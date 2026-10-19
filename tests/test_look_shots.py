@@ -176,7 +176,7 @@ def test_the_audit_cuts_a_box_to_what_shows():
     assert L._clip((0, 230, 320, 10), (0, 28, 320, 192)) is None
 
 
-def test_a_pair_an_open_question_owns_is_no_flag():
+def test_a_pair_with_an_owner_is_no_flag():
     rows = [("p", "#292c52", "#181839", 1.28, 3.0, "D-05"),
             ("p", "#ffee62", "#ffe600", 1.07, 3.0, ""),
             ("p", "#000000", "#ffe600", 16.6, 3.0, "")]
@@ -248,13 +248,24 @@ def test_a_mark_shorter_than_its_row_and_a_rim_off_its_cover_are_flags():
     assert not L.flagged([L._measure("hero rim-to-cover gap", 0, 0, True)])
 
 
-def test_a_known_gap_is_tagged_not_flagged():
-    """The desk Calc's backspace waits on the engine (R3-09, a strict xfail
-    in tests/test_editor_look.py): the kit tags it rather than flagging it,
-    and the tag comes off with the fix because a passing measure has none."""
-    row = L._measure("desk backspace ink height vs digit cap", 12, 15, False)
-    assert row[5] == "R3-09" and not L.flagged([row])
-    assert L._measure("desk backspace ink height vs digit cap", 15, 15, True)[5] == ""
+def test_a_known_gap_is_tagged_and_counted(monkeypatch):
+    """A measure with a known, filed gap carries it in the owner column and
+    is no FLAG; the index's headline counts it beside the FLAGs (R4-11)."""
+    monkeypatch.setitem(L.KNOWN, "focus mark height vs row", "#999")
+    row = L._measure("focus mark height vs row", 7, 22, False)
+    assert row[5] == "#999" and not L.flagged([row])
+    assert L._measure("focus mark height vs row", 22, 22, True)[5] == ""
+    since = L._AUDIT_COUNT[0]
+    L._report("/nonexistent", "s", {"checks": [], "audit": [
+        row, ("p", "#000000", "#111111", 1.1, 3.0, "")]}, False, [], True)
+    assert L._headline(since) == "Audit: 1 FLAG, 1 known gap (KNOWN) under their floors."
+
+
+def test_the_audit_holds_a_rest_track_to_1_6():
+    """D-05's floors: a hairline 1.5:1, an Off or a rest track 1.6:1, and no
+    design question owns a failing track any more (R4-11)."""
+    assert L.STRUCTURE_FLOOR == 1.5 and L.TRACK_FLOOR == 1.6
+    assert not hasattr(L, "D08_KINDS") and not hasattr(L, "OWNED_THEMES")
 
 
 def test_the_kit_measures_the_editor_and_the_desk_apps(tmp_path):
@@ -276,3 +287,55 @@ def test_the_kit_measures_the_editor_and_the_desk_apps(tmp_path):
                  "sprite tools off the chrome ink", "sprite tool row off the mockup's pitch",
                  "desk Appearance foot off the rows' column", "desk Appearance foot gaps apart"):
         assert got.get(pair) == "", (pair, got.get(pair))
+
+
+def test_the_kit_draws_the_states_round_4_built_by_hand(tmp_path):
+    """The system menu over Make with Sleep offered and over an open cart
+    of the kid's own, each opened on a row that destroys nothing (R4-01),
+    its card clear of its anchor and the glass's edge (R4-04), its Delete's
+    words and the strip's ink at 4.5:1 (R4-05), a cut body faded; desk
+    Files with its cut row faded; the bar with Wi-Fi off (R4-33)."""
+    table = L._kit_table()
+    for screen in ("handheld_make_sysmenu", "handheld_make_sysmenu-sleep",
+                   "handheld_cart_sysmenu", "desktop_sysmenu-sleep", "handheld_home_wifi-off",
+                   "desktop_home_wifi-off", "desktop_files", "handheld_home_search_input"):
+        assert screen in table, screen
+    failed = []
+    L.run(str(tmp_path), ["moy-light_handheld_make_sysmenu-sleep",
+                          "moy-dark_handheld_cart_sysmenu", "moy-dark_desktop_files"],
+          quiet=True, kit=True, only_kit=True, audit_csv=True, failed=failed)
+    assert failed == []
+    kit = tmp_path / "kit"
+    index = (kit / "index.txt").read_text()
+    assert index.count("check: menu opens safe ok") == 2
+    assert "Audit: 0 FLAGs" in index
+
+    def pairs(name):
+        return {ln.split(",")[1]: ln.split(",")[6]
+                for ln in (kit / (name + ".audit.csv")).read_text().splitlines()[1:]}
+    menu = pairs("moy-light_handheld_make_sysmenu-sleep")
+    for pair in ("menu card to its glass's edge", "menu card over its anchor",
+                 "danger row ink vs card", "hint ink vs strip ground"):
+        assert menu.get(pair) == "", (pair, menu)
+    assert any(p.startswith("list with hidden rows") and f == "" for p, f in menu.items())
+    files = pairs("moy-dark_desktop_files")
+    assert any(p.startswith("list with hidden rows (Files' rows)") and f == ""
+               for p, f in files.items()), files
+
+
+def test_a_theme_the_shell_does_not_hold_is_skipped(tmp_path):
+    rows = L.run(str(tmp_path), ["luna-light_handheld_home"], quiet=True)
+    assert rows == [("luna-light_handheld_home", False,
+                     ["theme luna is not in the shell"])]
+    assert not (tmp_path / "luna-light_handheld_home.render.png").exists()
+    assert "[SKIPPED]" in (tmp_path / "index.txt").read_text()
+
+
+def test_a_keys_run_draws_the_keys_in_every_themed_scene(tmp_path):
+    """--input keys pins every themed scene's hints to the keyboard's, the
+    pause card's among them, and the index says so (conv#22)."""
+    L.run(str(tmp_path), ["blocks-light_handheld_pause"], quiet=True, kit=True,
+          only_kit=True, inputs="keys")
+    index = (tmp_path / "kit" / "index.txt").read_text()
+    assert "input keys;" in index and "input tdeck" not in index
+    assert "Input: every scene draws keys's keys" in index

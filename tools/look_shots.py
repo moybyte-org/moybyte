@@ -30,8 +30,10 @@ description, what the render stands in with, and the plan steps still to land.
 
 A scene is BUILT when the shell holds its theme and every step of
 `docs/look_2026-10.md` that targets it carries a "Landed YYYY-MM-DD" mark.
-Until then it is rendered as the nearest current screen (a missing theme
-becomes the default, `DEFAULT`) and marked "not built yet" with what is missing.
+Until then it is rendered as the nearest current screen and marked "not
+built yet" with what is missing; a scene whose theme the shell does not hold
+(the ricing themes, step 29) is listed and skipped, unless `--unheld` draws
+it in the default theme (`DEFAULT`).
 
 FILTER keeps the scene it names, else the scenes whose name contains it
 (shell globs work too);
@@ -51,13 +53,16 @@ Brightness, a toggle On and Off and the empty Name field focused; the desk
 Appearance window with a cycler, the segments and the accents focused; the
 parts sheet with each of its parts focused; the Code tab with Undo enabled
 and disabled and with the caret on the longest line; the sprite editor's
-palette; the system menu and the pause menu over focused content; the
-desk with Calc; a long press on a Games and a Make card and a pad's X (the
+palette; the system menu and the pause menu over focused content, the
+system menu over Make, over an open cart of the kid's own and with Sleep
+offered (a stub idle ladder), each checked to open on a row that destroys
+nothing; the home and the console's home with Wi-Fi off; the desk with
+Calc, and Files alone; a long press on a Games and a Make card and a pad's X (the
 card's verbs as a menu) and up from the desk home's shelf, each under the
 input it is made with (`KIT_INPUT`) and each checked to have opened what it
 opens. `--profiles` adds the hint-bearing screens once per input profile,
-the Make tab, the Name field being typed and the Wi-Fi password prompt among
-them; a scene drawn with the T-Deck's keys notes that the host cannot prove
+the Make tab, the Name field being typed, the Wi-Fi password prompt and the
+home's search field among them; a scene drawn with the T-Deck's keys notes that the host cannot prove
 its keyboard's keys. They are written into OUT/kit/ with their own
 index.txt; `--only-kit` skips the mockup pairs.
 
@@ -65,7 +70,9 @@ Every render is checked, and a failed check fails the run (exit 1): the
 handheld hero's focus mark lies under the bar, every cover a home draws is
 the whole 128 px cover at a clean scale, a menu over content leaves one focus
 mark on the screen, an open tab's pill has its ink padded alike both sides,
-and a theme's bar packs alike in every mode the run drew it in. `--audit`
+and a theme's bar packs alike in every mode the run drew it in. A kit
+scene draws the keys of the run's `--input`, else the T-Deck's on the
+handheld and the keyboard's on the desk, and its index says which. `--audit`
 writes SCENE.audit.csv beside each render: the state pairs the review rounds
 measured by hand (a focused row's parts against its plate and its mark
 against the row, the caret against its line, the open tab's current mark
@@ -74,17 +81,21 @@ history icon against the enabled ink, an Off toggle against its row, a lifted
 hero's rim against its cover, a Settings caption cut at the page top, the
 Code tab's left edges against its inset and its caret against the next stem,
 the sprite tools' ink and columns, the desk Appearance foot, the desk Calc's
-backspace against a digit),
+backspace against a digit, a menu's card against its anchor and the edge of
+the glass it takes, its danger rows' words and the hint strip's ink under
+it, the sprite selection's ring against the grid's lines, and a fade
+wherever a list hides rows),
 each with its ratio and a FLAG under its floor. A box is measured as it
 shows -- cut to its window or the content under the bar, less the hint band
 -- inside its plate's own run; anti-aliasing is no colour of its own; text
-is held to 4.5:1, a part to 3:1 and the structure ramp (`STRUCTURE_TOKENS`,
-an Off track) to 1.5:1; a toggle's knob is measured on its track; a current
+is held to 4.5:1, a part to 3:1, the structure ramp's hairlines
+(`STRUCTURE_TOKENS`) to 1.5:1 and an Off or a rest track to 1.6:1 (D-05);
+a toggle's knob is measured on its track; a current
 mark by the look's `current.style`, a faint plate passing on its label's
 ink; a swatch only has to show, and a preview card is measured by its ring.
-A pair an open design question owns (`D08_KINDS`), or a measure with a known, filed
-gap (`KNOWN`), names it in the CSV's owner column and is no FLAG; the run
-prints the FLAG count.
+A measure with a known, filed gap (`KNOWN`) names it in the CSV's owner
+column and is no FLAG; the run and each index.txt count the FLAGs and the
+known gaps.
 """
 
 import argparse
@@ -551,6 +562,7 @@ def render(g, config, theme, mode, setup, wallpaper, inputs=None):
         # Every target's status: Wi-Fi on Home, the battery at 82%.
         ws.wifi = _HomeWifi()
         ws.battery_level = lambda: 82
+        ui_draw._C.api_fades(True)
         setup(g, ws)
         ws.bar_layer.invalidate()         # the probes see the bars drawn
         probe = Probe()
@@ -737,6 +749,118 @@ class _Pressed:
         return name == self.name
 
 
+class _OffWifi(_HomeWifi):
+    """Wi-Fi off: no network, none found (D-19's bar)."""
+
+    def status(self):
+        return (False, None, None)
+
+    def scan(self):
+        return []
+
+
+def _wifi_off(base):
+    """`base` with Wi-Fi off."""
+    def setup(g, ws):
+        ws.wifi = _OffWifi()
+        base(g, ws)
+    return setup
+
+
+class _Ladder:
+    """A board's idle ladder, as far as the system menu asks: it offers
+    Sleep (the boards' spine sets one; the host's console has none)."""
+
+    def sleep(self):
+        pass
+
+
+def _sleep(base):
+    """`base` on a console whose idle ladder offers Sleep."""
+    def setup(g, ws):
+        ws.idle_ladder = _Ladder()
+        base(g, ws)
+    return setup
+
+
+def _own_cart(g, ws):
+    """A cart of the kid's own: a copy of Star Catcher (a built-in is
+    copied, never deleted)."""
+    from runtime.moy_store_base import builtin_name
+    ws.carts.dup(g._cart_by_title(ws, "Star Catcher"))
+    for cart in ws.carts.all:
+        if cart.get("path") and builtin_name(cart["path"]) is None:
+            return cart
+    raise AssertionError("the copy of Star Catcher is not on the shelf")
+
+
+def _menu_opens_safe(how):
+    """The check that the system menu opened on a row that destroys
+    nothing (design review R4-01), with its rows."""
+    def check(ws):
+        from runtime import console_notices
+        m = ws.sysmenu
+        got = m.open and m.widget == "menu"
+        row = m.items[m.sel] if got and 0 <= m.sel < len(m.items) else None
+        ok = bool(got) and row is not None and row[3] != console_notices._DANGER_ICON
+        return [("menu opens safe", ok, "the menu %s opens on %s" % (
+            how, row[4] if row is not None else "nothing"))]
+    return check
+
+
+def _sysmenu_over(base, how):
+    """`base`, then the system key: the system menu over it, opened on a
+    row that destroys nothing."""
+    def setup(g, ws):
+        base(g, ws)
+        _settle(g, ws, 2)
+        ws._golden_popover = True
+        ws.system_key()
+        _EXPECT[0] = _menu_opens_safe(how)
+    return setup
+
+
+def _make_own(g, ws):
+    """The Make tab with a project of the kid's own selected: New, Change,
+    Duplicate and, set apart, Delete."""
+    own = _own_cart(g, ws)
+    _home(g, ws)
+    ws.set_home_tab("make")
+    for i, it in enumerate(ws.launcher.items):
+        if it.get("path") == own["path"]:
+            ws.launcher.sel = i
+
+
+def _cart_open(g, ws):
+    """A cart of the kid's own open on its Code tab."""
+    ws.open_in_editor(_own_cart(g, ws))
+    ws.set_menu_view("code")
+
+
+def _desk_files(g, ws):
+    """Files alone on the desk, on Projects, its window shorter than its
+    rows: covers, and the cut row's fade."""
+    ws.open_desk()
+    ws.open_app(ws._apps_by_id["files"])
+    _settle(g, ws, 2)
+    _place(ws, "files", 112, 54, 548, 380)
+    _app(ws, "files").open_place("projects", keep="Harpoon Pop")
+
+
+# What the home's search field holds in its scene, where something types.
+SEARCH_TYPED = "st"
+
+
+def _home_search(g, ws):
+    """The home's search field open: a query typed where something types,
+    else the field's word on pairing a keyboard."""
+    _home(g, ws)
+    _settle(g, ws, 2)
+    ws.open_search()
+    if ws.can_type():
+        _typed(g, ws, SEARCH_TYPED)
+
+
 def _first_card(ws):
     """Select the home's first real card (the Make tab's leads with + New)."""
     for i, it in enumerate(ws.launcher.items):
@@ -858,6 +982,20 @@ def _kit_table():
                                       "the minimised playtest restored: the pause menu"),
         "handheld_sysmenu": (HANDHELD, _sysmenu_home,
                              "the system menu over the focused home: one focus mark"),
+        "handheld_make_sysmenu": (HANDHELD, _sysmenu_over(_make_own, "over Make"),
+                                  "the system menu over Make, a project of the kid's own"),
+        "handheld_make_sysmenu-sleep": (
+            HANDHELD, _sleep(_sysmenu_over(_make_own, "over Make with Sleep offered")),
+            "the system menu over Make with Sleep offered: its body cut and faded"),
+        "handheld_cart_sysmenu": (HANDHELD, _sysmenu_over(_cart_open, "over an open cart"),
+                                  "the system menu over an open cart of the kid's own"),
+        "desktop_sysmenu-sleep": (DESK, _sleep(_sysmenu_desk),
+                                  "the system menu over the desk with Sleep offered"),
+        "handheld_home_wifi-off": (HANDHELD, _wifi_off(_home), "the home, Wi-Fi off"),
+        "desktop_home_wifi-off": (CONSOLE, _wifi_off(_console_home),
+                                  "the console-mode home, Wi-Fi off"),
+        "desktop_files": (DESK, _desk_files, "Files alone on the desk: covers, the cut "
+                          "row's fade"),
         "handheld_pause": (HANDHELD, _pause,
                            "the pause menu over a running cart: one focus mark"),
         "desktop_sysmenu": (DESK, _sysmenu_desk,
@@ -893,6 +1031,9 @@ def _kit_table():
             "handheld_wifi-password": (
                 HANDHELD, _wifi_password, "the Wi-Fi password prompt, %d letters typed"
                 % len(WIFI_TYPED)),
+            "handheld_home_search": (
+                HANDHELD, _home_search, "the home's search field, %r typed where "
+                "something types" % SEARCH_TYPED),
             "desktop_home": (CONSOLE, _console_home, "the console-mode home")}.items():
         out[screen + "_input"] = (config, setup, what, "profile")
     return out
@@ -930,7 +1071,8 @@ class Probe:
     glass pixels: the covers' blits (x, y, w, h), the tabs (rect, active),
     the narrow rects (a caret's: x, y, w, h, colour), the icons (kind, ink),
     the desk bar's chips (rect, focused), the pages that drew hints (`ui.hints`
-    calls) and the most focus marks one frame drew. A record drawn into a window's
+    calls), the most focus marks one frame drew and the engine's list fades
+    since the scene began (`moy_ui_api_fades`). A record drawn into a window's
     buffer is offset to its content rect, one drawn into a strip (the bars'
     cache) to where the frame blitted the strip; one whose canvas reaches
     the glass neither way is dropped."""
@@ -941,6 +1083,7 @@ class Probe:
         self.last = {k: [] for k in self.KINDS}
         self.cur = {k: [] for k in self.KINDS}
         self.marks = 0
+        self.fades = 0
         self._undo = []
         self._ws = None
         self._blits = {}              # id(strip) -> (its canvas, x, y), kept across frames
@@ -984,6 +1127,9 @@ class Probe:
             if got:
                 self.last[k] = got
         self.marks = max(self.marks, ui_draw.marks(None, False)[2])
+        # the list fades since the scene began: a window behind keeps the
+        # frame it drew them in
+        self.fades = ui_draw._C.api_fades(False)
 
     def install(self, ws):
         """Wrap the verbs the probes read; `remove` puts them back."""
@@ -1211,21 +1357,19 @@ FLOOR = 3.0
 TEXT_FLOOR = 4.5
 DISABLED_FLOOR = 1.5
 SAMPLE_FLOOR = 1.5
-# The structure ramp -- a hairline, an Off toggle's track, the theme's
-# `border`/`edge` -- holds 1.5:1 to the ground it lies on (D-05, owner
-# 2026-10-19); a text field's outline is a part, 3:1.
+# The structure ramp (D-05, owner 2026-10-19, "don't be too harsh"): a
+# hairline, the theme's `border`/`edge`, holds 1.5:1 to the ground it lies
+# on, and an Off toggle's track or a slider's or a stepped bar's rest 1.6:1,
+# on a focused row's plate too; a text field's outline is a part, 3:1.
 STRUCTURE_FLOOR = 1.5
 STRUCTURE_TOKENS = ("border", "edge")
-
-# The open design question that owns a pair the audit measures (judged
-# round 3): in Moy and Blocks the stepped bar's rest steps and the slider's
-# rest track are D-08's. Such a row carries its owner and is no FLAG.
-OWNED_THEMES = ("moy", "blocks")
-D08_KINDS = ("slider", "steps", "volume")
-# The measures with a known gap the round filed: the desk Calc's backspace
-# waits on the engine sizing a button's icon by its face (R3-09,
-# tests/test_editor_look.py holds it as a strict xfail).
-KNOWN = {"desk backspace ink height vs digit cap": "R3-09"}
+TRACK_FLOOR = 1.6
+# The part kinds whose row holds a track: its value in the value's colour
+# (a part), the rest of it the structure ramp's.
+TRACK_KINDS = ("slider", "steps", "volume")
+# The measures with a known, filed gap, by pair: its issue or review item
+# in the owner column, and no FLAG while the gap is open.
+KNOWN = {}
 
 
 def _clip(r, v):
@@ -1363,15 +1507,6 @@ def _distinct(a, b):
     return contrast(a, b) >= DISABLED_FLOOR or _diff(a, b) >= 96
 
 
-def _owner(ws, kind, c, ratio, floor):
-    """The open question a failing pair is owned by ("" for none)."""
-    if ratio >= floor or ws.look.theme_name not in OWNED_THEMES or c is None:
-        return ""
-    if kind in D08_KINDS:
-        return "D-08"
-    return ""
-
-
 def _disabled_rgb(ws):
     """The live theme's disabled ink as the glass shows it, or None."""
     live = getattr(ws.look, "live", None)
@@ -1404,16 +1539,20 @@ def _row_pairs(ws, img, r, pair, kind=None, view=None):
     if r[2] < 3 or r[3] < 3:
         return []
     inks = _inks(img, r, plate, ws.layout.fs)
+    # a row on its card: the page's ground where the card's rounded corner
+    # shows it is no ink of the row's
+    if plate in _token_rgbs(ws, ("surface",)):
+        page = _token_rgbs(ws, ("panel",)) - {plate}
+        for k in inks:
+            inks[k] = [c for c in inks[k] if c not in page]
     out = []
     ramp = _token_rgbs(ws, STRUCTURE_TOKENS)
 
     def add(name, c, floor, on=None):
         on = plate if on is None else on
-        if c in ramp and kind != "field":
+        if c in ramp and kind != "field" and floor >= FLOOR:
             floor = STRUCTURE_FLOOR
-        ratio = contrast(c, on)
-        out.append((name, _hex(c), _hex(on), ratio, floor,
-                    _owner(ws, kind, c, ratio, floor)))
+        out.append((name, _hex(c), _hex(on), contrast(c, on), floor, ""))
     texts = inks["text"][:2]
     if kind == "field":
         # an empty field's placeholder is dim on purpose (D-05): held as a
@@ -1448,12 +1587,22 @@ def _row_pairs(ws, img, r, pair, kind=None, view=None):
         ground = _token_rgbs(ws, ("surface", "ink", "value_ink"))
         if track is None:
             track = next((c for c in solids if c not in ground), solids[0])
-            add(pair + " (Off track)", track, STRUCTURE_FLOOR)
+            add(pair + " (Off track)", track, TRACK_FLOOR)
         else:
             add(pair, track, FLOOR)
         for c in solids:
             if c != track and c in ground:
                 add("toggle knob vs its track", c, STRUCTURE_FLOOR, on=track)
+        solids = []
+    elif kind in TRACK_KINDS and solids:
+        # the value in the value's colour and the knob in the ink are parts;
+        # the rest of the track is the structure ramp's
+        part = _token_rgbs(ws, ("value", "accent", "ink", "value_ink"))
+        for c in solids:
+            if c in part:
+                add(pair, c, FLOOR)
+            else:
+                add(pair + " (rest track)", c, TRACK_FLOOR)
         solids = []
     elif kind == "seg" and solids and contrast(solids[0], plate) < FLOOR:
         # a faint selected pill: its label's ink against a plain label's
@@ -1808,14 +1957,129 @@ def _calc_pairs(ws, img):
                      back >= digit - 1)]
 
 
+def _meets(a, b):
+    """Whether rects `a` and `b` share a pixel."""
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] \
+        and b[1] < a[1] + a[3]
+
+
+def _strongest(img, r):
+    """(ink, ground) of rect `r` as it shows: its commonest colour, and the
+    colour farthest from it in contrast, or None."""
+    r = _clip(r, (0, 0, img.width, img.height))
+    hist = _colours(img, r, 1) if r is not None else {}
+    if not hist:
+        return None
+    ground = max(hist, key=hist.get)
+    return max(hist, key=lambda c: contrast(c, ground)), ground
+
+
+def _menu_pairs(ws, img):
+    """The system menu's and a card's menu's card as it shows (design review
+    R4-33): clear of its anchor and 4 pixels at the scale inside the glass
+    it takes (R4-04), each danger row's words on the card at 4.5:1, and,
+    over the home, the hint strip's ink on its ground at 4.5:1 (R4-05)."""
+    m = ws.sysmenu
+    mu = getattr(ws, "menu_ui", None)
+    if mu is None or not (m.open and mu.looked()):
+        return []
+    from runtime import console_notices
+    out = []
+    card = mu._host.box("System")
+    if card is not None:
+        fs = ws.sys_canvas.font_scale
+        sx, sy, sw, sh = mu.surface()
+        gap = min(card[0] - sx, card[1] - sy, sx + sw - card[0] - card[2],
+                  sy + sh - card[1] - card[3])
+        out.append(_measure("menu card to its glass's edge", gap, 4 * fs, gap >= 4 * fs))
+        if m.widget == "menu":
+            over = _meets(card, mu._menu_cell())
+            out.append(_measure("menu card over its anchor", int(over), 0, not over))
+        for row in m.items:
+            if row[0] == "item" and row[3] == console_notices._DANGER_ICON:
+                b = mu._host.box(row[4])
+                if b is not None:
+                    out += [("danger row ink vs card",) + r[1:]
+                            for r in _row_pairs(ws, img, b, "danger row", view=card)
+                            if r[0].endswith("(text)")]
+    grid = getattr(ws.launcher_layer, "grid", None)
+    foot = grid.foot() if grid is not None and ws.screen == "launcher" else None
+    if foot is not None and not grid.desk():
+        got = _strongest(img, foot[5])
+        if got is not None:
+            out.append(("hint ink vs strip ground", _hex(got[0]), _hex(got[1]),
+                        contrast(*got), TEXT_FLOOR, ""))
+    return out
+
+
+def _selection_pairs(ws, img):
+    """The sprite selection's ring against the grid's lines (design review
+    R4-02, R4-33): one of its two tones stands at 3:1 off the lines."""
+    if ws.screen != "menu" or getattr(ws, "menu_view", None) != "paint" or ws.paint is None:
+        return []
+    sel = getattr(ws.paint, "sel", None)
+    if sel is None:
+        return []
+    lay, ox, oy = _editor_origin(ws, "paint_layout", ws.paint_layer.layout)
+    cell = lay.pg_span // ws.paint.dim
+    x0 = ox + lay.pg_x0 + sel[0] * cell
+    ys = range(oy + lay.pg_y0 + (sel[1] + 1) * cell, oy + lay.pg_y0 + sel[3] * cell)
+    if x0 < 1 or x0 >= img.width or not ys:
+        return []
+    border = _index_rgb(ws, ws.theme_colors["border"])
+    tones = {img.getpixel((x, y)) for x in (x0 - 1, x0) for y in ys
+             if 0 <= y < img.height}
+    tones.discard(border)
+    if not tones:
+        return [("selection ring vs grid line", _hex(border), _hex(border), 1.0, FLOOR, "")]
+    best = max(tones, key=lambda c: contrast(c, border))
+    return [("selection ring vs grid line", _hex(best), _hex(border),
+             contrast(best, border), FLOOR, "")]
+
+
+def _fade_pairs(ws, probe, img):
+    """Every list with rows past what shows draws a fade there (design
+    review R4-10, R4-04, R4-33): a cut menu body (a row it holds that does
+    not show whole) or a table whose rows run on, and none of the engine's
+    list fades drawn, is a FLAG."""
+    hidden = []
+    m = ws.sysmenu
+    mu = getattr(ws, "menu_ui", None)
+    if mu is not None and m.open and mu.looked():
+        card = mu._host.box("System")
+        for row in m.items:
+            if row[0] != "item" or card is None:
+                continue
+            b = mu._host.box(row[4])
+            if b is None or b[1] < card[1] or b[1] + b[3] > card[1] + card[3]:
+                hidden.append("the menu's " + row[4])
+                break
+    files = _app(ws, "files") if "files" in ws._apps_by_id else None
+    win = getattr(ws.wm, "_wins", {}).get("files")
+    shown = ws.screen == "files" or (win is not None and not getattr(win, "minimized", False)
+                                     and ws.wm.desk_open())
+    host = getattr(files, "_ui", None)
+    if shown and host is not None and getattr(files, "rows", None):
+        from runtime import ui_draw
+        got = ui_draw._C.api_table_rows(host.ctx)
+        if got is not None and len(files.rows) * got[1] > got[2][3]:
+            hidden.append("Files' rows")
+    if not hidden:
+        return []
+    return [_measure("list with hidden rows (%s) without a fade" % ", ".join(hidden),
+                     probe.fades, 1, probe.fades >= 1)]
+
+
 def audit(ws, probe, img):
     """[(pair, a, b, ratio, floor, owner)] of one render: the focused row's
     parts against its plate and its mark against the row, the caret against
     its line, the open tab's current mark against the ground beside it, the
     focused desk chip's label, a disabled history icon's ink against the
-    enabled ink, an Off toggle's row in Settings, a lifted hero's rim and
-    the desk Calc's backspace. A row an open design question owns names it
-    in `owner`; the rest under their floor are the FLAGs."""
+    enabled ink, an Off toggle's row in Settings, a lifted hero's rim, the
+    desk Calc's backspace, a menu's card, danger rows and the strip under
+    it, the sprite selection's ring, and a fade wherever a list hides rows.
+    A measure with a known gap names it in `owner` (`KNOWN`); the rest
+    under their floor are the FLAGs."""
     th = ws.theme_colors
     out = []
     hinted = bool(probe.last["hints"])
@@ -1836,7 +2100,9 @@ def audit(ws, probe, img):
                 if b is not None and v is not None and _clip(b, v) == tuple(b):
                     out += _row_pairs(ws, img, b, "Off toggle vs row ground", kind, v)
     t = getattr(ws.code_layer, "_t", None)
-    if ws.screen == "menu" and t is not None and "caret" in t:
+    # a menu over the editor dims it: its caret is no focus to measure
+    modal = ws.sysmenu.open or ws.pause.open
+    if ws.screen == "menu" and t is not None and "caret" in t and not modal:
         for x, y, w, h, c in probe.last["rects"]:
             if c == t["caret"] and h > 2 * w:
                 cy = y + h // 2
@@ -1854,10 +2120,13 @@ def audit(ws, probe, img):
     out += _rim_pairs(ws, probe, img)
     out += _caption_pairs(ws, img)
     out += _code_pairs(ws, img)
-    out += _caret_pairs(ws, probe, img)
+    out += [] if modal else _caret_pairs(ws, probe, img)
     out += _sprite_pairs(ws, img)
     out += _foot_pairs(ws, img)
     out += _calc_pairs(ws, img)
+    out += _menu_pairs(ws, img)
+    out += _selection_pairs(ws, img)
+    out += _fade_pairs(ws, probe, img)
     enabled = th.get("chrome_ink")
     seen = set()
     for kind, ink in probe.last["icons"]:
@@ -1907,7 +2176,7 @@ def pair(mockup, shot, built, scale=1):
 
 def run(out, filters=(), step=None, theme=None, variant=None, quiet=False, parts=False,
         inputs=None, kit=False, profiles=False, only_kit=False, audit_csv=False,
-        failed=None):
+        failed=None, unheld=False):
     """Render, pair and index the kept scenes into `out`, and the kit's own
     scenes into `out`/kit when `kit` or `profiles`. Returns the rows
     written: [(scene, built, missing)]. Every failed check is appended to
@@ -1925,7 +2194,7 @@ def run(out, filters=(), step=None, theme=None, variant=None, quiet=False, parts
         rows = []
         if not only_kit:
             rows = _run(g, out, filters, step, theme, variant, quiet, parts, inputs,
-                        audit_csv, fails, bars)
+                        audit_csv, fails, bars, unheld)
         if kit or profiles:
             rows += _run_kit(g, os.path.join(out, "kit"), filters, theme, variant, quiet,
                              kit, profiles, inputs, audit_csv, fails, bars)
@@ -1941,8 +2210,17 @@ def run(out, filters=(), step=None, theme=None, variant=None, quiet=False, parts
         iconsets.reset()            # the sets' masks back out of the font rows
 
 
-# The run's (FLAGs, owned pairs), summed as each render reports.
+# The run's (FLAGs, known gaps), summed as each render reports.
 _AUDIT_COUNT = [(0, 0)]
+
+
+def _headline(since):
+    """The index's audit line: the FLAGs and the known gaps (`KNOWN`) its
+    renders reported since `_AUDIT_COUNT` read `since`."""
+    flags = _AUDIT_COUNT[0][0] - since[0]
+    known = _AUDIT_COUNT[0][1] - since[1]
+    return "Audit: %d FLAG%s, %d known gap%s (KNOWN) under their floors." % (
+        flags, "" if flags == 1 else "s", known, "" if known == 1 else "s")
 
 
 def _report(out, name, report, audit_csv, fails, quiet):
@@ -1961,7 +2239,7 @@ def _report(out, name, report, audit_csv, fails, quiet):
     for pair, a, b, ratio, floor, owner in report["audit"]:
         if ratio < floor:
             lines.append("  audit: %s %s %s on %s %.2f:1 (floor %.1f)" % (
-                "owned by " + owner if owner else "FLAG", pair, a, b, ratio, floor))
+                "known gap " + owner if owner else "FLAG", pair, a, b, ratio, floor))
     if audit_csv:
         with open(os.path.join(out, name + ".audit.csv"), "w", encoding="utf-8") as f:
             f.write("scene,pair,colour,against,ratio,floor,flag,owner\n")
@@ -1981,6 +2259,7 @@ def _run_kit(g, out, filters, theme, variant, quiet, kit, profiles, inputs, audi
     held = themes_held(g)
     os.makedirs(out, exist_ok=True)
     rows, lines = [], []
+    since = _AUDIT_COUNT[0]
     for name, screen, want_theme, mode, profile in scenes:
         config, setup, what, _kind = table[screen]
         drawn = want_theme if want_theme in held else DEFAULT
@@ -2008,14 +2287,19 @@ def _run_kit(g, out, filters, theme, variant, quiet, kit, profiles, inputs, audi
     head = ["The 2026-10 look's review kit: states no mockup draws (tools/look_shots.py "
             "--kit/--profiles)", "",
             "Each scene is the real shell rendered on the host; its checks and its",
-            "audit's flags follow it.", ""]
+            "audit's flags follow it.",
+            "Input: %s." % ("every scene draws %s's keys (--input), but a screen that is "
+                            "one input's own" % inputs if inputs else
+                            "a handheld scene draws the T-Deck's keys and a desk scene the "
+                            "keyboard's (no --input), a profile scene its profile's"),
+            _headline(since), ""]
     with open(os.path.join(out, "index.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(head + lines))
     return rows
 
 
 def _run(g, out, filters, step, theme, variant, quiet, parts=False, inputs=None,
-         audit_csv=False, fails=None, bars=None):
+         audit_csv=False, fails=None, bars=None, unheld=False):
     from PIL import Image
     table = _setup_table()
     fails = [] if fails is None else fails
@@ -2028,6 +2312,7 @@ def _run(g, out, filters, step, theme, variant, quiet, parts=False, inputs=None,
     held = themes_held(g)
     os.makedirs(out, exist_ok=True)
     rows, lines = [], []
+    since = _AUDIT_COUNT[0]
     for name, what, want_theme, want_mode, size in scenes:
         config, _steps, wallpaper, setup, shows = table[screen_of(name)]
         if parts and screen_of(name) in PARTS:
@@ -2037,6 +2322,14 @@ def _run(g, out, filters, step, theme, variant, quiet, parts=False, inputs=None,
         mode = variant or want_mode or "dark"
         missing = []
         drawn = target_theme
+        if target_theme not in held and not unheld:
+            lines.append("%s  [SKIPPED]  theme %s is not in the shell (--unheld draws it "
+                         "with %s)" % (name, target_theme, DEFAULT))
+            lines.append("")
+            rows.append((name, False, ["theme %s is not in the shell" % target_theme]))
+            if not quiet:
+                print("%-40s skipped (theme not held)" % name)
+            continue
         if target_theme not in held:
             drawn = theme if theme in held else DEFAULT
             missing.append("theme %s is not in the shell (drawn with %s)"
@@ -2065,8 +2358,9 @@ def _run(g, out, filters, step, theme, variant, quiet, parts=False, inputs=None,
                                          else "NOT BUILT YET",
                                          "  ".join(files)))
         lines.append("  target: %s" % what)
-        lines.append("  render: %s; theme %s, %s; config %s; %dx%d%s" % (
-            shows, drawn, mode, config, shot.width, shot.height,
+        lines.append("  render: %s; theme %s, %s; input %s; config %s; %dx%d%s" % (
+            shows, drawn, mode, inputs or (HANDHELD_INPUT if config == HANDHELD else "keys"),
+            config, shot.width, shot.height,
             "" if settled else "; NOT SETTLED (still animating)"))
         for m in missing:
             lines.append("  missing: " + m)
@@ -2089,6 +2383,7 @@ def _run(g, out, filters, step, theme, variant, quiet, parts=False, inputs=None,
         "A NOT BUILT YET scene is the nearest current screen: its 'missing' "
         "lines say what",
         "still moves its pixels.",
+        _headline(since),
         "",
     ]
     with open(os.path.join(out, "index.txt"), "w", encoding="utf-8") as f:
@@ -2122,17 +2417,20 @@ def main(argv=None):
                     help="skip the mockup pairs (with --kit or --profiles)")
     ap.add_argument("--audit", action="store_true",
                     help="write SCENE.audit.csv, the state pairs' contrast")
+    ap.add_argument("--unheld", action="store_true",
+                    help="draw the scenes of a theme the shell does not hold in the "
+                    "default theme instead of skipping them")
     args = ap.parse_args(argv)
     failed = []
     rows = run(args.out, args.filters, args.step, args.theme, args.variant,
                parts=args.parts, inputs=args.input, kit=args.kit, profiles=args.profiles,
-               only_kit=args.only_kit, audit_csv=args.audit, failed=failed)
+               only_kit=args.only_kit, audit_csv=args.audit, failed=failed,
+               unheld=args.unheld)
     print("%d scenes, %d built -> %s" % (
         len(rows), sum(1 for r in rows if r[1]),
         os.path.join(args.out, "index.txt")))
     if args.audit:
-        print("%d audit flags, %d pairs owned by open design questions or known gaps"
-              % _AUDIT_COUNT[0])
+        print("%d audit flags, %d known gaps (KNOWN)" % _AUDIT_COUNT[0])
     for name, check, detail in failed:
         print("FAILED %s: %s (%s)" % (name, check, detail))
     return 1 if failed else 0

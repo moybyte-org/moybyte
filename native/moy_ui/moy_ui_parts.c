@@ -88,6 +88,19 @@ static uint16_t mix(uint16_t a, uint16_t b, int k) {         // k/255 of b over 
                                      | (ab + (bb - ab) * k / 255)));
 }
 
+// The plate a focus mark lays in colour `c` at `alpha` (0..255) over `g`, all
+// wire order, as the depth paints it (moy_ui_depth.c's tint: moy_shape's
+// blend of a pixel the shape covers whole, rounded), so a part held apart
+// from the plate is held from the pixels it lies on.
+static uint16_t plate_of(uint16_t g, uint16_t c, int alpha) {
+    uint16_t a = moy_shape_wire(g), b = moy_shape_wire(c);
+    int wt = (15 * alpha * 256 + 15 * 255 / 2) / (15 * 255), iw = 256 - wt;
+    int r = (((b >> 11) & 31) * wt + ((a >> 11) & 31) * iw + 128) >> 8;
+    int gg = (((b >> 5) & 63) * wt + ((a >> 5) & 63) * iw + 128) >> 8;
+    int bl = ((b & 31) * wt + (a & 31) * iw + 128) >> 8;
+    return moy_shape_wire((uint16_t)((r << 11) | (gg << 5) | bl));
+}
+
 // Whether two colours (wire order) have a luminance ratio of num/den or more,
 // on squares for the sRGB curve.
 static int ratio_ge(uint16_t a, uint16_t b, int num, int den) {
@@ -110,7 +123,8 @@ static int apart(uint16_t a, uint16_t b) {
 }
 
 // Colour `c` kept apart (1.6:1, WCAG) from the ground `g` it lies on: moved toward
-// `to` as far as it takes. A part of the structure ramp (an Off track, a
+// `to` as far as it takes, aimed at 13:8 so the ratio survives the RGB565
+// rounding of either colour. A part of the structure ramp (an Off track, a
 // rest track or step) holds its ratio on a focused row's plate as on its card.
 static int32_t lum_w(uint16_t w) {           // a wire-order colour's WCAG luminance
     uint16_t c = moy_shape_wire(w);
@@ -124,7 +138,7 @@ static uint16_t hold(uint16_t c, uint16_t g, uint16_t to) {
         uint16_t m = mix(c, to, k);
         int32_t lm = lum_w(m);
         int32_t hi = lm > lg ? lm : lg, lo = lm > lg ? lg : lm;
-        if (5 * (hi + 500) >= 8 * (lo + 500)) {
+        if (8 * (hi + 500) >= 13 * (lo + 500)) {
             return m;
         }
     }
@@ -674,7 +688,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     }
     if ((flags & MOY_UI_F_FOCUS) && m->on && m->active
         && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_EDGE) {
-        rg = mix(rg, pal(&d, moy_ui_token(d.look, m->color)), m->plate_alpha);
+        rg = plate_of(rg, pal(&d, moy_ui_token(d.look, m->color)), m->plate_alpha);
     }
     int right = g.right;
     int chev = pm(&d, MOY_UI_M_VALUE_ROW_CHEV, 1), gap = pm(&d, MOY_UI_M_VALUE_ROW_GAP, 1);
