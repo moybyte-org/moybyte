@@ -24,9 +24,10 @@ tape persist while the app stays open, and reset on a fresh open.
 """
 
 try:
-    from layout_base import bar_rows, content_of, metric_class, DESK
+    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import bar_rows, content_of, metric_class, DESK
+    from runtime.layout_base import (bar_rows, content_of, metric_class,
+                                     window_foot, DESK)
 
 try:
     from moy_store_base import builtin_name
@@ -76,6 +77,10 @@ class CalcLayout:
         self.cs = max(fs, int(cs)) if cs else fs
         self.desk = metric_class() == DESK
         self.windowed = bool(windowed)     # its page lies in a window's body
+        # The rows under the page the window's frame draws in its ground:
+        # the bottom inset counts them, so the keys stand as far from the
+        # frame's bottom as from its sides, whatever the look's corners.
+        self.foot = window_foot() if self.windowed else 0
         self.cx, self.cy, self.cw, self.ch = content_of(
             self.w, self.h, 0 if windowed else bar_rows(self.cs))
         self.place((self.cx, self.cy, self.cw, self.ch))
@@ -86,16 +91,20 @@ class CalcLayout:
         self.page = page
         x, y, w, h = page
         self.side = w * 3 > h * 4
+        foot = self.foot
         if self.side:
             pad, g, between = 8 * fs, 6 * fs, 8 * fs
-            body = (x + pad, y + 4 * fs, max(0, w - 2 * pad), max(0, h - 10 * fs))
+            low = max(0, 6 * fs - foot)
+            body = (x + pad, y + 4 * fs, max(0, w - 2 * pad),
+                    max(0, h - 4 * fs - low))
             kw = (body[2] - between) * 184 // 296
             self.display, rest = ui.cut_left(body, body[2] - kw - between)
             _gap, grid = ui.cut_left(rest, between)
         else:
             pad = 16 if self.desk else 8 * fs
             g = 10 if self.desk else 6 * fs
-            body = ui.inset(page, pad)
+            low = max(0, pad - foot)
+            body = (x + pad, y + pad, max(0, w - 2 * pad), max(0, h - pad - low))
             dh = min(100 if self.desk else 46 * fs, body[3] // 4)
             self.display, rest = ui.cut_top(body, dh)
             _gap, grid = ui.cut_top(rest, pad if self.desk else 8 * fs)

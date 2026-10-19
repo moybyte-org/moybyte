@@ -3222,6 +3222,28 @@ def test_a_chip_that_minimizes_its_window_takes_the_focus_with_it(tmp_path):
     assert not wm._wins["calc"].minimized and wm._focus == "calc"
 
 
+@pytest.mark.parametrize("theme", ["moy", "blocks", "contrast"])
+def test_calcs_keys_stand_as_far_from_the_frames_bottom_as_its_sides(tmp_path, theme):
+    """A rounded frame's foot is part of the window's bottom inset, not an
+    addition to the app's: Calc's keypad ends as far above the frame's
+    outer bottom edge as it starts in from the frame's outer left edge, in
+    every look, whatever its corner radius."""
+    ws = _moy_desk(tmp_path)
+    if theme != "moy":
+        ws.look.set_theme(theme, persist=False, variant="light")
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    wm = ws.wm
+    win = wm._wins["calc"]
+    assert win.foot > 0
+    cx, cy, _cw, _ch = win.content_rect()
+    keys = win.ctx.app_layouts["calc"].keys
+    left = cx + min(k[0] for k in keys) - win.x
+    right = win.x + win.w - (cx + max(k[0] + k[2] for k in keys))
+    bottom = win.y + win.h - (cy + max(k[1] + k[3] for k in keys))
+    assert left == right == bottom
+
+
 @pytest.mark.parametrize("theme", ["moy", "contrast"])
 def test_the_focused_chip_prints_in_the_current_ink(tmp_path, theme):
     """The focused window's chip is current content: its icon and title take

@@ -404,7 +404,9 @@ handed to the app (a new surface mechanism, which `docs/surface_model_v1.md`
 rows)` (each bar `size * rows // 18` thick, `rows` the 18-row bar at the
 surface's scale), imported by the bars, every layout and the app heads alike;
 a window's layouts take its band instead (`in_window`: today's bar at the
-window's top, whose zone alone draws, whatever the theme's layout). `BarLayer.bar_rects(where)` and `content_rect(where)` answer it
+window's top, whose zone alone draws, whatever the theme's layout), and
+the rows its rounded frame takes under the content (`window_foot`), which a
+bottom inset counts. `BarLayer.bar_rects(where)` and `content_rect(where)` answer it
 per surface; `LayoutBase` carries `cx, cy, cw, ch`;
 `ListShellLayout._init_frame` and the calc/appearance/artwork heads take
 `content_of` (rows 0 in a window) instead of computing `18 * cs`; and

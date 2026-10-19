@@ -179,6 +179,7 @@ DEFAULT_BARS = (("top", BAR_ROWS, ("zone",), ("chips",),
 BAND = DEFAULT_BARS
 _bars = DEFAULT_BARS
 _band = False
+_foot = 0
 
 
 def bars():
@@ -211,11 +212,21 @@ def place_bar(edge):
     place_bars(((edge,) + DEFAULT_BARS[0][1:],))
 
 
-def in_window(on):
+def in_window(on, foot=0):
     """While a window's layouts build, the surface is a window buffer and
-    takes the band (`WindowedWM._make_ctx`)."""
-    global _band
+    takes the band (`WindowedWM._make_ctx`); `foot` is the rows under it
+    that the window's rounded frame draws in its ground (`window_foot`)."""
+    global _band, _foot
     _band = bool(on)
+    _foot = max(0, int(foot)) if on else 0
+
+
+def window_foot():
+    """The rows under the surface being laid out that its window's frame
+    draws in the window's ground (its rounded bottom corners take them),
+    0 outside a window: a bottom inset counts them, so its content stands
+    as far from the frame's bottom as from its sides."""
+    return _foot
 
 
 def bar_rects_of(w, h, rows, of=None):

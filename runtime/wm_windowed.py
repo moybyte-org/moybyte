@@ -565,14 +565,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                            and not self.popover_takes_keys())
             _ui_draw.marks(win._marked)
 
-    def _make_ctx(self, buf):
+    def _make_ctx(self, buf, foot=0):
         """Build the layout set for a window buffer: run the console's own
         _relayout with the buffer installed (so every responsive surface derives
-        its geometry from the WINDOW size), capture it, then restore the root."""
+        its geometry from the WINDOW size, and its bottom inset from the
+        window's `foot`), capture it, then restore the root."""
         ws = self.ws
         self._ctx_switching = True
         ws._sys_canvas = buf
-        _layout_base.in_window(True)          # a window's layouts take its band
+        _layout_base.in_window(True, foot)    # a window's layouts take its band
         try:
             ws._relayout()
         finally:
@@ -994,7 +995,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ch = max(40, win.h - 2 - win.title_h - win.foot)
         self._drop_win(win)             # a resize's old buffer, freed first
         win.buf = full.new_layer(cw, ch)
-        win.ctx = self._make_ctx(win.buf)
+        win.ctx = self._make_ctx(win.buf, win.foot)
         win._buf_stale = True         # blank until a live render/_prewarm fills it
 
     def _resize_window(self, win, w, h):
