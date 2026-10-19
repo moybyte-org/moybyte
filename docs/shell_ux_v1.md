@@ -201,7 +201,7 @@ door — no setting, no mode:
   line of code, and the path from "I changed the color" to "what else can I change?"
   runs straight through the Editor's tab ladder (§6).
 - **Make manages projects:** ＋New (create a game and open it), COPY, and DEL
-  (a two-tap confirm: the first tap arms SURE?) are Make's verbs; the tabs
+  (to the Trash at once, which restores it) are Make's verbs; the tabs
   that play carry none of them but an empty Mine's ＋New.
 - **Wallpapers are backdrop-only:** they are on none of the tabs that run. The backdrop
   (and the panel theme) is chosen in the **Appearance app** — the ONE appearance

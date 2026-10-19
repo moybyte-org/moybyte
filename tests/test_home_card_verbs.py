@@ -71,7 +71,7 @@ def _menu_verbs(ws):
             continue
         act = it[2]
         if getattr(act, "verb", None) is not None:
-            out.add("delete" if act.verb == "sure" else act.verb)
+            out.add(act.verb)
         elif act == home.toggle_favourite:
             out.add("favourite")
     return out
@@ -125,7 +125,7 @@ def _reached(ws, drv, kind, monkeypatch):
             _frames(drv, 1)
             drv.frame(1 / 30)
         monkeypatch.undo()
-        got.update("delete" if v == "sure" else v for v in done)
+        got.update(done)
     elif kind == "pad":
         pad = _Pad("x")
         home.handle_input(pad)
@@ -158,7 +158,7 @@ def test_every_card_verb_is_reachable_under_every_input(tmp_path, monkeypatch, c
     _select(ws, tab, which)
     _frames(drv)
     home = ws.launcher_layer
-    want = set("delete" if v == "sure" else v for v in home.zone_verbs())
+    want = set(home.zone_verbs())
     want |= set(home.card_verbs())
     if which in ("cart", "own"):
         want.discard("new")                   # the "+ New" card's tap (make/new)

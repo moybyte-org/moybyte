@@ -83,10 +83,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import shell_layout as _shell_layout
 
 try:
-    from widgets import ConfirmTap
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import ConfirmTap
-try:
     from moy_store_base import builtin_name as _builtin_name
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name as _builtin_name
@@ -1057,7 +1053,7 @@ _KIND_NAME = {"game": "Game", "app": "App", "tool": "Tool", "wallpaper": "Wallpa
 _VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
               "change": ("C", "Change"), "search": ("search", "Search"),
               "new": ("N", "New"), "copy": ("Y", "Duplicate"),
-              "delete": ("X", "Delete"), "sure": ("X", "Sure?"),
+              "delete": ("X", "Delete"),
               "favourite": ("F", "Add favourite"), "options": ("X", "Options")}
 _UNFAVOURITE = "Remove favourite"   # the star's words on a card that wears it
 _VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
@@ -1081,7 +1077,7 @@ _GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
 _SLIDE_MS = 200        # the handheld's slide: 6 frames at the home's 30 fps
 _VERB_LABEL = {"play": "PLAY", "open": "OPEN", "change": "CHANGE",
                "new": "NEW", "search": "SEARCH", "copy": "DUPLICATE",
-               "delete": "DEL", "sure": "SURE?"}
+               "delete": "DEL"}
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
            "Oct", "Nov", "Dec")
 
@@ -2348,7 +2344,7 @@ class LauncherHomeLayer:
     draw composes the wallpaper backdrop -> the tab row and the cards (`grid`,
     ws.launcher) -> the top bar; input is the grid nav / selection, dispatching
     the active tab's tap (ws.launch_selected). Owns the trackball hover state
-    (_lhover), the tab-row focus and the armed DEL; `grid` is the single source
+    (_lhover), the tab-row focus; `grid` is the single source
     it reads. `HomeWindowLayer` is the same home in a window."""
 
     id = "launcher"
@@ -2363,8 +2359,6 @@ class LauncherHomeLayer:
         self._back_tip = False        # a mouse rests on the bar's way back to the desk
         self._hold = None             # a press on a card: [index, x, y, ms held]
         self._tab_focus = False       # keys drive the tab row (up from the carousel)
-        self._delete = ConfirmTap()   # Make's DEL: the first tap arms, the second deletes
-        self._delete_path = None      # ...the card it was armed on
         # Drag-scroll PARTIAL repaint bookkeeping (#58/#66: a FULL home repaint
         # measured ~100-140ms on BOTH boards' glass -- backdrop + panel + cards
         # stack megabytes of writes -- capping a shelf drag at ~7fps). During a
@@ -2893,7 +2887,7 @@ class LauncherHomeLayer:
         """The selected card's verbs beyond its tap, the ONE list every
         input reaches them by: the system menu's card group, a long press
         on the card, a gamepad's X, the desk's buttons. Its favourite star,
-        then CHANGE with COPY beside it, then DEL (SURE? once armed), where
+        then CHANGE with COPY beside it, then DEL, where
         the active tab has them (`zone_verbs`)."""
         zone = self.zone_verbs()
         out = []
@@ -2903,7 +2897,7 @@ class LauncherHomeLayer:
             out.append("change")
             out.append("copy")
         for v in zone:
-            if v in ("delete", "sure"):
+            if v == "delete":
                 out.append(v)
         return out
 
@@ -2937,7 +2931,7 @@ class LauncherHomeLayer:
             label = _VERB_HINT[v][1]
             if k == 0 and v in ("play", "open", "new"):
                 kind = "primary"
-            elif v in ("delete", "sure"):
+            elif v == "delete":
                 kind = "danger"
             else:
                 kind = "normal"
@@ -3280,8 +3274,6 @@ class LauncherHomeLayer:
         if ch == _FAVOURITE_KEY:
             return self.toggle_favourite()
         v = _VERB_KEY.get(ch)
-        if v == "delete" and self._armed():
-            v = "sure"
         if v is None or not (v in self.zone_verbs() or v in self.card_verbs()):
             return False
         self._do_verb(v)
@@ -3399,17 +3391,14 @@ class LauncherHomeLayer:
         if self.ws.bar_layer._show_x(self.strip):
             self.ws.open_desk()
 
-    # The doors out of the home; each leaves DEL disarmed behind it.
+    # The doors out of the home.
     def _launch(self):
-        self._delete.disarm()
         self.ws.launch_selected(self.grid)
 
     def _change(self):
-        self._delete.disarm()
         self.ws.change_selected(self.grid)
 
     def _new(self):
-        self._delete.disarm()
         self.ws.new_cart_and_edit(self.grid)
 
     def _grid_top_row(self):
@@ -3558,15 +3547,8 @@ class LauncherHomeLayer:
     @property
     def zone_gen(self):
         """Proxy onto the grid's zone_gen -- the GRID owns sel/items (the state
-        that actually varies the zone's pixels) -- plus the DEL guard's
-        generation, so BarLayer's strip cache repaints the armed prompt."""
-        return self.grid.zone_gen + self._delete.gen + self._zone_bump
-
-    def _armed(self):
-        """Whether DEL is armed on the selected card."""
-        sel = self.grid.selected()
-        return (self._delete.armed and sel is not None
-                and sel.get("path") == self._delete_path)
+        that actually varies the zone's pixels) -- plus the zone's own bump."""
+        return self.grid.zone_gen + self._zone_bump
 
     def zone_verbs(self):
         """The active tab's verbs on the selected card (§12's table): Games
@@ -3574,7 +3556,7 @@ class LauncherHomeLayer:
         COPY, DEL. CHANGE, COPY and DEL need a real cart and a store that
         manages projects, and DEL one the kid's (a built-in is copied, never
         deleted: `builtin_name`, the open-cart menu's own test); the "+ New"
-        card's verb is NEW. DEL reads SURE? once armed. SEARCH is the
+        card's verb is NEW. SEARCH is the
         fullscreen home's alone."""
         ws = self.ws
         grid = self.grid
@@ -3592,8 +3574,7 @@ class LauncherHomeLayer:
                 return ("new",)
             if _builtin_name(sel["path"]) is not None:
                 return ("new", "change", "copy")
-            return ("new", "change", "copy",
-                    "sure" if self._armed() else "delete")
+            return ("new", "change", "copy", "delete")
         if sel is not None and sel.get("type") == NEW_TILE_TYPE:
             return ("new",)
         out = ("play", "change") if change else (("play",) if real else ())
@@ -3702,8 +3683,7 @@ class LauncherHomeLayer:
         lay = ws.layout
         fill = {"play": th["play"], "open": th["play"], "change": th["author"],
                 "new": th["author"], "search": NAMES["light_grey"],
-                "copy": th["author"], "delete": NAMES["light_grey"],
-                "sure": th["danger"]}
+                "copy": th["author"], "delete": NAMES["light_grey"]}
         for verb, (x, y, w, h) in self._zone_action_rects(rect).items():
             cv.rect(x, y, w, h, fill[verb])
             cv.rectb(x, y, w, h, NAMES["black"])
@@ -3733,8 +3713,6 @@ class LauncherHomeLayer:
         """One of the active tab's verbs on the selected card (§12's table),
         from a zone chip, a hint or its key."""
         ws = self.ws
-        if verb != "sure":
-            self._delete.disarm()
         if verb in ("play", "open"):
             ws.defer(self._launch)   # #184: start behind the paint
         elif verb == "change":
@@ -3744,10 +3722,6 @@ class LauncherHomeLayer:
         elif verb == "copy":
             ws.carts.dup(self.grid.selected())
         elif verb == "delete":
-            self._delete_path = self.grid.selected().get("path")
-            self._delete.arm()
-        elif verb == "sure":
-            self._delete.disarm()
             ws.carts.delete(self.grid.selected())
         elif verb == "favourite":
             self.toggle_favourite()

@@ -241,7 +241,7 @@ def test_copy_duplicates_the_selected_project(tmp_path):
     assert any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
 
 
-def test_delete_is_two_tap_guarded(tmp_path):
+def test_delete_takes_one_tap_and_moves_the_cart_to_the_trash(tmp_path):
     from runtime import moy_carts
     ws = _ws(tmp_path, sys_size=(800, 480))
     moy_carts.create("Extra", str(ws.carts_root), src="def _draw():\n    cls(1)\n",
@@ -250,24 +250,11 @@ def test_delete_is_two_tap_guarded(tmp_path):
     layer = ws.launcher_layer
     _make_with(ws, "Extra")
     n0 = len(ws.carts.all)
-    assert _verb_tap(ws, layer, "delete")
-    assert len(ws.carts.all) == n0                     # armed, not deleted
-    assert layer.zone_verbs()[-1] == "sure"
-    assert _verb_tap(ws, layer, "sure")
-    assert len(ws.carts.all) == n0 - 1
-    assert all(c.get("title") != "Extra" for c in ws.carts.all)
-
-
-def test_delete_disarms_when_the_selection_moves(tmp_path):
-    ws = _ws(tmp_path, sys_size=(800, 480))
-    _extra(ws)
-    _extra(ws, "Extra Two")
-    layer = ws.launcher_layer
-    _make_with(ws, "Extra")
-    _verb_tap(ws, layer, "delete")
-    assert layer.zone_verbs()[-1] == "sure"
-    _make_with(ws, "Extra Two")
     assert layer.zone_verbs()[-1] == "delete"
+    assert _verb_tap(ws, layer, "delete")
+    assert len(ws.carts.all) == n0 - 1                 # gone at once, no "Sure?"
+    assert all(c.get("title") != "Extra" for c in ws.carts.all)
+    assert "sure" not in layer.zone_verbs()
 
 
 # -- desktop mode: the home in a window ------------------------------------

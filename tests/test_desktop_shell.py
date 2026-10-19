@@ -523,7 +523,7 @@ def test_only_make_manages_carts(tmp_path):
         real = [i for i, it in enumerate(ws.launcher.items) if it.get("path")]
         ws.launcher.sel = real[0] if real else 0
         verbs = ws.launcher_layer.zone_verbs()
-        assert not {"copy", "delete", "sure"} & set(verbs), tab
+        assert not {"copy", "delete"} & set(verbs), tab
 
 
 def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):

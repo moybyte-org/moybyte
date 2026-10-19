@@ -60,7 +60,7 @@ to whoever called it.
   dispatch; a tap on **Make** EDITS. **Make is the ONE projects list** (owner,
   2026-10-14): there is no project picker on any tier and no PROJECTS button
   on the Editor's bar (its X pops back to where it was opened from); Make's
-  verbs are ＋New / CHANGE / COPY / DEL (DEL a two-tap confirm). The desk's
+  verbs are ＋New / CHANGE / COPY / DEL (DEL, like the menu's Delete, moves the cart to the Trash at once). The desk's
   PROJECTS is the same home in a window (`HomeWindowLayer`), always the grid
   arrangement, on Make; a pick there opens its window above it.
   **Wallpapers are backdrop-only**: on none of the tabs that run, chosen in the **Appearance app**

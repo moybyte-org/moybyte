@@ -656,7 +656,7 @@ arrangement (step 18).
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
 | Apps | the registered apps (`ws._apps`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
-| Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor fullscreen, pushed | NEW, CHANGE, COPY, DEL (two taps: DEL arms SURE?) |
+| Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor fullscreen, pushed | NEW, CHANGE, COPY, DEL (DEL takes the cart to the Trash at once) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
 is Mine's, not Games'. **The selected card's verbs beyond its tap are one
@@ -667,7 +667,7 @@ its first group, in an open cart's place; a long press on a card (500 ms
 without travel, the phone home screens' idiom) and a gamepad's X open it
 alone, as a menu hung at the card; a keyboard types F for the star and the
 strip's letters for the rest. A row's Delete takes the cart to the Trash at
-once, as the cart group's does; the strip's DEL keeps its two taps. Mine and Make hold the same carts under the two
+once, as the cart group's, the strip's DEL and the X key do (owner, 2026-10-19). Mine and Make hold the same carts under the two
 personas of `docs/shell_ux_v1.md` §4 — a tap on Mine plays, a tap on Make
 edits (owner, 2026-10-13) — which narrows that section's "a launcher tap
 always RUNS" to the three tabs that launch (§16). The windowed tier's

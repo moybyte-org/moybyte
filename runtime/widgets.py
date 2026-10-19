@@ -98,7 +98,7 @@ class ConfirmTap:
     """A two-tap guard on a destructive button: the first tap ARMS, the
     second (while still armed) confirms, and any other gesture disarms.
     `gen` counts every arm/disarm so a surface whose chrome is cached by a
-    generation key (the home's bar zone) repaints the armed prompt."""
+    generation key repaints the armed prompt."""
 
     def __init__(self):
         self.armed = False

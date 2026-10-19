@@ -59,7 +59,7 @@ _LOOK_ICON = {"menu.delete_cart": "trash",
 # The selected card's verbs (LauncherHomeLayer.card_verbs) as menu rows:
 # (the chrome's label, icon, the look's text); the star's are the string ids'.
 _CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "dup", "Duplicate"),
-             "delete": ("DELETE", "trash", "Delete"), "sure": ("DELETE", "trash", "Delete")}
+             "delete": ("DELETE", "trash", "Delete")}
 
 
 def _row(kind, sid, action=None):
@@ -81,7 +81,7 @@ class _CardVerb:
 
     def __init__(self, home, verb):
         self.home = home
-        self.verb = "sure" if verb == "delete" else verb
+        self.verb = verb
 
     def __call__(self):
         self.home._do_verb(self.verb)

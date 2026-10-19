@@ -318,7 +318,7 @@ All rows below are SHIPPED (2026-07-23) unless noted:
 | OTA failure | `UPDATE FAILED` | `Update didn't finish.` / `Nothing changed.` + `B = BACK` (back *is* the retry path — the UPDATE row re-arms the check; no separate retry action exists to promise) |
 | Block editor mixed casing | `MOVED` vs `can't move there` | one register: the whole lowercase status set unified into ENGRAVED (`CAN'T MOVE THERE`, `COPY A BLOCK FIRST`, `TAP A + SPOT`, `BLOCK DELETED`, …); `CODE LOCKED -- can't blockify` → `CODE LOCKED` |
 | Undo split | `NOTHING TO UNDO` vs `nothing to undo` | `NOTHING TO UNDO` everywhere |
-| Delete confirm | `DELETE? TAP AGAIN` | kept — the two-tap *is* our "are you sure" |
+| Delete confirm | `DELETE? TAP AGAIN` | kept where a button arms (Storybook TEAR OUT, Paint's NEW, Get Carts' REMOVE) — the two-tap *is* our "are you sure"; a Make cart's DEL and Delete never ask, since the Trash restores it |
 | Empty grid | `NOTHING HERE YET` | kept — the "yet" doctrine's model string (block menus' `(nothing here)` joined it) |
 | About panel | `MOYBYTE CONSOLE` | `moybyte` (lowercase wordmark law) |
 | Launcher captions | `Open or create a project` | kept — already correct Spoken register |

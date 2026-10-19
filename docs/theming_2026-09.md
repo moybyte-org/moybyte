@@ -1781,8 +1781,7 @@ port), never here.
      asks `Appearance.name_check`: a seed's name, `custom` itself, a stem a
      cart folder holds and a name outside the grammar are refused with the
      reason under the field; a name an installed theme holds arms REPLACE?
-     and a second ENTER on the same name replaces it (the Make tab's DEL
-     arms SURE? the same way). `Appearance.name_custom` writes a change
+     and a second ENTER on the same name replaces it. `Appearance.name_custom` writes a change
      still settling, renames `custom.moy` to `<name>.moy` by one rename
      (`moy_carts.rename_package`; `adopt`'s aside-and-remove when it
      replaces), rewrites `theme.json`'s `name`, keeps the manifest's `look`

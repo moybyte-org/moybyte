@@ -441,7 +441,7 @@ def test_the_tdeck_home_acts_on_letters_from_the_matrix(tmp_path):
     """Design review R3-02, end to end on the host: the home's verb keys
     arrive through the board's own keyboard driver in raw mode, the mode the
     home runs in, and act -- F stars the card, Sym+G opens Search, C
-    changes it (the Editor); on Make, Y copies and X arms Sure?."""
+    changes it (the Editor); on Make, Y copies and X deletes to the Trash at once."""
     mod = _input_module()
     ws, drv = _home(tmp_path)
     assert ws.launcher.tab == "games"
@@ -466,8 +466,7 @@ def test_the_tdeck_home_acts_on_letters_from_the_matrix(tmp_path):
     assert len(ws.carts.all) == n + 1, "Y on Make is Copy"
     _real_card(ws)
     _matrix_press(ws, drv, _chord(mod, ord("x")))
-    assert ws.launcher_layer._armed(), "X on Make arms Delete's Sure?"
-    assert len(ws.carts.all) == n + 1
+    assert len(ws.carts.all) == n, "X on Make deletes at once, with no second press"
 
 
 def test_the_console_puts_the_keyboard_on_the_matrix_at_boot(tmp_path):
