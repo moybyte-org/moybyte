@@ -3290,10 +3290,12 @@ class LauncherHomeLayer:
 
     def zone_tabs(self, rect):
         """[(tab id, label, rect)] of the home's tabs in the bar's zone
-        `rect` (steps 17 and 18), flush left, as many as fit."""
+        `rect` (steps 17 and 18), flush left, as many as fit. A plate may
+        reach a chrome unit past the zone above and below, so the label's
+        line and a mark under it both fit (B-15)."""
         cs = self.ws.layout.cs
         sc, h, pad, gap = self._zone_tab_metrics()
-        h = min(rect[3] - 2 * cs, h)
+        h = min(rect[3] + 2 * cs, h)
         y = rect[1] + (rect[3] - h) // 2
         x = rect[0] + 2 * cs
         out = []
@@ -3307,7 +3309,8 @@ class LauncherHomeLayer:
 
     def _zone_tab_metrics(self):
         """(label scale, plate height, label pad, gap) of the tabs in the bar:
-        the handheld's at the font scale, the desk's a line about 15 glass
+        the handheld's at the font scale on a plate a unit taller than the
+        line either side (the targets'), the desk's a line about 15 glass
         pixels tall on a 28-pixel plate."""
         lay = self.ws.layout
         fs = lay.fs
@@ -3316,7 +3319,7 @@ class LauncherHomeLayer:
             sc = text_scale(15 // u, fs)
             return (sc, max(28 // u, _ui_draw.font()[2] * sc + 6 * fs),
                     max(12 // u, 4 * fs), max(6 // u, 2 * fs))
-        return fs, lay.line_h + 8 * fs, 6 * fs, 2 * fs
+        return fs, lay.line_h + 2 * fs, 6 * fs, 2 * fs
 
     def _draw_zone_tabs(self, cv, rect):
         """The tabs in the bar (step 17): the active one under the current

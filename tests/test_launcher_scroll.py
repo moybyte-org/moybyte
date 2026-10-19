@@ -534,6 +534,38 @@ def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkey
         ui_draw.input_kind("keys")
 
 
+@pytest.mark.parametrize("theme,variant", [("blocks", "light"), ("moy", "dark")])
+def test_a_bar_tabs_mark_clears_its_label(tmp_path, theme, variant):
+    """B-15: the active tab's plate holds its label's line and its mark, so
+    Blocks' underline runs under the glyphs with a gap, not through them."""
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 10)
+    ws.look.set_theme(theme, persist=False, variant=variant)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    ws.mark_dirty()
+    drv.frame(1 / 30)
+    home = ws.launcher_layer
+    (tid, r, _on), = [t for t in home.tab_rects() if t[0] == ws.launcher.tab]
+    lay = ws.layout
+    assert r[3] >= lay.line_h + 2 * lay.fs, "the plate holds the line and a unit"
+    cv = ws.sys_canvas
+    w = cv.width if hasattr(cv, "width") else lay.w
+    buf = cv._buf
+
+    def px(x, y):
+        i = 2 * (y * w + x)
+        return bytes(buf[i:i + 2])
+
+    xs = range(r[0] + 6 * lay.fs, r[0] + r[2] - 6 * lay.fs)     # the label, clear of corners
+    rows = [len({px(x, y) for x in xs}) for y in range(r[1], r[1] + r[3])]
+    # a run of glyph rows (several colours), then at least one plain row
+    # before the plate's foot (a mark's rows are one colour across)
+    last_glyph = max(i for i, n in enumerate(rows) if n > 2)
+    assert last_glyph < len(rows) - 1 and rows[last_glyph + 1] == 1, rows
+
+
 def test_under_touch_the_home_takes_the_strips_height(tmp_path):
     """Touch shows no keycaps, so the strip takes no band: the cards' band
     reaches the content's foot, and a key brings the strip back."""
