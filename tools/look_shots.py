@@ -1542,28 +1542,38 @@ def _ink_left(px, x0, x1, y0, y1, ground=None):
 
 
 def _code_pairs(ws, img):
-    """The Code tab's one inset (design review R3-10): the code, the status
-    line and the symbol keys start on the layout's `x0`, a bearing's pixel
-    aside; the worst of them is the measure."""
+    """The Code tab's one inset (design review R3-10): the status line and
+    the symbol keys start on the layout's `x0`, a line's number right-aligned
+    in the gutter that starts there and its code on the text column after
+    it (D-03.1), a bearing's pixel aside; the worst of them is the measure."""
     if ws.screen != "menu" or getattr(ws, "menu_view", None) != "code":
         return []
     lay, ox, oy = _editor_origin(ws, "code_layout", ws.code_layout)
     ed = ws.editor
     fs, x0 = lay.fs, lay.x0
+    cl = ws.code_layer
+    gc = cl._gutter_cols(ed)
+    tx0 = cl._text_x0(lay, ed)
     px = img.load()
     edges = []
     for i in range(lay.rows):
         n = ed.top + i
         if n != ed.row and n < len(ed.lines) and ed.lines[n][:1].isalpha():
             y = oy + lay.y0 + i * lay.lh
-            edges.append(_ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh))
+            if gc:
+                at = x0 + (gc - 1 - len(str(n + 1))) * lay.cell
+                e = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh)
+                edges.append((e, at))
+            e = _ink_left(px, ox + tx0 - lay.cell // 2, ox + lay.cx + lay.cw, y, y + lay.lh)
+            edges.append((e, tx0))
             break
     sx, sy, _sw, sh = lay.status_band
-    edges.append(_ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh))
-    ky = oy + lay.sym_y + lay.sym_h // 2
-    edges.append(_ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, ky, ky + 1))
-    off = [abs(e - ox - x0) if not (x0 <= e - ox <= x0 + fs) else 0
-           for e in edges if e is not None]
+    edges.append((_ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh), x0))
+    if getattr(lay, "sym_h", 0):
+        ky = oy + lay.sym_y + lay.sym_h // 2
+        edges.append((_ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, ky, ky + 1), x0))
+    off = [abs(e - ox - want) if not (want <= e - ox <= want + fs) else 0
+           for e, want in edges if e is not None]
     worst = max(off) if off else 0
     return [_measure("code left edges off the inset", worst, 0, worst == 0)]
 
