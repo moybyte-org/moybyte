@@ -211,8 +211,8 @@ def test_the_desktop_micropython_mirrors_the_boards():
     """The binary six suites drive is `standard`, which is EXTRA_FEATURES like
     the boards -- so without the same flag it would report that MicroPython
     cannot write this format, about itself rather than about a board."""
-    body = (ROOT / "Makefile").read_text()
-    assert "CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1" in body
+    for build, flags in unix_mp.build_flags().items():
+        assert "-DMICROPY_PY_DEFLATE_COMPRESS=1" in flags, build
 
 
 def test_the_browser_build_already_had_it():

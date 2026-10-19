@@ -68,6 +68,29 @@ BOARD_MODEL = CANONICAL.parent.parent / "build-moybyte-board" / "micropython"
 _PROBED = {}
 
 
+def build_flags():
+    """What `make unix-micropython` adds to the port's CFLAGS, as the Makefile
+    expands it: {"build-moybyte": [...], "build-moybyte-board": [...]}. The
+    Makefile itself answers, so a test reads the flags a build would get rather
+    than the spelling of one line of the recipe."""
+    out = {}
+    for build, var in (("build-moybyte", "UNIX_MP_CFLAGS"),
+                       ("build-moybyte-board", "UNIX_MP_R32_CFLAGS")):
+        proc = subprocess.run(
+            ["make", "-s", "--no-print-directory",
+             "--eval", "print-%: ; @echo $($*)", "print-" + var],
+            cwd=ROOT, capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            raise RuntimeError("make print-%s failed:\n%s" % (var, proc.stderr))
+        out[build] = proc.stdout.split()
+    body = (ROOT / "Makefile").read_text()
+    for var in ("UNIX_MP_CFLAGS", "UNIX_MP_R32_CFLAGS"):
+        if 'CFLAGS_EXTRA="$(%s)"' % var not in body:
+            raise AssertionError("unix-micropython no longer passes $(%s) as "
+                                 "CFLAGS_EXTRA" % var)
+    return out
+
+
 def _provides(exe, modules, board_model=False):
     """Does this binary import every one of `modules` (and, for the board
     model, run on 32-bit words)? Cached per (exe, mods, model)."""

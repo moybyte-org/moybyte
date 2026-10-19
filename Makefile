@@ -223,7 +223,18 @@ UNIX_MP := $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython
 # track their flags: a tree built without the GIL would be linked into this one.
 # tests/unix_mp.py probes the binary for the GIL, so the model cannot drift.
 UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/micropython
-UNIX_MP_R32_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 \
+# What both builds add to the port's flags. -ffp-contract=off compiles every
+# multiply-add UNFUSED, the rounding every other host compile of the same C
+# uses: the audio parity reference and the host binding pass it explicitly,
+# runtime/native_build.py's -std=c99 implies it. The unix port's own
+# -std=gnu99 implies -ffp-contract=fast, which changes nothing where the
+# compiler's default target has no FMA instruction to fuse into (baseline
+# x86-64) and changes libmoy's samples by one LSB where it has one: the
+# ubuntu-26.04 runner installs from Ubuntu's amd64v3 variant, whose gcc
+# defaults to -march=x86-64-v3, and tests/test_audio_parity.py diverged there.
+# Pinned, the result no longer depends on the compiler's default target.
+UNIX_MP_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off
+UNIX_MP_R32_CFLAGS := $(UNIX_MP_CFLAGS) \
 	-DMICROPY_OBJ_REPR=MICROPY_OBJ_REPR_C \
 	-DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
 UNIX_MP_NATIVE := native
@@ -291,7 +302,7 @@ unix-micropython:
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
-	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1 \
+	    CFLAGS_EXTRA="$(UNIX_MP_CFLAGS)" \
 	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_index_impl
