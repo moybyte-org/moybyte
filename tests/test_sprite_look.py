@@ -55,3 +55,61 @@ def test_the_selection_reads_against_the_grid_lines(tmp_path, config, theme, mod
     assert inner == {el._rgb(cv, ws.theme_colors["surface"])}, inner
     best = max(_contrast(c, border) for c in outer | inner)
     assert best >= 3, (theme, mode, best)
+
+
+@pytest.mark.parametrize("config", (HANDHELD, DESK))
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_the_maps_mark_leaves_the_sprite_whole(tmp_path, config, theme, mode):
+    """The sprite map's mark lies outside the sprite -- `surface` around
+    it, then `ink` -- so every pixel of the sprite shows as the sheet holds
+    it (design review R4-03: the inner line used to cover its edge)."""
+    ws, lay, ox, oy = _open(tmp_path, config, theme, mode)
+    pe = ws.paint
+    sheet = pe.sheet
+    pl = ws.paint_layer
+    x0, y0, k, first, rows = pl._map_geom(lay, pe, sheet)
+    tile = sheet.TILE * k
+    sx = ox + x0 + (pe.n % sheet.cols) * tile
+    sy = oy + y0 + (pe.n // sheet.cols - first) * tile
+    px = el._px(ws)
+    cv = ws.glass_canvas
+    tx, ty = sheet.tile_origin(pe.n)
+    inked = 0
+    for y in range(sheet.TILE):
+        for x in range(sheet.TILE):
+            v = sheet.pget(tx + x, ty + y)
+            if not v:
+                continue
+            inked += 1
+            want = el._rgb(cv, v)
+            for yy in range(k):
+                for xx in range(k):
+                    assert px[sy + y * k + yy][sx + x * k + xx] == want, (x, y)
+    assert inked
+    o = pl._map_ring(lay)
+    mid = sy + tile // 2
+    th = ws.theme_colors
+    assert px[mid][sx - 1] == el._rgb(cv, th["surface"])
+    assert px[mid][sx - o - 1] == el._rgb(cv, th["ink"])
+    assert px[mid][sx + tile + o] == el._rgb(cv, th["ink"])
+
+
+@pytest.mark.parametrize("config", (HANDHELD, DESK))
+def test_the_map_stands_on_the_columns_edge(tmp_path, config):
+    """The map's left edge is the column's (design review R4-17), where
+    the steppers, the tool row at the column's head and the file buttons
+    start."""
+    ws, lay, _ox, _oy = _open(tmp_path, config, "moy", "light")
+    x0 = ws.paint_layer._map_geom(lay, ws.paint, ws.paint.sheet)[0]
+    assert x0 == lay.map_rect[0] == lay.spr_prev[0] == lay.get_btn[0]
+
+
+@pytest.mark.parametrize("config", (HANDHELD, DESK))
+def test_a_tool_row_under_the_grid_stands_on_the_file_buttons_line(tmp_path, config):
+    """Under the grid (the handheld), the tool row and the file buttons
+    under the map share one line (design review R4-17), their plates one
+    height."""
+    ws, lay, _ox, _oy = _open(tmp_path, config, "moy", "light")
+    if lay.tool_btns[0][1] < lay.pg_y0 + lay.pg_span:
+        pytest.skip("the tool row stands at the column's head here")
+    assert {b[1] for b in lay.tool_btns} == {lay.get_btn[1]}

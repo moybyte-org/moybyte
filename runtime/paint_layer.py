@@ -339,13 +339,15 @@ class PaintLayout(LayoutBase):
             pitch = min(pitch, rw // n)
             self.tool_btns = _tool_row(rx, y, pitch, trow, n)
             y += trow + sep
-        else:
-            pitch = min(pitch, span // n)
-            self.tool_btns = _tool_row(gx, gy + span + tgap, pitch, trow, n)
         # The load / save / to-Files row at the column's foot, from its
         # left: each its icon and its word where the three fit in the
-        # column's width, else their icons alone.
+        # column's width, else their icons alone. A tool row under the grid
+        # stands on the same line (design review R4-17): its plates are the
+        # buttons' height.
         fy = bottom - bh
+        if not beside:
+            pitch = min(pitch, span // n)
+            self.tool_btns = _tool_row(gx, fy, pitch, trow, n)
         words = ("Load", "Save", "To Files")
         inner = self.icon + (8 if desk else 4 * fs) + 2 * (12 if desk else 5 * fs)
         ws_ = [inner + _ui_draw.print_width(wd, fs) for wd in words]
@@ -1166,26 +1168,35 @@ class PaintLayer:
         self._draw_tools_look()
         self._draw_hints(cv, lay, pe, th)
 
+    @staticmethod
+    def _map_ring(lay):
+        """The width of each of the two lines that mark the map's sprite."""
+        return 2 if lay.desk else lay.fs
+
     def _map_geom(self, lay, pe, sheet):
         """The sprite map's (x0, y0, k, first row, rows): the sheet's sprites at
-        the largest whole scale `k` that holds a row of them across the map,
-        as many rows as fit, from the row that keeps the sprite (and its
-        size's span) in view, centred in the map's width."""
+        the largest whole scale `k` that holds a row of them across the map
+        with the sprite's mark beside it, as many rows as fit, from the row
+        that keeps the sprite (and its size's span) in view, from the map's
+        left, on the column's edge (design review R4-17). The mark lies
+        outside the sprite, in the column's gutters."""
         x, y, w, h = lay.map_rect
         cols = sheet.cols
-        k = max(1, w // (cols * sheet.TILE))
+        k = max(1, (w - 2 * self._map_ring(lay)) // (cols * sheet.TILE))
         tile = sheet.TILE * k
         rows = min(sheet.rows, max(1, h // tile))
         row = pe.n // cols
         first = row - (rows - pe.size) // 2
         first = max(0, min(first, sheet.rows - rows))
-        return x + (w - cols * tile) // 2, y, k, first, rows
+        return x, y, k, first, rows
 
     def _draw_map(self, cv, lay, pe, sheet, th, greys):
         """The sprite map (owner, 2026-10-19): the sheet around the sprite
-        on the grey checker, the sprite and its size's span outlined -- a line
-        of `ink`, then one of `surface` within, as the colour in use is -- and
-        a tap on a sprite makes it the sprite."""
+        on the grey checker, a fade at an edge past which the sheet goes on,
+        the sprite and its size's span outlined outside its pixels -- a line
+        of `surface` around it, then one of `ink`, as the colour in use is
+        marked, so the sprite shows whole (design review R4-03) -- and a tap
+        on a sprite makes it the sprite."""
         if lay.map_rect is None or lay.map_rect[3] <= 0:
             return
         x0, y0, k, first, rows = self._map_geom(lay, pe, sheet)
@@ -1196,15 +1207,21 @@ class PaintLayer:
             for c in range(cols):
                 cv.spr(sheet.tile_image((first + r) * cols + c, 0),
                        x0 + c * tile, y0 + r * tile, k)
+        fs = lay.fs
+        fh = min(8 * fs, rows * tile // 2)
+        if first > 0:
+            _ui_draw.fade(cv, (x0, y0, cols * tile, fh), th["surface"], True)
+        if first + rows < sheet.rows:
+            _ui_draw.fade(cv, (x0, y0 + rows * tile - fh, cols * tile, fh),
+                          th["surface"])
         n = pe.n
         sx = x0 + (n % cols) * tile
         sy = y0 + (n // cols - first) * tile
         span = pe.size * tile
-        fs = lay.fs
-        o = 2 if lay.desk else fs
-        for i in range(2 * o):
-            c = th["ink"] if i < o else th["surface"]
-            cv.rectb(sx - o + i, sy - o + i, span + 2 * (o - i), span + 2 * (o - i), c)
+        o = self._map_ring(lay)
+        for i in range(1, 2 * o + 1):
+            c = th["surface"] if i <= o else th["ink"]
+            cv.rectb(sx - i, sy - i, span + 2 * i, span + 2 * i, c)
 
     def _map_pick(self, px, py):
         """A tap on the sprite map: the sprite under it becomes the sprite."""

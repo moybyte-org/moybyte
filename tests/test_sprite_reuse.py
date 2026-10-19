@@ -441,8 +441,9 @@ def test_the_caption_the_column_and_the_tool_row_keep_their_room(tmp_path, theme
 
 def test_the_map_outlines_the_sprite_and_a_tap_on_it_picks_one(tmp_path):
     """The sprite map shows the sheet around the sprite, the sprite outlined
-    (`ink`, then `surface` within), and a tap on a sprite there makes it the
-    sprite (owner, D-15, 2026-10-19)."""
+    outside its pixels (`surface` around it, then `ink`; design review
+    R4-03), and a tap on a sprite there makes it the sprite (owner, D-15,
+    2026-10-19)."""
     ws, drv, chrome = _look_tab(tmp_path)
     pl = ws.paint_layer
     pe = ws.paint
@@ -453,8 +454,9 @@ def test_the_map_outlines_the_sprite_and_a_tap_on_it_picks_one(tmp_path):
     assert rows >= 8 and first == 0
     sx = x0 + (pe.n % pe.sheet.cols) * tile
     sy = y0 + (pe.n // pe.sheet.cols - first) * tile
-    o = pl.layout.fs
-    assert _px(ws, sx - o, sy + tile // 2) == chrome.rgb565_of(th["ink"])
+    o = pl._map_ring(pl.layout)
+    assert _px(ws, sx - 1, sy + tile // 2) == chrome.rgb565_of(th["surface"])
+    assert _px(ws, sx - 2 * o, sy + tile // 2) == chrome.rgb565_of(th["ink"])
     _tap_at(drv, x0 + 3 * tile + 1, y0 + 2 * tile + 1)
     assert pe.n == (first + 2) * pe.sheet.cols + 3
 
