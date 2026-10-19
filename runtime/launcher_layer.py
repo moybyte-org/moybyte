@@ -1056,6 +1056,7 @@ _TAB_KEYS = ("tabs", "Tabs")
 _HINT_LEAD = 5       # the handheld's margin ui.hints leads with, at the font
                      # scale: the top bar's (MOY_UI_HINT_LEAD)
 _HINT_LEAD_DESK = 8  # the desk's
+BACK_TIP = "Desk"    # the tooltip on the bar's chevron back to the desk
 DESC_LINES = 3       # the desk home's description: at most this many lines,
 DESC_EMS = 48        # ... as wide as this many n's: about 60 characters of
                      # running text, the width of the buttons' row
@@ -2336,6 +2337,7 @@ class LauncherHomeLayer:
         self.ws = ws
         self._NAMES = names
         self._lhover = (-1, -1)       # the last pointer sample (a release is not a move)
+        self._back_tip = False        # a mouse rests on the bar's way back to the desk
         self._hold = None             # a press on a card: [index, x, y, ms held]
         self._tab_focus = False       # keys drive the tab row (up from the carousel)
         self._delete = ConfirmTap()   # Make's DEL: the first tap arms, the second deletes
@@ -2466,7 +2468,7 @@ class LauncherHomeLayer:
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
             getattr(ws, "search_typing", False) and ws.can_type(),
             self.grid.tab, self._tab_focus, self._button_focus, self.grid.arrangement,
-            self.grid.statics_sel())
+            self.grid.statics_sel(), self._back_tip)
 
     def _retained_key(self, cv):
         """Everything the WHOLE home frame's pixels are a pure function of: the
@@ -2734,6 +2736,8 @@ class LauncherHomeLayer:
         if _surf is not None:
             _surf("home-bar", "system")
         ws.bar_layer._draw_status_strip("home")
+        if self._back_tip:
+            self._draw_back_tip(cv)
         if _t0 is not None:
             _t3 = _ticks_ms()
             ws._pf_home = (_ticks_diff(_t1, _t0), _ticks_diff(_t2, _t1),
@@ -2741,6 +2745,32 @@ class LauncherHomeLayer:
         # A FULL paint landed in the current framebuffer.
         _advance_streak(self, cv)
         self._capture_retained(cv, dt)   # retain this frame for re-entry stamps
+
+    def _hover_back(self, px, py, click, down):
+        """Whether a mouse rests on the bar's chevron back to the desk (the
+        home in console mode over a desk, `BarLayer.back_rect`): a pointer
+        that moves with nothing held, never a touch, which has no hover."""
+        if click or down or _ui_draw.input_kind() == "touch":
+            return False
+        r = self.ws.bar_layer.back_rect("home")
+        return r is not None and _in(px, py, r)
+
+    def _draw_back_tip(self, cv):
+        """The chevron's tooltip, `BACK_TIP` on a plate under it: where it
+        goes, which the bare chevron does not say (owner, 2026-10-19)."""
+        ws = self.ws
+        r = ws.bar_layer.back_rect("home")
+        if r is None:
+            return
+        th = ws.theme_colors
+        fs = ws.layout.fs
+        u = _lb.unit()
+        pad = 6 * u
+        tw = _ui_draw.print_width(BACK_TIP, fs)
+        h = ws.layout.line_h + pad
+        x, y = r[0], ws.layout.cy + 4 * u      # under the bar
+        cv.rrect(x, y, tw + 2 * pad, h, 4 * u, th["ink"])
+        cv.print(BACK_TIP, x + pad, y + (h - ws.layout.line_h) // 2, th["surface"], 1)
 
     def _hh(self):
         """The carousel home (docs/look_2026-10.md steps 17 and 18), the
@@ -3388,6 +3418,10 @@ class LauncherHomeLayer:
         ws = self.ws
         down = ws.pointer.down
         grid = self.grid
+        tip = self._hover_back(px, py, click, down)
+        if tip != self._back_tip:
+            self._back_tip = tip
+            ws.mark_dirty()
         if click:
             self._hold = None
             if self._button_focus is not None:
