@@ -835,21 +835,44 @@ def theme_custom_matches_host(board):
         assert (n, got) == (sum(map(len, chunks)), want), name
 
 
+@contextlib.contextmanager
+def known_look(board, theme="moy", variant="dark"):
+    """The console in a look the HOST can reproduce, and back the way it was
+    found after: a check that holds the board's theme to the host's computes
+    the host's side from a seeded theme, and a board's saved `custom` is its
+    owner's own (its font family, tints and accent live in the board's
+    store), which no fresh host store holds -- the font roles and the pixels
+    of a page differ for that reason alone. Nothing is saved: the pin and the
+    restore both go through `set_theme(persist=False)`, so the board's saved
+    theme and variant are what they were and `custom` comes back from its
+    stored file."""
+    was = board.pyval("(ws.look.theme_name, ws.look.theme_variant)", strict=True)
+    board.pyexec("ws.look.set_theme(%r, persist=False, variant=%r)" % (theme, variant),
+                 strict=True)
+    try:
+        yield
+    finally:
+        board.pyexec("ws.look.set_theme(%r, persist=False, variant=%r)" % tuple(was),
+                     strict=True)
+
+
 def the_theme_font_is_installed(board):
     """The live theme's faces (docs/theming_2026-09.md §4.7) are what this
     board's shell draws in: each role holds the face `appearance.role_fonts`
     names on the host for the same theme, variant and metric class, loaded
-    once, and the print font is `ui`'s. The bytes and metrics of each face
+    once, and the print font is `ui`'s. Read under `known_look`: a saved
+    `custom` names faces of its own. The bytes and metrics of each face
     are `the_font_set_is_the_tiers`'."""
     import runtime  # noqa: F401  (registers the host's moy_ui)
     from runtime import appearance
     roles = ("ui", "title", "mono")
-    name, variant, desk, ids, pf, loaded = board.pyval(
-        "(lambda a, u: (ws.look.theme_name, ws.look.theme_variant,"
-        " ws.metric_class == __import__('layout_base').DESK,"
-        " [u.font(r)[0] for r in %r], u.print_font(),"
-        " sorted((v, k[0], k[1]) for k, v in a._FONTS.items())))"
-        "(__import__('appearance'), __import__('moy_ui'))" % (roles,), strict=True)
+    with known_look(board):
+        name, variant, desk, ids, pf, loaded = board.pyval(
+            "(lambda a, u: (ws.look.theme_name, ws.look.theme_variant,"
+            " ws.metric_class == __import__('layout_base').DESK,"
+            " [u.font(r)[0] for r in %r], u.print_font(),"
+            " sorted((v, k[0], k[1]) for k, v in a._FONTS.items())))"
+            "(__import__('appearance'), __import__('moy_ui'))" % (roles,), strict=True)
     want = appearance.role_fonts(name, variant, desk)
     on = {fid: (pkg, f) for fid, pkg, f in loaded}
     assert len(on) == len(loaded), loaded
@@ -1007,7 +1030,7 @@ def home_shelf_fling(board, x0, x1, y):
 def home_long_press_opens_card_verbs(board):
     """A long press on the home's centre card, through the real pointer
     feed, opens the card's verbs (design review R3-01): under touch alone
-    it is the route to Change and Copy. The release launches nothing, and
+    it is the route to Change and Duplicate. The release launches nothing, and
     the menu is closed again after."""
     r = board.pyval("ws.launcher.tile_rect(ws.launcher.sel)")
     x, y = r[0] + r[2] // 2, r[1] + r[3] // 2
@@ -1018,7 +1041,7 @@ def home_long_press_opens_card_verbs(board):
         assert st["stack"][-1] == "launcher", st["stack"]
         assert board.pyval("ws.sysmenu.open and ws.sysmenu.widget") == "card"
         rows = board.pyval("[r[4] for r in ws.sysmenu.items if r[0] == 'item']")
-        assert "Change" in rows and "Copy" in rows, rows
+        assert "Change" in rows and "Duplicate" in rows, rows
     finally:
         board.pyexec("ws.sysmenu.close(); ws.popover_touch()", strict=True)
 
@@ -2519,7 +2542,14 @@ def wasm_app_draws_the_toolkit(board, root):
     """App UI Wasm draws the public UI API's fixture page through the `ui`
     rows (docs/ui_api_2026-10.md): no row fails, the page's pixel hash is the
     host's run's, the run crosses into Python for nothing but the console's
-    frame and the census keeps it VM-free. Leaves the desk as it found it."""
+    frame and the census keeps it VM-free. Leaves the desk and the look as it
+    found them: the page runs under `known_look`, since the host's side is a
+    seeded theme's and a saved `custom` is the board's own."""
+    with known_look(board):
+        _wasm_app_draws_the_toolkit(board, root)
+
+
+def _wasm_app_draws_the_toolkit(board, root):
     host = _app_ui_host_pmem(board.pyval(
         "(ws.look.theme_name, ws.look.theme_variant, __import__('moy_ui').input())",
         strict=True))
