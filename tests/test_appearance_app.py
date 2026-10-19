@@ -693,11 +693,11 @@ def test_a_single_mode_theme_offers_no_mode(tmp_path):
     ws = _ws(tmp_path)
     ws.look.set_theme("blocks", persist=False, variant="light")
     app = _open(ws)
-    assert app._modes("blocks") == ("Light",)
+    assert app._modes("blocks") == ("Day",)
     assert app._modes("moy") == ("Day", "Night")
-    assert app._modes("contrast") == ("Light", "Dark")
+    assert app._modes("contrast") == ("Day", "Night")
     assert "Mode" not in app._kinds and "Accent" in app._kinds
-    assert app._status(app.choices()).startswith("Blocks Light")
+    assert app._status(app.choices()).startswith("Blocks Day")
 
 
 def test_the_desk_foots_status_column_is_the_rows_label_inset():

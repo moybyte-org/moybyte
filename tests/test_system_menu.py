@@ -240,7 +240,7 @@ def test_menu_omits_cart_group_when_no_cart(tmp_path):
     # rows, SEARCH first, launcher-only (#105: over the run-grid it filters).
     sel = ws.launcher.selected()
     card = ([sel["title"].upper()] + [
-        {"favourite": "ADD FAVOURITE", "change": "CHANGE", "copy": "COPY",
+        {"favourite": "ADD FAVOURITE", "change": "CHANGE", "copy": "DUPLICATE",
          "delete": "DELETE"}[v] for v in ws.launcher_layer.card_verbs()]
         if sel and sel.get("path") else [])
     assert labels == card + ["SYSTEM", "SEARCH", "SETTINGS", "ABOUT", "REBOOT"]

@@ -54,7 +54,7 @@ _LOOK_ICON = {"menu.restart_cart": "rotate", "menu.delete_cart": "trash",
               "menu.settings": "settings", "menu.about": "doc", "menu.reboot": "rotate"}
 # The selected card's verbs (LauncherHomeLayer.card_verbs) as menu rows:
 # (the chrome's label, icon, the look's text); the star's are the string ids'.
-_CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("COPY", "dup", "Copy"),
+_CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "dup", "Duplicate"),
              "delete": ("DELETE", "trash", "Delete"), "sure": ("DELETE", "trash", "Delete")}
 _DANGER_ICON = "trash"      # a row that wears it destroys: the danger rows' ink
 
@@ -391,7 +391,7 @@ class PauseMenu:
             _ui.hints(("change", "Change", "back", "Back"))
         else:
             _ui.menu("", self.ITEMS, self.ICONS)
-            _ui.hints(("confirm", "Choose", "back", "Resume"))
+            _ui.hints(("back", "Resume"))
         _ui.popover()
         if not settled:
             ws.request_frame()

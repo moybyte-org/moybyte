@@ -72,7 +72,7 @@ FRAME_NAMES = ("Classic", "Tabs", "Platinum", "Win9x", "Flat")
 FONT_NAMES = ("Tiny5", "PetMe128")
 # The CODE FONT presets (`Appearance.CODE_FONTS`) by name.
 CODE_FONT_NAMES = {"petme128": "PetMe128", "jbmono": "JetBrains Mono"}
-OWN = "Theme's"
+OWN = "Default"     # a cycler's word for the theme's own choice
 # ACCENT's seven swatches after the theme's own, by name, in hue order: a
 # preset (style.json's `presets`, an accent in each mode's value) or one of
 # the sixteen accents. Each reads in Moy's Day and Night, its focus colour on
@@ -331,8 +331,8 @@ class AppearanceAppLayer:
         """A theme's modes, light first, as its Mode row names them: one for
         a single-mode theme (`_single_mode`), which shows no Mode row."""
         if self._single_mode(name):
-            return ("Light",) if theme_modes(name) == ("light",) else ("Dark",)
-        return ("Day", "Night") if name == "moy" else ("Light", "Dark")
+            return ("Day",) if theme_modes(name) == ("light",) else ("Night",)
+        return ("Day", "Night")
 
     @staticmethod
     def _single_mode(name):

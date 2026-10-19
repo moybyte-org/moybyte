@@ -1037,11 +1037,11 @@ def _clean_side(limit):
 _KIND_NAME = {"game": "Game", "app": "App", "tool": "Tool", "wallpaper": "Wallpaper"}
 # The home's hint strip (steps 17 and 18): each verb's key and words. The
 # keys stay off the T-Deck keyboard's buttons (moy_kbd.c: w a s d, l, k), so
-# Copy is Y on a keyboard, and a gamepad's Y names nothing on the home: its X
+# Duplicate is Y on a keyboard, and a gamepad's Y names nothing on the home: its X
 # opens the card's verbs ("options"), the star among them.
 _VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
               "change": ("C", "Change"), "search": ("/", "Search"),
-              "new": ("N", "New"), "copy": ("Y", "Copy"),
+              "new": ("N", "New"), "copy": ("Y", "Duplicate"),
               "delete": ("X", "Delete"), "sure": ("X", "Sure?"),
               "favourite": ("F", "Add favourite"), "options": ("X", "Options")}
 _UNFAVOURITE = "Remove favourite"   # the star's words on a card that wears it
@@ -1054,12 +1054,12 @@ _LETTER_INPUTS = ("keys", "tdeck")
 LONG_PRESS_MS = 500
 _TAB_KEYS = ("tabs", "Tabs")
 _HINT_LEAD = 8       # the margin ui.hints leads with, at the font scale
-_MENU_KEYS = ("confirm", "Choose", "back", "Close")   # the strip under the system menu
+_MENU_KEYS = ("back", "Close")   # the strip under the system menu
 _TAB_H = 16          # the tab row's height, in chrome-scale units
 _GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
 _SLIDE_MS = 200        # the handheld's slide: 6 frames at the home's 30 fps
 _VERB_LABEL = {"play": "PLAY", "open": "OPEN", "change": "CHANGE",
-               "new": "NEW", "search": "SEARCH", "copy": "COPY",
+               "new": "NEW", "search": "SEARCH", "copy": "DUPLICATE",
                "delete": "DEL", "sure": "SURE?"}
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
            "Oct", "Nov", "Dec")

@@ -99,7 +99,7 @@ VERB = {
     "RUN": ("Run", "run"),
     "PLAY": ("Play", "play"),
     "NAME": ("Rename", "pencil"),
-    "COPY": ("Copy", "dup"),
+    "COPY": ("Duplicate", "dup"),
     "WALL": ("Wallpaper", "wallpaper"),
     "GAME": ("Use in game", "game"),
     "USE": ("Used in", "search"),

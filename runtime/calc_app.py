@@ -188,7 +188,7 @@ class CalcAppLayer:
         self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
         ui.page("")
         page = (lay.cx, lay.cy, lay.cw, lay.ch)
-        hints = ("confirm", "Press", "back", "Back")
+        hints = ("back", "Back")
         if not lay.desk and ui.hints_width(hints) > 0:
             # the hints' band, only where the input shows keys: under touch
             # the keys take its height (design review R3-07)

@@ -233,10 +233,10 @@ _GROUPS = (
 # The keycap hints for the focused row's kind.
 _HINT_OPEN = ("confirm", "Open", "back", "Back")
 _HINT_CHANGE = ("change", "Change", "back", "Back")
-_HINT_SWITCH = ("confirm", "Switch", "back", "Back")
 _HINT_TYPE = ("confirm", "Done", "cancel", "Cancel")
-_HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "toggle": _HINT_SWITCH,
-          "slider": _HINT_CHANGE, "field": _HINT_TYPE}
+_HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "slider": _HINT_CHANGE,
+          "toggle_on": ("confirm", "Turn off", "back", "Back"),
+          "toggle_off": ("confirm", "Turn on", "back", "Back"), "field": _HINT_TYPE}
 
 # The level rows, by system.json key: (lowest, highest, the value with none
 # stored). Volume is the console's level (`audio_session.console_volume`,
@@ -834,7 +834,7 @@ class SettingsLayer:
         on."""
         title, text, yes = TOGGLE_CONFIRMS[self.confirm_key]
         _x, _y, w, _h = _ui.page("")
-        _ui.hints(("confirm", "Choose", "back", "Back"))
+        _ui.hints(("back", "Back"))
         _ui.group(say(title))
         for line in _wrap(text, max(8, (w - 32) // max(1, self.ws.layout.font_w))):
             _ui.label(line)
@@ -1213,10 +1213,7 @@ class SettingsLayer:
         look = self.ws.look
         name = str(look.theme_name or "")
         title = _capital(name.replace("_", " ").replace("-", " "))
-        light = look.theme_variant == "light"
-        if name == "moy":
-            return title + (" Day" if light else " Night")
-        return title + (" Light" if light else " Dark")
+        return title + (" Day" if look.theme_variant == "light" else " Night")
 
     def _row(self, key, label, kind):
         """One row of the page: its verb, and what its answer does."""
@@ -1259,8 +1256,8 @@ class SettingsLayer:
             if _ui.link(s, ws.webhost_label() if ws.webhost_serving() else "Off"):
                 ws.toggle_webhost()
         elif kind == "diag":
-            self._kinds[s] = "toggle"
             on = bool(getattr(ws, key, False))
+            self._kinds[s] = "toggle_on" if on else "toggle_off"
             if _ui.toggle(s, on) != on:
                 self._toggle_diag_row(key)
         elif kind == "font":
