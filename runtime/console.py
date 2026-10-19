@@ -4572,8 +4572,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _wifi_icon_kind(self):
         """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi
-        service reports a live link, "wifi_off" (wifi-with-a-red-slash) when there's no
-        connection. Reads the backend's status() -> (connected, ssid, ip); defaults to
+        service reports a live link, "wifi_off" when there's no
+        connection, which the zoned bar shows as no glyph (the crash strip as a
+        slashed one). Reads the backend's status() -> (connected, ssid, ip); defaults to
         disconnected on no backend / any status error, so the host + tests are
         deterministic (FakeWifi boots disconnected -> "wifi_off"). Folded into the bar's
         cache key so a real connect/disconnect repaints the strip. Only ever called on a

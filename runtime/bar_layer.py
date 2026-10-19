@@ -907,6 +907,8 @@ class BarLayer:
                      2 * fw, 2 * lh)
         elif name == "wifi":
             s = ws._wifi_icon_kind()
+            if s != "wifi":            # off is the quiet state: no glyph
+                return
         elif name == "title":
             s = self._title(where)
         elif name == "text":
@@ -943,8 +945,7 @@ class BarLayer:
         if name in ("wifi", "battery", "close"):
             kind = name
             if name == "wifi" and ws._wifi_icon_kind() != "wifi":
-                ink = th["chrome_ink_dim"]
-                kind = "wifi_off"
+                return             # off is the quiet state, as a phone's: no glyph
             dx = self._ink_dx.get(name, 0) if self._ink_dx else 0
             x += dx                                    # its ink evened out (_status_dx)
             side = 16 * u                              # the theme's icon set, centred
