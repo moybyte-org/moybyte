@@ -121,13 +121,21 @@ def test_the_code_tab_keeps_one_left_inset(tmp_path, config, theme, mode):
     x0 = lay.x0
     assert x0 - lay.cx >= 8 * fs
     px = _px(ws)
-    # An unindented line that is not the current one: its ink starts on x0,
-    # its glyph's bearing at most fs in.
+    # An unindented line that is not the current one: its line number
+    # ends a cell before the code, which starts on the text column, each
+    # glyph's bearing at most fs in; the widest number starts on x0.
     other = next(i for i in range(lay.rows) if ed.top + i != ed.row
                  and ed.lines[ed.top + i][:1].isalpha())
     y = oy + lay.y0 + other * lay.lh
-    code = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh)
-    assert x0 <= code - ox <= x0 + fs, ("code", code - ox, x0)
+    tx0 = ws.code_layer._text_x0(lay, ed)
+    gc = ws.code_layer._gutter_cols(ed)
+    assert gc and tx0 == x0 + gc * lay.cell
+    num = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh)
+    digits = len(str(ed.top + other + 1))
+    at = x0 + (gc - 1 - digits) * lay.cell
+    assert at <= num - ox <= at + fs, ("number", num - ox, at)
+    code = _ink_left(px, ox + tx0 - lay.cell // 2, ox + lay.cx + lay.cw, y, y + lay.lh)
+    assert tx0 <= code - ox <= tx0 + fs, ("code", code - ox, tx0)
     sx, sy, _sw, sh = lay.status_band
     status = _ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh)
     assert x0 <= status - ox <= x0 + fs, ("status", status - ox, x0)
@@ -209,7 +217,7 @@ def test_the_caret_stands_a_column_off_the_next_stem(tmp_path, theme, mode):
     px = _px(ws)
     caret = _rgb(cv, ws.code_layer._tones()["caret"])
     y = oy + lay.y0 + (ed.row - ed.top) * lay.lh
-    x = lay.x0 + (ed.col - ed.left) * lay.cell
+    x = ws.code_layer._text_x0(lay, ed) + (ed.col - ed.left) * lay.cell
     cols = [c for c in range(x - lay.cell, x + lay.cell)
             if all(px[yy][c] == caret for yy in range(y + fs, y + lay.text_h - fs))]
     assert len(cols) == fs, cols

@@ -344,7 +344,7 @@ class CodeLayer:
         self._tools_open = False      # the tool palette row is shown
         self._select_mode = False     # SELECT mode: a code drag extends the selection
         self._sel_drag = False        # a selection drag is in progress this gesture
-        self._gutter = False          # optional line-number gutter (off == baseline)
+        self._gutter = True           # the line-number gutter, on by default (look 2026-10, D-03.1)
         self._find_open = False       # the find bar is shown + focused
         self._find_q = ""             # the find query being typed
         self._find_ci = True          # case-insensitive find (the default)
@@ -1165,8 +1165,8 @@ class CodeLayer:
                 if cur:
                     self._current_line(cv, lay, y, lay.mark_x, fx if fade else None)
                 if gc:                           # #89: line-number gutter (crash mark integrated)
-                    num = str(absrow + 1)
-                    cv.print(num[-gc:], lay.x0, y,
+                    num = str(absrow + 1)[-(gc - 1):]
+                    cv.print(num, lay.x0 + (gc - 1 - len(num)) * cell, y,
                              NAMES["red"] if on_err else
                              (t["gutter_cur"] if cur else t["gutter"]), 1)
                 elif on_err:                     # no gutter: the crash tick, on the mark's place

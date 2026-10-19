@@ -206,7 +206,7 @@ def test_code_editor_touch_places_caret_in_system_coords(tmp_path):
     drv.frame(1 / 30)
     lay = ws.code_layout
     # Tap the cell at visible (col=5, row=3).
-    tx = lay.x0 + 5 * lay.cell + 1
+    tx = ws.code_layer._text_x0(lay, ed) + 5 * lay.cell + 1
     ty = lay.y0 + 3 * lay.lh + 1
     drv.touch(tx, ty)
     drv.frame(1 / 30)

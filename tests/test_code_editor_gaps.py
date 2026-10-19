@@ -346,14 +346,16 @@ def test_tools_toggle_and_gutter_button(tmp_path):
     _tap(drv, b[0] + b[2] // 2, b[1] + b[3] // 2)
     assert cl._tools_open
     ws.editor.set_text("\n".join("row %d" % i for i in range(30)))
-    assert cl._gutter_cols(ws.editor) == 0
-    base_cols = ws.editor.COLS
-    _tap_tool(ws, drv, "gutter")
-    assert cl._gutter
+    assert cl._gutter                              # on by default (D-03.1)
     drv.frame(DT)                                  # a draw applies the gutter reflow
     assert cl._gutter_cols(ws.editor) == 3         # 30 lines -> 2 digits + 1 margin
     assert cl._text_x0(lay, ws.editor) > lay.x0    # text shifted right of the gutter
-    assert ws.editor.COLS == base_cols - 3         # visible columns narrowed to fit
+    with_cols = ws.editor.COLS
+    _tap_tool(ws, drv, "gutter")                   # the tools row's toggle hides it
+    assert not cl._gutter
+    drv.frame(DT)
+    assert cl._gutter_cols(ws.editor) == 0
+    assert ws.editor.COLS == with_cols + 3         # the columns come back
 
 
 def test_select_mode_drag_then_copy(tmp_path):
@@ -761,9 +763,10 @@ def _look_ws(tmp_path, theme, variant="light"):
     drv = _enter_code(ws)
     lay = ws.code_layout
     ed = ws.editor
-    ed.set_text("\n".join(["x = 1", "y" * (ed.COLS + 9), "z" * ed.COLS, "w = 2"]))
-    ed.row, ed.col, ed.top, ed.left = 0, 2, 0, 0
-    drv.frame(DT)
+    for _ in range(2):          # the second pass: COLS beside this text's gutter
+        ed.set_text("\n".join(["x = 1", "y" * (ed.COLS + 9), "z" * ed.COLS, "w = 2"]))
+        ed.row, ed.col, ed.top, ed.left = 0, 2, 0, 0
+        drv.frame(DT)
     return ws, drv, lay, ed
 
 
@@ -800,14 +803,15 @@ def test_a_line_longer_than_the_view_fades_over_its_last_12_pixels(tmp_path):
     from runtime.code_layer import _FADE
     ws, _drv, lay, ed = _look_ws(tmp_path, "moy")
     cv = ws.sys_canvas
-    x1 = lay.x0 + ed.COLS * lay.cell
+    tx0 = ws.code_layer._text_x0(lay, ed)        # past the line-number gutter
+    x1 = tx0 + ed.COLS * lay.cell
     x0 = x1 - _FADE * lay.fs
     long_y, fits_y = lay.y0 + lay.lh, lay.y0 + 2 * lay.lh
     # the same glyphs ("y" and "z" differ, so compare each line with its own
     # left: the fitting line's band holds its ink, the long line's has none)
     ink = cv._col(ws.look.content_colors()["code_text"])
     assert ink in _band(cv, x0, x1, fits_y, lay.lh)
-    assert ink in _band(cv, lay.x0, lay.x0 + _FADE, long_y, lay.lh)
+    assert ink in _band(cv, tx0, tx0 + _FADE, long_y, lay.lh)
     assert ink not in _band(cv, x0 + _FADE * lay.fs // 3, x1, long_y, lay.lh)
 
 
@@ -832,7 +836,8 @@ def test_a_faded_current_line_wears_one_outline(tmp_path):
         ring = _w(cv, x, y)                          # the outline's top edge
         assert ring == _w(cv, x, y + lay.lh - 1), variant
         assert ring != cv._col(ws.code_layer._t["bg"]), variant
-        caret = lay.x0 + (ed.col - ed.left) * lay.cell - lay.fs   # fs wide
+        caret = (ws.code_layer._text_x0(lay, ed) + (ed.col - ed.left) * lay.cell
+                 - lay.fs)                           # fs wide
         inner = [x for x in _edges(cv, lay, y, ring)
                  if lay.mark_x + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs
                  and not caret <= x < caret + lay.fs]
