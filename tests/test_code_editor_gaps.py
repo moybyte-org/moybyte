@@ -833,3 +833,21 @@ def test_a_faded_current_line_wears_one_outline(tmp_path):
         inner = [x for x in _edges(cv, lay, y, ring)
                  if lay.cx + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs]
         assert inner == [], (variant, inner)
+
+
+def test_a_disabled_undo_draws_in_the_themes_disabled_ink(tmp_path):
+    """Undo/Redo with nothing to walk take the look's `disabled` role (about
+    3:1), not the bar's dim ink -- which in Contrast is near full ink (design
+    review R2-09)."""
+    from runtime import ui_draw
+    for theme, variant in (("contrast", "dark"), ("contrast", "light"),
+                           ("moy", "dark")):
+        ws, _drv, _lay, _ed = _look_ws(tmp_path / (theme + variant), theme, variant)
+        cv, th = ws.sys_canvas, ws.theme_colors
+        cv.rect(0, 0, 24, 24, th["surface"])
+        ws.editor_app._draw_history_icon(cv, "undo", 4, 4, 16, False)
+        box = set(_band(cv, 0, 24, 0, 24))
+        off = cv._col(ui_draw.disabled_ink(th))
+        assert off != cv._col(th["chrome_ink_dim"]), (theme, variant)
+        assert off in box, (theme, variant)
+        assert cv._col(th["chrome_ink_dim"]) not in box, (theme, variant)

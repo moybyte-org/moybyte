@@ -638,16 +638,19 @@ class EditorApp:
         return tuple(t for t in _TAB_CHIPS if t[0] != "code")
 
     def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
-        """Draw the UNDO/REDO bar icon (#88), dimmed when the journal has nothing to
-        walk. `enabled` draws it like any other bar icon; disabled draws the
-        theme's icon set's in `chrome_ink_dim`, or, where the theme names no set,
-        the plain _glyph bitmap tinted dim -- an IconSheet has no 'dimmed' sprite
-        variant, so the fallback vocabulary carries the color instead."""
+        """Draw the UNDO/REDO bar icon (#88), in the theme's `disabled` ink when
+        the journal has nothing to walk. `enabled` draws it like any other bar
+        icon; disabled draws the theme's icon set's in `ui_draw.disabled_ink`,
+        or, where the theme names no set, the plain _glyph bitmap in that ink --
+        an IconSheet has no 'dimmed' sprite variant, so the fallback vocabulary
+        carries the color instead."""
         ws = self.ws
         if enabled:
             ws._icon(glyph, x, y, cv)
-        elif not ws.draw_icon(glyph, (x, y, ic, ic), ws.theme_colors["chrome_ink_dim"], cv):
-            ws._glyph(glyph, (x, y, ic, ic), ws.theme_colors["dim"], cv)
+            return
+        ink = _ui_draw.disabled_ink(ws.theme_colors)
+        if not ws.draw_icon(glyph, (x, y, ic, ic), ink, cv):
+            ws._glyph(glyph, (x, y, ic, ic), ink, cv)
 
     def _zone_scale(self):
         """The scale the shelf zone is laid out on: the FONT scale, which is also
