@@ -226,6 +226,20 @@ def test_the_code_roles_read_on_the_current_line(seed, variant):
     assert not low, (plate, low)
 
 
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("seed", TH["seeds"])
+def test_the_accent_as_ink_clears_the_code_surface(seed, variant):
+    """`ink_accent` is the accent where it is an ink: the accent derivation
+    picks the first of the accent, its deep and the ink that clears the
+    surface, and every seed holds it there too. A mark drawn on the code
+    surface in the accent (a caret) reads only through this role: Contrast
+    Light's `accent` is its yellow, 1.27:1 on white."""
+    live = live_colors(seed, variant)
+    ui_draw._C.theme_block(live.block, live.used)
+    s, ink = _rgb(live.tokens[TH["code"]["bg"]]), _rgb(live.tokens["ink_accent"])
+    assert _wcag(ink, s) >= 3.0, (seed, variant, round(_wcag(ink, s), 2))
+
+
 def _title_pixels(seed, variant, active, fs):
     """The window title's pixels and the strip's colour beside them, from the
     real frame: a titled frame against the same frame untitled."""
