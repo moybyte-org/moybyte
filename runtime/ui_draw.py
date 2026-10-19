@@ -1926,6 +1926,16 @@ class AppHost:
         return settled
 
 
+FADE_WELL = -3     # `fade`'s colour: a part's well (moy_ui_well's fill)
+
+
+def fade(cv, rect, col, up=False, look=None):
+    """A fade over `rect` toward colour `col` (or FADE_WELL), nothing at one
+    edge to nearly the colour at the other -- the bottom, or the top with
+    `up`: what says a list goes on past that edge."""
+    _C.fade(cv, rect, col, up, look)
+
+
 def fill_uncovered(cv, inner, outer, col):
     """Fill only the parts of `inner` that `outer` does not already cover.
 

@@ -309,6 +309,10 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // draws into it before its next ui call -- and the state bits (§5).
 void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                      moy_ui_span_t sub, const moy_ui_over_t *o, int32_t out[5]);
+// The page's end, after its rows: where they run on below what shows, a
+// fade at the foot of the page, over the hint band's top edge where the
+// page has one.
+void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // Whether the frame drawn last laid a dialog or a popover out from a stale measure, so
 // the next frame is owed though no input came.
 int moy_ui_api_owes(const moy_ui_ctx_t *c);

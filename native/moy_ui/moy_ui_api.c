@@ -12,6 +12,7 @@
 #define DIALOG_SALT 0xc2b2ae35u
 #define POPOVER_SALT 0x27d4eb2fu
 #define NO_PAGE 0xffu
+#define FADE_H 8                     // a scrolled page's foot fade, rows at the scale
 
 // A stop's flags.
 enum {
@@ -1544,6 +1545,21 @@ static void nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, in
     open_page(c, id, b, flags | (kind >= 2 || in_dialog(c) ? STOP_MODAL : 0));
 }
 
+// The page's (or a scroll region's) foot, its groups closed: where its rows
+// run on below what shows, a fade over its last FADE_H rows of the scale.
+static void foot_fade(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    moy_ui_keep_t *k = page_keep(c);
+    if (k == NULL || k->b <= c->scroll + c->page.h) {
+        return;
+    }
+    int h = FADE_H * c->fs;
+    if (h > c->page.h) {
+        h = c->page.h;
+    }
+    moy_ui_box_t b = {c->page.x, (int16_t)(c->page.y + c->page.h - h), c->page.w, (int16_t)h};
+    moy_ui_fade(s, b, MOY_UI_DEFAULT, 0, c->fs, ground_of(c));
+}
+
 // Close the innermost nested page where it is of `kind`: answers the height
 // its rows took.
 static int nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
@@ -1551,6 +1567,9 @@ static int nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
         return -1;
     }
     group_close(c, s);
+    if (kind == 1) {
+        foot_fade(c, s);
+    }
     int took = c->y;
     moy_ui_nest_t *n = &c->nest[--c->n_nest];
     c->page = n->page;
@@ -2242,6 +2261,13 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     out[2] = content.w;
     out[3] = content.h;
     out[4] = st;
+}
+
+void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    if (c->n_nest == 0) {
+        group_close(c, s);
+        foot_fade(c, s);
+    }
 }
 
 int moy_ui_api_owes(const moy_ui_ctx_t *c) {

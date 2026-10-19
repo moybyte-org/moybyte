@@ -819,6 +819,13 @@ int moy_ui_group_r(int fs);
 // moy_ui_panel. *content: where its rows go.
 int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
                        int desk, moy_ui_box_t *content);
+// A fade over box b, `b.h` rows from nothing to nearly colour `ci` (a look
+// colour), toward its bottom edge or, with `up`, its top: what says a list
+// goes on past that edge. MOY_UI_DEFAULT is the page's ground
+// (moy_ui_page_ground's colour, `desk` as there), MOY_UI_FADE_WELL a part's
+// well (moy_ui_well's fill).
+#define MOY_UI_FADE_WELL (-3)
+int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, int desk);
 // A group's caption in band `b`.
 int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int fs, int desk);
 // A rule across band `b` (inside the group pad), one unit thick, centred in

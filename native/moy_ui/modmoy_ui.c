@@ -2273,6 +2273,24 @@ static mp_obj_t ui_api_hints(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_hints_obj, 5, 5, ui_api_hints);
 
+// api_end(ctx, cv, look): the page's end, after its rows
+static mp_obj_t ui_api_end(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
+    moy_ui_sink_t s;
+    sink_of(&s, cv, look);
+    moy_ui_api_end(ctx_of(ctx), &s);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_end_obj, ui_api_end);
+
+// fade(cv, rect, ci, up[, look]): a fade toward colour `ci` over `rect`
+static mp_obj_t ui_fade(size_t n_args, const mp_obj_t *a) {
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], n_args > 4 ? a[4] : mp_const_none);
+    check(moy_ui_fade(&s, box_of(a[1]), mp_obj_get_int(a[2]), mp_obj_is_true(a[3]), s.fs, 0));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_fade_obj, 4, 5, ui_fade);
+
 // api_hints_w(ctx, cv, look, items) -> the width those hints take
 static mp_obj_t ui_api_hints_w(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2589,6 +2607,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_field), MP_ROM_PTR(&ui_api_field_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_dialog), MP_ROM_PTR(&ui_api_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },
@@ -2606,6 +2625,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_scrollbar), MP_ROM_PTR(&ui_scrollbar_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_cues), MP_ROM_PTR(&ui_scroll_cues_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_uncovered), MP_ROM_PTR(&ui_fill_uncovered_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fade), MP_ROM_PTR(&ui_fade_obj) },
     { MP_ROM_QSTR(MP_QSTR_list), MP_ROM_PTR(&ui_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_calls), MP_ROM_PTR(&ui_calls_obj) },
     { MP_ROM_QSTR(MP_QSTR_hits_cap), MP_ROM_PTR(&ui_hits_cap_obj) },

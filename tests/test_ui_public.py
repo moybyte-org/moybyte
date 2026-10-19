@@ -395,6 +395,40 @@ def test_focus_on_an_id_no_longer_drawn_passes_to_the_nearest_stop():
     assert ui.focus() in ("One", "Three")
 
 
+def _rows_page(n, end):
+    def draw():
+        content = ui.page("Rows")
+        for k in range(n):
+            ui.label("row %d" % k)
+        if end:
+            ui.end()
+        return content
+    return draw
+
+
+def test_the_page_end_fades_its_foot_only_where_rows_run_on_below():
+    """`ui.end()` fades the page's last rows toward its ground where its rows
+    run on past what shows (design review D-09), and draws nothing where
+    they all show."""
+    def rows(n, end):
+        r = _Run(_rows_page(n, end))
+        _TH[0].look.set_theme("moy", persist=False, variant="light")   # a look with a ground
+        r.th = _TH[0].theme_colors
+        r.frame()
+        page = r.frame()
+        return bytes(r.cv._buf), page, r.cv.w
+    long_plain, page, w = rows(40, False)
+    long_faded, _p, _w = rows(40, True)
+    x, y, pw, ph = page
+    foot = (y + ph - 8) * w * 2                  # the fade's band, over a row's text
+    top = y * w * 2
+    assert long_faded[foot:foot + 8 * w * 2] != long_plain[foot:foot + 8 * w * 2]
+    assert long_faded[top:top + w * 2] == long_plain[top:top + w * 2]
+    short_plain, _p, _w = rows(2, False)
+    short_faded, _p, _w = rows(2, True)
+    assert short_faded == short_plain
+
+
 def test_a_settled_page_draws_the_same_pixels():
     r = _Run(_page())
     r.frame()

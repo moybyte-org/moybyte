@@ -262,6 +262,7 @@ class CalcAppLayer:
         ty = y + 4 * fs
         fit = max(0, (ey - 4 * fs - ty) // pitch)
         sums = self.tape[:-1] if self.shown else self.tape
+        dropped = len(sums) > fit
         for a, op, b, res in sums[max(0, len(sums) - fit):]:
             s = _fit(_sum(a, op, b, signs), room, 1)
             cv.print(s, right - ui.text_size(s)[0], ty + 3 * fs, dim)
@@ -269,6 +270,9 @@ class CalcAppLayer:
             cv.print(r, right - ui.text_size(r)[0], ty + line + 7 * fs, ink)
             cv.rect(right - room, ty + 2 * line + 11 * fs, room, fs, rule)
             ty += pitch
+        if dropped and fit:
+            # older sums above the first shown: its top fades into the well
+            ui.fade((right - room, y + 2 * fs, room, pitch // 2), True)
 
     def _expr(self, signs):
         """The display's line over the result: the sum just made, or the

@@ -1068,6 +1068,40 @@ int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t tit
     return MOY_UI_OK;
 }
 
+int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, int desk) {
+    if (b.w <= 0 || b.h <= 0) {
+        return MOY_UI_OK;
+    }
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    uint16_t g;
+    if (ci == MOY_UI_FADE_WELL) {
+        g = pal(&d, tok(&d, MOY_UI_T_LCD, MOY_UI_T_SUNK));
+    } else if (ci != MOY_UI_DEFAULT) {
+        g = pal(&d, ci);
+    } else if (!ground(&d, &g)) {
+        return MOY_UI_OK;
+    }
+    moy_text_target_t *t = &d.t;
+    for (int j = 0; j < b.h; j++) {
+        int k = (j + 1) * 255 / (b.h + 1);          // the edge's row nearly the colour
+        int y = (up ? b.y + b.h - 1 - j : b.y + j) - t->cam_y;
+        if (y < t->cy0 || y >= t->cy1) {
+            continue;
+        }
+        for (int i = 0; i < b.w; i++) {
+            int x = b.x + i - t->cam_x;
+            if (x < t->cx0 || x >= t->cx1) {
+                continue;
+            }
+            uint16_t *p = &t->px[(size_t)y * (size_t)t->dw + (size_t)x];
+            *p = mix(*p, g, k);
+        }
+    }
+    d.row->st[MOY_ST_N_FILL]++;
+    return MOY_UI_OK;
+}
+
 // -- a part's ground --------------------------------------------------------------------
 
 int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int fs,

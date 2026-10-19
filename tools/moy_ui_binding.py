@@ -202,6 +202,7 @@ _DRAW_SIGS = (
     ("moy_ui_scrollbar", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, _I], _I),
     ("moy_ui_scroll_cues", [c.POINTER(_Sink), _I, _I, _I, _I, _I, _I, _I], _I),
     ("moy_ui_fill_uncovered", [c.POINTER(_Sink), _Box, _Box, _I], _I),
+    ("moy_ui_fade", [c.POINTER(_Sink), _Box, _I, _I, _I, _I], _I),
     ("moy_ui_list", [c.POINTER(_Sink), _Box, _I, c.c_char_p, _Z, _I, _I, _I, _I, _I,
                      _I], _I),
     ("moy_ui_button", [c.POINTER(_Sink), _Box, _I, _I, _I, c.POINTER(_Button), _I], _I),
@@ -298,6 +299,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_dialog", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, _I, c.c_void_p],
      c.c_int32),
     ("moy_ui_api_owes", [c.c_void_p], _I),
+    ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                          c.c_void_p], c.c_int32),
@@ -568,6 +570,10 @@ def binding():
         _check(lib.moy_ui_fill_uncovered(c.byref(sink(cv, None)), box_of(inner),
                                          box_of(outer), int(ci)))
 
+    def fade(cv, rect, ci, up, look=None):
+        s = sink(cv, look)
+        _check(lib.moy_ui_fade(c.byref(s), box_of(rect), int(ci), 1 if up else 0, s.fs, 0))
+
     def list_(cv, look, rect, kind, items, count, row_h, offset, sel, bar_w):
         s = sink(cv, look)
         b = bytes(items)
@@ -782,7 +788,7 @@ def binding():
         lib.moy_ui_cell_art(r4(rect), int(fs), opt(pad, DEFAULT), int(caption_h), out)
         return tuple(out)
 
-    for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered,
+    for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
               scrim,
@@ -1048,6 +1054,10 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
 
+    def api_end(ctx, cv, look):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_end(p, c.byref(sink(cv, look)))
+
     def api_grid(ctx, cv, look, id_, w, h, o):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
@@ -1106,7 +1116,8 @@ def binding():
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
-              api_box, api_table, api_scroll, api_field, api_dialog, api_owes, api_grid,
+              api_box, api_table, api_scroll, api_field, api_dialog, api_owes, api_end,
+              api_grid,
               api_card, api_part, api_popover, api_menu, api_menu_danger,
               api_focus, api_keys_taken, api_at, api_dup):
         setattr(m, f.__name__, f)

@@ -279,6 +279,22 @@ def hints(items, o=None):
     _C.api_hints(t[0], t[1], t[2], _opts(items), _over(o))
 
 
+def fade(rect, up=False):
+    """A fade over `rect` in a part, toward the part's well: nothing at one
+    edge to nearly the well at the other -- its bottom, or its top with
+    `up` -- what says the part's content goes on past that edge (Calc's
+    tape, its older sums above)."""
+    t = _T
+    _D.fade(t[1], rect, _D.FADE_WELL, up, t[2])
+
+
+def end():
+    """The page's end, after its last row: where its rows run on below what
+    shows, a fade at its foot (above the hint band) says there is more."""
+    t = _T
+    _C.api_end(t[0], t[1], t[2])
+
+
 def hints_width(items):
     """The pixels `ui.hints(items)` takes across with the input in use, its
     margin at either end included, so a band placed with `ui.at` can end
