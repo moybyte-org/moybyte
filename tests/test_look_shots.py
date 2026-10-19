@@ -144,3 +144,94 @@ def test_pads_measures_a_pills_ink():
 def test_a_failed_check_fails_the_run(tmp_path, monkeypatch):
     monkeypatch.setattr(L, "checks", lambda ws, probe, img: [("clean cover", False, "138")])
     assert L.main([str(tmp_path), "moy-dark_handheld_home"]) == 1
+
+
+# -- the audit picks real pairs (round 3's triage) ----------------------------------
+
+def _glyph_row():
+    """A 40x12 row: plate, a solid 3:1-missing pill, a black glyph-ish
+    stroke with grey anti-aliasing beside it, all on white."""
+    img = Image.new("RGB", (40, 12), (255, 255, 255))
+    for x in range(2, 8):
+        for y in range(2, 9):
+            img.putpixel((x, y), (230, 226, 246))          # a faint pill
+    for y in range(2, 10):
+        img.putpixel((20, y), (0, 0, 0))                   # a stem
+        img.putpixel((21, y), (128, 128, 128))             # its anti-aliasing
+    return img
+
+
+def test_the_audit_drops_anti_aliasing_and_holds_text_to_4_5():
+    img = _glyph_row()
+    inks = L._inks(img, (0, 0, 40, 12), (255, 255, 255))
+    assert inks["solid"] == [(230, 226, 246)]
+    assert inks["text"] == [(0, 0, 0)], "the grey between ink and ground is a blend"
+    assert L._between((128, 128, 128), (0, 0, 0), (255, 255, 255))
+    assert not L._between((230, 0, 0), (0, 0, 0), (255, 255, 255))
+    assert L.TEXT_FLOOR == 4.5 and L.FLOOR == 3.0
+
+
+def test_the_audit_cuts_a_box_to_what_shows():
+    assert L._clip((0, 200, 320, 40), (0, 28, 320, 192)) == (0, 200, 320, 20)
+    assert L._clip((0, 230, 320, 10), (0, 28, 320, 192)) is None
+
+
+def test_a_pair_an_open_question_owns_is_no_flag():
+    rows = [("p", "#292c52", "#181839", 1.28, 3.0, "D-05"),
+            ("p", "#ffee62", "#ffe600", 1.07, 3.0, ""),
+            ("p", "#000000", "#ffe600", 16.6, 3.0, "")]
+    assert L.flagged(rows) == [rows[1]]
+
+
+def test_the_kit_renders_the_card_menus_and_the_shelfs_buttons():
+    table = L._kit_table()
+    for screen, want in (("handheld_home_long-press", "touch"),
+                         ("handheld_make_long-press", "touch"),
+                         ("handheld_home_pad-x", "pad"), ("desktop_home_pad-up", "pad")):
+        assert screen in table and L.KIT_INPUT[screen] == want
+    assert "handheld_make_input" in table, "the Make tab under each input"
+    assert "desktop_calc" in table
+
+
+def test_a_long_press_opens_the_card_menu_and_the_check_says_so(tmp_path):
+    failed = []
+    L.run(str(tmp_path), ["moy-dark_handheld_home_long-press", "moy-dark_handheld_home_pad-x",
+                          "moy-dark_desktop_home_pad-up"],
+          quiet=True, kit=True, theme="moy", variant="dark", only_kit=True, failed=failed)
+    assert failed == []
+    index = (tmp_path / "kit" / "index.txt").read_text()
+    assert "check: card menu ok (a long press on the card opens its verbs" in index
+    assert "check: card menu ok (a pad's X opens its verbs" in index
+    assert "check: shelf up ok" in index
+
+
+def test_a_long_press_that_opens_nothing_fails_the_run(tmp_path, monkeypatch):
+    from runtime import launcher_layer
+    assert L.PRESS_MS > launcher_layer.LONG_PRESS_MS
+    monkeypatch.setattr(L, "PRESS_MS", 200)              # a tap, not a long press
+    failed = []
+    L.run(str(tmp_path), ["moy-dark_handheld_home_long-press"], quiet=True, kit=True,
+          theme="moy", variant="dark", only_kit=True, failed=failed)
+    assert [f[1] for f in failed] == ["card menu"]
+
+
+def test_the_audit_finds_round_3s_real_pairs(tmp_path):
+    """The Contrast Mode segment (R3-04), Moy Night's chip label (R3-06),
+    the editing Name field's mark (R3-03) and the desk Calc's backspace
+    (R3-09) are FLAGs; Moy's hairline is D-05's, not a FLAG."""
+    L.run(str(tmp_path), ["contrast-dark_handheld_parts-appearance_focus-mode",
+                          "moy-dark_desktop_calc", "moy-dark_handheld_settings_focus-name"],
+          quiet=True, kit=True, only_kit=True, audit_csv=True)
+    kit = tmp_path / "kit"
+
+    def rows(name):
+        return [ln.split(",") for ln in (kit / (name + ".audit.csv")).read_text().splitlines()[1:]]
+    seg = rows("contrast-dark_handheld_parts-appearance_focus-mode")
+    assert any(r[2] == "#ffee62" and r[6] == "FLAG" for r in seg)
+    calc = rows("moy-dark_desktop_calc")
+    assert any(r[1] == "bar chip label vs plate" and r[6] == "FLAG" for r in calc)
+    assert any(r[1].startswith("desk backspace") for r in calc)
+    name = rows("moy-dark_handheld_settings_focus-name")
+    assert any(r[1] == "focus mark height vs row" for r in name)
+    assert all(r[6] == "" for r in name if r[2] == "#292c52")
+    assert any(r[7] == "D-05" for r in name)

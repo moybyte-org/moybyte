@@ -51,22 +51,35 @@ Brightness, a toggle On and Off and the empty Name field focused; the desk
 Appearance window with a cycler, the segments and the accents focused; the
 parts sheet with each of its parts focused; the Code tab with Undo enabled
 and disabled and with the caret on the longest line; the sprite editor's
-palette; the system menu and the pause menu over focused content.
-`--profiles` adds the hint-bearing screens once per input profile, the
-Name field being typed and the Wi-Fi password prompt among them. They are
-written into OUT/kit/ with their own index.txt; `--only-kit` skips the
-mockup pairs.
+palette; the system menu and the pause menu over focused content; the
+desk with Calc; a long press on a Games and a Make card and a pad's X (the
+card's verbs as a menu) and up from the desk home's shelf, each under the
+input it is made with (`KIT_INPUT`) and each checked to have opened what it
+opens. `--profiles` adds the hint-bearing screens once per input profile,
+the Make tab, the Name field being typed and the Wi-Fi password prompt among
+them; a scene drawn with the T-Deck's keys notes that the host cannot prove
+its keyboard's keys. They are written into OUT/kit/ with their own
+index.txt; `--only-kit` skips the mockup pairs.
 
 Every render is checked, and a failed check fails the run (exit 1): the
 handheld hero's focus mark lies under the bar, every cover a home draws is
 the whole 128 px cover at a clean scale, a menu over content leaves one focus
 mark on the screen, an open tab's pill has its ink padded alike both sides,
 and a theme's bar packs alike in every mode the run drew it in. `--audit`
-writes SCENE.audit.csv beside each render: the state pairs round 2 measured
-by hand (a focused row's parts against its plate, the caret against its line,
-the current plate against the ground beside it, a disabled history icon
-against the enabled ink, an Off toggle against its row), each with its
-contrast ratio and a FLAG under its floor.
+writes SCENE.audit.csv beside each render: the state pairs the review rounds
+measured by hand (a focused row's parts against its plate and its mark
+against the row, the caret against its line, the open tab's current mark
+against the ground beside it, the focused desk chip's label, a disabled
+history icon against the enabled ink, an Off toggle against its row, a lifted
+hero's rim against its cover, the desk Calc's backspace against a digit),
+each with its ratio and a FLAG under its floor. A box is measured as it
+shows -- cut to its window or the content under the bar, less the hint band
+-- inside its plate's own run; anti-aliasing is no colour of its own; text
+is held to 4.5:1 and a part to 3:1; a current mark by the look's
+`current.style`, a faint plate passing on its label's ink; a swatch only has
+to show, and a preview card is measured by its ring. A pair an open design
+question owns (`D05_TOKENS`, `D08_KINDS`) names it in the CSV's owner column
+and is no FLAG; the run prints the FLAG count.
 """
 
 import argparse
@@ -490,7 +503,7 @@ def render(g, config, theme, mode, setup, wallpaper, inputs=None):
         if "layout" not in cfg:
             cfg["theme"] = theme
         ws = g._build(cfg, os.path.join(tmp, "carts"))
-        _FOCUSED[0] = None
+        _FOCUSED[0] = _FOCUSED_KIND[0] = _EXPECT[0] = None
         if inputs is None and config == HANDHELD:
             inputs = HANDHELD_INPUT
         if inputs is not None:
@@ -512,7 +525,8 @@ def render(g, config, theme, mode, setup, wallpaper, inputs=None):
         finally:
             probe.remove()
         img = _image(ws)
-        report = {"checks": checks(ws, probe, img), "audit": audit(ws, probe, img),
+        expect = _EXPECT[0](ws) if _EXPECT[0] is not None else []
+        report = {"checks": checks(ws, probe, img) + expect, "audit": audit(ws, probe, img),
                   "bars": (ws.layout.clock_w, ws.layout.bars)}
         return img, settled, report
     finally:
@@ -541,9 +555,29 @@ def themes_held(g):
 KIT_MODES = (("moy", "dark"), ("moy", "light"), ("blocks", "light"),
              ("contrast", "dark"), ("contrast", "light"))
 
-# How the scene being rendered finds its focused stop on the glass (a
-# kit setup sets it; `render` clears it).
+# How the scene being rendered finds its focused stop on the glass, and
+# that stop's part kind (a kit setup sets them; `render` clears them).
 _FOCUSED = [None]
+_FOCUSED_KIND = [None]
+# A kit scene's own checks, ws -> [(check, ok, detail)], read after it
+# settles (a setup sets it; `render` clears it).
+_EXPECT = [None]
+
+# The kit screens that draw one input's keys whatever the run's profile:
+# a long press is a finger's, X and up a gamepad's.
+KIT_INPUT = {"handheld_home_long-press": "touch", "handheld_make_long-press": "touch",
+             "handheld_home_pad-x": "pad", "desktop_home_pad-up": "pad"}
+
+# The parts sheet's and the desk Appearance's stops by the part they draw,
+# where the audit measures a part its own way (`_row_pairs`).
+PART_KINDS = {"Mode": "seg", "Accent": "swatches", "Sound": "toggle", "Volume": "slider",
+              "Tint": "cycle"}
+
+# A note on every scene drawn with the T-Deck's keys: the host types every
+# key, so what a hint names arriving from its keyboard is the board's to show.
+TDECK_NOTE = ("the host types every key; that the T-Deck's keyboard delivers "
+              "the keys these hints name is proven on glass "
+              "(tests/test_tdeck_on_glass.py) and in tests/test_tdeck_keymap.py")
 
 # What a typed field and the Wi-Fi password prompt hold in their scenes.
 NAME_TYPED = "Moy"
@@ -582,6 +616,7 @@ def _settings_at(key):
         sl.set_level("volume", VOLUME_REST)
         sl.show_row(key)
         _FOCUSED[0] = lambda: sl._host.box(sl._focused) if sl._focused else None
+        _FOCUSED_KIND[0] = lambda: sl._kinds.get(sl._focused)
     return setup
 
 
@@ -616,6 +651,8 @@ def _desk_appearance_at(label):
             cx, cy, _w, _h = win.content_rect()
             return (b[0] + cx, b[1] + cy, b[2], b[3])
         _FOCUSED[0] = box
+        _FOCUSED_KIND[0] = lambda: (PART_KINDS.get(app._focused)
+                                    or app._kinds.get(app._focused))
     return setup
 
 
@@ -629,6 +666,7 @@ def _parts_at(page, stop):
         _settle(g, ws, 2)
         ui_draw._C.api_focus(app.ctx, stop)
         _FOCUSED[0] = lambda: ui_draw._C.api_box(app.ctx, stop)
+        _FOCUSED_KIND[0] = lambda: PART_KINDS.get(stop)
     return setup
 
 
@@ -649,10 +687,99 @@ def _code_long(g, ws):
     ed.top = max(0, row - 4)
 
 
+class _Pressed:
+    """One frame's input with button `name` pressed, for a layer's
+    handle_input (a gamepad's X and up, which the host's keyboard has not)."""
+
+    def __init__(self, name):
+        self.name = name
+        self.last_key = 0
+
+    def pressed(self, name):
+        return name == self.name
+
+    def held(self, name):
+        return name == self.name
+
+
+def _first_card(ws):
+    """Select the home's first real card (the Make tab's leads with + New)."""
+    for i, it in enumerate(ws.launcher.items):
+        if it.get("path"):
+            ws.launcher.sel = i
+            return
+
+
+def _make(g, ws):
+    """The Make tab with a project selected: New, Change, Copy and Delete."""
+    _home(g, ws)
+    ws.set_home_tab("make")
+    _first_card(ws)
+
+
+# How long the kit's finger stays down: past the launcher's LONG_PRESS_MS.
+PRESS_MS = 650
+
+
+def _long_press(base):
+    """`base`, then a long press on the selected card through the real
+    pointer feed -- a finger held still past LONG_PRESS_MS, then lifted --
+    which opens the card's verbs over the home (design review R3-01). The
+    scene's check fails unless the menu opened."""
+    def setup(g, ws):
+        base(g, ws)
+        ws._golden_popover = True          # the frames' quiesce keeps it open
+        drv = _driver(ws)
+        for _ in range(3):
+            g._quiesce(ws)
+            drv.frame(g._DT)
+        r = ws.launcher.tile_rect(ws.launcher.sel)
+        drv.touch(r[0] + r[2] // 2, r[1] + r[3] // 2)
+        for _ in range(int(PRESS_MS / 1000.0 / g._DT)):
+            drv.frame(g._DT)
+        drv.touch_up()
+        drv.frame(g._DT)
+        _EXPECT[0] = _card_menu_open("a long press on the card")
+    return setup
+
+
+def _card_menu_open(how):
+    def check(ws):
+        got = ws.sysmenu.open and ws.sysmenu.widget == "card"
+        rows = [r[4] for r in ws.sysmenu.items if r[0] == "item"] if got else []
+        return [("card menu", bool(got), "%s opens its verbs: %s" % (
+            how, ", ".join(rows) if got else "no menu"))]
+    return check
+
+
+def _pad_x(g, ws):
+    """A gamepad's X on the home's card: its verbs, as a long press opens
+    them (design review R3-16)."""
+    _home(g, ws)
+    _settle(g, ws, 2)
+    ws._golden_popover = True
+    ws.launcher_layer.handle_input(_Pressed("x"))
+    _EXPECT[0] = _card_menu_open("a pad's X")
+
+
+def _pad_up(g, ws):
+    """Up from the desk home's shelf: the keys move to the details pane's
+    buttons, the shelf's card keeping its place (design review R3-16)."""
+    _console_home(g, ws)
+    _settle(g, ws, 2)
+    ws.launcher_layer.handle_input(_Pressed("up"))
+
+    def check(ws):
+        k = ws.launcher_layer._button_focus
+        return [("shelf up", k is not None, "up from the shelf focuses button %r" % (k,))]
+    _EXPECT[0] = check
+
+
 def _kit_table():
     """kit screen -> (config, setup, what it shows, kind): a "theme" scene
     renders in each of KIT_MODES (--kit), a "profile" one in each input
-    profile (--profiles), in the run's theme (Moy Night by default)."""
+    profile (--profiles), in the run's theme (Moy Night by default). A
+    screen in KIT_INPUT draws that input's keys in every theme-mode."""
     t = {
         "handheld_settings_focus-volume": (
             HANDHELD, _settings_at("volume"), "Settings, Volume focused at %d/7"
@@ -690,6 +817,14 @@ def _kit_table():
                            "the pause menu over a running cart: one focus mark"),
         "desktop_sysmenu": (DESK, _sysmenu_desk,
                             "the system menu over a focused desk window: one focus mark"),
+        "desktop_calc": (DESK, _desk, "the desk: Files and Calc, the tape's sums"),
+        "handheld_home_long-press": (HANDHELD, _long_press(_home),
+                                     "a long press on a Games card: its verbs"),
+        "handheld_make_long-press": (HANDHELD, _long_press(_make),
+                                     "a long press on a Make card: its verbs"),
+        "handheld_home_pad-x": (HANDHELD, _pad_x, "a pad's X on a Games card: its verbs"),
+        "desktop_home_pad-up": (CONSOLE, _pad_up,
+                                "up from the desk home's shelf: the details pane's buttons"),
     }
     out = {k: v + ("theme",) for k, v in t.items()}
     for page, stops in (("settings", ("Wi-Fi", "Appearance", "Text size")),
@@ -701,6 +836,7 @@ def _kit_table():
                 "the parts sheet's %s page, %s focused" % (page, stop), "theme")
     for screen, (config, setup, what) in {
             "handheld_home": (HANDHELD, _home, "home"),
+            "handheld_make": (HANDHELD, _make, "the Make tab, a project selected"),
             "handheld_settings": (HANDHELD, _settings, "Settings"),
             "handheld_appearance": (HANDHELD, _appearance, "Appearance"),
             "handheld_sysmenu": (HANDHELD, _sysmenu_home, "the system menu over the home"),
@@ -747,13 +883,14 @@ def kit_scenes(filters=(), kit=True, profiles=False, theme=None, variant=None):
 class Probe:
     """What a scene's frames drew, the last frame that drew each kind, in
     glass pixels: the covers' blits (x, y, w, h), the tabs (rect, active),
-    the narrow rects (a caret's: x, y, w, h, colour), the icons (kind, ink)
-    and the most focus marks one frame drew. A record drawn into a window's
+    the narrow rects (a caret's: x, y, w, h, colour), the icons (kind, ink),
+    the desk bar's chips (rect, focused), the pages that drew hints (`ui.hints`
+    calls) and the most focus marks one frame drew. A record drawn into a window's
     buffer is offset to its content rect, one drawn into a strip (the bars'
     cache) to where the frame blitted the strip; one whose canvas reaches
     the glass neither way is dropped."""
 
-    KINDS = ("covers", "tabs", "rects", "icons")
+    KINDS = ("covers", "tabs", "rects", "icons", "chips", "hints")
 
     def __init__(self):
         self.last = {k: [] for k in self.KINDS}
@@ -792,10 +929,10 @@ class Probe:
                 o = (0, 0) if cv is None else self._origin(cv)
                 if o is None:
                     continue
-                if k == "tabs":
+                if k in ("tabs", "chips"):
                     r, active = rec
                     got.append(((r[0] + o[0], r[1] + o[1], r[2], r[3]), active))
-                elif k == "icons":
+                elif k in ("icons", "hints"):
                     got.append(rec)
                 else:
                     got.append((rec[0] + o[0], rec[1] + o[1]) + tuple(rec[2:]))
@@ -849,8 +986,24 @@ class Probe:
                 cur["icons"].append((None, (kind, ink)))
                 return real(cv, kind, rect, ink, *a, **kw)
             return f
+        def bar_part(real):
+            def f(cv, th, part, rect, on=0, *a, **kw):
+                if part == ui_draw.BAR_CHIP:
+                    cur["chips"].append((cv, (tuple(rect), bool(on))))
+                return real(cv, th, part, rect, on, *a, **kw)
+            return f
+
+        def hints(real):
+            def f(items, *a, **kw):
+                cur["hints"].append((None, tuple(items)))
+                return real(items, *a, **kw)
+            return f
         for mod in {ui_draw, sys.modules.get("ui_draw", ui_draw)}:
             patch(mod, "tab", tab)
+            patch(mod, "bar_part", bar_part)
+        from runtime import ui as ui_api
+        for mod in {ui_api, sys.modules.get("ui", ui_api)}:
+            patch(mod, "hints", hints)
         for mod in {iconsets, sys.modules.get("iconsets", iconsets)}:
             patch(mod, "draw", icon)
 
@@ -989,23 +1142,216 @@ def _colours(img, r, min_px=6):
     return {c: n for c, n in hist.items() if n >= min_px}
 
 
-# The pairs' floors: 3:1 where the pair is the only cue; a disabled ink is
-# judged by how far it falls from the enabled one.
+# The pairs' floors: a part (a fill, a line) against what it sits on 3:1,
+# text against its ground 4.5:1 (WCAG's); a disabled ink, and the second cue
+# beside a faint current plate, by how far it falls from the plain ink; a
+# colour sample (a swatch) only by whether it shows at all.
 FLOOR = 3.0
+TEXT_FLOOR = 4.5
 DISABLED_FLOOR = 1.5
+SAMPLE_FLOOR = 1.5
+
+# The open design questions that own a pair the audit measures (judged
+# round 3): in Moy and Blocks the structure ramp -- a hairline, a field's
+# outline, the theme's `border`/`edge` -- is D-05's, and the stepped bar's
+# rest steps and the slider's rest track are D-08's. Such a row carries its
+# owner and is no FLAG.
+D05_TOKENS = ("border", "edge")
+OWNED_THEMES = ("moy", "blocks")
+D08_KINDS = ("slider", "steps", "volume")
 
 
-def _row_pairs(img, r, pair):
-    """The pairs of a row: its plate (its commonest colour) against each
-    colour that draws a part on it (a hundredth of the row or more: an edge's
-    anti-aliasing is no part), the commonest four."""
+def _clip(r, v):
+    """Rect `r` cut to rect `v`, or None where nothing is left."""
+    x0, y0 = max(r[0], v[0]), max(r[1], v[1])
+    x1, y1 = min(r[0] + r[2], v[0] + v[2]), min(r[1] + r[3], v[1] + v[3])
+    return (x0, y0, x1 - x0, y1 - y0) if x1 > x0 and y1 > y0 else None
+
+
+def _viewport(ws, r, hinted):
+    """The glass a measured box shows on: the desk window holding it (its
+    content), else the content rect under the bar; less the hint band at
+    its foot where the page drew hints with keys (the engine's band, the
+    value row's `hints` metric)."""
+    from runtime import ui_draw, layout_base
+    lay = ws.layout
+    view = (lay.cx, lay.cy, lay.cw, lay.ch)
+    mx, my = r[0] + r[2] // 2, r[1] + r[3] // 2
+    for win in getattr(ws.wm, "_wins", {}).values():
+        if getattr(win, "minimized", False):
+            continue
+        c = win.content_rect()
+        if c[0] <= mx < c[0] + c[2] and c[1] <= my < c[1] + c[3]:
+            view = c
+    if hinted and ui_draw.input_kind() != "touch":
+        desk = layout_base.metric_class() != layout_base.HANDHELD
+        band = ui_draw.metrics("value_row")[17 if desk else 16] * lay.fs
+        view = (view[0], view[1], view[2], max(0, view[3] - band))
+    return view
+
+
+def _run_of(px, r, c):
+    """The bounding box of colour `c`'s pixels in `r` (`px` the image's
+    pixel access): a plate's own run, so a frame or a ring drawn just
+    outside a plate is not measured as sitting on it."""
+    x, y, w, h = r
+    xs, ys = [], []
+    for yy in range(y, y + h):
+        for xx in range(x, x + w):
+            if px[xx, yy] == c:
+                xs.append(xx)
+                ys.append(yy)
+    if not xs:
+        return r
+    return (min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
+
+
+def _shape(px, r, c, fs=1):
+    """How colour `c` lies in rect `r`: "solid" where it fills a 3x3 block,
+    "line" where it runs straight longer than a glyph's stroke (16 pixels
+    across a font scale, or three quarters of the rect down), else "text"
+    (a glyph's strokes)."""
+    x, y, w, h = r
+    for yy in range(y, y + h - 2):
+        for xx in range(x, x + w - 2):
+            if px[xx, yy] == c and all(px[xx + i, yy + j] == c
+                                       for i in range(3) for j in range(3)):
+                return "solid"
+    for yy in range(y, y + h):
+        run = 0
+        for xx in range(x, x + w):
+            run = run + 1 if px[xx, yy] == c else 0
+            if run >= 16 * fs:
+                return "line"
+    for xx in range(x, x + w):
+        run = 0
+        for yy in range(y, y + h):
+            run = run + 1 if px[xx, yy] == c else 0
+            if run >= max(12 * fs, h * 3 // 4):
+                return "line"
+    return "text"
+
+
+def _neighbours(px, r, c):
+    """The colours touching colour `c`'s pixels in `r` (8-neighbours)."""
+    x, y, w, h = r
+    out = set()
+    for yy in range(y, y + h):
+        for xx in range(x, x + w):
+            if px[xx, yy] != c:
+                continue
+            for j in (-1, 0, 1):
+                for i in (-1, 0, 1):
+                    if x <= xx + i < x + w and y <= yy + j < y + h:
+                        out.add(px[xx + i, yy + j])
+    out.discard(c)
+    return out
+
+
+def _between(c, a, b):
+    """Is `c` on the line from `a` to `b`, short of both ends, within a
+    tenth of their distance: what an edge's anti-aliasing mixes?"""
+    ab = [b[k] - a[k] for k in range(3)]
+    n = sum(v * v for v in ab)
+    if n == 0:
+        return False
+    t = sum((c[k] - a[k]) * ab[k] for k in range(3)) / float(n)
+    if not 0.04 < t < 0.96:
+        return False
+    d = sum((c[k] - a[k] - t * ab[k]) ** 2 for k in range(3))
+    return d <= 0.01 * n
+
+
+def _blend(px, r, c):
+    """Is `c` anti-aliasing: on the line between two colours it touches?"""
+    near = list(_neighbours(px, r, c))
+    for i, a in enumerate(near):
+        for b in near[i + 1:]:
+            if _between(c, a, b):
+                return True
+    return False
+
+
+def _inks(img, r, plate, fs=1):
+    """{shape: [colour, ...]} of the solid colours drawn on `plate` in `r`,
+    commonest first: anti-aliasing and colours under a hundredth of the rect
+    (a stray edge) left out."""
+    px = img.load()
     hist = _colours(img, r, max(6, r[2] * r[3] // 100))
+    out = {"solid": [], "line": [], "text": []}
+    for c in sorted(hist, key=lambda c: -hist[c]):
+        if c == plate or _diff(c, plate) <= 24:
+            continue
+        shape = _shape(px, r, c, fs)
+        if shape != "solid" and _blend(px, r, c):
+            continue
+        out[shape].append(c)
+    return out
+
+
+def _owner(ws, kind, c, ratio, floor):
+    """The open question a failing pair is owned by ("" for none)."""
+    if ratio >= floor or ws.look.theme_name not in OWNED_THEMES:
+        return ""
+    if c in _token_rgbs(ws, D05_TOKENS):
+        return "D-05"
+    if kind in D08_KINDS:
+        return "D-08"
+    return ""
+
+
+def _token_rgbs(ws, names):
+    th = ws.theme_colors
+    return {_index_rgb(ws, th[n]) for n in names if th.get(n) is not None}
+
+
+def _row_pairs(ws, img, r, pair, kind=None, view=None):
+    """The pairs of a row: its plate -- the commonest colour of the row as
+    it shows (cut to `view`), measured inside the plate's own run -- against
+    each solid colour drawn on it, the commonest four: a fill or a line at
+    3:1, text at 4.5:1. A part kind measures its own way: a swatch's fill
+    is a sample, held only to show at all, and a card's preview art is not
+    measured, their rings are; a segment's selected pill may lean on its
+    label's ink, as a current plate does."""
+    if view is not None:
+        r = _clip(r, view)
+    if r is None or r[2] < 3 or r[3] < 3:
+        return []
+    hist = _colours(img, r, 1)
     if not hist:
         return []
     plate = max(hist, key=hist.get)
-    parts = sorted((c for c in hist if c != plate and _diff(c, plate) > 24),
-                   key=lambda c: -hist[c])[:4]
-    return [(pair, _hex(c), _hex(plate), contrast(c, plate), FLOOR) for c in parts]
+    r = _run_of(img.load(), r, plate)
+    if r[2] < 3 or r[3] < 3:
+        return []
+    inks = _inks(img, r, plate, ws.layout.fs)
+    out = []
+
+    def add(name, c, floor):
+        ratio = contrast(c, plate)
+        out.append((name, _hex(c), _hex(plate), ratio, floor,
+                    _owner(ws, kind, c, ratio, floor)))
+    for c in inks["text"][:2]:
+        add(pair + " (text)", c, TEXT_FLOOR)
+    for c in inks["line"][:2]:
+        add(pair + (" (ring)" if kind in ("swatches", "card") else ""), c, FLOOR)
+    solids = inks["solid"][:4]
+    if kind == "card":
+        solids = []
+    elif kind == "swatches":
+        for c in solids:
+            add("swatch vs plate (shows)", c, SAMPLE_FLOOR)
+        solids = []
+    elif kind == "seg" and solids and len(inks["text"]) >= 2:
+        a, b = inks["text"][:2]
+        if contrast(a, b) >= DISABLED_FLOOR and contrast(solids[0], plate) < FLOOR:
+            ratio = contrast(a, b)
+            out.append(("selected label ink vs plain label ink", _hex(a), _hex(b), ratio,
+                        DISABLED_FLOOR, ""))
+            solids = solids[1:]
+    for c in solids:
+        add(pair, c, FLOOR)
+    return out
 
 
 def _focused_box(ws):
@@ -1015,23 +1361,199 @@ def _focused_box(ws):
     return f() if f is not None else None
 
 
+def _theme_look(ws):
+    """The live theme's `look` block, from its file (a theme the shell
+    seeds); {} for one it does not."""
+    import json
+    path = os.path.join(ROOT, "native", "moy_ui", "themes", ws.look.theme_name + ".json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f).get("look", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _tab_ink(img, r, plate):
+    """The label ink of tab `r` on `plate`: its commonest solid text ink."""
+    inner = (r[0] + 1, r[1] + 1, max(1, r[2] - 2), max(1, r[3] - 2))
+    inks = _inks(img, inner, plate)
+    got = inks["text"] or inks["line"]
+    return got[0] if got else None
+
+
+def _current_pairs(ws, probe, img):
+    """The open tab's current mark against the ground beside it, by the
+    look's `current.style`: a bar under the tab, else a plate -- and where
+    a plate is faint, its second cue, the label's ink against a plain
+    tab's, which is flagged only when both miss."""
+    style = (_theme_look(ws).get("current") or {}).get("style", "bar")
+    tabs = probe.last["tabs"]
+    out = []
+    for r, active in tabs:
+        if not active or r[2] < 8:
+            continue
+        x, y, w, h = r
+        side = _colours(img, (x - 4, y + h // 4, 3, max(1, h // 2)), 1)
+        side.update(_colours(img, (x + w + 1, y + h // 4, 3, max(1, h // 2)), 1))
+        if not side:
+            continue
+        ground = max(side, key=side.get)
+        if style == "bar":
+            fs = ws.layout.fs
+            bar = _colours(img, (x + 2 * fs, y + h - 3, max(1, w - 4 * fs), 3), 1)
+            bar = {c: n for c, n in bar.items() if c != ground}
+            if bar:
+                c = max(bar, key=bar.get)
+                out.append(("current bar vs ground", _hex(c), _hex(ground),
+                            contrast(c, ground), FLOOR, ""))
+            continue
+        plate = _colours(img, (x + 1, y + h // 4, max(1, w - 2), max(1, h // 2)), 1)
+        if not plate:
+            continue
+        p = max(plate, key=plate.get)
+        row = ("current plate vs ground", _hex(p), _hex(ground), contrast(p, ground), FLOOR,
+               "")
+        if row[3] < FLOOR:
+            mine = _tab_ink(img, r, p)
+            plain = [_tab_ink(img, q, ground) for q, act in tabs if not act and q[2] >= 8]
+            plain = [c for c in plain if c is not None]
+            if mine is not None and plain and contrast(mine, plain[0]) >= DISABLED_FLOOR:
+                row = ("current label ink vs plain label ink", _hex(mine), _hex(plain[0]),
+                       contrast(mine, plain[0]), DISABLED_FLOOR, "")
+        out.append(row)
+    return out
+
+
+def _chip_pairs(ws, probe, img):
+    """The focused window's chip on the desk bar: its label's ink against
+    its plate, as text (design review R3-06)."""
+    out = []
+    for r, focused in probe.last["chips"]:
+        if not focused or r[2] < 40:
+            continue
+        x, y, w, h = r
+        label = (x + 38, y + 2, max(1, w - 40), max(1, h - 4))
+        hist = _colours(img, label, 1)
+        if not hist:
+            continue
+        plate = max(hist, key=hist.get)
+        inks = _inks(img, label, plate)
+        got = inks["text"] or inks["line"]
+        if got:
+            out.append(("bar chip label vs plate", _hex(got[0]), _hex(plate),
+                        contrast(got[0], plate), TEXT_FLOOR, ""))
+    return out
+
+
+def _measure(pair, got, want, ok):
+    """A geometry pair as an audit row: what was measured against what it
+    must reach, in pixels (the ratio column 1.0 where it holds)."""
+    return (pair, "%dpx" % got, "%dpx" % want, 1.0 if ok else 0.0, 1.0, "")
+
+
+def _mark_pairs(ws, img, box, view):
+    """The focused row's mark covers the row (design review R3-03, R3-14):
+    the focus colour's run spans the row's height as it shows, a theme
+    whose mark is an edge or a bar on a row (Moy) up to the bar's own
+    16-pixel cap."""
+    from runtime import ui_draw
+    if not ui_draw.marks_on():
+        return []
+    r = _clip(box, view) if view is not None else box
+    if r is None:
+        return []
+    th = ws.theme_colors
+    focus = _token_rgbs(ws, ("focus",))
+    px = img.load()
+    reach = max(2, ui_draw.mark_reach("part"))
+    # the row's leading edge: where an edge, a bar beside a row, a ring and
+    # a plate all lie, and a field's own ring inside the row does not
+    x0, x1 = max(0, r[0] - reach), min(img.width, r[0] + reach + 4)
+    y0, y1 = max(0, r[1] - reach), min(img.height, r[1] + r[3] + reach)
+    ys = [yy for yy in range(y0, y1) if any(px[xx, yy] in focus for xx in range(x0, x1))]
+    if th.get("focus") is None or not focus:
+        return []
+    want = min(r[3], 16 * ws.layout.fs) - 2
+    got = (max(ys) - min(ys) + 1) if ys else 0
+    return [_measure("focus mark height vs row", got, want, got >= want)]
+
+
+def _rim_pairs(ws, probe, img):
+    """A lifted card's rim hugs its cover (design review R3-05): between
+    the hero's cover and its rim no run of the card's plate (Moy's lift)."""
+    look = _theme_look(ws)
+    if (look.get("focus") or {}).get("card") != "lift" or ws.screen != "launcher" \
+            or ws.sysmenu.open or ws.pause.open:
+        return []           # a menu over the home takes the hero's lift
+    covers = probe.last["covers"]
+    if not covers:
+        return []
+    dx, dy, dw, dh = max(covers, key=lambda c: c[2] * c[3])
+    px = img.load()
+    plates = _token_rgbs(ws, ("surface", "tile_fill"))
+    y = dy + dh // 2
+    gap = 0
+    while dx - 1 - gap >= 0 and px[dx - 1 - gap, y] in plates and gap < 16:
+        gap += 1
+    return [_measure("hero rim-to-cover gap", gap, 0, gap == 0)]
+
+
+def _calc_pairs(ws, img):
+    """The desk Calc's backspace key draws its sign as tall as a digit's
+    cap less a pixel (design review R3-09)."""
+    win = getattr(ws.wm, "_wins", {}).get("calc")
+    app = ws._apps_by_id.get("calc") if hasattr(ws, "_apps_by_id") else None
+    app = getattr(app, "_inst", app)
+    host = getattr(app, "_ui", None)
+    if win is None or getattr(win, "minimized", False) or host is None:
+        return []
+    cx, cy, _w, _h = win.content_rect()
+
+    def ink_h(stop):
+        k = host.box(stop)          # the key's stop, in the window's content
+        if k is None:
+            return None
+        r = (k[0] + cx + 3, k[1] + cy + 3, k[2] - 6, k[3] - 6)
+        hist = _colours(img, r, 1)
+        if not hist:
+            return None
+        plate = max(hist, key=hist.get)
+        px = img.load()
+        ys = [yy for yy in range(r[1], r[1] + r[3])
+              if any(_diff(px[xx, yy], plate) > 96 for xx in range(r[0], r[0] + r[2]))]
+        return (max(ys) - min(ys) + 1) if ys else None
+    back, digit = ink_h("<"), ink_h("7")
+    if back is None or digit is None:
+        return []
+    return [_measure("desk backspace ink height vs digit cap", back, digit - 1,
+                     back >= digit - 1)]
+
+
 def audit(ws, probe, img):
-    """[(pair, colour a, colour b, ratio, floor)] of one render: the focused
-    row's parts against its plate, the caret against its line, the open
-    tab's current plate against the ground beside it, a disabled history
-    icon's ink against the enabled ink, and an Off toggle's row in Settings."""
+    """[(pair, a, b, ratio, floor, owner)] of one render: the focused row's
+    parts against its plate and its mark against the row, the caret against
+    its line, the open tab's current mark against the ground beside it, the
+    focused desk chip's label, a disabled history icon's ink against the
+    enabled ink, an Off toggle's row in Settings, a lifted hero's rim and
+    the desk Calc's backspace. A row an open design question owns names it
+    in `owner`; the rest under their floor are the FLAGs."""
     th = ws.theme_colors
     out = []
+    hinted = bool(probe.last["hints"])
     box = _focused_box(ws)
     if box is not None:
-        out += _row_pairs(img, box, "focused row part vs plate")
+        view = _viewport(ws, box, hinted)
+        kind = _FOCUSED_KIND[0]() if _FOCUSED_KIND[0] is not None else None
+        out += _row_pairs(ws, img, box, "focused row part vs plate", kind, view)
+        out += _mark_pairs(ws, img, box, view)
     sl = ws.settings_layer
     if ws.screen == "settings":
         for stop, kind in sl._kinds.items():
             if kind == "toggle" and "fps" in stop.lower() and stop != sl._focused:
                 b = sl._host.box(stop)
                 if b is not None:
-                    out += _row_pairs(img, b, "Off toggle vs row ground")
+                    out += _row_pairs(ws, img, b, "Off toggle vs row ground", kind,
+                                      _viewport(ws, b, hinted))
     t = getattr(ws.code_layer, "_t", None)
     if ws.screen == "menu" and t is not None and "caret" in t:
         for x, y, w, h, c in probe.last["rects"]:
@@ -1045,17 +1567,11 @@ def audit(ws, probe, img):
                     ground = max(band, key=band.get)
                 if ground is not None:
                     out.append(("caret vs line ground", _hex(caret), _hex(ground),
-                                contrast(caret, ground), FLOOR))
-    for r, active in probe.last["tabs"]:
-        if active and r[2] >= 8:
-            x, y, w, h = r
-            plate = _colours(img, (x + 1, y + h // 4, max(1, w - 2), max(1, h // 2)), 1)
-            side = _colours(img, (x - 4, y + h // 4, 3, max(1, h // 2)), 1)
-            side.update(_colours(img, (x + w + 1, y + h // 4, 3, max(1, h // 2)), 1))
-            if plate and side:
-                a, b = max(plate, key=plate.get), max(side, key=side.get)
-                out.append(("current plate vs ground", _hex(a), _hex(b), contrast(a, b),
-                            FLOOR))
+                                contrast(caret, ground), FLOOR, ""))
+    out += _current_pairs(ws, probe, img)
+    out += _chip_pairs(ws, probe, img)
+    out += _rim_pairs(ws, probe, img)
+    out += _calc_pairs(ws, img)
     enabled = th.get("chrome_ink")
     seen = set()
     for kind, ink in probe.last["icons"]:
@@ -1064,13 +1580,18 @@ def audit(ws, probe, img):
             seen.add(kind)
             a, b = _index_rgb(ws, ink), _index_rgb(ws, enabled)
             out.append(("disabled %s vs enabled ink" % kind, _hex(a), _hex(b),
-                        contrast(a, b), DISABLED_FLOOR))
+                        contrast(a, b), DISABLED_FLOOR, ""))
     seen, kept = set(), []
     for row in out:
         if row[:3] not in seen:
             seen.add(row[:3])
             kept.append(row)
     return kept
+
+
+def flagged(rows):
+    """The audit rows under their floor that no open question owns."""
+    return [r for r in rows if r[3] < r[4] and not r[5]]
 
 
 # --------------------------------------------------------------------------
@@ -1108,6 +1629,7 @@ def run(out, filters=(), step=None, theme=None, variant=None, quiet=False, parts
     are pinned for the run and put back after it."""
     g = _goldens()
     from runtime import cover_cache
+    _AUDIT_COUNT[0] = (0, 0)
     saved = cover_cache._COVER_SLICE_MS, g._CLOCK
     cover_cache._COVER_SLICE_MS = g._COVER_SLICE_UNBOUNDED
     g._CLOCK = CLOCK
@@ -1133,26 +1655,34 @@ def run(out, filters=(), step=None, theme=None, variant=None, quiet=False, parts
         iconsets.reset()            # the sets' masks back out of the font rows
 
 
+# The run's (FLAGs, owned pairs), summed as each render reports.
+_AUDIT_COUNT = [(0, 0)]
+
+
 def _report(out, name, report, audit_csv, fails, quiet):
     """The index lines of one render's checks and audit; its CSV with
     `audit_csv`; each failed check into `fails`."""
     lines = []
+    flags = len(flagged(report["audit"]))
+    owned = sum(1 for r in report["audit"] if r[3] < r[4] and r[5])
+    _AUDIT_COUNT[0] = (_AUDIT_COUNT[0][0] + flags, _AUDIT_COUNT[0][1] + owned)
     for check, ok, detail in report["checks"]:
         lines.append("  check: %s %s (%s)" % (check, "ok" if ok else "FAILED", detail))
         if not ok:
             fails.append((name, check, detail))
             if not quiet:
                 print("  FAILED %s: %s" % (check, detail))
-    flagged = [a for a in report["audit"] if a[3] < a[4]]
-    for pair, a, b, ratio, floor in flagged:
-        lines.append("  audit: FLAG %s %s on %s %.2f:1 (floor %.1f)" % (pair, a, b, ratio,
-                                                                       floor))
+    for pair, a, b, ratio, floor, owner in report["audit"]:
+        if ratio < floor:
+            lines.append("  audit: %s %s %s on %s %.2f:1 (floor %.1f)" % (
+                "owned by " + owner if owner else "FLAG", pair, a, b, ratio, floor))
     if audit_csv:
         with open(os.path.join(out, name + ".audit.csv"), "w", encoding="utf-8") as f:
-            f.write("scene,pair,colour,against,ratio,floor,flag\n")
-            for pair, a, b, ratio, floor in report["audit"]:
-                f.write("%s,%s,%s,%s,%.2f,%.1f,%s\n" % (name, pair, a, b, ratio, floor,
-                                                       "FLAG" if ratio < floor else ""))
+            f.write("scene,pair,colour,against,ratio,floor,flag,owner\n")
+            for pair, a, b, ratio, floor, owner in report["audit"]:
+                f.write("%s,%s,%s,%s,%.2f,%.1f,%s,%s\n" % (
+                    name, pair, a, b, ratio, floor,
+                    "FLAG" if ratio < floor and not owner else "", owner))
     return lines
 
 
@@ -1168,6 +1698,7 @@ def _run_kit(g, out, filters, theme, variant, quiet, kit, profiles, inputs, audi
     for name, screen, want_theme, mode, profile in scenes:
         config, setup, what, _kind = table[screen]
         drawn = want_theme if want_theme in held else DEFAULT
+        profile = profile or KIT_INPUT.get(screen)
         shot, settled, report = render(g, config, drawn, mode, setup, False,
                                        profile or inputs)
         bars.append((drawn, config, mode, report["bars"]))
@@ -1181,6 +1712,8 @@ def _run_kit(g, out, filters, theme, variant, quiet, kit, profiles, inputs, audi
             what, drawn, mode, profile or inputs or (HANDHELD_INPUT if config == HANDHELD
                                                       else "keys"),
             config, "" if settled else "; NOT SETTLED (still animating)"))
+        if (profile or inputs or (HANDHELD_INPUT if config == HANDHELD else None)) == "tdeck":
+            lines.append("  note: " + TDECK_NOTE)
         lines += _report(out, name, report, audit_csv, fails, quiet)
         lines.append("")
         rows.append((name, True, []))
@@ -1311,6 +1844,8 @@ def main(argv=None):
     print("%d scenes, %d built -> %s" % (
         len(rows), sum(1 for r in rows if r[1]),
         os.path.join(args.out, "index.txt")))
+    if args.audit:
+        print("%d audit flags, %d pairs owned by open design questions" % _AUDIT_COUNT[0])
     for name, check, detail in failed:
         print("FAILED %s: %s (%s)" % (name, check, detail))
     return 1 if failed else 0
