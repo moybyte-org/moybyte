@@ -3195,6 +3195,32 @@ def test_a_chip_that_minimizes_its_window_takes_the_focus_with_it(tmp_path):
     assert not wm._wins["calc"].minimized and wm._focus == "calc"
 
 
+@pytest.mark.parametrize("theme", ["moy", "contrast"])
+def test_the_focused_chip_prints_in_the_current_ink(tmp_path, theme):
+    """The focused window's chip is current content: its icon and title take
+    the ink the look gives that (Moy's accent, beside the raised plate), and
+    a look that names none keeps the bar's ink; the others the dim ink."""
+    ws = _moy_desk(tmp_path)
+    if theme != "moy":
+        ws.look.set_theme(theme, persist=False, variant="light")
+    for app in ("files", "calc"):
+        ws.open_app(ws._apps_by_id[app])
+        ws.frame(1 / 30)
+    wm = ws.wm
+    sc, th = wm._root_canvas, ws.theme_colors
+    inks = {}
+    real = sc.print
+    sc.print = lambda text, x, y, c=None, *a: (inks.__setitem__(text, c),
+                                               real(text, x, y, c, *a))[1]
+    try:
+        wm._draw_look_chips(sc, th, 1, wm._root_ctx.layout.line_h)
+    finally:
+        sc.print = real
+    want = th["ink_accent"] if theme == "moy" else th["chrome_ink"]
+    assert inks["Calc"] == want
+    assert inks["Files"] == th["chrome_ink_dim"]
+
+
 # -- the wallpaper's subject (docs/look_2026-10.md step 28) -------------------
 
 def _overlaps(a, b):

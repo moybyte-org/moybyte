@@ -547,12 +547,14 @@ class WindowChrome:
         """The taskbar chips as the look's tabs (docs/look_2026-10.md step 14):
         the window's icon (in `_win_icon`'s order) then its title, the
         focused window's chip raised under the current mark, a minimized
-        one's in the dim ink."""
+        one's in the dim ink. The focused chip's content takes the ink the
+        look gives current content (Moy's accent), the plate's second cue."""
+        current = _ui_draw.current_ink(sc, th) or th["chrome_ink"]
         for key, (x, y, w, h), label in self._chip_rects():
             win = self._wins[key]
             focused = key == self._focus and not win.minimized
             _ui_draw.bar_part(sc, th, _ui_draw.BAR_CHIP, (x, y, w, h), focused)
-            ink = th["chrome_ink" if focused else "chrome_ink_dim"]
+            ink = current if focused else th["chrome_ink_dim"]
             slot = (x + 12, y + (h - 18) // 2, 18, 18)
             if not self.ws.draw_icon(_ICON_SLOTS.get(win.kind, win.kind), slot, ink, sc):
                 img = self._win_icon_img(win)
