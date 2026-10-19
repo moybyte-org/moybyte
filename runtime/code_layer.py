@@ -120,6 +120,10 @@ _SYM_CELL = 20
 # _SYM_MARGIN less a key's 1px inset above the content's bottom edge.
 _SYM_MIN = 18
 _SYM_MARGIN = 3
+# The status band's height (CodeLayout) at the font scale under a theme's
+# own `ui` face, the same in every theme and mode, and never under that
+# face's line and 1px above and below; petme128's band is 12.
+_CODE_STATUS_H = 20
 _SYM_AREA = (0, _SYM_Y, _SYM_CELL * len(_CODE_SYMBOLS), _SYM_H)
 # The 2026-10 look's overflow fade: a line longer than the view fades out over
 # its last _FADE pixels (at the font scale), in bands of `bg` at these alphas.

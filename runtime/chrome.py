@@ -64,10 +64,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import _SET_ROW_H
 
 try:
-    from code_layer import (_CODE_LEAD, _CODE_X0, _SYM_CELL, _SYM_H,
+    from code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_CELL, _SYM_H,
                             _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (_CODE_LEAD, _CODE_X0, _SYM_CELL, _SYM_H,
+    from runtime.code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_CELL, _SYM_H,
                                     _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS)
 
 try:
@@ -577,17 +577,20 @@ class CodeLayout(LayoutBase):
         # -- code area origin (the content rect's top) --------------------------
         # The zoned bar carries the editor's controls, so CodeLayout has no
         # chrome of its own: the body is text + the symbol palette, filling the
-        # content rect.
-        self.x0 = self.cx + _CODE_X0 * fs
+        # content rect. Its left inset is the status band's text pad, so the
+        # code and the status line start on one column.
+        self.x0 = self.cx + _ui_draw.metrics("status")[_ui_draw.ST_PAD] * fs
         self.y0 = self.cy
         # -- the COLS x ROWS text grid (fills between the bar + palette) ---------
         avail_w = self.cx + self.cw - self.x0
         self.cols = max(8, avail_w // self.cell)
         # Status band (visual identity v1 Phase 3, the Studio mockup's
         # "Ln 13, Col 1" strip) between the text grid and the symbol palette.
-        # Its height is the `ui` face's line and 2px above and below, never
-        # under 12px at the font scale.
-        band = max(12, _ui_draw.font("ui")[2] + 4) * fs
+        # Its height is _CODE_STATUS_H under a theme's own `ui` face (a
+        # version 2 face), one height in every theme and mode, and 12 under
+        # petme128; never under the face's line and 1px above and below.
+        ufid, _uw, uline, _ua = _ui_draw.font("ui")
+        band = max(_CODE_STATUS_H if _ui_draw.font_v2(ufid) else 12, uline + 2) * fs
         self.status_band = (self.cx, self.sym_y - band, self.cw, band)
         avail_h = self.status_band[1] - self.y0
         self.rows = max(4, avail_h // self.lh)

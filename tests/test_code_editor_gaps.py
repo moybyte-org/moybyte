@@ -851,3 +851,21 @@ def test_a_disabled_undo_draws_in_the_themes_disabled_ink(tmp_path):
         assert off != cv._col(th["chrome_ink_dim"]), (theme, variant)
         assert off in box, (theme, variant)
         assert cv._col(th["chrome_ink_dim"]) not in box, (theme, variant)
+
+
+def test_the_status_band_is_one_height_and_starts_on_the_code_column(tmp_path):
+    """Under every theme's own `ui` face the status band is one height, in
+    both modes, and its text pad is the code's left inset, so the status
+    line and the code start on one column (design review R2-22)."""
+    from runtime import ui_draw
+    bands = set()
+    for theme, variant in (("moy", "light"), ("moy", "dark"), ("blocks", "light"),
+                           ("contrast", "light"), ("contrast", "dark")):
+        ws, _drv, _lay, _ed = _look_ws(tmp_path / (theme + variant), theme, variant)
+        lay = ws.code_layout
+        bx, by, bw, bh = lay.status_band
+        bands.add(bh)
+        pad = ui_draw.metrics("status")[ui_draw.ST_PAD] * lay.fs
+        assert lay.x0 == bx + pad, (theme, variant)
+        assert by + bh <= lay.sym_y and lay.y0 + lay.rows * lay.lh <= by, (theme, variant)
+    assert len(bands) == 1, bands
