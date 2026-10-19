@@ -389,6 +389,9 @@ _SYSMENU_LAYERS = ("sysmenu", "popover_over")
 # The inputs that type (`Workstation.can_type`), and what a text field says
 # where the input in use cannot.
 _TYPING_INPUTS = ("keys", "tdeck")
+# The input source a paired Bluetooth keyboard is (`use_inputs`): it types
+# only while it is connected.
+_BLE_SOURCE = "ble"
 NO_KEYBOARD_TEXT = "Pair a keyboard to type"
 
 try:
@@ -2848,12 +2851,36 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.editor_app.set_tab(view)
 
     def can_type(self):
-        """Can the input in use type into a text field? A keyboard can (the
-        desk's, the T-Deck's), and so can a page that offers its own soft
-        keyboard (`soft_keyboard`, the browser's). Touch alone or a gamepad
+        """Can the console type into a text field? Where it holds a keyboard:
+        one its board declares (`use_inputs` names a `keys` or `tdeck` input,
+        the desk's, the T-Deck's), a paired Bluetooth keyboard while it is
+        connected, or a page's own soft keyboard (`soft_keyboard`, the
+        browser's). It is the device's answer, not the last event's: a tap on
+        a T-Deck leaves its keyboard able to type. Touch alone or a gamepad
         cannot, and a field there says NO_KEYBOARD_TEXT in place of a hint
-        that promises a keystroke (#239 is the on-screen keyboard)."""
-        return self.soft_keyboard or _ui_draw.input_kind() in _TYPING_INPUTS
+        that promises a keystroke (#239 is the on-screen keyboard). A console
+        that declares no inputs answers for the input in use."""
+        if self.soft_keyboard:
+            return True
+        kinds = self.input_kinds
+        if kinds is None:
+            return _ui_draw.input_kind() in _TYPING_INPUTS
+        for source, kind in kinds.items():
+            if kind in _TYPING_INPUTS and (source != _BLE_SOURCE or self._ble_typing()):
+                return True
+        return False
+
+    def _ble_typing(self):
+        """Is the paired Bluetooth keyboard connected? It is the T-Deck's
+        `ble_keyboard` beside its own, the touch boards' `keyboard`; the
+        service that answers Settings (`settings_capable`) says."""
+        for svc in (getattr(self, "ble_keyboard", None), getattr(self, "keyboard", None)):
+            if getattr(svc, "settings_capable", False):
+                try:
+                    return svc.settings_status()[1] == "ready"
+                except Exception:  # noqa: BLE001 -- a radio error is no keyboard
+                    return False
+        return False
 
     def cancel_field(self):
         """Cancel the text field being typed into, if one is: the home's

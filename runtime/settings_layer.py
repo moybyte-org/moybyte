@@ -247,6 +247,9 @@ LEVELS = {"volume": (0, 7, 7), "brightness": (0, 7, 4)}
 _STEPPED = {"steps": True}    # a level row's slider: a segment a level, no number
 NAME_MAX = 16                 # the Name row's bytes
 _NAME_HINT = {"hint": "Your name"}   # what the empty Name field shows
+# The caption under the read-only Name where nothing can type (D-24's
+# interim words, `Workstation.can_type`).
+NAME_NO_KEYBOARD = "Pair a keyboard to change"
 WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
 _NETS = 24                    # the networks the Wi-Fi page lists
@@ -734,7 +737,9 @@ class SettingsLayer:
             except Exception:  # noqa: BLE001
                 pass
         _ui.page("")
-        if self.wifi_pick is not None:
+        if self.wifi_pick is not None and not ws.can_type():
+            _ui.hints(("back", "Cancel"))     # the prompt has no field and no Connect
+        elif self.wifi_pick is not None:
             _ui.hints(("confirm", "Connect", "back", "Cancel"))
         else:
             _ui.hints(("confirm", "Connect", "back", "Back"))
@@ -1311,10 +1316,12 @@ class SettingsLayer:
             if got != cur:
                 self.set_level(key, got)
         elif kind == "name" and not ws.can_type():
-            # nothing in use can type (touch alone, a gamepad): the row says
-            # so instead of a field no key reaches (#239 is the keyboard)
+            # nothing can type (touch alone, a gamepad): the saved name shows,
+            # read-only, and a caption says how to change it, instead of a
+            # field no key reaches (#239 is the on-screen keyboard)
             self._kinds.pop(s, None)
-            _ui.info(s, ws.no_keyboard_text)
+            _ui.info(s, str(ws.system.get(key, "") or ""))
+            _ui.label(NAME_NO_KEYBOARD)
         elif kind == "name":
             self._kinds[s] = "field"
             cur = self._name
