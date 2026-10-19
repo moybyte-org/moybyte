@@ -863,10 +863,17 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # editor gives me a small window in the corner" is a rule you learn
             # once, where a screen-relative size would be a different window on
             # every machine for no benefit the grip doesn't already give.
+            # The frame fits the game exactly: its border, its title strip
+            # and the rows its rounded bottom corners take (the foot), which
+            # the content rect leaves out.
+            foot = (_ui_draw.frame_geom(full.w, full.h, th)[1]
+                    if _ui_draw.depth()[13] else 0)
             s = (1 if self._play_intent == "dev" else
                  max(1, min((full.w - 24) // self.ws.canvas.w,
-                            (self._desk_rect()[3] - 24 - th) // self.ws.canvas.h)))
-            return (self.ws.canvas.w * s + 2, self.ws.canvas.h * s + 2 + th)
+                            (self._desk_rect()[3] - 24 - th - foot)
+                            // self.ws.canvas.h)))
+            return (self.ws.canvas.w * s + 2,
+                    self.ws.canvas.h * s + 2 + th + foot)
         if key in ("menu", "projects"):
             return (full.w - full.w // 8, full.h - full.h // 10)
         if key in ("artwork", "appearance", "storybook"):

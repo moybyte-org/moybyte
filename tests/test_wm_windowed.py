@@ -477,6 +477,33 @@ def test_dev_playtest_is_native_size_on_every_desktop(tmp_path):
     assert sizes[0] == sizes[1] == sizes[2] == (ws.canvas.w + 2, ws.canvas.h + 2 + 18)
 
 
+@pytest.mark.parametrize("dev", [True, False], ids=["playtest", "desk-run"])
+def test_a_game_window_holds_its_game_whole_over_rounded_corners(tmp_path, dev):
+    """Under a depth with rounded corners the frame takes rows under the
+    content (the foot): the game window is sized to the game PLUS them, so
+    the game's rows are all inside its content rect -- none under the title
+    strip, none under the foot -- at its scale."""
+    ws = _moy_desk(tmp_path)
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path"))
+    drv = _drv(ws)
+    if dev:
+        _open_editor(ws)
+        drv.frame(1 / 30)
+        ws._leave_menu()                          # PLAY from the Editor
+    else:
+        ws.open()
+    drv.frame(1 / 30)
+    wm = ws.wm
+    win = wm._wins["desktop"]
+    assert win.foot > 0
+    cx, cy, cw, ch = win.content_rect()
+    ox, oy, s = wm._player_view(win)
+    assert (s == 1) == dev
+    assert (ox, oy) == (cx, cy)
+    assert (cw, ch) == (ws.canvas.w * s, ws.canvas.h * s)
+
+
 def test_game_viewport_is_the_player_window(tmp_path):
     """ws._game_xy maps a system point at the playtest window's viewport origin
     into 320x240 game coords (the cart's touch() contract)."""
