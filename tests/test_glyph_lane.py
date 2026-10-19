@@ -378,6 +378,13 @@ def test_the_boards_module_draws_the_hosts_bytes(tmp_path):
     want = []
     g = {"moy_ui": moy_ui}
     exec(cases, g)
+    # The host's font slots are the process's, and the workstations earlier
+    # tests built keep their faces loaded: free them the way the shell does
+    # when a load finds the slots full (runtime/appearance.py), so the
+    # cases' faces load in any test order.
+    from runtime import appearance
+    moy_ui.font_reset()
+    appearance._FONTS.clear()
     g["glyph_cases"](lambda w, h, fs: make_system_canvas(w, h, font_scale=fs),
              lambda i, b: want.append((i, zlib.crc32(b))), [_read(p) for p in fonts])
     assert len(got) == len(want) == 60, out.stdout[-500:]
