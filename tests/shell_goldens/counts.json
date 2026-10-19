@@ -106,7 +106,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [42, 31],
+    "settings": [41, 31],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -151,7 +151,7 @@
     "editor_scene": [0, 1],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [42, 31],
+    "settings": [41, 31],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -414,7 +414,7 @@
     "editor_scene": [115, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [44, 19],
+    "settings": [43, 19],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
