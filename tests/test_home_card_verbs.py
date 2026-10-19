@@ -273,3 +273,41 @@ def test_y_is_copy_and_nothing_else(tmp_path):
             continue                          # the tap's; Delete's and a pad's Options
         assert caps.setdefault(k, v) == v, "%s names %s and %s" % (k, caps[k], v)
         assert k.lower() not in "wasdlk"
+
+
+def test_the_desk_strip_names_its_buttons_verbs(tmp_path):
+    """The desk home's strip names every button's verb, then Search and
+    the star (R3-28)."""
+    ws = _ws(tmp_path, CONSOLE)
+    _select(ws, "games", "cart")
+    home = ws.launcher_layer
+    ui_draw.input_kind("keys")
+    _items, verbs = home._hint_groups()
+    buttons = [v for v, _r, _k in home._desk_buttons()]
+    assert verbs[:len(buttons)] == buttons
+    assert verbs[len(buttons):] == ["search", "favourite"]
+
+
+def test_the_desk_says_when_last_played_once(tmp_path, monkeypatch):
+    """The desk's details pane names the last play in its facts, so its
+    metadata line does not say it again (R3-28)."""
+    ws = _ws(tmp_path, CONSOLE)
+    it = _select(ws, "games", "cart")
+    y, m, d = g._DATE
+    ws.system.set("plays", {it["path"]: [12, y * 10000 + m * 100 + d]})
+    said = []
+    for kind in {type(ws.sys_canvas), type(ws.glass_canvas)}:
+        real = kind.print_scaled
+
+        def print_scaled(cv, s, *a, _real=real, **kw):
+            said.append(s)
+            return _real(cv, s, *a, **kw)
+
+        monkeypatch.setattr(kind, "print_scaled", print_scaled)
+    ws.launcher_layer._lib_unsupported = True
+    for _ in range(2):
+        g._quiesce(ws)
+        ws._dirty = True
+        ws.frame(g._DT)
+    assert "Last" in said and "Today" in said
+    assert not any(s.startswith("Played ") for s in said), said

@@ -1798,11 +1798,12 @@ class Carousel(Launcher):
         f = self.today_for
         return 0 if f is None else f()
 
-    def _meta(self, it):
+    def _meta(self, it, played=True):
         """The metadata of the selected card, its items: the cart's genre
         where its manifest names one (SPEC.md 3.7) and its kind where not,
         where it came from (built in, the kid's own, installed) and, where
-        its play record has a day, when it was last played."""
+        its play record has a day and `played`, when it was last played
+        (the desk's details pane says that in its facts)."""
         if it.get("type") in PSEUDO_TILE_TYPES:
             return ("A new game",)
         kind = _cl.genre_word(it.get("genre")) or _KIND_NAME.get(it.get("type"), "App")
@@ -1813,7 +1814,7 @@ class Carousel(Launcher):
             src = "Built in"
         else:
             src = "Installed"
-        rec = self.played(it)
+        rec = self.played(it) if played else None
         words = day_words(rec[1], self.today()) if rec is not None else None
         if words is None:
             return (kind, src)
@@ -2892,7 +2893,7 @@ class LauncherHomeLayer:
         my = ty + _ui_draw.font("title")[2] * ts + 14 // u
         sep = 8 // u
         x = dx
-        for k, t in enumerate(g._meta(it)):
+        for k, t in enumerate(g._meta(it, played=False)):    # the facts' Last
             if k:
                 cv.rect(x, _dot_top(my, ms, ms), ms, ms, dim)
                 x += ms + sep
@@ -2954,8 +2955,9 @@ class LauncherHomeLayer:
 
     def _hint_groups(self):
         """The hint strip's two groups: the active tab's verbs on the
-        selected card, then the tab keys; and the verb of each pair. A
-        keyboard types each verb's letter, the star last, its words
+        selected card (on the desk, its buttons' and SEARCH), then the tab
+        keys; and the verb of each pair. A keyboard types each verb's
+        letter, the star last, its words
         following its state; a gamepad shows the verb its confirm does
         (`launch_selected`), on that key, and X for the card's other verbs
         (`card_verbs`)."""
@@ -2972,7 +2974,8 @@ class LauncherHomeLayer:
                 items.extend(_VERB_HINT["options"])
                 verbs.append("options")
             return items, verbs
-        for v in zone:
+        desk = self._desk_verbs()
+        for v in (tuple(desk) + tuple(v for v in zone if v == "search")) if desk else zone:
             items.extend(_VERB_HINT[v])
             verbs.append(v)
         it = self.favourable()

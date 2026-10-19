@@ -651,7 +651,7 @@ buttons) over a shelf that bleeds off the right edge, the tabs in the bar
 and the hint strip along the foot as on the handheld, still the `carousel`
 arrangement (step 18).
 
-| tab | source | tap (console mode, every board) | verbs (the hint strip; the desk's buttons add COPY beside CHANGE) |
+| tab | source | tap (console mode, every board) | verbs (the hint strip; on the desk its buttons, and the strip naming them, add COPY beside CHANGE) |
 |---|---|---|---|
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
