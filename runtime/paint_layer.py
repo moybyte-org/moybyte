@@ -305,12 +305,12 @@ class PaintLayout(LayoutBase):
         self.status_xy = (rx, col_end + 2 * fs)
         self.status_w = rw
         span2 = (cx + cw - pad - gx) if beside else (self.sw_x0 + 2 * sw - gx)
-        # The two rows are one toolbar: one pitch, each row centred on its span.
+        # The two rows are one toolbar: one pitch, both starting on the grid's
+        # left edge, so their buttons stand in columns (design review R3-23).
         n1, n2 = len(_TOOL_ROW1), len(_TOOL_ROW2)
         pitch = min(span // n1, span2 // n2)
-        self.tool_btns = (
-            _tool_row(gx + (span - pitch * n1) // 2, row1_y, pitch, trow, n1)
-            + _tool_row(gx + (span2 - pitch * n2) // 2, row2_y, pitch, trow, n2))
+        self.tool_btns = (_tool_row(gx, row1_y, pitch, trow, n1)
+                          + _tool_row(gx, row2_y, pitch, trow, n2))
 
 
 class PaintLayer:

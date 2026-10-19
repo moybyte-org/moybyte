@@ -291,3 +291,19 @@ def test_every_enabled_sprite_tool_wears_the_chrome_ink(tmp_path, config, theme,
         seen = {px[oy + yy][ox + xx] for yy in range(y, y + h) for xx in range(x, x + w)}
         assert ink in seen, tid
         assert not (seen & others), (tid, seen & others)
+
+
+@pytest.mark.parametrize("config", (HANDHELD, DESK))
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_the_two_sprite_tool_rows_stand_in_columns(tmp_path, config, theme, mode):
+    """The tools and the actions under them are one toolbar: both rows start
+    on the grid's left edge at one pitch, so each tool stands over an action
+    (design review R3-23: the rows were centred on different spans)."""
+    from runtime import paint_layer
+    ws = _ws(tmp_path, config, theme, mode)
+    lay, _ox, _oy = _sprites(ws, config)
+    n1 = len(paint_layer._TOOL_ROW1)
+    row1, row2 = lay.tool_btns[:n1], lay.tool_btns[n1:]
+    assert row1[0][0] == row2[0][0] == lay.pg_x0
+    for a, b in zip(row1, row2):
+        assert (a[0], a[2]) == (b[0], b[2]), (a, b)

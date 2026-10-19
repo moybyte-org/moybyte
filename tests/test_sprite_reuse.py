@@ -385,7 +385,8 @@ def test_previous_and_next_sprite_are_the_sets_chevrons(tmp_path):
 def test_the_caption_size_line_and_tool_rows_keep_their_room(tmp_path, theme, variant):
     """The grid starts under the caption's ink and the preview under the
     Size line's, the Size line is centred on its column, and the two tool
-    rows are one toolbar: one pitch, each row centred on its span."""
+    rows are one toolbar: one pitch, both from the grid's left edge, the
+    actions within the content's pad (design review R3-23)."""
     from runtime import paint_layer as P
     from runtime import ui_draw
     ws, _drv, _c = _look_tab(tmp_path, theme, variant)
@@ -401,11 +402,10 @@ def test_the_caption_size_line_and_tool_rows_keep_their_room(tmp_path, theme, va
     pitches = {b[0] - a[0] for row in (row1, row2) for a, b in zip(row, row[1:])}
     assert len(pitches) == 1
     pitch = pitches.pop()
-    # On the handheld the actions span the content less its pad each side.
+    # On the handheld the actions end inside the content less its pad.
     end = lay.cx + lay.cw - (lay.pg_x0 - lay.cx)
-    left = row2[0][0] - lay.pg_x0
-    right = end - (row2[-1][0] + pitch)
-    assert abs(left - right) <= 1
+    assert row1[0][0] == row2[0][0] == lay.pg_x0
+    assert row2[-1][0] + pitch <= end
 
 
 def test_the_colour_in_use_and_the_cursor_are_two_toned(tmp_path):
