@@ -121,7 +121,9 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
     assert counter.n["chip"] == 1 + len(cl._TOOLS) + 4
     assert counter.n["cell"] == keys
     assert counter.n["row"] >= 1              # the find bar's query field
-    assert counter.n["status_row"] == 1       # the responsive "LN n, COL n" band
+    # the responsive "LN n, COL n" band: its ground, then its text on the
+    # code's column
+    assert counter.n["status_row"] == 2
 
 
 def test_code_popups_are_toolkit_rows(tmp_path, monkeypatch):

@@ -99,6 +99,54 @@ def _editor(ws, config, tab):
     return win.ctx.code_layout, cx, cy
 
 
+@pytest.mark.parametrize("config", (HANDHELD, DESK))
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_the_code_tab_keeps_one_left_inset(tmp_path, config, theme, mode):
+    """The code, the status line, the symbol keys and (on the desk) the tab
+    strip start on one column at least 8 px in from the content's left
+    edge, and the current line's mark stands inside that inset, clear of
+    the frame (design review R3-10)."""
+    ws = _ws(tmp_path, config, theme, mode)
+    lay, ox, oy = _editor(ws, config, "code")
+    ed = ws.editor
+    fs = lay.fs
+    x0 = lay.x0
+    assert x0 - lay.cx >= 8 * fs
+    px = _px(ws)
+    # An unindented line that is not the current one: its ink starts on x0,
+    # its glyph's bearing at most fs in.
+    other = next(i for i in range(lay.rows) if ed.top + i != ed.row
+                 and ed.lines[ed.top + i][:1].isalpha())
+    y = oy + lay.y0 + other * lay.lh
+    code = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh)
+    assert x0 <= code - ox <= x0 + fs, ("code", code - ox, x0)
+    sx, sy, _sw, sh = lay.status_band
+    status = _ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh)
+    assert x0 <= status - ox <= x0 + fs, ("status", status - ox, x0)
+    # The symbol keys: the first key's edge on x0, the last one's on the
+    # inset from the right.
+    assert lay.sym_key_x(0) + fs == x0
+    n = len(ws.code_layer._symbols())
+    assert lay.sym_key_x(n) - fs == lay.cx + lay.cw - (x0 - lay.cx)
+    for i in range(n):
+        assert lay.sym_key_at(lay.sym_key_x(i)) == i
+        assert lay.sym_key_at(lay.sym_key_x(i + 1) - 1) == i
+    ky = oy + lay.sym_y + lay.sym_h // 2
+    key = _ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, ky, ky + 1)
+    assert key - ox == x0, ("keys", key - ox, x0)
+    # The current line's mark: inside the inset, 3 px or more off the frame.
+    assert lay.cx + 3 * fs <= lay.mark_x and lay.mark_x + 2 * fs < x0
+    cy = oy + lay.y0 + (ed.row - ed.top) * lay.lh + lay.lh // 2
+    mark = _ink_left(px, ox + lay.cx, ox + x0, cy, cy + 1)
+    assert mark - ox == lay.mark_x, ("mark", mark - ox, lay.mark_x)
+    if config == DESK:
+        # the tab strip: the window's band above the content
+        band = ws.wm._wins["menu"].ctx.layout.bars[0][1]
+        ty = oy + band[1] + band[3] // 2
+        tab = _ink_left(px, ox + band[0] + 1, ox + band[0] + 200, ty - 6, ty + 6)
+        assert x0 <= tab - ox <= x0 + fs, ("tabs", tab - ox, x0)
+
+
 def _files(ws, cur=3):
     """The desk's Files window on Projects, file row `cur` current. (the
     app, its window)."""

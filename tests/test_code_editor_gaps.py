@@ -772,14 +772,16 @@ def test_the_current_line_wears_the_current_mark_and_the_value_bar(tmp_path):
     cv, th = ws.sys_canvas, ws.theme_colors
     value, surface = cv._col(th["value"]), cv._col(th["surface"])
     mid = lay.y0 + lay.lh // 2
-    assert _w(cv, lay.cx, mid) == value and _w(cv, lay.cx + lay.fs, mid) == value
+    mx = lay.mark_x                              # inside the content inset
+    assert _w(cv, mx, mid) == value and _w(cv, mx + lay.fs, mid) == value
+    assert _w(cv, lay.cx, mid) == surface, "the frame side stays bare"
     far = lay.x0 + 10 * lay.cell                 # past the short line's text
     assert _w(cv, far, mid) not in (value, surface), "the current plate"
     assert _w(cv, far, mid + 3 * lay.lh) == surface, "another line is bare"
-    assert _w(cv, lay.cx, mid + 3 * lay.lh) == surface
+    assert _w(cv, mx, mid + 3 * lay.lh) == surface
     ed.row = 3
     drv.frame(DT)
-    assert _w(cv, lay.cx, mid) == surface and _w(cv, lay.cx, mid + 3 * lay.lh) == value
+    assert _w(cv, mx, mid) == surface and _w(cv, mx, mid + 3 * lay.lh) == value
 
 
 def test_a_theme_without_a_depth_keeps_its_code_tab(tmp_path):
@@ -832,7 +834,7 @@ def test_a_faded_current_line_wears_one_outline(tmp_path):
         assert ring != cv._col(ws.code_layer._t["bg"]), variant
         caret = lay.x0 + (ed.col - ed.left) * lay.cell - lay.fs   # 2 * fs wide
         inner = [x for x in _edges(cv, lay, y, ring)
-                 if lay.cx + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs
+                 if lay.mark_x + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs
                  and not caret <= x < caret + 2 * lay.fs]
         assert inner == [], (variant, inner)
 
@@ -857,8 +859,8 @@ def test_a_disabled_undo_draws_in_the_themes_disabled_ink(tmp_path):
 
 def test_the_status_band_is_one_height_and_starts_on_the_code_column(tmp_path):
     """Under every theme's own `ui` face the status band is one height, in
-    both modes, and its text pad is the code's left inset, so the status
-    line and the code start on one column (design review R2-22)."""
+    both modes, and its text starts on the code's column, the content inset
+    (design review R2-22, R3-10)."""
     from runtime import ui_draw
     bands = set()
     for theme, variant in (("moy", "light"), ("moy", "dark"), ("blocks", "light"),
@@ -868,7 +870,8 @@ def test_the_status_band_is_one_height_and_starts_on_the_code_column(tmp_path):
         bx, by, bw, bh = lay.status_band
         bands.add(bh)
         pad = ui_draw.metrics("status")[ui_draw.ST_PAD] * lay.fs
-        assert lay.x0 == bx + pad, (theme, variant)
+        assert lay.x0 == lay.status_text[0] + pad, (theme, variant)
+        assert bx == lay.cx and lay.x0 - lay.cx >= 8 * lay.fs, (theme, variant)
         assert by + bh <= lay.sym_y and lay.y0 + lay.rows * lay.lh <= by, (theme, variant)
     assert len(bands) == 1, bands
 

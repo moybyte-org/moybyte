@@ -65,10 +65,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     from code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_CELL, _SYM_H,
-                            _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS)
+                            _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS, _CODE_INSET,
+                            _CODE_MARK)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_CELL, _SYM_H,
-                                    _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS)
+                                    _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS, _CODE_INSET,
+                                    _CODE_MARK)
 
 try:
     import shell_layout as _shell_layout
@@ -557,29 +559,35 @@ class CodeLayout(LayoutBase):
         else:
             self.text_h = 8 * fs
             self.lh = (line + _CODE_LEAD) * fs
+        # One content inset (design review R3-10): the code, the status line
+        # and the symbol keys all start `inset` in from the content's left
+        # edge, and the current line's mark stands `mark_x`, inside it.
+        ins = self.inset = _CODE_INSET * fs
+        self.mark_x = self.cx + _CODE_MARK * fs
         # -- symbol palette (bottom strip): one cell per coding symbol -----------
         # A key is TAPPED (on a board with no keyboard this strip IS the keyboard),
         # so it is as tall as the chrome scale makes a tap target, and the keys
-        # share out the content width less a margin each side -- the row is
-        # centred, and a key is never narrower than _SYM_MIN at the font scale
-        # (font scale 3 overflows 800px either way). Each key draws 1px inside
-        # its cell (`draw_symbol_keys`), so keys stand 2px apart and the strip
-        # sits a margin above the content's bottom edge.
+        # share out the content width less the inset each side -- a key is never
+        # narrower than _SYM_MIN at the font scale (font scale 3 overflows 800px
+        # either way). Each key draws fs inside its cell (`draw_symbol_keys`),
+        # so keys stand 2fs apart, the first one's edge on the inset, and the
+        # strip sits a margin above the content's bottom edge. The cells share
+        # the span out whole (`sym_key_x`), so its two ends are the inset.
         n = len(_CODE_SYMBOLS)
         m = _SYM_MARGIN * fs
-        self.sym_cell = max(_SYM_MIN * fs, (self.cw - 2 * m) // n)
+        span = self.cw - 2 * (ins - fs)
+        self.sym_cell = max(_SYM_MIN * fs, span // n)
         self.sym_h = _SYM_H * cs
         self.sym_text_dx = max(0, (self.sym_cell - _SYM_CELL * fs) // 2)
         self.sym_text_dy = (self.sym_h - _SYM_H * fs) // 2
         self.sym_y = self.cy + self.ch - self.sym_h - (m - fs)
-        self.sym_area = (self.cx + max(0, (self.cw - self.sym_cell * n) // 2), self.sym_y,
-                         self.sym_cell * n, self.sym_h)
+        self.sym_area = (self.cx + ins - fs, self.sym_y, max(span, self.sym_cell * n),
+                         self.sym_h)
         # -- code area origin (the content rect's top) --------------------------
         # The zoned bar carries the editor's controls, so CodeLayout has no
         # chrome of its own: the body is text + the symbol palette, filling the
-        # content rect. Its left inset is the status band's text pad, so the
-        # code and the status line start on one column.
-        self.x0 = self.cx + _ui_draw.metrics("status")[_ui_draw.ST_PAD] * fs
+        # content rect.
+        self.x0 = self.cx + ins
         self.y0 = self.cy
         # -- the COLS x ROWS text grid (fills between the bar + palette) ---------
         avail_w = self.cx + self.cw - self.x0
@@ -588,12 +596,30 @@ class CodeLayout(LayoutBase):
         # "Ln 13, Col 1" strip) between the text grid and the symbol palette.
         # Its height is _CODE_STATUS_H under a theme's own `ui` face (a
         # version 2 face), one height in every theme and mode, and 12 under
-        # petme128; never under the face's line and 1px above and below.
+        # petme128; never under the face's line and 1px above and below. The
+        # band spans the content; its text (`status_text`, the band less the
+        # status pad before the inset) starts on the code's column.
         ufid, _uw, uline, _ua = _ui_draw.font("ui")
         band = max(_CODE_STATUS_H if _ui_draw.font_v2(ufid) else 12, uline + 2) * fs
         self.status_band = (self.cx, self.sym_y - band, self.cw, band)
+        tx = self.x0 - _ui_draw.metrics("status")[_ui_draw.ST_PAD] * fs
+        self.status_text = (tx, self.sym_y - band, self.cx + self.cw - tx, band)
         avail_h = self.status_band[1] - self.y0
         self.rows = max(4, avail_h // self.lh)
+
+    def sym_key_x(self, i):
+        """Where symbol key cell `i` starts: the strip's width shared out
+        whole, so the cells differ by at most a pixel."""
+        x, _y, w, _h = self.sym_area
+        return x + i * w // len(_CODE_SYMBOLS)
+
+    def sym_key_at(self, px):
+        """The symbol key cell under x `px` (sym_key_x's inverse), or -1."""
+        x, _y, w, _h = self.sym_area
+        n = len(_CODE_SYMBOLS)
+        if not x <= px < x + w:
+            return -1
+        return ((px - x + 1) * n - 1) // w
 
     def code_area(self):
         return (self.x0, self.y0, self.cols * self.cell, self.rows * self.lh)

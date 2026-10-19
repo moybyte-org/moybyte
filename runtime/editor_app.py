@@ -56,6 +56,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.bar_layer import _BAR_ICON
 
+try:
+    from code_layer import _CODE_INSET
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.code_layer import _CODE_INSET
+
 
 # The Editor's lent left zone (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46
 # zoned bar): the tab ladder + UNDO/REDO + PLAY, in the spec Section 6 order
@@ -705,12 +710,19 @@ class EditorApp:
         """PURE shelf-zone geometry (shared by draw_zone and zone_tap so a strip-
         cached draw and a later tap can't desync): the labeled tab row | PLAY,
         the button right-aligned (SAVE dropped, #111). Widths scale with the
-        font (`_zone_scale`); every part is as tall as the lent band."""
+        font (`_zone_scale`); every part is as tall as the lent band. A zone
+        that opens its bar (a window's strip) puts its first tab's icon on the
+        Code tab's content inset, the column the code starts on (design review
+        R3-10); one after the bar's own widgets stands a gap past them."""
         fs = self._zone_scale()
         gap = 4 * fs
         play_r, rest = _ui.cut_right(rect, 54 * fs)
         _pad, rest = _ui.cut_right(rest, gap)
-        tabs_area = (rest[0] + gap, rest[1], max(0, rest[2] - 2 * gap), rest[3])
+        left = rest[0] + gap
+        ins = _CODE_INSET * fs
+        if rest[0] < ins:
+            left = ins - _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
+        tabs_area = (left, rest[1], max(0, rest[0] + rest[2] - gap - left), rest[3])
         return tabs_area, play_r
 
     def zone_tap(self, px, py, rect):

@@ -120,6 +120,12 @@ _SYM_CELL = 20
 # _SYM_MARGIN less a key's 1px inset above the content's bottom edge.
 _SYM_MIN = 18
 _SYM_MARGIN = 3
+# The Code tab's one content inset at the font scale: the code, the status
+# line, the symbol keys and the Editor's tab strip start this far in from the
+# content's left edge, and the current line's mark sits _CODE_MARK in, inside
+# that inset and clear of the frame (design review R3-10).
+_CODE_INSET = 8
+_CODE_MARK = 3
 # The status band's height (CodeLayout) at the font scale under a theme's
 # own `ui` face, the same in every theme and mode, and never under that
 # face's line and 1px above and below; petme128's band is 12.
@@ -158,23 +164,30 @@ def symbols_for(lang):
 
 
 def draw_symbol_keys(cv, t, syms, x0, y, cell, h, fs, dx=0, dy=0, rects=None,
-                     th=None):
+                     th=None, w=None):
     """The symbol palette renderer, ONE body for the Code tab and the script
     console: each key is a grid CELL whose picture is the symbol itself, laid
     out `cell` apart from `x0`. `cell` draws the frame and hands back where
     the picture goes; the symbol sits at the frozen +6px inside it, nudged by
     `dx`/`dy` (the Code tab re-centres it in a key the chrome scale grew,
     #203). Under the 2026-10 look (`t["look"]`) each key is a normal button
-    of theme `th` inside its rect instead. Appends each key's rect to `rects`
-    when a list is given."""
-    for i in range(len(syms)):
-        r = (x0 + i * cell, y, cell - 1, h - 1)
+    of theme `th` inside its rect instead. `w` (the strip's width) shares it
+    out whole instead, cell i starting at x0 + i * w // n. Appends each key's
+    rect to `rects` when a list is given."""
+    n = len(syms)
+    for i in range(n):
+        if w is None:
+            kx, kw = x0 + i * cell, cell
+        else:
+            kx = x0 + i * w // n
+            kw = x0 + (i + 1) * w // n - kx
+        r = (kx, y, kw - 1, h - 1)
         if rects is not None:
             rects.append(r)
         if t.get("look") and th is not None:
             # Each key inset by fs inside its cell: 2*fs apart, fs off the
             # strip's edges.
-            _ui_draw.button(cv, th, (r[0] + fs, r[1] + fs, cell - 2 * fs, h - 2 * fs),
+            _ui_draw.button(cv, th, (kx + fs, r[1] + fs, kw - 2 * fs, h - 2 * fs),
                             syms[i], kind="normal", app="code")
             continue
         art = _ui_draw.cell(cv, t, r, pad=0, caption_h=0, fs=fs)
@@ -500,7 +513,7 @@ class CodeLayer:
             return True
         if click and _in(px, py, lay.sym_area) and ed is not None:
             syms = self._symbols()
-            i = (px - lay.sym_area[0]) // lay.sym_cell   # tap a coding symbol
+            i = lay.sym_key_at(px)                       # tap a coding symbol
             if 0 <= i < len(syms):
                 self._feed_char(ord(syms[i]))            # routes to find field or editor
             return True
@@ -1150,14 +1163,14 @@ class CodeLayer:
                 cur = look and absrow == ed.row
                 fade = look and len(full) - ed.left > cols
                 if cur:
-                    self._current_line(cv, lay, y, lay.cx, fx if fade else None)
+                    self._current_line(cv, lay, y, lay.mark_x, fx if fade else None)
                 if gc:                           # #89: line-number gutter (crash mark integrated)
                     num = str(absrow + 1)
                     cv.print(num[-gc:], lay.x0, y,
                              NAMES["red"] if on_err else
                              (t["gutter_cur"] if cur else t["gutter"]), 1)
-                elif on_err:                     # no gutter: the original far-left crash tick
-                    cv.rect(0, y, 3 * fs, th, NAMES["red"])
+                elif on_err:                     # no gutter: the crash tick, on the mark's place
+                    cv.rect(lay.mark_x, y, 2 * fs, th, NAMES["red"])
                 if on_err:                       # inline error underline (#24)
                     cv.rect(tx0, y + th, cols * cell, fs, NAMES["red"])
                 self._draw_selection(ed, absrow, y, tx0, cell, cols, th, t["sel"])
@@ -1182,34 +1195,37 @@ class CodeLayer:
                                     t["caret"])
                         else:
                             cv.rect(tx0 + vcol * cell, y, fs, th, t["caret"])
-        # Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1" strip.
+        # Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1" strip,
+        # the band across the content and its text on the code's column.
         if lay.status_band is not None and ed is not None:
             issues = "1 issue" if ws.code_err else "No issues"
-            _ui_draw.status_row(cv, ws.theme_colors, lay.status_band, (_status_line(
+            _ui_draw.status_row(cv, ws.theme_colors, lay.status_band, ())
+            _ui_draw.status_row(cv, ws.theme_colors, lay.status_text, (_status_line(
                 ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
-                 str(len(ed.lines)) + " lines", issues), lay.status_band[2], fs),))
+                 str(len(ed.lines)) + " lines", issues), lay.status_text[2], fs),))
         self._draw_tools(lay, ed, t)             # #89: tools toggle + palette + find bar
         self._draw_symbols()
 
     def _current_line(self, cv, lay, y, x0, x1):
         """The current line's mark, the columns [x0, x1) of it (x1 None: to
         the area's right): the theme's current mark (a `bar` beside the line,
-        as beside a row) laid over the WHOLE line and clipped to those
-        columns, so a line drawn in two parts around its fade is one mark --
-        one outline, one plate -- and the `value` bar where the part starts at
-        the area's left."""
+        as beside a row) laid over the WHOLE line from `mark_x` (inside the
+        content inset, clear of the frame) and clipped to those columns, so
+        a line drawn in two parts around its fade is one mark -- one outline,
+        one plate -- and the `value` bar where the part starts at `mark_x`."""
         right = lay.cx + lay.cw
+        left = lay.mark_x
         x1 = right if x1 is None else x1
         if x1 <= x0:
             return
         th = self.ws.theme_colors
-        whole = x0 == lay.cx and x1 == right
+        whole = x0 == left and x1 == right
         if not whole:
             cv.clip(x0, y, x1 - x0, lay.lh)
-        _ui_draw.current(cv, th, (lay.cx, y, lay.cw, lay.lh), side=True)
+        _ui_draw.current(cv, th, (left, y, right - left, lay.lh), side=True)
         if not whole:
             cv.clip()
-        if x0 == lay.cx:
+        if x0 == left:
             cv.rect(x0, y, 2 * lay.fs, lay.lh, th["value"])
 
     def _fade(self, cv, x, y, h, bg, fs):
@@ -1464,4 +1480,5 @@ class CodeLayer:
         sh = lay.sym_h
         t = self._t if self._t is not None else self._tones()
         draw_symbol_keys(cv, t, self._symbols(), lay.sym_area[0], sy, sc, sh,
-                         fs, lay.sym_text_dx, lay.sym_text_dy, th=self.ws.theme_colors)
+                         fs, lay.sym_text_dx, lay.sym_text_dy, th=self.ws.theme_colors,
+                         w=lay.sym_area[2])
