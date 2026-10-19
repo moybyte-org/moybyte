@@ -464,6 +464,16 @@ def _sprites(g, ws):
         ws.paint.color = SPRITE_COLOUR
 
 
+def _sprites_more(g, ws):
+    """The sprite tab with its more menu open, a selection held (the hint
+    strip's operations first)."""
+    _sprites(g, ws)
+    if ws.paint is not None:
+        ws.paint.set_selection(1, 1, 4, 4)
+        ws.paint_layer._open_more()
+    _settle(g, ws, 3)
+
+
 def _calc(g, ws):
     ws.open_app(ws._apps_by_id["calc"])
     _settle(g, ws, 2)
@@ -812,7 +822,12 @@ def _kit_table():
         "handheld_code-editor_long-line": (
             HANDHELD, _code_long, "the caret on the longest line: the current "
             "line's mark meets the overflow fade"),
-        "desktop_sprite-editor": (DESK, _sprites, "the desk Sprites tab: its two tool rows"),
+        "desktop_sprite-editor": (DESK, _sprites, "the desk Sprites tab: its tool row "
+                                  "and the sprite map"),
+        "desktop_sprite-editor_more": (DESK, _sprites_more,
+                                       "the desk Sprites tab's more menu, a selection held"),
+        "handheld_sprite-editor_more": (HANDHELD, _sprites_more,
+                                        "the Sprites tab's more menu, a selection held"),
         "handheld_sprite-editor_palette": (
             HANDHELD, _sprites, "Sprites, colour %d current beside the focus hue"
             % SPRITE_COLOUR),
@@ -1575,10 +1590,11 @@ def _caret_pairs(ws, probe, img):
 
 
 def _sprite_pairs(ws, img):
-    """The sprite tools (design review R3-11, R3-23): every enabled tool
-    shows the chrome's ink and none of the dim or danger inks (the tool in
-    use wears the current mark, an idle copy or paste the disabled ink),
-    and the two tool rows stand in columns."""
+    """The sprite tools (design review R3-11; the one row of 2026-10-19):
+    every enabled tool shows the chrome's ink and none of the dim or danger
+    inks (the tool in use wears the current mark, an idle stamp the disabled
+    ink), and the row keeps the mockup's spacing, one pitch from button to
+    button."""
     if ws.screen != "menu" or getattr(ws, "menu_view", None) != "paint" or ws.paint is None:
         return []
     from runtime import paint_layer, ui_draw
@@ -1591,18 +1607,17 @@ def _sprite_pairs(ws, img):
     others.discard(ink)
     bad = 0
     for tid, (x, y, w, h) in zip(paint_layer._TOOLS, lay.tool_btns):
-        if tid in ("copy", "paste") or (tid in paint_layer._TOOL_MODE
-                                        and ws.paint.tool == paint_layer._TOOL_MODE[tid]):
+        if tid == "stamp" or ws.paint_layer._tool_on(ws.paint, tid):
             continue
         seen = {px[ox + xx, oy + yy] for yy in range(y, y + h) for xx in range(x, x + w)
                 if 0 <= ox + xx < img.width and 0 <= oy + yy < img.height}
         if ink not in seen or seen & others:
             bad += 1
-    n1 = len(paint_layer._TOOL_ROW1)
-    row1, row2 = lay.tool_btns[:n1], lay.tool_btns[n1:]
-    off = sum(1 for a, b in zip(row1, row2) if (a[0], a[2]) != (b[0], b[2]))
+    row = lay.tool_btns
+    pitch = 48 if lay.desk else 24 * lay.fs
+    off = sum(1 for a, b in zip(row, row[1:]) if b[0] - a[0] != pitch)
     return [_measure("sprite tools off the chrome ink", bad, 0, bad == 0),
-            _measure("sprite tool rows out of column", off, 0, off == 0)]
+            _measure("sprite tool row off the mockup's pitch", off, 0, off == 0)]
 
 
 def _foot_pairs(ws, img):

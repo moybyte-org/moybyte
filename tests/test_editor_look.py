@@ -296,9 +296,7 @@ def test_every_enabled_sprite_tool_wears_the_chrome_ink(tmp_path, config, theme,
     others.discard(ink)
     pe = ws.paint
     for tid, (x, y, w, h) in zip(paint_layer._TOOLS, lay.tool_btns):
-        if tid in paint_layer._TOOL_MODE and pe.tool == paint_layer._TOOL_MODE[tid]:
-            continue
-        if tid in ("copy", "paste"):
+        if tid == "stamp" or ws.paint_layer._tool_on(pe, tid):
             continue
         seen = {px[oy + yy][ox + xx] for yy in range(y, y + h) for xx in range(x, x + w)}
         assert ink in seen, tid
@@ -307,18 +305,18 @@ def test_every_enabled_sprite_tool_wears_the_chrome_ink(tmp_path, config, theme,
 
 @pytest.mark.parametrize("config", (HANDHELD, DESK))
 @pytest.mark.parametrize("theme,mode", THEMES)
-def test_the_two_sprite_tool_rows_stand_in_columns(tmp_path, config, theme, mode):
-    """The tools and the actions under them are one toolbar: both rows start
-    on the grid's left edge at one pitch, so each tool stands over an action
-    (design review R3-23: the rows were centred on different spans)."""
+def test_the_sprite_tool_row_keeps_the_mockups_spacing(tmp_path, config, theme, mode):
+    """The one tool row (owner, 2026-10-19) stands at the mockup's pitch,
+    48 px on the desk and 24 on the handheld, from the grid's left edge
+    under the grid or from the column's at its head."""
     from runtime import paint_layer
     ws = _ws(tmp_path, config, theme, mode)
     lay, _ox, _oy = _sprites(ws, config)
-    n1 = len(paint_layer._TOOL_ROW1)
-    row1, row2 = lay.tool_btns[:n1], lay.tool_btns[n1:]
-    assert row1[0][0] == row2[0][0] == lay.pg_x0
-    for a, b in zip(row1, row2):
-        assert (a[0], a[2]) == (b[0], b[2]), (a, b)
+    row = lay.tool_btns
+    assert len(row) == len(paint_layer._TOOL_ROW)
+    pitch = 48 if config == DESK else 24 * lay.fs
+    assert {b[0] - a[0] for a, b in zip(row, row[1:])} == {pitch}
+    assert row[0][0] in (lay.pg_x0, lay.spr_prev[0])
 
 
 # The desk Appearance window, the target's (tools/look_shots.py's

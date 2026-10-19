@@ -292,18 +292,26 @@ def test_a_clear_pixel_lies_on_the_grey_checker_and_a_colour_fills_its_cell(tmp_
 
 
 def test_the_arrows_move_the_ring_cursor_and_a_paints_at_it(tmp_path):
+    """Under a gamepad (and the T-Deck's trackball) the arrows move the
+    grid's cursor; a desk keyboard's shift the sprite instead
+    (tests/test_paint_tools_v90.py)."""
+    from runtime import ui_draw
     ws, drv, chrome = _look_tab(tmp_path)
+    ui_draw.input_kind("pad")
     pe = ws.paint
     pe.color = 12
     ws.paint_layer._cur[:] = [0, 0]
     before = bytes(ws.sys_canvas._buf)
+    def pad(k):                        # a gamepad's button, a press and a release
+        drv.hold(k, True, source="pad")
+        _frames(drv)
+        drv.hold(k, False, source="pad")
+        _frames(drv)
     for k in ("right", "right", "down"):
-        drv.press(k)
-        _frames(drv, 2)
+        pad(k)
     assert ws.paint_layer._cur == [2, 1]
     assert bytes(ws.sys_canvas._buf) != before, "the cursor moved on the glass"
-    drv.press("a")
-    _frames(drv)
+    pad("a")
     ox, oy = pe.sheet.tile_origin(pe.n)
     assert pe.sheet.pget(ox + 2, oy + 1) == 12
     x, y, cell = _cell(ws.paint_layer.layout, pe, 4, 4)
@@ -326,24 +334,24 @@ def test_the_tool_in_use_wears_the_current_mark(tmp_path):
 
 @pytest.mark.parametrize("theme,variant", [("moy", "dark"), ("blocks", "light"),
                                            ("contrast", "light")])
-def test_clear_wears_the_rows_ink_and_idle_copy_the_disabled(tmp_path, theme, variant):
-    """Clear's trash is a tool like its row, in the chrome's ink, never
-    louder than it (design review R3-11); copy with nothing selected takes
-    the disabled ink."""
+def test_the_tools_wear_the_rows_ink_and_an_idle_stamp_the_disabled(tmp_path, theme,
+                                                                   variant):
+    """Every tool is in the chrome's ink, one role for the row (design
+    review R3-11); stamp with nothing to stamp takes the disabled ink."""
     from runtime import paint_layer as P, ui_draw
     ws, drv, chrome = _look_tab(tmp_path, theme, variant)
     lay = ws.paint_layer.layout
     th = ws.theme_colors
-    ws.paint.sel = None
+    ws.paint.clip = None
     _frames(drv)
 
     def inks(tid):
         x, y, w, h = lay.tool_btns[P._TOOLS.index(tid)]
         return {_px(ws, i, j) for i in range(x, x + w) for j in range(y, y + h)}
 
-    assert chrome.rgb565_of(th["chrome_ink"]) in inks("clear")
-    assert chrome.rgb565_of(th["chrome_ink"]) in inks("rot")
-    assert chrome.rgb565_of(ui_draw.disabled_ink(th)) in inks("copy")
+    assert chrome.rgb565_of(th["chrome_ink"]) in inks("more")
+    assert chrome.rgb565_of(th["chrome_ink"]) in inks("shape")
+    assert chrome.rgb565_of(ui_draw.disabled_ink(th)) in inks("stamp")
 
 
 def test_the_shifts_are_the_sets_line_arrows(tmp_path):
@@ -353,8 +361,9 @@ def test_the_shifts_are_the_sets_line_arrows(tmp_path):
     from runtime import iconsets, paint_layer as P
     ws, _drv, _c = _look_tab(tmp_path)
     cv = ws.sys_canvas
+    slots = {oid: slot for oid, _label, slot in P._OPS}
     for tid in ("sleft", "sright", "sup", "sdown"):
-        slot = P._TOOL_ICON[tid]
+        slot = slots[tid]
         assert slot in iconsets.SLOT and slot.startswith("arrow_"), tid
         for name in ("default", "coast", "luna"):
             assert iconsets.draw(cv, slot, (0, 0, 16, 16), 7, ("smooth", name, None)), \
@@ -363,15 +372,19 @@ def test_the_shifts_are_the_sets_line_arrows(tmp_path):
     iconsets.reset()
 
 
-def test_erase_mirror_and_the_vertical_flip_are_the_sets_line_art(tmp_path):
-    """Erase, mirror and the vertical flip draw the icon sets' line art,
-    not the glyph table's filled pixel shapes (design review R3-11), in
-    every smooth set and the pixel set."""
+def test_the_more_menus_icons_and_the_new_tools_are_the_sets_line_art(tmp_path):
+    """Mirror and the vertical flip in the more menu, and the stamp and more
+    buttons, draw the icon sets' line art, not the glyph table's filled
+    pixel shapes (design review R3-11), in every smooth set and the pixel
+    set."""
     from runtime import iconsets, paint_layer as P
     ws, _drv, _c = _look_tab(tmp_path)
     cv = ws.sys_canvas
-    for tid, slot in (("erase", "eraser"), ("mirror", "mirror"), ("flipv", "flip_v")):
-        assert P._TOOL_ICON.get(tid) == slot and slot in iconsets.SLOT, tid
+    slots = {oid: slot for oid, _label, slot in P._OPS}
+    slots.update(P._TOOL_ICON)
+    for tid, slot in (("mirror", "mirror"), ("flipv", "flip_v"), ("stamp", "stamp"),
+                      ("more", "more")):
+        assert slots.get(tid) == slot and slot in iconsets.SLOT, tid
         for name in ("default", "coast", "luna"):
             assert iconsets.draw(cv, slot, (0, 0, 16, 16), 7, ("smooth", name, None)), \
                 (tid, name)
@@ -398,11 +411,12 @@ def test_previous_and_next_sprite_are_the_sets_chevrons(tmp_path):
 
 @pytest.mark.parametrize("theme,variant", [("moy", "light"), ("moy", "dark"),
                                            ("blocks", "light"), ("contrast", "dark")])
-def test_the_caption_size_line_and_tool_rows_keep_their_room(tmp_path, theme, variant):
-    """The grid starts under the caption's ink and the preview under the
-    Size line's, the Size line is centred on its column, and the two tool
-    rows are one toolbar: one pitch, both from the grid's left edge, the
-    actions within the content's pad (design review R3-23)."""
+def test_the_caption_the_column_and_the_tool_row_keep_their_room(tmp_path, theme, variant):
+    """The grid starts under the caption's ink; the column's parts stand
+    from its left, the Size caption beside ‹ ›, the map under them and
+    the load row at its foot, clear of the hint strip; the tool row stands
+    under the grid at the mockup's pitch within the content's pad (owner,
+    D-15, 2026-10-19)."""
     from runtime import paint_layer as P
     from runtime import ui_draw
     ws, _drv, _c = _look_tab(tmp_path, theme, variant)
@@ -410,18 +424,39 @@ def test_the_caption_size_line_and_tool_rows_keep_their_room(tmp_path, theme, va
     fs = lay.fs
     asc = ui_draw.font("ui")[3] * fs
     assert lay.pg_y0 >= lay.title_xy[1] + asc + 3 * fs
-    assert lay.prev_rect[1] >= lay.size_xy[1] + asc + 4 * fs
-    assert lay.size_xy[0] == lay.close_btn[0] + lay.close_btn[2] // 2
     assert lay.pg_span == 144
-    n1 = len(P._TOOL_ROW1)
-    row1, row2 = lay.tool_btns[:n1], lay.tool_btns[n1:]
-    pitches = {b[0] - a[0] for row in (row1, row2) for a, b in zip(row, row[1:])}
-    assert len(pitches) == 1
-    pitch = pitches.pop()
-    # On the handheld the actions end inside the content less its pad.
+    rx = lay.spr_prev[0]
+    assert lay.get_btn[0] == lay.map_rect[0] == rx
+    assert lay.size_xy[0] > lay.spr_next[0] + lay.spr_next[2]
+    assert lay.map_rect[1] >= lay.spr_prev[1] + lay.spr_prev[3]
+    assert lay.map_rect[1] + lay.map_rect[3] <= lay.get_btn[1]
+    if lay.hints is not None:
+        assert lay.get_btn[1] + lay.get_btn[3] <= lay.hints[1]
+    row = lay.tool_btns
+    assert len(row) == len(P._TOOL_ROW) and row[0][0] == lay.pg_x0
+    assert {b[0] - a[0] for a, b in zip(row, row[1:])} == {24 * fs}
     end = lay.cx + lay.cw - (lay.pg_x0 - lay.cx)
-    assert row1[0][0] == row2[0][0] == lay.pg_x0
-    assert row2[-1][0] + pitch <= end
+    assert row[-1][0] + row[-1][2] <= end
+
+
+def test_the_map_outlines_the_sprite_and_a_tap_on_it_picks_one(tmp_path):
+    """The sprite map shows the sheet around the sprite, the sprite outlined
+    (`ink`, then `surface` within), and a tap on a sprite there makes it the
+    sprite (owner, D-15, 2026-10-19)."""
+    ws, drv, chrome = _look_tab(tmp_path)
+    pl = ws.paint_layer
+    pe = ws.paint
+    th = ws.theme_colors
+    _frames(drv)
+    x0, y0, k, first, rows = pl._map_geom(pl.layout, pe, pe.sheet)
+    tile = pe.sheet.TILE * k
+    assert rows >= 8 and first == 0
+    sx = x0 + (pe.n % pe.sheet.cols) * tile
+    sy = y0 + (pe.n // pe.sheet.cols - first) * tile
+    o = pl.layout.fs
+    assert _px(ws, sx - o, sy + tile // 2) == chrome.rgb565_of(th["ink"])
+    _tap_at(drv, x0 + 3 * tile + 1, y0 + 2 * tile + 1)
+    assert pe.n == (first + 2) * pe.sheet.cols + 3
 
 
 def test_the_colour_in_use_and_the_cursor_are_two_toned(tmp_path):
@@ -475,7 +510,7 @@ def test_the_size_opens_the_pickers_and_a_tile_of_the_sheet_becomes_the_sprite(t
 def test_the_pickers_size_seg_sets_the_sprites_size(tmp_path):
     ws, drv, _c = _look_tab(tmp_path)
     pl = ws.paint_layer
-    x, y, w, h = pl.layout.prev_rect
+    x, y, w, h = pl.layout.size_btn
     _tap_at(drv, x + w // 2, y + h // 2)
     _frames(drv, 2)
     drv.press("right")

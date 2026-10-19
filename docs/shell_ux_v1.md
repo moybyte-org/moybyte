@@ -269,8 +269,10 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
   indent/outdent — every verb touch-reachable, with host Ctrl+C/X/V/F/Z/Y as
   conveniences on top.
 - **Sprites / Map / Scene / Music** — the asset editors, each with an icon-buttoned
-  tool row (#90/#91/#92): the sprite painter has stroke-level undo/redo, a bucket
-  fill, and whole-sprite transforms (flip/rotate/shift/clear); the map editor has
+  tool row (#90/#91/#92): the sprite painter has PICO-8's row (pen, fill, shape,
+  select, stamp) with stroke-level undo/redo, and its operations
+  (copy/flip/rotate/shift/mirror/clear, on the selection or the whole sprite)
+  under a more menu and PICO-8's keys (`docs/look_2026-10.md` step 24); the map editor has
   per-gesture undo/redo, rectangle + flood fills, map resize, and a zoom ladder
   whose last rung is an OVERVIEW -- each cell a solid block of its tile's dominant
   colour, because no tile can be drawn below 8px, at 4-7px per cell: the whole map

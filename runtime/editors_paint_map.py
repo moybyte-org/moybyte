@@ -204,8 +204,9 @@ class PaintEditor(OpHistoryMixin):
     RECT = "rect"         # shape tool: drag two corners -> hollow rectangle (#90)
     LINE = "line"         # shape tool: drag endpoints -> straight line (#90)
     OVAL = "oval"         # shape tool: drag a bbox -> hollow ellipse/circle (#90)
-    SELECT = "select"     # region tool: drag a box -> selection; tap stamps the clip (#90)
-    TOOLS = (PEN, FILL, RECT, LINE, OVAL, SELECT)
+    SELECT = "select"     # region tool: drag a box -> selection; a tap drops it (#90)
+    STAMP = "stamp"       # stamp tool: a tap stamps the clipboard there (PICO-8's)
+    TOOLS = (PEN, FILL, RECT, LINE, OVAL, SELECT, STAMP)
 
     # In-editor undo depth (#90). An undo step snapshots ONLY the current editable
     # region (dim*dim palette bytes) -- 64B for an 8x8 sprite, 256B for a 16x16 icon,

@@ -490,8 +490,9 @@ def test_mirror_toggle_button(tmp_path):
     ws.paint.color = 9
     ox, oy = ws.sheet.tile_origin(ws.paint.n)
 
-    _tap_tool(drv, ws, "mirror")
+    _pick_more(drv, ws, "mirror")      # the more menu's "Turn on mirror"
     assert ws.paint.mirror is True
+    assert ws.paint_layer._pop is False   # a pick closes the menu
 
     cx, cy = _cell_center(C, 1, 2, ws.paint.dim)
     drv.touch(cx, cy)
@@ -501,8 +502,24 @@ def test_mirror_toggle_button(tmp_path):
     assert ws.sheet.pget(ox + 1, oy + 2) == 9
     assert ws.sheet.pget(ox + 6, oy + 2) == 9      # the mirrored echo landed too
 
-    _tap_tool(drv, ws, "mirror")
+    _pick_more(drv, ws, "mirror")
     assert ws.paint.mirror is False
+
+
+def _pick_more(drv, ws, oid):
+    """Open the more menu with its button and pick row `oid` with the keys:
+    focus opens on its first row, down walks it, enter activates."""
+    _tap_tool(drv, ws, "more")
+    assert ws.paint_layer._pop == "more"
+    drv.frame(1 / 30)
+    rows = [r[0] for r in ws.paint_layer._more_rows(ws.paint_layer.layout.desk)]
+    for _ in range(rows.index(oid)):
+        drv.press("down")
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)               # the key comes up between presses
+    drv.press("run")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
 
 
 # -- region select / copy / paste (#90) --------------------------------------
@@ -790,7 +807,12 @@ def test_line_tool_button_and_grid_drag(tmp_path):
     ws.paint.clear()
     ws.paint.color = 12
 
-    _tap_tool(drv, ws, "line")
+    # One shape button: oval first, then a tap a shape: rect, line.
+    _tap_tool(drv, ws, "shape")
+    assert ws.paint.tool == ws.paint.OVAL
+    _tap_tool(drv, ws, "shape")
+    assert ws.paint.tool == ws.paint.RECT
+    _tap_tool(drv, ws, "shape")
     assert ws.paint.tool == ws.paint.LINE
 
     # Press-drag-release a horizontal line: press at (1,1), drag to (5,1), release.
@@ -809,30 +831,38 @@ def test_line_tool_button_and_grid_drag(tmp_path):
     assert ws.paint.can_undo()
 
 
-def test_erase_toggle_button(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
+def test_the_operation_keys_act_on_the_sprite(tmp_path):
+    """PICO-8's keys on a keyboard: F and V flip, R rotates, Del clears,
+    the arrows shift (a desk keyboard's; the cursor is the pointer there),
+    M opens the more menu."""
+    from runtime import host_app, ui_draw
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_paint(ws)
     drv = host_app.ConsoleDriver(ws)
-    ws.paint.color = 9
-    ox, oy = ws.sheet.tile_origin(ws.paint.n)
-
-    cx, cy = _cell_center(C, 2, 2, ws.paint.dim)
-    drv.touch(cx, cy)
+    ui_draw.input_kind("keys")
+    pe = ws.paint
+    pe.clear()
+    pe.color = 7
+    pe.paint(0, 0)
+    ox, oy = ws.sheet.tile_origin(pe.n)
+    last = pe.dim - 1
+    drv.type_char(ord("f"))
     drv.frame(1 / 30)
-    drv.touch_up()
+    assert ws.sheet.pget(ox + last, oy) == 7 and ws.sheet.pget(ox, oy) == 0
+    drv.type_char(ord("v"))
     drv.frame(1 / 30)
-    assert ws.sheet.pget(ox + 2, oy + 2) == 9
-
-    _tap_tool(drv, ws, "erase")
-    assert ws.paint.erase is True
-    drv.touch(cx, cy)                  # paint again -> now erases
+    assert ws.sheet.pget(ox + last, oy + last) == 7
+    drv.press("left")
     drv.frame(1 / 30)
-    drv.touch_up()
+    assert ws.sheet.pget(ox + last - 1, oy + last) == 7
+    drv.type_char(0x7F)
     drv.frame(1 / 30)
-    assert ws.sheet.pget(ox + 2, oy + 2) == 0
+    assert all(ws.sheet.pget(ox + x, oy + y) == 0
+               for x in range(pe.dim) for y in range(pe.dim))
+    drv.type_char(ord("m"))
+    drv.frame(1 / 30)
+    assert ws.paint_layer._pop == "more"
 
 
 def test_select_copy_paste_through_the_ui(tmp_path):
@@ -864,11 +894,21 @@ def test_select_copy_paste_through_the_ui(tmp_path):
     drv.frame(1 / 30)
     assert ws.paint.sel == (1, 1, 2, 1)
 
-    _tap_tool(drv, ws, "copy")
-    assert ws.paint.has_clip
+    drv.type_char(0x03)                         # Ctrl-C copies the selection
+    drv.frame(1 / 30)
+    assert ws.paint.has_clip and ws.paint.clip[:2] == (2, 1)
 
-    # A tap in SELECT mode (no drag) stamps the clip at the tapped cell.
+    # A tap in SELECT mode (no drag) drops the selection.
     dest = _cell_center(C, 4, 4, ws.paint.dim)
+    drv.touch(*dest)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.paint.sel is None
+
+    # The stamp tool stamps the clip at the tapped cell.
+    _tap_tool(drv, ws, "stamp")
+    assert ws.paint.tool == ws.paint.STAMP
     drv.touch(*dest)
     drv.frame(1 / 30)
     drv.touch_up()

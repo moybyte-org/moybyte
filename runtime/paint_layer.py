@@ -68,11 +68,13 @@ except ImportError:  # pragma: no cover - direct host import (chrome not yet ali
 
 try:
     from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
-                             metric_class as _metric_class, DESK as _DESK)
+                             metric_class as _metric_class, DESK as _DESK,
+                             render_scale as _render_scale)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H,
-                                     metric_class as _metric_class, DESK as _DESK)
+                                     metric_class as _metric_class, DESK as _DESK,
+                                     render_scale as _render_scale)
 
 
 # -- paint geometry (single source; console.py imports these back) ------------
@@ -90,58 +92,84 @@ _SW_Y0 = 32
 _SW = 18
 _SW_COLS = 2
 
-# -- tool palette (#90) -------------------------------------------------------
-# TWO compact rows of single-glyph tool buttons drawn just below the pixel grid.
-# Row 1 = the drawing MODES (the pen / bucket / rect / line / oval / select tools).
-# Row 2 = the whole-sprite transforms (flip / rotate 90 / shift-with-wrap x4 / clear)
-# plus the copy/paste/erase/mirror actions. UNDO/REDO left this row in #111: the ONE bar
-# UNDO/REDO pair is now THE undo (routed to this editor's op-history, console.py), so
-# the two freed slots just widen the remaining mode buttons (spacing).
-# The drawing tools are direct mode buttons (touch-first, no chords): a tap selects
-# that tool, and a grid drag then draws it with a live preview. Single-char labels
-# are the fallback if a glyph is ever missing; the glyphs (`ui.glyph`) are
-# the pre-literate primary cue. Order within each tuple is the hit-test/draw order.
-_TOOL_ROW1 = ("pen", "fill", "rect", "line", "oval", "select")
-_TOOL_ROW2 = ("copy", "paste", "erase", "mirror", "fliph", "flipv", "rot",
-              "sleft", "sright", "sup", "sdown", "clear")
-_TOOLS = _TOOL_ROW1 + _TOOL_ROW2       # flat order; tool_btns follows it (row1, row2)
+# -- the tool row (PICO-8's set, owner 2026-10-19) ---------------------------
+# ONE row on every tier: the drawing tools -- pen, fill, shape, select and
+# stamp -- then the more button, which opens the operations as a menu. Shape
+# is one button over three tools: a tap selects the last shape used, a tap
+# while a shape is in use moves to the next (oval -> rect -> line), and its
+# icon is the shape in use. Stamp stamps the clipboard where the grid is
+# tapped. The operations (copy, the flips, rotate, the shifts, mirror, clear)
+# act on the selection, else the whole sprite, and each has a key on a
+# keyboard (PICO-8's: F V R, the arrows, Del, Ctrl-C/X/V). UNDO/REDO are
+# the bar's ONE pair (#111). Order within the row is the hit-test/draw order.
+_TOOL_ROW = ("pen", "fill", "shape", "select", "stamp", "more")
+_TOOLS = _TOOL_ROW                     # tool_btns follows it
+_SHAPES = (PaintEditor.OVAL, PaintEditor.RECT, PaintEditor.LINE)
 _TOOL_LABEL = {
-    "pen": "P", "fill": "F", "rect": "R", "line": "L",
-    "oval": "O", "select": "S", "copy": "C", "paste": "V", "erase": "E",
-    "mirror": "|", "fliph": "H", "flipv": "M", "rot": "T", "sleft": "<",
-    "sright": ">", "sup": "^", "sdown": "v", "clear": "X",
+    "pen": "P", "fill": "F", "shape": "O", "select": "S", "stamp": "V", "more": "+",
 }
 # The pre-literate glyph for each tool (#89-#93 icon pass): a 12x12 glyph
 # (`ui.glyph`) drawn centered instead of the single-char label, so the row
 # reads as pictures. An unknown kind draws NOTHING (`ui.glyph_id` is -1), so the
 # _TOOL_LABEL letter above stays the guaranteed fallback (see _draw_tools).
 _TOOL_GLYPH = {
-    "pen": "edit", "fill": "fill",
-    "rect": "rect_tool", "line": "line", "oval": "circle", "select": "select",
-    "copy": "copy", "paste": "paste", "erase": "eraser", "mirror": "mirror",
-    "fliph": "flip_h", "flipv": "flip_v", "rot": "rotate",
-    "sleft": "arr_l", "sright": "arr_r", "sup": "arr_u", "sdown": "arr_d",
-    "clear": "clear",
+    "pen": "edit", "fill": "fill", "select": "select", "stamp": "paste",
+    "more": "more",
 }
 # The 2026-10 look's icon for each tool: the icon set's slot where the sets
-# have one, else the glyph table's (`ui.icon`'s order). The four shifts are
-# the sets' line arrows, so not the chevrons the column's previous and next
-# sprite wear; erase, mirror and the vertical flip are the sets' line art
-# (design review R3-11), the horizontal flip keeps the set's half-filled one.
+# have one, else the glyph table's (`ui.icon`'s order).
 _TOOL_ICON = {
-    "pen": "pencil", "fill": "bucket", "rect": "rect", "line": "line",
-    "oval": "oval", "select": "select", "copy": "dup", "erase": "eraser",
-    "mirror": "mirror", "fliph": "flip", "flipv": "flip_v", "rot": "rotate",
-    "sleft": "arrow_left", "sright": "arrow_right", "sup": "arrow_up",
-    "sdown": "arrow_down", "clear": "del",
+    "pen": "pencil", "fill": "bucket", "select": "select", "stamp": "stamp",
+    "more": "more",
 }
+# A shape tool's (slot, glyph): the shape button wears the shape in use.
+_SHAPE_ICON = {
+    PaintEditor.OVAL: ("oval", "circle"), PaintEditor.RECT: ("rect", "rect_tool"),
+    PaintEditor.LINE: ("line", "line"),
+}
+# The more menu's operations, in its order: (id, label, icon slot). Clear is
+# a danger row, set apart at the end.
+_OPS = (
+    ("copy", "Copy", "dup"), ("fliph", "Flip across", "flip"),
+    ("flipv", "Flip over", "flip_v"), ("rot", "Rotate", "rotate"),
+    ("sleft", "Shift left", "arrow_left"), ("sright", "Shift right", "arrow_right"),
+    ("sup", "Shift up", "arrow_up"), ("sdown", "Shift down", "arrow_down"),
+    ("mirror", "Turn on mirror", "mirror"), ("clear", "Clear", "del"),
+)
+# The shifts, which a handheld's more menu folds into one row.
+_SHIFT_OPS = ("sleft", "sright", "sup", "sdown")
+# The key each operation answers to, per input (the hints' profiles,
+# native/moy_ui/moy_ui_parts.c's ACT_KEYS): what the more menu shows at a
+# row's right. The T-Deck's trackball moves the grid's cursor, so its shifts
+# have no key; a gamepad and touch reach the operations through the menu.
+_OP_KEYS = {
+    "keys": {"copy": "Ctrl C", "fliph": "F", "flipv": "V", "rot": "R",
+             "sleft": "\u2190", "sright": "\u2192", "sup": "\u2191", "sdown": "\u2193",
+             "clear": "Del"},
+    "tdeck": {"fliph": "F", "flipv": "V", "rot": "R", "clear": "Del"},
+}
+# The typed bytes the tab answers to, on a keyboard: PICO-8's sprite keys.
+_KEY_OPS = {
+    0x03: "copy", 0x18: "cut", 0x16: "paste", 0x08: "clear", 0x7F: "clear",
+    ord("f"): "fliph", ord("F"): "fliph", ord("v"): "flipv", ord("V"): "flipv",
+    ord("r"): "rot", ord("R"): "rot", ord("m"): "more", ord("M"): "more",
+}
+# The hint strip: the operations' actions (ui.hints draws each as the keys of
+# the input in use, and drops one the input has no key for), the more
+# menu's last. With a selection, clear takes shift's place.
+_HINTS = ("flip", "Flip", "rotate", "Rotate", "shift", "Shift", "more", "More")
+_HINTS_SEL = ("flip", "Flip", "rotate", "Rotate", "clear", "Clear", "more", "More")
 # The pickers' sizes, PaintEditor.SIZES's order.
 _SIZE_NAMES = ("1x1", "2x2", "3x3")
-# The drawing-mode tools (highlighted when active); the rest are one-shot actions.
+# The drawing-mode tools (highlighted when active); shape is any of _SHAPES.
 _TOOL_MODE = {
-    "pen": PaintEditor.PEN, "fill": PaintEditor.FILL, "rect": PaintEditor.RECT,
-    "line": PaintEditor.LINE, "oval": PaintEditor.OVAL, "select": PaintEditor.SELECT,
+    "pen": PaintEditor.PEN, "fill": PaintEditor.FILL, "select": PaintEditor.SELECT,
+    "stamp": PaintEditor.STAMP,
 }
+# The sheet the map draws is 16 sprites across (SPEC.md 3.2's 128 px).
+_MAP_COLS = 16
+
+
 def _tool_row(x0, y0, cw, h, n):
     """A row of n button rects (x, y, w, h), cw apart with a 1px gutter."""
     return [(x0 + i * cw, y0, cw - 1, h) for i in range(n)]
@@ -162,9 +190,10 @@ class PaintLayout(LayoutBase):
     a hugely bigger drawing surface, not just scaled chrome."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
-                 chrome_scale=None, look=False):
+                 chrome_scale=None, look=False, keys=True):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         self.look = bool(look)
+        self.keys = bool(keys)          # an input with keys: the hint strip shows
         self.desk = _metric_class() == _DESK
         if self.look:
             self._look_geometry()
@@ -234,34 +263,41 @@ class PaintLayout(LayoutBase):
             tool_span = (p_right - 6 * fs) - self.pg_x0
             self.status_xy = (self.pg_x0 + 96 * fs, row_y + 6 * fs)
         self.status_w = max(4 * 8 * fs, self.close_btn[0] - self.status_xy[0])
-        cw1 = max(10 * fs, tool_span // len(_TOOL_ROW1))
-        cw2 = max(10 * fs, tool_span // len(_TOOL_ROW2))
-        self.tool_btns = (
-            _tool_row(self.pg_x0, row1_y, cw1, toolh, len(_TOOL_ROW1))
-            + _tool_row(self.pg_x0, row2_y, cw2, toolh, len(_TOOL_ROW2)))
+        # The one tool row sits in the second row's place; the first's stays
+        # clear, so the grid keeps its span.
+        cw = max(10 * fs, min(tool_span // len(_TOOL_ROW), 24 * fs))
+        self.tool_btns = _tool_row(self.pg_x0, row2_y, cw, toolh, len(_TOOL_ROW))
+        self.more_btn = self.tool_btns[-1]
+        self.map_rect = None
+        self.hints = None
 
 
     def _look_geometry(self):
         """The 2026-10 look's arrangement (a theme with a depth; the
-        `sprite-editor` targets): "Sprite N" over the grid, the palette's two
-        columns beside it, then a column of ‹ ›, the Size line, the preview
-        and Get / Put / File; the tools under the grid and the actions under
-        them, Close in the column. The grid is the largest multiple of 48
-        that leaves room for both tool rows and the column. Close sits beside
-        the tools when the column ends above them, and the actions then take
-        the whole width; else Close sits beside the actions, which span the
-        grid and the palette."""
+        `sprite-editor` targets, with the owner's D-15 of 2026-10-19):
+        "Sprite N" over the grid, the palette's two columns beside it, then a
+        column of compact parts from its left: ‹ › with the Size caption
+        beside them, the sprite map (the sheet around the sprite, the sprite
+        outlined) and the load, save and to-Files buttons at its foot. The
+        tool row goes under the grid, or at the column's head where that
+        leaves the grid bigger (the desk), at the mockup's spacing; the hint
+        strip runs along the content's foot under an input with keys. The
+        grid is the largest multiple of 48 that fits."""
         fs, desk = self.fs, self.desk
         pad, gap = (16, 20) if desk else (6 * fs, 6 * fs)
         trow = 40 if desk else 22 * fs
         bh = 40 if desk else 18 * fs
-        line = 8 * fs                             # a line of the pixel face
-        # The caption and the Size line print in the `ui` face; the grid and
-        # the preview clear their ascent, which holds a caption's ink (it
-        # has no descenders).
+        sep = 12 if desk else 3 * fs              # between the column's parts
+        g2 = 8 if desk else 3 * fs                # between two buttons
+        # The caption and the Size line print in the `ui` face; the grid
+        # clears its ascent, which holds a caption's ink (it has no
+        # descenders).
         asc = _ui_draw.font("ui")[3] * fs
+        line = _ui_draw.font("ui")[2] * fs
         cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
         self.body_fill = self.panel = (cx, cy, cw, ch)
+        hint_h = (max(34 // _render_scale(), 18 * fs) if desk else 20 * fs) if self.keys else 0
+        self.hints = (cx, cy + ch - hint_h, cw, hint_h) if hint_h else None
         top = cy + (pad if desk else 3 * fs)
         self.title_xy = (cx + pad, top)
         self.trow = trow
@@ -269,11 +305,18 @@ class PaintLayout(LayoutBase):
         gx = cx + pad
         gy = top + asc + (10 if desk else 3 * fs)
         tgap = 14 if desk else 3 * fs
-        bottom = cy + ch - (pad // 2 if desk else 2 * fs)
+        bottom = cy + ch - hint_h - (pad // 2 if desk else 2 * fs)
+        n = len(_TOOL_ROW)
+        pitch = 48 if desk else 24 * fs           # the mockup's tool spacing
         col = 300 if desk else 120 * fs           # the column's least width
-        hroom = bottom - gy - tgap - 2 * trow
-        wroom = (cw - 2 * pad - 2 * gap - col) * 144 // 166
-        span = max(48, 48 * (min(hroom, wroom) // 48))
+
+        def span_of(hroom, colw):
+            wroom = (cw - 2 * pad - 2 * gap - colw) * 144 // 166
+            return max(48, 48 * (min(hroom, wroom) // 48))
+        under = span_of(bottom - gy - tgap - trow, col)
+        head = span_of(bottom - gy, max(col, n * pitch))
+        beside = head > under                     # the row at the column's head
+        span = head if beside else under
         self.pg_x0, self.pg_y0, self.pg_span = gx, gy, span
         self.pg_area = (gx, gy, span, span)
         self.caption = (gx, top - 2 * fs, span, asc + 4 * fs)
@@ -283,35 +326,47 @@ class PaintLayout(LayoutBase):
         self.sw_area = (self.sw_x0, gy, 2 * sw, 8 * sw)
         rx = self.sw_x0 + 2 * sw + gap
         rw = cx + cw - pad - rx
-        half = (rw - (8 if desk else 4 * fs)) // 2
-        self.spr_prev = (rx, gy, half, bh)
-        self.spr_next = (rx + rw - half, gy, half, bh)
-        y = gy + bh + (12 if desk else 2 * fs)
-        self.size_btn = (rx, y - 3 * fs, rw, asc + 6 * fs)
-        self.size_xy = (rx + rw // 2, y)
-        y += asc + (14 if desk else 5 * fs)
-        ph = 96 if desk else 34 * fs
-        self.prev_rect = (rx, y, rw, ph)
-        self.prev_xy, self.prev_box = (rx, y), ph
-        y += ph + (14 if desk else 5 * fs)
-        step = bh + (8 if desk else 3 * fs)
-        self.get_btn = (rx, y, rw, bh)
-        self.put_btn = (rx, y + step, rw, bh)
-        self.files_btn = (rx, y + 2 * step, rw, bh)
-        col_end = y + 2 * step + bh
-        row1_y = gy + span + tgap
-        row2_y = row1_y + trow
-        beside = col_end + line + 2 * fs <= row1_y
-        self.close_btn = (rx, row1_y if beside else row2_y, rw, bh)
-        self.status_xy = (rx, col_end + 2 * fs)
-        self.status_w = rw
-        span2 = (cx + cw - pad - gx) if beside else (self.sw_x0 + 2 * sw - gx)
-        # The two rows are one toolbar: one pitch, both starting on the grid's
-        # left edge, so their buttons stand in columns (design review R3-23).
-        n1, n2 = len(_TOOL_ROW1), len(_TOOL_ROW2)
-        pitch = min(span // n1, span2 // n2)
-        self.tool_btns = (_tool_row(gx, row1_y, pitch, trow, n1)
-                          + _tool_row(gx, row2_y, pitch, trow, n2))
+        # ‹ › as square-ish icon buttons, the Size caption beside them (a
+        # tap on it opens the pickers)
+        sq = bh + (8 if desk else 4 * fs)
+        self.spr_prev = (rx, gy, sq, bh)
+        self.spr_next = (rx + sq + g2, gy, sq, bh)
+        sx = rx + 2 * sq + g2 + (12 if desk else 5 * fs)
+        self.size_xy = (sx, gy + (bh - line) // 2)
+        self.size_btn = (sx - 2 * fs, gy, max(0, rx + rw - sx + 2 * fs), bh)
+        y = gy + bh + sep
+        if beside:
+            pitch = min(pitch, rw // n)
+            self.tool_btns = _tool_row(rx, y, pitch, trow, n)
+            y += trow + sep
+        else:
+            pitch = min(pitch, span // n)
+            self.tool_btns = _tool_row(gx, gy + span + tgap, pitch, trow, n)
+        # The load / save / to-Files row at the column's foot, from its
+        # left: each its icon and its word where the three fit in the
+        # column's width, else their icons alone.
+        fy = bottom - bh
+        words = ("Load", "Save", "To Files")
+        inner = self.icon + (8 if desk else 4 * fs) + 2 * (12 if desk else 5 * fs)
+        ws_ = [inner + _ui_draw.print_width(wd, fs) for wd in words]
+        self.btn_words = sum(ws_) + 2 * g2 <= rw
+        if not self.btn_words:
+            ws_ = [sq, sq, sq]
+        x = rx
+        rects = []
+        for w_ in ws_:
+            rects.append((x, fy, w_, bh))
+            x += w_ + g2
+        self.get_btn, self.put_btn, self.files_btn = rects
+        # The icon editor (EDIT ICONS) has no bar to leave by: its Close
+        # ends the row.
+        clw = _ui_draw.print_width("Close", fs) + 2 * (12 if desk else 5 * fs)
+        self.close_btn = (rx + rw - clw, fy, clw, bh)
+        self.status_xy = (x, fy + (bh - line) // 2)
+        self.status_w = max(0, rx + rw - x)
+        # The sprite map fills what the column has left.
+        self.map_rect = (rx, y, rw, max(0, fy - sep - y))
+        self.more_btn = self.tool_btns[-1]
 
 
 class PaintLayer:
@@ -342,30 +397,40 @@ class PaintLayer:
         # The pickers (the sprite and its size): a popover of the public UI
         # API's, its host side made at the first open; the release that
         # tapped inside it last.
-        self._pop = False
+        self._pop = False             # the popover open: "pickers", "more" or False
         self._host = None
         self._pop_tap = None
+        self._shape = PaintEditor.OVAL   # the shape button's shape when not in use
+        self._shifts = False          # the more menu shows its shifts' page
         sc = ws.sys_canvas
         self._lay_args = (sc.w, sc.h, getattr(sc, "font_scale", 1), None)
         self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1),
-                                  look=self._looked())
+                                  look=self._looked(), keys=self._keys())
 
     @staticmethod
     def _looked():
         return bool(_ui_draw.depth()[0])
 
+    @staticmethod
+    def _keys():
+        """Whether the input in use has keys, and so the tab a hint strip."""
+        return _ui_draw.input_kind() != "touch"
+
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39) -- called by ws._relayout on a
         font-scale change (and, later, a window resize)."""
         self._lay_args = (w, h, fs, cs)
-        self.layout = PaintLayout(w, h, fs, chrome_scale=cs, look=self._looked())
+        self.layout = PaintLayout(w, h, fs, chrome_scale=cs, look=self._looked(),
+                                  keys=self._keys())
 
     def _sync_layout(self):
-        """A look change between a theme with a depth and one without lays
-        the tab out again."""
-        if self.layout.look != self._looked():
+        """A look change between a theme with a depth and one without, or
+        between touch and an input with keys (the hint strip), lays the tab
+        out again."""
+        if self.layout.look != self._looked() or self.layout.keys != self._keys():
             w, h, fs, cs = self._lay_args
-            self.layout = PaintLayout(w, h, fs, chrome_scale=cs, look=self._looked())
+            self.layout = PaintLayout(w, h, fs, chrome_scale=cs, look=self._looked(),
+                                      keys=self._keys())
 
     def reset_drag(self):
         """Clear the drag-stroke origin (called by ws lifecycle: open_theme /
@@ -395,17 +460,22 @@ class PaintLayer:
         self.ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
-        if self._pop:                  # the pickers take the keys while open
+        if self._pop:                  # the popover takes the keys while open
             if self._host.keys(i):
                 self.ws.mark_dirty()
             return True
-        self.handle_key(i)             # host Ctrl+Z / Ctrl+Y undo shortcut (#90)
+        self.handle_key(i)             # the typed keys: undo, redo, the operations
+        if i.pressed("y") and self.ws.paint is not None:
+            self._open_more()          # a gamepad's more menu
+            return True
         self._cursor_keys(i)
         return True
 
     def _cursor_keys(self, i):
-        """The arrows move the grid's cursor; `a` acts at it as a tap there
-        does (a pen dot, a fill, a one-cell shape or selection)."""
+        """The arrows move the grid's cursor -- on a desk keyboard they shift
+        the sprite, PICO-8's keys, and the pointer is the cursor there; `a`
+        acts at it as a tap there does (a pen dot, a fill, a one-cell shape or
+        selection, a stamp)."""
         ws = self.ws
         pe = ws.paint
         if pe is None:
@@ -413,7 +483,10 @@ class PaintLayer:
         dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
         dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
         c = self._cur
-        if dx or dy:
+        if (dx or dy) and _ui_draw.input_kind() == "keys":
+            pe.shift(dx, dy)
+            ws.mark_dirty()
+        elif dx or dy:
             d = pe.dim - 1
             c[0] = max(0, min(d, c[0] + dx))
             c[1] = max(0, min(d, c[1] + dy))
@@ -436,17 +509,30 @@ class PaintLayer:
             self._cur[0], self._cur[1] = cell
 
     def handle_key(self, i):
-        """Host-convenience undo/redo shortcut: Ctrl+Z (0x1A) / Ctrl+Y (0x19). These
-        control bytes never reach the paint logic otherwise (paint is pointer-driven),
-        and on-screen Z/Y buttons give the SAME verbs everywhere touch reaches -- the
-        keyboard path is a convenience only (spec / #90). Edge-tracked so a held key
-        fires once."""
+        """The typed keys, edge-tracked so a held key fires once: Ctrl+Z (0x1A)
+        / Ctrl+Y (0x19) undo and redo (#90), and PICO-8's sprite keys
+        (`_KEY_OPS`): F and V flip, R rotates, Del and Backspace clear,
+        Ctrl-C copies, Ctrl-X cuts, Ctrl-V stamps and M opens the more menu.
+        Each has its place on the screen too, so touch reaches every one."""
         pe = self.ws.paint
-        k = getattr(i, "last_key", 0)
-        if pe is not None:
-            self._ekey.undo_redo(k, pe.undo, pe.redo)
-        else:
+        k = getattr(i, "last_key", 0) or 0
+        if pe is None:
             self._ekey.hit(k)          # keep the edge in sync even with no editor
+            return
+        if not self._ekey.hit(k):
+            return
+        if k == 0x1A:
+            pe.undo()
+            return
+        if k == 0x19:
+            pe.redo()
+            return
+        op = _KEY_OPS.get(k)
+        if op == "more":
+            self._open_more()
+        elif op is not None:
+            self._do_tool(op)
+            self.ws.mark_dirty()
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
@@ -565,6 +651,12 @@ class PaintLayer:
             self._shape_start = cell
             self._shape_end = cell
             return True
+        if pe.tool == pe.STAMP:
+            cell = self._paint_grid_cell(px, py)   # one stamp a press, its top-left here
+            if cell is None:
+                return False
+            pe.paste(cell[0], cell[1])
+            return True
         return self._paint_stroke(px, py)
 
     def _paint_drag_move(self, px, py):
@@ -606,10 +698,7 @@ class PaintLayer:
         e = self._shape_end if self._shape_end is not None else s
         if pe.tool == pe.SELECT:
             if s == e:
-                if pe.has_clip:
-                    pe.paste(s[0], s[1])       # tap-to-stamp: move/copy the clip here
-                else:
-                    pe.clear_selection()       # tap on empty space deselects
+                pe.clear_selection()           # a tap drops the selection
             else:
                 pe.set_selection(s[0], s[1], e[0], e[1])
         else:
@@ -637,8 +726,9 @@ class PaintLayer:
             pe.select(-1)
         elif _in(px, py, lay.spr_next):
             pe.select(1)
-        elif lay.look and (_in(px, py, lay.size_btn) or _in(px, py, lay.prev_rect)
-                           or _in(px, py, lay.caption)):
+        elif lay.look and lay.map_rect is not None and _in(px, py, lay.map_rect):
+            self._map_pick(px, py)             # a sprite of the map becomes the sprite
+        elif lay.look and (_in(px, py, lay.size_btn) or _in(px, py, lay.caption)):
             self._open_pickers()               # the sprite and its size, a popover
         elif _in(px, py, lay.size_btn):        # cycle 1x1 / 2x2 / 3x3 (#30)
             pe.cycle_size()
@@ -654,7 +744,7 @@ class PaintLayer:
         elif (getattr(lay, "files_btn", None) is not None
               and _in(px, py, lay.files_btn) and not ws._editing_icons):
             ws.send_sprites_to_files()       # export the sheet to files/sprites/ (#108)
-        elif _in(px, py, lay.close_btn):
+        elif _in(px, py, lay.close_btn) and (ws._editing_icons or not lay.look):
             # CLOSE returns to Settings (theme editor, hard-committing on the way --
             # ThemeLayer.leave -- since it has no PLAY of its own) or runs+leaves to
             # the cart (PAINT: ws._leave_menu is EditorApp.leave, PLAY, itself now a
@@ -680,10 +770,18 @@ class PaintLayer:
         pe = self.ws.paint
         if pe is None:
             return
-        if tid in _TOOL_MODE:                  # pen/fill/rect/line/oval/select
+        if tid in _TOOL_MODE:                  # pen/fill/select/stamp
             pe.set_tool(_TOOL_MODE[tid])
+        elif tid == "shape":                   # the last shape, else the next one
+            if pe.tool in _SHAPES:
+                self._shape = _SHAPES[(_SHAPES.index(pe.tool) + 1) % len(_SHAPES)]
+            pe.set_tool(self._shape)
+        elif tid == "more":
+            self._open_more()
         elif tid == "copy":
             pe.copy_selection()
+        elif tid == "cut":
+            pe.cut_selection()
         elif tid == "paste":
             self._paste_default(pe)
         elif tid == "erase":
@@ -695,7 +793,8 @@ class PaintLayer:
         elif tid == "flipv":
             pe.flip_v()
         elif tid == "rot":
-            pe.rotate()
+            if pe.rotate() is False:
+                self.ws.paint_status = "Rotate needs a square"
         elif tid == "sleft":
             pe.shift(-1, 0)
         elif tid == "sright":
@@ -719,13 +818,12 @@ class PaintLayer:
             pe.paste(0, 0)
 
     def _draw_tools(self):
-        """Draw the compact tool row: the drawing MODES, the erase/mirror toggles, and
-        the whole-sprite transforms. Each button carries a centered 12x12 chrome GLYPH
-        (the #89-#93 icon pass -- pen/fill/flip/rotate/shift-arrows/clear, plus #90's
-        mirror axis) instead of its one-char label, so the row reads as pictures on
-        the pre-literate tiers. The active drawing tool is accented, and so are the
-        erase/mirror toggles when armed; copy/paste dim when unusable (undo/redo moved
-        to the ONE bar pair, #111). Drawn on the panel
+        """Draw the tool row: the drawing tools and the more button. Each button
+        carries a centered 12x12 chrome GLYPH (the #89-#93 icon pass) instead of
+        its one-char label, so the row reads as pictures on the pre-literate
+        tiers. The tool in use is accented, the more button while its menu is
+        open; stamp dims with nothing to stamp (undo/redo moved to the ONE bar
+        pair, #111). Drawn on the panel
         surface directly (indexed primitives + ws._glyph), so host == device; the glyph
         follows the canvas font scale (#39). If a glyph kind were ever missing, ws._glyph
         draws nothing and the _TOOL_LABEL letter is the guaranteed fallback."""
@@ -742,20 +840,15 @@ class PaintLayer:
         for i in range(len(btns)):
             tid = _TOOLS[i]
             x, y, w, h = btns[i]
-            # The active drawing MODE is accented; so are the erase/mirror toggles
-            # when armed.
-            active = (tid in _TOOL_MODE and pe.tool == _TOOL_MODE[tid]) or (
-                tid == "erase" and pe.erase) or (tid == "mirror" and pe.mirror)
-            enabled = True
-            if tid in ("copy", "paste"):
-                # copy needs a selection, paste needs a clip -- dim when unusable.
-                enabled = (pe.sel is not None) if tid == "copy" else pe.has_clip
+            active = self._tool_on(pe, tid)
+            enabled = tid != "stamp" or pe.has_clip
             fill = NAMES["indigo"] if active else (
                 NAMES["dark_grey"] if enabled else NAMES["black"])
             ink = NAMES["white"] if enabled else NAMES["dark_grey"]
             cv.rect(x, y, w, h, fill)
             cv.rectb(x, y, w, h, NAMES["light_grey"])
-            kind = _TOOL_GLYPH.get(tid)
+            kind = (_SHAPE_ICON[self._shape_of(pe) or self._shape][1] if tid == "shape"
+                    else _TOOL_GLYPH.get(tid))
             if _ui_draw.glyph_id(kind) >= 0:
                 ws._glyph(kind, (x, y, w, h), ink, cv)
             else:                            # missing glyph -> the letter is the fallback
@@ -807,7 +900,9 @@ class PaintLayer:
         sheet = pe.sheet if pe is not None else ws.project.sheet
         if lay.look:
             self._draw_look(sheet)
-            if self._pop and pe is not None:
+            if self._pop == "more" and pe is not None:
+                self._draw_more()
+            elif self._pop and pe is not None:
                 self._draw_pickers()
             return
         # Cover the FULL content area below the bar first (Fix 3): the panel below
@@ -909,8 +1004,9 @@ class PaintLayer:
                      lay.status_xy[0], lay.status_xy[1],
                      th["author"], 1)
         ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)
-        self._draw_tools()               # #90: undo/redo/fill/transform row
-
+        self._draw_tools()               # the tool row and its more button
+        if self._pop == "more" and pe is not None:
+            self._draw_more()
 
     # -- the 2026-10 look (a theme with a depth) ----------------------------------
 
@@ -1024,48 +1120,128 @@ class PaintLayer:
         for r in range(2 * fs):
             cv.rectb(x + r, y + r, sw - 2 * r, sw - 2 * r,
                      th["ink"] if r < fs else th["surface"])
-        # The column: the sprite before and after, its size (a tap opens the
-        # pickers, as on the preview and the caption), the preview on the
-        # checker, then Get, Put and File. Previous and next are the icon
-        # set's chevrons, never the font's less-than and greater-than signs.
+        # The column: the sprite before and after (the icon set's chevrons,
+        # never the font's less-than and greater-than signs) with the Size
+        # caption beside them (a tap opens the pickers, as on the caption over
+        # the grid), the sprite map, then load, save and to-Files.
         self._stepper(cv, th, lay.spr_prev, ("back", "arr_l"))
         self._stepper(cv, th, lay.spr_next, ("forward", "arr_r"))
-        text = "Size %dx%d" % (pe.size, pe.size)
-        cv.print(text, lay.size_xy[0] - _ui_draw.print_width(text, fs) // 2, lay.size_xy[1],
-                 th["ink"], 1)
-        px, py, pw, ph = lay.prev_rect
-        self._checker(cv, px, py, pw, ph, 6 if lay.desk else 3 * fs, greys)
-        ps = max(1, (ph * 3 // 4) // dim)
-        bx = px + (pw - dim * ps) // 2
-        by = py + (ph - dim * ps) // 2
-        for ly in range(dim):
-            for lx in range(dim):
-                v = sheet.pget(ox + lx, oy + ly)
-                if v:
-                    cv.rect(bx + lx * ps, by + ly * ps, ps, ps, v)
+        cv.print("Size %dx%d" % (pe.size, pe.size), lay.size_xy[0], lay.size_xy[1],
+                 th["ink_dim"], 1)
+        self._draw_map(cv, lay, pe, sheet, th, greys)
         draw = self._icon_draw
+        words = lay.btn_words
         if ws._editing_icons:
-            _ui_draw.button(cv, th, lay.get_btn, "Reset", "normal",
+            _ui_draw.button(cv, th, lay.get_btn, "Reset" if words else "", "normal",
                             glyph=("rotate", "rotate"), glyph_draw=draw)
+            _ui_draw.button(cv, th, lay.close_btn, "Close", "normal")
         else:
-            _ui_draw.button(cv, th, lay.get_btn, "Get", "normal",
-                            glyph=("getcarts", "get"), glyph_draw=draw)
-            _ui_draw.button(cv, th, lay.put_btn, "Put", "normal",
-                            glyph=("save", "put"), glyph_draw=draw)
-            _ui_draw.button(cv, th, lay.files_btn, "File", "normal",
-                            glyph=("files", "folder"), glyph_draw=draw)
+            for rect, word, kind in ((lay.get_btn, "Load", ("folder_open", "get")),
+                                     (lay.put_btn, "Save", ("save", "put")),
+                                     (lay.files_btn, "To Files", ("files", "folder"))):
+                if words:
+                    _ui_draw.button(cv, th, rect, word, "normal", glyph=kind,
+                                    glyph_draw=draw)
+                else:
+                    self._stepper(cv, th, rect, kind)
         if ws.paint_status:
             cv.print(_ui_draw.print_cut(ws.paint_status, lay.status_w, fs),
                      lay.status_xy[0], lay.status_xy[1], th["ink_dim"], 1)
-        _ui_draw.button(cv, th, lay.close_btn, "Close", "normal")
         self._draw_tools_look()
+        self._draw_hints(cv, lay, pe, th)
+
+    def _map_geom(self, lay, pe, sheet):
+        """The sprite map's (x0, y0, k, first row, rows): the sheet's sprites at
+        the largest whole scale `k` that holds a row of them across the map,
+        as many rows as fit, from the row that keeps the sprite (and its
+        size's span) in view, centred in the map's width."""
+        x, y, w, h = lay.map_rect
+        cols = sheet.cols
+        k = max(1, w // (cols * sheet.TILE))
+        tile = sheet.TILE * k
+        rows = min(sheet.rows, max(1, h // tile))
+        row = pe.n // cols
+        first = row - (rows - pe.size) // 2
+        first = max(0, min(first, sheet.rows - rows))
+        return x + (w - cols * tile) // 2, y, k, first, rows
+
+    def _draw_map(self, cv, lay, pe, sheet, th, greys):
+        """The sprite map (owner, 2026-10-19): the sheet around the sprite
+        on the grey checker, the sprite and its size's span outlined -- a line
+        of `ink`, then one of `surface` within, as the colour in use is -- and
+        a tap on a sprite makes it the sprite."""
+        if lay.map_rect is None or lay.map_rect[3] <= 0:
+            return
+        x0, y0, k, first, rows = self._map_geom(lay, pe, sheet)
+        tile = sheet.TILE * k
+        cols = sheet.cols
+        self._checker(cv, x0, y0, cols * tile, rows * tile, max(2, 2 * k), greys)
+        for r in range(rows):
+            for c in range(cols):
+                cv.spr(sheet.tile_image((first + r) * cols + c, 0),
+                       x0 + c * tile, y0 + r * tile, k)
+        n = pe.n
+        sx = x0 + (n % cols) * tile
+        sy = y0 + (n // cols - first) * tile
+        span = pe.size * tile
+        fs = lay.fs
+        o = 2 if lay.desk else fs
+        for i in range(2 * o):
+            c = th["ink"] if i < o else th["surface"]
+            cv.rectb(sx - o + i, sy - o + i, span + 2 * (o - i), span + 2 * (o - i), c)
+
+    def _map_pick(self, px, py):
+        """A tap on the sprite map: the sprite under it becomes the sprite."""
+        pe = self.ws.paint
+        sheet = pe.sheet if pe is not None else None
+        if sheet is None:
+            return
+        x0, y0, k, first, rows = self._map_geom(self.layout, pe, sheet)
+        tile = sheet.TILE * k
+        c = (px - x0) // tile
+        r = (py - y0) // tile
+        if 0 <= c < sheet.cols and 0 <= r < rows:
+            pe.n = (first + r) * sheet.cols + c
+            pe._clamp_size()
+
+    def _draw_hints(self, cv, lay, pe, th):
+        """The hint strip along the content's foot: the operations' keys of
+        the input in use, the operations on a selection first while one is
+        held, as many pairs as the strip holds (none under touch)."""
+        if lay.hints is None:
+            return
+        items = _HINTS_SEL if pe.sel is not None else _HINTS
+        x, y, w, h = lay.hints
+        fs = lay.fs
+        band = (x + (8 if lay.desk else 2 * fs), y, w - (16 if lay.desk else 4 * fs), h)
+        spans = _ui_draw.hints(cv, th, band, items, lay.desk, draw=False)
+        n = 0
+        for x0, x1 in spans:
+            if x1 > band[0] + band[2]:
+                break
+            n += 1
+        if n:
+            _ui_draw.hints(cv, th, band, items[:2 * n], lay.desk)
+
+    @staticmethod
+    def _shape_of(pe):
+        return pe.tool if pe.tool in _SHAPES else None
+
+    def _tool_on(self, pe, tid):
+        """Whether tool button `tid` wears the current mark: the tool in use
+        (shape: any of the shapes), the more button while its menu is open."""
+        if tid == "shape":
+            return pe.tool in _SHAPES
+        if tid == "more":
+            return self._pop == "more"
+        return tid in _TOOL_MODE and pe.tool == _TOOL_MODE[tid]
 
     def _draw_tools_look(self):
-        """The tools and the actions as icons in the chrome's ink, one role
-        for every enabled tool, clear's trash included (design review
-        R3-11): the tool in use and an armed toggle (erase, mirror) on the
-        current mark, copy and paste in the disabled ink while there is
-        nothing to copy or paste."""
+        """The tool row as icons in the chrome's ink, one role for every
+        enabled tool (design review R3-11): the tool in use and the more
+        button while its menu is open on the current mark, the shape button
+        wearing the shape in use (else the next it selects), and stamp in the
+        disabled ink while there is nothing to stamp."""
         ws = self.ws
         cv = ws.sys_canvas
         pe = ws.paint
@@ -1078,25 +1254,97 @@ class PaintLayer:
             tid = _TOOLS[i]
             x, y, w, h = btns[i]
             plate = (x + fs, y, w - 2 * fs, h - 4 * fs)
-            active = (tid in _TOOL_MODE and pe.tool == _TOOL_MODE[tid]) or (
-                tid == "erase" and pe.erase) or (tid == "mirror" and pe.mirror)
             ink = th["chrome_ink"]
-            if active:
+            if self._tool_on(pe, tid):
                 got = _ui_draw.current(cv, th, plate, r)
                 ink = th["ink"] if got is None else got
-            elif tid in ("copy", "paste") and not (
-                    (pe.sel is not None) if tid == "copy" else pe.has_clip):
+            elif tid == "stamp" and not pe.has_clip:
                 ink = _ui_draw.disabled_ink(th)
             box = min(lay.icon, w, plate[3])
             rect = (x + (w - box) // 2, y + (plate[3] - box) // 2, box, box)
-            self._icon_draw((_TOOL_ICON.get(tid), _TOOL_GLYPH[tid]), rect, ink, cv)
+            if tid == "shape":
+                kind = _SHAPE_ICON[self._shape_of(pe) or self._shape]
+            else:
+                kind = (_TOOL_ICON.get(tid), _TOOL_GLYPH[tid])
+            self._icon_draw(kind, rect, ink, cv)
+
+    def _open_more(self):
+        """Open the more menu (the ⋯ button, M on a keyboard, Y on a
+        gamepad), or close it when it is open."""
+        if self._pop == "more":
+            self._pop = False
+            self.ws.mark_dirty()
+            return
+        self._open_pickers()
+        self._pop = "more"
+        self._shifts = False
+
+    def _more_rows(self, desk):
+        """The more menu's rows, [(id, label, slot)]: `_OPS` on a desk; on a
+        handheld, whose screen holds seven rows under its bar, the four
+        shifts fold into one "Shift" row that opens them as a page of their
+        own (`_shifts`)."""
+        if self._shifts:
+            return [op for op in _OPS if op[0] in _SHIFT_OPS]
+        if desk:
+            return list(_OPS)
+        out = []
+        for op in _OPS:
+            if op[0] == _SHIFT_OPS[0]:
+                out.append(("shifts", "Shift", "arrow_right"))
+            elif op[0] not in _SHIFT_OPS:
+                out.append(op)
+        return out
+
+    def _draw_more(self):
+        """The more menu, a popover of the public UI API's hung from the ⋯
+        button: the operations as a menu, each with its icon and, under an
+        input with keys, the key it answers to at the row's right; clear a
+        danger row at its foot. A pick runs it and closes the menu (the
+        handheld's Shift opens the shifts in its place); a press outside, or
+        Esc, closes it."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        pe = ws.paint
+        lay = self.layout
+        th = ws.theme_colors
+        fs = lay.fs
+        settled = self._host.begin(cv, th, lay.body_fill, lay.desk)
+        keys = _OP_KEYS.get(_ui_draw.input_kind(), {})
+        rows = self._more_rows(lay.desk)
+        items, icons, kinds = [], [], []
+        for oid, label, slot in rows:
+            if oid == "mirror" and pe.mirror:
+                label = "Turn off mirror"
+            k = keys.get(oid)
+            items.append(label + ("\t" + k if k else ""))
+            icons.append(slot)
+            kinds.append("danger" if oid == "clear" else "")
+        _ui.at(*lay.more_btn)
+        shown = _ui.popover("Shift" if self._shifts else "More",
+                            260 if lay.desk else 150 * fs)
+        pick = _ui.menu("", items, icons, kinds=kinds)
+        _ui.popover()
+        if pick >= 0 and rows[pick][0] == "shifts":
+            self._shifts = True
+            self._host.reset()
+            ws.request_frame()
+            return
+        if pick >= 0:
+            self._do_tool(rows[pick][0])
+            shown = False
+        if not shown:
+            self._pop = False
+            ws.request_frame()
+        elif not settled:
+            ws.request_frame()
 
     def _open_pickers(self):
         if self._host is None:
             self._host = _ui_draw.AppHost()
         else:
             self._host.reset()
-        self._pop = True
+        self._pop = "pickers"
         self._pop_tap = None
         self.ws.mark_dirty()
 
@@ -1117,7 +1365,7 @@ class PaintLayer:
         tile = sheet.TILE * k
         pw = sheet.cols * tile + 2 * m
         ph = sheet.rows * tile + 2 * m
-        _ui.at(*lay.prev_rect)
+        _ui.at(*lay.size_btn)
         shown = _ui.popover("Sprites", max(pw + (48 if lay.desk else 24 * fs),
                                            300 if lay.desk else 200 * fs))
         i = _ui.seg("Size", _SIZE_NAMES, pe.size - 1)
