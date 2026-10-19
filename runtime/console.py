@@ -1169,6 +1169,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The pause menu over a fullscreen game (docs/look_2026-10.md step 25a):
         # Super holds the run and shows it; Esc or Super again gives it back.
         self.pause = PauseMenu(self)
+        self._marks_held = False      # a modal turned the focus marks off
         # Reboot hook: the device injects a callable (machine.reset via the OTA
         # updater); None on the host -> the Reboot row is a safe no-op (go_home).
         self.reboot_hook = None
@@ -1781,6 +1782,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # -- only when a cart is open -- a CART group PREPENDED (Restart / Delete). The
     # actions wire to the existing console flows (open_settings, apply = re-run, the SD
     # delete path). Selecting any row closes the menu (Popup.activate closes first).
+
+    def _modal_layer(self):
+        """The id of the layer that holds the keys over the screen, the
+        pause menu's or the system menu's, or None."""
+        if self.pause.open:
+            return "pause"
+        if self.sysmenu.open:
+            return "sysmenu"
+        return None
 
     def system_key(self):
         """Super -- the `start` button (a keyboard's GUI key), the host's
@@ -4345,7 +4355,16 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # world, where the WM's title strip carries the close instead. See
         # `_app_bar_route` for the input half and the scope note there.
         _appbar = self._apps_by_id if not self.wm.desk_open() else None
+        # One focus mark a screen: while the pause menu or the system menu
+        # holds the keys, what draws under it shows its current, not its
+        # focus (ui.marks); the menu's own layer and those above it mark.
+        _modal = self._modal_layer()
+        if _modal is not None or self._marks_held:
+            self._marks_held = _modal is not None
+            _ui_draw.marks(_modal is None)
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
+            if _modal is not None and layer.id == _modal:
+                _ui_draw.marks(True)
             if _prev_domain == "game" and layer.domain == "system":
                 if _game_open:                      # close the placement span
                     _view()

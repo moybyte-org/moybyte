@@ -130,3 +130,48 @@ def test_a_themes_bar_packs_alike_in_both_modes(tmp_path, config, theme):
         got[mode] = (ws.layout.clock_w, ws.layout.bars)
     assert got["dark"] == got["light"], "%s on %s: the bar moves with the mode" % (
         theme, config)
+
+
+@pytest.mark.parametrize("theme,mode", [("moy", "dark"), ("contrast", "dark"),
+                                        ("blocks", "light")])
+def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
+    """Under the system menu the screen draws one focus mark, the menu's
+    (R2-11); closed, the home's comes back."""
+    ws = _ws(tmp_path, HANDHELD, theme, mode)
+    _home(ws)
+    _frame(ws, 2)
+    ws._golden_popover = True
+    ws.system_key()
+    assert ws.sysmenu.open
+    _frame(ws, 1)
+    ui_draw.marks(None, True)
+    g._quiesce(ws)
+    ws._dirty = True
+    ws.frame(g._DT)
+    assert ui_draw.marks(None, False)[2] == 1, \
+        "the home behind the system menu still draws its focus"
+    ws.toggle_sysmenu()
+    assert not ws.sysmenu.open
+    _frame(ws, 1)
+    ui_draw.marks(None, True)
+    g._quiesce(ws)
+    ws._dirty = True
+    ws.frame(g._DT)
+    assert ui_draw.marks(None, False)[2] == 1, "the closed menu left the focus off"
+
+
+def test_one_focus_mark_under_the_pause_menu(tmp_path):
+    """...and under the pause menu."""
+    ws = _ws(tmp_path, HANDHELD, "contrast", "dark")
+    ws.go_home()
+    ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
+    ws.run(ws.project, ws.launcher_layer)
+    _frame(ws, 3)
+    ws.system_key()
+    assert ws.pause.open
+    _frame(ws, 1)
+    ui_draw.marks(None, True)
+    g._quiesce(ws)
+    ws._dirty = True
+    ws.frame(g._DT)
+    assert ui_draw.marks(None, False)[2] == 1
