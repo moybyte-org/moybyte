@@ -166,6 +166,10 @@ class _LayoutCtx:
         ws._surface_write(origin[0], origin[1])
 
 
+# A dev playtest's scale where the desk holds it (D-03.4).
+_DEV_SCALE = 2
+
+
 class _Win:
     """One open window: the back-stack kind it presents, its outer rect on the
     desktop, the WM title strip, and -- for app windows -- the retained content
@@ -880,20 +884,19 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             r = _layout_base.render_scale()
             return (DESK_SIZES[key][0] * n // r, DESK_SIZES[key][1] * n // r)
         if key == "desktop":
-            # A dev playtest (#178) is ONE size on every desktop: native cart
-            # pixels. Deliberately not derived from the screen -- "PLAY from the
-            # editor gives me a small window in the corner" is a rule you learn
-            # once, where a screen-relative size would be a different window on
-            # every machine for no benefit the grip doesn't already give.
-            # The frame fits the game exactly: its border (and the edge a
-            # wider frame takes), its title strip and the rows its rounded
-            # bottom corners take (the foot), which the content rect leaves out.
+            # A dev playtest (#178) opens at 2x where the desk holds it, else
+            # at native size (the owner's D-03.4, 2026-10-19): the game is the
+            # point of the window. A desk play takes the largest whole scale
+            # that fits. The frame fits the game exactly: its border (and the
+            # edge a wider frame takes), its title strip and the rows its
+            # rounded bottom corners take (the foot), which the content rect
+            # leaves out.
             foot = (_ui_draw.frame_geom(full.w, full.h, th)[1]
                     if _ui_draw.depth()[13] else 0)
-            s = (1 if self._play_intent == "dev" else
-                 max(1, min((full.w - 24) // self.ws.canvas.w,
-                            (self._desk_rect()[3] - 24 - th - foot)
-                            // self.ws.canvas.h)))
+            fit = max(1, min((full.w - 24) // self.ws.canvas.w,
+                             (self._desk_rect()[3] - 24 - th - foot)
+                             // self.ws.canvas.h))
+            s = min(fit, _DEV_SCALE) if self._play_intent == "dev" else fit
             e = self._frame_edge()
             return (self.ws.canvas.w * s + 2 + 2 * e,
                     self.ws.canvas.h * s + 2 + th + max(foot, e))
@@ -919,11 +922,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         w = min(w, dw - 4 * fs)
         h = min(h, dh - 8 * fs)
         if key == "desktop" and self._play_intent == "dev":
-            # A dev playtest is small so the editor stays workable (#178) -- so put
-            # it where the editor needs least: the bottom-right corner. Centered,
-            # it would land squarely on the code column it is meant to sit beside.
-            x = max(dx, dx + dw - w - 8 * fs)
-            y = max(dy, dy + dh - h - 8 * fs)
+            x, y = self._dev_place(w, h, fs)
         else:
             # Cascade: centred in the work area right of the icon column (a
             # window wider than it as far right as the desk allows), each
@@ -945,6 +944,28 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # buffer.
         self._prewarm(win)
         return win
+
+    def _dev_place(self, w, h, fs):
+        """Where a dev playtest of outer size (w, h) opens (D-03.4): at 2x,
+        centred over the Editor's window (the desk's middle with none); at
+        native size, at the Editor's top right, clear of the symbol keys
+        along its foot. Clamped to the desk."""
+        dx, dy, dw, dh = self._desk_rect()
+        ed = self._wins.get("menu")
+        native = w < 2 * self.ws.canvas.w
+        if ed is None or getattr(ed, "minimized", False):
+            ex, ey, ew, eh = dx, dy, dw, dh
+        else:
+            ex, ey, ew, eh = ed.x, ed.y, ed.w, ed.h
+        if native:
+            x = ex + ew - w - 8 * fs
+            y = ey + (ed.title_h if ed is not None else 0) + 8 * fs
+        else:
+            x = ex + (ew - w) // 2
+            y = ey + (eh - h) // 2
+        x = max(dx, min(x, dx + dw - w))
+        y = max(dy, min(y, dy + dh - h))
+        return x, y
 
     def _clear_of_subject(self, x, y, w, h, fs):
         """A new window's place kept clear of the wallpaper's subject

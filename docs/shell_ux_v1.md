@@ -145,13 +145,11 @@ home; its desktop story is the web view.)*
 
 *(Status 2026-07-31 — PLAY INTENT, #178: `run(cart)` stays one verb, but the
 windowed tier reads WHY it was called to pick the playtest window's default
-size. A **PLAY from the Editor is a dev action** — the window opens at **1× of
-the cart canvas on every desktop**, parked in the bottom-right corner, so the
-code it came from stays readable ("editor beside a running playtest",
-owner-directed); a **run from the desk is a play action** and opens as big as
-the desktop fits. The dev size is deliberately NOT screen-relative — one rule
-you learn once beats a different window on every machine, and the grip is
-already there. The size is read ONCE, at window creation, so a window the kid
+size. A **PLAY from the Editor is a dev action** — the window opens at **2× of
+the cart canvas, centred over the Editor**, where the desk holds it, else at
+1× at the Editor's top right, clear of its symbol keys (owner, 2026-10-19:
+the game is the point of the window); a **run from the desk is a play
+action** and opens as big as the desktop fits. The size is read ONCE, at window creation, so a window the kid
 resizes is never re-sized under them. No new UI and no setting — the two entry
 points already carry the meaning. An explicit scale chooser and per-project
 memory remain open on #178.)*

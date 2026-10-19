@@ -428,11 +428,11 @@ def test_play_opens_playtest_window_and_exit_returns(tmp_path):
     assert ws.menu_view == "code"   # back on the tab PLAY left
 
 
-def test_editor_playtest_opens_smaller_than_a_desk_run(tmp_path):
-    """#178: one run() verb, two jobs. A PLAY from the Editor is a dev action --
-    the playtest window opens small so the code beside it stays workable -- while
-    running a cart from the desk opens it as big as the desktop fits. The entry
-    point carries that meaning (run()'s caller), so nobody picks a scale."""
+def test_editor_playtest_opens_at_2x_over_the_editor(tmp_path):
+    """#178: one run() verb, two jobs, read from run()'s caller. A PLAY from
+    the Editor opens at 2x centred over the Editor where the desk holds it
+    (the owner's D-03.4, 2026-10-19); a desk run opens as big as the desk
+    fits."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open()                       # desk run: play-sized
@@ -442,19 +442,18 @@ def test_editor_playtest_opens_smaller_than_a_desk_run(tmp_path):
     ws._exit_to_caller()
     drv.frame(1 / 30)
 
-    _open_editor(ws)                # Editor PLAY: dev-sized
+    _open_editor(ws)                # Editor PLAY: the dev size
     drv.frame(1 / 30)
     ws._leave_menu()
     drv.frame(1 / 30)
     dev = ws.wm._wins["desktop"]
-    assert dev.w < play.w and dev.h < play.h
-    assert ws.wm._player_view(dev)[2] == 1        # native cart pixels
-    assert play_scale > 1                         # ... vs as-big-as-fits
-    # Small enough to leave the editor beneath it usable: under half the desktop,
-    # and parked in the corner rather than centered on the code column.
-    assert dev.w * 2 < ws.sys_canvas.w
-    assert dev.x + dev.w <= ws.sys_canvas.w and dev.x > play.x
-    assert dev.y + dev.h <= ws.sys_canvas.h and dev.y > play.y
+    ed = ws.wm._wins["menu"]
+    assert ws.wm._player_view(dev)[2] == min(2, play_scale) == 2
+    assert abs((dev.x + dev.w // 2) - (ed.x + ed.w // 2)) <= 1 or dev.x in (
+        ws.wm._desk_rect()[0], ws.wm._desk_rect()[0] + ws.wm._desk_rect()[2] - dev.w)
+    dx, dy, dw, dh = ws.wm._desk_rect()
+    assert dx <= dev.x and dev.x + dev.w <= dx + dw
+    assert dy <= dev.y and dev.y + dev.h <= dy + dh
     # A window the kid has since resized is never re-sized under them: the
     # intent is read ONCE, when the window is created.
     ws.wm._resize_window(dev, play.w, play.h)
@@ -462,19 +461,36 @@ def test_editor_playtest_opens_smaller_than_a_desk_run(tmp_path):
     assert ws.wm._wins["desktop"].w == play.w
 
 
-def test_dev_playtest_is_native_size_on_every_desktop(tmp_path):
-    """The dev playtest is ONE size everywhere: native cart pixels, not a
-    fraction of the screen. A play run still grows with the desktop."""
-    sizes = []
+def test_dev_playtest_is_2x_where_it_fits_else_native(tmp_path):
+    """The dev playtest is 2x where the desk holds it and native cart pixels
+    where it does not; a play run still grows with the desktop."""
+    from runtime import wm_windowed
     for i, sys_size in enumerate(((640, 480), (1024, 600), (1440, 900))):
         ws = _ws(tmp_path / str(i), sys_size=sys_size, font_scale=1)
         full = ws.wm._root_canvas
         ws.wm.set_play_intent("dev")
-        sizes.append(ws.wm._win_size("desktop", full, 1))
+        dev = ws.wm._win_size("desktop", full, 1)
         ws.wm.set_play_intent("play")
-        play_w = ws.wm._win_size("desktop", full, 1)[0]
-        assert play_w >= sizes[-1][0]
-    assert sizes[0] == sizes[1] == sizes[2] == (ws.canvas.w + 2, ws.canvas.h + 2 + 18)
+        play = ws.wm._win_size("desktop", full, 1)
+        assert play[0] >= dev[0]
+        s = (dev[0] - 2) // ws.canvas.w
+        assert s == (wm_windowed._DEV_SCALE if sys_size != (640, 480) else 1), sys_size
+        assert dev == (ws.canvas.w * s + 2, ws.canvas.h * s + 2 + 18)
+
+
+def test_a_native_playtest_opens_clear_of_the_editors_symbol_keys(tmp_path):
+    """Where 2x does not fit, the playtest opens at native size at the
+    Editor's top right, clear of the symbol keys along its foot (D-03.4)."""
+    ws = _ws(tmp_path, sys_size=(640, 480), font_scale=1)
+    drv = _drv(ws)
+    _open_editor(ws)
+    drv.frame(1 / 30)
+    ws._leave_menu()
+    drv.frame(1 / 30)
+    dev = ws.wm._wins["desktop"]
+    ed = ws.wm._wins["menu"]
+    assert ws.wm._player_view(dev)[2] == 1
+    assert dev.y < ed.y + ed.h // 2
 
 
 @pytest.mark.parametrize("dev", [True, False], ids=["playtest", "desk-run"])
@@ -499,7 +515,7 @@ def test_a_game_window_holds_its_game_whole_over_rounded_corners(tmp_path, dev):
     assert win.foot > 0
     cx, cy, cw, ch = win.content_rect()
     ox, oy, s = wm._player_view(win)
-    assert (s == 1) == dev
+    assert s >= 1
     assert (ox, oy) == (cx, cy)
     assert (cw, ch) == (ws.canvas.w * s, ws.canvas.h * s)
 

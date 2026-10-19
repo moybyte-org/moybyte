@@ -1072,6 +1072,22 @@ def pads(img, r):
     return ink[0] - x, x + w - 1 - ink[-1]
 
 
+def _covered(ws, r):
+    """Whether a window above the Editor's covers rect `r`'s middle on the
+    glass (a playtest over its tab strip): its pill shows no pads there."""
+    order = getattr(ws.wm, "_order", None) or []
+    wins = getattr(ws.wm, "_wins", {})
+    if "menu" not in order:
+        return False
+    mx, my = r[0] + r[2] // 2, r[1] + r[3] // 2
+    for key in order[order.index("menu") + 1:]:
+        w = wins.get(key)
+        if w is not None and not getattr(w, "minimized", False) \
+                and w.x <= mx < w.x + w.w and w.y <= my < w.y + w.h:
+            return True
+    return False
+
+
 def checks(ws, probe, img):
     """[(check, ok, detail)] of one render: the hero's mark under the bar
     (R2-01), every cover at a clean scale (R2-07), one focus mark under a
@@ -1095,7 +1111,7 @@ def checks(ws, probe, img):
                     "%d focus marks under the %s" % (
                         probe.marks, "pause menu" if ws.pause.open else "system menu")))
     for r, active in probe.last["tabs"]:
-        if not active or r[2] < 8 or r[3] < 6:
+        if not active or r[2] < 8 or r[3] < 6 or _covered(ws, r):
             continue
         p = pads(img, r)
         if p is not None:
@@ -1431,7 +1447,7 @@ def _current_pairs(ws, probe, img):
     tabs = probe.last["tabs"]
     out = []
     for r, active in tabs:
-        if not active or r[2] < 8:
+        if not active or r[2] < 8 or _covered(ws, r):
             continue
         x, y, w, h = r
         side = _colours(img, (x - 4, y + h // 4, 3, max(1, h // 2)), 1)
