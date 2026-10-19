@@ -90,8 +90,8 @@ to whoever called it.
   LEFT zone = LENT to the active app (`draw_zone`):
   the home shows the active tab's verbs on the selected card, the Editor its PROJECTS/tab-ladder/
   UNDO/REDO/PLAY icons. Icons are the theme's icon set where its look names
-  one (`runtime/iconsets.py`: a smooth set's masks or the 62-slot pixel
-  set), else 16×16 sprites from the editable `IconSheet` (Settings → EDIT
+  one (`runtime/iconsets.py`: a smooth set's masks or the pixel
+  set, a tile a slot of its `SLOTS`), else 16×16 sprites from the editable `IconSheet` (Settings → EDIT
   ICONS). **The bar hides entirely while a GAME plays** (the cart
   owns all 320×240); tools/apps run WITH the bar (Moy, back, title, status) so
   they're always exitable.
