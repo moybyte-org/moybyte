@@ -37,10 +37,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # (docs/look_2026-10.md step 25a); a theme without a depth draws the kernel's
 # chrome menu in the string table's capitals.
 _LOOK_TEXT = {"menu.cart": "Cart", "menu.restart_cart": "Restart cart",
-              "menu.delete_cart": "Delete cart", "menu.system": "System",
+              "menu.delete_cart": "Delete cart", "menu.favourite_add": "Add favourite",
+              "menu.favourite_remove": "Remove favourite", "menu.system": "System",
               "menu.clear_search": "Clear search", "menu.search": "Search",
               "menu.settings": "Settings", "menu.about": "About", "menu.reboot": "Restart"}
 _LOOK_ICON = {"menu.restart_cart": "rotate", "menu.delete_cart": "trash",
+              "menu.favourite_add": "new", "menu.favourite_remove": "del",
               "menu.clear_search": "search", "menu.search": "search",
               "menu.settings": "settings", "menu.about": "doc", "menu.reboot": "rotate"}
 
@@ -410,6 +412,20 @@ class SystemMenuUI:
         rows.append(_row("item", "menu.settings", self.ws.open_settings))
         rows.append(_row("item", "menu.about", self._menu_about))
         rows.append(_row("item", "menu.reboot", self._menu_reboot))
+        if cart is None and self.ws.screen == "launcher":
+            # over the home, after the system's rows: the selected card's
+            # star (#105), its title over the row that adds it to the
+            # favourites or takes it out
+            home = self.ws.launcher_layer
+            it = home.favourable()
+            if it is not None:
+                title = it.get("title") or ""
+                rows.append(("sep",))
+                rows.append(("header", title.upper(), None, "", title) if title
+                            else _row("header", "menu.cart"))
+                fav = self.ws.carts.is_favorite(it)
+                rows.append(_row("item", "menu.favourite_remove" if fav
+                                 else "menu.favourite_add", home.toggle_favourite))
         return rows
 
     def _deletable(self, cart):

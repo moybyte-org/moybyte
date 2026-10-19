@@ -4,6 +4,8 @@
     "menu.cart": "CART",
     "menu.restart_cart": "RESTART CART",
     "menu.delete_cart": "DELETE CART",
+    "menu.favourite_add": "ADD FAVOURITE",
+    "menu.favourite_remove": "REMOVE FAVOURITE",
     "menu.system": "SYSTEM",
     "menu.clear_search": "CLEAR SEARCH",
     "menu.search": "SEARCH",

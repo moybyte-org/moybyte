@@ -657,7 +657,10 @@ arrangement (step 18).
 | Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor fullscreen, pushed | NEW, CHANGE, COPY, DEL (two taps: DEL arms SURE?) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
-is Mine's, not Games'. Mine and Make hold the same carts under the two
+is Mine's, not Games'. Every tab's selected cart also takes the favourite
+star (#105): F on a keyboard, Y on a gamepad, a Favourite hint where the
+strip has room for it beside the tab keys, and a row in the system menu over the
+home. Mine and Make hold the same carts under the two
 personas of `docs/shell_ux_v1.md` §4 — a tap on Mine plays, a tap on Make
 edits (owner, 2026-10-13) — which narrows that section's "a launcher tap
 always RUNS" to the three tabs that launch (§16). The windowed tier's

@@ -264,3 +264,77 @@ def test_recent_carts_skips_a_deleted_cart(tmp_path):
 
     ws.system.set("desk_mru", ["nonexistent/path"] + ws.system.get("desk_mru"))
     assert all(c["path"] != "nonexistent/path" for c in ws.carts.recent())
+
+
+# -- the star without a pointer (R2-12) ----------------------------------------
+
+def _on_real_card(ws):
+    idx = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    ws.launcher.sel = idx
+    return ws.launcher.selected()
+
+
+def test_f_toggles_the_selected_cards_star(tmp_path):
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    cart = _on_real_card(ws)
+    drv.type_char(ord("f")); drv.frame(1 / 30)
+    assert ws.screen == "launcher"
+    assert ws.carts.is_favorite(cart) is True
+    drv.frame(1 / 30)
+    drv.type_char(ord("F")); drv.frame(1 / 30)
+    assert ws.carts.is_favorite(cart) is False
+
+
+class _PadY:
+    """A frame's input with a gamepad's Y pressed (the boards' fifteen-name
+    vocabulary; the host's keyboard has no Y)."""
+
+    def pressed(self, name):
+        return name == "y"
+
+
+def test_a_gamepads_y_toggles_the_star(tmp_path):
+    ws = _ws(tmp_path)
+    cart = _on_real_card(ws)
+    assert ws.launcher_layer.handle_input(_PadY())
+    assert ws.screen == "launcher"
+    assert ws.carts.is_favorite(cart) is True
+
+
+def test_the_new_card_takes_no_star_by_key(tmp_path):
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.set_home_tab("make")
+    ws.launcher.sel = 0
+    before = list(ws.system.get("favorites", []))
+    drv.type_char(ord("f")); drv.frame(1 / 30)
+    assert ws.system.get("favorites", []) == before
+
+
+def test_the_system_menu_over_the_home_stars_the_selected_card(tmp_path):
+    ws = _ws(tmp_path)
+    cart = _on_real_card(ws)
+    ws.toggle_sysmenu()
+    items = ws.sysmenu.items
+    labels = [it[1] for it in items if it[0] == "item"]
+    assert labels[0] == "SEARCH", "the menu still opens on the system's rows"
+    assert labels[-1] == "ADD FAVOURITE"
+    row = [it for it in items if it[0] == "item"][-1]
+    row[2]()
+    assert ws.carts.is_favorite(cart) is True
+    ws.toggle_sysmenu()
+    if not ws.sysmenu.open:
+        ws.toggle_sysmenu()
+    labels = [it[1] for it in ws.sysmenu.items if it[0] == "item"]
+    assert labels[-1] == "REMOVE FAVOURITE"
+
+
+def test_the_system_menu_offers_no_star_off_the_home(tmp_path):
+    ws = _ws(tmp_path)
+    ws.open_settings()
+    ws.toggle_sysmenu()
+    labels = [it[1] for it in ws.sysmenu.items if it[0] == "item"]
+    assert "ADD FAVOURITE" not in labels and "REMOVE FAVOURITE" not in labels

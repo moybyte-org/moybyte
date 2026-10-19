@@ -1033,8 +1033,11 @@ _KIND_NAME = {"game": "Game", "app": "App", "tool": "Tool", "wallpaper": "Wallpa
 _VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
               "change": ("C", "Change"), "search": ("/", "Search"),
               "new": ("N", "New"), "copy": ("Y", "Copy"),
-              "delete": ("X", "Delete"), "sure": ("X", "Sure?")}
+              "delete": ("X", "Delete"), "sure": ("X", "Sure?"),
+              "favourite": ("F", "Favourite")}
 _VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
+_FAVOURITE_KEY = "f"     # the selected card's star, on every tab that draws one
+_FAVOURITE_PAD = "Y"     # ...and a gamepad's button for it
 # The inputs (ui_draw.INPUTS) that type those letters: a gamepad has no C.
 _LETTER_INPUTS = ("keys", "tdeck")
 _TAB_KEYS = ("tabs", "Tabs")
@@ -2943,6 +2946,12 @@ class LauncherHomeLayer:
             items.append(k)
             items.append(words)
             verbs.append(v)
+        if self.favourable() is not None:
+            # the star last, where the strip has room for it (`_hint_spans`)
+            k, words = _VERB_HINT["favourite"]
+            items.append(k if tap is None else _FAVOURITE_PAD)
+            items.append(words)
+            verbs.append("favourite")
         return items, verbs
 
     def _confirm_verb(self, zone):
@@ -2972,6 +2981,8 @@ class LauncherHomeLayer:
         sp = _ui_draw.hints(cv, th, inner, _TAB_KEYS, desk, draw=False)
         if sp:
             dx = rect[0] + rect[2] - self._hint_pad() - sp[0][1]
+            if out and out[-1][0] == "favourite" and sp[0][0] + dx <= out[-1][2]:
+                out.pop()                # no room for the star beside the tabs
             if not out or sp[0][0] + dx > out[-1][2]:
                 out.append(("tabs", sp[0][0] + dx, sp[0][1] + dx))
         return out, rect
@@ -3060,7 +3071,8 @@ class LauncherHomeLayer:
 
     def _hint_keys(self, i):
         """The hint strip's keys, typed (an edge: a held key acts once):
-        C, /, N, Y and X the verbs it names, Q and E the tabs."""
+        C, /, N, Y and X the verbs it names, Q and E the tabs, F the
+        selected card's favourite star."""
         k = self.ws.input.last_key
         prev = self._kprev
         self._kprev = k
@@ -3070,6 +3082,8 @@ class LauncherHomeLayer:
         if ch in ("q", "e"):
             self.ws.step_home_tab(-1 if ch == "q" else 1, self.grid)
             return True
+        if ch == _FAVOURITE_KEY:
+            return self.toggle_favourite()
         v = _VERB_KEY.get(ch)
         if v == "delete" and self._armed():
             v = "sure"
@@ -3157,10 +3171,31 @@ class LauncherHomeLayer:
             # CHANGE (visual identity v1 Section 1.2): open the selected cartridge
             # in place in the Studio/Editor, landing on Config.
             ws.defer(self._change)
+        if i.pressed("y"):
+            self.toggle_favourite()          # a gamepad's Y: the star
         if i.pressed("b") and ws.ach_ui._konami_pos == 0:
             self._back()                     # (a B inside the Konami code is the code's)
         elif i.pressed("home"):
             ws.home_key()
+        return True
+
+    def favourable(self):
+        """The selected card where it takes the favourite star (a cart of
+        the store's on a home that keeps favourites), else None."""
+        grid = self.grid
+        it = grid.selected()
+        if grid.favorite_for is None or it is None or not it.get("path") \
+                or it.get("type") in PSEUDO_TILE_TYPES:
+            return None
+        return it
+
+    def toggle_favourite(self):
+        """Star or unstar the selected card (the badge's tap, F, a gamepad's
+        Y, the system menu's row); False where it takes no star."""
+        it = self.favourable()
+        if it is None:
+            return False
+        self.ws.carts.toggle_favorite(it)
         return True
 
     def _back(self):
@@ -3244,7 +3279,7 @@ class LauncherHomeLayer:
                     return True
             frect = grid.favorite_rect(grid.sel)
             if frect is not None and _in(px, py, frect):
-                ws.carts.toggle_favorite(grid.selected())
+                self.toggle_favourite()
                 return True
             if self._carousel() and grid.desk() and self._details_tap(px, py):
                 return True
@@ -3458,6 +3493,8 @@ class LauncherHomeLayer:
         elif verb == "sure":
             self._delete.disarm()
             ws.carts.delete(self.grid.selected())
+        elif verb == "favourite":
+            self.toggle_favourite()
         else:
             ws.toggle_search()
         ws.mark_dirty()

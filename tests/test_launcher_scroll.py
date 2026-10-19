@@ -494,7 +494,9 @@ def test_the_tabs_are_the_bars_and_the_verbs_the_hint_strips(tmp_path):
     ws.set_home_tab("games")
     drv.frame(1 / 30)
     hints = home._zone_action_rects(None)
-    assert tuple(hints) == home.zone_verbs() == ("play", "change", "search")
+    assert home.zone_verbs() == ("play", "change", "search")
+    # the selected card's star after them, where the strip has room (R2-12)
+    assert tuple(hints) == home.zone_verbs() + ("favourite",)
     strip = ws.launcher.foot()[5]
     for x, y, w, h in hints.values():
         assert strip[1] <= y and y + h <= strip[1] + strip[3]
@@ -507,7 +509,8 @@ def test_the_tabs_are_the_bars_and_the_verbs_the_hint_strips(tmp_path):
 @pytest.mark.parametrize("kind", ["keys", "tdeck", "pad"])
 def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkeypatch):
     """A keyboard types every verb's letter; a gamepad has no C or /, so
-    its strip names only the verb its confirm does, on that key."""
+    its strip names only the verb its confirm does, on that key. The
+    selected cart's favourite star follows, on F or the gamepad's Y."""
     from runtime import ui_draw
 
     ws = _ws_with_carts(tmp_path, 10)
@@ -517,10 +520,11 @@ def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkey
         ui_draw.input_kind(kind)
         items, verbs = home._hint_groups()
         if kind == "pad":
-            assert (items, verbs) == (["confirm", "Play"], ["play"])
+            assert (items, verbs) == (["confirm", "Play", "Y", "Favourite"],
+                                      ["play", "favourite"])
         else:
-            assert verbs == ["play", "change", "search"]
-            assert items[::2] == ["confirm", "C", "/"]
+            assert verbs == ["play", "change", "search", "favourite"]
+            assert items[::2] == ["confirm", "C", "/", "F"]
         ws.set_home_tab("make")
         assert home._hint_groups()[1] == ["new"], "the + New card"
         # a project selected
