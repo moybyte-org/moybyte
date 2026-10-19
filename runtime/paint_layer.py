@@ -857,19 +857,35 @@ class PaintLayer:
 
     def _draw_grid_overlay(self, cv, lay, pe, gx0, gy0, cell):
         """Overlay the active selection marquee and the live shape/select drag preview
-        on the zoomed grid (#90). The committed selection is a solid white box; a live
-        SELECT drag is a yellow box; a live RECT/LINE/OVAL drag stamps the shape's cells
-        in the current ink with a white outline so it reads even when ink == background.
+        on the zoomed grid (#90). The committed selection and a live SELECT drag
+        are one two-toned ring (design review R4-02): a line of `ink` on and
+        outside the box's grid lines, then one of `surface` within, as the
+        colour in use and the map's sprite are marked -- never a palette
+        colour, so one tone reads against the grid's lines and any pixel in
+        every theme. A live RECT/LINE/OVAL drag stamps the shape's cells in the
+        current ink with a white outline so it reads even when ink == background.
         Called after the grid pixels + tile boundaries; a no-selection / no-drag editor
         draws nothing (baseline parity)."""
         NAMES = self._NAMES
+        th = self.ws.theme_colors
+        t = 2 if lay.desk else lay.fs
+        lines = 1 if cell >= 6 else 0
 
-        def box(x0, y0, x1, y1, c):
-            cv.rectb(gx0 + x0 * cell, gy0 + y0 * cell,
-                     (x1 - x0 + 1) * cell, (y1 - y0 + 1) * cell, c)
+        def ring(x0, y0, x1, y1):
+            x = gx0 + x0 * cell
+            y = gy0 + y0 * cell
+            w = (x1 - x0 + 1) * cell
+            h = (y1 - y0 + 1) * cell
+            # on the box's own grid lines, where the grid draws them, and out
+            for i in range(t):
+                cv.rectb(x - 1 - i, y - 1 - i, w + 2 - lines + 2 * i,
+                         h + 2 - lines + 2 * i, th["ink"])
+            for i in range(t):
+                cv.rectb(x + i, y + i, w - lines - 2 * i, h - lines - 2 * i,
+                         th["surface"])
 
         if pe.sel is not None:
-            box(pe.sel[0], pe.sel[1], pe.sel[2], pe.sel[3], NAMES["white"])
+            ring(pe.sel[0], pe.sel[1], pe.sel[2], pe.sel[3])
         if self._shape_start is not None and self._shape_end is not None:
             s, e = self._shape_start, self._shape_end
             if pe.tool == pe.SELECT:
@@ -877,7 +893,7 @@ class PaintLayer:
                 x1 = s[0] if s[0] > e[0] else e[0]
                 y0 = s[1] if s[1] < e[1] else e[1]
                 y1 = s[1] if s[1] > e[1] else e[1]
-                box(x0, y0, x1, y1, NAMES["yellow"])
+                ring(x0, y0, x1, y1)
             else:
                 ink = 0 if pe.erase else pe.color
                 for (x, y) in pe.shape_points(s[0], s[1], e[0], e[1]):
