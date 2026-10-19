@@ -650,7 +650,7 @@ def tab_row_rects(rect, tabs, fs, gap=None):
 
     def chip_w(label, labels_on):
         if labels_on and label:
-            return icon_w + pad + len(str(label).encode('utf-8')) * fw + pad
+            return pad + icon_w + pad + len(str(label).encode('utf-8')) * fw + pad
         return icon_w + 2 * pad
     labels_on = True
     total = 0

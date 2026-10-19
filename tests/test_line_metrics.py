@@ -199,6 +199,25 @@ def test_tabs_are_as_wide_as_their_labels_and_never_overlap(sample, fs):
 
 
 @pytest.mark.parametrize("fs", [1, 2])
+def test_a_labelled_tab_ends_its_label_a_pad_inside_its_chip(sample, fs):
+    """A labelled chip is pad, icon, pad, label, pad: the label's ink stops
+    a pad short of the chip's right edge, as the icon starts a pad in (the
+    open tab's pill ended on its label's last letter)."""
+    pad = ui_draw.metrics("tab")[ui_draw.TAB_PAD] * fs
+    rect = (0, 0, 400, 20 * fs)
+    for label in ("Code", "Sprites", "MAP"):
+        (_tid, (x, y, w, h), on), = ui_draw.tab_row_rects(rect, [("t", label)], fs)
+        assert on
+
+        def draw(cv, text, r=(x, y, w, h), label=label):
+            ui_draw.tab(cv, TH, r, False, label if text else "", True)
+
+        box = _ink(draw, w=400, h=20 * fs, fs=fs)
+        assert box[0] >= x + 2 * pad + ui_draw.metrics("tab")[ui_draw.TAB_ICON] * fs
+        assert box[2] <= x + w - pad, (label, box, (x, w))
+
+
+@pytest.mark.parametrize("fs", [1, 2])
 def test_a_frames_title_stays_clear_of_its_buttons(sample, fs):
     win, th_ = (10, 10, 180, 100), 18 * fs
 

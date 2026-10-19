@@ -998,6 +998,8 @@ int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int
 
 // The tab chips laid left to right (draw-what-fits; every tab collapses to
 // its icon when the labelled row would not fit). `labels` are NUL-separated.
+// A labelled chip is its pad, icon, pad, label and pad: the label ends a pad
+// inside the chip, as the icon starts one.
 int moy_ui_tab_rects(moy_ui_box_t r, const uint8_t *labels, size_t len, int count, int fs,
                      int gap, moy_ui_box_t *out, int *labels_on) {
     int pad = metric(MOY_UI_K_TAB, MOY_UI_M_TAB_PAD) * fs;
@@ -1014,7 +1016,7 @@ int moy_ui_tab_rects(moy_ui_box_t r, const uint8_t *labels, size_t len, int coun
             e++;
         }
         int n = (int)(e - at);
-        total += (n ? icon_w + pad + t_w(&f, labels + at, (size_t)n, fs) + pad
+        total += (n ? pad + icon_w + pad + t_w(&f, labels + at, (size_t)n, fs) + pad
                     : icon_w + 2 * pad) + gap;
         at = e + 1;
     }
@@ -1028,7 +1030,7 @@ int moy_ui_tab_rects(moy_ui_box_t r, const uint8_t *labels, size_t len, int coun
             e++;
         }
         int n = (int)(e - at);
-        int cw = (on && n) ? icon_w + pad + t_w(&f, labels + at, (size_t)n, fs) + pad
+        int cw = (on && n) ? pad + icon_w + pad + t_w(&f, labels + at, (size_t)n, fs) + pad
                            : icon_w + 2 * pad;
         if (x + cw > r.x + r.w) {
             break;
