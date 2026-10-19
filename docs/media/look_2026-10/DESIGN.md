@@ -59,7 +59,7 @@ buttons, fields), which takes `style`; `card` and `small` absent mean
 |---|---|---|
 | `ring` | an outline outside the part; on a small part, a tinted plate and a 1.5 px ring inside its own box | `ring.w`, `ring.gap`, `ring.alpha`; `outline` |
 | `plate` | the part tinted in `accent` | `plate.alpha` (light, dark) |
-| `lift` | the part grown and raised over a neutral offset shadow, with a 1 px rim; on a card, its picture | `lift.grow`, `lift.rise`, `lift.rim` (a colour or role, and its alpha) |
+| `lift` | the part grown and raised over a neutral offset shadow, with a 1 px rim; on a card, its chrome grown and its picture raised at its own clean side, on the card's plate (owner call 2026-10-17: never a non-clean scale) | `lift.grow`, `lift.rise`, `lift.rim` (a colour or role, and its alpha) |
 | `edge` | a bar the full height of a row on its leading edge; under a part not three times wider than tall | `edge.w` |
 | `underline` | a bar under the glyph, inside the part's box | `underline.w` |
 | `invert` | the part filled in `accent`, its ink flipped | — |

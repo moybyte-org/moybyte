@@ -1154,7 +1154,7 @@ class Carousel(Launcher):
         the class in force. A card is square (a cover is, SPEC.md 3.6) and
         shows its whole cover at a clean scale (`_clean_side`)."""
         lay = self.layout
-        reach = _ui_draw.mark_reach()          # the centre card's focus mark
+        reach = _ui_draw.mark_reach("card")    # the centre card's focus mark
         keys = _ui_draw.input_kind() != "touch"    # touch shows no hint strip
         if self._g_lay is lay and self._g_reach == reach and self._g_keys == keys:
             return self._g
@@ -1947,6 +1947,20 @@ class Carousel(Launcher):
         else:
             self._draw_hh_cover(cv, it, rect, centre)
 
+    def _lifted(self, cv, at, box):
+        """The picture rect of a card at `at` whose focus mark draws in
+        `box`: `at` itself, or, where a lift grew the box, the card's own
+        side centred in it -- raised with the box, on the card's plate (its
+        `surface`) out to the grown edge -- so the cover keeps its clean
+        scale (owner call 2026-10-17) and the lift grows the chrome."""
+        if box[2] == at[2] and box[3] == at[3]:
+            return box
+        cv.rrect(box[0], box[1], box[2], box[3], self._corner_r(at[2]),
+                 (self.theme or {}).get("surface", 0),
+                 stepped=bool(_ui_draw.depth()[5]))
+        return (box[0] + (box[2] - at[2]) // 2, box[1] + (box[3] - at[3]) // 2,
+                at[2], at[3])
+
     def _draw_home_card(self, cv, it, rect, centre, sheet_for):
         NAMES = self._NAMES
         th = self.theme or {}
@@ -1956,8 +1970,9 @@ class Carousel(Launcher):
         mark = centre and not self.moving and marks and not self.tab_focus
         at = rect
         if mark:
-            _ink, rect = _ui_draw.focus(cv, self.theme, at, size="card",
-                                        r=self._corner_r(at[2]))
+            _ink, box = _ui_draw.focus(cv, self.theme, at, size="card",
+                                       r=self._corner_r(at[2]))
+            rect = self._lifted(cv, at, box)
         self._draw_picture(cv, it, rect, centre, sheet_for)
         if centre and self.favorite_for is not None and not self.moving \
                 and not self.desk() \
