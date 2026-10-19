@@ -51,7 +51,9 @@ def _uninstall(monkeypatch):
     monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", g._COVER_SLICE_UNBOUNDED)
     yield
     import moy_ui
+    from runtime import iconsets
     moy_ui.theme_uninstall()
+    iconsets.reset()                # the sets' masks back out of the font rows
 
 
 @pytest.mark.parametrize("theme,mode", THEMES)

@@ -1129,6 +1129,8 @@ def run(out, filters=(), step=None, theme=None, variant=None, quiet=False, parts
         return rows
     finally:
         cover_cache._COVER_SLICE_MS, g._CLOCK = saved
+        from runtime import iconsets
+        iconsets.reset()            # the sets' masks back out of the font rows
 
 
 def _report(out, name, report, audit_csv, fails, quiet):
