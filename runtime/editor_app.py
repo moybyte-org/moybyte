@@ -138,9 +138,9 @@ _TAB_CHIPS = (
 )
 
 # The slot of a theme's icon set (runtime/iconsets.py) a ladder icon draws
-# where it differs from the IconSheet's kind: the 2026-10 look's gear for
-# Config and face for Sprites (docs/media/look_2026-10/editor_bar_all_themes.png).
-_SET_KIND = {"edit": "settings", "paint": "sprite", "run": "play"}
+# where it differs from the IconSheet's kind: the sliders for Config (the gear
+# is Settings', owner 2026-10-19) and the face for Sprites.
+_SET_KIND = {"edit": "sliders", "paint": "sprite", "run": "play"}
 
 # The `ws` attribute holding each tab's layout owner -- the object whose
 # `relayout(w, h, fs, cs)` rebuilds that tab's geometry from the live canvas
