@@ -389,7 +389,7 @@ def test_the_name_is_stored_on_enter_not_a_keystroke_at_a_time(tmp_path):
     drv.frame(1 / 30)
     assert writes.count("name") == 1
     assert _stored_name(tmp_path) == "Kit"
-    assert ws.settings_layer._focused == "Name", "Enter keeps focus in the field"
+    assert ws.settings_layer._focused != "Name", "Enter is Done: focus leaves the field"
 
 
 def test_focus_leaving_the_name_field_stores_it(tmp_path):

@@ -1357,7 +1357,7 @@ class SettingsLayer:
 
     def _rows_page(self):
         _ui.page("")
-        _ui.hints(_HINTS.get(self._kinds.get(self._focused), _HINT_OPEN))
+        _ui.hints(_HINTS.get(self._kinds.get(_ui.focus()), _HINT_OPEN))
         ws = self.ws
         sheet = ws.icon_spec() is None        # EDIT ICONS paints the IconSheet
         for caption, rows in self._grouped():

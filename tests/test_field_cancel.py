@@ -64,6 +64,23 @@ def test_the_tdeck_mic_cancels_the_field_and_puts_its_text_back(tmp_path):
     assert not sl.editing_field() and ws.screen == "settings"
 
 
+def test_the_strip_follows_focus_out_of_the_field_in_the_same_frame(tmp_path, monkeypatch):
+    """Once the field is cancelled the next frame's strip names the row
+    focus moved to, not the field's Done and Cancel (seen on glass: the
+    page settled with the field's strip under Brightness)."""
+    from runtime import settings_layer
+    ws, drv, sl = _name_field(tmp_path)
+    drawn = []
+    real = settings_layer._ui.hints
+    monkeypatch.setattr(settings_layer._ui, "hints",
+                        lambda items, *a: (drawn.append(tuple(items)), real(items, *a))[1])
+    ui_draw.input_kind("tdeck")
+    _tdeck_frame(ws, MIC, text=True)
+    ws._dirty = True
+    drv.frame(_DT)
+    assert drawn[-1] != settings_layer._HINT_TYPE, drawn[-1]
+
+
 def test_mic_outside_a_field_is_still_the_console_key(tmp_path):
     ws, drv, sl = _name_field(tmp_path)
     ui_draw.input_kind("tdeck")

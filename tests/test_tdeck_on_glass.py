@@ -417,6 +417,53 @@ def test_the_homes_letter_keys_arrive_from_the_matrix(board):
         board.drain(0.5)
 
 
+def _glass_key(board, k):
+    board.pyexec("ws.input.source('local').key(%d)" % k, strict=True)
+    board.drain(0.4)
+
+
+def _glass_start(board):
+    """One press of `start` with the T-Deck's keys the input in use."""
+    board.pyexec("import ui_draw; ui_draw.input_kind('tdeck'); "
+                 "ws.input.source('local').set_button('start', True)", strict=True)
+    board.drain(0.3)
+    board.pyexec("ws.input.source('local').set_button('start', False)", strict=True)
+    board.drain(0.3)
+
+
+def test_a_field_reads_the_matrix_and_mic_cancels_it(board):
+    """Owner call 2026-10-18: in a field Enter is Done and Mic is Cancel.
+    The Name field keeps the keyboard on the matrix (where Mic shows; the
+    C3's ASCII mode sends nothing for it), a Mic press puts the typed text
+    back, Enter keeps it, and Mic outside the field opens the system menu.
+    The keys are queued into the console's table, Mic as `start`: a person
+    pressing them is the one step no suite takes."""
+    was = board.pyval("ws.system.get('name', '')", strict=True)
+    try:
+        board.pyexec("ws.open_settings(); ws.settings_layer.show_row('name')", strict=True)
+        board.drain(0.8)
+        assert board.pyval("ws.settings_layer.editing_field()", strict=True) is True
+        assert board.pyval("ws.input.text_mode", strict=True) is True
+        assert board.pyval("ws.keyboard.raw_mode", strict=True) is True, \
+            "a text surface reads the matrix"
+        _glass_key(board, ord("q"))
+        _glass_start(board)
+        assert board.pyval("ws.system.get('name', '')", strict=True) == was
+        assert board.pyval("ws.settings_layer.editing_field()", strict=True) is False
+        assert board.pyval("ws.sysmenu.open", strict=True) is False
+        board.pyexec("ws.settings_layer.show_row('name')", strict=True)
+        board.drain(0.5)
+        _glass_key(board, ord("z"))
+        _glass_key(board, 13)
+        assert board.pyval("ws.system.get('name', '')", strict=True) == (was or "") + "z"
+        _glass_start(board)                       # outside the field: the console's key
+        assert board.pyval("ws.sysmenu.open", strict=True) is True
+    finally:
+        board.pyexec("ws.sysmenu.close(); ws.popover_touch(); ws.go_home()", strict=True)
+        board.pyval("ws.system.set('name', %r)" % (was,))   # a flash write: its own line
+        board.drain(0.5)
+
+
 def test_a_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "star")
 
