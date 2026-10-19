@@ -386,6 +386,10 @@ _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
 # the system menu's own, and a desk popover frame's that paints it alone.
 _PAUSE_LAYERS = ("pause",)
 _SYSMENU_LAYERS = ("sysmenu", "popover_over")
+# The inputs that type (`Workstation.can_type`), and what a text field says
+# where the input in use cannot.
+_TYPING_INPUTS = ("keys", "tdeck")
+NO_KEYBOARD_TEXT = "Pair a keyboard to type"
 
 try:
     import ui_draw as _ui_draw
@@ -644,6 +648,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # board declares them, and then the source names' kinds.
     input_kinds = None
     _news = None
+    # A soft keyboard the board offers beside its inputs (the browser page's).
+    soft_keyboard = False
+    no_keyboard_text = NO_KEYBOARD_TEXT
 
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1, panel_diagonal_in=None):
@@ -2837,6 +2844,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # stays as the tested ws. entry point (cards_layer/block_editor_ui + tests +
         # the _open_* forwards call it).
         self.editor_app.set_tab(view)
+
+    def can_type(self):
+        """Can the input in use type into a text field? A keyboard can (the
+        desk's, the T-Deck's), and so can a page that offers its own soft
+        keyboard (`soft_keyboard`, the browser's). Touch alone or a gamepad
+        cannot, and a field there says NO_KEYBOARD_TEXT in place of a hint
+        that promises a keystroke (#239 is the on-screen keyboard)."""
+        return self.soft_keyboard or _ui_draw.input_kind() in _TYPING_INPUTS
 
     def sync_keyboard_mode(self):
         """Put the board's keyboard in the mode of the surface on top, as

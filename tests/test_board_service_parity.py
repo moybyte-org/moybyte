@@ -416,6 +416,10 @@ NOT_A_SERVICE = {
                  "LIVE value (dev_channel._remote_state's psave field). Both "
                  "boards set it beside their IdleBlank; the host and web have "
                  "no panel to blank",
+    "soft_keyboard": "a fact about the page, not a backend: its ⌨ summons the "
+                     "browser's own keyboard, so a text field can be typed "
+                     "under touch there (Workstation.can_type). The boards "
+                     "have no such keyboard and keep the class default",
 }
 
 

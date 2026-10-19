@@ -2483,6 +2483,7 @@ class LauncherHomeLayer:
         return _statics_base(ws, cv, self.grid) + (
             ws.look.wallpaper_id,
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
+            getattr(ws, "search_typing", False) and ws.can_type(),
             self.grid.tab, self._tab_focus, self._button_focus, self.grid.arrangement,
             self.grid.statics_sel())
 
@@ -2839,12 +2840,20 @@ class LauncherHomeLayer:
         query = getattr(ws, "search_query", "")
         typing = getattr(ws, "search_typing", False)
         if self.searchable and (query or typing):
-            label = "SEARCH: " + query + ("_" if typing else "")
+            label = self._search_label(query, typing)
             sx = x1 + 4 * p
             label = _ui_draw.print_fit(label, max(6 * lay.font_w, tx + tw - sx - p), fs)
             w = _ui_draw.print_width(label, fs) + 2 * p
             cv.rect(sx - p, ty - p, w + p, tht + 2 * p, th["surface"])
             cv.print(label, sx, ty + (tht - lay.line_h) // 2, th["ink"], 1)
+
+    def _search_label(self, query, typing):
+        """The search box's words: the query and its caret while typed, or,
+        where the input in use cannot type, that a keyboard is needed (#239
+        is the on-screen keyboard)."""
+        if typing and not query and not self.ws.can_type():
+            return self.ws.no_keyboard_text
+        return "SEARCH: " + query + ("_" if typing else "")
 
     def card_verbs(self):
         """The selected card's verbs beyond its tap, the ONE list every
@@ -3145,8 +3154,7 @@ class LauncherHomeLayer:
             _ui_draw.hints(cv, th, self._hint_inner(rect), items[:2 * n], desk)
         elif self.searchable and (query or typing):
             fs = self.ws.layout.fs
-            label = "SEARCH: " + query + ("_" if typing else "")
-            label = _ui_draw.print_fit(label, rect[2] // 2, fs)
+            label = _ui_draw.print_fit(self._search_label(query, typing), rect[2] // 2, fs)
             ink = th["ink"] if _ui_draw.depth()[0] else th["chrome_ink"]
             cv.print(label, rect[0] + pad,
                      rect[1] + (rect[3] - self.ws.layout.line_h) // 2, ink, 1)
