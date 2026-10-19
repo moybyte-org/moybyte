@@ -686,3 +686,10 @@ def test_a_single_mode_theme_offers_no_mode(tmp_path):
     assert app._modes("contrast") == ("Light", "Dark")
     assert "Mode" not in app._kinds and "Accent" in app._kinds
     assert app._status(app.choices()).startswith("Blocks Light")
+
+
+def test_the_desk_foots_status_column_is_the_rows_label_inset():
+    """AppearanceLayout.LABEL_X, where the desk foot's status starts, is
+    style.json's `group` `pad`: where a desk row's label starts (design
+    review R3-27)."""
+    assert page.AppearanceLayout.LABEL_X == ui_draw.metrics("group")[1]

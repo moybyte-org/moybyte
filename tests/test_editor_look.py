@@ -312,3 +312,52 @@ def test_the_two_sprite_tool_rows_stand_in_columns(tmp_path, config, theme, mode
     for a, b in zip(row1, row2):
         assert (a[0], a[2]) == (b[0], b[2]), (a, b)
 
+
+# The desk Appearance window, the target's (tools/look_shots.py's
+# `_desk_appearance`).
+APPEARANCE_WIN = (226, 65, 680, 510)
+
+
+def _desk_appearance(ws):
+    ws.open_desk()
+    ws.open_app(ws._apps_by_id["appearance"])
+    _frame(ws, 2)
+    win = _place(ws, "appearance", APPEARANCE_WIN)
+    _frame(ws)
+    app = ws._apps_by_id["appearance"]
+    return getattr(app, "app", app), win
+
+
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_the_desk_appearance_foot_sits_on_the_rows_column_and_inset(tmp_path, theme, mode):
+    """The window's foot: the theme's status starts on the rows' label
+    column (where a desk row's label starts), and stands centred between
+    the foot's rule and the frame's bottom, as far from the bottom as the
+    rows from the sides (design review R3-27: 2 px left of the rows, 27 px
+    above the bottom)."""
+    ws = _ws(tmp_path, DESK, theme, mode)
+    app, win = _desk_appearance(ws)
+    lay = win.ctx.app_layouts["appearance"]
+    cx, cy, _cw, _ch = win.content_rect()
+    px = _px(ws)
+    bx, _by, bw, _bh = lay.body
+    fx, fy, _fw, fh = lay.foot
+    ground = px[cy + fy + 4][cx + bx + bw // 2]
+    # the status's ink: the rows between the rule and the frame's bottom,
+    # left of the hints
+    rule = cy + fy
+    bottom = win.y + win.h - 1 - win.edge             # the frame's inside bottom edge
+    cols = range(cx + bx, cx + bx + bw // 2)
+    rows = [y for y in range(rule + 1, bottom) if any(px[y][x] != ground for x in cols)]
+    assert rows, "no status"
+    above, below = rows[0] - rule - 1, bottom - rows[-1] - 1
+    # centred by the face's line box, which holds its ink a pixel or two
+    # off its middle
+    assert abs(above - below) <= 3, (above, below)
+    assert below <= 17, below
+    # on the rows' label column: the desk rows' label inset, style.json's
+    # group pad
+    from runtime import ui_draw
+    pad = ui_draw.metrics("group")[1] * lay.fs
+    x0 = _ink_left(px, cx + bx, cx + bx + bw // 2, rows[0], rows[-1] + 1, ground)
+    assert 0 <= x0 - (cx + bx + pad) <= lay.fs, (x0 - cx - bx, pad)

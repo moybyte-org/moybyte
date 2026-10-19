@@ -35,9 +35,9 @@ backs out.
 """
 
 try:
-    from layout_base import bar_rows, content_of, metric_class, DESK
+    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import bar_rows, content_of, metric_class, DESK
+    from runtime.layout_base import bar_rows, content_of, metric_class, window_foot, DESK
 
 try:
     from moy_store_base import BUILTIN_NS, builtin_name
@@ -174,7 +174,10 @@ class AppearanceLayout:
     # (fs-scaled).
     MIN_W = 310
     MIN_H = 230
-    FOOT = 44            # the desk's foot band (the target's)
+    FOOT = 44            # the desk's foot (the target's): the rule to the frame's bottom
+    # Where a desk row's label starts in the body: style.json's `group` `pad`
+    # (held to it by tests/test_appearance_app.py), the foot's status's x.
+    LABEL_X = 10
 
     def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self.w = int(w)
@@ -188,8 +191,16 @@ class AppearanceLayout:
         self.cx, self.cy, self.cw, self.ch = content_of(
             self.w, self.h, 0 if windowed else bar_rows(self.cs))
         content = (self.cx, self.cy, self.cw, self.ch)
+        self.under = 0
         if self.desk:
-            self.foot, body = ui.cut_bottom(content, self.FOOT)
+            # In a window the frame's rounded foot (`window_foot`) is the
+            # foot's last rows: the rule drops by it, leaving the rows' region
+            # its height with a blank under it, and the status stands as far
+            # from the frame's bottom as the rows from its sides (design
+            # review R3-27).
+            self.under = window_foot() if self.windowed else 0
+            foot, body = ui.cut_bottom(content, self.FOOT)
+            self.foot = (foot[0], foot[1] + self.under, foot[2], foot[3] - self.under)
             self.body = ui.inset(body, 16, 0)
             # The pictures: the target's 192 x 112, three to a 680 window.
             self.card = (192, 112)
@@ -525,16 +536,19 @@ class AppearanceAppLayer:
             ui.hints(items)
             return
         x, y, w, h = lay.foot
+        h += lay.under                # centred between the rule and the frame's bottom
         bx, _by, bw, _bh = lay.body
         cv.rect(bx, y, bw, 1, th["border"])
         hw = ui.hints_width(items)
-        # The status: the body face in the dim ink, quieter than the rows.
+        # The status: the body face in the dim ink, quieter than the rows,
+        # on the rows' label column.
         ui.face("ui")
         text = self._status(ch)
-        room = max(0, bw - hw - 8)
+        room = max(0, bw - hw - lay.LABEL_X)
         while len(text) > 1 and ui.text_size(text)[0] > room:
             text = text[:-1]
-        cv.print(text, bx + 8, y + 1 + (h - 1 - ui.text_size(text)[1]) // 2, th["ink_dim"])
+        cv.print(text, bx + lay.LABEL_X, y + 1 + (h - 1 - ui.text_size(text)[1]) // 2,
+                 th["ink_dim"])
         ui.face()
         ui.at(bx + bw - hw, y + 1, hw, h - 1)
         ui.hints(items)
