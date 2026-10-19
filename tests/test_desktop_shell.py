@@ -177,7 +177,10 @@ def test_status_strip_menu_opens_settings_from_home(tmp_path):
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     assert ws.sysmenu.open
-    drv.press("down"); drv.frame(1 / 30)                    # SEARCH -> SETTINGS
+    for _ in range(len(ws.sysmenu.items)):                  # past the card's group
+        if ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS":
+            break
+        drv.press("down"); drv.frame(1 / 30); drv.frame(1 / 30)
     drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)    # activate SETTINGS
     assert ws.screen == "settings"
 

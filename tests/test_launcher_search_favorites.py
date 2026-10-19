@@ -80,7 +80,8 @@ def test_sysmenu_search_row_opens_typing_and_filters_live(tmp_path):
     ws.toggle_sysmenu()
     labels = [it[1] for it in ws.sysmenu.items if it[0] == "item"]
     assert "SEARCH" in labels
-    drv.press("a"); drv.frame(1 / 30)          # activates the first selectable row (SEARCH)
+    ws.sysmenu.sel = [it[1:2] for it in ws.sysmenu.items].index(("SEARCH",))
+    drv.press("a"); drv.frame(1 / 30)          # activates SEARCH
     assert ws.search_typing is True
     assert ws.input.text_mode is True
     assert not ws.sysmenu.open
@@ -104,6 +105,7 @@ def test_sysmenu_search_row_opens_typing_and_filters_live(tmp_path):
     ws.toggle_sysmenu()
     labels = [it[1] for it in ws.sysmenu.items if it[0] == "item"]
     assert "CLEAR SEARCH" in labels
+    ws.sysmenu.sel = [it[1:2] for it in ws.sysmenu.items].index(("CLEAR SEARCH",))
     drv.press("a"); drv.frame(1 / 30)
     assert ws.search_query == ""
     assert len(_real_items(ws)) > 1
@@ -287,19 +289,20 @@ def test_f_toggles_the_selected_cards_star(tmp_path):
     assert ws.carts.is_favorite(cart) is False
 
 
-class _PadY:
-    """A frame's input with a gamepad's Y pressed (the boards' fifteen-name
-    vocabulary; the host's keyboard has no Y)."""
+class _PadX:
+    """A frame's input with a gamepad's X pressed (the boards' fifteen-name
+    vocabulary; the host's keyboard has no X button)."""
 
     def pressed(self, name):
-        return name == "y"
+        return name == "x"
 
 
-def test_a_gamepads_y_toggles_the_star(tmp_path):
+def test_a_gamepads_x_opens_the_cards_verbs_the_star_first(tmp_path):
     ws = _ws(tmp_path)
     cart = _on_real_card(ws)
-    assert ws.launcher_layer.handle_input(_PadY())
-    assert ws.screen == "launcher"
+    assert ws.launcher_layer.handle_input(_PadX())
+    assert ws.screen == "launcher" and ws.sysmenu.open
+    ws.sysmenu.activate()                    # the cursor's first row: the star
     assert ws.carts.is_favorite(cart) is True
 
 
@@ -320,16 +323,15 @@ def test_the_system_menu_over_the_home_stars_the_selected_card(tmp_path):
     ws.toggle_sysmenu()
     items = ws.sysmenu.items
     labels = [it[1] for it in items if it[0] == "item"]
-    assert labels[0] == "SEARCH", "the menu still opens on the system's rows"
-    assert labels[-1] == "ADD FAVOURITE"
-    row = [it for it in items if it[0] == "item"][-1]
+    assert labels[0] == "ADD FAVOURITE", "the menu opens on the card's group (R3-18)"
+    row = [it for it in items if it[0] == "item"][0]
     row[2]()
     assert ws.carts.is_favorite(cart) is True
     ws.toggle_sysmenu()
     if not ws.sysmenu.open:
         ws.toggle_sysmenu()
     labels = [it[1] for it in ws.sysmenu.items if it[0] == "item"]
-    assert labels[-1] == "REMOVE FAVOURITE"
+    assert labels[0] == "REMOVE FAVOURITE"
 
 
 def test_the_system_menu_offers_no_star_off_the_home(tmp_path):

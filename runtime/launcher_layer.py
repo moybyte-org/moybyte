@@ -1030,17 +1030,21 @@ def _clean_side(limit):
 
 _KIND_NAME = {"game": "Game", "app": "App", "tool": "Tool", "wallpaper": "Wallpaper"}
 # The home's hint strip (steps 17 and 18): each verb's key and words. The
-# keys stay off the T-Deck keyboard's buttons (moy_kbd.c: w a s d, l, k).
+# keys stay off the T-Deck keyboard's buttons (moy_kbd.c: w a s d, l, k). A
+# gamepad's X opens the card's verbs ("options").
 _VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
               "change": ("C", "Change"), "search": ("/", "Search"),
               "new": ("N", "New"), "copy": ("Y", "Copy"),
               "delete": ("X", "Delete"), "sure": ("X", "Sure?"),
-              "favourite": ("F", "Favourite")}
+              "favourite": ("F", "Favourite"), "options": ("X", "Options")}
 _VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
 _FAVOURITE_KEY = "f"     # the selected card's star, on every tab that draws one
 _FAVOURITE_PAD = "Y"     # ...and a gamepad's button for it
 # The inputs (ui_draw.INPUTS) that type those letters: a gamepad has no C.
 _LETTER_INPUTS = ("keys", "tdeck")
+# A press held this long on a card without travel opens the card's verbs (a
+# phone home screen's long press), in frame milliseconds.
+LONG_PRESS_MS = 500
 _TAB_KEYS = ("tabs", "Tabs")
 _HINT_LEAD = 8       # the margin ui.hints leads with, at the font scale
 _MENU_KEYS = ("confirm", "Choose", "back", "Close")   # the strip under the system menu
@@ -2325,6 +2329,7 @@ class LauncherHomeLayer:
         self.ws = ws
         self._NAMES = names
         self._lhover = (-1, -1)       # the last pointer sample (a release is not a move)
+        self._hold = None             # a press on a card: [index, x, y, ms held]
         self._tab_focus = False       # keys drive the tab row (up from the carousel)
         self._delete = ConfirmTap()   # Make's DEL: the first tap arms, the second deletes
         self._delete_path = None      # ...the card it was armed on
@@ -2761,15 +2766,32 @@ class LauncherHomeLayer:
             cv.rect(sx - p, ty - p, w + p, tht + 2 * p, th["surface"])
             cv.print(label, sx, ty + (tht - lay.line_h) // 2, th["ink"], 1)
 
+    def card_verbs(self):
+        """The selected card's verbs beyond its tap, the ONE list every
+        input reaches them by: the system menu's card group, a long press
+        on the card, a gamepad's X, the desk's buttons. Its favourite star,
+        then CHANGE with COPY beside it, then DEL (SURE? once armed), where
+        the active tab has them (`zone_verbs`)."""
+        zone = self.zone_verbs()
+        out = []
+        if self.favourable() is not None:
+            out.append("favourite")
+        if "change" in zone:
+            out.append("change")
+            out.append("copy")
+        for v in zone:
+            if v in ("delete", "sure"):
+                out.append(v)
+        return out
+
     def _desk_verbs(self):
-        """The desk home's buttons (step 18): the active tab's verbs but
-        SEARCH, the hint strip's, with COPY beside CHANGE. None off the
-        desk."""
+        """The desk home's buttons (step 18): the active tab's tap verb,
+        then the card's verbs but its star (the hero wears that). None off
+        the desk."""
         if not (self._carousel() and self.grid.desk()):
             return ()
-        out = [v for v in self.zone_verbs() if v != "search"]
-        if "change" in out and "copy" not in out:
-            out.insert(out.index("change") + 1, "copy")
+        out = [v for v in self.zone_verbs()[:1] if v in ("play", "open", "new")]
+        out.extend(v for v in self.card_verbs() if v != "favourite")
         return out
 
     def _desk_buttons(self):
@@ -2932,25 +2954,30 @@ class LauncherHomeLayer:
     def _hint_groups(self):
         """The hint strip's two groups: the active tab's verbs on the
         selected card, then the tab keys; and the verb of each pair. A
-        keyboard types each verb's letter; another input shows only the
-        verb its confirm does (`launch_selected`), on that key."""
+        keyboard types each verb's letter; a gamepad shows the verb its
+        confirm does (`launch_selected`), on that key, and X for the card's
+        other verbs (`card_verbs`)."""
         items = []
         verbs = []
         zone = self.zone_verbs()
-        tap = None if _ui_draw.input_kind() in _LETTER_INPUTS else self._confirm_verb(zone)
-        for v in zone:
-            k, words = _VERB_HINT[v]
-            if tap is not None:
-                if v != tap:
-                    continue
-                k = "confirm"
-            items.append(k)
-            items.append(words)
-            verbs.append(v)
+        pad = _ui_draw.input_kind() not in _LETTER_INPUTS
+        if pad:
+            tap = self._confirm_verb(zone)
+            if tap:
+                items.append("confirm")
+                items.append(_VERB_HINT[tap][1])
+                verbs.append(tap)
+            if self.card_verbs():
+                items.extend(_VERB_HINT["options"])
+                verbs.append("options")
+        else:
+            for v in zone:
+                items.extend(_VERB_HINT[v])
+                verbs.append(v)
         if self.favourable() is not None:
             # the star last, where the strip has room for it (`_hint_spans`)
             k, words = _VERB_HINT["favourite"]
-            items.append(k if tap is None else _FAVOURITE_PAD)
+            items.append(_FAVOURITE_PAD if pad else k)
             items.append(words)
             verbs.append("favourite")
         return items, verbs
@@ -3088,7 +3115,7 @@ class LauncherHomeLayer:
         v = _VERB_KEY.get(ch)
         if v == "delete" and self._armed():
             v = "sure"
-        if v is None or not (v in self.zone_verbs() or v in self._desk_verbs()):
+        if v is None or not (v in self.zone_verbs() or v in self.card_verbs()):
             return False
         self._do_verb(v)
         return True
@@ -3168,10 +3195,8 @@ class LauncherHomeLayer:
             # #184: DEFERRED -- the cart start runs behind the next painted
             # frame (LOADING toast), never inside this input dispatch.
             ws.defer(self._launch)           # the active tab's tap
-        if i.pressed("code"):
-            # CHANGE (visual identity v1 Section 1.2): open the selected cartridge
-            # in place in the Studio/Editor, landing on Config.
-            ws.defer(self._change)
+        if i.pressed("x"):
+            self.open_card_menu()            # a gamepad's X: the card's verbs
         if i.pressed("y"):
             self.toggle_favourite()          # a gamepad's Y: the star
         if i.pressed("b") and ws.ach_ui._konami_pos == 0:
@@ -3269,6 +3294,7 @@ class LauncherHomeLayer:
         down = ws.pointer.down
         grid = self.grid
         if click:
+            self._hold = None
             if ws.bar_layer.handle_bar_tap(self.strip, px, py):
                 return True
             if self._hh() and self._hint_tap(px, py):
@@ -3284,6 +3310,8 @@ class LauncherHomeLayer:
                 return True
             if self._carousel() and grid.desk() and self._details_tap(px, py):
                 return True
+        if self._long_press(px, py, click, down):
+            return True
         if not self._carousel():
             return self._grid_pointer(px, py, click)
         i = grid.pointer_frame(px, py, click, down, dt_ms=ws._pointer_dt_ms)
@@ -3301,6 +3329,53 @@ class LauncherHomeLayer:
         if click or down:
             self._lhover = (px, py)
         return True
+
+    def _long_press(self, px, py, click, down):
+        """A press held `LONG_PRESS_MS` on a card without travel selects
+        that card and opens its verbs (`open_card_menu`), the phone home
+        screens' long press; the gesture ends there, so its release is no
+        tap. True the frame it opens."""
+        grid = self.grid
+        if click:
+            i = grid.tile_at(px, py)
+            self._hold = None if i is None else [i, px, py, 0.0]
+            return False
+        h = self._hold
+        if h is None:
+            return False
+        slop = 4 * self.ws.layout.fs + 2              # the DragTap's own
+        if not down or grid.dragging or abs(px - h[1]) > slop or abs(py - h[2]) > slop:
+            self._hold = None
+            return False
+        h[3] += self.ws._frame_dt_ms
+        if h[3] < LONG_PRESS_MS:
+            return False
+        self._hold = None
+        grid.pointer_frame(px, py, False, False)      # the gesture ends untapped
+        if h[0] != grid.sel and 0 <= h[0] < len(grid.items):
+            grid.sel = h[0]
+        self._tab_focus = False
+        self.open_card_menu((h[1], h[2]))
+        self.ws.mark_dirty()
+        return True
+
+    def open_card_menu(self, at=None):
+        """The selected card's verbs (`card_verbs`) as a menu hung at `at`,
+        (x, y) on the system canvas -- a long press's point, else the
+        card's middle (the desk's hero's): a long press, a gamepad's X, the
+        strip's Options. False where the card has none."""
+        if not self.card_verbs():
+            return False
+        if at is None:
+            grid = self.grid
+            r = grid.hero_rect() if self._carousel() and grid.desk() else None
+            r = r or grid.tile_rect(grid.sel)
+            if r is None:
+                c = self.ws.layout
+                at = (c.cx + c.cw // 2, c.cy + c.ch // 2)
+            else:
+                at = (r[0] + r[2] // 2, r[1] + r[3] // 2)
+        return self.ws.menu_ui.open_card(self, at)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
 
@@ -3496,6 +3571,8 @@ class LauncherHomeLayer:
             ws.carts.delete(self.grid.selected())
         elif verb == "favourite":
             self.toggle_favourite()
+        elif verb == "options":
+            self.open_card_menu()
         else:
             ws.toggle_search()
         ws.mark_dirty()

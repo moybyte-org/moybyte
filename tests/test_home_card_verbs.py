@@ -1,0 +1,239 @@
+"""The home's card verbs are ONE list (`LauncherHomeLayer.card_verbs`) that
+every input reaches (design review R3-01, R3-16, R3-18, R3-19, R3-28):
+
+* a keyboard types each verb's letter, and its strip names them;
+* touch long-presses a card (the phone home screens' idiom) and a gamepad
+  presses X, and both open the card's verbs as a menu;
+* every input reaches the system menu, whose first group over the home is
+  the selected card's.
+
+Driven on the shell the goldens build, through the real pointer feed."""
+
+import pytest
+
+import test_shell_goldens as g
+from runtime import launcher_layer, moy_input, ui_draw
+from ws_helpers import make_drv
+
+HANDHELD = "tdeck_320x240_fs1_dark"
+CONSOLE = "p4_1024x600_cs2_fs1_console"
+
+
+@pytest.fixture(autouse=True)
+def _clean():
+    yield
+    import moy_ui
+    moy_ui.theme_uninstall()
+    ui_draw.input_kind("keys")
+
+
+def _ws(tmp_path, config=HANDHELD):
+    import moy_ui
+    moy_ui.theme_uninstall()
+    cfg = dict(g.CONFIGS[config], variant="dark", theme="moy")
+    ws = g._build(cfg, tmp_path / "carts")
+    ws.go_home()
+    if getattr(ws.wm, "mode", None) is not None:
+        ws.open_library()
+    return ws
+
+
+def _frames(drv, n=2):
+    for _ in range(n):
+        drv.frame(1 / 30)
+
+
+def _select(ws, tab, which):
+    """Select on `tab` the "+ New" card (`which` "new") or a real cart (on
+    Mine, a copy of a game: a fresh store holds none of its own)."""
+    if tab == "mine":
+        _select(ws, "games", "cart")
+        ws.carts.dup(ws.launcher.selected())
+    ws.set_home_tab(tab)
+    items = ws.launcher.items
+    for i, it in enumerate(items):
+        if (it.get("type") == "new") == (which == "new") and (which == "new" or it.get("path")):
+            ws.launcher.sel = i
+            return it
+    pytest.skip("no %s card on %s" % (which, tab))
+
+
+def _menu_verbs(ws):
+    """The verbs of the open menu's rows: a card row's, a favourite's."""
+    home = ws.launcher_layer
+    out = set()
+    for it in ws.sysmenu.items:
+        if it[0] != "item":
+            continue
+        act = it[2]
+        if getattr(act, "verb", None) is not None:
+            out.add("delete" if act.verb == "sure" else act.verb)
+        elif act == home.toggle_favourite:
+            out.add("favourite")
+    return out
+
+
+def _card_centre(ws):
+    gr = ws.launcher
+    r = gr.tile_rect(gr.sel)
+    return r[0] + r[2] // 2, r[1] + r[3] // 2
+
+
+def _long_press(ws, drv, at=None, frames=20):
+    x, y = at or _card_centre(ws)
+    drv.touch(x, y)
+    _frames(drv, frames)
+    drv.touch_up()
+    _frames(drv, 1)
+
+
+class _Pad:
+    """A frame's input with one gamepad button pressed (the boards'
+    fifteen names), asserting the home asks for no name the input
+    vocabulary lacks."""
+
+    def __init__(self, name):
+        self.name = name
+        self.asked = set()
+
+    def pressed(self, name):
+        self.asked.add(name)
+        return name == self.name
+
+
+def _reached(ws, drv, kind, monkeypatch):
+    """The verbs input `kind` reaches on the selected card: the confirm's,
+    the strip's letters (typed), the card menu its gesture opens, and the
+    system menu's card group."""
+    home = ws.launcher_layer
+    zone = home.zone_verbs()
+    got = set()
+    tap = home._confirm_verb(zone)
+    if tap:
+        got.add(tap)                          # a tap, A or enter
+    ui_draw.input_kind(kind)
+    if kind in launcher_layer._LETTER_INPUTS:
+        done = []
+        monkeypatch.setattr(home, "_do_verb", lambda v: done.append(v))
+        monkeypatch.setattr(home, "toggle_favourite", lambda: done.append("favourite") or True)
+        for ch in "cnyx/f":
+            drv.type_char(ord(ch))
+            _frames(drv, 1)
+            drv.frame(1 / 30)
+        monkeypatch.undo()
+        got.update("delete" if v == "sure" else v for v in done)
+    elif kind == "pad":
+        pad = _Pad("x")
+        home.handle_input(pad)
+        assert pad.asked <= set(moy_input.NAMES), \
+            "the home asks for a button no input has: %s" % (pad.asked - set(moy_input.NAMES))
+        got |= _menu_verbs(ws) if ws.sysmenu.open else set()
+        ws.sysmenu.close()
+    else:
+        _long_press(ws, drv)
+        got |= _menu_verbs(ws) if ws.sysmenu.open else set()
+        ws.sysmenu.close()
+    ui_draw.input_kind(kind)
+    ws.toggle_sysmenu()                       # every input opens the system menu
+    got |= _menu_verbs(ws)
+    if any(it[0] == "item" and it[4] == "Search" for it in ws.sysmenu.items):
+        got.add("search")
+    ws.sysmenu.close()
+    return got
+
+
+@pytest.mark.parametrize("config", [HANDHELD, CONSOLE])
+@pytest.mark.parametrize("kind", ui_draw.INPUTS)
+@pytest.mark.parametrize("tab,which", [("games", "cart"), ("mine", "cart"), ("apps", "cart"),
+                                       ("make", "cart"), ("make", "new")])
+def test_every_card_verb_is_reachable_under_every_input(tmp_path, monkeypatch, config, kind,
+                                                        tab, which):
+    ws = _ws(tmp_path, config)
+    drv = make_drv(ws)
+    _frames(drv)
+    _select(ws, tab, which)
+    _frames(drv)
+    home = ws.launcher_layer
+    want = set("delete" if v == "sure" else v for v in home.zone_verbs())
+    want |= set(home.card_verbs())
+    if which == "cart":
+        want.discard("new")                   # the "+ New" card's tap (make/new)
+    got = _reached(ws, drv, kind, monkeypatch)
+    assert want <= got, "%s %s/%s under %s: no route to %s" % (
+        config, tab, which, kind, sorted(want - got))
+
+
+@pytest.mark.parametrize("config", [HANDHELD, CONSOLE])
+def test_a_long_press_opens_the_cards_verbs_and_its_release_is_no_tap(tmp_path, config):
+    ws = _ws(tmp_path, config)
+    drv = make_drv(ws)
+    _frames(drv)
+    it = _select(ws, "make", "cart")
+    ui_draw.input_kind("touch")
+    _frames(drv)
+    _long_press(ws, drv)
+    assert ws.screen == "launcher", "the release launched the card"
+    assert ws.sysmenu.open and ws.sysmenu.widget == "card"
+    items = ws.sysmenu.items
+    assert items[0][0] == "header" and items[0][4] == it.get("title")
+    assert [r[4] for r in items if r[0] == "item"] == [
+        "Add favourite", "Change", "Copy", "Delete"]
+    # a row acts on the card: Copy makes one more cart
+    n = len(ws.carts.all)
+    row = next(i for i, r in enumerate(items) if r[0] == "item" and r[4] == "Copy")
+    ws.sysmenu.sel = row
+    ws.sysmenu.activate()
+    assert len(ws.carts.all) == n + 1
+
+
+def test_a_short_press_or_a_drag_opens_no_menu(tmp_path):
+    ws = _ws(tmp_path)
+    drv = make_drv(ws)
+    _frames(drv)
+    _select(ws, "games", "cart")
+    ui_draw.input_kind("touch")
+    _frames(drv)
+    held = launcher_layer.LONG_PRESS_MS * 30 // 1000
+    _long_press(ws, drv, frames=held - 3)     # released before the hold
+    assert not (ws.sysmenu.open and ws.sysmenu.widget == "card")
+    ws.go_home()
+    _frames(drv)
+    x, y = _card_centre(ws)
+    drv.touch(x, y)
+    _frames(drv, 1)
+    drv.touch_drag(x + 30, y)                 # a drag is a scroll, never a hold
+    _frames(drv, held + 5)
+    drv.touch_up()
+    _frames(drv, 1)
+    assert not ws.sysmenu.open
+
+
+def test_the_system_menu_opens_on_the_selected_cards_group(tmp_path):
+    """Over the home, the card's group stands first, where an open cart's
+    does (R3-18), and names its verbs."""
+    ws = _ws(tmp_path)
+    it = _select(ws, "games", "cart")
+    ws.toggle_sysmenu()
+    items = ws.sysmenu.items
+    assert items[0][:2] == ("header", it["title"].upper())
+    labels = [r[4] for r in items if r[0] in ("header", "item")]
+    assert labels.index("System") > labels.index("Copy")
+
+
+
+def test_the_projects_windows_card_menu_is_its_own_cards(tmp_path):
+    """The desk's projects window holds its own card model: a gamepad's X
+    there opens the window's card's verbs, not the fullscreen home's."""
+    from ws_helpers import build_desktop_ws
+    ws = build_desktop_ws(tmp_path)
+    drv = make_drv(ws)
+    ws.open_desk()
+    ws.open_projects()
+    _frames(drv)
+    g = ws.projects_grid
+    real = [i for i, it in enumerate(g.items) if it.get("path")]
+    g.sel = real[-1]
+    ws.launcher.sel = 0
+    ws.projects_layer.handle_input(_Pad("x"))
+    assert ws.sysmenu.open
+    assert ws.sysmenu.items[0][4] == g.items[real[-1]]["title"]

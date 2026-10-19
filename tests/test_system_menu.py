@@ -235,12 +235,15 @@ def test_menu_omits_cart_group_when_no_cart(tmp_path):
     labels = _labels(ws)
     assert "CART" not in labels
     assert "RESTART CART" not in labels and "DELETE CART" not in labels
-    # #105: SEARCH is offered first, launcher-only (over the run-grid it filters);
-    # the selected card's star follows the system's rows, under its title.
-    assert labels[:5] == ["SYSTEM", "SEARCH", "SETTINGS", "ABOUT", "REBOOT"]
+    # Over the home the selected card's group stands first, in an open
+    # cart's place (R3-18): its title over its verbs. Then the system's
+    # rows, SEARCH first, launcher-only (#105: over the run-grid it filters).
     sel = ws.launcher.selected()
-    assert labels[5:] == ([sel["title"].upper(), "ADD FAVOURITE"]
-                          if sel and sel.get("path") else [])
+    card = ([sel["title"].upper()] + [
+        {"favourite": "ADD FAVOURITE", "change": "CHANGE", "copy": "COPY",
+         "delete": "DELETE"}[v] for v in ws.launcher_layer.card_verbs()]
+        if sel and sel.get("path") else [])
+    assert labels == card + ["SYSTEM", "SEARCH", "SETTINGS", "ABOUT", "REBOOT"]
 
 
 # -- dismissal ---------------------------------------------------------------

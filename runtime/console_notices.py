@@ -10,9 +10,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_diff, NAMES)
 try:
-    from widgets import (Achievements, TOAST_MS)
+    from widgets import (Achievements, TOAST_MS, _POPUP_W)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Achievements, TOAST_MS)
+    from runtime.widgets import (Achievements, TOAST_MS, _POPUP_W)
 try:
     import chrome_ops as _ch
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -45,6 +45,11 @@ _LOOK_ICON = {"menu.restart_cart": "rotate", "menu.delete_cart": "trash",
               "menu.favourite_add": "new", "menu.favourite_remove": "del",
               "menu.clear_search": "search", "menu.search": "search",
               "menu.settings": "settings", "menu.about": "doc", "menu.reboot": "rotate"}
+# The selected card's verbs (LauncherHomeLayer.card_verbs) as menu rows:
+# (the chrome's label, icon, the look's text); the star's are the string ids'.
+_CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("COPY", "dup", "Copy"),
+             "delete": ("DELETE", "trash", "Delete"), "sure": ("DELETE", "trash", "Delete")}
+_DANGER_ICON = "trash"      # a row that wears it destroys: the danger rows' ink
 
 
 def _row(kind, sid, action=None):
@@ -58,6 +63,18 @@ def _in_box(px, py, b):
 
 def _desk_class():
     return _lb.metric_class() == _lb.DESK
+
+
+class _CardVerb:
+    """A card group row's action: the home's verb on its selected card.
+    Its Delete deletes at once (to the Trash): the row is the choice."""
+
+    def __init__(self, home, verb):
+        self.home = home
+        self.verb = "sure" if verb == "delete" else verb
+
+    def __call__(self):
+        self.home._do_verb(self.verb)
 
 
 class Notices:
@@ -382,6 +399,7 @@ class SystemMenuUI:
         self.ws = ws
         self._NAMES = names
         self._host = None           # the look's card: its verbs' context
+        self._card_at = (0, 0)      # where a card's menu hangs (`open_card`)
 
     def _sysmenu_items(self):
         """The rows for this open of the ≡ menu (see class note for the tuple form).
@@ -401,6 +419,13 @@ class SystemMenuUI:
             if self._deletable(cart):
                 rows.append(_row("item", "menu.delete_cart", self._menu_delete_cart))
             rows.append(("sep",))
+        elif self.ws.screen == "launcher":
+            # over the home, the selected card's group in the open cart's
+            # place: its title over its verbs (`card_rows`)
+            card = self.card_rows()
+            if card:
+                rows.extend(card)
+                rows.append(("sep",))
         rows.append(_row("header", "menu.system"))
         # SEARCH (#105): only meaningful over the run-grid, so it's offered ONLY
         # from the launcher home -- the label flips to CLEAR SEARCH once a query
@@ -412,21 +437,59 @@ class SystemMenuUI:
         rows.append(_row("item", "menu.settings", self.ws.open_settings))
         rows.append(_row("item", "menu.about", self._menu_about))
         rows.append(_row("item", "menu.reboot", self._menu_reboot))
-        if cart is None and self.ws.screen == "launcher":
-            # over the home, after the system's rows: the selected card's
-            # star (#105), its title over the row that adds it to the
-            # favourites or takes it out
-            home = self.ws.launcher_layer
-            it = home.favourable()
-            if it is not None:
-                title = it.get("title") or ""
-                rows.append(("sep",))
-                rows.append(("header", title.upper(), None, "", title) if title
-                            else _row("header", "menu.cart"))
+        return rows
+
+    def card_rows(self, home=None):
+        """A home's selected card as a menu group (the fullscreen home's,
+        else `home`'s, the desk's projects window): its title over a row a
+        verb of `card_verbs` (the favourite star's words follow its state;
+        Delete takes it to the Trash, never asked, as the cart group's
+        does). [] where the card has none."""
+        home = home or self.ws.launcher_layer
+        verbs = home.card_verbs()
+        if not verbs:
+            return []
+        it = home.grid.selected()
+        title = it.get("title") or ""
+        rows = [("header", title.upper(), None, "", title) if title
+                else _row("header", "menu.cart")]
+        for v in verbs:
+            if v == "favourite":
                 fav = self.ws.carts.is_favorite(it)
                 rows.append(_row("item", "menu.favourite_remove" if fav
                                  else "menu.favourite_add", home.toggle_favourite))
+            else:
+                label, icon, text = _CARD_ROW[v]
+                rows.append(("item", label, _CardVerb(home, v), icon, text))
         return rows
+
+    def open_card(self, home, at):
+        """`home`'s selected card's group alone, as a menu hung at `at`
+        (x, y): what a long press on the card and a gamepad's X open. False
+        where the card has no verbs."""
+        rows = self.card_rows(home)
+        if not rows:
+            return False
+        ws = self.ws
+        m = ws.sysmenu
+        m.fs = ws.look.effective_font_scale()
+        m.cs = ws.layout.cs
+        m.w = 0
+        cv = ws.sys_canvas
+        x, y = at
+        # the Popup's own panel (a theme with no depth): under the point,
+        # over it where the glass has no room below
+        pw = _POPUP_W * m.fs
+        m.anchor_x = max(0, min(x - pw // 2, cv.w - pw))
+        m.anchor_y = y
+        m.up = False
+        self._card_at = (x, y)
+        m.show(rows, widget="card")
+        x0, y0, w0, h0 = m.panel_rect()
+        if y0 + h0 > cv.h:
+            m.up = True
+        ws.popover_touch()
+        return True
 
     def _deletable(self, cart):
         """Whether the open cart is the store's to delete: a store that
@@ -569,8 +632,15 @@ class SystemMenuUI:
     def _menu_cell(self):
         """The system button's cell on the system canvas, the card's anchor,
         its left at least the popover's gap from the glass's edge (4 pixels
-        at the font scale, 8 on the desk), as far as it hangs below the bar."""
+        at the font scale, 8 on the desk), as far as it hangs below the bar.
+        A card's menu (`open_card`) hangs from its point instead, a line as
+        wide as the card and centred on it, kept on the glass."""
         ws = self.ws
+        if ws.sysmenu.widget == "card":
+            x, y = self._card_at
+            cv = ws.sys_canvas
+            w = min(self._look_w(_desk_class()), cv.w)
+            return (max(0, min(x - w // 2, cv.w - w)), y, w, 0)
         bars = ws.layout.bars
         got = _shell_layout.cell_of(bars, "menu")
         if got is None:
@@ -610,7 +680,7 @@ class SystemMenuUI:
                 texts.append(it[4])
                 icons.append(it[3])
                 # Delete is a verb that destroys: the danger rows' ink
-                kinds.append("danger" if it[2] == self._menu_delete_cart else "")
+                kinds.append("danger" if it[3] == _DANGER_ICON else "")
         if texts:
             _ui.menu(cap, texts, icons, kinds=kinds)
         _ui.popover()

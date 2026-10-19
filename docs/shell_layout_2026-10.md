@@ -659,10 +659,15 @@ arrangement (step 18).
 | Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor fullscreen, pushed | NEW, CHANGE, COPY, DEL (two taps: DEL arms SURE?) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
-is Mine's, not Games'. Every tab's selected cart also takes the favourite
-star (#105): F on a keyboard, Y on a gamepad, a Favourite hint where the
-strip has room for it beside the tab keys, and a row in the system menu over the
-home. Mine and Make hold the same carts under the two
+is Mine's, not Games'. **The selected card's verbs beyond its tap are one
+list** (`LauncherHomeLayer.card_verbs`): its favourite star (#105), CHANGE
+with COPY beside it, and Make's DEL. Every input reaches the whole list
+(`tests/test_home_card_verbs.py`): the system menu over the home opens on it,
+its first group, in an open cart's place; a long press on a card (500 ms
+without travel, the phone home screens' idiom) and a gamepad's X open it
+alone, as a menu hung at the card; a keyboard types F for the star and the
+strip's letters for the rest. A row's Delete takes the cart to the Trash at
+once, as the cart group's does; the strip's DEL keeps its two taps. Mine and Make hold the same carts under the two
 personas of `docs/shell_ux_v1.md` §4 — a tap on Mine plays, a tap on Make
 edits (owner, 2026-10-13) — which narrows that section's "a launcher tap
 always RUNS" to the three tabs that launch (§16). The windowed tier's
@@ -702,9 +707,10 @@ returns; the trackball is the same four directions. On the desk a key or a
 tap on a shelf card selects it at once and the shelf glides to show it two
 cards in; a drag scrolls the shelf and selects nothing. The hint strip names
 its keys: on a keyboard C, /, N, Y and X its verbs, and the tabs' action;
-on a gamepad, which has no letters, only the verb its confirm does (Play,
-Open, New, or Change on Make) and the tabs' shoulders. Under touch there
-is no strip, and the home lays out in its height too.
+on a gamepad, which has no letters, the verb its confirm does (Play,
+Open, New, or Change on Make), X for the card's list and the tabs'
+shoulders. Under touch there is no strip, and the home lays out in its
+height too; a long press opens the card's list.
 
 **Damage first.** The fullscreen home's drag partial hands its band rect to
 the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,

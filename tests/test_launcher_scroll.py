@@ -509,8 +509,9 @@ def test_the_tabs_are_the_bars_and_the_verbs_the_hint_strips(tmp_path):
 @pytest.mark.parametrize("kind", ["keys", "tdeck", "pad"])
 def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkeypatch):
     """A keyboard types every verb's letter; a gamepad has no C or /, so
-    its strip names only the verb its confirm does, on that key. The
-    selected cart's favourite star follows, on F or the gamepad's Y."""
+    its strip names the verb its confirm does, on that key, and X for the
+    card's other verbs. The selected cart's favourite star follows, on F or
+    the gamepad's Y."""
     from runtime import ui_draw
 
     ws = _ws_with_carts(tmp_path, 10)
@@ -520,8 +521,8 @@ def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkey
         ui_draw.input_kind(kind)
         items, verbs = home._hint_groups()
         if kind == "pad":
-            assert (items, verbs) == (["confirm", "Play", "Y", "Favourite"],
-                                      ["play", "favourite"])
+            assert (items, verbs) == (["confirm", "Play", "X", "Options", "Y", "Favourite"],
+                                      ["play", "options", "favourite"])
         else:
             assert verbs == ["play", "change", "search", "favourite"]
             assert items[::2] == ["confirm", "C", "/", "F"]
@@ -531,7 +532,8 @@ def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkey
         monkeypatch.setattr(home, "zone_verbs", lambda: ("new", "change", "copy", "delete"))
         items, verbs = home._hint_groups()
         if kind == "pad":
-            assert (items, verbs) == (["confirm", "Change"], ["change"])
+            assert (items, verbs) == (["confirm", "Change", "X", "Options"],
+                                      ["change", "options"])
         else:
             assert items[::2] == ["N", "C", "Y", "X"]
     finally:
