@@ -48,7 +48,7 @@
       "shadow": ["soft", "#000000", 0.55, 14, 6], "dim_neighbours": 0.3,
       "win": { "header": "bar", "frame": [1, "#2b2f57"], "frame_back": [1, "#2b2f57"] },
       "bar": { "fill": "#0b0d1e", "alpha": 0.85, "sys": ["#23274b", "#b6a8f7", "#23274b"],
-               "chip_cur": "#23274b" },
+               "chip_cur": "#0b0d1e" },
       "tile_fill": "#23274b", "disabled": "#686c92",
       "buttons": { "normal": { "fill": "#23274b" }, "tonal": { "fill": "#2e3360" },
                    "danger": { "ink": "#eef0fb" } },

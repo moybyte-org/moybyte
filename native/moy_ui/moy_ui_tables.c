@@ -842,7 +842,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"shadow\": [\"soft\", \"#000000\", 0.55, 14, 6], \"dim_neighbours\": 0.3,\012"
     "      \"win\": { \"header\": \"bar\", \"frame\": [1, \"#2b2f57\"], \"frame_back\": [1, \"#2b2f57\"] },\012"
     "      \"bar\": { \"fill\": \"#0b0d1e\", \"alpha\": 0.85, \"sys\": [\"#23274b\", \"#b6a8f7\", \"#23274b\"],\012"
-    "               \"chip_cur\": \"#23274b\" },\012"
+    "               \"chip_cur\": \"#0b0d1e\" },\012"
     "      \"tile_fill\": \"#23274b\", \"disabled\": \"#686c92\",\012"
     "      \"buttons\": { \"normal\": { \"fill\": \"#23274b\" }, \"tonal\": { \"fill\": \"#2e3360\" },\012"
     "                   \"danger\": { \"ink\": \"#eef0fb\" } },\012"

@@ -306,6 +306,28 @@ def test_the_current_swatchs_ring_stands_clear_of_its_neighbours():
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
+@pytest.mark.parametrize("ground", ["surface", "chip"])
+def test_a_label_on_a_current_plate_clears_it_for_text(theme, ground):
+    """A label on a current plate -- a row's current option on its card, the
+    desk bar's chip of the focused window -- is text, and clears the plate
+    4.5:1 as drawn (Moy Night's chip printed #b4aaf6 on #414473, 4.36:1)."""
+    th = _theme(*theme)
+    cv = make_system_canvas(80, 40)
+    cv.rect(0, 0, 80, 40, th["surface"])
+    if ground == "chip":
+        if not ui_draw.bar_part(cv, th, ui_draw.BAR_CHIP, (4, 4, 72, 32), True):
+            pytest.skip("a theme with no depth draws no chip")
+    else:
+        ui_draw.current(cv, th, (4, 4, 72, 32))
+    ink = ui_draw.current_ink(cv, th)
+    ink = th["chrome_ink" if ground == "chip" else "ink"] if ink is None else ink
+    px = lambda x, y: cv._buf[2 * (y * 80 + x)] << 8 | cv._buf[2 * (y * 80 + x) + 1]  # noqa
+    plate = px(40, 20)
+    cv.rect(0, 0, 2, 2, ink)
+    assert _ratio(px(0, 0), plate) >= 4.5, (theme, round(_ratio(px(0, 0), plate), 2))
+
+
+@pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
 def test_the_current_marks_content_takes_an_ink_that_reads_on_it(theme):
     """Where a look gives the current content an ink of its own
     (`current.ink`, the second cue beside a soft plate: Moy's plate alone is
