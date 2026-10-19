@@ -643,6 +643,40 @@ def test_a_focused_segs_current_option_reads_on_its_focus_plate(theme, cur):
     assert _ratio(label, fill) >= 4.5, "its label %.2f:1 on it" % _ratio(label, fill)
 
 
+def _swatch_page(theme, colours, focus=True):
+    def draw():
+        st = {"rect": ui.page("")}
+        ui.group("G")
+        ui.link("Top", "")
+        ui.swatches("Accent", colours, 0)
+        ui.group()
+        ui.focus("Accent" if focus else "Top")
+        return st
+    r = _Run(draw, theme)
+    for _ in range(3):
+        r.frame()
+    return r
+
+
+@pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
+@pytest.mark.parametrize("focus", [True, False], ids=["focused", "rest"])
+def test_a_swatch_its_ground_hides_wears_a_keyline(theme, focus):
+    """A swatch in its row ground's own colour -- Contrast's yellow on its
+    yellow focus plate, a white dot on a white card -- wears a keyline in
+    the row's ink, so it still shows."""
+    probe = _swatch_page(theme, [0x000000, 0x000000], focus)
+    y = probe.out["rect"][1] + CAPTION + ROW + ROW // 2
+    gx = 160                                  # the row's ground: its plate, or its card
+    ground = probe.px(gx, y)
+    g = _rgb(ground)
+    same = _swatch_page(theme, [0x000000, g[0] << 16 | g[1] << 8 | g[2]], focus)
+    other = _swatch_page(theme, [0x000000, 0xffffff - (g[0] << 16 | g[1] << 8 | g[2])], focus)
+    xs = [x for x in range(160, 320 - INSET) if same.px(x, y) != other.px(x, y)]
+    assert xs, "the second dot draws"
+    dot = [same.px(x, yy) for x in range(xs[0] - 1, xs[-1] + 2) for yy in range(y - 6, y + 7)]
+    assert any(_ratio(p, ground) >= 3.0 for p in dot), "the dot in its ground's colour is lost"
+
+
 _SURFACES = {}
 
 

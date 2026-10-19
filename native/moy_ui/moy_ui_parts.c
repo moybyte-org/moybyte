@@ -661,7 +661,20 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 text(&d, &fl, t.p, t.n, o.x + g.gap / 2, b.y, b.h, pal(&d, c), sc);
             }
             return MOY_UI_OK;
-        case MOY_UI_V_SWATCH:
+        case MOY_UI_V_SWATCH: {
+            // the row's ground: its focus plate, else its card or the page's
+            uint16_t gnd = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
+            if (rowfill >= 0) {
+                gnd = pal(&d, rowfill);
+            } else if (!on_card) {
+                ground(&d, &gnd);
+            }
+            // a dot in its ground's colour would be lost: then every dot of
+            // the row wears a keyline in the row's ink
+            int key = 0;
+            for (int i = 0; i < r->n && !key; i++) {
+                key = !apart(swatch(&d, colour_at(r->colours, i)), gnd);
+            }
             for (int i = r->n - 1; i >= 0; i--) {
                 moy_ui_box_t o = dot_box(b, r, &g, i);
                 if (i == r->cur) {
@@ -672,11 +685,12 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                                       (int16_t)(o.w + 2 * h), (int16_t)(o.h + 2 * h)};
                     rrect(&d, c.x, c.y, c.w, c.h, c.w / 2, 0, 0, d.fs, cink);
                 }
-                rrect(&d, o.x, o.y, o.w, o.h, o.w / 2, 1, swatch(&d, colour_at(r->colours, i)), 0,
-                      0);
+                rrect(&d, o.x, o.y, o.w, o.h, o.w / 2, 1, swatch(&d, colour_at(r->colours, i)),
+                      key ? d.fs : 0, cink);
                 right = o.x;
             }
             break;
+        }
         case MOY_UI_V_TOGGLE: {
             int sw = pm(&d, MOY_UI_M_VALUE_ROW_SWITCH_W, 0), sh = pm(&d, MOY_UI_M_VALUE_ROW_SWITCH_H, 0);
             int x = right - sw, y = b.y + (b.h - sh) / 2, kn = sh - 2 * d.fs;
