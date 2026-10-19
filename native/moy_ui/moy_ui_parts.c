@@ -1687,10 +1687,12 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     uint16_t ink = pal(&d, on_card ? tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK)
                                    : tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK));
     int focused = (flags & MOY_UI_F_FOCUS) != 0;
-    // the row's focus mark, as a value row wears it, under the label and
-    // the field; on an invert mark the field's ring takes the mark's ink
+    // in a group, the row's focus mark, as a value row wears it, under the
+    // label and the field (on an invert mark the field's ring takes the
+    // mark's ink); elsewhere -- a dialog's body, a page -- the field's own
+    // ring is its focus, as a text field's is on every desk
     int mi = -1, invert = 0;
-    if (focused && m->on) {
+    if (focused && m->on && card) {
         moy_ui_focus_in(s, on_card ? on_card_mark(&d, b, first, 0) : b, MOY_UI_MARK_PART, 0, 0,
                         d.fs, NULL, &mi, 0);
         invert = mi >= 0 && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT;
@@ -1718,7 +1720,9 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     // focused, the field is being typed in: its ring is two pixels at the
     // scale, the second outside the box, in the focus colour (the mark's ink
     // on an invert mark), whether or not focus marks show
+    uint16_t under = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
     int fc = m->on ? moy_ui_token(d.look, m->color) : -1;
+    fc = fc >= 0 && ratio_ge(pal(&d, fc), under, 3, 1) ? fc : -1;  // Contrast's yellow on white
     int ring_c = !focused ? tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)
                  : invert ? mi
                  : fc >= 0 ? fc

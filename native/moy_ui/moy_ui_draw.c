@@ -414,12 +414,20 @@ static int mark_flags(int flags) {
 // `r` is the part's corner radius, which a focus ring follows. The focus mark
 // is classed by the box's size, but a button or a chip (`card` 0) is a part
 // however big: a desk's keypad key wears the part's mark, never a card's.
+// Whether colour `a` clears colour `b` 3:1 (both colour values).
+static int clears(int a, int b) {
+    int32_t la = moy_theme_lum_of(a), lb = moy_theme_lum_of(b);
+    int32_t hi = la > lb ? la : lb, lo = la > lb ? lb : la;
+    return hi + 500 >= 3 * (lo + 500);
+}
+
 static void part_marks(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fs, int draw,
                        int side, int r, int card, int *ink, int *on) {
     const moy_ui_marks_t *m = moy_ui_marks();
     if (!m->on) {
         return;
     }
+    int field = *on;
     int mi, how = (draw ? 0 : MOY_UI_MARK_INK) | side;
     if (flags & MOY_UI_F_ON) {
         moy_ui_current_in(s, b, 0, how | (m->active ? 0 : MOY_UI_MARK_BACK), fs, &mi, 0);
@@ -429,6 +437,17 @@ static void part_marks(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fs
     if ((flags & MOY_UI_F_FOCUS) && m->active) {
         int cls = moy_ui_mark_class(b, MOY_UI_MARK_AUTO, fs);
         cls = cls == MOY_UI_MARK_CARD && !card ? MOY_UI_MARK_PART : cls;
+        int st = m->style[cls];
+        // a mark drawn on the part in its own fill's colour (Moy's edge on
+        // its accent primary) would not show: the theme's ring round it then
+        if (field >= 0 && st != MOY_UI_FOCUS_RING && st != MOY_UI_FOCUS_INVERT
+            && !clears(moy_ui_token(s->look, m->color), field)) {
+            if (draw) {
+                moy_ui_focus_in(s, b, cls, r, MOY_UI_MARK_RING | MOY_UI_MARK_COUNT, fs, NULL,
+                                &mi, 0);
+            }
+            return;
+        }
         moy_ui_focus_in(s, b, cls, r, how, fs, NULL, &mi, 0);
         *ink = mi >= 0 ? mi : *ink;
         *on = -1;

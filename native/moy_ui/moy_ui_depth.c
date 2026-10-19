@@ -776,6 +776,9 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
     if (flags & MOY_UI_MARK_RING) {
         if (!after) {
             focus_ring_of(&d, m, x, y, w, h, r, c);
+            if (flags & MOY_UI_MARK_COUNT) {
+                s_marks.drawn++;
+            }
         }
         return MOY_UI_OK;
     }

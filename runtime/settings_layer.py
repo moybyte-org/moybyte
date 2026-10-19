@@ -48,10 +48,10 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime.crash_guard import crash_available, crash_lines, last_crash
 
 try:
-    from editors_base import TextEntry, TE_COMMIT, TE_CANCEL
+    from editors_base import TextEntry
     from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_base import TextEntry, TE_COMMIT, TE_CANCEL
+    from runtime.editors_base import TextEntry
     from runtime.audio_session import console_volume
 
 # -- settings-screen geometry: the row height console's Layout scales ---------
@@ -245,6 +245,7 @@ _HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "toggle": _HINT_SWITCH,
 LEVELS = {"volume": (0, 7, 7), "brightness": (0, 5, 3)}
 _STEPPED = {"steps": True}    # Volume's slider: a segment a level, no number
 NAME_MAX = 16                 # the Name row's bytes
+WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
 _NETS = 24                    # the networks the Wi-Fi page lists
 
@@ -329,8 +330,8 @@ class SettingsLayer:
         self.wifi_nets = []           # [(ssid, signal, locked), ...] last scan
         self.wifi_sel = 0
         self.wifi_pick = None         # ssid being typed for (password mode)
-        self._wifi_focus = None       # the stop the password step opens on
-        self.wifi_pw = TextEntry(32)  # the password being typed
+        self._wifi_seed = None        # the byte held as the prompt opened
+        self.wifi_pw = TextEntry(WIFI_PW_MAX)  # the password being typed (its .text)
         self.wifi_msg = ""
         self.wifi_known = []
         # Bluetooth keyboard panel, capability-gated through _bt_service():
@@ -648,10 +649,12 @@ class SettingsLayer:
     def _wifi_ask(self, ssid):
         ws = self.ws
         self.wifi_pick = ssid
-        self._wifi_focus = "Connect"
-        self.wifi_pw.open("", getattr(ws.input, "last_key", 0) or 0)
+        self.wifi_pw.open("")
+        # the byte that opened the prompt is held: its field never types it
+        self._wifi_seed = getattr(ws.input, "last_key", 0) or 0
         self.wifi_msg = ""
         ws._set_text_mode(True)      # clean ASCII typing (device keyboard)
+        ws._dirty = True
 
     def _wifi_connect(self, ssid, pw):
         ws = self.ws
@@ -695,20 +698,19 @@ class SettingsLayer:
         self.ws._dirty = True
 
     def wifi_input(self, i, host, popover=False):
-        """Keys for the wifi panel held by `host`. In PASSWORD mode typed
-        bytes edit the password (ENTER connects, BACKSPACE deletes, ESC
-        cancels -- Settings is a taskbar app, so BACKSPACE is an ordinary
-        key, spec §9) and only the pointer reaches the page; in LIST mode the
-        page takes the keys and B backs out. True when the panel took them."""
-        ws = self.ws
+        """Keys for the wifi panel held by `host`. In PASSWORD mode the
+        prompt's field takes the typed bytes (ENTER connects, BACKSPACE
+        deletes -- Settings is a taskbar app, so BACKSPACE is an ordinary
+        key, spec §9) and ESC, or B, cancels; in LIST mode the page takes
+        the keys and B backs out. True when the panel took them."""
         if self.wifi_pick is not None:
-            ev = self.wifi_pw.feed(ws.input)
-            if ev == TE_COMMIT:                          # ENTER -> connect
-                self._wifi_connect(self.wifi_pick, self.wifi_pw.text)
-            elif ev == TE_CANCEL:                        # ESC -> cancel the prompt
+            if self._wifi_seed is not None:
+                host.key = self._wifi_seed      # the held byte types nothing
+                self._wifi_seed = None
+            host.keys(i)
+            if host.inp[5] == 27 or i.pressed("b") or i.pressed("stop"):
+                host.inp[5] = 0
                 self._wifi_cancel()
-            if ev is not None:
-                ws._dirty = True
             return True
         if i.pressed("b") or i.pressed("stop"):
             self._wifi_back(popover)
@@ -731,23 +733,8 @@ class SettingsLayer:
         _ui.page("")
         if self.wifi_pick is not None:
             _ui.hints(("confirm", "Connect", "back", "Cancel"))
-            _ui.group(("Password for " + str(self.wifi_pick))[:30])
-            x, y, w, h, _st = _ui.part("password")
-            lay = ws.layout
-            pad = 8 * lay.fs
-            n = max(4, (w - 2 * pad) // max(1, lay.font_w) - 1)
-            ws.sys_canvas.print(self.wifi_pw.text[-n:] + "_", x + pad,
-                                y + (h - lay.line_h) // 2, ws.theme_colors["ink"], 1)
-            if _ui.button("Connect", "primary"):
-                self._wifi_connect(self.wifi_pick, self.wifi_pw.text)
-            elif _ui.button("Cancel"):
-                self._wifi_cancel()
-            _ui.group()
-            if self._wifi_focus is not None:
-                _ui.focus(self._wifi_focus)
-                self._wifi_focus = None
-            return
-        _ui.hints(("confirm", "Connect", "back", "Back"))
+        else:
+            _ui.hints(("confirm", "Connect", "back", "Back"))
         _ui.group("Wi-Fi")
         _ui.icon("wifi" if connected else "wifi_off")
         _ui.info("Connected" if connected else "Not connected",
@@ -775,9 +762,25 @@ class SettingsLayer:
             if _ui.link("Forget", str(sel)[:16]):
                 self._wifi_forget()
         _ui.group()
+        if self.wifi_pick is not None:
+            self._wifi_prompt()
+            return
         f = _ui.focus()
         if f and f.startswith("net") and f[3:].isdigit():
             self.wifi_sel = int(f[3:])
+
+    def _wifi_prompt(self):
+        """The password for the network picked, over the list: a dialog of
+        the engine's field (focused as it opens: typing goes in) and Cancel
+        and Connect side by side at its foot. Enter in the field connects."""
+        pick = _ui.dialog(("Password for " + str(self.wifi_pick))[:30], ("Cancel", "Connect"))
+        text, done = _ui.field("Password", self.wifi_pw.text, WIFI_PW_MAX, {"id": "password"})
+        _ui.dialog()
+        self.wifi_pw.text = text
+        if pick == 1 or done:
+            self._wifi_connect(self.wifi_pick, text)
+        elif pick == 0:
+            self._wifi_cancel()
 
     # -- the warning before a TOGGLE_CONFIRMS toggle turns ON -------------------
 

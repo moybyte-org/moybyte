@@ -241,31 +241,38 @@ def test_block_prompt_kinds_type_what_they_allow():
 # -- the seeded fields: wifi and the scene TAG ---------------------------------
 
 def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_path):
+    """The prompt is the engine's field (tests/test_settings_wifi_prompt.py):
+    the Enter still held from picking the row types nothing into it."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     sl = ws.settings_layer
     sl.open_wifi()
     sl.wifi_nets = [("Locked", 80, True)]
     sl.wifi_known = []
     sl.wifi_sel = 0
+    drv.frame(1 / 30)
     ws.input.last_key = 0x0D                      # the Enter that picked the row
     sl._wifi_activate()
     assert sl.wifi_pick == "Locked" and ws.input.text_mode
     sl.wifi_input(ws.input, sl._sub)                      # the byte is still held
+    sl._draw_page()
     assert sl.wifi_pick == "Locked", "a latched Enter must not connect with ''"
     ws.input.last_key = 0
-    sl.wifi_input(ws.input, sl._sub)
-    for ch in "pw":
-        ws.input.last_key = ord(ch)
+
+    def key(code):
+        ws.input.last_key = code
         sl.wifi_input(ws.input, sl._sub)
+        sl._draw_page()
         ws.input.last_key = 0
         sl.wifi_input(ws.input, sl._sub)
+        sl._draw_page()
+    for ch in "pw":
+        key(ord(ch))
     assert sl.wifi_pw.text == "pw"
-    ws.input.last_key = 127                       # Delete trims like Backspace now
-    sl.wifi_input(ws.input, sl._sub)
+    key(127)                                      # Delete trims like Backspace now
     assert sl.wifi_pw.text == "p"
-    ws.input.last_key = 27
-    sl.wifi_input(ws.input, sl._sub)
+    key(27)
     assert sl.wifi_pick is None and not ws.input.text_mode
 
 

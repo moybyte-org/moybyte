@@ -382,10 +382,11 @@ enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI
 // INK draws nothing and answers only the ink (a part's CONTENT phase); AGAIN
 // draws a focus mark once more under a clip and counts no mark; RING draws
 // the theme's `focus.ring` whatever its focus style, and counts no mark (a
-// cursor: the sprite editor's).
+// cursor: the sprite editor's) unless COUNT says it is the focus mark (a part
+// whose fill would hide the theme's own mark).
 enum {
     MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8,
-    MOY_UI_MARK_AGAIN = 16, MOY_UI_MARK_RING = 32,
+    MOY_UI_MARK_AGAIN = 16, MOY_UI_MARK_RING = 32, MOY_UI_MARK_COUNT = 64,
 };
 // focus.style's and current.style's values, in style.json's order
 enum {
