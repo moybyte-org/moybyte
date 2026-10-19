@@ -235,8 +235,9 @@ _HINT_OPEN = ("confirm", "Open", "back", "Back")
 _HINT_CHANGE = ("change", "Change", "back", "Back")
 _HINT_TYPE = ("confirm", "Done", "cancel", "Cancel")
 _HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "slider": _HINT_CHANGE,
-          "toggle_on": ("confirm", "Turn off", "back", "Back"),
-          "toggle_off": ("confirm", "Turn on", "back", "Back"), "field": _HINT_TYPE}
+          "field": _HINT_TYPE}
+# A toggle's: what Enter does to it, by whether it is on.
+_HINT_TOGGLE = (("confirm", "Turn on", "back", "Back"), ("confirm", "Turn off", "back", "Back"))
 
 # The level rows, by system.json key: (lowest, highest, the value with none
 # stored). Volume is the console's level (`audio_session.console_volume`,
@@ -323,6 +324,7 @@ class SettingsLayer:
         self._focused = None          # the focused id after the last frame
         self._sub_focused = None      # ... and on the open panel's page
         self._kinds = {}              # a row's label -> its verb, for the hints
+        self._on = {}                 # a toggle row's label -> whether it is on
         self._words = {}              # a cycle's values -> the words it shows
         self._about = ()              # About's facts, read at each visit
         # The WIFI panel (#38, spec §10): scan list -> pick -> (password) ->
@@ -1257,7 +1259,8 @@ class SettingsLayer:
                 ws.toggle_webhost()
         elif kind == "diag":
             on = bool(getattr(ws, key, False))
-            self._kinds[s] = "toggle_on" if on else "toggle_off"
+            self._kinds[s] = "toggle"
+            self._on[s] = on
             if _ui.toggle(s, on) != on:
                 self._toggle_diag_row(key)
         elif kind == "font":
@@ -1352,7 +1355,10 @@ class SettingsLayer:
 
     def _rows_page(self):
         _ui.page("")
-        _ui.hints(_HINTS.get(self._kinds.get(_ui.focus()), _HINT_OPEN))
+        f = _ui.focus()
+        kind = self._kinds.get(f)
+        _ui.hints(_HINT_TOGGLE[bool(self._on.get(f))] if kind == "toggle"
+                  else _HINTS.get(kind, _HINT_OPEN))
         ws = self.ws
         sheet = ws.icon_spec() is None        # EDIT ICONS paints the IconSheet
         for caption, rows in self._grouped():
