@@ -754,57 +754,55 @@ Every one of these was learned by hanging or bricking a board.
 - **80 MHz SPI is requested, not delivered.** None of MOSI(41)/SCK(40)/MISO(38)
   are the S3's IOMUX-native FSPI pins, so everything routes through the GPIO
   matrix, which caps a write-only LCD at ~40 MHz. The board's wiring is the wall.
-- **The keyboard has two modes and the console flips between them per
-  screen.** It is a separate ESP32-C3 at I2C 0x55 (its firmware is in
+- **The keyboard has two modes, and every surface reads the matrix.** It is
+  a separate ESP32-C3 at I2C 0x55 (its firmware is in
   `firmware/lilygo_t_deck_plus_reference/examples/Keyboard_ESP32C3`, an
   UNTRACKED vendor tree a fresh checkout does not have; THIRD_PARTY.md's scope
-  note says why). In its default mode it returns
-  clean 1-byte ASCII (shift, sym and digits resolved on the keyboard) but
-  reports each key ONCE on the press edge with no autorepeat, so a held key can
-  only be faked for `MOY_KBD_HOLD_MS` by the driver's latch
-  (`native/moy_input/moy_kbd.c`). For true hold-to-move a running cart
-  switches it to raw-matrix mode (`0x03`, `LILYGO_KB_MODE_RAW_CMD`), which
-  streams the full key matrix every read. `Workstation._set_text_mode` →
-  `ws.keyboard.set_game_mode(on)` queues the flip and the input task's next
-  pass applies it:
-  ASCII for the code editor (so typing is clean, `last_key`), raw everywhere
-  else, and `0x04` (`..._MODE_KEY_CMD`) reverts — the step whose absence once
-  garbled the editor irreversibly. **A mode switch swallows its own byte, on
-  both sides of the seam**: what the C3 hands over at the revert was typed
-  while the matrix streamed, so the driver DRAINS the keyboard after `0x04`,
-  and `_set_text_mode(True)` seeds every typed-key edge with the byte already
-  in `last_key`; each half covers a case the other cannot. The matrix decode
-  (`RAW_KEYS`) carries the whole keyboard as the C3 types it, Sym giving a key
-  its symbol and Shift a letter its capital, so a raw-mode surface reads the
-  bytes a text surface does: the home, which is raw so that Mic and a held
-  direction read, takes its verb letters (C, N, Y, X, F) and Search's `/`
-  (Sym+G, the symbol printed on that key) from it, and a game its `key()`.
-  The driver boots in ASCII and never enables raw by
-  itself; the console asks for it as it attaches the keyboard
-  (`Workstation.sync_keyboard_mode`), because it boots on the home. Raw needs
-  keyboard firmware **≥ 2025-06-12**
-  (`T-Keyboard_..._250620.bin`), and on older firmware the raw read sees the
-  stray ASCII byte and keeps the session on the 1-byte + latch path
-  (`raw_unsupported`; `RAW_GAME_MODE = False` on the driver force-disables raw). The
-  keyboard has no `=` `[ ] { } < > %` keys, so the code editor shows an
-  on-screen symbol palette; `0x01 <duty>` sets its backlight. `MODE =
-  "keyboard"` is the on-glass check (it dumps keys over serial), and the last
-  thing it does is send the `0x04` revert.
+  note says why). In its default mode it returns clean 1-byte ASCII (shift,
+  sym and digits resolved on the keyboard) but reports each key ONCE on the
+  press edge with no autorepeat, and it sends nothing for a bare Mic. In
+  raw-matrix mode (`0x03`, `LILYGO_KB_MODE_RAW_CMD`) it streams the full key
+  matrix every read, and the driver (`native/moy_input/moy_kbd.c`) decodes
+  it: `RAW_KEYS` carries the whole keyboard as the C3 types it, Sym giving a
+  key its symbol and Shift a letter its capital. A game reads the held key
+  and its buttons (true hold-to-move); a text surface (`input.text_mode`)
+  gets each key's press edge as one typed byte, as the ASCII mode types,
+  with no letter a button; and every surface sees Mic, the console's key,
+  which is why a text surface reads the matrix too (a field's Cancel is
+  Mic, owner call 2026-10-18, `docs/ui_api_2026-10.md`). The home takes its
+  verb letters (C, N, Y, X, F) and Search's `/` (Sym+G, the symbol printed
+  on that key) from it, and a game its `key()`. A key already down when the
+  matrix starts, or when a surface turns to text, types nothing until it is
+  pressed again, and `_set_text_mode(True)` seeds every typed-key edge with
+  the byte already in `last_key`. `Workstation._set_text_mode` →
+  `ws.keyboard.set_game_mode(on)` queues a request the input task's next
+  pass applies; the driver boots in ASCII and never enables raw by itself,
+  and the console asks for it as it attaches the keyboard
+  (`Workstation.sync_keyboard_mode`). Raw needs keyboard firmware
+  **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`): on older firmware the raw
+  read sees the stray ASCII byte and keeps the session on the 1-byte + latch
+  path (`raw_unsupported`), as `RAW_GAME_MODE = False` on the driver does;
+  there a text surface's switch to ASCII is `0x04` (`..._MODE_KEY_CMD`), and
+  the driver DRAINS the keyboard after it, because what the C3 hands over at
+  the revert was typed while the matrix streamed. The keyboard has no `=`
+  `[ ] { } < > %` keys, so the code editor shows an on-screen symbol
+  palette; `0x01 <duty>` sets its backlight. `MODE = "keyboard"` is the
+  on-glass check (it dumps keys over serial), and the last thing it does is
+  send the `0x04` revert.
 - **The Mic key is the console's key (owner call, 2026-10-18).** It is the
   `start` button — the pause menu over a fullscreen game, the system menu
-  anywhere else (`docs/shell_ux_v1.md` §9a) — and never reaches a cart.
-  BACKSPACE is a plain key (a typed 0x08 in text mode, `key()` 0x08 in a game),
-  with no hold gesture. What the C3 says for Mic, from the vendor firmware
-  (`keyboard[0][6] = NULL`, `keyboard_symbol[0][6] = '0'`):
-  - **raw matrix (games):** d0 bit 6, level state: `start` while held, every
-    mode, a text surface's included (`moy_kbd_decode_raw`).
-  - **ASCII (text surfaces):** a bare Mic press sets the byte 0x00, the very
-    byte an idle read returns, so the driver CANNOT see it. Shift+Mic is the
-    byte 0xE0 (NULL − 32) and is `start` (it is never a typed key); Sym+Mic is
-    '0'. Seeing a bare Mic there needs one of: a C3 firmware that gives the
-    key a byte, or a raw-matrix read between ASCII reads, which this driver
-    does not do (every mode flip costs two C3 console prints inside the I2C
-    callback and a typed byte can land in the window).
+  anywhere else (`docs/shell_ux_v1.md` §9a) — and never reaches a cart;
+  inside a text field being typed into it is the field's Cancel, because K
+  types a letter there. BACKSPACE is a plain key (a typed 0x08 at a text
+  surface, `key()` 0x08 in a game), with no hold gesture. What the C3 says
+  for Mic, from the vendor firmware (`keyboard[0][6] = NULL`,
+  `keyboard_symbol[0][6] = '0'`):
+  - **raw matrix (every surface):** d0 bit 6, level state: `start` while
+    held, a text surface's included (`moy_kbd_decode_raw`).
+  - **ASCII (old keyboard firmware only):** a bare Mic press sets the byte
+    0x00, the very byte an idle read returns, so the driver cannot see it.
+    Shift+Mic is the byte 0xE0 (NULL − 32) and is `start` (it is never a
+    typed key); Sym+Mic is '0'.
 - **Serial works both ways during play** — "The serial dev channel" above has
   the three changes RX needed.
 

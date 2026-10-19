@@ -78,6 +78,7 @@ typedef struct {
     bool raw_valid;
     uint32_t stat_n, stat_max_us, stat_over5, stat_over20, stat_timeouts;
     bool stat_max_raw;
+    bool raw_text;              // the matrix serves a text surface: it types press edges
 } moy_kbd_t;
 
 // The buttons a typed byte fires (an upper-case letter fires its lower case's).
@@ -87,6 +88,10 @@ uint32_t moy_kbd_buttons_for_key(int32_t key);
 void moy_kbd_decode_raw(const uint8_t d[5], uint32_t *held, int32_t *key);
 // Probe the keyboard; it comes up in ASCII mode.
 void moy_kbd_init(moy_kbd_t *k, const moy_i2c_t *bus, moy_input_t *table, uint32_t src);
+// A surface asks for its mode, applied by the next pass: the matrix for every
+// surface (a text one types its press edges, and sees Mic), ASCII where raw
+// is off or the firmware ignores it. `on` is the surface's game mode, which
+// the matrix serves either way.
 void moy_kbd_game_mode(moy_kbd_t *k, bool on);
 void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus);
 // For the host's binding: the struct's size, and the matrix table by entry.

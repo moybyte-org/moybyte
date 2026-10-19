@@ -254,7 +254,9 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
 
 def test_set_game_mode_is_queued_and_applied_by_the_pass():
     # The input task owns the bus: set_game_mode writes nothing itself; the
-    # next pass applies it, only on a real transition.
+    # next pass applies it, only on a real transition. Every surface reads the
+    # matrix, a text one too (it types press edges), so ASCII is only for raw
+    # turned off or a firmware that ignores 0x03.
     table, drv, fake = _keyboard()
     drv.set_game_mode(True)
     assert fake.writes == [] and not drv.raw_mode
@@ -265,7 +267,12 @@ def test_set_game_mode_is_queued_and_applied_by_the_pass():
     assert fake.writes == [b"\x03"]                  # idempotent
     drv.set_game_mode(False)
     drv.pass_()
+    assert fake.writes == [b"\x03"] and drv.raw_mode, "a text surface keeps the matrix"
+    drv.RAW_GAME_MODE = False
+    drv.set_game_mode(False)
+    drv.pass_()
     assert fake.writes == [b"\x03", b"\x04"] and not drv.raw_mode
+    drv.RAW_GAME_MODE = True
     drv.raw_unsupported = True                       # firmware ignored 0x03 once
     drv.set_game_mode(True)
     drv.pass_()
@@ -280,6 +287,7 @@ def test_the_raw_to_ascii_revert_drains_the_byte_it_produces():
     was streaming. Delivered, it is a letter the kid never typed appearing in
     the code buffer. The drain stops at the first quiet read."""
     table, drv, fake = _keyboard(raw=True)
+    drv.RAW_GAME_MODE = False                        # the one way back to ASCII
     drv.held = 1                                     # a matrix-era latch
     drv.held_until = fake.t + 10_000
     fake.frames = [b"m", b"\x00", b"\x00"]
@@ -293,9 +301,58 @@ def test_the_raw_to_ascii_revert_drains_the_byte_it_produces():
 
 def test_the_ascii_revert_drain_is_bounded():
     table, drv, fake = _keyboard(b"x", raw=True)
+    drv.RAW_GAME_MODE = False
     drv.set_game_mode(False)
     drv.pass_()
     assert len(fake.reads) == 4 + 1                  # MOY_KBD_DRAIN, then the pass's read
+
+
+def _matrix(*keys, sym=False, shift=False):
+    """Five matrix bytes with these plain keys down (moy_kbd.c's RAW_KEYS)."""
+    d = bytearray(5)
+    for at, bit, code, _sym in mi.raw_keys():
+        if chr(code) in keys:
+            d[at] |= bit
+    if sym:
+        d[0] |= 0x04
+    if shift:
+        d[1] |= 0x40
+    return bytes(d)
+
+
+def test_a_text_surface_types_the_matrixs_press_edges_once():
+    """A text surface reads the matrix too: each key's press edge is one
+    typed byte (Sym's symbol, Shift's capital), a held key types once, and
+    no letter is a button there. Mic is still `start`, which the C3's ASCII
+    mode cannot send for a bare press -- the reason text surfaces read the
+    matrix (a field's Cancel on the T-Deck, owner call 2026-10-18)."""
+    frames = [bytes(5), _matrix("h"), _matrix("h"), bytes(5), _matrix("h"),
+              _matrix("g", sym=True), _matrix("d", shift=True), bytes([0x40, 0, 0, 0, 0])]
+    table, drv, _fake = _keyboard(frames, raw=True)
+    table.text_mode = True
+    got = []
+    for _ in range(len(frames)):
+        _frame(drv, table)
+        got.append((table.last_key, sorted(table.held_names())))
+    assert [k for k, _h in got] == [0, ord("h"), 0, 0, ord("h"), ord("/"), ord("D"), 0]
+    assert all(h == [] for _k, h in got[:-1]), "no letter is a button at a text surface"
+    assert got[-1][1] == ["start"]
+
+
+def test_the_key_a_game_held_is_no_typed_key_at_a_text_surface():
+    """The level key of game mode does not leak into typing when a text
+    surface takes the keyboard, and typing does not leak back."""
+    table, drv, fake = _keyboard([_matrix("c")], raw=True)
+    _frame(drv, table)
+    assert table.last_key == ord("c")                 # a game's held key
+    table.text_mode = True
+    fake.frames = [_matrix("c")]                      # still held: no new edge
+    _frame(drv, table)
+    assert table.last_key == 0
+    fake.frames = [bytes(5), _matrix("c")]
+    _frame(drv, table)
+    _frame(drv, table)
+    assert table.last_key == ord("c"), "the next press of the same key types"
 
 
 def test_the_keyboard_boots_in_ascii_and_the_bus_caps_a_stretch():

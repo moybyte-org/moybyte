@@ -214,13 +214,14 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   would read keys the frame never merges; under Brick Siege on 2026-09-23 the
   thread this replaced read a key twice a second, and lockstep netplay shipped
   that stale mask.
-- **The T-Deck keyboard (a separate ESP32-C3) switches mode per screen**:
-  ASCII for text, raw matrix for games. The flip is queued and applied by the
-  input task's pass, which drains after the `0x04` revert, and a text surface
-  seeds its edges with the byte already held — the README has the mechanism.
-  **Mic is the console's key** (`start`, 2026-10-18): the matrix shows it, but
-  the C3's ASCII mode sends the idle byte for a bare Mic, so a text surface
-  sees only Shift+Mic (0xE0). Backspace is a plain key.
+- **The T-Deck keyboard (a separate ESP32-C3) is read as its raw matrix on
+  every surface**: a game reads the held key and its buttons, a text surface
+  the press edges as typed bytes. Its ASCII mode is only for firmware that
+  ignores `0x03` (or raw turned off), where the `0x04` revert drains — the
+  README has the mechanism. **Mic is the console's key** (`start`,
+  2026-10-18), seen only in the matrix (ASCII sends the idle byte for a bare
+  Mic), and a text field's Cancel while one is typed into. Backspace is a
+  plain key.
 - **Serial reads are unreliable ACROSS a reset** on the SoC-USB boards: a reset
   removes the device node from under an open handle, and a reader that opens
   early sees nothing, which reads as a dead board. Attach after the boot

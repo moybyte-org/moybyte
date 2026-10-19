@@ -1399,7 +1399,7 @@ def input_kind(name=None):
 def hints(cv, th, rect, items, desk=False, draw=True):
     """Keycap hints in band `rect`, from its left (the public `ui.hints`'s
     part, for chrome that lays itself out): `items` alternate an action --
-    `confirm`, `back`, `change`, `tabs` or `menu`, drawn as the keys of the
+    `confirm`, `back`, `change`, `tabs`, `menu` or `cancel`, drawn as the keys of the
     input in use (`input_kind`) -- or keys spelled out -- space-separated;
     `enter`, `left`, `right`, `up` and `down` draw as signs -- and what they
     do. Answers

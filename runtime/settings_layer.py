@@ -234,7 +234,7 @@ _GROUPS = (
 _HINT_OPEN = ("confirm", "Open", "back", "Back")
 _HINT_CHANGE = ("change", "Change", "back", "Back")
 _HINT_SWITCH = ("confirm", "Switch", "back", "Back")
-_HINT_TYPE = ("confirm", "Done", "back", "Back")
+_HINT_TYPE = ("confirm", "Done", "cancel", "Cancel")
 _HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "toggle": _HINT_SWITCH,
           "slider": _HINT_CHANGE, "field": _HINT_TYPE}
 
@@ -1312,6 +1312,33 @@ class SettingsLayer:
                 self._name = got
             if done:
                 self.commit_name()
+                self._leave_field()
+
+    def editing_field(self):
+        """Whether a field on Settings is being typed into: the Name row
+        focused, or the Wi-Fi password prompt."""
+        if self._page_of() == "wifi":
+            return self.wifi_pick is not None
+        return self._page_of() is None and self._kinds.get(self._focused) == "field"
+
+    def cancel_field(self):
+        """Cancel the field being typed into (Esc, B, the T-Deck's Mic): the
+        Name gets back the text it had when typing began and focus leaves
+        it; the password prompt closes. False where no field is."""
+        if not self.editing_field():
+            return False
+        if self._page_of() == "wifi":
+            self._wifi_cancel()
+            return True
+        self._name = None                 # nothing typed is kept
+        self._leave_field()
+        return True
+
+    def _leave_field(self):
+        """Focus leaves the field for the row above it: typing ends."""
+        i = self.row_index("name")
+        if i:
+            self.set_msel = i - 1
 
     def _rows_page(self):
         _ui.page("")
@@ -1379,7 +1406,9 @@ class SettingsLayer:
         Settings closes, else Settings does (resuming the cart it was opened
         from). True: Settings took it either way."""
         view = self._page_of()
-        if view == "bt":
+        if view is None and self.cancel_field():
+            pass                          # the first back cancels the field
+        elif view == "bt":
             self.close_bluetooth()
         elif view == "confirm":
             self.close_confirm()

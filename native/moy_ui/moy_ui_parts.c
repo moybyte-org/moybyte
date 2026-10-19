@@ -1250,18 +1250,21 @@ int moy_ui_input(void) {
 }
 
 // Each action's name.
-static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", "tabs", "menu"};
+static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", "tabs", "menu",
+                                                   "cancel"};
 
 // The keys each input does each action with. The T-Deck's are its keyboard's
 // (native/moy_input/moy_kbd.c): Enter is `run`, K is `b` (back, as the bar's
 // chevron is), the trackball steers (`ball_lr`, its sign), Q and E are the
 // home's tab keys and Mic is `start`. A gamepad's are its face buttons, its
-// d-pad (`dpad_lr`), its shoulders and Start. Touch has none.
+// d-pad (`dpad_lr`), its shoulders and Start. Touch has none. Cancel is a
+// field's: in one the T-Deck's K types a letter, so Mic, which never types,
+// cancels there (owner call, 2026-10-18).
 static const char *const ACT_KEYS[MOY_UI_INPUTS][MOY_UI_ACTS] = {
-    {"enter", "Esc", "left right", "Q E", "Super"},
-    {"enter", "K", "ball_lr", "Q E", "Mic"},
-    {"A", "B", "dpad_lr", "L R", "Start"},
-    {"", "", "", "", ""},
+    {"enter", "Esc", "left right", "Q E", "Super", "Esc"},
+    {"enter", "K", "ball_lr", "Q E", "Mic", "Mic"},
+    {"A", "B", "dpad_lr", "L R", "Start", "B"},
+    {"", "", "", "", "", ""},
 };
 
 static int span_is(moy_ui_span_t k, const char *s) {

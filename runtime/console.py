@@ -2853,6 +2853,21 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         that promises a keystroke (#239 is the on-screen keyboard)."""
         return self.soft_keyboard or _ui_draw.input_kind() in _TYPING_INPUTS
 
+    def cancel_field(self):
+        """Cancel the text field being typed into, if one is: the home's
+        search box closes, cleared; Settings' Name gets its text back and
+        focus leaves it, its password prompt closes. The T-Deck's Mic does
+        this inside a field (owner call, 2026-10-18), where its K types a
+        letter; anywhere else Mic is the console's key. True if it did."""
+        if self.search_typing and self.screen == "launcher":
+            self.close_search(clear=True)
+            return True
+        if (self.screen == "settings" or self.wm.input_holder() == "settings") \
+                and self.settings_layer.cancel_field():
+            self._dirty = True
+            return True
+        return False
+
     def sync_keyboard_mode(self):
         """Put the board's keyboard in the mode of the surface on top, as
         `_set_text_mode` does on every change. Called as the keyboard is
@@ -2865,15 +2880,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             kb.set_game_mode(not self.input.text_mode)
 
     def _set_text_mode(self, on):
-        # The code editor needs clean 1-byte ASCII (it reads last_key for typing);
-        # a running cart wants the raw key matrix so a *held* direction keeps firing
-        # (true hold-to-move -- the ASCII path reports each key once on the press
-        # edge with no autorepeat). Flip the keyboard between the two on every screen
-        # change. Raw needs keyboard fw >= 2025-06-12; without it the keyboard keeps
-        # sending ASCII and the keyboard's driver sticks on the 1-byte + hold-latch path, so
-        # this is safe on any firmware. No-op on the host (no keyboard).
+        # A text surface (the code editor, a field) takes typed bytes, once a
+        # press (it reads last_key for typing); a running cart takes the held key
+        # and its buttons, so a *held* direction keeps firing. The T-Deck's driver
+        # reads its raw matrix for both, typing the press edges at a text surface
+        # (moy_kbd.c); on keyboard firmware older than 2025-06-12 it stays on the
+        # C3's ASCII path. The request is queued for the input task. No-op on the
+        # host (no keyboard).
         # text_mode is the single source of truth for "typing, don't latch buttons":
-        # the device keyboard, in ASCII, otherwise ALSO fires a typed key's game alias
+        # the device keyboard otherwise ALSO fires a typed key's game alias
         # (w/a/s/d/z/x -> up/left/down/right/a/b), so a typed name/password would
         # trigger d-pad/shortcut actions. Set it for the code editor too (on=True), and
         # clear it on every other screen (on=False) so it can never leak past the cart
@@ -3482,7 +3497,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Super (the `start` button) is the console's from every surface, before
         # any layer: the system menu, or the pause menu over a fullscreen game.
         if i.pressed("start"):
-            self.system_key()
+            if not (_ui_draw.input_kind() == "tdeck" and self.cancel_field()):
+                self.system_key()
             return
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
         # change visible state (nav, select, screen/menu switch, an edit), so request a

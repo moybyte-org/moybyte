@@ -91,17 +91,26 @@ static const uint8_t RAW_KEYS[][4] = {
 #define KBD_RSHIFT_BYTE 2
 #define KBD_RSHIFT_BIT 0x08
 
-void moy_kbd_decode_raw(const uint8_t d[5], uint32_t *held, int32_t *key) {
+#define N_RAW_KEYS (sizeof(RAW_KEYS) / sizeof(RAW_KEYS[0]))
+
+// The byte matrix key `i` types in frame `d`: its Sym symbol with Sym held, a
+// letter's capital with a Shift held, as the C3's ASCII mode types them.
+static int32_t key_byte(const uint8_t d[5], size_t i) {
     bool sym = (d[KBD_SYM_BYTE] & KBD_SYM_BIT) != 0;
     bool shift = (d[KBD_LSHIFT_BYTE] & KBD_LSHIFT_BIT) || (d[KBD_RSHIFT_BYTE] & KBD_RSHIFT_BIT);
+    int32_t c = sym && RAW_KEYS[i][3] ? RAW_KEYS[i][3] : RAW_KEYS[i][2];
+    if (shift && c >= 'a' && c <= 'z') {
+        c -= 32;                    // the button is the same
+    }
+    return c;
+}
+
+void moy_kbd_decode_raw(const uint8_t d[5], uint32_t *held, int32_t *key) {
     uint32_t h = 0;
     int32_t k = 0;
-    for (size_t i = 0; i < sizeof(RAW_KEYS) / sizeof(RAW_KEYS[0]); i++) {
+    for (size_t i = 0; i < N_RAW_KEYS; i++) {
         if (d[RAW_KEYS[i][0]] & RAW_KEYS[i][1]) {
-            int32_t c = sym && RAW_KEYS[i][3] ? RAW_KEYS[i][3] : RAW_KEYS[i][2];
-            if (shift && c >= 'a' && c <= 'z') {
-                c -= 32;            // as the C3 types it; the button is the same
-            }
+            int32_t c = key_byte(d, i);
             k = c;
             h |= moy_kbd_buttons_for_key(c);
         }
@@ -188,6 +197,19 @@ static void set_mode(moy_kbd_t *k, const moy_i2c_t *bus, bool want) {
     k->held_until = 0;
 }
 
+// A text surface's typing from the matrix: each key down in `d` and up in
+// `was` is one typed byte, queued as the C3's ASCII mode queues it (once a
+// press, no autorepeat).
+static void type_edges(moy_kbd_t *k, const uint8_t was[5], const uint8_t d[5]) {
+    for (size_t i = 0; i < N_RAW_KEYS; i++) {
+        uint8_t at = RAW_KEYS[i][0];
+        uint8_t bit = RAW_KEYS[i][1];
+        if ((d[at] & bit) && !(was[at] & bit)) {
+            moy_input_key(k->table, k->src, key_byte(d, i));
+        }
+    }
+}
+
 // What a surface takes of `mask`: a text surface none of the aliases, and the
 // console key always.
 static uint32_t text_mask(const moy_kbd_t *k, uint32_t mask) {
@@ -198,13 +220,22 @@ void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
     if (!k->available) {
         return;
     }
-    int8_t want = k->want;
-    if (want >= 0) {
+    if (k->want >= 0) {
         k->want = -1;
-        set_mode(k, bus, want && k->raw_game && !k->raw_unsupported);
+        // Every surface reads the matrix, a text one included: it types each
+        // key's press edge, and it sees Mic, which ASCII cannot. ASCII is for
+        // a keyboard firmware that ignores 0x03, or RAW_GAME_MODE off.
+        set_mode(k, bus, k->raw_game && !k->raw_unsupported);
     }
     uint32_t now = bus->ms(bus->ctx);
     if (k->raw_mode) {
+        bool text = moy_input_text_mode(k->table);
+        if (text != k->raw_text) {
+            // a text surface takes typed bytes, a game the held key: neither
+            // inherits the other's key
+            k->raw_text = text;
+            moy_input_set_key(k->table, k->src, 0);
+        }
         uint8_t d[5];
         if (timed_read(k, bus, d, 5)) {
             if (!k->raw_valid || memcmp(d, k->raw_bytes, 5) != 0) {
@@ -226,6 +257,9 @@ void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
                     moy_input_set_mask(k->table, k->src, text_mask(k, stray));
                     return;
                 }
+                if (text && k->raw_valid) {
+                    type_edges(k, k->raw_bytes, d);
+                }
                 moy_kbd_decode_raw(d, &k->raw_held, &k->raw_key);
                 memcpy(k->raw_bytes, d, 5);
                 k->raw_valid = true;
@@ -234,7 +268,9 @@ void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
         // A failed read holds the last matrix for this frame: an empty one
         // would release and re-press a held button, which btnp() reads as a
         // second press.
-        moy_input_set_key(k->table, k->src, k->raw_key);
+        if (!text) {
+            moy_input_set_key(k->table, k->src, k->raw_key);
+        }
         moy_input_set_mask(k->table, k->src, text_mask(k, k->raw_held));
         return;
     }

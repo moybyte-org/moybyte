@@ -414,7 +414,7 @@ cart ever reads it. It is the `start` button (`Workstation.system_key`,
 | input | the console key |
 |---|---|
 | a BLE or USB keyboard | its GUI key (the simulator's Super, Cmd or Meta) |
-| the T-Deck's keyboard | **Mic**: d0 bit 6 of the raw matrix, and in the C3's ASCII mode (which sends no byte for a bare Mic) Shift+Mic (`firmware/lilygo_t_deck_plus_mainline/README.md`) |
+| the T-Deck's keyboard | **Mic**: d0 bit 6 of the raw matrix, and in the C3's ASCII mode (which sends no byte for a bare Mic) Shift+Mic (`firmware/lilygo_t_deck_plus_mainline/README.md`); inside a text field being typed into, Mic is the field's Cancel instead (owner call 2026-10-18: K types a letter there, and Mic never types) |
 | a gamepad | Start |
 | the browser page | a Meta tap, the page's ☰, and Esc during play (a page rarely sees Super) |
 | touch | the bar's Moy button, where a bar shows |

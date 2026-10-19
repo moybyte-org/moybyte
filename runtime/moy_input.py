@@ -611,7 +611,7 @@ class _Kbd(ctypes.Structure):
                 ("raw_held", _U32), ("raw_key", _I32), ("raw_bytes", _U8 * 5),
                 ("raw_valid", _B), ("stat_n", _U32), ("stat_max_us", _U32),
                 ("stat_over5", _U32), ("stat_over20", _U32), ("stat_timeouts", _U32),
-                ("stat_max_raw", _B)]
+                ("stat_max_raw", _B), ("raw_text", _B)]
 
 
 class _Touch(ctypes.Structure):

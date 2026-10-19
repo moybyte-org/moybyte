@@ -71,7 +71,7 @@ def _py_callers():
 
 
 def test_no_caller_spells_out_a_key_an_action_covers():
-    """A hint pair names `confirm`, `back`, `change`, `tabs` or `menu`, so
+    """A hint pair names `confirm`, `back`, `change`, `tabs`, `menu` or `cancel`, so
     every input draws its own keys: a caller that spells out `Esc` shows a
     keyboard's cap on a gamepad. Every string tuple or list in a module that
     calls the hints, every Lua `ui.hints{...}` and every compiled fixture's
