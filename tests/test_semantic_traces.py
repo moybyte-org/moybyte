@@ -2257,6 +2257,7 @@ def roles_trace(ws):
     t1 = ws.input.text_mode
     nv.text_mode(False)
     say("text_mode", t1, ws.input.text_mode)
+    say("cover", nv.cover({"title": "Nowhere"}))
     nv.play(cart)
     say("play", ws.wm.top_kind())
     ws.go_home()
@@ -2495,6 +2496,7 @@ open_image True artwork
 open_text True desktop
 run_script [False,"CAN'T READ IT"]
 text_mode True False
+cover None
 play desktop
 notify
 wallpaper None 'moybyte.wall_z'

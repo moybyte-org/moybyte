@@ -640,10 +640,11 @@ def test_a_blank_icon_tile_is_no_art():
     assert img is not None and img.w == 8
 
 
-def test_a_card_without_a_cover_is_its_title_tile(tmp_path):
-    """A coverless card on the handheld home is its title tile (the 2026-10
-    look's GAPS 21): the theme's tile field across the card, the cart's
-    title on it in the ink, inside the card."""
+def test_a_card_without_a_cover_wears_its_generated_cover(tmp_path):
+    """A coverless card on the handheld home wears a generated cover (design
+    review D-13, owner 2026-10-19): its title's colour block across the
+    card, the title's initial on it in the block's ink, inside the card."""
+    from runtime import ui_draw
     from runtime.host_canvas import indices_of
     from runtime.host_canvas import make_system_canvas as SystemCanvas
     ws = build_ws(tmp_path)
@@ -656,6 +657,7 @@ def test_a_card_without_a_cover_is_its_title_tile(tmp_path):
     cv.cls(th["desktop"])
     lw._draw_home_card(cv, it, (20, 20, w, h), False, None)
     px = indices_of(cv)
-    assert px[(20 + 2) * 320 + 20 + 2] == th["surface_alt"]       # the tile's field
-    ink = [(i % 320, i // 320) for i in range(len(px)) if px[i] == th["ink"]]
+    block, ink_i = ui_draw.initial_block("PIN")
+    assert px[(20 + 2) * 320 + 20 + 2] == block                   # the block
+    ink = [(i % 320, i // 320) for i in range(len(px)) if px[i] == ink_i]
     assert ink and all(20 < x < 20 + w and 20 < y < 20 + h for x, y in ink)

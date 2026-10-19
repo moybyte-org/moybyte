@@ -1249,7 +1249,8 @@ def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch)
     ws.bar_layer.invalidate()
     drv.frame(1 / 30)
     kinds = [k for k, _i in drew]
-    assert "settings" in kinds and "sprite" in kinds and "code" in kinds
+    assert "sliders" in kinds and "sprite" in kinds and "code" in kinds
+    assert "settings" not in kinds, "the gear is Settings', never the Config tab's"
     assert "edit" not in kinds and "paint" not in kinds
     assert ("play", ws.theme_colors["value"]) in drew
     # Day and Night take one rule: on the T-Deck's zone the ladder has no

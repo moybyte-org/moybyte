@@ -324,8 +324,10 @@ class CoverCache:
 
     def none_for(self, cart):
         """Whether `cart` is known to carry no cover (its `cover_for` answers
-        None for good, not while a decode is in flight)."""
-        return cart.get("path") in self._none
+        None for good, not while a decode is in flight): one with no path
+        too, which no store holds."""
+        path = cart.get("path")
+        return path is None or path in self._none
 
     def tinted(self, cart, c, alpha):
         """The cart's BASE cover with colour `c` over it at `alpha` (0..255,

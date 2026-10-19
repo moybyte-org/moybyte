@@ -177,10 +177,10 @@ def test_a_long_press_opens_the_cards_verbs_and_its_release_is_no_tap(tmp_path, 
     items = ws.sysmenu.items
     assert items[0][0] == "header" and items[0][4] == it.get("title")
     assert [r[4] for r in items if r[0] == "item"] == [
-        "Add favourite", "Change", "Copy", "Delete"]
+        "Add favourite", "Change", "Duplicate", "Delete"]
     # a row acts on the card: Copy makes one more cart
     n = len(ws.carts.all)
-    row = next(i for i, r in enumerate(items) if r[0] == "item" and r[4] == "Copy")
+    row = next(i for i, r in enumerate(items) if r[0] == "item" and r[4] == "Duplicate")
     ws.sysmenu.sel = row
     ws.sysmenu.activate()
     assert len(ws.carts.all) == n + 1
@@ -217,7 +217,7 @@ def test_the_system_menu_opens_on_the_selected_cards_group(tmp_path):
     items = ws.sysmenu.items
     assert items[0][:2] == ("header", it["title"].upper())
     labels = [r[4] for r in items if r[0] in ("header", "item")]
-    assert labels.index("System") > labels.index("Copy")
+    assert labels.index("System") > labels.index("Duplicate")
 
 
 
