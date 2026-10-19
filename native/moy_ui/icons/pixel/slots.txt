@@ -60,3 +60,6 @@
 59 arrow_down
 60 star
 61 star_on
+62 eraser
+63 mirror
+64 flip_v

@@ -428,6 +428,31 @@ def test_every_set_fills_the_slots_of_the_sources():
     assert not set(iconsets.ALIASES) & set(names), "an alias may not hide a slot"
 
 
+@pytest.mark.parametrize("name", ["default", "coast", "luna"])
+@pytest.mark.parametrize("size", [16, 20, 24])
+def test_the_sprite_tools_icons_share_the_sets_grid(name, size):
+    """The sprite row's line arrows stand on the set's grid, as large as
+    the rotate icon beside them (R3-11: they were 2-4 px smaller), and the
+    row's mirror, eraser and vertical flip are slots every set draws."""
+    src = (ICONS / ("%s-%d.fnt" % (name, size))).read_bytes()
+
+    def box(slot):
+        g = _glyph(src, iconsets.FIRST + iconsets.SLOT[slot])
+        assert g is not None, "%s-%d draws no %s" % (name, size, slot)
+        w, h, _x, _y, lv = g
+        cols = [c for c in range(w) if any(lv[r][c] for r in range(h))]
+        rows = [r for r in range(h) if any(lv[r])]
+        return cols[-1] - cols[0] + 1, rows[-1] - rows[0] + 1
+
+    rw, rh = box("rotate")
+    for arrow in ("arrow_left", "arrow_right", "arrow_up", "arrow_down"):
+        aw, ah = box(arrow)
+        assert max(aw, ah) >= max(rw, rh), "%s-%d: %s is %dx%d beside rotate's %dx%d" % (
+            name, size, arrow, aw, ah, rw, rh)
+    for slot in ("eraser", "mirror", "flip_v"):
+        box(slot)
+
+
 def test_masks_build_from_their_sources():
     """The committed masks and pixel set are what tools/make_icons.py builds from
     the SVG sources and pixel_icons.py: a derived artifact, compared byte for byte
