@@ -265,6 +265,7 @@ static moy_ui_keep_t *keep(moy_ui_ctx_t *c, uint32_t id, int make) {
     }
     free_->id = id;
     free_->a = free_->b = 0;
+    free_->over = free_->foot = 0;
     free_->seen = 1;
     return free_;
 }
@@ -279,16 +280,41 @@ static moy_ui_keep_t *keep_of(moy_ui_ctx_t *c, uint32_t id) {
 }
 
 // Scroll the page `p` stop holds so box `b` (as drawn last frame) shows.
-static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, moy_ui_box_t b) {
+// Scroll page p (stop index `page`) to show box b, keeping each group
+// caption on it wholly in view or wholly out: a scroll down that would cut
+// one at the page's top goes on past it, a scroll up brings it in, and a
+// group's first row brings its caption.
+static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_t b) {
     moy_ui_keep_t *k = keep_of(c, p->id);
     if (k == NULL) {
         return 0;
     }
     int32_t was = k->a;
-    if (b.y < p->b.y) {
-        k->a -= p->b.y - b.y;
-    } else if (b.y + b.h > p->b.y + p->b.h) {
-        k->a += (b.y + b.h) - (p->b.y + p->b.h);
+    int top = p->b.y, bottom = p->b.y + p->b.h, d = 0;
+    if (b.y < top) {
+        d = b.y - top;
+    } else if (b.y + b.h > bottom) {
+        d = (b.y + b.h) - bottom;
+    }
+    if (d != 0) {
+        int t = top + d;                // the page's top after, in this frame's pixels
+        for (int i = 0; i < c->n_cap_prev; i++) {
+            const moy_ui_cap_t *cp = &c->cap_prev[i];
+            int cy = cp->y, ce = cp->y + cp->h;
+            if (cp->page != page) {
+                continue;
+            }
+            if (d > 0 && cy < t && t < ce && ce <= b.y) {
+                t = ce;                 // down: past the caption, the row still in
+            } else if (d < 0 && cy < t && (t < ce || (ce <= b.y && b.y - ce <= c->fs))
+                       && b.y + b.h - cy <= p->b.h) {
+                t = cy;                 // up: the caption in, with the row
+            }
+        }
+        k->a += t - top;
+        // a scroll down past a caption may go past the rows' end by as
+        // much: the page keeps that room while the scroll stays there
+        k->over = (int16_t)(d > 0 ? t - top - d : 0);
     }
     if (k->a < 0) {
         k->a = 0;
@@ -315,6 +341,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     memcpy(c->prev, c->cur, c->n_cur * sizeof(moy_ui_stop_t));
     c->n_prev = c->n_cur;
     c->n_cur = 0;
+    memcpy(c->cap_prev, c->cap_cur, c->n_cap_cur * sizeof(moy_ui_cap_t));
+    c->n_cap_prev = c->n_cap_cur;
+    c->n_cap_cur = 0;
     c->surface = surface;
     c->page = surface;
     c->cls = (uint8_t)((flags & MOY_UI_DESK) ? 1 : 0);
@@ -528,6 +557,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             moy_ui_keep_t *k = keep_of(c, c->drag_page);
             if (k != NULL) {
                 k->a -= y - c->drag_y;
+                k->over = 0;
                 if (k->a < 0) {
                     k->a = 0;
                 }
@@ -577,7 +607,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
                 && b.y + b.h + pk->a <= v[v[i].page].b.y + v[v[i].page].b.h) {
                 pk->a = 0;              // the page's first stop shows the page's top
                 settled = 0;
-            } else if (reveal(c, &v[v[i].page], b)) {
+            } else if (reveal(c, &v[v[i].page], v[i].page, b)) {
                 settled = 0;
             }
         }
@@ -870,7 +900,14 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags) 
     c->scroll = 0;
     c->page_keep = -1;
     if (k != NULL) {
-        int32_t most = k->b - ct.h;
+        // the rows' height less what shows of them: the page less the hint
+        // band its foot gave up last frame
+        int32_t most = k->b - (ct.h - k->foot);
+        k->foot = 0;
+        if (k->a <= most) {
+            k->over = 0;
+        }
+        most += k->over;
         if (k->a > most) {
             k->a = most;
         }
@@ -1057,6 +1094,9 @@ void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t cap
     if (k != NULL) {
         k->b = c->y;
     }
+    if (c->n_cap_cur < MOY_UI_API_CAPS && c->page_stop != NO_PAGE) {
+        c->cap_cur[c->n_cap_cur++] = (moy_ui_cap_t){b.y, b.h, c->page_stop};
+    }
     clip_t cl;
     if (clip_row(&cl, s, b, 1, c->page)) {
         if (!c->cls) {
@@ -1207,6 +1247,10 @@ void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *it
         c->page.h = (int16_t)(c->page.h - h);
         if (c->page_stop != NO_PAGE) {
             c->cur[c->page_stop].b.h = c->page.h;
+        }
+        moy_ui_keep_t *k = page_keep(c);
+        if (k != NULL) {
+            k->foot = (int16_t)h;
         }
     }
     moy_ui_hints(s, b, items, len, c->fs, ground_of(c));

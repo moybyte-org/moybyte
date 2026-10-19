@@ -107,6 +107,7 @@ class _Run:
 
 # The handheld's geometry (style.json's `group` and `value_row` metrics at fs 1).
 INSET, PAD, CAPTION, ROW, GAP = 6, 10, 19, 20, 3
+HINTS = 20      # the hint band a page's foot gives up
 
 
 def _group_page(n=3, last_focus=False, theme=("moy", "light")):
@@ -439,6 +440,51 @@ def _long_page():
     r.frame()
     r.frame()
     return r, st
+
+
+def _groups_page(groups=5, rows=3):
+    def draw():
+        st = {"rect": ui.page("")}
+        ui.hints(("confirm", "Open"))
+        for g in range(groups):
+            ui.group("Group %d" % g)
+            for i in range(rows):
+                ui.link("G%d R%d" % (g, i), "")
+        ui.group()
+        return st
+    r = _Run(draw)
+    r.frame()
+    r.frame()
+    return r
+
+
+def test_keys_scroll_a_header_wholly_in_or_out_and_a_first_row_brings_its():
+    """Moving focus scrolls the page so no group's caption is cut by the
+    page's top edge -- wholly in, or wholly out -- and a group's first row
+    comes into view with its caption (a Settings page scrolled by keys cut
+    "General" in half under the bar)."""
+    groups, rows = 5, 3
+    r = _groups_page(groups, rows)
+    ids = ["G%d R%d" % (g, i) for g in range(groups) for i in range(rows)]
+    at0 = {i: _box(r, i)[1] for i in ids}               # content y at scroll 0
+    top = r.out["rect"][1]
+    caps = [at0["G%d R0" % g] - CAPTION for g in range(groups)]
+    walk = ["down"] * (len(ids) - 1) + ["up"] * (len(ids) - 1)
+    for key in walk:
+        r.frame((key,))
+        r.frame()
+        f = ui.focus()
+        scroll = at0[ids[0]] - _box(r, ids[0])[1]
+        view = top + scroll
+        for g, cy in enumerate(caps):
+            assert not cy < view < cy + CAPTION, \
+                "focus on %s: Group %d's caption cut %d px" % (f, g, view - cy)
+        if f.endswith(" R0"):
+            g = int(f[1:f.index(" ")])
+            assert caps[g] >= view, "focus on %s: its caption is out of view" % f
+        _x, y, _w, h = _box(r, f)
+        assert top <= y and y + h <= top + r.out["rect"][3] - HINTS, \
+            "focus on %s: the row is out of view (above the hint band)" % f
 
 
 def _drag(r, x0, y0, x1, y1, steps=4):

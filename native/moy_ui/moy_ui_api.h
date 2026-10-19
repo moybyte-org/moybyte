@@ -27,6 +27,7 @@
 
 #define MOY_UI_API_STOPS 40         // the stops one frame records
 #define MOY_UI_API_KEEP 16          // the ids whose state is kept
+#define MOY_UI_API_CAPS 16          // the group captions one frame records
 #define MOY_UI_API_NAME 32          // the focused id's text, NUL-terminated
 
 // The input a frame resolves over, the run snapshot's shape: the buttons held
@@ -93,8 +94,15 @@ typedef struct {
 typedef struct {
     uint32_t id;
     int32_t a, b;                   // a page: its scroll, its rows' height; a list: its row
+    int16_t over;                   // a page: how far a scroll into view went past its rows
+    int16_t foot;                   // a page: the hint band its foot gave up last frame
     uint8_t seen;
 } moy_ui_keep_t;
+
+typedef struct {
+    int16_t y, h;
+    uint8_t page;
+} moy_ui_cap_t;
 
 typedef struct {
     uint32_t magic;
@@ -116,6 +124,10 @@ typedef struct {
     uint8_t n_prev, n_cur, has_at, gesture;    // gesture: 0 none, 1 down, 2 a scroll, 3 sideways
     moy_ui_stop_t prev[MOY_UI_API_STOPS], cur[MOY_UI_API_STOPS];
     moy_ui_keep_t keep[MOY_UI_API_KEEP];
+    // The group captions drawn last frame and this one: where on screen, and
+    // the page stop they lie on (a scroll into view keeps them whole).
+    moy_ui_cap_t cap_prev[MOY_UI_API_CAPS], cap_cur[MOY_UI_API_CAPS];
+    uint8_t n_cap_prev, n_cap_cur;
     moy_ui_box_t surface;           // what a page fills where ui.at does not place it
     moy_ui_box_t page;              // the content rect rows stack in
     moy_ui_box_t at;
