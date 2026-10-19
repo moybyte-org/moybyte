@@ -280,6 +280,12 @@ ICONS = {
              (("rect", (11, 7, 3, 3)), "dark", "flat")],
     "stamp": [(("ell", (5, 1, 10, 5)), "brown"), (("rect", (6, 6, 4, 3)), "brown"),
               (("rect", (2, 9, 12, 3)), "red"), (("rect", (2, 13, 12, 1)), "dark", "flat")],
+    "power": [(("ring", (2, 3, 13, 14, 2)), "red", "flat"), (("rect", (5, 0, 6, 7)), 0, "cut"),
+              (("rect", (7, 1, 2, 7)), "red", "flat")],
+    "sleep": [(("ell", (2, 2, 13, 13)), "yellow"), (("ell", (6, 0, 15, 9)), 0, "cut")],
+    "sliders": [(("rect", (1, 3, 14, 1)), "dark", "flat"), (("rect", (1, 8, 14, 1)), "dark", "flat"),
+                (("rect", (1, 12, 14, 1)), "dark", "flat"), (("rect", (9, 1, 3, 5)), "blue"),
+                (("rect", (3, 6, 3, 5)), "blue"), (("rect", (8, 10, 3, 5)), "blue")],
 }
 
 

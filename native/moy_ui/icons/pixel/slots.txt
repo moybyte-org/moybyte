@@ -66,3 +66,6 @@
 65 folder_open
 66 more
 67 stamp
+68 power
+69 sleep
+70 sliders
