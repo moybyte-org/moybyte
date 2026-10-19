@@ -3723,7 +3723,7 @@ static void put_wallpaper_keys(wr_t *w, const uint8_t *src, size_t n) {
 static void put_colour(wr_t *w, int32_t v) {
     if (MOY_THEME_IS_RGB(v)) {
         static const char hx[] = "0123456789abcdef";
-        char b[9] = "\"#000000\"";
+        char b[10] = "\"#000000\"";   // 9 written; the 10th holds the NUL
         for (int i = 0; i < 6; i++) {
             b[7 - i] = hx[(v >> (4 * i)) & 15];
         }
