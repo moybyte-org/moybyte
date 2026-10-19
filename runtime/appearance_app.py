@@ -205,8 +205,11 @@ class AppearanceLayout:
             # The pictures: the target's 192 x 112, three to a 680 window.
             self.card = (192, 112)
         else:
+            # The hints' band: only where the input shows keys (touch shows
+            # none, and the rows take the whole content rect, `full`).
             self.foot, self.body = ui.cut_bottom(content, 20 * fs)
             self.card = (66 * fs, 50 * fs)
+        self.full = content
 
 
 class AppearanceAppLayer:
@@ -246,6 +249,7 @@ class AppearanceAppLayer:
         self._focus = None          # the id focus moves to on the next frame
         self._focused = None        # the focused id as the last frame left it
         self._kinds = {}            # a stop's id -> its kind, for the hints
+        self._keys = True           # the input in use shows keys: the hints take a band
         self._ch = None
         self._gen = None
         self._stale = 0
@@ -505,7 +509,10 @@ class AppearanceAppLayer:
             self._focus = None
         self._kinds.clear()
         ch = self._ch
-        ui.at(*lay.body)
+        # Under touch the handheld draws no hints, so no band holds them
+        # (design review R3-07): the rows take the whole content rect.
+        self._keys = lay.desk or ui.hints_width(("back", "Back")) > 0
+        ui.at(*(lay.body if self._keys else lay.full))
         ui.scroll("page" if self.view == "rows" else "walls")
         if self.view == "walls":
             self._walls_page(cv, th, ch)
@@ -532,8 +539,9 @@ class AppearanceAppLayer:
         else:
             items = _HINTS.get(kind, _STEP)
         if not lay.desk:
-            ui.at(*lay.foot)
-            ui.hints(items)
+            if self._keys:
+                ui.at(*lay.foot)
+                ui.hints(items)
             return
         x, y, w, h = lay.foot
         h += lay.under                # centred between the rule and the frame's bottom

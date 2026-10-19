@@ -361,3 +361,26 @@ def test_the_desk_appearance_foot_sits_on_the_rows_column_and_inset(tmp_path, th
     pad = ui_draw.metrics("group")[1] * lay.fs
     x0 = _ink_left(px, cx + bx, cx + bx + bw // 2, rows[0], rows[-1] + 1, ground)
     assert 0 <= x0 - (cx + bx + pad) <= lay.fs, (x0 - cx - bx, pad)
+
+
+@pytest.mark.parametrize("app_id", ("appearance", "calc"))
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_under_touch_a_handheld_app_keeps_no_hint_band(tmp_path, app_id, theme, mode):
+    """Touch draws no keycaps, so Appearance and Calc on the handheld keep no
+    empty band for them: the content's last 20 rows hold the page (design
+    review R3-07); a key input brings the hints back."""
+    ws = _ws(tmp_path, HANDHELD, theme, mode)
+    ws.use_inputs([("local", "touch")])
+    ws.open_app(ws._apps_by_id[app_id])
+    _frame(ws)
+    lay = ws.layout
+    px = _px(ws)
+    band = {px[y][x] for y in range(lay.cy + lay.ch - 20, lay.cy + lay.ch)
+            for x in range(lay.cx, lay.cx + lay.cw)}
+    assert len(band) > 1, "an empty band under touch"
+    ws.use_inputs([("local", "keys")])
+    _frame(ws)
+    px = _px(ws)
+    band = {px[y][x] for y in range(lay.cy + lay.ch - 20, lay.cy + lay.ch)
+            for x in range(lay.cx, lay.cx + lay.cw)}
+    assert len(band) > 1, "no hints under keys"
