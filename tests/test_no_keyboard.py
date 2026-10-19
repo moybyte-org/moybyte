@@ -44,6 +44,21 @@ def _printed(ws, drv):
     return " | ".join(out)
 
 
+@pytest.mark.parametrize("kind,field", [("keys", True), ("tdeck", True), ("pad", False),
+                                        ("touch", False)])
+def test_settings_name_is_a_field_only_where_something_types(tmp_path, kind, field):
+    """Under touch alone or a gamepad the Name row says to pair a keyboard
+    (an info row, no stop to type into, no Done hint)."""
+    ws = build_ws(tmp_path)
+    drv = make_drv(ws)
+    ws.open_settings()
+    ui_draw.input_kind(kind)
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert ("field" in ws.settings_layer._kinds.values()) is field
+
+
 @pytest.mark.parametrize("kind", ["pad", "touch"])
 def test_the_home_search_says_to_pair_a_keyboard_where_nothing_types(tmp_path, kind):
     ws = build_ws_with_shelf(tmp_path, 4)

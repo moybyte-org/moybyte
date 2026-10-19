@@ -773,7 +773,17 @@ class SettingsLayer:
         """The password for the network picked, over the list: a dialog of
         the engine's field (focused as it opens: typing goes in) and Cancel
         and Connect side by side at its foot. Enter in the field connects."""
-        pick = _ui.dialog(("Password for " + str(self.wifi_pick))[:30], ("Cancel", "Connect"))
+        title = ("Password for " + str(self.wifi_pick))[:30]
+        if not self.ws.can_type():
+            # nothing in use can type: no field and no Connect a key can't
+            # fill (#239 is the on-screen keyboard)
+            if _ui.dialog(title, ("Cancel",)) == 0:
+                self._wifi_cancel()
+            else:
+                _ui.label(self.ws.no_keyboard_text)
+            _ui.dialog()
+            return
+        pick = _ui.dialog(title, ("Cancel", "Connect"))
         text, done = _ui.field("Password", self.wifi_pw.text, WIFI_PW_MAX, {"id": "password"})
         _ui.dialog()
         self.wifi_pw.text = text
@@ -1302,6 +1312,11 @@ class SettingsLayer:
                 got = _ui.slider(s, cur, lo, hi)
             if got != cur:
                 self.set_level(key, got)
+        elif kind == "name" and not ws.can_type():
+            # nothing in use can type (touch alone, a gamepad): the row says
+            # so instead of a field no key reaches (#239 is the keyboard)
+            self._kinds.pop(s, None)
+            _ui.info(s, ws.no_keyboard_text)
         elif kind == "name":
             self._kinds[s] = "field"
             cur = self._name
