@@ -60,6 +60,14 @@ def _px(ws):
     return out
 
 
+def _rgb(cv, colour):
+    """Colour index (or role value) `colour` as `_px` reads it: the canvas
+    word is the glass's big-endian RGB565 read as a native one."""
+    w = cv._col(colour)
+    v = ((w & 0xFF) << 8) | (w >> 8)
+    return ((v >> 11) & 31, (v >> 5) & 63, v & 31)
+
+
 def _ink_left(px, x0, x1, y0, y1, ground=None):
     """The first column in [x0, x1) where a row of [y0, y1) leaves its ground
     (the row's pixel at x0, or `ground`), or None."""
@@ -181,3 +189,27 @@ def test_a_row_mark_stands_off_the_frame_and_the_divider(tmp_path, theme, mode):
             run = px[yy][x0:x0 + 3 * fs]
             assert len(set(run)) == 1, (name, yy - cy, run)
             assert run[0] == px[cy + ch - 2][x0], (name, yy - cy, run[0])
+
+
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_the_caret_stands_a_column_off_the_next_stem(tmp_path, theme, mode):
+    """The caret before "b" (the targets' caret, line 42 column 13) is one
+    column wide and a ground column stands between it and the stem, so the
+    stem does not read as bold (design review R3-24)."""
+    ws = _ws(tmp_path, HANDHELD, theme, mode)
+    lay, ox, oy = _editor(ws, HANDHELD, "code")
+    ed = ws.editor
+    assert ed.lines[ed.row][ed.col] == "b"
+    fs = lay.fs
+    cv = ws.glass_canvas
+    px = _px(ws)
+    caret = _rgb(cv, ws.code_layer._tones()["caret"])
+    y = oy + lay.y0 + (ed.row - ed.top) * lay.lh
+    x = lay.x0 + (ed.col - ed.left) * lay.cell
+    cols = [c for c in range(x - lay.cell, x + lay.cell)
+            if all(px[yy][c] == caret for yy in range(y + fs, y + lay.text_h - fs))]
+    assert len(cols) == fs, cols
+    ground = px[y + lay.text_h // 2][cols[-1] + 1]
+    stem = next(c for c in range(cols[-1] + 1, x + lay.cell)
+                if any(px[yy][c] != ground for yy in range(y + fs, y + lay.text_h - fs)))
+    assert stem - cols[-1] >= 2, (cols, stem)

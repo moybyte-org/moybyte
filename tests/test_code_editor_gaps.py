@@ -832,10 +832,10 @@ def test_a_faded_current_line_wears_one_outline(tmp_path):
         ring = _w(cv, x, y)                          # the outline's top edge
         assert ring == _w(cv, x, y + lay.lh - 1), variant
         assert ring != cv._col(ws.code_layer._t["bg"]), variant
-        caret = lay.x0 + (ed.col - ed.left) * lay.cell - lay.fs   # 2 * fs wide
+        caret = lay.x0 + (ed.col - ed.left) * lay.cell - lay.fs   # fs wide
         inner = [x for x in _edges(cv, lay, y, ring)
                  if lay.mark_x + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs
-                 and not caret <= x < caret + 2 * lay.fs]
+                 and not caret <= x < caret + lay.fs]
         assert inner == [], (variant, inner)
 
 

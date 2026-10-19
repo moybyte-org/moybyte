@@ -1191,7 +1191,11 @@ class CodeLayer:
                     vcol = ed.col - ed.left
                     if 0 <= vcol <= cols:
                         if look:
-                            cv.rect(tx0 + vcol * cell - fs, y + fs, 2 * fs, th - 2 * fs,
+                            # One scale wide, in the column before the cell:
+                            # a mono face leaves its cells two blank columns
+                            # between glyphs, and a caret filling both read as
+                            # the next stem's bold (design review R3-24).
+                            cv.rect(tx0 + vcol * cell - fs, y + fs, fs, th - 2 * fs,
                                     t["caret"])
                         else:
                             cv.rect(tx0 + vcol * cell, y, fs, th, t["caret"])
