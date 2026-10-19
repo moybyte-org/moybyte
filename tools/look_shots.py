@@ -78,10 +78,11 @@ backspace against a digit),
 each with its ratio and a FLAG under its floor. A box is measured as it
 shows -- cut to its window or the content under the bar, less the hint band
 -- inside its plate's own run; anti-aliasing is no colour of its own; text
-is held to 4.5:1 and a part to 3:1; a current mark by the look's
-`current.style`, a faint plate passing on its label's ink; a swatch only has
-to show, and a preview card is measured by its ring. A pair an open design
-question owns (`D05_TOKENS`, `D08_KINDS`), or a measure with a known, filed
+is held to 4.5:1, a part to 3:1 and the structure ramp (`STRUCTURE_TOKENS`,
+an Off track) to 1.5:1; a toggle's knob is measured on its track; a current
+mark by the look's `current.style`, a faint plate passing on its label's
+ink; a swatch only has to show, and a preview card is measured by its ring.
+A pair an open design question owns (`D08_KINDS`), or a measure with a known, filed
 gap (`KNOWN`), names it in the CSV's owner column and is no FLAG; the run
 prints the FLAG count.
 """
@@ -1210,13 +1211,15 @@ FLOOR = 3.0
 TEXT_FLOOR = 4.5
 DISABLED_FLOOR = 1.5
 SAMPLE_FLOOR = 1.5
+# The structure ramp -- a hairline, an Off toggle's track, the theme's
+# `border`/`edge` -- holds 1.5:1 to the ground it lies on (D-05, owner
+# 2026-10-19); a text field's outline is a part, 3:1.
+STRUCTURE_FLOOR = 1.5
+STRUCTURE_TOKENS = ("border", "edge")
 
-# The open design questions that own a pair the audit measures (judged
-# round 3): in Moy and Blocks the structure ramp -- a hairline, a field's
-# outline, the theme's `border`/`edge` -- is D-05's, and the stepped bar's
-# rest steps and the slider's rest track are D-08's. Such a row carries its
-# owner and is no FLAG.
-D05_TOKENS = ("border", "edge")
+# The open design question that owns a pair the audit measures (judged
+# round 3): in Moy and Blocks the stepped bar's rest steps and the slider's
+# rest track are D-08's. Such a row carries its owner and is no FLAG.
 OWNED_THEMES = ("moy", "blocks")
 D08_KINDS = ("slider", "steps", "volume")
 # The measures with a known gap the round filed: the desk Calc's backspace
@@ -1364,11 +1367,16 @@ def _owner(ws, kind, c, ratio, floor):
     """The open question a failing pair is owned by ("" for none)."""
     if ratio >= floor or ws.look.theme_name not in OWNED_THEMES or c is None:
         return ""
-    if c in _token_rgbs(ws, D05_TOKENS):
-        return "D-05"
     if kind in D08_KINDS:
         return "D-08"
     return ""
+
+
+def _disabled_rgb(ws):
+    """The live theme's disabled ink as the glass shows it, or None."""
+    live = getattr(ws.look, "live", None)
+    v = live.look[0].get("disabled") if live is not None else None
+    return _index_rgb(ws, v) if v is not None and v >= 0 else None
 
 
 def _token_rgbs(ws, names):
@@ -1397,12 +1405,25 @@ def _row_pairs(ws, img, r, pair, kind=None, view=None):
         return []
     inks = _inks(img, r, plate, ws.layout.fs)
     out = []
+    ramp = _token_rgbs(ws, STRUCTURE_TOKENS)
 
-    def add(name, c, floor):
-        ratio = contrast(c, plate)
-        out.append((name, _hex(c), _hex(plate), ratio, floor,
+    def add(name, c, floor, on=None):
+        on = plate if on is None else on
+        if c in ramp and kind != "field":
+            floor = STRUCTURE_FLOOR
+        ratio = contrast(c, on)
+        out.append((name, _hex(c), _hex(on), ratio, floor,
                     _owner(ws, kind, c, ratio, floor)))
-    for c in inks["text"][:2]:
+    texts = inks["text"][:2]
+    if kind == "field":
+        # an empty field's placeholder is dim on purpose (D-05): held as a
+        # disabled ink is, on the field's own ground
+        dis = _disabled_rgb(ws)
+        for c in [c for c in texts if dis is not None and _diff(c, dis) <= 12]:
+            texts.remove(c)
+            add("field placeholder vs its ground", c, DISABLED_FLOOR,
+                on=_index_rgb(ws, ws.theme_colors["surface"]))
+    for c in texts:
         add(pair + " (text)", c, TEXT_FLOOR)
     for c in inks["line"][:2]:
         add(pair + (" (ring)" if kind in ("swatches", "card") else ""), c, FLOOR)
@@ -1419,6 +1440,21 @@ def _row_pairs(ws, img, r, pair, kind=None, view=None):
         solids = []
     elif kind == "field":
         solids = []         # the field's own ground, which its ring bounds
+    elif kind == "toggle" and solids:
+        # the track, On in the value's colour (a part) or Off in the
+        # structure ramp's; the knob lies on the track and is measured there
+        value = _token_rgbs(ws, ("value", "accent"))
+        track = next((c for c in solids if c in value), None)
+        ground = _token_rgbs(ws, ("surface", "ink", "value_ink"))
+        if track is None:
+            track = next((c for c in solids if c not in ground), solids[0])
+            add(pair + " (Off track)", track, STRUCTURE_FLOOR)
+        else:
+            add(pair, track, FLOOR)
+        for c in solids:
+            if c != track and c in ground:
+                add("toggle knob vs its track", c, STRUCTURE_FLOOR, on=track)
+        solids = []
     elif kind == "seg" and solids and contrast(solids[0], plate) < FLOOR:
         # a faint selected pill: its label's ink against a plain label's
         pill = solids[0]
@@ -1707,11 +1743,14 @@ def _caption_pairs(ws, img):
     """No section caption is cut at the top of Settings' page (design
     review R3-14): a header is wholly in or wholly out, so no caption ink
     (`chrome_ink_dim`/`ink_dim`) lies on the page's first two rows, in the
-    left third where captions start."""
+    left third where captions start. A theme whose dim ink is its ink
+    (Contrast, D-14) has no caption ink to tell apart."""
     if ws.screen != "settings" or ws.settings_layer.has_page():
         return []
     lay = ws.layout
-    inks = _token_rgbs(ws, ("chrome_ink_dim", "ink_dim"))
+    inks = _token_rgbs(ws, ("chrome_ink_dim", "ink_dim")) - _token_rgbs(ws, ("ink", "chrome_ink"))
+    if not inks:
+        return []
     px = img.load()
     got = sum(1 for y in (lay.cy, lay.cy + 1) for x in range(lay.cx, lay.cx + lay.cw // 3)
               if px[x, y] in inks)
@@ -1791,9 +1830,11 @@ def audit(ws, probe, img):
         for stop, kind in sl._kinds.items():
             if kind == "toggle" and "fps" in stop.lower() and stop != sl._focused:
                 b = sl._host.box(stop)
-                if b is not None:
-                    out += _row_pairs(ws, img, b, "Off toggle vs row ground", kind,
-                                      _viewport(ws, b, hinted))
+                v = _viewport(ws, b, hinted) if b is not None else None
+                # only a row wholly on screen: a sliver cut by the hint
+                # strip shows a track's edge, no toggle
+                if b is not None and v is not None and _clip(b, v) == tuple(b):
+                    out += _row_pairs(ws, img, b, "Off toggle vs row ground", kind, v)
     t = getattr(ws.code_layer, "_t", None)
     if ws.screen == "menu" and t is not None and "caret" in t:
         for x, y, w, h, c in probe.last["rects"]:
