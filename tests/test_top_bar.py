@@ -266,8 +266,8 @@ def _make_chip(ws, verb):
 
 
 def test_make_tab_copy_and_delete_through_the_bar(tmp_path):
-    """COPY duplicates the selected project at once (a copy only ADDS); DEL is
-    two-tap guarded -- the first tap arms SURE?, only the second deletes."""
+    """COPY duplicates the selected project at once (a copy only ADDS); DEL deletes at
+    once (to the Trash), with no second tap."""
     from runtime import host_app
     ws = _ws(tmp_path)
     assert ws.can_manage
@@ -279,10 +279,7 @@ def test_make_tab_copy_and_delete_through_the_bar(tmp_path):
     drv.click(*_make_chip(ws, "copy"))
     drv.frame(1 / 30)
     assert len(ws.launcher.items) == n0 + 1
-    drv.click(*_make_chip(ws, "delete"))             # DEL tap 1: arms
-    drv.frame(1 / 30)
-    assert len(ws.launcher.items) == n0 + 1
-    drv.click(*_make_chip(ws, "sure"))               # DEL tap 2: confirms
+    drv.click(*_make_chip(ws, "delete"))
     drv.frame(1 / 30)
     assert len(ws.launcher.items) == n0
 
