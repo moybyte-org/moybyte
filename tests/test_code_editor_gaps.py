@@ -895,3 +895,26 @@ def test_the_caret_and_a_find_match_read_on_the_code_surface(tmp_path, seed, var
         fg = lum(t[role])
         ratio = (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
         assert ratio >= 3.0, (seed, variant, role, round(ratio, 2))
+
+
+def test_the_open_tabs_icon_takes_the_current_marks_ink(tmp_path):
+    """On the labelled ladder the open tab's icon takes the ink its name takes
+    on the current mark (Moy's `current.ink`), the other tabs the chrome's."""
+    from runtime import ui_draw
+    ws, _drv, _lay, _ed = _look_ws(tmp_path, "moy", "light")
+    cv, th = ws.sys_canvas, ws.theme_colors
+    app = ws.editor_app
+    rect = (0, 0, cv.w, 20)
+    assert not app._compact(rect), "the labelled ladder fits the strip"
+    cur = ui_draw.current_ink(cv, th)
+    assert cur is not None and cur != th["chrome_ink"]
+    seen = {}
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, r, ink, c=None: (seen.setdefault(kind, ink),
+                                                 real(kind, r, ink, c))[1]
+    try:
+        app.draw_zone(cv, rect)
+    finally:
+        ws.draw_icon = real
+    assert seen["code"] == cur, seen
+    assert seen["blocks"] == th["chrome_ink"], seen

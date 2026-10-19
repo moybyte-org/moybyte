@@ -486,9 +486,17 @@ class EditorApp:
             # and Play is its bare glyph and label in `value`.
             tabs_area, play_r = self._zone_parts(rect)
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
-            _ui_draw.tab_row(cv, th, tabs_area, self._chips(), self.tab,
+            chips = self._chips()
+            draw = None
+            if sets:
+                # The open tab's icon takes the ink its name takes on the
+                # current mark (Moy's `current.ink`), the rest the chrome's.
+                open_kind = next((k for t, _l, k in chips if t == self.tab), None)
+                draw = self._set_icon(cv, open_kind=open_kind,
+                                      open_ink=_ui_draw.current_ink(cv, th))
+            _ui_draw.tab_row(cv, th, tabs_area, chips, self.tab,
                         icon_for=getattr(ws, "_icon_image_keyed", None),
-                        ink=band_ink, icon_draw=self._set_icon(cv) if sets else None)
+                        ink=band_ink, icon_draw=draw)
             if sets:
                 self._bare_play(cv, play_r)
             else:
@@ -534,15 +542,17 @@ class EditorApp:
         _ui_draw.tab(cv, th, r, True)
         return th["selection_ink"]
 
-    def _set_icon(self, cv, ink=None):
+    def _set_icon(self, cv, ink=None, open_kind=None, open_ink=None):
         """A tab's icon_draw: the theme's icon set's slot for a ladder kind,
-        in `ink` (default the chrome ink)."""
+        in `ink` (default the chrome ink), and the open tab's kind
+        `open_kind` in `open_ink` where the current mark gives one."""
         ws = self.ws
         if ink is None:
             ink = ws.theme_colors["chrome_ink"]
 
         def draw(kind, r):
-            return ws.draw_icon(_SET_KIND.get(kind, kind), r, ink, cv)
+            c = open_ink if open_ink is not None and kind == open_kind else ink
+            return ws.draw_icon(_SET_KIND.get(kind, kind), r, c, cv)
         return draw
 
     def _bare_play(self, cv, r):
