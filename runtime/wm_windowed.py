@@ -200,10 +200,19 @@ class _Win:
 
     def content_rect(self):
         """The inner rect the content occupies: below the WM title strip and
-        inside the frame, its `edge` off the sides and the bottom."""
+        inside the frame, its `edge` off the sides, and above the foot (the
+        frame's bottom line where it has no foot)."""
         e = self.edge
         return (self.x + 1 + e, self.y + 1 + self.title_h,
-                self.w - 2 - 2 * e, self.h - 2 - self.title_h - self.foot - e)
+                self.w - 2 - 2 * e, self.h - 2 - self.title_h - max(self.foot, e))
+
+    def inner_foot(self):
+        """The rows under the content the window's ground fills inside its
+        frame: the foot, less the frame's bottom line past its first row.
+        What a layout's bottom inset counts (`layout_base.window_foot`), so
+        its content stands as far from the frame's inside edge at the
+        bottom as at the sides."""
+        return max(self.foot, self.edge) - self.edge
 
 
 class _Parked:
@@ -581,7 +590,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         """Build the layout set for a window buffer: run the console's own
         _relayout with the buffer installed (so every responsive surface derives
         its geometry from the WINDOW size, and its bottom inset from the
-        window's `foot`), capture it, then restore the root."""
+        window's `inner_foot`), capture it, then restore the root."""
         ws = self.ws
         self._ctx_switching = True
         ws._sys_canvas = buf
@@ -887,7 +896,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                             // self.ws.canvas.h)))
             e = self._frame_edge()
             return (self.ws.canvas.w * s + 2 + 2 * e,
-                    self.ws.canvas.h * s + 2 + th + foot + e)
+                    self.ws.canvas.h * s + 2 + th + max(foot, e))
         if key in ("menu", "projects"):
             return (full.w - full.w // 8, full.h - full.h // 10)
         if key in ("artwork", "appearance", "storybook"):
@@ -1006,10 +1015,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return
         full = self._root_canvas
         cw = max(64, win.w - 2 - 2 * win.edge)
-        ch = max(40, win.h - 2 - win.title_h - win.foot - win.edge)
+        ch = max(40, win.h - 2 - win.title_h - max(win.foot, win.edge))
         self._drop_win(win)             # a resize's old buffer, freed first
         win.buf = full.new_layer(cw, ch)
-        win.ctx = self._make_ctx(win.buf, win.foot)
+        win.ctx = self._make_ctx(win.buf, win.inner_foot())
         win._buf_stale = True         # blank until a live render/_prewarm fills it
 
     def _resize_window(self, win, w, h):

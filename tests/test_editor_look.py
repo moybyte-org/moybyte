@@ -182,6 +182,10 @@ def test_a_row_mark_stands_off_the_frame_and_the_divider(tmp_path, theme, mode):
     px = _px(ws)
     side, row_h = lay.side, lay.row_h
     divider = cx + side[0] + side[2]                  # the rule's column
+    # the frame's foot fills every row under the content to its inside edge
+    mx = cx + cw // 2
+    foot = [px[y][mx] for y in range(cy + ch, win.y + win.h - 1 - win.edge)]
+    assert len(set(foot)) <= 1, foot
     for name, x0, y in (("places", cx, cy + side[1]),
                         ("files", divider + fs, cy + lay.list[1])):
         # every row of the list's top 6 rows: three ground columns first
@@ -307,3 +311,4 @@ def test_the_two_sprite_tool_rows_stand_in_columns(tmp_path, config, theme, mode
     assert row1[0][0] == row2[0][0] == lay.pg_x0
     for a, b in zip(row1, row2):
         assert (a[0], a[2]) == (b[0], b[2]), (a, b)
+

@@ -166,9 +166,9 @@ class WindowChrome:
         return _ui_draw.frame_geom(win.w, win.h, win.title_h)[1]
 
     def _frame_edge(self):
-        """The columns (and rows) the depth's window frame takes past its
-        first on each side (a 2 px frame: 1), focused or not: the content
-        rect leaves them out at the sides and the bottom, so no content
+        """The columns the depth's window frame takes past its first on each
+        side (a 2 px frame: 1), focused or not: the content rect leaves them
+        out (and the bottom line's, where no foot holds it), so no content
         pixel lies under the frame and a row's mark stands off it (design
         review R3-25)."""
         if not _ui_draw.depth()[13]:
