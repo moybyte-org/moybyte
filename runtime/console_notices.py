@@ -472,7 +472,8 @@ class SystemMenuUI:
         else `home`'s, the desk's projects window): its title over a row a
         verb of `card_verbs` (the favourite star's words follow its state;
         Delete takes it to the Trash, never asked, as the cart group's
-        does). [] where the card has none."""
+        does, and stands set apart under a rule). [] where the card has
+        none."""
         home = home or self.ws.launcher_layer
         verbs = home.card_verbs()
         if not verbs:
@@ -488,6 +489,8 @@ class SystemMenuUI:
                                  else "menu.favourite_add", home.toggle_favourite))
             else:
                 label, icon, text = _CARD_ROW[v]
+                if icon == _DANGER_ICON:
+                    rows.append(("sep",))     # a verb that destroys, set apart
                 rows.append(("item", label, _CardVerb(home, v), icon, text))
         return rows
 
@@ -657,18 +660,17 @@ class SystemMenuUI:
         cap = grp[3 + d] * fs
         pad = vr[28 + d] * fs
         rule = (2 * row[7] + (9 if desk else 5)) * fs
-        body, n, first = 0, 0, True
+        body, n, ruled = 0, 0, False
         for it in ws.sysmenu.items:
             if it[0] == "header":
-                if n:
-                    body += n * (rh + gap)
-                    n = 0
-                body += cap + gap
-                first = False
+                body += n * (rh + gap) + cap + gap
+                n, ruled = 0, False
+            elif it[0] == "sep":
+                ruled = n > 0             # inside a group: its danger rows set apart
             elif it[0] == "item":
-                if first and body:
-                    body += rule + gap
-                first = False
+                if ruled:
+                    body += n * (rh + gap) + rule + gap
+                    n, ruled = 0, False
                 n += 1
         body += n * (rh + gap)
         sx, sy, sw, sh = self.surface()
@@ -746,10 +748,13 @@ class SystemMenuUI:
         _ui.popover("System", self._look_w(desk))
         cap, texts, icons, kinds = "", [], [], []
         for it in m.items:
-            if it[0] == "header":
+            if it[0] in ("header", "sep"):
+                # a header begins a group; a rule inside one sets its danger
+                # rows apart, a menu of their own under the group's rows
                 if texts:
                     _ui.menu(cap, texts, icons, kinds=kinds)
-                cap, texts, icons, kinds = it[4], [], [], []
+                if it[0] == "header" or texts:
+                    cap, texts, icons, kinds = (it[4] if it[0] == "header" else ""), [], [], []
             elif it[0] == "item":
                 texts.append(it[4])
                 icons.append(it[3])

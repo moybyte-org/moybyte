@@ -410,6 +410,23 @@ def test_every_home_menu_opens_on_a_safe_row(tmp_path, tab, sleep):
             ws.sysmenu.close()
 
 
+def test_a_cards_delete_stands_apart_under_a_rule(tmp_path):
+    """The card group's Delete is set apart from the verbs above it, in the
+    system menu and in the card's own menu (design review R4-13)."""
+    ws = _ws(tmp_path)
+    ws.set_home_tab("games")
+    ws.carts.dup(next(it for it in ws.launcher.items if it.get("path")))
+    ws.set_home_tab("make")
+    from runtime.moy_store_base import builtin_name
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path") and builtin_name(it["path"]) is None)
+    rows = ws.menu_ui.card_rows()
+    i = next(i for i, r in enumerate(rows) if _danger(r))
+    assert rows[i - 1] == ("sep",) and rows[i - 2][0] == "item", rows
+    assert ws.menu_ui.open_card(ws.launcher_layer, (40, 60))
+    assert ("sep",) in ws.sysmenu.items
+
+
 @pytest.mark.parametrize("sleep", [False, True])
 def test_the_desk_menus_open_on_a_safe_row(tmp_path, sleep):
     from ws_helpers import build_desktop_ws
