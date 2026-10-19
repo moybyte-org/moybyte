@@ -42,8 +42,10 @@ def _tile_fill(tiles, key):
 
 
 def _icon_box(box):
-    """The square a desk tile's icon is drawn in: 20 of the tile's 44, centred."""
-    s = box[2] * 20 // 44
+    """The square a desk tile's icon is drawn in: 24 of the tile's 44, centred,
+    the set's 24-pixel masks, whose line art spans about 20 (owner,
+    2026-10-19: the dock's glyphs at 20, their 20-pixel masks' 14 read thin)."""
+    s = box[2] * 24 // 44
     return (box[0] + (box[2] - s) // 2, box[1] + (box[3] - s) // 2, s, s)
 
 
@@ -334,7 +336,7 @@ class _BackdropLayer(Layer):
     def _draw_look_icons(self, ws, cv, th):
         """Each tile as the look's part (`ui.bar_part`'s BAR_TILE) in its
         app's colour of the look's `tiles` where it names one, its app's
-        icon from the theme's set at the 20-pixel size in `tile_ink` (else
+        icon from the theme's set at the 24-pixel size in `tile_ink` (else
         the ink; the app's own art where the set has none), its label in
         `label.ink` (else the ink) over the theme's backdrop with no plate
         and `label.shadow` under it where the look sets one; over a
@@ -362,7 +364,7 @@ class _BackdropLayer(Layer):
             if not ws.draw_icon(key, _icon_box(box), tink, cv):
                 img = ws.covers.icon_sheet_for(cart) if cart is not None else None
                 if img is not None:
-                    sc = max(1, (box[2] * 20 // 44) // 16)
+                    sc = max(1, (box[2] * 24 // 44) // 16)
                     cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
                            box[1] + (box[3] - 16 * sc) // 2, sc)
                 else:

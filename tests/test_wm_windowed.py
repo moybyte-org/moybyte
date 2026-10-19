@@ -3109,7 +3109,7 @@ def test_the_desk_column_is_tiles_with_their_labels_over_the_backdrop(tmp_path):
 
 def test_a_desk_tile_draws_its_apps_icon_from_the_set(tmp_path):
     """Every tile's icon is its app's slot of the theme's set (Paint's by
-    its alias), at the 20-pixel size in the ink."""
+    its alias), at the 24-pixel size in the ink."""
     ws = _moy_desk(tmp_path)
     drawn = []
     real = ws.draw_icon
@@ -3118,9 +3118,9 @@ def test_a_desk_tile_draws_its_apps_icon_from_the_set(tmp_path):
     ws.wm._backdrop_layer._draw_desk_icons()
     keys = [r[0] for r in ws.wm._backdrop_layer._icon_rects()]
     assert [d[0] for d in drawn] == keys
-    assert all(size == 20 and ok for _k, size, ok in drawn)
+    assert all(size == 24 and ok for _k, size, ok in drawn)
     from runtime import iconsets
-    assert iconsets._pick("default", 20)[1] == 20
+    assert iconsets._pick("default", 24)[1] == 24
 
 
 def test_a_desk_label_over_a_wallpaper_is_white_over_a_shadow(tmp_path, monkeypatch):
