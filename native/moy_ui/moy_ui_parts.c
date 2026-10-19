@@ -636,7 +636,13 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 moy_ui_box_t o = seg_box(&d, &fv, b, r, &g, i, sc);
                 moy_ui_span_t t = option(r->value, i);
                 int c = dim;
-                if (i == r->cur) {
+                if (i == r->cur && rowfill >= 0) {
+                    // on a row its focus mark fills, the current mark would
+                    // be the plate's own colour: a pill in the mark's ink,
+                    // its label in the plate's colour
+                    rrect(&d, o.x, o.y, o.w, o.h, (d.desk ? 6 : 4) * d.fs, 1, cink, 0, 0);
+                    c = rowfill;
+                } else if (i == r->cur) {
                     c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, 0, ink, 0);
                 }
                 text(&d, &fv, t.p, t.n, o.x + g.gap / 2, b.y, b.h, pal(&d, c), sc);

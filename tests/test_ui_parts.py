@@ -606,6 +606,43 @@ def test_a_focused_stepped_bar_fills_its_steps_in_the_rows_ink(theme):
     assert r.px(x0 + 3 * 8, mid) == on, "an empty step is outlined in the ink"
 
 
+def _seg_page(theme, cur):
+    def draw():
+        st = {"rect": ui.page("")}
+        ui.group("G")
+        ui.seg("Mode", ["AAA", "BBB"], cur)
+        ui.group()
+        return st
+    r = _Run(draw, theme)
+    for _ in range(3):
+        r.frame()
+    return r
+
+
+@pytest.mark.parametrize("theme", _INVERT_ROWS, ids=lambda t: "-".join(t))
+@pytest.mark.parametrize("cur", [0, 1])
+def test_a_focused_segs_current_option_reads_on_its_focus_plate(theme, cur):
+    """On a row filled by its focus mark, the current option is a pill in
+    the mark's ink, clearing the plate 3:1, its label in the plate's colour
+    on it (Contrast Dark's current pill was #ffee62 on the #ffe600 plate,
+    1.07:1, with the same black labels as the other option)."""
+    a, b = _seg_page(theme, cur), _seg_page(theme, 1 - cur)
+    y0 = a.out["rect"][1] + CAPTION
+    plate = a.px(INSET + 6, y0 + ROW // 2)
+    diff = [(x, y) for x in range(INSET, 320 - INSET) for y in range(y0 + 1, y0 + ROW - 1)
+            if a.px(x, y) != b.px(x, y)]
+    xs = sorted({x for x, _y in diff})
+    half = (xs[0] + xs[-1]) // 2
+    mine = [a.px(x, y) for x, y in diff if (x <= half) == (cur == 0)]
+    counts = {}
+    for p in mine:
+        counts[p] = counts.get(p, 0) + 1
+    fill = max((p for p in counts if p != plate), key=lambda p: counts[p])
+    assert _ratio(fill, plate) >= 3.0, "the current pill %.2f:1 on the plate" % _ratio(fill, plate)
+    label = max((p for p in counts if p != fill and counts[p] >= 3), key=lambda p: _ratio(p, fill))
+    assert _ratio(label, fill) >= 4.5, "its label %.2f:1 on it" % _ratio(label, fill)
+
+
 _SURFACES = {}
 
 
