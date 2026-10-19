@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   -- the index and the plan      read_index, plan_steps, scene_steps, select
+#   -- the shell                   each scene's setup over the goldens' workstation
+#   render                         one scene on a fresh workstation: image, checks, audit
+#   -- the kit's own scenes        _kit_table, kit_scenes: states no mockup draws
+#   Probe                          what a render's frames drew, in glass pixels
+#   -- the checks: geometry        checks, pads, bar_parity: what fails the run
+#   -- the audit                   audit, contrast: the state pairs and their ratios
+#   -- the pairs                   pair, run, _run, _run_kit, main
 """The 2026-10 look's review kit: every mockup beside the real shell's render.
 
 usage: .venv/bin/python tools/look_shots.py OUT [FILTER ...] [--step N]
@@ -481,6 +490,7 @@ def render(g, config, theme, mode, setup, wallpaper, inputs=None):
         if "layout" not in cfg:
             cfg["theme"] = theme
         ws = g._build(cfg, os.path.join(tmp, "carts"))
+        _FOCUSED[0] = None
         if inputs is None and config == HANDHELD:
             inputs = HANDHELD_INPUT
         if inputs is not None:
@@ -531,6 +541,10 @@ def themes_held(g):
 KIT_MODES = (("moy", "dark"), ("moy", "light"), ("blocks", "light"),
              ("contrast", "dark"), ("contrast", "light"))
 
+# How the scene being rendered finds its focused stop on the glass (a
+# kit setup sets it; `render` clears it).
+_FOCUSED = [None]
+
 # What a typed field and the Wi-Fi password prompt hold in their scenes.
 NAME_TYPED = "Moy"
 WIFI_TYPED = "hunter2"
@@ -567,7 +581,7 @@ def _settings_at(key):
         sl = ws.settings_layer
         sl.set_level("volume", VOLUME_REST)
         sl.show_row(key)
-        ws._kit_box = lambda: sl._host.box(sl._focused) if sl._focused else None
+        _FOCUSED[0] = lambda: sl._host.box(sl._focused) if sl._focused else None
     return setup
 
 
@@ -601,7 +615,7 @@ def _desk_appearance_at(label):
                 return None
             cx, cy, _w, _h = win.content_rect()
             return (b[0] + cx, b[1] + cy, b[2], b[3])
-        ws._kit_box = box
+        _FOCUSED[0] = box
     return setup
 
 
@@ -614,7 +628,7 @@ def _parts_at(page, stop):
         ws.wm.goto(app.id)
         _settle(g, ws, 2)
         ui_draw._C.api_focus(app.ctx, stop)
-        ws._kit_box = lambda: ui_draw._C.api_box(app.ctx, stop)
+        _FOCUSED[0] = lambda: ui_draw._C.api_box(app.ctx, stop)
     return setup
 
 
@@ -997,7 +1011,7 @@ def _row_pairs(img, r, pair):
 def _focused_box(ws):
     """The focused stop's rect on the glass, where a kit scene says how to
     find it (Settings', the desk Appearance window's, the parts sheet's)."""
-    f = getattr(ws, "_kit_box", None)
+    f = _FOCUSED[0]
     return f() if f is not None else None
 
 
