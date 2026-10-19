@@ -1957,32 +1957,34 @@ class Carousel(Launcher):
         else:
             self._draw_hh_cover(cv, it, rect, centre)
 
-    def _lifted(self, cv, at, box):
-        """The picture rect of a card at `at` whose focus mark draws in
-        `box`: `at` itself, or, where a lift grew the box, the card's own
-        side centred in it -- raised with the box, on the card's plate (its
-        `surface`) out to the grown edge -- so the cover keeps its clean
-        scale (owner call 2026-10-17) and the lift grows the chrome."""
-        if box[2] == at[2] and box[3] == at[3]:
-            return box
-        cv.rrect(box[0], box[1], box[2], box[3], self._corner_r(at[2]),
-                 (self.theme or {}).get("surface", 0),
-                 stepped=bool(_ui_draw.depth()[5]))
-        return (box[0] + (box[2] - at[2]) // 2, box[1] + (box[3] - at[3]) // 2,
-                at[2], at[3])
+    def _mark_rect(self, cv, at):
+        """The rect a card at `at` hands its focus mark: `at` shrunk by as
+        much as the theme's mark grows a card (a lift's `grow`, read off the
+        canvas's edge, where it draws nothing), so the mark's box is the
+        card's own side, raised where it lifts. The cover keeps its clean
+        scale (owner call 2026-10-17) and the lift's rim hugs it, with no
+        plate between (design review R3-05): a picture card lifts by its
+        rise and its shadow alone."""
+        w, h = at[2], at[3]
+        _ink, box = _ui_draw.focus(cv, self.theme, (-4 * w - 64, -4 * h - 64, w, h),
+                                   size="card", after=True)
+        g = (box[2] - w) // 2
+        if g <= 0:
+            return at
+        return (at[0] + g, at[1] + g, w - 2 * g, h - 2 * g)
 
     def _draw_home_card(self, cv, it, rect, centre, sheet_for):
         NAMES = self._NAMES
         th = self.theme or {}
         # The centre card at rest takes the theme's focus mark (ui.focus; a
-        # lifted card draws grown and raised); a theme without marks rings it.
+        # lifted card draws raised, `_mark_rect`); a theme without marks rings it.
         marks = _ui_draw.marks_on()
         mark = centre and not self.moving and marks and not self.tab_focus
         at = rect
         if mark:
-            _ink, box = _ui_draw.focus(cv, self.theme, at, size="card",
-                                       r=self._corner_r(at[2]))
-            rect = self._lifted(cv, at, box)
+            at = self._mark_rect(cv, rect)
+            _ink, rect = _ui_draw.focus(cv, self.theme, at, size="card",
+                                        r=self._corner_r(rect[2]))
         self._draw_picture(cv, it, rect, centre, sheet_for)
         if centre and self.favorite_for is not None and not self.moving \
                 and not self.desk() \
@@ -1995,7 +1997,7 @@ class Carousel(Launcher):
         if not self._corner_r(rect[2]):
             self._card_frame(cv, rect, centre and not marks, ring=ring)
         if mark:
-            _ui_draw.focus(cv, self.theme, at, size="card", r=self._corner_r(at[2]),
+            _ui_draw.focus(cv, self.theme, at, size="card", r=self._corner_r(rect[2]),
                            after=True)
 
 

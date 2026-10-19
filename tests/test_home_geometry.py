@@ -134,6 +134,39 @@ def test_a_themes_bar_packs_alike_in_both_modes(tmp_path, config, theme):
         theme, config)
 
 
+@pytest.mark.parametrize("config", [HANDHELD, CONSOLE])
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_a_focused_cover_fills_its_mark(tmp_path, monkeypatch, config, theme, mode):
+    """The selected card's cover fills the box its focus mark draws in, so
+    a lift's rim hugs the cover with no plate between (R3-05): the mark
+    keeps the card's side and the cover its clean scale."""
+    ws = _ws(tmp_path, config, theme, mode)
+    _home(ws)
+    _frame(ws, 2)
+    boxes, covers = [], []
+    real_focus = launcher_layer._ui_draw.focus
+
+    def focus(cv, th, rect, size=None, r=0, after=False, **kw):
+        got = real_focus(cv, th, rect, size, r, after, **kw)
+        if size == "card" and not after and rect[0] >= 0:
+            boxes.append(tuple(got[1]))
+        return got
+
+    monkeypatch.setattr(launcher_layer._ui_draw, "focus", focus)
+    for kind in {type(ws.sys_canvas), type(ws.glass_canvas)}:
+        real = kind.cover
+
+        def cover(cv, pix, w, sx, sy, sw, sh, dx, dy, dw, dh, *rest, _real=real):
+            covers.append((dx, dy, dw, dh))
+            return _real(cv, pix, w, sx, sy, sw, sh, dx, dy, dw, dh, *rest)
+
+        monkeypatch.setattr(kind, "cover", cover)
+    _frame(ws, 1)
+    assert len(boxes) == 1, "one card wears the focus mark"
+    assert boxes[0] in covers, "%s %s %s: the mark's box %s holds no cover (%s)" % (
+        config, theme, mode, boxes[0], covers)
+
+
 @pytest.mark.parametrize("theme,mode", [("moy", "dark"), ("contrast", "dark"),
                                         ("blocks", "light")])
 def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
