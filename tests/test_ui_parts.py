@@ -1211,32 +1211,85 @@ def _row_or_field_page(theme, field, focus=True, last=False):
 @pytest.mark.parametrize("last", [False, True], ids=["mid", "last"])
 def test_a_focused_field_row_wears_the_value_rows_focus_mark(theme, last):
     """A focused field's row wears the focus mark a focused link's row does,
-    over the whole row (a card's last row included): the row's left margin,
-    outside its label and box, draws alike. Before, the mark showed only
-    where the card's foot redrew it: a sliver in Moy, two squares under
-    Blocks, specks in Contrast."""
-    f = _row_or_field_page(theme, True, last=last)
-    k = _row_or_field_page(theme, False, last=last)
-    y0 = f.out["rect"][1] + CAPTION + ROW
-    for y in range(y0, y0 + ROW):
-        got = [f.px(x, y) for x in range(INSET, INSET + PAD - 2)]
-        want = [k.px(x, y) for x in range(INSET, INSET + PAD - 2)]
-        assert got == want, "row y %d: the field's mark is not the link's" % (y - y0)
+    over the whole row (a card's last row included): down the row's left
+    margin, outside its label and box, the mark runs the row's height less
+    what the link's leaves at its ends, and across it as wide. Before, the
+    mark showed only where the card's foot redrew it: a sliver in Moy, two
+    squares under Blocks, specks in Contrast."""
+    def marked(focused, field):
+        on = _row_or_field_page(theme, field, last=last)
+        off = _row_or_field_page(theme, field, focus=False, last=last)
+        _x, y0, _w, h = _box(on, "Name")
+        rows = [y - y0 for y in range(y0, y0 + h) if on.px(INSET + 3, y) != off.px(INSET + 3, y)]
+        mid = y0 + h // 2
+        cols = [x for x in range(INSET, INSET + PAD - 2) if on.px(x, mid) != off.px(x, mid)]
+        return h, rows, cols
+    fh, frows, fcols = marked(True, True)
+    lh, lrows, lcols = marked(True, False)
+    assert lrows and lcols, "the link's row is marked"
+    assert fcols == lcols, "the field's mark is as wide as the link's"
+    assert len(frows) == fh - (lh - len(lrows)), "the field's mark runs its row's height"
+    assert frows == list(range(frows[0], frows[0] + len(frows))), "in one piece"
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
 def test_a_focused_fields_ring_is_the_focus_colour_and_reads_on_its_row(theme):
     """Focused (being typed in), the field's ring is two pixels where its
-    rest ring is one, in the focus colour (the mark's ink on an invert
-    mark), and clears what lies round it 3:1 -- Contrast's stayed its one
-    pixel of border colour, so only the caret told it was being typed in."""
+    rest ring is one, the second outside the box, in the focus colour (the
+    mark's ink on an invert mark), and clears what lies round it 3:1 --
+    Contrast's stayed its one pixel of border colour, so only the caret
+    told it was being typed in."""
     on = _row_or_field_page(theme, True)
     off = _row_or_field_page(theme, True, focus=False)
-    y = on.out["rect"][1] + CAPTION + ROW + ROW // 2
+    _x, y0, _w, h = _box(on, "Name")
+    y = y0 + h // 2
     x = 320 - INSET - PAD - TRACK
     ring = on.px(x, y)
-    assert on.px(x + 1, y) == ring and off.px(x + 1, y) != off.px(x, y), "two pixels, not one"
-    assert _ratio(ring, on.px(x - 1, y)) >= 3.0, "%.2f:1" % _ratio(ring, on.px(x - 1, y))
+    assert on.px(x - 1, y) == ring and off.px(x - 1, y) != off.px(x, y), "two pixels, not one"
+    assert _ratio(ring, on.px(x - 2, y)) >= 3.0, "%.2f:1" % _ratio(ring, on.px(x - 2, y))
+
+
+@pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
+@pytest.mark.parametrize("desk", [False, True], ids=["handheld", "desk"])
+def test_a_fields_text_and_caret_keep_inside_its_ring(theme, desk):
+    """The field is as tall as its letters' ink and 3 pixels above and
+    below it, inside its ring (its row grows to hold it): a descender keeps
+    3 pixels off the ring, and the caret stays inside the box. Before, the
+    box was the row less 3 pixels a side, which put a handheld's descender
+    on the ring and the caret over it."""
+    def render(text):
+        def draw():
+            ui.page("")
+            ui.group("You")
+            ui.field("Name", text, 16)
+            ui.group()
+            ui.focus("Name")
+        cv = make_system_canvas(640 if desk else 320, 240)
+        ctx = ui_draw.ui_context()
+        for _ in range(3):
+            ui_draw.ui_frame(ctx, cv, _theme(*theme), None, array("i", [0] * 6), desk=desk)
+            draw()
+        b = cv._buf
+        return (lambda x, y: b[2 * (y * cv.w + x)] << 8 | b[2 * (y * cv.w + x) + 1],
+                ui_draw._C.api_box(ctx, "Name"))
+    full, (x0, y0, w, h) = render("Mgyj")
+    empty, _b = render("")
+    cx, mid = x0 + w - 30, y0 + h // 2          # inside the box, right of the text
+    ground = empty(cx, mid)
+    inner0 = mid
+    while empty(cx, inner0 - 1) == ground:
+        inner0 -= 1
+    inner1 = mid
+    while empty(cx, inner1 + 1) == ground:
+        inner1 += 1
+    diff = [(x, y) for x in range(x0, cx) for y in range(y0, y0 + h) if full(x, y) != empty(x, y)]
+    caret = max(x for x, _y in diff)
+    was = {x for x in range(x0 + w // 2, cx) if empty(x, mid) == full(caret, mid) != ground}
+    ink = sorted({y for x, y in diff if x < caret - 1 and x not in was})   # the empty one's caret
+    assert ink[0] - inner0 >= 3, "the letters %d px under the ring" % (ink[0] - inner0)
+    assert inner1 - ink[-1] >= 3, "the descender %d px over the ring" % (inner1 - ink[-1])
+    rows = [y for x, y in diff if x == caret]
+    assert inner0 <= min(rows) and max(rows) <= inner1, "the caret pokes out of the box"
 
 
 def _dialog_page(shown, body_field=False):

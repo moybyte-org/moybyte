@@ -1663,7 +1663,8 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         len = cap;
     }
     int stacked;
-    moy_ui_box_t b = place(c, row_h(c), &stacked);
+    int h = row_h(c), fh = moy_ui_field_h(s, c->fs, c->cls);
+    moy_ui_box_t b = place(c, fh > h ? fh : h, &stacked);
     int disabled = o->disabled == 1;
     int st = disabled ? 0 : stop(c, id_of(o, label), b, STOP_FIELD, name_of(o, label));
     if (st < 0) {

@@ -764,6 +764,10 @@ int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t conte
 // colour's ring.
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text,
                  int flags, int fs, int desk, int card, int first);
+// The height a field row takes (at least the stacked row's): the field's box,
+// its letters' ink with 3 pixels at the scale above and below inside its
+// ring, and room round it for its focus ring.
+int moy_ui_field_h(const moy_ui_sink_t *s, int fs, int desk);
 // A modal card (ui.dialog) in box b: its shadow under a depth, the card and
 // its title in the `title_h` rows under the card's padding; the padding.
 int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs, int desk,

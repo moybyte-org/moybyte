@@ -177,24 +177,58 @@ static void rrect(pd_t *d, int x, int y, int w, int h, int r, int has_fill, uint
 typedef struct {
     uint32_t id;
     int line, ascent;
+    int deep;                       // the rows from the line's top to its deepest ink
 } pf_t;
 
 // The font a role's text draws in; the caption role takes the ui role's
 // where a theme installs a font for that and none for it.
 static pf_t font_of(const pd_t *d, int role) {
-    pf_t f = {MOY_FONT_PETME128, MOY_TEXT_CELL, MOY_TEXT_CELL - 1};
+    pf_t f = {MOY_FONT_PETME128, MOY_TEXT_CELL, MOY_TEXT_CELL - 1, MOY_TEXT_CELL};
     if (!d->run) {
         moy_font_info_t fi;
         f.id = moy_ui_font(role, &fi);
         f.line = fi.line;
         f.ascent = fi.ascent;
+        f.deep = fi.h;
         if (role == MOY_UI_FONT_CAPTION && f.id == MOY_FONT_PETME128) {
             f.id = moy_ui_font(MOY_UI_FONT_UI, &fi);
             f.line = fi.line;
             f.ascent = fi.ascent;
+            f.deep = fi.h;
         }
     }
     return f;
+}
+
+// The row of a font's line its letters' ink starts at (a capital's top, an
+// ascender's), probed once a font by drawing them a row at a time: the
+// room a line keeps above its letters (an accent's) is not the letters'.
+static int ink_top(const pf_t *f) {
+    static uint32_t s_font = 0xFFFFFFFFu;
+    static int s_top = 0;
+    if (f->id == s_font) {
+        return s_top;
+    }
+    static const uint8_t probe[] = "MHdlkbij";
+    uint16_t px[96];
+    int top = 0;
+    for (int r = 0; r < f->line; r++) {
+        memset(px, 0, sizeof(px));
+        moy_text_target_t t = {px, 96, 96, 0, r, 0, 0, 96, 1};
+        moy_text(&t, f->id, MOY_TEXT_PY, probe, sizeof(probe) - 1, 0, 0, 0xFFFF, 1,
+                 MOY_TEXT_LEFT, -1);
+        int ink = 0;
+        for (int i = 0; i < 96 && !ink; i++) {
+            ink = px[i] != 0;
+        }
+        if (ink) {
+            top = r;
+            break;
+        }
+    }
+    s_font = f->id;
+    s_top = top;
+    return top;
 }
 
 static int tw(const pf_t *f, const uint8_t *p, size_t n, int scale) {
@@ -1555,6 +1589,27 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
 
 // -- a text field ------------------------------------------------------------------------
 
+// A field's box: its letters' ink with 3 pixels at the scale above and
+// below it, inside its 1-pixel ring; its height, and where in it the text's
+// line starts (*line_dy).
+static int field_box_h(const pd_t *d, const pf_t *f, int sc, int *line_dy) {
+    int top = ink_top(f) * sc, deep = f->deep * sc;
+    int pad = 3 * d->fs + d->fs;
+    if (line_dy != NULL) {
+        *line_dy = pad - top;
+    }
+    return (deep > top ? deep - top : f->line * sc) + 2 * pad;
+}
+
+int moy_ui_field_h(const moy_ui_sink_t *s, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    pf_t fl = font_of(&d, MOY_UI_FONT_UI);
+    // the box, and a pixel at the scale each side for its focus ring and
+    // one between that and the row's edge
+    return field_box_h(&d, &fl, tscale(s), NULL) + 4 * d.fs;
+}
+
 int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text_,
                  int flags, int fs, int desk, int card, int first) {
     pd_t d;
@@ -1564,7 +1619,6 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     int pad = (card || desk ? gm(MOY_UI_M_GROUP_PAD, fs)
                             : metric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * d.fs);
     int gap = pm(&d, MOY_UI_M_VALUE_ROW_GAP, 1);
-    int inset = pm(&d, MOY_UI_M_VALUE_ROW_FIELD, 1);
     pf_t fl = font_of(&d, MOY_UI_FONT_UI);
     int on_card = card && !desk;
     uint16_t ink = pal(&d, on_card ? tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK)
@@ -1578,9 +1632,13 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
                         d.fs, NULL, &mi, 0);
         invert = mi >= 0 && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT;
     }
+    // the box centred in the row, the label on the text's line
+    int line_dy = 0;
+    int fh = field_box_h(&d, &fl, sc, &line_dy);
+    int fy = b.y + moy_ui_fdiv(b.h - fh, 2), ty = fy + line_dy;
     int x = b.x + pad, right = b.x + b.w - pad;
     if (label.n) {
-        x += text(&d, &fl, label.p, label.n, x, b.y, b.h, mi >= 0 ? pal(&d, mi) : ink, sc) + gap;
+        x += moy_ui_text_in(s, fl.id, 0, label, x, ty, mi >= 0 ? pal(&d, mi) : ink) + gap;
     }
     if (card) {
         // in a group the field is the row's value: as wide as a slider's
@@ -1588,30 +1646,37 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
         int col = right - pm(&d, MOY_UI_M_VALUE_ROW_TRACK, 1);
         x = col > x ? col : x;
     }
-    moy_ui_box_t f = {(int16_t)x, (int16_t)(b.y + inset), (int16_t)(right - x),
-                      (int16_t)(b.h - 2 * inset)};
+    moy_ui_box_t f = {(int16_t)x, (int16_t)fy, (int16_t)(right - x), (int16_t)fh};
     if (f.w <= 0 || f.h <= 0) {
         return MOY_UI_OK;
     }
     const moy_ui_depth_t *dp = moy_ui_depth();
     int r = dp->on ? (dp->key_r < (desk ? 8 : 6) ? dp->key_r : (desk ? 8 : 6)) * d.fs : 0;
-    // focused, the field is being typed in: its ring is the focus colour
-    // (the mark's ink on an invert mark), two pixels at the scale, whether
-    // or not focus marks show
+    // focused, the field is being typed in: its ring is two pixels at the
+    // scale, the second outside the box, in the focus colour (the mark's ink
+    // on an invert mark), whether or not focus marks show
     int fc = m->on ? moy_ui_token(d.look, m->color) : -1;
     int ring_c = !focused ? tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)
                  : invert ? mi
                  : fc >= 0 ? fc
                            : tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
+    if (focused) {
+        rrect(&d, f.x - d.fs, f.y - d.fs, f.w + 2 * d.fs, f.h + 2 * d.fs, r ? r + d.fs : 0, 0, 0,
+              d.fs, pal(&d, ring_c));
+    }
     rrect(&d, f.x, f.y, f.w, f.h, r, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)),
-          (focused ? 2 : 1) * d.fs, pal(&d, ring_c));
+          d.fs, pal(&d, ring_c));
     if (focused && m->on) {
         int fi = -1;
         moy_ui_focus_in(s, f, MOY_UI_MARK_PART, r, MOY_UI_MARK_AFTER, d.fs, NULL, &fi, 0);
     } else if (focused && m->active) {
         moy_ui_focus_ring(s, f, d.fs);
     }
-    int tx = f.x + gap, room = f.w - 2 * gap - (focused ? 2 * d.fs : 0);
+    // the text from the corner's radius and 3 pixels at the scale, the
+    // caret's room kept inside the ring on the right
+    int inner = 3 * d.fs + d.fs;
+    int tx = f.x + (r > d.fs ? r : d.fs) + 3 * d.fs;
+    int room = f.x + f.w - inner - tx - (focused ? 2 * d.fs : 0);
     uint16_t tink = pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK));
     // the text's tail shows where it is wider than the field
     size_t from = 0;
@@ -1621,10 +1686,14 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
             from++;
         }
     }
-    int w = text(&d, &fl, text_.p + from, text_.n - from, tx, f.y, f.h, tink, sc);
+    moy_ui_span_t tt = {text_.p + from, (uint16_t)(text_.n - from)};
+    int w = tt.n ? moy_ui_text_in(s, fl.id, 0, tt, tx, ty, tink) : 0;
     if (focused) {
-        int ch = fl.line * sc;
-        fill(&d, tx + w + d.fs, f.y + moy_ui_fdiv(f.h - ch, 2), d.fs, ch,
+        // the caret: a pixel at the scale past the text, from a pixel over
+        // the letters' ink to a pixel under it, never past the box's inside
+        int cx = tx + w + d.fs, cmax = f.x + f.w - inner;
+        cx = cx > cmax ? cmax : cx;
+        fill(&d, cx, f.y + 3 * d.fs, d.fs, f.h - 6 * d.fs,
              pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT)));
     }
     return MOY_UI_OK;
