@@ -165,6 +165,18 @@ class WindowChrome:
             return 0
         return _ui_draw.frame_geom(win.w, win.h, win.title_h)[1]
 
+    def _frame_edge(self):
+        """The columns (and rows) the depth's window frame takes past its
+        first on each side (a 2 px frame: 1), focused or not: the content
+        rect leaves them out at the sides and the bottom, so no content
+        pixel lies under the frame and a row's mark stands off it (design
+        review R3-25)."""
+        if not _ui_draw.depth()[13]:
+            return 0
+        lk = self.ws.look.live.look[0]
+        w = max(lk.get("win.frame.w", 0), lk.get("win.frame_back.w", 0))
+        return max(0, (w + 50) // 100 - 1)
+
     def _pad_extent(self, win, x, y, w, h):
         """(x, y, w, h) grown by what its draw touches beyond it: the border,
         the classic 3px shadow, or the depth's shadow at its full size."""
@@ -254,15 +266,16 @@ class WindowChrome:
                 rc.clip()
 
     def _resize_feet(self):
-        """A look that moves the depth re-sizes every window's foot (its
-        content rect, and so its buffer)."""
+        """A look that moves the depth re-sizes every window's foot and
+        frame edge (its content rect, and so its buffer)."""
         gen = self.ws.look.look_gen
         if gen == self._foot_gen:
             return
         self._foot_gen = gen
         for key in self._order:
             win = self._wins.get(key)
-            if win is not None and win.foot != self._win_foot(win):
+            if win is not None and (win.foot != self._win_foot(win)
+                                    or win.edge != self._frame_edge()):
                 self._resize_window(win, win.w, win.h)
 
     def _win_title(self, win):

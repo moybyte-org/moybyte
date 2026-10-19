@@ -135,6 +135,10 @@ def shown_name(folder):
 # by tests/test_files_app.py), which sit over a table's rows.
 HEAD = (18, 34)
 CAPTION = (19, 26)
+# How far a list stands off a window's frame and off the divider between
+# the places and the files, at the font scale: a row's current mark (Blocks'
+# sliver at the row's left) never touches a rule (design review R3-25).
+MARK_CLEAR = 3
 
 
 class FilesLayout:
@@ -158,13 +162,21 @@ class FilesLayout:
         self.row_h = (28 if self.desk else 20) * fs
         self.two = self.desk and self.cw >= 400 * fs
         content = (self.cx, self.cy, self.cw, self.ch)
+        clear = MARK_CLEAR * fs
+        lead = clear if self.windowed else 0      # off the window's frame
         if self.two:
             self.side, rest = ui.cut_left(content, self.SIDE * fs)
             _rule, self.pane = ui.cut_left(rest, fs)
+            # the places' list: off the frame and off the divider at its right
+            sx, sy, sw, sh = self.side
+            self.side_list = (sx + lead, sy, sw - lead - clear, sh)
+            lead = clear                          # the files: off the divider
         else:
-            self.side = self.pane = content
+            self.side = self.pane = self.side_list = content
         pad = 8 if self.desk else 4 * fs
         self.foot, self.list = ui.cut_bottom(self.pane, self.row_h + 2 * pad)
+        x, y, w, h = self.list
+        self.list = (x + lead, y, w - lead, h)
         self.pad = pad
         # On the desk the list holds whole rows: under its caption (a single
         # pane names the place) and its columns' head, the rows' view is a
@@ -178,6 +190,9 @@ class FilesLayout:
             self.list = (x, y, w, h - (h - top) % self.row_h)
         # the handheld's places page: the places over the keycap hints
         self.hints, self.places = ui.cut_bottom(content, 20 * fs)
+        if self.windowed and not self.two:
+            x, y, w, h = self.places
+            self.places = (x + clear, y, w - clear, h)
 
 
 class FilesAppLayer(ListShellApp):
@@ -662,7 +677,7 @@ class FilesAppLayer(ListShellApp):
             ui.focus(self._focus)
             self._focus = None
         if lay.two:
-            ui.at(*lay.side)
+            ui.at(*lay.side_list)
             ui.scroll("side")
             self._places()
             ui.scroll()

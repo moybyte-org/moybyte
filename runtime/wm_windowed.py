@@ -183,6 +183,8 @@ class _Win:
         self.title_h = title_h        # the WM strip (title + min/max/X)
         self.foot = 0                 # rows under the content: the depth's
                                       # rounded bottom corners (ui.frame_geom)
+        self.edge = 0                 # columns each side the frame takes past
+                                      # its first (WindowChrome._frame_edge)
         self.buf = buf                # SystemCanvas (apps) | None (player)
         self.ctx = ctx                # _LayoutCtx (apps) | None (player)
         self.minimized = False        # hidden; lives on as a taskbar chip
@@ -197,9 +199,11 @@ class _Win:
         self._marked = False          # buf was drawn focused: it holds a focus mark
 
     def content_rect(self):
-        """The inner rect the content occupies (below the WM title strip)."""
-        return (self.x + 1, self.y + 1 + self.title_h,
-                self.w - 2, self.h - 2 - self.title_h - self.foot)
+        """The inner rect the content occupies: below the WM title strip and
+        inside the frame, its `edge` off the sides and the bottom."""
+        e = self.edge
+        return (self.x + 1 + e, self.y + 1 + self.title_h,
+                self.w - 2 - 2 * e, self.h - 2 - self.title_h - self.foot - e)
 
 
 class _Parked:
@@ -872,17 +876,18 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # editor gives me a small window in the corner" is a rule you learn
             # once, where a screen-relative size would be a different window on
             # every machine for no benefit the grip doesn't already give.
-            # The frame fits the game exactly: its border, its title strip
-            # and the rows its rounded bottom corners take (the foot), which
-            # the content rect leaves out.
+            # The frame fits the game exactly: its border (and the edge a
+            # wider frame takes), its title strip and the rows its rounded
+            # bottom corners take (the foot), which the content rect leaves out.
             foot = (_ui_draw.frame_geom(full.w, full.h, th)[1]
                     if _ui_draw.depth()[13] else 0)
             s = (1 if self._play_intent == "dev" else
                  max(1, min((full.w - 24) // self.ws.canvas.w,
                             (self._desk_rect()[3] - 24 - th - foot)
                             // self.ws.canvas.h)))
-            return (self.ws.canvas.w * s + 2,
-                    self.ws.canvas.h * s + 2 + th + foot)
+            e = self._frame_edge()
+            return (self.ws.canvas.w * s + 2 + 2 * e,
+                    self.ws.canvas.h * s + 2 + th + foot + e)
         if key in ("menu", "projects"):
             return (full.w - full.w // 8, full.h - full.h // 10)
         if key in ("artwork", "appearance", "storybook"):
@@ -994,13 +999,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         reference, only a live window re-ships) -- and the P4's device system
         canvas (#58) returns an RGB565 layer sharing its native moy_gfx kernel."""
         win.foot = self._win_foot(win)
+        win.edge = self._frame_edge()
         if win.kind == "desktop":
             win.buf = None
             win.ctx = None
             return
         full = self._root_canvas
-        cw = max(64, win.w - 2)
-        ch = max(40, win.h - 2 - win.title_h - win.foot)
+        cw = max(64, win.w - 2 - 2 * win.edge)
+        ch = max(40, win.h - 2 - win.title_h - win.foot - win.edge)
         self._drop_win(win)             # a resize's old buffer, freed first
         win.buf = full.new_layer(cw, ch)
         win.ctx = self._make_ctx(win.buf, win.foot)
@@ -2356,14 +2362,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             asb = getattr(self._root_canvas, "blit_strip_async", None)
             if asb is not None:
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
-                if asb(win.buf, win.x + 1, win.y + 1 + win.title_h):
+                cx, cy, _cw, _ch = win.content_rect()
+                if asb(win.buf, cx, cy):
                     return
                 # non-fit / refusal: fall through to the sync stamp (the chrome
                 # is already down; the second draw below is harmless overdraw).
         # Retained (or just-rendered) buffer -> desktop, then chrome.
         _perf = getattr(self.ws, "perf_capture", False)
         _t0 = _ticks_ms() if _perf else 0
-        self._root_canvas.blit_strip(win.buf, win.x + 1, win.y + 1 + win.title_h)
+        cx, cy, _cw, _ch = win.content_rect()
+        self._root_canvas.blit_strip(win.buf, cx, cy)
         if _perf:
             self.ws._pf_wm_stamp = _ticks_ms() - _t0
         self._win_chrome(win, focused, quiet=self._chrome_quiet)
@@ -2666,7 +2674,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return bool(self._content_for("desktop").handle_pointer(px, py, click))
         # App window: dispatch the content in WINDOW-LOCAL coords under the
         # window's layout context (the app's own bar row is its toolbar).
-        lx, ly = px - (win.x + 1), py - (win.y + 1 + win.title_h)
+        cx, cy, _cw, _ch = win.content_rect()
+        lx, ly = px - cx, py - cy
         content = self._content_for(win.kind)
         if content is None:
             return True
