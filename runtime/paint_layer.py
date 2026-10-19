@@ -928,6 +928,18 @@ class PaintLayer:
             return
         _ui_draw.glyph(cv, glyph, rect, ink, 2 if self.layout.desk else None)
 
+    def _stepper(self, cv, th, rect, kind):
+        """An icon-only button: the theme's button with icon `kind` (as
+        `_icon_draw` takes it) centred on it, at the box and in the ink the
+        button gives its glyph (a button lays its glyph out before a label,
+        so with none the glyph would sit left of centre)."""
+        got = []
+        _ui_draw.button(cv, th, rect, "", "normal", glyph=kind,
+                        glyph_draw=lambda k, r, ink, c: got.append((r, ink)))
+        if got:
+            (_x, y, w, h), ink = got[0]
+            self._icon_draw(kind, (rect[0] + (rect[2] - w) // 2, y, w, h), ink, cv)
+
     def _checker(self, cv, x, y, w, h, s, greys):
         """Transparency's grey checker over (x, y, w, h) in squares of s."""
         dark, light = greys
@@ -1012,9 +1024,10 @@ class PaintLayer:
         cv.rectb(x + t, y + t, sw - 2 * t, sw - 2 * t, th["surface"])
         # The column: the sprite before and after, its size (a tap opens the
         # pickers, as on the preview and the caption), the preview on the
-        # checker, then Get, Put and File.
-        _ui_draw.button(cv, th, lay.spr_prev, "<", "normal")
-        _ui_draw.button(cv, th, lay.spr_next, ">", "normal")
+        # checker, then Get, Put and File. Previous and next are the icon
+        # set's chevrons, never the font's less-than and greater-than signs.
+        self._stepper(cv, th, lay.spr_prev, ("back", "arr_l"))
+        self._stepper(cv, th, lay.spr_next, ("forward", "arr_r"))
         text = "Size %dx%d" % (pe.size, pe.size)
         cv.print(text, lay.size_xy[0] - _ui_draw.print_width(text, fs) // 2, lay.size_xy[1],
                  th["ink"], 1)

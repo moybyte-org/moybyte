@@ -360,6 +360,23 @@ def test_the_shifts_are_the_sets_line_arrows(tmp_path):
     iconsets.reset()
 
 
+def test_previous_and_next_sprite_are_the_sets_chevrons(tmp_path):
+    """The sprite steppers wear the icon set's chevrons, centred on their
+    buttons, not the font's "<" and ">" (design review R2-19)."""
+    ws, drv, _c = _look_tab(tmp_path)
+    lay = ws.paint_layer.layout
+    drawn = []
+    real = ws.paint_layer._icon_draw
+    ws.paint_layer._icon_draw = lambda kind, rect, ink, cv: (
+        drawn.append((kind, rect)), real(kind, rect, ink, cv))
+    _frames(drv)
+    for kind, btn in ((("back", "arr_l"), lay.spr_prev), (("forward", "arr_r"), lay.spr_next)):
+        rects = [r for k, r in drawn if k == kind]
+        assert len(rects) == 1, kind
+        x, y, w, h = rects[0]
+        assert abs((x + w // 2) - (btn[0] + btn[2] // 2)) <= 1, (kind, rects[0], btn)
+
+
 @pytest.mark.parametrize("theme,variant", [("moy", "light"), ("moy", "dark"),
                                            ("blocks", "light"), ("contrast", "dark")])
 def test_the_caption_size_line_and_tool_rows_keep_their_room(tmp_path, theme, variant):
