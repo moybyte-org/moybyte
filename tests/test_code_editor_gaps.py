@@ -937,3 +937,30 @@ def test_the_labelled_ladder_keeps_8px_from_a_pill_to_the_next_icon(tmp_path):
         assert nxt[0] + pad - (r[0] + r[2]) >= 8 * fs, (r, nxt)
     for tid, r, _on in rects:
         assert app.zone_tap(r[0] + r[2] // 2, r[1] + r[3] // 2, rect) is not False, tid
+
+
+def test_a_labelled_chips_icon_ink_starts_at_its_pad(tmp_path):
+    """On the labelled ladder each icon's ink starts at its chip's pad, as
+    the name's ends at it, so the open tab's pill is padded alike both
+    sides (the review kit's pill-pad check)."""
+    from runtime import iconsets, ui_draw
+    ws, _drv, _lay, _ed = _look_ws(tmp_path, "moy", "light")
+    app = ws.editor_app
+    rect = (0, 0, 700, 20)
+    tabs_area, _play = app._zone_parts(rect)
+    chips = dict((tid, r) for tid, r, _on in app._shelf_rects(tabs_area))
+    pad = ui_draw.metrics("tab")[ui_draw.TAB_PAD] * app._zone_scale()
+    drawn = []
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, r, ink, c=None: (drawn.append((kind, r)),
+                                                 real(kind, r, ink, c))[1]
+    try:
+        app.draw_zone(ws.sys_canvas, rect)
+    finally:
+        ws.draw_icon = real
+    spec = ws.icon_spec()
+    got = dict(drawn)
+    for tid, kind in (("code", "code"), ("blocks", "blocks")):
+        r = got[kind]
+        a = iconsets.ink_span(kind, r[2], r[3], spec)[0]
+        assert r[0] + a == chips[tid][0] + pad, (tid, r, a, chips[tid])

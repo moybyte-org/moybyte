@@ -142,9 +142,11 @@ _TAB_LAYOUT_UI = {
 }
 
 try:
+    import iconsets as _iconsets
     import ui as _ui
     import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import iconsets as _iconsets
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
@@ -489,14 +491,15 @@ class EditorApp:
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
             chips = self._chips()
             draw = None
+            rects = self._shelf_rects(tabs_area)
             if sets:
                 # The open tab's icon takes the ink its name takes on the
                 # current mark (Moy's `current.ink`), the rest the chrome's.
                 open_kind = next((k for t, _l, k in chips if t == self.tab), None)
                 draw = self._set_icon(cv, open_kind=open_kind,
-                                      open_ink=_ui_draw.current_ink(cv, th))
+                                      open_ink=_ui_draw.current_ink(cv, th),
+                                      lead=bool(rects) and rects[0][2])
             icon_for = getattr(ws, "_icon_image_keyed", None)
-            rects = self._shelf_rects(tabs_area)
             for (tid, label, kind), (_t, r, labels_on) in zip(chips, rects):
                 _ui_draw.tab(cv, th, r, tid == self.tab, label, labels_on, band_ink,
                              icon_for(kind) if icon_for is not None else None,
@@ -546,17 +549,25 @@ class EditorApp:
         _ui_draw.tab(cv, th, r, True)
         return th["selection_ink"]
 
-    def _set_icon(self, cv, ink=None, open_kind=None, open_ink=None):
+    def _set_icon(self, cv, ink=None, open_kind=None, open_ink=None, lead=False):
         """A tab's icon_draw: the theme's icon set's slot for a ladder kind,
         in `ink` (default the chrome ink), and the open tab's kind
-        `open_kind` in `open_ink` where the current mark gives one."""
+        `open_kind` in `open_ink` where the current mark gives one. `lead`
+        (a labelled chip, whose icon leads its name) moves the icon left by
+        the blank columns before its ink, so the ink starts at the chip's
+        pad as the name ends at it, and the pill's two pads match."""
         ws = self.ws
         if ink is None:
             ink = ws.theme_colors["chrome_ink"]
+        spec = ws.icon_spec() if lead else None
 
         def draw(kind, r):
             c = open_ink if open_ink is not None and kind == open_kind else ink
-            return ws.draw_icon(_SET_KIND.get(kind, kind), r, c, cv)
+            slot = _SET_KIND.get(kind, kind)
+            span = _iconsets.ink_span(slot, r[2], r[3], spec) if spec is not None else None
+            if span is not None:
+                r = (r[0] - span[0], r[1], r[2], r[3])
+            return ws.draw_icon(slot, r, c, cv)
         return draw
 
     def _bare_play(self, cv, r):
