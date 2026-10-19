@@ -1926,6 +1926,44 @@ class AppHost:
         return settled
 
 
+# A coverless cart's cover (`initial_cover`): (block, ink) pairs of MOY64
+# indices, the colours a cart's own cover draws in, each ink at 3:1 or more
+# on its block: yellow, red, blue, green, pink, orange, dark purple, dark
+# green, indigo, dark blue.
+INITIAL_BLOCKS = ((10, 1), (8, 7), (12, 1), (11, 1), (14, 1), (9, 1), (2, 7), (3, 7),
+                  (13, 7), (1, 15))
+
+
+def initial_block(title):
+    """The (block, ink) pair of `title`'s generated cover: the same for the
+    same title on every tier and every run (no `hash`, which is salted)."""
+    n = 0
+    for ch in str(title or ""):
+        n = (n * 31 + ord(ch)) & 0xffff
+    return INITIAL_BLOCKS[n % len(INITIAL_BLOCKS)]
+
+
+def initial_cover(cv, rect, r, title, stepped=False):
+    """A cart with no cover's picture over `rect` (corners `r`): its title's
+    first letter on a colour block that stays the cart's (`initial_block`),
+    a pixel letter (petme128, crisp at any whole scale, as a cover's pixel
+    art is) at the largest scale that stands it no taller than half the
+    block."""
+    x, y, w, h = rect
+    block, ink = initial_block(title)
+    cv.rrect(x, y, w, h, r, block, stepped=stepped)
+    s = str(title or "").strip()
+    if not s:
+        return
+    letter = s[0].upper()
+    sc = max(1, (h // 2) // 7)            # petme128's capitals are 7 rows
+    was = print_font(0)
+    # its 8-column cell holds 7 of ink: centred on the ink, not the cell
+    cv.print_scaled(letter, x + (w - 7 * sc) // 2, y + (h - 7 * sc) // 2, ink, sc)
+    if was is not None:
+        print_font(was)
+
+
 FADE_WELL = -3     # `fade`'s colour: a part's well (moy_ui_well's fill)
 
 

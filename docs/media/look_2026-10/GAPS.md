@@ -241,8 +241,8 @@ moy-spec's: owner call.
 
 **21. Covers:** the whole cover on every card at a clean scale (owner call
 2026-10-17, after a side-by-side render; the mockups' per-cover crops,
-`CROPS`, are declined), anti-aliased clipped corners, a title tile for a
-cart without a cover. **Cost:** 1.5 days.
+`CROPS`, are declined), anti-aliased clipped corners, a generated cover
+(the title's initial on a colour block) for a cart without one. **Cost:** 1.5 days.
 
 **22. App relayouts:**
 

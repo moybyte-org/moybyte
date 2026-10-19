@@ -1908,35 +1908,11 @@ class Carousel(Launcher):
                 x += ws_[k] + sep
 
     def _draw_title_tile(self, cv, it, rect, r):
-        """A card for a cart with no cover (GAPS 21): the theme's tile field,
-        its corners the card's, the cart's title wrapped across it."""
-        th = self.theme or {}
-        fs = self.layout.fs
-        x, y, w, h = rect
-        cv.rrect(x, y, w, h, r, th.get("surface_alt", 1),
-                 stepped=bool(_ui_draw.depth()[5]))
-        sc = 2 * fs if w >= _COVER_SIDE * fs else fs
-        words = (it.get("title") or "").split()
-        lines = []
-        cur = ""
-        room = w - 8 * fs
-        for wd in words:
-            nxt = (cur + " " + wd) if cur else wd
-            if cur and _ui_draw.print_width(nxt, sc) > room:
-                lines.append(cur)
-                cur = wd
-            else:
-                cur = nxt
-        if cur:
-            lines.append(cur)
-        lh = self.layout.line_h * sc // fs
-        lines = lines[:max(1, (h - 8 * fs) // max(1, lh))]
-        yy = y + (h - lh * len(lines)) // 2
-        for ln in lines:
-            ln = _ui_draw.print_fit(ln, room, sc)
-            cv.print_scaled(ln, x + (w - _ui_draw.print_width(ln, sc)) // 2, yy,
-                            th.get("ink", 7), sc)
-            yy += lh
+        """A card for a cart with no cover: a generated one, its title's
+        initial on the colour block that stays the cart's
+        (`ui_draw.initial_cover`)."""
+        _ui_draw.initial_cover(cv, rect, r, it.get("title") or "",
+                               bool(_ui_draw.depth()[5]))
 
     def _draw_hh_cover(self, cv, it, rect, centre):
         """A card's picture: the whole cover scaled to the card (the
