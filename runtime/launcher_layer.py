@@ -1054,6 +1054,9 @@ _LETTER_INPUTS = ("keys", "tdeck")
 LONG_PRESS_MS = 500
 _TAB_KEYS = ("tabs", "Tabs")
 _HINT_LEAD = 8       # the margin ui.hints leads with, at the font scale
+DESC_LINES = 3       # the desk home's description: at most this many lines,
+DESC_EMS = 48        # ... as wide as this many n's: about 60 characters of
+                     # running text, the width of the buttons' row
 _MENU_KEYS = ("back", "Close")   # the strip under the system menu
 _TAB_H = 16          # the tab row's height, in chrome-scale units
 _GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
@@ -2971,15 +2974,17 @@ class LauncherHomeLayer:
             vy = by - 16 // u - lh * vs
             ky = vy - 6 // u - lh * ks
             # the manifest's description (SPEC.md 3.7) in the room between
-            # the metadata and the facts, as many lines as fit
+            # the metadata and the facts: a measure of DESC_EMS, DESC_LINES
+            # lines at most, the last cut with an ellipsis (owner, 2026-10-19)
             gap = 10 // u
-            room = (ky - gap - (my + lh * ms + gap)) // (lh * ms)
+            room = min(DESC_LINES, (ky - gap - (my + lh * ms + gap)) // (lh * ms))
             text = it.get("description")
             if text and room > 0:
-                lines = list(_ui_draw.wrap_px(text, dw, ms))
+                tw = min(dw, _ui_draw.print_width("n" * DESC_EMS, ms))
+                lines = list(_ui_draw.wrap_px(text, tw, ms))
                 if len(lines) > room:
                     lines = lines[:room]
-                    lines[-1] = _ui_draw.print_fit(lines[-1], dw - _ui_draw.print_width("...", ms), ms) + "..."
+                    lines[-1] = _ui_draw.print_fit(lines[-1], tw - _ui_draw.print_width("...", ms), ms) + "..."
                 dy = my + lh * ms + gap
                 for line in lines:
                     cv.print_scaled(line, dx, dy, dim, ms)
