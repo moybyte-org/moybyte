@@ -52,7 +52,8 @@ BAR_ROWS = 18
 # at; the desk's are the 1024x600 and 1280x800 desk's (the 2026-10 look's
 # DESIGN.md, "The sizes"): a 40-pixel bar, list rows 28, Places 34, window
 # title strips 44, desk icon tiles 44 on a 74-row pitch, the first 18 under
-# the bar. `unit` is what every OTHER logical size of the chrome
+# the bar. `clock` is the bar's clock cell, the widest "HH:MM" of the shipped
+# themes' faces on the class, so the bar packs alike in every mode. `unit` is what every OTHER logical size of the chrome
 # (an icon, a margin, a menu row) is multiplied by on that class: the desk
 # draws the handheld's 16-pixel icons at 32. A board is a desk when its
 # declared glass is at least DESK_MIN_IN across (`class_of`).
@@ -60,9 +61,9 @@ HANDHELD = "handheld"
 DESK = "desk"
 CLASSES = {
     HANDHELD: {"unit": 1, "bar": BAR_ROWS, "row": 20, "place": 34, "title": 18,
-               "tile": 40, "tile_cell": 62, "tile_top": 12},
+               "tile": 40, "tile_cell": 62, "tile_top": 12, "clock": 35},
     DESK: {"unit": 2, "bar": 40, "row": 28, "place": 34, "title": 44,
-           "tile": 44, "tile_cell": 74, "tile_top": 18},
+           "tile": 44, "tile_cell": 74, "tile_top": 18, "clock": 44},
 }
 DESK_MIN_IN = 5.0
 # The bar heights a theme's look sets per class (`hhbar.h`, `bar.h`; the

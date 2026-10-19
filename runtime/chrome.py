@@ -78,12 +78,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
     from layout_base import CLASSES as _LB_CLASSES, class_of as _lb_class_of, bar_rows as _bar_rows
-    from layout_base import sys_tile as _sys_tile
+    from layout_base import sys_tile as _sys_tile, metric as _lb_metric
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
     from runtime.layout_base import (CLASSES as _LB_CLASSES, class_of as _lb_class_of,
-                                     bar_rows as _bar_rows, sys_tile as _sys_tile)
+                                     bar_rows as _bar_rows, sys_tile as _sys_tile,
+                                     metric as _lb_metric)
 
 
 try:                                    # device: ticks is frozen flat
@@ -389,8 +390,10 @@ class Layout(LayoutBase):
         # widget (None where none does): batt hard right, then wifi, the ≡,
         # the context X and the clock in today's bar; its lent left zone runs
         # from the left edge to just before the clock.
-        # "HH:MM": five cells, or a version 2 face's measure of it
-        self.clock_w = (_ui_draw.print_width("00:00", fs)
+        # "HH:MM": five cells, or a version 2 face's measure of it no
+        # narrower than its metric class's clock (`layout_base.CLASSES`), so
+        # a theme whose modes set different faces keeps one bar
+        self.clock_w = (max(_ui_draw.print_width("00:00", fs), _lb_metric("clock", fs))
                         if _ui_draw.font_v2(_ui_draw.font()[0]) else 5 * self.font_w)
         sys_len = _sys_tile(self.status_h)[2] if _ui_draw.depth()[0] else 0
         self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs,

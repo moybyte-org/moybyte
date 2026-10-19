@@ -117,3 +117,16 @@ def test_a_home_draws_whole_covers_at_a_clean_scale(tmp_path, monkeypatch, confi
         assert _clean(dw) and dw * sw == dw * sh, \
             "%s %s %s: a cover drawn at %d px, not a clean scale of %d" % (
                 config, theme, mode, dw, COVER)
+
+
+@pytest.mark.parametrize("config", [HANDHELD, DESK])
+@pytest.mark.parametrize("theme", ["moy", "blocks", "contrast"])
+def test_a_themes_bar_packs_alike_in_both_modes(tmp_path, config, theme):
+    """A theme's bar packs alike in its light and dark modes, whatever faces
+    they set (R2-13)."""
+    got = {}
+    for mode in ("dark", "light"):
+        ws = _ws(tmp_path / mode, config, theme, mode)
+        got[mode] = (ws.layout.clock_w, ws.layout.bars)
+    assert got["dark"] == got["light"], "%s on %s: the bar moves with the mode" % (
+        theme, config)
