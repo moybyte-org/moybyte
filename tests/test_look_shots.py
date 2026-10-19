@@ -260,7 +260,8 @@ def test_a_known_gap_is_tagged_not_flagged():
 def test_the_kit_measures_the_editor_and_the_desk_apps(tmp_path):
     """Batch C's fixes, held in the kit too: the Code tab's one inset
     (R3-10) and the caret's ground column (R3-24), the sprite tools' ink
-    (R3-11) and columns (R3-23), the desk Appearance foot (R3-27)."""
+    (R3-11) and the one row's mockup pitch (2026-10-19), the desk
+    Appearance foot (R3-27)."""
     L.run(str(tmp_path), ["moy-dark_handheld_code-editor_undo-off",
                           "moy-dark_desktop_sprite-editor",
                           "moy-dark_desktop_appearance_focus-cycler"],
@@ -272,6 +273,6 @@ def test_the_kit_measures_the_editor_and_the_desk_apps(tmp_path):
             r = ln.split(",")
             got[r[1]] = r[6]
     for pair in ("code left edges off the inset", "caret to next stem gap",
-                 "sprite tools off the chrome ink", "sprite tool rows out of column",
+                 "sprite tools off the chrome ink", "sprite tool row off the mockup's pitch",
                  "desk Appearance foot off the rows' column", "desk Appearance foot gaps apart"):
         assert got.get(pair) == "", (pair, got.get(pair))
