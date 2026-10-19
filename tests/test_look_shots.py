@@ -246,3 +246,32 @@ def test_a_mark_shorter_than_its_row_and_a_rim_off_its_cover_are_flags():
     assert L._measure("focus mark height vs row", 7, 22, 7 >= 22)[3] < 1.0
     assert L.flagged([L._measure("hero rim-to-cover gap", 5, 0, False)])
     assert not L.flagged([L._measure("hero rim-to-cover gap", 0, 0, True)])
+
+
+def test_a_known_gap_is_tagged_not_flagged():
+    """The desk Calc's backspace waits on the engine (R3-09, a strict xfail
+    in tests/test_editor_look.py): the kit tags it rather than flagging it,
+    and the tag comes off with the fix because a passing measure has none."""
+    row = L._measure("desk backspace ink height vs digit cap", 12, 15, False)
+    assert row[5] == "R3-09" and not L.flagged([row])
+    assert L._measure("desk backspace ink height vs digit cap", 15, 15, True)[5] == ""
+
+
+def test_the_kit_measures_the_editor_and_the_desk_apps(tmp_path):
+    """Batch C's fixes, held in the kit too: the Code tab's one inset
+    (R3-10) and the caret's ground column (R3-24), the sprite tools' ink
+    (R3-11) and columns (R3-23), the desk Appearance foot (R3-27)."""
+    L.run(str(tmp_path), ["moy-dark_handheld_code-editor_undo-off",
+                          "moy-dark_desktop_sprite-editor",
+                          "moy-dark_desktop_appearance_focus-cycler"],
+          quiet=True, kit=True, only_kit=True, audit_csv=True)
+    kit = tmp_path / "kit"
+    got = {}
+    for f in kit.glob("*.audit.csv"):
+        for ln in f.read_text().splitlines()[1:]:
+            r = ln.split(",")
+            got[r[1]] = r[6]
+    for pair in ("code left edges off the inset", "caret to next stem gap",
+                 "sprite tools off the chrome ink", "sprite tool rows out of column",
+                 "desk Appearance foot off the rows' column", "desk Appearance foot gaps apart"):
+        assert got.get(pair) == "", (pair, got.get(pair))

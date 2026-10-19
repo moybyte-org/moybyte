@@ -71,15 +71,19 @@ measured by hand (a focused row's parts against its plate and its mark
 against the row, the caret against its line, the open tab's current mark
 against the ground beside it, the focused desk chip's label, a disabled
 history icon against the enabled ink, an Off toggle against its row, a lifted
-hero's rim against its cover, the desk Calc's backspace against a digit),
+hero's rim against its cover, a Settings caption cut at the page top, the
+Code tab's left edges against its inset and its caret against the next stem,
+the sprite tools' ink and columns, the desk Appearance foot, the desk Calc's
+backspace against a digit),
 each with its ratio and a FLAG under its floor. A box is measured as it
 shows -- cut to its window or the content under the bar, less the hint band
 -- inside its plate's own run; anti-aliasing is no colour of its own; text
 is held to 4.5:1 and a part to 3:1; a current mark by the look's
 `current.style`, a faint plate passing on its label's ink; a swatch only has
 to show, and a preview card is measured by its ring. A pair an open design
-question owns (`D05_TOKENS`, `D08_KINDS`) names it in the CSV's owner column
-and is no FLAG; the run prints the FLAG count.
+question owns (`D05_TOKENS`, `D08_KINDS`), or a measure with a known, filed
+gap (`KNOWN`), names it in the CSV's owner column and is no FLAG; the run
+prints the FLAG count.
 """
 
 import argparse
@@ -808,6 +812,7 @@ def _kit_table():
         "handheld_code-editor_long-line": (
             HANDHELD, _code_long, "the caret on the longest line: the current "
             "line's mark meets the overflow fade"),
+        "desktop_sprite-editor": (DESK, _sprites, "the desk Sprites tab: its two tool rows"),
         "handheld_sprite-editor_palette": (
             HANDHELD, _sprites, "Sprites, colour %d current beside the focus hue"
             % SPRITE_COLOUR),
@@ -1159,6 +1164,10 @@ SAMPLE_FLOOR = 1.5
 D05_TOKENS = ("border", "edge")
 OWNED_THEMES = ("moy", "blocks")
 D08_KINDS = ("slider", "steps", "volume")
+# The measures with a known gap the round filed: the desk Calc's backspace
+# waits on the engine sizing a button's icon by its face (R3-09,
+# tests/test_editor_look.py holds it as a strict xfail).
+KNOWN = {"desk backspace ink height vs digit cap": "R3-09"}
 
 
 def _clip(r, v):
@@ -1298,7 +1307,7 @@ def _distinct(a, b):
 
 def _owner(ws, kind, c, ratio, floor):
     """The open question a failing pair is owned by ("" for none)."""
-    if ratio >= floor or ws.look.theme_name not in OWNED_THEMES:
+    if ratio >= floor or ws.look.theme_name not in OWNED_THEMES or c is None:
         return ""
     if c in _token_rgbs(ws, D05_TOKENS):
         return "D-05"
@@ -1465,8 +1474,10 @@ def _chip_pairs(ws, probe, img):
 
 def _measure(pair, got, want, ok):
     """A geometry pair as an audit row: what was measured against what it
-    must reach, in pixels (the ratio column 1.0 where it holds)."""
-    return (pair, "%dpx" % got, "%dpx" % want, 1.0 if ok else 0.0, 1.0, "")
+    must reach, in pixels (the ratio column 1.0 where it holds). A pair
+    with a known, filed gap carries it in the owner column (KNOWN)."""
+    return (pair, "%dpx" % got, "%dpx" % want, 1.0 if ok else 0.0, 1.0,
+            "" if ok else KNOWN.get(pair, ""))
 
 
 def _mark_pairs(ws, img, box, view, kind=None):
@@ -1493,6 +1504,138 @@ def _mark_pairs(ws, img, box, view, kind=None):
     want = r[3] - 4             # a ring inset inside a ring (Contrast Light) the slack
     got = (max(ys) - min(ys) + 1) if ys else 0
     return [_measure("focus mark height vs row", got, want, got >= want)]
+
+
+def _editor_origin(ws, attr, own):
+    """(the Editor's `attr` layout, the glass x and y of its content): its
+    desk window's where one is open, else `own`, the fullscreen one."""
+    win = getattr(ws.wm, "_wins", {}).get("menu")
+    if win is not None and not getattr(win, "minimized", False) and ws.wm.desk_open():
+        cx, cy, _w, _h = win.content_rect()
+        return getattr(win.ctx, attr), cx, cy
+    return own, 0, 0
+
+
+def _ink_left(px, x0, x1, y0, y1, ground=None):
+    """The first column in [x0, x1) where a row of [y0, y1) leaves its
+    ground (the row's pixel at x0, or `ground`), or None."""
+    for x in range(x0, x1):
+        for y in range(y0, y1):
+            if px[x, y] != (px[x0, y] if ground is None else ground):
+                return x
+    return None
+
+
+def _code_pairs(ws, img):
+    """The Code tab's one inset (design review R3-10): the code, the status
+    line and the symbol keys start on the layout's `x0`, a bearing's pixel
+    aside; the worst of them is the measure."""
+    if ws.screen != "menu" or getattr(ws, "menu_view", None) != "code":
+        return []
+    lay, ox, oy = _editor_origin(ws, "code_layout", ws.code_layout)
+    ed = ws.editor
+    fs, x0 = lay.fs, lay.x0
+    px = img.load()
+    edges = []
+    for i in range(lay.rows):
+        n = ed.top + i
+        if n != ed.row and n < len(ed.lines) and ed.lines[n][:1].isalpha():
+            y = oy + lay.y0 + i * lay.lh
+            edges.append(_ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, y, y + lay.lh))
+            break
+    sx, sy, _sw, sh = lay.status_band
+    edges.append(_ink_left(px, ox + sx + 1, ox + sx + 200, oy + sy + 1, oy + sy + sh))
+    ky = oy + lay.sym_y + lay.sym_h // 2
+    edges.append(_ink_left(px, ox + lay.cx + 1, ox + lay.cx + lay.cw, ky, ky + 1))
+    off = [abs(e - ox - x0) if not (x0 <= e - ox <= x0 + fs) else 0
+           for e in edges if e is not None]
+    worst = max(off) if off else 0
+    return [_measure("code left edges off the inset", worst, 0, worst == 0)]
+
+
+def _caret_pairs(ws, probe, img):
+    """A ground column stands between the code caret and the next stem
+    (design review R3-24), across the caret's middle third: the caret is no
+    bold stroke (a glyph's foot, an underscore, may meet it)."""
+    t = getattr(ws.code_layer, "_t", None)
+    if ws.screen != "menu" or t is None or "caret" not in t:
+        return []
+    px = img.load()
+    lay, ox, _oy = _editor_origin(ws, "code_layout", ws.code_layout)
+    for x, y, w, h, c in probe.last["rects"]:
+        # the caret: in the code's columns (a current-line mark in its colour
+        # stands in the inset)
+        if c == t["caret"] and h > 2 * w and ox + lay.x0 <= x and x + w < img.width:
+            col = x + w
+            ys = range(y + h // 3, y + h - h // 3)    # a stem's, not an underscore's
+            ground = px[col, y + h // 2]
+            gap = 1 if all(px[col, yy] == ground for yy in ys) and                 all(px[col, yy] != px[x, yy] for yy in ys) else 0
+            return [_measure("caret to next stem gap", gap, 1, gap >= 1)]
+    return []
+
+
+def _sprite_pairs(ws, img):
+    """The sprite tools (design review R3-11, R3-23): every enabled tool
+    shows the chrome's ink and none of the dim or danger inks (the tool in
+    use wears the current mark, an idle copy or paste the disabled ink),
+    and the two tool rows stand in columns."""
+    if ws.screen != "menu" or getattr(ws, "menu_view", None) != "paint" or ws.paint is None:
+        return []
+    from runtime import paint_layer, ui_draw
+    lay, ox, oy = _editor_origin(ws, "paint_layout", ws.paint_layer.layout)
+    th = ws.theme_colors
+    px = img.load()
+    ink = _index_rgb(ws, th["chrome_ink"])
+    others = {_index_rgb(ws, th[r]) for r in ("ink_dim", "chrome_ink_dim")}
+    others.add(_index_rgb(ws, ui_draw.button_ink(th, "danger")))
+    others.discard(ink)
+    bad = 0
+    for tid, (x, y, w, h) in zip(paint_layer._TOOLS, lay.tool_btns):
+        if tid in ("copy", "paste") or (tid in paint_layer._TOOL_MODE
+                                        and ws.paint.tool == paint_layer._TOOL_MODE[tid]):
+            continue
+        seen = {px[ox + xx, oy + yy] for yy in range(y, y + h) for xx in range(x, x + w)
+                if 0 <= ox + xx < img.width and 0 <= oy + yy < img.height}
+        if ink not in seen or seen & others:
+            bad += 1
+    n1 = len(paint_layer._TOOL_ROW1)
+    row1, row2 = lay.tool_btns[:n1], lay.tool_btns[n1:]
+    off = sum(1 for a, b in zip(row1, row2) if (a[0], a[2]) != (b[0], b[2]))
+    return [_measure("sprite tools off the chrome ink", bad, 0, bad == 0),
+            _measure("sprite tool rows out of column", off, 0, off == 0)]
+
+
+def _foot_pairs(ws, img):
+    """The desk Appearance window's foot (design review R3-27): its status
+    starts on the rows' label column and stands as far below the foot's
+    rule as above the frame's bottom (within the face's 3 px), no more than
+    17 px up."""
+    win = getattr(ws.wm, "_wins", {}).get("appearance")
+    if win is None or getattr(win, "minimized", False) or not ws.wm.desk_open():
+        return []
+    from runtime import ui_draw
+    lay = win.ctx.app_layouts.get("appearance")
+    if lay is None or not hasattr(lay, "foot"):
+        return []
+    cx, cy, _cw, _ch = win.content_rect()
+    px = img.load()
+    bx, _by, bw, _bh = lay.body
+    _fx, fy, _fw, _fh = lay.foot
+    ground = px[cx + bx + bw // 2, cy + fy + 4]
+    rule = cy + fy
+    bottom = win.y + win.h - 1 - win.edge
+    cols = range(cx + bx, cx + bx + bw // 2)
+    rows = [y for y in range(rule + 1, bottom) if any(px[x, y] != ground for x in cols)]
+    if not rows:
+        return []
+    above, below = rows[0] - rule - 1, bottom - rows[-1] - 1
+    pad = ui_draw.metrics("group")[1] * lay.fs
+    x0 = _ink_left(px, cx + bx, cx + bx + bw // 2, rows[0], rows[-1] + 1, ground)
+    dx = (x0 - (cx + bx + pad)) if x0 is not None else bw
+    return [_measure("desk Appearance foot off the rows' column", abs(dx), 0,
+                     0 <= dx <= lay.fs),
+            _measure("desk Appearance foot gaps apart", abs(above - below), 3,
+                     abs(above - below) <= 3 and below <= 17)]
 
 
 def _caption_pairs(ws, img):
@@ -1604,6 +1747,10 @@ def audit(ws, probe, img):
     out += _chip_pairs(ws, probe, img)
     out += _rim_pairs(ws, probe, img)
     out += _caption_pairs(ws, img)
+    out += _code_pairs(ws, img)
+    out += _caret_pairs(ws, probe, img)
+    out += _sprite_pairs(ws, img)
+    out += _foot_pairs(ws, img)
     out += _calc_pairs(ws, img)
     enabled = th.get("chrome_ink")
     seen = set()
@@ -1878,7 +2025,8 @@ def main(argv=None):
         len(rows), sum(1 for r in rows if r[1]),
         os.path.join(args.out, "index.txt")))
     if args.audit:
-        print("%d audit flags, %d pairs owned by open design questions" % _AUDIT_COUNT[0])
+        print("%d audit flags, %d pairs owned by open design questions or known gaps"
+              % _AUDIT_COUNT[0])
     for name, check, detail in failed:
         print("FAILED %s: %s (%s)" % (name, check, detail))
     return 1 if failed else 0
