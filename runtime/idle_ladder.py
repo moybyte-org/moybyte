@@ -95,6 +95,11 @@ class IdleLadder:
         i = max(0, min(len(STEPS) - 1, i + (1 if d > 0 else -1)))
         return self.set(key, STEPS[i])
 
+    def sleep(self):
+        """The BLANK rung now (the system menu's Sleep): the light goes off
+        until the next input, which the ladder swallows as it wakes."""
+        self.loop.power(False)
+
     def set(self, key, secs):
         """Rung `key` at `secs`, persisted and live."""
         for k, rung, _t, _d in ROWS:

@@ -201,17 +201,39 @@ def test_hamburger_is_leftmost_and_switchers_shifted_right():
 
 # -- opening / contents ------------------------------------------------------
 
-def test_hamburger_tap_opens_menu_with_cart_and_system_groups(tmp_path):
+def test_hamburger_tap_opens_menu_with_the_system_group(tmp_path):
     from runtime import console as C
     ws = _ws(tmp_path)
     drv = _drv(ws)
     _open_cart(ws)
     _tap(drv, *_center(C._SYSMENU_BTN))
     assert ws.sysmenu.open
-    title = ws.cart.get("title").upper()
-    # a built-in: the console's own, so no Delete
-    assert _labels(ws) == [title, "RESTART CART",
-                           "SYSTEM", "SETTINGS", "ABOUT", "REBOOT"]
+    # a built-in: the console's own, so no Delete and no cart group (a run
+    # restarts from the pause menu); restarting the console is last
+    assert _labels(ws) == ["SYSTEM", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
+    reboot = ws.sysmenu.items[-1]
+    assert reboot[3] == "power" and reboot[4] == "Restart Moybyte"
+
+
+def test_sleep_is_offered_where_the_board_has_an_idle_ladder(tmp_path):
+    """Sleep is the ladder's BLANK rung now: a row only where the kernel's
+    ladder drives the light (absent on the host's console), before the
+    console's restart."""
+    from runtime import idle_ladder
+    from runtime import moy_loop as L
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    L.trace_init(30, False, 1000)
+    ws.idle_ladder = idle_ladder.IdleLadder(ws, L, 300)
+    ws.toggle_sysmenu()
+    drv.frame(1 / 30)
+    assert _labels(ws)[-2:] == ["SLEEP", "RESTART MOYBYTE"]
+    assert ws.sysmenu.items[-2][3] == "sleep"
+    blanked = []
+    ws.idle_ladder.loop = type("Loop", (), {"power": staticmethod(blanked.append)})
+    _tap(drv, *_row_center(ws, "SLEEP"))
+    assert not ws.sysmenu.open
+    assert blanked == [False]
 
 
 def test_an_own_cart_offers_delete_last_in_its_group(tmp_path):
@@ -220,8 +242,8 @@ def test_an_own_cart_offers_delete_last_in_its_group(tmp_path):
     _open_own_cart(ws, tmp_path)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
-    assert _labels(ws) == ["EXTRA", "RESTART CART", "DELETE CART",
-                           "SYSTEM", "SETTINGS", "ABOUT", "REBOOT"]
+    assert _labels(ws) == ["EXTRA", "DELETE CART",
+                           "SYSTEM", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
     head = ws.sysmenu.items[0]
     assert head[0] == "header" and head[4] == "Extra"     # the look's caption
 
@@ -234,7 +256,7 @@ def test_menu_omits_cart_group_when_no_cart(tmp_path):
     drv.frame(1 / 30)
     labels = _labels(ws)
     assert "CART" not in labels
-    assert "RESTART CART" not in labels and "DELETE CART" not in labels
+    assert "DELETE CART" not in labels
     # Over the home the selected card's group stands first, in an open
     # cart's place (R3-18): its title over its verbs. Then the system's
     # rows, SEARCH first, launcher-only (#105: over the run-grid it filters).
@@ -243,7 +265,7 @@ def test_menu_omits_cart_group_when_no_cart(tmp_path):
         {"favourite": "ADD FAVOURITE", "change": "CHANGE", "copy": "DUPLICATE",
          "delete": "DELETE"}[v] for v in ws.launcher_layer.card_verbs()]
         if sel and sel.get("path") else [])
-    assert labels == card + ["SYSTEM", "SEARCH", "SETTINGS", "ABOUT", "REBOOT"]
+    assert labels == card + ["SYSTEM", "SEARCH", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
 
 
 # -- dismissal ---------------------------------------------------------------
@@ -302,8 +324,6 @@ def test_keyboard_nav_skips_headers(tmp_path):
     _open_own_cart(ws, tmp_path)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
-    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "RESTART CART"
-    _key(drv, "down")
     assert ws.sysmenu.items[ws.sysmenu.sel][1] == "DELETE CART"
     _key(drv, "down")                          # skips the sep + the SYSTEM header
     assert ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS"
@@ -333,21 +353,6 @@ def test_about_action_opens_dismissible_modal(tmp_path):
     assert not ws._about
 
 
-def test_restart_cart_action_reruns_via_apply(tmp_path):
-    ws = _ws(tmp_path)
-    drv = _drv(ws)
-    _open_cart(ws)
-    # Spy on apply() (the existing restart flow).
-    calls = []
-    orig = ws.apply
-    ws.apply = lambda: (calls.append(1), orig())[1]
-    ws.toggle_sysmenu()
-    drv.frame(1 / 30)
-    _tap(drv, *_row_center(ws, "RESTART CART"))
-    assert calls == [1]
-    assert ws.screen == "desktop" and not ws.sysmenu.open
-
-
 def test_delete_cart_action_deletes_then_goes_home(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
@@ -369,7 +374,7 @@ def test_reboot_action_uses_hook_when_present(tmp_path):
     _open_cart(ws)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
-    _tap(drv, *_row_center(ws, "REBOOT"))
+    _tap(drv, *_row_center(ws, "RESTART MOYBYTE"))
     assert fired == ["reboot"]
     assert not ws.sysmenu.open
 
@@ -381,7 +386,7 @@ def test_reboot_action_safe_stub_without_hook(tmp_path):
     _open_cart(ws)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
-    _tap(drv, *_row_center(ws, "REBOOT"))      # no hook -> safe go_home stub
+    _tap(drv, *_row_center(ws, "RESTART MOYBYTE"))      # no hook -> safe go_home stub
     assert ws.screen == "launcher" and not ws.sysmenu.open
 
 

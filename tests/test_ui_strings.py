@@ -298,9 +298,9 @@ def test_the_py_sites_only_come_down():
 # language pack cannot reach.
 PY_FED_MOVED = {
     "runtime/console_notices.py": ["MOYBYTE UPDATED", "UPDATE UNDONE", '"now %s"',
-                                   '"still on %s"', '"CART"', "RESTART CART",
+                                   '"still on %s"', '"CART"', "RESTART MOYBYTE",
                                    "DELETE CART", '"SYSTEM"', "CLEAR SEARCH",
-                                   '"SEARCH"', '"SETTINGS"', '"ABOUT"', '"REBOOT"'],
+                                   '"SEARCH"', '"SETTINGS"', '"ABOUT"', '"SLEEP"'],
     "runtime/device_boot.py": ["IT CRASHED LAST TIME"],
     "runtime/cart_manager.py": ["the store is full"],
 }

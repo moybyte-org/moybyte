@@ -43,15 +43,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The 2026-10 look's words and icons for the system menu's rows, by string id
 # (docs/look_2026-10.md step 25a); a theme without a depth draws the kernel's
 # chrome menu in the string table's capitals.
-_LOOK_TEXT = {"menu.cart": "Cart", "menu.restart_cart": "Restart cart",
-              "menu.delete_cart": "Delete cart", "menu.favourite_add": "Add favourite",
+_LOOK_TEXT = {"menu.cart": "Cart", "menu.delete_cart": "Delete cart",
+              "menu.favourite_add": "Add favourite",
               "menu.favourite_remove": "Remove favourite", "menu.system": "System",
               "menu.clear_search": "Clear search", "menu.search": "Search",
-              "menu.settings": "Settings", "menu.about": "About", "menu.reboot": "Restart"}
-_LOOK_ICON = {"menu.restart_cart": "rotate", "menu.delete_cart": "trash",
+              "menu.settings": "Settings", "menu.about": "About", "menu.sleep": "Sleep",
+              "menu.reboot": "Restart Moybyte"}
+_LOOK_ICON = {"menu.delete_cart": "trash",
               "menu.favourite_add": "star", "menu.favourite_remove": "star_on",
               "menu.clear_search": "search", "menu.search": "search",
-              "menu.settings": "settings", "menu.about": "doc", "menu.reboot": "rotate"}
+              "menu.settings": "settings", "menu.about": "doc", "menu.sleep": "sleep",
+              "menu.reboot": "power"}
 # The selected card's verbs (LauncherHomeLayer.card_verbs) as menu rows:
 # (the chrome's label, icon, the look's text); the star's are the string ids'.
 _CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "dup", "Duplicate"),
@@ -412,22 +414,22 @@ class SystemMenuUI:
 
     def _sysmenu_items(self):
         """The rows for this open of the ≡ menu (see class note for the tuple form).
-        The cart group is OMITTED entirely (not greyed) when no cart is open."""
+        The cart group is OMITTED entirely (not greyed) when it has no row."""
         rows = []
         cart = self.ws.cart
         if cart is not None:
-            # headed by the cart's own title; Delete (to the Trash, never
-            # asked) last, and only for a cart the store can delete: a
-            # built-in is the console's, so it offers none
-            title = cart.get("title") or ""
-            head = _row("header", "menu.cart")
-            if title:
-                head = ("header", title.upper(), None, "", title)
-            rows.append(head)
-            rows.append(_row("item", "menu.restart_cart", self._menu_restart_cart))
+            # headed by the cart's own title over Delete (to the Trash, never
+            # asked), offered only for a cart the store can delete: a
+            # built-in is the console's, so it has no group. A run restarts
+            # from the pause menu.
             if self._deletable(cart):
+                title = cart.get("title") or ""
+                head = _row("header", "menu.cart")
+                if title:
+                    head = ("header", title.upper(), None, "", title)
+                rows.append(head)
                 rows.append(_row("item", "menu.delete_cart", self._menu_delete_cart))
-            rows.append(("sep",))
+                rows.append(("sep",))
         elif self.ws.screen == "launcher":
             # over the home, the selected card's group in the open cart's
             # place: its title over its verbs (`card_rows`)
@@ -445,6 +447,10 @@ class SystemMenuUI:
             rows.append(_row("item", sid, self.ws.toggle_search))
         rows.append(_row("item", "menu.settings", self.ws.open_settings))
         rows.append(_row("item", "menu.about", self._menu_about))
+        # Sleep where the board's idle ladder can blank its light (absent on
+        # a tier with none); restarting the console is last.
+        if getattr(self.ws, "idle_ladder", None) is not None:
+            rows.append(_row("item", "menu.sleep", self._menu_sleep))
         rows.append(_row("item", "menu.reboot", self._menu_reboot))
         return rows
 
@@ -507,12 +513,6 @@ class SystemMenuUI:
         return bool(path) and bool(getattr(self.ws, "can_manage", True)) \
             and _builtin_name(path) is None
 
-    def _menu_restart_cart(self):
-        # Re-run the open cart from its current config (TIC-80 restart), landing back
-        # on the running-cart screen -- exactly what GO/apply does.
-        if self.ws.cart is not None:
-            self.ws.apply()
-
     def _menu_delete_cart(self):
         # Delete the OPEN cart (carts.delete() with no cart targets ws.cart, which
         # need not be the home's selection), then go home.
@@ -527,6 +527,12 @@ class SystemMenuUI:
         # A tiny dismissible info modal (any tap / ESC / B closes it), drawn on top.
         self.ws._dirty = True
         self.ws._about = True
+
+    def _menu_sleep(self):
+        # The idle ladder's BLANK rung now: the light goes off and the next
+        # input wakes the screen (and is swallowed, as the ladder's own is).
+        self.ws.settings_layer.commit_name()   # a Name still being typed is kept
+        self.ws.idle_ladder.sleep()
 
     def _menu_reboot(self):
         # Device: the injected reboot hook (machine.reset). Host / no hook: a safe

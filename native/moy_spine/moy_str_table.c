@@ -5,7 +5,6 @@
 
 const char *const moy_str_ids[MOY_STRINGS] = {
     "menu.cart",
-    "menu.restart_cart",
     "menu.delete_cart",
     "menu.favourite_add",
     "menu.favourite_remove",
@@ -14,6 +13,7 @@ const char *const moy_str_ids[MOY_STRINGS] = {
     "menu.search",
     "menu.settings",
     "menu.about",
+    "menu.sleep",
     "menu.reboot",
     "notice.updated",
     "notice.now",
@@ -84,7 +84,6 @@ const char *const moy_str_ids[MOY_STRINGS] = {
 
 const char *const moy_str_en[MOY_STRINGS] = {
     "CART",
-    "RESTART CART",
     "DELETE CART",
     "ADD FAVOURITE",
     "REMOVE FAVOURITE",
@@ -93,7 +92,8 @@ const char *const moy_str_en[MOY_STRINGS] = {
     "SEARCH",
     "SETTINGS",
     "ABOUT",
-    "REBOOT",
+    "SLEEP",
+    "RESTART MOYBYTE",
     "MOYBYTE UPDATED",
     "now %s",
     "UPDATE UNDONE",
