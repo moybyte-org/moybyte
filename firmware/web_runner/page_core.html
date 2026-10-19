@@ -360,8 +360,11 @@ function up(e){if(!drag)return;drag=false;send({type:"up"});if(e)e.preventDefaul
 cv.addEventListener("pointerup",up);cv.addEventListener("pointercancel",up);
 var jE=document.getElementById("joy"),tE=document.getElementById("th"),jA=false,jP=null,
 jH={left:false,right:false,up:false,down:false};
+// The joystick and A/B are the page's gamepad: their holds name the `pad`
+// source (web_boot's WEB_INPUTS), so a tap on them makes the pad the input in
+// use and the hints draw its buttons, never the desk keyboard's.
 function jAp(d){["left","right","up","down"].forEach(function(n){var w=!!d[n];if(w!=jH[n]){jH[n]=w;
-send({type:"hold",name:n,down:w});}});}
+send({type:"hold",name:n,down:w,src:"pad"});}});}
 function jT(e){var r=jE.getBoundingClientRect(),cX=r.left+r.width/2,cY=r.top+r.height/2,
 dx=e.clientX-cX,dy=e.clientY-cY,rad=r.width/2,d=Math.sqrt(dx*dx+dy*dy);
 if(d>rad&&d>0){var s=rad/d;dx*=s;dy*=s;}tE.style.transform="translate("+dx+"px,"+dy+"px)";
@@ -373,8 +376,8 @@ function jEnd(e){if(!jA||(e&&e.pointerId!=jP))return;jA=false;jP=null;jAp({});
 tE.style.transform="translate(0,0)";if(e)e.preventDefault();}
 jE.addEventListener("pointerup",jEnd);jE.addEventListener("pointercancel",jEnd);
 function wb(id,nm){var el=document.getElementById(id),dn=false;
-function pr(e){if(dn)return;dn=true;el.classList.add("pr");send({type:"hold",name:nm,down:true});if(e)e.preventDefault();}
-function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold",name:nm,down:false});if(e)e.preventDefault();}
+function pr(e){if(dn)return;dn=true;el.classList.add("pr");send({type:"hold",name:nm,down:true,src:"pad"});if(e)e.preventDefault();}
+function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold",name:nm,down:false,src:"pad"});if(e)e.preventDefault();}
 el.addEventListener("pointerdown",function(e){el.setPointerCapture(e.pointerId);pr(e);});
 el.addEventListener("pointerup",rl);el.addEventListener("pointercancel",rl);el.addEventListener("pointerleave",rl);}
 wb("ba","a");wb("bb","b");

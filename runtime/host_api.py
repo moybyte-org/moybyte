@@ -199,12 +199,17 @@ class ConsoleDriver:
     def press(self, name):
         self._pending.append(name)
 
-    def hold(self, name, down):
+    def hold(self, name, down, source=None):
+        """Button `name` held or let go; `source` names the input source
+        that holds it (the page's gamepad is "pad"), else the table's own."""
         if down:
             self._held_ext.add(name)
         else:
             self._held_ext.discard(name)
-        self.input.set_held(name, down)
+        if source is None:
+            self.input.set_held(name, down)
+        else:
+            self.input.source(source).set_button(name, down)
 
     def type_char(self, code):
         # QUEUE, not last-wins (#42 Thread 2): the console consumes ONE last_key per

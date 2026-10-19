@@ -147,11 +147,12 @@ def _make_api(*a, **kw):
 
 
 # The inputs a page declares (Workstation.use_inputs): its keyboard, the
-# driver's "local" source, and on a coarse-pointer page (a phone, a tablet)
+# driver's "local" source; its on-screen gamepad, the "pad" source its holds
+# name (web_input.PAD_SOURCE); and on a coarse-pointer page (a phone, a tablet)
 # touch first, in use from boot, since a finger is what such a page is used
 # with; a fine pointer is a mouse, no finger, as on the host.
-WEB_INPUTS = (("local", "keys"),)
-WEB_TOUCH_INPUTS = (("touch", "touch"), ("local", "keys"))
+WEB_INPUTS = (("local", "keys"), (web_input.PAD_SOURCE, "pad"))
+WEB_TOUCH_INPUTS = (("touch", "touch"), ("local", "keys"), (web_input.PAD_SOURCE, "pad"))
 
 
 def boot(carts_root="/moy/carts", cart=None, width=320, height=240,

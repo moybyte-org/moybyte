@@ -25,6 +25,9 @@ except ImportError:  # pragma: no cover - wasm head (frozen as `input`)
 
 # The console's button set, as the wire names them.
 BUTTON_NAMES = InputState.BUTTONS
+# The input source a page's on-screen gamepad writes (a hold's "src"); every
+# other hold is the page keyboard's, the table's "local".
+PAD_SOURCE = "pad"
 
 
 def apply_ws_text(payload, apply):
@@ -54,6 +57,8 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
       {"type":"pan","dx":..,"dy":..} -> trackball nudge (on_pan)
       {"type":"press","name":..}     -> one-shot button press (on_press)
       {"type":"hold","name":..,"down":bool} -> held button (on_hold, else input.set_button)
+      {"type":"hold",...,"src":"pad"} -> the same from the page's gamepad,
+                                        written to the "pad" source
       {"type":"key","code":<ascii>}  -> typed key (on_key)
       {"type":"esc"}                 -> close panel (on_esc)
       {"type":"super"}               -> the system key (on_super): the system
@@ -93,10 +98,19 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                 if name in BUTTON_NAMES:
                     # Route to on_hold when wired (the device's keyboard.poll clears buttons,
                     # so a hold must be re-asserted AFTER the poll); else a direct set.
+                    # A hold from the page's gamepad names its source, so the pad,
+                    # not the keyboard, becomes the input in use.
+                    down = bool(ev.get("down"))
+                    src = PAD_SOURCE if ev.get("src") == PAD_SOURCE else None
                     if on_hold is not None:
-                        on_hold(name, bool(ev.get("down")))
+                        if src is None:
+                            on_hold(name, down)
+                        else:
+                            on_hold(name, down, src)
+                    elif src is not None and hasattr(input, "source"):
+                        input.source(src).set_button(name, down)
                     else:
-                        input.set_button(name, bool(ev.get("down")))
+                        input.set_button(name, down)
             elif t == "key":
                 code = ev.get("code")
                 if isinstance(code, int) and 0 <= code <= 0xFF and on_key is not None:

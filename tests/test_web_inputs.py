@@ -52,3 +52,46 @@ def test_a_fine_pointer_page_stays_on_its_keys(web_boot, tmp_path):
     ws.use_inputs(web_boot.WEB_INPUTS)
     web_boot._PointerSink(drv).click = True
     assert ui_draw.input_kind() == "keys", "a mouse is no finger"
+
+
+def _pad_hold(drv, name, down):
+    """One hold from the page's on-screen gamepad, through the decode the
+    worker runs (web_boot._apply's callbacks)."""
+    from runtime import web_input
+    web_input.apply_events([{"type": "hold", "name": name, "down": down, "src": "pad"}],
+                           drv.input, drv.pointer, on_hold=drv.hold)
+
+
+@pytest.mark.parametrize("coarse", [True, False])
+def test_the_pages_gamepad_is_the_pad_and_its_keys_stay_the_keyboards(web_boot, tmp_path,
+                                                                      coarse):
+    """A tap on the page's joystick or A/B (design review R3-17) makes the
+    gamepad the input in use, so the hints draw its buttons; a desk key after
+    it brings the keyboard's back. The pad's hold is its own source's, so the
+    button reads held through the table like any other."""
+    ws = build_ws(Path(tmp_path))
+    drv = make_drv(ws)
+    ws.use_inputs(web_boot.WEB_TOUCH_INPUTS if coarse else web_boot.WEB_INPUTS)
+    _pad_hold(drv, "a", True)
+    drv.frame(1 / 30)
+    assert ui_draw.input_kind() == "pad"
+    assert "a" in drv.input.held_names()
+    _pad_hold(drv, "a", False)
+    drv.frame(1 / 30)
+    assert "a" not in drv.input.held_names()
+    drv.press("down")
+    drv.frame(1 / 30)
+    assert ui_draw.input_kind() == "keys"
+
+
+def test_the_pages_joystick_and_buttons_send_the_pad_source():
+    """The page's joystick (jAp) and its A/B (wb) name the pad source on
+    every hold, down and up; the keyboard's holds name none."""
+    import re
+    page = Path(ROOT, "firmware", "web_runner", "page_core.html").read_text(encoding="utf-8")
+    jap = page[page.index("function jAp("):page.index("function jT(")]
+    wb = page[page.index("function wb("):page.index('wb("ba"')]
+    assert jap.count('src:"pad"') == 1 and 'type:"hold"' in jap
+    assert wb.count('src:"pad"') == 2, "the press and the release"
+    keys = page[page.index('cv.addEventListener("keydown"'):]
+    assert not re.search(r'type:"hold"[^}]*src:', keys), "a key is the keyboard's"
