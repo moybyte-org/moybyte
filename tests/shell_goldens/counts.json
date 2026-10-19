@@ -82,7 +82,7 @@
     "editor_scene": [116, 16],
     "launcher": [0, 0],
     "script_console": [18, 19],
-    "settings": [55, 24],
+    "settings": [51, 22],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -441,7 +441,7 @@
   },
   "tdeck_320x240_fs1_dark": {
     "app_appearance": [33, 20],
-    "app_appearance_name": [29, 22],
+    "app_appearance_name": [30, 22],
     "app_appearance_walls": [10, 7],
     "app_artwork": [314, 13],
     "app_calc": [24, 23],
@@ -476,7 +476,7 @@
   },
   "tdeck_320x240_fs1_light": {
     "app_appearance": [33, 20],
-    "app_appearance_name": [29, 22],
+    "app_appearance_name": [30, 22],
     "app_appearance_walls": [10, 7],
     "app_artwork": [314, 13],
     "app_calc": [24, 23],
