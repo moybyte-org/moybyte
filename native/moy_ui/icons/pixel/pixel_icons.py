@@ -125,6 +125,10 @@ def chev(pts):
     return [(("line", (pts, 3)), "dark", "flat")]
 
 
+def arrow(shaft, head):
+    return [(("line", (shaft, 3)), "dark", "flat"), (("line", (head, 3)), "dark", "flat")]
+
+
 def cart(label, extra=()):
     return [(("poly", [(2, 1), (11, 1), (13, 3), (13, 14), (2, 14)]), "grey"),
             (("rect", (4, 3, 8, 7)), label),
@@ -253,6 +257,10 @@ ICONS = {
     "mute": [(("poly", [(1, 5), (3, 5), (7, 1), (7, 14), (3, 10), (1, 10)]), "grey"),
              (("line", ([(10, 5), (14, 9)], 1)), "red", "flat"),
              (("line", ([(14, 5), (10, 9)], 1)), "red", "flat")],
+    "arrow_left": arrow([(13, 8), (3, 8)], [(8, 3), (3, 8), (8, 13)]),
+    "arrow_right": arrow([(2, 8), (12, 8)], [(7, 3), (12, 8), (7, 13)]),
+    "arrow_up": arrow([(8, 13), (8, 3)], [(3, 8), (8, 3), (13, 8)]),
+    "arrow_down": arrow([(8, 2), (8, 12)], [(3, 7), (8, 12), (13, 7)]),
 }
 
 

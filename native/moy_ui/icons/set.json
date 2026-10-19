@@ -37,63 +37,63 @@
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 2549,
+   "bytes": 2681,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 6398,
+   "bytes": 6766,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 9016,
+   "bytes": 9496,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 2667,
+   "bytes": 2799,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 6584,
+   "bytes": 6952,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 9026,
+   "bytes": 9506,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 2638,
+   "bytes": 2770,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 6488,
+   "bytes": 6856,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 9016,
+   "bytes": 9496,
    "layer": "ink",
    "set": "luna",
    "size": 24
@@ -194,7 +194,11 @@
   "cart_lua",
   "cart_wasm",
   "cart_p8",
-  "mute"
+  "mute",
+  "arrow_left",
+  "arrow_right",
+  "arrow_up",
+  "arrow_down"
  ],
  "tiers": {
   "desktop": [

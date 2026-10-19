@@ -343,6 +343,23 @@ def test_clear_wears_the_danger_buttons_ink_and_idle_copy_the_disabled(tmp_path,
     assert chrome.rgb565_of(ui_draw.disabled_ink(th)) in inks("copy")
 
 
+def test_the_shifts_are_the_sets_line_arrows(tmp_path):
+    """The four shift tools draw the icon set's line arrows, one family with
+    the row's other line icons, not the glyph table's small filled ones
+    (design review R2-16), in every smooth set and the pixel set."""
+    from runtime import iconsets, paint_layer as P
+    ws, _drv, _c = _look_tab(tmp_path)
+    cv = ws.sys_canvas
+    for tid in ("sleft", "sright", "sup", "sdown"):
+        slot = P._TOOL_ICON[tid]
+        assert slot in iconsets.SLOT and slot.startswith("arrow_"), tid
+        for name in ("default", "coast", "luna"):
+            assert iconsets.draw(cv, slot, (0, 0, 16, 16), 7, ("smooth", name, None)), \
+                (tid, name)
+        assert iconsets.pixel_image(slot) is not None, tid
+    iconsets.reset()
+
+
 @pytest.mark.parametrize("theme,variant", [("moy", "light"), ("moy", "dark"),
                                            ("blocks", "light"), ("contrast", "dark")])
 def test_the_caption_size_line_and_tool_rows_keep_their_room(tmp_path, theme, variant):

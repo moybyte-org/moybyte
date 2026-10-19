@@ -54,3 +54,7 @@
 53 cart_wasm
 54 cart_p8
 55 mute
+56 arrow_left
+57 arrow_right
+58 arrow_up
+59 arrow_down

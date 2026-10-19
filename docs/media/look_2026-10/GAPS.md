@@ -209,7 +209,7 @@ during motion; 32–75 KB of covers, which the Player's fit check must be
 able to release on the T-Deck.
 
 **18. Icon sets.** A theme's `icons` is `{kind, set}`; every set fills the
-same 56 slots (`native/moy_ui/icons/pixel/slots.txt`).
+same slots (`native/moy_ui/icons/pixel/slots.txt`).
 
 - **Pixel:** a 16×16 `IconSheet` (`native/moy_ui/icons/pixel/system_icons.moygfx`, drawn
   by `native/moy_ui/icons/pixel/pixel_icons.py`), editable in the sprite editor as today.

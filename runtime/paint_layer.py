@@ -125,12 +125,13 @@ _TOOL_GLYPH = {
 }
 # The 2026-10 look's icon for each tool: the icon set's slot where the sets
 # have one, else the glyph table's (`ui.icon`'s order). The four shifts are
-# the glyph table's arrows, one family (the sets have no up), and so not the
-# chevrons the column's previous and next sprite wear.
+# the sets' line arrows, so not the chevrons the column's previous and next
+# sprite wear.
 _TOOL_ICON = {
     "pen": "pencil", "fill": "bucket", "rect": "rect", "line": "line",
     "oval": "oval", "select": "select", "copy": "dup", "fliph": "flip",
-    "rot": "rotate", "clear": "del",
+    "rot": "rotate", "sleft": "arrow_left", "sright": "arrow_right",
+    "sup": "arrow_up", "sdown": "arrow_down", "clear": "del",
 }
 # The pickers' sizes, PaintEditor.SIZES's order.
 _SIZE_NAMES = ("1x1", "2x2", "3x3")

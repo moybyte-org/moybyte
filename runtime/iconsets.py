@@ -5,7 +5,7 @@ A theme's look sets `icons.kind` (`pixel` or `smooth`), `icons.set` and, for
 a pixel set, `icons.swap`. A theme that sets no kind draws the bar's own
 IconSheet (`ws.look.icon_sheet`, Settings -> EDIT ICONS), as it always has.
 
-* PIXEL: the 56-slot IconSheet tools/make_icons.py builds
+* PIXEL: the IconSheet tools/make_icons.py builds, a tile a slot
   (`system_icons.moygfx`, its clear pixel 16, so Moy's index-0 outline
   draws), at whole scales. `icons.swap` is 16 hex digits, digit i the index
   that index i draws as (Bench takes the blue ramp down a step).
@@ -41,6 +41,7 @@ SLOTS = (
     "rotate", "game", "app", "art", "wallpaper", "doc", "folder", "trash",
     "close", "minimize", "maximize", "back", "forward", "down", "new", "dup",
     "del", "enter", "backspace", "cart_py", "cart_lua", "cart_wasm", "cart_p8", "mute",
+    "arrow_left", "arrow_right", "arrow_up", "arrow_down",
 )
 SLOT = {n: i for i, n in enumerate(SLOTS)}
 # The shell's own icon kinds (chrome._ICON's) by the slot they draw.
@@ -53,7 +54,8 @@ SIZES = (24, 20, 16)          # the mask sizes, largest first
 KINDS = ("smooth", "pixel")
 DEFAULT_SET = "default"
 FILL_DEFAULT = "#7da7ea"
-PIXEL_COLS, PIXEL_ROWS = 8, 7
+PIXEL_COLS = 8
+PIXEL_ROWS = -(-len(SLOTS) // PIXEL_COLS)   # pixel_icons.moygfx's tile rows
 _NONE = -2147483648
 
 _FONTS = {}                   # mask file -> font id, 0 where it does not load

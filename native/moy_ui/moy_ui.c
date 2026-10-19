@@ -655,7 +655,7 @@ const uint8_t *moy_ui_moy(int *clear) {
 }
 
 // The slots, tools/make_icons.py's order (runtime/iconsets.py SLOTS;
-// tests/test_ui_icon_progress.py holds the two equal).
+// tests/test_ui_parts.py holds the two equal).
 static const char *const s_icon_slots[] = {
     "moy", "home", "wifi", "wifi_off", "battery", "search", "play", "projects",
     "paint", "storybook", "files", "calc", "getcarts", "settings", "music", "notes",
@@ -664,6 +664,7 @@ static const char *const s_icon_slots[] = {
     "rotate", "game", "app", "art", "wallpaper", "doc", "folder", "trash",
     "close", "minimize", "maximize", "back", "forward", "down", "new", "dup",
     "del", "enter", "backspace", "cart_py", "cart_lua", "cart_wasm", "cart_p8", "mute",
+    "arrow_left", "arrow_right", "arrow_up", "arrow_down",
 };
 #define ICON_SLOTS ((int)(sizeof(s_icon_slots) / sizeof(s_icon_slots[0])))
 // An alias and the slot it names, which is also the glyph table's name.

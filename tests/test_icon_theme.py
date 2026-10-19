@@ -484,7 +484,8 @@ def test_moy_draws_its_outline():
     assert img.transparent == 16
     assert img.pix.count(0) > 30                       # the outline and the face
     assert img.pix[0] == 16 and img.pix[3 + 16] == 0   # clear corner, outlined top
-    assert type(sheet).from_hex(src, 8, 7).to_hex() == src.rstrip("\n")
+    assert type(sheet).from_hex(src, iconsets.PIXEL_COLS,
+                                iconsets.PIXEL_ROWS).to_hex() == src.rstrip("\n")
 
 
 def test_the_sheet_loader_takes_the_clear_header():
