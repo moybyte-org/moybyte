@@ -38,7 +38,7 @@
   },
   "look": {
     "focus": { "style": "edge", "card": "lift", "small": "underline" },
-    "current": { "style": "plate" },
+    "current": { "style": "plate", "ink": "ink_accent" },
     "icons": { "kind": "smooth", "set": "default" },
     "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
                                "primary": { "font": "op" } } },

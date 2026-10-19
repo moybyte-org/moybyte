@@ -1711,7 +1711,7 @@ def focus_ring(cv, th, rect, fs=None):
 
 # The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
 _MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
-_MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_RING = 1, 2, 4, 32
+_MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_INK, _MARK_RING = 1, 2, 4, 8, 32
 
 
 def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False):
@@ -1736,6 +1736,15 @@ def current(cv, th, rect, r=0, back=False, side=False, fs=None):
     drawn by `row`, `cell`, `chip` or `tab` marks its `on` itself."""
     return _C.current(cv, _LOOK if th is _TH else _look(th), rect, r,
                       (_MARK_BACK if back else 0) | (_MARK_SIDE if side else 0), fs)
+
+
+def current_ink(cv, th, back=False):
+    """The ink the current content takes under the theme's current mark, as
+    `current` answers it, without drawing the mark (a caller that draws its
+    own, the desk bar's chips): the look's `current.ink`, a fill's selection
+    ink, or None for its own."""
+    return _C.current(cv, _LOOK if th is _TH else _look(th), (0, 0, 0, 0), 0,
+                      _MARK_INK | (_MARK_BACK if back else 0), None)
 
 
 def marks(active=None, reset=False):

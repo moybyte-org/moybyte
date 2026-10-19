@@ -2844,6 +2844,15 @@ static int plate_reads(const char *name, size_t n, int variant, const int32_t *r
             int32_t lp = lum565(p), la2 = moy_theme_lum_of(edge);
             int32_t hi = lp > la2 ? lp : la2, lo = lp > la2 ? la2 : lp;
             ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
+            // and the ink the current content takes on it (`current.ink`)
+            int li = look_leaf("current.ink");
+            int32_t ci = li >= 0 ? lk->v[li] : -1;
+            if (ok && ci >= 0 && ci < MOY_THEME_ROLES && row[ci] >= 0) {
+                int32_t lq = moy_theme_lum_of(row[ci]);
+                hi = lp > lq ? lp : lq;
+                lo = lp > lq ? lq : lp;
+                ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
+            }
         }
     }
     free(lk);

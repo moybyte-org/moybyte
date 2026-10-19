@@ -125,6 +125,10 @@ static void marks_of(moy_ui_marks_t *m, const moy_theme_look_t *lk, int light) {
     m->cur_color = num(leaf(lk, "current.color"), MOY_UI_T_VALUE);
     m->cur_alpha = alpha_of(lk, "current.alpha", light ? 14 : 24);
     m->cur_row = (uint8_t)num(leaf(lk, "current.row"), MOY_UI_CUR_ROW_PLATE);
+    m->cur_ink = num(leaf(lk, "current.ink"), -1);
+    if (m->cur_ink >= MOY_UI_TOKENS) {
+        m->cur_ink = -1;
+    }
     m->sel_back = leaf(lk, "sel_back");
     if (m->color < 0 || m->color >= MOY_UI_TOKENS) {
         m->color = MOY_UI_T_ACCENT;
@@ -877,12 +881,18 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, 
         return MOY_UI_OK;
     }
     int back = (flags & MOY_UI_MARK_BACK) != 0;
+    // the current content's second cue beside the mark (`current.ink`), the
+    // fill's selection ink under its own
+    int own = m->cur_ink >= 0 ? moy_ui_token(d.look, m->cur_ink) : -1;
     if (flags & MOY_UI_MARK_INK) {
         if (m->cur_style == MOY_UI_CUR_FILL && !back) {
             *ink = moy_ui_token(d.look, MOY_UI_T_SELECTION_INK);
+        } else {
+            *ink = own;
         }
         return MOY_UI_OK;
     }
+    *ink = own;
     fs = fs < 1 ? 1 : fs;
     switch (m->cur_style) {
         case MOY_UI_CUR_PLATE:

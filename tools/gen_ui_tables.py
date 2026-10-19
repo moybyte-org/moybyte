@@ -692,9 +692,10 @@ def _look_fields(lk, roles=()):
             d = 0 if len(a) < 2 else a[1]
             return [(path, "enum", a[0], None, d)]
         if t == "role":
-            if a[0] not in roles:
-                raise SystemExit("theme.look: %s's default %r is no role" % (path, a[0]))
-            return [(path, "enum", list(roles), None, a[0])]
+            d = a[0] if a else None
+            if d is not None and d not in roles:
+                raise SystemExit("theme.look: %s's default %r is no role" % (path, d))
+            return [(path, "enum", list(roles), None, d)]
         if t == "int":
             return [(path, "int", a[0], a[1], a[2] if len(a) > 2 else None)]
         if t == "num":

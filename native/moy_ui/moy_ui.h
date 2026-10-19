@@ -402,6 +402,7 @@ typedef struct {
     uint8_t style[3];               // per class: PART, CARD, SMALL
     uint8_t ring_alpha, plate_alpha, rim_alpha, cur_alpha, cur_style, outline_w, cur_row;
     int16_t color, cur_color;       // tokens
+    int16_t cur_ink;                // the token the current content takes (-1: its own)
     int16_t ring_w, ring_gap, grow, rise, edge_w, underline_w;
     int32_t outline_c, rim_c, sel_back;     // look colours
     uint32_t drawn;

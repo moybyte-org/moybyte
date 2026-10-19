@@ -1144,6 +1144,7 @@
         ["win.rule", "int", 0, 8, 1], ["win.icon", "bool", true],
         ["current.style", "enum", ["bar", "plate", "fill"]], ["current.color", "role", "value"],
         ["current.alpha", "num", 0, 1, [0.14, 0.24]], ["current.row", "enum", ["plate", "outline"]],
+        ["current.ink", "role"],
         ["sel_back", "colour"],
         ["disabled", "colour"],
         ["bar.edge", "enum", ["top", "bottom"]], ["bar.h", "int", 16, 64, 40],

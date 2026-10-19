@@ -52,6 +52,9 @@ N_PMEM = 11
 BITS = {"left": 1, "right": 2, "up": 4, "down": 8, "a": 16, "b": 32, "run": 64}
 
 _THEMES = {}
+# The seeds' theme-modes.
+_FIVE = (("moy", "light"), ("moy", "dark"), ("blocks", "light"), ("contrast", "light"),
+         ("contrast", "dark"))
 
 
 def _theme(name, variant):
@@ -300,6 +303,30 @@ def test_the_current_swatchs_ring_stands_clear_of_its_neighbours():
             xx += step
             clear += 1
         assert clear >= 3, (step, clear)
+
+
+@pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
+def test_the_current_marks_content_takes_an_ink_that_reads_on_it(theme):
+    """Where a look gives the current content an ink of its own
+    (`current.ink`, the second cue beside a soft plate: Moy's plate alone is
+    1.15 to 1.32:1 on its ground), the mark answers it in front and in a
+    window behind, and it holds the theme floor's 3:1 on the plate as drawn
+    (theme.contrast; the plate's readability bit holds it too). Moy gives
+    it one."""
+    th = _theme(*theme)
+    cv = make_system_canvas(40, 20)
+    cv.rect(0, 0, 40, 20, th["surface"])
+    ink = ui_draw.current(cv, th, (2, 2, 36, 16))
+    if ink is None:
+        assert theme[0] != "moy", "Moy's current names an ink"
+        return
+    assert ink != th["ink"]
+    assert ui_draw.current(cv, th, (2, 2, 36, 16), back=True) == ink
+    assert ui_draw.current_ink(cv, th) == ink
+    px = lambda x, y: cv._buf[2 * (y * 40 + x)] << 8 | cv._buf[2 * (y * 40 + x) + 1]  # noqa
+    plate = px(20, 10)
+    cv.rect(0, 0, 2, 2, ink)
+    assert _ratio(px(0, 0), plate) >= 3.0, (theme, round(_ratio(px(0, 0), plate), 2))
 
 
 def test_toggle_draws_its_word_and_flips():
@@ -622,10 +649,6 @@ def _hint_shape(desk, theme, items):
     rows = lambda v: max(v) - min(v) + 1  # noqa: E731
     return (cap, rows([y for _x, y in inner]), rows([xx for xx, _y in inner]),
             rows(word))
-
-
-_FIVE = (("moy", "light"), ("moy", "dark"), ("blocks", "light"), ("contrast", "light"),
-         ("contrast", "dark"))
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
