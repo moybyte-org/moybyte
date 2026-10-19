@@ -94,6 +94,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # is icon-only with 2px gaps and a 9px group gap.
 _ZONE_UNDO = "\x00undo"          # sentinel: UNDO icon -> ws.history.undo() (#88)
 _ZONE_REDO = "\x00redo"          # sentinel: REDO icon -> ws.history.redo() (#88)
+_ZONE_STOP = "\x00stop"          # sentinel: Stop, while a playtest runs (D-23)
+_ZONE_RESTART = "\x00restart"    # sentinel: Restart, beside it
 _ZONE_TABS = (
     ("cards", "edit"),
     ("blocks", "blocks"),
@@ -412,7 +414,7 @@ class EditorApp:
 
     # -- PLAY: commit the tab, then run the cart (spec Section 2/Section 6) ---------
 
-    def leave(self):
+    def leave(self, restart=False):
         """PLAY (spec Section 6): leave the current tab by RUNNING the cart. Commits/
         applies the tab's freshest edit, (re)starts the cart, and hands it to the
         Player -- recording SELF (the Editor) as the run caller (Stage 3b), so the
@@ -466,6 +468,9 @@ class EditorApp:
             # start so a crash doesn't overwrite config with a half-applied edit.
             if ws.cart is not None and ws._start():
                 ws._save_config()
+        if restart and self.tab not in ("code", "blocks", "scene", "cards") \
+                and ws.cart is not None:
+            ws._start()              # Restart: from the start, whatever the tab
         ws.run(ws.project, self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
@@ -523,7 +528,11 @@ class EditorApp:
                 (ux, uy, ic, _h), (rx, ry, _w, _h2) = hist
                 self._draw_history_icon(cv, "undo", ux, uy, ic, ws.history.can_undo())
                 self._draw_history_icon(cv, "redo", rx, ry, ic, ws.history.can_redo())
-            if sets:
+            if self.playing():
+                restart_r, stop_r = self._run_rects(play_r)
+                self._bare_action(cv, restart_r, "Restart", "rotate")
+                self._bare_action(cv, stop_r, "Stop", None)
+            elif sets:
                 self._bare_play(cv, play_r)
             else:
                 _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
@@ -627,6 +636,34 @@ class EditorApp:
         self._draw_play(cv, (x, r[1] + (r[3] - box) // 2, box, box), ink)
         line = _ui_draw.font("ui")[2] * fs
         cv.print("Play", x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
+
+    def _run_rects(self, play_r):
+        """Restart's and Stop's rects in Play's place while a playtest runs,
+        Stop at the zone's right end."""
+        fs = self._zone_scale()
+        w = play_r[2] // 2
+        return ((play_r[0], play_r[1], w, play_r[3]),
+                (play_r[0] + w, play_r[1], play_r[2] - w, play_r[3]))
+
+    def _bare_action(self, cv, r, word, slot):
+        """Restart or Stop on the shelf, as Play is drawn: the glyph and the
+        word in `value` with no plate, at the right of `r`. Stop's glyph is a
+        square, ■ (no set draws one)."""
+        ws = self.ws
+        ink = ws.theme_colors["value"]
+        fs = self._zone_scale()
+        box = _BAR_ICON * fs
+        gap = 4 * fs
+        tw = _ui_draw.print_width(word, fs)
+        x = r[0] + r[2] - box - gap - tw - 4 * fs
+        y = r[1] + (r[3] - box) // 2
+        if slot is None:
+            m = 4 * fs
+            cv.rect(x + m, y + m, box - 2 * m, box - 2 * m, ink)
+        elif not ws.draw_icon(slot, (x, y, box, box), ink, cv):
+            ws._glyph(slot, (x, y, box, box), ink, cv)
+        line = _ui_draw.font("ui")[2] * fs
+        cv.print(word, x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
 
     def _compact(self, rect):
         """Whether the zone takes the narrow bar: the labeled row drops a tab."""
@@ -807,7 +844,7 @@ class EditorApp:
         R3-10); one after the bar's own widgets stands a gap past them."""
         fs = self._zone_scale()
         gap = 4 * fs
-        play_r, rest = _ui.cut_right(rect, 54 * fs)
+        play_r, rest = _ui.cut_right(rect, (150 if self.playing() else 54) * fs)
         _pad, rest = _ui.cut_right(rest, gap)
         left = rest[0] + gap
         ins = _CODE_INSET * fs
@@ -827,6 +864,10 @@ class EditorApp:
         if not self._compact(rect):
             tabs_area, play_r = self._zone_parts(rect)
             if _in(px, py, play_r):
+                if self.playing():
+                    restart_r, _stop = self._run_rects(play_r)
+                    return self._activate_zone_tab(
+                        _ZONE_RESTART if _in(px, py, restart_r) else _ZONE_STOP)
                 return self._activate_zone_tab(None)
             rects = self._shelf_rects(tabs_area)
             for tid, r, _labels_on in rects:
@@ -876,6 +917,10 @@ class EditorApp:
             ws.history.undo()
         elif tab == _ZONE_REDO:   # REDO (#88)
             ws.history.redo()
+        elif tab == _ZONE_STOP:   # Stop: the playtest's window closes (D-23)
+            ws.wm.close_player()
+        elif tab == _ZONE_RESTART:
+            ws.defer(self.restart)
         else:                     # PLAY (tab is None)
             # #184: deferred -- the hard-commit (#154, seconds on a dirty
             # asset tab) + compile + exec + first-world build run behind the
@@ -883,6 +928,18 @@ class EditorApp:
             # that asked for them.
             ws.defer(ws._leave_menu)
         return True
+
+    def playing(self):
+        """Whether a playtest runs in its own window beside the Editor (the
+        desk): Play then reads Stop, with Restart beside it (D-23)."""
+        wm = self.ws.wm
+        return bool(getattr(wm, "desk_open", lambda: False)()
+                    and "desktop" in getattr(wm, "_wins", {}))
+
+    def restart(self):
+        """Restart: the playtest runs again from its start, with the tab's
+        freshest edit (`leave`, which re-starts the cart)."""
+        self.leave(restart=True)
 
     def _tab_is_clean(self, tab):
         """True when `tab` PROVABLY has nothing to persist, so save_tab can

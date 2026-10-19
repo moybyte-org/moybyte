@@ -3044,7 +3044,28 @@ def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
     ws.look.set_theme("moy", persist=False, variant="light")
     drv.frame(1 / 30)
     labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
-    assert "Editor".startswith(labels["menu"]) and labels["desktop"] == "Play"
+    assert "Editor".startswith(labels["menu"])
+    assert cart.startswith(labels["desktop"])      # the playtest's chip names the cart (D-23)
+
+
+def test_while_a_playtest_runs_play_reads_stop_and_restart(tmp_path):
+    """D-23 (2026-10-19): with the playtest's window open, the Editor's Play
+    is Restart and Stop; Stop closes the window, and Play is back."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _open_editor(ws)
+    drv.frame(1 / 30)
+    app = ws.editor_app
+    assert not app.playing()
+    ws._leave_menu()
+    drv.frame(1 / 30)
+    assert app.playing()
+    zone = ws.bar_layer._zone_rect("menu")
+    tabs_area, play_r = app._zone_parts(zone)
+    restart_r, stop_r = app._run_rects(play_r)
+    assert app.zone_tap(stop_r[0] + stop_r[2] // 2, stop_r[1] + stop_r[3] // 2, zone)
+    drv.frame(1 / 30)
+    assert "desktop" not in ws.wm._wins and not app.playing()
 
 
 # -- the desk and windows (docs/look_2026-10.md step 25) ----------------------

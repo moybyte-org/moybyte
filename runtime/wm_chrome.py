@@ -297,12 +297,16 @@ class WindowChrome:
 
     def _chip_title(self, win, looked):
         """A window's chip label: its title, or under the 2026-10 look the app
-        alone where the title names the app and a cart ("Editor")."""
+        alone where the title names the app and a cart ("Editor"), and a
+        playtest's the cart alone ("Star Catcher", D-23), never a second
+        "Play" beside the Editor's."""
         t = self._win_title(win)
         if looked:
             for sep in (_SEP_DOT, _SEP_ASCII):
                 at = t.find(sep)
-                if at > 0 and win.kind in ("menu", "desktop"):
+                if at > 0 and win.kind == "desktop":
+                    return t[at + len(sep):]      # a playtest's chip names the cart
+                if at > 0 and win.kind == "menu":
                     return t[:at]
         return t
 

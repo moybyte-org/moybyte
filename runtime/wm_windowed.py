@@ -841,6 +841,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             for g in keys:
                 if g not in order:
                     order.append(g)
+            if ("desktop" in self._kinds) != ("desktop" in alive):
+                # the Editor's Play reads Stop while a playtest runs (D-23)
+                bar = getattr(self.ws, "bar_layer", None)
+                if bar is not None:
+                    bar.invalidate()
             self._kinds = keys
             self._order = order
             # The focus after a stack change: the kind a navigation brought
