@@ -321,6 +321,39 @@ static void arrow_sign(pd_t *d, int x, int y, int w, int h, int dir, uint16_t c)
     d->row->st[MOY_ST_N_FILL]++;
 }
 
+// The T-Deck's trackball rolled left and right in the cap box: a ball
+// between a head pointing left and one pointing right.
+static void ball_sign(pd_t *d, int x, int y, int w, int h, uint16_t c) {
+    int k = d->fs, n = h / k;
+    int dia = (n * 5 / 15) | 1, hd = n >= 15 ? 3 : n >= 11 ? 2 : 1, total = 2 * hd + 2 + dia;
+    int x0 = x + (w - total * k) / 2, mid = y + (h - k) / 2;
+    for (int i = 0; i < hd; i++) {
+        int rl = hd - 1 - i;          // the left head's tip is its first column
+        moy_target_fill(&d->t, x0 + i * k, mid - i * k, k, (2 * i + 1) * k, c);
+        moy_target_fill(&d->t, x0 + (hd + 2 + dia + i) * k, mid - rl * k, k, (2 * rl + 1) * k, c);
+    }
+    int bx = x0 + (hd + 1) * k, by = mid + k / 2 - dia * k / 2;
+    rrect(d, bx, by, dia * k, dia * k, dia * k / 2, 1, c, 0, 0);
+    d->row->st[MOY_ST_N_FILL]++;
+}
+
+// A gamepad's d-pad pressed left or right in the cap box: its cross, the
+// left and right arms solid, the up and down ones outlined.
+static void dpad_sign(pd_t *d, int x, int y, int w, int h, uint16_t c) {
+    int k = d->fs, n = h / k;
+    int arm = (n * 3 / 15) | 1, reach = n * 4 / 15, size = 2 * reach + arm;
+    int x0 = x + (w - size * k) / 2, y0 = y + (h - size * k) / 2;
+    moy_target_fill(&d->t, x0, y0 + reach * k, size * k, arm * k, c);
+    int ax = x0 + reach * k, aw = arm * k, ah = reach * k + k;
+    for (int s = 0; s < 2; s++) {
+        int ay = s ? y0 + (reach + arm - 1) * k : y0;
+        moy_target_fill(&d->t, ax, ay, k, ah, c);
+        moy_target_fill(&d->t, ax + aw - k, ay, k, ah, c);
+        moy_target_fill(&d->t, ax, s ? ay + ah - k : ay, aw, k, c);
+    }
+    d->row->st[MOY_ST_N_FILL]++;
+}
+
 // -- the current mark on an option -------------------------------------------------------
 
 // The current mark on box b (radius r): the theme's (`side` MOY_UI_MARK_SIDE on
@@ -1220,13 +1253,13 @@ static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", 
 
 // The keys each input does each action with. The T-Deck's are its keyboard's
 // (native/moy_input/moy_kbd.c): Enter is `run`, K is `b` (back, as the bar's
-// chevron is), the trackball and A/D steer, Q and E are the home's tab keys
-// and Mic is `start`. A gamepad's are its face buttons, its d-pad, its
-// shoulders and Start. Touch has none.
+// chevron is), the trackball steers (`ball_lr`, its sign), Q and E are the
+// home's tab keys and Mic is `start`. A gamepad's are its face buttons, its
+// d-pad (`dpad_lr`), its shoulders and Start. Touch has none.
 static const char *const ACT_KEYS[MOY_UI_INPUTS][MOY_UI_ACTS] = {
     {"enter", "Esc", "left right", "Q E", "Super"},
-    {"enter", "K", "left right", "Q E", "Mic"},
-    {"A", "B", "left right", "L R", "Start"},
+    {"enter", "K", "ball_lr", "Q E", "Mic"},
+    {"A", "B", "dpad_lr", "L R", "Start"},
     {"", "", "", "", ""},
 };
 
@@ -1250,9 +1283,14 @@ const char *moy_ui_hint_keys(int input, int act) {
     return ACT_KEYS[input][act];
 }
 
+// The keys a cap draws as a sign: the arrows, enter, the trackball rolled
+// and the d-pad pressed left or right.
+enum { SIGN_ENTER = 4, SIGN_BALL_LR = 5, SIGN_DPAD_LR = 6, SIGNS = 7 };
+
 static int key_sign(moy_ui_span_t k) {
-    static const char *const names[] = {"left", "right", "up", "down", "enter"};
-    for (int i = 0; i < 5; i++) {
+    static const char *const names[SIGNS] = {"left", "right", "up", "down", "enter",
+                                             "ball_lr", "dpad_lr"};
+    for (int i = 0; i < SIGNS; i++) {
         if (span_is(k, names[i])) {
             return i;
         }
@@ -1335,7 +1373,7 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                     int lw = sign >= 0 ? 0 : tw(&fk, k.p, k.n, sc);
                     // a sign's cap and a one-glyph legend's are square, a
                     // word's grows with it; the enter sign's is a little wider
-                    int w = sign == 4 ? kh + 3 * d.fs
+                    int w = sign == SIGN_ENTER ? kh + 3 * d.fs
                             : sign >= 0 || (one_glyph(k) && lw + 4 * d.fs <= kh)
                                 ? kh
                                 : lw + (d.desk ? 10 : 8) * d.fs;
@@ -1353,8 +1391,12 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                     }
                     if (!draw) {
                         // measured only
-                    } else if (sign == 4) {
+                    } else if (sign == SIGN_ENTER) {
                         enter_sign(&d, x, y, w, kh, capi);
+                    } else if (sign == SIGN_BALL_LR) {
+                        ball_sign(&d, x, y, w, kh, capi);
+                    } else if (sign == SIGN_DPAD_LR) {
+                        dpad_sign(&d, x, y, w, kh, capi);
                     } else if (sign >= 0) {
                         arrow_sign(&d, x, y, w, kh, sign, capi);
                     } else {

@@ -736,6 +736,35 @@ def test_a_keycaps_legend_is_no_size_under_its_word(desk, theme):
     assert 2 * arrow >= cap - 4, (arrow, cap)
 
 
+def _hint_band(theme, kind, items):
+    """The width of one hint pair drawn under input `kind`, and its pixels."""
+    th = _surface_theme(False, *theme)
+    cv = make_system_canvas(400, 40)
+    cv.rect(0, 0, 400, 40, th["panel"])
+    was = ui_draw.input_kind()
+    ui_draw.input_kind(kind)
+    try:
+        (x0, x1), = ui_draw.hints(cv, th, (0, 0, 400, 40), items)
+    finally:
+        ui_draw.input_kind(was)
+    return x1 - x0, bytes(cv._buf)
+
+
+@pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
+def test_the_change_legend_draws_each_inputs_own_sign(theme):
+    """`change` is a keyboard's two arrow keys, the T-Deck's trackball and
+    a gamepad's d-pad: one square cap each for the last two (as wide as one
+    arrow's), each its own sign (the T-Deck and a pad drew a keyboard's
+    arrows)."""
+    keys, kpx = _hint_band(theme, "keys", ("change", "Change"))
+    one, _px = _hint_band(theme, "keys", ("left", "Change"))
+    tdeck, tpx = _hint_band(theme, "tdeck", ("change", "Change"))
+    pad, ppx = _hint_band(theme, "pad", ("change", "Change"))
+    assert keys > one, "a keyboard's two arrow caps"
+    assert tdeck == one and pad == one, "one cap: the trackball's, the d-pad's"
+    assert len({kpx, tpx, ppx}) == 3, "each input draws its own"
+
+
 def test_hints_take_the_pages_foot_and_rows_stop_above_them():
     def draw():
         ui.page("")
