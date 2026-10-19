@@ -363,6 +363,22 @@ def test_the_shifts_are_the_sets_line_arrows(tmp_path):
     iconsets.reset()
 
 
+def test_erase_mirror_and_the_vertical_flip_are_the_sets_line_art(tmp_path):
+    """Erase, mirror and the vertical flip draw the icon sets' line art,
+    not the glyph table's filled pixel shapes (design review R3-11), in
+    every smooth set and the pixel set."""
+    from runtime import iconsets, paint_layer as P
+    ws, _drv, _c = _look_tab(tmp_path)
+    cv = ws.sys_canvas
+    for tid, slot in (("erase", "eraser"), ("mirror", "mirror"), ("flipv", "flip_v")):
+        assert P._TOOL_ICON.get(tid) == slot and slot in iconsets.SLOT, tid
+        for name in ("default", "coast", "luna"):
+            assert iconsets.draw(cv, slot, (0, 0, 16, 16), 7, ("smooth", name, None)), \
+                (tid, name)
+        assert iconsets.pixel_image(slot) is not None, tid
+    iconsets.reset()
+
+
 def test_previous_and_next_sprite_are_the_sets_chevrons(tmp_path):
     """The sprite steppers wear the icon set's chevrons, centred on their
     buttons, not the font's "<" and ">" (design review R2-19)."""

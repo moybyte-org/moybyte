@@ -123,16 +123,17 @@ _TOOL_GLYPH = {
     "sleft": "arr_l", "sright": "arr_r", "sup": "arr_u", "sdown": "arr_d",
     "clear": "clear",
 }
-# The 2026-10 look's icon for each tool: the icon set's slot named here, else
-# the set's slot of the tool's glyph name (`_TOOL_GLYPH`) where a set draws
-# one, else the glyph table's (`ui.icon`'s order). The four shifts are the
-# sets' line arrows, so not the chevrons the column's previous and next
-# sprite wear.
+# The 2026-10 look's icon for each tool: the icon set's slot where the sets
+# have one, else the glyph table's (`ui.icon`'s order). The four shifts are
+# the sets' line arrows, so not the chevrons the column's previous and next
+# sprite wear; erase, mirror and the vertical flip are the sets' line art
+# (design review R3-11), the horizontal flip keeps the set's half-filled one.
 _TOOL_ICON = {
     "pen": "pencil", "fill": "bucket", "rect": "rect", "line": "line",
-    "oval": "oval", "select": "select", "copy": "dup", "fliph": "flip",
-    "rot": "rotate", "sleft": "arrow_left", "sright": "arrow_right",
-    "sup": "arrow_up", "sdown": "arrow_down", "clear": "del",
+    "oval": "oval", "select": "select", "copy": "dup", "erase": "eraser",
+    "mirror": "mirror", "fliph": "flip", "flipv": "flip_v", "rot": "rotate",
+    "sleft": "arrow_left", "sright": "arrow_right", "sup": "arrow_up",
+    "sdown": "arrow_down", "clear": "del",
 }
 # The pickers' sizes, PaintEditor.SIZES's order.
 _SIZE_NAMES = ("1x1", "2x2", "3x3")
@@ -1088,8 +1089,7 @@ class PaintLayer:
                 ink = _ui_draw.disabled_ink(th)
             box = min(lay.icon, w, plate[3])
             rect = (x + (w - box) // 2, y + (plate[3] - box) // 2, box, box)
-            glyph = _TOOL_GLYPH[tid]
-            self._icon_draw((_TOOL_ICON.get(tid, glyph), glyph), rect, ink, cv)
+            self._icon_draw((_TOOL_ICON.get(tid), _TOOL_GLYPH[tid]), rect, ink, cv)
 
     def _open_pickers(self):
         if self._host is None:
