@@ -413,7 +413,8 @@ def menu(label, items, icons=(), o=None, kinds=()):
     its place ("" plain): a "danger" row, a verb that destroys, draws its
     label and icon in the danger buttons' ink. The item activated this frame
     (from 0), -1 none; an item's id is its text, and its text after a tab
-    is the key it answers to, drawn at the row's right."""
+    is the key it answers to, drawn at the row's right (a key `hints` draws
+    as a sign -- left, right, up, down, enter -- as that sign)."""
     t = _T
     danger = 0
     for i in range(min(len(kinds), 32)):
