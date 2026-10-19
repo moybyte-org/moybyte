@@ -40,7 +40,12 @@ def _check(log):
 
 
 def test_the_host_binding_writes_the_python_layers_bytes(tmp_path):
+    """The store starts as a board's does: its root the only publish root.
+    The host library is one per process, and moy_fs keeps the MOY_FS_ROOTS
+    longest roots, so a session's earlier stores with longer tmp paths would
+    leave this one unregistered and its publish marker unwritten."""
     import moy_ufiles_binding
+    moy_ufiles_binding.library().moy_fs_roots_clear()
     uf = moy_ufiles_binding.binding()
     uf.clock_fix(TS)
     try:
