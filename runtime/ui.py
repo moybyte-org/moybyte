@@ -422,7 +422,8 @@ def menu(label, items, icons=(), o=None, kinds=()):
     place in `icons` ("" none) before it. Stacked on the page (in a popover,
     its card), or from `at`'s rect's top left. `kinds` names a row's kind at
     its place ("" plain): a "danger" row, a verb that destroys, draws its
-    label and icon in the danger buttons' ink. The item activated this frame
+    label and icon in the theme's menu danger ink (its look's `danger_ink`,
+    else the danger buttons' ink). The item activated this frame
     (from 0), -1 none; an item's id is its text, and its text after a tab
     is the key it answers to, drawn at the row's right (a key `hints` draws
     as a sign -- left, right, up, down, enter -- as that sign)."""

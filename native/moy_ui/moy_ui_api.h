@@ -298,7 +298,8 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
 // label. An item's id is its text. Stacked on the page, or from ui.at's
 // rect's top left across its width. Answers the item activated this frame
 // (from 0), -1 none. The rows moy_ui_api_menu_danger named last are danger
-// rows: their label and icon in the danger buttons' ink.
+// rows: their label and icon in the theme's menu danger ink (its look's
+// `danger_ink`), else the danger buttons' ink.
 int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                         const uint8_t *items, size_t len, const uint8_t *icons, size_t ilen,
                         const moy_ui_over_t *o);

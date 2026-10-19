@@ -53,6 +53,12 @@ int moy_ui_colors(int look, int kind, int state, int16_t out[3]);
 // -- below the ink and its dim, about 3:1 on the surface. Set with the theme.
 void moy_ui_set_disabled(int32_t v);
 int moy_ui_disabled(void);
+// The live theme's menu danger ink: its look's `danger_ink` leaf as placed (a
+// colour index; none, absent or off: -1), the ink a menu's danger row draws
+// its label and icon in -- held to text's contrast on the card. Where it
+// names none, a danger row takes the danger buttons' ink. Set with the theme.
+void moy_ui_set_danger_ink(int32_t v);
+int moy_ui_danger_ink(void);
 // A kind's own states (rest, hover, hot) whose (field, ink) misses the
 // contrast floor take its floor forms (style.json's "floors"), in order.
 
@@ -735,7 +741,7 @@ typedef struct {
     int16_t icon_slot, icon_glyph;  // the icon before the label (-1 none)
     int16_t steps;                  // slider: a segment per step, no number
     int16_t kind;                   // MOY_UI_VROW_*: a danger row inks its label and icon
-                                    // in the danger buttons' ink
+                                    // in the menu danger ink
     int16_t first;                  // the first row on its card (under the card's top frame)
     int16_t keys;                   // info: the value is the keys the row answers to, and
                                     // one the hints draw as a sign (`left`, `right`, `up`,

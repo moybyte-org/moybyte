@@ -1146,7 +1146,7 @@
         ["current.alpha", "num", 0, 1, [0.14, 0.24]], ["current.row", "enum", ["plate", "outline", "underline"]],
         ["current.ink", "role"],
         ["sel_back", "colour"],
-        ["disabled", "colour"],
+        ["disabled", "colour"], ["danger_ink", "colour"],
         ["bar.edge", "enum", ["top", "bottom"]], ["bar.h", "int", 16, 64, 40],
         ["bar.style", "enum", ["flat", "grad", "glass"]], ["bar.fill", "paint"],
         ["bar.alpha", "num", 0, 1, 1], ["bar.line", "line"], ["bar.grad", "paint"],

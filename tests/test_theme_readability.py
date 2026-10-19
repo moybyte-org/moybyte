@@ -189,6 +189,27 @@ def test_a_seeds_disabled_ink_is_quiet_and_seen(seed, variant):
     assert ui_draw.disabled_ink(th) == th["ink_dim"]
 
 
+@pytest.mark.parametrize("variant", VARIANTS)
+@pytest.mark.parametrize("seed", TH["seeds"])
+def test_a_seeds_menu_danger_ink_reads_on_the_card(seed, variant):
+    """A seed that names a `danger_ink` (Moy, Blocks: the red of a menu's
+    destructive rows, owner 2026-10-19) holds it to text's 4.5:1 on the
+    surface the menu card is, and `use_buttons` installs it; a seed that
+    names none leaves the danger buttons' ink to the row."""
+    live = live_colors(seed, variant)
+    ui_draw._C.theme_block(live.block, live.used)
+    th = live.tokens
+    ink = live.look[0].get("danger_ink")
+    if seed in ("moy", "blocks"):
+        assert ink is not None and ink >= 0
+    if ink is None or ink < 0:
+        return
+    la, lb = _lum(ink), _lum(th["surface"])
+    assert (max(la, lb) + 500) * 10 >= 45 * (min(la, lb) + 500), (seed, variant)
+    # the glass shows a red, not the plain ink
+    assert _rgb(ink)[0] > _rgb(ink)[1] + 40
+
+
 def _rgb(v):
     """A colour index's (r, g, b) as the glass shows it (RGB565, widened)."""
     c = ui_draw._C.theme_rgb(v)[0]

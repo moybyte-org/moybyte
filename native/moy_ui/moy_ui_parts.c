@@ -640,12 +640,15 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                       : tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
     int lab = ink, rowfill = -1;
     if (r->kind == MOY_UI_VROW_DANGER) {
-        // a verb that destroys: in the danger buttons' ink, which every
-        // theme holds to text's contrast (a theme may make it its ink)
+        // a verb that destroys: in the theme's menu danger ink where it
+        // names one, else in the danger buttons' ink, which every theme
+        // holds to text's contrast (a theme may make it its ink)
         moy_ui_btn_style_t bs;
-        if (moy_ui_button_style(d.look, MOY_UI_K_BUTTON_DANGER, MOY_UI_REST, -1, &bs)
-                == MOY_UI_OK
-            && bs.c[1] >= 0) {
+        if (moy_ui_danger_ink() >= 0) {
+            lab = ink = moy_ui_danger_ink();
+        } else if (moy_ui_button_style(d.look, MOY_UI_K_BUTTON_DANGER, MOY_UI_REST, -1, &bs)
+                       == MOY_UI_OK
+                   && bs.c[1] >= 0) {
             lab = ink = bs.c[1];
         }
     }

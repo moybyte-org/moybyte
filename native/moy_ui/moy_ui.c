@@ -221,6 +221,17 @@ int moy_ui_disabled(void) {
     return s_disabled;
 }
 
+// The live theme's menu danger ink (its look's `danger_ink`, placed), or -1.
+static int16_t s_danger_ink = -1;
+
+void moy_ui_set_danger_ink(int32_t v) {
+    s_danger_ink = v < 0 || v == MOY_THEME_OFF ? -1 : (int16_t)(v & 127);
+}
+
+int moy_ui_danger_ink(void) {
+    return s_danger_ink;
+}
+
 int moy_ui_colors(int look, int kind, int state, int16_t out[3]) {
     ui_t *u = ui();
     if (u == NULL) {

@@ -949,19 +949,23 @@ def _app_row(app):
 def use_buttons(live):
     """Install the live theme's `buttons[kind]` and `app_buttons[app][kind]`
     (`chrome.live_colors`' `look`, every colour placed in its block) for every
-    button that draws, and its look's `disabled` as every disabled part's
-    ink; None drops them. A gradient fill draws its first stop."""
+    button that draws, its look's `disabled` as every disabled part's ink
+    and its `danger_ink` as the ink of a menu's danger rows; None drops
+    them. A gradient fill draws its first stop."""
     _C.buttons_clear()
     _APP_ROW.clear()
     _DISABLED[0] = None
     if live is None:
         _C.disabled(None)
+        _C.danger_ink(None)
         return
     for app, kind, vals in live.buttons:
         _C.buttons_set(app, BUTTON_KINDS.index(kind), vals)
     v = live.look[0].get("disabled")
     _DISABLED[0] = v if v is not None and v >= 0 else None
     _C.disabled(_DISABLED[0])
+    v = live.look[0].get("danger_ink")
+    _C.danger_ink(v if v is not None and v >= 0 else None)
 
 
 _DISABLED = [None]        # the live theme's disabled ink, a colour index, or None

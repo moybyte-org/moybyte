@@ -963,6 +963,14 @@ static mp_obj_t ui_disabled(mp_obj_t v) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_disabled_obj, ui_disabled);
 
+// danger_ink(v): the live theme's menu danger ink (moy_ui_set_danger_ink), its
+// look's placed `danger_ink` leaf; None or a negative value for none.
+static mp_obj_t ui_danger_ink(mp_obj_t v) {
+    moy_ui_set_danger_ink(v == mp_const_none ? -1 : (int32_t)mp_obj_get_int(v));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_danger_ink_obj, ui_danger_ink);
+
 static mp_obj_t ui_buttons_app(mp_obj_t name) {
     size_t n;
     const char *s = mp_obj_str_get_data(name, &n);
@@ -2601,6 +2609,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_buttons_set), MP_ROM_PTR(&ui_buttons_set_obj) },
     { MP_ROM_QSTR(MP_QSTR_buttons_clear), MP_ROM_PTR(&ui_buttons_clear_obj) },
     { MP_ROM_QSTR(MP_QSTR_disabled), MP_ROM_PTR(&ui_disabled_obj) },
+    { MP_ROM_QSTR(MP_QSTR_danger_ink), MP_ROM_PTR(&ui_danger_ink_obj) },
     { MP_ROM_QSTR(MP_QSTR_buttons_app), MP_ROM_PTR(&ui_buttons_app_obj) },
     { MP_ROM_QSTR(MP_QSTR_theme_reads), MP_ROM_PTR(&ui_theme_reads_obj) },
     { MP_ROM_QSTR(MP_QSTR_metrics), MP_ROM_PTR(&ui_metrics_obj) },
