@@ -479,9 +479,9 @@ def test_a_focused_value_rows_controls_read_on_its_focus_plate(theme, row):
     i = _VALUE_ROWS.index(row)
     r = _value_rows_page(theme, row)
     y0 = r.out["rect"][1] + CAPTION + i * ROW
-    plate = r.px(INSET + 3, y0 + ROW // 2)
+    plate = r.px(INSET + 6, y0 + ROW // 2)
     calm = _value_rows_page(theme, _VALUE_ROWS[(i + 1) % len(_VALUE_ROWS)])
-    assert plate != calm.px(INSET + 3, y0 + ROW // 2), "the focus mark is a plate"
+    assert plate != calm.px(INSET + 6, y0 + ROW // 2), "the focus mark is a plate"
     right = 320 - INSET - PAD
     counts = {}
     for y in range(y0 + 2, y0 + ROW - 2):
@@ -500,6 +500,38 @@ def test_a_focused_value_rows_controls_read_on_its_focus_plate(theme, row):
                                                       _ratio(p, plate)))
 
 
+@pytest.mark.parametrize("variant", ["dark", "light"])
+def test_contrasts_card_frame_is_two_pixels_and_runs_past_a_focused_row(variant):
+    """Contrast frames its cards at 2 px, as its windows and bars (look
+    `card.frame`). A focused row's plate stays inside the frame (Dark's
+    yellow covered it), and its edge has one weight all round: Light's
+    outline is the frame's width, and the next row draws no rule under it
+    (2 px over the row, 3 under it)."""
+    theme = ("contrast", variant)
+    r = _value_rows_page(theme, "Off")
+    top = r.out["rect"][1] + CAPTION
+    card = r.px(160, top + 3 * ROW + ROW // 2 - 6)
+    frame = r.px(INSET, top + 3 * ROW + 4)
+    assert frame != card
+    assert r.px(INSET + 1, top + 3 * ROW + 4) == frame, "a 2 px frame"
+    assert r.px(INSET + 2, top + 3 * ROW + 4) == card
+    y0, mid = top + ROW, top + ROW + ROW // 2
+    assert r.px(INSET, mid) == r.px(INSET + 1, mid) == frame, "the frame runs past the row"
+    plate = r.px(INSET + 6, mid)
+    assert r.px(INSET + 2, mid) in (plate, frame)
+    # down the middle: the lines over the plate and under it, to the card
+    col = [r.px(160, y) for y in range(y0 - 1, y0 + ROW + 3)]
+    first = col.index(plate)
+    last = len(col) - 1 - col[::-1].index(plate)
+    over = 0
+    while col[first - 1 - over] not in (card, plate):
+        over += 1
+    under = 0
+    while col[last + 1 + under] not in (card, plate):
+        under += 1
+    assert over == under, (over, under)
+
+
 @pytest.mark.parametrize("theme", _INVERT_ROWS, ids=lambda t: "-".join(t))
 def test_a_focused_stepped_bar_fills_its_steps_in_the_rows_ink(theme):
     """The filled steps are the bright part on the plate: the row's ink, the
@@ -507,7 +539,7 @@ def test_a_focused_stepped_bar_fills_its_steps_in_the_rows_ink(theme):
     than its filled ones)."""
     r = _value_rows_page(theme, "Steps")
     mid = r.out["rect"][1] + CAPTION + 3 * ROW + ROW // 2
-    plate = r.px(INSET + 3, mid)
+    plate = r.px(INSET + 6, mid)
     x0 = 320 - INSET - PAD - (7 * 8 - 2)
     on = r.px(x0 + 2, mid)
     assert _ratio(on, plate) >= 3.0

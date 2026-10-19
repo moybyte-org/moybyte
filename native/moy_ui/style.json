@@ -1127,6 +1127,7 @@
         ["focus.lift.rim", "ring"],
         ["focus.edge.w", "int", 0, 8, 4], ["focus.underline.w", "int", 0, 8, 3],
         ["win_r", "int", 0, 99, 12], ["card_r", "int", 0, 99, 10], ["key_r", "int", 0, 99, 10],
+        ["card.frame", "line"],
         ["win_corners", "corners"],
         ["shadow", "shadow"], ["shadow_back", "num", 0, 1, 0.55],
         ["edges", "enum", ["flat", "bevel"]],

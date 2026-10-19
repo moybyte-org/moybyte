@@ -299,6 +299,10 @@ typedef struct {
     uint8_t tile_r;
     int16_t tile_line_w;
     int32_t tile_fill, tile_line_c;
+    // A group card's frame (`card.frame`): its width (0: the depth's own
+    // rule) and look colour.
+    int16_t card_line;
+    int32_t card_line_c;
 } moy_ui_depth_t;
 // win.header's, win.controls' and the bars' styles, in style.json's order
 enum { MOY_UI_HEAD_PLAIN = 0, MOY_UI_HEAD_FILL = 1, MOY_UI_HEAD_BAR = 2, MOY_UI_HEAD_GRAD = 3 };
@@ -703,6 +707,7 @@ typedef struct {
     int16_t steps;                  // slider: a segment per step, no number
     int16_t kind;                   // MOY_UI_VROW_*: a danger row inks its label and icon
                                     // in the danger buttons' ink
+    int16_t first;                  // the first row on its card (under the card's top frame)
 } moy_ui_vrow_t;
 enum { MOY_UI_VROW_PLAIN = 0, MOY_UI_VROW_DANGER = 1 };
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,

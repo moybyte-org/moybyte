@@ -255,6 +255,7 @@ In the package format (`docs/theming_2026-09.md` §3, style.json's
 | rendering | `render.text` (`aa`/`crisp`), `render.shapes` (`smooth`/`stepped`), `render.scale` (1/2) | aa, smooth, 1 |
 | focus | `focus.style` (`ring`/`plate`/`lift`/`edge`/`underline`/`invert`), `focus.card`, `focus.small` (a style per size class), `focus.color` (a role), `focus.ink` (`keep`/`accent`), `focus.outline` (width, colour), `focus.ring.w`, `.gap`, `.alpha`, `focus.plate.alpha` (light, dark), `focus.lift.grow`, `.rise`, `.rim` (colour or role, alpha), `focus.edge.w`, `focus.underline.w` (DESIGN, the marks) | ring; `card`, `small`: `style`; `accent`, keep; no outline; 2.5, 3, 1; (0.14, 0.22); 5, 3, no rim; 4; 3 |
 | radii | `win_r`, `card_r`, `key_r`, `win_corners` (four flags) | 12, 10, 10, all |
+| card | `card.frame` (width, colour): a group card's frame, which an invert focus mark keeps inside (or covers with an outline as wide) | a dark card's 1 px rule, a light card's where it meets its ground's colour |
 | elevation | `shadow` (`soft`, colour, alpha, blur, dy; or `hard`, colour, dx, dy), `shadow_back` | no shadow |
 | backdrop | `backdrop.home`, `backdrop.desk`: lists of shapes (gap 9); `home_bg` | `bg` |
 | home | `dim_neighbours`; `on_backdrop.ink`, `.dim`, `.shadow` | no veil; `text`, `dim` |

@@ -629,6 +629,7 @@ static moy_ui_box_t place(moy_ui_ctx_t *c, int h, int *stacked) {
             c->grp_n++;
         }
         c->grp_last = b;
+        c->grp_prev = c->grp_first ? 0 : c->grp_flags;
         c->grp_flags = 0;
     }
     c->y = (int16_t)(c->y + h + gap);
@@ -699,7 +700,12 @@ static void band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int st
         return;
     }
     c->grp_flags = (uint16_t)(marks & (MOY_UI_F_FOCUS | MOY_UI_F_ON));
-    moy_ui_group_band(s, card_of(c), b, c->grp_first, c->fs, c->cls);
+    // a row under one its invert focus mark fills draws no rule: the mark's
+    // edge is the line between them
+    const moy_ui_marks_t *m = moy_ui_marks();
+    int after_mark = (c->grp_prev & MOY_UI_F_FOCUS) && m->on && m->active
+                     && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT;
+    moy_ui_group_band(s, card_of(c), b, c->grp_first || after_mark, c->fs, c->cls);
 }
 
 // The open group ends: its card's foot under its last row, and the gap the
@@ -825,6 +831,7 @@ static void vrow_init(const moy_ui_ctx_t *c, moy_ui_vrow_t *r, moy_ui_span_t lab
     r->fs = c->fs;
     r->desk = c->cls;
     r->card = c->grp_open;
+    r->first = c->grp_open && c->grp_first;
     r->icon_slot = c->row_slot;
     r->icon_glyph = c->row_glyph;
 }

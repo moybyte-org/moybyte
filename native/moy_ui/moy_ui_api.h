@@ -127,9 +127,10 @@ typedef struct {
     uint32_t dup, dup_told;         // a duplicate id this frame (its hash), the last told
     char dup_name[MOY_UI_API_NAME];
     // The open group (ui.group): its card's top in content coordinates, the
-    // rows stacked on it, its last row's box and that row's marks.
+    // rows stacked on it, its last row's box and that row's marks, and the
+    // marks of the row before it.
     int16_t grp_top;
-    uint16_t grp_flags;
+    uint16_t grp_flags, grp_prev;
     uint8_t grp_open, grp_n, grp_any, grp_first;
     moy_ui_box_t grp_last;
     // ui.icon's: the next row's icon, then the row's being drawn (an icon

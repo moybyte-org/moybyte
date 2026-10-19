@@ -48,6 +48,7 @@
     "win": { "header": "fill", "rule": 2 },
     "dark": {
       "current": { "alpha": 0.40 }, "disabled": "#5c5c5c",
+      "card": { "frame": [2, "#ffffff"] },
       "win": { "frame": [2, "#ffffff"], "frame_back": [2, "#ffffff"] },
       "bar": { "fill": "#000000", "line": [2, "#ffffff"], "chip_cur": "#1a1a1a" },
       "buttons": {
@@ -59,6 +60,7 @@
     },
     "light": {
       "current": { "alpha": 0.42 }, "disabled": "#949494",
+      "card": { "frame": [2, "#000000"] },
       "focus": { "outline": [2, "#000000"] },
       "win": { "frame": [2, "#000000"], "frame_back": [2, "#000000"] },
       "bar": { "fill": "#ffffff", "line": [2, "#000000"], "chip_cur": "#e6e6e6" },

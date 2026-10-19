@@ -239,6 +239,8 @@ static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, s
         d->dy = num(leaf(lk, "shadow.dy"), 0);
         d->back = num(leaf(lk, "shadow_back"), 55);
     }
+    d->card_line = whole(lk, "card.frame.w", 0);
+    d->card_line_c = leaf(lk, "card.frame.c");
     d->line = whole(lk, "win.frame.w", 0);
     d->line_back = whole(lk, "win.frame_back.w", d->line);
     d->line_c = leaf(lk, "win.frame.c");

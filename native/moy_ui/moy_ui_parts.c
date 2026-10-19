@@ -507,6 +507,8 @@ int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const m
     return -1;
 }
 
+static moy_ui_box_t on_card_mark(const pd_t *d, moy_ui_box_t b, int first, int last);
+
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 const moy_ui_vrow_t *r) {
     pd_t d;
@@ -534,7 +536,8 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     } else if (flags & MOY_UI_F_FOCUS) {
         if (m->on) {
             int mi = -1;
-            moy_ui_focus_in(s, b, MOY_UI_MARK_PART, 0, 0, d.fs, NULL, &mi, 0);
+            moy_ui_focus_in(s, on_card ? on_card_mark(&d, b, r->first, 0) : b, MOY_UI_MARK_PART,
+                            0, 0, d.fs, NULL, &mi, 0);
             lab = mi >= 0 ? mi : ink;
             if (mi >= 0 && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT) {
                 // the whole row is on the mark: its controls too take the
@@ -989,9 +992,13 @@ int moy_ui_group_r(int fs) {
     return cr < r ? cr : r;
 }
 
-// The card's ring: a theme without a depth, or a dark one, rings its cards.
+// The card's ring: the look's `card.frame`, else a theme without a depth,
+// or a dark one, rings its cards.
 static int card_line(const pd_t *d) {
     const moy_ui_depth_t *dp = moy_ui_depth();
+    if (dp->on && dp->card_line > 0) {
+        return dp->card_line * d->fs;
+    }
     if (!dp->on || dark(d)) {
         return d->fs;
     }
@@ -1005,9 +1012,29 @@ static int card_line(const pd_t *d) {
 
 // The card's shape from its top to `bottom` (exclusive), drawn where the clip lets it.
 static void card(pd_t *d, moy_ui_box_t c, int bottom) {
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    uint16_t lc = dp->on && dp->card_line > 0 && set(dp->card_line_c)
+                      ? val(d, dp->card_line_c)
+                      : pal(d, tok(d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
     rrect(d, c.x, c.y, c.w, bottom - c.y, moy_ui_group_r(d->fs), 1,
-          pal(d, tok(d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), card_line(d),
-          pal(d, tok(d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)));
+          pal(d, tok(d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), card_line(d), lc);
+}
+
+// Where a row on a card wears an invert focus mark, which fills it: inside
+// the card's frame, so the frame runs past it unbroken (its top too on the
+// card's first row, its foot on the last), or on it where the mark's outline
+// is as wide, the outline then standing for the frame, so the mark has one
+// weight all round.
+static moy_ui_box_t on_card_mark(const pd_t *d, moy_ui_box_t b, int first, int last) {
+    const moy_ui_marks_t *m = moy_ui_marks();
+    if (d->desk || !m->on || m->style[MOY_UI_MARK_PART] != MOY_UI_FOCUS_INVERT) {
+        return b;
+    }
+    int f = card_line(d) - (m->outline_w > 0 && set(m->outline_c) ? m->outline_w : 0);
+    f = f > 0 ? f : 0;
+    int top = first ? f : 0, foot = last ? f : 0;
+    return (moy_ui_box_t){(int16_t)(b.x + f), (int16_t)(b.y + top), (int16_t)(b.w - 2 * f),
+                          (int16_t)(b.h - top - foot)};
 }
 
 static void clip_to(pd_t *d, int x, int y, int w, int h) {
@@ -1082,8 +1109,8 @@ int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t c, moy_ui_box_t last, 
                 moy_ui_current_in(s, last, 0, 0, fs, &ink, 0);
             }
             if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->on) {
-                moy_ui_focus_in(s, last, MOY_UI_MARK_PART, 0, MOY_UI_MARK_AGAIN, fs, NULL, &ink,
-                                0);
+                moy_ui_focus_in(s, on_card_mark(&d, last, 0, 1), MOY_UI_MARK_PART, 0,
+                                MOY_UI_MARK_AGAIN, fs, NULL, &ink, 0);
             }
             memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
         }
