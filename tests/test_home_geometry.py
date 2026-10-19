@@ -175,3 +175,22 @@ def test_one_focus_mark_under_the_pause_menu(tmp_path):
     ws._dirty = True
     ws.frame(g._DT)
     assert ui_draw.marks(None, False)[2] == 1
+
+
+@pytest.mark.parametrize("theme,mode", [("moy", "light"), ("contrast", "dark")])
+def test_the_desk_homes_play_draws_the_icon_sets_play(tmp_path, monkeypatch, theme, mode):
+    """The details pane's Play takes the icon set's play, as the dock, Files,
+    the pause menu and the Editor do (R2-18)."""
+    ws = _ws(tmp_path, CONSOLE, theme, mode)
+    _home(ws)
+    _frame(ws, 2)
+    kinds = []
+    real = ws.draw_icon
+
+    def draw_icon(kind, rect, ink, cv=None):
+        kinds.append(kind)
+        return real(kind, rect, ink, cv)
+
+    monkeypatch.setattr(ws, "draw_icon", draw_icon)
+    _frame(ws, 1)
+    assert "play" in kinds, "the details pane's Play drew the pixel triangle"

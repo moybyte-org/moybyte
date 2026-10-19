@@ -2897,7 +2897,14 @@ class LauncherHomeLayer:
                 cv.print_scaled(_ui_draw.print_fit(val, col - 10 // u, vs), fx, vy, ink, vs)
         for v, r, kind in buttons:
             _ui_draw.button(cv, th, r, _VERB_HINT[v][1], kind=kind, app="home",
-                            glyph="run" if v in ("play", "open") else None)
+                            glyph="play" if v in ("play", "open") else None,
+                            glyph_draw=self._play_glyph)
+
+    def _play_glyph(self, kind, rect, c, cv):
+        """A details-pane button's glyph: the theme's icon set's (the dock's,
+        Files' and the Editor's Play), else the toolkit's own raster."""
+        if not self.ws.draw_icon(kind, rect, c, cv):
+            _ui_draw.glyph(cv, "run" if kind == "play" else kind, rect, c)
 
     def _facts(self, it):
         """The details pane's facts of a cart: (caption, value) pairs."""
