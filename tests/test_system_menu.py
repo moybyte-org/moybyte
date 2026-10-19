@@ -1,8 +1,8 @@
 """Tests for the top-bar dropdown system menu (#52): a ≡ (hamburger) toggle at the
 LEFT of the unified 18px bar opens a left-anchored dropdown built on a reusable Popup
 primitive. Always a SYSTEM group (Settings/About/Reboot); a group headed by the open
-cart's title (Restart, then Delete for a cart the store can delete -- never a
-built-in) is prepended only when a cart is open.
+cart's title (Delete, for a cart the store can delete -- never a built-in) is
+prepended only when a cart is open. The cursor never opens on a danger row.
 
 Driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver: mouse == touch, arrows == trackball, Enter == run / A),
@@ -324,9 +324,116 @@ def test_keyboard_nav_skips_headers(tmp_path):
     _open_own_cart(ws, tmp_path)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
-    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "DELETE CART"
-    _key(drv, "down")                          # skips the sep + the SYSTEM header
     assert ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS"
+    _key(drv, "up")                            # skips the SYSTEM header + the sep
+    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "DELETE CART"
+    _key(drv, "down")
+    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS"
+
+
+# -- the cursor never opens on a danger row (design review R4-01) ------------
+
+def test_popup_opens_past_a_danger_row():
+    from runtime import host_app, console as C  # noqa: F401
+    from runtime import widgets
+    p = C.Popup()
+    danger = ("item", "DELETE", None, widgets.DANGER_ICON, "Delete")
+    p.show([("header", "CART"), danger, ("sep",), ("header", "SYSTEM"),
+            ("item", "SETTINGS", None, "settings", "Settings")])
+    assert p.items[p.sel][1] == "SETTINGS"
+    # a menu of danger rows alone still opens on its first row
+    p.show([("header", "CART"), danger, danger])
+    assert p.sel == 1
+
+
+def _danger(it):
+    from runtime import widgets
+    return len(it) > 3 and it[3] == widgets.DANGER_ICON
+
+
+def _assert_opens_safe(ws, what):
+    m = ws.sysmenu
+    assert m.open, what
+    it = m.items[m.sel]
+    assert it[0] == "item", what
+    assert not _danger(it), "%s: the menu opens on %r" % (what, it[4] if len(it) > 4 else it[1])
+
+
+def _ladder(ws):
+    from runtime import idle_ladder
+    from runtime import moy_loop as L
+    L.trace_init(30, False, 1000)
+    ws.idle_ladder = idle_ladder.IdleLadder(ws, L, 300)
+
+
+@pytest.mark.parametrize("sleep", [False, True])
+def test_the_open_cart_menu_opens_on_settings_not_delete(tmp_path, sleep):
+    """One press of the key that opened it must not delete the open cart:
+    the cursor lands on the System group's first row."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    if sleep:
+        _ladder(ws)
+    _open_own_cart(ws, tmp_path)
+    ws.toggle_sysmenu()
+    drv.frame(1 / 30)
+    assert "DELETE CART" in _labels(ws)
+    _assert_opens_safe(ws, "open cart")
+    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS"
+    n0 = len(ws.carts.all)
+    _key(drv, "a")                             # the press runs Settings, deletes nothing
+    assert len(ws.carts.all) == n0
+
+
+@pytest.mark.parametrize("sleep", [False, True])
+@pytest.mark.parametrize("tab", ["games", "mine", "make"])
+def test_every_home_menu_opens_on_a_safe_row(tmp_path, tab, sleep):
+    """Over each home tab, the system menu and the card's own menu (a long
+    press, a pad's X) open on a row that destroys nothing."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    if sleep:
+        _ladder(ws)
+    if tab == "mine":
+        ws.set_home_tab("games")
+        ws.carts.dup(next(it for it in ws.launcher.items if it.get("path")))
+    ws.set_home_tab(tab)
+    real = [i for i, it in enumerate(ws.launcher.items) if it.get("path")]
+    for i in (real or [0]):
+        ws.launcher.sel = i
+        ws.toggle_sysmenu()
+        drv.frame(1 / 30)
+        _assert_opens_safe(ws, "%s card %d, system menu" % (tab, i))
+        ws.sysmenu.close()
+        if ws.menu_ui.open_card(ws.launcher_layer, (40, 60)):
+            _assert_opens_safe(ws, "%s card %d, card menu" % (tab, i))
+            ws.sysmenu.close()
+
+
+@pytest.mark.parametrize("sleep", [False, True])
+def test_the_desk_menus_open_on_a_safe_row(tmp_path, sleep):
+    from ws_helpers import build_desktop_ws
+    ws = build_desktop_ws(tmp_path)
+    drv = _drv(ws)
+    if sleep:
+        _ladder(ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    ws.toggle_sysmenu()
+    drv.frame(1 / 30)
+    _assert_opens_safe(ws, "desk")
+    ws.sysmenu.close()
+    ws.open_projects()
+    drv.frame(1 / 30)
+    g = ws.projects_grid
+    for i, it in enumerate(g.items):
+        if not it.get("path"):
+            continue
+        g.sel = i
+        if ws.menu_ui.open_card(ws.projects_layer, (200, 200)):
+            assert any(_danger(r) for r in ws.sysmenu.items)
+            _assert_opens_safe(ws, "projects card %d" % i)
+            ws.sysmenu.close()
 
 
 # -- actions wire to the right console methods ------------------------------

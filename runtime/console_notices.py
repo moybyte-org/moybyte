@@ -17,9 +17,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_diff, NAMES)
 try:
-    from widgets import (Achievements, TOAST_MS, _POPUP_W)
+    from widgets import (Achievements, TOAST_MS, _POPUP_W,
+                         DANGER_ICON as _DANGER_ICON)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Achievements, TOAST_MS, _POPUP_W)
+    from runtime.widgets import (Achievements, TOAST_MS, _POPUP_W,
+                                 DANGER_ICON as _DANGER_ICON)
 try:
     import chrome_ops as _ch
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -58,7 +60,6 @@ _LOOK_ICON = {"menu.delete_cart": "trash",
 # (the chrome's label, icon, the look's text); the star's are the string ids'.
 _CARD_ROW = {"change": ("CHANGE", "pencil", "Change"), "copy": ("DUPLICATE", "dup", "Duplicate"),
              "delete": ("DELETE", "trash", "Delete"), "sure": ("DELETE", "trash", "Delete")}
-_DANGER_ICON = "trash"      # a row that wears it destroys: the danger rows' ink
 
 
 def _row(kind, sid, action=None):

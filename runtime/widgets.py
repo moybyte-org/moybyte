@@ -609,6 +609,10 @@ _POPUP_W = 128                # panel width (~120-140px band; 128 keeps it clear
 _POPUP_ROW_H = 12             # per-row height (selectable + header rows alike)
 _POPUP_PAD_X = 4              # text inset from the panel left
 _POPUP_SEP_H = 1              # separator line height
+# A row whose icon (its 4th element) is this destroys: it draws in the danger
+# rows' ink, and the cursor never OPENS on it, so one press of the key that
+# opened the menu cannot delete.
+DANGER_ICON = "trash"
 
 
 class Popup:
@@ -696,10 +700,17 @@ class Popup:
         return 0 <= i < len(self.items) and self.items[i][0] == "item"
 
     def _first_selectable(self):
+        """The first "item" row that is not a danger row (`DANGER_ICON`); the
+        first "item" row where every one is; 0 where none is."""
+        first = None
         for i in range(len(self.items)):
-            if self.items[i][0] == "item":
-                return i
-        return 0
+            it = self.items[i]
+            if it[0] == "item":
+                if len(it) < 4 or it[3] != DANGER_ICON:
+                    return i
+                if first is None:
+                    first = i
+        return 0 if first is None else first
 
     def _clamp_sel(self):
         if not self._is_selectable(self.sel):
