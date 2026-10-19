@@ -335,6 +335,10 @@ def test_swipe_rides_the_real_pointer_feed(board):
     on_glass.home_shelf_fling(board, 400, 80, 160)
 
 
+def test_a_long_press_opens_the_cards_verbs(board):
+    on_glass.home_long_press_opens_card_verbs(board)
+
+
 def test_a_failed_flush_is_recovered_from(board):
     """#205. The QSPI transport's failure exits, each taken ON PURPOSE:
     `moy_axs.fault(kind)` arms one for the next flush, the swipe supplies the

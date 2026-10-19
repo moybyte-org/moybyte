@@ -381,6 +381,10 @@ def test_swipe_rides_the_real_pointer_feed(board):
     on_glass.home_shelf_fling(board, 260, 60, 140)
 
 
+def test_a_long_press_opens_the_cards_verbs(board):
+    on_glass.home_long_press_opens_card_verbs(board)
+
+
 def test_a_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "star")
 

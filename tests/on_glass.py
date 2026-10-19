@@ -1004,6 +1004,25 @@ def home_shelf_fling(board, x0, x1, y):
     board.drain(0.8)                       # let the fling settle
 
 
+def home_long_press_opens_card_verbs(board):
+    """A long press on the home's centre card, through the real pointer
+    feed, opens the card's verbs (design review R3-01): under touch alone
+    it is the route to Change and Copy. The release launches nothing, and
+    the menu is closed again after."""
+    r = board.pyval("ws.launcher.tile_rect(ws.launcher.sel)")
+    x, y = r[0] + r[2] // 2, r[1] + r[3] // 2
+    board.swipe(x, y, x, y, frames=40)
+    board.drain(0.5)
+    try:
+        st = board.state()
+        assert st["stack"][-1] == "launcher", st["stack"]
+        assert board.pyval("ws.sysmenu.open and ws.sysmenu.widget") == "card"
+        rows = board.pyval("[r[4] for r in ws.sysmenu.items if r[0] == 'item']")
+        assert "Change" in rows and "Copy" in rows, rows
+    finally:
+        board.pyexec("ws.sysmenu.close(); ws.popover_touch()", strict=True)
+
+
 def draw_gates_are_installed(board, windowed=False):
     """(#155) rect/rectb/print/pix must be the NATIVE moy_gfx callables on the
     root system canvas -- and, on the windowed tier, on every window content
