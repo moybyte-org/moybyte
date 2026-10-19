@@ -675,12 +675,15 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // and track -- or a tab row's tabs from the left, on the page's ground or on
 // a group's card; the group's caption
 // and card; and a strip of keycap hints. A row's FOCUS is the theme's focus
-// mark (a theme without marks fills it with the row's `on` field); a seg's,
-// a swatch picker's and a tab row's current option wear the current mark (a
-// theme without: the selection colour); a tab row's are in the label's face. Geometry is style.json's `group` and
-// `value_row` metrics at font scale `fs`, a `_desk` slot where `desk` is set;
-// colours are tokens of the sink's look; text is the `ui` role's (the label)
-// and the `caption` role's (values, captions, legends), petme128 on a run.
+// mark (a theme without marks fills it with the row's `on` field); a seg's
+// and a tab row's current option wear the current mark (a theme without: the
+// selection colour), a swatch picker's current dot a ring in the row's ink
+// off a gap of its ground; a tab row's are in the label's face. Geometry is
+// style.json's `group` and `value_row` metrics at font scale `fs`, a `_desk`
+// slot where `desk` is set; colours are tokens of the sink's look; text is
+// the `ui` role's (the label, an info's, a link's and a cycle's value, what a
+// hint does) and the `caption` role's (a seg's options, captions, key
+// legends), petme128 on a run.
 // The page's ground and the hints take MOY_UI_WINDOW in `desk` beside the
 // size class (MOY_UI_DESK): the page lies in a window's body.
 enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2 };

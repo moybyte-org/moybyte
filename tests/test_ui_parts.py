@@ -244,6 +244,32 @@ def test_swatches_draw_their_colours_and_a_tap_picks_one():
     assert st["cur"] == 1
 
 
+def test_the_current_swatch_wears_an_ink_ring_off_a_ground_gap():
+    """The current colour is ringed in the row's ink, the row's ground
+    showing between ring and dot, not the theme's current plate."""
+    cols = [0xff0000, 0x00c000, 0x0000ff]
+    r, _st = _choice_page("swatches", cols, 0)
+    r.frame()
+    r.frame()
+    y = CAPTION + 10
+    right = 320 - INSET - PAD
+    cx = right - 6 - 2 * 15
+    red = r.px(cx, y)
+    x = cx
+    while r.px(x - 1, y) == red:
+        x -= 1
+    ground = r.px(x - 20 if x > 40 else 2, y)
+    # a pixel or two of AA edge, then the gap in the ground, then the ring
+    run = [r.px(x - k, y) for k in range(1, 7)]
+    assert ground in run, run
+    gap_at = run.index(ground)
+    assert any(p != ground for p in run[gap_at:]), "an ink ring outside the gap"
+    # the ring is the ink, not the plate: its middle is far from the ground
+    ring = next(p for p in run[gap_at:] if p != ground)
+    lum = lambda p: (p >> 11) * 2 + ((p >> 5) & 63) + (p & 31) * 2   # noqa: E731
+    assert abs(lum(ring) - lum(ground)) > 40, (hex(ring), hex(ground))
+
+
 def test_toggle_draws_its_word_and_flips():
     st = {"on": False}
 

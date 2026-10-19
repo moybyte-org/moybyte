@@ -553,9 +553,10 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 chevron(&d, x, cy, chev, 1, cdim);
                 x -= kind == MOY_UI_V_CYCLE ? gap + d.fs : gap;
             }
-            int vw = tw(&fv, r->value.p, r->value.n, sc);
+            // the value in the label's face and weight, set apart by its ink
+            int vw = tw(&fl, r->value.p, r->value.n, sc);
             x -= vw;
-            text(&d, &fv, r->value.p, r->value.n, x, b.y, b.h,
+            text(&d, &fl, r->value.p, r->value.n, x, b.y, b.h,
                  kind == MOY_UI_V_CYCLE ? cink : cdim, sc);
             if (kind == MOY_UI_V_CYCLE) {
                 x -= gap + d.fs + chev;
@@ -592,10 +593,12 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             for (int i = r->n - 1; i >= 0; i--) {
                 moy_ui_box_t o = dot_box(b, r, &g, i);
                 if (i == r->cur) {
+                    // the current colour: a ring in the row's ink, the
+                    // row's ground showing between it and the dot
                     int h = 3 * d.fs;
                     moy_ui_box_t c = {(int16_t)(o.x - h), (int16_t)(o.y - h),
                                       (int16_t)(o.w + 2 * h), (int16_t)(o.h + 2 * h)};
-                    current(s, &d, c, c.w / 2, 1, ink, 0);
+                    rrect(&d, c.x, c.y, c.w, c.h, c.w / 2, 0, 0, d.fs, cink);
                 }
                 rrect(&d, o.x, o.y, o.w, o.h, o.w / 2, 1, swatch(&d, colour_at(r->colours, i)), 0,
                       0);
@@ -1167,7 +1170,8 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_keycap_t *kc = moy_ui_keycap();
-    pf_t fk = font_of(&d, MOY_UI_FONT_CAPTION), fh = fk;
+    // the caps' legends in the caption face, what they do in the rows' (B-23)
+    pf_t fk = font_of(&d, MOY_UI_FONT_CAPTION), fh = font_of(&d, MOY_UI_FONT_UI);
     int sc = tscale(s);
     int kh = pm(&d, MOY_UI_M_VALUE_ROW_KEY, 1), hgap = pm(&d, MOY_UI_M_VALUE_ROW_HINT_GAP, 1);
     int dk = dark(&d);
