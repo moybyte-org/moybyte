@@ -1030,14 +1030,14 @@ def _clean_side(limit):
 _KIND_NAME = {"game": "Game", "app": "App", "tool": "Tool", "wallpaper": "Wallpaper"}
 # The home's hint strip (steps 17 and 18): each verb's key and words. The
 # keys stay off the T-Deck keyboard's buttons (moy_kbd.c: w a s d, l, k).
-_VERB_HINT = {"play": ("enter", "Play"), "open": ("enter", "Open"),
+_VERB_HINT = {"play": ("confirm", "Play"), "open": ("confirm", "Open"),
               "change": ("C", "Change"), "search": ("/", "Search"),
               "new": ("N", "New"), "copy": ("Y", "Copy"),
               "delete": ("X", "Delete"), "sure": ("X", "Sure?")}
 _VERB_KEY = {"c": "change", "/": "search", "n": "new", "y": "copy", "x": "delete"}
-_TAB_KEYS = ("Q E", "Tabs")
+_TAB_KEYS = ("tabs", "Tabs")
 _HINT_LEAD = 8       # the margin ui.hints leads with, at the font scale
-_MENU_KEYS = ("enter", "Choose", "Esc", "Close")   # the strip under the system menu
+_MENU_KEYS = ("confirm", "Choose", "back", "Close")   # the strip under the system menu
 _TAB_H = 16          # the tab row's height, in chrome-scale units
 _GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
 _SLIDE_MS = 200        # the handheld's slide: 6 frames at the home's 30 fps

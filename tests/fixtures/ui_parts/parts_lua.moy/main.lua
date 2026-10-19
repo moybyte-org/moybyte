@@ -17,7 +17,7 @@ frames = 0
 
 function _draw()
   local x, y, w, h = ui.page("Parts")
-  ui.hints({"enter", "Open", "left right", "Change"})
+  ui.hints({"confirm", "Open", "change", "Change"})
   ui.group("General")
   ui.icon("wifi")
   if ui.link("Wi-Fi", "Home") then opens = opens + 1 end

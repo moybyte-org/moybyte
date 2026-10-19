@@ -1205,6 +1205,18 @@ void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *it
     moy_ui_hints(s, b, items, len, c->fs, ground_of(c));
 }
 
+int moy_ui_api_hints_w(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items,
+                       size_t len) {
+    int16_t sp[32];
+    moy_ui_box_t b = {0, 0, 0x3fff, 0};
+    int n = moy_ui_hints_at(s, b, items, len, c->fs, ground_of(c), 0, sp, 16);
+    int w = 0;
+    for (int k = 0; k < n && k < 16; k++) {
+        w = sp[2 * k + 1] > w ? sp[2 * k + 1] : w;
+    }
+    return w ? w + 8 * c->fs : 0;
+}
+
 int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                         const uint8_t *items, size_t len, int32_t cur, const moy_ui_over_t *o) {
     o = over(o);

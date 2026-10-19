@@ -1098,11 +1098,8 @@ int moy_ui_input(void) {
     return s_input;
 }
 
-// Each action's name, then the key spellings the hints took before actions.
-static const char *const ACT_NAMES[MOY_UI_ACTS][3] = {
-    {"confirm", "enter", NULL}, {"back", "Esc", "esc"}, {"change", "left right", NULL},
-    {"tabs", "Q E", NULL},      {"menu", NULL, NULL},
-};
+// Each action's name.
+static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", "tabs", "menu"};
 
 // The keys each input does each action with. The T-Deck's are its keyboard's
 // (native/moy_input/moy_kbd.c): Enter is `run`, K is `b` (back, as the bar's
@@ -1122,10 +1119,8 @@ static int span_is(moy_ui_span_t k, const char *s) {
 
 int moy_ui_hint_action(moy_ui_span_t k) {
     for (int a = 0; a < MOY_UI_ACTS; a++) {
-        for (int i = 0; i < 3; i++) {
-            if (span_is(k, ACT_NAMES[a][i])) {
-                return a;
-            }
+        if (span_is(k, ACT_NAMES[a])) {
+            return a;
         }
     }
     return -1;

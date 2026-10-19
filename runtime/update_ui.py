@@ -479,8 +479,8 @@ class UpdateUI:
         keys = []
 
         def say(text, _col=None):
-            if text[:1] in ("A", "B") and text[1:4] == " = ":     # a key: a hint
-                keys.extend(("enter" if text[0] == "A" else "Esc", text[4:5] + text[5:].lower()))
+            if text[1:4] == " = " and text[0] in "AB":     # a key: a hint
+                keys.extend(("confirm" if text[0] == "A" else "back", text[4:5] + text[5:].lower()))
             else:
                 out.append(text)
 

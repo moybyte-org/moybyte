@@ -2,8 +2,8 @@
 (docs/ui_api_2026-10.md, "Hints"; native/moy_ui/moy_ui.h, MOY_UI_INPUT_*):
 
 * each input draws its own keys for an action -- the desk keyboard's Esc, the
-  T-Deck's K, a gamepad's B -- and the key spellings callers passed before
-  actions (`Esc`, `enter`, `left right`, `Q E`) draw as the action they name;
+  T-Deck's K, a gamepad's B -- and a key spelled out draws as written on
+  every input, so no caller spells out a key an action covers;
 * under touch alone no hint draws and `ui.hints` takes no band, so the rows
   reach the page's foot;
 * the input table names the source that brought news (a button going down, a
@@ -15,6 +15,7 @@
 
 import ast
 import os
+import re
 from array import array
 from pathlib import Path
 
@@ -48,11 +49,55 @@ def _strip(th, items, kind):
     return bytes(cv._buf), spans
 
 
-@pytest.mark.parametrize("kind", ["keys", "tdeck", "pad"])
-@pytest.mark.parametrize("action,legacy", [("back", "Esc"), ("confirm", "enter"),
-                                           ("change", "left right"), ("tabs", "Q E")])
-def test_a_legacy_key_spelling_draws_as_its_action(th, kind, action, legacy):
-    assert _strip(th, (legacy, "Go"), kind) == _strip(th, (action, "Go"), kind)
+@pytest.mark.parametrize("action,spelled", [("back", "Esc"), ("confirm", "enter"),
+                                            ("tabs", "Q E")])
+def test_a_spelled_out_key_names_no_action(th, action, spelled):
+    assert _strip(th, (spelled, "Go"), "pad") != _strip(th, (action, "Go"), "pad")
+    assert _strip(th, (spelled, "Go"), "pad") == _strip(th, (spelled, "Go"), "keys")
+
+
+# Every key an input does an action with (moy_ui_parts.c's ACT_KEYS), and the
+# spellings the hints took before they named actions.
+_ACTION_KEYS = {"enter", "Esc", "esc", "left right", "Q E", "K", "Super", "Mic",
+                "A", "B", "L R", "Start"}
+
+
+def _py_callers():
+    for d in ("runtime", "device", "system_carts", "tests/fixtures"):
+        for p in sorted(Path(ROOT, d).rglob("*.py")):
+            src = p.read_text()
+            if "hints(" in src and p.name != "ui_draw.py":
+                yield p, src
+
+
+def test_no_caller_spells_out_a_key_an_action_covers():
+    """A hint pair names `confirm`, `back`, `change`, `tabs` or `menu`, so
+    every input draws its own keys: a caller that spells out `Esc` shows a
+    keyboard's cap on a gamepad. Every string tuple or list in a module that
+    calls the hints, every Lua `ui.hints{...}` and every compiled fixture's
+    `ui_hints` items is held to it."""
+    bad = []
+    for p, src in _py_callers():
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, (ast.Tuple, ast.List)):
+                # a pair's keys come first, its words second
+                for e in node.elts[::2]:
+                    if isinstance(e, ast.Constant) and e.value in _ACTION_KEYS:
+                        bad.append("%s:%d %r" % (p.relative_to(ROOT), e.lineno, e.value))
+    for p in sorted(Path(ROOT).glob("tests/fixtures/**/*.lua")) + sorted(
+            Path(ROOT).glob("system_carts/*/*.lua")):
+        for m in re.finditer(r"ui\.hints\s*\(?\s*\{([^}]*)\}", p.read_text()):
+            for k in re.findall(r'"([^"]*)"', m.group(1))[::2]:
+                if k in _ACTION_KEYS:
+                    bad.append("%s %r" % (p.relative_to(ROOT), k))
+    for p in sorted(Path(ROOT).glob("tests/fixtures/wasm/*/src/main.wat")):
+        src = p.read_text()
+        data = dict(re.findall(r'\(data \(i32\.const (\d+)\) "([^"]*)"\)', src))
+        for at in re.findall(r"call \$ui_hints \(i32\.const (\d+)\)", src):
+            for k in data[at].split("\\00")[::2]:
+                if k in _ACTION_KEYS:
+                    bad.append("%s %r" % (p.relative_to(ROOT), k))
+    assert not bad, "name the action instead: %s" % bad
 
 
 def test_each_input_draws_its_own_keys_for_an_action(th):
@@ -79,7 +124,7 @@ def _px_cap_widths(th, items):
 
 def test_touch_draws_no_hints(th):
     blank = bytes(make_system_canvas(320, 240)._buf)
-    px, spans = _strip(th, ("enter", "Open", "Esc", "Back"), "touch")
+    px, spans = _strip(th, ("confirm", "Open", "back", "Back"), "touch")
     assert spans == () and px == blank
 
 

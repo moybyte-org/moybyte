@@ -280,6 +280,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_choice", [c.c_void_p, c.POINTER(_Sink), _I, _Span, c.c_char_p, _Z, c.c_int32,
                            c.c_void_p], c.c_int32),
     ("moy_ui_api_hints", [c.c_void_p, c.POINTER(_Sink), c.c_char_p, _Z, c.c_void_p], None),
+    ("moy_ui_api_hints_w", [c.c_void_p, c.POINTER(_Sink), c.c_char_p, _Z], _I),
     ("moy_ui_api_icon", [c.c_void_p, _Span], _I),
     ("moy_ui_api_box", [c.c_void_p, _Span, c.POINTER(c.c_int32)], _I),
     ("moy_ui_api_progress", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_int32, c.c_int32,
@@ -965,6 +966,12 @@ def binding():
         b = bytes(items)
         lib.moy_ui_api_hints(p, c.byref(s), b, len(b), ov)
 
+    def api_hints_w(ctx, cv, look, items):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        b = bytes(items)
+        return int(lib.moy_ui_api_hints_w(p, c.byref(s), b, len(b)))
+
     def api_table(ctx, cv, look, label, cols, cells, cur, o):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
@@ -1089,7 +1096,8 @@ def binding():
         return None if d is None else d.decode("utf-8", "replace")
 
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
-              api_list, api_group, api_value, api_choice, api_hints, api_icon, api_progress,
+              api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
+              api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_owes, api_grid,
               api_card, api_part, api_popover, api_menu, api_menu_danger,
               api_focus, api_keys_taken, api_at, api_dup):

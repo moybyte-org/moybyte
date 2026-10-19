@@ -23,7 +23,7 @@ def _draw():
         ui.info("Star", "Paused")
         i = ui.menu("", ["Resume", "Restart", "Options", "Quit"],
                     ["play", "rotate", "settings", "close"])
-        ui.hints(["enter", "Choose", "Esc", "Resume"])
+        ui.hints(["confirm", "Choose", "back", "Resume"])
         ui.popover()
         if i >= 0:
             last = i + 1

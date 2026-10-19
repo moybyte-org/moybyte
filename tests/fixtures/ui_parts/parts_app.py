@@ -70,7 +70,7 @@ class PartsApp:
         ui.page("")
         if self.first:
             ui.focus("Appearance")
-        ui.hints(("enter", "Open", "Esc", "Back"))
+        ui.hints(("confirm", "Open", "back", "Back"))
         ui.group("General")
         ui.link("Wi-Fi", "Home")
         ui.link("Appearance", "Moy " + ("Day" if self.ws.look.theme_variant == "light" else "Night"))
@@ -86,7 +86,7 @@ class PartsApp:
         ui.page("")
         if self.first:
             ui.focus("Tint")
-        ui.hints(("left right", "Change", "Esc", "Back"))
+        ui.hints(("change", "Change", "back", "Back"))
         light = self.ws.look.theme_variant == "light"
         ui.group("Sound")
         self.sound = ui.toggle("Sound", self.sound)

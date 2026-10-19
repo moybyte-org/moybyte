@@ -272,6 +272,14 @@ def hints(items, o=None):
     _C.api_hints(t[0], t[1], t[2], _opts(items), _over(o))
 
 
+def hints_width(items):
+    """The pixels `ui.hints(items)` takes across with the input in use, its
+    margin at either end included, so a band placed with `ui.at` can end
+    where they do; 0 under touch alone."""
+    t = _T
+    return _C.api_hints_w(t[0], t[1], t[2], _opts(items))
+
+
 def icon(name, o=None):
     """The next row (a label, info, link, cycle, seg, swatches, toggle,
     slider or progress) draws icon `name` before its label: the theme's

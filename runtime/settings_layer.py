@@ -231,10 +231,10 @@ _GROUPS = (
 )
 
 # The keycap hints for the focused row's kind.
-_HINT_OPEN = ("enter", "Open", "Esc", "Back")
-_HINT_CHANGE = ("left right", "Change", "Esc", "Back")
-_HINT_SWITCH = ("enter", "Switch", "Esc", "Back")
-_HINT_TYPE = ("enter", "Done", "Esc", "Back")
+_HINT_OPEN = ("confirm", "Open", "back", "Back")
+_HINT_CHANGE = ("change", "Change", "back", "Back")
+_HINT_SWITCH = ("confirm", "Switch", "back", "Back")
+_HINT_TYPE = ("confirm", "Done", "back", "Back")
 _HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "toggle": _HINT_SWITCH,
           "slider": _HINT_CHANGE, "field": _HINT_TYPE}
 
@@ -537,7 +537,7 @@ class SettingsLayer:
         status = self._bt_refresh()
         enabled, state, name, _preferred, _error = status
         _ui.page("")
-        _ui.hints(("enter", "Use", "Esc", "Back"))
+        _ui.hints(("confirm", "Use", "back", "Back"))
         _ui.group("Bluetooth keyboard")
         if _ui.toggle("Keyboard input", bool(enabled)) != bool(enabled):
             self._bt_action("toggle")
@@ -730,7 +730,7 @@ class SettingsLayer:
                 pass
         _ui.page("")
         if self.wifi_pick is not None:
-            _ui.hints(("enter", "Connect", "Esc", "Cancel"))
+            _ui.hints(("confirm", "Connect", "back", "Cancel"))
             _ui.group(("Password for " + str(self.wifi_pick))[:30])
             x, y, w, h, _st = _ui.part("password")
             lay = ws.layout
@@ -747,7 +747,7 @@ class SettingsLayer:
                 _ui.focus(self._wifi_focus)
                 self._wifi_focus = None
             return
-        _ui.hints(("enter", "Connect", "Esc", "Back"))
+        _ui.hints(("confirm", "Connect", "back", "Back"))
         _ui.group("Wi-Fi")
         _ui.icon("wifi" if connected else "wifi_off")
         _ui.info("Connected" if connected else "Not connected",
@@ -820,7 +820,7 @@ class SettingsLayer:
         on."""
         title, text, yes = TOGGLE_CONFIRMS[self.confirm_key]
         _x, _y, w, _h = _ui.page("")
-        _ui.hints(("enter", "Choose", "Esc", "Back"))
+        _ui.hints(("confirm", "Choose", "back", "Back"))
         _ui.group(say(title))
         for line in _wrap(text, max(8, (w - 32) // max(1, self.ws.layout.font_w))):
             _ui.label(line)
@@ -844,7 +844,7 @@ class SettingsLayer:
     def _crash_page(self):
         """The record's lines, and one button back."""
         _x, _y, w, _h = _ui.page("")
-        _ui.hints(("enter", "Back"))
+        _ui.hints(("confirm", "Back"))
         _ui.group("Last crash")
         n = max(8, (w - 32) // max(1, self.ws.layout.font_w))
         for line in crash_lines(last_crash()):

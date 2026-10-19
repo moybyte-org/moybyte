@@ -2253,6 +2253,18 @@ static mp_obj_t ui_api_hints(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_hints_obj, 5, 5, ui_api_hints);
 
+// api_hints_w(ctx, cv, look, items) -> the width those hints take
+static mp_obj_t ui_api_hints_w(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[3], &b, MP_BUFFER_READ);
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_hints_w(c, &s, (const uint8_t *)b.buf, b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_hints_w_obj, 4, 4, ui_api_hints_w);
+
 // api_part(ctx, cv, look, id, w, h, o) -> (x, y, w, h, state)
 static mp_obj_t ui_api_part(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2542,6 +2554,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_value), MP_ROM_PTR(&ui_api_value_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_choice), MP_ROM_PTR(&ui_api_choice_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_hints), MP_ROM_PTR(&ui_api_hints_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_hints_w), MP_ROM_PTR(&ui_api_hints_w_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_slider), MP_ROM_PTR(&ui_api_slider_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_icon), MP_ROM_PTR(&ui_api_icon_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_box), MP_ROM_PTR(&ui_api_box_obj) },

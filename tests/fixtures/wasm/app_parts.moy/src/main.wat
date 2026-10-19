@@ -36,7 +36,7 @@
   (memory (export "memory") 1 1)
 
   (data (i32.const 1024) "Parts")
-  (data (i32.const 1040) "enter\00Open\00left right\00Change")
+  (data (i32.const 1040) "confirm\00Open\00change\00Change")
   (data (i32.const 1072) "General")
   (data (i32.const 1088) "Wi-Fi")
   (data (i32.const 1096) "Home")
@@ -86,7 +86,7 @@
     (local $r i32)
     (call $ok (call $ui_page (i32.const 1024) (i32.const 5) (i32.const 0) (i32.const 0)
                              (i32.const 2048) (i32.const 16)))
-    (call $ok (call $ui_hints (i32.const 1040) (i32.const 28) (i32.const 0) (i32.const 0)))
+    (call $ok (call $ui_hints (i32.const 1040) (i32.const 26) (i32.const 0) (i32.const 0)))
     (call $ok (call $ui_group (i32.const 1072) (i32.const 7) (i32.const 0) (i32.const 0)))
     (call $ok (call $ui_icon (i32.const 1192) (i32.const 4) (i32.const 0) (i32.const 0)))
     (if (call $ui_link (i32.const 1088) (i32.const 5) (i32.const 1096) (i32.const 4)

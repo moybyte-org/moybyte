@@ -794,8 +794,8 @@ void moy_ui_set_input(int input);
 int moy_ui_input(void);
 // The hints' actions, which a pair names in place of its keys: confirm, back,
 // change (left and right), tabs (the previous and the next) and menu (the
-// console's key). Answers the action `k` names, a key spelling the hints took
-// before actions (`enter`, `Esc`, `left right`, `Q E`) included, else -1.
+// console's key). Answers the action `k` names, else -1: a key spelled out
+// (`enter`, `Esc`) names none and draws as written.
 enum { MOY_UI_ACT_CONFIRM = 0, MOY_UI_ACT_BACK, MOY_UI_ACT_CHANGE, MOY_UI_ACT_TABS,
        MOY_UI_ACT_MENU, MOY_UI_ACTS };
 int moy_ui_hint_action(moy_ui_span_t k);

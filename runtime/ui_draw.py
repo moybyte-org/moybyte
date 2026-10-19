@@ -1389,7 +1389,7 @@ def hints(cv, th, rect, items, desk=False, draw=True):
     `confirm`, `back`, `change`, `tabs` or `menu`, drawn as the keys of the
     input in use (`input_kind`) -- or keys spelled out -- space-separated;
     `enter`, `left`, `right`, `up` and `down` draw as signs -- and what they
-    do. `enter`, `Esc`, `left right` and `Q E` name their actions. Answers
+    do. Answers
     each pair's (x0, x1) across the band, what a tap hit-tests (x0 == x1 for
     a pair the input has no key for; none under touch); `draw` False only
     measures."""

@@ -182,7 +182,7 @@ class CalcAppLayer:
         if not lay.desk:
             band, page = ui.cut_bottom(page, 20 * lay.fs)
             ui.at(*band)
-            ui.hints(("enter", "Press", "Esc", "Back"))
+            ui.hints(("confirm", "Press", "back", "Back"))
         if page != lay.page:
             lay.place(page)
         if self._first:

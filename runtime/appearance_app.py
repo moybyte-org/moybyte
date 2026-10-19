@@ -94,9 +94,9 @@ _AA_FACES = ("result", "key", "title")
 # The roles a theme's second mode changes (`_single_mode`).
 _MODE_ROLES = ("desktop", "surface", "panel", "ink", "bar", "accent")
 # The hints by the focused stop's kind.
-_STEP = ("left right", "Change")
-_OPEN = ("enter", "Open")
-_USE = ("enter", "Use")
+_STEP = ("change", "Change")
+_OPEN = ("confirm", "Open")
+_USE = ("confirm", "Use")
 _HINTS = {"step": _STEP, "link": _OPEN, "card": _USE, "tabs": _STEP}
 
 
@@ -517,9 +517,9 @@ class AppearanceAppLayer:
         lay = self.layout
         kind = self._kinds.get(self._focused, "step")
         if self.naming:
-            items = ("enter", "Keep", "Esc", "Cancel")
+            items = ("confirm", "Keep", "back", "Cancel")
         else:
-            items = _HINTS.get(kind, _STEP) + ("Esc", "Close" if lay.desk else "Back")
+            items = _HINTS.get(kind, _STEP) + ("back", "Close" if lay.desk else "Back")
         if not lay.desk:
             ui.at(*lay.foot)
             ui.hints(items)
@@ -527,7 +527,7 @@ class AppearanceAppLayer:
         x, y, w, h = lay.foot
         bx, _by, bw, _bh = lay.body
         cv.rect(bx, y, bw, 1, th["border"])
-        hw = self._hints_w(items)
+        hw = ui.hints_width(items)
         # The status: the body face in the dim ink, quieter than the rows.
         ui.face("ui")
         text = self._status(ch)
@@ -538,22 +538,6 @@ class AppearanceAppLayer:
         ui.face()
         ui.at(bx + bw - hw, y + 1, hw, h - 1)
         ui.hints(items)
-
-    @staticmethod
-    def _hints_w(items):
-        """About what `items` take as the desk's hints draw them: the caps
-        (an arrow or Enter a square key, a word its legend), then the action."""
-        w = 8
-        for i in range(0, len(items), 2):
-            for k in items[i].split(" "):
-                if k in ("left", "right", "up", "down"):
-                    w += 20 + 3
-                elif k == "enter":
-                    w += 23 + 3
-                else:
-                    w += max(20, ui.text_size(k)[0] + 10) + 3
-            w += 1 + ui.text_size(items[i + 1])[0] + 14
-        return w
 
     # -- the rows --------------------------------------------------------------
 

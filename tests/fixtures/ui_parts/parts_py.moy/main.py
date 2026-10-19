@@ -18,7 +18,7 @@ frames = 0
 def _draw():
     global opens, size, mode, accent, name, dones, level, frames
     x, y, w, h = ui.page("Parts")
-    ui.hints(["enter", "Open", "left right", "Change"])
+    ui.hints(["confirm", "Open", "change", "Change"])
     ui.group("General")
     ui.icon("wifi")
     if ui.link("Wi-Fi", "Home"):

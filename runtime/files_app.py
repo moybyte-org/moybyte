@@ -689,7 +689,7 @@ class FilesAppLayer(ListShellApp):
             cur, opened = ui.table("Places", ("", ""), rows, at)
         else:
             ui.at(*lay.hints)
-            ui.hints(("enter", "Open"))
+            ui.hints(("confirm", "Open"))
             ui.at(*lay.places)
             rows = [(p[2], p[1], str(self._count(p[0]))) for p in shown]
             cur, opened = ui.table("", ("", "", ""), rows, at, {"id": "Places"})

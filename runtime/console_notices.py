@@ -360,10 +360,10 @@ class PauseMenu:
             got = _ui.slider("Volume", cur, lo, hi, {"steps": True})
             if got != cur:
                 sl.set_level("volume", got)
-            _ui.hints(("left right", "Change", "Esc", "Back"))
+            _ui.hints(("change", "Change", "back", "Back"))
         else:
             _ui.menu("", self.ITEMS, self.ICONS)
-            _ui.hints(("enter", "Choose", "Esc", "Resume"))
+            _ui.hints(("confirm", "Choose", "back", "Resume"))
         _ui.popover()
         if not settled:
             ws.request_frame()

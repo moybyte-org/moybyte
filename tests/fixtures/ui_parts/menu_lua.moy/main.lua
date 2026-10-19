@@ -21,7 +21,7 @@ function _draw()
     ui.info("Star", "Paused")
     local i = ui.menu("", {"Resume", "Restart", "Options", "Quit"},
                       {"play", "rotate", "settings", "close"})
-    ui.hints({"enter", "Choose", "Esc", "Resume"})
+    ui.hints({"confirm", "Choose", "back", "Resume"})
     ui.popover()
     if i > 0 then
       last = i

@@ -225,6 +225,10 @@ int32_t moy_ui_api_choice(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind, moy
 // and a ui.at before it is spent.
 void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items, size_t len,
                       const moy_ui_over_t *o);
+// The width those hints take with the input in use, their margin at either
+// end included (0 under touch): what a band placed to end where they do is.
+int moy_ui_api_hints_w(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items,
+                       size_t len);
 // The next row (a label, info, link, cycle, seg, swatch picker, toggle,
 // slider or progress) draws icon `name` before its label: the live icon
 // set's slot of that name (moy_ui_icon_slot), else the glyph table's.
