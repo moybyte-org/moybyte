@@ -213,3 +213,35 @@ def test_the_caret_stands_a_column_off_the_next_stem(tmp_path, theme, mode):
     stem = next(c for c in range(cols[-1] + 1, x + lay.cell)
                 if any(px[yy][c] != ground for yy in range(y + fs, y + lay.text_h - fs)))
     assert stem - cols[-1] >= 2, (cols, stem)
+
+
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_play_carries_as_much_full_ink_as_a_tab_icon(tmp_path, theme, mode):
+    """The narrow bar's Play, drawn in one ink beside the tab icons, has at
+    least as many pixels of that full ink as the lightest tab icon: its 16 px
+    mask's diagonals no longer antialias it to a grey the tabs do not wear,
+    which Contrast reads as disabled (design review R3-26)."""
+    from runtime.editor_app import _SET_KIND, _ZONE_TABS
+    ws = _ws(tmp_path, HANDHELD, theme, mode)
+    _editor(ws, HANDHELD, "code")
+    cv, th = ws.sys_canvas, ws.theme_colors
+    ink = th["chrome_ink"]
+    word = cv._col(ink)
+
+    def full(draw):
+        cv.rect(0, 0, 32, 32, th["surface"])
+        draw((8, 8, 16, 16))
+        n = 0
+        for y in range(32):
+            for x in range(32):
+                i = (y * cv._stride + x) * 2
+                n += (cv._buf[i] | (cv._buf[i + 1] << 8)) == word
+        return n
+
+    tabs = [full(lambda r, k=k: ws.draw_icon(_SET_KIND.get(k, k), r, ink, cv))
+            for t, k in _ZONE_TABS if isinstance(t, str) and not t.startswith("\x00")]
+    play = full(lambda r: ws.editor_app._draw_play(cv, r, ink))
+    assert play >= min(tabs), (play, tabs)
+    bare = full(lambda r: ws.draw_icon("play", r, ink, cv))
+    assert bare < min(tabs), ("the set's 16 px play carries full ink of its own now: "
+                              "_draw_play's second pass can go", bare, tabs)

@@ -538,7 +538,7 @@ class EditorApp:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_redo())
             elif tab is None and sets:
                 # Play: the set's bare glyph in `value` (DESIGN.md, Play)
-                ws.draw_icon("play", (x, y0, ic, ic), th["value"], cv)
+                self._draw_play(cv, (x, y0, ic, ic), th["value"])
             else:
                 ws._icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y0, cv,
                          ink=ink)
@@ -575,6 +575,22 @@ class EditorApp:
             return ws.draw_icon(slot, r, c, cv)
         return draw
 
+    def _draw_play(self, cv, rect, ink):
+        """Play, the set's bare glyph, in a stroke as heavy as the tab
+        icons': a smooth set's 16 px mask draws the triangle's 2-unit stroke
+        1.33 px wide, whose diagonals antialias to a grey the tab icons'
+        verticals do not (Contrast's disabled ink is a grey), so below the
+        20 px mask it draws twice, a column apart -- a 2 px stroke (design
+        review R3-26)."""
+        ws = self.ws
+        if not ws.draw_icon("play", rect, ink, cv):
+            return False
+        spec = ws.icon_spec()
+        if spec is not None and spec[0] == "smooth" \
+                and min(rect[2], rect[3]) < _iconsets.SIZES[1]:
+            ws.draw_icon("play", (rect[0] + 1, rect[1], rect[2], rect[3]), ink, cv)
+        return True
+
     def _bare_play(self, cv, r):
         """The shelf's Play under a theme's icon set: the set's glyph and the
         word, in `value`, on the band with no plate, centred in `r`."""
@@ -585,7 +601,7 @@ class EditorApp:
         gap = 4 * fs
         tw = _ui_draw.print_width("Play", fs)
         x = r[0] + (r[2] - box - gap - tw) // 2
-        ws.draw_icon("play", (x, r[1] + (r[3] - box) // 2, box, box), ink, cv)
+        self._draw_play(cv, (x, r[1] + (r[3] - box) // 2, box, box), ink)
         line = _ui_draw.font("ui")[2] * fs
         cv.print("Play", x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
 
