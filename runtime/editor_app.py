@@ -83,12 +83,15 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # that paints the destination pays, and every hard exit pays the debt first. See
 # set_tab/leave below and the exit-path call sites in console.py/wm_windowed.py.
 #
-# The narrow bar's rule, one for every theme and mode: the icons share the
-# lent zone's spare width out as gaps of up to _LADDER_GAP each, so they never
-# abut, and the open tab carries its name only where the whole ladder holds it
-# at the full gap -- the name goes before the icons squeeze. On the T-Deck's
-# 320px (10 icons, the open one widened by the tab's pad, in a ~195px zone)
-# that is icon-only with 3px gaps.
+# The narrow bar's rule, one for every theme and mode: two groups, the tabs
+# (where am I) and the actions (undo, redo, Play), parted by a group gap of at
+# least _GROUP_GAP with a hairline in it (owner, 2026-10-19, D-02). The icons
+# in a group share what the zone has left out as gaps of up to _LADDER_GAP
+# each, so they never abut; the group gap takes the rest, up to _GROUP_MAX.
+# The open tab carries its name only where the whole ladder holds it at the
+# full gap -- the name goes before the icons squeeze. On the T-Deck's 320px
+# (10 icons, the open one widened by the tab's pad, in a ~191px zone) that
+# is icon-only with 2px gaps and a 9px group gap.
 _ZONE_UNDO = "\x00undo"          # sentinel: UNDO icon -> ws.history.undo() (#88)
 _ZONE_REDO = "\x00redo"          # sentinel: REDO icon -> ws.history.redo() (#88)
 _ZONE_TABS = (
@@ -104,6 +107,8 @@ _ZONE_TABS = (
     (None, "run"),          # PLAY
 )
 _LADDER_GAP = 4                 # the narrow bar's widest gap between icons, at fs 1
+_GROUP_GAP = 8                  # ...the least gap between the tabs and the actions
+_GROUP_MAX = 12                 # ...and the most
 _PILL_CLEAR = 8                 # the labelled ladder: open pill to the next tab's icon, at fs 1
 
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
@@ -519,7 +524,15 @@ class EditorApp:
         # one on the bar's current mark with its name where the bar has the
         # room, then UNDO, REDO and PLAY.
         label = self._open_label(rect)
-        for tab, glyph, r in self._ladder_rects(rect):
+        rects = self._ladder_rects(rect)
+        cut = self._group_cut(rects)
+        if cut:
+            # The hairline between the groups, in the middle of their gap.
+            a, b = rects[cut - 1][2], rects[cut][2]
+            fs = self._zone_scale()
+            cv.rect((a[0] + a[2] + b[0]) // 2, b[1] + 3 * fs, fs, b[3] - 6 * fs,
+                    th["border"])
+        for tab, glyph, r in rects:
             x, y0, w, ic = r
             ink = None
             if tab is not None and tab == self.tab:
@@ -636,7 +649,9 @@ class EditorApp:
         if not chip or not chip[0][2]:
             return ""
         n = len(self._ladder())
-        if (n - 1) * (ic + _LADDER_GAP * self._zone_scale()) + chip[0][1][2] > w:
+        fs = self._zone_scale()
+        if (n - 2) * _LADDER_GAP * fs + _GROUP_GAP * fs + (n - 1) * ic \
+                + chip[0][1][2] > w:
             return ""
         return label
 
@@ -646,10 +661,12 @@ class EditorApp:
 
     def _ladder_layout(self, rect):
         """The narrow bar's icons, ([(tab, glyph, rect)], gap), as many as
-        `rect` holds: square, as tall as the lent band, `gap` apart -- the
-        zone's spare width shared out up to _LADDER_GAP each, the full gap
-        where the open tab is labeled. The open tab's is widened by the tab's
-        pad each side, or to a labeled chip with its name (`_open_label`)."""
+        `rect` holds: square, as tall as the lent band, `gap` apart within a
+        group -- the zone's spare width, less the least group gap, shared out
+        up to _LADDER_GAP each, the full gap where the open tab is labeled --
+        and the group gap before the first action the rest, from _GROUP_GAP
+        up to _GROUP_MAX. The open tab's is widened by the tab's pad each
+        side, or to a labeled chip with its name (`_open_label`)."""
         x, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON
         fs = self._zone_scale()
@@ -658,21 +675,37 @@ class EditorApp:
         ladder = self._ladder()
         n = len(ladder)
         full = _LADDER_GAP * fs
+        least = _GROUP_GAP * fs
         if label:
             wide = _ui_draw.tab_row_rects((x, y0, w, ic), [(self.tab, label)], fs)[0][1][2]
-            gap = full
         else:
             wide = ic + 2 * pad
-            spare = w - (n - 1) * ic - (wide if self.tab in [t for t, _g in ladder] else ic)
-            gap = max(0, min(full, spare // (n - 1))) if n > 1 else 0
+        opened = self.tab in [t for t, _g in ladder]
+        spare = w - (n - 1) * ic - (wide if opened else ic)
+        if label:
+            gap = full
+        else:
+            gap = max(0, min(full, (spare - least) // (n - 2))) if n > 2 else 0
+        group = max(gap, min(spare - (n - 2) * gap, _GROUP_MAX * fs))
         out = []
         for tab, glyph in ladder:
+            if tab == _ZONE_UNDO and out:
+                x += group - gap
             cw = wide if tab is not None and tab == self.tab else ic
             if x + cw > rect[0] + w:
                 break
             out.append((tab, glyph, (x, y0, cw, ic)))
             x += cw + gap
         return out, gap
+
+    @staticmethod
+    def _group_cut(rects):
+        """The index of the first action in the ladder's `rects` (undo), the
+        group gap's right side, or 0 where the ladder holds no tab before it."""
+        for i, (tab, _g, _r) in enumerate(rects):
+            if tab == _ZONE_UNDO:
+                return i
+        return 0
 
     def _has_code(self):
         """Whether the open cart has a Code tab: every cart whose main is text
@@ -755,13 +788,18 @@ class EditorApp:
                 if _in(px, py, r):
                     return self._activate_zone_tab(tid)
             return False
-        rects, gap = self._ladder_layout(rect)
+        rects, _gap = self._ladder_layout(rect)
         last = len(rects) - 1
         for i, (tab, _glyph, r) in enumerate(rects):
             # A tap in a gap between two icons belongs to the nearer one;
             # the ladder's two ends stay where they are drawn.
-            lo = r[0] - (gap // 2 if i else 0)
-            hi = r[0] + r[2] + (gap - gap // 2 if i < last else 0)
+            lo = r[0]
+            if i:
+                a = rects[i - 1][2]
+                lo = (a[0] + a[2] + r[0] + 1) // 2
+            hi = r[0] + r[2]
+            if i < last:
+                hi = (hi + rects[i + 1][2][0] + 1) // 2
             if _in(px, py, (lo, r[1], hi - lo, r[3])):
                 return self._activate_zone_tab(tab)
         return False

@@ -163,8 +163,13 @@ def test_the_narrow_bar_names_the_open_tab_only_at_the_full_gap(tmp_path):
             rects, gap = ea._ladder_layout(zone)
             assert len(rects) == len(ea._ladder())       # nothing dropped
             assert rects[-1][2][0] + rects[-1][2][2] <= zone[0] + zone[2]
-            gaps = {b[2][0] - a[2][0] - a[2][2] for a, b in zip(rects, rects[1:])}
-            assert gaps == {gap} and gap > 0
+            cut = ea._group_cut(rects)
+            gaps = [b[2][0] - a[2][0] - a[2][2] for a, b in zip(rects, rects[1:])]
+            group = gaps.pop(cut - 1)                    # tabs | actions (D-02)
+            assert rects[cut][0] == EA._ZONE_UNDO
+            assert set(gaps) == {gap} and gap > 0
+            assert EA._GROUP_GAP * ea._zone_scale() <= group
+            assert group <= EA._GROUP_MAX * ea._zone_scale()
             label = ea._open_label(zone)
             assert label in ("", name)
             if label:
