@@ -1145,7 +1145,7 @@ class CodeLayer:
                 cur = look and absrow == ed.row
                 fade = look and len(full) - ed.left > cols
                 if cur:
-                    self._current_line(cv, lay, y, lay.cx, (fx if fade else lay.cx + lay.cw))
+                    self._current_line(cv, lay, y, lay.cx, fx if fade else None)
                 if gc:                           # #89: line-number gutter (crash mark integrated)
                     num = str(absrow + 1)
                     cv.print(num[-gc:], lay.x0, y,
@@ -1168,7 +1168,7 @@ class CodeLayer:
                 if fade:
                     self._fade(cv, fx, y, lh, t["bg"], fs)
                     if cur:
-                        self._current_line(cv, lay, y, fx, lay.cx + lay.cw)
+                        self._current_line(cv, lay, y, fx, None)
                 if absrow == ed.row:            # caret on the cursor's line
                     vcol = ed.col - ed.left
                     if 0 <= vcol <= cols:
@@ -1187,13 +1187,23 @@ class CodeLayer:
         self._draw_symbols()
 
     def _current_line(self, cv, lay, y, x0, x1):
-        """The current line's mark from x0 to x1: the theme's current mark (a
-        `bar` beside the line, as beside a row), and the `value` bar where the
-        band starts at the area's left."""
+        """The current line's mark, the columns [x0, x1) of it (x1 None: to
+        the area's right): the theme's current mark (a `bar` beside the line,
+        as beside a row) laid over the WHOLE line and clipped to those
+        columns, so a line drawn in two parts around its fade is one mark --
+        one outline, one plate -- and the `value` bar where the part starts at
+        the area's left."""
+        right = lay.cx + lay.cw
+        x1 = right if x1 is None else x1
         if x1 <= x0:
             return
         th = self.ws.theme_colors
-        _ui_draw.current(cv, th, (x0, y, x1 - x0, lay.lh), side=True)
+        whole = x0 == lay.cx and x1 == right
+        if not whole:
+            cv.clip(x0, y, x1 - x0, lay.lh)
+        _ui_draw.current(cv, th, (lay.cx, y, lay.cw, lay.lh), side=True)
+        if not whole:
+            cv.clip()
         if x0 == lay.cx:
             cv.rect(x0, y, 2 * lay.fs, lay.lh, th["value"])
 

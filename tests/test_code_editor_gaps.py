@@ -807,3 +807,29 @@ def test_a_line_longer_than_the_view_fades_over_its_last_12_pixels(tmp_path):
     assert ink in _band(cv, x0, x1, fits_y, lay.lh)
     assert ink in _band(cv, lay.x0, lay.x0 + _FADE, long_y, lay.lh)
     assert ink not in _band(cv, x0 + _FADE * lay.fs // 3, x1, long_y, lay.lh)
+
+
+def _edges(cv, lay, y, c):
+    """The columns of the line at y whose every row is colour c: a mark's
+    vertical edges (no glyph fills a line's whole height)."""
+    return [x for x in range(lay.cx, lay.cx + lay.cw)
+            if all(_w(cv, x, yy) == c for yy in range(y, y + lay.lh))]
+
+
+def test_a_faded_current_line_wears_one_outline(tmp_path):
+    """Contrast's current line is an outline: a line longer than the view,
+    drawn in two parts around its fade, is still ONE box -- no second edge
+    where the fade starts (design review R2-14)."""
+    for variant in ("dark", "light"):
+        ws, drv, lay, ed = _look_ws(tmp_path / variant, "contrast", variant)
+        ed.row = 1                                   # the line longer than the view
+        drv.frame(DT)
+        cv = ws.sys_canvas
+        y = lay.y0 + lay.lh
+        x = lay.cx + lay.cw - 20                     # inside the fade
+        ring = _w(cv, x, y)                          # the outline's top edge
+        assert ring == _w(cv, x, y + lay.lh - 1), variant
+        assert ring != cv._col(ws.code_layer._t["bg"]), variant
+        inner = [x for x in _edges(cv, lay, y, ring)
+                 if lay.cx + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs]
+        assert inner == [], (variant, inner)
