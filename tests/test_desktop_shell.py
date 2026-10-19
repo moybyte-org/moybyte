@@ -311,9 +311,9 @@ def test_the_volume_row_sets_the_console_level(tmp_path):
 
 
 def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypatch):
-    """Volume draws as the power popover's seven-step gauge (a `steps`
-    slider: no number), the theme's muted-speaker icon before it at 0;
-    Brightness keeps the plain slider."""
+    """Volume and Brightness draw as the power popover's seven-step gauge (a
+    `steps` slider: no number), the theme's muted-speaker icon before Volume
+    at 0 (owner, 2026-10-19: Brightness is Volume's bar)."""
     from runtime import settings_layer as S
     ws, drv = _settings_page(tmp_path)
     icons, sliders = [], {}
@@ -333,7 +333,7 @@ def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypat
     drv.frame(1 / 30)
     assert ("mute", True) in icons, "the theme's set draws the muted speaker"
     assert sliders["Volume"] == (0, 7, {"steps": True})
-    assert sliders["Brightness"][2] is None
+    assert sliders["Brightness"] == (0, 7, {"steps": True})
     ws.settings_layer.set_level("volume", 4)
     icons.clear()
     ws._dirty = True
@@ -344,19 +344,19 @@ def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypat
 def test_brightness_and_name_are_stored(tmp_path):
     """Brightness and Name apply nothing yet, but what they are set to is in
     system.json: a fresh session reads it back. Name is typed (the keyboard
-    in text mode while it holds focus), Brightness stepped in 0..5."""
+    in text mode while it holds focus), Brightness stepped in 0..7."""
     from runtime import host_app
     ws, drv = _settings_page(tmp_path)
     sl = ws.settings_layer
     sl.step_row("brightness", 1)
-    assert ws.system.get("brightness") == 4
-    sl.step_row("brightness", 9)
     assert ws.system.get("brightness") == 5
+    sl.step_row("brightness", 9)
+    assert ws.system.get("brightness") == 7
     _type_name(ws, drv, "Kit")
     _focus_row(ws, drv, "volume")
     assert not ws.input.text_mode
     again = host_app.build_workstation(str(tmp_path / "carts"))
-    assert again.system.get("brightness") == 5
+    assert again.system.get("brightness") == 7
     assert again.system.get("name") == "Kit"
 
 

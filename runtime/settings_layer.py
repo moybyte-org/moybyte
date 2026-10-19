@@ -242,8 +242,8 @@ _HINTS = {"cycle": _HINT_CHANGE, "seg": _HINT_CHANGE, "toggle": _HINT_SWITCH,
 # stored). Volume is the console's level (`audio_session.console_volume`,
 # the one the boot applies and the dev channel's `vol` sets); Brightness is
 # stored and applied by nothing yet.
-LEVELS = {"volume": (0, 7, 7), "brightness": (0, 5, 3)}
-_STEPPED = {"steps": True}    # Volume's slider: a segment a level, no number
+LEVELS = {"volume": (0, 7, 7), "brightness": (0, 7, 4)}
+_STEPPED = {"steps": True}    # a level row's slider: a segment a level, no number
 NAME_MAX = 16                 # the Name row's bytes
 _NAME_HINT = {"hint": "Your name"}   # what the empty Name field shows
 WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
@@ -1305,12 +1305,9 @@ class SettingsLayer:
         elif kind == "level":
             self._kinds[s] = "slider"
             cur, lo, hi = self.level(key)
-            if key == "volume":           # the power popover's gauge, muted at 0
-                if cur == lo:
-                    _ui.icon("mute")
-                got = _ui.slider(s, cur, lo, hi, _STEPPED)
-            else:
-                got = _ui.slider(s, cur, lo, hi)
+            if key == "volume" and cur == lo:     # muted at 0
+                _ui.icon("mute")
+            got = _ui.slider(s, cur, lo, hi, _STEPPED)  # the power popover's gauge
             if got != cur:
                 self.set_level(key, got)
         elif kind == "name" and not ws.can_type():
