@@ -698,7 +698,8 @@ tap on a shelf card selects it at once and the shelf glides to show it two
 cards in; a drag scrolls the shelf and selects nothing. The hint strip names
 its keys: on a keyboard C, /, N, Y and X its verbs, and the tabs' action;
 on a gamepad, which has no letters, only the verb its confirm does (Play,
-Open, New, or Change on Make) and the tabs' shoulders.
+Open, New, or Change on Make) and the tabs' shoulders. Under touch there
+is no strip, and the home lays out in its height too.
 
 **Damage first.** The fullscreen home's drag partial hands its band rect to
 the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,

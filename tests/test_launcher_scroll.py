@@ -534,6 +534,27 @@ def test_the_strip_shows_the_verbs_the_input_has_keys_for(tmp_path, kind, monkey
         ui_draw.input_kind("keys")
 
 
+def test_under_touch_the_home_takes_the_strips_height(tmp_path):
+    """Touch shows no keycaps, so the strip takes no band: the cards' band
+    reaches the content's foot, and a key brings the strip back."""
+    from runtime import ui_draw
+
+    ws = _ws_with_carts(tmp_path, 10)
+    lz = ws.launcher
+    lay = ws.layout
+    try:
+        strip = lz.foot()[5]
+        assert strip[3] > 0
+        ui_draw.input_kind("touch")
+        band = lz.band_rect()
+        assert lz.foot()[5][3] == 0
+        assert band[1] + band[3] == lay.cy + lay.ch
+        ui_draw.input_kind("keys")
+        assert lz.foot()[5] == strip
+    finally:
+        ui_draw.input_kind("keys")
+
+
 def test_the_hint_keys_switch_tabs_and_change(tmp_path):
     from runtime import host_app
 

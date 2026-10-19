@@ -1131,6 +1131,7 @@ class Carousel(Launcher):
         self._was_drag = False
         self._g_lay = None            # the layout _g was computed for
         self._g_reach = 0
+        self._g_keys = True
         self._g = None
         self.layout = None
         self.own_for = None           # optional cart -> bool (ws.carts.is_own)
@@ -1154,24 +1155,27 @@ class Carousel(Launcher):
         shows its whole cover at a clean scale (`_clean_side`)."""
         lay = self.layout
         reach = _ui_draw.mark_reach()          # the centre card's focus mark
-        if self._g_lay is lay and self._g_reach == reach:
+        keys = _ui_draw.input_kind() != "touch"    # touch shows no hint strip
+        if self._g_lay is lay and self._g_reach == reach and self._g_keys == keys:
             return self._g
-        self._g = (self._geom_hh(lay, reach) if _lb.metric_class() == _lb.HANDHELD
-                   else self._geom_desk(lay, reach))
+        self._g = (self._geom_hh(lay, reach, keys) if _lb.metric_class() == _lb.HANDHELD
+                   else self._geom_desk(lay, reach, keys))
         self._g_lay = lay
         self._g_reach = reach
+        self._g_keys = keys
         return self._g
 
-    def _geom_hh(self, lay, reach):
+    def _geom_hh(self, lay, reach, keys=True):
         """The handheld home's geometry (docs/look_2026-10.md step 17), the
         same tuple with its foot: no tab row (the tabs are the bar's), the
         hero twice a neighbour's side, its title and its metadata under it
-        and the hint strip along the content's foot. A neighbour is half the
+        and the hint strip along the content's foot (none with no `keys`: touch
+        shows no keycaps, and the cards take its height). A neighbour is half the
         cover's side at the font scale where that fits, and the next clean
         side down (`_clean_side`) where it does not."""
         fs = lay.fs
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
-        hint_h = 20 * fs
+        hint_h = 20 * fs if keys else 0
         hints = (cx, cy + ch - hint_h, cw, hint_h)
         tf = _ui_draw.font("hero")
         tsc = max(fs, (16 * fs) // max(1, tf[2]))
@@ -1207,7 +1211,7 @@ class Carousel(Launcher):
         return (None, band, card, card + gap, ring, gap, 0, top + card,
                 (title_y, title_h, tsc, meta_y, meta_h, hints), None)
 
-    def _geom_desk(self, lay, reach):
+    def _geom_desk(self, lay, reach, keys=True):
         """The desk home's geometry (docs/look_2026-10.md step 18), the same
         tuple with its foot (the hint strip) and the desk's own: the hero at
         the top left, the details pane beside it, the shelf under them
@@ -1224,7 +1228,7 @@ class Carousel(Launcher):
         fs = lay.fs
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
         u = _lb.render_scale()
-        hint_h = max(34 // u, 18 * fs)
+        hint_h = max(34 // u, 18 * fs) if keys else 0
         hints = (cx, cy + ch - hint_h, cw, hint_h)
         pad, top, gap = 48 // u, 24 // u, 20 // u
         ring = max(2 * fs + 2, reach)
