@@ -468,6 +468,10 @@ def test_a_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "star")
 
 
+def test_the_pause_menu_dims_the_game_and_holds_the_heap(board):
+    on_glass.pause_menu_dims_and_holds_the_heap(board, "star")
+
+
 def test_a_lua_cart_runs_and_exits(board):
     """The Lua tier is supposed to reach EVERY board by default (the point of
     the shared native staging), so pin it with a real run, not an import."""
