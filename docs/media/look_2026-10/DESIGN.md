@@ -256,7 +256,8 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
 - **System menu:** a popover under Moy: Search, Settings, About, Restart.
 - **Modals dim what they cover** (owner, 2026-10-19): the system menu, a
   card's menu, About and a dialog wash the content under the bars in the
-  look's `scrim` (about 40%); the pause menu washes the whole frozen game. A
+  look's `scrim` (about 40%); the pause menu washes the whole frozen game
+  (on the desk the content under the bar). A
   popover hung from its control -- an app's picker, a bar widget's calendar,
   Wi-Fi or power -- does not.
 - **Pause menu:** a card over the veiled, frozen game: Moy, the title and

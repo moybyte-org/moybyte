@@ -365,9 +365,14 @@ class PauseMenu:
             self._put_under(cv)
         ws.icon_spec()                    # the theme's set in the engine, as the bar has it
         # the paused game dims under the card (D-01): over the frame just
-        # put back, or the composite just made, never over the last scrim
+        # put back, or the composite just made, never over the last scrim;
+        # the whole glass, or on the desk the content under its bar
         if self._under is not None or ws.canvas is not cv:
-            _ui_draw.scrim(cv, ws.theme_colors, (0, 0, cv.w, cv.h))
+            if getattr(ws.wm, "mode", None) == "desktop":
+                lay = ws.layout
+                _ui_draw.scrim(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch))
+            else:
+                _ui_draw.scrim(cv, ws.theme_colors, (0, 0, cv.w, cv.h))
         if not self.page:
             host.focus(self.ITEMS[self.sel])
         settled = host.begin(cv, ws.theme_colors, (0, 0, cv.w, cv.h), desk)
