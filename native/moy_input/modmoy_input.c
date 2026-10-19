@@ -857,8 +857,26 @@ static mp_obj_t kbd_set_game_mode(mp_obj_t self_in, mp_obj_t on) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(kbd_set_game_mode_obj, kbd_set_game_mode);
 
+// decode(five_bytes) -> (held_mask, key): the matrix decode this image carries,
+// for the on-glass suite (a matrix frame it names, decoded as a read would be).
+static mp_obj_t kbd_decode(mp_obj_t self_in, mp_obj_t data) {
+    (void)self_in;
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(data, &bi, MP_BUFFER_READ);
+    if (bi.len != 5) {
+        mp_raise_ValueError(MP_ERROR_TEXT("five matrix bytes"));
+    }
+    uint32_t held;
+    int32_t key;
+    moy_kbd_decode_raw((const uint8_t *)bi.buf, &held, &key);
+    mp_obj_t t[2] = {mp_obj_new_int_from_uint(held), MP_OBJ_NEW_SMALL_INT(key)};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(kbd_decode_obj, kbd_decode);
+
 static const mp_rom_map_elem_t kbd_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_game_mode), MP_ROM_PTR(&kbd_set_game_mode_obj) },
+    { MP_ROM_QSTR(MP_QSTR_decode), MP_ROM_PTR(&kbd_decode_obj) },
 };
 static MP_DEFINE_CONST_DICT(kbd_locals, kbd_locals_table);
 

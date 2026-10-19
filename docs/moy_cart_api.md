@@ -200,8 +200,9 @@ an imported PICO-8 cart always carries its own 30 or 60.
   key. A `"tool"`/`"app"` cart runs WITH a minimal console bar (the back chevron, its
   title and the status) instead, and exits via that back.
 - **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
-  keyboard only produces 9 letters (the button-mapped `a d w s z x r` plus plain
-  `q e`); text mode delivers EVERY letter to `key()`/`keyp()`.
+  keyboard types every key to `key()`, but a held key reads every frame it is down
+  and `w a s d l k` also move and fire; text mode delivers each typed key once, with
+  no button behind it.
 - **A `textmode(True)` game needs no exit of its own**: the console's key opens the
   pause menu in text mode too, and BACKSPACE is a typed delete your cart reads. A
   cart may still bind **`quit()`** (see [State & utility](#state--utility)) to a key

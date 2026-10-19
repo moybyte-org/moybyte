@@ -2838,6 +2838,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # the _open_* forwards call it).
         self.editor_app.set_tab(view)
 
+    def sync_keyboard_mode(self):
+        """Put the board's keyboard in the mode of the surface on top, as
+        `_set_text_mode` does on every change. Called as the keyboard is
+        attached: the console boots on the home, which is no text surface, so
+        the keyboard takes the game mode from the first frame -- on the T-Deck
+        the raw matrix, where Mic (the console's key) and a held direction
+        read; the C3 itself boots in ASCII, where a bare Mic sends nothing."""
+        kb = self.keyboard
+        if kb is not None:
+            kb.set_game_mode(not self.input.text_mode)
+
     def _set_text_mode(self, on):
         # The code editor needs clean 1-byte ASCII (it reads last_key for typing);
         # a running cart wants the raw key matrix so a *held* direction keeps firing
@@ -4702,7 +4713,8 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
         inp.players = PlayerRouter(inp)
     if keyboard is not None:
         ws.keyboard = keyboard      # lets the code editor switch to text (ASCII) mode
-    ws.load_system()                # #28: system.json, the theme and its wallpaper
+        ws.sync_keyboard_mode()
+    ws.load_system()            # #28: system.json, the theme and its wallpaper
     try:                            # the console's level, the Settings row
         console_volume(int(ws.system.get("volume", 7)))
     except (TypeError, ValueError):

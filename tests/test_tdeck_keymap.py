@@ -48,7 +48,8 @@ def _input_module():
     class mod:
         KEY_BUTTON = {c: mi.buttons_for_key(c)[0] for c in range(128)
                       if not 65 <= c <= 90 and mi.buttons_for_key(c)}
-        RAW_KEYS = mi.raw_keys()
+        RAW_KEYS = tuple(e[:3] for e in mi.raw_keys())
+        RAW_SYMS = {(e[0], e[1]): e[3] for e in mi.raw_keys() if e[3]}
         decode_raw = staticmethod(mi.decode_raw)
 
     mod.TDeckKeyboard = TDeckKeyboard
@@ -361,3 +362,146 @@ def test_the_device_and_the_arrow_hosts_differ_ON_PURPOSE():
 
     # ...and what the two DO share.
     assert KEY_BUTTON[0x0D] == "run" and KEY_BUTTON[0x20] == "a"
+
+
+# -- the matrix types what the ASCII mode types ------------------------------
+
+def _chord(mod, *codes, sym=False, shift=False):
+    """The five matrix bytes for these plain keys held, with Sym and Shift."""
+    data = bytearray(5)
+    for idx, bit, code in mod.RAW_KEYS:
+        if code in codes:
+            data[idx] |= bit
+    if sym:
+        data[0] |= 0x04
+    if shift:
+        data[1] |= 0x40
+    return data
+
+
+def test_the_homes_verb_keys_arrive_in_raw_mode():
+    """The T-Deck home runs the keyboard as the raw matrix (`_set_text_mode`
+    puts every surface but a text one there, so Mic, the console's key, and a
+    held direction both read). Every key the home's strip names must
+    therefore be one the matrix decoder delivers; a key outside RAW_KEYS is a
+    hint that does nothing on the one keyboard the strip is drawn for. Search's
+    `/` is Sym+G, the chord printed on that key."""
+    from runtime import launcher_layer as ll
+    mod = _input_module()
+    keys = {ord(ch) for ch in ll._VERB_KEY} | {ord(ll._FAVOURITE_KEY), ord("q"), ord("e")}
+    for cap, _words in ll._VERB_HINT.values():
+        if len(cap) == 1:
+            keys.add(ord(cap.lower()))
+    plain = {code for _i, _b, code in mod.RAW_KEYS}
+    for k in sorted(keys):
+        if k in plain:
+            assert mod.decode_raw(_chord(mod, k))[1] == k, chr(k)
+        else:
+            hits = [mod.decode_raw(_chord(mod, code, sym=True))[1]
+                    for code in plain if code not in (0x08, 0x0D, 0x20)]
+            assert k in hits, "%r reaches the home in neither the plain nor the Sym layer" % chr(k)
+    assert mod.decode_raw(_chord(mod, ord("g"), sym=True)) == ((), ord("/"))
+
+
+def test_shift_and_sym_type_without_moving_the_player():
+    """Shift folds a letter to upper case, as the C3 does, and keeps its
+    button (Shift+D is still `right`); Sym gives the key its symbol, which is
+    no button -- Sym+W types '1' and is not `up`, as in the ASCII mode."""
+    mod = _input_module()
+    assert mod.decode_raw(_chord(mod, ord("d"), shift=True)) == (("right",), ord("D"))
+    assert mod.decode_raw(_chord(mod, ord("w"), sym=True)) == ((), ord("1"))
+    assert mod.decode_raw(_chord(mod, ord("c"))) == ((), ord("c"))
+
+
+def _home(tmp_path):
+    from runtime import host_app
+    from ws_helpers import build_ws_with_shelf
+    ws = build_ws_with_shelf(tmp_path, 6)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    return ws, drv
+
+
+def _matrix_press(ws, drv, data):
+    """One frame of the T-Deck's keyboard in raw mode (the C3's five bytes ->
+    moy_kbd.c -> a board's table) into the console's router, then two plain
+    frames for what the verb deferred."""
+    from test_system_key import _tdeck_frame
+    _tdeck_frame(ws, bytes(data))
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+
+
+def _real_card(ws):
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    return ws.launcher.selected()
+
+
+def test_the_tdeck_home_acts_on_letters_from_the_matrix(tmp_path):
+    """Design review R3-02, end to end on the host: the home's verb keys
+    arrive through the board's own keyboard driver in raw mode, the mode the
+    home runs in, and act -- F stars the card, Sym+G opens Search, C
+    changes it (the Editor); on Make, Y copies and X arms Sure?."""
+    mod = _input_module()
+    ws, drv = _home(tmp_path)
+    assert ws.launcher.tab == "games"
+    cart = _real_card(ws)
+    _matrix_press(ws, drv, _chord(mod, ord("f")))
+    assert ws.carts.is_favorite(cart) is True
+    _matrix_press(ws, drv, _chord(mod, ord("f")))       # F again: the star comes off
+    assert ws.carts.is_favorite(cart) is False
+    _matrix_press(ws, drv, _chord(mod, ord("g"), sym=True))
+    assert ws.search_typing
+    ws.close_search(clear=True)
+    drv.frame(1 / 30)
+    _real_card(ws)
+    _matrix_press(ws, drv, _chord(mod, ord("c")))
+    assert ws.screen == "menu", "C on a Games card is Change: the Editor"
+    ws.go_home()
+    drv.frame(1 / 30)
+    ws.set_home_tab("make")
+    _real_card(ws)
+    n = len(ws.carts.all)
+    _matrix_press(ws, drv, _chord(mod, ord("y")))
+    assert len(ws.carts.all) == n + 1, "Y on Make is Copy"
+    _real_card(ws)
+    _matrix_press(ws, drv, _chord(mod, ord("x")))
+    assert ws.launcher_layer._armed(), "X on Make arms Delete's Sure?"
+    assert len(ws.carts.all) == n + 1
+
+
+def test_the_console_puts_the_keyboard_on_the_matrix_at_boot(tmp_path):
+    """The C3 boots in ASCII, where a bare Mic sends nothing; the console
+    boots on the home, so attaching the keyboard asks for the matrix and the
+    console's key reads from the first frame, not only after a game."""
+    from test_tdeck_input import _frame, _keyboard
+    from ws_helpers import build_ws
+    ws = build_ws(tmp_path)
+    table, kbd, fake = _keyboard(bytes(5))
+    assert not kbd.raw_mode
+    ws.keyboard = kbd
+    ws.sync_keyboard_mode()
+    _frame(kbd, table)
+    assert kbd.raw_mode and b"\x03" in fake.writes
+
+
+@pytest.mark.skipif(not VENDOR_KBD.exists(),
+                    reason="vendor keyboard reference not checked out")
+def test_the_matrix_carries_every_key_and_symbol_the_ascii_mode_types():
+    """Every position the vendor firmware types a byte for is in RAW_KEYS, and
+    its Sym entry is the vendor's `keyboard_symbol` -- so a raw-mode surface
+    (the home, a game) reads the same bytes a text surface does."""
+    mod = _input_module()
+    src = VENDOR_KBD.read_text(encoding="utf-8", errors="replace")
+    syms = {}
+    for col, row, ch in re.findall(
+            r"keyboard_symbol\[(\d+)\]\[(\d+)\]\s*=\s*'(\\?.)'", src):
+        syms[(int(col), int(row))] = ch[-1]
+    plain = _vendor_matrix()
+    ours = {(idx, bit.bit_length() - 1): code for idx, bit, code in mod.RAW_KEYS}
+    for pos, ch in plain.items():
+        assert ours.get(pos) == ord(ch), (pos, ch)
+    for (idx, row), ch in syms.items():
+        if (idx, row) == (0, 6):
+            continue                    # Sym+Mic: Mic is the console's button
+        assert mod.RAW_SYMS.get((idx, 1 << row)) == ord(ch), ((idx, row), ch)

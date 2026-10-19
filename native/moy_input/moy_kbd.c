@@ -57,29 +57,53 @@ uint32_t moy_kbd_buttons_for_key(int32_t key) {
     }
 }
 
-// (byte, bit, key) for every key the console decodes from the matrix, in the
-// order they are tested: the last match wins the key slot, so BACKSPACE is last
-// and beats any letter held with it. Mic is not here: it is a button and no
-// key.
-static const uint8_t RAW_KEYS[][3] = {
-    {0, 0x02, 'w'}, {1, 0x02, 's'},
-    {0, 0x08, 'a'}, {1, 0x04, 'd'},
-    {4, 0x02, 'l'}, {4, 0x40, 'k'},
-    {2, 0x01, 'r'},
-    {0, 0x01, 'q'}, {1, 0x01, 'e'},
-    {3, 0x02, 'h'}, {3, 0x40, 'j'},
-    {1, 0x20, 'z'}, {1, 0x10, 'x'},
-    {0, 0x20, ' '}, {3, 0x08, 0x0D},
-    {4, 0x08, 0x08},
+// Every key of the matrix the console decodes, as (byte, bit, key, sym): the
+// byte the C3 types for it, and the one it types with Sym held (0: the plain
+// key's). The matrix carries the whole keyboard, so a raw-mode surface reads
+// the letters, digits and symbols an ASCII-mode one does: the home's verb
+// letters (C N Y X F, launcher_layer._VERB_KEY), Search's '/' (Sym+G) and a
+// cart's key(). Tested in this order: the last match wins the key slot, so
+// BACKSPACE is last and beats any letter held with it. Mic is not here: it is
+// a button and no key.
+static const uint8_t RAW_KEYS[][4] = {
+    {0, 0x02, 'w', '1'}, {1, 0x02, 's', '4'},
+    {0, 0x08, 'a', '*'}, {1, 0x04, 'd', '5'},
+    {4, 0x02, 'l', '"'}, {4, 0x40, 'k', '\''},
+    {2, 0x01, 'r', '3'},
+    {0, 0x01, 'q', '#'}, {1, 0x01, 'e', '2'},
+    {3, 0x02, 'h', ':'}, {3, 0x40, 'j', ';'},
+    {1, 0x20, 'z', '7'}, {1, 0x10, 'x', '8'},
+    {1, 0x08, 'p', '@'},
+    {2, 0x02, 'g', '/'}, {2, 0x04, 't', '('}, {2, 0x10, 'v', '?'},
+    {2, 0x20, 'c', '9'}, {2, 0x40, 'f', '6'},
+    {3, 0x01, 'u', '_'}, {3, 0x04, 'y', ')'}, {3, 0x10, 'b', '!'},
+    {3, 0x20, 'n', ','},
+    {4, 0x01, 'o', '+'}, {4, 0x04, 'i', '-'}, {4, 0x10, '$', 0},
+    {4, 0x20, 'm', '.'},
+    {0, 0x20, ' ', 0}, {3, 0x08, 0x0D, 0},
+    {4, 0x08, 0x08, 0},
 };
 
+#define KBD_SYM_BYTE 0
+#define KBD_SYM_BIT 0x04        // raw d0, the Sym key
+#define KBD_LSHIFT_BYTE 1
+#define KBD_LSHIFT_BIT 0x40
+#define KBD_RSHIFT_BYTE 2
+#define KBD_RSHIFT_BIT 0x08
+
 void moy_kbd_decode_raw(const uint8_t d[5], uint32_t *held, int32_t *key) {
+    bool sym = (d[KBD_SYM_BYTE] & KBD_SYM_BIT) != 0;
+    bool shift = (d[KBD_LSHIFT_BYTE] & KBD_LSHIFT_BIT) || (d[KBD_RSHIFT_BYTE] & KBD_RSHIFT_BIT);
     uint32_t h = 0;
     int32_t k = 0;
     for (size_t i = 0; i < sizeof(RAW_KEYS) / sizeof(RAW_KEYS[0]); i++) {
         if (d[RAW_KEYS[i][0]] & RAW_KEYS[i][1]) {
-            k = RAW_KEYS[i][2];
-            h |= moy_kbd_buttons_for_key(k);
+            int32_t c = sym && RAW_KEYS[i][3] ? RAW_KEYS[i][3] : RAW_KEYS[i][2];
+            if (shift && c >= 'a' && c <= 'z') {
+                c -= 32;            // as the C3 types it; the button is the same
+            }
+            k = c;
+            h |= moy_kbd_buttons_for_key(c);
         }
     }
     if (d[KBD_MIC_BYTE] & KBD_MIC_BIT) {
@@ -235,12 +259,13 @@ size_t moy_kbd_sizeof(void) {
 }
 
 // The matrix table, entry by entry, for the host's tests: 0 past the end.
-int moy_kbd_raw_key(size_t i, uint8_t *byte, uint8_t *bit, uint8_t *key) {
+int moy_kbd_raw_key(size_t i, uint8_t *byte, uint8_t *bit, uint8_t *key, uint8_t *sym) {
     if (i >= sizeof(RAW_KEYS) / sizeof(RAW_KEYS[0])) {
         return 0;
     }
     *byte = RAW_KEYS[i][0];
     *bit = RAW_KEYS[i][1];
     *key = RAW_KEYS[i][2];
+    *sym = RAW_KEYS[i][3];
     return 1;
 }

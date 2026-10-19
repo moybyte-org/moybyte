@@ -641,7 +641,7 @@ _DRV_SIGS = (
     ("moy_kbd_pass", [_PKBD, _POPS], None),
     ("moy_kbd_sizeof", [], ctypes.c_size_t),
     ("moy_kbd_raw_key", [ctypes.c_size_t, ctypes.POINTER(_U8), ctypes.POINTER(_U8),
-                         ctypes.POINTER(_U8)], _I),
+                         ctypes.POINTER(_U8), ctypes.POINTER(_U8)], _I),
     ("moy_touchdev_init", [_PTOUCH, _U8, _U8, ctypes.POINTER(_Map), _B, ctypes.c_float, _I32],
      None),
     ("moy_touchdev_probe", [_PTOUCH, _POPS], None),
@@ -681,11 +681,13 @@ def decode_raw(data):
 
 
 def raw_keys():
-    """The matrix table, (byte, bit, key) in the order the decoder tests them."""
+    """The matrix table, (byte, bit, key, sym) in the order the decoder tests
+    them: sym is the byte the key types with Sym held, 0 for the plain key's."""
     out = []
-    a, b, c = _U8(), _U8(), _U8()
-    while _lib().moy_kbd_raw_key(len(out), ctypes.byref(a), ctypes.byref(b), ctypes.byref(c)):
-        out.append((a.value, b.value, c.value))
+    a, b, c, s = _U8(), _U8(), _U8(), _U8()
+    while _lib().moy_kbd_raw_key(len(out), ctypes.byref(a), ctypes.byref(b), ctypes.byref(c),
+                                 ctypes.byref(s)):
+        out.append((a.value, b.value, c.value, s.value))
     return tuple(out)
 
 

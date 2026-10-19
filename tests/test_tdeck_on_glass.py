@@ -385,6 +385,38 @@ def test_a_long_press_opens_the_cards_verbs(board):
     on_glass.home_long_press_opens_card_verbs(board)
 
 
+# Matrix frames (d0..d4) of the keys the home's strip names, and what this
+# image's own decoder must type for each: C N Y X F, and Sym+G for Search's /.
+HOME_KEYS = (([0, 0, 0x20, 0, 0], "c"), ([0, 0, 0, 0x20, 0], "n"),
+             ([0, 0, 0, 0x04, 0], "y"), ([0, 0x10, 0, 0, 0], "x"),
+             ([0, 0, 0x40, 0, 0], "f"), ([0x04, 0, 0x02, 0, 0], "/"))
+_DECODE = "__import__('moy_input').keyboard().decode(bytes(%r))[1]"
+
+
+def test_the_homes_letter_keys_arrive_from_the_matrix(board):
+    """Design review R3-02: the home keeps the keyboard on the raw matrix
+    (Mic and a held direction read there), so its verb letters must be keys
+    the matrix decode types. This image's decoder answers each; then the C it
+    types, queued as a typed key, does Change on a Games card (the Editor).
+    A person pressing the key is the one step no suite takes."""
+    assert board.pyval("ws.screen", strict=True) == "launcher"
+    assert board.pyval("ws.input.text_mode", strict=True) is False
+    assert board.pyval("ws.keyboard.raw_mode", strict=True) is True, \
+        "the home is not on the matrix (keyboard firmware older than 2025-06-12?)"
+    for data, ch in HOME_KEYS:
+        assert board.pyval(_DECODE % data, strict=True) == ord(ch), ch
+    try:
+        board.pyexec("ws.set_home_tab('games'); ws.launcher.sel = [i for i, it in "
+                     "enumerate(ws.launcher.items) if it.get('path')][0]", strict=True)
+        board.pyexec("ws.input.source('local').key(%s)" % (_DECODE % HOME_KEYS[0][0]),
+                     strict=True)
+        board.drain(0.8)
+        assert board.pyval("ws.screen", strict=True) == "menu", "C did not open the Editor"
+    finally:
+        board.pyexec("ws.go_home()", strict=True)
+        board.drain(0.5)
+
+
 def test_a_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "star")
 

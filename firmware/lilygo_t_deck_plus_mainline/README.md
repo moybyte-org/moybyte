@@ -773,9 +773,16 @@ Every one of these was learned by hanging or bricking a board.
   both sides of the seam**: what the C3 hands over at the revert was typed
   while the matrix streamed, so the driver DRAINS the keyboard after `0x04`,
   and `_set_text_mode(True)` seeds every typed-key edge with the byte already
-  in `last_key` — the matrix decodes only sixteen keys, so each half covers a
-  case the other cannot. The driver boots in ASCII and never enables raw by
-  itself; raw needs keyboard firmware **≥ 2025-06-12**
+  in `last_key`; each half covers a case the other cannot. The matrix decode
+  (`RAW_KEYS`) carries the whole keyboard as the C3 types it, Sym giving a key
+  its symbol and Shift a letter its capital, so a raw-mode surface reads the
+  bytes a text surface does: the home, which is raw so that Mic and a held
+  direction read, takes its verb letters (C, N, Y, X, F) and Search's `/`
+  (Sym+G, the symbol printed on that key) from it, and a game its `key()`.
+  The driver boots in ASCII and never enables raw by
+  itself; the console asks for it as it attaches the keyboard
+  (`Workstation.sync_keyboard_mode`), because it boots on the home. Raw needs
+  keyboard firmware **≥ 2025-06-12**
   (`T-Keyboard_..._250620.bin`), and on older firmware the raw read sees the
   stray ASCII byte and keeps the session on the 1-byte + latch path
   (`raw_unsupported`; `RAW_GAME_MODE = False` on the driver force-disables raw). The

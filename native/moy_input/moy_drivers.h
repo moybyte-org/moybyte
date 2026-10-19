@@ -82,7 +82,8 @@ typedef struct {
 
 // The buttons a typed byte fires (an upper-case letter fires its lower case's).
 uint32_t moy_kbd_buttons_for_key(int32_t key);
-// Five matrix bytes -> the held buttons and the key (the last match wins).
+// Five matrix bytes -> the held buttons and the key the C3 would type (Sym and
+// Shift applied; the last match wins).
 void moy_kbd_decode_raw(const uint8_t d[5], uint32_t *held, int32_t *key);
 // Probe the keyboard; it comes up in ASCII mode.
 void moy_kbd_init(moy_kbd_t *k, const moy_i2c_t *bus, moy_input_t *table, uint32_t src);
@@ -90,7 +91,7 @@ void moy_kbd_game_mode(moy_kbd_t *k, bool on);
 void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus);
 // For the host's binding: the struct's size, and the matrix table by entry.
 size_t moy_kbd_sizeof(void);
-int moy_kbd_raw_key(size_t i, uint8_t *byte, uint8_t *bit, uint8_t *key);
+int moy_kbd_raw_key(size_t i, uint8_t *byte, uint8_t *bit, uint8_t *key, uint8_t *sym);
 
 // -- touch controllers -----------------------------------------------------------
 
