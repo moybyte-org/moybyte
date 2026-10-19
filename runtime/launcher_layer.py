@@ -2416,9 +2416,63 @@ class LauncherHomeLayer:
         if on != getattr(self, "_tab_keys", None):
             self._zone_bump = getattr(self, "_zone_bump", 0) + 1
         self._tab_keys = on
+        if on:
+            self._btn = None
         g = getattr(self.ws, "launcher", None)
         if g is not None:
-            g.tab_focus = on
+            g.tab_focus = on or getattr(self, "_btn", None) is not None
+
+    @property
+    def _button_focus(self):
+        """The desk home's button the keys are on (up from the shelf), an
+        index into `_desk_buttons`, or None: the shelf's card has them."""
+        return getattr(self, "_btn", None)
+
+    @_button_focus.setter
+    def _button_focus(self, k):
+        # one focus mark a screen: the button's takes it from the card
+        if k != getattr(self, "_btn", None):
+            self._zone_bump = getattr(self, "_zone_bump", 0) + 1
+        self._btn = k
+        if k is not None:
+            self._tab_keys = False
+        g = getattr(self.ws, "launcher", None)
+        if g is not None:
+            g.tab_focus = k is not None or bool(getattr(self, "_tab_keys", False))
+        self.ws.mark_dirty()
+
+    def _button_keys(self, i):
+        """The keys on the desk home's buttons: left and right move along
+        them, confirm presses one, up goes on to the tabs, down and B back
+        to the shelf. False where no button has them, or for another key."""
+        k = self._button_focus
+        if k is None:
+            return False
+        ws = self.ws
+        buttons = self._desk_buttons()
+        if not buttons:
+            self._button_focus = None
+            return False
+        k = min(k, len(buttons) - 1)
+        if not any(i.pressed(n) for n in ("left", "right", "up", "down", "a", "run", "b",
+                                          "home")):
+            return False                     # the strip's letters still act
+        if i.pressed("left"):
+            self._button_focus = max(0, k - 1)
+        elif i.pressed("right"):
+            self._button_focus = min(len(buttons) - 1, k + 1)
+        elif i.pressed("up"):
+            self._tab_focus = True
+        elif i.pressed("down") or (i.pressed("b") and ws.ach_ui._konami_pos == 0):
+            self._button_focus = None
+        elif i.pressed("a") or i.pressed("run"):
+            v = buttons[k][0]
+            if v != "delete":                # DEL's second press is on it too
+                self._button_focus = None
+            self._do_verb(v)
+        elif i.pressed("home"):
+            ws.home_key()
+        return True
 
     def _statics_key(self, cv):
         """Everything the home frame's STATIC chrome (wallpaper backdrop +
@@ -2429,7 +2483,7 @@ class LauncherHomeLayer:
         return _statics_base(ws, cv, self.grid) + (
             ws.look.wallpaper_id,
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
-            self.grid.tab, self._tab_focus, self.grid.arrangement,
+            self.grid.tab, self._tab_focus, self._button_focus, self.grid.arrangement,
             self.grid.statics_sel())
 
     def _retained_key(self, cv):
@@ -2824,6 +2878,9 @@ class LauncherHomeLayer:
         """[(verb, rect, kind)] of the details pane's buttons along the hero's
         foot, the first a primary where it plays, opens or makes, DEL a
         danger, as many as the pane holds."""
+        verbs = self._desk_verbs()
+        if not verbs:
+            return []                        # off the desk
         g = self.grid
         _hx, hy, _hs, _ = g.hero_rect()
         dk = g._geom()[9]
@@ -2833,7 +2890,7 @@ class LauncherHomeLayer:
         y = hy + block - 6 // u - h
         x = dx
         out = []
-        for k, v in enumerate(self._desk_verbs()):
+        for k, v in enumerate(verbs):
             label = _VERB_HINT[v][1]
             if k == 0 and v in ("play", "open", "new"):
                 kind = "primary"
@@ -2947,10 +3004,11 @@ class LauncherHomeLayer:
                 fx = dx + k * col
                 cv.print_scaled(key, fx, ky, dim, ks)
                 cv.print_scaled(_ui_draw.print_fit(val, col - 10 // u, vs), fx, vy, ink, vs)
-        for v, r, kind in buttons:
+        on = self._button_focus
+        for k, (v, r, kind) in enumerate(buttons):
             _ui_draw.button(cv, th, r, _VERB_HINT[v][1], kind=kind, app="home",
                             glyph="play" if v in ("play", "open") else None,
-                            glyph_draw=self._play_glyph)
+                            glyph_draw=self._play_glyph, focus=k == on)
 
     def _play_glyph(self, kind, rect, c, cv):
         """A details-pane button's glyph: the theme's icon set's (the dock's,
@@ -2981,15 +3039,20 @@ class LauncherHomeLayer:
         """The hint strip's two groups: the active tab's verbs on the
         selected card (on the desk, its buttons' and SEARCH), then the tab
         keys; and the verb of each pair. A keyboard types each verb's
-        letter, the star last, its words
-        following its state; a gamepad shows the verb its confirm does
-        (`launch_selected`), on that key, and X for the card's other verbs
-        (`card_verbs`)."""
+        letter, the star last, its words following its state; a gamepad
+        shows the verb its confirm does (`launch_selected`), on that key,
+        and X for the card's other verbs (`card_verbs`). With the keys on a
+        desk button, confirm names that button's verb."""
         items = []
         verbs = []
         zone = self.zone_verbs()
+        on = self._button_focus
+        if on is not None:
+            # the keys on the desk's buttons: confirm presses the one they are on
+            buttons = self._desk_buttons()
+            on = buttons[min(on, len(buttons) - 1)][0] if buttons else None
         if _ui_draw.input_kind() not in _LETTER_INPUTS:
-            tap = self._confirm_verb(zone)
+            tap = on or self._confirm_verb(zone)
             if tap:
                 items.append("confirm")
                 items.append(_VERB_HINT[tap][1])
@@ -3000,7 +3063,13 @@ class LauncherHomeLayer:
             return items, verbs
         desk = self._desk_verbs()
         for v in (tuple(desk) + tuple(v for v in zone if v == "search")) if desk else zone:
-            items.extend(_VERB_HINT[v])
+            k, words = _VERB_HINT[v]
+            if on is not None and (v == on or k == "confirm"):
+                if v != on:
+                    continue                 # the shelf's tap: no key on the buttons
+                k = "confirm"
+            items.append(k)
+            items.append(words)
             verbs.append(v)
         it = self.favourable()
         if it is not None:
@@ -3199,11 +3268,14 @@ class LauncherHomeLayer:
             elif i.pressed("home"):
                 ws.home_key()
             return True
+        if self._button_keys(i):
+            return True
         if self._hh() and self._hint_keys(i):
             return True
         # The carousel (§12): left/right glide by a card, a held key one
-        # motion; up takes the keys to the tab row. The grid: the arrows
-        # step its cells, and up from its top row takes them to the tabs.
+        # motion; up takes the keys to the tab row (on the desk, to the
+        # details pane's buttons first). The grid: the arrows step its
+        # cells, and up from its top row takes them to the tabs.
         grid = self.grid
         if i.pressed("left"):
             grid.nav2d(-1, 0)
@@ -3212,7 +3284,9 @@ class LauncherHomeLayer:
             grid.nav2d(1, 0)
             ws.mark_dirty()
         if i.pressed("up"):
-            if self._carousel() or self._grid_top_row():
+            if self._desk_buttons():
+                self._button_focus = 0
+            elif self._carousel() or self._grid_top_row():
                 self._tab_focus = True
             else:
                 grid.nav2d(0, -1)
@@ -3322,6 +3396,8 @@ class LauncherHomeLayer:
         grid = self.grid
         if click:
             self._hold = None
+            if self._button_focus is not None:
+                self._button_focus = None    # a press takes the keys' mark away
             if ws.bar_layer.handle_bar_tap(self.strip, px, py):
                 return True
             if self._hh() and self._hint_tap(px, py):

@@ -705,7 +705,10 @@ slide), run through the same `flinging` path as a touch fling
 the tabs in the bar, where left/right switch tabs and down or enter
 returns; the trackball is the same four directions. On the desk a key or a
 tap on a shelf card selects it at once and the shelf glides to show it two
-cards in; a drag scrolls the shelf and selects nothing. The hint strip names
+cards in; a drag scrolls the shelf and selects nothing; up from the shelf
+puts the focus on the details pane's first button, where left/right move
+along the buttons, confirm presses one, up goes on to the tabs and down or
+B comes back to the shelf. The hint strip names
 its keys: on a keyboard C, /, N, Y and X its verbs, and the tabs' action;
 on a gamepad, which has no letters, the verb its confirm does (Play,
 Open, New, or Change on Make), X for the card's list and the tabs'

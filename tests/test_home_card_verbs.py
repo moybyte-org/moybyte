@@ -328,3 +328,49 @@ def test_the_star_rows_wear_the_icon_sets_star(tmp_path):
             assert r[3] in iconsets.SLOT, "%s's icon %r is no slot" % (r[4], r[3])
         ws.sysmenu.close()
         ws.carts.toggle_favorite(it)
+
+
+def _marks(ws):
+    """The focus marks one full home frame draws."""
+    ui_draw.marks(None, True)
+    g._quiesce(ws)
+    ws._dirty = True
+    ws.frame(g._DT)
+    return ui_draw.marks(None, False)[2]
+
+
+def test_up_from_the_desk_shelf_reaches_its_buttons(tmp_path):
+    """On the desk home the keys and a gamepad reach the details pane's
+    buttons (R3-16): up from the shelf puts the focus mark on the first,
+    left and right move along them, confirm presses one; up again goes on
+    to the tabs, down comes back to the shelf. One focus mark a screen."""
+    ws = _ws(tmp_path, CONSOLE)
+    ws.launcher_layer._lib_unsupported = True
+    _select(ws, "games", "cart")
+    home = ws.launcher_layer
+    verbs = [v for v, _r, _k in home._desk_buttons()]
+    assert verbs[:2] == ["play", "change"]
+    assert _marks(ws) == 1
+    home.handle_input(_Pad("up"))
+    assert home._button_focus == 0 and not home._tab_focus
+    assert _marks(ws) == 1, "the button's mark, the card's gone"
+    home.handle_input(_Pad("right"))
+    assert home._button_focus == 1
+    for kind in ("pad", "keys"):
+        ui_draw.input_kind(kind)
+        items, _verbs = home._hint_groups()
+        assert items[:2] == ["confirm", "Change"], "%s: confirm names the button" % kind
+    home.handle_input(_Pad("up"))
+    assert home._tab_focus and home._button_focus is None
+    home.handle_input(_Pad("down"))
+    home.handle_input(_Pad("up"))
+    home.handle_input(_Pad("right"))
+    home.handle_input(_Pad("down"))
+    assert home._button_focus is None and not home._tab_focus
+    assert _marks(ws) == 1, "the card's mark back"
+    home.handle_input(_Pad("up"))
+    home.handle_input(_Pad("right"))
+    done = []
+    home._do_verb = done.append
+    home.handle_input(_Pad("a"))
+    assert done == ["change"]
