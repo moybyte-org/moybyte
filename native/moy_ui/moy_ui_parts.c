@@ -1447,7 +1447,7 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
     uint16_t capc = set(kc->fill) ? val(&d, kc->fill) : mix(bg, ink, dk ? 41 : 26);
     uint16_t capi = set(kc->ink) ? val(&d, kc->ink) : ink;
     int r = kc->r * d.fs;
-    int x = b.x + 8 * d.fs, y = b.y + (b.h - kh) / 2;
+    int x = b.x + MOY_UI_HINT_LEAD(d.desk) * d.fs, y = b.y + (b.h - kh) / 2;
     size_t i = 0;
     int field = 0, pairs = 0, shown = 1;
     while (i < len) {

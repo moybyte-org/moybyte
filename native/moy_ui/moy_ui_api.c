@@ -1286,7 +1286,7 @@ int moy_ui_api_hints_w(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *i
     for (int k = 0; k < n && k < 16; k++) {
         w = sp[2 * k + 1] > w ? sp[2 * k + 1] : w;
     }
-    return w ? w + 8 * c->fs : 0;
+    return w ? w + MOY_UI_HINT_LEAD(c->cls) * c->fs : 0;
 }
 
 int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,

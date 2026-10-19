@@ -1053,7 +1053,9 @@ _LETTER_INPUTS = ("keys", "tdeck")
 # phone home screen's long press), in frame milliseconds.
 LONG_PRESS_MS = 500
 _TAB_KEYS = ("tabs", "Tabs")
-_HINT_LEAD = 8       # the margin ui.hints leads with, at the font scale
+_HINT_LEAD = 5       # the handheld's margin ui.hints leads with, at the font
+                     # scale: the top bar's (MOY_UI_HINT_LEAD)
+_HINT_LEAD_DESK = 8  # the desk's
 DESC_LINES = 3       # the desk home's description: at most this many lines,
 DESC_EMS = 48        # ... as wide as this many n's: about 60 characters of
                      # running text, the width of the buttons' row
@@ -3141,7 +3143,7 @@ class LauncherHomeLayer:
                      rect[1] + (rect[3] - self.ws.layout.line_h) // 2, ink, 1)
         for v, x0, _x1 in spans:
             if v == "tabs":
-                left = x0 - (rect[0] + _HINT_LEAD * self.ws.layout.fs)
+                left = x0 - (rect[0] + self._hint_lead())
                 _ui_draw.hints(cv, th, (rect[0] + left, rect[1], rect[2] - left, rect[3]),
                                _TAB_KEYS, desk)
 
@@ -3157,17 +3159,20 @@ class LauncherHomeLayer:
         self._wall_th = (th, white, wt)
         return wt
 
+    def _hint_lead(self):
+        """The margin `ui.hints` leads with here, at the font scale."""
+        return (_HINT_LEAD_DESK if self.grid.desk() else _HINT_LEAD) * self.ws.layout.fs
+
     def _hint_pad(self):
         """The hint strip's margin at either end: the handheld's is the one
-        `ui.hints` leads with, the desk's wider."""
-        fs = self.ws.layout.fs
+        `ui.hints` leads with, the top bar's, the desk's wider."""
         if self.grid.desk():
-            return max(24 // _lb.render_scale(), _HINT_LEAD * fs)
-        return _HINT_LEAD * fs
+            return max(24 // _lb.render_scale(), self._hint_lead())
+        return self._hint_lead()
 
     def _hint_inner(self, rect):
         """The strip `ui.hints` draws in for the margin `_hint_pad`."""
-        e = self._hint_pad() - _HINT_LEAD * self.ws.layout.fs
+        e = self._hint_pad() - self._hint_lead()
         return (rect[0] + e, rect[1], rect[2] - 2 * e, rect[3])
 
     def _hint_tap(self, px, py):

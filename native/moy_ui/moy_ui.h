@@ -859,7 +859,11 @@ const char *moy_ui_hint_keys(int input, int act);
 // `enter`, `left`, `right`, `up` and `down` draw as signs, any other as its
 // legend). An action the input has no key for draws nothing, and the input
 // touch draws no hints at all. The theme's `keycap` look styles the caps
-// (moy_ui_keycap); a one-glyph legend's cap is square.
+// (moy_ui_keycap); a one-glyph legend's cap is square. They lead in by
+// MOY_UI_HINT_LEAD at the scale, the handheld's the top bar's own margin (its
+// system button's and its clock's ink, 5 at the T-Deck's scale), so the bar
+// and the strip share one side margin.
+#define MOY_UI_HINT_LEAD(desk) ((desk) ? 8 : 5)
 int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
                  int fs, int desk);
 // The same hints, drawn when `draw`, with each pair's span across the band
