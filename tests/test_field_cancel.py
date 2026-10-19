@@ -86,6 +86,32 @@ def test_esc_cancels_first_then_leaves(tmp_path):
     assert ws.screen != "settings"
 
 
+def test_mic_cancels_the_wifi_password_prompt(tmp_path):
+    class _Wifi:
+        def status(self):
+            return (False, None, None)
+
+        def scan(self):
+            return [("Cafe", 60, True)]
+
+        def known(self):
+            return []
+    ws = build_ws(tmp_path)
+    drv = make_drv(ws)
+    ws.wifi = _Wifi()
+    ws.open_settings()
+    sl = ws.settings_layer
+    sl.open_wifi()
+    sl._wifi_ask("Cafe")
+    for _ in range(3):
+        drv.frame(_DT)
+    _type(drv, "abc")
+    assert sl.editing_field()
+    ui_draw.input_kind("tdeck")
+    _tdeck_frame(ws, MIC, text=True)
+    assert sl.wifi_pick is None and not ws.sysmenu.open
+
+
 def test_the_home_search_is_a_field_mic_cancels(tmp_path):
     ws = build_ws(tmp_path)
     make_drv(ws).frame(_DT)

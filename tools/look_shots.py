@@ -1453,9 +1453,8 @@ def _measure(pair, got, want, ok):
 
 def _mark_pairs(ws, img, box, view):
     """The focused row's mark covers the row (design review R3-03, R3-14):
-    the focus colour's run spans the row's height as it shows, a theme
-    whose mark is an edge or a bar on a row (Moy) up to the bar's own
-    16-pixel cap."""
+    the focus colour's run at the row's leading edge spans the row's height
+    as it shows, a field's row included."""
     from runtime import ui_draw
     if not ui_draw.marks_on():
         return []
@@ -1473,9 +1472,24 @@ def _mark_pairs(ws, img, box, view):
     ys = [yy for yy in range(y0, y1) if any(px[xx, yy] in focus for xx in range(x0, x1))]
     if th.get("focus") is None or not focus:
         return []
-    want = min(r[3], 16 * ws.layout.fs) - 2
+    want = r[3] - 4             # a ring inset inside a ring (Contrast Light) the slack
     got = (max(ys) - min(ys) + 1) if ys else 0
     return [_measure("focus mark height vs row", got, want, got >= want)]
+
+
+def _caption_pairs(ws, img):
+    """No section caption is cut at the top of Settings' page (design
+    review R3-14): a header is wholly in or wholly out, so no caption ink
+    (`chrome_ink_dim`/`ink_dim`) lies on the page's first two rows, in the
+    left third where captions start."""
+    if ws.screen != "settings" or ws.settings_layer.has_page():
+        return []
+    lay = ws.layout
+    inks = _token_rgbs(ws, ("chrome_ink_dim", "ink_dim"))
+    px = img.load()
+    got = sum(1 for y in (lay.cy, lay.cy + 1) for x in range(lay.cx, lay.cx + lay.cw // 3)
+              if px[x, y] in inks)
+    return [_measure("caption cut at the page top", got, 0, got == 0)]
 
 
 def _rim_pairs(ws, probe, img):
@@ -1571,6 +1585,7 @@ def audit(ws, probe, img):
     out += _current_pairs(ws, probe, img)
     out += _chip_pairs(ws, probe, img)
     out += _rim_pairs(ws, probe, img)
+    out += _caption_pairs(ws, img)
     out += _calc_pairs(ws, img)
     enabled = th.get("chrome_ink")
     seen = set()

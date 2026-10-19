@@ -215,10 +215,12 @@ def test_a_long_press_that_opens_nothing_fails_the_run(tmp_path, monkeypatch):
     assert [f[1] for f in failed] == ["card menu"]
 
 
-def test_the_audit_finds_round_3s_real_pairs(tmp_path):
-    """The Contrast Mode segment (R3-04), Moy Night's chip label (R3-06),
-    the editing Name field's mark (R3-03) and the desk Calc's backspace
-    (R3-09) are FLAGs; Moy's hairline is D-05's, not a FLAG."""
+def test_the_audit_measures_round_3s_pairs(tmp_path):
+    """The pairs round 3 found by eye are measured in the scenes that show
+    them: the Mode segment on a focus plate (R3-04), the focused desk chip's
+    label as text (R3-06), the Name row's mark against the row (R3-03) and
+    the desk Calc's backspace against a digit (R3-09); a row under its floor
+    is a FLAG unless an open question owns it."""
     L.run(str(tmp_path), ["contrast-dark_handheld_parts-appearance_focus-mode",
                           "moy-dark_desktop_calc", "moy-dark_handheld_settings_focus-name"],
           quiet=True, kit=True, only_kit=True, audit_csv=True)
@@ -226,12 +228,21 @@ def test_the_audit_finds_round_3s_real_pairs(tmp_path):
 
     def rows(name):
         return [ln.split(",") for ln in (kit / (name + ".audit.csv")).read_text().splitlines()[1:]]
-    seg = rows("contrast-dark_handheld_parts-appearance_focus-mode")
-    assert any(r[2] == "#ffee62" and r[6] == "FLAG" for r in seg)
-    calc = rows("moy-dark_desktop_calc")
-    assert any(r[1] == "bar chip label vs plate" and r[6] == "FLAG" for r in calc)
-    assert any(r[1].startswith("desk backspace") for r in calc)
-    name = rows("moy-dark_handheld_settings_focus-name")
-    assert any(r[1] == "focus mark height vs row" for r in name)
-    assert all(r[6] == "" for r in name if r[2] == "#292c52")
-    assert any(r[7] == "D-05" for r in name)
+    for name, pair in (("contrast-dark_handheld_parts-appearance_focus-mode",
+                        "focused row part vs plate"),
+                       ("moy-dark_desktop_calc", "bar chip label vs plate"),
+                       ("moy-dark_desktop_calc", "desk backspace ink height vs digit cap"),
+                       ("moy-dark_handheld_settings_focus-name", "focus mark height vs row")):
+        got = [r for r in rows(name) if r[1] == pair]
+        assert got, (name, pair)
+        for r in got:
+            under = float(r[4]) < float(r[5])
+            assert r[6] == ("FLAG" if under and not r[7] else ""), r
+    chip = [r for r in rows("moy-dark_desktop_calc") if r[1] == "bar chip label vs plate"]
+    assert chip[0][5] == "4.5", "a label is text"
+
+
+def test_a_mark_shorter_than_its_row_and_a_rim_off_its_cover_are_flags():
+    assert L._measure("focus mark height vs row", 7, 22, 7 >= 22)[3] < 1.0
+    assert L.flagged([L._measure("hero rim-to-cover gap", 5, 0, False)])
+    assert not L.flagged([L._measure("hero rim-to-cover gap", 0, 0, True)])
