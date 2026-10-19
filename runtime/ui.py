@@ -358,6 +358,14 @@ def table_rows():
     return _C.api_table_rows(_T[0])
 
 
+def table_pictures():
+    """After the app drew its pictures over the cells `table_rows` names:
+    the table's fades at the edges its rows run on past, again over the
+    picture column, so a cut row's picture fades with its row."""
+    t = _T
+    _C.api_table_pics(t[0], t[1], t[2])
+
+
 def scroll(id=None, o=None):
     """`scroll(id)` begins a scroll region in `at`'s rect (else the page's
     room below its rows): the rows stacked after it scroll in it, by the keys

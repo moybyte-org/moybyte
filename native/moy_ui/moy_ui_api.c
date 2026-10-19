@@ -303,7 +303,9 @@ static moy_ui_keep_t *keep_of(moy_ui_ctx_t *c, uint32_t id) {
 // Scroll page p (stop index `page`) to show box b, keeping each group
 // caption on it wholly in view or wholly out: a scroll down that would cut
 // one at the page's top goes on past it, a scroll up brings it in, and a
-// group's first row brings its caption.
+// group's first row brings its caption. Where rows run on below what shows,
+// the page's foot fades (foot_fade): the box stands above that fade, as far
+// as the rows go on.
 static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_t b) {
     moy_ui_keep_t *k = keep_of(c, p->id);
     if (k == NULL) {
@@ -311,10 +313,15 @@ static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_
     }
     int32_t was = k->a;
     int top = p->b.y, bottom = p->b.y + p->b.h, d = 0;
+    int32_t more = k->b - (k->a + p->b.h);       // the rows below what shows
+    int fade = more > 0 ? FADE_H * c->fs : 0;
     if (b.y < top) {
         d = b.y - top;
-    } else if (b.y + b.h > bottom) {
-        d = (b.y + b.h) - bottom;
+    } else if (b.y + b.h > bottom - fade) {
+        d = (b.y + b.h) - (bottom - fade);
+        if (b.y + b.h <= bottom && d > more) {
+            d = (int)more;                       // no further than the rows go
+        }
     }
     if (d != 0) {
         int t = top + d;                // the page's top after, in this frame's pixels
@@ -1555,6 +1562,16 @@ static void nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, in
 // A list's edges in view `v`: where rows `rows` high scrolled by `scroll`
 // run on below it, a fade over its last `h` pixels toward colour `ci`;
 // with `head`, where rows are scrolled off above it, one over its first.
+static uint32_t s_fades;
+
+uint32_t moy_ui_api_fades(int reset) {
+    uint32_t n = s_fades;
+    if (reset) {
+        s_fades = 0;
+    }
+    return n;
+}
+
 static void edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, int rows,
                        int scroll, int ci, int head, int h) {
     if (h > v.h) {
@@ -1563,10 +1580,12 @@ static void edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, 
     if (rows > scroll + v.h) {
         moy_ui_box_t b = {v.x, (int16_t)(v.y + v.h - h), v.w, (int16_t)h};
         moy_ui_fade(s, b, ci, 0, c->fs, ground_of(c));
+        s_fades++;
     }
     if (head && scroll > 0) {
         moy_ui_box_t b = {v.x, v.y, v.w, (int16_t)h};
         moy_ui_fade(s, b, ci, 1, c->fs, ground_of(c));
+        s_fades++;
     }
 }
 
@@ -1721,6 +1740,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     }
     c->tbl_y0 = (int16_t)(view.y - offset);
     c->tbl_rh = (int16_t)rh;
+    c->tbl_n = (int16_t)count;
     c->tbl_view = view;
     c->tbl_px = c->tbl_pw = 0;
     clip_t k;
@@ -2329,6 +2349,15 @@ int moy_ui_api_table_rows(const moy_ui_ctx_t *c, int32_t out[8]) {
     out[6] = c->tbl_px;
     out[7] = c->tbl_pw;
     return c->tbl_pw > 0;
+}
+
+void moy_ui_api_table_pics(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    if (c->tbl_pw <= 0) {
+        return;
+    }
+    moy_ui_box_t v = c->tbl_view;
+    moy_ui_box_t pic = {c->tbl_px, v.y, c->tbl_pw, v.h};
+    edge_fades(c, s, pic, c->tbl_n * c->tbl_rh, v.y - c->tbl_y0, MOY_UI_DEFAULT, 1, c->tbl_rh);
 }
 
 void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {

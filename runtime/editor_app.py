@@ -111,6 +111,8 @@ _ZONE_TABS = (
 _LADDER_GAP = 4                 # the narrow bar's widest gap between icons, at fs 1
 _GROUP_GAP = 8                  # ...the least gap between the tabs and the actions
 _GROUP_MAX = 12                 # ...and the most
+_ZONE_TAIL = 6                  # ...and its room after Play: with the bar's gap, Play's
+                                # ink stands 10 px clear of the status icons (R4-26)
 _PILL_CLEAR = 8                 # the labelled ladder: open pill to the next tab's icon, at fs 1
 _PILL_PAD = 9                   # ...the most each pill grows on either side, room given
 _HIST_LEAD = 12                 # ...the last tab to undo
@@ -740,15 +742,17 @@ class EditorApp:
 
     def _ladder_layout(self, rect):
         """The narrow bar's icons, ([(tab, glyph, rect)], gap), as many as
-        `rect` holds: square, as tall as the lent band, `gap` apart within a
-        group -- the zone's spare width, less the least group gap, shared out
-        up to _LADDER_GAP each, the full gap where the open tab is labeled --
+        `rect` less _ZONE_TAIL at its end holds: square, as tall as the lent
+        band, `gap` apart within a group -- the zone's spare width, less the
+        least group gap, shared out up to _LADDER_GAP each, the full gap where
+        the open tab is labeled --
         and the group gap before the first action the rest, from _GROUP_GAP
         up to _GROUP_MAX. The open tab's is widened by the tab's pad each
         side, or to a labeled chip with its name (`_open_label`)."""
         x, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON
         fs = self._zone_scale()
+        w -= _ZONE_TAIL * fs
         pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
         label = self._open_label(rect)
         ladder = self._ladder()

@@ -299,7 +299,9 @@ _DRAW_SIGS = (
     ("moy_ui_api_dialog", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, _I, c.c_void_p],
      c.c_int32),
     ("moy_ui_api_owes", [c.c_void_p], _I),
+    ("moy_ui_api_fades", [_I], c.c_uint32),
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
+    ("moy_ui_api_table_pics", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_table_rows", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_popover", [c.c_void_p, c.POINTER(_Sink), _Span, _I, c.c_void_p], _I),
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
@@ -1055,9 +1057,16 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
 
+    def api_fades(reset):
+        return int(lib.moy_ui_api_fades(1 if reset else 0))
+
     def api_end(ctx, cv, look):
         p, _k = _ctx(ctx)
         lib.moy_ui_api_end(p, c.byref(sink(cv, look)))
+
+    def api_table_pics(ctx, cv, look):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_table_pics(p, c.byref(sink(cv, look)))
 
     def api_table_rows(ctx):
         p, _k = _ctx(ctx)
@@ -1124,8 +1133,9 @@ def binding():
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
-              api_box, api_table, api_scroll, api_field, api_dialog, api_owes, api_end,
-              api_table_rows,
+              api_box, api_table, api_scroll, api_field, api_dialog, api_owes, api_fades,
+              api_end,
+              api_table_rows, api_table_pics,
               api_grid,
               api_card, api_part, api_popover, api_menu, api_menu_danger,
               api_focus, api_keys_taken, api_at, api_dup):

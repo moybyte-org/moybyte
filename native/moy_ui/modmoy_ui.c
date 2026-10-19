@@ -2288,6 +2288,16 @@ static mp_obj_t ui_api_table_rows(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_table_rows_obj, ui_api_table_rows);
 
+// api_table_pics(ctx, cv, look): the table drawn last's edge fades again over
+// its picture column, its pictures drawn
+static mp_obj_t ui_api_table_pics(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
+    moy_ui_sink_t s;
+    sink_of(&s, cv, look);
+    moy_ui_api_table_pics(ctx_of(ctx), &s);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_table_pics_obj, ui_api_table_pics);
+
 // api_end(ctx, cv, look): the page's end, after its rows
 static mp_obj_t ui_api_end(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
     moy_ui_sink_t s;
@@ -2467,6 +2477,12 @@ static mp_obj_t ui_api_owes(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_owes_obj, ui_api_owes);
 
+// api_fades(reset) -> the list fades drawn since the count was reset
+static mp_obj_t ui_api_fades(mp_obj_t reset) {
+    return mp_obj_new_int_from_uint(moy_ui_api_fades(mp_obj_is_true(reset)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_fades_obj, ui_api_fades);
+
 // api_focus(ctx, id=None) -> the focused id, or None
 static mp_obj_t ui_api_focus(mp_obj_t ctx, mp_obj_t id) {
     moy_ui_ctx_t *c = ctx_of(ctx);
@@ -2622,8 +2638,10 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_field), MP_ROM_PTR(&ui_api_field_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_dialog), MP_ROM_PTR(&ui_api_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_fades), MP_ROM_PTR(&ui_api_fades_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_rows), MP_ROM_PTR(&ui_api_table_rows_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_table_pics), MP_ROM_PTR(&ui_api_table_pics_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },

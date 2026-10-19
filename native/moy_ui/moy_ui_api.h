@@ -182,9 +182,10 @@ typedef struct {
     uint8_t fin_on, fin_flags;
     uint16_t fin_ground;
     moy_ui_box_t fin_pic, fin_content;
-    // The table drawn last: row 0's top (scrolled) and the rows' height, the
-    // view they show in, and its picture column's x and side (0: none).
-    int16_t tbl_y0, tbl_rh, tbl_px, tbl_pw;
+    // The table drawn last: row 0's top (scrolled), the rows' height and
+    // count, the view they show in, and its picture column's x and side (0:
+    // none).
+    int16_t tbl_y0, tbl_rh, tbl_n, tbl_px, tbl_pw;
     moy_ui_box_t tbl_view;
 } moy_ui_ctx_t;
 
@@ -318,6 +319,10 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
 // side, where an app draws a row's own picture over its cell; 0 where that
 // table has no picture column or none was drawn.
 int moy_ui_api_table_rows(const moy_ui_ctx_t *c, int32_t out[8]);
+// The table drawn last, its pictures drawn: the fades at the edges its rows
+// run on past, again over its picture column, so a cut row's picture fades
+// with its row (Files' covers).
+void moy_ui_api_table_pics(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
 // page has one.
@@ -325,6 +330,11 @@ void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // Whether the frame drawn last laid a dialog or a popover out from a stale measure, so
 // the next frame is owed though no input came.
 int moy_ui_api_owes(const moy_ui_ctx_t *c);
+// The fades drawn at the edges lists run on past (a page's foot, a scroll
+// region's, a cut popover body's, a table's), in every context since the
+// count was last reset; `reset` zeroes it after reading. The review kit's
+// net that a list with hidden rows says so.
+uint32_t moy_ui_api_fades(int reset);
 // out: x, y, w, h, state.
 void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w, int h,
                      const moy_ui_over_t *o, int32_t out[5]);

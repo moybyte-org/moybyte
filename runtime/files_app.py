@@ -546,7 +546,7 @@ class FilesAppLayer(ListShellApp):
         elif verb == "COPY":
             res = self._store.duplicate(kind, name)
             if self._persist(res):
-                self.status = "Copied"
+                self.status = "Duplicated"
                 self._refresh(keep=res[0] or name)
         elif verb == "WALL":
             self.status = "Wallpaper set" if art.set_wallpaper(name) else \
@@ -771,6 +771,7 @@ class FilesAppLayer(ListShellApp):
                 due = due or cover is False    # its decode lands over the next frames
                 ui.initial((px, y, side, side), cart.get("title") or self.rows[i][0], r)
         cv.clip()
+        ui.table_pictures()                    # the cut row's cover fades with it
         if due:
             self._damage.all()
 

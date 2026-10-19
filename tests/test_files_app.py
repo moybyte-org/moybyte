@@ -175,6 +175,7 @@ def test_gallery_lists_rename_copy_trash_restore(tmp_path):
     # COPY numbers upward, and the copy is current
     app._act("COPY", "dragon")
     assert "dragon_2" in app.names_shown() and app.sel_name() == "dragon_2"
+    assert app.status == "Duplicated", "the verb's word, Duplicate, in its report (R4-24)"
 
     # RENAME in a dialog: focus opens in its field, the keys type, Enter commits
     app._act("NAME")
