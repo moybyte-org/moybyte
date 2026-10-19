@@ -521,7 +521,7 @@
   "tdeck_320x240_fs1_moy_menus": {
     "pause": [7, 13],
     "pause_options": [15, 6],
-    "sysmenu": [1, 9]
+    "sysmenu": [1, 12]
   },
   "tdeck_320x240_fs1_moy_night": {
     "app_appearance": [33, 20],
@@ -558,7 +558,7 @@
   "tdeck_320x240_fs1_widget_pages": {
     "page_battery": [46, 19],
     "page_clock": [63, 39],
-    "page_menu": [1, 9],
+    "page_menu": [1, 12],
     "page_wifi": [68, 15]
   }
 }
