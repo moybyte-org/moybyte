@@ -1274,10 +1274,10 @@ def _blend(px, r, c):
 
 def _inks(img, r, plate, fs=1):
     """{shape: [colour, ...]} of the solid colours drawn on `plate` in `r`,
-    commonest first: anti-aliasing and colours under a hundredth of the rect
-    (a stray edge) left out."""
+    commonest first: anti-aliasing and colours under a 400th of the rect (a
+    stray edge) left out."""
     px = img.load()
-    hist = _colours(img, r, max(6, r[2] * r[3] // 100))
+    hist = _colours(img, r, max(6, r[2] * r[3] // 400))
     out = {"solid": [], "line": [], "text": []}
     for c in sorted(hist, key=lambda c: -hist[c]):
         if c == plate or _diff(c, plate) <= 24:
@@ -1287,6 +1287,13 @@ def _inks(img, r, plate, fs=1):
             continue
         out[shape].append(c)
     return out
+
+
+def _distinct(a, b):
+    """Do two inks tell apart as a second cue: by lightness (1.5:1, as a
+    disabled ink is judged) or by hue (an accent beside a grey of its
+    lightness, 96 apart in RGB)?"""
+    return contrast(a, b) >= DISABLED_FLOOR or _diff(a, b) >= 96
 
 
 def _owner(ws, kind, c, ratio, floor):
@@ -1310,9 +1317,9 @@ def _row_pairs(ws, img, r, pair, kind=None, view=None):
     it shows (cut to `view`), measured inside the plate's own run -- against
     each solid colour drawn on it, the commonest four: a fill or a line at
     3:1, text at 4.5:1. A part kind measures its own way: a swatch's fill
-    is a sample, held only to show at all, and a card's preview art is not
-    measured, their rings are; a segment's selected pill may lean on its
-    label's ink, as a current plate does."""
+    is a sample, held only to show at all, and a card's preview art and a
+    field's own ground are not measured, their rings are; a segment's
+    selected pill may lean on its label's ink, as a current plate does."""
     if view is not None:
         r = _clip(r, view)
     if r is None or r[2] < 3 or r[3] < 3:
@@ -1339,15 +1346,25 @@ def _row_pairs(ws, img, r, pair, kind=None, view=None):
     if kind == "card":
         solids = []
     elif kind == "swatches":
-        for c in solids:
-            add("swatch vs plate (shows)", c, SAMPLE_FLOOR)
+        keys = [c for c in inks["text"] + inks["line"] if contrast(c, plate) >= FLOOR]
+        if keys:            # the dots wear a keyline: it is what shows them
+            add("swatch keyline vs plate", keys[0], FLOOR)
+        else:
+            for c in solids:
+                add("swatch vs plate (shows)", c, SAMPLE_FLOOR)
         solids = []
-    elif kind == "seg" and solids and len(inks["text"]) >= 2:
-        a, b = inks["text"][:2]
-        if contrast(a, b) >= DISABLED_FLOOR and contrast(solids[0], plate) < FLOOR:
-            ratio = contrast(a, b)
-            out.append(("selected label ink vs plain label ink", _hex(a), _hex(b), ratio,
-                        DISABLED_FLOOR, ""))
+    elif kind == "field":
+        solids = []         # the field's own ground, which its ring bounds
+    elif kind == "seg" and solids and contrast(solids[0], plate) < FLOOR:
+        # a faint selected pill: its label's ink against a plain label's
+        pill = solids[0]
+        on = _inks(img, _run_of(img.load(), r, pill), pill, ws.layout.fs)
+        mine = [c for c in on["text"] + on["solid"] + on["line"] if c != plate]
+        plain = [c for c in inks["text"] if c not in mine]
+        if mine and plain and _distinct(mine[0], plain[0]):
+            out.append(("selected label ink vs plain label ink", _hex(mine[0]),
+                        _hex(plain[0]), contrast(mine[0], plain[0]),
+                        min(DISABLED_FLOOR, contrast(mine[0], plain[0])), ""))
             solids = solids[1:]
     for c in solids:
         add(pair, c, FLOOR)
@@ -1417,9 +1434,10 @@ def _current_pairs(ws, probe, img):
             mine = _tab_ink(img, r, p)
             plain = [_tab_ink(img, q, ground) for q, act in tabs if not act and q[2] >= 8]
             plain = [c for c in plain if c is not None]
-            if mine is not None and plain and contrast(mine, plain[0]) >= DISABLED_FLOOR:
+            if mine is not None and plain and _distinct(mine, plain[0]):
+                ratio = contrast(mine, plain[0])
                 row = ("current label ink vs plain label ink", _hex(mine), _hex(plain[0]),
-                       contrast(mine, plain[0]), DISABLED_FLOOR, "")
+                       ratio, min(DISABLED_FLOOR, ratio), "")
         out.append(row)
     return out
 
@@ -1451,13 +1469,13 @@ def _measure(pair, got, want, ok):
     return (pair, "%dpx" % got, "%dpx" % want, 1.0 if ok else 0.0, 1.0, "")
 
 
-def _mark_pairs(ws, img, box, view):
+def _mark_pairs(ws, img, box, view, kind=None):
     """The focused row's mark covers the row (design review R3-03, R3-14):
     the focus colour's run at the row's leading edge spans the row's height
     as it shows, a field's row included."""
     from runtime import ui_draw
-    if not ui_draw.marks_on():
-        return []
+    if not ui_draw.marks_on() or ui_draw.input_kind() == "touch" or kind == "card":
+        return []           # touch shows no focus; a card wears a card's mark
     r = _clip(box, view) if view is not None else box
     if r is None:
         return []
@@ -1559,7 +1577,7 @@ def audit(ws, probe, img):
         view = _viewport(ws, box, hinted)
         kind = _FOCUSED_KIND[0]() if _FOCUSED_KIND[0] is not None else None
         out += _row_pairs(ws, img, box, "focused row part vs plate", kind, view)
-        out += _mark_pairs(ws, img, box, view)
+        out += _mark_pairs(ws, img, box, view, kind)
     sl = ws.settings_layer
     if ws.screen == "settings":
         for stop, kind in sl._kinds.items():
