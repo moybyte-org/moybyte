@@ -520,6 +520,114 @@ def test_a_game_window_holds_its_game_whole_over_rounded_corners(tmp_path, dev):
     assert (cw, ch) == (ws.canvas.w * s, ws.canvas.h * s)
 
 
+_TRIM_CART = {
+    "manifest.json": ('{"format": "moy-1", "title": "Trim Fill", "version": 1,'
+                      ' "main": "main.lua", "runtime": "lua", "fps": 30,'
+                      ' "canvas": "128x128", "input": ["buttons"]}'),
+    # the p8 importer's 128x120 trim (p8_writer.P8_CROP), every pixel drawn
+    "main.lua": "view(128, 120)\nfunction _draw() cls(8) end\n",
+}
+
+
+def _trim_desk(tmp_path):
+    ws = _moy_desk(tmp_path)
+    root = Path(ws.carts_root) / "trim_fill.moy"
+    root.mkdir()
+    for name, text in _TRIM_CART.items():
+        (root / name).write_text(text)
+    ws.carts.rescan()
+    assert select_on_home(ws, "Trim Fill") is not None
+    return ws
+
+
+def _settle(ws, n=4):
+    """`n` frames with no overlay over the game: no FPS chip, no toast (the
+    first open's achievement)."""
+    ws.show_fps = False
+    for _ in range(n):
+        ws._toast_until = 0
+        ws.frame(1 / 30)
+
+
+def _nothing_beneath_shows(ws, win):
+    """Every pixel inside the player window's ring, from the title strip's
+    foot to the frame's foot, is the window's own: the game, the bezel a
+    content rect larger than the game takes, or the window's body (the
+    matte at the sides, the colour its foot is painted)."""
+    wm = ws.wm
+    sc = wm._root_canvas
+    cx, cy, cw, ch = win.content_rect()
+    ox, oy, s = wm._player_view(win)
+    view = wm._view_src() or (0, 0, ws.canvas.w, ws.canvas.h)
+    game = _px(ws.canvas, view[0] + view[2] // 2, view[1] + view[3] // 2)
+    body = _px(sc, win.x + win.w // 2, cy + ch + max(1, win.foot // 2))
+    bezel = _px(sc, cx, cy) if (ox, oy) != (cx, cy) else game
+    e = wm._frame_edge()
+    x0, x1 = win.x + 1 + e, win.x + win.w - 1 - e
+    bad = []
+    for y in range(cy, cy + ch):
+        for x in range(x0, x1):
+            p = _px(sc, x, y)
+            if ox <= x < ox + view[2] * s and oy <= y < oy + view[3] * s:
+                want = (game,)
+            elif cx <= x < cx + cw:
+                want = (bezel,)
+            else:
+                want = (body,)
+            if p not in want:
+                bad.append((x, y, hex(p)))
+    return bad
+
+
+@pytest.mark.parametrize("size", ["play", "dev", "maximised", "resized"])
+def test_a_trimmed_game_window_shows_nothing_beneath(tmp_path, size):
+    """celeste's 128x120 trim in a game window at every size the WM gives
+    one: the game covers its content rect and the matte round it is the
+    window's body, so no pixel of the desk shows through at its sides (the
+    owner's "celeste is transparent on the borders", 2026-10-20)."""
+    ws = _trim_desk(tmp_path)
+    ws.open()
+    _settle(ws)
+    wm = ws.wm
+    win = wm._wins["desktop"]
+    assert ws.cart.get("title") == "Trim Fill"
+    if size == "dev":
+        wm.set_play_intent("dev")
+        wm._resize_window(win, *wm._win_size("desktop", wm._root_canvas, wm._fs()))
+    elif size == "maximised":
+        wm._toggle_max(win)
+    elif size == "resized":
+        wm._resize_window(win, win.w + 37, win.h - 23)
+    _settle(ws)
+    assert win.foot > 0 and win.edge >= win.foot     # the matte this pins
+    bad = _nothing_beneath_shows(ws, win)
+    assert not bad, "%d pixels of what is beneath show, first %r" % (len(bad), bad[:4])
+
+
+def test_a_trimmed_game_fullscreen_covers_its_rect(tmp_path):
+    """The same cart in console mode: the scaled game covers its rect, and
+    every pixel round it is the letterbox bezel."""
+    ws = _trim_desk(tmp_path)
+    ws.wm.enter_console()
+    _settle(ws, 2)
+    assert select_on_home(ws, "Trim Fill") is not None
+    ws.open()
+    _settle(ws)
+    wm = ws.wm
+    assert wm.mode == "console" and not wm._wins
+    sc = wm._root_canvas
+    ox, oy, s = wm.viewport()
+    view = wm._view_src() or (0, 0, ws.canvas.w, ws.canvas.h)
+    game = _px(ws.canvas, view[0] + view[2] // 2, view[1] + view[3] // 2)
+    bezel = _px(sc, 0, 0)
+    assert bezel != game
+    gw, gh = view[2] * s, view[3] * s
+    bad = [(x, y) for y in range(sc.h) for x in range(sc.w)
+           if _px(sc, x, y) != (game if ox <= x < ox + gw and oy <= y < oy + gh
+                                 else bezel)]
+    assert not bad, "%d pixels off, first %r" % (len(bad), bad[:4])
+
+
 def test_game_viewport_is_the_player_window(tmp_path):
     """ws._game_xy maps a system point at the playtest window's viewport origin
     into 320x240 game coords (the cart's touch() contract)."""

@@ -1701,7 +1701,7 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
     int top = moy_theme_sheet_cell(MOY_THEME_P_WINDOW, st, 0);
     if (depth) {
         // the theme's depth: a rounded frame, its shadow and fringe the desk's
-        moy_ui_depth_frame(s, w, th, active);
+        moy_ui_depth_frame(s, w, th, active, (btns & MOY_UI_FRAME_MATTE) != 0);
     } else if (top >= 0) {
         int y0 = w.y + th + 1, sides = w.h - th - 2;
         int lc = L.style == MOY_THEME_FRAME_WIN9X ? moy_ui_token(look, MOY_UI_T_SHADE_HI) : edge;

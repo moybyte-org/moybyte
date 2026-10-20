@@ -1653,7 +1653,7 @@ static mp_obj_t ui_paint(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_paint_obj, 5, 5, ui_paint);
 
 // frame(cv, look, rect, title_h, title, active, btns, fs): a window's frame,
-// `btns` its MOY_UI_FRAME_* buttons (True: a minimise)
+// `btns` its MOY_UI_FRAME_* word: the buttons (True: a minimise), the matte
 static mp_obj_t ui_frame(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;

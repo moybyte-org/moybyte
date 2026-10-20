@@ -352,8 +352,9 @@ enum { MOY_UI_CAST_WINDOW = 0, MOY_UI_CAST_CARD = 1, MOY_UI_CAST_KEY = 2 };
 #define MOY_UI_GEOM 6
 void moy_ui_frame_geom(int w, int h, int th, int active, int mode, int out[MOY_UI_GEOM]);
 // The frame's own pixels under the depth (moy_ui_frame draws it): the strip,
-// the sides and the foot inside the rounded outline, the ring, the rule.
-void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active);
+// the sides and the foot inside the rounded outline, the ring, the rule; with
+// `matte`, the columns as wide as the foot inside each side as well.
+void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int matte);
 // The token a title draws in under the depth's header: the value ink on a
 // focused `fill` header, the chrome ink, the dim chrome ink behind.
 int moy_ui_depth_title_ink(int active);
@@ -602,8 +603,13 @@ enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2, MOY_UI_FB_BACK
 // A frame's optional buttons (`btns`): a minimise, and the back chevron at
 // the head of the strip, before the icon and the title, that a window whose
 // app has opened a page of it shows (docs/look_2026-10.md step 27a).
+// MOY_UI_FRAME_MATTE rides the same word and is no button: the window's
+// content stands in from its sides by the foot (the game window's matte,
+// WindowChrome._win_edge), so under a depth the body paints those columns
+// too, as it paints the foot.
 #define MOY_UI_FRAME_MIN 1
 #define MOY_UI_FRAME_BACK 2
+#define MOY_UI_FRAME_MATTE 8
 #define MOY_UI_FRAME_BUTTONS 4
 typedef struct {
     moy_ui_box_t box;

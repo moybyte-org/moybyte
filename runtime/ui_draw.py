@@ -1566,14 +1566,15 @@ def icon_label(cv, th, band, text, on, fs):
 # one, its title alignment and its button order.
 
 FRAME_BUTTONS = ("close", "max", "min", "back")     # MOY_UI_FB_*
-FRAME_MIN, FRAME_BACK = 1, 2                           # MOY_UI_FRAME_*
+FRAME_MIN, FRAME_BACK, FRAME_MATTE = 1, 2, 8            # MOY_UI_FRAME_*
 
 
 def frame(cv, th, rect, title_h, title, active, btns, fs):
     """Window `rect`'s frame: its ring, its `title_h` strip with `title` and
     the strip's buttons, its drop shadow. `btns`: FRAME_MIN for a minimise
     button, FRAME_BACK for the back chevron at the head of the strip (True:
-    a minimise)."""
+    a minimise), and FRAME_MATTE for a content rect standing in from the
+    sides by the foot, whose columns the depth's body then paints too."""
     _C.frame(cv, _LOOK if th is _TH else _look(th), rect, title_h, title, active, int(btns), fs)
 
 

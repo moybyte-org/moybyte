@@ -492,8 +492,10 @@ int moy_ui_depth_title_ink(int active) {
 
 // The frame's body in `mask`: the header with the top corners (a focused
 // `bar` header's value bar across its top rows), the sides and foot with the
-// bottom ones (the content's rect left alone), the ring and the rule.
-static void frame_body(const dd_t *d, moy_ui_box_t w, int th, int active, int mask) {
+// bottom ones (the content's rect left alone: in from each side by the foot
+// under `matte`), the ring and the rule.
+static void frame_body(const dd_t *d, moy_ui_box_t w, int th, int active, int mask,
+                       int matte) {
     const moy_ui_depth_t *dp = &s_depth;
     int g[MOY_UI_GEOM];
     moy_ui_frame_geom(w.w, w.h, th, active, MOY_UI_UNDER_FULL, g);
@@ -527,7 +529,9 @@ static void frame_body(const dd_t *d, moy_ui_box_t w, int th, int active, int ma
         }
         dd_t rest = rows_of(d, w.y + band, w.y + th + 1);
         rrect(&rest, w.x, w.y, w.w, th + 1, r, top, st, mask, &head, 0, 0, -1, NULL);
-        moy_shape_hole_t content = {w.x + 1, w.y + 1 + th, w.w - 2, w.h - 2 - th - foot, 0};
+        int side = matte ? foot : 0;
+        moy_shape_hole_t content = {w.x + 1 + side, w.y + 1 + th, w.w - 2 - 2 * side,
+                                    w.h - 2 - th - foot, 0};
         rrect(d, w.x, w.y + th + 1, w.w, w.h - th - 1, r, cn & (MOY_SHAPE_BL | MOY_SHAPE_BR), st,
               mask, &body, 0, 0, -1, &content);
     }
@@ -543,10 +547,10 @@ static void frame_body(const dd_t *d, moy_ui_box_t w, int th, int active, int ma
     }
 }
 
-void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active) {
+void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int matte) {
     dd_t d;
     open_dd(s, &d, 0);
-    frame_body(&d, w, th, active, MOY_SHAPE_INNER);
+    frame_body(&d, w, th, active, MOY_SHAPE_INNER, matte);
 }
 
 static void under(const dd_t *d, moy_ui_box_t w, int th, int active, int mode) {
@@ -557,7 +561,7 @@ static void under(const dd_t *d, moy_ui_box_t w, int th, int active, int mode) {
         moy_shape_hole_t body = {w.x, w.y, w.w, w.h, g[0]};
         moy_shape_shadow(&d->t, w.x, w.y, w.w, w.h, &sh, &body);
     }
-    frame_body(d, w, th, active, MOY_SHAPE_FRINGE);
+    frame_body(d, w, th, active, MOY_SHAPE_FRINGE, 0);
 }
 
 int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int mode) {

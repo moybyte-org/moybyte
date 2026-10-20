@@ -102,8 +102,11 @@ class WindowChrome:
         win._chrome_streak += 1
         self._chrome_drew = True
         self.ws.icon_spec()               # the look's icon set, for the title buttons
+        # The game window's content stands in further than the frame takes
+        # (_win_edge): the frame's body paints that matte, as it does the foot.
+        matte = _ui_draw.FRAME_MATTE if win.edge > self._frame_edge() else 0
         _ui_draw.frame(self._root_canvas, self.ws.theme_colors, (win.x, win.y, win.w, win.h),
-                  win.title_h, self._win_title(win), focused, btns, self._fs())
+                  win.title_h, self._win_title(win), focused, int(btns) | matte, self._fs())
         slot = _ui_draw.frame_icon((win.x, win.y, win.w, win.h), win.title_h, btns)
         if slot is not None:
             self._win_icon(win, slot, focused)
