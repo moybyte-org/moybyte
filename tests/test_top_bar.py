@@ -266,8 +266,8 @@ def _make_chip(ws, verb):
 
 
 def test_make_tab_copy_and_delete_through_the_bar(tmp_path):
-    """COPY duplicates the selected project at once (a copy only ADDS); DEL deletes at
-    once (to the Trash), with no second tap."""
+    """COPY duplicates the selected project at once (a copy only ADDS); DEL asks
+    first (a cart's delete is permanent), and the dialog's Delete deletes it."""
     from runtime import host_app
     ws = _ws(tmp_path)
     assert ws.can_manage
@@ -281,7 +281,12 @@ def test_make_tab_copy_and_delete_through_the_bar(tmp_path):
     assert len(ws.launcher.items) == n0 + 1
     drv.click(*_make_chip(ws, "delete"))
     drv.frame(1 / 30)
-    assert len(ws.launcher.items) == n0
+    assert ws.confirm.open and len(ws.launcher.items) == n0 + 1
+    x, y, w, h = ws.confirm._host.box("Delete")
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)                 # the release taps it; the tail deletes
+    drv.frame(1 / 30)
+    assert not ws.confirm.open and len(ws.launcher.items) == n0
 
 
 def test_make_tab_management_hidden_when_read_only(tmp_path):
