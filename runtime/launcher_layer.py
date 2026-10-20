@@ -1072,6 +1072,8 @@ _HINT_LEAD = 5       # the handheld's margin ui.hints leads with, at the font
                      # scale: the top bar's (MOY_UI_HINT_LEAD)
 _HINT_LEAD_DESK = 8  # the desk's
 BACK_TIP = "Desk"    # the tooltip on the bar's chevron back to the desk
+SHELF_GAP = 42       # the details block's foot to the shelf's caption, in
+                     # glass pixels: the full PROJECTS window's, at every size
 DETAILS_MIN = 280    # the narrowest details pane beside the hero, in glass
                      # pixels at the target's 1x: a primary button and one more
 # The most buttons a desk card shows, per kind of tab: a played tab's
@@ -1335,9 +1337,11 @@ class Carousel(Launcher):
         as it holds. The margins narrow with the width, to a twentieth of
         it. Where the height cannot hold the pane over a half-cover shelf,
         the pane drops its facts, then its metadata (the desk's `rows`), and
-        the hero halves down to an eighth of the cover. What height is left goes half above the
-        shelf's caption and half under the shelf, which under touch (no
-        hint strip, no `keys`) keeps at most the side margin under it. The
+        the hero halves down to an eighth of the cover. The shelf's caption
+        stands `SHELF_GAP` under the details and what height is left goes
+        under the shelf (design review R5-08), but under touch (no hint
+        strip, no `keys`) the shelf keeps at most the side margin under it,
+        the rest over its caption (R3-07). The
         tuple's band is the shelf's: its caption, its cards, their lift
         and their shadows; the desk's own ends with the pane's top and the
         rows of buttons it holds, `brows`, each a button's height and
@@ -1389,15 +1393,19 @@ class Carousel(Launcher):
                 block = hero + apart + need
         shelf = hero // 2
         spare = max(0, hints[1] - cy - top - block - cap_h - shelf)
-        cap_y = hy + block + spare // 2
+        d = _ui_draw.depth()
+        blur = d[9] if d[0] and d[6] else 0
+        down = max(ring, blur + d[11])
+        # the caption SHELF_GAP under the details, the spare height under the
+        # shelf; a height short of that splits what it has, keeping the
+        # shelf's lift and shadow off the strip
+        cap_y = hy + block + min(SHELF_GAP // u,
+                                 max(spare // 2, spare - max(down, 20 // u)))
         if not keys:
             # no strip under touch: the shelf stands at most the side margin
             # off the glass's foot, and the strip's room goes over its caption
             cap_y = max(cap_y, hints[1] - pad - shelf - cap_h)
         shelf_y = cap_y + cap_h
-        d = _ui_draw.depth()
-        blur = d[9] if d[0] and d[6] else 0
-        down = max(ring, blur + d[11])
         band = (cx, cap_y, cw, max(0, min(hints[1], shelf_y + shelf + down) - cap_y))
         desk = ((hx, hy, hero, hero), dx, max(0, cx + cw - pad - dx), shelf_y, pad,
                 (ts, ms, ks, vs, bh, pane, u), dy, tuple(rows), brows)

@@ -389,3 +389,38 @@ def test_the_narrow_editor_bar_keeps_play_clear_of_the_status(tmp_path):
     play = rects[-1][2]
     assert rects[-1][0] is None, "Play ends the ladder"
     assert zone[0] + zone[2] - (play[0] + play[2]) >= 6 * ws.layout.fs
+
+
+@pytest.mark.parametrize("theme,mode", [("moy", "light"), ("contrast", "dark")])
+def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, theme,
+                                                                      mode):
+    """The PROJECTS window's shelf caption stands as far under the details
+    block at the narrow size as at the full one, its wrapped buttons
+    included, and the height the window has spare goes under the shelf
+    (design review R5-08)."""
+    ws = _ws(tmp_path, DESK, theme, mode)
+    ui_draw.input_kind("keys")
+    ws.open_desk()
+    ws.open_projects()
+    _frame(ws)
+    win = ws.wm._wins["projects"]
+    gaps = []
+    for size in (None, (360, 534)):
+        if size is not None:
+            ws.wm._resize_window(win, *size)
+            _frame(ws)
+        grid = ws.projects_grid
+        ws.wm._install(win.ctx)
+        try:
+            dk = grid._geom()[9]
+            (_hx, hy, hero, _h), dy, pane = dk[0], dk[6], dk[5][5]
+            foot = max(hy + hero, dy + pane)
+            buttons = ws.projects_layer._desk_buttons()
+            assert all(r[1] + r[3] <= foot for _v, r, _k in buttons)
+            cap = grid.band_rect()[1]
+            under = grid.foot()[5][1] - (dk[3] + hero // 2)
+            gaps.append(cap - foot)
+            assert under >= 20, "the shelf runs into the strip"
+        finally:
+            ws.wm._install(ws.wm._root_ctx)
+    assert gaps[0] == gaps[1] == launcher_layer.SHELF_GAP, gaps
