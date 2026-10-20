@@ -476,3 +476,22 @@ def test_a_theme_merged_from_the_page_is_the_consoles_at_once(tmp_path):
     assert (applied, errors) == (1, [])
     assert ws.look.theme_name == other and ws.look.theme_variant == "dark"
     assert ws.system.get("theme") == other
+
+
+def test_a_theme_no_console_has_re_applies_as_boot_reads_it(tmp_path):
+    """A stored name no theme has reads as absent at boot: the default, in its
+    own mode. The live re-apply lands on the same look, so a board's glass
+    after a page's change is the one its next boot shows (on a Guition S3,
+    2026-10-20, a row naming a retired `night` re-applied in `dark` where boot
+    showed `light`)."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    from ws_helpers import build_ws
+    from runtime.chrome import DEFAULT_THEME, DEFAULT_VARIANT
+    ws = build_ws(tmp_path)
+    ws.system.set("theme", "no_such_theme", persist=False)
+    ws.system.set("theme_variant", "dark")
+    ws.apply_system_keys(["theme", "theme_variant"])
+    live = (ws.look.theme_name, ws.look.theme_variant)
+    assert live == (DEFAULT_THEME, DEFAULT_VARIANT)
+    assert live == (lambda w: (w.look.theme_name, w.look.theme_variant))(
+        build_ws(tmp_path))

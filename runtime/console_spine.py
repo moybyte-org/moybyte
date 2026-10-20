@@ -166,6 +166,8 @@ class SpineVerbs:
             self.look.set_theme(name, persist=False,
                                 variant=self.system.get(
                                     "theme_variant", self.look.theme_variant))
+            if self.look.theme_name != name:   # as at boot: the default's mode
+                self.look.set_theme_variant(DEFAULT_VARIANT, persist=False)
         if "layout_theme" in keys:
             self.look.apply_layout()
         for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
