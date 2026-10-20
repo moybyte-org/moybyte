@@ -210,6 +210,9 @@ def chrome_scale_floor(w, h, diagonal_in=None):
                    that leaves the bar's lent zone too narrow for the Editor's
                    tab ladder or the launcher's verbs. The board.toml says what
                    would have to change before it is worth re-proposing.
+      Browser      its two arrangements are those boards': the desk declares
+                   the P4's 7.0" (`web_boot.DESK_DIAGONAL_IN`), the 320x240
+                   handheld declares none, as the T-Deck.
 
     A floor of 3 is not reachable by any panel in the lineup; a board that
     started answering 3 is a red test in tests/test_board_toml.py."""
