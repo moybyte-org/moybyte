@@ -75,18 +75,81 @@ def test_the_vendor_reset_dance_brackets_the_upload():
     chip = _chip(i2c, fw_blob([(0x00, 1)]))
     chip.gsl_init(pins)
     regs = [w[0] for w in i2c.writes]
-    # clear_reg, reset, LOAD, startup, reset, startup: the 0xE0 power register
-    # is written before and after the firmware, the RST pin pulsed twice with
-    # INT low, and INT released once the firmware runs.
+    # pulse, clear, reset, LOAD, startup, reset, startup: the 0xE0 power
+    # register is written before and after the firmware, the RST pin pulsed
+    # three times with INT low, and INT released once the firmware runs.
     assert regs.index(0x00) > regs.index(0xE0)
     assert regs.count(0xBC) == 2                        # two resets
-    assert pins.calls == [True, True, False]
+    assert pins.calls == [True, True, True, False]
+    assert chip.gsl_tries == 1 and chip.gsl_werr == 0
+    assert chip.gsl_sig == 0x5A5A5A5A
+
+
+class PinsOnTheWire(FakePins):
+    """The pin calls recorded in the bus's own write log, so their order
+    against the writes is visible."""
+
+    def __init__(self, i2c):
+        super().__init__()
+        self.i2c = i2c
+
+    def __call__(self, before):
+        super().__call__(before)
+        self.i2c.writes.append(("PIN", before))
+
+
+def test_the_shutdown_pulse_comes_before_the_first_write():
+    """A warm restart leaves the chip running the last boot's firmware, or
+    wedged (the Guition P4, 2026-10-05 to 10-20: every bring-up uploaded,
+    0xB0 read 0, until one pulsed first). The pulse is the first thing the
+    chip sees, as silead.c's power toggle and the Android init_chip do."""
+    i2c = FakeI2C({0xB0: b"\x5a\x5a\x5a\x5a"})
+    chip = _chip(i2c, fw_blob([(0x00, 1)]))
+    chip.gsl_init(PinsOnTheWire(i2c))
+    assert i2c.writes[0] == ("PIN", True)
+
+
+def test_the_clear_writes_the_touch_count_register_not_0x88():
+    """The clear is silead.c's init and the Android clr_reg: 0xE0 halt, then
+    0x80 (the touch count) = 1, the clock, 0xE0 run. 0x88 is no register of
+    that sequence."""
+    i2c = FakeI2C({0xB0: b"\x5a\x5a\x5a\x5a"})
+    chip = _chip(i2c, fw_blob([(0x00, 1)]))
+    chip.gsl_init(FakePins())
+    head = [w for w in i2c.writes[:4]]
+    assert head == [(0xE0, b"\x88"), (0x80, b"\x01"), (0xE4, b"\x04"), (0xE0, b"\x00")]
+    assert all(w[0] != 0x88 for w in i2c.writes)
 
 
 def test_a_chip_that_never_signs_is_not_available():
     i2c = FakeI2C({0xB0: b"\x00\x00\x00\x00"})
     chip = _chip(i2c, fw_blob([(0x00, 1)]))
     assert chip.gsl_init(FakePins()) is False and not chip.available
+    assert chip.gsl_tries == 2 and chip.gsl_sig == 0         # MOY_GSL_TRIES
+
+
+def test_a_bring_up_that_does_not_sign_runs_once_more():
+    """silead.c's resume: a wrong signature is one more full bring-up, the
+    firmware uploaded again."""
+    answers = iter([b"\x00\x00\x00\x00", b"\x5a\x5a\x5a\x5a"])
+    i2c = FakeI2C({0xB0: lambda: next(answers)})
+    chip = _chip(i2c, fw_blob([(0x00, 1)]))
+    assert chip.gsl_init(FakePins()) is True and chip.available
+    assert chip.gsl_tries == 2
+    assert [w[0] for w in i2c.writes].count(0x00) == 2   # the record, twice
+
+
+def test_a_board_sleep_lasts_at_least_what_was_asked():
+    """The board's bus sleeps in scheduler ticks (FreeRTOS at 100 Hz on every
+    console), and pdMS_TO_TICKS rounds DOWN: the bring-up's 5 ms was no sleep
+    at all and its 10 ms anywhere from 0 to 10. A delay of n ticks lasts
+    (n-1, n] ticks, so the board asks for one more than the ceiling."""
+    ticks = mi._lib().moy_drv_sleep_ticks
+    for tick in (1, 10):
+        for ms in (0, 1, 5, 9, 10, 11, 20, 30, 50):
+            n = ticks(ms, tick)
+            assert (n - 1) * tick >= ms, (ms, tick, n)
+            assert (n - 2) * tick < ms or n == 1, (ms, tick, n)
 
 
 # The real packets, sampled over the dev channel while a finger held the

@@ -12,7 +12,10 @@
 // GSL3680: RAM-loaded -- after every reset the host streams the board's
 // firmware into it (5-byte records: a register, then four bytes, of which a
 // page select at 0xF0 sends one), the sequence of the vendor's driver and
-// Linux's silead.c. Every read is the chip's current answer: byte 0 of 0x80 is
+// Linux's silead.c: the shutdown line pulsed before the first write, as
+// silead.c's power toggle and the Android driver's init_chip do, so a chip a
+// warm restart left wedged is reset before it is spoken to, and a bring-up
+// whose signature is wrong is run again once, as silead.c's resume does. Every read is the chip's current answer: byte 0 of 0x80 is
 // the finger count, read alone first so an untouched frame costs one byte;
 // then eight bytes with x and y 12-bit (bit 14 of y is a flag, masked).
 //
@@ -100,59 +103,91 @@ void moy_touchdev_probe(moy_touchdev_t *d, const moy_i2c_t *bus) {
     d->last_read_ms = bus->ms(bus->ctx);
 }
 
+uint32_t moy_drv_sleep_ticks(uint32_t ms, uint32_t tick_ms) {
+    return (ms + tick_ms - 1) / tick_ms + 1;
+}
+
 // -- the GSL3680's bring-up --------------------------------------------------------
 
-static void gsl_w(const moy_i2c_t *bus, uint8_t reg, uint8_t v) {
-    reg8_write(bus, reg, &v, 1);
+// Every write of the bring-up counts its failures into d->gsl_werr.
+static void gsl_w(moy_touchdev_t *d, const moy_i2c_t *bus, uint8_t reg, const uint8_t *src, size_t n) {
+    if (reg8_write(bus, reg, src, n) != 0) {
+        d->gsl_werr++;
+    }
 }
 
-static void gsl_w32(const moy_i2c_t *bus, uint8_t reg, uint32_t v) {
+static void gsl_w8(moy_touchdev_t *d, const moy_i2c_t *bus, uint8_t reg, uint8_t v) {
+    gsl_w(d, bus, reg, &v, 1);
+}
+
+static void gsl_w32(moy_touchdev_t *d, const moy_i2c_t *bus, uint8_t reg, uint32_t v) {
     uint8_t b[4] = {(uint8_t)v, (uint8_t)(v >> 8), (uint8_t)(v >> 16), (uint8_t)(v >> 24)};
-    reg8_write(bus, reg, b, 4);
+    gsl_w(d, bus, reg, b, 4);
 }
 
-static void gsl_reset_chip(const moy_i2c_t *bus, void (*reset)(void *, bool), void *ctx) {
+static void gsl_reset_chip(moy_touchdev_t *d, const moy_i2c_t *bus, void (*reset)(void *, bool),
+                           void *ctx) {
     reset(ctx, true);
-    gsl_w(bus, GSL_POWER, 0x88);
+    gsl_w8(d, bus, GSL_POWER, 0x88);
     bus->sleep_ms(bus->ctx, 10);
-    gsl_w(bus, GSL_CLOCK, 0x04);
+    gsl_w8(d, bus, GSL_CLOCK, 0x04);
     bus->sleep_ms(bus->ctx, 10);
-    gsl_w32(bus, 0xBC, 0);
+    gsl_w32(d, bus, 0xBC, 0);
     bus->sleep_ms(bus->ctx, 10);
 }
 
-static void gsl_startup(const moy_i2c_t *bus) {
-    gsl_w(bus, GSL_POWER, 0x00);
+static void gsl_startup(moy_touchdev_t *d, const moy_i2c_t *bus) {
+    gsl_w8(d, bus, GSL_POWER, 0x00);
     bus->sleep_ms(bus->ctx, 10);
+}
+
+// One bring-up: the shutdown pulse before the first write (whatever state the
+// chip was left in, a running firmware or a wedged one), clear, reset, load,
+// start, reset, start, then the signature.
+static bool gsl_bring_up(moy_touchdev_t *d, const moy_i2c_t *bus,
+                         void (*reset)(void *ctx, bool before), void *reset_ctx) {
+    d->gsl_werr = 0;
+    uint32_t t0 = bus->ms(bus->ctx);
+    reset(reset_ctx, true);
+    // clear: halt, the touch count register, the clock, run
+    gsl_w8(d, bus, GSL_POWER, 0x88);
+    bus->sleep_ms(bus->ctx, 20);
+    gsl_w8(d, bus, GSL_TOUCH, 0x01);
+    bus->sleep_ms(bus->ctx, 5);
+    gsl_w8(d, bus, GSL_CLOCK, 0x04);
+    bus->sleep_ms(bus->ctx, 5);
+    gsl_w8(d, bus, GSL_POWER, 0x00);
+    bus->sleep_ms(bus->ctx, 20);
+    gsl_reset_chip(d, bus, reset, reset_ctx);
+    size_t n = d->fw_len / 5;
+    for (size_t i = 0; i < n; i++) {
+        const uint8_t *r = &d->fw[i * 5];
+        gsl_w(d, bus, r[0], &r[1], r[0] == GSL_PAGE ? 1 : 4);
+    }
+    d->loaded = (uint32_t)n;
+    gsl_startup(d, bus);
+    gsl_reset_chip(d, bus, reset, reset_ctx);
+    gsl_startup(d, bus);
+    reset(reset_ctx, false);
+    bus->sleep_ms(bus->ctx, 30);
+    d->gsl_ms = (uint32_t)moy_input_ticks_diff(bus->ms(bus->ctx), t0);
+    uint8_t reg = GSL_STATUS;
+    uint8_t st[4];
+    d->gsl_sig_read = bus->write_read(bus->ctx, 0x40, &reg, 1, st, 4) == 0;
+    d->gsl_sig = d->gsl_sig_read
+                 ? ((uint32_t)st[0] << 24 | (uint32_t)st[1] << 16 | (uint32_t)st[2] << 8 | st[3])
+                 : 0;
+    return d->gsl_sig_read && d->gsl_sig == 0x5A5A5A5Au;
 }
 
 bool moy_gsl_init(moy_touchdev_t *d, const moy_i2c_t *bus,
                   void (*reset)(void *ctx, bool before), void *reset_ctx) {
-    // clear_reg
-    gsl_w(bus, GSL_POWER, 0x88);
-    bus->sleep_ms(bus->ctx, 20);
-    gsl_w(bus, 0x88, 0x01);
-    bus->sleep_ms(bus->ctx, 5);
-    gsl_w(bus, GSL_CLOCK, 0x04);
-    bus->sleep_ms(bus->ctx, 5);
-    gsl_w(bus, GSL_POWER, 0x00);
-    bus->sleep_ms(bus->ctx, 20);
-    gsl_reset_chip(bus, reset, reset_ctx);
-    size_t n = d->fw_len / 5;
-    for (size_t i = 0; i < n; i++) {
-        const uint8_t *r = &d->fw[i * 5];
-        reg8_write(bus, r[0], &r[1], r[0] == GSL_PAGE ? 1 : 4);
+    bool alive = false;
+    d->gsl_tries = 0;
+    while (!alive && d->gsl_tries < MOY_GSL_TRIES) {
+        d->gsl_tries++;
+        alive = gsl_bring_up(d, bus, reset, reset_ctx);
     }
-    d->loaded = (uint32_t)n;
-    gsl_startup(bus);
-    gsl_reset_chip(bus, reset, reset_ctx);
-    gsl_startup(bus);
-    reset(reset_ctx, false);
-    bus->sleep_ms(bus->ctx, 30);
-    uint8_t reg = GSL_STATUS;
-    uint8_t st[4];
-    bool alive = bus->write_read(bus->ctx, 0x40, &reg, 1, st, 4) == 0
-                 && st[0] == 0x5A && st[1] == 0x5A && st[2] == 0x5A && st[3] == 0x5A;
     d->init_state = alive ? 2 : -1;
     d->available = alive;
     return alive;

@@ -17,6 +17,8 @@ canvas, the windowed tier one size up from the Waveshare's, the GSL3680
 pointer feed, and the PPA composite the two P4 boards share.
 """
 
+import ast
+
 import pytest
 
 import on_glass
@@ -284,8 +286,16 @@ def test_the_pointer_is_the_gsl3680(board):
     line = board.cmd("py (touch.available, touch.fingers, touch.w, touch.h, "
                      "touch.swap_xy, touch.flip_x, touch.flip_y)",
                      wait_for="PY ")
+    # What the bring-up saw, named in the failure: the signature 0xB0 gave
+    # (None: no answer), the bring-ups it took, the failed writes, its time.
+    diag = board.cmd("py (touch.gsl_sig, touch.gsl_tries, touch.gsl_werr, touch.gsl_ms)",
+                     wait_for="PY ")
     # The 2026-09-06 calibration: landscape as mounted, no swap, no flips.
-    assert line == "PY (True, 0, 1280, 800, False, False, False)", line
+    assert line == "PY (True, 0, 1280, 800, False, False, False)", (line, diag)
+    # It signed, its writes all landed, and in at most the two bring-ups
+    # moy_gsl_init allows (MOY_GSL_TRIES).
+    sig, tries, werr, _ms = ast.literal_eval(diag[3:])
+    assert sig == 0x5A5A5A5A and werr == 0 and 1 <= tries <= 2, diag
     # The mapping is the board's FITTED knobs (mpconfigboard.h's
     # MOY_INPUT_TOUCH_RAW_*: the five-target fit, not the firmware's nominal
     # 1664x896), and the kernel's driver must carry exactly them -- a re-fit

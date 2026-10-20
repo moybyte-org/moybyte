@@ -43,9 +43,14 @@ typedef struct {
                       uint8_t *dst, size_t nd);
     uint32_t (*ms)(void *ctx);          // on the VM's tick clock
     uint32_t (*us)(void *ctx);
-    void (*sleep_ms)(void *ctx, uint32_t ms);
+    void (*sleep_ms)(void *ctx, uint32_t ms);   // AT LEAST ms: a reset's timing is a floor
     void *ctx;
 } moy_i2c_t;
+
+// The scheduler ticks a sleep of `ms` blocks for so that it lasts at least
+// that long on a `tick_ms` tick: a delay of n ticks ends at the n-th tick
+// interrupt, the first of which can come at once, so it is (n-1, n] ticks.
+uint32_t moy_drv_sleep_ticks(uint32_t ms, uint32_t tick_ms);
 
 // -- the T-Deck keyboard: the ESP32-C3 at 0x55 ----------------------------------
 //
@@ -113,6 +118,7 @@ enum {
 };
 
 #define MOY_TOUCH_SAFETY_MS 250  // a gated GT911 still reads at ~4 Hz
+#define MOY_GSL_TRIES 2          // a GSL3680 bring-up whose signature is wrong runs once more
 #define MOY_TOUCH_REPROBE 120    // passes between probes of a controller that was not there
 
 typedef struct {
@@ -133,6 +139,11 @@ typedef struct {
     size_t fw_len;
     uint32_t loaded;
     int8_t init_state;          // 0 idle, 1 upload wanted, 2 running, -1 failed
+    uint32_t gsl_werr;          // the last bring-up's failed writes
+    uint32_t gsl_sig;           // what 0xB0 answered (0x5A5A5A5A: running)
+    bool gsl_sig_read;          // the 0xB0 read itself succeeded
+    uint32_t gsl_ms;            // the last bring-up's time, reset to the 0xB0 read
+    uint8_t gsl_tries;          // the bring-ups moy_gsl_init ran
     uint16_t reprobe;
     // staged by the passes, taken by the frame
     moy_drv_lock_t lock;
@@ -159,7 +170,8 @@ void moy_touchdev_init(moy_touchdev_t *d, uint8_t kind, uint8_t addr, const moy_
 // Probe the controller (a GT911 also finds which of its two addresses answers;
 // a GSL3680 is uploaded by the passes that follow, not here).
 void moy_touchdev_probe(moy_touchdev_t *d, const moy_i2c_t *bus);
-// The GSL3680's bring-up: reset, upload, start, check. True when it runs.
+// The GSL3680's bring-up: reset, upload, start, check, up to MOY_GSL_TRIES
+// times. True when it runs.
 // `reset(ctx, int_low)` pulses the reset with INT held low and releases INT.
 bool moy_gsl_init(moy_touchdev_t *d, const moy_i2c_t *bus,
                   void (*reset)(void *ctx, bool before), void *reset_ctx);

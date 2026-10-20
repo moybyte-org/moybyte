@@ -122,7 +122,17 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   reports anything; the upload's time is in #224.
   The bring-up sequence is the vendor's factory driver's, cross-checked
   against Linux's `silead.c`; the chip answers `0x5A5A5A5A` at register 0xB0
-  once its firmware runs (glass-confirmed). Silead's GPL finger-id algorithm
+  once its firmware runs (glass-confirmed). **The shutdown line (RST, GPIO22)
+  is pulsed before the first write**, as `silead.c`'s power toggle and the
+  Android driver's `init_chip` do, and the clear writes the touch-count
+  register 0x80: from 2026-10-05 to 10-20 the chip sat WEDGED across every
+  warm restart — every write acknowledged, the whole firmware uploaded, 0xB0
+  answering 0 — under a sequence that spoke to it before resetting it and
+  cleared 0x88 instead; the first bring-up that pulsed first brought it back.
+  A bring-up whose signature is wrong runs once more (`MOY_GSL_TRIES`), and
+  what each saw is on the driver: `py (touch.gsl_sig, touch.gsl_tries,
+  touch.gsl_werr, touch.gsl_ms)` over the dev channel, the smoke's first
+  line, and `test_the_pointer_is_the_gsl3680`'s failure. Silead's GPL finger-id algorithm
   (`gsl_point_id.c`) is deliberately NOT carried: raw register 0x80 gives one
   finger's position, which is all a console pointer needs.
 - **Touch is CALIBRATED (2026-09-06, twice).** Three corner holds with the

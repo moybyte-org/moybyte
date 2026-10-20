@@ -67,9 +67,13 @@ def touch(seconds=15):
 
     t0 = time.ticks_ms()
     tp = moy_input.touch(1280, 800)
-    print("Moybyte Guition P4 touch smoke: available=%s (init %dms, %d fw records) "
+    sig = tp.gsl_sig
+    print("Moybyte Guition P4 touch smoke: available=%s (init %dms, %d fw records, "
+          "%d bring-up(s), the last %dms, %d failed writes, 0xB0=%s) "
           "swap=%s flip_x=%s flip_y=%s"
           % (tp.available, time.ticks_diff(time.ticks_ms(), t0), tp.loaded,
+             tp.gsl_tries, tp.gsl_ms, tp.gsl_werr,
+             "no answer" if sig is None else "%08x" % sig,
              tp.swap_xy, tp.flip_x, tp.flip_y))
     if not tp.available:
         return

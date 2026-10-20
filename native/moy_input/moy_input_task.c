@@ -80,7 +80,7 @@ static uint32_t bus_us(void *ctx) {
 
 static void bus_sleep(void *ctx, uint32_t ms) {
     (void)ctx;
-    vTaskDelay(pdMS_TO_TICKS(ms ? ms : 1));
+    vTaskDelay(moy_drv_sleep_ticks(ms, portTICK_PERIOD_MS));
 }
 
 static const moy_i2c_t s_bus = {
@@ -242,9 +242,9 @@ static void gsl_reset(void *ctx, bool before) {
         gpio_set_direction(MOY_INPUT_TOUCH_INT, GPIO_MODE_OUTPUT);
         gpio_set_level(MOY_INPUT_TOUCH_INT, 0);
         gpio_set_level(MOY_INPUT_TOUCH_RST, 0);
-        vTaskDelay(pdMS_TO_TICKS(20));
+        bus_sleep(NULL, 20);
         gpio_set_level(MOY_INPUT_TOUCH_RST, 1);
-        vTaskDelay(pdMS_TO_TICKS(20));
+        bus_sleep(NULL, 20);
     } else {
         gpio_set_direction(MOY_INPUT_TOUCH_INT, GPIO_MODE_INPUT);
         gpio_set_pull_mode(MOY_INPUT_TOUCH_INT, GPIO_PULLUP_ONLY);

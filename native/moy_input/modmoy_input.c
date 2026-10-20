@@ -1004,6 +1004,12 @@ static void touch_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR_fresh: dest[0] = mp_obj_new_bool(d->held.fresh); break;
         case MP_QSTR_fingers: dest[0] = MP_OBJ_NEW_SMALL_INT(d->fingers); break;
         case MP_QSTR_loaded: dest[0] = mp_obj_new_int_from_uint(d->loaded); break;
+        case MP_QSTR_gsl_ms: dest[0] = mp_obj_new_int_from_uint(d->gsl_ms); break;
+        case MP_QSTR_gsl_tries: dest[0] = MP_OBJ_NEW_SMALL_INT(d->gsl_tries); break;
+        case MP_QSTR_gsl_werr: dest[0] = mp_obj_new_int_from_uint(d->gsl_werr); break;
+        case MP_QSTR_gsl_sig:
+            dest[0] = d->gsl_sig_read ? mp_obj_new_int_from_uint(d->gsl_sig) : mp_const_none;
+            break;
         case MP_QSTR_addr: dest[0] = MP_OBJ_NEW_SMALL_INT(d->addr); break;
         case MP_QSTR_raw: {
             if (!d->has_raw) {
