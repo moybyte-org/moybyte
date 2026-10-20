@@ -96,7 +96,7 @@
     "app_storybook": "9699b2f70ac7055d537c6f9ba5b9c555c485f1d33317255019990422acc6566d",
     "desk": "1f665b05ed330f8f1db0e09a9b946ab14baf23d69e60dbf5f73ae17efdbd7ac4",
     "desk_window_calc": "1022efff81a9113c054ea027c448c05d0453b08b647a0ad8dfb373dbace18659",
-    "desk_window_projects": "98345de02a3d8a9fc949eb61251b137d5df119bdb3c6f53142724065a96cbab6",
+    "desk_window_projects": "bb2ab48fde8e2c0f1cd87b62b3cda48c06a622b6c94a9991ed430001d7cbab90",
     "editor_blocks": "26e1bb4cbbb9ab678072a405eaa0ac683298ba158ba8a8c275202a07e3c43bbe",
     "editor_cards": "468550d946fa341e2a0161615aa3db06e48279148c08e2bb889bcaa19cc8e83b",
     "editor_code": "a0078f7766d4bdd4941c8f60109369207e13a131fe8d685c0adb58772ff3e0d6",
@@ -141,7 +141,7 @@
     "app_storybook": "611fcccc7e42b25a4dc909804a76aab3affc557a8ac47df3c4075b9f716c28b5",
     "desk": "8dc429c94557f4948ebe059fd3bc678fac03211b7224ec638bd7f83909f68f0d",
     "desk_window_calc": "81d04a084b83fe8ec506646a9868ce9f6abc9d60be91e1954f63a7d5e15d94ea",
-    "desk_window_projects": "f5f108a0a1c8a09671921b19d3f8a32b2f96c399f29c23ec0644ffe007757f11",
+    "desk_window_projects": "5108b9b100b8ea61ecc9fa19b293f23fc74f333a2e4bf30606158712ac2f2d25",
     "editor_blocks": "a4218ad86f0a740f5798a37e000e59eae401e8e90e665f557ebda1477f2f226b",
     "editor_cards": "f7d61a89a2a770b9be1281a99ac9a5f2b38a6ed304a30eede107682035241929",
     "editor_code": "7d167f98eb529cf8276757e72e011ae03fd4a51899f7a6dfd7461a564a509489",
@@ -521,7 +521,7 @@
   "tdeck_320x240_fs1_moy_menus": {
     "pause": "47b12c1471fe43db7a657d62c13a03f53111ef971c74fff8863c267965e73187",
     "pause_options": "ca3d1c03589628e205594c94dfe8735bf38bab61864f2548127aa46d1c707359",
-    "sysmenu": "d11a924f897a70edca7d32d7642987dc1649d4e9ff6e811f6f58c453ee2df1a7"
+    "sysmenu": "722c20628b5b41e1630c3971b687ae60b478239d776493b6c2235cac491070b1"
   },
   "tdeck_320x240_fs1_moy_night": {
     "app_appearance": "e536fe506222d6fc0515e3c5f04605a360c6d0b6de2a10cd46dcaadc5fca22b5",
@@ -558,7 +558,7 @@
   "tdeck_320x240_fs1_widget_pages": {
     "page_battery": "20d930efef664683582be67e70f031b20266abb4f4d39497651da2292bca0e79",
     "page_clock": "83f2cb1ab70c11031ded079547fc52a0900f9f238fcba76aea2e258cf07d597f",
-    "page_menu": "7b470b7534b810350a9d3024981306f6b1970970700d9f6d29401b7bca1c3c4f",
+    "page_menu": "0461cb7315fc57624f4f4bfa6af4d1ff950ce5f7d43d4710291b76a4ee00153c",
     "page_wifi": "3edbb166b6747a5944fc46398593c94fc94370abd91b4227d8c794db63cf8f61"
   }
 }
