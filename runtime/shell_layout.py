@@ -292,6 +292,14 @@ def pack(w, h, rows, cs, fs, clock_w, text_w=None, of=None, sys_len=0):
     return tuple(out)
 
 
+def without(of, names):
+    """The bars `of` with the widgets `names` left out of every slot: what
+    `pack` places when those widgets give their room to the flex ones."""
+    return tuple(bar[:2] + tuple(tuple(n for n in slot if n not in names)
+                                 for slot in bar[2:5]) + bar[5:]
+                 for bar in of)
+
+
 def cell_of(packed, name):
     """(bar index, cell rect) of the first `name` cell in `packed`, or None."""
     for i in range(len(packed)):

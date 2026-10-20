@@ -91,7 +91,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The open tab carries its name only where the whole ladder holds it at the
 # full gap -- the name goes before the icons squeeze. On the T-Deck's 320px
 # (10 icons, the open one widened by the tab's pad, in a ~191px zone) that
-# is icon-only with 2px gaps and a 9px group gap.
+# is icon-only with 2px gaps and a 9px group gap. Each icon is the font
+# scale's, centred in a square as tall as the band: under the tap floor
+# (#203) that square is the tap target, and no shipped bar drops an item --
+# where the zone is narrower than the whole ladder at its least gaps
+# (`zone_need`), the bar gives it its status widgets' room
+# (`BarLayer._make_room`; owner, 2026-10-20: the Guition S3's Editor shows
+# every item).
 _ZONE_UNDO = "\x00undo"          # sentinel: UNDO icon -> ws.history.undo() (#88)
 _ZONE_REDO = "\x00redo"          # sentinel: REDO icon -> ws.history.redo() (#88)
 _ZONE_STOP = "\x00stop"          # sentinel: Stop, while a playtest runs (D-23)
@@ -552,6 +558,7 @@ class EditorApp:
             fs = self._zone_scale()
             cv.rect((a[0] + a[2] + b[0]) // 2, b[1] + 3 * fs, fs, b[3] - 6 * fs,
                     th["border"])
+        box = _BAR_ICON * self._zone_scale()
         for tab, glyph, r in rects:
             x, y0, w, ic = r
             ink = None
@@ -564,16 +571,18 @@ class EditorApp:
                                  icon_draw=self._set_icon(cv, ink) if sets else None,
                                  kind=glyph)
                     continue
-                x += (w - ic) // 2
+            # the icon centred in its cell, which is the tap target's square
+            x += (w - box) // 2
+            y = y0 + (ic - box) // 2
             if tab == _ZONE_UNDO:
-                self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_undo())
+                self._draw_history_icon(cv, glyph, x, y, box, ws.history.can_undo())
             elif tab == _ZONE_REDO:
-                self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_redo())
+                self._draw_history_icon(cv, glyph, x, y, box, ws.history.can_redo())
             elif tab is None and sets:
                 # Play: the set's bare glyph in `value` (DESIGN.md, Play)
-                self._draw_play(cv, (x, y0, ic, ic), th["value"])
+                self._draw_play(cv, (x, y, box, box), th["value"])
             else:
-                ws._icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y0, cv,
+                ws._icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y, cv,
                          ink=ink)
 
     def _open_mark(self, cv, r):
@@ -668,9 +677,27 @@ class EditorApp:
         cv.print(word, x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
 
     def _compact(self, rect):
-        """Whether the zone takes the narrow bar: the labeled row drops a tab."""
+        """Whether the zone takes the narrow bar: the labeled row drops a tab,
+        or holds one in a chip narrower than the band is tall -- the square
+        the bar's chrome scale makes every tap target (#203), which the
+        narrow bar's cells are."""
         tabs_area, _play = self._zone_parts(rect)
-        return len(self._shelf_rects(tabs_area)) < len(self._chips())
+        rects = self._shelf_rects(tabs_area)
+        if len(rects) < len(self._chips()):
+            return True
+        return any(r[2] < rect[3] for _t, r, _on in rects)
+
+    def zone_need(self, h):
+        """The narrowest zone, at band height `h`, whose narrow bar holds
+        the whole ladder (`_ZONE_TABS`, a cart's Code tab included) at the
+        least gaps: each icon in its band-high square, the open one widened
+        by the tab's pad, the least group gap and the tail. The bar gives a
+        zone this narrower than its status widgets' room
+        (`BarLayer._make_room`), so no shipped bar drops undo, redo or Play."""
+        ic = h if h > 0 else _BAR_ICON
+        fs = self._zone_scale()
+        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
+        return len(_ZONE_TABS) * ic + 2 * pad + (_GROUP_GAP + _ZONE_TAIL) * fs
 
     def _shelf_rects(self, tabs_area):
         """The labelled ladder's chips, [(tab, rect, labels_on)]
@@ -878,12 +905,17 @@ class EditorApp:
                 if _in(px, py, r):
                     return self._activate_zone_tab(tid)
             hist = self._history_rects(rects)
-            if hist is not None:
-                for act, (x, _y, w, _h) in zip((_ZONE_UNDO, _ZONE_REDO), hist):
-                    # the band's full height, a gap's half either side
-                    if x - 4 * self._zone_scale() <= px < x + w + 4 * self._zone_scale() \
-                            and rect[1] <= py < rect[1] + rect[3]:
-                        return self._activate_zone_tab(act)
+            if hist is not None and rect[1] <= py < rect[1] + rect[3]:
+                # The band's full height. Undo reaches back across its lead to
+                # the last tab, the two share the gap between them, and redo
+                # reaches on as far as undo's lead, short of Play.
+                (ux, _uy, uw, _uh), (rx, _ry, rw, _rh) = hist
+                fs = self._zone_scale()
+                mid = (ux + uw + rx) // 2
+                if ux - _HIST_LEAD * fs <= px < mid:
+                    return self._activate_zone_tab(_ZONE_UNDO)
+                if mid <= px < min(rx + rw + _HIST_LEAD * fs, play_r[0]):
+                    return self._activate_zone_tab(_ZONE_REDO)
             return False
         rects, _gap = self._ladder_layout(rect)
         last = len(rects) - 1

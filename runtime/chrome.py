@@ -80,13 +80,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
     from layout_base import CLASSES as _LB_CLASSES, class_of as _lb_class_of, bar_rows as _bar_rows
-    from layout_base import sys_tile as _sys_tile, metric as _lb_metric
+    from layout_base import sys_tile as _sys_tile, metric as _lb_metric, bars as _lb_bars
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
     from runtime.layout_base import (CLASSES as _LB_CLASSES, class_of as _lb_class_of,
                                      bar_rows as _bar_rows, sys_tile as _sys_tile,
-                                     metric as _lb_metric)
+                                     metric as _lb_metric, bars as _lb_bars)
 
 
 try:                                    # device: ticks is frozen flat
@@ -401,8 +401,14 @@ class Layout(LayoutBase):
         self.clock_w = (max(_ui_draw.print_width("00:00", fs), _lb_metric("clock", fs))
                         if _ui_draw.font_v2(_ui_draw.font()[0]) else 5 * self.font_w)
         sys_len = _sys_tile(self.status_h)[2] if _ui_draw.depth()[0] else 0
+        of = _lb_bars()
         self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs,
-                                       self.clock_w, _bar_text_w, sys_len=sys_len)
+                                       self.clock_w, _bar_text_w, of=of, sys_len=sys_len)
+        self._pack_of = (of, cs, fs, sys_len)
+        # {where: the packing its bar takes}, the bar layer's to fill
+        # (`BarLayer._make_room`): a surface's bars less the status widgets
+        # its zone owner took the room of.
+        self.room = {}
         self.batt_btn = self._cell("battery")
         self.wifi_btn = self._cell("wifi")
         self.sysmenu_btn = self._cell("menu")
@@ -522,6 +528,15 @@ class Layout(LayoutBase):
     def _cell(self, name):
         got = _shell_layout.cell_of(self.bars, name)
         return got[1] if got is not None else None
+
+    def bars_without(self, names):
+        """`bars` packed again with the widgets `names` left out, their room
+        the flex widgets' (`BarLayer._make_room`): the same bars in force,
+        glass and scales, so every other cell is where `bars` has it."""
+        of, cs, fs, sys_len = self._pack_of
+        return _shell_layout.pack(self.w, self.h, self.status_h, cs, fs, self.clock_w,
+                                  _bar_text_w, of=_shell_layout.without(of, names),
+                                  sys_len=sys_len)
 
     def clock_hit(self):
         # The clock's cell (Time Traveler egg #21), in its bar's coordinates

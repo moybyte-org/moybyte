@@ -7,7 +7,13 @@ zone runs on to its end), and every other zone owner a desk window holds.
 The drawn items are read off the draw itself -- the rects the Editor's
 `draw_zone` paints each item at -- and tapped at their centres through the
 real pointer feed, so a hit test that lays the zone out on any other rect
-than the draw's fails here."""
+than the draw's fails here.
+
+Every shipped bar holds the Editor's whole ladder -- the seven tabs, undo,
+redo and Play -- each tappable across at least the board's tap floor: the
+T-Deck's 320x240 (the browser's handheld is the same glass, undeclared),
+the Guition S3's 3.5" tap floor, the P4's Editor window (the browser's desk
+declares the same 7.0") and the Guition P4's."""
 
 import pytest
 
@@ -18,6 +24,10 @@ from runtime import editor_app
 DESK = "p4_1024x600_cs2_fs1_windowed"
 HANDHELD = "tdeck_320x240_fs1_dark"
 TAPFLOOR = "guition_tapfloor_dark"
+GUITION_P4 = "guition_p4_1280x800_windowed"
+DESKS = (DESK, GUITION_P4)
+# Every item the Editor's bar owes: the seven tabs, undo, redo and Play.
+_ALL = [tab for tab, _glyph in editor_app._ZONE_TABS]
 # glyph (or icon-set slot) -> the zone action it draws
 _ACTION = {glyph: tab for tab, glyph in editor_app._ZONE_TABS}
 _ACTION.update({slot: _ACTION[glyph] for glyph, slot in editor_app._SET_KIND.items()})
@@ -70,6 +80,11 @@ def _drawn(ws, drv, monkeypatch):
     """[(action, rect)] of what the Editor's last zone draw painted, each
     item's rect in its bar's coordinates: a tab's chip or icon, undo's and
     redo's icons, Play's plate, or its glyph and the word beside it."""
+    return _drawn_in(ws, drv, monkeypatch)[0]
+
+
+def _drawn_in(ws, drv, monkeypatch):
+    """(`_drawn`'s list, the rect the draw was lent)."""
     app = ws.editor_app
     got = []
     inside = []          # a draw helper that paints through ws._icon is running
@@ -128,7 +143,7 @@ def _drawn(ws, drv, monkeypatch):
         m.setattr(ws, "_icon", icon)
         ws.bar_layer.invalidate()
         _frames(ws, drv, 2)
-    return list(got)
+    return list(got), band[0]
 
 
 def _taps(ws, drv, monkeypatch, drawn):
@@ -145,6 +160,42 @@ def _taps(ws, drv, monkeypatch, drawn):
         _frames(ws, drv, 2)
         out.append((action, (x, y, w, h), list(fired)))
     return out
+
+
+def _hit_runs(ws, monkeypatch, drawn, band):
+    """[(action drawn, the width of the run of columns about its centre a
+    tap fires it on)], the Editor's hit test swept across the lent rect at
+    the item's centre row."""
+    app = ws.editor_app
+    fired = []
+    monkeypatch.setattr(app, "_activate_zone_tab",
+                        lambda tab: fired.append(tab) or True)
+    x0, _y0, bw, _bh = band
+    out = []
+    for action, (x, y, w, h) in drawn:
+        py = y + h // 2
+
+        def fires(px):
+            del fired[:]
+            app.zone_tap(px, py, band)
+            return fired == [action]
+
+        cx = x + w // 2
+        lo = hi = cx
+        while lo > x0 and fires(lo - 1):
+            lo -= 1
+        while hi + 1 < x0 + bw and fires(hi + 1):
+            hi += 1
+        out.append((action, hi - lo + 1 if fires(cx) else 0))
+    return out
+
+
+def _tap_floor(ws):
+    """The board's tap floor in pixels: a bar icon at its metric class's
+    unit and the chrome scale its declared glass asks for (#203)."""
+    from runtime import layout_base
+    unit = layout_base.CLASSES[ws.metric_class]["unit"]
+    return editor_app._BAR_ICON * unit * max(1, ws.chrome_floor)
 
 
 def _editor(ws, drv, desk, size=None):
@@ -177,12 +228,56 @@ def test_a_tap_on_a_drawn_editor_bar_item_fires_that_item(tmp_path, monkeypatch,
     _editor(ws, drv, config == DESK, size)
     drawn = _drawn(ws, drv, monkeypatch)
     actions = [a for a, _r in drawn]
-    assert "cards" in actions and len(set(actions)) >= 5, drawn
-    if config != TAPFLOOR:        # its ladder holds the tabs and stops there
-        assert None in actions and editor_app._ZONE_UNDO in actions, drawn
+    if size is None:              # a shipped bar: every item
+        assert sorted(set(actions), key=_ALL.index) == _ALL, drawn
+    else:
+        assert "cards" in actions and None in actions \
+            and editor_app._ZONE_UNDO in actions, drawn
     taps = _taps(ws, drv, monkeypatch, drawn)
     wrong = [t for t in taps if t[2] != [t[0]]]
     assert not wrong, ("drawn item, its rect, what its tap fired", wrong)
+
+
+@pytest.mark.parametrize("config,inputs", [
+    (HANDHELD, "touch"),
+    (HANDHELD, "tdeck"),
+    (TAPFLOOR, "touch"),
+    (DESK, "touch"),
+    (GUITION_P4, "touch"),
+])
+@pytest.mark.parametrize("theme", ["moy", "blocks", "contrast"])
+def test_no_shipped_editor_bar_drops_an_item_or_shrinks_one_under_the_floor(
+        tmp_path, monkeypatch, config, inputs, theme):
+    """The Editor's bar on every shipped glass draws all ten items, and a
+    tap fires each across at least the board's tap floor, on a band at
+    least that tall: where the zone is too narrow for the ladder at the
+    floor, the status widgets give it their room (`BarLayer._make_room`)
+    rather than the ladder giving up an item."""
+    ws, drv = _ws(tmp_path, config, theme, inputs)
+    _editor(ws, drv, config in DESKS)
+    drawn, band = _drawn_in(ws, drv, monkeypatch)
+    actions = [a for a, _r in drawn]
+    assert sorted(set(actions), key=_ALL.index) == _ALL, drawn
+    floor = _tap_floor(ws)
+    assert band[3] >= floor, (band, floor)
+    narrow = [r for r in _hit_runs(ws, monkeypatch, drawn, band) if r[1] < floor]
+    assert not narrow, ("item, its hit width, under the floor of %d px" % floor, narrow)
+
+
+def test_the_status_widgets_give_way_only_where_the_ladder_needs_their_room(
+        tmp_path):
+    """The Guition S3's Editor bar takes the battery's and the Wi-Fi's room
+    and keeps the clock; the T-Deck's ladder fits beside all three, and the
+    S3's home keeps them."""
+    def cells(ws, where):
+        return [c[0] for b in ws.bar_layer._packed(where) for c in b[3]]
+    for config, gone in ((TAPFLOOR, {"battery", "wifi"}), (HANDHELD, set())):
+        ws, drv = _ws(tmp_path / config, config, "moy", "touch")
+        _editor(ws, drv, False)
+        shown = cells(ws, "menu")
+        assert "clock" in shown and not gone & set(shown), (config, shown)
+        assert {"battery", "wifi", "clock"} <= set(cells(ws, "home")), config
+        assert ws.bar_layer._packed("home") is ws.layout.bars
 
 
 @pytest.mark.parametrize("where,opener", [

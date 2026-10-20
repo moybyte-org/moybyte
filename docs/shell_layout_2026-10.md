@@ -270,7 +270,11 @@ thing in both modes; what differs is only the container a component opens in
 bar as widgets — the X became its own widget so that a layout can place it,
 instead of riding inside the right zone, and a layout without it has the
 zone's back chevron (§9); `chips`, `text`, `spacer` and `separator` are new
-cells. Every widget is compact (L13): the tallest cell any of them needs is
+cells. A zone owner that declares `zone_need` -- the Editor, whose narrow bar
+is ten tap-floor squares -- takes the battery's room and then the Wi-Fi's on
+its own surface's bar wherever its zone is narrower than that, and the clock
+keeps its cell (`BarLayer._make_room`; owner, 2026-10-20: every Editor item on
+the Guition S3). Every widget is compact (L13): the tallest cell any of them needs is
 16 logical pixels, the clock's two lines on a side bar and an icon across a
 top bar, which is why §5 caps a bar at 32. There is no `home` widget: the HOME key is the way home (L11, L12). There is no `settings` widget: Settings is a row of the system menu
 (L0). The home's verbs ride in `zone` wherever a theme puts it, so D7's

@@ -42,11 +42,11 @@ import time
 try:
     from layout_base import (BAR_ROWS, DEFAULT_BARS, bar_rects_of, bars_in_force,
                              content_of)
-    from shell_layout import pack as _pack
+    from shell_layout import pack as _pack, cell_of as _cell_of
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (BAR_ROWS, DEFAULT_BARS, bar_rects_of, bars_in_force,
                                      content_of)
-    from runtime.shell_layout import pack as _pack
+    from runtime.shell_layout import pack as _pack, cell_of as _cell_of
 
 
 # -- bar geometry (single source; console.py imports these back) --------------
@@ -102,6 +102,11 @@ _ZONE_GEAR = (_ZONE_WIFI[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _ZONE_CONTEXT_X = (_ZONE_GEAR[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _ZONE_CLOCK = (_ZONE_CONTEXT_X[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _ZONE_LEFT_GAME = (2, _BAR_Y, _ZONE_CLOCK[0] - 4, _BAR_ICON)     # the app-lent rect
+
+# The status widgets that give their room to a zone too narrow for what its
+# owner draws (`BarLayer._make_room`), in the order they give it: the battery
+# first, then the Wi-Fi. The clock never does.
+_YIELD = ("battery", "wifi")
 
 
 try:                                    # device: ticks is frozen flat
@@ -434,7 +439,53 @@ class BarLayer:
                 self._game_size = (cv.w, cv.h)
                 self._game_pack = _pack(cv.w, cv.h, _STATUS_H, 1, 1, 5 * 8, _bar_text_w, of)
             return self._game_pack
-        return self.ws.layout.bars
+        layout = self.ws.layout
+        room = getattr(layout, "room", None)
+        if room is None:
+            return layout.bars
+        got = room.get(where)
+        if got is None:
+            got = room[where] = self._make_room(where, layout.bars)
+        return got
+
+    def _make_room(self, where, bars):
+        """`where`'s packing: the layout's `bars`, less the status widgets
+        (`_YIELD`, in order) its zone owner needs the room of. An owner with
+        a `zone_need(h)` -- the narrowest rect, at band height `h`, in which
+        everything it draws stands at the tap floor -- takes a widget's room
+        until its rect is that wide, and only where the room reaches it (a
+        layout whose status cluster is on another bar keeps it). Inside a
+        window the zone runs to the strip's end already (`lent_zone`)."""
+        owner = self._zone_owner(where)
+        need = getattr(owner, "zone_need", None)
+        if need is None or self._in_window(where):
+            return bars
+        layout = self.ws.layout
+        had = self._owner_w(where, bars)
+        if had is None or had[0] >= need(had[1]):
+            return bars
+        out = bars
+        for k in range(1, len(_YIELD) + 1):
+            wider = layout.bars_without(_YIELD[:k])
+            got = self._owner_w(where, wider)
+            if got is None or got[0] <= had[0]:
+                break
+            out, had = wider, got
+            if got[0] >= need(got[1]):
+                break
+        return out
+
+    def _owner_w(self, where, packed):
+        """(width, height) of the rect `where`'s zone owner gets in
+        `packed`, past the chevron where the bar draws one; None where the
+        packing places no zone."""
+        got = _cell_of(packed, "zone")
+        if got is None:
+            return None
+        _x, _y, w, h = got[1]
+        if self._way_back(where) and _cell_of(packed, "close") is None:
+            w -= self._back_w(False)
+        return w, h
 
     def bar_rects(self, where):
         """Every bar `where` shows, as (x, y, w, h) on its canvas."""
