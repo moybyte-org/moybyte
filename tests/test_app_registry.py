@@ -160,3 +160,12 @@ def test_the_device_and_web_orders_agree():
     web = gdc.roster("web")
     dev = gdc.roster("device")
     assert [c for c in dev if c in set(web)] == web
+
+
+def test_the_browser_shelf_is_the_boards():
+    """Every seed cart a board ships, the browser ships (owner, 2026-10-20:
+    the browser and the boards do not diverge). A `targets` line that leaves
+    one out takes Notes from the browser's Files (its text app) or My Art
+    from its Appearance (Paint's wallpaper) with nothing failing; a cart that
+    cannot run in a browser is a decision argued here, not a manifest line."""
+    assert gdc.roster("web") == gdc.roster("device")

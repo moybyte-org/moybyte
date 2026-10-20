@@ -12,7 +12,8 @@
     "order": 350,
     "targets": [
       "host",
-      "device"
+      "device",
+      "web"
     ],
     "permissions": [
       "graphics",
