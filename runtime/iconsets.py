@@ -4,8 +4,9 @@
 A theme's look sets `icons.kind` (`pixel` or `smooth`), `icons.set` and, for
 a pixel set, `icons.swap`. A theme that sets no kind draws the bar's own
 IconSheet (`ws.look.icon_sheet`, Settings -> EDIT ICONS), as it always has,
-and so does a console whose image carries none of the set's files
-(`carried`: the browser's).
+and so would an image that carried none of the set's files (`carried`).
+Every console image carries its tier's sets, the browser's the handheld's
+(tools/make_font.py's `module`).
 
 * PIXEL: the IconSheet tools/make_icons.py builds, a tile a slot
   (`system_icons.moygfx`, its clear pixel 16, so Moy's index-0 outline
@@ -94,10 +95,9 @@ def spec(look):
 def carried(spec_):
     """`spec_` where this image carries the set, else None: a smooth set
     draws where a mask file of it or of the default set is in the image, a
-    pixel set where its IconSheet is. An image that carries none (the
-    browser's, board.toml `font_icons = false`) draws the shell's own icons,
-    as under a theme that names no set, rather than a set's slots it cannot
-    draw."""
+    pixel set where its IconSheet is. An image that carried none would
+    draw the shell's own icons, as under a theme that names no set, rather
+    than a set's slots it cannot draw."""
     if spec_ is None:
         return None
     if spec_[0] == "pixel":

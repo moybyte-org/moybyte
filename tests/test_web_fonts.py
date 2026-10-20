@@ -45,13 +45,13 @@ ROLES = ("ui", "title", "caption", "mono")
 
 def _module():
     ns = {}
-    exec(compile(make_font.render_module(*make_font.board_fonts(str(WEB))), "fonts_data", "exec"), ns)
+    exec(compile(make_font.render_module(make_font.board_fonts(str(WEB))), "fonts_data", "exec"), ns)
     return ns
 
 
 def test_the_browser_module_names_every_face_a_seed_theme_draws():
     assert SEEDS == ["blocks", "contrast", "moy"], SEEDS    # a new seed joins this net
-    tier, _icons = make_font.board_fonts(str(WEB))
+    tier = make_font.board_fonts(str(WEB))
     desk = tier == "desktop"
     carried = set(_module()["FACES"])
     for name in SEEDS:
@@ -67,7 +67,7 @@ def test_the_browser_module_names_every_face_a_seed_theme_draws():
 
 
 def test_the_browser_lays_out_on_the_class_its_fonts_were_built_for():
-    tier, _icons = make_font.board_fonts(str(WEB))
+    tier = make_font.board_fonts(str(WEB))
     assert layout_base.class_of(None) == (layout_base.DESK if tier == "desktop"
                                           else layout_base.HANDHELD)
     src = (WEB / "web_boot.py").read_text()
@@ -115,7 +115,7 @@ def test_the_browser_console_draws_a_themes_roles_in_its_faces(tmp_path, windowe
     line = [ln for ln in r.stdout.splitlines() if "FONTS " in ln]
     assert line, r.stdout[-3000:]
     got = json.loads(line[0].split("FONTS ", 1)[1])
-    tier, _icons = make_font.board_fonts(str(WEB))
+    tier = make_font.board_fonts(str(WEB))
     want_class = layout_base.DESK if tier == "desktop" else layout_base.HANDHELD
     assert got.pop("class") == want_class
     for key, roles in got.items():

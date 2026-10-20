@@ -4,11 +4,12 @@ other tabs, UNDO, REDO and PLAY.
 The ladder draws the theme's icon set where its look names one, and the set's
 own slots for a few tabs (`editor_app._SET_KIND`: Config's sliders, Sprites'
 face, Play's bare glyph), which the bar's IconSheet does not hold. An image
-that carries no set's files -- the browser's, whose board.toml freezes no
-icon sets (`font_icons = false`) -- draws the shell's own icons instead
-(`iconsets.carried`), every one of them: under Moy, the default theme, which
-names the smooth set, the browser drew the Config pill, the Sprites tab and
-Play blank.
+that carries no set's files draws the shell's own icons instead
+(`iconsets.carried`), every one of them, where drawing the set's slots it
+lacks would leave the Config pill, the Sprites tab and Play blank under Moy,
+the default theme, which names the smooth set. The browser carries the
+handheld boards' sets, so its bar draws Moy's smooth set as the T-Deck's
+does.
 
 The probe is one source, run on the host's handheld workstation (with the
 image's sets and without them) and in the real wasm console (the browser
@@ -138,6 +139,6 @@ def test_the_browsers_ladder_draws_every_icon(variant):
     line = [ln for ln in r.stdout.splitlines() if "LADDER " in ln]
     assert line, r.stdout[-3000:]
     got = json.loads(line[0].split("LADDER ", 1)[1])
-    assert got["spec"] is None          # the browser's image carries no set
+    assert got["spec"] == ["smooth", "default", None]   # the T-Deck's set
     assert _blank(got["drawn"]) == []
     assert any(is_open for _t, _g, is_open, _n in got["drawn"][-1])

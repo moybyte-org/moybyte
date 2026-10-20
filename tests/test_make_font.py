@@ -135,18 +135,18 @@ def test_a_board_module_carries_its_tier():
     assert ns["TIER"] == "handheld" and sorted(ns["FACES"]) == tiers["handheld"]
     assert set(ns["LICENCES"]) == {"daysans", "inter", "atkinson", "jbmono"}
     assert make_font.board_fonts(os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_mainline")) \
-        == ("handheld", True)
+        == "handheld"
     assert make_font.board_fonts(os.path.join(ROOT, "firmware", "guition_jc8012p4a1c")) \
-        == ("desktop", True)
+        == "desktop"
 
 
-def test_the_browser_module_carries_the_handhelds_faces_and_no_icon_sets():
+def test_the_browser_module_carries_the_handhelds_faces_and_icon_sets():
     """The browser draws in the handheld's metrics (tests/test_web_fonts.py
-    holds the class), so its `fonts_data` is that tier's faces; its icons stay
-    the shell's own."""
+    holds the class), so its `fonts_data` is that tier's faces and icon sets
+    (tests/test_web_look_parity.py holds them to the boards')."""
     web = os.path.join(ROOT, "firmware", "web_runner")
-    assert make_font.board_fonts(web) == ("handheld", False)
+    assert make_font.board_fonts(web) == "handheld"
     ns = {}
-    exec(compile(make_font.render_module(*make_font.board_fonts(web)), "fonts_data", "exec"), ns)
+    exec(compile(make_font.render_module(make_font.board_fonts(web)), "fonts_data", "exec"), ns)
     _faces, tiers = make_font.faces()
-    assert sorted(ns["FACES"]) == tiers["handheld"] and "ICONS" not in ns
+    assert sorted(ns["FACES"]) == tiers["handheld"] and "system_icons.moygfx" in ns["ICONS"]

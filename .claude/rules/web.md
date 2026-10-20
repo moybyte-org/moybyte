@@ -40,9 +40,10 @@ nor those docs will warn you about:
   even for the 1024x600 desk; **declaring a glass there means carrying the
   desk's faces too**, or every theme falls back to petme128 with nothing failing
   -- `tests/test_web_fonts.py` runs the real wasm in both arrangements and
-  names the face a seed theme lost. Icon sets stay off (`font_icons = false`),
-  so the browser draws the shell's own icons under every theme
-  (`iconsets.carried`).
+  names the face a seed theme lost. The icon sets the handheld boards freeze
+  ride the same module, so `iconsets.carried` answers a theme's set here as
+  on the T-Deck (`tests/test_web_look_parity.py` holds the two images' sets
+  equal).
 - **The emscripten is PINNED: `EMSDK_VERSION` in build.sh, held by
   `tools/emsdk_tree.sh` on every full build** (a tree at the pin is a silent
   no-op, another version is moved to it, one that cannot be had fails the

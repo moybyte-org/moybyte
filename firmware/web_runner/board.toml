@@ -39,18 +39,16 @@ unlike both boards it keeps host_api.py -- deliberately
 portable, the wasm head's cart API -- and input.py, the host InputState
 web_input decodes into."""
 font_tier = "handheld"
-font_icons = false
 font_why = """
 `tools/make_font.py module` freezes the board's font set as `fonts_data`, the
-way every console board does. The browser's metric class is the HANDHELD's in
-both arrangements, because web_boot declares no panel diagonal
+way every console board does, and with it the icon sets' files the handheld
+boards freeze (tools/make_icons.py), so `iconsets.carried` answers a theme's
+set here as it does on the T-Deck. The browser's metric class is the
+HANDHELD's in both arrangements, because web_boot declares no panel diagonal
 (`layout_base.class_of(None)`), so the desktop arrangement on a 1024x600 canvas
 still asks `fontset.role_face` for the handheld's sizes -- and carries the
-handheld's faces, not the desk's (tests/test_web_fonts.py holds the class and
-the coverage). Icon sets stay off: the browser's icons are the shell's own
-under every theme (`iconsets.carried` answers no set for an image that holds
-none; tests/test_editor_ladder_icons.py draws the Editor's bar in the wasm),
-and a smooth icon set is a separate change to what it draws."""
+handheld's faces and icon masks, not the desk's (tests/test_web_fonts.py holds
+the class and the coverage, tests/test_editor_ladder_icons.py the icons)."""
 
 # ---------------------------------------------------------------------------
 

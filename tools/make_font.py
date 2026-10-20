@@ -21,8 +21,8 @@ tool says so.
   report   the bytes each tier's set costs.
   module   BOARD_DIR OUT: the freezable `fonts_data` of the board's tier
            (board.toml [board] `font_tier`, else `tier`), every face and family
-           licence it takes, and its icon sets' files (tools/make_icons.py)
-           unless `font_icons` is false; runtime/fontset.py reads both.
+           licence it takes, and its icon sets' files (tools/make_icons.py);
+           runtime/fontset.py reads both.
 
 The committed files are the build's output under the FreeType and raqm
 versions set.json records; `check` refuses to compare under others, since a
@@ -373,10 +373,10 @@ def build_set(quiet=False):
     return files
 
 
-def render_module(tier, icons=True):
+def render_module(tier):
     """A freezable fonts_data.py: tier `tier`'s faces and their licences as
-    bytes literals, which a frozen module keeps in flash, and (`icons`) its
-    icon sets' files."""
+    bytes literals, which a frozen module keeps in flash, and its icon sets'
+    files."""
     meta = json.load(open(os.path.join(OUT, "set.json")))
     names = meta["tiers"][tier]
     fams = sorted({meta["faces"][n]["family"] for n in names})
@@ -390,22 +390,20 @@ def render_module(tier, icons=True):
     for f in fams:
         out.append("    %r: %r," % (f, open(os.path.join(OUT, f + ".txt"), "rb").read()))
     out.append("}")
-    if icons:
-        sys.path.insert(0, HERE)
-        import make_icons
-        out += make_icons.module_lines(tier)
+    sys.path.insert(0, HERE)
+    import make_icons
+    out += make_icons.module_lines(tier)
     return "\n".join(out) + "\n"
 
 
 def board_fonts(board_dir):
-    """(the font tier, whether icon sets ride with it) a board's board.toml
-    declares: `font_tier` where the board's own `tier` names no class of the
-    set (the browser draws in the handheld's metrics), `font_icons` false
-    where the image carries no icon sets."""
+    """The font tier a board's board.toml declares: `font_tier` where the
+    board's own `tier` names no class of the set (the browser draws in the
+    handheld's metrics), else its `tier`."""
     sys.path.insert(0, HERE)
     import board_config
     b = board_config.load(board_dir)["board"]
-    return b.get("font_tier", b["tier"]), b.get("font_icons", True)
+    return b.get("font_tier", b["tier"])
 
 
 def main(argv):
@@ -414,9 +412,9 @@ def main(argv):
         print(__doc__)
         return
     if cmd == "module":
-        tier, icons = board_fonts(argv[2])
+        tier = board_fonts(argv[2])
         with open(argv[3], "w") as f:
-            f.write(render_module(tier, icons))
+            f.write(render_module(tier))
         print("%s: the %s font set" % (argv[3], tier))
         return
     if cmd == "fetch":
