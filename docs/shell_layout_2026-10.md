@@ -42,7 +42,7 @@ memory and compositors); this doc cites, it does not copy.
 | L15 | **One projects list** (owner, 2026-10-14): the project picker is deleted on every tier; the home's Make tab is the one list of projects (L0) | §12 |
 | L16 | **The Editor's bar has no PROJECTS button** (owner, 2026-10-14), in every console-mode Editor: its X backs out one level, to wherever the Editor was opened from -- CHANGE works from any home tab -- which is the back-stack's pop | §12 |
 | L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs in a window, an Apps entry opens its app window. It draws the console home's design (owner, 2026-10-20: the hero, its details, the shelf) whatever the fullscreen home's arrangement | §3, §12 |
-| L18 | **On a board with a desk the Editor is a window** (owner, 2026-10-20): a Make pick, CHANGE or NEW from the console-mode home gives console mode back to the desk and opens the Editor there in a window; a board with no desk opens it fullscreen | §3, §12 |
+| L18 | **On a board with a desk the Editor is a window** (owner, 2026-10-20): a Make pick, CHANGE or NEW from the console-mode home gives console mode back to the desk and opens the Editor there in a window, and closing that window gives the glass back to the console-mode home on the tab and card it came from, unless a window the desk did not have then is open on it (R5-05); a board with no desk opens it fullscreen | §3, §12 |
 
 ## 2. What exists, read against this doc
 
@@ -144,7 +144,7 @@ memory and compositors); this doc cites, it does not copy.
 | feels like | a console: one thing on screen, the animated home, a tap plays | a normal OS: a desk with icons, windows, bars, popovers |
 | the WM | `FullscreenStackWM`'s presentation | `WindowedWM`'s |
 | the root of the back-stack | the home (§12) | the desk |
-| an app or the Editor opens | fullscreen, pushed; back pops -- but the Editor on a board with a desk goes back to the desk as a window (L18) | as a window on the desk |
+| an app or the Editor opens | fullscreen, pushed; back pops -- but the Editor on a board with a desk goes back to the desk as a window, whose X comes back here (L18) | as a window on the desk |
 | a bar widget's tap | its component fullscreen, pushed; the system menu as the popup it is | a popover anchored to the cell (§8) |
 | boards | the T-Deck and the Guition S3 — this mode only; the P4 boards, the host and the browser when switched into it | the P4 boards, the host with `--windowed`, the browser's desktop arrangement — their default |
 
@@ -208,7 +208,9 @@ desk; PLAY is the only way into console mode and the bar's back the way out (§1
 **Console mode is the same everywhere, but for the Editor.** On a P4 in
 console mode the Apps tab opens an app fullscreen, as on the T-Deck; the
 Editor is the one exception (L18): a Make pick, CHANGE or NEW gives console
-mode back to the desk and opens the Editor there in a window. No other door
+mode back to the desk and opens the Editor there in a window, and its X
+brings console mode back, on the tab and card it came from -- unless the kid
+opened a window on the desk meanwhile, which keeps them there. No other door
 flips the mode; the desk's own doors (its icons, PROJECTS) are desktop
 mode's. The desk icon column stays (owner,
 2026-10-13): a desk with icons and a launcher is the OS norm.

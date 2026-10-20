@@ -819,6 +819,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         st = self.stack.kinds()
         return st[base:]
 
+    def window_kinds(self):
+        """The kinds open as windows on the desk, bottom -> top (none in
+        console mode)."""
+        return self._slots()
+
     def _sync_windows(self):
         """Mirror the back-stack into window records: drop windows whose kind
         was popped, create records (buffer + layout context + cascade
@@ -2805,6 +2810,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self.close_player()
         else:
             self._remove_kind(kind)
+        if kind == "menu" and not ws._editing_icons:
+            ws.editor_closed()                # back where it was opened from
 
     def _close_window(self, kind):
         self.close_window_kind(kind)

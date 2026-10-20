@@ -1016,6 +1016,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # the request, popped by _exit_to_caller, which re-reads the folder on
         # the way back so the loader sees what was written.
         self._project_return = None
+        # Where an Editor the console-mode home handed to the desk goes back
+        # to when its window closes (`open_in_editor`, `editor_closed`):
+        # (tab, the card's path, the desk's windows then), or None.
+        self._editor_from = None
         # The #111 UNDO ROUTER (#209 landing E, history_router.py): the bar
         # UNDO/REDO pair over both undo mechanisms (each Editor tab's in-RAM op
         # stack, then the tab-scoped durable journal walk), the code tab's typing
@@ -2626,16 +2630,44 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         PLAY) but not shown; the Editor owns its screen until PLAY runs it.
         Fullscreen where the board has no desk; in a window of its own where
         it has one -- opened from the console-mode home, console mode gives
-        way to the desk first (owner, 2026-10-20)."""
+        way to the desk first (owner, 2026-10-20), and closing that window
+        gives the glass back to the home (`editor_closed`, R5-05)."""
         wm = self.wm
+        back = None
         if wm.has_desk and wm.mode == "console" and self.screen == "launcher":
+            sel = self.launcher.selected()
+            back = (self.launcher.tab, sel.get("path") if sel else None)
             self.open_desk()
+        self._editor_from = None
         if not self._open_workspace(cart):
             # No source, nothing to edit: land on the same error panel a crashed
             # cart lands on rather than opening the Editor over an empty project.
             self.run(self.project, self.launcher_layer)
             return
         self.editor_app.open(self.project)
+        if back is not None:
+            self._editor_from = back + (frozenset(wm.window_kinds()),)
+
+    def editor_closed(self):
+        """The Editor's window closed (its X): an Editor the console-mode
+        home handed to the desk (`open_in_editor`) gives the glass back to
+        that home, on the tab and the card it was opened from -- unless a
+        window the desk did not have then is open on it now (a playtest
+        included), which keeps the kid on the desk (owner, 2026-10-20)."""
+        back, self._editor_from = self._editor_from, None
+        wm = self.wm
+        if back is None or not wm.desk_open():
+            return
+        tab, path, kinds = back
+        if not set(wm.window_kinds()) <= kinds:
+            return
+        self.open_library()
+        self.set_home_tab(tab)
+        lw = self.launcher
+        for j in range(len(lw.items)):
+            if path and lw.items[j].get("path") == path:
+                lw.sel = j
+                break
 
     def launch_selected(self, grid=None):
         """The home's tap on `grid`'s selected card (the home's, ws.launcher,
@@ -2776,6 +2808,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         (docs/shell_layout_2026-10.md §3). The WM ends a running playtest
         and parks the desk's windows, and go_home lands on the home without
         touching them. On a console-only WM it is go_home."""
+        self._editor_from = None
         self.wm.enter_console()
         self.go_home()
 

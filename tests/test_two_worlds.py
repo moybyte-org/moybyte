@@ -321,7 +321,8 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     """On a board with a desk the Editor is a window (owner, 2026-10-20): a
     tap on the Make tab, CHANGE and NEW from the console-mode home each give
     console mode back to the desk and open the Editor in a window there,
-    over the windows the desk had."""
+    over the windows the desk had. Closing that window gives the glass back
+    to the console-mode home, on the tab and the card it came from (R5-05)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_app(ws._apps_by_id["calc"])
@@ -336,8 +337,10 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     assert ws.wm.mode == "desktop" and ws.wm.desk_open()
     assert ws.wm._order == ["calc", "menu"] and ws.screen == "menu"
     assert ws.cart.get("path") == want
-    ws.wm.close_window_kind("menu")
-    ws.open_library()
+    ws.wm.close_window_kind("menu")               # the Editor's X
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.screen == "launcher"
+    assert ws.launcher.tab == "make" and ws.launcher.selected().get("path") == want
     ws.set_home_tab("games")
     drv.frame(1 / 30)
     assert _select(ws, "Star Catcher")
@@ -345,7 +348,9 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     drv.frame(1 / 30)
     assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
     ws.wm.close_window_kind("menu")
-    ws.open_library()
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.launcher.tab == "games"
+    assert ws.launcher.selected().get("path") == want
     ws.set_home_tab("make")
     ws.launcher.sel = 0                           # the "+ New" card
     n0 = len(ws.carts.all)
@@ -354,6 +359,51 @@ def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
     assert len(ws.carts.all) == n0 + 1
     assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
     assert ws.cart.get("type") == "game"
+    made = ws.cart.get("path")
+    ws.wm.close_window_kind("menu")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.launcher.tab == "make"
+    assert ws.launcher.selected().get("path") == made, "back on the cart it made"
+    # The parked windows came through the trip untouched.
+    ws.open_desk()
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["calc"]
+
+
+def test_closing_the_editor_stays_on_the_desk_once_another_window_opened(tmp_path):
+    """The one exception to R5-05's return: a window the kid opened on the
+    desk meanwhile keeps them there when the Editor closes."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_library()
+    drv.frame(1 / 30)
+    ws.set_home_tab("make")
+    assert _select(ws, "Star Catcher")
+    ws.launch_selected()
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["menu"]
+    ws.wm._backdrop_layer._open_icon("files")
+    drv.frame(1 / 30)
+    ws.wm.close_window_kind("menu")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["files"]
+
+
+def test_an_editor_opened_on_the_desk_closes_onto_the_desk(tmp_path):
+    """Only a hand-off from the console-mode home returns there: an Editor
+    the desk's PROJECTS opened closes onto the desk."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_projects()
+    drv.frame(1 / 30)
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("path"))
+    ws.launch_selected(g)
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["projects", "menu"]
+    ws.wm.close_window_kind("menu")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["projects"]
 
 
 def test_desk_icons_open_windows(tmp_path):
