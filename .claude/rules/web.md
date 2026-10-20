@@ -42,9 +42,11 @@ nor those docs will warn you about:
   `micropython.wasm` (Zero image headroom pays for them: the build prints it).
   **A class the image lacks the tier of falls back to petme128 and the
   shell's own icons with nothing failing**: `tests/test_web_look_parity.py`
-  holds the image's sets and the desk's glass to the boards',
-  `tests/test_web_fonts.py` runs the real wasm in both arrangements and names
-  the face a seed theme lost.
+  holds the image's sets and the desk's glass to the boards' and, under
+  `MOYBYTE_WEB_E2E`, the wasm's frames to the host's in each arrangement,
+  pixel for pixel; `tests/test_web_fonts.py` names the face a seed theme lost.
+  A web-only tweak to what the console draws (web_boot) is a divergence that
+  test reports: the page's own chrome is the only look the browser owns.
 - **The emscripten is PINNED: `EMSDK_VERSION` in build.sh, held by
   `tools/emsdk_tree.sh` on every full build** (a tree at the pin is a silent
   no-op, another version is moved to it, one that cannot be had fails the

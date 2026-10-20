@@ -10,9 +10,15 @@ image's `fonts_data` from its board.toml (`font_tier`, else `tier`); the
 module the browser freezes is held here against each board's, and
 `iconsets.carried` -- what the bar, the Editor's ladder and the C parts draw
 from -- is evaluated under each image's module for every seed theme in both
-variants. tests/test_editor_ladder_icons.py and tests/test_web_fonts.py run
-the real wasm; so does the last test here, which holds the console page's
-achievements to a board's (the one-cart player keeps none).
+variants.
+
+Under MOYBYTE_WEB_E2E the real wasm console (dist/, booted in node) is held
+to the host's workstation built in each board's arrangement -- the shell the
+goldens pin -- frame for frame: the home, the desk, the Editor's Config tab,
+Settings, Files and Appearance under the seed themes, pixel for pixel; and
+the console page awards achievements as a board does (the one-cart player
+keeps none). tests/test_editor_ladder_icons.py and tests/test_web_fonts.py
+run the wasm too.
 """
 
 import glob
@@ -166,3 +172,93 @@ def test_the_browser_console_awards_achievements_as_a_board_does():
     assert line, r.stdout[-3000:]
     got = json.loads(line[0].split("ACH ", 1)[1])
     assert got["after"] > got["before"], got     # First Steps, as on a board
+
+
+# -- the frames themselves -----------------------------------------------------
+#
+# Each scene runs on the host's workstation in the board's arrangement and in
+# the real wasm console, and the two framebuffers are compared pixel for
+# pixel. The clock reads a fixed time in both (the host's zone is not node's),
+# the pointer is hidden (the page boots it hidden; the host draws the
+# cursor), and achievements stay quiet (a toast's slide is timed by the clock).
+_STEADY = ("_ws.bar_layer._clock_text = lambda: '12:00'\n"
+           "_ws.pointer.visible = False\n"
+           "_ws.ach.note = lambda *a, **k: None\n"
+           "_ws.ach.toast = None\n"
+           "_ws.look.set_theme(%r, persist=False, variant=%r)\n")
+_EDITOR = ("_ws.open_in_editor([c for c in _ws.carts.all if c.get('title') == 'Sky Run'][0])\n"
+           "_ws.set_menu_view('cards')\n")
+_APP = "_ws.open_app(_ws._apps_by_id[%r])\n"
+# (arrangement, scene, theme, variant, what the scene does after the setup)
+SCENES = [("handheld", "home", "moy", "dark", ""),
+          ("handheld", "editor_config", "moy", "dark", _EDITOR),
+          ("handheld", "settings", "moy", "light", "_ws.open_settings()\n"),
+          ("handheld", "files", "contrast", "dark", _APP % "files"),
+          ("handheld", "home", "blocks", "light", ""),
+          ("desk", "desk", "moy", "dark", ""),
+          ("desk", "editor_config", "moy", "light", _EDITOR),
+          ("desk", "appearance", "moy", "dark", _APP % "appearance"),
+          ("desk", "desk", "contrast", "light", ""),
+          ("desk", "settings", "blocks", "dark", "_ws.open_settings()\n")]
+SIZES = {"handheld": (320, 240), "desk": (1024, 600)}
+
+
+def _host_frame(tmp_path, arrangement, src):
+    from runtime import host_app
+    from ws_helpers import device_frames
+    w, h = SIZES[arrangement]
+    glass = _web_glass("DESK_DIAGONAL_IN") if arrangement == "desk" else None
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(w, h),
+                                    windowed=arrangement == "desk",
+                                    panel_diagonal_in=glass)
+    device_frames(ws, 30)
+    exec(src, {"_ws": ws})
+    ws._dirty = True
+    device_frames(ws, 20)
+    cv = ws.glass if ws.glass is not None else ws.canvas
+    assert (cv.w, cv.h) == (w, h)
+    stride = getattr(cv, "_stride", 0) or cv.w
+    buf = bytes(cv._buf)
+    return [buf[2 * (y * stride + x)] << 8 | buf[2 * (y * stride + x) + 1]
+            for y in range(h) for x in range(w)]
+
+
+def _web_frame(tmp_path, arrangement, src):
+    w, h = SIZES[arrangement]
+    steps = [{"frames": 30}, {"py": src + "_ws._dirty = True\n"}, {"frames": 20},
+             {"shot": "frame"}]
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    scenario = tmp_path / "scene.json"
+    scenario.write_text(json.dumps({"size": [w, h], "windowed": arrangement == "desk",
+                                    "steps": steps}))
+    r = subprocess.run(["node", "pageshot.mjs", str(scenario), str(tmp_path / "shots")],
+                       cwd=WEB, capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0 and "Traceback" not in r.stdout, r.stdout[-3000:] + r.stderr[-500:]
+    from PIL import Image
+    img = Image.open(tmp_path / "shots" / "frame.png").convert("RGB")
+    assert img.size == (w, h)
+    return [(p[0] >> 3) << 11 | (p[1] >> 2) << 5 | (p[2] >> 3) for p in img.getdata()]
+
+
+@pytest.mark.skipif(not os.environ.get("MOYBYTE_WEB_E2E"),
+                    reason="MOYBYTE_WEB_E2E not set (boots the built wasm console)")
+@pytest.mark.parametrize("arrangement,scene,theme,variant,src", SCENES,
+                         ids=["%s-%s-%s-%s" % sc[:4] for sc in SCENES])
+def test_the_browser_draws_the_boards_frame(tmp_path, arrangement, scene, theme, variant, src):
+    from web_e2e import require
+    require()
+    pytest.importorskip("PIL")
+    if not (WEB / "dist" / "micropython.mjs").exists():
+        pytest.skip("no built firmware/web_runner/dist")
+    full = _STEADY % (theme, variant) + src
+    host = _host_frame(tmp_path / "host", arrangement, full)
+    web = _web_frame(tmp_path / "web", arrangement, full)
+    w = SIZES[arrangement][0]
+    diff = [(i % w, i // w) for i, (a, b) in enumerate(zip(host, web)) if a != b]
+    box = None
+    if diff:
+        xs = [p[0] for p in diff]
+        ys = [p[1] for p in diff]
+        box = (min(xs), min(ys), max(xs), max(ys))
+    assert not diff, "%d pixels differ from the host's %s %s frame, in %s" % (
+        len(diff), arrangement, scene, box)
