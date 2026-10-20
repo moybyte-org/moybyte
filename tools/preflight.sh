@@ -86,7 +86,8 @@ if [ "${WEB}" = "1" ]; then
       tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
       tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
       tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
-      tests/test_web_fonts.py
+      tests/test_web_fonts.py tests/test_web_look_parity.py \
+      tests/test_editor_ladder_icons.py
 fi
 
 if [ "${fails}" -ne 0 ]; then

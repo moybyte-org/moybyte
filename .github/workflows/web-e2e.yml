@@ -32,6 +32,9 @@ name: Web console E2E
 #                                  error panel; Jet Teapot and ESP 88 play; Get
 #                                  Carts installs one by range, no module
 #                                  fetched, and it plays.
+#   tests/test_web_look_parity.py  the console's frames in both arrangements
+#                                  are the host's in the board's, pixel for
+#                                  pixel, under every seed theme.
 #
 # All are gated on MOYBYTE_WEB_E2E, and until this workflow existed nothing set
 # it: the whole browser tier -- the thing a visitor actually touches -- had no
@@ -208,7 +211,8 @@ jobs:
             tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
             tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
             tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
-            tests/test_web_fonts.py
+            tests/test_web_fonts.py tests/test_web_look_parity.py \
+            tests/test_editor_ladder_icons.py
 
       # pytest was green -- but was it green over anything? The prerequisite
       # skips fail hard above, so this catches the other way of proving nothing:
