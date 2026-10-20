@@ -328,6 +328,10 @@ def test_a_full_set_of_slots_is_taken_back(tmp_path):
     assert _free_slots() == 0
     appearance._FONTS.clear()                  # a console that knows none of them
     build_ws(tmp_path)
-    # Moy's Day: its seven faces and JetBrains Mono
+    # Moy's Day: its seven faces and JetBrains Mono, and its icon set's 16
+    # and 24 px masks, which the boot's first publish found no slot for
+    masks = {f for f in iconsets._FONTS.values()
+             if f and ui_draw.font_info(f) is not None}
     assert ui_draw.font("ui")[0] not in (0, None) and len(appearance._FONTS) == 8
-    assert _free_slots() == SLOTS - 8
+    assert len(masks) == 2
+    assert _free_slots() == SLOTS - 8 - 2

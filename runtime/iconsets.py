@@ -155,15 +155,17 @@ def _font(name):
 _PICK = {}                    # set -> {box: [ink font, size, fill font]}
 
 
-def _pick(set_name, box):
+def _pick(set_name, box, again=False):
     """[ink font id, size, fill font id] of the largest mask of `set_name` that
     `box` holds (the smallest where none does): ink 0 where the set has none,
-    fill 0 where it has no fill layer at that size."""
+    fill 0 where it has no fill layer at that size. `again`: a pick that
+    found no mask looks again (the font slots may have been full then)."""
     by = _PICK.get(set_name)
     if by is None:
         by = _PICK[set_name] = {}
     got = by.get(box)
-    if got is not None and (not got[0] or _ui_draw.font_info(got[0]) is not None):
+    if got is not None and (_ui_draw.font_info(got[0]) is not None if got[0]
+                            else not again):
         return got
     got = [0, 0, 0]
     for size in SIZES:
@@ -371,8 +373,8 @@ def use_parts(spec_):
     name = spec_[1] if spec_ is not None and spec_[0] == "smooth" else None
     if name is not None:
         for n in (name, DEFAULT_SET):
-            f16 = f16 or _pick(n, 16)[0]
-            got = _pick(n, 24)
+            f16 = f16 or _pick(n, 16, True)[0]
+            got = _pick(n, 24, True)
             f24 = f24 or (got[0] if got[1] == 24 else 0)
     _ui_draw._C.icons_use(f16, f24, FIRST + SLOT["close"], FIRST + SLOT["maximize"],
                           FIRST + SLOT["minimize"])
