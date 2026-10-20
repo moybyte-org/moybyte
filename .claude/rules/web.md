@@ -31,19 +31,20 @@ nor those docs will warn you about:
   without their comments (build.sh re-prints them with emsdk's terser, nothing
   else changed): read `worker.js` and `moy_store.mjs` in the tree, not in
   `dist/`.
-- **The browser draws in the theme's fonts, and in the HANDHELD's metrics in
-  both arrangements.** `build.sh` generates `fonts_data` (`tools/make_font.py
-  module`) for board.toml's `font_tier` and freezes it into the wasm, so the
-  faces ride the baked, compressed `micropython.wasm` (Zero image headroom pays
-  for them: the build prints it). The tier is `handheld` because web_boot
-  declares no panel diagonal, so `layout_base.class_of(None)` is the handheld
-  even for the 1024x600 desk; **declaring a glass there means carrying the
-  desk's faces too**, or every theme falls back to petme128 with nothing failing
-  -- `tests/test_web_fonts.py` runs the real wasm in both arrangements and
-  names the face a seed theme lost. The icon sets the handheld boards freeze
-  ride the same module, so `iconsets.carried` answers a theme's set here as
-  on the T-Deck (`tests/test_web_look_parity.py` holds the two images' sets
-  equal).
+- **The browser draws what its boards draw: each arrangement on its board's
+  metric class, in the theme's fonts and icon set** (owner, 2026-10-20: the
+  browser and the boards never diverge). The handheld 320x240 declares no
+  glass, as the T-Deck declares none; the 1024x600 desk declares the P4's
+  (`web_boot.DESK_DIAGONAL_IN`), so it lays out on the desk's metrics as that
+  board does. `build.sh` generates `fonts_data` (`tools/make_font.py module`)
+  for board.toml's `font_tier` -- both tiers -- and freezes it into the wasm,
+  faces and icon masks together, so they ride the baked, compressed
+  `micropython.wasm` (Zero image headroom pays for them: the build prints it).
+  **A class the image lacks the tier of falls back to petme128 and the
+  shell's own icons with nothing failing**: `tests/test_web_look_parity.py`
+  holds the image's sets and the desk's glass to the boards',
+  `tests/test_web_fonts.py` runs the real wasm in both arrangements and names
+  the face a seed theme lost.
 - **The emscripten is PINNED: `EMSDK_VERSION` in build.sh, held by
   `tools/emsdk_tree.sh` on every full build** (a tree at the pin is a silent
   no-op, another version is moved to it, one that cannot be had fails the

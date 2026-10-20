@@ -38,17 +38,20 @@ blit_game), picked at boot. So unlike the S3 it stages wm_windowed.py, and
 unlike both boards it keeps host_api.py -- deliberately
 portable, the wasm head's cart API -- and input.py, the host InputState
 web_input decodes into."""
-font_tier = "handheld"
+font_tier = ["handheld", "desktop"]
 font_why = """
 `tools/make_font.py module` freezes the board's font set as `fonts_data`, the
-way every console board does, and with it the icon sets' files the handheld
-boards freeze (tools/make_icons.py), so `iconsets.carried` answers a theme's
-set here as it does on the T-Deck. The browser's metric class is the
-HANDHELD's in both arrangements, because web_boot declares no panel diagonal
-(`layout_base.class_of(None)`), so the desktop arrangement on a 1024x600 canvas
-still asks `fontset.role_face` for the handheld's sizes -- and carries the
-handheld's faces and icon masks, not the desk's (tests/test_web_fonts.py holds
-the class and the coverage, tests/test_editor_ladder_icons.py the icons)."""
+way every console board does, with the icon sets' files beside it
+(tools/make_icons.py). The browser runs both board arrangements, each on its
+board's metric class: the handheld 320x240 declares no glass, as the T-Deck
+declares none, so it lays out on the handheld's metrics
+(`layout_base.class_of(None)`); the 1024x600 desk declares the Waveshare P4's
+7-inch glass (`web_boot.DESK_DIAGONAL_IN`), so it lays out on the desk's. The
+image therefore carries both tiers' faces and icon masks, the union of what
+the T-Deck and the P4 freeze, and `iconsets.carried` and every theme role
+resolve here as on that board's glass (tests/test_web_look_parity.py holds
+the sets and the number to the boards', tests/test_web_fonts.py runs the
+real wasm in both arrangements)."""
 
 # ---------------------------------------------------------------------------
 

@@ -9,11 +9,11 @@ wasm. Without it every theme falls back to the pixel font and nothing fails --
 `fontset.file` answers None, `appearance._install_fonts` leaves each role on
 petme128 -- so this holds three things:
 
-* the module the build generates names every face a seed theme draws in on the
-  class the browser lays out on, in both variants;
-* the class is the one the module was built for, in both arrangements of the
-  real wasm console (the desk on 1024x600 and the handheld on 320x240, each
-  booted from dist/ in node);
+* the module the build generates names every face a seed theme draws in on
+  each class the browser lays out on, in both variants;
+* each arrangement of the real wasm console lays out on its board's class, one
+  the module was built for (the desk on 1024x600 the P4's, the handheld on
+  320x240 the T-Deck's, each booted from dist/ in node);
 * in that console a theme's roles load the faces the host loads (same
   `role_fonts`, same file headers), not the pixel font.
 """
@@ -51,30 +51,32 @@ def _module():
 
 def test_the_browser_module_names_every_face_a_seed_theme_draws():
     assert SEEDS == ["blocks", "contrast", "moy"], SEEDS    # a new seed joins this net
-    tier = make_font.board_fonts(str(WEB))
-    desk = tier == "desktop"
+    assert sorted(make_font.board_fonts(str(WEB))) == ["desktop", "handheld"]
     carried = set(_module()["FACES"])
-    for name in SEEDS:
-        for variant in VARIANTS:
-            files = appearance.role_fonts(name, variant, desk)
-            assert files, (name, variant)
-            for role, (_pkg, f) in files.items():
-                if fontset.face(f):
-                    assert f[:-4] in carried, (
-                        "the browser build carries no %s: theme %s %s draws %s in it"
-                        % (f, name, variant, role))
-            assert "ui" in files and "mono" in files, (name, variant, sorted(files))
+    for desk in (False, True):
+        for name in SEEDS:
+            for variant in VARIANTS:
+                files = appearance.role_fonts(name, variant, desk)
+                assert files, (name, variant, desk)
+                for role, (_pkg, f) in files.items():
+                    if fontset.face(f):
+                        assert f[:-4] in carried, (
+                            "the browser build carries no %s: theme %s %s draws %s in it"
+                            % (f, name, variant, role))
+                assert "ui" in files and "mono" in files, (name, variant, sorted(files))
 
 
-def test_the_browser_lays_out_on_the_class_its_fonts_were_built_for():
-    tier = make_font.board_fonts(str(WEB))
-    assert layout_base.class_of(None) == (layout_base.DESK if tier == "desktop"
-                                          else layout_base.HANDHELD)
-    src = (WEB / "web_boot.py").read_text()
-    assert "panel_diagonal_in" not in src, (
-        "web_boot declares a glass, so the browser's class is no longer "
-        "class_of(None)'s: board.toml's font_tier must follow it")
-    assert "font_tier" in (WEB / "board.toml").read_text()
+# The font tier each metric class takes.
+CLASS_TIER = {layout_base.HANDHELD: "handheld", layout_base.DESK: "desktop"}
+
+
+def test_the_browser_carries_the_faces_of_each_class_it_lays_out_on():
+    """The handheld arrangement declares no glass, the desk the P4's
+    (tests/test_web_look_parity.py holds the number); a class whose tier
+    board.toml's font_tier leaves out would draw every theme in petme128."""
+    tiers = make_font.board_fonts(str(WEB))
+    for glass in (None, 7.0):
+        assert CLASS_TIER[layout_base.class_of(glass)] in tiers, glass
 
 
 def _scenario(tmp_path, windowed, size):
@@ -115,12 +117,12 @@ def test_the_browser_console_draws_a_themes_roles_in_its_faces(tmp_path, windowe
     line = [ln for ln in r.stdout.splitlines() if "FONTS " in ln]
     assert line, r.stdout[-3000:]
     got = json.loads(line[0].split("FONTS ", 1)[1])
-    tier = make_font.board_fonts(str(WEB))
-    want_class = layout_base.DESK if tier == "desktop" else layout_base.HANDHELD
+    want_class = layout_base.DESK if windowed else layout_base.HANDHELD
     assert got.pop("class") == want_class
+    assert CLASS_TIER[want_class] in make_font.board_fonts(str(WEB))
     for key, roles in got.items():
         name, variant = key.split("/")
-        files = appearance.role_fonts(name, variant, tier == "desktop")
+        files = appearance.role_fonts(name, variant, windowed)
         for role in ROLES:
             fid, cell, line_h, ascent = roles[role]
             assert fid != 0, "%s draws %s in petme128 in the browser" % (key, role)

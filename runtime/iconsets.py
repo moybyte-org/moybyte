@@ -6,7 +6,7 @@ a pixel set, `icons.swap`. A theme that sets no kind draws the bar's own
 IconSheet (`ws.look.icon_sheet`, Settings -> EDIT ICONS), as it always has,
 and so would an image that carried none of the set's files (`carried`).
 Every console image carries its tier's sets, the browser's the handheld's
-(tools/make_font.py's `module`).
+and the desk's (tools/make_font.py's `module`).
 
 * PIXEL: the IconSheet tools/make_icons.py builds, a tile a slot
   (`system_icons.moygfx`, its clear pixel 16, so Moy's index-0 outline

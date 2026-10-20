@@ -213,12 +213,16 @@ def build_all():
     return files
 
 
-def module_lines(tier):
-    """The `ICONS` dict make_font.py's fonts_data carries: tier `tier`'s mask
-    files and the pixel set, as bytes."""
+def module_lines(tiers):
+    """The `ICONS` dict make_font.py's fonts_data carries: the mask files of
+    the tiers `tiers` names (one tier, or a tuple of them) and the pixel set,
+    as bytes."""
+    if isinstance(tiers, str):
+        tiers = (tiers,)
     with open(os.path.join(ICONS, "set.json"), "rb") as f:
         meta_b = f.read()
-    names = json.loads(meta_b)["tiers"].get(tier, [])
+    meta = json.loads(meta_b)["tiers"]
+    names = sorted({n for t in tiers for n in meta.get(t, [])})
     out = ["ICONS = {"]
     for n in names:
         with open(os.path.join(ICONS, n + ".fnt"), "rb") as f:

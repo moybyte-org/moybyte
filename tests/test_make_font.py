@@ -140,13 +140,15 @@ def test_a_board_module_carries_its_tier():
         == "desktop"
 
 
-def test_the_browser_module_carries_the_handhelds_faces_and_icon_sets():
-    """The browser draws in the handheld's metrics (tests/test_web_fonts.py
-    holds the class), so its `fonts_data` is that tier's faces and icon sets
+def test_the_browser_module_carries_both_classes_faces_and_icon_sets():
+    """The browser lays out on the handheld's metrics in one arrangement and
+    the desk's in the other (tests/test_web_fonts.py holds the classes), so
+    its `fonts_data` is the two tiers' faces and icon sets
     (tests/test_web_look_parity.py holds them to the boards')."""
     web = os.path.join(ROOT, "firmware", "web_runner")
-    assert make_font.board_fonts(web) == "handheld"
+    assert make_font.board_fonts(web) == ("handheld", "desktop")
     ns = {}
     exec(compile(make_font.render_module(make_font.board_fonts(web)), "fonts_data", "exec"), ns)
     _faces, tiers = make_font.faces()
-    assert sorted(ns["FACES"]) == tiers["handheld"] and "system_icons.moygfx" in ns["ICONS"]
+    assert sorted(ns["FACES"]) == sorted(set(tiers["handheld"]) | set(tiers["desktop"]))
+    assert ns["TIER"] == ("handheld", "desktop") and "system_icons.moygfx" in ns["ICONS"]
