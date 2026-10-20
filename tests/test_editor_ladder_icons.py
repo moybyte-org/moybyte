@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from runtime import fontset, iconsets
-from ws_helpers import build_ws, device_frames
+from runtime import iconsets
+from ws_helpers import build_ws, device_frames, image_without_icon_sets
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "firmware" / "web_runner"
@@ -95,7 +95,7 @@ def test_every_ladder_icon_draws_from_the_set(tmp_path, variant):
 
 @pytest.mark.parametrize("variant", ["light", "dark"])
 def test_an_image_without_the_set_draws_the_shells_icons(tmp_path, monkeypatch, variant):
-    monkeypatch.setattr(fontset, "icon_file", lambda name: None)
+    image_without_icon_sets(monkeypatch)
     ws, drawn = _ladder(tmp_path, variant)
     assert _blank(drawn) == []
     assert ws.icon_spec() is None
@@ -107,8 +107,7 @@ def test_carried_answers_what_the_image_holds(monkeypatch):
     assert iconsets.carried(smooth) == smooth
     assert iconsets.carried(pixel) == pixel
     assert iconsets.carried(None) is None
-    monkeypatch.setattr(fontset, "icon_file", lambda name: None)
-    monkeypatch.setattr(iconsets, "_PIXEL", [])
+    image_without_icon_sets(monkeypatch)
     assert iconsets.carried(smooth) is None
     assert iconsets.carried(pixel) is None
 

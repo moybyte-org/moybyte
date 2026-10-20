@@ -20,6 +20,28 @@ from runtime import host_app
 FIXTURE_THEMES = Path(__file__).resolve().parent / "fixtures" / "themes"
 
 
+def fresh_icon_caches(monkeypatch):
+    """runtime/iconsets.py's module caches, empty for this test alone: what a
+    test loads under an image it substitutes (no icon sets, another board's
+    `fonts_data`) leaves with the substitution instead of answering the next
+    test in the process -- a pixel set cached as absent drew the bar's Moy
+    from the IconSheet in every later test in that xdist worker. The mask
+    fonts already loaded stay (a copy of `_FONTS`: a load takes a font slot,
+    so it is never repeated), and what the test adds goes with it."""
+    from runtime import iconsets
+    for name, val in list(vars(iconsets).items()):
+        if name.startswith("_") and name.isupper() and type(val) in (dict, list):
+            fresh = dict(val) if name == "_FONTS" else type(val)()
+            monkeypatch.setattr(iconsets, name, fresh)
+
+
+def image_without_icon_sets(monkeypatch):
+    """The host as an image that carries no icon set's files."""
+    from runtime import fontset
+    monkeypatch.setattr(fontset, "icon_file", lambda name: None)
+    fresh_icon_caches(monkeypatch)
+
+
 def fixture_theme(name):
     """Fixture package `name`'s theme.json bytes."""
     return (FIXTURE_THEMES / (name + ".moy") / "theme.json").read_bytes()

@@ -34,7 +34,7 @@ from pathlib import Path
 import pytest
 
 from runtime import fontset, iconsets, layout_base
-from ws_helpers import build_ws
+from ws_helpers import build_ws, fresh_icon_caches
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -132,7 +132,7 @@ def theme_specs(tmp_path_factory):
 
 def _carried(monkeypatch, board, specs):
     monkeypatch.setattr(fontset, "_data", _image(board))
-    monkeypatch.setattr(iconsets, "_PIXEL", [])
+    fresh_icon_caches(monkeypatch)
     return {k: iconsets.carried(s) for k, s in specs.items()}
 
 

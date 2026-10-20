@@ -285,13 +285,12 @@ APP_UI = ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"
 _APP_UI_RECTS = ((0, 40, 320, 120),)
 
 
-def _app_ui_host_words(tmp_path, monkeypatch):
+def _app_ui_host_words(tmp_path):
     """The fixture's frame on the host's WAMR (tests/test_ui_public.py's
-    run), as canonical RGB565 words, the host carrying no icon sets, as the
-    browser carries none (runtime/fontset.py): the font set is the same, the
-    browser's handheld faces being the ones the host's handheld class loads."""
-    from runtime import fontset, host_app, wasm_host
-    monkeypatch.setattr(fontset, "icon_file", lambda name: None)
+    run), as canonical RGB565 words: the font and icon sets are the same, the
+    browser's handheld faces and masks being the ones the host's handheld
+    class loads (runtime/fontset.py)."""
+    from runtime import host_app, wasm_host
     from tools import wasm_cart
     from ws_helpers import make_drv, open_cart, quiesce
     if not wasm_host.available():
@@ -320,7 +319,7 @@ def _rects(words):
     return out
 
 
-def test_a_compiled_app_draws_the_ui_page_in_the_browser(tmp_path, monkeypatch):
+def test_a_compiled_app_draws_the_ui_page_in_the_browser(tmp_path):
     """App UI Wasm (its src/main.wat says what it does) draws the public UI
     API's fixture page through the `ui` rows: in the browser they are the
     page's adapters over the same C (native/moy_ui/moy_ui_wasm.c), so the run
@@ -342,7 +341,7 @@ def test_a_compiled_app_draws_the_ui_page_in_the_browser(tmp_path, monkeypatch):
     size, b64 = js[1].split(":", 1)
     assert size == "%dx%d" % (tier_frame.W, tier_frame.H), size
     page = _rects(tier_frame.from_rgba(base64.b64decode(b64)))
-    host = _rects(_app_ui_host_words(tmp_path, monkeypatch))
+    host = _rects(_app_ui_host_words(tmp_path))
     for rect, a, b in zip(_APP_UI_RECTS, page, host):
         assert a == b, "the page drew %r otherwise than the host's run" % (rect,)
 
