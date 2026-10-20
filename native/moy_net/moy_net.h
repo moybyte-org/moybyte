@@ -124,14 +124,19 @@ size_t moy_sync_encode(char *out, size_t cap, const char *v, size_t v_n,
 
 // The store a batch speaks for, off its `v` and `root`: v1 is the carts root
 // by definition (a `root` other than "carts" is refused, never read as
-// carts); v2 names a root whose wire is 2, which is "files" alone.
+// carts); v2 names a root whose wire is 2, "files" or "system". A system
+// batch (the console's own documents, runtime/moy_sync.py's SYSTEM_ROOT) is
+// never applied here: the webhost parks it for the VM, whose Settings decide
+// which of its keys a browser may change (moy_sync.merge_system), and
+// moy_sync_apply refuses every op of one.
 enum {
     MOY_SYNC_CARTS = 0,
     MOY_SYNC_FILES = 1,
+    MOY_SYNC_SYSTEM = 2,
 };
 
 typedef struct {
-    int root;                       // MOY_SYNC_CARTS or MOY_SYNC_FILES
+    int root;                       // MOY_SYNC_CARTS, _FILES or _SYSTEM
     const char *ops, *ops_end;      // the ops array
     const char *pin, *pin_end;      // the pin's value, NULL when it has none
 } moy_sync_batch_t;
@@ -173,7 +178,8 @@ typedef struct {
 } moy_sync_result_t;
 
 // Apply the ops array at [ops, ops_end) into `root` of `s`, one op at a time:
-// a bad op is refused with its reason and never aborts the batch.
+// a bad op is refused with its reason and never aborts the batch. A system
+// root has no store here: each of its ops is refused "no such store".
 void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
                     const char *ops_end, moy_sync_result_t *res);
 
@@ -181,7 +187,9 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
 //
 // The console's own HTTP server: the baked bundle (native/moy_web) open, the
 // capability marker open, and behind the pin the store's two pulls, the sync
-// apply, and whatever routes the VM answers (`defer`). It is the kernel's: its
+// apply, and whatever routes the VM answers (`defer`). A system batch is the
+// VM's too: it is parked, pin checked, when `defer` names its pull
+// (/console.json), and refused 400 "no such store" when it does not. It is the kernel's: its
 // listener, state and buffers are outside the VM's heap, so a soft reset leaves
 // it serving and the next VM finds it so. The poll calls no Python; a deferred
 // request is parked until the VM takes it (moy_web_take) and answers it

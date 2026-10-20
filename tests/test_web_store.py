@@ -74,8 +74,8 @@ def test_the_sync_root_registry_agrees_across_languages():
     moy_store.mjs carries a MIRROR of moy_sync.SYNC_ROOTS. The mirror can rot --
     a root whose dc arity or vfs path drifts would persist a kid's drawing into
     the wrong place or reject a legal delete -- so pin id, endpoint, vfs, the
-    whole-folder-delete arity, the named top-level files and site-onlyness
-    against the Python registry, in order."""
+    whole-folder-delete arity and the named top-level files against the
+    Python registry, in order."""
     from runtime import moy_sync
 
     js = _read("firmware", "web_runner", "moy_store.mjs")
@@ -100,7 +100,6 @@ def test_the_sync_root_registry_agrees_across_languages():
         assert field(entry, "endpoint") == (
             None if root.endpoint is None else root.endpoint.lstrip("/")), entry
         assert field(entry, "vfs") == root.path("/moy/carts"), entry
-        assert bool(field(entry, "siteOnly")) == root.site_only, entry
         top = re.search(r"top:\s*\[([^\]]*)\]", entry)
         assert (tuple(re.findall(r'"([^"]*)"', top.group(1))) if top else None) \
             == root.top, entry
@@ -111,11 +110,9 @@ def test_the_sync_root_registry_agrees_across_languages():
 
 def _dc_depths(root):
     """The whole-folder-delete depths the receiving C applies for `root`; a
-    root no wire carries has none."""
+    root the C does not apply (the system root, the VM's) has none."""
     import tempfile
     from runtime import moy_sync
-    if root.site_only:
-        return []
     root_id = root.id
     with tempfile.TemporaryDirectory() as d:
         ok = []

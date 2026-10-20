@@ -793,10 +793,10 @@ def test_sync_off_stops_both_roots(tmp_path):
 
 # ---------------------------------------------------------------------------
 # The console's own documents (moy_sync.SYSTEM_ROOT): a site-mode browser keeps
-# system.json, the badges and the edited icons in its OPFS, and no wire ever
-# carries them. The JS half (the OPFS apply and its crash-safety) is
-# firmware/web_runner/store_test.mjs; the reload itself is
-# tests/test_web_system_persist.py.
+# system.json, the badges and the edited icons in its OPFS. The JS half (the
+# OPFS apply and its crash-safety) is firmware/web_runner/store_test.mjs; the
+# reload itself is tests/test_web_system_persist.py. Their board half -- the
+# per-key merge, the pull, the parked batch -- is tests/test_system_sync.py.
 # ---------------------------------------------------------------------------
 
 
@@ -824,7 +824,8 @@ def _system_watcher(top):
 def test_the_system_root_is_the_carts_folders_parent():
     assert moy_sync.SYSTEM_ROOT.path("/moy/carts") == "/moy"
     assert moy_sync.SYSTEM_ROOT.path("/sd/moybyte/carts") == "/sd/moybyte"
-    assert moy_sync.SYSTEM_ROOT.site_only and moy_sync.SYSTEM_ROOT.endpoint is None
+    assert moy_sync.SYSTEM_ROOT.endpoint == moy_sync.SYSTEM_PULL
+    assert moy_sync.SYSTEM_ROOT.wire_top == ("system.json", "achievements.json")
 
 
 def test_the_system_files_are_the_stores_own_names():
@@ -884,22 +885,36 @@ def test_a_vanished_system_file_is_a_plain_delete_never_a_folder_one(tmp_path):
     assert w.take() == [{"p": "achievements.json", "d": 1}]
 
 
-def test_every_board_refuses_a_system_batch():
-    """The wire has no verb for the console's own documents: a batch stamped
-    for them is refused by the receiving C (no root it serves), never read as
-    a carts batch with `system.json` for a cart path."""
+def test_the_c_apply_refuses_every_op_of_a_system_batch(tmp_path):
+    """A system batch parses as its own root and is never read as a carts
+    batch with `system.json` for a cart path: the C apply has no store for it,
+    so nothing lands even where a caller hands it one (the VM merges it)."""
     body = json.dumps({"v": moy_sync.PROTOCOL_V_ROOTED, "root": "system",
                        "ops": [{"p": "system.json", "t": "{}"}]})
-    assert parse_batch(body) == (None, None, None)
+    ops, _pin, root_id = parse_batch(body)
+    assert root_id == "system" and ops == [{"p": "system.json", "t": "{}"}]
+    root = _store(tmp_path)
+    applied, errors, _shelf = apply_ops(str(root), ops, root_id)
+    assert applied == 0 and errors == [(0, "no such store")]
+    assert not (root / "system.json").exists()
+    assert not (tmp_path / "system.json").exists()
 
 
-def test_only_a_site_mode_page_watches_the_console_s_own_documents(tmp_path):
-    """A board-served page's console is the board's: it builds no watcher for
-    the documents the board keeps itself, whatever its VFS holds."""
+def test_a_board_page_watches_its_documents_only_when_the_board_served_them(
+        tmp_path):
+    """The system root's directory is there whatever the host serves, so the
+    capability is the worker's word: a board that answered /console.json gets
+    a watcher over the two documents it takes, one that did not (firmware
+    before the root, which refuses the batch) gets none, and a page that never
+    said gets none either."""
     wb = _web_boot()
     top = _console_dir(tmp_path)
     carts = str(top / "carts")
     assert "system" not in wb._build_watchers(carts, False)
+    assert "system" not in wb._build_watchers(carts, False, ("carts", "files"))
+    board = wb._build_watchers(carts, False, ("carts", "files", "system"))
+    assert set(board) == {"carts", "files", "system"}
+    assert board["system"].top == moy_sync.SYSTEM_WIRE_FILES
     site = wb._build_watchers(carts, True)
     assert set(site) == {"carts", "files", "system"}
     assert site["system"].top == moy_sync.SYSTEM_FILES

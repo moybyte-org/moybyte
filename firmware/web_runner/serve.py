@@ -15,7 +15,12 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # on a board, against a plain
                                             # directory. The no-hardware way to
                                             # watch a browser edit land as files
-                                            # on disk.
+                                            # on disk. The console's own
+                                            # documents beside D (system.json,
+                                            # achievements.json) are the
+                                            # board's too: GET /console.json,
+                                            # and a system batch merged key by
+                                            # key (moy_sync.SYSTEM_KEYS).
     python serve.py ... --carts D --update glass|headless
                                             # ...and a board's FIRMWARE routes
                                             # (GET/POST /update) on top, faked.
@@ -34,6 +39,11 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # one being served and a client
                                             # that stops reading is cut off,
                                             # as on glass.
+    python serve.py ... --carts D --no-system  # ...as a board flashed before
+                                            # the system root: /console.json
+                                            # 404s and a system batch is
+                                            # refused 400, as that firmware's
+                                            # C refuses it ("bad batch").
     python serve.py ... --carts D --pin NNNN  # ...with a board's PIN GATE on
                                             # top. The dev loop stays PINLESS by
                                             # default and is meant to: a
@@ -90,6 +100,11 @@ if "--close-after" in args:
     i = args.index("--close-after")
     close_after = float(args[i + 1])
     del args[i:i + 2]
+no_system = "--no-system" in args
+if no_system:
+    args.remove("--no-system")
+    if "--carts" not in sys.argv:
+        raise SystemExit("--no-system needs --carts (it is part of the board twin)")
 one_link = "--one-link" in args
 if one_link:
     args.remove("--one-link")
@@ -123,6 +138,40 @@ else:
     # what cuts a client off, is the board's own.
     _LINK_CHUNK = 65536
     from runtime import moy_sync                        # noqa: E402
+
+    class TwinConsole:
+        """The board's Settings and badges, as a board keeps them beside its
+        carts (D/../system.json, D/../achievements.json), merged through the
+        same bodies a board's VM runs (moy_webhost.ConsoleSystem's): what a
+        page served by this twin may change is moy_sync.SYSTEM_KEYS'."""
+
+        def __init__(self, carts):
+            import threading
+            from runtime import moy_carts
+            from runtime.moy_spine import Settings
+            from runtime.widgets import Achievements
+            self.carts = carts
+            self.lock = threading.Lock()
+            self.rows = Settings(
+                lambda text: moy_carts.save_system(text, carts) or True)
+            self.rows.adopt(moy_carts.load_system(carts))
+            self.ach = Achievements(
+                moy_carts.load_achievements(carts),
+                on_save=lambda ids: moy_carts.save_achievements(ids, carts))
+            self.rx = moy_sync.SystemReceiver()
+
+        def pull(self):
+            with self.lock:
+                return moy_sync.system_pull(self.rows, self.ach.unlocked)
+
+        def apply(self, ops):
+            with self.lock:
+                applied, errors, _changed = self.rx.apply(
+                    ops, self.rows, lambda i: self.ach.award(i, quiet=True),
+                    self.carts)
+            return applied, errors
+
+    console = None if no_system else TwinConsole(carts_dir)
 
     class _TwinOta:
         """The handful of things `moy_webhost.update_status` asks an updater."""
@@ -309,6 +358,12 @@ else:
                     tops=moy_sync.file_kinds())).encode()
                 self._send(200, body)
                 return
+            if path == moy_sync.SYSTEM_PULL and console is not None:
+                # The console's own documents, as a board's VM answers them.
+                if self._refused(_query(self.path, "pin")):
+                    return
+                self._send(200, json.dumps(console.pull()).encode())
+                return
             if path == "/update":
                 # Both methods gate on the QUERY here, exactly as a board's do
                 # -- see moy_webhost._update for why one endpoint may not read
@@ -356,6 +411,19 @@ else:
                 self._send(400, b'{"error":"bad batch"}')
                 return
             if self._refused(sent):
+                return
+            if root_id == moy_sync.SYSTEM_ROOT_ID:
+                if console is None:
+                    print("sync: system batch refused (no system root)",
+                          flush=True)
+                    self._send(400, b'{"error":"bad batch"}')
+                    return
+                # Merged key by key into the twin's Settings and badges, as a
+                # board's VM merges the batch its C parked.
+                applied, errors = console.apply(ops)
+                print("sync: system %d applied" % applied, flush=True)
+                self._send(200, json.dumps(
+                    {"ok": applied, "err": [list(e) for e in errors]}).encode())
                 return
             target = (moy_sync.files_root(carts_dir)
                       if root_id == moy_sync.FILES_ROOT_ID else carts_dir)

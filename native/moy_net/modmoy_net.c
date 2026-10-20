@@ -563,7 +563,8 @@ static mp_obj_t mod_sync_batch(mp_obj_t body) {
     }
     mp_obj_t fn = mp_load_attr(json_module(), MP_QSTR_loads);
     mp_obj_t t[3] = {
-        MP_OBJ_NEW_QSTR(bt.root == MOY_SYNC_FILES ? MP_QSTR_files : MP_QSTR_carts),
+        MP_OBJ_NEW_QSTR(bt.root == MOY_SYNC_FILES ? MP_QSTR_files
+                        : bt.root == MOY_SYNC_SYSTEM ? MP_QSTR_system : MP_QSTR_carts),
         loads(fn, bt.pin, bt.pin_end),
         mp_obj_new_str(bt.ops, (size_t)(bt.ops_end - bt.ops)),
     };
@@ -582,8 +583,9 @@ static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
         .journal = mp_obj_is_true(args[5]),
         .ts = (int64_t)(mp_hal_time_ns() / 1000000000ull) - VM_EPOCH,
     };
-    int root = strcmp(mp_obj_str_get_str(args[3]), "files") == 0
-               ? MOY_SYNC_FILES : MOY_SYNC_CARTS;
+    const char *rid = mp_obj_str_get_str(args[3]);
+    int root = strcmp(rid, "files") == 0 ? MOY_SYNC_FILES
+               : strcmp(rid, "carts") == 0 ? MOY_SYNC_CARTS : MOY_SYNC_SYSTEM;
     size_t on;
     const char *ops = mp_obj_str_get_data(args[4], &on);
     if (moy_json_valid(ops, on) != MOY_JSON_OK) {

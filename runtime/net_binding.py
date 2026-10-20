@@ -323,6 +323,10 @@ def decode_batch(body):
             field(e.ops, e.ops_end), field(e.pin, e.pin_end))
 
 
+# moy_net.h's MOY_SYNC_CARTS / _FILES / _SYSTEM, by value.
+_ROOT_NAMES = ("carts", "files", "system")
+
+
 def sync_batch(body):
     """(root id, pin, ops JSON text) of a POST /sync body, or None when the
     batch is malformed or speaks for a root this build does not serve."""
@@ -336,7 +340,7 @@ def sync_batch(body):
     if b.pin:
         pin = json.loads(raw[b.pin - base:b.pin_end - base].decode("utf-8"))
     ops = raw[b.ops - base:b.ops_end - base].decode("utf-8")
-    return ("files" if b.root == 1 else "carts", pin, ops)
+    return (_ROOT_NAMES[b.root], pin, ops)
 
 
 def _names(names):
@@ -359,7 +363,8 @@ def sync_apply(carts, files, kinds, root_id, ops, journal):
     base = ctypes.addressof(buf)
     lead = len(raw) - len(raw.lstrip())
     end = len(raw.rstrip())
-    _lib().moy_sync_apply(ctypes.byref(st), 1 if root_id == "files" else 0,
+    root = _ROOT_NAMES.index(root_id) if root_id in _ROOT_NAMES else 2
+    _lib().moy_sync_apply(ctypes.byref(st), root,
                           base + lead, base + end, ctypes.byref(r))
     errs = [(r.err[i].index, r.err[i].why.decode("utf-8"))
             for i in range(r.nerr)]

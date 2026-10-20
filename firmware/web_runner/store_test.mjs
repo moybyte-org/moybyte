@@ -171,7 +171,7 @@ for (const sync of [true, false]) {
     const carts = await store.openStore(nav);
     const s = await store.openStore(nav, "system");
     ok("the console's store opens beside the carts (" + label + ")",
-       !!s && s.root.id === "system" && s.root.siteOnly === true);
+       !!s && s.root.id === "system" && s.root.endpoint === "console.json");
     ok("a fresh console store is empty (" + label + ")", await store.isEmpty(s));
     const icons = new Uint8Array(300).map((_, i) => (i * 7) & 255);
     const SYS = '{"theme": "dusk", "show_fps": false, "volume": 3}';

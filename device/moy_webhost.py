@@ -3,9 +3,10 @@
 #   pack_store         the whole store as the page's bundle (the C pull)
 #   update_status      the one /update document
 #   ConsoleUpdate      the /update backend on a board with glass
+#   ConsoleSystem      the console's Settings and badges for the page it serves
 #   WebHost            the Settings contract over the kernel's webhost
 #   WebHost.poll       the C poll, its events, the parked request, the update
-#   WebHost.handle_http  the routes the VM answers: /run and /update
+#   WebHost.handle_http  the routes the VM answers: /run, /update, the system root
 #   ensure_online      connect, wait for the link, report (a port's station)
 #   make_webhost       the WebHost every board injects
 """Serve the moybyte web console FROM the console, over the device's own WiFi.
@@ -20,6 +21,12 @@ console behind it:
     POST /run       play a cart on the BOARD's own glass (#197)         [pin]
     GET  /update    this board's FIRMWARE state (#41/#53)               [pin]
     POST /update    ask it to update                                    [pin]
+    GET  /console.json  the console's portable Settings and its badges  [pin]
+    POST /sync      a batch for the system root, merged into them       [pin]
+
+The last two are a host built with `system` (`ConsoleSystem`; the Zero has
+none, so its page keeps its Settings in the tab): the board is of record, and
+which keys a page may change is `moy_sync.SYSTEM_KEYS`.
 
 The C parks such a request until `poll()` takes it, answers it here, and hands
 the response back; one nobody answers within the kernel's window (a VM gone
@@ -250,6 +257,32 @@ class ConsoleUpdate:
             return None
 
 
+class ConsoleSystem:
+    """The system root's board half: the pull a page seeds its console from,
+    and the merge of what it sends back, over the live console. A changed
+    Setting is re-applied through the verbs boot uses (`apply_system_keys`),
+    so a theme picked in the page is the board's when its glass comes back;
+    a badge earned there is kept here without a second celebration."""
+
+    def __init__(self, ws):
+        self.ws = ws
+        self._rx = moy_sync.SystemReceiver()
+
+    def pull(self):
+        ws = self.ws
+        return moy_sync.system_pull(ws.system, ws.ach.unlocked)
+
+    def apply(self, ops):
+        """(applied, [(index, reason)]) of one batch's ops."""
+        ws = self.ws
+        applied, errors, changed = self._rx.apply(
+            ops, ws.system, lambda i: ws.ach.award(i, quiet=True),
+            ws.carts_root)
+        if changed:
+            ws.apply_system_keys(changed)
+        return applied, errors
+
+
 class WebHost:
     """The Settings contract (`.serving`, `.joining`, `.closing`, `.start()`,
     `.stop()`, `.url()`, `.error`) over the kernel's web-console switch
@@ -264,7 +297,8 @@ class WebHost:
     running one) is adopted, holding the radio lease it rides on."""
 
     # The routes the VM answers. A subclass adds its own (the Zero's /gpio)
-    # and answers them in `handle_http`.
+    # and answers them in `handle_http`; a host with a `system` adds the
+    # system root's pull, which is also what has the C park its batches.
     DEFER = ("/run", "/update")
 
     # The switch's states (moy_net.h's MOY_WC_*).
@@ -273,7 +307,8 @@ class WebHost:
     def __init__(self, carts_root, port=None, with_sd=None,
                  ensure_online=None, pin=None, on_sync=None, pin_source=None,
                  on_run=None, update=None, on_stop=None, files_root=None,
-                 kinds=None, dial=None, on_serving=None, on_failed=None):
+                 kinds=None, dial=None, on_serving=None, on_failed=None,
+                 system=None):
         self.port = DEFAULT_PORT if port is None else port
         self.carts_root = carts_root
         self.files_root = (moy_sync.files_root(carts_root)
@@ -284,6 +319,7 @@ class WebHost:
         self.on_sync = on_sync
         self.on_run = on_run
         self.update = update
+        self.system = system
         self.on_stop = on_stop
         self.on_serving = on_serving
         self.on_failed = on_failed
@@ -327,10 +363,15 @@ class WebHost:
     def requests(self):
         return moy_net.web_state()[4]
 
+    def _defer(self):
+        if self.system is None:
+            return self.DEFER
+        return self.DEFER + (moy_sync.SYSTEM_PULL,)
+
     def _configure(self, port):
         moy_net.web_start(port, self.carts_root, self.files_root,
                           self.kinds if self.files_root else None,
-                          self.pin or None, self.DEFER)
+                          self.pin or None, self._defer())
 
     def start(self, ip=None):
         """Turn the switch on, never waiting for the link. `ip` is the address
@@ -353,7 +394,7 @@ class WebHost:
         self._with_sd(lambda: None)          # the store's volume is up
         moy_net.wc_on(self.port, self.carts_root, self.files_root,
                       self.kinds if self.files_root else None,
-                      self.pin or None, self.DEFER, ip)
+                      self.pin or None, self._defer(), ip)
         st = moy_net.wc_state()
         if st[0] == self.JOINING and not st[2] and self._dial is not None:
             try:
@@ -526,7 +567,36 @@ class WebHost:
             return self._run(body)
         if path == "/update":
             return self._update(target, body if method == "POST" else None)
+        if self.system is not None:
+            if path == moy_sync.SYSTEM_PULL and method == "GET":
+                return self._console(target)
+            if path == "/sync" and method == "POST":
+                return self._system(body)
         return None
+
+    def _console(self, target):
+        """GET /console.json: the documents a page seeds its console's own
+        root from, gated off `?pin=` like the store's pulls."""
+        refused = self.gate(target)
+        if refused is not None:
+            return refused
+        return http_response(200, _json.dumps(self.system.pull()))
+
+    def _system(self, body):
+        """A system batch the C parked (it checked the pin; so does this, for
+        the host's seam): merged into the console's Settings and badges inside
+        the storage gate, answered as the C answers a carts batch."""
+        ops, sent, root_id = moy_sync.parse_batch(body or b"")
+        if ops is None or root_id != moy_sync.SYSTEM_ROOT_ID:
+            return http_response(400, '{"error":"bad batch"}')
+        if not pin_ok(self.pin, sent):
+            return http_response(403, PIN_REFUSED)
+        applied, errors = self._with_sd(lambda: self.system.apply(ops))
+        if errors:
+            print("SYNC system %d applied, %d refused: %s"
+                  % (applied, len(errors), errors[0][1]))
+        return http_response(200, _json.dumps(
+            {"ok": applied, "err": [list(e) for e in errors]}))
 
     def _run(self, body):
         """PLAY ON DEVICE (#197): `{"cart": "<title or folder>", "pin": ...}`.
@@ -631,7 +701,7 @@ def make_webhost(ws, carts_root, autoconnect=None, with_sd=None,
                    on_stop=lambda: ws.wifi_release("web"),
                    on_serving=lambda: ws.web.on_serving(),
                    on_failed=lambda: ws.web.on_failed(),
-                   update=ConsoleUpdate(ws))
+                   update=ConsoleUpdate(ws), system=ConsoleSystem(ws))
 
 
 def dial_saved(wifi):

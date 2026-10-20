@@ -3,13 +3,18 @@
 #   root_by_id          the Root for a wire root id
 #   parse_batch         a POST body -> (ops, pin, root id)
 #   apply_ops           apply one batch into a store (the kernel's C)
+#   key_class           which Settings cross between a board and its page
+#   system_pull         a board's /console.json document
+#   merge_system        a browser's system.json into a board's Settings
+#   SystemReceiver      a board's apply of a system batch (the VM's)
 #   StoreWatcher        detect a store's changes and queue them as batches
 #   StoreWatcher.sweep  one pass over the store
 #   StoreWatcher.take   the next wire batch
 #   StoreWatcher.ack    settle the batch in flight
 """Commit-shaped store sync between the wasm head and a board (#197 mode 2,
 moycore plan 3.4 -- the PUSH half; the pull half is the webhost's
-GET /carts.json + GET /files.json, native/moy_net/moy_webhost.c).
+GET /carts.json + GET /files.json, native/moy_net/moy_webhost.c, and the
+VM's GET /console.json, device/moy_webhost.py).
 
 The unit of sync is the COMMIT, and the design rides what already exists: the
 console has no SAVE button, so a cart's durable state changes only at the
@@ -54,7 +59,12 @@ docs, sprite sheets, songs and recordings. One protocol, one watcher class,
 one apply; a batch carries which root it speaks for and never mixes the two.
 A third root, the console's own documents (Settings, badges, edited icons;
 owner 2026-10-20, "they should use the store, achievements as well"), rides
-the same watcher into a site-mode browser's OPFS and crosses no wire.
+the same watcher into a site-mode browser's OPFS, and between a board and the
+page it serves as the board's VM decides key by key (`SYSTEM_KEYS`): the
+board is of record, its C parks a system batch for the VM, and the VM merges
+it (`SystemReceiver`) -- the portable Settings that changed set and re-applied,
+the badges a union. A board's pin, update channel and UNKNOWN SOURCES are
+never sent to a page and never taken from one.
 
 One body, three consumers, so the two sides cannot disagree about the wire:
 
@@ -83,10 +93,12 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     shared sheet) never cross the WIRE: each console keeps its own, a board's
     system.json carries its pin and its crash ledger, and wifi.json is a
     secret. The pull skips non-directories at the root and `apply_ops`
-    refuses single-segment file paths outright. A SITE-mode browser keeps the
-    console's own documents (`SYSTEM_FILES`) in its own OPFS through the
-    third root, `SYSTEM_ROOT`, which is site-only: its batches are applied by
-    the page into OPFS and are never POSTed.
+    refuses single-segment file paths outright. The console's own documents
+    (`SYSTEM_FILES`) are the third root, `SYSTEM_ROOT`: a SITE-mode browser
+    keeps all of them in its own OPFS; a board serves system.json's portable
+    rows and achievements.json through its VM (`system_pull`) and merges a
+    page's changes to those two (`merge_system`, `merge_achievements`), while
+    the edited icons and the shared sheet stay on each console.
   * In the files root, anything whose first segment is not one of the
     user-files kinds (moy_store_base.FILE_KIND_NAMES) -- which is how `files/.history/` and `files/trash/`
     stay home, in BOTH directions, with no second skip list to keep in step.
@@ -140,6 +152,20 @@ In practice no files batch is ever aimed at such a board: the browser only
 builds a files watcher when the board answered GET /files.json (web_boot),
 so the version check is the second line of defense, not the first.
 
+A system batch names the third root the same way, and carries the two
+documents a board takes from its page:
+
+    {"v": 2, "root": "system", "ops": [
+      {"p": "system.json", "t": "<the page's whole system.json>"},
+      {"p": "achievements.json", "t": "{\"unlocked\": [...]}"}]}
+
+    -> {"ok": <applied count>, "err": [[index, "reason"], ...]}
+
+Its pull is GET /console.json (`?pin=`), `system_pull`'s document in the
+pull's shape. Both are the VM's: a board without them (firmware before this
+root) answers the batch 400 and the pull 404, and the page then builds no
+system watcher and keeps its Settings and badges in the tab.
+
 A chunked file spans REQUESTS when it must (a 200KB main.lua cannot fit one
 64KB POST): parts accumulate in `<path>.tmp` on the receiver and only `pub`
 publishes, atomically, so a dropped connection mid-file leaves the previous
@@ -166,9 +192,9 @@ except ImportError:  # pragma: no cover - host package lane
     from runtime.net_binding import (encode_batch, sync_batch,
                                      sync_apply)
 try:
-    from moy_store_base import store_path
+    from moy_store_base import cart_path, store_path, USER_NS_KEY
 except ImportError:  # host / CPython: the runtime package
-    from runtime.moy_store_base import store_path
+    from runtime.moy_store_base import cart_path, store_path, USER_NS_KEY
 
 try:
     import binascii as _binascii
@@ -339,7 +365,7 @@ def files_root(carts_root):
 # the browser watchers and the OPFS store. Every per-root behaviour that used to
 # be such a branch is a field on its Root, so ADDING A STORE is one entry and
 # nothing else moves. Three ship: carts, the #108 user files, and the console's
-# own documents beside them (`SYSTEM_ROOT`, a site-mode browser's alone).
+# own documents beside them (`SYSTEM_ROOT`, whose board half is the VM's).
 #
 # The JS side mirrors this list (firmware/web_runner/moy_store.mjs ROOTS), pinned
 # by tests/test_web_store.py, because a STATIC host has no server to ask for it --
@@ -370,10 +396,9 @@ class Root:
       top      None, or the store is these TOP-LEVEL FILES of its directory and
                nothing else: no folder, no other name (`SYSTEM_FILES`). A
                whole-folder delete never applies to one.
-      site_only
-               the store crosses no wire: only a SITE-mode browser, whose OPFS
-               is of record, watches it. A board keeps its own copy and the
-               wire has no verb for it, so a board-mode page builds no watcher.
+      wire_top
+               None, or the files of `top` a BOARD-mode batch may carry (the
+               rest stay on each console): `SYSTEM_WIRE_FILES`.
 
     What a receiver does per root -- the carts root journals and dirties the
     shelf, a whole-cart delete is one segment, the files root is made on its
@@ -382,7 +407,7 @@ class Root:
     """
 
     def __init__(self, id, wire, path, endpoint, kinds=False,
-                 site_keep_journal=False, top=None, site_only=False):
+                 site_keep_journal=False, top=None, wire_top=None):
         self.id = id
         self.wire = wire
         self._path = path
@@ -390,7 +415,7 @@ class Root:
         self.kinds = kinds
         self.site_keep_journal = site_keep_journal
         self.top = top
-        self.site_only = site_only
+        self.wire_top = wire_top
 
     def path(self, carts_root):
         return self._path(carts_root)
@@ -400,6 +425,11 @@ class Root:
         default (None lets StoreWatcher supply it), relaxed to keep the journal
         only for the one root+mode that is of record in the browser."""
         return skip_keep_journal if (site and self.site_keep_journal) else None
+
+    def watch_top(self, site):
+        """The top-level files a watcher over this root sweeps: all of `top` in
+        SITE mode, `wire_top` (when set) for a board."""
+        return self.top if (site or self.wire_top is None) else self.wire_top
 
 
 CARTS_ROOT = Root(
@@ -427,6 +457,11 @@ FILES_ROOT = Root(
 SYSTEM_ROOT_ID = "system"
 SYSTEM_FILES = ("system.json", "achievements.json", "system_icons.moygfx",
                 "system_icons.ver", "shared.moygfx")
+# What crosses between a board and the page it serves: the pull, and the
+# documents a system batch may carry. The edited bar icons and the shared sheet
+# stay on each console in board mode.
+SYSTEM_PULL = "/console.json"
+SYSTEM_WIRE_FILES = ("system.json", "achievements.json")
 
 
 def system_root(carts_root):
@@ -436,11 +471,13 @@ def system_root(carts_root):
 
 
 SYSTEM_ROOT = Root(
-    # v2 + its own root name, though no batch of it is ever aimed at a board:
-    # a receiver that somehow got one REFUSES it (moy_sync.c names only carts
-    # and files), never reads `system.json` as a cart path.
-    SYSTEM_ROOT_ID, PROTOCOL_V_ROOTED, system_root, None,
-    top=SYSTEM_FILES, site_only=True)
+    # v2 + its own root name: a board's C parks a batch of it for the VM
+    # (`SystemReceiver`), and firmware older than this root REFUSES it (its
+    # moy_sync.c named only carts and files), never reading `system.json` as a
+    # cart path. A board-served page watches it only when the board answered
+    # its pull, so no batch of it is aimed at such firmware at all.
+    SYSTEM_ROOT_ID, PROTOCOL_V_ROOTED, system_root, SYSTEM_PULL,
+    top=SYSTEM_FILES, wire_top=SYSTEM_WIRE_FILES)
 
 SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT, SYSTEM_ROOT)
 ROOT_IDS = tuple(r.id for r in SYNC_ROOTS)
@@ -606,6 +643,245 @@ def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
         None if kinds is None else tuple(kinds), root_id, _json.dumps(ops),
         journal)
     return applied, errors, shelf
+
+
+# ---------------------------------------------------------------------------
+# The console's own documents between a board and the page it serves.
+#
+# A board-served page reads the board's Settings and badges through the pull
+# `SYSTEM_PULL` and sends its changes back as system batches, which the board's
+# VM merges (the C parks them: native/moy_net/moy_webhost.c). The board is of
+# record, and it decides per KEY what a browser may change: `SYSTEM_KEYS`.
+# ---------------------------------------------------------------------------
+
+PORTABLE = "portable"   # the pull carries it, a browser's change lands
+LOCAL = "local"         # each console keeps its own: a browser's is ignored
+BOARD = "board"         # never sent to a browser, never taken from one
+
+# Every key a console writes, by what crossing does to it; a key not named here
+# (a retired setting, one added without an entry) is LOCAL. A PORTABLE key
+# carries the shape its value must have to be taken (None: any JSON value).
+# BOARD keys guard the board: its pairing pin, its update channel, and whether
+# it loads unsigned code -- a page must never be able to turn that on.
+SYSTEM_KEYS = {
+    "theme": (PORTABLE, str),
+    "theme_variant": (PORTABLE, str),
+    "layout_theme": (PORTABLE, str),
+    "name": (PORTABLE, str),
+    USER_NS_KEY: (PORTABLE, str),
+    "steady": (PORTABLE, bool),
+    "show_fps": (PORTABLE, bool),
+    "favorites": (PORTABLE, list),
+    "desk_mru": (PORTABLE, list),
+    "plays": (PORTABLE, dict),
+    "volume": (LOCAL, None),
+    "brightness": (LOCAL, None),
+    "idle_dim": (LOCAL, None),
+    "idle_saver": (LOCAL, None),
+    "idle_blank": (LOCAL, None),
+    "font_scale": (LOCAL, None),
+    "chrome_scale": (LOCAL, None),
+    "crisp_pixels": (LOCAL, None),
+    "two_player": (LOCAL, None),
+    "diag_live": (LOCAL, None),
+    "diag_sd": (LOCAL, None),
+    "app_guard": (LOCAL, None),
+    "wallpaper_guard": (LOCAL, None),
+    "web_pin": (BOARD, None),
+    "ota_channel": (BOARD, None),
+    "unknown_sources": (BOARD, None),
+}
+
+# The app prefs namespaces (native/moy_app's `<ns>_<key>` rows) a page may
+# change: a system app's by its PREFS_NS (tests/test_moy_sync.py holds every
+# app that takes the prefs role to this list), and any cart's, whose namespace
+# is its id and so carries a dot.
+SYSTEM_PREFS_NS = ("paint",)
+
+# The keys whose values name carts by PATH (`<carts root>/<folder>`). They cross
+# as folder names and land under the receiver's own carts root: a cart's folder
+# is its id on every console, its root is not.
+CART_PATH_KEYS = ("favorites", "desk_mru", "plays")
+
+
+def key_class(key):
+    """PORTABLE, LOCAL or BOARD for a system.json key."""
+    got = SYSTEM_KEYS.get(key)
+    if got is not None:
+        return got[0]
+    ns = key.split("_", 1)
+    if len(ns) == 2 and ns[1] and (ns[0] in SYSTEM_PREFS_NS or "." in ns[0]):
+        return PORTABLE
+    return LOCAL
+
+
+def _shape_ok(key, value):
+    got = SYSTEM_KEYS.get(key)
+    want = got[1] if got is not None else None
+    return want is None or type(value) is want
+
+
+def _cart_at(path, carts_root):
+    """`path`'s cart folder under `carts_root` (None: the bare folder), or None
+    for a value that names no folder."""
+    if type(path) is not str:
+        return None
+    folder = path.rsplit("/", 1)[-1]
+    if not folder or folder in (".", ".."):
+        return None
+    return folder if carts_root is None else cart_path(carts_root, folder)
+
+
+def rebase_value(key, value, carts_root):
+    """`value` of `key` with every cart path re-rooted under `carts_root` (None:
+    reduced to folder names, the wire's form); any other key's as it is."""
+    if key not in CART_PATH_KEYS:
+        return value
+    if isinstance(value, dict):
+        out = {}
+        for k in value:
+            p = _cart_at(k, carts_root)
+            if p is not None:
+                out[p] = value[k]
+        return out
+    if isinstance(value, list):
+        return [p for p in (_cart_at(v, carts_root) for v in value)
+                if p is not None]
+    return value
+
+
+def system_pull(rows, unlocked):
+    """The /console.json document: `{"system.json": text, "achievements.json":
+    text}` -- the PORTABLE rows of `rows` (a Settings), cart paths as folder
+    names, and the `unlocked` badge ids in achievements.json's own shape."""
+    doc = {}
+    for key in rows.keys():
+        if key_class(key) == PORTABLE:
+            doc[key] = rebase_value(key, rows.get(key), None)
+    ids = sorted(str(i) for i in unlocked)
+    return {"system.json": _json.dumps(doc),
+            "achievements.json": _json.dumps({"unlocked": ids})}
+
+
+def rebase_system(text, carts_root):
+    """A pulled system.json's text with its cart folders re-rooted under this
+    console's `carts_root`, or None when it is not a JSON object."""
+    try:
+        doc = _json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(doc, dict):
+        return None
+    for key in CART_PATH_KEYS:
+        if key in doc:
+            doc[key] = rebase_value(key, doc[key], carts_root)
+    return _json.dumps(doc)
+
+
+def merge_system(rows, text, carts_root):
+    """Merge a browser's system.json `text` into the Settings `rows`: each
+    PORTABLE key whose value differs is set (cart paths re-rooted under
+    `carts_root`), and a PORTABLE key the document no longer has is deleted --
+    unless the document is empty, which says nothing. LOCAL and BOARD keys,
+    and a value of the wrong shape, are passed over. One write for the lot.
+    Returns the keys that changed; ValueError when `text` is not a JSON object.
+    """
+    doc = _json.loads(text)
+    if not isinstance(doc, dict):
+        raise ValueError("not an object")
+    changed = []
+    for key in doc:
+        if key_class(key) != PORTABLE or not _shape_ok(key, doc[key]):
+            continue
+        value = rebase_value(key, doc[key], carts_root)
+        if rows.get(key) != value:
+            rows.set(key, value, persist=False)
+            changed.append(key)
+    if doc:
+        for key in [k for k in rows.keys() if k not in doc]:
+            if key_class(key) == PORTABLE:
+                rows.delete(key, persist=False)
+                changed.append(key)
+    if changed:
+        rows.flush()
+    return changed
+
+
+def merge_achievements(text, award):
+    """Award every badge id a browser's achievements.json `text` holds through
+    `award(id)` -- a union, never a replacement: a badge one console earned is
+    never taken away by the other's list. How many were new; ValueError when
+    the text is not achievements.json's shape."""
+    doc = _json.loads(text)
+    ids = doc.get("unlocked") if isinstance(doc, dict) else None
+    if not isinstance(ids, list):
+        raise ValueError("no unlocked list")
+    n = 0
+    for i in ids:
+        if type(i) is str and award(i):
+            n += 1
+    return n
+
+
+class SystemReceiver:
+    """A board's apply for system batches (the C parks them for the VM): a
+    `system.json` goes through `merge_system`, an `achievements.json` through
+    `merge_achievements`, a document sent in parts is held here until its
+    `pub` (a part 0 starts it again). A delete, a binary op and any other file
+    are refused: a page cannot take a console's documents away."""
+
+    def __init__(self):
+        self._parts = {}
+
+    def apply(self, ops, rows, award, carts_root):
+        """(applied, [(index, reason)], changed keys) of one batch's `ops`."""
+        applied = 0
+        errors = []
+        changed = []
+        for i, op in enumerate(ops if isinstance(ops, list) else ()):
+            why = self._one(op, rows, award, carts_root, changed)
+            if why is None:
+                applied += 1
+            elif len(errors) < 8:
+                errors.append((i, why))
+        return applied, errors, changed
+
+    def _one(self, op, rows, award, carts_root, changed):
+        if not isinstance(op, dict):
+            return "bad op"
+        p = op.get("p")
+        if p not in SYSTEM_WIRE_FILES:
+            return "stays on the console"
+        if op.get("d") or op.get("dc"):
+            return "kept on the console"
+        text = op.get("t")
+        if "part" in op:
+            if type(text) is not str:
+                return "bad part"
+            if op["part"] == 0:
+                self._parts[p] = []
+            got = self._parts.get(p)
+            if got is None or op["part"] != len(got):
+                return "part out of order"
+            got.append(text)
+            return None
+        if op.get("pub"):
+            got = self._parts.pop(p, None)
+            if got is None:
+                return "nothing to publish"
+            text = "".join(got)
+        if type(text) is not str:
+            return "not a document"
+        try:
+            if p == "system.json":
+                for key in merge_system(rows, text, carts_root):
+                    if key not in changed:
+                        changed.append(key)
+            else:
+                merge_achievements(text, award)
+        except (ValueError, TypeError):
+            return "bad document"
+        return None
 
 
 # ---------------------------------------------------------------------------

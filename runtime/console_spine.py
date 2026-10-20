@@ -155,6 +155,25 @@ class SpineVerbs:
         # every write forever; drop it once.
         self.system.delete("frameskip")
 
+    def apply_system_keys(self, keys):
+        """Re-apply the Settings rows `keys` after something other than this
+        console changed them (the page a board serves: moy_sync.merge_system),
+        through the verbs `load_system` calls, persist=False. The rows the
+        console reads where it uses them (the name, the favorites, an app's
+        prefs) need nothing; what shows changes at the next painted frame."""
+        if "theme" in keys or "theme_variant" in keys:
+            name = self.system.get("theme", self.look.theme_name)
+            self.look.set_theme(name, persist=False,
+                                variant=self.system.get(
+                                    "theme_variant", self.look.theme_variant))
+        if "layout_theme" in keys:
+            self.look.apply_layout()
+        for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
+            if key in keys:
+                getattr(self, setter)(self.system.get(key, default),
+                                      persist=False)
+        self._dirty = True
+
     def run(self, project, caller):
         """Show `project`'s running cart on the desktop, recording `caller` so the exit
         gesture knows where to return (spec Section 2's run/return -- a stack discipline,

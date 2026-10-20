@@ -502,6 +502,8 @@ const RECORD_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + stor
 // site mode only, where a page keeps its own carts.
 const WRITTEN_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.WRITTEN_ROOT;
 let writtenStore = null;
+// The roots initStore seeded, which web_boot builds its watchers over.
+let seededRoots = null;
 
 function writeStore(root, files) {
     // mkdirs(root) even for an empty set: a root with no files YET (a board's
@@ -638,17 +640,17 @@ async function initStore(fetched) {
     keep = site ? await store.requestPersistence(navigator) : null;
     if (keep && keep.state !== "granted") self.postMessage({ t: "keep" });
     let anySite = false, anyNone = false, loaded = false;
+    seededRoots = [];
     for (const root of store.ROOTS) {
         const data = fetched[root.id];
-        // The console's own documents (system.json, achievements.json, ...)
-        // are a SITE-mode store alone: a board-served page's console is the
-        // board's, and the board keeps its own.
-        if (!site && root.siteOnly) continue;
-        // A sibling root the host does not serve (files.json 404 -> null): in
-        // BOARD mode skip it (no watcher, no empty dir, exactly today's
-        // capability rule); in SITE mode still give it an empty OPFS store, so a
+        // A sibling root the host does not serve (files.json or console.json
+        // 404 -> null): in BOARD mode skip it (no watcher, no empty dir: the
+        // capability rule, which for the console's own documents is what keeps
+        // a board flashed before their root from being sent a batch it
+        // refuses); in SITE mode still give it an empty OPFS store, so a
         // drawing the kid makes locally has somewhere to persist.
         if (!site && data == null && root.id !== "carts") continue;
+        seededRoots.push(root.id);
         const w = await seedRoot(root, data, site);
         if (w === "seed" || w === "load") anySite = true;
         if (w === "load") loaded = true;
@@ -884,13 +886,17 @@ async function init(search, coarse) {
     // -- stops draining once the browser's buffer is full, and the board cuts
     // it off: a board with more carts than that serves a console that cannot
     // boot. tests/test_web_store_e2e.py boots one over a board-shaped link.
-    const [mods, cartsRes, files, shelves] = await Promise.all([
+    const [mods, cartsRes, files, shelves, system] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
         fetch(withPin("carts.json")).then(async (r) => (
             { status: r.status, json: r.status === 403 ? null : await r.json() })),
         fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
             .catch(() => null),
-        fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null)]);
+        fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null),
+        // The console's own documents, where the serving board keeps them
+        // (its portable Settings and its badges); firmware before them 404s.
+        fetch(withPin("console.json")).then((r) => r.ok ? r.json() : null)
+            .catch(() => null)]);
     if (cartsRes.status === 403) {
         // A PINNED BOARD, and this page cannot read it. Stop the boot here --
         // there is nothing to boot, and seeding the VFS from an error body
@@ -908,7 +914,7 @@ async function init(search, coarse) {
         for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
-    await initStore({ carts: carts, files: files });
+    await initStore({ carts: carts, files: files, system: system });
     if (mode !== "board" && shelves && Array.isArray(shelves.indexes)) {
         mp.FS.writeFile(CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/indexes.json",
                         JSON.stringify({ indexes: shelves.indexes }));
@@ -948,7 +954,8 @@ async function init(search, coarse) {
         // sweeps the journal, and boot() is where that watcher is built.
         // `mode || ""` and not `mode`: JSON.stringify(null) is the token `null`,
         // which is a NameError in the Python this string becomes.
-        + "web_boot.store_mode(" + JSON.stringify(mode || "") + ")\n"
+        + "web_boot.store_mode(" + JSON.stringify(mode || "") + ", "
+        + JSON.stringify(seededRoots || []) + ")\n"
         + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
         + "web_boot.boot('/moy/carts'" + bootArgs + ")\n"
         // AFTER boot(), unlike gpio_enable: this one hangs the updater on the

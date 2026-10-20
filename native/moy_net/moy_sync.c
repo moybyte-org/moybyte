@@ -87,10 +87,13 @@ int moy_sync_batch(const char *body, size_t n, moy_sync_batch_t *b) {
         }
         b->root = MOY_SYNC_CARTS;
     } else if (v == 2) {
-        if (!str || !moy_json_str_is(e.root, e.root_end, "files", 5)) {
+        if (str && moy_json_str_is(e.root, e.root_end, "files", 5)) {
+            b->root = MOY_SYNC_FILES;
+        } else if (str && moy_json_str_is(e.root, e.root_end, "system", 6)) {
+            b->root = MOY_SYNC_SYSTEM;
+        } else {
             return MOY_SYNC_BAD;
         }
-        b->root = MOY_SYNC_FILES;
     } else {
         return MOY_SYNC_BAD;
     }

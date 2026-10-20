@@ -254,10 +254,12 @@ class Achievements:
         return len(self.unlocked)
 
     # -- awarding ------------------------------------------------------------
-    def award(self, ach_id):
+    def award(self, ach_id, quiet=False):
         """Unlock `ach_id` if it isn't already and is a known achievement. Returns
         True only on the FIRST unlock (so a milestone awards exactly once), and then
-        persists + raises a toast + fires the on_unlock hook. A repeat is a no-op."""
+        persists + raises a toast + fires the on_unlock hook. A repeat is a no-op.
+        `quiet` keeps a badge earned on another console (the page a board serves):
+        persisted, never celebrated a second time."""
         if ach_id in self.unlocked or ach_id not in ACH_TITLE:
             return False
         self.unlocked[ach_id] = True
@@ -266,6 +268,8 @@ class Achievements:
                 self._on_save(list(self.unlocked.keys()))
             except Exception as exc:  # noqa: BLE001 -- a failed save must not crash the UI
                 print("Moybyte achievements save failed:", _err_text(exc))
+        if quiet:
+            return True
         self.toast = (ach_id, ACH_TITLE[ach_id], ACH_GLYPH.get(ach_id, "trophy"))
         # The payload is set BEFORE the hook, which is what arms the banner: a
         # live deadline must never point at a stale (or absent) payload.

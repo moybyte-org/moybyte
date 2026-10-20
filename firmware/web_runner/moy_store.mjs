@@ -108,15 +108,15 @@ export function skipLocal(name) {
 // The per-root behaviour the browser store needs is the whole-folder delete
 // ARITY (a cart is one segment, a files item is a kind/name or a folder below
 // it; null: no folder delete at all), and for the console's own documents the
-// named top-level files the store IS (`top`, moy_sync.SYSTEM_FILES), a root no
-// served host has an endpoint for and a board-mode page never opens
-// (`siteOnly`). Kinds are not validated here -- these ops are the browser's own
+// named top-level files the store IS (`top`, moy_sync.SYSTEM_FILES), which a
+// board serves through its VM (`console.json`) when its firmware has the root.
+// Kinds are not validated here -- these ops are the browser's own
 // sweep of its own store, and `.history`/`trash` persisting to a SITE-mode OPFS
 // is the kid's own undo/recovery surviving the tab, which is correct.
 export const ROOTS = [
     { id: "carts", vfs: "/moy/carts", endpoint: "carts.json", dcMin: 1, dcMax: 1 },
     { id: "files", vfs: "/moy/files", endpoint: "files.json", dcMin: 2, dcMax: null },
-    { id: "system", vfs: "/moy", endpoint: null, dcMin: null, dcMax: null, siteOnly: true,
+    { id: "system", vfs: "/moy", endpoint: "console.json", dcMin: null, dcMax: null,
       top: ["system.json", "achievements.json", "system_icons.moygfx",
             "system_icons.ver", "shared.moygfx"] },
 ];

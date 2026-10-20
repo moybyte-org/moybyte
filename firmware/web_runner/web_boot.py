@@ -26,9 +26,10 @@ browser's MEMFS first, and the sweep (`_build_watchers`) carries it to where the
 page's store of record is: a site-mode page's OPFS -- the carts with their
 journals and pmem, the drawings, and the console's own documents (system.json,
 achievements.json, the edited icons), so a reload comes back on the same shelf,
-theme, Settings and badges -- or the serving board for its carts and files.
-A board-served page's Settings and badges live in the tab, and a page with no
-OPFS keeps everything in the tab and says so.
+theme, Settings and badges -- or the serving board for its carts, files,
+portable Settings and badges (`moy_sync.SYSTEM_KEYS`; a board answering no
+/console.json leaves them in the tab). A page with no OPFS keeps everything in
+the tab and says so.
 
 JS contract (see worker.js):
     boot(carts_root, cart=None, ...) -> build the Workstation
@@ -209,6 +210,8 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # worker's idle collect still lands them on quiet frames.
     import gc
     gc.threshold(4 * 1024 * 1024)
+    if _S.get("store_mode") == "board" and "system" in (_S.get("seeded") or ()):
+        _rebase_system(carts_root)
     carts = moy_catalogue.catalogue(carts_root)
     if windowed:
         # The system canvas is never smaller than the 320x240 game canvas it
@@ -280,8 +283,8 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # across a reload", which #193 made false: a static-host page keeps carts in
     # OPFS and a board-served one writes them home. What stays in the tab is
     # everything in a browser with no usable OPFS -- and the page says THAT out
-    # loud -- and a board-served page's Settings and badges, which no wire
-    # carries (the board keeps its own).
+    # loud -- and the Settings a board keeps for itself (moy_sync.SYSTEM_KEYS),
+    # or all of them and the badges where the board serves no /console.json.
     # can_manage is wired AFTER the launcher was built, so rebuild the shelf for it
     # to appear.
     ws.launcher.items = ws._launcher_items(ws.carts.all)
@@ -368,8 +371,10 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # rule everywhere else -- so a board-mode sweep is byte-identical to what it
     # always was. A root whose store is not present in the VFS (a sibling root
     # the served host has no layer for) simply gets no watcher, and neither does
-    # a site-only root (the console's own documents) outside site mode.
-    _S["watchers"] = _build_watchers(carts_root, _S.get("store_mode") == "site")
+    # a root the worker did not seed (the console's own documents, where the
+    # board serves no /console.json).
+    _S["watchers"] = _build_watchers(carts_root, _S.get("store_mode") == "site",
+                                     _S.get("seeded"))
     # The canvas the PAGE presents: the system canvas on the desktop tier, the
     # one shared canvas on the handheld tier. Its buffer is what fb_addr()
     # publishes, so this is the single place the two tiers differ downstream.
@@ -439,23 +444,44 @@ def carts_event_json(text):
     return ""
 
 
-def _build_watchers(carts_root, site):
+def _rebase_system(carts_root):
+    """The pulled system.json's cart folders under this VFS's `carts_root`
+    (they cross as folder names, `moy_sync.CART_PATH_KEYS`), before the
+    Workstation reads it."""
+    import moy_sync
+    path = moy_sync.system_root(carts_root) + "/system.json"
+    try:
+        with open(path) as f:
+            text = moy_sync.rebase_system(f.read(), carts_root)
+        if text is not None:
+            with open(path, "w") as f:
+                f.write(text)
+    except OSError:
+        pass                             # nothing pulled: the defaults
+
+
+def _build_watchers(carts_root, site, seeded=None):
     """`{root_id: StoreWatcher}` for every registered sync root whose store is
     PRESENT in the VFS. A missing store means no watcher -- and that is a
     CAPABILITY signal, not a bug: worker.js seeds a sibling root's directory only
     when its source exists (a board-served `files.json`, or the browser's own
     OPFS in site mode), so a host that has no files layer leaves no directory,
     gets no files watcher, and never aims a files batch at a receiver that could
-    only refuse it. A site-only root (the console's own documents, which the
-    wire has no verb for) is watched in SITE mode alone. Never blocks a boot --
-    any failure leaves an empty dict."""
+    only refuse it. `seeded` is the worker's list of the roots it seeded: the
+    system root's directory is the carts folder's parent, present whatever the
+    host serves, so a board-served page watches it only when the board answered
+    /console.json and the worker said so -- firmware without it refuses the
+    batch. Never blocks a boot -- any failure leaves an empty dict."""
     import os
     out = {}
     try:
         import moy_sync
         for root in moy_sync.SYNC_ROOTS:
-            if root.site_only and not site:
-                continue                 # a board keeps its own copy
+            if seeded is not None:
+                if root.id not in seeded:
+                    continue             # the host does not serve it
+            elif root.top is not None and not site:
+                continue                 # its directory proves nothing
             path = root.path(carts_root)
             if path is None:
                 continue                 # no such layer on this host at all
@@ -465,7 +491,7 @@ def _build_watchers(carts_root, site):
                 continue                 # not seeded -> not watched
             out[root.id] = moy_sync.StoreWatcher(
                 path, root_id=root.id, skip=root.watch_skip(site),
-                top=root.top)
+                top=root.watch_top(site))
     except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
         print("sync watcher unavailable:", exc)
         return {}
@@ -782,7 +808,7 @@ def _apply(events):
         on_super=d.system_key)
 
 
-def store_mode(mode=None):
+def store_mode(mode=None, seeded=None):
     """Which world this page is in, told to us by the worker BEFORE boot().
 
     The worker decides it (moy_store.probeMode) before anything is written,
@@ -797,8 +823,12 @@ def store_mode(mode=None):
     the wire's own predicate in place. That default matters more than the
     setting: a mode that fails to arrive must not start shipping journals at a
     board.
+
+    `seeded` is the ids of the roots the worker seeded (None: unknown, every
+    present root): a board-mode page watches only what its board served.
     """
     _S["store_mode"] = mode or None
+    _S["seeded"] = None if seeded is None else tuple(seeded)
     return ""
 
 

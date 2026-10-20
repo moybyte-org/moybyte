@@ -14,6 +14,11 @@ name: Web console E2E
 #                                  in one pinned Chrome profile, the .moy zip
 #                                  round trip, and the negative case -- a
 #                                  BOARD-served page must keep nothing locally.
+#   tests/test_web_board_system_e2e.py  a board-served page's theme and badges
+#                                  land in the board twin's system.json and
+#                                  achievements.json, key by key, and a fresh
+#                                  browser comes back on them; a twin without
+#                                  the system root is sent no system batch.
 #   tests/test_web_p8_e2e.py       #194: a .p8 and a .p8.png dropped on the page
 #                                  convert in the wasm VM, RUN, and open in the
 #                                  editor -- plus the refusal case, because an
@@ -209,6 +214,7 @@ jobs:
         run: |
           .venv/bin/python -m pytest -p xdist -n 4 -rs --junitxml=web-e2e.xml \
             tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
+            tests/test_web_board_system_e2e.py \
             tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
             tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
             tests/test_web_fonts.py tests/test_web_look_parity.py \

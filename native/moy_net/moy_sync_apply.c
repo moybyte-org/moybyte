@@ -579,7 +579,8 @@ void moy_sync_apply(const moy_sync_store_t *s, int root, const char *ops,
     }
     o->s = s;
     o->root = root;
-    o->dir = root == MOY_SYNC_FILES ? s->files : s->carts;
+    o->dir = root == MOY_SYNC_FILES ? s->files
+             : root == MOY_SYNC_CARTS ? s->carts : NULL;
     moy_json_iter_t it;
     moy_json_iter(&it, ops, ops_end);
     const char *k, *ke, *v, *ve;

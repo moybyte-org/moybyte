@@ -4,8 +4,11 @@
 //   GET  /sync                                 open: {"sync":1}, "a board lives here"
 //   GET  /carts.json, /files.json              pin (?pin=): the store, streamed
 //   POST /sync                                 pin (the body's): a batch applied
+//   POST /sync of the system root              pin (the body's): parked for the VM when it
+//                                              answers /console.json, else 400
 //   GET, POST /gpio                            pin: the board's pins, where it has a table (moy_gpio.c)
-//   anything in the configured `defer`         parked for the VM (/run, /update; "*": every path)
+//   anything in the configured `defer`         parked for the VM (/run, /update, /console.json;
+//                                              "*": every path)
 //
 // THE PIN GATES EVERYTHING that reveals or changes what is on the board (owner
 // call 2026-08-25): a GET carries it as `?pin=`, a POST /sync in its body. A
@@ -890,19 +893,31 @@ static void asset(out_t *o, const char *name, const char *ctype) {
     }
 }
 
-static void sync_post(out_t *o, const char *b, size_t n) {
+// THE SYSTEM ROOT IS THE VM'S. Which of a browser's Settings a board takes,
+// and what changing one sets off, are the console's own (runtime/moy_sync.py,
+// merge_system), so a pinned system batch is parked for the VM -- the one that
+// serves its pull, /console.json -- and refused where no VM answers it.
+static const char SYSTEM_PULL[] = "/console.json";
+
+// 1 when answered, 0 when the batch is parked for the VM.
+static int sync_post(out_t *o, const char *b, size_t n) {
     moy_sync_batch_t batch;
     if (moy_sync_batch(b, n, &batch) != MOY_SYNC_OK) {
         json(o, 400, "{\"error\":\"bad batch\"}");
-        return;
+        return 1;
     }
     if (!moy_sync_pin_ok(&batch, W->pin)) {
         json(o, 403, PIN_REFUSED);
-        return;
+        return 1;
     }
-    if (batch.root == MOY_SYNC_FILES && !W->has_files) {
+    if (batch.root == MOY_SYNC_SYSTEM
+        && in_list(W->defer, SYSTEM_PULL, sizeof(SYSTEM_PULL) - 1u)) {
+        return 0;
+    }
+    if ((batch.root == MOY_SYNC_FILES && !W->has_files)
+        || batch.root == MOY_SYNC_SYSTEM) {
         json(o, 400, "{\"error\":\"no such store\"}");
-        return;
+        return 1;
     }
     moy_sync_store_t s = {
         .carts = W->carts,
@@ -932,6 +947,7 @@ static void sync_post(out_t *o, const char *b, size_t n) {
         snprintf(doc + k, sizeof(doc) - (size_t)k, "]}");
     }
     json(o, 200, doc);
+    return 1;
 }
 
 static void pull(out_t *o, const char *root, const char *kinds) {
@@ -958,8 +974,7 @@ static int route(out_t *o, const char *m, size_t mn, const char *t, size_t tn,
         return 0;
     }
     if (post && path_is(t, pn, "/sync")) {
-        sync_post(o, b, bn);
-        return 1;
+        return sync_post(o, b, bn);
     }
     const uint8_t *gpins;
     if (moy_gpio_pins != NULL && moy_gpio_pins(&gpins) > 0 && path_is(t, pn, "/gpio")
