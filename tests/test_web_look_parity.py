@@ -11,12 +11,17 @@ module the browser freezes is held here against each board's, and
 `iconsets.carried` -- what the bar, the Editor's ladder and the C parts draw
 from -- is evaluated under each image's module for every seed theme in both
 variants. tests/test_editor_ladder_icons.py and tests/test_web_fonts.py run
-the real wasm.
+the real wasm; so does the last test here, which holds the console page's
+achievements to a board's (the one-cart player keeps none).
 """
 
 import glob
+import json
+import os
 import re
+import subprocess
 import sys
+import tempfile
 import types
 from pathlib import Path
 
@@ -136,3 +141,28 @@ def test_every_seed_theme_draws_its_boards_icon_set_in_the_browser(
     assert web == on_glass
     assert web[("moy", "dark")] == ("smooth", "default", None)
 
+
+
+@pytest.mark.skipif(not os.environ.get("MOYBYTE_WEB_E2E"),
+                    reason="MOYBYTE_WEB_E2E not set (boots the built wasm console)")
+def test_the_browser_console_awards_achievements_as_a_board_does():
+    from web_e2e import require
+    require()
+    if not (WEB / "dist" / "micropython.mjs").exists():
+        pytest.skip("no built firmware/web_runner/dist")
+    py = ("import json, web_boot\n"
+          "_n0 = _ws.ach.count()\n"
+          "web_boot.open_cart('Star Catcher')\n")
+    report = ("print('ACH ' + json.dumps({'before': _n0, 'after': _ws.ach.count(),"
+              " 'toast': _ws.ach.toast is not None}))\n")
+    steps = [{"frames": 30}, {"py": py}, {"frames": 10}, {"py": report}]
+    with tempfile.TemporaryDirectory() as tmp:
+        scenario = Path(tmp) / "ach.json"
+        scenario.write_text(json.dumps({"size": [320, 240], "windowed": False, "steps": steps}))
+        r = subprocess.run(["node", "pageshot.mjs", str(scenario), str(Path(tmp) / "shots")],
+                           cwd=WEB, capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0 and "Traceback" not in r.stdout, r.stdout[-3000:] + r.stderr[-500:]
+    line = [ln for ln in r.stdout.splitlines() if "ACH " in ln]
+    assert line, r.stdout[-3000:]
+    got = json.loads(line[0].split("ACH ", 1)[1])
+    assert got["after"] > got["before"], got     # First Steps, as on a board

@@ -285,14 +285,16 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     ws.cart_pick = seams[2]
     ws.cart_home = seams[3]
     # The Moybyte shell's achievements are gamification for the kid console,
-    # not part of a cart player (and doubly not of the brand-neutral spec
-    # bundle). The REAL trigger is the Achievements core's note() (e.g.
-    # ach.note("open", ...) -> toast "First Steps" -- console.py's own
-    # _draw_toast renders it, so stubbing achievements_ui alone was not
-    # enough, as the first owner session proved). Kill the core's verbs.
-    ws.ach.note = lambda *a, **k: None
-    ws.ach.toast = None
-    ws._achievement_unlocked = lambda *a, **k: None
+    # which the console page is, as on a board; they are no part of the
+    # one-cart player (`cart`: an export, the gallery, a kiosk bundle), whose
+    # frames are the cart's. The trigger is the Achievements core's note()
+    # (ach.note("open", ...) -> toast "First Steps", which console.py's own
+    # _draw_toast renders, so stubbing achievements_ui alone is not enough):
+    # the player kills the core's verbs.
+    if cart:
+        ws.ach.note = lambda *a, **k: None
+        ws.ach.toast = None
+        ws._achievement_unlocked = lambda *a, **k: None
     # The Pointer boots visible (a device shows the trackball cursor until its
     # idle timeout) -- in the browser that composited an arrow over the first
     # game frames (owner report: "a cursor flashes at open"). Start hidden; a
