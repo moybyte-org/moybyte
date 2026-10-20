@@ -9,6 +9,7 @@
 // the sync access handle, a browser without one falls back to createWritable.
 import { deflateRawSync } from "node:zlib";
 import * as store from "./moy_store.mjs";
+import { crash, fakeNav } from "./fake_opfs.mjs";
 
 let fail = 0;
 function ok(name, cond, extra = "") {
@@ -17,99 +18,6 @@ function ok(name, cond, extra = "") {
 }
 
 const enc = new TextEncoder(), dec = new TextDecoder();
-
-// ---- a fake OPFS ------------------------------------------------------------
-// CRASH, when set, counts every change the fake makes to its contents and
-// throws once it has allowed `left` of them -- a reload at that exact point,
-// with the store left as far as it got (truncate and write are two changes,
-// as they are on a real sync access handle).
-let CRASH = null;
-function change() {
-    if (CRASH && CRASH.left-- <= 0) throw new Error("the page went away here");
-}
-
-function makeDir(sync) {
-    const children = new Map();
-    const dir = {
-        kind: "directory",
-        async getDirectoryHandle(name, opts) {
-            let c = children.get(name);
-            if (!c) {
-                if (!opts || !opts.create) throw new Error("NotFoundError: " + name);
-                change();
-                c = makeDir(sync);
-                children.set(name, c);
-            }
-            if (c.kind !== "directory") throw new Error("TypeMismatchError: " + name);
-            return c;
-        },
-        async getFileHandle(name, opts) {
-            let c = children.get(name);
-            if (!c) {
-                if (!opts || !opts.create) throw new Error("NotFoundError: " + name);
-                change();
-                c = makeFile(sync);
-                children.set(name, c);
-            }
-            if (c.kind !== "file") throw new Error("TypeMismatchError: " + name);
-            return c;
-        },
-        async removeEntry(name, opts) {
-            const c = children.get(name);
-            if (!c) throw new Error("NotFoundError: " + name);
-            if (c.kind === "directory" && !(opts && opts.recursive) && c._size())
-                throw new Error("InvalidModificationError");
-            // A recursive removal is not atomic on a real filesystem: entry by
-            // entry, so a reload can land half way through one.
-            if (c.kind === "directory") {
-                const inner = [];
-                for await (const [k] of c.entries()) inner.push(k);
-                for (const k of inner) await c.removeEntry(k, { recursive: true });
-            }
-            change();
-            children.delete(name);
-        },
-        async *entries() { for (const [k, v] of children) yield [k, v]; },
-        _size() { return children.size; },
-    };
-    return dir;
-}
-
-function makeFile(sync) {
-    const fh = {
-        kind: "file",
-        data: new Uint8Array(0),
-        async getFile() {
-            return { text: async () => dec.decode(fh.data),
-                     arrayBuffer: async () => fh.data.slice().buffer };
-        },
-    };
-    if (sync) {
-        fh.createSyncAccessHandle = async () => ({
-            truncate(n) { change(); fh.data = fh.data.slice(0, n); },
-            write(bytes, o) {
-                change();
-                const at = (o && o.at) || 0;
-                const out = new Uint8Array(Math.max(fh.data.length, at + bytes.length));
-                out.set(fh.data, 0);
-                out.set(bytes, at);
-                fh.data = out;
-            },
-            flush() { }, close() { },
-        });
-    } else {
-        fh.createWritable = async () => ({
-            async write(bytes) { change(); fh.data = bytes; },
-            async close() { },
-        });
-    }
-    return fh;
-}
-
-const fakeNav = (sync) => {
-    const root = makeDir(sync);
-    return { storage: { getDirectory: async () => root } };
-};
 
 // ---- mode detection ---------------------------------------------------------
 const reply = (status) => async () => ({ ok: status >= 200 && status < 300, status });
@@ -190,7 +98,8 @@ for (const sync of [true, false]) {
         "a.moy/manifest.json": '{"title":"A"}',
         "a.moy/main.py": "print(1)",
         "b.moy/manifest.json": '{"title":"B"}',
-        // Never seeded: a top-level file is system state, not the kid's work.
+        // Never seeded here: a top-level file is the console's own, and the
+        // console's own store keeps it (the system root, below).
         "system.json": "{}",
     });
     ok("seeded store is not empty (" + label + ")", !(await store.isEmpty(s)));
@@ -245,6 +154,148 @@ for (const sync of [true, false]) {
        && back["a.moy/journal/journal.jsonl"] === '{"seq": 1}\n'
        && back["a.moy/journal/s/0001-main.py"] === "print(1)\n",
        JSON.stringify(jr.errors) + " " + JSON.stringify(Object.keys(back)));
+}
+
+// ---- the console's own documents: system.json and its siblings ---------------
+// A site-mode browser is its own console, so it keeps what a board keeps
+// beside its carts -- the Settings rows, the badges, the edited icons -- in an
+// OPFS store of its own, and takes nothing else into it.
+const dirNames = async (d) => {
+    const out = [];
+    for await (const [n] of d.entries()) out.push(n);
+    return out.sort();
+};
+for (const sync of [true, false]) {
+    const label = sync ? "sync handle" : "createWritable";
+    const nav = fakeNav(sync);
+    const carts = await store.openStore(nav);
+    const s = await store.openStore(nav, "system");
+    ok("the console's store opens beside the carts (" + label + ")",
+       !!s && s.root.id === "system" && s.root.siteOnly === true);
+    ok("a fresh console store is empty (" + label + ")", await store.isEmpty(s));
+    const icons = new Uint8Array(300).map((_, i) => (i * 7) & 255);
+    const SYS = '{"theme": "dusk", "show_fps": false, "volume": 3}';
+    const ACH = '{"unlocked": ["first_open", "first_run"]}';
+    const r = await store.applyOps(s, [
+        { p: "system.json", t: SYS },
+        { p: "achievements.json", t: ACH },
+        { p: "system_icons.moygfx", b: store.toBase64(icons) },
+        { p: "system_icons.ver", t: "3" },
+    ]);
+    ok("its documents land (" + label + ")", r.applied === 4 && !r.errors.length,
+       JSON.stringify(r.errors));
+    let all = await store.readAll(s);
+    ok("...and read back, the icons as bytes (" + label + ")",
+       all["system.json"] === SYS && all["achievements.json"] === ACH
+       && all["system_icons.ver"] === "3"
+       && store.fileData(all["system_icons.moygfx"]).every((x, i) => x === icons[i]),
+       JSON.stringify(Object.keys(all)));
+    ok("a committed write leaves nothing beside the file (" + label + ")",
+       (await dirNames(s.carts)).join() ===
+       "achievements.json,system.json,system_icons.moygfx,system_icons.ver",
+       (await dirNames(s.carts)).join());
+    ok("the console store is not empty now (" + label + ")", !(await store.isEmpty(s)));
+    ok("...and the carts store never saw any of it (" + label + ")",
+       !Object.keys(await store.readAll(carts)).length && await store.isEmpty(carts));
+
+    const big = "{\"name\": \"" + "z".repeat(40) + "\"}";
+    const chunked = await store.applyOps(s, [
+        { p: "system.json", t: big.slice(0, 20), part: 0 },
+        { p: "system.json", t: big.slice(20), part: 1 },
+        { p: "system.json", pub: 1 },
+        { p: "achievements.json", d: 1 },
+    ]);
+    all = await store.readAll(s);
+    ok("chunks publish whole and a delete lands (" + label + ")",
+       chunked.applied === 4 && all["system.json"] === big && !("achievements.json" in all),
+       JSON.stringify(chunked.errors) + " " + JSON.stringify(Object.keys(all)));
+
+    const bad = await store.applyOps(s, [
+        { p: "wifi.json", t: "[]" },
+        { p: "installed.json", t: "{}" },
+        { p: "indexes.json", t: "{}" },
+        { p: "a.moy/main.py", t: "x" },
+        { p: "system.json.bak", t: "x" },
+        { p: "system.json~part", t: "x" },
+        { p: "../system.json", t: "x" },
+        { p: "system.json", dc: 1 },
+        { p: "carts/a.moy", dc: 1 },
+        { p: "system.json", b: store.toBase64(icons) },
+    ]);
+    ok("a secret, another sibling, a cart path, a folder delete and bytes for a"
+       + " text file are all refused (" + label + ")",
+       bad.applied === 0 && bad.errors.length === 10, JSON.stringify(bad.errors));
+    ok("...and nothing they named was written (" + label + ")",
+       (await dirNames(s.carts)).join() ===
+       "system.json,system_icons.moygfx,system_icons.ver",
+       (await dirNames(s.carts)).join());
+}
+
+// ---- an interrupted write never corrupts system.json -------------------------
+// A reload can land between any two changes the store makes. Whatever it
+// interrupted, the next boot reads the old document or the new one, whole,
+// and finds nothing else beside them.
+{
+    const OLD = '{"theme": "dusk", "show_fps": false}';
+    const NEW = '{"theme": "night", "show_fps": true, "name": "nikola", "volume": 5}';
+    const fresh = async () => {
+        const s = await store.openStore(fakeNav(true), "system");
+        await store.applyOps(s, [{ p: "system.json", t: OLD }]);
+        return s;
+    };
+    const probe = await fresh();
+    crash.at = { left: 1e9 };
+    await store.applyOps(probe, [{ p: "system.json", t: NEW }]);
+    const total = 1e9 - crash.at.left;
+    crash.at = null;
+    let olds = 0, news = 0, bad = [];
+    for (let k = 0; k < total; k++) {
+        const s = await fresh();
+        crash.at = { left: k };
+        const r = await store.applyOps(s, [{ p: "system.json", t: NEW }]);
+        crash.at = null;
+        if (!r.errors.length) { bad.push(k + ": no crash"); continue; }
+        const all = await store.readAll(s);           // the next boot
+        if (all["system.json"] === OLD) olds++;
+        else if (all["system.json"] === NEW) news++;
+        else bad.push(k + ": " + JSON.stringify(all["system.json"]));
+        const left = await dirNames(s.carts);
+        if (left.join() !== "system.json") bad.push(k + ": left " + left.join());
+    }
+    ok("a reload at any of a Settings write's " + total + " changes leaves the old"
+       + " system.json or the new", !bad.length && olds > 0 && news > 0,
+       bad.slice(0, 4).join(" | ") + " old=" + olds + " new=" + news);
+
+    // A boot whose own settle is interrupted is finished by the boot after it.
+    let twice = [];
+    for (let k = 0; k < total; k++) {
+        const s = await fresh();
+        crash.at = { left: k };
+        await store.applyOps(s, [{ p: "system.json", t: NEW }]);
+        for (let j = 0; j < 12; j++) {
+            crash.at = { left: j };
+            try { await store.readAll(s); crash.at = null; break; } catch (e) { }
+        }
+        crash.at = null;
+        const v = (await store.readAll(s))["system.json"];
+        if (v !== OLD && v !== NEW) twice.push(k + ":" + v);
+    }
+    ok("an interrupted settle is finished by the next one", !twice.length, twice.join(","));
+
+    // No reload at all: a write that failed part way (a quota error) and the
+    // next write after it, in the same session.
+    let next = [];
+    const NEWER = '{"theme": "sakura"}';
+    for (let k = 0; k < total; k++) {
+        const s = await fresh();
+        crash.at = { left: k };
+        await store.applyOps(s, [{ p: "system.json", t: NEW }]);
+        crash.at = null;
+        const r = await store.applyOps(s, [{ p: "system.json", t: NEWER }]);
+        const v = (await store.readAll(s))["system.json"];
+        if (r.errors.length || v !== NEWER) next.push(k + ":" + v);
+    }
+    ok("the write after a failed one lands whole", !next.length, next.join(","));
 }
 
 // ---- a theme package's fonts and sheets cross as BYTES -----------------------
@@ -334,18 +385,18 @@ for (const sync of [true, false]) {
 
     // How many changes a whole update makes, then a reload after each one.
     const probe = await fresh();
-    CRASH = { left: 1e9 };
+    crash.at = { left: 1e9 };
     await store.commitInstall(probe, "jet.moy", asFiles(NEW), NEW_REC);
-    const total = 1e9 - CRASH.left;
-    CRASH = null;
+    const total = 1e9 - crash.at.left;
+    crash.at = null;
     let olds = 0, news = 0, bad = [];
     for (let k = 0; k < total; k++) {
         const s = await fresh();
-        CRASH = { left: k };
+        crash.at = { left: k };
         let threw = false;
         try { await store.commitInstall(s, "jet.moy", asFiles(NEW), NEW_REC); }
         catch (e) { threw = true; }
-        CRASH = null;
+        crash.at = null;
         if (!threw) { bad.push(k + ": no crash"); continue; }
         await store.recoverInstalls(s);
         all = await store.readAll(s);
@@ -367,13 +418,13 @@ for (const sync of [true, false]) {
     let twice = [];
     for (let k = 0; k < total; k++) {
         const s = await fresh();
-        CRASH = { left: k };
+        crash.at = { left: k };
         try { await store.commitInstall(s, "jet.moy", asFiles(NEW), NEW_REC); } catch (e) { }
         for (let j = 0; j < 40; j++) {
-            CRASH = { left: j };
-            try { await store.recoverInstalls(s); CRASH = null; break; } catch (e) { }
+            crash.at = { left: j };
+            try { await store.recoverInstalls(s); crash.at = null; break; } catch (e) { }
         }
-        CRASH = null;
+        crash.at = null;
         await store.recoverInstalls(s);
         all = await store.readAll(s);
         const rec = await store.readRecord(s);
@@ -495,17 +546,17 @@ ok("a DEFLATED zip reads too", defl.length === 1 && dec.decode(defl[0].data) ===
     // the new one, whole, and nothing of the attempt is left behind.
     let probe = await store.openWritten(fakeNav(true));
     await store.commitWritten(probe, "doom", "doomsav0.dsg", OLD);
-    CRASH = { left: 1e9 };
+    crash.at = { left: 1e9 };
     await store.commitWritten(probe, "doom", "doomsav0.dsg", NEW);
-    const steps = 1e9 - CRASH.left;
-    CRASH = null;
+    const steps = 1e9 - crash.at.left;
+    crash.at = null;
     let torn = 0, newer = 0;
     for (let k = 0; k < steps; k++) {
         const s = await store.openWritten(fakeNav(true));
         await store.commitWritten(s, "doom", "doomsav0.dsg", OLD);
-        CRASH = { left: k };
+        crash.at = { left: k };
         try { await store.commitWritten(s, "doom", "doomsav0.dsg", NEW); } catch (e) { }
-        CRASH = null;
+        crash.at = null;
         const after = await store.readWritten(s);
         const text = after["doom/doomsav0.dsg"] ? dec.decode(after["doom/doomsav0.dsg"]) : null;
         if (text !== "old save" && text !== "the new, longer save") torn++;

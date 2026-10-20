@@ -256,6 +256,38 @@ def test_name_on_the_desk_survives_a_phone_keyboards_enter(tmp_path):
         server.wait(timeout=10)
 
 
+def test_the_theme_and_badges_survive_a_reload(tmp_path):
+    """The console's own documents in a real browser's OPFS: a theme named
+    through Appearance on the desk (the UI, end to end), then a cart opened
+    (First Steps, and the run in system.json), then a third load in the same
+    profile, which boots on that theme with that badge and that run. A
+    console that kept its Settings in the tab came back on the default theme
+    with nothing earned (owner, 2026-10-20)."""
+    import json
+    web_e2e.require("store")
+    port = web_e2e.free_port()             # fixed: OPFS is scoped to the ORIGIN
+    profile = tmp_path / "chrome"          # fixed: OPFS lives in the profile
+    server, base = _serve(port)
+    try:
+        out, js = _run("appearance_name", base, profile, tmp_path / "s1")
+        assert json.loads(_tagged(js, "THEME"))["name"] == "nikola", out[-3000:]
+        out, js = _run("persist_open", base, profile, tmp_path / "s2")
+        opened = json.loads(_tagged(js, "OPENED"))
+        assert opened["theme"] == "nikola", "the named theme did not come back: %r\n%s" % (
+            opened, out[-3000:])
+        assert "first_open" in opened["ach"], opened
+        out, js = _run("persist_settings_reload", base, profile, tmp_path / "s3")
+        back = json.loads(_tagged(js, "RELOADED"))
+        assert back["theme"] == "nikola", back
+        assert "first_open" in back["ach"], \
+            "the badge earned on the last load is gone: %r\n%s" % (back, out[-3000:])
+        assert back["mru"] >= 1, "the run the last load recorded is gone: %r" % back
+        assert js[-1].startswith("loaded "), js[-1]
+    finally:
+        server.terminate()
+        server.wait(timeout=10)
+
+
 def test_a_board_served_page_keeps_nothing_locally(tmp_path):
     """The other half of a total split: serve.py --carts answers GET /sync, so
     the page must stay in BOARD mode and open no local store.

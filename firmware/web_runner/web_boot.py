@@ -21,8 +21,14 @@ the PC sim runs -- and input replays through the shared `web_input.apply_events`
 decode, so host == device == browser stays one code path.
 
 Scope: the FULL console, both presentation tiers -- `can_manage=True`, so the
-Make tile and the editors are reachable in the browser. pmem/journal writes land
-in the browser's MEMFS, so they are ephemeral: a reload resets the machine.
+Make tile and the editors are reachable in the browser. Every write lands in the
+browser's MEMFS first, and the sweep (`_build_watchers`) carries it to where the
+page's store of record is: a site-mode page's OPFS -- the carts with their
+journals and pmem, the drawings, and the console's own documents (system.json,
+achievements.json, the edited icons), so a reload comes back on the same shelf,
+theme, Settings and badges -- or the serving board for its carts and files.
+A board-served page's Settings and badges live in the tab, and a page with no
+OPFS keeps everything in the tab and says so.
 
 JS contract (see worker.js):
     boot(carts_root, cart=None, ...) -> build the Workstation
@@ -272,9 +278,10 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # console, not the player-only runner #151 originally scoped -- the Make tile
     # and the editors are the point. This used to add "and nothing persists
     # across a reload", which #193 made false: a static-host page keeps carts in
-    # OPFS and a board-served one writes them home, so the only in-memory case
-    # left is a browser with no usable OPFS -- and the page still says THAT out
-    # loud.
+    # OPFS and a board-served one writes them home. What stays in the tab is
+    # everything in a browser with no usable OPFS -- and the page says THAT out
+    # loud -- and a board-served page's Settings and badges, which no wire
+    # carries (the board keeps its own).
     # can_manage is wired AFTER the launcher was built, so rebuild the shelf for it
     # to appear.
     ws.launcher.items = ws._launcher_items(ws.carts.all)
@@ -332,10 +339,11 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # the suite and got exactly 200 differing pixels on every scene -- a 20x10
     # box at (299, 229), which is the chip.
     #
-    # Default stays True, so the device, the dev page and the desktop tier are
-    # unchanged. A caller that wants clean frames passes hud=False.
-    ws.show_fps = bool(hud)
+    # A caller that wants clean frames passes hud=False. Otherwise the chip is
+    # the Settings SHOW FPS row's, as on a board: the boot's settings apply
+    # (wire_workstation_core) already set it from the stored system.json.
     if not hud:
+        ws.show_fps = False
         ws.perf_hud = False
     driver = host_api.ConsoleDriver(ws)
     ws.use_inputs(WEB_TOUCH_INPUTS if coarse else WEB_INPUTS)
@@ -359,7 +367,8 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # mode for the root that is of record there (carts), and keeps the wire's own
     # rule everywhere else -- so a board-mode sweep is byte-identical to what it
     # always was. A root whose store is not present in the VFS (a sibling root
-    # the served host has no layer for) simply gets no watcher.
+    # the served host has no layer for) simply gets no watcher, and neither does
+    # a site-only root (the console's own documents) outside site mode.
     _S["watchers"] = _build_watchers(carts_root, _S.get("store_mode") == "site")
     # The canvas the PAGE presents: the system canvas on the desktop tier, the
     # one shared canvas on the handheld tier. Its buffer is what fb_addr()
@@ -437,12 +446,16 @@ def _build_watchers(carts_root, site):
     when its source exists (a board-served `files.json`, or the browser's own
     OPFS in site mode), so a host that has no files layer leaves no directory,
     gets no files watcher, and never aims a files batch at a receiver that could
-    only refuse it. Never blocks a boot -- any failure leaves an empty dict."""
+    only refuse it. A site-only root (the console's own documents, which the
+    wire has no verb for) is watched in SITE mode alone. Never blocks a boot --
+    any failure leaves an empty dict."""
     import os
     out = {}
     try:
         import moy_sync
         for root in moy_sync.SYNC_ROOTS:
+            if root.site_only and not site:
+                continue                 # a board keeps its own copy
             path = root.path(carts_root)
             if path is None:
                 continue                 # no such layer on this host at all
@@ -451,7 +464,8 @@ def _build_watchers(carts_root, site):
             except OSError:
                 continue                 # not seeded -> not watched
             out[root.id] = moy_sync.StoreWatcher(
-                path, root_id=root.id, skip=root.watch_skip(site))
+                path, root_id=root.id, skip=root.watch_skip(site),
+                top=root.top)
     except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
         print("sync watcher unavailable:", exc)
         return {}
@@ -733,10 +747,14 @@ def state_json():
     every on-glass suite reads -- plus this page's sample stream
     (`moy_audio.snd_counts()`: frames a compiled cart queued, frames the page's
     audio pull mixed, frames it found none, the room, whether it is open) and
-    the running cart's first eight pmem slots, for a harness driving the page
-    (`window.__moyState()`)."""
+    the running cart's first eight pmem slots, the earned badges' ids, the
+    Settings rows as the console holds them and whether the FPS chip shows,
+    for a harness driving the page (`window.__moyState()`)."""
     import dev_channel
     st = dev_channel._remote_state(_S["ws"])
+    st["ach"] = sorted(_S["ws"].ach.unlocked)
+    st["system"] = json.loads(_S["ws"].system.dump() or "{}")
+    st["show_fps"] = bool(_S["ws"].show_fps)
     try:
         import moy_audio
         sc = moy_audio.snd_counts()
@@ -834,7 +852,7 @@ def sync_off():
     stop sweeping for good. One failed probe, then silence -- the standalone
     browser console must not retry-log forever.
 
-    BOTH roots, because this is the "there is no push half here" answer. A board
+    EVERY root, because this is the "there is no push half here" answer. A board
     that has /sync but no files layer is a different case entirely, and it is
     settled at boot: no files store in the VFS means no files watcher, so
     nothing ever probes for a files endpoint that would 404."""

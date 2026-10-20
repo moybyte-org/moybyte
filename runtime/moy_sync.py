@@ -48,10 +48,13 @@ and no half of it is journaled by the receiver: a drawing pushed from a browser
 lands as a file and nothing else. That asymmetry is recorded rather than fixed
 because the two histories are not the same object.
 
-TWO ROOTS since 2026-08-25 (owner call, "they should get synced"): the carts
-root, and the #108 user-files layer beside it -- the kid's drawings, docs,
-sprite sheets, songs and recordings. One protocol, one watcher class,
+TWO WIRE ROOTS since 2026-08-25 (owner call, "they should get synced"): the
+carts root, and the #108 user-files layer beside it -- the kid's drawings,
+docs, sprite sheets, songs and recordings. One protocol, one watcher class,
 one apply; a batch carries which root it speaks for and never mixes the two.
+A third root, the console's own documents (Settings, badges, edited icons;
+owner 2026-10-20, "they should use the store, achievements as well"), rides
+the same watcher into a site-mode browser's OPFS and crosses no wire.
 
 One body, three consumers, so the two sides cannot disagree about the wire:
 
@@ -77,9 +80,13 @@ One body, three consumers, so the two sides cannot disagree about the wire:
 
 What deliberately does NOT sync, recorded so it is not read as a gap:
   * Top-level files beside the cart folders (system.json, wifi.json, the
-    shared sheet) -- system state, not the kid's work, and wifi.json is a
-    secret. The pull skips non-directories at the root for the same reason;
-    `apply_ops` refuses single-segment file paths outright.
+    shared sheet) never cross the WIRE: each console keeps its own, a board's
+    system.json carries its pin and its crash ledger, and wifi.json is a
+    secret. The pull skips non-directories at the root and `apply_ops`
+    refuses single-segment file paths outright. A SITE-mode browser keeps the
+    console's own documents (`SYSTEM_FILES`) in its own OPFS through the
+    third root, `SYSTEM_ROOT`, which is site-only: its batches are applied by
+    the page into OPFS and are never POSTed.
   * In the files root, anything whose first segment is not one of the
     user-files kinds (moy_store_base.FILE_KIND_NAMES) -- which is how `files/.history/` and `files/trash/`
     stay home, in BOTH directions, with no second skip list to keep in step.
@@ -331,8 +338,8 @@ def files_root(carts_root):
 # branch scattered through the wire parser, the apply, the webhost endpoints,
 # the browser watchers and the OPFS store. Every per-root behaviour that used to
 # be such a branch is a field on its Root, so ADDING A STORE is one entry and
-# nothing else moves. The two we ship are carts and the #108 user files; a third
-# (a shared-projects store, say) would be a third descriptor and no new plumbing.
+# nothing else moves. Three ship: carts, the #108 user files, and the console's
+# own documents beside them (`SYSTEM_ROOT`, a site-mode browser's alone).
 #
 # The JS side mirrors this list (firmware/web_runner/moy_store.mjs ROOTS), pinned
 # by tests/test_web_store.py, because a STATIC host has no server to ask for it --
@@ -360,6 +367,13 @@ class Root:
                sweeps `journal/` too, so the kid's undo history survives the tab.
                Only carts relaxes; the files layer's history is `.history/`
                sidecars, a different mechanism that stays home either way.
+      top      None, or the store is these TOP-LEVEL FILES of its directory and
+               nothing else: no folder, no other name (`SYSTEM_FILES`). A
+               whole-folder delete never applies to one.
+      site_only
+               the store crosses no wire: only a SITE-mode browser, whose OPFS
+               is of record, watches it. A board keeps its own copy and the
+               wire has no verb for it, so a board-mode page builds no watcher.
 
     What a receiver does per root -- the carts root journals and dirties the
     shelf, a whole-cart delete is one segment, the files root is made on its
@@ -368,13 +382,15 @@ class Root:
     """
 
     def __init__(self, id, wire, path, endpoint, kinds=False,
-                 site_keep_journal=False):
+                 site_keep_journal=False, top=None, site_only=False):
         self.id = id
         self.wire = wire
         self._path = path
         self.endpoint = endpoint
         self.kinds = kinds
         self.site_keep_journal = site_keep_journal
+        self.top = top
+        self.site_only = site_only
 
     def path(self, carts_root):
         return self._path(carts_root)
@@ -398,7 +414,35 @@ FILES_ROOT = Root(
     FILES_ROOT_ID, PROTOCOL_V_ROOTED, lambda carts_root: files_root(carts_root),
     "/files.json", kinds=True)
 
-SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT)
+# The console's own documents, the files a board keeps BESIDE its carts
+# folder (moy_carts' sibling stores): the Settings rows and everything else
+# `ws.system` holds, the earned badges, the edited bar icons with their
+# icon-set version, and the shared sprite sheet. A site-mode browser is its own
+# console, so it keeps them in its own OPFS the way a board keeps them on its
+# card, and a reload comes back on the same theme, Settings and badges.
+# Left out on purpose: wifi.json (a browser has no radio, and it is a secret),
+# indexes.json (the serving host's, read at boot), installed.json and written/
+# (each has its own crash-safe keeper, moy_store.commitInstall /
+# commitWritten), and install/ (staging).
+SYSTEM_ROOT_ID = "system"
+SYSTEM_FILES = ("system.json", "achievements.json", "system_icons.moygfx",
+                "system_icons.ver", "shared.moygfx")
+
+
+def system_root(carts_root):
+    """The directory the console's own documents live in: the carts folder's
+    parent, the store's own sibling rule (moy_store_base._sibling_path)."""
+    return carts_root.rsplit("/", 1)[0] or "/"
+
+
+SYSTEM_ROOT = Root(
+    # v2 + its own root name, though no batch of it is ever aimed at a board:
+    # a receiver that somehow got one REFUSES it (moy_sync.c names only carts
+    # and files), never reads `system.json` as a cart path.
+    SYSTEM_ROOT_ID, PROTOCOL_V_ROOTED, system_root, None,
+    top=SYSTEM_FILES, site_only=True)
+
+SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT, SYSTEM_ROOT)
 ROOT_IDS = tuple(r.id for r in SYNC_ROOTS)
 _ROOT_BY_ID = {r.id: r for r in SYNC_ROOTS}
 
@@ -603,10 +647,11 @@ class StoreWatcher:
     """
 
     def __init__(self, root, listdir=None, isdir=None, read=None,
-                 root_id=CARTS_ROOT_ID, skip=None):
+                 root_id=CARTS_ROOT_ID, skip=None, top=None):
         self.root = root
         self.root_id = root_id
         self.skip = skip or _skip    # what this watcher will not sweep
+        self.top = top               # a Root's `top`: these files and no others
         self._listdir = listdir      # injected for host tests; None = real fs
         self._isdir = isdir
         self._read = read or _read_payload
@@ -717,6 +762,8 @@ class StoreWatcher:
         dir is never a unit at all, or losing one recording would delete the
         peer's whole recordings folder.
         """
+        if self.top is not None:
+            return None                       # each file is its own unit
         parts = rel.split("/")
         if self.root_id != FILES_ROOT_ID:
             return parts[0]
@@ -724,9 +771,19 @@ class StoreWatcher:
 
     def _walk(self):
         """Yield (rel, size, mtime) for every syncable file, skip-filtered at
-        every level. Top-level FILES are never syncable (system state beside the
-        store), and in the files root a top-level dir must be a known kind --
-        which is what leaves `.history` and `trash` unwalked."""
+        every level. A store of named top-level files (`top`, the system root)
+        is those files and nothing beside them; in every other root top-level
+        FILES are never syncable, and in the files root a top-level dir must be
+        a known kind -- which is what leaves `.history` and `trash` unwalked."""
+        if self.top is not None:
+            for name, isdir in self._sorted_entries(self.root):
+                if isdir or name not in self.top:
+                    continue
+                full = store_path(self.root, name)
+                st = _stat_file(full) if self._listdir is None else (0, 0)
+                if st is not None:
+                    yield name, st[0], st[1]
+            return
         kinds = file_kinds() if self.root_id == FILES_ROOT_ID else None
         for top, isdir in self._sorted_entries(self.root):
             if not isdir or self.skip(top):

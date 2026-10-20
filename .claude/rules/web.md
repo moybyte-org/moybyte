@@ -90,6 +90,15 @@ nor those docs will warn you about:
   REFUSE the batch instead of writing `drawings/…` into its carts store. A files
   path must start with a `FILE_KINDS` kind, which is the one rule keeping
   `.history/` and `trash/` home in both directions.
+- **The console's own documents are a THIRD root, and SITE-ONLY**
+  (`moy_sync.SYSTEM_ROOT`, owner 2026-10-20): `system.json` (the theme and
+  every Setting), `achievements.json`, the edited bar icons and the shared
+  sheet ride the same sweep into a site-mode page's OPFS, so a reload comes
+  back on the same theme, Settings and badges. Each lands old-or-new
+  (`moy_store.commitFile`), because a torn `system.json` boots the console on
+  its defaults. No wire carries them: a board-served page builds no watcher
+  for them (its Settings and badges live in the tab) and a board refuses a
+  batch stamped for them.
 - **Get Carts runs in a page that keeps its own carts (#124), and in no other.**
   In site mode `carts_link.py` gives the console the page's fetch
   (`ws.cart_net`), an OPFS keeper (`ws.cart_keep`) and the page's file picker

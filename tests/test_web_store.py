@@ -73,8 +73,9 @@ def test_the_sync_root_registry_agrees_across_languages():
     """A static host has no server to hand the page the root list, so
     moy_store.mjs carries a MIRROR of moy_sync.SYNC_ROOTS. The mirror can rot --
     a root whose dc arity or vfs path drifts would persist a kid's drawing into
-    the wrong place or reject a legal delete -- so pin id, endpoint, vfs and the
-    whole-folder-delete arity against the Python registry, in order."""
+    the wrong place or reject a legal delete -- so pin id, endpoint, vfs, the
+    whole-folder-delete arity, the named top-level files and site-onlyness
+    against the Python registry, in order."""
     from runtime import moy_sync
 
     js = _read("firmware", "web_runner", "moy_store.mjs")
@@ -86,24 +87,36 @@ def test_the_sync_root_registry_agrees_across_languages():
             len(entries), len(moy_sync.SYNC_ROOTS))
 
     def field(entry, name):
-        m = re.search(r'%s:\s*("([^"]*)"|null|\d+)' % name, entry)
-        assert m, "no %s in %r" % (name, entry)
+        m = re.search(r'%s:\s*("([^"]*)"|null|true|\d+)' % name, entry)
+        if m is None:
+            return None
         v = m.group(1)
-        return None if v == "null" else (m.group(2) if v.startswith('"') else int(v))
+        if v in ("null", "true"):
+            return {"null": None, "true": True}[v]
+        return m.group(2) if v.startswith('"') else int(v)
 
     for entry, root in zip(entries, moy_sync.SYNC_ROOTS):
         assert field(entry, "id") == root.id, entry
-        assert field(entry, "endpoint") == root.endpoint.lstrip("/"), entry
-        assert field(entry, "vfs") == "/moy/" + root.id, entry
+        assert field(entry, "endpoint") == (
+            None if root.endpoint is None else root.endpoint.lstrip("/")), entry
+        assert field(entry, "vfs") == root.path("/moy/carts"), entry
+        assert bool(field(entry, "siteOnly")) == root.site_only, entry
+        top = re.search(r"top:\s*\[([^\]]*)\]", entry)
+        assert (tuple(re.findall(r'"([^"]*)"', top.group(1))) if top else None) \
+            == root.top, entry
         lo, hi = field(entry, "dcMin"), field(entry, "dcMax")
-        assert [n for n in (1, 2, 3, 4) if n >= lo and (hi is None or n <= hi)] \
-            == _dc_depths(root.id), entry
+        assert [n for n in (1, 2, 3, 4) if lo is not None and n >= lo
+                and (hi is None or n <= hi)] == _dc_depths(root), entry
 
 
-def _dc_depths(root_id):
-    """The whole-folder-delete depths the receiving C applies for `root_id`."""
+def _dc_depths(root):
+    """The whole-folder-delete depths the receiving C applies for `root`; a
+    root no wire carries has none."""
     import tempfile
     from runtime import moy_sync
+    if root.site_only:
+        return []
+    root_id = root.id
     with tempfile.TemporaryDirectory() as d:
         ok = []
         for n in (1, 2, 3, 4):

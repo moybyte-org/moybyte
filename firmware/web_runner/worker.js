@@ -536,7 +536,7 @@ function persist(m, s, d) {
 // which one this is has to be readable BEFORE a cart goes missing, not after.
 function siteSaid() {
     const base = sitePartial ? "carts saved here (some kinds could not)"
-                             : "carts & drawings saved in this browser";
+                             : "carts, drawings & settings saved in this browser";
     if (keep && keep.state === "granted") return base;
     return base + " -- the browser may clear them if space runs short";
 }
@@ -640,6 +640,10 @@ async function initStore(fetched) {
     let anySite = false, anyNone = false, loaded = false;
     for (const root of store.ROOTS) {
         const data = fetched[root.id];
+        // The console's own documents (system.json, achievements.json, ...)
+        // are a SITE-mode store alone: a board-served page's console is the
+        // board's, and the board keeps its own.
+        if (!site && root.siteOnly) continue;
         // A sibling root the host does not serve (files.json 404 -> null): in
         // BOARD mode skip it (no watcher, no empty dir, exactly today's
         // capability rule); in SITE mode still give it an empty OPFS store, so a

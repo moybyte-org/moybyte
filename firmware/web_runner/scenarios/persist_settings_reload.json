@@ -1,0 +1,6 @@
+{"query": "?dev=1", "boot_ms": 30000, "steps": [
+  {"note": "a later load in the same browser: the theme, the Settings rows and the badges come from OPFS", "wait": 3000},
+  {"js": "window.__moyState().then(s => 'RELOADED ' + JSON.stringify({theme: s.theme.name, ach: s.ach, show_fps: s.show_fps, mru: (s.system.desk_mru || []).length}))"},
+  {"js": "window.__moyPersist ? window.__moyPersist.d : 'none'"},
+  {"shot": "reloaded"}
+]}

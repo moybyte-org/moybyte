@@ -1,0 +1,6 @@
+{"query": "?desktop=1&cart=moybyte.star_catcher.moy&dev=1", "boot_ms": 30000, "steps": [
+  {"note": "a cart opened on the desk: First Steps, and the run in system.json", "wait": 3000},
+  {"note": "let the sweep carry both documents into the store (1s pump cadence)", "wait": 5000},
+  {"js": "window.__moyState().then(s => 'OPENED ' + JSON.stringify({ach: s.ach, theme: s.theme.name}))"},
+  {"js": "window.__moyPersist ? window.__moyPersist.d : 'none'"}
+]}
