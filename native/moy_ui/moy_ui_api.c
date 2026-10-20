@@ -285,7 +285,7 @@ static moy_ui_keep_t *keep(moy_ui_ctx_t *c, uint32_t id, int make) {
     }
     free_->id = id;
     free_->a = free_->b = 0;
-    free_->over = free_->foot = 0;
+    free_->over = free_->foot = free_->peek = 0;
     free_->seen = 1;
     return free_;
 }
@@ -659,9 +659,28 @@ static moy_ui_keep_t *page_keep(moy_ui_ctx_t *c) {
     return c->page_keep >= 0 ? &c->keep[c->page_keep] : NULL;
 }
 
+// A row of an open popover's body laid out at `t`, `h` tall, where the
+// body is cut: whether the cut falls well inside it (a quarter of the row
+// clear each side), and the deepest row middle at or above the cut. A rule
+// is no row to peek: what shows of one is not a row running on.
+static void peek_note(moy_ui_ctx_t *c, int t, int h) {
+    int cut = c->pop_cut;
+    if (cut <= 0 || c->n_nest == 0 || c->nest[c->n_nest - 1].kind != 3) {
+        return;
+    }
+    int q = h / 4;
+    if (cut - t > q && t + h - cut > q) {
+        c->pop_inside = 1;
+    }
+    int mid = t + h / 2;
+    if (mid <= cut && mid > c->pop_peek) {
+        c->pop_peek = (int16_t)mid;
+    }
+}
+
 // The next call's box: ui.at's, or the next row of the page. *stacked says
-// which (a row clips to the page).
-static moy_ui_box_t place(moy_ui_ctx_t *c, int h, int *stacked) {
+// which (a row clips to the page); a row a popover's cut may peek is `row`.
+static moy_ui_box_t place_row(moy_ui_ctx_t *c, int h, int *stacked, int row) {
     c->row_slot = c->icon_slot;
     c->row_glyph = c->icon_glyph;
     c->icon_slot = c->icon_glyph = -1;
@@ -689,12 +708,19 @@ static moy_ui_box_t place(moy_ui_ctx_t *c, int h, int *stacked) {
         c->grp_prev = c->grp_first ? 0 : c->grp_flags;
         c->grp_flags = 0;
     }
+    if (row) {
+        peek_note(c, c->y, h);
+    }
     c->y = (int16_t)(c->y + h + gap);
     moy_ui_keep_t *k = page_keep(c);
     if (k != NULL) {
         k->b = c->y;
     }
     return b;
+}
+
+static moy_ui_box_t place(moy_ui_ctx_t *c, int h, int *stacked) {
+    return place_row(c, h, stacked, 1);
 }
 
 // What a stacked row draws inside: the page's content rect.
@@ -1124,6 +1150,7 @@ void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t cap
     int h = kmetric(MOY_UI_K_GROUP, c->cls ? MOY_UI_M_GROUP_CAPTION_DESK : MOY_UI_M_GROUP_CAPTION)
             * c->fs;
     moy_ui_box_t b = {c->page.x, (int16_t)(c->page.y + c->y - c->scroll), c->page.w, (int16_t)h};
+    peek_note(c, c->y, h);
     c->y = (int16_t)(c->y + h);
     moy_ui_keep_t *k = page_keep(c);
     if (k != NULL) {
@@ -1986,16 +2013,39 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
 
 // -- popovers -------------------------------------------------------------------------
 
+// The body a popover shows of its rows' `body` in `cap`: all of it, else
+// the cut, raised to the row middle its keep's `peek` found last frame, so
+// a cut body always shows part of a row under its fade (a phone sheet's
+// peek); never under one row.
+static int pop_body(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body, int cap, int rh) {
+    if (body <= cap) {
+        return body;
+    }
+    c->pop_cut = (int16_t)(cap > 0 ? cap : 1);
+    int bh = kb != NULL && kb->peek > 0 && kb->peek < cap ? kb->peek : cap;
+    return bh < rh ? rh : bh;
+}
+
 int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w,
                        const moy_ui_over_t *o) {
     (void)over(o);
     if (id.n == 0) {
         if (c->n_nest && c->nest[c->n_nest - 1].kind == 3) {
             int used = c->nest[c->n_nest - 1].used;
+            moy_ui_keep_t *pk = page_keep(c);
             int took = nest_close(c, s, 3);
             if (took != used) {
                 c->owe = 1;             // laid out for another body: the next frame redraws
             }
+            // a cut body's rows run on: where the cut falls at a row's edge
+            // or between rows, the next frame cuts at the deepest row
+            // middle above it, so part of a row shows under the fade
+            int peek = c->pop_cut > 0 && took > c->pop_cut && !c->pop_inside ? c->pop_peek : 0;
+            if (pk != NULL && pk->peek != peek) {
+                pk->peek = (int16_t)peek;
+                c->owe = 1;
+            }
+            c->pop_cut = 0;
         }
         return 0;
     }
@@ -2050,13 +2100,11 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
         x = x0;
     }
     int y;
+    c->pop_cut = 0;
+    c->pop_peek = 0;
+    c->pop_inside = 0;
     if (c->pop_mid) {
-        if (2 * pad + bh > y1 - y0) {
-            bh = y1 - y0 - 2 * pad;
-        }
-        if (bh < rh) {
-            bh = rh;
-        }
+        bh = pop_body(c, kb, bh, y1 - y0 - 2 * pad, rh);
         x = sf.x + moy_ui_fdiv(sf.w - w, 2);
         y = sf.y + moy_ui_fdiv(sf.h - (2 * pad + bh), 2);
     } else {
@@ -2067,12 +2115,7 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
         int below = y1 - top, above = foot - y0;
         int dn = 2 * pad + bh <= below || (2 * pad + bh > above && below >= above);
         int room = dn ? below : above;
-        if (2 * pad + bh > room) {
-            bh = room - 2 * pad;
-            if (bh < rh) {
-                bh = rh;
-            }
-        }
+        bh = pop_body(c, kb, bh, room - 2 * pad, rh);
         y = dn ? top : foot - (2 * pad + bh);
     }
     int h = 2 * pad + bh;
@@ -2142,7 +2185,7 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         }
     } else if (!placed && c->y > 0) {
         int stacked;
-        moy_ui_box_t b = place(c, rule_h(c), &stacked);
+        moy_ui_box_t b = place_row(c, rule_h(c), &stacked, 0);
         clip_t k;
         if (clip_row(&k, s, b, stacked, c->page)) {
             moy_ui_rule(s, b, fs, c->cls);

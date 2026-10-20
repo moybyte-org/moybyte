@@ -412,6 +412,24 @@ class PauseMenu:
             ws.request_frame()
 
 
+def _peek(rows, cut):
+    """The body a popover cut at `cut` shows (the engine's `pop_body`): the
+    cut where it falls well inside a row (a quarter of the row clear each
+    side), else the deepest row middle above it, so part of a row always
+    shows under the fade. `rows` are (top, height, peekable)."""
+    best = 0
+    for t, h, row in rows:
+        if not row:
+            continue
+        q = h // 4
+        if cut - t > q and t + h - cut > q:
+            return cut
+        mid = t + h // 2
+        if best < mid <= cut:
+            best = mid
+    return best if 0 < best < cut else cut
+
+
 class SystemMenuUI:
     """The ≡ system menu's rows and their actions (#52). Its drawing, and the
     ABOUT box's, is the kernel's one body (moy_chrome_menu, moy_chrome_about),
@@ -660,19 +678,24 @@ class SystemMenuUI:
         cap = grp[3 + d] * fs
         pad = vr[28 + d] * fs
         rule = (2 * row[7] + (9 if desk else 5)) * fs
-        body, n, ruled = 0, 0, False
+        # the body's rows as the engine stacks them, (top, height, a row
+        # its cut may peek: a rule is not)
+        rows, body, n, ruled = [], 0, 0, False
         for it in ws.sysmenu.items:
             if it[0] == "header":
-                body += n * (rh + gap) + cap + gap
+                rows.append((body, cap, True))
+                body += cap + gap
                 n, ruled = 0, False
             elif it[0] == "sep":
                 ruled = n > 0             # inside a group: its danger rows set apart
             elif it[0] == "item":
                 if ruled:
-                    body += n * (rh + gap) + rule + gap
+                    rows.append((body, rule, False))
+                    body += rule + gap
                     n, ruled = 0, False
+                rows.append((body, rh, True))
+                body += rh + gap
                 n += 1
-        body += n * (rh + gap)
         sx, sy, sw, sh = self.surface()
         e = 4 * fs                       # the card's gap from every edge
         x0, x1, y0, y1 = sx + e, sx + sw - e, sy + e, sy + sh - e
@@ -685,7 +708,7 @@ class SystemMenuUI:
         dn = 2 * pad + bh <= below or (2 * pad + bh > above and below >= above)
         room = below if dn else above
         if 2 * pad + bh > room:
-            bh = max(rh, room - 2 * pad)
+            bh = max(rh, _peek(rows, room - 2 * pad))
         h = 2 * pad + bh
         y = top if dn else foot - h
         return (x, y, w, h)

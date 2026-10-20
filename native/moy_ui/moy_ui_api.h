@@ -99,6 +99,7 @@ typedef struct {
     int32_t a, b;                   // a page: its scroll, its rows' height; a list: its row
     int16_t over;                   // a page: how far a scroll into view went past its rows
     int16_t foot;                   // a page: the hint band its foot gave up last frame
+    int16_t peek;                   // a popover: the body height its cut peeks a row at, 0 none
     uint8_t seen;
 } moy_ui_keep_t;
 
@@ -169,6 +170,11 @@ typedef struct {
     uint8_t pop_gone;
     uint8_t pop_mid;                // it opened with nothing to hang from: centred
     uint32_t pop_id;                // the popover drawn this frame (0: none)
+    // Its body's cut while its rows lay out (content coordinates, 0: not
+    // cut): the deepest row middle at or above it, and whether it already
+    // falls well inside a row (a cut body peeks a row under its fade).
+    int16_t pop_cut, pop_peek;
+    uint8_t pop_inside;
     // ui.grid's: open (2: placed by ui.at), its columns, the card next, the
     // first column's left edge and the columns' pitch, the pictures' size,
     // the top of the card row being laid out (content coordinates; a placed

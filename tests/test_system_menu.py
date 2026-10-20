@@ -544,3 +544,133 @@ def test_menu_renders_on_top_without_error(tmp_path):
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 2          # over a running cart too
+
+
+# -- a cut popover peeks a row (design review R5-01) -------------------------
+
+import test_shell_goldens as _g  # noqa: E402
+
+_THEME_MODES = [("moy", "light"), ("moy", "dark"), ("blocks", "light"),
+                ("contrast", "light"), ("contrast", "dark")]
+_FADE_H = 10            # the engine's fade, rows at the scale (moy_ui_api.c)
+
+
+class _Ladder:
+    """An idle ladder that only offers Sleep."""
+
+    def sleep(self):
+        pass
+
+
+def _goldens_ws(tmp_path, theme, mode, inputs):
+    cfg = dict(_g.CONFIGS["tdeck_320x240_fs1_dark"], variant=mode)
+    cfg["theme"] = theme
+    ws = _g._build(cfg, tmp_path / "carts")
+    ws.use_inputs([("local", inputs)])
+    return ws
+
+
+def _settle(ws, n=6):
+    for _ in range(n):
+        _g._quiesce(ws)
+        ws._dirty = True
+        ws.frame(_g._DT)
+
+
+def _rgb565(v):
+    return ((v >> 11) & 31) * 255 // 31, ((v >> 5) & 63) * 255 // 63, (v & 31) * 255 // 31
+
+
+def _contrast(a, b):
+    def lum(v):
+        out = 0.0
+        for c, k in zip(_rgb565(v), (0.2126, 0.7152, 0.0722)):
+            c /= 255
+            out += k * (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+        return out
+    la, lb = sorted((lum(a), lum(b)))
+    return (lb + 0.05) / (la + 0.05)
+
+
+def _fade_ink(ws, card):
+    """The share of the cut body's fade band, its last FADE_H rows at the
+    scale across the card's inner width, that differs from the card's
+    ground by 1.5:1 or more, and the same share of the band's lower half:
+    ink there is a row running on under the fade, where the foot of a row
+    that ended above the cut reaches only the band's top."""
+    from runtime import ui_draw
+    cv = ws.glass_canvas
+    buf = bytes(cv._buf)
+    fs = cv.font_scale if hasattr(cv, "font_scale") else 1
+    pad = ui_draw.metrics("value_row")[28] * fs
+    x, y, w, h = card
+    foot = y + h - pad
+    # the card's ground: its pad under the body, clear of rows and fade
+    o = 2 * ((y + h - pad // 2) * cv.w + x + w // 2)
+    ground = buf[o] << 8 | buf[o + 1]
+    band = _FADE_H * fs
+    ink = []
+    for yy in range(foot - band, foot):
+        n = 0
+        for xx in range(x + pad, x + w - pad):
+            o = 2 * (yy * cv.w + xx)
+            n += _contrast(buf[o] << 8 | buf[o + 1], ground) >= 1.5
+        ink.append(n)
+    row = w - 2 * pad
+    return sum(ink) / (band * row), sum(ink[band // 2:]) / ((band - band // 2) * row)
+
+
+@pytest.mark.parametrize("theme,mode", _THEME_MODES)
+@pytest.mark.parametrize("inputs", ["tdeck", "touch"])
+@pytest.mark.parametrize("sleep", [True, False])
+def test_a_cut_system_menu_shows_a_row_under_its_fade(tmp_path, theme, mode, inputs, sleep):
+    """Over Make the system menu's body is cut to the room under the bar; the
+    cut never falls between rows, so the fade lies over part of a row and
+    the kid sees that the menu runs on (design review R5-01). Measured in
+    pixels: the fade band holds the next row's ink."""
+    ws = _goldens_ws(tmp_path, theme, mode, inputs)
+    if sleep:
+        ws.idle_ladder = _Ladder()
+    ws.carts.dup(_g._cart_by_title(ws, "Star Catcher"))
+    ws.go_home()
+    ws.set_home_tab("make")
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path") and _builtin_name(it["path"]) is None)
+    _settle(ws, 2)
+    ws._golden_popover = True
+    ws.system_key()
+    _settle(ws)
+    card = ws.menu_ui._host.box("System")
+    assert tuple(card) == ws.menu_ui.look_card()
+    last = ws.menu_ui._host.box(ws.sysmenu.items[-1][4])
+    cut = last is None or last[1] + last[3] > card[1] + card[3]
+    if sleep and inputs == "tdeck":
+        assert cut, "over Make with Sleep the T-Deck's menu is cut"
+    if cut:
+        band, low = _fade_ink(ws, card)
+        assert band >= 0.02 and low >= 0.02, "%s %s %s: %.1f%% ink under the fade, %.1f%% " \
+            "in its lower half" % (theme, mode, inputs, 100 * band, 100 * low)
+    ws.sysmenu.close()
+
+
+@pytest.mark.parametrize("theme,mode", _THEME_MODES)
+@pytest.mark.parametrize("inputs", ["tdeck", "touch"])
+def test_the_handheld_more_menu_shows_a_row_under_its_fade(tmp_path, theme, mode, inputs):
+    """The sprite tab's ⋯ menu is cut above its button: its fade lies over
+    part of a row, never over the bare card under the rule before Clear."""
+    ws = _goldens_ws(tmp_path, theme, mode, inputs)
+    ws.open_in_editor(_g._cart_by_title(ws, "Star Catcher"))
+    ws.set_menu_view("paint")
+    _settle(ws, 2)
+    ws.paint.set_selection(1, 1, 4, 4)
+    ws.paint_layer._open_more()
+    _settle(ws)
+    card = ws.paint_layer._host.box("More")
+    clear = ws.paint_layer._host.box("Clear")
+    cut = clear is None or clear[1] + clear[3] > card[1] + card[3]
+    if inputs == "touch" and not cut:
+        return                          # no strip: the whole menu fits
+    assert cut, "the T-Deck's menu is cut above its button"
+    band, low = _fade_ink(ws, card)
+    assert band >= 0.02 and low >= 0.02, "%s %s %s: %.1f%% ink under the fade, %.1f%% " \
+        "in its lower half" % (theme, mode, inputs, 100 * band, 100 * low)
