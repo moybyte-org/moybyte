@@ -250,6 +250,7 @@ _NAME_HINT = {"hint": "Your name"}   # what the empty Name field shows
 # The caption under the read-only Name where nothing can type (D-24's
 # interim words, `Workstation.can_type`).
 NAME_NO_KEYBOARD = "Pair a keyboard to change"
+NAME_UNSET = "Not set"      # the read-only Name row's value with no name saved
 WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
 _NETS = 24                    # the networks the Wi-Fi page lists
@@ -330,6 +331,7 @@ class SettingsLayer:
         self._on = {}                 # a toggle row's label -> whether it is on
         self._words = {}              # a cycle's values -> the words it shows
         self._about = ()              # About's facts, read at each visit
+        self._footer = None           # the note under the group being drawn
         # The WIFI panel (#38, spec §10): scan list -> pick -> (password) ->
         # connect/forget over the injected ws.wifi service.
         self.wifi_view = False
@@ -1317,11 +1319,12 @@ class SettingsLayer:
                 self.set_level(key, got)
         elif kind == "name" and not ws.can_type():
             # nothing can type (touch alone, a gamepad): the saved name shows,
-            # read-only, and a caption says how to change it, instead of a
-            # field no key reaches (#239 is the on-screen keyboard)
+            # read-only ("Not set" where none is), and the group's footer says
+            # how to change it (`_rows_page`), instead of a field no key
+            # reaches (#239 is the on-screen keyboard)
             self._kinds.pop(s, None)
-            _ui.info(s, str(ws.system.get(key, "") or ""))
-            _ui.label(NAME_NO_KEYBOARD)
+            _ui.info(s, str(ws.system.get(key, "") or "") or NAME_UNSET)
+            self._footer = NAME_NO_KEYBOARD
         elif kind == "name":
             self._kinds[s] = "field"
             cur = self._name
@@ -1370,9 +1373,14 @@ class SettingsLayer:
         sheet = ws.icon_spec() is None        # EDIT ICONS paints the IconSheet
         for caption, rows in self._grouped():
             _ui.group(caption)
+            self._footer = None
             for key, label, kind in rows:
                 if key != "icons" or sheet:
                     self._row(key, label, kind)
+            if self._footer is not None:
+                # a row's note under its group's card, on the page's ground
+                # in the captions' style
+                _ui.group(self._footer)
         _ui.group("About")
         for label, value in self._about:
             _ui.info(label, value)

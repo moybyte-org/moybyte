@@ -449,3 +449,61 @@ def test_a_settled_settings_page_paints_nothing(tmp_path):
         drv.frame(_DT)
     assert ws._frames_drawn == drawn + 1, "one frame for the press, then none"
     assert bytes(ws.sys_canvas._buf) == before
+
+
+@pytest.mark.parametrize("variant", ["dark", "light"])
+def test_under_touch_the_name_row_reads_not_set_over_its_note(tmp_path, variant):
+    """Where nothing types (touch alone) the Name row is read-only: with no
+    name saved its value reads "Not set", and the note that a keyboard
+    changes it stands under the General group's card on the page's ground,
+    in the captions' dim ink, with no divider -- not a row of the group
+    (design review R5-11)."""
+    from runtime import host_app, settings_layer
+    cfg = dict(CONFIGS["tdeck_320x240_fs1_dark"], variant=variant)
+    ws = _build(cfg, tmp_path / "carts")
+    ws.system.set("name", "")
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_settings()
+    ws.use_inputs([("local", "touch")])
+    ws.settings_layer.show_row("name")
+    infos = []
+    ui = settings_layer._ui
+    real = ui.info
+    ui.info = lambda label, value, o=None: (infos.append((label, value)), real(label, value, o))
+    try:
+        for _ in range(3):
+            ws._dirty = True
+            drv.frame(_DT)
+    finally:
+        ui.info = real
+    assert ("Name", settings_layer.NAME_UNSET) in infos, infos
+    cv = ws.sys_canvas
+    buf = bytes(cv._buf)
+
+    def px(x, y):
+        # as the canvas stores it, the form `_col` answers
+        return buf[2 * (y * cv.w + x)] | buf[2 * (y * cv.w + x) + 1] << 8
+    dim = cv._col(ws.theme_colors["ink_dim"])
+    play = ws.settings_layer._host.box("Steady")       # the next group's first row
+    assert play is not None
+    mid = cv.w // 2
+    card = px(mid, play[1] + 2)
+    # the General card's last pixel row over the page's middle
+    y = play[1] - 1
+    while px(mid, y) == card:            # up out of the Play card
+        y -= 1
+    while px(mid, y) != card:            # over the gap its captions lie in
+        y -= 1
+    foot = y
+    rows = [y for y in range(foot + 1, play[1])
+            if any(px(x, y) == dim for x in range(0, mid))]
+    assert rows, "no note under the General card"
+    note = rows[0]
+    line = [px(x, note) for x in range(cv.w)]
+    ground = px(cv.w - 4, note)
+    assert ground != card, "the note lies on a card, not the page's ground"
+    run, longest = 0, 0
+    for k in range(1, len(line)):
+        run = run + 1 if line[k] == line[k - 1] and line[k] != ground else 0
+        longest = max(longest, run)
+    assert longest < cv.w // 3, "the note has a divider"

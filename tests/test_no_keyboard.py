@@ -92,18 +92,22 @@ def test_settings_name_is_a_field_only_where_something_types(tmp_path, kind, fie
     ws.settings_layer.show_row("name")
     rows = []
     ui = settings_layer._ui
-    real = ui.info, ui.label
+    real = ui.info, ui.group
     ui.info = lambda label, value, o=None: (rows.append((label, value)), real[0](label, value, o))
-    ui.label = lambda text, o=None: (rows.append((text,)), real[1](text, o))
+    ui.group = lambda caption="", o=None: (rows.append((caption,)), real[1](caption, o))
     try:
         for _ in range(3):
             ws._dirty = True
             drv.frame(1 / 30)
     finally:
-        ui.info, ui.label = real
+        ui.info, ui.group = real
     assert ("field" in ws.settings_layer._kinds.values()) is field
     if not field:
+        # the note follows the group, captioned under its card
         assert ("Name", "Moy") in rows and (settings_layer.NAME_NO_KEYBOARD,) in rows, rows
+        assert rows.index((settings_layer.NAME_NO_KEYBOARD,)) > rows.index(("Name", "Moy"))
+    else:
+        assert (settings_layer.NAME_NO_KEYBOARD,) not in rows
 
 
 @pytest.mark.parametrize("kind,hints", [("keys", ("confirm", "Connect", "back", "Cancel")),
