@@ -868,13 +868,15 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
             }
             // the part on a light plate of the mark's colour, the edge on it;
             // on a card's first or last row the plate takes the card's
-            // corners, over the card's surface
+            // corners, over the card's surface: solid, in the colour the
+            // tint leaves there, since the corners are redrawn over a row
+            // the tint already plated (moy_ui_group_end)
             int cm = (flags & MOY_UI_MARK_TOP ? MOY_SHAPE_TL | MOY_SHAPE_TR : 0)
                      | (flags & MOY_UI_MARK_FOOT ? MOY_SHAPE_BL | MOY_SHAPE_BR : 0);
             if (cm) {
                 uint16_t g = moy_shape_wire(tok(&d, MOY_UI_T_SURFACE));
                 moy_shape_paint_t p =
-                    solid(moy_shape_wire(mix565(g, moy_shape_wire(c), m->plate_alpha)));
+                    solid(moy_shape_wire(moy_shape_over(moy_shape_wire(c), g, m->plate_alpha)));
                 rrect(&d, x, y, w, h, r, cm, s_depth.stepped, MOY_SHAPE_ALL, &p, 0, 0, -1, NULL);
             } else {
                 tint(&d, x, y, w, h, r, c, m->plate_alpha, NULL);

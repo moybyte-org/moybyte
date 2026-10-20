@@ -66,6 +66,16 @@ static inline int imin(int a, int b) {
     return a < b ? a : b;
 }
 
+// A shadow's weight (0..256) where its mask covers k of 15 at `alpha`.
+static inline int weight(int k, int alpha) {
+    return (k * alpha * 256 + 15 * 255 / 2) / (15 * 255);
+}
+
+uint16_t moy_shape_over(uint16_t f, uint16_t b, int alpha) {
+    int a = weight(15, alpha < 0 ? 0 : alpha > 255 ? 255 : alpha);
+    return a >= 256 ? f : over(f, b, a);
+}
+
 static inline int imax(int a, int b) {
     return a > b ? a : b;
 }
@@ -694,7 +704,7 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
     int alpha = imin(s->alpha, 255);
     int wt[16];
     for (int k = 0; k < 16; k++) {
-        wt[k] = (k * alpha * 256 + 15 * 255 / 2) / (15 * 255);
+        wt[k] = weight(k, alpha);
     }
     uint16_t col = can((uint16_t)s->col);
     int sx = x + s->dx - g.cam_x, sy = y + s->dy - g.cam_y;

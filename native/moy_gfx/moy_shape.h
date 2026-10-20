@@ -117,6 +117,11 @@ int moy_shape_rrect(const moy_text_target_t *t, int x, int y, int w, int h,
 int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
                      const moy_shape_shadow_t *s, const moy_shape_hole_t *hole);
 
+// Canonical `f` over canonical `b` at `alpha` (0..255): the colour a shadow
+// of `f` at `alpha` leaves over `b` inside its corners, so a solid fill that
+// stands for a tint, painted beside one, matches it to the bit.
+uint16_t moy_shape_over(uint16_t f, uint16_t b, int alpha);
+
 // The columns [*x0, *x1) of row i of a w x h rect with corners `r` (clamped as
 // moy_shape_rrect clamps them), `stepped`, ringed `line` wide, that its
 // MOY_SHAPE_INNER draws paint opaque: what a shape drawn over it after it
