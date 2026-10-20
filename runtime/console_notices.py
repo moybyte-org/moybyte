@@ -442,6 +442,7 @@ class SystemMenuUI:
         self._NAMES = names
         self._host = None           # the look's card: its verbs' context
         self._card_at = (0, 0)      # where a card's menu hangs (`open_card`)
+        self._card_proj = False     # a card's menu hangs from PROJECTS' hero
 
     def _sysmenu_items(self):
         """The rows for this open of the ≡ menu (see class note for the tuple form).
@@ -461,10 +462,12 @@ class SystemMenuUI:
                 rows.append(head)
                 rows.append(_row("item", "menu.delete_cart", self._menu_delete_cart))
                 rows.append(("sep",))
-        elif self.ws.screen == "launcher":
-            # over the home, the selected card's group in the open cart's
-            # place: its title over its verbs (`card_rows`)
-            card = self.card_rows()
+        elif self.ws.screen == "launcher" or self._projects_focused():
+            # over the home, or the desk's PROJECTS window holding the focus,
+            # the selected card's group in the open cart's place: its title
+            # over its verbs (`card_rows`)
+            card = self.card_rows(None if self.ws.screen == "launcher"
+                                  else self.ws.projects_layer)
             if card:
                 rows.extend(card)
                 rows.append(("sep",))
@@ -525,6 +528,14 @@ class SystemMenuUI:
         m.cs = ws.layout.cs
         m.w = 0
         cv = ws.sys_canvas
+        # from the desk's PROJECTS window the menu hangs from its hero's
+        # cover, below or above it and inside the window (`_menu_cell`,
+        # `surface`), never over the cover it acts on
+        proj = self._projects() if home is ws.projects_layer else None
+        self._card_proj = proj is not None and proj[2] is not None
+        if self._card_proj:
+            hx, hy, hw, hh = proj[2]
+            at = (hx + hw // 2, hy + hh)
         x, y = at
         # the Popup's own panel (a theme with no depth): under the point,
         # over it where the glass has no room below
@@ -632,16 +643,83 @@ class SystemMenuUI:
             return
         if ws._about:
             lay = ws.layout
-            rect = (lay.cx, lay.cy, lay.cw, lay.ch)
-        else:
-            rect = self.surface()
-        _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect)
+            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch))
+            return
+        for rect in self._scrim_bands():
+            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect)
+
+    def _scrim_bands(self):
+        """The rects the menu's scrim washes: what it dims (`_under`), less
+        the desk's PROJECTS window's hint strip where that window is on top
+        -- the strip names the menu's keys, as the home's does -- as the
+        bands above, below, left and right of it."""
+        x, y, w, h = self._under()
+        p = self._projects()
+        strip = p[1] if p is not None else None
+        if strip is None:
+            return ((x, y, w, h),)
+        sx0, sy0 = max(x, strip[0]), max(y, strip[1])
+        sx1 = min(x + w, strip[0] + strip[2])
+        sy1 = min(y + h, strip[1] + strip[3])
+        if sx0 >= sx1 or sy0 >= sy1:
+            return ((x, y, w, h),)
+        bands = ((x, y, w, sy0 - y), (x, sy1, w, y + h - sy1),
+                 (x, sy0, sx0 - x, sy1 - sy0), (sx1, sy0, x + w - sx1, sy1 - sy0))
+        return tuple(b for b in bands if b[2] > 0 and b[3] > 0)
 
     def surface(self):
-        """The glass the menu's card takes and its scrim dims, (x, y, w, h):
-        the content under the bars, less the home's hint strip when the
-        home is under it -- the strip names the menu's keys, so it stays
-        uncovered and unwashed, as the bars do (D-01)."""
+        """The glass the menu's card takes, (x, y, w, h): what the scrim
+        dims (`_under`), or for a card's menu hung from the desk's PROJECTS
+        window, that window's content less its hint strip."""
+        if self.ws.sysmenu.widget == "card" and self._card_proj:
+            p = self._projects()
+            if p is not None:
+                (x, y, w, h), strip, _hero = p
+                if strip is not None and y < strip[1] < y + h:
+                    h = strip[1] - y
+                return (x, y, w, h)
+        return self._under()
+
+    def _projects_focused(self):
+        """Whether the desk's PROJECTS window holds the input focus."""
+        wm = self.ws.wm
+        return getattr(wm, "mode", None) == "desktop" \
+            and getattr(wm, "input_holder", lambda: None)() == "projects"
+
+    def _projects(self):
+        """The desk's PROJECTS window where it is the top one on the glass:
+        (its content rect, its hint strip's rect -- None where the strip
+        has no height --, its hero's rect -- None where it lays out none),
+        each on the glass; else None. Its grid lays out in the window's own
+        layout, so the rects are read under it."""
+        ws = self.ws
+        wm = ws.wm
+        order = getattr(wm, "_order", None)
+        if getattr(wm, "mode", None) != "desktop" or not order or order[-1] != "projects":
+            return None
+        win = wm._wins.get("projects")
+        if win is None or win.minimized or win.ctx is None:
+            return None
+        grid = ws.projects_grid
+        cx, cy, cw, ch = win.content_rect()
+        grid.set_layout(win.ctx.layout)
+        try:
+            foot, hero = grid.foot(), grid.hero_rect()
+        finally:
+            grid.set_layout(ws.layout)
+        strip = None
+        if foot is not None and foot[5][3] > 0:
+            sx, sy, sw, sh = foot[5]
+            strip = (cx + sx, cy + sy, sw, sh)
+        if hero is not None:
+            hero = (cx + hero[0], cy + hero[1], hero[2], hero[3])
+        return ((cx, cy, cw, ch), strip, hero)
+
+    def _under(self):
+        """What the menu's scrim dims, (x, y, w, h): the content under the
+        bars, less the home's hint strip when the home is under it -- the
+        strip names the menu's keys, so it stays uncovered and unwashed, as
+        the bars do (D-01)."""
         ws = self.ws
         lay = ws.layout
         x, y, w, h = lay.cx, lay.cy, lay.cw, lay.ch
@@ -733,9 +811,15 @@ class SystemMenuUI:
         its left at least the popover's gap from the glass's edge (4 pixels
         at the font scale, 8 on the desk), as far as it hangs below the bar.
         A card's menu (`open_card`) hangs from its point instead, a line as
-        wide as the card and centred on it, kept on the glass."""
+        wide as the card and centred on it, kept on the glass; from the
+        desk's PROJECTS window, from its hero's cover, a rect it never
+        covers."""
         ws = self.ws
         if ws.sysmenu.widget == "card":
+            if self._card_proj:
+                p = self._projects()
+                if p is not None and p[2] is not None:
+                    return p[2]
             x, y = self._card_at
             cv = ws.sys_canvas
             w = min(self._look_w(_desk_class()), cv.w)

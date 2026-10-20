@@ -161,3 +161,60 @@ def test_the_home_strip_stays_unwashed_under_its_menus(tmp_path, theme, mode, me
     best = max(_contrast(v, ground) for v in hist)
     assert best >= 4.5, "%s %s: the strip's ink %.2f:1" % (theme, mode, best)
     _close_menu(ws)
+
+
+def _projects_own(tmp_path, theme, mode):
+    """The desk's PROJECTS window on a project of the kid's own."""
+    from runtime.moy_store_base import builtin_name
+    cfg = dict(g.CONFIGS[DESK], variant=mode)
+    cfg["theme"] = theme
+    ws = g._build(cfg, tmp_path / "carts")
+    ws.carts.dup(g._cart_by_title(ws, "Star Catcher"))
+    ws.open_desk()
+    ws.open_projects()
+    _frames(ws, 2)
+    grid = ws.projects_grid
+    grid.sel = next(i for i, it in enumerate(grid.items)
+                    if it.get("path") and builtin_name(it["path"]) is None)
+    _frames(ws, 2)
+    return ws
+
+
+@pytest.mark.parametrize("theme,mode", [("moy", "light"), ("moy", "dark"), ("blocks", "light"),
+                                        ("contrast", "light"), ("contrast", "dark")])
+@pytest.mark.parametrize("menu", ["system", "card"])
+def test_the_projects_strip_stays_unwashed_under_its_menus(tmp_path, theme, mode, menu):
+    """On the desk the PROJECTS window's hint strip names the open menu's
+    keys too, so the scrim washes around it (design review R5-03): its ink
+    holds 4.5:1 on its ground under the card's menu and under the system
+    menu over the window."""
+    ws = _projects_own(tmp_path, theme, mode)
+    ws._golden_popover = True
+    if menu == "system":
+        ws.system_key()
+    else:
+        assert ws.projects_layer.open_card_menu()
+    assert ws.sysmenu.open and ws.menu_ui.looked()
+    shown = _frames(ws, 3)[-1]
+    cv = ws.glass_canvas
+    proj = ws.menu_ui._projects()
+    assert proj is not None and proj[1] is not None, "the window shows its strip"
+    x0, y0, w, h = proj[1]
+    hist = {}
+    for y in range(y0, y0 + h):
+        for x in range(x0, x0 + w):
+            v = _px(shown, cv.w, x, y)
+            hist[v] = hist.get(v, 0) + 1
+    ground = max(hist, key=hist.get)
+    best = max(_contrast(v, ground) for v in hist)
+    assert best >= 4.5, "%s %s: the strip's ink %.2f:1" % (theme, mode, best)
+    # the rest of the window still dims: its lit pixels above the strip,
+    # clear of the menu's card
+    card = ws.menu_ui.look_card()
+    _close_menu(ws)
+    clear = _frames(ws, 3)[-1]
+    lit = [(x, y) for y in range(y0 - 120, y0, 3) for x in range(x0, x0 + w, 3)
+           if _lum(_px(clear, cv.w, x, y)) > 40
+           and not (card[0] <= x < card[0] + card[2] and card[1] <= y < card[1] + card[3])]
+    assert lit and all(_lum(_px(shown, cv.w, x, y)) < _lum(_px(clear, cv.w, x, y))
+                       for x, y in lit), "the window above its strip dims"

@@ -674,3 +674,69 @@ def test_the_handheld_more_menu_shows_a_row_under_its_fade(tmp_path, theme, mode
     band, low = _fade_ink(ws, card)
     assert band >= 0.02 and low >= 0.02, "%s %s %s: %.1f%% ink under the fade, %.1f%% " \
         "in its lower half" % (theme, mode, inputs, 100 * band, 100 * low)
+
+
+# -- the desk's PROJECTS window (design review R5-14, R5-16) ------------------
+
+
+def _projects_own(tmp_path, theme="moy", mode="light", inputs="keys"):
+    """The desk's PROJECTS window on a project of the kid's own."""
+    cfg = dict(_g.CONFIGS["p4_1024x600_cs2_fs1_windowed"], variant=mode)
+    cfg["theme"] = theme
+    ws = _g._build(cfg, tmp_path / "carts")
+    ws.use_inputs([("local", inputs)])
+    ws.carts.dup(_g._cart_by_title(ws, "Star Catcher"))
+    ws.open_desk()
+    ws.open_projects()
+    _settle(ws, 2)
+    grid = ws.projects_grid
+    grid.sel = next(i for i, it in enumerate(grid.items)
+                    if it.get("path") and _builtin_name(it["path"]) is None)
+    _settle(ws, 2)
+    return ws
+
+
+def _meets(a, b):
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+
+
+def _inside(a, b):
+    return b[0] <= a[0] and b[1] <= a[1] and a[0] + a[2] <= b[0] + b[2] \
+        and a[1] + a[3] <= b[1] + b[3]
+
+
+@pytest.mark.parametrize("theme,mode", _THEME_MODES)
+@pytest.mark.parametrize("inputs", ["keys", "pad", "touch"])
+def test_the_projects_card_menu_hangs_from_the_cover_inside_the_window(tmp_path, theme, mode,
+                                                                       inputs):
+    """The PROJECTS card menu (a pad's X, the strip's Options) hangs from the
+    hero's cover, below or above it: never over the cover it acts on, never
+    outside the window and never over its hint strip."""
+    ws = _projects_own(tmp_path, theme, mode, inputs)
+    ws._golden_popover = True
+    assert ws.projects_layer.open_card_menu()
+    _settle(ws)
+    card = tuple(ws.menu_ui._host.box("System"))
+    assert card == ws.menu_ui.look_card()
+    content, strip, hero = ws.menu_ui._projects()
+    assert hero is not None and not _meets(card, hero), (card, hero)
+    assert _inside(card, content), (card, content)
+    if strip is not None:
+        assert card[1] + card[3] <= strip[1], "the card keeps off the strip"
+
+
+@pytest.mark.parametrize("theme,mode", _THEME_MODES)
+def test_the_system_menu_over_projects_leads_with_its_card(tmp_path, theme, mode):
+    """Over a focused PROJECTS window the system menu leads with the selected
+    card's group, as over the console home, and opens on a row that
+    destroys nothing (R4-01)."""
+    ws = _projects_own(tmp_path, theme, mode)
+    ws._golden_popover = True
+    ws.system_key()
+    _settle(ws)
+    m = ws.sysmenu
+    card = ws.menu_ui.card_rows(ws.projects_layer)
+    assert card and [it[-1] for it in m.items[:len(card)]] == [it[-1] for it in card]
+    assert m.items[len(card)] == ("sep",)
+    from runtime.console_notices import _DANGER_ICON
+    assert m.items[m.sel][0] == "item" and m.items[m.sel][3] != _DANGER_ICON, m.items[m.sel]
