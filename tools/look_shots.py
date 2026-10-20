@@ -83,8 +83,8 @@ Code tab's left edges against its inset and its caret against the next stem,
 the sprite tools' ink and columns, the desk Appearance foot, the desk Calc's
 backspace against a digit, a menu's card against its anchor and the edge of
 the glass it takes, its danger rows' words and the hint strip's ink under
-it, the sprite selection's ring against the grid's lines, and a fade
-wherever a list hides rows),
+it and under the PROJECTS window's, the sprite selection's ring against the
+grid's lines, and rows showing under every fade where a list runs on),
 each with its ratio and a FLAG under its floor. A box is measured as it
 shows -- cut to its window or the content under the bar, less the hint band
 -- inside its plate's own run; anti-aliasing is no colour of its own; text
@@ -562,7 +562,6 @@ def render(g, config, theme, mode, setup, wallpaper, inputs=None):
         # Every target's status: Wi-Fi on Home, the battery at 82%.
         ws.wifi = _HomeWifi()
         ws.battery_level = lambda: 82
-        ui_draw._C.api_fades(True)
         setup(g, ws)
         ws.bar_layer.invalidate()         # the probes see the bars drawn
         probe = Probe()
@@ -613,6 +612,7 @@ _EXPECT = [None]
 # The kit screens that draw one input's keys whatever the run's profile:
 # a long press is a finger's, X and up a gamepad's.
 KIT_INPUT = {"handheld_home_long-press": "touch", "handheld_make_long-press": "touch",
+             "handheld_make_own_long-press": "touch",
              "handheld_home_pad-x": "pad", "desktop_home_pad-up": "pad"}
 
 # The parts sheet's and the desk Appearance's stops by the part they draw,
@@ -869,6 +869,48 @@ def _projects(size=None):
     return setup
 
 
+def _projects_own(size=None, menu=None, editor=False):
+    """The desk's PROJECTS window on Make with a cart of the kid's own
+    selected (its Change, Duplicate and Delete), at its default size or
+    placed at `size`; with `menu` its card's menu open over it, focus on the
+    row it opens on ("first") or on Delete ("delete"); with `editor` that
+    cart opened from it, the Editor's window above it (design review
+    R5-07)."""
+    def setup(g, ws):
+        own = _own_cart(g, ws)
+        ws.open_desk()
+        ws.open_projects()
+        _settle(g, ws, 2)
+        if size is not None:
+            _place(ws, "projects", *size)
+        grid = ws.projects_grid
+        for i, it in enumerate(grid.items):
+            if it.get("path") == own["path"]:
+                grid.sel = i
+        _settle(g, ws, 2)
+        if menu is not None:
+            from runtime import console_notices
+            ws._golden_popover = True
+            ws.projects_layer.open_card_menu()
+            m = ws.sysmenu
+            if menu == "delete" and m.open:
+                m.sel = next((i for i, it in enumerate(m.items) if it[0] == "item"
+                              and it[3] == console_notices._DANGER_ICON), m.sel)
+            _EXPECT[0] = _card_menu_open("the PROJECTS card")
+        if editor:
+            ws.launch_selected(grid)
+
+            def check(ws):
+                key = ws.wm.input_holder()
+                win = getattr(ws.wm, "_wins", {}).get(key)
+                ok = (win is not None and not win.minimized and ws.screen == "menu"
+                      and getattr(ws.wm, "mode", None) == "desktop")
+                return [("editor window", ok, "the Make pick opens the Editor in a "
+                         "window: %s" % ("focused" if ok else "none"))]
+            _EXPECT[0] = check
+    return setup
+
+
 def _home_search(g, ws):
     """The home's search field open: a query typed where something types,
     else the field's word on pairing a keyboard."""
@@ -1018,6 +1060,20 @@ def _kit_table():
                                     "the PROJECTS window narrowed: the hero shrinks"),
         "desktop_projects_short": (DESK, _projects((112, 54, 700, 400)),
                                    "the PROJECTS window shortened: the pane drops its facts"),
+        "desktop_projects_own": (DESK, _projects_own(), "the PROJECTS window on a cart of "
+                                 "the kid's own: Change, Duplicate, Delete set apart"),
+        "desktop_projects_own_narrow": (DESK, _projects_own((112, 54, 360, 534)),
+                                        "the PROJECTS window narrowed on a cart of the "
+                                        "kid's own: its buttons wrap, none dropped"),
+        "desktop_projects_card-menu": (DESK, _projects_own(menu="first"),
+                                       "the PROJECTS card's menu, on the row it opens on"),
+        "desktop_projects_card-menu_delete": (DESK, _projects_own(menu="delete"),
+                                              "the PROJECTS card's menu, focus on Delete"),
+        "desktop_projects_sysmenu": (DESK, _sysmenu_over(_projects_own(), "over PROJECTS"),
+                                     "the system menu over the PROJECTS window"),
+        "handheld_make_own_long-press": (HANDHELD, _long_press(_make_own),
+                                         "a long press on a Make card of the kid's own: "
+                                         "its verbs, Delete set apart"),
         "desktop_files": (DESK, _desk_files, "Files alone on the desk: covers, the cut "
                           "row's fade"),
         "handheld_pause": (HANDHELD, _pause,
@@ -1058,7 +1114,10 @@ def _kit_table():
             "handheld_home_search": (
                 HANDHELD, _home_search, "the home's search field, %r typed where "
                 "something types" % SEARCH_TYPED),
-            "desktop_home": (CONSOLE, _console_home, "the console-mode home")}.items():
+            "desktop_home": (CONSOLE, _console_home, "the console-mode home"),
+            "desktop_projects_editor": (
+                DESK, _projects_own(editor=True), "a cart of the kid's own opened from "
+                "PROJECTS: the Editor's window above it")}.items():
         out[screen + "_input"] = (config, setup, what, "profile")
     return out
 
@@ -1095,8 +1154,7 @@ class Probe:
     glass pixels: the covers' blits (x, y, w, h), the tabs (rect, active),
     the narrow rects (a caret's: x, y, w, h, colour), the icons (kind, ink),
     the desk bar's chips (rect, focused), the pages that drew hints (`ui.hints`
-    calls), the most focus marks one frame drew and the engine's list fades
-    since the scene began (`moy_ui_api_fades`). A record drawn into a window's
+    calls) and the most focus marks one frame drew. A record drawn into a window's
     buffer is offset to its content rect, one drawn into a strip (the bars'
     cache) to where the frame blitted the strip; one whose canvas reaches
     the glass neither way is dropped."""
@@ -1107,7 +1165,6 @@ class Probe:
         self.last = {k: [] for k in self.KINDS}
         self.cur = {k: [] for k in self.KINDS}
         self.marks = 0
-        self.fades = 0
         self._undo = []
         self._ws = None
         self._blits = {}              # id(strip) -> (its canvas, x, y), kept across frames
@@ -1151,9 +1208,6 @@ class Probe:
             if got:
                 self.last[k] = got
         self.marks = max(self.marks, ui_draw.marks(None, False)[2])
-        # the list fades since the scene began: a window behind keeps the
-        # frame it drew them in
-        self.fades = ui_draw._C.api_fades(False)
 
     def install(self, ws):
         """Wrap the verbs the probes read; `remove` puts them back."""
@@ -1664,10 +1718,12 @@ def _theme_look(ws):
 
 
 def _tab_ink(img, r, plate):
-    """The label ink of tab `r` on `plate`: its commonest solid text ink."""
+    """The label ink of tab `r` on `plate`: its commonest solid text ink,
+    else the ink its icon shares with it (an icon's filled parts make the
+    pair read as a solid: the Editor's Config tab)."""
     inner = (r[0] + 1, r[1] + 1, max(1, r[2] - 2), max(1, r[3] - 2))
     inks = _inks(img, inner, plate)
-    got = inks["text"] or inks["line"]
+    got = inks["text"] or inks["line"] or inks["solid"]
     return got[0] if got else None
 
 
@@ -1705,7 +1761,10 @@ def _current_pairs(ws, probe, img):
                "")
         if row[3] < FLOOR:
             mine = _tab_ink(img, r, p)
-            plain = [_tab_ink(img, q, ground) for q, act in tabs if not act and q[2] >= 8]
+            # a plain tab of a window behind (PROJECTS' under its Editor) is
+            # none of this row's
+            plain = [_tab_ink(img, q, ground) for q, act in tabs
+                     if not act and q[2] >= 8 and not _covered(ws, q)]
             plain = [c for c in plain if c is not None]
             if mine is not None and plain and _distinct(mine, plain[0]):
                 ratio = contrast(mine, plain[0])
@@ -1998,11 +2057,34 @@ def _strongest(img, r):
     return max(hist, key=lambda c: contrast(c, ground)), ground
 
 
+def _menu_keys_words(ws, layer, ox=0, oy=0):
+    """The glass rect of the words a home's hint strip names the open
+    menu's keys with ("Close" after its keycap), `layer` the home's layer,
+    its strip offset by (ox, oy); None where it draws none. The words, not
+    the strip's strongest colour: a keycap's glyph can stand far stronger
+    than the words beside it, so a scrim over the words would pass on the
+    glyph (design review R5-03)."""
+    from runtime import launcher_layer, ui_draw
+    foot = layer.grid.foot()
+    if foot is None or not foot[5][3]:
+        return None
+    rect = foot[5]
+    keys = launcher_layer._MENU_KEYS
+    spans = ui_draw.hints(ws.sys_canvas, ws.theme_colors, layer._hint_inner(rect), keys,
+                          layer.grid.desk(), draw=False)
+    if not spans or spans[0][0] == spans[0][1]:
+        return None
+    x1 = spans[0][1]
+    w = ui_draw.print_width(keys[1], ws.layout.fs)
+    return (ox + x1 - w, oy + rect[1], w, rect[3])
+
+
 def _menu_pairs(ws, img):
     """The system menu's and a card's menu's card as it shows (design review
     R4-33): clear of its anchor and 4 pixels at the scale inside the glass
     it takes (R4-04), each danger row's words on the card at 4.5:1, and,
-    over the home, the hint strip's ink on its ground at 4.5:1 (R4-05)."""
+    over the home, the hint strip's ink on its ground at 4.5:1 (R4-05), as
+    over the desk's PROJECTS window, its strip's (R5-03)."""
     m = ws.sysmenu
     mu = getattr(ws, "menu_ui", None)
     if mu is None or not (m.open and mu.looked()):
@@ -2019,10 +2101,13 @@ def _menu_pairs(ws, img):
         if m.widget == "menu":
             over = _meets(card, mu._menu_cell())
             out.append(_measure("menu card over its anchor", int(over), 0, not over))
+        body = _popover_body(ws, card)
         for row in m.items:
             if row[0] == "item" and row[3] == console_notices._DANGER_ICON:
                 b = mu._host.box(row[4])
-                if b is not None:
+                # a row the body's cut peeks under its fade is the fade's
+                # measure (`_fade_pairs`), not its words'
+                if b is not None and body[1] <= b[1] and b[1] + b[3] <= body[1] + body[3]:
                     out += [("danger row ink vs card",) + r[1:]
                             for r in _row_pairs(ws, img, b, "danger row", view=card)
                             if r[0].endswith("(text)")]
@@ -2033,6 +2118,15 @@ def _menu_pairs(ws, img):
         if got is not None:
             out.append(("hint ink vs strip ground", _hex(got[0]), _hex(got[1]),
                         contrast(*got), TEXT_FLOOR, ""))
+    words = _projects_strip(ws)
+    if words is not None:
+        # the window's strip names the menu's keys too: it stays unwashed (R5-03)
+        got = _strongest(img, words)
+        if got is not None:
+            pair = "PROJECTS hint ink vs strip ground"
+            ratio = contrast(*got)
+            out.append((pair, _hex(got[0]), _hex(got[1]), ratio, TEXT_FLOOR,
+                        "" if ratio >= TEXT_FLOOR else KNOWN.get(pair, "")))
     return out
 
 
@@ -2061,37 +2155,143 @@ def _selection_pairs(ws, img):
              contrast(best, border), FLOOR, "")]
 
 
-def _fade_pairs(ws, probe, img):
-    """Every list with rows past what shows draws a fade there (design
-    review R4-10, R4-04, R4-33): a cut menu body (a row it holds that does
-    not show whole) or a table whose rows run on, and none of the engine's
-    list fades drawn, is a FLAG."""
-    hidden = []
+# A list's fade (native/moy_ui/moy_ui_api.c's FADE_H): the last this many
+# rows at the font scale of a body cut to its room; a table's is one row.
+FADE_H = 10
+# A fade band shows rows when this share of the pixels of its half at the
+# cut (a percentage) stands this far off the band's ground: a band of blank
+# card says nothing runs on. Half a row's words under a fade, its peek, come
+# to about 1%; blank card is 0.
+FADE_INK_SHARE = 0.5
+FADE_INK_FLOOR = 1.5
+
+
+def _popover_body(ws, card, origin=(0, 0)):
+    """A popover's body on the glass: its card less the modal band
+    (`moy_ui_modal_band`) all round."""
+    from runtime import console_notices, ui_draw
+    fs = ws.sys_canvas.font_scale
+    d = 1 if console_notices._desk_class() else 0
+    pad = ui_draw.metrics("value_row")[28 + d] * fs
+    ox, oy = origin
+    return (ox + card[0] + pad, oy + card[1] + pad, card[2] - 2 * pad, card[3] - 2 * pad)
+
+
+def _popover_bands(ws, name, host, card_id, labels, origin=(0, 0)):
+    """[(where, rect)] on the glass of the fades of popover `card_id` in
+    `host` (an AppHost) whose body (`_popover_body`) its rows `labels` run
+    on past: at its foot, and at its head where it is scrolled."""
+    card = host.box(card_id)
+    if card is None:
+        return []
+    h = FADE_H * ws.sys_canvas.font_scale
+    ox, oy = origin
+    body = _popover_body(ws, card, origin)
+    below = above = False
+    for label in labels:
+        b = host.box(label)
+        if b is None:
+            continue
+        below = below or oy + b[1] + b[3] > body[1] + body[3]
+        above = above or oy + b[1] < body[1]
+    out = []
+    if below:
+        out.append((name + "'s foot", (body[0], body[1] + body[3] - h, body[2], h)))
+    if above:
+        out.append((name + "'s head", (body[0], body[1], body[2], h)))
+    return out
+
+
+def _fade_bands(ws):
+    """[(where, rect)] on the glass of every fade the scene's lists draw
+    where rows run on past what shows (design review R4-10, R4-04, R5-07):
+    the system menu's and a card's menu's body cut at its foot or scrolled
+    at its head, the sprite tab's more menu's, and a table whose rows run
+    on below its view."""
+    out = []
     m = ws.sysmenu
     mu = getattr(ws, "menu_ui", None)
     if mu is not None and m.open and mu.looked():
-        card = mu._host.box("System")
-        for row in m.items:
-            if row[0] != "item" or card is None:
-                continue
-            b = mu._host.box(row[4])
-            if b is None or b[1] < card[1] or b[1] + b[3] > card[1] + card[3]:
-                hidden.append("the menu's " + row[4])
-                break
+        out += _popover_bands(ws, "the menu", mu._host, "System",
+                              [row[4] for row in m.items if row[0] == "item"])
+    pl = getattr(ws, "paint_layer", None)
+    if pl is not None and getattr(pl, "_pop", None) == "more" and ws.screen == "menu" \
+            and getattr(ws, "menu_view", None) == "paint":
+        from runtime import paint_layer, ui_draw
+        keys = paint_layer._OP_KEYS.get(ui_draw.input_kind(), {})
+        labels = []
+        for oid, label, _slot in pl._more_rows(pl.layout.desk):
+            k = keys.get(oid)
+            labels.append(label + ("\t" + k if k else ""))
+        origin = (0, 0)
+        if ws.wm.desk_open():
+            win = getattr(ws.wm, "_wins", {}).get(ws.wm.input_holder())
+            if win is not None:
+                origin = win.content_rect()[:2]
+        out += _popover_bands(ws, "the more menu", pl._host,
+                              "Shift" if pl._shifts else "More", labels, origin)
     files = _app(ws, "files") if "files" in ws._apps_by_id else None
     win = getattr(ws.wm, "_wins", {}).get("files")
     shown = ws.screen == "files" or (win is not None and not getattr(win, "minimized", False)
                                      and ws.wm.desk_open())
     host = getattr(files, "_ui", None)
-    if shown and host is not None and getattr(files, "rows", None):
+    if shown and host is not None and getattr(files, "rows", None) and not m.open:
+        # (under a menu's scrim the list is no focus, its fade washed out)
         from runtime import ui_draw
         got = ui_draw._C.api_table_rows(host.ctx)
         if got is not None and len(files.rows) * got[1] > got[2][3]:
-            hidden.append("Files' rows")
-    if not hidden:
-        return []
-    return [_measure("list with hidden rows (%s) without a fade" % ", ".join(hidden),
-                     probe.fades, 1, probe.fades >= 1)]
+            ox, oy = (win.content_rect()[:2] if win is not None and ws.wm.desk_open()
+                      else (0, 0))
+            vx, vy, vw, vh = got[2]
+            out.append(("Files' rows", (ox + vx, oy + vy + vh - got[1], vw, got[1])))
+    return out
+
+
+def _fade_pairs(ws, probe, img):
+    """Every fade over rows that run on lies over rows (design review
+    R5-07): in the half of each band `_fade_bands` finds toward its cut
+    edge, at least FADE_INK_SHARE percent of the pixels stand
+    FADE_INK_FLOOR off the band's ground (its commonest colour). A fade
+    over blank card, or none at all, is a FLAG: nothing tells the kid the
+    list goes on. The half at the cut, since a cut that falls between rows
+    still has the last whole row's descenders in the band's other half."""
+    out = []
+    for where, r in _fade_bands(ws):
+        half = r[3] // 2
+        r = (r[0], r[1] if where.endswith("head") else r[1] + r[3] - half, r[2], half)
+        r = _clip(r, (0, 0, img.width, img.height))
+        pair = "fade band shows rows (%s)" % where
+        hist = _colours(img, r, 1) if r is not None else {}
+        total = sum(hist.values())
+        if not total:
+            out.append((pair, "0.0%", "%.1f%%" % FADE_INK_SHARE, 0.0, 1.0,
+                        KNOWN.get(pair, "")))
+            continue
+        ground = max(hist, key=hist.get)
+        ink = sum(n for c, n in hist.items() if contrast(c, ground) >= FADE_INK_FLOOR)
+        share = 100.0 * ink / total
+        ok = share >= FADE_INK_SHARE
+        out.append((pair, "%.1f%%" % share, "%.1f%%" % FADE_INK_SHARE, 1.0 if ok else 0.0,
+                    1.0, "" if ok else KNOWN.get(pair, "")))
+    return out
+
+
+def _projects_strip(ws):
+    """The words naming the open menu's keys on the desk PROJECTS window's
+    hint strip, as a glass rect (`_menu_keys_words`), where the window
+    shows, else None."""
+    win = getattr(ws.wm, "_wins", {}).get("projects")
+    if win is None or getattr(win, "minimized", False) or not ws.wm.desk_open():
+        return None
+    layer = getattr(ws, "projects_layer", None)
+    if layer is None:
+        return None
+    cx, cy, _w, _h = win.content_rect()
+    ws.wm._install(win.ctx)
+    try:
+        return _menu_keys_words(ws, layer, cx, cy)
+    finally:
+        ws.wm._install(ws.wm._root_ctx)
 
 
 def audit(ws, probe, img):
@@ -2101,7 +2301,8 @@ def audit(ws, probe, img):
     focused desk chip's label, a disabled history icon's ink against the
     enabled ink, an Off toggle's row in Settings, a lifted hero's rim, the
     desk Calc's backspace, a menu's card, danger rows and the strip under
-    it, the sprite selection's ring, and a fade wherever a list hides rows.
+    it, the sprite selection's ring, and rows under every fade where a list
+    runs on (`_fade_pairs`).
     A measure with a known gap names it in `owner` (`KNOWN`); the rest
     under their floor are the FLAGs."""
     th = ws.theme_colors

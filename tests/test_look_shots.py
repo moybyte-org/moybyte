@@ -317,10 +317,9 @@ def test_the_kit_draws_the_states_round_4_built_by_hand(tmp_path):
     for pair in ("menu card to its glass's edge", "menu card over its anchor",
                  "danger row ink vs card", "hint ink vs strip ground"):
         assert menu.get(pair) == "", (pair, menu)
-    assert any(p.startswith("list with hidden rows") and f == "" for p, f in menu.items())
+    assert "fade band shows rows (the menu's foot)" in menu, menu
     files = pairs("moy-dark_desktop_files")
-    assert any(p.startswith("list with hidden rows (Files' rows)") and f == ""
-               for p, f in files.items()), files
+    assert files.get("fade band shows rows (Files' rows)") == "", files
 
 
 def test_a_theme_the_shell_does_not_hold_is_skipped(tmp_path):
@@ -339,3 +338,51 @@ def test_a_keys_run_draws_the_keys_in_every_themed_scene(tmp_path):
     index = (tmp_path / "kit" / "index.txt").read_text()
     assert "input keys;" in index and "input tdeck" not in index
     assert "Input: every scene draws keys's keys" in index
+
+
+def test_the_kit_draws_the_states_round_5_built_by_hand(tmp_path):
+    """The PROJECTS window on a cart of the kid's own, full and narrow, its
+    card's menu (focus on its first row and on Delete), the system menu
+    over it, the Editor opened from it, and a long press on a Make card of
+    the kid's own (design review R5-07): each renders, its menu or window
+    opens, and under a menu the window's strip is measured."""
+    table = L._kit_table()
+    for screen in ("desktop_projects_own", "desktop_projects_own_narrow",
+                   "desktop_projects_card-menu", "desktop_projects_card-menu_delete",
+                   "desktop_projects_sysmenu", "desktop_projects_editor_input",
+                   "handheld_make_own_long-press"):
+        assert screen in table, screen
+    failed = []
+    L.run(str(tmp_path), ["moy-light_desktop_projects_card-menu_delete",
+                          "contrast-dark_handheld_make_own_long-press",
+                          "moy-dark_desktop_projects_editor_input-pad"],
+          quiet=True, kit=True, only_kit=True, profiles=True, audit_csv=True, failed=failed)
+    assert failed == []
+    kit = tmp_path / "kit"
+    index = (kit / "index.txt").read_text()
+    assert index.count("check: card menu ok") == 2
+    assert "check: editor window ok" in index
+    rows = {ln.split(",")[1]: ln.split(",")[6] for ln in
+            (kit / "moy-light_desktop_projects_card-menu_delete.audit.csv")
+            .read_text().splitlines()[1:]}
+    assert "PROJECTS hint ink vs strip ground" in rows, rows
+
+
+def test_a_fade_over_blank_card_is_flagged(monkeypatch):
+    """The fade audit measures pixels, not a count: a band with no row ink
+    in its half at the cut is a FLAG unless a filed gap owns it (R5-07)."""
+    from PIL import Image
+    img = Image.new("RGB", (40, 20), (255, 255, 255))
+    monkeypatch.setattr(L, "_fade_bands", lambda ws: [("a list's foot", (0, 0, 40, 20))])
+    (row,) = L._fade_pairs(None, None, img)
+    assert row[0] == "fade band shows rows (a list's foot)" and L.flagged([row])
+    for x in range(0, 40, 3):
+        for y in range(2, 8):
+            img.putpixel((x, y), (0, 0, 0))
+    (row,) = L._fade_pairs(None, None, img)
+    assert L.flagged([row]), "ink in the half away from the cut says nothing runs on"
+    for x in range(0, 40, 3):
+        for y in range(12, 18):
+            img.putpixel((x, y), (0, 0, 0))
+    (row,) = L._fade_pairs(None, None, img)
+    assert not L.flagged([row]), row
