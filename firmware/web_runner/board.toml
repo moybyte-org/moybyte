@@ -47,7 +47,9 @@ both arrangements, because web_boot declares no panel diagonal
 (`layout_base.class_of(None)`), so the desktop arrangement on a 1024x600 canvas
 still asks `fontset.role_face` for the handheld's sizes -- and carries the
 handheld's faces, not the desk's (tests/test_web_fonts.py holds the class and
-the coverage). Icon sets stay off: the browser's icons are the shell's own,
+the coverage). Icon sets stay off: the browser's icons are the shell's own
+under every theme (`iconsets.carried` answers no set for an image that holds
+none; tests/test_editor_ladder_icons.py draws the Editor's bar in the wasm),
 and a smooth icon set is a separate change to what it draws."""
 
 # ---------------------------------------------------------------------------

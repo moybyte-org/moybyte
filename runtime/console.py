@@ -4730,7 +4730,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def icon_spec(self):
         """The live theme's icon set, (kind, set, swap), or None where it
-        names none (runtime/iconsets.py): the look's, set when it publishes."""
+        names none or the image carries none of it (runtime/iconsets.py,
+        `carried`): the look's, set when it publishes."""
         return self.look.icons
 
     def draw_icon(self, kind, rect, ink, cv=None):

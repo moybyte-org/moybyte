@@ -1859,8 +1859,9 @@ class Appearance:
         # The look's icon set, and the masks the C parts draw from it (the
         # public UI API's `ui.icon` rows, a depth frame's title buttons): in
         # place before anything draws under the new generation, since a
-        # window's retained buffer drawn without them keeps that frame.
-        self.icons = _iconsets.spec(self.live.look)
+        # window's retained buffer drawn without them keeps that frame. A set
+        # the image does not carry is no set: the shell's own icons draw.
+        self.icons = _iconsets.carried(_iconsets.spec(self.live.look))
         _iconsets.use_parts(self.icons)
         # Strictly rising: the console's look may move before its ABI exists.
         self.look_gen = gen if gen > self.look_gen else self.look_gen + 1
