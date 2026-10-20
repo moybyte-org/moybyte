@@ -661,21 +661,21 @@ static moy_ui_keep_t *page_keep(moy_ui_ctx_t *c) {
 }
 
 // A row of an open popover's body laid out at `t`, `h` tall, where the
-// body is cut: whether the cut falls well inside it (a quarter of the row
-// clear each side), and the deepest row middle at or above the cut. A rule
-// is no row to peek: what shows of one is not a row running on.
+// body is cut: whether the cut falls inside it with the row's middle at
+// least the fade above it (the top of its words clear of the fade), and
+// the deepest such cut, a row's middle plus the fade, at or above the
+// cut. A rule is no row to peek: what shows of one is not a row running on.
 static void peek_note(moy_ui_ctx_t *c, int t, int h) {
     int cut = c->pop_cut;
     if (cut <= 0 || c->n_nest == 0 || c->nest[c->n_nest - 1].kind != 3) {
         return;
     }
-    int q = h / 4;
-    if (cut - t > q && t + h - cut > q) {
+    int at = t + h / 2 + FADE_H * c->fs / 2;
+    if (at <= cut && cut < t + h) {
         c->pop_inside = 1;
     }
-    int mid = t + h / 2;
-    if (mid <= cut && mid > c->pop_peek) {
-        c->pop_peek = (int16_t)mid;
+    if (at <= cut && at > c->pop_peek) {
+        c->pop_peek = (int16_t)at;
     }
 }
 
@@ -2028,9 +2028,10 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
 // -- popovers -------------------------------------------------------------------------
 
 // The body a popover shows of its rows' `body` in `cap`: all of it, else
-// the cut, raised to the row middle its keep's `peek` found last frame, so
-// a cut body always shows part of a row under its fade (a phone sheet's
-// peek); never under one row.
+// the cut, raised to the peek its keep's `peek` found last frame (a row's
+// middle the fade above the cut, `peek_note`), so a cut body always shows
+// the top of a row's words over its fade (a phone sheet's peek); never
+// under one row.
 static int pop_body(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body, int cap, int rh) {
     if (body <= cap) {
         return body;
@@ -2051,9 +2052,10 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
             if (took != used) {
                 c->owe = 1;             // laid out for another body: the next frame redraws
             }
-            // a cut body's rows run on: where the cut falls at a row's edge
-            // or between rows, the next frame cuts at the deepest row
-            // middle above it, so part of a row shows under the fade
+            // a cut body's rows run on: where the cut leaves no row's
+            // middle the fade above it, the next frame cuts at the deepest
+            // row middle plus the fade above it, so the top of a row's
+            // words shows over the fade
             int peek = c->pop_cut > 0 && took > c->pop_cut && !c->pop_inside ? c->pop_peek : 0;
             if (pk != NULL && pk->peek != peek) {
                 pk->peek = (int16_t)peek;
@@ -2098,7 +2100,9 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     // the card keeps `gap` clear of every edge of the surface and never
     // covers its anchor: below it, else above it, else on the side with
     // more room, its body cut to that room (it scrolls to focus, a fade at
-    // the cut edge)
+    // the cut edge). An anchor that is a point (a finger's, `h` 0) starts
+    // the card there and slides it to fit whole where the surface has the
+    // room, as a phone's context menu does
     int gap = 4 * fs;
     int x0 = sf.x + gap, x1 = sf.x + sf.w - gap;
     int y0 = sf.y + gap, y1 = sf.y + sf.h - gap;
@@ -2129,8 +2133,12 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
         int below = y1 - top, above = foot - y0;
         int dn = 2 * pad + bh <= below || (2 * pad + bh > above && below >= above);
         int room = dn ? below : above;
-        bh = pop_body(c, kb, bh, room - 2 * pad, rh);
-        y = dn ? top : foot - (2 * pad + bh);
+        if (a.h == 0 && 2 * pad + bh > room && 2 * pad + bh <= y1 - y0) {
+            y = dn ? y1 - (2 * pad + bh) : y0;
+        } else {
+            bh = pop_body(c, kb, bh, room - 2 * pad, rh);
+            y = dn ? top : foot - (2 * pad + bh);
+        }
     }
     int h = 2 * pad + bh;
     moy_ui_box_t card = {(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h};

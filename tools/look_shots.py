@@ -85,7 +85,8 @@ the sprite tools' ink and columns, the desk Appearance foot, the desk Calc's
 backspace against a digit, a menu's card against its anchor and the edge of
 the glass it takes, its danger rows' words and the hint strip's ink under
 it and under the PROJECTS window's, the sprite selection's ring against the
-grid's lines, and rows showing under every fade where a list runs on),
+grid's lines, and rows showing under every fade where a list runs on, the
+row a fade lies over reading where the fade begins),
 each with its ratio and a FLAG under its floor. A box is measured as it
 shows -- cut to its window or the content under the bar, less the hint band
 -- inside its plate's own run; anti-aliasing is no colour of its own; text
@@ -2189,6 +2190,15 @@ FADE_H = 10
 # to about 1%; blank card is 0.
 FADE_INK_SHARE = 0.5
 FADE_INK_FLOOR = 1.5
+# The row a popover's cut body peeks reads where its fade begins (design
+# review F6-01): in the strip of FADE_READ_ROWS rows at the scale each side
+# of the fade's clear edge (its first rows barely tint), this share of the
+# pixels (a percentage) stands FLOOR off the ground, a pixel row that is
+# mostly ink (a rule) not counted. A peek whose words all lie deep in the
+# fade leaves that strip blank card, or a rule.
+FADE_READ_ROWS = 2
+FADE_READ_SHARE = 2.0
+FADE_RULE_SHARE = 0.6
 
 
 def _popover_body(ws, card, origin=(0, 0)):
@@ -2282,6 +2292,8 @@ def _fade_pairs(ws, probe, img):
     still has the last whole row's descenders in the band's other half."""
     out = []
     for where, r in _fade_bands(ws):
+        if where.endswith(("foot", "head")):
+            out.append(_fade_read(where, r, img))
         half = r[3] // 2
         r = (r[0], r[1] if where.endswith("head") else r[1] + r[3] - half, r[2], half)
         r = _clip(r, (0, 0, img.width, img.height))
@@ -2299,6 +2311,33 @@ def _fade_pairs(ws, probe, img):
         out.append((pair, "%.1f%%" % share, "%.1f%%" % FADE_INK_SHARE, 1.0 if ok else 0.0,
                     1.0, "" if ok else KNOWN.get(pair, "")))
     return out
+
+
+def _fade_read(where, band, img):
+    """The pair that holds the row a popover's fade lies over readable
+    where the fade begins (FADE_READ_SHARE): the strip FADE_READ_ROWS at
+    the scale each side of the band's clear edge, its ink FLOOR off the
+    band's ground."""
+    pair = "fade's row reads over it (%s)" % where
+    x, y, w, h = band
+    k = FADE_READ_ROWS * max(1, h // FADE_H)
+    edge = y + h if where.endswith("head") else y
+    strip = _clip((x, edge - k, w, 2 * k), (0, 0, img.width, img.height))
+    hist = _colours(img, band, 1)
+    if strip is None or not hist:
+        return (pair, "0.0%", "%.1f%%" % FADE_READ_SHARE, 0.0, 1.0, KNOWN.get(pair, ""))
+    ground = max(hist, key=hist.get)
+    sx, sy, sw, sh = strip
+    ink = total = 0
+    for yy in range(sy, sy + sh):
+        n = sum(contrast(img.getpixel((xx, yy)), ground) >= FLOOR for xx in range(sx, sx + sw))
+        if n <= FADE_RULE_SHARE * sw:
+            ink += n
+        total += sw
+    share = 100.0 * ink / total if total else 0.0
+    ok = share >= FADE_READ_SHARE
+    return (pair, "%.1f%%" % share, "%.1f%%" % FADE_READ_SHARE, 1.0 if ok else 0.0, 1.0,
+            "" if ok else KNOWN.get(pair, ""))
 
 
 def _projects_strip(ws):
@@ -2327,7 +2366,7 @@ def audit(ws, probe, img):
     enabled ink, an Off toggle's row in Settings, a lifted hero's rim, the
     desk Calc's backspace, a menu's card, danger rows and the strip under
     it, the sprite selection's ring, and rows under every fade where a list
-    runs on (`_fade_pairs`).
+    runs on, reading where the fade begins (`_fade_pairs`).
     A measure with a known gap names it in `owner` (`KNOWN`); the rest
     under their floor are the FLAGs."""
     th = ws.theme_colors

@@ -526,21 +526,25 @@ class DeleteConfirm:
             ws.request_frame()
 
 
-def _peek(rows, cut):
-    """The body a popover cut at `cut` shows (the engine's `pop_body`): the
-    cut where it falls well inside a row (a quarter of the row clear each
-    side), else the deepest row middle above it, so part of a row always
-    shows under the fade. `rows` are (top, height, peekable)."""
+# A popover's fade, rows at the scale (native/moy_ui/moy_ui_api.c's FADE_H).
+_FADE_H = 10
+
+
+def _peek(rows, cut, fade):
+    """The body a popover cut at `cut` shows (the engine's `pop_body` and
+    `peek_note`): the cut where it falls inside a row whose middle stands
+    `fade` (the engine's FADE_H at the scale) above it, else the deepest
+    such cut above it, a row's middle plus the fade, so the top of a row's
+    words always shows over the fade. `rows` are (top, height, peekable)."""
     best = 0
     for t, h, row in rows:
         if not row:
             continue
-        q = h // 4
-        if cut - t > q and t + h - cut > q:
+        at = t + h // 2 + fade
+        if at <= cut < t + h:
             return cut
-        mid = t + h // 2
-        if best < mid <= cut:
-            best = mid
+        if best < at <= cut:
+            best = at
     return best if 0 < best < cut else cut
 
 
@@ -895,8 +899,11 @@ class SystemMenuUI:
         bh = body
         dn = 2 * pad + bh <= below or (2 * pad + bh > above and below >= above)
         room = below if dn else above
+        if ah == 0 and room < 2 * pad + bh <= y1 - y0:
+            # a point's card (a finger's) slides to fit whole
+            return (x, y1 - (2 * pad + bh) if dn else y0, w, 2 * pad + bh)
         if 2 * pad + bh > room:
-            bh = max(rh, _peek(rows, room - 2 * pad))
+            bh = max(rh, _peek(rows, room - 2 * pad, _FADE_H * fs // 2))
         h = 2 * pad + bh
         y = top if dn else foot - h
         return (x, y, w, h)
@@ -920,8 +927,9 @@ class SystemMenuUI:
         """The system button's cell on the system canvas, the card's anchor,
         its left at least the popover's gap from the glass's edge (4 pixels
         at the font scale, 8 on the desk), as far as it hangs below the bar.
-        A card's menu (`open_card`) hangs from its point instead, a line as
-        wide as the card and centred on it, kept on the glass; from the
+        A card's menu (`open_card`) starts at its point instead, a line as
+        wide as the card and centred on it, kept on the glass, and slides
+        to fit whole where the content has the room (`look_card`); from the
         desk's PROJECTS window, from its hero's cover, a rect it never
         covers."""
         ws = self.ws

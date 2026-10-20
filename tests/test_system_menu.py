@@ -603,7 +603,12 @@ def _fade_ink(ws, card):
     scale across the card's inner width, that differs from the card's
     ground by 1.5:1 or more, and the same share of the band's lower half:
     ink there is a row running on under the fade, where the foot of a row
-    that ended above the cut reaches only the band's top."""
+    that ended above the cut reaches only the band's top. Third, the share
+    of the strip two rows at the scale each side of the band's top (where
+    the fade barely tints) at 3:1 or more, a pixel row mostly ink (a rule)
+    not counted: the peeked row's words begin above the fade, where a peek
+    whose words all lie deep in it leaves that strip blank (design review
+    F6-01)."""
     from runtime import ui_draw
     cv = ws.glass_canvas
     buf = bytes(cv._buf)
@@ -623,7 +628,24 @@ def _fade_ink(ws, card):
             n += _contrast(buf[o] << 8 | buf[o + 1], ground) >= 1.5
         ink.append(n)
     row = w - 2 * pad
-    return sum(ink) / (band * row), sum(ink[band // 2:]) / ((band - band // 2) * row)
+    k = 2 * fs
+    read = 0
+    for yy in range(foot - band - k, foot - band + k):
+        n = 0
+        for xx in range(x + pad, x + w - pad):
+            o = 2 * (yy * cv.w + xx)
+            n += _contrast(buf[o] << 8 | buf[o + 1], ground) >= 3.0
+        if n <= 0.6 * row:
+            read += n
+    return (sum(ink) / (band * row), sum(ink[band // 2:]) / ((band - band // 2) * row),
+            read / (2 * k * row))
+
+
+def _peek_reads(theme, mode, inputs, band, low, read):
+    assert band >= 0.02 and low >= 0.02, "%s %s %s: %.1f%% ink under the fade, %.1f%% " \
+        "in its lower half" % (theme, mode, inputs, 100 * band, 100 * low)
+    assert read >= 0.02, "%s %s %s: %.1f%% ink where the fade begins: the peeked row's " \
+        "words lie under it" % (theme, mode, inputs, 100 * read)
 
 
 @pytest.mark.parametrize("theme,mode", _THEME_MODES)
@@ -653,9 +675,7 @@ def test_a_cut_system_menu_shows_a_row_under_its_fade(tmp_path, theme, mode, inp
     if sleep and inputs == "tdeck":
         assert cut, "over Make with Sleep the T-Deck's menu is cut"
     if cut:
-        band, low = _fade_ink(ws, card)
-        assert band >= 0.02 and low >= 0.02, "%s %s %s: %.1f%% ink under the fade, %.1f%% " \
-            "in its lower half" % (theme, mode, inputs, 100 * band, 100 * low)
+        _peek_reads(theme, mode, inputs, *_fade_ink(ws, card))
     ws.sysmenu.close()
 
 
@@ -677,9 +697,39 @@ def test_the_handheld_more_menu_shows_a_row_under_its_fade(tmp_path, theme, mode
     if inputs == "touch" and not cut:
         return                          # no strip: the whole menu fits
     assert cut, "the T-Deck's menu is cut above its button"
-    band, low = _fade_ink(ws, card)
-    assert band >= 0.02 and low >= 0.02, "%s %s %s: %.1f%% ink under the fade, %.1f%% " \
-        "in its lower half" % (theme, mode, inputs, 100 * band, 100 * low)
+    _peek_reads(theme, mode, inputs, *_fade_ink(ws, card))
+
+
+@pytest.mark.parametrize("theme,mode", _THEME_MODES)
+def test_a_long_press_menu_slides_up_to_fit_whole(tmp_path, theme, mode):
+    """A long press on a kid's own cart on Make opens its card's menu at
+    the finger; with no room below the finger for every row it slides up
+    over the point and shows them all, Delete included, as a phone's
+    context menu does (design review F6-01), and `look_card` is the card
+    the engine draws."""
+    ws = _goldens_ws(tmp_path, theme, mode, "touch")
+    ws.carts.dup(_g._cart_by_title(ws, "Star Catcher"))
+    ws.go_home()
+    ws.set_home_tab("make")
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path") and _builtin_name(it["path"]) is None)
+    _settle(ws, 2)
+    ws._golden_popover = True
+    r = ws.launcher.tile_rect(ws.launcher.sel)
+    at = (r[0] + r[2] // 2, r[1] + r[3] // 2)
+    assert ws.menu_ui.open_card(ws.launcher_layer, at)
+    _settle(ws)
+    card = ws.menu_ui._host.box("System")
+    assert tuple(card) == ws.menu_ui.look_card()
+    lay = ws.layout
+    assert card[1] + card[3] <= lay.cy + lay.ch, "the card stays in the content"
+    assert card[1] < at[1] < card[1] + card[3], "the card slid over the finger"
+    for it in ws.sysmenu.items:
+        if it[0] == "item":
+            b = ws.menu_ui._host.box(it[4])
+            assert b is not None and card[1] <= b[1] and b[1] + b[3] <= card[1] + card[3], \
+                "%s shows whole" % it[4]
+    ws.sysmenu.close()
 
 
 # -- the desk's PROJECTS window (design review R5-14, R5-16) ------------------

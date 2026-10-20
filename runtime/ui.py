@@ -404,7 +404,9 @@ def popover(id=None, w=0, o=None):
     stop that holds focus as it opens), above it where there is no room
     below, else on the side with more room, its body cut to fit and faded
     where it runs on; never over the rect, and 4 pixels at the scale off
-    the surface's edges. `w` wide (0: the rect's width), its body the rows
+    the surface's edges. An `at` rect 0 tall is a point (a finger's): the
+    card starts there and slides to fit whole where the surface has the
+    room. `w` wide (0: the rect's width), its body the rows
     stacked until
     `popover()` ends it; while it is drawn nothing outside it takes input.
     True, or False the frame a press outside the card or Esc dismissed it
