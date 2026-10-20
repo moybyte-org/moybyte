@@ -1697,7 +1697,7 @@ class Carousel(Launcher):
         if it.get("type") in PSEUDO_TILE_TYPES or not it.get("path"):
             return None
         hero = self.hero_rect()
-        if hero is not None and hero[2] < _COVER_SIDE:
+        if hero is not None and hero[2] * _lb.render_scale() < _COVER_SIDE:
             return None                  # a small hero wears no badge (F, the menu)
         r = hero or self.tile_rect(i)
         return None if r is None else self._favorite_badge_geom(r)
@@ -1827,7 +1827,7 @@ class Carousel(Launcher):
     def _paint_details(self, cv):
         """The desk home's hero (a full paint's): its shadow, the
         selected card's picture at the hero's size and its favourite star
-        (on a hero of the cover's side or more).
+        (on a hero of the cover's side or more in glass pixels).
         The details beside it are the home layer's (`_draw_details`)."""
         hero = self.hero_rect()
         if not self.items:
@@ -1835,7 +1835,8 @@ class Carousel(Launcher):
         it = self.items[self.nearest()]
         _ui_draw.cast(cv, self.theme, hero, _ui_draw.CAST_CARD)
         self._draw_picture(cv, it, hero, True)
-        if (self.favorite_for is not None and it.get("path") and hero[2] >= _COVER_SIDE
+        if (self.favorite_for is not None and it.get("path")
+                and hero[2] * _lb.render_scale() >= _COVER_SIDE
                 and it.get("type") not in PSEUDO_TILE_TYPES):
             _draw_star_badge(cv, self._NAMES, self.theme or {},
                              self._favorite_badge_geom(hero),
