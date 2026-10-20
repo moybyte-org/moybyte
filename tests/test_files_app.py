@@ -6,6 +6,8 @@ autosave riding the same layer."""
 
 from pathlib import Path
 
+import pytest
+
 from runtime import files_app, host_app, moy_carts
 from ws_helpers import quiesce, shelf, select_on_home  # noqa: E402
 from ws_helpers import build_ws as _ws
@@ -510,10 +512,12 @@ def test_the_desk_shows_the_places_beside_the_files(tmp_path):
     assert app._focused == "Places", "a place opens beside the list, focus stays"
 
 
-def test_the_desks_list_holds_whole_rows_above_the_verbs(tmp_path):
-    """A table's rows view is a whole number of rows at every size, so the
-    strip's edge never cuts one (the desk's Contrast window cut a row through
-    its x-height); the heights it reckons with are the engine's."""
+def test_the_list_meets_the_verbs_and_peeks_half_a_row(tmp_path):
+    """The list runs down to the verbs' rule, and its rows' view ends well
+    inside a row at every size (a quarter row clear of each edge), so where
+    rows run on the last one shows in part under the fade, never a blank
+    band above the rule (design review R5-13); the heights it reckons with
+    are the engine's."""
     import json
     style = json.loads((Path(__file__).resolve().parent.parent / "native" / "moy_ui"
                         / "style.json").read_text())["metrics"]
@@ -528,8 +532,55 @@ def test_the_desks_list_holds_whole_rows_above_the_verbs(tmp_path):
             lay = files_app.FilesLayout(w, h, 1, windowed=True)
             assert lay.desk
             top = files_app.HEAD[1] + (0 if lay.two else files_app.CAPTION[1])
-            assert (lay.list[3] - top) % lay.row_h == 0, (w, h)
+            cut, q = (lay.list[3] - top) % lay.row_h, lay.row_h // 4
+            assert q < cut < lay.row_h - q, (w, h, cut)
+            assert lay.list[1] + lay.list[3] == lay.foot[1], "the rule meets the list"
             assert lay.row_h == row["stack_desk"]
+
+
+@pytest.mark.parametrize("theme,mode", [("moy", "light"), ("moy", "dark"), ("blocks", "light"),
+                                        ("contrast", "light"), ("contrast", "dark")])
+def test_the_desks_cut_row_shows_under_the_fade(tmp_path, theme, mode):
+    """Files on the desk, on Projects, its window shorter than its rows (the
+    kit's scene): the half row above the view's foot holds the cut row's
+    ink, and the verbs' rule lies right under it."""
+    import test_shell_goldens as g
+    import test_editor_look as el
+    cfg = dict(g.CONFIGS["p4_1024x600_cs2_fs1_windowed"], variant=mode)
+    cfg["theme"] = theme
+    ws = g._build(cfg, Path(tmp_path) / "carts")
+    ws.open_desk()
+    ws.open_app(ws._apps_by_id["files"])
+    el._frame(ws, 2)
+    win = el._place(ws, "files", (112, 54, 548, 380))
+    ws.files_app.open_place("projects", keep="Harpoon Pop")
+    el._frame(ws, 6)
+    cx, cy, _cw, _ch = win.content_rect()
+    lay = win.ctx.app_layouts["files"]
+    x, y, w, h = lay.list
+    x, foot = cx + x, cy + y + h
+    cv = ws.glass_canvas
+    buf = bytes(cv._buf)
+
+    def word(xx, yy):
+        o = 2 * (yy * cv.w + xx)
+        return buf[o] << 8 | buf[o + 1]
+
+    def lum(v):
+        out = 0.0
+        for c, k in zip((((v >> 11) & 31) / 31, ((v >> 5) & 63) / 63, (v & 31) / 31),
+                        (0.2126, 0.7152, 0.0722)):
+            out += k * (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+        return out
+
+    def contrast(a, b):
+        la, lb = sorted((lum(a), lum(b)))
+        return (lb + 0.05) / (la + 0.05)
+    ground = word(x + w - 2, foot - 1)
+    ink = sum(1 for yy in range(foot - lay.row_h // 2, foot) for xx in range(x, x + w)
+              if contrast(word(xx, yy), ground) >= 1.5)
+    assert ink >= 20, "%s %s: %d pixels of the cut row show" % (theme, mode, ink)
+    assert contrast(word(x + w // 2, foot), ground) >= 1.5, "the verbs' rule lies under it"
 
 
 # -- the projects' rows and the foot (design review D-11, m02, m10) ---------------------

@@ -1812,8 +1812,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             at = e + 1;
         }
         if (any) {
-            // a table's view holds whole rows where its app snaps it (the
-            // desk's Files): its fade takes the row at the cut edge
+            // the row the view's foot cuts draws clipped to it, and the
+            // fade, a row tall, lies over what shows of it (the desk's
+            // Files ends its view half a row into one)
             edge_fades(c, s, view, count * rh, offset, MOY_UI_DEFAULT, 1, rh);
         }
         clip_out(&kv);

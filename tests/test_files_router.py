@@ -377,7 +377,7 @@ def test_the_projects_list_scrolls_by_drag_and_clamps(tmp_path):
     assert n * ROW > vh, "the seeded store overflows one screen"
     cx = x + w // 2
 
-    _drag(ws, cx, vy + 150, vy + 10)            # 140 px: seven rows
+    _drag(ws, cx, vy + vh - 5, vy + vh - 145)   # 140 px: seven rows, from inside the view
     _tap_at(ws, cx, vy + ROW // 2)
     assert app.cur == 7, "the first row in view is the eighth"
     assert ws.wm.top_kind() == "files"

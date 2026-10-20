@@ -137,7 +137,8 @@ def shown_name(folder):
 
 # The engine's table head and group caption heights (style.json's
 # `value_row` `head` and `group` `caption`, handheld then desk; held to it
-# by tests/test_files_app.py), which sit over a table's rows.
+# by tests/test_files_app.py), which sit over a table's rows: the list's
+# peek reckons from under them.
 HEAD = (18, 34)
 CAPTION = (19, 26)
 # How far a list stands off a window's frame and off the divider between
@@ -183,16 +184,22 @@ class FilesLayout:
         x, y, w, h = self.list
         self.list = (x + lead, y, w - lead, h)
         self.pad = pad
-        # On the desk the list holds whole rows: under its caption (a single
-        # pane names the place) and its columns' head, the rows' view is a
-        # multiple of the row, and what is left over lies between it and the
-        # verbs, so no row is cut by the strip's edge at any window size or
-        # in any theme. The handheld keeps every pixel for rows, its last
-        # one cut as a phone's list shows there is more.
+        # The list runs down to the verbs' rule and its rows' view ends well
+        # inside a row, on the desk as on the handheld: where rows run on,
+        # the last one shows in part under the table's fade, as a phone's
+        # list peeks its next row (the popovers' rule: a cut within a
+        # quarter row of a row's edge moves up to the row's middle). What
+        # that leaves over goes to the verbs' band, over its verbs, so its
+        # rule meets the list and no blank band lies between the two.
         top = HEAD[self.desk] * fs + (0 if self.two else CAPTION[self.desk] * fs)
         x, y, w, h = self.list
-        if self.desk and h > top + self.row_h:
-            self.list = (x, y, w, h - (h - top) % self.row_h)
+        rh = self.row_h
+        cut = (h - top) % rh
+        if h > top + rh and not rh // 4 < cut < rh - rh // 4:
+            spare = (cut - rh // 2) % rh
+            self.list = (x, y, w, h - spare)
+            fx, fy, fw, fh = self.foot
+            self.foot = (fx, fy - spare, fw, fh + spare)
         # the handheld's places page: the places over the keycap hints
         self.hints, self.places = ui.cut_bottom(content, 20 * fs)
         if self.windowed and not self.two:
@@ -781,9 +788,12 @@ class FilesAppLayer(ListShellApp):
         (the verb Enter does) last."""
         lay = self.layout
         fs = lay.fs
-        fx, fy, fw, _fh = lay.foot
+        fx, fy, fw, fh = lay.foot
         cv.rect(fx, fy, fw, fs, th["border"])
-        x, y, w, h = ui.inset(lay.foot, lay.pad, lay.pad)
+        # the verbs a row tall, at the band's foot: what the list's peek
+        # leaves over lies above them
+        x, y, w, h = ui.inset((fx, fy + fh - lay.row_h - 2 * lay.pad, fw,
+                               lay.row_h + 2 * lay.pad), lay.pad, lay.pad)
         verbs = self._action_labels()
         if verbs and verbs[0] in PRIMARY:
             verbs = verbs[1:] + verbs[:1]
