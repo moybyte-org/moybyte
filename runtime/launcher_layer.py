@@ -1156,16 +1156,16 @@ def text_scale(px, fs, role="ui"):
 
 
 def desk_button_layout(verbs, dw, fs, u):
-    """[(verb, x, row, w, kind)] of the desk details pane's buttons in a
+    """[(verb, x, row, w, kind, dy)] of the desk details pane's buttons in a
     pane `dw` wide: the first a primary where it plays, opens, makes or
     changes, DEL a danger set apart by a group's gap (three buttons' gaps,
     the button-row form of a menu's rule), the rest plain, left to right, a
     button that does not fit starting the next row (never dropped), `x` from
-    the pane's left edge."""
-    out = []
-    x, row = 0, 0
-    gap = 14 // u
-    apart = 3 * 14 // u
+    the pane's left edge. Where they wrap, every button takes the widest
+    one's width, and a danger that starts a row stands a group's gap under
+    the row above (two rows' gaps): `dy`, the pixels its row and the rows
+    after it stand lower than the row pitch puts them (DESK_ROW_GAP)."""
+    kinds, widths = [], []
     for k, v in enumerate(verbs):
         label = _VERB_HINT[v][1]
         if k == 0 and v in ("play", "open", "new", "change"):
@@ -1174,22 +1174,42 @@ def desk_button_layout(verbs, dw, fs, u):
             kind = "danger"
         else:
             kind = "normal"
-        w = min(dw, max((148 if kind == "primary" else 112) // u,
-                        _ui_draw.print_width(label, fs) + 56 // u + 16 * fs))
+        kinds.append(kind)
+        widths.append(min(dw, max((148 if kind == "primary" else 112) // u,
+                                  _ui_draw.print_width(label, fs) + 56 // u + 16 * fs)))
+    out = _desk_button_flow(verbs, kinds, widths, dw, u)
+    if out and out[-1][2]:
+        out = _desk_button_flow(verbs, kinds, [max(widths)] * len(widths), dw, u)
+    return out
+
+
+DESK_ROW_GAP = 8     # the desk pane's rows of buttons stand this far apart
+
+
+def _desk_button_flow(verbs, kinds, widths, dw, u):
+    out = []
+    x, row, dy = 0, 0, 0
+    gap = 14 // u
+    apart = 3 * 14 // u
+    for v, kind, w in zip(verbs, kinds, widths):
         lead = (apart if kind == "danger" else gap) if x else 0
         if x and x + lead + w > dw:
             row += 1
             x, lead = 0, 0
-        out.append((v, x + lead, row, w, kind))
+            if kind == "danger":
+                dy += DESK_ROW_GAP // u
+        out.append((v, x + lead, row, w, kind, dy))
         x += lead + w
     return out
 
 
-def desk_button_rows(dw, fs, u):
-    """How many rows the desk pane keeps for its buttons: as many as the
-    widest card's (`_DESK_VERB_SETS`) wrap to in a pane `dw` wide."""
-    return max(1 + max(b[2] for b in desk_button_layout(vs, dw, fs, u))
-               for vs in _DESK_VERB_SETS)
+def desk_button_span(dw, fs, u, bh):
+    """The pixels the desk pane keeps for its buttons under their first
+    row: as many as the widest card's (`_DESK_VERB_SETS`) rows take in a
+    pane `dw` wide, `bh` a button's height."""
+    return max(b[2] * (bh + DESK_ROW_GAP // u) + b[5]
+               for vs in _DESK_VERB_SETS
+               for b in desk_button_layout(vs, dw, fs, u)[-1:])
 
 
 def tab_count_title(tab, n):
@@ -1323,16 +1343,16 @@ class Carousel(Launcher):
     def _geom_desk(self, lay, reach, keys=True):
         """The desk home's geometry (`_geom_desk_at`) with room in its pane
         for as many rows of buttons as its width wraps them to
-        (`desk_button_rows`): a pane narrowed by a smaller hero is laid out
+        (`desk_button_span`): a pane narrowed by a smaller hero is laid out
         again, the rows it then needs kept."""
-        rows = 1
+        span = 0
         for _ in range(3):
-            g = self._geom_desk_at(lay, reach, keys, rows)
+            g = self._geom_desk_at(lay, reach, keys, span)
             dk = g[9]
-            got = desk_button_rows(dk[2], lay.fs, dk[5][6])
-            if got <= rows:
+            got = desk_button_span(dk[2], lay.fs, dk[5][6], dk[5][4])
+            if got <= span:
                 break
-            rows = got
+            span = got
         return g
 
     def _geom_desk_at(self, lay, reach, keys, brows):
@@ -1361,8 +1381,8 @@ class Carousel(Launcher):
         the rest over its caption (R3-07). The
         tuple's band is the shelf's: its caption, its cards, their lift
         and their shadows; the desk's own ends with the pane's top and the
-        rows of buttons it holds, `brows`, each a button's height and
-        8 px apart."""
+        pixels its rows of buttons take under their first, `brows`
+        (`desk_button_span`)."""
         fs = lay.fs
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
         u = _lb.render_scale()
@@ -1375,7 +1395,7 @@ class Carousel(Launcher):
         ts, ms = text_scale(40 // u, fs, "title"), text_scale(14 // u, fs)
         ks, vs = text_scale(13 // u, fs), text_scale(15 // u, fs)
         bh = max(42 // u, 20 * fs)
-        need = tl * ts + lh * (ms + ks + vs) + bh + 60 // u + (brows - 1) * (bh + 8 // u)
+        need = tl * ts + lh * (ms + ks + vs) + bh + 60 // u + brows
         cap_h = lh * ms + 8 // u
         room = hints[1] - cy - top - cap_h - 72 // u
         # A short window gives up, in turn, most of the slack round the
@@ -3154,7 +3174,7 @@ class LauncherHomeLayer:
         """The y of the details pane's first row of buttons."""
         dk = self.grid._geom()[9]
         h, block, u = dk[5][4], dk[5][5], dk[5][6]
-        return dk[6] + block - 6 // u - h - (dk[8] - 1) * (h + 8 // u)
+        return dk[6] + block - 6 // u - h - dk[8]
 
     def _desk_buttons(self):
         """[(verb, rect, kind)] of the details pane's buttons over the
@@ -3167,8 +3187,9 @@ class LauncherHomeLayer:
         dx, dw = dk[1], dk[2]
         h, u = dk[5][4], dk[5][6]
         y = self._desk_button_top()
-        return [(v, (dx + x, y + r * (h + 8 // u), w, h), kind)
-                for v, x, r, w, kind in desk_button_layout(verbs, dw, self.ws.layout.fs, u)]
+        return [(v, (dx + x, y + r * (h + DESK_ROW_GAP // u) + dy, w, h), kind)
+                for v, x, r, w, kind, dy in desk_button_layout(verbs, dw,
+                                                               self.ws.layout.fs, u)]
 
     def _details_tap(self, px, py):
         """A press on the desk home's hero (the active tab's tap) or one of
@@ -3230,7 +3251,7 @@ class LauncherHomeLayer:
             name = "New"
         ty = hy + 4 // u
         was = _ui_draw.print_font(_ui_draw.font("title")[0])
-        cv.print_scaled(_ui_draw.print_fit(name, dw, ts), dx, ty, ink, ts)
+        cv.print_scaled(_ui_draw.print_ellipsis(name, dw, ts), dx, ty, ink, ts)
         if was is not None:
             _ui_draw.print_font(was)
         lh = _ui_draw.font()[2]

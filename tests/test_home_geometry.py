@@ -466,3 +466,36 @@ def test_the_shelf_keeps_one_gap_under_the_details_at_any_window_size(tmp_path, 
         finally:
             ws.wm._install(ws.wm._root_ctx)
     assert gaps[0] == gaps[1] == launcher_layer.SHELF_GAP, gaps
+
+
+def test_wrapped_desk_buttons_take_one_width_and_keep_the_danger_apart():
+    """Where the details pane's buttons wrap they take the widest one's
+    width, and Delete starting a row stands a group's gap under the row
+    above, the row form of its gap beside the others (design review F6-03);
+    on one row each keeps its own width."""
+    verbs = ("change", "copy", "delete")
+    one = launcher_layer.desk_button_layout(verbs, 1000, 1, 1)
+    assert [b[2] for b in one] == [0, 0, 0] and len({b[3] for b in one}) > 1
+    assert all(b[5] == 0 for b in one)
+    stack = launcher_layer.desk_button_layout(verbs, 220, 1, 1)
+    assert [b[2] for b in stack] == [0, 1, 2]
+    assert len({b[3] for b in stack}) == 1, "one width a stack"
+    assert [b[5] for b in stack] == [0, 0, launcher_layer.DESK_ROW_GAP]
+    assert launcher_layer.desk_button_span(220, 1, 1, 42) == \
+        2 * (42 + launcher_layer.DESK_ROW_GAP) + launcher_layer.DESK_ROW_GAP
+
+
+def test_the_desk_title_cuts_with_an_ellipsis(tmp_path):
+    """A title wider than the details pane ends in an ellipsis, never a
+    hard cut mid-letter (design review F6-03)."""
+    ws = _ws(tmp_path, DESK, "moy", "light")
+    was = ui_draw.print_font(ui_draw.font("title")[0])
+    try:
+        name = "Star Catcher copy"
+        w = ui_draw.print_width(name, 2)
+        assert ui_draw.print_ellipsis(name, w, 2) == name
+        cut = ui_draw.print_ellipsis(name, w * 2 // 3, 2)
+        assert cut.endswith(("…", "...")) and ui_draw.print_width(cut, 2) <= w * 2 // 3
+    finally:
+        if was is not None:
+            ui_draw.print_font(was)

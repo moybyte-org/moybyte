@@ -138,7 +138,7 @@ def test_a_wide_window_is_the_console_homes_layout():
     beside a hero a quarter of the width holds."""
     g9 = _geom(1024, 520)[9]
     (hx, hy, hero, _h), dx, _dw, _shelf_y, pad, _m, dy, rows, brows = g9
-    assert brows == 1, "every card's buttons on one row"
+    assert brows == 0, "every card's buttons on one row"
     assert pad == 48 and dy == hy and dx == hx + hero + 32 and rows == (True, True)
 
 

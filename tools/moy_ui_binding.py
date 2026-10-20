@@ -64,6 +64,7 @@ _SIGS = (
     ("moy_theme_reads", [c.c_int32, c.c_int32], _I),
     ("moy_ui_metrics", [_I, c.POINTER(_I)], c.POINTER(c.c_int16)),
     ("moy_text_width", [c.c_uint32, _P, _Z, _I], _I),
+    ("moy_text_cut_px", [c.c_uint32, _P, _Z, _I, _I, c.POINTER(_I)], _Z),
     ("moy_text_covers", [c.c_uint32, _P, _Z], _I),
     ("moy_font_load", [_P, _Z, c.POINTER(c.c_uint32)], _I),
     ("moy_font_free", [c.c_uint32], _I),
@@ -415,6 +416,15 @@ def binding():
     def text_width(text, scale=1, font=0):
         b = _b(text)
         return lib.moy_text_width(int(font) & 0xFFFFFFFF, b, len(b), int(scale))
+
+    def text_cut(text, maxw, scale=1, font=0):
+        b = _b(text)
+        ell = _I(0)
+        k = lib.moy_text_cut_px(int(font) & 0xFFFFFFFF, b, len(b), max(0, int(maxw)),
+                                int(scale), c.byref(ell))
+        if k == len(b) and not ell.value:
+            return text
+        return b[:k].decode("utf-8") + ("\u2026" if ell.value else "")
 
     def text_covers(text, font=0):
         b = _b(text)
@@ -1172,6 +1182,7 @@ def binding():
     m.str_set = str_set
     m.str_reset = lambda: lib.moy_str_reset()
     m.text_width = text_width
+    m.text_cut = text_cut
     m.text_covers = text_covers
     m.wrap = wrap
     m.tokens = lambda: tokens
