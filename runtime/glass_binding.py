@@ -504,11 +504,13 @@ _SHOW = ctypes.CFUNCTYPE(None, _P, ctypes.c_int)
 _VOID = ctypes.CFUNCTYPE(None, _P)
 _BOOL = ctypes.CFUNCTYPE(ctypes.c_bool, _P)
 _TICKS = ctypes.CFUNCTYPE(ctypes.c_uint32, _P)
+_REFRESHES = ctypes.CFUNCTYPE(ctypes.c_int32, _P)
 
 
 class _DsiOps(ctypes.Structure):
     _fields_ = [("show", _SHOW), ("msync", _VOID), ("ppa_sync", _VOID),
-                ("ppa_done", _BOOL), ("ticks_us", _TICKS), ("ctx", _P)]
+                ("ppa_done", _BOOL), ("ticks_us", _TICKS),
+                ("refreshes", _REFRESHES), ("ctx", _P)]
 
 
 class _Dsi(ctypes.Structure):
@@ -518,7 +520,9 @@ class _Dsi(ctypes.Structure):
                  ("nbusy", ctypes.c_uint8), ("pend", ctypes.c_uint8 * 4),
                  ("kind", ctypes.c_uint8 * 4), ("busy", ctypes.c_uint8 * 4)]
                 + [(n, ctypes.c_uint32) for n in ("deferred", "obsolete", "fences",
-                                                  "fence_us", "game_n", "game_us")])
+                                                  "fence_us", "game_n", "game_us")]
+                + [("front", ctypes.c_uint8), ("shows", ctypes.c_uint32),
+                   ("seq", ctypes.c_uint32 * 4), ("rseq", ctypes.c_int32 * 4)])
 
 
 def _dsi_lib():
@@ -529,7 +533,8 @@ def _dsi_lib():
         lib.moy_dsi_present.argtypes = [ctypes.POINTER(_Dsi), ctypes.c_bool]
         lib.moy_dsi_present_pending.argtypes = [ctypes.POINTER(_Dsi)]
         lib.moy_dsi_fence.argtypes = [ctypes.POINTER(_Dsi)]
-        for f in (lib.moy_dsi_init, lib.moy_dsi_present,
+        lib.moy_dsi_show_landed.argtypes = [ctypes.POINTER(_Dsi)]
+        for f in (lib.moy_dsi_init, lib.moy_dsi_present, lib.moy_dsi_show_landed,
                   lib.moy_dsi_present_pending, lib.moy_dsi_fence):
             f.restype = None
         lib._dsi_sigs = True
@@ -573,8 +578,13 @@ class DsiCompositor:
             done = getattr(ppa, "done", None) if ppa is not None else None
             return True if done is None else bool(done())
 
+        def refreshes(_ctx):
+            return dsi.refreshes()
+
         self._cb = (_SHOW(show), _VOID(msync), _VOID(ppa_sync), _BOOL(ppa_done),
-                    _TICKS(lambda _ctx: _now_us()))
+                    _TICKS(lambda _ctx: _now_us()),
+                    _REFRESHES(refreshes) if hasattr(dsi, "refreshes")
+                    else _REFRESHES())
         self._ops = _DsiOps(*self._cb, None)
         self._d = _Dsi()
         _dsi_lib().moy_dsi_init(ctypes.byref(self._d), ctypes.byref(self._ops), n)
@@ -618,6 +628,7 @@ class DsiCompositor:
 
     def flush(self):
         kicked = False
+        _dsi_lib().moy_dsi_show_landed(ctypes.byref(self._d))
         st = self._stamp_pending
         if st is not None:
             self._stamp_pending = None

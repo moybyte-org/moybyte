@@ -54,9 +54,15 @@ bool moy_banded_fence(moy_banded_t *b);
 // three buffers a frame whose async composite (the PPA's game blit, a window
 // stamp) still flies is QUEUED: its show waits for the composite, drawing
 // moves to the next buffer, and a buffer still read by a queued op is fenced
-// before it is drawn into again. With two the deferred frame is shown at the
-// loop's pre-frame hook (present_pending); with one, present is the cache
-// writeback alone.
+// before it is drawn into again. A show takes effect at the panel's next
+// refresh, so with three the buffer the next frame draws into is never the one
+// on glass: a queued window stamp that has landed is shown when the next frame
+// flushes, a whole frame before the buffer it leaves is drawn into; when every
+// other buffer still holds a queued show they are fenced and shown; and the
+// pre-frame hook waits out the refresh that takes the drawn-into buffer off
+// glass (the panel's refresh count, `refreshes`). With two the
+// deferred frame is shown at the loop's pre-frame hook (present_pending); with
+// one, present is the cache writeback alone.
 
 // The async-overlap meters, in order: every DSI compositor returns
 // THIS field set from `overlap_stats()`, whatever its path does internally.
@@ -70,7 +76,8 @@ bool moy_banded_fence(moy_banded_t *b);
 //   deferred  composites kicked async whose scan-out switch was held a loop --
 //             the denominator for the rest.
 //   obsolete  queued shows a newer full paint replaced: composited, unseen.
-//   fences    blocking fences in flush() that free the next paint target, and
+//   fences    blocking waits that free the next paint target -- a fence of the
+//             DMA still reading it, or of the refresh still scanning it -- and
 //             fence_us their cost. One per deferred frame means the extra
 //             framebuffer buys nothing.
 //   game_n    the blocking fence in present_pending() -- the one that must land
@@ -89,6 +96,9 @@ typedef struct {
     void (*ppa_sync)(void *ctx);            // every PPA op landed
     bool (*ppa_done)(void *ctx);            // ...without waiting; NULL: unknown
     uint32_t (*ticks_us)(void *ctx);
+    // Panel refreshes since init (moy_dsi.refreshes); NULL: a show takes
+    // effect when it returns.
+    int32_t (*refreshes)(void *ctx);
     void *ctx;
 } moy_dsi_ops_t;
 
@@ -103,12 +113,20 @@ typedef struct {
     uint8_t kind[MOY_PRESENT_MAX_FBS];      // ...and what each one waits for
     uint8_t busy[MOY_PRESENT_MAX_FBS];      // buffers a queued op still reads
     uint32_t deferred, obsolete, fences, fence_us, game_n, game_us;
+    uint8_t front;                          // the buffer last shown
+    uint32_t shows;                         // shows since init
+    uint32_t seq[MOY_PRESENT_MAX_FBS];      // each buffer's last show, by `shows`
+    int32_t rseq[MOY_PRESENT_MAX_FBS];      // ...and the refresh count it was made at
 } moy_dsi_t;
 
 void moy_dsi_init(moy_dsi_t *d, const moy_dsi_ops_t *ops, int nfbs);
 // The frame is drawn: show it, or queue it behind its composite. `stamp`
 // says the binding just kicked a deferred window stamp into this buffer.
 void moy_dsi_present(moy_dsi_t *d, bool stamp);
+// Before a frame kicks its own composite: show the queued frames whose
+// composites have landed, so their shows reach a refresh while this one's
+// DMA flies.
+void moy_dsi_show_landed(moy_dsi_t *d);
 // The loop's pre-frame hook: show what the last present deferred, fencing
 // only when the cart's next draw would overwrite a composite's source.
 void moy_dsi_present_pending(moy_dsi_t *d);

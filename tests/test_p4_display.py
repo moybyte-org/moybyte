@@ -461,17 +461,106 @@ def test_a_game_queued_BEHIND_a_stamp_still_fences_blocking(stepped):
 
 def test_a_stamp_only_queue_keeps_its_free_gate(stepped):
     """The upgrade is one-way: a frame with no game composite must not start
-    paying the blocking fence."""
+    paying the blocking GAME fence. A queue that fills every other buffer is
+    fenced all the same -- the next frame's buffer is the one on glass -- and
+    that is the reuse fence, never the game's."""
     _dsi, ppa, ctx = build(done=False)
     with ctx as mod:
         stepped(mod)
         comp = mod.P4Compositor()
-        for _ in range(2):                 # two entries queued, both "stamp"
-            comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
-            comp.flush()
-            comp.present_pending()
-        assert [k for _fb, k in comp._pend3] == ["stamp", "stamp"]
+        comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
+        comp.flush()
+        comp.present_pending()
+        assert [k for _fb, k in comp._pend3] == ["stamp"]
         assert (ppa.syncs, comp.overlap_stats()[4]) == (0, 0)
+        comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
+        comp.flush()                       # both other buffers queued
+        comp.present_pending()
+        assert comp._pend3 == []
+        fences, _us, game_n = comp.overlap_stats()[2:5]
+        assert (ppa.syncs, fences, game_n) == (1, 1, 0)
+
+
+# -- the buffer drawn into is never the one on glass ---------------------------
+
+
+class ScanDsi(FakeDsi):
+    """`moy_dsi` with a panel that SCANS: a show takes effect at the next
+    refresh, so `scan` -- the buffer on glass -- is the last one shown before
+    the latest refresh. Time passes only where the test says (`vsync`) or
+    while the engine polls the refresh count (every `poll`-th read is a
+    refresh): frames as fast as the loop can make them."""
+
+    def __init__(self, n=3, poll=3):
+        super().__init__(n)
+        self.count = 0
+        self.reads = 0
+        self.poll = poll
+        self.scan = 0
+
+    def refreshes(self):
+        self.reads += 1
+        if self.reads % self.poll == 0:
+            self.vsync()
+        return self.count
+
+    def vsync(self):
+        self.count += 1
+        if self.shown:
+            self.scan = self.shown[-1]
+
+
+def _drag_frames(comp, dsi, ppa, frames, rng):
+    """A window drag's frames on the Waveshare: every frame defers its window
+    stamp to the PPA, whose DMA outlasts the loop's gap at random, and the
+    panel refreshes between frames at random. Answers the frames that drew
+    into the buffer on glass, by index."""
+    bad = []
+    for i in range(frames):
+        ppa.done_flag = rng.random() < 0.3
+        comp.present_pending()
+        if rng.random() < 0.4:
+            dsi.vsync()
+        if comp._back == dsi.scan:
+            bad.append(i)
+        comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
+        comp.flush()
+    return bad
+
+
+def test_a_drag_never_draws_into_the_buffer_on_glass():
+    """The flicker the owner saw on the Waveshare (2026-10-20): a window
+    dragged across the desk vanished for a frame, the desk under it showing
+    through. A drag frame defers its window stamp, so with the PPA still busy
+    at the next pre-frame hook its show stays queued; two such frames queue
+    both other buffers, and the round robin handed the third frame the buffer
+    being SCANNED -- its backdrop restore and chrome reached glass before its
+    stamp did. Drags at many speeds and timings, none drawn on glass."""
+    import random
+    for seed in range(40):
+        rng = random.Random(seed)
+        dsi, ppa = ScanDsi(), FakePpa(done=False)
+        with p4_display(dsi, ppa, FakeGfx()) as mod:
+            comp = mod.P4Compositor()
+            bad = _drag_frames(comp, dsi, ppa, 60, rng)
+            assert not bad, "seed %d: frames %s drew into the buffer on glass" % (seed, bad)
+
+
+def test_the_wait_shows_every_drag_frame_in_order():
+    """What the wait must not cost: every frame the drag drew reaches glass,
+    in the order it was drawn -- the round robin, no frame dropped, none
+    shown twice."""
+    import random
+    rng = random.Random(7)
+    dsi, ppa = ScanDsi(), FakePpa(done=False)
+    with p4_display(dsi, ppa, FakeGfx()) as mod:
+        comp = mod.P4Compositor()
+        _drag_frames(comp, dsi, ppa, 60, rng)
+        ppa.done_flag = True
+        comp.present_pending()
+        drawn = dsi.shown[1:]
+        assert len(drawn) == 60
+        assert all((drawn[k] + 1) % 3 == drawn[k + 1] for k in range(len(drawn) - 1))
 
 
 # -- where the numbers are readable --------------------------------------------

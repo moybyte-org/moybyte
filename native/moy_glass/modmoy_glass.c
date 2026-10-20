@@ -1072,6 +1072,7 @@ typedef struct {
     mp_obj_t gfx;
     mp_obj_t fbs;               // list of the scan buffers' memoryviews
     mp_obj_t stamp;             // the deferred stamp's argument tuple, or None
+    mp_obj_t refreshes;         // the panel's refresh count, or None
     mp_int_t w, h;
 } glass_dsi_obj_t;
 
@@ -1110,6 +1111,10 @@ static bool dsi_ppa_done(void *ctx) {
 static uint32_t dsi_ticks(void *ctx) {
     (void)ctx;
     return (uint32_t)mp_hal_ticks_us();
+}
+
+static int32_t dsi_refreshes(void *ctx) {
+    return (int32_t)mp_obj_get_int(mp_call_function_0(((glass_dsi_obj_t *)ctx)->refreshes));
 }
 
 // The kernel's first light (native/moy_kernel/moy_boot.h); none off a board.
@@ -1167,6 +1172,10 @@ static mp_obj_t dsi_make_new(const mp_obj_type_t *type, size_t n_args,
     c->ops.ppa_sync = dsi_ppa_sync;
     c->ops.ppa_done = dsi_ppa_done;
     c->ops.ticks_us = dsi_ticks;
+    mp_load_method_maybe(dsi, MP_QSTR_refreshes, dest);
+    c->refreshes = dest[0] == MP_OBJ_NULL ? mp_const_none
+                 : (dest[1] == MP_OBJ_NULL ? dest[0] : mp_obj_new_bound_meth(dest[0], dest[1]));
+    c->ops.refreshes = c->refreshes == mp_const_none ? NULL : dsi_refreshes;
     c->ops.ctx = c;
     moy_dsi_init(&c->d, &c->ops, (int)n);
     return MP_OBJ_FROM_PTR(c);
@@ -1190,12 +1199,13 @@ static mp_obj_t dsi_gfx(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(dsi_gfx_obj, dsi_gfx);
 
-// flush: kick the deferred window stamp as the frame's first op (a refused
-// kick draws it on the CPU instead -- worst case one stale frame), then the
-// engine's present.
+// flush: show the queued frames whose composites have landed, kick the
+// deferred window stamp as the frame's first op (a refused kick draws it on
+// the CPU instead -- worst case one stale frame), then the engine's present.
 static mp_obj_t dsi_flush(mp_obj_t self_in) {
     glass_dsi_obj_t *c = MP_OBJ_TO_PTR(self_in);
     bool kicked = false;
+    moy_dsi_show_landed(&c->d);
     if (c->stamp != mp_const_none) {
         mp_obj_t st = c->stamp;
         c->stamp = mp_const_none;
