@@ -210,7 +210,14 @@ def test_the_more_menus_arrow_keys_stand_as_tall_as_its_letters(tmp_path, theme,
     w = 24
     letter = _key_ink_h(px, host.box(rows["fliph"]), ox, oy, w)
     assert letter > 0
-    for op in ("sleft", "sright", "sup", "sdown"):
+    # a row the menu's cut peeks under its fade is the fade's measure
+    # (tests/test_system_menu.py), not its key's
+    card = host.box("Shift" if ws.paint_layer._shifts else "More")
+    fade = card[1] + card[3] - ui_draw.metrics("value_row")[29] - 10 * ws.layout.fs
+    shown = [op for op in ("sleft", "sright", "sup", "sdown")
+             if host.box(rows[op])[1] + host.box(rows[op])[3] <= fade]
+    assert len(shown) >= 3, shown
+    for op in shown:
         got = _key_ink_h(px, host.box(rows[op]), ox, oy, w)
         assert got >= 0.8 * letter, "%s %s: %s's arrow %d px against F's %d" % (
             theme, mode, op, got, letter)

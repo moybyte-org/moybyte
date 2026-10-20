@@ -661,16 +661,18 @@ static moy_ui_keep_t *page_keep(moy_ui_ctx_t *c) {
 }
 
 // A row of an open popover's body laid out at `t`, `h` tall, where the
-// body is cut: whether the cut falls inside it with the row's middle at
-// least the fade above it (the top of its words clear of the fade), and
-// the deepest such cut, a row's middle plus the fade, at or above the
-// cut. A rule is no row to peek: what shows of one is not a row running on.
+// body is cut: whether the cut falls inside it at least half the fade
+// under its middle (a part taller than a row: a row's middle down it), so
+// the top of its words reads above the fade's dense half, and the deepest
+// such cut at or above the cut. A rule is no row to peek: what shows of
+// one is not a row running on.
 static void peek_note(moy_ui_ctx_t *c, int t, int h) {
     int cut = c->pop_cut;
     if (cut <= 0 || c->n_nest == 0 || c->nest[c->n_nest - 1].kind != 3) {
         return;
     }
-    int at = t + h / 2 + FADE_H * c->fs / 2;
+    int rh = row_h(c);
+    int at = t + (h < rh ? h : rh) / 2 + FADE_H * c->fs / 2;
     if (at <= cut && cut < t + h) {
         c->pop_inside = 1;
     }
@@ -2029,7 +2031,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
 
 // The body a popover shows of its rows' `body` in `cap`: all of it, else
 // the cut, raised to the peek its keep's `peek` found last frame (a row's
-// middle the fade above the cut, `peek_note`), so a cut body always shows
+// middle half the fade above the cut, `peek_note`), so a cut body always shows
 // the top of a row's words over its fade (a phone sheet's peek); never
 // under one row.
 static int pop_body(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body, int cap, int rh) {
@@ -2053,9 +2055,9 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
                 c->owe = 1;             // laid out for another body: the next frame redraws
             }
             // a cut body's rows run on: where the cut leaves no row's
-            // middle the fade above it, the next frame cuts at the deepest
-            // row middle plus the fade above it, so the top of a row's
-            // words shows over the fade
+            // middle half the fade above it, the next frame cuts at the
+            // deepest row middle plus half the fade above it, so the top
+            // of a row's words shows over the fade
             int peek = c->pop_cut > 0 && took > c->pop_cut && !c->pop_inside ? c->pop_peek : 0;
             if (pk != NULL && pk->peek != peek) {
                 pk->peek = (int16_t)peek;

@@ -373,9 +373,9 @@ def test_a_fade_over_blank_card_is_flagged(monkeypatch):
     in its half at the cut is a FLAG unless a filed gap owns it (R5-07)."""
     from PIL import Image
     img = Image.new("RGB", (40, 20), (255, 255, 255))
-    monkeypatch.setattr(L, "_fade_bands", lambda ws: [("a list's foot", (0, 0, 40, 20))])
+    monkeypatch.setattr(L, "_fade_bands", lambda ws: [("a list's rows", (0, 0, 40, 20))])
     (row,) = L._fade_pairs(None, None, img)
-    assert row[0] == "fade band shows rows (a list's foot)" and L.flagged([row])
+    assert row[0] == "fade band shows rows (a list's rows)" and L.flagged([row])
     for x in range(0, 40, 3):
         for y in range(2, 8):
             img.putpixel((x, y), (0, 0, 0))
@@ -386,3 +386,27 @@ def test_a_fade_over_blank_card_is_flagged(monkeypatch):
             img.putpixel((x, y), (0, 0, 0))
     (row,) = L._fade_pairs(None, None, img)
     assert not L.flagged([row]), row
+
+
+def test_a_peek_whose_words_lie_deep_in_the_fade_is_flagged(monkeypatch):
+    """A popover's foot fade: the row it lies over must read where the fade
+    begins, ink at 3:1 in the rows each side of its clear edge, a rule not
+    counted (design review F6-01); its words all inside the fade's dense
+    half is a FLAG though the band holds ink."""
+    from PIL import Image
+    img = Image.new("RGB", (40, 40), (255, 255, 255))
+    band = (0, 20, 40, 10)
+    monkeypatch.setattr(L, "_fade_bands", lambda ws: [("the menu's foot", band)])
+
+    def read():
+        return next(r for r in L._fade_pairs(None, None, img) if r[0].startswith("fade's row"))
+    for x in range(0, 40, 3):                      # words deep in the fade
+        for y in range(25, 30):
+            img.putpixel((x, y), (0, 0, 0))
+    for x in range(40):                            # a rule over it
+        img.putpixel((x, 19), (0, 0, 0))
+    assert L.flagged([read()]), "a peek under the fade alone, or a rule, reads as nothing"
+    for x in range(0, 40, 3):                      # the words begin above the fade
+        for y in range(18, 23):
+            img.putpixel((x, y), (0, 0, 0))
+    assert not L.flagged([read()]), read()

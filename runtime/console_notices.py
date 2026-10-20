@@ -571,17 +571,18 @@ class DeleteConfirm:
 _FADE_H = 10
 
 
-def _peek(rows, cut, fade):
+def _peek(rows, cut, fade, rh):
     """The body a popover cut at `cut` shows (the engine's `pop_body` and
-    `peek_note`): the cut where it falls inside a row whose middle stands
-    `fade` (the engine's FADE_H at the scale) above it, else the deepest
-    such cut above it, a row's middle plus the fade, so the top of a row's
-    words always shows over the fade. `rows` are (top, height, peekable)."""
+    `peek_note`): the cut where it falls inside a row at least `fade` (half
+    the engine's FADE_H at the scale) under its middle -- a part taller
+    than a row `rh`, a row's middle down it --, else the deepest such cut
+    above it, so the top of a row's words always reads above the fade's
+    dense half. `rows` are (top, height, peekable)."""
     best = 0
     for t, h, row in rows:
         if not row:
             continue
-        at = t + h // 2 + fade
+        at = t + min(h, rh) // 2 + fade
         if at <= cut < t + h:
             return cut
         if best < at <= cut:
@@ -944,7 +945,7 @@ class SystemMenuUI:
             # a point's card (a finger's) slides to fit whole
             return (x, y1 - (2 * pad + bh) if dn else y0, w, 2 * pad + bh)
         if 2 * pad + bh > room:
-            bh = max(rh, _peek(rows, room - 2 * pad, _FADE_H * fs // 2))
+            bh = max(rh, _peek(rows, room - 2 * pad, _FADE_H * fs // 2, rh))
         h = 2 * pad + bh
         y = top if dn else foot - h
         return (x, y, w, h)

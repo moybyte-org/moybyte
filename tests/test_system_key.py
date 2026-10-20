@@ -373,20 +373,35 @@ def test_the_look_card_keeps_clear_of_the_bar_the_strip_and_its_anchor(tmp_path,
     ws.sysmenu.close()
 
 
-def test_the_card_menu_never_covers_the_point_it_opened_at(tmp_path):
+def test_the_card_menu_covers_its_point_only_to_show_whole(tmp_path):
+    """A card's menu hangs below the point it opened at, else above it;
+    where neither side holds every row it slides over the point and shows
+    them all, as a phone's context menu does (design review F6-01)."""
     ws = build_ws(tmp_path)
     _moy(ws)
     drv = make_drv(ws)
     ws.set_home_tab("make")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     _frames(drv)
+    covered = 0
     for at in ((160, 40), (160, 120), (160, 200), (20, 100), (300, 100)):
         assert ws.menu_ui.open_card(ws.launcher_layer, at)
         _frames(drv, 3)
         x, y, w, h = ws.menu_ui._host.box("System")
-        assert not (y < at[1] < y + h), (at, (x, y, w, h))
+        if y < at[1] < y + h:
+            covered += 1
+            for it in ws.sysmenu.items:
+                if it[0] == "item":
+                    b = ws.menu_ui._host.box(it[4])
+                    assert b is not None and y <= b[1] and b[1] + b[3] <= y + h, \
+                        (at, it[4], "a card over its point shows every row")
+            sx, sy, sw, sh = ws.menu_ui.surface()
+            gap = 4 * ws.layout.fs
+            assert h > sy + sh - gap - (at[1] + gap) and h > at[1] - gap - (sy + gap), \
+                (at, "it covers the point only where neither side holds it")
         ws.sysmenu.close()
         _frames(drv)
+    assert covered, "a point mid-glass has room for the menu on neither side"
 
 
 def test_the_look_card_takes_taps_on_its_rows_and_closes_outside(tmp_path):
