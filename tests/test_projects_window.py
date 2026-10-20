@@ -76,7 +76,7 @@ def test_the_window_draws_the_console_homes_design(tmp_path):
     try:
         assert grid.desk(), "the window lays out the desk home, not the handheld's"
         verbs = [v for v, _r, _k in ws.projects_layer._desk_buttons()]
-        assert verbs[:2] == ["new", "change"]
+        assert verbs[:2] == ["change", "copy"]
         assert ws.bar_layer._zone_owner("projects") is ws.projects_layer
     finally:
         ws.wm._install(ws.wm._root_ctx)
@@ -120,7 +120,7 @@ def test_a_narrow_tall_window_stands_the_hero_over_its_details():
     """Too narrow for the pane beside the hero and tall enough for both
     stacked: the hero over the pane, the pane the width, the shelf under."""
     g9 = _geom(360, 1000)[9]
-    (hx, hy, hero, _h), dx, dw, shelf_y, pad, _m, dy, _rows = g9
+    (hx, hy, hero, _h), dx, dw, shelf_y, pad, _m, dy, _rows, _brows = g9
     assert hero >= launcher_layer._COVER_SIDE // 2
     assert dx == hx and dy >= hy + hero and dw == 360 - 2 * pad
     assert shelf_y >= dy + g9[5][5]
@@ -129,7 +129,7 @@ def test_a_narrow_tall_window_stands_the_hero_over_its_details():
 def test_a_narrow_short_window_keeps_the_hero_beside_its_details():
     """No height to stack at a hero as large: it stays beside the pane."""
     g9 = _geom(360, 460)[9]
-    (hx, hy, hero, _h), dx, _dw, _shelf_y, _pad, _m, dy, _rows = g9
+    (hx, hy, hero, _h), dx, _dw, _shelf_y, _pad, _m, dy, _rows, _brows = g9
     assert dx > hx + hero and dy == hy
 
 
@@ -137,7 +137,8 @@ def test_a_wide_window_is_the_console_homes_layout():
     """At the glass's own width the window is the console home: the pane
     beside a hero a quarter of the width holds."""
     g9 = _geom(1024, 520)[9]
-    (hx, hy, hero, _h), dx, _dw, _shelf_y, pad, _m, dy, rows = g9
+    (hx, hy, hero, _h), dx, _dw, _shelf_y, pad, _m, dy, rows, brows = g9
+    assert brows == 1, "every card's buttons on one row"
     assert pad == 48 and dy == hy and dx == hx + hero + 32 and rows == (True, True)
 
 
@@ -167,3 +168,66 @@ def test_a_short_window_drops_the_facts_then_the_metadata():
     for g9 in (tall, mid, low):
         hy, hero, dy, pane = g9[0][1], g9[0][2], g9[6], g9[5][5]
         assert max(hy + hero, dy + pane) <= g9[3], "the pane runs into the shelf"
+
+
+def _own(ws, grid):
+    """Select a cart of the kid's own on the window's shelf: a copy of Star
+    Catcher (a built-in is copied, never deleted)."""
+    from runtime.moy_store_base import builtin_name
+    star = next(c for c in ws.carts.all if c.get("title") == "Star Catcher")
+    ws.carts.dup(star)
+    _frame(ws)
+    grid.sel = next(i for i, it in enumerate(grid.items)
+                    if it.get("path") and builtin_name(it["path"]) is None)
+    _frame(ws)
+
+
+@pytest.mark.parametrize("size", [None, (360, 534)])
+def test_make_leads_with_change_and_keeps_every_card_verb(tmp_path, size):
+    """On Make the hero's filled button acts on the hero: CHANGE, with
+    DUPLICATE and DELETE beside it, every one of them at any width (a button
+    that does not fit wraps under, R5-02); NEW is the + tile's primary and
+    stays on the strip's N."""
+    from runtime import ui_draw
+    ws = _ws(tmp_path)
+    win, grid = _projects(ws, size)
+    _own(ws, grid)
+    ws.wm._install(win.ctx)
+    was = ui_draw.input_kind()
+    try:
+        lay = ws.layout
+        content = (lay.cx, lay.cy, lay.cw, lay.ch)
+        home = ws.projects_layer
+        buttons = home._desk_buttons()
+        assert [(v, k) for v, _r, k in buttons] == [
+            ("change", "primary"), ("copy", "normal"), ("delete", "danger")]
+        pane = grid.plate_rect()
+        for _v, r, _k in buttons:
+            assert _inside(r, content) and _inside(r, pane), (r, pane)
+        ui_draw.input_kind("keys")
+        _items, verbs = home._hint_groups()
+        assert verbs[:2] == ["new", "change"], "the strip keeps N New on Make"
+        grid.sel = next(i for i, it in enumerate(grid.items)
+                        if it.get("type") == launcher_layer.NEW_TILE_TYPE)
+        _frame(ws)
+        assert [(v, k) for v, _r, k in home._desk_buttons()] == [("new", "primary")]
+    finally:
+        ui_draw.input_kind(was)
+        ws.wm._install(ws.wm._root_ctx)
+
+
+def test_wrapped_buttons_take_up_and_down_between_their_rows(tmp_path):
+    """Where the buttons wrap, up and down move between their rows before
+    the keys go on to the tabs or back to the shelf."""
+    ws = _ws(tmp_path)
+    win, grid = _projects(ws, (360, 534))
+    _own(ws, grid)
+    ws.wm._install(win.ctx)
+    try:
+        home = ws.projects_layer
+        buttons = home._desk_buttons()
+        assert len({r[1] for _v, r, _k in buttons}) > 1, "the narrow pane wraps"
+        assert home._button_rows_apart(buttons, 0) == (None, 1)
+        assert home._button_rows_apart(buttons, 1) == (0, 2)
+    finally:
+        ws.wm._install(ws.wm._root_ctx)

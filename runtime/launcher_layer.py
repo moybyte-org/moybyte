@@ -1074,6 +1074,11 @@ _HINT_LEAD_DESK = 8  # the desk's
 BACK_TIP = "Desk"    # the tooltip on the bar's chevron back to the desk
 DETAILS_MIN = 280    # the narrowest details pane beside the hero, in glass
                      # pixels at the target's 1x: a primary button and one more
+# The most buttons a desk card shows, per kind of tab: a played tab's
+# (Games, Mine), Make's on a real card. The details pane keeps room for as
+# many rows as the widest of them wraps to, so the shelf stays put as the
+# selection moves.
+_DESK_VERB_SETS = (("play", "change", "copy"), ("change", "copy", "delete"))
 DESC_LINES = 3       # the desk home's description: at most this many lines,
 DESC_EMS = 48        # ... as wide as this many n's: about 60 characters of
                      # running text, the width of the buttons' row
@@ -1130,6 +1135,40 @@ def text_scale(px, fs, role="ui"):
     lh = _ui_draw.font(role)[2]
     return max(fs, (px + lh // 2) // max(1, lh))
 
+
+def desk_button_layout(verbs, dw, fs, u):
+    """[(verb, x, row, w, kind)] of the desk details pane's buttons in a
+    pane `dw` wide: the first a primary where it plays, opens, makes or
+    changes, DEL a danger, the rest plain, left to right, a button that does
+    not fit starting the next row (never dropped), `x` from the pane's left
+    edge."""
+    out = []
+    x, row = 0, 0
+    gap = 14 // u
+    for k, v in enumerate(verbs):
+        label = _VERB_HINT[v][1]
+        if k == 0 and v in ("play", "open", "new", "change"):
+            kind = "primary"
+        elif v == "delete":
+            kind = "danger"
+        else:
+            kind = "normal"
+        w = min(dw, max((148 if kind == "primary" else 112) // u,
+                        _ui_draw.print_width(label, fs) + 56 // u + 16 * fs))
+        lead = gap if x else 0
+        if x and x + lead + w > dw:
+            row += 1
+            x, lead = 0, 0
+        out.append((v, x + lead, row, w, kind))
+        x += lead + w
+    return out
+
+
+def desk_button_rows(dw, fs, u):
+    """How many rows the desk pane keeps for its buttons: as many as the
+    widest card's (`_DESK_VERB_SETS`) wrap to in a pane `dw` wide."""
+    return max(1 + max(b[2] for b in desk_button_layout(vs, dw, fs, u))
+               for vs in _DESK_VERB_SETS)
 
 
 def tab_count_title(tab, n):
@@ -1261,6 +1300,21 @@ class Carousel(Launcher):
                 (title_y, title_h, tsc, meta_y, meta_h, hints), None)
 
     def _geom_desk(self, lay, reach, keys=True):
+        """The desk home's geometry (`_geom_desk_at`) with room in its pane
+        for as many rows of buttons as its width wraps them to
+        (`desk_button_rows`): a pane narrowed by a smaller hero is laid out
+        again, the rows it then needs kept."""
+        rows = 1
+        for _ in range(3):
+            g = self._geom_desk_at(lay, reach, keys, rows)
+            dk = g[9]
+            got = desk_button_rows(dk[2], lay.fs, dk[5][6])
+            if got <= rows:
+                break
+            rows = got
+        return g
+
+    def _geom_desk_at(self, lay, reach, keys, brows):
         """The desk home's geometry (docs/look_2026-10.md step 18), the same
         tuple with its foot (the hint strip) and the desk's own: the hero at
         the top left, the details pane beside it, the shelf under them
@@ -1283,7 +1337,9 @@ class Carousel(Launcher):
         shelf's caption and half under the shelf, which under touch (no
         hint strip, no `keys`) keeps at most the side margin under it. The
         tuple's band is the shelf's: its caption, its cards, their lift
-        and their shadows; the desk's own ends with the pane's top."""
+        and their shadows; the desk's own ends with the pane's top and the
+        rows of buttons it holds, `brows`, each a button's height and
+        8 px apart."""
         fs = lay.fs
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
         u = _lb.render_scale()
@@ -1296,7 +1352,7 @@ class Carousel(Launcher):
         ts, ms = text_scale(40 // u, fs, "title"), text_scale(14 // u, fs)
         ks, vs = text_scale(13 // u, fs), text_scale(15 // u, fs)
         bh = max(42 // u, 20 * fs)
-        need = tl * ts + lh * (ms + ks + vs) + bh + 60 // u
+        need = tl * ts + lh * (ms + ks + vs) + bh + 60 // u + (brows - 1) * (bh + 8 // u)
         cap_h = lh * ms + 8 // u
         room = hints[1] - cy - top - cap_h - 72 // u
         # A short window gives up, in turn, most of the slack round the
@@ -1342,7 +1398,7 @@ class Carousel(Launcher):
         down = max(ring, blur + d[11])
         band = (cx, cap_y, cw, max(0, min(hints[1], shelf_y + shelf + down) - cap_y))
         desk = ((hx, hy, hero, hero), dx, max(0, cx + cw - pad - dx), shelf_y, pad,
-                (ts, ms, ks, vs, bh, pane, u), dy, tuple(rows))
+                (ts, ms, ks, vs, bh, pane, u), dy, tuple(rows), brows)
         return (None, band, shelf, shelf + gap, ring, gap, 0, shelf_y + shelf // 2,
                 (0, 0, 0, 0, 0, hints), desk)
 
@@ -2498,10 +2554,29 @@ class LauncherHomeLayer:
             g.tab_focus = k is not None or bool(getattr(self, "_tab_keys", False))
         self.ws.mark_dirty()
 
+    @staticmethod
+    def _button_rows_apart(buttons, k):
+        """(the button over `k`, the button under it) where the pane's
+        buttons wrap to rows, each the nearest in its row; None for none."""
+        r = buttons[k][1]
+        mid = r[0] + r[2] // 2
+        out = []
+        for above in (True, False):
+            ys = [b[1][1] for b in buttons if (b[1][1] < r[1]) == above and b[1][1] != r[1]]
+            if not ys:
+                out.append(None)
+                continue
+            y = max(ys) if above else min(ys)
+            row = [j for j, b in enumerate(buttons) if b[1][1] == y]
+            out.append(min(row, key=lambda j: abs(buttons[j][1][0] + buttons[j][1][2] // 2
+                                                   - mid)))
+        return out[0], out[1]
+
     def _button_keys(self, i):
         """The keys on the desk home's buttons: left and right move along
-        them, confirm presses one, up goes on to the tabs, down and B back
-        to the shelf. False where no button has them, or for another key."""
+        them, confirm presses one, up and down move between their rows where
+        they wrap, up from the first row goes on to the tabs, down from the
+        last and B back to the shelf. False where no button has them, or for another key."""
         k = self._button_focus
         if k is None:
             return False
@@ -2514,12 +2589,17 @@ class LauncherHomeLayer:
         if not any(i.pressed(n) for n in ("left", "right", "up", "down", "a", "run", "b",
                                           "home")):
             return False                     # the strip's letters still act
+        up, down = self._button_rows_apart(buttons, k)
         if i.pressed("left"):
             self._button_focus = max(0, k - 1)
         elif i.pressed("right"):
             self._button_focus = min(len(buttons) - 1, k + 1)
+        elif i.pressed("up") and up is not None:
+            self._button_focus = up
         elif i.pressed("up"):
             self._tab_focus = True
+        elif i.pressed("down") and down is not None:
+            self._button_focus = down
         elif i.pressed("down") or (i.pressed("b") and ws.ach_ui._konami_pos == 0):
             self._button_focus = None
         elif i.pressed("a") or i.pressed("run"):
@@ -2960,44 +3040,36 @@ class LauncherHomeLayer:
 
     def _desk_verbs(self):
         """The desk home's buttons (step 18): the active tab's tap verb,
-        then the card's verbs but its star (the hero wears that). None off
-        the desk."""
+        then the card's verbs but its star (the hero wears that). On Make
+        a real card's are its own, CHANGE first: NEW makes another cart,
+        which the shelf's + tile and N keep. None off the desk."""
         if not (self._carousel() and self.grid.desk()):
             return ()
-        out = [v for v in self.zone_verbs()[:1] if v in ("play", "open", "new")]
+        zone = self.zone_verbs()
+        out = [] if "change" in zone and self.grid.tab == "make" else \
+            [v for v in zone[:1] if v in ("play", "open", "new")]
         out.extend(v for v in self.card_verbs() if v != "favourite")
         return out
 
+    def _desk_button_top(self):
+        """The y of the details pane's first row of buttons."""
+        dk = self.grid._geom()[9]
+        h, block, u = dk[5][4], dk[5][5], dk[5][6]
+        return dk[6] + block - 6 // u - h - (dk[8] - 1) * (h + 8 // u)
+
     def _desk_buttons(self):
-        """[(verb, rect, kind)] of the details pane's buttons along the hero's
-        foot, the first a primary where it plays, opens or makes, DEL a
-        danger, as many as the pane holds."""
+        """[(verb, rect, kind)] of the details pane's buttons over the
+        pane's foot (`desk_button_layout`): rows from the first the pane
+        keeps (`_desk_button_top`), every one of the card's verbs."""
         verbs = self._desk_verbs()
         if not verbs:
             return []                        # off the desk
-        g = self.grid
-        dk = g._geom()[9]
-        dx, dw, hy = dk[1], dk[2], dk[6]
-        fs = self.ws.layout.fs
-        h, block, u = dk[5][4], dk[5][5], dk[5][6]
-        y = hy + block - 6 // u - h
-        x = dx
-        out = []
-        for k, v in enumerate(verbs):
-            label = _VERB_HINT[v][1]
-            if k == 0 and v in ("play", "open", "new"):
-                kind = "primary"
-            elif v == "delete":
-                kind = "danger"
-            else:
-                kind = "normal"
-            w = max((148 if kind == "primary" else 112) // u,
-                    _ui_draw.print_width(label, fs) + 56 // u + 16 * fs)
-            if x + w > dx + dw:
-                break
-            out.append((v, (x, y, w, h), kind))
-            x += w + 14 // u
-        return out
+        dk = self.grid._geom()[9]
+        dx, dw = dk[1], dk[2]
+        h, u = dk[5][4], dk[5][6]
+        y = self._desk_button_top()
+        return [(v, (dx + x, y + r * (h + 8 // u), w, h), kind)
+                for v, x, r, w, kind in desk_button_layout(verbs, dw, self.ws.layout.fs, u)]
 
     def _details_tap(self, px, py):
         """A press on the desk home's hero (the active tab's tap) or one of
@@ -3078,7 +3150,7 @@ class LauncherHomeLayer:
         if not meta_on:
             my -= lh * ms + 14 // u
         buttons = self._desk_buttons()
-        by = hy + block - 6 // u - bh
+        by = self._desk_button_top()
         if it.get("type") not in PSEUDO_TILE_TYPES:
             vy = by - 16 // u - lh * vs
             ky = vy - 6 // u - lh * ks
@@ -3104,7 +3176,7 @@ class LauncherHomeLayer:
             # (design review R4-31); a fact past the last button a column on
             col = 150 // u
             facts = self._facts(it) if facts_on else ()
-            xs = [r[0] for _v, r, _k in buttons][:len(facts)]
+            xs = [r[0] for _v, r, _k in buttons if r[1] == by][:len(facts)]
             while len(xs) < len(facts):
                 xs.append(xs[-1] + col if xs else dx)
             for k, (key, val) in enumerate(facts):
@@ -3172,8 +3244,10 @@ class LauncherHomeLayer:
                 items.extend(_VERB_HINT["options"])
                 verbs.append("options")
             return items, verbs
-        desk = self._desk_verbs()
-        for v in (tuple(desk) + tuple(v for v in zone if v == "search")) if desk else zone:
+        desk = tuple(self._desk_verbs())
+        if desk and "new" in zone and "new" not in desk:
+            desk = ("new",) + desk           # Make's N, off the card's buttons
+        for v in (desk + tuple(v for v in zone if v == "search")) if desk else zone:
             k, words = _VERB_HINT[v]
             if on is not None and (v == on or k == "confirm"):
                 if v != on:
