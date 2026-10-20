@@ -740,3 +740,57 @@ def test_the_system_menu_over_projects_leads_with_its_card(tmp_path, theme, mode
     assert m.items[len(card)] == ("sep",)
     from runtime.console_notices import _DANGER_ICON
     assert m.items[m.sel][0] == "item" and m.items[m.sel][3] != _DANGER_ICON, m.items[m.sel]
+
+
+def _ratio_ge(a, b, num, den):
+    """The parts' own `ratio_ge` on two RGB565 words: luminance on squares
+    for the sRGB curve."""
+    def lum(v):
+        r, g, b = (v >> 11) * 255 // 31, ((v >> 5) & 63) * 255 // 63, (v & 31) * 255 // 31
+        return 2126 * r * r + 7152 * g * g + 722 * b * b + 32512500
+    hi, lo = max(lum(a), lum(b)), min(lum(a), lum(b))
+    return den * hi >= num * lo
+
+
+def _glass_word(ws, x, y):
+    buf = ws.glass_canvas._buf
+    o = 2 * (y * ws.glass_canvas.w + x)
+    return buf[o] << 8 | buf[o + 1]
+
+
+@pytest.mark.parametrize("theme,mode", _THEME_MODES)
+def test_a_focused_delete_keeps_its_red_icon_where_the_red_reads(tmp_path, theme, mode):
+    """Focus on a danger row (the PROJECTS card menu's Delete): where the
+    focus mark takes the label off its red, the trash icon keeps the red
+    wherever that holds 3:1 on the mark, so the row still says it destroys
+    (design review R5-12); where it does not hold, the icon takes the
+    mark's ink with the label."""
+    ws = _projects_own(tmp_path, theme, mode)
+    ws._golden_popover = True
+    assert ws.projects_layer.open_card_menu()
+    _settle(ws)
+    m = ws.sysmenu
+    dl = max(i for i, it in enumerate(m.items) if it[0] == "item")
+    x, y, w, h = ws.menu_ui._host.box(m.items[dl][4])
+    # unfocused, the row's ink is the danger ink: its commonest colour off
+    # the card's ground
+    hist = {}
+    for yy in range(y, y + h):
+        for xx in range(x, x + w):
+            v = _glass_word(ws, xx, yy)
+            hist[v] = hist.get(v, 0) + 1
+    ground = max(hist, key=hist.get)
+    danger = max((v for v in hist if v != ground), key=hist.get)
+    m.sel = dl
+    _settle(ws)
+    assert tuple(ws.menu_ui._host.box(m.items[dl][4])) == (x, y, w, h)
+    mark = _glass_word(ws, x + w - 6, y + h // 2)
+    side = 16 * ws.layout.fs
+    icon = {_glass_word(ws, xx, yy) for yy in range(y, y + h) for xx in range(x, x + 2 * side)}
+    label = {_glass_word(ws, xx, yy) for yy in range(y, y + h)
+             for xx in range(x + 2 * side, x + w // 2)}
+    if danger in label:
+        return                          # the mark keeps the label red: nothing taken
+    reads = _ratio_ge(danger, mark, 3, 1)
+    assert (danger in icon) == reads, "%s %s: red %04x on the mark %04x, the icon %s" % (
+        theme, mode, danger, mark, "red" if danger in icon else "not red")

@@ -654,7 +654,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                       : tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
     int dim = on_card ? tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_CHROME_INK_DIM)
                       : tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
-    int lab = ink, rowfill = -1;
+    int lab = ink, rowfill = -1, danger = -1;
     if (r->kind == MOY_UI_VROW_DANGER) {
         // a verb that destroys: in the theme's menu danger ink where it
         // names one, else in the danger buttons' ink, which every theme
@@ -667,6 +667,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                    && bs.c[1] >= 0) {
             lab = ink = bs.c[1];
         }
+        danger = lab;
     }
     if (flags & MOY_UI_F_DISABLED) {
         lab = ink = dim = moy_ui_disabled() >= 0 ? moy_ui_disabled() : dim;
@@ -948,7 +949,16 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
         int side = 16 * d.fs;
         moy_ui_box_t ib = {(int16_t)tx, (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)),
                            (int16_t)side, (int16_t)side};
-        if (icon_d(&d, r->icon_slot, r->icon_glyph, ib, lab)) {
+        // a focus that took a danger row's label off its red (red on the
+        // mark would not read as text) leaves the icon in it where the red
+        // holds 3:1 on the mark: the row still says that it destroys
+        int ic = lab;
+        if (danger >= 0 && lab != danger && (flags & MOY_UI_F_FOCUS)
+            && !(flags & MOY_UI_F_DISABLED)
+            && ratio_ge(pal(&d, danger), rowfill >= 0 ? pal(&d, rowfill) : rg, 3, 1)) {
+            ic = danger;
+        }
+        if (icon_d(&d, r->icon_slot, r->icon_glyph, ib, ic)) {
             tx += side + pm(&d, MOY_UI_M_VALUE_ROW_GAP, 1);
         }
     }
