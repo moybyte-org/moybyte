@@ -146,4 +146,4 @@ def test_the_home_search_says_to_pair_a_keyboard_where_nothing_types(tmp_path, k
     assert ws.no_keyboard_text in _printed(ws, drv)
     ws.use_inputs([("local", "keys")])
     text = _printed(ws, drv)
-    assert ws.no_keyboard_text not in text and "SEARCH: _" in text
+    assert ws.no_keyboard_text not in text and "Search: " in text

@@ -2814,11 +2814,14 @@ class LauncherHomeLayer:
     def _try_drag_partial(self, cv, dt):
         """The home's moving frame (`_drag_partial`), timed for the home
         diag's HITCH split. The carousel's only once the band's backdrop holds
-        this frame's wallpaper; the grid's band lies on its panel."""
+        this frame's wallpaper; the grid's band lies on its panel. Never
+        under touch's search line, which lies in the band."""
         if not self._carousel():
             return _drag_partial(self, cv, dt, self.grid, self.id,
                                  self._surface_fill, self.strip, timed=True)
         if self._band_bg is None or self._band_key != self._band_key_of(cv):
+            return False
+        if self._search_line() is not None:
             return False
         return _drag_partial(self, cv, dt, self.grid, self.id,
                              self._backdrop_fill, self.strip, timed=True)
@@ -3023,12 +3026,80 @@ class LauncherHomeLayer:
             cv.print(label, sx, ty + (tht - lay.line_h) // 2, th["ink"], 1)
 
     def _search_label(self, query, typing):
-        """The search box's words: the query and its caret while typed, or,
-        where the input in use cannot type, that a keyboard is needed (#239
-        is the on-screen keyboard)."""
+        """The search box's words: "Search: " and the query (a bar caret
+        follows it while typed, `_draw_search`), or, where the input in use
+        cannot type, that a keyboard is needed (#239 is the on-screen
+        keyboard)."""
         if typing and not query and not self.ws.can_type():
             return self.ws.no_keyboard_text
-        return "SEARCH: " + query + ("_" if typing else "")
+        return "Search: " + query
+
+    def _search_open(self):
+        """Whether the home's search is open: a query held or being typed."""
+        ws = self.ws
+        return bool(self.searchable and (getattr(ws, "search_query", "")
+                                         or getattr(ws, "search_typing", False)))
+
+    def _search_line(self):
+        """(x, y, w, h) of the handheld home's search line while search is
+        open: the hint strip, or under touch, which has none, a line on the
+        home's ground 4 units over the glass's foot (design review R5-04);
+        None while search is closed."""
+        if not (self._hh() and self._search_open()):
+            return None
+        rect = self.grid.foot()[5]
+        if rect[3] > 0:
+            return rect
+        lay = self.ws.layout
+        h = lay.line_h
+        return (rect[0], lay.cy + lay.ch - 4 * lay.fs - h, rect[2], h)
+
+    def _search_close_items(self):
+        """The strip's way out of search: a field's cancel while typing (the
+        T-Deck's Mic, where its K types), else back."""
+        return ("cancel" if getattr(self.ws, "search_typing", False) else "back", "Close")
+
+    def _draw_search(self, cv, th, ink):
+        """The search line (`_search_line`): its words, a bar caret after
+        the query while it is typed, and where a strip shows, the key that
+        closes it. Returns the line's right edge drawn to."""
+        ws = self.ws
+        line = self._search_line()
+        if line is None:
+            return 0
+        fs = ws.layout.fs
+        query = getattr(ws, "search_query", "")
+        typing = getattr(ws, "search_typing", False)
+        x = line[0] + self._hint_pad()
+        y = line[1] + (line[3] - ws.layout.line_h) // 2
+        label = _ui_draw.print_fit(self._search_label(query, typing), line[2] // 2, fs)
+        cv.print(label, x, y, ink, 1)
+        x += _ui_draw.print_width(label, fs)
+        if typing and ws.can_type():
+            # the field's caret: a unit wide, a unit over and under the ink
+            x += fs
+            cv.rect(x, y + fs, fs, ws.layout.line_h - 2 * fs, th["value"])
+            x += fs
+        if line[3] > 0 and line is self.grid.foot()[5]:
+            x += 4 * fs
+            sp = _ui_draw.hints(cv, th, (x, line[1], line[0] + line[2] - x, line[3]),
+                                self._search_close_items(), self.grid.desk())
+            if sp:
+                x = sp[-1][1]
+        return x
+
+    def _search_tap(self, px, py):
+        """A tap on the search line closes search, cleared (under touch its
+        only way out but the system menu's Clear search)."""
+        line = self._search_line()
+        if line is None:
+            return False
+        spans, _rect = self._hint_spans(self.ws.sys_canvas)
+        x1 = next((a for v, a, _b in spans if v == "tabs"), line[0] + line[2])
+        if not _in(px, py, (line[0], line[1], x1 - line[0], line[3])):
+            return False
+        self.ws.close_search(clear=True)
+        return True
 
     def card_verbs(self):
         """The selected card's verbs beyond its tap, the ONE list every
@@ -3354,11 +3425,8 @@ class LauncherHomeLayer:
         if n:
             _ui_draw.hints(cv, th, self._hint_inner(rect), items[:2 * n], desk)
         elif self.searchable and (query or typing):
-            fs = self.ws.layout.fs
-            label = _ui_draw.print_fit(self._search_label(query, typing), rect[2] // 2, fs)
             ink = th["ink"] if _ui_draw.depth()[0] else th["chrome_ink"]
-            cv.print(label, rect[0] + pad,
-                     rect[1] + (rect[3] - self.ws.layout.line_h) // 2, ink, 1)
+            self._draw_search(cv, th, ink)
         for v, x0, _x1 in spans:
             if v == "tabs":
                 left = x0 - (rect[0] + self._hint_lead())
@@ -3439,7 +3507,9 @@ class LauncherHomeLayer:
         wifi panel: while typing, the d-pad doesn't drive anything else)."""
         ws = self.ws
         k = ws.input.last_key
-        if k and k != self._search_kprev:
+        if i.pressed("b"):                          # a gamepad's B: the strip's Close
+            ws.close_search(clear=True)
+        elif k and k != self._search_kprev:
             if k in (10, 13):                       # ENTER -> stop typing, keep results
                 ws.close_search(clear=False)
             elif k == 27:                           # ESC -> cancel back to the full grid
@@ -3536,8 +3606,11 @@ class LauncherHomeLayer:
         return True
 
     def _back(self):
-        """B: the home's X, from a keyboard -- where the X shows."""
-        if self.ws.bar_layer._show_x(self.strip):
+        """B: closes a held search, cleared; else the home's X, from a
+        keyboard -- where the X shows."""
+        if self._search_open():
+            self.ws.close_search(clear=True)
+        elif self.ws.bar_layer._show_x(self.strip):
             self.ws.open_desk()
 
     # The doors out of the home.
@@ -3611,7 +3684,7 @@ class LauncherHomeLayer:
                 self._button_focus = None    # a press takes the keys' mark away
             if ws.bar_layer.handle_bar_tap(self.strip, px, py):
                 return True
-            if self._hh() and self._hint_tap(px, py):
+            if self._search_tap(px, py) or (self._hh() and self._hint_tap(px, py)):
                 return True
             for tid, r, _on in self.tab_rects():
                 if _in(px, py, r):

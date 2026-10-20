@@ -123,6 +123,104 @@ def test_search_esc_cancels_and_restores_the_full_grid(tmp_path):
     assert len(_real_items(ws)) == full_n
 
 
+def _search_frame(ws, drv, kind, typed=""):
+    """Search open under input `kind`, `typed` typed: (the words printed,
+    the hint items drawn) of one repaint."""
+    from runtime import ui_draw
+    ws.launcher_layer._lib_unsupported = True   # every frame a full paint
+    ws.use_inputs([("local", kind)])
+    ws.open_search()
+    for ch in typed:
+        drv.type_char(ord(ch))
+        drv.frame(1 / 30)
+    printed, hints = [], []
+    cv = ws.sys_canvas
+    real_print, real_hints = cv.print, ui_draw.hints
+
+    def spy_print(text, *a, **kw):
+        printed.append(str(text))
+        return real_print(text, *a, **kw)
+
+    def spy_hints(c, th, rect, items, *a, **kw):
+        if kw.get("draw", True):
+            hints.append(tuple(items))
+        return real_hints(c, th, rect, items, *a, **kw)
+    cv.print, ui_draw.hints = spy_print, spy_hints
+    try:
+        ws._dirty = True
+        drv.frame(1 / 30)
+    finally:
+        cv.print, ui_draw.hints = real_print, real_hints
+    return printed, hints
+
+
+def test_search_reads_in_sentence_case_with_a_bar_caret(tmp_path):
+    """The search line reads "Search: " and the query, no capitals past
+    the S and no underscore: a bar caret follows the query while it is
+    typed (design review R5-04)."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    printed, _hints = _search_frame(ws, drv, "keys", "st")
+    line = next(t for t in printed if t.startswith("Search"))
+    assert line == "Search: st"
+    assert not any(c.isupper() for c in line[1:]) and "_" not in line
+
+
+def test_search_offers_its_way_out_on_every_strip(tmp_path):
+    """Under keys, the T-Deck and a gamepad the strip names the key that
+    closes search while it is open (Esc, Mic in a field where K types, B);
+    the pad's B closes it, cleared (design review R5-04)."""
+    from runtime import host_app
+    from runtime import ui_draw
+    for kind, typed in (("keys", "st"), ("tdeck", "st"), ("pad", "")):
+        ws = _ws(tmp_path / kind)
+        drv = host_app.ConsoleDriver(ws)
+        _printed, hints = _search_frame(ws, drv, kind, typed)
+        assert ("cancel", "Close") in hints, (kind, hints)
+    ws = _ws(tmp_path / "b")
+    drv = host_app.ConsoleDriver(ws)
+    _search_frame(ws, drv, "pad")
+    assert ws.search_typing
+    drv.press("b")
+    drv.frame(1 / 30)
+    assert not ws.search_typing and ws.search_query == ""
+    ui_draw.input_kind("keys")
+
+
+def test_a_held_search_closes_on_back(tmp_path):
+    """Search left open (Enter kept the query) names back as its Close,
+    and back clears it before it does anything else."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    _search_frame(ws, drv, "keys", "st")
+    ws.close_search(clear=False)
+    assert ws.launcher_layer._search_close_items() == ("back", "Close")
+    ws.launcher_layer._back()
+    assert ws.search_query == ""
+
+
+def test_under_touch_the_search_line_lies_inside_the_glass(tmp_path):
+    """Touch draws no hint strip: the search line lies on the home's
+    ground over the glass's foot, wholly inside it, and a tap on it closes
+    search (design review R5-04)."""
+    from runtime import host_app
+    from runtime import ui_draw
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    printed, _hints = _search_frame(ws, drv, "touch")
+    assert ws.no_keyboard_text in printed
+    line = ws.launcher_layer._search_line()
+    lay = ws.layout
+    assert line is not None and line[3] > 0
+    assert lay.cy <= line[1] and line[1] + line[3] <= lay.cy + lay.ch - 4 * lay.fs
+    assert line[1] + line[3] <= ws.sys_canvas.h
+    assert ws.launcher_layer._search_tap(line[0] + 4, line[1] + line[3] // 2)
+    assert not ws.search_typing and ws.launcher_layer._search_line() is None
+    ui_draw.input_kind("keys")
+
+
 def test_search_row_is_absent_off_the_launcher(tmp_path):
     """SEARCH only makes sense over the run-grid -- Settings/the picker/etc. don't
     offer it."""

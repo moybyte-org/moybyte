@@ -704,6 +704,11 @@ wallpaper, so an idle window draws nothing, and its drag rides
 `_drag_partial` and the WM's content-gesture path. Every pick opens what it opens as a window above it: a Make project
 the Editor, a Games cart the player, an Apps entry its app; the Editor's
 window X closes back to it. SEARCH is the fullscreen home's verb alone.
+While search is open the handheld's hint strip reads "Search: " and the
+query, a bar caret after it while it is typed, then the key that closes it
+(a field's cancel while typing, where the T-Deck's K types a letter, else
+back); touch has no strip, so the line lies on the home's ground over the
+glass's foot and a tap on it closes search (design review R5-04).
 
 **Navigation.** Touch: tap a tab, drag or fling the carousel, tap the centre
 card (the desk's hero) or a verb (a hint, a desk button). T-Deck: left/right
