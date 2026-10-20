@@ -136,9 +136,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     import shell_layout as _shell_layout
     import layout_base as _layout_base
+    import iconsets as _iconsets
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import shell_layout as _shell_layout
     from runtime import layout_base as _layout_base
+    from runtime import iconsets as _iconsets
 _ui_is_light = _ui_draw.is_light
 
 def _ui_text_w(t):
@@ -339,6 +341,7 @@ class Appearance:
         self._choices = None
         self.layout_gen = 0             # moves with every resolve: the Settings row's memo
         self.look_gen = 0               # moves with every publish(); see the module doc
+        self.icons = None               # the live look's icon set, (kind, set, swap): publish()
         # The store's theme packages (docs/theming_2026-09.md §9 phase 6 step
         # 2): stem -> folder, as of the roster generation `_pkg_gen`; the
         # bytes the install slot holds when a store package filled it (None
@@ -1853,6 +1856,12 @@ class Appearance:
         if abi is not None:
             gen = abi.theme_write(self.theme_name, self.theme_variant,
                                   self.ws.theme_colors, self.live.near)
+        # The look's icon set, and the masks the C parts draw from it (the
+        # public UI API's `ui.icon` rows, a depth frame's title buttons): in
+        # place before anything draws under the new generation, since a
+        # window's retained buffer drawn without them keeps that frame.
+        self.icons = _iconsets.spec(self.live.look)
+        _iconsets.use_parts(self.icons)
         # Strictly rising: the console's look may move before its ABI exists.
         self.look_gen = gen if gen > self.look_gen else self.look_gen + 1
         _ui_draw.look_moved()

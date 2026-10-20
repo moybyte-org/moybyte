@@ -1098,8 +1098,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # shared draw toolkit) and stays here; the SHEET itself is the look's
         # (`ws.look.icon_sheet`), and `look.set_icon_sheet` clears this.
         self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None)
-        self._icon_spec = None        # the live theme's icon set (icon_spec)
-        self._icon_spec_gen = -1
         # The unified top bar (#46) is its own surface now (BarLayer, Phase 2
         # of docs/history/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
         # per-second clock cache (#66) and the bar tap slices live
@@ -4732,15 +4730,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def icon_spec(self):
         """The live theme's icon set, (kind, set, swap), or None where it
-        names none (runtime/iconsets.py); read once per look change."""
-        look = self.look
-        gen = look.look_gen
-        if self._icon_spec_gen != gen:
-            live = look.live
-            self._icon_spec = _iconsets.spec(live.look) if live is not None else None
-            self._icon_spec_gen = gen
-            _iconsets.use_parts(self._icon_spec)
-        return self._icon_spec
+        names none (runtime/iconsets.py): the look's, set when it publishes."""
+        return self.look.icons
 
     def draw_icon(self, kind, rect, ink, cv=None):
         """Draw icon `kind` of the live theme's icon set centred in `rect` in
@@ -4769,10 +4760,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if fs < 1:
             fs = 1
         box = _BAR_ICON * fs
-        if self.icon_spec() is not None and _iconsets.draw(
+        sp = self.look.icons
+        if sp is not None and _iconsets.draw(
                 cv, kind, (x, y, box, box),
-                self.theme_colors.get("chrome_ink", 7) if ink is None else ink,
-                self._icon_spec):
+                self.theme_colors.get("chrome_ink", 7) if ink is None else ink, sp):
             return
         img = self._bar_image(kind)
         if img is not None:
