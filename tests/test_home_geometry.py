@@ -347,14 +347,17 @@ def _glass(ws):
 
 
 @pytest.mark.parametrize("mode", ["dark", "light"])
-def test_the_framed_new_tile_reads_rounded_as_a_cover(tmp_path, monkeypatch, mode):
+@pytest.mark.parametrize("hero", [True, False])
+def test_the_framed_new_tile_reads_rounded_as_a_cover(tmp_path, monkeypatch, mode, hero):
     """Where the theme casts no shadow (Contrast) the + New tile is framed:
-    its frame's outer corner is a same-size cover's (the same blend), and
-    the page inside it keeps the corners too, so the page reads rounded
-    where the frame meets a ground of its own colour (design review R5-10)."""
+    the page inside it keeps a same-size cover's corners and the frame runs
+    round them, so both read rounded at 1x, as the hero and on the shelf,
+    where a cover's corner is smallest (design review R5-10, F6-04)."""
     ws = _ws(tmp_path, HANDHELD, "contrast", mode)
     _home(ws)
     ws.set_home_tab("make")
+    if not hero:
+        ws.launcher.sel = 1             # the + tile on the shelf beside it
     _frame(ws, 2)
     drawn = []
     real = launcher_layer.draw_new_art
@@ -375,6 +378,9 @@ def test_the_framed_new_tile_reads_rounded_as_a_cover(tmp_path, monkeypatch, mod
     assert px(x + w // 2, y) == border, "the frame takes the theme's border"
     ground = px(x + w // 2, y - 1)
     assert px(x, y) != border or border == ground, "the frame's outer corner is rounded"
+    # the frame runs round the page's corner, its own as wide again: a
+    # pixel in from the corner is still outside it, so it reads round at 1x
+    assert px(x + 1, y + 1) != border or border == ground, "the frame's corner reads round"
     # the page's own corner, inside the frame, is rounded as the frame's is
     assert px(x + line, y + line) != surface
     assert px(x + line + r + 1, y + line) == surface == px(x + line, y + line + r + 1)

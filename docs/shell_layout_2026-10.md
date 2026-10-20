@@ -794,7 +794,8 @@ cover: the theme's `surface` in a cover's corners with the icon set's plus in
 rest and selected. A colour block with a glyph is what a coverless cart's
 generated cover is (`ui_draw.initial_cover`), so New stays off that
 vocabulary; a theme that casts no shadow frames the page in its `border`,
-the page inside the frame keeping a cover's corners (design review R5-10).
+the page inside the frame keeping a cover's corners and the frame running
+round them (design review R5-10, F6-04).
 
 ## 13. Phases, as steps
 

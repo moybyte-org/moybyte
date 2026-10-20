@@ -200,15 +200,16 @@ def draw_new_art(cv, th, rect, r, stepped, spec, fs=1):
     `ink_accent`, the accent ink the theme holds readable on that surface.
     No rim, as a cover has none; but where the theme casts no shadow a page
     on a ground of its own colour would show only its plus, so there it is
-    framed in the theme's `border`, 2 px at font scale `fs`: the frame the
-    card's own shape, the page inside it with the corners `r` again, so the
-    page reads rounded as a cover does where the frame meets a ground of its
-    own colour (design review R5-10)."""
+    framed in the theme's `border`, 2 px at font scale `fs`: the page
+    inside the frame keeps a cover's corners `r` and the frame's run round
+    them, `r` plus its width, so the frame's corner reads rounded at 1x as
+    a filled cover's does where a thin line at `r` reads square (design
+    review R5-10, F6-04)."""
     x, y, w, h = rect
     d = _ui_draw.depth()
     if d[0] and not d[6]:
         line = 2 * fs
-        cv.rrect(x, y, w, h, r, th.get("border", 0), stepped=stepped)
+        cv.rrect(x, y, w, h, r + line, th.get("border", 0), stepped=stepped)
         cv.rrect(x + line, y + line, w - 2 * line, h - 2 * line, r, th.get("surface", 0),
                  stepped=stepped)
     else:
