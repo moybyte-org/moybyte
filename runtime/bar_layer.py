@@ -475,12 +475,23 @@ class BarLayer:
         """The rect LENT to `where`'s app for its draw_zone/zone_tap (never asked
         for "desktop", whose branch returns before any zone dispatch), in its
         bar's coordinates."""
-        got = self.cell(where, "zone")
-        if got is None:
-            return (0, 0, 0, 0)
-        if self._in_window(where):
-            return self._window_zone(got[0][1], got[1])
-        return got[1]
+        for bar in self._packed(where):
+            zone = self.lent_zone(where, bar)
+            if zone is not None:
+                return zone
+        return (0, 0, 0, 0)
+
+    def lent_zone(self, where, bar):
+        """The zone cell of `bar` (a packed bar of `where`'s) as its owner
+        draws into it and hit-tests it, in the bar's coordinates: the cell,
+        run on to a window strip's end inside a window; None where the bar
+        places no zone. The draw and the tap both take it from here."""
+        for c in bar[3]:
+            if c[0] == "zone":
+                if self._in_window(where):
+                    return self._window_zone(bar[1], c[1])
+                return c[1]
+        return None
 
     @staticmethod
     def _window_zone(rect, zone):
@@ -737,7 +748,8 @@ class BarLayer:
             _ch.replay(mp.chrome_strip_crash(cv.w, edit, self._clock_text(),
                                              ws._wifi_icon_kind()), cv, ws)
             return
-        edge, rect, dy, cells = self._packed(where)[i]
+        packed = self._packed(where)[i]
+        edge, rect, dy, cells = packed
         game = self._zone_is_game(where)
         # Part 4: a TOOL/APP runs WITH a minimal bar so it's EXITABLE: the OS
         # widgets, its TITLE in the zone (no tab ladder, no draw_zone: the
@@ -756,24 +768,18 @@ class BarLayer:
                                                _BAND_SIDE[edge])):
             looked = False
             _ui_draw.frame_band(cv, ws.theme_colors, bar, light, _BAND_SIDE[edge])
-        zone = None
         if not inside:
             cs = 0 if game else ws.layout.cs
             across = edge in ("left", "right")
             show_x = self._show_x(where)
             self._ink_dx = self._status_dx(cells) if looked and not across else None
             for name, r, text, _slot in cells:
-                if name == "zone":
-                    zone = r
-                elif name in _PAINTED and (show_x or name != "close"):
+                if name in _PAINTED and (show_x or name != "close"):
                     if looked:
                         self._paint_look_cell(cv, where, name, r, text, bar, across)
                     else:
                         self._paint_cell(cv, mp, where, name, r, text, cs, dy, across, game)
-        else:
-            for c in cells:
-                if c[0] == "zone":
-                    zone = self._window_zone(rect, c[1])
+        zone = self.lent_zone(where, packed)
         if zone is None:
             return
         back = self.draws_back(where)
@@ -1209,10 +1215,7 @@ class BarLayer:
     def _tap_bar(self, where, bar, px, py):
         ws = self.ws
         cells = bar[3]
-        zone = None
-        for c in cells:
-            if c[0] == "zone":
-                zone = c[1]
+        zone = self.lent_zone(where, bar)
         if self._in_window(where):
             # Inside a WM window (#73) the bar has NO OS widgets (suppressed in
             # the draw), so there is nothing OS-owned to hit -- the tap goes
