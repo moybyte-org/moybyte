@@ -338,6 +338,48 @@ def test_the_new_tile_takes_a_covers_corners(tmp_path, monkeypatch, config):
     assert tiles and all(r > 0 for _w, r, _f in tiles), calls
 
 
+def _glass(ws):
+    """The glass's pixel at (x, y) as the canvas stores it, the form
+    `_col` answers."""
+    cv = ws.glass_canvas
+    buf = bytes(cv._buf)
+    return lambda x, y: buf[2 * (y * cv.w + x)] | (buf[2 * (y * cv.w + x) + 1] << 8)
+
+
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_the_framed_new_tile_reads_rounded_as_a_cover(tmp_path, monkeypatch, mode):
+    """Where the theme casts no shadow (Contrast) the + New tile is framed:
+    its frame's outer corner is a same-size cover's (the same blend), and
+    the page inside it keeps the corners too, so the page reads rounded
+    where the frame meets a ground of its own colour (design review R5-10)."""
+    ws = _ws(tmp_path, HANDHELD, "contrast", mode)
+    _home(ws)
+    ws.set_home_tab("make")
+    _frame(ws, 2)
+    drawn = []
+    real = launcher_layer.draw_new_art
+
+    def spy(cv, th, rect, r, *a, **kw):
+        drawn.append((rect, r))
+        return real(cv, th, rect, r, *a, **kw)
+    monkeypatch.setattr(launcher_layer, "draw_new_art", spy)
+    _frame(ws, 1)
+    assert drawn, "the Make tab draws its + New tile"
+    (x, y, w, h), r = drawn[-1]
+    assert r > 0
+    px = _glass(ws)
+    cv = ws.glass_canvas
+    border = cv._col(ws.theme_colors["border"])
+    surface = cv._col(ws.theme_colors["surface"])
+    line = 2 * ws.layout.fs
+    assert px(x + w // 2, y) == border, "the frame takes the theme's border"
+    ground = px(x + w // 2, y - 1)
+    assert px(x, y) != border or border == ground, "the frame's outer corner is rounded"
+    # the page's own corner, inside the frame, is rounded as the frame's is
+    assert px(x + line, y + line) != surface
+    assert px(x + line + r + 1, y + line) == surface == px(x + line, y + line + r + 1)
+
+
 def test_the_star_stands_clear_of_its_chip():
     """The favourite star is about 10 pixels in a 16-pixel chip, its box
     centred, so the chip's rim stands clear of every point (R4-30)."""
