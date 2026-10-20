@@ -195,14 +195,17 @@ class CardsLayout(LayoutBase):
         self.scroll_up = (r - 20 * fs, self.card_y0, 16 * fs, 14 * fs)
         self.scroll_dn = (r - 20 * fs, self.view_bottom - 18 * fs,
                           16 * fs, 14 * fs)
-        self.info_btn = (r - 44 * fs, top + 3 * fs, 40 * fs, 14 * fs)
+        # The INFO chip's label sits at its corner's pads (`ui_draw.mini_btn`,
+        # 2 px each side): the chip holds the `ui` face's line between them.
+        line = _ui_draw.font()[2] * fs
+        self.info_btn = (r - 44 * fs, top + 3 * fs, 40 * fs, max(14 * fs, line + 4))
+        # `lead` is what that line takes past an 8-row cell (0 for a pixel
+        # face): a card's pictures, under its label, move down by it.
+        self.lead = max(0, line - 8 * fs)
+        lead = self.lead
         self.gap = 2 * fs
         # Per-display card heights (#15): sprite/bg picker cells, icon choices,
         # gauge/count meters -- all scale with the font so the pictures stay tappable.
-        # `lead` is what the `ui` face's line takes past the 8-row cell the
-        # pictures sit under (0 for a pixel face): they move down by it.
-        self.lead = max(0, _ui_draw.font()[2] * fs - 8 * fs)
-        lead = self.lead
         self.h_cells, self.h_icons, self.h_meter = (44 * fs + lead, 36 * fs + lead,
                                                     32 * fs + lead)
 
@@ -861,7 +864,7 @@ class CardsLayer:
                 glyph = icons[k] if k < len(icons) else "dot"
             art = _ui_draw.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
                            colors=(NAMES["black"] if chosen else t["cell"],
-                                   NAMES["white"],
+                                   NAMES["white"] if chosen else t["text"],
                                    NAMES["yellow"] if chosen else t["cell_edge"]),
                            glyph=glyph, glyph_draw=ws._glyph)
             if img is not None:
