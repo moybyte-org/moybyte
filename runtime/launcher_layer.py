@@ -1139,12 +1139,14 @@ def text_scale(px, fs, role="ui"):
 def desk_button_layout(verbs, dw, fs, u):
     """[(verb, x, row, w, kind)] of the desk details pane's buttons in a
     pane `dw` wide: the first a primary where it plays, opens, makes or
-    changes, DEL a danger, the rest plain, left to right, a button that does
-    not fit starting the next row (never dropped), `x` from the pane's left
-    edge."""
+    changes, DEL a danger set apart by a group's gap (three buttons' gaps,
+    the button-row form of a menu's rule), the rest plain, left to right, a
+    button that does not fit starting the next row (never dropped), `x` from
+    the pane's left edge."""
     out = []
     x, row = 0, 0
     gap = 14 // u
+    apart = 3 * 14 // u
     for k, v in enumerate(verbs):
         label = _VERB_HINT[v][1]
         if k == 0 and v in ("play", "open", "new", "change"):
@@ -1155,7 +1157,7 @@ def desk_button_layout(verbs, dw, fs, u):
             kind = "normal"
         w = min(dw, max((148 if kind == "primary" else 112) // u,
                         _ui_draw.print_width(label, fs) + 56 // u + 16 * fs))
-        lead = gap if x else 0
+        lead = (apart if kind == "danger" else gap) if x else 0
         if x and x + lead + w > dw:
             row += 1
             x, lead = 0, 0

@@ -231,3 +231,18 @@ def test_wrapped_buttons_take_up_and_down_between_their_rows(tmp_path):
         assert home._button_rows_apart(buttons, 1) == (0, 2)
     finally:
         ws.wm._install(ws.wm._root_ctx)
+
+
+def test_delete_stands_a_groups_gap_apart(tmp_path):
+    """DEL is set apart from the verbs before it by a group's gap, wider
+    than the gap between Change and Duplicate (R5-15)."""
+    ws = _ws(tmp_path)
+    win, grid = _projects(ws)
+    _own(ws, grid)
+    ws.wm._install(win.ctx)
+    try:
+        (_c, a, _k1), (_y, b, _k2), (_d, c, kind) = ws.projects_layer._desk_buttons()
+        assert kind == "danger" and a[1] == b[1] == c[1], "one row at the full size"
+        assert c[0] - (b[0] + b[2]) > b[0] - (a[0] + a[2]) > 0
+    finally:
+        ws.wm._install(ws.wm._root_ctx)
