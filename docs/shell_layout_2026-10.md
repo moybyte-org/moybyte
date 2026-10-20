@@ -41,7 +41,8 @@ memory and compositors); this doc cites, it does not copy.
 | L14 | **The home has arrangements** (owner, 2026-10-14: carousel, the old big grid, and later a small icon-only grid; "we don't have to do it now"): one home component, its tabs, sources, taps and bar verbs shared, its card layout the layout's `home` key -- `carousel` (default), `grid` or `icons` | §5, §12 |
 | L15 | **One projects list** (owner, 2026-10-14): the project picker is deleted on every tier; the home's Make tab is the one list of projects (L0) | §12 |
 | L16 | **The Editor's bar has no PROJECTS button** (owner, 2026-10-14), in every console-mode Editor: its X backs out one level, to wherever the Editor was opened from -- CHANGE works from any home tab -- which is the back-stack's pop | §12 |
-| L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, always the `grid` arrangement whatever the fullscreen home's, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs in a window, an Apps entry opens its app window | §3, §12 |
+| L17 | **The desk's PROJECTS opens the home in a window** (owner, 2026-10-14): on its Make tab, a normal window whose X closes it and never switches modes; a Make pick opens the Editor in its own window, a Games cart runs in a window, an Apps entry opens its app window. It draws the console home's design (owner, 2026-10-20: the hero, its details, the shelf) whatever the fullscreen home's arrangement | §3, §12 |
+| L18 | **On a board with a desk the Editor is a window** (owner, 2026-10-20): a Make pick, CHANGE or NEW from the console-mode home gives console mode back to the desk and opens the Editor there in a window; a board with no desk opens it fullscreen | §3, §12 |
 
 ## 2. What exists, read against this doc
 
@@ -125,7 +126,7 @@ memory and compositors); this doc cites, it does not copy.
   RGB565 bakes blitted at an integer scale, `_draw_cover`/`_cover_scale`).
   `Launcher.sel` bumps the zone generation, so a selection change re-renders
   the bar. The home window's card model, `ws.projects_grid`, is a second
-  `Launcher`, minted on the desk's first PROJECTS (step 7c).
+  `Carousel`, minted on the desk's first PROJECTS (step 7c, L17).
   `sspr` (`device/device_canvas.py`) scales INDEX sheets; the
   arbitrary-ratio RGB565 blit is `moy_gfx.blit565_resize` (step 7a).
 - **One cart runs at a time** (#73): moycore's single run slot
@@ -143,7 +144,7 @@ memory and compositors); this doc cites, it does not copy.
 | feels like | a console: one thing on screen, the animated home, a tap plays | a normal OS: a desk with icons, windows, bars, popovers |
 | the WM | `FullscreenStackWM`'s presentation | `WindowedWM`'s |
 | the root of the back-stack | the home (§12) | the desk |
-| an app or the Editor opens | fullscreen, pushed; back pops | as a window on the desk |
+| an app or the Editor opens | fullscreen, pushed; back pops -- but the Editor on a board with a desk goes back to the desk as a window (L18) | as a window on the desk |
 | a bar widget's tap | its component fullscreen, pushed; the system menu as the popup it is | a popover anchored to the cell (§8) |
 | boards | the T-Deck and the Guition S3 — this mode only; the P4 boards, the host and the browser when switched into it | the P4 boards, the host with `--windowed`, the browser's desktop arrangement — their default |
 
@@ -204,10 +205,12 @@ before step 1 commits and its numbers go to #58.
 **No boot setting** (owner, 2026-10-13: not for now). A P4 boots to the
 desk; PLAY is the only way into console mode and the bar's back the way out (§15).
 
-**Console mode is the same everywhere.** On a P4 in console mode the Apps
-tab opens an app fullscreen and the Make tab the Editor fullscreen, as on
-the T-Deck; no tab flips the mode; the desk's own doors (its icons,
-PROJECTS) are desktop mode's. The desk icon column stays (owner,
+**Console mode is the same everywhere, but for the Editor.** On a P4 in
+console mode the Apps tab opens an app fullscreen, as on the T-Deck; the
+Editor is the one exception (L18): a Make pick, CHANGE or NEW gives console
+mode back to the desk and opens the Editor there in a window. No other door
+flips the mode; the desk's own doors (its icons, PROJECTS) are desktop
+mode's. The desk icon column stays (owner,
 2026-10-13): a desk with icons and a launcher is the OS norm.
 
 **Boards with one mode, and the hardware reason.** The T-Deck's one canvas IS
@@ -656,7 +659,7 @@ arrangement (step 18).
 | Games | the installed carts that are games — the seeds and the store's — and not the kid's own | run, fullscreen | PLAY, CHANGE (an editable one), SEARCH (the launcher's search row, `tests/test_launcher_search_favorites.py`) |
 | Mine | the kid's own carts | run | PLAY, CHANGE |
 | Apps | the registered apps (`ws._apps`, minus `HIDDEN_APPS`) | the app fullscreen, pushed | OPEN |
-| Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor fullscreen, pushed | NEW, CHANGE, COPY, DEL (DEL takes the cart to the Trash at once) |
+| Make | "+ New" first, then every editable cart (owner, 2026-10-13): the one projects list (L15) | the Editor: fullscreen, pushed, on a board with no desk; a window on the desk on one with a desk (L18) | NEW, CHANGE, COPY, DEL (DEL takes the cart to the Trash at once) |
 
 Games and Mine do not overlap: a cart the kid made or took to make their own
 is Mine's, not Games'. **The selected card's verbs beyond its tap are one
@@ -686,14 +689,19 @@ the T-Deck's bar, beside the Moy tile and the back chevron, is icon-only.
 
 **The home in a window.** The desk's PROJECTS opens the same component in a
 desktop-mode window (`HomeWindowLayer`, kind `projects`): on its Make tab
-on every open, always the `grid` arrangement whatever the layout's `home`,
-over its own card model (`ws.projects_grid`), so the fullscreen home's tab
-and card are untouched. It is a normal window -- it moves, resizes,
+on every open, over its own card model (`ws.projects_grid`), so the
+fullscreen home's tab and card are untouched. It draws the console home's
+design whatever the layout's `home` (owner, 2026-10-20): the hero, its
+details pane and buttons, the shelf, the hint strip along the foot and the
+tabs in the window's band. It is a normal window -- it moves, resizes,
 minimises to a chip; its X and B close it alone and never switch modes. It
 lays out in the window's content rect through the window's layout context
-(step 3's machinery), its backdrop the panel field rather than the
-wallpaper, and its drag rides `_drag_partial` and the WM's content-gesture
-path. Every pick opens what it opens as a window above it: a Make project
+(step 3's machinery): a narrow window shrinks the hero, or stands it over
+the details where the height holds both at a hero no smaller, and a short
+one drops the details' facts, then their metadata
+(`Carousel._geom_desk`). Its backdrop is the panel field rather than the
+wallpaper, so an idle window draws nothing, and its drag rides
+`_drag_partial` and the WM's content-gesture path. Every pick opens what it opens as a window above it: a Make project
 the Editor, a Games cart the player, an Apps entry its app; the Editor's
 window X closes back to it. SEARCH is the fullscreen home's verb alone.
 
@@ -970,7 +978,8 @@ The step named in the last column corrects the claim where it stands:
 | how far the bars reach | global: every surface, the running tool/app included, lays out off `content_rect()`, migrated in step 3b; it saves the most space | §7, §13 step 3b, §15 |
 | the project picker (2026-10-14) | deleted on every tier; the Make tab is the one projects list | L15, §12, §13 step 7c |
 | the Editor's PROJECTS button (2026-10-14) | removed; the X backs out one level, to wherever the Editor was opened from | L16, §12 |
-| the desk's PROJECTS (2026-10-14) | the home in a normal window, on Make, always the grid arrangement; picks open as windows | L17, §12 |
+| the desk's PROJECTS (2026-10-14, 2026-10-20) | the home in a normal window, on Make, the console home's design; picks open as windows | L17, §12 |
+| the Editor from the console-mode home on a P4 (2026-10-20) | a window on the desk, console mode giving way | L18, §3, §12 |
 
 Nothing is pending the owner.
 

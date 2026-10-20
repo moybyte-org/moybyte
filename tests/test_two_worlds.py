@@ -317,28 +317,43 @@ def test_relaunching_a_cart_repaints_the_letterbox_bezel(tmp_path):
     assert sc.pix(px, py) != 42, "the letterbox kept the previous screen's pixels"
 
 
-def test_make_and_change_stay_in_console_mode(tmp_path):
-    """Console mode is the same everywhere: a tap on the Make tab and CHANGE
-    both open the Editor fullscreen, as on the T-Deck."""
+def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
+    """On a board with a desk the Editor is a window (owner, 2026-10-20): a
+    tap on the Make tab, CHANGE and NEW from the console-mode home each give
+    console mode back to the desk and open the Editor in a window there,
+    over the windows the desk had."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
+    ws.open_app(ws._apps_by_id["calc"])
+    drv.frame(1 / 30)
     ws.open_library()
     drv.frame(1 / 30)
     ws.set_home_tab("make")
     assert _select(ws, "Star Catcher")
+    want = ws.launcher.selected().get("path")
     ws.launch_selected()                          # Make's tap edits
     drv.frame(1 / 30)
-    assert ws.screen == "menu"
-    assert not ws.wm.desk_open() and ws.wm._order == []
-    ws.go_home()
+    assert ws.wm.mode == "desktop" and ws.wm.desk_open()
+    assert ws.wm._order == ["calc", "menu"] and ws.screen == "menu"
+    assert ws.cart.get("path") == want
+    ws.wm.close_window_kind("menu")
+    ws.open_library()
     ws.set_home_tab("games")
     drv.frame(1 / 30)
     assert _select(ws, "Star Catcher")
-    ws.change_selected()                          # CHANGE = the Editor, fullscreen
+    ws.change_selected()                          # CHANGE = the Editor, a window
     drv.frame(1 / 30)
-    assert not ws.wm.desk_open()
-    assert ws.wm.stack.kinds() == ["launcher", "menu"]
-    assert ws.wm._order == []
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
+    ws.wm.close_window_kind("menu")
+    ws.open_library()
+    ws.set_home_tab("make")
+    ws.launcher.sel = 0                           # the "+ New" card
+    n0 = len(ws.carts.all)
+    ws.launch_selected()
+    drv.frame(1 / 30)
+    assert len(ws.carts.all) == n0 + 1
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
+    assert ws.cart.get("type") == "game"
 
 
 def test_desk_icons_open_windows(tmp_path):

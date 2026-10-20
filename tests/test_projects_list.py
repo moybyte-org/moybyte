@@ -2,8 +2,9 @@
 2026-10-14): the home's Make tab is the only list of projects. There is no
 project picker on any tier and no PROJECTS button on the Editor's bar; the
 Editor's X backs out one level, to wherever it was opened from. In desktop
-mode the desk's PROJECTS opens the SAME home in a window -- always its grid
-arrangement, on Make -- and every pick in it opens what it opens as a window.
+mode the desk's PROJECTS opens the SAME home in a window -- the console
+home's design whatever the fullscreen home's arrangement, on Make -- and every
+pick in it opens what it opens as a window.
 
 These drive the shared console the device runs (runtime.host_app) through
 ConsoleDriver -- mouse == touch, arrows == trackball.
@@ -268,7 +269,7 @@ def _desk(tmp_path):
 
 
 def test_projects_opens_the_home_in_a_window_on_make(tmp_path):
-    from runtime.launcher_layer import Carousel, Launcher
+    from runtime.launcher_layer import Carousel
     ws, drv = _desk(tmp_path)
     assert isinstance(ws.launcher, Carousel)          # the fullscreen home's own
     ws.wm._backdrop_layer._open_icon("projects")      # the desk's icon
@@ -276,7 +277,7 @@ def test_projects_opens_the_home_in_a_window_on_make(tmp_path):
     assert ws.wm.mode == "desktop"
     assert ws.wm._order == ["projects"]
     g = ws.projects_grid
-    assert type(g) is Launcher and g.tab == "make"   # the grid, on Make
+    assert type(g) is Carousel and g is not ws.launcher and g.tab == "make"
     assert ws._content_layers["projects"] is ws.projects_layer
     # Switching the window's tab leaves the fullscreen home's alone.
     tab = ws.launcher.tab

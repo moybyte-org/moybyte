@@ -851,6 +851,24 @@ def _desk_files(g, ws):
 SEARCH_TYPED = "st"
 
 
+def _projects(size=None):
+    """The desk's PROJECTS window alone on the desk, on Make with its first
+    project selected: the home's hero, details and shelf in a window, at its
+    default size or placed at `size` (x, y, w, h)."""
+    def setup(g, ws):
+        ws.open_desk()
+        ws.open_projects()
+        _settle(g, ws, 2)
+        if size is not None:
+            _place(ws, "projects", *size)
+        grid = ws.projects_grid
+        for i, it in enumerate(grid.items):
+            if it.get("path"):
+                grid.sel = i
+                break
+    return setup
+
+
 def _home_search(g, ws):
     """The home's search field open: a query typed where something types,
     else the field's word on pairing a keyboard."""
@@ -994,6 +1012,12 @@ def _kit_table():
         "handheld_home_wifi-off": (HANDHELD, _wifi_off(_home), "the home, Wi-Fi off"),
         "desktop_home_wifi-off": (CONSOLE, _wifi_off(_console_home),
                                   "the console-mode home, Wi-Fi off"),
+        "desktop_projects": (DESK, _projects(), "the desk's PROJECTS window on Make, "
+                             "a project selected: hero, details and shelf"),
+        "desktop_projects_narrow": (DESK, _projects((112, 54, 360, 534)),
+                                    "the PROJECTS window narrowed: the hero shrinks"),
+        "desktop_projects_short": (DESK, _projects((112, 54, 700, 400)),
+                                   "the PROJECTS window shortened: the pane drops its facts"),
         "desktop_files": (DESK, _desk_files, "Files alone on the desk: covers, the cut "
                           "row's fade"),
         "handheld_pause": (HANDHELD, _pause,

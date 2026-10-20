@@ -61,8 +61,12 @@ to whoever called it.
   2026-10-14): there is no project picker on any tier and no PROJECTS button
   on the Editor's bar (its X pops back to where it was opened from); Make's
   verbs are ＋New / CHANGE / COPY / DEL (DEL, like the menu's Delete, moves the cart to the Trash at once). The desk's
-  PROJECTS is the same home in a window (`HomeWindowLayer`), always the grid
-  arrangement, on Make; a pick there opens its window above it.
+  PROJECTS is the same home in a window (`HomeWindowLayer`): the console
+  home's design (hero, details, shelf) in the window's content rect whatever
+  the theme's home arrangement, on Make; a pick there opens its window above
+  it. On a board with a desk the Editor is always a window: a Make pick,
+  CHANGE or NEW from the console-mode home goes back to the desk first
+  (owner, 2026-10-20).
   **Wallpapers are backdrop-only**: on none of the tabs that run, chosen in the **Appearance app**
   (wallpaper + panel theme — the ONE appearance surface; Settings' APPEARANCE
   action row deep-links to it, the old WALLPAPER/THEME stepper rows are gone),

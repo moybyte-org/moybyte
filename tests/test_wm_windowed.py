@@ -2249,10 +2249,11 @@ def test_view_scales_the_windowed_player_too(tmp_path):
     assert scale == max(1, min(cw // 128, ch // 128))
     assert scale > max(1, min(cw // 320, ch // 240))   # bigger than full-canvas
     assert ws.wm.game_xy(ox, oy) == (96, 56)
-def test_hover_select_marks_dirty_inside_the_projects_window(tmp_path):
-    """#177: a hover-preview that moves sel WITHOUT marking dirty never
-    repaints inside a window -- the content freeze reuses the retained buffer
-    (state moved, pixels didn't: dead on desktop + web)."""
+def test_a_shelf_tap_marks_dirty_inside_the_projects_window(tmp_path):
+    """#177: a selection that moves WITHOUT marking dirty never repaints
+    inside a window -- the content freeze reuses the retained buffer (state
+    moved, pixels didn't: dead on desktop + web). A tap on a shelf card of
+    the PROJECTS window marks the frame dirty and lands on that card."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_projects()
@@ -2260,21 +2261,22 @@ def test_hover_select_marks_dirty_inside_the_projects_window(tmp_path):
     win = ws.wm._wins["projects"]
     p = ws.pointer
     p.visible = True
-    p.down = False
     ws.wm._install(win.ctx)
     try:
         t2 = ws.projects_grid.tile_rect(2)
     finally:
         ws.wm._install(ws.wm._root_ctx)
     cx, cy, _cw, _ch = win.content_rect()
-    p.x, p.y = 900, 560
-    ws.wm._route_pointer(900, 560, False)          # seed the hover tracker
-    ws._dirty = False
     tx, ty = cx + t2[0] + 8, cy + t2[1] + 8
-    p.x, p.y = tx, ty
+    p.x, p.y, p.down = tx, ty, True
+    ws.wm._route_pointer(tx, ty, True)
+    ws._dirty = False
+    p.down = False
     ws.wm._route_pointer(tx, ty, False)
+    assert ws._dirty, "a shelf tap must mark dirty or the window never repaints"
+    for _ in range(30):                            # the glide settles on it
+        drv.frame(1 / 30)
     assert ws.projects_grid.sel == 2
-    assert ws._dirty, "hover-select must mark dirty or the window never repaints"
 
 
 def test_moving_cursor_leaves_no_trail_on_the_desk(tmp_path):
@@ -2669,8 +2671,9 @@ def test_branch_a_console_run_closes_the_parked_editors_project(tmp_path):
 
 
 def test_branch_exit_doors_in_console_mode(tmp_path):
-    """The Make tab and CHANGE open the Editor fullscreen; B on the home
-    leaves; no door flips the mode but the X and its keyboard twin."""
+    """The Make tab and CHANGE open the Editor in a desk window, console
+    mode giving way to the desk; B on the home leaves; a game's tap stays
+    in console mode."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_library()
@@ -2678,15 +2681,17 @@ def test_branch_exit_doors_in_console_mode(tmp_path):
     ws.launcher.sel = 1                          # a project: Make's tap edits
     ws.launch_selected()
     drv.frame(1 / 30)
-    assert ws.wm.mode == "console" and ws.wm.top_is("menu")
-    assert ws.wm._order == []
-    ws.go_home()
+    assert ws.wm.mode == "desktop" and ws.wm.top_is("menu")
+    assert ws.wm._order == ["menu"]
+    ws.wm.close_window_kind("menu")
+    ws.open_library()
     ws.set_home_tab("games")
     ws.launcher.sel = 1
     ws.change_selected()
     drv.frame(1 / 30)
-    assert ws.wm.mode == "console" and ws.wm.top_is("menu")
-    ws.go_home()
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["menu"]
+    ws.wm.close_window_kind("menu")
+    ws.open_library()
     drv.frame(1 / 30)
     drv.press("b")
     drv.frame(1 / 30)

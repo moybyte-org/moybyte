@@ -34,10 +34,11 @@ Picotron-style (owner direction, 2026-07-08):
   * a RUNNING CART composites integer-scaled and centered in its window -- the
     game itself never draws chrome, exactly as on the fullscreen tiers, and the
     editor stays VISIBLE beneath a playtest (spec §3's canonical picture);
-  * the desk's PROJECTS is the home in a window ("projects", always its grid
-    arrangement, opened on Make); a Make pick opens the Editor in a window of
-    its own above it, and the Editor's X closes back to it -- one window per
-    back-stack kind;
+  * the desk's PROJECTS is the home in a window ("projects", the console
+    home's design, opened on Make); a Make pick opens the Editor in a window
+    of its own above it, and the Editor's X closes back to it -- one window
+    per back-stack kind; the Editor opened from the console-mode home leaves
+    console mode for the desk and opens there as a window too;
   * INPUT FOCUS is decoupled from the back-stack: clicking a window (or its
     taskbar chip) moves the keyboard + highlight there WITHOUT popping anything
     -- a playtest keeps ticking (it stays the stack top, the running process)

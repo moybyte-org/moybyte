@@ -17,13 +17,16 @@
 
   * `Launcher`     -- the card GRID model + draw: items/sel/scroll/nav + the card
                       rendering, a shelf of two rows that scrolls sideways. Its
-                      instances are ws.launcher in the home's `grid`
-                      arrangement and ws.projects_grid, the home window's.
+                      instance is ws.launcher in the home's `grid`
+                      arrangement.
   * `Carousel`     -- the home's row (docs/shell_layout_2026-10.md §12): the
                       same selection model over one row of square cover cards,
                       the centre card larger by a function of its distance
-                      from the centre. Its instance is ws.launcher in the
-                      `carousel` arrangement, the default (the layout's `home`).
+                      from the centre; on the desk's metrics the selected
+                      card is the hero beside its details over a shelf. Its
+                      instances are ws.launcher in the `carousel`
+                      arrangement, the default (the layout's `home`), and
+                      ws.projects_grid, the home window's, always.
   * `IconHome`     -- the `icons` arrangement: the grid's model over one-tile
                       cells (`_IconCells`), the focused cell's name in the
                       desk's label pill.
@@ -34,8 +37,9 @@
                       centre card is the active tab's (ws.launch_selected).
   * `HomeWindowLayer` -- the "projects" content Layer: the SAME home in a
                       desktop-mode window (docs/shell_layout_2026-10.md §12, the
-                      desk's PROJECTS), always the `grid` arrangement over
-                      ws.projects_grid, opened on its Make tab.
+                      desk's PROJECTS): the console home's design over
+                      ws.projects_grid, laid out in the window's content
+                      rect, opened on its Make tab.
 
 Boundary (single source of truth): ws.launcher (the instance) + ws.open() (open the
 selected cart -- lifecycle, pinned) + the cart store stay on Workstation. The card
@@ -1068,6 +1072,8 @@ _HINT_LEAD = 5       # the handheld's margin ui.hints leads with, at the font
                      # scale: the top bar's (MOY_UI_HINT_LEAD)
 _HINT_LEAD_DESK = 8  # the desk's
 BACK_TIP = "Desk"    # the tooltip on the bar's chevron back to the desk
+DETAILS_MIN = 280    # the narrowest details pane beside the hero, in glass
+                     # pixels at the target's 1x: a primary button and one more
 DESC_LINES = 3       # the desk home's description: at most this many lines,
 DESC_EMS = 48        # ... as wide as this many n's: about 60 characters of
                      # running text, the width of the buttons' row
@@ -1264,17 +1270,27 @@ class Carousel(Launcher):
         multiple of the cover's side a quarter of the width holds with the
         shelf under it, else half the cover's side, and a shelf card is half
         the hero, so every card shows its whole cover at a clean scale; the pane
-        is as tall as the hero, or as its type needs where that is more;
-        what height is left goes half above the shelf's caption and half
-        under the shelf, which under touch (no hint strip, no `keys`) keeps
-        at most the side margin under it. The tuple's band is the shelf's:
-        its caption, its cards, their lift and their shadows."""
+        is as tall as the hero, or as its type needs where that is more.
+        Where the pane would be narrower than `DETAILS_MIN` (a narrow
+        window, the desk's PROJECTS) the hero stands over it instead, the
+        largest clean side the height holds with the pane and the shelf,
+        and the pane takes the width -- where that hero is no smaller than
+        the one beside it; else the pane stays beside, its buttons as many
+        as it holds. The margins narrow with the width, to a twentieth of
+        it. Where the height cannot hold the pane over a half-cover shelf,
+        the pane drops its facts, then its metadata (the desk's `rows`), and
+        the hero halves down to an eighth of the cover. What height is left goes half above the
+        shelf's caption and half under the shelf, which under touch (no
+        hint strip, no `keys`) keeps at most the side margin under it. The
+        tuple's band is the shelf's: its caption, its cards, their lift
+        and their shadows; the desk's own ends with the pane's top."""
         fs = lay.fs
         cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
         u = _lb.render_scale()
         hint_h = max(34 // u, 18 * fs) if keys else 0
         hints = (cx, cy + ch - hint_h, cw, hint_h)
-        pad, top, gap = 48 // u, 24 // u, 20 // u
+        pad = min(48 // u, max(12 // u, cw // 20))
+        top, gap, apart = 24 // u, 20 // u, 32 // u
         ring = max(2 * fs + 2, reach)
         lh, tl = _ui_draw.font()[2], _ui_draw.font("title")[2]
         ts, ms = text_scale(40 // u, fs, "title"), text_scale(14 // u, fs)
@@ -1283,15 +1299,38 @@ class Carousel(Launcher):
         need = tl * ts + lh * (ms + ks + vs) + bh + 60 // u
         cap_h = lh * ms + 8 // u
         room = hints[1] - cy - top - cap_h - 72 // u
+        # A short window gives up, in turn, most of the slack round the
+        # shelf's caption, the facts' row and the metadata's line.
+        rows = [True, True]                  # (facts, metadata) shown
+        least = _COVER_SIDE // 2
+        if max(least, need) + least // 2 > room:
+            room += 48 // u
+        for k, h in ((0, lh * (ks + vs) + 22 // u), (1, lh * ms + 14 // u)):
+            if max(least, need) + least // 2 > room:
+                rows[k] = False
+                need -= h
         hero = cw // 4 // _COVER_SIDE * _COVER_SIDE
         while hero > _COVER_SIDE and max(hero, need) + hero // 2 > room:
             hero -= _COVER_SIDE
         if hero < _COVER_SIDE or max(hero, need) + hero // 2 > room:
-            hero = _COVER_SIDE // 2
-        shelf = hero // 2
-        block = max(hero, need)
-        spare = max(0, hints[1] - cy - top - block - cap_h - shelf)
+            hero = least
+        while hero > _COVER_SIDE // 8 and max(hero, need) + hero // 2 > room:
+            hero //= 2
         hx, hy = cx + pad, cy + top
+        dx, dy, pane = hx + hero + apart, hy, max(hero, need)
+        block = pane
+        if cx + cw - pad - dx < DETAILS_MIN // u:
+            # too narrow for the pane beside the hero: the hero over the
+            # pane where the height holds both at a hero no smaller
+            up = _COVER_SIDE
+            while up > hero and up + apart + need + up // 2 > room:
+                up //= 2
+            if up >= hero and up + apart + need + up // 2 <= room:
+                hero = up
+                dx, dy, pane = hx, hy + hero + apart, need
+                block = hero + apart + need
+        shelf = hero // 2
+        spare = max(0, hints[1] - cy - top - block - cap_h - shelf)
         cap_y = hy + block + spare // 2
         if not keys:
             # no strip under touch: the shelf stands at most the side margin
@@ -1301,10 +1340,9 @@ class Carousel(Launcher):
         d = _ui_draw.depth()
         blur = d[9] if d[0] and d[6] else 0
         down = max(ring, blur + d[11])
-        band = (cx, cap_y, cw, min(hints[1], shelf_y + shelf + down) - cap_y)
-        dx = hx + hero + 32 // u
+        band = (cx, cap_y, cw, max(0, min(hints[1], shelf_y + shelf + down) - cap_y))
         desk = ((hx, hy, hero, hero), dx, max(0, cx + cw - pad - dx), shelf_y, pad,
-                (ts, ms, ks, vs, bh, block, u))
+                (ts, ms, ks, vs, bh, pane, u), dy, tuple(rows))
         return (None, band, shelf, shelf + gap, ring, gap, 0, shelf_y + shelf // 2,
                 (0, 0, 0, 0, 0, hints), desk)
 
@@ -1351,8 +1389,9 @@ class Carousel(Launcher):
             q = ((lay.cx + (lay.cw - tw) // 2, title_y, tw,
                   meta_y + meta_h - title_y), hints)
         else:
-            (hx, hy, hero, _h), dx, dw = dk[0], dk[1], dk[2]
-            q = ((hx, hy, dx + dw - hx, max(hero, dk[5][5])), g[1], foot[5])
+            (hx, hy, hero, _h), dx, dw, dy = dk[0], dk[1], dk[2], dk[6]
+            q = ((hx, hy, max(dx + dw, hx + hero) - hx,
+                  max(hy + hero, dy + dk[5][5]) - hy), g[1], foot[5])
         self._quiet_for = g
         self._quiet_q = q
         return q
@@ -1632,7 +1671,7 @@ class Carousel(Launcher):
         g = self._geom()
         bx, by, bw, bh = g[1]
         if g[9] is not None:
-            return (g[9][1], g[9][0][1], g[9][2], g[9][5][5])
+            return (g[9][1], g[9][6], g[9][2], g[9][5][5])
         f = g[8]
         return (bx, f[0], bw, f[3] + f[4] - f[0])
 
@@ -1657,7 +1696,10 @@ class Carousel(Launcher):
         it = self.items[i]
         if it.get("type") in PSEUDO_TILE_TYPES or not it.get("path"):
             return None
-        r = self.hero_rect() or self.tile_rect(i)
+        hero = self.hero_rect()
+        if hero is not None and hero[2] < _COVER_SIDE:
+            return None                  # a small hero wears no badge (F, the menu)
+        r = hero or self.tile_rect(i)
         return None if r is None else self._favorite_badge_geom(r)
 
     def cover_specs(self):
@@ -1784,7 +1826,8 @@ class Carousel(Launcher):
 
     def _paint_details(self, cv):
         """The desk home's hero (a full paint's): its shadow, the
-        selected card's picture at the hero's size and its favourite star.
+        selected card's picture at the hero's size and its favourite star
+        (on a hero of the cover's side or more).
         The details beside it are the home layer's (`_draw_details`)."""
         hero = self.hero_rect()
         if not self.items:
@@ -1792,7 +1835,7 @@ class Carousel(Launcher):
         it = self.items[self.nearest()]
         _ui_draw.cast(cv, self.theme, hero, _ui_draw.CAST_CARD)
         self._draw_picture(cv, it, hero, True)
-        if (self.favorite_for is not None and it.get("path")
+        if (self.favorite_for is not None and it.get("path") and hero[2] >= _COVER_SIDE
                 and it.get("type") not in PSEUDO_TILE_TYPES):
             _draw_star_badge(cv, self._NAMES, self.theme or {},
                              self._favorite_badge_geom(hero),
@@ -2406,6 +2449,19 @@ class LauncherHomeLayer:
         layout's arrangement."""
         return self.ws.launcher
 
+    def _grid_or_none(self):
+        """The card model, None while it is not minted yet (the window's
+        before its first open, the home's during the console's build)."""
+        try:
+            return self.grid
+        except AttributeError:
+            return None
+
+    def _wall(self):
+        """(white, black) where this home lies on a wallpaper (`_wall_ink`),
+        else None."""
+        return _wall_ink(self.ws)
+
     @property
     def _tab_focus(self):
         return self._tab_keys
@@ -2418,7 +2474,7 @@ class LauncherHomeLayer:
         self._tab_keys = on
         if on:
             self._btn = None
-        g = getattr(self.ws, "launcher", None)
+        g = self._grid_or_none()
         if g is not None:
             g.tab_focus = on or getattr(self, "_btn", None) is not None
 
@@ -2436,7 +2492,7 @@ class LauncherHomeLayer:
         self._btn = k
         if k is not None:
             self._tab_keys = False
-        g = getattr(self.ws, "launcher", None)
+        g = self._grid_or_none()
         if g is not None:
             g.tab_focus = k is not None or bool(getattr(self, "_tab_keys", False))
         self.ws.mark_dirty()
@@ -2697,7 +2753,7 @@ class LauncherHomeLayer:
             self.grid.motion = getattr(wm, "HOME_MOTION", "full")
             self.grid.scale = getattr(wm, "HOME_SCALE", HOME_SCALE_HH)
             self.grid.dim = _dim_of(ws)
-            self.grid.wall_ink = _wall_ink(ws)
+            self.grid.wall_ink = self._wall()
         # Kinetic fling (#113) and the glide to the centre card: advance the
         # row BEFORE painting, and keep the redraw gate open until it rests.
         # Both ride the partial path (its gate includes flinging).
@@ -2919,9 +2975,8 @@ class LauncherHomeLayer:
         if not verbs:
             return []                        # off the desk
         g = self.grid
-        _hx, hy, _hs, _ = g.hero_rect()
         dk = g._geom()[9]
-        dx, dw = dk[1], dk[2]
+        dx, dw, hy = dk[1], dk[2], dk[6]
         fs = self.ws.layout.fs
         h, block, u = dk[5][4], dk[5][5], dk[5][6]
         y = hy + block - 6 // u - h
@@ -2985,9 +3040,8 @@ class LauncherHomeLayer:
         it = g.items[g.nearest()]
         th = ws.theme_colors
         fs = ws.layout.fs
-        hy = g.hero_rect()[1]
         dk = g._geom()[9]
-        dx, dw = dk[1], dk[2]
+        dx, dw, hy = dk[1], dk[2], dk[6]
         ts, ms, ks, vs, bh, block, u = dk[5]
         ink, dim = th["ink"], th["ink_dim"]
         if not _ui_draw.depth()[0]:
@@ -3008,20 +3062,27 @@ class LauncherHomeLayer:
         if was is not None:
             _ui_draw.print_font(was)
         lh = _ui_draw.font()[2]
+        facts_on, meta_on = dk[7]
         my = ty + _ui_draw.font("title")[2] * ts + 14 // u
         sep = 8 // u
         x = dx
-        for k, t in enumerate(g._meta(it, played=False)):    # the facts' Last
-            if k:
+        for k, t in enumerate(g._meta(it, played=False) if meta_on else ()):
+            if k:                                            # the facts' Last
+                if x + ms + sep >= dx + dw:
+                    break
                 cv.rect(x, _dot_top(my, ms, ms), ms, ms, dim)
                 x += ms + sep
-            cv.print_scaled(t, x, my, dim, ms)
+            cv.print_scaled(_ui_draw.print_fit(t, dx + dw - x, ms), x, my, dim, ms)
             x += _ui_draw.print_width(t, ms) + sep
+        if not meta_on:
+            my -= lh * ms + 14 // u
         buttons = self._desk_buttons()
         by = hy + block - 6 // u - bh
         if it.get("type") not in PSEUDO_TILE_TYPES:
             vy = by - 16 // u - lh * vs
             ky = vy - 6 // u - lh * ks
+            if not facts_on:
+                ky = by - 6 // u
             # the manifest's description (SPEC.md 3.7) in the room between
             # the metadata and the facts: a measure of DESC_EMS, DESC_LINES
             # lines at most, the last cut with an ellipsis (owner, 2026-10-19)
@@ -3041,13 +3102,16 @@ class LauncherHomeLayer:
             # the facts' columns stand on the buttons' left edges under them
             # (design review R4-31); a fact past the last button a column on
             col = 150 // u
-            facts = self._facts(it)
+            facts = self._facts(it) if facts_on else ()
             xs = [r[0] for _v, r, _k in buttons][:len(facts)]
             while len(xs) < len(facts):
                 xs.append(xs[-1] + col if xs else dx)
             for k, (key, val) in enumerate(facts):
                 fx = xs[k]
                 w = (xs[k + 1] - fx if k + 1 < len(xs) else col) - 10 // u
+                w = min(w, dx + dw - fx)
+                if w <= 0:
+                    break                    # a column past the pane's edge
                 cv.print_scaled(key, fx, ky, dim, ks)
                 cv.print_scaled(_ui_draw.print_fit(val, w, vs), fx, vy, ink, vs)
         on = self._button_focus
@@ -3181,7 +3245,7 @@ class LauncherHomeLayer:
         keys at the right (the theme's `keycap`, `ui.hints`'s part). While
         a search query is held it shows in the verbs' place."""
         th = self.ws.theme_colors
-        wall = _wall_ink(self.ws)
+        wall = self._wall()
         if wall is not None:
             th = self._wall_theme(th, wall[0])
         if self.ws.menu_ui.looked():
@@ -3735,14 +3799,18 @@ class LauncherHomeLayer:
 class HomeWindowLayer(LauncherHomeLayer):
     """The "projects" content Layer: the home in a desktop-mode window, the
     desk's PROJECTS (docs/shell_layout_2026-10.md §12). The same tabs,
-    sources, taps and verbs over its own card model, ws.projects_grid, always
-    the `grid` arrangement whatever the fullscreen home's, opened on Make.
+    sources, taps and verbs over its own card model, ws.projects_grid, a
+    `Carousel` whatever the fullscreen home's arrangement, opened on Make:
+    the console home's design (step 18) laid out in the window's content
+    rect -- the hero, its details and buttons, the shelf under them, the
+    hint strip along the foot and the tabs in the window's band. A narrow
+    window stands the hero over its details (`Carousel._geom_desk`).
 
-    A window is a tool space: the panel field around the grid's own panel,
-    never the wallpaper (the desk shows its own around the window), so nothing
-    in it animates and an idle window draws nothing. The WM retains the
-    window's buffer, so it keeps no retained frame of its own; a drag rides
-    the shared `_drag_partial` and the WM's content-gesture path."""
+    A window is a tool space: the panel field under the cards, never the
+    wallpaper (the desk shows its own around the window), so nothing in it
+    animates and an idle window draws nothing. The WM retains the window's
+    buffer, so it keeps no retained frame of its own; a drag rides the
+    shared `_drag_partial` and the WM's content-gesture path."""
 
     id = "projects"
     strip = "projects"
@@ -3756,26 +3824,47 @@ class HomeWindowLayer(LauncherHomeLayer):
         """B closes this window alone, as its title strip's X does."""
         self.ws.wm.close_window_kind(self.id)
 
+    def _wall(self):
+        return None                           # the window lies on its panel
+
+    def _hover_back(self, px, py, click, down):
+        return False                          # the window's X is the way out
+
     def prealloc_retained(self):
         return
 
     def release_retained(self):
         return False
 
+    def _panel_fill(self, cv, r):
+        """The band's backdrop: the window's panel."""
+        cv.rect(r[0], r[1], r[2], r[3], self.ws.theme_colors["panel"])
+
+    def _try_drag_partial(self, cv, dt):
+        return _drag_partial(self, cv, dt, self.grid, self.id, self._panel_fill,
+                             self.strip)
+
     def draw(self, dt):
         ws = self.ws
         cv = ws.sys_canvas
         grid = self.grid
         _paint_continuity(self, ws)           # foreign paints void the buffers
+        th = ws.theme_colors
+        grid.motion = getattr(ws.wm, "HOME_MOTION", "full")
+        grid.scale = getattr(ws.wm, "HOME_SCALE", HOME_SCALE_HH)
+        dim = _dim_of(ws)                     # the neighbours dim toward the panel
+        grid.dim = None if dim is None else (th["panel"], dim[1])
+        grid.wall_ink = None
         grid.anim_frame(dt)
         if grid.flinging:
             ws.request_frame()
         if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#113)
             return
-        cv.cls(ws.theme_colors["panel"])
-        self._draw_grid_panel(cv)
+        cv.cls(th["panel"])
         self._draw_home_chrome(cv)
         grid.draw(cv, ws.covers.sheet_icon)
+        if grid.desk():
+            self._draw_details(cv)
         grid._scroll_region().note_painted(
             ws._frames_drawn,
             (grid.paint_key(), self._statics_key(cv), ws.covers.gen),

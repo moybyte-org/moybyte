@@ -2612,10 +2612,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         return True
 
     def open_in_editor(self, cart=None):
-        # Open `cart` (default: the launcher selection) in the Editor, landing on Config
-        # (spec Section 6). The cart is started (ready for PLAY) but not shown; the Editor
-        # owns the screen until PLAY runs it. Reached from the Editor's PROJECT-PICKER, which
-        # passes the PICKED cart -- never a tap on a played tab (that RUNS).
+        """Open `cart` (default: the launcher selection) in the Editor,
+        landing on Config (spec Section 6). The cart is started (ready for
+        PLAY) but not shown; the Editor owns its screen until PLAY runs it.
+        Fullscreen where the board has no desk; in a window of its own where
+        it has one -- opened from the console-mode home, console mode gives
+        way to the desk first (owner, 2026-10-20)."""
+        wm = self.wm
+        if wm.has_desk and wm.mode == "console" and self.screen == "launcher":
+            self.open_desk()
         if not self._open_workspace(cart):
             # No source, nothing to edit: land on the same error panel a crashed
             # cart lands on rather than opening the Editor over an empty project.
@@ -2627,9 +2632,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         """The home's tap on `grid`'s selected card (the home's, ws.launcher,
         by default), by tab (docs/shell_layout_2026-10.md §12): Games and
         Mine RUN it, Apps opens the app (`open` dispatches an app's cart to
-        it), Make opens it in the Editor -- fullscreen in console mode, a
-        window of its own in desktop mode. The "+ New" card -- Make's first,
-        an empty Mine's only -- makes a game and opens it in the Editor."""
+        it), Make opens it in the Editor (`open_in_editor`: a window of its
+        own on a board with a desk, from console mode too). The "+ New"
+        card -- Make's first, an empty Mine's only -- makes a game and opens
+        it in the Editor."""
         grid = grid or self.launcher
         sel = grid.selected()
         if sel is not None and sel.get("type") == NEW_TILE_TYPE:
@@ -2781,8 +2787,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def open_projects(self):
         """The desk's PROJECTS (docs/shell_layout_2026-10.md §12): the home in a
-        window on its Make tab, always the `grid` arrangement whatever the
-        fullscreen home's. Its card model is minted on the first open; a later
+        window on its Make tab, the console home's design (a `Carousel`: the
+        hero, its details, the shelf) whatever the fullscreen home's
+        arrangement. Its card model is minted on the first open; a later
         open brings the window back to Make on the card that tab last had.
         Where no desk is open (console mode, a console-only board) it is the
         home's own Make tab."""
@@ -2796,7 +2803,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         g = self.projects_grid
         if g is None:
             g = self.projects_grid = self._home_grid(
-                "grid", self._launcher_items(self.carts.all, "make"))
+                "carousel", self._launcher_items(self.carts.all, "make"))
             g.tab = "make"
         else:
             self.set_home_tab("make", g)
@@ -3288,7 +3295,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _home_grid(self, arrangement, items):
         """The home's card model for `arrangement` (docs/shell_layout_2026-10.md
-        §12): the Carousel, the shelf grid (the home window's, always) or
+        §12): the Carousel (the home window's, always), the shelf grid or
         the icon grid."""
         cls = _HOME_CLASSES.get(arrangement, Carousel)
         g = cls(items, self.layout, NAMES, _ui_draw.glyph)
