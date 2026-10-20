@@ -304,8 +304,9 @@ class ConsoleDriver:
         self.ws.system_key()
 
     def menu_open(self):
-        """The pause menu or the system menu shows: Esc is theirs."""
-        return self.ws.pause.open or self.ws.sysmenu.open
+        """The pause menu, the delete confirm or the system menu shows: Esc
+        is theirs."""
+        return self.ws.pause.open or self.ws.confirm.open or self.ws.sysmenu.open
 
     def takes_escape(self):
         """Esc is the console's: a menu shows, Settings or a registered app is
@@ -325,6 +326,8 @@ class ConsoleDriver:
         ws = self.ws
         if ws.pause.open:
             ws.pause.back()
+        elif ws.confirm.open:
+            ws.confirm.cancel()
         elif ws.sysmenu.open:
             ws.sysmenu.close()
             ws.popover_touch()

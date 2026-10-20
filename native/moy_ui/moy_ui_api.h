@@ -193,6 +193,9 @@ typedef struct {
     // none).
     int16_t tbl_y0, tbl_rh, tbl_n, tbl_px, tbl_pw;
     moy_ui_box_t tbl_view;
+    // The dialog drawn this frame: its id (0: none) and its card.
+    uint32_t dlg_id;
+    moy_ui_box_t dlg_card;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -351,8 +354,9 @@ int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap);
 int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
 void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h);
 // Where stop `id` drew in the frame drawn last (the host's: a popover beside
-// a row, a test's tap), or the card of the popover `id` drawn then: its box
-// into out, 1; 0 where it drew no such stop or popover.
+// a row, a test's tap), or the card of the popover `id` drawn then, or of
+// the dialog titled `id`, or the button labelled `id` at that dialog's foot:
+// its box into out, 1; 0 where it drew no such stop, popover or dialog.
 int moy_ui_api_box(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t out[4]);
 // A duplicate id drawn this frame, its text, once per id (NULL none).
 const char *moy_ui_api_dup(moy_ui_ctx_t *c);

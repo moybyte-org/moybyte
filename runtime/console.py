@@ -209,9 +209,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # (console_notices.py has the class). The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device).
 try:
-    from console_notices import SystemMenuUI, PauseMenu
+    from console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.console_notices import SystemMenuUI, PauseMenu
+    from runtime.console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
 
 # The Easter-egg subsystem + achievement/egg drawing (#21): the 3 hidden eggs +
 # their state + _draw_egg/_draw_confetti/_draw_achievements. The achievement
@@ -232,12 +232,12 @@ try:
     from layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
                         _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
                         _AchOverlayLayer, _SysMenuLayer, _AboutLayer, _WebConsoleLayer,
-                        _PauseLayer)
+                        _PauseLayer, _ConfirmLayer)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
                                 _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
                                 _AchOverlayLayer, _SysMenuLayer, _AboutLayer,
-                                _WebConsoleLayer, _PauseLayer)
+                                _WebConsoleLayer, _PauseLayer, _ConfirmLayer)
 
 # The unified top bar surface (#46 -- see bar_layer.py). bar_layer.py is the
 # SINGLE SOURCE of the bar geometry constants (_STATUS_H / the tool-switcher
@@ -385,6 +385,7 @@ _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
 # The layers that draw a menu holding the keys (`Workstation._modal_layer`):
 # the system menu's own, and a desk popover frame's that paints it alone.
 _PAUSE_LAYERS = ("pause",)
+_CONFIRM_LAYERS = ("confirm",)
 _SYSMENU_LAYERS = ("sysmenu", "popover_over")
 # The inputs that type (`Workstation.can_type`), and what a text field says
 # where the input in use cannot.
@@ -1184,6 +1185,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The pause menu over a fullscreen game (docs/look_2026-10.md step 25a):
         # Super holds the run and shows it; Esc or Super again gives it back.
         self.pause = PauseMenu(self)
+        self.confirm = DeleteConfirm(self)   # the question before a cart is deleted
         self._marks_held = False      # a modal turned the focus marks off
         # Reboot hook: the device injects a callable (machine.reset via the OTA
         # updater); None on the host -> the Reboot row is a safe no-op (go_home).
@@ -1296,6 +1298,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._notice_layer = L("notice", "system", draw=lambda dt: self._draw_notice())
         self._sysmenu_layer = _SysMenuLayer(self)
         self._pause_layer = _PauseLayer(self)
+        self._confirm_layer = _ConfirmLayer(self)
         self._about_layer = _AboutLayer(self)
         self._cursor_layer = L("cursor", "system", draw=lambda dt: self._draw_cursor())
 
@@ -1801,10 +1804,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _modal_layer(self):
         """The ids of the layers that draw the menu holding the keys over
-        the screen, the pause menu's or the system menu's (on the desk a
-        popover frame paints it from its own layer), or None."""
+        the screen, the pause menu's, the delete confirm's or the system
+        menu's (on the desk a popover frame paints it from its own layer),
+        or None."""
         if self.pause.open:
             return _PAUSE_LAYERS
+        if self.confirm.open:
+            return _CONFIRM_LAYERS
         if self.sysmenu.open:
             return _SYSMENU_LAYERS
         return None
@@ -1813,10 +1819,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         """Super -- the `start` button (a keyboard's GUI key), the host's
         Super, the browser's Meta tap -- from every surface: over a fullscreen
         game it opens the pause menu, anywhere else the system menu; pressed
-        again it closes the one it opened (Esc closes either and steps back)."""
+        again it closes the one it opened (Esc closes either and steps back).
+        Over the delete confirm it is Cancel."""
         p = self.pause
         m = self.sysmenu
-        if p.open:
+        if self.confirm.open:
+            self.confirm.cancel()         # the console's key answers Cancel
+        elif p.open:
             p.close()
         elif m.open and m.widget == "menu":
             m.close()

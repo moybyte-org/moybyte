@@ -242,7 +242,9 @@ def test_copy_duplicates_the_selected_project(tmp_path):
     assert any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
 
 
-def test_delete_takes_one_tap_and_moves_the_cart_to_the_trash(tmp_path):
+def test_del_asks_before_the_cart_goes(tmp_path):
+    """A delete is permanent (no Trash holds a cart), so DEL asks first:
+    tests/test_delete_confirm.py answers it on every route and input."""
     from runtime import moy_carts
     ws = _ws(tmp_path, sys_size=(800, 480))
     moy_carts.create("Extra", str(ws.carts_root), src="def _draw():\n    cls(1)\n",
@@ -253,9 +255,8 @@ def test_delete_takes_one_tap_and_moves_the_cart_to_the_trash(tmp_path):
     n0 = len(ws.carts.all)
     assert layer.zone_verbs()[-1] == "delete"
     assert _verb_tap(ws, layer, "delete")
-    assert len(ws.carts.all) == n0 - 1                 # gone at once, no "Sure?"
-    assert all(c.get("title") != "Extra" for c in ws.carts.all)
-    assert "sure" not in layer.zone_verbs()
+    assert ws.confirm.open and ws.confirm.title == "Delete Extra?"
+    assert len(ws.carts.all) == n0                     # nothing goes before the answer
 
 
 # -- desktop mode: the home in a window ------------------------------------

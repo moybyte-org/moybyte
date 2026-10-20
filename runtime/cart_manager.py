@@ -330,8 +330,10 @@ class CartManager:
             self.ws.notice(refusal, _ui_draw.s("notice.store_full"), "warn")
 
     def delete(self, cart=None):
-        """Delete `cart` (the Make tab's DEL, armed and confirmed), else the OPEN
-        cart (the sysmenu's DELETE CART). Keep at least one real cart on the
+        """Delete `cart` (a home's Delete), else the OPEN cart (the system
+        menu's "Delete cart"), for good: the folder goes, and no Trash holds
+        a cart. Every route asks first (`console_notices.DeleteConfirm`) and
+        calls this on its Delete. Keeps at least one real cart on the
         device."""
         ws = self.ws
         target = cart if cart is not None else ws.cart

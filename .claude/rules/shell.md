@@ -60,7 +60,8 @@ to whoever called it.
   dispatch; a tap on **Make** EDITS. **Make is the ONE projects list** (owner,
   2026-10-14): there is no project picker on any tier and no PROJECTS button
   on the Editor's bar (its X pops back to where it was opened from); Make's
-  verbs are ＋New / CHANGE / COPY / DEL (DEL, like the menu's Delete, moves the cart to the Trash at once). The desk's
+  verbs are ＋New / CHANGE / COPY / DEL (DEL, like every Delete of a cart, asks first:
+  `console_notices.DeleteConfirm`). The desk's
   PROJECTS is the same home in a window (`HomeWindowLayer`): the console
   home's design (hero, details, shelf) in the window's content rect whatever
   the theme's home arrangement, on Make; a pick there opens its window above
@@ -132,8 +133,10 @@ to whoever called it.
     `blit565_resize`, one call a card -- with no per-size variants
     (docs/theming_2026-09.md P8). **Do not re-add cover
     sidecars.**
-  - **DELETE moves to `files/trash/`, restorable, and never confirms**; emptying
-    the Trash is Files' one verb that asks first (a `ui.dialog`). WALL/GAME/wallpaper
+  - **A FILE's DELETE moves it to `files/trash/`, restorable, and never confirms**; emptying
+    the Trash is Files' one verb that asks first (a `ui.dialog`). A CART has no
+    Trash: its delete removes the folder, so every route asks first in the
+    same `ui.dialog`. WALL/GAME/wallpaper
     are **copy-on-use** — a kid's drawing is never mutated by being used
     (#108's comments hold that design discussion).
 - **Cart runtimes (#67): a manifest `"runtime"` other than python routes

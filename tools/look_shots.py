@@ -57,7 +57,8 @@ palette; the system menu and the pause menu over focused content, the
 system menu over Make, over an open cart of the kid's own and with Sleep
 offered (a stub idle ladder), each checked to open on a row that destroys
 nothing; the home and the console's home with Wi-Fi off; the desk with
-Calc, and Files alone; a long press on a Games and a Make card and a pad's X (the
+Calc, and Files alone; the delete's question over Make and over the desk's
+PROJECTS window, checked to open on Cancel; a long press on a Games and a Make card and a pad's X (the
 card's verbs as a menu) and up from the desk home's shelf, each under the
 input it is made with (`KIT_INPUT`) and each checked to have opened what it
 opens. `--profiles` adds the hint-bearing screens once per input profile,
@@ -981,6 +982,24 @@ def _pad_x(g, ws):
     _EXPECT[0] = _card_menu_open("a pad's X")
 
 
+def _delete_asks(base, projects=False):
+    """`base`, then Delete on its selected card (the home's, or the desk
+    PROJECTS window's): the question every route asks before a cart goes,
+    focus on Cancel."""
+    def setup(g, ws):
+        base(g, ws)
+        _settle(g, ws, 2)
+        (ws.projects_layer if projects else ws.launcher_layer)._do_verb("delete")
+
+        def check(ws):
+            c = ws.confirm
+            ok = c.open and c.title.startswith("Delete ") and c.focused == "Cancel"
+            return [("delete asks", ok, "%s, focus on %s" % (
+                c.title if c.open else "no dialog", c.focused))]
+        _EXPECT[0] = check
+    return setup
+
+
 def _pad_up(g, ws):
     """Up from the desk home's shelf: the keys move to the details pane's
     buttons, the shelf's card keeping its place (design review R3-16)."""
@@ -1071,6 +1090,12 @@ def _kit_table():
                                               "the PROJECTS card's menu, focus on Delete"),
         "desktop_projects_sysmenu": (DESK, _sysmenu_over(_projects_own(), "over PROJECTS"),
                                      "the system menu over the PROJECTS window"),
+        "handheld_make_delete-confirm": (HANDHELD, _delete_asks(_make_own),
+                                         "Make's X on a cart of the kid's own: "
+                                         "the delete asks, Cancel focused"),
+        "desktop_projects_delete-confirm": (DESK, _delete_asks(_projects_own(), True),
+                                            "the PROJECTS window's Delete: the delete "
+                                            "asks over the desk, Cancel focused"),
         "handheld_make_own_long-press": (HANDHELD, _long_press(_make_own),
                                          "a long press on a Make card of the kid's own: "
                                          "its verbs, Delete set apart"),
@@ -1344,7 +1369,7 @@ def checks(ws, probe, img):
     from runtime import ui_draw, layout_base
     out = []
     grid = getattr(ws, "launcher", None)
-    menu = ws.sysmenu.open or ws.pause.open
+    menu = ws.sysmenu.open or ws.pause.open or ws.confirm.open
     if (ws.screen == "launcher" and layout_base.metric_class() == layout_base.HANDHELD
             and hasattr(grid, "_geom") and not menu and ui_draw.marks_on()):
         geom = grid._geom()
@@ -1994,8 +2019,8 @@ def _rim_pairs(ws, probe, img):
     the hero's cover and its rim no run of the card's plate (Moy's lift)."""
     look = _theme_look(ws)
     if (look.get("focus") or {}).get("card") != "lift" or ws.screen != "launcher" \
-            or ws.sysmenu.open or ws.pause.open:
-        return []           # a menu over the home takes the hero's lift
+            or ws.sysmenu.open or ws.pause.open or ws.confirm.open:
+        return []           # a menu or a dialog over the home takes the hero's lift
     covers = probe.last["covers"]
     if not covers:
         return []
@@ -2326,7 +2351,7 @@ def audit(ws, probe, img):
                     out += _row_pairs(ws, img, b, "Off toggle vs row ground", kind, v)
     t = getattr(ws.code_layer, "_t", None)
     # a menu over the editor dims it: its caret is no focus to measure
-    modal = ws.sysmenu.open or ws.pause.open
+    modal = ws.sysmenu.open or ws.pause.open or ws.confirm.open
     if ws.screen == "menu" and t is not None and "caret" in t and not modal:
         for x, y, w, h, c in probe.last["rects"]:
             if c == t["caret"] and h > 2 * w:

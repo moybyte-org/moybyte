@@ -318,6 +318,8 @@ class FullscreenStackWM:
             sig |= 64
         if ws.pause.open:
             sig |= 512
+        if ws.confirm.open:
+            sig |= 1024
         if ws._about:
             sig |= 128
         if ws.notice_active():
@@ -368,6 +370,8 @@ class FullscreenStackWM:
             overlays.append(ws._pause_layer)
         if sig & 128:
             overlays.append(ws._about_layer)
+        if sig & 1024:
+            overlays.append(ws._confirm_layer)
         if sig & 256:
             overlays.append(ws._notice_layer)
         overlays.append(ws._cursor_layer)

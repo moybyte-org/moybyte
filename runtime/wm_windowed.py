@@ -574,7 +574,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _install(self, ctx, win=None):
         # The focus mark draws only in the focused window (ui.marks), and in
-        # none while a popover above the windows holds the keys: one a screen.
+        # none while a popover or the delete confirm above the windows holds
+        # the keys: one a screen.
         # The root context takes back the marks it had before the windows
         # drew -- off while the console holds them under a menu -- so what
         # the root draws after them marks only where it may.
@@ -589,7 +590,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             cx, cy, _cw, _ch = win.content_rect()
             ctx.install(self.ws, (cx, cy))
             win._marked = (self._wins.get(self._focus) is win
-                           and not self.popover_takes_keys())
+                           and not self.popover_takes_keys()
+                           and not self.ws.confirm.open)
             _ui_draw.marks(win._marked)
 
     def _make_ctx(self, buf, foot=0):
@@ -1319,7 +1321,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _scrim_up(self):
         """Whether a system modal's scrim is up (D-01): the system menu or a
-        card's menu, ABOUT, the pause menu (`SystemMenuUI.scrims`)."""
+        card's menu, ABOUT, the pause menu, the delete confirm
+        (`SystemMenuUI.scrims`)."""
         return self.ws.menu_ui.scrims()
 
     def _pop_n(self):

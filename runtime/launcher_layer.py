@@ -2619,7 +2619,7 @@ class LauncherHomeLayer:
             self._button_focus = None
         elif i.pressed("a") or i.pressed("run"):
             v = buttons[k][0]
-            if v != "delete":                # DEL's second press is on it too
+            if v != "delete":                # the confirm's Cancel comes back to DEL
                 self._button_focus = None
             self._do_verb(v)
         elif i.pressed("home"):
@@ -3949,7 +3949,7 @@ class LauncherHomeLayer:
         elif verb == "copy":
             ws.carts.dup(self.grid.selected())
         elif verb == "delete":
-            ws.carts.delete(self.grid.selected())
+            ws.confirm.ask(self.grid.selected())   # never on one press: it asks
         elif verb == "favourite":
             self.toggle_favourite()
         elif verb == "options":

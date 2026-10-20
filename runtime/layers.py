@@ -11,10 +11,10 @@ module holds the shell-side building blocks that are NOT the router itself:
                     cursor), which have no state worth a class of their own.
   * The Phase-1 adapters -- `_BlocksLayer` / `_UpdateLayer` / `_MapLayer` /
                     `_MusicLayer` / `_PerfLayer` / `_AchOverlayLayer` / `_SysMenuLayer`
-                    / `_PauseLayer` / `_AboutLayer` -- real Layer types for the
-                    surfaces that were already their own objects (block_ui /
-                    update_ui / map_ui / music_ui / perf_ui / ach_ui / menu_ui /
-                    pause).
+                    / `_PauseLayer` / `_ConfirmLayer` / `_AboutLayer` -- real Layer
+                    types for the surfaces that were already their own objects
+                    (block_ui / update_ui / map_ui / music_ui / perf_ui / ach_ui /
+                    menu_ui / pause / confirm).
 
 Every class here references ONLY its `self.ws` back-ref (and, for `_LegacyLayer` /
 `_AchOverlayLayer`, injected callables) -- no console module-level constants or
@@ -353,6 +353,30 @@ class _PauseLayer(Layer):
     def handle_pointer(self, px, py, click):
         ws = self.ws
         ws.pause.handle_pointer(px, py, click)
+        gp = ws.input.game_pointer
+        ws.input.game_pointer = (gp[0], gp[1], False, False)
+        return True
+
+
+class _ConfirmLayer(Layer):
+    """The delete confirm's layer (`console_notices.DeleteConfirm`): its
+    dialog over the content, drawn on the system canvas; it takes every key
+    and tap while it shows, and clears the game pointer's tap so a cart
+    underneath never sees one."""
+
+    id = "confirm"
+    domain = "system"
+
+    def draw(self, dt):
+        self.ws.confirm.draw()
+
+    def handle_input(self, i):
+        self.ws.confirm.handle_input(i)
+        return True
+
+    def handle_pointer(self, px, py, click):
+        ws = self.ws
+        ws.confirm.handle_pointer(px, py, click)
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)
         return True

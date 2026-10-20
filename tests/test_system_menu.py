@@ -480,7 +480,7 @@ def test_about_action_opens_dismissible_modal(tmp_path):
     assert not ws._about
 
 
-def test_delete_cart_action_deletes_then_goes_home(tmp_path):
+def test_delete_cart_action_asks_then_deletes_and_goes_home(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     _open_own_cart(ws, tmp_path)
@@ -488,6 +488,12 @@ def test_delete_cart_action_deletes_then_goes_home(tmp_path):
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     _tap(drv, *_row_center(ws, "DELETE CART"))
+    assert ws.confirm.open and ws.confirm.title == "Delete Extra?"
+    assert len(ws.carts.all) == n0, "it asks first"
+    drv.frame(1 / 30)
+    x, y, w, h = ws.confirm._host.box("Delete")
+    _tap(drv, x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
     assert len(ws.carts.all) == n0 - 1
     assert "Extra" not in [c.get("title") for c in ws.carts.all]
     assert ws.screen == "launcher" and not ws.sysmenu.open

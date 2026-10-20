@@ -1,6 +1,7 @@
 # Map (grep -n a name to jump there):
 #   Notices                     the achievements wiring, the notice banner, the toast
 #   PauseMenu                   the card over a held game: Resume, Options, Quit
+#   DeleteConfirm               "Delete <title>?" before any cart is deleted
 #   SystemMenuUI                the system menu's rows and their actions
 #   SystemMenuUI.card_rows      the home's selected card as a menu group
 #   SystemMenuUI.open_card      that group alone, hung at a card (long press, pad X)
@@ -77,7 +78,7 @@ def _desk_class():
 
 class _CardVerb:
     """A card group row's action: the home's verb on its selected card.
-    Its Delete deletes at once (to the Trash): the row is the choice."""
+    Its Delete asks first, as every route to a delete does (`DeleteConfirm`)."""
 
     def __init__(self, home, verb):
         self.home = home
@@ -412,6 +413,119 @@ class PauseMenu:
             ws.request_frame()
 
 
+class DeleteConfirm:
+    """The one question before a cart is deleted, on every route that
+    deletes one: Make's X and DEL, the desk PROJECTS window's Delete, a
+    card menu's Delete and the system menu's "Delete cart". Deleting a cart
+    is permanent (the Trash holds files, never carts), so the console asks
+    with the public UI API's dialog, the kind Files asks "Empty the Trash?"
+    with: "Delete <title>?", "This can't be undone.", Cancel and Delete,
+    Delete the danger button and Cancel where focus opens. The dialog dims
+    the content under the bars (D-01), centred in it.
+
+    Its keys and taps go to the dialog's engine, which moves focus between
+    the buttons and activates one; B, Esc, HOME, the console's key (the
+    T-Deck's Mic) and a press outside the card cancel. The answer is read
+    as the dialog draws, and the delete runs at the frame's tail."""
+
+    BUTTONS = ("Cancel", "Delete")
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.open = False
+        self.cart = None
+        self.title = ""
+        self._then = None            # what follows a delete (the open cart's: go home)
+        self._host = None
+        self._key = 0                # the key typed last frame (a press is its change)
+        self.focused = None          # the focused button as the last frame left it
+
+    def ask(self, cart, then=None):
+        """Ask before `cart` (a cart dict, or None for the open cart) is
+        deleted; `then()` runs after a delete that removed it."""
+        ws = self.ws
+        target = cart if cart is not None else ws.cart
+        if target is None or not target.get("path"):
+            return False
+        name = str(target.get("title") or "").strip()
+        self.cart = cart
+        self.title = "Delete %s?" % name if name else "Delete this cart?"
+        self._then = then
+        self.open = True
+        self.focused = None
+        self._key = getattr(ws.input, "last_key", 0) or 0
+        if self._host is None:
+            self._host = _ui_draw.AppHost()
+        else:
+            self._host.reset()
+        self._host.key = self._key   # the key that asked is no press of the dialog's
+        ws._dirty = True
+        return True
+
+    def cancel(self):
+        """The cart stays."""
+        if not self.open:
+            return
+        self.open = False
+        self.cart = self._then = None
+        self.ws._dirty = True
+
+    def _delete(self):
+        ws = self.ws
+        cart, then = self.cart, self._then
+        self.open = False
+        self.cart = self._then = None
+        before = len(ws.carts.all)
+        ws.carts.delete(cart)
+        if then is not None and len(ws.carts.all) < before:
+            then()
+        ws._dirty = True
+
+    def handle_input(self, i):
+        k = getattr(i, "last_key", 0) or 0
+        esc = k == 27 and self._key != 27
+        self._key = k
+        if i.pressed("b") or i.pressed("stop") or i.pressed("home") or esc:
+            self.cancel()
+            return
+        if self._host.keys(i):
+            self.ws._dirty = True
+
+    def handle_pointer(self, px, py, click):
+        host = self._host
+        ws = self.ws
+        card = host.box(self.title)
+        if click and card is not None and not _in_box(px, py, card):
+            self.cancel()             # a press outside the card: the cart stays
+            return
+        if host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
+            ws._dirty = True
+
+    def surface(self):
+        """What the dialog dims and centres in: the content under the bars."""
+        lay = self.ws.layout
+        return (lay.cx, lay.cy, lay.cw, lay.ch)
+
+    def draw(self):
+        if not self.open:
+            return
+        ws = self.ws
+        cv = ws.sys_canvas
+        ws.icon_spec()                # the theme's set in the engine, as the bar has it
+        settled = self._host.begin(cv, ws.theme_colors, self.surface(), _desk_class())
+        pick = _ui.dialog(self.title, self.BUTTONS, "danger")
+        _ui.label("This can't be undone.")
+        _ui.dialog()
+        self.focused = _ui.focus()
+        if pick == 0:
+            self.cancel()
+        elif pick == 1:
+            self.open = False         # the answer is in: the tail deletes
+            ws.defer(self._delete, toast=False)
+        elif not settled:
+            ws.request_frame()
+
+
 def _peek(rows, cut):
     """The body a popover cut at `cut` shows (the engine's `pop_body`): the
     cut where it falls well inside a row (a quarter of the row clear each
@@ -450,8 +564,8 @@ class SystemMenuUI:
         rows = []
         cart = self.ws.cart
         if cart is not None:
-            # headed by the cart's own title over Delete (to the Trash, never
-            # asked), offered only for a cart the store can delete: a
+            # headed by the cart's own title over Delete (which asks first:
+            # `DeleteConfirm`), offered only for a cart the store can delete: a
             # built-in is the console's, so it has no group. A run restarts
             # from the pause menu.
             if self._deletable(cart):
@@ -492,9 +606,8 @@ class SystemMenuUI:
         """A home's selected card as a menu group (the fullscreen home's,
         else `home`'s, the desk's projects window): its title over a row a
         verb of `card_verbs` (the favourite star's words follow its state;
-        Delete takes it to the Trash, never asked, as the cart group's
-        does, and stands set apart under a rule). [] where the card has
-        none."""
+        Delete asks first, as the cart group's does, and stands set apart
+        under a rule). [] where the card has none."""
         home = home or self.ws.launcher_layer
         verbs = home.card_verbs()
         if not verbs:
@@ -559,14 +672,10 @@ class SystemMenuUI:
             and _builtin_name(path) is None
 
     def _menu_delete_cart(self):
-        # Delete the OPEN cart (carts.delete() with no cart targets ws.cart, which
-        # need not be the home's selection), then go home.
-        # carts.delete() guards read-only / last-cart. Count the FULL cart list (a
-        # wallpaper isn't in the launcher run-grid) to detect the deletion.
-        before = len(self.ws.carts.all)
-        self.ws.carts.delete()
-        if len(self.ws.carts.all) < before:
-            self.ws.go_home()
+        # Ask before deleting the OPEN cart (None: carts.delete() targets
+        # ws.cart, which need not be the home's selection); a delete that
+        # removed it goes home. carts.delete() guards read-only / last-cart.
+        self.ws.confirm.ask(None, self.ws.go_home)
 
     def _menu_about(self):
         # A tiny dismissible info modal (any tap / ESC / B closes it), drawn on top.
@@ -625,12 +734,13 @@ class SystemMenuUI:
 
     def scrims(self):
         """Whether a system modal's scrim is up: this menu or a card's menu,
-        ABOUT, the pause menu. A bar widget's popover (the calendar, Wi-Fi,
+        ABOUT, the pause menu, the delete confirm. A bar widget's popover (the calendar, Wi-Fi,
         power) hangs from its widget as an app's picker does, and dims
         nothing (docs/look_2026-10.md, D-01)."""
         ws = self.ws
         m = ws.sysmenu
-        return (m.open and m.comp is None) or ws._about or ws.pause.open
+        return (m.open and m.comp is None) or ws._about or ws.pause.open \
+            or ws.confirm.open
 
     def scrim(self):
         """Dim what the system menu, a card's menu or ABOUT covers: the

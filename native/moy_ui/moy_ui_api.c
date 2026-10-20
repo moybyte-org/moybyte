@@ -397,6 +397,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->pop_card.w = 0;
     c->pop_gone = 0;
     c->pop_id = 0;
+    c->dlg_id = 0;
     int settled = !c->owe;
     c->owe = 0;
     uint32_t focus0 = c->focus;
@@ -1545,7 +1546,17 @@ int moy_ui_api_box(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t out[4]) {
         out[3] = c->pop_card.h;
         return 1;
     }
+    if (c->dlg_id != 0 && hash(id.p, id.n, DIALOG_SALT) == c->dlg_id) {
+        out[0] = c->dlg_card.x;
+        out[1] = c->dlg_card.y;
+        out[2] = c->dlg_card.w;
+        out[3] = c->dlg_card.h;
+        return 1;
+    }
     int i = find(c->cur, c->n_cur, hash(id.p, id.n, 0));
+    if (i < 0 && c->dlg_id != 0) {
+        i = find(c->cur, c->n_cur, hash(id.p, id.n, c->dlg_id));   // a button at its foot
+    }
     if (i < 0) {
         return 0;
     }
@@ -1921,6 +1932,8 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     }
     moy_ui_scrim(s, sf);                // everything under a dialog dims (D-01)
     moy_ui_modal(s, card, title, fs, c->cls, rh);
+    c->dlg_id = id;
+    c->dlg_card = card;
     // the buttons at its foot, right-aligned, recorded left to right
     int nb = moy_ui_fields(buttons, len);
     int gap = 8 * fs, bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
