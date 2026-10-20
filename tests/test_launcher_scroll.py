@@ -248,6 +248,79 @@ def test_drag_partial_repaint_is_pixel_faithful(tmp_path):
     assert ws.screen == "launcher"            # and the release opened nothing
 
 
+def test_a_generated_covers_letter_keeps_its_card_proportion_through_a_drag(tmp_path):
+    """Owner report 2026-10-20 (P4, console home): a coverless card's letter
+    danced in size while the row was dragged -- its scale was a whole number
+    taken from the card's moving side, so it stepped while the card grew
+    smoothly. Through a finger drag and the glide after it, every coverless
+    card's letter is its 128x128 picture's letter scaled with the card, to
+    a pixel, as a cover's art is."""
+    from runtime import host_app, ui_draw
+    from runtime.host_canvas import make_system_canvas
+
+    ws = _ws_with_carts(tmp_path, 14)
+    drv = host_app.ConsoleDriver(ws)
+    _settle(drv)
+    lz, cv = ws.launcher, ws.sys_canvas
+
+    def ink_box(c, rect, ink):
+        x, y, w, h = rect
+        xs, ys = [], []
+        for py in range(max(0, y), min(c.h, y + h)):
+            for px in range(max(0, x), min(c.w, x + w)):
+                i = (py * c._stride + px) * 2
+                if (c._buf[i] | (c._buf[i + 1] << 8)) == ink:
+                    xs.append(px)
+                    ys.append(py)
+        return (max(xs) - min(xs) + 1, max(ys) - min(ys) + 1) if xs else None
+
+    base = {}
+
+    def base_box(title):
+        if title not in base:
+            b = make_system_canvas(128, 128)
+            ui_draw.initial_cover(b, (0, 0, 128, 128), 0, title)
+            base[title] = ink_box(b, (0, 0, 128, 128),
+                                  b._col(ui_draw.initial_block(title)[1]))
+        return base[title]
+
+    seen, sides = 0, set()
+
+    def check():
+        nonlocal seen
+        bx, _by, bw, _bh = lz.band_rect()
+        for i, r in lz._visible():
+            it = lz.items[i]
+            if r[0] < bx or r[0] + r[2] > bx + bw or lz.cover_for(it, 1) is not None:
+                continue
+            title = it.get("title") or ""
+            if not title.strip():
+                continue
+            got = ink_box(cv, r, cv._col(ui_draw.initial_block(title)[1]))
+            bw0, bh0 = base_box(title)
+            assert got is not None, (title, r)
+            assert abs(got[0] * 128 - bw0 * r[2]) <= 128, (title, r[2], got, (bw0, bh0))
+            assert abs(got[1] * 128 - bh0 * r[3]) <= 128, (title, r[3], got, (bw0, bh0))
+            seen += 1
+            sides.add(r[2])
+
+    bx, by, bw, bh = lz.band_rect()
+    cx, cy = bx + bw - 10, by + bh // 2
+    drv.touch(cx, cy)
+    drv.frame(1 / 30)
+    for step in range(1, 16):                    # a slow finger drag left
+        drv.touch_drag(cx - step * 7, cy)
+        drv.frame(1 / 30)
+        check()
+    drv.touch_up()
+    for _ in range(60):                          # and the glide to rest
+        drv.frame(1 / 30)
+        check()
+        if not lz.moving:
+            break
+    assert seen >= 10 and len(sides) >= 6, (seen, sorted(sides))
+
+
 # -- keyboard / trackball nav ---------------------------------------------------
 
 def test_arrows_nav_reveals_last_cart(tmp_path):

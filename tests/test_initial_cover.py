@@ -48,3 +48,42 @@ def test_the_letter_centres_on_its_own_ink():
             ys = [y for x in range(side) for y in range(side) if px(x, y) == ink]
             assert abs(min(xs) - (side - 1 - max(xs))) <= 1, (side, title)
             assert abs(min(ys) - (side - 1 - max(ys))) <= 1, (side, title)
+
+
+def test_the_cover_draws_as_its_picture_scaled_like_a_cover():
+    """A generated cover moves as a cart's own cover does (owner report
+    2026-10-20, the letter's size dancing under a carousel drag): at every
+    side a card passes through, it is pixel for pixel its 128x128 picture
+    drawn by `cv.cover`, so its letter keeps its proportion to the card."""
+    base = make_system_canvas(128, 128)
+    for title in ("Pin Light", "Moy", "Ivy", "Extra 07"):
+        ui_draw.initial_cover(base, (0, 0, 128, 128), 0, title)
+        pix = bytearray(base._buf[:2 * 128 * 128])
+        for side in list(range(12, 140)) + [192, 255, 256, 257, 384]:
+            got = make_system_canvas(side, side)
+            ui_draw.initial_cover(got, (0, 0, side, side), 0, title)
+            want = make_system_canvas(side, side)
+            want.cover(pix, 128, 0, 0, 128, 128, 0, 0, side, side, 0, False)
+            assert bytes(got._buf) == bytes(want._buf), (title, side)
+
+
+def test_the_letter_is_whole_pixels_at_every_clean_side():
+    """At a card's rest sizes (a clean scale of the cover's side) every
+    letter pixel is the same whole number of card pixels: a sixteenth of
+    the side."""
+    for side in (16, 32, 64, 128, 256, 384):
+        cv = make_system_canvas(side, side)
+        ui_draw.initial_cover(cv, (0, 0, side, side), 0, "Moy")
+        ink = cv._col(ui_draw.initial_block("Moy")[1])
+        row = side // 2 - 1
+        runs, n, prev = [], 0, False
+        for x in range(side):
+            i = (row * cv._stride + x) * 2
+            on = (cv._buf[i] | (cv._buf[i + 1] << 8)) == ink
+            if on:
+                n += 1
+            elif prev:
+                runs.append(n)
+                n = 0
+            prev = on
+        assert runs and all(r % (side // 16) == 0 for r in runs), (side, runs)
