@@ -175,3 +175,42 @@ def test_while_a_popover_is_open_the_strip_shows_only_its_close(tmp_path, config
         assert seen[-1] == paint_layer._HINTS_POP
     finally:
         paint_layer._ui_draw.hints = real
+
+
+def _key_ink_h(px, box, ox, oy, w):
+    """The ink height of what a menu row draws in its key column, the last
+    `w` pixels of its box: rows holding a pixel 3:1 off the column's ground."""
+    x, y, bw, bh = box
+    cols = range(ox + x + bw - w, ox + x + bw)
+    hist = {}
+    for yy in range(oy + y, oy + y + bh):
+        for xx in cols:
+            hist[px[yy][xx]] = hist.get(px[yy][xx], 0) + 1
+    ground = max(hist, key=hist.get)
+    rows = [yy for yy in range(oy + y, oy + y + bh)
+            if any(_contrast(px[yy][xx], ground) >= 3 for xx in cols)]
+    return rows[-1] - rows[0] + 1 if rows else 0
+
+
+@pytest.mark.parametrize("theme,mode", THEMES)
+def test_the_more_menus_arrow_keys_stand_as_tall_as_its_letters(tmp_path, theme, mode):
+    """The desk more menu's key column draws the shifts' arrows as tall as
+    the letters beside them, "F" (design review R5-09), not as specks half
+    their height."""
+    from runtime import paint_layer, ui_draw
+    ws, lay, ox, oy = _open(tmp_path, DESK, theme, mode)
+    ui_draw.input_kind("keys")
+    ws.paint.set_selection(1, 1, 4, 4)
+    ws.paint_layer._open_more()
+    el._frame(ws)
+    px = el._px(ws)
+    keys = paint_layer._OP_KEYS["keys"]
+    rows = {op[0]: op[1] + "\t" + keys[op[0]] for op in paint_layer._OPS if op[0] in keys}
+    host = ws.paint_layer._host
+    w = 24
+    letter = _key_ink_h(px, host.box(rows["fliph"]), ox, oy, w)
+    assert letter > 0
+    for op in ("sleft", "sright", "sup", "sdown"):
+        got = _key_ink_h(px, host.box(rows[op]), ox, oy, w)
+        assert got >= 0.8 * letter, "%s %s: %s's arrow %d px against F's %d" % (
+            theme, mode, op, got, letter)

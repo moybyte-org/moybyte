@@ -334,10 +334,26 @@ static void enter_sign(pd_t *d, int x, int y, int w, int h, uint16_t c) {
     d->row->st[MOY_ST_N_FILL]++;
 }
 
-// An arrow in the cap box: `dir` 0 left, 1 right, 2 up, 3 down.
-static void arrow_sign(pd_t *d, int x, int y, int w, int h, int dir, uint16_t c) {
+// A tall arrow's strokes in a box `rows` strokes tall (a letter's
+// capitals, where no keycap holds it): its length and its head's strokes a
+// side. The head spans the box's odd rows; up or down the shaft does too,
+// and across it runs a third longer than the head is tall.
+static void tall_size(int rows, int dir, int *len, int *head) {
+    int n = rows > 2 ? (rows - 1) | 1 : 1;
+    *len = dir < 2 ? n + n / 3 : n;
+    *head = n / 2;
+}
+
+// An arrow in the cap box: `dir` 0 left, 1 right, 2 up, 3 down; `tall`,
+// as tall as the box (`tall_size`).
+static void arrow_sign(pd_t *d, int x, int y, int w, int h, int dir, int tall, uint16_t c) {
     int k = d->fs, n, head, cx = x + w / 2, cy = y + h / 2;
-    sign_size(d, h, &n, &head);
+    if (tall) {
+        tall_size(h / k, dir, &n, &head);
+        cy = y + (h - k) / 2;
+    } else {
+        sign_size(d, h, &n, &head);
+    }
     int len = n * k;
     if (dir < 2) {
         int x0 = cx - len / 2;
@@ -713,11 +729,24 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             if (sign >= 0 && sign <= SIGN_ENTER) {
                 int kh = pm(&d, MOY_UI_M_VALUE_ROW_KEY, 1);
                 int sw = sign == SIGN_ENTER ? kh + 3 * d.fs : kh;
+                int ky = b.y + (b.h - kh) / 2;
+                if (sign != SIGN_ENTER) {
+                    // an arrow stands as tall as the value face's capitals,
+                    // on their line: the letters beside it in the column
+                    // ("F", "Ctrl C") are what it is read against
+                    int top = ink_top(&fl), len, head;
+                    kh = sw = (fl.ascent - top) * sc;
+                    ky = b.y + moy_ui_fdiv(b.h - fl.line * sc, 2) + top * sc;
+                    tall_size(kh / d.fs, sign, &len, &head);
+                    if (len * d.fs > sw) {
+                        sw = len * d.fs;
+                    }
+                }
                 x -= sw;
                 if (sign == SIGN_ENTER) {
-                    enter_sign(&d, x, b.y + (b.h - kh) / 2, sw, kh, cdim);
+                    enter_sign(&d, x, ky, sw, kh, cdim);
                 } else {
-                    arrow_sign(&d, x, b.y + (b.h - kh) / 2, sw, kh, sign, cdim);
+                    arrow_sign(&d, x, ky, sw, kh, sign, 1, cdim);
                 }
             } else {
                 int vw = tw(&fl, r->value.p, r->value.n, sc);
@@ -1538,7 +1567,7 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                     } else if (sign == SIGN_DPAD_LR) {
                         dpad_sign(&d, x, y, w, kh, capi);
                     } else if (sign >= 0) {
-                        arrow_sign(&d, x, y, w, kh, sign, capi);
+                        arrow_sign(&d, x, y, w, kh, sign, 0, capi);
                     } else {
                         text(&d, &fk, k.p, k.n, x + (w - lw) / 2, y, kh, capi, sc);
                     }
