@@ -309,6 +309,26 @@ class PauseMenu:
             ws._exit_to_caller()
         ws._dirty = True
 
+    def _unwash_strip(self, cv):
+        """The desk's PROJECTS window's hint strip names the dialog's keys
+        (`launcher_layer.modal_keys`), so it stays unwashed, as under the
+        system menu (`SystemMenuUI._scrim_bands`): its pixels back from the
+        window's buffer over the dialog's scrim, where the card is clear of
+        it."""
+        ws = self.ws
+        p = ws.menu_ui._projects()
+        blit = getattr(cv, "blit_strip_rect", None)
+        if p is None or p[1] is None or blit is None:
+            return
+        sx, sy, sw, sh = p[1]
+        card = self._host.box(self.title)
+        if card is not None and card[0] < sx + sw and sx < card[0] + card[2] \
+                and card[1] < sy + sh and sy < card[1] + card[3]:
+            return
+        win = ws.wm._wins["projects"]
+        cx, cy = win.content_rect()[:2]
+        blit(win.buf, cx, cy, sx, sy, sw, sh)
+
     def handle_input(self, i):
         k = getattr(i, "last_key", 0) or 0
         esc = k == 27 and self._key != 27
@@ -481,6 +501,26 @@ class DeleteConfirm:
             then()
         ws._dirty = True
 
+    def _unwash_strip(self, cv):
+        """The desk's PROJECTS window's hint strip names the dialog's keys
+        (`launcher_layer.modal_keys`), so it stays unwashed, as under the
+        system menu (`SystemMenuUI._scrim_bands`): its pixels back from the
+        window's buffer over the dialog's scrim, where the card is clear of
+        it."""
+        ws = self.ws
+        p = ws.menu_ui._projects()
+        blit = getattr(cv, "blit_strip_rect", None)
+        if p is None or p[1] is None or blit is None:
+            return
+        sx, sy, sw, sh = p[1]
+        card = self._host.box(self.title)
+        if card is not None and card[0] < sx + sw and sx < card[0] + card[2] \
+                and card[1] < sy + sh and sy < card[1] + card[3]:
+            return
+        win = ws.wm._wins["projects"]
+        cx, cy = win.content_rect()[:2]
+        blit(win.buf, cx, cy, sx, sy, sw, sh)
+
     def handle_input(self, i):
         k = getattr(i, "last_key", 0) or 0
         esc = k == 27 and self._key != 27
@@ -516,6 +556,7 @@ class DeleteConfirm:
         pick = _ui.dialog(self.title, self.BUTTONS, "danger")
         _ui.label("This can't be undone.")
         _ui.dialog()
+        self._unwash_strip(cv)
         self.focused = _ui.focus()
         if pick == 0:
             self.cancel()

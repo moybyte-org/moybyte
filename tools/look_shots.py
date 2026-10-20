@@ -2085,7 +2085,9 @@ def _strongest(img, r):
 
 def _menu_keys_words(ws, layer, ox=0, oy=0):
     """The glass rect of the words a home's hint strip names the open
-    menu's keys with ("Close" after its keycap), `layer` the home's layer,
+    modal's first key with (`launcher_layer.modal_keys`: "Close" after its
+    keycap under a menu, "Choose" under the delete confirm), `layer` the
+    home's layer,
     its strip offset by (ox, oy); None where it draws none. The words, not
     the strip's strongest colour: a keycap's glyph can stand far stronger
     than the words beside it, so a scrim over the words would pass on the
@@ -2095,7 +2097,9 @@ def _menu_keys_words(ws, layer, ox=0, oy=0):
     if foot is None or not foot[5][3]:
         return None
     rect = foot[5]
-    keys = launcher_layer._MENU_KEYS
+    keys = launcher_layer.modal_keys(ws)
+    if keys is None:
+        return None
     spans = ui_draw.hints(ws.sys_canvas, ws.theme_colors, layer._hint_inner(rect), keys,
                           layer.grid.desk(), draw=False)
     if not spans or spans[0][0] == spans[0][1]:
@@ -2108,9 +2112,8 @@ def _menu_keys_words(ws, layer, ox=0, oy=0):
 def _menu_pairs(ws, img):
     """The system menu's and a card's menu's card as it shows (design review
     R4-33): clear of its anchor and 4 pixels at the scale inside the glass
-    it takes (R4-04), each danger row's words on the card at 4.5:1, and,
-    over the home, the hint strip's ink on its ground at 4.5:1 (R4-05), as
-    over the desk's PROJECTS window, its strip's (R5-03)."""
+    it takes (R4-04), each danger row's words on the card at 4.5:1, and
+    the hint strip naming its keys (`_strip_pairs`)."""
     m = ws.sysmenu
     mu = getattr(ws, "menu_ui", None)
     if mu is None or not (m.open and mu.looked()):
@@ -2137,6 +2140,15 @@ def _menu_pairs(ws, img):
                     out += [("danger row ink vs card",) + r[1:]
                             for r in _row_pairs(ws, img, b, "danger row", view=card)
                             if r[0].endswith("(text)")]
+    return out + _strip_pairs(ws, img)
+
+
+def _strip_pairs(ws, img):
+    """The hint strip that names an open modal's keys (the system menu's,
+    the delete confirm's, `launcher_layer.modal_keys`): over the home its
+    ink on its ground at 4.5:1 (R4-05), and its words on the desk's
+    PROJECTS window's strip unwashed (R5-03, F6-02)."""
+    out = []
     grid = getattr(ws.launcher_layer, "grid", None)
     foot = grid.foot() if grid is not None and ws.screen == "launcher" else None
     if foot is not None and not grid.desk():
@@ -2414,6 +2426,8 @@ def audit(ws, probe, img):
     out += _foot_pairs(ws, img)
     out += _calc_pairs(ws, img)
     out += _menu_pairs(ws, img)
+    if ws.confirm.open:
+        out += _strip_pairs(ws, img)
     out += _selection_pairs(ws, img)
     out += _fade_pairs(ws, probe, img)
     enabled = th.get("chrome_ink")

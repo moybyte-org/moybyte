@@ -1090,6 +1090,18 @@ DESC_LINES = 3       # the desk home's description: at most this many lines,
 DESC_EMS = 48        # ... as wide as this many n's: about 60 characters of
                      # running text, the width of the buttons' row
 _MENU_KEYS = ("back", "Close")   # the strip under the system menu
+_CONFIRM_KEYS = ("confirm", "Choose", "back", "Cancel")   # under the delete confirm
+
+
+def modal_keys(ws):
+    """The keys a home's hint strip names while a system modal holds them:
+    the delete confirm's dialog's, the system menu's card's, else None (the
+    home's own verbs)."""
+    if ws.confirm.open:
+        return _CONFIRM_KEYS
+    if ws.menu_ui.looked():
+        return _MENU_KEYS
+    return None
 _TAB_H = 16          # the tab row's height, in chrome-scale units
 _GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
 _SLIDE_MS = 200        # the handheld's slide: 6 frames at the home's 30 fps
@@ -2629,11 +2641,12 @@ class LauncherHomeLayer:
     def _statics_key(self, cv):
         """Everything the home frame's STATIC chrome (wallpaper backdrop +
         Library panel fill/header/footer) is a pure function of: the shared
-        base plus the wallpaper and the search field. A key change forces
-        full paints until the streak re-arms."""
+        base plus the wallpaper, the search field and the keys a modal's hint
+        strip names (`modal_keys`). A key change forces full paints until the
+        streak re-arms."""
         ws = self.ws
         return _statics_base(ws, cv, self.grid) + (
-            ws.look.wallpaper_id,
+            ws.look.wallpaper_id, modal_keys(ws),
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
             getattr(ws, "search_typing", False) and ws.can_type(),
             self.grid.tab, self._tab_focus, self._button_focus, self.grid.arrangement,
@@ -3404,15 +3417,18 @@ class LauncherHomeLayer:
         """The home's hint strip (steps 17 and 18): keycaps naming the
         active tab's verbs on the selected card, from the left, and the tab
         keys at the right (the theme's `keycap`, `ui.hints`'s part). While
-        a search query is held it shows in the verbs' place."""
+        a search query is held it shows in the verbs' place; while the
+        system menu or the delete confirm is up, their keys (`modal_keys`)."""
         th = self.ws.theme_colors
         wall = self._wall()
         if wall is not None:
             th = self._wall_theme(th, wall[0])
-        if self.ws.menu_ui.looked():
-            # the system menu's card is open over the home: its keys
+        keys = modal_keys(self.ws)
+        if keys is not None:
+            # the system menu's card or the delete confirm is up over the
+            # home: the keys it takes, never the home's verbs
             rect = self.grid.foot()[5]
-            _ui_draw.hints(cv, th, self._hint_inner(rect), _MENU_KEYS, self.grid.desk())
+            _ui_draw.hints(cv, th, self._hint_inner(rect), keys, self.grid.desk())
             return
         spans, rect, items = self._hint_fit(cv)
         n = sum(1 for v, _a, _b in spans if v != "tabs")

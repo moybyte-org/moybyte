@@ -271,3 +271,41 @@ def test_the_desk_projects_windows_delete_asks(tmp_path):
     _press(drv, "right", "a")
     assert not c.open and not _there(ws)
     moy_ui.theme_uninstall()
+
+
+@pytest.mark.parametrize("kind", ["keys", "pad", "tdeck"])
+def test_the_hint_strip_names_the_dialogs_keys(tmp_path, monkeypatch, kind):
+    """While the confirm is up the home's hint strip names the dialog's
+    keys, Choose and Cancel in the input's own keycaps, never the home's
+    verbs (design review F6-02), as it names Close under the system menu;
+    it names the home's verbs again once the dialog is answered."""
+    from runtime import launcher_layer
+    ws = build_ws(tmp_path)
+    drv = _drv(ws)
+    ui_draw.input_kind(kind)
+    _own(ws)
+    drawn = []
+    hints = launcher_layer._ui_draw.hints
+
+    def spy(cv, th, rect, items, desk=False, draw=True):
+        if draw:
+            drawn.append(tuple(items))
+        return hints(cv, th, rect, items, desk, draw)
+
+    def strip():
+        cv = ws.glass_canvas
+        x, y, w, h = ws.launcher_layer.grid.foot()[5]
+        return [bytes(cv._buf[2 * (yy * cv.w + x):2 * (yy * cv.w + x + w)])
+                for yy in range(y, y + h)]
+
+    ws._dirty = True
+    _frames(drv)
+    home = strip()
+    monkeypatch.setattr(launcher_layer._ui_draw, "hints", spy)
+    assert ws.confirm.ask(ws.launcher.selected())
+    c = _asked(ws, drv)
+    assert drawn == [launcher_layer._CONFIRM_KEYS] * len(drawn) and drawn, drawn
+    assert strip() != home
+    c.cancel()
+    _frames(drv)
+    assert strip() == home, "the home's verbs come back with the dialog gone"
