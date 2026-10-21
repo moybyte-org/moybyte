@@ -6,32 +6,43 @@ the handheld keeps its tab ladder, every tab in the look. Three concepts
 were drawn and reviewed the same day by a visual designer and a game
 maker; both chose **B, Workspaces**, and this file is B's design: the
 pane and tool sizes at 1024 × 600 and 800 × 480, the input model, the
-handheld, the new parts, and the owner's calls still open.
+handheld, the new parts, and the owner's decisions of the same day.
 `rounds/round12.py` draws every picture named here (`draw.py`), with Sky
 Run's code, sheet, map and scene and Coin Quest's blocks; the sound bank
 past Sky Run's two effects is illustrative. It is the target of step 30
 of `docs/look_2026-10.md`; `docs/studio_2026-09.md` is the earlier design
 it builds on.
 
-## The owner's calls
+## The owner's decisions (2026-10-21)
 
-The pictures assume yes to each; none is decided.
+The pictures were drawn before these; where one differs, the decision
+holds and the picture shows the parts.
 
-1. **Live edits.** A sprite, sound or flag edit reaches a running game
-   at once; a map, scene or code edit waits for the next Play, and
-   Restart wears a dot while one waits (`moy-*_desktop_editor-b-code`).
-   This revises `docs/studio_2026-09.md` S13, and rests on the playtest
-   reading the editor's sheet and bank in RAM, which is unverified.
-2. **Sound names.** An optional `name` per sound in `sounds.json` (a
-   moy-spec SPEC change); without it the list shows numbers and sketches.
-3. **The Editor opens maximised** on the desk (1024 × 600, 800 × 480 and
-   1280 × 800) and then remembers its last state per board.
-4. **A maximised window's strip carries its app's row** (every window,
-   not the Editor alone). A restored window's tab row returns under a
-   plain strip, which keeps 120 px bare to drag and double-tap. Two
-   alternatives, the bar taking the tools and full screen, are drawn
-   beside it in `MAXIMISE_VARIANTS.md`, with the panes' dividers moved by
-   hand (its Resize part).
+- **E-01, workspaces.** The five workspaces are the starting layouts, and
+  their dividers move (R-01, `MAXIMISE_VARIANTS.md`'s Resize): panels do
+  not move between panes and panes do not split.
+- **E-02, live edits.** A sprite, sound or flag edit reaches a running
+  game at once; a map, scene or code edit waits for the next Play, and
+  Restart wears a dot while one waits (`moy-*_desktop_editor-b-code`).
+  This revises `docs/studio_2026-09.md` S13, and needs the playtest to
+  read the editor's sheet and bank in RAM.
+- **E-03, sound names.** An optional `name` per sound in moy-spec's
+  `sounds.json`; without it the list shows numbers and sketches. The
+  moy-spec change is made at the start of the Editor's build.
+- **E-04, opening.** The Editor opens maximised on the desk (1024 × 600,
+  800 × 480 and 1280 × 800) and then remembers its last state per board.
+- **E-05, maximise is full screen** for every app (`MAXIMISE_VARIANTS.md`'s
+  V2 as the owner amended it): no shell bar and no title strip; the app's
+  row at the top edge; minimise, restore and close in its top-right
+  corner, as on every desk window. The title-strip reading these pictures
+  are drawn on, and V1, are not chosen.
+- **E-06, Settings.** The first workspace and the handheld tab are called
+  Settings everywhere (the pictures say Make it mine and Config).
+- **Q-03, flags.** A sprite's eight flags are toggles: a row in the desk's
+  Sprite pane, a Flags row in the handheld sprite tab's more menu.
+- **Q-04, keys first.** The build starts with the keyboard it needs: a key
+  event carries its key and its modifiers on the host, the web build and
+  BLE keyboards, and Super acts on its release, so it can lead chords.
 
 ## Not chosen
 
@@ -47,16 +58,19 @@ The pictures assume yes to each; none is decided.
 
 ## The frame (both desk sizes)
 
-- **The strip** (y 40–84) is the maximised window's title strip. Left to
-  right: the icon and the cart's name alone ("Sky Run": the chip already
-  says Editor) in a fixed title slot (144 px at
-  1024, 112 at 800, an ellipsis past it), so the workspaces always start
-  at x 190 (158 at 800); the five workspaces, labelled, or icons with the
-  current one labelled where the strip is short (800); undo and redo at a
+- **The app's row** is the top 40 px of the glass when the Editor is
+  maximised, which is full screen (E-05), and the row under the title
+  strip of a restored window. Left to right: the icon and the cart's name
+  alone ("Sky Run") in a fixed title slot (144 px at 1024, 112 at 800, an
+  ellipsis past it); the five workspaces, labelled, or icons with the
+  current one labelled where the row is short (800); undo and redo at a
   fixed place; a hairline; the 170 px Play slot (Play, or Restart and
-  Stop); minimise, restore, close. The slot never changes width, so undo
-  and redo never move. No top accent on a maximised window: the focused
-  pane wears it.
+  Stop); then minimise, restore and close, which the WM draws and answers
+  as on every window. The slot never changes width, so undo and redo
+  never move. No top accent on a maximised window: the focused pane wears
+  it. The pictures draw this row as a 44 px strip under the shell bar
+  (y 40–84, panes from y 90); full screen starts the panes at y 46 and
+  spends the 44 px as `MAXIMISE_VARIANTS.md`'s "Where the 44 px go" says.
 - **Undo and redo** act on the focused pane's file.
 - **A pane** is a `surface` card (radius 8; Night adds its 1 px `line`) on
   the Editor's `bg` ground, 6 px gutters, flat. Its 32 px header holds an
@@ -91,7 +105,7 @@ Panes from x 6–1018, y 90–594 (1012 × 504). Each workspace's picture is
 
 | workspace | pane | x, y, w, h | holds |
 |---|---|---|---|
-| **Make it mine** (`config`) | Settings | 6, 90, 360, 504 | rows ≥ 36: Run at (one slider, the value at its right), Hero (sprite tiles), Autorun (a toggle); This project: Cart info, Files |
+| **Settings** (`config`) | Settings | 6, 90, 360, 504 | rows ≥ 36: Run at (one slider, the value at its right), Hero (sprite tiles), Autorun (a toggle); This project: Cart info, Files |
 | | Game | 372, 90, 646, 504 | no header; 2× (640 × 480) while running, else the still frame |
 | **Code** (`code`) | Code | 6, 90, 666, 504 | file tabs; find, go to definition, more; ~79 columns × 32 rows at 11 px; a 26 px status line (Ln, Col, lines, issues, language; F6) |
 | | Run slot | 678, 90, 340, 282 | the game at 1× from (688, 127) |
@@ -123,21 +137,24 @@ always Game (the game at 1× at its top). Pictures: `moy-light_desktop_editor-b-
 
 | workspace | left | right |
 |---|---|---|
-| Make it mine | Settings, 300 wide | the game at 1×, centred |
+| Settings | Settings, 300 wide | the game at 1×, centred |
 | Code | Code 442 × 384 (~51 columns; grow gives 788, ~100) | Game, Sprites, Sounds, Map, Log |
 | Art | Sprite 306 × 384: the canvas box 192 (8 × 8 at 24), the palette 2 × 8 at 24, flags at 24 | Map · Game 476 × 384: the view 464 × 204 at 2× (29 × 12¾), then one sheet page at 2× with its page chips and 8 px under it, the brush and the zoom beside it. No 1× sheet |
 | World | Scene 442 × 384 at 2× (pick, stamp, snap, zoom) | Actor (or Stamps), Game |
 | Sound | Sound 442 × 384, the sounds as a menu from its title; the graph at 8 px a semitone (192), 22 px steps, the ops at 36, Oct ‹ 5 › | Game, Song |
 
-Under 660 px of panes across, or in a restored window below its
-workspace's minimum, the Editor is today's: one panel, the tab ladder.
+Art starts at Sprite 320, its T-Deck minimum, and Map · Game 462
+(`docs/studio_2026-09.md` S5; the pictures draw 306 and 476). A restored
+window stops shrinking at its workspace's combined minimum; on glass
+smaller than any workspace's minimum the Editor is the tab ladder, one
+panel at a time.
 At 1280 × 800 the Run slot is 2× (660 × 512).
 
 ## Input
 
 | | switch workspace | move focus | grow a pane | Play / Restart / Stop |
 |---|---|---|---|---|
-| touch | tap it | tap the pane | the grow button or a double tap on its header | the strip |
+| touch | tap it | tap the pane | the grow button or a double tap on its header | the app's row |
 | keys | Ctrl+1 … 5, Ctrl+Tab | F6, Shift+F6, in reading order | Ctrl+Shift+Enter; Esc restores | Ctrl+Enter plays and restarts, Ctrl+. stops |
 | pad | L, R | Select and the d-pad, by direction | Select+A | Select+Start plays; Start is the console key |
 | pointer | click | click | grow, or a double click | click |
@@ -152,12 +169,11 @@ One tab at a time under one bar for all seven: the Moy tile, the seven
 tabs in 18 px cells with the open one on the current plate and named
 (11 px); then a hairline, undo, redo and Play anchored to the battery
 and the clock, so the open tab's name never moves them. No ‹
-(Esc and B step back) and no Wi-Fi in the Editor. Config's glyph is
-`sliders` on both sizes; its handheld name stays "Config", "Make it mine"
-being too long for the bar. Pictures, Day and Night at 1× and 3×:
+(Esc and B step back) and no Wi-Fi in the Editor. Settings' glyph is
+`sliders` on both sizes (E-06). Pictures, Day and Night at 1× and 3×:
 `moy-{light,dark}_handheld_<tab>-editor.png`, and:
 
-- **Config:** the cards as one group, Run at focused; This project.
+- **Settings** (`config`): the cards as one group, Run at focused; This project.
 - **Blocks:** the object picker, the outline, "+ add block", the tools and
   See code, the door to the Code tab.
 - **Code:** step 23's tab under the one bar.
@@ -183,8 +199,6 @@ toolkit lacks, with its cost; the glyphs are drawn in
 1. Actors draw as their one tile, as the scene editor does today. The
    game maker's proposal: a stamp carries its sprite's size (1 × 1, 2 × 2,
    3 × 3) in the actor (w, h) and draws at that size, with no scale field.
-2. The handheld Config tab's name ("Config" drawn; "Make it mine" does
-   not fit the bar).
-3. The 2× game outside Make it mine: the Run slot's grow (drawn), and
+2. The 2× game outside Settings: the Run slot's grow (drawn), and
    2× by default at 1280 × 800; neither ticks idle. Measure the 2× pane
    on the P4 before building on it (GAPS 31).

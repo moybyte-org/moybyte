@@ -282,7 +282,8 @@ editor's swatch. **Frame:** none.
 **26. The system menu and the pause menu.**
 
 - **Keys:** Super (the GUI key of a BLE keyboard, the Windows key of a USB
-  one) opens the system menu from every surface; over a fullscreen cart it
+  one) opens the system menu from every surface, on its release so it can
+  lead chords (owner, 2026-10-21); over a fullscreen cart it
   opens the pause menu instead; Esc closes either and steps back. The
   T-Deck's own keyboard has no Super key; its chord is an owner call.
 - **The Moy button** leaves the focus order (Super reaches it); tapping it
@@ -324,8 +325,10 @@ desk would recompose it.
 (a card on the Editor's ground, a 32 px header of tabs or a name, 32 px
 tool cells, the grow button, a second tool row when the first is full,
 compact tabs, the focused pane's `value` edge, a dim cursor in a pane
-without the keys); a maximised window's strip carrying its app's row in
-fixed title and Play slots; the workspaces; the Game tab beside Art's map
+without the keys); the app's row in fixed title and Play slots, at the
+top edge of a maximised (full-screen) window with the WM's minimise,
+restore and close at its right (E-05, every app); the workspaces and their
+movable dividers (R-01, `MAXIMISE_VARIANTS.md`'s Resize); the Game tab beside Art's map
 and a blocks cart's scene; the signature popover; the sound panels (the
 two-octave pitch graph with its note readout, each step's wave, the
 volume ladder, the song's slots, a sound's sketch); the block palette and
@@ -337,12 +340,12 @@ pane that follows the tool, tagged stamps and tag chips; the Log tab
 lays out in a pane's rect instead of the content rect
 (`docs/studio_2026-09.md` §10's step 1), and a focus move between panes
 never commits (a tab switch commits synchronously today). **Cost:** about
-17–20 days (panes and the strip 3, the tabs at a pane's size 4, the
+19–22 days (panes and the row 3, the dividers 2, the tabs at a pane's size 4, the
 workspaces and the Game tabs 2, the sound panels 3, the block palette 1,
 the World pane and tagged stamps 1.5, flags and the picker 1.5, the
 popover 2, the commit change 1, the glyphs 0.5; the Log tab waits for
 moy-spec). **Frame:** a game running in the Run slot beside a pane being
-typed in is two damage rects a frame on the P4 desk, and Make it mine's
+typed in is two damage rects a frame on the P4 desk, and Settings'
 2× game is 640 × 480 a frame; measure both on p4 and guition_p4 before
 building on them.
 ## The apps' restyle (step 31)
@@ -401,11 +404,9 @@ Align and Transition). **Cost:** 1 day.
 breaks in the content width, `o.lines` its most lines with "…" after.
 **Cost:** 0.5 day.
 
-**40. Text sizes in a cart (moy-spec):** `print`'s `scale` is accepted and
-ignored, so a story's text boxes are 8 px only. Storybook's S, M, L and XL
-are `print` at 1–4×: a verb-table change, the owner's and moy-spec's
-call. **Cost:** 1 day here once the spec moves; until then Storybook
-ships S alone.
+**40. Void (2026-10-21).** Storybook is an app with its own document and
+draws a story's text in the shell's fonts at any size, so `print`'s scale
+in moy-spec stays as it is.
 
 **41. Focus on a part of the mark's own colour:** the engine measures the
 focus mark against the part's fill and draws DESIGN.md's ring for it
@@ -414,7 +415,7 @@ focus mark against the part's fill and draws DESIGN.md's ring for it
 **42. Touch density:** a layout's class takes the board's input as well as
 its glass, so a touch board's handheld parts meet a 28–32 px target (Paint's
 tools two by four at 28, one colour target, popovers of 32 swatches at
-26×30; Storybook's tool row of 64×32 cells and its 32 px rows) and its hint
+26×30) and its hint
 strip gives way to the app's tool row. **Cost:** 1.5 days.
 
 **43. A sheet:** `ui.sheet(id, h, o)` and `ui.sheet()`, a card docked to
@@ -434,4 +435,4 @@ window behind by 25%; the 12×12 two-tone icons; the redrawn default
 wallpaper (the default theme draws a backdrop).
 
 **Total:** about 96–104 developer days for gaps 1–26; gaps 27–30 add
-about 6, gap 31 about 17–20, and gaps 32–44 about 12.
+about 6, gap 31 about 19–22, and gaps 32–44 about 11.

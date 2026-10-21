@@ -14,6 +14,11 @@ it through `runtime/host_canvas.py`); the palette in
 `runtime/palette.py`; buttons in `runtime/input.py`. A cart runs **identically** on the
 PC simulator and on the device — same names, same pixels.
 
+**moy-spec is the game console spec** (owner, 2026-10-21): Moybyte's app
+features (a story document, a wallpaper's sizes, an app's permissions) go in
+Moybyte-side fields, such as the manifest's `moybyte` object, never in
+moy-spec.
+
 ---
 
 ## The shape of a cart

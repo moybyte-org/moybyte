@@ -9,6 +9,29 @@ and specified in `GAPS.md`. The look is `DESIGN.md`'s. The design took a
 visual review and, for Storybook, a functional one (2026-10-21); where
 the two differed on Storybook, the functional one decided.
 
+## The owner's decisions (2026-10-21)
+
+- **A-01.** The apps are built as drawn, except where a decision below
+  changes them; the pictures it outdates are marked **to be redrawn**
+  under their app, and are not targets until they are.
+- **Storybook** stays the slides app (S-01), and is an **app with its own
+  story document**: a story no longer compiles to a cart. Slides are
+  1024 × 600 and draw their text in the shell's fonts at any size, so
+  `print` in moy-spec does not change (S-02 and GAPS 40 are void). A
+  handheld shows and presents stories zoomed out; a story is edited, and
+  shown at full size, on the desk boards or in the web build.
+- **Drawings.** The desk boards' drawings are 1024 × 600. A handheld's own
+  drawings stay 320 × 240, and it opens a 1024 × 600 drawing view-only: it
+  can use it as its wallpaper or put it in a story, not draw on it.
+- **Wallpapers.** A wallpaper cart may carry one image per screen size,
+  so a desk and a handheld each show a picture made for it
+  (`docs/theming_2026-09.md`'s Wallpapers).
+- **Moybyte fields, not moy-spec.** moy-spec is the game console spec: an
+  app feature such as the story document or a wallpaper's sizes is
+  Moybyte's, in Moybyte-side fields (`docs/moy_cart_api.md`).
+- **Q-02, order.** The apps are built first (the look plan's step 31), then
+  the Editor (step 30), then the old UI is removed.
+
 ## What the five share
 
 - **A page, the app bar, a way back.** `ui.page(title)` under the handheld
@@ -78,7 +101,7 @@ menu.
 | FIT, 1X, 2X, 4X | Z cycles 1×, 2×, 4×, Fit; the bar's chip shows it (a `raised` chip with the structure line); a `ui.seg` on the desk. Paint opens at 1×, centred on the last mark (a whole-scale fit of 320×240 under the handheld bar is 160×120) |
 | 64 colours; PAL1–4 pages of 16 | the rail's page of 16 holds the colour in use; the colour in use opens all 64 in a `ui.popover` (`ui.swatches` in rows, **GAPS 38**), its focus the canvas's ring, its caption the focused colour's number and name; the desk shows all 64 always |
 | sizes 1, 2, 4; EDGE, SOLID | the brush popover (B), hung from the size button, whose dot is the brush's own diameter: Size for Pencil, Brush, Eraser and Spray; Size, Shape and Fill (Outline, Filled) for Shape |
-| GAME / DESKTOP preset (tap twice) | More on the desk only: New desk-size drawing (512×300), a new file |
+| GAME / DESKTOP preset (tap twice) | goes: a desk board's drawings are 1024×600, a handheld's 320×240; on a handheld a 1024×600 drawing opens view-only, its More offering Use as wallpaper and Put in a story |
 | the status line | the marks, and toasts: a new drawing's first save says its name; a failure (can't save, storage off) is a toast in the danger ink |
 | a show-only picture (a cart's own image) | opens as today; a mark is refused with a toast, and More offers Copy to My Art |
 | autosave, the starter garden | unchanged |
@@ -94,8 +117,10 @@ at 28×28 on a 32 px pitch, the colour in use 28×28 as the only colour
 target, the brush button and ⋯ at 28×28, the drawing 248×206 beside them,
 no hint strip; the colours popover fills the drawing's frame and shows 28
 at a time, 30×30 on a 32 px pitch, seven a row, with a 36 px page seg of
-three pages. **Desk:** tools 40×40 at 44 px, the drawing at 1× on a 568×384
-pasteboard, 36 px buttons in the tool row, 24 px swatches. **Keys:** P B E
+three pages. **Desk:** tools 40×40 at 44 px, the 1024×600 drawing on the
+window's pasteboard at the zoom (Fit, or a whole scale panned), 36 px
+buttons in the tool row, 24 px swatches. **To be redrawn:**
+`moy-*_desktop_paint` draws a 512×300 drawing at 1×. **Keys:** P B E
 F S A I, Space held to move, C colours, B brush, Z zoom, M more, the
 arrows move the cursor, Enter or `a` draws; the T-Deck's strip shows Draw,
 Colours and More after the tool.
@@ -176,35 +201,34 @@ page (4 lines of 34 mono characters, BG cycling six colours, MY ART
 attaching the current drawing, TEAR OUT tapped twice), 16 pages, the story
 a cart whose `main.py` the deck compiles to, read-only once its code is
 edited by hand. The owner widened its scope (2026-10-21): **a slides app
-for kids, with objects**, as PowerPoint is.
+for kids, with objects**, as PowerPoint is, and made it an **app with its
+own story document** (2026-10-21): a story is not a cart and compiles to
+none. A slide is 1024 × 600. The desk boards and the web build edit and
+present stories; a handheld shows and presents them zoomed out.
+
+**To be redrawn:** every Storybook picture (`storybook*`, handheld and
+desk, and `storybook_present*`) draws a 320 × 240 slide, and the handheld
+ones edit it. They show the parts, the objects and the inputs, not the
+slide's size or where editing happens; the sizes below that follow a
+320 × 240 slide are theirs.
 
 ### Screens
 
 | screen | picture | what it holds |
 |---|---|---|
-| Stories | `storybook`, `storybook-empty` | a card a story (its first slide), New story first; Enter opens, P presents, M the menu (Rename, Duplicate, Open as code in Make, Delete, which asks) |
+| Stories | `storybook`, `storybook-empty` | a card a story (its first slide), New story first; Enter opens, P presents, M the menu (Rename, Duplicate, Delete, which asks) |
 | a new story | `storybook-new` | New story makes one Title slide and opens it in edit with the title chosen to be written; the story is named from its title |
 | Slides | `storybook-deck`, `storybook-deck-menu`, `storybook-layouts` | the sorter: a card a slide, its number and transition icon; New slide last opens the layouts (Title, Picture, Two pictures, Blank; Enter takes the last used); N adds after the focused slide; [ and ] move it; Ctrl+D duplicates; Del deletes; M or a long press opens its menu: Transition, Duplicate, Move earlier, Move later, Delete |
-| a slide | `storybook-keys`, `storybook-edit`, `storybook-add`, `storybook-style`, `storybook-colours`, `storybook-overview` | the slide at 1× in a window, the chosen object, the style sheet, the colours, Z's whole slide |
+| a slide | `storybook-keys`, `storybook-edit`, `storybook-add`, `storybook-style`, `storybook-colours`, `storybook-overview` | the slide in its window, the chosen object, the style sheet, the colours, Z's whole slide |
 | Add a picture | `storybook-pictures` | `ui.tabs` My Art and Sprites, a grid of cards; Enter adds it, chosen, and the next placeholder becomes chosen |
-| Present | `storybook_present`, `storybook_present_desk` | the slide alone at a whole scale; its number shows for a second after each change, in a half-black pill (the desk: in the black margin) |
+| Present | `storybook_present`, `storybook_present_desk` | the slide alone, fitted whole to the glass; its number shows for a second after each change, in a half-black pill (the desk: in the black margin) |
 
-### Handheld: sizes and placement
+### Handheld: view and present
 
-| part | size, place |
-|---|---|
-| bar | 0,0 320×28, as every app's: Moy, ‹ (to the slides), "Slide 2/5" (a tap opens the slides), undo, redo, Present (bare Play in `value`); each icon a 32×32 target |
-| slide window | 0,28 under the bar, the slide at 1×: 320×192 with keys (it ends on the hint strip at y 220, scrolling 0–48 px), 320×180 on touch (it ends on the tool row at y 208, scrolling 0–60), always to keep the chosen object in sight; a thumb at the right edge; Tab chooses the next object in z order, a tap on a chosen object the one beneath |
-| Z overview | the slide at exactly 0.5 (160×120) at 80,46, the window's rows framed, the caption under it; the arrows move the object 2 px; Z comes back |
-| chosen object (keys, pointer) | the `value` outline in its dark keyline; eight handles drawn 6×6, white with a dark border (**GAPS 35**); a line has two |
-| chosen object (touch) | the same line; the body drags it; one knob at the bottom-right corner, drawn 10×10, answering 32×32, its zone clamped inward where the corner meets the glass's edge |
-| hint strip (keys) | 0,220 320×20: ↕↔ Move · G Step 8 · ↵ Write · M More (Write on a text-bearing object; R Size is More's and the keys') |
-| tool row (touch) | 0,208 320×32 in place of the hint strip: five 64×32 cells, an icon and its word: Add ▾, Style, Order, More, Slides |
-| Add popover | 192×136: four 88×56 cells: Text, Shape, Picture, Background (its own glyph, a frame round a swatch; T, S, I, B); Shape opens a second of the seven shapes at 40×40 |
-| style sheet | 0,96 320×124 from the foot (**GAPS 43**), or from the top when the object sits low; rows of 32: Shape, Fill, Line, Width, Text size, Colour, Align, Appears; it scrolls; the slide scrolls so the object stays in sight; Y opens it |
-| colours | a popover the sheet's full width over it: the 16 in two rows of 32×28 on a 36 px pitch, None in its head |
-| sorter | cards 80×60 (a quarter), three a row, 24 apart inside the 16 px margins, rows 80 apart |
-| layouts | four 64×48 cells across the content's width |
+A handheld (the T-Deck class) lists the stories, opens a story's sorter and
+presents it, each slide shrunk whole to the glass; it does not edit a
+story, and New story is the desk's. Present takes the same inputs as on the
+desk (Inputs, below).
 
 ### Desk: sizes and placement
 
@@ -212,8 +236,8 @@ for kids, with objects**, as PowerPoint is.
 |---|---|
 | tool row | 44: Add ▾ (Text, Shape, Picture, Background), Bring to front, Send to back, Copy, Paste, undo, redo as 36×36 icon buttons; the ‹ 2/5 › stepper; Present (primary, 124×34) |
 | slides column | 112 wide: frames 80×60 at a 72 px pitch, the number at their left, the slide in edit current; a click or tap opens one, a drag moves it, `,` and `.` step |
-| the slide | 480×360 (1.5×) on a 496×376 pasteboard; 640×480 (2×) when the window gives 656×496 (maximised): the largest whole-or-half scale wins |
-| chosen object | the handheld's line; handles drawn 8×8, answering 16×16 to a pointer and 32×32 to touch (by the last input) |
+| the slide | 1024×600, shrunk to fit its pasteboard between the slides column and the style panel; Present shows it at 1× on 1024×600 glass, and shrunk whole elsewhere |
+| chosen object | the `value` outline in its dark keyline (**GAPS 35**); handles drawn 8×8, answering 16×16 to a pointer and 32×32 to touch (by the last input) |
 | snap guide | a 1 px dashed `accent` line within 4 slide pixels of the slide's centre lines and edges or another object's edges and centres; Alt held, or Snap in More, turns it off |
 | style panel | 236 wide, rows 28 (32 under touch): the chosen object's Shape, Fill, Line, Width, Text size, Colour, Align, Appears; a picture's Size (½, 1, 2), Clear background, Appears; with nothing chosen, the slide's Background and its Transition (None, Fade, Swipe) |
 | foot | the status, Ctrl+D Duplicate, Del Delete |
@@ -223,6 +247,9 @@ for kids, with objects**, as PowerPoint is.
 
 Every action has keys, a pad, touch and a pointer (a keyboard is assumed on
 every board, BLE on the touch boards); no button stands for a key alone.
+The touch column names the cells of the handheld tool row the pictures
+draw (Add ▾, Style, Order, More, Slides); on the desk they are the tool
+row's and the panel's.
 
 | action | keys | pad | touch | pointer |
 |---|---|---|---|---|
@@ -247,52 +274,45 @@ every board, BLE on the touch boards); no button stands for a key alone.
 
 ### Objects
 
-| object | what it holds | drawn by the story cart with |
-|---|---|---|
-| text box | words (plain, one style a box, 200 characters; wrapped at word breaks in its width, a long word broken at the edge; its height follows), size, colour (the 16), align, an optional strip behind | `print` at a whole scale and `rect` |
-| shape | rect, rounded rect, ellipse, line, arrow, star, speech bubble; fill (none or a colour), line (none or a colour), width 1 or 2; words inside, styled as a text box's; arrow, line and the bubble's tail point four ways (`flip`) | `rect`, `rectb`, `oval`, `ovalb`, `line`, and `tri` fans for the arrow and the star |
-| picture | a drawing from My Art, copied into the cart (`images/pgN`, copy-on-use as today); scales ½, 1, 2, 3, 4 of its source, the ½ baked when it is placed (a pixel kept wherever the source has one off the background, so a 1 px line survives); Clear background draws its corner colour clear | `spr`, `sspr` |
-| sprite | tiles from any project's sheet, copied into the story cart's own sheet when used | `spr` |
-| background | a colour or a drawing at 1× | `cls`, `spr` |
+| object | what it holds |
+|---|---|
+| text box | words (plain, one style a box, 200 characters; wrapped at word breaks in its width, a long word broken at the edge; its height follows), a font of the shell's and its size (any size; the style panel offers S, M, L and XL first), colour (the 16), align, an optional strip behind |
+| shape | rect, rounded rect, ellipse, line, arrow, star, speech bubble; fill (none or a colour), line (none or a colour), width 1 or 2; words inside, styled as a text box's; arrow, line and the bubble's tail point four ways (`flip`) |
+| picture | a drawing from My Art, copied into the story (copy-on-use); scales ½, 1, 2, 3, 4 of its source, the ½ baked when it is placed (a pixel kept wherever the source has one off the background, so a 1 px line survives); Clear background draws its corner colour clear |
+| sprite | tiles from any project's sheet, copied into the story when used |
+| background | a colour or a drawing (a 1024×600 one fills the slide) |
 
 Every object has a **step**: 0 appears with its slide, 1, 2, … appear on
-taps in that order (the sheet's Appears). Every slide has a
-**transition**: None, Fade (through black, by the screen palette, about six
-frames each way) or Swipe (both slides on one 640×240 layer, the camera
-moving: the #54 scroll engine), set in the slide's menu and in the desk
-panel with nothing chosen.
-
-**Text sizes:** S, M, L and XL are `print` at 1–4×, and `print` ignores
-its scale today (**GAPS 40**, moy-spec's decision). Until moy-spec decides,
-Storybook ships S alone, the document keeps the field, and the pictures
-show the sizes as designed.
+taps in that order (the style panel's Appears). Every slide has a
+**transition**: None, Fade (through black, about six frames each way) or
+Swipe (the next slide pushes the last one off), set in the slide's menu
+and in the desk panel with nothing chosen.
 
 ### One renderer
 
-The story cart's slide-draw function is the only renderer: the editor runs
-the same template on an off-screen 320×240 canvas (edit is what Present
-shows), the thumbnails are its frames decimated by the C blit, and a drag
-redraws the dirty box (the old box and the new, the handles' reach and a
-guide's strips) in z order. Present runs through the story cart, which the
-Player starts at a slide and returns from to it on Esc. The generated loop
-holds the current and the next slide's images only.
+Storybook's slide renderer is the only one: edit draws through it (edit is
+what Present shows), the thumbnails are its frames shrunk by the C blit,
+and a drag redraws the dirty box (the old box and the new, the handles'
+reach and a guide's strips) in z order. Present is Storybook's own full
+screen, started at a slide and returning to it on Esc; it holds the
+current and the next slide's images only.
 
 ### The document
 
-The format changes. By the repo's rule (no store migrations before users,
-CLAUDE.md "Settled") it ships as a strict reader of the new format: a
-`moydeck-v1` `deck.json` reads as absent, so an old story opens as one whose
-deck is gone (its cart and code stay, read-only in Storybook, open in
-Make). No seed cart is a story, so no seed version moves.
+A story is a document of its own, the JSON below and the images it uses,
+not a cart. By the repo's rule (no store migrations before users,
+CLAUDE.md "Settled") Storybook reads only this format, strictly: an old
+story cart's `moydeck-v1` `deck.json` is not a story, and the cart stays a
+cart, which Make opens. No seed cart is a story, so no seed version moves.
 
 ```json
 {"format": "moystory-2", "slides": [{"bg": 15, "transition": "fade", "objects": [
- {"type": "text", "x": 8, "y": 14, "w": 304, "text": "Once upon a time...",
-  "size": 2, "colour": 1, "align": "centre", "strip": null, "step": 0},
- {"type": "picture", "x": 16, "y": 96, "image": "pg2", "scale": 0.5, "clear": true, "step": 0},
- {"type": "sprite", "x": 200, "y": 40, "tile": 3, "tw": 2, "th": 2, "scale": 2, "step": 0},
- {"type": "shape", "shape": "bubble", "x": 186, "y": 96, "w": 124, "h": 64, "flip": 0,
-  "fill": 7, "line": 0, "width": 2, "text": "Hello!", "size": 2, "colour": 0,
+ {"type": "text", "x": 26, "y": 36, "w": 972, "text": "Once upon a time...",
+  "font": "ui", "size": 48, "colour": 1, "align": "centre", "strip": null, "step": 0},
+ {"type": "picture", "x": 51, "y": 240, "image": "pg2", "scale": 0.5, "clear": true, "step": 0},
+ {"type": "sprite", "x": 640, "y": 100, "tile": 3, "tw": 2, "th": 2, "scale": 6, "step": 0},
+ {"type": "shape", "shape": "bubble", "x": 595, "y": 240, "w": 397, "h": 160, "flip": 0,
+  "fill": 7, "line": 0, "width": 2, "text": "Hello!", "font": "ui", "size": 32, "colour": 0,
   "align": "centre", "step": 1}]}]}
 ```
 
@@ -301,28 +321,21 @@ Make). No seed cart is a story, so no seed version moves.
   is one object's JSON.
 - Geometry by type: a picture or a sprite is a position and a scale, a text
   box a width (its height follows), a shape its whole rect.
-- `size` is `print`'s scale (shown S, M, L, XL); `step` replaces `appear`;
-  `bg` is a colour index or an image name.
+- Coordinates are the 1024 × 600 slide's. `font` names one of the shell's
+  font roles and `size` its pixel height; `step` replaces `appear`; `bg` is
+  a colour index or an image name.
 - Limits: 16 slides, 12 objects a slide, 200 characters a text box, 24
-  images a story, an image at most 512×300.
-
-The generated `main.py` stays curriculum: the `SLIDES` table in this shape
-and a short loop that draws each object, steps the taps and plays the
-transition. Graduation stays as today.
+  images a story, an image at most 1024×600.
 
 ### Later
 
 | feature | why later |
 |---|---|
-| free rotation | no part or cart verb draws a rotated rect, oval, text or sprite: a rotated raster per primitive |
-| pen and bezier paths | a path rasteriser (fill and stroke) in `moy_gfx` and a cart verb |
+| free rotation | no part draws a rotated rect, oval, text or sprite: a rotated raster per primitive |
+| pen and bezier paths | a path rasteriser (fill and stroke) in `moy_gfx` |
 | grouping | a group object, nested choosing and hit-testing: editor work, a little runtime |
-| gradients | the look's paints are chrome (GAPS 7); in a cart a gradient needs a verb |
+| gradients | the look's paints are chrome (GAPS 7); a slide's gradient needs a raster of its own |
 | animation paths | a timeline per object and an editor for it |
-| styled runs inside one text box | a rich-text model in the document and the cart |
+| styled runs inside one text box | a rich-text model in the document and the renderer |
 | go to a slide on a tap, a sound a slide | choose-your-own-adventure stories; a `go` field is reserved for it |
 | distribute, a layers panel, speaker notes | declined for a kids' app |
-
-## Open questions
-
-- **The text sizes** wait on moy-spec (GAPS 40).

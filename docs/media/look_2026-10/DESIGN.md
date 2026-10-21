@@ -256,7 +256,9 @@ at half strength. A two-layer set (Luna) outlines its green Play in the bar's in
 - **Window:** a 44 px header, a line icon, the title, then minimize,
   maximize and close; the chip and a title double-tap still minimise and
   maximise. A window behind keeps its frame, drops its current mark and
-  casts a smaller shadow.
+  casts a smaller shadow. A maximised window is full screen (owner,
+  2026-10-21): no bar and no header, the app's row at the top edge with
+  minimise, restore and close at its right (`MAXIMISE_VARIANTS.md`'s V2).
 - **System menu:** a popover under Moy: Search, Settings, About, Restart.
 - **Modals dim what they cover** (owner, 2026-10-19): the system menu, a
   card's menu, About and a dialog wash the content under the bars in the
@@ -309,9 +311,9 @@ light and its handheld bar takes the desk bar's fill.
 `index.txt` names every target. Settings, Appearance, the handheld Calc,
 the console home and the wallpaper scenes follow `pixel_round3/`'s
 layouts (`rounds/round11.py`). The Editor's desk layouts and its
-handheld Config, Blocks, Map, Scene and Music tabs are
+handheld Settings, Blocks, Map, Scene and Music tabs are
 `rounds/round12.py`'s, and `EDITOR_LAYOUT.md` is their design. Paint, My
 Art, Get Carts, Notes and Storybook are `rounds/round13.py`'s, each
 function mapped to its part in `APPS_RESTYLE.md`. The three readings of
-maximise and the resizable panes are `rounds/round14.py`'s
-(`MAXIMISE_VARIANTS.md`).
+maximise (the owner chose full screen) and the resizable panes are
+`rounds/round14.py`'s (`MAXIMISE_VARIANTS.md`).

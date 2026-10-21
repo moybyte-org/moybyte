@@ -98,7 +98,11 @@ Each was mocked and judged worse (§11).
   (Settings → EDIT ICONS), which wins.
 - **Wallpapers** are carts with `"moybyte": {"type": "wallpaper"}`, or the
   theme's picture; which one the desk shows is the theme's (D6, §4.9), and
-  apps reach the backdrop through `ctx.wallpaper`.
+  apps reach the backdrop through `ctx.wallpaper`. A wallpaper cart may
+  list one image per screen size in its `moybyte` object (owner,
+  2026-10-21, `docs/media/look_2026-10/APPS_RESTYLE.md`): a board shows the
+  image of its exact size, else shrinks the next larger one once and keeps
+  the result.
 - **Who reads tokens:** shipped apps through `ctx.theme` (`colors()`, `light()`,
   `name()`, `variant()`, `set()`, `set_variant()`;
   `runtime/app_context.py`). App carts (`"moybyte": {"type": "app"}`) through the ungated
