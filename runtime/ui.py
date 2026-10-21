@@ -17,7 +17,9 @@ is. `table` is a list in columns, `scroll` a region whose rows scroll in it,
 or centred where nothing holds focus, and `menu` its rows of verbs (the
 system menu, the pause menu);
 `tabs` is a row of tabs and `grid` and `card` a grid of cards whose pictures
-the app draws (Appearance's).
+the app draws (Appearance's); `empty` an empty page, `tool` an icon button
+in an app's tool row, `bar` the title and tools an app lends its bar and
+`rule` a divider (the apps' restyle's).
 
 Immediate mode: each verb draws now and answers its value, and the engine
 (native/moy_ui/moy_ui_api.h) owns focus, keyboard navigation, activation and
@@ -164,7 +166,15 @@ def _over(o):
     oid = o.get("id")
     idb = b"" if oid is None else str(oid).encode("utf-8")
     hint = o.get("hint")
-    tail = b"" if hint is None else _hint(str(hint).encode("utf-8"))
+    wash = o.get("wash")
+    lead = o.get("lead")
+    flags = None
+    if wash is not None or lead is not None:
+        flags = (1 if wash else 0) | (2 if lead else 0)
+    tail = b"" if hint is None and flags is None else _hint(
+        None if hint is None else str(hint).encode("utf-8"))
+    if flags is not None:
+        tail += _pack("<i", flags)
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -172,7 +182,10 @@ def _over(o):
 
 
 def _hint(b):
-    """A field's placeholder as the block's tail: its length, then its text."""
+    """A field's placeholder as the block's tail: its length, then its text
+    (-1 for none, where a flags word follows)."""
+    if b is None:
+        return _pack("<i", -1)
     return _pack("<i", len(b)) + b
 
 
@@ -433,7 +446,8 @@ def popover(id=None, w=0, o=None):
     stacked until
     `popover()` ends it; while it is drawn nothing outside it takes input.
     True, or False the frame a press outside the card or Esc dismissed it
-    (the app then stops drawing it)."""
+    (the app then stops drawing it). With `o.wash` it washes what it
+    covers, as a dialog does: a row's or a card's menu."""
     t = _T
     if id is None:
         _C.api_popover(t[0], t[1], t[2], "", 0, None)
@@ -519,6 +533,43 @@ def toast(text, kind="check"):
     _C.api_toast(t[0], t[1], t[2], text, kind)
 
 
+def tool(icon, label, o=None):
+    """A tool: icon `icon` as a flat button in `at`'s rect (else a row of
+    the page), wearing only its marks: current where `o` says `current`, at
+    half strength where it says `disabled`. `label` is its word, and its
+    text after a tab the key it answers to ("Paste\tCtrl+V"): on the
+    handheld the word stands under the icon; on the desk a resting pointer
+    shows the word and the key as a tooltip under it, over the page at
+    `end()`. True the frame it is activated."""
+    t = _T
+    return _C.api_tool(t[0], t[1], t[2], icon, label, _over(o))
+
+
+def bar(title, tools=(), off=(), back=False):
+    """Lend the host's bar this frame's `title` and `tools` (icon names, at
+    most six), drawn after the title in the bar's ink, a tool whose place in
+    `off` is true at half strength: on the handheld its bar after the way
+    back; on the desk the window's title after the app's ("Notes · Story
+    ideas"), and the tools are the app's own row there. `back`: the app has
+    a page to step back from, so the bar's way back is the app's. The tool
+    the bar activated since the last frame (from 0), UP its way back, -1
+    none."""
+    t = _T
+    bits = 0x80000000 if back else 0
+    for i in range(min(len(off), 6)):
+        if off[i]:
+            bits |= 1 << i
+    return _C.api_bar(t[0], t[1], t[2], title, _opts(tools), bits)
+
+
+def rule(o=None):
+    """A rule: a line in the structure colour across `at`'s rect (down it
+    where the rect is taller than wide: a split's divider), else a row of
+    the page with the line across it."""
+    t = _T
+    _C.api_rule(t[0], t[1], t[2])
+
+
 def part(id, w=0, h=0, o=None):
     """A stop for content only the app can draw, `w` and `h` 0 being the
     row's: `(x, y, w, h, state)`, state's bits FOCUS 1, ACTIVATED 2,
@@ -528,6 +579,7 @@ def part(id, w=0, h=0, o=None):
 
 
 FOCUS, ACTIVATED, PRESSED, HOVER = 1, 2, 4, 8
+UP = -2                                 # ui.bar's answer: the bar's way back
 
 
 def focus(id=None):

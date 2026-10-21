@@ -315,6 +315,13 @@ _DRAW_SIGS = (
     ("moy_ui_api_group_card", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_empty", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_char_p, _Z], _I),
     ("moy_ui_api_toast", [c.c_void_p, c.POINTER(_Sink), _Span, _Span], None),
+    ("moy_ui_api_tool", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p], _I),
+    ("moy_ui_api_bar", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_uint32],
+     c.c_int32),
+    ("moy_ui_api_bar_lent", [c.c_void_p, c.POINTER(c.c_char_p), c.POINTER(c.c_int16),
+                             c.POINTER(_I), c.POINTER(c.c_uint32)], _I),
+    ("moy_ui_api_bar_tap", [c.c_void_p, _I], None),
+    ("moy_ui_api_rule", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_grid", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p], None),
     ("moy_ui_api_card", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p, c.c_void_p],
      None),
@@ -330,7 +337,7 @@ class _Over(c.Structure):
     _fields_ = [("fill", c.c_int32), ("ink", c.c_int32), ("border", c.c_int32),
                 ("id", _Span), ("current", c.c_int8), ("disabled", c.c_int8),
                 ("nav", c.c_int8), ("mark", c.c_int8), ("steps", c.c_int8),
-                ("hint", _Span)]
+                ("hint", _Span), ("wash", c.c_int8), ("lead", c.c_int8)]
 
 
 class _Line(c.Structure):
@@ -1111,6 +1118,43 @@ def binding():
         u, keep2 = _span0(kind)
         lib.moy_ui_api_toast(p, c.byref(s), t, u)
 
+    def api_tool(ctx, cv, look, icon, label, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        i, keep = span(icon)
+        t, keep2 = span(label)
+        ov, ok = _over(o)
+        return bool(lib.moy_ui_api_tool(p, c.byref(s), i, t, ov))
+
+    def api_bar(ctx, cv, look, title, tools, off):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = span(title)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        b = bytes(tools)
+        return int(lib.moy_ui_api_bar(p, c.byref(s), t, b, len(b), int(off) & 0xFFFFFFFF))
+
+    def api_bar_lent(ctx):
+        p, _k = _ctx(ctx)
+        title = c.c_char_p()
+        slots = (c.c_int16 * 6)()
+        n = _I()
+        off = c.c_uint32()
+        if not lib.moy_ui_api_bar_lent(p, c.byref(title), slots, c.byref(n), c.byref(off)):
+            return None
+        return ((title.value or b"").decode("utf-8", "replace"),
+                tuple(slots[i] for i in range(n.value)), off.value)
+
+    def api_rule(ctx, cv, look):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_rule(p, c.byref(sink(cv, look)))
+
+    def api_bar_tap(ctx, i):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_bar_tap(p, int(i))
+
     def api_owes(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
@@ -1197,6 +1241,7 @@ def binding():
               api_grid,
               api_card, api_part, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_toast,
+              api_tool, api_bar, api_bar_lent, api_bar_tap, api_rule,
               api_focus, api_keys_taken, api_at, api_dup):
         setattr(m, f.__name__, f)
     m.hits_cap = lambda: c.c_int.in_dll(lib, "moy_ui_hits_cap").value

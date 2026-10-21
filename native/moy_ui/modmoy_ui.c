@@ -2503,6 +2503,68 @@ static mp_obj_t ui_api_menu_danger(mp_obj_t ctx, mp_obj_t rows) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_menu_danger_obj, ui_api_menu_danger);
 
+// api_tool(ctx, cv, look, icon, label, o) -> activated
+static mp_obj_t ui_api_tool(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_over_t o;
+    return mp_obj_new_bool(moy_ui_api_tool(c, &s, span_of(a[3]), span_of(a[4]),
+                                           over_of(a[5], &o)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_tool_obj, 6, 6, ui_api_tool);
+
+// api_bar(ctx, cv, look, title, tools, off) -> the tool the host's bar
+// activated (from 0), -2 its way back, -1 none
+static mp_obj_t ui_api_bar(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
+    return mp_obj_new_int(moy_ui_api_bar(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
+                                         (uint32_t)mp_obj_get_int_truncated(a[5])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_bar_obj, 6, 6, ui_api_bar);
+
+// api_bar_lent(ctx) -> (title, slots, off) the frame drawn last lent its
+// bar, or None
+static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
+    const char *title = NULL;
+    int16_t slots[MOY_UI_API_BAR];
+    int n = 0;
+    uint32_t off = 0;
+    if (!moy_ui_api_bar_lent(ctx_of(ctx), &title, slots, &n, &off)) {
+        return mp_const_none;
+    }
+    mp_obj_t sl[MOY_UI_API_BAR];
+    for (int i = 0; i < n; i++) {
+        sl[i] = MP_OBJ_NEW_SMALL_INT(slots[i]);
+    }
+    mp_obj_t t[3] = {mp_obj_new_str(title, strlen(title)), mp_obj_new_tuple(n, sl),
+                     mp_obj_new_int_from_uint(off)};
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_bar_lent_obj, ui_api_bar_lent);
+
+// api_rule(ctx, cv, look)
+static mp_obj_t ui_api_rule(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
+    moy_ui_sink_t s;
+    sink_of(&s, cv, look);
+    moy_ui_api_rule(ctx_of(ctx), &s);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_rule_obj, ui_api_rule);
+
+// api_bar_tap(ctx, i): the host's bar activated tool i of the bar lent last
+static mp_obj_t ui_api_bar_tap(mp_obj_t ctx, mp_obj_t i) {
+    moy_ui_api_bar_tap(ctx_of(ctx), mp_obj_get_int(i));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_bar_tap_obj, ui_api_bar_tap);
+
 // api_text(ctx, lines, centre, tone, role): the next label's text options.
 static mp_obj_t ui_api_text(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2737,6 +2799,11 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_tool), MP_ROM_PTR(&ui_api_tool_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_bar), MP_ROM_PTR(&ui_api_bar_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_bar_lent), MP_ROM_PTR(&ui_api_bar_lent_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_bar_tap), MP_ROM_PTR(&ui_api_bar_tap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_rule), MP_ROM_PTR(&ui_api_rule_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text), MP_ROM_PTR(&ui_api_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card_mark), MP_ROM_PTR(&ui_api_card_mark_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_grid_spread), MP_ROM_PTR(&ui_api_grid_spread_obj) },

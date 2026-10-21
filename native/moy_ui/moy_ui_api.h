@@ -29,6 +29,8 @@
 #define MOY_UI_API_KEEP 16          // the ids whose state is kept
 #define MOY_UI_API_CAPS 16          // the group captions one frame records
 #define MOY_UI_API_NAME 32          // the focused id's text, NUL-terminated
+#define MOY_UI_API_TIP 48           // a tooltip's or a lent title's text, NUL-terminated
+#define MOY_UI_API_BAR 6            // the tools an app lends its bar
 
 // The input a frame resolves over, the run snapshot's shape: the buttons held
 // and pressed this frame (bit i is MOY_INPUT_NAMES[i]: left, right, up, down,
@@ -53,8 +55,9 @@ enum { MOY_UI_ST_FOCUS = 1, MOY_UI_ST_ACTIVATED = 2, MOY_UI_ST_PRESSED = 4, MOY_
 // colour 0xRRGGBB; -1 absent), the id's length in bytes (its text follows
 // the nine words; -1 absent), current, disabled, nav, mark, steps (0 or 1;
 // -1 absent); then, where the block goes on, the hint's length as a word and
-// its text (a field's placeholder). A wasm app hands it over as a pointer and
-// its length.
+// its text (a field's placeholder), and then a word of flags (bit 0: wash, a
+// popover washing what it covers; bit 1: lead, a table whose first row is a
+// verb). A wasm app hands it over as a pointer and its length.
 enum {
     MOY_UI_O_FILL = 0, MOY_UI_O_INK, MOY_UI_O_BORDER, MOY_UI_O_ID, MOY_UI_O_CURRENT,
     MOY_UI_O_DISABLED, MOY_UI_O_NAV, MOY_UI_O_MARK, MOY_UI_O_STEPS, MOY_UI_O_WORDS
@@ -68,7 +71,11 @@ typedef struct {
     int8_t current, disabled, nav, mark;    // -1 absent
     int8_t steps;                   // a slider: a segment per step, no number
     moy_ui_span_t hint;             // a field's placeholder (p NULL: none)
+    int8_t wash;                    // a popover: wash what it covers (-1 absent)
+    int8_t lead;                    // a table: its first row is a verb (-1 absent)
 } moy_ui_over_t;
+#define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
+#define MOY_UI_O_LEAD 2             // and `lead`
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);
@@ -124,6 +131,7 @@ typedef struct {
     int8_t step_x, step_y;          // a key the focused stop keeps: -1 or 1
     uint8_t keys, reveal, cls, fs;
     uint8_t win;                    // the page lies in a window's body
+    uint8_t elsewhere;              // the keys are another surface's: no focus
     uint8_t app;                    // its buttons' row of app_buttons + 1, 0 none
     uint8_t n_prev, n_cur, has_at, gesture;    // gesture: 0 none, 1 down, 2 a scroll, 3 sideways
     moy_ui_stop_t prev[MOY_UI_API_STOPS], cur[MOY_UI_API_STOPS];
@@ -206,6 +214,19 @@ typedef struct {
     // The dialog drawn this frame: its id (0: none) and its card.
     uint32_t dlg_id;
     moy_ui_box_t dlg_card;
+    // The page's hint band this frame (h 0: none), which a wash leaves clear.
+    moy_ui_box_t hint_band;
+    // ui.tool's tooltip: the tool a resting pointer is over (w 0: none) and
+    // its words, drawn over the page at ui.end.
+    moy_ui_box_t tip_at;
+    char tip[MOY_UI_API_TIP];
+    // ui.bar's: the title and tools the app lends its host's bar, the frame
+    // that lent them (bar_seen), and the tool the host's bar activated for
+    // the next ui.bar to answer (-1 none).
+    char bar_title[MOY_UI_API_TIP];
+    int16_t bar_slot[MOY_UI_API_BAR];
+    uint8_t bar_n, bar_off, bar_seen, bar_back;
+    int8_t bar_act;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -218,7 +239,8 @@ moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n);
 // A frame begins: `in` (MOY_UI_IN_LEN words, NULL none), the surface a page
 // fills, its flags (moy_ui.h's MOY_UI_DESK: the desk's rows, else the
 // handheld's; MOY_UI_WINDOW: the page lies in a window's body, so its ground
-// is the window's; and, in the bits from MOY_UI_APP_SHIFT, the row of the
+// is the window's; MOY_UI_ELSEWHERE: the keys are another surface's, so no
+// stop holds focus this frame; and, in the bits from MOY_UI_APP_SHIFT, the row of the
 // theme's app_buttons its buttons take plus one, 0 none, which only a shell
 // app's host passes) and the font scale. Answers 1 when the frame is SETTLED: its input moved no focus,
 // activated nothing, pressed nothing and scrolled nothing, so a page drawn
@@ -369,8 +391,42 @@ int moy_ui_api_table_rows(const moy_ui_ctx_t *c, int32_t out[8]);
 void moy_ui_api_table_pics(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // The page's end, after its rows: where they run on below what shows, a
 // fade at the foot of the page, over the hint band's top edge where the
-// page has one.
+// page has one; and over everything, the tooltip of a tool a resting
+// pointer is over (ui.tool).
 void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
+// A tool (§1): an icon button in ui.at's rect (else a row of the page),
+// flat but for its marks: the current mark where o->current, the focus mark
+// by its size, at half strength where o->disabled. `label` is its word,
+// its text after a tab the key it answers to: on the handheld the word
+// stands under the icon; on the desk it is the tooltip, with the key, that a
+// resting pointer shows under the tool (drawn at ui.end). Answers true the
+// frame it is activated.
+int moy_ui_api_tool(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
+                    moy_ui_span_t label, const moy_ui_over_t *o);
+// The app's bar (§1): `title` and the tools (`tools` NUL-separated icon slot
+// names, `len` bytes, at most MOY_UI_API_BAR; bit i of `off` the tool i drawn
+// at half strength, which nothing activates) lent to the host's bar for this
+// frame; the host draws them (moy_ui_api_bar_lent) and taps them
+// (moy_ui_api_bar_tap). MOY_UI_BAR_BACK in `off`: the app has a page to step
+// back from, so the bar's way back is the app's. Answers the tool the host's
+// bar activated since the last frame (from 0), MOY_UI_BAR_UP its way back,
+// -1 none.
+#define MOY_UI_BAR_BACK 0x80000000u
+#define MOY_UI_BAR_UP (-2)
+int32_t moy_ui_api_bar(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
+                       const uint8_t *tools, size_t len, uint32_t off);
+// A rule (§1): a line in the structure colour, one pixel at the scale
+// across ui.at's rect (down it where the rect is taller than wide), else a
+// row of the page's with the line across its middle.
+void moy_ui_api_rule(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
+// The host's side of ui.bar: whether the frame drawn last lent a bar, its
+// title then, its tools' slots into `slots` (room for MOY_UI_API_BAR) and
+// their count into *n, the half-strength bits and MOY_UI_BAR_BACK into *off.
+int moy_ui_api_bar_lent(const moy_ui_ctx_t *c, const char **title, int16_t *slots, int *n,
+                        uint32_t *off);
+// The host's bar activated tool `i` of the bar lent last (MOY_UI_BAR_UP its
+// way back); the next ui.bar answers it.
+void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i);
 // Whether the frame drawn last laid a dialog or a popover out from a stale measure, so
 // the next frame is owed though no input came.
 int moy_ui_api_owes(const moy_ui_ctx_t *c);

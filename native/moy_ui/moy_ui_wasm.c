@@ -332,6 +332,26 @@ int moy_ui_run_menu(void *target, moy_ui_span_t label, const uint8_t *items, siz
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_tool(void *target, moy_ui_span_t icon, moy_ui_span_t label, const moy_ui_over_t *o,
+                    int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_tool(c, &r.s, icon, label, o);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_rule(void *target) {
+    OPEN(target);
+    moy_ui_api_rule(c, &r.s);
+    return close_run(&r, MOY_UI_OK);
+}
+
+int moy_ui_run_bar(void *target, moy_ui_span_t title, const uint8_t *tools, size_t n, uint32_t off,
+                   int32_t *out) {
+    OPEN(target);
+    *out = moy_ui_api_bar(c, &r.s, title, tools, n, off);
+    return close_run(&r, MOY_UI_OK);
+}
+
 int moy_ui_run_grid(void *target, moy_ui_span_t id, int w, int h, const moy_ui_over_t *o) {
     OPEN(target);
     moy_ui_api_grid(c, &r.s, id, w, h, o);
@@ -606,6 +626,28 @@ int32_t moy_ui_wasm_menu(void *e, const uint8_t *label, uint32_t n, const uint8_
     return rc != 0 ? rc : v;
 }
 
+int32_t moy_ui_wasm_tool(void *e, const uint8_t *icon, uint32_t in, const uint8_t *label,
+                         uint32_t n, const uint8_t *ob, uint32_t on) {
+    (void)e;
+    OVER(ob, on);
+    int32_t v = 0;
+    int rc = moy_ui_run_tool(wasm_target(), span(icon, in), span(label, n), &o, &v);
+    return rc != 0 ? rc : v;
+}
+
+int32_t moy_ui_wasm_bar(void *e, const uint8_t *title, uint32_t n, const uint8_t *tools,
+                        uint32_t len, int32_t off) {
+    (void)e;
+    int32_t v = -1;
+    int rc = moy_ui_run_bar(wasm_target(), span(title, n), tools, len, (uint32_t)off, &v);
+    return rc != 0 ? rc : v;
+}
+
+int32_t moy_ui_wasm_rule(void *e) {
+    (void)e;
+    return moy_ui_run_rule(wasm_target());
+}
+
 #define FN(f) ((void *)(f))
 
 // In roles.json's order; native/moy_app/moy_app_wasm.c's table carries each
@@ -639,6 +681,9 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_card", FN(moy_ui_wasm_card) },
     { "ui_popover", FN(moy_ui_wasm_popover) },
     { "ui_menu", FN(moy_ui_wasm_menu) },
+    { "ui_tool", FN(moy_ui_wasm_tool) },
+    { "ui_bar", FN(moy_ui_wasm_bar) },
+    { "ui_rule", FN(moy_ui_wasm_rule) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

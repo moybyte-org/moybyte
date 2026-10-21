@@ -1817,9 +1817,9 @@ def test_every_runtime_begins_its_page_in_the_window_it_runs_in(parts_root, monk
     seen = []
     real = player._ui_frame
 
-    def spy(*a):
+    def spy(*a, **kw):
         seen.append(a[6])
-        return real(*a)
+        return real(*a, **kw)
     monkeypatch.setattr(player, "_ui_frame", spy)
     root, titles = parts_root
     kw = dict(sys_size=(1024, 600), font_scale=2, windowed=True) if desk else {}
@@ -2429,3 +2429,240 @@ def test_the_menu_page_answers_its_script(menu_runs):
     assert s[3][M_LAST] == 3 and s[3][M_PICKS] == 1, "a activates Options"
     assert s[5][M_LAST] == 4 and s[5][M_OPEN] == 0, "Quit closes the card"
     assert s[7][M_SYS] == 2, "the page's menu takes input again"
+
+
+# -- the apps' restyle (docs/look_2026-10.md step 31): tools, the app's bar, a
+# -- rule, the override keys wash and lead ---------------------------------------------
+
+
+def _tools(current=False, disabled=False):
+    st = {}
+
+    def draw():
+        ui.page("")
+        ui.at(10, 100, 42, 32)
+        st["sel"] = ui.tool("select", "Select", {"current": current})
+        ui.at(56, 100, 42, 32)
+        st["copy"] = ui.tool("copy", "Copy\tCtrl+C", {"disabled": disabled})
+        return st
+    r = _Run(draw)
+    r.frame()
+    r.frame()
+    return r
+
+
+def test_a_tool_is_a_flat_stop_its_word_under_its_icon():
+    r = _tools()
+    assert _box(r, "Select") == (10, 100, 42, 32)
+    assert _box(r, "Copy") == (56, 100, 42, 32), "its id is its word, not its key"
+    ground = r.px(5, 95)
+    assert r.px(70, 102) == ground, "flat: no fill where no mark lies"
+    words = [r.px(x, y) for x in range(56, 98) for y in range(120, 132)]
+    assert any(p != ground for p in words), "the word under the icon"
+    r.tap(77, 116)
+    assert r.out["copy"] is True
+
+
+def test_a_disabled_tool_is_no_stop_and_a_current_one_wears_the_mark():
+    off = _tools(disabled=True)
+    assert _box(off, "Copy") is None
+    plain, cur = _tools(), _tools(current=True)
+    assert plain.px(12, 102) != cur.px(12, 102), "the current mark's plate"
+
+
+def test_a_resting_pointer_on_a_desk_tool_shows_its_word_and_key_at_the_end():
+    th = _theme("moy", "light")
+    cv = make_system_canvas(400, 200)
+    ctx = ui_draw.ui_context()
+    inp = array("i", [0] * 6)
+    out = {}
+
+    def frame(ptr):
+        inp[2], inp[3], inp[4] = ptr
+        ui_draw.ui_frame(ctx, cv, th, None, inp, desk=True)
+        ui.page("")
+        ui.at(20, 20, 36, 36)
+        out["hit"] = ui.tool("paste", "Paste\tCtrl+V")
+        ui.end()
+
+    def px():
+        return bytes(cv._buf)
+    frame((300, 150, 1))
+    frame((300, 150, 1))
+    away = px()
+    frame((38, 38, 1))
+    frame((38, 38, 1))
+    rest = px()
+    o = lambda x, y: 2 * (y * cv.w + x)                  # noqa: E731
+    under = [rest[o(x, y)] != away[o(x, y)] for x in range(0, 120) for y in range(60, 86)]
+    assert any(under), "the tooltip under the tool"
+
+
+def _bar_page():
+    st = {}
+
+    def draw():
+        ui.page("")
+        st["b"] = ui.bar("Story", ("undo", "redo"), (False, True), True)
+        return st
+    r = _Run(draw)
+    r.frame()
+    return r
+
+
+def test_the_bar_an_app_lends_is_read_and_tapped_by_its_host():
+    from runtime import iconsets
+    r = _bar_page()
+    title, slots, off, back = ui_draw.bar_lent(r.ctx)
+    assert title == "Story" and [iconsets.SLOTS[s] for s in slots] == ["undo", "redo"]
+    assert off == 0b10 and back is True
+    ui_draw.bar_tap(r.ctx, 0)
+    r.frame()
+    assert r.out["b"] == 0, "the tool the bar activated, once"
+    r.frame()
+    assert r.out["b"] == -1
+    ui_draw.bar_tap(r.ctx, 1)
+    r.frame()
+    assert r.out["b"] == -1, "a tool at half strength activates nothing"
+    ui_draw.bar_tap(r.ctx, -2)
+    r.frame()
+    assert r.out["b"] == ui.UP
+
+
+def test_a_bar_not_lent_this_frame_is_none():
+    st = {"lend": True}
+
+    def draw():
+        ui.page("")
+        if st["lend"]:
+            ui.bar("Here")
+    r = _Run(draw)
+    r.frame()
+    assert ui_draw.bar_lent(r.ctx) is not None
+    st["lend"] = False
+    r.frame()
+    assert ui_draw.bar_lent(r.ctx) is None
+
+
+def test_a_rule_is_a_line_across_or_down_ats_rect():
+    def draw():
+        ui.page("")
+        ui.at(10, 50, 100, 7)
+        ui.rule()
+        ui.at(200, 20, 9, 100)
+        ui.rule()
+    r = _Run(draw)
+    r.frame()
+    ground = r.px(5, 5)
+    assert r.px(50, 50) != ground and r.px(50, 51) == ground, "one pixel across"
+    assert r.px(200, 60) != ground and r.px(201, 60) == ground, "one pixel down"
+
+
+def _wash_page(wash):
+    def draw():
+        ui.page("")
+        ui.hints(("confirm", "Choose"))
+        ui.link("Row", "")
+        ui.at(100, 60, 100, 20)
+        ui.popover("m", 120, {"wash": True} if wash else None)
+        ui.menu("", ("One", "Two"))
+        ui.popover()
+    r = _Run(draw)
+    for _ in range(3):
+        r.frame()
+    return r
+
+
+def test_a_washing_popover_dims_what_it_covers_but_not_the_hint_strip():
+    plain, washed = _wash_page(False), _wash_page(True)
+    assert plain.px(10, 40) != washed.px(10, 40), "the page under it dims"
+    assert plain.px(4, 236) == washed.px(4, 236), "the hint strip does not"
+
+
+def _lead_table(lead, group):
+    def draw():
+        ui.page("")
+        if group:
+            ui.group("Notes")
+        ui.table("", ("", ""), (("new", "New note"), ("notes", "One")), 1,
+                 {"id": "vault", "lead": True} if lead else {"id": "vault"})
+        if group:
+            ui.group()
+    r = _Run(draw)
+    r.frame()
+    r.frame()
+    return r
+
+
+def test_a_lead_row_is_the_tables_verb_in_value():
+    plain, lead = _lead_table(False, False), _lead_table(True, False)
+    x, y, w, _h = _box(plain, "vault")
+    row = [(i, y + 10) for i in range(x, x + w // 2)]
+    assert [plain.px(*p) for p in row] != [lead.px(*p) for p in row]
+
+
+def test_a_table_in_a_group_draws_its_rows_as_the_groups():
+    r = _lead_table(False, True)
+    x, y, w, h = _box(r, "vault")
+    ground = r.px(2, y + 5)
+    assert r.px(x + w // 2, y + 25) != ground, "the rows lie on the card"
+
+
+# -- the restyle's page in every runtime ---------------------------------------------------
+
+WASM_RESTYLE = os.path.join(ROOT, "tests", "fixtures", "wasm", "app_restyle.moy")
+R_FRAMES, R_MAKES, R_TOOLS, R_BAR, _R4, R_FOCUS, R_FAIL = range(7)
+RESTYLE_SCRIPT = ("a", "down", "a", "right", "a")
+
+
+@pytest.fixture(scope="module")
+def restyle_runs(tmp_path_factory):
+    root = str(tmp_path_factory.mktemp("ui_restyle") / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    for d in ("restyle_py.moy", "restyle_lua.moy"):
+        shutil.copytree(os.path.join(PARTS, d), os.path.join(root, d))
+    titles = {"python": "UI Restyle Py", "lua": "UI Restyle Lua"}
+    if _wasm_or_skip():
+        from tools import wasm_cart
+        wasm_cart.build(WASM_RESTYLE, os.path.join(root, "app_restyle.moy"))
+        titles["wasm"] = "App Restyle Wasm"
+    out = {}
+    for name, title in titles.items():
+        ws = host_app.build_workstation(root)
+        ws.pointer.visible = False
+        open_cart(ws, title)
+        make_drv(ws).frame(_DT)
+        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        drv = make_drv(ws)
+        shots = []
+        for _ in range(3):
+            _frame(drv)
+        shots.append((_pixels(ws), _pmem(ws)))
+        for step in RESTYLE_SCRIPT:
+            drv.press(step)
+            for _ in range(3):
+                _frame(drv)
+            shots.append((_pixels(ws), _pmem(ws)))
+        out[name] = shots
+        assert ws.player.cart_error is None, (name, ws.player.cart_error)
+        ws.exit()
+    return out
+
+
+def test_the_restyle_page_is_one_page_in_every_runtime(restyle_runs):
+    ref = restyle_runs["python"]
+    for name, got in restyle_runs.items():
+        assert len(got) == len(ref)
+        for i, ((px, pm), (rpx, rpm)) in enumerate(zip(got, ref)):
+            assert pm[R_FAIL] == 0, "%s: a row failed (%d)" % (name, pm[R_FAIL])
+            assert pm[:R_FAIL] == rpm[:R_FAIL], "%s step %d answered %r, python %r" % (
+                name, i, pm, rpm)
+            assert px == rpx, "%s step %d drew other pixels than python" % (name, i)
+
+
+def test_the_restyle_page_answers_its_script(restyle_runs):
+    s = [p for _px, p in restyle_runs["python"]]
+    assert s[0][R_FOCUS] == len("Make")
+    assert s[1][R_MAKES] == 1, "a activates the verb"
+    assert s[3][R_TOOLS] in (1, 10), "a tool under it activates"
+    assert all(p[R_BAR] == 0 for p in s), "no host tapped the bar"

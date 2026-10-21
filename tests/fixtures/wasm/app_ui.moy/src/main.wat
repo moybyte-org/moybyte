@@ -60,6 +60,10 @@
   (import "moybyte.app" "ui_popover" (func $ui_popover (param i32 i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_menu" (func $ui_menu
     (param i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_tool" (func $ui_tool
+    (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_bar" (func $ui_bar (param i32 i32 i32 i32 i32) (result i32)))
+  (import "moybyte.app" "ui_rule" (func $ui_rule (result i32)))
 
   (memory (export "memory") 1 1)
 

@@ -28,16 +28,21 @@
  *   ui.popover(id, w, o)           -> true, false the frame it is dismissed;
  *                                    ui.popover() ends its body
  *   ui.menu(label, items, icons, o) -> the item activated (from 1; 0 none)
+ *   ui.tool(icon, label, o)        -> true the frame it is activated
+ *   ui.bar(title, tools, off, back) -> the tool the host's bar activated (from 1; 0
+ *                                    none; -1 its way back, where `back`); off[i] true
+ *                                    draws tool i at half strength
  *   ui.tabs(label, items, cur, o)  -> the new cur (from 1)
  *   ui.grid(id, w, h, o), ui.grid() (a grid of cards w x h; ui.grid() ends it)
  *   ui.card(title, sub, o)         -> x, y, w, h, state (the picture's rect)
+ *   ui.rule()                      (a divider across ui.at's rect, else a row)
  *   ui.part(id, w, h, o)           -> x, y, w, h, state
  *   ui.focus(id), ui.focus()       -> the focused id, or nil
  *   ui.keys_taken()                -> whether the ui used this frame's keys
  *   ui.at(x, y, w, h)
  *
  * `o` is a table of §3's keys: fill, ink, border (a role name or a colour
- * 0xRRGGBB), id, current, disabled, nav, mark.
+ * 0xRRGGBB), id, current, disabled, nav, mark, steps, hint, wash, lead.
  *
  * Included by native/moycore/moycore_lua.c and opened beside the superset
  * when the build has native/moy_ui (MOYCORE_UI). */
@@ -106,6 +111,8 @@ static const moy_ui_over_t *moycore_ui_over(lua_State *L, int i, moy_ui_over_t *
     o->nav = moycore_ui_flag(L, i, "nav");
     o->mark = moycore_ui_flag(L, i, "mark");
     o->steps = moycore_ui_flag(L, i, "steps");
+    o->wash = moycore_ui_flag(L, i, "wash");
+    o->lead = moycore_ui_flag(L, i, "lead");
     lua_getfield(L, i, "id");
     if (lua_type(L, -1) == LUA_TSTRING) {
         size_t n = 0;
@@ -506,6 +513,43 @@ static int moycore_ui_menu(lua_State *L)
     return 1;
 }
 
+static int moycore_ui_tool(lua_State *L)
+{
+    moy_ui_over_t o;
+    int32_t v = 0;
+    moy_ui_run_tool(moycore_ui_canvas(), moycore_ui_span(L, 1), moycore_ui_span(L, 2),
+                    moycore_ui_over(L, 3, &o), &v);
+    lua_pushboolean(L, v != 0);
+    return 1;
+}
+
+static int moycore_ui_bar(lua_State *L)
+{
+    size_t len = 0;
+    const char *tools = lua_isnoneornil(L, 2) ? "" : moycore_ui_items(L, 2, &len);
+    uint32_t off = 0;
+    if (lua_type(L, 3) == LUA_TTABLE) {
+        for (int i = 0; i < MOY_UI_API_BAR; i++) {
+            lua_rawgeti(L, 3, i + 1);
+            if (lua_toboolean(L, -1)) off |= 1u << i;
+            lua_pop(L, 1);
+        }
+    }
+    if (lua_toboolean(L, 4)) off |= MOY_UI_BAR_BACK;
+    int32_t v = -1;
+    moy_ui_run_bar(moycore_ui_canvas(), moycore_ui_span(L, 1), (const uint8_t *)tools, len, off,
+                   &v);
+    lua_pushinteger(L, v == MOY_UI_BAR_UP ? -1 : (lua_Integer)v + 1);
+    return 1;
+}
+
+static int moycore_ui_rule(lua_State *L)
+{
+    (void)L;
+    moy_ui_run_rule(moycore_ui_canvas());
+    return 0;
+}
+
 static int moycore_ui_part(lua_State *L)
 {
     moy_ui_over_t o;
@@ -555,6 +599,8 @@ static void moycore_ui_open(lua_State *L)
         {"scroll", moycore_ui_scroll}, {"field", moycore_ui_field}, {"dialog", moycore_ui_dialog},
         {"tabs", moycore_ui_tabs}, {"grid", moycore_ui_grid}, {"card", moycore_ui_card},
         {"popover", moycore_ui_popover}, {"menu", moycore_ui_menu},
+        {"tool", moycore_ui_tool}, {"bar", moycore_ui_bar},
+        {"rule", moycore_ui_rule},
         {NULL, NULL},
     };
     luaL_newlib(L, verbs);

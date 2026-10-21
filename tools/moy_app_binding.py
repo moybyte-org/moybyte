@@ -42,7 +42,7 @@ _PSIZE = c.POINTER(c.c_size_t)
 _PCHAR = c.c_char_p
 
 OK, STALE, FULL, NOMEM, DENIED, NOSTORE, IO, BAD, ABSENT, NEEDS_VM = range(10)
-ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 82, 4, 39
+ROLE_N, ROW_N, KINDS_N, TOKENS_N = 13, 85, 4, 39
 NAME_MAX = 31
 UF_NAME_MAX = 255        # moy_ufiles.h's MOY_UF_NAME_MAX
 NONE_UF, BAD_UF = -1, -2

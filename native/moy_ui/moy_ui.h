@@ -471,7 +471,7 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, 
 enum {
     MOY_UI_F_ON = 1, MOY_UI_F_HOT = 2, MOY_UI_F_DISABLED = 4, MOY_UI_F_EDGE = 8,
     MOY_UI_F_BAND = 16, MOY_UI_F_EDGE_LAST = 32, MOY_UI_F_LABEL = 64, MOY_UI_F_ICON = 128,
-    MOY_UI_F_GLYPH = 256, MOY_UI_F_FOCUS = 512,
+    MOY_UI_F_GLYPH = 256, MOY_UI_F_FOCUS = 512, MOY_UI_F_LEAD = 1024,
 };
 // A widget whose caller draws an icon image (or its own glyph) between the
 // frame and the content draws in two calls, FRAME then CONTENT; every other
@@ -737,6 +737,9 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // The page's ground and the hints take MOY_UI_WINDOW in `desk` beside the
 // size class (MOY_UI_DESK): the page lies in a window's body.
 enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2 };
+// moy_ui_api_begin's: the keys are another surface's this frame (a cart's
+// editor handle holds them), so no stop holds focus.
+#define MOY_UI_ELSEWHERE 4
 enum {
     MOY_UI_V_LABEL = 0, MOY_UI_V_INFO = 1, MOY_UI_V_LINK = 2, MOY_UI_V_CYCLE = 3,
     MOY_UI_V_SEG = 4, MOY_UI_V_SWATCH = 5, MOY_UI_V_TOGGLE = 6, MOY_UI_V_SLIDER = 7,
@@ -867,6 +870,17 @@ int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, in
 int moy_ui_modal_band(int fs, int desk);
 // The width of text `t` in type role `role`'s font on the sink.
 int moy_ui_role_w(const moy_ui_sink_t *s, int role, moy_ui_span_t t);
+// A tool's part (ui.tool) in box b: flat but for its marks (`flags`
+// MOY_UI_F_ON, _FOCUS, _DISABLED; `interact` the pointer's state, -1 none),
+// its icon, and on the handheld its `word` under it in the caption face.
+int moy_ui_tool_draw(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph,
+                     moy_ui_span_t word, int flags, int interact, int fs, int desk);
+// A line in the structure colour filling box b (ui.rule's, at ui.at's rect).
+int moy_ui_line(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk);
+// A tooltip: `t` on a plate in the ink, under box `at` (over it where `in`,
+// the surface, has no room under it), inside `in`.
+int moy_ui_tip_draw(const moy_ui_sink_t *s, moy_ui_box_t at, moy_ui_span_t t, moy_ui_box_t in,
+                    int fs, int desk);
 // A group's card (handheld) behind row box `row`: `card` is its x, width and
 // top; `first` rounds the card's top corners, else a rule heads the row. On
 // the desk (`desk`) the card is plain rules between rows.

@@ -1682,6 +1682,13 @@ int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int 
     return MOY_UI_OK;
 }
 
+int moy_ui_line(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    fill(&d, b.x, b.y, b.w, b.h, pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)));
+    return MOY_UI_OK;
+}
+
 int moy_ui_rule(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk) {
     pd_t d;
     open_pd(s, &d, fs, desk);
@@ -2054,6 +2061,9 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
     int ink = tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
     int dim = tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
     int lab = ink, meta = dim;
+    if ((flags & MOY_UI_F_LEAD) && !(flags & MOY_UI_F_DISABLED)) {
+        lab = tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);   // the table's verb, in `value`
+    }
     int r = moy_ui_depth()->on ? (desk ? 7 : 4) * d.fs : 0;
     if (flags & MOY_UI_F_DISABLED) {
         lab = dim;
@@ -2294,4 +2304,115 @@ int moy_ui_role_w(const moy_ui_sink_t *s, int role, moy_ui_span_t t) {
     open_pd(s, &d, s->fs, 0);
     pf_t f = font_of(&d, role);
     return tw(&f, t.p, t.n, tscale(s));
+}
+
+// -- an empty page, a tool, a tooltip ------------------------------------------------
+
+// An icon (slot, else glyph) centred in box b in the wire colour `col`: the
+// mask the box holds, else the glyph; 0 where neither draws.
+static int icon_col(pd_t *d, int slot, int glyph, moy_ui_box_t b, uint16_t col) {
+    int box = b.w < b.h ? b.w : b.h;
+    uint32_t f24 = moy_ui_icon_font(1), f16 = moy_ui_icon_font(0);
+    uint32_t font = box >= 24 && f24 ? f24 : f16 ? f16 : 0;
+    if (slot >= 0 && font && !d->run && moy_ui_cmask() != 63) {
+        int size = font == f24 ? 24 : 16;
+        uint8_t code = (uint8_t)(MOY_UI_ICON_FIRST + slot);
+        int w = moy_text(&d->t, font, MOY_TEXT_DATA, &code, 1, b.x + moy_ui_fdiv(b.w - size, 2),
+                         b.y + moy_ui_fdiv(b.h - size, 2), col, 1, MOY_TEXT_LEFT, -1);
+        d->row->st[MOY_ST_N_TEXT]++;
+        if (w > 0) {
+            return 1;
+        }
+    }
+    if (glyph >= 0) {
+        d->row->st[MOY_ST_N_FILL] += moy_ui_glyph_draw(&d->t, glyph, b.x, b.y, b.w, b.h, col,
+                                                       d->fs);
+        return 1;
+    }
+    return 0;
+}
+
+int moy_ui_tool_draw(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph,
+                     moy_ui_span_t word, int flags, int interact, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int k = d.fs, r = (b.w < 30 * k ? 6 : 8) * k;
+    uint16_t g = 0;
+    if (!ground(&d, &g)) {
+        g = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
+    }
+    int ink_i = tok(&d, MOY_UI_T_INK, MOY_UI_T_INK);
+    int word_i = tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
+    int disabled = (flags & MOY_UI_F_DISABLED) != 0;
+    int on = (flags & MOY_UI_F_ON) != 0;
+    uint16_t under = g;
+    if (on) {
+        int mi = -1;
+        moy_ui_current_in(s, b, r, moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK, d.fs, &mi, 0);
+        if (mi >= 0) {
+            ink_i = word_i = mi;
+        }
+    } else if (!disabled && interact >= 0) {
+        // a resting pointer's plate, the ink a tenth over the ground; pressed, a fifth
+        under = plate_of(g, pal(&d, ink_i), interact == MOY_UI_PRESSED ? 51 : 26);
+        rrect(&d, b.x, b.y, b.w, b.h, r, 1, under, 0, 0);
+    }
+    if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->active && moy_ui_marks()->on) {
+        int mi = -1;
+        moy_ui_focus_in(s, b, MOY_UI_MARK_AUTO, r, 0, d.fs, NULL, &mi, 0);
+        if (mi >= 0) {
+            ink_i = mi;
+        }
+    }
+    uint16_t ink = pal(&d, ink_i), wink = pal(&d, word_i);
+    if (disabled) {
+        ink = plate_of(under, ink, 102);            // half strength: 0.4 of the ink
+        wink = plate_of(under, wink, 102);
+    }
+    int sc = tscale(s);
+    if (d.desk || word.n == 0) {
+        int side = (d.desk ? 24 : 16) * k;
+        moy_ui_box_t ib = {(int16_t)(b.x + moy_ui_fdiv(b.w - side, 2)),
+                           (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)), (int16_t)side,
+                           (int16_t)side};
+        icon_col(&d, slot, glyph, ib, ink);
+        return MOY_UI_OK;
+    }
+    // the handheld's: the icon, its word under it in the caption face
+    pf_t f = font_of(&d, MOY_UI_FONT_CAPTION);
+    int side = 16 * k, lh = f.line * sc;
+    int top = b.y + moy_ui_fdiv(b.h - side - lh, 2);
+    moy_ui_box_t ib = {(int16_t)(b.x + moy_ui_fdiv(b.w - side, 2)), (int16_t)top, (int16_t)side,
+                       (int16_t)side};
+    icon_col(&d, slot, glyph, ib, ink);
+    int w = tw(&f, word.p, word.n, sc);
+    text(&d, &f, word.p, word.n, b.x + moy_ui_fdiv(b.w - w, 2), top + side, lh, wink, sc);
+    return MOY_UI_OK;
+}
+
+int moy_ui_tip_draw(const moy_ui_sink_t *s, moy_ui_box_t at, moy_ui_span_t t, moy_ui_box_t in,
+                    int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int k = d.fs, sc = tscale(s);
+    pf_t f = font_of(&d, MOY_UI_FONT_UI);
+    int pad = 10 * k, h = f.line * sc + 2 * 5 * k;
+    int w = tw(&f, t.p, t.n, sc) + 2 * pad;
+    int x = at.x + at.w / 2 - w / 2, y = at.y + at.h + 4 * k;
+    if (x + w > in.x + in.w - 4 * k) {
+        x = in.x + in.w - 4 * k - w;
+    }
+    if (x < in.x + 4 * k) {
+        x = in.x + 4 * k;
+    }
+    if (y + h > in.y + in.h) {
+        y = at.y - 4 * k - h;           // no room under it: over it
+    }
+    uint16_t g = 0;
+    if (!ground(&d, &g)) {
+        g = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
+    }
+    rrect(&d, x, y, w, h, 6 * k, 1, pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)), 0, 0);
+    text(&d, &f, t.p, t.n, x + pad, y, h, g, sc);
+    return MOY_UI_OK;
 }

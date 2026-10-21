@@ -145,6 +145,9 @@
     {"role": "ui", "verb": "grid", "server": "c", "grant": "never", "wasm": "(*~ii*~)i"},
     {"role": "ui", "verb": "card", "server": "c", "grant": "never", "wasm": "(*~*~*~*~)i"},
     {"role": "ui", "verb": "popover", "server": "c", "grant": "never", "wasm": "(*~i*~)i"},
-    {"role": "ui", "verb": "menu", "server": "c", "grant": "never", "wasm": "(*~*~*~*~)i"}
+    {"role": "ui", "verb": "menu", "server": "c", "grant": "never", "wasm": "(*~*~*~*~)i"},
+    {"role": "ui", "verb": "tool", "server": "c", "grant": "never", "wasm": "(*~*~*~)i"},
+    {"role": "ui", "verb": "bar", "server": "c", "grant": "never", "wasm": "(*~*~i)i"},
+    {"role": "ui", "verb": "rule", "server": "c", "grant": "never", "wasm": "()i"}
   ]
 }

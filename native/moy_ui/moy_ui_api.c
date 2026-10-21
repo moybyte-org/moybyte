@@ -71,6 +71,7 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->current = o->disabled = o->nav = o->mark = o->steps = -1;
     o->hint.p = NULL;
     o->hint.n = 0;
+    o->wash = o->lead = -1;
 }
 
 static int32_t word(const uint8_t *w, int i) {
@@ -115,6 +116,16 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
             }
             o->hint.p = w + at;
             o->hint.n = (uint16_t)hn;
+            at += (size_t)hn;
+        }
+        // then a word of flags
+        if (n - at >= 4u) {
+            int32_t fl;
+            memcpy(&fl, w + at, 4);
+            if (fl >= 0) {
+                o->wash = (int8_t)((fl & MOY_UI_O_WASH) != 0);
+                o->lead = (int8_t)((fl & MOY_UI_O_LEAD) != 0);
+            }
         }
     }
     o->current = flag(word(w, MOY_UI_O_CURRENT));
@@ -127,7 +138,7 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
 
 static const moy_ui_over_t *over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
-                                       -1, -1, -1, -1, -1, {NULL, 0}};
+                                       -1, -1, -1, -1, -1, {NULL, 0}, -1, -1};
     return o != NULL ? o : &none;
 }
 
@@ -162,6 +173,7 @@ void moy_ui_api_reset(moy_ui_ctx_t *c) {
     c->page_stop = NO_PAGE;
     c->icon_slot = c->icon_glyph = c->row_slot = c->row_glyph = -1;
     c->dlg_pick = -1;
+    c->bar_act = -1;
 }
 
 moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n) {
@@ -375,6 +387,10 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->page = surface;
     c->cls = (uint8_t)((flags & MOY_UI_DESK) ? 1 : 0);
     c->win = (uint8_t)((flags & MOY_UI_WINDOW) ? 1 : 0);
+    c->elsewhere = (uint8_t)((flags & MOY_UI_ELSEWHERE) ? 1 : 0);
+    if (c->elsewhere) {
+        c->focus = 0;
+    }
     c->app = (uint8_t)((flags >> MOY_UI_APP_SHIFT) & 0xff);
     c->fs = (uint8_t)(fs > 0 ? fs : 1);
     c->y = 0;
@@ -404,6 +420,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->pop_gone = 0;
     c->pop_id = 0;
     c->dlg_id = 0;
+    c->hint_band.h = 0;
+    c->tip_at.w = 0;
+    c->bar_seen = 0;
     int settled = !c->owe;
     c->owe = 0;
     uint32_t focus0 = c->focus;
@@ -861,7 +880,7 @@ static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_
     if (c->modal && !dlg) {
         return 0;                   // under a dialog: drawn, and no input reaches it
     }
-    if (c->focus == 0) {
+    if (c->focus == 0 && !c->elsewhere) {
         c->focus = id;
         c->focus_name[0] = 0;
     }
@@ -1363,6 +1382,9 @@ void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *it
             k->foot = (int16_t)h;
         }
     }
+    if (c->n_nest == 0) {
+        c->hint_band = b;
+    }
     moy_ui_hints(s, b, items, len, c->fs, ground_of(c));
 }
 
@@ -1834,6 +1856,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         if (cap_h) {
             moy_ui_caption(s, (moy_ui_box_t){b.x, b.y, b.w, (int16_t)cap_h}, label, c->fs, c->cls);
         }
+        // in a group, its rows are the group's: each on its card under a rule
+        int grp = stacked && c->grp_open;
+        moy_ui_box_t gcard = card_of(c);
         moy_ui_tgeo_t g;
         moy_ui_table_geo(s, b, cols, cols_n, cells, cells_n, c->fs, c->cls, &g);
         if (g.pic) {
@@ -1862,6 +1887,19 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                 int f = (i == cur ? MOY_UI_F_ON : 0) | (disabled ? MOY_UI_F_DISABLED : 0);
                 if ((st & MOY_UI_ST_FOCUS) && o->mark != 0 && i == cur) {
                     f |= MOY_UI_F_FOCUS;
+                    if (grp) {
+                        f &= ~MOY_UI_F_ON;      // a group's row: the focus mark alone
+                    }
+                }
+                if (grp && c->modal && c->modal_from == id) {
+                    f &= ~MOY_UI_F_ON;          // its focus under the dialog that took it
+                }
+                if (i == 0 && o->lead == 1) {
+                    f |= MOY_UI_F_LEAD;
+                }
+                if (grp) {
+                    moy_ui_group_band(s, gcard, (moy_ui_box_t){b.x, (int16_t)ry, b.w, (int16_t)rh},
+                                      i == 0 && c->grp_first, c->fs, c->cls);
                 }
                 size_t end = e < cells_n ? e : cells_n;
                 moy_ui_table_row(s, (moy_ui_box_t){b.x, (int16_t)ry, b.w, (int16_t)rh}, &g,
@@ -1928,6 +1966,18 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     return (int32_t)len | (done ? MOY_UI_FIELD_DONE : 0);
 }
 
+// The wash under a dialog or a modal popover: the surface, less the page's
+// hint band where it stands at the surface's foot (DESIGN: a wash never
+// covers a bar or the hint strip; the host's bars are drawn over it).
+static void wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    moy_ui_box_t sf = c->surface;
+    moy_ui_box_t hb = c->hint_band;
+    if (hb.h > 0 && hb.y + hb.h >= sf.y + sf.h && hb.y > sf.y) {
+        sf.h = (int16_t)(hb.y - sf.y);
+    }
+    moy_ui_scrim(s, sf);
+}
+
 int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                           const uint8_t *buttons, size_t len, int kind, const moy_ui_over_t *o) {
     o = over(o);
@@ -1977,7 +2027,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     if (card.y < sf.y) {
         card.y = sf.y;
     }
-    moy_ui_scrim(s, sf);                // everything under a dialog dims (D-01)
+    wash(c, s);                         // everything under a dialog dims (D-01)
     moy_ui_modal(s, card, title, fs, c->cls, rh);
     c->dlg_id = id;
     c->dlg_card = card;
@@ -2090,7 +2140,7 @@ static int pop_body(moy_ui_ctx_t *c, const moy_ui_keep_t *kb, int body, int cap,
 
 int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w,
                        const moy_ui_over_t *o) {
-    (void)over(o);
+    o = over(o);
     if (id.n == 0) {
         if (c->n_nest && c->nest[c->n_nest - 1].kind == 3) {
             int used = c->nest[c->n_nest - 1].used;
@@ -2190,6 +2240,9 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     int h = 2 * pad + bh;
     moy_ui_box_t card = {(int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h};
     static const uint8_t none[1] = {0};
+    if (o->wash == 1) {
+        wash(c, s);                     // a row's or a card's menu (DESIGN, Menus and washes)
+    }
     moy_ui_modal(s, card, (moy_ui_span_t){none, 0}, fs, c->cls, rh);
     int lp = c->cls ? kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD) * fs
                     : kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * fs;
@@ -2563,6 +2616,130 @@ void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
         group_close(c, s);
         foot_fade(c, s);
     }
+    if (c->tip_at.w > 0 && c->tip[0]) {
+        moy_ui_span_t t = {(const uint8_t *)c->tip, (uint16_t)strlen(c->tip)};
+        moy_ui_tip_draw(s, c->tip_at, t, c->surface, c->fs, ground_of(c));
+        c->tip_at.w = 0;
+    }
+}
+
+// -- an empty page, tools, the app's bar ----------------------------------------------
+
+// The words of a tool's label before its tab, and the tooltip: the label
+// with the tab as two spaces.
+static moy_ui_span_t tool_word(moy_ui_span_t label) {
+    moy_ui_span_t w = label;
+    for (uint16_t i = 0; i < label.n; i++) {
+        if (label.p[i] == '\t') {
+            w.n = i;
+            break;
+        }
+    }
+    return w;
+}
+
+int moy_ui_api_tool(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
+                    moy_ui_span_t label, const moy_ui_over_t *o) {
+    o = over(o);
+    int slot = moy_ui_icon_slot(icon.p, icon.n), glyph = moy_ui_icon_glyph(icon.p, icon.n);
+    moy_ui_span_t word = tool_word(label);
+    int stacked;
+    moy_ui_box_t b = place(c, row_h(c), &stacked);
+    int disabled = o->disabled == 1;
+    int st = disabled ? 0 : stop(c, id_of(o, word), b, 0, name_of(o, word));
+    if (st < 0) {
+        st = 0;
+    }
+    clip_t k;
+    if (clip_row(&k, s, b, stacked, c->page)) {
+        int fl = mark_flags(st, o) | (disabled ? MOY_UI_F_DISABLED : 0);
+        moy_ui_tool_draw(s, b, slot, glyph, word, fl, interact(st), c->fs, ground_of(c));
+        clip_out(&k);
+    }
+    // a resting pointer's tooltip, on the desk: the label and its key
+    if (c->cls && (st & MOY_UI_ST_HOVER) && moy_ui_input() != MOY_UI_INPUT_TOUCH) {
+        size_t n = 0;
+        for (uint16_t i = 0; i < label.n && n < MOY_UI_API_TIP - 2; i++) {
+            if (label.p[i] == '\t') {
+                c->tip[n++] = ' ';
+                c->tip[n++] = ' ';
+            } else {
+                c->tip[n++] = (char)label.p[i];
+            }
+        }
+        c->tip[n] = 0;
+        c->tip_at = b;
+    }
+    return (st & MOY_UI_ST_ACTIVATED) != 0;
+}
+
+int32_t moy_ui_api_bar(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
+                       const uint8_t *tools, size_t len, uint32_t off) {
+    (void)s;
+    size_t n = title.n < MOY_UI_API_TIP - 1 ? title.n : MOY_UI_API_TIP - 1;
+    if (n) {
+        memcpy(c->bar_title, title.p, n);
+    }
+    c->bar_title[n] = 0;
+    int k = moy_ui_fields(tools, len);
+    k = k < MOY_UI_API_BAR ? k : MOY_UI_API_BAR;
+    for (int i = 0; i < k; i++) {
+        moy_ui_span_t t = field_at(tools, len, i);
+        c->bar_slot[i] = (int16_t)moy_ui_icon_slot(t.p, t.n);
+    }
+    c->bar_n = (uint8_t)k;
+    c->bar_off = (uint8_t)(off & ((1u << MOY_UI_API_BAR) - 1u));
+    c->bar_back = (off & MOY_UI_BAR_BACK) != 0;
+    c->bar_seen = 1;
+    int32_t got = c->bar_act;
+    c->bar_act = -1;
+    if (got == MOY_UI_BAR_UP) {
+        return c->bar_back ? got : -1;
+    }
+    if (got >= k || (got >= 0 && (c->bar_off >> got) & 1u)) {
+        got = -1;
+    }
+    return got;
+}
+
+void moy_ui_api_rule(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    if (c->has_at) {
+        moy_ui_box_t b = c->at;
+        c->has_at = 0;
+        if (b.h > b.w) {
+            b.w = (int16_t)c->fs;
+        } else {
+            b.h = (int16_t)c->fs;
+        }
+        moy_ui_line(s, b, c->fs, ground_of(c));
+        return;
+    }
+    group_close(c, s);
+    int stacked;
+    moy_ui_box_t r = place(c, rule_h(c), &stacked);
+    clip_t k;
+    if (clip_row(&k, s, r, stacked, c->page)) {
+        moy_ui_rule(s, r, c->fs, c->cls);
+        clip_out(&k);
+    }
+}
+
+int moy_ui_api_bar_lent(const moy_ui_ctx_t *c, const char **title, int16_t *slots, int *n,
+                        uint32_t *off) {
+    if (!c->bar_seen) {
+        return 0;
+    }
+    *title = c->bar_title;
+    for (int i = 0; i < c->bar_n; i++) {
+        slots[i] = c->bar_slot[i];
+    }
+    *n = c->bar_n;
+    *off = c->bar_off | (c->bar_back ? MOY_UI_BAR_BACK : 0u);
+    return 1;
+}
+
+void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i) {
+    c->bar_act = (int8_t)((i >= 0 && i < MOY_UI_API_BAR) || i == MOY_UI_BAR_UP ? i : -1);
 }
 
 int moy_ui_api_owes(const moy_ui_ctx_t *c) {

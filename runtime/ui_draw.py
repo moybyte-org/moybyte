@@ -1816,6 +1816,7 @@ def mark_reach(size="part"):
 UI_TARGET = [None, None, 0]
 _DESK = 1                               # moy_ui.h's MOY_UI_DESK
 _WINDOW = 2                             # ... and MOY_UI_WINDOW
+_ELSEWHERE = 4                          # ... and MOY_UI_ELSEWHERE
 _APP_SHIFT = 8                          # moy_ui_api.h's MOY_UI_APP_SHIFT
 UI_SIZE = _C.api_size()
 
@@ -1825,7 +1826,8 @@ def ui_context():
     return bytearray(UI_SIZE)
 
 
-def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=None):
+def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=None,
+             elsewhere=False):
     """Begin context `ctx`'s frame on canvas `cv` under theme `th`: a page
     fills `rect` (the canvas when None), `inp` is the frame's input in the
     run snapshot's shape (an array('i') of buttons held, buttons pressed --
@@ -1833,7 +1835,9 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     and flags, and the key typed; None for none), `desk` picks the desk's
     rows and `window` says the page lies in a window's body, whose colour
     its ground then is; `app` is the shell app's id, whose
-    `app_buttons[app]` its buttons take. Answers whether the frame is
+    `app_buttons[app]` its buttons take; `elsewhere`, the keys are another
+    surface's (a cart's editor handle holds them), so no stop holds focus.
+    Answers whether the frame is
     settled: its input moved nothing, so a page drawn again draws the same
     pixels. A duplicate id the last frame drew is logged, once."""
     t = UI_TARGET
@@ -1845,10 +1849,26 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
         print("ui: two stops share the id %r; the later is no stop" % dup)
     if rect is None:
         rect = (0, 0, cv.w, cv.h)
-    flags = (_DESK if desk else 0) | (_WINDOW if window else 0)
+    flags = (_DESK if desk else 0) | (_WINDOW if window else 0) | (_ELSEWHERE if elsewhere else 0)
     if app is not None:
         flags |= (_app_row(app) + 1) << _APP_SHIFT
     return _C.api_begin(ctx, inp, rect, flags, _fs(cv))
+
+
+def bar_lent(ctx):
+    """What the app whose context is `ctx` lent its bar in the frame it drew
+    last (`ui.bar`): (title, icon slots, half-strength bits, back), or None."""
+    got = _C.api_bar_lent(ctx)
+    if got is None:
+        return None
+    title, slots, off = got
+    return (title, slots, off & 0x3F, bool(off & 0x80000000))
+
+
+def bar_tap(ctx, i):
+    """The host's bar activated tool `i` (-2: its way back) of the bar `ctx`
+    lent; the app's next `ui.bar` answers it."""
+    _C.api_bar_tap(ctx, i)
 
 
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
