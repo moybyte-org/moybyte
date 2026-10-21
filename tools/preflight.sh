@@ -3,7 +3,12 @@
 #
 #   tools/preflight.sh          # the host job, in CI's own order
 #   tools/preflight.sh --web    # ...plus the browser suites in real Chrome
+#   tools/preflight.sh --no-web # ...without them even where the change reaches them
 #   tools/preflight.sh --full   # the host job even when only docs changed
+#
+# The browser suites run on their own when the change touches what CI's
+# web-e2e.yml path filter covers (`web_touched`, below, mirrors that list);
+# `--web` forces them, `--no-web` skips them.
 #
 # A branch whose changes against origin/dev are ALL documents (`*.md`, anything
 # under `docs/`) runs the docs check, the look-shot tests and every test file
@@ -45,10 +50,12 @@ cd "${ROOT}"
 
 PY="${ROOT}/.venv/bin/python"
 WEB=0
+NOWEB=0
 FULL=0
 for arg in "$@"; do
   case "${arg}" in
     --web) WEB=1 ;;
+    --no-web) NOWEB=1 ;;
     --full) FULL=1 ;;
   esac
 done
@@ -88,6 +95,23 @@ docs_only() {
   done <<< "${files}"
 }
 
+# Whether the change touches what web-e2e.yml's `paths:` covers: keep this
+# list and that one the same (the workflow is the authority).
+web_touched() {
+  local f
+  while IFS= read -r f; do
+    case "${f}" in
+      firmware/web_runner/*|runtime/*|device/*|system_carts/*|native/*|ports/jet/*) return 0 ;;
+      tests/test_web_*|tests/web_e2e.py|tests/cart_store_fixtures.py) return 0 ;;
+      tests/fixtures/*|tests/tier_frame.py) return 0 ;;
+      tools/jet_cart.py|tools/zopfli_gz.py|tools/wasm_cart.py) return 0 ;;
+      tools/p8_import.py|tools/p8_lua_port.py|tools/p8_writer.py) return 0 ;;
+      .github/workflows/web-e2e.yml) return 0 ;;
+    esac
+  done <<< "$(changed)"
+  return 1
+}
+
 if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && docs_only; then
   printf 'preflight: only documents changed -- the docs lane (--full runs everything)\n'
   named=()
@@ -106,6 +130,11 @@ if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && docs_only; then
   fi
   printf '\npreflight: green (docs lane). A push should be too.\n'
   exit 0
+fi
+
+if [ "${WEB}" = "0" ] && [ "${NOWEB}" = "0" ] && web_touched; then
+  printf 'preflight: the change reaches the browser suites (CI runs them) -- the web lane is on (--no-web skips it)\n'
+  WEB=1
 fi
 
 # The COMPILED-VS-COMPILED lane's prerequisite, and the blob check's. Not
@@ -127,9 +156,8 @@ step "headless tour (fresh save dir)" \
     --gif "${TOUR_DIR}/demo.gif" --save-dir "${TOUR_DIR}/projects"
 
 if [ "${WEB}" = "1" ]; then
-  # Path-filtered in CI on runtime/**, device/**, system_carts/**, the runner
-  # and the vendored p8 files -- i.e. most of what this repo changes. The build
-  # comes first: the suites drive whatever `dist/` currently holds.
+  # Path-filtered in CI (`web_touched` above). The build comes first: the
+  # suites drive whatever `dist/` currently holds.
   step "browser console builds"  firmware/web_runner/build.sh
   step "...and the blob it baked is still what the binary serves" \
     make unix-micropython
