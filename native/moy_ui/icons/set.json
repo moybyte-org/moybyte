@@ -63,21 +63,21 @@
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 3640,
+   "bytes": 4535,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 9166,
+   "bytes": 11496,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 12521,
+   "bytes": 15849,
    "layer": "ink",
    "set": "default",
    "size": 24
@@ -219,7 +219,26 @@
   "palette",
   "export",
   "check",
-  "warn"
+  "warn",
+  "text",
+  "shapes",
+  "to_front",
+  "to_back",
+  "spray",
+  "picker",
+  "pan",
+  "cut",
+  "paste",
+  "layout",
+  "slides",
+  "background",
+  "bubble",
+  "align_l",
+  "align_c",
+  "align_r",
+  "trans_none",
+  "trans_fade",
+  "trans_swipe"
  ],
  "tiers": {
   "desktop": [

@@ -678,6 +678,9 @@ static const char *const s_icon_slots[] = {
     "arrow_left", "arrow_right", "arrow_up", "arrow_down", "star", "star_on",
     "eraser", "mirror", "flip_v", "folder_open", "more", "stamp",
     "power", "sleep", "sliders", "copy", "palette", "export", "check", "warn",
+    "text", "shapes", "to_front", "to_back", "spray", "picker", "pan", "cut",
+    "paste", "layout", "slides", "background", "bubble", "align_l", "align_c", "align_r",
+    "trans_none", "trans_fade", "trans_swipe",
 };
 #define ICON_SLOTS ((int)(sizeof(s_icon_slots) / sizeof(s_icon_slots[0])))
 // An alias and the slot it names, which is also the glyph table's name.

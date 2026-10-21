@@ -50,6 +50,9 @@ SLOTS = (
     "arrow_left", "arrow_right", "arrow_up", "arrow_down", "star", "star_on",
     "eraser", "mirror", "flip_v", "folder_open", "more", "stamp",
     "power", "sleep", "sliders", "copy", "palette", "export", "check", "warn",
+    "text", "shapes", "to_front", "to_back", "spray", "picker", "pan", "cut",
+    "paste", "layout", "slides", "background", "bubble", "align_l", "align_c", "align_r",
+    "trans_none", "trans_fade", "trans_swipe",
 )
 SLOT = {n: i for i, n in enumerate(SLOTS)}
 # The shell's own icon kinds (chrome._ICON's) by the slot they draw.
