@@ -146,8 +146,14 @@ def test_the_page_carries_the_line_the_stamp_rewrites():
     assert opens and set(opens) == {"opfsNav"}, opens
 
 
-@pytest.mark.skipif(not os.path.exists(os.path.join(RUNNER, "dist", "index.html")),
-                    reason="no browser console built")
+def _dist_is_current():
+    page = os.path.join(RUNNER, "dist", "index.html")
+    return (os.path.exists(page) and os.path.getmtime(page)
+            >= os.path.getmtime(os.path.join(RUNNER, "page_tail.js")))
+
+
+@pytest.mark.skipif(not _dist_is_current(),
+                    reason="no browser console built since page_tail.js changed")
 def test_the_built_page_carries_the_line_too():
     """build.sh copies page_tail.js into index.html verbatim; a minifier that
     reformatted the line would ship a dev site with no player."""
