@@ -163,6 +163,19 @@ A pane keeps its own keys while focused (the sprite tab's F, V, R, M, Q
 and W; the map's and scene's arrows; Code's text). The focused pane's foot
 shows its hints and F6 where it has room.
 
+Pointing, panning and previewing (owner, 2026-10-21):
+
+| | the sheet | the map and the scene | lists and code |
+|---|---|---|---|
+| touch | press and hold, then slide across the sheet: each sprite under the finger shows in the Sprite pane as it passes, so sliding across a row plays it like an animation; lifting picks the last one | drag pans | drag scrolls |
+| wheel | scrolls the sheet's pages | zooms in whole steps about the pointer; Shift+wheel pans across | scrolls |
+| middle button | drag pans the sheet | drag pans | drag scrolls |
+| T-Deck trackball | rolls across the sheet (the cursor, with the same live preview) | rolls pan the view | moves the cursor |
+| trackball press | | steps the zoom (1×, 2×, Fit) | |
+
+The live preview never commits and never records an undo step; picking does
+what a tap does today.
+
 ## The handheld
 
 One tab at a time under one bar for all seven: the Moy tile, the seven
