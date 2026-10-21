@@ -72,3 +72,5 @@
 71 copy
 72 palette
 73 export
+74 check
+75 warn

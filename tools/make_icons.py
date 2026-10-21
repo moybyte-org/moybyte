@@ -62,7 +62,7 @@ FILLS = {
              "battery": "#46b843", "calc": "#c9d3e6", "getcarts": "#46b843",
              "save": "#7da7ea", "sprite": "#9be36b", "map": "#9fd0ff", "mute": "#c9d3e6",
              "copy": "#ffffff", "palette": "#f2c38a",
-             "export": "#f5c542"},
+             "export": "#f5c542", "warn": "#f5c542"},
 }
 
 

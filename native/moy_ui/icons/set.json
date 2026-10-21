@@ -34,91 +34,92 @@
    "star_on": "#f5c542",
    "storybook": "#e2582e",
    "trash": "#c9d3e6",
-   "wallpaper": "#9fd0ff"
+   "wallpaper": "#9fd0ff",
+   "warn": "#f5c542"
   }
  },
  "first": 33,
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 3351,
+   "bytes": 3431,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 8632,
+   "bytes": 8838,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 12180,
+   "bytes": 12472,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 3560,
+   "bytes": 3640,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 8945,
+   "bytes": 9166,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 12229,
+   "bytes": 12521,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 3460,
+   "bytes": 3538,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 8849,
+   "bytes": 9070,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 12208,
+   "bytes": 12500,
    "layer": "ink",
    "set": "luna",
    "size": 24
   },
   "luna.fill-16": {
    "bpp": 2,
-   "bytes": 1838,
+   "bytes": 1876,
    "layer": "fill",
    "set": "luna",
    "size": 16
   },
   "luna.fill-20": {
    "bpp": 4,
-   "bytes": 4254,
+   "bytes": 4374,
    "layer": "fill",
    "set": "luna",
    "size": 20
   },
   "luna.fill-24": {
    "bpp": 4,
-   "bytes": 5796,
+   "bytes": 5948,
    "layer": "fill",
    "set": "luna",
    "size": 24
@@ -216,7 +217,9 @@
   "sliders",
   "copy",
   "palette",
-  "export"
+  "export",
+  "check",
+  "warn"
  ],
  "tiers": {
   "desktop": [
