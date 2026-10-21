@@ -110,7 +110,7 @@ _DRAG_MIN = 4                         # px of travel before a press becomes a dr
 # The desk's default OUTER sizes of the apps the 2026-10 look sizes to their
 # content (DESIGN.md "The sizes"; the `*desktop*` targets), in glass pixels
 # at chrome size 1. Every other window takes `_win_size`'s formulas.
-DESK_SIZES = {"files": (548, 534), "calc": (344, 488)}
+DESK_SIZES = {"files": (548, 534), "calc": (344, 488), "getcarts": (900, 536)}
 
 
 class _LayoutCtx:
