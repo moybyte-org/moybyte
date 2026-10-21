@@ -3,6 +3,13 @@
 #
 #   tools/preflight.sh          # the host job, in CI's own order
 #   tools/preflight.sh --web    # ...plus the browser suites in real Chrome
+#   tools/preflight.sh --full   # the host job even when only docs changed
+#
+# A branch whose changes against origin/dev are ALL documents (`*.md`, anything
+# under `docs/`) runs the docs check, the look-shot tests and every test file
+# that names a changed file, and nothing else: no source moved, so no derived
+# artifact can have gone stale. The main suite runs across cores as `make test`
+# does; CI's serial run is still the net for a test that only fails in order.
 #
 # WHY THIS EXISTS. `make test` is not the CI job. It is the part that needs
 # nothing but the venv, and the steps it leaves out are the ones that compare a
@@ -38,7 +45,13 @@ cd "${ROOT}"
 
 PY="${ROOT}/.venv/bin/python"
 WEB=0
-[ "${1:-}" = "--web" ] && WEB=1
+FULL=0
+for arg in "$@"; do
+  case "${arg}" in
+    --web) WEB=1 ;;
+    --full) FULL=1 ;;
+  esac
+done
 TOUR_DIR="$(mktemp -d)"
 trap 'rm -rf "${TOUR_DIR}"' EXIT
 
@@ -56,6 +69,45 @@ step() {                        # step "name" cmd...
   rm -f /tmp/preflight.$$
 }
 
+PYTEST=(env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 "${PY}" -m pytest)
+
+changed() {                     # every path changed against origin/dev (or $PREFLIGHT_BASE)
+  { git diff --name-only "${PREFLIGHT_BASE:-origin/dev}"...HEAD 2>/dev/null
+    git diff --name-only HEAD
+    git ls-files --others --exclude-standard; } | sort -u
+}
+docs_only() {
+  local files f
+  files="$(changed)"
+  [ -n "${files}" ] || return 1
+  while IFS= read -r f; do
+    case "${f}" in
+      *.md|docs/*) ;;
+      *) return 1 ;;
+    esac
+  done <<< "${files}"
+}
+
+if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && docs_only; then
+  printf 'preflight: only documents changed -- the docs lane (--full runs everything)\n'
+  named=()
+  while IFS= read -r f; do
+    base="$(basename "${f}")"
+    while IFS= read -r t; do named+=("${t}"); done \
+      < <(grep -lF -- "${base}" tests/test_*.py 2>/dev/null)
+  done <<< "$(changed)"
+  mapfile -t named < <(printf '%s\n' tests/test_look_shots.py tests/test_editor_look.py "${named[@]}" | sort -u)
+  step "docs agree with the tree"  "${PY}" tools/check_docs.py
+  step "tests that name a changed document" \
+    "${PYTEST[@]}" -p xdist -n auto -q "${named[@]}"
+  if [ "${fails}" -ne 0 ]; then
+    printf '\npreflight: %d step(s) failed -- CI would too.\n' "${fails}"
+    exit 1
+  fi
+  printf '\npreflight: green (docs lane). A push should be too.\n'
+  exit 0
+fi
+
 # The COMPILED-VS-COMPILED lane's prerequisite, and the blob check's. Not
 # cached-and-skipped: a stale binary is the failure this is here to catch, and
 # a warm build is under a minute.
@@ -68,7 +120,7 @@ step "wasi-sdk for the compiled showcase cart"      "${PY}" tools/jet_cart.py --
 # and hash-checked when absent.
 step "the pinned wamrc for the AOT checks"          "${PY}" tools/wasm_module.py compilers
 step "suite (redraw excluded)" \
-  "${PY}" -m pytest -q --ignore=tests/test_redraw_on_change.py
+  "${PYTEST[@]}" -p xdist -n auto -q --ignore=tests/test_redraw_on_change.py
 step "redraw suite, alone"     "${PY}" -m pytest -q tests/test_redraw_on_change.py
 step "headless tour (fresh save dir)" \
   "${PY}" tools/simulate_desktop.py --demo --strict \
