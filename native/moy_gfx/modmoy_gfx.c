@@ -58,6 +58,7 @@
 #include "moy_text.h"
 #include "moy_backdrop.h"
 #include "moy_shape.h"
+#include "moy_path.h"
 
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
@@ -1049,9 +1050,65 @@ static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_reset_obj, moy_gfx_shape_reset);
 
 static mp_obj_t moy_gfx_shape_order(mp_obj_t swapped) {
     moy_shape_wire_swapped(mp_obj_is_true(swapped));
+    moy_path_wire_swapped(mp_obj_is_true(swapped));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_order_obj, moy_gfx_shape_order);
+
+// -- paths and the outline faces (moy_path.h) --------------------------------------
+//
+// path_fill(dst, dw, pts, ends, col, cam_x, cam_y, cx0, cy0, cx1, cy1): `pts`
+// and `ends` are int32 buffers (array('i')): x, y pairs in 26.6 and each
+// contour's end. path_text(dst, dw, face, size, x, y, s, col, cam_x, cam_y,
+// cx0, cy0, cx1, cy1) -> the advance; path_width(face, size, s);
+// path_metrics(face) -> (em, ascent, descent).
+static mp_obj_t moy_gfx_path_fill(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_buffer_info_t pb, eb;
+    mp_get_buffer_raise(a[2], &pb, MP_BUFFER_READ);
+    mp_get_buffer_raise(a[3], &eb, MP_BUFFER_READ);
+    int n = mg_path_fill(dst, cap, mp_obj_get_int(a[1]), (const int32_t *)pb.buf,
+                         (int)(pb.len / 8), (const int32_t *)eb.buf, (int)(eb.len / 4),
+                         mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                         mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                         mp_obj_get_int(a[10]));
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_path_fill_obj, 11, 11, moy_gfx_path_fill);
+
+static mp_obj_t moy_gfx_path_text(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_buffer_info_t sb;
+    mp_get_buffer_raise(a[6], &sb, MP_BUFFER_READ);
+    int n = mg_path_text(dst, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                         mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                         (const uint8_t *)sb.buf, sb.len, mp_obj_get_int(a[7]),
+                         mp_obj_get_int(a[8]), mp_obj_get_int(a[9]), mp_obj_get_int(a[10]),
+                         mp_obj_get_int(a[11]), mp_obj_get_int(a[12]), mp_obj_get_int(a[13]));
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_path_text_obj, 14, 14, moy_gfx_path_text);
+
+static mp_obj_t moy_gfx_path_width(mp_obj_t face, mp_obj_t size, mp_obj_t s) {
+    mp_buffer_info_t sb;
+    mp_get_buffer_raise(s, &sb, MP_BUFFER_READ);
+    return MP_OBJ_NEW_SMALL_INT(moy_path_width(mp_obj_get_int(face), mp_obj_get_int(size),
+                                               (const uint8_t *)sb.buf, sb.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_path_width_obj, moy_gfx_path_width);
+
+static mp_obj_t moy_gfx_path_metrics(mp_obj_t face) {
+    int m[3];
+    moy_path_metrics(mp_obj_get_int(face), m);
+    mp_obj_t o[3] = { MP_OBJ_NEW_SMALL_INT(m[0]), MP_OBJ_NEW_SMALL_INT(m[1]),
+                      MP_OBJ_NEW_SMALL_INT(m[2]) };
+    return mp_obj_new_tuple(3, o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_path_metrics_obj, moy_gfx_path_metrics);
 
 // circ(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1) -- FILLED
 // circle: each scanline a clipped, camera-offset span (matches host canvas circ()).
@@ -2199,6 +2256,10 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_shape_stats), MP_ROM_PTR(&moy_gfx_shape_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_reset), MP_ROM_PTR(&moy_gfx_shape_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape_order), MP_ROM_PTR(&moy_gfx_shape_order_obj) },
+    { MP_ROM_QSTR(MP_QSTR_path_fill),  MP_ROM_PTR(&moy_gfx_path_fill_obj) },
+    { MP_ROM_QSTR(MP_QSTR_path_text),  MP_ROM_PTR(&moy_gfx_path_text_obj) },
+    { MP_ROM_QSTR(MP_QSTR_path_width), MP_ROM_PTR(&moy_gfx_path_width_obj) },
+    { MP_ROM_QSTR(MP_QSTR_path_metrics), MP_ROM_PTR(&moy_gfx_path_metrics_obj) },
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },

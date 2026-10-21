@@ -385,7 +385,23 @@ tint(buf, src, 4, 1, 1, 3, 2, 0xffff, 255)
 tint(buf, src, 4, 2, 2, 3, 3, 0x0000, 128)
 """
 
-OPS = OPS + CLAMP_OPS + SHAPE_OPS
+# Paths and the outline faces (native/moy_gfx/moy_path.c): a triangle off
+# the pixel grid, a ring whose inner contour turns the other way (a hole),
+# the camera and a clip cutting through both, text in each face at sizes
+# off the pixel grid, and a face and a size the kernel refuses.
+PATH_OPS = """
+path_fill(buf, 16, ptri, ptri_ends, 0xf81f, 0, 0, 0, 0, 16, 8)
+path_fill(buf, 16, ring, ring_ends, 0x07e0, 0, 0, 0, 0, 16, 8)
+path_fill(buf, 16, ring, ring_ends, 0x001f, 2, 1, 3, 1, 12, 6)
+path_fill(buf, 16, ptri, bad_ends, 0xffff, 0, 0, 0, 0, 16, 8)
+path_text(buf, 16, 1, 600, 32, 448, word, 0x1234, 0, 0, 0, 0, 16, 8)
+path_text(buf, 16, 0, 450, -100, 400, word, 0xffff, 0, 0, 0, 0, 16, 8)
+path_text(buf, 16, 2, 520, 64, 300, word, 0x0000, 1, -1, 2, 1, 14, 7)
+path_text(buf, 16, 3, 520, 64, 300, word, 0x0000, 0, 0, 0, 0, 16, 8)
+path_text(buf, 16, 0, 0, 64, 300, word, 0x0000, 0, 0, 0, 0, 16, 8)
+"""
+
+OPS = OPS + CLAMP_OPS + SHAPE_OPS + PATH_OPS
 
 
 def _op_lines(text):
@@ -470,11 +486,19 @@ no_quads = array.array("h", [0, 0, 0, 0])
 over_quads = array.array("h", [999, 0, 0, 0, 5, 1, 1, 0])
 # The layer restore's state: room for either side's struct.
 lr = bytearray(64)
+ptri = array.array("i", [70, 60, 900, 140, 330, 450])
+ptri_ends = array.array("i", [3])
+bad_ends = array.array("i", [4])
+ring = array.array("i", [128, 64, 832, 64, 832, 448, 128, 448,
+                         256, 192, 256, 320, 704, 320, 704, 192])
+ring_ends = array.array("i", [4, 8])
+word = bytes([65, 98, 0xC3, 0xA9, 63])
 """
 
 _FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565", "spans",
                   "font", "msg", "empty", "long", "big", "pal8", "idx8",
-                  "no_quads", "over_quads", "lr", "bdrec", "bdbad")
+                  "no_quads", "over_quads", "lr", "bdrec", "bdbad", "ptri", "ptri_ends",
+                  "bad_ends", "ring", "ring_ends", "word")
 
 
 def _fixtures():
@@ -571,7 +595,7 @@ def test_the_optional_libmoy_verbs_are_implemented_here_anyway():
 
 # Every verb the canvas calls is in the op script.
 # Called by the canvas and drawing nothing: the word order the shapes blend in.
-_NO_PIXELS = frozenset({"shape_order"})
+_NO_PIXELS = frozenset({"shape_order", "path_width", "path_metrics"})
 
 
 def test_the_op_script_exercises_every_verb_the_canvas_depends_on():
@@ -588,6 +612,26 @@ def test_the_op_script_exercises_every_verb_the_canvas_depends_on():
     assert not uncovered, (
         "device_canvas depends on these and the host/device op script never "
         "runs them, so nothing compares the two compilations: %s" % uncovered)
+
+
+def test_the_faces_measure_alike_in_both_compilations(tmp_path):
+    """path_width and path_metrics draw nothing, so the op script cannot
+    compare them: the same words in each face, at sizes off the pixel grid,
+    measured by both kernels."""
+    exe = _require_unix_mp()
+    cases = [(f, size, w) for f in (0, 1, 2) for size in (450, 3072, 4608, 6144)
+             for w in (b"Once upon a time...", b"AVATAR Wq", b"caf\xc3\xa9 \xe2\x80\xa6")]
+    script = tmp_path / "faces.py"
+    script.write_text("import moy_gfx\n"
+                      "for f, size, w in %r:\n"
+                      "    print(moy_gfx.path_width(f, size, w))\n"
+                      "for f in (0, 1, 2, 3):\n"
+                      "    print(tuple(moy_gfx.path_metrics(f)))\n" % (cases,))
+    out = subprocess.run([exe, str(script)], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stdout + out.stderr
+    host = [str(g.path_width(f, size, w)) for f, size, w in cases]
+    host += [str(tuple(g.path_metrics(f))) for f in (0, 1, 2, 3)]
+    assert out.stdout.split("\n")[:len(host)] == host
 
 
 def test_fill_respects_the_buffer_capacity():
@@ -824,6 +868,8 @@ def blit565_resize(*a): moy_gfx.blit565_resize(*a); _shot()
 def text(*a): moy_gfx.text(*a); _shot()
 def blit_batch(*a): moy_gfx.blit_batch(*a); _shot()
 def blit_map(*a): moy_gfx.blit_map(*a); _shot()
+def path_fill(*a): moy_gfx.path_fill(*a); _shot()
+def path_text(*a): moy_gfx.path_text(*a); _shot()
 def line(*a): moy_gfx.line(*a); _shot()
 def circ(*a): moy_gfx.circ(*a); _shot()
 def circb(*a): moy_gfx.circb(*a); _shot()

@@ -56,7 +56,8 @@ _MOY_GFX = os.path.dirname(native_build.LIBMOY)
 # stale copy.
 _LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
            "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
-           "moy_backdrop.h", "moy_backdrop.c", "moy_shape.h", "moy_shape.c")
+           "moy_backdrop.h", "moy_backdrop.c", "moy_shape.h", "moy_shape.c",
+           "moy_path.h", "moy_path.c", "moy_path_faces.h")
 
 # ...and where to find them. One tuple rather than a literal at the call site,
 # because a caller that reconstructs the build (tests/test_native_build_no_
@@ -109,6 +110,12 @@ _SIGS = (
     ("moy_shape_reset", [_I], None),
     ("moy_shape_wire_swapped", [_I], None),
     ("moy_shape_coverage", [_I, _I, _I], _I),
+    # Paths and the outline faces (native/moy_gfx/moy_path.c).
+    ("mg_path_fill", [_P, _Z, _I, _P, _I, _P, _I, _I, _I, _I, _I, _I, _I, _I], _I),
+    ("mg_path_text", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I], _I),
+    ("moy_path_width", [_I, _I, _P, _Z], _I),
+    ("moy_path_metrics", [_I, _P], _I),
+    ("moy_path_wire_swapped", [_I], None),
     # ...and the host-side rest.
     ("hg_lr_size", [], _Z),
     ("hg_lr_engine", [_I], None),
@@ -322,6 +329,47 @@ def shape_reset(caches):
 
 def shape_order(swapped):
     _lib().moy_shape_wire_swapped(int(bool(swapped)))
+    _lib().moy_path_wire_swapped(int(bool(swapped)))
+
+
+def _ints(a):
+    """(ctypes int32 array, count) over an array('i') of int32s, no copy."""
+    arr = (ctypes.c_int32 * len(a)).from_buffer(a)
+    return arr, len(a)
+
+
+def _bytes(s):
+    if isinstance(s, str):
+        s = s.encode()
+    return ctypes.create_string_buffer(bytes(s), len(s)), len(s)
+
+
+def path_fill(dst, dw, pts, ends, col, cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    pa, pn = _ints(pts)
+    ea, en = _ints(ends)
+    return _lib().mg_path_fill(ctypes.cast(arr, _P), cap, int(dw), ctypes.cast(pa, _P),
+                               pn // 2, ctypes.cast(ea, _P), en, int(col), int(cam_x),
+                               int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def path_text(dst, dw, face, size, x, y, s, col, cam_x, cam_y, cx0, cy0, cx1, cy1):
+    arr, cap = _buf(dst)
+    sb, sn = _bytes(s)
+    return _lib().mg_path_text(ctypes.cast(arr, _P), cap, int(dw), int(face), int(size),
+                               int(x), int(y), ctypes.cast(sb, _P), sn, int(col), int(cam_x),
+                               int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def path_width(face, size, s):
+    sb, sn = _bytes(s)
+    return _lib().moy_path_width(int(face), int(size), ctypes.cast(sb, _P), sn)
+
+
+def path_metrics(face):
+    out = (ctypes.c_int * 3)()
+    _lib().moy_path_metrics(int(face), ctypes.cast(out, _P))
+    return tuple(out)
 
 
 def shape_coverage(r, i, j):

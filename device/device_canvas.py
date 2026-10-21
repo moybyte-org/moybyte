@@ -1661,6 +1661,39 @@ class DeviceCanvas:
                                 self._clip_x0, self._clip_y0, self._clip_x1,
                                 self._clip_y1)
 
+    # -- paths and the outline faces (native/moy_gfx/moy_path.h) -----------
+    #
+    # A story's slides (runtime/story_render.py): shapes as filled paths and
+    # text in the shell's faces at any size, anti-aliased, the same pixels on
+    # every tier. Coordinates and sizes are 26.6 (1/64 px); a face is 0 sans,
+    # 1 sans bold, 2 mono.
+
+    def fill_path(self, pts, ends, c):
+        """Fill the path whose points `pts` (an array('i') of x, y pairs)
+        make contours ending at `ends` (an array('i')) in colour `c`. The
+        pixels touched."""
+        self.flush_batch()
+        return self._gfx.path_fill(self._buf, self._stride, pts, ends, self._col(c),
+                                   self._cam_x, self._cam_y, self._clip_x0, self._clip_y0,
+                                   self._clip_x1, self._clip_y1)
+
+    def face_text(self, face, size, x, y, s, c):
+        """`s` in outline face `face` at em `size`, its baseline's left end at
+        (x, y). The advance."""
+        self.flush_batch()
+        return self._gfx.path_text(self._buf, self._stride, int(face), int(size), int(x),
+                                   int(y), s, self._col(c), self._cam_x, self._cam_y,
+                                   self._clip_x0, self._clip_y0, self._clip_x1,
+                                   self._clip_y1)
+
+    def face_width(self, face, size, s):
+        """The advance `s` takes in face `face` at em `size`."""
+        return self._gfx.path_width(int(face), int(size), s)
+
+    def face_metrics(self, face):
+        """(em, ascent, descent) of face `face`, in its font units."""
+        return self._gfx.path_metrics(int(face))
+
     def fillp(self, p=None, c=None):
         # SPEC.md 6: a 4x4 dither for the nine SHAPE verbs. `p` is sixteen bits
         # read row by row from the top-left, bit 15 first; a SET bit is a hole,
