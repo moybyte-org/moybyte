@@ -149,7 +149,23 @@ CALC_TAPE = ("48+72=", "120-36=", "84/7=", "12*7=")
 def _setup_table():
     """screen -> (config, steps, wallpaper, set up, what the render shows).
     `screen` is a scene's name after its `theme-mode_` prefix."""
+    editor = {"handheld_%s" % (k if "_" in k else k + "-editor"):
+              (HANDHELD, ("16", "23", "30"), False, _tab(t), "nearest screen: the Editor's %s tab" % t)
+              for k, t in EDITOR_TABS.items()}
+    editor["handheld_sprite-editor_more"] = (HANDHELD, ("16", "23", "24", "30"), False, _sprites_more,
+                                             "the sprite tab's more menu, which has no flags row")
+    editor.update({"desktop_editor-%s" % k: (DESK, ("9", "23", "30"), False, _tab(t),
+                                             "nearest screen: the Editor window, one tab "
+                                             "(%s)" % t)
+                   for k, t in EDITOR_LAYOUTS.items()})
+    editor.update({"desktop_files-max-%s" % v: (DESK, ("21", "25", "30"), False, _desk,
+                                               "nearest screen: the desk, Files behind Calc "
+                                               "(no maximised Files)")
+                   for v in ("e05", "v1", "v2")})
+    editor["editor_maximise_compare"] = (DESK, ("25", "30"), False, _tab("paint"),
+                                         "nearest screen: the Editor window, one tab (paint)")
     return {
+        **editor,
         "handheld_home": (HANDHELD, ("7", "11", "15", "17"), False, _home,
                           "home, Games tab, Sky Run current"),
         "handheld_home_wallpaper": (HANDHELD, ("17", "28"), True, _home,
@@ -167,9 +183,9 @@ def _setup_table():
                                 "Appearance"),
         "desktop_appearance": (DESK, ("9", "20"), False, _desk_appearance,
                                "Appearance as a window on the desk"),
-        "handheld_code-editor": (HANDHELD, ("3", "4", "16", "23"), False,
+        "handheld_code-editor": (HANDHELD, ("3", "4", "16", "23", "30"), False,
                                  _code, "the Code tab on Star Catcher"),
-        "handheld_sprite-editor": (HANDHELD, ("16", "23", "24"), False,
+        "handheld_sprite-editor": (HANDHELD, ("16", "23", "24", "30"), False,
                                    _sprites,
                                    "the sprite tab on Star Catcher, sprite 0"),
         "desktop_code-editor": (DESK, ("9", "13", "16", "23"), False, _code,
@@ -476,6 +492,40 @@ def _sprites(g, ws):
     ws.paint_layer._cur[:] = SPRITE_CUR
     if ws.paint is not None:
         ws.paint.color = SPRITE_COLOUR
+
+
+def _tab(tab):
+    """The Editor on Star Catcher at `tab`, as a window on the desk where
+    the surface has one: the nearest screen to step 30's layouts and tabs."""
+    def setup(g, ws):
+        desk = getattr(ws.wm, "mode", None) == "desktop"
+        if desk:
+            ws.open_desk()
+        _editor(g, ws, tab)
+        if desk:
+            _settle(g, ws, 2)
+            _place(ws, "menu", 112, 54, 900, 534)
+    return setup
+
+
+# Step 30's targets (docs/media/look_2026-10/EDITOR_LAYOUT.md): the handheld
+# tabs, and the desk Editor's layouts by concept, each to the Editor's tab
+# nearest it, and the three readings of maximise and the resizable panes
+# (MAXIMISE_VARIANTS.md).
+EDITOR_TABS = {"config": "cards", "blocks": "blocks", "map": "map", "scene": "scene",
+               "music": "music", "scene-editor_stamp": "scene"}
+EDITOR_LAYOUTS = {"a-code": "code", "a-art": "map", "a-world": "scene", "a-sound": "music",
+                  "b-config": "cards", "b-code": "code", "b-blocks": "blocks", "b-art": "paint",
+                  "b-world": "scene", "b-world-stamp": "scene", "b-sound": "music",
+                  "b-config-800x480": "cards", "b-code-800x480": "code", "b-art-800x480": "paint",
+                  "b-world-800x480": "scene", "b-sound-800x480": "music",
+                  "c-code": "code", "c-art": "paint",
+                  "c-world": "scene", "c-sound": "music",
+                  **{"max-%s-%s" % (v, k): t for v in ("e05", "v1", "v2")
+                     for k, t in (("art", "paint"), ("code", "code"), ("art-800x480", "paint"))},
+                  "max-v1-windows": "paint", "max-v2-revealed": "paint", "max-v2-touch": "paint",
+                  "resize-art": "paint", "resize-code": "code", "resize-code-drag": "code",
+                  "resize-art-min": "paint", "resize-art-800x480": "paint"}
 
 
 def _sprites_more(g, ws):

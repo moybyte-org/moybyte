@@ -43,14 +43,6 @@ moy-dark_desktop_sysmenu.png — The system menu, open from Super, on the desk; 
 moy-dark_handheld_pause.png — The pause menu over a fullscreen game (Super): resume, restart, options, quit; Moy Night; 320x240
 moy-dark_handheld_pause@3x.png — same, enlarged 3x (nearest)
 moy-dark_desktop_pause.png — The pause menu over a fullscreen game at 2x on the desk; Moy Night; 1024x600
-moy-light_handheld_code-editor.png — Code tab on Star Catcher in today's layout, restyled: Play bare beside undo and redo; Moy Day; 320x240
-moy-light_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_sprite-editor.png — Sprites tab on Star Catcher's frog in today's layout, restyled; Moy Day; 320x240
-moy-light_handheld_sprite-editor@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_code-editor.png — Code tab on Star Catcher in today's layout, restyled: Play bare beside undo and redo; Moy Night; 320x240
-moy-dark_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_sprite-editor.png — Sprites tab on Star Catcher's frog in today's layout, restyled; Moy Night; 320x240
-moy-dark_handheld_sprite-editor@3x.png — same, enlarged 3x (nearest)
 pico-light_handheld_code-editor.png — Code tab on Star Catcher in today's layout, restyled: Play bare beside undo and redo; Pico (in the style of Picotron); 320x240
 pico-light_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
 pico-light_handheld_sprite-editor.png — Sprites tab on Star Catcher's frog in today's layout, restyled; Pico (in the style of Picotron); 320x240
@@ -88,3 +80,90 @@ moy-dark_desktop_home.png — The console-mode home on the 1024x600 board at 1x:
 moy-dark_handheld_home_wallpaper.png — Handheld home over the default wallpaper, Moy's night; Moy Night; 320x240
 moy-dark_handheld_home_wallpaper@3x.png — same, enlarged 3x (nearest)
 moy-dark_desktop_wallpaper.png — Desk over the default wallpaper, Moy's night: Calc keeps clear of the sleeping Moy; Moy Night; 1024x600
+moy-light_handheld_config-editor.png — Config tab (Make it mine) on Sky Run: the cards, focus on Run at; Moy Day; 320x240
+moy-light_handheld_config-editor@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_blocks-editor.png — Blocks tab on Coin Quest's coin: the object picker, the outline, add block, the tools and the door to Code; Moy Day; 320x240
+moy-light_handheld_blocks-editor@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_code-editor.png — Code tab on Star Catcher under the one bar; Moy Day; 320x240
+moy-light_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_sprite-editor.png — Sprites tab on Star Catcher's frog, step 24's arrangement under the one bar; Moy Day; 320x240
+moy-light_handheld_sprite-editor@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_map-editor.png — Map tab on Sky Run: the map at 1x, the brush palette, the tools; Moy Day; 320x240
+moy-light_handheld_map-editor@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_scene-editor.png — Scene tab on Sky Run: a coin selected and its props; Moy Day; 320x240
+moy-light_handheld_scene-editor@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_music-editor.png — Music tab on Sky Run: a sound's steps, the pad, Hear; Moy Day; 320x240
+moy-light_handheld_music-editor@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_sprite-editor_more.png — Sprites tab with its more menu open: the operations, the sprite's flags, Clear; Moy Day; 320x240
+moy-light_handheld_sprite-editor_more@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_scene-editor_stamp.png — Scene tab with the stamp tool: the stamp palette and its tag; Moy Day; 320x240
+moy-light_handheld_scene-editor_stamp@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_config-editor.png — Config tab (Make it mine) on Sky Run: the cards, focus on Run at; Moy Night; 320x240
+moy-dark_handheld_config-editor@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_blocks-editor.png — Blocks tab on Coin Quest's coin: the object picker, the outline, add block, the tools and the door to Code; Moy Night; 320x240
+moy-dark_handheld_blocks-editor@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_code-editor.png — Code tab on Star Catcher under the one bar; Moy Night; 320x240
+moy-dark_handheld_code-editor@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_sprite-editor.png — Sprites tab on Star Catcher's frog, step 24's arrangement under the one bar; Moy Night; 320x240
+moy-dark_handheld_sprite-editor@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_map-editor.png — Map tab on Sky Run: the map at 1x, the brush palette, the tools; Moy Night; 320x240
+moy-dark_handheld_map-editor@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_scene-editor.png — Scene tab on Sky Run: a coin selected and its props; Moy Night; 320x240
+moy-dark_handheld_scene-editor@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_music-editor.png — Music tab on Sky Run: a sound's steps, the pad, Hear; Moy Night; 320x240
+moy-dark_handheld_music-editor@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_sprite-editor_more.png — Sprites tab with its more menu open: the operations, the sprite's flags, Clear; Moy Night; 320x240
+moy-dark_handheld_sprite-editor_more@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_scene-editor_stamp.png — Scene tab with the stamp tool: the stamp palette and its tag; Moy Night; 320x240
+moy-dark_handheld_scene-editor_stamp@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop_editor-b-config.png — Desk Editor, concept B (Workspaces): Make it mine: Settings beside the game at 2x; Moy Day; 1024x600
+moy-light_desktop_editor-b-code.png — Desk Editor, concept B (Workspaces): Code: the signature popover over spr(, the game with a dot on Restart (an edit waits), the reference; Moy Day; 1024x600
+moy-light_desktop_editor-b-blocks.png — Desk Editor, concept B (Workspaces): Code on a blocks cart (Coin Quest): the palette, the coin's blocks, the scene with its Game tab, the code they make; Moy Day; 1024x600
+moy-light_desktop_editor-b-art.png — Desk Editor, concept B (Workspaces): Art: the sprite with its flags, the map with its Game tab, the whole sheet; Moy Day; 1024x600
+moy-light_desktop_editor-b-world.png — Desk Editor, concept B (Workspaces): World: the scene at 2x over the map, the game, the selected actor; Moy Day; 1024x600
+moy-light_desktop_editor-b-world-stamp.png — Desk Editor, concept B (Workspaces): World with the stamp tool: the stamps and their tag; Moy Day; 1024x600
+moy-light_desktop_editor-b-sound.png — Desk Editor, concept B (Workspaces): Sound: the sounds, a sound's two octaves, the game, the song; Moy Day; 1024x600
+moy-dark_desktop_editor-b-config.png — Desk Editor, concept B (Workspaces): Make it mine: Settings beside the game at 2x; Moy Night; 1024x600
+moy-dark_desktop_editor-b-code.png — Desk Editor, concept B (Workspaces): Code: the signature popover over spr(, the game with a dot on Restart (an edit waits), the reference; Moy Night; 1024x600
+moy-dark_desktop_editor-b-blocks.png — Desk Editor, concept B (Workspaces): Code on a blocks cart (Coin Quest): the palette, the coin's blocks, the scene with its Game tab, the code they make; Moy Night; 1024x600
+moy-dark_desktop_editor-b-art.png — Desk Editor, concept B (Workspaces): Art: the sprite with its flags, the map with its Game tab, the whole sheet; Moy Night; 1024x600
+moy-dark_desktop_editor-b-world.png — Desk Editor, concept B (Workspaces): World: the scene at 2x over the map, the game, the selected actor; Moy Night; 1024x600
+moy-dark_desktop_editor-b-world-stamp.png — Desk Editor, concept B (Workspaces): World with the stamp tool: the stamps and their tag; Moy Night; 1024x600
+moy-dark_desktop_editor-b-sound.png — Desk Editor, concept B (Workspaces): Sound: the sounds, a sound's two octaves, the game, the song; Moy Night; 1024x600
+moy-light_desktop_editor-b-config-800x480.png — Concept B on an 800x480 desk: config, one tabbed pane at the right; Moy Day; 800x480
+moy-light_desktop_editor-b-code-800x480.png — Concept B on an 800x480 desk: code, one tabbed pane at the right; Moy Day; 800x480
+moy-light_desktop_editor-b-art-800x480.png — Concept B on an 800x480 desk: art, one tabbed pane at the right; Moy Day; 800x480
+moy-light_desktop_editor-b-world-800x480.png — Concept B on an 800x480 desk: world, one tabbed pane at the right; Moy Day; 800x480
+moy-light_desktop_editor-b-sound-800x480.png — Concept B on an 800x480 desk: sound, one tabbed pane at the right; Moy Day; 800x480
+moy-light_desktop_editor-a-code.png — Desk Editor, concept A (Project, not chosen): coding; Moy Day; 1024x600
+moy-light_desktop_editor-a-art.png — Desk Editor, concept A (Project, not chosen): the map with the brush's sprite beside it; Moy Day; 1024x600
+moy-light_desktop_editor-a-world.png — Desk Editor, concept A (Project, not chosen): building a scene; Moy Day; 1024x600
+moy-light_desktop_editor-a-sound.png — Desk Editor, concept A (Project, not chosen): making music; Moy Day; 1024x600
+moy-light_desktop_editor-c-code.png — Desk Editor, concept C (Splits, not chosen): Code beside the game, the map split under it; Moy Day; 1024x600
+moy-light_desktop_editor-c-art.png — Desk Editor, concept C (Splits, not chosen): Sprites beside the Map, a tab dragged over the map: its drop zones; Moy Day; 1024x600
+moy-light_desktop_editor-c-world.png — Desk Editor, concept C (Splits, not chosen): the Scene, the actor and the stamps, split by hand; Moy Day; 1024x600
+moy-light_desktop_editor-c-sound.png — Desk Editor, concept C (Splits, not chosen): the Scene and the game over a sound's steps; Moy Day; 1024x600
+moy-light_desktop_editor-max-e05-art.png — Maximise E-05, tools in the title strip (as drawn): Art, the sprite, the map, the sheet; Moy Day; 1024x600
+moy-light_desktop_editor-max-e05-code.png — Maximise E-05, tools in the title strip (as drawn): Code, the game with a dot on Restart, the reference; Moy Day; 1024x600
+moy-light_desktop_editor-max-e05-art-800x480.png — Maximise E-05, tools in the title strip (as drawn): Art on an 800x480 desk; Moy Day; 800x480
+moy-dark_desktop_editor-max-e05-code.png — Maximise E-05, tools in the title strip (as drawn): Code; Moy Night; 1024x600
+moy-light_desktop_files-max-e05.png — Maximise E-05, tools in the title strip (as drawn): Files maximised, its verbs and search in the app's row; Moy Day; 1024x600
+moy-light_desktop_editor-max-v1-art.png — Maximise V1, the bar takes the tools: Art, the sprite, the map, the sheet; Moy Day; 1024x600
+moy-light_desktop_editor-max-v1-code.png — Maximise V1, the bar takes the tools: Code, the game with a dot on Restart, the reference; Moy Day; 1024x600
+moy-light_desktop_editor-max-v1-art-800x480.png — Maximise V1, the bar takes the tools: Art on an 800x480 desk; Moy Day; 800x480
+moy-dark_desktop_editor-max-v1-code.png — Maximise V1, the bar takes the tools: Code; Moy Night; 1024x600
+moy-light_desktop_files-max-v1.png — Maximise V1, the bar takes the tools: Files maximised, its verbs and search in the app's row; Moy Day; 1024x600
+moy-light_desktop_editor-max-v2-art.png — Maximise V2, full screen: Art, the sprite, the map, the sheet; Moy Day; 1024x600
+moy-light_desktop_editor-max-v2-code.png — Maximise V2, full screen: Code, the game with a dot on Restart, the reference; Moy Day; 1024x600
+moy-light_desktop_editor-max-v2-art-800x480.png — Maximise V2, full screen: Art on an 800x480 desk; Moy Day; 800x480
+moy-dark_desktop_editor-max-v2-code.png — Maximise V2, full screen: Code; Moy Night; 1024x600
+moy-light_desktop_files-max-v2.png — Maximise V2, full screen: Files maximised, its verbs and search in the app's row; Moy Day; 1024x600
+moy-light_desktop_editor-max-v1-windows.png — Maximise V1: the app's chip open, its window menu: Restore, Minimise, Close, the other windows, the desk; Moy Day; 1024x600
+moy-light_desktop_editor-max-v2-revealed.png — Maximise V2: the pointer at the top edge, the shell bar over the app's row with Exit full screen and close; Moy Day; 1024x600
+moy-light_desktop_editor-max-v2-touch.png — Maximise V2: a swipe down from the top edge, the bar following the finger in; Moy Day; 1024x600
+moy-light_desktop_editor-resize-art.png — Resizable panes, free dividers: Art with its divider moved: Sprite 470 wide, the canvas 8×8 at 38, centred; the Sheet one page at 2×; Moy Day; 1024x600
+moy-light_desktop_editor-resize-code.png — Resizable panes, free dividers: Code with its divider moved: the right column 452 wide, the game at 1× centred in the Run pane; Moy Day; 1024x600
+moy-light_desktop_editor-resize-code-drag.png — Resizable panes, free dividers: Code mid-drag by touch: the divider stopped at Run's minimum, the finger gone on; Moy Day; 1024x600
+moy-light_desktop_editor-resize-art-min.png — Resizable panes, free dividers: Art with the Map at its minimum, 320×240, drawn as on the T-Deck; Moy Day; 1024x600
+moy-light_desktop_editor-resize-art-800x480.png — Resizable panes, free dividers: Art on an 800x480 desk mid-drag: the divider stopped at Sprite's minimum, 320 wide; Moy Day; 800x480
+editor_maximise_compare.png — Maximise, the three variants' Art workspace stacked: E-05, V1, V2; Moy Day; 1024x1896

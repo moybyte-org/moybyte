@@ -318,6 +318,34 @@ new layout fields (`docs/shell_layout_2026-10.md`). **Cost:** 2–3 days.
 Live blur behind moving windows is declined: every window move on the P4
 desk would recompose it.
 
+## The Editor's layout (step 30)
+
+**31. Panes and their parts** (`EDITOR_LAYOUT.md`, concept B): the pane
+(a card on the Editor's ground, a 32 px header of tabs or a name, 32 px
+tool cells, the grow button, a second tool row when the first is full,
+compact tabs, the focused pane's `value` edge, a dim cursor in a pane
+without the keys); a maximised window's strip carrying its app's row in
+fixed title and Play slots; the workspaces; the Game tab beside Art's map
+and a blocks cart's scene; the signature popover; the sound panels (the
+two-octave pitch graph with its note readout, each step's wave, the
+volume ladder, the song's slots, a sound's sketch); the block palette and
+"+ add block"; the sprite's flag toggles and the picker tool; the World
+pane that follows the tool, tagged stamps and tag chips; the Log tab
+(after moy-spec's `log()`); sixteen glyph slots in every set (`stop`,
+`pause`, `grow`, `loop`, `grid`, `paste`, `pointer`, `lock`, `resize`,
+`volume`, `picker`, `jump`, `brush`, `flag`, `log`, `screen`). Each tab's `*Layout`
+lays out in a pane's rect instead of the content rect
+(`docs/studio_2026-09.md` §10's step 1), and a focus move between panes
+never commits (a tab switch commits synchronously today). **Cost:** about
+17–20 days (panes and the strip 3, the tabs at a pane's size 4, the
+workspaces and the Game tabs 2, the sound panels 3, the block palette 1,
+the World pane and tagged stamps 1.5, flags and the picker 1.5, the
+popover 2, the commit change 1, the glyphs 0.5; the Log tab waits for
+moy-spec). **Frame:** a game running in the Run slot beside a pane being
+typed in is two damage rects a frame on the P4 desk, and Make it mine's
+2× game is 640 × 480 a frame; measure both on p4 and guition_p4 before
+building on them.
+
 ## Moot in this rendering
 
 The pixel round's star field, moonlit edge and focus halo; the Galmuri
@@ -327,4 +355,4 @@ window behind by 25%; the 12×12 two-tone icons; the redrawn default
 wallpaper (the default theme draws a backdrop).
 
 **Total:** about 96–104 developer days for gaps 1–26; gaps 27–30 add
-about 6.
+about 6, and gap 31 about 17–20.

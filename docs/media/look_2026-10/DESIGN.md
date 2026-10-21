@@ -304,4 +304,8 @@ light and its handheld bar takes the desk bar's fill.
 
 `index.txt` names every target. Settings, Appearance, the handheld Calc,
 the console home and the wallpaper scenes follow `pixel_round3/`'s
-layouts (`rounds/round11.py`).
+layouts (`rounds/round11.py`). The Editor's desk layouts and its
+handheld Config, Blocks, Map, Scene and Music tabs are
+`rounds/round12.py`'s, and `EDITOR_LAYOUT.md` is their design. The three
+readings of maximise and the resizable panes are `rounds/round14.py`'s
+(`MAXIMISE_VARIANTS.md`).

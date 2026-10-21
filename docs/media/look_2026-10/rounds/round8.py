@@ -12,7 +12,8 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), "icons", "pixel"))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "..", "..", "..", "native", "moy_ui", "icons",
+                                "pixel"))
 import round7 as R7  # noqa: E402
 import pixel_icons as PX  # noqa: E402
 
@@ -164,12 +165,8 @@ def pixel_sheet():
         y += rh
     cv.save("icons_pixel", "The pixel icon set: today's art and the refined set for every slot, "
             "at 1x and 4x, on Pico's and Bench's bar colours")
-    text, cols, rows = PX.moygfx(slots)
-    d = os.path.join(R7.LOOK, "icons", "pixel")
-    with open(os.path.join(d, "system_icons.moygfx"), "w") as fh:
-        fh.write(text)
-    with open(os.path.join(d, "slots.txt"), "w") as fh:
-        fh.write("".join(f"{n} {s}\n" for n, s in enumerate(slots)))
+    # the shipped sheet is native/moy_ui/icons/pixel/'s, built by tools/make_icons.py
+    _text, cols, rows = PX.moygfx(slots)
     return cols, rows
 
 

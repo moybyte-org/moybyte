@@ -28,7 +28,7 @@ SITE_MOY = (
     ".0dddddddddddd0.", ".0dd0ddd0ddddd0.", ".0ddd000dddddd0.", ".0dddddddddddd0.",
     ".0dddddddddddd0.", "..022222222220..", "..02220002220...", "...000...000....",
 )
-PX.ICONS["moy"] = PX.hand(SITE_MOY, {"0": 16, "d": 13, "6": 6, "7": 7, "2": 2})
+PX.ICONS["moy"] = PX.hand(SITE_MOY)
 
 # the smooth Moy: the same silhouette traced in the 16-grid, scaled to 24
 SMOOTH_MOY = (

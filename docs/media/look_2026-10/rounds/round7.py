@@ -243,20 +243,11 @@ def mask(slot, set_name, layer, px, bpp):
 
 
 def write_sources():
-    total = {}
-    for set_name in SETS:
-        d = os.path.join(LOOK, "icons", "smooth", set_name)
-        os.makedirs(d, exist_ok=True)
-        n = 0
-        for slot in ALL:
-            for layer in SETS[set_name]["layers"]:
-                s = svg(slot, set_name, layer)
-                name = slot if layer == "ink" else f"{slot}.{layer}"
-                with open(os.path.join(d, name + ".svg"), "w") as fh:
-                    fh.write(s)
-                n += len(s)
-        total[set_name] = n
-    return total
+    """The SVG source bytes per set. The shipped sources are
+    native/moy_ui/icons/smooth/'s, which tools/make_icons.py builds from."""
+    return {set_name: sum(len(svg(slot, set_name, layer)) for slot in ALL
+                          for layer in SETS[set_name]["layers"])
+            for set_name in SETS}
 
 
 PIXEL_MAP = {"moy": "moy", "home": "home", "wifi": "wifi", "wifi_off": "wifi_off", "battery": "batt",
