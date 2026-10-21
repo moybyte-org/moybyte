@@ -1,23 +1,25 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "My Art",
   "id": "moybyte.my_art",
   "runtime": "python",
   "main": "main.py",
   "canvas": "320x240",
   "moybyte": {
-    "type": "wallpaper",
+    "type": "app",
     "system": true,
-    "order": 30,
-    "targets": [
-      "host",
-      "device",
-      "web"
-    ],
+    "order": 275,
+    "app": {
+      "id": "myart",
+      "entry": "myart_app:MyArtAppLayer",
+      "text_mode": false,
+      "order": 15
+    },
     "permissions": [
       "graphics",
-      "input"
+      "input",
+      "myart"
     ],
     "config": {},
     "edit": []

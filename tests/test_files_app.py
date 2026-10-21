@@ -281,12 +281,12 @@ def test_reuse_actions_are_copies(tmp_path):
     # (plus a #108 phase-2 provenance stamp, so compare decoded pixels).
     app._act("WALL", "dragon")
     ws.look.tick(0.0)                      # the change shows at the next frame
-    assert ws.look.wallpaper_id == "moybyte.my_art" == ws.look.PICTURE
+    assert ws.look.wallpaper_id == "moybyte.wallpaper" == ws.look.PICTURE
     px = moy_carts.decode_moyimg(moy_carts.load_file("drawings", "dragon", carts))
     # ...and the theme carries it: My Art's copy is custom's picture.
     assert moy_carts.decode_moyimg(ws.look.picture().decode()) == px
     assert moy_carts.decode_moyimg(moy_carts.load_artwork(carts)) == px
-    wall = next(c for c in moy_carts.scan(carts) if c["title"] == "My Art")
+    wall = next(c for c in moy_carts.scan(carts) if c["title"] == "Wallpaper")
     assert moy_carts.decode_moyimg(wall["images"]["bg"]) == px
     assert moy_carts.read_provenance(moy_carts.load_artwork(carts))[0] == \
         "drawings/dragon"
@@ -325,21 +325,23 @@ def test_delete_of_the_open_drawing_cannot_break_paint(tmp_path):
     assert ws.wm.top_kind() == "artwork"
 
 
-def test_paint_open_picker_switches_documents(tmp_path):
+def test_paints_open_is_my_art_and_its_pick_switches_documents(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
     _seed_drawing(carts, "one", color=11)
     _seed_drawing(carts, "two", color=12)
     _open_app(ws, "Paint")
     app = ws.artwork_app
-    app._action(3)                       # OPEN
-    assert app.mode == "open"
-    assert set(app.grid.names) >= {"one", "two"}
-    ws.frame(_DT)                        # a draw pass lays the grid out
-    cell = app.grid._cell_rect(0)
-    app._open_tap(cell[0] + 2, cell[1] + 2)
-    assert app.mode == "paint"
-    assert ws.artwork.doc_name() == app.grid.names[0]
+    app._verb("open")                    # More's Open...: the drawings' page
+    ws.frame(_DT)
+    assert ws.wm.top_kind() == "myart"
+    art = ws._apps_by_id["myart"]
+    assert set(art.drawings) >= {"one", "two"}
+    art._verb("open", "two")
+    ws.frame(_DT)
+    assert ws.wm.top_kind() == "artwork"
+    assert ws.artwork.doc_name() == "two"
+    assert app.doc.pix[0] == 12
 
 
 def test_paint_autosaves_on_the_idle_debounce(tmp_path):
@@ -368,9 +370,7 @@ def test_new_drawing_keeps_the_old_file(tmp_path):
     app.doc.put(1, 1, 22)
     app.doc.finish()
     app._mark_changed()
-    app._action(0)
-    app._action(0)                             # armed double-tap = NEW
-    assert app.status == "NEW DRAWING"
+    app._verb("new")                           # New drawing asks nothing
     names = moy_carts.list_files("drawings", carts)
     assert len(names) == 1                     # the old drawing kept its file
     old = moy_carts.decode_moyimg(moy_carts.load_file("drawings", names[0], carts))

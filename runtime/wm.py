@@ -67,7 +67,7 @@ class FullscreenStackWM:
     HOME_SCALE = 2.0
     # Registered apps the home's Apps tab and the desk leave out: reached
     # through Settings instead.
-    HIDDEN_APPS = ("appearance",)
+    HIDDEN_APPS = ("appearance", "myart")
 
     def __init__(self, ws):
         self.ws = ws

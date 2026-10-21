@@ -1,3 +1,9 @@
+# Map (grep -n a name to jump there):
+#   deck_to_code                  a deck compiled to its story cart's main.py
+#   story_list                    the stories a drawing can be put in
+#   add_picture_slide             a drawing as a story's new last page, and its undo
+#   StorybookLayout               the shelf's and a page's rects
+#   StorybookAppLayer             the Storybook app: the shelf, the pages, a page
 """Storybook -- decks of pages that COMPILE to a story cartridge (#78).
 
 The Desk Lab thesis (the HyperCard/Flash ladder): the document IS the game.
@@ -39,6 +45,11 @@ try:
     from picture_copies import current_picture
 except ImportError:  # pragma: no cover - direct host import
     from runtime.picture_copies import current_picture
+
+try:
+    from artwork import picture_size as _picture_size, read_cover as _read_cover
+except ImportError:  # pragma: no cover - direct host import
+    from runtime.artwork import picture_size as _picture_size, read_cover as _read_cover
 
 try:
     from editors_code import CodeEditor
@@ -129,6 +140,95 @@ def _fit_art(w, h, idx, max_w=320, max_h=240):
         for x in range(nw):
             out[di + x] = idx[row + x * factor]
     return nw, nh, bytes(out)
+
+
+# -- a drawing put in a story (Paint's and My Art's Put in a story) -------------------
+#
+# The one door another app takes into a story: the stories as rows, and a
+# drawing added as a new last page's picture, with its undo. Both read and
+# write the story cart's deck through the carts role, as the app does.
+
+def _deck_of(carts, cart):
+    try:
+        blob, err = carts.load_deck(cart)
+    except Exception:  # noqa: BLE001 -- a story that will not read lists empty
+        return None
+    if err is not None or not blob:
+        return None
+    try:
+        data = json.loads(blob)
+    except Exception:  # noqa: BLE001 -- a bad deck is no deck
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def story_list(carts):
+    """The stories a drawing can be put in: [{"cart", "title", "folder",
+    "slides", "cover"}] in the shelf's order, `cover` None (the app draws its
+    icon)."""
+    out = []
+    for c in carts.all():
+        if c.get("type") != STORY_TYPE or not c.get("path"):
+            continue
+        deck = _deck_of(carts, c)
+        if deck is None or c.get("graduated"):
+            continue
+        path = str(c.get("path")).replace("\\", "/").rstrip("/")
+        out.append({"cart": c, "title": c.get("title") or "My Story",
+                    "folder": path.rsplit("/", 1)[-1], "slides": len(deck.get("pages") or ()),
+                    "cover": None})
+    return out
+
+
+def _save_story(carts, cart, deck):
+    _v, err = carts.save_deck(cart, json.dumps(deck))
+    if err is None:
+        _v, err = carts.save_code(cart, deck_to_code(deck, cart.get("title") or "My Story"))
+    return err is None
+
+
+def add_picture_slide(carts, files, story, name):
+    """Drawing `name` as a new last page of `story` (a row of `story_list`),
+    read a row at a time at the story's size: (title, page number, undo), the
+    number 0 where it could not be added; `undo` takes that page out again
+    while it is still the story's last."""
+    cart = story["cart"]
+    title = story["title"]
+    deck = _deck_of(carts, cart)
+    blob, err = files.load("drawings", name)
+    size = _picture_size(blob) if err is None else None
+    if deck is None or size is None:
+        return (title, 0, None)
+    pages = deck.setdefault("pages", [])
+    if len(pages) >= MAX_PAGES:
+        return (title, 0, None)
+    w, h = size
+    factor = 1
+    while (w + factor - 1) // factor > 320 or (h + factor - 1) // factor > 240:
+        factor += 1
+    fw, fh = (w + factor - 1) // factor, (h + factor - 1) // factor
+    pix = bytearray(fw * fh)
+    if _read_cover(blob, pix, fw, fh) is None:
+        return (title, 0, None)
+    blob = None
+    seq = int(deck.get("art_seq") or 0) + 1
+    deck["art_seq"] = seq
+    art = "pg" + str(seq)
+    _v, err = carts.save_image(cart, art, carts.encode_image(fw, fh, pix))
+    if err is not None:
+        return (title, 0, None)
+    pages.append({"bg": BGS[0], "art": art, "text": []})
+    if not _save_story(carts, cart, deck):
+        return (title, 0, None)
+    n = len(pages)
+
+    def undo():
+        d = _deck_of(carts, cart)
+        ps = (d or {}).get("pages") or []
+        if len(ps) == n and ps[-1].get("art") == art:
+            ps.pop()
+            _save_story(carts, cart, d)
+    return (title, n, undo)
 
 
 class StorybookLayout(ListShellLayout):

@@ -251,7 +251,7 @@ class Appearance:
 
     # The wallpaper id of the theme's picture: the My Art entry, which stands
     # for Paint's picture (the wallpaper copy) wherever wallpapers are picked.
-    PICTURE = BUILTIN_NS + ".my_art"
+    PICTURE = BUILTIN_NS + ".wallpaper"
     # change()'s wallpaper value for the source theme's own wallpaper: its
     # cart or its picture, whichever it names (the page's undo of a try).
     THEIRS = ""

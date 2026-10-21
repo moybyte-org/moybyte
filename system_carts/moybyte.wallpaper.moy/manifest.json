@@ -1,0 +1,25 @@
+{
+  "format": "moy-1",
+  "version": 1,
+  "title": "Wallpaper",
+  "id": "moybyte.wallpaper",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "wallpaper",
+    "system": true,
+    "order": 30,
+    "targets": [
+      "host",
+      "device",
+      "web"
+    ],
+    "permissions": [
+      "graphics",
+      "input"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

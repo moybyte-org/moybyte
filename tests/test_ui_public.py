@@ -448,7 +448,6 @@ def test_a_settled_page_draws_the_same_pixels():
 # steps 23 and 24 restyled the editors in place, docs/ui_api_2026-10.md §1a),
 # and step 27 holds the list empty.
 NOT_MOVED = frozenset((
-    "runtime/artwork.py",
     "runtime/block_editor_ui.py",
     "runtime/code_layer.py",
     "runtime/editor_app.py",
@@ -462,7 +461,8 @@ NOT_MOVED = frozenset((
 
 # The shell's apps (§7): their modules and the system carts' code.
 APPS = (
-    "runtime/appearance_app.py", "runtime/artwork.py", "runtime/block_editor_ui.py",
+    "runtime/appearance_app.py", "runtime/artwork.py", "runtime/paint_app.py",
+    "runtime/myart_app.py", "runtime/drawing_pages.py", "runtime/block_editor_ui.py",
     "runtime/calc_app.py", "runtime/code_layer.py", "runtime/editor_app.py",
     "runtime/file_widgets.py", "runtime/files_app.py", "runtime/getcarts_app.py",
     "runtime/map_editor_ui.py", "runtime/music_editor_ui.py", "runtime/paint_layer.py",

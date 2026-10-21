@@ -24,7 +24,8 @@ app; there is no per-app line anywhere in the shell.
 """
 
 APPS = [
-    {'id': 'artwork', 'entry': 'artwork:PaintAppLayer', 'text_mode': False, 'order': 10, 'folder': 'moybyte.paint', 'title': 'Paint'},
+    {'id': 'artwork', 'entry': 'paint_app:PaintAppLayer', 'text_mode': False, 'order': 10, 'folder': 'moybyte.paint', 'title': 'Paint'},
+    {'id': 'myart', 'entry': 'myart_app:MyArtAppLayer', 'text_mode': False, 'order': 15, 'folder': 'moybyte.my_art', 'title': 'My Art'},
     {'id': 'appearance', 'entry': 'appearance_app:AppearanceAppLayer', 'text_mode': False, 'order': 20, 'folder': 'moybyte.appearance', 'title': 'Appearance'},
     {'id': 'storybook', 'entry': 'storybook_app:StorybookAppLayer', 'text_mode': False, 'order': 40, 'folder': 'moybyte.storybook', 'title': 'Storybook'},
     {'id': 'files', 'entry': 'files_app:FilesAppLayer', 'text_mode': True, 'order': 60, 'folder': 'moybyte.files', 'title': 'Files'},

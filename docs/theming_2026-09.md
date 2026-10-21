@@ -856,7 +856,7 @@ wallpaper is the theme's: the user's pick (Appearance's WALLPAPER, Paint's
 WALL, `ctx.wallpaper`) is a change to the theme, written into `custom`, and
 there is no setting beside it (owner, 2026-10-14; phase 6 step 5). A cart is
 `"wallpapers": {"desk": id}`; a picture is `"images": {"desk":
-"desk.moyimg"}` with the file in the package (a My Art pick copies Paint's
+"desk.moyimg"}` with the file in the package (the Wallpaper pick copies Paint's
 picture, the wallpaper copy WALL wrote); NONE is `"wallpapers": {}` with no
 `images`, the theme naming its wallpapers and none of them, so the desk is
 `desktop`'s fill under the theme's backdrop. A theme naming neither key shows
@@ -1651,7 +1651,7 @@ port), never here.
      the `wallpapers` and `images` keys are read (one slot, `desk`, §4.9);
      `select_wallpaper` — the Appearance picker, Paint's WALL, the cycle
      verb, `ctx.wallpaper` — becomes a change: a wallpaper cart is named by
-     id, a My Art picture is copied into the package as `desk.moyimg`, and
+     id, the Wallpaper slot's picture is copied into the package as `desk.moyimg`, and
      NONE names neither, so the desk is `desktop`'s fill (the built-in
      `fill:` options go). The `wallpaper` row of `system.json` and its
      reader are deleted: under the store rule (CLAUDE.md, 2026-09-07) a
@@ -1765,7 +1765,7 @@ port), never here.
      from another theme replaces it), one opened on `custom` changes the
      value back; a tap outside a popover closes it and keeps the try. The
      source theme's own picture is the catalogue's THEME'S PICTURE,
-     never My Art, and the change that puts it back is `change("wallpaper",
+     never the Wallpaper slot, and the change that puts it back is `change("wallpaper",
      THEIRS)` (`Appearance.THEIRS`, the source's own wallpaper). The look
      answers the rows in one read, `Appearance.choices()`, once per token
      generation; four `theme` role rows are the page's

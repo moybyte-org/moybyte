@@ -214,7 +214,7 @@ def test_a_picture_paint_cannot_read_opens_read_only(tmp_path):
 
     assert ws.wm.top_kind() == "artwork"
     assert not ws.artwork.editable()
-    assert ws.artwork.why_read_only() == "CAN'T READ THIS PICTURE"
+    assert ws.artwork.why_read_only() == "Can't read this picture"
     assert ws.artwork.save(bytes((9,)) * 16, 4, 4) is False
     assert (path / "images" / "sky.moyimg").read_text() \
         == '{"format":"moyimg-v1","w":8}'

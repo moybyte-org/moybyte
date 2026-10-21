@@ -262,7 +262,8 @@ def test_the_hosts_esc_steps_a_desk_windows_page(tmp_path):
     ("files", lambda a: setattr(a, "dialog", object())),
     ("getcarts", lambda a: setattr(a, "phase", "cart")),
     ("storybook", lambda a: setattr(a, "mode", "pages")),
-    ("artwork", lambda a: setattr(a, "mode", "show")),
+    ("artwork", lambda a: setattr(a, "page", "show")),
+    ("myart", lambda a: setattr(a, "menu", True)),
 ])
 def test_every_app_with_pages_answers_has_page(tmp_path, app_id, page):
     ws = build_ws(tmp_path)

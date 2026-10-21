@@ -61,7 +61,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The theme's picture's wallpaper id (`Appearance.PICTURE`), and the change
 # value that puts the source theme's own wallpaper back (`Appearance.change`).
-PICTURE = BUILTIN_NS + ".my_art"
+PICTURE = BUILTIN_NS + ".wallpaper"
 THEIRS = ""
 
 # The WINDOW STYLE and FONT presets in their stepping order (the look's
@@ -362,8 +362,8 @@ class AppearanceAppLayer:
         for c in self._wall.carts():
             wid = self._wall.id_for(c)
             title = str(c.get("title", "Wallpaper"))
-            if title == "My Art":
-                art = (wid, "My art", "art")
+            if title == "Wallpaper":
+                art = (wid, "Wallpaper", "art")
             else:
                 carts.append((wid, title, "cart"))
         if tab == 1:

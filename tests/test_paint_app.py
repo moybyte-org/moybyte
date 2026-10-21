@@ -27,20 +27,23 @@ def _open_paint(ws):
     return ws.artwork_app
 
 
-def test_paint_and_my_art_are_well_formed_system_carts():
+def test_paint_my_art_and_the_wallpaper_are_well_formed_system_carts():
     paint = ROOT / "system_carts" / "moybyte.paint.moy"
-    wall = ROOT / "system_carts" / "moybyte.my_art.moy"
-    for folder in (paint, wall):
+    art = ROOT / "system_carts" / "moybyte.my_art.moy"
+    wall = ROOT / "system_carts" / "moybyte.wallpaper.moy"
+    for folder in (paint, art, wall):
         man = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
         assert man["version"] >= 1
         compile((folder / "main.py").read_text(encoding="utf-8"),
                 str(folder / "main.py"), "exec")
     assert json.loads((paint / "manifest.json").read_text())["moybyte"]["type"] == "app"
-    assert json.loads((wall / "manifest.json").read_text())["moybyte"]["type"] == "wallpaper"
+    assert json.loads((art / "manifest.json").read_text())["moybyte"]["type"] == "app"
+    man = json.loads((wall / "manifest.json").read_text())
+    assert man["moybyte"]["type"] == "wallpaper" and man["title"] == "Wallpaper"
 
 
 def test_the_paint_cart_body_is_only_the_fallback_card():
-    """Paint the APP is `runtime/artwork.py`; `moybyte.paint.moy/main.py` is the card an
+    """Paint the APP is `runtime/paint_app.py`; `moybyte.paint.moy/main.py` is the card an
     older shell shows instead, and nothing else.
 
     A registered app CLAIMS its cart (`console.open()` routes a claimed cart to
@@ -88,19 +91,20 @@ def test_touch_stroke_undo_redo_and_shared_save(tmp_path):
     driver = host_app.ConsoleDriver(ws)
 
     before = bytes(app.doc.pix)
-    # FIT canvas maps each screen pixel to a 2x2 document block. Draw a short
-    # continuous stroke through the same pointer path as host mouse/device touch.
-    _img, dx, dy, scale, factor = app.display
-    x0, y0 = dx + 10 * scale, dy + 8 * scale
+    # A short continuous stroke through the same pointer path as a host mouse
+    # and a device touch, where the view shows the drawing at 1x.
+    x, y, w, h, sx, sy, sw, sh, q = app._spec()
+    assert q == 4, "Paint opens at 1x on a handheld"
+    x0, y0 = x + 10, y + 8
     driver.touch(x0, y0)
     driver.frame(1 / 30)
-    driver.touch_drag(x0 + 16 * scale, y0)
+    driver.touch_drag(x0 + 16, y0)
     driver.frame(1 / 30)
     driver.touch_up()
     driver.frame(1 / 30)
     changed = bytes(app.doc.pix)
     assert changed != before
-    assert changed[(8 * factor) * app.doc.W + 10 * factor] == app.color
+    assert changed[(sy + 8) * app.doc.W + sx + 10] == app.color
 
     assert app.doc.undo()
     assert bytes(app.doc.pix) == before
@@ -114,10 +118,10 @@ def test_touch_stroke_undo_redo_and_shared_save(tmp_path):
     assert name
     blob = moy_carts.load_file("drawings", name, carts)
     assert moy_carts.decode_moyimg(blob) == (app.doc.W, app.doc.H, changed)
-    wall = next(c for c in moy_carts.scan(carts) if c["title"] == "My Art")
+    wall = next(c for c in moy_carts.scan(carts) if c["title"] == "Wallpaper")
     assert "bg" not in wall["images"]
     assert ws.artwork.set_wallpaper()
-    wall = next(c for c in moy_carts.scan(carts) if c["title"] == "My Art")
+    wall = next(c for c in moy_carts.scan(carts) if c["title"] == "Wallpaper")
     # The wallpaper copy carries the SAME pixels (copy-on-set) plus a #108
     # phase-2 provenance stamp (src/sig) so a later edit can offer UPDATE.
     assert moy_carts.decode_moyimg(wall["images"]["bg"]) == \
@@ -133,11 +137,12 @@ def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
     ws = host_app.build_workstation(carts)
     app = _open_paint(ws)
     app.doc.put(10, 10, 14)
+    app._mark_changed()
     assert app._save()
 
     assert ws.artwork.set_wallpaper()
     ws.look.tick(0.0)                          # the change shows at the next frame
-    assert ws.look.wallpaper_id == "moybyte.my_art" == ws.look.PICTURE
+    assert ws.look.wallpaper_id == "moybyte.wallpaper" == ws.look.PICTURE
     ws.look.commit()
     # The picture is the theme's: copied into `custom` (docs/theming_2026-09.md D6).
     assert moy_carts.load_system(carts)["theme"] == "custom"
@@ -170,25 +175,24 @@ def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
     assert "artwork" not in ws.ns
 
 
-def test_desktop_paint_reflows_and_wallpaper_maps_512x300_exactly_2x(tmp_path):
+def test_a_desks_drawing_is_1024x600_and_a_window_resize_never_resamples_it(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"),
                                     sys_size=(1024, 600), font_scale=2,
-                                    windowed=True)
+                                    windowed=True, panel_diagonal_in=7.0)
+    ws.open_desk()
     app = _open_paint(ws)
+    ws.frame(1 / 30)
     win = ws.wm._wins["artwork"]
     lay = win.ctx.artwork_layout
-    assert (app.doc.W, app.doc.H) == (512, 300)
-    assert not lay.compact
-    assert lay.view[2] >= 512 and lay.view[3] >= 300
+    assert (app.doc.W, app.doc.H) == (1024, 600)
+    assert lay.desk
+    assert app._quarters() == 2, "Fit shows the desk's drawing at a half in a window"
+    assert app.sizes() == (2, 4, 8, 16)
 
-    # Resize release rebuilds the buffer + its Paint layout context; document bytes
-    # and resolution are not resampled by presentation changes.
     before = bytes(app.doc.pix)
     ws.wm._resize_window(win, 720, 430)
     assert win.ctx.artwork_layout.w == win.buf.w
     assert bytes(app.doc.pix) == before
-    assert win.w >= 620
-    assert win.h >= 460
 
     assert app._save()
     assert ws.artwork.set_wallpaper()
@@ -196,14 +200,9 @@ def test_desktop_paint_reflows_and_wallpaper_maps_512x300_exactly_2x(tmp_path):
     ws.wallpaper.draw(0)
     src = app.doc.pix
     out = ws.sys_canvas
-    # 512x300 -> exact nearest-neighbor 2x on the 1024x600 host system canvas.
-    # pix() reads a palette INDEX back, which is what the document stores.
-    for x, y in ((0, 0), (10, 10), (255, 149), (511, 299)):
-        c = src[y * 512 + x]
-        dx, dy = x * 2, y * 2
-        assert out.pix(dx, dy) == c
-        assert out.pix(dx + 1, dy) == c
-        assert out.pix(dx, dy + 1) == c
+    # 1024x600 -> the 1024x600 desk, one to one. pix() reads a palette INDEX.
+    for x, y in ((0, 0), (10, 10), (511, 299), (1023, 599)):
+        assert out.pix(x, y) == src[y * 1024 + x]
 
 
 def test_a_saved_drawing_reopens_as_the_same_pixels(tmp_path):
@@ -219,6 +218,7 @@ def test_a_saved_drawing_reopens_as_the_same_pixels(tmp_path):
     for i in range(0, len(doc.pix), 7):
         doc.pix[i] = (i // 7) & 63
     painted = bytes(doc.pix)
+    app._mark_changed()
     assert app._save() is True
     name = ws.artwork.doc_name()
 
@@ -280,16 +280,10 @@ def test_paints_full_screen_bake_is_borrowed_and_given_back(tmp_path):
 
     doc = app.doc
     assert doc.image._owner == PaintDocument.OWNER == "artwork"
-    assert doc.thumb_image._owner == PaintDocument.OWNER
-    # The picture is over the full-surface bar and the half-scale thumb is
-    # under it, so a stroke in FIT view -- the default -- costs no loan at all.
+    # The picture is over the full-surface bar: one loan, which a stroke
+    # mends a rect of (`rebake`) rather than taking again.
     assert _bake_bytes(doc.image) >= device_canvas._OFFHEAP_BAKE_BYTES
-    assert _bake_bytes(doc.thumb_image) < device_canvas._OFFHEAP_BAKE_BYTES
-    # A whole document plus its thumb is two loans at the desktop size, which is
-    # why the per-owner cap is not one.
-    big = PaintDocument(512, 300)
-    assert _bake_bytes(big.thumb_image) >= device_canvas._OFFHEAP_BAKE_BYTES
-    assert 2 <= device_canvas._MAX_LENT_BAKES
+    assert 1 <= device_canvas._MAX_LENT_BAKES
 
     # The seams. A gc-heap canvas has no release_bakes at all (the host's), so
     # the probe is a getattr -- record what a device canvas would be told.
@@ -586,3 +580,195 @@ def test_a_backdrop_that_already_fits_the_screen_is_read_straight_in(tmp_path,
 
     wall.drop_picture()
     assert loans.stats() == (0, 0)
+
+
+# --------------------------------------------------------------------------- #
+# The 2026-10 look's Paint (docs/media/look_2026-10/APPS_RESTYLE.md, Paint).  #
+# --------------------------------------------------------------------------- #
+
+def _type(ws, *keys):
+    drv = host_app.ConsoleDriver(ws)
+    for k in keys:
+        drv.type_char(ord(k) if isinstance(k, str) else k)
+        for _ in range(2):
+            drv.frame(1 / 30)
+
+
+def _wide(ws, name="garden", c=12):
+    pix = bytearray([c]) * (1024 * 600)
+    pix[600 * 1024 - 1] = 8
+    moy_carts.save_file("drawings", name, moy_carts.encode_moyimg(1024, 600, pix),
+                        ws.carts_root)
+
+
+def test_an_undo_step_holds_the_tiles_a_mark_reached_not_the_drawing():
+    from runtime.artwork import PaintDocument
+    d = PaintDocument(1024, 600)
+    before = bytes(d.pix)
+    d.snapshot()
+    d.line(10, 10, 600, 400, 8, 16, True)
+    d.finish()
+    held = sum(len(t[1]) for t in d.history[0])
+    assert held < len(d.pix) // 8, "a diagonal stroke keeps the strip it crossed"
+    after = bytes(d.pix)
+    assert d.undo() and bytes(d.pix) == before
+    assert d.redo() and bytes(d.pix) == after
+    # what changed is the rect the canvas mends, not a whole re-bake
+    d.take_dirty()
+    d.snapshot()
+    d.stamp(100, 100, 3, 4)
+    d.finish()
+    assert d.take_dirty() == (98, 98, 4, 4)
+
+
+def test_the_tool_keys_pick_tools_and_a_repeat_on_shape_moves_its_shape_on(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_paint(ws)
+    _type(ws, "b")
+    assert app.tool == 1
+    _type(ws, "s")
+    assert app.tool == 4 and app.shape == 1
+    _type(ws, "s")
+    assert app.shape == 2, "Shape: rect -> oval on a repeat"
+    _type(ws, "e", "e")
+    assert app.tool == 2 and app.pop == "brush", "a repeat key opens the brush"
+    assert app.back() and app.pop is None
+
+
+def test_z_cycles_1x_2x_4x_and_fit_and_fit_is_the_largest_that_shows_it_whole(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_paint(ws)
+    seen = [app._quarters()]
+    for _ in range(4):
+        _type(ws, "z")
+        seen.append(app._quarters())
+    assert seen == [4, 8, 16, 2, 4], "a 320x240 drawing in the T-Deck's view fits at a half"
+
+
+def test_the_arrows_move_the_cursor_and_a_draws_there(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_paint(ws)
+    c0 = list(app.cur)
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("right")
+    drv.frame(1 / 30)
+    assert app.cur[0] == c0[0] + 1
+    drv.press("a")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    x, y = app.cur
+    assert app.doc.get(x, y) == app.color
+
+
+def test_more_offers_put_in_a_game_only_for_a_game_size_drawing(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_paint(ws)
+    verbs = [r[0] for r in app._more_rows() if r != "-"]
+    assert verbs == ["new", "open", "wallpaper", "game", "show"]
+    app.doc.put(1, 1, 8)
+    app._mark_changed()
+    app._verb("game")
+    assert app.page == "game" and app.game.carts
+    title = app.game.carts[0].get("title")
+    assert app._art.copies.attach(0, app._art.doc_name()) == title
+
+
+def test_a_handheld_views_a_desks_drawing_and_never_decodes_it_whole(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.pointer.visible = False
+    _wide(ws)
+    ws.artwork.open_named("garden", "drawings")
+    app = ws.artwork_app
+    app._starter_pending = False
+    app = _open_paint(ws)
+    v = app.viewer
+    assert v is not None and (v.W, v.H) == (1024, 600)
+    assert app._doc is None, "no drawing decoded to draw on"
+    assert v.fit_q == 1 and (v.fit_bitmap().w, v.fit_bitmap().h) == (256, 150)
+    assert (v.mini().w, v.mini().h) == (64, 38)
+    _type(ws, "p")
+    assert app.toast[0] == "From a desk: you can look, not draw"
+    zooms = []
+    for _ in range(4):
+        _type(ws, "z")
+        zooms.append(v.quarters())
+    assert zooms == [2, 4, 8, 1], "Fit, then a half, 1x, 2x"
+    _type(ws, "z", "z")
+    bmp, k = v.window()
+    assert k == 1 and bmp.w <= 320 and v._src[1:3] == (1024, 600)
+    # its More keeps the verbs a viewer has
+    verbs = [r[0] for r in app._more_rows() if r != "-"]
+    assert verbs == ["open", "wallpaper", "story", "show"]
+    assert app.doc_title() == "Garden"
+
+
+def test_the_first_save_of_a_new_drawing_says_its_name(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_paint(ws)
+    app.doc.put(2, 2, 8)
+    app._mark_changed()
+    assert app._save()
+    assert app.toast is not None and app.toast[0].startswith("Saved ")
+
+
+def test_put_in_a_story_adds_a_last_page_and_its_undo_takes_it_out(tmp_path):
+    from runtime import storybook_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    sb = ws._apps_by_id["storybook"]
+    sb._new_story()
+    sb._commit_deck()
+    app = _open_paint(ws)
+    app.doc.put(2, 2, 8)
+    app._mark_changed()
+    assert app._save()
+    stories = storybook_app.story_list(ws.artwork.ctx.carts)
+    assert stories
+    n = stories[0]["slides"]
+    title, slide, undo = storybook_app.add_picture_slide(
+        ws.artwork.ctx.carts, ws.artwork.ctx.files, stories[0], ws.artwork.doc_name())
+    assert slide == n + 1
+    assert storybook_app.story_list(ws.artwork.ctx.carts)[0]["slides"] == n + 1
+    undo()
+    assert storybook_app.story_list(ws.artwork.ctx.carts)[0]["slides"] == n
+
+
+def test_the_desk_window_is_titled_with_the_drawing(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    windowed=True, panel_diagonal_in=7.0)
+    ws.open_desk()
+    app = _open_paint(ws)
+    for _ in range(2):
+        ws._dirty = True
+        ws.frame(1 / 30)
+    win = ws.wm._wins["artwork"]
+    assert ws.wm._win_title(win).startswith("Paint")
+    assert app.doc_title() in ws.wm._win_title(win)
+    assert ws.wm._chip_title(win, True) == "Paint"
+
+
+def _idle_paints(ws):
+    from ws_helpers import quiesce
+    drv = host_app.ConsoleDriver(ws)
+    quiesce(ws)
+    for _ in range(4):
+        drv.frame(1 / 30)
+    quiesce(ws)
+    ws._dirty = True
+    for _ in range(4):
+        drv.frame(1 / 30)
+    drawn = ws._frames_drawn
+    for _ in range(10):
+        drv.frame(1 / 30)
+    return ws._frames_drawn - drawn
+
+
+def test_a_settled_canvas_and_a_settled_view_paint_nothing(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.pointer.visible = False
+    _open_paint(ws)
+    assert _idle_paints(ws) == 0, "an idle canvas painted"
+    _wide(ws)
+    ws.artwork.open_named("garden", "drawings")
+    ws.artwork_app.open()
+    assert ws.artwork_app.viewer is not None
+    assert _idle_paints(ws) == 0, "an idle view painted"

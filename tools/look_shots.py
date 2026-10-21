@@ -226,17 +226,17 @@ def _setup_table():
 
 # The apps' restyle (docs/media/look_2026-10/APPS_RESTYLE.md, plan step 31):
 # each scene's screen -> the app it is drawn from today, and the page of it.
-APPS = {"paint": ("artwork", None), "paint-colours": ("artwork", None),
-        "paint-brush": ("artwork", None), "paint-more": ("artwork", None),
-        "paint-touch": ("artwork", None), "paint-touch-colours": ("artwork", None),
-        "paint-game": ("artwork", "projects"), "my-art": ("artwork", "open"),
-        "my-art-menu": ("artwork", "open"), "my-art-empty": ("artwork", "open"),
+APPS = {"paint": ("artwork", "main"), "paint-colours": ("artwork", "colours"),
+        "paint-brush": ("artwork", "brush"), "paint-more": ("artwork", "more"),
+        "paint-touch": ("artwork", "touch"), "paint-touch-colours": ("artwork", "touch-colours"),
+        "paint-game": ("artwork", "game"), "my-art": ("myart", "grid"),
+        "my-art-menu": ("myart", "menu"), "my-art-empty": ("myart", "empty"),
         "getcarts": ("getcarts", "grid"), "getcarts-cart": ("getcarts", "cart"),
         "getcarts-getting": ("getcarts", "getting"), "getcarts-offline": ("getcarts", "offline"),
         "notes": ("notes", "list"), "notes-edit": ("notes", "edit"), "notes-new": ("notes", "new"),
-        "notes-empty": ("notes", "empty"), "paint-max": ("artwork", None),
-        "paint-view": ("artwork", None), "paint-view-zoom": ("artwork", None),
-        "paint-view-more": ("artwork", None), "storybook": ("storybook", None),
+        "notes-empty": ("notes", "empty"), "paint-max": ("artwork", "main"),
+        "paint-view": ("artwork", "view"), "paint-view-zoom": ("artwork", "view-zoom"),
+        "paint-view-more": ("artwork", "view-more"), "storybook": ("storybook", None),
         "storybook-empty": ("storybook", None), "storybook-view": ("storybook", None),
         "storybook-deck": ("storybook", None), "storybook-picture": ("storybook", None),
         "storybook-slide": ("storybook", None), "storybook-max": ("storybook", None),
@@ -276,6 +276,12 @@ def _app_open(app, page=None, window=False):
             return
         if app == "getcarts":
             _getcarts(g, ws, page, window)
+            return
+        if app == "artwork":
+            _paint(g, ws, page, window)
+            return
+        if app == "myart":
+            _myart(g, ws, page, window)
             return
         ws.open_app(ws._apps_by_id[app])
         _settle(g, ws, 2)
@@ -498,6 +504,158 @@ def _notes(g, ws, state, window):
             ws.pointer.place(x, y)
             gx, gy = ws.wm.game_xy(x, y)
             ws.input.game_pointer = (gx, gy, False, False)
+    _settle(g, ws, 3)
+
+
+# The targets' drawings (rounds/round13.py ART and DRAWINGS, round15.py WIDE):
+# file name -> (round13 kind, newest first); the desk's Garden is 1024 x 600.
+_DRAWINGS = (("garden", "garden"), ("rocket", "rocket"), ("ginger", "cat"),
+             ("fish_tank", "fish"), ("my_house", "house"), ("night_sky", "night"),
+             ("dragon", "dragon"))
+
+
+_ART = {}
+
+
+def _art():
+    """The rounds' drawings as MOY64 indices, {kind: (w, h, bytes)}, the
+    desk's wide ones under "wide_<kind>": made in a process of their own
+    (the rounds put the runtime on the import path as top-level modules)."""
+    if _ART:
+        return _ART
+    import pickle
+    import subprocess
+    here = os.path.join(ROOT, "docs", "media", "look_2026-10", "rounds")
+    out = subprocess.run([sys.executable, "-c", _ART_SRC, here], check=True,
+                         stdout=subprocess.PIPE).stdout
+    _ART.update(pickle.loads(out))
+    return _ART
+
+
+_ART_SRC = """
+import pickle, sys
+sys.path.insert(0, sys.argv[1])
+import round15
+r13 = round15.R13
+lut = {}
+for i, c in enumerate(r13.P64):
+    lut.setdefault(c, i)
+def idx(im):
+    im = im.convert("RGB")
+    px = im.load()
+    out = bytearray(im.width * im.height)
+    for y in range(im.height):
+        for x in range(im.width):
+            p = px[x, y]
+            i = lut.get(p)
+            if i is None:
+                i = min(range(64), key=lambda k: sum((a - b) ** 2 for a, b in zip(r13.P64[k], p)))
+                lut[p] = i
+            out[y * im.width + x] = i
+    return (im.width, im.height, bytes(out))
+art = {k: idx(v) for k, v in r13.ART.items()}
+art.update({"wide_" + k: idx(v) for k, v in round15.WIDE.items()})
+sys.stdout.buffer.write(pickle.dumps(art))
+"""
+
+
+def _seed_drawings(ws, wide_garden=False, only=None):
+    from runtime import moy_carts
+    art = _art()
+    root = ws.carts_root
+    t = 1700000000
+    for i, (name, kind) in enumerate(_DRAWINGS):
+        if only is not None and name not in only:
+            continue
+        w, h, pix = art["wide_" + kind if wide_garden and name == "garden" else kind]
+        moy_carts.save_file("drawings", name, moy_carts.encode_moyimg(w, h, pix), root)
+        path = os.path.join(os.path.dirname(root), "files", "drawings", name + ".moyimg")
+        if os.path.exists(path):
+            os.utime(path, (t - 60 * i, t - 60 * i))
+
+
+def _paint(g, ws, state, window):
+    """Paint as the targets draw it: the Garden open (the desk's at 1024 x
+    600, a handheld's view of it for the view scenes), on `state`'s page."""
+    view = state.startswith("view")
+    _seed_drawings(ws, wide_garden=window or view, only=("garden",))
+    if state.startswith("touch"):
+        ws.use_inputs([("local", "touch")])
+    if not window:
+        ws.pointer.visible = False
+    else:
+        ws.open_desk()
+    ws.artwork.open_named("garden", "drawings")
+    app = _app(ws, "artwork")
+    app._starter_pending = False
+    ws.open_app(ws._apps_by_id["artwork"])
+    if window:
+        _settle(g, ws, 1)
+        _place(ws, "artwork", 112, 52, 900, 536)
+    _settle(g, ws, 2)
+    if view:
+        v = app.viewer
+        if state == "view-zoom":
+            v.zoom = 4
+            v.pan[0], v.pan[1] = 520, 300
+        elif state == "view-more":
+            app.pop = "more"
+            app._focus = "Use as wallpaper\tW"
+        else:
+            app._say("From a desk: you can look, not draw")
+        _settle(g, ws, 3)
+        return
+    d = app.doc
+    d.history.append(((0, d._tile(0)),))     # an edit to undo
+    if window:
+        app.cur = [600, 240]
+    else:
+        app.pan = [20, 34]
+        app.cur = [140, 107]
+    if state == "main" and not window:
+        app._say("Saved Garden")
+    elif state in ("colours", "touch-colours"):
+        app.pop = "colours"
+        app.swatch = 14
+    elif state == "brush":
+        app.tool = 4
+        app.size_i = 2
+        app.pop = "brush"
+    elif state == "more":
+        app.pop = "more"
+        app._focus = "Use as wallpaper\tW"
+    elif state == "game":
+        app._verb("game")
+    _settle(g, ws, 3)
+    if state == "game" and app.game is not None:
+        titles = [c.get("title") for c in app.game.carts]
+        if "Sky Run" in titles:
+            app.game.cur = titles.index("Sky Run")
+        _settle(g, ws, 3)
+
+
+def _myart(g, ws, state, window):
+    """My Art over the targets' drawings, Garden the wallpaper, focus on
+    Rocket (its menu open for `menu`); none for `empty`."""
+    if state != "empty":
+        _seed_drawings(ws)
+        ws.artwork.set_wallpaper("garden")
+        ws.look.tick(0.0)
+    if not window:
+        ws.pointer.visible = False
+    else:
+        ws.open_desk()
+    app = _app(ws, "myart")
+    ws.open_app(ws._apps_by_id["myart"])
+    if window:
+        _settle(g, ws, 1)
+        _place(ws, "myart", 112, 52, 900, 536)
+    _settle(g, ws, 2)
+    if state != "empty":
+        app._focus = app._card_id("rocket")
+        _settle(g, ws, 2)
+        if state == "menu":
+            app._verb("menu")
     _settle(g, ws, 3)
 
 

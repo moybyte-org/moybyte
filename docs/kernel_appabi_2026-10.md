@@ -188,7 +188,7 @@ only the shell's own calls (boot restore, cycling) reach the look's
 | `prefs` | `get(key, buf)`, `set(key, json)`, `clear(key)` | C | the settings rows under the grant's namespace, values as JSON text; `get` answers ABSENT and the Python binding returns the caller's default. On a board the rows are the kernel's (`moy_spine_kernel`'s, viewed by `moy_spine.kernel_settings`), and a write flushes through the rows' own saver (`moy_settings_flush`), which the console's store registers while its VM runs; a write made with no VM stays dirty in the rows, and the next start flushes them before it reads the file |
 | `notify` | `achieve(kind, key)` | shell | the `Achievements` object is the console's |
 | `wallpaper` | `current(buf)`, `carts(out)`, `id_for(cart, buf)`, `title(id, buf)` (in place of `cart_by_id`, whose one caller reads the title), `select(id)`, `preview(...)`, `thumbnail(w, h)` | shell | `current` is the look's live `wallpaper_id`, the active theme's (`runtime/appearance.py`, docs/theming_2026-09.md D6), and `select` is a change to the theme; `preview` is a Python callable on the frame path; `thumbnail` is My Art's card, Paint's decode of the copy scaled (§6) |
-| `wallpaper` | `load_copy`, `save_copy` | C | Paint's picture as WALL leaves it, which a My Art pick copies into the theme, with the user-files layer whose store it is; a write moves the copy's generation, which the thumbnail's decode is keyed on |
+| `wallpaper` | `load_copy`, `save_copy` | C | Paint's picture as WALL leaves it, which the Wallpaper pick copies into the theme, with the user-files layer whose store it is; a write moves the copy's generation, which the thumbnail's decode is keyed on |
 | `artwork` | `current(kind_buf, name_buf)`, `follow(kind, old, new)` | C | Paint's open picture, its settings rows `paint_doc_kind` and `paint_doc` (JSON strings, no kind row the drawings kind); `follow` repoints it when Files renames it (`runtime/files_app.py`'s rename). A consumer loads the picture through `files` |
 | `clipboard` | `put_text(text)`, `text(buf)`, `kind()`, `seq()` | C | a kernel row in PSRAM holding at most 4 KiB of text (configuration); a longer `put_text` answers BAD (the Python binding's False) and keeps the old text, and the code editor keeps that copy as its own until another lands. It is kernel state, so it outlives a stopped VM; the code editor's lane keeps its calls |
 | `install` | `hold()`, `release()`, `fit(...)`, `memory()`, `chip()`, `runtimes()`, `home()`, `can_pick()`, `pick(name, size, host)`, `root()`, `writable()`, `rescan()`, `free()`, `find(folder)` | shell | the lease's radio bring-up and the engine objects are the console's; the role is never granted, so no compiled app imports a row and none is C (§11, step 6) |
@@ -402,7 +402,7 @@ picture through `artwork.current()` and `files`; Files' rename repoint is
 `artwork.follow`. The copy verbs (WALL, GAME, "used in" and its UPDATE) are
 `runtime/picture_copies.py`'s, over each consumer's own roles -- `files`,
 `wallpaper.save_copy` and `select`, `carts.save_image`, `nav.is_system_app` --
-so Files holds `carts` and `wallpaper`. Appearance's My Art card is
+so Files holds `carts` and `wallpaper`. Appearance's Wallpaper card is
 `wallpaper.thumbnail`, Paint's decode of the copy, scaled.
 
 ## 7. The crossing table

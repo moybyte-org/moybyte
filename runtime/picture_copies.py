@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 
 DRAWINGS = "drawings"
-WALL_TITLE = "My Art"
+WALL_TITLE = "Wallpaper"
 
 
 class PictureCopies:
@@ -39,7 +39,7 @@ class PictureCopies:
         self.last_error = ""
 
     def wall_cart(self):
-        """The My Art wallpaper cart, or None."""
+        """The Wallpaper slot's cart, or None."""
         for cart in self._carts.all():
             if cart.get("type") == "wallpaper" and cart.get("title") == WALL_TITLE:
                 return cart
@@ -50,8 +50,8 @@ class PictureCopies:
         return self._wall.id_for(wall) if wall is not None else None
 
     def set_wallpaper(self, name):
-        """Copy drawing `name` into the wallpaper slot (and My Art's images/bg
-        for the launcher shelf) and make it the active desktop backdrop.
+        """Copy drawing `name` into the wallpaper slot (and its cart's
+        images/bg for the launcher shelf) and make it the active desktop backdrop.
         Editing the drawing afterwards changes nothing until it is set
         again."""
         files = self._files
@@ -87,6 +87,11 @@ class PictureCopies:
         return [cart for cart in self._carts.all()
                 if cart.get("type") in ("game", "app") and cart.get("path")
                 and not self._nav.is_system_app(cart)]
+
+    def target_carts(self):
+        """The projects a drawing can be copied into as a background, in
+        `targets`' order."""
+        return self._targets()
 
     def targets(self):
         """Project titles a drawing can be copied into as a background."""

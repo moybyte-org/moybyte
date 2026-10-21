@@ -1,21 +1,12 @@
-# My Art -- the static wallpaper published by the Paint app.
-
-picture = None
-
-
-def _init():
-    global picture
-    picture = image("bg")
+# My Art is presented by the shell as a responsive system process (the app
+# API, docs/app_api_v1.md). This small cart body is the recovery fallback for an
+# older shell that does not know that surface yet.
 
 
 def _draw():
-    if picture is not None:
-        spr(picture, 0, 0)
-        return
     cls(col("white"))
-    # A quiet placeholder before the first Paint save.
-    rect(0, 184, W, 56, col("light_grey"))
-    circ(246, 72, 24, col("yellow"))
-    rect(34, 112, 8, 72, col("brown"))
-    circ(38, 104, 30, col("pink"))
-    circ(62, 119, 23, col("peach"))
+    print("MY ART", 20, 20, col("black"))
+    print("UPDATE MOYBYTE TO OPEN", 20, 40, col("dark_grey"))
+    for i in range(3):
+        rect(24 + i * 96, 70, 80, 60, col("light_grey"))
+        rect(28 + i * 96, 74, 72, 52, (col("blue"), col("pink"), col("green"))[i])

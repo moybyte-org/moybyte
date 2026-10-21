@@ -111,7 +111,7 @@ _DRAG_MIN = 4                         # px of travel before a press becomes a dr
 # content (DESIGN.md "The sizes"; the `*desktop*` targets), in glass pixels
 # at chrome size 1. Every other window takes `_win_size`'s formulas.
 DESK_SIZES = {"files": (548, 534), "calc": (344, 488), "getcarts": (900, 536),
-              "notes": (900, 536)}
+              "notes": (900, 536), "artwork": (900, 536), "myart": (900, 536)}
 
 
 class _LayoutCtx:

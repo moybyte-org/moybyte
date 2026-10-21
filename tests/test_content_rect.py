@@ -158,7 +158,7 @@ def test_every_layout_lays_out_inside_the_content_rect(tmp_path, size):
     for want in ("Layout", "CodeLayout", "CardsLayout", "PaintLayout",
                  "MapLayout", "MusicLayout", "BlockLayout", "CalcLayout",
                  "FilesLayout", "StorybookLayout", "AppearanceLayout",
-                 "PaintAppLayout", "GetCartsLayout"):
+                 "PaintAppLayout", "GetCartsLayout", "MyArtLayout"):
         assert want in names, want + " was never built"
     top = _rect_map(ws)
     _bottom(ws)

@@ -297,7 +297,7 @@ console needs while no Python app runs is OS.
 | `runtime/app_shell.py` | app | — | the list shell Files, Storybook and Get Carts share |
 | `runtime/appearance.py` | roles | 5, stays | `Workstation.look`: theme variant, skin, font scale, wallpaper and bar icons. It stays Python, the coordinator, and writes what the theme role's C rows answer, the live token table (`docs/kernel_appabi_2026-10.md` §6) |
 | `runtime/appearance_app.py` | app | — | Appearance |
-| `runtime/artwork.py` | app | — | Paint: `PaintDocument`, `PaintAppLayout`, `PaintAppLayer`, and `ArtworkService`, its document model, built over Paint's grant; the `artwork` role's C rows read the open picture from Paint's prefs (`docs/kernel_appabi_2026-10.md` §6) |
+| `runtime/artwork.py` | app | — | Paint's document model: `PaintDocument` and `ArtworkService`, built over Paint's grant; the `artwork` role's C rows read the open picture from Paint's prefs (`docs/kernel_appabi_2026-10.md` §6) |
 | `runtime/audio.py` | split | 3, rest stays | `AudioEngine` crossed with audio (deleted 2026-10-07); the bank model (`SFX`, `MusicTrack`, `AudioBank`) is the music editor's data and stays |
 | `runtime/audio_binding.py` | host-only | — | the host's ctypes binding of libmoy audio; sprint 3's audio crossing rebinds it |
 | `runtime/bar_layer.py` | window managers | 7 | the top bar and dock every WM draws; its geometry constants are read outside it |

@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 6,
+  "version": 7,
   "title": "Paint",
   "id": "moybyte.paint",
   "runtime": "python",
@@ -12,7 +12,7 @@
     "order": 270,
     "app": {
       "id": "artwork",
-      "entry": "artwork:PaintAppLayer",
+      "entry": "paint_app:PaintAppLayer",
       "text_mode": false,
       "order": 10
     },

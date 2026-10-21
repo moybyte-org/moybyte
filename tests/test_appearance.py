@@ -366,7 +366,7 @@ def test_picking_a_theme_brings_its_wallpaper(tmp_path):
     one naming a cart that is not installed falls back to its picture, then to
     the default; switching back to a seed brings the seed's."""
     ws = build_ws(tmp_path)
-    opts = ws.look.wallpaper_options()
+    opts = [o for o in ws.look.wallpaper_options() if o != ws.look.PICTURE]
     _store_package(ws, "sunset", {"wallpapers": {"desk": opts[-1]}})
     _store_package(ws, "gone", {"wallpapers": {"desk": "nobody.no_such"}})
     ws.look.set_theme("sunset")

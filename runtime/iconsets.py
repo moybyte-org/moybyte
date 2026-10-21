@@ -59,7 +59,7 @@ SLOT = {n: i for i, n in enumerate(SLOTS)}
 # ...and the shell's apps whose id is not their slot's name (the desk's
 # tiles, a window's line icon and its chip draw an app by its id).
 ALIASES = {"edit": "pencil", "gear": "settings", "batt": "battery", "artwork": "paint",
-           "appearance": "palette"}
+           "appearance": "palette", "myart": "art"}
 FIRST = 0x21                  # slot 0's byte in a mask file (tools/make_icons.py)
 SIZES = (24, 20, 16)          # the mask sizes, largest first
 KINDS = ("smooth", "pixel")
