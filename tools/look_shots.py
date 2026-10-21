@@ -234,17 +234,19 @@ APPS = {"paint": ("artwork", None), "paint-colours": ("artwork", None),
         "getcarts": ("getcarts", None), "getcarts-cart": ("getcarts", None),
         "getcarts-getting": ("getcarts", None), "getcarts-offline": ("getcarts", None),
         "notes": ("notes", None), "notes-edit": ("notes", None), "notes-new": ("notes", None),
-        "notes-empty": ("notes", None), "storybook": ("storybook", None),
-        "storybook-empty": ("storybook", None), "storybook-deck": ("storybook", None),
-        "storybook-layouts": ("storybook", None), "storybook-edit": ("storybook", None),
-        "storybook-style": ("storybook", None), "storybook-pictures": ("storybook", None),
-        "storybook-deck-menu": ("storybook", None), "storybook-new": ("storybook", None),
-        "storybook-keys": ("storybook", None), "storybook-add": ("storybook", None),
-        "storybook-colours": ("storybook", None), "storybook-overview": ("storybook", None),
-        "storybook-picture": ("storybook", None), "storybook-slide": ("storybook", None)}
-DESK_APPS = ("paint", "my-art", "getcarts", "getcarts-getting", "notes", "storybook",
-             "storybook-deck", "storybook-picture", "storybook-slide")
-DESK_ONLY = ("storybook-picture", "storybook-slide")
+        "notes-empty": ("notes", None), "paint-max": ("artwork", None),
+        "paint-view": ("artwork", None), "paint-view-zoom": ("artwork", None),
+        "paint-view-more": ("artwork", None), "storybook": ("storybook", None),
+        "storybook-empty": ("storybook", None), "storybook-view": ("storybook", None),
+        "storybook-deck": ("storybook", None), "storybook-picture": ("storybook", None),
+        "storybook-slide": ("storybook", None), "storybook-max": ("storybook", None),
+        "storybook-stories": ("storybook", None), "storybook-add": ("storybook", None),
+        "storybook-pictures": ("storybook", None)}
+DESK_APPS = ("paint", "paint-max", "my-art", "getcarts", "getcarts-getting", "notes", "storybook",
+             "storybook-deck", "storybook-picture", "storybook-slide", "storybook-max",
+             "storybook-stories", "storybook-add", "storybook-pictures")
+DESK_ONLY = ("paint-max", "storybook-deck", "storybook-picture", "storybook-slide", "storybook-max",
+             "storybook-stories", "storybook-add", "storybook-pictures")
 
 
 def _apps_table():

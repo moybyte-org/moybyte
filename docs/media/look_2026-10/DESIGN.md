@@ -314,6 +314,7 @@ layouts (`rounds/round11.py`). The Editor's desk layouts and its
 handheld Settings, Blocks, Map, Scene and Music tabs are
 `rounds/round12.py`'s, and `EDITOR_LAYOUT.md` is their design. Paint, My
 Art, Get Carts, Notes and Storybook are `rounds/round13.py`'s, each
-function mapped to its part in `APPS_RESTYLE.md`. The three readings of
+function mapped to its part in `APPS_RESTYLE.md`; Storybook's pictures
+and Paint's 1024 × 600 drawings are `rounds/round15.py`'s. The three readings of
 maximise (the owner chose full screen) and the resizable panes are
 `rounds/round14.py`'s (`MAXIMISE_VARIANTS.md`).

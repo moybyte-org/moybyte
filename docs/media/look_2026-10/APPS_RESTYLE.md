@@ -1,9 +1,10 @@
 # The apps' restyle (design, 2026-10-21)
 
 Paint, My Art, Get Carts, Notes and Storybook in the 2026-10 look, drawn by
-`rounds/round13.py` (`index.txt` lists every picture, `moy-light_*` and
+`rounds/round13.py`, and Storybook and Paint's 1024×600 drawings by
+`rounds/round15.py` (`index.txt` lists every picture, `moy-light_*` and
 `moy-dark_*`, handheld at 320×240 and @3x, desk windows at 900×536 on the
-1024×600 desk). Each app becomes a page of the public verbs
+1024×600 desk, a maximised app full screen at 1024×600). Each app becomes a page of the public verbs
 (`docs/ui_api_2026-10.md` §1); a part the verbs lack is marked **GAPS n**
 and specified in `GAPS.md`. The look is `DESIGN.md`'s. The design took a
 visual review and, for Storybook, a functional one (2026-10-21); where
@@ -11,9 +12,9 @@ the two differed on Storybook, the functional one decided.
 
 ## The owner's decisions (2026-10-21)
 
-- **A-01.** The apps are built as drawn, except where a decision below
-  changes them; the pictures it outdates are marked **to be redrawn**
-  under their app, and are not targets until they are.
+- **A-01.** The apps are built as drawn. The decisions below are drawn by
+  `rounds/round15.py`: Storybook's pictures, Paint's desk and its
+  handheld view of a 1024 × 600 drawing.
 - **Storybook** stays the slides app (S-01), and is an **app with its own
   story document**: a story no longer compiles to a cart. Slides are
   1024 × 600 and draw their text in the shell's fonts at any size, so
@@ -92,22 +93,25 @@ menu.
 | today | becomes |
 |---|---|
 | 10 tools: pencil, brush, eraser, fill, pick, line, box, circle, spray, pan | 8 `toggle` buttons, the one in use current: Pencil, Brush, Eraser, Fill, Shape (line, rect, oval, cycling on a repeat tap, as the sprite tab's), Spray (a can and three dots), Pick (a dropper whose drip is the colour under the cursor), Move |
-| N (tap twice) | More: New drawing (N), no question |
+| N (tap twice) | More: New drawing (N), no question: the board's size (1024×600 on a desk, 320×240 on a handheld); the desk's More (⋯, the tool row's last button) adds New game-size drawing (320×240) |
 | U, R | the bar's undo and redo (Ctrl+Z, Ctrl+Y); the desk's tool row |
 | OPEN | More: Open… (O): the My Art page |
 | WALL | More: Use as wallpaper (W); a toast |
-| GAME, then the ADD AS BG list | More: Put in a game… (G): the projects as a `ui.table` (cover, name); Enter adds, a toast says where |
+| GAME, then the ADD AS BG list | More: Put in a game… (G), for a 320×240 drawing on every board and never for a 1024×600 one: the projects as a `ui.table` (cover, name); Enter adds, a toast says where |
 | SHOW, a tap to return | More: Show (V); any key or tap returns |
-| FIT, 1X, 2X, 4X | Z cycles 1×, 2×, 4×, Fit; the bar's chip shows it (a `raised` chip with the structure line); a `ui.seg` on the desk. Paint opens at 1×, centred on the last mark (a whole-scale fit of 320×240 under the handheld bar is 160×120) |
+| FIT, 1X, 2X, 4X | Z cycles 1×, 2×, 4×, Fit; the bar's chip shows it (a `raised` chip with the structure line); a `ui.seg` on the desk. Paint opens at 1×, centred on the last mark. Fit is the largest of 1×, ½ and ¼ that shows the whole drawing: ½ for a handheld's 320×240 drawing under its bar (160×120) and for the desk's 1024×600 one in a window or full screen (512×300); ¼ for a 1024×600 drawing on a handheld (256×150) |
 | 64 colours; PAL1–4 pages of 16 | the rail's page of 16 holds the colour in use; the colour in use opens all 64 in a `ui.popover` (`ui.swatches` in rows, **GAPS 38**), its focus the canvas's ring, its caption the focused colour's number and name; the desk shows all 64 always |
-| sizes 1, 2, 4; EDGE, SOLID | the brush popover (B), hung from the size button, whose dot is the brush's own diameter: Size for Pencil, Brush, Eraser and Spray; Size, Shape and Fill (Outline, Filled) for Shape |
-| GAME / DESKTOP preset (tap twice) | goes: a desk board's drawings are 1024×600, a handheld's 320×240; on a handheld a 1024×600 drawing opens view-only, its More offering Use as wallpaper and Put in a story |
+| sizes 1, 2, 4; EDGE, SOLID | the brush popover (B), hung from the size button, whose dot is the brush's own diameter: Size for Pencil, Brush, Eraser and Spray (1, 2, 4 on a 320×240 drawing; 2, 4, 8, 16 on a 1024×600 one); Size, Shape and Fill (Outline, Filled) for Shape |
+| GAME / DESKTOP preset (tap twice) | goes: a desk board's drawings are 1024×600, a handheld's 320×240 |
+| — | a handheld opens a 1024×600 drawing to view (`paint-view`): no tools and no colours; the bar holds the title, the zoom chip and ⋯; a caption says its size and the zoom; the hints lead with View only (Z Zoom, M More, Esc Back); Enter, `a` and the tool keys answer with a toast, "From a desk: you can look, not draw". Z cycles Fit (¼), ½, 1× and 2×; past Fit the arrows pan and the whole drawing shows at 1/16 in the top-right corner, the view framed in `accent`, with no scroll thumbs (`paint-view-zoom`). Its More (`paint-view-more`) keeps Open… (O), Use as wallpaper (W), Put in a story… (T) and Show (V) |
+| — | Put in a story… (T), on the desk and in a handheld's view: the stories as cards; Enter adds the drawing to the one chosen as a new last slide's background, and a toast names the story and the slide and carries Undo ("Added as slide 6 of The Brave Dragon · Undo"): on a handheld, which cannot edit the story, Undo is the only way to take it back |
 | the status line | the marks, and toasts: a new drawing's first save says its name; a failure (can't save, storage off) is a toast in the danger ink |
 | a show-only picture (a cart's own image) | opens as today; a mark is refused with a toast, and More offers Copy to My Art |
 | autosave, the starter garden | unchanged |
 
-Popovers hang inside the drawing's frame, their bottoms on its bottom,
-their shadows clipped to it.
+The rail's popovers hang inside the drawing's frame, their bottoms on its
+bottom, their shadows clipped to it; the bar's ⋯ More hangs from the bar,
+over the frame's edge.
 
 **T-Deck** (keys): tools 22×22 at 23 px down x 4; the drawing in a 256×184
 view at (32, 31); the rail at x 292: the colour in use 24×22, the page of
@@ -117,10 +121,15 @@ at 28×28 on a 32 px pitch, the colour in use 28×28 as the only colour
 target, the brush button and ⋯ at 28×28, the drawing 248×206 beside them,
 no hint strip; the colours popover fills the drawing's frame and shows 28
 at a time, 30×30 on a 32 px pitch, seven a row, with a 36 px page seg of
-three pages. **Desk:** tools 40×40 at 44 px, the 1024×600 drawing on the
-window's pasteboard at the zoom (Fit, or a whole scale panned), 36 px
-buttons in the tool row, 24 px swatches. **To be redrawn:**
-`moy-*_desktop_paint` draws a 512×300 drawing at 1×. **Keys:** P B E
+three pages. **Desk** (`paint`, a window): tools 40×40 at 44 px; the
+1024×600 drawing on a 568×384 pasteboard at Fit (½); the tool row's 36 px
+buttons New, Open, undo and redo, then the zoom seg (Fit, 1×, 2×, 4×), the
+drawing's verbs Show, Wallpaper and Put in a story, and More (⋯) at its
+right; 24 px swatches, all 64, a swatch that nearly vanishes into the
+panel edged in `dim`; the sizes 2, 4, 8 and 16. **Full screen**
+(`paint-max`): the same row is the app's row at the top edge, then a
+hairline and minimise, restore and close; the zoom seg moves to the foot;
+the drawing at 1× panned shows 712×500 of it, the colours beside it. **Keys:** P B E
 F S A I, Space held to move, C colours, B brush, Z zoom, M more, the
 arrows move the cursor, Enter or `a` draws; the T-Deck's strip shows Draw,
 Colours and More after the tool.
@@ -204,70 +213,86 @@ edited by hand. The owner widened its scope (2026-10-21): **a slides app
 for kids, with objects**, as PowerPoint is, and made it an **app with its
 own story document** (2026-10-21): a story is not a cart and compiles to
 none. A slide is 1024 × 600. The desk boards and the web build edit and
-present stories; a handheld shows and presents them zoomed out.
+present stories; a handheld lists, views and presents them zoomed out.
+`rounds/round15.py` draws every Storybook picture.
 
-**To be redrawn:** every Storybook picture (`storybook*`, handheld and
-desk, and `storybook_present*`) draws a 320 × 240 slide, and the handheld
-ones edit it. They show the parts, the objects and the inputs, not the
-slide's size or where editing happens; the sizes below that follow a
-320 × 240 slide are theirs.
+### Zooms
+
+The renderer draws a slide at any zoom (One renderer, below), so every view
+of it is a clean ratio of 1024 × 600:
+
+| where | zoom | on screen |
+|---|---|---|
+| desk, presenting on 1024 × 600 glass | 1:1 | 1024×600, the whole glass |
+| desk, full screen | 5/8 | 640×375: the largest eighth that fits beside the slides column and the panel |
+| desk, a window | ½ | 512×300 |
+| desk, the sorter's cards | ¼ | 256×150 |
+| handheld, a story open | ¼ | 256×150 |
+| handheld, presenting | 5/16 | 320×188: the glass's width, 26 px of black above and below |
+| handheld, the stories' cards | ⅛ | 128×75 |
+| desk, the slides column | — | 80×47: the 1:1 frame averaged down |
+
+Only an eighth of 1024 × 600 is whole in both directions, which is why the
+desk's views are eighths; Present on a handheld takes the glass's width
+over a whole ratio.
 
 ### Screens
 
 | screen | picture | what it holds |
 |---|---|---|
-| Stories | `storybook`, `storybook-empty` | a card a story (its first slide), New story first; Enter opens, P presents, M the menu (Rename, Duplicate, Delete, which asks) |
-| a new story | `storybook-new` | New story makes one Title slide and opens it in edit with the title chosen to be written; the story is named from its title |
-| Slides | `storybook-deck`, `storybook-deck-menu`, `storybook-layouts` | the sorter: a card a slide, its number and transition icon; New slide last opens the layouts (Title, Picture, Two pictures, Blank; Enter takes the last used); N adds after the focused slide; [ and ] move it; Ctrl+D duplicates; Del deletes; M or a long press opens its menu: Transition, Duplicate, Move earlier, Move later, Delete |
-| a slide | `storybook-keys`, `storybook-edit`, `storybook-add`, `storybook-style`, `storybook-colours`, `storybook-overview` | the slide in its window, the chosen object, the style sheet, the colours, Z's whole slide |
-| Add a picture | `storybook-pictures` | `ui.tabs` My Art and Sprites, a grid of cards; Enter adds it, chosen, and the next placeholder becomes chosen |
-| Present | `storybook_present`, `storybook_present_desk` | the slide alone, fitted whole to the glass; its number shows for a second after each change, in a half-black pill (the desk: in the black margin) |
+| Stories | handheld `storybook`, `storybook-empty`; desk `storybook-stories` | a card a story (its first slide), Enter opens, P presents. Handheld: cards at ⅛, two a row; with none, the page says where stories are made and offers no verb. Desk: cards at ¼, three a row, New story first; the foot's Present and Open (primary) act on the focused story, and M opens its card menu (Rename, Duplicate, Delete, which asks: no picture) |
+| a story, handheld | `storybook-view` | the slide at ¼ under the bar, ‹ 2 / 5 › under it, then "Edit stories on a desk board or the web"; the hints lead with View only, as Paint's view does; ← and → step, P presents, Esc goes back; Enter and the edit keys answer with a toast, "Stories are edited on a desk" |
+| a new story (desk) | no picture | New story makes one Title slide and opens it in edit with the title chosen to be written; the story is named from its title |
+| Slides (desk) | `storybook-deck` | the sorter, under ‹ back to Stories: a card a slide at ¼, three a row, its number and transition icon; the row's New slide, Duplicate, Delete, undo and redo, and Present; New slide last opens the layouts (Title, Picture, Two pictures, Blank; Enter takes the last used); N adds after the focused slide; [ and ] move it; Ctrl+D duplicates; Del deletes; M or a long press opens its menu: Transition, Duplicate, Move earlier, Move later, Delete |
+| a slide (desk) | `storybook`, `storybook-add`, `storybook-picture`, `storybook-slide`, `storybook-max` | the slide in its window at ½, or full screen at 5/8; Add's popover (Text, Shape, Picture…, Background…, each with its key; no wash); the chosen object, its style in the panel, the slide's own with nothing chosen |
+| Add a picture (desk) | `storybook-pictures` | a page of the window: `ui.tabs` My Art and Sprites, a card a drawing fitted whole and named with its size (1024 × 600 or 320 × 240); Enter or the foot's Add puts it on the slide, chosen, and the next placeholder becomes chosen |
+| Present | `storybook_present`, `storybook_present_desk` | the slide alone: 1:1 on 1024×600 glass, its number for a second after each change in a half-black pill on the corner; on a handheld at 5/16, the number in the black margin |
 
 ### Handheld: view and present
 
-A handheld (the T-Deck class) lists the stories, opens a story's sorter and
-presents it, each slide shrunk whole to the glass; it does not edit a
-story, and New story is the desk's. Present takes the same inputs as on the
-desk (Inputs, below).
+A handheld (the T-Deck class) lists the stories, opens one on its first
+slide and presents it; it does not edit a story, and New story is the
+desk's. Its bar lends Present (the bare Play glyph). Present takes the
+same inputs as on the desk (Inputs, below). The story view's stepper
+shows no transition icon: the desk's panel is where a transition is named.
 
 ### Desk: sizes and placement
 
 | part | size, place |
 |---|---|
-| tool row | 44: Add ▾ (Text, Shape, Picture, Background), Bring to front, Send to back, Copy, Paste, undo, redo as 36×36 icon buttons; the ‹ 2/5 › stepper; Present (primary, 124×34) |
-| slides column | 112 wide: frames 80×60 at a 72 px pitch, the number at their left, the slide in edit current; a click or tap opens one, a drag moves it, `,` and `.` step |
-| the slide | 1024×600, shrunk to fit its pasteboard between the slides column and the style panel; Present shows it at 1× on 1024×600 glass, and shrunk whole elsewhere |
-| chosen object | the `value` outline in its dark keyline (**GAPS 35**); handles drawn 8×8, answering 16×16 to a pointer and 32×32 to touch (by the last input) |
-| snap guide | a 1 px dashed `accent` line within 4 slide pixels of the slide's centre lines and edges or another object's edges and centres; Alt held, or Snap in More, turns it off |
-| style panel | 236 wide, rows 28 (32 under touch): the chosen object's Shape, Fill, Line, Width, Text size, Colour, Align, Appears; a picture's Size (½, 1, 2), Clear background, Appears; with nothing chosen, the slide's Background and its Transition (None, Fade, Swipe) |
-| foot | the status, Ctrl+D Duplicate, Del Delete |
-| sorter | cards 160×120 (a half), five a row, 16 apart |
+| tool row | 44: Add ▾ (Text, Shape, Picture, Background); Front, Back, Copy (two pages) and Paste, each its icon and its word; undo and redo as 36×36 icon buttons; the ‹ 2/5 › stepper; Present (primary, 124×34). Full screen, the app's row at the top edge holds them after ‹ and the title (32 px cells, no stepper: the slides column steps), then a hairline and minimise, restore and close |
+| slides column | 96 wide: frames 80×47 at a 76 px pitch, the number and the transition's icon under each, the slide in edit current; a click or tap opens one, a drag moves it, `,` and `.` step |
+| the slide | ½ (512×300) on a 528×384 pasteboard in a 900×536 window; 5/8 (640×375) on a 656×500 one full screen; the foot's status names the zoom |
+| chosen object | the `value` outline in its dark keyline (**GAPS 35**); handles drawn 8×8 (white in a dark border), answering 16×16 to a pointer and 32×32 to touch (by the last input) |
+| snap guide | indigo (#4c3fd6) dashes on a 3 px white keyline, in every theme, so it reads on any slide; it catches within 6 screen pixels of a pointer and 12 of a finger (by the last input), to the slide's centre lines and edges or another object's edges and centres; Alt held, or Snap in More, turns it off |
+| style panel | 236 wide, rows 28 (32 under touch): a shape's Shape, Fill, Line, Width; its text's Font, Size, Colour, Align; Appears. A text box's Font, Size, Colour, Align, Strip behind, Appears. A picture's Size (½, 1, 2, 3, 4), Clear background, Appears. With nothing chosen, the slide's Background (the last four colours used, then › for all 16 in a popover) and its Transition (None, Fade, Swipe). Size is S, M, L and XL and the size itself in a field (`field.border`) that takes any number. Every segment, align icon and ‹ › arrow answers to a cell the row's full height and at least 32 wide; a swatch that nearly vanishes into the panel is edged in `dim` |
+| foot | the status and the zoom, Ctrl+D Duplicate, Del Delete; full screen, F11 Restore |
+| sorter | cards 256×150 (¼), three a row, 24 apart |
 
 ### Inputs
 
 Every action has keys, a pad, touch and a pointer (a keyboard is assumed on
 every board, BLE on the touch boards); no button stands for a key alone.
-The touch column names the cells of the handheld tool row the pictures
-draw (Add ▾, Style, Order, More, Slides); on the desk they are the tool
-row's and the panel's.
+Editing is the desk's, so the touch and pointer columns name the tool
+row, the panel and the slides column; a handheld's keys are its story
+view's and Present's (Screens).
 
 | action | keys | pad | touch | pointer |
 |---|---|---|---|---|
 | choose an object | Tab (z order) | L, R | tap (again: the one beneath) | click |
-| move it | arrows by the step (1 px; G makes it 8 and shows the grid) | d-pad | drag the body | drag |
-| resize it | R, then the arrows change the width and height; + and − keep the aspect; a picture steps through its scales | A held, d-pad | the corner knob | a handle |
+| move it | arrows by the step (2 slide px, a screen pixel at ½; G makes it 16 and shows the grid) | d-pad | drag the body | drag |
+| resize it | R, then the arrows change the width and height; + and − keep the aspect; a picture steps through its scales | A held, d-pad | a handle | a handle |
 | add text, a shape, a picture, a background | T, S, I, B | X: More's Add rows | Add ▾ | Add ▾ |
 | write its words | Enter (the keyboard in text mode; Esc ends) | A | double tap | double click |
-| its style | Y | Y | Style | the panel |
-| the More menu | M | X | More | the tool row |
-| front, back | ], [ | More | Order | the tool row |
-| copy, paste (another slide too) | Ctrl+C, Ctrl+V | More | More | the tool row |
+| its style | Y | Y | the panel | the panel |
+| the More menu | M | X | a long press on it | a right click on it |
+| front, back | ], [ | More | the tool row | the tool row |
+| copy, paste (another slide too) | Ctrl+C, Ctrl+V | More | the tool row | the tool row |
 | centre it on the slide | More | More | More | More |
-| duplicate, delete | Ctrl+D, Del | More | More | the tool row, Del |
-| undo, redo | Ctrl+Z, Ctrl+Y | More | the bar | the tool row |
-| the whole slide | Z | More | More | — |
-| the next, previous slide | `.` and `,` | More | the bar's 2/5 | the slides column |
-| a new slide after this one | N | More | Slides | the sorter |
+| duplicate, delete | Ctrl+D, Del | More | More | More, Del |
+| undo, redo | Ctrl+Z, Ctrl+Y | More | the tool row | the tool row |
+| the next, previous slide | `.` and `,` | More | the stepper, the slides column | the stepper, the slides column |
+| a new slide after this one | N | More | the sorter | the sorter |
 | let go of the object | Esc | B (the d-pad then moves among the parts) | a tap on the empty slide | a click on the empty slide |
 | present | P (everywhere) | More | Present | Present |
 | in Present: next, previous, stop | → Space Enter, ←, Esc | A or →, ←, B | tap or swipe left, swipe right, the console key's menu | click, right click, Esc |
@@ -276,8 +301,8 @@ row's and the panel's.
 
 | object | what it holds |
 |---|---|
-| text box | words (plain, one style a box, 200 characters; wrapped at word breaks in its width, a long word broken at the edge; its height follows), a font of the shell's and its size (any size; the style panel offers S, M, L and XL first), colour (the 16), align, an optional strip behind |
-| shape | rect, rounded rect, ellipse, line, arrow, star, speech bubble; fill (none or a colour), line (none or a colour), width 1 or 2; words inside, styled as a text box's; arrow, line and the bubble's tail point four ways (`flip`) |
+| text box | words (plain, one style a box, 200 characters; wrapped at word breaks in its width, a long word broken at the edge; its height follows), a face of the shell's (Sans, Sans bold, Mono) and its size in slide pixels (any size; the style panel offers S 32, M 48, L 64 and XL 96 first, and shows the size), colour (the 16), align, an optional strip behind |
+| shape | rect, rounded rect, ellipse, line, arrow, star, speech bubble; fill (none or a colour), line (none or a colour), width Thin (4) or Thick (8); words inside, styled as a text box's; arrow, line and the bubble's tail point four ways (`flip`) |
 | picture | a drawing from My Art, copied into the story (copy-on-use); scales ½, 1, 2, 3, 4 of its source, the ½ baked when it is placed (a pixel kept wherever the source has one off the background, so a 1 px line survives); Clear background draws its corner colour clear |
 | sprite | tiles from any project's sheet, copied into the story when used |
 | background | a colour or a drawing (a 1024×600 one fills the slide) |
@@ -290,9 +315,11 @@ and in the desk panel with nothing chosen.
 
 ### One renderer
 
-Storybook's slide renderer is the only one: edit draws through it (edit is
-what Present shows), the thumbnails are its frames shrunk by the C blit,
-and a drag redraws the dirty box (the old box and the new, the handles'
+Storybook's slide renderer is the only one, and it draws a slide at any
+zoom: text in its face at its size times the zoom, shapes and lines at
+theirs, pictures and a background image by nearest neighbour. Edit draws
+through it (edit at ½ or 5/8 is what Present shows at 1:1), the
+thumbnails are its 1:1 frames averaged down, and a drag redraws the dirty box (the old box and the new, the handles'
 reach and a guide's strips) in z order. Present is Storybook's own full
 screen, started at a slide and returning to it on Esc; it holds the
 current and the next slide's images only.
@@ -307,13 +334,13 @@ cart, which Make opens. No seed cart is a story, so no seed version moves.
 
 ```json
 {"format": "moystory-2", "slides": [{"bg": 15, "transition": "fade", "objects": [
- {"type": "text", "x": 26, "y": 36, "w": 972, "text": "Once upon a time...",
-  "font": "ui", "size": 48, "colour": 1, "align": "centre", "strip": null, "step": 0},
- {"type": "picture", "x": 51, "y": 240, "image": "pg2", "scale": 0.5, "clear": true, "step": 0},
- {"type": "sprite", "x": 640, "y": 100, "tile": 3, "tw": 2, "th": 2, "scale": 6, "step": 0},
- {"type": "shape", "shape": "bubble", "x": 595, "y": 240, "w": 397, "h": 160, "flip": 0,
-  "fill": 7, "line": 0, "width": 2, "text": "Hello!", "font": "ui", "size": 32, "colour": 0,
-  "align": "centre", "step": 1}]}]}
+ {"type": "picture", "x": 64, "y": 64, "image": "pg2", "scale": 0.5, "clear": false, "step": 0},
+ {"type": "shape", "shape": "bubble", "x": 608, "y": 64, "w": 352, "h": 180, "flip": 0,
+  "fill": 7, "line": 0, "width": 8, "text": "Hello!", "font": "sans_bold", "size": 64,
+  "colour": 0, "align": "centre", "step": 1},
+ {"type": "text", "x": 64, "y": 416, "w": 896, "text": "Once upon a time...",
+  "font": "sans_bold", "size": 72, "colour": 1, "align": "centre", "strip": null, "step": 0},
+ {"type": "sprite", "x": 640, "y": 300, "tile": 3, "tw": 2, "th": 2, "scale": 6, "step": 0}]}]}
 ```
 
 - `format` is the version, read strictly. Objects carry no ids: z is the
@@ -321,9 +348,16 @@ cart, which Make opens. No seed cart is a story, so no seed version moves.
   is one object's JSON.
 - Geometry by type: a picture or a sprite is a position and a scale, a text
   box a width (its height follows), a shape its whole rect.
-- Coordinates are the 1024 × 600 slide's. `font` names one of the shell's
-  font roles and `size` its pixel height; `step` replaces `appear`; `bg` is
-  a colour index or an image name.
+- Coordinates are the 1024 × 600 slide's (the example is slide 2 of the
+  pictures, and a sprite). `font` names one of the shell's faces, `sans`
+  and `sans_bold` (Atkinson Hyperlegible Next) or `mono` (JetBrains Mono),
+  and `size` its pixel height; `step` replaces `appear`; `bg` is a colour
+  index or an image name.
+- The faces are fixed, not a theme's (owner, 2026-10-21): a theme never
+  reflows a story's slides or changes what Present shows on another
+  board. Every board draws them as outlines at any size, and a pixel
+  theme's crisp faces never stand in for them. The panel names them Sans,
+  Sans bold and Mono.
 - Limits: 16 slides, 12 objects a slide, 200 characters a text box, 24
   images a story, an image at most 1024×600.
 

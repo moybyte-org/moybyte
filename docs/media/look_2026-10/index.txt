@@ -64,41 +64,10 @@ moy-light_handheld_notes-new.png — Notes: New note's name in a dialog, the lis
 moy-light_handheld_notes-new@3x.png — same, enlarged 3x (nearest)
 moy-light_handheld_notes-empty.png — Notes with an empty vault; Moy Day; 320x240
 moy-light_handheld_notes-empty@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook.png — Storybook: the stories as cards, New story first; focus on The Brave Dragon, its name on two lines; Moy Day; 320x240
-moy-light_handheld_storybook@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-empty.png — Storybook with no stories; Moy Day; 320x240
-moy-light_handheld_storybook-empty@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-deck.png — Storybook: the slide sorter, 80x60 frames, each slide's number and transition icon, New slide last; focus on slide 2; Moy Day; 320x240
-moy-light_handheld_storybook-deck@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-deck-menu.png — Storybook: slide 2's menu -- transition, duplicate, move, delete; Moy Day; 320x240
-moy-light_handheld_storybook-deck-menu@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-layouts.png — Storybook: New slide's four layouts at 64x48; focus on Picture; Moy Day; 320x240
-moy-light_handheld_storybook-layouts@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-new.png — Storybook: a new story, one Title slide at 1x with its title chosen to be written; the keys' hints; Moy Day; 320x240
-moy-light_handheld_storybook-new@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-keys.png — Storybook on the T-Deck: slide 2 at 1x in the 320x192 window under the bar, the bubble chosen with eight handles; Move, Step 8, Write, More; Moy Day; 320x240
-moy-light_handheld_storybook-keys@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-edit.png — Storybook on a touch board: the bubble chosen with its one corner knob, the tool row in place of the hints; Moy Day; 320x240
-moy-light_handheld_storybook-edit@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-add.png — Storybook on a touch board: Add's popover -- text, shape, picture, background; Moy Day; 320x240
-moy-light_handheld_storybook-add@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-style.png — Storybook: the style sheet from the foot, the slide scrolled so the bubble stays in sight; focus on Fill; Moy Day; 320x240
-moy-light_handheld_storybook-style@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-colours.png — Storybook: Fill's colours, the 16 in two rows of 32x28 and None; Moy Day; 320x240
-moy-light_handheld_storybook-colours@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-overview.png — Storybook: Z's whole slide at exactly half size, the window it scrolls marked; Moy Day; 320x240
-moy-light_handheld_storybook-overview@3x.png — same, enlarged 3x (nearest)
-moy-light_handheld_storybook-pictures.png — Storybook: Add a picture, My Art and Sprites as tabs; focus on Dragon; Moy Day; 320x240
-moy-light_handheld_storybook-pictures@3x.png — same, enlarged 3x (nearest)
-moy-light_desktop_paint.png — Paint as a window: the document's verbs and zoom on top, the tools, the drawing at 1x on its pasteboard, the colours and the Pencil's size always open; Moy Day; 1024x600
 moy-light_desktop_my-art.png — My Art as a window: five cards a row, the foot's verbs for the focused drawing, Open primary, Move to Trash in the danger ink; Moy Day; 1024x600
 moy-light_desktop_getcarts.png — Get Carts as a window: the shelf beside the focused cart's page, its verbs in the foot; Moy Day; 1024x600
 moy-light_desktop_getcarts-getting.png — Get Carts as a window: the download in the cart's page, Cancel; Moy Day; 1024x600
 moy-light_desktop_notes.png — Notes as a window (no handheld bar inside it): the vault beside the open note, its tools with a tooltip, the clipboard's keys in the foot; Moy Day; 1024x600
-moy-light_desktop_storybook.png — Storybook as a window: the tool row, the slides at 80x60, the slide at 1.5x with the bubble moving on a snap guide, its style always open; Moy Day; 1024x600
-moy-light_desktop_storybook-picture.png — Storybook as a window: a picture chosen, its size, Clear background and Appears; Moy Day; 1024x600
-moy-light_desktop_storybook-slide.png — Storybook as a window with nothing chosen: the slide's background and its transition; Moy Day; 1024x600
-moy-light_desktop_storybook-deck.png — Storybook as a window: the slide sorter at 160x120, New slide, Duplicate, Delete, Present; Moy Day; 1024x600
 moy-dark_handheld_paint.png — Paint on the T-Deck: the drawing at 1x centred on the last mark, the tools down the left, the colour in use and its page of sixteen, the brush's size dot; the tool's name leads the hints; a toast for a new drawing's first save; Moy Night; 320x240
 moy-dark_handheld_paint@3x.png — same, enlarged 3x (nearest)
 moy-dark_handheld_paint-colours.png — Paint: the 64 colours in a popover hung from the colour in use, inside the drawing's frame; the cursor's ring on 14, the caption naming it; Moy Night; 320x240
@@ -135,44 +104,57 @@ moy-dark_handheld_notes-new.png — Notes: New note's name in a dialog, the list
 moy-dark_handheld_notes-new@3x.png — same, enlarged 3x (nearest)
 moy-dark_handheld_notes-empty.png — Notes with an empty vault; Moy Night; 320x240
 moy-dark_handheld_notes-empty@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook.png — Storybook: the stories as cards, New story first; focus on The Brave Dragon, its name on two lines; Moy Night; 320x240
-moy-dark_handheld_storybook@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-empty.png — Storybook with no stories; Moy Night; 320x240
-moy-dark_handheld_storybook-empty@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-deck.png — Storybook: the slide sorter, 80x60 frames, each slide's number and transition icon, New slide last; focus on slide 2; Moy Night; 320x240
-moy-dark_handheld_storybook-deck@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-deck-menu.png — Storybook: slide 2's menu -- transition, duplicate, move, delete; Moy Night; 320x240
-moy-dark_handheld_storybook-deck-menu@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-layouts.png — Storybook: New slide's four layouts at 64x48; focus on Picture; Moy Night; 320x240
-moy-dark_handheld_storybook-layouts@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-new.png — Storybook: a new story, one Title slide at 1x with its title chosen to be written; the keys' hints; Moy Night; 320x240
-moy-dark_handheld_storybook-new@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-keys.png — Storybook on the T-Deck: slide 2 at 1x in the 320x192 window under the bar, the bubble chosen with eight handles; Move, Step 8, Write, More; Moy Night; 320x240
-moy-dark_handheld_storybook-keys@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-edit.png — Storybook on a touch board: the bubble chosen with its one corner knob, the tool row in place of the hints; Moy Night; 320x240
-moy-dark_handheld_storybook-edit@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-add.png — Storybook on a touch board: Add's popover -- text, shape, picture, background; Moy Night; 320x240
-moy-dark_handheld_storybook-add@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-style.png — Storybook: the style sheet from the foot, the slide scrolled so the bubble stays in sight; focus on Fill; Moy Night; 320x240
-moy-dark_handheld_storybook-style@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-colours.png — Storybook: Fill's colours, the 16 in two rows of 32x28 and None; Moy Night; 320x240
-moy-dark_handheld_storybook-colours@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-overview.png — Storybook: Z's whole slide at exactly half size, the window it scrolls marked; Moy Night; 320x240
-moy-dark_handheld_storybook-overview@3x.png — same, enlarged 3x (nearest)
-moy-dark_handheld_storybook-pictures.png — Storybook: Add a picture, My Art and Sprites as tabs; focus on Dragon; Moy Night; 320x240
-moy-dark_handheld_storybook-pictures@3x.png — same, enlarged 3x (nearest)
-moy-dark_desktop_paint.png — Paint as a window: the document's verbs and zoom on top, the tools, the drawing at 1x on its pasteboard, the colours and the Pencil's size always open; Moy Night; 1024x600
 moy-dark_desktop_my-art.png — My Art as a window: five cards a row, the foot's verbs for the focused drawing, Open primary, Move to Trash in the danger ink; Moy Night; 1024x600
 moy-dark_desktop_getcarts.png — Get Carts as a window: the shelf beside the focused cart's page, its verbs in the foot; Moy Night; 1024x600
 moy-dark_desktop_getcarts-getting.png — Get Carts as a window: the download in the cart's page, Cancel; Moy Night; 1024x600
 moy-dark_desktop_notes.png — Notes as a window (no handheld bar inside it): the vault beside the open note, its tools with a tooltip, the clipboard's keys in the foot; Moy Night; 1024x600
-moy-dark_desktop_storybook.png — Storybook as a window: the tool row, the slides at 80x60, the slide at 1.5x with the bubble moving on a snap guide, its style always open; Moy Night; 1024x600
-moy-dark_desktop_storybook-picture.png — Storybook as a window: a picture chosen, its size, Clear background and Appears; Moy Night; 1024x600
-moy-dark_desktop_storybook-slide.png — Storybook as a window with nothing chosen: the slide's background and its transition; Moy Night; 1024x600
-moy-dark_desktop_storybook-deck.png — Storybook as a window: the slide sorter at 160x120, New slide, Duplicate, Delete, Present; Moy Night; 1024x600
-storybook_present.png — Storybook presenting slide 2 at 1x: the slide alone, its number in a pill for a second after each change; 320x240
+moy-light_handheld_paint-view.png — Paint on the T-Deck opening a 1024x600 drawing: view only, Fit at 1/4 (256x150), no tools or colours; the hints lead with View only; Enter answered with a toast; Moy Day; 320x240
+moy-light_handheld_paint-view@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_paint-view-zoom.png — Paint viewing a 1024x600 drawing at 1x (Z twice): panned, the whole drawing at 1/16 in the corner with the view marked; Moy Day; 320x240
+moy-light_handheld_paint-view-zoom@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_paint-view-more.png — Paint viewing a 1024x600 drawing: More, hung from the bar's ⋯, keeps Open, Use as wallpaper, Put in a story and Show; Moy Day; 320x240
+moy-light_handheld_paint-view-more@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook.png — Storybook on the T-Deck: the stories as cards at 1/8 (128x75), two a row, no New story (stories are made on the desk); focus on The Brave Dragon; Moy Day; 320x240
+moy-light_handheld_storybook@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-empty.png — Storybook on the T-Deck with no stories: where they are made, and no verb; Moy Day; 320x240
+moy-light_handheld_storybook-empty@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-view.png — Storybook on the T-Deck: a story open on slide 2 at 1/4 (256x150), view only, as Paint's view says it; the arrows step, P presents; Moy Day; 320x240
+moy-light_handheld_storybook-view@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop_paint.png — Paint as a window: the 1024x600 drawing at Fit (1/2, 512x300) on its pasteboard, the tools, More, the colours and the Pencil's sizes 2 to 16; Moy Day; 1024x600
+moy-light_desktop_paint-max.png — Paint full screen: its row at the top edge, a hairline, minimise, restore and close; the drawing at 1x panned (712x500 of it), the colours beside it; Moy Day; 1024x600
+moy-light_desktop_storybook-stories.png — Storybook as a window: the stories at 1/4, New story first; Open and Present for the focused story in the foot; Moy Day; 1024x600
+moy-light_desktop_storybook.png — Storybook as a window: the tool row with Front, Back, Copy and Paste labelled, the slides at 80x47, the 1024x600 slide at 1/2 with the bubble moving on a two-toned snap guide, its style always open; Moy Day; 1024x600
+moy-light_desktop_storybook-add.png — Storybook as a window: Add's popover hung from it -- text, shape, picture, background, each with its key; nothing chosen; Moy Day; 1024x600
+moy-light_desktop_storybook-pictures.png — Storybook's Add a picture as a window page: My Art and Sprites as tabs, each drawing fitted whole and named with its size; focus on Dragon; Moy Day; 1024x600
+moy-light_desktop_storybook-picture.png — Storybook as a window: a picture chosen, its size, Clear background on (the dragon's sky drawn clear) and Appears; Moy Day; 1024x600
+moy-light_desktop_storybook-slide.png — Storybook as a window with nothing chosen: the slide's background (the last four colours used, › for all 16) and its transition; Moy Day; 1024x600
+moy-light_desktop_storybook-deck.png — Storybook as a window: the slide sorter at 1/4 (256x150), New slide, Duplicate, Delete, undo and redo, Present; Moy Day; 1024x600
+moy-light_desktop_storybook-max.png — Storybook full screen: ‹ and the tools in its row, the slide at 5/8 (640x375), a text box being written at 72 px (its size in a field), its style beside it; Moy Day; 1024x600
+moy-dark_handheld_paint-view.png — Paint on the T-Deck opening a 1024x600 drawing: view only, Fit at 1/4 (256x150), no tools or colours; the hints lead with View only; Enter answered with a toast; Moy Night; 320x240
+moy-dark_handheld_paint-view@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_paint-view-zoom.png — Paint viewing a 1024x600 drawing at 1x (Z twice): panned, the whole drawing at 1/16 in the corner with the view marked; Moy Night; 320x240
+moy-dark_handheld_paint-view-zoom@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_paint-view-more.png — Paint viewing a 1024x600 drawing: More, hung from the bar's ⋯, keeps Open, Use as wallpaper, Put in a story and Show; Moy Night; 320x240
+moy-dark_handheld_paint-view-more@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook.png — Storybook on the T-Deck: the stories as cards at 1/8 (128x75), two a row, no New story (stories are made on the desk); focus on The Brave Dragon; Moy Night; 320x240
+moy-dark_handheld_storybook@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-empty.png — Storybook on the T-Deck with no stories: where they are made, and no verb; Moy Night; 320x240
+moy-dark_handheld_storybook-empty@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-view.png — Storybook on the T-Deck: a story open on slide 2 at 1/4 (256x150), view only, as Paint's view says it; the arrows step, P presents; Moy Night; 320x240
+moy-dark_handheld_storybook-view@3x.png — same, enlarged 3x (nearest)
+moy-dark_desktop_paint.png — Paint as a window: the 1024x600 drawing at Fit (1/2, 512x300) on its pasteboard, the tools, More, the colours and the Pencil's sizes 2 to 16; Moy Night; 1024x600
+moy-dark_desktop_paint-max.png — Paint full screen: its row at the top edge, a hairline, minimise, restore and close; the drawing at 1x panned (712x500 of it), the colours beside it; Moy Night; 1024x600
+moy-dark_desktop_storybook-stories.png — Storybook as a window: the stories at 1/4, New story first; Open and Present for the focused story in the foot; Moy Night; 1024x600
+moy-dark_desktop_storybook.png — Storybook as a window: the tool row with Front, Back, Copy and Paste labelled, the slides at 80x47, the 1024x600 slide at 1/2 with the bubble moving on a two-toned snap guide, its style always open; Moy Night; 1024x600
+moy-dark_desktop_storybook-add.png — Storybook as a window: Add's popover hung from it -- text, shape, picture, background, each with its key; nothing chosen; Moy Night; 1024x600
+moy-dark_desktop_storybook-pictures.png — Storybook's Add a picture as a window page: My Art and Sprites as tabs, each drawing fitted whole and named with its size; focus on Dragon; Moy Night; 1024x600
+moy-dark_desktop_storybook-picture.png — Storybook as a window: a picture chosen, its size, Clear background on (the dragon's sky drawn clear) and Appears; Moy Night; 1024x600
+moy-dark_desktop_storybook-slide.png — Storybook as a window with nothing chosen: the slide's background (the last four colours used, › for all 16) and its transition; Moy Night; 1024x600
+moy-dark_desktop_storybook-deck.png — Storybook as a window: the slide sorter at 1/4 (256x150), New slide, Duplicate, Delete, undo and redo, Present; Moy Night; 1024x600
+moy-dark_desktop_storybook-max.png — Storybook full screen: ‹ and the tools in its row, the slide at 5/8 (640x375), a text box being written at 72 px (its size in a field), its style beside it; Moy Night; 1024x600
+storybook_present.png — Storybook presenting on the T-Deck: the 1024x600 slide at 5/16 (320x188) on black, its number in the margin; 320x240
 storybook_present@3x.png — same, enlarged 3x (nearest)
-storybook_present_desk.png — Storybook presenting on the 1024x600 board: the slide at 2x on black, its number in the margin; 1024x600
+storybook_present_desk.png — Storybook presenting on the 1024x600 board: the slide 1:1, the whole glass, its number in a half-black pill; 1024x600
 calc_all_themes.png — Calc in all nine themes through one body and one kind table: the desk window over the theme's backdrop, and the handheld page below it; 1220x2600
 type_specimen.png — Type specimen: handheld sizes, the Code tab's mono and the desk body at 1, 2, 4 bpp and an 8-bit reference, on dark and on light; 860x336
 type_specimen@3x.png — same, enlarged 3x (nearest)

@@ -8,8 +8,9 @@ before, and draw the icon sets, the editors, the system and pause menus,
 Settings, Appearance, the handheld Calc, the console home, the wallpaper
 scenes, the sheets, and the Editor's desk layouts and handheld tabs
 (round 12, `EDITOR_LAYOUT.md`). `rounds/round13.py` draws the apps'
-restyle: Paint, My Art, Get Carts, Notes and Storybook (`APPS_RESTYLE.md`);
-`rounds/round14.py` adds the three readings of maximise and the resizable
+restyle: Paint, My Art, Get Carts, Notes and Storybook (`APPS_RESTYLE.md`),
+and `rounds/round15.py` Storybook and Paint at the desk's 1024x600 document
+size; `rounds/round14.py` adds the three readings of maximise and the resizable
 panes (`MAXIMISE_VARIANTS.md`). The icon sets' sources live in
 native/moy_ui/icons/ (tools/make_icons.py builds the shipped masks from
 them).
@@ -39,6 +40,8 @@ def main():
                           f"Desk: Calc focused, Files behind, bar; {T['name']}")
     import round13  # noqa: E402 -- the apps' restyle (APPS_RESTYLE.md)
     round13.scenes()
+    import round15  # noqa: E402 -- Storybook and Paint at 1024x600 (APPS_RESTYLE.md)
+    round15.scenes()
     M.calc_sheet()
     M.specimen()
     src = R12.scenes()

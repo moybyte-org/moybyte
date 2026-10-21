@@ -6,6 +6,8 @@ the sprite editor) and the public UI verbs (`docs/ui_api_2026-10.md`).
 
 `APPS_RESTYLE.md` beside `../draw.py` maps each app's functions to the
 parts drawn here; a part the verbs lack is marked there and in GAPS.md.
+`round15.py` draws Storybook and Paint's 1024x600 drawings over these
+parts.
 
 A layer of the target, not an entry point: `../draw.py` draws every picture.
 """
@@ -606,19 +608,6 @@ def zoom_chip(cv, T, x):
     cv.text(x + 14, M.mid_base(fz, 5, 18), "1×", fz, T["text"], align="center")
 
 
-def wide_garden():
-    im = Image.new("RGB", (256, 150), _c("blue"))
-    d = ImageDraw.Draw(im)
-    d.rectangle((0, 114, 255, 149), fill=_c("green"))
-    d.rectangle((0, 130, 255, 149), fill=_c("dark_green"))
-    small = _art("garden").resize((160, 120), Image.NEAREST)
-    im.paste(small, (48, 30))
-    for fx, col in ((16, "pink"), (230, "red")):
-        d.line((fx, 118, fx, 134), fill=_c("dark_green"), width=2)
-        d.ellipse((fx - 6, 110, fx + 6, 122), fill=_c(col))
-    return im.resize((512, 300), Image.NEAREST)
-
-
 def drawing_view(cv, T, vx, vy, vw, vh, cursor=None):
     """The drawing at 1x, opened centred on where it was last drawn on."""
     paste_rect(cv, ART["garden"].crop((20, 34, 20 + vw, 34 + vh)), vx, vy, vw, vh, 6)
@@ -741,52 +730,6 @@ def paint_game(T):
     fade(cv, T, 0, 204, 320, 14)
     cv.rect(0, 218, 320, 22, T["bg"])
     hh_hints(cv, T, (("enter", "Add"), ("Esc", "Back")))
-    return cv
-
-
-def paint_desk(T):
-    cv = desk(T, (("paint", "Paint"), ("folder", "Files")))
-    x, y, w, h = 112, 52, 900, 536
-    top = win(cv, T, x, y, w, h, "Paint · Garden", "paint")
-    ty = top + 8
-    ibtn(cv, T, "new", x + 16, ty, 36, desk=True)
-    ibtn(cv, T, "folder_open", x + 56, ty, 36, desk=True)
-    cv.rect(x + 102, ty + 6, 1, 24, T["line"])
-    ibtn(cv, T, "undo", x + 112, ty, 36, desk=True)
-    ibtn(cv, T, "redo", x + 152, ty, 36, "disabled", desk=True)
-    cv.rect(x + 198, ty + 6, 1, 24, T["line"])
-    seg(cv, T, x + 400, ty, 36, ("Fit", "1×", "2×", "4×"), 1, desk=True)
-    bx = x + w - 16
-    for label, slot in (("Put in a game", "export"), ("Use as wallpaper", "wallpaper"),
-                        ("Show", "maximize")):
-        bw = F(T, "chip", DK).width(label) + 48
-        bx -= bw
-        button(cv, T, "normal", bx, ty + 2, bw, 32, label, slot, desk=True)
-        bx -= 8
-    cv.rect(x + 16, top + 52, w - 32, 1, T["line"])
-    tool_cells(cv, T, x + 16, top + 66, 40, 44, 1, 0, desk=True)
-    ax, ay, aw, ah = x + 68, top + 62, 568, 384
-    cv.rrect(ax, ay, aw, ah, 10, T["bg"])
-    dx, dy = ax + (aw - 512) // 2, ay + (ah - 300) // 2
-    M.soft(cv, T, dx, dy, 512, 300, 2, 0.6)
-    paste_rect(cv, wide_garden(), dx, dy, 512, 300)
-    cv.ring(dx, dy, 512, 300, 0, 1, edge(T))
-    ring_cursor(cv, T, dx + 300, dy + 120, 2, 2)
-    px, pw = x + 652, 232
-    caption(cv, T, px, top + 76, "Colour", desk=True)
-    cv.rect(px, top + 88, 44, 28, P64[COLOUR])
-    two_tone(cv, T, px, top + 88, 44, 28)
-    cv.text(px + 56, top + 108, "12 · Blue", F(T, "row", DK), T["text"])
-    for i in range(64):
-        sx, sy = px + (i % 8) * 26, top + 126 + (i // 8) * 26
-        cv.rect(sx, sy, 24, 24, P64[i])
-        if i == COLOUR:
-            two_tone(cv, T, sx, sy, 24, 24)
-    caption(cv, T, px, top + 352, "Pencil", desk=True)
-    row_items(cv, T, px - 10, top + 360, pw + 6, 30,
-              (("Size", "seg2", (("1", "2", "4"), 0)),), None, desk=True, group=False)
-    desk_foot(cv, T, x, y + h - 44, w, "Pencil · size 1 · saved",
-              hint=(("C", "Colours"), ("B", "Brush"), (("Ctrl", "Z"), "Undo")))
     return cv
 
 
@@ -1172,139 +1115,11 @@ def notes_desk(T):
 
 
 # ==========================================================================
-# Storybook: slides of objects -- text boxes, shapes, pictures -- that a
-# story cart presents (APPS_RESTYLE.md: the screens, the tools, the document)
+# Storybook's parts: the chosen object, the snap guide, the style rows
+# (round15.py draws the slides and the screens)
 # ==========================================================================
-TEXT_SCALE = {"S": 1, "M": 2, "L": 3, "XL": 4}
-
-
 def _poly(d, s, pts):
     d.polygon([(px * s, py * s) for px, py in pts], fill=255)
-
-
-def _shape_fn(kind, w, h, inset=0.0):
-    """The mask of a slide shape in its w x h box, shrunk by `inset` (the
-    outline's width): what the cart's rect, oval, line and tri verbs draw."""
-    i = inset
-
-    def fn(d, s):
-        x0, y0, x1, y1 = i * s, i * s, (w - i) * s - 1, (h - i) * s - 1
-        if kind == "rect":
-            d.rectangle((x0, y0, x1, y1), fill=255)
-        elif kind == "round":
-            d.rounded_rectangle((x0, y0, x1, y1), max(1, (min(w, h) * 0.25 - i) * s), fill=255)
-        elif kind == "ellipse":
-            d.ellipse((x0, y0, x1, y1), fill=255)
-        elif kind == "bubble":
-            bh = h * 0.78
-            d.rounded_rectangle((x0, y0, x1, bh * s - i * s), max(1, (8 - i) * s), fill=255)
-            _poly(d, s, ((w * 0.18 + i, bh - i - 1), (w * 0.12 + i * 0.5, h - i * 1.6),
-                         (w * 0.38 - i, bh - i - 1)))
-        elif kind == "star":
-            import math
-            pts = []
-            for k in range(10):
-                a = -math.pi / 2 + k * math.pi / 5
-                r = (0.5 if k % 2 == 0 else 0.21) * (min(w, h) - 2 * i)
-                pts.append((w / 2 + r * math.cos(a) / min(w, h) * w, h / 2 + r * math.sin(a)))
-            _poly(d, s, pts)
-    return fn
-
-
-def slide_shape(cv, kind, x, y, w, h, fill, line, lw):
-    if line is not None:
-        cv.shape(x, y, w, h, _shape_fn(kind, w, h), P64[line])
-    if fill is not None:
-        cv.shape(x, y, w, h, _shape_fn(kind, w, h, lw if line is not None else 0), P64[fill])
-
-
-def slide_text(cv, text, x, y, w, size, colour, align="centre", box=None):
-    f = M.Petme(TEXT_SCALE[size])
-    if box is not None:
-        cv.rect(x, y, w, f.size + 4, P64[box])
-        y += 2
-    tx = {"left": x, "centre": x + (w - f.width(text)) // 2, "right": x + w - f.width(text)}[align]
-    cv.text(tx, y + 7 * f.s, text, f, P64[colour])
-
-
-# The story the scenes show: (background, objects); an object is
-# (type, ..., rect) as the document holds it (APPS_RESTYLE.md).
-BUBBLE = (186, 30, 124, 60)
-STORY = (
-    (1, (("shape", "star", (26, 30, 26, 26), 10, None), ("shape", "star", (272, 150, 20, 20), 10, None),
-         ("text", "The Brave", (16, 72, 288, 28), "L", 7),
-         ("text", "Dragon", (16, 104, 288, 28), "L", 10),
-         ("text", "by Mia", (16, 168, 288, 20), "M", 6))),
-    (15, (("text", "Once upon a time...", (8, 196, 304, 18), "M", 1),
-          ("picture", "dragon", (16, 66, 160, 120)),
-          ("shape", "bubble", BUBBLE, 7, 0, "Hello!"))),
-    (1, (("picture", "rocket", (0, 52, 160, 120)), ("picture", "fish", (160, 52, 160, 120)),
-         ("text", "Up and away!", (8, 196, 304, 18), "M", 7))),
-    ("house", (("text", "Home at last.", (8, 200, 304, 20), "M", 7, 0),)),
-    (2, (("shape", "round", (60, 70, 200, 100), 8, 7), ("text", "The End", (60, 104, 200, 28), "L", 7))),
-)
-TRANS = ("none", "fade", "swipe", "fade", "none")
-PICTURE = (16, 66, 160, 120)
-
-
-def slide_image(n, story=STORY):
-    """Slide n at 1x, as the story cart draws it; the editor draws the same
-    on an off-screen canvas (one renderer)."""
-    bg, objs = story[n]
-    cv = M.Cv(320, 240, "#000000" if isinstance(bg, str) else P64[bg], aa=False)
-    if isinstance(bg, str):
-        cv.paste(ART[bg], 0, 0)
-    for o in objs:
-        if o[0] == "picture":
-            x, y, w, h = o[2]
-            cv.paste(ART[o[1]].resize((w, h), Image.NEAREST), x, y)
-        elif o[0] == "shape":
-            x, y, w, h = o[2]
-            slide_shape(cv, o[1], x, y, w, h, o[3], o[4], 2)
-            if len(o) > 5:
-                slide_text(cv, o[5], x, y + (h * 0.78 - 16) // 2, w, "M", 0)
-        else:
-            x, y, w, h = o[2]
-            slide_text(cv, o[1], x, y, w, o[3], o[4], box=o[5] if len(o) > 5 else None)
-    return cv.img.copy()
-
-
-SLIDES = [slide_image(n) for n in range(len(STORY))]
-
-
-def _cleared():
-    """Slide 2 with its dragon's Clear background on: the picture's corner
-    colour drawn clear, so the slide shows through."""
-    im = SLIDES[1].copy()
-    x, y, w, h = PICTURE
-    im.paste(P64[15], (x, y, x + w, y + h))
-    pic = ART["dragon"].resize((w, h), Image.NEAREST)
-    key = pic.getpixel((0, 0))
-    mask = Image.new("L", (w, h), 255)
-    px = pic.load()
-    mp = mask.load()
-    for yy in range(h):
-        for xx in range(w):
-            if px[xx, yy] == key:
-                mp[xx, yy] = 0
-    im.paste(pic, (x, y), mask)
-    return im
-
-
-CLEARED_SLIDE = _cleared()
-_bg, _objs = STORY[1]
-MOVING_SLIDE = slide_image(0, ((_bg, _objs[:2] + (("shape", "bubble", (186, PICTURE[1], 124, 60),
-                                                    7, 0, "Hello!"),)),))
-NEW_STORY = ((1, (("text", "Your title", (16, 88, 288, 28), "L", 6),
-                  ("text", "by ...", (16, 140, 288, 20), "M", 13))),)
-NEW_SLIDE = slide_image(0, NEW_STORY)
-
-
-def slide_at(n, w, h):
-    """A slide's frame at a thumbnail's size: an exact decimation (80x60 is a
-    quarter, 160x120 a half)."""
-    im = SLIDES[n]
-    return im.resize((w, h), Image.NEAREST).point(M.LUT565)
 
 
 def chosen(cv, T, x, y, w, h, desk=False, touch=False):
@@ -1336,102 +1151,6 @@ def guide(cv, T, x0, y, x1):
     while x < x1:
         cv.rect(x, y, min(5, x1 - x), 1, T["accent"])
         x += 9
-
-
-def trans_label(cv, T, x, base, i, f, desk=False):
-    """A slide's number and its transition's icon (None, Fade, Swipe)."""
-    w = cv.text(x, base, str(i + 1), f, T["text"])
-    s = 16 if desk else 12
-    sicon(cv, T, "trans_" + TRANS[i], x + w + 5, base - s + 2, s, T["dim"])
-
-
-def sorter(cv, T, x0, y0, cw, ch, gx, gy, cols, focus_i, desk=False, rows_=2, add=True,
-           current_i=None):
-    """The slide sorter (`ui.grid` of `ui.card`s): each slide's frame, its
-    number and transition; the last card adds one."""
-    fn = F(T, "meta", DK) if desk else Face(T["fam"], 11, T["w_med"], 2)
-    n = len(STORY) + (1 if add else 0)
-    for i in range(min(n, cols * rows_)):
-        cx = x0 + i % cols * (cw + gx)
-        cy = y0 + i // cols * (ch + gy)
-        if i == len(STORY):
-            new_card(cv, T, cx, cy, cw, ch, desk)
-            cv.text(cx + cw // 2, cy + ch + (22 if desk else 13), "New slide", fn, T["value"],
-                    align="center")
-            continue
-        card_pic(cv, T, slide_at(i, cw, ch), cx, cy, cw, ch, 6 if desk else 4,
-                 focus=i == focus_i, current=i == current_i)
-        trans_label(cv, T, cx + 1, cy + ch + (22 if desk else 13), i, fn, desk)
-
-
-def wrap2(cv, T, cx, base, text, f, ink, maxw, lh):
-    """A card's name, on two lines where one does not hold it."""
-    if f.width(text) <= maxw:
-        cv.text(cx, base, text, f, ink, align="center")
-        return
-    words = text.split()
-    for k in range(len(words) - 1, 0, -1):
-        a, b = " ".join(words[:k]), " ".join(words[k:])
-        if f.width(a) <= maxw:
-            cv.text(cx, base, a, f, ink, align="center")
-            cv.text(cx, base + lh, b, f, ink, align="center", maxw=maxw)
-            return
-    cv.text(cx, base, text, f, ink, align="center", maxw=maxw)
-
-
-def story_cards(cv, T, x0, y0, cw, ch, gap, focus_i, desk=False):
-    stories = ((0, "The Brave Dragon", "5 slides"), (2, "Space trip", "3 slides"),
-               (4, "Our holiday", "8 slides"))
-    ft = F(T, "row", DK) if desk else Face(T["fam"], 12, T["w_semi"], 2)
-    fs = F(T, "meta", DK) if desk else Face(T["fam"], 11, T["w_body"], 2)
-    for i in range(4):
-        cx = x0 + i % 3 * (cw + gap)
-        cy = y0 + i // 3 * (ch + (60 if desk else 46))
-        if i == 0:
-            new_card(cv, T, cx, cy, cw, ch, desk)
-            cv.text(cx + cw // 2, cy + ch + (24 if desk else 15), "New story", ft, T["value"],
-                    align="center")
-            continue
-        n, name, sub = stories[i - 1]
-        card_pic(cv, T, slide_at(n, cw, ch), cx, cy, cw, ch, 8 if desk else 6, focus=i == focus_i)
-        lh = 20 if desk else 14
-        two = i == focus_i and ft.width(name) > cw + 8
-        wrap2(cv, T, cx + cw // 2, cy + ch + (24 if desk else 15), name, ft, T["text"], cw + 8, lh)
-        cv.text(cx + cw // 2, cy + ch + (42 if desk else 28) + (lh if two else 0), sub, fs, T["dim"],
-                align="center")
-
-
-def layout_card(cv, T, j, x, y, w, h, focus=False):
-    """A slide layout's schematic: where its boxes go."""
-    paper = "#ffffff" if T["mode"] == "light" else T["raised"]
-    card_pic(cv, T, Image.new("RGB", (w, h), M.q(paper)), x, y, w, h, 4, focus=focus)
-    if focus:
-        x, y, w, h = x - 2, y - 3, w + 4, h + 4
-    c = mix(T["dim"], paper, 0.45)
-    if j == 0:
-        cv.rrect(x + w * 0.18, y + h * 0.36, w * 0.64, 6, 2, c)
-        cv.rrect(x + w * 0.3, y + h * 0.58, w * 0.4, 4, 2, c)
-    elif j == 1:
-        cv.rrect(x + 6, y + 6, w * 0.5, h - 18, 2, c)
-        cv.rrect(x + w * 0.5 + 10, y + 10, w * 0.5 - 16, 4, 2, c)
-        cv.rrect(x + 6, y + h - 9, w - 12, 4, 2, c)
-    elif j == 2:
-        cv.rrect(x + 5, y + 8, w / 2 - 8, h - 22, 2, c)
-        cv.rrect(x + w / 2 + 3, y + 8, w / 2 - 8, h - 22, 2, c)
-        cv.rrect(x + 6, y + h - 9, w - 12, 4, 2, c)
-
-
-def tabs(cv, T, x, y, items, cur, desk=False):
-    """`ui.tabs`: a choice row, the current tab under the current mark."""
-    f = F(T, "chip", DK) if desk else F(T, "tab", HH)
-    h = 30 if desk else 22
-    for i, t in enumerate(items):
-        tw = f.width(t)
-        ink = T["dim"]
-        if i == cur:
-            ink = M.current_mark(cv, T, x, y, tw + 20, h, 6) or T["text"]
-        cv.text(x + 10, M.mid_base(f, y, h), t, f, ink)
-        x += tw + 26
 
 
 def toggle(cv, T, xr, y, h, on, desk=False):
@@ -1517,285 +1236,6 @@ def sheet_rows(cv, T, x, y, w, rh, items, focus_i, desk=False):
     return y + rh * len(items)
 
 
-BUBBLE_STYLE = (("Shape", "cycle", "Bubble"), ("Fill", "colour", (7, "White")),
-                ("Line", "colour", (0, "Black")), ("Width", "seg2", (("Thin", "Thick"), 1)),
-                ("Text size", "seg2", (("S", "M", "L", "XL"), 1)),
-                ("Colour", "colour", (0, "Black")), ("Align", "align", 1),
-                ("Appears", "seg2", (("With slide", "On tap"), 1)))
-TOUCH_TOOLS = (("new", "Add", True), ("palette", "Style", False), ("to_front", "Order", False),
-               ("more", "More", False), ("slides", "Slides", False))
-KEY_HINTS = (("↕↔", "Move"), ("G", "Step 8"), ("enter", "Write"), ("M", "More"))
-
-
-WIN_TOP = 28                    # the slide window starts under the 28 px bar
-
-
-def slide_window(cv, T, n, scroll, bottom, img=None):
-    """The slide at 1x in the window under the bar, scrolled to keep the
-    chosen object in view, its thumb at the right edge."""
-    im = (img or SLIDES[n]).crop((0, scroll, 320, scroll + bottom - WIN_TOP))
-    cv.paste(im.point(M.LUT565), 0, WIN_TOP)
-    h = bottom - WIN_TOP
-    th = h * h // 240
-    cv.rrect(316, WIN_TOP + scroll * h // 240, 3, th, 1.5, "#ffffff", 0.7)
-
-
-def touch_row(cv, T, cur=None):
-    """A touch board's tool row in place of the hint strip: five cells of
-    64x32, an icon and its word."""
-    cv.rect(0, 208, 320, 32, T["bg"])
-    cv.rect(0, 208, 320, 1, T["line"])
-    f = Face(T["fam"], 11, T["w_med"], 2)
-    for i, (slot, label, more) in enumerate(TOUCH_TOOLS):
-        x = i * 64
-        ink = T["text"]
-        if i == cur:
-            ink = M.current_mark(cv, T, x + 3, 211, 58, 27, 6) or ink
-        sicon(cv, T, slot, x + 6, 216, 16, ink)
-        lw = cv.text(x + 25, 228, label, f, ink)
-        if more:
-            sicon(cv, T, "down", x + 27 + lw, 219, 10, T["dim"])
-
-
-def present_counter(cv, x, y, text, f):
-    w = f.width(text) + 16
-    cv.rrect(x - w, y, w, 18, 9, "#000000", 0.5)
-    cv.text(x - w // 2, M.mid_base(f, y, 18), text, f, "#ffffff", align="center")
-
-
-def storybook(T, state="deck"):
-    if state == "present":
-        cv = M.Cv(320, 240, "#000000")
-        cv.paste(SLIDES[1], 0, 0)
-        present_counter(cv, 312, 214, "2 / 5", Face("inter", 12, 600, 2))
-        return cv
-    if state in ("shelf", "empty"):
-        cv = R11.hh_page(T, "Storybook")
-        if state == "empty":
-            empty_state(cv, T, 160, 40, "storybook", "No stories yet",
-                        ("Make slides with words,", "shapes and your drawings."), "New story", "new")
-            hh_hints(cv, T, (("enter", "New story"), ("Esc", "Back")))
-            return cv
-        caption(cv, T, 16, 42, "3 stories")
-        story_cards(cv, T, 16, 54, 80, 60, 24, 1)
-        fade(cv, T, 0, 204, 320, 14)
-        cv.rect(0, 218, 320, 22, T["bg"])
-        hh_hints(cv, T, (("enter", "Open"), ("P", "Present"), ("M", "Menu"), ("Esc", "Back")))
-        return cv
-    if state in ("deck", "layouts", "deck-menu"):
-        cv = R11.hh_page(T, "The Brave Dragon")
-        bar_tools(cv, T, "The Brave Dragon", ("play",))
-        caption(cv, T, 16, 42, "5 slides")
-        sorter(cv, T, 16, 50, 80, 60, 24, 20, 3,
-               1 if state == "deck" else None, current_i=1 if state == "deck-menu" else None)
-        if state == "deck":
-            hh_hints(cv, T, (("enter", "Edit"), ("N", "New"), (("[", "]"), "Move"), ("M", "Menu")))
-            return cv
-        if state == "deck-menu":
-            scrim(cv)
-            menu(cv, T, 112, 34, 196,
-                 (("trans_fade", "Transition: Fade", "›"), ("dup", "Duplicate", "Ctrl D"),
-                  ("back", "Move earlier", "["), ("forward", "Move later", "]"), ("-",),
-                  ("trash", "Delete", "Del", "danger")), 0, head="Slide 2")
-            hh_hints(cv, T, (("Esc", "Close"),))
-            return cv
-        px, py, pw, ph = 6, 112, 308, 102
-        card_surface(cv, T, px, py, pw, ph, 10)
-        cv.text(px + 12, py + 20, "New slide", Face(T["fam"], 13, T["w_semi"], 2), T["text"])
-        for j, name in enumerate(("Title", "Picture", "Two pictures", "Blank")):
-            lx, ly, lw, lh = px + 14 + j * 72, py + 30, 64, 48
-            layout_card(cv, T, j, lx, ly, lw, lh, focus=j == 1)
-            cv.text(lx + lw // 2, ly + lh + 14, name, Face(T["fam"], 11, T["w_med"], 2),
-                    T["text"], align="center")
-        hh_hints(cv, T, (("enter", "Add"), ("Esc", "Close")))
-        return cv
-    if state == "pictures":
-        cv = R11.hh_page(T, "Add a picture")
-        tabs(cv, T, 12, 32, ("My Art", "Sprites"), 0)
-        items = ("dragon", "garden", "rocket", "cat", "fish", "house")
-        for i, k in enumerate(items):
-            cx, cy = 16 + i % 3 * 100, 66 + i // 3 * 92
-            card_pic(cv, T, thumb(k, 88, 66), cx, cy, 88, 66, 6, focus=i == 0)
-            cv.text(cx + 44, cy + 81, dict(DRAWINGS)[k], Face(T["fam"], 12, T["w_med"], 2),
-                    T["text"], align="center")
-        fade(cv, T, 0, 204, 320, 14)
-        cv.rect(0, 218, 320, 22, T["bg"])
-        hh_hints(cv, T, (("enter", "Add"), (("L", "R"), "Tabs"), ("Esc", "Back")))
-        return cv
-    if state == "overview":
-        cv = R11.hh_page(T, "Slide 2/5")
-        bar_tools(cv, T, "Slide 2/5", ("undo", "redo", "play"), disabled=("redo",))
-        sx, sy = 80, 46
-        M.soft(cv, T, sx, sy, 160, 120, 2, 0.6)
-        paste_rect(cv, SLIDES[1].resize((160, 120), Image.NEAREST).point(M.LUT565), sx, sy, 160, 120)
-        cv.ring(sx, sy, 160, 120, 0, 1, edge(T))
-        x, y, w, h = BUBBLE
-        chosen(cv, T, sx + x / 2, sy + y / 2, w / 2, h / 2)
-        cv.ring(sx - 3, sy + 20 / 2, 166, 192 / 2, 3, 1.5, T["dim"])
-        caption(cv, T, 160, 190, "The whole slide at half size; the frame", align="center")
-        caption(cv, T, 160, 204, "is what the window shows", align="center")
-        hh_hints(cv, T, (("Z", "Back"), ("↕↔", "Move 2 px")))
-        return cv
-    # editing a slide at 1x
-    new = state == "new"
-    touch = state in ("edit", "add")
-    title = "Slide 1/1" if new else "Slide 2/5"
-    cv = R11.hh_page(T, title)
-    bar_tools(cv, T, title, ("undo", "redo", "play"), disabled=("undo", "redo") if new else ("redo",))
-    scroll = 24 if state in ("style", "colours") else (0 if new else 20)
-    bottom = 208 if touch else 220
-    slide_window(cv, T, 0 if new else 1, scroll, bottom, NEW_SLIDE if new else None)
-    if new:
-        chosen(cv, T, 16, WIN_TOP + 88 - scroll, 288, 28)
-        cv.rect(39, WIN_TOP + 88 + 2, 2, 24, T["accent"])
-        hh_hints(cv, T, KEY_HINTS)
-        return cv
-    x, y, w, h = BUBBLE
-    chosen(cv, T, x, WIN_TOP + y - scroll, w, h, touch=touch)
-    if state == "keys":
-        hh_hints(cv, T, KEY_HINTS)
-        return cv
-    if touch:
-        touch_row(cv, T, 0 if state == "add" else None)
-        if state == "add":
-            px, py = 6, 70
-            card_surface(cv, T, px, py, 192, 136, 10)
-            for j, (slot, label, key) in enumerate((("text", "Text", "T"), ("shapes", "Shape", "S"),
-                                                    ("art", "Picture", "I"),
-                                                    ("background", "Background", "B"))):
-                cx, cy = px + 6 + j % 2 * 92, py + 8 + j // 2 * 62
-                ink = M.focus_mark(cv, T, (cx, cy, 88, 56, 8), "part") if j == 0 else None
-                sicon(cv, T, slot, cx + 32, cy + 8, 24, ink or T["text"])
-                cv.text(cx + 44, cy + 48, label, Face(T["fam"], 12, T["w_med"], 2), ink or T["text"],
-                        align="center")
-        return cv
-    # the style sheet, the object above it
-    sy0 = 96
-    M.soft(cv, T, 0, sy0, 320, 140, 12, 0.7)
-    cv.rrect(0, sy0, 320, 140, 12, T["surface"], corners=(True, True, False, False))
-    if T["mode"] == "dark":
-        cv.ring(0, sy0, 320, 140, 12, 1, T["line"], corners=(True, True, False, False))
-    cv.rrect(146, sy0 + 5, 28, 4, 2, mix(T["line"], T["dim"], 0.3))
-    cv.set_clip(0, sy0 + 12, 320, 220 - sy0 - 12)
-    sheet_rows(cv, T, 0, sy0 + 12, 320, 32, BUBBLE_STYLE, 1)
-    cv.clip = None
-    fade(cv, T, 0, 206, 320, 14, T["surface"])
-    cv.rrect(315, sy0 + 16, 3, 30, 1.5, T["dim"], 0.5)
-    cv.rect(0, 220, 320, 20, T["bg"])
-    if state == "colours":
-        px, py, pw = 0, 116, 320
-        card_surface(cv, T, px, py, pw, 104, 10)
-        cv.text(px + 16, py + 19, "Fill", Face(T["fam"], 13, T["w_semi"], 2), T["text"])
-        button(cv, T, "normal", px + pw - 16 - 64, py + 6, 64, 20, "None")
-        for i in range(16):
-            cx, cy = px + 16 + i % 8 * 36, py + 32 + i // 8 * 34
-            cv.rect(cx, cy, 32, 28, P64[i])
-            if i == 7:
-                two_tone(cv, T, cx, cy, 32, 28)
-        ring_cursor(cv, T, px + 16 + 2 * 36, py + 66, 32, 28)
-        hh_hints(cv, T, (("enter", "Pick"), ("Esc", "Close")))
-        return cv
-    hh_hints(cv, T, (("enter", "Colours"), (("↑", "↓"), "Rows"), ("Esc", "Close")))
-    return cv
-
-
-def storybook_desk(T, state="edit"):
-    if state == "present":
-        cv = M.Cv(1024, 600, "#000000")
-        paste_rect(cv, SLIDES[1], 192, 60, 640, 480)
-        f = Face(T["fam"], 14, T["w_med"], 4)
-        cv.text(832, 570, "2 / 5", f, "#8a8fa8", align="right")
-        return cv
-    cv = desk(T, (("storybook", "Storybook"), ("art", "My Art")))
-    x, y, w, h = 112, 52, 900, 536
-    top = win(cv, T, x, y, w, h, "The Brave Dragon", "storybook", back=state != "deck")
-    ty = top + 6
-    fc = F(T, "chip", DK)
-    if state == "deck":
-        bx = x + 16
-        for label, slot, kind in (("New slide", "layout", "normal"), ("Duplicate", "dup", "normal"),
-                                  ("Delete", "trash", "danger")):
-            bw = fc.width(label) + 48
-            button(cv, T, kind, bx, ty + 2, bw, 34, label, slot, desk=True)
-            bx += bw + 8
-        button(cv, T, "primary", x + w - 16 - 124, ty + 2, 124, 34, "Present", "play", desk=True)
-        cv.rect(x + 16, top + 50, w - 32, 1, T["line"])
-        caption(cv, T, x + 24, top + 76, "5 slides", desk=True)
-        sorter(cv, T, x + 18, top + 88, 160, 120, 16, 34, 5, 2, desk=True, rows_=2)
-        desk_foot(cv, T, x, y + h - 44, w, "Slide 3 · Up and away!",
-                  hint=(("enter", "Edit"), (("[", "]"), "Move"), (("Ctrl", "D"), "Duplicate"),
-                        ("Del", "Delete")))
-        return cv
-    # the tool row: Add, order, clipboard, undo, the slide, Present
-    button(cv, T, "normal", x + 16, ty + 4, 92, 34, "Add   ", "new", desk=True)
-    sicon(cv, T, "down", x + 82, ty + 15, 14, T["dim"])
-    for bx, slot in ((120, "to_front"), (160, "to_back"), (214, "copy"), (254, "paste"),
-                     (308, "undo"), (348, "redo")):
-        ibtn(cv, T, slot, x + bx, ty + 4, 36, "disabled" if slot == "redo" else "rest", desk=True)
-    for bx in (114, 205, 299):
-        cv.rect(x + bx, ty + 10, 1, 24, T["line"])
-    sx0 = x + w - 16 - 124 - 116
-    f = F(T, "row", DK)
-    cv.rrect(sx0, ty + 4, 104, 34, 8, T["raised"])
-    sicon(cv, T, "back", sx0 + 6, ty + 13, 16, T["dim"])
-    sicon(cv, T, "forward", sx0 + 82, ty + 13, 16, T["dim"])
-    cv.text(sx0 + 52, M.mid_base(f, ty + 4, 34), "2/5", f, T["text"], align="center")
-    button(cv, T, "primary", x + w - 16 - 124, ty + 4, 124, 34, "Present", "play", desk=True)
-    cv.rect(x + 16, top + 50, w - 32, 1, T["line"])
-    # the slides down the side: frames 80x60 at a 72 px pitch
-    fn = F(T, "meta", DK)
-    for i in range(5):
-        cy = top + 62 + i * 72
-        cx = x + 40
-        if i == 1:
-            M.current_mark(cv, T, x + 12, cy - 6, 116, 72, 8)
-        cv.text(x + 22, cy + 14, str(i + 1), fn, T["text"] if i == 1 else T["dim"])
-        paste_rect(cv, slide_at(i, 80, 60), cx, cy, 80, 60, 4)
-        cv.ring(cx, cy, 80, 60, 4, 1, edge(T))
-    cv.rect(x + 136, top + 51, 1, h - 44 - 51 - 44, T["line"])
-    # the slide at 1.5x on its pasteboard
-    ax, ay = x + 146, top + 58
-    cv.rrect(ax, ay, 496, 376, 8, T["bg"])
-    sx, sy, k = ax + 8, ay + 8, 1.5
-    paste_rect(cv, SLIDES[1], sx, sy, 480, 360)
-    px, pw = x + 652, 232
-    if state == "edit":
-        paste_rect(cv, MOVING_SLIDE, sx, sy, 480, 360)
-        ox, oy, ow, oh = BUBBLE
-        guide(cv, T, sx + 4, sy + PICTURE[1] * k, sx + 476)
-        chosen(cv, T, sx + ox * k, sy + PICTURE[1] * k, ow * k, oh * k, desk=True)
-        sicon(cv, T, "bubble", px, top + 68, 20, T["text"])
-        cv.text(px + 28, top + 84, "Speech bubble", F(T, "wtitle", DK), T["text"])
-        yy = sheet_rows(cv, T, px - 12, top + 96, pw + 16, 28, BUBBLE_STYLE[:4], 1, desk=True)
-        caption(cv, T, px, yy + 18, "Text", desk=True)
-        yy = sheet_rows(cv, T, px - 12, yy + 24, pw + 16, 28, BUBBLE_STYLE[4:7], None, desk=True)
-        sheet_rows(cv, T, px - 12, yy + 8, pw + 16, 28, BUBBLE_STYLE[7:], None, desk=True)
-        status = "Slide 2 of 5 · moving: lined up with the dragon"
-    elif state == "picture":
-        paste_rect(cv, CLEARED_SLIDE, sx, sy, 480, 360)
-        chosen(cv, T, sx + PICTURE[0] * k, sy + PICTURE[1] * k, PICTURE[2] * k, PICTURE[3] * k,
-               desk=True)
-        sicon(cv, T, "art", px, top + 68, 20, T["text"])
-        cv.text(px + 28, top + 84, "Picture · Dragon", F(T, "wtitle", DK), T["text"])
-        sheet_rows(cv, T, px - 12, top + 96, pw + 16, 28,
-                   (("Size", "seg2", (("½", "1", "2"), 0)), ("Clear background", "toggle", True),
-                    ("Appears", "seg2", (("With slide", "On tap"), 0))), 1, desk=True)
-        status = "Slide 2 of 5 · Dragon at ½ · its background colour clear"
-    else:
-        sicon(cv, T, "layout", px, top + 68, 20, T["text"])
-        cv.text(px + 28, top + 84, "Slide 2", F(T, "wtitle", DK), T["text"])
-        cols = [P64[c] for c in (15, 7, 10, 12, 1, 0)]
-        rows = sheet_rows(cv, T, px - 12, top + 96, pw + 16, 28,
-                          (("Background", "sw", (cols, 0)), ("Picture", "link", "None")), 0, desk=True)
-        caption(cv, T, px, rows + 18, "Transition", desk=True)
-        sheet_rows(cv, T, px - 12, rows + 24, pw + 16, 28, (("", "trans", 1),),
-                   None, desk=True)
-        status = "Slide 2 of 5 · nothing chosen"
-    desk_foot(cv, T, x, y + h - 44, w, status,
-              hint=((("Ctrl", "D"), "Duplicate"), ("Del", "Delete")))
-    return cv
-
-
 # ==========================================================================
 # the pictures
 # ==========================================================================
@@ -1836,36 +1276,8 @@ HANDHELD = (
     (notes, "new", "notes-new", "Notes: New note's name in a dialog, the list washed between "
      "the bars"),
     (notes, "empty", "notes-empty", "Notes with an empty vault"),
-    (storybook, "shelf", "storybook", "Storybook: the stories as cards, New story first; "
-     "focus on The Brave Dragon, its name on two lines"),
-    (storybook, "empty", "storybook-empty", "Storybook with no stories"),
-    (storybook, "deck", "storybook-deck", "Storybook: the slide sorter, 80x60 frames, each "
-     "slide's number and transition icon, New slide last; focus on slide 2"),
-    (storybook, "deck-menu", "storybook-deck-menu", "Storybook: slide 2's menu -- transition, "
-     "duplicate, move, delete"),
-    (storybook, "layouts", "storybook-layouts", "Storybook: New slide's four layouts at 64x48; "
-     "focus on Picture"),
-    (storybook, "new", "storybook-new", "Storybook: a new story, one Title slide at 1x with its "
-     "title chosen to be written; the keys' hints"),
-    (storybook, "keys", "storybook-keys", "Storybook on the T-Deck: slide 2 at 1x in the "
-     "320x192 window under the bar, the bubble chosen with eight handles; Move, Step 8, "
-     "Write, More"),
-    (storybook, "edit", "storybook-edit", "Storybook on a touch board: the bubble chosen with "
-     "its one corner knob, the tool row in place of the hints"),
-    (storybook, "add", "storybook-add", "Storybook on a touch board: Add's popover -- text, "
-     "shape, picture, background"),
-    (storybook, "style", "storybook-style", "Storybook: the style sheet from the foot, the "
-     "slide scrolled so the bubble stays in sight; focus on Fill"),
-    (storybook, "colours", "storybook-colours", "Storybook: Fill's colours, the 16 in two rows "
-     "of 32x28 and None"),
-    (storybook, "overview", "storybook-overview", "Storybook: Z's whole slide at exactly half "
-     "size, the window it scrolls marked"),
-    (storybook, "pictures", "storybook-pictures", "Storybook: Add a picture, My Art and Sprites "
-     "as tabs; focus on Dragon"),
 )
 DESKS = (
-    (paint_desk, None, "paint", "Paint as a window: the document's verbs and zoom on top, the "
-     "tools, the drawing at 1x on its pasteboard, the colours and the Pencil's size always open"),
     (my_art_desk, None, "my-art", "My Art as a window: five cards a row, the foot's verbs for "
      "the focused drawing, Open primary, Move to Trash in the danger ink"),
     (getcarts_desk, "cart", "getcarts", "Get Carts as a window: the shelf beside the focused "
@@ -1874,14 +1286,6 @@ DESKS = (
      "cart's page, Cancel"),
     (notes_desk, None, "notes", "Notes as a window (no handheld bar inside it): the vault beside "
      "the open note, its tools with a tooltip, the clipboard's keys in the foot"),
-    (storybook_desk, "edit", "storybook", "Storybook as a window: the tool row, the slides at "
-     "80x60, the slide at 1.5x with the bubble moving on a snap guide, its style always open"),
-    (storybook_desk, "picture", "storybook-picture", "Storybook as a window: a picture chosen, "
-     "its size, Clear background and Appears"),
-    (storybook_desk, "none", "storybook-slide", "Storybook as a window with nothing chosen: the "
-     "slide's background and its transition"),
-    (storybook_desk, "deck", "storybook-deck", "Storybook as a window: the slide sorter at "
-     "160x120, New slide, Duplicate, Delete, Present"),
 )
 
 
@@ -1894,9 +1298,3 @@ def scenes():
         for fn, arg, slug, what in DESKS:
             cv = fn(T, arg) if arg else fn(T)
             cv.save(f"{tag}_desktop_{slug}", f"{what}; {n}")
-    storybook(LIGHT, "present").save("storybook_present", "Storybook presenting slide 2 at 1x: "
-                                     "the slide alone, its number in a pill for a second after "
-                                     "each change", x3=True)
-    storybook_desk(LIGHT, "present").save("storybook_present_desk", "Storybook presenting on "
-                                          "the 1024x600 board: the slide at 2x on black, its "
-                                          "number in the margin")
