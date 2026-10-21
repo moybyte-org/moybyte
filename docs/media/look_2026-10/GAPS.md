@@ -345,6 +345,85 @@ moy-spec). **Frame:** a game running in the Run slot beside a pane being
 typed in is two damage rects a frame on the P4 desk, and Make it mine's
 2× game is 640 × 480 a frame; measure both on p4 and guition_p4 before
 building on them.
+## The apps' restyle (step 31)
+
+Paint, My Art, Get Carts, Notes and Storybook (`APPS_RESTYLE.md`,
+`rounds/round13.py`) on the public verbs need, beyond gaps 1–26:
+
+**32. Icon slots:** `text`, `shapes`, `to_front`, `to_back`, `spray` (a
+can and three dots), `picker` (a dropper; Paint draws its drip in the
+colour under the cursor), `pan`, `cut`, `paste` (a clipboard holding a
+page), `layout`, `slides`, `background`, `check`, `bubble`, `warn`, `down`,
+`align_l`, `align_c`, `align_r` and the transitions `trans_none`,
+`trans_fade`, `trans_swipe`, in every set (the default set's sources are
+in `rounds/round13.py`'s `NEW_ICONS`). **Cost:** 1 day.
+
+**33. A toast:** `ui.toast(text, kind)`, a pill in `text` with the
+ground's ink and a leading icon over the content's foot, gone after two
+seconds or the next key; one at a time, a new one replacing it. **Cost:**
+0.5 day. **Frame:** the band under it repaints as it goes.
+
+**34. A card's badge:** `ui.card`'s `o.badge`, an icon slot on a
+`surface` disc at the picture's top right, its ink `value`. **Cost:** 0.5
+day.
+
+**35. Chosen objects:** `ui.handles(id, x, y, w, h, o)` over a part: its
+outline (`value`, 1.5 px, with a dark 1 px keyline round it, so it reads on
+any picture),
+and by the last input either eight handles (drawn 6×6 on the handheld, 8×8
+on the desk, white with a dark border, answering 16×16 to a pointer) or,
+under touch, the body's drag and one corner knob (drawn 10×10, answering
+32×32); a line has two; it answers the drag and the handle. With it,
+`ui.guide(x0, y0, x1, y1)`, the dashed `accent` snap line. **Cost:** 2.5
+days.
+
+**36. An empty page:** `ui.empty(icon, title, lines)`: the icon at 26 px
+(36 on the desk) on a disc of `value` at 0.1 (`raised` in a dark mode), the
+title in the `title` role, the lines in `dim`, centred; the page's verbs
+follow as buttons. **Cost:** 0.5 day.
+
+**37. An app's bar tools:** `ui.page`'s `o.bar`, icons the app lends the
+handheld bar after its title, in the chrome ink (Play bare in `value`, a
+disabled one at half strength), and a compact cycle (Paint's zoom),
+answered as buttons; on the desk they are the window's tool row, which
+the app draws. The editors' row is chrome (step 23); this is the same
+zone through the verbs. **Cost:** 1.5 days.
+
+**38. Options on existing verbs:** `ui.swatches`'s `o.cols` lays the
+swatches out in rows and `o.page` shows a page of them (Paint's 64, 32 a
+page under touch), its focus the canvas cursor's ring -- a swatch grid's
+focus is a ring in every theme, the one exception to a theme's small-part
+mark -- and its chosen swatch a 2 px `value` ring at a 1 px gap;
+`ui.seg`'s `o.icons` draws icon names, alone or before words (Storybook's
+Align and Transition). **Cost:** 1 day.
+
+**39. Wrapped labels:** `ui.label`'s `o.wrap`, the text broken at word
+breaks in the content width, `o.lines` its most lines with "…" after.
+**Cost:** 0.5 day.
+
+**40. Text sizes in a cart (moy-spec):** `print`'s `scale` is accepted and
+ignored, so a story's text boxes are 8 px only. Storybook's S, M, L and XL
+are `print` at 1–4×: a verb-table change, the owner's and moy-spec's
+call. **Cost:** 1 day here once the spec moves; until then Storybook
+ships S alone.
+
+**41. Focus on a part of the mark's own colour:** the engine measures the
+focus mark against the part's fill and draws DESIGN.md's ring for it
+(The marks) where the pair falls under 3:1. **Cost:** 0.5 day.
+
+**42. Touch density:** a layout's class takes the board's input as well as
+its glass, so a touch board's handheld parts meet a 28–32 px target (Paint's
+tools two by four at 28, one colour target, popovers of 32 swatches at
+26×30; Storybook's tool row of 64×32 cells and its 32 px rows) and its hint
+strip gives way to the app's tool row. **Cost:** 1.5 days.
+
+**43. A sheet:** `ui.sheet(id, h, o)` and `ui.sheet()`, a card docked to
+the content's foot (or its head, `o.top`), its rows scrolling inside, the
+page above it left in sight; modal like a popover, washing nothing.
+**Cost:** 1 day.
+
+**44. Tooltips:** `o.tip` on a button, shown under a resting pointer on the
+desk (the bar's Desk tooltip, `BACK_TIP`, as a verb). **Cost:** 0.5 day.
 
 ## Moot in this rendering
 
@@ -355,4 +434,4 @@ window behind by 25%; the 12×12 two-tone icons; the redrawn default
 wallpaper (the default theme draws a backdrop).
 
 **Total:** about 96–104 developer days for gaps 1–26; gaps 27–30 add
-about 6, and gap 31 about 17–20.
+about 6, gap 31 about 17–20, and gaps 32–44 about 12.

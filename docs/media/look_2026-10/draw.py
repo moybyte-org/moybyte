@@ -7,9 +7,12 @@ desk, the Calc sheet, the type specimen); `rounds/round7.py` to
 before, and draw the icon sets, the editors, the system and pause menus,
 Settings, Appearance, the handheld Calc, the console home, the wallpaper
 scenes, the sheets, and the Editor's desk layouts and handheld tabs
-(round 12, `EDITOR_LAYOUT.md`); `rounds/round14.py` adds the three
-readings of maximise and the resizable panes (`MAXIMISE_VARIANTS.md`). The icon sets' sources live in native/moy_ui/icons/
-(tools/make_icons.py builds the shipped masks from them).
+(round 12, `EDITOR_LAYOUT.md`). `rounds/round13.py` draws the apps'
+restyle: Paint, My Art, Get Carts, Notes and Storybook (`APPS_RESTYLE.md`);
+`rounds/round14.py` adds the three readings of maximise and the resizable
+panes (`MAXIMISE_VARIANTS.md`). The icon sets' sources live in
+native/moy_ui/icons/ (tools/make_icons.py builds the shipped masks from
+them).
 
   pip install resvg-py==0.5.0   # the SVG rasteriser, into any path
   .venv/bin/python docs/media/look_2026-10/draw.py
@@ -34,6 +37,8 @@ def main():
                           f"Handheld home, Games tab, carousel on Sky Run; {T['name']}", x3=True)
         M.desktop(T).save(f"{T['key']}-{T['mode']}_desktop",
                           f"Desk: Calc focused, Files behind, bar; {T['name']}")
+    import round13  # noqa: E402 -- the apps' restyle (APPS_RESTYLE.md)
+    round13.scenes()
     M.calc_sheet()
     M.specimen()
     src = R12.scenes()

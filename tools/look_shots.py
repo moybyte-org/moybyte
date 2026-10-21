@@ -164,7 +164,7 @@ def _setup_table():
                    for v in ("e05", "v1", "v2")})
     editor["editor_maximise_compare"] = (DESK, ("25", "30"), False, _tab("paint"),
                                          "nearest screen: the Editor window, one tab (paint)")
-    return {
+    table = {
         **editor,
         "handheld_home": (HANDHELD, ("7", "11", "15", "17"), False, _home,
                           "home, Games tab, Sky Run current"),
@@ -220,6 +220,68 @@ def _setup_table():
         "type_specimen": (HANDHELD, ("3", "4"), False, _code,
                           "nearest screen: the Code tab on Star Catcher"),
     }
+    table.update(_apps_table())
+    return table
+
+
+# The apps' restyle (docs/media/look_2026-10/APPS_RESTYLE.md, plan step 31):
+# each scene's screen -> the app it is drawn from today, and the page of it.
+APPS = {"paint": ("artwork", None), "paint-colours": ("artwork", None),
+        "paint-brush": ("artwork", None), "paint-more": ("artwork", None),
+        "paint-touch": ("artwork", None), "paint-touch-colours": ("artwork", None),
+        "paint-game": ("artwork", "projects"), "my-art": ("artwork", "open"),
+        "my-art-menu": ("artwork", "open"), "my-art-empty": ("artwork", "open"),
+        "getcarts": ("getcarts", None), "getcarts-cart": ("getcarts", None),
+        "getcarts-getting": ("getcarts", None), "getcarts-offline": ("getcarts", None),
+        "notes": ("notes", None), "notes-edit": ("notes", None), "notes-new": ("notes", None),
+        "notes-empty": ("notes", None), "storybook": ("storybook", None),
+        "storybook-empty": ("storybook", None), "storybook-deck": ("storybook", None),
+        "storybook-layouts": ("storybook", None), "storybook-edit": ("storybook", None),
+        "storybook-style": ("storybook", None), "storybook-pictures": ("storybook", None),
+        "storybook-deck-menu": ("storybook", None), "storybook-new": ("storybook", None),
+        "storybook-keys": ("storybook", None), "storybook-add": ("storybook", None),
+        "storybook-colours": ("storybook", None), "storybook-overview": ("storybook", None),
+        "storybook-picture": ("storybook", None), "storybook-slide": ("storybook", None)}
+DESK_APPS = ("paint", "my-art", "getcarts", "getcarts-getting", "notes", "storybook",
+             "storybook-deck", "storybook-picture", "storybook-slide")
+DESK_ONLY = ("storybook-picture", "storybook-slide")
+
+
+def _apps_table():
+    what = "nearest screen: %s as it draws today"
+    out = {"storybook_present": (HANDHELD, ("31",), False, _app_open("storybook"),
+                                 what % "storybook"),
+           "storybook_present_desk": (CONSOLE, ("31",), False, _app_open("storybook"),
+                                      what % "storybook")}
+    for screen, (app, page) in APPS.items():
+        if screen not in DESK_ONLY:
+            out["handheld_" + screen] = (HANDHELD, ("31",), False, _app_open(app, page),
+                                         what % app)
+        if screen in DESK_APPS:
+            out["desktop_" + screen] = (DESK, ("31",), False, _app_open(app, page, True),
+                                        what % app)
+    return out
+
+
+def _app_open(app, page=None, window=False):
+    """An app the restyle redraws, opened as it is today (Notes is a cart),
+    on `page` (one of Paint's modes), in a window where the target has it."""
+    def setup(g, ws):
+        if window:
+            ws.open_desk()
+        if app == "notes":
+            ws.go_home()
+            ws._open_workspace(g._cart_by_title(ws, "Notes"))
+            ws.run(ws.project, ws.launcher_layer)
+            _settle(g, ws, 3)
+            return
+        ws.open_app(ws._apps_by_id[app])
+        _settle(g, ws, 2)
+        if page is not None:
+            _app(ws, app).mode = page
+        if window:
+            _place(ws, app, 112, 52, 900, 536)
+    return setup
 
 
 # --------------------------------------------------------------------------

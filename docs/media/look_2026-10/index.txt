@@ -28,6 +28,151 @@ bench-light_desktop.png — Desk: Calc focused, Files behind, bar; Bench (in the
 adw-light_handheld_home.png — Handheld home, Games tab, carousel on Sky Run; Adw (in the style of GNOME's Adwaita); 320x240
 adw-light_handheld_home@3x.png — same, enlarged 3x (nearest)
 adw-light_desktop.png — Desk: Calc focused, Files behind, bar; Adw (in the style of GNOME's Adwaita); 1024x600
+moy-light_handheld_paint.png — Paint on the T-Deck: the drawing at 1x centred on the last mark, the tools down the left, the colour in use and its page of sixteen, the brush's size dot; the tool's name leads the hints; a toast for a new drawing's first save; Moy Day; 320x240
+moy-light_handheld_paint@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_paint-colours.png — Paint: the 64 colours in a popover hung from the colour in use, inside the drawing's frame; the cursor's ring on 14, the caption naming it; Moy Day; 320x240
+moy-light_handheld_paint-colours@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_paint-brush.png — Paint with the Shape tool: Size, Shape and Fill (Outline, Filled) in the brush popover; focus on Size; Moy Day; 320x240
+moy-light_handheld_paint-brush@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_paint-more.png — Paint: the more menu hung from its button (no wash) -- new, open, use as wallpaper, put in a game, show -- each with its key; Moy Day; 320x240
+moy-light_handheld_paint-more@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_paint-touch.png — Paint on a touch board (the Guition S3): tools two by four at 28 px, the colour in use the one colour target, no hint strip; Moy Day; 320x240
+moy-light_handheld_paint-touch@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_paint-touch-colours.png — Paint on a touch board: the colours filling the drawing's frame, 28 a page at 30x30 on a 32 px pitch, a 36 px page seg; Moy Day; 320x240
+moy-light_handheld_paint-touch-colours@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_paint-game.png — Paint's Put in a game: the projects with their pictures; focus on Sky Run; Moy Day; 320x240
+moy-light_handheld_paint-game@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_my-art.png — My Art: the drawings as cards, New drawing first, the wallpaper's badge; focus on Rocket; Moy Day; 320x240
+moy-light_handheld_my-art@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_my-art-menu.png — My Art: Rocket's menu over a washed page, the card current behind it; Move to Trash set apart in the danger ink; Moy Day; 320x240
+moy-light_handheld_my-art-menu@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_my-art-empty.png — My Art with no drawings: what is missing and the one verb, focused with the ring a mark on its own colour takes; Moy Day; 320x240
+moy-light_handheld_my-art-empty@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_getcarts.png — Get Carts: the shelf as cover cards three a row, badges for on console, update ready and too big (Doom, no cover: its genre on a tile); focus on Hop Quest; Moy Day; 320x240
+moy-light_handheld_getcarts@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_getcarts-cart.png — Get Carts: a cart's page with an update ready -- the facts as rows, Remove (danger), Play, Update; Moy Day; 320x240
+moy-light_handheld_getcarts-cart@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_getcarts-getting.png — Get Carts: a download in progress, Cancel; Moy Day; 320x240
+moy-light_handheld_getcarts-getting@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_getcarts-offline.png — Get Carts with Wi-Fi off: the bar says so, Wi-Fi is the primary, Try again beside it; Moy Day; 320x240
+moy-light_handheld_getcarts-offline@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_notes.png — Notes: New note first, then the vault, a note's name bare and another file's with its extension; focus on Story ideas; Moy Day; 320x240
+moy-light_handheld_notes@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_notes-edit.png — Notes: a note open, Markdown in the mono cells, a selection; Select, Copy, Cut and Paste labelled at the foot; Moy Day; 320x240
+moy-light_handheld_notes-edit@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_notes-new.png — Notes: New note's name in a dialog, the list washed between the bars; Moy Day; 320x240
+moy-light_handheld_notes-new@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_notes-empty.png — Notes with an empty vault; Moy Day; 320x240
+moy-light_handheld_notes-empty@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook.png — Storybook: the stories as cards, New story first; focus on The Brave Dragon, its name on two lines; Moy Day; 320x240
+moy-light_handheld_storybook@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-empty.png — Storybook with no stories; Moy Day; 320x240
+moy-light_handheld_storybook-empty@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-deck.png — Storybook: the slide sorter, 80x60 frames, each slide's number and transition icon, New slide last; focus on slide 2; Moy Day; 320x240
+moy-light_handheld_storybook-deck@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-deck-menu.png — Storybook: slide 2's menu -- transition, duplicate, move, delete; Moy Day; 320x240
+moy-light_handheld_storybook-deck-menu@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-layouts.png — Storybook: New slide's four layouts at 64x48; focus on Picture; Moy Day; 320x240
+moy-light_handheld_storybook-layouts@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-new.png — Storybook: a new story, one Title slide at 1x with its title chosen to be written; the keys' hints; Moy Day; 320x240
+moy-light_handheld_storybook-new@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-keys.png — Storybook on the T-Deck: slide 2 at 1x in the 320x192 window under the bar, the bubble chosen with eight handles; Move, Step 8, Write, More; Moy Day; 320x240
+moy-light_handheld_storybook-keys@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-edit.png — Storybook on a touch board: the bubble chosen with its one corner knob, the tool row in place of the hints; Moy Day; 320x240
+moy-light_handheld_storybook-edit@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-add.png — Storybook on a touch board: Add's popover -- text, shape, picture, background; Moy Day; 320x240
+moy-light_handheld_storybook-add@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-style.png — Storybook: the style sheet from the foot, the slide scrolled so the bubble stays in sight; focus on Fill; Moy Day; 320x240
+moy-light_handheld_storybook-style@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-colours.png — Storybook: Fill's colours, the 16 in two rows of 32x28 and None; Moy Day; 320x240
+moy-light_handheld_storybook-colours@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-overview.png — Storybook: Z's whole slide at exactly half size, the window it scrolls marked; Moy Day; 320x240
+moy-light_handheld_storybook-overview@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_storybook-pictures.png — Storybook: Add a picture, My Art and Sprites as tabs; focus on Dragon; Moy Day; 320x240
+moy-light_handheld_storybook-pictures@3x.png — same, enlarged 3x (nearest)
+moy-light_desktop_paint.png — Paint as a window: the document's verbs and zoom on top, the tools, the drawing at 1x on its pasteboard, the colours and the Pencil's size always open; Moy Day; 1024x600
+moy-light_desktop_my-art.png — My Art as a window: five cards a row, the foot's verbs for the focused drawing, Open primary, Move to Trash in the danger ink; Moy Day; 1024x600
+moy-light_desktop_getcarts.png — Get Carts as a window: the shelf beside the focused cart's page, its verbs in the foot; Moy Day; 1024x600
+moy-light_desktop_getcarts-getting.png — Get Carts as a window: the download in the cart's page, Cancel; Moy Day; 1024x600
+moy-light_desktop_notes.png — Notes as a window (no handheld bar inside it): the vault beside the open note, its tools with a tooltip, the clipboard's keys in the foot; Moy Day; 1024x600
+moy-light_desktop_storybook.png — Storybook as a window: the tool row, the slides at 80x60, the slide at 1.5x with the bubble moving on a snap guide, its style always open; Moy Day; 1024x600
+moy-light_desktop_storybook-picture.png — Storybook as a window: a picture chosen, its size, Clear background and Appears; Moy Day; 1024x600
+moy-light_desktop_storybook-slide.png — Storybook as a window with nothing chosen: the slide's background and its transition; Moy Day; 1024x600
+moy-light_desktop_storybook-deck.png — Storybook as a window: the slide sorter at 160x120, New slide, Duplicate, Delete, Present; Moy Day; 1024x600
+moy-dark_handheld_paint.png — Paint on the T-Deck: the drawing at 1x centred on the last mark, the tools down the left, the colour in use and its page of sixteen, the brush's size dot; the tool's name leads the hints; a toast for a new drawing's first save; Moy Night; 320x240
+moy-dark_handheld_paint@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_paint-colours.png — Paint: the 64 colours in a popover hung from the colour in use, inside the drawing's frame; the cursor's ring on 14, the caption naming it; Moy Night; 320x240
+moy-dark_handheld_paint-colours@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_paint-brush.png — Paint with the Shape tool: Size, Shape and Fill (Outline, Filled) in the brush popover; focus on Size; Moy Night; 320x240
+moy-dark_handheld_paint-brush@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_paint-more.png — Paint: the more menu hung from its button (no wash) -- new, open, use as wallpaper, put in a game, show -- each with its key; Moy Night; 320x240
+moy-dark_handheld_paint-more@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_paint-touch.png — Paint on a touch board (the Guition S3): tools two by four at 28 px, the colour in use the one colour target, no hint strip; Moy Night; 320x240
+moy-dark_handheld_paint-touch@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_paint-touch-colours.png — Paint on a touch board: the colours filling the drawing's frame, 28 a page at 30x30 on a 32 px pitch, a 36 px page seg; Moy Night; 320x240
+moy-dark_handheld_paint-touch-colours@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_paint-game.png — Paint's Put in a game: the projects with their pictures; focus on Sky Run; Moy Night; 320x240
+moy-dark_handheld_paint-game@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_my-art.png — My Art: the drawings as cards, New drawing first, the wallpaper's badge; focus on Rocket; Moy Night; 320x240
+moy-dark_handheld_my-art@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_my-art-menu.png — My Art: Rocket's menu over a washed page, the card current behind it; Move to Trash set apart in the danger ink; Moy Night; 320x240
+moy-dark_handheld_my-art-menu@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_my-art-empty.png — My Art with no drawings: what is missing and the one verb, focused with the ring a mark on its own colour takes; Moy Night; 320x240
+moy-dark_handheld_my-art-empty@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_getcarts.png — Get Carts: the shelf as cover cards three a row, badges for on console, update ready and too big (Doom, no cover: its genre on a tile); focus on Hop Quest; Moy Night; 320x240
+moy-dark_handheld_getcarts@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_getcarts-cart.png — Get Carts: a cart's page with an update ready -- the facts as rows, Remove (danger), Play, Update; Moy Night; 320x240
+moy-dark_handheld_getcarts-cart@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_getcarts-getting.png — Get Carts: a download in progress, Cancel; Moy Night; 320x240
+moy-dark_handheld_getcarts-getting@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_getcarts-offline.png — Get Carts with Wi-Fi off: the bar says so, Wi-Fi is the primary, Try again beside it; Moy Night; 320x240
+moy-dark_handheld_getcarts-offline@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_notes.png — Notes: New note first, then the vault, a note's name bare and another file's with its extension; focus on Story ideas; Moy Night; 320x240
+moy-dark_handheld_notes@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_notes-edit.png — Notes: a note open, Markdown in the mono cells, a selection; Select, Copy, Cut and Paste labelled at the foot; Moy Night; 320x240
+moy-dark_handheld_notes-edit@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_notes-new.png — Notes: New note's name in a dialog, the list washed between the bars; Moy Night; 320x240
+moy-dark_handheld_notes-new@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_notes-empty.png — Notes with an empty vault; Moy Night; 320x240
+moy-dark_handheld_notes-empty@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook.png — Storybook: the stories as cards, New story first; focus on The Brave Dragon, its name on two lines; Moy Night; 320x240
+moy-dark_handheld_storybook@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-empty.png — Storybook with no stories; Moy Night; 320x240
+moy-dark_handheld_storybook-empty@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-deck.png — Storybook: the slide sorter, 80x60 frames, each slide's number and transition icon, New slide last; focus on slide 2; Moy Night; 320x240
+moy-dark_handheld_storybook-deck@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-deck-menu.png — Storybook: slide 2's menu -- transition, duplicate, move, delete; Moy Night; 320x240
+moy-dark_handheld_storybook-deck-menu@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-layouts.png — Storybook: New slide's four layouts at 64x48; focus on Picture; Moy Night; 320x240
+moy-dark_handheld_storybook-layouts@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-new.png — Storybook: a new story, one Title slide at 1x with its title chosen to be written; the keys' hints; Moy Night; 320x240
+moy-dark_handheld_storybook-new@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-keys.png — Storybook on the T-Deck: slide 2 at 1x in the 320x192 window under the bar, the bubble chosen with eight handles; Move, Step 8, Write, More; Moy Night; 320x240
+moy-dark_handheld_storybook-keys@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-edit.png — Storybook on a touch board: the bubble chosen with its one corner knob, the tool row in place of the hints; Moy Night; 320x240
+moy-dark_handheld_storybook-edit@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-add.png — Storybook on a touch board: Add's popover -- text, shape, picture, background; Moy Night; 320x240
+moy-dark_handheld_storybook-add@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-style.png — Storybook: the style sheet from the foot, the slide scrolled so the bubble stays in sight; focus on Fill; Moy Night; 320x240
+moy-dark_handheld_storybook-style@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-colours.png — Storybook: Fill's colours, the 16 in two rows of 32x28 and None; Moy Night; 320x240
+moy-dark_handheld_storybook-colours@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-overview.png — Storybook: Z's whole slide at exactly half size, the window it scrolls marked; Moy Night; 320x240
+moy-dark_handheld_storybook-overview@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_storybook-pictures.png — Storybook: Add a picture, My Art and Sprites as tabs; focus on Dragon; Moy Night; 320x240
+moy-dark_handheld_storybook-pictures@3x.png — same, enlarged 3x (nearest)
+moy-dark_desktop_paint.png — Paint as a window: the document's verbs and zoom on top, the tools, the drawing at 1x on its pasteboard, the colours and the Pencil's size always open; Moy Night; 1024x600
+moy-dark_desktop_my-art.png — My Art as a window: five cards a row, the foot's verbs for the focused drawing, Open primary, Move to Trash in the danger ink; Moy Night; 1024x600
+moy-dark_desktop_getcarts.png — Get Carts as a window: the shelf beside the focused cart's page, its verbs in the foot; Moy Night; 1024x600
+moy-dark_desktop_getcarts-getting.png — Get Carts as a window: the download in the cart's page, Cancel; Moy Night; 1024x600
+moy-dark_desktop_notes.png — Notes as a window (no handheld bar inside it): the vault beside the open note, its tools with a tooltip, the clipboard's keys in the foot; Moy Night; 1024x600
+moy-dark_desktop_storybook.png — Storybook as a window: the tool row, the slides at 80x60, the slide at 1.5x with the bubble moving on a snap guide, its style always open; Moy Night; 1024x600
+moy-dark_desktop_storybook-picture.png — Storybook as a window: a picture chosen, its size, Clear background and Appears; Moy Night; 1024x600
+moy-dark_desktop_storybook-slide.png — Storybook as a window with nothing chosen: the slide's background and its transition; Moy Night; 1024x600
+moy-dark_desktop_storybook-deck.png — Storybook as a window: the slide sorter at 160x120, New slide, Duplicate, Delete, Present; Moy Night; 1024x600
+storybook_present.png — Storybook presenting slide 2 at 1x: the slide alone, its number in a pill for a second after each change; 320x240
+storybook_present@3x.png — same, enlarged 3x (nearest)
+storybook_present_desk.png — Storybook presenting on the 1024x600 board: the slide at 2x on black, its number in the margin; 1024x600
 calc_all_themes.png — Calc in all nine themes through one body and one kind table: the desk window over the theme's backdrop, and the handheld page below it; 1220x2600
 type_specimen.png — Type specimen: handheld sizes, the Code tab's mono and the desk body at 1, 2, 4 bpp and an 8-bit reference, on dark and on light; 860x336
 type_specimen@3x.png — same, enlarged 3x (nearest)

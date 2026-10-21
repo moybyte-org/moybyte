@@ -70,7 +70,11 @@ buttons, fields), which takes `style`; `card` and `small` absent mean
 always flips it. `outline` (a width and a colour) rings a ring from outside
 and an inverted part from inside, for an accent that alone would not hold
 3:1 on its ground. Every style but `lift` on a card is drawn after the part's
-fill and before its content.
+fill and before its content. Two rules hold in every theme (2026-10-21,
+GAPS 38 and 41): a mark that would land on a fill it does not hold 3:1
+against (Moy's primary button, its `value` its `accent`) becomes a 2 px
+`accent` ring at a 2 px gap of `surface`; and a grid of colour swatches
+takes the canvas cursor's ring for focus, never the small-part mark.
 
 **Current** is `current = {style, color, alpha, row, ink}`: a `plate`
 (`color`, by default `value`, at `alpha` for light and dark, 0.6 of it in a
@@ -306,6 +310,8 @@ light and its handheld bar takes the desk bar's fill.
 the console home and the wallpaper scenes follow `pixel_round3/`'s
 layouts (`rounds/round11.py`). The Editor's desk layouts and its
 handheld Config, Blocks, Map, Scene and Music tabs are
-`rounds/round12.py`'s, and `EDITOR_LAYOUT.md` is their design. The three
-readings of maximise and the resizable panes are `rounds/round14.py`'s
+`rounds/round12.py`'s, and `EDITOR_LAYOUT.md` is their design. Paint, My
+Art, Get Carts, Notes and Storybook are `rounds/round13.py`'s, each
+function mapped to its part in `APPS_RESTYLE.md`. The three readings of
+maximise and the resizable panes are `rounds/round14.py`'s
 (`MAXIMISE_VARIANTS.md`).
