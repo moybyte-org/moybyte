@@ -335,6 +335,7 @@ class SettingsLayer:
         # The WIFI panel (#38, spec §10): scan list -> pick -> (password) ->
         # connect/forget over the injected ws.wifi service.
         self.wifi_view = False
+        self.wifi_return = None       # the app the panel goes back to (`_wifi_back`)
         self.wifi_nets = []           # [(ssid, signal, locked), ...] last scan
         self.wifi_sel = 0
         self.wifi_pick = None         # ssid being typed for (password mode)
@@ -612,9 +613,13 @@ class SettingsLayer:
 
     def _wifi_back(self, popover=False):
         """BACK out of the panel: to the Settings rows, or out of the popover
-        that holds it."""
+        that holds it; a panel an app opened (`wifi_return`) goes back to the
+        app, out of Settings."""
         if popover:
             self.ws.sysmenu.close()
+        elif self.wifi_return is not None:
+            self.close_wifi()
+            self.ws._exit_settings()
         else:
             self.close_wifi()
 

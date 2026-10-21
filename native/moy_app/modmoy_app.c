@@ -1751,6 +1751,8 @@ SERVED(install, INSTALL, free)
 SERVED(install, INSTALL, find)
 SERVED(install, INSTALL, net)
 SERVED(install, INSTALL, keep)
+SERVED(install, INSTALL, wifi)
+SERVED(install, INSTALL, wifi_open)
 
 static const mp_rom_map_elem_t install_locals_table[] = {
     ROW(install, hold)
@@ -1770,6 +1772,8 @@ static const mp_rom_map_elem_t install_locals_table[] = {
     ROW(install, find)
     ROW(install, net)
     ROW(install, keep)
+    ROW(install, wifi)
+    ROW(install, wifi_open)
 };
 SERVED_ROLE(install, Install)
 

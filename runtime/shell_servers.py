@@ -466,6 +466,25 @@ class InstallServer:
         """Re-read the store, so the shelf shows what came and went."""
         self.__ws.carts.rescan()
 
+    def wifi(self, g):
+        """Open the Wi-Fi page: Settings' WIFI panel, on the desk its popover
+        (`Workstation.open_wifi_panel`); leaving the panel comes back to the
+        app on top, out of Settings."""
+        ws = self.__ws
+        top = ws.wm.top_kind()
+        ws.open_wifi_panel()
+        if not ws.wm.desk_open():
+            ws.settings_layer.wifi_return = top
+
+    def wifi_open(self, g):
+        """True while that page is open: Settings' WIFI panel on screen, or
+        the desk's Wi-Fi popover."""
+        ws = self.__ws
+        m = getattr(ws, "sysmenu", None)
+        if m is not None and m.open and m.widget == "wifi":
+            return True
+        return bool(ws.wm.top_is("settings") and ws.settings_layer.wifi_view)
+
     def free(self, g):
         """`(free bytes, block size)` of the store the carts live on, or None:
         the keeper's answer where there is one."""

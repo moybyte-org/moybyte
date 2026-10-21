@@ -1761,7 +1761,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return
         # Close Settings back to wherever it was opened from: resume the running cart
         # if we came from one (the gear on the in-cart/crash bar), else the launcher home.
-        if getattr(self, "_settings_return", "launcher") == "desktop" and self.cart is not None:
+        back = self.settings_layer.wifi_return
+        self.settings_layer.wifi_return = None
+        if back is not None and back in self._apps_by_id:
+            self.wm.goto(back)         # the app that opened the Wi-Fi page, as it was
+            self._dirty = True
+        elif getattr(self, "_settings_return", "launcher") == "desktop" and self.cart is not None:
             # Resume the running cart WITHOUT clobbering the run's caller (the Stage-3
             # review fix): Settings was opened OVER a cart the Editor may have launched via
             # PLAY, so the cart's exit must still return to that caller (the Editor tab),
@@ -4646,8 +4651,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _wifi_icon_kind(self):
         """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi
         service reports a live link, "wifi_off" when there's no
-        connection, which the zoned bar shows as no glyph (the crash strip as a
-        slashed one). Reads the backend's status() -> (connected, ssid, ip); defaults to
+        connection, which the look's bar shows as its own glyph and the pixel
+        bar as no glyph (the crash strip as a slashed one). Reads the backend's status() -> (connected, ssid, ip); defaults to
         disconnected on no backend / any status error, so the host + tests are
         deterministic (FakeWifi boots disconnected -> "wifi_off"). Folded into the bar's
         cache key so a real connect/disconnect repaints the strip. Only ever called on a

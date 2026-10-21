@@ -662,7 +662,7 @@ _SERVED = {
     "notify": "achieve",
     "wallpaper": "current carts id_for title select preview thumbnail",
     "install": ("hold release fit memory chip runtimes home can_pick pick root "
-                "writable op rescan free find net keep"),
+                "writable op rescan free find net keep wifi wifi_open"),
 }
 
 

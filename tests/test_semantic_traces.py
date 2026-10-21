@@ -2314,6 +2314,8 @@ def roles_trace(ws):
         i.pick("x", 1, "h") is None)
     say("lease", i.hold() in (True, False), i.release())
     say("op", i.op(lambda: 7))
+    say("wifi page", i.wifi_open(), i.wifi(), i.wifi_open())
+    ws.settings_layer.back()                # the panel goes back to where it was
     i.rescan()
     folder = cart["path"].replace("\\", "/").rsplit("/", 1)[1]
     found = i.find(folder)
@@ -2516,6 +2518,7 @@ clip hello text 1
 install True True False None True True True
 lease True None
 op 7
+wifi page False None True
 find None local.trace_cart.moy Trace Cart
 free True
 engine tuple True None 2

@@ -1549,6 +1549,8 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"install.find", MOY_ROLE_INSTALL, MOY_APP_SHELL},
     {"install.net", MOY_ROLE_INSTALL, MOY_APP_SHELL},
     {"install.keep", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.wifi", MOY_ROLE_INSTALL, MOY_APP_SHELL},
+    {"install.wifi_open", MOY_ROLE_INSTALL, MOY_APP_SHELL},
     {"ui.page", MOY_ROLE_UI, MOY_ROW_UI_PAGE},
     {"ui.label", MOY_ROLE_UI, MOY_ROW_UI_LABEL},
     {"ui.button", MOY_ROLE_UI, MOY_ROW_UI_BUTTON},

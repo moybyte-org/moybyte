@@ -766,8 +766,7 @@ class BarLayer:
         if need & 128:
             key[7] = ws._wifi_icon_kind()      # the wifi status glyph
         if need & 256:
-            cart = ws.cart
-            key[8] = cart.get("title") if cart else None   # the tool bar's title
+            key[8] = self._title(where) if ws.cart else None   # the tool bar's title
         if need & _KEY_UNDO:
             # #111: the local op-history dim state (RAM-only; journal flips
             # invalidate explicitly)
@@ -1001,8 +1000,8 @@ class BarLayer:
             return
         if name in ("wifi", "battery", "close"):
             kind = name
-            if name == "wifi" and ws._wifi_icon_kind() != "wifi":
-                return             # off is the quiet state, as a phone's: no glyph
+            if name == "wifi":
+                kind = ws._wifi_icon_kind()            # the true state: wifi_off with no link
             dx = self._ink_dx.get(name, 0) if self._ink_dx else 0
             x += dx                                    # its ink evened out (_status_dx)
             side = 16 * u                              # the theme's icon set, centred
@@ -1108,9 +1107,16 @@ class BarLayer:
         return (r[0] + (r[2] - tw) // 2, (thick - th) // 2, tw, th)
 
     def _title(self, where):
-        """The `title` widget's string: the running cart's or the open
-        project's, else the surface's name."""
+        """The `title` widget's string: the page an app names (its
+        `page_title()`), the running cart's or the open project's, else the
+        surface's name."""
         ws = self.ws
+        if where == "app":
+            app = ws._apps_by_id.get(ws.wm.top_kind())
+            pt = getattr(app, "page_title", None)
+            t = pt() if pt is not None else None
+            if t:
+                return t                    # a page of the app names its own
         if where in ("tool", "app", "menu") and ws.cart:
             return ws.cart.get("title") or ""
         if where == "home":

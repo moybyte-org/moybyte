@@ -116,6 +116,8 @@
     {"role": "install", "verb": "find", "server": "shell", "grant": "never", "wasm": null},
     {"role": "install", "verb": "net", "server": "shell", "grant": "never", "wasm": null},
     {"role": "install", "verb": "keep", "server": "shell", "grant": "never", "wasm": null},
+    {"role": "install", "verb": "wifi", "server": "shell", "grant": "never", "wasm": null},
+    {"role": "install", "verb": "wifi_open", "server": "shell", "grant": "never", "wasm": null},
     {"role": "ui", "verb": "page", "server": "c", "grant": "never", "wasm": "(*~*~*~)i"},
     {"role": "ui", "verb": "label", "server": "c", "grant": "never", "wasm": "(*~*~)i"},
     {"role": "ui", "verb": "button", "server": "c", "grant": "never", "wasm": "(*~i*~)i"},
