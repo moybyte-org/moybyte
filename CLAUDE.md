@@ -70,7 +70,9 @@ carts live in one repo, moybyte-org/carts, each under the licence in its own
 folder (#230); user carts go through the planned store (#122–#124). How a console runs them
 stays here: boards, shell, store, OTA, per-chip compiling and signing, and the
 seed set (`system_carts/`: the shell's apps and wallpapers, Python-only games,
-and the fixtures the perf ledger and parity harness use).
+and the fixtures the perf ledger and parity harness use). moy-spec is a game
+console spec, not Moybyte's: an app feature goes in a Moybyte-side field
+(`docs/moy_cart_api.md`).
 
 The shipped shell is the **2026-07 shell** (everything-is-a-process; spec
 `docs/shell_ux_v1.md`). **One version ladder**: the firmware's
