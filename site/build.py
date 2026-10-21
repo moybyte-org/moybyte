@@ -11,6 +11,7 @@ own palette.
     python3 site/build.py                  # -> _site/
     python3 site/build.py --out /tmp/x     # somewhere else
     python3 site/build.py --no-player      # skip the ~1.6 MB player copy
+    python3 site/build.py --channel dev --out _site/dev   # the dev site
 
 Build the player first, or there is nothing to embed:
 
@@ -34,11 +35,13 @@ Everything under _site/ is generated. Edit this file, not the output.
 import argparse
 import datetime
 import glob
+import gzip
 import hashlib
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -65,6 +68,20 @@ VARIANTS = (
     ("beta", "Dev", "firmware-beta",
      "built from every push to dev -- newer, and not board-tested"),
 )
+
+# The sites a channel publishes BESIDE the stable one (.github/workflows/
+# pages.yml builds dev's tree into _site/dev/). Such a page says what it is in a
+# banner, keeps search engines out, offers its own firmware variant first, and
+# its player keeps every store under the channel's own OPFS directory
+# (moy_store.channelNav): the two sites share an origin, and a dev store format
+# must never touch the stable site's carts.
+CHANNELS = {
+    "dev": {"variant": "beta", "label": "Dev build",
+            "note": "the latest dev, built from every push; it may be broken"},
+}
+
+# page_tail.js's channel line, which stamp_player rewrites for a channel's site.
+CHANNEL_LINE = 'const MOY_CHANNEL = "";'
 
 
 def palette():
@@ -461,7 +478,7 @@ def publish_image(board, folder, out, variant, vlabel):
     }
 
 
-def firmware(src, out):
+def firmware(src, out, prefer=None):
     """Publish every available build of every board, and describe them.
 
     `src` is tools/fetch_ci_firmware.py's output. Two layouts are accepted:
@@ -477,7 +494,8 @@ def firmware(src, out):
 
     Each card gets "builds" (every variant that had an image) and "fw" (the
     first of them, which is what the page defaults to and what the older
-    single-build code paths still read).
+    single-build code paths still read). `prefer` names the variant that goes
+    first when a board has it -- a channel's site defaults to its own build.
     """
     cards = []
     for board in BOARDS:
@@ -496,6 +514,7 @@ def firmware(src, out):
                 got = publish_image(board, folder, out, VARIANTS[0][0], VARIANTS[0][1])
                 if got:
                     builds.append(got)
+        builds.sort(key=lambda b: b["variant"] != prefer)
         cards.append(dict(board, builds=builds, fw=builds[0] if builds else None))
     return cards
 
@@ -613,7 +632,44 @@ def flash_cards(cards):
     return "\n".join("      " + line for line in "\n".join(out).split("\n"))
 
 
-def page(pal, has_player, cards):
+def provenance():
+    """(release name, commit, commit date) of the tree this script is in, for a
+    channel banner. Any of them can be "" (no git, a tarball)."""
+    name = ""
+    try:
+        src = open(os.path.join(ROOT, "device", "moy_ota.py"), encoding="utf-8").read()
+        m = re.search(r'^FIRMWARE_NAME = "([^"]*)"', src, re.M)
+        name = m.group(1) if m else ""
+    except OSError:
+        pass
+    try:
+        commit, stamp = subprocess.run(
+            ["git", "-C", ROOT, "log", "-1", "--format=%H %cI"], check=True,
+            capture_output=True, text=True).stdout.split()
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        commit, stamp = "", ""
+    return name, commit, stamp
+
+
+def channel_banner(channel):
+    """The strip a channel's page opens with: which build this is, that it is
+    not the release, and the way back to the stable site."""
+    ch = CHANNELS[channel]
+    name, commit, stamp = provenance()
+    bits = ["<b>%s</b>" % ch["label"]]
+    if name:
+        bits.append("after %s" % name)
+    if commit:
+        bits.append('<a href="%s/commit/%s">%s</a>' % (REPO, commit, commit[:7]))
+    if stamp:
+        bits.append(when(stamp))
+    return ('<div class="chbar" role="note"><div class="wrap">'
+            '<span>%s &mdash; %s.</span>'
+            '<a href="../">Stable site &rarr;</a></div></div>\n'
+            % (" &middot; ".join(bits), ch["note"]))
+
+
+def page(pal, has_player, cards, channel=None):
     tokens = "".join("--p%d:%s;" % (i, c) for i, c in enumerate(pal))
     tabs = "\n".join(
         '        <button class="tab%s" data-tier="%s" data-q="%s" data-ar="%s">'
@@ -662,7 +718,8 @@ def page(pal, has_player, cards):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAhUlEQVR42mNgGAW4wX8y8dB3ANig5rI5ZGFqOGTAHIBi8aHDx1HwyHPAgEfBcHAAydl0cDrg/8cXKJiQOCVRNLgdgC6PS3z4OYDaeOg5gJDDaB4FA+4AQgUM3dLAgDtg5OaCEeUAFIfUqQZTFZPSUBncDsCVHalh8aBxAKGuGbXUDw4HAAAJtsp8ecvLrQAAAABJRU5ErkJggg==">
-<title>moybyte &mdash; a small operating system for ESP32 boards</title>
+<title>%(title_pre)smoybyte &mdash; a small operating system for ESP32 boards</title>
+%(robots)s
 <meta name="description" content="A small operating system for ESP32 boards. Its software is cartridges you can open, change and run on the board itself. Try it in the browser.">
 <style>
 /* Every colour below is MOY64, generated from runtime/palette.py -- the site
@@ -789,6 +846,9 @@ body.noscroll{overflow:hidden}
 }
 .hint{display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between;
   color:var(--muted);font-size:13px;margin:10px 0 0}
+.chbar{background:var(--warn);color:var(--pri-ink);font-size:14px}
+.chbar .wrap{display:flex;flex-wrap:wrap;gap:4px 18px;justify-content:space-between;padding:8px 24px}
+.chbar a{color:inherit;font-weight:600}
 .warnbox{color:var(--warn);border:1px solid var(--warn);padding:10px 14px;margin:12px 0 0}
 /* --- card grids ------------------------------------------------------------ */
 .cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
@@ -885,7 +945,7 @@ footer a{margin-right:4px}
 </style>
 </head>
 <body>
-<nav><div class="wrap">
+%(chbar)s<nav><div class="wrap">
   <a class="brand px" href="#top"><img class="moy" src="%(mark)s" alt="">moy<em>byte</em></a>
   <span class="sp"></span>
   <a class="l" href="#try">Try it</a>
@@ -1086,7 +1146,37 @@ pickDevice();
         "status": status, "features": features, "mark": moy_mark(pal),
         "targets": targets, "boards": boards, "device_options": device_options, "flash_js": flash_js,
         "flash_hint": flash_hint,
+        "title_pre": "[dev] " if channel else "",
+        "robots": '<meta name="robots" content="noindex,nofollow">' if channel else "",
+        "chbar": channel_banner(channel) if channel else "",
     }
+
+
+def stamp_player(player, channel):
+    """Make a copied player bundle a channel's: its page tells the worker the
+    channel (so every store opens under the channel's OPFS directory) and keeps
+    search engines out. -> False, with the bundle removed, when the page has no
+    channel line to stamp: a channel's player that shared the stable site's
+    storage is worse than the page's "no player" notice."""
+    index = os.path.join(player, "index.html")
+    with open(index, encoding="utf-8") as f:
+        html = f.read()
+    if html.count(CHANNEL_LINE) != 1 or html.count("<head>") < 1:
+        print("!! %s has no single %r -- the %s site publishes without its "
+              "player rather than share the stable site's storage"
+              % (index, CHANNEL_LINE, channel))
+        shutil.rmtree(player)
+        return False
+    html = html.replace(CHANNEL_LINE, 'const MOY_CHANNEL = "%s";' % channel)
+    html = html.replace("<head>", '<head><meta name="robots" content="noindex,nofollow">', 1)
+    with open(index, "w", encoding="utf-8") as f:
+        f.write(html)
+    # The bundle's precompressed twin must say the same thing (a host that
+    # serves .gz beside the file would otherwise serve the stable page).
+    if os.path.exists(index + ".gz"):
+        with gzip.open(index + ".gz", "wb", compresslevel=9) as f:
+            f.write(html.encode("utf-8"))
+    return True
 
 
 def main():
@@ -1094,6 +1184,9 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "_site"))
     ap.add_argument("--no-player", action="store_true",
                     help="skip copying the player bundle (page only)")
+    ap.add_argument("--channel", choices=sorted(CHANNELS),
+                    help="publish a channel's site (its banner, its firmware "
+                         "first, its own browser storage) instead of stable")
     ap.add_argument("--firmware", default=FIRMWARE_SRC,
                     help="CI firmware folder for the flasher "
                          "(tools/fetch_ci_firmware.py's output)")
@@ -1109,7 +1202,8 @@ def main():
         if os.path.isdir(PLAYER_SRC) and os.path.exists(
                 os.path.join(PLAYER_SRC, "index.html")):
             shutil.copytree(PLAYER_SRC, os.path.join(out, "player"))
-            has_player = True
+            has_player = (not args.channel
+                          or stamp_player(os.path.join(out, "player"), args.channel))
         else:
             print("!! no player bundle at %s -- build it first" % PLAYER_SRC)
 
@@ -1124,7 +1218,8 @@ def main():
     # The flasher: the CI images the page can write, the vendored esptool-js
     # that writes them, and a manifest that says what each one is. All three
     # only ship when there is at least one image to flash.
-    cards = firmware(os.path.abspath(args.firmware), out)
+    cards = firmware(os.path.abspath(args.firmware), out,
+                     prefer=CHANNELS[args.channel]["variant"] if args.channel else None)
     # One manifest entry per BOARD, carrying every build the picker offers.
     # The default build's fields stay at the top level so a reader that
     # predates the picker still finds what it expects.
@@ -1152,7 +1247,7 @@ def main():
         shutil.copyfile(gif, os.path.join(out, "media", "desktop.gif"))
 
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
-        f.write(page(palette(), has_player, cards))
+        f.write(page(palette(), has_player, cards, args.channel))
 
     total = sum(os.path.getsize(os.path.join(d, n))
                 for d, _, ns in os.walk(out) for n in ns)

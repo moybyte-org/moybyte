@@ -74,6 +74,15 @@ nor those docs will warn you about:
   (a new app, a new seed game), which is seeded into it the way a board seeds a
   built-in it lacks (`moy_store.missingSystemCarts`). Without that, nobody who
   had visited before a system cart shipped would ever see it.
+- **A channel's site keeps its own storage.** The stable site (`/moybyte/`)
+  and the dev site (`/moybyte/dev/`, both from `.github/workflows/pages.yml`)
+  share the origin moybyte-org.github.io, so they share its OPFS.
+  `site/build.py --channel dev` stamps page_tail.js's `MOY_CHANNEL` into the
+  dev player, and the worker opens every store through `moy_store.channelNav`,
+  which roots it under `channel-dev/`, so a dev store format never touches the
+  stable site's carts. A new store opens through the worker's `opfsNav`, never
+  `navigator` (`tests/test_site_channel.py` holds the call sites), and a player
+  the build cannot stamp is not published at all.
 - **The journal lives with the STORE OF RECORD** (owner call) — there is one
   durable journal per cart, where the cart durably lives, so a kid gets undo on
   both ends without a byte of history on the wire. **The wire predicate itself

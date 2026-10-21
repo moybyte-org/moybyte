@@ -1,31 +1,47 @@
 # The project site (GitHub Pages): the README's claims, plus the console itself
-# running in the page.
+# running in the page. TWO sites in one deploy:
+#
+#   /moybyte/      master's tree -- the stable site
+#   /moybyte/dev/  dev's tree    -- the latest dev, marked as such
+#
+# Pages publishes the WHOLE site per deploy, so every run builds both trees,
+# whichever branch triggered it: master checked out at the workspace root, dev
+# under _dev/. A run that built only its own branch would delete the other's.
 #
 # The centrepiece is a REAL build, not a recording -- site/build.py embeds
-# firmware/web_runner/dist, so this workflow has to compile MicroPython to
-# WebAssembly before assembling the page. That is the slow part: build.sh clones
-# and installs emsdk (~1.7 GB) the first time. It is cached, keyed on build.sh,
-# so only a change to the build itself pays for it again.
+# firmware/web_runner/dist, so this workflow compiles MicroPython to
+# WebAssembly twice before assembling the pages. That is the slow part:
+# build.sh clones and installs emsdk (~1.7 GB) the first time. master's tree
+# caches its whole .build under the key firmware-build.yml and web-e2e.yml
+# share (same path, same key: one cache); dev's tree caches its own .build
+# under a key of its own, so dev never evicts master's, and borrows master's
+# emsdk through a symlink rather than caching a second copy.
 #
-# The page also FLASHES a board over USB, so this job carries the firmware too:
-# it pulls each board's image out of the rolling `firmware-latest` AND
-# `firmware-beta` releases -- the page's build picker offers both -- and
-# site/build.py publishes them under _site/firmware/<variant>/. That copy is not a
-# convenience -- GitHub serves neither Actions artifacts nor release assets with
-# CORS headers, so a browser cannot fetch a firmware image from anywhere but the
-# page's own origin (tools/fetch_ci_firmware.py explains it at length). This
-# workflow WATCHES the firmware one (the `workflow_run` trigger below), so a new
-# board build republishes the site around it.
+# Each page also FLASHES a board over USB, so this job carries the firmware too:
+# each tree's tools/fetch_ci_firmware.py pulls every board's image out of the
+# rolling `firmware-latest` AND `firmware-beta` releases -- the picker offers
+# both, and the dev site offers the beta first -- and site/build.py publishes
+# them under firmware/<variant>/. That copy is not a convenience -- GitHub
+# serves neither Actions artifacts nor release assets with CORS headers, so a
+# browser cannot fetch a firmware image from anywhere but the page's own origin
+# (tools/fetch_ci_firmware.py explains it at length). This workflow WATCHES the
+# firmware one (the `workflow_run` trigger below), so a new board build
+# republishes the site around it.
 #
-# Deploys on a push to master that touches the site, the console, the web runner
-# or the README -- and on demand. If the wasm build ever fails, the page still
-# assembles (build.py says so in place of the player) rather than publishing
-# nothing.
+# The two sites share one origin, so the dev page's player keeps its browser
+# storage under a directory of its own (site/build.py --channel,
+# moy_store.channelNav): a dev store format never touches the stable site's
+# carts.
+#
+# Deploys on a push to master or dev that touches the site, the console, the
+# web runner or the README -- and on demand. A failed wasm build does not stop
+# the deploy: that page assembles with a notice in place of its player (the
+# player-check job then goes red), and the other site is unaffected.
 name: Pages
 
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
     paths:
       - "site/**"
       - "runtime/**"
@@ -38,14 +54,9 @@ on:
   # A finished firmware build is new content for this site, so republish around
   # it instead of waiting for the next unrelated site push. (Only on success,
   # and only off master or dev -- see the job's `if`; this event fires on every
-  # conclusion and every branch.)
-  #
-  # DEV COUNTS NOW. It did not use to: the page flashed the stable channel
-  # alone, so a beta build changed nothing here and rebuilding the wasm player
-  # around it would have burned a long job to publish the same page. The page
-  # offers a Dev build in its picker now, so a beta that does not republish is a
-  # picker serving a stale image under a version string that says otherwise --
-  # and the player build is cached, so the extra run is not the whole job.
+  # conclusion and every branch.) A beta counts: both pages offer it in their
+  # picker, and one that does not republish is a picker serving a stale image
+  # under a version string that says otherwise.
   workflow_run:
     workflows: ["Firmware build"]
     types: [completed]
@@ -53,9 +64,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-  actions: read          # list + download the firmware build's artifacts
 
 # One deploy at a time, and never cancel one midway: a half-published site is
 # worse than a slightly stale one.
@@ -66,19 +74,32 @@ concurrency:
 jobs:
   build:
     # Every trigger except a firmware build that FAILED or ran off a branch
-    # other than master (neither has anything new for this page, and both would
-    # only burn a wasm build).
+    # other than master or dev (neither has anything new for these pages, and
+    # both would only burn two wasm builds).
     if: >-
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' &&
        (github.event.workflow_run.head_branch == 'master' ||
         github.event.workflow_run.head_branch == 'dev'))
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read      # list + download the firmware build's artifacts
     outputs:
       player: ${{ steps.player.outcome }}
+      player_dev: ${{ steps.player_dev.outcome }}
+      site_dev: ${{ steps.site_dev.outcome }}
     steps:
-      - name: Check out repository
+      - name: Check out master (the stable site)
         uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Check out dev (the dev site)
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          path: _dev
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -93,6 +114,7 @@ jobs:
       # emsdk + the micropython clone, keyed on the build script that pins them.
       # ~1.8 GB, comfortably inside the 10 GB repo cache (unlike the board
       # builds, which need the whole ESP-IDF and cache only their toolchains).
+      # The key and path are firmware-build.yml's and web-e2e.yml's too.
       - name: Cache the wasm toolchain
         uses: actions/cache@v4
         with:
@@ -100,10 +122,29 @@ jobs:
           key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
           restore-keys: web-runner-${{ runner.os }}-
 
-      - name: Build the browser console
+      # dev's micropython clone and objects, apart from master's. Its emsdk is
+      # a symlink to master's (made below, kept in this cache as a link): one
+      # emsdk serves both, and build.sh activates the version each tree pins.
+      - name: Cache dev's wasm build
+        uses: actions/cache@v4
+        with:
+          path: _dev/firmware/web_runner/.build
+          key: web-runner-dev-${{ runner.os }}-${{ hashFiles('_dev/firmware/web_runner/build.sh') }}
+          restore-keys: web-runner-dev-${{ runner.os }}-
+
+      - name: Build the browser console (master)
         id: player
         continue-on-error: true
         run: firmware/web_runner/build.sh
+
+      - name: Build the browser console (dev)
+        id: player_dev
+        continue-on-error: true
+        run: |
+          mkdir -p _dev/firmware/web_runner/.build
+          [ -e _dev/firmware/web_runner/.build/emsdk ] || [ -L _dev/firmware/web_runner/.build/emsdk ] || \
+            ln -s "$GITHUB_WORKSPACE/firmware/web_runner/.build/emsdk" _dev/firmware/web_runner/.build/emsdk
+          _dev/firmware/web_runner/build.sh
 
       # The images the page's flasher writes: the `firmware-latest` release,
       # falling back per board to a live run artifact. A board with nothing
@@ -115,25 +156,48 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        # One subtree per build the flasher offers (site/build.py VARIANTS).
-        # The beta is fetched too now: the page lets a visitor pick between the
-        # tested release and the dev channel, and a browser cannot reach either
-        # release directly (no CORS), so both have to be baked in. The beta is
-        # best-effort -- a repo whose dev branch has never published still gets
-        # a site with the stable build in the picker.
+        # One subtree per build the flasher offers (site/build.py VARIANTS),
+        # fetched by each tree's own tool into that tree, so each site's
+        # build.py reads the layout its own fetcher wrote. The beta is fetched
+        # too: the picker offers the tested release and the dev channel, and a
+        # browser cannot reach either release directly (no CORS), so both have
+        # to be baked in. The beta is best-effort -- a repo whose dev branch has
+        # never published still gets sites with the stable build in the picker.
         run: |
-          python3 tools/fetch_ci_firmware.py \
-            --release firmware-latest --out dist/ci-firmware/stable
-          python3 tools/fetch_ci_firmware.py \
-            --release firmware-beta --out dist/ci-firmware/beta || \
-            echo "::warning::no beta images -- the picker will offer stable only"
+          rc=0
+          for tree in . _dev; do
+            (cd "$tree" && python3 tools/fetch_ci_firmware.py \
+               --release firmware-latest --out dist/ci-firmware/stable) || rc=1
+            (cd "$tree" && python3 tools/fetch_ci_firmware.py \
+               --release firmware-beta --out dist/ci-firmware/beta) || \
+              echo "::warning::no beta images for $tree -- its picker offers stable only"
+          done
+          exit "$rc"
 
-      - name: Assemble the site
+      # master's first: its build.py replaces the whole --out directory.
+      - name: Assemble the stable site
         run: python3 site/build.py --out _site --firmware dist/ci-firmware
+
+      # A dev tree whose build.py breaks must not take the stable site down
+      # with it: the deploy goes out without /dev/ and player-check goes red.
+      - name: Assemble the dev site
+        id: site_dev
+        continue-on-error: true
+        run: |
+          python3 _dev/site/build.py --channel dev --out _site/dev \
+            --firmware _dev/dist/ci-firmware
+
+      - name: Drop a half-assembled dev site
+        if: steps.site_dev.outcome == 'failure'
+        run: rm -rf _site/dev
 
       - name: Note a missing player
         if: steps.player.outcome == 'failure'
-        run: echo "::warning::the wasm build failed -- the site publishes without the live player"
+        run: echo "::warning::master's wasm build failed -- the stable site publishes without the live player"
+
+      - name: Note a missing dev player
+        if: steps.player_dev.outcome == 'failure'
+        run: echo "::warning::dev's wasm build failed -- the dev site publishes without the live player"
 
       - name: Note missing firmware
         if: steps.firmware.outcome == 'failure'
@@ -147,6 +211,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -167,11 +234,23 @@ jobs:
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: The page shipped without its player
-        if: needs.build.outputs.player == 'failure'
+      - name: A page shipped without its player
+        if: >-
+          needs.build.outputs.player == 'failure' ||
+          needs.build.outputs.player_dev == 'failure' ||
+          needs.build.outputs.site_dev == 'failure'
+        env:
+          STABLE: ${{ needs.build.outputs.player }}
+          DEV: ${{ needs.build.outputs.player_dev }}
+          DEV_SITE: ${{ needs.build.outputs.site_dev }}
         run: |
-          echo "::error::the wasm build failed -- the site is live but the player is an error box"
+          [ "$STABLE" != failure ] || echo "::error::master's wasm build failed -- the stable site is live but its player is an error box"
+          [ "$DEV" != failure ] || echo "::error::dev's wasm build failed -- the dev site is live but its player is an error box"
+          [ "$DEV_SITE" != failure ] || echo "::error::dev's site/build.py failed -- the deploy went out without /dev/"
           exit 1
-      - name: Player is present
-        if: needs.build.outputs.player != 'failure'
-        run: echo "player built and shipped"
+      - name: Players are present
+        if: >-
+          needs.build.outputs.player != 'failure' &&
+          needs.build.outputs.player_dev != 'failure' &&
+          needs.build.outputs.site_dev != 'failure'
+        run: echo "both players built and shipped"

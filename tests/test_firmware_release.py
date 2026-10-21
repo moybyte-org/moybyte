@@ -16,6 +16,7 @@ from the result. What is asserted at the end is the manifest the BROWSER reads.
 import importlib.util
 import json
 import os
+import re
 import stat
 import sys
 
@@ -361,9 +362,17 @@ def test_the_workflows_keep_the_branches_apart():
 
     pages = open(os.path.join(ROOT, ".github", "workflows", "pages.yml"),
                  encoding="utf-8").read()
-    # The public site follows master only -- a beta build must not republish it.
+    # The site is two: master's tree at the root, dev's under dev/ with its own
+    # channel. Every deploy replaces the whole site, so every run builds both,
+    # whichever branch triggered it.
+    assert "branches: [master, dev]" in pages
     assert "github.event.workflow_run.head_branch == 'master'" in pages
-    assert "branches: [master]" in pages
+    assert "github.event.workflow_run.head_branch == 'dev'" in pages
+    assert re.search(r"ref: master\n", pages) and re.search(r"ref: dev\n\s+path: _dev\n", pages)
+    assert "python3 site/build.py --out _site " in pages
+    assert "_dev/site/build.py --channel dev --out _site/dev" in pages
+    assert pages.index("python3 site/build.py --out _site ") < \
+        pages.index("_dev/site/build.py --channel dev"), "master's build replaces _site whole"
 
 
 # -- the notes name every board, and name them in Markdown --------------------
