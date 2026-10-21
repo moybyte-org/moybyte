@@ -695,7 +695,7 @@ static void cat_note(void *ctx, const char *what, const char *path,
 }
 
 static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
-    mp_obj_t d = mp_obj_new_dict(27);
+    mp_obj_t d = mp_obj_new_dict(28);
     if (c->whole_path) {
         put(d, MP_QSTR_path, new_str(c->root, c->root_n));
     } else {
@@ -721,6 +721,7 @@ static mp_obj_t entry_dict(const cat_ctx_t *c, const moy_cat_entry_t *e) {
                                                              strlen(MOY_CAT_FORMAT))));
     put(d, MP_QSTR_graduated, mp_obj_new_bool(e->graduated));
     put(d, MP_QSTR_glass, mp_obj_new_bool(e->glass));
+    put(d, MP_QSTR_pictures, json_or(e->pictures, mp_const_none));
     put(d, MP_QSTR_fps, json_or(e->fps, MP_OBJ_NEW_SMALL_INT(e->spec ? 30 : 0)));
     put(d, MP_QSTR_palette, json_or(e->palette, mp_const_none));
     put(d, MP_QSTR_extensions, json_or(e->extensions, mp_obj_new_list(0, NULL)));

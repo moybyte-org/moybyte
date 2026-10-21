@@ -17,6 +17,7 @@
 #include "py/objstr.h"
 #include "py/objmodule.h"
 #include "py/runtime.h"
+#include "py/stream.h"
 
 #include "moy_ufiles.h"
 
@@ -635,6 +636,48 @@ static mp_obj_t mod_encode_cover(mp_obj_t pix) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_encode_cover_obj, mod_encode_cover);
 
+// The streamed reader's source: the stream's own read, the store's watchdog
+// fed between reads. A raise unwinds through the caller's guard.
+static int stream_rd(void *ctx, uint8_t *buf, size_t n) {
+    mp_obj_t o = ctx;
+    int err;
+    mp_uint_t got = mp_get_stream(o)->read(o, buf, n, &err);
+    if (got == MP_STREAM_ERROR) {
+        mp_raise_OSError(err);
+    }
+    moy_store_tick();
+    return (int)got;
+}
+
+// cover_image(stream, dst, dw, dh, max_w, max_h): the picture `stream` reads,
+// cover-sampled into `dst`; (w, h), or None when it is not a picture or is
+// larger than max_w x max_h.
+static mp_obj_t mod_cover_image(size_t n_args, const mp_obj_t *args) {
+    mp_get_stream_raise(args[0], MP_STREAM_OP_READ);
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(args[1], &bi, MP_BUFFER_WRITE);
+    mp_int_t dw = mp_obj_get_int(args[2]), dh = mp_obj_get_int(args[3]);
+    mp_int_t mw = mp_obj_get_int(args[4]), mh = mp_obj_get_int(args[5]);
+    if (dw <= 0 || dh <= 0 || mw <= 0 || mh <= 0 || (uint64_t)dw * (uint64_t)dh > bi.len) {
+        raise_rc(MOY_UF_BAD);
+    }
+    uint32_t w = 0, h = 0;
+    int rc = 0;
+    GUARD_BEGIN
+    rc = moy_uf_cover_image(stream_rd, MP_OBJ_TO_PTR(args[0]), bi.buf, (uint32_t)dw,
+                            (uint32_t)dh, (uint32_t)mw, (uint32_t)mh, &w, &h);
+    GUARD_END
+    if (rc == MOY_UF_NONE) {
+        return mp_const_none;
+    }
+    if (rc) {
+        raise_rc(rc);
+    }
+    mp_obj_t t[2] = { mp_obj_new_int_from_uint(w), mp_obj_new_int_from_uint(h) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_cover_image_obj, 6, 6, mod_cover_image);
+
 static mp_obj_t mod_decode_cover(mp_obj_t data) {
     mp_buffer_info_t bi;
     mp_get_buffer_raise(data, &bi, MP_BUFFER_READ);
@@ -718,6 +761,7 @@ static const mp_rom_map_elem_t moy_ufiles_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_deflate), MP_ROM_PTR(&mod_deflate_obj) },
     { MP_ROM_QSTR(MP_QSTR_encode_image), MP_ROM_PTR(&mod_encode_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_decode_image), MP_ROM_PTR(&mod_decode_image_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cover_image), MP_ROM_PTR(&mod_cover_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_encode_cover), MP_ROM_PTR(&mod_encode_cover_obj) },
     { MP_ROM_QSTR(MP_QSTR_decode_cover), MP_ROM_PTR(&mod_decode_cover_obj) },
     { MP_ROM_QSTR(MP_QSTR_palette), MP_ROM_PTR(&mod_palette_obj) },

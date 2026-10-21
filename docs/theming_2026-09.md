@@ -865,6 +865,19 @@ mode switch into the picture's own bake (`Wallpaper._draw_backdrop`): the
 desk draws `backdrop.desk`, the home and the handheld's every screen
 `backdrop.home`.
 
+A picture is at most 1024x600, the desk boards' drawing and wallpaper size
+(owner, 2026-10-21), and is read from its file a row at a time straight into
+one screen-sized buffer, cropped about its centre to the glass's aspect and
+sampled nearest as it comes: no raster of the picture and no copy of its file
+(`Wallpaper._read_picture`, `native/moy_store/moy_img.h`'s streamed reader).
+The screen it made is kept beside it (`thumbs/pic<w>x<h>.mct`, stamped with
+the file's `bytes_sig`), and the next boot reads that instead. A wallpaper
+cart may be a picture: `"moybyte": {"pictures": {"320x240": "small",
+"1024x600": "big"}}` names one of its `images/` per glass size, and the desk
+draws the one made for its glass, else the smallest larger one shrunk once
+and kept, else the largest, running none of the cart's code (which another
+host runs instead).
+
 - **Nothing executable rides in a theme.** Installing a cart is exactly what
   `system_api.py` never grants (`carts`, "the single most important entry"). A
   theme that names a cart does not install it: the cart comes from the store

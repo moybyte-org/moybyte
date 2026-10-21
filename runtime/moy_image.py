@@ -1,7 +1,9 @@
-# `Image`, the indexed sprite every canvas and the `image` verb share, and the
+# `Image`, the indexed sprite every canvas and the `image` verb share, the
 # wallpaper-preview sidecar (the Appearance monitor's computed frame, read
-# instead of re-rendering the cart -- regenerable, plain writes, readers
-# validate magic + size + stamp). The moyimg codec is runtime/moyimg.py.
+# instead of re-rendering the cart) and the picture's bake (the desk's picture
+# resampled to the screen, read instead of decoding it) -- regenerable, plain
+# writes, readers validate magic + size + stamp. The moyimg codec is
+# runtime/moyimg.py.
 #
 # MicroPython-safe (_mkdir from the moy_fs leaf).
 
@@ -107,3 +109,26 @@ def load_wallpaper_preview(path, w, h, sig):
 def save_wallpaper_preview(path, w, h, sig, pix):
     """Persist a rendered wallpaper preview frame. Best-effort, never raises."""
     _save_thumb(path, w, h, sig, pix, "wp")
+
+
+def load_picture_bake(path, w, h, sig, out):
+    """The desk's picture as it was resampled to a w x h screen
+    (thumbs/pic<w>x<h>.mct of the folder at `path`), read straight into `out`
+    (w*h bytes, off-heap on a board): True, or False when it is absent, stale
+    (`sig` is moyimg.bytes_sig of the picture's file) or corrupt."""
+    n = int(w) * int(h)
+    try:
+        with open(_thumb_file(path, w, h, "pic"), "rb") as f:
+            head = f.read(8)
+            if (len(head) != 8 or head[:4] != b"MCT1"
+                    or int.from_bytes(head[4:8], "little") != (sig & 0xFFFFFFFF)):
+                return False
+            got = f.readinto(memoryview(out)[:n])
+            return got == n and not f.read(1)
+    except OSError:
+        return False
+
+
+def save_picture_bake(path, w, h, sig, pix):
+    """Persist the picture's bake. Best-effort, never raises."""
+    _save_thumb(path, w, h, sig, memoryview(pix)[:int(w) * int(h)], "pic")

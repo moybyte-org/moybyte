@@ -1,6 +1,7 @@
 // The moyimg-v1 decoder (moy_img.h has the contract).
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "moy_img.h"
@@ -138,9 +139,9 @@ static int b64_byte(void *data) {
     return (int)((w->acc >> w->bits) & 0xffu);
 }
 
-// The header: w, h and the base64 span of `data`.
-static int head(const char *text, size_t n, uint32_t *w, uint32_t *h, const char **b,
-                const char **be) {
+// The object in text[0, n): its span, and its `w` and `h`.
+static int object_wh(const char *text, size_t n, const char **os, const char **oe,
+                     uint32_t *w, uint32_t *h) {
     const char *end = text + n;
     const char *s = moy_json_ws(text, end);
     if (s >= end || *s != '{') {
@@ -157,11 +158,23 @@ static int head(const char *text, size_t n, uint32_t *w, uint32_t *h, const char
         || wi <= 0 || hi <= 0 || wi > 0xffff || hi > 0xffff) {
         return MOY_IMG_NOT;
     }
+    *os = s;
+    *oe = e;
+    *w = (uint32_t)wi;
+    *h = (uint32_t)hi;
+    return MOY_IMG_OK;
+}
+
+// The header: w, h and the base64 span of `data`.
+static int head(const char *text, size_t n, uint32_t *w, uint32_t *h, const char **b,
+                const char **be) {
+    const char *s, *e, *v, *ve;
+    if (object_wh(text, n, &s, &e, w, h) != MOY_IMG_OK) {
+        return MOY_IMG_NOT;
+    }
     if (!moy_json_get(s, e, "data", &v, &ve) || *v != '"') {
         return MOY_IMG_NOT;
     }
-    *w = (uint32_t)wi;
-    *h = (uint32_t)hi;
     *b = v + 1;             // the string's text, its escapes decoded as it is read
     *be = ve - 1;
     return MOY_IMG_OK;
@@ -213,4 +226,257 @@ int moy_img_decode(const char *text, size_t n, uint8_t *pix, size_t cap,
     *w_out = w;
     *h_out = h;
     return MOY_IMG_OK;
+}
+
+// -- the streamed reader ----------------------------------------------------------
+
+#define WINDOW 32768u           // the largest window a ZLIB header can name
+#define CHUNK 512u              // the source's bytes a read asks for
+
+typedef struct {
+    uzlib_uncomp_t z;
+    moy_img_read_t rd;
+    void *ctx;
+    uint32_t w, h;
+    size_t in_at, in_n;
+    bool in_end;                // the source said 0
+    bool failed;                // the source said < 0
+    bool bad;                   // a character outside the form
+    bool closed;                // the value's closing quote was read
+    uint32_t n64;               // base64 characters read
+    int pads;                   // `=` read
+    uint32_t acc;
+    int bits;
+    uint8_t in[CHUNK];
+    uint8_t out[CHUNK];         // decoded bytes the inflater has not taken
+    uint8_t window[WINDOW];
+} stream_t;
+
+size_t moy_img_stream_size(void) {
+    return sizeof(stream_t);
+}
+
+// The source's next byte, or -1 at its end or when it failed.
+static int sbyte(stream_t *st) {
+    if (st->in_at == st->in_n) {
+        if (st->in_end || st->failed) {
+            return -1;
+        }
+        int got = st->rd(st->ctx, st->in, CHUNK);
+        if (got < 0) {
+            st->failed = true;
+            return -1;
+        }
+        if (got == 0) {
+            st->in_end = true;
+            return -1;
+        }
+        st->in_at = 0;
+        st->in_n = (size_t)got;
+    }
+    return st->in[st->in_at++];
+}
+
+static bool is_ws(int c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+// The next byte that is not whitespace, or -1.
+static int sbyte_ws(stream_t *st) {
+    int c;
+    do {
+        c = sbyte(st);
+    } while (is_ws(c));
+    return c;
+}
+
+// The inflater's byte source: the value's next run of base64 decoded into
+// `out`, the inflater pointed at its rest, its first byte; -1 at the closing
+// quote or at a character outside the form.
+static int b64_fill(void *data) {
+    stream_t *st = data;
+    size_t k = 0;
+    while (k < sizeof(st->out) && !st->closed && !st->bad) {
+        int c = sbyte(st);
+        if (c == '"') {
+            st->closed = true;
+            break;
+        }
+        if (c == '=') {
+            if (++st->pads > 2) {
+                st->bad = true;
+            }
+            continue;
+        }
+        int v = c < 0 ? -1 : b64_value((char)c);
+        if (v < 0 || st->pads) {
+            st->bad = true;
+            break;
+        }
+        st->n64++;
+        st->acc = (st->acc << 6) | (uint32_t)v;
+        st->bits += 6;
+        if (st->bits >= 8) {
+            st->bits -= 8;
+            st->out[k++] = (uint8_t)(st->acc >> st->bits);
+        }
+    }
+    if (k == 0) {
+        return -1;
+    }
+    st->z.source = st->out + 1;
+    st->z.source_limit = st->out + k;
+    return st->out[0];
+}
+
+static int verdict(const stream_t *st) {
+    return st->failed ? MOY_IMG_READ : MOY_IMG_NOT;
+}
+
+int moy_img_stream_head(void *state, moy_img_read_t rd, void *ctx, uint32_t *w, uint32_t *h) {
+    stream_t *st = state;
+    memset(st, 0, offsetof(stream_t, in));
+    st->rd = rd;
+    st->ctx = ctx;
+    char hb[MOY_IMG_HEAD + 1];
+    size_t n = 0;
+    while (n < 6 || memcmp(hb + n - 6, "\"data\"", 6) != 0) {
+        int c = n < MOY_IMG_HEAD ? sbyte(st) : -1;
+        if (c < 0) {
+            return verdict(st);
+        }
+        hb[n++] = (char)c;
+    }
+    n -= 6;
+    while (n > 0 && is_ws((unsigned char)hb[n - 1])) {
+        n--;
+    }
+    if (n == 0) {
+        return MOY_IMG_NOT;
+    }
+    if (hb[n - 1] == ',') {
+        n--;
+    } else if (hb[n - 1] != '{') {
+        return MOY_IMG_NOT;
+    }
+    hb[n++] = '}';
+    const char *os, *oe;
+    if (object_wh(hb, n, &os, &oe, w, h) != MOY_IMG_OK) {
+        return MOY_IMG_NOT;
+    }
+    if (sbyte_ws(st) != ':' || sbyte_ws(st) != '"') {
+        return verdict(st);
+    }
+    st->w = *w;
+    st->h = *h;
+    return MOY_IMG_OK;
+}
+
+// One more source row into `row`: the inflater's last status.
+static int inflate_row(stream_t *st, uint8_t *row, size_t n) {
+    st->z.dest_start = st->z.dest = row;
+    st->z.dest_limit = row + n;
+    int rc;
+    do {
+        rc = uzlib_uncompress_chksum(&st->z);
+    } while (rc == UZLIB_OK && st->z.dest < st->z.dest_limit);
+    return rc;
+}
+
+int moy_img_stream_cover(void *state, uint8_t *row, uint8_t *dst, uint32_t dw, uint32_t dh) {
+    stream_t *st = state;
+    uint32_t w = st->w, h = st->h;
+    if (w == 0 || h == 0 || dw == 0 || dh == 0) {
+        return MOY_IMG_NOT;
+    }
+    memset(st->window, 0, sizeof(st->window));
+    uzlib_uncompress_init(&st->z, st->window, WINDOW);
+    st->z.source = NULL;
+    st->z.source_limit = NULL;
+    st->z.source_read_data = st;
+    st->z.source_read_cb = b64_fill;
+    int wbits;
+    if (uzlib_parse_zlib_gzip_header(&st->z, &wbits) != UZLIB_HEADER_ZLIB) {
+        return verdict(st);
+    }
+    // The crop: the source's centre at dst's aspect (cover_indices).
+    uint32_t cw, ch, sx0, sy0;
+    if ((uint64_t)w * dh > (uint64_t)h * dw) {
+        ch = h;
+        cw = (uint32_t)((uint64_t)h * dw / dh);
+        cw = cw ? cw : 1u;
+        sx0 = (w - cw) / 2u;
+        sy0 = 0;
+    } else {
+        cw = w;
+        ch = (uint32_t)((uint64_t)w * dh / dw);
+        ch = ch ? ch : 1u;
+        sx0 = 0;
+        sy0 = (h - ch) / 2u;
+    }
+    uint32_t next = 0;
+    int rc = UZLIB_OK;
+    for (uint32_t sy = 0; sy < h; sy++) {
+        if (rc == UZLIB_DONE) {
+            return MOY_IMG_NOT;             // the stream ended before the picture
+        }
+        rc = inflate_row(st, row, w);
+        if (rc < 0 || st->z.dest != row + w) {
+            return verdict(st);
+        }
+        bool first = true;
+        while (next < dh && sy0 + (uint32_t)((uint64_t)next * ch / dh) == sy) {
+            uint8_t *o = dst + (size_t)next * dw;
+            if (first) {
+                const uint8_t *r = row + sx0;
+                for (uint32_t x = 0; x < dw; x++) {
+                    o[x] = r[(uint64_t)x * cw / dw];
+                }
+                first = false;
+            } else {
+                memcpy(o, o - dw, dw);
+            }
+            next++;
+        }
+    }
+    if (rc != UZLIB_DONE) {
+        uint8_t probe;                      // a stream longer than the picture
+        rc = inflate_row(st, &probe, 1);
+        if (rc != UZLIB_DONE || st->z.dest != &probe) {
+            return verdict(st);
+        }
+    }
+    while (b64_fill(st) >= 0) {             // the rest of the value, checked
+    }
+    if (st->bad || !st->closed || st->n64 % 4u == 1u
+        || st->pads != (int)((4u - st->n64 % 4u) % 4u)) {
+        return verdict(st);
+    }
+    // What follows the value, at most MOY_IMG_HEAD bytes: `}`, or the
+    // object's other members (a copy's provenance) and `}`.
+    char tb[MOY_IMG_HEAD + 1];
+    size_t n = 0;
+    int c;
+    while ((c = sbyte(st)) >= 0) {
+        if (n == MOY_IMG_HEAD) {
+            return MOY_IMG_NOT;
+        }
+        tb[1 + n++] = (char)c;
+    }
+    if (st->failed) {
+        return MOY_IMG_READ;
+    }
+    const char *t = moy_json_ws(tb + 1, tb + 1 + n), *te = tb + 1 + n;
+    if (t < te && *t == '}') {
+        return moy_json_ws(t + 1, te) == te ? MOY_IMG_OK : MOY_IMG_NOT;
+    }
+    if (t >= te || *t != ',') {
+        return MOY_IMG_NOT;
+    }
+    char *o = (char *)t;
+    *o = '{';
+    const char *in = moy_json_ws(o + 1, te);
+    const char *e = moy_json_value(o, te, 0);
+    return e != NULL && in < te && *in != '}' && moy_json_ws(e, te) == te ? MOY_IMG_OK
+                                                                       : MOY_IMG_NOT;
 }

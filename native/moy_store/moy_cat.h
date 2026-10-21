@@ -76,7 +76,7 @@ typedef struct {
     size_t main_n;
     // The manifest's fields as they stand; the defaults are the binding's.
     moy_cat_json_t title, author, type, runtime, format, fps, palette,
-        extensions, edit, permissions, writable;
+        extensions, edit, permissions, writable, pictures;
     int writable_ok;            // a compiled cart's "writable" is a list of strings
     moy_cat_int_t version, memory;
     int graduated;

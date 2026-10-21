@@ -315,6 +315,8 @@ def build_carts(system_carts_dir):
             cart["permissions"] = vendor(man)["permissions"]
         if vendor(man).get("glass") is True:   # a per-glass wallpaper
             cart["glass"] = True
+        if "pictures" in vendor(man):           # a picture wallpaper
+            cart["pictures"] = vendor(man)["pictures"]
         if "input" in man:                # #42 Thread 3 input-kind hint, optional
             cart["input"] = man["input"]
         cart["cfg"] = vendor(man).get("config", {})

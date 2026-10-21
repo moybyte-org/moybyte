@@ -165,7 +165,7 @@ def font_file(name):
     return data if data is not None else _fontset.file(name)
 _THEME_BYTES = 16384    # style.json's theme.bytes: the largest theme.json
 _THEME_MAIN = "theme.json"
-_PICTURE_BYTES = 262144  # a theme's picture: a 512x300 moyimg with room to spare
+_PICTURE_BYTES = 1048576  # a theme's picture: a 1024x600 moyimg, incompressible, fits
 # A sheet's caps (style.json's theme.sheet_rows): (width, sprite rows, icon
 # rows, sprite bytes, icon bytes).
 _SHEET_CAPS = _ui_draw.sheet_caps()
@@ -479,6 +479,29 @@ class Appearance:
             return None
         got = self._package_file(self.theme_name, img, _PICTURE_BYTES)
         return got if got is not None and len(got) <= _PICTURE_BYTES else None
+
+    def picture_ref(self):
+        """Where the active theme's picture is, for a reader that streams it
+        rather than holding it: (folder, file, None) of its package, or
+        (folder, file, bytes) while it is `custom`'s unwritten change (folder
+        then None until custom has one); None when the theme names none or
+        its package cannot be read now."""
+        img = wall_keys(self._theme_bytes())[1]
+        if img is None:
+            return None
+        name = self.theme_name
+        folder = self._pkg_paths.get(name)
+        c = self._cust
+        if name == CUSTOM and c is not None:
+            got = c.pending.get(img)
+            if got is not None:
+                return (folder, img, got)
+            if c.fresh:
+                return None
+        store = getattr(self.ws, "store", None)
+        if folder is None or store is None or not store.ready():
+            return None
+        return (folder, img, None)
 
     def _apply_wallpaper(self):
         """Show the active theme's wallpaper (`theme_wallpaper`) when it is not
@@ -1544,8 +1567,12 @@ class Appearance:
             return None
 
         def read():
+            # Sized to the file: read(cap + 1) is one allocation of the cap,
+            # whatever the file holds -- a 262,145-byte ask for a 4 KB picture.
             with open(path + "/" + file, "rb") as f:
-                return f.read(cap + 1)
+                n = f.seek(0, 2)
+                f.seek(0)
+                return f.read(n if n <= cap else cap + 1)
 
         try:
             return store.call(read)

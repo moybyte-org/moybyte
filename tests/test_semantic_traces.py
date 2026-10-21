@@ -842,7 +842,7 @@ seed Seed One=5.1/2 Seed Two=6.1/1
 seed warm Seed One=5.1/2 Seed Two=6.1/1
 seed bump Seed One=5.1/3 Seed Two=6.1/1
 load Seed One 3 [('speed', 9)] 1024 True [] [] None {}
-loaded ['author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'palette', 'permissions', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'writable']
+loaded ['author', 'blocks', 'canvas', 'cfg', 'description', 'edit', 'extensions', 'flags', 'format', 'fps', 'genre', 'glass', 'graduated', 'icon', 'id', 'images', 'input', 'main', 'map', 'memory', 'palette', 'permissions', 'pictures', 'runtime', 'scene_names', 'scenes', 'sounds', 'sprites', 'src', 'src_after', 'src_before', 'tags', 'title', 'type', 'version', 'writable']
 publish True
 recover True True
 journal 1 None False False

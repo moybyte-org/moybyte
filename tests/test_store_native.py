@@ -139,8 +139,9 @@ def test_the_native_shelf_is_the_twins_over_every_cart(tmp_path):
 _KEYS = ("title", "author", "type", "runtime", "main", "format", "version",
          "memory", "writable", "graduated", "fps", "palette", "extensions",
          "icon", "edit", "permissions", "input", "canvas", "assets", "id",
-         "config", "sources", "description", "genre", "tags")
-_VENDOR = ("type", "graduated", "edit", "permissions", "assets", "config")
+         "config", "sources", "description", "genre", "tags", "glass", "pictures")
+_VENDOR = ("type", "graduated", "edit", "permissions", "assets", "config", "glass",
+           "pictures")
 
 
 _LISTING = json.load(open(os.path.join(ROOT, "tests", "listing_vectors",
@@ -199,6 +200,11 @@ def _manifest(rng):
                                     rng.randrange(0, 6)], rng.randrange(600)])
         if key in ("description", "genre", "tags") and rng.random() < 0.7:
             man.update(rng.choice(_LISTING)["manifest"])      # SPEC.md 3.7's cases
+        if key == "pictures" and rng.random() < 0.7:
+            man[key] = rng.choice([{"320x240": "wall"}, {"1024x600": "sky", "320x240": "wall"},
+                                   {}, "wall", [["320x240", "wall"]]])
+        if key == "glass" and rng.random() < 0.7:
+            man[key] = rng.choice([True, False, "true", 1])
         if key == "id" and rng.random() < 0.6:
             man[key] = rng.choice(["kenny.star", "local.a_1", "moybyte.x", "Kenny.star",
                                    "a.b.c", ".x", "x.", "kenny", "k\u00e9.x", ""])
@@ -535,6 +541,38 @@ def test_the_native_seed_writes_the_twins_tree(tmp_path):
     assert all(n.split("/")[0].startswith("moybyte.") for n in trees[0]
                if "/" in n)
     assert "wrote []" in _seed_step([exe], tmp_path, vm_root, "warm")
+
+
+def test_the_native_seed_carries_a_picture_carts_pictures(tmp_path):
+    """A seed's manifest is regenerated, so every field it keeps is passed
+    through by name -- by the C and the twin alike."""
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import gen_device_carts
+    src = tmp_path / "src" / "moybyte.pics.moy"
+    (src / "images").mkdir(parents=True)
+    pictures = {"1024x600": "big", "320x240": "small"}
+    (src / "manifest.json").write_text(json.dumps({
+        "format": "moybyte-cart-v1", "title": "Pics", "id": "moybyte.pics",
+        "runtime": "python", "main": "main.py", "version": 1,
+        "moybyte": {"type": "wallpaper", "system": True, "order": 1, "edit": [],
+                    "pictures": pictures}}))
+    (src / "main.py").write_text("def _draw():\n    cls(1)\n")
+    for name in pictures.values():
+        (src / "images" / (name + ".moyimg")).write_text(
+            '{"format": "moyimg-v1", "w": 1, "h": 1, "data": "eJxjAAAAAQAB"}')
+    packed = gen_device_carts.build_packed(str(tmp_path / "src"))
+    with open(str(tmp_path / "roster.json"), "w") as f:
+        json.dump([[t, v] for t, v, _ in packed], f)
+    for i, (_t, _v, blob) in enumerate(packed):
+        with open(str(tmp_path / ("blob%d" % i)), "wb") as f:
+            f.write(blob)
+    vm_root, cp_root = str(tmp_path / "vm" / "carts"), str(tmp_path / "cp" / "carts")
+    assert _seed_step([_vm()], tmp_path, vm_root, "cold")[1:] \
+        == _seed_step([sys.executable], tmp_path, cp_root, "cold")[1:]
+    a, b = _tree(vm_root), _tree(cp_root)
+    assert a == b
+    man = json.loads(a[os.path.join("moybyte.pics.moy", "manifest.json")])
+    assert man["moybyte"]["pictures"] == pictures
 
 
 # -- the journal (slice 6) -------------------------------------------------------------------

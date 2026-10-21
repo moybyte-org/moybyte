@@ -835,6 +835,9 @@ def _load(path, whole, folder=None):
             # at the glass's W and H around the shell's quiet rectangles,
             # rather than a 320x240 frame cover-cropped onto it.
             "glass": ven.get("glass") is True,
+            # A picture wallpaper: {"WxH": image name}, one picture per glass
+            # size (Wallpaper.picture_sizes reads it), else None.
+            "pictures": ven.get("pictures"),
             # The cart's LOGIC rate (#217): the Player ticks a GAME at 60 only
             # when its manifest says so, else at the 30 SPEC.md 5 guarantees.
             # Spec carts default to that tick explicitly.
@@ -1805,7 +1808,8 @@ def _unique_dir(root, base, ns=USER_NS):
 def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
            runtime="python", main="main.py", scenes=None, scene_order=None,
            author=None, palette=None, extensions=None, format=None, fps=None,
-           icon=None, canvas=None, listing=None, ns=USER_NS, glass=False):
+           icon=None, canvas=None, listing=None, ns=USER_NS, glass=False,
+           pictures=None):
     """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
     default to a python cart; duplicate() passes a source cart's through so a
     copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
@@ -1821,12 +1825,13 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
     _mkdir(d)
     return _whole_or_none(d, lambda: _create_in(
         d, title, src, cfg, edit, type, runtime, main, scenes, scene_order,
-        author, palette, extensions, format, fps, icon, canvas, listing, glass))
+        author, palette, extensions, format, fps, icon, canvas, listing, glass,
+        pictures))
 
 
 def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
                scene_order, author, palette, extensions, format, fps, icon,
-               canvas, listing, glass=False):
+               canvas, listing, glass=False, pictures=None):
     name = d.replace("\\", "/").rsplit("/", 1)[-1]
     manifest = {
         "format": format or CART_FORMAT, "title": title,
@@ -1836,6 +1841,8 @@ def _create_in(d, title, src, cfg, edit, type, runtime, main, scenes,
     ven = {"type": type, "edit": edit or []}
     if glass:                         # a per-glass wallpaper stays one
         ven["glass"] = True
+    if pictures is not None:          # and a picture wallpaper
+        ven["pictures"] = pictures
     if fps:                # 0 is moybyte's "unset" app default -- never written
         manifest["fps"] = fps
     if author:
@@ -1940,7 +1947,8 @@ def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
                  icon=cart.get("icon"),                      # spec 3.4 launcher art
                  canvas=cart.get("canvas"),                  # spec 1/3.1 cart canvas
                  listing=cart,                               # spec 3.7 description/genre/tags
-                 ns=ns, glass=cart.get("glass", False))      # a per-glass wallpaper
+                 ns=ns, glass=cart.get("glass", False),      # a per-glass wallpaper
+                 pictures=cart.get("pictures"))              # a picture wallpaper
     # create() writes the CODE side of a project (manifest/main/config/scenes).
     # Everything else a cart owns -- sprites.moygfx, map.moymap, sounds.json,
     # blocks.json, images/, docs/ -- lived only in the source FOLDER, so

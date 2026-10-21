@@ -7,11 +7,11 @@
 # no paths, no extensions. MicroPython-safe; staged to both boards.
 
 try:
-    from moyimg import decode_moyimg
+    from moyimg import cover_indices, decode_moyimg  # noqa: F401 -- re-exported
     import ui as _ui
     import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moyimg import decode_moyimg
+    from runtime.moyimg import cover_indices, decode_moyimg  # noqa: F401
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
 
@@ -36,34 +36,6 @@ class Bitmap:
         self._paint = True
         if owner is not None:
             self._owner = owner
-
-
-def cover_indices(src, sw, sh, dw, dh, out=None):
-    """Nearest-neighbor cover crop: source cropped centered to the target
-    aspect, then sampled to exactly dw x dh (the backdrop's and a copy's formula).
-
-    `out` is a caller-supplied dw*dh buffer. The desktop backdrop resamples to
-    the whole SCREEN (#186), and a screenful of indices is 153,600 bytes on the
-    Guition -- past the largest contiguous run that board has at the launcher --
-    so that caller hands one down from moybuf instead. None keeps the plain
-    bytearray every other caller wants."""
-    if sw * dh > sh * dw:
-        crop_h = sh
-        crop_w = max(1, sh * dw // dh)
-        sx0, sy0 = (sw - crop_w) // 2, 0
-    else:
-        crop_w = sw
-        crop_h = max(1, sw * dh // dw)
-        sx0, sy0 = 0, (sh - crop_h) // 2
-    if out is None:
-        out = bytearray(dw * dh)
-    for y in range(dh):
-        sy = sy0 + y * crop_h // dh
-        so = sy * sw
-        do = y * dw
-        for x in range(dw):
-            out[do + x] = src[so + sx0 + x * crop_w // dw]
-    return out
 
 
 THUMB_CACHE_MAX = 24     # decoded tiles kept across draws (a few KB each)

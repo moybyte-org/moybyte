@@ -536,14 +536,15 @@ def test_publishing_a_new_drawing_returns_both_of_the_backdrops_loans(
     cv = _device_canvas(ws, 320, 240)
     wall.draw_picture(cv)
     assert loans.stats() == (2, 320 * 240 * 3)
+    indices = wall._pic_bitmap.pix
 
     art.new_doc(512, 300)
     assert art.save(bytearray(512 * 300), 512, 300), art.last_error
     assert art.set_wallpaper(), art.last_error
     ws.look.tick(0.0)
-    assert wall._picture() is not None
-    assert loans.stats() == (0, 0), "the replaced screen kept its buffers"
-    assert wall._pic_bitmap is None and wall._pic_pix is None
+    assert wall._picture(320, 240) is not None
+    assert loans.stats() == (1, 320 * 240), "the replaced screen kept its buffers"
+    assert wall._pic_bitmap.pix is not indices
 
     wall.draw_picture(cv)
     assert loans.stats() == (2, 320 * 240 * 3), "the new backdrop took no loan"
@@ -570,18 +571,18 @@ def test_an_exact_integer_cover_is_the_replication_it_replaced():
                 src[srow + x // k] for x in range(dw)), "%dx moved a pixel" % k
 
 
-def test_a_backdrop_that_already_fits_the_screen_takes_no_resample(tmp_path,
-                                                                   monkeypatch):
-    """A drawing the size of the desk is drawn from its own decoded indices --
-    one loan (the bake), not two. The release path has to cope with the
-    half-set state that leaves."""
+def test_a_backdrop_that_already_fits_the_screen_is_read_straight_in(tmp_path,
+                                                                    monkeypatch):
+    """A drawing the size of the desk is read into the screen's own buffer,
+    the same one loan as any other size (its indices, then the bake): no
+    decoded copy of it is kept anywhere."""
     ws, wall = _published(tmp_path, 320, 240)
     loans, _dc = _lending(monkeypatch, wall)
 
     cv = _device_canvas(ws, 320, 240)
     wall.draw_picture(cv)
-    assert wall._pic_pix is None, "a screen-sized source needs no copy"
-    assert loans.stats() == (1, 153600)
+    assert wall._pic_pix is wall._pic_bitmap.pix
+    assert loans.stats() == (2, 320 * 240 * 3)
 
     wall.drop_picture()
     assert loans.stats() == (0, 0)

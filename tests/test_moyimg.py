@@ -170,7 +170,7 @@ def test_a_heap_that_says_no_is_not_a_missing_picture():
         moyimg._inflate = real
 
 
-def _starved(raw):
+def _starved(raw, n):
     raise MemoryError("memory allocation failed, allocating 76800 bytes")
 
 
@@ -190,7 +190,7 @@ def test_the_streaming_compressor_writes_a_picture_anything_can_read(chunk):
     art = _art(320, 240)
     pieces = [art[i:i + chunk] for i in range(0, len(art), chunk)]
     got = moyimg._deflate_pieces(pieces)
-    assert moyimg._inflate(got) == art
+    assert moyimg._inflate(got, len(art)) == art
     whole = moyimg._deflate(art)
     assert len(got) <= len(whole) * 1.05 + 64
 
@@ -261,7 +261,7 @@ assert hgot is not None and bytes(hgot[2]) == art, "a board could not read the h
 # does not.
 pieces = [art[i:i + 1024] for i in range(0, len(art), 1024)]
 streamed_blob = moyimg._deflate_pieces(pieces)
-assert moyimg._inflate(streamed_blob) == art, "a board could not read the picture it wrote piece by piece"
+assert moyimg._inflate(streamed_blob, len(art)) == art, "a board could not read the picture it wrote piece by piece"
 piecewise = len(streamed_blob)
 
 meta = json.loads(blob)

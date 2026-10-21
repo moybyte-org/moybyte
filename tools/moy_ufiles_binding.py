@@ -55,6 +55,7 @@ _PB = c.POINTER(_Buf)
 _PU32 = c.POINTER(c.c_uint32)
 _PINT = c.POINTER(c.c_int)
 _NAME = c.c_char * (NAME_MAX + 1)
+_READ = c.CFUNCTYPE(c.c_int, c.c_void_p, c.POINTER(c.c_ubyte), c.c_size_t)
 
 _SIGS = (
     ("moy_uf_kind", [c.c_int], _P),
@@ -87,6 +88,8 @@ _SIGS = (
     ("moy_uf_provenance", [_P, _S, _PB, c.POINTER(c.c_int64)], c.c_int),
     ("moy_uf_encode_image", [_U32, _U32, _P, _S, _PB], c.c_int),
     ("moy_uf_decode_image", [_P, _S, _PB, _PU32, _PU32], c.c_int),
+    ("moy_uf_cover_image", [_READ, c.c_void_p, c.c_void_p, _U32, _U32, _U32, _U32, _PU32,
+                            _PU32], c.c_int),
     ("moy_uf_encode_cover", [_P, _S, _PB], c.c_int),
     ("moy_uf_decode_cover", [_P, _S, _PB], c.c_int),
     ("moy_uf_palette", [], c.c_void_p),
@@ -421,6 +424,36 @@ def binding():
         if rc:
             _raise(rc)
         return (w.value, h.value, _take(lib(), buf, False))
+
+    def cover_image(stream, dst, dw, dh, max_w, max_h):
+        dw, dh, max_w, max_h = int(dw), int(dh), int(max_w), int(max_h)
+        if min(dw, dh, max_w, max_h) <= 0 or dw * dh > len(dst):
+            raise ValueError("an argument the store refuses")
+        failed = []
+
+        def rd(_ctx, buf, n):
+            try:
+                got = stream.read(n)
+            except Exception as exc:  # noqa: BLE001 -- raised again below
+                failed.append(exc)
+                return -1
+            if not got:
+                return 0
+            c.memmove(buf, bytes(got), len(got))
+            return len(got)
+
+        out = (c.c_ubyte * len(dst)).from_buffer(dst)
+        w, h = c.c_uint32(), c.c_uint32()
+        rc = lib().moy_uf_cover_image(_READ(rd), None, c.addressof(out), dw, dh, max_w, max_h,
+                                      c.byref(w), c.byref(h))
+        del out
+        if failed:
+            raise failed[0]
+        if rc == NONE:
+            return None
+        if rc:
+            _raise(rc)
+        return (w.value, h.value)
 
     def encode_cover(indices):
         pix = bytes(bytearray(indices))

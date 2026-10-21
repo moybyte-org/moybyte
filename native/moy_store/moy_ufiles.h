@@ -64,6 +64,7 @@
 #include <stdint.h>
 
 #include "moy_fs.h"
+#include "moy_img.h"
 
 #define MOY_UF_NONE (-1)
 #define MOY_UF_BAD (-2)
@@ -188,6 +189,11 @@ int moy_uf_encode_image(uint32_t w, uint32_t h, const uint8_t *pix, size_t n,
 // The picture's w*h indices (NONE: not a picture).
 int moy_uf_decode_image(const char *text, size_t n, moy_buf_t *pix,
                         uint32_t *w, uint32_t *h);
+// A picture read from its file a row at a time (moy_img.h's streamed reader)
+// and cover-sampled into `dst` (dw*dh indices): 0 with its size, NONE (not a
+// picture, or one past max_w x max_h), ENOMEM, or EIO when `rd` failed.
+int moy_uf_cover_image(moy_img_read_t rd, void *ctx, uint8_t *dst, uint32_t dw, uint32_t dh,
+                       uint32_t max_w, uint32_t max_h, uint32_t *w, uint32_t *h);
 int moy_uf_encode_cover(const uint8_t *pix, size_t n, moy_buf_t *out);
 int moy_uf_decode_cover(const uint8_t *data, size_t n, moy_buf_t *pix);
 // The console palette a cover is written in and read to: 64 R, G, B triples.

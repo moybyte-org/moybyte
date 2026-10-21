@@ -164,6 +164,8 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None, ns=BUILTIN_NS):
             ven["permissions"] = cart["permissions"]
         if cart.get("glass") is True:             # a per-glass wallpaper
             ven["glass"] = True
+        if cart.get("pictures") is not None:     # a picture wallpaper
+            ven["pictures"] = cart["pictures"]
         scenes = cart.get("scenes")               # {name: .moyscene blob}, optional (#85)
         if scenes:
             # Register the ordered set in manifest.moybyte.assets.scenes (element 0 = default

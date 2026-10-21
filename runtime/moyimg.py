@@ -131,18 +131,34 @@ def _deflate_pieces(pieces):
     return buf.getvalue()
 
 
-def _inflate(raw):
-    """A zlib stream -> its bytes, with the window the STREAM declares.
+def _inflate(raw, n):
+    """A zlib stream -> its `n` bytes, with the window the STREAM declares, or
+    None when it holds another count.
 
     ONE allocation the size of the whole raster -- 76,800 bytes for a 320x240
-    picture. Only a reader that genuinely needs pixels calls this."""
+    picture -- filled a piece at a time: DeflateIO's read() of a whole stream
+    regrows its result as it goes (4.2 s for a 614 KB picture on an S3, against
+    0.3 s into the buffer). Only a reader that genuinely needs pixels calls
+    this."""
     try:
         import deflate
     except ImportError:                  # CPython
         import zlib
-        return zlib.decompress(raw)
+        out = zlib.decompress(raw)
+        return out if len(out) == n else None
     import io as _io
-    return deflate.DeflateIO(_io.BytesIO(raw), deflate.ZLIB).read()
+    s = deflate.DeflateIO(_io.BytesIO(raw), deflate.ZLIB)
+    out = bytearray(n)
+    mv = memoryview(out)
+    got = 0
+    while got < n:
+        k = s.readinto(mv[got:got + 4096])
+        if not k:
+            return None
+        got += k
+    if s.read(1):
+        return None
+    return out
 
 
 def _blob_header(text):
@@ -202,15 +218,15 @@ def decode_moyimg(text):
     got = None                           # drop the tuple's hold on the stream
     try:
         try:
-            pix = _inflate(raw)
+            pix = _inflate(raw, w * h)
         except MemoryError:
             gc.collect()
-            pix = _inflate(raw)
+            pix = _inflate(raw, w * h)
     except MemoryError:
         raise
     except Exception:  # noqa: BLE001 -- a corrupt drawing is treated as absent
         return None
-    if len(pix) != w * h:
+    if pix is None:
         return None
     return (w, h, pix)
 
@@ -225,3 +241,155 @@ def text_sig(text):
     for ch in text[-64:]:
         s = (s * 3 + ord(ch)) & 0xFFFFFF
     return (len(text) * 2654435761 + s) & 0xFFFFFFFF
+
+
+def bytes_sig(head, tail, n):
+    """`text_sig` of a blob known by its first and last 64 bytes and its
+    length -- the same stamp as text_sig of the text, without reading the
+    text."""
+    s = 0
+    for b in head[:64]:
+        s += b
+    for b in tail[-64:]:
+        s = (s * 3 + b) & 0xFFFFFF
+    return (n * 2654435761 + s) & 0xFFFFFFFF
+
+
+def file_sig(f):
+    """`bytes_sig` of the open binary file `f`, which is left at its start."""
+    n = f.seek(0, 2)
+    f.seek(0)
+    head = f.read(64)
+    f.seek(n - 64 if n > 64 else 0)
+    tail = f.read(64)
+    f.seek(0)
+    return bytes_sig(head, tail, n)
+
+
+def cover_indices(src, sw, sh, dw, dh, out=None):
+    """Nearest-neighbor cover crop: source cropped centered to the target
+    aspect, then sampled to exactly dw x dh (the backdrop's and a copy's formula).
+
+    `out` is a caller-supplied dw*dh buffer (the streamed reader's screen,
+    off-heap); None makes a bytearray. The formula is native/moy_store/moy_img.h's
+    streamed reader's, which samples as it reads."""
+    if sw * dh > sh * dw:
+        crop_h = sh
+        crop_w = max(1, sh * dw // dh)
+        sx0, sy0 = (sw - crop_w) // 2, 0
+    else:
+        crop_w = sw
+        crop_h = max(1, sw * dh // dw)
+        sx0, sy0 = 0, (sh - crop_h) // 2
+    if out is None:
+        out = bytearray(dw * dh)
+    for y in range(dh):
+        sy = sy0 + y * crop_h // dh
+        so = sy * sw
+        do = y * dw
+        for x in range(dw):
+            out[do + x] = src[so + sx0 + x * crop_w // dw]
+    return out
+
+
+# --- the streamed reader -----------------------------------------------------
+#
+# A picture read from its FILE and cover-sampled into a screen, the form
+# native/moy_store/moy_img.h's streamed reader takes (its rules are there):
+# `data` ending within the first HEAD bytes, at most HEAD bytes after its
+# value, its base64 bare and padded. This is that reader's reference, rule for rule; a
+# board reads through the C (`moy_ufiles.cover_image`), which holds one source
+# row and the inflater's window instead of the file and the raster this does.
+
+HEAD = 256
+_WS = b" \t\n\r"
+_ALPHA = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+
+def _skip_ws(buf, i):
+    while i < len(buf) and buf[i] in _WS:
+        i += 1
+    return i
+
+
+def cover_stream(f, dst, dw, dh, max_w, max_h):
+    """The picture binary file `f` reads, cover-sampled into `dst` (dw*dh
+    indices, the formula `file_widgets.cover_indices` is): its (w, h), or
+    None when it is not a picture in the streamed form or is larger than
+    max_w x max_h. ValueError for a size `dst` cannot hold."""
+    dw, dh, max_w, max_h = int(dw), int(dh), int(max_w), int(max_h)
+    if min(dw, dh, max_w, max_h) <= 0 or dw * dh > len(dst):
+        raise ValueError("an argument the store refuses")
+    buf = b""
+    while len(buf) < HEAD:
+        got = f.read(HEAD - len(buf))
+        if not got:
+            break
+        buf += got
+    i = buf.find(b'"data"')
+    if i < 0:
+        return None
+    head = buf[:i].rstrip(_WS)
+    if head.endswith(b","):
+        head = head[:-1]
+    elif not head.endswith(b"{"):
+        return None
+    try:
+        meta = json.loads((head + b"}").decode())
+        w = int(meta["w"])
+        h = int(meta["h"])
+    except MemoryError:
+        raise
+    except Exception:  # noqa: BLE001 -- a foreign head is not a picture
+        return None
+    if type(meta) is not dict or not (0 < w <= 0xFFFF and 0 < h <= 0xFFFF):
+        return None
+    if w > max_w or h > max_h:
+        return None
+    rest = buf[i + 6:] + f.read()
+    j = _skip_ws(rest, 0)
+    if rest[j:j + 1] != b":":
+        return None
+    j = _skip_ws(rest, j + 1)
+    if rest[j:j + 1] != b'"':
+        return None
+    q = rest.find(b'"', j + 1)
+    if q < 0:
+        return None
+    value = rest[j + 1:q]
+    run = value.rstrip(b"=")
+    pads = len(value) - len(run)
+    n = len(run)
+    for c in run:
+        if c not in _ALPHA:
+            return None
+    if pads > 2 or n % 4 == 1 or pads != (4 - n % 4) % 4:
+        return None
+    tail = rest[q + 1:]
+    if len(tail) > HEAD:
+        return None
+    k = _skip_ws(tail, 0)
+    if tail[k:k + 1] == b"}":
+        if _skip_ws(tail, k + 1) != len(tail):
+            return None
+    elif tail[k:k + 1] == b",":
+        try:                             # a copy's provenance
+            more = json.loads((b"{" + tail[k + 1:]).decode())
+        except MemoryError:
+            raise
+        except Exception:  # noqa: BLE001 -- not an object's members
+            return None
+        if type(more) is not dict or not more:
+            return None
+    else:
+        return None
+    try:
+        pix = _inflate(_b64_decode(value), w * h)
+    except MemoryError:
+        raise
+    except Exception:  # noqa: BLE001 -- a corrupt stream is not a picture
+        return None
+    if pix is None:
+        return None
+    cover_indices(pix, w, h, dw, dh, dst)
+    return (w, h)

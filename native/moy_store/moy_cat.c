@@ -887,6 +887,7 @@ static int read_entry(rd_t *r, moy_cat_entry_t *e, moy_cart_t *c,
     e->extensions = field(man, mend, "extensions");
     e->edit = vfield(man, mend, "edit");
     e->permissions = vfield(man, mend, "permissions");
+    e->pictures = vfield(man, mend, "pictures");
     moy_cat_json_t v = field(man, mend, "version");
     if (v.v != NULL) {
         e->version.kind = moy_json_int(v.v, v.e, &e->version.value);

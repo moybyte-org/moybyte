@@ -2171,6 +2171,32 @@ int moy_uf_decode_image(const char *text, size_t n, moy_buf_t *pix,
     return 0;
 }
 
+int moy_uf_cover_image(moy_img_read_t rd, void *ctx, uint8_t *dst, uint32_t dw, uint32_t dh,
+                       uint32_t max_w, uint32_t max_h, uint32_t *w, uint32_t *h) {
+    size_t sn = moy_img_stream_size();
+    void *st = moy_store_alloc(sn);
+    if (st == NULL) {
+        return MOY_ENOMEM;
+    }
+    int rc = moy_img_stream_head(st, rd, ctx, w, h);
+    uint8_t *row = NULL;
+    if (rc == MOY_IMG_OK && (*w > max_w || *h > max_h)) {
+        rc = MOY_IMG_NOT;
+    }
+    if (rc == MOY_IMG_OK) {
+        row = moy_store_alloc(*w);
+        rc = row == NULL ? MOY_ENOMEM : moy_img_stream_cover(st, row, dst, dw, dh);
+    }
+    if (row != NULL) {
+        moy_store_free(row, *w);
+    }
+    moy_store_free(st, sn);
+    if (rc == MOY_ENOMEM) {
+        return MOY_ENOMEM;
+    }
+    return rc == MOY_IMG_OK ? 0 : rc == MOY_IMG_READ ? MOY_EIO : MOY_UF_NONE;
+}
+
 static void be32(char *p, uint32_t v) {
     p[0] = (char)(v >> 24);
     p[1] = (char)(v >> 16);
