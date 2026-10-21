@@ -2503,6 +2503,64 @@ static mp_obj_t ui_api_menu_danger(mp_obj_t ctx, mp_obj_t rows) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_menu_danger_obj, ui_api_menu_danger);
 
+// api_text(ctx, lines, centre, tone, role): the next label's text options.
+static mp_obj_t ui_api_text(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_api_text(ctx_of(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_obj, 5, 5, ui_api_text);
+
+// api_card_mark(ctx, badge, tone, blank): the next card's badge, tone and
+// blank picture's icon.
+static mp_obj_t ui_api_card_mark(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_api_card_mark(ctx_of(a[0]), span_of(a[1]), num(a[2]), span_of(a[3]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_card_mark_obj, 4, 4, ui_api_card_mark);
+
+// api_grid_spread(ctx, cols, foot, top, margin): the next grid's spread.
+static mp_obj_t ui_api_grid_spread(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_api_grid_spread(ctx_of(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_grid_spread_obj, 5, 5, ui_api_grid_spread);
+
+// api_group_card(ctx, cv, look): a group with no caption.
+static mp_obj_t ui_api_group_card(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
+    moy_ui_sink_t s;
+    sink_of(&s, cv, look);
+    moy_ui_api_group_card(ctx_of(ctx), &s);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_group_card_obj, ui_api_group_card);
+
+// api_empty(ctx, cv, look, icon, title, lines) -> the head's foot y
+static mp_obj_t ui_api_empty(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(a[5], &b, MP_BUFFER_READ);
+    return mp_obj_new_int(moy_ui_api_empty(c, &s, span_of(a[3]), span_of(a[4]),
+                                           (const uint8_t *)b.buf, b.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_empty_obj, 6, 6, ui_api_empty);
+
+// api_toast(ctx, cv, look, text, kind)
+static mp_obj_t ui_api_toast(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    moy_ui_api_toast(c, &s, span_of(a[3]), span_of(a[4]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_toast_obj, 5, 5, ui_api_toast);
+
 // api_owes(ctx) -> whether the frame drawn last owes the next
 static mp_obj_t ui_api_owes(mp_obj_t ctx) {
     return mp_obj_new_bool(moy_ui_api_owes(ctx_of(ctx)));
@@ -2679,6 +2737,12 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_popover), MP_ROM_PTR(&ui_api_popover_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu), MP_ROM_PTR(&ui_api_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_menu_danger), MP_ROM_PTR(&ui_api_menu_danger_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_text), MP_ROM_PTR(&ui_api_text_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_card_mark), MP_ROM_PTR(&ui_api_card_mark_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_grid_spread), MP_ROM_PTR(&ui_api_grid_spread_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_group_card), MP_ROM_PTR(&ui_api_group_card_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_empty), MP_ROM_PTR(&ui_api_empty_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_toast), MP_ROM_PTR(&ui_api_toast_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },

@@ -375,6 +375,10 @@ int moy_ui_frame_under_onto(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int 
 // The shadow box `b` casts as a part (MOY_UI_CAST_*), its own pixels left
 // alone. Answers whether the theme casts one.
 int moy_ui_cast(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int mode);
+// The theme's soft shadow under box b at radius r, `k` (0..255) of its
+// alpha, its own pixels left alone: a badge's or a toast's. Answers whether
+// the theme casts one.
+int moy_ui_soft(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int k);
 
 // -- the marks (moy_ui_depth.c; docs/media/look_2026-10/DESIGN.md, the marks) ----
 //
@@ -728,7 +732,8 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // slot where `desk` is set; colours are tokens of the sink's look; text is
 // the `ui` role's (the label, an info's, a link's and a cycle's value, what a
 // hint does) and the `caption` role's (a seg's options, captions, key
-// legends), petme128 on a run.
+// legends), petme128 on a run. A progress row a row and its bar tall or
+// taller sets its label and percent on a line, the bar across under them.
 // The page's ground and the hints take MOY_UI_WINDOW in `desk` beside the
 // size class (MOY_UI_DESK): the page lies in a window's body.
 enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2 };
@@ -791,13 +796,55 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
 // it -- and its title and `sub` centred under the picture. *gnd is the
 // colour around the picture, which moy_ui_card_end cuts its corners to;
 // `desk` takes MOY_UI_WINDOW as the page's ground does.
+// `tone` (MOY_UI_TONE_*) is the sub line's ink: the dim ink, else `value`
+// or the danger ink.
 int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
-                moy_ui_span_t sub, int flags, int fs, int desk, moy_ui_box_t *content,
+                moy_ui_span_t sub, int flags, int fs, int desk, int tone, moy_ui_box_t *content,
                 uint16_t *gnd);
 // After the app drew into `content`: its corners cut to the card radius over
 // `gnd` and its ring, then a lifted picture's rim (F_FOCUS) round `pic`.
 int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t content, int flags,
                     uint16_t gnd, int fs, int desk);
+// A card's state over its picture `content` after the app drew it, before
+// moy_ui_card_end (ui.card's `badge` and `tone`): a picture whose cart the
+// console cannot take (MOY_UI_TONE_DANGER) veiled toward the ground `gnd`,
+// then icon `slot` (else glyph table `glyph`; both -1 none) on a `surface`
+// disc at its top right, in `value` or the danger ink.
+int moy_ui_card_badge(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph,
+                      int tone, uint16_t gnd, int fs, int desk);
+
+// A card with no picture of its own (ui.card's `icon`): its picture box
+// `content` a tile tinted from `value`, icon `slot` (else `glyph`) on it in
+// `value`, its largest mask at the largest whole scale that fits half the tile.
+int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph, int fs,
+                      int desk);
+
+// The tones a line of text takes (ui.label's and ui.card's `tone`): the
+// part's ink, the dim ink, `value`, the danger ink (the look's `danger_ink`,
+// else the danger buttons' ink).
+enum { MOY_UI_TONE_INK = 0, MOY_UI_TONE_DIM = 1, MOY_UI_TONE_VALUE = 2, MOY_UI_TONE_DANGER = 3 };
+// Text in box b from its top (ui.label's `wrap`, `lines`, `align`, `tone`
+// and `face`): in font `role`, broken at word breaks in b.w into at most
+// `lines` lines (0: one), an ellipsis after the last where the text runs on;
+// each line centred where `centre`; icon `slot` (else `glyph`; both -1 none)
+// before the first line in the text's ink, the lines beside it. A handheld's
+// lines stand a line less two pixels apart, a desk's a line. The height it
+// takes, drawn where `draw`.
+int moy_ui_text_block(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int role,
+                      int tone, int lines, int centre, int slot, int glyph, int fs, int desk,
+                      int draw);
+// An empty page's head (ui.empty), centred across b from its top: icon `slot`
+// (else `glyph`) on a disc of `value` mixed into the ground (`surface_alt` in
+// a dark look), `title` in the title role, then `lines` (NUL-separated, `n`
+// bytes) in the caption role's dim ink, each centred. The height it takes,
+// to a line's pitch under the last, drawn where `draw`.
+int moy_ui_empty(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, moy_ui_span_t title,
+                 const uint8_t *lines, size_t n, int fs, int desk, int draw);
+// A toast (ui.toast): a pill in the ink's colour holding icon `slot` (else
+// `glyph`) and `text` in the ground's colour, centred across b with its
+// foot on b's foot. Its box in *out.
+int moy_ui_toast(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t text, int slot, int glyph,
+                 int fs, int desk, moy_ui_box_t *out);
 // A text field row (ui.field): its label, then the field to the row's right
 // showing the text's tail and, focused (F_FOCUS), the caret. On a group's
 // card (`card`) the label sits where a value row's does and the field is the

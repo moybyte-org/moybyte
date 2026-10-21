@@ -188,6 +188,16 @@ typedef struct {
     uint8_t fin_on, fin_flags;
     uint16_t fin_ground;
     moy_ui_box_t fin_pic, fin_content;
+    int16_t fin_slot, fin_glyph;
+    int8_t fin_tone;
+    // The next card's badge and tone (moy_ui_api_card_mark), the next
+    // grid's spread (moy_ui_api_grid_spread) and the next label's text
+    // options (moy_ui_api_text): each cleared once used and by begin.
+    int16_t card_slot, card_glyph, card_blank, card_blank_glyph;
+    int8_t card_tone;
+    uint8_t spread_cols;
+    int16_t spread_foot, spread_top, spread_margin;
+    int8_t txt_lines, txt_centre, txt_tone, txt_role;
     // The table drawn last: row 0's top (scrolled), the rows' height and
     // count, the view they show in, and its picture column's x and side (0:
     // none).
@@ -314,6 +324,30 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
                         const moy_ui_over_t *o);
 // The next ui.menu's danger rows (a verb that destroys: Delete): bit i its row i.
 void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows);
+// The Python face's options the override block does not carry, each for the
+// next call of its verb: a label's text (`lines` its most, 0 one unwrapped;
+// `centre`; `tone` MOY_UI_TONE_*; `role` a font role, -1 the label's own),
+// a card's badge (icon `badge`, empty none), tone and blank picture (icon
+// `blank` on a tinted tile, empty none: moy_ui_card_blank), a grid's spread (its
+// `cols` columns spread across its rect, the gaps taking the rest; `foot`
+// the card's foot under its picture, `top` the room over its first row and
+// `margin` its rect's at either side, in pixels at the scale, 0 the style's).
+void moy_ui_api_text(moy_ui_ctx_t *c, int lines, int centre, int tone, int role);
+void moy_ui_api_card_mark(moy_ui_ctx_t *c, moy_ui_span_t badge, int tone,
+                          moy_ui_span_t blank);
+void moy_ui_api_grid_spread(moy_ui_ctx_t *c, int cols, int foot, int top, int margin);
+// A group with no caption (ui.group's `card`): its rows on its card, from
+// the page's next row, until a group call ends it.
+void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
+// An empty page's head (ui.empty) at `at`'s rect, else the page's next row:
+// the icon on its disc, the title and the lines (NUL-separated), centred.
+// Its foot's y, where the page's verbs go.
+int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
+                     moy_ui_span_t title, const uint8_t *lines, size_t n);
+// A toast (ui.toast) over the foot of `at`'s rect, else of the page: the
+// `check` icon, else `kind`'s (the icon slot it names), and `text`.
+void moy_ui_api_toast(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
+                      moy_ui_span_t kind);
 // A card grid (§1): `id` begins one whose cards' pictures are w x h, as
 // many columns as the row holds, the grid's rows stacking on the page (or
 // from ui.at's rect's top left, across its width); an id of length 0 ends it.

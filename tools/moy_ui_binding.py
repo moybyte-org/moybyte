@@ -309,6 +309,12 @@ _DRAW_SIGS = (
     ("moy_ui_api_menu", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                          c.c_void_p], c.c_int32),
     ("moy_ui_api_menu_danger", [c.c_void_p, c.c_uint32], None),
+    ("moy_ui_api_text", [c.c_void_p, _I, _I, _I, _I], None),
+    ("moy_ui_api_card_mark", [c.c_void_p, _Span, _I, _Span], None),
+    ("moy_ui_api_grid_spread", [c.c_void_p, _I, _I, _I, _I], None),
+    ("moy_ui_api_group_card", [c.c_void_p, c.POINTER(_Sink)], None),
+    ("moy_ui_api_empty", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_char_p, _Z], _I),
+    ("moy_ui_api_toast", [c.c_void_p, c.POINTER(_Sink), _Span, _Span], None),
     ("moy_ui_api_grid", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p], None),
     ("moy_ui_api_card", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p, c.c_void_p],
      None),
@@ -1064,6 +1070,47 @@ def binding():
         p, _k = _ctx(ctx)
         lib.moy_ui_api_menu_danger(p, int(rows) & 0xFFFFFFFF)
 
+    def api_text(ctx, lines, centre, tone, role):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_text(p, int(lines), int(centre), int(tone), int(role))
+
+    def _span0(text):
+        t, keep = span(text)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        return t, keep
+
+    def api_card_mark(ctx, badge, tone, blank):
+        p, _k = _ctx(ctx)
+        t, keep = _span0(badge)
+        u, keep2 = _span0(blank)
+        lib.moy_ui_api_card_mark(p, t, int(tone), u)
+
+    def api_grid_spread(ctx, cols, foot, top, margin):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_grid_spread(p, int(cols), int(foot), int(top), int(margin))
+
+    def api_group_card(ctx, cv, look):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        lib.moy_ui_api_group_card(p, c.byref(s))
+
+    def api_empty(ctx, cv, look, icon, title, lines):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = _span0(icon)
+        u, keep2 = _span0(title)
+        b = bytes(lines)
+        return int(lib.moy_ui_api_empty(p, c.byref(s), t, u, b, len(b)))
+
+    def api_toast(ctx, cv, look, text, kind):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = _span0(text)
+        u, keep2 = _span0(kind)
+        lib.moy_ui_api_toast(p, c.byref(s), t, u)
+
     def api_owes(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
@@ -1149,6 +1196,7 @@ def binding():
               api_table_rows, api_table_pics,
               api_grid,
               api_card, api_part, api_popover, api_menu, api_menu_danger,
+              api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_toast,
               api_focus, api_keys_taken, api_at, api_dup):
         setattr(m, f.__name__, f)
     m.hits_cap = lambda: c.c_int.in_dll(lib, "moy_ui_hits_cap").value

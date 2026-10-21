@@ -700,6 +700,40 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     vgeo_t g;
     geo(&d, b, r, &g);
     pf_t fl = font_of(&d, MOY_UI_FONT_UI), fv = font_of(&d, MOY_UI_FONT_CAPTION);
+    int rh = (d.desk ? 28 : 20) * d.fs, bh = (d.desk ? 8 : 6) * d.fs;
+    if (kind == MOY_UI_V_PROGRESS && b.h >= rh + bh + d.fs) {
+        // a progress row given room for it: its label and percent on a
+        // line, the bar the width of the row under them
+        int sc = tscale(s);
+        int span = r->hi > r->lo ? r->hi - r->lo : 1;
+        int pct = (int)((int64_t)100 * (r->v - r->lo) / span);
+        char num[8];
+        int n = 0;
+        if (pct >= 100) {
+            num[n++] = '1';
+        }
+        if (pct >= 10) {
+            num[n++] = (char)('0' + (pct / 10) % 10);
+        }
+        num[n++] = (char)('0' + pct % 10);
+        num[n++] = '%';
+        int vw = tw(&fv, (const uint8_t *)num, (size_t)n, sc);
+        text(&d, &fv, (const uint8_t *)num, (size_t)n, b.x + b.w - vw, b.y, rh, pal(&d, dim), sc);
+        if (r->label.n) {
+            size_t ln = moy_text_fit_px(fl.id, r->label.p, r->label.n, b.w - vw - 8 * d.fs, sc);
+            text(&d, &fl, r->label.p, ln, b.x, b.y, rh, pal(&d, lab), sc);
+        }
+        int ty = b.y + rh + (d.desk ? 2 : 1) * d.fs;
+        uint16_t line = pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
+        uint16_t rest = mix(line, pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK)), 64);
+        rrect(&d, b.x, ty, b.w, bh, bh / 2, 1, rest, 0, 0);
+        int fw = (int)((int64_t)b.w * (r->v - r->lo) / span);
+        if (fw > 0) {
+            rrect(&d, b.x, ty, fw > bh ? fw : bh, bh, bh / 2, 1,
+                  pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT)), 0, 0);
+        }
+        return MOY_UI_OK;
+    }
     // the ground the row's parts lie on: its card or its page, under the
     // edge mark's plate where the row has focus
     uint16_t rg = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
@@ -970,6 +1004,24 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     return MOY_UI_OK;
 }
 
+static const uint8_t s_dots[] = {0xE2, 0x80, 0xA6};
+static void text_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int y, int h, int room,
+                     uint16_t c, int sc);
+
+// Text centred across x..x+w in the rows y..y+h, cut to `room` with an
+// ellipsis where the font has one.
+static void centred_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int w, int y, int h,
+                        int room, uint16_t c, int sc) {
+    int ell = 0;
+    size_t k = moy_text_cut_px(f->id, t.p, t.n, room, sc, &ell);
+    int tw_ = tw(f, t.p, k, sc) + (ell ? tw(f, s_dots, sizeof(s_dots), sc) : 0);
+    int tx = x + (w - tw_) / 2;
+    int at = text(d, f, t.p, k, tx, y, h, c, sc);
+    if (ell) {
+        text(d, f, s_dots, sizeof(s_dots), tx + at, y, h, c, sc);
+    }
+}
+
 // -- cards (ui.card) -------------------------------------------------------------------
 
 // The card's picture radius at the scale, under the depth's card radius; 0
@@ -983,8 +1035,31 @@ static int card_r(const pd_t *d) {
     return cr < r ? cr : r;
 }
 
+// The colour index a tone's text takes on the page's ground (MOY_UI_TONE_*).
+static int tone_ink(const pd_t *d, int tone) {
+    if (tone == MOY_UI_TONE_DIM) {
+        return tok(d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
+    }
+    if (tone == MOY_UI_TONE_VALUE) {
+        return tok(d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
+    }
+    if (tone == MOY_UI_TONE_DANGER) {
+        moy_ui_btn_style_t bs;
+        if (moy_ui_danger_ink() >= 0) {
+            return moy_ui_danger_ink();
+        }
+        if (moy_ui_button_style(d->look, MOY_UI_K_BUTTON_DANGER, MOY_UI_REST, -1, &bs)
+                == MOY_UI_OK
+            && bs.c[1] >= 0) {
+            return bs.c[1];
+        }
+        return tok(d, MOY_UI_T_DANGER, MOY_UI_T_INK);
+    }
+    return tok(d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
+}
+
 int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
-                moy_ui_span_t sub, int flags, int fs, int desk, moy_ui_box_t *content,
+                moy_ui_span_t sub, int flags, int fs, int desk, int tone, moy_ui_box_t *content,
                 uint16_t *gnd) {
     pd_t d;
     open_pd(s, &d, fs, desk);
@@ -1030,17 +1105,19 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
     } else if ((flags & MOY_UI_F_ON) && solid && moy_ui_marks_shown() && cur_ink >= 0) {
         ink = dim = cur_ink;
     }
+    if (tone != MOY_UI_TONE_INK && tone != MOY_UI_TONE_DIM && dim != ink) {
+        dim = tone_ink(&d, tone);
+    }
     pf_t ft = font_of(&d, MOY_UI_FONT_UI), fsub = font_of(&d, MOY_UI_FONT_CAPTION);
     if (title.n && room > 0) {
-        size_t n = moy_text_fit_px(ft.id, title.p, title.n, room, sc);
-        int w = tw(&ft, title.p, n, sc);
-        text(&d, &ft, title.p, n, b.x + (b.w - w) / 2, y, th, pal(&d, ink), sc);
+        centred_cut(&d, &ft, title, b.x, b.w, y, th, room, pal(&d, ink), sc);
     }
     int sh = fsub.line * sc + 4 * d.fs;
-    if (sub.n && room > 0 && y + th - d.fs + sh <= b.y + b.h) {     // where the foot holds it
-        size_t n = moy_text_fit_px(fsub.id, sub.p, sub.n, room, sc);
-        int w = tw(&fsub, sub.p, n, sc);
-        text(&d, &fsub, sub.p, n, b.x + (b.w - w) / 2, y + th - d.fs, sh, pal(&d, dim), sc);
+    // on the handheld the sub line sits under the title's line, a desk's a
+    // band below it
+    int sy = y + th - d.fs - (d.desk ? 0 : 4 * d.fs);
+    if (sub.n && room > 0 && sy + 2 * d.fs + fsub.ascent * sc <= b.y + b.h) {  // where the foot holds it
+        centred_cut(&d, &fsub, sub, b.x, b.w, sy, sh, room, pal(&d, dim), sc);
     }
     return MOY_UI_OK;
 }
@@ -1107,6 +1184,212 @@ int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t conte
         int mi = -1;
         moy_ui_focus_in(s, pic, MOY_UI_MARK_CARD, r, MOY_UI_MARK_AFTER, d.fs, NULL, &mi, 0);
     }
+    return MOY_UI_OK;
+}
+
+int moy_ui_card_badge(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph,
+                      int tone, uint16_t gnd, int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    moy_text_target_t *t = &d.t;
+    if (tone == MOY_UI_TONE_DANGER) {
+        // the cover veiled: what the console cannot take stands back
+        for (int y = content.y; y < content.y + content.h; y++) {
+            int ty = y - t->cam_y;
+            if (ty < t->cy0 || ty >= t->cy1) {
+                continue;
+            }
+            for (int x = content.x; x < content.x + content.w; x++) {
+                int tx = x - t->cam_x;
+                if (tx >= t->cx0 && tx < t->cx1) {
+                    uint16_t *p = &t->px[(size_t)ty * (size_t)t->dw + (size_t)tx];
+                    *p = mix(*p, gnd, 140);
+                }
+            }
+        }
+        d.row->st[MOY_ST_N_FILL]++;
+    }
+    if (slot < 0 && glyph < 0) {
+        return MOY_UI_OK;
+    }
+    int dd = (d.desk ? 26 : 18) * d.fs, o = (d.desk ? 16 : 11) * d.fs;
+    moy_ui_box_t disc = {(int16_t)(content.x + content.w - o - dd / 2),
+                         (int16_t)(content.y + o - dd / 2), (int16_t)dd, (int16_t)dd};
+    moy_ui_soft(s, disc, dd / 2, 102);
+    rrect(&d, disc.x, disc.y, disc.w, disc.h, dd / 2, 1,
+          pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), 0, 0);
+    icon_d(&d, slot, glyph, disc,
+           tone == MOY_UI_TONE_DANGER ? tone_ink(&d, tone) : tone_ink(&d, MOY_UI_TONE_VALUE));
+    return MOY_UI_OK;
+}
+
+int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph, int fs,
+                      int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int v = tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
+    uint16_t surf = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
+    fill(&d, content.x, content.y, content.w, content.h,
+         mix(surf, pal(&d, v), dark(&d) ? 77 : 46));
+    uint32_t f24 = moy_ui_icon_font(1), f16 = moy_ui_icon_font(0);
+    uint32_t font = f24 ? f24 : f16;
+    int half = (content.w < content.h ? content.w : content.h) / 2;
+    if (slot >= 0 && font && !d.run && moy_ui_cmask() != 63) {
+        if (font == f24 && half < 24 && f16) {
+            font = f16;
+        }
+        int size = font == f24 ? 24 : 16;
+        int sc = half / size > 1 ? half / size : 1;
+        uint8_t code = (uint8_t)(MOY_UI_ICON_FIRST + slot);
+        int side = size * sc;
+        moy_text(&d.t, font, MOY_TEXT_DATA, &code, 1, content.x + (content.w - side) / 2,
+                 content.y + (content.h - side) / 2, pal(&d, v), sc, MOY_TEXT_LEFT, -1);
+        d.row->st[MOY_ST_N_TEXT]++;
+        return MOY_UI_OK;
+    }
+    icon_d(&d, slot, glyph, content, v);
+    return MOY_UI_OK;
+}
+
+// -- text blocks, empty pages, toasts ------------------------------------------------------
+
+#define TEXT_LINES 16
+
+int moy_ui_text_block(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int role,
+                      int tone, int lines, int centre, int slot, int glyph, int fs, int desk,
+                      int draw) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    pf_t f = font_of(&d, role);
+    int sc = tscale(s);
+    int lh = f.line * sc - (d.desk ? 0 : 2 * d.fs);
+    moy_ui_box_t ib = {b.x, b.y, 0, 0};
+    if (slot >= 0 || glyph >= 0) {
+        int side = 16 * d.fs, gap = (d.desk ? 6 : 4) * d.fs;
+        ib.w = ib.h = (int16_t)side;
+        ib.y = (int16_t)(b.y + moy_ui_fdiv(lh - side, 2));
+        b.x = (int16_t)(b.x + side + gap);
+        b.w = (int16_t)(b.w - side - gap);
+    }
+    moy_text_line_t ln[TEXT_LINES];
+    int n = 1;
+    lines = lines < 1 ? 1 : lines > TEXT_LINES ? TEXT_LINES : lines;
+    if (lines > 1 && t.n > 0) {
+        n = moy_text_wrap(f.id, t.p, t.n, b.w / sc, MOY_WRAP_WORDS_PX, ln, TEXT_LINES);
+        n = n < 1 ? 1 : n;
+    }
+    int shown = n < lines ? n : lines;
+    if (!draw || t.n == 0) {
+        return shown * lh;
+    }
+    uint16_t c = pal(&d, tone_ink(&d, tone));
+    if (ib.w > 0) {
+        icon_d(&d, slot, glyph, ib, tone_ink(&d, tone));
+    }
+    uint8_t buf[256];
+    for (int i = 0; i < shown; i++) {
+        moy_ui_span_t part = t;
+        if (lines > 1 && i < TEXT_LINES) {
+            if (i == shown - 1 && n > shown) {
+                // the last line shown: the rest of the text, cut with an ellipsis
+                part.p = t.p + ln[i].off;
+                part.n = (uint16_t)(t.n - ln[i].off);
+            } else if (ln[i].collapse && ln[i].len <= sizeof(buf)) {
+                part.p = buf;
+                part.n = (uint16_t)moy_text_collapse(t.p, &ln[i], buf);
+            } else {
+                part.p = t.p + ln[i].off;
+                part.n = ln[i].len;
+            }
+        }
+        if (centre) {
+            centred_cut(&d, &f, part, b.x, b.w, b.y + i * lh, lh, b.w, c, sc);
+        } else {
+            text_cut(&d, &f, part, b.x, b.y + i * lh, lh, b.w, c, sc);
+        }
+    }
+    return shown * lh;
+}
+
+int moy_ui_empty(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, moy_ui_span_t title,
+                 const uint8_t *lines, size_t n, int fs, int desk, int draw) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int sc = tscale(s);
+    int k = d.fs;
+    int dd = (d.desk ? 72 : 52) * k;
+    pf_t ft = font_of(&d, MOY_UI_FONT_TITLE), fl = font_of(&d, MOY_UI_FONT_CAPTION);
+    // baselines: the title's under the disc, then a line's each pitch
+    int tb = b.y + dd + (d.desk ? 32 : 22) * k;
+    int lb = tb + (d.desk ? 22 : 17) * k, pitch = (d.desk ? 20 : 15) * k;
+    int count = 0;
+    for (size_t i = 0, from = 0; i <= n; i++) {
+        if (i == n || lines[i] == 0) {
+            count += i > from || i < n;
+            from = i + 1;
+        }
+    }
+    int end = (count ? lb + (count - 1) * pitch : tb) + pitch;
+    if (!draw) {
+        return end - b.y;
+    }
+    uint16_t g;
+    if (!ground(&d, &g)) {
+        g = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
+    }
+    int v = tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
+    uint16_t disc = dark(&d) ? pal(&d, tok(&d, MOY_UI_T_SURFACE_ALT, MOY_UI_T_SURFACE))
+                             : mix(g, pal(&d, v), 26);
+    moy_ui_box_t db = {(int16_t)(b.x + (b.w - dd) / 2), b.y, (int16_t)dd, (int16_t)dd};
+    rrect(&d, db.x, db.y, db.w, db.h, dd / 2, 1, disc, 0, 0);
+    icon_d(&d, slot, glyph, db, v);
+    centred_cut(&d, &ft, title, b.x, b.w, tb - ft.ascent * sc, ft.line * sc, b.w,
+                pal(&d, tone_ink(&d, MOY_UI_TONE_INK)), sc);
+    uint16_t dim = pal(&d, tone_ink(&d, MOY_UI_TONE_DIM));
+    int y = lb;
+    for (size_t i = 0, from = 0; i <= n; i++) {
+        if (i == n || lines[i] == 0) {
+            if (i > from || i < n) {
+                moy_ui_span_t l = {lines + from, (uint16_t)(i - from)};
+                centred_cut(&d, &fl, l, b.x, b.w, y - fl.ascent * sc, fl.line * sc, b.w, dim, sc);
+                y += pitch;
+            }
+            from = i + 1;
+        }
+    }
+    return end - b.y;
+}
+
+int moy_ui_toast(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t text_, int slot, int glyph,
+                 int fs, int desk, moy_ui_box_t *out) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int sc = tscale(s);
+    pf_t f = font_of(&d, MOY_UI_FONT_UI);
+    int h = (d.desk ? 30 : 20) * d.fs, pad = (d.desk ? 12 : 8) * d.fs;
+    int side = 16 * d.fs, gap = 6 * d.fs;
+    int room = b.w - 2 * pad - side - gap;
+    int ell = 0;
+    size_t k = moy_text_cut_px(f.id, text_.p, text_.n, room, sc, &ell);
+    int w = 2 * pad + side + gap + tw(&f, text_.p, k, sc)
+            + (ell ? tw(&f, s_dots, sizeof(s_dots), sc) : 0);
+    moy_ui_box_t p = {(int16_t)(b.x + (b.w - w) / 2), (int16_t)(b.y + b.h - h), (int16_t)w,
+                      (int16_t)h};
+    if (out != NULL) {
+        *out = p;
+    }
+    uint16_t g;
+    if (!ground(&d, &g)) {
+        g = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
+    }
+    moy_ui_soft(s, p, h / 2, 153);
+    rrect(&d, p.x, p.y, p.w, p.h, h / 2, 1,
+          mix(g, pal(&d, tone_ink(&d, MOY_UI_TONE_INK)), 240), 0, 0);
+    moy_ui_box_t ib = {(int16_t)(p.x + pad), (int16_t)(p.y + (h - side) / 2), (int16_t)side,
+                       (int16_t)side};
+    int gi = tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE);
+    icon_d(&d, slot, glyph, ib, gi);
+    text_cut(&d, &f, text_, p.x + pad + side + gap, p.y, h, room, g, sc);
     return MOY_UI_OK;
 }
 

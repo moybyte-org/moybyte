@@ -656,6 +656,22 @@ int moy_ui_cast(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int mode) {
     return 1;
 }
 
+int moy_ui_soft(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int k) {
+    dd_t d;
+    open_dd(s, &d, 1);
+    moy_shape_shadow_t sh;
+    if (!shadow_of(&s_depth, r, 1, MOY_UI_UNDER_FULL, &sh)) {
+        return 0;
+    }
+    sh.alpha = sh.alpha * k / 255;
+    if (sh.alpha <= 0) {
+        return 0;
+    }
+    moy_shape_hole_t body = {b.x, b.y, b.w, b.h, r};
+    moy_shape_shadow(&d.t, b.x, b.y, b.w, b.h, &sh, &body);
+    return 1;
+}
+
 // -- the marks (DESIGN.md, "The marks: focus, current, primary") --------------------
 
 static int set(int32_t v) {

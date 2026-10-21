@@ -391,6 +391,12 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->n_nest = 0;
     c->grid_open = 0;
     c->fin_on = 0;
+    c->card_slot = c->card_glyph = c->card_blank = c->card_blank_glyph = -1;
+    c->card_tone = 0;
+    c->spread_cols = 0;
+    c->spread_foot = c->spread_top = c->spread_margin = 0;
+    c->txt_lines = c->txt_centre = c->txt_tone = 0;
+    c->txt_role = -1;
     c->dlg_pick = -1;
     c->typed = 0;
     c->pop_prev = c->pop_card;
@@ -1016,6 +1022,36 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
                       const moy_ui_over_t *o) {
     o = over(o);
     int stacked;
+    if (c->txt_lines || c->txt_centre || c->txt_tone || c->txt_role >= 0) {
+        // the Python face's text options: lines wrapped, centred, a tone, a role
+        int lines = c->txt_lines, centre = c->txt_centre, tone = c->txt_tone;
+        int role = c->txt_role >= 0 ? c->txt_role : MOY_UI_FONT_UI;
+        c->txt_lines = c->txt_centre = c->txt_tone = 0;
+        c->txt_role = -1;
+        int pad = kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
+        moy_ui_box_t m = c->has_at ? c->at : c->page;
+        if (!c->has_at) {
+            m.x = (int16_t)(m.x + pad);
+            m.w = (int16_t)(m.w - 2 * pad);
+        }
+        int h = moy_ui_text_block(s, m, text, role, tone, lines, centre, c->icon_slot,
+                                  c->icon_glyph, c->fs, ground_of(c), 0);
+        int one = lines <= 1 && !c->has_at && h < row_h(c);
+        moy_ui_box_t b = place(c, one ? row_h(c) : h, &stacked);
+        b.x = m.x;
+        b.w = m.w;
+        if (one) {
+            b.y = (int16_t)(b.y + (row_h(c) - h) / 2);
+            b.h = (int16_t)h;
+        }
+        clip_t k;
+        if (clip_row(&k, s, b, stacked, c->page)) {
+            moy_ui_text_block(s, b, text, role, tone, lines, centre, c->row_slot, c->row_glyph,
+                              c->fs, ground_of(c), 1);
+            clip_out(&k);
+        }
+        return;
+    }
     moy_ui_box_t b = place(c, row_h(c), &stacked);
     clip_t k;
     if (!clip_row(&k, s, b, stacked, c->page)) {
@@ -1139,6 +1175,15 @@ int32_t moy_ui_api_slider(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     r.v = v;
     vrow_draw(c, s, b, stacked, MOY_UI_V_SLIDER, st, o, &r);
     return v;
+}
+
+void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    grid_end(c, s);
+    group_close(c, s);
+    c->has_at = 0;
+    c->grp_open = 1;
+    c->grp_n = 0;
+    c->grp_top = c->y;
 }
 
 void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t caption,
@@ -2266,6 +2311,63 @@ void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows) {
     c->menu_danger = rows;
 }
 
+void moy_ui_api_text(moy_ui_ctx_t *c, int lines, int centre, int tone, int role) {
+    c->txt_lines = (int8_t)(lines < 0 ? 0 : lines > 16 ? 16 : lines);
+    c->txt_centre = (int8_t)(centre != 0);
+    c->txt_tone = (int8_t)(tone < 0 || tone > MOY_UI_TONE_DANGER ? 0 : tone);
+    c->txt_role = (int8_t)(role < 0 || role > MOY_UI_FONT_RESULT ? -1 : role);
+}
+
+void moy_ui_api_card_mark(moy_ui_ctx_t *c, moy_ui_span_t badge, int tone,
+                          moy_ui_span_t blank) {
+    c->card_slot = (int16_t)(badge.n ? moy_ui_icon_slot(badge.p, badge.n) : -1);
+    c->card_glyph = (int16_t)(badge.n ? moy_ui_icon_glyph(badge.p, badge.n) : -1);
+    c->card_tone = (int8_t)(tone < 0 || tone > MOY_UI_TONE_DANGER ? 0 : tone);
+    c->card_blank = (int16_t)(blank.n ? moy_ui_icon_slot(blank.p, blank.n) : -1);
+    c->card_blank_glyph = (int16_t)(blank.n ? moy_ui_icon_glyph(blank.p, blank.n) : -1);
+}
+
+void moy_ui_api_grid_spread(moy_ui_ctx_t *c, int cols, int foot, int top, int margin) {
+    c->spread_margin = (int16_t)(margin < 0 ? 0 : margin);
+    c->spread_cols = (uint8_t)(cols < 0 ? 0 : cols > 255 ? 255 : cols);
+    c->spread_foot = (int16_t)(foot < 0 ? 0 : foot);
+    c->spread_top = (int16_t)(top < 0 ? 0 : top);
+}
+
+int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
+                     moy_ui_span_t title, const uint8_t *lines, size_t n) {
+    grid_end(c, s);
+    int slot = moy_ui_icon_slot(icon.p, icon.n), glyph = moy_ui_icon_glyph(icon.p, icon.n);
+    moy_ui_box_t m = c->has_at ? c->at : c->page;
+    int h = moy_ui_empty(s, m, slot, glyph, title, lines, n, c->fs, ground_of(c), 0);
+    int stacked;
+    moy_ui_box_t b = place(c, h, &stacked);
+    b.x = m.x;
+    b.w = m.w;
+    clip_t k;
+    if (clip_row(&k, s, b, stacked, c->page)) {
+        moy_ui_empty(s, b, slot, glyph, title, lines, n, c->fs, ground_of(c), 1);
+        clip_out(&k);
+    }
+    return b.y + h;
+}
+
+void moy_ui_api_toast(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
+                      moy_ui_span_t kind) {
+    moy_ui_box_t m = c->page;
+    if (c->has_at) {
+        m = c->at;
+        c->has_at = 0;
+    } else {
+        m.y = (int16_t)(m.y + 8 * c->fs);
+        m.h = (int16_t)(m.h - 16 * c->fs);
+    }
+    static const uint8_t check[] = "check";
+    moy_ui_span_t ic = kind.n ? kind : (moy_ui_span_t){check, 5};
+    int slot = moy_ui_icon_slot(ic.p, ic.n), glyph = moy_ui_icon_glyph(ic.p, ic.n);
+    moy_ui_toast(s, m, text, slot, glyph, c->fs, ground_of(c), NULL);
+}
+
 // -- card grids ----------------------------------------------------------------------
 
 // The card drawn last: its picture finished over what the app drew in it.
@@ -2276,6 +2378,10 @@ static void card_finish(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     c->fin_on = 0;
     clip_t k;
     if (clip_row(&k, s, c->fin_content, c->grid_open == 1, c->page)) {
+        if (c->fin_slot >= 0 || c->fin_glyph >= 0 || c->fin_tone == MOY_UI_TONE_DANGER) {
+            moy_ui_card_badge(s, c->fin_content, c->fin_slot, c->fin_glyph, c->fin_tone,
+                              c->fin_ground, c->fs, ground_of(c));
+        }
         moy_ui_card_end(s, c->fin_pic, c->fin_content, c->fin_flags ? MOY_UI_F_FOCUS : 0,
                         c->fin_ground, c->fs, ground_of(c));
         clip_out(&k);
@@ -2332,7 +2438,9 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     } else {
         area = c->page;
         c->grid_open = 1;
-        c->y = (int16_t)(c->y + pmetric(c, MOY_UI_M_VALUE_ROW_GRID_TOP));
+        c->y = (int16_t)(c->y + (c->spread_cols > 0 && c->spread_top > 0
+                                     ? c->spread_top * c->fs
+                                     : pmetric(c, MOY_UI_M_VALUE_ROW_GRID_TOP)));
         c->grid_y = c->y;
     }
     int cols = (area.w - 2 * pad + gap) / (w + gap);
@@ -2342,10 +2450,23 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     c->grid_i = 0;
     c->grid_x = (int16_t)(area.x + (area.w - span) / 2);
     c->grid_pitch = (int16_t)(w + gap);
+    int foot = pmetric(c, MOY_UI_M_VALUE_ROW_CARD_FOOT);
+    if (c->spread_cols > 0) {
+        // the columns spread across the rect, the gaps taking the rest
+        cols = c->spread_cols;
+        int m = c->spread_margin * c->fs;
+        c->grid_cols = (uint8_t)cols;
+        c->grid_x = (int16_t)(area.x + m);
+        c->grid_pitch = (int16_t)(cols > 1 ? (area.w - 2 * m - w) / (cols - 1) : w);
+        if (c->spread_foot > 0) {
+            foot = c->spread_foot * c->fs;
+        }
+        c->spread_cols = 0;
+        c->spread_foot = c->spread_top = c->spread_margin = 0;
+    }
     c->grid_w = (int16_t)w;
     c->grid_h = (int16_t)h;
-    c->grid_row = (int16_t)(pmetric(c, MOY_UI_M_VALUE_ROW_CARD_TOP) + h
-                            + pmetric(c, MOY_UI_M_VALUE_ROW_CARD_FOOT)
+    c->grid_row = (int16_t)(pmetric(c, MOY_UI_M_VALUE_ROW_CARD_TOP) + h + foot
                             + pmetric(c, MOY_UI_M_VALUE_ROW_GRID_GAP));
 }
 
@@ -2390,10 +2511,20 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     uint16_t g = 0;
     if (!clip_row(&k, s, b, stacked, c->page)) {
         out[4] = st;
+        c->card_slot = c->card_glyph = c->card_blank = c->card_blank_glyph = -1;
+        c->card_tone = 0;
         return;                     // scrolled out of view: nothing to draw into
     }
-    moy_ui_card(s, b, pic, title, sub, f, c->fs, ground_of(c), &content, &g);
+    moy_ui_card(s, b, pic, title, sub, f, c->fs, ground_of(c), c->card_tone, &content, &g);
+    if (c->card_blank >= 0 || c->card_blank_glyph >= 0) {
+        moy_ui_card_blank(s, content, c->card_blank, c->card_blank_glyph, c->fs, ground_of(c));
+    }
     clip_out(&k);
+    c->fin_slot = c->card_slot;
+    c->fin_glyph = c->card_glyph;
+    c->fin_tone = c->card_tone;
+    c->card_slot = c->card_glyph = c->card_blank = c->card_blank_glyph = -1;
+    c->card_tone = 0;
     c->fin_on = 1;
     c->fin_flags = (uint8_t)(f & MOY_UI_F_FOCUS ? 1 : 0);
     c->fin_ground = g;

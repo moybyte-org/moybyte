@@ -183,9 +183,27 @@ def page(title, o=None):
     return _C.api_page(t[0], t[1], t[2], title, _over(o))
 
 
+_TONES = ("ink", "dim", "value", "danger")
+_FACES = ("ui", "title", "mono", "caption")
+
+
+def _tone(o):
+    v = o.get("tone") if o else None
+    return _TONES.index(v) if v in _TONES else 0
+
+
 def label(text, o=None):
-    """A row of text; no stop."""
+    """A row of text; no stop. `o`'s `wrap` breaks it at word breaks in the
+    row's width, at most `lines` lines (16 where it names none) with an
+    ellipsis after the last; `align` "center" centres each line; `tone`
+    ("dim", "value", "danger") inks it; `face` ("title", "caption") sets it
+    in another type role. Such a label is as tall as its lines."""
     t = _T
+    if o and ("wrap" in o or "align" in o or "tone" in o or "face" in o):
+        lines = (o.get("lines") or 16) if o.get("wrap") else 0
+        f = o.get("face")
+        _C.api_text(t[0], lines, 1 if o.get("align") == "center" else 0, _tone(o),
+                    _FACES.index(f) if f in _FACES else -1)
     _C.api_label(t[0], t[1], t[2], text, _over(o))
 
 
@@ -221,8 +239,12 @@ def list(label, items, cur, o=None):
 
 def group(caption="", o=None):
     """A group headed by `caption`: the rows stacked after it sit on its
-    card until the next group, or `group()`, which ends it."""
+    card until the next group, or `group()`, which ends it. `o`'s `card`
+    opens a group with no caption."""
     t = _T
+    if not caption and o and o.get("card"):
+        _C.api_group_card(t[0], t[1], t[2])
+        return
     _C.api_group(t[0], t[1], t[2], caption, _over(o))
 
 
@@ -313,7 +335,8 @@ def icon(name, o=None):
 
 def progress(label, v, hi, o=None):
     """A row showing `v` of `hi` done: a bar and its percent at the right;
-    no stop."""
+    no stop. Placed (`at`) a row and its bar tall, the label and percent
+    stand on a line over the bar, which spans the rect."""
     t = _T
     _C.api_progress(t[0], t[1], t[2], label, v, hi, _over(o))
 
@@ -452,8 +475,14 @@ def grid(id=None, w=0, h=0, o=None):
     """`grid(id, w, h)` begins a grid of cards whose pictures are `w` x `h`,
     as many columns as the row holds, centred, its rows stacking on the page
     (or from `at`'s rect's top left); `grid()` ends it. In a group it lies
-    on the page's ground between the caption and the group's rows."""
+    on the page's ground between the caption and the group's rows. `o`'s
+    `cols` spreads that many columns across the rect, the gaps taking the
+    rest, `margin` keeps that many pixels at either side, `foot` sets a
+    card's foot under its picture and `top` the room over its first row."""
     t = _T
+    if o and o.get("cols"):
+        _C.api_grid_spread(t[0], o["cols"], o.get("foot") or 0, o.get("top") or 0,
+                           o.get("margin") or 0)
     _C.api_grid(t[0], t[1], t[2], "" if id is None else id, w, h, _over(o))
 
 
@@ -462,9 +491,32 @@ def card(title, sub="", o=None):
     picture, the current mark where `o` says `current`: `(x, y, w, h,
     state)`, the picture's rect -- the app draws its picture there before
     its next ui call, which cuts its corners and rings it -- and the state
-    bits `part`'s are. `w` and `h` are 0 for a card scrolled out of view."""
+    bits `part`'s are. `w` and `h` are 0 for a card scrolled out of view.
+    `o`'s `badge` names the icon on the picture's corner, and `tone`
+    ("value", "danger") inks the sub line; "danger" also veils the picture
+    and inks the badge. `icon` is a card with no picture of its own: that
+    icon on a tile tinted from `value`, and the app draws nothing there."""
     t = _T
+    if o and ("badge" in o or "tone" in o or "icon" in o):
+        _C.api_card_mark(t[0], o.get("badge") or "", _tone(o), o.get("icon") or "")
     return _C.api_card(t[0], t[1], t[2], title, sub, _over(o))
+
+
+def empty(icon, title, lines=()):
+    """An empty page's head, centred in `at`'s rect (else the page's next
+    row): `icon` on a disc of `value`, `title`, then `lines` in the dim ink,
+    what is missing; the page's one verb that fills it follows as a button.
+    The y under it."""
+    t = _T
+    return _C.api_empty(t[0], t[1], t[2], icon, title, _opts(lines))
+
+
+def toast(text, kind="check"):
+    """A toast over the foot of `at`'s rect (else the page's): a pill with
+    icon `kind` and `text`, a passing message. The app draws it each frame
+    for as long as it shows (two seconds, or until the next key)."""
+    t = _T
+    _C.api_toast(t[0], t[1], t[2], text, kind)
 
 
 def part(id, w=0, h=0, o=None):
