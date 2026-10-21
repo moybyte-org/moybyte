@@ -169,7 +169,7 @@ Pointing, panning and previewing (owner, 2026-10-21):
 |---|---|---|---|
 | touch | press and hold, then slide across the sheet: each sprite under the finger shows in the Sprite pane as it passes, so sliding across a row plays it like an animation; lifting picks the last one | drag pans | drag scrolls |
 | wheel | scrolls the sheet's pages | zooms in whole steps about the pointer; Shift+wheel pans across | scrolls |
-| middle button | drag pans the sheet | drag pans | drag scrolls |
+| middle button | drag pans the sheet | drag pans | lists: drag scrolls; Code: autoscroll, its speed set by how far the pointer moves above or below where it was pressed (a click latches it until the next click or key) |
 | T-Deck trackball | rolls across the sheet (the cursor, with the same live preview) | rolls pan the view | moves the cursor |
 | trackball press | | steps the zoom (1×, 2×, Fit) | |
 
