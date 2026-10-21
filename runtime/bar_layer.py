@@ -937,7 +937,7 @@ class BarLayer:
         elif where == "tool":
             lent = self._lent(where)
             if lent is not None and lent[3]:
-                _ui_draw.bar_tap(ws.player._ui[0], -2)    # the app's page steps back
+                _ui_draw.bar_tap(self._lent_ctx(where), -2)    # the app's page steps back
             else:
                 ws._exit_to_caller()
         elif where == "settings":
@@ -979,20 +979,32 @@ class BarLayer:
 
     # -- what a running app lends its bar (ui.bar) -----------------------------
 
+    def _lent_ctx(self, where):
+        """The ui context whose `ui.bar` lends `where`'s bar: the running app
+        cart's ("tool"), the registered app's on top ("app"), else None."""
+        ws = self.ws
+        if where == "tool":
+            ui = getattr(getattr(ws, "player", None), "_ui", None)
+            return ui[0] if ui else None
+        if where == "app":
+            app = ws._apps_by_id.get(ws.wm.top_kind())
+            host = getattr(app, "_ui", None) if getattr(app, "UI", False) else None
+            return getattr(host, "ctx", None)
+        return None
+
     def _lent(self, where):
-        """(title, icon names, half-strength bits, back) the running app cart
-        lent `where`'s bar in its last frame (`ui.bar`), or None."""
-        if where != "tool":
+        """(title, icon names, half-strength bits, back, chip) the running
+        app lent `where`'s bar in its last frame (`ui.bar`), or None; a
+        tool that names no icon is "" among the names, and `chip` its words."""
+        ctx = self._lent_ctx(where)
+        if ctx is None:
             return None
-        ui = getattr(getattr(self.ws, "player", None), "_ui", None)
-        if not ui:
-            return None
-        got = _ui_draw.bar_lent(ui[0])
+        got = _ui_draw.bar_lent(ctx)
         if got is None:
             return None
-        title, slots, off, back = got
+        title, slots, off, back, chip = got
         names = tuple(_iconsets.SLOTS[s] if 0 <= s < len(_iconsets.SLOTS) else "" for s in slots)
-        return (title, names, off, back)
+        return (title, names, off, back, chip)
 
     def _lent_rects(self, where, end, bar, game):
         """The lent tools' boxes in bar coordinates after a title ending at
@@ -1007,6 +1019,16 @@ class BarLayer:
         x = end + 12 * u
         out = []
         for i in range(len(lent[1])):
+            if not lent[1][i] and lent[4]:
+                # a chip of words (a compact cycle: Paint's zoom), 18 tall
+                if i == 0:
+                    x -= 2 * u
+                cw = _ui_draw.text_width(lent[4], u, "caption") + 14 * u
+                ch = 18 * u
+                out.append(((x, 0, cw, bar[3]), i, bool(lent[2] >> i & 1), lent[4],
+                            (x, (bar[3] - ch) // 2, cw, ch)))
+                x += cw + 8 * u
+                continue
             out.append(((x - 3 * u, 0, side + 6 * u, bar[3]), i, bool(lent[2] >> i & 1),
                         lent[1][i], (x, y, side, side)))
             x += 22 * u
@@ -1017,8 +1039,22 @@ class BarLayer:
         chrome ink, a tool with nothing to do at half strength."""
         ws = self.ws
         th = ws.theme_colors
-        for _hit, _i, off, name, r in self._lent_rects(where, end, bar, game):
+        lent = self._lent(where)
+        chip = lent[4] if lent is not None else ""
+        u = 1 if game else _layout_base.unit()
+        for _hit, i, off, name, r in self._lent_rects(where, end, bar, game):
             ink = _ui_draw.disabled_ink(th) if off else th["chrome_ink"]
+            if chip and name == chip and not lent[1][i]:
+                x, y, w, h = r
+                cv.rrect(x, y, w, h, 5 * u, th.get("raised", th["panel"]),
+                         ring=th["border"], line=u)
+                f = _ui_draw.font("caption")
+                was = _ui_draw.print_font(f[0])
+                cv.print_scaled(chip, x + (w - _ui_draw.text_width(chip, u, "caption")) // 2,
+                                y + (h - f[2] * u) // 2, ink, u)
+                if was is not None:
+                    _ui_draw.print_font(was)
+                continue
             if not ws.draw_icon(name, r, ink, cv):
                 ws._glyph(name, r, ink, cv)
 
@@ -1414,11 +1450,11 @@ class BarLayer:
             if zone[0] <= px < zone[0] + self._back_w(game):
                 self.go_back(where)
                 return True
-            end = self._title_end(where, zone, bar, game) if where == "tool" else 0
+            end = self._title_end(where, zone, bar, game) if where in ("tool", "app") else 0
             for hit, i, off, _name, _r in self._lent_rects(where, end, bar, game):
                 if _in(px, py, hit):
                     if not off:
-                        _ui_draw.bar_tap(ws.player._ui[0], i)
+                        _ui_draw.bar_tap(self._lent_ctx(where), i)
                         ws._dirty = True
                     return True
             if owner is not None and not getattr(owner, "back_title", None):

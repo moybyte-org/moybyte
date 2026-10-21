@@ -2296,13 +2296,37 @@ class DeviceCanvas:
                                stepped, self._cam_x, self._cam_y, self._clip_x0,
                                self._clip_y0, self._clip_x1, self._clip_y1)
 
-    def picture(self, img, x, y, w, h, r=0):
-        """Drawing `img` (MOY64 indices) scaled to w x h at (x, y) inside
-        corners of radius `r`, as `cover` draws: its pixels baked to RGB565
-        once (`_bake_indices`, kept on the image). The pixels written."""
+    def picture(self, img, x, y, w, h, r=0, src=None):
+        """Drawing `img` (MOY64 indices) -- its (sx, sy, sw, sh) part `src`,
+        else the whole -- scaled to w x h at (x, y) inside corners of radius
+        `r`, as `cover` draws: its pixels baked to RGB565 once
+        (`_bake_indices`, kept on the image; `rebake` mends a part of it).
+        The pixels written."""
         if getattr(img, "_rgb_i", None) is None:
             self._bake_indices(img)
-        return self.cover(img._rgb_i, img.w, 0, 0, img.w, img.h, x, y, w, h, r)
+        if src is None:
+            return self.cover(img._rgb_i, img.w, 0, 0, img.w, img.h, x, y, w, h, r)
+        return self.cover(img._rgb_i, img.w, src[0], src[1], src[2], src[3], x, y, w, h, r)
+
+    def rebake(self, img, x, y, w, h):
+        """Bake the (x, y, w, h) part of `img`'s indices into the RGB565 bake
+        `picture` keeps on it, a row a call: what a stroke changed, where a
+        whole re-bake would walk the picture. Nothing while it has no bake."""
+        buf = getattr(img, "_rgb_i", None)
+        if buf is None:
+            return
+        x0 = max(0, int(x))
+        y0 = max(0, int(y))
+        x1 = min(img.w, int(x) + int(w))
+        y1 = min(img.h, int(y) + int(h))
+        if x1 <= x0 or y1 <= y0:
+            return
+        iw = img.w
+        pix = memoryview(img.pix)
+        n = x1 - x0
+        for row in range(y0, y1):
+            o = row * iw + x0
+            self._gfx.blit_indices(buf, iw, img.h, x0, row, pix[o:o + n], n, 1, self._wire)
 
     def tint565(self, dst, buf, sw, sx, sy, w, h, c, alpha):
         """Copy the (sx, sy, w, h) sub-rect of a picture of RGB565 words `sw`

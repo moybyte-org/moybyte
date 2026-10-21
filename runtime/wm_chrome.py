@@ -403,6 +403,12 @@ class WindowChrome:
         base = ws.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
         if shell and win.kind != "menu" and not _ui_draw.depth()[0]:
             base = base.upper()
+        app = ws._apps_by_id.get(win.kind)
+        host = getattr(app, "_ui", None) if getattr(app, "UI", False) else None
+        if host is not None:
+            lent = _ui_draw.bar_lent(host.ctx)
+            if lent is not None and lent[0] and lent[0] != base:
+                return base + _title_sep() + lent[0]   # the document it lent ("Paint · Garden")
         if win.kind == "menu" and ws.cart:
             t = ws.cart.get("title")
             if t:
@@ -422,8 +428,8 @@ class WindowChrome:
                     return t[:at]                 # an app's chip names the app
                 if at > 0 and win.kind == "desktop":
                     return t[at + len(sep):]      # a playtest's chip names the cart
-                if at > 0 and win.kind == "menu":
-                    return t[:at]
+                if at > 0 and (win.kind == "menu" or win.kind in self.ws._apps_by_id):
+                    return t[:at]                 # the Editor's, an app's: the app
         return t
 
     def _win_btns(self, win):

@@ -30,6 +30,7 @@
 #define MOY_UI_API_CAPS 16          // the group captions one frame records
 #define MOY_UI_API_NAME 32          // the focused id's text, NUL-terminated
 #define MOY_UI_API_TIP 48           // a tooltip's or a lent title's text, NUL-terminated
+#define MOY_UI_API_CHIP 12          // a lent chip's words (ui.bar), NUL-terminated
 #define MOY_UI_API_BAR 6            // the tools an app lends its bar
 
 // The input a frame resolves over, the run snapshot's shape: the buttons held
@@ -227,6 +228,9 @@ typedef struct {
     int16_t bar_slot[MOY_UI_API_BAR];
     uint8_t bar_n, bar_off, bar_seen, bar_back;
     int8_t bar_act;
+    // the one tool lent as words, not an icon (Paint's zoom chip), and its place
+    char bar_chip[MOY_UI_API_CHIP];
+    int8_t bar_chip_at;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -404,7 +408,7 @@ void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 int moy_ui_api_tool(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
                     moy_ui_span_t label, const moy_ui_over_t *o);
 // The app's bar (§1): `title` and the tools (`tools` NUL-separated icon slot
-// names, `len` bytes, at most MOY_UI_API_BAR; bit i of `off` the tool i drawn
+// names -- one that names no icon is a chip of those words, `len` bytes, at most MOY_UI_API_BAR; bit i of `off` the tool i drawn
 // at half strength, which nothing activates) lent to the host's bar for this
 // frame; the host draws them (moy_ui_api_bar_lent) and taps them
 // (moy_ui_api_bar_tap). MOY_UI_BAR_BACK in `off`: the app has a page to step
@@ -424,6 +428,9 @@ void moy_ui_api_rule(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // their count into *n, the half-strength bits and MOY_UI_BAR_BACK into *off.
 int moy_ui_api_bar_lent(const moy_ui_ctx_t *c, const char **title, int16_t *slots, int *n,
                         uint32_t *off);
+// The words of the one tool the bar lent last that names no icon (a compact
+// cycle's chip, Paint's zoom), "" for none; its place among the tools at *at.
+const char *moy_ui_api_bar_chip(const moy_ui_ctx_t *c, int *at);
 // The host's bar activated tool `i` of the bar lent last (MOY_UI_BAR_UP its
 // way back); the next ui.bar answers it.
 void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i);

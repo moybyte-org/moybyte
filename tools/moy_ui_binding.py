@@ -321,6 +321,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_bar_lent", [c.c_void_p, c.POINTER(c.c_char_p), c.POINTER(c.c_int16),
                              c.POINTER(_I), c.POINTER(c.c_uint32)], _I),
     ("moy_ui_api_bar_tap", [c.c_void_p, _I], None),
+    ("moy_ui_api_bar_chip", [c.c_void_p, c.POINTER(_I)], c.c_char_p),
     ("moy_ui_api_rule", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_grid", [c.c_void_p, c.POINTER(_Sink), _Span, _I, _I, c.c_void_p], None),
     ("moy_ui_api_card", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p, c.c_void_p],
@@ -1144,8 +1145,11 @@ def binding():
         off = c.c_uint32()
         if not lib.moy_ui_api_bar_lent(p, c.byref(title), slots, c.byref(n), c.byref(off)):
             return None
+        at = _I()
+        chip = lib.moy_ui_api_bar_chip(p, c.byref(at))
         return ((title.value or b"").decode("utf-8", "replace"),
-                tuple(slots[i] for i in range(n.value)), off.value)
+                tuple(slots[i] for i in range(n.value)), off.value,
+                (chip or b"").decode("utf-8", "replace"))
 
     def api_rule(ctx, cv, look):
         p, _k = _ctx(ctx)

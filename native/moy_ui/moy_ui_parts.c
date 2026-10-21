@@ -1107,6 +1107,9 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
     }
     if (tone != MOY_UI_TONE_INK && tone != MOY_UI_TONE_DIM && dim != ink) {
         dim = tone_ink(&d, tone);
+        if (!sub.n && tone == MOY_UI_TONE_VALUE) {
+            ink = dim;                  // a card with no sub line: its title takes the tone
+        }
     }
     pf_t ft = font_of(&d, MOY_UI_FONT_UI), fsub = font_of(&d, MOY_UI_FONT_CAPTION);
     if (title.n && room > 0) {
@@ -2371,7 +2374,8 @@ int moy_ui_tool_draw(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph
     }
     int sc = tscale(s);
     if (d.desk || word.n == 0) {
-        int side = (d.desk ? 24 : 16) * k;
+        // the icon by the tool's size: 16 under 30, 20 under 40, else 24
+        int side = (d.desk ? (b.w < 40 * k ? 20 : 24) : 16) * k;
         moy_ui_box_t ib = {(int16_t)(b.x + moy_ui_fdiv(b.w - side, 2)),
                            (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)), (int16_t)side,
                            (int16_t)side};

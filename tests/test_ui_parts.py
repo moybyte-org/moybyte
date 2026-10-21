@@ -2513,7 +2513,7 @@ def _bar_page():
 def test_the_bar_an_app_lends_is_read_and_tapped_by_its_host():
     from runtime import iconsets
     r = _bar_page()
-    title, slots, off, back = ui_draw.bar_lent(r.ctx)
+    title, slots, off, back, _chip = ui_draw.bar_lent(r.ctx)
     assert title == "Story" and [iconsets.SLOTS[s] for s in slots] == ["undo", "redo"]
     assert off == 0b10 and back is True
     ui_draw.bar_tap(r.ctx, 0)

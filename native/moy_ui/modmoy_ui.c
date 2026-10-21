@@ -2529,8 +2529,8 @@ static mp_obj_t ui_api_bar(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_bar_obj, 6, 6, ui_api_bar);
 
-// api_bar_lent(ctx) -> (title, slots, off) the frame drawn last lent its
-// bar, or None
+// api_bar_lent(ctx) -> (title, slots, off, chip) the frame drawn last lent
+// its bar, or None
 static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
     const char *title = NULL;
     int16_t slots[MOY_UI_API_BAR];
@@ -2543,9 +2543,11 @@ static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
     for (int i = 0; i < n; i++) {
         sl[i] = MP_OBJ_NEW_SMALL_INT(slots[i]);
     }
-    mp_obj_t t[3] = {mp_obj_new_str(title, strlen(title)), mp_obj_new_tuple(n, sl),
-                     mp_obj_new_int_from_uint(off)};
-    return mp_obj_new_tuple(3, t);
+    int at = -1;
+    const char *chip = moy_ui_api_bar_chip(ctx_of(ctx), &at);
+    mp_obj_t t[4] = {mp_obj_new_str(title, strlen(title)), mp_obj_new_tuple(n, sl),
+                     mp_obj_new_int_from_uint(off), mp_obj_new_str(chip, strlen(chip))};
+    return mp_obj_new_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_bar_lent_obj, ui_api_bar_lent);
 

@@ -533,6 +533,13 @@ def toast(text, kind="check"):
     _C.api_toast(t[0], t[1], t[2], text, kind)
 
 
+def cursor(x, y, w, h):
+    """A canvas's cursor around the rect (x, y, w, h) the app drew: the
+    theme's ring round a dark keyline, so it reads on a pixel of any colour
+    (Paint's brush, a swatch the keys are on). It is no stop and no focus."""
+    _D.cursor(_T[1], (x, y, w, h))
+
+
 def tool(icon, label, o=None):
     """A tool: icon `icon` as a flat button in `at`'s rect (else a row of
     the page), wearing only its marks: current where `o` says `current`, at

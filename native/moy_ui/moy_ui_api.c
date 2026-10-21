@@ -174,6 +174,7 @@ void moy_ui_api_reset(moy_ui_ctx_t *c) {
     c->icon_slot = c->icon_glyph = c->row_slot = c->row_glyph = -1;
     c->dlg_pick = -1;
     c->bar_act = -1;
+    c->bar_chip_at = -1;
 }
 
 moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n) {
@@ -2683,9 +2684,17 @@ int32_t moy_ui_api_bar(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t ti
     c->bar_title[n] = 0;
     int k = moy_ui_fields(tools, len);
     k = k < MOY_UI_API_BAR ? k : MOY_UI_API_BAR;
+    c->bar_chip[0] = 0;
+    c->bar_chip_at = -1;
     for (int i = 0; i < k; i++) {
         moy_ui_span_t t = field_at(tools, len, i);
         c->bar_slot[i] = (int16_t)moy_ui_icon_slot(t.p, t.n);
+        if (c->bar_slot[i] < 0 && t.n) {
+            size_t m = t.n < MOY_UI_API_CHIP - 1 ? t.n : MOY_UI_API_CHIP - 1;
+            memcpy(c->bar_chip, t.p, m);
+            c->bar_chip[m] = 0;
+            c->bar_chip_at = (int8_t)i;
+        }
     }
     c->bar_n = (uint8_t)k;
     c->bar_off = (uint8_t)(off & ((1u << MOY_UI_API_BAR) - 1u));
@@ -2736,6 +2745,11 @@ int moy_ui_api_bar_lent(const moy_ui_ctx_t *c, const char **title, int16_t *slot
     *n = c->bar_n;
     *off = c->bar_off | (c->bar_back ? MOY_UI_BAR_BACK : 0u);
     return 1;
+}
+
+const char *moy_ui_api_bar_chip(const moy_ui_ctx_t *c, int *at) {
+    *at = c->bar_seen ? c->bar_chip_at : -1;
+    return *at >= 0 ? c->bar_chip : "";
 }
 
 void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i) {

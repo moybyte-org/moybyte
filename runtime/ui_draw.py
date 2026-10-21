@@ -1768,6 +1768,24 @@ def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, select
                     | (_MARK_SELECTED if selected else 0), fs)
 
 
+def cursor(cv, rect, keyline=0):
+    """A canvas's cursor around `rect` (a pixel, a brush, a swatch): a
+    `keyline` line round it, a line of the frame's `surface`, the theme's
+    `accent` ring two pixels wide with corners of three, and a last line of
+    `surface` (DESIGN.md's cursor), so it reads on a pixel of any colour.
+    Under the frame's theme (`ui_frame`)."""
+    th = _TH
+    x, y, w, h = rect
+    cv.rectb(x - 1, y - 1, w + 2, h + 2, keyline)
+    if th is None or th.get("surface") is None:
+        return
+    s = th["surface"]
+    cv.rectb(x - 2, y - 2, w + 4, h + 4, s)
+    cv.rrect(x - 3, y - 3, w + 6, h + 6, 2, None, s)
+    cv.rrect(x - 4, y - 4, w + 8, h + 8, 3, None, th.get("accent", th["ink"]), 2)
+    cv.rrect(x - 5, y - 5, w + 10, h + 10, 4, None, s)
+
+
 def current(cv, th, rect, r=0, back=False, side=False, fs=None, keep=False):
     """The current mark under `rect`'s content: the theme's plate, fill or
     bar (`side`: a bar beside a row, not under it; `back`: in a window
@@ -1859,12 +1877,14 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
 
 def bar_lent(ctx):
     """What the app whose context is `ctx` lent its bar in the frame it drew
-    last (`ui.bar`): (title, icon slots, half-strength bits, back), or None."""
+    last (`ui.bar`): (title, icon slots, half-strength bits, back, chip), or
+    None; `chip` the words of the tool that names no icon (its slot -1),
+    "" for none."""
     got = _C.api_bar_lent(ctx)
     if got is None:
         return None
-    title, slots, off = got
-    return (title, slots, off & 0x3F, bool(off & 0x80000000))
+    title, slots, off, chip = got
+    return (title, slots, off & 0x3F, bool(off & 0x80000000), chip)
 
 
 def bar_tap(ctx, i):
