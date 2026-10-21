@@ -1199,7 +1199,7 @@
       "paints_cap": 12,
       "entries_cap": 160,
       "tiles_cap": 12,
-      "app_buttons_cap": 8,
+      "app_buttons_cap": 12,
       "name_max": 12,
       "text_max": 24,
       "backdrop": {

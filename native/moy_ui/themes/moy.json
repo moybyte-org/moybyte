@@ -53,8 +53,9 @@
                "chip_cur": "#0b0d1e" },
       "tile_fill": "#23274b", "disabled": "#686c92", "danger_ink": "#ff8f8f",
       "buttons": { "normal": { "fill": "#23274b" }, "tonal": { "fill": "#2e3360" },
-                   "danger": { "ink": "#eef0fb" } },
-      "app_buttons": { "home": { "normal": { "border": [1, "#848aad"] } } },
+                   "danger": { "ink": "#ff8f8f" } },
+      "app_buttons": { "home": { "normal": { "border": [1, "#848aad"] } },
+                       "calc": { "danger": { "ink": "#eef0fb" } } },
       "backdrop": { "desk": [{ "k": "circle", "at": [801, 850, 433], "p": "#191c3e" },
                              { "k": "circle", "at": [889, 733, 433], "p": "#0f1127" }] }
     },
@@ -70,8 +71,9 @@
       "hhbar": { "sys": ["#ffffff", "#4c3fd6", "#ffffff"] },
       "tile_fill": "#ffffff", "disabled": "#9a9eb0", "danger_ink": "#b3261e",
       "buttons": { "normal": { "fill": "#f4f5f8" }, "tonal": { "fill": "#e3e6ed" },
-                   "danger": { "ink": "#15161d" } },
-      "app_buttons": { "home": { "normal": { "border": [1, "#7b8294"] } } },
+                   "danger": { "ink": "#b3261e" } },
+      "app_buttons": { "home": { "normal": { "border": [1, "#7b8294"] } },
+                       "calc": { "danger": { "ink": "#15161d" } } },
       "backdrop": { "desk": [{ "k": "circle", "at": [918, 1000, 500], "p": "#e2e5ee" },
                              { "k": "circle", "at": [88, 983, 350], "p": "#e5e3f1" }] }
     }

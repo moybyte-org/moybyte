@@ -847,8 +847,9 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "               \"chip_cur\": \"#0b0d1e\" },\012"
     "      \"tile_fill\": \"#23274b\", \"disabled\": \"#686c92\", \"danger_ink\": \"#ff8f8f\",\012"
     "      \"buttons\": { \"normal\": { \"fill\": \"#23274b\" }, \"tonal\": { \"fill\": \"#2e3360\" },\012"
-    "                   \"danger\": { \"ink\": \"#eef0fb\" } },\012"
-    "      \"app_buttons\": { \"home\": { \"normal\": { \"border\": [1, \"#848aad\"] } } },\012"
+    "                   \"danger\": { \"ink\": \"#ff8f8f\" } },\012"
+    "      \"app_buttons\": { \"home\": { \"normal\": { \"border\": [1, \"#848aad\"] } },\012"
+    "                       \"calc\": { \"danger\": { \"ink\": \"#eef0fb\" } } },\012"
     "      \"backdrop\": { \"desk\": [{ \"k\": \"circle\", \"at\": [801, 850, 433], \"p\": \"#191c3e\" },\012"
     "                             { \"k\": \"circle\", \"at\": [889, 733, 433], \"p\": \"#0f1127\" }] }\012"
     "    },\012"
@@ -864,8 +865,9 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "      \"hhbar\": { \"sys\": [\"#ffffff\", \"#4c3fd6\", \"#ffffff\"] },\012"
     "      \"tile_fill\": \"#ffffff\", \"disabled\": \"#9a9eb0\", \"danger_ink\": \"#b3261e\",\012"
     "      \"buttons\": { \"normal\": { \"fill\": \"#f4f5f8\" }, \"tonal\": { \"fill\": \"#e3e6ed\" },\012"
-    "                   \"danger\": { \"ink\": \"#15161d\" } },\012"
-    "      \"app_buttons\": { \"home\": { \"normal\": { \"border\": [1, \"#7b8294\"] } } },\012"
+    "                   \"danger\": { \"ink\": \"#b3261e\" } },\012"
+    "      \"app_buttons\": { \"home\": { \"normal\": { \"border\": [1, \"#7b8294\"] } },\012"
+    "                       \"calc\": { \"danger\": { \"ink\": \"#15161d\" } } },\012"
     "      \"backdrop\": { \"desk\": [{ \"k\": \"circle\", \"at\": [918, 1000, 500], \"p\": \"#e2e5ee\" },\012"
     "                             { \"k\": \"circle\", \"at\": [88, 983, 350], \"p\": \"#e5e3f1\" }] }\012"
     "    }\012"
@@ -1049,7 +1051,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {5307, 4359, 4385};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {5441, 4359, 4385};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
