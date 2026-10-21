@@ -212,7 +212,7 @@ UNIX_MP := $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython
 # really allocates; tests/test_frame_alloc.py measures on this one. It needs a
 # 32-bit C toolchain (gcc-multilib) and is skipped, out loud, without one.
 UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-r32/micropython
-UNIX_MP_R32_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 \
+UNIX_MP_R32_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off \
 	-DMICROPY_OBJ_REPR=MICROPY_OBJ_REPR_C \
 	-DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
 UNIX_MP_NATIVE := native
@@ -261,9 +261,11 @@ unix-micropython:
 	  if [ -f "$$f" ] && [ -n "$$(find -L $(UNIX_MP_USERMODS)/ -name '*.[ch]' \
 	      -newer "$$f" -print -quit 2>/dev/null)" ]; then rm -f "$$f"; fi; done
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
+	@# -ffp-contract=off: multiply-adds unfused, the rounding the audio parity
+	@# reference uses, whatever the compiler's default target (an FMA one fuses them).
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
-	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1 \
+	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1\ -ffp-contract=off \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 	@if echo 'int main(void){return 0;}' | cc -m32 -x c - -o /dev/null 2>/dev/null; then \
