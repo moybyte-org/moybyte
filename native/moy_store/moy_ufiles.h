@@ -4,8 +4,12 @@
 // What a PC sees on the mounted card is what the Files app shows.
 //
 //   the kinds        drawings (.moyimg), docs (.md), sprites (.moygfx), music
-//                    (.moysong), and recordings, one FOLDER an item. Every verb
-//                    validates its kind against them: another is MOY_UF_BAD.
+//                    (.moysong), and recordings and stories, one FOLDER an
+//                    item. Every verb validates its kind against them: another
+//                    is MOY_UF_BAD. A folder item's member is `item/file`: it
+//                    loads, saves (its item made on need) and deletes (unkept)
+//                    by that name, and the item lists, renames, duplicates and
+//                    goes to the trash whole.
 //   the vault        docs holds notes and more: a `.py`, `.lua`, `.txt` or
 //                    `.json` is listed and addressed by its WHOLE name, a `.md`
 //                    by its stem, so `todo.txt` and `todo` never shadow each
@@ -69,7 +73,7 @@
 #define MOY_UF_NONE (-1)
 #define MOY_UF_BAD (-2)
 #define MOY_UF_NAME_MAX 255u        // a stored name's bytes
-#define MOY_UF_KINDS 5
+#define MOY_UF_KINDS 6
 #define MOY_UF_TRASH_KEEP 50u
 #define MOY_UF_HISTORY_KEEP 32u
 #define MOY_UF_COVER_SIDE 128

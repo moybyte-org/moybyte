@@ -23,6 +23,7 @@ static const struct {
     { "sprites", ".moygfx", "sheet", 0 },
     { "music", ".moysong", "song", 0 },
     { "recordings", "", "recording", 1 },
+    { "stories", "", "story", 1 },
 };
 #define DOCS 1
 
@@ -239,6 +240,32 @@ static char *file_path(const char *root, int kind, const char *name) {
     char *d = kind_dir(root, kind);
     char *out = d ? cat(d, "/", name, item_ext(kind, name), NULL) : NULL;
     str_free(d);
+    return out;
+}
+
+// A folder item's member, `item/file`: one `/`, neither part empty, `.` or
+// `..`, no `\\`. Its path, or NULL and `*rc` BAD for a name that is not one
+// (NONE where `name` names no member at all: no `/`).
+static char *member_path(const char *root, int kind, const char *name, int *rc) {
+    const char *cut = strchr(name, '/');
+    if (cut == NULL) {
+        *rc = MOY_UF_NONE;
+        return NULL;
+    }
+    const char *file = cut + 1;
+    size_t item_n = (size_t)(cut - name);
+    int bad = item_n == 0 || *file == 0 || strchr(file, '/') != NULL
+              || strchr(name, '\\') != NULL || strcmp(file, ".") == 0
+              || strcmp(file, "..") == 0 || (item_n == 1 && name[0] == '.')
+              || (item_n == 2 && name[0] == '.' && name[1] == '.');
+    if (bad) {
+        *rc = MOY_UF_BAD;
+        return NULL;
+    }
+    char *d = kind_dir(root, kind);
+    char *out = d ? cat(d, "/", name, NULL) : NULL;
+    str_free(d);
+    *rc = out ? 0 : MOY_ENOMEM;
     return out;
 }
 
@@ -857,8 +884,14 @@ int moy_uf_load(const char *root, const char *kind, const char *name,
     if (k < 0) {
         return rc;
     }
-    if (KINDS[k].folder) {
-        return MOY_UF_NONE;
+    if (KINDS[k].folder) {                  // a member, `item/file`
+        char *m = member_path(root, k, name, &rc);
+        if (m == NULL) {
+            return rc;
+        }
+        rc = moy_fs_read(m, NULL, out);
+        str_free(m);
+        return rc == 0 ? 0 : fs_none(rc);
     }
     char *p = file_path(root, k, name);
     if (p == NULL) {
@@ -922,8 +955,24 @@ int moy_uf_save(const char *root, const char *kind, const char *name,
     if (k < 0) {
         return rc;
     }
-    if (KINDS[k].folder) {
-        return MOY_UF_BAD;          // a folder item is written by its own tools
+    if (KINDS[k].folder) {          // a member, `item/file`, its item made on need
+        char *m = member_path(root, k, name, &rc);
+        if (m == NULL) {
+            return rc == MOY_UF_NONE ? MOY_UF_BAD : rc;
+        }
+        size_t item_n = (size_t)(strchr(name, '/') - name);
+        char item[MOY_UF_NAME_MAX + 1];
+        rc = name_out_set(name_out, name);
+        if (rc == 0) {
+            memcpy(item, name, item_n);
+            item[item_n] = 0;
+            rc = mkdirs(root, 1, KINDS[k].name, item, NULL);
+        }
+        if (rc == 0) {
+            rc = moy_fs_publish(m, data, n);
+        }
+        str_free(m);
+        return rc;
     }
     rc = slug_item(k, name, name_out);
     if (rc == 0) {
@@ -1178,6 +1227,20 @@ int moy_uf_delete(const char *root, const char *kind, const char *name,
     int rc;
     int k = kind_arg(kind, &rc);
     if (k < 0) {
+        return rc;
+    }
+    if (KINDS[k].folder && strchr(name, '/') != NULL) {
+        // a member goes, unkept: its item is what the trash holds
+        char *m = member_path(root, k, name, &rc);
+        if (m == NULL) {
+            return rc;
+        }
+        rc = name_out_set(name_out, name);
+        if (rc == 0) {
+            rc = exists(m) ? moy_fs_remove(m) : MOY_UF_NONE;
+            moy_fs_forget_bak(m);   // a publish's backup would read it back
+        }
+        str_free(m);
         return rc;
     }
     rc = mkdirs(root, 0, TRASH_DIR, KINDS[k].name, NULL);

@@ -170,7 +170,7 @@ def _sibling_path(root, name):
 # denies it, still serves and takes `files/<kind>/` by path.
 # tests/test_userfiles_parity.py holds these to the C.
 FILES_DIR = "files"
-FILE_KIND_NAMES = ("drawings", "docs", "sprites", "music", "recordings")
+FILE_KIND_NAMES = ("drawings", "docs", "sprites", "music", "recordings", "stories")
 
 
 def files_root(root):

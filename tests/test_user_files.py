@@ -160,6 +160,31 @@ def test_folder_valued_recordings_ride_the_same_verbs(tmp_path):
     assert moy_carts.trash_list(root) == []
 
 
+def test_a_folder_items_members_load_save_and_delete_by_item_and_file(tmp_path):
+    """A story (a `stories` item) is its document and its images, each a
+    member: `item/file`. The item is made by its first member, lists,
+    duplicates and goes to the trash whole; a member is deleted unkept."""
+    root = _root(tmp_path)
+    assert moy_carts.save_file("stories", "brave/story.json", "{}", root) == "brave/story.json"
+    moy_carts.save_file("stories", "brave/pg1.moyimg", "img", root)
+    assert moy_carts.list_files("stories", root) == ["brave"]
+    assert moy_carts.load_file("stories", "brave/story.json", root) == "{}"
+    assert moy_carts.load_file("stories", "brave/nope.json", root) is None
+    assert moy_carts.load_file("stories", "brave", root) is None
+    for bad in ("../x/story.json", "brave/../x", "brave/a/b", "/story.json", "brave/",
+                "brave\\x/story.json"):
+        with pytest.raises(ValueError):
+            moy_carts.save_file("stories", bad, "x", root)
+    assert moy_carts.duplicate_file("stories", "brave", root) == "brave_2"
+    assert moy_carts.load_file("stories", "brave_2/pg1.moyimg", root) == "img"
+    moy_carts.delete_file("stories", "brave/pg1.moyimg", root)
+    assert moy_carts.load_file("stories", "brave/pg1.moyimg", root) is None
+    assert moy_carts.trash_list(root) == []
+    moy_carts.delete_file("stories", "brave", root)
+    assert moy_carts.trash_list(root) == [("stories", "brave")]
+    assert moy_carts.list_files("stories", root) == ["brave_2"]
+
+
 # -- provenance stamps (#108 phase 2) --------------------------------------------
 
 def test_provenance_stamp_roundtrips_and_is_ignored_by_decoders():
