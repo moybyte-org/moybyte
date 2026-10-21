@@ -390,6 +390,10 @@ try {
   // any token makes the url differ from the bare "worker.js" a browser may have
   // cached -- it just stops changing between builds.
   const MOY_BUILD = "@MOY_BUILD@";
+  // The channel this page was published as: empty but on a channel's site,
+  // whose build (site/build.py --channel) rewrites this one line. The worker
+  // keeps that page's stores apart from the stable site's (moy_store.channelNav).
+  const MOY_CHANNEL = "";
   // The worker url carries a CACHE BUSTER, and it is not superstition: browsers
   // cache worker scripts stubbornly, and a hard reload that refreshes the
   // document will happily keep an old worker.js. That is not hypothetical --
@@ -405,7 +409,7 @@ try {
   const w = new Worker("worker.js?v=" + MOY_BUILD, { type: "module" });
   window.__moyAttach(w);
   // A coarse pointer is a finger: the console's hints start on touch.
-  w.postMessage({ t: "init", search: location.search,
+  w.postMessage({ t: "init", search: location.search, channel: MOY_CHANNEL,
                   coarse: !!(window.matchMedia && matchMedia("(pointer: coarse)").matches) });
   // Leaving the page ends the VM with it. A page the back-forward cache keeps
   // keeps its worker too -- and on iOS that worker's wasm memory, so the next

@@ -18,8 +18,9 @@
 // JS replayer, the wire protocol and the per-surface delta are gone.
 //
 // Protocol -- main -> worker:
-//   {t:"init", search, coarse}  boot the console; `search` is location.search
-//                        (tier + cart), `coarse` the page's (pointer: coarse)
+//   {t:"init", search, coarse, channel}  boot the console; `search` is
+//                        location.search (tier + cart), `coarse` the page's
+//                        (pointer: coarse), `channel` its MOY_CHANNEL
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
 //   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
 //   {t:"state"}          the console's `state` (web_boot.state_json), for a harness
@@ -502,6 +503,9 @@ const RECORD_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + stor
 // site mode only, where a page keeps its own carts.
 const WRITTEN_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.WRITTEN_ROOT;
 let writtenStore = null;
+// The storage every store opens through: the origin's, or the page's channel's
+// (moy_store.channelNav), set by init before anything is seeded.
+let opfsNav = navigator;
 // The roots initStore seeded, which web_boot builds its watchers over.
 let seededRoots = null;
 
@@ -577,7 +581,7 @@ async function seedRoot(root, data, site) {
         writeStore(root.vfs, data);
         return "board";
     }
-    const s = await store.openStore(navigator, root.id);
+    const s = await store.openStore(opfsNav, root.id);
     opfsStores[root.id] = s;
     if (!s) {                                // no OPFS for this root: in memory
         writeStore(root.vfs, data);
@@ -678,7 +682,7 @@ async function initStore(fetched) {
 // The written files OPFS keeps, into the VFS before the console boots, with
 // every write a reload interrupted finished or discarded first.
 async function seedWritten() {
-    writtenStore = await store.openWritten(navigator);
+    writtenStore = await store.openWritten(opfsNav);
     if (!writtenStore) return;
     try {
         const files = await store.readWritten(writtenStore);
@@ -859,7 +863,8 @@ function crashMessage(e) {
              s: !stack ? msg : stack.startsWith(msg) ? stack : msg + "\n" + stack };
 }
 
-async function init(search, coarse) {
+async function init(search, coarse, channel) {
+    opfsNav = store.channelNav(navigator, channel);
     const qs = new URLSearchParams(search || "");
     // Read BEFORE the first fetch, not after: since 2026-08-25 the board's read
     // half is gated too, so carts.json is the first request that needs it.
@@ -1587,7 +1592,7 @@ self.onmessage = async (ev) => {
     const m = ev.data;
     try {
         if (m.t === "init") {
-            await init(m.search, !!m.coarse);
+            await init(m.search, !!m.coarse, m.channel || "");
         } else if (m.t === "input") {
             inbox.push(m.json);
         } else if (m.t === "ahead") {

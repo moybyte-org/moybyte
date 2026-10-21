@@ -635,5 +635,43 @@ ok("a zip named for a cart's id keeps it",
            store.landedTheme(pkg("x", "Bad Name")[1].data, owl, "night_owl"))).name === "night_owl");
 }
 
+// ---- a channel's site keeps its own storage ---------------------------------
+// The stable site and the dev site share an origin, so they share its OPFS. A
+// page published for a channel opens every store through channelNav, and what
+// one site writes the other never reads.
+{
+    const nav = fakeNav(true);
+    ok("the stable site opens the origin's own storage", store.channelNav(nav, "") === nav);
+    const devNav = store.channelNav(nav, "dev");
+    const stable = await store.openStore(nav, "carts");
+    const dev = await store.openStore(devNav, "carts");
+    await store.seed(stable, { "a.moy/main.py": "print('stable')" });
+    await store.seed(dev, { "a.moy/main.py": "print('dev')", "d.moy/main.py": "x" });
+    const sAll = await store.readAll(await store.openStore(nav, "carts"));
+    const dAll = await store.readAll(await store.openStore(devNav, "carts"));
+    ok("a dev write never reaches the stable carts",
+       sAll["a.moy/main.py"] === "print('stable')" && !("d.moy/main.py" in sAll),
+       JSON.stringify(sAll));
+    ok("the dev site reads its own carts back",
+       dAll["a.moy/main.py"] === "print('dev')" && "d.moy/main.py" in dAll, JSON.stringify(dAll));
+    await store.writeRecord(dev, '{"dev":1}');
+    ok("the install record is the channel's too", (await store.readRecord(stable)) === null
+       && (await store.readRecord(dev)) === '{"dev":1}');
+    await store.commitWritten(await store.openWritten(devNav), "c", "k", new Uint8Array([1]));
+    ok("a compiled cart's written files are the channel's too",
+       !Object.keys(await store.readWritten(await store.openWritten(nav))).length &&
+       Object.keys(await store.readWritten(await store.openWritten(devNav))).length === 1);
+    const root = await nav.storage.getDirectory();
+    const top = [];
+    for await (const [name] of root.entries()) top.push(name);
+    ok("the channel lives in one directory of the origin root",
+       top.includes(store.CHANNEL_DIR_PREFIX + "dev") && top.includes("carts")
+       && !top.includes("dev"), JSON.stringify(top));
+    ok("a channel name that is not a word gets no storage, never the origin's",
+       (await store.openStore(store.channelNav(nav, "../carts"), "carts")) === null);
+    ok("no OPFS stays no OPFS under a channel",
+       (await store.openStore(store.channelNav({ storage: null }, "dev"), "carts")) === null);
+}
+
 console.log("\n" + (fail ? fail + " FAILED" : "all store checks passed"));
 process.exit(fail ? 1 : 0);

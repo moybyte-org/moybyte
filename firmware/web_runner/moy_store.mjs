@@ -275,6 +275,28 @@ const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 export const RECORD_NAME = "installed.json";
 export const STAGE_DIR = "install";
 
+// THE CHANNEL'S STORAGE ROOT. Pages that share an origin share its OPFS: the
+// stable site (/moybyte/) and the dev site (/moybyte/dev/) both live on
+// moybyte-org.github.io. A page published for a channel (site/build.py
+// --channel, which stamps page_tail.js's MOY_CHANNEL) keeps every store under
+// its own top-level directory, so a dev store format never reads or writes the
+// stable site's carts. The worker opens every store through what this returns;
+// the empty channel is the origin root, which is where the stable site, a
+// board-served page and a local build keep theirs. A channel name that is not
+// a plain word gets no storage at all (the console runs in memory and says so)
+// rather than the origin root.
+export const CHANNEL_DIR_PREFIX = "channel-";
+
+export function channelNav(nav, channel) {
+    if (!channel) return nav;
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(channel)) return { storage: null };
+    const st = nav && nav.storage;
+    if (!st || typeof st.getDirectory !== "function") return { storage: null };
+    return { storage: { getDirectory: async () =>
+        (await st.getDirectory()).getDirectoryHandle(CHANNEL_DIR_PREFIX + channel,
+                                                     { create: true }) } };
+}
+
 // null when the browser has no OPFS (or refuses it -- a private window, a
 // file:// origin, site data blocked). The caller must treat null as "run in
 // memory and SAY so", never as an empty store.
