@@ -248,16 +248,41 @@ def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000,
     return r.stdout, js
 
 
-def get_carts_layout():
-    """Get Carts' layout on the 320x240 handheld tier, as the browser draws it:
-    a tap lands where the console drew, and the browser draws in the theme's
-    fonts, whose line the layout reads (`print_line`). A host workstation
-    installs the same default look's fonts into this process first."""
+def get_carts_taps(n=3):
+    """Where a tap lands on Get Carts' 320x240 handheld pages, as the browser
+    draws them: `cards` the centres of the shelf's first `n` cards (in the
+    shelf's order, by name), `verb` the cart page's one button (Get) and
+    `agree` the licence page's I agree. The cards are read off the app's own
+    frame, the buttons off its layout; the browser draws in the theme's
+    fonts, which a host workstation installs into this process first."""
     import tempfile
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    from runtime import host_app
-    from runtime.getcarts_app import GetCartsLayout
+    sys.path.insert(0, str(ROOT / "tests"))
+    from cart_store_fixtures import MemNet, Repo
+    from runtime import cart_index, host_app
+    repo = Repo("https://mit.example/carts", "Test carts")
+    for i in range(n):
+        repo.add("c%d" % i, runtime="lua", modules=())
+
+    def centre(r):
+        return [r[0] + r[2] // 2, r[1] + r[3] // 2]
     with tempfile.TemporaryDirectory() as d:
-        host_app.build_workstation(d)
-    return GetCartsLayout(320, 240, 1, False, 1)
+        ws = host_app.build_workstation(os.path.join(d, "carts"))
+        with open(os.path.join(d, cart_index.INDEXES_NAME), "w") as f:
+            json.dump({"indexes": [repo.url("index.json")]}, f)
+        ws.cart_net = MemNet(repo.routes())
+        app = ws._apps_by_id["getcarts"]
+        ws.open_app(app)
+        for _ in range(60):
+            ws._dirty = True
+            ws.frame(1 / 30)
+            if app.phase == "list":
+                break
+        for _ in range(3):
+            ws._dirty = True
+            ws.frame(1 / 30)
+        assert app.phase == "list" and len(app.rows) == n, app.phase
+        lay = app.layout
+        assert (lay.w, lay.h, lay.fs, lay.desk) == (320, 240, 1, False)
+        cards = [centre(app._ui.box(app._card_id(r))) for r in app.rows]
+        return {"cards": cards, "verb": centre(lay.split_verbs(lay.page_verbs(), 1)[0]),
+                "agree": centre(lay.licence_verbs()[1])}

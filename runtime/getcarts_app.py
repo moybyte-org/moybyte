@@ -255,6 +255,33 @@ class GetCartsLayout:
     def well_text_w(self):
         return self.well()[2] - 2 * (8 if self.desk else 6 * self.fs)
 
+    def page_verbs(self):
+        """The handheld cart page's verb row: where its buttons sit."""
+        x, y, w, h = self.pane
+        fs = self.fs
+        return (x, y + h - 42 * fs, w, 26 * fs)
+
+    def split_verbs(self, rect, n):
+        """`rect` cut into `n` verb buttons, the one that goes on last and
+        wider."""
+        x, y, w, h = rect
+        gap = 6 * self.fs
+        extra = 20 * self.fs if n > 1 else 0
+        bw = (w - gap * (n - 1) - extra) // n
+        out = [(x + i * (bw + gap), y, bw, h) for i in range(n - 1)]
+        last = x + (n - 1) * (bw + gap)
+        out.append((last, y, x + w - last, h))
+        return out
+
+    def licence_verbs(self):
+        """The handheld licence page's No and I agree, under its well."""
+        x, y, w, h = self.well()
+        fs = self.fs
+        foot = y + h + 8 * fs
+        vw = 140 if self.desk else 96 * fs
+        vh = 36 if self.desk else 26 * fs
+        return ((x + w - 2 * vw - 6 * fs, foot, vw, vh), (x + w - vw, foot, vw, vh))
+
 
 class GetCartsAppLayer(ListShellApp):
     id = "getcarts"
@@ -1179,7 +1206,8 @@ class GetCartsAppLayer(ListShellApp):
         if lay.desk and ph in ("list", "cart", "done"):
             self._pane_follows()
         if (self.phase, self.cur is None, self.asking) != was:
-            self._damage.all()            # an answer changed what the page shows
+            self._damage.again()          # an answer changed what the page shows: a
+                                          # draw's `all` is spent with it, an `again` is not
 
     # -- the shelf ---------------------------------------------------------------
 
@@ -1388,7 +1416,7 @@ class GetCartsAppLayer(ListShellApp):
             ui.info(label, value)
         ui.group()
         ui.scroll()
-        self._verb_row((x, y + h - foot, w, 26 * fs))
+        self._verb_row(lay.page_verbs())
         if ui.hints_width(("back", "Back")) > 0:
             v = self._current_verbs()
             items = (("confirm", VERB[self._focused_verb(v)][0]) if v else ()) + ("back", "Back")
@@ -1407,16 +1435,8 @@ class GetCartsAppLayer(ListShellApp):
         verbs = self._current_verbs()
         if not verbs:
             return
-        lay = self.layout
-        x, y, w, h = rect
-        gap = 6 * lay.fs
-        extra = 20 * lay.fs if len(verbs) > 1 else 0
-        bw = (w - gap * (len(verbs) - 1) - extra) // len(verbs)
-        for i, v in enumerate(verbs):
-            ww = bw + (extra if i == len(verbs) - 1 else 0)
-            if i == len(verbs) - 1:
-                ww = x + w - (rect[0] + i * (bw + gap))
-            self._button(v, (rect[0] + i * (bw + gap), y, ww, h))
+        for v, r in zip(verbs, self.layout.split_verbs(rect, len(verbs))):
+            self._button(v, r)
 
     def _kind(self, v):
         verbs = self._current_verbs()
@@ -1755,11 +1775,9 @@ class GetCartsAppLayer(ListShellApp):
         ui.face()
         if lines and first + self._well_rows() < len(lines):
             ui.fade((bx + 1, by + bh - 12 * fs, bw - 2, 12 * fs - 1))
-        foot = by + bh + 8 * fs
-        vw = 96 * fs if not lay.desk else 140
-        vh = 26 * fs if not lay.desk else 36
-        self._button("NO", (x + w - 2 * vw - 6 * fs, foot, vw, vh))
-        self._button("I AGREE", (x + w - vw, foot, vw, vh))
+        no, agree = lay.licence_verbs()
+        self._button("NO", no)
+        self._button("I AGREE", agree)
         if not lay.desk and ui.hints_width(("back", "Back")) > 0:
             ui.at(*lay.foot)
             f = self._focused

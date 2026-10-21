@@ -236,3 +236,39 @@ def test_enter_never_cancels_a_download_and_b_does(tmp_path):
     app.handle_input(_In("b"))
     assert app.phase == "cart" and app.toast[0] == "Stopped. Nothing changed."
     assert not (tmp_path / "carts" / "jet.moy").exists()
+
+
+def test_the_layouts_rects_are_where_the_buttons_draw(tmp_path):
+    """The browser suites tap the layout's rects (`web_e2e.get_carts_taps`):
+    they are the ones the pages' buttons draw at."""
+    repo = Repo("https://mit.example/carts", "Test carts")
+    repo.add("dm", name="Dungeon", runtime="lua", modules=(),
+             external=[("game.wad", b"WAD!" * 3000, "pkg/game.wad")])
+    ws, app = _ws(tmp_path, MemNet(repo.routes()), [repo.url("index.json")])
+    _open(ws, app)
+    lay = app.layout
+    _press(ws, app, "a")
+    assert app.phase == "cart"
+    assert app._ui.box(gc.vid("GET")) == lay.split_verbs(lay.page_verbs(), 1)[0]
+    _press(ws, app, "a")
+    for _ in range(40):
+        _frames(ws, 1)
+        if app.phase == "licence":
+            break
+    assert app.phase == "licence"
+    no, agree = lay.licence_verbs()
+    assert app._ui.box(gc.vid("NO")) == no and app._ui.box(gc.vid("I AGREE")) == agree
+
+
+def test_a_press_in_the_draw_owes_the_next_frame_a_repaint(tmp_path):
+    """Get is pressed inside the cart page's draw, which spends that draw's
+    `all`: the page it opens is owed to the frame after, as an `again`."""
+    repo, net = _shelf()
+    ws, app = _ws(tmp_path, net, [repo.url("index.json")])
+    _open(ws, app)
+    _press(ws, app, "a")
+    assert app.phase == "cart"
+    app.handle_input(_In("a"))
+    ws._dirty = True
+    ws.frame(_DT)
+    assert app.phase != "cart" and ws._damage_take()

@@ -440,16 +440,14 @@ def test_get_carts_installs_a_compiled_cart_without_its_modules_and_it_plays(tmp
     server, base = web_e2e.serve(site, web_e2e.free_port())
     profile = tmp_path / "chrome"
     sys.path.insert(0, str(ROOT))
-    lay = web_e2e.get_carts_layout()
-    row = lay.row_rect(0)
-    one = lay.buttons(1)[0]
+    at = web_e2e.get_carts_taps(1)
     try:
         out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"note": "Get Carts lists the compiled cart as one to GET", "wait": 4000},
             {"shot": "list"},
-            {"click": [row[0] + row[2] // 2, row[1] + row[3] // 2]},
+            {"click": at["cards"][0]},
             {"wait": 800}, {"shot": "cart"},
-            {"click": [one[0] + one[2] // 2, one[1] + one[3] // 2]},
+            {"click": at["verb"]},
             {"wait": 6000}, {"shot": "ready"},
             {"js": "window.__moyInstalled || ''"},
         ], base, profile)
