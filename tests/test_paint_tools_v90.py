@@ -1006,3 +1006,19 @@ def test_clear_is_set_apart_and_the_keys_still_reach_it(tmp_path):
     for _label, items, kinds in held:
         assert [i.split("\t")[0] for i in items] == ["Clear"] and kinds == ["danger"]
 
+
+
+def test_a_selection_shrinks_with_the_sprite_and_a_shift_stays_inside_it():
+    pe = _pe()
+    pe.size = 3
+    pe.set_selection(0, 0, 23, 23)
+    pe.size = 2
+    assert pe.sel == (0, 0, 15, 15)
+    pe.shift(1, 0)                       # read past the 16x16 region before
+    pe.set_selection(18, 18, 23, 23)
+    assert pe.sel == (15, 15, 15, 15)
+    pe.size = 3
+    pe.set_selection(18, 18, 23, 23)
+    pe.size = 1
+    assert pe.sel is None
+    pe.flip_h()

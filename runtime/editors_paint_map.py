@@ -240,6 +240,24 @@ class PaintEditor(OpHistoryMixin):
         self._stroke_pre = None   # pending pre-stroke snapshot (set on press, #90)
 
     @property
+    def size(self):
+        """Sprite side length in tiles (1=8x8, 2=16x16, ...)."""
+        return self._size
+
+    @size.setter
+    def size(self, v):
+        # A selection made on a bigger sprite would reach past the smaller
+        # one's region, and every transform reads the area it names.
+        self._size = v
+        sel = getattr(self, "sel", None)
+        if sel is not None:
+            d = v * self.sheet.TILE
+            if sel[0] > d - 1 or sel[1] > d - 1:
+                self.sel = None
+            else:
+                self.sel = (sel[0], sel[1], min(sel[2], d - 1), min(sel[3], d - 1))
+
+    @property
     def dim(self):
         """Editable region side length in pixels (size * 8)."""
         return self.size * self.sheet.TILE
