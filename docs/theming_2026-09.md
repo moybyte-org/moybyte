@@ -1525,8 +1525,8 @@ port), never here.
      (`runtime/chrome.py`, imported by value) stays the seeds';
      `ws.look.theme_names()` (+) is the seeds plus the store's packages,
      read once per store change, and every list reads it. Get Carts lists
-     and installs a theme as a cart (GET, ON CONSOLE, UPDATE; an installed
-     row's verbs are USE and two-tap REMOVE, and removing the active theme
+     and installs a theme as a cart (Get, On console, Update; an installed
+     card's verbs are Use and Remove, which asks first, and removing the active theme
      falls back to the default seed; the size is the folder's, no chip, no
      memory plan). The Zero's sync carries the folder as it carries a cart —
      `theme.json` and the manifest as text, a font or a sheet as bytes —

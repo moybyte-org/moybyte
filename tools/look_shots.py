@@ -231,8 +231,8 @@ APPS = {"paint": ("artwork", None), "paint-colours": ("artwork", None),
         "paint-touch": ("artwork", None), "paint-touch-colours": ("artwork", None),
         "paint-game": ("artwork", "projects"), "my-art": ("artwork", "open"),
         "my-art-menu": ("artwork", "open"), "my-art-empty": ("artwork", "open"),
-        "getcarts": ("getcarts", None), "getcarts-cart": ("getcarts", None),
-        "getcarts-getting": ("getcarts", None), "getcarts-offline": ("getcarts", None),
+        "getcarts": ("getcarts", "grid"), "getcarts-cart": ("getcarts", "cart"),
+        "getcarts-getting": ("getcarts", "getting"), "getcarts-offline": ("getcarts", "offline"),
         "notes": ("notes", None), "notes-edit": ("notes", None), "notes-new": ("notes", None),
         "notes-empty": ("notes", None), "paint-max": ("artwork", None),
         "paint-view": ("artwork", None), "paint-view-zoom": ("artwork", None),
@@ -277,6 +277,9 @@ def _app_open(app, page=None, window=False):
             ws.run(ws.project, ws.launcher_layer)
             _settle(g, ws, 3)
             return
+        if app == "getcarts":
+            _getcarts(g, ws, page, window)
+            return
         ws.open_app(ws._apps_by_id[app])
         _settle(g, ws, 2)
         if page is not None:
@@ -284,6 +287,119 @@ def _app_open(app, page=None, window=False):
         if window:
             _place(ws, app, 112, 52, 900, 536)
     return setup
+
+
+# The targets' shelf (rounds/round13.py's STORE): name, the seed cart whose
+# cover it shows (None: none), its genre, where it stands, its size in KB.
+_STORE = (("Pixel Pet", "pixel_pet", "toy", "installed", 40),
+          ("Hop Quest", "hop_quest", "platformer", "update", 18),
+          ("Bullet Storm", "bullet_storm", "shooter", "get", 96),
+          ("Doom", None, "shooter", "too_big", 4100),
+          ("Letter Blitz", "letter_blitz", "puzzle", "get", 22),
+          ("Tiny Runner", "tiny_runner", "platformer", "noplay", 14),
+          ("Star Catcher", "star_catcher", "arcade", "installed", 12),
+          ("Harpoon Pop", "harpoon_pop", "arcade", "get", 31))
+
+
+class _NoLink:
+    """A radio with no network joined."""
+
+    def status(self):
+        return (False, None, None)
+
+    def scan(self):
+        return []
+
+    def known(self):
+        return []
+
+
+class _Job:
+    """A download caught at 62%: 11 KB of 18 KB at 140 KB/s."""
+    finished = False
+    keeping = False
+    path = None
+    error = None
+    done = 11 * 1024
+    total = 18 * 1024
+
+    def step(self):
+        return True
+
+    def rate(self):
+        return 140 * 1024
+
+    def cancel(self):
+        return True
+
+
+def _getcarts(g, ws, state, window):
+    """Get Carts over the targets' shelf, on `state`'s page."""
+    from cart_store_fixtures import INDEX_URL, MemNet, Repo
+    repo = Repo(INDEX_URL.rsplit("/", 1)[0], name="moybyte-org")
+    for name, key, genre, _st, kb in _STORE:
+        cover = None
+        if key is not None:
+            with open(os.path.join(ROOT, "system_carts", "moybyte.%s.moy" % key,
+                                   "cover.png"), "rb") as f:
+                cover = f.read()
+        e = repo.add(name.lower().replace(" ", "_"), version=3, name=name, cover=cover,
+                     main=b"\0" * (kb * 1024 - 400))
+        e["genre"] = genre
+        if name == "Hop Quest":
+            e["description"] = ("Hop across the hills, grab every coin before the clouds "
+                                "roll in, and find the flag at the end of the day.")
+    repo.files["index.json"] = repo.index()
+    net = MemNet(repo.routes())
+    ws.cart_net = net
+    app = ws._apps_by_id["getcarts"]
+    app._inst.free = lambda: (3250585, 4096)
+    if state == "offline":
+        net.up = False
+        ws.wifi = _NoLink()
+    if window:
+        ws.open_desk()
+    ws.open_app(app)
+    for _ in range(12):
+        ws._dirty = True
+        ws.frame(g._DT)
+        if app.phase not in ("checking",):
+            break
+    for row in app.rows:
+        st = [s for s in _STORE if s[0] == row["cart"]["name"]][0][3]
+        if st == "too_big":
+            row["fit"] = "Doom needs more memory than this console has."
+        elif st == "noplay":
+            row["runs"] = False
+        elif st in ("installed", "update"):
+            row["state"] = st
+            row["had"] = 2 if st == "update" else None
+    have = dict((r["cart"]["folder"], {"title": r["cart"]["name"]}) for r in app.rows
+                if r["state"] in ("installed", "update"))
+    app._inst.find = have.get
+    order = [s[0] for s in _STORE]
+    app.rows.sort(key=lambda r: order.index(r["cart"]["name"]))
+    hop = [r for r in app.rows if r["cart"]["name"] == "Hop Quest"]
+    hop = hop[0] if hop else None
+    if hop is None:
+        pass
+    else:
+        app._ui.reset()               # the shelf from its top, as a fresh open shows it
+        app._focus = app._card_id(hop)
+    if hop is None:
+        pass
+    elif state == "cart" and not window:
+        app.cur = hop
+        app._go("cart")
+        app._focus_go()
+    elif state == "getting":
+        app.cur = hop
+        app.job = _Job()
+        app._go("getting")
+        app.armed = True
+    if window:
+        _place(ws, "getcarts", 112, 52, 900, 536)
+    _settle(g, ws, 4)
 
 
 # --------------------------------------------------------------------------
