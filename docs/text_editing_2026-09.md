@@ -24,7 +24,7 @@ drawings the Files app owns.
 | door | path | what opens |
 |---|---|---|
 | make a game | Launcher → cart → EDIT → tab ladder | the Code tab is one of the cart's scripts — its main file unless another is picked (#89): highlight by runtime, parse gate on the debounce, hard exits always write (SYNTAX badge), PLAY, crash-to-code |
-| write | Launcher → Notes | the vault list (whole names, mode badges), NEW → a name prompt, one file open with the SELECT/COPY/CUT/PASTE/UNDO/REDO toolbar over it |
+| write | Launcher → Notes | the vault as a table (New note first, then each file's kind icon and its name: a note's bare, another file's with its extension), New note → a name in a dialog, one file open with Select, Copy, Cut and Paste at its foot and undo and redo in the bar (docs/media/look_2026-10/APPS_RESTYLE.md's Notes) |
 | any file | Launcher → Files → a root | routed by what it is (below) |
 
 **The Files router**, in order: a `.moy` folder opens the project Editor, never a

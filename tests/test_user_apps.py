@@ -245,11 +245,9 @@ def test_the_demo_app_saves_a_document_the_rest_of_the_console_can_read(tmp_path
     _open(ws, "Notes")
     _frames(ws)
     ns = ws.player.ns
-    x, y, w, h = _hit_rect(ns, "new")          # NEW opens the name prompt...
-    _tap(ws, x + w // 2, y + h // 2)
+    ns["_ask"]("new")                          # New note asks a name...
     _frames(ws)
-    x, y, w, h = _hit_rect(ns, "make")         # ...and MAKE takes the auto-name
-    _tap(ws, x + w // 2, y + h // 2)
+    ns["_answer"]()                            # ...and Make takes the auto-name
     _frames(ws)
     ed = ns["ed"]
     assert ed is not None and ws.player.cart_error is None, ws.player.cart_error
@@ -527,13 +525,13 @@ def test_the_run_canvas_is_given_back_on_exit(tmp_path):
     assert ws.bar_layer._zone_is_game("tool") is True
 
 
-def test_the_desk_world_keeps_a_responsive_cart_on_the_fixed_raster(tmp_path):
+def test_the_desk_world_gives_a_responsive_cart_its_window(tmp_path):
     """MEASURED, 2026-08-19: in the windowed desk world a cart lives in a
     WINDOW, and `_draw_player_window` blits `ws.canvas` into it -- so with the
     system canvas bound the window blits the screen into a rectangle of that
-    screen and the desktop renders as a recursive smear of its own bar. A cart
-    window is a `wm_windowed` change and out of this phase's scope, so the desk
-    world keeps the fixed raster and the cart is TOLD (320, 240)."""
+    screen and the desktop renders as a recursive smear of its own bar. The
+    cart's surface is its window's instead: a canvas of its own, never the
+    system one, and the cart is told the window's content size."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Flexy", RESPONSIVE_SRC)
     ws = build_ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
@@ -545,9 +543,11 @@ def test_the_desk_world_keeps_a_responsive_cart_on_the_fixed_raster(tmp_path):
     assert ws.player.start(ws.project) is True
     _frames(ws)
     assert ws.player.cart_error is None, ws.player.cart_error
-    assert ws.app_full_canvas is False
+    assert ws.app_full_canvas is True and ws.app_window_canvas is True
     assert ws.canvas is not ws.sys_canvas
-    assert ws.player.ns["seen"] == [(320, 240, 1)]
+    w, h = ws.app_window_size()
+    assert ws.player.ns["seen"][-1][:2] == (w, h)
+    assert ws.wm._wins["desktop"].content_rect()[2:] == (w, h)
 
 
 def test_console_mode_gives_a_responsive_cart_the_whole_surface(tmp_path):

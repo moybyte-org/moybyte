@@ -684,8 +684,12 @@ def _surface_plan(ws, cfg):
                          _after_appearance(ws, _name_page(ws))))
             pages = True
     for surface, title in APP_CARTS:
-        plan.append(("app_" + surface,
-                     lambda title=title: open_cart(ws, title)))
+        enter = (lambda title=title: open_cart(ws, title))
+        if surface == "notes":
+            enter = _notes_vault(ws, enter)
+        plan.append(("app_" + surface, enter))
+    # Notes with a note open: its page of tools, the note in the look
+    plan.append(("app_notes_note", lambda: ws.player.ns["_open"](NOTES_VAULT[0][0])))
 
     def park():
         ws.system.set("web_pin", GOLDEN_PIN)
@@ -715,6 +719,21 @@ def _surface_plan(ws, cfg):
     plan.append(("web_console", park))
     plan.append(("web_console_address", park_revealed))
     return plan
+
+
+# The vault the Notes surfaces show: a note with each kind of line a note
+# draws (a heading, a checkbox done and one not, a link), and a script.
+NOTES_VAULT = (("story_ideas", "# Story ideas\n\n- [x] A dragon\n- [ ] A map\n\n"
+                               "Read [[Dragon facts]] first.\n"),
+               ("hello.py", "print('hi')\n"))
+
+
+def _notes_vault(ws, enter):
+    def run():
+        for name, body in NOTES_VAULT:
+            ws.carts_store.save_file("docs", name, body, ws.carts_root)
+        enter()
+    return run
 
 
 def _walls_page(ws):
@@ -925,6 +944,7 @@ def surface_names(config_name):
             names += ["app_appearance_walls", "app_appearance_name"]
     names += ["script_console"]
     names += ["app_" + a for a, _title in APP_CARTS]
+    names += ["app_notes_note"]
     names += ["web_console", "web_console_address"]
     return names
 
@@ -1057,8 +1077,9 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
         "exactly one a screen, never in a window behind): %r" % many)
     cap = json.loads((ROOT / "native" / "moy_ui" / "style.json").read_text())[
         "hits_capacity"]
-    # (a `plan` config's few surfaces need not register any)
-    assert (0 < peak[0] or "plan" in CONFIGS[config_name]) and 2 * peak[0] <= cap, (
+    # (since Notes moved onto the verbs no golden surface registers any:
+    # the engine's stops are the verbs' hit map)
+    assert 2 * peak[0] <= cap, (
         "a surface registers %d hit rects in the goldens' frames; the hit "
         "buffer's capacity (style.json's hits_capacity, %d) is twice the most "
         "any surface registers (docs/kernel_toolkit_2026-10.md §3.4)"
@@ -1153,14 +1174,14 @@ def test_every_axis_is_actually_exercised():
     assert {c.get("render", 1) for c in CONFIGS.values()} == {1, 2}
 
 
-# A running APP CART is drawn on the fixed 320x240 GAME raster, and so is the
-# minimal bar over it -- `bar_layer._bar_canvas("tool")` IS `ws.canvas` and its
-# height is the flat `_STATUS_H`, deliberately, because the tier then scales
-# that whole raster and the scale is what carries a 16px icon past the
-# millimetre floor. So these two hash the same on both sides of the declared
-# diagonal, and that is #203 working rather than missing. Asserted BOTH ways
-# below, so an exemption that stops being true goes red instead of widening.
-TAP_FLOOR_EXEMPT = frozenset("app_" + s for s, _title in APP_CARTS)
+# A running APP CART on the fixed 320x240 GAME raster would draw its minimal
+# bar there too -- `bar_layer._bar_canvas("tool")` IS `ws.canvas` and its
+# height the flat `_STATUS_H` -- and hash the same on both sides of the
+# declared diagonal, #203 working rather than missing. No golden surface does
+# since Notes, the one app cart here, became responsive (it takes the whole
+# surface and its bar moves with the diagonal). Asserted BOTH ways below, so
+# an exemption that stops being true goes red instead of widening.
+TAP_FLOOR_EXEMPT = frozenset()
 
 
 def test_the_tap_floor_moves_chrome_and_leaves_text_alone(request):

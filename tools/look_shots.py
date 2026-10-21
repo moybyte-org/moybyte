@@ -233,8 +233,8 @@ APPS = {"paint": ("artwork", None), "paint-colours": ("artwork", None),
         "my-art-menu": ("artwork", "open"), "my-art-empty": ("artwork", "open"),
         "getcarts": ("getcarts", "grid"), "getcarts-cart": ("getcarts", "cart"),
         "getcarts-getting": ("getcarts", "getting"), "getcarts-offline": ("getcarts", "offline"),
-        "notes": ("notes", None), "notes-edit": ("notes", None), "notes-new": ("notes", None),
-        "notes-empty": ("notes", None), "paint-max": ("artwork", None),
+        "notes": ("notes", "list"), "notes-edit": ("notes", "edit"), "notes-new": ("notes", "new"),
+        "notes-empty": ("notes", "empty"), "paint-max": ("artwork", None),
         "paint-view": ("artwork", None), "paint-view-zoom": ("artwork", None),
         "paint-view-more": ("artwork", None), "storybook": ("storybook", None),
         "storybook-empty": ("storybook", None), "storybook-view": ("storybook", None),
@@ -272,10 +272,7 @@ def _app_open(app, page=None, window=False):
         if window:
             ws.open_desk()
         if app == "notes":
-            ws.go_home()
-            ws._open_workspace(g._cart_by_title(ws, "Notes"))
-            ws.run(ws.project, ws.launcher_layer)
-            _settle(g, ws, 3)
+            _notes(g, ws, "edit" if window else page, window)
             return
         if app == "getcarts":
             _getcarts(g, ws, page, window)
@@ -400,6 +397,117 @@ def _getcarts(g, ws, state, window):
     if window:
         _place(ws, "getcarts", 112, 52, 900, 536)
     _settle(g, ws, 4)
+
+
+# The targets' vault (rounds/round13.py NOTES), newest first, and the note
+# the edit scenes open: a heading, checkboxes, a link and a drawing.
+NOTES = ("Shopping list", "Story ideas", "Dragon facts", "todo.txt", "scores.json", "hello.py",
+         "Party plan", "maze.lua")
+STORY = ("# Story ideas\n\n- [x] A dragon who is scared of the dark\n"
+         "- [ ] Moy finds a map in the sand\n- [ ] A race to the moon\n\n"
+         "Read [[Dragon facts]] first.\n![[dragon]]\n")
+
+
+def _dragon():
+    """The targets' dragon (round13's thumb), as a drawing of MOY64 indices
+    at 160x120: a navy sky, a green ground, a green dragon with a dark wing,
+    yellow horns and an orange beak."""
+    w, h = 160, 120
+    px = bytearray([1]) * (w * h)
+
+    def tri(a, b, c, col):
+        def side(p, q, x, y):
+            return (q[0] - p[0]) * (y - p[1]) - (q[1] - p[1]) * (x - p[0])
+        for y in range(h):
+            for x in range(w):
+                s1, s2, s3 = side(a, b, x, y), side(b, c, x, y), side(c, a, x, y)
+                if (s1 >= 0 and s2 >= 0 and s3 >= 0) or (s1 <= 0 and s2 <= 0 and s3 <= 0):
+                    px[y * w + x] = col
+
+    def oval(cx, cy, rx, ry, col):
+        for y in range(h):
+            for x in range(w):
+                if ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1:
+                    px[y * w + x] = col
+    for y in range(96, h):
+        for x in range(w):
+            px[y * w + x] = 3
+    tri((50, 22), (60, 66), (84, 62), 3)
+    tri((10, 92), (40, 80), (44, 88), 11)
+    oval(70, 76, 32, 21, 11)
+    oval(104, 46, 16, 15, 11)
+    tri((94, 32), (98, 20), (101, 32), 10)
+    tri((104, 32), (108, 20), (111, 32), 10)
+    tri((116, 42), (138, 46), (118, 52), 9)
+    oval(108, 42, 2.5, 2.5, 7)
+    px[42 * w + 108] = 0
+    return w, h, bytes(px)
+
+
+def _notes(g, ws, state, window):
+    """Notes as the targets draw it: the vault seeded (none for `empty`),
+    newest first, and `state`'s page -- the list with Story ideas focused,
+    Story ideas open with "scared of the dark" selected (and on the desk a
+    pointer resting on Paste), or New note's dialog."""
+    from runtime import moy_carts
+    root = ws.carts_root
+    if state != "empty":
+        w, h, pix = _dragon()
+        moy_carts.save_file("drawings", "dragon", moy_carts.encode_moyimg(w, h, pix), root)
+        t = 1700000000
+        for i, title in enumerate(NOTES):
+            body = STORY if title == "Story ideas" else ""
+            name = moy_carts.save_file("docs", title, body, root)
+            path = moy_carts.file_path("docs", name, root) if hasattr(moy_carts, "file_path") \
+                else None
+            if path:
+                os.utime(path, (t - 60 * i, t - 60 * i))
+    if not window:
+        ws.pointer.visible = False        # the T-Deck's targets: no pointer rests
+    ws.go_home()
+    ws._open_workspace(g._cart_by_title(ws, "Notes"))
+    ws.run(ws.project, ws.launcher_layer)
+    _settle(g, ws, 3)
+    if window:
+        _place(ws, "desktop", 112, 52, 900, 536)
+        _settle(g, ws, 3)
+    ns = ws.player.ns
+    if state == "list":
+        ns["cur"] = 2
+    elif state == "new":
+        ns["_ask"]("new")
+    elif state == "edit":
+        ns["_open"]("story_ideas")
+        _settle(g, ws, 2)
+        h = ns["ed"]
+        # what the targets show: an edit to undo (a box ticked and unticked)
+        # and a clipboard to paste
+        laid = h._row(h.ed.lines[3], h._view[0])
+        h._toggle_check(3, laid)
+        h._toggle_check(3, h._row(h.ed.lines[3], h._view[0]))
+        h.ed.clipboard = "map"
+        ed = h.ed
+        ed.row, ed.col = 2, len("- [x] A dragon who is ")
+        ed.sel = (2, len("- [x] A dragon who is scared of the dark"))
+        ed.select_sticky = True
+        if window:
+            _settle(g, ws, 3)
+            x, y = _tool_xy(ws, ns, "Paste")
+            # a mouse rests on Paste: its tooltip (the console publishes the
+            # pointer in the game's space; the kit's frames run no input pass)
+            ws.pointer.place(x, y)
+            gx, gy = ws.wm.game_xy(x, y)
+            ws.input.game_pointer = (gx, gy, False, False)
+    _settle(g, ws, 3)
+
+
+def _tool_xy(ws, ns, name):
+    """The middle of tool `name`'s box as the Notes cart drew it last, in the
+    desk's pixels."""
+    from runtime import ui_draw
+    b = ui_draw._C.api_box(ws.player._ui[0], name)
+    gx, gy, _s = ws.wm.viewport()
+    return gx + b[0] + b[2] // 2, gy + b[1] + b[3] // 2
 
 
 # --------------------------------------------------------------------------

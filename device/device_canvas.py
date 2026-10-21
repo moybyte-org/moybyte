@@ -2296,6 +2296,14 @@ class DeviceCanvas:
                                stepped, self._cam_x, self._cam_y, self._clip_x0,
                                self._clip_y0, self._clip_x1, self._clip_y1)
 
+    def picture(self, img, x, y, w, h, r=0):
+        """Drawing `img` (MOY64 indices) scaled to w x h at (x, y) inside
+        corners of radius `r`, as `cover` draws: its pixels baked to RGB565
+        once (`_bake_indices`, kept on the image). The pixels written."""
+        if getattr(img, "_rgb_i", None) is None:
+            self._bake_indices(img)
+        return self.cover(img._rgb_i, img.w, 0, 0, img.w, img.h, x, y, w, h, r)
+
     def tint565(self, dst, buf, sw, sx, sy, w, h, c, alpha):
         """Copy the (sx, sy, w, h) sub-rect of a picture of RGB565 words `sw`
         a row into `dst` (w words a row), colour `c` over every pixel at

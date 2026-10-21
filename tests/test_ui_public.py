@@ -458,7 +458,6 @@ NOT_MOVED = frozenset((
     "runtime/paint_layer.py",
     "runtime/scene_editor_ui.py",
     "runtime/storybook_app.py",
-    "system_carts/moybyte.notes.moy/main.py",
 ))
 
 # The shell's apps (§7): their modules and the system carts' code.

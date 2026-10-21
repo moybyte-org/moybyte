@@ -326,12 +326,16 @@ game. On the handheld nothing changed at all -- there is no new code on that pat
 A cart that defines a top-level `_layout(w, h, fs)` opts INTO the whole system
 surface: it draws on the system canvas, is called once before `_init` and again
 whenever the size or font scale changes, and gets the responsive exitable strip
-instead of the frozen 320-wide cluster. Two cases keep the fixed raster and are
+instead of the frozen 320-wide cluster. A cart that ALSO declares a small
+`canvas` (that has a SPEC contract behind it) keeps the fixed raster and is
 told so through `_layout`'s own arguments, which is the whole reason it takes
-them: a cart that ALSO declares a small `canvas` (that has a SPEC contract behind
-it), and the windowed DESK world, where a cart lives in a window whose blit
-source is `ws.canvas` -- binding the screen there makes the desktop blit itself.
-From the fullscreen Library the same cart gets the full desktop surface.
+them. In the windowed DESK world the screen is never bound -- a cart lives in a
+window whose blit source is `ws.canvas`, and binding the screen there makes the
+desktop blit itself -- so the cart gets a window surface of its own
+(`Workstation.app_window_canvas`): a canvas the desk's work area large, of which
+its window shows its content rect, with no strip inside the window, its title
+strip the way out; `_layout` and `content_rect()` are the window's content. From
+the fullscreen Library the same cart gets the full desktop surface.
 
 Say the honest part out loud: **responsive is real authoring work most app carts
 should not take.** It means no literal coordinates anywhere, a rect-algebra
@@ -345,7 +349,7 @@ calculator or a notepad, fixed is the right answer.
 `system_carts/moybyte.notes.moy` is the worked example: a notepad that types, saves into
 the kid's documents (the same `docs` kind Files browses -- open one
 there and it is really the same file), lists what it saved and remembers which
-note was open. **One script of under 400 lines, no shell code, no registration, no
+note was open, on the public UI API's verbs. **One script of under 500 lines, no shell code, no registration, no
 `runtime/` module** -- and no C, no build, no reflash: it is a cart, so it edits
 and re-runs on the device.
 

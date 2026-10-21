@@ -110,7 +110,8 @@ _DRAG_MIN = 4                         # px of travel before a press becomes a dr
 # The desk's default OUTER sizes of the apps the 2026-10 look sizes to their
 # content (DESIGN.md "The sizes"; the `*desktop*` targets), in glass pixels
 # at chrome size 1. Every other window takes `_win_size`'s formulas.
-DESK_SIZES = {"files": (548, 534), "calc": (344, 488), "getcarts": (900, 536)}
+DESK_SIZES = {"files": (548, 534), "calc": (344, 488), "getcarts": (900, 536),
+              "notes": (900, 536)}
 
 
 class _LayoutCtx:
@@ -364,6 +365,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # console mode and the home's X leaves it. ws.windowed_chrome follows
         # it through desk_open().
         self.mode = "console"
+        self._app_src = None          # a window-bound app's view of its canvas (_view_src)
         self._mode_was = "console"    # mode-switch edge detector (_on_nav)
         self._mode_switch = False     # on_relayout: this relayout is a switch
         # The desk's window records while console mode runs: outside the
@@ -897,6 +899,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             n = _layout_base.chrome_size(fs)
             r = _layout_base.render_scale()
             return (DESK_SIZES[key][0] * n // r, DESK_SIZES[key][1] * n // r)
+        if key == "desktop" and self.ws.app_window_canvas:
+            # a window-bound app cart (Notes): its designed size, by the
+            # last part of its id, else the default panel below
+            cid = str((self.ws.cart or {}).get("id") or "")
+            key = cid[cid.rfind(".") + 1:] or key
+            if _layout_base.metric_class() == _layout_base.DESK and key in DESK_SIZES:
+                n = _layout_base.chrome_size(fs)
+                r = _layout_base.render_scale()
+                return (DESK_SIZES[key][0] * n // r, DESK_SIZES[key][1] * n // r)
+            key = "app"
         if key == "desktop":
             # A dev playtest (#178) opens at 2x where the desk holds it, else
             # at native size (the owner's D-03.4, 2026-10-19): the game is the
@@ -1047,6 +1059,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if win.kind == "desktop":
             win.buf = None
             win.ctx = None
+            if self.ws.app_window_canvas:
+                self.ws._surface_write()  # the app's content rect is its window's
             return
         full = self._root_canvas
         cw = max(64, win.w - 2 - 2 * win.edge)
@@ -1799,11 +1813,48 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     # -- game viewport == the player window (#39 mapping) ----------------------
 
+    def app_surface(self):
+        """(w, h) of the canvas a window-bound app cart draws on
+        (`Workstation._bind_window_canvas`): the desk's work area, so its
+        window shows any size of it with no new pixels."""
+        _dx, _dy, dw, dh = self._desk_rect()
+        return (dw, dh)
+
+    def app_window_content(self):
+        """(w, h) of the content a window-bound app cart's window shows from
+        its canvas's top left: the player window's content rect, or the one
+        its window opens at."""
+        win = self._wins.get("desktop")
+        if win is None:
+            fs = self._fs()
+            w, h = self._win_size("desktop", self._root_canvas, fs)
+            win = _Win("desktop", 0, 0, w, h, _layout_base.metric("title", fs))
+            win.foot = self._win_foot(win)
+            win.edge = self._win_edge(win)
+        _x, _y, cw, ch = win.content_rect()
+        sw, sh = self.app_surface()
+        return (max(1, min(cw, sw)), max(1, min(ch, sh)))
+
+    def _view_src(self):
+        """A window-bound app cart's window shows its canvas's top left, its
+        content rect's size; else the cart view rule (wm.py)."""
+        if self.ws.app_window_canvas and self.mode == "desktop":
+            w, h = self.app_window_content()
+            v = self._app_src
+            if v is None or v[2] != w or v[3] != h:
+                v = self._app_src = (0, 0, w, h)
+            return v
+        return FullscreenStackWM._view_src(self)
+
     def _player_view(self, win):
         """(ox, oy, scale) of the game canvas centered in the player window's
         content rect -- the windowed viewport. A cart-declared view (`view(w,
         h)`) scales ITS region here exactly like the fullscreen composite, so
-        celeste's 128x128 fills the window at 4x instead of the container's 2x."""
+        celeste's 128x128 fills the window at 4x instead of the container's 2x.
+        A window-bound app cart's canvas lies at the content's top left, 1x."""
+        if self.ws.app_window_canvas:
+            cx, cy, _cw, _ch = win.content_rect()
+            return (cx, cy, 1)
         gc = self.ws.canvas
         view = self._view_src()
         gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
@@ -2466,7 +2517,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # first cut of this shipped.) `scale` is the same integer magnification the
         # pixel path would have used, so the game FILLS its window.
         use_view = _view is not None and getattr(gc, "buf", None) is None
-        if full:
+        if full and not ws.app_window_canvas:
             self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
         if running:
             # The Player ticks while it's the STACK top (the running process),

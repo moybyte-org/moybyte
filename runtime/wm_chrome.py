@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   WindowChrome                     the mixin: a window's frame, strip and chips
+#   WindowChrome._win_chrome         a window's frame, title strip and shadow
+#   WindowChrome._icon_slot          a window's line icon (an app cart's own)
+#   WindowChrome._win_title          a window's title ("Notes · Story ideas")
+#   WindowChrome._strip_button_hit   the strip's buttons under a finger
+#   WindowChrome._draw_taskbar_chips  the desk bar's window chips
 """The windowed WM's CHROME: the per-window title strip (title + min/max/X),
 border, drop shadow and resize grip, the fat-finger resolution of the strip
 buttons and the grip, the rubber-band resize preview, and the taskbar chips in
@@ -13,9 +20,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     import ui_draw as _ui_draw
+    import iconsets as _iconsets
     from app_decls import APPS as _APP_DECLS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui_draw as _ui_draw
+    from runtime import iconsets as _iconsets
     from runtime.app_decls import APPS as _APP_DECLS
 
 # The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
@@ -125,7 +134,7 @@ class WindowChrome:
                 and ws.look.live.look[0].get("win.header") == _HEAD_FILL:
             role = "value_ink"            # on the `value` header (moy_ui_depth_title_ink)
         ink = ws.theme_colors[role]
-        if ws.draw_icon(_ICON_SLOTS.get(win.kind, win.kind), slot, ink, sc):
+        if ws.draw_icon(self._icon_slot(win), slot, ink, sc):
             return
         img = self._win_icon_img(win)
         if img is not None:
@@ -135,6 +144,17 @@ class WindowChrome:
             return
         if not ws.draw_icon("app", slot, ink, sc):
             ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
+
+    def _icon_slot(self, win):
+        """The icon set's slot a window's line icon and its chip draw: its
+        kind's, or a window-bound app cart's own (Notes' `notes`)."""
+        ws = self.ws
+        if win.kind == "desktop" and ws.app_window_canvas and ws.cart:
+            name = str(ws.cart.get("id") or "")
+            name = name[name.rfind(".") + 1:]
+            if name in _iconsets.SLOT:
+                return name
+        return _ICON_SLOTS.get(win.kind, win.kind)
 
     def _win_icon_img(self, win):
         """The icon sheet of the app cart `win` runs, found once per window."""
@@ -296,6 +316,9 @@ class WindowChrome:
             t = str((ws.cart.get("title") if ws.cart else "") or "GAME")
             if getattr(self, "_play_intent", None) == "dev":
                 return _PLAY + _title_sep() + t       # a playtest from the Editor
+            lent = ws.bar_layer._lent("tool") if ws.app_window_canvas else None
+            if lent is not None and lent[0]:
+                return t + _title_sep() + lent[0]     # the page an app lent ("Notes · Story ideas")
             return t
         shell = win.kind in _TITLES or win.kind in _SHELL_APPS
         base = ws.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
@@ -316,6 +339,8 @@ class WindowChrome:
         if looked:
             for sep in (_SEP_DOT, _SEP_ASCII):
                 at = t.find(sep)
+                if at > 0 and win.kind == "desktop" and self.ws.app_window_canvas:
+                    return t[:at]                 # an app's chip names the app
                 if at > 0 and win.kind == "desktop":
                     return t[at + len(sep):]      # a playtest's chip names the cart
                 if at > 0 and win.kind == "menu":
@@ -591,7 +616,7 @@ class WindowChrome:
             slot = (x + 12, y + (h - 18) // 2, 18, 18)
             if win.minimized and getattr(win, "held", False):
                 self._pause_glyph(sc, slot, ink)
-            elif not self.ws.draw_icon(_ICON_SLOTS.get(win.kind, win.kind), slot, ink, sc):
+            elif not self.ws.draw_icon(self._icon_slot(win), slot, ink, sc):
                 img = self._win_icon_img(win)
                 if img is not None:
                     iw = getattr(img, "w", 16) or 16

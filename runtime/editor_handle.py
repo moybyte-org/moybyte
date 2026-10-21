@@ -70,6 +70,11 @@ except ImportError:  # pragma: no cover - direct host import
     from runtime.moyimg import decode_moyimg
 
 try:
+    import ui_draw as _ui_draw
+except ImportError:  # pragma: no cover - direct host import
+    from runtime import ui_draw as _ui_draw
+
+try:
     from ticks import _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - direct host import
     from runtime.ticks import _ticks_ms, _ticks_diff
@@ -81,6 +86,12 @@ INVALID = "INVALID"    # the badge a mode's gate raises (#154's SYNTAX twin)
 
 CELL = 8               # one glyph cell at scale 1
 LH = 9                 # one text row: the 8px glyph plus a gap
+# In the look (a built-in app's note): a row's pitch and the paper's pad on
+# the handheld and on the desk, and an embedded drawing's height.
+LOOK_LH = (15, 22)
+LOOK_PAD = ((10, 6), (16, 12))
+IMAGE_H = (48, 144)
+DESK_W = 600           # a canvas this wide is a desk's
 
 # Laid-out lines held per generation of the `_row` memo (two generations live).
 _MEMO = 120
@@ -94,17 +105,47 @@ _IMAGE_KIND = "drawings"
 
 class _Row:
     """One buffer line, laid out. Pure data: what `draw` paints and what `tap`
-    hit-tests, cached by (text, cols) so an edit invalidates one line."""
+    hit-tests, cached by (text, cols) so an edit invalidates one line.
 
-    __slots__ = ("head", "check", "img", "segs", "links", "hl")
+    A Markdown line SHOWS other text than it holds: a checkbox's `- [ ] ` is a
+    box in three cells, a link's brackets are not drawn. `cols` maps each
+    shown cell to the buffer column it stands for (one past the last, the
+    line's end), so the caret, a tap and a selection cross between the two;
+    None where the two are the same. Columns in `segs`, `check` and `links`
+    are SHOWN ones."""
 
-    def __init__(self, head, check, img, segs, links):
+    __slots__ = ("head", "check", "img", "segs", "links", "hl", "cols")
+
+    def __init__(self, head, check, img, segs, links, cols=None):
         self.head = head       # heading level 1..3, else 0
         self.check = check     # (box column, checked) for a `- [ ]` line, else None
         self.img = img         # the drawing name of a whole-line `![[name]]`
         self.segs = segs       # [(text, start column)] -- one per visual row
         self.links = links     # [(col0, col1, target)] for the `[[note]]` spans
         self.hl = None         # a code line's per-character colours, once
+        self.cols = cols       # shown cell -> buffer column, or None (the same)
+
+    def shown(self, col):
+        """The shown cell buffer column `col` stands at: the first cell at or
+        past it (a hidden bracket's caret stands before the word it opens)."""
+        m = self.cols
+        if m is None:
+            return col
+        lo, hi = 0, len(m) - 1
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if m[mid] < col:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
+
+    def held(self, cell):
+        """The buffer column shown cell `cell` stands for."""
+        m = self.cols
+        if m is None:
+            return cell
+        return m[max(0, min(len(m) - 1, cell))]
 
 
 def _wrap(text, cols, on):
@@ -148,28 +189,51 @@ def _link_spans(text):
 
 
 def _md_row(text, cols):
-    """`text` laid out as MARKDOWN: heading, checkbox, embed, links, wrap."""
+    """`text` laid out as MARKDOWN: heading, checkbox, embed, links, wrap --
+    as it shows: a checkbox's `- [ ] ` a box and a space in three cells, a
+    link its target's words without the brackets."""
     head = 0
     while head < 3 and text[head:head + 1] == "#":
         head += 1
     if head and text[head:head + 1] not in (" ", ""):
         head = 0
+    out = []
+    cmap = []
+    i = 0
     check = None
     lead = 0
     while text[lead:lead + 1] == " ":
         lead += 1
     mark = text[lead:lead + 6]
     if mark[:3] in ("- [", "* [") and mark[4:6] == "] ":
-        check = (lead + 3, mark[3] in "xX")
+        check = (lead, mark[3] in "xX")
+        out.append(text[:lead] + "   ")
+        cmap.extend(range(lead))
+        cmap.extend((lead, lead + 3, lead + 5))
+        i = lead + 6
     img = None
     links = []
     for c0, c1, target, is_img in _link_spans(text):
         if is_img:
             if img is None and text.strip() == text[c0:c1]:
                 img = target
-        else:
-            links.append((c0, c1, target))
-    return _Row(head, check, img, _wrap(text, cols, True), tuple(links))
+            continue
+        if c0 < i:
+            continue
+        out.append(text[i:c0])
+        cmap.extend(range(i, c0))
+        d0 = len(cmap)
+        out.append(text[c0 + 2:c1 - 2])
+        cmap.extend(range(c0 + 2, c1 - 2))
+        links.append((d0, len(cmap), target))
+        i = c1
+    if i == 0 and not links:
+        return _Row(head, check, img, _wrap(text, cols, True), ())
+    out.append(text[i:])
+    cmap.extend(range(i, len(text)))
+    cmap.append(len(text))
+    shown = "".join(out)
+    return _Row(head, check, img, _wrap(shown, cols, True), tuple(links), tuple(cmap))
 
 
 class EditorHandle:
@@ -181,7 +245,7 @@ class EditorHandle:
     taps X never loses a note."""
 
     def __init__(self, files, kind, name, mode, canvas, theme,
-                 clip=None, host=None, images=None, watch=None):
+                 clip=None, host=None, images=None, watch=None, look=False):
         self._files = files          # the (kind, name)-taking Files role
         # The document's own reader, or None: an object whose
         # `file_check(text)` is a second gate after the mode's, answering
@@ -196,6 +260,9 @@ class EditorHandle:
         self._images = images or files   # the role a note's embedded drawings load through
         self._canvas = canvas
         self._theme = theme          # () -> the live token dict
+        # A built-in app's note draws in the look (system_api.draws_in_look):
+        # the mono faces and their bold, the look's marks; else petme128's cells.
+        self._look = bool(look)
         self._host = host            # the shell, for the keyboard-focus flip
         self.kind = kind
         self._name = str(name)
@@ -223,6 +290,7 @@ class EditorHandle:
         self._img = {}               # drawing name -> Image (None when absent)
         self._vis = ()               # the last drawn (buffer row, seg, y) map
         self._geom = (0, 0, CELL, LH, 1)   # x, y, cell, lh, scale
+        self._faces_in = (0, 0, 8)   # the faces the last draw took, and their line
         self._drag = None            # last pointer cell-origin of a live drag
         self._caret_at = None        # the caret the last draw scrolled to see
         # The watch's `file_gen` this buffer last matched: a change made
@@ -406,6 +474,10 @@ class EditorHandle:
         """True when COPY and CUT have something to act on."""
         return self.ed.has_selection()
 
+    def selected_count(self):
+        """The letters the selection holds (a line's break counts as one)."""
+        return len(self.ed.selected_text())
+
     def can_paste(self):
         """True when there is clipboard text to paste (the system lane's when
         one is attached, else this handle's own)."""
@@ -491,26 +563,38 @@ class EditorHandle:
 
     # -- drawing --------------------------------------------------------------
 
-    def draw(self, x, y, w, h, scale=1):
-        """Render the document into `(x, y, w, h)` of the cart's canvas.
+    def draw(self, x, y, w, h, scale=1, r=0):
+        """Render the document into `(x, y, w, h)` of the cart's canvas, on
+        its paper (corners of radius `r`).
 
         Also where the idle autosave lands: the shipped notebook has always
         run its debounce off the draw pass (Writer's `#108` model), and a kid
         pressing save is the thing this console does not do."""
         cv = self._canvas
         th = self._theme()
-        scale = int(scale) or 1
-        cell = CELL * scale
-        lh = LH * scale
-        cols = max(1, int(w) // cell)
-        rows = max(1, int(h) // lh)
+        desk = getattr(cv, "w", 0) >= DESK_W
+        reg, bold = self._faces(desk)
+        if reg:
+            info = _ui_draw.font_info(reg)
+            cell, line = info[0], info[2]
+            lh = LOOK_LH[desk]
+            px, py = LOOK_PAD[desk]
+            scale = 1
+        else:
+            scale = int(scale) or 1
+            cell, line, lh = CELL * scale, 8 * scale, LH * scale
+            px = py = 0
+        tx, ty = int(x) + px, int(y) + py
+        cols = max(1, (int(w) - 2 * px) // cell)
+        rows = max(1, (int(h) - py) // lh)
         if (cols, rows) != self._view:
             self._view = (cols, rows)
             self.ed.set_view_size(cols, rows)
             self._memo = {}
             self._memo_old = {}
             self._caret_at = None      # a resize re-flows: show the caret again
-        self._geom = (int(x), int(y), cell, lh, scale)
+        self._geom = (tx, ty, cell, lh, scale)
+        self._faces_in = (reg, bold, line)
         if self._m.wrap:
             self.ed.left = 0              # wrapped prose never scrolls sideways
         self._follow_watch()
@@ -521,9 +605,24 @@ class EditorHandle:
         # own chrome. Released to the full canvas afterwards, which is where
         # the Player leaves it for every cart frame anyway.
         cv.clip(x, y, w, h)
-        cv.rect(x, y, w, h, th["surface"])
-        self._paint(cv, th, x, y, w, cols, rows, cell, lh, scale)
+        if r:
+            cv.rrect(x, y, w, h, r, th["surface"])
+        else:
+            cv.rect(x, y, w, h, th["surface"])
+        was = _ui_draw.print_font(reg) if reg else None
+        try:
+            self._paint(cv, th, tx, ty, int(w) - 2 * px, cols, rows, cell, lh, scale)
+        finally:
+            if was is not None:
+                _ui_draw.print_font(was)
         cv.clip()
+
+    def _faces(self, desk):
+        """The note's (regular, bold) faces, (0, 0) for petme128's cells."""
+        if not self._look:
+            return (0, 0)
+        f = getattr(getattr(self._host, "look", None), "note_faces", None)
+        return f(desk) if f is not None else (0, 0)
 
     def tap(self, px, py, click=True):
         """Route a pointer at `(px, py)` through the LAST DRAWN frame -- the
@@ -537,16 +636,16 @@ class EditorHandle:
         got = self._cell_at(px, py)
         if got is None:
             return None
-        brow, col, laid = got
+        brow, col, laid, cell = got
         if not click:
             return ("caret", None)
         self._drag = (int(px), int(py))   # a drag pans/selects from HERE
         if self._mode == _modes.MD:
-            if laid.check is not None and abs(col - laid.check[0]) <= 1:
+            if laid.check is not None and abs(cell - laid.check[0] - 1) <= 1:
                 self._toggle_check(brow, laid)
                 return ("check", brow)
             for c0, c1, target in laid.links:
-                if c0 <= col < c1:
+                if c0 <= cell < c1:
                     return ("link", target)
         # The press edge COLLAPSES even in SELECT mode and re-anchors here --
         # the Code tab's `_select_pointer` rule, so a fresh drag selects a
@@ -590,9 +689,9 @@ class EditorHandle:
     # -- internals ------------------------------------------------------------
 
     def _cell_at(self, px, py):
-        """`(buffer row, column, laid-out row)` under `(px, py)`, or None --
-        the one place a pixel becomes a text cell, for both `tap` and
-        `drag`."""
+        """`(buffer row, column, laid-out row, shown cell)` under `(px, py)`,
+        or None -- the one place a pixel becomes a text cell, for both `tap`
+        and `drag`."""
         x0, _y0, cell, lh, _scale = self._geom
         px = int(px)
         py = int(py)
@@ -605,10 +704,10 @@ class EditorHandle:
             if not self._m.wrap:
                 base = self.ed.left
                 text = line[base:base + self._view[0]]
-            col = base + max(0, (px - x0) // cell)
-            if col > base + len(text):
-                col = base + len(text)
-            return (brow, min(col, len(line)), laid)
+            c = base + max(0, (px - x0) // cell)
+            if c > base + len(text):
+                c = base + len(text)
+            return (brow, min(laid.held(c), len(line)), laid, c)
         return None
 
     def _place(self, brow, col, select):
@@ -736,7 +835,7 @@ class EditorHandle:
             ed.top += 1
 
     def _toggle_check(self, row, laid):
-        col = laid.check[0]
+        col = laid.held(laid.check[0] + 1)      # the box's `x` or space
         line = self.ed.lines[row]
         self._burst = self.ed.text()
         self.ed.lines[row] = line[:col] + (" " if laid.check[1] else "x") \
@@ -762,10 +861,8 @@ class EditorHandle:
 
     def _paint(self, cv, th, x, y, w, cols, rows, cell, lh, scale):
         ed = self.ed
-        ink = th["ink"]
-        dim = th["ink_dim"]
-        accent = th["accent"]
-        link_c = th["focus"]
+        reg, _bold, line = self._faces_in
+        dy = (lh - line) // 2 if reg else 0
         vis = []
         drawn = 0
         brow = ed.top
@@ -773,18 +870,19 @@ class EditorHandle:
         yy = y
         caret = None
         while drawn < rows and brow < n:
-            line = ed.lines[brow]
-            laid = self._row(line, cols)
+            text = ed.lines[brow]
+            laid = self._row(text, cols)
             if laid.img is not None:
                 drawn += self._paint_image(cv, th, laid.img, x, yy, w,
-                                           (rows - drawn) * lh, scale)
+                                           (rows - drawn) * lh, lh, scale)
                 vis.append((brow, 0, yy))
                 yy = y + drawn * lh
                 brow += 1
                 continue
             if self._m.lang and laid.hl is None:
-                laid.hl = self._colors(line)     # once per LINE, not per frame
+                laid.hl = self._colors(text)     # once per LINE, not per frame
             hl = laid.hl
+            here = laid.shown(ed.col) if brow == ed.row else -1
             for si in range(len(laid.segs)):
                 if drawn >= rows:
                     break
@@ -795,17 +893,23 @@ class EditorHandle:
                     base = ed.left
                     seg = seg[base:base + cols]
                 vis.append((brow, si, yy))
-                self._paint_selection(cv, th, brow, base, seg, x, yy, cell, lh)
-                self._paint_seg(cv, th, laid, seg, base, x, yy, cell, scale,
-                                ink, dim, accent, link_c, hl)
-                if brow == ed.row and base <= ed.col <= base + len(seg):
-                    caret = (x + (ed.col - base) * cell, yy)
+                sel = self._paint_selection(cv, th, brow, laid, base, seg, x, yy, cell, lh)
+                self._paint_seg(cv, th, laid, seg, base, x, yy + dy, cell, lh, scale, hl)
+                if sel is not None:
+                    s0, s1 = sel
+                    cv.print(seg[s0 - base:s1 - base], x + (s0 - base) * cell, yy + dy,
+                             th["selection_ink"], scale)
+                if base <= here <= base + len(seg) and here >= 0:
+                    caret = (x + (here - base) * cell, yy)
                 drawn += 1
                 yy += lh
             brow += 1
         self._vis = tuple(vis)
         if caret is not None and x <= caret[0] < x + w:
-            cv.rect(caret[0], caret[1], max(1, scale), 8 * scale, accent)
+            if reg:
+                cv.rect(caret[0], caret[1] + 2, 2, lh - 4, th["accent"])
+            else:
+                cv.rect(caret[0], caret[1], max(1, scale), 8 * scale, th["accent"])
 
     def _colors(self, line):
         """The code highlighter's per-character palette indices. Imported at
@@ -817,44 +921,67 @@ class EditorHandle:
             from runtime.code_layer import _highlight
         return _highlight(line, self._m.lang == "lua")
 
-    def _paint_seg(self, cv, th, laid, seg, base, x, yy, cell, scale,
-                   ink, dim, accent, link_c, hl):
+    def _paint_seg(self, cv, th, laid, seg, base, x, yy, cell, lh, scale, hl):
+        """One visual row: a heading after its `#` in the disabled ink and
+        in the bold, a checkbox as a square (done: filled in `value`, its
+        words `dim`), a link in `value` underlined (APPS_RESTYLE.md, Notes)."""
+        ink = th["ink"]
         if not seg and laid.check is None:
             return
         if hl is not None:
-            self._paint_runs(cv, th, seg, hl[base:base + len(seg)], x, yy,
-                             cell, scale, ink)
+            self._paint_runs(cv, th, seg, hl[base:base + len(seg)], x, yy, cell, scale, ink)
             return
+        reg, bold, line = self._faces_in
         if laid.head:
-            # A heading COLOURS, it does not resize: a wrapped caret has to map
+            # A heading takes the bold, not a size: a wrapped caret has to map
             # onto a uniform row grid, and a taller first row would put every
             # tap on this page one line out.
             cut = laid.head + 1 if base == 0 else 0
             if cut:
-                cv.print(seg[:cut], x, yy, dim, scale)
-            cv.print(seg[cut:], x + cut * cell, yy, accent, scale)
+                cv.print(seg[:cut], x, yy, _ui_draw.disabled_ink(th), scale)
+            if bold and bold != reg:
+                _ui_draw.print_font(bold)
+            cv.print(seg[cut:], x + cut * cell, yy, ink if reg else th["accent"], scale)
+            if bold and bold != reg:
+                _ui_draw.print_font(reg)
         elif laid.check is not None and base == 0:
-            # The box is a glyph pair the person taps; the rest is ordinary ink.
-            bx = x + (laid.check[0] - 1) * cell
-            cv.rectb(bx, yy, cell, 8 * scale, dim)
-            if laid.check[1]:
-                cv.rect(bx + scale * 2, yy + scale * 2,
-                        cell - scale * 4, 8 * scale - scale * 4, accent)
-            cv.print(seg[laid.check[0] + 3:],
-                     x + (laid.check[0] + 3) * cell, yy, ink, scale)
+            bx = x + laid.check[0] * cell
+            done = laid.check[1]
+            if reg:
+                box = 13 if cell > 8 else 9
+                bx += 2
+                by = yy + (line - box) // 2
+                if done:
+                    cv.rrect(bx, by, box, box, 2, th.get("value", th["accent"]))
+                    ink_v = th.get("value_ink", th["surface"])
+                    host = self._host
+                    r = (bx - 1, by - 1, box + 2, box + 2)
+                    if host is None or not host.draw_icon("check", r, ink_v, cv):
+                        cv.rect(bx + box // 4, by + box // 4, box // 2, box // 2, ink_v)
+                else:
+                    cv.rrect(bx, by, box, box, 2, None, ring=th["ink_dim"])
+            else:
+                # petme128's cells: a box the glyph's size, filled when done
+                cv.rectb(bx, yy, cell, 8 * scale, th["ink_dim"])
+                if done:
+                    cv.rect(bx + scale * 2, yy + scale * 2, cell - scale * 4,
+                            8 * scale - scale * 4, th["accent"])
+            k = laid.check[0] + 3
+            cv.print(seg[k:], x + k * cell, yy, th["ink_dim"] if done else ink, scale)
         else:
             cv.print(seg, x, yy, ink, scale)
         # The link overlay runs over whatever was drawn above, so a checkbox
         # line may carry one -- `- [ ] read [[the other note]]` is a note a
         # person actually writes.
+        link_c = th.get("value", th["focus"])
+        under = (line + 2) if reg else 8 * scale - scale
         for c0, c1, _target in laid.links:
             s = max(c0, base)
             e = min(c1, base + len(seg))
             if e <= s:
                 continue
-            cv.print(seg[s - base:e - base], x + (s - base) * cell, yy,
-                     link_c, scale)
-            cv.rect(x + (s - base) * cell, yy + 8 * scale - scale,
+            cv.print(seg[s - base:e - base], x + (s - base) * cell, yy, link_c, scale)
+            cv.rect(x + (s - base) * cell, yy + under - (2 if reg else 0),
                     (e - s) * cell, max(1, scale), link_c)
 
     def _paint_runs(self, cv, th, seg, cols_, x, yy, cell, scale, ink):
@@ -871,28 +998,42 @@ class EditorHandle:
                      hl.get(c, c) if hl else c, scale)
             i = j
 
-    def _paint_selection(self, cv, th, brow, base, seg, x, yy, cell, lh):
+    def _paint_selection(self, cv, th, brow, laid, base, seg, x, yy, cell, lh):
+        """The selection's part of one visual row, in the `selection` colour:
+        its shown cells (s, e), or None."""
         ed = self.ed
         bounds = ed.selection_bounds()
         if bounds is None:
-            return
+            return None
         r0, c0, r1, c1 = bounds
         if brow < r0 or brow > r1:
-            return
-        s = c0 if brow == r0 else 0
-        e = c1 if brow == r1 else base + len(seg)
+            return None
+        s = laid.shown(c0) if brow == r0 else 0
+        e = laid.shown(c1) if brow == r1 else base + len(seg)
         s = max(s, base)
         e = min(e, base + len(seg))
         if e <= s:
-            return
-        cv.rect(x + (s - base) * cell, yy, (e - s) * cell, lh, th["selection"])
+            return None
+        inset = 1 if self._faces_in[0] else 0
+        cv.rect(x + (s - base) * cell, yy + inset, (e - s) * cell, lh - 2 * inset,
+                th["selection"])
+        return (s, e)
 
-    def _paint_image(self, cv, th, name, x, yy, w, h, scale):
-        """An `![[drawing]]` embed. Returns the text rows it consumed."""
+    def _paint_image(self, cv, th, name, x, yy, w, h, lh, scale):
+        """An `![[drawing]]` embed, its picture at the note's size with the
+        edge (the look's: 48 pixels tall on the handheld, 144 on the desk).
+        Returns the text rows it consumed."""
         img = self._image(name)
         if img is None:
-            cv.print(("?" + name)[:max(1, w // (CELL * scale))], x, yy,
+            cv.print(("?" + name)[:max(1, w // max(1, self._geom[2]))], x, yy,
                      th["danger"], scale)
             return 1
-        cv.spr(img, x, yy, scale)
-        return max(1, min(h, img.h * scale) // (LH * scale))
+        if not self._faces_in[0] or not hasattr(cv, "picture"):
+            cv.spr(img, x, yy, scale)
+            return max(1, min(h, img.h * scale) // lh)
+        ph = IMAGE_H[lh > LOOK_LH[0]]
+        pw = img.w * ph // max(1, img.h)
+        top = yy + 4
+        cv.picture(img, x, top, pw, ph, 4)
+        cv.rrect(x, top, pw, ph, 4, None, ring=th["border"])
+        return max(1, -(-(ph + 4) // lh))

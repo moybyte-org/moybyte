@@ -738,6 +738,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # every game, every fixed app cart, and every shipped system app, which
         # is what keeps the pixel goldens where they are.
         self.app_full_canvas = False
+        # ...and in the windowed desk its window is its surface: a canvas the
+        # desk's work area large, of which the window's content shows
+        # (`app_window_size`), so a resize moves its content rect and no
+        # pixels. No host strip is drawn on it; the window's title strip is
+        # the way out.
+        self.app_window_canvas = False
         # The LOOK (#209 landing D, appearance.py): theme + variant, the widget
         # skin, the requested system font scale, the theme's wallpaper and the
         # top-bar icon sheet. Built FIRST of the collaborators because the two
@@ -4034,19 +4040,16 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         bind and nothing to change, which is exactly why the handheld's pixels
         cannot move. Released by `release_run_canvas`, on every exit path.
 
-        Also returns False in the windowed DESK world, and that one is not a
-        degradation but a correctness rule -- measured, 2026-08-19. There a cart
+        In the windowed DESK world the system canvas is never bound: a cart
         lives in a WINDOW, and `wm_windowed._draw_player_window` blits
-        `ws.canvas` into it: with the system canvas bound, the window blits the
-        screen into a rectangle OF that screen and the desktop renders as a
-        recursive smear of its own bar. Giving a cart its own window surface is a
-        `wm_windowed` change, which `docs/history/ui_refactor_2026-08.md` Section 6 puts
-        out of scope -- so in desktop mode a responsive cart keeps the fixed
-        raster and is told (320, 240) by `_layout`, which is the truth. In
-        console mode (`windowed_chrome` False) it gets the whole surface."""
+        `ws.canvas` into it, so with the system canvas bound the window blits
+        the screen into a rectangle OF that screen (measured, 2026-08-19).
+        There the app takes a window surface of its own instead
+        (`_bind_window_canvas`). In console mode (`windowed_chrome` False) it
+        gets the whole system surface."""
         sc = self._sys_canvas
         if self.windowed_chrome:
-            return False
+            return self._bind_window_canvas()
         if sc is None or sc is self.canvas or self._run_canvas is not None:
             # ...or a cart-declared small canvas already holds the slot: a
             # manifest asking for 128x128 AND a _layout is contradictory, and
@@ -4060,12 +4063,44 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._surface_write()             # the strip is the responsive one now
         return True
 
+    def _bind_window_canvas(self):
+        """A responsive app cart's surface on the desk: a canvas of the
+        desk's work area (`WindowedWM.app_surface`) on loan to the run, of
+        which its window shows the content rect (`app_window_size`). True
+        when bound; False where the tier has no factory or the WM no desk."""
+        mk = self.make_game_canvas
+        size = getattr(self.wm, "app_surface", None)
+        if mk is None or size is None or self._run_canvas is not None:
+            return False
+        w, h = size()
+        try:
+            cv = mk(w, h, "cart")
+        except Exception as exc:  # noqa: BLE001 -- an alloc failure refuses, not crashes
+            print("Moybyte window canvas failed:", _err_text(exc))
+            cv = None
+        if cv is None:
+            return False
+        self._run_canvas = cv
+        self._run_canvas_stock = self.canvas
+        self._run_canvas_shared = False
+        self.canvas = cv
+        self.app_full_canvas = True
+        self.app_window_canvas = True
+        self._surface_write()
+        return True
+
+    def app_window_size(self):
+        """(w, h) of a window-bound app cart's content: its window's content
+        rect, which its canvas holds from the top left."""
+        return self.wm.app_window_content()
+
     def release_run_canvas(self):
         """Undo bind_run_canvas / bind_app_canvas at run death
         (Player.release_world) -- the cart_quit pattern, idempotent.
         Identity-guarded so a backend that swapped ws.canvas mid-run (the
         web-view Tee) is never clobbered."""
         self.app_full_canvas = False
+        self.app_window_canvas = False
         stock = self._run_canvas_stock
         if stock is None:
             self._surface_write()

@@ -540,6 +540,30 @@
    "family": "jbmono",
    "size": 11,
    "weight": 400
+  },
+  "jbmono-11-700-2": {
+   "bpp": 2,
+   "bytes": 4083,
+   "chars": "full",
+   "family": "jbmono",
+   "size": 11,
+   "weight": 700
+  },
+  "jbmono-15-400-4": {
+   "bpp": 4,
+   "bytes": 10623,
+   "chars": "full",
+   "family": "jbmono",
+   "size": 15,
+   "weight": 400
+  },
+  "jbmono-15-700-4": {
+   "bpp": 4,
+   "bytes": 9880,
+   "chars": "full",
+   "family": "jbmono",
+   "size": 15,
+   "weight": 700
   }
  },
  "families": {
@@ -604,7 +628,10 @@
    "inter-22-500-4",
    "inter-24-500-4",
    "inter-44-600-4",
-   "jbmono-11-400-2"
+   "jbmono-11-400-2",
+   "jbmono-11-700-2",
+   "jbmono-15-400-4",
+   "jbmono-15-700-4"
   ],
   "handheld": [
    "atkinson-11-700-2",
@@ -640,7 +667,8 @@
    "inter-17-500-4",
    "inter-19-700-4",
    "inter-28-600-4",
-   "jbmono-11-400-2"
+   "jbmono-11-400-2",
+   "jbmono-11-700-2"
   ]
  }
 }

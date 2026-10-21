@@ -805,6 +805,10 @@ Ruled 2026-10-13 by step 3 (Tiny5 lands), each the pick that builds least:
     (its body, `_layout`, `_init`, `_update`, `_draw`; a wallpaper cart's
     frame), every role and the print font read petme128, and the shell's
     come back after. A compiled run's canvas is petme128 already (step 2).
+    A built-in app cart (`system_carts/`, `system_api.draws_in_look`:
+    Notes) runs outside it: its page is the verbs' and its note the editor
+    handle's, both in the look's colours and faces; a copy of it is a
+    kid's cart, inside the boundary.
   - **The floor is the smallest text the owner kept at 1x**: `MIN_TEXT_MM`
     is Tiny5's six rows on the 7" 1024×600 Waveshare P4 (0.89mm; that panel
     runs font scale 1 by the owner's call of 2026-07-12), under the 3.5"

@@ -348,7 +348,7 @@ def test_a_checkbox_is_tappable_and_the_tick_paints(tmp_path):
     cv = _draw(ws, ed)
     y = _row_y(ed, 0)
     empty = probe.painted_pixels_rect(cv, 0, y, 8 * 3, 8)
-    assert ed.tap(8 * 3 + 2, y + 3) == ("check", 0)
+    assert ed.tap(8 + 2, y + 3) == ("check", 0)          # the box, its first cells
     assert ed.text() == "- [x] milk\n"
     cv = _draw(ws, ed)
     assert probe.painted_pixels_rect(cv, 0, _row_y(ed, 0), 8 * 3, 8) > empty
@@ -364,11 +364,13 @@ def test_a_link_is_underlined_and_a_tap_on_it_names_the_note(tmp_path):
     cv = _draw(ws, ed)
     th = ws.theme_colors
     y = _row_y(ed, 0)
-    # The RULE under the link, and nothing under the words either side of it.
+    # The RULE under the link (its brackets are not drawn: "go to other
+    # now"), and nothing under the words either side of it.
     rule = y + 7
-    assert probe.word_of(th["focus"], cv) in _band(cv, rule, 1, 6 * 8, 15 * 8)
-    assert probe.word_of(th["focus"], cv) not in _band(cv, rule, 1, CARET, 6 * 8)
-    assert probe.word_of(th["focus"], cv) not in _band(cv, rule, 1, 15 * 8)
+    link = probe.word_of(th.get("value", th["focus"]), cv)
+    assert link in _band(cv, rule, 1, 6 * 8, 11 * 8)
+    assert link not in _band(cv, rule, 1, CARET, 6 * 8)
+    assert link not in _band(cv, rule, 1, 11 * 8)
     assert ed.tap(6 * 8 + 2, y + 3) == ("link", "other")
     # and a tap OFF the link is an ordinary caret place
     assert ed.tap(1, y + 3) == ("caret", None)
@@ -449,10 +451,11 @@ def test_a_checkbox_line_can_still_carry_a_link(tmp_path):
     ed = _handle(ws, "both")
     cv = _draw(ws, ed)
     y = _row_y(ed, 0)
-    assert probe.word_of(ws.theme_colors["focus"], cv) in \
-        _band(cv, y + 7, 1, 11 * 8, 20 * 8)
-    assert ed.tap(13 * 8, y + 3) == ("link", "other")
-    assert ed.tap(3 * 8 + 2, y + 3) == ("check", 0)
+    th = ws.theme_colors
+    assert probe.word_of(th.get("value", th["focus"]), cv) in \
+        _band(cv, y + 7, 1, 8 * 8, 13 * 8)      # "   read other": the box, then the words
+    assert ed.tap(10 * 8, y + 3) == ("link", "other")
+    assert ed.tap(8 + 2, y + 3) == ("check", 0)
 
 
 def test_a_resize_drops_the_memo_because_the_wrap_moved(tmp_path):

@@ -279,7 +279,7 @@ def test_draw_and_tap_reach_the_canvas_and_name_the_tapped_link():
 
 def test_a_checkbox_tap_answers_its_row_as_a_number():
     with run_cart(DRAWN) as r:
-        assert _tap_at(r, 2, 3,
+        assert _tap_at(r, 2, 1,                 # the box, its first cells
                        'VERBOK = (verb == "check") and 1 or 0\nROW = arg'
                        ) is None
         assert r.get("VERBOK") == 1

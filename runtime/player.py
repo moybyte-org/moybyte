@@ -170,18 +170,20 @@ try:
     from ui_draw import print_font as _print_font
     from ui_draw import ui_context as _ui_context, ui_frame as _ui_frame
     from moy_input import pointer_state as _pointer_state
+    import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ui_draw import cart_text as _cart_text
     from runtime.ui_draw import print_font as _print_font
     from runtime.ui_draw import ui_context as _ui_context, ui_frame as _ui_frame
     from runtime.moy_input import pointer_state as _pointer_state
+    from runtime import layout_base as _layout_base
 from array import array as _array
 _UI_MASKS = [0, 0]                      # reused: the frame's button masks
 _UI_POINTER = [0, 0, 0, 0]              # reused: moy_input.pointer_state's answer
 try:
-    from system_api import make_system_api, wants_layout
+    from system_api import draws_in_look, make_system_api, wants_layout
 except ImportError:                     # host: the runtime package
-    from runtime.system_api import make_system_api, wants_layout
+    from runtime.system_api import draws_in_look, make_system_api, wants_layout
 import moy_app as _moy_app              # the grant policy (native/moy_app)
 try:
     from audio_session import native as _audio_native
@@ -579,6 +581,8 @@ class Player:
                                       # window resize / font-scale change re-runs it and a
                                       # steady frame costs one tuple compare
         self._app_id = None           # the crash guard's key for this run (#160), or None
+        self._look = False            # a built-in app: its code draws in the look, outside
+                                      # the app-cart boundary (system_api.draws_in_look)
         self._ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
         self._run_handle = 0          # the kernel Player's handle on this run, or 0
         self._app_ctx = None          # a user app's or script's context: its run grant
@@ -638,7 +642,8 @@ class Player:
         look = getattr(self.ws, "look", None)
         ed = EditorHandle(files, kind, name, mode, canvas, self._theme_colors,
                           clip=clip, host=self.ws, images=self._embeds(),
-                          watch=look.file_watch(kind, name) if look else None)
+                          watch=look.file_watch(kind, name) if look else None,
+                          look=self._look)
         self._editors.append(ed)
         return ed
 
@@ -754,8 +759,8 @@ class Player:
         text size is none of its business."""
         ws = self.ws
         cv = ws.canvas
-        return (cv.w, cv.h,
-                ws.look.effective_font_scale() if ws.app_full_canvas else 1)
+        w, h = ws.app_window_size() if ws.app_window_canvas else (cv.w, cv.h)
+        return (w, h, ws.look.effective_font_scale() if ws.app_full_canvas else 1)
 
     def _map_crash_line(self, line):
         """Map a crash line reported against the NATIVIZED source back to the
@@ -1266,7 +1271,7 @@ class Player:
             _CODE_CACHE[_ckey] = (_csig, code, self._native_ins, self._native_fail)
             t_compile = t_compile_native + _ticks_diff(_ticks_ms(), t4)
             t5 = _ticks_ms()
-            _was = _cart_text(True)
+            _was = _cart_text(not self._look)
             try:
                 exec(code, ns)
                 t_exec = _ticks_diff(_ticks_ms(), t5)
@@ -1342,6 +1347,7 @@ class Player:
         self._app_layout = None
         self._app_wh = None
         self._app_id = None
+        self._look = False
         self._ui = None
         self._end_grant()
         self._release_editors()        # a RE-RUN is an exit too: flush, then drop
@@ -1428,6 +1434,7 @@ class Player:
             # EDIT/CODE -- so "this app is broken" and "here is how you fix it"
             # are the same screen.
             self._app_id = ws.app_cart_id(cart)
+            self._look = draws_in_look(cart)
             if not ws.app_guard.arm(self._app_id):
                 self._app_id = None
                 return ("app turned off after %d crashes - EDIT it"
@@ -1547,7 +1554,13 @@ class Player:
         a[0], a[1] = m[0], m[1]
         a[2], a[3], a[4] = st[0], st[1], st[2]
         a[5] = int(getattr(inp, "last_key", 0) or 0)
-        _ui_frame(ctx, cv, ws.theme_colors, None, a, False, ws.windowed_chrome)
+        if self._focus_editor is not None:
+            a[0] = a[1] = a[5] = 0      # the keys are the focused editor handle's
+        # an app on the whole surface (a desk's window, or its glass) lays out
+        # on the desk's rows there; the fixed raster is the handheld's
+        desk = ws.app_full_canvas and _layout_base.metric_class() == _layout_base.DESK
+        _ui_frame(ctx, cv, ws.theme_colors, None, a, desk, ws.windowed_chrome,
+                  elsewhere=self._focus_editor is not None)
 
     def _build_namespace(self, ws, project, cart, wifi, net, gpio, console):
         """The cart's namespace: make_api over the project, the artwork and
@@ -2160,7 +2173,7 @@ class Player:
             self._tick_keys(ws)
             # The cart's code prints and measures in petme128, whatever the
             # theme names (docs/theming_2026-09.md §4.7).
-            _was = _cart_text(True)
+            _was = _cart_text(not self._look)
             try:
                 # A RESPONSIVE app cart follows its surface (#181): a window
                 # resize, a font-scale change or a mode switch re-runs `_layout`
@@ -2279,8 +2292,8 @@ class Player:
             # it and the cart's own key()/keyp() read nothing, so a skin
             # never has to filter the text its editor is eating.
             ws.input.cart_key = 0
-            if k and k != self._cart_key_prev:
-                fed.key(k)
+            if k and k != self._cart_key_prev and not fed.key(k):
+                self._keyp_latch = k    # a key it did not take (Esc) is the cart's
         self._cart_key_prev = k
 
     def _lockstep_step(self, ws, dt):
@@ -2441,7 +2454,7 @@ class Player:
         if self.cart_error is not None:
             self._draw_error_panel()
             ws._draw_cart_bar()                 # unified top bar (crash tool switcher)
-        elif self._is_tool:                     # #75: cached at start(); error is None here
+        elif self._is_tool and not ws.app_window_canvas:   # #75: cached at start()
             # Part 4: a TOOL/APP runs WITH a minimal bar (back + title + status) so
             # it's exitable -- a GAME stays fullscreen-bar-hidden. The bar-visibility-by-
             # type rule keys on the running cart's manifest type (ws._running_cart_shows_bar).
@@ -2476,7 +2489,7 @@ class Player:
         if click and self.cart_error is not None:
             ws._cart_bar_tap(px, py)            # crash-bar tool switcher (EDIT/CODE reachable)
         elif click and self._is_tool:           # #75: cached type; error is None past the if
-            if ws._tool_bar_tap(px, py):        # tool bar: X exits, wifi/≡ shortcuts
+            if not ws.app_window_canvas and ws._tool_bar_tap(px, py):   # X exits, wifi/≡
                 # The bar consumed the tap -> clear the published game pointer's tap so the
                 # tool doesn't ALSO act on it this frame (mirrors the overlay-suppress rule).
                 gp = ws.input.game_pointer
