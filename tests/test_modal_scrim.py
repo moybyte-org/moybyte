@@ -19,6 +19,17 @@ HANDHELD = "tdeck_320x240_fs1_dark"
 DESK = "p4_1024x600_cs2_fs1_windowed"
 
 
+@pytest.fixture(autouse=True)
+def _pin_cover_budget(monkeypatch):
+    """Build every cover inside its own frame: a cover spends a per-frame TIME
+    slice, so on a loaded machine a shelf cover lands a frame later and the
+    shown and clear frames the dimming test compares differ by more than the
+    scrim. test_shell_goldens pins the same for its own tests; a fixture is
+    not inherited by importing that module."""
+    from runtime import cover_cache
+    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", g._COVER_SLICE_UNBOUNDED)
+
+
 def _ws(tmp_path, config, mode="light"):
     cfg = dict(g.CONFIGS[config], variant=mode)
     cfg["theme"] = "moy"
