@@ -604,16 +604,23 @@ int moy_ui_part(const char *name, size_t n);
 // and glyph (docs/theming_2026-09.md §4.6). States are MOY_THEME_S_ACTIVE /
 // _INACTIVE.
 enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2, MOY_UI_FB_BACK = 3 };
+// What a full-screen row draws in maximise's place (moy_ui_icon_button's id;
+// never a layout's).
+#define MOY_UI_FB_RESTORE 4
 // A frame's optional buttons (`btns`): a minimise, and the back chevron at
 // the head of the strip, before the icon and the title, that a window whose
 // app has opened a page of it shows (docs/look_2026-10.md step 27a).
 // MOY_UI_FRAME_MATTE rides the same word and is no button: the window's
 // content stands in from its sides by the foot (the game window's matte,
 // WindowChrome._win_edge), so under a depth the body paints those columns
-// too, as it paints the foot.
+// too, as it paints the foot. MOY_UI_FRAME_FULL is a full-screen window's
+// row (docs/media/look_2026-10/MAXIMISE_VARIANTS.md, V2): the strip's title
+// and buttons alone, on the ground already under them -- no ring, strip,
+// line or shadow -- and maximise drawn as restore.
 #define MOY_UI_FRAME_MIN 1
 #define MOY_UI_FRAME_BACK 2
 #define MOY_UI_FRAME_MATTE 8
+#define MOY_UI_FRAME_FULL 16
 #define MOY_UI_FRAME_BUTTONS 4
 typedef struct {
     moy_ui_box_t box;

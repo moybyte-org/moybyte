@@ -547,11 +547,27 @@ class BarLayer:
                 return c[1]
         return None
 
-    @staticmethod
-    def _window_zone(rect, zone):
+    def _window_zone(self, rect, zone):
         """A window's strip paints none of the OS widgets, so its zone runs on
-        to the strip's end, its own left margin kept at the right."""
+        to the strip's end, its own left margin kept at the right; in a
+        full-screen window's row, between its title slot and its controls
+        (`WindowedWM.band_span`)."""
+        span = self.ws.wm.band_span()
+        if span is not None:
+            return (span[0], zone[1], max(0, span[1] - span[0]), zone[3])
         return (zone[0], zone[1], max(zone[2], rect[2] - 2 * zone[0]), zone[3])
+
+    def lends_band(self, where):
+        """Whether `where`'s content draws the band a window's layouts take:
+        a full-screen window's row is then that band (`WindowedWM._band_is_row`)."""
+        return where != "home" and self._zone_owner(where) is not None
+
+    def paint_band(self, cv, rect):
+        """A window's band ground at `rect` on `cv`, its line under it: what a
+        full-screen row with no band of its app's lies on."""
+        th = self.ws.theme_colors
+        light = th.get("bar_light", False) or th.get("band_light", False)
+        _ui_draw.frame_band(cv, th, rect, light, _BAND_SIDE["top"])
 
     def zone_band_light(self, where):
         """True when `where`'s bar band is LIGHT -- an in-window band under a

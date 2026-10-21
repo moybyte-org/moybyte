@@ -303,6 +303,11 @@ class ConsoleDriver:
         board's reaches it through its `start` button."""
         self.ws.system_key()
 
+    def full_key(self):
+        """F11: the focused desk window full screen, and back
+        (`Workstation.full_key`)."""
+        self.ws.full_key()
+
     def menu_open(self):
         """The pause menu, the delete confirm or the system menu shows: Esc
         is theirs."""

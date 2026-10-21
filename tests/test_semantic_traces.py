@@ -585,7 +585,7 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # input.py so the scripted feed can BE the console's InputState rather than
     # a second implementation of held/pressed/button_masks -- and it is the
     # BOARDS' one, because this harness models a device build: the native
-    # table over all fifteen names. Staging the host's (which is what it used
+    # table over all sixteen names. Staging the host's (which is what it used
     # to do) meant the one suite that drives real input through the real glue
     # was testing the wrong tier's input class.
     (stage / "input.py").write_text(
@@ -1342,7 +1342,7 @@ print("DRIVER_DONE")
 '''
 
 INPUT_TRACE = """\
-names left,right,up,down,a,b,run,home,x,y,stop,save,share,select,start
+names left,right,up,down,a,b,run,home,x,y,stop,save,share,select,start,full
 host left,right,up,down,a,b,run,home
 refuse VALUE ok VALUE
 sources 6.1.1 6.2.1 6.3.1

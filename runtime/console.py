@@ -1849,6 +1849,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self.toggle_sysmenu()
         self._dirty = True
 
+    def full_key(self):
+        """F11 -- the `full` button of a keyboard, the host's and the page's
+        F11: the focused desk window full screen, and back
+        (`WindowedWM.full_key`)."""
+        if self.wm.full_key():
+            self._dirty = True
+
     def plays_fullscreen(self):
         """A game runs fullscreen, live: what Super pauses."""
         return (self.wm.top_is_player() and self.cart_error is None

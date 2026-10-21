@@ -1,10 +1,16 @@
 # Map (grep -n a name to jump there):
-#   WindowChrome                     the mixin: a window's frame, strip and chips
-#   WindowChrome._win_chrome         a window's frame, title strip and shadow
-#   WindowChrome._icon_slot          a window's line icon (an app cart's own)
-#   WindowChrome._win_title          a window's title ("Notes · Story ideas")
-#   WindowChrome._strip_button_hit   the strip's buttons under a finger
-#   WindowChrome._draw_taskbar_chips  the desk bar's window chips
+#   WindowChrome                       the mixin WindowedWM draws its chrome through
+#   WindowChrome._win_chrome           a window's frame: strip, buttons, border, shadow
+#   WindowChrome._icon_slot            a window's line icon (an app cart's own)
+#   WindowChrome._win_title            a window's title ("Notes · Story ideas")
+#   WindowChrome._full_chrome          a full-screen window's row on the glass
+#   WindowChrome._paint_row            the row's head and its corner's controls
+#   WindowChrome._draw_unders          the shadows the desk takes under the windows
+#   WindowChrome._cast_onto            the shadows a window behind takes
+#   WindowChrome._strip_button_hit     the strip's and the corner's fat-finger hit
+#   WindowChrome._grip_hit_rect        the resize grip's touch target
+#   WindowChrome._chip_rects           the taskbar chips in the bar
+#   WindowChrome._draw_taskbar_chips   the desk bar's window chips
 """The windowed WM's CHROME: the per-window title strip (title + min/max/X),
 border, drop shadow and resize grip, the fat-finger resolution of the strip
 buttons and the grip, the rubber-band resize preview, and the taskbar chips in
@@ -19,10 +25,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import NAMES
 
 try:
+    import layout_base as _layout_base
     import ui_draw as _ui_draw
     import iconsets as _iconsets
     from app_decls import APPS as _APP_DECLS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import layout_base as _layout_base
     from runtime import ui_draw as _ui_draw
     from runtime import iconsets as _iconsets
     from runtime.app_decls import APPS as _APP_DECLS
@@ -77,7 +85,7 @@ class WindowChrome:
         it is the one piece the chrome freeze can never skip. A depth's
         rounded frame draws none (its corner still resizes,
         `_grip_hit_rect`)."""
-        if not focused or _ui_draw.depth()[13]:
+        if not focused or _ui_draw.depth()[13] or win.saved is not None:
             return
         sc = self._root_canvas
         ink = self.ws.theme_colors["chrome_ink"]
@@ -96,7 +104,10 @@ class WindowChrome:
         redraws only the grip. The streak counts CONSECUTIVE quiet paints, so any
         disturbance -- desk repaint, drag, cursor, animation, a changed title or
         theme -- restarts it and all buffers are refreshed before skipping
-        resumes."""
+        resumes. A full-screen window's is its row (`_full_chrome`)."""
+        if win.saved is not None:
+            self._full_chrome(win, focused, quiet)
+            return
         btns = self._win_btns(win)
         sig = (win.x, win.y, win.w, win.h, win.title_h, focused,
                self._win_title(win), btns, self.ws.look.look_gen, self._fs())
@@ -121,16 +132,77 @@ class WindowChrome:
             self._win_icon(win, slot, focused)
         self._win_grip(win, focused)
 
-    def _win_icon(self, win, slot, focused):
+    def _full_chrome(self, win, focused, quiet):
+        """A full-screen window's row on the root canvas: the band's ground
+        and the row (`_paint_row`) where the row lies above the content, the
+        corner's controls alone over a game's black; nothing where the app's
+        own band is the row, which its content draw carries (`_paint_row`
+        into the window's buffer). Frozen on quiet frames as a strip is."""
+        if win.kind != "desktop" and not win.row:
+            return
+        sig = (win.w, win.h, win.row, self._full_title(win), self._win_btns(win),
+               self.ws.look.look_gen, self._fs())
+        if sig != getattr(win, "_chrome_sig", None):
+            self._win_touched = True
+        if not quiet or sig != getattr(win, "_chrome_sig", None):
+            win._chrome_sig = sig
+            win._chrome_streak = 0
+        elif win._chrome_streak >= self._retained_n():
+            return
+        win._chrome_streak += 1
+        self._chrome_drew = True
+        if win.row:
+            self.ws.bar_layer.paint_band(self._root_canvas, (win.x, win.y, win.w, win.row))
+        self._paint_row(win, self._root_canvas)
+
+    def _paint_row(self, win, cv):
+        """A full-screen row's head and controls on `cv` (the glass's
+        coordinates): the back chevron where its app has a page open, the
+        window's icon and title, then minimise, restore and close at the
+        right, drawn by the frame as on every strip (`FRAME_FULL`). A game's
+        row is its controls alone."""
+        self.ws.icon_spec()               # the look's icon set, for the buttons
+        btns = self._win_btns(win) | _ui_draw.FRAME_FULL
+        rect = self._row_rect(win)
+        game = win.kind == "desktop"
+        _ui_draw.frame(cv, self.ws.theme_colors, rect, win.title_h,
+                       "" if game else self._full_title(win), True, btns, self._fs())
+        if not game:
+            slot = _ui_draw.frame_icon(rect, win.title_h, btns)
+            if slot is not None:
+                self._win_icon(win, slot, True, cv, row=True)
+
+    def _full_title(self, win):
+        """A full-screen row's title: the Editor's names its cart alone
+        (EDITOR_LAYOUT.md's frame), cut to the title slot where the app's band
+        follows it."""
+        t = self._win_title(win)
+        if win.kind == "menu":
+            cart = self.ws.cart.get("title") if self.ws.cart else None
+            if cart:
+                t = str(cart)
+        if win.kind == "desktop" or win.row:
+            return t
+        rect = self._row_rect(win)
+        btns = self._win_btns(win) | _ui_draw.FRAME_FULL
+        x = _ui_draw.frame_icon(rect, win.title_h, btns)
+        n = _layout_base.chrome_size(self._fs()) * 8 // _layout_base.render_scale()
+        x = (x[0] + x[2] + n + 2) if x is not None else win.x + 2 * n
+        room = self._full_slot(win) - n - x
+        fid = _ui_draw.font("title")[0]
+        return _ui_draw._C.text_cut(t, max(0, room), self._fs(), fid)
+
+    def _win_icon(self, win, slot, focused, cv=None, row=False):
         """The window's icon in the slot its frame leaves left of the title:
         its kind's icon of the theme's icon set where the set draws one (a
         shell app's by its id), else its app cart's icon at the largest whole
-        scale that fits, else its glyph, in the title's ink."""
+        scale that fits, else its glyph, in the title's ink (on a full-screen
+        `row`, the band's)."""
         ws = self.ws
-        sc = self._root_canvas
+        sc = self._root_canvas if cv is None else cv
         x, y, w, h = slot
         role = "chrome_ink" if focused else "chrome_ink_dim"
-        if focused and _ui_draw.depth()[13] \
+        if focused and not row and _ui_draw.depth()[13] \
                 and ws.look.live.look[0].get("win.header") == _HEAD_FILL:
             role = "value_ink"            # on the `value` header (moy_ui_depth_title_ink)
         ink = ws.theme_colors[role]
@@ -183,8 +255,9 @@ class WindowChrome:
         return _ui_draw.frame_geom(win.w, win.h, win.title_h)[0]
 
     def _win_foot(self, win):
-        """The rows under `win`'s content its rounded bottom corners take."""
-        if not _ui_draw.depth()[13]:
+        """The rows under `win`'s content its rounded bottom corners take
+        (none full screen)."""
+        if not _ui_draw.depth()[13] or win.saved is not None:
             return 0
         return _ui_draw.frame_geom(win.w, win.h, win.title_h)[1]
 
@@ -204,6 +277,8 @@ class WindowChrome:
         """The columns `win`'s content stands in from its frame each side:
         the frame's edge, and in the player's window its foot too, so the
         game sits as far from the frame at its sides as above the foot."""
+        if win.saved is not None:
+            return 0                      # full screen: no frame
         e = self._frame_edge()
         if win.kind == "desktop":
             return max(e, self._win_foot(win))
@@ -211,7 +286,10 @@ class WindowChrome:
 
     def _pad_extent(self, win, x, y, w, h):
         """(x, y, w, h) grown by what its draw touches beyond it: the border,
-        the classic 3px shadow, or the depth's shadow at its full size."""
+        the classic 3px shadow, or the depth's shadow at its full size; a
+        full-screen window draws nothing past the glass it covers."""
+        if win.saved is not None:
+            return (x, y, w, h)
         if _ui_draw.depth()[13]:
             g = _ui_draw.frame_geom(w, h, win.title_h)
             return (x - g[2] - 2, y - g[3] - 2, w + g[2] + g[4] + 4, h + g[3] + g[5] + 4)
@@ -240,7 +318,7 @@ class WindowChrome:
         try:
             for key in self._order:
                 win = self._wins.get(key)
-                if win is None or win.minimized:
+                if win is None or win.minimized or win.saved is not None:
                     continue
                 _ui_draw.frame_under(rc, th, (win.x, win.y, win.w, win.h), win.title_h,
                                 key == self._focus)
@@ -264,7 +342,8 @@ class WindowChrome:
             rx, ry, rw, rh = win.x, win.y, win.w, win.h
         else:
             rx, ry, rw, rh = win.content_rect()
-        dx, dy, dw, dh = self._desk_rect()
+        dx, dy, dw, dh = (win.x, win.y, win.w, win.h) if win.saved is not None \
+            else self._desk_rect()
         x0, y0 = max(dx, rx), max(dy, ry)
         x1, y1 = min(dx + dw, rx + rw), min(dy + dh, ry + rh)
         if x1 <= x0 or y1 <= y0:
@@ -278,7 +357,7 @@ class WindowChrome:
             for j in range(i + 1, n):
                 k = order[j]
                 up = self._wins.get(k)
-                if up is None or up.minimized:
+                if up is None or up.minimized or up.saved is not None:
                     continue
                 ex = self._pad_extent(up, up.x, up.y, up.w, up.h)
                 if (ex[0] >= x1 or ex[1] >= y1 or ex[0] + ex[2] <= x0
@@ -363,7 +442,11 @@ class WindowChrome:
     def _frame_buttons(self, win):
         """The title-strip buttons as the frame style lays them, left to right:
         [(name, rect, right)]. Close, maximize, and `_win_btns`' minimize and
-        back."""
+        back; a full-screen window's on its row (`_row_rect`)."""
+        if win.saved is not None:
+            return _ui_draw.frame_buttons(self._row_rect(win), win.title_h, "",
+                                          self._win_btns(win) | _ui_draw.FRAME_FULL,
+                                          self._fs())
         return _ui_draw.frame_buttons((win.x, win.y, win.w, win.h), win.title_h,
                                       self._win_title(win), self._win_btns(win), self._fs())
 
@@ -415,7 +498,8 @@ class WindowChrome:
             return None
         fs = self._fs()
         pad = 6 * fs
-        if not (win.y <= py < win.y + 1 + win.title_h + pad):
+        strip = self._row_h() if win.saved is not None else 1 + win.title_h
+        if not (win.y <= py < win.y + strip + pad):
             return None
         best = None
         bd = None

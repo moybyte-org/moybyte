@@ -417,6 +417,8 @@ if(e.key=="Escape"){
 // p8-web-player expectation -- since a page rarely sees the Super key; on a
 // system surface it closes and steps back.
 send(INPUT?{type:"super"}:{type:"esc"});e.preventDefault();return;}
+// F11 is the console's full-screen key: a desk window full screen, and back.
+if(e.key=="F11"){send({type:"full"});e.preventDefault();return;}
 // Super alone (the Meta key pressed and released with no other key, so a
 // Cmd chord never opens it) is the system key from every surface.
 if(e.key=="Meta"){metaTap=true;return;}

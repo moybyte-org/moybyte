@@ -805,7 +805,7 @@ def _apply(events):
         events, d.input, _S["sink"],
         on_press=d.press, on_pan=d.pan, on_key=d.type_char,
         on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold,
-        on_super=d.system_key)
+        on_super=d.system_key, on_full=d.full_key)
 
 
 def store_mode(mode=None, seeded=None):

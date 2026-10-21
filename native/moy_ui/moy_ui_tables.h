@@ -13,7 +13,7 @@
 #define MOY_UI_SLOTS 52
 #define MOY_UI_SPECS 31
 #define MOY_UI_HITS_CAP 32
-#define MOY_UI_GLYPHS 62
+#define MOY_UI_GLYPHS 63
 #define MOY_UI_GLYPH_SIZE 12
 
 // The tokens, in the row's order.

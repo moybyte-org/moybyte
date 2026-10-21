@@ -1648,7 +1648,7 @@ int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int
     return L.n;
 }
 
-static const char *const k_fb_glyph[4] = {"close", "app", "minus", "arr_l"};
+static const char *const k_fb_glyph[5] = {"close", "app", "minus", "arr_l", "restore"};
 
 static int fb_glyph(int id) {
     return moy_ui_glyph_id(k_fb_glyph[id], strlen(k_fb_glyph[id]));
@@ -1683,14 +1683,18 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
                    : moy_ui_token(look, active ? MOY_UI_T_CHROME_INK : MOY_UI_T_DIM);
     int t_bg = active ? MOY_UI_T_TITLE_ACTIVE : MOY_UI_T_TITLE_INACTIVE;
     int bg = moy_ui_token(look, t_bg);
-    int fg = moy_ui_token(look, moy_ui_depth()->frames
+    int full = (btns & MOY_UI_FRAME_FULL) != 0;    // on the band: the band's ink
+    int fg = moy_ui_token(look, full ? (active ? MOY_UI_T_CHROME_INK : MOY_UI_T_CHROME_INK_DIM)
+                                : moy_ui_depth()->frames
                                     ? moy_ui_depth_title_ink(active)
                                     : active ? MOY_UI_T_TITLE_INK : MOY_UI_T_CHROME_INK_DIM);
     int dark = L.style == MOY_THEME_FRAME_CLASSIC ? FRAME_BLACK
                                                   : moy_ui_token(look, MOY_UI_T_SHADE_DARK);
     moy_ui_box_t strip = {(int16_t)(w.x + 1), (int16_t)(w.y + 1), (int16_t)(w.w - 2), (int16_t)th};
     int depth = moy_ui_depth()->frames;
-    if (!depth) {
+    if (full) {
+        // a full-screen row: the title and the buttons on the ground under them
+    } else if (!depth) {
         fill(&d, w.x + 3, w.y + w.h, w.w, 3, dark);
         fill(&d, w.x + w.w, w.y + 3, 3, w.h, dark);
     }
@@ -1699,7 +1703,8 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
     // under the window; the ring's sides and foot and the shadow stay the
     // style's.
     int top = moy_theme_sheet_cell(MOY_THEME_P_WINDOW, st, 0);
-    if (depth) {
+    if (full) {
+    } else if (depth) {
         // the theme's depth: a rounded frame, its shadow and fringe the desk's
         moy_ui_depth_frame(s, w, th, active, (btns & MOY_UI_FRAME_MATTE) != 0);
     } else if (top >= 0) {
@@ -1769,17 +1774,19 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, moy_ui_span_t t
         moy_ui_box_t b = L.b[i].box;
         int id = L.b[i].id;
         int ink = fg;
+        // what the button shows: a full-screen row's maximise is restore
+        int face = full && id == MOY_UI_FB_MAX ? MOY_UI_FB_RESTORE : id;
         // the role sheet's title buttons are close, maximise and minimise
-        if (id != MOY_UI_FB_BACK
+        if (id != MOY_UI_FB_BACK && face == id
             && sprite(&d, b, moy_theme_sheet_cell(MOY_THEME_P_WINDOW_BUTTON, st, id), fs)) {
             continue;
         }
-        if (depth) {
+        if (depth || full) {
             if (!active && moy_ui_disabled() >= 0) {
                 ink = moy_ui_disabled();    // a window behind: its controls dimmed
             }
-            if (!moy_ui_icon_button(&d.t, id, b, d.row->pal[moy_ui_pidx(ink)])) {
-                glyph(&d, fb_glyph(id), b.x, b.y, b.w, b.h, ink, d.tfs);
+            if (!moy_ui_icon_button(&d.t, face, b, d.row->pal[moy_ui_pidx(ink)])) {
+                glyph(&d, fb_glyph(face), b.x, b.y, b.w, b.h, ink, d.tfs);
             }
             continue;
         }

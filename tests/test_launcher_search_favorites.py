@@ -388,7 +388,7 @@ def test_f_toggles_the_selected_cards_star(tmp_path):
 
 
 class _PadX:
-    """A frame's input with a gamepad's X pressed (the boards' fifteen-name
+    """A frame's input with a gamepad's X pressed (the boards' sixteen-name
     vocabulary; the host's keyboard has no X button)."""
 
     def pressed(self, name):

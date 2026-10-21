@@ -20,7 +20,7 @@ file; CPython has no such module, so this is what it finds.
   NAMES            the buttons, in libmoy's moy_button order with the console's
                    own names after it; HOST_NAMES is the host's prefix of it
   InputTable       the merged input every surface reads, and the masks: all
-                   fifteen names. HostInputTable is the same table over
+                   sixteen names. HostInputTable is the same table over
                    HOST_NAMES, the eight a keyboard, a mouse and the browser
                    can press; a name outside a table's names is refused
   InputSource      one producer's held set and key, a row of kind SRC
@@ -54,7 +54,7 @@ _SHIM = os.path.join(_INPUT, "moy_input.c")
 # libmoy's moy_button enum (lua_ext.MOY_BUTTONS, pinned against the vendored
 # header by tests/test_moy_button_order.py), then the console's own buttons.
 NAMES = ("left", "right", "up", "down", "a", "b", "run", "home",
-         "x", "y", "stop", "save", "share", "select", "start")
+         "x", "y", "stop", "save", "share", "select", "start", "full")
 HOST_NAMES = NAMES[:8]
 _BIT = {n: i for i, n in enumerate(NAMES)}
 

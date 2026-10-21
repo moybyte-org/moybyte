@@ -579,7 +579,7 @@ def _nothing_beneath_shows(ws, win):
     return bad
 
 
-@pytest.mark.parametrize("size", ["play", "dev", "maximised", "resized"])
+@pytest.mark.parametrize("size", ["play", "dev", "resized"])
 def test_a_trimmed_game_window_shows_nothing_beneath(tmp_path, size):
     """celeste's 128x120 trim in a game window at every size the WM gives
     one: the game covers its content rect and the matte round it is the
@@ -594,8 +594,6 @@ def test_a_trimmed_game_window_shows_nothing_beneath(tmp_path, size):
     if size == "dev":
         wm.set_play_intent("dev")
         wm._resize_window(win, *wm._win_size("desktop", wm._root_canvas, wm._fs()))
-    elif size == "maximised":
-        wm._toggle_max(win)
     elif size == "resized":
         wm._resize_window(win, win.w + 37, win.h - 23)
     _settle(ws)
@@ -998,7 +996,7 @@ def test_a_held_games_chip_icon_is_the_pause_glyph(tmp_path, monkeypatch):
     ws.pause.close()
 
 
-def test_maximize_toggle_fills_desktop_and_restores(tmp_path):
+def test_maximize_toggle_fills_the_glass_and_restores(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_settings()
@@ -1008,9 +1006,7 @@ def test_maximize_toggle_fills_desktop_and_restores(tmp_path):
     mx = dict(ws.wm._strip_buttons(win))["max"]
     drv.touch(mx[0] + 2, mx[1] + 2)
     drv.frame(1 / 30)
-    dx, dy, dw, dh = ws.wm._desk_rect()
-    assert (dx, dy, dw, dh) == (0, ws.layout.status_h, 1024, 600 - ws.layout.status_h)
-    assert (win.x, win.y, win.w, win.h) == (dx, dy, dw, dh)   # the desk, bar left
+    assert (win.x, win.y, win.w, win.h) == (0, 0, 1024, 600)   # full screen
     assert win.ctx.layout.w == win.buf.w        # content relaid out to the new size
     mx = dict(ws.wm._strip_buttons(win))["max"]
     drv.touch(mx[0] + 2, mx[1] + 2)             # toggle back
@@ -3576,6 +3572,7 @@ def test_a_new_window_opens_clear_of_the_icon_column(tmp_path, key):
     GNOME place one in the free area), never over their labels."""
     ws = _moy_desk(tmp_path)
     if key == "menu":
+        ws.system.set("win_full", {"menu": False})     # restored (E-04 opens it full)
         ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
     elif key == "appearance":
         ws.open_app(ws.appearance_app)

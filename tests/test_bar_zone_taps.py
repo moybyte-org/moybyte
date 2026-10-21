@@ -199,7 +199,12 @@ def _tap_floor(ws):
 
 
 def _editor(ws, drv, desk, size=None):
+    """The Editor on Star Catcher: on a desk in a window, restored, `size`
+    big where given, or full screen where `size` is "full" (its band is the
+    full-screen row, between the title slot and the corner's controls)."""
+    full = size == "full"
     if desk:
+        ws.system.set("win_full", {"menu": full})
         ws.open_desk()
         _frames(ws, drv)
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
@@ -207,6 +212,9 @@ def _editor(ws, drv, desk, size=None):
     if desk:
         win = ws.wm._wins["menu"]
         assert getattr(ws.wm, "mode", None) == "desktop" and ws.wm.input_holder() == "menu"
+        assert win.full() == full
+        if full:
+            return
         if size is not None:
             win.x, win.y = 160, 60
             ws.wm._resize_window(win, *size)
@@ -217,6 +225,8 @@ def _editor(ws, drv, desk, size=None):
 @pytest.mark.parametrize("config,inputs,size", [
     (DESK, "touch", None),            # the P4's Editor window, the labelled shelf
     (DESK, "touch", (520, 400)),      # a narrow window: the icon ladder
+    (DESK, "touch", "full"),          # full screen: the row past the title slot
+    (GUITION_P4, "touch", "full"),
     (HANDHELD, "touch", None),
     (HANDHELD, "tdeck", None),        # the T-Deck's trackball pointer
     (TAPFLOOR, "touch", None),        # chrome scale above the font's (#203)
@@ -225,10 +235,10 @@ def _editor(ws, drv, desk, size=None):
 def test_a_tap_on_a_drawn_editor_bar_item_fires_that_item(tmp_path, monkeypatch,
                                                           config, inputs, size, theme):
     ws, drv = _ws(tmp_path, config, theme, inputs)
-    _editor(ws, drv, config == DESK, size)
+    _editor(ws, drv, config in DESKS, size)
     drawn = _drawn(ws, drv, monkeypatch)
     actions = [a for a, _r in drawn]
-    if size is None:              # a shipped bar: every item
+    if size is None or size == "full":    # a shipped bar: every item
         assert sorted(set(actions), key=_ALL.index) == _ALL, drawn
     else:
         assert "cards" in actions and None in actions \
@@ -246,15 +256,18 @@ def test_a_tap_on_a_drawn_editor_bar_item_fires_that_item(tmp_path, monkeypatch,
     (GUITION_P4, "touch"),
 ])
 @pytest.mark.parametrize("theme", ["moy", "blocks", "contrast"])
+@pytest.mark.parametrize("full", [False, True])
 def test_no_shipped_editor_bar_drops_an_item_or_shrinks_one_under_the_floor(
-        tmp_path, monkeypatch, config, inputs, theme):
+        tmp_path, monkeypatch, config, inputs, theme, full):
     """The Editor's bar on every shipped glass draws all ten items, and a
     tap fires each across at least the board's tap floor, on a band at
     least that tall: where the zone is too narrow for the ladder at the
     floor, the status widgets give it their room (`BarLayer._make_room`)
     rather than the ladder giving up an item."""
+    if full and config not in DESKS:
+        pytest.skip("only a desk window goes full screen")
     ws, drv = _ws(tmp_path, config, theme, inputs)
-    _editor(ws, drv, config in DESKS)
+    _editor(ws, drv, config in DESKS, "full" if full else None)
     drawn, band = _drawn_in(ws, drv, monkeypatch)
     actions = [a for a, _r in drawn]
     assert sorted(set(actions), key=_ALL.index) == _ALL, drawn

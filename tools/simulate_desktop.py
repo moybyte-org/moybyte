@@ -219,6 +219,8 @@ def run_live(driver, dt, scale):
                 running = False
             elif ev.type == pygame.KEYDOWN and ev.key in super_keys:
                 driver.system_key()
+            elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_F11:
+                driver.full_key()         # a desk window full screen, and back
             elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE \
                     and driver.takes_escape():
                 driver.escape()           # a menu closes, Settings or an app steps back

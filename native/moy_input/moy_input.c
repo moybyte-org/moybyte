@@ -19,7 +19,7 @@
 
 const char *const MOY_INPUT_NAMES[MOY_INPUT_BUTTONS] = {
     "left", "right", "up", "down", "a", "b", "run", "home",
-    "x", "y", "stop", "save", "share", "select", "start",
+    "x", "y", "stop", "save", "share", "select", "start", "full",
 };
 
 // A source's latch: what its producer wrote since the last merge. Internal RAM

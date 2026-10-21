@@ -57,7 +57,7 @@
 #endif
 #endif
 
-#define MOY_INPUT_BUTTONS 15u
+#define MOY_INPUT_BUTTONS 16u
 #define MOY_INPUT_HOST_BUTTONS 8u
 #define MOY_INPUT_SOURCES 8u
 #define MOY_INPUT_PLAYERS 8u

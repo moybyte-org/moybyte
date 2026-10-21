@@ -268,7 +268,7 @@ body and nothing executable guarded it.**
   be per-frame: on the boot path it runs once and reads statically identical.
 - **Derived values get one author.** Both tiers' InputState are one table
   (`runtime/moy_input.py`'s `InputTable`) over two vocabularies — the boards'
-  fifteen names, the host's first eight of the same order — and a mask's bit
+  sixteen names, the host's first eight of the same order — and a mask's bit
   order is the caller's (`button_masks(order, player)`), never the vocabulary's.
 - **Storage READS take the SD gate too, not just writes.** The webhost's poll
   runs at the frame tail after `kick()` (the kernel loop's service upcall), so

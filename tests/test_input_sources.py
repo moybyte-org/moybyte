@@ -12,7 +12,7 @@ that board.
 
 Every behavioural test below runs against BOTH tiers' InputState. They are
 one table now (runtime/moy_input.py's InputTable) over two vocabularies -- the
-boards' fifteen names and the host's first eight -- and a tier that stopped
+boards' sixteen names and the host's first eight -- and a tier that stopped
 being that table would be exactly the shape of failure `button_masks`'s
 docstring records: no crash, no failing test, no frame hash.
 
@@ -675,7 +675,7 @@ def test_a_one_player_cart_responds_to_any_controller():
 
 def test_one_table_two_vocabularies():
     """Both tiers' InputState are moy_input's InputTable (sprint 3's carve):
-    the boards accept all fifteen names, the host its eight, which are the
+    the boards accept all sixteen names, the host its eight, which are the
     first eight of the same order -- libmoy's moy_button enum, then `home` --
     and a name outside a table's vocabulary is refused."""
     from runtime import moy_input
@@ -685,7 +685,7 @@ def test_one_table_two_vocabularies():
     assert issubclass(Host, moy_input.InputTable)
     assert issubclass(Board, moy_input.InputTable)
     assert moy_input.NAMES[:len(MOY_BUTTONS)] == MOY_BUTTONS
-    assert Host.BUTTONS == moy_input.NAMES[:8] and len(Board.BUTTONS) == 15
+    assert Host.BUTTONS == moy_input.NAMES[:8] and len(Board.BUTTONS) == 16
     host, board = Host(), Board()
     board.source("kbd").set_held("start", True)
     with pytest.raises(ValueError):

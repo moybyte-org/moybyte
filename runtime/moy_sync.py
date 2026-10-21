@@ -687,6 +687,7 @@ SYSTEM_KEYS = {
     "diag_sd": (LOCAL, None),
     "app_guard": (LOCAL, None),
     "wallpaper_guard": (LOCAL, None),
+    "win_full": (LOCAL, None),
     "web_pin": (BOARD, None),
     "ota_channel": (BOARD, None),
     "unknown_sources": (BOARD, None),

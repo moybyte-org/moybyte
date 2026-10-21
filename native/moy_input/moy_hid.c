@@ -161,7 +161,7 @@ int32_t moy_hid_keycode(uint8_t usage, uint8_t mods, bool caps) {
 enum {
     B_LEFT = 1u << 0, B_RIGHT = 1u << 1, B_UP = 1u << 2, B_DOWN = 1u << 3,
     B_A = 1u << 4, B_B = 1u << 5, B_RUN = 1u << 6, B_STOP = 1u << 10,
-    B_START = 1u << 14,
+    B_START = 1u << 14, B_FULL = 1u << 15,
 };
 
 // The GUI keys (left 0x08, right 0x80): Super, the console's system key.
@@ -191,6 +191,7 @@ static uint32_t direct_button(uint8_t usage) {
         case 0x50: return B_LEFT;
         case 0x51: return B_DOWN;
         case 0x52: return B_UP;
+        case 0x44: return B_FULL;       // F11: a desk window full screen, and back
         default: return 0;
     }
 }

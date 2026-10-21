@@ -91,6 +91,7 @@ def _editor(ws, config, tab):
     left, the glass y of its content's top)."""
     desk = config == DESK
     if desk:
+        ws.system.set("win_full", {"menu": False})     # restored, not full screen
         ws.open_desk()
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
     ws.set_menu_view(tab)

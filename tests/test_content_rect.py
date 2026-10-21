@@ -429,7 +429,5 @@ def test_the_desk_keeps_windows_and_icons_off_the_bottom_bar(tmp_path):
     assert dy <= win.y and win.y + win.h <= dy + dh
     wm._move_window(win, win.x, 10_000)
     assert win.y + 24 * wm._fs() <= dy + dh
-    wm._toggle_max(win)
-    assert (win.x, win.y, win.w, win.h) == (dx, dy, dw, dh)
     for _k, rect, _label in wm._chip_rects():
         assert _inside(rect, (bx, by, bw, bh))

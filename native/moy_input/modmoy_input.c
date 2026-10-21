@@ -28,7 +28,7 @@
 static const qstr NAME_Q[MOY_INPUT_BUTTONS] = {
     MP_QSTR_left, MP_QSTR_right, MP_QSTR_up, MP_QSTR_down, MP_QSTR_a, MP_QSTR_b,
     MP_QSTR_run, MP_QSTR_home, MP_QSTR_x, MP_QSTR_y, MP_QSTR_stop, MP_QSTR_save,
-    MP_QSTR_share, MP_QSTR_select, MP_QSTR_start,
+    MP_QSTR_share, MP_QSTR_select, MP_QSTR_start, MP_QSTR_full,
 };
 
 static const mp_rom_obj_tuple_t names_obj = {
@@ -38,6 +38,7 @@ static const mp_rom_obj_tuple_t names_obj = {
         MP_ROM_QSTR(MP_QSTR_run), MP_ROM_QSTR(MP_QSTR_home), MP_ROM_QSTR(MP_QSTR_x),
         MP_ROM_QSTR(MP_QSTR_y), MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_QSTR(MP_QSTR_save),
         MP_ROM_QSTR(MP_QSTR_share), MP_ROM_QSTR(MP_QSTR_select), MP_ROM_QSTR(MP_QSTR_start),
+        MP_ROM_QSTR(MP_QSTR_full),
     }
 };
 

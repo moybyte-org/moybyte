@@ -195,7 +195,12 @@ class _Win:
         self.ctx = ctx                # _LayoutCtx (apps) | None (player)
         self.minimized = False        # hidden; lives on as a taskbar chip
         self.held = False             # its run held by the minimise (a game's)
-        self.saved = None             # pre-maximize rect (x, y, w, h) | None
+        self.saved = None             # full screen: the rect a restore puts
+                                      # back (x, y, w, h); None while restored
+        self.corner = 0               # full screen: where its controls start
+        self.row = 0                  # full screen: the rows the WM's row takes
+                                      # above the content (0 where the app's
+                                      # own band is the row)
         self._buf_stale = True        # buf is behind the content's truth (fresh
                                       # buffer, or a gesture's _direct_render
                                       # painted past it) -> the next paint must
@@ -204,10 +209,18 @@ class _Win:
         self._look_gen = -1           # the look buf's content was drawn under
         self._marked = False          # buf was drawn focused: it holds a focus mark
 
+    def full(self):
+        """Whether the window is full screen (maximised, docs/media/look_2026-10/
+        MAXIMISE_VARIANTS.md's V2): the whole glass, no frame and no strip."""
+        return self.saved is not None
+
     def content_rect(self):
         """The inner rect the content occupies: below the WM title strip and
         inside the frame, its `edge` off the sides, and above the foot (the
-        frame's bottom line where it has no foot)."""
+        frame's bottom line where it has no foot); full screen, the glass
+        under the WM's row."""
+        if self.saved is not None:
+            return (self.x, self.y + self.row, self.w, self.h - self.row)
         e = self.edge
         return (self.x + 1 + e, self.y + 1 + self.title_h,
                 self.w - 2 - 2 * e, self.h - 2 - self.title_h - max(self.foot, e))
@@ -426,6 +439,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                                       # rect, None (all of it) or False (nothing)
         self._foot_gen = None         # the look the windows' feet were sized under
         self._root_marks = None       # ui.marks' active before a window's install
+        self._installed = None        # the window whose layouts are installed
         self._drag_armed = None       # (kind, ox, oy, wx, wy) press-in-strip origin
         self._resize = None           # (kind, ox, oy, ow, oh, cur_w, cur_h) in-flight
         self._ctx_switching = False   # reentrancy guard for internal _relayout runs
@@ -581,6 +595,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # The root context takes back the marks it had before the windows
         # drew -- off while the console holds them under a menu -- so what
         # the root draws after them marks only where it may.
+        self._installed = win
         if win is None:
             ctx.install(self.ws)
             if self._root_marks is not None:
@@ -963,6 +978,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             y = max(dy, min(y, dy + dh - 24 * fs))
         x, y = self._clear_of_subject(x, y, w, h, fs)
         win = _Win(kind, x, y, w, h, title_h)
+        if self._opens_full(kind):
+            win.saved = (x, y, w, h)
+            self._set_full(win)
         self._build_content(win)
         # Prewarm: render the content ONCE into the fresh buffer, so a window
         # created BEHIND another (e.g. the home window when it and the Editor
@@ -1033,12 +1051,20 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._install(win.ctx, win)
         try:
             content.draw(0)
+            self._row_over(win, win.buf)
             win._buf_stale = False
             win._look_gen = self.ws.look.look_gen
         except Exception:  # noqa: BLE001
             pass
         finally:
             self._install(self._root_ctx)
+
+    def _row_over(self, win, cv):
+        """Where `win` is full screen and its app's band is its row: the
+        row's head and controls over the band its content just drew on `cv`,
+        so they ride the content's stamp and its freeze."""
+        if win.saved is not None and not win.row and win.kind != "desktop":
+            self._paint_row(win, cv)
 
     def _build_content(self, win):
         """(Re)build a window's content backing for its CURRENT size: the buffer +
@@ -1056,6 +1082,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         canvas (#58) returns an RGB565 layer sharing its native moy_gfx kernel."""
         win.foot = self._win_foot(win)
         win.edge = self._win_edge(win)
+        if win.saved is not None:
+            # where the corner's controls start, and the game stops short of
+            right = [r[0] for _n, r, side in self._frame_buttons(win) if side]
+            win.corner = (min(right) if right else win.x + win.w) - 8 * self._fs()
         if win.kind == "desktop":
             win.buf = None
             win.ctx = None
@@ -1063,8 +1093,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self.ws._surface_write()  # the app's content rect is its window's
             return
         full = self._root_canvas
-        cw = max(64, win.w - 2 - 2 * win.edge)
-        ch = max(40, win.h - 2 - win.title_h - max(win.foot, win.edge))
+        _x, _y, cw, ch = win.content_rect()
+        cw, ch = max(64, cw), max(40, ch)
         self._drop_win(win)             # a resize's old buffer, freed first
         win.buf = full.new_layer(cw, ch)
         win.ctx = self._make_ctx(win.buf, win.inner_foot())
@@ -1098,19 +1128,120 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._build_content(win)
         self.ws._dirty = True
 
+    # -- full screen (docs/media/look_2026-10/MAXIMISE_VARIANTS.md, V2) -------
+    #
+    # Maximise is full screen: the window takes the whole glass, the desk's
+    # bar, its chips and every window under it covered; no frame, no strip.
+    # Its row is the top of the glass: the app's own band where its content
+    # draws one (the Editor's, Settings', the home window's), the band's
+    # ground under the WM's row otherwise, with the window's icon and title
+    # at its head and minimise, restore and close at its right, drawn and
+    # answered as every strip's. A game's window is the game alone, at the
+    # largest whole scale that leaves the corner's controls clear, on black.
+
+    def _row_h(self):
+        """The full-screen row's height: the band's (a window's bar)."""
+        return _layout_base.bar_rows(self._root_ctx.layout.cs)
+
+    def _band_is_row(self, kind):
+        """Whether `kind`'s content draws the band a window's layouts take
+        (`BarLayer.lends_band`), which full screen makes its row."""
+        return kind != "desktop" and self.ws.bar_layer.lends_band(kind)
+
+    def _set_full(self, win):
+        """`win` on the whole glass, its row above the content where its band
+        is not the row (none for a game)."""
+        full = self._root_canvas
+        win.x, win.y, win.w, win.h = 0, 0, full.w, full.h
+        win.row = (0 if win.kind == "desktop" or self._band_is_row(win.kind)
+                   else self._row_h())
+
     def _toggle_max(self, win):
-        """Maximize <-> restore: fill the desk's content rect (the taskbar
-        stays visible), remembering the rect to restore to."""
-        dx, dy, dw, dh = self._desk_rect()
+        """Full screen <-> restored: the whole glass, remembering the rect a
+        restore puts back unchanged; the state is remembered per board."""
         if win.saved is None:
             win.saved = (win.x, win.y, win.w, win.h)
-            win.x, win.y = dx, dy
-            self._resize_window(win, dw, dh)
+            self._set_full(win)
+            self._build_content(win)
         else:
             x, y, w, h = win.saved
             win.saved = None
+            win.row = 0
             win.x, win.y = x, y
             self._resize_window(win, w, h)
+        self._remember_full(win)
+        self.ws._dirty = True
+
+    def full_key(self):
+        """F11 (a keyboard's `full` button, the host's and the page's F11):
+        the focused desk window full screen, or back. Esc never leaves full
+        screen -- a game and the Editor's panes take it. False where no
+        window holds the focus."""
+        win = self._focus_win()
+        if self.mode != "desktop" or win is None or win.minimized:
+            return False
+        self._toggle_max(win)
+        return True
+
+    def _remember_full(self, win):
+        """An app window's full screen, per board (`win_full`, the owner's
+        E-04): the next time it opens it opens so."""
+        if win.kind == "desktop":
+            return
+        got = self.ws.system.get("win_full", None)
+        got = dict(got) if isinstance(got, dict) else {}
+        if got.get(win.kind) != win.full():
+            got[win.kind] = win.full()
+            self.ws.system.set("win_full", got)
+
+    def _opens_full(self, kind):
+        """Whether a window of `kind` opens full screen: as it was last left
+        on this board, and the Editor so the first time, on a desk (E-04)."""
+        if kind == "desktop" or _layout_base.metric_class() != _layout_base.DESK:
+            return False
+        got = self.ws.system.get("win_full", None)
+        if isinstance(got, dict) and kind in got:
+            return bool(got[kind])
+        return kind == "menu"
+
+    def full_cover(self):
+        """The z-slot of the topmost shown full-screen window, -1 for none:
+        it and the windows above it are all the glass shows."""
+        order = self._order
+        for i in range(len(order) - 1, -1, -1):
+            win = self._wins.get(order[i])
+            if win is not None and not win.minimized and win.saved is not None:
+                return i
+        return -1
+
+    def _full_slot(self, win):
+        """Where a full-screen row's title slot ends (EDITOR_LAYOUT.md's
+        frame: 144 pixels from the icon at 1024 wide, 112 narrower), past a
+        back chevron the row shows."""
+        r = _layout_base.render_scale()
+        n = _layout_base.chrome_size(self._fs())
+        slot = (144 if win.w * r >= 1024 else 112) * n // r
+        btns = self._win_btns(win) | _ui_draw.FRAME_FULL
+        icon = _ui_draw.frame_icon(self._row_rect(win), win.title_h, btns)
+        head = icon[0] if icon is not None else win.x + 16 * n // r
+        return head + slot
+
+    def _row_rect(self, win):
+        """The rect a full-screen row's title and buttons lay out on: the
+        window strip's height, centred on the row, so its controls are the
+        size they are on every desk window."""
+        rh = self._row_h()
+        return (win.x, win.y + (rh - win.title_h) // 2, win.w, win.title_h + 2)
+
+    def band_span(self):
+        """(x0, x1) the band's lent zone runs between in the window whose
+        layouts are installed, where it is a full-screen row: from the title
+        slot to the corner's controls. None anywhere else."""
+        win = self._installed
+        if win is None or win.saved is None or win.row:
+            return None
+        n = _layout_base.chrome_size(self._fs()) * 16 // _layout_base.render_scale()
+        return (self._full_slot(win), win.corner - n)
 
     def _top_win(self):
         return self._wins.get(self._order[-1]) if self._order else None
@@ -1862,6 +1993,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         scale = max(1, min(cw // gw, ch // gh))
         ox = cx + (cw - gw * scale) // 2
         oy = cy + (ch - gh * scale) // 2
+        if win.saved is not None:
+            # Full screen: the largest whole scale that leaves the corner's
+            # controls clear, their row's height down from the top.
+            kx = win.corner
+            ky = cy + self._row_h()
+            while scale > 1 and ox + gw * scale > kx and oy < ky:
+                scale -= 1
+                ox = cx + (cw - gw * scale) // 2
+                oy = cy + (ch - gh * scale) // 2
         return (ox, oy, scale)
 
     def game_is_fullscreen(self):
@@ -2200,7 +2340,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         _surf = getattr(self._root_canvas, "begin_surface", None)
         _skip = getattr(self._root_canvas, "skip_surface", None)
         n = len(self._order)
-        first = self._lowest_dirty_window(dt)
+        # A full-screen window covers the glass: nothing under it is drawn.
+        cover = self.full_cover()
+        first = max(self._lowest_dirty_window(dt), cover)
         # Chrome freeze (#155): a window's strip/border/shadow is DISJOINT from
         # its content stamp, so on a quiet frame -- a content scroll, a fling,
         # typing -- those pixels are already correct in this ping-pong buffer and
@@ -2275,7 +2417,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # SurfaceDelta's cache is sid-keyed, so a second "windows" span in
             # one frame would corrupt the {"same":1} replay.
             _surf("chips", "system")
-        self._draw_taskbar_chips(quiet=self._chrome_quiet)
+        if cover < 0:                              # the bar is covered with the desk
+            self._draw_taskbar_chips(quiet=self._chrome_quiet)
         if self._resize is not None:               # rubber-band resize preview
             kind, _ox, _oy, _ow, _oh, cw, chh = self._resize
             win = self._wins.get(kind)
@@ -2322,6 +2465,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         finally:
             root.clear_viewport()
             self._install(self._root_ctx)
+        self._row_over(win, root)
         win._buf_stale = True                 # buf skipped: it now lags the truth
         return True
 
@@ -2451,6 +2595,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     self._content_for(win.kind).draw(dt)
                 finally:
                     self._install(self._root_ctx)
+                self._row_over(win, win.buf)
                 win._buf_stale = False
         # Stamp-defer (#58 drag; extended to CONTENT gestures 2026-07-26): on a
         # device with an async 1:1 blitter (P4SystemCanvas.blit_strip_async ->
@@ -2621,6 +2766,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return True
         if win is None or win.minimized:
             return False
+        if i.pressed("full") and self.full_key():
+            return True
         content = self._content_for(win.kind)
         if content is None:
             return False
@@ -2736,8 +2883,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 return True
         if not self._order:
             return False
-        # Taskbar chips live in the OS bar row, above every window.
-        if click:
+        # Taskbar chips live in the OS bar row, above every window -- and
+        # under a full-screen one, which covers the bar.
+        if click and self.full_cover() < 0:
             for key, rect, _label in self._chip_rects():
                 if _in(px, py, rect):
                     self._chip_tap(key)
@@ -2777,11 +2925,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     if focused:
                         self._move_focus(None)
                 return True
-            if _in(px, py, self._grip_hit_rect(win)):
+            if win.saved is None and _in(px, py, self._grip_hit_rect(win)):
                 self._resize = (key, px, py, win.w, win.h, win.w, win.h)
                 self._seed_gesture_hist()   # #58: pre-resize footprint, both buffers
                 return True
-            if py < win.y + 1 + win.title_h:
+            if win.saved is None and py < win.y + 1 + win.title_h:
                 self._drag_armed = (key, px, py, win.x, win.y)
                 return True
         elif not focused:

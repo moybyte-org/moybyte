@@ -189,6 +189,16 @@ class FullscreenStackWM:
         False here: this WM is console mode only."""
         return False
 
+    def full_key(self):
+        """F11: a desk window full screen (`WindowedWM.full_key`); this WM
+        presents everything full screen already."""
+        return False
+
+    def band_span(self):
+        """Where a full-screen window's band lends its zone; this WM has no
+        windows (`WindowedWM.band_span`)."""
+        return None
+
     def floor(self):
         """The back-stack depth of this mode's root when nothing is beneath
         it. The home's X shows when the stack is deeper; here the home is

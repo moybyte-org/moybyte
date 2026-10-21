@@ -130,6 +130,13 @@ class _BackdropLayer(Layer):
             if wm._drag is None and wm._resize is None:
                 wm._desk_streak = 0
                 wm._backdrop_valid = False
+        if wm.full_cover() >= 0:
+            # A full-screen window covers the desk, its bar and the shadows
+            # cast on it: nothing here shows, so nothing is drawn. Leaving
+            # full screen is a shape change, which renders the desk again.
+            wm._desk_painted = False
+            wm._damage_rects = []
+            return
         if (stale or wm._backdrop_disabled or wm._backdrop_unsupported
                 or self.ws._animating(dt)):   # a toast/confetti moves desk pixels
             wm._desk_sig = sig
