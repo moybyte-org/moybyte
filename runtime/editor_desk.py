@@ -90,6 +90,7 @@ _CTRL, _SHIFT, _ALT = 1, 2, 4
 _F6 = 0x101 + 5
 _LEFT, _RIGHT, _UP, _DOWN = 0x110, 0x111, 0x112, 0x113
 _ENTERS = (10, 13)
+_PAD_DIRS = (("left", -1, 0), ("right", 1, 0), ("up", 0, -1), ("down", 0, 1))
 _PB_MIDDLE = 2
 
 
@@ -959,6 +960,10 @@ class EditorDesk(Layer):
         if fresh and self._chord(ev & 0xFFFF, ev >> _MODS_AT):
             i.clear_edges()
             return True
+        if self._pad(i):
+            i.clear_edges()
+            ws._dirty = True
+            return True
         if self.grown is not None and i.pressed("stop") and self.escape():
             return True
         if self._view_wheel(i):
@@ -1162,6 +1167,60 @@ class EditorDesk(Layer):
             ws._dirty = True
             return True
         return False
+
+    def _pad(self, i):
+        """The pad's rows (EDITOR_LAYOUT.md's input table): Select and the
+        d-pad move the keys to the pane that way, Select+A grows the focused
+        pane. True where one acted."""
+        if not i.held("select"):
+            return False
+        if i.pressed("a"):
+            self.grow(self.focused()[0])
+            return True
+        for name, dx, dy in _PAD_DIRS:
+            if i.pressed(name):
+                self._focus_toward(dx, dy)
+                return True
+        return False
+
+    def _focus_toward(self, dx, dy):
+        """The keys to the nearest pane whose centre lies the way (dx, dy)
+        from the focused one's, nearest along the way first."""
+        shown = self._shown_panes()
+        fi = self._focus.get(self.key, 0)
+        cur = None
+        for n, _p, r in shown:
+            if n == fi:
+                cur = r
+        if cur is None:
+            return
+        cx, cy = cur[0] + cur[2] // 2, cur[1] + cur[3] // 2
+        best = None
+        for n, _p, r in shown:
+            px, py = r[0] + r[2] // 2 - cx, r[1] + r[3] // 2 - cy
+            along = px * dx + py * dy
+            if n == fi or along <= 0:
+                continue
+            k = along + 2 * abs(px * dy + py * dx)
+            if best is None or k < best[0]:
+                best = (k, n)
+        if best is not None:
+            self.focus_pane(best[1])
+
+    def select_start(self):
+        """Select+Start (the pad's Play): Play, or Restart while the
+        playtest runs, where the keys are the Editor's or its docked game's.
+        True where it acted, so Start does not also open the system menu."""
+        ws = self.ws
+        if not self.active():
+            return False
+        holder = ws.wm.input_holder()
+        win = ws.wm._wins.get("desktop")
+        if holder != "menu" and not (holder == "desktop" and win is not None and win.docked):
+            return False
+        app = ws.editor_app
+        ws.defer(app.restart if app.playing() else ws._leave_menu)
+        return True
 
     def _nudge(self, code):
         """Ctrl+Alt+arrows: the focused pane's right (left and right) or

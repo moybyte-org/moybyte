@@ -3620,6 +3620,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # Super (the `start` button) is the console's from every surface, before
         # any layer: the system menu, or the pause menu over a fullscreen game.
         if i.pressed("start"):
+            desk = self._editor_desk
+            if desk is not None and i.held("select") and desk.select_start():
+                return                  # the desk Editor's Select+Start: Play
             if not (_ui_draw.input_kind() == "tdeck" and self.cancel_field()):
                 self.system_key()
             return

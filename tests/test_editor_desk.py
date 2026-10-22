@@ -961,3 +961,73 @@ def test_a_settled_header_more_menu_paints_nothing(blocks_desk):
     for _ in range(8):
         drv.frame(DT)
     assert ws._frames_drawn == drawn
+
+
+# -- the pad's rows -------------------------------------------------------------------------
+
+class _Pad:
+    """A pad's frame: `held` buttons down, `pressed` this frame's edges."""
+    key_event = 0
+    wheel_x = wheel_y = pointer_buttons = mods = 0
+
+    def __init__(self, held, pressed):
+        self._held, self._pressed = set(held) | set(pressed), set(pressed)
+
+    def held(self, name):
+        return name in self._held
+
+    def pressed(self, name):
+        return name in self._pressed
+
+    def clear_edges(self):
+        self._pressed = set()
+
+
+def test_select_and_the_d_pad_move_the_keys_by_direction_and_select_a_grows(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)                       # Code | Run slot over the Reference
+    names = [pane for pane, _r, _p in d.panes()]
+    at = lambda: names[d._focus.get(d.key, 0)]   # noqa: E731
+    d.focus_pane(names.index(("code",)))
+    assert d.handle_input(_Pad({"select"}, {"right"}))
+    assert at() == ("game",)
+    assert d.handle_input(_Pad({"select"}, {"down"}))
+    assert "log" in at()
+    assert d.handle_input(_Pad({"select"}, {"left"}))
+    assert at() == ("code",)
+    d.handle_input(_Pad({"select"}, {"left"}))   # nothing that way
+    assert at() == ("code",)
+    assert d.handle_input(_Pad({"select"}, {"a"}))
+    assert d.grown == ("code",)
+    d.handle_input(_Pad({"select"}, {"a"}))
+    assert d.grown is None
+
+
+def test_select_start_plays_and_restarts_and_start_alone_is_the_console_key(desk, monkeypatch):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)
+    inp = ws.input
+    pad = {"held": {"select"}, "pressed": {"start"}}
+    monkeypatch.setattr(inp, "held", lambda n, p=None: n in pad["held"] | pad["pressed"],
+                        raising=False)
+    monkeypatch.setattr(inp, "pressed", lambda n, p=None: n in pad["pressed"], raising=False)
+    drv.frame(DT)
+    pad["pressed"] = set()
+    for _ in range(4):
+        drv.frame(DT)
+    assert ws.editor_app.playing()
+    calls = []
+    monkeypatch.setattr(ws.editor_app, "restart", lambda: calls.append(1))
+    ws.wm._move_focus("menu")
+    pad["pressed"] = {"start"}
+    drv.frame(DT)
+    pad["pressed"] = set()
+    drv.frame(DT)
+    assert calls == [1]
+    opened = []
+    monkeypatch.setattr(ws, "system_key", lambda: opened.append(1))
+    pad["held"], pad["pressed"] = set(), {"start"}
+    drv.frame(DT)
+    assert opened == [1]
