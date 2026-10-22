@@ -751,3 +751,14 @@ def test_at_800_the_sound_panes_menu_picks_a_sound(tmp_path):
     drv.frame(DT)
     _press(drv, d, "1")
     assert me.sfx_idx == 1 and not d.part_state["menu"]
+
+
+def test_the_waves_swatches_are_their_moy64_inks():
+    from runtime import editor_sound as S
+    from runtime.palette import MOY64
+    for light, inks, rgbs in ((True, S.WAVE_INK_DAY, S._WAVE_RGB_DAY),
+                              (False, S.WAVE_INK_NIGHT, S._WAVE_RGB_NIGHT)):
+        for wv in range(8):
+            r, g, b = MOY64[inks[wv]]
+            assert rgbs[wv] == (r << 16) | (g << 8) | b
+            assert S.wave_rgb({"surface_light": light}, wv) == rgbs[wv]

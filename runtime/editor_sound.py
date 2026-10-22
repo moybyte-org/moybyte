@@ -64,13 +64,14 @@ def wave_ink(th, wv):
 
 
 def wave_rgb(th, wv):
-    """A wave's ink as 0xRRGGBB, what `ui.swatches` takes."""
-    try:
-        from palette import MOY64
-    except ImportError:  # pragma: no cover - host fallback
-        from runtime.palette import MOY64
-    r, g, b = MOY64[wave_ink(th, wv)]
-    return (r << 16) | (g << 8) | b
+    """A wave's ink as 0xRRGGBB, what `ui.swatches` takes: its MOY64
+    index's colour (`palette.MOY64`, which no board stages)."""
+    t = _WAVE_RGB_DAY if th.get("surface_light", False) else _WAVE_RGB_NIGHT
+    return t[wv & 7]
+
+
+_WAVE_RGB_DAY = (0x2D8AE0, 0x008751, 0xFF004D, 0x5F574F, 0xAB5236, 0xE02DC4, 0x9E936A, 0x83769C)
+_WAVE_RGB_NIGHT = (0x29ADFF, 0x00E436, 0xFF004D, 0xC2C3C7, 0xFFA300, 0xFF77A8, 0xFFEC27, 0x83769C)
 
 
 def editor(desk):
