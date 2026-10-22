@@ -828,10 +828,15 @@ int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
         uint32_t u = u0;
         for (int X = X0; X < X1; X++, u += fx) {
             if (X >= a && X < b) {
-                // the run between the corners: a straight sample
-                uint32_t v = u;
-                for (int Z = X; Z < b; Z++, v += fx) {
-                    row[Z] = srow[v >> 16];
+                // the run between the corners: a straight sample, a copy
+                // where the picture is at its own width
+                if (fx == 0x10000u) {
+                    memcpy(row + X, srow + (u >> 16), (size_t)(b - X) * sizeof(uint16_t));
+                } else {
+                    uint32_t v = u;
+                    for (int Z = X; Z < b; Z++, v += fx) {
+                        row[Z] = srow[v >> 16];
+                    }
                 }
                 n += b - X;
                 u += fx * (uint32_t)(b - X - 1);
