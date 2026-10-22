@@ -519,9 +519,9 @@ def _quiesce(ws):
     ws._about = False
     ws._notice = None
     ws._notice_until = 0
-    # The bar prints a live HH:MM. Bind the accessor -- pinning the per-second
-    # cache does NOT work (bar_layer compares `now_s == self._clock_at`, so a
-    # sentinel forces a recompute every frame).
+    # The bar prints a live HH:MM. Bind the accessor -- pinning the clock's
+    # cache does NOT work (bar_layer reads the clock again once its hold runs
+    # out, so a sentinel only forces a recompute).
     ws.bar_layer._clock_text = lambda: _CLOCK
     ws.bar_layer._today = lambda: _DATE
 

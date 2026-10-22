@@ -61,7 +61,7 @@ def _draw(ws, ed, rect=(0, 0, 320, 200)):
 
 def _row_y(ed, buffer_row, seg=0):
     """The y the last draw put one buffer line's visual row at."""
-    for brow, si, y in ed._vis:
+    for brow, si, y in ed._visible():
         if brow == buffer_row and si == seg:
             return y
     raise AssertionError("row %d/%d was not drawn" % (buffer_row, seg))
@@ -408,8 +408,8 @@ def test_wrap_is_the_modes_and_only_prose_wraps(tmp_path):
     _draw(ws, code)
     assert text_modes.MODES[text_modes.MD].wrap is True
     assert text_modes.MODES[text_modes.CODE].wrap is False
-    assert len(prose._vis) > 1, "one prose line must occupy several rows"
-    assert len(code._vis) == 1, "a code line scrolls sideways, it does not wrap"
+    assert len(prose._visible()) > 1, "one prose line must occupy several rows"
+    assert len(code._visible()) == 1, "a code line scrolls sideways, it does not wrap"
 
 
 def test_the_layout_memo_holds_a_line_and_an_edit_invalidates_it(tmp_path):
@@ -463,9 +463,9 @@ def test_a_resize_drops_the_memo_because_the_wrap_moved(tmp_path):
     moy_carts.save_file("docs", "wide", "word " * 30, ws.carts_root)
     ed = _handle(ws, "wide")
     _draw(ws, ed, (0, 0, 320, 200))
-    wide = len(ed._vis)
+    wide = len(ed._visible())
     _draw(ws, ed, (0, 0, 120, 200))
-    assert len(ed._vis) > wide, "a narrower page wraps into more rows"
+    assert len(ed._visible()) > wide, "a narrower page wraps into more rows"
 
 
 def test_the_caret_stays_on_screen_in_a_wrapped_document(tmp_path):
@@ -476,7 +476,7 @@ def test_the_caret_stays_on_screen_in_a_wrapped_document(tmp_path):
     _draw(ws, ed, (0, 0, 320, 100))
     ed.ed.row = len(ed.ed.lines) - 1
     _draw(ws, ed, (0, 0, 320, 100))
-    assert any(brow == ed.ed.row for brow, _si, _y in ed._vis)
+    assert any(brow == ed.ed.row for brow, _si, _y in ed._visible())
 
 
 @pytest.mark.parametrize("cols,expected", [
@@ -597,7 +597,7 @@ def test_the_caret_is_reachable_at_the_bottom_of_a_long_note(tmp_path):
     ed.nav(0, 200)                          # roll to the end
     _draw(ws, ed, (4, 40, 312, 186))
     assert ed.caret()[0] == 79
-    assert any(brow == 79 for brow, _si, _y in ed._vis), "the last line is drawn"
+    assert any(brow == 79 for brow, _si, _y in ed._visible()), "the last line is drawn"
 
 
 # ---------------------------------------------------------------------------

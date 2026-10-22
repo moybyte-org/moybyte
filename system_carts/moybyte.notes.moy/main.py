@@ -37,9 +37,27 @@ KEY_DEL, KEY_BS, KEY_ESC, KEY_DUP, KEY_CR, KEY_LF = 0x7F, 0x08, 0x1B, 0x04, 0x0D
 
 NO_STORE = ("Notes keep to a card;", "put one in to start.")
 FS = 1                 # the font scale the page lays out at (_layout)
+MODES = {"md": "Markdown", "code": "Program", "json": "Data", "text": "Text"}
+
+# The page is drawn again on every change, so what it hands the verbs is
+# made once: the override tables here, the vault's rows and caption in
+# _refresh, a note's shown name in _title.
+TOOL_O = (({"current": False, "disabled": False}, {"current": False, "disabled": True}),
+          ({"current": True, "disabled": False}, {"current": True, "disabled": True}))
+UNDO_O = ({"disabled": False}, {"disabled": True})
+OFF = ((False, False), (True, False), (False, True), (True, True))
+STATUS_O = {"id": "status"}
+MODE_O = {"id": "mode"}
+VAULT_O = {"id": "vault", "lead": True}
+DIM_O = {"tone": "dim"}
+FIELD_O = {"id": "Name", "hint": "my note"}
+WRAP_O = {"wrap": True, "tone": "dim"}
+WASH_O = {"wash": True}
 
 ed = None              # the open note's editor handle (None: the list)
 names = None           # the vault, newest first (None: no storage)
+rows = None            # the vault's table rows: New note, then a note each
+caption = ""           # "8 notes"
 cur = 0                # the list's current row: 0 is New note, then a note each
 asking = None          # None | "new" | "rename": the dialog that is up
 typed = ""             # what has been typed into it
@@ -73,10 +91,13 @@ def _init():
 
 
 def _refresh(keep=None):
-    global names, cur
+    global names, cur, rows, caption
     got, err = files.list()
     names = None if err is not None else list(got)
     n = len(names) if names else 0
+    rows = [("new", "New note")] + [(ICON.get(files.badge(m), "doc"), shown(m))
+                                    for m in names or ()]
+    caption = "%d note%s" % (n, "" if n == 1 else "s")
     if keep is not None and names and keep in names:
         cur = names.index(keep) + 1
     cur = max(0, min(cur, n))
@@ -89,6 +110,19 @@ def shown(name):
         return name
     words = name.replace("_", " ")
     return words[:1].upper() + words[1:]
+
+
+_titled = [None, "", ""]   # the name _title last saw, its shown name, and "... · saved"
+
+
+def _title(name, saved=False):
+    """`shown(name)`, made once a name (`ed.name()` is one object a note)."""
+    t = _titled
+    if t[0] is not name:
+        t[0] = name
+        t[1] = shown(name)
+        t[2] = t[1] + " · saved"
+    return t[2] if saved else t[1]
 
 
 def _row():
@@ -236,7 +270,7 @@ def _list_page(x, y, w, h):
         _dialog()
         return
     _hints()
-    _list(None)
+    _list(False)
     ui.end()
     _row_menu()
     _dialog()
@@ -276,21 +310,18 @@ def _blank(x, y, w, h, title, lines, verb=False):
             _ask("new")
 
 
-def _list(rect):
-    """The vault as a table: New note first, then a row a note."""
+def _list(desk, x=0, y=0, w=0, h=0):
+    """The vault as a table: New note first, then a row a note -- on the
+    desk in its column (x, y, w, h), the rows on the window's ground."""
     global cur
-    rows = [("new", "New note")] + [(ICON.get(files.badge(n), "doc"), shown(n)) for n in names]
-    n = len(names)
-    caption = "%d note%s" % (n, "" if n == 1 else "s")
-    if rect is not None:
-        # the desk's column: the rows on the window's ground
-        ui.at(*rect)
-        cur, opened = ui.table(caption, ("", ""), rows, cur, {"id": "vault", "lead": True})
+    if desk:
+        ui.at(x, y, w, h)
+        cur, opened = ui.table(caption, ("", ""), rows, cur, VAULT_O)
     else:
         ui.group(caption)
-        cur, opened = ui.table("", ("", ""), rows, cur, {"id": "vault", "lead": True})
+        cur, opened = ui.table("", ("", ""), rows, cur, VAULT_O)
         ui.group()
-    if opened or (rect is not None and ed is not None and _row() is not None
+    if opened or (desk and ed is not None and _row() is not None
                   and _row() != ed.name()):
         if cur == 0:
             _ask("new")
@@ -306,7 +337,7 @@ def _row_menu():
     if got is not None:
         y0, rh, view, _px, _side = got
         ui.at(view[0], y0 + cur * rh, view[2], rh)
-    menu = ui.popover("row", 0, {"wash": True})
+    menu = ui.popover("row", 0, WASH_O)
     a = ui.menu("", ["Rename…", "Duplicate\tCtrl+D"], ["pencil", "dup"])
     b = ui.menu("", ["Move to Trash\tDel"], ["trash"], kinds=("danger",))
     ui.popover()
@@ -326,10 +357,9 @@ def _dialog():
         return
     p = ui.dialog("New note" if asking == "new" else "Rename",
                   ("Cancel", "Make" if asking == "new" else "Rename"))
-    typed, done = ui.field("", typed, NAME_MAX, {"id": "Name", "hint": "my note"})
+    typed, done = ui.field("", typed, NAME_MAX, FIELD_O)
     if asking == "new":
-        ui.label("End the name with .py or .lua to make a program.",
-                 {"wrap": True, "tone": "dim"})
+        ui.label("End the name with .py or .lua to make a program.", WRAP_O)
     ui.dialog()
     if p == 1 or done:
         _answer()
@@ -339,8 +369,8 @@ def _dialog():
 
 def _note_page(x, y, w, h):
     """A note open: undo and redo lent to the bar, the note, the tools at the foot."""
-    t = ui.bar(shown(ed.name()), ("undo", "redo"), (not ed.can_undo(), not ed.can_redo()),
-               True)
+    t = ui.bar(_title(ed.name()), ("undo", "redo"),
+               OFF[(not ed.can_undo()) + 2 * (not ed.can_redo())], True)
     if t == 0:
         ed.undo()
     elif t == 1:
@@ -357,14 +387,14 @@ def _note_page(x, y, w, h):
         ui.at(x + 6 + i * 46, fy, 42, 32)
         _tool(i)
     ui.at(x + w - 120, fy + 5, 114, 22)
-    ui.info("", _status(), {"id": "status"})
+    ui.info("", _status(), STATUS_O)
 
 
 def _tool(i):
     icon, label = TOOLS[i]
     off = (icon in ("copy", "cut") and not ed.has_selection()) or \
         (icon == "paste" and not ed.can_paste())
-    if ui.tool(icon, label, {"current": icon == "select" and ed.selecting(), "disabled": off}):
+    if ui.tool(icon, label, TOOL_O[1 if icon == "select" and ed.selecting() else 0][1 if off else 0]):
         if icon == "select":
             ed.select_mode()
         elif icon == "copy":
@@ -375,30 +405,38 @@ def _tool(i):
             ed.paste()
 
 
+_counted = [-1, ""]    # the selection's size _status last said, and its words
+
+
 def _status():
     """The foot's word: a refusal, else what a selection holds, else the mode."""
     if ed.badge():
         return ed.badge()
     if ed.selecting():
         n = ed.selected_count()
-        return "%d letter%s" % (n, "" if n == 1 else "s")
+        if n != _counted[0]:
+            _counted[0] = n
+            _counted[1] = "%d letter%s" % (n, "" if n == 1 else "s")
+        return _counted[1]
     return _mode()
 
 
 def _mode():
-    return {"md": "Markdown", "code": "Program", "json": "Data", "text": "Text"}.get(
-        ed.mode(), ed.mode())
+    m = ed.mode()
+    return MODES.get(m, m)
 
 
 def _sheet(x, y, w, h, r=0):
     """Where the note draws on its paper (corners `r`), and the rect a tap
     is forwarded through."""
-    global sheet
-    sheet = (x, y, w, h)
+    sheet[0] = x
+    sheet[1] = y
+    sheet[2] = w
+    sheet[3] = h
     ed.draw(x, y, w, h, 1, r)
 
 
-sheet = None
+sheet = [0, 0, 0, 0]   # the note's rect as last drawn (w 0: never)
 
 
 # -- the desk: the vault beside the note --------------------------------------
@@ -408,7 +446,7 @@ def _desk(x, y, w, h):
     """The vault as a column beside the note (Files' split), the note's tools
     over it, a foot under both: its rule, the note's state, the clipboard's
     keys."""
-    ui.bar(shown(ed.name()) if ed is not None else "")
+    ui.bar(_title(ed.name()) if ed is not None else "")
     ui.at(x, y, w, h)
     ui.page("")
     if names is None:
@@ -420,14 +458,14 @@ def _desk(x, y, w, h):
     ui.rule()
     ui.at(x + 4, fy, w - 8, 1)
     ui.rule()
-    _list((x, y + 12, side - 4, fy - y - 12))
+    _list(True, x, y + 12, side - 4, fy - y - 12)
     px = x + side + 1
     if ed is not None:
         tx = px + 11
         for i, (icon, label) in enumerate((("undo", "Undo\tCtrl+Z"), ("redo", "Redo\tCtrl+Y"))):
             ui.at(tx + 40 * i, y + 8, 36, 36)
             off = not (ed.can_undo() if i == 0 else ed.can_redo())
-            if ui.tool(icon, label, {"disabled": off}):
+            if ui.tool(icon, label, UNDO_O[off]):
                 if i == 0:
                     ed.undo()
                 else:
@@ -438,7 +476,7 @@ def _desk(x, y, w, h):
             ui.at(tx + 96 + 40 * i, y + 8, 36, 36)
             _tool(i)
         ui.at(px, y + 8, x + w - px - 2, 36)
-        ui.info("", ed.badge() or _mode(), {"id": "mode"})
+        ui.info("", ed.badge() or _mode(), MODE_O)
         ui.at(px, y + 52, x + w - px, 1)
         ui.rule()
         _sheet(px, y + 53, x + w - px, fy - y - 61)
@@ -447,7 +485,7 @@ def _desk(x, y, w, h):
         ui.at(x + w - 4 - hw, fy + 5, hw, FOOT - 1)
         ui.hints(keys)
         ui.at(x + 4, fy + 9, side, FOOT - 1)
-        ui.label(shown(ed.name()) + " · saved", {"tone": "dim"})
+        ui.label(_title(ed.name(), True), DIM_O)
     else:
         _blank(px, y, x + w - px, fy - y, "Pick a note", ("Or make a new one.",))
     ui.end()
@@ -460,7 +498,7 @@ def _desk(x, y, w, h):
 
 def _tapping():
     global paging
-    if ed is None or sheet is None:
+    if ed is None or not sheet[2]:
         return
     t = touch()
     if t is None:

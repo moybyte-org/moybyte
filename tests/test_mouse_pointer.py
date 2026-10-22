@@ -298,7 +298,7 @@ def test_an_editor_handle_takes_the_wheel_the_middle_button_and_mouse_selection(
     h.draw(0, 0, 320, 200)
     ws.pointer.hovers = True
     x0, _y0, cell, _lh, _s = h._geom
-    y = next(yy for brow, si, yy in h._vis if brow == 0 and si == 0) + 2
+    y = next(yy for brow, si, yy in h._visible() if brow == 0 and si == 0) + 2
     h.tap(x0 + cell // 2, y)
     h.drag(x0 + 5 * cell + cell // 2, y, True)
     assert h.ed.selected_text() == "word0"

@@ -1850,6 +1850,10 @@ _APP_SHIFT = 8                          # moy_ui_api.h's MOY_UI_APP_SHIFT
 UI_SIZE = _C.api_size()
 
 
+_WHOLE = [None]                         # ui_frame's last whole-canvas rect
+ui_owes = _C.api_owes      # (ctx) whether the frame it drew last owes the next
+
+
 def ui_context():
     """A fresh context for one app's verbs."""
     return bytearray(UI_SIZE)
@@ -1877,7 +1881,9 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     if dup is not None:
         print("ui: two stops share the id %r; the later is no stop" % dup)
     if rect is None:
-        rect = (0, 0, cv.w, cv.h)
+        rect = _WHOLE[0]
+        if rect is None or rect[2] != cv.w or rect[3] != cv.h:
+            rect = _WHOLE[0] = (0, 0, cv.w, cv.h)
     flags = (_DESK if desk else 0) | (_WINDOW if window else 0) | (_ELSEWHERE if elsewhere else 0)
     if app is not None:
         flags |= (_app_row(app) + 1) << _APP_SHIFT
@@ -1892,8 +1898,16 @@ def bar_lent(ctx):
     got = _C.api_bar_lent(ctx)
     if got is None:
         return None
+    last = _BAR_LENT
+    if last[0] is got:                  # the module's answer is the last one's
+        return last[1]
     title, slots, off, chip = got
-    return (title, slots, off & 0x3F, bool(off & 0x80000000), chip)
+    last[0] = got
+    last[1] = (title, slots, off & 0x3F, bool(off & 0x80000000), chip)
+    return last[1]
+
+
+_BAR_LENT = [None, None]                # the module's last answer, and ours to it
 
 
 def bar_tap(ctx, i):

@@ -266,6 +266,10 @@ class BarLayer:
         # (runtime/editor_desk.py): the pane takes no bar, and the tab's own
         # strip draw and bar tap are no-ops.
         self.held = False
+        self._lent_last = [None, None]  # ui_draw.bar_lent's last answer, and _lent's
+        self._k8 = [None, None, None]   # key[8]'s title and lent, and their pair
+        self._cr_last = None            # content_rect's last (x, y, w, h)
+        self._cr_game = [0, 0, None, None]   # ...and a game zone's: w, h, bars, rect
         # Cached top bar (#43, generalized in Stage 4 to every `where`): rendered
         # ONCE into an offscreen strip and blitted each frame (one flat copy)
         # instead of re-rendering ~9 sprites + glyph + text every frame.
@@ -288,7 +292,9 @@ class BarLayer:
         self._bar_strips = {}
         self._bar_cache_gen = 0
         # Clock-text cache (#66): (second, string) -- see _clock_text.
-        self._clock_at = -1
+        self._clock_at = -1           # when the clock was read, and how long
+        self._clock_hold = 0          # its text holds from then (_clock_text)
+        self._clock_hm = (-1, -1)
         self._clock_cache = ""
         self._date_cache = (0, 0, 0)
         # The root canvas the bar strips are published to (publish_strips),
@@ -511,12 +517,27 @@ class BarLayer:
         if where == "desktop":
             return content_of(cv.w, cv.h, _STATUS_H, DEFAULT_BARS)
         if where == "tool" and self.ws.app_window_canvas:
-            w, h = self.ws.app_window_size()     # a window's: its title strip is the bar
-            return (0, 0, w, h)
+            wh = self.ws.app_window_size()       # a window's: its title strip is the bar
+            return self._kept_rect(0, 0, wh[0], wh[1])
         if self._zone_is_game(where):
-            return content_of(cv.w, cv.h, _STATUS_H, bars_in_force())
+            of = bars_in_force()
+            g = self._cr_game
+            if g[0] != cv.w or g[1] != cv.h or g[2] is not of:
+                g[0] = cv.w
+                g[1] = cv.h
+                g[2] = of
+                g[3] = content_of(cv.w, cv.h, _STATUS_H, of)
+            return g[3]
         L = self.ws.layout
-        return (L.cx, L.cy, L.cw, L.ch)
+        return self._kept_rect(L.cx, L.cy, L.cw, L.ch)
+
+    def _kept_rect(self, x, y, w, h):
+        """(x, y, w, h), the tuple answered last while it holds: an app asks
+        `content_rect()` every frame it draws."""
+        r = self._cr_last
+        if r is None or r[0] != x or r[1] != y or r[2] != w or r[3] != h:
+            r = self._cr_last = (x, y, w, h)
+        return r
 
     def bar_at(self, where, px, py):
         """True when (px, py) on `where`'s canvas is on one of its bars."""
@@ -796,7 +817,14 @@ class BarLayer:
             key[7] = ws._wifi_icon_kind()      # the wifi status glyph
         if need & 256:
             # the tool bar's title, and what the running app lent it (ui.bar)
-            key[8] = (self._title(where) if ws.cart else None, self._lent(key[0]))
+            t = self._title(where) if ws.cart else None
+            lent = self._lent(key[0])
+            k8 = self._k8
+            if k8[0] is not t or k8[1] is not lent:
+                k8[0] = t
+                k8[1] = lent
+                k8[2] = (t, lent)
+            key[8] = k8[2]
         if need & _KEY_UNDO:
             # #111: the local op-history dim state (RAM-only; journal flips
             # invalidate explicitly)
@@ -1013,9 +1041,14 @@ class BarLayer:
         got = _ui_draw.bar_lent(ctx)
         if got is None:
             return None
+        last = self._lent_last
+        if last[0] is got:              # the same bar as the last frame lent
+            return last[1]
         title, slots, off, back, chip = got
         names = tuple(_iconsets.SLOTS[s] if 0 <= s < len(_iconsets.SLOTS) else "" for s in slots)
-        return (title, names, off, back, chip)
+        last[0] = got
+        last[1] = (title, names, off, back, chip)
+        return last[1]
 
     def _lent_rects(self, where, end, bar, game):
         """The lent tools' boxes in bar coordinates after a title ending at
@@ -1365,23 +1398,31 @@ class BarLayer:
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
-        uptime so the strip always shows a live clock (host == device). Cached
-        per second (#66): the cart bar's cache KEY calls this every
-        frame, and re-running localtime + %-format 30x/s was a measurable slice
-        of the ~2.3ms bar cost -- the string can only change once a second."""
-        now_s = _ticks_ms() // 1000
-        if now_s == self._clock_at:
+        uptime so the strip always shows a live clock (host == device). The
+        cart bar's cache KEY calls this every frame it paints (#66), so the
+        clock is read when its text can next change -- the next minute, or
+        the next second of the uptime -- and its strings are made only when
+        it did."""
+        now = _ticks_ms()
+        if self._clock_at >= 0 and _ticks_diff(now, self._clock_at) < self._clock_hold:
             return self._clock_cache
         try:
             lt = time.localtime()
-            s = "%02d:%02d" % (lt[3], lt[4])
-            self._date_cache = (lt[0], lt[1], lt[2])
+            a, b = lt[3], lt[4]
+            hold = (60 - lt[5]) * 1000
+            if lt[0] != self._date_cache[0] or lt[1] != self._date_cache[1] \
+                    or lt[2] != self._date_cache[2]:
+                self._date_cache = (lt[0], lt[1], lt[2])
         except Exception:  # noqa: BLE001
-            secs = _ticks_diff(_ticks_ms(), 0) // 1000
-            s = "%02d:%02d" % ((secs // 60) % 100, secs % 60)
-        self._clock_at = now_s
-        self._clock_cache = s
-        return s
+            secs = _ticks_diff(now, 0) // 1000
+            a, b = (secs // 60) % 100, secs % 60
+            hold = 1000 - _ticks_diff(now, 0) % 1000
+        if a != self._clock_hm[0] or b != self._clock_hm[1]:
+            self._clock_hm = (a, b)
+            self._clock_cache = "%02d:%02d" % (a, b)
+        self._clock_at = now
+        self._clock_hold = hold
+        return self._clock_cache
 
     def _today(self):
         """(year, month, day) from the clock's per-second read, (0, 0, 0)

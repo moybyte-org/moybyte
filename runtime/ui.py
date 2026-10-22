@@ -159,10 +159,19 @@ def _flag(o, key):
     return _ABSENT if v is None else (1 if v else 0)
 
 
+# The board's and the browser's module read the table itself (modmoy_ui.c's
+# over_dict), so a verb given one builds nothing; the host's binding takes the
+# block below.
+_OVER_DICT = getattr(_C, "over_dict", False)
+
+
 def _over(o):
-    """The override table as the engine's block (moy_ui_api.h), or None."""
+    """The override table as the engine reads it: the dict where the module
+    takes one, else its block (moy_ui_api.h); None for none."""
     if not o:
         return None
+    if _OVER_DICT:
+        return o
     oid = o.get("id")
     idb = b"" if oid is None else str(oid).encode("utf-8")
     hint = o.get("hint")
@@ -264,18 +273,55 @@ def group(caption="", o=None):
 def info(label, value, o=None):
     """A row that shows `value`; no stop."""
     t = _T
-    _C.api_value(t[0], t[1], t[2], 1, label, str(value), _over(o))
+    _C.api_value(t[0], t[1], t[2], 1, label, value if type(value) is str else str(value),
+                 _over(o))
 
 
 def link(label, value="", o=None):
     """A row that leads somewhere, `value` where it is now: True the frame it
     is activated."""
     t = _T
-    return _C.api_value(t[0], t[1], t[2], 2, label, str(value), _over(o))
+    return _C.api_value(t[0], t[1], t[2], 2, label,
+                        value if type(value) is str else str(value), _over(o))
+
+
+# The encodings verbs made lately, so a frame that hands a verb the same
+# options draws without building them again: by identity, and for a mutable
+# sequence also by a copy an edit no longer equals (a tuple is its own).
+_MEMO = 24
+_memo_k = [None] * _MEMO
+_memo_c = [None] * _MEMO
+_memo_v = [None] * _MEMO
+_memo_at = [0]
+
+
+def _memo_get(items, kind):
+    k = _memo_k
+    for i in range(_MEMO):
+        if k[i] is items:
+            c = _memo_c[i]
+            if c is None or c == items:
+                v = _memo_v[i]
+                if v[0] == kind:
+                    return v[1]
+    return None
+
+
+def _memo_put(items, kind, b, copy):
+    i = _memo_at[0]
+    _memo_at[0] = (i + 1) % _MEMO
+    _memo_k[i] = items
+    _memo_c[i] = copy
+    _memo_v[i] = (kind, b)
+    return b
 
 
 def _opts(items):
-    return "\0".join([str(i) for i in items]).encode("utf-8")
+    b = _memo_get(items, 0)
+    if b is None:
+        b = _memo_put(items, 0, "\0".join([str(i) for i in items]).encode("utf-8"),
+                      None if type(items) is tuple else [i for i in items])
+    return b
 
 
 def cycle(label, items, cur, o=None):
@@ -359,6 +405,14 @@ def _cells(items):
     return "".join([str(i) + "\0" for i in items]).encode("utf-8")
 
 
+def _columns(columns):
+    b = _memo_get(columns, -1)
+    if b is None:
+        b = _memo_put(columns, -1, _cells(columns),
+                      None if type(columns) is tuple else [c for c in columns])
+    return b
+
+
 def table(label, columns, rows, cur, o=None):
     """A list in columns: `label` its caption (none where empty), `columns`
     the headers -- an empty first one makes column 0 the picture column,
@@ -369,12 +423,16 @@ def table(label, columns, rows, cur, o=None):
     the current row is opened (Enter on it, or a tap on it again)."""
     t = _T
     n = len(columns)
-    cells = []
-    for r in rows:
-        r = [str(c) for c in r][:n]
-        cells.extend(r)
-        cells.extend([""] * (n - len(r)))
-    return _C.api_table(t[0], t[1], t[2], label, _cells(columns), _cells(cells),
+    b = _memo_get(rows, n)
+    if b is None:
+        cells = []
+        for r in rows:
+            r = [str(c) for c in r][:n]
+            cells.extend(r)
+            cells.extend([""] * (n - len(r)))
+        copy = [tuple(r) for r in rows]
+        b = _memo_put(rows, n, _cells(cells), tuple(copy) if type(rows) is tuple else copy)
+    return _C.api_table(t[0], t[1], t[2], label, _columns(columns), b,
                         -1 if cur is None else cur, _over(o))
 
 
@@ -562,11 +620,11 @@ def bar(title, tools=(), off=(), back=False):
     the bar activated since the last frame (from 0), UP its way back, -1
     none."""
     t = _T
-    bits = 0x80000000 if back else 0
+    bits = 0
     for i in range(min(len(off), 6)):
         if off[i]:
             bits |= 1 << i
-    return _C.api_bar(t[0], t[1], t[2], title, _opts(tools), bits)
+    return _C.api_bar(t[0], t[1], t[2], title, _opts(tools), bits, back)
 
 
 def rule(o=None):

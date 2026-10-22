@@ -2182,6 +2182,7 @@ def test_a_clock_tick_does_not_re_render_the_desk(tmp_path):
     try:
         # Force the clock string to change, as a minute boundary would.
         ws.bar_layer._clock_at = -1
+        ws.bar_layer._clock_hm = (-1, -1)
         ws.bar_layer._clock_cache = "00:00"
         for _ in range(4):
             ws.mark_dirty()

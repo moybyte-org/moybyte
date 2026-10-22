@@ -359,7 +359,7 @@ def test_tapping_a_link_opens_the_note_it_names(tmp_path):
     _frames(drv)
     ed = ns["ed"]
     x0, _y0, cell, lh, _s = ed._geom
-    row_y = next(y for brow, _si, y in ed._vis if brow == 0)
+    row_y = next(y for brow, _si, y in ed._visible() if brow == 0)
     drv.click(x0 + 5 * cell + 2, row_y + lh // 2)    # inside the link's words
     _frames(drv)
     assert ns["ed"].name() == "other_one"

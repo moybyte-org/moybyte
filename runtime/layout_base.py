@@ -283,7 +283,9 @@ def content_of(w, h, rows, of=None):
         return (0, 0, w, h)
     if of is None:
         of = bars()
-    x0, y0, x1, y1 = 0, 0, w, h
+    x0 = y0 = 0
+    x1 = w
+    y1 = h
     for bar in of:
         t = bar[1] * rows // BAR_ROWS
         e = bar[0]

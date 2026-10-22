@@ -198,6 +198,7 @@ class _Win:
         self.held = False             # its run held by the minimise (a game's)
         self.saved = None             # full screen: the rect a restore puts
                                       # back (x, y, w, h); None while restored
+        self._content = None          # content_rect's last answer
         self.docked = None            # the rect it stands in, docked in a host's
                                       # pane (the desk Editor's Run slot): no
                                       # frame and no strip; None: a window
@@ -227,10 +228,22 @@ class _Win:
         if self.docked is not None:
             return self.docked
         if self.saved is not None:
-            return (self.x, self.y + self.row, self.w, self.h - self.row)
-        e = self.edge
-        return (self.x + 1 + e, self.y + 1 + self.title_h,
-                self.w - 2 - 2 * e, self.h - 2 - self.title_h - max(self.foot, e))
+            x = self.x
+            y = self.y + self.row
+            w = self.w
+            h = self.h - self.row
+        else:
+            e = self.edge
+            x = self.x + 1 + e
+            y = self.y + 1 + self.title_h
+            w = self.w - 2 - 2 * e
+            h = self.h - 2 - self.title_h - max(self.foot, e)
+        # The rect it answered last, while it holds: asked every frame, it
+        # allocates nothing until the window moves.
+        r = self._content
+        if r is None or r[0] != x or r[1] != y or r[2] != w or r[3] != h:
+            r = self._content = (x, y, w, h)
+        return r
 
     def inner_foot(self):
         """The rows under the content the window's ground fills inside its
@@ -392,6 +405,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # it through desk_open().
         self.mode = "console"
         self._app_src = None          # a window-bound app's view of its canvas (_view_src)
+        self._app_wc = None           # app_window_content's last (rect, desk w, h, answer)
         self._mode_was = "console"    # mode-switch edge detector (_on_nav)
         self._mode_switch = False     # on_relayout: this relayout is a switch
         # The desk's window records while console mode runs: outside the
@@ -1499,7 +1513,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return True                 # a parked desk's wallpaper is not drawn
         return (self.stack.has("desktop") and ws.cart_error is None
                 and not ws.player.paused
-                and (ws._update is not None or ws._draw is not None))
+                and (ws._update is not None or ws._draw is not None)
+                and ws.player.animates())
 
     def _content_for(self, kind):
         """The content Layer a window presents (the router's registry lookup,
@@ -2081,9 +2096,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             win = _Win("desktop", 0, 0, w, h, _layout_base.metric("title", fs))
             win.foot = self._win_foot(win)
             win.edge = self._win_edge(win)
-        _x, _y, cw, ch = win.content_rect()
+        cr = win.content_rect()
+        lay = self._root_ctx.layout     # _desk_rect's source: app_surface's size
+        c = self._app_wc
+        if c is not None and c[0] is cr and c[1] == lay.cw and c[2] == lay.ch:
+            return c[3]
         sw, sh = self.app_surface()
-        return (max(1, min(cw, sw)), max(1, min(ch, sh)))
+        r = (max(1, min(cr[2], sw)), max(1, min(cr[3], sh)))
+        self._app_wc = (cr, lay.cw, lay.ch, r)
+        return r
 
     def _view_src(self):
         """A window-bound app cart's window shows its canvas's top left, its

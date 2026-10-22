@@ -362,6 +362,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         tile_flags[n] = (tile_flags[n] | bit) if on else (tile_flags[n] & ~bit & 0xFF)
 
     _touch_scratch = [0, 0, 0, 0]        # reused; see moy_input.pointer_state
+    _touch_last = [None]                 # touch()'s last answer
 
     def touch():
         # Pointer (touch glass on a board, mouse on the host) exposed to
@@ -378,7 +379,14 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         st = pointer_state(input, _touch_scratch)
         if st[2] == P_NONE:
             return None
-        return (st[0], st[1], bool(st[2] & P_CLICK), bool(st[2] & P_HELD))
+        x = st[0]
+        y = st[1]
+        click = bool(st[2] & P_CLICK)
+        held = bool(st[2] & P_HELD)
+        t = _touch_last[0]
+        if t is None or t[0] != x or t[1] != y or t[2] is not click or t[3] is not held:
+            t = _touch_last[0] = (x, y, click, held)
+        return t        # the last answer while it holds: a still pointer allocates none
 
     def mouse():
         # TIC-80-shaped 7-tuple (x, y, left, middle, right, scrollx, scrolly)

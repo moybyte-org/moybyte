@@ -85,6 +85,7 @@ except ImportError:  # pragma: no cover - direct host import
 
 
 MAX_CHARS = 8000       # per document -- bounds the SD write + device memory
+_VIS_ROW = (0, 0, 0)
 AUTOSAVE_MS = 2500     # idle before a SOFT save (Writer's #108 debounce)
 INVALID = "INVALID"    # the badge a mode's gate raises (#154's SYNTAX twin)
 
@@ -292,18 +293,23 @@ class EditorHandle:
         self._memo = {}
         self._memo_old = {}
         self._img = {}               # drawing name -> Image (None when absent)
-        self._vis = ()               # the last drawn (buffer row, seg, y) map
+        self._vis = []               # the last drawn (buffer row, seg, y) map, flat
+        self._nvis = 0               # the rows of it the last draw wrote
         self._geom = (0, 0, CELL, LH, 1)   # x, y, cell, lh, scale
         self._faces_in = (0, 0, 8)   # the faces the last draw took, and their line
         self._drag = None            # last pointer cell-origin of a live drag
         self._mouse = TextMouse()    # a mouse's clicks, selection and autoscroll
         self._mid = False            # the middle button was held last frame
         self._rect = (0, 0, 0, 0)    # where the last draw put it
-        self._caret_at = None        # the caret the last draw scrolled to see
+        self._caret_at = None        # the caret's row the last draw scrolled to see
+        self._caret_col = 0          # ...and its column
         # The watch's `file_gen` this buffer last matched: a change made
         # elsewhere (the Appearance rows) reloads a buffer with no edits; one
         # with edits keeps them, and its save is the last write.
         self._wgen = watch.file_gen if watch is not None else None
+        self._fmemo = [None, None, None, None]   # look_gen, desk, its faces, font_info
+        self._gen = 0                # bumped by every verb that changes what it draws
+        self._drawn = -1             # the _gen the last draw showed
 
     # -- what the skin asks ---------------------------------------------------
 
@@ -332,6 +338,7 @@ class EditorHandle:
         return self.ed.text()
 
     def set_text(self, body):
+        self._gen += 1
         self.ed.set_text(str(body)[:self._max])
         self._caret_at = None
         self._mark()
@@ -342,6 +349,7 @@ class EditorHandle:
         A pan STAYS: `draw` scrolls the caret back into view only when the
         caret itself moved, so reading the end of a long note does not fight
         the caret left at the top."""
+        self._gen += 1
         self.ed.scroll(int(rows), int(cols))
 
     def wraps(self):
@@ -359,6 +367,7 @@ class EditorHandle:
         focus. Taking it flips the T-Deck to clean ASCII and swallows the byte
         that caused the flip (`b2ff7de`), which is the whole reason this is a
         shell call and not a flag the cart sets."""
+        self._gen += 1
         on = bool(on)
         if on == self._focus:
             return on
@@ -372,6 +381,7 @@ class EditorHandle:
         """Drop the focus flag without touching the keyboard -- what the shell
         calls on the PREVIOUS handle when a second one takes it, so two
         handles can never both believe they own the keys."""
+        self._gen += 1
         self._focus = False
 
     def focused(self):
@@ -382,6 +392,7 @@ class EditorHandle:
         the skin deliberately left blurred. The shell comes through the same
         door for the focused handle. True when the handle TOOK it (a shortcut
         counts), so a skin can fall through on a key it wants for itself."""
+        self._gen += 1
         code = int(code or 0)
         if not code:
             return False
@@ -401,13 +412,22 @@ class EditorHandle:
         if code in (0x18, 0x16):             # Ctrl+X / Ctrl+V
             changed = self.cut() if code == 0x18 else self.paste()
             return changed
-        if len(ed.text()) >= self._max and code not in (0x08, 0x7F):
-            return False
+        if code not in (0x08, 0x7F):
+            n = len(ed.lines) - 1           # the text's length, not joined to measure it
+            for line in ed.lines:
+                n += len(line)
+            if n >= self._max:
+                return False
         if self._burst is None:
             self._burst = ed.text()
         if not ed.key(code):
             return False
         self._mark()
+        cols = self._view[0]
+        if cols:
+            # The edit lays out the line it changed; the frame that draws it
+            # finds it laid out.
+            self._row(ed.lines[ed.row], cols)
         if code in (0x0D, 0x0A) or (0x20 <= code <= 0x7E
                                     and chr(code) in _BURST_BREAK):
             self._close_burst()
@@ -422,6 +442,7 @@ class EditorHandle:
         would leave the caret unreachable. In SELECT mode the same motion
         EXTENDS the selection, because `select_sticky` is what `move` reads,
         and so does `select` (Shift held). True when it moved something."""
+        self._gen += 1
         dx = int(dx or 0)
         dy = int(dy or 0)
         if not (dx or dy):
@@ -443,6 +464,7 @@ class EditorHandle:
         return self.history.can_redo()
 
     def undo(self):
+        self._gen += 1
         self._close_burst()
         if self.history.undo() is None:
             return False
@@ -450,12 +472,14 @@ class EditorHandle:
         return True
 
     def redo(self):
+        self._gen += 1
         if self.history.redo() is None:
             return False
         self._mark()
         return True
 
     def select_all(self):
+        self._gen += 1
         self.ed.select_all()
         return True
 
@@ -467,6 +491,7 @@ class EditorHandle:
         range is a MODE in which the caret -- moved by a drag or the trackball
         -- extends the selection instead of collapsing it. Turning it on
         anchors at the caret, so the very next move already selects."""
+        self._gen += 1
         on = (not self.ed.select_sticky) if on is None else bool(on)
         self.ed.select_sticky = on
         if on:
@@ -496,6 +521,7 @@ class EditorHandle:
         return self.ed.copy()
 
     def cut(self):
+        self._gen += 1
         if self._burst is None:
             self._burst = self.ed.text()
         if not self.ed.cut():
@@ -506,6 +532,7 @@ class EditorHandle:
         return True
 
     def paste(self):
+        self._gen += 1
         if len(self.ed.text()) + len(self.ed.paste_text()) > self._max:
             return False
         if self._burst is None:
@@ -528,6 +555,7 @@ class EditorHandle:
         own back, `close()`, the hard-exit ladder -- and writes anyway, keeping
         the badge, because a kid's text is theirs and a broken document is
         caught the next time something loads it."""
+        self._gen += 1
         self._close_burst()
         body = self.ed.text()[:self._max]
         good, why = _modes.check(self._mode, body)
@@ -567,10 +595,25 @@ class EditorHandle:
         self._memo = {}
         self._memo_old = {}
         self._img = {}
-        self._vis = ()
+        self._nvis = 0
         self._drag = None
 
     # -- drawing --------------------------------------------------------------
+
+    def owes(self):
+        """Whether the handle has a frame to draw: a verb changed it since its
+        last draw (a key handed to it outside a drawn frame), the document
+        moved elsewhere, or its idle save is due -- what an app drawn on
+        change (`Player.animates`) asks of every handle it opened."""
+        if self._gen != self._drawn:
+            return True
+        w = self._watch
+        if w is not None and w.file_gen != self._wgen:
+            return True
+        if self.dirty():
+            at = self._edit_ms
+            return at is None or _ticks_diff(_ticks_ms(), at) >= AUTOSAVE_MS
+        return False
 
     def draw(self, x, y, w, h, scale=1, r=0):
         """Render the document into `(x, y, w, h)` of the cart's canvas, on
@@ -584,7 +627,7 @@ class EditorHandle:
         desk = getattr(cv, "w", 0) >= DESK_W
         reg, bold = self._faces(desk)
         if reg:
-            info = _ui_draw.font_info(reg)
+            info = self._fmemo[3]
             cell, line = info[0], info[2]
             lh = LOOK_LH[desk]
             px, py = LOOK_PAD[desk]
@@ -596,19 +639,32 @@ class EditorHandle:
         tx, ty = int(x) + px, int(y) + py
         cols = max(1, (int(w) - 2 * px) // cell)
         rows = max(1, (int(h) - py) // lh)
-        if (cols, rows) != self._view:
+        v = self._view
+        if v[0] != cols or v[1] != rows:
             self._view = (cols, rows)
             self.ed.set_view_size(cols, rows)
             self._memo = {}
             self._memo_old = {}
             self._caret_at = None      # a resize re-flows: show the caret again
-        self._geom = (tx, ty, cell, lh, scale)
-        self._rect = (int(x), int(y), int(w), int(h))
-        self._faces_in = (reg, bold, line)
+        # Kept while they hold: a frame drawn as the last one allocates none.
+        g = self._geom
+        if g[0] != tx or g[1] != ty or g[2] != cell or g[3] != lh or g[4] != scale:
+            self._geom = (tx, ty, cell, lh, scale)
+        x = int(x)
+        y = int(y)
+        w = int(w)
+        h = int(h)
+        g = self._rect
+        if g[0] != x or g[1] != y or g[2] != w or g[3] != h:
+            self._rect = (x, y, w, h)
+        g = self._faces_in
+        if g[0] is not reg or g[1] is not bold or g[2] != line:
+            self._faces_in = (reg, bold, line)
         if self._m.wrap:
             self.ed.left = 0              # wrapped prose never scrolls sideways
         self._follow_watch()
         self._autosave()
+        self._drawn = self._gen
         self._keep_caret(cols, rows)
         # Clipped to the rect the skin gave: a long line, a tall embed and the
         # last part-row stop at the editor's edge instead of over the skin's
@@ -631,11 +687,23 @@ class EditorHandle:
         cv.clip()
 
     def _faces(self, desk):
-        """The note's (regular, bold) faces, (0, 0) for petme128's cells."""
+        """The note's (regular, bold) faces, (0, 0) for petme128's cells;
+        asked of the look once a look (`look_gen`) and size class, the
+        regular face's `font_info` kept beside them (`_fmemo`)."""
         if not self._look:
             return (0, 0)
-        f = getattr(getattr(self._host, "look", None), "note_faces", None)
-        return f(desk) if f is not None else (0, 0)
+        look = getattr(self._host, "look", None)
+        gen = getattr(look, "look_gen", None)
+        if gen is None:
+            return (0, 0)
+        m = self._fmemo
+        if m[0] != gen or m[1] is not desk:
+            got = look.note_faces(desk)
+            m[0] = gen
+            m[1] = desk
+            m[2] = got
+            m[3] = _ui_draw.font_info(got[0]) if got[0] else None
+        return m[2]
 
     def tap(self, px, py, click=True):
         """Route a pointer at `(px, py)` through the LAST DRAWN frame -- the
@@ -646,6 +714,7 @@ class EditorHandle:
         (already toggled), `("caret", None)` a plain place, or None when the
         point is outside the editor. Without `click` the answer is only
         whether the point is INSIDE -- nothing moves and nothing toggles."""
+        self._gen += 1
         got = self._cell_at(px, py)
         if got is None:
             return None
@@ -682,6 +751,7 @@ class EditorHandle:
         PANS, content following the finger, sideways too in the modes that do
         not wrap -- `code_layer._code_drag`'s gesture, because it is the one a
         kid's hand already learned in the Code tab."""
+        self._gen += 1
         if not down:
             self._drag = None
             self._mouse.release(self.ed)
@@ -733,7 +803,8 @@ class EditorHandle:
         if self._mouse.armed and self._mouse.autoscroll(ed, x, y, dt, self._geom[3]):
             moved = True
         if moved:
-            self._caret_at = (ed.row, ed.col)   # the view is the reader's now
+            self._caret_at = ed.row             # the view is the reader's now
+            self._caret_col = ed.col
         return moved
 
     def autoscrolling(self):
@@ -748,6 +819,11 @@ class EditorHandle:
         p = getattr(self._host, "pointer", None)
         return bool(getattr(p, "hovers", False))
 
+    def _visible(self):
+        """The rows the last draw put on screen, as (buffer row, seg, y)."""
+        v = self._vis
+        return [(v[i], v[i + 1], v[i + 2]) for i in range(0, 3 * self._nvis, 3)]
+
     def _cell_at(self, px, py):
         """`(buffer row, column, laid-out row, shown cell)` under `(px, py)`,
         or None -- the one place a pixel becomes a text cell, for both `tap`
@@ -755,7 +831,11 @@ class EditorHandle:
         x0, _y0, cell, lh, _scale = self._geom
         px = int(px)
         py = int(py)
-        for brow, seg, yy in self._vis:
+        vis = self._vis
+        for i in range(0, 3 * self._nvis, 3):
+            brow = vis[i]
+            seg = vis[i + 1]
+            yy = vis[i + 2]
             if not (yy <= py < yy + lh):
                 continue
             line = self.ed.lines[brow]
@@ -848,8 +928,10 @@ class EditorHandle:
             hist.mark_keyframe()
 
     def _row(self, line, cols):
-        """`line`'s laid-out form, memoized by (text, cols)."""
-        key = (line, cols)
+        """`line`'s laid-out form, memoized by its text: every caller lays out
+        at the drawn view's `cols`, and a view of other cols clears the memo
+        (`draw`)."""
+        key = line
         row = self._memo.get(key)
         if row is None:
             row = self._memo_old.get(key)
@@ -876,10 +958,10 @@ class EditorHandle:
         meant a long note could not be read past its first screen -- the pan
         landed and the next frame undid it."""
         ed = self.ed
-        here = (ed.row, ed.col)
-        if here == self._caret_at:
+        if self._caret_at == ed.row and self._caret_col == ed.col:
             return
-        self._caret_at = here
+        self._caret_at = ed.row
+        self._caret_col = ed.col
         if ed.row < ed.top:
             ed.top = ed.row
             return
@@ -923,19 +1005,25 @@ class EditorHandle:
         ed = self.ed
         reg, _bold, line = self._faces_in
         dy = (lh - line) // 2 if reg else 0
-        vis = []
+        vis = self._vis                 # (brow, seg, y) a row, flat and reused
+        nv = 0
         drawn = 0
         brow = ed.top
         n = len(ed.lines)
         yy = y
-        caret = None
+        cx = cy = None
         while drawn < rows and brow < n:
             text = ed.lines[brow]
             laid = self._row(text, cols)
             if laid.img is not None:
                 drawn += self._paint_image(cv, th, laid.img, x, yy, w,
                                            (rows - drawn) * lh, lh, scale)
-                vis.append((brow, 0, yy))
+                if len(vis) <= nv:
+                    vis.extend(_VIS_ROW)
+                vis[nv] = brow
+                vis[nv + 1] = 0
+                vis[nv + 2] = yy
+                nv += 3
                 yy = y + drawn * lh
                 brow += 1
                 continue
@@ -952,7 +1040,12 @@ class EditorHandle:
                     # is the window into it, so `base` is where it starts.
                     base = ed.left
                     seg = seg[base:base + cols]
-                vis.append((brow, si, yy))
+                if len(vis) <= nv:
+                    vis.extend(_VIS_ROW)
+                vis[nv] = brow
+                vis[nv + 1] = si
+                vis[nv + 2] = yy
+                nv += 3
                 sel = self._paint_selection(cv, th, brow, laid, base, seg, x, yy, cell, lh)
                 self._paint_seg(cv, th, laid, seg, base, x, yy + dy, cell, lh, scale, hl)
                 if sel is not None:
@@ -960,16 +1053,17 @@ class EditorHandle:
                     cv.print(seg[s0 - base:s1 - base], x + (s0 - base) * cell, yy + dy,
                              th["selection_ink"], scale)
                 if base <= here <= base + len(seg) and here >= 0:
-                    caret = (x + (here - base) * cell, yy)
+                    cx = x + (here - base) * cell
+                    cy = yy
                 drawn += 1
                 yy += lh
             brow += 1
-        self._vis = tuple(vis)
-        if caret is not None and x <= caret[0] < x + w:
+        self._nvis = nv // 3
+        if cx is not None and x <= cx < x + w:
             if reg:
-                cv.rect(caret[0], caret[1] + 2, 2, lh - 4, th["accent"])
+                cv.rect(cx, cy + 2, 2, lh - 4, th["accent"])
             else:
-                cv.rect(caret[0], caret[1], max(1, scale), 8 * scale, th["accent"])
+                cv.rect(cx, cy, max(1, scale), 8 * scale, th["accent"])
 
     def _colors(self, line):
         """The code highlighter's per-character palette indices. Imported at

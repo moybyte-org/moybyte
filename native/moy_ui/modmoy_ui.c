@@ -7,6 +7,8 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/objstr.h"
+#include "py/objtuple.h"
+#include "py/gc.h"
 
 #include "moy_ui.h"
 #include "moy_canvas.h"
@@ -1258,10 +1260,50 @@ static moy_ui_span_t span_if(mp_obj_t o) {
     return span_of(o);
 }
 
+// The answers the verbs hand back lately (a page's content rect, a table's
+// (cur, opened), a card's rect): an answer equal to one of them IS that tuple,
+// so a frame that lays out as the last one did allocates no answer. Tuples are
+// immutable, so sharing one is invisible to the app.
+#define RET_RING 16
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_ui_ret[16]);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_ui_bar_last);
+static uint8_t s_ret_at;
+
+static mp_obj_t ret_tuple(size_t n, const mp_obj_t *items) {
+    mp_obj_t *ring = MP_STATE_VM(moy_ui_ret);
+    for (int i = 0; i < RET_RING; i++) {
+        mp_obj_t r = ring[i];
+        if (r == MP_OBJ_NULL) {
+            continue;
+        }
+        // A soft reset keeps the ring and starts a new heap: an entry is
+        // trusted only while it heads a live block that is a tuple.
+        if (gc_nbytes(MP_OBJ_TO_PTR(r)) == 0 || !mp_obj_is_type(r, &mp_type_tuple)) {
+            ring[i] = MP_OBJ_NULL;
+            continue;
+        }
+        mp_obj_tuple_t *t = MP_OBJ_TO_PTR(r);
+        if (t->len != n) {
+            continue;
+        }
+        size_t k = 0;
+        while (k < n && t->items[k] == items[k]) {
+            k++;
+        }
+        if (k == n) {
+            return r;
+        }
+    }
+    mp_obj_t r = mp_obj_new_tuple(n, items);
+    ring[s_ret_at] = r;
+    s_ret_at = (uint8_t)((s_ret_at + 1) % RET_RING);
+    return r;
+}
+
 static mp_obj_t box_tuple(moy_ui_box_t b) {
     mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
                      MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
-    return mp_obj_new_tuple(4, t);
+    return ret_tuple(4, t);
 }
 
 static mp_obj_t rect_tuple(const int32_t r[4]) {
@@ -2107,9 +2149,75 @@ static moy_ui_ctx_t *ctx_of(mp_obj_t o) {
     return c;
 }
 
+// A key of an override dict, or MP_OBJ_NULL where it is absent or None.
+static mp_obj_t over_key(mp_map_t *m, qstr k) {
+    mp_map_elem_t *e = mp_map_lookup(m, MP_OBJ_NEW_QSTR(k), MP_MAP_LOOKUP);
+    return e == NULL || e->value == mp_const_none ? MP_OBJ_NULL : e->value;
+}
+
+// A colour key: a role by its token name, an RGB colour, or absent (an
+// unknown name too).
+static int32_t over_colour(mp_map_t *m, qstr k) {
+    mp_obj_t v = over_key(m, k);
+    if (v == MP_OBJ_NULL) {
+        return MOY_UI_O_NONE;
+    }
+    if (mp_obj_is_str(v)) {
+        const char *name = mp_obj_str_get_str(v);
+        for (int i = 0; i < MOY_UI_TOKENS; i++) {
+            if (strcmp(name, moy_ui_token_names[i]) == 0) {
+                return MOY_UI_O_ROLE + i;
+            }
+        }
+        return MOY_UI_O_NONE;
+    }
+    return (int32_t)(mp_obj_get_int_truncated(v) & 0xffffff);
+}
+
+static int8_t over_flag(mp_map_t *m, qstr k) {
+    mp_obj_t v = over_key(m, k);
+    return v == MP_OBJ_NULL ? -1 : (int8_t)mp_obj_is_true(v);
+}
+
+// The override table (§3) straight from the app's dict, as runtime/ui.py's
+// block reads: no block is built, so a verb given a table allocates nothing.
+static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
+    mp_map_t *m = mp_obj_dict_get_map(d);
+    moy_ui_over_none(out);
+    out->fill = over_colour(m, MP_QSTR_fill);
+    out->ink = over_colour(m, MP_QSTR_ink);
+    out->border = over_colour(m, MP_QSTR_border);
+    mp_obj_t v = over_key(m, MP_QSTR_id);
+    if (v != MP_OBJ_NULL) {
+        out->id = span_of(v);
+    }
+    out->current = over_flag(m, MP_QSTR_current);
+    out->disabled = over_flag(m, MP_QSTR_disabled);
+    out->nav = over_flag(m, MP_QSTR_nav);
+    out->mark = over_flag(m, MP_QSTR_mark);
+    out->steps = over_flag(m, MP_QSTR_steps);
+    v = over_key(m, MP_QSTR_hint);
+    if (v != MP_OBJ_NULL) {
+        out->hint = span_of(v);
+    }
+    mp_obj_t wash = over_key(m, MP_QSTR_wash);
+    mp_obj_t lead = over_key(m, MP_QSTR_lead);
+    if (wash != MP_OBJ_NULL || lead != MP_OBJ_NULL) {
+        out->wash = (int8_t)(wash != MP_OBJ_NULL && mp_obj_is_true(wash));
+        out->lead = (int8_t)(lead != MP_OBJ_NULL && mp_obj_is_true(lead));
+    }
+}
+
 static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
     if (o == mp_const_none) {
         return NULL;
+    }
+    if (mp_obj_is_type(o, &mp_type_dict)) {
+        if (mp_obj_dict_len(o) == 0) {
+            return NULL;
+        }
+        over_dict(o, out);
+        return out;
     }
     mp_buffer_info_t b;
     mp_get_buffer_raise(o, &b, MP_BUFFER_READ);
@@ -2219,7 +2327,7 @@ static mp_obj_t ui_api_box(mp_obj_t ctx, mp_obj_t id) {
     }
     mp_obj_t t[4] = {mp_obj_new_int(v[0]), mp_obj_new_int(v[1]), mp_obj_new_int(v[2]),
                      mp_obj_new_int(v[3])};
-    return mp_obj_new_tuple(4, t);
+    return ret_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_box_obj, ui_api_box);
 
@@ -2315,9 +2423,9 @@ static mp_obj_t ui_api_table_rows(mp_obj_t ctx) {
     }
     mp_obj_t view[4] = {mp_obj_new_int(v[2]), mp_obj_new_int(v[3]), mp_obj_new_int(v[4]),
                         mp_obj_new_int(v[5])};
-    mp_obj_t t[5] = {mp_obj_new_int(v[0]), mp_obj_new_int(v[1]), mp_obj_new_tuple(4, view),
+    mp_obj_t t[5] = {mp_obj_new_int(v[0]), mp_obj_new_int(v[1]), ret_tuple(4, view),
                      mp_obj_new_int(v[6]), mp_obj_new_int(v[7])};
-    return mp_obj_new_tuple(5, t);
+    return ret_tuple(5, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_table_rows_obj, ui_api_table_rows);
 
@@ -2374,7 +2482,7 @@ static mp_obj_t ui_api_part(size_t n_args, const mp_obj_t *a) {
     for (int i = 0; i < 5; i++) {
         t[i] = mp_obj_new_int(v[i]);
     }
-    return mp_obj_new_tuple(5, t);
+    return ret_tuple(5, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_part_obj, 7, 7, ui_api_part);
 
@@ -2403,7 +2511,7 @@ static mp_obj_t ui_api_card(size_t n_args, const mp_obj_t *a) {
     for (int i = 0; i < 5; i++) {
         t[i] = mp_obj_new_int(v[i]);
     }
-    return mp_obj_new_tuple(5, t);
+    return ret_tuple(5, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_card_obj, 6, 6, ui_api_card);
 
@@ -2422,7 +2530,7 @@ static mp_obj_t ui_api_table(size_t n_args, const mp_obj_t *a) {
     moy_ui_api_table(c, &s, span_of(a[3]), (const uint8_t *)cb.buf, cb.len,
                      (const uint8_t *)eb.buf, eb.len, num(a[6]), over_of(a[7], &o), v);
     mp_obj_t t[2] = {mp_obj_new_int(v[0]), mp_obj_new_bool(v[1])};
-    return mp_obj_new_tuple(2, t);
+    return ret_tuple(2, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_table_obj, 8, 8, ui_api_table);
 
@@ -2519,16 +2627,20 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_tool_obj, 6, 6, ui_api_tool);
 // api_bar(ctx, cv, look, title, tools, off) -> the tool the host's bar
 // activated (from 0), -2 its way back, -1 none
 static mp_obj_t ui_api_bar(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     moy_ui_ctx_t *c = ctx_of(a[0]);
     moy_ui_sink_t s;
     sink_of(&s, a[1], a[2]);
     mp_buffer_info_t b;
     mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
+    // `back` apart from the bits: MOY_UI_BAR_BACK is no small int on a board.
+    uint32_t off = (uint32_t)mp_obj_get_int_truncated(a[5]);
+    if (n_args > 6 && mp_obj_is_true(a[6])) {
+        off |= MOY_UI_BAR_BACK;
+    }
     return mp_obj_new_int(moy_ui_api_bar(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
-                                         (uint32_t)mp_obj_get_int_truncated(a[5])));
+                                         off));
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_bar_obj, 6, 6, ui_api_bar);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_bar_obj, 6, 7, ui_api_bar);
 
 // api_bar_lent(ctx) -> (title, slots, off, chip) the frame drawn last lent
 // its bar, or None
@@ -2546,9 +2658,33 @@ static mp_obj_t ui_api_bar_lent(mp_obj_t ctx) {
     }
     int at = -1;
     const char *chip = moy_ui_api_bar_chip(ctx_of(ctx), &at);
+    // The host's bar asks every frame it draws, and the bar lent is the last
+    // one's as a rule: the answer it had, where it says the same, allocates
+    // nothing.
+    mp_obj_t last = MP_STATE_VM(moy_ui_bar_last);
+    if (last != MP_OBJ_NULL && gc_nbytes(MP_OBJ_TO_PTR(last)) != 0
+            && mp_obj_is_type(last, &mp_type_tuple)) {
+        mp_obj_tuple_t *lt = MP_OBJ_TO_PTR(last);
+        if (lt->len == 4 && mp_obj_is_str(lt->items[0]) && mp_obj_is_str(lt->items[3])
+                && mp_obj_is_type(lt->items[1], &mp_type_tuple)
+                && strcmp(mp_obj_str_get_str(lt->items[0]), title) == 0
+                && strcmp(mp_obj_str_get_str(lt->items[3]), chip) == 0
+                && mp_obj_get_int_truncated(lt->items[2]) == (mp_int_t)off) {
+            mp_obj_tuple_t *ls = MP_OBJ_TO_PTR(lt->items[1]);
+            int k = 0;
+            while (k < n && (size_t)k < ls->len && ls->items[k] == sl[k]) {
+                k++;
+            }
+            if (k == n && ls->len == (size_t)n) {
+                return last;
+            }
+        }
+    }
     mp_obj_t t[4] = {mp_obj_new_str(title, strlen(title)), mp_obj_new_tuple(n, sl),
                      mp_obj_new_int_from_uint(off), mp_obj_new_str(chip, strlen(chip))};
-    return mp_obj_new_tuple(4, t);
+    last = mp_obj_new_tuple(4, t);
+    MP_STATE_VM(moy_ui_bar_last) = last;
+    return last;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_bar_lent_obj, ui_api_bar_lent);
 
@@ -2695,6 +2831,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(ui_calls_obj, ui_calls);
 static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ui) },
     { MP_ROM_QSTR(MP_QSTR_tokens), MP_ROM_PTR(&ui_tokens_obj) },
+    { MP_ROM_QSTR(MP_QSTR_over_dict), MP_ROM_TRUE },
     { MP_ROM_QSTR(MP_QSTR_states), MP_ROM_PTR(&ui_states_obj) },
     { MP_ROM_QSTR(MP_QSTR_kinds), MP_ROM_PTR(&ui_kinds_obj) },
     { MP_ROM_QSTR(MP_QSTR_metric_kinds), MP_ROM_PTR(&ui_metric_kinds_obj) },

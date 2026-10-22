@@ -34,6 +34,12 @@ call 2026-09-30), so there is no frame that is allowed to allocate. The `perf`
 skill lists the idioms that allocate on a board while reading as free; a dozen
 of them were on this path at once.
 
+It then runs Notes, the app cart on the public UI API, with a note open: idle
+it paints nothing and allocates nothing, and typed into, one key every fourth
+frame (the edit itself handed in between frames, as shell_bench types), the
+frame each key paints allocates nothing either -- the verbs, the editor
+handle's draw, the host's bar and the Player's app frame included.
+
 WHEN IT FAILS. Something on the frame path allocates again, and the per-frame
 deltas are printed. What names the LINE is a MicroPython whose gc_alloc and
 gc_free charge each block to the Python line running (the code state's ip,
@@ -357,7 +363,67 @@ def measure(loop):
     _frames(loop, 100, True)             # the press edge itself may allocate
     info["held"] = _frames(loop, @WINDOW_MS@, True)
     gc.enable()
+    notes(loop, info)
     print("RESULT " + json.dumps(info))
+
+
+def _typing(loop, ms):
+    """Notes' note typed into, one key every fourth frame, handed to its
+    editor handle as shell_bench's typing hands it (the edit is the
+    document's, outside the frame measured): what each frame allocates."""
+    from gc import mem_alloc
+    keys = b"the quick brown fox jumps over the lazy dog "
+    fed = loop.ws.player._focus_editor
+    out = []
+    n = 0
+    t0 = time.ticks_ms()
+    while time.ticks_diff(time.ticks_ms(), t0) < ms:
+        if n % 4 == 0:
+            fed.key(keys[(n // 4) % len(keys)])
+        n += 1
+        a = mem_alloc()
+        loop.step()
+        out.append(mem_alloc() - a)
+    return out
+
+
+def notes(loop, info):
+    """Notes with a note open, idle and typed into: the app cart a desk
+    runs every day, on the verbs."""
+    ws = loop.ws
+    ws.exit()
+    for _ in range(30):
+        loop.step()
+    info["notes_title"] = ws.launch_named("Notes")
+    for _ in range(30):
+        loop.step()
+    ns = ws.player.ns
+    got, err = ns["files"].new_name("probe")
+    ns["_open"](got)
+    for _ in range(60):
+        loop.step()
+    info["notes_error"] = str(ws.cart_error)
+    info["notes_focused"] = ws.player._focus_editor is not None
+    _typing(loop, 1500)                  # the first keys' edges, settled
+    # ...and the idle save they owe (EditorHandle.AUTOSAVE_MS), an event of
+    # its own: idle is what comes after it.
+    fed = ws.player._focus_editor
+    t0 = time.ticks_ms()
+    while fed.dirty() and time.ticks_diff(time.ticks_ms(), t0) < 15000:
+        loop.step()
+    info["notes_saved"] = not fed.dirty()
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    d0 = ws._frames_drawn
+    info["notes_idle"] = _frames(loop, @WINDOW_MS@, False)
+    d1 = ws._frames_drawn
+    info["notes_typing"] = _typing(loop, @WINDOW_MS@)
+    info["notes_idle_drawn"] = d1 - d0
+    info["notes_typing_drawn"] = ws._frames_drawn - d1
+    info["notes_text"] = len(ws.player._focus_editor.text())
+    gc.enable()
 
 
 class _Loop:
@@ -455,6 +521,8 @@ def _stage(dest, exe):
     (cart / "main.wasm").write_bytes(b"\0asm\1\0\0\0\5\3\1\0\x10")
     (cart / ("main.xtensa.f%s.aot" % format_version())).write_bytes(b"AOT")
     (cart / "config.json").write_text("{}")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.notes.moy",
+                    dest / "carts" / "moybyte.notes.moy")
 
 
 def _run(tmp_path):
@@ -527,3 +595,33 @@ def test_a_play_frame_allocates_nothing(result):
 def test_a_play_frame_with_a_button_held_allocates_nothing(result):
     info, text = result
     _assert_quiet(info["held"], "'up' held", text)
+
+
+def test_notes_is_the_run_being_measured(result):
+    info, text = result
+    assert info["notes_title"] == "Notes", text[-3000:]
+    assert info["notes_error"] == "None", text[-3000:]
+    assert info["notes_focused"] is True, text[-3000:]
+    assert info["notes_saved"] is True, "the idle save never came"
+    # The typing window typed: a key every fourth frame reached the note.
+    assert info["notes_text"] > 20, info["notes_text"]
+
+
+def test_notes_idle_paints_nothing_and_a_key_paints_its_frame(result):
+    """An app on the verbs is drawn on change (Player.animates): idle, not a
+    frame; typed into, the frame each key lands in."""
+    info, text = result
+    assert info["notes_idle_drawn"] == 0, info["notes_idle_drawn"]
+    keys = (len(info["notes_typing"]) + 3) // 4
+    assert keys - 1 <= info["notes_typing_drawn"] <= keys + 1, (
+        info["notes_typing_drawn"], keys)
+
+
+def test_notes_idle_allocates_nothing(result):
+    info, text = result
+    _assert_quiet(info["notes_idle"], "Notes idle, a note open", text)
+
+
+def test_notes_typing_allocates_nothing(result):
+    info, text = result
+    _assert_quiet(info["notes_typing"], "Notes typed into", text)

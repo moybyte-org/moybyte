@@ -58,6 +58,7 @@
 #include "py/objtuple.h"
 #include "py/objmodule.h"
 #include "py/runtime.h"
+#include "py/gc.h"
 
 #include "moy_app.h"
 #include "moy_app_wasm.h"
@@ -705,6 +706,8 @@ static mp_obj_t surface_bar_h(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(surface_bar_h_obj, surface_bar_h);
 
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_app_rect_last);
+
 static mp_obj_t surface_content_rect(mp_obj_t self) {
     uint32_t g;
     int32_t r[4];
@@ -714,7 +717,21 @@ static mp_obj_t surface_content_rect(mp_obj_t self) {
         mp_obj_new_int(r[0]), mp_obj_new_int(r[1]),
         mp_obj_new_int(r[2]), mp_obj_new_int(r[3]),
     };
-    return mp_obj_new_tuple(4, items);
+    // An app asks every frame it draws: the rect it had, while it holds,
+    // allocates nothing. A soft reset keeps the root and starts a new heap,
+    // so the kept one is trusted only while it heads a live tuple.
+    mp_obj_t last = MP_STATE_VM(moy_app_rect_last);
+    if (last != MP_OBJ_NULL && gc_nbytes(MP_OBJ_TO_PTR(last)) != 0
+            && mp_obj_is_type(last, &mp_type_tuple)) {
+        mp_obj_tuple_t *t = MP_OBJ_TO_PTR(last);
+        if (t->len == 4 && t->items[0] == items[0] && t->items[1] == items[1]
+                && t->items[2] == items[2] && t->items[3] == items[3]) {
+            return last;
+        }
+    }
+    last = mp_obj_new_tuple(4, items);
+    MP_STATE_VM(moy_app_rect_last) = last;
+    return last;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(surface_content_rect_obj, surface_content_rect);
 

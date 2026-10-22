@@ -2511,9 +2511,8 @@ class DeviceCanvas:
         # framebuffer in C; else a memoryview row-copy fallback (mirrors the host index
         # copy + the parity stub). Ignores camera/clip (it's chrome over a finished frame).
         self.flush_batch()             # #63: emit this canvas's queued sprites first
-        _fb = getattr(layer, "flush_batch", None)
-        if _fb is not None:
-            _fb()                      # ... and complete the source strip's pixels
+        if hasattr(layer, "flush_batch"):   # (a getattr of a method allocates it)
+            layer.flush_batch()        # ... and complete the source strip's pixels
         dst_x = int(dst_x)
         dst_y = int(dst_y)
         sw = layer.w

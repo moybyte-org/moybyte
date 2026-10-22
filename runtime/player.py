@@ -169,14 +169,14 @@ try:
     from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
     from ui_draw import print_font as _print_font
     from ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
-                         UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
+                         ui_owes as _ui_owes, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from moy_input import pointer_state as _pointer_state
     import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ui_draw import cart_text as _cart_text
     from runtime.ui_draw import print_font as _print_font
     from runtime.ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
-                                 UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
+                                 ui_owes as _ui_owes, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from runtime.moy_input import pointer_state as _pointer_state
     from runtime import layout_base as _layout_base
 from array import array as _array
@@ -586,6 +586,9 @@ class Player:
         self._look = False            # a built-in app: its code draws in the look, outside
                                       # the app-cart boundary (system_api.draws_in_look)
         self._ui = None               # a Python app's frame of ui verbs: [context, input, canvas]
+        self._on_change = False       # an app on the verbs: drawn on change (animates())
+        self._masks = None            # ws.input.button_masks, bound for an app's run
+        self._owe = 0                 # drawn frames it still owes after the last change
         self._run_handle = 0          # the kernel Player's handle on this run, or 0
         self._app_ctx = None          # a user app's or script's context: its run grant
         self._embed_ctx = None        # the shell's drawings grant, for a note's embeds
@@ -764,6 +767,26 @@ class Player:
         w, h = ws.app_window_size() if ws.app_window_canvas else (cv.w, cv.h)
         return (w, h, ws.look.effective_font_scale() if ws.app_full_canvas else 1)
 
+    def _layout_moved(self):
+        """Whether `_layout_args` moved from what `_layout` was told, told
+        into `_app_wh` when it did -- read field by field, so a steady frame
+        builds no tuple."""
+        ws = self.ws
+        if ws.app_window_canvas:
+            wh = ws.app_window_size()
+            w = wh[0]
+            h = wh[1]
+        else:
+            cv = ws.canvas
+            w = cv.w
+            h = cv.h
+        fs = ws.look.effective_font_scale() if ws.app_full_canvas else 1
+        a = self._app_wh
+        if a is not None and a[0] == w and a[1] == h and a[2] == fs:
+            return False
+        self._app_wh = (w, h, fs)
+        return True
+
     def _map_crash_line(self, line):
         """Map a crash line reported against the NATIVIZED source back to the
         kid's original line (#67 spike / #24): subtract the @micropython.native
@@ -886,6 +909,7 @@ class Player:
         self._app_layout = None
         self._app_wh = None
         self._ui = None
+        self._on_change = False
         self._end_grant()
         if self._app_id is not None:
             self._app_id = None
@@ -1351,6 +1375,7 @@ class Player:
         self._app_id = None
         self._look = False
         self._ui = None
+        self._on_change = False
         self._end_grant()
         self._release_editors()        # a RE-RUN is an exit too: flush, then drop
         ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
@@ -1538,8 +1563,9 @@ class Player:
         its update, so `ui.keys_taken()` answers there."""
         ctx, a, cv = self._ui
         inp = ws.input
-        if getattr(inp, "button_masks", None) is not None:
-            m = inp.button_masks(_NET_BUTTONS, None, _UI_MASKS)
+        bm = self._masks
+        if bm is not None:
+            m = bm(_NET_BUTTONS, None, _UI_MASKS)
         else:
             m = _UI_MASKS
             m[0] = m[1] = 0
@@ -1562,8 +1588,55 @@ class Player:
         # an app on the whole surface (a desk's window, or its glass) lays out
         # on the desk's rows there; the fixed raster is the handheld's
         desk = ws.app_full_canvas and _layout_base.metric_class() == _layout_base.DESK
-        _ui_frame(ctx, cv, ws.theme_colors, None, a, desk, ws.windowed_chrome,
-                  elsewhere=self._focus_editor is not None)
+        settled = _ui_frame(ctx, cv, ws.theme_colors, None, a, desk, ws.windowed_chrome,
+                            elsewhere=self._focus_editor is not None)
+        if self._on_change:
+            # A frame that moved anything owes the next, which paints the
+            # state it left (a verb acts after its part drew, a tap on the
+            # note moves the caret after the note drew); a frame with nothing
+            # going on pays off one.
+            if not settled or self._input_active(inp) or _ui_owes(ctx):
+                self._owe = 2
+            elif self._owe:
+                self._owe -= 1
+
+    def animates(self):
+        """Whether the running cart has a frame to draw now. A game always
+        has. An app on the verbs (`_on_change`) has one while input is going
+        on, while a frame it drew still owes the next, while the engine has a
+        part in motion (`api_owes`: a toast, a fade) and while an editor
+        handle it opened changed since it drew (`EditorHandle.owes`); still,
+        it draws nothing, and its window keeps its last frame."""
+        if not self._on_change:
+            return True
+        if self._owe or self._input_active(self.ws.input):
+            return True
+        ui = self._ui
+        if ui is not None and _ui_owes(ui[0]):
+            return True
+        for ed in self._editors:
+            if ed.owes():
+                return True
+        return False
+
+    def _input_active(self, inp):
+        """A key, a button, the wheel or the middle button this frame: what
+        an app's `_update` and its verbs read. The pointer's moves are the
+        console's own redraw leg (`Workstation._ptr_changed`)."""
+        if getattr(inp, "last_key", 0):
+            return True
+        bm = self._masks
+        if bm is not None:
+            m = bm(_NET_BUTTONS, None, _UI_MASKS)
+            if m[0] or m[1]:
+                return True
+        else:
+            for i in range(len(_NET_BUTTONS)):
+                if inp.held(_NET_BUTTONS[i]) or inp.pressed(_NET_BUTTONS[i]):
+                    return True
+        if getattr(inp, "wheel_x", 0) or getattr(inp, "wheel_y", 0):
+            return True
+        return bool(getattr(inp, "pointer_buttons", 0) & _PB_MIDDLE)
 
     def _build_namespace(self, ws, project, cart, wifi, net, gpio, console):
         """The cart's namespace: make_api over the project, the artwork and
@@ -1601,6 +1674,15 @@ class Player:
                                       keep=self._keep_grant))
             if "ui" in ns:
                 self._ui = [_ui_context(), _array("i", [0] * _UI_IN_LEN), ws.canvas]
+                # Bound once: a getattr that finds a method allocates its
+                # bound method every frame.
+                self._masks = getattr(ws.input, "button_masks", None)
+                # An app on the verbs is drawn on change, as a shipped app is
+                # (docs/ui_api_2026-10.md, "Drawn on change"): one that plays
+                # sound keeps every frame, which is where the host pulls its mix.
+                self._on_change = (self._app_id is not None and not self._script
+                                   and "audio" not in (cart.get("permissions") or ()))
+                self._owe = 2
         if console is not None:
             ns.update(console.api())
         # The cart's OTHER SCRIPTS, either side of main (SPEC.md 4). A ported
@@ -2185,13 +2267,10 @@ class Player:
                 # A RESPONSIVE app cart follows its surface (#181): a window
                 # resize, a font-scale change or a mode switch re-runs `_layout`
                 # BEFORE the frame that would draw against the new geometry.
-                # Costs a game exactly one `is not None`, and an app one tuple
-                # build plus a compare -- there is no clock and no probe here.
-                if self._app_layout is not None:
-                    _wh = self._layout_args()
-                    if _wh != self._app_wh:
-                        self._app_wh = _wh
-                        self._app_layout(*_wh)
+                # Costs a game exactly one `is not None`, and an app three
+                # compares -- there is no clock and no probe here.
+                if self._app_layout is not None and self._layout_moved():
+                    self._app_layout(*self._app_wh)
                 # Declared background (#63): restore the cart's named backdrop BEFORE
                 # its frame runs, so a naive cart draws only its actors. No-op (one
                 # early-out) when the cart never called background(). Skipped on a

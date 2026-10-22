@@ -4220,11 +4220,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # drawn on a change, over the frozen frame; a hidden window, the desk
         # Editor's paused Run slot).
         player = self.player
+        # (The Player's own fields: ws._update/_draw are property forwards to
+        # exactly these.) An app on the verbs draws on change.
         if kind == "desktop" and self.cart_error is None and not self.pause.open \
                 and not player.paused and (
-                    player._update is not None or player._draw is not None):
-            return True             # (the Player's own fields: ws._update/_draw
-                                    # are property forwards to exactly these)
+                    player._update is not None or player._draw is not None) \
+                and player.animates():
+            return True
         # Windowed WM (#73): a running cart's WINDOW keeps animating even when
         # another window sits above it on the stack (Settings over a game, the
         # editor beside a playtest). No hook on the fullscreen-stack WM.

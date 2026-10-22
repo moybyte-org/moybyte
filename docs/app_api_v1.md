@@ -291,6 +291,9 @@ hardcode 18) with **`bar_h()`**, its `y` -- what an app that knows only a top
 strip draws below. Under a strip at the bottom `bar_h()` is 0 and the strip
 covers your last rows, so a new app reads `content_rect()`.
 
+Like a shipped app, a user app paints only when something changed
+(`docs/ui_api_2026-10.md`, "Drawn on change").
+
 ### A compiled user app (#224)
 
 A user app may be compiled: `"runtime": "wasm"` with `"extensions":

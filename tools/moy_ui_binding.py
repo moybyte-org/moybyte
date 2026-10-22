@@ -1127,7 +1127,7 @@ def binding():
         ov, ok = _over(o)
         return bool(lib.moy_ui_api_tool(p, c.byref(s), i, t, ov))
 
-    def api_bar(ctx, cv, look, title, tools, off):
+    def api_bar(ctx, cv, look, title, tools, off, back=False):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
         t, keep = span(title)
@@ -1135,7 +1135,8 @@ def binding():
             keep = c.create_string_buffer(b"", 1)
             t = _Span(c.addressof(keep), 0)
         b = bytes(tools)
-        return int(lib.moy_ui_api_bar(p, c.byref(s), t, b, len(b), int(off) & 0xFFFFFFFF))
+        off = (int(off) | (0x80000000 if back else 0)) & 0xFFFFFFFF
+        return int(lib.moy_ui_api_bar(p, c.byref(s), t, b, len(b), off))
 
     def api_bar_lent(ctx):
         p, _k = _ctx(ctx)

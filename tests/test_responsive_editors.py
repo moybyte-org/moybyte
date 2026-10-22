@@ -47,10 +47,9 @@ def _quiesce(ws):
     and failed the assertion. That is a real flake, not a real difference: it took
     down CI on Python 3.11 while 3.10 passed the same commit (2026-07-29).
 
-    Pinning the per-second cache does NOT work -- bar_layer hits it with
-    `now_s == self._clock_at`, so a sentinel that never equals the current second
-    forces a recompute every frame, which is the opposite of what you want. Bind
-    the accessor instead. No production code needs a test hook for this.
+    Pinning the clock's cache does NOT work -- bar_layer reads the clock again
+    once its hold runs out (`_clock_at`, `_clock_hold`), so a sentinel only
+    forces a recompute. Bind the accessor instead. No production code needs a test hook for this.
     """
     if ws.pointer is not None:
         ws.pointer.visible = False
