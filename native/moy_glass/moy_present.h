@@ -167,6 +167,9 @@ enum {
 #define MOY_ROT_STRIPS 4                // bar strips a quiet frame may carry
 #define MOY_ROT_RECTS 8                 // game + damage + strips, after coalescing
 #define MOY_ROT_BOUNCE_MIN_PX (384L * 1024L)
+// An RGB565 picture the PPA writes is this many pixels wide a row at least
+// as often: its rows start and end on the P4's 64-byte cache line.
+#define MOY_ROT_ALIGN_PX 32
 
 typedef struct {
     void (*show)(void *ctx, int n);

@@ -619,14 +619,26 @@ class RotatingPpa(FakePpa):
     def init(self):
         return True
 
+    @staticmethod
+    def _out_rows(dw, dy, oh):
+        """ESP-IDF's rule for the engine's output (modmoy_ppa.c scopes it to
+        the rows the block lands on): they start and end on the P4's 64-byte
+        cache line, or the submit fails."""
+        if (dy * dw * 2) % 64 or (oh * dw * 2) % 64:
+            raise OSError("ppa out rows not cache-line aligned: dw=%d dy=%d oh=%d"
+                          % (dw, dy, oh))
+
     def rotate(self, dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle,
                nb=False, wb=True):
+        self._out_rows(dw, dy, w if angle in (90, 270) else h)
         self.rotates.append((dst, dx, dy, src, sx, sy, w, h, angle))
         self.nbs.append(nb)
         self.wbs.append((dst, wb))
 
     def rotate_scale(self, dst, dw, dh, dx, dy, src, sw, sh, scale, angle,
                      nb=False, wb=True, *block):
+        bw, bh = (block[2], block[3]) if block else (sw, sh)
+        self._out_rows(dw, dy, (bw if angle in (90, 270) else bh) * scale)
         self.direct.append((dst, dx, dy, src, sw, sh, scale, angle) + block)
         self.nbs.append(nb)
         self.wbs.append((dst, wb))
@@ -782,6 +794,24 @@ def test_a_quiet_game_after_a_change_is_full_once_then_direct():
         assert comp.rotate_stats()[2] == 2 and comp.rotate_stats()[4] == 0
         assert dsi.shown == [0, 1, 0, 1, 0]
         assert comp.async_stats()[:3] == (4, 4, 0), "every frame defers its show now"
+
+
+def test_a_quiet_game_of_any_width_writes_whole_cache_lines():
+    """A window-bound app's view is its window's content, any width (868 on
+    the Guition's desk): the queued copy of it lands in a scratch whose rows
+    are a whole number of cache lines, and the rotate reads the game's block
+    of it. A copy as wide as the game failed every submit, every frame."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        step(comp)
+        for _ in range(3):
+            comp.mark_game(GAME, 868, 475, 100, 60, 1, lambda: None, lambda: True, True)
+            step(comp)
+        gcopy = ppa.rotates[-1]
+        assert gcopy[0] is comp._scratch and gcopy[3] is GAME
+        assert gcopy[6:8] == (868, 475)
+        dst, dx, dy, src, sw, sh, scale, angle, bx, by, bw, bh = ppa.direct[-1]
+        assert src is comp._scratch and sw == 896 and sh == 475
+        assert (bx, by, bw, bh) == (0, 0, 868, 475)
 
 
 def test_a_frame_that_drew_anything_else_paints_and_rotates_whole():

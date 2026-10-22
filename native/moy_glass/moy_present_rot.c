@@ -576,11 +576,16 @@ void moy_rot_flush(moy_rot_t *r) {
                 tail = frame_ops(r, nb, fb, px, py);
                 ops += tail;
             } else if (nb) {
-                o->scratch(o->ctx, (size_t)g->sw * g->sh * 2u);
-                rot(r, true, false, MOY_ROT_SCRATCH, g->sw, g->sh, 0, 0, MOY_ROT_GAME, g->sw,
+                // The copy is the engine's OUTPUT, whose rows must start and
+                // end on a cache line: the scratch is the game's width rounded
+                // up to MOY_ROT_ALIGN_PX, and the rotate reads the game's block.
+                int sp = (g->sw + MOY_ROT_ALIGN_PX - 1) & ~(MOY_ROT_ALIGN_PX - 1);
+                int16_t blk[4] = { 0, 0, (int16_t)g->sw, (int16_t)g->sh };
+                o->scratch(o->ctx, (size_t)sp * g->sh * 2u);
+                rot(r, true, false, MOY_ROT_SCRATCH, sp, g->sh, 0, 0, MOY_ROT_GAME, g->sw,
                     g->sh, 0, 0, g->sw, g->sh, 0);
-                rot_scale(r, true, false, fb, r->pw, r->ph, px, py, MOY_ROT_SCRATCH, g->sw,
-                          g->sh, g->scale, r->angle, NULL);
+                rot_scale(r, true, false, fb, r->pw, r->ph, px, py, MOY_ROT_SCRATCH, sp,
+                          g->sh, g->scale, r->angle, sp == g->sw ? NULL : blk);
                 ops += 2;
             } else {
                 rot_scale(r, false, false, fb, r->pw, r->ph, px, py, MOY_ROT_GAME, g->sw,
