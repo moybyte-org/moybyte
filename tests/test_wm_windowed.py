@@ -3923,3 +3923,30 @@ def test_a_resizing_window_casts_its_shadow_where_it_stands(tmp_path):
                 continue
             o = 2 * (yy * W + xx)
             assert seen[o:o + 2] == full[o:o + 2], (xx, yy)
+
+
+def test_a_press_in_a_resize_zone_is_never_a_content_capture(tmp_path):
+    """A resize zone's press is the WM's: the window's content does not
+    capture it (`_held_in`), and is handed none of the gesture."""
+    ws, drv, win = _settled(tmp_path)
+    fed = [0]
+    layer = ws.wm._content_for("settings")
+    orig = layer.handle_pointer
+
+    def spy(px, py, click):
+        if click or ws.pointer.down:
+            fed[0] += 1
+        return orig(px, py, click)
+
+    layer.handle_pointer = spy
+    x, y = win.x + 1, win.y + win.h // 2           # just inside the left edge
+    assert ws.wm._resize_zone_at(x, y) == ("settings", RZ_L)
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    for k in range(1, 4):
+        drv.touch_drag(x + 10 * k, y)
+        drv.frame(1 / 30)
+        assert ws.wm._held_in is None and ws.wm._resize is not None
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert fed[0] == 0
