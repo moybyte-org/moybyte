@@ -145,19 +145,17 @@ def test_the_editor_bar_has_no_projects_button(tmp_path):
     assert "projects" not in glyphs
 
 
-def test_the_narrow_bar_names_the_open_tab_only_at_the_full_gap(tmp_path):
-    """The narrow bar's one rule: its icons never abut, and the open tab's
-    name goes before the icons squeeze. Every icon fits the zone, evenly
-    gapped; the open tab is named exactly where the whole ladder holds it
-    at the full gap, as a wider zone does."""
+def test_the_one_bar_names_the_open_tab(tmp_path):
+    """The Editor's one bar (look step 30): every icon fits the zone, evenly
+    gapped, the tabs parted from the actions; the open tab is named where
+    the whole ladder holds its name, which the T-Deck's does."""
     from runtime import editor_app as EA
     ws = _ws(tmp_path)
     ws.set_home_tab("make")
     ws.launcher.sel = _first_real(ws.launcher)
     ws.launch_selected()
     ea = ws.editor_app
-    rect = ws.layout.zone_left
-    full = EA._LADDER_GAP * ea._zone_scale()
+    rect = ws.bar_layer._zone_rect("menu")
     for tab, name in (("cards", "Config"), ("paint", "Sprites"), ("code", "Code")):
         ws.set_menu_view(tab)
         for zone in (rect, (rect[0], rect[1], rect[2] + 80, rect[3])):
@@ -168,14 +166,11 @@ def test_the_narrow_bar_names_the_open_tab_only_at_the_full_gap(tmp_path):
             gaps = [b[2][0] - a[2][0] - a[2][2] for a, b in zip(rects, rects[1:])]
             group = gaps.pop(cut - 1)                    # tabs | actions (D-02)
             assert rects[cut][0] == EA._ZONE_UNDO
-            assert set(gaps) == {gap} and gap > 0
+            assert set(gaps) == {gap} and gap >= 0
             assert EA._GROUP_GAP * ea._zone_scale() <= group
             assert group <= EA._GROUP_MAX * ea._zone_scale()
             label = ea._open_label(zone)
-            assert label in ("", name)
-            if label:
-                assert gap == full
-        assert ea._open_label((rect[0], rect[1], rect[2] + 80, rect[3])) == name
+            assert label == name
 
 
 def test_the_editor_x_returns_to_the_tab_it_came_from(tmp_path):

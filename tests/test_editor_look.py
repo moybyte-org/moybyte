@@ -35,7 +35,12 @@ def _ws(tmp_path, config, theme, mode):
     cfg = dict(g.CONFIGS[config], variant=mode)
     if "layout" not in cfg:
         cfg["theme"] = theme
-    return g._build(cfg, tmp_path / "carts")
+    ws = g._build(cfg, tmp_path / "carts")
+    if ws.editor_desk is not None:
+        # The desk tab ladder these looks were drawn on (steps 23 and 24),
+        # kept until its removal after the workspaces (look step 30).
+        ws.editor_desk.ladder = True
+    return ws
 
 
 def _frame(ws, n=4):

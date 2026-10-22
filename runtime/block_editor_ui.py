@@ -1461,7 +1461,7 @@ class BlockEditorUI:
         elif i.pressed("run"):
             self.save_blocks()
         else:
-            ws._leave_or_home(ws._leave_menu)
+            ws._leave_or_home(ws.exit)
 
     def _blk_left(self):
         be = self.blocks_ed

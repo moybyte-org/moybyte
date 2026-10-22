@@ -198,6 +198,10 @@ class _Win:
         self.held = False             # its run held by the minimise (a game's)
         self.saved = None             # full screen: the rect a restore puts
                                       # back (x, y, w, h); None while restored
+        self.docked = None            # the rect it stands in, docked in a host's
+                                      # pane (the desk Editor's Run slot): no
+                                      # frame and no strip; None: a window
+        self.undock = None            # where it goes back to (x, y, w, h)
         self.corner = 0               # full screen: where its controls start
         self.row = 0                  # full screen: the rows the WM's row takes
                                       # above the content (0 where the app's
@@ -220,6 +224,8 @@ class _Win:
         inside the frame, its `edge` off the sides, and above the foot (the
         frame's bottom line where it has no foot); full screen, the glass
         under the WM's row."""
+        if self.docked is not None:
+            return self.docked
         if self.saved is not None:
             return (self.x, self.y + self.row, self.w, self.h - self.row)
         e = self.edge
@@ -1181,6 +1187,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = self._focus_win()
         if self.mode != "desktop" or win is None or win.minimized:
             return False
+        if win.docked is not None:
+            win = self._wins.get("menu")    # a docked game: its host's
+            if win is None:
+                return False
         self._toggle_max(win)
         return True
 
@@ -1243,6 +1253,57 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return None
         n = _layout_base.chrome_size(self._fs()) * 16 // _layout_base.render_scale()
         return (self._full_slot(win), win.corner - n)
+
+    def dock(self, kind, rect):
+        """Stand window `kind` in `rect` (glass coordinates) with no frame and
+        no strip, above the window it docks in: the desk Editor's Run slot
+        and Game tab hold the playtest so (runtime/editor_desk.py). `rect`
+        None gives the window back its place; False hides it, its run held,
+        as a minimise does. Whether there is such a window."""
+        win = self._wins.get(kind)
+        if win is None:
+            return False
+        if rect is None or rect is False:
+            if win.docked is not None:
+                win.docked = None
+                if win.undock is not None:
+                    win.x, win.y, win.w, win.h = win.undock
+                    win.undock = None
+                self._build_content(win)
+                self.ws._dirty = True
+            if rect is False and not win.minimized:
+                self._minimize(win, True)
+            elif rect is None and win.minimized:
+                self._minimize(win, False)
+            return True
+        if win.minimized:
+            self._minimize(win, False)
+        rect = tuple(rect)
+        if win.docked != rect:
+            if win.docked is None:
+                win.undock = (win.x, win.y, win.w, win.h)
+            win.docked = rect
+            win.saved = None
+            win.x, win.y, win.w, win.h = rect
+            self._build_content(win)
+            self.ws._dirty = True
+        order = self._order
+        if order and order[-1] != kind and kind in order:
+            order.remove(kind)
+            order.append(kind)
+        return True
+
+    def _undock_orphans(self):
+        """A docked game whose host is gone, hidden, or no longer shows the
+        desk's workspaces gets its window back."""
+        win = self._wins.get("desktop")
+        if win is None or win.docked is None:
+            return
+        host = self._wins.get("menu")
+        if host is not None and not host.minimized \
+                and self.ws.editor_layer() is self.ws.editor_desk:
+            return
+        self.dock("desktop", None)
 
     def _top_win(self):
         return self._wins.get(self._order[-1]) if self._order else None
@@ -1425,7 +1486,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         otherwise -- same resolution ws._content_layer() does for the stack top."""
         ws = self.ws
         if kind == "menu":
-            return ws.layer_of(ws.menu_view) or ws._content_layers["cards"]
+            return ws.editor_layer()
         return ws.layer_of(kind)
 
     # -- the memoized stacks (parent memo, windowed shape) ---------------------
@@ -2332,6 +2393,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _draw_windows(self, dt):
         self._sync_windows()
+        self._undock_orphans()
         self._resize_feet()
         self._surface_windows()
         # Per-window surface marks (§2: this is the Stage 9 re-partition -- the
@@ -2682,7 +2744,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if fb is not None:
             fb()
         if use_view:
-            if full:
+            if full and win.docked is None:
                 self._win_chrome(win, focused)
             return
         # On a quiet game frame (full=False) the composite is this frame's LAST
@@ -2695,7 +2757,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if not self._window_frame(gc, ox, oy, scale, not full, src):
             self._blit_game(self._root_canvas, gc, ox, oy, scale,
                             defer=not full, src=src)
-        if full:
+        if full and win.docked is None:
             self._win_chrome(win, focused)
 
     def _blit_game(self, sc, gc, ox, oy, scale, defer=False, src=None):
@@ -2772,6 +2834,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         content = self._content_for(win.kind)
         if content is None:
             return False
+        if win.docked is not None:
+            host = self._content_for("menu")
+            keys = getattr(host, "dock_keys", None)
+            if keys is not None and keys(i):
+                return True           # the host Editor's chords reach past its game
         if (i.pressed("b") or i.pressed("stop")) and self._win_back(win):
             return True               # the window's back chevron (`_win_back`)
         if win.ctx is not None:
@@ -2911,7 +2978,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._move_focus(key)
             ws._dirty = True
         focused = (key == self._focus)
-        if click:
+        if click and win.docked is None:
             name = self._strip_button_hit(win, px, py)
             if name is not None:
                 ws._dirty = True

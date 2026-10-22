@@ -159,6 +159,10 @@ def _setup_table():
                                              "nearest screen: the Editor window, one tab "
                                              "(%s)" % t)
                    for k, t in EDITOR_LAYOUTS.items()})
+    editor.update({"desktop_editor-%s" % k: (DESK, ("9", "23", "30"), False, _workspace(*w),
+                                             "the desk Editor on Sky Run, workspace %s%s"
+                                             % (w[0], ", full screen" if w[1] else ""))
+                   for k, w in EDITOR_WORKSPACES.items()})
     editor.update({"desktop_files-max-%s" % v: (DESK, ("21", "25", "30"), False, _desk,
                                                "nearest screen: the desk, Files behind Calc "
                                                "(no maximised Files)")
@@ -1084,6 +1088,10 @@ def _desk_appearance(g, ws):
 
 
 def _editor(g, ws, tab):
+    """The Editor on Star Catcher at `tab`: on a desk, the tab ladder the
+    step 23 and 24 targets draw (kept until its removal after step 30)."""
+    if ws.editor_desk is not None:
+        ws.editor_desk.ladder = True
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
     ws.set_menu_view(tab)
 
@@ -1161,6 +1169,46 @@ EDITOR_LAYOUTS = {"a-code": "code", "a-art": "map", "a-world": "scene", "a-sound
                   "max-v1-windows": "paint", "max-v2-revealed": "paint", "max-v2-touch": "paint",
                   "resize-art": "paint", "resize-code": "code", "resize-code-drag": "code",
                   "resize-art-min": "paint", "resize-art-800x480": "paint"}
+
+
+# The workspace concept's pictures (concept B, EDITOR_LAYOUT.md; full screen
+# and the dividers, MAXIMISE_VARIANTS.md): the workspace each draws, and
+# whether the window is full screen. A title-strip picture (round 12's, and
+# Resize's) is the restored window over the whole desk.
+def _ws_scenes():
+    out = {}
+    for k in ("config", "code", "blocks", "art", "world", "world-stamp", "sound"):
+        key = {"config": "settings", "blocks": "code", "world-stamp": "world"}.get(k, k)
+        out["b-" + k] = (key, False)
+        if k in ("config", "code", "art", "world", "sound"):
+            out["b-%s-800x480" % k] = (key, False)
+    for v in ("e05", "v1", "v2"):
+        for k in ("art", "code", "art-800x480"):
+            out["max-%s-%s" % (v, k)] = ("art" if k.startswith("art") else "code", v == "v2")
+    for k in ("art", "code", "code-drag", "art-min", "art-800x480"):
+        out["resize-" + k] = ("art" if k.startswith("art") else "code", False)
+    return out
+
+
+EDITOR_WORKSPACES = _ws_scenes()
+
+
+def _workspace(key, full):
+    """The Editor on Sky Run on the desk, showing workspace `key`: full screen,
+    or restored over the whole desk under the bar."""
+    def setup(g, ws):
+        ws.open_desk()
+        ws.open_in_editor(g._cart_by_title(ws, "Sky Run"))
+        _settle(g, ws, 2)
+        win = ws.wm._wins["menu"]
+        if win.full() != full:
+            ws.wm._toggle_max(win)
+        if not full:
+            dx, dy, dw, dh = ws.wm._desk_rect()
+            _place(ws, "menu", dx, dy, dw, dh)
+        ws.editor_desk.switch(key)
+        _settle(g, ws, 2)
+    return setup
 
 
 def _sprites_more(g, ws):

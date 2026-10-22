@@ -1031,6 +1031,11 @@ class DeviceCanvas:
             st[_ST_H] = self._bh
         self.reset_state()
 
+    def viewport(self):
+        """(x, y, w, h): the sub-rect of the buffer this canvas draws into,
+        so a viewport set inside another can be put back."""
+        return (self._ox, self._oy, self.w, self.h)
+
     def clear_viewport(self):
         """Back to owning the whole buffer."""
         self._ox = 0

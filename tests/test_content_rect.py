@@ -317,10 +317,11 @@ def test_an_editor_tab_routes_its_bottom_bar(tmp_path):
     SURFACES["menu"](ws)
     got = []
     ws.editor_app.zone_tap = lambda px, py, rect: got.append((px, py, rect))
-    zx, zy, zw, zh = ws.layout.zone_left
+    zone = ws.bar_layer._zone_rect("menu")
+    zx, zy, zw, zh = zone
     by = ws.bar_layer.bar_rect(0, "menu")[1]
     _tap(ws, zx + 3, by + zy + 2)
-    assert got[-1] == (zx + 3, zy + 2, ws.layout.zone_left)
+    assert got[-1] == (zx + 3, zy + 2, zone)
     n = len(got)
     assert ws.bar_layer.handle_bar_tap("menu", zx + 3, zy + 2) is False
     assert len(got) == n                          # the old top band: not a bar

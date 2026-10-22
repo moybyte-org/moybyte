@@ -262,6 +262,10 @@ class BarLayer:
     def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
+        # True while a desk Editor pane draws an Editor tab
+        # (runtime/editor_desk.py): the pane takes no bar, and the tab's own
+        # strip draw and bar tap are no-ops.
+        self.held = False
         # Cached top bar (#43, generalized in Stage 4 to every `where`): rendered
         # ONCE into an offscreen strip and blitted each frame (one flat copy)
         # instead of re-rendering ~9 sprites + glyph + text every frame.
@@ -341,6 +345,8 @@ class BarLayer:
         "menu" / "desktop". All four route through the ONE generalized cache
         mechanism below (_draw_top_bar_cart) -- there is no more per-`where` draw
         body here; the zoning happens inside _render_cart_bar."""
+        if self.held:
+            return
         self._draw_top_bar_cart(where)
 
     # -- zone plumbing (Stage 4, #46 zoned bar) -------------------------------
@@ -461,12 +467,16 @@ class BarLayer:
         if need is None or self._in_window(where):
             return bars
         layout = self.ws.layout
+        if where == "menu":
+            # The Editor's one bar shows no Wi-Fi (EDITOR_LAYOUT.md's
+            # handheld): its tabs, undo, redo and Play by the battery and clock.
+            bars = layout.bars_without(("wifi",))
         had = self._owner_w(where, bars)
         if had is None or had[0] >= need(had[1]):
             return bars
         out = bars
         for k in range(1, len(_YIELD) + 1):
-            wider = layout.bars_without(_YIELD[:k])
+            wider = layout.bars_without(_YIELD[:k] + (("wifi",) if where == "menu" else ()))
             got = self._owner_w(where, wider)
             if got is None or got[0] <= had[0]:
                 break
@@ -483,7 +493,7 @@ class BarLayer:
         if got is None:
             return None
         _x, _y, w, h = got[1]
-        if self._way_back(where) and _cell_of(packed, "close") is None:
+        if where != "menu" and self._way_back(where) and _cell_of(packed, "close") is None:
             w -= self._back_w(False)
         return w, h
 
@@ -898,8 +908,9 @@ class BarLayer:
     def draws_back(self, where):
         """Whether `where`'s bar draws the back chevron at the head of its
         zone: where it has a way back and its bar places no `close`, outside
-        a window (whose title strip carries close)."""
-        return (not self._in_window(where) and self._way_back(where)
+        a window (whose title strip carries close). The Editor's one bar
+        draws none: Esc and B step back (EDITOR_LAYOUT.md's handheld)."""
+        return (where != "menu" and not self._in_window(where) and self._way_back(where)
                 and self.cell(where, "close") is None)
 
     def _back_w(self, game):
@@ -1389,6 +1400,8 @@ class BarLayer:
         pre-Stage-4 launcher pointer), so taps that fall through to the content
         still reset it. (px, py) are on `where`'s canvas; every cell is in its
         bar's coordinates."""
+        if self.held:
+            return False
         ws = self.ws
         for bar in self._packed(where):
             r = bar[1]

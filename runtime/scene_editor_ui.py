@@ -326,6 +326,30 @@ class SceneEditorUI:
         se.cam_x = max(0, min(max(0, ww - vw), se.cam_x))
         se.cam_y = max(0, min(max(0, wh - vh), se.cam_y))
 
+    def wheel_zoom(self, px, py, d):
+        """A wheel notch at (px, py): the next zoom in (`d` < 0) or out, a
+        whole step, the world point under the pointer kept under it."""
+        se = self.sceneedit
+        if se is None:
+            return
+        z = max(0, min(len(self.layout.zooms) - 1, self.scene_zoom - d))
+        if z == self.scene_zoom:
+            return
+        x0, y0, scale, _w, _h = self._sv_metrics()
+        wx = se.cam_x + (px - x0) // scale
+        wy = se.cam_y + (py - y0) // scale
+        self.scene_zoom = z
+        x0, y0, scale, _w, _h = self._sv_metrics()
+        se.cam_x = wx - (px - x0) // scale
+        se.cam_y = wy - (py - y0) // scale
+        self._clamp_cam()
+
+    def drag_pan(self, dx, dy):
+        """The view dragged `dx`, `dy` pixels: the camera the other way."""
+        _x0, _y0, scale, _w, _h = self._sv_metrics()
+        self._pan(-dx // scale if dx > 0 else (-dx + scale - 1) // scale,
+                  -dy // scale if dy > 0 else (-dy + scale - 1) // scale)
+
     def _cycle_zoom(self):
         self.scene_zoom = (self.scene_zoom + 1) % len(self.layout.zooms)
         self._clamp_cam()
@@ -353,7 +377,7 @@ class SceneEditorUI:
         """Keyboard: while the TAG field is capturing, typed bytes edit the tag
         (ENTER commits, ESC cancels -- the wifi-password pattern). Otherwise the
         d-pad nudges the selected actor (or pans when nothing is selected), A
-        cycles zoom, Ctrl+Z/Y walk the in-editor history, B leaves (PLAY)."""
+        cycles zoom, Ctrl+Z/Y walk the in-editor history, B steps back."""
         ws = self.ws
         i = ws.input
         se = self.sceneedit
@@ -390,7 +414,7 @@ class SceneEditorUI:
                 self._cycle_zoom()
             self._skey.undo_redo(getattr(i, "last_key", 0),
                                  self._undo, self._redo)
-        ws._leave_or_home(ws._leave_menu)
+        ws._leave_or_home(ws.exit)
 
     def _nudge(self, dx, dy):
         se = self.sceneedit

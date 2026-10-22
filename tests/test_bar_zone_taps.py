@@ -31,6 +31,14 @@ _ALL = [tab for tab, _glyph in editor_app._ZONE_TABS]
 # glyph (or icon-set slot) -> the zone action it draws
 _ACTION = {glyph: tab for tab, glyph in editor_app._ZONE_TABS}
 _ACTION.update({slot: _ACTION[glyph] for glyph, slot in editor_app._SET_KIND.items()})
+# The desk Editor's row (look step 30): the five workspaces, undo, redo and Play.
+_WS_BY_LABEL = {label: "ws:" + key for key, label, _icon in editor_app._WORKSPACES}
+_ALL_WS = list(_WS_BY_LABEL.values()) + _ALL[-3:]
+
+
+def _all(ws):
+    desk = ws.editor_desk
+    return _ALL_WS if desk is not None and desk.active() else _ALL
 
 
 @pytest.fixture(autouse=True)
@@ -96,7 +104,11 @@ def _drawn_in(ws, drv, monkeypatch):
         return real_zone(cv, rect)
 
     def tab(cv, th, r, active, label="", labels_on=True, *a, **kw):
-        got.append((_ACTION[kw["kind"]], r))
+        desk = ws.editor_desk
+        if desk is not None and desk.active():
+            got.append((_WS_BY_LABEL[label], r))
+        else:
+            got.append((_ACTION[kw["kind"]], r))
         return real_tab(cv, th, r, active, label, labels_on, *a, **kw)
 
     def button(cv, th, r, label, *a, **kw):
@@ -239,7 +251,7 @@ def test_a_tap_on_a_drawn_editor_bar_item_fires_that_item(tmp_path, monkeypatch,
     drawn = _drawn(ws, drv, monkeypatch)
     actions = [a for a, _r in drawn]
     if size is None or size == "full":    # a shipped bar: every item
-        assert sorted(set(actions), key=_ALL.index) == _ALL, drawn
+        assert sorted(set(actions), key=_all(ws).index) == _all(ws), drawn
     else:
         assert "cards" in actions and None in actions \
             and editor_app._ZONE_UNDO in actions, drawn
@@ -270,7 +282,7 @@ def test_no_shipped_editor_bar_drops_an_item_or_shrinks_one_under_the_floor(
     _editor(ws, drv, config in DESKS, "full" if full else None)
     drawn, band = _drawn_in(ws, drv, monkeypatch)
     actions = [a for a, _r in drawn]
-    assert sorted(set(actions), key=_ALL.index) == _ALL, drawn
+    assert sorted(set(actions), key=_all(ws).index) == _all(ws), drawn
     floor = _tap_floor(ws)
     assert band[3] >= floor, (band, floor)
     narrow = [r for r in _hit_runs(ws, monkeypatch, drawn, band) if r[1] < floor]
@@ -279,12 +291,12 @@ def test_no_shipped_editor_bar_drops_an_item_or_shrinks_one_under_the_floor(
 
 def test_the_status_widgets_give_way_only_where_the_ladder_needs_their_room(
         tmp_path):
-    """The Guition S3's Editor bar takes the battery's and the Wi-Fi's room
-    and keeps the clock; the T-Deck's ladder fits beside all three, and the
-    S3's home keeps them."""
+    """The Editor's one bar shows no Wi-Fi (look step 30), and with its room
+    the Guition S3's and the T-Deck's ladders fit beside the battery and the
+    clock; the S3's home keeps all three."""
     def cells(ws, where):
         return [c[0] for b in ws.bar_layer._packed(where) for c in b[3]]
-    for config, gone in ((TAPFLOOR, {"battery", "wifi"}), (HANDHELD, set())):
+    for config, gone in ((TAPFLOOR, {"wifi"}), (HANDHELD, {"wifi"})):
         ws, drv = _ws(tmp_path / config, config, "moy", "touch")
         _editor(ws, drv, False)
         shown = cells(ws, "menu")

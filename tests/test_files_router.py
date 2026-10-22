@@ -193,7 +193,14 @@ def test_a_missing_app_degrades_to_the_status_line(tmp_path):
 # shelf the person left, never on the app's root and never at home.
 
 def _tap_x(ws):
-    """The OS bar's context-X, through the ROUTER (where the bar contract is)."""
+    """The OS bar's context-X, through the ROUTER (where the bar contract is);
+    in the Editor, whose one bar has no way back (look step 30), B."""
+    if ws.wm.top_kind() == "menu":
+        drv = host_app.ConsoleDriver(ws)
+        drv.press("b")
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+        return
     x, y, w, h = ws.layout.context_x_btn
     ws.pointer.place(x + w // 2, y + h // 2)
     ws.pointer.click = True

@@ -180,11 +180,15 @@ BAND = DEFAULT_BARS
 _bars = DEFAULT_BARS
 _band = False
 _foot = 0
+_pane = False
 
 
 def bars():
-    """The bars a surface laid out now takes: a window's band while its
-    layouts build (`in_window`), else the bars in force."""
+    """The bars a surface laid out now takes: none for a desk Editor's pane
+    (`in_pane`), a window's band while its layouts build (`in_window`), else
+    the bars in force."""
+    if _pane:
+        return ()
     return BAND if _band else _bars
 
 
@@ -219,6 +223,18 @@ def in_window(on, foot=0):
     global _band, _foot
     _band = bool(on)
     _foot = max(0, int(foot)) if on else 0
+
+
+def in_pane(on):
+    """While an Editor tab's layout builds for a pane of the desk Editor
+    (`runtime/editor_desk.py`), the surface is the pane and takes no bar."""
+    global _pane
+    _pane = bool(on)
+
+
+def pane():
+    """Whether the surface laid out now is a desk Editor's pane."""
+    return _pane
 
 
 def window_foot():

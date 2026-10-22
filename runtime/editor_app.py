@@ -123,6 +123,7 @@ _PILL_CLEAR = 8                 # the labelled ladder: open pill to the next tab
 _PILL_PAD = 9                   # ...the most each pill grows on either side, room given
 _HIST_LEAD = 12                 # ...the last tab to undo
 _HIST_GAP = 8                   # ...undo to redo
+_PLAY_SLOT = 170                # the desk Editor's Play slot, Play or Restart and Stop
 
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
 # will owe -- derived from the ladder rather than listed a second time. The
@@ -165,6 +166,11 @@ _TAB_LAYOUT_UI = {
 }
 
 try:
+    from editor_panes import WORKSPACES as _WORKSPACES
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editor_panes import WORKSPACES as _WORKSPACES
+
+try:
     import iconsets as _iconsets
     import ui as _ui
     import ui_draw as _ui_draw
@@ -200,6 +206,9 @@ class EditorApp:
         # interaction and on every hard exit -- and the same exposure: one
         # frame, since `ws.defer` drains at that frame's own tail.
         self._pending = []
+        # E-02: a map, scene or code edit made while a playtest runs waits for
+        # the next Play; Restart wears a dot while one waits.
+        self.restart_owed = False
         self.tab = "cards"            # active view -- ws.menu_view projects onto this:
                                       # "cards" | "code" | "paint" | "map" | "blocks"
                                       # | "music" | "theme" (theme = the EDIT-ICONS
@@ -335,6 +344,36 @@ class EditorApp:
             self.commit_later(self.tab)
         self.tab = view              # the `tab` setter bumps zone_gen on a real change
                                      # (Stage 4, #46: the lent zone's highlight moved)
+        self.build_tab(view)
+        desk = self._desk()
+        if desk is None:
+            self._relayout_tab(view)
+        ws._set_text_mode(view == "code")
+        # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
+        # Master". "cards" isn't an editor, so it's ignored by note().
+        ws.ach.note("editor", view)
+
+    def focus_tab(self, view):
+        """The desk Editor moved the keys to the pane showing tab `view`
+        (runtime/editor_desk.py): the Editor's tab is it, built, with the
+        keyboard's text mode -- and nothing is committed: moving focus
+        between panes is no boundary (EDITOR_LAYOUT.md's frame)."""
+        ws = self.ws
+        self.tab = view
+        self.build_tab(view)
+        ws._set_text_mode(view == "code")
+        ws.ach.note("editor", view)
+
+    def _desk(self):
+        """The desk Editor where it shows workspaces, else None."""
+        desk = getattr(self.ws, "editor_desk", None)
+        return desk if desk is not None and desk.active() else None
+
+    def build_tab(self, view):
+        """Build tab `view`'s editor over the open cart where it has none:
+        what entering the tab needs before it draws (a desk workspace builds
+        every pane it shows)."""
+        ws = self.ws
         if view == "code":
             if ws.editor is None and ws.cart is not None:
                 # WHICH script (SPEC.md 4, #89): `ws.code_file` is the Code tab's
@@ -388,11 +427,6 @@ class EditorApp:
             # bank; the tab-leave debt / a PLAY hard-commit persists it to
             # sounds.json (#111).
             ws.music_ui.build()
-        self._relayout_tab(view)
-        ws._set_text_mode(view == "code")
-        # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
-        # Master". "cards" isn't an editor, so it's ignored by note().
-        ws.ach.note("editor", view)
 
     def _relayout_tab(self, view):
         """Re-derive the entered tab's geometry from the live canvas.
@@ -479,6 +513,9 @@ class EditorApp:
         if restart and self.tab not in ("code", "blocks", "scene", "cards") \
                 and ws.cart is not None:
             ws._start()              # Restart: from the start, whatever the tab
+        if self.restart_owed:
+            self.restart_owed = False
+            self.zone_gen += 1
         ws.run(ws.project, self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
@@ -508,6 +545,10 @@ class EditorApp:
         ws = self.ws
         th = ws.theme_colors
         sets = ws.icon_spec() is not None
+        desk = self._desk()
+        if desk is not None:
+            self._draw_row(cv, th, rect, desk, sets)
+            return
         if not self._compact(rect):
             # SHELF density (visual identity v1 Phase 3): labeled tabs + a labeled
             # PLAY button -- the Studio mockup's tab row, on the zoned bar (SAVE
@@ -584,6 +625,100 @@ class EditorApp:
             else:
                 ws._icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y, cv,
                          ink=ink)
+
+    # -- the desk Editor's row (EDITOR_LAYOUT.md's frame) ---------------------
+
+    def _row_layout(self, rect, desk):
+        """The app's row while the desk Editor shows workspaces: the five
+        workspaces from the left, labelled, or icons with the current one
+        labelled where the row is short; undo and redo at a fixed place, a
+        hairline, then the Play slot, which never changes width.
+        ([(id, label, kind, rect, labelled)], undo rect, redo rect,
+        hairline x, Play slot)."""
+        fs = self._zone_scale()
+        x, y, w, h = rect
+        play_r = (x + w - _PLAY_SLOT * fs, y, _PLAY_SLOT * fs, h)
+        ic = _BAR_ICON * fs
+        cell = max(ic, min(h, 32 * fs))
+        line = play_r[0] - 6 * fs
+        redo_r = (line - 6 * fs - cell, y + (h - cell) // 2, cell, cell)
+        undo_r = (redo_r[0] - cell, redo_r[1], cell, cell)
+        area = (x, y, max(0, undo_r[0] - 12 * fs - x), h)
+        cur = "ws:" + desk.key
+        items = [("ws:" + k, label, kind) for k, label, kind in _WORKSPACES]
+        got = _ui_draw.tab_row_rects(area, [(t, l) for t, l, _k in items], fs, 8 * fs)
+        out = []
+        if len(got) == len(items) and got[0][2]:
+            for (t, label, kind), (_t, r, _on) in zip(items, got):
+                out.append((t, label, kind, r, True))
+            return out, undo_r, redo_r, line, play_r
+        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
+        xx = x
+        for t, label, kind in items:
+            lw = 0
+            if t == cur:
+                one = _ui_draw.tab_row_rects(area, [(t, label)], fs)
+                if one and one[0][2]:
+                    lw = one[0][1][2]
+            cw = lw or ic + 2 * pad
+            if xx + cw > area[0] + area[2]:
+                break
+            out.append((t, label, kind, (xx, y, cw, h), bool(lw)))
+            xx += cw + 4 * fs
+        return out, undo_r, redo_r, line, play_r
+
+    def _draw_row(self, cv, th, rect, desk, sets):
+        ws = self.ws
+        tabs, undo_r, redo_r, line, play_r = self._row_layout(rect, desk)
+        cur = "ws:" + desk.key
+        band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
+        draw = None
+        if sets:
+            kind = next((k for t, _l, k, _r, _o in tabs if t == cur), None)
+            draw = self._set_icon(cv, open_kind=kind,
+                                  open_ink=_ui_draw.current_ink(cv, th), lead=True)
+        icon_for = getattr(ws, "_icon_image_keyed", None)
+        for t, label, kind, r, on in tabs:
+            _ui_draw.tab(cv, th, r, t == cur, label, on, band_ink,
+                         icon_for(kind) if icon_for is not None else None,
+                         icon_draw=draw, kind=kind)
+        ic = _BAR_ICON * self._zone_scale()
+        for glyph, r, can in (("undo", undo_r, ws.history.can_undo()),
+                              ("redo", redo_r, ws.history.can_redo())):
+            self._draw_history_icon(cv, glyph, r[0] + (r[2] - ic) // 2,
+                                    r[1] + (r[3] - ic) // 2, ic, can)
+        fs = self._zone_scale()
+        cv.rect(line, rect[1] + 8 * fs, fs, rect[3] - 16 * fs, th["border"])
+        if self.playing():
+            restart_r, stop_r = self._run_rects(play_r)
+            self._bare_action(cv, restart_r, "Restart", "rotate")
+            if self.restart_owed:
+                d = 6 * fs
+                cv.rrect(restart_r[0] + 10 * fs, restart_r[1] + 8 * fs, d, d, d // 2,
+                         th["value"])
+            self._bare_action(cv, stop_r, "Stop", None)
+        elif sets:
+            self._bare_play(cv, play_r)
+        else:
+            _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
+                            glyph_draw=ws._glyph)
+
+    def _row_tap(self, px, py, rect, desk):
+        tabs, undo_r, redo_r, _line, play_r = self._row_layout(rect, desk)
+        if _in(px, py, play_r):
+            if self.playing():
+                restart_r, _stop = self._run_rects(play_r)
+                return self._activate_zone_tab(
+                    _ZONE_RESTART if _in(px, py, restart_r) else _ZONE_STOP)
+            return self._activate_zone_tab(None)
+        for t, _l, _k, r, _on in tabs:
+            if _in(px, py, r):
+                return self._activate_zone_tab(t)
+        if _in(px, py, undo_r):
+            return self._activate_zone_tab(_ZONE_UNDO)
+        if _in(px, py, redo_r):
+            return self._activate_zone_tab(_ZONE_REDO)
+        return False
 
     def _open_mark(self, cv, r):
         """The open tab's mark on the narrow bar, the home's bar tabs' own: the
@@ -758,8 +893,7 @@ class EditorApp:
             return ""
         n = len(self._ladder())
         fs = self._zone_scale()
-        if (n - 2) * _LADDER_GAP * fs + _GROUP_GAP * fs + (n - 1) * ic \
-                + chip[0][1][2] > w:
+        if _GROUP_GAP * fs + _ZONE_TAIL * fs + (n - 1) * ic + chip[0][1][2] > w:
             return ""
         return label
 
@@ -792,10 +926,7 @@ class EditorApp:
             wide = ic + 2 * pad
         opened = self.tab in [t for t, _g in ladder]
         spare = w - (n - 1) * ic - (wide if opened else ic)
-        if label:
-            gap = full
-        else:
-            gap = max(0, min(full, (spare - least) // (n - 2))) if n > 2 else 0
+        gap = max(0, min(full, (spare - least) // (n - 2))) if n > 2 else 0
         group = max(gap, min(spare - (n - 2) * gap, _GROUP_MAX * fs))
         out = []
         for tab, glyph in ladder:
@@ -892,6 +1023,9 @@ class EditorApp:
         coordinates (`BarLayer.handle_bar_tap` translates them). The icon
         side + stride derive from the rect height, matching draw_zone; the shelf
         tiers resolve against the SAME _zone_parts geometry the draw used."""
+        desk = self._desk()
+        if desk is not None:
+            return self._row_tap(px, py, rect, desk)
         if not self._compact(rect):
             tabs_area, play_r = self._zone_parts(rect)
             if _in(px, py, play_r):
@@ -935,6 +1069,12 @@ class EditorApp:
 
     def _activate_zone_tab(self, tab):
         ws = self.ws
+        if tab is not None and tab.startswith("ws:"):
+            desk = self._desk()
+            if desk is not None:
+                desk.switch(tab[3:])
+                self.zone_gen += 1
+            return True
         if tab == "cards":
             ws._open_menu()
         elif tab == "code":

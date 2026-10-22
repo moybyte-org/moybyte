@@ -308,6 +308,8 @@ class MapEditorUI:
         sc = ws.sys_canvas
         self.layout = MapLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
+    _pan_acc = [0, 0]
+
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
         a font-scale change AND by EditorApp.set_tab on every entry into the tab
@@ -381,7 +383,7 @@ class MapEditorUI:
             # UNDO/REDO buttons are the touch-first affordance (no Ctrl key).
             k = getattr(i, "last_key", 0)
             self._mkey.undo_redo(k, self._map_undo, self._map_redo)
-        ws._leave_or_home(ws._leave_menu)
+        ws._leave_or_home(ws.exit)
 
     def _map_undo(self):
         """Step the in-editor edit journal back one gesture (#91), then re-clamp the
@@ -493,6 +495,45 @@ class MapEditorUI:
         me.cam_x = me.cam_x + dcx
         me.cam_y = me.cam_y + dcy
         self._map_clamp_cam()
+
+    def wheel_zoom(self, px, py, d):
+        """A wheel notch at (px, py): the next zoom in (`d` < 0, a notch up)
+        or out, a whole step, the cell under the pointer kept under it. The
+        overview is the press's and the A button's, never the wheel's."""
+        me = self.mapedit
+        lay = self.layout
+        if me is None:
+            return
+        last = len(lay.zooms) - 1
+        if lay.zooms[last] == _MV_OVERVIEW:
+            last -= 1
+        z = max(0, min(last, self.map_zoom - d))
+        if z == self.map_zoom:
+            return
+        x0, y0, cell, _c, _r = self._mv_metrics()
+        cx = me.cam_x + (px - x0) // cell
+        cy = me.cam_y + (py - y0) // cell
+        self.map_zoom = z
+        x0, y0, cell, _c, _r = self._mv_metrics()
+        me.cam_x = cx - (px - x0) // cell
+        me.cam_y = cy - (py - y0) // cell
+        self._map_clamp_cam()
+
+    def drag_pan(self, dx, dy):
+        """The view dragged `dx`, `dy` pixels (a middle drag, the wheel
+        across): the camera the other way, a cell at a time."""
+        me = self.mapedit
+        if me is None:
+            return
+        _x0, _y0, cell, _c, _r = self._mv_metrics()
+        acc = self._pan_acc
+        acc[0] -= dx
+        acc[1] -= dy
+        sx, sy = int(acc[0] / cell), int(acc[1] / cell)
+        if sx or sy:
+            acc[0] -= sx * cell
+            acc[1] -= sy * cell
+            self._map_pan(sx, sy)
 
     def _map_cell_at(self, px, py):
         """The map cell (cx, cy) under pointer (px, py) accounting for the pan

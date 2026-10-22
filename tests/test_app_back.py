@@ -106,17 +106,19 @@ def test_settings_esc_is_its_b(tmp_path):
     assert ws.screen == "launcher"
 
 
-def test_the_editor_bar_backs_out_with_no_x(tmp_path):
+def test_the_editor_bar_has_no_way_back_and_b_backs_out(tmp_path):
+    """The Editor's one bar (look step 30): no X and no chevron, its tabs,
+    undo, redo and Play by the battery and clock; B steps back."""
     ws = build_ws(tmp_path)
     drv = make_drv(ws)
     cart = next(c for c in ws.carts.all if c["title"] == "Star Catcher")
     ws.open_in_editor(cart)
     _frames(drv)
     bl = ws.bar_layer
-    assert bl.cell("menu", "close") is None and bl.draws_back("menu")
-    _tap_back(ws, drv, "menu")
+    assert bl.cell("menu", "close") is None and not bl.draws_back("menu")
+    _press(ws, "b")
     _frames(drv)
-    assert ws.screen == "launcher"
+    assert ws.screen != "menu"
 
 
 def test_the_home_at_its_floor_has_no_way_back(tmp_path):

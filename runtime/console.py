@@ -300,13 +300,13 @@ try:
     from widgets import (Achievements, Pmem, Popup,
                          ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y,
                          _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
-    from moy_input import Pointer, SHIFT as _SHIFT
+    from moy_input import Pointer, SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
     from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import (Achievements, Pmem,
                                  Popup, ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X,
                                  _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
-    from runtime.moy_input import Pointer, SHIFT as _SHIFT
+    from runtime.moy_input import Pointer, SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
     from runtime.audio_session import console_volume
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
@@ -1241,6 +1241,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # ws.sheet + dispatches SAVE/GET/PUT/CLOSE to ws. The theme content is ThemeLayer
         # -- it owns the EDIT-ICONS lifecycle + delegates all editing to this PaintLayer.
         self._paint_layer = None      # built at its first use, as theme_layer
+        self._editor_desk = None      # the desk Editor, at its first use on a desk
         self._theme_layer = None
         # The Settings app (#28/#39/#53): the aggregator screen. Owns its page of
         # rows and panels; reads ws config/system state + dispatches every
@@ -1320,8 +1321,29 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         registry lookup: the stack is a data structure it reads, not a second router."""
         kind = self.wm.top_kind()
         if kind == "menu":
-            return self.layer_of(self.menu_view) or self._content_layers["cards"]
+            return self.editor_layer()
         return self.layer_of(kind) or self._content_layers["launcher"]
+
+    def editor_layer(self):
+        """The Editor's content layer: the desk Editor's workspaces where they
+        show (runtime/editor_desk.py), else the open tab's surface."""
+        desk = self.editor_desk
+        if desk is not None and desk.active():
+            return desk
+        return self.layer_of(self.menu_view) or self._content_layers["cards"]
+
+    @property
+    def editor_desk(self):
+        """The desk Editor (`EditorDesk`), built at its first use on a desk;
+        None on a handheld, which never loads it."""
+        desk = self._editor_desk
+        if desk is None and _layout_base.metric_class() == _layout_base.DESK:
+            try:
+                from editor_desk import EditorDesk
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime.editor_desk import EditorDesk
+            desk = self._editor_desk = EditorDesk(self, _ui_draw.AppHost)
+        return desk
 
     def built(self, attr):
         """The editor surface `attr` names (`block_ui`, `map_ui`, ...) when it
@@ -3878,6 +3900,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         no layer sees the press. False where no caret wants it."""
         dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
         dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
+        if (getattr(i, "mods", 0) & (_CTRL | _ALT)) == _CTRL | _ALT:
+            return False              # Ctrl+Alt+arrows move the desk Editor's dividers
         if not (dx or dy) or self.pause.open or self.confirm.open or self.sysmenu.open \
                 or self.wm.popover_takes_keys():
             return False

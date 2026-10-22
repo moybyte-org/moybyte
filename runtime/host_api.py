@@ -269,8 +269,8 @@ class ConsoleDriver:
             self._key_btn[_fold(code)] = button
             self.hold(button, True)
             self._pending.append(button)    # a tap shorter than a frame still presses
-        if _mi.KEY_LEFT <= code <= _mi.KEY_DOWN:
-            return
+        if _mi.KEY_LEFT <= code <= _mi.KEY_DOWN and not mods & _CHORD:
+            return                      # an arrow alone is the d-pad; a chord's an event
         if code == _KEY_F11 and not mods:
             self.full_key()
             return
@@ -428,8 +428,9 @@ class ConsoleDriver:
         """Esc: the pause menu steps back (Options to its menu, the menu to
         the game), the system menu closes; Settings and a registered app go
         back one level, as the bar's chevron and B do, and so does a desk
-        window's app with a page open (its title strip's chevron); else an
-        open Editor panel goes back to the desktop."""
+        window's app with a page open (its title strip's chevron); the
+        Editor steps back (its one bar has no chevron), and on a desk a
+        grown pane goes back instead."""
         ws = self.ws
         if ws.pause.open:
             ws.pause.back()
@@ -444,8 +445,10 @@ class ConsoleDriver:
             ws.app_back()
         elif ws.windowed_chrome and ws.wm.focus_back():
             pass
+        elif ws.screen == "menu" and ws.editor_layer() is not ws.layer_of(ws.menu_view):
+            ws.editor_layer().escape()  # the desk Editor: a grown pane back
         elif ws.screen == "menu":
-            ws._leave_menu()
+            ws.exit()                   # the Editor's one bar: Esc steps back
 
     # -- per-frame tick ------------------------------------------------------
     def frame(self, dt):

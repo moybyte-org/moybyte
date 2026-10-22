@@ -392,7 +392,12 @@ class SpineVerbs:
             _g.set_items(self._launcher_view_items(_g))
 
     def app_min_size(self, kind):
-        """The registered windowed resize minimum for app `kind`, or None."""
+        """The registered windowed resize minimum for app `kind`, or None.
+        The Editor's window stops at its workspace's combined minimum while
+        the desk Editor shows workspaces (`EditorDesk.min_window`)."""
+        if kind == "menu":
+            desk = self.editor_desk
+            return desk.min_window() if desk is not None and desk.active() else None
         h = self.apps.find(kind)
         return self.apps.min_size(h) if h else None
 

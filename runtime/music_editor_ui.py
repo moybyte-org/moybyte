@@ -339,7 +339,7 @@ class MusicEditorUI:
                 changed = True
         if i.pressed("b") or i.pressed("home"):
             changed = True
-        ws._leave_or_home(ws._leave_menu)
+        ws._leave_or_home(ws.exit)
         if changed:
             ws._dirty = True
 

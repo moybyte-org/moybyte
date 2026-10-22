@@ -704,7 +704,7 @@ def _ladder_center(ws, rect, target):
 def _sys_zone_center(ws, target):
     """Center of the tab-ladder / PLAY icon `target` on the SYSTEM-canvas bar
     (the code + blocks tabs). `target` is a tab name or None (PLAY)."""
-    return _ladder_center(ws, ws.layout.zone_left, target)
+    return _ladder_center(ws, ws.bar_layer._zone_rect("menu"), target)
 
 
 def test_code_tab_shows_unified_bar_ladder_switches(tmp_path):
@@ -744,7 +744,7 @@ def test_code_tab_context_x_exits_to_home(tmp_path):
     ws.open_in_editor()
     ws.set_menu_view("code")
     drv.frame(1 / 30)
-    drv.click(*_center(ws.layout.context_x_btn))  # the right-zone X (system canvas)
+    drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))  # the right-zone X
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
@@ -892,7 +892,7 @@ def _game_zone_center(target, ws):
     """Center of the ladder/PLAY icon `target` on the GAME-canvas bar
     (cards/paint/map/music). `target` is a tab name or None (PLAY)."""
     from runtime import bar_layer as BL
-    return _ladder_center(ws, BL._ZONE_LEFT_GAME, target)
+    return _ladder_center(ws, ws.bar_layer._zone_rect("menu"), target)
 
 
 def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
@@ -946,7 +946,7 @@ def test_music_tab_context_x_exits_to_home(tmp_path):
     ws.open_in_editor()
     ws._open_music()
     drv.frame(1 / 30)
-    drv.click(*_center(BL._ZONE_CONTEXT_X))       # game-canvas right-zone X
+    drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))  # the right-zone X
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
@@ -1026,7 +1026,7 @@ def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
     ws.open_in_editor()
     ws._open_paint()
     drv.frame(1 / 30)
-    drv.click(*_center(BL._ZONE_GEAR))             # Editor, game-domain tab
+    drv.click(*_center(ws.bar_layer.cell("menu", "menu")[1]))  # the Editor's ≡
     drv.frame(1 / 30)
     assert ws.sysmenu.open
 
@@ -1047,7 +1047,7 @@ def test_context_x_exits_the_editor_to_home(tmp_path):
     ws._open_paint()                 # a game-domain tab -> the game-canvas zoned bar
     drv.frame(1 / 30)
     assert ws.screen == "menu"
-    drv.click(*_center(BL._ZONE_CONTEXT_X))
+    drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))
     drv.frame(1 / 30)
     assert ws.screen == "launcher"   # the context X exited the Editor to home
 
@@ -1255,12 +1255,11 @@ def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch)
     assert "settings" not in kinds, "the gear is Settings', never the Config tab's"
     assert "edit" not in kinds and "paint" not in kinds
     assert ("play", ws.theme_colors["value"]) in drew
-    # Day and Night take one rule: on the T-Deck's zone the ladder has no
-    # room for the open tab's name at the full gap in either mode.
-    zone = ws.layout.zone_left
+    # Day and Night take one rule: the T-Deck's one bar (no chevron, no
+    # Wi-Fi, look step 30) names the open tab in either mode.
+    zone = ws.bar_layer._zone_rect("menu")
     day = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
     ws.look.set_theme("moy", persist=False, variant="dark")
-    zone = ws.layout.zone_left
+    zone = ws.bar_layer._zone_rect("menu")
     night = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
-    assert day[0] == night[0] == ""
-    assert day[1] > 0 and night[1] > 0
+    assert day[0] == night[0] == "Code" and day[1] >= 0 and night[1] >= 0
