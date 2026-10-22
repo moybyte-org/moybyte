@@ -106,16 +106,24 @@ def test_a_refused_bank_leaves_a_live_silent_session():
 
 def test_a_bank_swap_holds_the_lock_for_microseconds_whatever_its_size():
     """The parse runs outside the lock; the lock covers a pointer swap and a
-    voice reset. A board's feeder never waits on a big bank."""
+    voice reset. A board's feeder never waits on a big bank.
+
+    Each swap is read alone and the FASTEST of each kind compared: the stats
+    are maxima, and on a loaded host one preempted hold of a few microseconds
+    reads as milliseconds. A hold that grew with the bank would be long on
+    every swap, the fastest too."""
     big = AudioBank([SFX([[40 + i % 30, i % 8, 5]] * 64, speed=8)
                      for i in range(64)], [])
+    text = json.dumps(big.to_dict())
     h = _open()
-    na.stats(True)                          # reset the maxima
-    for _ in range(5):
-        na.bank(h, json.dumps(big.to_dict()))
-    st = na.stats()
-    parse_us, hold_us = st[9], st[8]
-    assert parse_us > hold_us * 4, (parse_us, hold_us)
+    parse, hold = [], []
+    for _ in range(9):
+        na.stats(True)                      # reset the maxima
+        na.bank(h, text)
+        st = na.stats()
+        parse.append(st[9])
+        hold.append(st[8])
+    assert min(parse) > min(hold) * 4, (parse, hold)
 
 
 def test_hush_silences_every_session_and_closes_none():
