@@ -864,3 +864,52 @@ def test_restart_and_stop_end_the_pause(desk):
     _tap(drv, ord("."), 1)                       # Stop
     drv.frame(DT)
     assert not d.paused and "desktop" not in ws.wm._wins
+
+
+# -- the Sheet's loupe and the palette's chip -------------------------------------------
+
+def test_a_press_held_on_the_sheet_shows_its_tile_in_a_3x_loupe(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("3"), 1)                       # Art: the Sheet under the Map
+    drv.frame(DT)
+    (_pg, (x, y, w, h)) = d._sheet_rects[0]
+    tw = w // 16
+    drv.touch(x + 3 * tw + 2, y + 2)
+    drv.frame(DT)
+    assert d._loupe is not None and d._loupe[0] == 3
+    ly = d._loupe[2]
+    calls = []
+    real = d._draw_loupe
+
+    def spy(cv, th, u):
+        real_spr = cv.spr
+
+        def spr(img, x, y, s=1, *a, **k):
+            calls.append((y, s))
+            return real_spr(img, x, y, s, *a, **k)
+        cv.spr = spr
+        try:
+            real(cv, th, u)
+        finally:
+            del cv.spr
+    d._draw_loupe = spy
+    ws._dirty = True
+    drv.frame(DT)
+    del d._draw_loupe
+    assert [y for y, s in calls if s == 6 and y + 48 < ly], "no 3x loupe over the finger"
+    drv.touch_up()
+    drv.frame(DT)
+    drv.frame(DT)
+    assert d._loupe is None and ws.paint.n == 3
+
+
+def test_the_sprite_panes_palette_wears_its_64_chip(desk):
+    ws, drv = desk
+    _tap(drv, ord("3"), 1)
+    lay = ws.editor_desk._pane_layout("paint", ws.editor_desk._body(
+        _pane(ws.editor_desk, "paint"), 1))
+    x, y, w, h = lay.pal_chip
+    assert (x, w) == (lay.sw_x0, 2 * lay.sw) and h >= 32
+    assert y > lay.sw_y0 + 8 * lay.sw            # under the palette, beside the steppers
+    assert y == lay.spr_prev[1]

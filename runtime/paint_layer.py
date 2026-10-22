@@ -326,6 +326,7 @@ class PaintLayout(LayoutBase):
         sx = gx + 2 * cell + nw + 12
         self.size_xy = (sx, y + (cell - line) // 2)
         self.size_btn = (sx - 4, y, 56, cell)
+        self.pal_chip = (self.sw_x0, y, 2 * sw, cell)
         y += cell + 8
         fw = _ui_draw.print_width("Flags", self.fs) + 12
         fp = max(16, min(cell, (cw - 2 * pad - fw) // 8))
@@ -1236,6 +1237,7 @@ class PaintLayer:
         cv.print(("%d%s%d" if lay.pane else "Size %d%s%d") % (pe.size, times, pe.size),
                  lay.size_xy[0], lay.size_xy[1], th["ink_dim"], 1)
         if lay.pane:
+            _ui_draw.button(cv, th, lay.pal_chip, "64", "normal")
             self._draw_flags(cv, lay, pe, th)
             self._draw_preview(cv, lay, pe, sheet, th)
             self._draw_tools_look()

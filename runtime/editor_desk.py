@@ -78,6 +78,7 @@ _CODE_MORE = (("select", "Select", "sel"), ("copy", "Copy\tCtrl+C", "copy"),
               ("indent", "Indent\tTab", "indent"), ("outdent", "Outdent", "outdent"),
               ("linenums", "Line numbers", "gutter"), ("code", "Complete", "auto"))
 
+LOUPE = 3                   # the Sheet's loupe: a held tile at 3x its 16 px
 _DOUBLE_MS = 400            # a second press this soon on a header or handle
 _FULL_MS = 1000
 
@@ -118,6 +119,7 @@ class EditorDesk(Layer):
         self._flash = None              # (pane, why): a divider stopped at its minimum
         self._sheet_page = 0
         self._sheet_hold = False
+        self._loupe = None              # (tile, x, y): a press held on the Sheet
         self._still = None
         self._cursors = []
         self.part_state = {}            # the verbs parts' kept state (a typed tag)
@@ -448,6 +450,10 @@ class EditorDesk(Layer):
         if self.grown is None:
             self._dividers(cv, th, divs, u)
         self._frame(cv, th, shown, u)
+        if self._loupe is not None and not ws.pointer.down:
+            self._loupe = None
+        if self._loupe is not None:
+            self._draw_loupe(cv, th, u)
         ws.bar_layer._draw_status_strip("menu")
         self._dock()
 
@@ -830,6 +836,25 @@ class EditorDesk(Layer):
             px += pw + cap
         cv.clip()
 
+    def _draw_loupe(self, cv, th, u):
+        """The Sheet's loupe (EDITOR_LAYOUT.md): the tile under a held press
+        at 3x its 16 px, on a card over the finger, inside the surface."""
+        t, px, py = self._loupe
+        sh = self.ws.sheet
+        if sh is None:
+            return
+        s = LOUPE * 2 * u
+        d = 8 * s
+        m = 4 * u
+        bw = d + 2 * m
+        x = max(0, min(cv.w - bw, px - bw // 2))
+        y = py - bw - 20 * u
+        if y < 0:
+            y = py + 20 * u
+        cv.rrect(x, y, bw, bw, 6 * u, th["surface"], th["border"])
+        cv.rect(x + m, y + m, d, d, th["surface_alt"])
+        cv.spr(sh.tile_image(t, 0), x + m, y + m, s)
+
     def _cur_sprite(self):
         """The sprite the Sheet and the Reference mark: the Sprite pane's,
         else the last picked."""
@@ -1186,6 +1211,10 @@ class EditorDesk(Layer):
                         ws._dirty = True
                 else:
                     self._pick(t)           # a held slide previews each it passes
+            loupe = (t, px, py) if t is not None and down else None
+            if loupe != self._loupe:
+                self._loupe = loupe
+                ws._dirty = True
             return True
         if c in Parts.PARTS:
             if Parts.pointer(self, c, body, u, px, py, click, down) \
