@@ -533,19 +533,30 @@ class P4SystemCanvas(SystemCanvas):
         the CPU (PSRAM-bound both ways) -- but async it runs on the DMA engine
         while the loop does input/logic, hiding the drag frame's dominant cost
         (the ~24ms window-content stamp, measured 2026-07-10). Returns False (no
-        PPA / non-fit / hardware refusal) so the caller falls back to the sync
-        CPU stamp. MUST be the frame's LAST framebuffer write (the caller draws
+        PPA / nothing on the glass / hardware refusal) so the caller falls back
+        to the sync CPU stamp. MUST be the frame's LAST framebuffer write (the caller draws
         the chrome FIRST; regions are disjoint, and the PPA driver's dest cache
         writeback at submit covers the shared edge cache lines)."""
         ppa = self._ppa
         x = int(x)
         y = int(y)
         comp = self._comp
-        if (ppa is None or x < 0 or y < 0
-                or x + layer.w > self.w or y + layer.h > self.h
-                or (getattr(comp, "rotated", False)
-                    and not getattr(comp, "_async", False))):
+        rotated = getattr(comp, "rotated", False)
+        if ppa is None or (rotated and not getattr(comp, "_async", False)):
             return False              # no queue to ride: the sync CPU stamp
+        # A window hanging off the glass stamps the block of it that is on
+        # it (the Waveshare's kick takes a source block; the rotated engine
+        # stamps whole layers, so there it stays on the CPU).
+        x0 = x if x > 0 else 0
+        y0 = y if y > 0 else 0
+        x1 = min(x + layer.w, self.w)
+        y1 = min(y + layer.h, self.h)
+        if x0 >= x1 or y0 >= y1:
+            return False
+        whole = (x0 == x and y0 == y
+                 and x1 == x + layer.w and y1 == y + layer.h)
+        if not whole and rotated:
+            return False
         fb = getattr(layer, "flush_batch", None)
         if fb is not None:
             fb()
@@ -556,8 +567,10 @@ class P4SystemCanvas(SystemCanvas):
         # 2026-07-10: persistent desktop droppings during drags, cleaned by the
         # release repaint). REGISTER the stamp instead; P4Compositor.flush()
         # kicks it after the WHOLE frame has drawn -- the true last write.
-        self._comp._stamp_pending = (self._buf, self.w, self.h, x, y,
-                                     layer._buf, layer.w, layer.h)
+        st = (self._buf, self.w, self.h, x, y, layer._buf, layer.w, layer.h)
+        if not whole:
+            st += (x0 - x, y0 - y, x1 - x0, y1 - y0)
+        self._comp._stamp_pending = st
         return True
 
     # blit_cover is SystemCanvas's shared body -- CPU kernel by design: the

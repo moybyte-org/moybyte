@@ -1214,12 +1214,23 @@ static mp_obj_t dsi_flush(mp_obj_t self_in) {
         mp_obj_get_array(st, &n, &items);
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
-            mp_obj_t a[9];
+            // (dst, dw, dh, x, y, src, sw, sh[, bx, by, bw, bh]): the layer at
+            // (x, y), or its block that lies on the glass, landing where it sits.
+            mp_obj_t a[13];
             for (size_t i = 0; i < 8 && i < n; i++) {
                 a[i] = items[i];
             }
             a[8] = MP_OBJ_NEW_SMALL_INT(1);
-            mp_call_function_n_kw(mp_load_attr(c->ppa, MP_QSTR_blit_async), 9, 0, a);
+            size_t na = 9;
+            if (n >= 12) {
+                a[3] = mp_obj_new_int(mp_obj_get_int(items[3]) + mp_obj_get_int(items[8]));
+                a[4] = mp_obj_new_int(mp_obj_get_int(items[4]) + mp_obj_get_int(items[9]));
+                for (size_t i = 0; i < 4; i++) {
+                    a[9 + i] = items[8 + i];
+                }
+                na = 13;
+            }
+            mp_call_function_n_kw(mp_load_attr(c->ppa, MP_QSTR_blit_async), na, 0, a);
             nlr_pop();
             kicked = true;
         } else {

@@ -633,7 +633,11 @@ class DsiCompositor:
         if st is not None:
             self._stamp_pending = None
             try:
-                self._ppa.blit_async(*(tuple(st[:8]) + (1,)))
+                a = tuple(st[:8]) + (1,)
+                if len(st) >= 12:       # the block of the layer on the glass
+                    a = (a[:3] + (st[3] + st[8], st[4] + st[9]) + a[5:]
+                         + tuple(st[8:12]))
+                self._ppa.blit_async(*a)
                 kicked = True
             except Exception:  # noqa: BLE001 -- refusal -> draw it on the CPU
                 print("Moybyte P4 stamp kick failed -> CPU")

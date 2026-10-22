@@ -99,6 +99,7 @@ class FakePpa:
 
     def blit_async(self, *a):
         self.kicks += 1
+        self.last = a
 
     def stats(self):
         # (submitted, done, timeouts) -- modmoy_ppa.c
@@ -418,6 +419,24 @@ def test_a_stamp_pending_never_blocks_and_is_no_game_fence(stepped):
         assert ppa.syncs == 1
         assert comp.overlap_stats()[4] == 0, (
             "the ~free done()-gated drain was billed as a blocking fence")
+
+
+def test_a_stamp_off_the_glass_kicks_the_block_on_it(stepped):
+    """A window hanging off the glass hands the kick the block of it that
+    lies on the glass, landing where that block sits; a whole one, the
+    layer as it is."""
+    _dsi, ppa, ctx = build()
+    with ctx as mod:
+        stepped(mod)
+        comp = mod.P4Compositor()
+        dst, src = FB(9), FB(8)
+        comp._stamp_pending = (dst, 8, 8, 0, 0, src, 8, 8)
+        comp.flush()
+        assert ppa.last == (dst, 8, 8, 0, 0, src, 8, 8, 1)
+        comp.present_pending()
+        comp._stamp_pending = (dst, 8, 8, 5, -2, src, 8, 8, 0, 2, 3, 6)
+        comp.flush()
+        assert ppa.last == (dst, 8, 8, 5, 0, src, 8, 8, 1, 0, 2, 3, 6)
 
 
 def test_a_frame_with_both_a_stamp_and_a_game_composite_fences_blocking(stepped):
@@ -1374,6 +1393,14 @@ def test_the_canvas_hands_the_rotated_compositor_its_stamp():
     cv3 = types.SimpleNamespace(_ppa=object(), _comp=Comp(), w=1280, h=800,
                                 _buf=buf, flush_batch=lambda: None)
     assert verb(cv3, Layer(), 900, 200) is False, "a stamp off the edge stays on the CPU"
+    flat = Comp()
+    flat.rotated = False
+    cv4 = types.SimpleNamespace(_ppa=object(), _comp=flat, w=1280, h=800,
+                                _buf=buf, flush_batch=lambda: None)
+    assert verb(cv4, Layer(), 900, -30) is True, "the Waveshare stamps the block on the glass"
+    assert flat._stamp_pending == (buf, 1280, 800, 900, -30, WIN, 512, 480,
+                                   0, 30, 380, 450)
+    assert verb(cv4, Layer(), 1280, 0) is False, "nothing of it on the glass"
 
 
 def test_only_the_cpu_painted_destination_gets_the_cache_writeback():
