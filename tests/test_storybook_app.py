@@ -379,3 +379,37 @@ def test_paints_door_lists_the_stories_and_adds_a_slide_with_its_undo(tmp_path):
     assert undo()
     assert len(_stored(ws, "brave")["slides"]) == 3
     assert sb.add_picture_slide(None, app._files, rows[0], "nope")[1] == 0
+
+
+def _tap_part(ws, app, part):
+    cx, cy, _cw, _ch = ws.wm._wins["storybook"].content_rect()
+    x, y, w, h = app._ui.box(part)
+    ws.pointer.place(cx + x + w // 2, cy + y + h // 2)
+    ws.pointer.click = True
+    ws.handle_pointer()
+    _frames(ws, 1)
+    ws.pointer.click = False
+    ws.handle_pointer()
+    _frames(ws, 2)
+
+
+def test_the_sorters_new_slide_card_opens_the_layouts(tmp_path):
+    ws, app = _desk(tmp_path)
+    app._open_story(app.stories[0], "deck")
+    app.ed.opened()
+    _frames(ws)
+    _tap_part(ws, app, "Add slide")
+    assert app.ed.menu == "layouts"
+
+
+def test_deleting_the_last_slide_from_the_sorters_button(tmp_path):
+    ws, app = _desk(tmp_path)
+    app._open_story(app.stories[0], "deck")
+    app.ed.opened()
+    _frames(ws)
+    n = len(app.story.slides)
+    app._focus = "Slide %d" % (n - 1)
+    _frames(ws)
+    _tap_part(ws, app, "Delete")
+    assert len(app.story.slides) == n - 1
+    _frames(ws)

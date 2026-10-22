@@ -842,6 +842,8 @@ class Editor:
                 elif act == "del" and has:
                     self._delete_slide(i)
             bx += wd + 8
+        if has and i >= len(st.slides):         # Delete took the last slide
+            i = len(st.slides) - 1
         bx += 2
         ui.at(bx, by, 1, 32)
         ui.rule()
@@ -870,7 +872,7 @@ class Editor:
                 self.on_slide = True
                 app._damage.all()
         if len(st.slides) < D.MAX_SLIDES:
-            _x, _y, _w, _h2, state = ui.card("New slide", "", {"icon": "new",
+            _x, _y, _w, _h2, state = ui.card("New slide", "", {"icon": "new", "id": "Add slide",
                                                               "tone": "value"})
             if state & ui.ACTIVATED:
                 self.menu = "layouts"
