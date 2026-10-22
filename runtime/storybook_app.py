@@ -69,6 +69,41 @@ def dot():
     return " · " if ui.has_symbols() else " - "
 
 
+_DIM_CAPTION = {"tone": "dim", "face": "caption"}
+_NEW_CARD = {"icon": "new", "tone": "value"}
+_PRESENT = {"id": "Present"}
+_PRESENT_OFF = {"disabled": True, "id": "Present"}
+_OPEN = {"id": "Open"}
+_OPEN_OFF = {"disabled": True, "id": "Open"}
+_BACK = ("back", "Back")
+_STORIES_HINTS = ("confirm", "Open", "P", "Present", "back", "Back")
+
+
+class _Card:
+    """A story's card as the stories page draws it, made once per story
+    (`StorybookApp._cards`): its words, override table and picture's key."""
+
+    def __init__(self, entry):
+        doc = entry["doc"]
+        k = len(doc["slides"])
+        self.entry = entry
+        self.doc = doc
+        self.title_was = doc["title"]
+        self.k = k
+        self.title = doc["title"] or "Untitled"
+        self.sub = "%d slide%s" % (k, "" if k == 1 else "s")
+        self.status = None            # the desk foot's words, made when first focused
+        self.o = {"id": "Story " + entry["name"]}
+        self.doc_id = id(doc)
+        self.key = None               # the picture's key in `cards`, at its size
+        self.kw = self.kh = -1
+
+    def holds(self, entry):
+        doc = entry["doc"]
+        return (entry is self.entry and doc is self.doc and doc["title"] is self.title_was
+                and len(doc["slides"]) == self.k)
+
+
 def zoom_fit(w, h):
     """The largest present zoom whose slide fits w x h: (num, den)."""
     for n, d in PRESENT_ZOOMS:
@@ -161,6 +196,7 @@ class StorybookLayout:
             gw = self.cols * 256 + (self.cols - 1) * 24
             self.margin = max(16, (w - gw) // 2)
             self.stories_grid = (x, y + 28, w, self.foot[1] - y - 28)
+            self.grid_o = {"cols": self.cols, "margin": self.margin, "foot": 44, "top": 4}
             self.deck_grid = (x, y + self.ROW + 1, w, self.foot[1] - y - self.ROW - 1)
             self._slide_rects()
         else:
@@ -171,6 +207,7 @@ class StorybookLayout:
             self.cols = 2
             self.margin = 16 * fs
             self.stories_grid = (bx, by + 16 * fs, bw, bh - 16 * fs)
+            self.grid_o = {"cols": self.cols, "margin": self.margin, "foot": 32, "top": 4}
             vz = (fs, 4)
             sw, sh = R.size(fs, 4)
             self.view_zoom = vz
@@ -308,6 +345,10 @@ class StorybookAppLayer(ListShellApp):
         self._key = 0
         self._edited_at = None
         self._scanned = False
+        self._rows = []               # the stories' cards (`_cards`)
+        self._caption = (-1, "")      # (count, words) above the cards
+        self._whole = (0, 0, 0, 0)    # the page's rect, the canvas's
+        self._cap_lh = (None, 0)      # (theme generation, the caption face's line)
 
     # -- the app protocol (docs/app_api_v1.md) --------------------------------
 
@@ -510,12 +551,12 @@ class StorybookAppLayer(ListShellApp):
 
     def _stories_keys(self, inp, k):
         entry = self._focused_story()
-        if k in (ord("p"), ord("P")) and entry is not None:
+        if (k == 112 or k == 80) and entry is not None:              # p, P
             self._open_story(entry, "view" if not self.layout.desk else "deck")
             self._start(0)
             return True
         if self.layout.desk:
-            if k in (ord("m"), ord("M")) and entry is not None:
+            if (k == 109 or k == 77) and entry is not None:          # m, M
                 self.menu = "story"
                 self._damage.all()
                 return True
@@ -526,7 +567,7 @@ class StorybookAppLayer(ListShellApp):
                 self.asking = "delete"
                 self._damage.all()
                 return True
-            if k in (ord("n"), ord("N")):
+            if k == 110 or k == 78:                                 # n, N
                 self._new_story()
                 return True
         if inp.pressed("b"):
@@ -542,7 +583,7 @@ class StorybookAppLayer(ListShellApp):
             self._step_view(-1)
         elif inp.pressed("right") or k == ord("."):
             self._step_view(1)
-        elif k in (ord("p"), ord("P")):
+        elif k == 112 or k == 80:                        # p, P
             self._start(self.cur)
         elif inp.pressed("b") or k == 27:
             self.back()
@@ -597,13 +638,17 @@ class StorybookAppLayer(ListShellApp):
         th = self._theme.colors()
         keys_elsewhere = self.ed is not None and self.page != "stories" \
             and self.ed.keys_elsewhere()
-        self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed,
-                       elsewhere=keys_elsewhere)
+        whole = self._whole
+        if whole[2] != cv.w or whole[3] != cv.h:
+            whole = self._whole = (0, 0, cv.w, cv.h)
+        self._ui.begin(cv, th, whole, lay.desk, lay.windowed, elsewhere=keys_elsewhere)
         ui.page("")
         if self._focus is not None:
             ui.focus(self._focus)
             self._focus = None
-        was = (self.page, self.asking, self.menu, self.show is None)
+        page = self.page
+        asking = self.asking
+        menu = self.menu
         title = self.page_title() or ""
         if self.page == "view":
             self._view(cv)
@@ -618,7 +663,8 @@ class StorybookAppLayer(ListShellApp):
         if self.toast is not None:
             self._toast()
         self._focused = ui.focus()
-        if (self.page, self.asking, self.menu, self.show is None) != was:
+        if (self.page != page or self.asking != asking or self.menu != menu
+                or self.show is not None):
             self._damage.again()
 
     # -- stories ----------------------------------------------------------------------
@@ -628,28 +674,46 @@ class StorybookAppLayer(ListShellApp):
 
     def _focused_story(self):
         f = self._focused
-        if f is None or not f.startswith("Story "):
+        if f is None:
             return None
-        name = f[6:]
-        for s in self.stories:
-            if s["name"] == name:
-                return s
+        for row in self._cards():
+            if row.o["id"] == f:
+                return row.entry
         return None
 
-    def _card_pic(self, cv, entry, x, y, w, h, clip):
+    def _cards(self):
+        """The stories' cards, made again for a story added, removed or
+        changed; a frame where none did makes nothing."""
+        rows = self._rows
+        st = self.stories
+        n = len(st)
+        same = len(rows) == n
+        if same:
+            for i in range(n):
+                if not rows[i].holds(st[i]):
+                    same = False
+                    break
+        if not same:
+            rows = self._rows = [_Card(e) for e in st]
+        return rows
+
+    def _card_pic(self, cv, row, x, y, w, h, clip):
         """A story's card: its first slide, drawn once at the card's size
         and kept; its pictures are read for that and let go."""
         if not w or not h:
             return
         if self.cards is None:
             self.cards = Frames(None, 12 if self.layout.desk else 6)
-        name = entry["name"]
-        key = (name, id(entry["doc"]), w, h)
+        entry = row.entry
+        if row.kw != w or row.kh != h:
+            row.key = (entry["name"], row.doc_id, w, h)
+            row.kw = w
+            row.kh = h
+        key = row.key
         rend = None
         if not self.cards.has(key):
-            rend = R.Renderer(R.Images(self._load(name), 4 * w * h))
-        self.cards.place(cv, key, entry["doc"]["slides"][0], x, y, w, h, clip,
-                         renderer=rend)
+            rend = R.Renderer(R.Images(self._load(entry["name"]), 4 * w * h))
+        self.cards.place(cv, key, row.doc["slides"][0], x, y, w, h, clip, renderer=rend)
         if rend is not None:
             rend.images.forget()
 
@@ -661,32 +725,30 @@ class StorybookAppLayer(ListShellApp):
             ui.at(x, y + 16 * lay.fs, w, h)
             ui.empty("storybook", "No stories yet",
                      ("Stories are made on a desk board", "or in the web build."))
-            if ui.hints_width(("back", "Back")) > 0:
-                ui.at(*lay.foot)
-                ui.hints(("back", "Back"))
+            if ui.hints_width(_BACK) > 0:
+                r = lay.foot
+                ui.at(r[0], r[1], r[2], r[3])
+                ui.hints(_BACK)
             return
-        caption = "%d stor%s" % (n, "y" if n == 1 else "ies")
-        ui.at(*lay.caption)
-        ui.label(caption, {"tone": "dim", "face": "caption"})
+        if self._caption[0] != n:
+            self._caption = (n, "%d stor%s" % (n, "y" if n == 1 else "ies"))
+        r = lay.caption
+        ui.at(r[0], r[1], r[2], r[3])
+        ui.label(self._caption[1], _DIM_CAPTION)
         grid = lay.stories_grid
-        ui.at(*grid)
+        ui.at(grid[0], grid[1], grid[2], grid[3])
         ui.scroll("stories")
         cw, ch = lay.card
-        ui.grid("stories", cw, ch, {"cols": lay.cols, "margin": lay.margin,
-                                     "foot": 44 if lay.desk else 32,
-                                     "top": 4 if lay.desk else 4})
+        ui.grid("stories", cw, ch, lay.grid_o)
         if lay.desk:
-            x, y, w, h, st = ui.card("New story", "", {"icon": "new", "tone": "value"})
-            if st & ui.ACTIVATED:
+            r = ui.card("New story", "", _NEW_CARD)
+            if r[4] & ui.ACTIVATED:
                 self._new_story()
-        for s in self.stories:
-            k = len(s["doc"]["slides"])
-            sub = "%d slide%s" % (k, "" if k == 1 else "s")
-            x, y, w, h, st = ui.card(s["doc"]["title"] or "Untitled", sub,
-                                     {"id": self._card_id(s["name"])})
-            self._card_pic(cv, s, x, y, w, h, grid)
-            if st & ui.ACTIVATED:
-                self._open_story(s, "deck" if lay.desk else "view")
+        for row in self._cards():
+            r = ui.card(row.title, row.sub, row.o)
+            self._card_pic(cv, row, r[0], r[1], r[2], r[3], grid)
+            if r[4] & ui.ACTIVATED:
+                self._open_story(row.entry, "deck" if lay.desk else "view")
                 if self.ed is not None:
                     self.ed.opened()
         ui.grid()
@@ -694,36 +756,47 @@ class StorybookAppLayer(ListShellApp):
         ui.scroll()
         if lay.desk:
             self._stories_foot()
-        elif ui.hints_width(("back", "Back")) > 0:
-            ui.at(*lay.foot)
-            ui.hints(("confirm", "Open", "P", "Present", "back", "Back"))
+        elif ui.hints_width(_BACK) > 0:
+            r = lay.foot
+            ui.at(r[0], r[1], r[2], r[3])
+            ui.hints(_STORIES_HINTS)
 
     def _stories_foot(self):
         lay = self.layout
-        ui.at(*lay.foot_rule)
+        r = lay.foot_rule
+        ui.at(r[0], r[1], r[2], r[3])
         ui.rule()
         fx, fy, fw, fh = lay.foot
-        entry = self._focused_story()
+        entry = None
         status = ""
-        if entry is not None:
-            k = len(entry["doc"]["slides"])
-            status = (entry["doc"]["title"] or "Untitled") + dot() + \
-                "%d slide%s" % (k, "" if k == 1 else "s")
+        f = self._focused
+        if f is not None:
+            for row in self._rows:
+                if row.o["id"] == f:
+                    entry = row.entry
+                    if row.status is None:
+                        row.status = row.title + dot() + row.sub
+                    status = row.status
+                    break
         by = fy + max(1, (fh - 34) // 2)
-        ui.face("caption")
-        lh = ui.text_size("Ag")[1]
-        ui.face()
+        gen = self._theme.gen()
+        if self._cap_lh[0] != gen:
+            ui.face("caption")
+            self._cap_lh = (gen, ui.text_size("Ag")[1])
+            ui.face()
+        lh = self._cap_lh[1]
         ui.at(fx + 26, fy + (fh - lh) // 2, fw - 300, lh + 2)
-        ui.label(status, {"tone": "dim", "face": "caption"})
-        off = {"disabled": True} if entry is None else {}
+        ui.label(status, _DIM_CAPTION)
         ui.at(fx + fw - 16 - 86 - 8 - 100, by, 100, 32)
         ui.icon("play")
-        if ui.button("Present", "normal", dict(off, id="Present")) and entry is not None:
+        if ui.button("Present", "normal", _PRESENT_OFF if entry is None else _PRESENT) \
+                and entry is not None:
             self._open_story(entry, "deck")
             self._start(0)
         ui.at(fx + fw - 16 - 86, by, 86, 32)
         ui.icon("folder_open")
-        if ui.button("Open", "primary", dict(off, id="Open")) and entry is not None:
+        if ui.button("Open", "primary", _OPEN_OFF if entry is None else _OPEN) \
+                and entry is not None:
             self._open_story(entry, "deck")
             if self.ed is not None:
                 self.ed.opened()
