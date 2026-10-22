@@ -887,7 +887,6 @@ def test_audio_bank_backward_compat_schema_unchanged():
 
 def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     from runtime import host_app
-    from runtime import console as C
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
@@ -904,19 +903,19 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     ws.frame(1 / 30)
     assert probe.drew_something(ws.canvas)
 
-    # Tap NOTE+ on the edit pad -> the current step's pitch rises + bank goes dirty.
+    # The pad's Note up -> the current step's pitch rises + bank goes dirty.
+    page = ws.music_ui.page()
     p0 = me.cur_step()[0]
-    r = C._mu_pad_rect(1, 0)                  # (col 1, row 0) = NOTE+
-    ws.music_ui._music_click(r[0] + 2, r[1] + 2)
+    page.act("pitch+")
     assert me.cur_step()[0] == p0 + 1 and me.dirty
 
-    # PLAY starts a preview on the cart's session; tapping again STOPS it (toggle).
-    ws.music_ui._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
+    # Hear starts a preview on the cart's session; again STOPS it (toggle).
+    page.act("hear")
     assert ws.music_ui.music_preview is not None
     rendered0 = ws.audio_out.rendered
     ws.frame(1 / 30)                          # a frame pulls the mix (renders PCM)
     assert ws.audio_out.rendered > rendered0
-    ws.music_ui._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
+    page.act("hear")
     assert ws.music_ui.music_preview is None           # toggled off while still sounding
 
     # SAVE persists to sounds.json; reload proves it stuck. SAVE moved to the unified
@@ -929,28 +928,27 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     assert audio.AudioBank.from_dict(reloaded["sounds"]).to_dict() == me.bank.to_dict()
 
     # Leaving the editor stops any preview and returns to the cart.
-    ws.music_ui._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)   # start a preview again
+    page.act("hear")                          # start a preview again
     ws._leave_menu()
     assert ws.music_ui.music_preview is None and ws.screen == "desktop"
 
 
 def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
     from runtime import host_app
-    from runtime import console as C
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
     ws.open()
     ws._open_music()
     me = ws.music_ui.musicedit
-    # Toggle to SONG view via the view button; a frame draws it.
-    ws.music_ui._music_click(C._MU_VIEW[0] + 2, C._MU_VIEW[1] + 2)
+    page = ws.music_ui.page()
+    # The Song tab; a frame draws it.
+    page._view()
     assert me.view == me.SONG_VIEW
     ws.frame(1 / 30)
     assert probe.drew_something(ws.canvas)
-    # SFX+ pad button (song view, row 0 col 1) bumps the slot's SFX id.
+    # The song pad's Sfx up bumps the slot's SFX id.
     v0 = me.cur_slot_value()
-    r = C._mu_pad_rect(1, 0)
-    ws.music_ui._music_click(r[0] + 2, r[1] + 2)
+    page.act("slot+")
     assert me.cur_slot_value() == min(v0 + 1, len(me.bank.sfx) - 1)
 
 
@@ -963,37 +961,33 @@ def test_music_editor_ui_copy_paste_and_move_pad_buttons_sfx_view(tmp_path):
     ws.open()
     ws._open_music()
     me = ws.music_ui.musicedit
-    lay = ws.music_ui.layout
+    page = ws.music_ui.page()
 
-    def tap(col, row):
-        r = lay.pad_rect(col, row)
-        ws.music_ui._music_click(r[0] + 2, r[1] + 2)
-
-    # COPY (row 4 col 0) the current step, edit a second step, then PASTE
-    # (row 4 col 1) the clipboard back over it.
+    # Copy the current step, edit a second step, then Paste the clipboard
+    # back over it.
     me.select_cursor(0)
     me.set_pitch(66)
-    tap(0, 4)                              # COPY
+    page.act("copy")
     me.add_step()
     me.nudge_pitch(1)
     assert me.cur_step()[0] != 66
-    tap(1, 4)                              # PASTE
+    page.act("paste")
     assert me.cur_step()[0] == 66 and me.dirty
 
-    # MOVE- / MOVE+ (row 5) swap the cursor step with its neighbor.
+    # Up / Down swap the cursor step with its neighbor.
     s = me.cur_sfx()
     for i, st in enumerate(s.steps):
         st[0] = i
     me.select_cursor(0)
-    tap(1, 5)                              # MOVE+
+    page.act("down")
     assert me.step == 1 and s.steps[0][0] == 1
 
-    # DUP (row 2 col 1) clones the WHOLE current SFX into a new bank-end slot.
+    # Dup clones the WHOLE current SFX into a new bank-end slot.
     n = len(me.bank.sfx)
-    tap(1, 2)                              # DUP
+    page.act("dup")
     assert len(me.bank.sfx) == n + 1 and me.sfx_idx == n
 
-    # A frame still draws cleanly with the extra pad rows + bottom buttons.
+    # A frame still draws cleanly.
     ws.frame(1 / 30)
     assert probe.drew_something(ws.canvas)
 
@@ -1005,13 +999,9 @@ def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
     ws.open()
     ws._open_music()
     me = ws.music_ui.musicedit
-    lay = ws.music_ui.layout
-    ws.music_ui._music_click(lay.view_btn[0] + 2, lay.view_btn[1] + 2)
+    page = ws.music_ui.page()
+    page._view()
     assert me.view == me.SONG_VIEW
-
-    def tap(col, row):
-        r = lay.pad_rect(col, row)
-        ws.music_ui._music_click(r[0] + 2, r[1] + 2)
 
     me.add_slot()
     t = me.cur_track()
@@ -1019,36 +1009,15 @@ def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
     for i in range(len(t.pattern)):
         t.pattern[i] = min(i, hi)
     me.select_cursor(0)
-    tap(1, 5)                              # MOVE+ (song view, row 5)
+    page.act("down")
     assert me.slot == 1 and t.pattern[0] == min(1, hi)
 
     n = len(me.bank.music)
-    tap(1, 2)                              # DUP (song view, row 2 col 1)
+    page.act("dup")
     assert len(me.bank.music) == n + 1 and me.track_idx == n
 
     ws.frame(1 / 30)
     assert probe.drew_something(ws.canvas)
-
-
-def test_music_editor_ui_undo_redo_bottom_bar_buttons(tmp_path):
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.launcher.sel = 0
-    ws.open()
-    ws._open_music()
-    me = ws.music_ui.musicedit
-    lay = ws.music_ui.layout
-
-    me.select_cursor(0)
-    p0 = me.cur_step()[0]
-    me.set_pitch(80)
-    assert me.can_undo()
-
-    ws.music_ui._music_click(lay.undo_btn[0] + 2, lay.undo_btn[1] + 2)
-    assert me.cur_step()[0] == p0
-
-    ws.music_ui._music_click(lay.redo_btn[0] + 2, lay.redo_btn[1] + 2)
-    assert me.cur_step()[0] == 80
 
 
 def test_music_editor_ui_ctrl_z_y_keyboard_shortcut(tmp_path):

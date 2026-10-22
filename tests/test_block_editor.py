@@ -391,19 +391,14 @@ def test_pointer_taps_insert_and_action_bar(tmp_path):
 # Kid-facing copy: forever-is-bounded + wait hints surface in the editor
 # ----------------------------------------------------------------------------
 
-def test_forever_and_wait_have_kidfacing_hints(tmp_path):
+def test_forever_compiles_to_the_bounded_loop(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("forever")
     assert _select_type(be, "forever")
-    assert "every frame" in ws.block_ui._blk_hint()             # forever is bounded
-    go_to_insert(be, 1)
-    be.insert_block("wait", {"secs": 1})
-    assert _select_type(be, "wait")
-    assert "pause" in ws.block_ui._blk_hint()
-    # and the compiled forever is the bounded loop (Part-1 contract)
+    # the compiled forever is the bounded loop (Part-1 contract)
     src = blocks.compile_blocks(be.program)
     assert "while True" not in src and "range(100000)" in src
 

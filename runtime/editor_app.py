@@ -436,14 +436,10 @@ class EditorApp:
         """Re-derive the entered tab's geometry from the live canvas.
 
         Every tab layout is a pure function of (canvas size, effective font scale),
-        but the objects are shared singletons on `ws`, so ANOTHER tab can overwrite
-        one and leave it there. The Blocks+Scene workspace binds `ws.scene_ui.layout`
-        to its right pane (block_editor_ui._layout_workspace) and nothing unbound it,
-        so the Scene tab opened afterwards drew into that pane -- at 800x480/3x a rect
-        of NEGATIVE width, off the right edge (#216). Rebuilding the ENTERED tab's own
-        layout is what makes that whole class impossible instead of fixing one pair:
-        whatever a tab inherits, it re-derives before it draws. It runs after the tab's
-        editor is built, so the clamps inside each `relayout` see the live editor."""
+        but the objects are shared singletons on `ws` that another path can leave
+        bound to other geometry (#216), so whatever a tab inherits, it re-derives
+        before it draws. It runs after the tab's editor is built, so the clamps
+        inside each `relayout` see the live editor."""
         ws = self.ws
         if view == "code":
             ws._relayout_code()              # ws owns the CodeLayout handle
@@ -473,8 +469,6 @@ class EditorApp:
         ws._set_text_mode(False)
         if self.tab == "music":
             ws.music_ui._stop_music_preview()   # don't let a preview leak into the cart resume
-        if self.tab == "scene" and ws.scene_ui.tag_edit:
-            ws.scene_ui._tag_commit()   # PLAY mid-typing keeps the typed tag (#85)
         # (#111) PLAY is a hard-commit trigger too -- autosave is the only model now
         # (no SAVE tap exists to rely on), so persist whatever the active tab holds
         # BEFORE running. Config is the one exception: it keeps its OWN commit below,

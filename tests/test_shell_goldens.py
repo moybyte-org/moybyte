@@ -473,9 +473,8 @@ WIDGETS = ("clock", "wifi", "battery", "menu")
 HOME_TAB_IDS = ("games", "mine", "apps", "make")
 _DATE = (2026, 10, 14)    # the pinned calendar day
 
-# The config test_editor_tabs_render_independently sweeps. The largest one: every
-# cross-tab bounding an editor layout can suffer is a big-screen feature, and #216
-# showed only here.
+# The config test_editor_tabs_render_independently sweeps: the largest handheld,
+# where #216 showed.
 _INDEPENDENCE_CONFIG = "big_800x480_fs3_dark"
 
 
@@ -1218,20 +1217,16 @@ def test_the_light_variant_really_draws_different_pixels(request):
 def test_editor_tabs_render_independently(tmp_path):
     """An Editor tab renders the same pixels whatever tab was rendered before it.
 
-    `_surface_plan` re-opens the Editor per tab and its comment claims that buys
-    independence. It did not (#216): the Blocks+Scene workspace binds
-    `ws.scene_ui.layout` to its right pane and nothing unbound it, so the Scene tab
-    entered afterwards drew into that pane -- at this config a rect of NEGATIVE
-    width, off the right edge, leaving the blocks pixels standing underneath. One
-    golden was therefore a function of the surface before it, and an unrelated
-    map-editor change moved `editor_scene` with a re-baseline reason that looked
-    wrong.
+    `_surface_plan` re-opens the Editor per tab, and that alone does not buy
+    independence: the tab layouts are singletons on `ws` that another tab can
+    leave bound to other geometry. In #216 the Blocks tab bound
+    `ws.scene_ui.layout` to a pane of its own and the Scene tab entered
+    afterwards drew into it, so one golden was a function of the surface
+    before it; `EditorApp._relayout_tab` re-derives the entered tab's layout.
 
-    Every ORDERED PAIR, at the config where it showed. font_scale 3 is what
-    collapses the workspace panes; at 320x240 the workspace is off, so no
-    editor is ever bounded there. The pairs share one workstation, so
-    the state also ACCUMULATES across them -- a stronger claim than pairwise, for
-    the price of one build."""
+    Every ORDERED PAIR, at the largest handheld config. The pairs share one
+    workstation, so the state also ACCUMULATES across them -- a stronger claim
+    than pairwise, for the price of one build."""
     cfg = CONFIGS[_INDEPENDENCE_CONFIG]
     alone = {tab: _editor_tab_hash(_build(cfg, tmp_path / ("alone_" + tab)), tab)
              for tab in TABS}

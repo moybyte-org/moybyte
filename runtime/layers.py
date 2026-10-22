@@ -183,10 +183,9 @@ class _WebConsoleLayer(Layer):
 
 
 class _MapLayer(Layer):
-    """The map/tilemap editor (#32), SYSTEM-domain responsive (#39 step 3): a
-    full-screen panel on the reflowed system canvas (the frozen-cart backdrop is
-    gone -- the panel always covered every pixel of it anyway). Tap = paint one
-    cell, drag = pan (#37); the d-pad pans the window.
+    """The map/tilemap editor (#32), SYSTEM-domain responsive (#39 step 3): the
+    handheld's Map page, or a desk pane's view (`map_editor_ui.py`). Tap = paint
+    one cell, drag = pan (#37); the d-pad pans the window.
 
     Stage 4 (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip("menu")
     LAST (chrome over content) so the Editor's lent top-bar zone (the tab ladder +
@@ -226,9 +225,9 @@ class _MapLayer(Layer):
 
 class _SceneLayer(Layer):
     """The scene placement editor (#85 Stage 2), SYSTEM-domain responsive (#39):
-    a full-screen panel on the reflowed system canvas -- the world view + actor
-    palette + props row (scene_editor_ui.SceneEditorUI). Tap = place/select,
-    drag = move an actor or pan the world (the map editor's gesture grammar).
+    the handheld's Scene page, or a desk pane's world view
+    (scene_editor_ui.SceneEditorUI). Tap = place/select, drag = move an actor or
+    pan the world (the map editor's gesture grammar).
 
     Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer.
     _draw_status_strip("menu") LAST (chrome over content) so the Editor's lent
@@ -268,15 +267,14 @@ class _SceneLayer(Layer):
 
 
 class _MusicLayer(Layer):
-    """The music/sound editor (#50), SYSTEM-domain responsive (#39 step 3): a
-    full-screen tracker on the reflowed system canvas (a bigger panel shows more
-    steps/slots). The live mixer is ticked so a PLAY preview keeps sounding, then
-    the preview flag auto-clears when it ends.
+    """The music/sound editor (#50), SYSTEM-domain responsive (#39 step 3): the
+    handheld's Music page (`editor_music.py`). The live mixer is ticked so a
+    preview keeps sounding, then the preview flag auto-clears when it ends.
 
     Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip
-    ("menu") LAST (chrome over the tracker) so the Editor's lent top-bar zone (the tab
+    ("menu") LAST (chrome over the page) so the Editor's lent top-bar zone (the tab
     ladder + PLAY + X, no SAVE -- #111) shows on this tab; handle_pointer routes a tap through
-    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the tracker click."""
+    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the page's verbs."""
 
     id = "music"
     domain = "system"
@@ -293,7 +291,7 @@ class _MusicLayer(Layer):
         ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
-        # D-pad navigates the tracker (#50): up/down move the step/slot cursor,
+        # D-pad navigates the steps (#50): up/down move the step/slot cursor,
         # left/right change the value under it (pitch / SFX-id), A plays/stops the
         # preview, B leaves. Tap remains the primary path.
         self.ws.music_ui._music_input()
@@ -304,7 +302,7 @@ class _MusicLayer(Layer):
         # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
-        ws.music_ui.pointer(px, py, click)   # step list + edit pad + actions
+        ws.music_ui.pointer(px, py, click)   # the page's verbs
         return True
 
 

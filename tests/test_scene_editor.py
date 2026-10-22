@@ -144,21 +144,21 @@ def test_world_size_covers_viewport_map_and_actors():
 # -- SceneLayout ----------------------------------------------------------------
 
 def test_scene_layout_reflows_bigger_panel():
-    # The world view grows to fill the panel: a big panel shows the whole
-    # 320x240 game viewport at 1x with no panning, the handheld page's and the
-    # Blocks workspace's bounded panel alike.
+    # The world view grows to fill the page: a big surface shows the whole
+    # 320x240 game viewport at 1x with no panning, clear of the page's column;
+    # in a desk Editor's Scene pane the view fills the pane.
+    from runtime import layout_base
     lay = SU.SceneLayout(1024, 600, 1)
-    assert lay.verbs
+    assert lay.verbs and not lay.pane
     assert lay.sv_avail_w >= 320 and lay.sv_avail_h >= 240
     assert lay.sv_x0 + lay.sv_avail_w <= lay.tp_x0 - 4
-    lay = SU.SceneLayout(1024, 600, 1, bounds=(0, 0, 1024, 600))
-    assert not lay.verbs
-    assert lay.sv_avail_w >= 320 and lay.sv_avail_h >= 240
-    # The view never overlaps the palette column, the palette gains rows.
-    assert lay.sv_x0 + lay.sv_avail_w <= lay.tp_x0 - 4
-    assert lay.tp_rows > SU._TP_ROWS
-    # The props row sits below the view.
-    assert lay.tag_btn[1] >= lay.sv_y0 + lay.sv_avail_h
+    layout_base.in_pane(True)
+    try:
+        lay = SU.SceneLayout(442, 384, 1)
+    finally:
+        layout_base.in_pane(False)
+    assert lay.pane and not lay.verbs
+    assert (lay.sv_avail_w, lay.sv_avail_h) == (lay.cw - 4, lay.ch - 4)
 
 
 # -- the tab through the real Workstation (headless, host == device code) -----

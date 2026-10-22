@@ -25,8 +25,10 @@ window's canvas, and its taps translated into it; the panes the desk adds
 workspace switch commits the panes it leaves that are dirty, through
 `EditorApp.commit_later`, as a tab switch does.
 
-Below `editor_panes.WORK_MIN`, and on every handheld, the Editor is the tab
-ladder (`EditorApp`), one tab at a time."""
+On a surface smaller than the workspace's least size (a doubled desk theme's
+half-size surface) the focused pane stands alone over the panes area, as a
+grown one does, and the keys move it to the next. On a handheld the
+Editor is one tab at a time under its one bar (`EditorApp`)."""
 
 try:
     import ui
@@ -103,8 +105,6 @@ class EditorDesk(Layer):
         self.ws = ws
         self._host = host("editor")
         self.key = "settings"           # the workspace shown
-        self.ladder = False             # True: the old desk tab ladder instead,
-                                        # until its removal (look step 30's next)
         self._focus = {}                # workspace -> the focused pane's index
         self._tabs = {}                 # pane -> its open tab's index
         self.grown = None               # the pane grown over the workspace
@@ -140,14 +140,8 @@ class EditorDesk(Layer):
     # -- where it applies -------------------------------------------------------
 
     def active(self):
-        """Whether the Editor shows workspaces: a desk, an open cart, and a
-        surface that holds the panes area's least size."""
-        ws = self.ws
-        if self.ladder or _lb.metric_class() != _lb.DESK or ws.cart is None:
-            return False
-        cv = ws.sys_canvas
-        u = self._unit()
-        return cv.w >= P.WORK_MIN[0] * u and cv.h >= P.WORK_MIN[1] * u
+        """Whether the Editor shows workspaces: a desk and an open cart."""
+        return _lb.metric_class() == _lb.DESK and self.ws.cart is not None
 
     def _unit(self):
         return max(1, _lb.chrome_size(self.ws.look.effective_font_scale())
@@ -326,6 +320,16 @@ class EditorDesk(Layer):
                         self.focus_pane(n)
                         return
 
+    def alone(self):
+        """The pane shown over the whole panes area, or None: the grown one,
+        else the focused one where the area is under the workspace's least
+        size (one pane at a time)."""
+        if self.grown is not None:
+            return self.grown
+        _x, _y, w, h = self._area()
+        mw, mh = self.arrangement().minimum()
+        return self.focused()[0] if w < mw or h < mh else None
+
     def grow(self, pane=None):
         """Grow a pane over the workspace, or back (Ctrl+Shift+Enter, Esc,
         a double tap on its header, its grow tool)."""
@@ -427,12 +431,13 @@ class EditorDesk(Layer):
         panes, divs = self.placed()
         cv.rect(lay.cx, lay.cy, lay.cw, lay.ch, th["panel"])
         fi = self._focus.get(self.key, 0)
+        alone = self.alone()
         shown = []
         self._cursors = []
         self._still_at = None
         for n, (pane, r, path) in enumerate(panes):
-            if self.grown is not None:
-                if pane != self.grown:
+            if alone is not None:
+                if pane != alone:
                     continue
                 r = self._area()
             shown.append((n, pane, r))
@@ -449,7 +454,7 @@ class EditorDesk(Layer):
                 self._sheet(cv, th, body, u, c == "stamps")
             elif c in ("made", "maps"):
                 Parts.drawn_before(self, c, cv, th, body, u)
-        if self.grown is None:
+        if alone is None:
             self._dividers(cv, th, divs, u)
         self._frame(cv, th, shown, u)
         if self._loupe is not None and not ws.pointer.down:
@@ -984,7 +989,7 @@ class EditorDesk(Layer):
         if tab is not None:
             layer = ws.layer_of(tab)
             if layer is not None:
-                if self.grown is not None:
+                if self.alone() is not None:
                     r = self._area()
                 got = bool(self._in_pane(tab, self._body(r, self._unit()),
                                          layer.handle_input, i))
@@ -1304,6 +1309,8 @@ class EditorDesk(Layer):
             got = bool(self._in_pane(tab, body, layer.handle_pointer,
                                      px - body[0], py - body[1], click))
             self._owe_restart(tab)
+            if tab == "scene" and self._blocks():
+                ws.block_ui._sync_target_from_scene()   # its scripts, in the Blocks pane
             return got
         if c == "game":
             if click and (self.paused or not ws.editor_app.playing()):
@@ -1338,9 +1345,10 @@ class EditorDesk(Layer):
         return True
 
     def _shown_panes(self):
-        if self.grown is not None:
+        alone = self.alone()
+        if alone is not None:
             for n, (pane, _r, _p) in enumerate(self.panes()):
-                if pane == self.grown:
+                if pane == alone:
                     return [(n, pane, self._area())]
         return [(n, pane, r) for n, (pane, r, _p) in enumerate(self.panes())]
 
@@ -1355,7 +1363,7 @@ class EditorDesk(Layer):
     def _divider_at(self, px, py):
         """The divider under a press: anywhere on its gutter for a pointer,
         its handle's 16 x 48 for a finger."""
-        if self.grown is not None:
+        if self.alone() is not None:
             return None
         u = self._unit()
         mouse = bool(getattr(self.ws.pointer, "hovers", False))

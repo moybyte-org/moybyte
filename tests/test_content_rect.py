@@ -175,7 +175,7 @@ def test_every_layout_lays_out_inside_the_content_rect(tmp_path, size):
         rb, cb = bottom[key]
         if not _inside(rb, cb):
             bad.append("%s.%s[%d] %r in %r" % (key + (rb, cb)))
-    assert checked > 100
+    assert checked > 80
     assert not bad, "outside the content rect under a bottom bar: %s" % bad
     lay = ws.layout
     assert lay.icon_y0 >= lay.cy and lay.grid_bottom <= lay.cy + lay.ch

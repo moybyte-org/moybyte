@@ -1,11 +1,12 @@
 # Map (grep -n a name to jump there):
-#   BlocksPage         the handheld Blocks tab on the verbs
+#   BlocksPage         the Blocks tab on the verbs, the handheld's and a desk pane's
 #   BlocksPage.draw    the objects' tabs, the outline and the foot
 #   BlocksPage._row    one outline row: a hat, a statement or an insert point
 #   BlocksPage.act     a foot tool's verb
-"""The handheld Editor's Blocks tab on the public UI API
-(docs/media/look_2026-10/EDITOR_LAYOUT.md's `blocks` pictures): the
-objects as tabs (the Stage, then each sprite with scripts or on the stage),
+"""The Editor's Blocks tab on the public UI API, the handheld's and a desk
+Editor's Blocks pane alike (docs/media/look_2026-10/EDITOR_LAYOUT.md's
+`blocks` pictures): the objects as tabs (the Stage, then each sprite with
+scripts or on the stage),
 the outline of the picked object's scripts -- a hat in its category's
 colour, a statement on a plate with its category's bar, indented by depth,
 the cursor's row on the current plate and the cursor's insert point as

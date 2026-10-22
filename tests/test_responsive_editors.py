@@ -159,11 +159,12 @@ def test_code_editor_font_scale_grows_text(tmp_path):
 
 def test_block_editor_shows_more_rows_and_wider_blocks(tmp_path):
     """At 960x600 the block outline shows MORE rows + a WIDER block area."""
-    from runtime import console as C
+    from runtime.block_editor_ui import BlockLayout
     ws = _ws(tmp_path, sys_size=(960, 600))
     _enter(ws, "blocks")
-    assert ws.block_ui.block_layout.rows > C._BLK_ROWS         # more than 11 rows
-    assert ws.block_ui.block_layout.outline_w > C._BLK_W       # wider than 308
+    base = BlockLayout(320, 240, 1)
+    assert ws.block_ui.block_layout.rows > base.rows
+    assert ws.block_ui.block_layout.outline_w > base.outline_w
 
 
 def test_code_editor_renders_without_error_on_large_canvas(tmp_path):
@@ -247,18 +248,18 @@ def test_code_editor_symbol_palette_tap(tmp_path):
     assert ws.editor.text() == C._CODE_SYMBOLS[0]
 
 
-def test_block_editor_action_bar_tap_opens_menu(tmp_path):
-    """Tapping ADD opens the insert menu at native size (the bar rect is layout-
-    derived, hit-tested in system coords)."""
+def test_block_editor_add_tool_tap_opens_menu(tmp_path):
+    """Tapping the foot's Add opens the insert menu at native size (hit-tested
+    in system coords where the page drew it)."""
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
     _enter(ws, "blocks")
     drv.frame(1 / 30)
-    lay = ws.block_ui.block_layout
-    bx, by, bw, bh = lay.add_btn
-    drv.touch(bx + bw // 2, by + bh // 2)
-    drv.frame(1 / 30)
+    bx, by, bw, bh = ws.block_ui.page().host.box("Tool Add")
+    drv.click(bx + bw // 2, by + bh // 2)
+    for _ in range(3):
+        drv.frame(1 / 30)
     assert ws.block_ui.blk_menu is not None and ws.block_ui.blk_menu["mode"] == "cat"
 
 
@@ -517,7 +518,7 @@ def test_map_editor_shows_more_cells_on_large_canvas(tmp_path):
     ws._open_map()
     lay = ws.map_ui.layout
     base = M.MapLayout(320, 240, 1)
-    assert lay.mv_avail_w > M._MV_AVAIL_W and lay.mv_avail_h > M._MV_AVAIL_H
+    assert lay.mv_avail_w > base.mv_avail_w and lay.mv_avail_h > base.mv_avail_h
     assert lay.zooms[0] == base.zooms[0]           # same field size on every tier
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     assert cols > base.mv_avail_w // base.zooms[0]   # ...so the bigger view shows more
@@ -561,15 +562,12 @@ def test_music_editor_320x240_is_byte_identical(tmp_path):
     assert bufs[0] == bufs[1]
 
 
-def test_music_editor_shows_more_rows_on_large_canvas(tmp_path):
-    """At 960x600 the tracker list shows MORE visible rows than the baseline 10,
-    and the editor renders valid pixels on the system canvas."""
-    from runtime import music_editor_ui as M
+def test_music_editor_renders_on_large_canvas(tmp_path):
+    """At 960x600 the Music page renders valid pixels on the system canvas."""
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
     ws._open_music()
-    assert ws.music_ui.layout.rows > M._MU_ROWS
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3

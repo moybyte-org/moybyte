@@ -173,19 +173,3 @@ def _cards_ws(tmp_path, **kw):
     ws.cards_layer.mtop = 0
     ws.cards_layer.msel = 0
     return ws
-
-
-# -------------------------------------------------------------- the music tab
-
-def test_music_speed_ticks_are_toolkit_rows(tmp_path, monkeypatch):
-    """The +/- speed nudges were the last hand-rolled field+border+label in the
-    music editor. The tracker's own step/slot list is deliberately NOT converted
-    -- it is a per-row content grid (#163's territory). The tracker is a
-    desk's (its pane and its tab ladder); the handheld's tab is on the verbs."""
-    ws = _editor(tmp_path, "music", sys_size=(480, 320))
-    if ws.music_ui.musicedit is None:
-        pytest.skip("the seed cart has no sound bank on this build")
-    ws.music_ui.layout.verbs = False
-    counter = _Counter(monkeypatch)
-    _frame(ws)
-    assert counter.n["row"] == 2                # speed - and speed +

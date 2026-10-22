@@ -4,7 +4,6 @@
 #   -- Desktop shell                  chrome_scale_floor, text_scale_floor, Layout, CodeLayout
 #   Layout                            responsive desktop-shell geometry
 #   CodeLayout                        responsive code-editor geometry
-#   -- Button icon glyphs             the pre-literate icon vocabulary
 #   -- the unified top bar's icon theme  the bar's icon sheet
 #   -- Panel THEMES                   THEME_NAMES, the seed packages' names
 #   theme_colors                      the full token dict for a theme and variant
@@ -14,8 +13,7 @@ console draws with, extracted from console.py so the Workstation kernel is alone
 that file.
 
 Everything here is PURE: the MOY64 palette (NAMES/color), the responsive Layout /
-CodeLayout geometry (#39), the glyph-button helper (_gbtn; the 12x12 glyphs
-themselves are native/moy_ui's, drawn by `ui.glyph`), the themeable top-bar IconSheet defaults (_ICON / _ICON_ART /
+CodeLayout geometry (#39), the themeable top-bar IconSheet defaults (_ICON / _ICON_ART /
 _default_icon_sheet), and the small helpers (_in / _clamp_scroll / _cursor_delta /
 _ticks_* / _err_text / _from_ascii). Nothing touches a Workstation -- these are the
 functions/constants shared by console.py AND the surface modules (launcher_layer
@@ -652,24 +650,6 @@ class CodeLayout(LayoutBase):
 
 
 # BlockLayout (#39 step 2) now lives in block_editor_ui.py (imported above).
-
-
-# --- Button icon glyphs (the pre-literate icon vocabulary) ------------------
-# The 12x12 bitmaps are native/moy_ui/style.json's "glyphs", drawn by the one
-# C raster (`ui.glyph`), centred in a button's rect in any palette colour.
-
-
-def _gbtn(ws, names, kind, label, rect, fill, cv):
-    """A button carrying a centered 12x12 chrome glyph (the #91/#92/#93 icon
-    passes): the colored `ws._btn` chip, then the glyph (black, matching the
-    button's label ink) over it. Falls back to the word `label` when the glyph
-    kind is missing (or None), so the row is never blank. The ONE body behind
-    the map/music/block editor surfaces' `_gbtn` delegates."""
-    if _ui_draw.glyph_id(kind) >= 0:
-        ws._btn("", rect, fill, cv)
-        ws._glyph(kind, rect, names["black"], cv)
-    else:
-        ws._btn(label, rect, fill, cv)
 
 
 def _print_scaled(cv, s, x, y, c, mult=2):

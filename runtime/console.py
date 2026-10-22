@@ -64,16 +64,12 @@ except ImportError:  # pragma: no cover - host: the ctypes binding
 # below. block_editor_ui.py's docstring says why the UIs take NAMES/_err_text/
 # _clamp_scroll as constructor args instead of importing them back from here.
 _LAZY_MODULES = {
-    "block_editor_ui": ("BlockEditorUI", "BlockLayout", "_BLK_W", "_BLK_ROWS",
-                        "_BLK_AREA", "_BLK_ADD", "_BLK_CODE", "_BLK_MENU",
-                        "_BLK_MENU_ROW_H", "_BLK_MENU_ROWS", "_NEW_VAR_ITEM",
+    "block_editor_ui": ("BlockEditorUI", "BlockLayout", "_BLK_MENU_ROWS", "_NEW_VAR_ITEM",
                         "_NEW_VAR_LABEL", "_NEW_LIST_ITEM", "_NEW_LIST_LABEL",
                         "_NUM_LITERAL_ITEM", "_NUM_LITERAL_LABEL"),
-    "map_editor_ui": ("MapEditorUI", "_MV_X0", "_MV_Y0", "_MV_ZOOMS", "_MAP_ZOOM",
-                      "_MAP_SIZE", "_TP_X0", "_TP_Y0", "_TP_CELL", "_TP_SKY",
-                      "_PAN_RT", "_PAN_DN", "_MAP_ERASE"),
+    "map_editor_ui": ("MapEditorUI", "_MV_ZOOMS"),
     "scene_editor_ui": ("SceneEditorUI",),
-    "music_editor_ui": ("MusicEditorUI", "_MU_VIEW", "_MU_PLAY", "_mu_pad_rect"),
+    "music_editor_ui": ("MusicEditorUI",),
     "paint_layer": ("PaintLayer", "ThemeLayer", "_PG_X0", "_PG_Y0", "_PG_SPAN",
                     "_SW_X0", "_SW_Y0", "_SW", "_SW_COLS"),
 }

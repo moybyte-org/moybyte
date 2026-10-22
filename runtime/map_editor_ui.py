@@ -1,30 +1,19 @@
 # Map (grep -n a name to jump there):
-#   MapLayout          responsive map-editor geometry
-#   MapEditorUI        the map editor's UI: pan/zoom view and tile palette
+#   MapLayout          the map editor's geometry: the handheld page's or a desk pane's
+#   MapEditorUI        the map editor's UI: the panned, zoomed view and its gestures
 #   MapEditorUI.build  build the MapEditor over the cart's map
-"""The map (tilemap) editor's UI layer (issue #32): a panned view of the map on
-the left where each cell shows the placed sprite tile, a paged tile palette on
-the right to pick the brush, a pan d-pad + zoom control, and tap-to-paint /
-drag-to-pan gesture handling (#37 follow-up).
+"""The map (tilemap) editor's UI layer (issue #32): a panned, zoomed view of
+the map where each cell shows the placed sprite tile, and the tap-to-paint /
+drag-to-pan gestures over it (#37). On the handheld the Map tab is the page
+`runtime/editor_map.py` draws round the view (its brushes, tools and foot);
+in a desk Editor's Map pane the view fills the pane above a status line, the
+brush is the Sheet pane's and the tools the pane header's
+(`runtime/editor_desk.py`).
 
-Extracted from Workstation (runtime/console.py), mirroring block_editor_ui.py's
-BlockEditorUI: this class owns the map editor's UI state (mapedit/map_erase/
-map_page/map_zoom/the pan-drag gesture fields, plus the responsive view-metrics
-helpers `_mv_metrics`/`_mv_area`) and every `_map_*` method, verbatim (no
-renaming), via a back-reference to the owning Workstation (`self.ws`) for the
-handful of primitives it shares with the rest of the console (canvas, _btn,
-_leave_menu, sheet, tilemap, save_map -- the last two are the cart's actual
-resources, shared with the running game and the paint editor, so they stay on
-Workstation rather than becoming map-only state). `NAMES` is injected at
-construction instead of imported back from console.py, which would be a real
-circular import: console.py imports MapEditorUI to build the one instance a
-Workstation holds (same reasoning as BlockEditorUI -- see its docstring).
-
-Kept name-for-name with the pre-extraction Workstation methods/fields (no
-renaming): Workstation._open_map/set_menu_view/open/go_home/handle_input/
-handle_pointer/frame all just gained one level of indirection (`self.map_ui.X`
-instead of `self.X`), and so did the tests that poke the map editor's
-internals directly.
+One instance lives on Workstation (`ws.map_ui`), with a back-reference to it
+for the cart's shared resources (the sheet and the tilemap, which a run
+copies at its start). `NAMES` is injected at construction instead of
+imported back from console.py, which would be a circular import.
 """
 
 from array import array
@@ -42,43 +31,17 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import MapEditor, KeyEdge
 
-# The shared pre-literate glyph vocabulary (#91 icon pass): the #91 toolbar (TOOL/
-# UNDO/REDO/resize) + the resize panel's -/+ draw a 12x12 chrome glyph instead of a
-# terse label. The shared glyph-button body lives in chrome (one implementation).
 try:
-    from chrome import _gbtn as _chrome_gbtn
-except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
-    from runtime.chrome import _gbtn as _chrome_gbtn
-
-try:
-    from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
-                             pane as _in_pane, metric_class as _metric_class, DESK as _DESK)
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H, pane as _in_pane,
-                                     metric_class as _metric_class, DESK as _DESK)
+                                     BASE_H as _BASE_H, pane as _in_pane)
 
 # The handheld page (editor_map.py): the right column's width and the foot's
 # height, beside and under the view.
 HAND_COL = 104
 HAND_FOOT = 27
 
-# Map (tilemap) editor (#32): a panned view of the map on the left where each cell
-# is the scaled sprite tile placed there, and a paged tile palette on the right to
-# pick the brush tile. Tap a map cell to stamp the brush (or erase, when the ERASE
-# toggle is on); tap a palette cell to select that tile id. Mirrors the paint
-# editor's structure (grid + picker + close), with pan controls for maps
-# larger than the on-screen window.
-_MV_X0 = 14            # map view top-left (cells drawn scaled here)
-_MV_Y0 = 32
-# The map-view rectangle is sized dynamically from the current ZOOM level (#37
-# follow-up): the cell size in px drives how many cells fit (and how big each tile
-# is drawn). The available rectangle is x 14..~206, y 32..~196 -- clear of the tile
-# palette (x >= 210) / pan d-pad / bottom button row (y = 198). All hit-testing,
-# panning and drawing route through MapEditorUI._mv_metrics() so they share one
-# live cell size; there is no fixed _MV_CELL/_MV_COLS/_MV_ROWS/_MV_AREA any more.
-_MV_AVAIL_W = 192      # usable map-view width  (14 .. 206)
-_MV_AVAIL_H = 164      # usable map-view height (32 .. 196)
 # TIC-80-style zoom: a small ascending list of DETAIL CELL SIZES in px. Every rung
 # is a multiple of the 8px tile, so a tile UPSCALES to fill its cell exactly (scale
 # = cell // 8) -- crisp pixel art, never a floating 8px tile in a bigger box. 8px is
@@ -119,72 +82,11 @@ _MV_ZOOMS = [8, 16, 24, 32]
 _MV_OVERVIEW = 0
 _MV_FIT_MAX = 7
 _MV_FIT_MIN = 4
-# The rung's badge, in the title ("zOV") and on the ZOOM button. Two chars, because
-# the 24px button prints at 8px per glyph and "Z" + a three-char label overflows it.
+# The OVERVIEW rung's name in a pane's status line ("zoom OV").
 _MV_OV_LABEL = "OV"
-# ZOOM control: a small button in the map editor that cycles the zoom level. Sits
-# in the empty CENTER of the pan d-pad (between UP/DOWN/LEFT/RIGHT) -- a natural,
-# TIC-80-ish spot that overlaps nothing (palette PREV/NEXT end at y 140; the d-pad
-# arrows surround x 244,y 164 without filling its center).
-_MAP_ZOOM = (244, 164, 24, 16)
-# Tile palette (right): a paged grid of sheet tiles; tap to pick the brush.
-_TP_X0 = 210
-_TP_Y0 = 32
-_TP_CELL = 22
-_TP_COLS = 4
-_TP_ROWS = 4
-_TP_PAGE = _TP_COLS * _TP_ROWS          # tiles shown per palette page
-_TP_AREA = (_TP_X0, _TP_Y0, _TP_COLS * _TP_CELL, _TP_ROWS * _TP_CELL)
-_TP_PREV = (_TP_X0, _TP_Y0 + _TP_ROWS * _TP_CELL + 2, 42, 18)        # page back
-_TP_NEXT = (_TP_X0 + 46, _TP_Y0 + _TP_ROWS * _TP_CELL + 2, 42, 18)   # page forward
-# Empty/"sky" swatch (#37): a first-class, selectable palette entry on the bottom
-# button row (right of CLOSE). Picking it sets the brush to EMPTY so a tap paints
-# "nothing" -- the transparent/background cell map() skips -- like any other tile.
-_TP_SKY = (206, 198, 100, 20)
-# SIZE brush (#57): cycles the stamp size 1/2/3 (one tile / a 16x16 sprite's 2x2
-# block / 24x24), mirroring the paint editor's SIZE. Sits in the free top-left
-# corner slot of the pan d-pad cluster, styled like the ZOOM button ("S2" ~ "Z2").
-_MAP_SIZE = (218, 146, 24, 16)
-# Pan d-pad (right column, under the palette): 4 arrow buttons that scroll the
-# view. Kept clear of the map view (x < 196) and the bottom button row (y = 198).
-_PAN_UP = (244, 146, 24, 16)
-_PAN_LF = (218, 164, 24, 16)
-_PAN_RT = (270, 164, 24, 16)
-_PAN_DN = (244, 182, 24, 16)
-# ERASE toggle + CLOSE along the bottom-left (clear of the d-pad column). (SAVE
-# lived at x58 here; #111 removed it -- the freed strip stays empty.)
-_MAP_ERASE = (14, 198, 40, 20)
-_MAP_CLOSE = (126, 198, 76, 20)
-# Editor toolbar (#91): a compact strip in the title band (between the panel top
-# and the map view, y 16..32) on the RIGHT, clear of the "MAP TILE n z1 *" title
-# text on the left. TOOL cycles the paint tool (pen/box/fill), DIM opens the
-# map-resize panel. UNDO/REDO left the strip in #111 (the ONE bar pair is THE undo).
-# 26px buttons keep the labels two chars so the whole strip fits the 320px baseline.
-_MAP_TOOL = (196, 17, 26, 13)
-_MAP_DIM = (280, 17, 26, 13)
-# The paint tools (#91), cycled by the TOOL button: STAMP (today's per-cell / SIZE
-# brush), RECT (drag corner-to-corner, fill the rectangle), FLOOD (contiguous
-# same-tile fill), SELECT (drag a marquee -> COPY/CUT the region -> tap-to-stamp
-# PASTE, the paint editor's #90 region model applied to map cells). Two-char labels
-# for the compact toolbar button.
-_MAP_TOOLS = ("stamp", "rect", "flood", "select")
-_MAP_TOOL_LABEL = {"stamp": "PN", "rect": "BX", "flood": "FL", "select": "SE"}
-# The pre-literate glyph the TOOL button shows for the ACTIVE tool (#91 icon pass):
-# a pen/brush for STAMP, a hollow box for RECT, a paint bucket for FLOOD, a dashed
-# marquee for SELECT. `ui.glyph` draws nothing for an unknown kind, so
-# _MAP_TOOL_LABEL stays the fallback.
-_MAP_TOOL_GLYPH = {"stamp": "paint", "rect": "rect_tool", "flood": "fill",
-                   "select": "select"}
-# SELECT-mode region actions (#91), mirroring the paint editor's copy/paste/cut. The
-# tile palette is idle while selecting (region ops don't use the brush), so when the
-# SELECT tool is active a COPY/CUT/PASTE strip is drawn OVER the palette column and
-# hit-tested there instead of the palette. Geometry is computed on demand from the
-# palette rect (like the resize panel's _dims_rects), so MapLayout gains no permanent
-# field and the 320x240 idle-parity baseline is untouched.
-_MAP_SEL_ACTIONS = ("copy", "cut", "paste")
-_MAP_SEL_GLYPH = {"copy": "copy", "cut": "cut", "paste": "paste"}
-_MAP_SEL_LABEL = {"copy": "CP", "cut": "CT", "paste": "PS"}
-# Map resize (#91): the largest grid the +/- steppers will grow to. 96x96 = 9216
+# The tiles a page of the handheld page's palette shows: four rows of four.
+_TP_PAGE = 16
+# Map resize (#91): the largest grid Resize grows to. 96x96 = 9216
 # cells (~9KB) is a generous kid level and still device-RAM-safe; shrink floors at
 # 1x1 (TileMap.resize clamps too).
 _MAP_MAX_DIM = 96
@@ -213,128 +115,39 @@ def _mv_fit_cell(avail_w, avail_h, mw, mh):
 
 
 class MapLayout(LayoutBase):
-    """Responsive map-editor geometry (#39 step 3): the panel, the panned map view,
-    the paged tile palette + pan d-pad + zoom column, and the ERASE/CLOSE/SKY
-    bottom row, derived from the SYSTEM canvas size (w, h) + font scale.
+    """The map editor's geometry, from the SYSTEM canvas size (w, h) and font
+    scale. On the handheld (`verbs`) the view runs from the content rect's
+    top left to the page's right column and foot, which
+    `editor_map.MapPage` draws; in a desk Editor's Map pane (`pane`) the
+    view fills the pane above a status line.
 
-    The T-Deck's 320x240 is laid out by the same formulas as every canvas.
-
-    The map VIEW is the star of the reflow: its available rectangle grows to fill
-    the panel (so a big screen shows far more of the map at once), and larger
-    zoom-in cell sizes (48/64) join the cycle once the view can afford them. The
-    OVERVIEW sentinel stays LAST on every tier, so the rung a reader is on is a
-    name, not an index. The palette gains rows to fill its column."""
+    The zoom list is the detail sizes, then the OVERVIEW sentinel LAST on
+    every tier, so the rung a reader is on is a name, not an index."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
                  chrome_scale=None):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
-        # -- responsive: anchor the palette/d-pad column to the panel's right edge,
-        # the button row to its bottom, and grow the map view to fill the rest ----
-        # The panel fills the content rect, its top edge tucked 2fs under a
-        # top bar's (row 0 when nothing is above it).
-        px, py = self.cx + 8 * fs, max(0, self.cy - 2 * fs)
-        pw, ph = self.cw - 16 * fs, self.cy + self.ch - py - 20 * fs
-        self.body_fill = (self.cx, self.cy, self.cw, self.ch)
-        self.panel = (px, py, pw, ph)
-        p_right = px + pw
-        p_bottom = py + ph
-        self.title_xy = (px + 6 * fs, py + _ui_draw.line_dy(2 * fs, fs))
-        row_y = p_bottom - 22 * fs                # bottom button row (base 198)
-        rc_x = p_right - 106 * fs                 # right column origin (base 206)
-        self.mv_x0 = px + 6 * fs
-        self.mv_y0 = py + 16 * fs
-        self.mv_avail_w = rc_x - self.mv_x0
-        self.mv_avail_h = row_y - self.mv_y0 - 2 * fs
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        self.body_fill = (cx, cy, cw, ch)
         self.zooms = tuple(_MV_ZOOMS) + (48, 64, _MV_OVERVIEW)
-        # Pan d-pad cluster, bottom-anchored just above the button row.
-        pan_dn_y = row_y - 16 * fs
-        pan_mid_y = row_y - 34 * fs
-        pan_up_y = row_y - 52 * fs
-        bw, bh = 24 * fs, 16 * fs
-        self.pan_up = (rc_x + 38 * fs, pan_up_y, bw, bh)
-        self.pan_lf = (rc_x + 12 * fs, pan_mid_y, bw, bh)
-        self.pan_rt = (rc_x + 64 * fs, pan_mid_y, bw, bh)
-        self.pan_dn = (rc_x + 38 * fs, pan_dn_y, bw, bh)
-        self.zoom_btn = (rc_x + 38 * fs, pan_mid_y, bw, bh)
-        self.size_btn = (rc_x + 12 * fs, pan_up_y, bw, bh)
-        # Tile palette fills the column between the title band and the d-pad.
-        self.tp_x0 = rc_x + 4 * fs
-        self.tp_y0 = self.mv_y0
-        self.tp_cell = _TP_CELL * fs
-        self.tp_cols = _TP_COLS
-        self.tp_rows = max(1, (pan_up_y - 22 * fs - self.tp_y0) // self.tp_cell)
-        self.tp_page = self.tp_cols * self.tp_rows
-        self.tp_area = (self.tp_x0, self.tp_y0,
-                        self.tp_cols * self.tp_cell, self.tp_rows * self.tp_cell)
-        tp_by = self.tp_y0 + self.tp_rows * self.tp_cell + 2 * fs
-        self.tp_prev = (self.tp_x0, tp_by, 42 * fs, 18 * fs)
-        self.tp_next = (self.tp_x0 + 46 * fs, tp_by, 42 * fs, 18 * fs)
-        self.sky_btn = (rc_x, row_y, 100 * fs, 20 * fs)
-        self.erase_btn = (px + 6 * fs, row_y, 40 * fs, 20 * fs)
-        self.close_btn = (px + 118 * fs, row_y, 76 * fs, 20 * fs)
-        # Editor toolbar (#91/#111): the TOOL/DIM strip, right-anchored in the title
-        # band, mirrors the baseline geometry scaled to the panel (UNDO/REDO moved to
-        # the ONE bar pair, so TOOL now abuts DIM).
-        tb_y = py + 2 * fs
-        tbw, tbh, gap = 26 * fs, 13 * fs, 2 * fs
-        tb_right = p_right - 6 * fs
-        self.dim_btn = (tb_right - tbw, tb_y, tbw, tbh)
-        self.tool_btn = (self.dim_btn[0] - gap - tbw, tb_y, tbw, tbh)
         self.pan_thresh = _MAP_PAN_THRESH * fs
+        self.tp_page = _TP_PAGE
         self.pane = _in_pane()
-        self.verbs = not self.pane and _metric_class() != _DESK
+        self.verbs = not self.pane
         if self.pane:
-            self._pane_geometry()
-        elif self.verbs:
-            self._hand_geometry()
-
-    def _hand_geometry(self):
-        """The handheld's tab on the verbs (EDITOR_LAYOUT.md's Map): the
-        view from the content rect's top left to the right column and the
-        foot, which `editor_map.MapPage` draws; the panel's buttons stand
-        off the surface."""
-        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
-        self.body_fill = self.panel = (cx, cy, cw, ch)
-        self.mv_x0, self.mv_y0 = cx, cy
-        self.mv_avail_w = cw - HAND_COL
-        self.mv_avail_h = ch - HAND_FOOT - 1
-        off = (-4096, -4096, 0, 0)
-        for name in ("pan_up", "pan_lf", "pan_rt", "pan_dn", "zoom_btn", "size_btn",
-                     "tp_prev", "tp_next", "sky_btn", "erase_btn", "close_btn",
-                     "dim_btn", "tool_btn"):
-            setattr(self, name, off)
-        self.tp_x0 = cx + cw - HAND_COL + 6
-        self.tp_y0 = cy + 6
-        self.tp_cell = 22
-        self.tp_cols = self.tp_rows = 4
-        self.tp_page = 16
-        self.tp_area = (self.tp_x0, self.tp_y0, 4 * 22, 4 * 22)
-        self.title_xy = (-4096, -4096)
-
-    def _pane_geometry(self):
-        """A desk Editor's Map pane (EDITOR_LAYOUT.md's Art): the view fills
-        the pane above a status line; the brush is the Sheet pane's and the
-        tools the pane header's, so the palette, the pad and the buttons
-        stand off the surface."""
-        fs = self.fs
-        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
-        self.body_fill = self.panel = (cx, cy, cw, ch)
-        line = _ui_draw.font("ui")[2] * fs
-        self.status_h = line + 8 * fs
-        self.mv_x0, self.mv_y0 = cx + 2 * fs, cy + 2 * fs
-        self.mv_avail_w = cw - 4 * fs
-        self.mv_avail_h = ch - 4 * fs - self.status_h
-        self.status_xy = (cx + 8 * fs, cy + ch - self.status_h + 4 * fs)
-        off = (-4096, -4096, 0, 0)
-        for name in ("pan_up", "pan_lf", "pan_rt", "pan_dn", "zoom_btn", "size_btn",
-                     "tp_prev", "tp_next", "sky_btn", "erase_btn", "close_btn",
-                     "dim_btn", "tool_btn"):
-            setattr(self, name, off)
-        self.tp_area = off
-        self.tp_rows = 1
-        self.tp_page = self.tp_cols
-        self.title_xy = (-4096, -4096)
+            line = _ui_draw.font("ui")[2] * fs
+            self.status_h = line + 8 * fs
+            self.mv_x0, self.mv_y0 = cx + 2 * fs, cy + 2 * fs
+            self.mv_avail_w = cw - 4 * fs
+            self.mv_avail_h = ch - 4 * fs - self.status_h
+            self.status_xy = (cx + 8 * fs, cy + ch - self.status_h + 4 * fs)
+        else:
+            self.mv_x0, self.mv_y0 = cx, cy
+            self.mv_avail_w = cw - HAND_COL
+            self.mv_avail_h = ch - HAND_FOOT - 1
+            self.tp_x0 = cx + cw - HAND_COL + 6
+            self.tp_y0 = cy + 6
 
 
 class MapEditorUI:
@@ -355,7 +168,6 @@ class MapEditorUI:
         self.map_tool = "stamp"        # active paint tool (#91): stamp/rect/flood/select
         self._map_rect = None          # (x0,y0,x1,y1) cell corners while a RECT drags
         self._map_sel = None           # (x0,y0,x1,y1) live SELECT marquee drag box (#91)
-        self.dims_open = False         # the map-resize (DIM) panel is showing (#91)
         self._mkey = KeyEdge()         # Ctrl+Z/Y edge tracker (#91)
         self._map_drag = None          # last pointer (px,py) during a map pan drag (#37)
         self._map_press = None         # gesture origin (px,py); set on press, None on release
@@ -472,7 +284,6 @@ class MapEditorUI:
         self.map_tool = "stamp"        # (#91) back to the plain per-cell brush
         self._map_rect = None
         self._map_sel = None
-        self.dims_open = False
         self._mkey.reset()
 
     # -- input -----------------------------------------------------------------
@@ -525,18 +336,6 @@ class MapEditorUI:
         me = self.mapedit
         if me is not None and me.redo():
             self._map_clamp_cam()
-
-    def _map_cycle_tool(self):
-        """Cycle the paint tool stamp -> rect -> flood -> select -> stamp (#91). Drops
-        any half-built RECT/SELECT drag preview so switching mid-drag can't leave a
-        stray outline."""
-        try:
-            idx = _MAP_TOOLS.index(self.map_tool)
-        except ValueError:
-            idx = 0
-        self.map_tool = _MAP_TOOLS[(idx + 1) % len(_MAP_TOOLS)]
-        self._map_rect = None
-        self._map_sel = None
 
     def _map_palette_ids(self):
         """The tile ids shown on the current palette page (a window into the sheet,
@@ -704,32 +503,6 @@ class MapEditorUI:
 
     # -- map resize panel (#91) ------------------------------------------------
 
-    def _dims_rects(self):
-        """Geometry for the map-resize (DIM) overlay panel: the panel itself plus its
-        W-/W+/H-/H+ steppers and DONE button, centered in the content area and scaled
-        with the font. Computed on demand (drawn/hit-tested only while dims_open) so
-        it needs no permanent MapLayout real estate."""
-        lay = self.layout
-        fs = lay.fs
-        pw = 168 * fs
-        ph = 96 * fs
-        bx, by, bw, bh = lay.body_fill
-        x = bx + (bw - pw) // 2
-        y = by + (bh - ph) // 2
-        b = 22 * fs
-        wy = y + 26 * fs
-        hy = y + 50 * fs
-        margin = 8 * fs
-        return {
-            "panel": (x, y, pw, ph),
-            "w_dn": (x + margin, wy, b, b),
-            "w_up": (x + pw - margin - b, wy, b, b),
-            "h_dn": (x + margin, hy, b, b),
-            "h_up": (x + pw - margin - b, hy, b, b),
-            "done": (x + (pw - 64 * fs) // 2, y + ph - 26 * fs, 64 * fs, 20 * fs),
-            "rows": (wy, hy),
-        }
-
     def _map_resize(self, dw, dh):
         """Grow/shrink the map by (dw, dh) cells on the right/bottom edge (#91),
         clamped to [_MAP_MIN_DIM, _MAP_MAX_DIM]; content is preserved (top-left
@@ -757,61 +530,7 @@ class MapEditorUI:
         self._map_rect = None
         self._map_clamp_cam()
 
-    def _dims_click(self, px, py):
-        """Route a tap while the resize panel is open (#91): the +/- steppers resize
-        by one row/column, DONE (or a tap outside the panel) closes it. Returns True
-        so the tap never falls through to the map/palette behind the panel."""
-        r = self._dims_rects()
-        if _in(px, py, r["w_dn"]):
-            self._map_resize(-1, 0)
-        elif _in(px, py, r["w_up"]):
-            self._map_resize(1, 0)
-        elif _in(px, py, r["h_dn"]):
-            self._map_resize(0, -1)
-        elif _in(px, py, r["h_up"]):
-            self._map_resize(0, 1)
-        elif _in(px, py, r["done"]) or not _in(px, py, r["panel"]):
-            self.dims_open = False
-        return True
-
     # -- SELECT-mode region actions (#91) --------------------------------------
-
-    def _sel_actions_rects(self):
-        """Geometry for the SELECT-mode COPY/CUT/PASTE strip, computed on demand (drawn
-        + hit-tested only while the select tool is active) so it needs no permanent
-        MapLayout field and the 320x240 baseline stays byte-identical. Three buttons
-        stacked vertically over the (idle) tile-palette column, scaled with the font."""
-        lay = self.layout
-        fs = lay.fs
-        ax, ay, aw, ah = lay.tp_area
-        bh = 20 * fs
-        gap = 4 * fs
-        r = {"panel": lay.tp_area}
-        for i in range(len(_MAP_SEL_ACTIONS)):
-            r[_MAP_SEL_ACTIONS[i]] = (ax, ay + i * (bh + gap), aw, bh)
-        return r
-
-    def _sel_actions_click(self, px, py):
-        """Route a tap on the SELECT-mode action strip (over the palette). COPY needs a
-        selection, CUT needs a selection, PASTE needs a clip -- an unusable button is a
-        no-op (it's drawn dimmed). Returns True iff the tap hit the strip's column, so a
-        tap there never falls through to the brush-pick behind it."""
-        me = self.mapedit
-        if me is None:
-            return False
-        r = self._sel_actions_rects()
-        if _in(px, py, r["copy"]):
-            me.copy_selection()
-            return True
-        if _in(px, py, r["cut"]):
-            me.cut_selection()
-            return True
-        if _in(px, py, r["paste"]):
-            self._sel_paste_default(me)
-            return True
-        # A tap anywhere else in the palette column while selecting is swallowed (the
-        # strip owns the column in this mode) so it can't accidentally re-pick a brush.
-        return _in(px, py, r["panel"])
 
     def _sel_paste_default(self, me):
         """The PASTE button stamps the clip at the active selection's top-left (so
@@ -967,9 +686,6 @@ class MapEditorUI:
         me = self.mapedit
         if me is None:
             return
-        if self.dims_open:                     # the resize panel eats every tap (#91)
-            self._dims_click(px, py)
-            return
         if _in(px, py, self._mv_area()):  # a press in the map view: start a
             self._map_press = (px, py)         # gesture; the tool decides what it does.
             self._map_panning = False
@@ -1008,178 +724,27 @@ class MapEditorUI:
                         self._map_paint_undo = (self._map_stamp_cells(cx, cy),
                                                 tm.dirty, tm.gen)
                         self._map_paint(cx, cy)
-            return
-        lay = self.layout
-        # SELECT mode (#91): the COPY/CUT/PASTE strip is drawn OVER the palette column,
-        # so it eats taps there before the brush-pick / palette-page logic below.
-        if self.map_tool == "select" and self._sel_actions_click(px, py):
-            return
-        if _in(px, py, lay.tool_btn):     # cycle stamp/rect/flood (#91)
-            self._map_cycle_tool()
-            return
-        if _in(px, py, lay.dim_btn):      # open the map-resize panel (#91)
-            self.dims_open = True
-            return
-        if _in(px, py, lay.sky_btn):      # the EMPTY/"sky" swatch (#37)
-            me.n = ws.project.tilemap.EMPTY if ws.project.tilemap is not None else -1
-            return
-        if _in(px, py, lay.tp_area):      # pick the brush tile from the palette
-            col = (px - lay.tp_x0) // lay.tp_cell
-            row = (py - lay.tp_y0) // lay.tp_cell
-            if 0 <= col < lay.tp_cols and 0 <= row < lay.tp_rows:
-                k = row * lay.tp_cols + col
-                ids = self._map_palette_ids()
-                if 0 <= k < len(ids):
-                    me.n = ids[k]
-        elif _in(px, py, lay.tp_prev):    # page the palette back/forward
-            self.map_page = max(0, self.map_page - lay.tp_page)
-        elif _in(px, py, lay.tp_next):
-            if ws.project.sheet is not None and self.map_page + lay.tp_page < ws.project.sheet.count:
-                self.map_page += lay.tp_page
-        elif _in(px, py, lay.size_btn):   # cycle the SIZE brush 1/2/3 (#57)
-            me.cycle_size()
-        elif _in(px, py, lay.zoom_btn):   # cycle the zoom level (#37 follow-up)
-            self._map_cycle_zoom()
-        elif _in(px, py, lay.pan_up):
-            self._map_pan(0, -1)
-        elif _in(px, py, lay.pan_dn):
-            self._map_pan(0, 1)
-        elif _in(px, py, lay.pan_lf):
-            self._map_pan(-1, 0)
-        elif _in(px, py, lay.pan_rt):
-            self._map_pan(1, 0)
-        elif _in(px, py, lay.erase_btn):  # toggle stamp <-> erase
-            self.map_erase = not self.map_erase
-        elif _in(px, py, lay.close_btn):
-            # CLOSE runs+leaves to the cart (ws._leave_menu is EditorApp.leave --
-            # PLAY, itself a hard-commit trigger now, #111: no SAVE tap exists).
-            ws.defer(ws._leave_menu)   # #184: commit+run behind the next paint
 
     # -- drawing -----------------------------------------------------------------
 
-    def _gbtn(self, kind, label, rect, fill, cv):
-        # #91 icon pass -- one shared body, chrome._gbtn.
-        _chrome_gbtn(self.ws, self._NAMES, kind, label, rect, fill, cv)
-
     def _draw_map(self):
-        # The map (tilemap) editor (#32): a panned view of the map on the left where
-        # each cell shows the placed sprite tile, and a paged tile palette on the
-        # right to pick the brush. Mirrors _draw_paint's structure (grid + picker +
-        # close), drawn with the indexed API only so host == device. SYSTEM
-        # canvas + MapLayout geometry (#39 step 3): a bigger panel shows more map.
+        """The Map tab: the handheld's page round the view, or a desk pane's
+        view over its status line. Drawn with the indexed API only, so host
+        == device."""
         ws = self.ws
-        NAMES = self._NAMES
         cv = ws.sys_canvas
         lay = self.layout
-        me = self.mapedit
-        sheet = ws.project.sheet
-        if lay.verbs:
-            self.page().draw(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), False)
-            return
-        # Cover the FULL content area below the bar first (Fix 3): the panel doesn't
-        # span edge to edge, so without this fill stale pixels would bleed through
-        # the side/bottom strips. Match the cards tab (fills the whole area) so the
-        # editor is fully opaque.
-        # Phase 3 (visual identity v1): the theme's surface body on every tier;
-        # the map cells and the tile-palette strip back themselves (dark map
-        # field), so the panel joins the surface.
         th = ws.theme_colors
+        if lay.verbs:
+            self.page().draw(cv, th, (lay.cx, lay.cy, lay.cw, lay.ch), False)
+            return
         cv.rect(*(lay.body_fill + (th["surface"],)))
-        # Only the sliver of `panel` that `body_fill` did not already cover in
-        # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
-        # nothing (see ui.fill_uncovered).
-        if not lay.pane:
-            _ui_draw.fill_uncovered(cv, lay.panel, lay.body_fill,
-                               th["surface"])
-            cv.rectb(*(lay.panel + (NAMES["green"],)))
-        # Live zoom metrics (#37 follow-up): one cell size drives the grid, the tile
-        # upscale and the title's "z<level>" badge.
-        x0, y0, cell, cols, rows = self._mv_metrics()
-        if me is not None and me.n < 0:        # the EMPTY/"sky" brush (#37)
-            title = "MAP  SKY"
-        else:
-            title = "MAP  TILE " + str(me.n if me else 0)
-        title = title + "  z" + self._mv_zoom_label()
-        cv.print(title, lay.title_xy[0], lay.title_xy[1],
-                 th["ink"], 1)
-        if me is None or sheet is None or ws.project.tilemap is None:
-            return
+        me = self.mapedit
         tm = ws.project.tilemap
-        self.draw_view(cv)
-        if lay.pane:
-            self._pane_status(cv, lay, me, tm, th)
+        if me is None or ws.project.sheet is None or tm is None:
             return
-        # Tile palette (right): a page of sheet tiles; the brush tile is boxed white.
-        # The tile art stays its native size (a bigger palette shows MORE tiles per
-        # page via extra rows, and the fs-scaled cell just gives it more air).
-        ids = self._map_palette_ids()
-        tscale = max(1, lay.tp_cell // (sheet.TILE + 6))
-        # SIZE-brush footprint (#57): the OTHER tiles of the brush's stamp block
-        # get a lighter outline in the palette, so a 2x2/3x3 pick visibly shows
-        # which consecutive tiles will land on the map with it.
-        block = set()
-        if me.n >= 0 and me.size > 1:
-            tw, th = me.stamp_span()
-            for dy in range(th):
-                for dx in range(tw):
-                    block.add(me.n + dy * sheet.cols + dx)
-        for k in range(len(ids)):
-            tid = ids[k]
-            x = lay.tp_x0 + (k % lay.tp_cols) * lay.tp_cell
-            y = lay.tp_y0 + (k // lay.tp_cols) * lay.tp_cell
-            cv.rect(x, y, lay.tp_cell, lay.tp_cell, NAMES["black"])
-            img = sheet.tile_image(tid, -1)
-            if img is not None:
-                cv.spr(img, x + (lay.tp_cell - sheet.TILE * tscale) // 2,
-                       y + (lay.tp_cell - sheet.TILE * tscale) // 2, tscale)
-            cv.rectb(x, y, lay.tp_cell, lay.tp_cell,
-                     NAMES["white"] if tid == me.n else
-                     (NAMES["light_grey"] if tid in block else NAMES["dark_grey"]))
-        ws._btn("<", lay.tp_prev, NAMES["blue"], cv)
-        ws._btn(">", lay.tp_next, NAMES["blue"], cv)
-        # SELECT-mode region actions (#91): the COPY/CUT/PASTE strip is drawn OVER the
-        # palette column (idle while selecting), so it sits after the palette tiles.
-        if self.map_tool == "select":
-            self._draw_sel_actions(cv, NAMES)
-        # SIZE brush (#57): cycles the stamp size (top-left d-pad corner slot);
-        # labeled like the zoom button ("S2" ~ "Z2").
-        ws._btn("S" + str(me.size), lay.size_btn, NAMES["dark_purple"], cv)
-        # ZOOM control (#37 follow-up): cycles the zoom rung (in the d-pad center);
-        # the title's "z<rung>" badge shows which one is active.
-        zlab = self._mv_zoom_label()
-        ws._btn(zlab if zlab == _MV_OV_LABEL else "Z" + zlab,
-                lay.zoom_btn, NAMES["dark_purple"], cv)
-        # Pan d-pad under the map view.
-        ws._btn("^", lay.pan_up, NAMES["indigo"], cv)
-        ws._btn("v", lay.pan_dn, NAMES["indigo"], cv)
-        ws._btn("<", lay.pan_lf, NAMES["indigo"], cv)
-        ws._btn(">", lay.pan_rt, NAMES["indigo"], cv)
-        # ERASE toggle (highlighted when active) + CLOSE.
-        ws._btn("ER", lay.erase_btn, NAMES["red"] if self.map_erase else NAMES["dark_grey"], cv)
-        ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)
-        # EMPTY/"sky" swatch (#37): a selectable brush that paints "nothing". Drawn
-        # as a checkerboard (the universal transparent cue) + "SKY" label, boxed
-        # white when it's the active brush so it reads like any other palette pick.
-        sx, sy, sw, sh = lay.sky_btn
-        fs = lay.fs
-        cb = sh // 2
-        cv.rect(sx, sy, sw, sh, NAMES["dark_blue"])
-        cv.rect(sx, sy, cb, cb, NAMES["light_grey"])
-        cv.rect(sx + cb, sy + cb, cb, cb, NAMES["light_grey"])
-        cv.print("SKY", sx + sw - 26 * fs, sy + (sh - _ui_draw.font("ui")[2] * fs) // 2,
-                 NAMES["white"], 1)
-        cv.rectb(sx, sy, sw, sh,
-                 NAMES["white"] if me.n < 0 else NAMES["dark_grey"])
-        # Editor toolbar (#91/#111): TOOL (the active tool's pen/box/bucket glyph) +
-        # the resize glyph (open the resize panel). UNDO/REDO moved to the ONE bar
-        # pair. Icons instead of the terse two-char labels (#91 icon pass).
-        self._gbtn(_MAP_TOOL_GLYPH.get(self.map_tool),
-                   _MAP_TOOL_LABEL.get(self.map_tool, "PN"), lay.tool_btn,
-                   NAMES["orange"], cv)
-        self._gbtn("resize", "WH", lay.dim_btn, NAMES["dark_green"], cv)
-        # Map-resize overlay (#91): drawn LAST so it sits over the whole editor.
-        if self.dims_open:
-            self._draw_dims(cv, NAMES)
+        self.draw_view(cv)
+        self._pane_status(cv, lay, me, tm, th)
 
     def draw_view(self, cv):
         """The map field: the window of the map at the zoom, its lattice, and
@@ -1402,47 +967,3 @@ class MapEditorUI:
         cv.rectb(rpx, rpy, rpw, rph, color)
         if double and rpw > 2 and rph > 2:
             cv.rectb(rpx + 1, rpy + 1, rpw - 2, rph - 2, color)
-
-    def _draw_sel_actions(self, cv, NAMES):
-        """The SELECT-mode COPY/CUT/PASTE strip over the palette column (#91). COPY/CUT
-        need a selection, PASTE a clip -- an unusable action is dimmed (mirrors the
-        paint tool row). Geometry from _sel_actions_rects(); drawn only in select mode
-        so the baseline is untouched."""
-        me = self.mapedit
-        if me is None:
-            return
-        r = self._sel_actions_rects()
-        # Back the whole column so the palette tiles underneath don't bleed through.
-        cv.rect(*(r["panel"] + (NAMES["black"],)))
-        enabled = {"copy": me.sel is not None,
-                   "cut": me.sel is not None,
-                   "paste": me.has_clip}
-        for act in _MAP_SEL_ACTIONS:
-            on = enabled[act]
-            self._gbtn(_MAP_SEL_GLYPH.get(act), _MAP_SEL_LABEL.get(act, "?"),
-                       r[act], NAMES["indigo"] if on else NAMES["dark_grey"], cv)
-
-    def _draw_dims(self, cv, NAMES):
-        """The map-resize (DIM) overlay panel (#91): the current W x H with +/-
-        steppers on the right/bottom edge and a DONE button, centered over the
-        editor. Drawn only while dims_open; geometry from _dims_rects()."""
-        ws = self.ws
-        tm = ws.project.tilemap
-        lay = self.layout
-        fs = lay.fs
-        r = self._dims_rects()
-        px, py, pw, ph = r["panel"]
-        cv.rect(px, py, pw, ph, NAMES["dark_blue"])
-        cv.rectb(px, py, pw, ph, NAMES["white"])
-        cv.print("MAP SIZE", px + 8 * fs, py + _ui_draw.line_dy(6 * fs, fs), NAMES["white"], 1)
-        wy, hy = r["rows"]
-        w = tm.w if tm is not None else 0
-        h = tm.h if tm is not None else 0
-        self._gbtn("minus", "-", r["w_dn"], NAMES["red"], cv)
-        self._gbtn("plus", "+", r["w_up"], NAMES["green"], cv)
-        self._gbtn("minus", "-", r["h_dn"], NAMES["red"], cv)
-        self._gbtn("plus", "+", r["h_up"], NAMES["green"], cv)
-        yoff = (22 * fs - _ui_draw.font("ui")[2] * fs) // 2
-        cv.print("W " + str(w), px + pw // 2 - 14 * fs, wy + yoff, NAMES["white"], 1)
-        cv.print("H " + str(h), px + pw // 2 - 14 * fs, hy + yoff, NAMES["white"], 1)
-        ws._btn("DONE", r["done"], NAMES["green"], cv)

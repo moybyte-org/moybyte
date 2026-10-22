@@ -242,8 +242,6 @@ BAR = ("ws.bar_layer", "_draw_status_strip", "bar.strip")
 SURFACES = {
     "map": ("ws._g['_edit']('map', %r)", [
         ("ws.map_ui", "_draw_map", "map._draw_map"),
-        ("ws.map_ui", "_draw_sel_actions", "map.sel_actions"),
-        ("ws.map_ui", "_draw_dims", "map.dims"),
         BAR,
     ]),
     "paint": ("ws._g['_edit']('paint', %r)", [
@@ -255,14 +253,6 @@ SURFACES = {
     ]),
     "blocks": ("ws._g['_edit']('blocks', %r)", [
         ("ws.block_ui", "_draw_blocks", "blocks._draw_blocks"),
-        ("ws.block_ui", "_draw_blk_row", "blocks.row"),
-        ("ws.block_ui", "_draw_sprite_list", "blocks.sprite_list"),
-        ("ws.block_ui", "_draw_scene_pane", "blocks.scene_pane"),
-        ("ws.block_ui", "_layout_workspace", "blocks.layout_ws"),
-        # The blocks tab's dominant phase is the SCENE pane it hosts on a wide
-        # canvas (#93/#85), so its renderer is wrapped here too.
-        ("ws.scene_ui", "_draw_scene", "scene._draw_scene"),
-        ("ws.scene_ui", "_frame_world", "scene.frame_world"),
         BAR,
     ]),
     "scene": ("ws._g['_edit']('scene', %r)", [

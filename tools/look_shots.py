@@ -1088,10 +1088,8 @@ def _desk_appearance(g, ws):
 
 
 def _editor(g, ws, tab):
-    """The Editor on Star Catcher at `tab`: on a desk, the tab ladder the
-    step 23 and 24 targets draw (kept until its removal after step 30)."""
-    if ws.editor_desk is not None:
-        ws.editor_desk.ladder = True
+    """The Editor on Star Catcher at `tab`: on a desk, the workspace that
+    holds it."""
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
     ws.set_menu_view(tab)
 
@@ -2590,12 +2588,11 @@ def _mark_pairs(ws, img, box, view, kind=None):
 
 
 def _editor_origin(ws, attr, own):
-    """(the Editor's `attr` layout, the glass x and y of its content): its
-    desk window's where one is open, else `own`, the fullscreen one."""
-    win = getattr(ws.wm, "_wins", {}).get("menu")
-    if win is not None and not getattr(win, "minimized", False) and ws.wm.desk_open():
-        cx, cy, _w, _h = win.content_rect()
-        return getattr(win.ctx, attr), cx, cy
+    """(the Editor's `attr` layout, the glass x and y of its content): `own`,
+    the handheld's, or None on a desk, whose Editor tabs stand in the
+    workspaces' panes (their measures are tests/test_editor_desk.py's)."""
+    if ws.editor_desk is not None and ws.editor_desk.active():
+        return None, 0, 0
     return own, 0, 0
 
 
@@ -2617,6 +2614,8 @@ def _code_pairs(ws, img):
     if ws.screen != "menu" or getattr(ws, "menu_view", None) != "code":
         return []
     lay, ox, oy = _editor_origin(ws, "code_layout", ws.code_layout)
+    if lay is None:
+        return []
     ed = ws.editor
     fs, x0 = lay.fs, lay.x0
     cl = ws.code_layer
@@ -2655,6 +2654,8 @@ def _caret_pairs(ws, probe, img):
         return []
     px = img.load()
     lay, ox, _oy = _editor_origin(ws, "code_layout", ws.code_layout)
+    if lay is None:
+        return []
     for x, y, w, h, c in probe.last["rects"]:
         # the caret: in the code's columns (a current-line mark in its colour
         # stands in the inset)
@@ -2677,6 +2678,8 @@ def _sprite_pairs(ws, img):
         return []
     from runtime import paint_layer, ui_draw
     lay, ox, oy = _editor_origin(ws, "paint_layout", ws.paint_layer.layout)
+    if lay is None:
+        return []
     th = ws.theme_colors
     px = img.load()
     ink = _index_rgb(ws, th["chrome_ink"])
@@ -2692,7 +2695,7 @@ def _sprite_pairs(ws, img):
         if ink not in seen or seen & others:
             bad += 1
     row = lay.tool_btns
-    pitch = 48 if lay.desk else 24 * lay.fs
+    pitch = 24 * lay.fs
     off = sum(1 for a, b in zip(row, row[1:]) if b[0] - a[0] != pitch)
     return [_measure("sprite tools off the chrome ink", bad, 0, bad == 0),
             _measure("sprite tool row off the mockup's pitch", off, 0, off == 0)]
@@ -2911,6 +2914,8 @@ def _selection_pairs(ws, img):
     if sel is None:
         return []
     lay, ox, oy = _editor_origin(ws, "paint_layout", ws.paint_layer.layout)
+    if lay is None:
+        return []
     cell = lay.pg_span // ws.paint.dim
     x0 = ox + lay.pg_x0 + sel[0] * cell
     ys = range(oy + lay.pg_y0 + (sel[1] + 1) * cell, oy + lay.pg_y0 + sel[3] * cell)

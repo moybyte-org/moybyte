@@ -612,6 +612,30 @@ def test_a_settled_blocks_workspace_paints_nothing(blocks_desk):
     assert ws._frames_drawn == drawn
 
 
+def test_an_actor_picked_in_the_scene_pane_opens_its_scripts(blocks_desk):
+    """A blocks cart's Scene pane: a tap on an actor points the Blocks pane
+    at its scripts (EDITOR_LAYOUT.md's Scene · Game), and the scene edited
+    beside the blocks is saved with them."""
+    ws, drv = blocks_desk
+    d = ws.editor_desk
+    se = ws.scene_ui.sceneedit
+    be = ws.block_ui.blocks_ed
+    assert be.target is None                         # the Stage
+    pane, r, _p = next(p for p in d.panes() if "scene" in p[0])
+    body = d._body(r, d._unit(), pane)
+    x0, y0, scale, _vw, _vh = d._in_pane("scene", body, ws.scene_ui._sv_metrics)
+    actor = next(a for a in se.rows if a.get("tag"))
+    ox, oy = d._origin()
+    _click(drv, ox + body[0] + x0 + (actor["x"] - se.cam_x + 2) * scale,
+           oy + body[1] + y0 + (actor["y"] - se.cam_y + 2) * scale)
+    assert be.target == actor["tag"]
+    se.dirty = True
+    d.focus_pane(next(i for i, p in enumerate(d.panes()) if p[0] == ("blocks",)))
+    assert ws.editor_app.tab == "blocks"
+    ws.editor_app.save_current()
+    assert not se.dirty
+
+
 # -- the Reference's Sounds, Map and Log ---------------------------------------------
 
 def _reference(desk, tab):

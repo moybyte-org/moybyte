@@ -28,19 +28,30 @@ def _contrast(a, b):
 
 
 def _open(tmp_path, config, theme, mode):
+    """The Sprites tab: the handheld's, or the desk Editor's Sprite pane in
+    the Art workspace. (ws, its PaintLayout, the glass origin of its
+    surface)."""
     ws = el._ws(tmp_path, config, theme, mode)
-    lay, ox, oy = el._sprites(ws, config)
-    return ws, lay, ox, oy
+    if config == HANDHELD:
+        return ws, el._sprites(ws), 0, 0
+    ws.open_desk()
+    ws.open_in_editor(el.g._cart_by_title(ws, "Star Catcher"))
+    ws.set_menu_view("paint")
+    el._frame(ws)
+    d = ws.editor_desk
+    pane, r, _p = next(p for p in d.panes() if "paint" in p[0])
+    body = d._body(r, d._unit(), pane)
+    ox, oy = d._origin()
+    return ws, d._pane_layout("paint", body), ox + body[0], oy + body[1]
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
 @pytest.mark.parametrize("theme,mode", THEMES)
-def test_the_selection_reads_against_the_grid_lines(tmp_path, config, theme, mode):
+def test_the_selection_reads_against_the_grid_lines(tmp_path, theme, mode):
     """The selection is a two-toned ring, `ink` on and outside its grid
     lines and `surface` within: one of the two stands at 3:1 or more off
     the grid's lines in every theme-mode (design review R4-02; Contrast
     Night's lines are its ink, Moy Day's and Blocks' a hair from white)."""
-    ws, lay, ox, oy = _open(tmp_path, config, theme, mode)
+    ws, lay, ox, oy = _open(tmp_path, HANDHELD, theme, mode)
     ws.paint.set_selection(1, 1, 4, 4)
     el._frame(ws)
     px = el._px(ws)
@@ -57,13 +68,12 @@ def test_the_selection_reads_against_the_grid_lines(tmp_path, config, theme, mod
     assert best >= 3, (theme, mode, best)
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
 @pytest.mark.parametrize("theme,mode", THEMES)
-def test_the_maps_mark_leaves_the_sprite_whole(tmp_path, config, theme, mode):
+def test_the_maps_mark_leaves_the_sprite_whole(tmp_path, theme, mode):
     """The sprite map's mark lies outside the sprite -- `surface` around
     it, then `ink` -- so every pixel of the sprite shows as the sheet holds
     it (design review R4-03: the inner line used to cover its edge)."""
-    ws, lay, ox, oy = _open(tmp_path, config, theme, mode)
+    ws, lay, ox, oy = _open(tmp_path, HANDHELD, theme, mode)
     pe = ws.paint
     sheet = pe.sheet
     pl = ws.paint_layer
@@ -94,34 +104,31 @@ def test_the_maps_mark_leaves_the_sprite_whole(tmp_path, config, theme, mode):
     assert px[mid][sx + tile + o] == el._rgb(cv, th["ink"])
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
-def test_the_map_stands_on_the_columns_edge(tmp_path, config):
+def test_the_map_stands_on_the_columns_edge(tmp_path):
     """The map's left edge is the column's (design review R4-17), where
     the steppers, the tool row at the column's head and the file buttons
     start."""
-    ws, lay, _ox, _oy = _open(tmp_path, config, "moy", "light")
+    ws, lay, _ox, _oy = _open(tmp_path, HANDHELD, "moy", "light")
     x0 = ws.paint_layer._map_geom(lay, ws.paint, ws.paint.sheet)[0]
     assert x0 == lay.map_rect[0] == lay.spr_prev[0] == lay.get_btn[0]
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
-def test_a_tool_row_under_the_grid_stands_on_the_file_buttons_line(tmp_path, config):
+def test_a_tool_row_under_the_grid_stands_on_the_file_buttons_line(tmp_path):
     """Under the grid (the handheld), the tool row and the file buttons
     under the map share one line (design review R4-17), their plates one
     height."""
-    ws, lay, _ox, _oy = _open(tmp_path, config, "moy", "light")
+    ws, lay, _ox, _oy = _open(tmp_path, HANDHELD, "moy", "light")
     if lay.tool_btns[0][1] < lay.pg_y0 + lay.pg_span:
         pytest.skip("the tool row stands at the column's head here")
     assert {b[1] for b in lay.tool_btns} == {lay.get_btn[1]}
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
 @pytest.mark.parametrize("theme,mode", THEMES)
-def test_the_sprite_number_sits_between_its_steppers(tmp_path, config, theme, mode):
+def test_the_sprite_number_sits_between_its_steppers(tmp_path, theme, mode):
     """‹ n › (D-10's "‹ value ›", design review R4-18): the sprite's number
     in the ink between the steppers, the Size caption on its own after
     them."""
-    ws, lay, ox, oy = _open(tmp_path, config, theme, mode)
+    ws, lay, ox, oy = _open(tmp_path, HANDHELD, theme, mode)
     px_, py_, pw, _ph = lay.spr_prev
     nx, ny, nw, nh = lay.num_rect
     assert nx == px_ + pw and lay.spr_next[0] == nx + nw
@@ -132,12 +139,11 @@ def test_the_sprite_number_sits_between_its_steppers(tmp_path, config, theme, mo
     assert ink in seen
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
-def test_the_grid_cursor_is_drawn_for_keys_and_not_for_touch(tmp_path, config):
+def test_the_grid_cursor_is_drawn_for_keys_and_not_for_touch(tmp_path):
     """The grid's cursor is a key's: under touch it is gone (design review
     R4-19), and a key's move brings it back."""
     from runtime import ui_draw
-    ws, lay, ox, oy = _open(tmp_path, config, "moy", "light")
+    ws, lay, ox, oy = _open(tmp_path, HANDHELD, "moy", "light")
     cv = ws.glass_canvas
     keyline = el._rgb(cv, ws.look.live.fixed[2])
     border = el._rgb(cv, ws.theme_colors["border"])
@@ -152,13 +158,12 @@ def test_the_grid_cursor_is_drawn_for_keys_and_not_for_touch(tmp_path, config):
     assert el._px(ws)[y][x] == border
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
-def test_while_a_popover_is_open_the_strip_shows_only_its_close(tmp_path, config):
+def test_while_a_popover_is_open_the_strip_shows_only_its_close(tmp_path):
     """The hint strip shows the operations' keys, and while the more menu
     is open only the key that closes it (design review R4-13), never keys
     the menu has taken."""
     from runtime import paint_layer, ui_draw
-    ws, lay, _ox, _oy = _open(tmp_path, config, "moy", "light")
+    ws, lay, _ox, _oy = _open(tmp_path, HANDHELD, "moy", "light")
     seen = []
     real = ui_draw.hints
 
@@ -194,7 +199,7 @@ def _key_ink_h(px, box, ox, oy, w):
 
 @pytest.mark.parametrize("theme,mode", THEMES)
 def test_the_more_menus_arrow_keys_stand_as_tall_as_its_letters(tmp_path, theme, mode):
-    """The desk more menu's key column draws the shifts' arrows as tall as
+    """The desk Sprite pane's more menu's key column draws the shifts' arrows as tall as
     the letters beside them, "F" (design review R5-09), not as specks half
     their height."""
     from runtime import paint_layer, ui_draw

@@ -57,7 +57,6 @@ def _music(hh):
     mu = ws.music_ui
     if mu.musicedit is None:
         pytest.skip("no sound bank on this build")
-    assert mu.layout.verbs
     return ws, drv, mu, mu.page()
 
 
@@ -302,7 +301,7 @@ def _blocks(hh, title="Coin Quest"):
     ws.open_in_editor(cart)
     ws, drv = _open(hh, "blocks")
     bu = ws.block_ui
-    assert bu.block_layout.verbs and bu.blocks_ed is not None
+    assert bu.blocks_ed is not None
     return ws, drv, bu, bu.page()
 
 

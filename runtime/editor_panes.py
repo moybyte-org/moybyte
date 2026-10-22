@@ -72,10 +72,6 @@ KEYS = tuple(k for k, _l, _i in WORKSPACES)
 HOME_TAB = {"settings": "cards", "code": "code", "art": "paint",
             "world": "scene", "sound": "music"}
 
-# Below this the panes area holds no workspace and the Editor is the tab
-# ladder, one panel at a time (EDITOR_LAYOUT.md: "under 660 px of panes").
-WORK_MIN = (660, 300)
-
 
 def wide(w):
     """Whether a panes area `w` wide takes the 1024 arrangement (a Run slot

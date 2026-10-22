@@ -11,9 +11,8 @@ THEMES = [("moy", "dark"), ("moy", "light"), ("blocks", "light"),
           ("contrast", "dark"), ("contrast", "light")]
 HANDHELD = "tdeck_320x240_fs1_dark"
 DESK = "p4_1024x600_cs2_fs1_windowed"
-# The desk Editor's window and the Code tab's caret, the targets'
-# (tools/look_shots.py's `_code`): line 42, column 13, line 34 the first shown.
-EDITOR_WIN = (112, 54, 900, 534)
+# The Code tab's caret, the targets' (tools/look_shots.py's `_code`): line 42,
+# column 13, line 34 the first shown.
 CODE_TOP, CODE_ROW, CODE_COL = 33, 41, 12
 
 
@@ -33,12 +32,7 @@ def _ws(tmp_path, config, theme, mode):
     cfg = dict(g.CONFIGS[config], variant=mode)
     if "layout" not in cfg:
         cfg["theme"] = theme
-    ws = g._build(cfg, tmp_path / "carts")
-    if ws.editor_desk is not None:
-        # The desk tab ladder these looks were drawn on (steps 23 and 24),
-        # kept until its removal after the workspaces (look step 30).
-        ws.editor_desk.ladder = True
-    return ws
+    return g._build(cfg, tmp_path / "carts")
 
 
 def _frame(ws, n=4):
@@ -88,40 +82,27 @@ def _place(ws, key, rect):
     return win
 
 
-def _editor(ws, config, tab):
-    """The Editor on Star Catcher's `tab`: fullscreen on the handheld, the
-    target's window on the desk. (its CodeLayout, the glass x of its content's
-    left, the glass y of its content's top)."""
-    desk = config == DESK
-    if desk:
-        ws.system.set("win_full", {"menu": False})     # restored, not full screen
-        ws.open_desk()
+def _editor(ws, tab):
+    """The handheld Editor on Star Catcher's `tab`: its CodeLayout and the
+    glass origin of its content (0, 0)."""
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
     ws.set_menu_view(tab)
     if tab == "code":
         ed = ws.editor
         ed.row, ed.col, ed.top = CODE_ROW, CODE_COL, CODE_TOP
-    if not desk:
-        _frame(ws)
-        return ws.code_layout, 0, 0
-    _frame(ws, 2)
-    win = _place(ws, "menu", EDITOR_WIN)
     _frame(ws)
-    cx, cy, _w, _h = win.content_rect()
-    return win.ctx.code_layout, cx, cy
+    return ws.code_layout, 0, 0
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
 @pytest.mark.parametrize("theme,mode", THEMES)
-def test_the_code_tab_keeps_one_left_inset(tmp_path, config, theme, mode):
-    """The code, the status line, the symbol keys and (on the desk) the tab
-    strip start on one column at least 8 px in from the content's left
-    edge, and the current line's mark stands inside that inset, clear of
+def test_the_code_tab_keeps_one_left_inset(tmp_path, theme, mode):
+    """The code, the status line and the symbol keys start on one column
+    at least 8 px in from the content's left edge, and the current line's mark stands inside that inset, clear of
     the frame (design review R3-10)."""
     from runtime import ui_draw
-    ws = _ws(tmp_path, config, theme, mode)
+    ws = _ws(tmp_path, HANDHELD, theme, mode)
     ui_draw.input_kind("touch")              # the symbol keys show after touch (D-17)
-    lay, ox, oy = _editor(ws, config, "code")
+    lay, ox, oy = _editor(ws, "code")
     ed = ws.editor
     fs = lay.fs
     x0 = lay.x0
@@ -161,19 +142,6 @@ def test_the_code_tab_keeps_one_left_inset(tmp_path, config, theme, mode):
     cy = oy + lay.y0 + (ed.row - ed.top) * lay.lh + lay.lh // 2
     mark = _ink_left(px, ox + lay.cx, ox + x0, cy, cy + 1)
     assert mark - ox == lay.mark_x, ("mark", mark - ox, lay.mark_x)
-    if config == DESK:
-        # the tab strip: the window's band above the content
-        band = ws.wm._wins["menu"].ctx.layout.bars[0][1]
-        ty = oy + band[1] + band[3] // 2
-        tab = _ink_left(px, ox + band[0] + 1, ox + band[0] + 200, ty - 6, ty + 6)
-        # the first pill's edge on the inset, its content the pill's grown
-        # pad in (the padded tabs, D-03.3)
-        app = ws.editor_app
-        bar = ws.wm._wins["menu"].ctx.layout.bars[0]
-        zone = ws.bar_layer._window_zone(bar[1], next(c[1] for c in bar[3]
-                                                      if c[0] == "zone"))
-        grown = app._shelf_layout(app._zone_parts(zone)[0])[1]
-        assert x0 + grown <= tab - ox <= x0 + grown + fs, ("tabs", tab - ox, x0, grown)
 
 
 def _files(ws, cur=3):
@@ -222,7 +190,7 @@ def test_the_caret_stands_a_column_off_the_next_stem(tmp_path, theme, mode):
     column wide and a ground column stands between it and the stem, so the
     stem does not read as bold (design review R3-24)."""
     ws = _ws(tmp_path, HANDHELD, theme, mode)
-    lay, ox, oy = _editor(ws, HANDHELD, "code")
+    lay, ox, oy = _editor(ws, "code")
     ed = ws.editor
     assert ed.lines[ed.row][ed.col] == "b"
     fs = lay.fs
@@ -248,7 +216,7 @@ def test_play_carries_as_much_full_ink_as_a_tab_icon(tmp_path, theme, mode):
     which Contrast reads as disabled (design review R3-26)."""
     from runtime.editor_app import _SET_KIND, _ZONE_TABS
     ws = _ws(tmp_path, HANDHELD, theme, mode)
-    _editor(ws, HANDHELD, "code")
+    _editor(ws, "code")
     cv, th = ws.sys_canvas, ws.theme_colors
     ink = th["chrome_ink"]
     word = cv._col(ink)
@@ -272,34 +240,24 @@ def test_play_carries_as_much_full_ink_as_a_tab_icon(tmp_path, theme, mode):
                               "_draw_play's second pass can go", bare, tabs)
 
 
-def _sprites(ws, config):
-    """The Sprites tab, as the targets show it (tools/look_shots.py's
-    `_sprites`). (its PaintLayout, the glass origin of its content)."""
-    desk = config == DESK
-    if desk:
-        ws.open_desk()
+def _sprites(ws):
+    """The handheld Sprites tab, as the targets show it (tools/look_shots.py's
+    `_sprites`): its PaintLayout."""
     ws.open_in_editor(g._cart_by_title(ws, "Star Catcher"))
     ws.set_menu_view("paint")
-    if not desk:
-        _frame(ws)
-        return ws.paint_layer.layout, 0, 0
-    _frame(ws, 2)
-    win = _place(ws, "menu", EDITOR_WIN)
     _frame(ws)
-    cx, cy, _w, _h = win.content_rect()
-    return win.ctx.paint_layout, cx, cy
+    return ws.paint_layer.layout
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
 @pytest.mark.parametrize("theme,mode", THEMES)
-def test_every_enabled_sprite_tool_wears_the_chrome_ink(tmp_path, config, theme, mode):
+def test_every_enabled_sprite_tool_wears_the_chrome_ink(tmp_path, theme, mode):
     """The sprite tools' icons take one ink role, the chrome's: no tool in
     the dim ink and no trash in the danger ink, louder than its row (design
     review R3-11). The tool in use wears the current mark; copy and paste,
     with nothing to copy or paste, the disabled ink."""
     from runtime import paint_layer, ui_draw
-    ws = _ws(tmp_path, config, theme, mode)
-    lay, ox, oy = _sprites(ws, config)
+    ws = _ws(tmp_path, HANDHELD, theme, mode)
+    lay = _sprites(ws)
     th = ws.theme_colors
     cv = ws.glass_canvas
     px = _px(ws)
@@ -311,24 +269,22 @@ def test_every_enabled_sprite_tool_wears_the_chrome_ink(tmp_path, config, theme,
     for tid, (x, y, w, h) in zip(paint_layer._TOOLS, lay.tool_btns):
         if tid == "stamp" or ws.paint_layer._tool_on(pe, tid):
             continue
-        seen = {px[oy + yy][ox + xx] for yy in range(y, y + h) for xx in range(x, x + w)}
+        seen = {px[yy][xx] for yy in range(y, y + h) for xx in range(x, x + w)}
         assert ink in seen, tid
         assert not (seen & others), (tid, seen & others)
 
 
-@pytest.mark.parametrize("config", (HANDHELD, DESK))
 @pytest.mark.parametrize("theme,mode", THEMES)
-def test_the_sprite_tool_row_keeps_the_mockups_spacing(tmp_path, config, theme, mode):
+def test_the_sprite_tool_row_keeps_the_mockups_spacing(tmp_path, theme, mode):
     """The one tool row (owner, 2026-10-19) stands at the mockup's pitch,
-    48 px on the desk and 24 on the handheld, from the grid's left edge
-    under the grid or from the column's at its head."""
+    24 px on the handheld, from the grid's left edge under the grid or
+    from the column's at its head."""
     from runtime import paint_layer
-    ws = _ws(tmp_path, config, theme, mode)
-    lay, _ox, _oy = _sprites(ws, config)
+    ws = _ws(tmp_path, HANDHELD, theme, mode)
+    lay = _sprites(ws)
     row = lay.tool_btns
     assert len(row) == len(paint_layer._TOOL_ROW)
-    pitch = 48 if config == DESK else 24 * lay.fs
-    assert {b[0] - a[0] for a, b in zip(row, row[1:])} == {pitch}
+    assert {b[0] - a[0] for a, b in zip(row, row[1:])} == {24 * lay.fs}
     assert row[0][0] in (lay.pg_x0, lay.spr_prev[0])
 
 

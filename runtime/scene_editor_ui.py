@@ -1,28 +1,23 @@
 # Map (grep -n a name to jump there):
-#   SceneLayout          responsive scene-editor geometry
-#   SceneEditorUI        the placement editor's UI: world, palette, props
+#   SceneLayout          the scene editor's geometry: the handheld page's or a desk pane's
+#   SceneEditorUI        the placement editor's UI: the world view and its gestures
 #   SceneEditorUI.build  build the SceneEditor over a scene
 #   SceneEditorUI.save   persist the edited scene
 """The scene (placed-actor) placement editor's UI layer (#85 Stage 2): a panned
-WYSIWYG view of the WORLD on the left -- the tilemap as the backdrop, the fixed
-320x240 game viewport as a frame, every placed actor as its sprite -- a paged
-tile palette on the right to pick the stamp, a pan d-pad + zoom, and the
-selected actor's inline props row (tag / flip / delete / z-order).
+WYSIWYG view of the WORLD -- the tilemap as the backdrop, the fixed 320x240
+game viewport as a frame, every placed actor as its sprite -- and the
+gestures over it. On the handheld the Scene tab is the page
+`runtime/editor_scene.py` draws round the view (the stamps, the picked
+actor's props, the tools); in a desk Editor's Scene pane the view fills the
+pane, the stamps are the Stamps pane's, the props the Actor pane's and the
+tools the pane header's (`runtime/editor_desk.py`).
 
-Practically the map editor with an actor palette instead of a tile palette
-(#85 Section 4) -- same gesture grammar, same shared-console home, mirroring
-map_editor_ui.py's MapEditorUI shape (layout class + UI class + injected
-NAMES/_in). The genuinely new machinery is OBJECT select/move/delete and the
-inline tag row:
+The map editor's gesture grammar, over objects:
 
-  * tap a sheet tile in the palette   -> it's the active stamp
   * tap empty world                   -> place ONE actor there (selects it)
   * tap an existing actor             -> select it (topmost wins)
   * drag an actor                     -> move it (live, one undo step)
   * drag empty world                  -> pan the view (map-editor gesture)
-  * TAG field (selected)              -> type a tag, ENTER commits
-  * SNAP toggle                       -> 8px tile-grid placement vs free-pixel
-  * FRONT/BACK                        -> z-order = list order (#85 Section 2)
 
 Coordinates are WORLD-SPACE pixels (#85 Section 7): the editor shows a viewport
 frame at world (0,0)-(320,240) over a pannable world, so screen-space carts just
@@ -34,8 +29,6 @@ TileMap gives the map tab. SAVE persists through Project.commit_scene (atomic
 write + the durable undo journal, Stage 1). The editor manages the cart's
 DEFAULT scene (multi-scene UX is a deferred follow-up, #85 decision log 4)."""
 
-from array import array
-
 try:
     import ui as _ui              # frozen on device
     import ui_draw as _ui_draw
@@ -45,197 +38,58 @@ except ImportError:  # pragma: no cover - host fallback
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
-    from editors import SceneEditor, KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
+    from editors import SceneEditor, KeyEdge
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import (SceneEditor, KeyEdge, TextEntry, TE_COMMIT,
-                                 TE_CANCEL)
+    from runtime.editors import SceneEditor, KeyEdge
 
 try:
-    from chrome import _gbtn as _chrome_gbtn
-except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
-    from runtime.chrome import _gbtn as _chrome_gbtn
-
-try:
-    from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
-                             pane as _in_pane, metric_class as _metric_class, DESK as _DESK)
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H, pane as _in_pane,
-                                     metric_class as _metric_class, DESK as _DESK)
+                                     BASE_H as _BASE_H, pane as _in_pane)
 
 # The handheld page (editor_scene.py): the right column's width and the
 # foot's height, beside and under the view.
 HAND_COL = 104
 HAND_FOOT = 27
 
-# World view (left): the panned window onto the world, same rectangle the map
-# editor uses (clear of the palette column at x >= 206 and the bottom row).
-_SV_X0 = 14
-_SV_Y0 = 32
-_SV_AVAIL_W = 192      # usable view width  (14 .. 206)
-_SV_AVAIL_H = 164      # usable view height (32 .. 196)
 # Zoom SCALES (not cell sizes): world px -> view px multipliers. 1x shows the
 # most world; 2x/3x zoom IN for fine placement (sprites only ever upscale).
 _SV_ZOOMS = (1, 2, 3)
-# Tile palette (right): a paged grid of sheet tiles; tap to pick the stamp.
-# Identical geometry to the map editor's palette (one muscle memory).
-_TP_X0 = 210
-_TP_Y0 = 32
-_TP_CELL = 22
-_TP_COLS = 4
-_TP_ROWS = 4
-_TP_PAGE = _TP_COLS * _TP_ROWS
-_TP_AREA = (_TP_X0, _TP_Y0, _TP_COLS * _TP_CELL, _TP_ROWS * _TP_CELL)
-_TP_PREV = (_TP_X0, _TP_Y0 + _TP_ROWS * _TP_CELL + 2, 42, 18)
-_TP_NEXT = (_TP_X0 + 46, _TP_Y0 + _TP_ROWS * _TP_CELL + 2, 42, 18)
-# Pan d-pad cluster (right column, under the palette) -- the map editor's slots:
-# zoom in the center, and the free top-left corner slot holds the FLIP toggle.
-_SC_FLIP = (218, 146, 24, 16)
-_SC_ZOOM = (244, 164, 24, 16)
-_PAN_UP = (244, 146, 24, 16)
-_PAN_LF = (218, 164, 24, 16)
-_PAN_RT = (270, 164, 24, 16)
-_PAN_DN = (244, 182, 24, 16)
-# Bottom row: the selected actor's TAG field + DEL, and the SNAP toggle on the
-# right (the slot the map editor gives its SKY swatch).
-_SC_TAG = (14, 198, 120, 20)
-_SC_DEL = (138, 198, 40, 20)
-_SC_SNAP = (206, 198, 100, 20)
-# Title-band toolbar (the map editor's 4-slot strip): UNDO / REDO / FRONT / BACK.
-_SC_UNDO = (196, 17, 26, 13)
-_SC_REDO = (224, 17, 26, 13)
-_SC_FRONT = (252, 17, 26, 13)
-_SC_BACK = (280, 17, 26, 13)
+# The tiles a page of the handheld page's palette shows: four rows of four.
+_TP_PAGE = 16
 # Drag-vs-tap threshold (px), the map editor's gesture rule (#37).
 _SC_PAN_THRESH = 6
 
 
 class SceneLayout(LayoutBase):
-    """Responsive scene-editor geometry (#39): the panel, the panned world view,
-    the paged tile palette + pan/zoom column, the props row and the toolbar,
-    derived from the SYSTEM canvas size (w, h) + font scale.
+    """The scene editor's geometry, from the SYSTEM canvas size (w, h) and
+    font scale. On the handheld (`verbs`) the world view runs from the
+    content rect's top left to the page's right column and foot, which
+    `editor_scene.ScenePage` draws; in a desk Editor's Scene pane (`pane`)
+    the view fills the pane."""
 
-    The T-Deck's 320x240 is laid out by the same formulas as every canvas. The world VIEW is the
-    star of the reflow -- a big panel shows the whole 320x240 viewport (and
-    beyond) with no panning."""
-
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None,
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
                  chrome_scale=None):
-        # `bounds` (bx, by, bw, bh) confines the whole editor to a SUB-RECT of the
-        # system canvas -- the right pane of the combined Blocks+Scene workspace
-        # (blocks-left / objects-right, Scratch-style), a big-screen feature: the
-        # T-Deck's scene tab is never bounded.
         LayoutBase.__init__(self, w, h, font_scale,
                             chrome_scale=chrome_scale)
         fs = self.fs
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        self.body_fill = (cx, cy, cw, ch)
         self.zooms = _SV_ZOOMS
-        # -- responsive: the MapLayout formulas (right column anchored to the
-        # panel's right edge, button row to its bottom, view fills the rest) ----
-        if bounds is not None:
-            # Confined to the workspace's right pane: the panel fills the pane
-            # (minus a hair of inset), and every rect below derives from px/py/
-            # pw/ph exactly as the full-canvas path -- so the whole scene editor
-            # relocates with no other change.
-            bx, by, bw, bh = bounds
-            px, py = bx + 2 * fs, by + 2 * fs
-            pw, ph = bw - 4 * fs, bh - 4 * fs
-            self.body_fill = (bx, by, bw, bh)
-        else:
-            # The content rect, its top edge tucked 2fs under a top bar's.
-            px, py = self.cx + 8 * fs, max(0, self.cy - 2 * fs)
-            pw, ph = self.cw - 16 * fs, self.cy + self.ch - py - 20 * fs
-            self.body_fill = (self.cx, self.cy, self.cw, self.ch)
-        self.panel = (px, py, pw, ph)
-        p_right = px + pw
-        p_bottom = py + ph
-        self.title_xy = (px + 6 * fs, py + _ui_draw.line_dy(2 * fs, fs))
-        row_y = p_bottom - 22 * fs
-        rc_x = p_right - 106 * fs
-        self.sv_x0 = px + 6 * fs
-        self.sv_y0 = py + 16 * fs
-        self.sv_avail_w = rc_x - self.sv_x0
-        self.sv_avail_h = row_y - self.sv_y0 - 2 * fs
-        pan_dn_y = row_y - 16 * fs
-        pan_mid_y = row_y - 34 * fs
-        pan_up_y = row_y - 52 * fs
-        bw, bh = 24 * fs, 16 * fs
-        self.pan_up = (rc_x + 38 * fs, pan_up_y, bw, bh)
-        self.pan_lf = (rc_x + 12 * fs, pan_mid_y, bw, bh)
-        self.pan_rt = (rc_x + 64 * fs, pan_mid_y, bw, bh)
-        self.pan_dn = (rc_x + 38 * fs, pan_dn_y, bw, bh)
-        self.zoom_btn = (rc_x + 38 * fs, pan_mid_y, bw, bh)
-        self.flip_btn = (rc_x + 12 * fs, pan_up_y, bw, bh)
-        self.tp_x0 = rc_x + 4 * fs
-        self.tp_y0 = self.sv_y0
-        self.tp_cell = _TP_CELL * fs
-        self.tp_cols = _TP_COLS
-        self.tp_rows = max(1, (pan_up_y - 22 * fs - self.tp_y0) // self.tp_cell)
-        self.tp_page = self.tp_cols * self.tp_rows
-        self.tp_area = (self.tp_x0, self.tp_y0,
-                        self.tp_cols * self.tp_cell, self.tp_rows * self.tp_cell)
-        tp_by = self.tp_y0 + self.tp_rows * self.tp_cell + 2 * fs
-        self.tp_prev = (self.tp_x0, tp_by, 42 * fs, 18 * fs)
-        self.tp_next = (self.tp_x0 + 46 * fs, tp_by, 42 * fs, 18 * fs)
-        self.tag_btn = (px + 6 * fs, row_y, 120 * fs, 20 * fs)
-        self.del_btn = (px + 130 * fs, row_y, 40 * fs, 20 * fs)
-        self.snap_btn = (rc_x, row_y, 100 * fs, 20 * fs)
-        tb_y = py + 2 * fs
-        tbw, tbh, gap = 26 * fs, 13 * fs, 2 * fs
-        tb_right = p_right - 6 * fs
-        self.back_btn = (tb_right - tbw, tb_y, tbw, tbh)
-        self.front_btn = (self.back_btn[0] - gap - tbw, tb_y, tbw, tbh)
-        self.redo_btn = (self.front_btn[0] - gap - tbw, tb_y, tbw, tbh)
-        self.undo_btn = (self.redo_btn[0] - gap - tbw, tb_y, tbw, tbh)
         self.pan_thresh = _SC_PAN_THRESH * fs
-        self.pane = _in_pane() and bounds is None
-        self.verbs = bounds is None and not self.pane and _metric_class() != _DESK
+        self.tp_page = _TP_PAGE
+        self.pane = _in_pane()
+        self.verbs = not self.pane
         if self.pane:
-            self._pane_geometry()
-        elif self.verbs:
-            self._hand_geometry()
-
-    def _hand_geometry(self):
-        """The handheld's tab on the verbs (EDITOR_LAYOUT.md's Scene): the
-        view from the content rect's top left to the right column and the
-        foot, which `editor_scene.ScenePage` draws; the panel's buttons
-        stand off the surface."""
-        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
-        self.body_fill = self.panel = (cx, cy, cw, ch)
-        self.sv_x0, self.sv_y0 = cx, cy
-        self.sv_avail_w = cw - HAND_COL
-        self.sv_avail_h = ch - HAND_FOOT - 1
-        off = (-4096, -4096, 0, 0)
-        for name in ("pan_up", "pan_lf", "pan_rt", "pan_dn", "zoom_btn", "flip_btn",
-                     "tp_prev", "tp_next", "tag_btn", "del_btn", "snap_btn",
-                     "back_btn", "front_btn", "redo_btn", "undo_btn"):
-            setattr(self, name, off)
-        self.tp_x0 = cx + cw - HAND_COL + 6
-        self.tp_y0 = cy + 6
-        self.tp_cell = 22
-        self.tp_cols = self.tp_rows = 4
-        self.tp_page = 16
-        self.tp_area = (self.tp_x0, self.tp_y0, 4 * 22, 4 * 22)
-        self.title_xy = (-4096, -4096)
-
-    def _pane_geometry(self):
-        """A desk Editor's Scene pane (EDITOR_LAYOUT.md's World): the view
-        fills the pane; the stamps are the Stamps pane's, the props the Actor
-        pane's and the tools the pane header's, so the palette, the pad and
-        the props row stand off the surface."""
-        fs = self.fs
-        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
-        self.body_fill = self.panel = (cx, cy, cw, ch)
-        self.sv_x0, self.sv_y0 = cx + 2 * fs, cy + 2 * fs
-        self.sv_avail_w, self.sv_avail_h = cw - 4 * fs, ch - 4 * fs
-        off = (-4096, -4096, 0, 0)
-        for name in ("pan_up", "pan_lf", "pan_rt", "pan_dn", "zoom_btn", "flip_btn",
-                     "tp_prev", "tp_next", "tag_btn", "del_btn", "snap_btn",
-                     "back_btn", "front_btn", "redo_btn", "undo_btn"):
-            setattr(self, name, off)
-        self.tp_area = off
-        self.tp_rows = 1
-        self.tp_page = self.tp_cols
-        self.title_xy = (-4096, -4096)
+            self.sv_x0, self.sv_y0 = cx + 2 * fs, cy + 2 * fs
+            self.sv_avail_w, self.sv_avail_h = cw - 4 * fs, ch - 4 * fs
+        else:
+            self.sv_x0, self.sv_y0 = cx, cy
+            self.sv_avail_w = cw - HAND_COL
+            self.sv_avail_h = ch - HAND_FOOT - 1
+            self.tp_x0 = cx + cw - HAND_COL + 6
+            self.tp_y0 = cy + 6
 
 
 class SceneEditorUI:
@@ -252,8 +106,6 @@ class SceneEditorUI:
         self.scene_name = None         # the DEFAULT scene this editor manages
         self.scene_page = 0            # first tile id shown in the palette
         self.scene_zoom = 0            # index into layout.zooms (0 = 1x)
-        self.tag_edit = False          # the TAG field is capturing keystrokes
-        self.tag_buf = TextEntry(SceneEditor.TAG_MAX)   # the tag being typed
         self._skey = KeyEdge()         # Ctrl+Z/Y edge tracker
         self._press = None             # gesture origin (px, py); None outside one
         self._mode = None              # open gesture: "move" (an actor) or "pan"
@@ -261,8 +113,6 @@ class SceneEditorUI:
         self._drag = None              # last pointer (px, py) during a view pan
         self._grab = (0, 0)            # world offset actor-origin - press (a drag
                                        # holds the sprite where the finger picked it)
-        self._tp_memo = None           # #163: palette-grid quad pack, keyed on
-                                       # (geometry, count) -- relayout invalidates
         self.place_taps = True         # the handheld page's stamp tool: a tap on empty world places
         self._page = None              # the handheld's page on the verbs (editor_scene.py)
         sc = ws.sys_canvas
@@ -304,17 +154,6 @@ class SceneEditorUI:
             self.scene_zoom = 0
         self._clamp_cam()
 
-    def relayout_bounded(self, bounds):
-        """Rebuild the scene geometry CONFINED to `bounds` (bx, by, bw, bh) -- the
-        right pane of the combined Blocks+Scene workspace. Mirrors relayout() but
-        into a sub-rect; called each frame the workspace is active by the Blocks
-        tab, so a window resize (new sys_canvas size) re-derives the pane."""
-        sc = self.ws.sys_canvas
-        self.layout = SceneLayout(sc.w, sc.h, getattr(sc, "font_scale", 1), bounds)
-        if self.scene_zoom >= len(self.layout.zooms):
-            self.scene_zoom = 0
-        self._clamp_cam()
-
     def build(self):
         """Build the SceneEditor over the open cart's DEFAULT scene (the
         manifest's element 0; a cart with none starts an empty "main"). Called
@@ -333,16 +172,12 @@ class SceneEditorUI:
         cart). Called from Workstation.open()/go_home()/_reload_after_walk."""
         self.sceneedit = None
         self.scene_name = None
-        self.tag_edit = False
-        self.tag_buf.open("")
 
     def on_open(self):
         """Reset gesture/zoom/props state -- called from EditorApp.open_scene
         before set_menu_view("scene") (re)builds the editor."""
         self.scene_zoom = 0
         self.scene_page = 0
-        self.tag_edit = False
-        self.tag_buf.open("")
         self._press = None
         self._mode = None
         self._panning = False
@@ -461,9 +296,8 @@ class SceneEditorUI:
     # -- input ----------------------------------------------------------------
 
     def _scene_input(self):
-        """Keyboard: while the TAG field is capturing, typed bytes edit the tag
-        (ENTER commits, ESC cancels -- the wifi-password pattern). Otherwise the
-        d-pad nudges the selected actor (or pans when nothing is selected), A
+        """Keyboard: the handheld page's popover takes the keys while it is
+        open. Otherwise the d-pad nudges the selected actor (or pans when nothing is selected), A
         cycles zoom, Ctrl+Z/Y walk the in-editor history, B steps back."""
         ws = self.ws
         i = ws.input
@@ -479,15 +313,6 @@ class SceneEditorUI:
                 return
             if page.owed():
                 ws._dirty = True
-        if se is not None and self.tag_edit:
-            ev = self.tag_buf.feed(i)
-            if ev == TE_COMMIT:                      # ENTER -> commit the tag
-                self._tag_commit()
-            elif ev == TE_CANCEL:                    # ESC -> cancel
-                self._tag_cancel()
-            if ev is not None:
-                ws._dirty = True
-            return                                   # the field owns every key
         if se is not None:
             g = 8
             if se.selected() is not None:
@@ -532,45 +357,16 @@ class SceneEditorUI:
             self._sync_live()
             self._clamp_cam()
 
-    # -- the TAG field (inline props, #85 Section 4) --------------------------
-
-    def _tag_start(self):
-        """Tap on the TAG field with an actor selected: begin capturing keys.
-        Flips the device keyboard to clean ASCII (the code-editor/wifi mode)."""
-        se = self.sceneedit
-        r = se.selected() if se is not None else None
-        if r is None:
-            return
-        self.tag_edit = True
-        self.tag_buf.open(r.get("tag", ""),
-                          getattr(self.ws.input, "last_key", 0) or 0)
-        self.ws._set_text_mode(True)
-
-    def _tag_commit(self):
-        se = self.sceneedit
-        self.tag_edit = False
-        self.ws._set_text_mode(False)
-        if se is not None and se.set_tag(self.tag_buf.text):
-            self._sync_live()
-
-    def _tag_cancel(self):
-        self.tag_edit = False
-        self.ws._set_text_mode(False)
-
     # -- pointer gestures ------------------------------------------------------
 
     def _scene_click(self, px, py):
         """Pointer PRESS. In the world view: an actor under the tap -> select it
         and open a MOVE gesture; empty world -> open a PAN gesture (a release
-        inside the tap threshold PLACES there instead). Elsewhere: the palette /
-        toolbar / props buttons."""
+        inside the tap threshold PLACES there instead)."""
         ws = self.ws
         se = self.sceneedit
         if se is None:
             return
-        lay = self.layout
-        if self.tag_edit and not _in(px, py, lay.tag_btn):
-            self._tag_commit()                   # tap-away commits the typed tag
         if _in(px, py, self._sv_area()):
             self._press = (px, py)
             self._panning = False
@@ -587,59 +383,6 @@ class SceneEditorUI:
             else:
                 self._mode = "pan"
             ws._dirty = True
-            return
-        if _in(px, py, lay.undo_btn):
-            self._undo()
-            return
-        if _in(px, py, lay.redo_btn):
-            self._redo()
-            return
-        if _in(px, py, lay.front_btn):
-            if se.front_sel():
-                self._sync_live()
-            return
-        if _in(px, py, lay.back_btn):
-            if se.back_sel():
-                self._sync_live()
-            return
-        if _in(px, py, lay.tag_btn):
-            self._tag_start()
-            return
-        if _in(px, py, lay.del_btn):
-            if se.delete_sel():
-                self._sync_live()
-            return
-        if _in(px, py, lay.snap_btn):
-            se.snap = not se.snap
-            return
-        if _in(px, py, lay.flip_btn):
-            if se.toggle_flip():
-                self._sync_live()
-            return
-        if _in(px, py, lay.tp_area):
-            col = (px - lay.tp_x0) // lay.tp_cell
-            row = (py - lay.tp_y0) // lay.tp_cell
-            if 0 <= col < lay.tp_cols and 0 <= row < lay.tp_rows:
-                k = row * lay.tp_cols + col
-                ids = self._palette_ids()
-                if 0 <= k < len(ids):
-                    se.set_brush(ids[k])     # pick sprite + adopt its object type (#85/#93)
-        elif _in(px, py, lay.tp_prev):
-            self.scene_page = max(0, self.scene_page - lay.tp_page)
-        elif _in(px, py, lay.tp_next):
-            sheet = ws.project.sheet
-            if sheet is not None and self.scene_page + lay.tp_page < sheet.count:
-                self.scene_page += lay.tp_page
-        elif _in(px, py, lay.zoom_btn):
-            self._cycle_zoom()
-        elif _in(px, py, lay.pan_up):
-            self._pan(0, -8)
-        elif _in(px, py, lay.pan_dn):
-            self._pan(0, 8)
-        elif _in(px, py, lay.pan_lf):
-            self._pan(-8, 0)
-        elif _in(px, py, lay.pan_rt):
-            self._pan(8, 0)
 
     def _scene_drag(self, px, py):
         """Held-drag: a MOVE gesture tracks the actor under the finger (live,
@@ -685,7 +428,7 @@ class SceneEditorUI:
                     self._sync_live()
                     self._clamp_cam()
             elif (self._mode == "pan" and not self._panning
-                  and (self.place_taps or not self.layout.verbs)):
+                  and (self.place_taps or self.layout.pane)):
                 w = self._world_at(*self._press)
                 if w is not None:
                     se.place(w[0], w[1])
@@ -698,126 +441,19 @@ class SceneEditorUI:
 
     # -- drawing ---------------------------------------------------------------
 
-    def _gbtn(self, kind, label, rect, fill, cv):
-        _chrome_gbtn(self.ws, self._NAMES, kind, label, rect, fill, cv)
-
     def _draw_scene(self):
-        """The placement editor: the world view (tilemap backdrop + the 320x240
-        viewport frame + placed actors), the tile palette, the pan/zoom column,
-        the props row and the toolbar. Indexed API only, so host == device."""
+        """The Scene tab: the handheld's page round the view, or a desk
+        pane's view. Indexed API only, so host == device."""
         ws = self.ws
-        NAMES = self._NAMES
         cv = ws.sys_canvas
         lay = self.layout
-        se = self.sceneedit
-        sheet = ws.project.sheet
         th = ws.theme_colors
         if lay.verbs:
             self.page().draw(cv, th, (lay.cx, lay.cy, lay.cw, lay.ch), False)
             return
         cv.rect(*(lay.body_fill + (th["surface"],)))
-        # Only the sliver of `panel` that `body_fill` did not already cover in
-        # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
-        # nothing (see ui.fill_uncovered).
-        if not lay.pane:
-            _ui_draw.fill_uncovered(cv, lay.panel, lay.body_fill,
-                               th["surface"])
-            cv.rectb(*(lay.panel + (NAMES["green"],)))
-        x0, y0, scale, vw, vh = self._sv_metrics()
-        title = "SCENE"
-        if self.scene_name:
-            title += " " + str(self.scene_name)[:8].upper()
-        title += "  TILE " + str(se.n if se else 0) + "  z" + str(self.scene_zoom + 1)
-        cv.print(title, lay.title_xy[0], lay.title_xy[1],
-                 th["ink"], 1)
-        if se is None or sheet is None:
-            return
-        self.draw_view(cv)
-        if lay.pane:
-            return
-        # -- tile palette (the stamp picker; the brush tile is boxed white).
-        # #163 conversion: the grid's chrome is a MEMOIZED quad pack -- one
-        # fill_rects paints every cell's black bg, one paints every dark
-        # border -- with the tile stamps as a single spr_tile run between
-        # them (one native blit_batch). Cells are disjoint rects, so the
-        # phase split is pixel-identical to the old per-cell rect/spr/rectb
-        # order; the brush cell's white border paints LAST over its dark
-        # twin (opaque, same final pixels as drawing it alone). Was ~250
-        # per-call verbs on an 80-cell pane; now 3 batched calls + a rectb.
-        ids = self._palette_ids()
-        tscale = max(1, lay.tp_cell // (sheet.TILE + 6))
-        npal = len(ids)
-        key = (lay.tp_x0, lay.tp_y0, lay.tp_cols, lay.tp_cell, npal)
-        memo = self._tp_memo
-        if memo is None or memo[0] != key:
-            cell = lay.tp_cell
-            bg = []
-            bd = []
-            for k in range(npal):
-                x = key[0] + (k % key[2]) * cell
-                y = key[1] + (k // key[2]) * cell
-                bg += [x, y, cell, cell, 0]        # ci unused: c overrides
-                bd += [x, y, cell, 1, 0,
-                       x, y + cell - 1, cell, 1, 0,
-                       x, y, 1, cell, 0,
-                       x + cell - 1, y, 1, cell, 0]
-            memo = (key, array("h", bg), array("h", bd))
-            self._tp_memo = memo
-        cv.fill_rects(memo[1], npal, 0, 0, NAMES["black"])
-        inset = (lay.tp_cell - sheet.TILE * tscale) // 2
-        for k in range(npal):
-            cv.spr_tile(sheet, ids[k],
-                        lay.tp_x0 + (k % lay.tp_cols) * lay.tp_cell + inset,
-                        lay.tp_y0 + (k // lay.tp_cols) * lay.tp_cell + inset,
-                        -1, tscale, 0)
-        cv.fill_rects(memo[2], npal * 4, 0, 0, NAMES["dark_grey"])
-        if se.n in ids:
-            k = ids.index(se.n)
-            cv.rectb(lay.tp_x0 + (k % lay.tp_cols) * lay.tp_cell,
-                     lay.tp_y0 + (k // lay.tp_cols) * lay.tp_cell,
-                     lay.tp_cell, lay.tp_cell, NAMES["white"])
-        ws._btn("<", lay.tp_prev, NAMES["blue"], cv)
-        ws._btn(">", lay.tp_next, NAMES["blue"], cv)
-        # -- pan/zoom column + FLIP (props) in the corner slot.
-        sel = se.selected()
-        self._gbtn("flip_h", "FL", lay.flip_btn,
-                   NAMES["dark_purple"] if sel is not None and sel.get("flip")
-                   else (NAMES["indigo"] if sel is not None else NAMES["dark_grey"]),
-                   cv)
-        ws._btn("Z" + str(self.scene_zoom + 1), lay.zoom_btn, NAMES["dark_purple"], cv)
-        ws._btn("^", lay.pan_up, NAMES["indigo"], cv)
-        ws._btn("v", lay.pan_dn, NAMES["indigo"], cv)
-        ws._btn("<", lay.pan_lf, NAMES["indigo"], cv)
-        ws._btn(">", lay.pan_rt, NAMES["indigo"], cv)
-        # -- props row: TAG field + DEL, SNAP toggle on the right.
-        tx, ty, tw2, th2 = lay.tag_btn
-        fs = lay.fs
-        cv.rect(tx, ty, tw2, th2, NAMES["dark_blue"])
-        if self.tag_edit:
-            tag_text = "TAG " + self.tag_buf.text + "_"
-        elif sel is not None:
-            tag_text = "TAG " + (sel.get("tag") or "-")
-        else:
-            tag_text = "TAG -"
-        cv.print(_ui_draw.print_cut(tag_text, tw2 - 8 * fs, fs), tx + 4 * fs,
-                 ty + (th2 - _ui_draw.font("ui")[2] * fs) // 2,
-                 NAMES["white"], 1)
-        cv.rectb(tx, ty, tw2, th2,
-                 NAMES["white"] if self.tag_edit else
-                 (NAMES["light_grey"] if sel is not None else NAMES["dark_grey"]))
-        self._gbtn("clear", "DEL", lay.del_btn,
-                   NAMES["red"] if sel is not None else NAMES["dark_grey"], cv)
-        ws._btn("SNAP " + ("ON" if se.snap else "OFF"), lay.snap_btn,
-                NAMES["dark_green"] if se.snap else NAMES["dark_grey"], cv)
-        # -- toolbar: UNDO / REDO / FRONT (to top) / BACK (to bottom).
-        self._gbtn("undo", "UN", lay.undo_btn,
-                   NAMES["blue"] if se.can_undo() else NAMES["dark_grey"], cv)
-        self._gbtn("redo", "RE", lay.redo_btn,
-                   NAMES["blue"] if se.can_redo() else NAMES["dark_grey"], cv)
-        self._gbtn("arr_u", "FR", lay.front_btn,
-                   NAMES["orange"] if sel is not None else NAMES["dark_grey"], cv)
-        self._gbtn("arr_d", "BK", lay.back_btn,
-                   NAMES["orange"] if sel is not None else NAMES["dark_grey"], cv)
+        if self.sceneedit is not None and ws.project.sheet is not None:
+            self.draw_view(cv)
 
     def draw_view(self, cv, boxes=True):
         """The world view: the dark field, the tilemap backdrop, the game

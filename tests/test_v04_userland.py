@@ -1385,7 +1385,8 @@ def test_host_console_map_open_place_and_render(tmp_path):
     assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     # pick the 2nd palette tile (id == map_page + 1) ...
     lay = ws.map_ui.layout
-    px = lay.tp_x0 + 1 * lay.tp_cell
+    from runtime import editor_map
+    px = lay.tp_x0 + 1 * editor_map.CELL
     py = lay.tp_y0
     drv.click(px + 2, py + 2)
     drv.frame(1 / 30)

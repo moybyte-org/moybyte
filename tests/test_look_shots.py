@@ -274,7 +274,7 @@ def test_the_kit_measures_the_editor_and_the_desk_apps(tmp_path):
     (R3-11) and the one row's mockup pitch (2026-10-19), the desk
     Appearance foot (R3-27)."""
     L.run(str(tmp_path), ["moy-dark_handheld_code-editor_undo-off",
-                          "moy-dark_desktop_sprite-editor",
+                          "moy-dark_handheld_sprite-editor",
                           "moy-dark_desktop_appearance_focus-cycler"],
           quiet=True, kit=True, only_kit=True, audit_csv=True)
     kit = tmp_path / "kit"

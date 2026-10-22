@@ -234,7 +234,7 @@ def _editor(ws, drv, desk, size=None):
 
 @pytest.mark.parametrize("config,inputs,size", [
     (DESK, "touch", None),            # the P4's Editor window, the labelled shelf
-    (DESK, "touch", (520, 400)),      # a narrow window: the icon ladder
+    (DESK, "touch", (520, 400)),      # a narrow window, at its workspace's least size
     (DESK, "touch", "full"),          # full screen: the row past the title slot
     (GUITION_P4, "touch", "full"),
     (HANDHELD, "touch", None),
@@ -248,11 +248,12 @@ def test_a_tap_on_a_drawn_editor_bar_item_fires_that_item(tmp_path, monkeypatch,
     _editor(ws, drv, config in DESKS, size)
     drawn = _drawn(ws, drv, monkeypatch)
     actions = [a for a, _r in drawn]
-    if size is None or size == "full":    # a shipped bar: every item
-        assert sorted(set(actions), key=_all(ws).index) == _all(ws), drawn
-    else:
-        assert "cards" in actions and None in actions \
-            and editor_app._ZONE_UNDO in actions, drawn
+    if isinstance(size, tuple):
+        # the window stops at the workspace's least size (`EditorDesk.min_window`)
+        win = ws.wm._wins["menu"]
+        mw, mh = ws.editor_desk.min_window()
+        assert win.w >= min(mw, ws.wm._desk_rect()[2]), (win.w, mw)
+    assert sorted(set(actions), key=_all(ws).index) == _all(ws), drawn
     taps = _taps(ws, drv, monkeypatch, drawn)
     wrong = [t for t in taps if t[2] != [t[0]]]
     assert not wrong, ("drawn item, its rect, what its tap fired", wrong)
