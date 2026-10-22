@@ -78,6 +78,7 @@ _CODE_MORE = (("select", "Select", "sel"), ("copy", "Copy\tCtrl+C", "copy"),
               ("indent", "Indent\tTab", "indent"), ("outdent", "Outdent", "outdent"),
               ("linenums", "Line numbers", "gutter"), ("code", "Complete", "auto"))
 
+_TAB_PAD = 28               # a header tab's room beside its word
 LOUPE = 3                   # the Sheet's loupe: a held tile at 3x its 16 px
 _DOUBLE_MS = 400            # a second press this soon on a header or handle
 _FULL_MS = 1000
@@ -560,13 +561,20 @@ class EditorDesk(Layer):
             if ui.tool("maximize", "Grow\tCtrl+Shift+Enter", {"id": pid + " grow"}):
                 self.grow(pane)
             tx = x + w - cell - 2 * u
+            tools, folded = self._head_fit(pane, c, x, w, u)
+            if folded:
+                tx -= cell
+                ui.at(tx, y, cell, hh)
+                if ui.tool("more", "More", {"id": pid + " head more"}):
+                    self.part_state["head more"] = (tx, y + hh, cell, folded)
+                    self.ws._dirty = True
             if c == "game":
                 tx -= cell
                 ui.at(tx, y, cell, hh)
                 if ui.tool("sleep", "Pause", {"id": pid + " pause", "current": self.paused,
                                               "disabled": not self.ws.editor_app.playing()}):
                     self.pause(not self.paused)
-            for icon, word, op in _HEAD_TOOLS.get(self.tab_of(pane), ()):
+            for icon, word, op in tools:
                 tx -= cell
                 ui.at(tx, y, cell, hh)
                 if ui.tool(icon, word, {"id": "%s %s" % (pid, op),
@@ -593,6 +601,8 @@ class EditorDesk(Layer):
             ui.cursor(*r)
         if self.part_state.get("code more") is not None:
             self._code_more(u)
+        if self.part_state.get("head more") is not None:
+            self._head_more(u)
         flash = self._flash
         if flash is not None and self._drag is not None:
             pane, why = flash
@@ -628,6 +638,49 @@ class EditorDesk(Layer):
         if got is not None and 0 <= got < len(names) and got != cur:
             ws.open_code_file(names[got])
         return tx
+
+    def _head_fit(self, pane, c, x, w, u):
+        """The header tools a pane shows and the ones its more menu holds:
+        as many as fit right of its name or tabs, the rest (the leftmost)
+        folded, as the Code header's are."""
+        tools = _HEAD_TOOLS.get(c, ())
+        if not tools:
+            return tools, ()
+        cell = 32 * u
+        if len(pane) == 1:
+            lead = 8 * u + 28 * u + ui.text_size(self._title(c, P.CONTENTS[c][0]))[0]
+        else:
+            lead = 4 * u + sum(ui.text_size(P.CONTENTS[k][0])[0] + _TAB_PAD * u for k in pane)
+        room = (w - lead - 2 * u - cell - 4 * u) // cell
+        if room >= len(tools):
+            return tools, ()
+        k = max(0, room - 1)
+        return tools[:k], tools[k:]
+
+    def _head_more(self, u):
+        """A pane header's more menu, hung under its tool: the tools that
+        did not fit."""
+        ws = self.ws
+        tx, ty, cell, ops = self.part_state["head more"]
+        w = 160 * u
+        ui.at(max(0, tx + cell - w), ty, w, 0)
+        if not ui.popover("head more", w):
+            self.part_state["head more"] = None
+            ui.popover()
+            ws._dirty = True
+            return
+        got = ui.menu("", [o[1] for o in ops], [o[0] for o in ops])
+        ui.popover()
+        if got is not None and 0 <= got < len(ops):
+            self.part_state["head more"] = None
+            self._head_tool(ops[got][2])
+            ws._dirty = True
+
+    def _menu_open(self):
+        """Whether a header's more menu is open (it takes the keys and the
+        pointer)."""
+        ps = self.part_state
+        return ps.get("code more") is not None or ps.get("head more") is not None
 
     def _code_more(self, u):
         """The Code pane's more menu, hung under its tool: the Code tab's other
@@ -910,7 +963,7 @@ class EditorDesk(Layer):
             return True
         if self._view_wheel(i):
             return True
-        if self.part_state.get("code more") is not None:
+        if self._menu_open():
             if self._host.keys(i):
                 ws._dirty = True
             return True
@@ -1024,7 +1077,7 @@ class EditorDesk(Layer):
     def _part_focused(self):
         """Whether the focused pane is one drawn on the verbs, whose stops
         take the keys."""
-        if self.part_state.get("code more") is not None:
+        if self._menu_open():
             return True
         c = self.tab_of(self.focused()[0])
         return c in Parts.PARTS or c in _ON_VERBS
@@ -1158,7 +1211,7 @@ class EditorDesk(Layer):
                     if n != self._focus.get(self.key, 0):
                         self.focus_pane(n)
                     break
-        if self.part_state.get("code more") is not None:
+        if self._menu_open():
             if self._host.point(px, py, click, down):
                 ws._dirty = True
             return True

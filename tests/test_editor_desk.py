@@ -13,6 +13,7 @@ sys.path.insert(0, ROOT)
 
 from runtime import editor_panes as P      # noqa: E402
 from runtime import host_app                # noqa: E402
+from runtime import ui                      # noqa: E402
 
 FULL_1024 = (6, 46, 1012, 548)              # full screen: the row is the top 40 px
 STRIP_1024 = (6, 90, 1012, 504)             # the pictures' title-strip frame
@@ -913,3 +914,50 @@ def test_the_sprite_panes_palette_wears_its_64_chip(desk):
     assert (x, w) == (lay.sw_x0, 2 * lay.sw) and h >= 32
     assert y > lay.sw_y0 + 8 * lay.sw            # under the palette, beside the steppers
     assert y == lay.spr_prev[1]
+
+
+# -- a header's tools that do not fit -----------------------------------------------------
+
+def _scene_game(d):
+    return next(n for n, (pane, _r, _p) in enumerate(d.panes()) if pane == ("scene", "game"))
+
+
+def test_a_narrow_headers_tools_fold_into_its_more_menu(blocks_desk):
+    ws, drv = blocks_desk
+    d = ws.editor_desk
+    n = _scene_game(d)
+    pane, (x, y, w, h), _p = d.panes()[n]
+    assert w == 340
+    shown, folded = d._head_fit(pane, "scene", x, w, 1)
+    assert folded and len(shown) + len(folded) == 6
+    tx = d._tools_x[n]
+    tabs_right = x + 4 + sum(ui.text_size(word)[0] + 28 for word in ("Scene", "Game"))
+    assert tx >= tabs_right                      # no tool over the tabs
+    se = ws.scene_ui.sceneedit
+    se.sel = 0
+    flip = bool(se.selected().get("flip"))
+    _press(drv, d, "pane %d head more" % n)
+    drv.frame(DT)
+    assert "Flip" in [f[1] for f in folded]
+    _press(drv, d, "Flip")
+    assert bool(se.rows[0].get("flip")) != flip
+    assert d.part_state.get("head more") is None
+    for _n, (pane, r, _p) in enumerate(d.panes()):    # a wide header folds nothing
+        if pane != ("scene", "game"):
+            for c in pane:
+                assert not d._head_fit(pane, c, r[0], r[2], 1)[1]
+
+
+def test_a_settled_header_more_menu_paints_nothing(blocks_desk):
+    ws, drv = blocks_desk
+    d = ws.editor_desk
+    _press(drv, d, "pane %d head more" % _scene_game(d))
+    assert d.part_state.get("head more") is not None
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    for _ in range(4):
+        drv.frame(DT)
+    drawn = ws._frames_drawn
+    for _ in range(8):
+        drv.frame(DT)
+    assert ws._frames_drawn == drawn
