@@ -1478,6 +1478,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if self.mode == "desktop" and ws.wallpaper.is_animating(dt):
             return True                 # a parked desk's wallpaper is not drawn
         return (self.stack.has("desktop") and ws.cart_error is None
+                and not ws.player.paused
                 and (ws._update is not None or ws._draw is not None))
 
     def _content_for(self, kind):

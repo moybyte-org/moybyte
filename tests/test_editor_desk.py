@@ -821,3 +821,46 @@ def test_play_takes_an_edited_map_in_place_and_keeps_an_unedited_runs_msets(desk
     assert pm.cells == pr.tilemap.cells
     pr.tilemap.resize(pr.tilemap.w + 1, pr.tilemap.h)
     assert pr.play_world()                       # a new size: the run restarts
+
+
+# -- the Run slot's pause ---------------------------------------------------------------
+
+def test_the_run_slots_pause_holds_the_run_and_shows_its_still(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)                       # Code: the Run slot
+    _play(drv)
+    win = ws.wm._wins["desktop"]
+    _press(drv, d, "pane 1 pause")
+    drv.frame(DT)
+    assert d.paused and ws.player.paused and win.minimized
+    assert d._still is not None                  # the still, dimmed under Play
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    for _ in range(3):
+        drv.frame(DT)
+    drawn = ws._frames_drawn
+    for _ in range(8):
+        drv.frame(DT)
+    assert ws._frames_drawn == drawn, "a paused Run slot painted"
+    gx, gy, gw, gh = d._still
+    _click(drv, gx + gw // 2, gy + gh // 2)      # the still's Play goes on
+    drv.frame(DT)
+    assert not d.paused and not ws.player.paused and not win.minimized
+    assert win.docked and ws.wm._order[-1] == "desktop"
+
+
+def test_restart_and_stop_end_the_pause(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)
+    _play(drv)
+    d.pause(True)
+    drv.frame(DT)
+    _play(drv)                                   # Ctrl+Enter: Restart
+    assert not d.paused and not ws.player.paused and ws.wm._wins["desktop"].docked
+    d.pause(True)
+    drv.frame(DT)
+    _tap(drv, ord("."), 1)                       # Stop
+    drv.frame(DT)
+    assert not d.paused and "desktop" not in ws.wm._wins

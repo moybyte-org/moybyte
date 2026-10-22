@@ -1139,7 +1139,11 @@ class EditorApp:
 
     def restart(self):
         """Restart: the playtest runs again from its start, with the tab's
-        freshest edit (`leave`, which re-starts the cart)."""
+        freshest edit (`leave`, which re-starts the cart); a paused Run
+        slot goes on with it."""
+        desk = self.ws._editor_desk
+        if desk is not None and desk.paused:
+            desk.pause(False)
         self.leave(restart=True)
 
     def _tab_is_clean(self, tab):

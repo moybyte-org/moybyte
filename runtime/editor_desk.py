@@ -127,6 +127,7 @@ class EditorDesk(Layer):
         self._ref = False               # the sheet drawn is the Reference's
         self._picked = 0                # the sprite picked with no Sprite pane built
         self._was_playing = False
+        self.paused = False             # the Run slot's pause: the run held, its still shown
         self._back_tab = {}             # a pane's tab before Play took it to Game
         self._fresh = 0                 # this frame's key event, where it is new
         self._tools_x = {}              # pane index -> its header tools' left edge
@@ -465,7 +466,7 @@ class EditorDesk(Layer):
         dock = getattr(ws.wm, "dock", None)
         if dock is None or not playing:
             return
-        if self._still_at is None:
+        if self._still_at is None or self.paused:
             dock("desktop", False)
             return
         ox, oy = self._origin()
@@ -478,6 +479,7 @@ class EditorDesk(Layer):
         playing = ws.editor_app.playing()
         if playing != self._was_playing:
             self._was_playing = playing
+            self.paused = False
             for _n, pane, _r in self._shown_panes():
                 if "game" in pane and len(pane) > 1:
                     if playing:
@@ -552,6 +554,12 @@ class EditorDesk(Layer):
             if ui.tool("maximize", "Grow\tCtrl+Shift+Enter", {"id": pid + " grow"}):
                 self.grow(pane)
             tx = x + w - cell - 2 * u
+            if c == "game":
+                tx -= cell
+                ui.at(tx, y, cell, hh)
+                if ui.tool("sleep", "Pause", {"id": pid + " pause", "current": self.paused,
+                                              "disabled": not self.ws.editor_app.playing()}):
+                    self.pause(not self.paused)
             for icon, word, op in _HEAD_TOOLS.get(self.tab_of(pane), ()):
                 tx -= cell
                 ui.at(tx, y, cell, hh)
@@ -642,7 +650,35 @@ class EditorDesk(Layer):
         d = 48 * u
         ui.at(gx + (gw - d) // 2, gy + (gh - d) // 2, d, d)
         if ui.tool("play", "Play\tCtrl+Enter", {"id": pid + " play"}):
+            self._play_slot()
+
+    def _play_slot(self):
+        """The still frame's Play: the paused playtest goes on, else Play."""
+        if self.paused:
+            self.pause(False)
+        else:
             self.ws.defer(self.ws._leave_menu)
+
+    def pause(self, on):
+        """The Run slot's pause: the playtest's window hides with its run
+        held (`WindowedWM.dock`) and the slot shows its last frame, dimmed
+        under Play; off, the run goes on where it stood and takes the keys."""
+        ws = self.ws
+        on = bool(on) and ws.editor_app.playing()
+        if on == self.paused:
+            return
+        self.paused = on
+        if on:
+            self._dock()                    # hidden now, its run held
+            ws.wm._move_focus("menu")
+        else:
+            win = ws.wm._wins.get("desktop")
+            if win is not None:
+                win.held = False            # the restore lands on the run, not its menu
+            ws.player.resume()
+            if "desktop" in ws.wm._wins:
+                ws.wm._move_focus("desktop")
+        ws._dirty = True
 
     def _title(self, c, label):
         ws = self.ws
@@ -747,10 +783,11 @@ class EditorDesk(Layer):
         if fb is not None:
             fb()
         cv.blit565_resize(gc._buf, gc.w, gc.h, gx, gy, gw, gh)
-        if not ws.editor_app.playing():
+        live = ws.editor_app.playing() and not self.paused
+        if not live:
             cv.shadow(gx, gy, gw, gh, 0, th["panel"], 140, 0)
         cv.clip()
-        self._still = None if ws.editor_app.playing() else (gx, gy, gw, gh)
+        self._still = None if live else (gx, gy, gw, gh)
         self._still_at = (gx, gy, gw, gh)
 
     def _sheet(self, cv, th, r, u, stamps=False):
@@ -1132,8 +1169,8 @@ class EditorDesk(Layer):
             self._owe_restart(tab)
             return got
         if c == "game":
-            if click and not ws.editor_app.playing():
-                ws.defer(ws._leave_menu)
+            if click and (self.paused or not ws.editor_app.playing()):
+                self._play_slot()
             return True
         if c in ("sprites", "stamps") and py >= body[1] + body[3] - 40 * u:
             if host.point(px, py, click, down):     # the foot's line (Insert)

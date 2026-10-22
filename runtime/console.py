@@ -4217,10 +4217,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # the `screen` projection string -- same answers, hoisted once per call.
         kind = self.wm.top_kind()
         # A running cart on the desktop draws every frame, unless it crashed (the
-        # error panel is static) or the pause menu holds it (its card is drawn on
-        # a change, over the frozen frame).
-        if kind == "desktop" and self.cart_error is None and not self.pause.open and (
-                self.player._update is not None or self.player._draw is not None):
+        # error panel is static) or its run is held (the pause menu's card is
+        # drawn on a change, over the frozen frame; a hidden window, the desk
+        # Editor's paused Run slot).
+        player = self.player
+        if kind == "desktop" and self.cart_error is None and not self.pause.open \
+                and not player.paused and (
+                    player._update is not None or player._draw is not None):
             return True             # (the Player's own fields: ws._update/_draw
                                     # are property forwards to exactly these)
         # Windowed WM (#73): a running cart's WINDOW keeps animating even when
