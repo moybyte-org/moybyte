@@ -442,3 +442,105 @@ def test_a_reference_pick_inserts_its_call_at_the_caret(desk):
     bx, by, bw, bh = d._host.box("insert call")
     _click(drv, bx + bw // 2, by + bh // 2)
     assert ws.editor.text().startswith("spr(6, x, y)")
+
+
+# -- the Sound pane (on the verbs over the MusicEditor core) ------------------------
+
+def _sound(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("5"), 1)                       # Sound
+    me = ws.music_ui.musicedit
+    d.focus_pane(1)                              # the Sound pane
+    ws._dirty = True
+    drv.frame(DT)
+    from runtime import editor_sound as S
+    return ws, drv, d, me, S
+
+
+def test_the_sound_pane_is_drawn_on_the_verbs_not_the_music_tab(desk, monkeypatch):
+    ws, drv, d, me, S = _sound(desk)
+    drew = []
+    monkeypatch.setattr(ws.layer_of("music"), "draw", lambda dt: drew.append(dt))
+    ws._dirty = True
+    drv.frame(DT)
+    assert drew == []
+    assert ws.editor_app.tab == "music"
+    assert d._host.box("wave brush") is not None
+    assert d._host.box("sound add") is not None
+
+
+def test_a_tap_on_the_graph_picks_the_step_and_sets_its_note(desk):
+    ws, drv, d, me, S = _sound(desk)
+    body = d._body(_pane(d, "music"), 1)
+    g = S.geometry(body, 1)
+    gx, gy, gw, gh = g["graph"]
+    lo = S.low(d, me)
+    _click(drv, gx + g["cw"] + 4, gy + gh - 3 * g["semi"] - 2)
+    assert me.step == 1
+    assert me.cur_step()[0] == lo + 3
+    lx, ly, _lw, _lh = g["ladder"]
+    _click(drv, lx + g["cw"] + 4, ly + 1)
+    assert me.cur_step()[2] == S.LEVELS
+    me.undo()
+    assert me.cur_step()[2] != S.LEVELS
+
+
+def test_the_sound_panes_keys_move_the_step_and_its_note(desk):
+    ws, drv, d, me, S = _sound(desk)
+    me.select_cursor(0)
+    p = me.cur_step()[0]
+    drv.press("right")
+    drv.frame(DT)
+    assert me.step == 1
+    me.select_cursor(0)
+    drv.press("up")
+    drv.frame(DT)
+    assert me.cur_step()[0] == p + 1
+    w = me.cur_step()[1]
+    _tap(drv, ord("w"))
+    assert me.cur_step()[1] != w
+    assert not ws.editor_app._tab_is_clean("music")
+
+
+def test_a_sound_is_renamed_and_its_name_saved_with_the_bank(desk):
+    ws, drv, d, me, S = _sound(desk)
+    _tap(drv, 0x101 + 1)                         # F2
+    assert d.part_state.get("rename") == ""
+    drv.frame(DT)
+    for ch in "boom":
+        _tap(drv, ord(ch))
+    _tap(drv, 13)
+    assert me.bank.sfx[0].name == "boom"
+    assert me.bank.to_dict()["sfx"][0]["name"] == "boom"
+    assert d.part_state.get("rename") is None
+    assert S.title(d) == "Sound 0 · boom"
+    assert S.row_label(me, 0) == "0  boom"
+    me.undo()
+    assert me.bank.sfx[0].name is None
+    me.redo()
+    ws.save_sounds()
+    import json
+    with open(ws.cart["path"] + "/sounds.json") as f:
+        assert json.load(f)["sfx"][0]["name"] == "boom"
+
+
+def test_the_sounds_list_adds_a_sound_and_plays_one(desk):
+    ws, drv, d, me, S = _sound(desk)
+    n = len(me.bank.sfx)
+    bx, by, bw, bh = d._host.box("pane 0 new sound")
+    _click(drv, bx + bw // 2, by + bh // 2)
+    assert len(me.bank.sfx) == n + 1 and me.sfx_idx == n
+
+
+def test_a_settled_sound_pane_paints_nothing_with_its_name_popover_open(desk):
+    ws, drv, d, me, S = _sound(desk)
+    S.open_rename(d)
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    for _ in range(4):
+        drv.frame(DT)
+    drawn = ws._frames_drawn
+    for _ in range(8):
+        drv.frame(DT)
+    assert ws._frames_drawn == drawn

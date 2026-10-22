@@ -14,12 +14,15 @@ to the running game as the tab's is."""
 
 try:
     import ui
+    import editor_sound as Sound
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui
+    from runtime import editor_sound as Sound
 
 PARTS = ("actor", "sounds", "song", "log", "maps", "palette", "made")
 
 _ROW = 36
+_LIST_ROW = 28              # a list's row on the desk (style.json's stack_desk)
 
 
 def draw(desk, c, r, u):
@@ -135,19 +138,25 @@ def _music(desk):
 
 
 def sounds(desk, r, u):
-    """The Sound workspace's list: the Song, then a row a sound, by its
-    number and its name where it has one (moy-spec's optional `name`)."""
+    """The Sound workspace's list: the Song and its length, then a row a
+    sound, by its number and its name where it has one (moy-spec's optional
+    `name`), a sketch of its notes and its play tool."""
     mu, me = _music(desk)
     if me is None:
         return
-    names = ["Song"]
-    for k, s in enumerate(me.bank.sfx):
-        name = getattr(s, "name", None)
-        names.append("%d  %s" % (k, name) if name else "Sound %d" % k)
+    ws = desk.ws
+    th = ws.theme_colors
+    cv = ws.sys_canvas
+    items = ["Song"] + [Sound.row_label(me, k) for k in range(len(me.bank.sfx))]
     song = me.view == me.SONG_VIEW
     cur = 0 if song else me.sfx_idx + 1
-    ui.at(*r)
-    got = ui.list("Sounds", names, cur, {"id": "sound list"})
+    x, y, w, h = r
+    pad = 6 * u
+    cell = 32 * u
+    rh = _LIST_ROW * u
+    lr = (x + pad, y + 4 * u, w - 2 * pad - cell, h - 8 * u)
+    ui.at(*lr)
+    got = ui.list("Sounds", items, cur, {"id": "sound list"})
     if got is not None and got != cur and got >= 0:
         if got == 0:
             if not song:
@@ -157,7 +166,63 @@ def sounds(desk, r, u):
                 me.toggle_view()
             me.sfx_idx = got - 1
             me.step = 0
+        ws._dirty = True
+    if len(items) * rh > lr[3]:
+        return                      # the list scrolls in its rect: no sketches over it
+    t = me.cur_track()
+    n = len(t.pattern) if t is not None else 0
+    slots = "1 slot" if n == 1 else "%d slots" % n
+    sw = ui.text_size(slots)[0] + 8 * u
+    ui.at(lr[0] + lr[2] - sw, lr[1], sw, rh)
+    ui.label(slots, {"tone": "dim"})
+    playing = mu.music_preview
+    for k, s in enumerate(me.bank.sfx):
+        ry = lr[1] + (k + 1) * rh
+        _sketch(cv, th, s, lr[0] + lr[2] - 52 * u, ry + 6 * u, 44 * u, rh - 12 * u, u)
+        ui.at(x + w - pad - cell, ry + (rh - cell) // 2, cell, cell)
+        on = playing is not None and playing == ("sfx", k)
+        if ui.tool("run", "Play", {"id": "sound play %d" % k, "current": on}):
+            if on:
+                mu._stop_music_preview()
+            else:
+                if me.view != me.SFX_VIEW:
+                    me.toggle_view()
+                me.sfx_idx = k
+                mu._play_music_preview()
+            ws._dirty = True
+
+
+def _sketch(cv, th, s, x, y, w, h, u):
+    """A sound's sketch: a bar a step at its pitch in its first wave's ink,
+    a rest none."""
+    steps = s.steps
+    heard = [st[0] for st in steps if st[0] >= 0 and st[2]]
+    if not heard:
+        cv.rect(x, y + h - 1 * u, w, 1 * u, th["border"])
+        return
+    lo, hi = min(heard) - 2, max(heard) + 2
+    bw = max(2 * u, w // max(8, len(steps)))
+    ink = Sound.wave_ink(th, steps[0][1])
+    for i, st in enumerate(steps[: w // bw]):
+        if st[0] >= 0 and st[2]:
+            bh = max(2 * u, (st[0] - lo) * h // max(1, hi - lo))
+            cv.rect(x + i * bw, y + h - bh, bw - 1 * u, bh, ink)
+
+
+def sounds_header(desk, pid, tx, y, hh, u):
+    """The Sounds pane's ＋: a new sound at the end of the bank."""
+    _mu, me = _music(desk)
+    if me is None:
+        return tx
+    cell = 32 * u
+    tx -= cell
+    ui.at(tx, y, cell, hh)
+    if ui.tool("new", "New sound", {"id": pid + " new sound"}):
+        if me.view != me.SFX_VIEW:
+            me.toggle_view()
+        me.select_sfx(len(me.bank.sfx) - me.sfx_idx)
         desk.ws._dirty = True
+    return tx
 
 
 def song(desk, r, u):

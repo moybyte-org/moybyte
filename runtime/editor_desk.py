@@ -32,6 +32,7 @@ try:
     import ui
     import editor_panes as P
     import editor_parts as Parts
+    import editor_sound as Sound
     import layout_base as _lb
     from layers import Layer
     from ticks import _ticks_ms, _ticks_diff
@@ -39,6 +40,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui
     from runtime import editor_panes as P
     from runtime import editor_parts as Parts
+    from runtime import editor_sound as Sound
     from runtime import layout_base as _lb
     from runtime.layers import Layer
     from runtime.ticks import _ticks_ms, _ticks_diff
@@ -48,6 +50,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 _OWNERS = {"cards": ("cards_layer", "layout"), "blocks": ("block_ui", "block_layout"),
            "paint": ("paint_layer", "layout"), "map": ("map_ui", "layout"),
            "scene": ("scene_ui", "layout"), "music": ("music_ui", "layout")}
+
+# The Editor tabs whose desk pane is drawn here on the verbs over the tab's
+# editor core, not by the tab's own surface: the Sound pane.
+_ON_VERBS = ("music",)
 
 # Which workspace shows an Editor tab, for a tab opened from elsewhere (a
 # crash's throw to Code, Files opening a sprite sheet).
@@ -113,6 +119,8 @@ class EditorDesk(Layer):
         self._picked = 0                # the sprite picked with no Sprite pane built
         self._was_playing = False
         self._back_tab = {}             # a pane's tab before Play took it to Game
+        self._fresh = 0                 # this frame's key event, where it is new
+        self.dt = 0
 
     # -- where it applies -------------------------------------------------------
 
@@ -212,7 +220,10 @@ class EditorDesk(Layer):
             tab = P.CONTENTS[self.tab_of(pane)][2]
             if tab is not None and not app._tab_is_clean(tab):
                 app.commit_later(tab)
+        if self.key == "sound":
+            self.ws.music_ui._stop_music_preview()
         self.key = key
+        app.zone_gen += 1               # the row marks the workspace on show
         self.grown = None
         self._arr = None
         self._placed = None
@@ -286,6 +297,7 @@ class EditorDesk(Layer):
                 continue
             if k != self.key:
                 self.key = k
+                self.ws.editor_app.zone_gen += 1
                 self.grown = None
                 self._arr = None
                 self._placed = None
@@ -390,6 +402,7 @@ class EditorDesk(Layer):
 
     def draw(self, dt):
         ws = self.ws
+        self.dt = dt
         self.follow()
         self._play_tabs()
         cv = ws.sys_canvas
@@ -412,7 +425,7 @@ class EditorDesk(Layer):
             c = self.tab_of(pane)
             body = self._body(r, u, pane)
             tab = P.CONTENTS[c][2]
-            if tab is not None:
+            if tab is not None and c not in _ON_VERBS:
                 self._tab_pane(tab, body, dt)
             elif c == "game":
                 self._game(cv, th, body, u)
@@ -498,7 +511,8 @@ class EditorDesk(Layer):
             if self._headless(pane):
                 self._still_tool(pid, u)
                 continue
-            tools_w = cell + 4 * u
+            c = self.tab_of(pane)
+            tools_w = cell + 4 * u + (7 * cell if c in _ON_VERBS else cell if c == "sounds" else 0)
             if len(pane) == 1:
                 label, icon, _tab, _m = P.CONTENTS[pane[0]]
                 title = self._title(pane[0], label)
@@ -530,11 +544,16 @@ class EditorDesk(Layer):
                 if ui.tool(icon, word, {"id": "%s %s" % (pid, op),
                                         "current": self._tool_on(op)}):
                     self._head_tool(op)
-            c = self.tab_of(pane)
+            if c == "music":
+                Sound.header(self, pid, tx, y, hh, u)
+            elif c == "sounds":
+                Parts.sounds_header(self, pid, tx, y, hh, u)
             if c == "game":
                 self._still_tool(pid, u)
             if c in Parts.PARTS:
                 Parts.draw(self, c, self._body(r, u, pane), u)
+            elif c == "music":
+                Sound.draw(self, cv, th, self._body(r, u, pane), u)
             elif c == "stamps":
                 Parts.stamps_label(self, self._body(r, u, pane), u)
             elif c == "sprites":
@@ -568,6 +587,8 @@ class EditorDesk(Layer):
             return "Sprite %d" % ws.paint.n
         if c == "code":
             return ws.code_file_name()
+        if c == "music":
+            return Sound.title(self)
         return label
 
     def _head_tool(self, op):
@@ -754,6 +775,7 @@ class EditorDesk(Layer):
         ev = getattr(i, "key_event", 0) or 0
         fresh = ev != 0 and ev != self._ev
         self._ev = ev
+        self._fresh = ev if fresh else 0
         if fresh and self._chord(ev & 0xFFFF, ev >> _MODS_AT):
             i.clear_edges()
             return True
@@ -764,6 +786,12 @@ class EditorDesk(Layer):
         pane, r, _p = self.focused()
         c = self.tab_of(pane)
         tab = P.CONTENTS[c][2]
+        if c == "music":
+            if Sound.keys(self, i, self._fresh):
+                i.clear_edges()
+            elif self._host.keys(i):
+                ws._dirty = True
+            return True
         if tab is not None:
             layer = ws.layer_of(tab)
             if layer is not None:
@@ -859,7 +887,19 @@ class EditorDesk(Layer):
     def _part_focused(self):
         """Whether the focused pane is one drawn on the verbs, whose stops
         take the keys."""
-        return self.tab_of(self.focused()[0]) in Parts.PARTS
+        c = self.tab_of(self.focused()[0])
+        return c in Parts.PARTS or c in _ON_VERBS
+
+    def shows(self, content):
+        """Whether a pane on show holds `content` as its open tab."""
+        return any(self.tab_of(p) == content for _n, p, _r in self._shown_panes())
+
+    def header_rect(self, content):
+        """The header of the pane showing `content`, or None."""
+        for _n, p, r in self._shown_panes():
+            if self.tab_of(p) == content:
+                return (r[0], r[1], r[2], P.HEADER * self._unit())
+        return None
 
     def _owe_restart(self, tab):
         """E-02: a map, scene or code edit made while the game runs waits for
@@ -1000,6 +1040,11 @@ class EditorDesk(Layer):
         c = self.tab_of(pane)
         body = self._body(r, u, pane)
         tab = P.CONTENTS[c][2]
+        if c == "music":
+            if not Sound.pointer(self, body, u, px, py, click, down):
+                host.point(px, py, click, down)
+            ws._dirty = True
+            return True
         if tab is not None:
             layer = ws.layer_of(tab)
             if layer is None:

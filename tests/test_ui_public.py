@@ -464,6 +464,7 @@ APPS = (
     "runtime/myart_app.py", "runtime/drawing_pages.py", "runtime/block_editor_ui.py",
     "runtime/calc_app.py", "runtime/code_layer.py", "runtime/editor_app.py",
     "runtime/editor_desk.py", "runtime/editor_parts.py", "runtime/editor_settings.py",
+    "runtime/editor_sound.py",
     "runtime/file_widgets.py", "runtime/files_app.py", "runtime/getcarts_app.py",
     "runtime/map_editor_ui.py", "runtime/music_editor_ui.py", "runtime/paint_layer.py",
     "runtime/scene_editor_ui.py", "runtime/settings_layer.py", "runtime/storybook_app.py",

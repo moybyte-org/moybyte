@@ -4231,8 +4231,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return True
         # A music-editor preview must keep ticking the mixer + redrawing the PLAY/STOP
         # button (and clearing the flag when the effect ends) without input (#50).
-        if kind == "menu" and self.menu_view == "music" \
-                and self.music_ui.music_preview is not None:
+        if kind == "menu" and self.music_ui.music_preview is not None \
+                and (self.menu_view == "music"
+                     or (self._editor_desk is not None
+                         and self._editor_desk.key == "sound")):
             return True
         # A live wallpaper animates the home/settings/desk backdrop.
         if kind in ("launcher", "settings", "desk") and self.wallpaper.is_animating(dt):
