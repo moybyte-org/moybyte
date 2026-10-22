@@ -4,6 +4,8 @@
 #   stamps_label    the Stamps pane's line: the tag the stamp gives
 #   sounds          the Sound workspace's list: the song, then a row a sound
 #   song            the Song pane: the tracks, the current one marked
+#   palette         the Blocks workspace's palette: the categories, then their blocks
+#   made            the code the blocks make, read only
 #   empty           a pane whose part is not built: what it holds
 """The desk Editor's own panes on the public UI API
 (docs/media/look_2026-10/EDITOR_LAYOUT.md's World and Sound): each draws in
@@ -15,9 +17,11 @@ to the running game as the tab's is."""
 try:
     import ui
     import editor_sound as Sound
+    import blocks as B
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui
     from runtime import editor_sound as Sound
+    from runtime import blocks as B
 
 PARTS = ("actor", "sounds", "song", "log", "maps", "palette", "made")
 
@@ -33,7 +37,9 @@ def draw(desk, c, r, u):
         sounds(desk, r, u)
     elif c == "song":
         song(desk, r, u)
-    else:
+    elif c == "palette":
+        palette(desk, r, u)
+    elif c != "made":               # the made code is drawn before the frame
         empty(c, r)
 
 
@@ -247,3 +253,189 @@ def song(desk, r, u):
                 if me.view != me.SONG_VIEW:
                     me.toggle_view()
                 desk.ws._dirty = True
+
+
+# -- the block palette ---------------------------------------------------------------
+
+# The palette's categories (the insert menu's, block_editor_ui._CAT_LABEL)
+# in the pictures' order, read across two columns, and the rows heading
+# three of them.
+_CATS = (("events", "When..."), ("control", "Control"), ("draw", "Draw"),
+         ("input", "Buttons"), ("variables", "Variables"), ("lists", "Lists"),
+         ("actors", "Sprite"), ("looks", "Looks"), ("operators", "Math"),
+         ("sound", "Sound"), ("myblocks", "My Blocks"))
+_NEW = {"variables": ("\x00new_var", "+ new variable"),
+        "lists": ("\x00new_list", "+ new list"),
+        "myblocks": ("\x00new_proc", "+ new block")}
+_CALL = "\x00call:"
+
+
+def _blocks(desk):
+    bu = desk.ws.block_ui
+    if bu.blocks_ed is None:
+        bu.build()
+    return bu, bu.blocks_ed
+
+
+def palette_items(be, cat):
+    """(item, label) for the blocks category `cat` offers: the catalog's,
+    headed by its make-one row; My Blocks' calls; none for the events,
+    which head every script already."""
+    if cat == "events":
+        return []
+    out = []
+    if cat in _NEW:
+        out.append(_NEW[cat])
+    if cat == "myblocks":
+        for n in (be.proc_names() if be is not None else []):
+            out.append((_CALL + n, "call " + n))
+        return out
+    for t in B.blocks_in_category(cat):
+        d = B.block_def(t)
+        out.append((t, _filled(d) if d else t))
+    return out
+
+
+def _filled(d):
+    """A catalog block's label as a new block reads: each slot its default,
+    one with none its name ("move by {dx} {dy}" reads "move by 2 0")."""
+    label = d["label"]
+    for slot in d.get("slots", ()):
+        v = slot.get("default")
+        if v is not None:
+            label = label.replace("{%s}" % slot["name"], str(v))
+    label = label.replace("{", "").replace("}", "")
+    while "  " in label:
+        label = label.replace("  ", " ")
+    return label.strip()
+
+
+def palette(desk, r, u):
+    """The Blocks workspace's palette (EDITOR_LAYOUT.md): the eleven
+    categories in two columns, each by its colour, then the current one's
+    blocks; activating a block puts it at the Blocks pane's cursor."""
+    ws = desk.ws
+    bu, be = _blocks(desk)
+    if be is None:
+        empty("palette", r)
+        return
+    th = ws.theme_colors
+    cv = ws.sys_canvas
+    cols = ws.look.content_colors()
+    st = desk.part_state
+    cat = st.get("block cat", "actors")
+    x, y, w, h = r
+    pad = 6 * u
+    rh = _LIST_ROW * u
+    half = (w - 2 * pad - 4 * u) // 2
+    rows = (len(_CATS) + 1) // 2
+    for side in (0, 1):
+        part = _CATS[side::2]
+        cx = x + pad + side * (half + 4 * u)
+        names = ["   " + label for _k, label in part]
+        cur = [k for k, _l in part].index(cat) if cat in [k for k, _l in part] else -1
+        ui.at(cx, y + 6 * u, half, rows * rh)
+        got = ui.list("block categories %d" % side, names, cur,
+                      {"id": "block categories %d" % side})
+        if got is not None and got >= 0 and got != cur:
+            cat = st["block cat"] = part[got][0]
+            ws._dirty = True
+        for k, (key, _l) in enumerate(part):
+            d = 8 * u
+            cv.rrect(cx + 5 * u, y + 6 * u + k * rh + (rh - d) // 2, d, d, 2 * u,
+                     cols.get("block_" + key, th["border"]))
+    top = y + 6 * u + rows * rh + 8 * u
+    ui.at(x + pad, top, w - 2 * pad, 1)
+    ui.rule()
+    top += 8 * u
+    items = palette_items(be, cat)
+    room = (y + h - pad) - top
+    if not items:
+        ui.at(x + pad, top, w - 2 * pad, room)
+        ui.label("Every script starts with one: they head the Blocks pane",
+                 {"tone": "dim", "wrap": True, "lines": 4})
+        return
+    if bu.blk_graduated:
+        ui.at(x + pad, top, w - 2 * pad, room)
+        ui.label("This cart is code now: its blocks only read",
+                 {"tone": "dim", "wrap": True, "lines": 4})
+        return
+    ui.at(x + pad, top, w - 2 * pad, room)
+    got = ui.list("blocks of " + cat, ["  " + label for _i, label in items], -1,
+                  {"id": "palette blocks"})
+    if got is not None and 0 <= got < len(items):
+        add_block(desk, items[got][0])
+    if len(items) * rh <= room:
+        ink = cols.get("block_" + cat, th["border"])
+        for k in range(len(items)):
+            cv.rect(x + pad + 2 * u, top + k * rh + 4 * u, 3 * u, rh - 8 * u, ink)
+
+
+def add_block(desk, item):
+    """A palette row activated: the block at the Blocks pane's cursor (on a
+    block, the next "+ add block" after it), or the category's make-one row."""
+    bu, be = _blocks(desk)
+    if be is None or bu.blk_graduated:
+        return
+    if not item.startswith("\x00new") and not be.at_insert():
+        for k in range(be.cur + 1, len(be.rows)):
+            if be.rows[k].kind == "insert":
+                be.cur = k
+                break
+    if item == _NEW["variables"][0]:
+        bu._blk_new_variable()
+    elif item == _NEW["lists"][0]:
+        bu._blk_new_list()
+    elif item == _NEW["myblocks"][0]:
+        bu._blk_new_proc()
+    elif item.startswith(_CALL):
+        bu._blk_insert_call(item[len(_CALL):])
+    else:
+        bu._blk_insert_chosen(item)
+    desk.ws._dirty = True
+
+
+# -- the code the blocks make ----------------------------------------------------------
+
+_made = [None, None]            # [the program's text it was made from, its lines]
+
+
+def made_lines(be):
+    """The blocks' code as lines, made again only when the program moved."""
+    key = repr(be.program)
+    if _made[0] != key:
+        try:
+            src = B.compile_blocks(be.program)
+        except B.BlockError as e:
+            src = "# " + str(e)
+        _made[0] = key
+        _made[1] = src.rstrip("\n").split("\n")
+    return _made[1]
+
+
+def made(desk, r, u):
+    """The code the blocks make (EDITOR_LAYOUT.md's blocks cart), read only,
+    in the Code tab's type and colours, numbered; the wheel scrolls it.
+    Drawn before the frame begins, as the Code tab draws."""
+    ws = desk.ws
+    _bu, be = _blocks(desk)
+    if be is None:
+        return
+    lines = made_lines(be)
+    x, y, w, h = r
+    pad = 8 * u
+    rows = max(1, (h - 2 * pad) // ws.code_layout.lh)
+    st = desk.part_state
+    first = max(0, min(st.get("made top", 0), len(lines) - rows))
+    st["made top"] = first
+    ws.code_layer.draw_lines(lines, first, (x + pad, y + pad, w - 2 * pad, h - 2 * pad))
+
+
+def scroll(desk, c, d):
+    """The wheel over a part that scrolls by rows: `d` notches."""
+    st = desk.part_state
+    if c == "made":
+        st["made top"] = max(0, st.get("made top", 0) + 3 * d)
+        desk.ws._dirty = True
+        return True
+    return False

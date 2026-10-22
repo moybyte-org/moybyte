@@ -54,7 +54,7 @@ CONTENTS = {
     "actor": ("Actor", "scene", None, FLOOR),
     "stamps": ("Stamps", "stamp", None, FLOOR),
     "palette": ("Block palette", "blocks", None, FLOOR),
-    "made": ("Code", "code", None, FLOOR),
+    "made": ("Code", "lock", None, FLOOR),
 }
 
 # (key, label, icon) in the app's row's order; Ctrl+1 ... 5 is this order.

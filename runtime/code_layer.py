@@ -1202,6 +1202,45 @@ class CodeLayer:
         t["look"] = False
         return t
 
+    def draw_lines(self, lines, first, rect):
+        """Lines of code read only in `rect` from line `first`, numbered, in
+        the Code tab's mono font and colours: the desk's made code
+        (`editor_parts.made`). The rows it shows."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        hl = self._hl_map()
+        lay = ws.code_layout
+        cell, lh = lay.cell, lay.lh
+        x, y, w, h = rect
+        gut = (len(str(len(lines))) + 1) * cell
+        rows = max(1, h // lh)
+        cols = max(1, (w - gut) // cell)
+        was = _ui_draw.print_font(_ui_draw.font("mono")[0])
+        cv.clip(x, y, w, h)
+        try:
+            for k in range(rows):
+                n = first + k
+                if n >= len(lines):
+                    break
+                ly = y + k * lh
+                num = str(n + 1)
+                cv.print(num, x + gut - (len(num) + 1) * cell, ly, th["ink_dim"], 1)
+                line = lines[n][:cols]
+                colours = self._hl(line)
+                i = 0
+                while i < len(line):
+                    c = colours[i]
+                    j = i + 1
+                    while j < len(line) and colours[j] == c:
+                        j += 1
+                    cv.print(line[i:j], x + gut + i * cell, ly, hl.get(c, c) if hl else c, 1)
+                    i = j
+        finally:
+            cv.clip()
+            _ui_draw.print_font(was)
+        return rows
+
     def _draw_code(self):
         # Responsive (#39 step 2): the code editor draws on the SYSTEM canvas at
         # native size, so a bigger panel shows more lines + wider columns and a

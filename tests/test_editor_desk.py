@@ -544,3 +544,68 @@ def test_a_settled_sound_pane_paints_nothing_with_its_name_popover_open(desk):
     for _ in range(8):
         drv.frame(DT)
     assert ws._frames_drawn == drawn
+
+
+# -- the Blocks workspace's palette and made code --------------------------------------
+
+@pytest.fixture
+def blocks_desk(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    panel_diagonal_in=7.0, font_scale=1, windowed=True)
+    ws.open_desk()
+    cart = next(c for c in ws.carts.all if c.get("title") == "Coin Quest")
+    ws.open_in_editor(cart)
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(3):
+        drv.frame(DT)
+    _tap(drv, ord("2"), 1)                       # Code: a blocks cart's is the Blocks one
+    return ws, drv
+
+
+def test_a_blocks_carts_code_workspace_shows_the_palette_and_the_made_code(blocks_desk):
+    ws, drv = blocks_desk
+    d = ws.editor_desk
+    assert [p for p, _r, _p in d.panes()][0] == ("palette",)
+    from runtime import blocks as B, editor_parts as Parts
+    be = ws.block_ui.blocks_ed
+    assert Parts.made_lines(be) == B.compile_blocks(be.program).rstrip("\n").split("\n")
+    assert d._host.box("palette blocks") is not None
+
+
+def test_a_palette_pick_puts_its_block_at_the_cursor_and_the_made_code_follows(blocks_desk):
+    ws, drv = blocks_desk
+    d = ws.editor_desk
+    from runtime import editor_parts as Parts
+    be = ws.block_ui.blocks_ed
+    before = list(Parts.made_lines(be))
+    d.part_state["block cat"] = "looks"
+    ws._dirty = True
+    drv.frame(DT)
+    items = Parts.palette_items(be, "looks")
+    bx, by, bw, bh = d._host.box("palette blocks")
+    _click(drv, bx + 20, by + 14)                # the category's first block
+    assert items[0][0] in repr(be.program)
+    assert Parts.made_lines(be) != before
+    assert not ws.editor_app._tab_is_clean("blocks")
+
+
+def test_the_palettes_categories_pick_their_blocks(blocks_desk):
+    ws, drv = blocks_desk
+    d = ws.editor_desk
+    bx, by, bw, bh = d._host.box("block categories 0")
+    _click(drv, bx + bw // 2, by + 28 + 14)      # the second row: Draw
+    assert d.part_state["block cat"] == "draw"
+    from runtime import editor_parts as Parts
+    assert Parts.palette_items(None, "events") == []
+
+
+def test_a_settled_blocks_workspace_paints_nothing(blocks_desk):
+    ws, drv = blocks_desk
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    for _ in range(4):
+        drv.frame(DT)
+    drawn = ws._frames_drawn
+    for _ in range(8):
+        drv.frame(DT)
+    assert ws._frames_drawn == drawn

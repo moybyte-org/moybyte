@@ -432,6 +432,8 @@ class EditorDesk(Layer):
             elif c in ("sheet", "sprites", "stamps"):
                 self._ref = c == "sprites"
                 self._sheet(cv, th, body, u, c == "stamps")
+            elif c == "made":
+                Parts.made(self, body, u)
         if self.grown is None:
             self._dividers(cv, th, divs, u)
         self._frame(cv, th, shown, u)
@@ -521,7 +523,7 @@ class EditorDesk(Layer):
                 ui.label(title)
                 status = self._status(pane[0])
                 if status:
-                    sx = x + 8 * u + 28 * u + ui.text_size(title)[0] + 8 * u
+                    sx = x + 8 * u + 28 * u + ui.text_size(title)[0] + 14 * u
                     lh = ui.text_size(status)[1]
                     ui.at(sx, y + (hh - lh) // 2, max(0, x + w - tools_w - sx), lh)
                     ui.label(status, {"tone": "dim"})
@@ -647,6 +649,8 @@ class EditorDesk(Layer):
         """A pane's dim status after its name: the game's scale."""
         if c == "game" and self._scale:
             return "%d\u00d7" % self._scale
+        if c == "made":
+            return "made by your blocks"
         return ""
 
     def _dividers(self, cv, th, divs, u):
@@ -863,6 +867,8 @@ class EditorDesk(Layer):
                 self._sheet_page = max(0, min(3, self._sheet_page + (1 if wy > 0 else -1)))
                 ws._dirty = True
                 return True
+            if tab is None and wy:
+                return Parts.scroll(self, self.tab_of(hit[0]), 1 if wy > 0 else -1)
             return False
         body = self._body(hit[1], self._unit())
         lx, ly = px - body[0], py - body[1]

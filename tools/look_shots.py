@@ -1179,7 +1179,7 @@ def _ws_scenes():
     out = {}
     for k in ("config", "code", "blocks", "art", "world", "world-stamp", "sound"):
         key = {"config": "settings", "blocks": "code", "world-stamp": "world"}.get(k, k)
-        out["b-" + k] = (key, False)
+        out["b-" + k] = (key, False, "Coin Quest" if k == "blocks" else "Sky Run")
         if k in ("config", "code", "art", "world", "sound"):
             out["b-%s-800x480" % k] = (key, False)
     for v in ("e05", "v1", "v2"):
@@ -1193,12 +1193,13 @@ def _ws_scenes():
 EDITOR_WORKSPACES = _ws_scenes()
 
 
-def _workspace(key, full):
-    """The Editor on Sky Run on the desk, showing workspace `key`: full screen,
-    or restored over the whole desk under the bar."""
+def _workspace(key, full, cart="Sky Run"):
+    """The Editor on `cart` (Sky Run; Coin Quest, a blocks cart, for the
+    Blocks workspace) on the desk, showing workspace `key`: full screen, or
+    restored over the whole desk under the bar."""
     def setup(g, ws):
         ws.open_desk()
-        ws.open_in_editor(g._cart_by_title(ws, "Sky Run"))
+        ws.open_in_editor(g._cart_by_title(ws, cart))
         _settle(g, ws, 2)
         win = ws.wm._wins["menu"]
         if win.full() != full:
