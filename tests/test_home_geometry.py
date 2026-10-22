@@ -46,9 +46,7 @@ def _home(ws):
 
 
 @pytest.fixture(autouse=True)
-def _uninstall(monkeypatch):
-    from runtime import cover_cache
-    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", g._COVER_SLICE_UNBOUNDED)
+def _uninstall():
     yield
     import moy_ui
     from runtime import iconsets

@@ -160,10 +160,12 @@ dt is INJECTED, never read from a clock -- `ScrollRegion` is the precedent):
     confetti/egg timers, the achievements list, the system menu, About, the
     notice banner, the FPS/perf HUDs, the cursor.
   * `cover_cache._COVER_SLICE_MS` is raised so every home and home-window cover builds
-    within its frame. This is load-bearing, not belt-and-braces: the cover
-    build is a per-frame TIME budget, and the launcher home hashes differently
-    at a 1ms slice than at 5ms. Left alone, these goldens would be a function
-    of how fast the machine is.
+    within its frame: tests/conftest.py's `_cover_budget_unbounded` does it for
+    every test of the suite, tools/look_shots.py with `_COVER_SLICE_UNBOUNDED`.
+    This is load-bearing, not belt-and-braces: the cover build is a per-frame
+    TIME budget, and the launcher home hashes differently at a 1ms slice than
+    at 5ms. Left alone, these goldens would be a function of how fast the
+    machine is.
   * each surface is rendered until two consecutive frames are byte-identical
     (cap `_MAX_FRAMES`); a surface that never settles FAILS by name rather
     than silently baking in whichever frame it was caught on.
@@ -1027,22 +1029,15 @@ def _write_goldens_on_teardown(request):
         for c in sorted(counts)), encoding="utf-8")
 
 
-@pytest.fixture(autouse=True)
-def _pin_cover_budget(monkeypatch):
-    """Build every cover inside its own frame.
-
-    `_cover_for` spends a per-frame TIME slice (`_COVER_SLICE_MS`), so on a
-    slower machine a shelf cover pops in a frame later and the launcher hashes
-    differently -- measured: slice 1ms and slice 5ms give different launcher
-    pixels. Raising the budget makes the captured frame the fully-built one on
-    every machine."""
-    from runtime import cover_cache
-    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", _COVER_SLICE_UNBOUNDED)
-
-
 # ---------------------------------------------------------------------------
 # the tests
 # ---------------------------------------------------------------------------
+
+def test_every_cover_builds_in_its_own_frame_under_test():
+    """The pin the goldens stand on is the suite's, in force for every test."""
+    from runtime import cover_cache
+    assert cover_cache._COVER_SLICE_MS >= _COVER_SLICE_UNBOUNDED
+
 
 def _hits_peak(monkeypatch):
     """The most rects one `ui_draw.Hits` holds at once while the goldens render."""

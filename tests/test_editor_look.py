@@ -18,9 +18,7 @@ CODE_TOP, CODE_ROW, CODE_COL = 33, 41, 12
 
 
 @pytest.fixture(autouse=True)
-def _uninstall(monkeypatch):
-    from runtime import cover_cache
-    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", g._COVER_SLICE_UNBOUNDED)
+def _uninstall():
     yield
     import moy_ui
     from runtime import iconsets, ui_draw

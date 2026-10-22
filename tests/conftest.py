@@ -196,8 +196,12 @@ def _theme_shape_back():
     draws, so the empty shape goes back after each, the depth a workstation's
     `_go_live` installed (the shape does not carry it) is switched off, the
     installed theme package is dropped (a later test's Settings would list
-    its layout), every font role and the print font go back to petme128, and
-    the bars go back to the default's."""
+    its layout), every font role and the print font go back to petme128, the
+    bars go back to the default's, and the input in use, the marks' focus
+    switch and the metric class go back to a fresh process's (keys, on, the
+    handheld's): a workstation places its class as it boots, and a test that
+    left the desk's or touch in force would lay out and mark every later
+    test's parts as that one's."""
     yield
     try:
         from runtime import ui_draw
@@ -216,3 +220,28 @@ def _theme_shape_back():
     from runtime import layout_base
     layout_base.place_bar_h()
     layout_base.place_bars(layout_base.DEFAULT_BARS)
+    layout_base.place_class(layout_base.HANDHELD)
+    layout_base.in_window(False)
+    layout_base.in_pane(False)
+    ui_draw.input_kind("keys")
+    ui_draw.marks(True, True)
+
+
+# What `_cover_budget_unbounded` raises the cover slice to: every cover builds
+# inside the frame that asks for it.
+COVER_SLICE_UNBOUNDED = 10 ** 9
+
+
+@pytest.fixture(autouse=True)
+def _cover_budget_unbounded(monkeypatch):
+    """A cover build spends a per-frame TIME slice (`cover_cache._COVER_SLICE_MS`),
+    so on a loaded machine a cover lands a frame or three later than on an idle
+    one, and two renders a test compares (a live edit and a cold boot, a window
+    and its fresh render, an idle frame count) differ by how busy the machine
+    was. Every test builds each cover in its own frame; a test of the budget
+    sets the slice itself."""
+    try:
+        from runtime import cover_cache
+    except ImportError:
+        return
+    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", COVER_SLICE_UNBOUNDED)
