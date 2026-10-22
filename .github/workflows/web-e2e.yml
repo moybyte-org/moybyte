@@ -59,8 +59,9 @@ name: Web console E2E
 # always-on gate and must run on everything), so a filtered job could not live
 # there without either dropping the filter -- a wasm build on every docs push --
 # or re-deriving the changed paths by hand. pages.yml already expresses exactly
-# this shape, and this workflow shares its wasm cache key on purpose: one cache,
-# two consumers, and a warm hit either way.
+# this shape. Its wasm cache is firmware-build.yml's, not pages.yml's master
+# tree's: a dev push saves dev's objects here, which master's tree must not
+# restore.
 on:
   push:
     branches: [master, dev]
@@ -170,9 +171,8 @@ jobs:
       - name: Install package
         run: make setup
 
-      # Same path, same key shape as pages.yml -- deliberately THE SAME cache.
-      # emsdk + the micropython clone are ~1.8 GB and keyed on the build script
-      # that pins them, so a run here warms the site build and vice versa.
+      # firmware-build.yml's cache: emsdk + the micropython clone, ~1.8 GB,
+      # keyed on the build script that pins them.
       - name: Cache the wasm toolchain
         uses: actions/cache@v4
         with:

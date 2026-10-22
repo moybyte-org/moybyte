@@ -20,7 +20,7 @@ paths:
   The `tests/test_web_*_e2e.py` suites (sync, persist, p8, update, store, wasm) are
   the only checks that drive the wasm head in real headless Chrome; all are
   gated on `MOYBYTE_WEB_E2E` and are run by `.github/workflows/web-e2e.yml` (path-filtered,
-  sharing pages.yml's wasm cache key). Prerequisites resolve through
+  sharing firmware-build.yml's wasm cache). Prerequisites resolve through
   `tests/web_e2e.py`, which warns and skips on a bench but FAILS under
   `CI`/`MOYBYTE_REQUIRE_WEB_E2E` — same doctrine as `MOYBYTE_REQUIRE_UNIX_MP`.
   A skip is the right answer to a missing emsdk build on a laptop and the wrong

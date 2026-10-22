@@ -12,10 +12,12 @@
 # firmware/web_runner/dist, so this workflow compiles MicroPython to
 # WebAssembly twice before assembling the pages. That is the slow part:
 # build.sh clones and installs emsdk (~1.7 GB) the first time. master's tree
-# caches its whole .build under the key firmware-build.yml and web-e2e.yml
-# share (same path, same key: one cache); dev's tree caches its own .build
-# under a key of its own, so dev never evicts master's, and borrows master's
-# emsdk through a symlink rather than caching a second copy.
+# caches its whole .build under a key only this workflow's master tree saves,
+# and dev's tree its own: firmware-build.yml and web-e2e.yml save dev's
+# objects under `web-runner-` on a dev push, and a restore of those into
+# master's tree linked dev's module table against master's modules (the
+# stable player broke so on 2026-10-22). Dev's tree borrows master's emsdk
+# through a symlink rather than caching a second copy.
 #
 # Each page also FLASHES a board over USB, so this job carries the firmware too:
 # each tree's tools/fetch_ci_firmware.py pulls every board's image out of the
@@ -114,13 +116,12 @@ jobs:
       # emsdk + the micropython clone, keyed on the build script that pins them.
       # ~1.8 GB, comfortably inside the 10 GB repo cache (unlike the board
       # builds, which need the whole ESP-IDF and cache only their toolchains).
-      # The key and path are firmware-build.yml's and web-e2e.yml's too.
       - name: Cache the wasm toolchain
         uses: actions/cache@v4
         with:
           path: firmware/web_runner/.build
-          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
-          restore-keys: web-runner-${{ runner.os }}-
+          key: web-runner-master-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          restore-keys: web-runner-master-${{ runner.os }}-
 
       # dev's micropython clone and objects, apart from master's. Its emsdk is
       # a symlink to master's (made below, kept in this cache as a link): one
