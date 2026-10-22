@@ -101,6 +101,11 @@ _SIGS = (
                            _I, _I, _I, _I], None),
     ("mg_blit_window", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I], None),
     ("mg_blit_indices", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z], None),
+    ("mg_ifill", [_P, _Z, _I, _I, _I, _I, _I, _I, ctypes.c_uint8], None),
+    ("mg_iline", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, ctypes.c_uint8], None),
+    ("mg_icopy", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_iflood", [_P, _Z, _I, _I, _I, _I, ctypes.c_uint8, _P, _Z, _I, _I, _P, _I,
+                   ctypes.POINTER(ctypes.c_int)], _I),
     ("mg_text", [_P, _Z, _I, _P, _Z, _I, _I, _I, _P, _I, _I, _I, _I, _I,
                  _I, _I, _I, _I], None),
     ("mg_shape", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
@@ -586,6 +591,48 @@ def blit_indices(dst, dw, dh, dx, dy, idx, iw, ih, pal):
                            int(dx), int(dy),
                            ctypes.cast(iarr, _P), len(imv), int(iw), int(ih),
                            ctypes.cast(parr, _P), len(pmv) // 2)
+
+
+# One byte a pixel (moy_gfx_kernels.h): a drawing's palette indices.
+
+def _bbuf(b):
+    """(ctypes array, byte length) over a writable buffer, no copy."""
+    return (ctypes.c_char * len(b)).from_buffer(b), len(b)
+
+
+def ifill(buf, bw, bh, x, y, w, h, v):
+    arr, cap = _bbuf(buf)
+    _lib().mg_ifill(ctypes.cast(arr, _P), cap, int(bw), int(bh), int(x), int(y),
+                    int(w), int(h), int(v) & 0xFF)
+
+
+def iline(buf, bw, bh, x0, y0, x1, y1, d, round_, v):
+    arr, cap = _bbuf(buf)
+    _lib().mg_iline(ctypes.cast(arr, _P), cap, int(bw), int(bh), int(x0), int(y0),
+                    int(x1), int(y1), int(d), 1 if round_ else 0, int(v) & 0xFF)
+
+
+def icopy(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, frm, to):
+    darr, dcap = _bbuf(dst)
+    smv = memoryview(src).cast("B")
+    try:
+        sarr = (ctypes.c_char * len(smv)).from_buffer(smv)
+    except TypeError:
+        sarr = (ctypes.c_char * len(smv)).from_buffer_copy(smv)
+    _lib().mg_icopy(ctypes.cast(darr, _P), dcap, int(dw), int(dh), int(dx), int(dy),
+                    ctypes.cast(sarr, _P), len(smv), int(sw), int(sh), int(sx), int(sy),
+                    int(w), int(h), int(frm), int(to))
+
+
+def iflood(buf, bw, bh, x, y, v, marks, t, tx, stack):
+    arr, cap = _bbuf(buf)
+    marr, mcap = _bbuf(marks)
+    sarr, scap = _bbuf(stack)
+    out = (ctypes.c_int * 4)()
+    n = _lib().mg_iflood(ctypes.cast(arr, _P), cap, int(bw), int(bh), int(x), int(y),
+                         int(v) & 0xFF, ctypes.cast(marr, _P), mcap, int(t), int(tx),
+                         ctypes.cast(sarr, _P), scap // 4, out)
+    return (n, out[0], out[1], out[2], out[3])
 
 
 _TEXT = [None]

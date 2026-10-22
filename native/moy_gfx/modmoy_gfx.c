@@ -1281,6 +1281,74 @@ static mp_obj_t moy_gfx_blit_indices(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_obj, 9, 9, moy_gfx_blit_indices);
 
+// One byte a pixel: a drawing's palette indices (moy_gfx_kernels.h has the
+// contracts). The marks Paint makes (runtime/artwork.py's PaintDocument).
+static uint8_t *moy_gfx_ibuf(mp_obj_t obj, size_t *cap, mp_uint_t flags) {
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(obj, &bi, flags);
+    *cap = bi.len;
+    return (uint8_t *)bi.buf;
+}
+
+// ifill(buf, bw, bh, x, y, w, h, v)
+static mp_obj_t moy_gfx_ifill(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint8_t *buf = moy_gfx_ibuf(a[0], &cap, MP_BUFFER_WRITE);
+    mg_ifill(buf, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+             mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+             (uint8_t)mp_obj_get_int(a[7]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_ifill_obj, 8, 8, moy_gfx_ifill);
+
+// iline(buf, bw, bh, x0, y0, x1, y1, d, round, v)
+static mp_obj_t moy_gfx_iline(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint8_t *buf = moy_gfx_ibuf(a[0], &cap, MP_BUFFER_WRITE);
+    mg_iline(buf, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+             mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+             mp_obj_get_int(a[7]), mp_obj_is_true(a[8]), (uint8_t)mp_obj_get_int(a[9]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_iline_obj, 10, 10, moy_gfx_iline);
+
+// icopy(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, frm, to)
+static mp_obj_t moy_gfx_icopy(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, scap;
+    uint8_t *dst = moy_gfx_ibuf(a[0], &dcap, MP_BUFFER_WRITE);
+    const uint8_t *src = moy_gfx_ibuf(a[5], &scap, MP_BUFFER_READ);
+    mg_icopy(dst, dcap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+             mp_obj_get_int(a[4]), src, scap, mp_obj_get_int(a[6]), mp_obj_get_int(a[7]),
+             mp_obj_get_int(a[8]), mp_obj_get_int(a[9]), mp_obj_get_int(a[10]),
+             mp_obj_get_int(a[11]), mp_obj_get_int(a[12]), mp_obj_get_int(a[13]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_icopy_obj, 14, 14, moy_gfx_icopy);
+
+// iflood(buf, bw, bh, x, y, v, marks, t, tx, stack) -> (n, x0, y0, x1, y1);
+// `stack` a buffer of int16 (x, y) pairs.
+static mp_obj_t moy_gfx_iflood(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap, mcap, scap;
+    uint8_t *buf = moy_gfx_ibuf(a[0], &cap, MP_BUFFER_WRITE);
+    uint8_t *marks = moy_gfx_ibuf(a[6], &mcap, MP_BUFFER_WRITE);
+    int16_t *stack = (int16_t *)moy_gfx_ibuf(a[9], &scap, MP_BUFFER_WRITE);
+    int out[4];
+    int n = mg_iflood(buf, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                      (uint8_t)mp_obj_get_int(a[5]), marks, mcap, mp_obj_get_int(a[7]),
+                      mp_obj_get_int(a[8]), stack, (int)(scap / 4u), out);
+    mp_obj_t items[5] = {
+        MP_OBJ_NEW_SMALL_INT(n), MP_OBJ_NEW_SMALL_INT(out[0]), MP_OBJ_NEW_SMALL_INT(out[1]),
+        MP_OBJ_NEW_SMALL_INT(out[2]), MP_OBJ_NEW_SMALL_INT(out[3]),
+    };
+    return mp_obj_new_tuple(5, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_iflood_obj, 10, 10, moy_gfx_iflood);
+
 // The petme128 rasterizer, shared by the `text` op and the print draw gate. The
 // clip rect is intersected with the buffer here, so every caller is bounds-safe.
 // The rasterizer itself is mg_text_raw in moy_gfx_kernels.c (the host draws the
@@ -2272,6 +2340,10 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_layer_meter), MP_ROM_PTR(&moy_gfx_layer_meter_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_rect), MP_ROM_PTR(&moy_gfx_scroll_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ifill), MP_ROM_PTR(&moy_gfx_ifill_obj) },
+    { MP_ROM_QSTR(MP_QSTR_iline), MP_ROM_PTR(&moy_gfx_iline_obj) },
+    { MP_ROM_QSTR(MP_QSTR_icopy), MP_ROM_PTR(&moy_gfx_icopy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_iflood), MP_ROM_PTR(&moy_gfx_iflood_obj) },
     { MP_ROM_QSTR(MP_QSTR_text),       MP_ROM_PTR(&moy_gfx_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },
     #ifdef MOY_GFX_HAS_MEMBENCH

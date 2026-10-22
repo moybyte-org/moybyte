@@ -61,6 +61,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moyimg import cover_stream
 
 try:
+    import moy_gfx as _gfx
+except ImportError:  # pragma: no cover - host: the kernel through its binding
+    from runtime import gfx_binding as _gfx
+
+try:
     import io as _io
 except ImportError:  # pragma: no cover - every tier has io
     import uio as _io
@@ -160,17 +165,21 @@ class PaintDocument:
     TILE = 32
     UNDO_STEPS = 24
     UNDO_BYTES = 384 * 1024          # the tiles every step holds, together
+    _MARKER = 255                    # a flood's region while it is found: no colour
+    _FLOOD_STACK = 4096              # the flood's (x, y) scratch, pairs
 
     def __init__(self, width=GAME_W, height=GAME_H, seed=False):
         self.W = int(width)
         self.H = int(height)
         self.pix = bytearray(self.W * self.H)
-        self.pix[:] = bytes((self.PAPER,)) * len(self.pix)
+        _gfx.ifill(self.pix, self.W, self.H, 0, 0, self.W, self.H, self.PAPER)
         self.image = Bitmap(self.W, self.H, self.pix, self.OWNER)
         self.tiles_x = (self.W + self.TILE - 1) // self.TILE
         self.history = []
         self.future = []
         self._act = None              # the mark in hand: {tile: its pixels before}
+        self._held = 0                # the bytes it holds
+        self._lost = False            # it outgrew UNDO_BYTES: it records nothing more
         self.dirty = None             # [x0, y0, x1, y1) the marks changed
         if seed and self.W * 300 == self.H * 512:
             self.seed_desktop()
@@ -210,11 +219,20 @@ class PaintDocument:
         """A mark begins: what it changes is recorded until `finish`."""
         if self._act is None:
             self._act = {}
+            self._held = 0
+            self._lost = False
 
     def finish(self):
-        """The mark ends: the tiles it changed are one undo step."""
+        """The mark ends: the tiles it changed are one undo step. A step
+        larger than every step may hold together leaves no undo at all, as
+        trimming it would."""
         act = self._act
         self._act = None
+        if self._lost:
+            self._lost = False
+            self.history = []
+            self.future = []
+            return
         if not act:
             return
         self.history.append(tuple(act.items()))
@@ -238,21 +256,13 @@ class PaintDocument:
 
     def _tile(self, t):
         x, y, w, h = self._tile_rect(t)
-        W = self.W
-        pix = self.pix
         out = bytearray(w * h)
-        for r in range(h):
-            o = (y + r) * W + x
-            out[r * w:(r + 1) * w] = pix[o:o + w]
-        return bytes(out)
+        _gfx.icopy(out, w, h, 0, 0, self.pix, self.W, self.H, x, y, w, h, -1, 0)
+        return out
 
     def _put_tile(self, t, data):
         x, y, w, h = self._tile_rect(t)
-        W = self.W
-        pix = self.pix
-        for r in range(h):
-            o = (y + r) * W + x
-            pix[o:o + w] = data[r * w:(r + 1) * w]
+        _gfx.icopy(self.pix, self.W, self.H, x, y, data, w, h, 0, 0, w, h, -1, 0)
         self._grow(x, y, x + w, y + h)
 
     def _swap(self, src, dst):
@@ -302,15 +312,95 @@ class PaintDocument:
         if x1 < x0 or y1 < y0:
             return False
         self._grow(x0, y0, x1 + 1, y1 + 1)
-        act = self._act
-        if act is not None:
-            T = self.TILE
-            tx = self.tiles_x
-            for ty in range(y0 // T, y1 // T + 1):
-                for t in range(ty * tx + x0 // T, ty * tx + x1 // T + 1):
-                    if t not in act:
-                        act[t] = self._tile(t)
+        if self._act is not None:
+            self._keep(x0 // self.TILE, y0 // self.TILE, x1 // self.TILE, y1 // self.TILE)
         return True
+
+    def _keep(self, tx0, ty0, tx1, ty1):
+        """The mark in hand records tiles tx0..tx1 by ty0..ty1 it has not."""
+        act = self._act
+        tx = self.tiles_x
+        ts = None
+        for ty in range(ty0, ty1 + 1):
+            for t in range(ty * tx + tx0, ty * tx + tx1 + 1):
+                if t not in act:
+                    if ts is None:
+                        ts = []
+                    ts.append(t)
+        if ts is not None:
+            self._hold(ts)
+
+    def _hold(self, ts, frm=-1, to=0):
+        """The mark in hand records tiles `ts` as they are (a value `frm` read
+        as `to`), into one buffer: an allocation a call, not one a tile."""
+        if self._lost:
+            return
+        n = 0
+        for t in ts:
+            _x, _y, w, h = self._tile_rect(t)
+            n += w * h
+        if self._held + n > self.UNDO_BYTES:
+            self._lost = True
+            self._act.clear()
+            return
+        self._held += n
+        buf = memoryview(bytearray(n))
+        act = self._act
+        W, H, pix = self.W, self.H, self.pix
+        o = 0
+        for t in ts:
+            x, y, w, h = self._tile_rect(t)
+            k = buf[o:o + w * h]
+            _gfx.icopy(k, w, h, 0, 0, pix, W, H, x, y, w, h, frm, to)
+            act[t] = k
+            o += w * h
+
+    def _reach(self, x0, y0, x1, y1, d):
+        """A line of dots `d` across, top lefts (x0, y0) to (x1, y1), is about
+        to be drawn: the dirty rect grows over it, and the mark in hand records
+        the tiles each dot on the drawing lies in, walked as the line steps --
+        a long diagonal's undo holds the strip it crossed, never its box."""
+        W = self.W
+        H = self.H
+        lx = x0 if x0 < x1 else x1
+        ly = y0 if y0 < y1 else y1
+        hx = (x1 if x0 < x1 else x0) + d - 1
+        hy = (y1 if y0 < y1 else y0) + d - 1
+        if hx < 0 or hy < 0 or lx >= W or ly >= H:
+            return
+        self._grow(max(0, lx), max(0, ly), min(W, hx + 1), min(H, hy + 1))
+        if self._act is None:
+            return
+        T = self.TILE
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        last = -1
+        while True:
+            ax = x0 if x0 > 0 else 0
+            ay = y0 if y0 > 0 else 0
+            bx = x0 + d - 1
+            by = y0 + d - 1
+            if bx >= W:
+                bx = W - 1
+            if by >= H:
+                by = H - 1
+            if bx >= ax and by >= ay:
+                k = ax // T | (ay // T) << 7 | (bx // T) << 14 | (by // T) << 21
+                if k != last:
+                    last = k
+                    self._keep(ax // T, ay // T, bx // T, by // T)
+            if x0 == x1 and y0 == y1:
+                return
+            e2 = err + err
+            if e2 > -dy:
+                err -= dy
+                x0 += sx
+            if e2 < dx:
+                err += dx
+                y0 += sy
 
     # -- marks ------------------------------------------------------------------
 
@@ -326,89 +416,37 @@ class PaintDocument:
             self.pix[y * self.W + x] = int(color) & 63
 
     def _span(self, x0, x1, y, c):
-        """Row y from x0 to x1 inclusive in colour byte `c`, clipped; the
-        caller has touched it."""
-        if y < 0 or y >= self.H:
-            return
-        if x0 < 0:
-            x0 = 0
-        if x1 >= self.W:
-            x1 = self.W - 1
-        if x1 < x0:
-            return
-        o = y * self.W
-        self.pix[o + x0:o + x1 + 1] = c * (x1 - x0 + 1)
-
-    def _dot(self, x, y, c, d, round_):
-        """A dot `d` pixels across centred on (x, y): a square, or a disc
-        where `round_` and it is wider than two."""
-        x0 = x - d // 2
-        y0 = y - d // 2
-        if not round_ or d <= 2:
-            for r in range(d):
-                self._span(x0, x0 + d - 1, y0 + r, c)
-            return
-        h2 = d / 2
-        for r in range(d):
-            dy = r + 0.5 - h2
-            k = h2 * h2 - dy * dy
-            if k < 0:
-                continue
-            i1 = int(h2 - 0.5 + k ** 0.5)
-            if i1 > d - 1:
-                i1 = d - 1
-            self._span(x0 + d - 1 - i1, x0 + i1, y0 + r, c)
+        """Row y from x0 to x1 inclusive in colour `c`, clipped; the caller
+        has touched it."""
+        _gfx.ifill(self.pix, self.W, self.H, x0, y, x1 - x0 + 1, 1, c)
 
     def stamp(self, x, y, color, d=1, round_=True):
-        d = max(1, int(d))
-        a = d // 2
-        if self._touch(x - a, y - a, x - a + d - 1, y - a + d - 1):
-            self._dot(int(x), int(y), bytes((int(color) & 63,)), d, round_)
+        self.line(x, y, x, y, color, d, round_)
 
     def line(self, x0, y0, x1, y1, color, d=1, round_=True):
         d = max(1, int(d))
         a = d // 2
-        c = bytes((int(color) & 63,))
         x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
-        while True:
-            # each dot records its own tiles: a long diagonal stroke's undo
-            # holds the strip it crossed, never its bounding box
-            if self._touch(x0 - a, y0 - a, x0 - a + d - 1, y0 - a + d - 1):
-                self._dot(x0, y0, c, d, round_)
-            if x0 == x1 and y0 == y1:
-                return
-            e2 = err + err
-            if e2 > -dy:
-                err -= dy
-                x0 += sx
-            if e2 < dx:
-                err += dx
-                y0 += sy
+        self._reach(x0 - a, y0 - a, x1 - a, y1 - a, d)
+        _gfx.iline(self.pix, self.W, self.H, x0, y0, x1, y1, d, round_, int(color) & 63)
 
     def box(self, a, b, color, filled=False, d=1):
         x0, x1 = min(a[0], b[0]), max(a[0], b[0])
         y0, y1 = min(a[1], b[1]), max(a[1], b[1])
         d = max(1, int(d))
-        if filled or 2 * d >= min(x1 - x0, y1 - y0) + 1:
-            if self._touch(x0, y0, x1, y1):
-                c = bytes((int(color) & 63,))
-                for y in range(y0, y1 + 1):
-                    self._span(x0, x1, y, c)
-            return
         if not self._touch(x0, y0, x1, y1):
             return
-        c = bytes((int(color) & 63,))
-        for y in range(y0, y1 + 1):
-            if y < y0 + d or y > y1 - d:
-                self._span(x0, x1, y, c)
-            else:
-                self._span(x0, x0 + d - 1, y, c)
-                self._span(x1 - d + 1, x1, y, c)
+        c = int(color) & 63
+        W, H, pix = self.W, self.H, self.pix
+        w = x1 - x0 + 1
+        h = y1 - y0 + 1
+        if filled or 2 * d >= min(x1 - x0, y1 - y0) + 1:
+            _gfx.ifill(pix, W, H, x0, y0, w, h, c)
+            return
+        _gfx.ifill(pix, W, H, x0, y0, w, d, c)
+        _gfx.ifill(pix, W, H, x0, y1 - d + 1, w, d, c)
+        _gfx.ifill(pix, W, H, x0, y0 + d, d, h - 2 * d, c)
+        _gfx.ifill(pix, W, H, x1 - d + 1, y0 + d, d, h - 2 * d, c)
 
     def oval(self, a, b, color, filled=False, d=1):
         """The ellipse inscribed in the box from `a` to `b`: filled, or its
@@ -417,7 +455,7 @@ class PaintDocument:
         y0, y1 = min(a[1], b[1]), max(a[1], b[1])
         if not self._touch(x0, y0, x1, y1):
             return
-        c = bytes((int(color) & 63,))
+        c = int(color) & 63
         cx = (x0 + x1 + 1) / 2
         cy = (y0 + y1 + 1) / 2
         rx = (x1 - x0 + 1) / 2
@@ -473,64 +511,52 @@ class PaintDocument:
         return seed
 
     def flood(self, x, y, color):
+        """The region of (x, y)'s colour around it, in `color`: filled with a
+        marker first, so the tiles it reached are recorded as they were (the
+        marker read as the old colour), then the marker becomes the colour."""
         old = self.get(x, y)
         color = int(color) & 63
         if old == color:
             return
-        c = bytes((color,))
-        W = self.W
-        pix = self.pix
-        stack = [(x, y)]
-        while stack:
-            sx, sy = stack.pop()
-            row = sy * W
-            if pix[row + sx] != old:
-                continue
-            left = sx
-            while left > 0 and pix[row + left - 1] == old:
-                left -= 1
-            right = sx
-            while right + 1 < W and pix[row + right + 1] == old:
-                right += 1
-            self._touch(left, sy, right, sy)
-            self._span(left, right, sy, c)
-            for ny in (sy - 1, sy + 1):
-                if ny < 0 or ny >= self.H:
-                    continue
-                nrow = ny * W
-                px = left
-                while px <= right:
-                    if pix[nrow + px] == old:
-                        stack.append((px, ny))
-                        while px <= right and pix[nrow + px] == old:
-                            px += 1
-                    px += 1
+        W, H, T = self.W, self.H, self.TILE
+        tx = self.tiles_x
+        marks = bytearray(tx * ((H + T - 1) // T))
+        n, x0, y0, x1, y1 = _gfx.iflood(self.pix, W, H, x, y, self._MARKER, marks, T, tx,
+                                        bytearray(self._FLOOD_STACK * 4))
+        if not n:
+            return
+        act = self._act
+        if act is not None:
+            self._hold([t for t in range(len(marks)) if marks[t] and t not in act],
+                       self._MARKER, old)
+        _gfx.icopy(self.pix, W, H, x0, y0, self.pix, W, H, x0, y0, x1 - x0, y1 - y0,
+                   self._MARKER, color)
+        self._grow(x0, y0, x1, y1)
 
     def seed_desktop(self):
         """Editable starter art: a designed retro garden wallpaper, drawn at
         512 x 300 and at twice that on a desk board's 1024 x 600."""
         k = self.W // 512
         W = self.W
+        H = self.H
+        pix = self.pix
 
         def s(v):
             return v * k
 
         bands = ((0, 70, 22), (70, 138, 21), (138, 202, 20), (202, 240, 19))
         for y0, y1, c in bands:
-            row = bytes((c,)) * W
-            for y in range(s(y0), s(y1)):
-                self.pix[y * W:(y + 1) * W] = row
+            _gfx.ifill(pix, W, H, 0, s(y0), W, s(y1) - s(y0), c)
         self.circle((s(423), s(70)), (s(463), s(70)), 18, True)
         for x in range(W):
             xs = x // k
             ridge = 186 - abs((xs % 210) - 105) // 3
-            c = bytes((23 if xs < 300 else 13,))
-            for y in range(s(max(145, ridge)), s(220)):
-                self.pix[y * W + x] = c[0]
+            top = s(max(145, ridge))
+            _gfx.ifill(pix, W, H, x, top, 1, s(220) - top, 23 if xs < 300 else 13)
         for y in range(s(205), s(260)):
-            self._span(0, W - 1, y, bytes((22 if (y // k) & 4 else 21,)))
+            self._span(0, W - 1, y, 22 if (y // k) & 4 else 21)
         for y in range(s(255), self.H):
-            self._span(0, W - 1, y, bytes((32 if y // k < 278 else 3,)))
+            self._span(0, W - 1, y, 32 if y // k < 278 else 3)
         self.line(s(102), s(274), s(126), s(128), 28, s(14))
         self.line(s(116), s(185), s(67), s(115), 28, s(8))
         self.line(s(119), s(176), s(180), s(104), 28, s(8))
@@ -545,7 +571,7 @@ class PaintDocument:
             self.circle((s(cx - r // 3), s(cy - r // 4)),
                         (s(cx - r // 3 + r // 2), s(cy - r // 4)), 7 if i & 1 else 15, True)
         for x in range(260, 500, 12):
-            self._span(s(x), s(min(511, x + 7)), s(232 + (x % 5)), bytes((48,)))
+            self._span(s(x), s(min(511, x + 7)), s(232 + (x % 5)), 48)
         for i in range(38):
             x = (i * 73 + 41) % 512
             y = 34 + ((i * 47) % 210)

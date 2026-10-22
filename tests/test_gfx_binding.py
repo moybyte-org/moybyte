@@ -401,7 +401,26 @@ path_text(buf, 16, 3, 520, 64, 300, word, 0x0000, 0, 0, 0, 0, 16, 8)
 path_text(buf, 16, 0, 0, 64, 300, word, 0x0000, 0, 0, 0, 0, 16, 8)
 """
 
-OPS = OPS + CLAMP_OPS + SHAPE_OPS + PATH_OPS
+# One byte a pixel (Paint's marks, moy_gfx_kernels.h): the arena read as a
+# 32 x 8 drawing. The capacity cases claim more rows than the arena holds; the
+# flood's second case has no stack, so it is the sweep alone.
+I8_OPS = """
+ifill(buf, 32, 8, 3, 1, 9, 4, 17)
+ifill(buf, 32, 8, -2, -1, 5, 3, 18)
+ifill(buf, 32, 12, 29, 6, 9, 9, 19)
+iline(buf, 32, 8, 2, 1, 27, 6, 1, 1, 20)
+iline(buf, 32, 8, 30, 0, 4, 7, 4, 1, 21)
+iline(buf, 32, 8, 5, 3, 5, 3, 7, 1, 22)
+iline(buf, 32, 8, -3, 7, 34, 2, 3, 0, 23)
+iline(buf, 32, 12, 16, 7, 16, 11, 5, 1, 26)
+icopy(buf, 32, 8, 20, 2, idx, 5, 4, 0, 0, 5, 4, -1, 0)
+icopy(buf, 32, 8, -1, 5, idx, 5, 4, 1, 1, 9, 9, 7, 60)
+icopy(buf, 32, 8, 0, 0, buf, 32, 8, 0, 0, 32, 8, 17, 24)
+iflood(buf, 32, 8, 0, 0, 255, marks, 8, 4, stack)
+iflood(buf, 32, 8, 12, 4, 254, marks, 8, 4, nostack)
+iflood(buf, 32, 12, 31, 7, 253, marks, 8, 4, stack)
+"""
+OPS = OPS + CLAMP_OPS + SHAPE_OPS + PATH_OPS + I8_OPS
 
 
 def _op_lines(text):
@@ -493,12 +512,15 @@ ring = array.array("i", [128, 64, 832, 64, 832, 448, 128, 448,
                          256, 192, 256, 320, 704, 320, 704, 192])
 ring_ends = array.array("i", [4, 8])
 word = bytes([65, 98, 0xC3, 0xA9, 63])
+marks = bytearray(4)
+stack = bytearray(64)
+nostack = bytearray(0)
 """
 
 _FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565", "spans",
                   "font", "msg", "empty", "long", "big", "pal8", "idx8",
                   "no_quads", "over_quads", "lr", "bdrec", "bdbad", "ptri", "ptri_ends",
-                  "bad_ends", "ring", "ring_ends", "word")
+                  "bad_ends", "ring", "ring_ends", "word", "marks", "stack", "nostack")
 
 
 def _fixtures():
@@ -866,6 +888,10 @@ def blit565(*a): moy_gfx.blit565(*a); _shot()
 def blit565_scale(*a): moy_gfx.blit565_scale(*a); _shot()
 def blit565_resize(*a): moy_gfx.blit565_resize(*a); _shot()
 def text(*a): moy_gfx.text(*a); _shot()
+def ifill(*a): moy_gfx.ifill(*a); _shot()
+def iline(*a): moy_gfx.iline(*a); _shot()
+def icopy(*a): moy_gfx.icopy(*a); _shot()
+def iflood(*a): moy_gfx.iflood(*a); _shot()
 def blit_batch(*a): moy_gfx.blit_batch(*a); _shot()
 def blit_map(*a): moy_gfx.blit_map(*a); _shot()
 def path_fill(*a): moy_gfx.path_fill(*a); _shot()

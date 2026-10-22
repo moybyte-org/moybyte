@@ -373,6 +373,228 @@ void mg_blit_indices(uint16_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
     }
 }
 
+/* ---- one byte a pixel ------------------------------------------------- */
+
+static int mg_ibh(size_t cap, int bw, int bh)
+{
+    if (bw <= 0 || bh <= 0) return 0;
+    if ((size_t)bw * (size_t)bh > cap) bh = (int)(cap / (size_t)bw);
+    return bh;
+}
+
+/* Row y's [x0, x1] (inclusive) in `v`, clipped. */
+static inline void mg_irun(uint8_t *buf, int bw, int bh, int x0, int x1, int y, uint8_t v)
+{
+    if (y < 0 || y >= bh) return;
+    if (x0 < 0) x0 = 0;
+    if (x1 >= bw) x1 = bw - 1;
+    if (x1 < x0) return;
+    memset(buf + (size_t)y * (size_t)bw + (size_t)x0, v, (size_t)(x1 - x0 + 1));
+}
+
+void mg_ifill(uint8_t *buf, size_t cap, int bw, int bh, int x, int y, int w, int h,
+              uint8_t v)
+{
+    bh = mg_ibh(cap, bw, bh);
+    if (bh <= 0 || w <= 0 || h <= 0) return;
+    int y1 = y + h > bh ? bh : y + h;
+    for (int r = y < 0 ? 0 : y; r < y1; r++) {
+        mg_irun(buf, bw, bh, x, x + w - 1, r, v);
+    }
+}
+
+static int mg_isqrt(int m)
+{
+    if (m <= 0) return 0;
+    int s = 0;
+    while ((s + 1) * (s + 1) <= m) s++;
+    return s;
+}
+
+void mg_iline(uint8_t *buf, size_t cap, int bw, int bh, int x0, int y0, int x1, int y1,
+              int d, int round, uint8_t v)
+{
+    bh = mg_ibh(cap, bw, bh);
+    if (bh <= 0) return;
+    if (d < 1) d = 1;
+    if (d > MG_IDOT_MAX) d = MG_IDOT_MAX;
+    /* each row's [lo, hi] from the dot's left, inclusive */
+    int16_t lo[MG_IDOT_MAX], hi[MG_IDOT_MAX];
+    int disc = round && d > 2;
+    for (int r = 0; r < d; r++) {
+        if (!disc) {
+            lo[r] = 0;
+            hi[r] = (int16_t)(d - 1);
+            continue;
+        }
+        int R = 2 * r + 1 - d;
+        int i1 = (d - 1 + mg_isqrt(d * d - R * R)) / 2;
+        if (i1 > d - 1) i1 = d - 1;
+        lo[r] = (int16_t)(d - 1 - i1);
+        hi[r] = (int16_t)i1;
+    }
+    int a = d / 2;
+    int dx = x1 > x0 ? x1 - x0 : x0 - x1;
+    int dy = y1 > y0 ? y1 - y0 : y0 - y1;
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx - dy;
+    for (;;) {
+        int ox = x0 - a, oy = y0 - a;
+        if (ox < bw && oy < bh && ox + d > 0 && oy + d > 0) {
+            for (int r = 0; r < d; r++) {
+                mg_irun(buf, bw, bh, ox + lo[r], ox + hi[r], oy + r, v);
+            }
+        }
+        if (x0 == x1 && y0 == y1) return;
+        int e2 = err + err;
+        if (e2 > -dy) {
+            err -= dy;
+            x0 += sx;
+        }
+        if (e2 < dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+void mg_icopy(uint8_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
+              const uint8_t *src, size_t scap, int sw, int sh, int sx, int sy,
+              int w, int h, int from, int to)
+{
+    dh = mg_ibh(dcap, dw, dh);
+    sh = mg_ibh(scap, sw, sh);
+    if (dh <= 0 || sh <= 0) return;
+    /* clip the rect to the source, then to the destination, moving both ends */
+    if (sx < 0) { w += sx; dx -= sx; sx = 0; }
+    if (sy < 0) { h += sy; dy -= sy; sy = 0; }
+    if (dx < 0) { w += dx; sx -= dx; dx = 0; }
+    if (dy < 0) { h += dy; sy -= dy; dy = 0; }
+    if (sx + w > sw) w = sw - sx;
+    if (sy + h > sh) h = sh - sy;
+    if (dx + w > dw) w = dw - dx;
+    if (dy + h > dh) h = dh - dy;
+    if (w <= 0 || h <= 0) return;
+    for (int r = 0; r < h; r++) {
+        uint8_t *o = dst + (size_t)(dy + r) * (size_t)dw + (size_t)dx;
+        const uint8_t *i = src + (size_t)(sy + r) * (size_t)sw + (size_t)sx;
+        if (from < 0) {
+            memmove(o, i, (size_t)w);
+            continue;
+        }
+        for (int c = 0; c < w; c++) {
+            uint8_t p = i[c];
+            o[c] = p == (uint8_t)from ? (uint8_t)to : p;
+        }
+    }
+}
+
+typedef struct {
+    uint8_t *buf;
+    int bw, bh;
+    uint8_t v;
+    uint8_t *marks;
+    size_t mcap;
+    int t, tx;
+    int out[4];
+    int n;
+} mg_ifl_t;
+
+/* Row y's [l, r] joined the region. */
+static void mg_ifl_run(mg_ifl_t *f, int l, int r, int y)
+{
+    memset(f->buf + (size_t)y * (size_t)f->bw + (size_t)l, f->v, (size_t)(r - l + 1));
+    f->n += r - l + 1;
+    if (l < f->out[0]) f->out[0] = l;
+    if (y < f->out[1]) f->out[1] = y;
+    if (r + 1 > f->out[2]) f->out[2] = r + 1;
+    if (y + 1 > f->out[3]) f->out[3] = y + 1;
+    if (f->t > 0) {
+        size_t row = (size_t)(y / f->t) * (size_t)f->tx;
+        for (int k = l / f->t; k <= r / f->t; k++) {
+            if (row + (size_t)k < f->mcap) f->marks[row + (size_t)k] = 1;
+        }
+    }
+}
+
+int mg_iflood(uint8_t *buf, size_t cap, int bw, int bh, int x, int y, uint8_t v,
+              uint8_t *marks, size_t mcap, int t, int tx, int16_t *stack, int n,
+              int out[4])
+{
+    out[0] = out[1] = out[2] = out[3] = 0;
+    bh = mg_ibh(cap, bw, bh);
+    if (bh <= 0 || x < 0 || y < 0 || x >= bw || y >= bh) return 0;
+    uint8_t old = buf[(size_t)y * (size_t)bw + (size_t)x];
+    if (old == v) return 0;
+    mg_ifl_t f = {buf, bw, bh, v, marks, mcap, t, tx, {bw, bh, 0, 0}, 0};
+    int sp = 0, over = 0;
+    if (n > 0) {
+        stack[0] = (int16_t)x;
+        stack[1] = (int16_t)y;
+        sp = 1;
+    } else {
+        over = 1;
+        mg_ifl_run(&f, x, x, y);
+    }
+    while (sp > 0) {
+        sp--;
+        int px = stack[2 * sp], py = stack[2 * sp + 1];
+        uint8_t *row = buf + (size_t)py * (size_t)bw;
+        if (row[px] != old) continue;
+        int l = px, r = px;
+        while (l > 0 && row[l - 1] == old) l--;
+        while (r + 1 < bw && row[r + 1] == old) r++;
+        mg_ifl_run(&f, l, r, py);
+        for (int ny = py - 1; ny <= py + 1; ny += 2) {
+            if (ny < 0 || ny >= bh) continue;
+            const uint8_t *nrow = buf + (size_t)ny * (size_t)bw;
+            int q = l;
+            while (q <= r) {
+                if (nrow[q] == old) {
+                    if (sp < n) {
+                        stack[2 * sp] = (int16_t)q;
+                        stack[2 * sp + 1] = (int16_t)ny;
+                        sp++;
+                    } else {
+                        over = 1;
+                    }
+                    while (q <= r && nrow[q] == old) q++;
+                }
+                q++;
+            }
+        }
+    }
+    /* The stack ran out: what is left of the region touches what was filled,
+     * so sweep, down then up, until a pass adds nothing. */
+    while (over) {
+        over = 0;
+        for (int pass = 0; pass < 2; pass++) {
+            for (int k = 0; k < bh; k++) {
+                int yy = pass ? bh - 1 - k : k;
+                uint8_t *row = buf + (size_t)yy * (size_t)bw;
+                const uint8_t *up = yy > 0 ? row - bw : NULL;
+                const uint8_t *dn = yy + 1 < bh ? row + bw : NULL;
+                for (int xx = 0; xx < bw; xx++) {
+                    if (row[xx] != old) continue;
+                    if (!((xx > 0 && row[xx - 1] == v) || (xx + 1 < bw && row[xx + 1] == v)
+                          || (up && up[xx] == v) || (dn && dn[xx] == v))) {
+                        continue;
+                    }
+                    int l = xx, r = xx;
+                    while (l > 0 && row[l - 1] == old) l--;
+                    while (r + 1 < bw && row[r + 1] == old) r++;
+                    mg_ifl_run(&f, l, r, yy);
+                    over = 1;
+                    xx = r;
+                }
+            }
+        }
+    }
+    memcpy(out, f.out, sizeof(f.out));
+    return f.n;
+}
+
 /* ---- text ------------------------------------------------------------- */
 
 void mg_text_raw(uint16_t *dst, size_t dcap, int dw,

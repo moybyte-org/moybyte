@@ -7,8 +7,9 @@
  * is this console's compositor: a viewport-aware fill and fill_rect, the RGB565
  * blit with its opaque memcpy lane, the integer-upscale blit the windowed WM
  * composites through, the any-ratio resize the home's cards scale by,
- * blit_window, scroll_rect, blit_indices, and the system-font (scale > 1)
- * text rasterizer. These loops were once written
+ * blit_window, scroll_rect, blit_indices, the system-font (scale > 1)
+ * text rasterizer, and the one-byte-a-pixel ops Paint's drawings are marked
+ * with (ifill, iline, icopy, iflood). These loops were once written
  * twice (moyhost_gfx.c + modmoy_gfx.c) and had already drifted; this file is
  * the one copy.
  *
@@ -315,6 +316,43 @@ void mg_blit_window(uint16_t *dst, size_t dcap, int dw, int dh,
 void mg_blit_indices(uint16_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
                      const uint8_t *idx, size_t icap, int iw, int ih,
                      const uint16_t *pal, size_t pcap);
+
+/* ---- one byte a pixel: a drawing's palette indices (runtime/artwork.py) --
+ * A bw x bh buffer of `cap` bytes; every op clips to it (a cap short of
+ * bw * bh shortens bh). Paint's marks are these calls, and the canvas bakes
+ * what they changed (`blit_indices`). */
+
+/* Fill the w x h rect at (x, y) with `v`. */
+void mg_ifill(uint8_t *buf, size_t cap, int bw, int bh, int x, int y, int w, int h,
+              uint8_t v);
+
+/* A dot `d` pixels across at every point of the line from (x0, y0) to
+ * (x1, y1), stepped as Bresenham steps it: a square, or a disc where `round`
+ * and d > 2 (each row's half-width the floor of (d - 1 + isqrt(d^2 - R^2)) / 2,
+ * R the row's centre offset doubled). A dot's top left is (x - d/2, y - d/2).
+ * `d` is clamped to 1..MG_IDOT_MAX. */
+#define MG_IDOT_MAX 512
+void mg_iline(uint8_t *buf, size_t cap, int bw, int bh, int x0, int y0, int x1, int y1,
+              int d, int round, uint8_t v);
+
+/* Copy the w x h rect at (sx, sy) of `src` (sw x sh, `scap` bytes) to (dx, dy)
+ * of `dst` (dw x dh), clipped to both. A pixel of value `from` (0..255) lands
+ * as `to`; a negative `from` copies every value as it is. On one buffer at one
+ * place it is a replace. */
+void mg_icopy(uint8_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
+              const uint8_t *src, size_t scap, int sw, int sh, int sx, int sy,
+              int w, int h, int from, int to);
+
+/* Fill the 4-connected region of (x, y)'s value with `v`, a value no pixel
+ * holds (the caller's marker), marking in `marks` (`mcap` bytes, one a `t` x
+ * `t` tile, `tx` tiles a row) each tile a filled run crosses. `stack` is the
+ * fill's scratch, `n` (x, y) pairs; a fill that outgrows it finishes by
+ * sweeping the buffer until no pixel joins. out[] = the filled region's
+ * bounds (x0, y0, x1, y1), exclusive; the pixels filled, 0 when (x, y) is off
+ * the buffer or already `v`. */
+int mg_iflood(uint8_t *buf, size_t cap, int bw, int bh, int x, int y, uint8_t v,
+              uint8_t *marks, size_t mcap, int t, int tx, int16_t *stack, int n,
+              int out[4]);
 
 /* The petme128 rasterizer behind the scale > 1 lane of `text` and behind the
  * print draw gate. The clip rect is intersected with the buffer here, so every
