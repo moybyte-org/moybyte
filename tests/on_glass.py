@@ -216,26 +216,25 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
     _home_desk(board)
     assert board.pyval("ws.open_app(ws._apps_by_id['artwork'])", strict=True)
     board.drain(2.5)
-    board.pyexec(
-        "import time\n"
-        "a = ws.artwork_app\n"
-        "a._fresh_doc(a.doc.W, a.doc.H)\n"
-        "a.display = a._display_spec()\n"
-        "ws._paint_probe = 1\n"
-        "ws._paint_saves = []\n"
-        "def _paint_timed(*args, _save=a._art.save):\n"
-        "    t = time.ticks_ms()\n"
-        "    ok = _save(*args)\n"
-        "    ws._paint_saves.append((ok, time.ticks_diff(time.ticks_ms(), t)))\n"
-        "    return ok\n"
-        "a._art.save = _paint_timed\n"
-        "def _paint_leave():\n"
-        "    ws._paint_pix = bytes(ws.artwork_app.doc.pix)\n"
-        "    ws.go_home()\n"
-        "    return 1\n"
-        "ws.mark_dirty()", strict=True)
-    board.drain(1.0)
     try:
+        board.pyexec(
+            "import time\n"
+            "a = ws.artwork_app\n"
+            "a._fresh_doc(a.doc.W, a.doc.H)\n"
+            "ws._paint_probe = 1\n"
+            "ws._paint_saves = []\n"
+            "def _paint_timed(*args, _save=a._art.save):\n"
+            "    t = time.ticks_ms()\n"
+            "    ok = _save(*args)\n"
+            "    ws._paint_saves.append((ok, time.ticks_diff(time.ticks_ms(), t)))\n"
+            "    return ok\n"
+            "a._art.save = _paint_timed\n"
+            "def _paint_leave():\n"
+            "    ws._paint_pix = bytes(ws.artwork_app.doc.pix)\n"
+            "    ws.go_home()\n"
+            "    return 1\n"
+            "ws.mark_dirty()", strict=True)
+        board.drain(1.0)
         assert board.pyval("bytes(ws.artwork_app.doc.pix) == bytes((ws.artwork_app.doc.pix[0],))"
                            " * len(ws.artwork_app.doc.pix)", strict=True), "the page is not blank"
         st = board.state()
@@ -245,8 +244,8 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
             w = st["wins"][wins[-1]]
             ox, oy = w[0] + 1, w[1] + 1 + w[4]
         (x0, y0), (x1, y1) = board.pyval(
-            "(lambda a: (a._art_to_screen((a.doc.W // 3, a.doc.H // 2)), "
-            "a._art_to_screen((2 * a.doc.W // 3, a.doc.H // 2))))(ws.artwork_app)",
+            "(lambda a: (a._to_glass((a.doc.W // 3, a.doc.H // 2)), "
+            "a._to_glass((2 * a.doc.W // 3, a.doc.H // 2))))(ws.artwork_app)",
             strict=True)
         board.swipe(ox + x0, oy + y0, ox + x1, oy + y1, frames=20)
         board.pyval("ws._g['_paint_leave']()", timeout=60)
