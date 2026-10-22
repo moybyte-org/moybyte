@@ -172,6 +172,17 @@ def _any_key(inp):
     return False
 
 
+_DIM = {"tone": "dim"}
+_DISABLED = {"disabled": True}
+_TITLE = {"face": "title"}
+_WRAP3 = {"wrap": True, "lines": 3}
+_CARD_GROUP = {"card": True}
+_DIM_CAPTION = {"tone": "dim", "face": "caption"}
+_CHECK = {"id": "Check"}
+_BACK = ("back", "Back")
+_SHELF_HINTS = ("confirm", "Open", "R", "Check", "back", "Back")
+
+
 def vid(verb):
     """A verb's button's id: its words, apart from the dialog's."""
     return "verb " + VERB[verb][0]
@@ -188,6 +199,24 @@ def genre_icon(cart):
     if cart.get("type") == "app":
         return "app"
     return "game"
+
+
+class _Pane:
+    """The desk pane's words and foot for one cart in one phase
+    (`GetCartsApp._pane_parts`)."""
+
+    def __init__(self):
+        self.row = None
+        self.st = self.phase = self.free = None
+        self.word = self.src = ""
+        self.state = None
+        self.state_icon = ""
+        self.state_h = 0
+        self.state_o = None
+        self.info = ()
+        self.status = ""
+        self.status_at = (0, 0, 0, 0)
+        self.buttons = []         # (verb, rect, label, icon, kind, override table)
 
 
 class GetCartsLayout:
@@ -230,6 +259,7 @@ class GetCartsLayout:
             self.grid = (sx, sy + 34, 24 + gw + 24, sh - 34)
             self.margin = 24
             self.foot_pad = 8
+            self.grid_o = {"cols": self.cols, "foot": 0, "top": 0, "margin": self.margin}
         else:
             self.foot, self.body = ui.cut_bottom(content, 20 * fs)
             bx, by, bw, bh = self.body
@@ -238,6 +268,7 @@ class GetCartsLayout:
             self.caption = (bx + 16 * fs, by + 2 * fs, bw - 32 * fs, 16 * fs)
             self.grid = (bx, by + 16 * fs, bw, bh - 16 * fs)
             self.margin = 16
+            self.grid_o = {"cols": self.cols, "foot": 32, "top": 4, "margin": self.margin}
             self.pane = (bx + 6 * fs, by + 8 * fs, bw - 12 * fs, bh - 8 * fs)
 
     def well(self):
@@ -325,6 +356,9 @@ class GetCartsAppLayer(ListShellApp):
         self.why = ""                 # the NOT INSTALLED page's reason
         self.toast = None             # (text, icon, until ms): a passing message
         self.thumbs = {}              # cover sha256 -> (side, RGB565) or None
+        self._pane_k = None           # the desk pane's parts (`_pane_parts`)
+        self._whole = (0, 0, 0, 0)    # the page's rect, the canvas's
+        self._caption_key = (-1, None, None, "", "", "", 0)   # the shelf's caption, as last made
         self._covers = []             # the covers this check still fetches
         self._work = None             # the decode's scratch, while checking
         self._found = []
@@ -1166,9 +1200,14 @@ class GetCartsAppLayer(ListShellApp):
         cv = self._surf.canvas()
         lay = self.layout
         th = self._theme.colors()
-        self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
+        whole = self._whole
+        if whole[2] != cv.w or whole[3] != cv.h:
+            whole = self._whole = (0, 0, cv.w, cv.h)
+        self._ui.begin(cv, th, whole, lay.desk, lay.windowed)
         ui.page("")                       # the ground under the bar's band too
-        was = (self.phase, self.cur is None, self.asking)
+        was_phase = self.phase
+        was_cur = self.cur is None
+        was_asking = self.asking
         if self.phase in BUSY or self.phase == "pick":
             self._focus = _NOWHERE            # held there: no key reaches Cancel
         if self._focus is not None:
@@ -1198,7 +1237,8 @@ class GetCartsAppLayer(ListShellApp):
         self._focused = ui.focus()
         if lay.desk and ph in ("list", "cart", "done"):
             self._pane_follows()
-        if (self.phase, self.cur is None, self.asking) != was:
+        if (self.phase != was_phase or (self.cur is None) != was_cur
+                or self.asking != was_asking):
             self._damage.again()          # an answer changed what the page shows: a
                                           # draw's `all` is spent with it, an `again` is not
 
@@ -1236,59 +1276,79 @@ class GetCartsAppLayer(ListShellApp):
         right = "%s free" % _mb(self.free[0]) if self.free is not None else ""
         return left, right
 
+    def _card(self, row):
+        """Row `row`'s card as the shelf draws it: (title, sub, override
+        table), made again only when where the cart stands, or the room
+        free, moves."""
+        c = row.get("_card")
+        st = row["state"]
+        if c is not None and c[0] == st and c[1] is self.free:
+            return c
+        shown = self._shown(row)
+        sub = STATE_WORD.get(shown) or _mb(row["plan"]["store_bytes"])
+        o = {"id": self._card_id(row)}
+        if shown in BADGE:
+            o["badge"] = BADGE[shown]
+        if shown == "update":
+            o["tone"] = "value"
+        elif shown in BLOCKED:
+            o["tone"] = "danger"
+        o["icon"] = genre_icon(row["cart"])
+        o_pic = dict(o)
+        del o_pic["icon"]
+        c = row["_card"] = (st, self.free, row["cart"]["name"], sub, o, o_pic)
+        return c
+
     def _shelf(self, cv):
         lay = self.layout
-        left, right = self._caption()
+        key = self._caption_key
+        if key[0] != len(self.rows) or key[1] != self.unreached or key[2] is not self.free:
+            left, right = self._caption()
+            dot = " · " if ui.has_symbols() else " - "
+            self._caption_key = (len(self.rows), self.unreached, self.free, left, right,
+                                 left + (dot + right if right else ""),
+                                 ui.text_size(right)[0] if right else 0)
+            key = self._caption_key
         x, y, w, h = lay.caption
         if lay.desk:
-            dot = " · " if ui.has_symbols() else " - "
-            text = left + (dot + right if right else "")
             bw = 104
             ui.at(x, y, w - bw - 8, h)
-            ui.label(text, {"tone": "dim", "face": "caption"})
+            ui.label(key[5], _DIM_CAPTION)
             ui.at(x + w - bw, y, bw, h)
             ui.icon("rotate")
-            if ui.button("Check", "normal", {"id": "Check"}):
+            if ui.button("Check", "normal", _CHECK):
                 self._check()
         else:
             ui.at(x, y, w, h)
-            ui.label(left, {"tone": "dim", "face": "caption"})
-            if right:
-                rw = ui.text_size(right)[0]
+            ui.label(key[3], _DIM_CAPTION)
+            if key[4]:
+                rw = key[6]
                 ui.at(x + w - rw, y, rw, h)
-                ui.label(right, {"tone": "dim", "face": "caption"})
-            if ui.hints_width(("back", "Back")) > 0:
-                ui.at(*lay.foot)
-                ui.hints(("confirm", "Open", "R", "Check", "back", "Back"))
-        ui.at(*lay.grid)
+                ui.label(key[4], _DIM_CAPTION)
+            if ui.hints_width(_BACK) > 0:
+                r = lay.foot
+                ui.at(r[0], r[1], r[2], r[3])
+                ui.hints(_SHELF_HINTS)
+        g = lay.grid
+        ui.at(g[0], g[1], g[2], g[3])
         ui.scroll("shelf")
         side = lay.side
-        ui.grid("carts", side, side, {"cols": lay.cols, "foot": 0 if lay.desk else 32,
-                                      "top": 0 if lay.desk else 4, "margin": lay.margin})
-        for i, row in enumerate(self.rows):
-            st = self._shown(row)
-            sub = STATE_WORD.get(st) or _mb(row["plan"]["store_bytes"])
-            o = {"id": self._card_id(row)}
-            if st in BADGE:
-                o["badge"] = BADGE[st]
-            if st == "update":
-                o["tone"] = "value"
-            elif st in BLOCKED:
-                o["tone"] = "danger"
+        ui.grid("carts", side, side, lay.grid_o)
+        rows = self.rows
+        for i in range(len(rows)):
+            row = rows[i]
+            c = self._card(row)
             pic = self._pic(row)
-            if pic is None:
-                o["icon"] = genre_icon(row["cart"])
-            x, y, cw, chh, st_ = ui.card(row["cart"]["name"], sub, o)
-            if cw and pic is not None:
-                s, pix = pic
-                cv.clip(*lay.grid)
-                cv.cover(pix, s, 0, 0, s, s, x, y, cw, chh, 0, False)
+            r = ui.card(c[2], c[3], c[4] if pic is None else c[5])
+            if r[2] and pic is not None:
+                cv.clip(g[0], g[1], g[2], g[3])
+                cv.cover(pic[1], pic[0], 0, 0, pic[0], pic[0], r[0], r[1], r[2], r[3], 0, False)
                 cv.clip()
-            if st_ & ui.ACTIVATED:
+            if r[4] & ui.ACTIVATED:
                 self._tap_row(i)
         ui.grid()
-        if not self.rows:
-            ui.label("No carts on the shelf yet", {"tone": "dim"})
+        if not rows:
+            ui.label("No carts on the shelf yet", _DIM)
         ui.end()
         ui.scroll()
 
@@ -1298,7 +1358,7 @@ class GetCartsAppLayer(ListShellApp):
         if f is None or not f.startswith("Cart "):
             return
         for row in self.rows:
-            if self._card_id(row) == f and row is not self.cur:
+            if self._card(row)[4]["id"] == f and row is not self.cur:
                 self.cur = row
                 if self.phase == "list" or self.phase == "done":
                     self.phase = "cart"
@@ -1312,16 +1372,16 @@ class GetCartsAppLayer(ListShellApp):
         no name, its picture's edge and corners the engine's."""
         top = (6 if self.layout.desk else 4 * self.layout.fs)    # style.json's card_top
         ui.at(x, y - top, side, side + top)
-        ui.grid("cover " + row["cart"]["folder"], side, side)
+        c = row.get("_cover")
+        if c is None:
+            c = row["_cover"] = ("cover " + row["cart"]["folder"],
+                                 {"disabled": True, "icon": genre_icon(row["cart"])})
+        ui.grid(c[0], side, side)
         pic = self._pic(row)
-        o = {"disabled": True}
-        if pic is None:
-            o["icon"] = genre_icon(row["cart"])
-        cx, cy, cw, chh, _st = ui.card("", "", o)
-        if cw and pic is not None:
-            s, pix = pic
+        r = ui.card("", "", c[1] if pic is None else _DISABLED)
+        if r[2] and pic is not None:
             cv = self._surf.canvas()
-            cv.cover(pix, s, 0, 0, s, s, cx, cy, cw, chh, 0, False)
+            cv.cover(pic[1], pic[0], 0, 0, pic[0], pic[0], r[0], r[1], r[2], r[3], 0, False)
         ui.grid()
 
     def _meta(self, c):
@@ -1441,6 +1501,16 @@ class GetCartsAppLayer(ListShellApp):
 
     def _button(self, v, rect):
         label, icon = VERB[v]
+        o = self._button_o(v)
+        ui.at(*rect)
+        if icon:
+            ui.icon(icon)
+        if ui.button(label, self._kind(v), o):
+            self._press(v)
+
+    def _button_o(self, v):
+        """Verb `v`'s button's override table: its id, and greyed where a
+        blocker stops it."""
         o = {"id": vid(v)}
         if v in ("GET", "UPDATE") and self.phase in ("cart", "done") \
                 and self.blocker(self.cur) is not None:
@@ -1448,64 +1518,121 @@ class GetCartsAppLayer(ListShellApp):
         if v in ("PLAY", "USE") and self.phase in ("cart", "done") \
                 and self._inst.find(self.cur["cart"]["folder"]) is None:
             o["disabled"] = True
-        ui.at(*rect)
-        if icon:
-            ui.icon(icon)
-        if ui.button(label, self._kind(v), o):
-            self._press(v)
+        return o
 
     # -- the desk's pane and foot ------------------------------------------------
 
     def _pane(self, cv):
         lay = self.layout
         x, y, w, h = lay.rule
-        cv.rect(x, y, w, h, self._theme.colors()["border"])
+        border = self._theme.colors()["border"]
+        cv.rect(x, y, w, h, border)
         row = self.cur if self.cur is not None else (self.rows[0] if self.rows else None)
         fx, fy, fw, fh = lay.foot
         bx = lay.body[0]
-        cv.rect(bx + 16, fy, lay.body[2] - 32, 1, self._theme.colors()["border"])
+        cv.rect(bx + 16, fy, lay.body[2] - 32, 1, border)
         if row is None:
             return
         c = row["cart"]
         px, py, pw, ph = lay.pane
         side = lay.side
         self._cover(row, px, py, side)
+        busy = self.phase in BUSY
+        k = None if busy else self._pane_parts(row)
         tx = px + side + 14
         tw = px + pw - tx
         ui.at(tx, py + 10, tw, 28)
-        ui.label(c["name"], {"face": "title"})
-        word = _cl.genre_word(c.get("genre"))
-        src = c.get("shelf") or _host_of(c.get("index") or "")
+        ui.label(c["name"], _TITLE)
         ty = py + 40
-        for t in (word, src):
-            if t:
-                ui.at(tx, ty, tw, 20)
-                ui.label(t, {"tone": "dim", "face": "caption"})
-                ty += 20
-        busy = self.phase in BUSY
-        state = None if busy else self._state_line(row)
-        if state is not None:
-            text, icon, tone = state
-            short = text.split(":")[0] if tone == "value" else text
-            ui.at(tx, ty + 4, tw, 22 if tone == "value" else 44)
-            ui.icon(icon)
-            ui.label(short, {"tone": tone, "wrap": tone != "value", "lines": 2})
+        if k is None:
+            word = _cl.genre_word(c.get("genre"))
+            src = c.get("shelf") or _host_of(c.get("index") or "")
+        else:
+            word = k.word
+            src = k.src
+        if word:
+            ui.at(tx, ty, tw, 20)
+            ui.label(word, _DIM_CAPTION)
+            ty += 20
+        if src:
+            ui.at(tx, ty, tw, 20)
+            ui.label(src, _DIM_CAPTION)
+            ty += 20
+        if k is not None and k.state is not None:
+            ui.at(tx, ty + 4, tw, k.state_h)
+            ui.icon(k.state_icon)
+            ui.label(k.state, k.state_o)
         dy = py + side + 16
         if c.get("description"):
             ui.at(px, dy, pw, 60)
-            ui.label(c["description"], {"wrap": True, "lines": 3})
+            ui.label(c["description"], _WRAP3)
         dy += 72
         if busy:
             self._pane_busy((px, dy, pw, fy - dy))
         else:
             ui.at(px - 10, dy, pw + 10, fy - dy - 8)
             ui.scroll("facts")
-            ui.group("", {"card": True})
-            for label, value in self._info(row, True):
-                ui.info(label, value)
+            ui.group("", _CARD_GROUP)
+            for f in k.info:
+                ui.info(f[0], f[1])
             ui.group()
             ui.scroll()
-        self._foot(row)
+        if k is None:
+            self._foot(row)
+            return
+        ui.at(k.status_at[0], k.status_at[1], k.status_at[2], k.status_at[3])
+        ui.label(k.status, _DIM_CAPTION)
+        for b in k.buttons:
+            r = b[1]
+            ui.at(r[0], r[1], r[2], r[3])
+            if b[3]:
+                ui.icon(b[3])
+            if ui.button(b[2], b[4], b[5]):
+                self._press(b[0])
+
+    def _pane_parts(self, row):
+        """What the desk's pane and foot draw for `row` outside a job: made
+        again when the cart, where it stands, the phase or the room free
+        moves, so a frame that only scrolls the shelf makes nothing."""
+        k = self._pane_k
+        if (k is not None and k.row is row and k.st == row["state"] and k.phase == self.phase
+                and k.free is self.free):
+            return k
+        k = self._pane_k = _Pane()
+        k.row = row
+        k.st = row["state"]
+        k.phase = self.phase
+        k.free = self.free
+        c = row["cart"]
+        k.word = _cl.genre_word(c.get("genre"))
+        k.src = c.get("shelf") or _host_of(c.get("index") or "")
+        state = self._state_line(row)
+        if state is not None:
+            text, icon, tone = state
+            k.state = text.split(":")[0] if tone == "value" else text
+            k.state_icon = icon
+            k.state_h = 22 if tone == "value" else 44
+            k.state_o = {"tone": tone, "wrap": tone != "value", "lines": 2}
+        k.info = self._info(row, True)
+        lay = self.layout
+        fx, fy, fw, fh = lay.foot
+        verbs = self._current_verbs()
+        ui.face("caption")
+        widths = []
+        for v in verbs:
+            label, icon = VERB[v]
+            widths.append(ui.text_size(label)[0] + (48 if icon else 28))
+        ui.face()
+        bx = fx + fw - 16 - sum(widths) - 8 * max(0, len(verbs) - 1)
+        by = fy + max(1, (fh - 30) // 2)
+        k.status = self._status(row)
+        k.status_at = (fx + 26, by, max(0, bx - fx - 34), 30)
+        for i, v in enumerate(verbs):
+            label, icon = VERB[v]
+            k.buttons.append((v, (bx, by, widths[i], 30), label, icon, self._kind(v),
+                              self._button_o(v)))
+            bx += widths[i] + 8
+        return k
 
     def _pane_busy(self, rect):
         x, y, w, h = rect
