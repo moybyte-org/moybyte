@@ -106,9 +106,11 @@ class ScenePage:
     def _actor(self, cv, se, r, px, y):
         sheet = self.su.ws.project.sheet
         self._checker(cv, px + 68, y, 24)
-        img = sheet.tile_image(r.get("tile", 0), 0)
-        if img is not None:
-            cv.spr(img, px + 68, y, 3)
+        t = r.get("tile", 0)
+        if 0 <= t < sheet.count:
+            ox, oy = sheet.tile_origin(t)
+            cv.sspr(sheet, ox, oy, sheet.TILE, sheet.TILE, px + 68, y,
+                    3 * sheet.TILE, 3 * sheet.TILE, 0)
         ui.at(px, y + 2, 66, 18)
         ui.label(str(r.get("tag") or "thing"), {"face": "title"})
         ui.at(px, y + 28, 98, 16)
@@ -129,9 +131,10 @@ class ScenePage:
             tx = px + (k % 4) * CELL
             ty = y + (k // 4) * CELL
             self._checker(cv, tx, ty, CELL - 2)
-            img = sheet.tile_image(ids[k], -1)
-            if img is not None:
-                cv.spr(img, tx + 2, ty + 2, 2)
+            if 0 <= ids[k] < sheet.count:
+                ox, oy = sheet.tile_origin(ids[k])
+                cv.sspr(sheet, ox, oy, sheet.TILE, sheet.TILE, tx + 2, ty + 2,
+                        2 * sheet.TILE, 2 * sheet.TILE, -1)
         if se.n in ids:
             k = ids.index(se.n)
             ui.cursor(px + (k % 4) * CELL, y + (k // 4) * CELL, CELL - 2, CELL - 2)

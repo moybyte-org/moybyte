@@ -119,9 +119,11 @@ class MapPage:
             ty = y + (k // 4) * CELL
             s = CELL - 2
             checker(cv, tx, ty, s, s, 4, dark, light)
-            img = sheet.tile_image(ids[k], -1)
-            if img is not None:
-                cv.spr(img, tx + (s - 2 * sheet.TILE) // 2, ty + (s - 2 * sheet.TILE) // 2, 2)
+            if 0 <= ids[k] < sheet.count:
+                ox, oy = sheet.tile_origin(ids[k])
+                d = 2 * sheet.TILE
+                cv.sspr(sheet, ox, oy, sheet.TILE, sheet.TILE,
+                        tx + (s - d) // 2, ty + (s - d) // 2, d, d, -1)
         n = me.n
         if n in ids:
             k = ids.index(n)
