@@ -772,3 +772,24 @@ def test_a_settled_canvas_and_a_settled_view_paint_nothing(tmp_path):
     ws.artwork_app.open()
     assert ws.artwork_app.viewer is not None
     assert _idle_paints(ws) == 0, "an idle view painted"
+
+
+def test_a_tap_on_the_handheld_bars_zoom_chip_steps_the_zoom(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_paint(ws)
+    for _ in range(3):
+        ws._dirty = True
+        ws.frame(1 / 30)
+    bl = ws.bar_layer
+    edge, rect, _dy, _cells = bl._packed("app")[0]
+    box = (0, 0, rect[2], rect[3])
+    end = bl._title_end("app", bl.lent_zone("app", bl._packed("app")[0]), box, False)
+    chip = [h for h, _i, _off, name, _r in bl._lent_rects("app", end, box, False)
+            if name == bl._lent("app")[4]]
+    assert chip
+    was = app.zoom
+    x, y, w, h = chip[0]
+    assert bl.handle_bar_tap("app", rect[0] + x + w // 2, rect[1] + y + h // 2)
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert app.zoom != was

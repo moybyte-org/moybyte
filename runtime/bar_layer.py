@@ -1450,8 +1450,9 @@ class BarLayer:
             if zone[0] <= px < zone[0] + self._back_w(game):
                 self.go_back(where)
                 return True
-            end = self._title_end(where, zone, bar, game) if where in ("tool", "app") else 0
-            for hit, i, off, _name, _r in self._lent_rects(where, end, bar, game):
+            box = (0, 0, bar[1][2], bar[1][3])
+            end = self._title_end(where, zone, box, game) if where in ("tool", "app") else 0
+            for hit, i, off, _name, _r in self._lent_rects(where, end, box, game):
                 if _in(px, py, hit):
                     if not off:
                         _ui_draw.bar_tap(self._lent_ctx(where), i)
