@@ -351,11 +351,15 @@ class EditorDesk(Layer):
 
     def _pane_layout(self, tab, r):
         """The layout tab `tab`'s surface takes in a pane `r` big: built by
-        its own `relayout` at that size with no bar, once per size."""
+        its own `relayout` at that size with no bar, once per size (and for
+        Code, per whether it shows its symbol keys, which the last input
+        decides: a layout that disagrees is one the tab rebuilds as it
+        draws, every frame)."""
         ws = self.ws
         fs = ws.look.effective_font_scale()
         cs = ws.look.effective_chrome_scale()
-        key = (tab, r[2], r[3], fs, cs, ws.look.look_gen)
+        sym = tab == "code" and ws.code_layer.wants_symbols()
+        key = (tab, r[2], r[3], fs, cs, ws.look.look_gen, sym)
         lay = self._lay.get(key)
         if lay is not None:
             return lay

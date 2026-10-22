@@ -625,3 +625,49 @@ def test_notes_idle_allocates_nothing(result):
 def test_notes_typing_allocates_nothing(result):
     info, text = result
     _assert_quiet(info["notes_typing"], "Notes typed into", text)
+
+
+# -- the desk Editor's Code pane -----------------------------------------------
+#
+# Not a play frame, but the same bill: on the Waveshare P4 a drag in the desk
+# Code pane allocated ~136 KB EVERY frame, so how often the collector came
+# depended on the heap's layout (1 collection on one image, 8 on another,
+# for the same code). The bytes were a whole Code layout rebuilt per frame:
+# the pane's cached layout said "no symbol keys" while the last input, a
+# touch, asked for them, so the tab re-laid itself out as it drew and the
+# pane put its stale layout back after. What allocated is pinned here by the
+# work it did, on the host: the board-model MicroPython above boots a
+# handheld, which has no panes.
+
+def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
+    sys.path.insert(0, str(ROOT))
+    from runtime import host_app, ui_draw
+    dt = 1 / 30
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    panel_diagonal_in=7.0, font_scale=1, windowed=True)
+    ws.open_desk()
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(3):
+        drv.frame(dt)
+    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
+    ws.editor_app.set_tab("code")
+    for _ in range(4):
+        drv.frame(dt)
+    rebuilt = []
+    real = ws._relayout_code
+    ws._relayout_code = lambda: rebuilt.append(1) or real()
+    was = ui_draw.input_kind()
+    ui_draw.input_kind("touch")
+    try:
+        drv.touch(400, 420)
+        drv.frame(dt)
+        painted = ws._frames_drawn
+        for i in range(12):
+            drv.touch_drag(400, 400 - 20 * i)
+            drv.frame(dt)
+        drv.touch_up()
+        drv.frame(dt)
+    finally:
+        ui_draw.input_kind(was)
+    assert ws._frames_drawn - painted >= 10, "the drag painted too few frames to say"
+    assert len(rebuilt) <= 1, "the Code layout was rebuilt %d times in a drag" % len(rebuilt)

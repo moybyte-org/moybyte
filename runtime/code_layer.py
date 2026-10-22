@@ -411,6 +411,11 @@ class CodeLayer:
     def _symbols(self):
         return symbols_for("lua" if self._is_lua() else "python")
 
+    def wants_symbols(self):
+        """Whether the Code tab lays out its symbol keys: the last input was
+        a touch, which leaves a keyboard's symbols to type (D-17)."""
+        return _ui_draw.input_kind() == "touch"
+
     # -- Layer facets --------------------------------------------------------
 
     def draw(self, dt):
@@ -1240,7 +1245,7 @@ class CodeLayer:
         NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
-        if ws.code_layout.symbols != (_ui_draw.input_kind() == "touch"):
+        if ws.code_layout.symbols != self.wants_symbols():
             # The last input moved between touch and keys: the symbol keys
             # come or go, and the code takes their rows (D-17).
             ws._relayout_code()
