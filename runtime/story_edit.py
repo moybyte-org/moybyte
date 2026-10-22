@@ -62,10 +62,6 @@ GUIDE_565 = _w565(GUIDE)
 WHITE_565 = 0xFFFF
 
 
-def _plural(n, word):
-    return "%d %s%s" % (n, word, "" if n == 1 else "s")
-
-
 class Editor:
     """The desk's editing pages of the app `app` (StorybookAppLayer): the
     story is the app's (`app.story`), so are the renderer, the frames and
@@ -258,11 +254,6 @@ class Editor:
         n, d = lay.edit_zoom
         sx, sy = lay.slide[0], lay.slide[1]
         return (sx + b[0] * n // d, sy + b[1] * n // d, b[2] * n // d, b[3] * n // d)
-
-    def _to_slide(self, px, py):
-        lay = self.app.layout
-        n, d = lay.edit_zoom
-        return ((px - lay.slide[0]) * d // n, (py - lay.slide[1]) * d // n)
 
     def _choose(self, j):
         if self.writing:

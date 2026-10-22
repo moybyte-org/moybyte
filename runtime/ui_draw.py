@@ -1102,8 +1102,7 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
 # (an off-token field, a vertically centred label), the system menu's rows
 # (hilite on the selected row only, drawn by `moy_chrome`'s C) and
 # `achievements_ui._draw_achievements` (a leading glyph, a locked/dim look
-# that IS `disabled`). `cell` answers
-# `file_widgets.FileGridView.draw` (thumbnail + centred caption) and
+# that IS `disabled`). `cell` answers a thumbnail with a centred caption and
 # `cards_layer._draw_choice_icons` / `_draw_bg_thumbs` (frame-only cells whose
 # picture is bespoke) -- which is why `cell` RETURNS the art rect instead of
 # trying to own every picture.

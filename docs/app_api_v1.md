@@ -131,9 +131,8 @@ Four things about the roles are load-bearing:
   frame and at a run's end.
 
 **No role hands out the console.** An app reaches the shell only through the
-roles above; the shared `file_widgets.FileGridView` lists and loads through the
-`files` role its embedder passes it. `tests/test_app_context.py` fails an app
-module that names the Workstation.
+roles above. `tests/test_app_context.py` fails an app module that names the
+Workstation.
 
 ## Lifecycle: `close()` is the LEAVING hook
 

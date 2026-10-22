@@ -724,13 +724,6 @@ class GetCartsAppLayer(ListShellApp):
                                                                _mb(self.free[0]))
         return None
 
-    def _enabled(self, verb):
-        if verb in ("GET", "UPDATE"):
-            return self.blocker(self.cur) is None
-        if verb in ("PLAY", "USE"):
-            return self._inst.find(self.cur["cart"]["folder"]) is not None
-        return True
-
     def _press(self, verb):
         ph = self.phase
         if ph in ("cart", "done"):
