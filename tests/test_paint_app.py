@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from runtime import host_app, moy_carts
 from ws_helpers import select_on_home  # noqa: E402
 
@@ -793,3 +795,76 @@ def test_a_tap_on_the_handheld_bars_zoom_chip_steps_the_zoom(tmp_path):
     ws._dirty = True
     ws.frame(1 / 30)
     assert app.zoom != was
+
+
+def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1):
+    """The glass after every frame of one scripted stroke, and how many of
+    them were stroke frames."""
+    from runtime import paint_app
+    if not stroke_frames:
+        monkeypatch.setattr(paint_app, "_loop", None)
+    if desk:
+        ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                        font_scale=2, windowed=True, panel_diagonal_in=7.0)
+        ws.open_desk()
+    else:
+        ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    app.tool = tool
+    app.shape = shape
+    win = ws.wm._wins.get("artwork") if hasattr(ws.wm, "_wins") else None
+    ox = oy = 0
+    if win is not None:
+        was = app.layout
+        app.layout = win.ctx.artwork_layout
+        x, y, w, h = app._spec()[:4]
+        app.layout = was
+        ox, oy = win.content_rect()[:2]
+    else:
+        x, y, w, h = app._spec()[:4]
+    root = getattr(ws.wm, "_root_canvas", None) or ws.sys_canvas
+    # The page below the bar, whose clock reads the wall's minute: the two
+    # runs this compares are made at two moments.
+    top = (oy if win is not None else app.layout.cy) * root.w * 2
+    made = [0]
+    real = app._stroke_frame
+
+    def counted(cv, th):
+        got = real(cv, th)
+        made[0] += got
+        return got
+    app._stroke_frame = counted
+    shots = []
+    pts = [(x + 16 + i * 7, y + 14 + (i * i) % (h - 30)) for i in range(18)]
+    drv.touch(ox + pts[0][0], oy + pts[0][1])
+    drv.frame(1 / 30)
+    for px, py in pts[1:]:
+        drv.touch_drag(ox + px, oy + py)
+        drv.frame(1 / 30)
+        shots.append(bytes(root._buf[top:]))
+    drv.touch_up()
+    drv.frame(1 / 30)
+    shots.append(bytes(root._buf[top:]))
+    return shots, made[0], bytes(app.doc.pix)
+
+
+@pytest.mark.parametrize("desk", [False, True])
+@pytest.mark.parametrize("tool", ["brush", "eraser", "spray", "shape"])
+def test_a_stroke_frame_paints_what_a_whole_frame_paints(tmp_path, monkeypatch, desk, tool):
+    """A frame whose only change is the stroke's repaints the part of the view
+    it changed, and the glass is the glass a whole frame leaves, every frame."""
+    from runtime import paint_app
+    t = {"brush": paint_app.BRUSH, "eraser": paint_app.ERASER, "spray": paint_app.SPRAY,
+         "shape": paint_app.SHAPE}[tool]
+    whole, none, pix0 = _stroke_glass(tmp_path / "a", monkeypatch, desk, False, t)
+    monkeypatch.undo()
+    part, made, pix1 = _stroke_glass(tmp_path / "b", monkeypatch, desk, True, t)
+    assert none == 0
+    assert made >= 8, "the stroke was painted whole every frame"
+    assert pix0 == pix1
+    for i, (a, b) in enumerate(zip(whole, part)):
+        assert a == b, "frame %d of the stroke differs from a whole frame" % i

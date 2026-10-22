@@ -7,6 +7,7 @@
 #   PaintAppLayer.handle_pointer  a tap or a drag: on the drawing, else the verbs'
 #   PaintAppLayer.draw            the frame: the page in hand
 #   PaintAppLayer._canvas         the drawing in its view, the cursor and the rail
+#   PaintAppLayer._stroke_frame   a frame only a mark changed: the view's changed part alone
 #   PaintAppLayer._more           More: the drawing's verbs
 """Paint: drawing with the public UI API's verbs (docs/ui_api_2026-10.md; the
 look's docs/media/look_2026-10/APPS_RESTYLE.md, Paint).
@@ -66,6 +67,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         from runtime import moybuf as _moybuf
     except ImportError:
         _moybuf = None
+
+try:
+    import moy_loop as _loop
+except ImportError:  # pragma: no cover - direct host import
+    try:
+        from runtime import moy_loop as _loop
+    except ImportError:
+        _loop = None
 
 try:
     from drawing_pages import GamePage, StoryPage, shown, dot as _dot, stories_here
@@ -339,6 +348,48 @@ class Viewer:
         self.blob = None
 
 
+def _grow(c, x0, y0, x1, y1):
+    """Rect `c` [x0, y0, x1, y1) grown over another; an empty one adds
+    nothing."""
+    if x1 <= x0 or y1 <= y0:
+        return
+    if x0 < c[0]:
+        c[0] = x0
+    if y0 < c[1]:
+        c[1] = y0
+    if x1 > c[2]:
+        c[2] = x1
+    if y1 > c[3]:
+        c[3] = y1
+
+
+class _Damage:
+    """Paint's damage role: `all` and `again` as the role's, each counted in
+    `gen`; `mark` asks for a frame whose only change is a mark's -- the doc's
+    pixels and a shape's outline -- which the stroke frame paints alone."""
+
+    def __init__(self, role):
+        self._role = role
+        self.gen = 0
+
+    def all(self):
+        self.gen += 1
+        self._role.all()
+
+    def again(self):
+        self.gen += 1
+        self._role.again()
+
+    def mark(self):
+        self._role.all()
+
+
+# The most physical buffers a canvas rotates through (the scroll's paint ring
+# says the same of its own): a stroke frame needs that many paints of the
+# same page behind it.
+_RING = 3
+
+
 class PaintAppLayer:
     """The Paint app: the canvas, its tools and colours, More's verbs, and a
     desk's drawing viewed on a handheld."""
@@ -361,7 +412,7 @@ class PaintAppLayer:
         self.ctx = ctx
         self._surf = ctx.surface
         self._theme = ctx.theme
-        self._damage = ctx.damage
+        self._damage = _Damage(ctx.damage)
         self._nav = ctx.nav
         self._ui = ctx.ui
         self._art = self.service = ArtworkService(ctx)
@@ -408,6 +459,21 @@ class PaintAppLayer:
         self._focus = None
         self._pop_rect = None
         self._opened = None           # the doc pointer the open drawing was opened at
+        # The stroke frame (`_stroke_frame`): the paints behind it, each
+        # [frame, epoch, x0, y0, x1, y1) the glass its marks changed; the
+        # canvas they went to; the page's signature and its epoch; and last
+        # frame's shape outline and pointer sprite, which a frame repaints
+        # where they stood.
+        self._ring = [[-1, -1, 0, 0, 0, 0] for _i in range(_RING)]
+        self._ring_cv = None
+        self._sig = [None] * 20
+        self._epoch = 0
+        self._gen = -1
+        self._chg = [0, 0, 0, 0]
+        self._clip_r = None
+        self._pv = [0, 0, 0, 0]
+        self._sp = [0, 0, 0, 0]
+        self._drip_c = 0
 
     # -- the document ------------------------------------------------------------
 
@@ -971,15 +1037,18 @@ class PaintAppLayer:
             self.pan[0] -= (px - self._panning[0]) * 4 // q
             self.pan[1] -= (py - self._panning[1]) * 4 // q
             self._panning = (px, py)
+            self._damage.all()
         else:
             p = self._to_doc(px, py, True)
-            self.cur = [p[0], p[1]]
+            self.cur[0] = p[0]
+            self.cur[1] = p[1]
             self._drag(p)
+            self._damage.mark()
         if not down:
             self._down = False
             self._panning = None
             self._release()
-        self._damage.all()
+            self._damage.all()
         return True
 
     def _page_swatch(self, px, py):
@@ -1109,6 +1178,9 @@ class PaintAppLayer:
                 self._damage.again()
         th = self._theme.colors()
         lay = self.layout
+        if (self.page is None and self.viewer is None and self._doc is not None
+                and self._stroke_frame(cv, th)):
+            return
         self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
         if self._touch is None:
             self._touch = ui.hints_width(("back", "Back")) == 0
@@ -1196,11 +1268,19 @@ class PaintAppLayer:
         k = side / 24
         o = (w - side) // 2
         dd = max(3, side // 6)
-        d = self.doc
-        c = d.get(min(d.W - 1, self.cur[0]), min(d.H - 1, self.cur[1]))
+        c = self._drip_colour()
         cx = x + o + int(5.8 * k)
         cy = y + (h - side) // 2 + int(20 * k)
         cv.rrect(cx - dd // 2, cy - dd // 2, dd, dd, dd // 2, c)
+
+    def _drip_colour(self):
+        """The colour under the cursor; while the pointer draws, the one it
+        was under when the stroke began."""
+        if self._down:
+            return self._drip_c
+        d = self.doc
+        c = self._drip_c = d.get(min(d.W - 1, self.cur[0]), min(d.H - 1, self.cur[1]))
+        return c
 
     def _drawing(self, cv, th):
         lay = self.layout
@@ -1209,11 +1289,33 @@ class PaintAppLayer:
         dirty = d.take_dirty()
         if dirty is not None:
             cv.rebake(d.image, *dirty)
-        x, y, w, h, sx, sy, sw, sh, q = self._spec()
+        spec = self._spec()
+        self._view(cv, th, spec)
+        if self._cursor_shown():
+            s = self.size()
+            gx, gy = self._to_glass((self.cur[0] - s // 2, self.cur[1] - s // 2))
+            side = max(2, s * spec[8] // 4)
+            if vx <= gx < vx + vw and vy <= gy < vy + vh:
+                cv.clip(vx, vy, vw, vh)
+                ui.cursor(gx, gy, side, side)
+                cv.clip()
+
+    def _cursor_shown(self):
+        """The ring cursor: the keys', so not under touch, under a popover,
+        or while the pointer draws (the pointer is where it draws)."""
+        return not self.layout.touch and self.pop is None and not self._down
+
+    def _view(self, cv, th, spec):
+        """The view: the drawing on its ground, its frame and thumbs, and a
+        shape's outline while it is dragged."""
+        lay = self.layout
+        d = self.doc
+        vx, vy, vw, vh = lay.view
+        x, y, w, h, sx, sy, sw, sh, q = spec
         r = lay.radius
         if lay.desk:
             cv.rrect(vx, vy, vw, vh, 10, th["panel"])
-            cv.shadow(x, y, w, h, 2, 0, 60, 6, 0, 2)
+            cv.shadow(x, y, w, h, 2, 0, 60, 6, 0, 2, (x, y, w, h, 0))
             cv.picture(d.image, x, y, w, h, 0, (sx, sy, sw, sh))
             cv.rrect(x - 1, y - 1, w + 2, h + 2, 0, None, th["border"])
         else:
@@ -1224,14 +1326,162 @@ class PaintAppLayer:
                 cv.rrect(vx, vy, vw, vh, r, None, th["border"])
             self._thumbs(cv, th, x, y, w, h, sx, sy, sw, sh)
         self._preview(cv)
-        if not lay.touch and self.pop is None:
-            s = self.size()
-            gx, gy = self._to_glass((self.cur[0] - s // 2, self.cur[1] - s // 2))
-            side = max(2, s * q // 4)
-            if vx <= gx < vx + vw and vy <= gy < vy + vh:
-                cv.clip(vx, vy, vw, vh)
-                ui.cursor(gx, gy, side, side)
-                cv.clip()
+
+    # -- the stroke frame ----------------------------------------------------------
+    #
+    # A frame whose only change is a mark's -- the doc's pixels, a shape's
+    # outline, the pointer's sprite over them -- repaints the part of the view
+    # those changed and nothing else: the page around it, the toolkit's pass
+    # included, is the pixels already there. That holds when the canvas keeps
+    # them: the last RETAINED_FRAMES frames all painted this page, the same
+    # page (`_epoch`, moved by any change but a mark's and by anything the page
+    # reads), into this canvas. The view is then painted again inside the
+    # union of what those frames and this one changed, by the same calls a
+    # whole frame makes, so the pixels are a whole frame's. A recording canvas
+    # keeps nothing, and the loop's drawn-frame count is what says the frames
+    # were consecutive.
+
+    def _stroke_frame(self, cv, th):
+        """Paint this frame as a stroke frame where it may: True when it did
+        (the frame is done), False when the whole page must be painted. Either
+        way the doc's marks are baked and this frame's change is recorded."""
+        d = self.doc
+        spec = self._spec()
+        c = self._chg
+        c[0] = c[1] = 1 << 29
+        c[2] = c[3] = -(1 << 29)
+        dirty = d.take_dirty()
+        if dirty is not None:
+            cv.rebake(d.image, *dirty)
+            x, y, w, h, sx, sy, sw, sh, q = spec
+            dx, dy, dw, dh = dirty
+            _grow(c, x + (dx - sx) * q // 4 - 1, y + (dy - sy) * q // 4 - 1,
+                  x + ((dx + dw - sx) * q + 3) // 4 + 1, y + ((dy + dh - sy) * q + 3) // 4 + 1)
+        pv = self._pv
+        _grow(c, pv[0], pv[1], pv[2], pv[3])
+        a, b = self._shape0, self._shape1
+        if a is not None and b is not None:
+            ga = self._to_glass(a)
+            gb = self._to_glass(b)
+            pv[0] = min(ga[0], gb[0]) - 2
+            pv[1] = min(ga[1], gb[1]) - 2
+            pv[2] = max(ga[0], gb[0]) + 3
+            pv[3] = max(ga[1], gb[1]) + 3
+            _grow(c, pv[0], pv[1], pv[2], pv[3])
+        else:
+            pv[2] = pv[0]
+        sp = self._sp
+        _grow(c, sp[0], sp[1], sp[2], sp[3])
+        p = self._surf.pointer() if self._down else None
+        if p is not None and p[4]:
+            u = self.layout.fs
+            sp[0] = p[0] - 1
+            sp[1] = p[1] - 1
+            sp[2] = p[0] + 8 * u + 1
+            sp[3] = p[1] + 13 * u + 1
+            _grow(c, sp[0], sp[1], sp[2], sp[3])
+        else:
+            sp[2] = sp[0]
+        epoch = self._page_epoch(cv, th, d, spec)
+        f = _loop.drawn() if _loop is not None else -1
+        ok = self._region(cv, f, epoch)
+        if f >= 0:
+            e = self._ring[f % _RING]
+            e[0] = f
+            e[1] = epoch
+            e[2] = c[0]
+            e[3] = c[1]
+            e[4] = c[2]
+            e[5] = c[3]
+            self._ring_cv = cv
+        if not ok:
+            return False
+        if c[2] > c[0] and c[3] > c[1]:
+            self._clip_r = c
+            cv.clip(c[0], c[1], c[2] - c[0], c[3] - c[1])
+            self._view(cv, th, spec)
+            cv.clip()
+            self._clip_r = None
+        return True
+
+    def _region(self, cv, f, epoch):
+        """Whether this frame may be a stroke frame; when it may, `_chg`
+        becomes the part of the view it repaints: this frame's change and
+        those of the frames since the canvas's buffer was last painted."""
+        if (f < 0 or self.page is not None or self.pop is not None
+                or self.viewer is not None or self.toast is not None
+                or self._touch is None or cv is not self._ring_cv
+                or getattr(cv, "begin_surface", None) is not None):
+            return False
+        n = getattr(cv, "RETAINED_FRAMES", 0)
+        if n < 1 or n > _RING:
+            return False
+        ring = self._ring
+        c = self._chg
+        for i in range(1, n + 1):
+            e = ring[(f - i) % _RING]
+            if e[0] != f - i or e[1] != epoch:
+                return False
+            if i < n:
+                _grow(c, e[2], e[3], e[4], e[5])
+        lay = self.layout
+        vx, vy, vw, vh = lay.view
+        if c[0] < vx:
+            c[0] = vx
+        if c[1] < vy:
+            c[1] = vy
+        if c[2] > vx + vw:
+            c[2] = vx + vw
+        if c[3] > vy + vh:
+            c[3] = vy + vh
+        # The view's rounded corners blend into what is under them, so a
+        # second paint there would not be the first's.
+        k = 10 if lay.desk else lay.radius
+        if k > 0 and c[2] > c[0] and c[3] > c[1]:
+            if ((c[0] < vx + k or c[2] > vx + vw - k)
+                    and (c[1] < vy + k or c[3] > vy + vh - k)):
+                return False
+        return True
+
+    def _page_epoch(self, cv, th, d, spec):
+        """The page's epoch: moved by any change a mark is not (the damage's
+        own count) and by anything the page outside the view reads."""
+        g = self._damage.gen
+        moved = g != self._gen
+        self._gen = g
+        moved = self._sig_is(0, cv) | moved
+        moved = self._sig_is(1, self.layout) | moved
+        moved = self._sig_is(2, th) | moved
+        moved = self._sig_is(3, d) | moved
+        moved = self._sig_is(4, self.page) | moved
+        moved = self._sig_is(5, self.pop) | moved
+        moved = self._sig_is(6, self.viewer) | moved
+        moved = self._sig_is(7, self.toast) | moved
+        h = (self.tool | self.shape << 4 | (1 if self.shape_fill else 0) << 6
+             | self.size_i << 7 | self.color << 10 | (1 if self._unsaved else 0) << 16
+             | (1 if d.history else 0) << 17 | (1 if d.future else 0) << 18
+             | (1 if self._cursor_shown() else 0) << 19 | (1 if self._touch else 0) << 20
+             | (1 if self._art.editable() else 0) << 21)
+        moved = self._sig_eq(8, h) | moved
+        moved = self._sig_eq(9, self.zoom) | moved
+        for i in range(9):
+            moved = self._sig_eq(10 + i, spec[i]) | moved
+        moved = self._sig_eq(19, self._drip_colour()) | moved
+        if moved:
+            self._epoch += 1
+        return self._epoch
+
+    def _sig_is(self, i, v):
+        if self._sig[i] is v:
+            return False
+        self._sig[i] = v
+        return True
+
+    def _sig_eq(self, i, v):
+        if self._sig[i] == v:
+            return False
+        self._sig[i] = v
+        return True
 
     def _thumbs(self, cv, th, x, y, w, h, sx, sy, sw, sh):
         """A panned view's thumbs: where the view stands in the drawing."""
@@ -1253,8 +1503,13 @@ class PaintAppLayer:
             return
         ga = self._to_glass(a)
         gb = self._to_glass(b)
-        v = self.layout.view
-        cv.clip(*v)
+        vx, vy, vw, vh = self.layout.view
+        k = self._clip_r
+        if k is not None:
+            x0, y0 = max(vx, k[0]), max(vy, k[1])
+            cv.clip(x0, y0, min(vx + vw, k[2]) - x0, min(vy + vh, k[3]) - y0)
+        else:
+            cv.clip(vx, vy, vw, vh)
         c = self.color
         if self.shape == 0:
             cv.line(ga[0], ga[1], gb[0], gb[1], c)
@@ -1265,7 +1520,10 @@ class PaintAppLayer:
                 (cv.rect if self.shape_fill else cv.rectb)(x, y, w, h, c)
             else:
                 (cv.oval if self.shape_fill else cv.ovalb)(x, y, w, h, c)
-        cv.clip()
+        if k is not None:
+            cv.clip(k[0], k[1], k[2] - k[0], k[3] - k[1])
+        else:
+            cv.clip()
 
     def _two_tone(self, cv, th, x, y, w, h):
         """The colour in use's edge: a line of ink, then one of surface
@@ -1638,7 +1896,7 @@ class PaintAppLayer:
             if bmp is not None:
                 x = cx + (cw - bmp.w) // 2
                 y = cy + 6 * u
-                cv.shadow(x, y, bmp.w, bmp.h, 2, 0, 60, 6, 0, 2)
+                cv.shadow(x, y, bmp.w, bmp.h, 2, 0, 60, 6, 0, 2, (x, y, bmp.w, bmp.h, 0))
                 cv.picture(bmp, x, y, bmp.w, bmp.h)
                 cv.rrect(x - 1, y - 1, bmp.w + 2, bmp.h + 2, 0, None, th["border"])
                 cap = "%d × %d, made on a desk%sshown at %s" % (
