@@ -74,11 +74,12 @@ def test_a_page_reads_back_through_any_inflater(uf, name):
 
 def test_a_blank_page_is_one_run_of_long_matches(uf):
     """A blank page is the worst case for the work and the best case for the
-    ratio: it must come out as maximal matches, in no time."""
+    ratio: it must come out as maximal matches, in no time: the process's
+    CPU time, which a loaded host's preemption does not stretch."""
     uf.encode_image(2, 2, bytes(4))
-    t = time.perf_counter()
+    t = time.process_time()
     z = _stream(uf.encode_image(W, H, PAGES["blank"]))
-    took = time.perf_counter() - t
+    took = time.process_time() - t
     assert len(z) < 1200, len(z)
     assert took < 0.25, "a blank page took %.0f ms to encode" % (took * 1e3)
 
