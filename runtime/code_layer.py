@@ -1226,16 +1226,7 @@ class CodeLayer:
                 ly = y + k * lh
                 num = str(n + 1)
                 cv.print(num, x + gut - (len(num) + 1) * cell, ly, th["ink_dim"], 1)
-                line = lines[n][:cols]
-                colours = self._hl(line)
-                i = 0
-                while i < len(line):
-                    c = colours[i]
-                    j = i + 1
-                    while j < len(line) and colours[j] == c:
-                        j += 1
-                    cv.print(line[i:j], x + gut + i * cell, ly, hl.get(c, c) if hl else c, 1)
-                    i = j
+                self._draw_code_runs(lines[n][:cols], 0, cols, ly, x + gut, hl)
         finally:
             cv.clip()
             _ui_draw.print_font(was)
@@ -1299,11 +1290,9 @@ class CodeLayer:
                     cv.rect(tx0, y + th, cols * cell, fs, NAMES["red"])
                 self._draw_selection(ed, absrow, y, tx0, cell, cols, th, t["sel"])
                 self._draw_find_matches(ed, full, y, tx0, cell, cols, th, t["find"])
-                seg = full[ed.left:ed.left + cols]
-                segcols = self._hl(full)[ed.left:ed.left + cols]
-                self._draw_code_runs(seg, segcols, y, tx0)
+                self._draw_code_runs(full, ed.left, cols, y, tx0, t.get("hl"))
                 if on_err and ws.code_err:      # short reason after the code, if it fits
-                    mcol = len(seg) + 1
+                    mcol = max(0, min(cols, len(full) - ed.left)) + 1
                     if mcol < cols - 2:
                         cv.print(ws.code_err[:cols - mcol],
                                  tx0 + mcol * cell, y, NAMES["red"], 1)
@@ -1363,10 +1352,12 @@ class CodeLayer:
         for i in range(len(_FADE_ALPHA)):
             cv.shadow(x + i * step, y, step, h, 0, bg, _FADE_ALPHA[i], 0)
 
-    def _hl(self, line):
-        """Memoized per-line syntax highlight (#24). Lines recur every frame, so
-        cache by text (keyed with the language, so switching a python project for
-        a lua one never replays stale colors).
+    def _runs(self, line):
+        """Memoized per-line syntax highlight (#24) as its runs: a flat list
+        of (start, end, colour) for each stretch of one colour. Lines recur
+        every frame, so cache by text (keyed with the language, so switching
+        a python project for a lua one never replays stale colors), and a
+        frame walks a line's few runs, never its characters.
 
         The bound is TWO generations, not a clear. Dragging through a long file
         walks past the bound, and emptying the memo there re-highlights the whole
@@ -1376,34 +1367,51 @@ class CodeLayer:
         what the single larger bound it replaces held."""
         lua = self._is_lua()
         key = (lua, line)
-        cols = self._hl_cache.get(key)
-        if cols is None:
-            cols = self._hl_old.get(key)
-            if cols is None:
+        runs = self._hl_cache.get(key)
+        if runs is None:
+            runs = self._hl_old.get(key)
+            if runs is None:
                 cols = _highlight(line, lua)
+                runs = []
+                n = len(line)
+                i = 0
+                while i < n:
+                    c = cols[i]
+                    j = i + 1
+                    while j < n and cols[j] == c:
+                        j += 1
+                    runs += (i, j, c)
+                    i = j
             if len(self._hl_cache) >= _HL_MEMO:
                 self._hl_old = self._hl_cache
                 self._hl_cache = {}
-            self._hl_cache[key] = cols
-        return cols
+            self._hl_cache[key] = runs
+        return runs
 
-    def _draw_code_runs(self, seg, segcols, y, x0):
-        """Draw one code line as runs of same-colored text (#24). On the SYSTEM
-        canvas at the layout's char-cell width (8*fs), so it scales with the font.
-        `x0` is the text origin (shifted right by the #89 line-number gutter)."""
+    def _draw_code_runs(self, line, left, cols, y, x0, hl):
+        """Draw the columns [left, left+cols) of one code line as runs of
+        same-colored text (#24), each through `hl` (the theme's tones) when
+        it has one. On the SYSTEM canvas at the layout's char-cell width
+        (8*fs), so it scales with the font. `x0` is the text origin (shifted
+        right by the #89 line-number gutter)."""
         cv = self.ws.sys_canvas
         cell = self.ws.code_layout.cell
-        hl = (self._t or {}).get("hl")
-        n = len(seg)
-        i = 0
-        while i < n:
-            cl = segcols[i]
-            j = i + 1
-            while j < n and segcols[j] == cl:
-                j += 1
-            cv.print(seg[i:j], x0 + i * cell, y,
+        runs = self._runs(line)
+        right = left + cols
+        for k in range(0, len(runs), 3):
+            a = runs[k]
+            b = runs[k + 1]
+            if b <= left:
+                continue
+            if a >= right:
+                break
+            if a < left:
+                a = left
+            if b > right:
+                b = right
+            cl = runs[k + 2]
+            cv.print(line[a:b], x0 + (a - left) * cell, y,
                      hl.get(cl, cl) if hl else cl, 1)
-            i = j
 
     def _visible_span(self, ed, s, e, cols):
         """Clip a column span [s, e) to the horizontally-scrolled visible window,

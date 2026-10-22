@@ -174,10 +174,29 @@ def test_clean_cart_has_no_crash_line(tmp_path):
     assert ws.code_err_row is None
 
 
+def _colour_at(runs, i):
+    """The colour a line's highlight runs (start, end, colour flat) give
+    column i."""
+    for k in range(0, len(runs), 3):
+        if runs[k] <= i < runs[k + 1]:
+            return runs[k + 2]
+    return None
+
+
+def test_the_runs_are_the_highlight_in_stretches(tmp_path):
+    from runtime.code_layer import _highlight
+    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
+    line = 'x = "hi" + 12  # note'
+    cols = _highlight(line)
+    runs = cl._runs(line)
+    assert [_colour_at(runs, i) for i in range(len(line))] == cols
+    assert all(runs[k + 2] != runs[k + 5] for k in range(0, len(runs) - 3, 3))
+
+
 def test_highlight_cache_reuses_result(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
-    a = ws.code_layer._hl("cls(7)")
-    b = ws.code_layer._hl("cls(7)")
+    a = ws.code_layer._runs("cls(7)")
+    b = ws.code_layer._runs("cls(7)")
     assert a is b                          # same line -> cached object
 
 
@@ -189,23 +208,23 @@ def test_crossing_the_memo_bound_keeps_the_lines_still_on_screen(tmp_path):
     from runtime.code_layer import _HL_MEMO
     cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
     onscreen = ["cls(%d)" % i for i in range(20)]
-    kept = [cl._hl(ln) for ln in onscreen]
+    kept = [cl._runs(ln) for ln in onscreen]
     for i in range(_HL_MEMO * 2):          # scroll far enough to rotate twice
-        cl._hl("x%d = %d" % (i, i))
+        cl._runs("x%d = %d" % (i, i))
     assert len(cl._hl_cache) <= _HL_MEMO
     assert len(cl._hl_old) <= _HL_MEMO
     # The window is re-highlighted, not returned stale, once BOTH generations
     # have rolled past it -- correctness never depends on the memo.
-    assert [cl._hl(ln) for ln in onscreen] == kept
+    assert [cl._runs(ln) for ln in onscreen] == kept
 
 
 def test_a_rotation_does_not_lose_the_line_it_just_cached(tmp_path):
     from runtime.code_layer import _HL_MEMO
     cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
     for i in range(_HL_MEMO - 1):
-        cl._hl("a%d = 1" % i)
-    first = cl._hl("cls(1)")               # the entry that trips the rotation
-    assert cl._hl("cls(1)") is first
+        cl._runs("a%d = 1" % i)
+    first = cl._runs("cls(1)")               # the entry that trips the rotation
+    assert cl._runs("cls(1)") is first
 
 
 def test_lua_project_switches_palette_and_highlighting(tmp_path):
@@ -222,13 +241,13 @@ def test_lua_project_switches_palette_and_highlighting(tmp_path):
     ws.screen = "menu"
     assert ws.code_layer._symbols() == _CODE_SYMBOLS
     line = "n = #petals  -- count"
-    py_cols = ws.code_layer._hl(line)
+    py_cols = ws.code_layer._runs(line)
     ws.project.cart["runtime"] = "lua"     # what a picker-opened lua cart carries
     assert ws.code_layer._symbols() == _LUA_SYMBOLS
-    lua_cols = ws.code_layer._hl(line)
+    lua_cols = ws.code_layer._runs(line)
     assert lua_cols != py_cols             # memo keyed by language, not just text
-    assert lua_cols[line.index("--")] == _HL_COMMENT
-    assert lua_cols[line.index("#")] != _HL_COMMENT
+    assert _colour_at(lua_cols, line.index("--")) == _HL_COMMENT
+    assert _colour_at(lua_cols, line.index("#")) != _HL_COMMENT
     ws.frame(1 / 30)                       # the palette draw must not raise
 
 
