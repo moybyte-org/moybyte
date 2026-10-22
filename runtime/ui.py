@@ -600,6 +600,12 @@ def keys_taken():
     return _C.api_keys_taken(_T[0])
 
 
+def input_kind():
+    """The input in use (the last one used): "keys", "tdeck", "pad" or
+    "touch" -- what a part sized for a finger or a pointer reads."""
+    return _D.input_kind()
+
+
 def at(x, y, w, h):
     """Place the next call exactly, leaving the row cursor alone; before a
     `page`, it places the page."""

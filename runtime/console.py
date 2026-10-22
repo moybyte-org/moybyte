@@ -3196,7 +3196,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # drop an edit still sitting in its idle-debounce window.
         #
         # This used to be a hand-written ladder naming four apps and four
-        # DIFFERENT verbs (writer.flush / storybook._commit_deck / sheets.flush /
+        # DIFFERENT verbs (writer.flush / the story's deck commit / sheets.flush /
         # artwork._save) -- the bar-contract bug class one level down: an app that
         # persists on a debounce and is not on the list loses the kid's work,
         # silently. `close()` is the uniform LEAVING hook now
@@ -3775,7 +3775,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         for layer in self.wm.visible_stack_rev():
             if _appbar is not None:
                 _app = _appbar.get(layer.id)
-                if _app is not None:
+                if _app is not None and not getattr(_app, "glass", False):
                     _bar = self._app_bar_route(_app, px, py)
                     if _bar is not None:            # the band is the bar's
                         if _bar:
@@ -4555,7 +4555,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # ONCE per frame (the walk cannot change either term): `_apps_by_id`
         # while the fullscreen chrome rules apply, None in the windowed desk
         # world, where the WM's title strip carries the close instead. See
-        # `_app_bar_route` for the input half and the scope note there.
+        # `_app_bar_route` for the input half and the scope note there. An
+        # app whose `glass` is true holds the whole glass for now (Storybook
+        # presenting): no strip, and the band's taps are the app's; its back
+        # is Esc and B, and the console's key opens the system menu as ever.
         _appbar = self._apps_by_id if not self.wm.desk_open() else None
         # One focus mark a screen: while the pause menu or the system menu
         # holds the keys, what draws under it shows its current, not its
@@ -4602,7 +4605,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 _lb()
                 _lb_done = True
             layer.draw(dt)
-            if _appbar is not None and layer.id in _appbar:
+            if _appbar is not None and layer.id in _appbar \
+                    and not getattr(_appbar[layer.id], "glass", False):
                 self.bar_layer._draw_status_strip("app")    # host guarantee
             _prev_domain = layer.domain
         if _game_open:                              # game was the TOP layer

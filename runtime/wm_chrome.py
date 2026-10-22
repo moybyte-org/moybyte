@@ -389,6 +389,12 @@ class WindowChrome:
                                     or win.edge != self._win_edge(win)):
                 self._resize_window(win, win.w, win.h)
 
+    def _page_named(self, win):
+        """The page a shell app names in its window's title (a story's), or
+        None."""
+        pt = getattr(self.ws._apps_by_id.get(win.kind), "page_title", None)
+        return pt() if pt is not None else None
+
     def _win_title(self, win):
         ws = self.ws
         if win.kind == "desktop":
@@ -400,6 +406,9 @@ class WindowChrome:
                 return t + _title_sep() + lent[0]     # the page an app lent ("Notes · Story ideas")
             return t
         shell = win.kind in _TITLES or win.kind in _SHELL_APPS
+        named = self._page_named(win)
+        if named:
+            return named                      # the page a shell app names (a story's)
         base = ws.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
         if shell and win.kind != "menu" and not _ui_draw.depth()[0]:
             base = base.upper()
@@ -421,6 +430,9 @@ class WindowChrome:
         playtest's the cart alone ("Star Catcher", D-23), never a second
         "Play" beside the Editor's."""
         t = self._win_title(win)
+        named = self._page_named(win)
+        if named and t == named:
+            t = self.ws.app_title(win.kind) or t  # the chip names the app
         if looked:
             for sep in (_SEP_DOT, _SEP_ASCII):
                 at = t.find(sep)

@@ -204,6 +204,13 @@ Two things follow for an app author:
   tap, because the back there is an exit path. An app that persists on an idle
   debounce (#111) implements it (`storybook_app` does); forgetting it costs an
   autosave, never the exit.
+- **Optional `glass`**, an attribute: true while the app holds the whole glass
+  (Storybook presenting). The host then paints no strip and routes the band's
+  taps to the app; its way out is its own back (Esc, B) and the console's key
+  opens the system menu as ever.
+- **Optional `page_title()`**: the page the app has open, by name. The
+  handheld bar shows it after the back chevron; on the desk it is the window's
+  title (its chip keeps the app's name).
 
 ## Checklist for a new shipped app (2026-08-19: it is two files)
 

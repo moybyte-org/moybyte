@@ -2170,13 +2170,13 @@ class DeviceCanvas:
             self._t_text_us += _ticks_diff(_ticks_us(), _t0)
         return
 
-    def blit565(self, buf, w, h, x, y, scale=1):
+    def blit565(self, buf, w, h, x, y, scale=1, key=-1):
         """Place a w x h picture of RGB565 words -- already in this canvas's
         byte order, `swapped565` -- at (x, y), `scale` (a whole number) times
-        its size. Opaque; camera and clip honoured; pal() does not apply,
-        because direct colour has no index to remap. A cart's cover is drawn
-        this way (runtime/cover_cache.py): the console's one picture whose
-        pixels are colours, not palette indices."""
+        its size. Opaque, or at scale 1 with its words equal to `key` left
+        out (a story's picture with a clear background); camera and clip
+        honoured; pal() does not apply, because direct colour has no index to
+        remap. A cart's cover is drawn this way (runtime/cover_cache.py)."""
         self.flush_batch()
         w = int(w)
         h = int(h)
@@ -2191,7 +2191,7 @@ class DeviceCanvas:
         cy1 = self._clip_y1
         g = self._gfx
         if g is not None and scale == 1:
-            g.blit565(self._buf, self._stride, self._bh, x, y, buf, w, h, -1,
+            g.blit565(self._buf, self._stride, self._bh, x, y, buf, w, h, int(key),
                       cx0, cy0, cx1, cy1)
             return
         sw = w * scale
@@ -2369,6 +2369,11 @@ class DeviceCanvas:
         The pixels written, 0 where either buffer is short."""
         return self._gfx.tint(dst, buf, int(sw), int(sx), int(sy), int(w), int(h),
                               self._col(c), int(alpha))
+
+    def bake565(self, indices, w, h, out):
+        """MOY64 indices (w x h) as this canvas's RGB565 words, into `out`
+        (2 * w * h bytes): a picture made once and placed with `blit565`."""
+        self._gfx.blit_indices(out, int(w), int(h), 0, 0, indices, int(w), int(h), self._wire)
 
     def blit_indices(self, indices, iw, ih, x, y):
         # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index

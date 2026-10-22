@@ -2005,9 +2005,11 @@ class AppHost:
         """(x, y, w, h) where stop `id` drew in the last frame, or None."""
         return _C.api_box(self.ctx, id)
 
-    def begin(self, cv, th, rect, desk=False, window=False):
+    def begin(self, cv, th, rect, desk=False, window=False, elsewhere=False):
         """Begin the frame on `cv` under theme `th`, its page `rect` (in a
-        window's body when `window`): whether it is settled."""
+        window's body when `window`): whether it is settled. `elsewhere`:
+        the keys are a part's the app drives itself (a story's slide), so no
+        stop holds focus this frame."""
         a = self.inp
         t = self.tap
         a[4] = 7 if t == 1 else 3 if t == 3 else 1 if t == 2 else 0
@@ -2016,7 +2018,8 @@ class AppHost:
                 a[2] = self.px
                 a[3] = self.py
             a[4] |= 1 | (_P_MIDDLE if self.mid else 0)
-        settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app)
+        settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app,
+                           elsewhere=elsewhere)
         self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
         a[0] = a[1] = a[5] = a[7] = a[8] = 0
         self.owed = not settled
