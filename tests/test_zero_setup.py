@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from net_ports import free_port
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "device"))            # moy_webserver
 # APPENDED, not inserted, since the Zero became a build target (2026-08-29):
@@ -476,14 +478,6 @@ class _FakeSTA:
         self.log.append("sta connect")      # it saves and reboots instead
 
 
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
 class _FakeMachine:
     def __init__(self, log, on_reset):
         self.log = log
@@ -649,7 +643,7 @@ def test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order(
     monkeypatch.setitem(sys.modules, "time", _FakeTime(_on_sleep))
     try:
         with pytest.raises(_Rebooted):
-            zero_setup.run(str(wifi), str(zero), port=_free_port())
+            zero_setup.run(str(wifi), str(zero), port=free_port())
     finally:
         for c in clients:
             c.close()

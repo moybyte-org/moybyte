@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from net_ports import free_port
+
 from board_source import runtime_text
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -407,14 +409,6 @@ def test_a_write_anywhere_but_sync_is_still_405(tmp_path):
 # -- over a real socket --------------------------------------------------------
 
 
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
 def _exchange(host, raw, polls=400):
     """Send `raw` to the serving host from a thread, pumping its poll the way
     the frame loop does, and return everything it answered."""
@@ -449,7 +443,7 @@ def serving(tmp_path):
     hosts = []
 
     def make(**kw):
-        h = wh.WebHost(str(_store(tmp_path)), port=_free_port(), **kw)
+        h = wh.WebHost(str(_store(tmp_path)), port=free_port(), **kw)
         h.start(ip="127.0.0.1")
         hosts.append(h)
         return h
@@ -504,7 +498,7 @@ def test_a_request_the_vm_answers_is_parked_and_answered(serving):
 def test_a_parked_request_nobody_takes_is_a_503(tmp_path):
     """A VM gone mid-request (a soft reset) must not leave the browser hanging:
     the kernel answers it itself once the window is out."""
-    h = wh.WebHost(str(_store(tmp_path)), port=_free_port())
+    h = wh.WebHost(str(_store(tmp_path)), port=free_port())
     h.start(ip="127.0.0.1")
     try:
         c = socket.create_connection(("127.0.0.1", h.port), timeout=5)
@@ -1414,7 +1408,7 @@ def test_every_board_wires_the_release_to_the_socket(tmp_path):
     """make_webhost is the ONE injection every board takes, so the lease's
     release lives there and not in four board files."""
     ws = _ws(tmp_path)
-    h = wh.make_webhost(ws, str(_store(tmp_path)), port=_free_port())
+    h = wh.make_webhost(ws, str(_store(tmp_path)), port=free_port())
     ws.wifi_hold("web")
     h.start(ip="127.0.0.1")
     assert h.serving
@@ -1954,7 +1948,7 @@ def test_a_start_with_no_link_returns_at_once_and_the_poll_brings_it_on(tmp_path
     and the frame's poll binds once the kernel's link has an address."""
     seen = []
     nb._link(None)
-    h = wh.WebHost(str(_store(tmp_path)), port=_free_port(),
+    h = wh.WebHost(str(_store(tmp_path)), port=free_port(),
                    on_serving=lambda: seen.append("up"))
     try:
         t0 = time.time()
@@ -1976,7 +1970,7 @@ def test_a_start_with_no_link_returns_at_once_and_the_poll_brings_it_on(tmp_path
 def test_a_join_that_never_gets_a_link_fails_and_says_so(tmp_path):
     failed = []
     nb._link(None)
-    h = wh.WebHost(str(_store(tmp_path)), port=_free_port(),
+    h = wh.WebHost(str(_store(tmp_path)), port=free_port(),
                    on_failed=lambda: failed.append(h.error))
     h.start()
     nb._skew_clock(20001)
@@ -1988,7 +1982,7 @@ def test_a_join_that_never_gets_a_link_fails_and_says_so(tmp_path):
 def test_turning_a_join_off_ends_it_and_lets_the_radio_go(tmp_path):
     stopped = []
     nb._link(None)
-    h = wh.WebHost(str(_store(tmp_path)), port=_free_port(),
+    h = wh.WebHost(str(_store(tmp_path)), port=free_port(),
                    on_stop=lambda: stopped.append(1))
     h.start()
     h.stop("off")
@@ -2002,7 +1996,7 @@ def test_turning_a_join_off_ends_it_and_lets_the_radio_go(tmp_path):
 def test_the_console_parks_when_the_join_arrives_and_not_before(tmp_path):
     ws = _ws(tmp_path)
     nb._link(None)
-    ws.webhost = wh.make_webhost(ws, str(_store(tmp_path)), port=_free_port())
+    ws.webhost = wh.make_webhost(ws, str(_store(tmp_path)), port=free_port())
     ws.toggle_webhost()
     assert ws.webhost.joining and not ws.web.parked
     assert ws.webhost_label() == "JOINING..."
@@ -2018,7 +2012,7 @@ def test_the_console_parks_when_the_join_arrives_and_not_before(tmp_path):
 
 
 def test_the_goodbye_ends_with_the_switch_off(tmp_path):
-    h = wh.WebHost(str(_store(tmp_path)), port=_free_port())
+    h = wh.WebHost(str(_store(tmp_path)), port=free_port())
     h.start(ip="127.0.0.1")
     h.stop("off")
     assert nb.wc_state()[0] == wh.WebHost.CLOSING

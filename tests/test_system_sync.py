@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from net_ports import free_port
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "device"))
@@ -400,14 +402,6 @@ def test_a_carts_batch_still_applies_in_c_beside_the_system_root(tmp_path):
     assert (tmp_path / "carts" / "hop.moy" / "main.py").read_text() == "x = 2\n"
 
 
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
 def _exchange(host, raw, polls=400):
     out = {}
 
@@ -439,7 +433,7 @@ def test_over_a_socket_the_c_parks_the_batch_for_the_vm(tmp_path):
     """The board's own path: the kernel's poll parks the pinned system batch,
     the VM's poll takes it, merges it and answers on the same connection."""
     ws = _Ws()
-    h = _host(tmp_path, ws, port=_free_port())
+    h = _host(tmp_path, ws, port=free_port())
     h.start(ip="127.0.0.1")
     try:
         body = _batch([{"p": "system.json", "t": json.dumps(
