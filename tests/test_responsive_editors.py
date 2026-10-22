@@ -577,8 +577,8 @@ def test_music_editor_shows_more_rows_on_large_canvas(tmp_path):
 
 
 def test_music_editor_tap_works_in_system_coords(tmp_path):
-    """Tapping the PLAY button at the layout's position starts a preview on a big
-    canvas (system-coord hit-testing)."""
+    """Tapping Hear where the page drew it starts a preview on a big canvas
+    (system-coord hit-testing)."""
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
@@ -586,9 +586,9 @@ def test_music_editor_tap_works_in_system_coords(tmp_path):
     drv.frame(1 / 30)
     if ws.music_ui.musicedit is None:
         return                                     # no audio bank -- nothing to pin
-    lay = ws.music_ui.layout
-    bx, by, bw, bh = lay.play_btn
-    drv.touch(bx + bw // 2, by + bh // 2)
+    bx, by, bw, bh = ws.music_ui.page().host.box("Hear")
+    drv.click(bx + bw // 2, by + bh // 2)
+    drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.music_ui.music_preview is not None
 

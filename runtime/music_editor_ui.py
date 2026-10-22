@@ -70,9 +70,11 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    import layout_base as _lb
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
+    from runtime import layout_base as _lb
 
 # Music / sound editor (#50): a tracker-style step editor over the cart's AudioBank.
 # Two views: SFX (a vertical column of [note, wave, vol] steps for one effect) and
@@ -167,6 +169,9 @@ class MusicLayout(LayoutBase):
                  chrome_scale=None):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
+        # The handheld's tab is the page on the verbs (editor_music.py); a
+        # desk's pane and its tab ladder draw the tracker below.
+        self.verbs = not _lb.pane() and _lb.metric_class() != _lb.DESK
         # -- responsive: the control row hangs from the content rect's top, the
         # PLAY/LOOP row anchors to its floor, and the list gains rows to fill the
         # band between ----------------------------------------------------------
@@ -227,8 +232,29 @@ class MusicEditorUI:
         self.musicedit = None         # MusicEditor while menu_view == "music"
         self.music_preview = None     # ("sfx", n) | ("song", track) | None (preview)
         self._mkey = KeyEdge()        # Ctrl+Z/Y edge tracker (#92)
+        self._page = None             # the handheld's page on the verbs (editor_music.py)
         sc = ws.sys_canvas
         self.layout = MusicLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
+
+    def page(self):
+        """The handheld's Music page on the verbs, built at its first use."""
+        if self._page is None:
+            try:
+                from editor_music import MusicPage
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime.editor_music import MusicPage
+            self._page = MusicPage(self, _ui_draw.AppHost("editor_music"))
+        return self._page
+
+    def pointer(self, px, py, click):
+        """A pointer sample on the tab (the layer's, after the bar's): the
+        page's on the handheld, else a tap routed by `_music_click`."""
+        ws = self.ws
+        if self.layout.verbs:
+            if self.page().point(px, py, click, ws.pointer.down):
+                ws._dirty = True
+        elif click:
+            self._music_click(px, py)
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
@@ -307,6 +333,17 @@ class MusicEditorUI:
         i = ws.input
         me = self.musicedit
         changed = False
+        page = self._page if self.layout.verbs else None
+        if page is not None:
+            if page.pop is not None:
+                if page.keys(i):
+                    ws._dirty = True
+                if i.pressed("b"):
+                    page.pop = None
+                    ws._dirty = True
+                return
+            if page.owed():
+                changed = True
         if me is not None:
             if i.pressed("up"):
                 me.move_cursor(-1)
@@ -448,6 +485,9 @@ class MusicEditorUI:
         cv = ws.sys_canvas
         lay = self.layout
         me = self.musicedit
+        if lay.verbs:
+            self.page().draw(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), False)
+            return
         # Phase 3 (visual identity v1): the theme's tool surface and ink on
         # every tier (the tokens resolve per theme and variant).
         th = ws.theme_colors

@@ -298,8 +298,7 @@ class _MusicLayer(Layer):
         # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
-        if click:
-            ws.music_ui._music_click(px, py)   # step list + edit pad + actions
+        ws.music_ui.pointer(px, py, click)   # step list + edit pad + actions
         return True
 
 
