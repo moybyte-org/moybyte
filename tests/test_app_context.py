@@ -354,8 +354,8 @@ def test_storage_verbs_report_no_store_instead_of_raising(tmp_path):
                 ctx.files.trash_list(),
                 ctx.files.begin(),
                 ctx.carts.begin(),
-                ctx.carts.load_deck({"path": "/nope"}),
-                ctx.carts.save_code({"path": "/nope"}, "x")):
+                ctx.carts.images({"path": "/nope"}),
+                ctx.carts.save_image({"path": "/nope"}, "x", "y")):
         value, err = res
         assert value is None
         assert err is _ac.NO_STORE
@@ -449,7 +449,7 @@ def test_prefs_writes_and_clears_reach_system_json(tmp_path):
 # A statement-level sweep of the whole suite found TEN verbs on this module
 # whose bodies had never executed -- the seven #208 names (`Files.count`,
 # `Files.empty_trash`, `Files.decode_text`, `_RawFiles.empty_trash`,
-# `Carts.save_deck`, `Carts.images`, `Theme.set_variant`) plus `Files.history`,
+# `Carts.images`, `Theme.set_variant`) plus `Files.history`,
 # `_RawFiles.history` and `_NoStore.__str__` -- and two branches nothing
 # reached: `Nav.open_app`'s id resolution and `Prefs.clear`'s persist.
 #
@@ -482,7 +482,7 @@ def _files(tmp_path):
 def _new_cart(carts, title):
     """A cart of this test's own making. Borrowing `ws.carts.all[0]` makes an
     assertion about a cart's FOLDER hostage to whichever seed sorts first --
-    one with a deck.json or an images/ dir would read as a role verb that
+    one with an images/ dir would read as a role verb that
     wrote when it should not have."""
     cart, err = carts.create(title, None, "story")
     assert err is None, err
@@ -624,7 +624,7 @@ def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
     files.begin()                                  # never ended
     carts.begin()                                  # never ended
     files.save("docs", "leak", _store.encode_text("x"))
-    assert carts.load_deck({"path": str(tmp_path / "nope.moy")}) == (None, None)
+    assert carts.images({"path": str(tmp_path / "nope.moy")}) == ({}, None)
     before = ws._frames_drawn
     for _ in range(4):
         ws._dirty = True
@@ -680,26 +680,6 @@ def test_the_history_role_reads_back_what_history_commit_wrote(tmp_path):
 
 
 # -- ctx.carts -----------------------------------------------------------------
-
-def test_save_deck_writes_the_deck_into_the_carts_own_folder(tmp_path):
-    """Storybook's authoring verb, and the reason `carts` is a role of its own:
-    it writes into a CART, which is executable content."""
-    ws = _ws(tmp_path)
-    carts = ws.app_context("demo", ("carts",)).carts
-    cart = _new_cart(carts, "Deck Test")
-    deck = '{"format": "moydeck-v1", "pages": []}'
-    assert carts.load_deck(cart) == (None, None)          # never a deck before
-    assert carts.save_deck(cart, deck) == (None, None)
-    path = cart["path"] + "/" + _store.DECK_NAME
-    with open(path) as fh:
-        assert fh.read() == deck
-    assert carts.load_deck(cart) == (deck, None)
-    ws.can_manage = False
-    ws.store.bind()
-    assert carts.save_deck(cart, "{}") == (None, _ac.NO_STORE)
-    with open(path) as fh:
-        assert fh.read() == deck                          # the refusal wrote nothing
-
 
 def test_carts_images_reads_the_assets_by_name_from_a_cart_or_a_path(tmp_path):
     """`moy_carts.load_images` takes the cart's PATH, so the raw verb accepts a

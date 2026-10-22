@@ -294,7 +294,7 @@ console needs while no Python app runs is OS.
 | `runtime/achievements_ui.py` | cart path | 4 | the achievement and Easter-egg drawing: the "achievements/notify path" of §2.2 |
 | `runtime/app_context.py` | roles | 5 | `ROLES` is the ABI's source |
 | `runtime/app_decls.py` | spine | 2 | the app registry's frozen declaration, generated from the manifests by `tools/gen_device_carts.py`; the manifests stay the source |
-| `runtime/app_shell.py` | app | — | the list shell Files, Storybook and Get Carts share |
+| `runtime/app_shell.py` | app | — | the identity gate and persist tail Files, Storybook and Get Carts share |
 | `runtime/appearance.py` | roles | 5, stays | `Workstation.look`: theme variant, skin, font scale, wallpaper and bar icons. It stays Python, the coordinator, and writes what the theme role's C rows answer, the live token table (`docs/kernel_appabi_2026-10.md` §6) |
 | `runtime/appearance_app.py` | app | — | Appearance |
 | `runtime/artwork.py` | app | — | Paint's document model: `PaintDocument` and `ArtworkService`, built over Paint's grant; the `artwork` role's C rows read the open picture from Paint's prefs (`docs/kernel_appabi_2026-10.md` §6) |
@@ -405,7 +405,7 @@ console needs while no Python app runs is OS.
 | `runtime/web_console.py` | radios and links | 3 | the web-console switch: pairing pin, paired url, and parking the glass while a browser edits the store |
 | `runtime/web_console_ui.py` | radios and links | open | the screen the glass parks on while no app runs, so it is OS by §2.2's rule; it draws with `runtime/ui.py` and `runtime/moy_qr.py`. Question: does it cross in 3 with the webhost, drawn without the toolkit, or wait for the toolkit in 6? |
 | `runtime/web_input.py` | input | 3 | the browser's event decode; the boards deny it |
-| `runtime/widgets.py` | split | 3 + 4 + 5 + 6 | `Pointer` and `pointer_state`, `_SilentAudio` (deleted) → 3; `Achievements`, `Pmem`, `Actor`, `Scenes`, `SceneWorld`, `Popup` → 4; `Clipboard` → 5 (a kernel row in native/moy_app); `ConfirmTap`, `_Blit` and the small draw helpers → 6 |
+| `runtime/widgets.py` | split | 3 + 4 + 5 + 6 | `Pointer` and `pointer_state`, `_SilentAudio` (deleted) → 3; `Achievements`, `Pmem`, `Actor`, `Scenes`, `SceneWorld`, `Popup` → 4; `Clipboard` → 5 (a kernel row in native/moy_app); `_Blit` and the small draw helpers → 6 |
 | `runtime/wm.py` | window managers | 7 | the memoized draw stack, the game-to-system composite and navigation over the spine's back-stack (the spine's `BackStack`, `native/moy_spine`, 2) |
 | `runtime/wm_chrome.py` | window managers | 7 | the windowed WM's title strip, borders and taskbar chips |
 | `runtime/wm_desk.py` | window managers | 7 | the windowed desk's root layer and backdrop cache |

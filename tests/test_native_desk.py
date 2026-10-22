@@ -17,7 +17,6 @@ import os
 import pytest
 
 from runtime import host_app, layout_base, ui_draw
-from runtime.app_shell import ListShellLayout
 from runtime.chrome import text_scale_floor
 from runtime.files_app import FilesLayout
 
@@ -145,37 +144,6 @@ def test_the_text_floor_answers_1_on_the_desks_for_the_font_set(name, size, diag
             assert text_scale_floor(size[0], size[1], diag, asc) == 1, (name, face)
         finally:
             ui_draw._C.font_free(fid)
-
-
-# -- line metrics ------------------------------------------------------------------
-
-def test_the_list_apps_read_the_print_fonts_line(tmp_path):
-    """A taller print font grows the rows and bands that hold its text; under
-    petme128 they are the 8px cell's numbers."""
-    class StorybookLayout(ListShellLayout):           # a list app's head and rows
-        def __init__(self, w, h, fs=1):
-            self._init_frame(w, h, fs, False)
-            self.band_h = self.band(24, 8)
-            self._init_list(self.cy + self.band_h)
-
-    layout_base.place_class(layout_base.HANDHELD)
-    lay = StorybookLayout(320, 240, 1)
-    assert (lay.band_h, lay.row_h) == (24, 20)
-    sample = os.path.join(ROOT, "tests", "fixtures", "fonts", "sample6x9.fnt")
-    rc, fid = ui_draw._C.font_load(open(sample, "rb").read())
-    assert rc == 0
-    try:
-        ui_draw.use_font("ui", fid)
-        line = ui_draw.font("ui")[2]
-        big = StorybookLayout(320, 240, 2)
-        assert big.row_h >= line * 2 + 4 * 2
-        assert big.band_h >= line * 2 + 8 * 2
-        assert isinstance(big, ListShellLayout)
-        assert big.cut("A LABEL FAR TOO LONG FOR ITS BOX", 60) \
-            == ui_draw.print_cut("A LABEL FAR TOO LONG FOR ITS BOX", 60, 2)
-    finally:
-        ui_draw.use_font("ui", 0)
-        ui_draw._C.font_free(fid)
 
 
 # -- the 2x option -----------------------------------------------------------------

@@ -22,7 +22,6 @@ import inspect
 from pathlib import Path
 
 from runtime import ui_draw
-import ui_twin as twin
 from runtime.chrome import THEME_NAMES, THEME_VARIANTS, theme_colors
 
 # The seeds of MOY64 colours, whose widgets these pin byte for byte; `moy`'s,
@@ -204,61 +203,3 @@ def test_the_cue_paints_only_the_edge_at_rest_geometry():
                     (py in (y, y + h - 1) and x <= px < x + w)
         assert on_border, "hover moved a pixel at %d,%d, off the cell edge" % (
             px, py)
-
-
-# --- the private button copies ---------------------------------------------------
-
-def test_the_private_button_copies_are_gone():
-    """The notebook app's `_hist_btn` was a hand-rolled copy of `ui_draw.chip` that
-    disagreed with its siblings about what an enabled icon button looks
-    like. It is absorbed; `disabled` is the toolkit's.
-
-    The two-line DELEGATE it left behind was itself duplicated (that app and
-    Storybook's argument-poorer twin) and is now one method,
-    `app_shell.ListShellApp._button`. The app is gone; the shared chip it was
-    folded into is what has to keep carrying `disabled`, so that is what this
-    asserts."""
-    shell = (ROOT / "runtime" / "app_shell.py").read_text(encoding="utf-8")
-    assert "disabled=not enabled" in shell, "the shared chip lost `disabled`"
-
-
-def test_the_disabled_history_chip_dims_through_the_theme_role():
-    """The affordance is the INK (there is no dimmed sprite), and it now comes
-    from the theme's own `ink_dim` role rather than a hardcoded palette index --
-    so it stays legible in all 12 family x variant sets."""
-    from runtime.app_shell import ListShellApp, ListShellLayout
-
-    class _Layout(ListShellLayout):
-        def __init__(self):
-            self._init_frame(320, 240, 1, False)
-
-    for name in THEME_NAMES:
-        for variant in THEME_VARIANTS:
-            th = theme_colors(name, variant)
-            seen = []
-
-            class _Theme:
-                @staticmethod
-                def colors():
-                    return th
-
-            app = ListShellApp()
-            # The app reads its shell through AppContext roles now
-            # (runtime/app_context.py), so the stub supplies the theme.
-            app._theme = _Theme()
-            app.layout = _Layout()
-            for glyph, enabled in (("undo", True), ("redo", False)):
-                cv = SystemCanvas(40, 30, 1)
-                app._button(cv, glyph, (4, 4, 18, 18), glyph=glyph, enabled=enabled)
-                # The twin's chip paints its glyph in the disabled ink its
-                # state table resolves through the theme's `ink_dim` role.
-                ref = SystemCanvas(40, 30, 1)
-                twin.chip(ref, th, (4, 4, 18, 18), glyph, fs=1, glyph=glyph,
-                          glyph_draw=lambda k, r, c, v: ui_draw.glyph(v, k, r, c),
-                          disabled=not enabled)
-                assert bytes(cv._buf) == bytes(ref._buf), (name, variant, glyph)
-                seen.append(twin.state_colors(th, "chip", twin.DISABLED if not enabled
-                                              else twin.REST)[1])
-            assert seen == [th["chrome_ink"],
-                            twin.state_token(th, "disabled_ink", 6)], (name, variant)
-            assert seen[0] != seen[1], (name, variant)

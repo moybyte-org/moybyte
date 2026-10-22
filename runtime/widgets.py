@@ -1,6 +1,5 @@
 # Map (grep -n a name to jump there):
 #   arm_prompt                 take the keyboard for a modal prompt
-#   ConfirmTap                 a two-tap guard on a destructive button
 #   _Blit                      the cursor sprite's blittable
 #   -- achievements            Achievements, Pmem
 #   Achievements               the milestones a kid has unlocked
@@ -23,7 +22,6 @@ that don't belong to any one surface Layer or the router:
                       the scene()/load_scene() accessor over the .moyscene blobs.
   * `Popup`        -- the one popover (#52, docs/shell_layout_2026-10.md §8): the
                       system menu's rows, or a bar widget's component.
-  * `ConfirmTap`   -- the two-tap guard every destructive button shares.
   * `arm_prompt`   -- the input-edge neutraliser a modal prompt opens with.
 
 All are backend-agnostic + MicroPython-safe: they take NO NAMES/canvas (they don't
@@ -92,36 +90,6 @@ def arm_prompt(ws):
     ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
     if ws.pointer is not None:
         ws.pointer.click = False        # the tap that opened the prompt is not OK
-
-
-class ConfirmTap:
-    """A two-tap guard on a destructive button: the first tap ARMS, the
-    second (while still armed) confirms, and any other gesture disarms.
-    `gen` counts every arm/disarm so a surface whose chrome is cached by a
-    generation key repaints the armed prompt."""
-
-    def __init__(self):
-        self.armed = False
-        self.gen = 0
-
-    def arm(self):
-        if not self.armed:
-            self.armed = True
-            self.gen += 1
-
-    def disarm(self):
-        if self.armed:
-            self.armed = False
-            self.gen += 1
-
-    def tap(self):
-        """One tap on the guarded button: True when it confirms (and disarms),
-        False when it only armed."""
-        if self.armed:
-            self.disarm()
-            return True
-        self.arm()
-        return False
 
 
 class _Blit:

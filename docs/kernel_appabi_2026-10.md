@@ -37,7 +37,7 @@ grants a subset to a `type: "app"` cart by its manifest permissions.
 | `surface` | `canvas`, `font_scale`, `chrome_scale`, `windowed`, `pointer` | the same five | never; a cart gets `screen()` and `bar_h()` ungated |
 | `theme` | `colors`, `light`, `name`, `variant`, `set`, `set_variant` | the same six | reads ungated (`theme()`); `appearance` grants `set_theme`, `themes` |
 | `files` | the user-files store: list, count, load, save, delete, duplicate, rename, new_name, the trash, history and its ops, the image, cover and text codecs, `sig`, `stamp`, `provenance`; `readable`, `ready`, `batch` | Files, `ArtworkService` | `files` / `files:<kind>`, one kind (`ScopedFiles`), with `open_editor` |
-| `carts` | `all`, `can_journal`, `slug`, `hydrate`, `apply`, `load_deck`, `save_deck`, `save_code`, `images`, `save_image`, `encode_image`; `batch` | Storybook, `ArtworkService` | never |
+| `carts` | `all`, `can_journal`, `slug`, `hydrate`, `apply`, `images`, `save_image`, `encode_image`; `batch` | Storybook, `ArtworkService` | never |
 | `nav` | `app`, `open_app`, `is_system_app`, `projects`, `edit`, `edit_file`, `open_image`, `open_text`, `play`, `run_script`, `text_mode` | Files, Storybook, Get Carts, `ArtworkService` | `launch` grants `open_app` |
 | `prefs` | `get`, `set`, `clear`, namespaced | `ArtworkService` (namespace `paint`) | `prefs` |
 | `notify` | `achieve` | `ArtworkService` | never |
@@ -56,7 +56,7 @@ caller: `nav.app`, and the `surface.size` and `notify.notice` that
 cycling).
 
 **What is object-shaped** (the plan's §2.1): `surface.canvas` and `pointer`
-(five call sites: `runtime/app_shell.py`, `runtime/artwork.py`,
+(four call sites: `runtime/artwork.py`,
 `runtime/files_app.py`, two in `runtime/getcarts_app.py`) return objects;
 the glyphs those apps' chips carry are the toolkit's own (`ui.glyph`, sprint
 6's step 4), not a role row;
@@ -183,7 +183,7 @@ only the shell's own calls (boot restore, cycling) reach the look's
 | `theme` | `token(role_id)`, `gen()`, `light()`, `name(buf)`, `variant(buf)` | C | the **live token table**: one theme's flattened tokens and a generation, written by the look at each switch. Role ids are theming's vocabulary (`docs/theming_2026-09.md` §4.1); the generation is theming §6's `look_gen` |
 | `theme` | `set(name, variant)`, `set_variant(v)` | shell | the look coordinates caches, the theme's shape and the wallpaper |
 | `files` | list, count, load, save, delete, duplicate, rename, new_name, trash, restore, empty_trash, history, history_ops, history_commit and the codecs over `(kind, name)`; `begin()`, `end()`; `ready()`, `readable()` | C | the user-files layer in `native/moy_store` (`moy_ufiles.h`, §12 answer 4), reached through the verb table the console binds with the store; history ops cross as JSON bytes. A **session** is readiness only (§2.6). A grant made with a files kind reaches that kind alone |
-| `carts` | the table's rows: the store's readiness and session, the live list, a new cart, its undo journal, a rescan (the old `apply`), its deck, code and images | shell | the live list is the shell's; a cart crosses the Python binding as the list's own dict, and the ROLE door names it by its folder; `create` and `journal` are Storybook's new story and graduation, `rescan` adopts a fresh scan (the old `apply`); the commit verbs ask the block compiler and Storybook (`runtime/project_store.py`). Never granted, so no import shape |
+| `carts` | the table's rows: the store's readiness and session, the live list, a new cart, its undo journal, a rescan (the old `apply`), its images | shell | the live list is the shell's; a cart crosses the Python binding as the list's own dict, and the ROLE door names it by its folder; `create` and `journal` are Storybook's new story and graduation, `rescan` adopts a fresh scan (the old `apply`); the commit verbs ask the block compiler and Storybook (`runtime/project_store.py`). Never granted, so no import shape |
 | `nav` | `open_app(id)`, `edit(cart, tab)`, `edit_file(cart, name, mode)`, `open_text(kind, name, mode)`, `open_image(kind, name, cart)`, `play(cart)`, `run_script(kind, name, why_buf)`, `projects(out)`, `is_system_app(cart)`, `text_mode(on)` | shell | every verb lands on a Python surface; `play`'s caller is the grant; `nav.app` is deleted |
 | `prefs` | `get(key, buf)`, `set(key, json)`, `clear(key)` | C | the settings rows under the grant's namespace, values as JSON text; `get` answers ABSENT and the Python binding returns the caller's default. On a board the rows are the kernel's (`moy_spine_kernel`'s, viewed by `moy_spine.kernel_settings`), and a write flushes through the rows' own saver (`moy_settings_flush`), which the console's store registers while its VM runs; a write made with no VM stays dirty in the rows, and the next start flushes them before it reads the file |
 | `notify` | `achieve(kind, key)` | shell | the `Achievements` object is the console's |

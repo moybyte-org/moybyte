@@ -11,7 +11,7 @@ step 4 (docs/theming_2026-09.md §9), and this file holds that retirement:
   * no other shared module re-declares the 320x240 default size.
 
 The app tier is a DECLARED second vocabulary and is not covered here:
-`app_shell.ListShellLayout` and the calc/appearance/artwork heads speak
+the calc/appearance/artwork heads speak
 `(w, h, fs, windowed=)` (§6).
 """
 

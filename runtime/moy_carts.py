@@ -5,7 +5,7 @@
 #   encode_cover               128x128 indices -> cover.png bytes
 #   load_images                a cart's paint-image assets
 #   load_scenes                a cart's scene assets
-#   -- sibling stores          load_artwork, save_artwork, load_deck, save_deck
+#   -- sibling stores          load_artwork, save_artwork
 #   -- the document codec      encode_text, decode_text
 #   -- the catalogue           PAYLOADS, entry, load, catalogue, scan
 #   -- manifest metadata       save_manifest_meta, add_source, compile_check
@@ -165,7 +165,6 @@ def _normalize_input_kinds(value):
 
 
 ARTWORK_NAME = "artwork.moyimg"
-DECK_NAME = "deck.json"
 
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
 # it sits beside every <name>.moy folder). Tiles painted here are reusable
@@ -492,19 +491,6 @@ def load_artwork(root=CARTS_DIR):
 
 def save_artwork(text, root=CARTS_DIR):
     _write_sibling(root, ARTWORK_NAME, text)
-
-
-def load_deck(cart):
-    """The Storybook deck (a `moydeck-v1` JSON blob) inside a story cart's
-    folder, or None for carts that were never decks (#78)."""
-    try:
-        return _read(cart["path"] + "/" + DECK_NAME)
-    except OSError:
-        return None
-
-
-def save_deck(cart, text):
-    _write_atomic(cart["path"] + "/" + DECK_NAME, text)
 
 
 # --- the document codec ---

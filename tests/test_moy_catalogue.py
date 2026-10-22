@@ -202,7 +202,7 @@ def test_the_seed_runs_after_the_scan_and_reads_only_what_it_writes(tmp_path,
 
 # moy_carts' path-level bodies a cart passes through, the journal's included:
 # the shell walks and appends to a cart's journal by its handle. Reading a
-# cart's FILES by path (save_*, load_pmem, load_deck) is not on this list: those
+# cart's FILES by path (save_*, load_pmem) is not on this list: those
 # leave nothing in the store between calls. The sync wire and Files' project
 # files start from a path and reach moy_journal itself.
 _CART_BODIES = {"catalogue", "entry", "load", "scan", "create",

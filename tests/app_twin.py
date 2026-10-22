@@ -656,7 +656,7 @@ class Files(_Role):
 # The roles every row of which the console serves (roles.json's "shell" rows).
 _SERVED = {
     "carts": ("readable ready begin end all can_journal slug create journal rescan "
-              "hydrate load_deck save_deck save_code images save_image encode_image"),
+              "hydrate images save_image encode_image"),
     "nav": ("open_app is_system_app projects edit open_image open_text edit_file "
             "play run_script text_mode"),
     "notify": "achieve",

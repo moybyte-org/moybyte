@@ -220,18 +220,6 @@ class CartsServer(_Session):
         """Load a slimmed cart's full payloads back IN PLACE (#66)."""
         return self._ws.carts.rehydrate(cart)
 
-    def load_deck(self, g, cart):
-        ws = self._ws
-        return self._read(lambda: ws.carts_store.load_deck(cart))
-
-    def save_deck(self, g, cart, blob):
-        ws = self._ws
-        return self._write(lambda: ws.carts_store.save_deck(cart, blob))
-
-    def save_code(self, g, cart, src):
-        ws = self._ws
-        return self._write(lambda: ws.carts_store.save_code(cart, src))
-
     def images(self, g, cart):
         """The cart's image assets by name."""
         ws = self._ws

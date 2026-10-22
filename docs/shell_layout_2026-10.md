@@ -117,7 +117,7 @@ memory and compositors); this doc cites, it does not copy.
   `_LayoutCtx.install`; a user app reads `bar_h()` ungated
   (`runtime/system_api.py`); `native/moy_app/roles.json` lists `surface.bar_h`
   with `wasm: null`. The shipped apps compute their own band
-  (`ListShellLayout._init_frame`, `runtime/app_shell.py`), and `console.py`'s
+  (`layout_base.content_of`), and `console.py`'s
   band check reads that layout field back.
 - **The home today** is the Library shelf (`runtime/launcher_layer.py`:
   `Launcher`, kinetic scroll, #113's scroll-as-blit whose shift key includes
@@ -417,7 +417,7 @@ window's top, whose zone alone draws, whatever the theme's layout), and
 the rows its rounded frame takes under the content (`window_foot`), which a
 bottom inset counts. `BarLayer.bar_rects(where)` and `content_rect(where)` answer it
 per surface; `LayoutBase` carries `cx, cy, cw, ch`;
-`ListShellLayout._init_frame` and the calc/appearance/artwork heads take
+The calc/appearance/artwork heads take
 `content_of` (rows 0 in a window) instead of computing `18 * cs`; and
 `console.py`'s band check reads the bar rects, never the app's layout.
 `moy_app_surface_t` holds `cx, cy, cw, ch` where it held `bar_h`, written by
@@ -824,7 +824,7 @@ every step; the steps that ADD a config say which.
 |---|---|---|
 | 1 — console mode as state | `wm.mode`, `_parked`, `enter_console`/`leave_console`, the route's restore op; every branch of §3 reads the mode; PLAY ends a playtest and parks the rest; the fit-check stamp release; `go_home` split by mode; the HOME key and `show_desk()` (L11) | `tools/mem_census.py p4 offheap` before the commit, to #58; NEW config `p4_1024x600_cs2_fs1_console` (a P4 in console mode, equal to the T-Deck row's layout at the P4's size); `tests/test_wm_windowed.py` covers enter, exit with windows restored unrendered, exit with a released stamp re-rendered once, a parked kind reopened fullscreen and found in place on return, the playtest ended, and each branch of §3 by name; `tests/test_wm_stack_memo.py` holds; `library drag-scroll` re-pinned here (its meaning moves: the home is now above a parked desk) with the before number beside it; PLAY and X single-frame maxima recorded; the P4's on-glass suite drives PLAY and the X; the T-Deck row unchanged |
 | 2 — the Guition P4's strips and the home's damage (landed 2026-10-13) | the compositor's one boot-time strip becomes a rect LIST in `native/moy_glass` set on relayout, each rotated only when its strip's generation moved; the fullscreen home hands its band to `note_damage` | the Guition P4's on-glass suite; its shelf-drag and play rows re-measured, to #66 and #58 (a cut from today, since an unchanged strip no longer rotates per play frame); `MOY_ROT_RECTS` budgeted: game, damage, up to four bars, coalesced, with a test that five rects never exceed it |
-| 3 — the content rectangle (landed 2026-10-13) | `cx, cy, cw, ch` in the surface row; `content_rect()` published (Python and the role table); `bar_h()` derived; `LayoutBase` and `ListShellLayout` read it; `bar_rect(i)` the one author for the responsive surfaces' draw and tap tests | all golden configs identical; `tests/test_app_context.py` covers the verb on both writers; `tests/test_top_bar.py` holds the tap slices |
+| 3 — the content rectangle (landed 2026-10-13) | `cx, cy, cw, ch` in the surface row; `content_rect()` published (Python and the role table); `bar_h()` derived; `LayoutBase` reads it; `bar_rect(i)` the one author for the responsive surfaces' draw and tap tests | all golden configs identical; `tests/test_app_context.py` covers the verb on both writers; `tests/test_top_bar.py` holds the tap slices |
 | 3b — the fixed geometry (landed 2026-10-13) | the game-canvas tool bar, `editor_app.py`, `_POPUP_Y`, `WindowedWM._bar_h()`'s four readers (now `_desk_rect()`) and the desk icon column move onto `bar_rect`; every remaining `bar_h` reader in `runtime/` grepped and moved | every golden row identical (the fixed geometry moved without a pixel); the P4 and T-Deck suites |
 | 4 — the format, the loader, the resolver (landed 2026-10-13) | the loader reads `layout.bars` (C, additive, fuzzed; §5's caps, §9's rule twice); `LAYOUT_CATALOGUE` on both WMs; the composer and its drops per mode; the seeds carry example 1 with `close` as a widget; `layout_theme` and `look.layout()`; the Settings row | goldens identical; a test picks a layout, switches themes twice and reads it back; a test reads an uninstalled name as absent; the fixture layouts of §10 drop as specified on every config and the rule's second run catches a vertical-only `zone` |
 | 5 — bars on any edge, slots, cells (landed 2026-10-14) | strips per bar at their rects, whole-strip re-render on a key change (§14); slot packing; the new widgets (`chips`, `text`, `spacer`, `separator`); the drag clamp to the content rect; the strip rect list fed from the bars on the Guition P4 | NEW golden configs from examples 2, 3, 4 and 6 (`p4_1024x600_cs2_fs1_win95bar`, `..._gnomebar`, `..._twobars`, `tdeck_320x240_fs1_bottombar`), with renders for the owner; existing configs identical; idle zero under each; the T-Deck `--repaint settings,files` delta; the Guition P4's suite under example 2 and under a side bar on glass (the wedge check), its roster play fps under a two-bar layout; `tests/test_frame_alloc.py` holds |

@@ -2228,9 +2228,6 @@ def roles_trace(ws):
             cart = x
     say("carts", len(c.all()) - n0, cart is not None)
     c.hydrate(cart)
-    say("deck", _n(c.load_deck(cart)), _n(c.save_deck(cart, '{"pages": []}')),
-        _n(c.load_deck(cart)))
-    say("code", _n(c.save_code(cart, "def _draw():\n    cls(2)\n")))
     say("journal", _n(c.journal(cart, "main.py", "def _draw():\n    cls(3)\n", 0)),
         _n(c.journal({"title": "none"}, "main.py", "", 0)))
     cpx = c.encode_image(2, 2, bytes([5, 6, 7, 8]))
@@ -2486,8 +2483,6 @@ carts ready True True True a_b_c
 carts session [True,None] None
 create True None
 carts 1 True
-deck [None,None] [None,None] ['{"pages": []}',None]
-code [['ok',''],None]
 journal [1,None] [None,'NO CART']
 cart image {} None [None,None] [2,2,b4]
 nav False True

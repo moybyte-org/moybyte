@@ -34,7 +34,7 @@ there is a cycle for exactly the editor surfaces that subclass it
 (`docs/history/console_architecture_2026-08.md` §6).
 
 The APP tier is a declared second vocabulary and is not here:
-`app_shell.ListShellLayout` and the calc/appearance/artwork heads speak
+the calc/appearance/artwork heads speak
 `(w, h, fs, windowed=)`.
 """
 

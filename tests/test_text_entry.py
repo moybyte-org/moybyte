@@ -20,7 +20,6 @@ tests below drive all three callers through the same latched-byte frame.
 from runtime import host_app, moy_carts
 from runtime.editors_base import (KeyEdge, TextEntry, text_key, TE_EDIT,
                                   TE_COMMIT, TE_CANCEL)
-from runtime.widgets import ConfirmTap
 from ws_helpers import shelf, select_on_home  # noqa: E402
 
 
@@ -114,21 +113,6 @@ def test_a_shared_edge_does_not_refire_across_fields():
     assert a.feed(_Inp(ord("x"))) == TE_EDIT
     assert b.feed(_Inp(ord("x"))) is None        # still the same held byte
     assert b.text == ""
-
-
-# -- ConfirmTap ---------------------------------------------------------------
-
-def test_confirm_tap_arms_then_confirms_and_counts_every_transition():
-    c = ConfirmTap()
-    assert c.tap() is False and c.armed and c.gen == 1
-    c.arm()                                       # already armed: no new generation
-    assert c.gen == 1
-    assert c.tap() is True and not c.armed and c.gen == 2
-    c.disarm()                                    # already disarmed: no new generation
-    assert c.gen == 2
-    c.arm()
-    c.disarm()
-    assert c.gen == 4
 
 
 # -- arm_prompt: the three callers, one latched frame -------------------------

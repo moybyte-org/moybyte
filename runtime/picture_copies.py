@@ -10,17 +10,12 @@ backdrop's copy and selects it, `carts` writes a project's `images/bg`, and
 `nav` says which carts are projects. Neither reaches the other: Paint's open
 picture is the `artwork` role's (`current`), and a renamed drawing is followed
 there (`artwork.follow`).
-
-`current_picture` is the third use of Paint's open picture: Storybook's "use my
-painting", which reads it through `artwork.current` and `files`.
 """
 
 try:
     from file_widgets import cover_indices
-    from moy_store_base import COVER_FILE
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.file_widgets import cover_indices
-    from runtime.moy_store_base import COVER_FILE
 
 
 DRAWINGS = "drawings"
@@ -165,22 +160,3 @@ class PictureCopies:
         if row.get("kind") == "wall":
             return self.set_wallpaper(name)
         return self.attach(row.get("index", -1), name) is not None
-
-
-def current_picture(files, artwork):
-    """Paint's open picture as `(w, h, indices)`, or None: the picture
-    `artwork.current()` names (a cart's cover decoded as one), else the newest
-    drawing."""
-    cur = artwork.current()
-    kind, name = cur if cur is not None else (DRAWINGS, None)
-    if name is None:
-        names = files.list(DRAWINGS)[0]
-        if not names:
-            return None
-        name = names[0]
-    blob, err = files.load(kind, name)
-    if err is not None or not blob:
-        return None
-    if kind != DRAWINGS and name == COVER_FILE:
-        return files.decode_cover(blob)
-    return files.decode_image(blob)
