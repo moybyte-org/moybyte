@@ -447,8 +447,8 @@ class MapEditorUI:
 
     def build(self):
         """Build the MapEditor over the cart's TileMap + sheet (both always exist
-        after Workstation.open()). Edits go straight into the live tilemap, so a
-        running cart picks them up via tilemap.gen (#32). Called from
+        after Workstation.open()). Edits go into the Editor's tilemap, which a
+        run copies at its start and at Play (`ProjectStore.play_world`, E-02). Called from
         Workstation.set_menu_view("map")."""
         ws = self.ws
         if self.mapedit is None and ws.project.tilemap is not None and ws.project.sheet is not None:

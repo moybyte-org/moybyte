@@ -666,17 +666,18 @@ def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
 def test_brick_siege_brick_crumbles_steel_stops(tmp_path):
     # Bullet vs walls: a player bullet into a BRICK cell clears it (mset -> empty),
     # while a STEEL cell is never destroyed. Drive a couple of shots straight into
-    # each wall kind and check the tilemap before/after.
+    # each wall kind and check the run's map before/after; the Editor's never sees it.
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Brick Siege")
     ns = ws.ns
     TS = ns["TS"]
+    tm = ws.project.play_map                # the run's own map (E-02)
     # find a brick and a steel cell in the loaded field
     brick = steel = None
-    for y in range(ws.tilemap.h):
-        for x in range(ws.tilemap.w):
-            v = ws.tilemap.mget(x, y)
+    for y in range(tm.h):
+        for x in range(tm.w):
+            v = tm.mget(x, y)
             if v == 8 and brick is None:
                 brick = (x, y)
             elif v == 9 and steel is None:
@@ -687,15 +688,15 @@ def test_brick_siege_brick_crumbles_steel_stops(tmp_path):
     ns["bullets"].append([bx * TS + TS // 2, by * TS + TS // 2 - TS, 1, 0])  # heading down
     for _ in range(20):
         ws.frame(1 / 30)
-        if ws.tilemap.mget(bx, by) < 0:
+        if tm.mget(bx, by) < 0:
             break
-    assert ws.tilemap.mget(bx, by) < 0           # brick crumbled to empty
+    assert tm.mget(bx, by) < 0           # brick crumbled to empty
     # a bullet into steel leaves it intact
     sx, sy = steel
     ns["bullets"].append([sx * TS + TS // 2, sy * TS + TS // 2 - TS, 1, 0])
     for _ in range(20):
         ws.frame(1 / 30)
-    assert ws.tilemap.mget(sx, sy) == 9          # steel never destroyed
+    assert tm.mget(sx, sy) == 9          # steel never destroyed
 
 
 def test_console_cards_make_it_mine_edit_and_run(tmp_path):

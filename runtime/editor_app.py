@@ -206,9 +206,13 @@ class EditorApp:
         # interaction and on every hard exit -- and the same exposure: one
         # frame, since `ws.defer` drains at that frame's own tail.
         self._pending = []
-        # E-02: a map, scene or code edit made while a playtest runs waits for
-        # the next Play; Restart wears a dot while one waits.
+        # E-02: a map, scene or code edit waits for the next Play (the run
+        # reads its own map and scenes, `ProjectStore.play_world`); Restart
+        # wears a dot while one made during the playtest waits. A scene or
+        # code edit made in a desk pane other than the one Play leaves owes
+        # the next Play a fresh start (`start_owed`, its tabs).
         self.restart_owed = False
+        self.start_owed = ()
         self.tab = "cards"            # active view -- ws.menu_view projects onto this:
                                       # "cards" | "code" | "paint" | "map" | "blocks"
                                       # | "music" | "theme" (theme = the EDIT-ICONS
@@ -407,8 +411,8 @@ class EditorApp:
                 ws.paint = PaintEditor(ws.sheet)
         elif view == "map":
             # Mirror the paint branch: build the MapEditor over the cart's TileMap
-            # + sheet (both always exist after open()). Edits go straight into the
-            # live tilemap, so a running cart picks them up via tilemap.gen (#32).
+            # + sheet (both always exist after open()). Edits go into the Editor's
+            # tilemap; a run takes them at the next Play (`play_world`, E-02).
             ws.map_ui.build()
         elif view == "scene":
             # Mirror the map branch: build the SceneEditor over the cart's
@@ -478,6 +482,11 @@ class EditorApp:
         # half-applied edit) -- every other tab commits unconditionally, here.
         if self.tab != "cards":
             self.save_current()
+        owed = self.start_owed
+        self.start_owed = ()
+        for t in owed:
+            if t != self.tab:
+                self.save_tab(t)
         # Returning to the desktop from the code editor must run whatever source is
         # in the editor now (the kid may have fixed a crash and kept typing, or just
         # edited and left). Re-_start() with the editor text so the FIXED cart
@@ -498,8 +507,8 @@ class EditorApp:
             # Scenes are consumed ONCE at _init (#85 Variant A) -- a resumed cart
             # would never re-read scene(), so PLAY from the scene tab re-starts:
             # the fresh _init spawns the placement the kid just made (the editor
-            # live-syncs each gesture into ws.scenes; Player.start resets the
-            # parse cache). Mirrors the blocks tab's re-run-on-leave.
+            # live-syncs each gesture into ws.scenes; Player.start copies them
+            # for the run). Mirrors the blocks tab's re-run-on-leave.
             if ws.cart is not None:
                 ws._start()
         elif self.tab == "cards":
@@ -510,9 +519,12 @@ class EditorApp:
             # start so a crash doesn't overwrite config with a half-applied edit.
             if ws.cart is not None and ws._start():
                 ws._save_config()
-        if restart and self.tab not in ("code", "blocks", "scene", "cards") \
-                and ws.cart is not None:
+        project = ws.project
+        if ws.cart is not None and self.tab not in ("code", "blocks", "scene", "cards") \
+                and (restart or owed or project.play_world()):
             ws._start()              # Restart: from the start, whatever the tab
+        else:
+            project.play_world()     # E-02: the Editor's map and scenes, where edited
         if self.restart_owed:
             self.restart_owed = False
             self.zone_gen += 1
@@ -1091,8 +1103,10 @@ class EditorApp:
             ws._open_music()
         elif tab == _ZONE_UNDO:   # UNDO (#88): the shared journal walk, any tab
             ws.history.undo()
+            self.owe_restart(self.tab)
         elif tab == _ZONE_REDO:   # REDO (#88)
             ws.history.redo()
+            self.owe_restart(self.tab)
         elif tab == _ZONE_STOP:   # Stop: the playtest's window closes (D-23)
             ws.wm.close_player()
         elif tab == _ZONE_RESTART:
@@ -1111,6 +1125,17 @@ class EditorApp:
         wm = self.ws.wm
         return bool(getattr(wm, "desk_open", lambda: False)()
                     and "desktop" in getattr(wm, "_wins", {}))
+
+    def owe_restart(self, tab):
+        """E-02: a map, scene or code edit (`tab`) waits for the next Play;
+        while the playtest runs, Restart wears the dot until then."""
+        if tab not in ("map", "scene", "code"):
+            return
+        if tab != "map" and tab not in self.start_owed:
+            self.start_owed = self.start_owed + (tab,)
+        if self.playing() and not self.restart_owed:
+            self.restart_owed = True
+            self.zone_gen += 1
 
     def restart(self):
         """Restart: the playtest runs again from its start, with the tab's

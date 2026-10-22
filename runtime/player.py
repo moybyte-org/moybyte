@@ -1355,14 +1355,10 @@ class Player:
         self._release_editors()        # a RE-RUN is an exit too: flush, then drop
         ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
                                        # pattern): a cart re-declares it each start
-        # #85: a fresh run resets the active scene to the default, so a load_scene()
-        # switch never leaks across a re-run (the "resets on next _init" semantics).
-        _sc = getattr(project, "scenes", None)
-        if _sc is not None:
-            try:
-                _sc.reset()
-            except Exception:  # noqa: BLE001 -- scene reset must never block a run
-                pass
+        # The run's own map and scenes, fresh from the Editor's (E-02): a fresh
+        # Scenes stands at its default scene with no world, so a load_scene()
+        # switch never leaks across a re-run (#85's "resets on next _init").
+        project.play_world(True)
         self._close_lua()              # a re-run replaces the previous run's Lua state
         # #63 leak fix: the PREVIOUS cart is dead and moycore has let go of it
         # -- return everything on loan to it (its make_layer worlds, its run
@@ -1574,8 +1570,8 @@ class Player:
         system-api capabilities a shipped app / user app / script is granted,
         the text console's verbs, and the other scripts either side of main."""
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
-                         ws.audio, project.tilemap, project.pmem, wifi, project.images,
-                         project.scenes,    # #85: scene()/load_scene() over the cart's scenes
+                         ws.audio, project.play_map, project.pmem, wifi, project.images,
+                         project.play_scenes,   # #85: scene()/load_scene(), the run's own
                          net=net,           # #65: capability-gated net.* backend
                          gpio=gpio,         # #9: capability-gated physical pins
                          flags=project.flags)   # SPEC.md 3.5 tile flags (fget/fset)

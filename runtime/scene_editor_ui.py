@@ -353,7 +353,7 @@ class SceneEditorUI:
 
     def _sync_live(self):
         """Push the edited rows into the LIVE widgets.Scenes so the next PLAY's
-        _init sees them (the map tab's live-TileMap semantics). Called after
+        _init sees them (the run copies them, `ProjectStore.play_world`). Called after
         every committed gesture and after undo/redo."""
         se = self.sceneedit
         scenes = self.ws.project.scenes

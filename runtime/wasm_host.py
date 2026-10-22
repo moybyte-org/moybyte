@@ -150,7 +150,7 @@ class WasmHostRun:
             buf, canvas.w, canvas.h, cart["path"], cart.get("main", "main.wasm"),
             cart.get("memory"),
             sheet=getattr(project, "sheet", None),
-            tilemap=getattr(project, "tilemap", None),
+            tilemap=getattr(project, "play_map", None) or getattr(project, "tilemap", None),
             wire=getattr(canvas, "_wire", None), wire_swapped=_wire_swapped(),
             flags=getattr(project, "flags", None), cfg=ns.get("_moy_cfg"),
             files=cart["path"], writable=cart.get("writable"))

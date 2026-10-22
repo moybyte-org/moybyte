@@ -762,3 +762,62 @@ def test_the_waves_swatches_are_their_moy64_inks():
             r, g, b = MOY64[inks[wv]]
             assert rgbs[wv] == (r << 16) | (g << 8) | b
             assert S.wave_rgb({"surface_light": light}, wv) == rgbs[wv]
+
+
+# -- E-02: the playtest's own map and scenes ------------------------------------------
+
+def _play(drv):
+    _tap(drv, 13, 1)                             # Ctrl+Enter: Play, or Restart
+    for _ in range(4):
+        drv.frame(DT)
+
+
+def test_the_playtest_runs_on_its_own_map_and_scenes(desk):
+    ws, drv = desk
+    _tap(drv, ord("4"), 1)                       # World: the Scene beside the Run slot
+    _play(drv)
+    pr = ws.project
+    assert ws.editor_app.playing()
+    assert pr.play_map is not pr.tilemap and pr.play_map.cells == pr.tilemap.cells
+    assert pr.play_scenes is not pr.scenes
+    ns = ws.player.ns
+    assert ns["_moy_scenes"] is pr.play_scenes
+    was, mine = pr.play_map.mget(0, 0), pr.tilemap.mget(1, 0)
+    pr.tilemap.mset(0, 0, was + 1)               # an edit in the Editor's map
+    pr.play_map.mset(1, 0, mine + 1)             # the game's own mset
+    drv.frame(DT)
+    assert pr.play_map.mget(0, 0) == was         # waits for the next Play
+    assert pr.tilemap.mget(1, 0) == mine         # never reaches the Editor
+
+
+def test_a_scene_edit_during_the_playtest_waits_for_restart_and_wears_the_dot(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    app = ws.editor_app
+    _tap(drv, ord("4"), 1)
+    _play(drv)
+    pr = ws.project
+    name = ws.scene_ui.scene_name
+    se = ws.scene_ui.sceneedit
+    se.sel = 0
+    before = pr.play_scenes.raw(name)
+    d._head_tool("scene:flip")                   # a scene edit while it runs
+    assert pr.scenes.raw(name) != before and pr.play_scenes.raw(name) == before
+    assert app.restart_owed and "scene" in app.start_owed
+    _play(drv)                                   # Restart
+    assert not app.restart_owed and app.start_owed == ()
+    assert pr.play_scenes.raw(name) == pr.scenes.raw(name)
+
+
+def test_play_takes_an_edited_map_in_place_and_keeps_an_unedited_runs_msets(desk):
+    ws, _drv = desk
+    pr = ws.project
+    pr.play_world(True)
+    pm = pr.play_map
+    pm.mset(2, 0, 9)                             # the run's own change
+    assert not pr.play_world() and pm.mget(2, 0) == 9 and pr.play_map is pm
+    pr.tilemap.mset(3, 0, 4)                     # an Editor edit
+    assert not pr.play_world() and pr.play_map is pm
+    assert pm.cells == pr.tilemap.cells
+    pr.tilemap.resize(pr.tilemap.w + 1, pr.tilemap.h)
+    assert pr.play_world()                       # a new size: the run restarts

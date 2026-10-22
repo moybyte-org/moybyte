@@ -263,7 +263,8 @@ def test_running_cart_reads_scene_into_init(tmp_path):
     assert ns["ppos"] == (5, 6, 1, 3)                    # x/y/flip/flags read through
     assert ns["named2"] == 1                             # scene('level2') peeked
     assert ns["switched"] == 1                           # load_scene switched + returned
-    assert ws.scenes.active == "level2"                  # the switch stuck for this run
+    assert ws.project.play_scenes.active == "level2"     # the switch stuck for this run
+    assert ws.scenes.active == "main"                    # the Editor's are not the run's
 
 
 # A cart that does NOT switch -- it just records how many actors the ACTIVE scene has.
@@ -277,16 +278,14 @@ COUNT_SRC = (
 
 def test_active_scene_resets_on_rerun(tmp_path):
     # load_scene() must not leak across a RE-RUN of the same project: Player.start
-    # resets the active scene to the default before _init runs ("resets on next
-    # _init", #85 Section 6). _start() re-runs without rebuilding the Scenes object,
-    # so this exercises the Player reset (not the fresh-workspace rebuild).
+    # gives the run a fresh copy of the scenes, at the default, before _init runs
+    # ("resets on next _init", #85 Section 6; `ProjectStore.play_world`).
     ws = _open_scene_cart(tmp_path, src=COUNT_SRC,
                           scenes={"main": MAIN_SCENE, "level2": LEVEL2_SCENE})
     assert ws.ns["n"] == 3                               # active == main (3 actors)
-    ws.scenes.load_scene("level2")                       # a leftover switch (1 actor)
-    assert ws.scenes.active == "level2"
+    ws.project.play_scenes.load_scene("level2")          # a leftover switch (1 actor)
     ws._start()                                          # re-run the SAME project
-    assert ws.scenes.active == "main"                    # reset to default first...
+    assert ws.project.play_scenes.active == "main"       # a fresh copy, at its default...
     assert ws.ns["n"] == 3                               # ...so _init saw main again
 
 

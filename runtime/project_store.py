@@ -95,6 +95,9 @@ class ProjectStore:
         self.pmem = None              # Pmem (persistent cart store) for the open cart
         self.scenes = None            # Scenes (#85): the open cart's placed-actor
                                       # scenes; make_api binds scene()/load_scene()
+        self.play_map = None          # the run's own TileMap and Scenes, copied
+        self.play_scenes = None       # from the two above (`play_world`)
+        self._play_from = None        # (map, its gen, scenes, their gen) copied
 
     # -- builders -------------------------------------------------------------
 
@@ -193,6 +196,37 @@ class ProjectStore:
         blobs = cart.get("scenes") if cart else None
         names = cart.get("scene_names") if cart else None
         return Scenes(blobs, names)
+
+    def play_world(self, fresh=False):
+        """The run's own map and scenes (EDITOR_LAYOUT.md E-02): a running
+        cart reads and writes these, never the Editor's, so a map or scene
+        edit waits for the next Play while sprite, sound and flag edits (the
+        sheet, the bank and the flags, shared) reach it at once. `fresh` (a
+        run's start) copies both anew; otherwise (Play, Restart) they take
+        the Editor's only where it changed since the last copy, in place, so
+        a resumed run keeps its own `mset`s over a map nobody edited. True
+        where the map's size changed, which a running cart cannot take in
+        place (its map is bound by pointer): the caller restarts it."""
+        tm, sc = self.tilemap, self.scenes
+        was = self._play_from
+        self._play_from = (tm, tm.gen if tm is not None else 0,
+                           sc, sc.gen if sc is not None else 0)
+        pm, ps = self.play_map, self.play_scenes
+        if fresh or pm is None or ps is None or tm is None or sc is None:
+            self.play_map = None if tm is None else TileMap(tm.w, tm.h, bytearray(tm.cells))
+            self.play_scenes = None if sc is None else sc.copy()
+            return False
+        if was == self._play_from:
+            return False
+        if was is None or was[2] is not sc or was[3] != sc.gen:
+            for n in sc.names:
+                ps.put(n, sc.raw(n))
+        if was is None or was[0] is not tm or was[1] != tm.gen:
+            if (pm.w, pm.h) != (tm.w, tm.h):
+                return True
+            pm.cells[:] = tm.cells
+            pm.gen += 1
+        return False
 
     def _build_audio(self):
         """Open the run's audio session (#16, owner "cart", focused) over the

@@ -877,6 +877,8 @@ class EditorDesk(Layer):
                 i.clear_edges()
             elif self._host.keys(i):
                 ws._dirty = True
+            if c == "actor":
+                self._owe_restart("scene")
             return True
         return False
 
@@ -977,15 +979,12 @@ class EditorDesk(Layer):
         return None
 
     def _owe_restart(self, tab):
-        """E-02: a map, scene or code edit made while the game runs waits for
-        the next Play, and Restart wears a dot until then. Sprite, sound and
-        flag edits reach the running game at once (it reads the editor's
-        sheet, bank and flags in RAM)."""
+        """E-02 (`EditorApp.owe_restart`): a map, scene or code edit made in
+        a pane waits for the next Play. Sprite, sound and flag edits reach
+        the running game at once (the sheet, bank and flags are shared)."""
         app = self.ws.editor_app
-        if (tab in ("map", "scene", "code") and not app.restart_owed
-                and app.playing() and not app._tab_is_clean(tab)):
-            app.restart_owed = True
-            app.zone_gen += 1
+        if tab in ("map", "scene", "code") and not app._tab_is_clean(tab):
+            app.owe_restart(tab)
 
     def escape(self):
         """Esc: a grown pane goes back (it never leaves full screen, and the
@@ -1155,6 +1154,8 @@ class EditorDesk(Layer):
             if Parts.pointer(self, c, body, u, px, py, click, down) \
                     or host.point(px, py, click, down):
                 ws._dirty = True
+            if c == "actor":
+                self._owe_restart("scene")
             return True
         return True
 

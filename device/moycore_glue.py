@@ -185,7 +185,10 @@ class MoycoreRun:
         canvas = ws.canvas
         project = getattr(ws, "project", None)
         sheet = getattr(project, "sheet", None) if project is not None else None
-        tilemap = getattr(project, "tilemap", None) if project is not None else None
+        # the run's own map (`ProjectStore.play_world`); a harness's bare
+        # project carries only `tilemap`
+        tilemap = (getattr(project, "play_map", None) or getattr(project, "tilemap", None)
+                   if project is not None else None)
         # SPEC.md 3.5 tile flags. Unlike the sheet and the map this crosses as a
         # COPY (run_begin memcpys 512 bytes into the console's own table), so a
         # cart's fset writes are the C table's, not this bytearray's -- which is
@@ -942,7 +945,10 @@ class WasmRun(MoycoreRun):
         self._dt = 0.0
         canvas = ws.canvas
         sheet = getattr(project, "sheet", None) if project is not None else None
-        tilemap = getattr(project, "tilemap", None) if project is not None else None
+        # the run's own map (`ProjectStore.play_world`); a harness's bare
+        # project carries only `tilemap`
+        tilemap = (getattr(project, "play_map", None) or getattr(project, "tilemap", None)
+                   if project is not None else None)
         flags = getattr(project, "flags", None) if project is not None else None
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP

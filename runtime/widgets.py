@@ -384,6 +384,11 @@ class Scenes:
         self.active = self._default
         self._cache = {}                   # name -> [Actor], parsed once
         self._world = None                 # #109: the live mutable actor world (lazy)
+        self.gen = 0                       # bumps on every put
+
+    def copy(self):
+        """An independent Scenes over the same blobs, at its default scene."""
+        return Scenes(self._raw, self.names)
 
     def reset(self):
         """Back to the default active scene -- called at each run's start so a
@@ -453,12 +458,13 @@ class Scenes:
     def put(self, name, text):
         """Replace scene `name`'s raw blob IN the live object (#85 Stage 2: the
         placement editor syncs each committed gesture here, so a PLAY without an
-        explicit SAVE runs the freshest placement -- the same live-edit semantics
-        the shared TileMap gives the map editor). A NEW name joins the order (and
+        explicit SAVE runs the freshest placement, which the run copies,
+        `ProjectStore.play_world`). A NEW name joins the order (and
         becomes the default when there was none); the parse cache entry drops so
         the next scene() re-parses."""
         known = name in self._raw
         self._raw[name] = text
+        self.gen += 1
         if not known:
             self.names.append(name)
             if self._default is None:

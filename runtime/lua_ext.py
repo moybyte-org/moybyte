@@ -653,8 +653,9 @@ _LUA_PRELUDE = PRELUDE_HANDLES + PRELUDE_FASTMATH
 def put_scenes(ns, put):
     """Hand the cart's scene texts to a run that parses them in C
     (native/moycore/moycore_scene.h), in the order the namespace's Scenes keeps,
-    so the first is the default active scene. The Scenes object carries the
-    Editor's live, unsaved placement (Scenes.put). Before the prelude."""
+    so the first is the default active scene. The Scenes object is the run's
+    copy of the Editor's placement, unsaved edits included
+    (`ProjectStore.play_world`). Before the prelude."""
     scenes = ns.get("_moy_scenes") if hasattr(ns, "get") else None
     if scenes is None:
         return
