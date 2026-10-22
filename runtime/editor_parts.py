@@ -6,7 +6,10 @@
 #   song            the Song pane: the tracks, the current one marked
 #   palette         the Blocks workspace's palette: the categories, then their blocks
 #   made            the code the blocks make, read only
-#   empty           a pane whose part is not built: what it holds
+#   ref_sounds      the Reference's Sounds: a pick puts its sfx() at the caret
+#   map_view        the Reference's Map: a pick puts its mget() at the caret
+#   log             the Reference's Log: the run's and the code's errors, to their line
+#   pointer, keys   a press on the map, the arrows over it
 """The desk Editor's own panes on the public UI API
 (docs/media/look_2026-10/EDITOR_LAYOUT.md's World and Sound): each draws in
 its pane's body inside `EditorDesk`'s frame, over the editor cores the
@@ -34,25 +37,27 @@ def draw(desk, c, r, u):
     if c == "actor":
         actor(desk, r, u)
     elif c == "sounds":
-        sounds(desk, r, u)
+        if desk.key == "sound":
+            sounds(desk, r, u)
+        else:
+            ref_sounds(desk, r, u)
     elif c == "song":
         song(desk, r, u)
     elif c == "palette":
         palette(desk, r, u)
-    elif c != "made":               # the made code is drawn before the frame
-        empty(c, r)
+    elif c == "maps":
+        map_foot(desk, r, u)
+    elif c == "log":
+        log(desk, r, u)
 
 
-def empty(c, r):
-    """A part not built yet: its name and what it will hold."""
-    what = {"log": ("print() and errors, linking to their line",),
-            "maps": ("The map, to pick a place from",),
-            "palette": ("The blocks, by category",),
-            "made": ("The code your blocks make",)}.get(c, ())
-    ui.at(*r)
-    ui.empty({"log": "doc", "maps": "map", "palette": "blocks", "made": "code"}.get(c, "doc"),
-             {"log": "Log", "maps": "Map", "palette": "Blocks", "made": "Code"}.get(c, c),
-             what)
+def drawn_before(desk, c, cv, th, r, u):
+    """The parts drawn on the canvas before the frame begins: the made code
+    (in the Code tab's print font) and the Reference's map."""
+    if c == "made":
+        made(desk, r, u)
+    elif c == "maps":
+        map_view(desk, cv, th, r, u)
 
 
 def _rows(r, u, n):
@@ -317,7 +322,8 @@ def palette(desk, r, u):
     ws = desk.ws
     bu, be = _blocks(desk)
     if be is None:
-        empty("palette", r)
+        ui.at(*r)
+        ui.empty("blocks", "No blocks", ("This cart's blocks did not open",))
         return
     th = ws.theme_colors
     cv = ws.sys_canvas
@@ -438,4 +444,226 @@ def scroll(desk, c, d):
         st["made top"] = max(0, st.get("made top", 0) + 3 * d)
         desk.ws._dirty = True
         return True
+    if c == "maps":
+        vx, vy = st.get("ref view", (0, 0))
+        cx, cy = st.get("ref cell", (0, 0))
+        st["ref view"] = (vx, max(0, vy + 3 * d))
+        st["ref cell"] = (cx, max(0, cy + 3 * d))
+        desk.ws._dirty = True
+        return True
     return False
+
+
+# -- the Reference (the Code workspace's context pane) ---------------------------------
+
+_FOOT = 40                      # a Reference tab's foot: the call a pick puts at the caret
+
+
+def _foot(desk, r, u, call, id):
+    """The call a pick puts at the Code pane's caret, and Insert."""
+    ws = desk.ws
+    x, y, w, h = r
+    row = 30 * u
+    ui.at(x + 10 * u, y + h - row - 4 * u, w - 110 * u, row)
+    ui.label(call, {"tone": "dim"})
+    ui.at(x + w - 96 * u, y + h - row - 4 * u, 88 * u, row)
+    if ui.button("Insert", "normal", {"id": id}) and ws.editor is not None:
+        ws.history.code_burst_open()
+        ws.editor.insert_text(call)
+        ws._dirty = True
+
+
+def ref_sounds(desk, r, u):
+    """The Reference's Sounds (EDITOR_LAYOUT.md): a row a sound, its number,
+    name, sketch and play tool; the picked one's `sfx(n)` goes at the caret."""
+    mu, me = _music(desk)
+    if me is None:
+        ui.at(*r)
+        ui.empty("music", "No sounds", ("This cart has no sound bank",))
+        return
+    ws = desk.ws
+    th = ws.theme_colors
+    cv = ws.sys_canvas
+    st = desk.part_state
+    n = len(me.bank.sfx)
+    cur = max(0, min(n - 1, st.get("ref sound", 0)))
+    x, y, w, h = r
+    pad = 6 * u
+    cell = 32 * u
+    rh = _LIST_ROW * u
+    lr = (x + pad, y + 4 * u, w - 2 * pad - cell, h - 8 * u - _FOOT * u)
+    ui.at(*lr)
+    got = ui.list("Sound calls", [Sound.row_label(me, k) for k in range(n)], cur,
+                  {"id": "ref sounds"})
+    if got is not None and 0 <= got < n and got != cur:
+        cur = st["ref sound"] = got
+        ws._dirty = True
+    if n * rh <= lr[3]:
+        playing = mu.music_preview
+        for k, s in enumerate(me.bank.sfx):
+            ry = lr[1] + k * rh
+            _sketch(cv, th, s, lr[0] + lr[2] - 52 * u, ry + 6 * u, 44 * u, rh - 12 * u, u)
+            ui.at(x + w - pad - cell, ry + (rh - cell) // 2, cell, cell)
+            on = playing is not None and playing == ("sfx", k)
+            if ui.tool("run", "Play", {"id": "ref play %d" % k, "current": on}):
+                if on:
+                    mu._stop_music_preview()
+                else:
+                    au = ws.audio
+                    if au is not None:
+                        au.focus()
+                        au.sound_stop()
+                        au.sfx(k)
+                        mu.music_preview = ("sfx", k)
+                ws._dirty = True
+    _foot(desk, r, u, "sfx(%d)" % cur, "insert sfx")
+
+
+def _map_rect(desk, r, u):
+    x, y, w, h = r
+    pad = 6 * u
+    tw = 8 * u
+    cols = max(1, (w - 2 * pad) // tw)
+    rows = max(1, (h - _FOOT * u - pad) // tw)
+    return (x + pad, y + pad, cols * tw, rows * tw), cols, rows, tw
+
+
+def _map_view_at(desk, cols, rows):
+    """The picked cell, and the view's corner kept round it."""
+    ws = desk.ws
+    tm = ws.tilemap
+    st = desk.part_state
+    if "ref cell" not in st:
+        st["ref cell"] = _first_cell(tm)
+    cx, cy = st["ref cell"]
+    cx = max(0, min(tm.w - 1, cx))
+    cy = max(0, min(tm.h - 1, cy))
+    vx, vy = st.get("ref view", (0, 0))
+    vx = max(min(vx, cx), cx - cols + 1)
+    vy = max(min(vy, cy), cy - rows + 1)
+    vx = max(0, min(vx, max(0, tm.w - cols)))
+    vy = max(0, min(vy, max(0, tm.h - rows)))
+    st["ref cell"] = (cx, cy)
+    st["ref view"] = (vx, vy)
+    return cx, cy, vx, vy
+
+
+def _first_cell(tm):
+    """Where the Reference's map opens: the first cell holding a tile."""
+    for y in range(tm.h):
+        for x in range(tm.w):
+            if tm.mget(x, y):
+                return (x, y)
+    return (0, 0)
+
+
+def map_view(desk, cv, th, r, u):
+    """The Reference's Map: the cart's map at 1x from the view's corner, the
+    picked cell under the cursor."""
+    ws = desk.ws
+    tm, sh = ws.tilemap, ws.sheet
+    if tm is None or sh is None:
+        return
+    (mx, my, mw, mh), cols, rows, tw = _map_rect(desk, r, u)
+    cx, cy, vx, vy = _map_view_at(desk, cols, rows)
+    cv.rect(mx, my, mw, mh, th["surface_alt"])
+    cv.clip(mx, my, mw, mh)
+    for row in range(min(rows, tm.h - vy)):
+        for col in range(min(cols, tm.w - vx)):
+            t = tm.mget(vx + col, vy + row)
+            if t:
+                img = sh.tile_image(t, 0)
+                if img is not None:
+                    cv.spr(img, mx + col * tw, my + row * tw, u)
+    cv.clip()
+    desk._cursors.append((mx + (cx - vx) * tw, my + (cy - vy) * tw, tw, tw))
+
+
+def map_foot(desk, r, u):
+    ws = desk.ws
+    if ws.tilemap is None:
+        ui.at(*r)
+        ui.empty("map", "No map", ("This cart has no map yet",))
+        return
+    cx, cy = desk.part_state.get("ref cell", (0, 0))
+    _foot(desk, r, u, "mget(%d, %d)" % (cx, cy), "insert mget")
+
+
+def log_rows(desk):
+    """(text, file, row) for each error the Log names: the run's crash at its
+    line, the code's own error."""
+    ws = desk.ws
+    out = []
+    err, line = ws.cart_error, ws.crash_line
+    if err:
+        f = ws.player.crash_file or ws.code_file_name()
+        if line:
+            out.append(("%s:%d  %s" % (f, line, err), f, line - 1))
+        else:
+            out.append((str(err), None, None))
+    if ws.code_err and ws.code_err_row is not None:
+        f = ws.code_file_name()
+        out.append(("%s:%d  %s" % (f, ws.code_err_row + 1, ws.code_err), f, ws.code_err_row))
+    return out
+
+
+def log(desk, r, u):
+    """The Reference's Log: each error with its file and line; activating one
+    puts the Code pane's caret there."""
+    rows = log_rows(desk)
+    if not rows:
+        ui.at(*r)
+        ui.empty("doc", "Nothing logged", ("Your game's errors show here, with their line",))
+        return
+    x, y, w, h = r
+    ui.at(x + 6 * u, y + 4 * u, w - 12 * u, h - 8 * u)
+    got = ui.list("Log", [t for t, _f, _r in rows], -1, {"id": "log"})
+    if got is not None and 0 <= got < len(rows):
+        goto(desk, rows[got][1], rows[got][2])
+
+
+def goto(desk, name, row):
+    """The Code pane on file `name`, its caret on `row`, and the keys."""
+    ws = desk.ws
+    if row is None:
+        return
+    if name and name != ws.code_file_name():
+        ws.open_code_file(name)
+    ed = ws.editor
+    if ed is not None:
+        ed.goto_row(row)
+    for n, (pane, _r, _p) in enumerate(desk.panes()):
+        if "code" in pane:
+            desk.focus_pane(n)
+    ws._dirty = True
+
+
+def pointer(desk, c, r, u, px, py, click, down):
+    """A press a part takes itself: a cell of the Reference's map. True
+    where it took it."""
+    if c != "maps" or desk.ws.tilemap is None or not (click or down):
+        return False
+    (mx, my, mw, mh), cols, rows, tw = _map_rect(desk, r, u)
+    if not (mx <= px < mx + mw and my <= py < my + mh):
+        return False
+    st = desk.part_state
+    vx, vy = st.get("ref view", (0, 0))
+    st["ref cell"] = (vx + (px - mx) // tw, vy + (py - my) // tw)
+    desk.ws._dirty = True
+    return True
+
+
+def keys(desk, c, i):
+    """The arrows over the Reference's map move its cell. True where they
+    acted."""
+    if c != "maps" or desk.ws.tilemap is None:
+        return False
+    dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
+    dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
+    if not (dx or dy):
+        return False
+    st = desk.part_state
+    cx, cy = st.get("ref cell", (0, 0))
+    st["ref cell"] = (cx + dx, cy + dy)
+    desk.ws._dirty = True
+    return True

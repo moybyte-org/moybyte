@@ -609,3 +609,71 @@ def test_a_settled_blocks_workspace_paints_nothing(blocks_desk):
     for _ in range(8):
         drv.frame(DT)
     assert ws._frames_drawn == drawn
+
+
+# -- the Reference's Sounds, Map and Log ---------------------------------------------
+
+def _reference(desk, tab):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)                       # Code
+    pane = ("sprites", "sounds", "maps", "log")
+    d._tabs[pane] = pane.index(tab)
+    ws.editor.row, ws.editor.col = 0, 0
+    ws._dirty = True
+    drv.frame(DT)
+    return ws, drv, d
+
+
+def _press(drv, d, id):
+    bx, by, bw, bh = d._host.box(id)
+    _click(drv, bx + bw // 2, by + bh // 2)
+
+
+def test_a_reference_sound_pick_inserts_its_sfx_call(desk):
+    ws, drv, d = _reference(desk, "sounds")
+    bx, by, bw, bh = d._host.box("ref sounds")
+    _click(drv, bx + 20, by + 28 + 14)           # sound 1
+    assert d.part_state["ref sound"] == 1
+    ws.editor.row, ws.editor.col = 0, 0
+    _press(drv, d, "insert sfx")
+    assert ws.editor.text().startswith("sfx(1)")
+
+
+def test_a_reference_map_pick_inserts_its_mget_call(desk):
+    ws, drv, d = _reference(desk, "maps")
+    from runtime import editor_parts as Parts
+    body = d._body(_pane(d, "maps"), 1)
+    (mx, my, _mw, _mh), _c, _r, tw = Parts._map_rect(d, body, 1)
+    vx, vy = d.part_state["ref view"]
+    _click(drv, mx + 3 * tw + 1, my + 2 * tw + 1)
+    assert d.part_state["ref cell"] == (vx + 3, vy + 2)
+    ws.editor.row, ws.editor.col = 0, 0
+    _press(drv, d, "insert mget")
+    assert ws.editor.text().startswith("mget(%d, %d)" % (vx + 3, vy + 2))
+
+
+def test_the_log_names_an_error_and_takes_the_caret_to_its_line(desk):
+    ws, drv, d = _reference(desk, "log")
+    ws.player.cart_error = "NameError: foo"
+    ws.player.crash_line = 12
+    ws._dirty = True
+    drv.frame(DT)
+    bx, by, bw, bh = d._host.box("log")
+    _click(drv, bx + 20, by + 14)
+    assert ws.editor.row == 11
+    assert d.tab_of(d.focused()[0]) == "code"
+
+
+def test_a_settled_reference_paints_nothing_on_any_tab(desk):
+    ws, drv = desk
+    for tab in ("sounds", "maps", "log"):
+        _ws, _drv, d = _reference(desk, tab)
+        ws.pointer.visible = False
+        ws._toast_until = 0
+        for _ in range(4):
+            drv.frame(DT)
+        drawn = ws._frames_drawn
+        for _ in range(8):
+            drv.frame(DT)
+        assert ws._frames_drawn == drawn, tab

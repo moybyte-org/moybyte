@@ -432,8 +432,8 @@ class EditorDesk(Layer):
             elif c in ("sheet", "sprites", "stamps"):
                 self._ref = c == "sprites"
                 self._sheet(cv, th, body, u, c == "stamps")
-            elif c == "made":
-                Parts.made(self, body, u)
+            elif c in ("made", "maps"):
+                Parts.drawn_before(self, c, cv, th, body, u)
         if self.grown is None:
             self._dividers(cv, th, divs, u)
         self._frame(cv, th, shown, u)
@@ -548,7 +548,7 @@ class EditorDesk(Layer):
                     self._head_tool(op)
             if c == "music":
                 Sound.header(self, pid, tx, y, hh, u)
-            elif c == "sounds":
+            elif c == "sounds" and self.key == "sound":
                 Parts.sounds_header(self, pid, tx, y, hh, u)
             if c == "game":
                 self._still_tool(pid, u)
@@ -808,7 +808,9 @@ class EditorDesk(Layer):
         if c in ("sheet", "sprites"):
             return self._sheet_keys(i)
         if c in Parts.PARTS:
-            if self._host.keys(i):
+            if Parts.keys(self, c, i):
+                i.clear_edges()
+            elif self._host.keys(i):
                 ws._dirty = True
             return True
         return False
@@ -1079,7 +1081,8 @@ class EditorDesk(Layer):
                     self._pick(t)           # a held slide previews each it passes
             return True
         if c in Parts.PARTS:
-            host.point(px, py, click, down)
+            if not Parts.pointer(self, c, body, u, px, py, click, down):
+                host.point(px, py, click, down)
             ws._dirty = True
             return True
         return True
