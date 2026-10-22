@@ -418,11 +418,6 @@ tools two by four at 28, one colour target, popovers of 32 swatches at
 26×30) and its hint
 strip gives way to the app's tool row. **Cost:** 1.5 days.
 
-**43. A sheet:** `ui.sheet(id, h, o)` and `ui.sheet()`, a card docked to
-the content's foot (or its head, `o.top`), its rows scrolling inside, the
-page above it left in sight; modal like a popover, washing nothing.
-**Cost:** 1 day.
-
 **44. Tooltips:** `o.tip` on a button, shown under a resting pointer on the
 desk (the bar's Desk tooltip, `BACK_TIP`, as a verb). **Cost:** 0.5 day.
 
@@ -432,7 +427,9 @@ The pixel round's star field, moonlit edge and focus halo; the Galmuri
 chrome fonts and their Moybyte cut; text at 2× as the big boards' only
 mode (now gap 11, a theme's choice); the 14 and 17 px desk rows; dimming a
 window behind by 25%; the 12×12 two-tone icons; the redrawn default
-wallpaper (the default theme draws a backdrop).
+wallpaper (the default theme draws a backdrop); gap 43's sheet, a card
+docked to the content's foot (the apps as built take popovers and dialogs,
+2026-10-22).
 
 **Total:** about 96–104 developer days for gaps 1–26; gaps 27–30 add
-about 6, gap 31 about 19–22, and gaps 32–44 about 11.
+about 6, gap 31 about 19–22, and gaps 32–44 about 10.

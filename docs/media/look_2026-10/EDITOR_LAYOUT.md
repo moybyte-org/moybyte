@@ -146,8 +146,9 @@ always Game (the game at 1× at its top). Pictures: `moy-light_desktop_editor-b-
 Art starts at Sprite 320, its T-Deck minimum, and Map · Game 462
 (`docs/studio_2026-09.md` S5; the pictures draw 306 and 476). A restored
 window stops shrinking at its workspace's combined minimum; on glass
-smaller than any workspace's minimum the Editor is the tab ladder, one
-panel at a time.
+smaller than any workspace's minimum the Editor shows one panel at a
+time, the focused pane over the panes area (2026-10-22, when the desk's
+tab ladder was removed).
 At 1280 × 800 the Run slot is 2× (660 × 512).
 
 ## Input

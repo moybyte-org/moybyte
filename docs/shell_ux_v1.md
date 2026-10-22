@@ -297,8 +297,8 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
   Another project is the home's Make tab (§4); the bar has no way there of
   its own.
 - **On a desk** the Editor shows several of these at once, as five
-  workspaces (Settings, Code, Art, World, Sound) whose dividers move, the
-  tab ladder only where the glass holds none of them
+  workspaces (Settings, Code, Art, World, Sound) whose dividers move, one
+  pane at a time where the glass holds none of them
   (`runtime/editor_desk.py`, `docs/look_2026-10.md` step 30).
 
 There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
