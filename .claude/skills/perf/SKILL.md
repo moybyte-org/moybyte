@@ -20,6 +20,8 @@ tools/board.py tdeck perf "Brick Siege" --diag       # + draw/flush/logic/render
 tools/board.py guition_s3 perf "Jet Teapot" --uncap  # every loop frame draws: the compiled carts' floors
 python3 tools/p4_perf.py --board p4                  # the roster, one row a cart
 python3 tools/p4_cart_bench.py --board tdeck         # the two Bench carts' phases
+python3 tools/shell_bench.py --board p4 --out DIR --gate     # one board's shell run: apps, Editor, pause, memory, p4_bench's runs, the roster
+python3 tools/shell_bench.py --board p4 --out DIR --report --against OLD   # its tables beside an earlier run's, regressions flagged
 ```
 
 `perf` drops the first 4 s (caches, cold flash), takes only samples naming the
