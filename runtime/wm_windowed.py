@@ -101,6 +101,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
     from runtime import layout_base as _layout_base
     from runtime import ui_draw as _ui_draw
+try:
+    from moy_input import PB_MIDDLE as _PB_MIDDLE
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_input import PB_MIDDLE as _PB_MIDDLE
 
 import time as _time                  # the bar clock's minute (localtime)
 
@@ -465,6 +469,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._grab = 0                # the last press was the WM's: 1 while it
                                       # is held, 2 once released; no content
                                       # has had it (_content_static)
+        self._held_in = None          # the window a held press went down in
         self._restored = False        # what the last cache restore covered: a
                                       # rect, None (all of it) or False (nothing)
         self._foot_gen = None         # the look the windows' feet were sized under
@@ -749,6 +754,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._focus = None
         self._drag = self._drag_armed = self._resize = None
         self._grab = 0
+        self._held_in = None
         self._content_gesture = False
         self._gesture_hist = []
         if self._recording:
@@ -3050,7 +3056,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 if _in(px, py, rect):
                     self._chip_tap(key)
                     return True
-        key = self._win_at(px, py)
+        # A press held since it went down in the focused window's content --
+        # a finger's, the left button's or the middle button's -- stays that
+        # window's wherever the pointer goes, its release included, as a
+        # browser's pointer capture keeps it: a drag scrolls on past the frame.
+        held = bool(p.down) or bool(getattr(ws.input, "pointer_buttons", 0) & _PB_MIDDLE)
+        key = self._held_in
+        if click or key is None or key != self._focus or key not in self._wins:
+            key = self._win_at(px, py)
         if key is None:
             # Clicking the desktop moves focus to it; a bar is not the desk,
             # so a widget's tap (a popover over the focused window) keeps it.
@@ -3070,6 +3083,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._move_focus(key)
             ws._dirty = True
         focused = (key == self._focus)
+        self._held_in = key if focused and held else None
         if click and win.docked is None:
             name = self._strip_button_hit(win, px, py)
             if name is not None:

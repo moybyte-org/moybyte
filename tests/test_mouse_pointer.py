@@ -16,6 +16,8 @@ editor handle -- Notes' -- both use).
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -346,3 +348,58 @@ def test_the_code_window_autoscrolls_in_its_own_space(tmp_path):
     for _ in range(30):
         d.frame(DT)
     assert ed.top > 0 and ws.code_layer.autoscrolling()
+
+
+# -- the desk: a held press is its window's -------------------------------------
+
+def _desk_files(tmp_path, n=60):
+    """Files on the desk over `n` drawings, its Art place open: (ws, driver,
+    a point on the list, the window's content rect)."""
+    from ws_helpers import build_desktop_ws
+    from test_files_app import _files, _frames, _press, _seed_drawing
+    ws = build_desktop_ws(tmp_path)
+    for i in range(n):
+        _seed_drawing(str(tmp_path / "carts"), "pic%02d" % i, 8, 8, i % 16)
+    _app, d = _files(ws)
+    _press(d, "down", "down", "a")
+    cr = ws.wm._wins[ws.wm._focus].content_rect()
+    x, y = cr[0] + cr[2] // 2, cr[1] + cr[3] * 3 // 4
+    d.hover(x, y)
+    _frames(d)
+    return ws, d, x, y, cr
+
+
+def _shot(ws):
+    import hashlib
+    return hashlib.sha1(bytes(ws.sys_canvas._buf)).hexdigest()
+
+
+@pytest.mark.parametrize("by", ["middle", "finger"])
+def test_a_drag_that_leaves_the_window_still_scrolls_it(tmp_path, by):
+    """A middle-button drag (or a finger's) that went down on a window's
+    list keeps scrolling it once the pointer is past the window's top, and
+    its release there ends it: the press is the window's until it comes up."""
+    from test_files_app import _frames
+    ws, d, x, y, cr = _desk_files(tmp_path)
+    if by == "middle":
+        d.middle(x, y, True)
+    else:
+        d.touch(x, y)
+    _frames(d, 1)
+    out = []
+    for yy in range(y - 20, -1, -20):
+        if by == "middle":
+            d.hover(x, yy)
+        else:
+            d.touch_drag(x, yy)
+        _frames(d, 1)
+        if yy < cr[1]:
+            out.append(_shot(ws))
+    assert len(set(out)) == len(out) >= 3, "the list stopped when the pointer left the window"
+    if by == "middle":
+        d.middle(x, 0, False)
+    else:
+        d.touch_up()
+    _frames(d)
+    assert ws.wm._held_in is None
+
