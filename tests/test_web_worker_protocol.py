@@ -4,7 +4,9 @@ The console moved off the browser's main thread into worker.js: it owns the VM,
 self-paces the frame loop and PUSHES frames, while the page only blits them.
 Nothing else in the suite executes that JS, so this fakes the Web Worker globals
 (`self` + `fetch`) in node and drives boot -> assets -> run -> frames -> input ->
-reload, for both presentation tiers plus the idle case.
+reload, for both presentation tiers plus the idle case. Once booted the worker
+runs on the harness's virtual clock, so the frame counts and the sim/wall ratio
+measure the worker's pacing and not how busy the machine is.
 
 Needs a built dist/ (firmware/web_runner/build.sh [--stage-only]); skipped when
 that or node is absent, so a fresh checkout still runs the suite green.

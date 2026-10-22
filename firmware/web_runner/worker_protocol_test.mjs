@@ -22,7 +22,6 @@ globalThis.fetch = async (url) => {
 await import(pathToFileURL(process.cwd() + "/dist/worker.js").href);
 if (!onmsg) { console.log("FAIL: worker never installed an onmessage handler"); process.exit(1); }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const seen = (t) => posted.filter((m) => m.t === t);
 
 let fail = 0;
@@ -55,6 +54,51 @@ if (assets.length) {
     ok("desktop tier reports its panel size",
        search.includes("desktop") ? (a.w === 1024 && a.h === 600) : (a.w === 320),
        a.w + "x" + a.h);
+}
+
+// From here on the worker runs on a VIRTUAL clock, so what the checks below
+// count is the worker's pacing and never how busy the machine is: a loaded
+// host stretched a real 600ms window over too few frames and clamped dt (a
+// step over 100ms) until sim lagged wall. performance.now (the frame loop's
+// clock) and Date.now (MicroPython's ticks and wall time) read it, and the
+// worker's setTimeout queues on it; `sleep` advances it, firing each timer
+// that falls due in order. Time stands still inside a step, and every timer
+// fires LATE_MS after its deadline, as a real step makes the next one late:
+// the lateness a deadline-measured dt would add to every frame (sim/wall
+// 1.24), and a loop that waited for no deadline would run at 1000 / LATE_MS
+// = 250 frames/s, over the pacing check's ceiling. Wall time starts a second
+// into a minute, so the bar's HH:MM stays put for the run.
+const LATE_MS = 4;
+const realNow = Date.now();
+const date0 = realNow - (realNow % 60000) + 61000;
+const v0 = performance.now();
+let vnow = v0;
+const timers = [];
+let tseq = 0;
+performance.now = () => vnow;
+Date.now = () => date0 + (vnow - v0);
+globalThis.setTimeout = (fn, ms, ...args) => {
+    timers.push({ at: vnow + Math.max(0, ms || 0) + LATE_MS, id: ++tseq, fn, args });
+    return tseq;
+};
+globalThis.clearTimeout = (id) => {
+    const i = timers.findIndex((t) => t.id === id);
+    if (i >= 0) timers.splice(i, 1);
+};
+async function sleep(ms) {
+    const end = vnow + ms;
+    for (;;) {
+        await new Promise((r) => setImmediate(r));
+        let k = -1;
+        for (let i = 0; i < timers.length; i++) {
+            if (k < 0 || timers[i].at < timers[k].at) k = i;
+        }
+        if (k < 0 || timers[k].at > end) break;
+        const t = timers.splice(k, 1)[0];
+        vnow = Math.max(vnow, t.at);
+        t.fn(...t.args);
+    }
+    vnow = end;
 }
 
 // Frames must NOT flow before "run" (the page's play gesture gates it).
