@@ -3728,10 +3728,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # mapping's tuples every loop iteration of every play frame (~0.4 ms
         # a loop on the S3, see wm.py). The fullscreen tiers only: the
         # windowed WM's focus can strip a tap without the pointer moving, so
-        # it keeps the unconditional publish.
+        # it keeps the unconditional publish. Under an app the publish is kept
+        # the same way, and the layer walk below still runs.
+        kept = False
         if (_pp is None and not click and not p.down and not self._ptr_was_down
                 and px == self._ptr_last_x and py == self._ptr_last_y
-                and self.cart_error is None and self.wm.top_is_player()
+                and self.cart_error is None
                 and self.input.game_pointer is self._gp_idle):
             # Same geometry? These seven reads are exactly what the fullscreen
             # WM's game_xy consumes; its memo checks the same key, but through
@@ -3745,29 +3747,32 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     and getattr(self.input, "game_view", None) is k[0]
                     and gc.w == k[3] and gc.h == k[4]
                     and sc.w == k[5] and sc.h == k[6]):
-                if _perf:
-                    self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)
-                return
-        gx, gy = self._game_xy(px, py)
-        _live = _pp() if _pp is not None else True
-        gp = (gx, gy, click and _live, p.down and _live)
-        self.input.game_pointer = gp
-        if click or p.down:
-            self._gp_idle = None              # a tap/hold: next frame republishes
-        else:
-            self._gp_idle = gp
-            k = self._gp_key
-            gc = self.canvas
-            sc = self._sys_canvas
-            if sc is None:
-                sc = gc
-            k[0] = getattr(self.input, "game_view", None)
-            k[1] = gc
-            k[2] = sc
-            k[3] = gc.w
-            k[4] = gc.h
-            k[5] = sc.w
-            k[6] = sc.h
+                if self.wm.top_is_player():
+                    if _perf:
+                        self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)
+                    return
+                kept = True
+        if not kept:
+            gx, gy = self._game_xy(px, py)
+            _live = _pp() if _pp is not None else True
+            gp = (gx, gy, click and _live, p.down and _live)
+            self.input.game_pointer = gp
+            if click or p.down:
+                self._gp_idle = None              # a tap/hold: next frame republishes
+            else:
+                self._gp_idle = gp
+                k = self._gp_key
+                gc = self.canvas
+                sc = self._sys_canvas
+                if sc is None:
+                    sc = gc
+                k[0] = getattr(self.input, "game_view", None)
+                k[1] = gc
+                k[2] = sc
+                k[3] = gc.w
+                k[4] = gc.h
+                k[5] = sc.w
+                k[6] = sc.h
         if _perf:
             self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)   # pre-walk share
         # Idle fast-path (2026-08-03): while a healthy GAME owns the glass and

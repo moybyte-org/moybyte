@@ -735,6 +735,8 @@ static mp_obj_t surface_content_rect(mp_obj_t self) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(surface_content_rect_obj, surface_content_rect);
 
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_app_ptr_last);
+
 static const qstr POINTER_FIELDS[5] = {
     MP_QSTR_x, MP_QSTR_y, MP_QSTR_down, MP_QSTR_click, MP_QSTR_visible,
 };
@@ -752,7 +754,23 @@ static mp_obj_t surface_pointer(mp_obj_t self) {
         MP_OBJ_NEW_SMALL_INT(v[0]), MP_OBJ_NEW_SMALL_INT(v[1]),
         mp_obj_new_bool(v[2]), mp_obj_new_bool(v[3]), mp_obj_new_bool(v[4]),
     };
-    return mp_obj_new_attrtuple(POINTER_FIELDS, 5, items);
+    // Asked on every frame the pointer reaches an app: the answer it had,
+    // while it holds, allocates nothing (as content_rect's).
+    mp_obj_t last = MP_STATE_VM(moy_app_ptr_last);
+    if (last != MP_OBJ_NULL && gc_nbytes(MP_OBJ_TO_PTR(last)) != 0
+            && mp_obj_is_type(last, &mp_type_attrtuple)) {
+        mp_obj_tuple_t *t = MP_OBJ_TO_PTR(last);
+        size_t k = 0;
+        while (k < 5 && t->items[k] == items[k]) {
+            k++;
+        }
+        if (t->len == 5 && k == 5) {
+            return last;
+        }
+    }
+    last = mp_obj_new_attrtuple(POINTER_FIELDS, 5, items);
+    MP_STATE_VM(moy_app_ptr_last) = last;
+    return last;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(surface_pointer_obj, surface_pointer);
 
