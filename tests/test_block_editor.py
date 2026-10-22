@@ -218,6 +218,28 @@ def test_desktop_blocks_button_opens_editor(tmp_path):
     assert ws.menu_view == "blocks"
 
 
+def _menu_word(ws, item):
+    """The handheld menu's row for `item`, as the page names it."""
+    bu = ws.block_ui
+    return bu.page().menu_word(bu.blk_menu["items"].index(item))
+
+
+def _menu_focus(ws, item):
+    """Focus the handheld menu's row for `item`, as the keys would."""
+    ws.block_ui.page().host.focus(_menu_word(ws, item))
+
+
+def _tap_stop(ws, drv, stop):
+    """Tap stop `stop` of the handheld Blocks page where it drew last."""
+    ws._dirty = True
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    x, y, w, h = ws.block_ui.page().host.box(stop)
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+
+
 def test_insert_flow_through_the_menu_then_runs(tmp_path):
     """Press A on an insert point -> category menu -> block list -> a block is
     inserted, the program compiles, and the cart runs through the Workstation."""
@@ -232,13 +254,13 @@ def test_insert_flow_through_the_menu_then_runs(tmp_path):
     drv.frame(1 / 30)
     drv.frame(1 / 30)                                  # release
     assert ws.block_ui.blk_menu is not None and ws.block_ui.blk_menu["mode"] == "cat"
-    # navigate to DRAW and select
-    ws.block_ui.blk_menu["sel"] = ws.block_ui.blk_menu["items"].index(blocks.CAT_DRAW)
+    # navigate to DRAW and select (the menu's keys are the UI engine's)
+    _menu_focus(ws, blocks.CAT_DRAW)
     drv.press("a")
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_menu["mode"] == "blk"
-    ws.block_ui.blk_menu["sel"] = ws.block_ui.blk_menu["items"].index("cls")
+    _menu_focus(ws, "cls")
     drv.press("a")
     drv.frame(1 / 30)
     drv.frame(1 / 30)
@@ -357,17 +379,11 @@ def test_pointer_taps_insert_and_action_bar(tmp_path):
     ws._open_blocks()
     drv = _driver(ws)
     drv.frame(1 / 30)
-    lay = ws.block_ui.block_layout
-    # tap ADD -> the category menu opens
-    drv.click(lay.add_btn[0] + 2, lay.add_btn[1] + 2)
-    drv.frame(1 / 30)
+    # tap Add -> the category menu opens
+    _tap_stop(ws, drv, "Tool Add")
     assert ws.block_ui.blk_menu is not None
-    # tap a menu row (DRAW) then dismiss back out
-    # (drill: pick category by tapping its row)
-    my = lay.menu[1] + 16
-    draw_i = ws.block_ui.blk_menu["items"].index(blocks.CAT_DRAW)
-    drv.click(lay.menu[0] + 20, my + draw_i * lay.menu_row_h + 2)
-    drv.frame(1 / 30)
+    # tap a menu row (Draw) -> its blocks
+    _tap_stop(ws, drv, _menu_word(ws, blocks.CAT_DRAW))
     assert ws.block_ui.blk_menu["mode"] == "blk"
 
 
@@ -629,7 +645,6 @@ def test_new_variable_prompt_survives_the_opening_tap(tmp_path):
     """Regression (#29), touch path: the TAP that selects '+ new variable' must not
     carry into the new prompt and hit OK. Open the prompt by tapping its menu row,
     then assert it stays open across the next frame (the opening click is cleared)."""
-    import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
@@ -640,10 +655,13 @@ def test_new_variable_prompt_survives_the_opening_tap(tmp_path):
     ws.block_ui._blk_menu_select()
     assert ws.block_ui.blk_menu["mode"] == "blk"
     # tap the "+ new variable" row (index 0) to select it -> opens the name prompt
-    mx, my = C._BLK_MENU[0], C._BLK_MENU[1]
-    row0_y = (my + 16) + 0 * C._BLK_MENU_ROW_H + 2
-    drv.click(mx + 20, row0_y)
+    ws._dirty = True
     drv.frame(1 / 30)
+    drv.frame(1 / 30)                                  # the popover settles in place
+    x, y, w, h = ws.block_ui.page().host.box(ws.block_ui.page().menu_word(0))
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)                                  # the release activates the row
     assert ws.block_ui.blk_kbd is not None, "tapping '+ new variable' should open the prompt"
     # an immediate next frame (the tap is gone) -- the prompt must still be open,
     # not closed by the opening tap leaking onto OK/X.

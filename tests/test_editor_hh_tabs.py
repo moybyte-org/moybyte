@@ -292,3 +292,91 @@ def test_a_settled_scene_tab_paints_nothing(hh):
     assert _settles(ws, drv)
     _tap(drv, page.host.box("Tool Stamp"))
     assert _settles(ws, drv)
+
+
+# -- Blocks -----------------------------------------------------------------------------
+
+def _blocks(hh, title="Coin Quest"):
+    ws, drv = hh
+    cart = next(c for c in ws.carts.all if c.get("title") == title)
+    ws.open_in_editor(cart)
+    ws, drv = _open(hh, "blocks")
+    bu = ws.block_ui
+    assert bu.block_layout.verbs and bu.blocks_ed is not None
+    return ws, drv, bu, bu.page()
+
+
+def test_the_objects_tabs_pick_whose_scripts_show(hh):
+    ws, drv, bu, page = _blocks(hh)
+    assert bu.blocks_ed.target is None
+    tags = bu._roster_tags()
+    assert tags, "Coin Quest's objects have scripts"
+    x, y, w, h = page.host.box("Objects")
+    drv.click(x + 8 + 50 + 6, y + h // 2)         # the tab after the Stage's
+    for _ in range(3):
+        drv.frame(DT)
+    assert bu.blocks_ed.target == tags[0]
+
+
+def test_add_opens_the_menu_and_a_pick_inserts_the_block(hh):
+    ws, drv, bu, page = _blocks(hh)
+    be = bu.blocks_ed
+    be.cur = next(i for i, r in enumerate(be.rows) if r.kind == "insert")
+    n = len(be.rows)
+    _tap(drv, page.host.box("Tool Add"))
+    assert bu.blk_menu is not None and bu.blk_menu["mode"] == "cat"
+    _tap(drv, page.host.box("Control"))
+    assert bu.blk_menu["mode"] == "blk"
+    _tap(drv, page.host.box("forever"))
+    assert bu.blk_menu is None
+    assert len(be.rows) > n
+    assert any(r.kind == "block" and r.block.get("t") == "forever" for r in be.rows)
+
+
+def test_the_menus_keys_are_the_engines_and_b_steps_back(hh):
+    ws, drv, bu, page = _blocks(hh)
+    _tap(drv, page.host.box("Tool Add"))
+    drv.press("down")
+    drv.frame(DT)
+    drv.press("a")
+    for _ in range(2):
+        drv.frame(DT)
+    assert bu.blk_menu["mode"] == "blk", "the second kind opened"
+    drv.press("b")
+    drv.frame(DT)
+    drv.frame(DT)
+    assert bu.blk_menu["mode"] == "cat"
+    drv.press("b")
+    drv.frame(DT)
+    drv.frame(DT)
+    assert bu.blk_menu is None
+    assert ws.menu_view == "blocks"
+
+
+def test_delete_and_see_code_from_the_foot(hh):
+    ws, drv, bu, page = _blocks(hh)
+    be = bu.blocks_ed
+    be.cur = next(i for i, r in enumerate(be.rows) if r.kind == "block" and r.depth > 0)
+    n = len(be.rows)
+    _tap(drv, page.host.box("Tool Delete"))
+    assert len(be.rows) < n
+    _tap(drv, page.host.box("See code"))
+    assert ws.menu_view == "code"
+
+
+def test_a_tap_on_a_row_picks_it(hh):
+    ws, drv, bu, page = _blocks(hh)
+    lay = bu.block_layout
+    be = bu.blocks_ed
+    be.cur = 0
+    drv.click(lay.x0 + 20, lay.y0 + 2 * lay.row_h + lay.row_h // 2)
+    for _ in range(2):
+        drv.frame(DT)
+    assert be.cur == bu.blk_top + 2
+
+
+def test_a_settled_blocks_tab_paints_nothing(hh):
+    ws, drv, bu, page = _blocks(hh)
+    assert _settles(ws, drv)
+    _tap(drv, page.host.box("Tool Add"))
+    assert _settles(ws, drv)

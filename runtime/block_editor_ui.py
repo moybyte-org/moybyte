@@ -70,10 +70,20 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
-                             BAR_ROWS as _BAR_ROWS)
+                             BAR_ROWS as _BAR_ROWS, pane as _in_pane,
+                             metric_class as _metric_class, DESK as _DESK)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H, BAR_ROWS as _BAR_ROWS)
+                                     BASE_H as _BASE_H, BAR_ROWS as _BAR_ROWS,
+                                     pane as _in_pane, metric_class as _metric_class,
+                                     DESK as _DESK)
+
+# The handheld page (editor_blocks.py): the objects' tab row over the outline,
+# a row's pitch and a depth's indent, and the foot under it.
+HAND_HEAD = 28
+HAND_ROW = 22
+HAND_INDENT = 14
+HAND_FOOT = 34
 
 
 # --- Layout geometry (baseline 320x240 constants + BlockLayout) -------------
@@ -325,8 +335,31 @@ class BlockLayout(LayoutBase):
         self.menu_rows = max(3, (mh - 16 * fs) // self.menu_row_h)
         # Confine the outline + action bar to the workspace's left pane (the modals
         # above keep full-canvas centering, so they float over both panes).
+        self.verbs = bounds is None and not _in_pane() and _metric_class() != _DESK
         if bounds is not None:
             self._apply_bounds(bounds)
+        elif self.verbs:
+            self._hand_geometry()
+
+    def _hand_geometry(self):
+        """The handheld's tab on the verbs (EDITOR_LAYOUT.md's Blocks): the
+        objects' tabs, the outline under them and the foot's tools, which
+        `editor_blocks.BlocksPage` draws; the action bar stands off the
+        surface. The modal menu and prompts keep their geometry."""
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        self.x0 = cx + 8
+        self.y0 = cy + HAND_HEAD
+        self.row_h = HAND_ROW
+        self.indent = HAND_INDENT
+        self.outline_w = cw - 16
+        self.bar_h = HAND_FOOT
+        self.bar_y = cy + ch - HAND_FOOT
+        self.rows = max(3, (self.bar_y - 2 - self.y0) // self.row_h)
+        off = (-4096, -4096, 0, 0)
+        for name in ("add_btn", "del_btn", "up_btn", "dn_btn", "code_btn", "act_btn",
+                     "undo_btn", "redo_btn"):
+            setattr(self, name, off)
+        self.hint_y = self.status_x = -4096
 
     def _apply_bounds(self, bounds):
         """Relocate the outline + action bar into `bounds` (bx, by, bw, bh) -- the
@@ -402,6 +435,17 @@ class BlockEditorUI:
         # (geometry key, block_layout, scene layout) of the last workspace split --
         # see _layout_workspace.
         self._ws_memo = None
+        self._page = None             # the handheld's page on the verbs (editor_blocks.py)
+
+    def page(self):
+        """The handheld's Blocks page on the verbs, built at its first use."""
+        if self._page is None:
+            try:
+                from editor_blocks import BlocksPage
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime.editor_blocks import BlocksPage
+            self._page = BlocksPage(self, _ui_draw.AppHost("editor_blocks"))
+        return self._page
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive layout from the live system-canvas size + the
@@ -1391,6 +1435,17 @@ class BlockEditorUI:
         editors' edge-driven nav. The menu, when open, captures nav + A/B."""
         ws = self.ws
         i = ws.input
+        page = self._page if self.block_layout.verbs else None
+        if page is not None:
+            if page.owed():
+                ws._dirty = True
+            if self.blk_kbd is None and self.blk_menu is not None:
+                if page.keys(i):
+                    ws._dirty = True
+                if i.pressed("b"):
+                    self._blk_menu_back()
+                    ws._dirty = True
+                return
         # Blocks+Scene workspace (#93/#85): route the keyboard to the focused pane. A
         # block modal (name/number entry, insert menu) always keeps it on blocks;
         # otherwise the scene owns it while focused (e.g. typing an actor's TAG).
@@ -1512,6 +1567,18 @@ class BlockEditorUI:
     def _blocks_pointer(self, px, py, click):
         # SYSTEM coords + the responsive BlockLayout (#39 step 2).
         panes = self._layout_workspace()   # None unless the wide workspace is active
+        lay = self.block_layout
+        if (lay.verbs and self.blk_kbd is None
+                and (self.blk_menu is not None
+                     or not _in(px, py, lay.area()) and self._dragv is None)):
+            # The handheld page: the outline's taps and drags are this method's,
+            # the rest the verbs' (the bar's first).
+            ws = self.ws
+            if click and ws.bar_layer.handle_bar_tap("menu", px, py):
+                return
+            if self.page().point(px, py, click, ws.pointer.down):
+                ws._dirty = True
+            return
         # Modal overlays (full-canvas insert menu / entry prompt) own a click first.
         if click and self.blk_kbd is not None:
             self._blk_kbd_click(px, py)
@@ -1703,6 +1770,12 @@ class BlockEditorUI:
         lay = self.block_layout
         fs = lay.fs
         be = self.blocks_ed
+        if lay.verbs:
+            self.page().draw(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), False)
+            ws.bar_layer._draw_status_strip("menu")
+            if self.blk_kbd is not None:
+                self._draw_blk_kbd()
+            return
         # Phase 3 (visual identity v1): the theme's tool surface and ink on
         # every tier. The block PIECES keep their own colorful language
         # (self-backed rows, the theme's `block_*` content roles).
