@@ -157,7 +157,7 @@ class MapPage:
         size = times(me.size, me.size)
         cw = _width(size) + 30
         ui.at(cx, y + 3, cw, 20)
-        ui.icon("stamp")
+        ui.icon("brush")
         if ui.button(size, "normal", {"id": "Brush size"}):
             me.cycle_size()
         cx += cw + 4
@@ -168,7 +168,7 @@ class MapPage:
         if ui.button(zoom, "normal", {"id": "Zoom"}):
             mu._map_cycle_zoom()
         ui.at(x + w - 2 - TOOL, y + 1, TOOL, TOOL)
-        if ui.tool("maximize", "", {"id": "Resize", "current": self.pop == "resize"}):
+        if ui.tool("resize", "", {"id": "Resize", "current": self.pop == "resize"}):
             self.pop = None if self.pop == "resize" else "resize"
 
     def zoom_word(self):

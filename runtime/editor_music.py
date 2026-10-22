@@ -27,7 +27,7 @@ WAVES = ("SQR", "TRI", "SAW", "NOI", "PLS", "ORG", "TLT", "PHA")
 # The pad, two to a row: (icon, word, the sound view's verb, the song view's).
 PAD = (
     (("arrow_down", "Note", "pitch-", None), ("arrow_up", "Note", "pitch+", None)),
-    (("rotate", "Wave", "wave", None), ("music", "Vol", "vol", None)),
+    (("rotate", "Wave", "wave", None), ("volume", "Vol", "vol", None)),
     (("mute", "Rest", "rest", None), ("new", "Add", "add", "add")),
     (("dup", "Dup", "dup", "dup"), ("del", "Del", "del", "del")),
     (("copy", "Copy", "copy", "copy"), ("paste", "Paste", "paste", "paste")),
@@ -209,7 +209,7 @@ class MusicPage:
         loop = bool(obj.loop) if obj is not None else False
         lw = _width("Loop") + 34
         ui.at(x + 14 + bw, y + 4, lw, 20)
-        ui.icon("rotate")
+        ui.icon("loop")
         if ui.button("Loop", "normal", {"id": "Loop", "current": loop}):
             me.toggle_loop()
         n = me.slot_count() if song else me.step_count()

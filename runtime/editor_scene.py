@@ -159,7 +159,7 @@ class ScenePage:
         su = self.su
         ui.at(x, y - 1, w, 1)
         ui.rule()
-        for i, (icon, word, tool) in enumerate((("pan", "Pick", "pointer"),
+        for i, (icon, word, tool) in enumerate((("pointer", "Pick", "pointer"),
                                                 ("stamp", "Stamp", "stamp"))):
             ui.at(x + 2 + i * TOOL, y + 1, TOOL, TOOL)
             if ui.tool(icon, "", {"id": "Tool " + word, "current": self.tool == tool}):
@@ -170,7 +170,7 @@ class ScenePage:
         cx += 5
         sw = _width("Snap") + 30
         ui.at(cx, y + 3, sw, 20)
-        ui.icon("layout")
+        ui.icon("grid")
         if ui.button("Snap", "normal", {"id": "Snap", "current": bool(se.snap)}):
             se.snap = not se.snap
         cx += sw + 4
