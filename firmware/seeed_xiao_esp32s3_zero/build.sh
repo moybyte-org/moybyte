@@ -63,6 +63,10 @@ moybyte_setup_idf esp32s3 \
 # its teardown, which links against the port's function.
 moybyte_patch_native_code_free
 #
+# An equal-length slice store moves no tail: every board takes it, and
+# tools/patch_slice_store.py carries the measurement.
+moybyte_patch_slice_store
+#
 # DECLINED moybyte_patch_repr_c -- unboxed 30-bit floats (#66). The lever is a
 #    CART INTERPRETER tax: REPR_A boxes every float RESULT in 16 bytes of heap,
 #    sakura measured ~73KB of that per frame, and the heap-wrap collect it

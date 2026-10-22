@@ -72,6 +72,9 @@ moybyte_patch_gc_run_hints
 # The gc meters (gc.pauses, gc.areas): every console board takes them, for
 # the PERF line's gc= field and the dev channel's `heapcaps` word.
 moybyte_patch_gc_meters
+# An equal-length slice store moves no tail: every board takes it, and
+# tools/patch_slice_store.py carries the measurement.
+moybyte_patch_slice_store
 moybyte_patch_gc_split_reserve
 
 # 2d) esp_lcd tx_color no-acquire (#66), applied to the IDF tree.

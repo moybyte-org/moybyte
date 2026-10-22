@@ -34,6 +34,8 @@
 #     assertions abort on the port's own patterns).
 #   - library.js: mp_hal_get_interrupt_char ccall passed 1 arg to a 0-arg C
 #     function (node-only path; assertions abort).
+#   - py/obj.h: an equal-length slice store moves no tail
+#     (tools/patch_slice_store.py, the VM patch every board takes).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,6 +125,8 @@ good = '"mp_hal_get_interrupt_char",\n                "number",\n               
 if bad in src:
     open(p, "w").write(src.replace(bad, good))
 PYEOF
+  # The VM patch every board takes: an equal-length slice store moves no tail.
+  "${PY}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}"
 
   # The moybyte variant (canonical copy lives in variant/, re-staged every build).
   mkdir -p "${PORT_DIR}/variants/moybyte"

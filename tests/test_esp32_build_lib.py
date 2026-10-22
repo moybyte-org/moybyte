@@ -780,6 +780,95 @@ def test_the_lfs_patch_is_idempotent_and_refuses_a_changed_line(tmp_path):
     assert g.read_text(encoding="utf-8") == changed
 
 
+# -- an equal-length slice store ------------------------------------------------
+
+def _slice_store_stock():
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import patch_slice_store
+    finally:
+        sys.path.pop(0)
+    return patch_slice_store
+
+
+def _obj_h(tmp_path, macro):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "obj.h"
+    f.write_text("// Note: dest and slice regions may overlap\n" + macro + "\n", encoding="utf-8")
+    return f, sh("moybyte_patch_slice_store", MPY_DIR=str(tmp_path),
+                 REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_slice_store_patch_is_idempotent_and_refuses_a_changed_macro(tmp_path):
+    pss = _slice_store_stock()
+    f, r = _obj_h(tmp_path, pss.STOCK)
+    assert r.returncode == 0, r.stderr
+    once = f.read_text(encoding="utf-8")
+    assert pss.MARKER in once and pss.STOCK not in once
+    r = sh("moybyte_patch_slice_store", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    changed = pss.STOCK.replace("(dest_len - end)", "((dest_len) - (end))")
+    g, r = _obj_h(tmp_path / "b", changed)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert pss.MARKER not in g.read_text(encoding="utf-8")
+
+
+_SLICE_HARNESS = r"""
+#include <stdio.h>
+#include <string.h>
+%s
+%s
+int main(void) {
+    int bad = 0;
+    for (size_t isz = 1; isz <= 4; isz *= 2) {
+        for (size_t len = 0; len <= 9; len++) {
+            for (long beg = 0; beg <= (long)len; beg++) {
+                for (long end = beg; end <= (long)len; end++) {
+                    for (size_t sl = 0; sl <= (size_t)(end - beg); sl++) {
+                        for (int alias = 0; alias < 2; alias++) {
+                            unsigned char a[64], b[64], src[64];
+                            for (int i = 0; i < 64; i++) { a[i] = b[i] = (unsigned char)(i * 7 + 1); src[i] = (unsigned char)(200 - i); }
+                            unsigned char *sa = alias ? a + (beg * isz) : src;
+                            unsigned char *sb = alias ? b + (beg * isz) : src;
+                            STOCK_no_grow(a, len, beg, end, sa, sl, isz);
+                            mp_seq_replace_slice_no_grow(b, len, beg, end, sb, sl, isz);
+                            if (memcmp(a, b, sizeof a)) { bad++; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    printf("%%d\n", bad);
+    return bad != 0;
+}
+"""
+
+
+def test_the_patched_slice_store_writes_what_the_stock_one_does(tmp_path):
+    """Every no-grow store of every length, slice and item size, the slice from
+    another buffer and from inside the destination: the patched macro leaves the
+    buffer byte for byte as the stock one does. The bounds are signed, as a
+    list's are (mp_bound_slice_t), and -Wextra holds the macro to the
+    sign-compare warning mpy-cross builds under."""
+    import shutil
+    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+    if cc is None:
+        pytest.skip("no C compiler")
+    pss = _slice_store_stock()
+    src = tmp_path / "h.c"
+    stock = pss.STOCK.replace("mp_seq_replace_slice_no_grow", "STOCK_no_grow")
+    src.write_text(_SLICE_HARNESS % (stock, pss.PATCHED), encoding="utf-8")
+    exe = tmp_path / "h"
+    c = subprocess.run([cc, "-std=c99", "-Wall", "-Wextra", "-Werror", "-o", str(exe), str(src)],
+                       capture_output=True, text=True)
+    assert c.returncode == 0, c.stderr
+    r = subprocess.run([str(exe)], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.strip() == "0", r.stdout
+
+
 def test_a_repr_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
     """The guard is the point: a silent no-op is a board quietly running boxed
     floats again, which costs a 130-175ms GC hitch -- and, since the ESP-NOW

@@ -210,6 +210,16 @@ moybyte_patch_gc_meters() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_census.py" "${MPY_DIR}" || exit 1
 }
 
+# An equal-length slice store (`buf[a:b] = row`) moves the slice and nothing
+# else: the stock no-grow path also memmoves the whole tail onto itself, a
+# pass over the rest of the buffer per store -- ~2.2 ms a row into a 153 KB
+# PSRAM bytearray on the P4. tools/patch_slice_store.py is the patch and the
+# measurement: all-or-nothing, idempotent, and every other store unchanged.
+moybyte_patch_slice_store() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}" || exit 1
+}
+
 # A 4 KB stdin ring, in the ESP32-P4's TCM, for a board whose serial is a
 # UART, and an RX ISR that wakes the reader. The port's stock ring is 260 bytes
 # and the UART has no flow control, so a heap collection landing while a long
