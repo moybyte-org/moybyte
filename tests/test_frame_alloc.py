@@ -419,6 +419,7 @@ def notes(loop, info):
     d0 = ws._frames_drawn
     info["notes_idle"] = _frames(loop, @WINDOW_MS@, False)
     d1 = ws._frames_drawn
+    info["notes_text0"] = len(ws.player._focus_editor.text())
     info["notes_typing"] = _typing(loop, @WINDOW_MS@)
     info["notes_idle_drawn"] = d1 - d0
     info["notes_typing_drawn"] = ws._frames_drawn - d1
@@ -603,8 +604,12 @@ def test_notes_is_the_run_being_measured(result):
     assert info["notes_error"] == "None", text[-3000:]
     assert info["notes_focused"] is True, text[-3000:]
     assert info["notes_saved"] is True, "the idle save never came"
-    # The typing window typed: a key every fourth frame reached the note.
-    assert info["notes_text"] > 20, info["notes_text"]
+    # The typing window typed, and every key it fed reached the note. The
+    # window is wall-clock, so how many keys fit depends on the machine.
+    keys = (len(info["notes_typing"]) + 3) // 4
+    assert keys >= 4, keys
+    assert info["notes_text"] - info["notes_text0"] == keys, (
+        info["notes_text0"], info["notes_text"], keys)
 
 
 def test_notes_idle_paints_nothing_and_a_key_paints_its_frame(result):
