@@ -20,9 +20,9 @@ own.
 """
 
 try:
-    from chrome import NAMES          # not palette: chrome is the device-safe home
+    from chrome import NAMES, MIN_TAP_MM   # not palette: chrome is the device-safe home
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import NAMES
+    from runtime.chrome import NAMES, MIN_TAP_MM
 
 try:
     import layout_base as _layout_base
@@ -38,6 +38,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
 # style, drawn in C (ui.frame); the letterbox bezel keeps the shadow's black.
 _SHADOW = NAMES["black"]
+
+# The edges a resize moves, as the bits of a zone's mask.
+RZ_L, RZ_R, RZ_T, RZ_B = 1, 2, 4, 8
+
+# The pointer's shape over a resize zone, by its mask.
+RZ_CURSOR = {RZ_L: "ew", RZ_R: "ew", RZ_T: "ns", RZ_B: "ns",
+             RZ_L | RZ_T: "nwse", RZ_R | RZ_B: "nwse",
+             RZ_R | RZ_T: "nesw", RZ_L | RZ_B: "nesw"}
 
 # Shell-process title strips (registered apps contribute TITLE through the app
 # registry instead; the player shows the live cart title). A theme without a
@@ -554,21 +562,76 @@ class WindowChrome:
         over = 4 * fs
         return (win.x + win.w - g, win.y + win.h - g, g + over, g + over)
 
+    def _rz_band(self):
+        """(outside, inside, corner) of a window's resize zones, in root
+        pixels: a few of the chrome's unit inside the frame, outside it what
+        takes the zone to MIN_TAP_MM across on this glass, and how far each
+        corner's zone reaches along its two edges."""
+        n = _layout_base.chrome_size(self._fs()) * _layout_base.unit()
+        inside = 2 * n
+        total = 5 * n
+        diag = getattr(self.ws, "panel_diagonal_in", None)
+        if diag:
+            full = self._root_canvas
+            r = _layout_base.render_scale()
+            gw, gh = full.w * r, full.h * r
+            per_mm = (gw * gw + gh * gh) ** 0.5 / (float(diag) * 25.4) / r
+            tap = int(MIN_TAP_MM * per_mm + 0.999)
+            if tap > total:
+                total = tap
+        return (total - inside, inside, max(total, 12 * n))
+
+    def _resize_edges(self, win, px, py):
+        """The edges (a mask of RZ_*) a press at (px, py) resizes `win` by:
+        within its zones, which straddle the frame (`_rz_band`) but for the
+        top's, which lies above it (the strip is the drag's), or on its
+        grip; 0 elsewhere, and for a full-screen, docked or minimised one."""
+        if win.saved is not None or win.docked is not None or win.minimized:
+            return 0
+        o, i, c = self._rz_band()
+        x0, y0 = win.x, win.y
+        x1, y1 = x0 + win.w, y0 + win.h
+        if not (x0 - o <= px < x1 + o and y0 - o <= py < y1 + o):
+            return 0
+        g = self._grip_hit_rect(win)
+        if g[0] <= px < g[0] + g[2] and g[1] <= py < g[1] + g[3]:
+            return RZ_R | RZ_B
+        m = 0
+        if px < x0 + i:
+            m = RZ_L
+        elif px >= x1 - i:
+            m = RZ_R
+        if py < y0:                       # the strip itself is the drag's
+            m |= RZ_T
+        elif py >= y1 - i:
+            m |= RZ_B
+        if m and not m & (RZ_T | RZ_B):
+            if py < y0 + c:
+                m |= RZ_T
+            elif py >= y1 - c:
+                m |= RZ_B
+        elif m and not m & (RZ_L | RZ_R):
+            if px < x0 + c:
+                m |= RZ_L
+            elif px >= x1 - c:
+                m |= RZ_R
+        return m
+
     def _live_resize_ok(self):
         """Live-body resize needs the rect-clipped stamp (see _blit_backdrop_cache);
         without it (the web RecordingLayer) the rubber-band outline preview stays."""
         return getattr(self._root_canvas, "blit_strip_rect", None) is not None
 
-    def _draw_resizing_window(self, win, focused, cw, ch):
+    def _draw_resizing_window(self, win, focused, x, y, cw, ch):
         """The 'real OS' resize feel (#58): during the gesture the window BODY
-        follows the grip -- frame + title strip + grip at the rubber size, the
+        follows the edge -- frame + title strip + grip at the rubber rect, the
         RETAINED content cropped into the new content rect (anchored top-left;
         grow reveals the panel field -- no re-layout mid-gesture, the real reflow
-        still lands on release via _resize_window). Draws via a temporary w/h
+        still lands on release via _resize_window). Draws via a temporary rect
         swap so _win_chrome/content_rect need no size plumbing."""
         sc = self._root_canvas
-        ow, oh = win.w, win.h
-        win.w, win.h = cw, ch
+        ox, oy, ow, oh = win.x, win.y, win.w, win.h
+        win.x, win.y, win.w, win.h = x, y, cw, ch
         try:
             cx, cy, cwid, chei = win.content_rect()
             if cwid > 0 and chei > 0:
@@ -576,7 +639,7 @@ class WindowChrome:
                 sc.blit_strip_rect(win.buf, cx, cy, cx, cy, cwid, chei)
             self._win_chrome(win, focused)
         finally:
-            win.w, win.h = ow, oh
+            win.x, win.y, win.w, win.h = ox, oy, ow, oh
 
     # -- the taskbar chips (open windows in the desktop bar) --------------------
 

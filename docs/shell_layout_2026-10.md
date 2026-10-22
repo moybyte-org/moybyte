@@ -215,6 +215,20 @@ flips the mode; the desk's own doors (its icons, PROJECTS) are desktop
 mode's. The desk icon column stays (owner,
 2026-10-13): a desk with icons and a launcher is the OS norm.
 
+**Moving and resizing a window** (owner, 2026-10-23). A window's strip
+drags it, and so does a full-screen window's row, from its head: the drag
+restores it to its last normal size (the size it opened at, where it opened
+full screen) under the finger, at the same point across its title, as on a
+desktop OS. Every edge and corner resizes, from a zone that straddles the
+frame (`WindowChrome._rz_band`): a few of the chrome's unit inside it, and
+outside it what takes the zone to `chrome.MIN_TAP_MM` across on the panel;
+the top's lies above the frame alone, the strip being the drag's, and no zone
+reaches a bar. The pointer shows the resize a zone starts (`cursor_shape`).
+A moving edge stops at the desk's edge and at the app's minimum
+(`_min_size`); the WM holds the press, so the content stays frozen through
+the gesture (`docs/surface_model_v1.md` §14.1) and relays out once on
+release.
+
 **Boards with one mode, and the hardware reason.** The T-Deck's one canvas IS
 the 320×240 game raster (`runtime/wm.py`), so there is no system canvas to
 put a window on. The Guition S3 has a 480×320 system canvas, but at #203's

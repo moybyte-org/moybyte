@@ -477,13 +477,15 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # surface geometry constants, none of which import back), so there is no cycle.
 # Same bare-or-package fallback as the surfaces above.
 try:
-    from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR, NAMES,
+    from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
+                        RESIZE_CURSORS, NAMES,
                         _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
                         _ICON, _ICON_ART, _nibble, chrome_scale_floor,
                         chrome_scale_choices, _cursor_delta,
                         _clamp_scroll, _in, _SPLASH_MS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
+                                RESIZE_CURSORS,
                                 NAMES, _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
                                 _ICON, _ICON_ART, _nibble,
                                 chrome_scale_floor, chrome_scale_choices,
@@ -4751,9 +4753,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # / a 320x240 system canvas this is exactly today's 1x cursor on the canvas.
         if self._splash_until is not None:
             return                        # no cursor over the boot logo
-        if self.pointer is not None and self.pointer.visible:
-            self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y,
-                            self.look.font_scale)
+        p = self.pointer
+        if p is not None and p.visible:
+            s = self.look.font_scale
+            shape = self.wm.cursor_shape()
+            if shape is None:
+                self.sys_canvas.spr(CURSOR, p.x, p.y, s)
+            else:                         # a resize's arrows, centred on it
+                img = RESIZE_CURSORS[shape]
+                self.sys_canvas.spr(img, p.x - img.w * s // 2, p.y - img.h * s // 2, s)
 
     def _glyph(self, kind, rect, c, cv=None, scale=None):
         # Draw a centered icon glyph in color `c`. Defaults to the GAME canvas (the

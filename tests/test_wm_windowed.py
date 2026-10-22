@@ -1062,10 +1062,11 @@ def _two_apps(tmp_path):
 
 
 def _open_point(ws, win, key, strip=False):
-    """A point of `win` (of its title strip, with `strip`) no window covers."""
+    """A point of `win` (of its title strip, with `strip`) no window covers
+    and no window's resize zone holds."""
     ys = [win.y + 3] if strip else range(win.y + 2, win.y + win.h - 2, 6)
     return next((x, y) for y in ys for x in range(win.x + 2, win.x + win.w - 2, 6)
-                if ws.wm._win_at(x, y) == key)
+                if ws.wm._win_at(x, y) == key and ws.wm._resize_zone_at(x, y) is None)
 
 
 def _shows_content(ws, win, rect):
@@ -3631,3 +3632,197 @@ def test_a_new_window_opens_clear_of_the_icon_column(tmp_path, key):
     right = max(max(b[0] + b[2], l[0] + l[2])
                 for _k, b, l, _t, _c in ws.wm._backdrop_layer._icon_rects())
     assert win.x >= right, (key, win.x, right)
+
+
+# -- every edge and corner resizes; a full-screen row's drag restores --------
+# (docs/shell_layout_2026-10.md §3, owner 2026-10-23)
+
+from runtime.wm_chrome import RZ_L, RZ_R, RZ_T, RZ_B   # noqa: E402
+
+_MASKS = (RZ_L, RZ_R, RZ_T, RZ_B, RZ_L | RZ_T, RZ_R | RZ_T,
+          RZ_L | RZ_B, RZ_R | RZ_B)
+
+
+def _desk(tmp_path):
+    """A 7-inch desk: the touch-sized zones and full screen's first open."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    use_theme(ws, "night", "dark")
+    return ws, _drv(ws)
+
+
+def _settled(tmp_path, kind="settings"):
+    ws, drv = _desk(tmp_path)
+    drv.frame(1 / 30)
+    ws.open_settings()
+    for _ in range(4):
+        drv.frame(1 / 30)
+    _quiesce(ws)
+    return ws, drv, ws.wm._wins[kind]
+
+
+def _zone_point(ws, win, mask):
+    """A point in the middle of `win`'s outside band on the edges `mask` names."""
+    o, _i, _c = ws.wm._rz_band()
+    x = (win.x - o // 2 if mask & RZ_L else win.x + win.w + o // 2 if mask & RZ_R
+         else win.x + win.w // 2)
+    y = (win.y - o // 2 if mask & RZ_T else win.y + win.h + o // 2 if mask & RZ_B
+         else win.y + win.h // 2)
+    return x, y
+
+
+def _resize_by(drv, x, y, dx, dy, steps=4):
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    for k in range(1, steps + 1):
+        drv.touch_drag(x + dx * k // steps, y + dy * k // steps)
+        drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+
+@pytest.mark.parametrize("mask", _MASKS)
+def test_every_edge_and_corner_resizes(tmp_path, mask):
+    ws, drv, win = _settled(tmp_path)
+    x0, y0, w0, h0 = win.x, win.y, win.w, win.h
+    px, py = _zone_point(ws, win, mask)
+    assert ws.wm._resize_zone_at(px, py) == ("settings", mask)
+    dx = 20 if mask & RZ_L else -20 if mask & RZ_R else 0     # inward: no clamp
+    dy = 20 if mask & RZ_T else -20 if mask & RZ_B else 0
+    _resize_by(drv, px, py, dx, dy)
+    assert ws.wm._resize is None
+    want = (x0 + (dx if mask & RZ_L else 0), y0 + (dy if mask & RZ_T else 0),
+            w0 - abs(dx), h0 - abs(dy))
+    assert (win.x, win.y, win.w, win.h) == want
+    assert (win.buf.w, win.buf.h) == win.content_rect()[2:]   # relaid out
+
+
+def test_the_strip_drags_and_the_band_above_it_resizes(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    assert ws.wm._resize_zone_at(win.x + win.w // 2, win.y + 2) is None
+    assert ws.wm._resize_zone_at(win.x + win.w // 2, win.y - 2) == ("settings", RZ_T)
+
+
+def test_a_resize_stops_at_the_minimum_and_at_the_desk(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    dx, dy, dw, dh = wm._desk_rect()
+    min_w, min_h = wm._min_size(win, dw, dh)
+    right, bottom = win.x + win.w, win.y + win.h
+    _resize_by(drv, *_zone_point(ws, win, RZ_L), 2000, 0)
+    assert (win.w, win.x + win.w) == (min_w, right)       # the right edge stays
+    _resize_by(drv, *_zone_point(ws, win, RZ_T), 0, 2000)
+    assert (win.h, win.y + win.h) == (min_h, bottom)
+    # pressed just inside the frame, so the edge would pass the glass's
+    _resize_by(drv, win.x + 1, win.y - 1, -2000, -2000)
+    assert (win.x, win.y) == (dx, dy)                     # the desk's edges
+    assert (win.x + win.w, win.y + win.h) == (right, bottom)
+    _resize_by(drv, win.x + win.w - 1, win.y + win.h - 1, 2000, 2000)
+    assert (win.x + win.w, win.y + win.h) == (dx + dw, dy + dh)
+
+
+def test_a_resize_keeps_the_content_frozen_and_relays_it_out_once(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    calls = [0]
+    layer = ws.wm._content_for("settings")
+    orig = layer.draw
+    layer.draw = lambda dt: (calls.__setitem__(0, calls[0] + 1), orig(dt))[1]
+    px, py = _zone_point(ws, win, RZ_L | RZ_B)
+    drv.touch(px, py)
+    drv.frame(1 / 30)
+    calls[0] = 0
+    for k in range(1, 5):
+        drv.touch_drag(px + 8 * k, py - 8 * k)
+        drv.frame(1 / 30)
+    assert calls[0] == 0, "the content re-rendered mid-resize"
+    drv.touch_up()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert calls[0] == 1, "the release relays the content out once"
+
+
+def test_the_pointer_shows_the_resize_it_would_start(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    p = ws.pointer
+    for mask, shape in ((RZ_R, "ew"), (RZ_B, "ns"), (RZ_L | RZ_T, "nwse"),
+                        (RZ_R | RZ_T, "nesw")):
+        p.x, p.y = _zone_point(ws, win, mask)
+        assert ws.wm.cursor_shape() == shape
+    p.x, p.y = win.x + win.w // 2, win.y + win.h // 2
+    assert ws.wm.cursor_shape() is None
+
+
+def _drag_row(drv, x, y, tx, ty, steps=4):
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    for k in range(1, steps + 1):
+        drv.touch_drag(x + (tx - x) * k // steps, y + (ty - y) * k // steps)
+        drv.frame(1 / 30)
+
+
+def test_a_drag_from_a_full_windows_row_restores_it_under_the_finger(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    w0, h0 = win.w, win.h
+    wm._toggle_max(win)
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert win.saved is not None
+    fw, row = win.w, wm._row_h()
+    x, y = 40, row // 2
+    assert wm._on_row_head(win, x, y)
+    _drag_row(drv, x, y, 300, 200)
+    assert win.saved is None and (win.w, win.h) == (w0, h0)
+    assert wm._drag is not None and wm._drag[0] == "settings"
+    # the finger holds the same point across the title, as far down the strip
+    assert 300 - win.x == x * w0 // fw
+    assert 200 - win.y == y * win.title_h // row
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert wm._drag is None and win.saved is None
+    assert ws.system.get("win_full", {}).get("settings") is False
+
+
+def test_a_window_that_opened_full_restores_at_its_designed_size(tmp_path):
+    ws, drv = _desk(tmp_path)
+    drv.frame(1 / 30)
+    ws.system.set("win_full", {"settings": True})
+    ws.open_settings()
+    for _ in range(4):
+        drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    assert win.saved is not None
+    _sx, _sy, w, h = win.saved                          # the size it opened at
+    _drag_row(drv, 40, ws.wm._row_h() // 2, 400, 300)
+    assert win.saved is None and (win.w, win.h) == (w, h)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+
+def test_a_bar_is_never_a_resize_zone(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    dx, dy, _dw, _dh = wm._desk_rect()
+    wm._move_window(win, win.x, dy)                    # right under the top bar
+    assert wm._resize_zone_at(win.x + win.w // 2, dy - 2) is None
+
+
+@pytest.mark.parametrize("how", ["restore", "left", "top_right"])
+def test_after_a_restore_or_a_resize_the_glass_is_a_full_repaint(tmp_path, how):
+    ws, drv, win = _settled(tmp_path)
+    if how == "restore":
+        ws.wm._toggle_max(win)
+        for _ in range(3):
+            drv.frame(1 / 30)
+        _drag_row(drv, 40, ws.wm._row_h() // 2, 300, 200)
+        drv.touch_up()
+        drv.frame(1 / 30)
+    else:
+        mask = RZ_L if how == "left" else RZ_R | RZ_T
+        _resize_by(drv, *_zone_point(ws, win, mask), 30 if how == "left" else -40,
+                   0 if how == "left" else 40)
+    _quiesce(ws)
+    for _ in range(3):
+        drv.frame(1 / 30)
+    ring = _Ring(ws, 1)
+    seen = bytes(ws.sys_canvas._buf)
+    assert seen == ring.full(drv)[0]

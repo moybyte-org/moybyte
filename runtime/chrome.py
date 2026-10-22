@@ -111,6 +111,47 @@ CURSOR = _from_ascii([
     "OFFFFFO.", "OFFFFFFO", "OFFFOOO.", "OFOOFO..", "OO..OFO.", "O...OFO.", "....OO..",
 ], {"O": 0, "F": 7}, ".")
 
+
+
+def _arrow_sprite(cells, w, h):
+    """A double-headed arrow from its fill cells: white, outlined black on
+    every side and corner, so it reads on a pixel of any colour."""
+    fill = set(cells)
+    pix = []
+    for y in range(h):
+        for x in range(w):
+            if (x, y) in fill:
+                pix.append(7)
+            elif any((x + i, y + j) in fill for i in (-1, 0, 1) for j in (-1, 0, 1)):
+                pix.append(0)
+            else:
+                pix.append(-1)
+    return _Blit(w, h, pix, -1)
+
+
+def _resize_cursors():
+    n = 13
+    m = n // 2
+    e = n - 2                        # the far tip's row and column
+    ew = [(x, m) for x in range(1, n - 1)]
+    for d in range(4):               # a solid head at each end
+        for j in range(-d, d + 1):
+            ew += [(1 + d, m + j), (e - d, m + j)]
+    ns = [(y, x) for x, y in ew]
+    nwse = [(i, i) for i in range(1, n - 1)]
+    for x in range(1, n - 1):
+        for y in range(1, n - 1):
+            if x + y <= 6 or x + y >= 2 * e - 4:
+                nwse.append((x, y))
+    nesw = [(n - 1 - x, y) for x, y in nwse]
+    return {k: _arrow_sprite(c, n, n)
+            for k, c in (("ew", ew), ("ns", ns), ("nwse", nwse), ("nesw", nesw))}
+
+
+# The pointer over a window's resize zone (WindowedWM.cursor_shape), hotspot at
+# its centre.
+RESIZE_CURSORS = _resize_cursors()
+
 NAMES = {
     "black": 0, "dark_blue": 1, "dark_purple": 2, "dark_green": 3, "brown": 4,
     "dark_grey": 5, "light_grey": 6, "white": 7, "red": 8, "orange": 9,

@@ -199,6 +199,11 @@ class FullscreenStackWM:
         windows (`WindowedWM.band_span`)."""
         return None
 
+    def cursor_shape(self):
+        """The pointer's shape where it is not the arrow; this WM resizes
+        nothing (`WindowedWM.cursor_shape`)."""
+        return None
+
     def floor(self):
         """The back-stack depth of this mode's root when nothing is beneath
         it. The home's X shows when the stack is deeper; here the home is

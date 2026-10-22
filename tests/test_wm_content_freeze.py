@@ -230,10 +230,11 @@ def test_drag_release_restarts_the_backdrop_restore(tmp_path):
 
 def test_a_held_press_on_a_full_windows_row_head_keeps_the_freeze(tmp_path):
     """A full-screen window's row head (its icon and title, which the WM
-    draws) is chrome, as a strip is: a press held and moved there reaches no
-    content, so the focused content stays frozen while it is held and on its
-    release (its press edge marks the frame, as every press does). A press
-    in the content renders live again."""
+    draws) is chrome, as a strip is: a press held there (short of the drag
+    that restores the window) reaches no content, so the focused content
+    stays frozen while it is held and on its release (its press edge marks
+    the frame, as every press does). A press in the content renders live
+    again."""
     from runtime import moy_input as _mi
     ws, drv, win = _settled_settings(tmp_path)
     wm = ws.wm
@@ -260,7 +261,7 @@ def test_a_held_press_on_a_full_windows_row_head_keeps_the_freeze(tmp_path):
     drv._buttons(_mi.PB_PRIMARY, False)          # a finger: no mouse button held
     drv.frame(0.0)                               # the press edge: a dirty frame
     calls[0] = 0
-    for dx in (6, 12, 18, 12):
+    for dx in (1, 2, 3, 2):                      # held, short of a drag
         drv.touch_drag(x + dx, y)
         drv.frame(0.0)
     drv.touch_up()

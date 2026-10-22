@@ -25,8 +25,9 @@ Picotron-style (owner direction, 2026-07-08):
     home's X brings them back;
   * every process pushed above it (the home window / Editor / Settings / update /
     a running cart) is a floating WINDOW: a WM-drawn TITLE STRIP (title + minimize /
-    maximize / close), a border + drop shadow, draggable by the strip and
-    resizable by the bottom-right grip;
+    maximize / close), a border + drop shadow, draggable by the strip (a
+    full-screen one by its row, which restores it) and resizable from every
+    edge and corner;
   * a window's body is PURELY the app: in windowed mode the zoned bar suppresses
     its OS widgets (ws.windowed_chrome -- see bar_layer.py), so
     an app window's own bar row is just its toolbar (the Editor's tab ladder),
@@ -85,7 +86,7 @@ try:
     from widgets import _Blit, _in, _ticks_ms, _ticks_diff
     import moy_glass as _glass        # the surface table (docs/surface_model_v1.md §15)
     from wm_desk import _BackdropLayer
-    from wm_chrome import WindowChrome, _SHADOW
+    from wm_chrome import WindowChrome, _SHADOW, RZ_L, RZ_R, RZ_T, RZ_B, RZ_CURSOR
     from moy_spine import EDITOR
     from shell_layout import WIDGETS as _LAYOUT_WIDGETS
     import layout_base as _layout_base
@@ -96,7 +97,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import _Blit, _in, _ticks_ms, _ticks_diff
     from runtime import glass_binding as _glass
     from runtime.wm_desk import _BackdropLayer
-    from runtime.wm_chrome import WindowChrome, _SHADOW
+    from runtime.wm_chrome import (WindowChrome, _SHADOW, RZ_L, RZ_R, RZ_T, RZ_B,
+                                   RZ_CURSOR)
     from runtime.moy_spine import EDITOR
     from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
     from runtime import layout_base as _layout_base
@@ -476,7 +478,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._root_marks = None       # ui.marks' active before a window's install
         self._installed = None        # the window whose layouts are installed
         self._drag_armed = None       # (kind, ox, oy, wx, wy) press-in-strip origin
-        self._resize = None           # (kind, ox, oy, ow, oh, cur_w, cur_h) in-flight
+        self._resize = None           # in flight: (kind, press x, press y, start w,
+                                      # start h, rubber w, rubber h, edges (RZ_*),
+                                      # start x, start y, rubber x, rubber y)
         self._ctx_switching = False   # reentrancy guard for internal _relayout runs
         self._in_draw = False         # the windows draw: a relayout waits for its end
         self._relayout_owed = False
@@ -1141,32 +1145,108 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win._buf_stale = True         # blank until a live render/_prewarm fills it
 
     def _resize_window(self, win, w, h):
-        """Apply a new OUTER size (resize grip release / maximize): clamp to a
+        """Apply a new OUTER size (a resize's release / a restore): clamp to a
         usable minimum, then rebuild the content buffer + layout context so the
         app reflows to the new window size."""
-        fs = self._fs()
         dx, dy, max_w, max_h = self._desk_rect()
         full = self._root_canvas
-        # A right or bottom bar is a wall the grip stops at.
+        # A right or bottom bar is a wall a resize stops at.
         if dx + max_w < full.w:
             max_w = max(1, min(max_w, dx + max_w - win.x))
         if dy + max_h < full.h:
             max_h = max(1, min(max_h, dy + max_h - win.y))
-        min_w = 160 * fs
-        min_h = 90 * fs + win.title_h
-        # Min-size convention (ui.py + the app API): a registered app declares
-        # its resize minimum (fs-scaled) at register_app time -- the minimums
-        # live with the app, not in a WM if-ladder. The cap keeps the same apps
-        # usable on a 320x240 windowed host.
-        ms = self.ws.app_min_size(win.kind) \
-            if hasattr(self.ws, "app_min_size") else None
-        if ms is not None:
-            min_w = min(max_w, ms[0] * fs)
-            min_h = min(max_h, ms[1] * fs)
+        min_w, min_h = self._min_size(win, max_w, max_h)
         win.w = max(min_w, min(w, max_w))
         win.h = max(min_h, min(h, max_h))
         self._build_content(win)
         self.ws._dirty = True
+
+    def _min_size(self, win, max_w, max_h):
+        """The smallest outer size `win` takes. Min-size convention (ui.py +
+        the app API): a registered app declares its resize minimum
+        (fs-scaled) at register_app time -- the minimums live with the app,
+        not in a WM if-ladder. The cap at (max_w, max_h) keeps the same apps
+        usable on a 320x240 windowed host."""
+        fs = self._fs()
+        ms = self.ws.app_min_size(win.kind) \
+            if hasattr(self.ws, "app_min_size") else None
+        if ms is not None:
+            return (min(max_w, ms[0] * fs), min(max_h, ms[1] * fs))
+        return (160 * fs, 90 * fs + win.title_h)
+
+    def _rubber(self, win, edges, wx, wy, ow, oh, ddx, ddy):
+        """The rect (x, y, w, h) a resize by (ddx, ddy) of the window that
+        stood at (wx, wy, ow, oh) gives it: each moving edge stops at the
+        desk's edge and where the window would be smaller than its minimum."""
+        dx, dy, dw, dh = self._desk_rect()
+        min_w, min_h = self._min_size(win, dw, dh)
+        x0, y0, x1, y1 = wx, wy, wx + ow, wy + oh
+        if edges & RZ_L:
+            x0 = min(x1 - min_w, max(dx, x0 + ddx))
+        elif edges & RZ_R:
+            x1 = max(x0 + min_w, min(dx + dw, x1 + ddx))
+        if edges & RZ_T:
+            y0 = min(y1 - min_h, max(dy, y0 + ddy))
+        elif edges & RZ_B:
+            y1 = max(y0 + min_h, min(dy + dh, y1 + ddy))
+        return (x0, y0, x1 - x0, y1 - y0)
+
+    def _resize_zone_at(self, px, py):
+        """(key, edges) of the window whose resize zone holds (px, py), the
+        top one first; None where none does, a window above holds the point
+        (its strip buttons included), or it is off the desk (a bar's)."""
+        dx, dy, dw, dh = self._desk_rect()
+        if not (dx <= px < dx + dw and dy <= py < dy + dh):
+            return None
+        order = self._order
+        for i in range(len(order) - 1, -1, -1):
+            key = order[i]
+            win = self._wins.get(key)
+            if win is None or win.minimized or win.docked is not None:
+                continue
+            inside = (win.x <= px < win.x + win.w
+                      and win.y <= py < win.y + win.h)
+            if inside and (win.saved is not None
+                           or self._strip_button_hit(win, px, py) is not None):
+                return None
+            m = self._resize_edges(win, px, py)
+            if m:
+                return (key, m)
+            if inside:
+                return None
+        return None
+
+    def cursor_shape(self):
+        """The pointer's shape: a resize's arrows over a window's resize
+        zone and while one is in flight (`RZ_CURSOR`), else None."""
+        g = self._resize
+        if g is not None:
+            return RZ_CURSOR.get(g[7])
+        p = self.ws.pointer
+        if self.mode != "desktop" or p is None:
+            return None
+        hit = self._resize_zone_at(p.x, p.y)
+        return RZ_CURSOR.get(hit[1]) if hit is not None else None
+
+    def _restore_under(self, win, px, py):
+        """A full-screen window restored for a drag from its row at
+        (px, py): its last normal size (the size it opened at, where it
+        opened full), the press at the same point across its title and as
+        far down its strip. Returns where it stands, before the desk
+        clamps it."""
+        _sx, _sy, w, h = win.saved
+        row = self._row_h()
+        fx = (px - win.x) * w // max(1, win.w)
+        fy = (py - win.y) * win.title_h // max(1, row)
+        win.saved = None
+        win.row = 0
+        x, y = px - fx, py - fy
+        win.x, win.y = x, y
+        self._resize_window(win, w, h)
+        self._prewarm(win)
+        self._remember_full(win)
+        self._move_window(win, x, y)
+        return x, y
 
     # -- full screen (docs/media/look_2026-10/MAXIMISE_VARIANTS.md, V2) -------
     #
@@ -1947,13 +2027,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = self._wins.get(g[0])
         if win is None:
             return None
-        w, h = win.w, win.h
+        x, y, w, h = win.x, win.y, win.w, win.h
         # Gesture tuples carry the window REGISTRY key (g[0]); every
         # gesture-vs-window test below resolves through _wins identity.
         if g is self._resize:
-            w = max(w, self._resize[5])
-            h = max(h, self._resize[6])
-        return self._pad_extent(win, win.x, win.y, w, h)
+            rx, ry, rw, rh = g[10], g[11], g[5], g[6]
+            x1 = max(x + w, rx + rw)
+            y1 = max(y + h, ry + rh)
+            x, y = min(x, rx), min(y, ry)
+            w, h = x1 - x, y1 - y
+        return self._pad_extent(win, x, y, w, h)
 
     def _seed_gesture_hist(self):
         """Prime the damage history at gesture START: every physical buffer
@@ -2011,17 +2094,17 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = self._wins.get(g[0]) if g is not None else None
         bx0 = by0 = bx1 = by1 = 0
         if win is not None:
-            bw, bh = win.w, win.h
+            wx, wy, bw, bh = win.x, win.y, win.w, win.h
             if g is self._resize \
                     and self._live_resize_ok() and win.kind != "desktop":
-                bw, bh = self._resize[5], self._resize[6]
+                wx, wy, bw, bh = g[10], g[11], g[5], g[6]
             # The rows the depth's rounded corners leave partly uncovered are
             # restored with the margin: only the square middle is opaque.
             r = self._win_radius(win)
-            bx0 = max(x0, win.x)
-            by0 = max(y0, win.y + r)
-            bx1 = min(x1, win.x + bw)
-            by1 = min(y1, win.y + bh - r)
+            bx0 = max(x0, wx)
+            by0 = max(y0, wy + r)
+            bx1 = min(x1, wx + bw)
+            by1 = min(y1, wy + bh - r)
         if win is None or bx0 >= bx1 or by0 >= by1:
             stamp(self._backdrop, 0, 0, x0, y0, x1 - x0, y1 - y0)
         else:
@@ -2570,7 +2653,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if cover < 0:                              # the bar is covered with the desk
             self._draw_taskbar_chips(quiet=self._chrome_quiet)
         if self._resize is not None:               # rubber-band resize preview
-            kind, _ox, _oy, _ow, _oh, cw, chh = self._resize
+            g = self._resize
+            kind, cw, chh, rx, ry = g[0], g[5], g[6], g[10], g[11]
             win = self._wins.get(kind)
             # App windows resize LIVE-BODY (drawn in _draw_app_window, #58 "real
             # OS" feel); the outline preview remains for the game window (its
@@ -2579,7 +2663,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # canvases without the rect stamp (the web RecordingLayer).
             if win is not None and (win.kind == "desktop"
                                     or not self._live_resize_ok()):
-                self._root_canvas.rectb(win.x, win.y, cw, chh,
+                self._root_canvas.rectb(rx, ry, cw, chh,
                                         self.ws.theme_colors["accent"])
 
     def _direct_render(self, win, dt):
@@ -2631,7 +2715,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
           draw -- frame() clears it AFTER -- so a False here means no input or
           state handler reported a visible change this frame.
         - No pointer DOWN or CLICK was live this frame or last, unless the
-          press is the WM's (`_grab`: a strip, a grip, a full-screen row's
+          press is the WM's (`_grab`: a strip, a resize zone, a full-screen row's
           head), which no content is handed while it is held. The drag-driven
           handlers (paint strokes, map pans, block drags, kinetic scrolls)
           mutate content WITHOUT marking dirty -- they predate the #44 gate and
@@ -2697,10 +2781,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if self._resize is not None \
                 and self._wins.get(self._resize[0]) is win \
                 and self._live_resize_ok():
-            # Live-body resize: the frame follows the grip, content crops.
+            # Live-body resize: the frame follows the edge, content crops.
             self._win_touched = True
-            self._draw_resizing_window(win, focused,
-                                       self._resize[5], self._resize[6])
+            g = self._resize
+            self._draw_resizing_window(win, focused, g[10], g[11], g[5], g[6])
             return
         moving = ((self._drag is not None
                    and self._wins.get(self._drag[0]) is win)
@@ -2985,22 +3069,22 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._grab = 0                  # a new press: whose it is is settled below
         # An in-flight RESIZE follows the pointer; released -> apply the new size.
         if self._resize is not None:
-            kind, ox, oy, ow, oh, _cw, _ch = self._resize
+            kind, ox, oy, ow, oh, cw, ch, edges, wx, wy, rx, ry = self._resize
             win = self._wins.get(kind)
             if win is None:
                 self._resize = None
             elif p.down:
-                fs = self._fs()
-                nw = max(160 * fs, ow + (px - ox))
-                nh = max(90 * fs + win.title_h, oh + (py - oy))
-                self._resize = (kind, ox, oy, ow, oh, nw, nh)
+                rx, ry, cw, ch = self._rubber(win, edges, wx, wy, ow, oh,
+                                              px - ox, py - oy)
+                self._resize = (kind, ox, oy, ow, oh, cw, ch, edges, wx, wy, rx, ry)
                 # Attributed like _move_window (§3): keeps_animating's gesture
                 # leg owns the repaint; _surface_signals touches the sids.
                 return True
             else:
                 self._resize = None
                 win.saved = None                   # a manual size clears "maximized"
-                self._resize_window(win, _cw, _ch)
+                win.x, win.y = rx, ry
+                self._resize_window(win, cw, ch)   # the one relayout
                 return True
         # An in-flight DRAG follows the pointer until release.
         if self._drag is not None:
@@ -3041,6 +3125,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._drag_armed = None
             elif abs(px - ox) >= _DRAG_MIN or abs(py - oy) >= _DRAG_MIN:
                 self._drag_armed = None
+                if win.saved is not None:          # a full-screen row: restore
+                    wx, wy = self._restore_under(win, ox, oy)
                 self._drag = (kind, ox - wx, oy - wy)
                 self._seed_gesture_hist()   # #58: pre-move footprint, both buffers
                 self._move_window(win, px - (ox - wx), py - (oy - wy))
@@ -3059,6 +3145,21 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 if _in(px, py, rect):
                     self._chip_tap(key)
                     return True
+        # Every edge and corner resizes, from a zone that straddles the frame.
+        # The WM holds that press (_grab): no window's content captures it.
+        hit = self._resize_zone_at(px, py) if click else None
+        if hit is not None:
+            key, edges = hit
+            win = self._wins[key]
+            if key != self._focus:
+                self._move_focus(key)
+                ws._dirty = True
+            self._grab = 1
+            self._held_in = None
+            self._resize = (key, px, py, win.w, win.h, win.w, win.h, edges,
+                            win.x, win.y, win.x, win.y)
+            self._seed_gesture_hist()   # #58: pre-resize footprint, both buffers
+            return True
         # A press held since it went down in the focused window's content --
         # a finger's, the left button's or the middle button's -- stays that
         # window's wherever the pointer goes, its release included, as a
@@ -3103,17 +3204,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     if focused:
                         self._move_focus(None)
                 return True
-            if win.saved is None and _in(px, py, self._grip_hit_rect(win)):
-                self._grab = 1
-                self._resize = (key, px, py, win.w, win.h, win.w, win.h)
-                self._seed_gesture_hist()   # #58: pre-resize footprint, both buffers
-                return True
-            if win.saved is None and py < win.y + 1 + win.title_h:
+            if (win.saved is None and py < win.y + 1 + win.title_h) \
+                    or self._on_row_head(win, px, py):
+                # A strip, or a full-screen row's head, which a drag restores.
                 self._grab = 1
                 self._drag_armed = (key, px, py, win.x, win.y)
-                return True
-            if self._on_row_head(win, px, py):
-                self._grab = 1
                 return True
         elif not focused:
             return True         # hovers/drags only reach the focused window

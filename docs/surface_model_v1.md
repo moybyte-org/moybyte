@@ -723,7 +723,7 @@ content draw is skipped and the retained `win.buf` stamp presents it instead.
   activity renders live. The check reads BOTH frames because handlers consume
   `p.click` in place — a tap that opens a prompt zeroes it before the draw sees
   it, and the previous frame's edge is still in `ws._last_ptr`. A press that
-  lands on chrome — a strip, its buttons, the resize grip, a full-screen
+  lands on chrome — a strip, its buttons, a resize zone, a full-screen
   window's row head — is the WM's (`_grab`): no content is handed it, its
   drag or its release, so it waives the check. A position/visibility-only change is inert:
   no content surface draws hover feedback (audited 2026-07-27), and anything
