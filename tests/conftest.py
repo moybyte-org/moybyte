@@ -245,3 +245,24 @@ def _cover_budget_unbounded(monkeypatch):
     except ImportError:
         return
     monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", COVER_SLICE_UNBOUNDED)
+
+
+@pytest.fixture(autouse=True)
+def _webhost_switched_off():
+    """The kernel's webhost and its switch are one per process (native/moy_net),
+    as they are one per board, and a host's `handle_http` keeps whatever store,
+    pin and routes a switch still on its port was configured with ("never
+    re-point a kernel host that serves"). A test that left the switch joining,
+    serving or in its goodbye window handed a later test on the worker another
+    host's pin and routes (a 403 for a pinless /gpio batch, a 404 for
+    /console.json), or a 503 `closing`. After each test the switch is off and
+    the host stopped now, as a fresh process has them; a process that never
+    loaded the library has neither."""
+    yield
+    nb = sys.modules.get("runtime.net_binding")
+    if nb is None or nb._LIB[0] is None:
+        return
+    nb.wc_off()
+    nb.web_stop()
+    nb.web_events()
+    nb.wc_poll()                 # a switch in its goodbye sees the host stopped
