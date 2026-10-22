@@ -957,7 +957,9 @@ def _frames(ws, app, n=40):
     for _ in range(n):
         ws._dirty = True
         ws.frame(1 / 30)
-        if app.phase not in ("checking", "licence_fetch", "connecting", "getting"):
+        # ...and the covers the shelf fetches once it shows.
+        if app.phase not in ("checking", "licence_fetch", "connecting", "getting") \
+                and not app._covers:
             ws._dirty = True
             ws.frame(1 / 30)
             return
@@ -1567,6 +1569,26 @@ def test_a_cover_that_does_not_come_leaves_the_card_as_it_is(tmp_path, fault):
         assert ("cover" in app.rows[i]["cart"]) == (cover is not None)
         views.append(_canvas_rows(ws.sys_canvas, app._ui.box(app._card_id(app.rows[i]))))
     assert views[0] == views[1]
+
+
+def test_the_shelf_shows_before_its_covers_come(tmp_path):
+    """The shelf is up the frame its index is read; the covers follow, one a
+    frame, under the radio's lease, which goes once the last has landed."""
+    rock = (_VECTORS / "rgb_filter2.png").read_bytes()
+    repo, _jet, net = _covered_shelf((rock, rock))
+    ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
+    ws.open_app(app)
+    for _ in range(40):
+        ws._dirty = True
+        ws.frame(1 / 30)
+        if app.phase != "checking":
+            break
+    assert app.phase == "list"
+    assert len(app._covers) == 2 and "carts" in ws.leases.holders()
+    assert not any(app.thumbs.values())
+    _frames(ws, app)
+    assert not app._covers and "carts" not in ws.leases.holders()
+    assert sum(1 for v in app.thumbs.values() if v) == 2
 
 
 def test_a_second_check_fetches_only_the_covers_it_has_not_drawn(tmp_path):

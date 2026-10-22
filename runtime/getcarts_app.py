@@ -395,6 +395,7 @@ class GetCartsAppLayer(ListShellApp):
             fresh = (self.fetched_at is not None
                      and _ticks_diff(_ticks_ms(), self.fetched_at) < REFRESH_MS)
             if self.carts and fresh:
+                self._covers = self._covers_to_fetch(self.carts)
                 self._build_rows()
                 self._go("list")
                 if self.rows:
@@ -508,10 +509,13 @@ class GetCartsAppLayer(ListShellApp):
             _ci._log("recover failed: %s" % exc)
 
     def _pump(self):
-        """The BUSY phases' slice of work, one per drawn frame."""
+        """The BUSY phases' slice of work, one per drawn frame; between them
+        the shelf's covers."""
         if self.phase == "pick":
             self._poll_pick()
         if self.phase not in BUSY:
+            if self._covers and self.phase != "pick":
+                self._pump_covers()
             return
         if not self.armed:
             self.armed = True         # this frame shows the screen; work next frame
@@ -584,33 +588,46 @@ class GetCartsAppLayer(ListShellApp):
             self._step += 1
             if self._step - 1 < len(self.indexes):
                 return
-            self._covers = self._covers_to_fetch()
-            if self._covers:
-                return
-        if self._covers:
-            if not self._fetch_cover(net, self._covers[-1]):
-                return
-            self._covers.pop()
-            if self._covers:
-                return
-        self._work = None
-        self._release()
         if not self._found and self.unreached:
+            self._release()
             self._go("nomemory" if self.starved else "unreached")
             return
         self.carts = self._found
         self._found = []
         self.fetched_at = _ticks_ms()
+        self._covers = self._covers_to_fetch(self.carts)
+        if not self._covers:
+            self._work = None
+            self._release()
         self._build_rows()
         self._go("list")
         if self.rows:
             self._focus = self._card_id(self.cur if self.cur in self.rows else self.rows[0])
 
-    def _covers_to_fetch(self):
+    def _pump_covers(self):
+        """The shelf's covers, fetched after it shows rather than before: a
+        step of the next one each drawn frame while any is owed, a card
+        drawing its cover from the frame it lands in."""
+        self._hold()
+        try:
+            done = self._fetch_cover(self._inst.net(), self._covers[-1])
+        except Exception as exc:  # noqa: BLE001 -- a cover never takes the shelf down
+            _ci._log("%r" % (exc,))
+            done = True
+        if done:
+            self._covers.pop()
+            self._damage.all()
+        if self._covers:
+            self._damage.again()
+        else:
+            self._work = None
+            self._release()
+
+    def _covers_to_fetch(self, carts):
         side = self.layout.side
         out = []
         seen = {}
-        for c in self._found:
+        for c in carts:
             ref = c.get("cover")
             if ref is None or ref["sha256"] in seen:
                 continue
