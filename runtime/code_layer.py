@@ -46,6 +46,16 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
+try:
+    from moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
+except ImportError:  # pragma: no cover - host fallback
+    from runtime.moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
+try:
+    from editors_code import TextMouse
+    from ticks import _ticks_ms
+except ImportError:  # pragma: no cover - host fallback
+    from runtime.editors_code import TextMouse
+    from runtime.ticks import _ticks_ms
 
 # The cart API's names, once (see runtime/cart_verbs.py) -- the syntax
 # highlighter's builtin class is derived from them below.
@@ -344,6 +354,9 @@ class CodeLayer:
         self._tools_open = False      # the tool palette row is shown
         self._select_mode = False     # SELECT mode: a code drag extends the selection
         self._sel_drag = False        # a selection drag is in progress this gesture
+        self._mouse = TextMouse()     # a mouse's clicks, selection and autoscroll
+        self._mid = False             # the middle button was held last frame
+        self._px = self._py = 0       # the pointer as handle_pointer last saw it
         self._gutter = True           # the line-number gutter, on by default (look 2026-10, D-03.1)
         self._find_open = False       # the find bar is shown + focused
         self._find_q = ""             # the find query being typed
@@ -401,11 +414,17 @@ class CodeLayer:
     # -- Layer facets --------------------------------------------------------
 
     def draw(self, dt):
+        ws = self.ws
+        if self._mouse.armed and ws.editor is not None:
+            self._mouse.autoscroll(ws.editor, self._px, self._py, dt, ws.code_layout.lh)
         # The code and its popup are laid out in the `mono` font's cells, so
         # they print in it (docs/theming_2026-09.md §4.7).
         was = _ui_draw.print_font(_ui_draw.font("mono")[0])
         try:
             self._draw_code()
+            if self._mouse.armed:
+                _ui_draw.autoscroll_mark(ws.sys_canvas, ws.theme_colors, self._mouse.anchor_x,
+                                         self._mouse.anchor_y, ws.look.effective_font_scale())
         finally:
             _ui_draw.print_font(was)
         # The unified zoned bar (Stage 4 rollout): the tab ladder + PLAY + X (no SAVE,
@@ -464,8 +483,44 @@ class CodeLayer:
         cv.print(foot, x + 4 * fs, y + h - 11 * fs, th["ink_dim"], 1)
 
     def handle_input(self, i):
+        if i.last_key or i.any_pressed():
+            self._mouse.stop()         # any key ends a latched autoscroll
+        if self._mouse.armed:
+            self.ws.mark_dirty()       # an autoscroll moves the code on its own
+        self._wheel(i)
         self._editor_input()           # keyboard is in text mode here
         return True
+
+    def _wheel(self, i):
+        """The wheel scrolls the code three lines a notch, Shift's sideways."""
+        wy, wx = getattr(i, "wheel_y", 0), getattr(i, "wheel_x", 0)
+        ed = self.ws.editor
+        if not (wx or wy) or ed is None:
+            return
+        if getattr(i, "mods", 0) & _SHIFT:
+            wx, wy = wx + wy, 0
+        ed.scroll(3 * wy, 3 * wx)
+        self.ws.mark_dirty()
+
+    def stop_autoscroll(self):
+        self._mouse.stop()
+
+    def autoscrolling(self):
+        """A middle-button autoscroll runs: the frames must keep coming."""
+        return self._mouse.armed
+
+    def _middle(self, px, py, lay):
+        """The middle button's edges over the code (`TextMouse.middle`)."""
+        mid = bool(getattr(self.ws.input, "pointer_buttons", 0) & _PB_MIDDLE)
+        if mid != self._mid and (not mid or _in(px, py, lay.code_area())):
+            self._mouse.middle(px, py, mid)
+            self.ws.mark_dirty()
+        self._mid = mid
+
+    def _cell(self, px, py, lay, ed):
+        """The document cell (row, col) under (px, py) in the code area."""
+        col = (px - self._text_x0(lay, ed)) // lay.cell
+        return ed.top + (py - lay.y0) // lay.lh, ed.left + max(0, col)
 
     def handle_pointer(self, px, py, click):
         # The code editor is responsive (#39 step 2): it draws on the SYSTEM canvas at
@@ -517,7 +572,24 @@ class CodeLayer:
             if 0 <= i < len(syms):
                 self._feed_char(ord(syms[i]))            # routes to find field or editor
             return True
-        if ed is not None and _in(px, py, lay.code_area()):
+        self._px, self._py = px, py    # the pointer in this layer's space
+        if ed is not None:
+            self._middle(px, py, lay)
+        if ed is not None and ws.pointer.hovers and (self._mouse.dragging or (
+                click and _in(px, py, lay.code_area()))):
+            # A mouse: the press places the caret (Shift extends, a second
+            # and third press take the word and the line) and its drag selects.
+            row, col = self._cell(px, py, lay, ed)
+            if click:
+                self._mouse.press(ed, row, col, bool(getattr(ws.input, "mods", 0) & _SHIFT),
+                                  _ticks_ms())
+            elif ws.pointer.down:
+                self._mouse.drag(ed, row, col)
+                ed._scroll()
+            else:
+                self._mouse.release(ed)
+            ws.mark_dirty()
+        elif ed is not None and _in(px, py, lay.code_area()):
             if self._select_mode:
                 self._select_pointer(px, py, click, lay, ed)   # drag = extend selection
             else:
@@ -584,6 +656,10 @@ class CodeLayer:
             elif k == 0x16:
                 ws.history.code_burst_open()   # #111: a paste joins the typing burst
                 if ed.paste():
+                    self._recheck_err()
+            elif k == 0x09 and getattr(ws.input, "mods", 0) & _SHIFT:
+                ws.history.code_burst_open()   # Shift+Tab outdents, as << does
+                if ed.outdent_selection():
                     self._recheck_err()
             else:
                 # A text-editing key (printable / backspace / tab / enter). Open the

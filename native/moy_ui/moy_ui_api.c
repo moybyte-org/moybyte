@@ -547,7 +547,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             c->act = c->focus;
             c->tap_x = c->tap_y = INT16_MIN;
         } else if (tab) {
-            to = step_order(v, n, fi, 0);
+            to = step_order(v, n, fi, (in[MOY_UI_IN_MODS] & MOY_UI_MOD_SHIFT) != 0);
         } else if ((dir & (MOY_UI_B_LEFT | MOY_UI_B_RIGHT)) && (f->flags & STOP_KEEP_LR)) {
             c->step_x = (int8_t)((dir & MOY_UI_B_LEFT) ? -1 : 1);
         } else if ((dir & MOY_UI_B_UP) && (f->flags & STOP_KEEP_UD) && !(f->flags & STOP_AT_TOP)) {
@@ -635,6 +635,40 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         c->press = 0;
         c->drag_page = 0;
         settled = 0;
+    }
+    // The wheel scrolls the page under the pointer; Shift turns it across.
+    int wy = (in[MOY_UI_IN_MODS] & MOY_UI_MOD_SHIFT) ? 0 : in[MOY_UI_IN_WHEEL_Y];
+    if (live && wy) {
+        int pg = page_at(v, n, x, y);
+        moy_ui_keep_t *k = pg >= 0 ? keep_of(c, v[pg].id) : NULL;
+        if (k != NULL) {
+            k->a += wy * MOY_UI_WHEEL_ROWS * row_h(c);
+            k->over = 0;
+            if (k->a < 0) {
+                k->a = 0;
+            }
+            settled = 0;
+        }
+    }
+    // The middle button held drags the page it went down on by its travel.
+    if (live && (p & MOY_UI_P_MIDDLE)) {
+        if (!c->mid_page) {
+            int pg = page_at(v, n, x, y);
+            c->mid_page = pg >= 0 ? v[pg].id : 0xFFFFFFFFu;
+        } else if (y != c->mid_y) {
+            moy_ui_keep_t *k = keep_of(c, c->mid_page);
+            if (k != NULL) {
+                k->a -= y - c->mid_y;
+                k->over = 0;
+                if (k->a < 0) {
+                    k->a = 0;
+                }
+                settled = 0;
+            }
+        }
+        c->mid_y = (int16_t)y;
+    } else {
+        c->mid_page = 0;
     }
     if (live && (x != c->last_x || y != c->last_y)) {
         settled = 0;                // a hover moved

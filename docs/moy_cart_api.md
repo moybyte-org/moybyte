@@ -534,6 +534,10 @@ and comfortable `Z`/`X`, which is PICO-8's layout and every emulator's, so it ge
 those. `SPACE` is jump and `ENTER` is `run` on both.
 
 `run` is also the launcher's **open this cart**, so Enter confirms in menus.
+On a desktop keyboard (the simulator's, the browser's, a BLE one) the letters
+and `SPACE` are buttons only while a game owns the keys; in the shell, the
+Editor and the apps they are keys and nothing else, and the arrows, `ENTER` and
+`ESC` navigate (the T-Deck, with no arrows, keeps `WASD` everywhere).
 The console's key is no button a cart can read (see [The canvas](#the-canvas)).
 
 **Every other key is a plain character** a cart reads with `key()` / `keyp()`, firing

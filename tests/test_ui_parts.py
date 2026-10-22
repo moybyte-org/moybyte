@@ -79,7 +79,7 @@ class _Run:
         self.app = app
         self.cv = make_system_canvas(320, 240)
         self.ctx = ui_draw.ui_context()
-        self.inp = array("i", [0] * 6)
+        self.inp = array("i", [0] * ui_draw.UI_IN_LEN)
         self.draw = draw
         self.out = None
 
@@ -1513,7 +1513,7 @@ def test_a_fields_text_and_caret_keep_inside_its_ring(theme, desk):
         cv = make_system_canvas(640 if desk else 320, 240)
         ctx = ui_draw.ui_context()
         for _ in range(3):
-            ui_draw.ui_frame(ctx, cv, _theme(*theme), None, array("i", [0] * 6), desk=desk)
+            ui_draw.ui_frame(ctx, cv, _theme(*theme), None, array("i", [0] * ui_draw.UI_IN_LEN), desk=desk)
             draw()
         b = cv._buf
         return (lambda x, y: b[2 * (y * cv.w + x)] << 8 | b[2 * (y * cv.w + x) + 1],
@@ -2474,7 +2474,7 @@ def test_a_resting_pointer_on_a_desk_tool_shows_its_word_and_key_at_the_end():
     th = _theme("moy", "light")
     cv = make_system_canvas(400, 200)
     ctx = ui_draw.ui_context()
-    inp = array("i", [0] * 6)
+    inp = array("i", [0] * ui_draw.UI_IN_LEN)
     out = {}
 
     def frame(ptr):

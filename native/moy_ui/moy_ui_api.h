@@ -36,12 +36,21 @@
 // The input a frame resolves over, the run snapshot's shape: the buttons held
 // and pressed this frame (bit i is MOY_INPUT_NAMES[i]: left, right, up, down,
 // a, b, run), the pointer (x, y and its flags: LIVE 1, HELD 2, the press edge
-// 4) and the key typed this frame (9 is Tab).
+// 4), the key typed this frame (9 is Tab) and the modifiers held with it
+// (moy_input.h's MOY_INPUT_MOD_*: Shift+Tab steps back), and the wheel's
+// notches this frame, across and down (positive right and down): a notch
+// down scrolls the page under the pointer by MOY_UI_WHEEL_ROWS rows. No page
+// scrolls across, so Shift's wheel, which turns it across, scrolls none.
 enum {
     MOY_UI_IN_BTN = 0, MOY_UI_IN_BTNP, MOY_UI_IN_X, MOY_UI_IN_Y, MOY_UI_IN_PTR, MOY_UI_IN_KEY,
+    MOY_UI_IN_MODS, MOY_UI_IN_WHEEL_X, MOY_UI_IN_WHEEL_Y,
     MOY_UI_IN_LEN
 };
-enum { MOY_UI_P_LIVE = 1, MOY_UI_P_HELD = 2, MOY_UI_P_EDGE = 4 };
+#define MOY_UI_MOD_SHIFT 2
+#define MOY_UI_WHEEL_ROWS 3
+// MIDDLE: the pointer's middle button is held (a mouse's), which drags the
+// page under it by its travel.
+enum { MOY_UI_P_LIVE = 1, MOY_UI_P_HELD = 2, MOY_UI_P_EDGE = 4, MOY_UI_P_MIDDLE = 8 };
 enum {
     MOY_UI_B_LEFT = 1, MOY_UI_B_RIGHT = 2, MOY_UI_B_UP = 4, MOY_UI_B_DOWN = 8, MOY_UI_B_A = 16,
     MOY_UI_B_B = 32, MOY_UI_B_RUN = 64
@@ -126,6 +135,8 @@ typedef struct {
     uint32_t act;                   // the id activated this frame
     uint32_t press;                 // the id the pointer went down on
     uint32_t drag_page;             // the page a drag scrolls
+    uint32_t mid_page;              // the page a middle-button drag scrolls
+    int16_t mid_y;
     int16_t tap_x, tap_y;           // where the activating tap was released
     int16_t press_x, press_y, drag_y;
     int16_t last_x, last_y;         // the pointer last frame

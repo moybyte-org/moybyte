@@ -115,7 +115,10 @@ class _PointerSink:
         self._d = driver
 
     def place(self, x, y):
-        self._d.pointer.place(int(x), int(y))
+        if self._d._click:
+            self._d._after = (int(x), int(y))   # a press's frame keeps the press's place
+        else:
+            self._d.pointer.place(int(x), int(y))
 
     @property
     def down(self):
@@ -126,6 +129,15 @@ class _PointerSink:
         if v and not self._d._down:
             self._d.ws.input_used("touch")      # a press: the input in use
         self._d._down = bool(v)
+        self._d._buttons(1, bool(v))           # moy_input's PB_PRIMARY
+
+    @property
+    def hovers(self):
+        return self._d.pointer.hovers
+
+    @hovers.setter
+    def hovers(self, v):
+        self._d.pointer.hovers = bool(v)        # a mouse: it has a place with nothing held
 
     @property
     def click(self):
@@ -638,6 +650,8 @@ def edit_cart(name, tab=None):
         opener = _EDIT_TABS.get(tab)
         if opener is not None:
             getattr(ws.editor_app, opener)()
+        elif tab:
+            ws.set_menu_view(tab)         # a tab with no opener of its own (code)
     return json.dumps({
         "ok": ok,
         "screen": getattr(ws, "screen", None),
@@ -768,6 +782,33 @@ def step_frame_json(dt, audio_ahead=-1.0):
     })
 
 
+def _edit_state(ws):
+    """What a key in the Editor changed, for a harness that types into it:
+    the open tab, the sprite's pixels as hex, the code's first lines and
+    whether it holds a selection, and whether the system menu shows."""
+    out = {"tab": getattr(ws, "menu_view", None),
+           "sysmenu": bool(getattr(ws.sysmenu, "open", False))}
+    pe, sheet = getattr(ws, "paint", None), getattr(ws, "sheet", None)
+    if pe is not None and sheet is not None:
+        ox, oy = sheet.tile_origin(pe.n)
+        out["sprite"] = "".join("%x" % sheet.pget(ox + x, oy + y)
+                                for y in range(pe.dim) for x in range(pe.dim))
+        out["tool"] = pe.tool
+    ed = getattr(ws, "editor", None)
+    if ed is not None:
+        out["code"] = ed.lines[:4]
+        out["sel"] = bool(ed.has_selection())
+        out["selected"] = ed.selected_text()[:60] if ed.has_selection() else ""
+        out["top"] = ed.top
+        out["caret"] = [ed.row, ed.col]
+        lay = getattr(ws, "code_layout", None)
+        if lay is not None and out["tab"] == "code":
+            out["autoscroll"] = ws.code_layer.autoscrolling()
+            # where the text lies on the glass: x of column 0, y of the top row
+            out["grid"] = [ws.code_layer._text_x0(lay, ed), lay.y0, lay.cell, lay.lh]
+    return out
+
+
 def state_json():
     """The console's `state`: the dev channel's one-line snapshot -- the keys
     every on-glass suite reads -- plus this page's sample stream
@@ -781,6 +822,7 @@ def state_json():
     st["ach"] = sorted(_S["ws"].ach.unlocked)
     st["system"] = json.loads(_S["ws"].system.dump() or "{}")
     st["show_fps"] = bool(_S["ws"].show_fps)
+    st["edit"] = _edit_state(_S["ws"])
     try:
         import moy_audio
         sc = moy_audio.snd_counts()
@@ -805,7 +847,8 @@ def _apply(events):
         events, d.input, _S["sink"],
         on_press=d.press, on_pan=d.pan, on_key=d.type_char,
         on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold,
-        on_super=d.system_key, on_full=d.full_key)
+        on_super=d.system_key, on_full=d.full_key, on_key_down=d.key_down,
+        on_key_up=d.key_up, on_mods=d.set_mods, on_wheel=d.wheel, on_middle=d.middle)
 
 
 def store_mode(mode=None, seeded=None):

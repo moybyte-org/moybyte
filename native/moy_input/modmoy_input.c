@@ -447,6 +447,31 @@ static void table_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             dest[0] = mp_obj_new_bool(s->t && moy_input_text_mode(s->t));
             return;
         }
+        if (attr == MP_QSTR_key_event) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(s->t ? moy_input_key_event(s->t) : 0);
+            return;
+        }
+        if (attr == MP_QSTR_mods) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(s->t ? moy_input_mods(s->t) : 0);
+            return;
+        }
+        if (attr == MP_QSTR_wheel_x || attr == MP_QSTR_wheel_y) {
+            int32_t wx = 0, wy = 0;
+            if (s->t) {
+                moy_input_wheel(s->t, &wx, &wy);
+            }
+            dest[0] = MP_OBJ_NEW_SMALL_INT(attr == MP_QSTR_wheel_x ? wx : wy);
+            return;
+        }
+        if (attr == MP_QSTR_pointer_buttons || attr == MP_QSTR_pointer_pressed) {
+            uint8_t pr = 0, hd = s->t ? moy_input_pointer_buttons(s->t, &pr) : 0;
+            dest[0] = MP_OBJ_NEW_SMALL_INT(attr == MP_QSTR_pointer_buttons ? hd : pr);
+            return;
+        }
+        if (attr == MP_QSTR_cart_keys) {
+            dest[0] = mp_obj_new_bool(s->t && moy_input_cart_keys(s->t));
+            return;
+        }
         if (attr == MP_QSTR_pointer) {
             dest[0] = s->pointer;
             return;
@@ -467,10 +492,12 @@ static void table_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         return;
     }
     mp_obj_t v = dest[1];
-    if (attr == MP_QSTR_last_key && v != MP_OBJ_NULL) {
+    if ((attr == MP_QSTR_last_key || attr == MP_QSTR_key_event) && v != MP_OBJ_NULL) {
         moy_input_set_last_key(table_of(self_in)->t, v == mp_const_none ? 0 : mp_obj_get_int(v));
     } else if (attr == MP_QSTR_text_mode && v != MP_OBJ_NULL) {
         moy_input_set_text_mode(table_of(self_in)->t, mp_obj_is_true(v));
+    } else if (attr == MP_QSTR_cart_keys && v != MP_OBJ_NULL) {
+        moy_input_set_cart_keys(table_of(self_in)->t, mp_obj_is_true(v));
     } else if (attr == MP_QSTR_pointer && v != MP_OBJ_NULL) {
         s->pointer = v;
     } else if (v == MP_OBJ_NULL) {
@@ -549,6 +576,14 @@ static mp_obj_t source_key(mp_obj_t self_in, mp_obj_t key) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(source_key_obj, source_key);
 
+static mp_obj_t source_scroll(mp_obj_t self, mp_obj_t dx, mp_obj_t dy) {
+    input_source_obj_t *o = MP_OBJ_TO_PTR(self);
+    check(moy_input_scroll(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h, mp_obj_get_int(dx),
+                           mp_obj_get_int(dy)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(source_scroll_obj, source_scroll);
+
 // point(x, y, down, edge=False, fresh=True): this source's pointer sample.
 static mp_obj_t source_point(size_t n_args, const mp_obj_t *args) {
     input_source_obj_t *o = MP_OBJ_TO_PTR(args[0]);
@@ -571,6 +606,7 @@ static const mp_rom_map_elem_t source_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_button), MP_ROM_PTR(&source_set_button_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_held), MP_ROM_PTR(&source_set_button_obj) },
     { MP_ROM_QSTR(MP_QSTR_key), MP_ROM_PTR(&source_key_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll), MP_ROM_PTR(&source_scroll_obj) },
     { MP_ROM_QSTR(MP_QSTR_held_names), MP_ROM_PTR(&source_held_names_obj) },
     { MP_ROM_QSTR(MP_QSTR_point), MP_ROM_PTR(&source_point_obj) },
 };
@@ -593,6 +629,12 @@ static void source_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             int32_t k;
             check(moy_input_source_key(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h, &k));
             dest[0] = MP_OBJ_NEW_SMALL_INT(k);
+        } else if (attr == MP_QSTR_mods) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(
+                moy_input_source_mods(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h));
+        } else if (attr == MP_QSTR_pointer_buttons) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(
+                moy_input_source_pointer_buttons(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h));
         } else {
             dest[1] = MP_OBJ_SENTINEL;
         }
@@ -611,6 +653,12 @@ static void source_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         dest[0] = MP_OBJ_NULL;
     } else if (attr == MP_QSTR_last_key) {
         check(moy_input_set_key(t, o->h, dest[1] == mp_const_none ? 0 : mp_obj_get_int(dest[1])));
+        dest[0] = MP_OBJ_NULL;
+    } else if (attr == MP_QSTR_mods) {
+        check(moy_input_set_mods(t, o->h, (uint8_t)mp_obj_get_int(dest[1])));
+        dest[0] = MP_OBJ_NULL;
+    } else if (attr == MP_QSTR_pointer_buttons) {
+        check(moy_input_set_pointer_buttons(t, o->h, (uint8_t)mp_obj_get_int(dest[1])));
         dest[0] = MP_OBJ_NULL;
     }
 }
@@ -1593,6 +1641,19 @@ void moy_input_loop_tail(void) {
 
 // -- the module ----------------------------------------------------------------------
 
+// typed(event) -> the byte a key event types, 0 for none (moy_input_typed)
+static mp_obj_t input_typed(mp_obj_t ev) {
+    return MP_OBJ_NEW_SMALL_INT(moy_input_typed((int32_t)mp_obj_get_int(ev)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(input_typed_obj, input_typed);
+
+// event(code, mods=0) -> the key event of `code` typed with `mods` held
+static mp_obj_t input_event(size_t n_args, const mp_obj_t *a) {
+    mp_int_t mods = n_args > 1 ? mp_obj_get_int(a[1]) : 0;
+    return MP_OBJ_NEW_SMALL_INT(MOY_INPUT_EVENT(mp_obj_get_int(a[0]), mods));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(input_event_obj, 1, 2, input_event);
+
 static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_input) },
     { MP_ROM_QSTR(MP_QSTR_NAMES), MP_ROM_PTR(&names_obj) },
@@ -1620,6 +1681,21 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_P_LIVE), MP_ROM_INT(MOY_INPUT_P_LIVE) },
     { MP_ROM_QSTR(MP_QSTR_P_HELD), MP_ROM_INT(MOY_INPUT_P_HELD) },
     { MP_ROM_QSTR(MP_QSTR_P_CLICK), MP_ROM_INT(MOY_INPUT_P_CLICK) },
+    { MP_ROM_QSTR(MP_QSTR_typed), MP_ROM_PTR(&input_typed_obj) },
+    { MP_ROM_QSTR(MP_QSTR_event), MP_ROM_PTR(&input_event_obj) },
+    { MP_ROM_QSTR(MP_QSTR_MODS_AT), MP_ROM_INT(MOY_INPUT_MODS_AT) },
+    { MP_ROM_QSTR(MP_QSTR_CTRL), MP_ROM_INT(MOY_INPUT_MOD_CTRL) },
+    { MP_ROM_QSTR(MP_QSTR_SHIFT), MP_ROM_INT(MOY_INPUT_MOD_SHIFT) },
+    { MP_ROM_QSTR(MP_QSTR_ALT), MP_ROM_INT(MOY_INPUT_MOD_ALT) },
+    { MP_ROM_QSTR(MP_QSTR_SUPER), MP_ROM_INT(MOY_INPUT_MOD_SUPER) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_F1), MP_ROM_INT(MOY_INPUT_KEY_F1) },
+    { MP_ROM_QSTR(MP_QSTR_PB_PRIMARY), MP_ROM_INT(MOY_INPUT_PB_PRIMARY) },
+    { MP_ROM_QSTR(MP_QSTR_PB_MIDDLE), MP_ROM_INT(MOY_INPUT_PB_MIDDLE) },
+    { MP_ROM_QSTR(MP_QSTR_PB_SECONDARY), MP_ROM_INT(MOY_INPUT_PB_SECONDARY) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_LEFT), MP_ROM_INT(MOY_INPUT_KEY_LEFT) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_RIGHT), MP_ROM_INT(MOY_INPUT_KEY_RIGHT) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_UP), MP_ROM_INT(MOY_INPUT_KEY_UP) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_DOWN), MP_ROM_INT(MOY_INPUT_KEY_DOWN) },
 };
 static MP_DEFINE_CONST_DICT(moy_input_globals, moy_input_globals_table);
 

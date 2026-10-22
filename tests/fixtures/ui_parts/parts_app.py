@@ -23,7 +23,7 @@ class PartsApp:
         self.ws = ws
         self.page = page
         self.ctx = ui_draw.ui_context()
-        self.inp = array("i", [0] * 6)
+        self.inp = array("i", [0] * ui_draw.UI_IN_LEN)
         self.first = True
         self.sound = True
         self.vol = 6

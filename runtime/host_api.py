@@ -24,6 +24,31 @@ except ImportError:                     # host: the runtime package
     from runtime.cart_api import (CART_BUTTONS, _Layer,  # noqa: F401
                                   _decode_moyimg, make_api)
 
+try:                                    # a VM: the native module
+    import moy_input as _mi
+except ImportError:
+    from runtime import moy_input as _mi
+
+# A desk keyboard's keys on a host (the simulator's and the browser page's),
+# in one place: the button each presses beside what it types. The arrows and
+# Enter press theirs on every surface; the letters and Space only while a cart
+# owns the keys (`input.cart_keys`) and is not taking text, so S in the
+# sprite tab selects and never shifts. A BLE keyboard's twin is moy_hid.c's
+# moy_hid_buttons_for_key; tests/test_tdeck_keymap.py holds the two equal.
+DESK_KEYS = {_mi.KEY_LEFT: "left", _mi.KEY_RIGHT: "right", _mi.KEY_UP: "up",
+             _mi.KEY_DOWN: "down", 0x0D: "run"}
+CART_KEYS = {0x77: "up", 0x61: "left", 0x73: "down", 0x64: "right",
+             0x7A: "a", 0x20: "a", 0x78: "b"}
+_CHORD = _mi.CTRL | _mi.ALT | _mi.SUPER
+_KEY_F11 = _mi.KEY_F1 + 10
+
+
+def _fold(code):
+    """A letter's key whichever case it typed: Shift may change between its
+    down and its up."""
+    return code | 0x20 if 0x41 <= code <= 0x5A else code
+
+
 PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
 
 
@@ -194,6 +219,12 @@ class ConsoleDriver:
         self._down = False      # touch/button currently held (for drag-scroll)
         self._tap = False       # click(): auto-release at the end of the frame
         self._pan = (0, 0)      # held-arrow trackball velocity (dx, dy in [-1,1])
+        self._src = ws.input.source("local")    # the keys this driver types
+        self._key_btn = {}      # a key held down -> the button it holds
+        self._super = False     # Super is held...
+        self._chord = False     # ...and another key went down meanwhile
+        self._pb = 0            # the mouse's buttons held (moy_input PB_*)
+        self._after = None      # where the pointer went after this frame's press
 
     # -- input the sim feeds in ---------------------------------------------
     def press(self, name):
@@ -219,6 +250,75 @@ class ConsoleDriver:
         # frame() drains one char per frame, preserving order.
         self._typed.append(code)
 
+    def key_down(self, code, mods=0):
+        """A desk keyboard's key went down: `code` the byte it types with
+        Shift applied and Ctrl not, or a moy_input KEY_* for a key that types
+        none; `mods` the modifiers held with it. It presses its DESK_KEYS or
+        CART_KEYS button, types its key event, and a printable one held
+        streams to a cart (`key_hold`). F11 is `full_key`."""
+        self.set_mods(mods)
+        if self._super:
+            self._chord = True
+        ev = code | (mods << _mi.MODS_AT)
+        typed = _mi.typed(ev)
+        button = DESK_KEYS.get(code) if not mods & _CHORD else None
+        if (button is None and typed and self.input.cart_keys
+                and not getattr(self.input, "text_mode", False)):
+            button = CART_KEYS.get(_fold(typed))
+        if button is not None and self._key_btn.get(_fold(code)) != button:
+            self._key_btn[_fold(code)] = button
+            self.hold(button, True)
+            self._pending.append(button)    # a tap shorter than a frame still presses
+        if _mi.KEY_LEFT <= code <= _mi.KEY_DOWN:
+            return
+        if code == _KEY_F11 and not mods:
+            self.full_key()
+            return
+        self.type_char(ev)
+        if 0x20 <= typed <= 0x7E:
+            self.key_hold(typed, True)
+
+    def key_up(self, code, mods=0):
+        """A desk keyboard's key came up: what it held lets go."""
+        self.set_mods(mods)
+        button = self._key_btn.pop(_fold(code), None)
+        if button is not None and button not in self._key_btn.values():
+            self.hold(button, False)
+        if 0x20 <= code <= 0x7E:
+            self.key_hold(code, False)
+
+    def set_mods(self, mods):
+        """The modifiers a desk keyboard holds now. Super acts on its
+        release, and only when no other key went down while it was held, so
+        it leads chords: its tap is `system_key`."""
+        self._src.mods = mods
+        if mods & _mi.SUPER:
+            if not self._super:
+                self._super, self._chord = True, False
+        elif self._super:
+            self._super = False
+            if not self._chord:
+                self.system_key()
+
+    def wheel(self, dx, dy, mods=0):
+        """A mouse wheel's (or a trackpad's) notches, across and down,
+        positive right and down, with the modifiers held as it turned."""
+        self.set_mods(mods)
+        if self._super:
+            self._chord = True
+        self._src.scroll(dx, dy)
+
+    def middle(self, x, y, down):
+        """The middle button down or up at (x, y); moving it between is
+        `hover`."""
+        self.pointer.place(int(x), int(y))
+        self.pointer.hovers = True
+        self._buttons(_mi.PB_MIDDLE, down)
+
+    def _buttons(self, bit, down):
+        self._pb = (self._pb | bit) if down else (self._pb & ~bit)
+        self._src.pointer_buttons = self._pb
+
     def key_hold(self, code, down):
         # The khold latch (web_view.apply_events routes {type:"khold"} here).
         # Release matches case-insensitively: shift down/up mid-hold changes
@@ -240,6 +340,7 @@ class ConsoleDriver:
         self.pointer.place(int(x), int(y))
         self._click = True
         self._down = True
+        self._buttons(_mi.PB_PRIMARY, True)
         self.ws.input_used("touch")
 
     def touch_drag(self, x, y):
@@ -266,6 +367,7 @@ class ConsoleDriver:
 
     def touch_up(self):
         self._down = False
+        self._buttons(_mi.PB_PRIMARY, False)
 
     def click(self, x, y):
         """A full TAP for tests/scripts: the press edge this frame PLUS a release
@@ -348,25 +450,6 @@ class ConsoleDriver:
     # -- per-frame tick ------------------------------------------------------
     def frame(self, dt):
         dx, dy = self._pan
-        # ARROWS ON A MOUSE TIER (owner call 2026-07-31): the browser/sim page no
-        # longer steers a virtual cursor with the arrow keys -- the MOUSE is the
-        # cursor there -- so arrows arrive as held left/right/up/down (the same
-        # buttons w/a/s/d send) and drive menu navigation. The one surface that
-        # still wants them as a DIRECTION is the code editor's caret, which used
-        # to ride the pan path: translate the held nav buttons back into a nav
-        # step here, and swallow them so the shell does not ALSO act on them.
-        # (`_pan` stays wired for real trackball backends; the T-Deck's own
-        # driver is untouched by this file.)
-        if not (dx or dy) and self._held_ext and self.in_caret_surface():
-            ndx = (1 if "right" in self._held_ext else 0) \
-                - (1 if "left" in self._held_ext else 0)
-            ndy = (1 if "down" in self._held_ext else 0) \
-                - (1 if "up" in self._held_ext else 0)
-            if ndx or ndy:
-                self.ws.nav(ndx, ndy)
-                for _n in ("left", "right", "up", "down"):
-                    self._held_ext.discard(_n)
-                    self.input.set_held(_n, False)
         if dx or dy:
             if self.in_caret_surface():
                 self.ws.nav(dx, dy)          # arrows move the caret in the editor
@@ -392,7 +475,7 @@ class ConsoleDriver:
         if (nxt == 0 and self._key_held
                 and not getattr(self.input, "text_mode", False)):
             nxt = self._key_held     # game mode: a held key streams every frame
-        self.input.last_key = nxt
+        self._src.last_key = nxt
         self._key_prev = nxt
         self.pointer.down = self._down
         self.pointer.click = self._click
@@ -408,7 +491,10 @@ class ConsoleDriver:
                 self.input.set_held(name, False)
         self._pending = []
         self._click = False
-        self.input.last_key = 0
+        self._src.last_key = 0
+        if self._after is not None:
+            self.pointer.place(*self._after)
+            self._after = None
         if self._tap:
             # click()'s release pass: lift the synthetic finger and route one
             # more pointer pass so release-activated surfaces (the home's
@@ -418,6 +504,7 @@ class ConsoleDriver:
             # explicitly -- whatever the release changed must reach the pixels.
             self._tap = False
             self._down = False
+            self._buttons(_mi.PB_PRIMARY, False)
             self.pointer.down = False
             self.pointer.click = False
             self.ws.handle_pointer()

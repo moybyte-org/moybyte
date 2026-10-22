@@ -11,7 +11,9 @@
 //
 // Same scenario vocabulary as pageshot.mjs where it makes sense --
 //   {"wait":ms} {"shot":"name"} {"click":[x,y]} {"move":[x,y]}
-//   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"js":"..."} {"note":"..."}
+//   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"key":"z","mods":["ctrl"]}
+//   {"key":"Meta"} (a modifier alone) {"click":[x,y],"mods":["shift"]}
+//   {"wheel":[x,y,dx,dy]} {"middle":[x0,y0,x1,y1,steps]} {"js":"..."} {"note":"..."}
 //   {"file":"path|$ENVVAR","as":"__name"}   local bytes -> window.__name
 //                                           (an ArrayBuffer, for the drop paths)
 //   {"waitFor":"<js expression>","timeout":ms}   poll the expression (as
@@ -212,9 +214,10 @@ async function toPage(x, y) {
     if (!r) throw new Error("no canvas element");
     return { x: r.x + (x / r.cw) * r.w, y: r.y + (y / r.ch) * r.h };
 }
-async function mouse(type, x, y, button = "left", clickCount = 1) {
+async function mouse(type, x, y, button = "left", clickCount = 1, modifiers = 0) {
     const p = await toPage(x, y);
-    await cdp("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button, clickCount, buttons: type === "mouseMoved" ? 0 : 1 });
+    const buttons = type === "mouseMoved" ? 0 : (button === "middle" ? 4 : 1);
+    await cdp("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button, clickCount, buttons, modifiers });
 }
 async function shot(name) {
     // The CANVAS pixels, not the page: element.toDataURL is exactly what the
@@ -230,6 +233,13 @@ async function shot(name) {
     console.log(`shot ${name}: -> ${path}  ${st}`);
 }
 
+// CDP's modifier bits, and each modifier's own key.
+const VK = { Enter: 13, Backspace: 8, Escape: 27, Tab: 9, Delete: 46,
+             ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+             F6: 117, F11: 122 };
+const MODKEY = { alt: ["Alt", "AltLeft", 18, 1], ctrl: ["Control", "ControlLeft", 17, 2],
+                 meta: ["Meta", "MetaLeft", 91, 4], shift: ["Shift", "ShiftLeft", 16, 8] };
+
 let failed = 0;
 for (const step of scenario.steps || []) {
     try {
@@ -241,10 +251,35 @@ for (const step of scenario.steps || []) {
         }
         if (step.move) { await mouse("mouseMoved", step.move[0], step.move[1]); await sleep(60); }
         if (step.click) {
-            await mouse("mousePressed", step.click[0], step.click[1]);
+            const m = (step.mods || []).reduce((a, k) => a | MODKEY[k][3], 0);
+            await mouse("mousePressed", step.click[0], step.click[1], "left", 1, m);
             await sleep(80);
-            await mouse("mouseReleased", step.click[0], step.click[1]);
+            await mouse("mouseReleased", step.click[0], step.click[1], "left", 1, m);
             await sleep(step.settle ?? 400);
+        }
+        if (step.wheel) {
+            // {"wheel":[x,y,dx,dy]}: one wheel event, its deltas in pixels
+            // (Chrome's 100 a notch), over a canvas point.
+            const [x, y, dx, dy] = step.wheel;
+            const p = await toPage(x, y);
+            const m = (step.mods || []).reduce((a, k) => a | MODKEY[k][3], 0);
+            await cdp("Input.dispatchMouseEvent", { type: "mouseWheel", x: p.x, y: p.y,
+                deltaX: dx, deltaY: dy, modifiers: m });
+            await sleep(step.settle ?? 300);
+        }
+        if (step.middle) {
+            // {"middle":[x0,y0,x1,y1,steps]}: the middle button pressed at the
+            // first point, moved to the second and released there (a click
+            // when they are the same).
+            const [x0, y0, x1, y1, n = 6] = step.middle;
+            await mouse("mousePressed", x0, y0, "middle");
+            for (let i = 1; i <= n && (x1 !== x0 || y1 !== y0); i++) {
+                const p = await toPage(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n));
+                await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", buttons: 4, ...p });
+                await sleep(40);
+            }
+            await mouse("mouseReleased", x1, y1, "middle");
+            await sleep(step.settle ?? 300);
         }
         if (step.drag) {
             const [x0, y0, x1, y1, n = 8] = step.drag;
@@ -260,19 +295,38 @@ for (const step of scenario.steps || []) {
             await sleep(step.settle ?? 300);
         }
         if (step.key != null) {
-            // CDP takes `text` only for printable chars; a NAMED key (Enter,
-            // ArrowDown, ...) must go as rawKeyDown with its virtual keycode
-            // or the call is refused with "Invalid 'text' parameter".
+            // CDP takes `text` only for printable chars typed alone; a NAMED
+            // key (Enter, ArrowDown, ...) or a chord goes as rawKeyDown with
+            // its virtual keycode. `mods` (["ctrl", "shift", "alt", "meta"])
+            // are pressed first and released after, as a hand does.
             const k = String(step.key);
-            const VK = { Enter: 13, Backspace: 8, Escape: 27, Tab: 9,
-                         ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
-            if (k.length === 1) {
-                await cdp("Input.dispatchKeyEvent", { type: "keyDown", text: k, key: k });
-                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k });
+            const alone = Object.keys(MODKEY).find((m) => MODKEY[m][0] === k);
+            const mods = alone ? [alone] : (step.mods || []);
+            let held = 0;
+            for (const m of mods) {
+                const [key, code, vk, bit] = MODKEY[m];
+                held |= bit;
+                await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code,
+                    windowsVirtualKeyCode: vk, modifiers: held });
+            }
+            const chord = held & (1 | 2 | 4);
+            if (alone) {
+                // the modifier's own down and up are all there is
+            } else if (k.length === 1 && !chord) {
+                await cdp("Input.dispatchKeyEvent", { type: "keyDown", text: k, key: k, modifiers: held });
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, modifiers: held });
             } else {
-                const vk = VK[k] || 0;
-                await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", key: k, code: k, windowsVirtualKeyCode: vk });
-                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: vk });
+                const up = k.length === 1 ? k.toUpperCase() : k;
+                const code = k.length === 1 ? (/[A-Z]/.test(up) ? "Key" + up : "Digit" + up) : k;
+                const vk = k.length === 1 ? up.charCodeAt(0) : (VK[k] || 0);
+                await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", key: k, code, windowsVirtualKeyCode: vk, modifiers: held });
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk, modifiers: held });
+            }
+            for (const m of mods.slice().reverse()) {
+                const [key, code, vk, bit] = MODKEY[m];
+                held &= ~bit;
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key, code,
+                    windowsVirtualKeyCode: vk, modifiers: held });
             }
             await sleep(150);
         }

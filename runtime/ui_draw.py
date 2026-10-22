@@ -1737,6 +1737,16 @@ def panel(cv, th, rect, title=None, fs=None):
     return _C.panel(cv, _LOOK if th is _TH else _look(th), rect, title, fs)
 
 
+def autoscroll_mark(cv, th, x, y, s=1):
+    """A middle-button autoscroll's anchor at (x, y): a ring on the
+    surface with a wedge up and a wedge down (`editors_code.TextMouse`)."""
+    r = 6 * s
+    cv.circ(x, y, r, th["surface"])
+    cv.circb(x, y, r, th["ink"])
+    cv.tri(x - 2 * s, y - s, x + 2 * s, y - s, x, y - 4 * s, th["ink"])
+    cv.tri(x - 2 * s, y + s, x + 2 * s, y + s, x, y + 4 * s, th["ink"])
+
+
 def focus_ring(cv, th, rect, fs=None):
     """The ring a theme without marks draws as its focus (`focus` draws it
     for such a theme; an app calls `focus`)."""
@@ -1894,6 +1904,12 @@ def bar_tap(ctx, i):
 
 
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
+# The words of a frame's input (moy_ui_api.h's MOY_UI_IN_*): the buttons held
+# and pressed, the pointer's x, y and flags, the key typed, its modifiers,
+# and the wheel's steps across and down.
+UI_IN_LEN = 9
+_P_MIDDLE = 8                           # MOY_UI_P_MIDDLE: the middle button held
+_PB_MIDDLE = 2                          # moy_input's PB_MIDDLE
 
 
 class AppHost:
@@ -1913,11 +1929,13 @@ class AppHost:
     def __init__(self, app=None):
         self.app = app
         self.ctx = ui_context()
-        self.inp = array("i", [0] * 6)
+        self.inp = array("i", [0] * UI_IN_LEN)
         self.tap = 0                    # 1 a press to begin, 3 held, 2 its release
         self.hold = False               # the pointer is down since the press
         self.owed = False
         self.key = 0                    # the key typed last frame (a press is its change)
+        self.px = self.py = -1          # where the pointer was last seen, in the app's space
+        self.mid = False                # the middle button is held
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
@@ -1927,7 +1945,8 @@ class AppHost:
     def clear(self):
         """Forget the input gathered for the next frame."""
         a = self.inp
-        a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = 0
+        for n in range(UI_IN_LEN):
+            a[n] = 0
         self.tap = 0
         self.hold = False
         self.owed = False
@@ -1947,13 +1966,21 @@ class AppHost:
         typed = k != 0 and k != self.key
         self.key = k
         a[5] = k if typed else 0        # the engine sees each press once
-        return (bool(b) or typed or self.owed or self.tap != 0
+        a[6] = getattr(i, "mods", 0) or 0
+        a[7] = getattr(i, "wheel_x", 0)
+        a[8] = getattr(i, "wheel_y", 0)
+        mid = bool(getattr(i, "pointer_buttons", 0) & _PB_MIDDLE)
+        moved = mid or mid != self.mid or a[7] or a[8]
+        self.mid = mid
+        return (bool(b) or typed or self.owed or self.tap != 0 or bool(moved)
                 or _C.api_owes(self.ctx))
 
     def point(self, x, y, click, down=None):
         """A pointer sample in the app's coordinates; a click starts a tap.
         With `down` (the pointer held), the press stays held while it moves
         and is released where it comes up."""
+        self.px = int(x)
+        self.py = int(y)
         if click:
             self.inp[2] = int(x)
             self.inp[3] = int(y)
@@ -1984,9 +2011,14 @@ class AppHost:
         a = self.inp
         t = self.tap
         a[4] = 7 if t == 1 else 3 if t == 3 else 1 if t == 2 else 0
+        if (self.mid or a[7] or a[8]) and self.px >= 0:
+            if not a[4]:                # the wheel and the middle button act where it rests
+                a[2] = self.px
+                a[3] = self.py
+            a[4] |= 1 | (_P_MIDDLE if self.mid else 0)
         settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app)
         self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
-        a[0] = a[1] = a[5] = 0
+        a[0] = a[1] = a[5] = a[7] = a[8] = 0
         self.owed = not settled
         return settled
 

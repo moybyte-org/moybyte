@@ -189,7 +189,7 @@ class _Run:
         self.cv = make_system_canvas(w, h)
         self.th = _theme()
         self.ctx = ui_draw.ui_context()
-        self.inp = array("i", [0] * 6)
+        self.inp = array("i", [0] * ui_draw.UI_IN_LEN)
         self.draw = draw
         self.out = None
         self.settled = None

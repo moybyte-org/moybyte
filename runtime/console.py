@@ -300,13 +300,13 @@ try:
     from widgets import (Achievements, Pmem, Popup,
                          ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y,
                          _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
-    from moy_input import Pointer
+    from moy_input import Pointer, SHIFT as _SHIFT
     from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import (Achievements, Pmem,
                                  Popup, ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X,
                                  _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
-    from runtime.moy_input import Pointer
+    from runtime.moy_input import Pointer, SHIFT as _SHIFT
     from runtime.audio_session import console_volume
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
@@ -652,6 +652,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # board declares them, and then the source names' kinds.
     input_kinds = None
     _news = None
+    _cart_keys = False              # what the input table was told last
     # A soft keyboard the board offers beside its inputs (the browser page's).
     soft_keyboard = False
     no_keyboard_text = NO_KEYBOARD_TEXT
@@ -3587,6 +3588,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             src = self._news()
             if src is not None:
                 self.input_used(src)
+        # A desk keyboard's letters are a GAME's buttons only while it owns
+        # the keys (moy_input.h's CART KEYS; an app's or a tool's are keys);
+        # a producer reads it next frame.
+        ck = self.wm.keys_to_cart() and not self.player._is_tool
+        if ck != self._cart_keys:
+            self._cart_keys = ck
+            i.cart_keys = ck
         # Super (the `start` button) is the console's from every surface, before
         # any layer: the system menu, or the pause menu over a fullscreen game.
         if i.pressed("start"):
@@ -3609,7 +3617,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # the T-Deck's one-shot press edge): ANY held/mashed key collapsed P4 play
         # from ~30fps to ~10 (measured; the "every keypress slows the game" bug).
         pressed = i.any_pressed()
-        if pressed or i.last_key:
+        # The arrows of a keyboard with arrows (the host's, the browser's, a
+        # BLE one) or a d-pad step a caret where one has the keys -- the Code
+        # tab, a cart's focused editor handle -- as the T-Deck's ball does
+        # (`nav`), Shift extending the selection; the step is theirs alone.
+        if pressed and self._caret_step(i):
+            return
+        if (pressed or i.last_key or getattr(i, "wheel_y", 0) or getattr(i, "wheel_x", 0)
+                or getattr(i, "pointer_buttons", 0)):
             if not self.wm.keys_to_cart() and not self.wm.popover_takes_keys():
                 self._dirty = True
         # Undo journal (Stage 7): activity in an EDITOR TAB (re)arms the idle
@@ -3843,17 +3858,35 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # question: the same pulses drive the cursor when no caret wants them.
         if not (dx or dy):
             return False
+        # Shift held extends the selection, as SELECT mode does.
+        select = True if getattr(self.input, "mods", 0) & _SHIFT else None
         if (self.wm.top_is("menu") and self.menu_view == "code"    # Stage 6d
                 and self.editor is not None):
-            self.editor.move(dy, dx)
+            self.code_layer.stop_autoscroll()
+            self.editor.move(dy, dx, select)
             self._dirty = True             # caret moved -> redraw (#44)
             return True
         handle = self.focused_cart_editor()
         if handle is not None:
-            handle.nav(dx, dy)
+            handle.nav(dx, dy, select)
             self._dirty = True
             return True
         return False
+
+    def _caret_step(self, i):
+        """A direction pressed while a caret has the keys: `nav` it, and
+        no layer sees the press. False where no caret wants it."""
+        dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
+        dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
+        if not (dx or dy) or self.pause.open or self.confirm.open or self.sysmenu.open \
+                or self.wm.popover_takes_keys():
+            return False
+        if not ((self.wm.top_is("menu") and self.menu_view == "code" and self.editor is not None)
+                or self.focused_cart_editor() is not None):
+            return False
+        self.nav(dx, dy)
+        i.clear_edges()
+        return True
 
     def focused_cart_editor(self):
         """The cart editor handle holding the keyboard, or None."""

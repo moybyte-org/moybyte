@@ -5,6 +5,7 @@ through the host's binding (runtime/moy_input.py's HidMachine). A board runs
 the same machine on NimBLE's host task (moy_ble_task.c); its wiring is pinned
 at the end, and the radio itself on glass."""
 
+import pytest
 import re
 from pathlib import Path
 
@@ -66,8 +67,11 @@ class FakeStack:
         return self.t
 
 
-def _machine(**kw):
+def _machine(cart=True, **kw):
+    """A machine over a table where a game owns the keys (`cart`), so its
+    letters are the cart's buttons too."""
     table = mi.InputTable()
+    table.cart_keys = cart
     stack = FakeStack()
     m = mi.HidMachine(table, stack, **kw)
     return table, stack, m
@@ -124,7 +128,9 @@ def test_boot_report_and_ascii_mapping_cover_typing_shortcuts_and_symbols():
 
 def test_the_arrow_host_scheme():
     """Arrows + Z/X, PICO-8's and every emulator's (owner call 2026-08-14);
-    the T-Deck's L/K scheme is pinned in tests/test_tdeck_keymap.py."""
+    the T-Deck's L/K scheme is pinned in tests/test_tdeck_keymap.py. The
+    letters are buttons only while a game owns the keys; Enter and Esc are
+    the shell's confirm and back on every surface."""
     assert mi.hid_buttons_for_key(ord("z")) == ("a",)
     assert mi.hid_buttons_for_key(ord(" ")) == ("a",)
     assert mi.hid_buttons_for_key(ord("x")) == ("b",)
@@ -132,6 +138,24 @@ def test_the_arrow_host_scheme():
     assert mi.hid_buttons_for_key(0x0D) == ("run",)
     assert mi.hid_buttons_for_key(0x08) == ()        # Backspace is a plain key
     assert mi.hid_buttons_for_key(ord("l")) == ()
+    for k in b"wasdzx ":
+        assert mi.hid_buttons_for_key(k, cart=False) == (), chr(k)
+    assert mi.hid_buttons_for_key(0x0D, cart=False) == ("run",)
+    assert mi.hid_buttons_for_key(0x1B, cart=False) == ("stop",)
+
+
+def test_outside_a_cart_the_letters_are_keys_and_nothing_else():
+    """S in the sprite tab selects; it must not also shift the sprite down."""
+    table, _stack, m = _machine(cart=False)
+    _ready(m)
+    m.notify(3, 3, b"\x00\x00\x16\x00\x00\x00\x00\x00")      # S make
+    _frame(m, table)
+    assert table.last_key == ord("s") and not table.held("down")
+    m.notify(3, 3, bytes(8))
+    _frame(m, table)
+    m.notify(3, 3, b"\x00\x00\x28\x00\x00\x00\x00\x00")      # Enter
+    _frame(m, table)
+    assert table.pressed("run")
 
 
 # -- the level state ---------------------------------------------------------------
@@ -158,9 +182,10 @@ def test_report_level_state_gives_real_hold_edges_and_text_mode_suppression():
     assert table.last_key == 0 and table.held("left")
 
 
-def test_super_is_the_start_button_in_every_mode():
-    """Either GUI key (Super, the Windows key) is `start`, the console's
-    system key (docs/look_2026-10.md step 25a), and types nothing."""
+def test_super_tapped_is_the_start_button_in_every_mode():
+    """Either GUI key (Super, the Windows key) tapped is `start`, the
+    console's system key (docs/look_2026-10.md step 25a), on its RELEASE, and
+    types nothing."""
     table, _stack, m = _machine()
     _ready(m)
     for text in (False, True):
@@ -168,10 +193,75 @@ def test_super_is_the_start_button_in_every_mode():
         for gui in (0x08, 0x80):
             m.notify(3, 3, bytes((gui, 0, 0, 0, 0, 0, 0, 0)))
             _frame(m, table)
-            assert table.pressed("start") and table.last_key == 0
+            assert not table.held("start") and table.last_key == 0
+            assert table.mods == mi.SUPER
             m.notify(3, 3, bytes(8))
             _frame(m, table)
+            assert table.pressed("start")
+            _frame(m, table)
             assert not table.held("start")
+
+
+def test_a_super_tap_between_frames_is_still_a_tap():
+    table, _stack, m = _machine()
+    _ready(m)
+    m.notify(3, 3, bytes((0x08, 0, 0, 0, 0, 0, 0, 0)))
+    m.notify(3, 3, bytes(8))
+    _frame(m, table)
+    assert table.pressed("start")
+
+
+def test_super_leads_a_chord_and_then_opens_nothing():
+    """Super+key is a chord: the key event carries SUPER, types nothing,
+    and Super's release is no tap."""
+    table, _stack, m = _machine(cart=False)
+    _ready(m)
+    m.notify(3, 3, bytes((0x08, 0, 0, 0, 0, 0, 0, 0)))
+    _frame(m, table)
+    m.notify(3, 3, bytes((0x08, 0, 0x1B, 0, 0, 0, 0, 0)))  # Super+X
+    _frame(m, table)
+    assert table.key_event == mi.event(ord("x"), mi.SUPER) and table.last_key == 0
+    m.notify(3, 3, bytes((0x08, 0, 0, 0, 0, 0, 0, 0)))
+    _frame(m, table)
+    m.notify(3, 3, bytes(8))
+    _frame(m, table)
+    assert not table.pressed("start") and not table.held("start")
+    m.notify(3, 3, bytes((0x08, 0, 0, 0, 0, 0, 0, 0)))  # and the next tap is one
+    _frame(m, table)
+    m.notify(3, 3, bytes(8))
+    _frame(m, table)
+    assert table.pressed("start")
+
+
+@pytest.mark.parametrize("report, event, typed", [
+    (b"\x01\x00\x1d", mi.event(ord("z"), mi.CTRL), 0x1A),           # Ctrl+Z
+    (b"\x03\x00\x1d", mi.event(ord("Z"), mi.CTRL | mi.SHIFT), 0x1A),
+    (b"\x01\x00\x1e", mi.event(ord("1"), mi.CTRL), 0),              # Ctrl+1
+    (b"\x01\x00\x28", mi.event(0x0D, mi.CTRL), 0),                  # Ctrl+Enter
+    (b"\x01\x00\x2b", mi.event(0x09, mi.CTRL), 0),                  # Ctrl+Tab
+    (b"\x02\x00\x2b", mi.event(0x09, mi.SHIFT), 0x09),              # Shift+Tab
+    (b"\x01\x00\x37", mi.event(ord("."), mi.CTRL), 0),              # Ctrl+.
+    (b"\x04\x00\x1b", mi.event(ord("x"), mi.ALT), 0),               # Alt+X
+    (b"\x40\x00\x1b", mi.event(ord("x"), mi.ALT), 0),               # AltGr side
+    (b"\x00\x00\x3f", mi.KEY_F1 + 5, 0),                            # F6
+    (b"\x02\x00\x3f", mi.event(mi.KEY_F1 + 5, mi.SHIFT), 0),        # Shift+F6
+    (b"\x00\x00\x4c", 0x7F, 0x7F),                                  # Delete
+])
+def test_a_key_event_carries_its_modifiers(report, event, typed):
+    table, _stack, m = _machine(cart=False)
+    _ready(m)
+    m.notify(3, 3, report + bytes(8 - len(report)))
+    _frame(m, table)
+    assert table.key_event == event and table.last_key == typed
+    assert table.mods == event >> mi.MODS_AT
+
+
+def test_an_arrow_with_ctrl_held_reads_both():
+    table, _stack, m = _machine(cart=False)
+    _ready(m)
+    m.notify(3, 3, b"\x01\x00\x50\x00\x00\x00\x00\x00")      # Ctrl+Left
+    _frame(m, table)
+    assert table.pressed("left") and table.mods == mi.CTRL
 
 
 def test_make_and_break_between_frames_preserves_one_press_then_release():

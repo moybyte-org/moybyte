@@ -27,10 +27,14 @@ const char *const MOY_INPUT_NAMES[MOY_INPUT_BUTTONS] = {
 typedef struct {
     uint32_t held;
     int32_t key;                    // the key this source holds now (a level)
-    uint16_t q[MOY_INPUT_KEYQ];     // one-shot keys awaiting their frame
+    int32_t q[MOY_INPUT_KEYQ];      // one-shot keys awaiting their frame
     uint8_t qn;
     uint8_t queued;                 // the queue drives `key` at every begin_frame
-    uint16_t qlast;                 // the key the queue delivered last frame
+    uint8_t mods;                   // the modifiers it holds
+    uint8_t pbuttons;               // its pointer's buttons
+    uint8_t pbseen;                 // ...and every one held since the merge
+    int16_t wx, wy;                 // wheel notches since the merge
+    int32_t qlast;                  // the key the queue delivered last frame
     uint8_t pflags;                 // the pointer sample: P_SET | P_DOWN | P_EDGE | P_FRESH
     int16_t px, py;
     uint32_t pseq;                  // when it was written, for the newest-wins merge
@@ -57,6 +61,10 @@ struct moy_input {
     bool multi;                     // two sources disagree about their player
     bool taken;                     // a logic tick already took this frame's edges
     bool text_mode;
+    bool cart_keys;
+    uint8_t mods;                   // every source's held modifiers at the merge
+    uint8_t pb_held, pb_pressed;    // the pointer's buttons, and their press edges
+    int32_t wheel_x, wheel_y;       // the frame's wheel notches
     uint8_t player[MOY_INPUT_SOURCES];
     char name[MOY_INPUT_SOURCES][MOY_INPUT_NAME + 1];
     uint32_t held, last, pressed, released, kept;
@@ -337,7 +345,7 @@ int moy_input_key(moy_input_t *t, uint32_t h, int32_t key) {
     if (s < 0) {
         return MOY_INPUT_STALE;
     }
-    if (key <= 0 || key > 0xFFFF) {
+    if (key <= 0 || key > 0xFFFFFF) {
         return MOY_INPUT_BAD;
     }
     moy_input_latch_t *l = &t->front->src[s];
@@ -345,12 +353,52 @@ int moy_input_key(moy_input_t *t, uint32_t h, int32_t key) {
     LOCK(t);
     l->queued = 1;
     if (l->qn < MOY_INPUT_KEYQ) {
-        l->q[l->qn++] = (uint16_t)key;
+        l->q[l->qn++] = key;
     } else {
         r = MOY_INPUT_FULL;
     }
     UNLOCK(t);
     return r;
+}
+
+int moy_input_set_mods(moy_input_t *t, uint32_t h, uint8_t mods) {
+    int s = slot_of(t, h);
+    if (s < 0) {
+        return MOY_INPUT_STALE;
+    }
+    LOCK(t);
+    t->front->src[s].mods = mods;
+    UNLOCK(t);
+    return MOY_INPUT_OK;
+}
+
+static int16_t sat16(int32_t v) {
+    return (int16_t)(v < INT16_MIN ? INT16_MIN : (v > INT16_MAX ? INT16_MAX : v));
+}
+
+int moy_input_scroll(moy_input_t *t, uint32_t h, int32_t dx, int32_t dy) {
+    int s = slot_of(t, h);
+    if (s < 0) {
+        return MOY_INPUT_STALE;
+    }
+    moy_input_latch_t *l = &t->front->src[s];
+    LOCK(t);
+    l->wx = sat16(l->wx + dx);
+    l->wy = sat16(l->wy + dy);
+    UNLOCK(t);
+    return MOY_INPUT_OK;
+}
+
+int moy_input_set_pointer_buttons(moy_input_t *t, uint32_t h, uint8_t held) {
+    int s = slot_of(t, h);
+    if (s < 0) {
+        return MOY_INPUT_STALE;
+    }
+    LOCK(t);
+    t->front->src[s].pbuttons = held;
+    t->front->src[s].pbseen |= held;
+    UNLOCK(t);
+    return MOY_INPUT_OK;
 }
 
 int moy_input_source_key(const moy_input_t *t, uint32_t h, int32_t *key) {
@@ -360,6 +408,16 @@ int moy_input_source_key(const moy_input_t *t, uint32_t h, int32_t *key) {
     }
     *key = t->front->src[s].key;
     return MOY_INPUT_OK;
+}
+
+uint8_t moy_input_source_mods(const moy_input_t *t, uint32_t h) {
+    int s = slot_of(t, h);
+    return s < 0 ? 0 : t->front->src[s].mods;
+}
+
+uint8_t moy_input_source_pointer_buttons(const moy_input_t *t, uint32_t h) {
+    int s = slot_of(t, h);
+    return s < 0 ? 0 : t->front->src[s].pbuttons;
 }
 
 uint32_t moy_input_source_held(const moy_input_t *t, uint32_t h) {
@@ -391,7 +449,7 @@ static int32_t dequeue_locked(moy_input_latch_t *l) {
         l->qlast = 0;
         return 0;
     }
-    uint16_t k = l->q[0];
+    int32_t k = l->q[0];
     memmove(&l->q[0], &l->q[1], (size_t)(l->qn - 1) * sizeof(l->q[0]));
     l->qn--;
     l->qlast = k;
@@ -419,12 +477,20 @@ void moy_input_begin_frame(moy_input_t *t) {
     uint32_t ph[MOY_INPUT_PLAYERS] = {0};
     const moy_input_latch_t *best = NULL;
     moy_input_sample_t smp = {0};
+    uint8_t mods = 0, pb = 0;
+    int32_t wx = 0, wy = 0;
     LOCK(t);
     for (uint8_t i = 0; i < t->nsrc; i++) {
         moy_input_latch_t *l = &t->front->src[i];
         if (l->queued) {
             key_locked(t, i, dequeue_locked(l));
         }
+        mods |= l->mods;
+        pb |= l->pbuttons | l->pbseen;     // a click between merges is held for one
+        l->pbseen = 0;
+        wx += l->wx;
+        wy += l->wy;
+        l->wx = l->wy = 0;
         held |= l->held;
         ph[t->player[i]] |= l->held;
         if ((l->pflags & P_SET) && better(l, best)) {
@@ -450,6 +516,11 @@ void moy_input_begin_frame(moy_input_t *t) {
         t->front->src[i].pflags &= (uint8_t)~P_EDGE;
     }
     UNLOCK(t);
+    t->mods = mods;
+    t->pb_pressed = (uint8_t)(pb & ~t->pb_held);
+    t->pb_held = pb;
+    t->wheel_x = wx;
+    t->wheel_y = wy;
     t->smp = smp;
     t->held = held;
     t->pressed = held & ~t->last;
@@ -476,13 +547,19 @@ void moy_input_release_all(moy_input_t *t) {
     LOCK(t);
     for (uint8_t i = 0; i < t->nsrc; i++) {
         t->front->src[i].held = 0;
+        t->front->src[i].mods = 0;
+        t->front->src[i].pbuttons = 0;
     }
     UNLOCK(t);
     t->held = 0;
+    t->mods = 0;
+    t->pb_held = 0;
     memset(t->p_held, 0, sizeof(t->p_held));
 }
 
 void moy_input_clear_edges(moy_input_t *t) {
+    t->pb_pressed = 0;
+    t->wheel_x = t->wheel_y = 0;
     t->pressed = 0;
     t->released = 0;
     t->last = 0;
@@ -544,8 +621,51 @@ uint32_t moy_input_kept(const moy_input_t *t) {
     return t->kept;
 }
 
+int32_t moy_input_typed(int32_t ev) {
+    int32_t c = MOY_INPUT_CODE(ev);
+    uint8_t m = MOY_INPUT_MODS(ev);
+    if (c > 0xFF || (m & (MOY_INPUT_MOD_ALT | MOY_INPUT_MOD_SUPER))) {
+        return 0;
+    }
+    if (m & MOY_INPUT_MOD_CTRL) {
+        if (c >= 'a' && c <= 'z') {
+            return c - 'a' + 1;
+        }
+        return c >= 'A' && c <= 'Z' ? c - 'A' + 1 : 0;
+    }
+    return c;
+}
+
 int32_t moy_input_last_key(const moy_input_t *t) {
+    return moy_input_typed(t->front->last_key);
+}
+
+int32_t moy_input_key_event(const moy_input_t *t) {
     return t->front->last_key;
+}
+
+uint8_t moy_input_mods(const moy_input_t *t) {
+    return (uint8_t)(t->mods | MOY_INPUT_MODS(t->front->last_key));
+}
+
+void moy_input_wheel(const moy_input_t *t, int32_t *dx, int32_t *dy) {
+    *dx = t->wheel_x;
+    *dy = t->wheel_y;
+}
+
+uint8_t moy_input_pointer_buttons(const moy_input_t *t, uint8_t *pressed) {
+    if (pressed != NULL) {
+        *pressed = t->pb_pressed;
+    }
+    return t->pb_held;
+}
+
+bool moy_input_cart_keys(const moy_input_t *t) {
+    return t->cart_keys;
+}
+
+void moy_input_set_cart_keys(moy_input_t *t, bool on) {
+    t->cart_keys = on;
 }
 
 void moy_input_set_last_key(moy_input_t *t, int32_t key) {

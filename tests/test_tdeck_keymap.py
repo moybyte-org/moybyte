@@ -312,34 +312,35 @@ def test_the_p4_ble_keyboard_is_an_arrow_host_too():
         assert want in direct, want
 
 
-def test_the_two_arrow_key_hosts_agree_with_each_other():
-    """A host WITH arrow keys uses arrows + Z/X. Both of them must.
+def test_the_two_arrow_key_hosts_share_one_table():
+    """A host WITH arrow keys uses arrows + Z/X, and both of them use ONE
+    table: the pygame sim and the browser page send keys as codes and
+    modifiers, and ConsoleDriver.key_down decides what each presses.
 
-    The pygame sim and the browser page are one tier wearing two coats, and they
-    had drifted the other way from the device: the page has done arrows-as-d-pad
-    + Z/X since 2026-07-31 while the sim still steered a trackball with the
-    arrows and had no d-pad at all. Each file was self-consistent, which is
-    exactly why neither could notice.
+    They had drifted twice: the page did arrows-as-d-pad + Z/X while the sim
+    steered a trackball, and both sent WASD as the d-pad on every surface, so
+    S in the sprite tab shifted the sprite as it selected.
     """
+    from runtime import host_api, moy_input as mi
     sim = (ROOT / "tools" / "simulate_desktop.py").read_text(encoding="utf-8")
     page = (ROOT / "firmware" / "web_runner"
             / "page_core.html").read_text(encoding="utf-8")
+    assert "driver.key_down" in sim and "driver.key_up" in sim
+    assert 'type:"kd"' in page and 'type:"ku"' in page
+    for gone in ("NAV={", "SC={", "shortcuts = {", "nav_keys"):
+        assert gone not in sim and gone not in page, gone
 
-    shortcuts = re.search(r"shortcuts = \{(.+?)\}", sim, re.S).group(1)
-    assert "K_z: \"a\"" in shortcuts and "K_x: \"b\"" in shortcuts
-    assert "K_RETURN: \"run\"" in shortcuts
-    assert "K_SPACE: \"a\"" in shortcuts, "space = jump is every tier's"
-    assert "K_r:" not in shortcuts, "R stopped being `run` on 2026-08-14"
-
-    sc = re.search(r"SC=\{(.+?)\}", page).group(1)
-    for want in ('z:"a"', 'x:"b"', 'Enter:"run"', '" ":"a"'):
-        assert want in sc, (want, sc)
-
-    arrows = re.search(r"arrow_keys = \{(.+?)\}", sim, re.S).group(1)
-    for key, button in (("K_LEFT", "left"), ("K_RIGHT", "right"),
-                        ("K_UP", "up"), ("K_DOWN", "down")):
-        assert key in arrows and button in arrows
-    assert "AN={ArrowLeft:\"left\"" in page
+    assert host_api.DESK_KEYS == {mi.KEY_LEFT: "left", mi.KEY_RIGHT: "right",
+                                  mi.KEY_UP: "up", mi.KEY_DOWN: "down", 0x0D: "run"}
+    cart = host_api.CART_KEYS
+    assert cart[ord("z")] == "a" and cart[ord("x")] == "b"
+    assert cart[ord(" ")] == "a", "space = jump is every tier's"
+    assert ord("r") not in cart, "R stopped being `run` on 2026-08-14"
+    # ...and the BLE keyboard's twin agrees, key for key.
+    for k in range(0x20, 0x7F):
+        want = cart.get(k | 0x20 if 0x41 <= k <= 0x5A else k)
+        assert mi.hid_buttons_for_key(k, cart=True) == ((want,) if want else ()), chr(k)
+        assert mi.hid_buttons_for_key(k, cart=False) == (), chr(k)
 
 
 def test_the_device_and_the_arrow_hosts_differ_ON_PURPOSE():
@@ -352,13 +353,11 @@ def test_the_device_and_the_arrow_hosts_differ_ON_PURPOSE():
     console, two keyboards, two ergonomics. The shared part is the BUTTON set,
     and `space` = jump and `Enter` = run everywhere.
     """
+    from runtime import host_api
     KEY_BUTTON = _input_module().KEY_BUTTON
     assert KEY_BUTTON[ord("l")] == "a" and KEY_BUTTON[ord("k")] == "b"
     assert ord("z") not in KEY_BUTTON and ord("x") not in KEY_BUTTON
-
-    sim = (ROOT / "tools" / "simulate_desktop.py").read_text(encoding="utf-8")
-    shortcuts = re.search(r"shortcuts = \{(.+?)\}", sim, re.S).group(1)
-    assert "K_l:" not in shortcuts and "K_k:" not in shortcuts
+    assert ord("l") not in host_api.CART_KEYS and ord("k") not in host_api.CART_KEYS
 
     # ...and what the two DO share.
     assert KEY_BUTTON[0x0D] == "run" and KEY_BUTTON[0x20] == "a"

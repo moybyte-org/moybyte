@@ -18,8 +18,11 @@
 //
 // THE KEYMAP is the arrow-key hosts' (owner call, 2026-08-14): arrows are the
 // d-pad, W A S D too, Z and SPACE are A, X is B, ENTER is `run`, ESC `stop`,
-// BACKSPACE a plain key; the GUI key is `start`, the console's. A text
-// surface gets the key and no alias but the arrows (and `start`).
+// BACKSPACE a plain key; the GUI key is Super, which a tap makes `start`,
+// the console's (its release, when no other key went down while it was
+// held), so Super leads chords. The letters alias buttons only while a cart
+// owns the keys; a text surface gets the key and no alias but the arrows.
+// A key event carries the report's modifiers (moy_input.h).
 //
 // RECONNECT. Once a keyboard is picked only that address is reconnected; with
 // none picked, the first HOGP keyboard seen is. Background scans are passive
@@ -171,6 +174,8 @@ struct moy_hid {
     int32_t mdx, mdy;           // its motion since the frame took it
     uint8_t mbuttons;
     int8_t want_player;         // -1: nobody asked
+    bool gui_seen;              // a GUI key was down since the last frame
+    bool gui_chord;             // another key went down while it was held
 };
 
 // -- the pure parts, for both the machine and the host's tests --
@@ -179,8 +184,13 @@ size_t moy_hid_adv_name(const uint8_t *adv, size_t n, char *out, size_t cap);
 // A boot-shaped report (eight bytes, or nine with a leading report id) ->
 // modifiers and up to six usages; false for any other layout.
 bool moy_hid_decode(const uint8_t *r, size_t n, uint8_t *mods, uint8_t keys[6], uint8_t *nkeys);
+// A usage typed with the report's modifiers -> its key event (moy_input.h),
+// 0 for a usage that is no key; moy_hid_keycode is the byte that event types.
+int32_t moy_hid_event(uint8_t usage, uint8_t mods, bool caps);
 int32_t moy_hid_keycode(uint8_t usage, uint8_t mods, bool caps);
-uint32_t moy_hid_buttons_for_key(int32_t key);
+// The buttons a typed byte presses: Enter and Esc on every surface, the
+// letters and Space only while a game owns the keys (`cart`).
+uint32_t moy_hid_buttons_for_key(int32_t key, bool cart);
 
 // -- the machine --
 void moy_hid_init(moy_hid_t *h, const moy_hid_ops_t *ops, moy_input_t *table, uint32_t src);

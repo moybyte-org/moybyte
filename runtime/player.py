@@ -168,13 +168,15 @@ except ImportError:                     # host: the runtime package
 try:
     from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
     from ui_draw import print_font as _print_font
-    from ui_draw import ui_context as _ui_context, ui_frame as _ui_frame
+    from ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
+                         UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from moy_input import pointer_state as _pointer_state
     import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ui_draw import cart_text as _cart_text
     from runtime.ui_draw import print_font as _print_font
-    from runtime.ui_draw import ui_context as _ui_context, ui_frame as _ui_frame
+    from runtime.ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
+                                 UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from runtime.moy_input import pointer_state as _pointer_state
     from runtime import layout_base as _layout_base
 from array import array as _array
@@ -1554,6 +1556,11 @@ class Player:
         a[0], a[1] = m[0], m[1]
         a[2], a[3], a[4] = st[0], st[1], st[2]
         a[5] = int(getattr(inp, "last_key", 0) or 0)
+        a[6] = int(getattr(inp, "mods", 0) or 0)
+        a[7] = getattr(inp, "wheel_x", 0)
+        a[8] = getattr(inp, "wheel_y", 0)
+        if getattr(inp, "pointer_buttons", 0) & _PB_MIDDLE:
+            a[4] |= _P_MIDDLE
         if self._focus_editor is not None:
             a[0] = a[1] = a[5] = 0      # the keys are the focused editor handle's
         # an app on the whole surface (a desk's window, or its glass) lays out
@@ -1597,7 +1604,7 @@ class Player:
                                       request=ws.take_text_request(),
                                       keep=self._keep_grant))
             if "ui" in ns:
-                self._ui = [_ui_context(), _array("i", [0] * 6), ws.canvas]
+                self._ui = [_ui_context(), _array("i", [0] * _UI_IN_LEN), ws.canvas]
         if console is not None:
             ns.update(console.api())
         # The cart's OTHER SCRIPTS, either side of main (SPEC.md 4). A ported
@@ -2171,6 +2178,10 @@ class Player:
         _perf = ws.perf_hud or ws.perf_capture
         if self.cart_error is None:
             self._tick_keys(ws)
+            fed = self._focus_editor
+            gp = getattr(ws.input, "game_pointer", None) if fed is not None else None
+            if gp is not None:
+                fed.mouse_frame(ws.input, gp[0], gp[1], dt)   # its wheel and autoscroll
             # The cart's code prints and measures in petme128, whatever the
             # theme names (docs/theming_2026-09.md §4.7).
             _was = _cart_text(not self._look)

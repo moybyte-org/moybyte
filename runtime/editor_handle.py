@@ -48,9 +48,13 @@ memo mid-scroll re-lays the whole visible window inside one frame.
 """
 
 try:
-    from editors_code import CodeEditor
+    from editors_code import CodeEditor, TextMouse
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_code import CodeEditor
+    from runtime.editors_code import CodeEditor, TextMouse
+try:
+    from moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
+except ImportError:  # pragma: no cover - host fallback
+    from runtime.moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
 
 try:
     from op_history import History, TextEditCodec, text_diff_op
@@ -292,6 +296,9 @@ class EditorHandle:
         self._geom = (0, 0, CELL, LH, 1)   # x, y, cell, lh, scale
         self._faces_in = (0, 0, 8)   # the faces the last draw took, and their line
         self._drag = None            # last pointer cell-origin of a live drag
+        self._mouse = TextMouse()    # a mouse's clicks, selection and autoscroll
+        self._mid = False            # the middle button was held last frame
+        self._rect = (0, 0, 0, 0)    # where the last draw put it
         self._caret_at = None        # the caret the last draw scrolled to see
         # The watch's `file_gen` this buffer last matched: a change made
         # elsewhere (the Appearance rows) reloads a buffer with no edits; one
@@ -378,6 +385,7 @@ class EditorHandle:
         code = int(code or 0)
         if not code:
             return False
+        self._mouse.stop()                   # any key ends a latched autoscroll
         ed = self.ed
         if code == 0x1A:                     # Ctrl+Z
             self.undo()
@@ -405,20 +413,21 @@ class EditorHandle:
             self._close_burst()
         return True
 
-    def nav(self, dx, dy):
+    def nav(self, dx, dy, select=None):
         """Feed DIRECTIONAL input -- the T-Deck trackball, a host arrow key.
 
         It moves the CARET and the view follows, which is `ws.nav`'s contract
         for the Code tab held one rung down: on the writing board the ball IS
         the arrow keys, and a text surface that spent them on a mouse cursor
         would leave the caret unreachable. In SELECT mode the same motion
-        EXTENDS the selection, because `select_sticky` is what `move` reads.
-        True when it moved something."""
+        EXTENDS the selection, because `select_sticky` is what `move` reads,
+        and so does `select` (Shift held). True when it moved something."""
         dx = int(dx or 0)
         dy = int(dy or 0)
         if not (dx or dy):
             return False
-        self.ed.move(dy, dx)
+        self._mouse.stop()
+        self.ed.move(dy, dx, select)
         return True
 
     # -- undo / clipboard -----------------------------------------------------
@@ -594,6 +603,7 @@ class EditorHandle:
             self._memo_old = {}
             self._caret_at = None      # a resize re-flows: show the caret again
         self._geom = (tx, ty, cell, lh, scale)
+        self._rect = (int(x), int(y), int(w), int(h))
         self._faces_in = (reg, bold, line)
         if self._m.wrap:
             self.ed.left = 0              # wrapped prose never scrolls sideways
@@ -615,6 +625,9 @@ class EditorHandle:
         finally:
             if was is not None:
                 _ui_draw.print_font(was)
+        a = self.autoscrolling()
+        if a is not None:
+            _ui_draw.autoscroll_mark(cv, th, a[0], a[1], max(1, cell // 7))
         cv.clip()
 
     def _faces(self, desk):
@@ -647,6 +660,12 @@ class EditorHandle:
             for c0, c1, target in laid.links:
                 if c0 <= cell < c1:
                     return ("link", target)
+        if self._is_mouse():
+            # A mouse's press: the caret, Shift extending, a second and a
+            # third press the word and the line; its drag selects.
+            m = getattr(getattr(self._host, "input", None), "mods", 0)
+            self._mouse.press(self.ed, brow, col, bool(m & _SHIFT), _ticks_ms())
+            return ("caret", None)
         # The press edge COLLAPSES even in SELECT mode and re-anchors here --
         # the Code tab's `_select_pointer` rule, so a fresh drag selects a
         # fresh range instead of growing the last one.
@@ -665,9 +684,13 @@ class EditorHandle:
         kid's hand already learned in the Code tab."""
         if not down:
             self._drag = None
+            self._mouse.release(self.ed)
             return False
         px = int(px)
         py = int(py)
+        if self._mouse.dragging:
+            got = self._cell_at(px, py)
+            return got is not None and self._mouse.drag(self.ed, got[0], got[1])
         if self._drag is None:
             self._drag = (px, py)
             return False
@@ -686,7 +709,44 @@ class EditorHandle:
         self.ed.scroll(-drows, -dcols)
         return True
 
+    def mouse_frame(self, inp, x, y, dt):
+        """One frame of a mouse over the handle, the pointer at (x, y) in
+        the canvas: the wheel scrolls it (Shift's sideways where it does not
+        wrap), and the middle button pressed over it autoscrolls
+        (`TextMouse`). True when the view moved."""
+        ed = self.ed
+        rx, ry, rw, rh = self._rect
+        over = rx <= x < rx + rw and ry <= y < ry + rh
+        moved = False
+        wy = getattr(inp, "wheel_y", 0)
+        wx = getattr(inp, "wheel_x", 0)
+        if getattr(inp, "mods", 0) & _SHIFT:
+            wx, wy = wx + wy, 0
+        if over and (wy or (wx and not self._m.wrap)):
+            top, left = ed.top, ed.left
+            ed.scroll(3 * wy, 0 if self._m.wrap else 3 * wx)
+            moved = (top, left) != (ed.top, ed.left)
+        mid = bool(getattr(inp, "pointer_buttons", 0) & _PB_MIDDLE)
+        if mid != self._mid and (over or not mid):
+            self._mouse.middle(x, y, mid)
+        self._mid = mid
+        if self._mouse.armed and self._mouse.autoscroll(ed, x, y, dt, self._geom[3]):
+            moved = True
+        if moved:
+            self._caret_at = (ed.row, ed.col)   # the view is the reader's now
+        return moved
+
+    def autoscrolling(self):
+        """Whether a middle-button autoscroll runs, and where its anchor is."""
+        m = self._mouse
+        return (m.anchor_x, m.anchor_y) if m.armed else None
+
     # -- internals ------------------------------------------------------------
+
+    def _is_mouse(self):
+        """The pointer is a mouse: it hovers, as a finger never does."""
+        p = getattr(self._host, "pointer", None)
+        return bool(getattr(p, "hovers", False))
 
     def _cell_at(self, px, py):
         """`(buffer row, column, laid-out row, shown cell)` under `(px, py)`,

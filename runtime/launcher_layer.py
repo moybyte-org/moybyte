@@ -67,6 +67,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui_draw as _ui_draw
     from runtime import cart_listing as _cl
     from runtime import iconsets as _iconsets
+try:
+    from moy_input import SHIFT as _SHIFT
+except ImportError:  # pragma: no cover - host fallback
+    from runtime.moy_input import SHIFT as _SHIFT
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -3600,6 +3604,17 @@ class LauncherHomeLayer:
         # details pane's buttons first). The grid: the arrows step its
         # cells, and up from its top row takes them to the tabs.
         grid = self.grid
+        wy, wx = getattr(i, "wheel_y", 0), getattr(i, "wheel_x", 0)
+        if wy or wx:
+            # The wheel: the carousel glides a card a notch, the grid steps a
+            # row, Shift's wheel a column.
+            if getattr(i, "mods", 0) & _SHIFT:
+                wx, wy = wx + wy, 0
+            if self._carousel():
+                grid.nav2d(wx + wy, 0)
+            else:
+                grid.nav2d(wx, wy)
+            ws.mark_dirty()
         if i.pressed("left"):
             grid.nav2d(-1, 0)
             ws.mark_dirty()

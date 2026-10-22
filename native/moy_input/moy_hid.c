@@ -141,21 +141,31 @@ static int32_t shift_of(uint8_t u) {
     }
 }
 
-int32_t moy_hid_keycode(uint8_t usage, uint8_t mods, bool caps) {
+// The report's modifier byte (left and right halves) -> MOY_INPUT_MOD_*.
+static uint8_t mods_of(uint8_t m) {
+    m = (uint8_t)(m | (m >> 4));
+    return (uint8_t)(((m & 1) ? MOY_INPUT_MOD_CTRL : 0) | ((m & 2) ? MOY_INPUT_MOD_SHIFT : 0)
+                     | ((m & 4) ? MOY_INPUT_MOD_ALT : 0) | ((m & 8) ? MOY_INPUT_MOD_SUPER : 0));
+}
+
+int32_t moy_hid_event(uint8_t usage, uint8_t mods, bool caps) {
     bool shift = (mods & 0x22) != 0;
-    bool ctrl = (mods & 0x11) != 0;
+    int32_t k;
     if (usage >= 0x04 && usage <= 0x1D) {
-        int32_t letter = usage - 0x04;
-        if (ctrl) {
-            return letter + 1;              // Ctrl+A..Z -> 0x01..0x1a
-        }
-        return (shift != caps ? 'A' : 'a') + letter;
+        k = (shift != caps ? 'A' : 'a') + (usage - 0x04);
+    } else if (usage >= 0x1E && usage <= 0x27) {
+        k = shift ? shift_of(usage) : "1234567890"[usage - 0x1E];
+    } else if (usage >= 0x3A && usage <= 0x45) {
+        k = MOY_INPUT_KEY_F1 + (usage - 0x3A);
+    } else {
+        k = shift ? shift_of(usage) : 0;
+        k = k ? k : plain_of(usage);
     }
-    if (usage >= 0x1E && usage <= 0x27) {
-        return shift ? shift_of(usage) : "1234567890"[usage - 0x1E];
-    }
-    int32_t k = shift ? shift_of(usage) : 0;
-    return k ? k : plain_of(usage);
+    return k ? MOY_INPUT_EVENT(k, mods_of(mods)) : 0;
+}
+
+int32_t moy_hid_keycode(uint8_t usage, uint8_t mods, bool caps) {
+    return moy_input_typed(moy_hid_event(usage, mods, caps));
 }
 
 enum {
@@ -167,7 +177,16 @@ enum {
 // The GUI keys (left 0x08, right 0x80): Super, the console's system key.
 #define MOD_GUI 0x88u
 
-uint32_t moy_hid_buttons_for_key(int32_t key) {
+uint32_t moy_hid_buttons_for_key(int32_t key, bool cart) {
+    if (key == 0x0D) {
+        return B_RUN;
+    }
+    if (key == 0x1B) {
+        return B_STOP;
+    }
+    if (!cart) {
+        return 0;
+    }
     if (key >= 'A' && key <= 'Z') {
         key += 32;
     }
@@ -179,8 +198,6 @@ uint32_t moy_hid_buttons_for_key(int32_t key) {
         case 'z': return B_A;
         case ' ': return B_A;
         case 'x': return B_B;
-        case 0x0D: return B_RUN;
-        case 0x1B: return B_STOP;
         default: return 0;
     }
 }
@@ -850,10 +867,16 @@ void moy_hid_on_notify(moy_hid_t *h, uint16_t conn, uint16_t handle, const uint8
                     // A make that may break before the next frame: kept for one.
                     h->pend_usage[keys[i] >> 3] |= (uint8_t)(1u << (keys[i] & 7));
                     h->pend_mods |= mods;
+                    if ((mods | rep->mods) & MOD_GUI) {
+                        h->gui_chord = true;        // Super leads a chord
+                    }
                     if (keys[i] == 0x39) {      // Caps Lock's make
                         h->caps = !h->caps;
                     }
                 }
+            }
+            if (mods & MOD_GUI) {
+                h->gui_seen = true;
             }
             rep->mods = mods;
             memcpy(rep->keys, keys, sizeof(keys));
@@ -921,7 +944,7 @@ void moy_hid_frame(moy_hid_t *h) {
     uint8_t mods = 0;
     bool any = false;
     MOY_DRV_LOCK(&h->lock);
-    bool pending = h->pend_mods != 0;
+    bool pending = h->pend_mods != 0 || h->gui_seen;
     for (int i = 0; i < 32 && !pending; i++) {
         pending = h->pend_usage[i] != 0;
     }
@@ -945,9 +968,21 @@ void moy_hid_frame(moy_hid_t *h) {
     memset(h->pend_usage, 0, sizeof(h->pend_usage));
     h->pend_mods = 0;
     bool caps = h->caps;
+    uint8_t level = 0;
+    for (uint8_t i = 0; i < h->nreports; i++) {
+        level |= h->reports[i].mods;
+    }
+    // Super's tap: released with no other key gone down while it was held.
+    bool tap = false;
+    if ((h->gui_seen || (level & MOD_GUI)) && !(level & MOD_GUI)) {
+        tap = !h->gui_chord;
+        h->gui_chord = false;
+    }
+    h->gui_seen = (level & MOD_GUI) != 0;
     MOY_DRV_UNLOCK(&h->lock);
 
     bool text = moy_input_text_mode(h->table);
+    bool cart = moy_input_cart_keys(h->table);
     uint32_t buttons = 0;
     int32_t key = 0;
     // Ascending usage: the first one that types a byte is the held key, like
@@ -958,20 +993,21 @@ void moy_hid_frame(moy_hid_t *h) {
         }
         any = true;
         buttons |= direct_button((uint8_t)u);
-        int32_t k = moy_hid_keycode((uint8_t)u, mods, caps);
+        int32_t k = moy_hid_event((uint8_t)u, mods, caps);
         if (!text) {
-            buttons |= moy_hid_buttons_for_key(k);
+            buttons |= moy_hid_buttons_for_key(moy_input_typed(k), cart);
         }
         if (key == 0) {
             key = k;
         }
     }
-    if (mods & MOD_GUI) {
+    if (tap) {
         buttons |= B_START;             // Super: the system menu, or the pause menu
     }
+    moy_input_set_mods(h->table, h->src, mods_of(level));
     moy_input_set_mask(h->table, h->src, buttons & ((1u << moy_input_nbuttons(h->table)) - 1u));
     moy_input_set_key(h->table, h->src, key);
-    h->level_idle = !any && !mods;
+    h->level_idle = !any && !mods && !tap;
 }
 
 size_t moy_hid_sizeof(void) {

@@ -561,6 +561,7 @@ def test_the_physical_keyboards_poll_no_longer_erases_the_ble_keyboard():
     """
     inp = device_input.InputState()
     inp.text_mode = False
+    inp.cart_keys = True        # a game owns the keys: W is its `up`
     kbd = _tdeck_keyboard(inp)
     ble = _Ble(inp)
 
@@ -605,6 +606,7 @@ def test_the_two_keyboards_can_be_two_players():
     player 2 is one attribute -- no transport, no _Slot, no netcode."""
     inp = device_input.InputState()
     inp.text_mode = False
+    inp.cart_keys = True        # a game owns the keys: W is its `up`
     kbd = _tdeck_keyboard(inp)
     ble = _Ble(inp)
     ble.src.player = 1

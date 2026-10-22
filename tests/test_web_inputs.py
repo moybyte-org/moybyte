@@ -95,3 +95,20 @@ def test_the_pages_joystick_and_buttons_send_the_pad_source():
     assert wb.count('src:"pad"') == 2, "the press and the release"
     keys = page[page.index('cv.addEventListener("keydown"'):]
     assert not re.search(r'type:"hold"[^}]*src:', keys), "a key is the keyboard's"
+
+
+def test_the_pages_mouse_reaches_the_consoles_pointer_as_a_mouse(web_boot, tmp_path):
+    """A hover makes the console's pointer a mouse (it hovers, as a finger
+    never does: the text views select under its drag), and a press holds the
+    pointer's primary button in the input table."""
+    from runtime import moy_input, web_input
+    ws = build_ws(Path(tmp_path))
+    drv = make_drv(ws)
+    sink = web_boot._PointerSink(drv)
+    web_input.apply_events([{"type": "hover", "x": 30, "y": 40}], drv.input, sink)
+    assert ws.pointer.hovers and (ws.pointer.x, ws.pointer.y) == (30, 40)
+    web_input.apply_events([{"type": "down", "x": 30, "y": 40, "mods": moy_input.SHIFT}],
+                           drv.input, sink, on_mods=drv.set_mods)
+    ws.input.begin_frame()
+    assert ws.input.pointer_buttons == moy_input.PB_PRIMARY
+    assert ws.input.mods & moy_input.SHIFT

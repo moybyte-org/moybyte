@@ -195,7 +195,7 @@ var W=320,H=240,ready=false,assCart=undefined,img=null,rgba=null;
 // #42 Thread 3: the open cart's manifest input hint (null/"buttons"/"touch"/"keyboard" list;
 // null = undeclared -> show every control, today's behaviour). applyInputHint() gates the
 // virtual gamepad (#ctl) on "buttons" and the soft-keyboard summon (#kb) on "keyboard".
-var INPUT=null,padWanted=true,kbWanted=true,metaTap=false;
+var INPUT=null,padWanted=true,kbWanted=true;
 var HUD={on:false,fps:0,kb:0,el:document.getElementById("hud"),last:0};
 // Periodic perf LOG: one console.log line every PERF_MS. recv = frames the page
 // actually presented, render = the smoothed rAF rate, then the two halves of the
@@ -341,9 +341,21 @@ PERF.sb+=t1-t0;PERF.su+=t2-t1;PERF.sn++;}
 var q=[];function send(e){q.push(e);}
 function xy(cX,cY){var r=cv.getBoundingClientRect();var x=Math.floor((cX-r.left)/r.width*W),
 y=Math.floor((cY-r.top)/r.height*H);return{x:Math.max(0,Math.min(W-1,x)),y:Math.max(0,Math.min(H-1,y))};}
-var drag=false;
-cv.addEventListener("pointerdown",function(e){cv.focus();cv.setPointerCapture(e.pointerId);drag=true;
-var p=xy(e.clientX,e.clientY);send({type:"down",x:p.x,y:p.y});e.preventDefault();});
+var drag=false,mid=false;
+// The middle button is its own (mdown/mup; moving it is a hover), the
+// others the finger, with the modifiers held as it went down (Shift+click).
+cv.addEventListener("pointerdown",function(e){cv.focus();var p=xy(e.clientX,e.clientY);
+if(e.button===1){mid=true;cv.setPointerCapture(e.pointerId);send({type:"mdown",x:p.x,y:p.y});e.preventDefault();return;}
+cv.setPointerCapture(e.pointerId);drag=true;
+send({type:"down",x:p.x,y:p.y,mods:kmods(e)});e.preventDefault();});
+// The wheel, in notches (a line-mode notch is three lines, a pixel-mode one
+// 100 px, a trackpad's fractions carried to the next event), on the canvas
+// only, with the modifiers held as it turned.
+var wA=[0,0];
+cv.addEventListener("wheel",function(e){var u=e.deltaMode===1?3:(e.deltaMode===2?0.34:100);
+wA[0]+=e.deltaX/u;wA[1]+=e.deltaY/u;var dx=Math.trunc(wA[0]),dy=Math.trunc(wA[1]);
+wA[0]-=dx;wA[1]-=dy;if(dx||dy)send({type:"wheel",dx:dx,dy:dy,mods:kmods(e)});
+e.preventDefault();},{passive:false});
 cv.addEventListener("pointermove",function(e){var p=xy(e.clientX,e.clientY);
 if(!drag){
 // HOVER (2026-07-31): report the idle pointer too, or the shell's hover
@@ -356,7 +368,10 @@ if(q.length&&q[q.length-1].type==="hover")q[q.length-1]={type:"hover",x:p.x,y:p.
 else send({type:"hover",x:p.x,y:p.y});
 return;}
 send({type:"move",x:p.x,y:p.y});e.preventDefault();});
-function up(e){if(!drag)return;drag=false;send({type:"up"});if(e)e.preventDefault();}
+cv.addEventListener("mousedown",function(e){if(e.button===1)e.preventDefault();});
+function up(e){if(mid&&e&&(e.button===1||e.type==="pointercancel")){mid=false;var p=xy(e.clientX,e.clientY);
+send({type:"mup",x:p.x,y:p.y});e.preventDefault();return;}
+if(!drag)return;drag=false;send({type:"up"});if(e)e.preventDefault();}
 cv.addEventListener("pointerup",up);cv.addEventListener("pointercancel",up);
 var jE=document.getElementById("joy"),tE=document.getElementById("th"),jA=false,jP=null,
 jH={left:false,right:false,up:false,down:false};
@@ -388,72 +403,40 @@ document.getElementById("bh").addEventListener("pointerdown",function(e){send({t
 // on the play surfaces (canvas + control bar) only, so desktop right-click elsewhere is normal.
 document.addEventListener("contextmenu",function(e){var t=e.target;
 if(t===cv||(t.closest&&t.closest("#ctl")))e.preventDefault();});
-var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
-NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"," ":"a"},pH={},nH={};
-// SPACE = jump, everywhere (owner call 2026-08-14): a kid already has that habit
-// from every other game, and a scheme they must unlearn is the worse scheme. The
-// one alias in the whole map; the boards carry it too (native/moy_input/moy_kbd.c).
-// No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
-// suppression, so h-as-HOME stole the letter h from typing carts (Letter
-// Blitz). The console's key from the page is a tap on the burger button, Esc
-// during play, or a Meta tap (all the `super` event); a tool also has the bar's
-// X. Backspace is a plain typed 0x08 everywhere.
-function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
-var AN={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"};
-cv.addEventListener("keydown",function(e){if(e.key in PAN){
-// Arrows are CONTEXTUAL: while a cart owns the keyboard (INPUT = the effective
-// input hint, non-null only during play) they are the D-PAD (PICO-8 muscle
-// memory: arrows + Z/X). On SYSTEM surfaces they NAVIGATE -- the same
-// left/right/up/down buttons w/a/s/d send -- because in a browser the MOUSE is
-// the cursor (owner call 2026-07-31): steering a virtual cursor with the arrow
-// keys made the desktop feel like neither a console nor a PC, and it painted
-// cursor trails. The trackball-pan mapping stays alive in the code (pv/pump)
-// for backends that really have a trackball; nothing on this transport arms it.
-var an=AN[e.key];
-if(!nH[an]){nH[an]=true;send({type:"hold",name:an,down:true});}
-e.preventDefault();return;}
+var pH={};
+// The desk keyboard: each key goes to the console as its code and the
+// modifiers held with it (runtime/moy_input.py's key events), and what a key
+// presses beside what it types is the console's, one table for this page and
+// the simulator (runtime/host_api.py's DESK_KEYS): the arrows and Enter on
+// every surface, the letters only while a game owns the keys. The modifiers
+// go as a level too, so Super acts on its release when nothing came between
+// (the console's tap). On a Mac Cmd is Ctrl.
+// Kept for the browser: what it never delivers (Ctrl+W/T/N, Ctrl+Tab and
+// their Shift twins), and what this page leaves to it (reload, the address
+// bar, the developer tools). The console's key from the page is also a tap on
+// the burger button and Esc during play (the `super` event).
+var MAC=/Mac|iP(hone|ad|od)/.test(navigator.platform||""),MODK={Control:1,Shift:2,Alt:4,Meta:8,OS:8};
+var KC={Enter:13,Backspace:8,Tab:9,Delete:127,ArrowLeft:272,ArrowRight:273,ArrowUp:274,ArrowDown:275};
+// AltGr (a layout's third level: @ on a German Q) is Ctrl+Alt to a browser,
+// and what it types is the key, not a chord.
+function kmods(e){if(e.getModifierState&&e.getModifierState("AltGraph"))return e.shiftKey?2:0;
+return(e.ctrlKey||(MAC&&e.metaKey)?1:0)|(e.shiftKey?2:0)|(e.altKey?4:0)|(e.metaKey&&!MAC?8:0);}
+function kcode(e){var k=e.key;if(k.length==1){var c=k.charCodeAt(0);return c>=32&&c<=126?c:null;}
+if(k in KC)return KC[k];var f=/^F([1-9]|1[0-2])$/.exec(k);return f?256+(+f[1]):null;}
+function kept(e,c){var l=e.key.toLowerCase();if(c==261||c==268)return true;
+return (e.ctrlKey||e.metaKey)&&(l=="r"||l=="l"||(e.shiftKey&&(l=="i"||l=="j")));}
+cv.addEventListener("keydown",function(e){
 if(e.key=="Escape"){
 // In play (INPUT set), Esc is the system key -- the pause menu, the
 // p8-web-player expectation -- since a page rarely sees the Super key; on a
 // system surface it closes and steps back.
 send(INPUT?{type:"super"}:{type:"esc"});e.preventDefault();return;}
-// F11 is the console's full-screen key: a desk window full screen, and back.
-if(e.key=="F11"){send({type:"full"});e.preventDefault();return;}
-// Super alone (the Meta key pressed and released with no other key, so a
-// Cmd chord never opens it) is the system key from every surface.
-if(e.key=="Meta"){metaTap=true;return;}
-metaTap=false;
-// Ctrl/Cmd chords (#132): the console's control-byte shortcuts -- select-all/
-// copy/cut/paste (a/c/x/v), undo/redo (z/y), find/autocomplete/jump (f/e/g).
-// Mapped EXPLICITLY, never every letter (Ctrl+R/T/W stay the browser's), and
-// prevented so the browser's own copy/select-all never fights the console's.
-if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.length==1){
-var cc={a:1,c:3,e:5,f:6,g:7,v:22,x:24,y:25,z:26}[e.key.toLowerCase()];
-if(cc){send({type:"key",code:cc});e.preventDefault();}return;}var cd=null;
-if(e.key=="Enter")cd=13;
-else if(e.key=="Backspace")cd=8;
-else if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)cd=e.key.charCodeAt(0);
-if(cd!==null)send({type:"key",code:cd});
-// A held printable key must STREAM in game mode (the device's raw matrix
-// reports a held key every frame; browser autorepeat is ~30Hz and gappy --
-// key() read per frame flapped code/0/code). khold latches the physical hold;
-// the server feeds it every frame outside text mode.
-if(cd!==null&&cd>=32&&!e.repeat)send({type:"khold",code:cd,down:true});
-// Enter/Z/X are BUTTONS (run/a/b): hold semantics, not one-frame press edges --
-// a p8 cart holding jump reads btn() the whole hold; btnp() is the edge anyway.
-var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
-if(s&&!nH[s]){nH[s]=true;send({type:"hold",name:s,down:true});}
-var n=nv(e);if(n&&!nH[n]){nH[n]=true;send({type:"hold",name:n,down:true});}
-if(s||n||cd!==null)e.preventDefault();});
-cv.addEventListener("keyup",function(e){if(e.key=="Meta"){if(metaTap)send({type:"super"});metaTap=false;return;}
-if(e.key in PAN){delete pH[e.key];
-var an=AN[e.key];if(nH[an]){delete nH[an];send({type:"hold",name:an,down:false});}
-e.preventDefault();return;}
-if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)
-send({type:"khold",code:e.key.charCodeAt(0),down:false});
-var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
-if(s&&nH[s]){delete nH[s];send({type:"hold",name:s,down:false});}
-var n=nv(e);if(n&&nH[n]){delete nH[n];send({type:"hold",name:n,down:false});}});
+if(e.key in MODK){send({type:"mods",mods:kmods(e)});return;}
+var c=kcode(e);if(c===null||kept(e,c))return;
+if(!e.repeat||c<256)send({type:"kd",code:c,mods:kmods(e)});e.preventDefault();});
+cv.addEventListener("keyup",function(e){
+if(e.key in MODK){send({type:"mods",mods:kmods(e)});return;}
+var c=kcode(e);if(c!==null)send({type:"ku",code:c,mods:kmods(e)});});
 // Soft keyboard (#42 Thread 2): #kb (in the bottom bar's middle cluster, beside the burger)
 // focuses the hidden #kbin so a touch device's on-screen keyboard opens; it never appears on
 // desktop (#ctl is media-query hidden there) and #kbin's events are entirely separate from

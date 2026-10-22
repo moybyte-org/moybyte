@@ -11,6 +11,8 @@
 #   HeldPoint                    the no-news contract on its own
 #   map_point                    a raw point onto the glass
 #   HidMachine                   the BLE keyboard central's machine over a fake stack
+#   event                        a key event: its code and modifiers
+#   typed                        the byte a key event types
 """The input table (native/moy_input) on CPython, by ctypes: the module
 `moy_input` as the boards and the browser import it, name for name
 (docs/kernel_survival_2026-10.md section 4.1). A VM's `import moy_input` is the
@@ -68,6 +70,15 @@ CURSOR_IDLE_MS = 2000   # hide the trackball cursor after this long with no move
 # How long a touchscreen pointer OUTLIVES the finger that made it: a cart wants
 # a mouse, and a released drag must not read as "no pointer" on the next frame.
 POINTER_LINGER_MS = 1500
+
+# A key event (moy_input.h): the code in the low 16 bits, the modifiers held
+# with it above MODS_AT; `typed` is the byte it types.
+MODS_AT = 16
+CTRL, SHIFT, ALT, SUPER = 1, 2, 4, 8
+KEY_F1 = 0x101                  # ... KEY_F1 + 11 is F12
+KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN = 0x110, 0x111, 0x112, 0x113
+# The pointer's buttons, a bit each.
+PB_PRIMARY, PB_MIDDLE, PB_SECONDARY = 1, 2, 4
 
 P_NONE = 0
 P_LIVE = 1                     # there is a pointer at all
@@ -139,7 +150,19 @@ _SIGS = (
     ("moy_input_news", [_P, _PU32], _I),
     ("moy_input_source_name", [_P, _U32, ctypes.c_char_p, ctypes.c_size_t], _I),
     ("moy_input_last_key", [_P], _I32),
+    ("moy_input_key_event", [_P], _I32),
     ("moy_input_set_last_key", [_P, _I32], None),
+    ("moy_input_typed", [_I32], _I32),
+    ("moy_input_set_mods", [_P, _U32, _U8], _I),
+    ("moy_input_source_mods", [_P, _U32], _U8),
+    ("moy_input_mods", [_P], _U8),
+    ("moy_input_cart_keys", [_P], _B),
+    ("moy_input_scroll", [_P, _U32, _I32, _I32], _I),
+    ("moy_input_set_pointer_buttons", [_P, _U32, _U8], _I),
+    ("moy_input_source_pointer_buttons", [_P, _U32], _U8),
+    ("moy_input_wheel", [_P, ctypes.POINTER(_I32), ctypes.POINTER(_I32)], None),
+    ("moy_input_pointer_buttons", [_P, ctypes.POINTER(_U8)], _U8),
+    ("moy_input_set_cart_keys", [_P, _B], None),
     ("moy_input_players", [_P, ctypes.POINTER(_U8)], _U8),
     ("moy_input_multi", [_P], _B),
     ("moy_input_text_mode", [_P], _B),
@@ -244,6 +267,29 @@ class InputSource:
         hands the slot to whoever else is still typing."""
         _lib().moy_input_set_key(self.state._t, self.h, value or 0)
 
+    @property
+    def mods(self):
+        return _lib().moy_input_source_mods(self.state._t, self.h)
+
+    @mods.setter
+    def mods(self, value):
+        """The modifiers this source holds now (CTRL | SHIFT | ALT | SUPER)."""
+        _check(_lib().moy_input_set_mods(self.state._t, self.h, int(value) & 0xFF), "mods")
+
+    @property
+    def pointer_buttons(self):
+        return _lib().moy_input_source_pointer_buttons(self.state._t, self.h)
+
+    @pointer_buttons.setter
+    def pointer_buttons(self, held):
+        """The pointer buttons this source holds now (PB_*)."""
+        _check(_lib().moy_input_set_pointer_buttons(self.state._t, self.h, int(held) & 0xFF),
+               "pointer_buttons")
+
+    def scroll(self, dx, dy):
+        """Wheel notches, across and down, added to this frame's."""
+        _check(_lib().moy_input_scroll(self.state._t, self.h, int(dx), int(dy)), "scroll")
+
     def point(self, x, y, down, edge=False, fresh=True):
         """This source's pointer sample, standing until it writes another."""
         _check(_lib().moy_input_point(self.state._t, self.h, int(x), int(y), bool(down),
@@ -271,6 +317,7 @@ class InputTable:
             raise MemoryError("moy_input: no table")
         self._srcs = {}
         self._m = (_U32(), _U32())
+        self._w = (_I32(), _I32())
         self._default = self.source("local")
 
     def __del__(self):
@@ -334,6 +381,54 @@ class InputTable:
     @last_key.setter
     def last_key(self, value):
         _lib().moy_input_set_last_key(self._t, value or 0)
+
+    @property
+    def key_event(self):
+        """The frame's key event: its code and the modifiers held with it.
+        `last_key` is the byte it types."""
+        return _lib().moy_input_key_event(self._t)
+
+    @key_event.setter
+    def key_event(self, value):
+        _lib().moy_input_set_last_key(self._t, value or 0)
+
+    @property
+    def mods(self):
+        """The key event's modifiers and every source's held ones."""
+        return _lib().moy_input_mods(self._t)
+
+    @property
+    def wheel_x(self):
+        """The frame's wheel notches across (positive right), every source's."""
+        _lib().moy_input_wheel(self._t, ctypes.byref(self._w[0]), ctypes.byref(self._w[1]))
+        return self._w[0].value
+
+    @property
+    def wheel_y(self):
+        """The frame's wheel notches down (positive down), every source's."""
+        _lib().moy_input_wheel(self._t, ctypes.byref(self._w[0]), ctypes.byref(self._w[1]))
+        return self._w[1].value
+
+    @property
+    def pointer_buttons(self):
+        """The pointer's buttons held this frame (PB_*), every source's."""
+        return _lib().moy_input_pointer_buttons(self._t, None)
+
+    @property
+    def pointer_pressed(self):
+        """The pointer's buttons that went down this frame."""
+        p = _U8()
+        _lib().moy_input_pointer_buttons(self._t, ctypes.byref(p))
+        return p.value
+
+    @property
+    def cart_keys(self):
+        """A game owns the keyboard: a desk keyboard's letters are its buttons too."""
+        return _lib().moy_input_cart_keys(self._t)
+
+    @cart_keys.setter
+    def cart_keys(self, on):
+        _lib().moy_input_set_cart_keys(self._t, bool(on))
 
     @property
     def text_mode(self):
@@ -480,6 +575,16 @@ def pointer_state(inp, out):
 # kernel (native/moy_input/moy_input_task.c); the host has none, so each is
 # None, and `kick()` -- one pass of them, once a frame -- does nothing. `kernel()`
 # is the drivers' table, the one a board's console reads.
+
+def event(code, mods=0):
+    """The key event of `code` typed with `mods` held."""
+    return code | (mods << MODS_AT)
+
+
+def typed(ev):
+    """The byte key event `ev` types, 0 for none."""
+    return _lib().moy_input_typed(ev)
+
 
 def keyboard():
     return None
@@ -923,8 +1028,9 @@ _HID_SIGS = (
      ctypes.c_size_t),
     ("moy_hid_decode", [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(_U8),
                         ctypes.POINTER(_U8), ctypes.POINTER(_U8)], _B),
+    ("moy_hid_event", [_U8, _U8, _B], _I32),
     ("moy_hid_keycode", [_U8, _U8, _B], _I32),
-    ("moy_hid_buttons_for_key", [_I32], _U32),
+    ("moy_hid_buttons_for_key", [_I32, _B], _U32),
     ("moy_hid_take_mouse", [_PHID, ctypes.POINTER(_I32), ctypes.POINTER(_I32),
                             ctypes.POINTER(_U8)], _B),
 )
@@ -956,8 +1062,14 @@ def usage_to_keycode(usage, modifiers=0, caps=False):
     return _lib().moy_hid_keycode(usage, modifiers, caps)
 
 
-def hid_buttons_for_key(key):
-    bits = _lib().moy_hid_buttons_for_key(key)
+def usage_to_event(usage, modifiers=0, caps=False):
+    """A usage typed with a report's modifier byte -> its key event."""
+    return _lib().moy_hid_event(usage, modifiers, caps)
+
+
+def hid_buttons_for_key(key, cart=True):
+    """The buttons a typed byte presses; `cart`, a game owns the keys."""
+    bits = _lib().moy_hid_buttons_for_key(key, bool(cart))
     return tuple(n for i, n in enumerate(NAMES) if bits & (1 << i))
 
 

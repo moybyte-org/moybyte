@@ -186,46 +186,72 @@ def run_live(driver, dt, scale):
     # T-Deck's (whose cursor really is a trackball). An idle move hovers, a drag
     # drags; the keyboard steers nothing but the game.
     #
-    # ON A HOST WITH ARROW KEYS THE SCHEME IS ARROWS + Z/X (owner call
-    # 2026-08-14), which is PICO-8's and every emulator's. It is deliberately
-    # NOT the T-Deck's WASD + L/K: that board has no arrow keys at all, and Z/X
-    # sit on its bottom row under the same thumb WASD needs. Same console, two
-    # keyboards, two ergonomics -- the shared part is what the BUTTONS are.
-    #
-    # The browser page has done this since 2026-07-31 (page_core.html's AN/SC);
-    # this file did not, and steered the trackball with the arrows instead. That
-    # is the split being closed here: two hosts, one scheme.
-    arrow_keys = {pygame.K_LEFT: "left", pygame.K_RIGHT: "right",
-                  pygame.K_UP: "up", pygame.K_DOWN: "down"}
-    # WASD steers too, so a kid who learned on the T-Deck is not lost here.
-    # Aliasing a DIRECTION is cheap -- unlike a letter that also jumps, it
-    # steals nothing from a typing cart, and in the editor the arrows and the
-    # letters part ways (see the branch below).
-    nav_keys = dict(arrow_keys)
-    nav_keys.update({pygame.K_a: "left", pygame.K_d: "right",
-                     pygame.K_w: "up", pygame.K_s: "down"})
-    shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a",
-                 pygame.K_SPACE: "a", pygame.K_x: "b"}
-    # Super (the GUI key; Cmd on a Mac) is the console's system key from every
-    # surface: the system menu, or the pause menu over a fullscreen game.
-    super_keys = tuple(getattr(pygame, n) for n in ("K_LSUPER", "K_RSUPER", "K_LGUI",
-                                                     "K_RGUI", "K_LMETA", "K_RMETA")
-                       if hasattr(pygame, n))
+    # THE KEYBOARD is the browser page's: every key goes to the driver as its
+    # code and the modifiers held with it (ConsoleDriver.key_down), which
+    # presses what it presses beside typing it -- arrows + Z/X, PICO-8's and
+    # every emulator's (owner call 2026-08-14), the letters only while a cart
+    # owns the keys (runtime/host_api.py's DESK_KEYS and CART_KEYS). The
+    # modifiers go as a level too, so Super acts on its release (the tap).
+    from runtime import moy_input as mi
+    mod_keys = {}
+    for names, bit in ((("K_LCTRL", "K_RCTRL"), mi.CTRL), (("K_LSHIFT", "K_RSHIFT"), mi.SHIFT),
+                       (("K_LALT", "K_RALT"), mi.ALT),
+                       (("K_LSUPER", "K_RSUPER", "K_LGUI", "K_RGUI", "K_LMETA", "K_RMETA"),
+                        mi.SUPER)):
+        for n in names:
+            if hasattr(pygame, n):
+                mod_keys[getattr(pygame, n)] = bit
+    named = {pygame.K_RETURN: 0x0D, pygame.K_KP_ENTER: 0x0D, pygame.K_BACKSPACE: 0x08,
+             pygame.K_TAB: 0x09, pygame.K_DELETE: 0x7F, pygame.K_LEFT: mi.KEY_LEFT,
+             pygame.K_RIGHT: mi.KEY_RIGHT, pygame.K_UP: mi.KEY_UP, pygame.K_DOWN: mi.KEY_DOWN}
+    for n in range(12):
+        named[getattr(pygame, "K_F%d" % (n + 1))] = mi.KEY_F1 + n
+    held_mods = set()
+
+    def mods_now():
+        m = 0
+        for k in held_mods:
+            m |= mod_keys[k]
+        return m
+
+    def code_of(ev, mods):
+        """The byte a key types with Shift applied and Ctrl not, or a KEY_*."""
+        if ev.key in named:
+            return named[ev.key]
+        if mods & (mi.CTRL | mi.ALT | mi.SUPER) and 0x20 <= ev.key <= 0x7E:
+            c = ev.key
+            if mods & mi.SHIFT and 0x61 <= c <= 0x7A:
+                c -= 32
+            return c
+        if ev.unicode and 0x20 <= ord(ev.unicode) <= 0x7E:
+            return ord(ev.unicode)
+        return None
+
     mouse_down = False
     running = True
     while running:
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
-            elif ev.type == pygame.KEYDOWN and ev.key in super_keys:
-                driver.system_key()
-            elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_F11:
-                driver.full_key()         # a desk window full screen, and back
-            elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE \
-                    and driver.takes_escape():
-                driver.escape()           # a menu closes, Settings or an app steps back
+            elif ev.type in (pygame.KEYDOWN, pygame.KEYUP) and ev.key in mod_keys:
+                (held_mods.add if ev.type == pygame.KEYDOWN else held_mods.discard)(ev.key)
+                driver.set_mods(mods_now())
+            elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                if driver.takes_escape() or driver.in_code_editor():
+                    driver.escape()       # a menu closes, Settings or an app steps back
+                elif driver.in_text_mode():
+                    driver.type_char(0x1B)   # a cart taking text owns its Esc
+                else:
+                    running = False       # with no menu open, Esc quits the simulator
+            elif ev.type == pygame.MOUSEWHEEL:
+                # notches, positive right and down (SDL's y is positive up)
+                driver.wheel(ev.x, -ev.y, mods_now())
+            elif ev.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP) and ev.button == 2:
+                driver.middle(ev.pos[0] // scale, ev.pos[1] // scale,
+                              ev.type == pygame.MOUSEBUTTONDOWN)
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 mouse_down = True
+                driver.set_mods(mods_now())   # Shift+click extends a selection
                 driver.touch(ev.pos[0] // scale, ev.pos[1] // scale)   # tap
             elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
                 mouse_down = False
@@ -236,55 +262,13 @@ def run_live(driver, dt, scale):
                 else:
                     # THE MOUSE IS THE CURSOR here, exactly as in the browser
                     # (owner call): an idle move is a hover, so the desk icons
-                    # and card grids light up under it. Nothing steers a virtual
-                    # cursor with the keyboard on this tier any more.
+                    # and card grids light up under it.
                     driver.hover(ev.pos[0] // scale, ev.pos[1] // scale)
-            elif ev.type == pygame.KEYDOWN and ev.key in arrow_keys \
-                    and driver.in_code_editor():
-                # ARROWS IN THE EDITOR still move the caret: they arrive as held
-                # direction buttons now, and ConsoleDriver.frame translates those
-                # back into a nav step while the code editor is open (host_api's
-                # "ARROWS ON A MOUSE TIER" block). ARROWS ONLY -- W/A/S/D must
-                # fall through to the typing branch below, or you cannot write
-                # `draw` in the editor without the caret running away.
-                driver.hold(arrow_keys[ev.key], True)
-            elif ev.type == pygame.KEYDOWN and driver.in_code_editor():
-                # Code editor: letters type; Esc closes.
-                if ev.key == pygame.K_ESCAPE:
-                    driver.escape()
-                elif ev.key == pygame.K_RETURN:
-                    driver.type_char(0x0D)
-                elif ev.key == pygame.K_BACKSPACE:
-                    driver.type_char(0x08)
-                elif ev.key == pygame.K_TAB:
-                    driver.type_char(0x09)
-                elif ev.unicode and 0x20 <= ord(ev.unicode) <= 0x7E:
-                    driver.type_char(ord(ev.unicode))
-            elif ev.type == pygame.KEYDOWN and driver.in_text_mode():
-                # A running cart that asked for text input via textmode(True) (#38/#42):
-                # route typed unicode + Enter/Backspace/Esc to the cart's key() exactly
-                # as the code editor does. The cart owns the meaning of those keys (e.g.
-                # a password field: Enter=connect, Backspace=delete, Esc=back),
-                # so Esc does NOT quit the simulator here -- the cart handles it.
-                if ev.key == pygame.K_RETURN:
-                    driver.type_char(0x0D)
-                elif ev.key == pygame.K_BACKSPACE:
-                    driver.type_char(0x08)
-                elif ev.key == pygame.K_ESCAPE:
-                    driver.type_char(0x1B)
-                elif ev.unicode and 0x20 <= ord(ev.unicode) <= 0x7E:
-                    driver.type_char(ord(ev.unicode))
-            elif ev.type == pygame.KEYDOWN:
-                if ev.key == pygame.K_ESCAPE:
-                    running = False       # with no menu open, Esc quits the simulator
-                elif ev.key == pygame.K_BACKSPACE:
-                    driver.type_char(0x08)           # a plain key: the cart's key() reads it
-                elif ev.key in shortcuts:
-                    driver.press(shortcuts[ev.key])
-                elif ev.key in nav_keys:
-                    driver.hold(nav_keys[ev.key], True)
-            elif ev.type == pygame.KEYUP and ev.key in nav_keys:
-                driver.hold(nav_keys[ev.key], False)
+            elif ev.type in (pygame.KEYDOWN, pygame.KEYUP):
+                mods = mods_now()
+                code = code_of(ev, mods)
+                if code is not None:
+                    (driver.key_down if ev.type == pygame.KEYDOWN else driver.key_up)(code, mods)
         # (No trackball nudge: this tier's cursor IS the mouse. ConsoleDriver.pan
         # stays for backends that really have a trackball -- the T-Deck's own.)
         driver.frame(dt)

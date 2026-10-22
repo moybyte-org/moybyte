@@ -27,6 +27,32 @@
 // key is queued and delivered as the source's level for exactly one frame, a
 // zero frame between two equal keys so an edge reader sees both.
 //
+// A KEY EVENT is the key and the modifiers held with it, one int32: the code
+// in the low 16 bits, MOY_INPUT_MOD_* above MOY_INPUT_MODS_AT. The code is the
+// byte the key types with Shift applied and Ctrl not ('z' for Ctrl+Z, '!'
+// for Shift+1), or a MOY_INPUT_KEY_* above the bytes for a key that types
+// none. A source's key, its queue and last_key hold events; a byte with no
+// modifiers is the event of a key typed alone, so a producer that knows none
+// writes bytes. moy_input_typed is what an event types: Ctrl and a letter the
+// control byte (Ctrl+Z 0x1A), any other Ctrl, Alt or Super chord nothing, so
+// a shortcut reads the event and a text surface reads the byte.
+//
+// THE MODIFIERS a source holds are a level of their own (moy_input_set_mods),
+// so a button pressed with Ctrl held reads it too: moy_input_mods is the
+// frame's key event's modifiers and every source's held ones.
+//
+// THE WHEEL and THE POINTER'S BUTTONS. A source adds its wheel's notches
+// (moy_input_scroll: across and down, positive right and down) and holds its
+// pointer's buttons as a level (MOY_INPUT_PB_*: the primary is also the
+// sample's `down`); the merge sums the notches into the frame's and takes
+// the buttons' press edges (one pressed and let go between two merges is held
+// for one frame). A mouse beside a keyboard -- the host's, the
+// browser's, a BLE mouse -- writes them on its own source.
+//
+// CART KEYS. While a game owns the keyboard (the console says, every frame)
+// a desk keyboard's letters are the game's buttons too (WASD the d-pad, Z X
+// and Space A and B); on every other surface they are keys and nothing else.
+//
 // THE POINTER. A source may also hold a pointer sample -- a place, down, the
 // press edge and whether the hardware measured it this frame -- written like
 // its buttons. The frame's sample is the merge: the newest sample of a source
@@ -84,6 +110,32 @@ enum {
     MOY_INPUT_P_CLICK = 4,
 };
 
+#define MOY_INPUT_MODS_AT 16
+enum {
+    MOY_INPUT_MOD_CTRL = 1,
+    MOY_INPUT_MOD_SHIFT = 2,
+    MOY_INPUT_MOD_ALT = 4,
+    MOY_INPUT_MOD_SUPER = 8,
+};
+enum {
+    MOY_INPUT_PB_PRIMARY = 1,
+    MOY_INPUT_PB_MIDDLE = 2,
+    MOY_INPUT_PB_SECONDARY = 4,
+};
+// The keys that type no byte.
+enum {
+    MOY_INPUT_KEY_F1 = 0x101,       // ... MOY_INPUT_KEY_F1 + 11 is F12
+    MOY_INPUT_KEY_LEFT = 0x110,
+    MOY_INPUT_KEY_RIGHT,
+    MOY_INPUT_KEY_UP,
+    MOY_INPUT_KEY_DOWN,
+};
+#define MOY_INPUT_EVENT(code, mods) ((int32_t)(code) | ((int32_t)(mods) << MOY_INPUT_MODS_AT))
+#define MOY_INPUT_CODE(ev) ((int32_t)(ev) & 0xFFFF)
+#define MOY_INPUT_MODS(ev) ((uint8_t)(((uint32_t)(ev) >> MOY_INPUT_MODS_AT) & 0xFFu))
+// The byte event `ev` types, 0 for none.
+int32_t moy_input_typed(int32_t ev);
+
 extern const char *const MOY_INPUT_NAMES[MOY_INPUT_BUTTONS];
 
 typedef struct moy_input moy_input_t;
@@ -138,9 +190,14 @@ int moy_input_set_player(moy_input_t *t, uint32_t h, uint8_t player);
 int moy_input_set_held(moy_input_t *t, uint32_t h, uint8_t button, bool held);
 int moy_input_set_mask(moy_input_t *t, uint32_t h, uint32_t held);   // the whole held set
 int moy_input_release(moy_input_t *t, uint32_t h);                   // this source holds nothing
-int moy_input_set_key(moy_input_t *t, uint32_t h, int32_t key);      // the key, as a level; drops the queue
+int moy_input_set_key(moy_input_t *t, uint32_t h, int32_t key);      // the key event, as a level; drops the queue
 int moy_input_key(moy_input_t *t, uint32_t h, int32_t key);          // one-shot: one frame
+int moy_input_set_mods(moy_input_t *t, uint32_t h, uint8_t mods);    // the modifiers it holds now
+int moy_input_scroll(moy_input_t *t, uint32_t h, int32_t dx, int32_t dy);  // wheel notches, added
+int moy_input_set_pointer_buttons(moy_input_t *t, uint32_t h, uint8_t held);
 int moy_input_source_key(const moy_input_t *t, uint32_t h, int32_t *key);
+uint8_t moy_input_source_mods(const moy_input_t *t, uint32_t h);
+uint8_t moy_input_source_pointer_buttons(const moy_input_t *t, uint32_t h);
 uint32_t moy_input_source_held(const moy_input_t *t, uint32_t h);
 // This source's pointer sample, which stands until it writes another.
 int moy_input_point(moy_input_t *t, uint32_t h, int32_t x, int32_t y, bool down, bool edge,
@@ -169,8 +226,17 @@ uint32_t moy_input_kept(const moy_input_t *t);   // the press edges a paced cart
 // the first ask after it, 0 until a merge brings more. The console reads the
 // input in use from it (the hints draw that input's keys).
 int moy_input_news(moy_input_t *t, uint32_t *h);
-int32_t moy_input_last_key(const moy_input_t *t);
-void moy_input_set_last_key(moy_input_t *t, int32_t key);   // a direct write; the next source write heals it
+int32_t moy_input_last_key(const moy_input_t *t);    // the byte the frame's key event types
+int32_t moy_input_key_event(const moy_input_t *t);   // the frame's key event
+void moy_input_set_last_key(moy_input_t *t, int32_t key);   // a direct write of an event; the next source write heals it
+uint8_t moy_input_mods(const moy_input_t *t);
+// The frame's wheel notches, every source's summed.
+void moy_input_wheel(const moy_input_t *t, int32_t *dx, int32_t *dy);
+// The pointer's buttons held this frame, every source's; `pressed` (NULL:
+// not asked) the ones that went down at this merge.
+uint8_t moy_input_pointer_buttons(const moy_input_t *t, uint8_t *pressed);
+bool moy_input_cart_keys(const moy_input_t *t);
+void moy_input_set_cart_keys(moy_input_t *t, bool on);
 // The distinct player slots the sources sit on, in the order a source first
 // took each; returns how many (at least one).
 uint8_t moy_input_players(const moy_input_t *t, uint8_t *out);

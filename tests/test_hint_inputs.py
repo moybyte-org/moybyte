@@ -146,7 +146,7 @@ def test_under_touch_the_rows_take_the_hints_band(tmp_path):
         ui_draw.input_kind(kind)
         cv = make_system_canvas(320, 240)
         ctx = ui_draw.ui_context()
-        inp = array("i", [0] * 6)
+        inp = array("i", [0] * ui_draw.UI_IN_LEN)
         for _ in range(2):
             ui_draw.ui_frame(ctx, cv, th, None, inp)
             ui.page("")

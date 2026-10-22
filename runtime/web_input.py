@@ -47,7 +47,8 @@ def apply_ws_text(payload, apply):
 
 def apply_events(events, input, pointer, on_press=None, on_pan=None,
                  on_key=None, on_esc=None, on_hold=None, on_key_hold=None,
-                 on_super=None, on_full=None):
+                 on_super=None, on_full=None, on_key_down=None, on_key_up=None,
+                 on_mods=None, on_wheel=None, on_middle=None):
     """Inject a batch of browser events into an InputState + Pointer. Each event is fully
     guarded (a malformed one is skipped, never raised) so a buggy client can't crash the loop.
 
@@ -59,6 +60,13 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
       {"type":"hold","name":..,"down":bool} -> held button (on_hold, else input.set_button)
       {"type":"hold",...,"src":"pad"} -> the same from the page's gamepad,
                                         written to the "pad" source
+      {"type":"kd","code":..,"mods":..} -> a desk keyboard's key down: its
+                                        code and modifiers (on_key_down)
+      {"type":"ku","code":..,"mods":..} -> ...and up (on_key_up)
+      {"type":"mods","mods":..}      -> the modifiers it holds now (on_mods)
+      {"type":"wheel","dx":..,"dy":..,"mods":..} -> wheel notches (on_wheel)
+      {"type":"mdown"|"mup","x":..,"y":..} -> the middle button (on_middle)
+      a "down" with "mods" says the modifiers held as it went down
       {"type":"key","code":<ascii>}  -> typed key (on_key)
       {"type":"esc"}                 -> close panel (on_esc)
       {"type":"full"}                -> F11 (on_full): a desk window full
@@ -70,6 +78,8 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
         try:
             t = ev.get("type")
             if t == "down":
+                if isinstance(ev.get("mods"), int) and on_mods is not None:
+                    on_mods(ev["mods"] & 0xFF)
                 pointer.place(int(ev.get("x", 0)), int(ev.get("y", 0)))
                 pointer.down = True
                 pointer.click = True
@@ -117,6 +127,24 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                 code = ev.get("code")
                 if isinstance(code, int) and 0 <= code <= 0xFF and on_key is not None:
                     on_key(code)
+            elif t == "kd" or t == "ku":
+                code = ev.get("code")
+                mods = ev.get("mods", 0)
+                fn = on_key_down if t == "kd" else on_key_up
+                if (isinstance(code, int) and 0 < code <= 0xFFFF and isinstance(mods, int)
+                        and fn is not None):
+                    fn(code, mods & 0xFF)
+            elif t == "wheel":
+                if on_wheel is not None:
+                    on_wheel(int(ev.get("dx", 0)), int(ev.get("dy", 0)),
+                             int(ev.get("mods", 0)) & 0xFF)
+            elif t == "mdown" or t == "mup":
+                if on_middle is not None:
+                    on_middle(int(ev.get("x", 0)), int(ev.get("y", 0)), t == "mdown")
+            elif t == "mods":
+                mods = ev.get("mods", 0)
+                if isinstance(mods, int) and on_mods is not None:
+                    on_mods(mods & 0xFF)
             elif t == "khold":
                 # A physically HELD printable key (browser keydown/keyup edges):
                 # outside text mode the driver latches it so key() streams every

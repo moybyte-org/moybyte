@@ -14,7 +14,7 @@ from ws_helpers import build_ws
 def _menu(th, kinds):
     cv = make_system_canvas(320, 240)
     ctx = ui_draw.ui_context()
-    inp = array("i", [0] * 6)
+    inp = array("i", [0] * ui_draw.UI_IN_LEN)
     for _ in range(2):
         ui_draw.ui_frame(ctx, cv, th, None, inp)
         ui.page("")
@@ -53,7 +53,7 @@ def test_moy_draws_where_a_part_names_it(tmp_path):
         cv = make_system_canvas(320, 240)
         ctx = ui_draw.ui_context()
         for _ in range(2):
-            ui_draw.ui_frame(ctx, cv, th, None, array("i", [0] * 6))
+            ui_draw.ui_frame(ctx, cv, th, None, array("i", [0] * ui_draw.UI_IN_LEN))
             ui.page("")
             if icon:
                 ui.icon("moy")

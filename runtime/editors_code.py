@@ -1,3 +1,8 @@
+# Map (grep -n a name to jump there):
+#   _is_word_char                what a word is made of
+#   _def_kw_name                 the symbol a def/class line names
+#   CodeEditor                   the text buffer, its caret, selection and view
+#   TextMouse                    a mouse over a text editor: clicks, selection, autoscroll
 """CodeEditor -- editable text buffer + cursor (the on-device code editor, #3).
 Split out of editors.py (which re-exports it); pure logic, dependency-free."""
 
@@ -263,6 +268,34 @@ class CodeEditor:
 
     def clear_select(self):
         self.sel = None
+
+    def select_word(self, row, col):
+        """Select the word at (row, col) -- an identifier's run, or the one
+        other character there -- the caret at its end."""
+        self.row = max(0, min(len(self.lines) - 1, int(row)))
+        ln = self.lines[self.row]
+        c = max(0, min(len(ln), int(col)))
+        if c == len(ln) and c > 0:
+            c -= 1
+        c0 = c1 = c
+        if c < len(ln) and _is_word_char(ln[c]):
+            while c0 > 0 and _is_word_char(ln[c0 - 1]):
+                c0 -= 1
+            while c1 < len(ln) and _is_word_char(ln[c1]):
+                c1 += 1
+        elif c < len(ln):
+            c1 = c + 1
+        self.sel = (self.row, c0)
+        self.col = c1
+
+    def select_line(self, row):
+        """Select line `row` whole, through its end of line where one follows."""
+        r = max(0, min(len(self.lines) - 1, int(row)))
+        self.sel = (r, 0)
+        if r + 1 < len(self.lines):
+            self.row, self.col = r + 1, 0
+        else:
+            self.row, self.col = r, len(self.lines[r])
 
     def has_selection(self):
         return self.sel is not None and self.sel != (self.row, self.col)
@@ -601,3 +634,129 @@ class CodeEditor:
         self.col = max(0, min(len(self.lines[self.row]), int(col)))
         self.sel = None
         self._scroll()
+
+
+class TextMouse:
+    """A mouse over a text editor: the Code tab's and an editor handle's
+    (Notes'), so both answer it alike. The left button's press places the
+    caret, a drag selects, Shift+press extends the selection, and a second and
+    a third press on the same cell within CLICK_MS select its word and its
+    line. The middle button autoscrolls: pressed over the text it drops an
+    anchor, and the pointer above or below it scrolls up or down at a speed
+    that grows with the distance past a dead zone of a line, up to MAX rows a
+    second; a click (press and release without moving) latches it until the
+    next click or any key, a press and drag runs it while held.
+
+    Positions arrive as document cells (row, col) from the surface's own hit
+    test, and the anchor and the pointer in its pixels; `now` (ms) and `dt`
+    (s) are the caller's, so a trajectory is exact. A frame allocates nothing:
+    the speed is integer milli-rows."""
+
+    CLICK_MS = 400
+    SLOP = 4            # px the middle button may travel and still be a click
+    SPEED = 8           # rows a second for each line height past the dead zone
+    MAX = 60            # rows a second at most
+
+    def __init__(self):
+        self.clicks = 0
+        self._at_r = self._at_c = -1
+        self._t = 0
+        self.dragging = False
+        self.anchor_x = self.anchor_y = 0
+        self.armed = False          # an autoscroll runs (its anchor shows)
+        self.latched = False
+        self._moved = False
+        self._acc = 0               # milli-rows not yet scrolled
+
+    # -- the left button -------------------------------------------------------
+
+    def press(self, ed, row, col, shift, now):
+        """The left button went down on document cell (row, col); a click
+        ends a latched autoscroll too."""
+        if self.latched:
+            self.stop()
+        row = max(0, min(len(ed.lines) - 1, int(row)))
+        col = max(0, min(len(ed.lines[row]), int(col)))
+        same = row == self._at_r and col == self._at_c
+        dt = (now - self._t) & 0x3FFFFFFF
+        self.clicks = self.clicks % 3 + 1 if same and dt <= self.CLICK_MS else 1
+        self._at_r, self._at_c, self._t = row, col, now
+        self.dragging = True
+        if shift and self.clicks == 1:
+            ed.begin_select()
+            ed.row, ed.col = row, col
+        elif self.clicks == 2:
+            ed.select_word(row, col)
+        elif self.clicks == 3:
+            ed.select_line(row)
+        else:
+            ed.row, ed.col = row, col
+            ed.sel = (row, col)         # the drag's anchor; nothing selected yet
+
+    def drag(self, ed, row, col):
+        """The left button held over cell (row, col): the selection follows.
+        True when it moved."""
+        if not self.dragging:
+            return False
+        row = max(0, min(len(ed.lines) - 1, int(row)))
+        col = max(0, min(len(ed.lines[row]), int(col)))
+        if self.clicks > 1 or (row, col) == (ed.row, ed.col):
+            return False
+        ed.begin_select()
+        ed.row, ed.col = row, col
+        return True
+
+    def release(self, ed=None):
+        self.dragging = False
+        if ed is not None and ed.sel is not None and not ed.has_selection():
+            ed.sel = None
+
+    # -- the middle button -----------------------------------------------------
+
+    def middle(self, x, y, down):
+        """The middle button went down (`down`) or up at (x, y) over the text."""
+        if down:
+            if self.latched:
+                self.stop()             # the next click ends a latched run
+                return
+            self.armed = True
+            self.anchor_x, self.anchor_y = int(x), int(y)
+            self._moved = False
+            self._acc = 0
+        elif self.armed:
+            if self._moved:
+                self.stop()             # a press and drag runs only while held
+            else:
+                self.latched = True     # a click latches it
+
+    def stop(self):
+        """End an autoscroll (a key does, and the next click)."""
+        self.armed = False
+        self.latched = False
+        self._acc = 0
+
+    def autoscroll(self, ed, x, y, dt, lh):
+        """One frame of an autoscroll with the pointer at (x, y), lines `lh`
+        pixels tall: the rows it scrolled, negative up."""
+        if not self.armed:
+            return 0
+        d = int(y) - self.anchor_y
+        if not self._moved and (abs(d) > self.SLOP or abs(int(x) - self.anchor_x) > self.SLOP):
+            self._moved = True
+        lh = max(1, int(lh))
+        past = abs(d) - lh
+        if past <= 0:
+            self._acc = 0
+            return 0
+        v = past * self.SPEED * 1000 // lh
+        if v > self.MAX * 1000:
+            v = self.MAX * 1000
+        self._acc += v * int(dt * 1000) // 1000
+        rows = self._acc // 1000
+        if not rows:
+            return 0
+        self._acc -= rows * 1000
+        rows = rows if d > 0 else -rows
+        top = ed.top
+        ed.scroll(rows, 0)
+        return ed.top - top
