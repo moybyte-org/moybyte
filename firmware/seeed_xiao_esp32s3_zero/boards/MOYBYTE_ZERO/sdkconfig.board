@@ -140,3 +140,12 @@ CONFIG_ETH_USE_SPI_ETHERNET=
 # home network a kid's browser is on, by passphrase, and raises its own setup
 # access point.
 CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=
+
+# --- Compiled for size -------------------------------------------------------
+# MicroPython's sdkconfig.base compiles every esp32 board for speed (-O2), and
+# the console boards keep it: their frame is the CPU's. This board runs no
+# frame. Its work is a socket serving the baked bundle out of flash and a sync
+# batch applied in C, both bounded by the WiFi link, and -Os takes ~150 KB off
+# an image that pays for every byte twice, once per OTA slot.
+CONFIG_COMPILER_OPTIMIZATION_PERF=
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
