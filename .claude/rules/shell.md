@@ -91,10 +91,12 @@ to whoever called it.
   chevron** (`BarLayer.draws_back`; a layout that places the `close` widget
   gets its X instead): one level back, as Esc and B (`ws.app_back` for a
   registered app, whose `back()` steps its own pages); the launcher root draws
-  one only above its mode's floor -- console mode over a P4's parked desk.
-  LEFT zone = LENT to the active app (`draw_zone`):
-  the home shows the active tab's verbs on the selected card, the Editor its PROJECTS/tab-ladder/
-  UNDO/REDO/PLAY icons. Icons are the theme's icon set where its look names
+  one only above its mode's floor -- console mode over a P4's parked desk --
+  and the Editor's one bar none (its B and Esc step back, and it shows no
+  Wi-Fi). LEFT zone = LENT to the active app (`draw_zone`):
+  the home shows the active tab's verbs on the selected card, the Editor its
+  tab ladder, UNDO, REDO and PLAY (on a desk its workspaces instead,
+  `runtime/editor_desk.py`). Icons are the theme's icon set where its look names
   one and the image carries it (`runtime/iconsets.py`: a smooth set's masks or the pixel
   set, a tile a slot of its `SLOTS`), else 16×16 sprites from the editable `IconSheet` (Settings → EDIT
   ICONS). **The bar hides entirely while a GAME plays** (the cart

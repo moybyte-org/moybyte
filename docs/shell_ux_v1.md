@@ -286,13 +286,20 @@ Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
   explicit cross-parent MOVE flow, and outline undo/redo (#93). Tool buttons
   draw from the shared 12×12 glyph vocabulary (`native/moy_ui/style.json`, drawn by `ui.glyph`), so every tool
   reads pre-literate.
-- **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen; exit
-  returns to the Editor **on the tab you were on**. Test-play is a round trip, not a
+- **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen (on a
+  desk, in the workspace's Run slot or Game tab); exit returns to the Editor **on
+  the tab you were on**. Test-play is a round trip, not a
   context switch.
-- **The back chevron** at the head of the zone backs out one level (owner,
-  2026-10-14): to wherever the Editor was opened from, the home's tab and
-  card included. Another project is the
-  home's Make tab (§4); the bar has no way there of its own.
+- **B and Esc** back out one level: to wherever the Editor was opened
+  from, the home's tab and card included. The Editor's one bar draws no
+  chevron and no Wi-Fi, so the open tab is named
+  (`docs/media/look_2026-10/EDITOR_LAYOUT.md`'s handheld); Enter plays.
+  Another project is the home's Make tab (§4); the bar has no way there of
+  its own.
+- **On a desk** the Editor shows several of these at once, as five
+  workspaces (Settings, Code, Art, World, Sound) whose dividers move, the
+  tab ladder only where the glass holds none of them
+  (`runtime/editor_desk.py`, `docs/look_2026-10.md` step 30).
 
 There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
