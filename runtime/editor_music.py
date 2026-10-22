@@ -16,6 +16,8 @@ stop holding focus; the verbs take the taps. Speed opens a popover with a
 slider, the keys its own while it is open. Every edit is the core's
 (`MusicEditor`), its undo step included."""
 
+from array import array
+
 try:
     import ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -37,6 +39,8 @@ PAD = (
 SONG_PAD = (("back", "Sfx", "slot-"), ("forward", "Sfx", "slot+"))
 
 ROW = 17                         # a step's row
+# A step's volume: seven bars, the lit ones first (`fill_rects(_METER, n)`).
+_METER = array("h", [v for k in range(7) for v in (k * 9, 0, 7, ROW - 10, 0)])
 PAD_W, PAD_H, PAD_DX, PAD_DY = 60, 22, 64, 26
 FOOT = 27                        # the foot: its rule and its buttons
 
@@ -165,9 +169,11 @@ class MusicPage:
         ui.label(WAVES[wave & 7], {"face": "mono", "tone": "dim"})
         ui.at(x + 98, ry, 12, ROW)
         ui.label(str(vol), {"face": "mono"})
-        for k in range(7):
-            cv.rect(x + 112 + k * 9, ry + 5, 7, ROW - 10,
-                    th["value"] if k < vol else th["surface_alt"])
+        lit = max(0, min(7, vol))
+        if lit < 7:
+            cv.fill_rects(_METER, -1, x + 112, ry + 5, th["surface_alt"])
+        if lit:
+            cv.fill_rects(_METER, lit, x + 112, ry + 5, th["value"])
 
     def _slot(self, me, row, x, ry):
         if isinstance(row, list):

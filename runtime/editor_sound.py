@@ -19,6 +19,8 @@ tools and buttons are the verbs; the graph, the wave marks and the ladder
 are drawn in the theme's roles and the waves' MOY64 inks, and answer the
 pointer here."""
 
+from array import array
+
 try:
     import ui
     from audio import SFX_NAME_MAX
@@ -353,12 +355,30 @@ def _graph(desk, me, s, cv, th, g, u):
         d = 8 * u
         cv.rrect(cx + (cw - d) // 2, wy + (wh - d) // 2, d, d, 2 * u,
                  wave_ink(th, wv) if p >= 0 else th["border"])
-        for k in range(LEVELS):
-            on = p >= 0 and k < v
-            cv.rect(cx + 4 * u, ly + (LEVELS - 1 - k) * vh, cw - 8 * u, vh - 2 * u,
-                    th["value"] if on else th["border"])
+        lit = max(0, min(LEVELS, v)) if p >= 0 else 0
+        rungs = _rungs(cw - 8 * u, vh, u)
+        if lit < LEVELS:
+            cv.fill_rects(rungs, -1, cx + 4 * u, ly, th["border"])
+        if lit:
+            cv.fill_rects(rungs, lit, cx + 4 * u, ly, th["value"])
     ui.at(gx - 30 * u, ly + (LEVELS * vh - 14 * u) // 2, 28 * u, 14 * u)
     ui.label("Vol", {"tone": "dim"})
+
+
+_RUNGS = [0, None]           # (width, pitch, unit) packed -> the ladder's quads
+
+
+def _rungs(w, vh, u):
+    """A step's ladder as LEVELS quads from its column's top left, the
+    bottom rung first, so `fill_rects(q, n, ...)` draws the n lit ones."""
+    key = (w & 0xFFF) | ((vh & 0xFFF) << 12) | ((u & 0xF) << 24)
+    if _RUNGS[0] != key or _RUNGS[1] is None:
+        q = []
+        for k in range(LEVELS):
+            q += (0, (LEVELS - 1 - k) * vh, w, vh - 2 * u, 0)
+        _RUNGS[0] = key
+        _RUNGS[1] = array("h", q)
+    return _RUNGS[1]
 
 
 # -- acting ----------------------------------------------------------------------
