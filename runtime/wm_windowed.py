@@ -319,7 +319,13 @@ class _PlayerWindowLayer(Layer):
             # full=False: the letterbox bezel + strip/shadow chrome are static and
             # already present in BOTH ping-pong buffers (the two full paints any
             # change costs); repainting them measured ~half the quiet frame.
-            wm._draw_player_window(win, True, wm._focus == "desktop", dt, full=False)
+            # Under the system menu's scrim the frame is washed after its
+            # composite, which therefore lands now, not at the present.
+            up = wm._scrim_up()
+            wm._draw_player_window(win, True, wm._focus == "desktop", dt,
+                                   full=False, defer=not up)
+            if up:
+                wm._scrim_game(win)
 
 
 def _overlap(a, b):
@@ -442,6 +448,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # the kid has since resized is never re-sized under them.
         self._play_intent = "play"
         self._drag = None             # (kind, grab_dx, grab_dy) while dragging
+        self._grab = 0                # the last press was the WM's: 1 while it
+                                      # is held, 2 once released; no content
+                                      # has had it (_content_static)
         self._restored = False        # what the last cache restore covered: a
                                       # rect, None (all of it) or False (nothing)
         self._foot_gen = None         # the look the windows' feet were sized under
@@ -725,6 +734,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._order = []
         self._focus = None
         self._drag = self._drag_armed = self._resize = None
+        self._grab = 0
         self._content_gesture = False
         self._gesture_hist = []
         if self._recording:
@@ -1163,6 +1173,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win.row = (0 if win.kind == "desktop" or self._band_is_row(win.kind)
                    else self._row_h())
 
+    def _on_row_head(self, win, px, py):
+        """Whether (px, py) is on a full-screen app window's row where the
+        WM draws it: the whole row above the content, or, where the app's
+        band is the row, its head -- the icon and title left of the zone
+        the band is lent (`band_span`)."""
+        if win.saved is None or win.kind == "desktop" \
+                or not (win.y <= py < win.y + self._row_h()):
+            return False
+        return bool(win.row) or px < self._full_slot(win)
+
     def _toggle_max(self, win):
         """Full screen <-> restored: the whole glass, remembering the rect a
         restore puts back unchanged; the state is remembered per board."""
@@ -1538,6 +1558,39 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         (`SystemMenuUI.scrims`)."""
         return self.ws.menu_ui.scrims()
 
+    def _scrim_rides(self):
+        """Whether the scrim that is up is the system menu's, riding as a
+        popover: a playtest's quiet frames carry it, the game's frame washed
+        in its own rect (`_scrim_game`) and the menu's face put back over
+        it, while every other pixel keeps the wash its full frame gave it."""
+        ws = self.ws
+        m = ws.sysmenu
+        return (m.open and m.comp is None and self._pop_cur is not None
+                and not ws._about and not ws.pause.open and not ws.confirm.open
+                and self._pop_rides())
+
+    def _game_rect(self, win):
+        """The rect a quiet frame composites the game into, on the glass."""
+        ox, oy, scale = self._player_view(win)
+        gc = self.ws.canvas
+        view = None if self.ws.app_window_canvas else self._view_src()
+        gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
+        return (ox, oy, gw * scale, gh * scale)
+
+    def _scrim_game(self, win):
+        """Wash the game's fresh frame where the system menu's scrim lies:
+        the pixels this frame painted, so they darken once (D-01)."""
+        x, y, w, h = self._game_rect(win)
+        root = self._root_canvas
+        th = self.ws.theme_colors
+        for r in self.ws.menu_ui.scrim_rects():
+            x0 = x if x > r[0] else r[0]
+            y0 = y if y > r[1] else r[1]
+            x1 = min(x + w, r[0] + r[2])
+            y1 = min(y + h, r[1] + r[3])
+            if x0 < x1 and y0 < y1:
+                _ui_draw.scrim(root, th, (x0, y0, x1 - x0, y1 - y0))
+
     def _pop_n(self):
         """The root's real buffer count: what a popover's rect is owed to."""
         n = getattr(self._root_canvas, "RETAINED_FRAMES", 1)
@@ -1726,7 +1779,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # A system modal's scrim (D-01) dims every retained pixel once: the
         # frame it comes or goes repaints the desk whole, every window's
         # stamp and the desk's own streak voided, and while it is up no
-        # window, desk or playtest frame is retained (_frame_is_quiet).
+        # window or desk frame is retained (_frame_is_quiet). A playtest
+        # under the system menu keeps its quiet frames: each washes the
+        # game's own fresh pixels (_scrim_rides).
         up = self._scrim_up()
         if up != self._scrim_was:
             self._scrim_was = up
@@ -1754,7 +1809,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                  and not getattr(ws.pointer, "visible", False))
         # A window over the game's casts its shadow on it and must stay over
         # it: the quiet stack repaints the game window alone, so not then.
-        quiet = still and "desktop" in self._wins and not self._player_under and not up
+        quiet = (still and "desktop" in self._wins and not self._player_under
+                 and (not up or self._scrim_rides()))
         if quiet and self._full_debt <= 0:
             if pop:
                 return self._quiet_pop_stack
@@ -2544,7 +2600,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         - Nothing marked the UI dirty. ws._dirty is still readable during the
           draw -- frame() clears it AFTER -- so a False here means no input or
           state handler reported a visible change this frame.
-        - No pointer DOWN or CLICK was live this frame or last. The drag-driven
+        - No pointer DOWN or CLICK was live this frame or last, unless the
+          press is the WM's (`_grab`: a strip, a grip, a full-screen row's
+          head), which no content is handed while it is held. The drag-driven
           handlers (paint strokes, map pans, block drags, kinetic scrolls)
           mutate content WITHOUT marking dirty -- they predate the #44 gate and
           rely on the pointer-state change arming the repaint -- so any button
@@ -2580,10 +2638,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return False
         cur = ws._ptr_state()
         last = ws._last_ptr
-        if cur is not None and (cur[3] or cur[4]):
-            return False
-        if last is not None and (last[3] or last[4]):
-            return False
+        if not self._grab:
+            if cur is not None and (cur[3] or cur[4]):
+                return False
+            if last is not None and (last[3] or last[4]):
+                return False
         if (cur is None) != (last is None):
             return False                  # pointer appeared/vanished: be safe
         k = win.kind
@@ -2709,7 +2768,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         keeps its chip hidden, as before)."""
         return (self.ws.show_fps and self.stack.top() == "desktop")
 
-    def _draw_player_window(self, win, running, focused, dt, full=True):
+    def _draw_player_window(self, win, running, focused, dt, full=True,
+                            defer=None):
         ws = self.ws
         gc = ws.canvas
         # Geometry FIRST (it does not depend on the cart's draw): on a recording
@@ -2751,13 +2811,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # On a quiet game frame (full=False) the composite is this frame's LAST
         # framebuffer write, so a device backend may run it async and defer the
         # present (the #58 composite-overlap budget lever). A full paint draws
-        # chrome AFTER it, so it must stay synchronous -- defer=not full. A
-        # compiled cart's frame is shown from where it is when the root canvas
-        # can (_window_frame), the FPS chip over it a rect its painter declared.
+        # chrome AFTER it, so it must stay synchronous -- defer=not full, unless
+        # the caller says otherwise. A compiled cart's frame is shown from
+        # where it is when the root canvas can (_window_frame), the FPS chip
+        # over it a rect its painter declared.
         src = self._view_src()
-        if not self._window_frame(gc, ox, oy, scale, not full, src):
+        if defer is None:
+            defer = not full
+        if not self._window_frame(gc, ox, oy, scale, defer, src):
             self._blit_game(self._root_canvas, gc, ox, oy, scale,
-                            defer=not full, src=src)
+                            defer=defer, src=src)
         if full and win.docked is None:
             self._win_chrome(win, focused)
 
@@ -2888,6 +2951,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         p = ws.pointer
         if p is None or not p.down:
             self._content_gesture = False   # finger up: the desk renders live again
+        if click:
+            self._grab = 0                  # a new press: whose it is is settled below
         # An in-flight RESIZE follows the pointer; released -> apply the new size.
         if self._resize is not None:
             kind, ox, oy, ow, oh, _cw, _ch = self._resize
@@ -2950,6 +3015,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._seed_gesture_hist()   # #58: pre-move footprint, both buffers
                 self._move_window(win, px - (ox - wx), py - (oy - wy))
                 return True
+        if self._grab == 1:
+            # A press on chrome reaches no content, its release included.
+            if not p.down:
+                self._grab = 2
+            return True
         if not self._order:
             return False
         # Taskbar chips live in the OS bar row, above every window -- and
@@ -2982,6 +3052,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if click and win.docked is None:
             name = self._strip_button_hit(win, px, py)
             if name is not None:
+                self._grab = 1
                 ws._dirty = True
                 if name == "close":
                     self._close_window(win.kind)
@@ -2995,11 +3066,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                         self._move_focus(None)
                 return True
             if win.saved is None and _in(px, py, self._grip_hit_rect(win)):
+                self._grab = 1
                 self._resize = (key, px, py, win.w, win.h, win.w, win.h)
                 self._seed_gesture_hist()   # #58: pre-resize footprint, both buffers
                 return True
             if win.saved is None and py < win.y + 1 + win.title_h:
+                self._grab = 1
                 self._drag_armed = (key, px, py, win.x, win.y)
+                return True
+            if self._on_row_head(win, px, py):
+                self._grab = 1
                 return True
         elif not focused:
             return True         # hovers/drags only reach the focused window

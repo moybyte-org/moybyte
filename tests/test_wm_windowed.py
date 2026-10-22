@@ -1758,7 +1758,11 @@ def test_window_drag_freezes_its_content(tmp_path):
     assert calls[0] == 0                   # frozen: no content render mid-drag
     drv.touch_up()
     drv.frame(1 / 30)
-    assert calls[0] > 0                    # release: live rendering resumes
+    assert calls[0] == 0                   # the release is the WM's too
+    cx, cy, cw, ch = win.content_rect()
+    drv.touch(cx + cw // 2, cy + ch // 2)
+    drv.frame(1 / 30)
+    assert calls[0] > 0                    # a press in it renders live again
 
 
 # -- settled windows are not re-stamped every frame (#155) -------------------
@@ -3153,6 +3157,49 @@ def test_a_popover_over_a_playtest_keeps_the_quiet_stack(tmp_path):
     ws.widget_tap("clock")
     assert ring.settle(drv, 4) == ["qpop", "quiet", "quiet", "quiet"]
     _game_only_moved(ws, drv, ring)
+
+
+def _differ(a, b):
+    """The pixels (as 16-bit offsets) where two buffers differ."""
+    return {i for i in range(0, len(a), 2) if a[i:i + 2] != b[i:i + 2]}
+
+
+def test_the_system_menu_over_a_playtest_keeps_the_quiet_stack(tmp_path):
+    """The system menu's scrim (D-01) over a running game: once the frame it
+    came on is in every buffer, the game's frames are quiet ones -- its own
+    pixels composited and washed, the menu's face put back over them -- and
+    every buffer equals a full repaint of the same state, as a quiet frame
+    without the menu does."""
+    ws, drv = _popover_desk(tmp_path, game=True)
+    player = ws._content_layers["desktop"]
+    ticks = [0]
+
+    def still_game(dt):                  # the same frame every tick
+        ticks[0] += 1
+        ws.canvas.cls(8)
+        ws.canvas.rect(10, 10, 40, 30, 12)
+
+    player.draw = still_game
+    ring = _Ring(ws, 3)
+    assert set(ring.settle(drv, 4)) == {"quiet"}
+    # what a quiet frame leaves unlike a full one without the menu: the
+    # window's corner over the game's last row
+    owed = _differ(ring.bufs[0], ring.full(drv)[0])
+    ring.settle(drv, 4)
+    ws.widget_tap("menu")
+    assert ws.menu_ui.scrims()
+    assert ring.settle(drv, 6)[-3:] == ["qpop"] * 3
+    assert ws.wm._pop_over_game, "the menu's card is not over the game"
+    n = ticks[0]
+    seen = list(ring.bufs)
+    full = ring.full(drv)
+    assert ticks[0] > n
+    for a, b in zip(seen, full):
+        assert _differ(a, b) == owed, "the quiet frames wash the game once"
+    ws.widget_tap("menu")
+    assert not ws.menu_ui.scrims()
+    ring.settle(drv, 4)
+    assert ring.settle(drv, 3) == ["quiet"] * 3
 
 
 def _game_only_moved(ws, drv, ring, over=None):

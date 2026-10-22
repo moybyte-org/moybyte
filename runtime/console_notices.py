@@ -794,15 +794,20 @@ class SystemMenuUI:
         frame, before the modal draws; a frame that paints the popover's
         rect alone keeps it."""
         ws = self.ws
+        for rect in self.scrim_rects():
+            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect)
+
+    def scrim_rects(self):
+        """The rects `scrim` washes, on the glass: none for a bar widget's
+        popover, ABOUT's content, or the system menu's bands."""
+        ws = self.ws
         m = ws.sysmenu
         if m.open and m.comp is not None and not ws._about:
-            return
+            return ()
         if ws._about:
             lay = ws.layout
-            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch))
-            return
-        for rect in self._scrim_bands():
-            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect)
+            return ((lay.cx, lay.cy, lay.cw, lay.ch),)
+        return self._scrim_bands()
 
     def _scrim_bands(self):
         """The rects the menu's scrim washes: what it dims (`_under`), less
