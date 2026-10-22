@@ -1334,6 +1334,14 @@ def save_sprites(cart, hex_text):
     cart["sprites"] = hex_text
 
 
+def save_flags(cart, flags):
+    """Persist a cart's 512 tile flag bytes (SPEC.md 3.5) to flags.moyflags,
+    atomically so an interrupted write can't truncate the real file."""
+    text = flags_to_hex(flags)
+    _write_atomic(cart["path"] + "/flags.moyflags", text)
+    cart["flags"] = text
+
+
 def save_sounds(cart, bank_dict):
     """Persist a cart's sound bank (AudioBank.to_dict()) to sounds.json (#16),
     atomically so an interrupted write can't truncate the real file. `bank_dict` is

@@ -142,9 +142,14 @@ def test_f_flips_and_s_does_not_shift_the_sprite(tmp_path, path):
     """The owner's report: S in the sprite tab shifted the sprite down,
     because a desk keyboard's letters were the d-pad on every surface."""
     ws, kb = _sprite(tmp_path, path)
-    for letter in "swad":
+    for letter in "sad":
         kb.tap(ord(letter))
         assert _px(ws, 0, 0) == 7, letter
+    n = ws.paint.n
+    kb.tap(ord("w"))                    # W and Q: the sprite after and before
+    assert ws.paint.n == n + 1
+    kb.tap(ord("q"))
+    assert ws.paint.n == n and _px(ws, 0, 0) == 7
     kb.tap(ord("f"))
     last = ws.paint.dim - 1
     assert _px(ws, last, 0) == 7 and _px(ws, 0, 0) == 0

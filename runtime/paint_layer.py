@@ -69,12 +69,12 @@ except ImportError:  # pragma: no cover - direct host import (chrome not yet ali
 try:
     from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
                              metric_class as _metric_class, DESK as _DESK,
-                             render_scale as _render_scale)
+                             render_scale as _render_scale, pane as _in_pane)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H,
                                      metric_class as _metric_class, DESK as _DESK,
-                                     render_scale as _render_scale)
+                                     render_scale as _render_scale, pane as _in_pane)
 
 
 # -- paint geometry (single source; console.py imports these back) ------------
@@ -161,6 +161,8 @@ _KEY_OPS = {
 # menu's last. With a selection, clear takes shift's place.
 _HINTS = ("flip", "Flip", "rotate", "Rotate", "shift", "Shift", "more", "More")
 _HINTS_SEL = ("flip", "Flip", "rotate", "Rotate", "clear", "Clear", "more", "More")
+# The desk Editor's Sprite pane: its sprite keys, the more menu, the next pane.
+_HINTS_PANE = ("Q W", "Sprite", "more", "More", "F6", "Next pane")
 # While a popover is open its keys alone: what closes it.
 _HINTS_POP = ("back", "Close")
 # The pickers' sizes, PaintEditor.SIZES's order.
@@ -199,6 +201,12 @@ class PaintLayout(LayoutBase):
         self.look = bool(look)
         self.keys = bool(keys)          # an input with keys: the hint strip shows
         self.desk = _metric_class() == _DESK
+        self.pane = self.desk and _in_pane()
+        self.flag_cells = ()
+        self.preview = None
+        if self.look and self.pane:
+            self._pane_geometry()
+            return
         if self.look:
             self._look_geometry()
             return
@@ -275,6 +283,57 @@ class PaintLayout(LayoutBase):
         self.map_rect = None
         self.hints = None
 
+
+    def _pane_geometry(self):
+        """The desk Editor's Sprite pane (EDITOR_LAYOUT.md's Art, 1024 x 600:
+        the pane's header names the sprite and holds flip and rotate): the
+        tool row of 36 px cells at its head, the grid at the largest whole
+        zoom for 8, 16 and 24 (a multiple of 48) with the palette's two
+        columns at its right, then the sprite's steppers and its size, its
+        eight flags, the sprite as the game draws it at 1x, 2x and 4x, and
+        the hints at the foot. The sprite map and the load and save buttons
+        are the Sheet's and the more menu's here."""
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        pad, gap, cell = 14, 8, 36
+        self.body_fill = self.panel = (cx, cy, cw, ch)
+        hint_h = max(34 // _render_scale(), 18 * self.fs) if self.keys else 0
+        self.hints = (cx, cy + ch - hint_h, cw, hint_h) if hint_h else None
+        self.trow, self.icon = cell, 24
+        n = len(_TOOL_ROW)
+        top = cy + 6
+        self.tool_btns = _tool_row(cx + pad, top, cell + 4, cell, n)
+        self.more_btn = self.tool_btns[-1]
+        gx, gy = cx + pad, top + cell + 10
+        below = cell + 10 + cell + 8 + 34 + 8
+        wroom = (cw - 2 * pad - gap) * 4 // 5
+        hroom = cy + ch - hint_h - gy - below
+        span = max(48, 48 * (min(wroom, hroom) // 48))
+        self.pg_x0, self.pg_y0, self.pg_span = gx, gy, span
+        self.pg_area = (gx, gy, span, span)
+        self.title_xy = (-4096, -4096)
+        self.caption = (gx, gy, 0, 0)
+        sw = span // 8
+        self.sw, self.sw_cols = sw, _SW_COLS
+        self.sw_x0, self.sw_y0 = gx + span + gap, gy
+        self.sw_area = (self.sw_x0, gy, 2 * sw, 8 * sw)
+        y = gy + span + 10
+        line = _ui_draw.font("ui")[2] * self.fs
+        self.spr_prev = (gx, y, cell, cell)
+        nw = _ui_draw.print_width("000", self.fs) + 16
+        self.num_rect = (gx + cell, y, nw, cell)
+        self.spr_next = (gx + cell + nw, y, cell, cell)
+        sx = gx + 2 * cell + nw + 12
+        self.size_xy = (sx, y + (cell - line) // 2)
+        self.size_btn = (sx - 4, y, 56, cell)
+        y += cell + 8
+        self.flag_cells = tuple((gx + k * cell, y, cell, cell) for k in range(8))
+        y += cell + 8
+        self.preview = (gx, y, span + gap + 2 * sw, 34)
+        off = (-4096, -4096, 0, 0)
+        self.get_btn = self.put_btn = self.files_btn = self.close_btn = off
+        self.btn_words = False
+        self.status_xy, self.status_w = (-4096, -4096), 0
+        self.map_rect = (gx, gy, 0, 0)
 
     def _look_geometry(self):
         """The 2026-10 look's arrangement (a theme with a depth; the
@@ -522,7 +581,8 @@ class PaintLayer:
         """The typed keys, edge-tracked so a held key fires once: Ctrl+Z (0x1A)
         / Ctrl+Y (0x19) undo and redo (#90), and PICO-8's sprite keys
         (`_KEY_OPS`): F and V flip, R rotates, Del and Backspace clear,
-        Ctrl-C copies, Ctrl-X cuts, Ctrl-V stamps and M opens the more menu.
+        Ctrl-C copies, Ctrl-X cuts, Ctrl-V stamps, M opens the more menu, and
+        Q and W step to the sprite before and after.
         Each has its place on the screen too, so touch reaches every one."""
         pe = self.ws.paint
         k = getattr(i, "last_key", 0) or 0
@@ -536,6 +596,10 @@ class PaintLayer:
             return
         if k == 0x19:
             pe.redo()
+            return
+        if k in (0x71, 0x51, 0x77, 0x57):     # Q and W: the sprite before, after
+            pe.select(-1 if k in (0x71, 0x51) else 1)
+            self.ws.mark_dirty()
             return
         op = _KEY_OPS.get(k)
         if op == "more":
@@ -556,6 +620,11 @@ class PaintLayer:
         if click and ws.menu_view == "paint" and ws.bar_layer.handle_bar_tap("menu", px, py):
             self._pop = False
             return True
+        if click and not self._pop and not ws._editing_icons:
+            k = self._flag_at(px, py)
+            if k is not None:
+                self._toggle_flag(k)
+                return True
         if self._pop:
             # The pickers hold the pointer while open: a press outside them
             # closes them (ui.popover answers it), and a release is the tap
@@ -1087,8 +1156,9 @@ class PaintLayer:
         keyline, white = ws.look.live.fixed[2:]
         cv.rect(*(lay.body_fill + (th["surface"],)))
         n = pe.n if pe is not None else 0
-        cv.print(("Icon " if ws._editing_icons else "Sprite ") + str(n),
-                 lay.title_xy[0], lay.title_xy[1], th["ink_dim"], 1)
+        if not lay.pane:
+            cv.print(("Icon " if ws._editing_icons else "Sprite ") + str(n),
+                     lay.title_xy[0], lay.title_xy[1], th["ink_dim"], 1)
         if pe is None or sheet is None:
             return
         # The grid: each pixel a cell, a clear one the checker, the cells
@@ -1160,8 +1230,14 @@ class PaintLayer:
         cv.print(num, nx + (nw - _ui_draw.print_width(num, fs)) // 2, lay.size_xy[1],
                  th["ink"], 1)
         times = "\u00d7" if _ui.has_symbols() else "x"
-        cv.print("Size %d%s%d" % (pe.size, times, pe.size), lay.size_xy[0], lay.size_xy[1],
-                 th["ink_dim"], 1)
+        cv.print(("%d%s%d" if lay.pane else "Size %d%s%d") % (pe.size, times, pe.size),
+                 lay.size_xy[0], lay.size_xy[1], th["ink_dim"], 1)
+        if lay.pane:
+            self._draw_flags(cv, lay, pe, th)
+            self._draw_preview(cv, lay, pe, sheet, th)
+            self._draw_tools_look()
+            self._draw_hints(cv, lay, pe, th)
+            return
         self._draw_map(cv, lay, pe, sheet, th, greys)
         draw = self._icon_draw
         words = lay.btn_words
@@ -1183,6 +1259,66 @@ class PaintLayer:
                      lay.status_xy[0], lay.status_xy[1], th["ink_dim"], 1)
         self._draw_tools_look()
         self._draw_hints(cv, lay, pe, th)
+
+    # PICO-8's flag colours, MOY64's first sixteen: red, orange, yellow,
+    # green, blue, indigo, pink, peach.
+    _FLAG_INKS = (8, 9, 10, 11, 12, 13, 14, 15)
+
+    def _draw_flags(self, cv, lay, pe, th):
+        """The sprite's eight flags as toggles (Q-03): a disc in its colour
+        where it is set, a ring where it is clear, then the word."""
+        flags = self.ws.project.flags
+        v = flags[pe.n] if flags is not None and pe.n < len(flags) else 0
+        for k, (x, y, w, h) in enumerate(lay.flag_cells):
+            d = min(w, h) - 14
+            ox, oy = x + (w - d) // 2, y + (h - d) // 2
+            if v >> k & 1:
+                cv.rrect(ox, oy, d, d, d // 2, self._FLAG_INKS[k])
+            else:
+                cv.rrect(ox, oy, d, d, d // 2, None, th["ink_dim"])
+        if lay.flag_cells:
+            x, y, w, h = lay.flag_cells[-1]
+            line = _ui_draw.font("ui")[2] * lay.fs
+            cv.print("Flags", x + w + 12, y + (h - line) // 2, th["ink_dim"], 1)
+
+    def _flag_at(self, px, py):
+        for k, r in enumerate(self.layout.flag_cells):
+            if _in(px, py, r):
+                return k
+        return None
+
+    def _toggle_flag(self, k):
+        """A flag tapped: the sprite's bit flips, live in the running game
+        (the project's table is the one it reads); it is saved with the
+        sheet (`Project.commit_sprites`)."""
+        ws = self.ws
+        flags = ws.project.flags
+        pe = ws.paint
+        if flags is None or pe is None or pe.n >= len(flags):
+            return
+        flags[pe.n] ^= 1 << k
+        ws.project.flags_dirty = True
+        if ws.sheet is not None:
+            ws.sheet.dirty = True
+        ws.mark_dirty()
+
+    def _draw_preview(self, cv, lay, pe, sheet, th):
+        """The sprite as the game draws it: at 1x, 2x and 4x, then the words."""
+        if lay.preview is None:
+            return
+        x, y, w, h = lay.preview
+        line = _ui_draw.font("ui")[2] * lay.fs
+        dim = pe.dim
+        img = sheet.tile_span_image(pe.n, pe.size, pe.size, 0)
+        for z in (1, 2, 4):
+            side = dim * z
+            if x + side > lay.preview[0] + w or side > h + dim * 2:
+                break
+            cv.spr(img, x, y + h - side, z)
+            cv.print("%d\u00d7" % z if _ui.has_symbols() else "%dx" % z,
+                     x + side + 4, y + h - line, th["ink_dim"], 1)
+            x += side + 4 + _ui_draw.print_width("4x", lay.fs) + 14
+        cv.print("in the game", x, y + h - line, th["ink_dim"], 1)
 
     @staticmethod
     def _map_ring(lay):
@@ -1262,6 +1398,8 @@ class PaintLayer:
             return
         if self._pop:
             items = _HINTS_POP
+        elif pe.sel is None and lay.pane:
+            items = _HINTS_PANE
         else:
             items = _HINTS_SEL if pe.sel is not None else _HINTS
         x, y, w, h = lay.hints

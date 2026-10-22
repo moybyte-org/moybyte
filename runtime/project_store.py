@@ -89,6 +89,7 @@ class ProjectStore:
         self.sheet = None             # SpriteSheet for the open cart (built on open)
         self.tilemap = None           # TileMap for the open cart (built on open, #32)
         self.flags = None             # 512 tile flag bytes (SPEC.md 3.5, built on open)
+        self.flags_dirty = False      # a toggle not yet saved (with the sheet)
         self.images = None            # {name: .moyimg text} for the open cart (#63);
                                       # make_api decodes each lazily via image(name)
         self.pmem = None              # Pmem (persistent cart store) for the open cart
@@ -522,6 +523,12 @@ class ProjectStore:
                            lambda: ws.carts_store.save_sprites(self.cart, hexs),
                            self._paint_history(), clean=self.sheet,
                            note="paint_save")          # "Little Artist" (#21)
+        if self.flags_dirty and self.flags is not None:
+            # A sprite's flags (the Sprite pane's toggles) ride the sheet's
+            # commit: they are the sprites' own data.
+            self.flags_dirty = False
+            flags = self.flags
+            ws._with_sd(lambda: ws.carts_store.save_flags(self.cart, flags))
 
     def commit_map(self):
         """Persist the cart's tilemap to map.moymap (#32). The running cart
