@@ -27,9 +27,10 @@ nor those docs will warn you about:
   serves without reflashing it, so "which console is this board serving?" is
   answered by its firmware version alone. Changing a web build means
   `firmware/web_runner/build.sh`, then rebuild and reflash. An oversized image is
-  a BUILD FAILURE on every board. For that reason the two worker modules ship
-  without their comments (build.sh re-prints them with emsdk's terser, nothing
-  else changed): read `worker.js` and `moy_store.mjs` in the tree, not in
+  a BUILD FAILURE on every board. For that reason the page and the two worker
+  modules ship without their comments (build.sh re-prints their scripts with
+  emsdk's terser, nothing else changed): read `page_core.html`,
+  `page_tail.js`, `worker.js` and `moy_store.mjs` in the tree, not in
   `dist/`.
 - **The browser draws what its boards draw: each arrangement on its board's
   metric class, in the theme's fonts and icon set** (owner, 2026-10-20: the

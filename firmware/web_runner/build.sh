@@ -465,6 +465,23 @@ for f in worker.js moy_store.mjs; do
     --format comments=false,beautify=true -o "${DIST_DIR}/${f}.tmp"
   mv "${DIST_DIR}/${f}.tmp" "${DIST_DIR}/${f}"
 done
+# The page ships without its comments for the same reason (they were half its
+# gzipped bytes): its one script through the same terser, and the comments of
+# its markup and stylesheet dropped. site/build.py's CHANNEL_LINE survives
+# the re-print, which tests/test_site_channel.py holds.
+"${PY}" - "${DIST_DIR}/index.html" "${JS_NODE}" "${TERSER}" <<'EOF'
+import re, subprocess, sys
+page, node, terser = sys.argv[1:4]
+html = open(page, encoding="utf-8").read()
+if html.count("<script>") != 1 or html.count("</script>") != 1:
+    sys.exit("build.sh: index.html must carry exactly one <script> to strip")
+a, b = html.index("<script>") + len("<script>"), html.index("</script>")
+head = re.sub(r"/\*.*?\*/", "", re.sub(r"<!--.*?-->\n?", "", html[:a], flags=re.S), flags=re.S)
+js = subprocess.run([node, terser, "--format", "comments=false,beautify=true"],
+                    input=html[a:b], capture_output=True, text=True, check=True).stdout
+with open(page, "w", encoding="utf-8") as f:
+    f.write(head + "\n" + js + html[b:])
+EOF
 if [ "${STAGE_ONLY}" = "1" ]; then
   cp "${STAGE_DIR}/modules.json" "${DIST_DIR}/"
 else
