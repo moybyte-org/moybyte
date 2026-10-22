@@ -162,9 +162,15 @@ def test_info_button_tap_opens_the_modal(tmp_path):
     ws.frame(1 / 30)                                    # draw once (lays out layout)
     assert ws.cards_layer.prompt is None
 
-    rect = ws.cards_layer.layout.info_btn
+    # Cart info, the Settings page's door (look step 30), taps open the dialog
+    rect = ws.cards_layer.page().host.box("Cart info")
     cx, cy = rect[0] + rect[2] // 2, rect[1] + rect[3] // 2
     assert ws.cards_layer.handle_pointer(cx, cy, True) is True
+    for _ in range(3):
+        ws.pointer.down = False
+        ws.cards_layer.handle_pointer(cx, cy, False)
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
     assert ws.cards_layer.prompt is not None
     assert ws.input.text_mode is True                   # typing mode armed
 

@@ -175,46 +175,6 @@ def _cards_ws(tmp_path, **kw):
     return ws
 
 
-def test_config_cards_are_toolkit_rows_and_cells(tmp_path, monkeypatch):
-    """One `ui_draw.row` per visible card (the selection field + its label line) and
-    one `ui_draw.cell` per choice cell -- the stepper glyphs, the gauge/count meters
-    and the background previews stay the card's own CONTENT."""
-    ws = _cards_ws(tmp_path, sys_size=(480, 320))
-    cl = ws.cards_layer
-    counter = _Counter(monkeypatch)
-    _frame(ws)
-    rows = cl._card_layout()
-    assert len(rows) == 4                       # three cards + the ADVANCED row
-    assert counter.n["row"] == 4
-    assert counter.n["cell"] == 3 + 2           # bg thumbs + choice icons
-
-
-def test_config_grids_register_no_per_cell_hit_rects(tmp_path, monkeypatch):
-    """MEASURED constraint (runtime/ui.py's module docstring): a grid must not
-    put one hit rect per cell into `Hits` -- on the P4 that is ~9.3ms, 13% of the
-    map tab's frame. The Config tab's choice/thumbnail grids hit-test
-    arithmetically (`_choice_cells`), and `ui_draw.cell` takes no `hits` argument at
-    all, so this asserts the whole cards draw adds ZERO."""
-    from runtime import ui
-    from runtime import ui_draw
-    ws = _cards_ws(tmp_path, sys_size=(480, 320))
-    counter = _Counter(monkeypatch)
-    added = []
-    monkeypatch.setattr(ui_draw.Hits, "add",
-                        lambda self, *a, **kw: added.append(a))
-    ws.cards_layer._t = ws.cards_layer._tones()
-    ws.cards_layer._draw_cards()
-    # The FLOOR comes first, and it is the whole point of writing it this way:
-    # an empty `added` is ALSO what a draw that returned early reports, so the
-    # widgets the draw actually made are what make the zero mean something.
-    # (This assertion used to be `real_add is not None`, which cannot fail.)
-    # Three cards plus the ADVANCED row, which is a toolkit row like the rest
-    # (step 5 of docs/text_editing_2026-09.md).
-    assert counter.n["row"] == 4, counter.n
-    assert counter.n["cell"] == 5, counter.n
-    assert added == []
-
-
 # -------------------------------------------------------------- the music tab
 
 def test_music_speed_ticks_are_toolkit_rows(tmp_path, monkeypatch):

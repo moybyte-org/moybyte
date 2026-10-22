@@ -300,3 +300,20 @@ def settings_back(ws, drv):
         return
     bar, (x, y, w, h) = bl.cell("settings", "close")
     drv.click(bar[1][0] + x + w // 2, bar[1][1] + y + h // 2)
+
+
+def settings_tile(ws, key, k):
+    """The middle of choice `k`'s tile on the Editor's Settings page (look
+    step 30: the cards on the verbs), where a frame draws it."""
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    (x, y, w, h), _k = ws.cards_layer.page()._tiles[key][k]
+    return x + w // 2, y + h // 2
+
+
+def settings_box(ws, label):
+    """The Settings page's row `label` (a door: Cart info, Files) as its last
+    frame drew it."""
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    return ws.cards_layer.page().host.box(label)

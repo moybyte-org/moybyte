@@ -83,21 +83,30 @@ def test_a_cart_with_no_edit_schema_still_has_the_row(tmp_path):
 
 
 def test_the_row_opens_on_a_tap_and_on_A_and_backs_out(tmp_path):
+    """Files, the Settings page's door (look step 30), opens the list on a
+    tap and on A, and BACK and B return to the page."""
+    from ws_helpers import settings_box
     ws = build_ws(tmp_path)
     cl = _on_config(ws, _project(ws))
-    row = cl._card_layout()[-1]
-    cl.handle_pointer(row["x"] + 4, row["y"] + 2, True)
+    x, y, w, h = settings_box(ws, "Files")
+    cl.handle_pointer(x + 4, y + 2, True)
+    ws.pointer.down = False
+    for _ in range(2):
+        cl.handle_pointer(x + 4, y + 2, False)
+        _frame(ws)
     assert cl.files is not None and cl.files["rows"]
 
-    # BACK returns to the cards, and B does the same from the keyboard
+    # BACK returns to the cards
     cl._files_pointer(cl.layout.info_btn[0] + 2, cl.layout.info_btn[1] + 2, True)
     assert cl.files is None
 
-    cl.msel = row["i"]
+    cl.page().host.focus("Files")
+    _frame(ws)
     ws.input.begin_frame()
     ws.input.set_held("a", True)
     ws.input.begin_frame()
     cl.handle_input(ws.input)
+    _frame(ws)
     assert cl.files is not None
     assert ws.wm.top_kind() == "menu"             # A opened the list, it did not PLAY
 

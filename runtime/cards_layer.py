@@ -44,6 +44,11 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import ui_draw as _ui_draw
 
 try:
+    import layout_base as _layout_base
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import layout_base as _layout_base
+
+try:
     import text_modes as _modes
 except ImportError:  # pragma: no cover - host fallback
     from runtime import text_modes as _modes
@@ -240,6 +245,7 @@ class CardsLayer:
         # The ADVANCED row's file list: None when closed, else
         # {"rows", "sel", "top", "msg"} -- see _open_files.
         self.files = None
+        self._page = None             # the cards on the verbs (editor_settings.py)
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -289,6 +295,15 @@ class CardsLayer:
             return self._prompt_input(i)
         if self.files is not None:
             return self._files_input(i)
+        if self._on_verbs():
+            page = self.page()
+            if (i.pressed("run") or i.pressed("a")) and not page.on_door():
+                ws.defer(ws._leave_menu)   # Enter PLAYs (a device's Enter is "a")
+                return True
+            if page.keys(i):
+                ws._dirty = True
+            ws._leave_or_home(ws.exit)
+            return True
         n = self._card_count()
         if not n:
             return True
@@ -308,7 +323,7 @@ class CardsLayer:
             if i.pressed("a") or i.pressed("run"):
                 self._open_files()
             else:
-                ws._leave_or_home(ws._leave_menu)
+                ws._leave_or_home(ws.exit)
             return True
         # Enter / RUN in Config = PLAY the cart (the bar's PLAY path). The device keyboard
         # maps Enter (0x0D) to the "a" button and the host maps it to "run", so BOTH must
@@ -320,7 +335,7 @@ class CardsLayer:
         if i.pressed("a") or i.pressed("run"):
             ws.defer(ws._leave_menu)   # #184: PLAY runs behind the next paint
         else:
-            ws._leave_or_home(ws._leave_menu)
+            ws._leave_or_home(ws.exit)
         return True
 
     def _cards_drag(self, px, py):
@@ -356,6 +371,12 @@ class CardsLayer:
             if click and ws.bar_layer.handle_bar_tap("menu", px, py):
                 return True
             return self._files_pointer(px, py, click)
+        if self._on_verbs():
+            if click and ws.bar_layer.handle_bar_tap("menu", px, py):
+                return True
+            if self.page().point(px, py, click, ws.pointer.down):
+                ws._dirty = True
+            return True
         # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
         self._cards_drag(px, py)           # held drag scrolls the card column
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
@@ -671,6 +692,22 @@ class CardsLayer:
                 "knob": th["ink"], "cell": th["dim"],
                 "cell_edge": th["ink_dim"]})
 
+    def page(self):
+        """The Settings page on the verbs, built at its first draw."""
+        if self._page is None:
+            try:
+                from editor_settings import SettingsPage
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime.editor_settings import SettingsPage
+            self._page = SettingsPage(self.ws, _ui_draw.AppHost("editor_settings"),
+                                      (self._open_meta, self._open_files))
+        return self._page
+
+    def _on_verbs(self):
+        """Whether the cards draw on the verbs: everywhere but a cart whose
+        manifest is broken and the file list, which keep this layer's own."""
+        return self.files is None and not self._broken()
+
     def _draw_cards(self):
         ws = self.ws
         cv = ws.sys_canvas
@@ -678,6 +715,10 @@ class CardsLayer:
         t = self._t = self._tones()
         if self.files is not None:
             self._draw_files()          # the ADVANCED row's list, same panel
+            return
+        if self._on_verbs():
+            desk = _layout_base.metric_class() == _layout_base.DESK
+            self.page().draw(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
             return
         # Fullscreen "Make it mine" panel below the unified bar (fix B/C): edge to
         # edge, no centered mini-card. GO/CODE/CLOSE are gone -- PLAY/Code-tab/X are all
@@ -871,6 +912,35 @@ class CardsLayer:
                 cv.spr(img, art[0] + (art[2] - 16 * fs) // 2,
                        art[1] + (art[3] - 16 * fs) // 2, 2 * fs)
 
+    def draw_choice(self, f, k, rect):
+        """Choice `k`'s picture of a cell card `f` in `rect` on the system
+        canvas, for the Settings page on the verbs (editor_settings.py): its
+        sprite at the largest whole zoom the rect holds, its glyph, or its
+        background's preview."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        x, y, w, h = rect
+        disp = f.get("display")
+        if disp == "sprite-tiles":
+            tiles = self._resolve_tiles(f)
+            sheet = ws.project.sheet
+            if sheet is None:
+                return
+            img = sheet.tile_image(tiles[k] if k < len(tiles) else 0, 0)
+            z = max(1, min(w, h) * 3 // 4 // 8)
+            cv.spr(img, x + (w - 8 * z) // 2, y + (h - 8 * z) // 2, z)
+        elif disp == "bg-thumbs":
+            ch = f.get("choices") or []
+            m = max(2, min(w, h) // 8)
+            self._draw_bg_thumb(str(ch[k]) if k < len(ch) else "", (x + m, y + m, w - 2 * m,
+                                                                    h - 2 * m))
+        else:
+            icons = f.get("icons") or []
+            side = max(12, min(w, h) // 2)
+            ws._glyph(icons[k] if k < len(icons) else "dot",
+                      (x + (w - side) // 2, y + (h - side) // 2, side, side),
+                      ws.theme_colors["ink"], cv)
+
     # Each bg-thumbs choice is drawn as a tiny "what the screen will look like"
     # preview. A cart reads the chosen name in cfg("bg") and paints to match.
     # "night"/"stripes" get a patterned thumbnail; any other name renders as a
@@ -954,6 +1024,8 @@ class CardsLayer:
 
     def _close_files(self):
         self.files = None
+        if self._page is not None:
+            self._page.recount()
         self.ws._dirty = True
 
     def _files_visible(self):

@@ -226,32 +226,6 @@ def _drag(ws, layer_pointer, x, y0, y1, steps=6):
     layer_pointer(x, y1, False)
 
 
-def test_cards_drag_scrolls(tmp_path):
-    """A held drag on the Config card column scrolls mtop (one card per base
-    card height of travel)."""
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    target = None
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("path") and it.get("edit"):
-            ws.launcher.sel = i
-            target = it
-            break
-    assert target is not None
-    ws.change_selected()
-    # Guarantee overflow: a long edit schema on the OPEN cart (the workspace
-    # rehydrates from the store on open, so mutate after) -- the list scrolls.
-    ws.cart["edit"] = [{"key": "k%d" % i, "label": "KNOB %d" % i,
-                       "min": 0, "max": 9, "default": 1} for i in range(14)]
-    cl = ws.cards_layer
-    assert cl._cards_scrollable()
-    lay = cl.layout
-    x = lay.card_x + 10
-    y0 = lay.view_bottom - 6
-    _drag(ws, cl.handle_pointer, x, y0, y0 - 4 * (lay.card_h + lay.gap))
-    assert cl.mtop > 0
-
-
 def test_blocks_outline_drag_scrolls(tmp_path):
     """A held drag on the Blocks outline scrolls blk_top when rows overflow."""
     from runtime import host_app

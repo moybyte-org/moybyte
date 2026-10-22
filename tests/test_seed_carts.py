@@ -326,6 +326,7 @@ def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
 
 def test_pet_picker_selects_a_sprite_tile(tmp_path):
     from runtime import host_app
+    from ws_helpers import settings_tile
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Pixel Pet")
@@ -333,10 +334,9 @@ def test_pet_picker_selects_a_sprite_tile(tmp_path):
     rows = ws.cards_layer._card_layout()
     pet = [r for r in rows if r["f"] and r["f"]["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
-    cells = ws.cards_layer._choice_cells(pet)
-    assert len(cells) == 3                               # frog / cat / robot
-    _, (cx, cy, cw, ch) = cells[2]                       # tap the robot tile
-    ws.pointer.place(cx + cw // 2, cy + ch // 2)
+    assert len(pet["f"]["choices"]) == 3
+    cx, cy = settings_tile(ws, "pet", 2)
+    ws.pointer.place(cx, cy)
     ws.pointer.click = True
     ws.handle_pointer()
     assert ws.config["pet"] == 2
@@ -403,6 +403,7 @@ def test_wallpaper_carts_load_their_sheet_and_run_headless(tmp_path):
 
 def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
     from runtime import host_app
+    from ws_helpers import settings_tile
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Space Desktop")
@@ -410,10 +411,9 @@ def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
     rows = ws.cards_layer._card_layout()
     pet = [r for r in rows if r["f"] and r["f"]["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
-    cells = ws.cards_layer._choice_cells(pet)
-    assert len(cells) == 2                               # frog / robot
-    _, (cx, cy, cw, ch) = cells[1]                       # tap the robot tile
-    ws.pointer.place(cx + cw // 2, cy + ch // 2)
+    assert len(pet["f"]["choices"]) == 2
+    cx, cy = settings_tile(ws, "pet", 1)
+    ws.pointer.place(cx, cy)
     ws.pointer.click = True
     ws.handle_pointer()
     assert ws.config["pet"] == 1

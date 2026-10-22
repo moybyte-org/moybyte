@@ -618,26 +618,6 @@ def test_cards_editor_shows_more_cards_on_large_canvas(tmp_path):
     assert probe.distinct_pixels_in(buf, 3) > 4
 
 
-def test_cards_editor_tap_steps_in_system_coords(tmp_path):
-    """A tap on a plain card's right half increments its config value, hit-tested
-    in SYSTEM coords on a big canvas."""
-    from runtime import host_app
-    ws = _ws(tmp_path, sys_size=(960, 600))
-    drv = host_app.ConsoleDriver(ws)
-    _enter(ws, "cards")
-    drv.frame(1 / 30)
-    rows = ws.cards_layer._card_layout()
-    plain = next((r for r in rows if r["display"] is None), None)
-    if plain is None:
-        return                                     # no plain stepper card to pin
-    f = plain["f"]
-    before = ws.project.config.get(f["key"], f.get("default"))
-    drv.touch(plain["x"] + plain["w"] - 20, plain["y"] + 2)   # right half -> +1
-    drv.frame(1 / 30)
-    after = ws.project.config.get(f["key"], f.get("default"))
-    assert after != before
-
-
 def test_theme_editor_320x240_is_byte_identical(tmp_path):
     """EDIT ICONS (the theme reuse of the paint renderer) is byte-identical at
     320x240 too."""

@@ -125,8 +125,10 @@ def test_unknown_display_hint_falls_back_to_text():
 # -- selecting without reading: tap a tile / icon ---------------------------
 
 def _tap_cell(ws, row, k):
-    cells = ws.cards_layer._choice_cells(row)
-    _, (cx, cy, cw, ch) = cells[k]
+    """A tap on choice `k`'s tile on the Settings page (look step 30: the
+    cards on the verbs), where its last frame drew it."""
+    _draw_once(ws)
+    (cx, cy, cw, ch), _k = ws.cards_layer.page()._tiles[row["f"]["key"]][k]
     ws.pointer.place(cx + cw // 2, cy + ch // 2)
     ws.pointer.click = True
     ws.handle_pointer()
@@ -156,21 +158,19 @@ def test_choice_icons_card_selects_by_tapping_an_icon():
     assert ws.config["p"] == "z"
 
 
-def test_choice_card_still_cycles_with_left_right_taps():
-    # The -/+ stepper contract is preserved for non-cell taps (e.g. a gauge), and
-    # adjust() still cycles a choice via keyboard left/right.
+def test_an_int_card_steps_by_its_step_with_left_and_right():
+    # A gauge card is a slider on the Settings page: left and right step it
+    # by the card's own step.
     edit = [{"key": "spd", "type": "int", "min": 0, "max": 100, "step": 10,
              "display": "gauge", "card": "F {value}"}]
     ws = _ws_with_cart(edit, {"spd": 50})
-    row = ws.cards_layer._card_layout()[0]
-    ws.pointer.place(row["x"] + row["w"] - 4, row["y"] + 4)   # right half = +
-    ws.pointer.click = True
-    ws.handle_pointer()
-    ws.pointer.click = False
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    drv.press("right")
+    drv.frame(1 / 30)
     assert ws.config["spd"] == 60
-    ws.pointer.place(row["x"] + 2, row["y"] + 4)              # left half = -
-    ws.pointer.click = True
-    ws.handle_pointer()
+    drv.press("left")
+    drv.frame(1 / 30)
     assert ws.config["spd"] == 50
 
 
@@ -300,9 +300,9 @@ def test_draw_cards_is_wrapped_against_a_thrown_card():
     ws = _ws_with_cart([{"key": "k", "type": "int", "min": 0, "max": 9, "card": "K"}],
                        {"k": 1})
 
-    def _boom(row):
+    def _boom():
         raise ValueError("boom")
-    ws.cards_layer._draw_card = _boom
+    ws.cards_layer._draw_cards = _boom
     _draw_once(ws)                                   # must not raise out of frame()
     assert ws.cart_error is not None
     assert "boom" in ws.cart_error
