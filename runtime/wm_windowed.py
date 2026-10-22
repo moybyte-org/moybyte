@@ -988,17 +988,20 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # never a near-fullscreen sheet.
         return (max(340 * fs, full.w * 2 // 5), max(300 * fs, full.h * 3 // 5))
 
+    def _open_size(self, key, fs):
+        """(w, h) a window of slot `key` opens at: its default size, clamped
+        so the whole window, grip included, fits the desk beside the OS bar
+        (a default can exceed a small desktop, e.g. the fs-scaled Settings
+        minimum at font 2x on 600px)."""
+        w, h = self._win_size(key, self._root_canvas, fs)
+        _dx, _dy, dw, dh = self._desk_rect()
+        return min(w, dw - 4 * fs), min(h, dh - 8 * fs)
+
     def _make_window(self, key, kind, depth):
-        full = self._root_canvas
         fs = self._fs()
-        w, h = self._win_size(key, full, fs)
+        w, h = self._open_size(key, fs)
         title_h = _layout_base.metric("title", fs)
         dx, dy, dw, dh = self._desk_rect()
-        # A default can exceed a small desktop (e.g. the fs-scaled Settings minimum
-        # at font 2x on 600px) -- clamp so the whole window, grip included, fits
-        # the desk beside the OS bar.
-        w = min(w, dw - 4 * fs)
-        h = min(h, dh - 8 * fs)
         if key == "desktop" and self._play_intent == "dev":
             x, y = self._dev_place(w, h, fs)
         else:
@@ -2098,7 +2101,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = self._wins.get("desktop")
         if win is None:
             fs = self._fs()
-            w, h = self._win_size("desktop", self._root_canvas, fs)
+            w, h = self._open_size("desktop", fs)
             win = _Win("desktop", 0, 0, w, h, _layout_base.metric("title", fs))
             win.foot = self._win_foot(win)
             win.edge = self._win_edge(win)

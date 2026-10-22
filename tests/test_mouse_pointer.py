@@ -350,7 +350,7 @@ def test_the_code_window_autoscrolls_in_its_own_space(tmp_path):
     assert ed.top > 0 and ws.code_layer.autoscrolling()
 
 
-# -- the desk: a held press is its window's -------------------------------------
+# -- the desk: a held press is its window's, a window-bound app its window's size --
 
 def _desk_files(tmp_path, n=60):
     """Files on the desk over `n` drawings, its Art place open: (ws, driver,
@@ -403,3 +403,29 @@ def test_a_drag_that_leaves_the_window_still_scrolls_it(tmp_path, by):
     _frames(d)
     assert ws.wm._held_in is None
 
+
+def test_a_window_bound_app_lays_out_in_its_window_and_scrolls_to_its_end(tmp_path):
+    """Notes on the desk lays out in the content its window shows -- the
+    size the window opened at on this desk, clamped to it -- so the wheel and
+    the middle button bring its last note into the window."""
+    from ws_helpers import build_desktop_ws, open_cart
+    from runtime import ui_draw
+    ws = build_desktop_ws(tmp_path)
+    for i in range(40):
+        moy_carts.save_file("docs", "note%02d.md" % i, b"hello\n", str(tmp_path / "carts"))
+    d = make_drv(ws)
+    d.frame(DT)
+    open_cart(ws, "Notes")
+    for _ in range(4):
+        d.frame(DT)
+    cx, cy, cw, ch = ws.wm._wins["desktop"].content_rect()
+    assert tuple(ws.player.ns["content_rect"]()[2:]) == (cw, ch)
+    x, y = cx + 60, cy + ch // 2
+    d.hover(x, y)
+    d.frame(DT)
+    for _ in range(30):
+        d.wheel(0, 1)
+        d.frame(DT)
+        d.frame(DT)
+    bx, by, bw, bh = ui_draw._C.api_box(ws.player._ui[0], "vault")
+    assert by + bh <= ch, "the list runs on under the window's bottom"
