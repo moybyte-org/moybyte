@@ -98,7 +98,8 @@ def text_size(text, scale=1):
     font the theme's, at the whole-number `scale` -- `h` is the line."""
     f = _C.print_font()
     info = _C.font_info(f)
-    return _C.text_width(str(text), scale, f), (info[2] if info else 8) * scale
+    return (_C.text_width(text if type(text) is str else str(text), scale, f),
+            (info[2] if info else 8) * scale)
 
 
 _FACE = [None]                          # the print font `face` put aside
@@ -118,7 +119,8 @@ def face(name=None, text=None):
             _FACE[0] = None
         return True
     f = _C.font(name)[0]
-    if f == 0 or (text is not None and not _C.text_covers(str(text), f)):
+    if f == 0 or (text is not None and not _C.text_covers(
+            text if type(text) is str else str(text), f)):
         return False
     was = _C.print_font(f)
     if was is not None and _FACE[0] is None:
@@ -345,7 +347,10 @@ def swatches(label, colours, cur, o=None):
     current mark; left and right move it while focused, a tap picks: the new
     `cur`."""
     t = _T
-    b = b"".join([_pack("<i", int(c) & 0xffffff) for c in colours])
+    b = _memo_get(colours, -2)
+    if b is None:
+        b = _memo_put(colours, -2, b"".join([_pack("<i", int(c) & 0xffffff) for c in colours]),
+                      None if type(colours) is tuple else [c for c in colours])
     return _C.api_choice(t[0], t[1], t[2], 5, label, b, -1 if cur is None else cur, _over(o))
 
 

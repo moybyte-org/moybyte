@@ -808,6 +808,8 @@ static mp_obj_t ui_text_lanes(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ui_text_lanes_obj, ui_text_lanes);
 
+static mp_obj_t ret_tuple(size_t n, const mp_obj_t *items);
+
 // font_info(font) -> (w, h, line, ascent, first, count), or None.
 static mp_obj_t ui_font_info(mp_obj_t font) {
     moy_font_info_t f;
@@ -817,7 +819,7 @@ static mp_obj_t ui_font_info(mp_obj_t font) {
     mp_obj_t t[6] = {MP_OBJ_NEW_SMALL_INT(f.w), MP_OBJ_NEW_SMALL_INT(f.h),
                      MP_OBJ_NEW_SMALL_INT(f.line), MP_OBJ_NEW_SMALL_INT(f.ascent),
                      MP_OBJ_NEW_SMALL_INT(f.first), MP_OBJ_NEW_SMALL_INT(f.count)};
-    return mp_obj_new_tuple(6, t);
+    return ret_tuple(6, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_info_obj, ui_font_info);
 
@@ -848,7 +850,7 @@ static mp_obj_t ui_font(mp_obj_t role) {
     uint32_t id = moy_ui_font(font_role(role), &f);
     mp_obj_t t[4] = {mp_obj_new_int_from_uint(id), MP_OBJ_NEW_SMALL_INT(f.w),
                      MP_OBJ_NEW_SMALL_INT(f.line), MP_OBJ_NEW_SMALL_INT(f.ascent)};
-    return mp_obj_new_tuple(4, t);
+    return ret_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_font_obj, ui_font);
 
@@ -1268,6 +1270,39 @@ static moy_ui_span_t span_if(mp_obj_t o) {
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_ui_ret[16]);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_ui_bar_last);
 static uint8_t s_ret_at;
+
+// The same for the words the verbs hand back (the focused id): an answer
+// equal to a recent one IS that str.
+#define RET_STRS 8
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_ui_ret_str[8]);
+static uint8_t s_ret_str_at;
+
+static mp_obj_t ret_str(const char *p, size_t n) {
+    mp_obj_t *ring = MP_STATE_VM(moy_ui_ret_str);
+    for (int i = 0; i < RET_STRS; i++) {
+        mp_obj_t r = ring[i];
+        if (r == MP_OBJ_NULL) {
+            continue;
+        }
+        if (!mp_obj_is_obj(r) || gc_nbytes(MP_OBJ_TO_PTR(r)) == 0
+            || ((mp_obj_base_t *)MP_OBJ_TO_PTR(r))->type != &mp_type_str) {
+            ring[i] = MP_OBJ_NULL;
+            continue;
+        }
+        size_t len;
+        const char *q = mp_obj_str_get_data(r, &len);
+        if (len == n && memcmp(p, q, n) == 0) {
+            return r;
+        }
+    }
+    mp_obj_t r = mp_obj_new_str(p, n);
+    if (mp_obj_is_qstr(r)) {
+        return r;                   // interned: no heap object to keep
+    }
+    ring[s_ret_str_at] = r;
+    s_ret_str_at = (uint8_t)((s_ret_str_at + 1) % RET_STRS);
+    return r;
+}
 
 static mp_obj_t ret_tuple(size_t n, const mp_obj_t *items) {
     mp_obj_t *ring = MP_STATE_VM(moy_ui_ret);
@@ -2786,7 +2821,7 @@ static mp_obj_t ui_api_focus(mp_obj_t ctx, mp_obj_t id) {
     }
     char buf[MOY_UI_API_NAME];
     int n = moy_ui_api_focus(c, sp, buf, sizeof(buf));
-    return n < 0 ? mp_const_none : mp_obj_new_str(buf, strlen(buf));
+    return n < 0 ? mp_const_none : ret_str(buf, strlen(buf));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_focus_obj, ui_api_focus);
 
