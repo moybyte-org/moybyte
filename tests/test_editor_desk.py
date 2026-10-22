@@ -277,6 +277,38 @@ def test_a_sheet_pick_sets_the_sprite_and_the_brush_and_a_slide_previews(desk):
     assert ws.map_ui.mapedit.n == 21
 
 
+def _card_bodies_hidden(ws, drv, keys, monkeypatch, label):
+    from runtime import editor_desk
+    ws.pointer.visible = False
+    d = ws.editor_desk
+
+    def shot(key):
+        d.switch(key)
+        for _ in range(3):
+            drv.frame(DT)
+        ws.mark_dirty()
+        drv.frame(DT)
+        return bytes(ws.sys_canvas.to_rgb888())
+
+    for key in keys:
+        got = shot(key)
+        monkeypatch.setattr(editor_desk, "_FILLS_BODY", ())
+        want = shot(key)
+        monkeypatch.undo()
+        assert got == want, "%s %s: a card's body showed" % (key, label)
+
+
+@pytest.mark.parametrize("theme,variant", [("moy", "light"), ("moy", "dark"),
+                                           ("contrast", "dark"), ("blocks", "light")])
+def test_a_pane_that_fills_its_body_hides_the_cards_body(desk, theme, variant, monkeypatch):
+    """`_FILLS_BODY`'s panes draw their card down to the header only: the
+    workspaces showing them paint the same pixels as with the whole card."""
+    ws, drv = desk
+    ws.look.set_theme(theme, persist=False, variant=variant)
+    _card_bodies_hidden(ws, drv, ("settings", "code", "art", "world"), monkeypatch,
+                        "%s/%s" % (theme, variant))
+
+
 def test_a_settled_workspace_paints_nothing(desk):
     """With no input the redraw gate draws no frame on any workspace."""
     ws, drv = desk
@@ -623,6 +655,11 @@ def test_the_palettes_categories_pick_their_blocks(blocks_desk):
     assert d.part_state["block cat"] == "draw"
     from runtime import editor_parts as Parts
     assert Parts.palette_items(None, "events") == []
+
+
+def test_a_blocks_carts_panes_hide_the_cards_body_too(blocks_desk, monkeypatch):
+    ws, drv = blocks_desk
+    _card_bodies_hidden(ws, drv, ("code", "world"), monkeypatch, "blocks cart")
 
 
 def test_a_settled_blocks_workspace_paints_nothing(blocks_desk):

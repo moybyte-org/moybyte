@@ -59,6 +59,12 @@ _OWNERS = {"cards": ("cards_layer", "layout"), "blocks": ("block_ui", "block_lay
 # editor core, not by the tab's own surface: the Sound pane.
 _ON_VERBS = ("music",)
 
+# The Editor tabs whose surface, drawn in a pane, fills the pane's whole body
+# before anything else (Sprite, Map and Scene their `body_fill`, Code its
+# `cls`, Settings its `ui.page`): their card is drawn down to the header
+# only, its body never seen (tests/test_editor_desk.py holds it).
+_FILLS_BODY = ("paint", "map", "scene", "code", "cards")
+
 # Which workspace shows an Editor tab, for a tab opened from elsewhere (a
 # crash's throw to Code, Files opening a sprite sheet).
 _HOME = {"cards": "settings", "code": "code", "blocks": "code", "paint": "art",
@@ -443,10 +449,12 @@ class EditorDesk(Layer):
                     continue
                 r = self._area()
             shown.append((n, pane, r))
-            self._card(cv, th, r, n == fi, u)
             c = self.tab_of(pane)
             body = self._body(r, u, pane)
             tab = P.CONTENTS[c][2]
+            self._card(cv, th, r, n == fi, u,
+                       body[1] if tab in _FILLS_BODY and c not in _ON_VERBS
+                       and ws.layer_of(tab) is not None else 0)
             if tab is not None and c not in _ON_VERBS:
                 self._tab_pane(tab, body, dt)
             elif c == "game":
@@ -541,11 +549,19 @@ class EditorDesk(Layer):
         h = 0 if pane is not None and self._headless(pane) else P.HEADER * u
         return (r[0], r[1] + h, r[2], max(0, r[3] - h))
 
-    def _card(self, cv, th, r, focused, u):
+    def _card(self, cv, th, r, focused, u, filled=0):
+        """Pane `r`'s card; with `filled`, the y its content's own fill
+        starts at, the card above it alone."""
         x, y, w, h = r
         rad = P.RADIUS * u
         line = None if th.get("surface_light", False) else th["border"]
-        cv.rrect(x, y, w, h, rad, th["surface"], line)
+        if filled:
+            if filled > y:
+                cv.clip(x, y, w, filled - y)
+                cv.rrect(x, y, w, h, rad, th["surface"], line)
+                cv.clip()
+        else:
+            cv.rrect(x, y, w, h, rad, th["surface"], line)
         if focused:
             cv.clip(x, y, w, P.EDGE * u)
             cv.rrect(x, y, w, h, rad, th["value"])
