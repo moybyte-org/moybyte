@@ -1,7 +1,7 @@
 {
   "files": {
     "native/moy_audio/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
-    "native/moy_audio/libmoy/moy_audio.c": "0ad1024459ba4f5456db96ae1ab54fa617a03da631e231999cdf1ad0cc42eb66",
+    "native/moy_audio/libmoy/moy_audio.c": "d8721f6e972cf9721058f6c04ea9a0a459f6c5c87044996ef5a44ffa4aa0a480",
     "native/moy_audio/libmoy/moy_audio.h": "140278244383a30aa00af19a69a8be8fb45e04c6b43c7315dc56e16074607afa",
     "native/moy_gfx/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moy_gfx/libmoy/moy.h": "ee11b68a1674dceb01bae8e95e38cda844f2c275dc3705a94db99581b758e288",
@@ -19,8 +19,8 @@
     "tools/wat.py": "cc7332d29d4642fede58d2521f343c836c3e4457f4b309b9f1f8553d24817796"
   },
   "upstream": {
-    "commit": "0af3dec00a61db6c1c24e02f3e4cdf93a4e6a5e6",
-    "date": "2026-10-12",
+    "commit": "8e55c772094d86d6c0f7525a765f934c3c0c7f74",
+    "date": "2026-10-22",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }

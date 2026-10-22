@@ -119,6 +119,11 @@ def _clampi(v, lo, hi):
 
 # -- data model --------------------------------------------------------------
 
+# SPEC.md 8.1: an SFX's optional `name` is a label for a person and never
+# changes playback. A reader cuts one past this many characters and drops a
+# non-string.
+SFX_NAME_MAX = 24
+
 class SFX:
     """A short sound effect: a list of [pitch, wave, vol] (or [pitch, wave, vol,
     eff]) steps at `speed` steps/second. Plain data; round-trips through
@@ -127,7 +132,7 @@ class SFX:
     pre-#170 banks stay byte-identical on disk."""
 
     def __init__(self, steps=None, speed=8, loop=False, loop_start=0,
-                 filters=0):
+                 filters=0, name=None):
         # normalize each step to a [pitch, wave, vol(, eff)] list of ints
         self.steps = [self._norm(s) for s in (steps or [])]
         # FRACTIONAL speeds are legal, exactly as libmoy declares them
@@ -157,6 +162,9 @@ class SFX:
             self.filters = _clampi(int(filters), 0, 255)
         except (TypeError, ValueError):
             self.filters = 0
+        # The label (SPEC.md 8.1): None = unnamed, "" is a name like any other.
+        # The Music editor has no field for it yet; the bank carries it.
+        self.name = name[:SFX_NAME_MAX] if isinstance(name, str) else None
 
     @staticmethod
     def _norm(s):
@@ -176,13 +184,15 @@ class SFX:
             d["loop_start"] = self.loop_start
         if self.filters:
             d["filters"] = self.filters
+        if self.name is not None:
+            d["name"] = self.name
         return d
 
     @classmethod
     def from_dict(cls, d):
         d = d or {}
         return cls(d.get("steps"), d.get("speed", 8), d.get("loop", False),
-                   d.get("loop_start", 0), d.get("filters", 0))
+                   d.get("loop_start", 0), d.get("filters", 0), d.get("name"))
 
 
 class MusicTrack:

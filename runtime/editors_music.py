@@ -543,6 +543,7 @@ class MusicEditor(OpHistoryMixin):
         dup.speed = s.speed
         dup.loop = s.loop
         dup.loop_start = getattr(s, "loop_start", 0)
+        dup.name = getattr(s, "name", None)
         self.bank.sfx.append(dup)
         self.sfx_idx = len(self.bank.sfx) - 1
         self.step = 0

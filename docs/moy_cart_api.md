@@ -973,6 +973,10 @@ Since #170 the model is PICO-8-parity:
   there — p8's loop range), and a track may carry `row_secs`, per-row
   durations in seconds (`0` = hold the row forever) — how a p8 song's
   changing pattern lengths survive the import.
+- An SFX may carry a `name`, a string of at most 24 characters (SPEC.md 8.1).
+  It labels the sound for a person and never changes how it plays. The bank
+  (`runtime/audio.py`) keeps it through a load and a save, so the Music tab
+  writes back the name it read, though it has no field to edit one yet.
 
 - A note with `vol` `0` but a real pitch is a **keyed rest**: silent, but still
   the note a following slide glides *from*. Only pitch `−1` leaves that origin

@@ -84,6 +84,52 @@ def test_sfx_effect_column_optional_and_stable():
     assert s2.to_dict() == s.to_dict()
 
 
+def test_sfx_name_roundtrips_and_is_cut_to_the_spec_bound():
+    # SPEC.md 8.1: an optional label; "" is a name, absent is None and writes
+    # nothing (a nameless bank stays byte-stable), a non-string is no name,
+    # one past 24 characters is cut to 24.
+    assert audio.SFX_NAME_MAX == 24
+    assert "name" not in audio.SFX([[60, 0, 6]]).to_dict()
+    for name in ("coin", "", 'say "hi" \u2603'):
+        s = audio.SFX([[60, 0, 6]], name=name)
+        assert s.to_dict()["name"] == name
+        assert audio.SFX.from_dict(s.to_dict()).name == name
+    assert audio.SFX([[60, 0, 6]], name="a" * 25).name == "a" * 24
+    assert audio.SFX.from_dict({"name": 7, "steps": [[60, 0, 6]]}).name is None
+    bank = {"sfx": [{"name": "coin", "speed": 8, "loop": False, "steps": [[60, 0, 6]]},
+                    {"speed": 8, "loop": False, "steps": [[60, 0, 6]]}],
+            "music": []}
+    assert audio.AudioBank.from_dict(bank).to_dict() == bank
+
+
+@requires_synth
+def test_sfx_name_never_changes_what_plays():
+    plain = audio.AudioBank([audio.SFX([[57, 0, 7], [60, 1, 5]], speed=12)], [])
+    named = audio.AudioBank([audio.SFX([[57, 0, 7], [60, 1, 5]], speed=12,
+                                       name='say "hi", {ok}')], [])
+    pcm = []
+    for bank in (plain, named):
+        eng = Synth(bank, rate=8000)
+        eng.play_sfx(0, chan=0)
+        pcm.append(bytes(eng.render(2000)))
+    assert pcm[0] == pcm[1] and any(pcm[0])
+
+
+def test_music_editor_keeps_an_sfx_name_through_save_and_duplicate(tmp_path):
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    c = moy_carts.create("Tune", root, src="def _draw():\n    cls(1)\n")
+    bank = audio.AudioBank.default()
+    bank.sfx[0].name = "coin"
+    me, _ = _music_editor(bank)
+    me.duplicate_sfx()
+    me.nudge_pitch(1)
+    moy_carts.save_sounds(c, me.bank.to_dict())
+    again = audio.AudioBank.from_dict(moy_carts.load(c["path"])["sounds"])
+    assert [s.name for s in again.sfx] == ["coin", None, None, "coin"]
+
+
 def test_audio_bank_default_and_roundtrip():
     bank = audio.AudioBank.default()
     assert len(bank.sfx) == 3 and len(bank.music) == 1
