@@ -166,7 +166,7 @@ def test_an_overlay_or_a_cursor_leaves_the_frame_undescribed(tmp_path):
     ws.pointer.visible = True
     wm.hand_content_damage(cv, 1, 2, 3, 4)
     ws.pointer.visible = False
-    ws._deferred.append((lambda: None, True))       # a LOADING pill is owed
+    ws._deferred.append((lambda: None, True, True))  # a LOADING pill is owed
     wm.hand_content_damage(cv, 1, 2, 3, 4)
     ws._deferred.clear()
     wm._cache_sig = 32                              # a toast is on the stack

@@ -194,6 +194,31 @@ def test_moving_focus_commits_nothing_and_a_switch_commits_only_dirty_panes(desk
     assert owed == ["paint"]
 
 
+def _painted(ws, drv, n=4):
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    drawn = ws._frames_drawn
+    for _ in range(n):
+        drv.frame(DT)
+    return ws._frames_drawn - drawn
+
+
+def test_a_clean_switch_paints_once_and_a_commit_paints_again(desk):
+    """The owed commit rides the frame's tail and shows nothing: a switch
+    away from a clean tab paints the destination once; a tab that wrote
+    paints once more, since a commit may move what the Editor shows."""
+    ws, drv = desk
+    _painted(ws, drv)
+    ws.editor_app.set_tab("code")
+    assert _painted(ws, drv) == 1
+    ws.editor_app.set_tab("paint")
+    assert _painted(ws, drv) == 1
+    ws.paint.sheet.pset(0, 0, 9)
+    ws.paint.sheet.dirty = True
+    ws.editor_app.set_tab("cards")
+    assert _painted(ws, drv) >= 2
+
+
 def test_ctrl_alt_arrows_and_ctrl_0_move_and_reset_the_dividers(desk):
     ws, drv = desk
     d = ws.editor_desk

@@ -1241,14 +1241,18 @@ class EditorApp:
         if defer is None:              # no frame loop to drain it -- pay now
             self.flush_pending()
         else:
-            defer(self.flush_pending, toast=False)
+            defer(self.flush_pending, toast=False, paints=False)
 
     def flush_pending(self):
         """Pay every commit `commit_later` owes, oldest first. Idempotent and
         cheap when nothing is owed, which is every frame but the one after a
         tab switch. Named for the DEFER diag line, which prints it by name."""
+        wrote = False
         while self._pending:
-            self.save_tab(self._pending.pop(0))
+            if self.save_tab(self._pending.pop(0)):
+                wrote = True
+        if wrote:
+            self.ws._dirty = True      # a commit may move what the Editor shows
 
     def save_current(self):
         """Hard-commit the ACTIVE tab (#111: the autosave-only model's persist verb --
@@ -1274,10 +1278,11 @@ class EditorApp:
         """Route ONE tab's commit to that tab's own persist verb, skipping a tab
         the clean guard can prove has nothing to write. The body `save_current`
         has always had, taking the tab as an argument so a debt `commit_later`
-        recorded can still be paid once the ladder has moved on."""
+        recorded can still be paid once the ladder has moved on. True when
+        it committed."""
         ws = self.ws
         if self._tab_is_clean(tab):
-            return                   # nothing changed -> nothing to persist
+            return False             # nothing changed -> nothing to persist
         if tab == "code":
             # force: this verb IS the hard-exit path (#154). A kid who goes home or
             # switches tab mid-line keeps the line even though it does not parse
@@ -1296,3 +1301,4 @@ class EditorApp:
             ws.block_ui.commit_workspace_scene()   # persist the side-by-side scene pane (#93/#85)
         elif tab == "cards":
             ws._save_config()
+        return True

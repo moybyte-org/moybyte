@@ -2190,7 +2190,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     # -- run / exit (Stage 2: the run/return stack discipline) ----------------
 
-    def defer(self, fn, toast=True):
+    def defer(self, fn, toast=True, paints=True):
         """#184: schedule a heavy transition (cart start, editor open, PLAY)
         instead of running it inside the pointer walk. The tap frame paints its
         acknowledgment (selection highlight + the LOADING toast) and PRESENTS
@@ -2205,15 +2205,19 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         already painted the destination. It gets the same drain and the same
         DEFER line, and no pill: SAVE IS INVISIBLE (spec Section 7), and a
         'LOADING...' over a tab that has already finished switching would
-        announce the one thing the shell promises never to show."""
-        self._deferred.append((fn, bool(toast)))
+        announce the one thing the shell promises never to show.
+
+        `paints=False` is work whose result shows nothing (that same commit,
+        which marks dirty itself when it writes): the drain then owes no
+        frame for it, where a transition's result must paint."""
+        self._deferred.append((fn, bool(toast), bool(paints)))
         self._dirty = True             # the acknowledgment frame must paint
 
     def _toast_owed(self):
         """Does a queued transition want the LOADING pill? A loop, because a
         generator expression is three heap objects and frame() asks on every
         painted frame."""
-        for _fn, toast in self._deferred:
+        for _fn, toast, _paints in self._deferred:
             if toast:
                 return True
         return False
@@ -2224,15 +2228,18 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         transition that defers another action leaves it for the next frame --
         its own result must paint first."""
         q = self._deferred
+        paint = False
         for _ in range(len(q)):
-            fn, _toast = q.pop(0)
+            fn, _toast, paints = q.pop(0)
+            paint = paint or paints
             _t0 = _ticks_ms() if self.perf_capture else 0
             fn()
             if self.perf_capture:
                 print("DEFER ms=%d fn=%s"
                       % (_ticks_diff(_ticks_ms(), _t0),
                          getattr(fn, "__name__", "?")))
-        self._dirty = True             # the transition's result must paint
+        if paint:
+            self._dirty = True         # the transition's result must paint
 
     def _crash_to_code(self):
         """A crashed cart run throws the kid STRAIGHT into the code editor on
