@@ -18,9 +18,13 @@ from ws_helpers import build_ws as _build_ws, use_theme  # noqa: E402
 def _ws(tmp_path, **kw):
     """A workstation on the lookless `night` fixture (tests/fixtures/themes/)
     in its dark mode: the bar's mechanics are pinned on the pixel IconSheet
-    and the pixel bar; a test of a look sets its theme."""
+    and the pixel bar; a test of a look sets its theme. Its bar's HH:MM is
+    pinned (`_pin_clock`): a test that counts strip renders across frames
+    counts a real minute rollover too, and a loaded machine stretches the
+    frames across one; a test of the clock sets `_clock_text` itself."""
     ws = _build_ws(tmp_path, **kw)
     use_theme(ws, "night", "dark")
+    ws.bar_layer._clock_text = lambda: "12:00"
     return ws
 
 
