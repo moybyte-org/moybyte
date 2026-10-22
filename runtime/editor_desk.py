@@ -55,7 +55,13 @@ _HOME = {"cards": "settings", "code": "code", "blocks": "code", "paint": "art",
          "map": "art", "scene": "world", "music": "sound"}
 
 # The tools a pane's header carries before its grow, right to left.
-_HEAD_TOOLS = {"paint": (("rotate", "Rotate\tR", "rot"), ("flip", "Flip\tF", "fliph"))}
+_HEAD_TOOLS = {"paint": (("rotate", "Rotate\tR", "rot"), ("flip", "Flip\tF", "fliph")),
+               "map": (("search", "Zoom\tA", "map:zoom"), ("eraser", "Erase", "map:erase"),
+                       ("select", "Select", "map:select"), ("bucket", "Fill", "map:flood"),
+                       ("rect", "Box", "map:rect"), ("pencil", "Pen", "map:stamp")),
+               "scene": (("search", "Zoom\tA", "scene:zoom"), ("check", "Snap", "scene:snap"),
+                         ("trash", "Delete", "scene:delete"), ("to_back", "Back", "scene:back"),
+                         ("to_front", "Front", "scene:front"), ("flip", "Flip", "scene:flip"))}
 
 _DOUBLE_MS = 400            # a second press this soon on a header or handle
 _FULL_MS = 1000
@@ -93,6 +99,7 @@ class EditorDesk(Layer):
         self._ev = 0                    # last frame's key event
         self._shown = None              # the workspace whose panes were built
         self._seen = None               # the Editor's tab as the desk last left it
+        self._zoomed = None             # the cart the desk zooms were set for
         self._flash = None              # (pane, why): a divider stopped at its minimum
         self._sheet_page = 0
         self._sheet_hold = False
@@ -228,6 +235,23 @@ class EditorDesk(Layer):
                 if tab is not None:
                     app.build_tab(tab)
         self.focus_pane(self._focus.get(self.key, 0))
+        self._desk_zooms()
+
+    def _desk_zooms(self):
+        """The Map and the Scene open at 2x on a desk (EDITOR_LAYOUT.md),
+        once a cart; the wheel and A move them after."""
+        ws = self.ws
+        path = (ws.cart or {}).get("path")
+        if self._zoomed == path:
+            return
+        mu, su = ws.built("map_ui"), ws.built("scene_ui")
+        if mu is None and su is None:
+            return
+        self._zoomed = path
+        if mu is not None and mu.map_zoom == 0:
+            mu.map_zoom = 1                 # 16 px a cell: 2x
+        if su is not None and su.scene_zoom == 0:
+            su.scene_zoom = 1
 
     def focus_pane(self, i):
         """Move the keys to pane `i` (reading order). Commits nothing."""
@@ -500,7 +524,8 @@ class EditorDesk(Layer):
             for icon, word, op in _HEAD_TOOLS.get(self.tab_of(pane), ()):
                 tx -= cell
                 ui.at(tx, y, cell, hh)
-                if ui.tool(icon, word, {"id": "%s %s" % (pid, op)}):
+                if ui.tool(icon, word, {"id": "%s %s" % (pid, op),
+                                        "current": self._tool_on(op)}):
                     self._head_tool(op)
             c = self.tab_of(pane)
             if c == "game":
@@ -541,10 +566,56 @@ class EditorDesk(Layer):
         return label
 
     def _head_tool(self, op):
-        """A tool in a pane's header: the Sprite pane's flip and rotate."""
+        """A tool in a pane's header: the Sprite pane's flip and rotate, the
+        Map pane's tools, eraser and zoom."""
         ws = self.ws
-        ws.paint_layer._do_tool(op)
+        if op.startswith("scene:"):
+            su = ws.scene_ui
+            se = su.sceneedit
+            what = op[6:]
+            if what == "zoom":
+                su._cycle_zoom()
+            elif se is not None:
+                if what == "snap":
+                    se.snap = not se.snap
+                elif what == "delete":
+                    se.delete_sel()
+                elif what == "back":
+                    se.back_sel()
+                elif what == "front":
+                    se.front_sel()
+                elif what == "flip":
+                    se.toggle_flip()
+                su._sync_live()
+                self._owe_restart("scene")
+        elif op.startswith("map:"):
+            mu = ws.map_ui
+            what = op[4:]
+            if what == "erase":
+                mu.map_erase = not mu.map_erase
+            elif what == "zoom":
+                mu._map_cycle_zoom()
+            else:
+                mu.map_tool = what
+                mu.map_erase = False
+                mu._map_rect = None
+                mu._map_sel = None
+        else:
+            ws.paint_layer._do_tool(op)
         ws.mark_dirty()
+
+    def _tool_on(self, op):
+        """Whether a header tool is the one in use (a current mark)."""
+        if op == "scene:snap":
+            se = self.ws.scene_ui.sceneedit
+            return bool(se is not None and se.snap)
+        if not op.startswith("map:"):
+            return False
+        mu = self.ws.map_ui
+        what = op[4:]
+        if what == "erase":
+            return bool(mu.map_erase)
+        return what == mu.map_tool and not mu.map_erase
 
     def _status(self, c):
         """A pane's dim status after its name: the game's scale."""

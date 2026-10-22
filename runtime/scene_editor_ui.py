@@ -56,10 +56,11 @@ except ImportError:  # pragma: no cover - direct host import (chrome not yet ali
     from runtime.chrome import _gbtn as _chrome_gbtn
 
 try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
+                             pane as _in_pane)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H)
+                                     BASE_H as _BASE_H, pane as _in_pane)
 
 # World view (left): the panned window onto the world, same rectangle the map
 # editor uses (clear of the palette column at x >= 206 and the bottom row).
@@ -180,6 +181,29 @@ class SceneLayout(LayoutBase):
         self.redo_btn = (self.front_btn[0] - gap - tbw, tb_y, tbw, tbh)
         self.undo_btn = (self.redo_btn[0] - gap - tbw, tb_y, tbw, tbh)
         self.pan_thresh = _SC_PAN_THRESH * fs
+        self.pane = _in_pane() and bounds is None
+        if self.pane:
+            self._pane_geometry()
+
+    def _pane_geometry(self):
+        """A desk Editor's Scene pane (EDITOR_LAYOUT.md's World): the view
+        fills the pane; the stamps are the Stamps pane's, the props the Actor
+        pane's and the tools the pane header's, so the palette, the pad and
+        the props row stand off the surface."""
+        fs = self.fs
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        self.body_fill = self.panel = (cx, cy, cw, ch)
+        self.sv_x0, self.sv_y0 = cx + 2 * fs, cy + 2 * fs
+        self.sv_avail_w, self.sv_avail_h = cw - 4 * fs, ch - 4 * fs
+        off = (-4096, -4096, 0, 0)
+        for name in ("pan_up", "pan_lf", "pan_rt", "pan_dn", "zoom_btn", "flip_btn",
+                     "tp_prev", "tp_next", "tag_btn", "del_btn", "snap_btn",
+                     "back_btn", "front_btn", "redo_btn", "undo_btn"):
+            setattr(self, name, off)
+        self.tp_area = off
+        self.tp_rows = 1
+        self.tp_page = self.tp_cols
+        self.title_xy = (-4096, -4096)
 
 
 class SceneEditorUI:
@@ -617,9 +641,10 @@ class SceneEditorUI:
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
         # nothing (see ui.fill_uncovered).
-        _ui_draw.fill_uncovered(cv, lay.panel, lay.body_fill,
-                           th["surface"])
-        cv.rectb(*(lay.panel + (NAMES["green"],)))
+        if not lay.pane:
+            _ui_draw.fill_uncovered(cv, lay.panel, lay.body_fill,
+                               th["surface"])
+            cv.rectb(*(lay.panel + (NAMES["green"],)))
         x0, y0, scale, vw, vh = self._sv_metrics()
         title = "SCENE"
         if self.scene_name:
@@ -680,6 +705,8 @@ class SceneEditorUI:
                          NAMES["white"] if i == se.sel else NAMES["dark_grey"])
                 if i == se.sel and side > 4:
                     cv.rectb(vx + 1, vy + 1, side - 2, side - 2, NAMES["white"])
+        if lay.pane:
+            return
         # -- tile palette (the stamp picker; the brush tile is boxed white).
         # #163 conversion: the grid's chrome is a MEMOIZED quad pack -- one
         # fill_rects paints every cell's black bg, one paints every dark

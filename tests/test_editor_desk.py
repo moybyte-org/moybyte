@@ -407,3 +407,20 @@ def test_a_stamp_pick_sets_the_scenes_brush(desk):
     tw = w // 16
     _click(drv, x + 6 * tw + 1, y + 1)
     assert ws.scene_ui.sceneedit.n == 6
+
+
+def test_the_map_and_scene_panes_open_at_2x_and_their_header_tools_act(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("3"), 1)
+    assert ws.map_ui.map_zoom == 1               # 16 px a cell: 2x
+    d._head_tool("map:flood")
+    assert ws.map_ui.map_tool == "flood" and d._tool_on("map:flood")
+    d._head_tool("map:erase")
+    assert ws.map_ui.map_erase and not d._tool_on("map:flood")
+    _tap(drv, ord("4"), 1)
+    assert ws.scene_ui.scene_zoom == 1
+    se = ws.scene_ui.sceneedit
+    snap = se.snap
+    d._head_tool("scene:snap")
+    assert se.snap != snap

@@ -51,10 +51,11 @@ except ImportError:  # pragma: no cover - direct host import (chrome not yet ali
     from runtime.chrome import _gbtn as _chrome_gbtn
 
 try:
-    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
+                             pane as _in_pane)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H)
+                                     BASE_H as _BASE_H, pane as _in_pane)
 
 # Map (tilemap) editor (#32): a panned view of the map on the left where each cell
 # is the scaled sprite tile placed there, and a paged tile palette on the right to
@@ -275,6 +276,33 @@ class MapLayout(LayoutBase):
         self.dim_btn = (tb_right - tbw, tb_y, tbw, tbh)
         self.tool_btn = (self.dim_btn[0] - gap - tbw, tb_y, tbw, tbh)
         self.pan_thresh = _MAP_PAN_THRESH * fs
+        self.pane = _in_pane()
+        if self.pane:
+            self._pane_geometry()
+
+    def _pane_geometry(self):
+        """A desk Editor's Map pane (EDITOR_LAYOUT.md's Art): the view fills
+        the pane above a status line; the brush is the Sheet pane's and the
+        tools the pane header's, so the palette, the pad and the buttons
+        stand off the surface."""
+        fs = self.fs
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        self.body_fill = self.panel = (cx, cy, cw, ch)
+        line = _ui_draw.font("ui")[2] * fs
+        self.status_h = line + 8 * fs
+        self.mv_x0, self.mv_y0 = cx + 2 * fs, cy + 2 * fs
+        self.mv_avail_w = cw - 4 * fs
+        self.mv_avail_h = ch - 4 * fs - self.status_h
+        self.status_xy = (cx + 8 * fs, cy + ch - self.status_h + 4 * fs)
+        off = (-4096, -4096, 0, 0)
+        for name in ("pan_up", "pan_lf", "pan_rt", "pan_dn", "zoom_btn", "size_btn",
+                     "tp_prev", "tp_next", "sky_btn", "erase_btn", "close_btn",
+                     "dim_btn", "tool_btn"):
+            setattr(self, name, off)
+        self.tp_area = off
+        self.tp_rows = 1
+        self.tp_page = self.tp_cols
+        self.title_xy = (-4096, -4096)
 
 
 class MapEditorUI:
@@ -309,6 +337,7 @@ class MapEditorUI:
         self.layout = MapLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
     _pan_acc = [0, 0]
+    _hover_cell = None
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
@@ -831,6 +860,9 @@ class MapEditorUI:
         self._map_sel = None
 
     def _map_click(self, px, py):
+        got = self._map_cell_at(px, py)
+        if got is not None:
+            self._hover_cell = got
         ws = self.ws
         me = self.mapedit
         if me is None:
@@ -953,9 +985,10 @@ class MapEditorUI:
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
         # nothing (see ui.fill_uncovered).
-        _ui_draw.fill_uncovered(cv, lay.panel, lay.body_fill,
-                           th["surface"])
-        cv.rectb(*(lay.panel + (NAMES["green"],)))
+        if not lay.pane:
+            _ui_draw.fill_uncovered(cv, lay.panel, lay.body_fill,
+                               th["surface"])
+            cv.rectb(*(lay.panel + (NAMES["green"],)))
         # Live zoom metrics (#37 follow-up): one cell size drives the grid, the tile
         # upscale and the title's "z<level>" badge.
         x0, y0, cell, cols, rows = self._mv_metrics()
@@ -1080,6 +1113,9 @@ class MapEditorUI:
                                    self._map_sel[0], self._map_sel[1],
                                    self._map_sel[2], self._map_sel[3],
                                    NAMES["yellow"], True)
+        if lay.pane:
+            self._pane_status(cv, lay, me, tm, th)
+            return
         # Tile palette (right): a page of sheet tiles; the brush tile is boxed white.
         # The tile art stays its native size (a bigger palette shows MORE tiles per
         # page via extra rows, and the fs-scaled cell just gives it more air).
@@ -1151,6 +1187,22 @@ class MapEditorUI:
         # Map-resize overlay (#91): drawn LAST so it sits over the whole editor.
         if self.dims_open:
             self._draw_dims(cv, NAMES)
+
+    def _pane_status(self, cv, lay, me, tm, th):
+        """The Map pane's status line: the cell the pointer is over, the
+        brush's tile, the map's size, the zoom, and the hold's pick."""
+        fs = lay.fs
+        cell = getattr(self, "_hover_cell", None)
+        parts = []
+        if cell is not None:
+            parts.append("Cell %d, %d" % cell)
+        parts.append("tile %d" % me.n if me.n >= 0 else "sky")
+        parts.append("%d\u00d7%d" % (tm.w, tm.h) if _ui.has_symbols() else "%dx%d" % (tm.w, tm.h))
+        parts.append("zoom " + self._mv_zoom_label())
+        parts.append("hold a cell to pick its tile")
+        text = "  \u00b7  ".join(parts) if _ui.has_symbols() else "  -  ".join(parts)
+        cv.print(_ui_draw.print_cut(text, lay.cw - 16 * fs, fs),
+                 lay.status_xy[0], lay.status_xy[1], th["ink_dim"], 1)
 
     def _draw_map_blocks(self, cv, tm, sheet, me, x0, y0, cell, nx, ny):
         """The OVERVIEW rung's minimap (#215): every placed cell as a solid block of
