@@ -114,7 +114,7 @@ class StoryPage:
         self.carts = carts
         self.files = files
         self.name = name
-        self.stories = _stories.story_list(carts) if _stories is not None else []
+        self.stories = _stories.story_list(carts, files) if _stories is not None else []
 
     def draw(self, cv, rect, desk, fs):
         """The page in `rect`: (story title, slide) the drawing went into the

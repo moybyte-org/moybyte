@@ -1,813 +1,1046 @@
 # Map (grep -n a name to jump there):
-#   deck_to_code                  a deck compiled to its story cart's main.py
-#   story_list                    the stories a drawing can be put in
-#   add_picture_slide             a drawing as a story's new last page, and its undo
-#   StorybookLayout               the shelf's and a page's rects
-#   StorybookAppLayer             the Storybook app: the shelf, the pages, a page
-"""Storybook -- decks of pages that COMPILE to a story cartridge (#78).
+#   story_list                  the stories a drawing can be put in (Paint's door)
+#   add_picture_slide           a drawing as a story's new last slide, and its undo
+#   StorybookLayout             the pages' rects on the handheld and the desk
+#   Frames                      slides drawn once into layers, kept by what they show
+#   StorybookAppLayer           the app: stories, a story's view, Present
+#   StorybookAppLayer._scan     the stories in the store, each read strictly
+#   StorybookAppLayer.draw      the frame: the page it is on
+#   StorybookAppLayer._present  Present: the slide alone, its taps and transitions
+"""Storybook -- the kids' slides app (docs/media/look_2026-10/APPS_RESTYLE.md,
+Storybook): a story is slides of words, shapes and pictures, an app's own
+document (runtime/story_doc.py), not a cart. One renderer draws a slide at
+any zoom (runtime/story_render.py).
 
-The Desk Lab thesis (the HyperCard/Flash ladder): the document IS the game.
-A deck is pages of art + words; saving it generates a short, readable
-`main.py` (tap to turn the page), so every story is a real cart -- it shows on
-the launcher, runs under the Player on every tier, and "open as code" is just
-the Editor's Code tab on it. Page art comes from Paint: USE MY PAINTING copies
-the shared drawing into the story cart as `images/pgN.moyimg`, drawn by the
-generated code through the existing `image()` verb (the My Art mechanism).
+  STORIES   a card a story, its first slide: the handheld's at 1/8, two a
+            row; the desk's at 1/4, three a row, New story first, Present
+            and Open in the window's foot, M its card's menu (Rename,
+            Duplicate, Delete, which asks).
+  A STORY   on the handheld, a slide at 1/4 to look at, left and right step,
+            P presents: a handheld shows stories and does not edit them, so
+            the edit keys answer "Stories are edited on a desk". On the desk
+            the sorter and the slide editor (runtime/story_edit.py).
+  PRESENT   the slide alone at the largest zoom the glass takes (1:1 on the
+            desk's 1024 x 600 glass, 5/16 on the handheld's 320 x 240), its
+            objects appearing on taps, Fade and Swipe between slides, its
+            number for a second after each change.
 
-Graduation (the MakeCode rule, full #78 form): a story is a deck-authored
-"origin" exactly like a block program is -- when the kid hand-edits `main.py`
-past the deck's page/art/bg vocabulary (in the Editor's Code tab), the SAME
-manifest `graduated` flag + undo-journal `grad` rider the block editor uses
-(runtime/project.py's `_journal_code`/`_journal_code_toward`) flips true, and
-undoing past that commit un-graduates it, exactly like a block cart. Storybook
-itself just READS that persisted flag (`cart["graduated"]`) to decide
-read-only, and -- as a bootstrap/fallback for a divergence that reached disk
-some other way (a direct write, or a cart authored before this integration
-existed) -- opportunistically detects + GRADUATES it into the real mechanism
-right here on open (`_graduate_hand_edit`), so "leveled up to code" is never a
-transient, un-persisted, un-undoable guess again.
-
-Same app pattern as Paint/Appearance: a `.moy` cartridge identity
-(`moybyte.storybook.moy`) backed by this responsive system process."""
+A story is the `stories` item `<name>` of the user files: `story.json` and
+the pictures it uses. A story whose document does not read (another format,
+an old story cart's deck) is not listed: it reads as absent.
+"""
 
 try:
-    import ui as _ui
-    import ui_draw as _ui_draw
+    import ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui as _ui
-    from runtime import ui_draw as _ui_draw
-_in = _ui.rect_in   # one hit-test (ui.rect_in)
-
-
-import json
+    from runtime import ui
 
 try:
-    from picture_copies import current_picture
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.picture_copies import current_picture
+    from app_shell import ListShellApp
+    from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
+    from ticks import _ticks_ms, _ticks_diff
+    import story_doc as D
+    import story_render as R
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.app_shell import ListShellApp
+    from runtime.layout_base import (bar_rows, content_of, metric_class, window_foot,
+                                     DESK)
+    from runtime.ticks import _ticks_ms, _ticks_diff
+    from runtime import story_doc as D
+    from runtime import story_render as R
 
-try:
-    from artwork import picture_size as _picture_size, read_cover as _read_cover
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.artwork import picture_size as _picture_size, read_cover as _read_cover
-
-try:
-    from editors_code import CodeEditor
-    from editors_base import KeyEdge
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.editors_code import CodeEditor
-    from runtime.editors_base import KeyEdge
-
-try:
-    from widgets import ConfirmTap
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.widgets import ConfirmTap
-
-try:
-    from app_shell import ListShellLayout, ListShellApp
-except ImportError:  # pragma: no cover - direct host import
-    from runtime.app_shell import ListShellLayout, ListShellApp
-
-
-MAX_PAGES = 16
-MAX_TEXT_LINES = 4
-MAX_LINE = 34
-BGS = ("dark_blue", "indigo", "dark_purple", "black", "dark_green", "blue")
-STORY_TYPE = "story"
+KIND = "stories"
+DOC = "story.json"
+TOAST_MS = 2000
+NUMBER_MS = 1000
+FADE_FRAMES = 6                 # each way, through black
+SWIPE_FRAMES = 8
+COMMIT_MS = 800                 # an edit is written this long after the last
+PRESENT_ZOOMS = ((1, 1), (7, 8), (3, 4), (5, 8), (1, 2), (5, 16), (1, 4), (1, 8))
+DESK_BUDGET = 8 << 20           # the pictures' pixels kept, desk and handheld
+HAND_BUDGET = 384 << 10
+EDIT_KEYS = (13, 10, 9, 127, 4, 26, 25, 3, 22, ord("["), ord("]"), ord("n"), ord("N"),
+             ord("t"), ord("T"), ord("s"), ord("S"), ord("i"), ord("I"), ord("b"),
+             ord("B"), ord("y"), ord("Y"), ord("m"), ord("M"), ord("r"), ord("R"),
+             ord("g"), ord("G"))
 
 
-def deck_to_code(deck, title="My Story"):
-    """Compile a deck to a short, readable story cart. This output is
-    curriculum: a kid opening the Code tab should be able to READ it."""
-    pages = list(deck.get("pages") or [])
-    if not pages:
-        pages = [{"bg": BGS[0], "art": None, "text": ["My story starts here."]}]
-    out = []
-    a = out.append
-    a("# " + str(title) + " -- made with Storybook!")
-    a("# Every page is art + words. Tap (or press A) to turn the page.")
-    a("# This is real cart code: open the Code tab in Make and change it.")
-    a("")
-    a("PAGES = [")
-    for p in pages:
-        a("    {\"bg\": %r, \"art\": %r," % (p.get("bg") or BGS[0], p.get("art")))
-        a("     \"text\": %r}," % ([str(t) for t in (p.get("text") or [])],))
-    a("]")
-    a("")
-    a("page = 0")
-    a("")
-    a("")
-    a("def _update(dt):")
-    a("    global page")
-    a("    tp = touch()")
-    a("    if (tp is not None and tp[2]) or btnp(\"a\") or btnp(\"right\"):")
-    a("        page = (page + 1) % len(PAGES)   # the last page wraps to the start")
-    a("    if btnp(\"left\"):")
-    a("        page = (page - 1) % len(PAGES)")
-    a("")
-    a("")
-    a("def _draw():")
-    a("    p = PAGES[page]")
-    a("    cls(col(p[\"bg\"]))")
-    a("    art = image(p[\"art\"]) if p[\"art\"] else None")
-    a("    if art is not None:")
-    a("        spr(art, 0, 0)")
-    a("    y = H - 16 * len(p[\"text\"]) - 18")
-    a("    for ln in p[\"text\"]:")
-    a("        rect(6, y - 3, W - 12, 14, col(\"black\"))")
-    a("        print(ln, 12, y, col(\"white\"))")
-    a("        y += 16")
-    a("    print(str(page + 1) + \"/\" + str(len(PAGES)), W - 36, H - 12,")
-    a("          col(\"light_grey\"))")
-    a("")
-    return "\n".join(out)
+def dot():
+    return " · " if ui.has_symbols() else " - "
 
 
-def _fit_art(w, h, idx, max_w=320, max_h=240):
-    """Nearest-neighbor shrink so a big Paint drawing (512x300 desktop doc)
-    fits the 320x240 story canvas. Small art passes through untouched."""
-    factor = 1
-    while (w + factor - 1) // factor > max_w or (h + factor - 1) // factor > max_h:
-        factor += 1
-    if factor == 1:
-        return w, h, idx
-    nw = (w + factor - 1) // factor
-    nh = (h + factor - 1) // factor
-    out = bytearray(nw * nh)
-    for y in range(nh):
-        row = (y * factor) * w
-        di = y * nw
-        for x in range(nw):
-            out[di + x] = idx[row + x * factor]
-    return nw, nh, bytes(out)
+def zoom_fit(w, h):
+    """The largest present zoom whose slide fits w x h: (num, den)."""
+    for n, d in PRESENT_ZOOMS:
+        if R.size(n, d)[0] <= w and R.size(n, d)[1] <= h:
+            return (n, d)
+    return PRESENT_ZOOMS[-1]
+
+
+def zoom_word(n, d):
+    words = {(1, 1): "1:1", (1, 2): "½", (1, 4): "¼", (1, 8): "⅛", (5, 8): "5/8",
+             (5, 16): "5/16", (3, 4): "¾", (7, 8): "7/8"}
+    w = words.get((n, d), "%d/%d" % (n, d))
+    if not ui.has_symbols():
+        w = {"½": "1/2", "¼": "1/4", "⅛": "1/8", "¾": "3/4"}.get(w, w)
+    return w
 
 
 # -- a drawing put in a story (Paint's and My Art's Put in a story) -------------------
 #
-# The one door another app takes into a story: the stories as rows, and a
-# drawing added as a new last page's picture, with its undo. Both read and
-# write the story cart's deck through the carts role, as the app does.
+# The one door another app takes into a story: the stories as cards, and a
+# drawing added as a new last slide's background (story_doc.put_drawing),
+# with its undo. Stories are user files: the files role reaches them.
 
-def _deck_of(carts, cart):
-    try:
-        blob, err = carts.load_deck(cart)
-    except Exception:  # noqa: BLE001 -- a story that will not read lists empty
-        return None
-    if err is not None or not blob:
-        return None
-    try:
-        data = json.loads(blob)
-    except Exception:  # noqa: BLE001 -- a bad deck is no deck
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def story_list(carts):
-    """The stories a drawing can be put in: [{"cart", "title", "folder",
-    "slides", "cover"}] in the shelf's order, `cover` None (the app draws its
-    icon)."""
+def story_list(carts, files=None):
+    """The stories a drawing can be put in, newest first: [{"title",
+    "folder", "slides", "cover"}], `cover` None (the caller draws the
+    Storybook's icon). `files` is the files role (`carts`, an older caller's
+    first argument, is used where it is one)."""
+    store = files if files is not None else carts
+    if store is None or not hasattr(store, "list"):
+        return []
+    names, err = store.list(KIND)
     out = []
-    for c in carts.all():
-        if c.get("type") != STORY_TYPE or not c.get("path"):
-            continue
-        deck = _deck_of(carts, c)
-        if deck is None or c.get("graduated"):
-            continue
-        path = str(c.get("path")).replace("\\", "/").rstrip("/")
-        out.append({"cart": c, "title": c.get("title") or "My Story",
-                    "folder": path.rsplit("/", 1)[-1], "slides": len(deck.get("pages") or ()),
-                    "cover": None})
+    for name in names or ():
+        blob, err = store.load(KIND, name + "/" + DOC)
+        doc = D.read(blob) if blob and err is None else None
+        if doc is not None:
+            out.append({"title": doc["title"] or "Untitled", "folder": name,
+                        "slides": len(doc["slides"]), "cover": None})
     return out
 
 
-def _save_story(carts, cart, deck):
-    _v, err = carts.save_deck(cart, json.dumps(deck))
-    if err is None:
-        _v, err = carts.save_code(cart, deck_to_code(deck, cart.get("title") or "My Story"))
-    return err is None
-
-
 def add_picture_slide(carts, files, story, name):
-    """Drawing `name` as a new last page of `story` (a row of `story_list`),
-    read a row at a time at the story's size: (title, page number, undo), the
-    number 0 where it could not be added; `undo` takes that page out again
-    while it is still the story's last."""
-    cart = story["cart"]
+    """Drawing `name` (My Art's) as a new last slide of `story` (a row of
+    `story_list`), its background: (title, slide number, undo), the number 0
+    where it could not be added; `undo()` takes the slide out again while it
+    is still the drawing's alone."""
     title = story["title"]
-    deck = _deck_of(carts, cart)
-    blob, err = files.load("drawings", name)
-    size = _picture_size(blob) if err is None else None
-    if deck is None or size is None:
+    i, pic, _t = D.put_drawing(files, story["folder"], name)
+    if i is None:
         return (title, 0, None)
-    pages = deck.setdefault("pages", [])
-    if len(pages) >= MAX_PAGES:
-        return (title, 0, None)
-    w, h = size
-    factor = 1
-    while (w + factor - 1) // factor > 320 or (h + factor - 1) // factor > 240:
-        factor += 1
-    fw, fh = (w + factor - 1) // factor, (h + factor - 1) // factor
-    pix = bytearray(fw * fh)
-    if _read_cover(blob, pix, fw, fh) is None:
-        return (title, 0, None)
-    blob = None
-    seq = int(deck.get("art_seq") or 0) + 1
-    deck["art_seq"] = seq
-    art = "pg" + str(seq)
-    _v, err = carts.save_image(cart, art, carts.encode_image(fw, fh, pix))
-    if err is not None:
-        return (title, 0, None)
-    pages.append({"bg": BGS[0], "art": art, "text": []})
-    if not _save_story(carts, cart, deck):
-        return (title, 0, None)
-    n = len(pages)
 
     def undo():
-        d = _deck_of(carts, cart)
-        ps = (d or {}).get("pages") or []
-        if len(ps) == n and ps[-1].get("art") == art:
-            ps.pop()
-            _save_story(carts, cart, d)
-    return (title, n, undo)
+        return D.take_back(files, story["folder"], i, pic)
+    return (title, i + 1, undo)
 
 
-class StorybookLayout(ListShellLayout):
+class StorybookLayout:
+    """The pages' rects over the content rect: on the handheld the stories'
+    grid, the story's slide and the hint band; on the desk the window's
+    tool row, body and foot (its full-screen arrangement where the window
+    fills the glass)."""
+
+    FOOT = 44
+    ROW = 50
+
     def __init__(self, w, h, fs=1, windowed=False, cs=None):
-        self._init_frame(w, h, fs, windowed, cs)
-        fs = self.fs
-        self.band_h = self.band(24, 8)
-        x = self.cx + 6 * fs
-        y = self.cy + 3 * fs
-        bh = self.band_h - 6 * fs
-        # Band buttons (which show depends on the view), each never narrower
-        # than its widest label.
-        btns = []
-        for k, label in ((58, "SHELF"), (52, "PLAY"), (72, "MY ART"),
-                         (66, "TEAR OUT")):
-            bw = max(k * fs, self.label_w(label, 2))
-            btns.append((x, y, bw, bh))
-            x += bw + 4 * fs
-        self.btn1, self.btn2, self.btn3, self.btn4 = btns
-        x = self.btn1[0]
-        self.status_x = x
-        # Row lists (shelf + pages); geometry: ListShellLayout.
-        self._init_list(self.cy + self.band_h)
-        # Page view: the text box (the kid types the page's words here) above a
-        # live-ish preview strip.
-        # The page's words are a typed grid, so they lay out in the `mono`
-        # font's cells (as the code editor's do) and draw in it.
-        _mf, mw, mline, _ma = _ui_draw.font("mono")
-        self.cell = mw * fs
-        self.mono_line = mline * fs
-        self.lh = self.mono_line + 2 * fs
-        # The preview's story lines: the print font's line, a strip behind each.
-        self.pv_lh = self.print_line() + 4 * fs
-        self.tx = self.cx + 8 * fs
-        self.ty = self.cy + self.band_h * 2 + 3 * fs
-        self.cols = min(MAX_LINE, max(1, (self.cw - 16 * fs) // self.cell))
-        self.rows = MAX_TEXT_LINES
-        self.text_area = (self.tx - 2 * fs, self.ty - 2 * fs,
-                          self.cols * self.cell + 4 * fs,
-                          self.rows * self.lh + 4 * fs)
-        pv_y = self.ty + self.rows * self.lh + 6 * fs
-        self.preview = (self.tx - 2 * fs, pv_y,
-                        self.cw - 12 * fs,
-                        max(20 * fs, self.cy + self.ch - pv_y - 4 * fs))
+        self.w = int(w)
+        self.h = int(h)
+        self.fs = fs = max(1, int(fs))
+        self.cs = max(fs, int(cs)) if cs else fs
+        self.windowed = bool(windowed)
+        self.desk = metric_class() == DESK
+        self.cx, self.cy, self.cw, self.ch = content_of(
+            self.w, self.h, 0 if windowed else bar_rows(self.cs))
+        content = (self.cx, self.cy, self.cw, self.ch)
+        self.content = content
+        self.glass = (0, 0, self.w, self.h)
+        self.full = self.desk and self.cw >= 1000 and self.ch >= 560
+        if self.desk:
+            under = window_foot() if self.windowed else 0
+            self.foot, self.body = ui.cut_bottom(content, self.FOOT - under)
+            x, y, w, h = content
+            self.row = (x, y, w, self.ROW)
+            self.row_rule = (x + 16, y + self.ROW, w - 32, 1)
+            self.foot_rule = (x + 16, self.foot[1], w - 32, 1)
+            self.caption = (x + 24, y + 8, w - 48, 30)
+            self.card = (256, 150)
+            self.cols = max(1, (w - 32 + 24) // (256 + 24))
+            gw = self.cols * 256 + (self.cols - 1) * 24
+            self.margin = max(16, (w - gw) // 2)
+            self.stories_grid = (x, y + 28, w, self.foot[1] - y - 28)
+            self.deck_grid = (x, y + self.ROW + 1, w, self.foot[1] - y - self.ROW - 1)
+            self._slide_rects()
+        else:
+            self.foot, self.body = ui.cut_bottom(content, 20 * fs)
+            bx, by, bw, bh = self.body
+            self.caption = (bx + 16 * fs, by + 2 * fs, bw - 32 * fs, 16 * fs)
+            self.card = (128 * fs, 75 * fs)
+            self.cols = 2
+            self.margin = 16 * fs
+            self.stories_grid = (bx, by + 16 * fs, bw, bh - 16 * fs)
+            vz = (fs, 4)
+            sw, sh = R.size(fs, 4)
+            self.view_zoom = vz
+            self.view = (bx + (bw - sw) // 2, by + 4 * fs, sw, sh)
+            self.stepper = (bx, by + 4 * fs + sh + 4 * fs, bw, 16 * fs)
+            self.note = (bx, self.stepper[1] + 16 * fs, bw, 14 * fs)
+
+    def _slide_rects(self):
+        """The slide editor's: the slides column, the pasteboard and the
+        slide on it, the style panel."""
+        x, y, w, h = self.content
+        top = y + (40 if self.full else self.ROW)
+        bottom = self.foot[1]
+        if self.full:
+            self.edit_zoom = (5, 8)
+            col_x, col_w = x + 8, 96
+            pb = (x + 120, top + 8, 656, 500)
+            self.row = (x, y, w, 40)
+            self.row_rule = (x, y + 40, w, 1)
+        else:
+            self.edit_zoom = (1, 2)
+            col_x, col_w = x + 12, 96
+            pb = (x + 124, top + 8, 528, 384)
+        sw, sh = R.size(self.edit_zoom[0], self.edit_zoom[1])
+        bh = min(pb[3], bottom - 4 - pb[1])
+        self.pasteboard = (pb[0], pb[1], pb[2], bh)
+        self.slide = (pb[0] + (pb[2] - sw) // 2, pb[1] + max(8, (bh - sh) // 2), sw, sh)
+        self.column = (col_x, top + 1, col_w, bottom - top - 2)
+        self.column_rule = (col_x + col_w + 8, top + 1, 1, bottom - top - 2)
+        px = pb[0] + pb[2] + 12
+        self.panel = (px, top + 8, x + w - 16 - px, bottom - top - 16)
+
+
+class Frames:
+    """Slides drawn once into layers and placed from them: kept by what
+    they show (the story's generation, the slide, the size, the tap), at
+    most `n`, the least recently placed going first."""
+
+    def __init__(self, renderer, n):
+        self.renderer = renderer
+        self.n = n
+        self._kept = {}
+        self._order = []
+
+    def get(self, cv, key, slide, w, h, step=-1, edit=False, renderer=None):
+        lay = self._kept.get(key)
+        if lay is not None:
+            if self._order[-1] != key:
+                self._order.remove(key)
+                self._order.append(key)
+            return lay
+        while len(self._order) >= self.n:
+            self._drop(self._order[0])
+        lay = cv.new_layer(w, h)
+        # the slide covering w x h: its own zoom, or a lifted card's a little
+        # more, the overhang cut evenly
+        if w * R.SH >= h * R.SW:
+            num, den = w, R.SW
+        else:
+            num, den = h, R.SH
+        sw, sh = R.size(num, den)
+        (renderer or self.renderer).draw(lay, slide, (w - sw) // 2, (h - sh) // 2, num, den,
+                                         step, clip=(0, 0, w, h), edit=edit)
+        self._kept[key] = lay
+        self._order.append(key)
+        return lay
+
+    def has(self, key):
+        return key in self._kept
+
+    def place(self, cv, key, slide, x, y, w, h, clip=None, step=-1, edit=False,
+              renderer=None):
+        """The slide drawn into w x h at (x, y) of `cv`, inside `clip`."""
+        lay = self.get(cv, key, slide, w, h, step, edit, renderer)
+        cx, cy, cw, ch = clip if clip is not None else (x, y, w, h)
+        x0, y0 = max(x, cx), max(y, cy)
+        x1, y1 = min(x + w, cx + cw), min(y + h, cy + ch)
+        if x1 > x0 and y1 > y0:
+            cv.blit_strip_rect(lay, x, y, x0, y0, x1 - x0, y1 - y0)
+
+    def _drop(self, key):
+        lay = self._kept.pop(key)
+        self._order.remove(key)
+        lay.release()
+
+    def drop(self, prefix=None):
+        """Forget the frames (those whose key starts with `prefix`)."""
+        for key in list(self._order):
+            if prefix is None or key[0] == prefix:
+                self._drop(key)
+
 
 class StorybookAppLayer(ListShellApp):
-    """Shelf of story carts -> a story's pages -> one page's words/art/bg."""
-
     id = "storybook"
     domain = "system"
     TITLE = "Storybook"
-    # The shipped identity (ListShellApp.is_app gates on these).
     APP_TITLE = "Storybook"
     APP_PERM = "storybook"
     APP_FOLDER = "moybyte.storybook.moy"
-    # The shell roles this app uses (runtime/app_context.py). Storybook is the
-    # ONE shipped app that authors CARTS -- which is exactly why ctx.carts is a
-    # role of its own and not folded into ctx.files (a story is executable
-    # content; a drawing is not). USE MY PAINTING reads Paint's open picture:
-    # which it is (`artwork`), and its pixels (`files`).
-    NEEDS = ("surface", "theme", "damage", "carts", "nav", "artwork", "files",
-             "clipboard")
+    # `files` holds the stories and My Art's drawings; `nav` the keyboard's
+    # text mode while a story's words are written.
+    NEEDS = ("surface", "theme", "damage", "files", "nav")
+    UI = True
 
     def __init__(self, ctx, names):
         self.ctx = ctx
-        # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
         self._surf = ctx.surface
         self._theme = ctx.theme
         self._damage = ctx.damage
-        self._store = ctx.carts    # ListShellApp's storage role: CARTS here
-        self._nav = ctx.nav
-        self._art = ctx.artwork
         self._files = ctx.files
-        self._clip = ctx.clipboard
+        self._store = ctx.files
+        self._nav = ctx.nav
+        self._ui = ctx.ui
         self.names = names
-        cv = ctx.surface.canvas()
+        cv = self._surf.canvas()
         self.layout = StorybookLayout(cv.w, cv.h, self._surf.font_scale(),
-                                      self._surf.windowed(),
-                                      self._surf.chrome_scale())
-        self.mode = "shelf"           # shelf | pages | page
-        self.cart = None              # the open story cart dict
-        self.deck = None              # its parsed deck.json
-        self.page_i = -1              # index of the page open in the editor
-        self.sel = 0
-        self.top = 0
-        self.editor = None            # CodeEditor over the page's text lines
-        self.status = "MY STORIES"
-        self.read_only = False        # the kid graduated this story to code
-        self.tear = ConfirmTap()      # TEAR OUT: first tap arms, second confirms
-        self._kedge = KeyEdge()       # the page words' typed-key edge
-        self._deck_dirty = False      # unsaved deck edits (commit no-ops when clean)
+                                      self._surf.windowed(), self._surf.chrome_scale())
+        self.page = "stories"
+        self.stories = []             # [{"name", "doc"}], newest first
+        self.story = None             # the open story (story_doc.Story)
+        self.cur = 0                  # the slide in view
+        self.images = None
+        self.renderer = None
+        self.frames = None
+        self.cards = None             # the stories' first slides, by story
+        self.toast = None             # (text, icon, until ms)
+        self.asking = None            # "delete", "rename": a dialog up
+        self.menu = None              # an open menu's name
+        self.typed = ""               # a dialog's field
+        self.glass = False            # presenting: the app holds the whole glass
+        self.show = None              # Present's state
+        self.ed = None                # the desk's editor (runtime/story_edit.py)
+        self._focus = None
+        self._focused = None
+        self._key = 0
+        self._edited_at = None
+        self._scanned = False
 
-    # -- store -----------------------------------------------------------------
-    # (is_app / _store_ready / _load_json: ListShellApp)
+    # -- the app protocol (docs/app_api_v1.md) --------------------------------
 
-    def _stories(self):
-        return [c for c in self._store.all()
-                if c.get("type") == STORY_TYPE and c.get("path")]
-
-    def _load_deck(self, cart):
-        # a bad deck opens as read-only code (guarded read: ListShellApp)
-        data = self._load_json(self._store.load_deck(cart))
-        return data if isinstance(data, dict) else None
-
-    def _commit_deck(self):
-        """Persist deck.json AND regenerate the story's main.py (the compile
-        step). No-op for read-only (graduated) stories and for a clean deck, so
-        the exit paths can call it unconditionally."""
-        if self.cart is None or self.deck is None or self.read_only:
-            return
-        if not self._deck_dirty:
-            return
-        self._deck_dirty = False
-        self._sync_editor()
-        src = deck_to_code(self.deck, self.cart.get("title") or "My Story")
-        if not self._store_ready():
-            self.status = "CAN'T SAVE HERE"
-            return
-        cart = self.cart
-        _v, err = self._store.save_deck(cart, json.dumps(self.deck))
-        if err is None:
-            _v, err = self._store.save_code(cart, src)
-        if err is not None:      # surface, never crash the shell
-            self.status = ("CAN'T SAVE " + str(err))[:28]
-
-    def commit(self):
-        """The app-API hard-commit hook (docs/app_api_v1.md): the host calls it
-        before routing a tap into this app's bar band -- the context-X there is
-        an exit path and must never lose a story."""
-        self._sync_editor()
-        self._commit_deck()
-
-    def close(self):
-        """The app-API LEAVING hook (docs/app_api_v1.md): the host calls it when
-        this app comes off the screen by ANY route. `_commit_deck` syncs the page
-        editor itself and no-ops on a clean deck."""
-        self._commit_deck()
-
-    def _sync_editor(self):
-        ed = self.editor
-        if ed is None or self.deck is None:
-            return
-        if 0 <= self.page_i < len(self.deck["pages"]):
-            lines = [ln[:MAX_LINE] for ln in ed.text().split("\n")
-                     if ln.strip()][:MAX_TEXT_LINES]
-            self.deck["pages"][self.page_i]["text"] = lines
-
-    # -- lifecycle ---------------------------------------------------------------
+    def open(self):
+        self.page = "stories"
+        self.asking = None
+        self.menu = None
+        self.show = None
+        self.glass = False
+        self.toast = None
+        self._scan()
+        if self.layout.desk and self.ed is None:
+            try:
+                from story_edit import Editor
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime.story_edit import Editor
+            self.ed = Editor(self)
+        if self.stories:
+            self._focus = self._card_id(self.stories[0]["name"])
+        elif self.layout.desk:
+            self._focus = "New story"
+        self._damage.all()
 
     def relayout(self, w, h, fs, cs=None):
         self.layout = StorybookLayout(w, h, fs, self._surf.windowed(), cs)
-        if self.editor is not None:
-            self.editor.set_view_size(self.layout.cols, self.layout.rows)
+        if self.ed is not None:
+            self.ed.relayout()
 
-    def open(self):
-        self.mode = "shelf"
-        self.cart = None
-        self.deck = None
-        self.editor = None
-        self.page_i = -1
-        self.sel = 0
-        self.top = 0
-        self.tear.disarm()
-        self.read_only = False
-        self._kedge.reset()
-        self._deck_dirty = False
-        self.status = "MY STORIES"
-        self._damage.all()
+    def close(self):
+        """Leaving, by any route: the open story is written, the pictures and
+        frames given back."""
+        self.commit()
+        self._stop_writing()
+        self.glass = False
+        self.show = None
+        if self.frames is not None:
+            self.frames.drop()
+        if self.cards is not None:
+            self.cards.drop()
+        if self.images is not None:
+            self.images.forget()
 
-    # -- story verbs ---------------------------------------------------------------
-
-    def _new_story(self):
-        if not self._store_ready():
-            self.status = "CAN'T MAKE STORIES HERE"
-            self._damage.all()
+    def commit(self):
+        """Write the open story now (an exit path, docs/app_api_v1.md)."""
+        st = self.story
+        if st is None or not st.dirty:
             return
-        title = "Story " + str(len(self._stories()) + 1)
-        deck = {"format": "moydeck-v1", "art_seq": 0,
-                "pages": [{"bg": BGS[0], "art": None,
-                           "text": ["Once upon a time..."]}]}
-        src = deck_to_code(deck, title)
-        cart, err = self._store.create(title, src, STORY_TYPE)
-        if err is None:
-            _v, err = self._store.save_deck(cart, json.dumps(deck))
+        st.dirty = False
+        self._edited_at = None
+        _v, err = self._files.save(KIND, st.name + "/" + DOC, D.write(st.doc))
         if err is not None:
-            self.status = ("NEW STORY FAILED " + str(err))[:28]
-            self._damage.all()
-            return
-        self._store.rescan()
-        # Open the freshly created story (find its scanned twin by path).
-        for c in self._stories():
-            if c.get("path") == cart.get("path"):
-                self._open_story(c)
-                return
-        self._open_story(cart)
+            st.dirty = True
+            self._say("This story can't be saved here", "warn")
+        for s in self.stories:
+            if s["name"] == st.name:
+                s["doc"] = st.doc
 
-    def _open_story(self, cart):
-        self.cart = cart
-        self.deck = self._load_deck(cart)
-        self.read_only = False
-        if self.deck is None:
-            # No deck (hand-made "story" cart) -- treat as graduated code.
-            self.deck = {"format": "moydeck-v1", "pages": []}
-            self.read_only = True
-        else:
-            self._store.hydrate(cart)
-            if bool(cart.get("graduated")):
-                self.read_only = True     # persisted (#78): already graduated
-            else:
-                src = cart.get("src") or ""
-                title = cart.get("title") or "My Story"
-                expected = deck_to_code(self.deck, title)
-                if src != expected:
-                    # Hand-edited past the deck's vocabulary. The Editor's Code
-                    # tab is the normal trigger (runtime/project.py's
-                    # _journal_code graduates it there, durably); this is the
-                    # bootstrap path for a divergence that reached disk some
-                    # other way -- fold it into the real mechanism NOW rather
-                    # than just refusing locally.
-                    self._graduate_hand_edit(cart, expected, src)
-                self.read_only = bool(cart.get("graduated"))
-        self.mode = "pages"
-        self.sel = 0
-        self.top = 0
-        self.tear.disarm()
-        self._deck_dirty = False
-        self.status = ("LEVELED UP TO CODE - EDIT IN MAKE" if self.read_only
-                       else (cart.get("title") or "STORY"))
-        self._damage.all()
-
-    def _graduate_hand_edit(self, cart, baseline_src, diverged_src):
-        """GRADUATE a story cart whose main.py diverged from what its deck would
-        generate (#78 full graduated-manifest integration): journal the deck's
-        own regenerated source as a grad=0 BASELINE (an undo restore point) then
-        the diverged source as grad=1 -- the exact blocks-machinery shape
-        (runtime/project.py's _journal_code_toward), so the SAME manifest flag +
-        journal rider + undo/redo un-graduate mechanism covers a deck-authored
-        story too (journal_append never touches the live main.py -- it only
-        records history + flips the manifest, so this never clobbers the
-        diverged code already on disk). Best-effort: a store/journal hiccup
-        still marks the RAM copy graduated (never re-offers a clobbering SAVE
-        this session), it just won't persist until the next successful write."""
-        carts = self._store
-        if cart.get("h") and carts.ready() and carts.can_journal():
-            mainf = cart.get("main", "main.py")
-            _v, err = carts.journal(cart, mainf, baseline_src, 0)
-            if err is None:
-                _v, err = carts.journal(cart, mainf, diverged_src, 1)
-            if err is not None:  # never crash the shell over this
-                print("Moybyte story graduation failed:", err)
-        cart["graduated"] = True
-
-    def _play_story(self):
-        if self.cart is None:
-            return
-        self._commit_deck()
-        # exit pops home (launcher root rule)
-        self._nav.play(self.cart)
-
-    def _back_to_shelf(self):
-        self._commit_deck()
-        self.open()
-
-    # -- page verbs ------------------------------------------------------------------
-
-    def _pages(self):
-        return self.deck["pages"] if self.deck else []
-
-    def _new_page(self):
-        if self.read_only:
-            return
-        pages = self._pages()
-        if len(pages) >= MAX_PAGES:
-            self.status = "STORY FULL"
-            self._damage.all()
-            return
-        pages.append({"bg": BGS[0], "art": None, "text": []})
-        self._deck_dirty = True
-        self._open_page(len(pages) - 1)
-
-    def _open_page(self, i):
-        pages = self._pages()
-        if not (0 <= i < len(pages)):
-            return
-        self._sync_editor()
-        self.page_i = i
-        lay = self.layout
-        self.editor = CodeEditor("\n".join(pages[i].get("text") or []),
-                                 lay.cols, lay.rows,
-                                 clip=self._clip)
-        # Typing continues the page: caret at the END of the words, not (0,0).
-        self.editor.row = len(self.editor.lines) - 1
-        self.editor.col = len(self.editor.lines[self.editor.row])
-        self.editor._scroll()
-        self.mode = "page"
-        self.tear.disarm()
-        self._kedge.reset()
-        self.status = "PAGE " + str(i + 1)
-        self._nav.text_mode(True)       # the page's words are typed
-        self._damage.all()
-
-    def _back_to_pages(self):
-        self._sync_editor()
-        self._commit_deck()
-        self.editor = None
-        self.sel = self.page_i + 1 if self.page_i >= 0 else 0
-        self.page_i = -1
-        self.mode = "pages"
-        self.tear.disarm()
-        self.status = (self.cart.get("title") or "STORY") if self.cart else "STORY"
-        self._nav.text_mode(False)
-        self._damage.all()
-
-    def _cycle_bg(self):
-        if self.read_only or not (0 <= self.page_i < len(self._pages())):
-            return
-        p = self._pages()[self.page_i]
-        cur = p.get("bg") or BGS[0]
-        i = BGS.index(cur) if cur in BGS else 0
-        p["bg"] = BGS[(i + 1) % len(BGS)]
-        self._deck_dirty = True
-        self._damage.all()
-
-    def _attach_art(self):
-        """USE MY PAINTING: copy the current shared Paint drawing onto this page
-        (the Paint attach mechanism, one image per attach)."""
-        if self.read_only or not (0 <= self.page_i < len(self._pages())):
-            return
-        loaded = current_picture(self._files, self._art)
-        if loaded is None:
-            self.status = "PAINT SOMETHING FIRST"
-            self._damage.all()
-            return
-        if not self._store_ready():
-            self.status = "CAN'T SAVE HERE"
-            self._damage.all()
-            return
-        w, h, idx = loaded
-        w, h, idx = _fit_art(w, h, idx)
-        seq = int(self.deck.get("art_seq") or 0) + 1
-        self.deck["art_seq"] = seq
-        name = "pg" + str(seq)
-        blob = self._store.encode_image(w, h, idx)
-        _v, err = self._store.save_image(self.cart, name, blob)
-        if err is not None:
-            self.status = ("ART FAILED " + str(err))[:28]
-            self._damage.all()
-            return
-        self._pages()[self.page_i]["art"] = name
-        self._deck_dirty = True
-        self.status = "PAINTING ON PAGE " + str(self.page_i + 1)
-        self._damage.all()
-
-    def _delete_page(self):
-        pages = self._pages()
-        if self.read_only or not (0 <= self.page_i < len(pages)):
-            return
-        del pages[self.page_i]
-        self.editor = None
-        self.page_i = -1
-        self.mode = "pages"
-        self.sel = 0
-        self.tear.disarm()
-        self.status = "PAGE TORN OUT"
-        self._deck_dirty = True
-        self._commit_deck()
-        self._nav.text_mode(False)
-        self._damage.all()
-
-    # -- input -------------------------------------------------------------------------
+    def page_title(self):
+        """The bar's title (the window's on the desk): the open story's name,
+        or the page of it that is open."""
+        if self.page == "pictures":
+            return "Add a picture"
+        if self.story is not None and self.page != "stories":
+            return self.story.title() or "Untitled"
+        return None
 
     def has_page(self):
-        """Whether a page of the app is open, which `back` steps out of: a
-        story's pages or one of them."""
-        return self.mode in ("page", "pages")
+        return self.page != "stories" or self.asking is not None or self.menu is not None \
+            or self.show is not None
 
     def back(self):
-        """Back one level (B, Esc, the bar's chevron): a page back to its
-        story's pages, the pages back to the shelf. False on the shelf: the
-        host leaves the app."""
-        if self.mode == "page":
-            self._back_to_pages()
-        elif self.mode == "pages":
-            self._back_to_shelf()
-        else:
+        """Back one level: Present stops, a dialog or a menu closes, the
+        editor's pages step back to the sorter and the stories."""
+        if self.show is not None:
+            self._stop()
+            return True
+        if self.asking is not None or self.menu is not None:
+            self.asking = None
+            self.menu = None
+            self._damage.all()
+            return True
+        if self.ed is not None and self.ed.back():
+            return True
+        if self.page == "stories":
             return False
+        self._to_stories()
         return True
 
+    # -- the store -------------------------------------------------------------------
+
+    def _scan(self):
+        """The stories in the store, newest first, each document read
+        strictly: one that does not read is not listed."""
+        names, err = self._files.list(KIND)
+        out = []
+        for name in names or ():
+            blob, err = self._files.load(KIND, name + "/" + DOC)
+            doc = D.read(blob) if blob else None
+            if doc is not None:
+                out.append({"name": name, "doc": doc})
+        self.stories = out
+        self._scanned = True
+
+    def _load(self, name):
+        """A picture of story `name`'s, its blob or None."""
+        def load(image):
+            blob, err = self._files.load(KIND, name + "/" + image + ".moyimg")
+            return blob if err is None else None
+        return load
+
+    def _open_story(self, entry, page):
+        if self.story is not None and self.story.name != entry["name"]:
+            self.commit()
+        if self.story is None or self.story.name != entry["name"]:
+            self.story = D.Story(entry["name"], D.copy(entry["doc"]))
+            budget = DESK_BUDGET if self.layout.desk else HAND_BUDGET
+            if self.images is not None:
+                self.images.forget()
+            self.images = R.Images(self._load(entry["name"]), budget)
+            self.renderer = R.Renderer(self.images)
+            if self.frames is not None:
+                self.frames.drop()
+            self.frames = Frames(self.renderer, 24 if self.layout.desk else 4)
+        self.cur = 0
+        self.page = page
+        self._damage.all()
+
+    def _to_stories(self):
+        self.commit()
+        name = self.story.name if self.story is not None else None
+        self._stop_writing()
+        self.page = "stories"
+        self._scan()
+        if name is not None:
+            self._focus = self._card_id(name)
+        if self.cards is not None:
+            self.cards.drop(name)
+        self._damage.all()
+
+    def edited(self):
+        """An edit happened: write it once the edits pause."""
+        self._edited_at = _ticks_ms()
+        self._damage.all()
+
+    def _stop_writing(self):
+        if self.ed is not None:
+            self.ed.stop_writing()
+
+    # -- messages ---------------------------------------------------------------------
+
+    def _say(self, text, icon="check"):
+        self.toast = (text, icon, _ticks_ms() + TOAST_MS)
+        self._damage.all()
+
+    # -- input ------------------------------------------------------------------------
+
+    def _typed(self, inp):
+        """The key typed this frame (each press once), or 0."""
+        k = getattr(inp, "last_key", 0) or 0
+        if not isinstance(k, int):
+            k = ord(k[0]) if k else 0
+        typed = k if k != 0 and k != self._key else 0
+        self._key = k
+        return typed
+
     def handle_input(self, inp):
-        if self.mode == "page":
-            self._typed_keys(inp)
+        k = self._typed(inp)
+        if self.toast is not None and (k or inp.pressed("a") or inp.pressed("b")):
+            self.toast = None
+            self._damage.all()
+        if self.show is not None:
+            self._present_keys(inp, k)
             return True
-        # shelf rows / page rows + the NEW row (nav + scroll window: ListShellApp)
-        return self._list_nav(inp, (len(self._stories()) if self.mode == "shelf"
-                                    else len(self._pages())) + 1)
-
-    def _typed_keys(self, inp):
-        ed = self.editor
-        if ed is None or self.read_only:
-            return
-        k = self._edge_key(inp)
-        if k:
-            block = False
-            if k in (0x0D, 0x0A) and len(ed.lines) >= MAX_TEXT_LINES:
-                block = True                       # a page holds 4 lines of words
-            if 0x20 <= k <= 0x7E and len(ed.lines[ed.row]) >= MAX_LINE:
-                block = True                       # keep lines on the page
-            if block:
-                self.status = "PAGE FULL"
-            elif ed.key(k):
-                self._deck_dirty = True
-                self.status = "PAGE " + str(self.page_i + 1)
-
-    def handle_pointer(self, px, py, click):
-        lay = self.layout
-        if not click:
-            return True
-        if self.mode == "shelf":
-            for i in range(self.top, min(self.top + lay.list_rows,
-                                         len(self._stories()) + 1)):
-                if _in(px, py, lay.row_rect(i - self.top)):
-                    self.sel = i
-                    self._tap_row(i)
-                    return True
-            return True
-        if self.mode == "pages":
-            if _in(px, py, lay.btn1):
-                self._back_to_shelf()
+        if self.asking is not None or self.menu is not None:
+            if k == 27:
+                self.back()
                 return True
-            if _in(px, py, lay.btn2):
-                self._play_story()
-                return True
-            for i in range(self.top, min(self.top + lay.list_rows,
-                                         len(self._pages()) + 1)):
-                if _in(px, py, lay.row_rect(i - self.top)):
-                    self.sel = i
-                    self._tap_row(i)
-                    return True
-            return True
-        # -- page view -------------------------------------------------------------
-        if _in(px, py, lay.btn1):
-            self._back_to_pages()
-            return True
-        if _in(px, py, lay.btn2):
-            self._cycle_bg()
-            return True
-        if _in(px, py, lay.btn3):
-            self._attach_art()
-            return True
-        if _in(px, py, lay.btn4):
-            if self.tear.tap():
-                self._delete_page()
-            else:
-                self.status = "TAP AGAIN TO TEAR OUT"
+            if self.asking == "rename":
+                self._type_into(k)
+            if self._ui.keys(inp):
                 self._damage.all()
             return True
-        self.tear.disarm()
-        if (self.editor is not None and not self.read_only
-                and _in(px, py, lay.text_area)):
-            self.editor.place((px - lay.tx) // lay.cell, (py - lay.ty) // lay.lh)
+        if self.ed is not None and self.page != "stories":
+            return self.ed.handle_input(inp, k)
+        if self.page == "view":
+            return self._view_keys(inp, k)
+        return self._stories_keys(inp, k)
+
+    def _type_into(self, k):
+        """A dialog's field, typed into."""
+        if k == 8:
+            self.typed = self.typed[:-1]
+        elif 32 <= k < 127 and len(self.typed) < D.MAX_TITLE:
+            self.typed += chr(k)
+        elif k in (13, 10):
+            self._rename_done()
+        else:
+            return
+        self._damage.all()
+
+    def _stories_keys(self, inp, k):
+        entry = self._focused_story()
+        if k in (ord("p"), ord("P")) and entry is not None:
+            self._open_story(entry, "view" if not self.layout.desk else "deck")
+            self._start(0)
+            return True
+        if self.layout.desk:
+            if k in (ord("m"), ord("M")) and entry is not None:
+                self.menu = "story"
+                self._damage.all()
+                return True
+            if k == 4 and entry is not None:
+                self._duplicate_story(entry)
+                return True
+            if k == 127 and entry is not None:
+                self.asking = "delete"
+                self._damage.all()
+                return True
+            if k in (ord("n"), ord("N")):
+                self._new_story()
+                return True
+        if inp.pressed("b"):
+            self.back()
+            return True
+        if self._ui.keys(inp):
             self._damage.all()
         return True
 
-    def _tap_row(self, i):
-        if self.mode == "shelf":
-            if i == 0:
-                self._new_story()
-            else:
-                stories = self._stories()
-                if 0 <= i - 1 < len(stories):
-                    self._open_story(stories[i - 1])
-        else:
-            if self.read_only:
-                return
-            if i == 0:
-                self._new_page()
-            else:
-                self._open_page(i - 1)
+    def _view_keys(self, inp, k):
+        n = len(self.story.slides)
+        if inp.pressed("left") or k == ord(","):
+            self._step_view(-1)
+        elif inp.pressed("right") or k == ord("."):
+            self._step_view(1)
+        elif k in (ord("p"), ord("P")):
+            self._start(self.cur)
+        elif inp.pressed("b") or k == 27:
+            self.back()
+        elif inp.pressed("a") or k in EDIT_KEYS:
+            self._say("Stories are edited on a desk", "warn")
+        _ = n
+        return True
 
-    # -- draw -------------------------------------------------------------------------
+    def _step_view(self, d):
+        j = max(0, min(len(self.story.slides) - 1, self.cur + d))
+        if j != self.cur:
+            self.cur = j
+            self._damage.all()
+
+    def handle_pointer(self, px, py, click):
+        down = bool(getattr(self._surf.pointer(), "down", False))
+        if self.show is not None:
+            self._present_pointer(px, py, click, down)
+            return True
+        if self.ed is not None and self.page != "stories" and self.asking is None \
+                and self.menu is None:
+            if self.ed.handle_pointer(px, py, click, down):
+                return True
+        if click and self.page == "view":
+            for k, r in enumerate(self._arrows):
+                if r[0] <= px < r[0] + r[2] and r[1] <= py < r[1] + r[3]:
+                    self._step_view(-1 if k == 0 else 1)
+                    return True
+        if self._ui.point(px, py, click, down):
+            self._damage.all()
+        return True
+
+    _arrows = ()
+
+    # -- the frame --------------------------------------------------------------------
 
     def draw(self, dt):
-        cv = self._surf.canvas()
-        lay = self.layout
-        th = self._theme.colors()
-        cv.cls(th["panel"])
-        bar_ink = _ui_draw.toolbar(cv, th, (lay.cx, lay.cy, lay.cw, lay.band_h))
-        if self.mode == "shelf":
-            cv.print(lay.cut(self.status, lay.cw, 2),
-                     lay.status_x, lay.cy + lay.dy(8), bar_ink, 1)
-            self._draw_rows(cv, self._stories(), "+ NEW STORY",
-                            lambda c: (c.get("title") or "STORY").upper())
-        elif self.mode == "pages":
-            self._button(cv, "SHELF", lay.btn1)
-            if not self.read_only:
-                self._button(cv, "PLAY", lay.btn2)
-            cv.print(lay.cut(self.status, lay.cx + lay.cw - lay.btn3[0]),
-                     lay.btn3[0], lay.cy + lay.dy(8), bar_ink, 1)
-            self._draw_rows(cv, self._pages(),
-                            None if self.read_only else "+ NEW PAGE",
-                            self._page_label)
-        else:
-            self._button(cv, "PAGES", lay.btn1)
-            self._button(cv, "BG", lay.btn2)
-            self._button(cv, "MY ART", lay.btn3)
-            self._button(cv, "TEAR OUT", lay.btn4, hot=self.tear.armed)
-            self._draw_page(cv)
-
-    def _page_label(self, p):
-        text = (p.get("text") or [""])
-        first = text[0] if text else ""
-        tag = "PAGE + ART" if p.get("art") else "PAGE"
-        return (tag + "  " + first)[:MAX_LINE + 8]
-
-    def _draw_rows(self, cv, items, new_label, label_fn):
-        lay = self.layout
-        th = self._theme.colors()
-        fs = lay.fs
-        rows = [new_label] + list(items) if new_label is not None else list(items)
-        for i in range(self.top, min(self.top + lay.list_rows, len(rows))):
-            r = lay.row_rect(i - self.top)
-            selected = i == self.sel
-            edge = th["accent"] if selected else th["dim"]
-            if new_label is not None and i == 0:
-                # The + NEW row: a themed call-to-action field, black ink -- the
-                # skin's "row_cta" kind since #207, so it restyles with the rest.
-                label, kind, colors = new_label, "row_cta", None
+        if self.toast is not None:
+            if _ticks_diff(_ticks_ms(), self.toast[2]) >= 0:
+                self.toast = None
+            self._damage.again()
+        if self._edited_at is not None:
+            if _ticks_diff(_ticks_ms(), self._edited_at) >= COMMIT_MS:
+                self.commit()
             else:
-                # A deck row: cream paper with black ink -- frozen OFF-token
-                # pixels, which is exactly what ui.row's `colors` escape hatch
-                # is for. The label is truncated HERE because this site's frozen
-                # cap (`w // 8fs - 2`) is one column tighter than the toolkit's
-                # pad-derived one at some widths.
-                label = lay.cut(label_fn(rows[i]), r[2], 2)
-                kind, colors = "row", (7, 0, edge)
-            _ui_draw.row(cv, th, r, label, kind=kind, on=selected, colors=colors,
-                    pad=6 * fs, fs=fs)
-
-    def _draw_page(self, cv):
+                self._damage.again()
+        cv = self._surf.canvas()
+        if self.show is not None:
+            self._present(cv)
+            return
         lay = self.layout
         th = self._theme.colors()
-        fs = lay.fs
-        # Words box (the typed text), then a page preview strip below.
-        ax, ay, aw, ah = lay.text_area
-        cv.rect(ax, ay, aw, ah, 7)
-        cv.rectb(ax, ay, aw, ah, th["dim"])
-        ed = self.editor
-        if ed is not None:
-            was = _ui_draw.print_font(_ui_draw.font("mono")[0])
-            try:
-                for r, line in enumerate(ed.visible_lines()):
-                    cv.print(line[ed.left:ed.left + lay.cols], lay.tx,
-                             lay.ty + r * lay.lh, 0, 1)
-            finally:
-                _ui_draw.print_font(was)
-            crow = ed.row - ed.top
-            ccol = ed.col - ed.left
-            if not self.read_only and 0 <= crow < lay.rows and 0 <= ccol <= lay.cols:
-                cv.rect(lay.tx + ccol * lay.cell,
-                        lay.ty + crow * lay.lh + lay.mono_line,
-                        lay.cell, max(1, 2 * fs), self.names["blue"])
-        # Preview: the page's bg color + art tag + its words, story-style.
-        px_, py_, pw, ph = lay.preview
-        pages = self._pages()
-        p = pages[self.page_i] if 0 <= self.page_i < len(pages) else None
-        bg = self.names.get(p.get("bg") or BGS[0], 1) if p else 1
-        cv.rect(px_, py_, pw, ph, bg)
-        cv.rectb(px_, py_, pw, ph, th["dim"])
-        if p is None:
+        keys_elsewhere = self.ed is not None and self.page != "stories" \
+            and self.ed.keys_elsewhere()
+        self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed,
+                       elsewhere=keys_elsewhere)
+        ui.page("")
+        if self._focus is not None:
+            ui.focus(self._focus)
+            self._focus = None
+        was = (self.page, self.asking, self.menu, self.show is None)
+        title = self.page_title() or ""
+        if self.page == "view":
+            self._view(cv)
+            ui.bar(title, ("play",), (), True)
+        elif self.page != "stories" and self.ed is not None:
+            self.ed.draw(cv, th)
+            ui.bar(title, (), (), True)
+        else:
+            self._stories(cv)
+            ui.bar("", (), (), False)
+        self._dialogs()
+        if self.toast is not None:
+            self._toast()
+        self._focused = ui.focus()
+        if (self.page, self.asking, self.menu, self.show is None) != was:
+            self._damage.again()
+
+    # -- stories ----------------------------------------------------------------------
+
+    def _card_id(self, name):
+        return "Story " + name
+
+    def _focused_story(self):
+        f = self._focused
+        if f is None or not f.startswith("Story "):
+            return None
+        name = f[6:]
+        for s in self.stories:
+            if s["name"] == name:
+                return s
+        return None
+
+    def _card_pic(self, cv, entry, x, y, w, h, clip):
+        """A story's card: its first slide, drawn once at the card's size
+        and kept; its pictures are read for that and let go."""
+        if not w or not h:
             return
-        if p.get("art"):
-            cv.print("ART: " + p["art"], px_ + 4 * fs, py_ + lay.dy(3),
-                     self.names["light_grey"], 1)
-        if ed is not None:
-            y = py_ + ph - lay.pv_lh * max(1, len(ed.lines))
-            for ln in ed.lines[:MAX_TEXT_LINES]:
-                if ln.strip():
-                    cv.rect(px_ + 2 * fs, y - 2 * fs, pw - 4 * fs, lay.pv_lh - fs,
-                            self.names["black"])
-                    cv.print(lay.cut(ln, pw, 2), px_ + 6 * fs, y,
-                             self.names["white"], 1)
-                y += lay.pv_lh
+        if self.cards is None:
+            self.cards = Frames(None, 12 if self.layout.desk else 6)
+        name = entry["name"]
+        key = (name, id(entry["doc"]), w, h)
+        rend = None
+        if not self.cards.has(key):
+            rend = R.Renderer(R.Images(self._load(name), 4 * w * h))
+        self.cards.place(cv, key, entry["doc"]["slides"][0], x, y, w, h, clip,
+                         renderer=rend)
+        if rend is not None:
+            rend.images.forget()
+
+    def _stories(self, cv):
+        lay = self.layout
+        n = len(self.stories)
+        if not n and not lay.desk:
+            x, y, w, h = lay.body
+            ui.at(x, y + 16 * lay.fs, w, h)
+            ui.empty("storybook", "No stories yet",
+                     ("Stories are made on a desk board", "or in the web build."))
+            if ui.hints_width(("back", "Back")) > 0:
+                ui.at(*lay.foot)
+                ui.hints(("back", "Back"))
+            return
+        caption = "%d stor%s" % (n, "y" if n == 1 else "ies")
+        ui.at(*lay.caption)
+        ui.label(caption, {"tone": "dim", "face": "caption"})
+        grid = lay.stories_grid
+        ui.at(*grid)
+        ui.scroll("stories")
+        cw, ch = lay.card
+        ui.grid("stories", cw, ch, {"cols": lay.cols, "margin": lay.margin,
+                                     "foot": 44 if lay.desk else 32,
+                                     "top": 4 if lay.desk else 4})
+        if lay.desk:
+            x, y, w, h, st = ui.card("New story", "", {"icon": "new", "tone": "value"})
+            if st & ui.ACTIVATED:
+                self._new_story()
+        for s in self.stories:
+            k = len(s["doc"]["slides"])
+            sub = "%d slide%s" % (k, "" if k == 1 else "s")
+            x, y, w, h, st = ui.card(s["doc"]["title"] or "Untitled", sub,
+                                     {"id": self._card_id(s["name"])})
+            self._card_pic(cv, s, x, y, w, h, grid)
+            if st & ui.ACTIVATED:
+                self._open_story(s, "deck" if lay.desk else "view")
+                if self.ed is not None:
+                    self.ed.opened()
+        ui.grid()
+        ui.end()
+        ui.scroll()
+        if lay.desk:
+            self._stories_foot()
+        elif ui.hints_width(("back", "Back")) > 0:
+            ui.at(*lay.foot)
+            ui.hints(("confirm", "Open", "P", "Present", "back", "Back"))
+
+    def _stories_foot(self):
+        lay = self.layout
+        ui.at(*lay.foot_rule)
+        ui.rule()
+        fx, fy, fw, fh = lay.foot
+        entry = self._focused_story()
+        status = ""
+        if entry is not None:
+            k = len(entry["doc"]["slides"])
+            status = (entry["doc"]["title"] or "Untitled") + dot() + \
+                "%d slide%s" % (k, "" if k == 1 else "s")
+        by = fy + max(1, (fh - 34) // 2)
+        ui.face("caption")
+        lh = ui.text_size("Ag")[1]
+        ui.face()
+        ui.at(fx + 26, fy + (fh - lh) // 2, fw - 300, lh + 2)
+        ui.label(status, {"tone": "dim", "face": "caption"})
+        off = {"disabled": True} if entry is None else {}
+        ui.at(fx + fw - 16 - 86 - 8 - 100, by, 100, 32)
+        ui.icon("play")
+        if ui.button("Present", "normal", dict(off, id="Present")) and entry is not None:
+            self._open_story(entry, "deck")
+            self._start(0)
+        ui.at(fx + fw - 16 - 86, by, 86, 32)
+        ui.icon("folder_open")
+        if ui.button("Open", "primary", dict(off, id="Open")) and entry is not None:
+            self._open_story(entry, "deck")
+            if self.ed is not None:
+                self.ed.opened()
+
+    # -- the stories' verbs (desk) ------------------------------------------------------
+
+    def _new_story(self):
+        """A new story: one Title slide, open in the editor with its title
+        to be written. It is named from its title when it is first written."""
+        name, err = self._files.new_name(KIND)
+        if err is not None or not name:
+            self._say("No room for a new story here", "warn")
+            return
+        doc = D.new_doc("")
+        entry = {"name": name, "doc": doc}
+        _v, err = self._files.save(KIND, name + "/" + DOC, D.write(doc))
+        if err is not None:
+            self._say("This story can't be saved here", "warn")
+            return
+        self.stories.insert(0, entry)
+        self._open_story(entry, "slide")
+        if self.ed is not None:
+            self.ed.opened(new=True)
+
+    def _duplicate_story(self, entry):
+        name, err = self._files.duplicate(KIND, entry["name"])
+        if err is not None:
+            self._say("This story can't be copied here", "warn")
+            return
+        self._scan()
+        for s in self.stories:
+            if s["name"] == name:
+                s["doc"]["title"] = (entry["doc"]["title"] + " 2")[:D.MAX_TITLE]
+                self._files.save(KIND, name + "/" + DOC, D.write(s["doc"]))
+        self._focus = self._card_id(name)
+        self._say("Duplicated", "dup")
+
+    def _delete_story(self, entry):
+        _v, err = self._files.delete(KIND, entry["name"])
+        if err is not None:
+            self._say("This story can't be deleted here", "warn")
+            return
+        if self.story is not None and self.story.name == entry["name"]:
+            self.story = None
+        i = self.stories.index(entry)
+        self.stories.pop(i)
+        if self.stories:
+            self._focus = self._card_id(self.stories[min(i, len(self.stories) - 1)]["name"])
+        else:
+            self._focus = "New story"
+        self._say("Moved to the Trash", "trash")
+
+    def _rename_done(self):
+        entry = self._menu_story
+        t = self.typed.strip()
+        self.asking = None
+        if entry is None or not t:
+            return
+        doc = entry["doc"]
+        doc["title"] = t[:D.MAX_TITLE]
+        self._files.save(KIND, entry["name"] + "/" + DOC, D.write(doc))
+        if self.story is not None and self.story.name == entry["name"]:
+            self.story.doc["title"] = doc["title"]
+        if self.cards is not None:
+            self.cards.drop(entry["name"])
+        self._damage.all()
+
+    _menu_story = None
+
+    def _dialogs(self):
+        lay = self.layout
+        if self.menu == "story":
+            entry = self._focused_story() or self._menu_story
+            self._menu_story = entry
+            if entry is None:
+                self.menu = None
+                return
+            alive = ui.popover("Story menu", 260 if lay.desk else 180 * lay.fs, {"wash": True})
+            a = ui.menu(entry["doc"]["title"] or "Untitled",
+                        ["Rename…" if ui.has_symbols() else "Rename...", "Duplicate\tCtrl+D",
+                         "Delete\tDel"], ["pencil", "dup", "trash"], kinds=("", "", "danger"))
+            ui.popover()
+            if not alive:
+                self.menu = None
+            if a == 0:
+                self.menu = None
+                self.typed = entry["doc"]["title"]
+                self.asking = "rename"
+            elif a == 1:
+                self.menu = None
+                self._duplicate_story(entry)
+            elif a == 2:
+                self.menu = None
+                self.asking = "delete"
+            return
+        if self.asking == "delete":
+            entry = self._focused_story() or self._menu_story
+            if entry is None:
+                self.asking = None
+                return
+            self._menu_story = entry
+            pick = ui.dialog("Delete %s?" % (entry["doc"]["title"] or "this story"),
+                             ("Cancel", "Delete"), "danger")
+            ui.label("Its slides and pictures go to the Trash.", {"wrap": True, "lines": 3})
+            ui.dialog()
+            if pick == 1:
+                self.asking = None
+                self._delete_story(entry)
+            elif pick == 0:
+                self.asking = None
+                self._damage.all()
+        elif self.asking == "rename":
+            self._menu_story = self._menu_story or self._focused_story()
+            pick = ui.dialog("Rename the story", ("Cancel", "Rename"), "primary")
+            self.typed, done = ui.field("Name", self.typed, D.MAX_TITLE,
+                                        {"hint": "my story"})
+            ui.dialog()
+            if pick == 1 or done:
+                self._rename_done()
+            elif pick == 0:
+                self.asking = None
+                self._damage.all()
+
+    def _toast(self):
+        lay = self.layout
+        text, icon, _until = self.toast
+        if lay.desk:
+            ui.at(lay.content[0], lay.content[1], lay.content[2],
+                  lay.foot[1] - lay.content[1] - 12)
+        else:
+            x, y, w, h = lay.body
+            ui.at(x, y, w, h - 6 * lay.fs)
+        ui.toast(text, icon)
+
+    # -- a story on the handheld: to look at ------------------------------------------------
+
+    def _view(self, cv):
+        lay = self.layout
+        st = self.story
+        n = len(st.slides)
+        x, y, w, h = lay.view
+        th = self._theme.colors()
+        cv.shadow(x, y, w, h, 0, 1, 40, 6 * lay.fs, 0, 2 * lay.fs, (x, y, w, h, 0))
+        key = ("view", st.gen, self.cur, w, h)
+        self.frames.place(cv, key, st.slides[self.cur], x, y, w, h)
+        cv.rectb(x - 1, y - 1, w + 2, h + 2, th["edge"])
+        sx, sy, sw, sh = lay.stepper
+        fs = lay.fs
+        word = "%d / %d" % (self.cur + 1, n)
+        tw = ui.text_size(word)[0]
+        mid = sx + sw // 2
+        self._arrows = ((mid - tw // 2 - 36 * fs, sy, 24 * fs, sh),
+                        (mid + tw // 2 + 12 * fs, sy, 24 * fs, sh))
+        for k, (ax, ay, aw, ah) in enumerate(self._arrows):
+            ui.at(ax, ay, aw, ah)
+            ui.icon("back" if k == 0 else "forward")
+            ui.label("", {"tone": "dim"} if (k == 0 and self.cur == 0)
+                     or (k == 1 and self.cur == n - 1) else None)
+        ui.at(mid - tw // 2 - 4 * fs, sy, tw + 8 * fs, sh)
+        ui.label(word, {"align": "center"})
+        ui.at(*lay.note)
+        ui.label("Edit stories on a desk board or the web", {"tone": "dim", "align": "center"})
+        if ui.hints_width(("back", "Back")) > 0:
+            fx, fy, fw, fh = lay.foot
+            ui.face("caption")
+            lw = ui.text_size("View only")[0]
+            ui.face()
+            ui.at(fx + 8 * fs, fy, lw + 4 * fs, fh)
+            ui.label("View only", {"face": "caption"})
+            ui.at(fx + lw + 14 * fs, fy, fw - lw - 14 * fs, fh)
+            ui.hints(("change", "Slides", "P", "Present", "back", "Back"))
+        t = ui.bar(self.story.title() or "Untitled", ("play",), (), True)
+        if t == 0:
+            self._start(self.cur)
+
+    # -- Present ------------------------------------------------------------------------
+
+    def _start(self, i):
+        """Present from slide `i`: the slide alone on the whole glass."""
+        if self.story is None:
+            return
+        self._stop_writing()
+        self.commit()
+        self.show = {"i": i, "step": 0, "from": None, "t": 0, "kind": "none",
+                     "shown": _ticks_ms(), "was": self.page, "down": None}
+        self.glass = True
+        self._damage.all()
+
+    def _stop(self):
+        sh = self.show
+        self.show = None
+        self.glass = False
+        if sh is not None:
+            self.cur = sh["i"]
+            if self.ed is not None:
+                self.ed.presented(sh["i"])
+        if self.frames is not None:
+            self.frames.drop("show")
+        self._damage.all()
+
+    def _last_step(self, i):
+        m = 0
+        for o in self.story.slides[i]["objects"]:
+            if o["step"] > m:
+                m = o["step"]
+        return m
+
+    def _next(self):
+        sh = self.show
+        if sh["from"] is not None:
+            return
+        if sh["step"] < self._last_step(sh["i"]):
+            sh["step"] += 1
+            self._damage.all()
+            return
+        if sh["i"] + 1 >= len(self.story.slides):
+            return
+        self._go(sh["i"] + 1, 0)
+
+    def _prev(self):
+        sh = self.show
+        if sh["from"] is not None or sh["i"] == 0:
+            return
+        self._go(sh["i"] - 1, self._last_step(sh["i"] - 1), back=True)
+
+    def _go(self, j, step, back=False):
+        sh = self.show
+        kind = self.story.slides[j if not back else sh["i"]]["transition"]
+        sh["from"] = (sh["i"], sh["step"]) if kind != "none" else None
+        sh["kind"] = kind
+        sh["back"] = back
+        sh["t"] = 0
+        sh["i"] = j
+        sh["step"] = step
+        sh["shown"] = _ticks_ms()
+        self._damage.all()
+
+    def _present_keys(self, inp, k):
+        if inp.pressed("b") or k == 27:
+            self._stop()
+        elif inp.pressed("right") or inp.pressed("a") or k in (13, 10, 32):
+            self._next()
+        elif inp.pressed("left"):
+            self._prev()
+
+    def _present_pointer(self, px, py, click, down):
+        sh = self.show
+        if click:
+            sh["down"] = (px, py)
+            return
+        if sh["down"] is not None and not down:
+            x0, y0 = sh["down"]
+            sh["down"] = None
+            dx = px - x0
+            if dx > 40:
+                self._prev()
+            else:
+                self._next()
+
+    def _present(self, cv):
+        sh = self.show
+        w, h = cv.w, cv.h
+        n, d = zoom_fit(w, h)
+        sw, sp = R.size(n, d)
+        x, y = (w - sw) // 2, (h - sp) // 2
+        cv.rect(0, 0, w, h, 0)
+        clip = (x, y, sw, sp)
+        frm = sh["from"]
+        if frm is not None:
+            sh["t"] += 1
+            t = sh["t"]
+            if sh["kind"] == "fade":
+                total = 2 * FADE_FRAMES
+                if t < FADE_FRAMES:
+                    self._show_slide(cv, frm[0], frm[1], x, y, sw, sp, clip)
+                    a = 255 * t // FADE_FRAMES
+                else:
+                    self._show_slide(cv, sh["i"], sh["step"], x, y, sw, sp, clip)
+                    a = 255 * max(0, total - t) // FADE_FRAMES
+                cv.shadow(x, y, sw, sp, 0, 0, min(255, a), 0)
+            else:
+                total = SWIPE_FRAMES
+                off = sw * t // total
+                if sh.get("back"):
+                    self._show_slide(cv, frm[0], frm[1], x + off, y, sw, sp, clip)
+                    self._show_slide(cv, sh["i"], sh["step"], x + off - sw, y, sw, sp, clip)
+                else:
+                    self._show_slide(cv, frm[0], frm[1], x - off, y, sw, sp, clip)
+                    self._show_slide(cv, sh["i"], sh["step"], x - off + sw, y, sw, sp, clip)
+            if t >= total:
+                sh["from"] = None
+                sh["shown"] = _ticks_ms()
+            self._damage.again()
+        else:
+            self._show_slide(cv, sh["i"], sh["step"], x, y, sw, sp, clip)
+        if _ticks_diff(_ticks_ms(), sh["shown"]) < NUMBER_MS or frm is not None:
+            self._number(cv, x, y, sw, sp)
+            self._damage.again()
+
+    def _show_slide(self, cv, i, step, x, y, w, h, clip):
+        key = ("show", self.story.gen, i, step, w, h)
+        self.frames.place(cv, key, self.story.slides[i], x, y, w, h, clip,
+                          step=step)
+
+    def _number(self, cv, x, y, sw, sh):
+        """The slide's number: in the black under the slide where there is
+        room, else in a half-black pill on its corner."""
+        word = "%d / %d" % (self.show["i"] + 1, len(self.story.slides))
+        fs = self.layout.fs
+        below = cv.h - (y + sh)
+        size = 13 * fs if not self.layout.desk else 15
+        tw = cv.face_width(1, size * 64, word) // 64
+        if below >= size + 4:
+            base = y + sh + (below + size * 7 // 10) // 2
+            cv.face_text(1, size * 64, (x + sw - tw - 8 * fs) * 64, base * 64, word, 13)
+            return
+        pw, ph = tw + 20, size + 14
+        px, py = x + sw - pw - 16, y + sh - ph - 16
+        cv.shadow(px, py, pw, ph, ph // 2, 0, 128, 0)
+        cv.face_text(1, size * 64, (px + 10) * 64, (py + 7 + size * 7 // 10) * 64, word, 7)

@@ -64,21 +64,10 @@ try:
     import blocks as _blocks_mod
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import blocks as _blocks_mod
-# The Storybook deck compiler (#78) -- graduation detection for a DECK-authored
-# story cart recompiles what the deck would generate and compares it to the
-# committed source, the deck-cart mirror of the blocks check just above (same
-# bare-or-package import fallback storybook_app/console use). No cycle: neither
-# storybook_app nor its own imports (ui/editors/app_shell) touch this file.
 try:
     import moy_catalogue
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import moy_catalogue
-try:
-    from storybook_app import deck_to_code as _deck_to_code, STORY_TYPE as _STORY_TYPE
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.storybook_app import (deck_to_code as _deck_to_code,
-                                       STORY_TYPE as _STORY_TYPE)
-
 
 # How slow a code commit has to be before the perf_capture COMMIT line prints.
 # It is a NOISE FLOOR, not a measurement: a normal commit stays silent so the
@@ -255,24 +244,16 @@ class ProjectStore:
             ws.bar_layer.invalidate()
 
     def _journal_code(self, src, ops=None, name=None):
-        """Journal a main.py code commit, DETECTING GRADUATION for a block- OR
-        deck-authored cart (spec Section 8, the MakeCode model -- #78 folds
-        Storybook's decks into the SAME mechanism as the block editor). Bound to
-        the code-commit path (so it rides Stage 7's idle-debounce, never a
-        keystroke), it is the ONE place either origin can graduate:
+        """Journal a main.py code commit, DETECTING GRADUATION for a
+        block-authored cart (spec Section 8, the MakeCode model). Bound to the
+        code-commit path (so it rides Stage 7's idle-debounce, never a
+        keystroke), it is the ONE place a cart can graduate:
 
-          * code-only cart (no blocks.json, no deck.json) -> a plain journal; it
-            has no generating program, so it never 'graduates'.
+          * code-only cart (no blocks.json) -> a plain journal; it has no
+            generating program, so it never 'graduates'.
           * a block-authored cart -> _journal_code_toward (below) decides
             sticky/round-trips/GRADUATE against the frozen blocks.json's own
-            regenerated source (source_roundtrips/compile_blocks).
-          * a deck-authored story cart (#78) -> the same decision against the
-            deck's own regenerated source (deck_to_code) -- a kid hand-editing a
-            story's main.py past Storybook's page/art/bg vocabulary graduates it
-            exactly like outgrowing blocks.
-
-        `prog` (blocks.json) wins when both somehow exist -- a cart is one origin
-        or the other in practice (Storybook never writes blocks.json)."""
+            regenerated source (source_roundtrips/compile_blocks)."""
         cart = self.cart
         prog = cart.get("blocks") if cart else None
         # The journal entry names the cart's ACTUAL main file (#67: main.lua for a
@@ -281,7 +262,7 @@ class ProjectStore:
         if name is not None and name != mainf:
             # One of the cart's OTHER scripts (SPEC.md 4): journaled under its
             # own name and nothing else. Graduation is a claim about the file
-            # blocks.json / deck.json GENERATE, and they generate main -- a
+            # blocks.json GENERATES, and it generates main -- a
             # `board.lua` that diverges from a block program it was never
             # compiled from is not a kid outgrowing blocks.
             self._journal(name, src, ops=ops)
@@ -292,23 +273,15 @@ class ProjectStore:
                 lambda: _blocks_mod.source_roundtrips(prog, src),
                 lambda: _blocks_mod.compile_blocks(prog), ops=ops)
             return
-        deck = self._deck_for_graduation(cart)
-        if deck is not None:
-            expected = _deck_to_code(deck, cart.get("title") or "My Story")
-            self._journal_code_toward(
-                mainf, src, cart,
-                lambda: src == expected,
-                lambda: expected, ops=ops)
-            return
         self._journal(mainf, src, ops=ops)                # code-only: never graduates
 
     def _journal_code_toward(self, mainf, src, cart, roundtrips, baseline_fn, ops=None):
-        """Shared graduation body for BOTH origins (blocks/deck -- #78):
+        """The graduation body:
 
           * already-graduated cart -> sticky: journal with grad=1 (a one-way
             door; every later code commit stays graduated).
           * still round-trips (`roundtrips()` True) -> journal grad=0; stays
-            editable from its origin (the Blocks tab / Storybook).
+            editable from its origin (the Blocks tab).
           * DIVERGED past the origin's vocabulary -> GRADUATE: journal a grad=0
             BASELINE (`baseline_fn()`'s regenerated source, the pre-graduation
             round-tripping state) so an undo restores it, THEN the diverged src
@@ -336,27 +309,6 @@ class ProjectStore:
             print("Moybyte graduation baseline failed:", _err_text(exc))
         self._journal(mainf, src, grad=1, ops=ops)        # flips manifest graduated -> True
         cart["graduated"] = True                          # sync the open workspace in RAM
-
-    def _deck_for_graduation(self, cart):
-        """The parsed deck.json for a Storybook-authored cart (#78 graduation), or
-        None for anything that isn't a deck-backed story right now (not a story
-        cart, no deck.json yet, or a store/SD hiccup) -- the deck-cart mirror of
-        `cart['blocks']` feeding the block graduation check above."""
-        ws = self.ws
-        if (cart is None or cart.get("type") != _STORY_TYPE
-                or ws.carts_store is None or not cart.get("path")):
-            return None
-        try:
-            blob = ws._with_sd(lambda: ws.carts_store.load_deck(cart))
-        except Exception:  # noqa: BLE001 -- a bad/missing deck: not deck-graduating
-            return None
-        if not blob:
-            return None
-        try:
-            data = json.loads(blob)
-        except ValueError:
-            return None
-        return data if isinstance(data, dict) else None
 
     # -- persistence verbs ----------------------------------------------------
     #
@@ -435,7 +387,7 @@ class ProjectStore:
         takes the same store write, the same op-history drain and the same
         journal line under ITS OWN file name (the #111 cursor is a per-file map,
         so an undo on p8.lua cannot revert the last commit to main.lua). What it
-        cannot do is GRADUATE: blocks.json and deck.json generate the main file
+        cannot do is GRADUATE: blocks.json generates the main file
         and no other, so a commit to a tab has nothing to diverge from.
 
         `quiet` is set by the Stage-7 idle-debounce autosave (ws.history.idle_tick): that

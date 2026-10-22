@@ -1,18 +1,16 @@
 """The Desk-Lab list shell's scroll window + nav, EXECUTED (`runtime/app_shell.py`).
 
 `ListShellApp._scroll_list` / `_list_nav` are the row-list nav extracted FROM
-hand-copies (Files' trash/game/used lists, Storybook's shelf and page
-rows). Until this file nothing executed either one:
+hand-copies (Files' trash/game/used lists, the old Storybook's shelf and
+page rows). Until this file nothing executed either one:
 a `sys.settrace` sweep of the whole suite saw only their `def` lines. The
 arithmetic is small and entirely off-by-one shaped -- which edge scrolls, by how
 much, and whether an end wraps or stops -- so it is pinned against the real
-`ListShellLayout` geometry, plus one real consumer driving the same body through
-its own `handle_input`.
+`ListShellLayout` geometry.
 """
 
 import pytest
 
-from ws_helpers import select_on_home
 
 from runtime import layout_base
 from runtime.app_shell import ListShellApp, ListShellLayout
@@ -142,35 +140,3 @@ def test_only_one_verb_fires_per_frame(lst):
     """up/down/a are an elif ladder -- a frame holding all three is one step."""
     lst._list_nav(_Inp("up", "down", "a"), COUNT)
     assert lst.sel == COUNT - 1 and lst.opened == []
-
-
-# -- a real consumer reaches this body ----------------------------------------
-
-def test_storybooks_shelf_scrolls_through_the_shared_body(tmp_path):
-    """The extraction is only worth anything while the apps still route into it,
-    so drive the whole way in: `StorybookAppLayer.handle_input` -> `_list_nav`
-    -> `_scroll_list`, on the app's own layout."""
-    from runtime import host_app
-    from runtime.storybook_app import StorybookAppLayer
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    select_on_home(ws, "Storybook")
-    ws.open()
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    app = ws.storybook_app
-    assert isinstance(app, StorybookAppLayer) and app.mode == "shelf"
-
-    rows = app.layout.list_rows
-    app._stories = lambda: [{"title": "S%d" % i} for i in range(rows + 4)]
-    count = rows + 5                        # the shelf's rows + its NEW row
-
-    src = ws.input.source("kbd")
-    for _ in range(count - 1):
-        src.set_held("down", True)
-        ws.input.begin_frame()
-        app.handle_input(ws.input)
-        src.set_held("down", False)
-        ws.input.begin_frame()
-    assert app.sel == count - 1
-    assert app.top == count - rows          # the window walked with it

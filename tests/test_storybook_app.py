@@ -1,195 +1,381 @@
-"""Storybook (#78): decks of pages that compile to real story cartridges."""
+"""Storybook (docs/media/look_2026-10/APPS_RESTYLE.md, Storybook): the stories,
+a handheld's view-only story and its toast, Present's taps, steps and
+transitions, and the desk's editor -- the sorter, a slide's objects, their
+edits and undo, a picture copied in from My Art -- all through the app as a
+kid drives it, the store under it the user files' `stories` kind."""
 
 import json
 from pathlib import Path
 
 from runtime import host_app, moy_carts
-from runtime.storybook_app import (StorybookAppLayer, StorybookLayout,
-                                   deck_to_code, _fit_art, MAX_PAGES)
-from ws_helpers import select_on_home  # noqa: E402
-
+from runtime import story_doc as D
+from runtime import story_render as R
+from runtime.storybook_app import StorybookAppLayer, StorybookLayout, zoom_fit
 
 ROOT = Path(__file__).resolve().parent.parent
+_DT = 1 / 30
 
 
-def _open_storybook(ws):
-    select_on_home(ws, "Storybook")
-    ws.open()
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    assert ws.wm.top_kind() == "storybook"
-    return ws.storybook_app
+class _In:
+    def __init__(self, *names, key=0):
+        self.names = set(names)
+        self.last_key = key
+
+    def pressed(self, name):
+        return name in self.names
 
 
-def _type(app, inp, text):
+def _frames(ws, n=2):
+    for _ in range(n):
+        ws._dirty = True
+        ws.frame(_DT)
+
+
+def _key(ws, app, k=0, *names):
+    """One press: the key (or buttons) down a frame, then up."""
+    app.handle_input(_In(*names, key=k))
+    _frames(ws, 1)
+    app.handle_input(_In())
+    _frames(ws, 1)
+
+
+def _type(ws, app, text):
     for ch in text:
-        inp.last_key = 10 if ch == "\n" else ord(ch)
-        app._typed_keys(inp)
-        inp.last_key = 0
-        app._typed_keys(inp)
+        _key(ws, app, ord(ch))
 
+
+def _drawing(w, h, ink=11):
+    px = bytearray([1]) * (w * h)
+    for y in range(h // 4, h * 3 // 4):
+        for x in range(w // 4, w * 3 // 4):
+            px[y * w + x] = ink
+    return moy_carts.encode_moyimg(w, h, bytes(px))
+
+
+def _seed(root, stories=(("brave", "The Brave Dragon", 3),)):
+    for name, title, n in stories:
+        doc = D.new_doc(title)
+        for i in range(1, n):
+            s = D.layout_slide("blank", 15)
+            s["objects"].append(D.text_obj("Slide %d" % (i + 1), 64, 416, 896, 72, 1))
+            s["objects"].append(D.shape_obj("bubble", 608, 64, 352, 180, 7, 0, 8, "Hello!",
+                                            64, 0, step=1))
+            s["transition"] = "fade" if i == 1 else "swipe"
+            doc["slides"].append(s)
+        moy_carts.save_file("stories", name + "/story.json", D.write(doc), root)
+
+
+def _handheld(tmp_path, seed=True):
+    root = str(tmp_path / "carts")
+    ws = host_app.build_workstation(root)
+    ws.pointer.visible = False
+    if seed:
+        _seed(ws.carts_root)
+    app = ws._apps_by_id["storybook"]
+    ws.open_app(app)
+    _frames(ws, 3)
+    return ws, app
+
+
+def _desk(tmp_path, seed=True):
+    root = str(tmp_path / "carts")
+    ws = host_app.build_workstation(root, sys_size=(1024, 600), panel_diagonal_in=7.0,
+                                    windowed=True)
+    ws.pointer.visible = False
+    if seed:
+        _seed(ws.carts_root)
+    ws.open_desk()
+    app = ws._apps_by_id["storybook"]
+    ws.open_app(app)
+    _frames(ws, 3)
+    return ws, app
+
+
+def _stored(ws, name):
+    return D.read(moy_carts.load_file("stories", name + "/story.json", ws.carts_root))
+
+
+# -- the app ------------------------------------------------------------------------
 
 def test_storybook_cart_is_versioned_system_app():
     folder = ROOT / "system_carts" / "moybyte.storybook.moy"
-    man = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-    assert man["version"] >= 1
-    assert man["moybyte"]["type"] == "app"
+    man = json.loads((folder / "manifest.json").read_text())
+    assert man["title"] == "Storybook"
     assert man["moybyte"]["system"] is True
     assert "storybook" in man["moybyte"]["permissions"]
-    compile((folder / "main.py").read_text(encoding="utf-8"),
-            str(folder / "main.py"), "exec")
 
 
 def test_storybook_identity_rejects_copies_and_impostors():
     real = {"title": "Storybook", "permissions": ["storybook"],
             "path": "/x/moybyte.storybook.moy"}
     assert StorybookAppLayer.is_app(real)
-    assert not StorybookAppLayer.is_app(dict(real, title="My Storybook"))
-    assert not StorybookAppLayer.is_app(dict(real, permissions=[]))
     assert not StorybookAppLayer.is_app(dict(real, path="/x/storybook_2.moy"))
+    assert not StorybookAppLayer.is_app(dict(real, permissions=[]))
 
 
-def test_deck_compiles_to_valid_readable_cart_code():
-    deck = {"pages": [{"bg": "indigo", "art": "pg1", "text": ["Hello", "World"]},
-                      {"bg": "black", "art": None, "text": ["The end."]}]}
-    src = deck_to_code(deck, "My Tale")
-    compile(src, "<story>", "exec")            # valid python
-    assert "My Tale" in src and "PAGES" in src
-    assert "'pg1'" in src and "'The end.'" in src
-    assert "def _update(dt):" in src           # the Player's tick signature
-    # An EMPTY deck still compiles to a playable one-page story.
-    empty = deck_to_code({"pages": []})
-    compile(empty, "<story>", "exec")
-    assert "My story starts here." in empty
+def test_only_stories_that_read_are_listed(tmp_path):
+    ws, app = _handheld(tmp_path)
+    root = ws.carts_root
+    deck = {"format": "moydeck-v1", "pages": [{"text": ["Once"], "bg": "dark_blue"}]}
+    moy_carts.save_file("stories", "old/story.json", json.dumps(deck), root)
+    moy_carts.save_file("stories", "broken/story.json", "{", root)
+    moy_carts.save_file("stories", "bare/pic.moyimg", _drawing(8, 8), root)
+    app._scan()
+    assert [s["name"] for s in app.stories] == ["brave"]
 
 
-def test_new_story_becomes_a_launcher_cart_and_plays(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_storybook(ws)
-    app._tap_row(0)                            # + NEW STORY
-    assert app.mode == "pages" and not app.read_only
-    cart = app.cart
-    assert cart["type"] == "story"
-    assert (Path(cart["path"]) / "deck.json").exists()
-    # The story is a REAL cart on the home: the kid's own, in Mine.
-    ws.set_home_tab("mine")
-    assert "Story 1" in [c.get("title") for c in ws.launcher.items]
-    # Type more words onto page 1, then PLAY it under the real Player.
-    app._tap_row(1)
-    _type(app, ws.input, " A dragon!")
-    app._play_story()
-    drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)
-    assert ws.wm.top_kind() == "desktop" and ws.cart_error is None
-    assert ws.ns["page"] == 0
-    # Add a second page so the A button visibly turns the page.
-    ws.go_home()
-    app2 = _open_storybook(ws)
-    stories = app2._stories()
-    app2._open_story(stories[0])
-    app2._new_page()
-    _type(app2, ws.input, "Page two!")
-    app2._back_to_pages()
-    app2._play_story()
-    drv.frame(1 / 30)
-    drv.press("a")
-    drv.frame(1 / 30)
-    assert ws.cart_error is None
-    assert ws.ns["page"] == 1                  # A turned the page
+# -- the handheld: stories to look at ----------------------------------------------------
+
+def test_a_handheld_without_stories_says_where_they_are_made(tmp_path):
+    ws, app = _handheld(tmp_path, seed=False)
+    assert app.stories == [] and not app.layout.desk and app.ed is None
+    assert app.page == "stories"
 
 
-def test_hand_edited_code_graduates_the_story_to_read_only(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_storybook(ws)
-    app._tap_row(0)
-    cart = app.cart
-    app._back_to_shelf()
-    # The kid levels up: hand-edit the generated code in the Editor.
-    hacked = (Path(cart["path"]) / "main.py").read_text() + "\nSPEED = 99\n"
-    ws.carts_store.save_code(cart, hacked)
-    ws.carts.rehydrate(cart)
-    app._open_story(cart)
-    assert app.read_only
-    assert "LEVELED UP" in app.status
-    # #78 full integration: the divergence GRADUATED the real manifest fact,
-    # not just a local in-app refusal -- it round-trips through a fresh load.
-    assert cart["graduated"] is True
-    assert moy_carts.load(cart["path"])["graduated"] is True
-    # A commit must NEVER clobber the hand-written code.
-    app._deck_dirty = True
-    app._commit_deck()
-    assert (Path(cart["path"]) / "main.py").read_text() == hacked
+def test_a_handheld_views_a_story_and_does_not_edit_it(tmp_path):
+    ws, app = _handheld(tmp_path)
+    _key(ws, app, 0, "a")                       # Enter on the focused card opens it
+    assert app.page == "view" and app.cur == 0
+    assert app.page_title() == "The Brave Dragon"
+    _key(ws, app, 0, "right")
+    assert app.cur == 1
+    _key(ws, app, ord("t"))
+    assert app.toast is not None and app.toast[0] == "Stories are edited on a desk"
+    _key(ws, app, 127)
+    before = moy_carts.load_file("stories", "brave/story.json", ws.carts_root)
+    _key(ws, app, 0, "left")
+    assert app.cur == 0
+    app.close()
+    assert moy_carts.load_file("stories", "brave/story.json", ws.carts_root) == before
+    assert app.layout.view[2:] == (256, 150), "the story's slide at a quarter"
 
 
-def test_paint_art_attaches_to_a_page_and_ships_in_the_code(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    # Seed the shared Paint drawing (the artwork service, as Paint would).
-    ws.artwork.save(bytes([8] * (32 * 24)), 32, 24)
-    app = _open_storybook(ws)
-    app._tap_row(0)
-    app._tap_row(1)                            # open page 1
-    app._attach_art()
-    assert app._pages()[0]["art"] == "pg1"
-    app._back_to_pages()
-    src = (Path(app.cart["path"]) / "main.py").read_text()
-    assert "'pg1'" in src
-    assert (Path(app.cart["path"]) / "images" / "pg1.moyimg").exists()
-    # And the story still runs (image() resolves the art).
-    app._play_story()
-    drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)
-    assert ws.cart_error is None
+def test_present_takes_the_glass_and_steps_through_taps(tmp_path):
+    ws, app = _handheld(tmp_path)
+    _key(ws, app, 0, "a")
+    _key(ws, app, ord("p"))
+    assert app.show is not None and app.glass
+    assert zoom_fit(320, 240) == (5, 16)
+    _key(ws, app, 0, "right")                   # slide 2, fading in
+    assert app.show["i"] == 1 and app.show["from"] is not None
+    _frames(ws, 14)
+    assert app.show["from"] is None and app.show["step"] == 0
+    _key(ws, app, 0, "right")                   # its bubble, on the tap
+    assert app.show["i"] == 1 and app.show["step"] == 1
+    _key(ws, app, 0, "right")                   # slide 3, swiping in
+    assert app.show["i"] == 2
+    _frames(ws, 10)
+    _key(ws, app, 0, "left")
+    _frames(ws, 10)
+    assert app.show["i"] == 1 and app.show["step"] == 1, "back: the slide as it ended"
+    _key(ws, app, 27)
+    assert app.show is None and not app.glass and app.page == "view" and app.cur == 1
 
 
-def test_fit_art_shrinks_desktop_paintings_to_the_cart_canvas():
-    idx = bytes(range(256)) * (512 * 300 // 256)
-    w, h, out = _fit_art(512, 300, idx)
-    assert w <= 320 and h <= 240
-    assert len(out) == w * h
-    # Small art passes through untouched.
-    small = bytes([5] * (100 * 80))
-    assert _fit_art(100, 80, small) == (100, 80, small)
+def test_present_draws_no_bar_and_the_bars_band_is_the_slides(tmp_path):
+    ws, app = _handheld(tmp_path)
+    _key(ws, app, 0, "a")
+    _key(ws, app, ord("p"))
+    _frames(ws, 2)
+    cv = ws.sys_canvas
+    top = bytes(cv._buf[:2 * cv.w * 4])
+    assert top == bytes(len(top)), "black above the slide, where the bar was"
+    ws.pointer.place(14, 9)                     # where the bar's way back was
+    ws.pointer.click = True
+    ws.handle_pointer()
+    ws.pointer.click = False
+    assert ws.wm.top_kind() == "storybook" and app.show is not None
 
 
-def test_story_full_and_page_caps(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_storybook(ws)
-    app._tap_row(0)
-    app.deck["pages"] = [{"bg": "black", "art": None, "text": []}
-                         for _ in range(MAX_PAGES)]
-    app._new_page()
-    assert len(app._pages()) == MAX_PAGES
-    assert app.status == "STORY FULL"
+# -- the desk: editing ------------------------------------------------------------------------
+
+def test_the_desk_opens_at_its_designed_size(tmp_path):
+    ws, app = _desk(tmp_path)
+    win = ws.wm._wins["storybook"]
+    assert (win.w, win.h) == (900, 536)
+    assert app.layout.desk and app.ed is not None
 
 
-def test_bar_back_commits_the_open_story(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_storybook(ws)
-    app._tap_row(0)
-    app._tap_row(1)
-    _type(app, ws.input, "\nSaved by the X.")   # a fresh line (the 34-char line cap)
-    path = Path(app.cart["path"])
-    xb = ws.bar_layer.back_rect("app")
-    for _ in range(3):                    # the page, the pages, the shelf: out
-        ws.pointer.place(xb[0] + 2, xb[1] + 2)
-        ws.pointer.click = True
-        ws.handle_pointer()               # the ROUTER owns the app bar contract
-        ws.pointer.click = False
-    assert ws.wm.top_kind() == "launcher"
-    assert ws.input.text_mode is False
-    deck = json.loads((path / "deck.json").read_text())
-    assert "Saved by the X." in " ".join(deck["pages"][0]["text"])
-    src = (path / "main.py").read_text()
-    assert "Saved by the X." in src
-    # A plain deck-driven save must never graduate the story on its own -- only
-    # a hand-edit past the deck's vocabulary does (#78, see the graduation
-    # tests below).
-    assert moy_carts.load(str(path))["graduated"] is False
+def test_a_new_story_is_written_from_its_title(tmp_path):
+    ws, app = _desk(tmp_path, seed=False)
+    app._new_story()
+    _frames(ws)
+    ed = app.ed
+    assert app.page == "slide" and ed.writing and ed.chosen == 0
+    _type(ws, app, "Moy at sea")
+    _key(ws, app, 27)
+    assert not ed.writing
+    st = app.story
+    assert st.title() == "Moy at sea" and st.name == "moy_at_sea"
+    app.commit()
+    doc = _stored(ws, "moy_at_sea")
+    assert doc["title"] == "Moy at sea" and doc["slides"][0]["objects"][0]["text"] == "Moy at sea"
 
 
-def test_layout_reflows():
-    small = StorybookLayout(320, 240, 1)
-    big = StorybookLayout(960, 600, 1)
-    assert big.list_rows > small.list_rows
-    assert big.preview[3] > small.preview[3]
-    assert StorybookLayout(480, 300, 1, windowed=True).cy == 0
+def _edit(tmp_path):
+    ws, app = _desk(tmp_path)
+    app._open_story(app.stories[0], "deck")
+    app.ed.opened()
+    app.page = "slide"
+    app.cur = 1
+    _frames(ws)
+    return ws, app, app.ed
+
+
+def test_the_keys_add_move_and_delete_with_undo(tmp_path):
+    ws, app, ed = _edit(tmp_path)
+    st = app.story
+    first = D.copy(st.slides[1])
+    _key(ws, app, ord("t"))                     # a text box, its words to write
+    assert ed.writing and len(st.slides[1]["objects"]) == 3
+    _type(ws, app, "Hi")
+    _key(ws, app, 27)
+    o = st.slides[1]["objects"][ed.chosen]
+    assert o["text"] == "Hi"
+    x = o["x"]
+    _key(ws, app, 0, "right")
+    assert o["x"] == x + 2
+    _key(ws, app, ord("g"))
+    _key(ws, app, 0, "right")
+    assert o["x"] == x + 18, "G steps 16"
+    _key(ws, app, 4)                            # Ctrl+D
+    assert len(st.slides[1]["objects"]) == 4
+    _key(ws, app, 127)                          # Del
+    assert len(st.slides[1]["objects"]) == 3
+    assert app.toast is not None and "Ctrl+Z" in app.toast[0]
+    for _ in range(8):
+        _key(ws, app, 26)                       # Ctrl+Z
+    assert st.slides[1] == first
+    app.commit()
+    assert _stored(ws, "brave")["slides"][1] == first
+
+
+def test_tab_chooses_in_z_order_and_front_and_back_move_it(tmp_path):
+    ws, app, ed = _edit(tmp_path)
+    st = app.story
+    _key(ws, app, 9)
+    assert ed.chosen == 0
+    _key(ws, app, ord("]"))
+    assert ed.chosen == 1 and st.slides[1]["objects"][1]["type"] == "text"
+    _key(ws, app, ord("["))
+    assert ed.chosen == 0
+    _key(ws, app, 27)
+    assert ed.chosen is None
+    _key(ws, app, 27)
+    assert not ed.on_slide, "Esc with nothing chosen: the keys go to the parts"
+
+
+def test_a_drag_moves_and_snaps_to_the_slides_middle(tmp_path):
+    ws, app, ed = _edit(tmp_path)
+    st = app.story
+    o = st.slides[1]["objects"][1]              # the bubble at 608, 64, 352 wide
+    ed.chosen = 1
+    sx, sy = app.layout.slide[0], app.layout.slide[1]
+    n, d = app.layout.edit_zoom
+    px, py = sx + 700 * n // d, sy + 100 * n // d
+    assert ed.handle_pointer(px, py, True, True)
+    # left to two screen pixels short of the bubble's left edge on the middle
+    to = px - (608 - 512) * n // d + 2
+    ed.handle_pointer(to, py, False, True)
+    assert o["x"] == 512 and ed.guides and ed.guides[0] == ("v", 512)
+    ed.handle_pointer(to, py, False, False)
+    assert ed.guides == () and len(st.undos) == 1
+    st.undo()
+    assert st.slides[1]["objects"][1]["x"] == 608
+
+
+def test_the_sorter_adds_moves_and_deletes_slides(tmp_path):
+    ws, app = _desk(tmp_path)
+    app._open_story(app.stories[0], "deck")
+    app.ed.opened()
+    _frames(ws)
+    st = app.story
+    app._focus = "Slide 1"
+    _frames(ws)
+    _key(ws, app, ord("n"))
+    assert len(st.slides) == 4 and app.cur == 2
+    assert st.slides[2]["objects"][0]["image"] is None, "Picture: the last layout used"
+    _frames(ws)
+    _key(ws, app, ord("]"))
+    assert st.slides[3]["objects"][0].get("image", 1) is None
+    _key(ws, app, 127)
+    assert len(st.slides) == 3
+    for _ in range(3):
+        _key(ws, app, 26)
+    assert len(st.slides) == 3 and [len(s["objects"]) for s in st.slides] == [2, 2, 2]
+
+
+def test_a_picture_from_my_art_is_copied_in_and_fills_its_frame(tmp_path):
+    ws, app = _desk(tmp_path)
+    root = ws.carts_root
+    moy_carts.save_file("drawings", "dragon", _drawing(1024, 600), root)
+    app._open_story(app.stories[0], "deck")
+    ed = app.ed
+    ed.opened()
+    j = ed._new_slide(0, "two")
+    app.page = "slide"
+    ed.chosen = 0
+    _key(ws, app, 13)                           # Enter on an empty frame
+    assert app.page == "pictures"
+    _frames(ws)
+    ed._place(("dragon", 1024, 600))
+    st = app.story
+    o = st.slides[j]["objects"][0]
+    assert o["image"] == "dragon" and o["scale"] == 0.5 and (o["x"], o["y"]) == (0, 40)
+    assert ed.chosen == 1, "the next empty frame is chosen"
+    item = moy_carts.file_path("stories", st.name, root)
+    assert Path(item, "dragon.moyimg").read_text() == moy_carts.load_file("drawings", "dragon",
+                                                                          root)
+    half = moy_carts.decode_moyimg(Path(item, "dragon_h.moyimg").read_text())
+    assert half[:2] == (512, 300)
+    ed._place(("dragon", 1024, 600))
+    assert st.slides[j]["objects"][1]["image"] == "dragon_2", "a second copy, its own name"
+    app.commit()
+    assert _stored(ws, st.name)["slides"][j]["objects"][0]["image"] == "dragon"
+
+
+def test_the_full_screen_window_edits_at_five_eighths(tmp_path):
+    host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                               panel_diagonal_in=7.0, windowed=True)
+    lay = StorybookLayout(1024, 600, 1, True)
+    assert lay.full and lay.edit_zoom == (5, 8) and lay.slide[2:] == (640, 375)
+    lay = StorybookLayout(900, 492, 1, True)
+    assert not lay.full and lay.edit_zoom == (1, 2) and lay.slide[2:] == (512, 300)
+    assert R.size(5, 64) == (80, 47)
+
+
+def test_a_drawing_put_in_a_story_is_its_new_last_slide_and_undo_takes_it_back(tmp_path):
+    """Paint's Put in a story (APPS_RESTYLE.md, Paint): the drawing becomes a
+    new last slide's background, copied in; the toast's Undo takes it back."""
+    ws, app = _handheld(tmp_path)
+    root = ws.carts_root
+    moy_carts.save_file("drawings", "garden", _drawing(320, 240), root)
+    files = app._files
+    i, name, title = D.put_drawing(files, "brave", "garden")
+    assert (i, name, title) == (3, "garden", "The Brave Dragon")
+    doc = _stored(ws, "brave")
+    assert doc["slides"][3] == {"bg": "garden", "transition": "none", "objects": []}
+    assert moy_carts.load_file("stories", "brave/garden.moyimg", root) == \
+        moy_carts.load_file("drawings", "garden", root)
+    assert D.put_drawing(files, "brave", "garden")[1] == "garden_2"
+    assert D.take_back(files, "brave", 4, "garden_2")
+    assert D.take_back(files, "brave", 3, "garden")
+    assert len(_stored(ws, "brave")["slides"]) == 3
+    assert moy_carts.load_file("stories", "brave/garden.moyimg", root) is None
+    assert D.put_drawing(files, "nope", "garden")[0] is None
+
+
+def test_paints_door_lists_the_stories_and_adds_a_slide_with_its_undo(tmp_path):
+    from runtime import storybook_app as sb
+    ws, app = _handheld(tmp_path)
+    moy_carts.save_file("drawings", "garden", _drawing(320, 240), ws.carts_root)
+    rows = sb.story_list(None, app._files)
+    assert rows == [{"title": "The Brave Dragon", "folder": "brave", "slides": 3,
+                     "cover": None}]
+    assert sb.story_list(app._files) == rows
+    title, n, undo = sb.add_picture_slide(None, app._files, rows[0], "garden")
+    assert (title, n) == ("The Brave Dragon", 4)
+    assert len(_stored(ws, "brave")["slides"]) == 4
+    assert undo()
+    assert len(_stored(ws, "brave")["slides"]) == 3
+    assert sb.add_picture_slide(None, app._files, rows[0], "nope")[1] == 0

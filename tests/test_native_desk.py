@@ -20,7 +20,6 @@ from runtime import host_app, layout_base, ui_draw
 from runtime.app_shell import ListShellLayout
 from runtime.chrome import text_scale_floor
 from runtime.files_app import FilesLayout
-from runtime.storybook_app import StorybookLayout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FONTS = os.path.join(ROOT, "native", "moy_ui", "fonts")
@@ -153,6 +152,12 @@ def test_the_text_floor_answers_1_on_the_desks_for_the_font_set(name, size, diag
 def test_the_list_apps_read_the_print_fonts_line(tmp_path):
     """A taller print font grows the rows and bands that hold its text; under
     petme128 they are the 8px cell's numbers."""
+    class StorybookLayout(ListShellLayout):           # a list app's head and rows
+        def __init__(self, w, h, fs=1):
+            self._init_frame(w, h, fs, False)
+            self.band_h = self.band(24, 8)
+            self._init_list(self.cy + self.band_h)
+
     layout_base.place_class(layout_base.HANDHELD)
     lay = StorybookLayout(320, 240, 1)
     assert (lay.band_h, lay.row_h) == (24, 20)

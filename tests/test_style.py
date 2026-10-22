@@ -245,6 +245,10 @@ def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch, empty_ring
 # one to `ui.py` without a consumer, a transcription row and an "outline" delta
 # is a red test in three places.
 _SHELL_KINDS = ("row_menu", "row_list", "row_chrome", "row_cta")
+# Kinds no surface asks for that stay in the table: the part list theme
+# packages name is frozen (docs/theming_2026-09.md §4.3), so a part outlives
+# its last surface. `row_cta` was the old Storybook's NEW row.
+_UNASKED_PARTS = ("row_cta",)
 
 _FROZEN_HATCH = {
     "cards_layer.py": (3,
@@ -260,9 +264,6 @@ _FROZEN_HATCH = {
     "achievements_ui.py": (1,
         "the Easter-egg banner: literal white on a literal black dialog, a "
         "surprise no theme colours"),
-    "storybook_app.py": (1,
-        "a deck row is cream paper with black ink -- frozen off-token, the "
-        "case the hatch is documented for"),
     "music_editor_ui.py": (1,
         "the title-strip nudge ticks: a frozen blue/black/white trio with no "
         "token behind any of the three"),
@@ -388,9 +389,8 @@ def test_the_hatch_that_moved_now_names_a_kind_instead():
         "achievements_ui.py": 1,        # the achievements list
         "cards_layer.py": 3,            # the cards, the ADVANCED row, its file list
         "popover.py": 2,                # the power popover's level line and its rows
-        "storybook_app.py": 1,          # the + NEW row
     }, named
-    assert sum(named.values()) == 7
+    assert sum(named.values()) == 6
 
 
 def test_every_kind_a_surface_asks_the_catalog_for_exists():
@@ -431,6 +431,9 @@ def test_every_kind_a_surface_asks_the_catalog_for_exists():
     # decision pretending to be one.
     for kind in _SHELL_KINDS:
         assert kind in ui_draw.kinds(), kind
+        if kind in _UNASKED_PARTS:
+            assert kind not in asked, "%r is asked for again: drop it from the list" % kind
+            continue
         assert kind in asked, "%r is in the table but nothing asks for it" % kind
 
 
@@ -440,10 +443,10 @@ def test_every_kind_a_surface_asks_the_catalog_for_exists():
 # which is what makes the move a no-op rather than a re-baseline.
 #
 # It is not redundant with the goldens, and the gap is measured rather than
-# assumed: mutating `row_cta`'s REST triple leaves BOTH golden suites green,
-# because Storybook's shelf always opens with the "+ NEW" row selected, so that
-# row is never rendered at rest. Every other state below IS netted by a golden
-# (verified by mutation: `row_menu` REST turns all ten golden rows red).
+# assumed: `row_cta` is drawn by no surface (it stays as a part of the frozen
+# vocabulary, below), so only these triples hold its pixels. Every other state
+# below IS netted by a golden (verified by mutation: `row_menu` REST turns all
+# ten golden rows red).
 _PRE_207_TRIPLES = {
     ("row_menu", ui_draw.REST):  # the power popover's rows (popover.PowerRows), the system menu (moy_chrome)
         lambda th: (None, th["chrome_ink_dim"], None),
@@ -460,7 +463,7 @@ _PRE_207_TRIPLES = {
         lambda th: (th["hilite"], th["selection_ink"], None),
     ("row_chrome", ui_draw.DISABLED):  # achievements_ui (locked)
         lambda th: (None, th["chrome_ink_dim"], None),
-    ("row_cta", ui_draw.REST):   # storybook_app._draw_rows, the "+ NEW" row
+    ("row_cta", ui_draw.REST):   # a part of the frozen vocabulary no surface draws
         lambda th: (th["hilite"], 0, th["dim"]),
     ("row_cta", ui_draw.ON):
         lambda th: (th["accent"], 0, th["accent"]),

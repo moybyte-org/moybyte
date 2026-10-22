@@ -716,20 +716,20 @@ def test_put_in_a_story_adds_a_last_page_and_its_undo_takes_it_out(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     sb = ws._apps_by_id["storybook"]
     sb._new_story()
-    sb._commit_deck()
     app = _open_paint(ws)
     app.doc.put(2, 2, 8)
     app._mark_changed()
     assert app._save()
-    stories = storybook_app.story_list(ws.artwork.ctx.carts)
+    files = ws.artwork.ctx.files
+    stories = storybook_app.story_list(ws.artwork.ctx.carts, files)
     assert stories
     n = stories[0]["slides"]
     title, slide, undo = storybook_app.add_picture_slide(
         ws.artwork.ctx.carts, ws.artwork.ctx.files, stories[0], ws.artwork.doc_name())
     assert slide == n + 1
-    assert storybook_app.story_list(ws.artwork.ctx.carts)[0]["slides"] == n + 1
+    assert storybook_app.story_list(ws.artwork.ctx.carts, files)[0]["slides"] == n + 1
     undo()
-    assert storybook_app.story_list(ws.artwork.ctx.carts)[0]["slides"] == n
+    assert storybook_app.story_list(ws.artwork.ctx.carts, files)[0]["slides"] == n
 
 
 def test_the_desk_window_is_titled_with_the_drawing(tmp_path):

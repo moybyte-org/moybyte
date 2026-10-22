@@ -104,6 +104,7 @@ import argparse
 import fnmatch
 import os
 import re
+import json
 import shutil
 import sys
 import tempfile
@@ -236,12 +237,12 @@ APPS = {"paint": ("artwork", "main"), "paint-colours": ("artwork", "colours"),
         "notes": ("notes", "list"), "notes-edit": ("notes", "edit"), "notes-new": ("notes", "new"),
         "notes-empty": ("notes", "empty"), "paint-max": ("artwork", "main"),
         "paint-view": ("artwork", "view"), "paint-view-zoom": ("artwork", "view-zoom"),
-        "paint-view-more": ("artwork", "view-more"), "storybook": ("storybook", None),
-        "storybook-empty": ("storybook", None), "storybook-view": ("storybook", None),
-        "storybook-deck": ("storybook", None), "storybook-picture": ("storybook", None),
-        "storybook-slide": ("storybook", None), "storybook-max": ("storybook", None),
-        "storybook-stories": ("storybook", None), "storybook-add": ("storybook", None),
-        "storybook-pictures": ("storybook", None)}
+        "paint-view-more": ("artwork", "view-more"), "storybook": ("storybook", "slide"),
+        "storybook-empty": ("storybook", "empty"), "storybook-view": ("storybook", "view"),
+        "storybook-deck": ("storybook", "deck"), "storybook-picture": ("storybook", "picture"),
+        "storybook-slide": ("storybook", "nothing"), "storybook-max": ("storybook", "max"),
+        "storybook-stories": ("storybook", "stories"), "storybook-add": ("storybook", "add"),
+        "storybook-pictures": ("storybook", "pictures")}
 DESK_APPS = ("paint", "paint-max", "my-art", "getcarts", "getcarts-getting", "notes", "storybook",
              "storybook-deck", "storybook-picture", "storybook-slide", "storybook-max",
              "storybook-stories", "storybook-add", "storybook-pictures")
@@ -251,10 +252,10 @@ DESK_ONLY = ("paint-max", "storybook-deck", "storybook-picture", "storybook-slid
 
 def _apps_table():
     what = "nearest screen: %s as it draws today"
-    out = {"storybook_present": (HANDHELD, ("31",), False, _app_open("storybook"),
-                                 what % "storybook"),
-           "storybook_present_desk": (CONSOLE, ("31",), False, _app_open("storybook"),
-                                      what % "storybook")}
+    out = {"storybook_present": (HANDHELD, ("31",), False,
+                                 _app_open("storybook", "present"), what % "storybook"),
+           "storybook_present_desk": (CONSOLE, ("31",), False,
+                                      _app_open("storybook", "present"), what % "storybook")}
     for screen, (app, page) in APPS.items():
         if screen not in DESK_ONLY:
             out["handheld_" + screen] = (HANDHELD, ("31",), False, _app_open(app, page),
@@ -282,6 +283,9 @@ def _app_open(app, page=None, window=False):
             return
         if app == "myart":
             _myart(g, ws, page, window)
+            return
+        if app == "storybook":
+            _storybook(g, ws, page, window)
             return
         ws.open_app(ws._apps_by_id[app])
         _settle(g, ws, 2)
@@ -403,6 +407,191 @@ def _getcarts(g, ws, state, window):
     if window:
         _place(ws, "getcarts", 112, 52, 900, 536)
     _settle(g, ws, 4)
+
+
+# The targets' stories (rounds/round15.py STORY, STORIES, PICTURES): The
+# Brave Dragon's five slides, Space trip and Our holiday, and My Art's seven
+# drawings, their art round15's own (rounds/round13.py's ART, round15's WIDE).
+SB_STORIES = (("brave_dragon", "The Brave Dragon", None), ("space_trip", "Space trip", 2),
+              ("our_holiday", "Our holiday", 3))
+SB_DRAWINGS = (("dragon", "dragon", True), ("garden", "garden", True),
+               ("my_house", "house", True), ("rocket", "rocket", False),
+               ("ginger", "cat", False), ("fish_tank", "fish", False),
+               ("night_sky", "night", False))
+
+
+_ART = {}
+
+
+def _round15_art():
+    """rounds/round15.py's art as PIL images: {("wide", kind): 1024x600,
+    ("art", kind): 320x240}, drawn once in a process of its own (the
+    rounds' drawing modules take over sys.argv and the import system)."""
+    if _ART:
+        return _ART
+    import subprocess
+    from PIL import Image
+    tmp = tempfile.mkdtemp(prefix="look_r15_")
+    rounds = os.path.join(ROOT, "docs", "media", "look_2026-10", "rounds")
+    code = ("import os, sys\nsys.path.insert(0, %r)\nout = %r\nimport round15 as R\n"
+            "for k, im in R.WIDE.items():\n    im.save(os.path.join(out, 'wide_' + k + '.png'))\n"
+            "for k, im in R.ART.items():\n    im.save(os.path.join(out, 'art_' + k + '.png'))\n"
+            % (rounds, tmp))
+    subprocess.run([sys.executable, "-c", code], check=True, cwd=rounds,
+                   capture_output=True)
+    try:
+        for f in os.listdir(tmp):
+            kind, name = f[:-4].split("_", 1)
+            with Image.open(os.path.join(tmp, f)) as im:
+                _ART[(kind, name)] = im.convert("RGB")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return _ART
+
+
+def _indices(im):
+    """A picture as MOY64's first sixteen, nearest each pixel."""
+    from runtime import story_doc
+    pal = [((c >> 16) & 255, (c >> 8) & 255, c & 255) for c in story_doc.COLOURS]
+    im = im.convert("RGB")
+    w, h = im.size
+    px = im.load()
+    out = bytearray(w * h)
+    near = {}
+    for y in range(h):
+        for x in range(w):
+            c = px[x, y]
+            k = near.get(c)
+            if k is None:
+                k = min(range(16), key=lambda i: sum((a - b) ** 2 for a, b in zip(pal[i], c)))
+                near[c] = k
+            out[y * w + x] = k
+    return w, h, bytes(out)
+
+
+def _sb_story():
+    """rounds/round15.py's STORY and TRANS: The Brave Dragon's slides, as
+    the document's values (its makers' defaults filled in)."""
+    import subprocess
+    rounds = os.path.join(ROOT, "docs", "media", "look_2026-10", "rounds")
+    code = ("import json, sys\nsys.path.insert(0, %r)\nimport round15 as R\n"
+            "sys.stdout.write(json.dumps([list(R.STORY), list(R.TRANS)]))\n" % rounds)
+    got = subprocess.run([sys.executable, "-c", code], check=True, cwd=rounds,
+                         capture_output=True, text=True).stdout
+    return json.loads(got[got.index("[["):])
+
+
+def _sb_doc(slides, title):
+    from runtime import story_doc
+    out = []
+    for (bg, objs), tr in slides:
+        conv = []
+        for o in objs:
+            o = dict(o)
+            if o["type"] == "shape":
+                for k, v in (("flip", 0), ("text", ""), ("font", "sans_bold"), ("size", 48),
+                             ("colour", 0), ("align", "centre")):
+                    o.setdefault(k, v)
+            if o["type"] == "picture":
+                o["scale"] = 0.5 if o["scale"] == 0.5 else int(o["scale"])
+            conv.append(o)
+        out.append({"bg": bg, "transition": tr, "objects": conv})
+    return {"format": story_doc.FORMAT, "title": title, "slides": out}
+
+
+def _storybook(g, ws, state, window):
+    """Storybook as the targets draw it: My Art's drawings and the three
+    stories seeded (none for `empty`), on `state`'s page."""
+    from runtime import moy_carts, story_doc, story_render
+    root = ws.carts_root
+    if state != "empty":
+        r15 = _round15_art()
+        art = {}
+        t = 1700000000
+        for i, (name, kind, wide) in enumerate(SB_DRAWINGS):
+            w, h, pix = _indices(r15[("wide" if wide else "art", kind)])
+            moy_carts.save_file("drawings", name, moy_carts.encode_moyimg(w, h, pix), root)
+            path = moy_carts.file_path("drawings", name, root)
+            os.utime(path, (t - 60 * i, t - 60 * i))
+        for kind, name in r15:
+            if kind == "wide":
+                art[name] = _indices(r15[(kind, name)])
+        slides, trans = _sb_story()
+        story = list(zip(slides, trans))
+        docs = {"brave_dragon": _sb_doc(story, "The Brave Dragon"),
+                "space_trip": _sb_doc([story[2], story[2], story[0]], "Space trip"),
+                "our_holiday": _sb_doc([story[3]] * 8, "Our holiday")}
+        for i, (item, _title, _first) in enumerate(SB_STORIES):
+            doc = docs[item]
+            for img in story_doc.images_of(doc):
+                w, h, pix = art[img]
+                moy_carts.save_file("stories", item + "/" + img + ".moyimg",
+                                    moy_carts.encode_moyimg(w, h, pix), root)
+                moy_carts.save_file("stories", item + "/" + img + "_h.moyimg",
+                                    moy_carts.encode_moyimg(w // 2, h // 2,
+                                                            bytes(story_render.half(pix, w, h))),
+                                    root)
+            moy_carts.save_file("stories", item + "/story.json", story_doc.write(doc), root)
+            d = moy_carts.file_path("stories", item, root)
+            os.utime(d, (t - 60 * i, t - 60 * i))
+    if not window:
+        ws.pointer.visible = False
+    app = ws._apps_by_id["storybook"]
+    ws.open_app(app)
+    _settle(g, ws, 2)
+    if window:
+        size = (1024, 600) if state == "max" else (900, 536)
+        at = (0, 0) if state == "max" else (112, 52)
+        _place(ws, "storybook", at[0], at[1], size[0], size[1])
+        _settle(g, ws, 2)
+    first = app.stories[0] if app.stories else None
+    if not app.layout.desk and state not in ("view", "present", "empty"):
+        state = "stories"                 # the handheld's Storybook: its stories
+    if state in ("stories", None) or state == "empty" or first is None:
+        if first is not None:
+            app._focus = app._card_id(first["name"])
+        _settle(g, ws, 3)
+        return
+    if state == "present":
+        app._open_story(first, "deck" if app.layout.desk else "view")
+        app._start(1)
+        app.show["step"] = 1              # the bubble: its tap taken
+        _settle(g, ws, 3)
+        return
+    if state == "view":
+        app._open_story(first, "view")
+        app.cur = 1
+        _settle(g, ws, 3)
+        return
+    app._open_story(first, "deck")
+    ed = app.ed
+    ed.opened()
+    if state == "deck":
+        app.cur = 2
+        app._focus = "Slide 2"
+        _settle(g, ws, 3)
+        return
+    app.page = "slide"
+    app.cur = 1
+    if state == "pictures":
+        ed._open_pictures("add")
+        _settle(g, ws, 2)
+        app._focus = "Pic dragon"
+        _settle(g, ws, 3)
+        return
+    if state == "add":
+        ed.menu = "add"
+    elif state == "picture":
+        ed.chosen = 0
+        app.story.set(1, 0, "clear", True)
+    elif state == "slide" or state is None:
+        ed.chosen = 1
+        ed.guides = (("h", 64),)
+        ed.say = "moving: lined up with the dragon"
+    elif state == "max":
+        ed.chosen = 2
+        ed.writing = True
+    _settle(g, ws, 3)
 
 
 # The targets' vault (rounds/round13.py NOTES), newest first, and the note

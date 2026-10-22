@@ -217,11 +217,9 @@ def test_the_private_button_copies_are_gone():
     Storybook's argument-poorer twin) and is now one method,
     `app_shell.ListShellApp._button`. The app is gone; the shared chip it was
     folded into is what has to keep carrying `disabled`, so that is what this
-    asserts, and Storybook is asserted not to have re-grown a private copy."""
+    asserts."""
     shell = (ROOT / "runtime" / "app_shell.py").read_text(encoding="utf-8")
     assert "disabled=not enabled" in shell, "the shared chip lost `disabled`"
-    src = (ROOT / "runtime" / "storybook_app.py").read_text(encoding="utf-8")
-    assert "def _button(" not in src, "storybook_app re-grew a private _button"
 
 
 def test_the_disabled_history_chip_dims_through_the_theme_role():
@@ -264,16 +262,3 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
             assert seen == [th["chrome_ink"],
                             twin.state_token(th, "disabled_ink", 6)], (name, variant)
             assert seen[0] != seen[1], (name, variant)
-
-
-# --- the row conversions ---------------------------------------------------------
-
-def test_the_converted_row_draws_go_through_the_toolkit():
-    """The Storybook's list draws its rows with `ui_draw.row`, and its pixels are
-    frozen OFF-token, so it passes `colors=`, which is what that escape hatch
-    is for."""
-    from runtime import storybook_app
-
-    deck = inspect.getsource(storybook_app.StorybookAppLayer._draw_rows)
-    assert "_ui_draw.row(" in deck and "colors=" in deck
-    assert "cv.rectb(" not in deck and "cv.rect(" not in deck

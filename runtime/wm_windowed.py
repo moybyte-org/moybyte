@@ -111,7 +111,8 @@ _DRAG_MIN = 4                         # px of travel before a press becomes a dr
 # content (DESIGN.md "The sizes"; the `*desktop*` targets), in glass pixels
 # at chrome size 1. Every other window takes `_win_size`'s formulas.
 DESK_SIZES = {"files": (548, 534), "calc": (344, 488), "getcarts": (900, 536),
-              "notes": (900, 536), "artwork": (900, 536), "myart": (900, 536)}
+              "notes": (900, 536), "artwork": (900, 536), "myart": (900, 536),
+              "storybook": (900, 536)}
 
 
 class _LayoutCtx:
@@ -943,7 +944,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     self.ws.canvas.h * s + 2 + th + e)
         if key in ("menu", "projects"):
             return (full.w - full.w // 8, full.h - full.h // 10)
-        if key in ("artwork", "appearance", "storybook"):
+        if key in ("artwork", "appearance"):
             return (full.w - full.w // 8, full.h - full.h // 10)
         if key == "update":
             return (full.w // 2, full.h // 2)
@@ -2990,7 +2991,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ws = self.ws
         ws._dirty = True
         if kind == "storybook":
-            ws.storybook_app._commit_deck()   # same rule for an open story
+            ws.storybook_app.commit()         # same rule for an open story
         if kind == "artwork":
             ws.artwork_app._save()            # same rule for the open drawing
         if kind == "appearance":

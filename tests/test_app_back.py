@@ -251,17 +251,17 @@ def test_the_settings_window_shows_its_back_on_a_page(tmp_path):
 def test_the_hosts_esc_steps_a_desk_windows_page(tmp_path):
     ws, drv, app, win = _desk_app(tmp_path, "storybook")
     assert not drv.takes_escape()
-    app.mode = "pages"
+    app.page = "deck"
     assert drv.takes_escape()
     drv.escape()
-    assert app.mode == "shelf" and "storybook" in ws.wm._wins
+    assert app.page == "stories" and "storybook" in ws.wm._wins
 
 
 @pytest.mark.parametrize("app_id,page", [
     ("appearance", lambda a: setattr(a, "view", "walls")),
     ("files", lambda a: setattr(a, "dialog", object())),
     ("getcarts", lambda a: setattr(a, "phase", "cart")),
-    ("storybook", lambda a: setattr(a, "mode", "pages")),
+    ("storybook", lambda a: setattr(a, "page", "view")),
     ("artwork", lambda a: setattr(a, "page", "show")),
     ("myart", lambda a: setattr(a, "menu", True)),
 ])
