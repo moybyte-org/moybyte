@@ -738,11 +738,24 @@ class MapEditorUI:
         if lay.verbs:
             self.page().draw(cv, th, (lay.cx, lay.cy, lay.cw, lay.ch), False)
             return
-        cv.rect(*(lay.body_fill + (th["surface"],)))
+        bx, by, bw, bh = lay.body_fill
+        col = th["surface"]
         me = self.mapedit
         tm = ws.project.tilemap
         if me is None or ws.project.sheet is None or tm is None:
+            cv.rect(bx, by, bw, bh, col)
             return
+        # The view fills its own rect first (its cells' backgrounds): the
+        # body round it is all that takes the surface.
+        vx, vy, vw, vh = self._mv_area()
+        vx = max(bx, min(vx, bx + bw))
+        vy = max(by, min(vy, by + bh))
+        vr = max(vx, min(vx + vw, bx + bw))
+        vb = max(vy, min(vy + vh, by + bh))
+        cv.rect(bx, by, bw, vy - by, col)
+        cv.rect(bx, vb, bw, by + bh - vb, col)
+        cv.rect(bx, vy, vx - bx, vb - vy, col)
+        cv.rect(vr, vy, bx + bw - vr, vb - vy, col)
         self.draw_view(cv)
         self._pane_status(cv, lay, me, tm, th)
 
