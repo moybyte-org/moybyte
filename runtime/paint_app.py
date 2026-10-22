@@ -470,6 +470,9 @@ class PaintAppLayer:
         self._epoch = 0
         self._gen = -1
         self._chg = [0, 0, 0, 0]
+        self._spec_l = [0] * 9
+        self._src = [0, 0, 0, 0]
+        self._hole = [0, 0, 0, 0, 0]
         self._own = [0, 0, 0, 0]
         self._clip_r = None
         self._pv = [0, 0, 0, 0]
@@ -702,27 +705,47 @@ class PaintAppLayer:
         return 1
 
     def _spec(self):
-        """(x, y, w, h, sx, sy, sw, sh, q): where the drawing's (sx, sy, sw,
-        sh) part stands on the glass at q quarters a pixel."""
+        """[x, y, w, h, sx, sy, sw, sh, q]: where the drawing's (sx, sy, sw,
+        sh) part stands on the glass at q quarters a pixel. One list, filled
+        afresh each call (a frame asks several times and keeps nothing)."""
         d = self.doc
         q = self._quarters()
-        vx, vy, vw, vh = self.layout.view
-        dw, dh = d.W * q // 4, d.H * q // 4
+        v = self.layout.view
+        vx = v[0]
+        vy = v[1]
+        vw = v[2]
+        vh = v[3]
+        o = self._spec_l
+        dw = d.W * q // 4
+        dh = d.H * q // 4
         if dw <= vw:
-            x, sx, sw, w = vx + (vw - dw) // 2, 0, d.W, dw
+            o[0] = vx + (vw - dw) // 2
+            o[4] = 0
+            o[6] = d.W
+            o[2] = dw
             self.pan[0] = 0
         else:
             sw = vw * 4 // q
             self.pan[0] = max(0, min(self.pan[0], d.W - sw))
-            x, sx, w = vx, self.pan[0], sw * q // 4
+            o[0] = vx
+            o[4] = self.pan[0]
+            o[6] = sw
+            o[2] = sw * q // 4
         if dh <= vh:
-            y, sy, sh, h = vy + (vh - dh) // 2, 0, d.H, dh
+            o[1] = vy + (vh - dh) // 2
+            o[5] = 0
+            o[7] = d.H
+            o[3] = dh
             self.pan[1] = 0
         else:
             sh = vh * 4 // q
             self.pan[1] = max(0, min(self.pan[1], d.H - sh))
-            y, sy, h = vy, self.pan[1], sh * q // 4
-        return (x, y, w, h, sx, sy, sw, sh, q)
+            o[1] = vy
+            o[5] = self.pan[1]
+            o[7] = sh
+            o[3] = sh * q // 4
+        o[8] = q
+        return o
 
     def _centre(self, p):
         q = self._quarters()
@@ -1314,16 +1337,27 @@ class PaintAppLayer:
         vx, vy, vw, vh = lay.view
         x, y, w, h, sx, sy, sw, sh, q = spec
         r = lay.radius
+        src = self._src
+        src[0] = sx
+        src[1] = sy
+        src[2] = sw
+        src[3] = sh
+        full = w == vw and h == vh
         if lay.desk:
             cv.rrect(vx, vy, vw, vh, 10, th["panel"])
-            cv.shadow(x, y, w, h, 2, 0, 60, 6, 0, 2, (x, y, w, h, 0))
-            cv.picture(d.image, x, y, w, h, 0, (sx, sy, sw, sh))
+            hole = self._hole
+            hole[0] = x
+            hole[1] = y
+            hole[2] = w
+            hole[3] = h
+            cv.shadow(x, y, w, h, 2, 0, 60, 6, 0, 2, hole)
+            cv.picture(d.image, x, y, w, h, 0, src)
             cv.rrect(x - 1, y - 1, w + 2, h + 2, 0, None, th["border"])
         else:
             if w < vw or h < vh:
                 cv.rrect(vx, vy, vw, vh, r, th["surface_alt"], th["border"])
-            cv.picture(d.image, x, y, w, h, r if (w, h) == (vw, vh) else 0, (sx, sy, sw, sh))
-            if (w, h) == (vw, vh):
+            cv.picture(d.image, x, y, w, h, r if full else 0, src)
+            if full:
                 cv.rrect(vx, vy, vw, vh, r, None, th["border"])
             self._thumbs(cv, th, x, y, w, h, sx, sy, sw, sh)
         self._preview(cv)
@@ -1353,7 +1387,7 @@ class PaintAppLayer:
         c[2] = c[3] = -(1 << 29)
         dirty = d.take_dirty()
         if dirty is not None:
-            cv.rebake(d.image, *dirty)
+            cv.rebake(d.image, dirty[0], dirty[1], dirty[2], dirty[3])
             x, y, w, h, sx, sy, sw, sh, q = spec
             dx, dy, dw, dh = dirty
             _grow(c, x + (dx - sx) * q // 4 - 1, y + (dy - sy) * q // 4 - 1,

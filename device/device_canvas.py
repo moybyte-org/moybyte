@@ -2347,24 +2347,20 @@ class DeviceCanvas:
         return self.cover(img._rgb_i, img.w, src[0], src[1], src[2], src[3], x, y, w, h, r)
 
     def rebake(self, img, x, y, w, h):
-        """Bake the (x, y, w, h) part of `img`'s indices into the RGB565 bake
-        `picture` keeps on it, a row a call: what a stroke changed, where a
-        whole re-bake would walk the picture. Nothing while it has no bake."""
+        """Bake the rows of the (x, y, w, h) part of `img`'s indices into the
+        RGB565 bake `picture` keeps on it, whole and in one call: what a
+        stroke changed, where a whole re-bake would walk the picture. Nothing
+        while it has no bake."""
         buf = getattr(img, "_rgb_i", None)
         if buf is None:
             return
-        x0 = max(0, int(x))
         y0 = max(0, int(y))
-        x1 = min(img.w, int(x) + int(w))
         y1 = min(img.h, int(y) + int(h))
-        if x1 <= x0 or y1 <= y0:
+        if int(w) <= 0 or y1 <= y0 or int(x) >= img.w or int(x) + int(w) <= 0:
             return
         iw = img.w
-        pix = memoryview(img.pix)
-        n = x1 - x0
-        for row in range(y0, y1):
-            o = row * iw + x0
-            self._gfx.blit_indices(buf, iw, img.h, x0, row, pix[o:o + n], n, 1, self._wire)
+        self._gfx.blit_indices(buf, iw, img.h, 0, y0,
+                               memoryview(img.pix)[y0 * iw:y1 * iw], iw, y1 - y0, self._wire)
 
     def tint565(self, dst, buf, sw, sx, sy, w, h, c, alpha):
         """Copy the (sx, sy, w, h) sub-rect of a picture of RGB565 words `sw`
