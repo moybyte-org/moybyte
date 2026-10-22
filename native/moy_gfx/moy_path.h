@@ -27,22 +27,16 @@ enum { MOY_PATH_SANS = 0, MOY_PATH_SANS_BOLD = 1, MOY_PATH_MONO = 2, MOY_PATH_FA
 #define MOY_PATH_SIZE_MAX (512 * 64)    // the largest em a face draws at, 26.6
 
 typedef struct {
-    uint16_t adv, pt, npt, end;
-    uint8_t nend;
+    uint16_t adv, at;                   // the advance, the program's offset in `data`
 } moy_path_glyph_t;
-
-typedef struct {
-    uint8_t a, b;
-    int16_t dx;
-} moy_path_kern_t;
 
 typedef struct {
     int16_t upm, ascent, descent;
     const moy_path_glyph_t *glyphs;     // 224 records, bytes 0x20..0xFF
-    const int16_t *pts;
-    const uint16_t *ends;
-    const moy_path_kern_t *kerns;
-    uint16_t nkern;
+    const uint8_t *data;                // the glyphs' outline programs
+    const uint16_t *kern_at;            // a left byte's first pair, 0x20..0x7F; NULL: none
+    const uint8_t *kern_b;              // each pair's right byte, sorted within its left
+    const int16_t *kern_dx;             // each pair's adjustment, font units
 } moy_path_face_t;
 
 // Fill the path: `npts` points (x, y pairs, 26.6) in contours ending at

@@ -325,13 +325,15 @@ static int next_byte(const uint8_t *s, size_t n, size_t *i) {
 }
 
 static int kern(const moy_path_face_t *f, int a, int b) {
-    int lo = 0, hi = (int)f->nkern - 1;
+    if (f->kern_at == NULL || a > 0x7E || b > 0x7E) {
+        return 0;
+    }
+    int lo = f->kern_at[a - 0x20], hi = (int)f->kern_at[a - 0x20 + 1] - 1;
     while (lo <= hi) {
         int mid = (lo + hi) / 2;
-        const moy_path_kern_t *k = &f->kerns[mid];
-        int cmp = k->a != a ? k->a - a : k->b - b;
+        int cmp = f->kern_b[mid] - b;
         if (cmp == 0) {
-            return k->dx;
+            return f->kern_dx[mid];
         }
         if (cmp < 0) {
             lo = mid + 1;
@@ -370,17 +372,57 @@ static int quad(int *n, int32_t lx, int32_t ly, int32_t mx, int32_t my, int32_t 
     return 1;
 }
 
+// One coordinate's delta in a glyph's program (make_outline_faces._program):
+// a byte's magnitude, signed by `same`, or nothing (a repeat), or an int16.
+static const uint8_t *delta(const uint8_t *d, uint8_t fl, uint8_t shrt, uint8_t same,
+                            int32_t *v) {
+    if (fl & shrt) {
+        *v += (fl & same) ? (int32_t)d[0] : -(int32_t)d[0];
+        return d + 1;
+    }
+    if (!(fl & same)) {
+        *v += (int16_t)(uint16_t)(d[0] | (d[1] << 8));
+        return d + 2;
+    }
+    return d;
+}
+
+// A glyph's points (x * 2 + the on-curve bit, y; font units) and its
+// contours' ends (one past each contour's last point), from its program.
+// The number of contours.
+static int glyph_load(const moy_path_face_t *f, int g, int16_t *pt, uint16_t *ends) {
+    const uint8_t *p = f->data + f->glyphs[g - 0x20].at;
+    int nend = *p++, npt = 0;
+    for (int c = 0; c < nend; c++) {
+        npt += *p++;
+        ends[c] = (uint16_t)npt;
+    }
+    const uint8_t *fl = p, *d = p + npt;
+    int32_t v = 0;
+    for (int i = 0; i < npt; i++) {
+        d = delta(d, fl[i], 0x02, 0x10, &v);
+        pt[2 * i] = (int16_t)(v * 2 + (fl[i] & 1));
+    }
+    v = 0;
+    for (int i = 0; i < npt; i++) {
+        d = delta(d, fl[i], 0x04, 0x20, &v);
+        pt[2 * i + 1] = (int16_t)v;
+    }
+    return nend;
+}
+
 // A glyph's contours as edges, its origin at (x, y) (26.6, y down). A
 // contour starts on its first on-curve point, else midway between its first
 // two off-curve ones; two off-curve points in a row imply the on-curve one
 // between them (TrueType's quadratic outlines).
 static int glyph_edges(const moy_path_face_t *f, int g, int size, int32_t x, int32_t y, int *n) {
-    const moy_path_glyph_t *gl = &f->glyphs[g - 0x20];
-    const int16_t *pt = f->pts;
+    int16_t pt[2 * PF_MOST_POINTS];
+    uint16_t ends[PF_MOST_CONTOURS];
+    int nend = glyph_load(f, g, pt, ends);
     int upm = f->upm;
-    int start = gl->pt;
-    for (int c = 0; c < gl->nend; c++) {
-        int end = f->ends[gl->end + c];
+    int start = 0;
+    for (int c = 0; c < nend; c++) {
+        int end = ends[c];
         int cnt = end - start;
         if (cnt < 2) {
             start = end;
