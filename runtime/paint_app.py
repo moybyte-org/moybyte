@@ -386,7 +386,7 @@ class _Damage:
 
 # The most physical buffers a canvas rotates through (the scroll's paint ring
 # says the same of its own): a stroke frame needs that many paints of the
-# same page behind it.
+# same page behind it, and the ring keeps one more, the frame in hand.
 _RING = 3
 
 
@@ -464,12 +464,13 @@ class PaintAppLayer:
         # canvas they went to; the page's signature and its epoch; and last
         # frame's shape outline and pointer sprite, which a frame repaints
         # where they stood.
-        self._ring = [[-1, -1, 0, 0, 0, 0] for _i in range(_RING)]
+        self._ring = [[-1, -1, 0, 0, 0, 0] for _i in range(_RING + 1)]
         self._ring_cv = None
         self._sig = [None] * 20
         self._epoch = 0
         self._gen = -1
         self._chg = [0, 0, 0, 0]
+        self._own = [0, 0, 0, 0]
         self._clip_r = None
         self._pv = [0, 0, 0, 0]
         self._sp = [0, 0, 0, 0]
@@ -1386,13 +1387,13 @@ class PaintAppLayer:
         f = _loop.drawn() if _loop is not None else -1
         ok = self._region(cv, f, epoch)
         if f >= 0:
-            e = self._ring[f % _RING]
+            e = self._ring[f % (_RING + 1)]
             e[0] = f
             e[1] = epoch
-            e[2] = c[0]
-            e[3] = c[1]
-            e[4] = c[2]
-            e[5] = c[3]
+            e[2] = self._own[0]
+            e[3] = self._own[1]
+            e[4] = self._own[2]
+            e[5] = self._own[3]
             self._ring_cv = cv
         if not ok:
             return False
@@ -1407,7 +1408,14 @@ class PaintAppLayer:
     def _region(self, cv, f, epoch):
         """Whether this frame may be a stroke frame; when it may, `_chg`
         becomes the part of the view it repaints: this frame's change and
-        those of the frames since the canvas's buffer was last painted."""
+        those of the frames since the canvas's buffer was last painted. The
+        frame's own change stays in `_own`, which the ring records."""
+        o = self._own
+        c = self._chg
+        o[0] = c[0]
+        o[1] = c[1]
+        o[2] = c[2]
+        o[3] = c[3]
         if (f < 0 or self.page is not None or self.pop is not None
                 or self.viewer is not None or self.toast is not None
                 or self._touch is None or cv is not self._ring_cv
@@ -1419,7 +1427,7 @@ class PaintAppLayer:
         ring = self._ring
         c = self._chg
         for i in range(1, n + 1):
-            e = ring[(f - i) % _RING]
+            e = ring[(f - i) % (_RING + 1)]
             if e[0] != f - i or e[1] != epoch:
                 return False
             if i < n:
