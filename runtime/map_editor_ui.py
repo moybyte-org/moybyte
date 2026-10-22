@@ -52,10 +52,16 @@ except ImportError:  # pragma: no cover - direct host import (chrome not yet ali
 
 try:
     from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
-                             pane as _in_pane)
+                             pane as _in_pane, metric_class as _metric_class, DESK as _DESK)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H, pane as _in_pane)
+                                     BASE_H as _BASE_H, pane as _in_pane,
+                                     metric_class as _metric_class, DESK as _DESK)
+
+# The handheld page (editor_map.py): the right column's width and the foot's
+# height, beside and under the view.
+HAND_COL = 104
+HAND_FOOT = 27
 
 # Map (tilemap) editor (#32): a panned view of the map on the left where each cell
 # is the scaled sprite tile placed there, and a paged tile palette on the right to
@@ -277,8 +283,34 @@ class MapLayout(LayoutBase):
         self.tool_btn = (self.dim_btn[0] - gap - tbw, tb_y, tbw, tbh)
         self.pan_thresh = _MAP_PAN_THRESH * fs
         self.pane = _in_pane()
+        self.verbs = not self.pane and _metric_class() != _DESK
         if self.pane:
             self._pane_geometry()
+        elif self.verbs:
+            self._hand_geometry()
+
+    def _hand_geometry(self):
+        """The handheld's tab on the verbs (EDITOR_LAYOUT.md's Map): the
+        view from the content rect's top left to the right column and the
+        foot, which `editor_map.MapPage` draws; the panel's buttons stand
+        off the surface."""
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        self.body_fill = self.panel = (cx, cy, cw, ch)
+        self.mv_x0, self.mv_y0 = cx, cy
+        self.mv_avail_w = cw - HAND_COL
+        self.mv_avail_h = ch - HAND_FOOT - 1
+        off = (-4096, -4096, 0, 0)
+        for name in ("pan_up", "pan_lf", "pan_rt", "pan_dn", "zoom_btn", "size_btn",
+                     "tp_prev", "tp_next", "sky_btn", "erase_btn", "close_btn",
+                     "dim_btn", "tool_btn"):
+            setattr(self, name, off)
+        self.tp_x0 = cx + cw - HAND_COL + 6
+        self.tp_y0 = cy + 6
+        self.tp_cell = 22
+        self.tp_cols = self.tp_rows = 4
+        self.tp_page = 16
+        self.tp_area = (self.tp_x0, self.tp_y0, 4 * 22, 4 * 22)
+        self.title_xy = (-4096, -4096)
 
     def _pane_geometry(self):
         """A desk Editor's Map pane (EDITOR_LAYOUT.md's Art): the view fills
@@ -338,6 +370,63 @@ class MapEditorUI:
 
     _pan_acc = [0, 0]
     _hover_cell = None
+    _page = None
+    _hold = 0                          # frames a still press has been held
+
+    def page(self):
+        """The handheld's Map page on the verbs, built at its first use."""
+        if self._page is None:
+            try:
+                from editor_map import MapPage
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime.editor_map import MapPage
+            self._page = MapPage(self, _ui_draw.AppHost("editor_map"))
+        return self._page
+
+    def pointer(self, px, py, click, down):
+        """A pointer sample on the handheld's page (the layer's, after the
+        bar's): a press in the view is the map's gesture, held still it picks
+        the cell's tile; the rest are the verbs'."""
+        page = self.page()
+        if page.pop is None:
+            if click and _in(px, py, self._mv_area()):
+                self._hold = 0
+                self._map_click(px, py)
+                return True
+            if self._map_press is not None:
+                if down:
+                    self._map_pan_drag(px, py)
+                    return self._held_pick(px, py)
+                self._map_release(px, py)
+                return True
+            if click and page.palette_tap(px, py):
+                return True
+        return page.point(px, py, click, down)
+
+    # A press held still this many frames picks the tile under it.
+    HOLD_FRAMES = 15
+
+    def _held_pick(self, px, py):
+        """A press held still in the view: its cell's tile becomes the
+        brush and the press's stamp is taken back. Whether it picked."""
+        me = self.mapedit
+        if (me is None or self._map_panning or self.map_tool != "stamp"
+                or self._hold < 0):
+            return False
+        self._hold += 1
+        if self._hold < self.HOLD_FRAMES:
+            return False
+        self._hold = -1
+        cell = self._map_cell_at(*self._map_press)
+        tm = self.ws.project.tilemap
+        if cell is None or tm is None:
+            return False
+        self._map_revert_paint()
+        me.abort_edit()
+        me.n = tm.mget(cell[0], cell[1])
+        self.map_erase = False
+        self._map_press = None
+        return True
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
@@ -395,6 +484,17 @@ class MapEditorUI:
         ws = self.ws
         i = ws.input
         me = self.mapedit
+        page = self._page if self.layout.verbs else None
+        if page is not None:
+            if page.pop is not None:
+                if page.keys(i):
+                    ws._dirty = True
+                if i.pressed("b"):
+                    page.pop = None
+                    ws._dirty = True
+                return
+            if page.owed():
+                ws._dirty = True
         if me is not None:
             if i.pressed("up"):
                 self._map_pan(0, -1)
@@ -973,6 +1073,9 @@ class MapEditorUI:
         lay = self.layout
         me = self.mapedit
         sheet = ws.project.sheet
+        if lay.verbs:
+            self.page().draw(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), False)
+            return
         # Cover the FULL content area below the bar first (Fix 3): the panel doesn't
         # span edge to edge, so without this fill stale pixels would bleed through
         # the side/bottom strips. Match the cards tab (fills the whole area) so the
@@ -1001,6 +1104,91 @@ class MapEditorUI:
                  th["ink"], 1)
         if me is None or sheet is None or ws.project.tilemap is None:
             return
+        tm = ws.project.tilemap
+        self.draw_view(cv)
+        if lay.pane:
+            self._pane_status(cv, lay, me, tm, th)
+            return
+        # Tile palette (right): a page of sheet tiles; the brush tile is boxed white.
+        # The tile art stays its native size (a bigger palette shows MORE tiles per
+        # page via extra rows, and the fs-scaled cell just gives it more air).
+        ids = self._map_palette_ids()
+        tscale = max(1, lay.tp_cell // (sheet.TILE + 6))
+        # SIZE-brush footprint (#57): the OTHER tiles of the brush's stamp block
+        # get a lighter outline in the palette, so a 2x2/3x3 pick visibly shows
+        # which consecutive tiles will land on the map with it.
+        block = set()
+        if me.n >= 0 and me.size > 1:
+            tw, th = me.stamp_span()
+            for dy in range(th):
+                for dx in range(tw):
+                    block.add(me.n + dy * sheet.cols + dx)
+        for k in range(len(ids)):
+            tid = ids[k]
+            x = lay.tp_x0 + (k % lay.tp_cols) * lay.tp_cell
+            y = lay.tp_y0 + (k // lay.tp_cols) * lay.tp_cell
+            cv.rect(x, y, lay.tp_cell, lay.tp_cell, NAMES["black"])
+            img = sheet.tile_image(tid, -1)
+            if img is not None:
+                cv.spr(img, x + (lay.tp_cell - sheet.TILE * tscale) // 2,
+                       y + (lay.tp_cell - sheet.TILE * tscale) // 2, tscale)
+            cv.rectb(x, y, lay.tp_cell, lay.tp_cell,
+                     NAMES["white"] if tid == me.n else
+                     (NAMES["light_grey"] if tid in block else NAMES["dark_grey"]))
+        ws._btn("<", lay.tp_prev, NAMES["blue"], cv)
+        ws._btn(">", lay.tp_next, NAMES["blue"], cv)
+        # SELECT-mode region actions (#91): the COPY/CUT/PASTE strip is drawn OVER the
+        # palette column (idle while selecting), so it sits after the palette tiles.
+        if self.map_tool == "select":
+            self._draw_sel_actions(cv, NAMES)
+        # SIZE brush (#57): cycles the stamp size (top-left d-pad corner slot);
+        # labeled like the zoom button ("S2" ~ "Z2").
+        ws._btn("S" + str(me.size), lay.size_btn, NAMES["dark_purple"], cv)
+        # ZOOM control (#37 follow-up): cycles the zoom rung (in the d-pad center);
+        # the title's "z<rung>" badge shows which one is active.
+        zlab = self._mv_zoom_label()
+        ws._btn(zlab if zlab == _MV_OV_LABEL else "Z" + zlab,
+                lay.zoom_btn, NAMES["dark_purple"], cv)
+        # Pan d-pad under the map view.
+        ws._btn("^", lay.pan_up, NAMES["indigo"], cv)
+        ws._btn("v", lay.pan_dn, NAMES["indigo"], cv)
+        ws._btn("<", lay.pan_lf, NAMES["indigo"], cv)
+        ws._btn(">", lay.pan_rt, NAMES["indigo"], cv)
+        # ERASE toggle (highlighted when active) + CLOSE.
+        ws._btn("ER", lay.erase_btn, NAMES["red"] if self.map_erase else NAMES["dark_grey"], cv)
+        ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)
+        # EMPTY/"sky" swatch (#37): a selectable brush that paints "nothing". Drawn
+        # as a checkerboard (the universal transparent cue) + "SKY" label, boxed
+        # white when it's the active brush so it reads like any other palette pick.
+        sx, sy, sw, sh = lay.sky_btn
+        fs = lay.fs
+        cb = sh // 2
+        cv.rect(sx, sy, sw, sh, NAMES["dark_blue"])
+        cv.rect(sx, sy, cb, cb, NAMES["light_grey"])
+        cv.rect(sx + cb, sy + cb, cb, cb, NAMES["light_grey"])
+        cv.print("SKY", sx + sw - 26 * fs, sy + (sh - _ui_draw.font("ui")[2] * fs) // 2,
+                 NAMES["white"], 1)
+        cv.rectb(sx, sy, sw, sh,
+                 NAMES["white"] if me.n < 0 else NAMES["dark_grey"])
+        # Editor toolbar (#91/#111): TOOL (the active tool's pen/box/bucket glyph) +
+        # the resize glyph (open the resize panel). UNDO/REDO moved to the ONE bar
+        # pair. Icons instead of the terse two-char labels (#91 icon pass).
+        self._gbtn(_MAP_TOOL_GLYPH.get(self.map_tool),
+                   _MAP_TOOL_LABEL.get(self.map_tool, "PN"), lay.tool_btn,
+                   NAMES["orange"], cv)
+        self._gbtn("resize", "WH", lay.dim_btn, NAMES["dark_green"], cv)
+        # Map-resize overlay (#91): drawn LAST so it sits over the whole editor.
+        if self.dims_open:
+            self._draw_dims(cv, NAMES)
+
+    def draw_view(self, cv):
+        """The map field: the window of the map at the zoom, its lattice, and
+        the RECT and SELECT overlays (the handheld page's view as well)."""
+        ws = self.ws
+        NAMES = self._NAMES
+        me = self.mapedit
+        sheet = ws.project.sheet
+        x0, y0, cell, cols, rows = self._mv_metrics()
         tm = ws.project.tilemap
         # Visible map region: each cell is the sprite tile placed there, UPSCALED to
         # fill the cell (scale = cell // TILE, crisp pixel-art) and centered, with grid
@@ -1113,80 +1301,6 @@ class MapEditorUI:
                                    self._map_sel[0], self._map_sel[1],
                                    self._map_sel[2], self._map_sel[3],
                                    NAMES["yellow"], True)
-        if lay.pane:
-            self._pane_status(cv, lay, me, tm, th)
-            return
-        # Tile palette (right): a page of sheet tiles; the brush tile is boxed white.
-        # The tile art stays its native size (a bigger palette shows MORE tiles per
-        # page via extra rows, and the fs-scaled cell just gives it more air).
-        ids = self._map_palette_ids()
-        tscale = max(1, lay.tp_cell // (sheet.TILE + 6))
-        # SIZE-brush footprint (#57): the OTHER tiles of the brush's stamp block
-        # get a lighter outline in the palette, so a 2x2/3x3 pick visibly shows
-        # which consecutive tiles will land on the map with it.
-        block = set()
-        if me.n >= 0 and me.size > 1:
-            tw, th = me.stamp_span()
-            for dy in range(th):
-                for dx in range(tw):
-                    block.add(me.n + dy * sheet.cols + dx)
-        for k in range(len(ids)):
-            tid = ids[k]
-            x = lay.tp_x0 + (k % lay.tp_cols) * lay.tp_cell
-            y = lay.tp_y0 + (k // lay.tp_cols) * lay.tp_cell
-            cv.rect(x, y, lay.tp_cell, lay.tp_cell, NAMES["black"])
-            img = sheet.tile_image(tid, -1)
-            if img is not None:
-                cv.spr(img, x + (lay.tp_cell - sheet.TILE * tscale) // 2,
-                       y + (lay.tp_cell - sheet.TILE * tscale) // 2, tscale)
-            cv.rectb(x, y, lay.tp_cell, lay.tp_cell,
-                     NAMES["white"] if tid == me.n else
-                     (NAMES["light_grey"] if tid in block else NAMES["dark_grey"]))
-        ws._btn("<", lay.tp_prev, NAMES["blue"], cv)
-        ws._btn(">", lay.tp_next, NAMES["blue"], cv)
-        # SELECT-mode region actions (#91): the COPY/CUT/PASTE strip is drawn OVER the
-        # palette column (idle while selecting), so it sits after the palette tiles.
-        if self.map_tool == "select":
-            self._draw_sel_actions(cv, NAMES)
-        # SIZE brush (#57): cycles the stamp size (top-left d-pad corner slot);
-        # labeled like the zoom button ("S2" ~ "Z2").
-        ws._btn("S" + str(me.size), lay.size_btn, NAMES["dark_purple"], cv)
-        # ZOOM control (#37 follow-up): cycles the zoom rung (in the d-pad center);
-        # the title's "z<rung>" badge shows which one is active.
-        zlab = self._mv_zoom_label()
-        ws._btn(zlab if zlab == _MV_OV_LABEL else "Z" + zlab,
-                lay.zoom_btn, NAMES["dark_purple"], cv)
-        # Pan d-pad under the map view.
-        ws._btn("^", lay.pan_up, NAMES["indigo"], cv)
-        ws._btn("v", lay.pan_dn, NAMES["indigo"], cv)
-        ws._btn("<", lay.pan_lf, NAMES["indigo"], cv)
-        ws._btn(">", lay.pan_rt, NAMES["indigo"], cv)
-        # ERASE toggle (highlighted when active) + CLOSE.
-        ws._btn("ER", lay.erase_btn, NAMES["red"] if self.map_erase else NAMES["dark_grey"], cv)
-        ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)
-        # EMPTY/"sky" swatch (#37): a selectable brush that paints "nothing". Drawn
-        # as a checkerboard (the universal transparent cue) + "SKY" label, boxed
-        # white when it's the active brush so it reads like any other palette pick.
-        sx, sy, sw, sh = lay.sky_btn
-        fs = lay.fs
-        cb = sh // 2
-        cv.rect(sx, sy, sw, sh, NAMES["dark_blue"])
-        cv.rect(sx, sy, cb, cb, NAMES["light_grey"])
-        cv.rect(sx + cb, sy + cb, cb, cb, NAMES["light_grey"])
-        cv.print("SKY", sx + sw - 26 * fs, sy + (sh - _ui_draw.font("ui")[2] * fs) // 2,
-                 NAMES["white"], 1)
-        cv.rectb(sx, sy, sw, sh,
-                 NAMES["white"] if me.n < 0 else NAMES["dark_grey"])
-        # Editor toolbar (#91/#111): TOOL (the active tool's pen/box/bucket glyph) +
-        # the resize glyph (open the resize panel). UNDO/REDO moved to the ONE bar
-        # pair. Icons instead of the terse two-char labels (#91 icon pass).
-        self._gbtn(_MAP_TOOL_GLYPH.get(self.map_tool),
-                   _MAP_TOOL_LABEL.get(self.map_tool, "PN"), lay.tool_btn,
-                   NAMES["orange"], cv)
-        self._gbtn("resize", "WH", lay.dim_btn, NAMES["dark_green"], cv)
-        # Map-resize overlay (#91): drawn LAST so it sits over the whole editor.
-        if self.dims_open:
-            self._draw_dims(cv, NAMES)
 
     def _pane_status(self, cv, lay, me, tm, th):
         """The Map pane's status line: the cell the pointer is over, the

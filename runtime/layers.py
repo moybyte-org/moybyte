@@ -212,7 +212,10 @@ class _MapLayer(Layer):
         # native size, so it hit-tests the raw pointer -- no _game_xy translation.
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
-        if click:
+        if ws.map_ui.layout.verbs:
+            if ws.map_ui.pointer(px, py, click, ws.pointer.down):
+                ws._dirty = True
+        elif click:
             ws.map_ui._map_click(px, py)
         elif ws.pointer.down:
             ws.map_ui._map_pan_drag(px, py)

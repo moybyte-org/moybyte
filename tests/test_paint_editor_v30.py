@@ -418,7 +418,6 @@ def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
     # the brush to EMPTY (-1), and tapping a filled cell with it clears the cell so
     # mget() returns 0/-1 (the transparent value map() skips). This is how a kid
     # paints sky/background or undoes a placement by overpainting.
-    from runtime import console as C
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
@@ -434,11 +433,12 @@ def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
     drv.frame(1 / 30)
     assert ws.tilemap.mget(0, 0) == 4
 
-    # Tap the SKY swatch to pick the empty brush, then tap the filled cell.
-    sx = C._TP_SKY[0] + C._TP_SKY[2] // 2
-    sy = C._TP_SKY[1] + C._TP_SKY[3] // 2
+    # Hold an empty cell to pick the empty brush, then tap the filled cell.
+    ws.tilemap.mset(1, 1, -1)
+    sx, sy = _map_cell_center(ws, 1, 1)
     drv.touch(sx, sy)
-    drv.frame(1 / 30)
+    for _ in range(ws.map_ui.HOLD_FRAMES + 2):
+        drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
     assert ws.map_ui.mapedit.n < 0                         # the brush is now EMPTY
@@ -470,6 +470,13 @@ def _tap(drv, x, y):
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
+
+
+def _stop(ws, drv, stop):
+    """The centre of the handheld Map page's stop `stop`, drawn afresh."""
+    ws._dirty = True
+    drv.frame(1 / 30)
+    return _btn_center(ws.map_ui.page().host.box(stop))
 
 
 def _blank_map(ws):
@@ -524,7 +531,7 @@ def test_map_rect_tool_fills_dragged_rectangle_as_one_step(tmp_path):
     _blank_map(ws)
     me = ws.map_ui.mapedit
     me.n = 5
-    _tap(drv, *_btn_center(ws.map_ui.layout.tool_btn))   # stamp -> rect
+    _tap(drv, *_stop(ws, drv, "Tool Box"))
     assert ws.map_ui.map_tool == "rect"
 
     x0, y0 = _map_cell_center(ws, 1, 1)
@@ -554,8 +561,7 @@ def test_map_flood_tool_taps_one_committed_step(tmp_path):
     _blank_map(ws)
     me = ws.map_ui.mapedit
     me.n = 7
-    _tap(drv, *_btn_center(ws.map_ui.layout.tool_btn))   # stamp -> rect
-    _tap(drv, *_btn_center(ws.map_ui.layout.tool_btn))   # rect  -> flood
+    _tap(drv, *_stop(ws, drv, "Tool Fill"))
     assert ws.map_ui.map_tool == "flood"
 
     cell = (me.cam_x + 2, me.cam_y + 2)
@@ -565,30 +571,29 @@ def test_map_flood_tool_taps_one_committed_step(tmp_path):
 
 
 def test_map_resize_panel_grows_and_shrinks(tmp_path):
-    # #91: the DIM button opens the resize panel; the +/- steppers grow/shrink the
-    # map on the right/bottom edge, content preserved, and DONE closes it.
+    # #91: Resize opens its popover; Wider, Taller and Narrower grow and shrink
+    # the map on the right/bottom edge, content preserved, and B closes it.
     ws, drv = _open_map(tmp_path)
     tm = ws.tilemap
     tm.mset(0, 0, 3)                               # a top-left marker to preserve
     w0, h0 = tm.w, tm.h
 
-    _tap(drv, *_btn_center(ws.map_ui.layout.dim_btn))
-    assert ws.map_ui.dims_open
+    page = ws.map_ui.page()
+    _tap(drv, *_stop(ws, drv, "Resize"))
+    assert page.pop == "resize"
 
-    r = ws.map_ui._dims_rects()
-    _tap(drv, *_btn_center(r["w_up"]))             # +1 column
-    _tap(drv, *_btn_center(r["h_up"]))             # +1 row
+    _tap(drv, *_stop(ws, drv, "Wider"))            # +1 column
+    _tap(drv, *_stop(ws, drv, "Taller"))           # +1 row
     assert ws.tilemap.w == w0 + 1 and ws.tilemap.h == h0 + 1
     assert ws.tilemap.mget(0, 0) == 3             # content preserved through resize
 
-    r = ws.map_ui._dims_rects()
-    _tap(drv, *_btn_center(r["w_dn"]))             # -1 column
+    _tap(drv, *_stop(ws, drv, "Narrower"))         # -1 column
     assert ws.tilemap.w == w0
     assert ws.tilemap.mget(0, 0) == 3
 
-    r = ws.map_ui._dims_rects()
-    _tap(drv, *_btn_center(r["done"]))
-    assert not ws.map_ui.dims_open
+    drv.press("b")
+    drv.frame(1 / 30)
+    assert page.pop is None
 
     # The resized map serializes at the new dims and round-trips through map.moymap
     # (SAVE writes exactly this blob), so a cart reloads the grown grid + content.

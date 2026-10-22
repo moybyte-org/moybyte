@@ -120,3 +120,92 @@ def test_a_settled_music_tab_paints_nothing(hh):
     assert _settles(ws, drv)
     _tap(drv, page.host.box("Pad pitch+"))
     assert _settles(ws, drv)
+
+
+# -- Map --------------------------------------------------------------------------------
+
+def _map(hh):
+    ws, drv = _open(hh, "map")
+    mu = ws.map_ui
+    assert mu.layout.verbs and mu.mapedit is not None
+    return ws, drv, mu, mu.page()
+
+
+def _view_cell(mu, cx, cy):
+    x0, y0, cell, _c, _r = mu._mv_metrics()
+    me = mu.mapedit
+    return (x0 + (cx - me.cam_x) * cell + cell // 2, y0 + (cy - me.cam_y) * cell + cell // 2)
+
+
+def test_a_tap_in_the_view_paints_and_a_brush_tap_picks(hh):
+    ws, drv, mu, page = _map(hh)
+    lay = mu.layout
+    tm = ws.project.tilemap
+    drv.click(lay.tp_x0 + 22 + 5, lay.tp_y0 + 5)     # the second brush
+    drv.frame(DT)
+    assert mu.mapedit.n == mu._map_palette_ids()[1]
+    x, y = _view_cell(mu, 2, 3)
+    drv.click(x, y)
+    for _ in range(2):
+        drv.frame(DT)
+    assert tm.mget(2, 3) == mu.mapedit.n
+    assert mu._hover_cell == (2, 3)
+
+
+def test_a_still_hold_in_the_view_picks_the_cells_tile(hh):
+    ws, drv, mu, page = _map(hh)
+    tm = ws.project.tilemap
+    tm.mset(4, 4, 7)
+    mu.mapedit.n = 2
+    x, y = _view_cell(mu, 4, 4)
+    drv.touch(x, y)
+    for _ in range(mu.HOLD_FRAMES + 2):
+        drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    assert mu.mapedit.n == 7
+    assert tm.mget(4, 4) == 7, "the hold took its stamp back"
+
+
+def test_the_foot_picks_the_tools_the_size_and_the_zoom(hh):
+    ws, drv, mu, page = _map(hh)
+    _tap(drv, page.host.box("Tool Box"))
+    assert mu.map_tool == "rect"
+    _tap(drv, page.host.box("Tool Erase"))
+    assert (mu.map_tool, mu.map_erase) == ("stamp", True)
+    _tap(drv, page.host.box("Tool Pen"))
+    assert (mu.map_tool, mu.map_erase) == ("stamp", False)
+    size = mu.mapedit.size
+    _tap(drv, page.host.box("Brush size"))
+    assert mu.mapedit.size != size
+    _tap(drv, page.host.box("Zoom"))
+    assert mu.map_zoom == 1
+    assert page.zoom_word().startswith("2")
+    _tap(drv, page.host.box("Tool Select"))
+    assert page.host.box("Copy") is None, "no selection: Copy is off"
+    mu.mapedit.set_selection(0, 0, 1, 1)
+    ws._dirty = True
+    drv.frame(DT)
+    _tap(drv, page.host.box("Copy"))
+    assert mu.mapedit.has_clip
+
+
+def test_resize_grows_the_map_from_its_popover(hh):
+    ws, drv, mu, page = _map(hh)
+    tm = ws.project.tilemap
+    w = tm.w
+    _tap(drv, page.host.box("Resize"))
+    assert page.pop == "resize"
+    _tap(drv, page.host.box("Wider"))
+    assert tm.w == w + 1
+    drv.press("b")
+    drv.frame(DT)
+    assert page.pop is None
+
+
+def test_a_settled_map_tab_paints_nothing(hh):
+    ws, drv, mu, page = _map(hh)
+    assert _settles(ws, drv)
+    _tap(drv, page.host.box("Tool Box"))
+    assert _settles(ws, drv)
+

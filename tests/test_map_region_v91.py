@@ -206,8 +206,9 @@ def test_ui_copy_button_then_tap_pastes(tmp_path):
     ws.map_ui.map_tool = "select"
     me.set_selection(0, 0, 1, 0)
     # COPY via the SELECT-mode action strip (over the palette column).
-    r = ws.map_ui._sel_actions_rects()
-    cbx, cby, cbw, cbh = r["copy"]
+    ws._dirty = True
+    drv.frame(1 / 30)
+    cbx, cby, cbw, cbh = ws.map_ui.page().host.box("Copy")
     drv.touch(cbx + cbw // 2, cby + cbh // 2)
     drv.frame(1 / 30)
     drv.touch_up()
