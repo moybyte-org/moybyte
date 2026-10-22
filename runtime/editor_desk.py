@@ -31,6 +31,7 @@ grown one does, and the keys move it to the next. On a handheld the
 Editor is one tab at a time under its one bar (`EditorApp`)."""
 
 try:
+    import moybuf
     import ui
     import editor_panes as P
     import editor_parts as Parts
@@ -39,6 +40,7 @@ try:
     from layers import Layer
     from ticks import _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moybuf
     from runtime import ui
     from runtime import editor_panes as P
     from runtime import editor_parts as Parts
@@ -873,10 +875,17 @@ class EditorDesk(Layer):
         fb = getattr(gc, "flush_batch", None)
         if fb is not None:
             fb()
-        cv.blit565_resize(gc._buf, gc.w, gc.h, gx, gy, gw, gh)
         live = ws.editor_app.playing() and not self.paused
-        if not live:
-            cv.shadow(gx, gy, gw, gh, 0, th["panel"], 140, 0)
+        if live:
+            cv.blit565_resize(gc._buf, gc.w, gc.h, gx, gy, gw, gh)
+        else:
+            # The still dimmed at the game's own size, then scaled: the same
+            # pixels as the panel's colour over the scaled frame, at a
+            # scale's square fewer blends.
+            dim = moybuf.alloc(2 * gc.w * gc.h)
+            cv.tint565(dim, gc._buf, gc.w, 0, 0, gc.w, gc.h, th["panel"], 140)
+            cv.blit565_resize(dim, gc.w, gc.h, gx, gy, gw, gh)
+            moybuf.free(dim)
         cv.clip()
         self._still = None if live else (gx, gy, gw, gh)
         self._still_at = (gx, gy, gw, gh)
