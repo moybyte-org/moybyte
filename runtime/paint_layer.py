@@ -294,7 +294,8 @@ class PaintLayout(LayoutBase):
         the hints at the foot. The sprite map and the load and save buttons
         are the Sheet's and the more menu's here."""
         cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
-        pad, gap, cell = 14, 8, 36
+        tall = ch >= 470                # 1024 x 600; a short pane (800 x 480) packs
+        pad, gap, cell = 14, 8, (36 if tall else 24)
         self.body_fill = self.panel = (cx, cy, cw, ch)
         hint_h = max(34 // _render_scale(), 18 * self.fs) if self.keys else 0
         self.hints = (cx, cy + ch - hint_h, cw, hint_h) if hint_h else None
@@ -304,7 +305,7 @@ class PaintLayout(LayoutBase):
         self.tool_btns = _tool_row(cx + pad, top, cell + 4, cell, n)
         self.more_btn = self.tool_btns[-1]
         gx, gy = cx + pad, top + cell + 10
-        below = cell + 10 + cell + 8 + 34 + 8
+        below = cell + 10 + cell + 8 + (34 + 8 if tall else 0)
         wroom = (cw - 2 * pad - gap) * 4 // 5
         hroom = cy + ch - hint_h - gy - below
         span = max(48, 48 * (min(wroom, hroom) // 48))
@@ -326,9 +327,11 @@ class PaintLayout(LayoutBase):
         self.size_xy = (sx, y + (cell - line) // 2)
         self.size_btn = (sx - 4, y, 56, cell)
         y += cell + 8
-        self.flag_cells = tuple((gx + k * cell, y, cell, cell) for k in range(8))
+        fw = _ui_draw.print_width("Flags", self.fs) + 12
+        fp = max(16, min(cell, (cw - 2 * pad - fw) // 8))
+        self.flag_cells = tuple((gx + k * fp, y, fp, cell) for k in range(8))
         y += cell + 8
-        self.preview = (gx, y, span + gap + 2 * sw, 34)
+        self.preview = (gx, y, span + gap + 2 * sw, 34) if tall else None
         off = (-4096, -4096, 0, 0)
         self.get_btn = self.put_btn = self.files_btn = self.close_btn = off
         self.btn_words = False
@@ -1270,7 +1273,7 @@ class PaintLayer:
         flags = self.ws.project.flags
         v = flags[pe.n] if flags is not None and pe.n < len(flags) else 0
         for k, (x, y, w, h) in enumerate(lay.flag_cells):
-            d = min(w, h) - 14
+            d = max(8, min(w, h) - (14 if h >= 36 else 8))
             ox, oy = x + (w - d) // 2, y + (h - d) // 2
             if v >> k & 1:
                 cv.rrect(ox, oy, d, d, d // 2, self._FLAG_INKS[k])
