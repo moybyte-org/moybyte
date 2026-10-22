@@ -2041,9 +2041,18 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _seed_gesture_hist(self):
         """Prime the damage history at gesture START: every physical buffer
         holds the window's pre-gesture stamp, so the first N restores must
-        cover it."""
+        cover it. Where the desk's last change has not reached every buffer
+        yet (its streak short of N: a window opened, closed, restored), the
+        first N restore the whole glass instead."""
         ext = self._gesture_extent()
-        self._gesture_hist = [ext] * self._retained_n() if ext is not None else []
+        n = self._retained_n()
+        if ext is None:
+            self._gesture_hist = []
+        elif self._desk_streak < n:
+            full = self._root_canvas
+            self._gesture_hist = [(0, 0, full.w, full.h)] * n
+        else:
+            self._gesture_hist = [ext] * n
 
     def _blit_backdrop_cache(self):
         """Stamp the cached backdrop into the current (ping-pong) back buffer --
@@ -3127,8 +3136,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._drag_armed = None
                 if win.saved is not None:          # a full-screen row: restore
                     wx, wy = self._restore_under(win, ox, oy)
+                    # The desk the full screen covered: rendered live and
+                    # captured once (nothing drew it meanwhile), and the
+                    # whole glass restored from it (_seed_gesture_hist).
+                    self._backdrop_valid = False
+                    self._desk_streak = 0
                 self._drag = (kind, ox - wx, oy - wy)
-                self._seed_gesture_hist()   # #58: pre-move footprint, both buffers
+                self._seed_gesture_hist()   # #58: pre-move footprint, every buffer
                 self._move_window(win, px - (ox - wx), py - (oy - wy))
                 return True
         if self._grab == 1:

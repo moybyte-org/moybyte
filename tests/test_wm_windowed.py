@@ -3826,3 +3826,100 @@ def test_after_a_restore_or_a_resize_the_glass_is_a_full_repaint(tmp_path, how):
     ring = _Ring(ws, 1)
     seen = bytes(ws.sys_canvas._buf)
     assert seen == ring.full(drv)[0]
+
+
+def test_a_restoring_drag_clears_what_the_full_screen_window_covered(tmp_path):
+    """Mid-drag, each frame shows the desk wherever the restored window is
+    not, in every buffer it lands in: the full-screen window's pixels go
+    (glass, P4 2026-10-23: they stayed behind the window as it was
+    dragged)."""
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    ring = _Ring(ws, 3)
+    wm._toggle_max(win)
+    ring.settle(drv, 4)
+    drv.touch(40, wm._row_h() // 2)
+    ring.frame(drv)
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    _dx, dy, _dw, _dh = wm._desk_rect()
+    for k in range(1, 8):
+        drv.touch_drag(40 + 40 * k, wm._row_h() // 2 + 25 * k)
+        assert ring.frame(drv) is not None
+        assert wm._drag is not None and win.saved is None
+        b = ring.bufs[(ring.k - 1) % ring.n]
+        cache = bytes(wm._backdrop._buf)
+        x0, y0, w, h = wm._pad_extent(win, win.x, win.y, win.w, win.h)
+        for y in range(dy, H, 7):
+            for x in range(0, W, 7):
+                if x0 <= x < x0 + w and y0 <= y < y0 + h:
+                    continue
+                o = 2 * (y * W + x)
+                assert b[o:o + 2] == cache[o:o + 2], (k, x, y)
+
+
+def test_a_drag_right_after_a_close_leaves_no_ghost(tmp_path):
+    """A window closed, then a drag begun before the close reached every
+    buffer: each drag frame shows the desk wherever the dragged window is
+    not, the closed window in none of them."""
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    ring = _Ring(ws, 3)
+    ws.open_app(ws._apps_by_id["calc"])
+    _quiesce(ws)
+    ring.settle(drv, 6)
+    wm.close_window_kind("calc")
+    ring.frame(drv)
+    x, y = win.x + win.w // 2, win.y + win.title_h // 2
+    drv.touch(x, y)
+    ring.frame(drv)
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    _dx, dy, _dw, _dh = wm._desk_rect()
+    for k in range(1, 7):
+        drv.touch_drag(x + 30 * k, y + 20 * k)
+        assert ring.frame(drv) is not None
+        b = ring.bufs[(ring.k - 1) % ring.n]
+        cache = bytes(wm._backdrop._buf)
+        x0, y0, w, h = wm._pad_extent(win, win.x, win.y, win.w, win.h)
+        for yy in range(dy, H, 7):
+            for xx in range(0, W, 7):
+                if x0 <= xx < x0 + w and y0 <= yy < y0 + h:
+                    continue
+                o = 2 * (yy * W + xx)
+                assert b[o:o + 2] == cache[o:o + 2], (k, xx, yy)
+
+
+def test_a_resizing_window_casts_its_shadow_where_it_stands(tmp_path):
+    """Mid-resize, the glass outside the rubber window is what it is once
+    the window settles there: no shadow or fringe stays at the rect it
+    started from (glass, P4 2026-10-23: its old bottom corners' fringes
+    did)."""
+    from runtime import ui_draw
+    ws, drv, _win = _settled(tmp_path)
+    ws.look.set_theme("blocks", persist=False, variant="light")
+    drv.frame(1 / 30)
+    _quiesce(ws)
+    assert ui_draw.depth()[13], "a theme with a depth draws the shadows"
+    wm = ws.wm
+    win = wm._wins["settings"]
+    ring = _Ring(ws, 3)
+    ring.settle(drv, 6)
+    x, y = _zone_point(ws, win, RZ_L | RZ_B)
+    drv.touch(x, y)
+    ring.frame(drv)
+    for k in range(1, 6):
+        drv.touch_drag(x + 15 * k, y - 15 * k)
+        assert ring.frame(drv) is not None
+    seen = ring.bufs[(ring.k - 1) % ring.n]
+    rx, ry, rw, rh = wm._shown_rect(win)
+    drv.touch_up()
+    ring.frame(drv)
+    _quiesce(ws)
+    assert (win.x, win.y, win.w, win.h) == (rx, ry, rw, rh)
+    full = ring.full(drv)[0]
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    for yy in range(H):
+        for xx in range(0, W, 2):
+            if rx <= xx < rx + rw and ry <= yy < ry + rh:
+                continue
+            o = 2 * (yy * W + xx)
+            assert seen[o:o + 2] == full[o:o + 2], (xx, yy)

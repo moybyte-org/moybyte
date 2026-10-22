@@ -328,10 +328,19 @@ class WindowChrome:
                 win = self._wins.get(key)
                 if win is None or win.minimized or win.saved is not None:
                     continue
-                _ui_draw.frame_under(rc, th, (win.x, win.y, win.w, win.h), win.title_h,
+                _ui_draw.frame_under(rc, th, self._shown_rect(win), win.title_h,
                                 key == self._focus)
         finally:
             rc.clip()
+
+    def _shown_rect(self, win):
+        """Where `win` stands this frame: a live resize's rubber rect, else
+        its own -- what its shadow and outline fringe follow."""
+        g = self._resize
+        if (g is not None and self._wins.get(g[0]) is win
+                and win.kind != "desktop" and self._live_resize_ok()):
+            return (g[10], g[11], g[5], g[6])
+        return (win.x, win.y, win.w, win.h)
 
     def _cast_onto(self, i):
         """The windows above z-slot `i` cast their shadows and outline
@@ -367,14 +376,14 @@ class WindowChrome:
                 up = self._wins.get(k)
                 if up is None or up.minimized or up.saved is not None:
                     continue
-                ex = self._pad_extent(up, up.x, up.y, up.w, up.h)
+                rect = self._shown_rect(up)
+                ex = self._pad_extent(up, rect[0], rect[1], rect[2], rect[3])
                 if (ex[0] >= x1 or ex[1] >= y1 or ex[0] + ex[2] <= x0
                         or ex[1] + ex[3] <= y0):
                     continue
                 if not clipped:
                     rc.clip(x0, y0, x1 - x0, y1 - y0)
                     clipped = True
-                rect = (up.x, up.y, up.w, up.h)
                 if chrome:
                     _ui_draw.frame_under_onto(rc, th, rect, up.title_h, k == focus,
                                               onto, win.title_h, key == focus)
