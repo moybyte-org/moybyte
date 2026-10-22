@@ -718,11 +718,14 @@ content draw is skipped and the retained `win.buf` stamp presents it instead.
 - **`ws._dirty` is false.** It is still readable during the draw — `frame()`
   clears it after — so false means no input or state handler reported a visible
   change this frame.
-- **No pointer DOWN or CLICK, this frame or last.** Class C (§3) mutates
-  content without marking dirty, so any button activity renders live. The check
-  reads BOTH frames because handlers consume `p.click` in place — a tap that
-  opens a prompt zeroes it before the draw sees it, and the previous frame's
-  edge is still in `ws._last_ptr`. A position/visibility-only change is inert:
+- **No pointer DOWN or CLICK, this frame or last — unless the press is the
+  WM's.** Class C (§3) mutates content without marking dirty, so any button
+  activity renders live. The check reads BOTH frames because handlers consume
+  `p.click` in place — a tap that opens a prompt zeroes it before the draw sees
+  it, and the previous frame's edge is still in `ws._last_ptr`. A press that
+  lands on chrome — a strip, its buttons, the resize grip, a full-screen
+  window's row head — is the WM's (`_grab`): no content is handed it, its
+  drag or its release, so it waives the check. A position/visibility-only change is inert:
   no content surface draws hover feedback (audited 2026-07-27), and anything
   that appears without input is a Class B source or it could never paint under
   the #44 gate at all.
@@ -766,9 +769,11 @@ unchanged within noise, all dirty-armed by design. The 70ms class is real on
 tap-settle frames on the P4 and on every cursor-move frame on the HOST tier,
 where a visible cursor defeats the quiet paths.
 
-**The widening still unbuilt:** waive the DOWN-guard when a WM drag or resize
-of a DIFFERENT window has captured the pointer. Widen one trigger source at a
-time, each behind the two gates this slice used — `tools/p4_clicks.py`
+**The WM's press waives the DOWN-guard (2026-10-22).** It is the widening
+this slice named: a press the WM captured — a drag or resize of any window, a
+strip button, a full-screen row's head — reaches no content, so the focused
+content stays frozen under it. A further widening goes one trigger source at
+a time, behind the two gates this slice used — `tools/p4_clicks.py`
 transitions must not regress, `tools/p4_surface_sweep.py` drag medians must
 move.
 
