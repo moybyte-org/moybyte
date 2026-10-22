@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   _MusicOps                     the op codec: a before/after snapshot pair per edit
+#   MusicEditor                   the tracker core over a cart's AudioBank: views and cursor
+#   MusicEditor.set_name          a sound's optional name (SPEC.md 8.1), an undo step
+#   MusicEditor.copy              copy and paste a step or a slot
+#   MusicEditor.duplicate_sfx     a whole sound or track appended as a copy
+#   MusicEditor._snapshot         what one undo step records
 """MusicEditor (#50/#92) -- the tracker-style step editor over a cart's
 AudioBank. Split out of editors.py (which re-exports it); undo/redo rides the
 shared #111 op-history core (runtime/op_history.py)."""
