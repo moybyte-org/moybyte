@@ -169,8 +169,8 @@ def test_every_layout_lays_out_inside_the_content_rect(tmp_path, size):
     bottom = _rect_map(ws)
     bad, checked = [], 0
     for key, (r, content) in sorted(top.items()):
-        if not _inside(r, content):
-            continue
+        if not _inside(r, content) or key not in bottom:
+            continue                    # a rect the relayout stood off the surface
         checked += 1
         rb, cb = bottom[key]
         if not _inside(rb, cb):

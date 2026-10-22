@@ -255,7 +255,10 @@ class _SceneLayer(Layer):
         # size, so it hit-tests the raw pointer -- no _game_xy translation.
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
-        if click:
+        if ws.scene_ui.layout.verbs:
+            if ws.scene_ui.pointer(px, py, click, ws.pointer.down):
+                ws._dirty = True
+        elif click:
             ws.scene_ui._scene_click(px, py)
         elif ws.pointer.down:
             ws.scene_ui._scene_drag(px, py)

@@ -57,10 +57,16 @@ except ImportError:  # pragma: no cover - direct host import (chrome not yet ali
 
 try:
     from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
-                             pane as _in_pane)
+                             pane as _in_pane, metric_class as _metric_class, DESK as _DESK)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H, pane as _in_pane)
+                                     BASE_H as _BASE_H, pane as _in_pane,
+                                     metric_class as _metric_class, DESK as _DESK)
+
+# The handheld page (editor_scene.py): the right column's width and the
+# foot's height, beside and under the view.
+HAND_COL = 104
+HAND_FOOT = 27
 
 # World view (left): the panned window onto the world, same rectangle the map
 # editor uses (clear of the palette column at x >= 206 and the bottom row).
@@ -182,8 +188,34 @@ class SceneLayout(LayoutBase):
         self.undo_btn = (self.redo_btn[0] - gap - tbw, tb_y, tbw, tbh)
         self.pan_thresh = _SC_PAN_THRESH * fs
         self.pane = _in_pane() and bounds is None
+        self.verbs = bounds is None and not self.pane and _metric_class() != _DESK
         if self.pane:
             self._pane_geometry()
+        elif self.verbs:
+            self._hand_geometry()
+
+    def _hand_geometry(self):
+        """The handheld's tab on the verbs (EDITOR_LAYOUT.md's Scene): the
+        view from the content rect's top left to the right column and the
+        foot, which `editor_scene.ScenePage` draws; the panel's buttons
+        stand off the surface."""
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        self.body_fill = self.panel = (cx, cy, cw, ch)
+        self.sv_x0, self.sv_y0 = cx, cy
+        self.sv_avail_w = cw - HAND_COL
+        self.sv_avail_h = ch - HAND_FOOT - 1
+        off = (-4096, -4096, 0, 0)
+        for name in ("pan_up", "pan_lf", "pan_rt", "pan_dn", "zoom_btn", "flip_btn",
+                     "tp_prev", "tp_next", "tag_btn", "del_btn", "snap_btn",
+                     "back_btn", "front_btn", "redo_btn", "undo_btn"):
+            setattr(self, name, off)
+        self.tp_x0 = cx + cw - HAND_COL + 6
+        self.tp_y0 = cy + 6
+        self.tp_cell = 22
+        self.tp_cols = self.tp_rows = 4
+        self.tp_page = 16
+        self.tp_area = (self.tp_x0, self.tp_y0, 4 * 22, 4 * 22)
+        self.title_xy = (-4096, -4096)
 
     def _pane_geometry(self):
         """A desk Editor's Scene pane (EDITOR_LAYOUT.md's World): the view
@@ -231,8 +263,39 @@ class SceneEditorUI:
                                        # holds the sprite where the finger picked it)
         self._tp_memo = None           # #163: palette-grid quad pack, keyed on
                                        # (geometry, count) -- relayout invalidates
+        self.place_taps = True         # the handheld page's stamp tool: a tap on empty world places
+        self._page = None              # the handheld's page on the verbs (editor_scene.py)
         sc = ws.sys_canvas
         self.layout = SceneLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
+
+    def page(self):
+        """The handheld's Scene page on the verbs, built at its first use."""
+        if self._page is None:
+            try:
+                from editor_scene import ScenePage
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime.editor_scene import ScenePage
+            self._page = ScenePage(self, _ui_draw.AppHost("editor_scene"))
+        return self._page
+
+    def pointer(self, px, py, click, down):
+        """A pointer sample on the handheld's page (the layer's, after the
+        bar's): a press in the view is the scene's gesture, the rest the
+        verbs'."""
+        page = self.page()
+        if page.pop is None:
+            if click and _in(px, py, self._sv_area()):
+                self._scene_click(px, py)
+                return True
+            if self._press is not None:
+                if down:
+                    self._scene_drag(px, py)
+                else:
+                    self._scene_release(px, py)
+                return True
+            if click and page.palette_tap(px, py):
+                return True
+        return page.point(px, py, click, down)
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39) -- ws._relayout fan-out."""
@@ -405,6 +468,17 @@ class SceneEditorUI:
         ws = self.ws
         i = ws.input
         se = self.sceneedit
+        page = self._page if self.layout.verbs else None
+        if page is not None:
+            if page.pop is not None:
+                if page.keys(i):
+                    ws._dirty = True
+                if i.pressed("b"):
+                    page.close()
+                    ws._dirty = True
+                return
+            if page.owed():
+                ws._dirty = True
         if se is not None and self.tag_edit:
             ev = self.tag_buf.feed(i)
             if ev == TE_COMMIT:                      # ENTER -> commit the tag
@@ -610,7 +684,8 @@ class SceneEditorUI:
                 if se.end_edit():
                     self._sync_live()
                     self._clamp_cam()
-            elif self._mode == "pan" and not self._panning:
+            elif (self._mode == "pan" and not self._panning
+                  and (self.place_taps or not self.layout.verbs)):
                 w = self._world_at(*self._press)
                 if w is not None:
                     se.place(w[0], w[1])
@@ -637,6 +712,9 @@ class SceneEditorUI:
         se = self.sceneedit
         sheet = ws.project.sheet
         th = ws.theme_colors
+        if lay.verbs:
+            self.page().draw(cv, th, (lay.cx, lay.cy, lay.cw, lay.ch), False)
+            return
         cv.rect(*(lay.body_fill + (th["surface"],)))
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
@@ -654,57 +732,7 @@ class SceneEditorUI:
                  th["ink"], 1)
         if se is None or sheet is None:
             return
-        tm = ws.project.tilemap
-        # -- the world view: dark field, tilemap backdrop, viewport frame, actors.
-        va = self._sv_area()
-        cv.rect(va[0], va[1], va[2], va[3], NAMES["dark_blue"])
-        g = sheet.TILE
-        if tm is not None:
-            # Visible map cells, drawn at the zoom scale (the scene draws OVER
-            # the tilemap, #85 Section 4). Via spr_tile (#163): a contiguous
-            # run coalesces into ONE native blit_batch, where the old
-            # tile_image + spr pair paid an Image blit crossing PER CELL that
-            # no batch could collect (pixel parity pinned by the #63 suite).
-            c0 = se.cam_x // g
-            r0 = se.cam_y // g
-            c1 = (se.cam_x + vw - 1) // g
-            r1 = (se.cam_y + vh - 1) // g
-            spr_tile = cv.spr_tile
-            for cy in range(r0, r1 + 1):
-                if cy < 0 or cy >= tm.h:
-                    continue
-                for cx in range(c0, c1 + 1):
-                    if cx < 0 or cx >= tm.w:
-                        continue
-                    vx = x0 + (cx * g - se.cam_x) * scale
-                    vy = y0 + (cy * g - se.cam_y) * scale
-                    if (vx < x0 or vy < y0 or vx + g * scale > x0 + va[2]
-                            or vy + g * scale > y0 + va[3]):
-                        continue              # only whole cells (no clip bleed)
-                    tid = tm.mget(cx, cy)
-                    if tid >= 0:
-                        spr_tile(sheet, tid, vx, vy, -1, scale, 0)
-        # The fixed game viewport's frame at world (0,0)-(320,240): what a
-        # non-panning cart shows. Each edge clamped to the view rectangle.
-        self._frame_world(cv, 0, 0, 320, 240, NAMES["yellow"])
-        # Placed actors, list order = draw order; box every actor so a blank
-        # tile (a pure tag marker, e.g. Hop Quest's spawn) stays visible.
-        for i, r in enumerate(se.rows):
-            vx = x0 + (r["x"] - se.cam_x) * scale
-            vy = y0 + (r["y"] - se.cam_y) * scale
-            side = g * scale
-            if (vx + side <= x0 or vy + side <= y0
-                    or vx >= x0 + va[2] or vy >= y0 + va[3]):
-                continue
-            if (vx >= x0 and vy >= y0 and vx + side <= x0 + va[2]
-                    and vy + side <= y0 + va[3]):
-                img = sheet.tile_image(r["tile"], 0)
-                if img is not None:
-                    cv.spr(img, vx, vy, scale)
-                cv.rectb(vx, vy, side, side,
-                         NAMES["white"] if i == se.sel else NAMES["dark_grey"])
-                if i == se.sel and side > 4:
-                    cv.rectb(vx + 1, vy + 1, side - 2, side - 2, NAMES["white"])
+        self.draw_view(cv)
         if lay.pane:
             return
         # -- tile palette (the stamp picker; the brush tile is boxed white).
@@ -790,6 +818,70 @@ class SceneEditorUI:
                    NAMES["orange"] if sel is not None else NAMES["dark_grey"], cv)
         self._gbtn("arr_d", "BK", lay.back_btn,
                    NAMES["orange"] if sel is not None else NAMES["dark_grey"], cv)
+
+    def draw_view(self, cv, boxes=True):
+        """The world view: the dark field, the tilemap backdrop, the game
+        viewport's frame and the placed actors, each boxed, the selected one
+        in white -- or, with `boxes` false, not at all (the handheld page's
+        view, which rings it with the canvas cursor)."""
+        ws = self.ws
+        NAMES = self._NAMES
+        se = self.sceneedit
+        sheet = ws.project.sheet
+        x0, y0, scale, vw, vh = self._sv_metrics()
+        tm = ws.project.tilemap
+        # -- the world view: dark field, tilemap backdrop, viewport frame, actors.
+        va = self._sv_area()
+        cv.rect(va[0], va[1], va[2], va[3], NAMES["dark_blue"])
+        g = sheet.TILE
+        if tm is not None:
+            # Visible map cells, drawn at the zoom scale (the scene draws OVER
+            # the tilemap, #85 Section 4). Via spr_tile (#163): a contiguous
+            # run coalesces into ONE native blit_batch, where the old
+            # tile_image + spr pair paid an Image blit crossing PER CELL that
+            # no batch could collect (pixel parity pinned by the #63 suite).
+            c0 = se.cam_x // g
+            r0 = se.cam_y // g
+            c1 = (se.cam_x + vw - 1) // g
+            r1 = (se.cam_y + vh - 1) // g
+            spr_tile = cv.spr_tile
+            for cy in range(r0, r1 + 1):
+                if cy < 0 or cy >= tm.h:
+                    continue
+                for cx in range(c0, c1 + 1):
+                    if cx < 0 or cx >= tm.w:
+                        continue
+                    vx = x0 + (cx * g - se.cam_x) * scale
+                    vy = y0 + (cy * g - se.cam_y) * scale
+                    if (vx < x0 or vy < y0 or vx + g * scale > x0 + va[2]
+                            or vy + g * scale > y0 + va[3]):
+                        continue              # only whole cells (no clip bleed)
+                    tid = tm.mget(cx, cy)
+                    if tid >= 0:
+                        spr_tile(sheet, tid, vx, vy, -1, scale, 0)
+        # The fixed game viewport's frame at world (0,0)-(320,240): what a
+        # non-panning cart shows. Each edge clamped to the view rectangle.
+        self._frame_world(cv, 0, 0, 320, 240, NAMES["yellow"])
+        # Placed actors, list order = draw order; box every actor so a blank
+        # tile (a pure tag marker, e.g. Hop Quest's spawn) stays visible.
+        for i, r in enumerate(se.rows):
+            vx = x0 + (r["x"] - se.cam_x) * scale
+            vy = y0 + (r["y"] - se.cam_y) * scale
+            side = g * scale
+            if (vx + side <= x0 or vy + side <= y0
+                    or vx >= x0 + va[2] or vy >= y0 + va[3]):
+                continue
+            if (vx >= x0 and vy >= y0 and vx + side <= x0 + va[2]
+                    and vy + side <= y0 + va[3]):
+                img = sheet.tile_image(r["tile"], 0)
+                if img is not None:
+                    cv.spr(img, vx, vy, scale)
+                if not boxes and i == se.sel:
+                    continue
+                cv.rectb(vx, vy, side, side,
+                         NAMES["white"] if i == se.sel else NAMES["dark_grey"])
+                if i == se.sel and side > 4:
+                    cv.rectb(vx + 1, vy + 1, side - 2, side - 2, NAMES["white"])
 
     def _frame_world(self, cv, wx, wy, ww, wh, color):
         """Outline the world rect (wx, wy, ww, wh) in view coords, each edge

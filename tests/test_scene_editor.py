@@ -144,9 +144,15 @@ def test_world_size_covers_viewport_map_and_actors():
 # -- SceneLayout ----------------------------------------------------------------
 
 def test_scene_layout_reflows_bigger_panel():
+    # The world view grows to fill the panel: a big panel shows the whole
+    # 320x240 game viewport at 1x with no panning, the handheld page's and the
+    # Blocks workspace's bounded panel alike.
     lay = SU.SceneLayout(1024, 600, 1)
-    # The world view grows to fill the panel: a desk-size panel shows the whole
-    # 320x240 game viewport at 1x with no panning.
+    assert lay.verbs
+    assert lay.sv_avail_w >= 320 and lay.sv_avail_h >= 240
+    assert lay.sv_x0 + lay.sv_avail_w <= lay.tp_x0 - 4
+    lay = SU.SceneLayout(1024, 600, 1, bounds=(0, 0, 1024, 600))
+    assert not lay.verbs
     assert lay.sv_avail_w >= 320 and lay.sv_avail_h >= 240
     # The view never overlaps the palette column, the palette gains rows.
     assert lay.sv_x0 + lay.sv_avail_w <= lay.tp_x0 - 4
@@ -196,6 +202,7 @@ def test_tab_ladder_and_router_carry_the_scene_tab(tmp_path):
 def test_tap_places_selects_and_drag_moves(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
     ws._open_scene()
+    ws.scene_ui.page().set_tool("stamp")
     se = ws.scene_ui.sceneedit
     x0, y0, scale, vw, vh = ws.scene_ui._sv_metrics()
     # Tap empty world at view (100, 100) -> place a snapped actor there.
@@ -250,6 +257,7 @@ def test_committed_gestures_reach_the_next_play_and_persist(tmp_path):
         "def _draw():\n    cls(0)\n"))
     assert ws.ns["n"] == 2
     ws._open_scene()
+    ws.scene_ui.page().set_tool("stamp")
     x0, y0, scale, vw, vh = ws.scene_ui._sv_metrics()
     _tap(ws, x0 + 120, y0 + 40)                       # place actor #3
     ws._leave_menu()                                  # PLAY re-runs _init AND commits
@@ -285,32 +293,25 @@ def test_props_row_tag_typing_and_flip(tmp_path):
     ws._open_scene()
     ui = ws.scene_ui
     se = ui.sceneedit
-    lay = ui.layout
+    page = ui.page()
     x0, y0, scale, vw, vh = ui._sv_metrics()
     _tap(ws, x0 + 44, y0 + 60)                        # select the coin
-    # Tap the TAG field -> capture, pre-filled with the current tag; erase it
-    # and type "gem" + ENTER -> committed, one undo step. Keys are edge-fired
-    # (the wifi-password pattern), so distinct bytes need a 0 between repeats.
-    _tap(ws, lay.tag_btn[0] + 2, lay.tag_btn[1] + 2)
-    assert ui.tag_edit and ws.input.text_mode
-    assert ui.tag_buf.text == "coin"
-    for k in (8, 0, 8, 0, 8, 0, 8):                   # four BACKSPACEs
-        ws.input.last_key = k
-        ui._scene_input()
-    for ch in "gem":
-        ws.input.last_key = ord(ch)
-        ui._scene_input()
-    ws.input.last_key = 13
-    ui._scene_input()
-    ws.input.last_key = 0
-    assert not ui.tag_edit and not ws.input.text_mode
+    # Tag opens its popover in text mode, pre-filled with the current tag; the
+    # typed "gem" is committed as one undo step (the typing itself is
+    # tests/test_editor_hh_tabs.py's).
+    page.act("Tag")
+    assert page.pop == "tag" and ws.input.text_mode
+    assert page.text == "coin"
+    page.text = "gem"
+    page.commit()
+    assert page.pop is None and not ws.input.text_mode
     assert se.selected()["tag"] == "gem"
     assert se.undo() and se.selected()["tag"] == "coin"
-    # FLIP via its button; DEL removes the actor.
-    _tap(ws, lay.flip_btn[0] + 2, lay.flip_btn[1] + 2)
+    # Flip, then Remove takes the actor away.
+    page.act("Flip")
     assert se.selected().get("flip") == 1
     count = len(se.rows)
-    _tap(ws, lay.del_btn[0] + 2, lay.del_btn[1] + 2)
+    page.act("Remove")
     assert len(se.rows) == count - 1 and se.sel is None
 
 

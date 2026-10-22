@@ -209,3 +209,86 @@ def test_a_settled_map_tab_paints_nothing(hh):
     _tap(drv, page.host.box("Tool Box"))
     assert _settles(ws, drv)
 
+
+# -- Scene ------------------------------------------------------------------------------
+
+def _scene(hh):
+    ws, drv = _open(hh, "scene")
+    su = ws.scene_ui
+    assert su.layout.verbs and su.sceneedit is not None
+    return ws, drv, su, su.page()
+
+
+def _world_px(su, wx, wy):
+    x0, y0, scale, _vw, _vh = su._sv_metrics()
+    se = su.sceneedit
+    return x0 + (wx - se.cam_x) * scale + 2, y0 + (wy - se.cam_y) * scale + 2
+
+
+def test_the_stamp_tool_places_and_the_pick_tool_does_not(hh):
+    ws, drv, su, page = _scene(hh)
+    se = su.sceneedit
+    n = len(se.rows)
+    x, y = _world_px(su, 200, 8)
+    drv.click(x, y)
+    for _ in range(2):
+        drv.frame(DT)
+    assert len(se.rows) == n, "the pick tool places nothing on empty world"
+    _tap(drv, page.host.box("Tool Stamp"))
+    assert su.place_taps
+    lay = su.layout
+    drv.click(lay.tp_x0 + 22 + 4, lay.tp_y0 + 4)     # the second stamp
+    drv.frame(DT)
+    assert se.n == su._palette_ids()[1]
+    drv.click(x, y)
+    for _ in range(2):
+        drv.frame(DT)
+    assert len(se.rows) == n + 1 and se.selected()["tile"] == se.n
+
+
+def test_the_actors_verbs_flip_and_remove_the_picked_actor(hh):
+    ws, drv, su, page = _scene(hh)
+    se = su.sceneedit
+    se.place(64, 64, "coin")
+    n = len(se.rows)
+    ws._dirty = True
+    drv.frame(DT)
+    _tap(drv, page.host.box("Flip"))
+    assert se.selected().get("flip")
+    _tap(drv, page.host.box("Remove"))
+    assert len(se.rows) == n - 1 and se.selected() is None
+
+
+def test_a_tag_is_typed_in_its_popover(hh):
+    ws, drv, su, page = _scene(hh)
+    se = su.sceneedit
+    se.place(64, 64, "coin")
+    ws._dirty = True
+    drv.frame(DT)
+    _tap(drv, page.host.box("Tag"))
+    assert page.pop == "tag"
+    for ch in "gem":
+        drv.type_char(ord(ch))
+        drv.frame(DT)
+    drv.type_char(0x0D)
+    for _ in range(2):
+        drv.frame(DT)
+    assert se.selected()["tag"] == "coingem"
+    assert page.pop is None
+
+
+def test_snap_and_zoom_from_the_foot(hh):
+    ws, drv, su, page = _scene(hh)
+    se = su.sceneedit
+    snap = se.snap
+    _tap(drv, page.host.box("Snap"))
+    assert se.snap != snap
+    _tap(drv, page.host.box("Zoom"))
+    assert su.scene_zoom == 1
+
+
+def test_a_settled_scene_tab_paints_nothing(hh):
+    ws, drv, su, page = _scene(hh)
+    assert _settles(ws, drv)
+    _tap(drv, page.host.box("Tool Stamp"))
+    assert _settles(ws, drv)
