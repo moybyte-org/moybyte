@@ -2004,6 +2004,17 @@ class AppHost:
         """(x, y, w, h) where stop `id` drew in the last frame, or None."""
         return _C.api_box(self.ctx, id)
 
+    def resume(self, cv, th):
+        """Point the verbs at this context again, on `cv` under theme `th`,
+        beginning no frame: what its last frame left -- focus, stops, the
+        bar it lent -- stands, and a verb that only draws (`ui.cursor`) draws
+        as it did. A frame that paints a part of its page again (Paint's
+        stroke frame) draws through it."""
+        t = UI_TARGET
+        t[0] = self.ctx
+        t[1] = cv
+        t[2] = _look(th)
+
     def begin(self, cv, th, rect, desk=False, window=False, elsewhere=False):
         """Begin the frame on `cv` under theme `th`, its page `rect` (in a
         window's body when `window`): whether it is settled. `elsewhere`:

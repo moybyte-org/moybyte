@@ -477,6 +477,7 @@ class PaintAppLayer:
         self._clip_r = None
         self._pv = [0, 0, 0, 0]
         self._sp = [0, 0, 0, 0]
+        self._cu = [0, 0, 0, 0]
         self._drip_c = 0
 
     # -- the document ------------------------------------------------------------
@@ -868,7 +869,10 @@ class PaintAppLayer:
                 self._follow()
                 if self._drawing_key:
                     self._drag((self.cur[0], self.cur[1]))
-            self._damage.all()
+            if self._space or self.tool == MOVE:
+                self._damage.all()
+            else:
+                self._damage.mark()
         down = inp.held("a") and not self._space
         if down and not self._drawing_key:
             self._drawing_key = True
@@ -1298,9 +1302,9 @@ class PaintAppLayer:
         cv.rrect(cx - dd // 2, cy - dd // 2, dd, dd, dd // 2, c)
 
     def _drip_colour(self):
-        """The colour under the cursor; while the pointer draws, the one it
+        """The colour under the cursor; while a stroke is drawn, the one it
         was under when the stroke began."""
-        if self._down:
+        if self._down or self._drawing_key:
             return self._drip_c
         d = self.doc
         c = self._drip_c = d.get(min(d.W - 1, self.cur[0]), min(d.H - 1, self.cur[1]))
@@ -1315,14 +1319,23 @@ class PaintAppLayer:
             cv.rebake(d.image, *dirty)
         spec = self._spec()
         self._view(cv, th, spec)
-        if self._cursor_shown():
-            s = self.size()
-            gx, gy = self._to_glass((self.cur[0] - s // 2, self.cur[1] - s // 2))
-            side = max(2, s * spec[8] // 4)
-            if vx <= gx < vx + vw and vy <= gy < vy + vh:
-                cv.clip(vx, vy, vw, vh)
-                ui.cursor(gx, gy, side, side)
-                cv.clip()
+        g = self._cursor_at()
+        if g is not None:
+            cv.clip(vx, vy, vw, vh)
+            ui.cursor(g[0], g[1], g[2], g[2])
+            cv.clip()
+
+    def _cursor_at(self):
+        """(x, y, side) of the ring cursor's rect on the glass, or None where
+        it is not drawn."""
+        if not self._cursor_shown():
+            return None
+        s = self.size()
+        gx, gy = self._to_glass((self.cur[0] - s // 2, self.cur[1] - s // 2))
+        vx, vy, vw, vh = self.layout.view
+        if not (vx <= gx < vx + vw and vy <= gy < vy + vh):
+            return None
+        return (gx, gy, max(2, s * self._quarters() // 4))
 
     def _cursor_shown(self):
         """The ring cursor: the keys', so not under touch, under a popover,
@@ -1365,7 +1378,8 @@ class PaintAppLayer:
     # -- the stroke frame ----------------------------------------------------------
     #
     # A frame whose only change is a mark's -- the doc's pixels, a shape's
-    # outline, the pointer's sprite over them -- repaints the part of the view
+    # outline, the ring cursor the keys move, the pointer's sprite over them
+    # -- repaints the part of the view
     # those changed and nothing else: the page around it, the toolkit's pass
     # included, is the pixels already there. That holds when the canvas keeps
     # them: the last RETAINED_FRAMES frames all painted this page, the same
@@ -1405,6 +1419,18 @@ class PaintAppLayer:
             _grow(c, pv[0], pv[1], pv[2], pv[3])
         else:
             pv[2] = pv[0]
+        cu = self._cu
+        _grow(c, cu[0], cu[1], cu[2], cu[3])
+        g = self._cursor_at()
+        if g is not None:
+            # the ring reaches five pixels past the rect it is round
+            cu[0] = g[0] - 6
+            cu[1] = g[1] - 6
+            cu[2] = g[0] + g[2] + 6
+            cu[3] = g[1] + g[2] + 6
+            _grow(c, cu[0], cu[1], cu[2], cu[3])
+        else:
+            cu[2] = cu[0]
         sp = self._sp
         _grow(c, sp[0], sp[1], sp[2], sp[3])
         p = self._surf.pointer() if self._down else None
@@ -1435,6 +1461,11 @@ class PaintAppLayer:
             self._clip_r = c
             cv.clip(c[0], c[1], c[2] - c[0], c[3] - c[1])
             self._view(cv, th, spec)
+            if g is not None:
+                # the toolkit's verbs on this page's context, its frame not
+                # begun again: the ring is drawn as a whole frame draws it
+                self._ui.resume(cv, th)
+                ui.cursor(g[0], g[1], g[2], g[2])
             cv.clip()
             self._clip_r = None
         return True

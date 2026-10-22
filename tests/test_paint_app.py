@@ -797,7 +797,8 @@ def test_a_tap_on_the_handheld_bars_zoom_chip_steps_the_zoom(tmp_path):
     assert app.zoom != was
 
 
-def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, bufs=1):
+def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, bufs=1,
+                  keys=False):
     """The glass after every frame of one scripted stroke, how many of them
     were stroke frames and the widest part of the view one repainted. `bufs`
     > 1 presents from that many buffers in turn, as a board's ping-pong does:
@@ -854,6 +855,24 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
         return got
     app._stroke_frame = counted
     shots = []
+    if keys:
+        # the keys draw: `a` held, the arrows moving the ring cursor
+        app.cur[0] = app.doc.W // 4
+        app.cur[1] = app.doc.H // 4
+        drv.hold("a", True)
+        drv.hold("right", True)
+        for i in range(40):
+            drv.hold("down", i % 3 == 0)
+            n = ws._frames_drawn
+            frame()
+            shots.append(bytes((held[-1] if bufs > 1 and ws._frames_drawn != n
+                                else root._buf)[top:]))
+        drv.hold("down", False)
+        drv.hold("right", False)
+        drv.hold("a", False)
+        frame()
+        shots.append(bytes((held[-1] if bufs > 1 else root._buf)[top:]))
+        return shots, made, bytes(app.doc.pix)
     pts = [(x + 16 + i * 5, y + 14 + (i * 3) % (h - 30)) for i in range(30)]
     drv.touch(ox + pts[0][0], oy + pts[0][1])
     frame()
@@ -869,19 +888,23 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
 
 
 @pytest.mark.parametrize("desk, bufs", [(False, 1), (False, 2), (False, 3), (True, 1)])
-@pytest.mark.parametrize("tool", ["brush", "eraser", "spray", "shape"])
+@pytest.mark.parametrize("tool", ["brush", "eraser", "spray", "shape", "keys"])
 def test_a_stroke_frame_paints_what_a_whole_frame_paints(tmp_path, monkeypatch, desk, bufs,
                                                          tool):
     """A frame whose only change is the stroke's repaints the part of the view
     it and the frames since its buffer was painted changed, and the glass is
     the glass a whole frame leaves, every frame -- on one buffer, and on two
-    or three presented in turn."""
+    or three presented in turn; drawn with the pointer, and with the keys,
+    whose ring cursor moves with the stroke."""
     from runtime import paint_app
     t = {"brush": paint_app.BRUSH, "eraser": paint_app.ERASER, "spray": paint_app.SPRAY,
-         "shape": paint_app.SHAPE}[tool]
-    whole, none, pix0 = _stroke_glass(tmp_path / "a", monkeypatch, desk, False, t, bufs=bufs)
+         "shape": paint_app.SHAPE, "keys": paint_app.BRUSH}[tool]
+    k = tool == "keys"
+    whole, none, pix0 = _stroke_glass(tmp_path / "a", monkeypatch, desk, False, t, bufs=bufs,
+                                      keys=k)
     monkeypatch.undo()
-    part, made, pix1 = _stroke_glass(tmp_path / "b", monkeypatch, desk, True, t, bufs=bufs)
+    part, made, pix1 = _stroke_glass(tmp_path / "b", monkeypatch, desk, True, t, bufs=bufs,
+                                     keys=k)
     assert none[0] == 0
     assert made[0] >= 20, "the stroke was painted whole every frame"
     assert pix0 == pix1
