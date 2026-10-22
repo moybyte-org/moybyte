@@ -373,6 +373,24 @@ def test_a_middle_drag_pans_the_scene(desk):
     assert se.cam_x > 0
 
 
+def test_an_idle_code_pane_reads_its_document_only_after_a_key(desk, monkeypatch):
+    """A Code edit made in its pane owes the playtest a restart (E-02), and
+    the check compares the whole source: a frame with no key asks nothing
+    (it built the source's text every frame, ~5 KB of garbage a frame on
+    the P4), a typed key still owes it."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)                      # Code: the Code pane focused
+    app = ws.editor_app
+    asked = []
+    real = app._tab_is_clean
+    monkeypatch.setattr(app, "_tab_is_clean", lambda tab: asked.append(tab) or real(tab))
+    for _ in range(10):
+        drv.frame(DT)
+    assert asked == []
+    _tap(drv, ord("x"))
+    assert "code" in asked and "code" in app.start_owed
+
+
 def test_play_runs_the_game_in_the_run_slot_and_stop_ends_it(desk):
     ws, drv = desk
     d = ws.editor_desk

@@ -1047,7 +1047,8 @@ class EditorDesk(Layer):
                     r = self._area()
                 got = bool(self._in_pane(tab, self._body(r, self._unit()),
                                          layer.handle_input, i))
-                self._owe_restart(tab)
+                if i.last_key or self._fresh or i.any_pressed():
+                    self._owe_restart(tab)     # only a key edits: the check reads the doc
                 return got
         if c in ("sheet", "sprites"):
             return self._sheet_keys(i)
