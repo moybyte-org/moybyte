@@ -605,8 +605,8 @@ def sounds_menu(desk, u):
     items = [row_label(me, k) for k in range(len(me.bank.sfx))] + ["New sound"]
     got = ui.menu("", items, ["music"] * len(me.bank.sfx) + ["new"])
     ui.popover()
-    if got is not None and got in items:
-        k = items.index(got)
+    if got is not None and 0 <= got < len(items):
+        k = got
         _sfx_view(me)
         if k >= len(me.bank.sfx):
             me.select_sfx(len(me.bank.sfx) - me.sfx_idx)

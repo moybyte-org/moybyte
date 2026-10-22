@@ -677,3 +677,77 @@ def test_a_settled_reference_paints_nothing_on_any_tab(desk):
         for _ in range(8):
             drv.frame(DT)
         assert ws._frames_drawn == drawn, tab
+
+
+# -- the Code pane's header ------------------------------------------------------------
+
+def test_the_code_panes_header_finds_jumps_and_opens_its_more_menu(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)
+    cl = ws.code_layer
+    assert d._host.box("pane 0 files") is not None
+    _press(drv, d, "pane 0 code find")
+    assert cl._find_open
+    _press(drv, d, "pane 0 code find")
+    assert not cl._find_open
+    _press(drv, d, "pane 0 code goto")
+    assert cl._jump_open
+    cl._jump_open = False
+    gutter = cl._gutter
+    _press(drv, d, "pane 0 code more")
+    assert d.part_state["code more"] is not None
+    drv.frame(DT)
+    _press(drv, d, "Line numbers")
+    assert cl._gutter != gutter
+    assert d.part_state["code more"] is None
+    _press(drv, d, "pane 0 code more")
+    drv.frame(DT)
+    _click(drv, 900, 500)                        # outside the card: dismissed
+    assert d.part_state["code more"] is None
+
+
+def test_the_code_panes_file_tabs_switch_the_script(desk, monkeypatch):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)
+    monkeypatch.setattr(ws, "code_sources", lambda: ["main.py", "enemies.py"])
+    opened = []
+    monkeypatch.setattr(ws, "open_code_file", lambda name: opened.append(name) or True)
+    ws._dirty = True
+    drv.frame(DT)
+    bx, by, bw, bh = d._host.box("pane 0 files")
+    _click(drv, bx + 110, by + bh // 2)          # the second tab
+    assert opened == ["enemies.py"]
+
+
+def test_a_settled_code_pane_paints_nothing_with_its_more_menu_open(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)
+    _press(drv, d, "pane 0 code more")
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    for _ in range(4):
+        drv.frame(DT)
+    drawn = ws._frames_drawn
+    for _ in range(8):
+        drv.frame(DT)
+    assert ws._frames_drawn == drawn
+
+
+def test_at_800_the_sound_panes_menu_picks_a_sound(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(800, 480),
+                                    panel_diagonal_in=7.0, font_scale=1, windowed=True)
+    ws.open_desk()
+    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Sky Run"))
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(3):
+        drv.frame(DT)
+    _tap(drv, ord("5"), 1)
+    d = ws.editor_desk
+    me = ws.music_ui.musicedit
+    _press(drv, d, "pane 0 sound menu")
+    drv.frame(DT)
+    _press(drv, d, "1")
+    assert me.sfx_idx == 1 and not d.part_state["menu"]
