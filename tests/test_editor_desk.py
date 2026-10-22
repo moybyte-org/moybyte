@@ -424,3 +424,21 @@ def test_the_map_and_scene_panes_open_at_2x_and_their_header_tools_act(desk):
     snap = se.snap
     d._head_tool("scene:snap")
     assert se.snap != snap
+
+
+def test_a_reference_pick_inserts_its_call_at_the_caret(desk):
+    ws, drv = desk
+    d = ws.editor_desk
+    _tap(drv, ord("2"), 1)                       # Code: the Reference's Sprites
+    ws._dirty = True
+    drv.frame(DT)
+    (_pg, (x, y, w, h)) = d._sheet_rects[0]
+    tw = w // 16
+    _click(drv, x + 6 * tw + 1, y + 1)
+    assert d._cur_sprite() == 6
+    ws.editor.row, ws.editor.col = 0, 0
+    ws._dirty = True
+    drv.frame(DT)
+    bx, by, bw, bh = d._host.box("insert call")
+    _click(drv, bx + bw // 2, by + bh // 2)
+    assert ws.editor.text().startswith("spr(6, x, y)")

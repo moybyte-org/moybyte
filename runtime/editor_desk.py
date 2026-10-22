@@ -109,6 +109,8 @@ class EditorDesk(Layer):
         self._mid = None                # the middle button's last place, while held
         self._scale = 0                 # the Run slot's scale, last drawn
         self._still_at = None           # where the game stands on the surface
+        self._ref = False               # the sheet drawn is the Reference's
+        self._picked = 0                # the sprite picked with no Sprite pane built
         self._was_playing = False
         self._back_tab = {}             # a pane's tab before Play took it to Game
 
@@ -415,6 +417,7 @@ class EditorDesk(Layer):
             elif c == "game":
                 self._game(cv, th, body, u)
             elif c in ("sheet", "sprites", "stamps"):
+                self._ref = c == "sprites"
                 self._sheet(cv, th, body, u, c == "stamps")
         if self.grown is None:
             self._dividers(cv, th, divs, u)
@@ -534,6 +537,8 @@ class EditorDesk(Layer):
                 Parts.draw(self, c, self._body(r, u, pane), u)
             elif c == "stamps":
                 Parts.stamps_label(self, self._body(r, u, pane), u)
+            elif c == "sprites":
+                self._pick_line(self._body(r, u, pane), u)
         for r in self._cursors:
             ui.cursor(*r)
         flash = self._flash
@@ -677,9 +682,11 @@ class EditorDesk(Layer):
         pw = cols * tw
         cap = 20 * u
         n = max(1, min(2, (w - cap) // (pw + cap)))
+        if stamps or self._ref:
+            h -= 40 * u                     # the foot's line
         first = min(self._sheet_page, max(0, pages - n))
         top = y + max(0, (h - prow * tw) // 2)
-        cur = ws.paint.n if ws.paint is not None else -1
+        cur = self._cur_sprite()
         if stamps:
             se = ws.scene_ui.sceneedit
             cur = se.n if se is not None else -1
@@ -700,6 +707,27 @@ class EditorDesk(Layer):
             px += pw + cap
         cv.clip()
 
+    def _cur_sprite(self):
+        """The sprite the Sheet and the Reference mark: the Sprite pane's,
+        else the last picked."""
+        ws = self.ws
+        return ws.paint.n if ws.paint is not None else self._picked
+
+    def _pick_line(self, r, u):
+        """The Reference's Sprites foot: the call a pick puts at the Code
+        pane's caret, and Insert."""
+        ws = self.ws
+        x, y, w, h = r
+        call = "spr(%d, x, y)" % self._cur_sprite()
+        row = 30 * u
+        ui.at(x + 10 * u, y + h - row - 4 * u, w - 110 * u, row)
+        ui.label(call, {"tone": "dim"})
+        ui.at(x + w - 96 * u, y + h - row - 4 * u, 88 * u, row)
+        if ui.button("Insert", "normal", {"id": "insert call"}) and ws.editor is not None:
+            ws.history.code_burst_open()
+            ws.editor.insert_text(call)
+            ws._dirty = True
+
     def _sheet_at(self, px, py):
         for pg, (x, y, w, h) in getattr(self, "_sheet_rects", ()):
             if x <= px < x + w and y <= py < y + h:
@@ -711,6 +739,7 @@ class EditorDesk(Layer):
         """A sprite picked on the Sheet: the Sprite pane's and the map's
         brush, as a tap on the sheet picks today (no undo step)."""
         ws = self.ws
+        self._picked = t
         if ws.paint is not None:
             ws.paint.n = t
         mu = ws.built("map_ui")
@@ -853,13 +882,13 @@ class EditorDesk(Layer):
 
     def _sheet_keys(self, i):
         ws = self.ws
-        if ws.paint is None:
+        if ws.sheet is None:
             return False
         dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
         dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
         if not (dx or dy):
             return False
-        n = max(0, min(ws.sheet.cols * ws.sheet.rows - 1, ws.paint.n + dx + dy * 16))
+        n = max(0, min(ws.sheet.cols * ws.sheet.rows - 1, self._cur_sprite() + dx + dy * 16))
         self._pick(n)
         self._sheet_page = min(self._sheet_page, n // 128)
         if n // 128 > self._sheet_page + 1:
@@ -982,6 +1011,10 @@ class EditorDesk(Layer):
         if c == "game":
             if click and not ws.editor_app.playing():
                 ws.defer(ws._leave_menu)
+            return True
+        if c in ("sprites", "stamps") and py >= body[1] + body[3] - 40 * u:
+            host.point(px, py, click, down)     # the foot's line (Insert)
+            ws._dirty = True
             return True
         if c in ("sheet", "sprites", "stamps"):
             t = self._sheet_at(px, py)
