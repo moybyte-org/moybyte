@@ -233,21 +233,29 @@ def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
             "    ws._paint_pix = bytes(ws.artwork_app.doc.pix)\n"
             "    ws.go_home()\n"
             "    return 1\n"
+            "def _paint_glass(px, py):\n"
+            "    w = getattr(ws.wm, '_wins', {}).get('artwork')\n"
+            "    if w is None or w.ctx is None:\n"
+            "        return a._to_glass((px, py))\n"
+            "    was = a.layout\n"
+            "    a.layout = w.ctx.artwork_layout\n"
+            "    try:\n"
+            "        gx, gy = a._to_glass((px, py))\n"
+            "    finally:\n"
+            "        a.layout = was\n"
+            "    cx, cy, _cw, _ch = w.content_rect()\n"
+            "    return (cx + gx, cy + gy)\n"
             "ws.mark_dirty()", strict=True)
         board.drain(1.0)
         assert board.pyval("bytes(ws.artwork_app.doc.pix) == bytes((ws.artwork_app.doc.pix[0],))"
                            " * len(ws.artwork_app.doc.pix)", strict=True), "the page is not blank"
-        st = board.state()
-        wins = [k for k in st.get("order") or [] if k != "desktop"]
-        ox = oy = 0
-        if wins:
-            w = st["wins"][wins[-1]]
-            ox, oy = w[0] + 1, w[1] + 1 + w[4]
+        # Where the drawing stands on the glass: a window's layout is
+        # installed only around its dispatch, so a probe between frames reads
+        # the root's and must put the window's in for the question.
         (x0, y0), (x1, y1) = board.pyval(
-            "(lambda a: (a._to_glass((a.doc.W // 3, a.doc.H // 2)), "
-            "a._to_glass((2 * a.doc.W // 3, a.doc.H // 2))))(ws.artwork_app)",
-            strict=True)
-        board.swipe(ox + x0, oy + y0, ox + x1, oy + y1, frames=20)
+            "(lambda a, g: (g(a.doc.W // 3, a.doc.H // 2), g(2 * a.doc.W // 3, a.doc.H // 2)))"
+            "(ws.artwork_app, ws._g['_paint_glass'])", strict=True)
+        board.swipe(x0, y0, x1, y1, frames=20)
         board.pyval("ws._g['_paint_leave']()", timeout=60)
         board.drain(1.0)
         assert board.pyval("getattr(ws, '_paint_probe', 0)") == 1, (
