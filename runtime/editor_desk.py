@@ -429,9 +429,9 @@ class EditorDesk(Layer):
         lay = ws.layout
         u = self._unit()
         panes, divs = self.placed()
-        cv.rect(lay.cx, lay.cy, lay.cw, lay.ch, th["panel"])
         fi = self._focus.get(self.key, 0)
         alone = self.alone()
+        self._ground(cv, th["panel"], lay, panes, divs, alone, u)
         shown = []
         self._cursors = []
         self._still_at = None
@@ -463,6 +463,32 @@ class EditorDesk(Layer):
             self._draw_loupe(cv, th, u)
         ws.bar_layer._draw_status_strip("menu")
         self._dock()
+
+    def _ground(self, cv, col, lay, panes, divs, alone, u):
+        """The Editor's ground where the cards leave it showing: the margin
+        round the panes area, the gutters between the panes and each card's
+        corners (its rounding is drawn over them). The cards cover the rest,
+        so the ground is never filled under them."""
+        ax, ay, aw, ah = self._area()
+        cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
+        cv.rect(cx, cy, cw, ay - cy, col)
+        cv.rect(cx, ay + ah, cw, cy + ch - ay - ah, col)
+        cv.rect(cx, ay, ax - cx, ah, col)
+        cv.rect(ax + aw, ay, cx + cw - ax - aw, ah, col)
+        rad = P.RADIUS * u
+        if alone is not None:
+            self._corners(cv, col, ax, ay, aw, ah, rad)
+            return
+        for _p, _i, _axis, (dx, dy, dw, dh) in divs:
+            cv.rect(dx, dy, dw, dh, col)
+        for _pane, (x, y, w, h), _path in panes:
+            self._corners(cv, col, x, y, w, h, rad)
+
+    def _corners(self, cv, col, x, y, w, h, rad):
+        cv.rect(x, y, rad, rad, col)
+        cv.rect(x + w - rad, y, rad, rad, col)
+        cv.rect(x, y + h - rad, rad, rad, col)
+        cv.rect(x + w - rad, y + h - rad, rad, rad, col)
 
     def _headless(self, pane):
         """The Settings workspace's game has no header: the game at 2x
