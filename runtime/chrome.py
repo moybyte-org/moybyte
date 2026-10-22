@@ -924,6 +924,7 @@ _THEME_FLAGS = ("surface_light", "bar_light", "band_light")
 _THEME_CACHE = {}
 _CONTENT_CACHE = {}
 _LIVE_CACHE = {}
+_LOOK_CACHE = {}
 RGB = 0x1000000             # a colour value at or above: RGB | 0xrrggbb
 PAINT = 0x2000000           # a look colour at or above is a paint, no colour
 LOOK_NONE = -2147483648     # a look leaf the theme leaves unset
@@ -1044,6 +1045,7 @@ def forget_themes():
     _THEME_CACHE.clear()
     _CONTENT_CACHE.clear()
     _LIVE_CACHE.clear()
+    _LOOK_CACHE.clear()
 
 
 def _look_raw(name, light):
@@ -1058,10 +1060,15 @@ def theme_look(name, variant=DEFAULT_VARIANT):
     """Theme `name`'s look leaves in `variant` as {leaf name: value}, a
     colour a palette index or RGB | 0xrrggbb, a width or alpha in
     hundredths, an unset leaf `LOOK_NONE`: what a picture of another theme
-    (Appearance's cards) reads its ground, bar and frame from."""
+    (Appearance's cards) reads its ground, bar and frame from. Returns a
+    shared cached dict (treat as read-only)."""
     if not theme_known(name):
         name = DEFAULT_THEME
-    return dict(zip(look_fields()[0], _look_raw(name, variant == "light")[0]))
+    key = (name, variant == "light")
+    got = _LOOK_CACHE.get(key)
+    if got is None:
+        got = _LOOK_CACHE[key] = dict(zip(look_fields()[0], _look_raw(name, key[1])[0]))
+    return got
 
 
 def backdrop(name, variant, surface):
