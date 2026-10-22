@@ -177,6 +177,14 @@ int moy_text_paint(const moy_text_target_t *t, uint32_t font, uint8_t source,
                    const uint8_t *s, size_t n, int x, int y, uint16_t col, int scale,
                    int align, int maxw, const moy_text_paint_t *p);
 
+// The glyph at byte `index` of version 2 font `font`, by the index alone,
+// never decoded as text: an icon set's slot (tools/make_icons.py), any of the
+// 256. Drawn as moy_text draws one glyph, its pen at (x, y) in `col` at
+// `scale`, reading what is under it. Its advance in pixels (0 where the index
+// gives the first record), or -1 where `font` is unknown or not version 2.
+int moy_text_glyph(const moy_text_target_t *t, uint32_t font, int index, int x, int y,
+                   uint16_t col, int scale);
+
 // The width `s` draws at `scale`, in pixels (0 for an unknown font): the sum
 // of its glyphs' advances and, in a version 2 font, its kerning pairs'.
 int moy_text_width(uint32_t font, const uint8_t *s, size_t n, int scale);

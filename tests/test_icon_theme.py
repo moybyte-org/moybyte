@@ -674,3 +674,190 @@ def test_the_new_card_is_a_blank_page_with_the_sets_plus(tmp_path, theme, mode):
     assert at(68, 68) == word(th["ink_accent"])
     assert at(30, 30) == word(th["surface"])
     assert at(68, 30) == word(th["surface"])      # above the plus's arm
+
+
+# -- the slots past 0x7f: an icon's glyph by its index, never decoded as text ----------
+
+PAST = [n for n in iconsets.SLOTS if iconsets.FIRST + iconsets.SLOT[n] > 0x7f]
+MASKS = sorted(p.name for p in ICONS.glob("*.fnt"))
+
+
+def test_the_sets_hold_slots_past_0x7f():
+    assert PAST and set(PAST) >= {"brush", "resize", "pointer", "grid", "volume", "loop"}
+    assert iconsets.FIRST + len(iconsets.SLOTS) <= 256
+
+
+@pytest.mark.parametrize("name", MASKS)
+def test_a_slot_past_0x7f_draws_its_mask_by_index(name):
+    """moy_ui.icon_mask draws the glyph at the slot's index byte, as the file
+    holds it: full coverage in the ink, none untouched, a part blended between
+    -- where a text draw would decode a lone byte past 0x7f as no codepoint."""
+    from runtime.host_canvas import make_system_canvas
+    import moy_ui
+    src = (ICONS / name).read_bytes()
+    size, top = src[6], (1 << src[5]) - 1
+    rc, fid = moy_ui.font_load(src)
+    assert rc == 0
+    try:
+        for slot in PAST:
+            g = _glyph(src, iconsets.FIRST + iconsets.SLOT[slot])
+            if g is None:
+                assert name.startswith("luna.fill"), (name, slot)   # a line icon's fill
+                continue
+            w, h, gx, gy, lv = g
+            cv = make_system_canvas(40, 40)
+            cv.rect(0, 0, 40, 40, 0)
+            cv.rect(0, 0, 1, 1, 7)
+            ink = _pixels(cv, (0, 0, 1, 1))[0]
+            cv.rect(0, 0, 1, 1, 0)
+            bg = _pixels(cv, (1, 0, 1, 1))[0]
+            _ui._C.icon_mask(cv, fid, iconsets.FIRST + iconsets.SLOT[slot], 4, 4, 7)
+            got = _pixels(cv, (4 + gx, 4 + size - gy, w, h))
+            for r in range(h):
+                for c in range(w):
+                    px = got[r][2 * c:2 * c + 2]
+                    if lv[r][c] == top:
+                        assert px == ink, (name, slot, c, r)
+                    elif lv[r][c] == 0:
+                        assert px == bg, (name, slot, c, r)
+                    else:
+                        assert px not in (ink, bg), (name, slot, c, r)
+            inked = sum(row.count(ink) for row in [[row[i:i + 2] for i in range(0, len(row), 2)]
+                                                   for row in _pixels(cv, (0, 0, 40, 40))])
+            assert inked == sum(v == top for row in lv for v in row), (name, slot)
+    finally:
+        moy_ui.font_free(fid)
+
+
+@pytest.mark.parametrize("box", [16, 20, 24, 32])
+def test_every_set_and_kind_draws_the_slots_past_0x7f(tmp_path, box):
+    ws = _ws(tmp_path)
+    cv = ws.sys_canvas
+    specs = [("smooth", s, None) for s in ("default", "coast", "luna")]
+    specs += [("pixel", None, None), ("pixel", None, bytes(range(15, -1, -1)))]
+    for spec in specs:
+        for slot in PAST:
+            cv.rect(0, 0, 40, 40, 0)
+            assert iconsets.draw(cv, slot, (0, 0, box, box), 7, spec), (spec, slot)
+            assert len(set(b"".join(_pixels(cv, (0, 0, box, box))))) > 1, (spec, slot)
+            if spec[0] == "smooth":
+                assert iconsets.ink_span(slot, box, box, spec) is not None, (spec, slot)
+    iconsets.reset()
+
+
+def test_the_title_buttons_draw_a_slot_past_0x7f(tmp_path):
+    """moy_ui.icons_use takes a slot's byte past 0x7f for a title button and
+    the C draws its mask by index."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="light")
+    cv = ws.sys_canvas
+    rect, th = (0, 0, 300, 120), 44
+
+    def frame():
+        cv.rect(0, 0, 300, 120, 7)
+        _ui.frame(cv, ws.theme_colors, rect, th, "T", True, True, 1)
+        return _pixels(cv, (150, 0, 150, th))
+
+    iconsets.use_parts(("smooth", "default", None))
+    masks = frame()
+    f16 = iconsets._pick("default", 16, True)[0]
+    f24 = iconsets._pick("default", 24, True)[0]
+    codes = [iconsets.FIRST + iconsets.SLOT[n] for n in ("grid", "resize", "loop")]
+    assert min(codes) > 0x7f
+    _ui._C.icons_use(f16, f24, *codes)
+    past = frame()
+    _ui._C.icons_use(0, 0, 0, 0, 0)
+    glyphs = frame()
+    assert past != masks and past != glyphs
+    iconsets.reset()
+    use_theme(ws, "night", "dark")
+
+
+# The boards' module: the same masks drawn by the desktop MicroPython's moy_ui.
+_MP_ICONS = r'''import sys
+sys.path.insert(0, @RUNTIME@)
+sys.path.insert(0, @DEVICE@)
+sys.path.insert(0, @STAGE@)
+import binascii
+import moy_ui
+import device_canvas as dc
+
+
+class Comp:
+    def __init__(self, w, h):
+        self._w, self._h = w, h
+        self._buf = bytearray(w * h * 2)
+
+    def size(self):
+        return (self._w, self._h)
+
+    def framebuffer(self):
+        return self._buf
+
+    def gfx(self):
+        import moy_gfx
+        return moy_gfx
+
+
+def make(w, h):
+    return dc.SystemCanvas(Comp(w, h))
+
+'''
+
+ICON_CASES = r'''
+def icon_cases(make, out, files, codes):
+    for name in files:
+        f = open(name, "rb")
+        src = f.read()
+        f.close()
+        rc, fid = moy_ui.font_load(src)
+        for code in codes:
+            cv = make(40, 40)
+            cv.rect(0, 0, 40, 40, 1)
+            moy_ui.icon_mask(cv, fid, code, 4, 4, 7)
+            cv.flush_batch()
+            out(rc, code, bytes(cv._buf))
+        moy_ui.font_free(fid)
+'''
+
+
+def test_the_boards_module_draws_the_slots_past_0x7f(tmp_path):
+    import shutil
+    import subprocess
+    import zlib
+    from unix_mp import require_unix_mp
+    exe = require_unix_mp(
+        "moy_ui", "moy_gfx", "moy_glass",
+        why="Without it the boards' icon_mask, the one every board imports, "
+            "never draws a slot past 0x7f on the host.")
+    import moy_ui
+    from runtime.host_canvas import make_system_canvas
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
+    shutil.copy(ROOT / "runtime" / "moy_image.py", stage / "moy_image.py")
+    files = [str(ICONS / n) for n in MASKS]
+    codes = [iconsets.FIRST + iconsets.SLOT[n] for n in PAST]
+    script = tmp_path / "icons.py"
+    script.write_text(_MP_ICONS.replace("@DEVICE@", repr(str(ROOT / "device")))
+                      .replace("@RUNTIME@", repr(str(ROOT / "runtime")))
+                      .replace("@STAGE@", repr(str(stage)))
+                      + ICON_CASES
+                      + "icon_cases(make, lambda rc, c, b: print(rc, c, binascii.crc32(b)), "
+                        "%r, %r)\n" % (files, codes))
+    run = subprocess.run([exe, str(script)], capture_output=True, text=True, timeout=120)
+    assert run.returncode == 0, run.stderr[-2000:] or run.stdout[-2000:]
+    got = [tuple(int(v) for v in ln.split()) for ln in run.stdout.splitlines()]
+    want = []
+    g = {"moy_ui": moy_ui}
+    exec(ICON_CASES, g)
+    g["icon_cases"](make_system_canvas,
+                    lambda rc, c, b: want.append((rc, c, zlib.crc32(b))), files, codes)
+    cv = make_system_canvas(40, 40)
+    cv.rect(0, 0, 40, 40, 1)
+    blank = zlib.crc32(bytes(cv._buf))
+    assert len(got) == len(want) == len(files) * len(codes)
+    assert got == want
+    held = [_glyph((ICONS / n).read_bytes(), c) is not None for n in MASKS for c in codes]
+    assert [w[0] for w in want] == [0] * len(want)
+    assert [w[2] != blank for w in want] == held

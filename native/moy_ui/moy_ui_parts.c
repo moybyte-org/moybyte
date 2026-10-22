@@ -452,9 +452,9 @@ static int icon_d(pd_t *d, int slot, int glyph, moy_ui_box_t b, int ci) {
     uint32_t font = box >= 24 && f24 ? f24 : f16 ? f16 : 0;
     if (slot >= 0 && font && !d->run && moy_ui_cmask() != 63) {   // a cart's: the glyph
         int size = font == f24 ? 24 : 16;
-        uint8_t code = (uint8_t)(MOY_UI_ICON_FIRST + slot);
-        int w = moy_text(&d->t, font, MOY_TEXT_DATA, &code, 1, b.x + moy_ui_fdiv(b.w - size, 2),
-                         b.y + moy_ui_fdiv(b.h - size, 2), pal(d, ci), 1, MOY_TEXT_LEFT, -1);
+        int w = moy_text_glyph(&d->t, font, MOY_UI_ICON_FIRST + slot,
+                               b.x + moy_ui_fdiv(b.w - size, 2),
+                               b.y + moy_ui_fdiv(b.h - size, 2), pal(d, ci), 1);
         d->row->st[MOY_ST_N_TEXT]++;
         if (w > 0) {
             return 1;
@@ -1243,10 +1243,9 @@ int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, in
         }
         int size = font == f24 ? 24 : 16;
         int sc = half / size > 1 ? half / size : 1;
-        uint8_t code = (uint8_t)(MOY_UI_ICON_FIRST + slot);
         int side = size * sc;
-        moy_text(&d.t, font, MOY_TEXT_DATA, &code, 1, content.x + (content.w - side) / 2,
-                 content.y + (content.h - side) / 2, pal(&d, v), sc, MOY_TEXT_LEFT, -1);
+        moy_text_glyph(&d.t, font, MOY_UI_ICON_FIRST + slot, content.x + (content.w - side) / 2,
+                       content.y + (content.h - side) / 2, pal(&d, v), sc);
         d.row->st[MOY_ST_N_TEXT]++;
         return MOY_UI_OK;
     }
@@ -2319,9 +2318,9 @@ static int icon_col(pd_t *d, int slot, int glyph, moy_ui_box_t b, uint16_t col) 
     uint32_t font = box >= 24 && f24 ? f24 : f16 ? f16 : 0;
     if (slot >= 0 && font && !d->run && moy_ui_cmask() != 63) {
         int size = font == f24 ? 24 : 16;
-        uint8_t code = (uint8_t)(MOY_UI_ICON_FIRST + slot);
-        int w = moy_text(&d->t, font, MOY_TEXT_DATA, &code, 1, b.x + moy_ui_fdiv(b.w - size, 2),
-                         b.y + moy_ui_fdiv(b.h - size, 2), col, 1, MOY_TEXT_LEFT, -1);
+        int w = moy_text_glyph(&d->t, font, MOY_UI_ICON_FIRST + slot,
+                               b.x + moy_ui_fdiv(b.w - size, 2),
+                               b.y + moy_ui_fdiv(b.h - size, 2), col, 1);
         d->row->st[MOY_ST_N_TEXT]++;
         if (w > 0) {
             return 1;

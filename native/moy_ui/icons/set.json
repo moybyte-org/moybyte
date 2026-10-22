@@ -8,6 +8,7 @@
   "luna": {
    "art": "#ffffff",
    "battery": "#46b843",
+   "brush": "#e2582e",
    "calc": "#c9d3e6",
    "copy": "#ffffff",
    "del": "#c9d3e6",
@@ -17,6 +18,7 @@
    "folder": "#f5c542",
    "game": "#c9d3e6",
    "getcarts": "#46b843",
+   "grid": "#9fd0ff",
    "home": "#f2a65a",
    "map": "#9fd0ff",
    "moy": "#c9b8ff",
@@ -26,6 +28,7 @@
    "paint": "#e2582e",
    "palette": "#f2c38a",
    "play": "#46b843",
+   "pointer": "#ffffff",
    "projects": "#f5c542",
    "run": "#46b843",
    "save": "#7da7ea",
@@ -34,6 +37,7 @@
    "star_on": "#f5c542",
    "storybook": "#e2582e",
    "trash": "#c9d3e6",
+   "volume": "#c9d3e6",
    "wallpaper": "#9fd0ff",
    "warn": "#f5c542"
   }
@@ -42,84 +46,84 @@
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 3431,
+   "bytes": 3682,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 8838,
+   "bytes": 9505,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 12472,
+   "bytes": 13420,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 4535,
+   "bytes": 4794,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 11496,
+   "bytes": 12175,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 15849,
+   "bytes": 16797,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 3538,
+   "bytes": 3794,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 9070,
+   "bytes": 9743,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 12500,
+   "bytes": 13448,
    "layer": "ink",
    "set": "luna",
    "size": 24
   },
   "luna.fill-16": {
    "bpp": 2,
-   "bytes": 1876,
+   "bytes": 1984,
    "layer": "fill",
    "set": "luna",
    "size": 16
   },
   "luna.fill-20": {
    "bpp": 4,
-   "bytes": 4374,
+   "bytes": 4656,
    "layer": "fill",
    "set": "luna",
    "size": 20
   },
   "luna.fill-24": {
    "bpp": 4,
-   "bytes": 5948,
+   "bytes": 6333,
    "layer": "fill",
    "set": "luna",
    "size": 24
@@ -238,7 +242,13 @@
   "align_r",
   "trans_none",
   "trans_fade",
-  "trans_swipe"
+  "trans_swipe",
+  "brush",
+  "resize",
+  "pointer",
+  "grid",
+  "volume",
+  "loop"
  ],
  "tiers": {
   "desktop": [

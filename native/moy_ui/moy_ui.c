@@ -680,9 +680,12 @@ static const char *const s_icon_slots[] = {
     "power", "sleep", "sliders", "copy", "palette", "export", "check", "warn",
     "text", "shapes", "to_front", "to_back", "spray", "picker", "pan", "cut",
     "paste", "layout", "slides", "background", "bubble", "align_l", "align_c", "align_r",
-    "trans_none", "trans_fade", "trans_swipe",
+    "trans_none", "trans_fade", "trans_swipe", "brush", "resize", "pointer", "grid",
+    "volume", "loop",
 };
 #define ICON_SLOTS ((int)(sizeof(s_icon_slots) / sizeof(s_icon_slots[0])))
+_Static_assert(MOY_UI_ICON_FIRST + ICON_SLOTS <= MOY_FONT_INDEX,
+               "a slot's byte is one of a mask file's index");
 // An alias and the slot it names, which is also the glyph table's name.
 static const char *const s_icon_alias[][2] = {
     {"gear", "settings"}, {"batt", "battery"}, {"edit", "pencil"},
@@ -744,7 +747,7 @@ int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint1
     if (font == 0) {
         return 0;
     }
-    return moy_text(t, font, MOY_TEXT_DATA, &code, 1, b.x + moy_ui_fdiv(b.w - size, 2),
-                    b.y + moy_ui_fdiv(b.h - size, 2), col, 1, MOY_TEXT_LEFT, -1) >= 0;
+    return moy_text_glyph(t, font, code, b.x + moy_ui_fdiv(b.w - size, 2),
+                          b.y + moy_ui_fdiv(b.h - size, 2), col, 1) >= 0;
 }
 

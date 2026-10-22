@@ -1288,7 +1288,8 @@ static mp_obj_t ui_glyph(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_glyph_obj, 5, 5, ui_glyph);
 
-// icon_mask(cv, font, code, x, y, ci): glyph `code` of icon set file `font`
+// icon_mask(cv, font, code, x, y, ci): the glyph at index byte `code` of icon set
+// file `font`
 static mp_obj_t ui_icon_mask(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_sink_t s;

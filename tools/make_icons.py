@@ -12,7 +12,8 @@ Every set fills the slots of `pixel/slots.txt`.
   `<slot>.fill.svg` layer where the set has two. Each layer of each set is
   rasterised by resvg at every size of SIZES into a font file, format
   version 2 (native/moy_gfx/moy_text.h): slot n is the glyph at byte
-  FIRST + n, its box placed so that the glyph drawn at (x, y) puts the
+  FIRST + n of its index, which the icons draw by index (moy_text_glyph),
+  never decoded as text, so a slot's byte may be past 0x7f; its box placed so that the glyph drawn at (x, y) puts the
   icon's square at (x, y); 2 bpp at 16 px and under, 4 bpp above. A
   slot's coverage is the alpha of its render quantised as the targets'
   (docs/media/look_2026-10/mockups.py `levels`). Moy is not a mask: it is
@@ -45,7 +46,7 @@ THEMES = os.path.join(ROOT, "native", "moy_ui", "themes")
 PIXEL = os.path.join(ICONS, "pixel", "system_icons.moygfx")
 
 SIZES = {"handheld": (16,), "desktop": (16, 20, 24)}
-FIRST = 0x21                # slot 0's byte; a version 2 font draws ASCII bytes as given
+FIRST = 0x21                # slot n's byte is FIRST + n, through 0xff
 MIRRORED = {"redo": "undo"}
 PIXEL_ONLY = ("moy",)
 DEFAULT_SET = "default"
@@ -62,7 +63,8 @@ FILLS = {
              "battery": "#46b843", "calc": "#c9d3e6", "getcarts": "#46b843",
              "save": "#7da7ea", "sprite": "#9be36b", "map": "#9fd0ff", "mute": "#c9d3e6",
              "copy": "#ffffff", "palette": "#f2c38a",
-             "export": "#f5c542", "warn": "#f5c542"},
+             "export": "#f5c542", "warn": "#f5c542", "brush": "#e2582e", "pointer": "#ffffff",
+             "grid": "#9fd0ff", "volume": "#c9d3e6"},
 }
 
 
@@ -128,6 +130,8 @@ def _pack(levels, bpp):
 def build_font(set_name, layer, size, names=None):
     """A version 2 font file: the slots of `set_name`'s `layer` at `size`."""
     names = slots() if names is None else names
+    if FIRST + len(names) > 256:
+        raise SystemExit("make_icons: %d slots, the index holds %d" % (len(names), 256 - FIRST))
     bpp = bpp_of(size)
     index = [0] * 256
     recs = [struct.pack("<I", 0)[:3] + struct.pack("<BBbbB", 0, 0, 0, 0, size)]

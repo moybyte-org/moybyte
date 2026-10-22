@@ -253,7 +253,7 @@ const uint8_t *moy_ui_moy(int *clear);
 // centred, in RGB565 `col`: 1 when drawn, 0 where no set is installed or
 // its font is gone (the caller draws its glyph).
 int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint16_t col);
-#define MOY_UI_ICON_FIRST 0x21          // slot 0's byte in a mask file
+#define MOY_UI_ICON_FIRST 0x21          // slot 0's byte in a mask file; slot n's is FIRST + n
 // The icon set's slot named `name` (tools/make_icons.py's order; `gear`,
 // `batt` and `edit` are aliases of settings, battery and pencil), -1 none.
 int moy_ui_icon_slot(const uint8_t *name, size_t n);
@@ -265,10 +265,11 @@ uint32_t moy_ui_icon_font(int size24);
 // `slot`, the largest that `b` holds, centred, else glyph `glyph` at the
 // font scale `fs`. 1 when drawn.
 int moy_ui_icon_in(const moy_ui_sink_t *s, int slot, int glyph, moy_ui_box_t b, int ci, int fs);
-// An icon mask through a sink (docs/look_2026-10.md step 16): glyph `code` of
-// font `font` (an icon set's file, tools/make_icons.py) at (x, y), the top
-// left of its square, blended in colour index `ci` at scale 1. MOY_UI_BAD
-// for a font that is not loaded.
+// An icon mask through a sink (docs/look_2026-10.md step 16): the glyph at
+// index byte `code` of font `font` (an icon set's file, tools/make_icons.py;
+// moy_text_glyph, never decoded as text) at (x, y), the top left of its
+// square, blended in colour index `ci` at scale 1. MOY_UI_BAD for a font that
+// is not loaded or not version 2.
 int moy_ui_sink_mask(const moy_ui_sink_t *s, uint32_t font, int code, int x, int y, int ci);
 // Every primitive counts its entry: the gate's "one crossing per widget".
 void moy_ui_count_call(void);

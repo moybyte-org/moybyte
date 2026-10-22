@@ -93,3 +93,9 @@
 92 trans_none
 93 trans_fade
 94 trans_swipe
+95 brush
+96 resize
+97 pointer
+98 grid
+99 volume
+100 loop
