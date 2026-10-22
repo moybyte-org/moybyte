@@ -122,14 +122,14 @@ def render():
         out.append("static const uint16_t PF_%s_ENDS[] = {" % u)
         out.append(_rows(ends))
         out.append("};")
-        out.append("static const moy_path_glyph_t PF_%s_GLYPHS[%d] = {" % (u, len(glyphs)))
+        out.append("static const moy_path_glyph_t PF_%s_RECS[%d] = {" % (u, len(glyphs)))
         out.append("\n".join("    {%d, %d, %d, %d, %d}," % g for g in glyphs))
         out.append("};")
         out.append("static const moy_path_kern_t PF_%s_KERNS[] = {" % u)
         out.append("\n".join("    {%d, %d, %d}," % k for k in sorted(kerns)) or "    {0, 0, 0},")
         out.append("};")
         out.append("")
-        table.append("    {%d, %d, %d, PF_%s_GLYPHS, PF_%s_PTS, PF_%s_ENDS, PF_%s_KERNS, %d},"
+        table.append("    {%d, %d, %d, PF_%s_RECS, PF_%s_PTS, PF_%s_ENDS, PF_%s_KERNS, %d},"
                      % (upm, asc, desc, u, u, u, u, len(kerns)))
     out.append("static const moy_path_face_t PF_FACES[MOY_PATH_FACES] = {")
     out.extend(table)

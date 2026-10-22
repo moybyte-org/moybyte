@@ -987,7 +987,7 @@ static const uint16_t PF_SANS_ENDS[] = {
     5356, 5384, 5395, 5406, 5428, 5440, 5462, 5474, 5496, 5508, 5530, 5542,
     5554, 5573, 5585, 5606, 5618, 5637, 5649, 5661,
 };
-static const moy_path_glyph_t PF_SANS_GLYPHS[224] = {
+static const moy_path_glyph_t PF_SANS_RECS[224] = {
     {293, 0, 0, 0, 0},
     {293, 0, 18, 0, 2},
     {337, 18, 8, 2, 2},
@@ -3322,7 +3322,7 @@ static const uint16_t PF_SANS_BOLD_ENDS[] = {
     5356, 5384, 5395, 5406, 5428, 5440, 5462, 5474, 5496, 5508, 5530, 5542,
     5554, 5573, 5585, 5606, 5618, 5637, 5649, 5661,
 };
-static const moy_path_glyph_t PF_SANS_BOLD_GLYPHS[224] = {
+static const moy_path_glyph_t PF_SANS_BOLD_RECS[224] = {
     {312, 0, 0, 0, 0},
     {303, 0, 18, 0, 2},
     {390, 18, 8, 2, 2},
@@ -5606,7 +5606,7 @@ static const uint16_t PF_MONO_ENDS[] = {
     5233, 5251, 5258, 5276, 5288, 5300, 5314, 5318, 5322, 5345, 5359, 5373,
     5385, 5397,
 };
-static const moy_path_glyph_t PF_MONO_GLYPHS[224] = {
+static const moy_path_glyph_t PF_MONO_RECS[224] = {
     {600, 0, 0, 0, 0},
     {600, 0, 20, 0, 2},
     {600, 20, 12, 2, 2},
@@ -5837,9 +5837,9 @@ static const moy_path_kern_t PF_MONO_KERNS[] = {
 };
 
 static const moy_path_face_t PF_FACES[MOY_PATH_FACES] = {
-    {1000, 984, -316, PF_SANS_GLYPHS, PF_SANS_PTS, PF_SANS_ENDS, PF_SANS_KERNS, 1128},
-    {1000, 984, -316, PF_SANS_BOLD_GLYPHS, PF_SANS_BOLD_PTS, PF_SANS_BOLD_ENDS, PF_SANS_BOLD_KERNS, 1120},
-    {1000, 1020, -300, PF_MONO_GLYPHS, PF_MONO_PTS, PF_MONO_ENDS, PF_MONO_KERNS, 0},
+    {1000, 984, -316, PF_SANS_RECS, PF_SANS_PTS, PF_SANS_ENDS, PF_SANS_KERNS, 1128},
+    {1000, 984, -316, PF_SANS_BOLD_RECS, PF_SANS_BOLD_PTS, PF_SANS_BOLD_ENDS, PF_SANS_BOLD_KERNS, 1120},
+    {1000, 1020, -300, PF_MONO_RECS, PF_MONO_PTS, PF_MONO_ENDS, PF_MONO_KERNS, 0},
 };
 
 #endif

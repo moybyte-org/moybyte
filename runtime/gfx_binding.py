@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   build          the host library: moy_gfx's compositor, libmoy and the shim
+#   _buf           a buffer's ctypes view and its capacity, shared, never copied
+#   fill           the compositor's verbs, in the native module's argument order
+#   rrect          the 2026-10 look's shapes: corners, rings, paints, shadows
+#   path_fill      filled paths and the outline faces (moy_path.c)
+#   text           petme128 and the theme fonts through moy_text
+#   sspr           the libmoy bridge verbs (sprites, maps, lines)
 """moy_gfx's compositor surface, on CPython, over `moyhost_gfx.c`.
 
 `device_canvas.py` is the raster on the boards and in the browser, and it
