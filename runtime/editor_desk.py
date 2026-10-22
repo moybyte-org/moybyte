@@ -1363,7 +1363,8 @@ class EditorDesk(Layer):
                 return False
             got = bool(self._in_pane(tab, body, layer.handle_pointer,
                                      px - body[0], py - body[1], click))
-            self._owe_restart(tab)
+            if click or tab != "code":
+                self._owe_restart(tab)         # Code's pointer edits are taps (its keys)
             if tab == "scene" and self._blocks():
                 ws.block_ui._sync_target_from_scene()   # its scripts, in the Blocks pane
             return got
