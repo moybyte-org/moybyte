@@ -451,9 +451,23 @@ class SceneEditorUI:
         if lay.verbs:
             self.page().draw(cv, th, (lay.cx, lay.cy, lay.cw, lay.ch), False)
             return
-        cv.rect(*(lay.body_fill + (th["surface"],)))
-        if self.sceneedit is not None and ws.project.sheet is not None:
-            self.draw_view(cv)
+        bx, by, bw, bh = lay.body_fill
+        col = th["surface"]
+        if self.sceneedit is None or ws.project.sheet is None:
+            cv.rect(bx, by, bw, bh, col)
+            return
+        # The view fills its own rect first: the body round it is all that
+        # takes the surface.
+        vx, vy, vw, vh = self._sv_area()
+        vx = max(bx, min(vx, bx + bw))
+        vy = max(by, min(vy, by + bh))
+        vr = max(vx, min(vx + vw, bx + bw))
+        vb = max(vy, min(vy + vh, by + bh))
+        cv.rect(bx, by, bw, vy - by, col)
+        cv.rect(bx, vb, bw, by + bh - vb, col)
+        cv.rect(bx, vy, vx - bx, vb - vy, col)
+        cv.rect(vr, vy, bx + bw - vr, vb - vy, col)
+        self.draw_view(cv)
 
     def draw_view(self, cv, boxes=True):
         """The world view: the dark field, the tilemap backdrop, the game
