@@ -885,12 +885,10 @@ class EditorDesk(Layer):
             pg = first + k
             cv.print(str(pg + 1), px - cap + 6 * u, top, th["ink_dim"], 1)
             cv.rect(px, top, pw, prow * tw, th["surface_alt"])
-            for row in range(prow):
-                for col in range(cols):
-                    t = (pg * prow + row) * cols + col
-                    cv.spr(sh.tile_image(t, 0), px + col * tw, top + row * tw, s)
-                    if t == cur:
-                        self._cursors.append((px + col * tw, top + row * tw, tw, tw))
+            cv.sspr(sh, 0, pg * prow * 8, cols * 8, prow * 8, px, top, pw, prow * tw, 0)
+            t = cur - pg * prow * cols
+            if 0 <= t < prow * cols:
+                self._cursors.append((px + (t % cols) * tw, top + (t // cols) * tw, tw, tw))
             self._sheet_rects.append((pg, (px, top, pw, prow * tw)))
             px += pw + cap
         cv.clip()
@@ -912,7 +910,8 @@ class EditorDesk(Layer):
             y = py + 20 * u
         cv.rrect(x, y, bw, bw, 6 * u, th["surface"], th["border"])
         cv.rect(x + m, y + m, d, d, th["surface_alt"])
-        cv.spr(sh.tile_image(t, 0), x + m, y + m, s)
+        ox, oy = sh.tile_origin(t)
+        cv.sspr(sh, ox, oy, 8, 8, x + m, y + m, d, d, 0)
 
     def _cur_sprite(self):
         """The sprite the Sheet and the Reference mark: the Sprite pane's,

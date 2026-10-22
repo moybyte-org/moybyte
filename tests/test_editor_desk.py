@@ -933,16 +933,16 @@ def test_a_press_held_on_the_sheet_shows_its_tile_in_a_3x_loupe(desk):
     real = d._draw_loupe
 
     def spy(cv, th, u):
-        real_spr = cv.spr
+        real_sspr = cv.sspr
 
-        def spr(img, x, y, s=1, *a, **k):
-            calls.append((y, s))
-            return real_spr(img, x, y, s, *a, **k)
-        cv.spr = spr
+        def sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, *a, **k):
+            calls.append((dy, dw // sw))
+            return real_sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, *a, **k)
+        cv.sspr = sspr
         try:
             real(cv, th, u)
         finally:
-            del cv.spr
+            del cv.sspr
     d._draw_loupe = spy
     ws._dirty = True
     drv.frame(DT)

@@ -53,9 +53,11 @@ the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 try:
     import ui as _ui              # frozen on device
     import ui_draw as _ui_draw
+    from editor_map import checker as _checker
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
+    from runtime.editor_map import checker as _checker
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 from editors import PaintEditor, KeyEdge, _pe_line
 
@@ -1139,11 +1141,7 @@ class PaintLayer:
 
     def _checker(self, cv, x, y, w, h, s, greys):
         """Transparency's grey checker over (x, y, w, h) in squares of s."""
-        dark, light = greys
-        cv.rect(x, y, w, h, light)
-        for yy in range(0, h, s):
-            for xx in range(s if (yy // s) & 1 == 0 else 0, w, 2 * s):
-                cv.rect(x + xx, y + yy, min(s, w - xx), min(s, h - yy), dark)
+        _checker(cv, x, y, w, h, s, greys[0], greys[1])
 
     def _draw_look(self, sheet):
         """The sprite tab in the theme's roles (docs/look_2026-10.md step 24):
@@ -1360,10 +1358,8 @@ class PaintLayer:
         tile = sheet.TILE * k
         cols = sheet.cols
         self._checker(cv, x0, y0, cols * tile, rows * tile, max(2, 2 * k), greys)
-        for r in range(rows):
-            for c in range(cols):
-                cv.spr(sheet.tile_image((first + r) * cols + c, 0),
-                       x0 + c * tile, y0 + r * tile, k)
+        cv.sspr(sheet, 0, first * sheet.TILE, cols * sheet.TILE, rows * sheet.TILE,
+                x0, y0, cols * tile, rows * tile, 0)
         fs = lay.fs
         fh = min(8 * fs, rows * tile // 2)
         if first > 0:
@@ -1577,9 +1573,7 @@ class PaintLayer:
         x, y, w, h, st = _ui.part("Sheet", pw, ph)
         if w > 0 and h > 0:
             x0, y0 = x + m, y + m
-            for t in range(sheet.count):
-                tx, ty = sheet.tile_origin(t)
-                cv.spr(sheet.tile_image(t, 0), x0 + tx * k, y0 + ty * k, k)
+            cv.sspr(sheet, 0, 0, sheet.w, sheet.h, x0, y0, sheet.w * k, sheet.h * k, 0)
             tx, ty = sheet.tile_origin(pe.n)
             span = pe.size * tile
             cv.rectb(x0 + tx * k - 1, y0 + ty * k - 1, span + 2, span + 2, th["value"])

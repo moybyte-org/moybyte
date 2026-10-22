@@ -17,6 +17,8 @@ tap paints, a drag pans, a still hold picks); the keys stay the tab's own
 focus, and the verbs take the taps. Resize opens a popover whose keys are
 its own while it is open."""
 
+from array import array
+
 try:
     import ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -34,6 +36,30 @@ def times(a, b=None):
     """`a×b`, or `a×` alone, in the print font's sign where it has one."""
     x = "×" if ui.has_symbols() else "x"
     return "%d%s%s" % (a, x, "" if b is None else str(b))
+
+
+_CHECKERS = {}                   # (w, h, s) packed in one int -> the dark squares
+
+
+def checker(cv, x, y, w, h, s, dark, light):
+    """Transparency's grey checker over (x, y, w, h) in squares of `s`, the
+    first row's first square light (the Sprite tab's grid and swatch, the
+    Map's and the Scene's brushes): the light ground, then every dark square
+    in one `fill_rects` of a quad list kept per size."""
+    cv.rect(x, y, w, h, light)
+    if w <= 0 or h <= 0 or s <= 0:
+        return
+    key = (w & 0xFFF) | ((h & 0xFFF) << 12) | ((s & 0x3F) << 24)
+    quads = _CHECKERS.get(key)
+    if quads is None:
+        q = []
+        for yy in range(0, h, s):
+            for xx in range(s if (yy // s) & 1 == 0 else 0, w, 2 * s):
+                q += (xx, yy, min(s, w - xx), min(s, h - yy), 0)
+        if len(_CHECKERS) >= 32:
+            _CHECKERS.clear()
+        quads = _CHECKERS[key] = array("h", q)
+    cv.fill_rects(quads, -1, x, y, dark)
 
 
 def _width(text):
@@ -92,10 +118,7 @@ class MapPage:
             tx = px + (k % 4) * CELL
             ty = y + (k // 4) * CELL
             s = CELL - 2
-            cv.rect(tx, ty, s, s, light)
-            for yy in range(0, s, 4):
-                for xx in range(4 if (yy // 4) & 1 == 0 else 0, s, 8):
-                    cv.rect(tx + xx, ty + yy, min(4, s - xx), min(4, s - yy), dark)
+            checker(cv, tx, ty, s, s, 4, dark, light)
             img = sheet.tile_image(ids[k], -1)
             if img is not None:
                 cv.spr(img, tx + (s - 2 * sheet.TILE) // 2, ty + (s - 2 * sheet.TILE) // 2, 2)

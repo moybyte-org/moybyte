@@ -21,8 +21,10 @@ running game as the tab's taps are."""
 
 try:
     import ui
+    from editor_map import checker
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui
+    from runtime.editor_map import checker
 
 ACTOR_VERBS = ("Tag", "Flip", "Front", "Back", "Remove")
 ACTOR_ICONS = ("notes", "flip", "arrow_up", "arrow_down", "del")
@@ -54,10 +56,7 @@ class ScenePage:
 
     def _checker(self, cv, x, y, s):
         dark, light = self._greys()
-        cv.rect(x, y, s, s, light)
-        for yy in range(0, s, 4):
-            for xx in range(4 if (yy // 4) & 1 == 0 else 0, s, 8):
-                cv.rect(x + xx, y + yy, min(4, s - xx), min(4, s - yy), dark)
+        checker(cv, x, y, s, s, 4, dark, light)
 
     # -- drawing ------------------------------------------------------------------
 
