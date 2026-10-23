@@ -269,6 +269,10 @@ _CATS = (("events", "When..."), ("control", "Control"), ("draw", "Draw"),
          ("input", "Buttons"), ("variables", "Variables"), ("lists", "Lists"),
          ("actors", "Sprite"), ("looks", "Looks"), ("operators", "Math"),
          ("sound", "Sound"), ("myblocks", "My Blocks"))
+# The palette's two columns: the categories alternately (a board's MicroPython
+# slices with no step).
+_CAT_SIDES = (tuple(_CATS[i] for i in range(0, len(_CATS), 2)),
+              tuple(_CATS[i] for i in range(1, len(_CATS), 2)))
 _NEW = {"variables": ("\x00new_var", "+ new variable"),
         "lists": ("\x00new_list", "+ new list"),
         "myblocks": ("\x00new_proc", "+ new block")}
@@ -336,7 +340,7 @@ def palette(desk, r, u):
     half = (w - 2 * pad - 4 * u) // 2
     rows = (len(_CATS) + 1) // 2
     for side in (0, 1):
-        part = _CATS[side::2]
+        part = _CAT_SIDES[side]
         cx = x + pad + side * (half + 4 * u)
         names = ["   " + label for _k, label in part]
         cur = [k for k, _l in part].index(cat) if cat in [k for k, _l in part] else -1
