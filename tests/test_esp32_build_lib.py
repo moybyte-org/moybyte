@@ -869,6 +869,47 @@ def test_the_patched_slice_store_writes_what_the_stock_one_does(tmp_path):
     assert r.returncode == 0 and r.stdout.strip() == "0", r.stdout
 
 
+# -- a found extensible built-in enters sys.modules ------------------------------
+
+def _import_cache():
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import patch_import_cache
+    finally:
+        sys.path.pop(0)
+    return patch_import_cache
+
+
+def _builtinimport(tmp_path, body):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "builtinimport.c"
+    f.write_text("        #if MICROPY_HAVE_REGISTERED_EXTENSIBLE_MODULES\n" + body
+                 + "        #endif\n", encoding="utf-8")
+    return f, sh("moybyte_patch_import_cache", MPY_DIR=str(tmp_path),
+                 REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_import_cache_patch_is_idempotent_and_refuses_a_changed_fallback(tmp_path):
+    """The fallback gains the one store into the loaded-modules dict and keeps
+    its return; a warm tree is left as it is, and a stock fallback that changed
+    shape stops the build with nothing written."""
+    pic = _import_cache()
+    f, r = _builtinimport(tmp_path, pic.STOCK)
+    assert r.returncode == 0, r.stderr
+    once = f.read_text(encoding="utf-8")
+    assert pic.MARKER in once and pic.STOCK not in once
+    assert "MP_MAP_LOOKUP_ADD_IF_NOT_FOUND)->value = module_obj;" in once
+    assert once.count("return module_obj;") == 1
+    r = sh("moybyte_patch_import_cache", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    changed = pic.STOCK.replace("level_mod_name, true", "full_mod_name, true")
+    g, r = _builtinimport(tmp_path / "b", changed)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert pic.MARKER not in g.read_text(encoding="utf-8")
+
+
 def test_a_repr_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
     """The guard is the point: a silent no-op is a board quietly running boxed
     floats again, which costs a 130-175ms GC hitch -- and, since the ESP-NOW

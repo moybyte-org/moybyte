@@ -67,6 +67,9 @@ moybyte_patch_gc_meters
 # An equal-length slice store moves no tail: every board takes it, and
 # tools/patch_slice_store.py carries the measurement.
 moybyte_patch_slice_store
+# A found extensible built-in enters sys.modules: every board takes it,
+# and tools/patch_import_cache.py carries the measurement.
+moybyte_patch_import_cache
 moybyte_patch_gc_split_reserve
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.

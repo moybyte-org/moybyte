@@ -220,6 +220,16 @@ moybyte_patch_slice_store() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}" || exit 1
 }
 
+# An extensible built-in (`json`, `array`, `time`, ...) is entered in
+# sys.modules once an import has found it: stock searches every sys.path entry
+# for the name on EVERY import of it, 24 ms a miss on a T-Deck.
+# tools/patch_import_cache.py is the patch and the measurement: all-or-nothing,
+# idempotent, and the first import of a name still searches the path.
+moybyte_patch_import_cache() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_import_cache.py" "${MPY_DIR}" || exit 1
+}
+
 # A 4 KB stdin ring, in the ESP32-P4's TCM, for a board whose serial is a
 # UART, and an RX ISR that wakes the reader. The port's stock ring is 260 bytes
 # and the UART has no flow control, so a heap collection landing while a long

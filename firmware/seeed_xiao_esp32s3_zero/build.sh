@@ -66,6 +66,9 @@ moybyte_patch_native_code_free
 # An equal-length slice store moves no tail: every board takes it, and
 # tools/patch_slice_store.py carries the measurement.
 moybyte_patch_slice_store
+# A found extensible built-in enters sys.modules: every board takes it,
+# and tools/patch_import_cache.py carries the measurement.
+moybyte_patch_import_cache
 #
 # DECLINED moybyte_patch_repr_c -- unboxed 30-bit floats (#66). The lever is a
 #    CART INTERPRETER tax: REPR_A boxes every float RESULT in 16 bytes of heap,
