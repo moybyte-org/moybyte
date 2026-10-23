@@ -778,6 +778,28 @@ void moy_shape_shadow_pad(const moy_shape_shadow_t *s, int out[4]) {
     out[3] = imax(0, b + s->dy);
 }
 
+// Pixels [X0, X1) of a row at one weight `a` of canonical `col`, as the
+// per-pixel loop writes them (over, rounded); each run of one colour blended
+// once. Answers the pixels written.
+static int shadow_run(uint16_t *row, int X0, int X1, uint16_t col, int a) {
+    if (a == 0 || X1 <= X0) {
+        return 0;
+    }
+    if (a >= 256) {
+        mg_fill_run(row + X0, (size_t)(X1 - X0), wire(col));
+        return X1 - X0;
+    }
+    uint16_t from = row[X0], to = wire(over(col, can(from), a));
+    for (int X = X0; X < X1; X++) {
+        if (row[X] != from) {
+            from = row[X];
+            to = wire(over(col, can(from), a));
+        }
+        row[X] = to;
+    }
+    return X1 - X0;
+}
+
 int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
                      const moy_shape_shadow_t *s, const moy_shape_hole_t *hole) {
     tgt_t g;
@@ -799,23 +821,33 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
     int n = 0;
     int Ya = imax(sy - b, g.y0), Yb = imin(sy + h + b, g.y1);
     int Xa = imax(sx - b, g.x0), Xb = imin(sx + w + b, g.x1);
+    // Columns whose mask cell lies past its corner box take the row's one
+    // weight (mask_at): [Ia, Ib) on the buffer.
+    int C = m->C, Ia = imax(sx + C - b, Xa), Ib = imin(sx + w - (C - b), Xb);
     for (int Y = Ya; Y < Yb; Y++) {
         tgt_row(&g, Y);
         int i = Y - sy;
         int ii = imin(i, h - 1 - i) + b;
         uint16_t *row = g.px + (size_t)Y * (size_t)g.stride;
-        for (int X = Xa; X < Xb; X++) {
+        int X = Xa;
+        while (X < Xb) {
             if (X >= g.hx0 && X < g.hx1) {
-                X = g.hx1 - 1;
+                X = g.hx1;
+                continue;
+            }
+            if (X >= Ia && X < Ib) {
+                int stop = g.hx1 > g.hx0 && g.hx0 > X && g.hx0 < Ib ? g.hx0 : Ib;
+                n += shadow_run(row, X, stop, col, wt[mask_at(m, ii, C)]);
+                X = stop;
                 continue;
             }
             int j = X - sx;
             int a = wt[mask_at(m, ii, imin(j, w - 1 - j) + b)];
-            if (a == 0) {
-                continue;
+            if (a != 0) {
+                row[X] = wire(a >= 256 ? col : over(col, can(row[X]), a));
+                n++;
             }
-            row[X] = wire(a >= 256 ? col : over(col, can(row[X]), a));
-            n++;
+            X++;
         }
     }
     s_st[MOY_SHAPE_ST_BLENDS] += (uint32_t)n;
