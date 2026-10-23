@@ -410,6 +410,7 @@ class TextConsole:
         self.cols = max(self.MIN_COLS, (cv.w - 2 * pad) // fw)
         self.rows = max(self.MIN_ROWS, body_h // lh)
         self.ed.set_view_size(self.cols, 1)
+        self.ed._scroll()                # the one-line prompt follows its caret
         # The log, oldest-visible first. `back` is how far up from the tail.
         first = max(0, self._n - self.rows - self.back)
         y = top + pad

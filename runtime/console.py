@@ -1644,15 +1644,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         `code_layout` after __init__ -- _relayout above and EditorApp._relayout_tab
         (entering the tab, #216) both come through here.
 
-        Adopting is gated on the LAYOUT's window actually changing, because
-        `set_view_size` re-runs the caret-follow scroll and this now runs on EVERY
-        entry into the tab. A kid who scrolled away from the caret and came back
-        through the tab ladder -- or re-tapped CODE while already on it -- had the
-        view snapped back to the caret. Re-deriving geometry must not move what the
-        kid is looking at; only a real reflow may. The gate compares LAYOUTS, not
-        the editor's live window, because the line-number gutter narrows that
-        window itself (code_layer._apply_gutter) and re-widening it here would
-        yank the view on every entry with the gutter on."""
+        Adopting is gated on the LAYOUT's window actually changing, and compares
+        LAYOUTS, not the editor's live window, because the line-number gutter
+        narrows that window itself (code_layer._apply_gutter). A real reflow
+        shows the caret again; re-deriving the same layout, and the desk's panes
+        setting theirs each frame (`set_view_size` alone), keep the view where
+        it was scrolled to."""
         prev = getattr(self, "code_layout", None)
         lay = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
                          self.look.effective_font_scale(),
@@ -1663,6 +1660,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if ed is not None and (prev is None
                                or (prev.cols, prev.rows) != (lay.cols, lay.rows)):
             ed.set_view_size(lay.cols, lay.rows)
+            ed._scroll()
 
 
     # -- WEB CONSOLE (#197): forwards to the `web` collaborator ---------------

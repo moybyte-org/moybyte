@@ -391,6 +391,28 @@ def test_an_idle_code_pane_reads_its_document_only_after_a_key(desk, monkeypatch
     assert "code" in asked and "code" in app.start_owed
 
 
+def test_the_wheel_scrolls_the_code_pane_past_its_caret_and_a_key_brings_it_back(desk):
+    """The wheel moves the view, not the caret, and nothing pulls the view
+    back to the caret: the pane's layout is set every frame, and adopting
+    it keeps the view where the wheel put it. A typed key shows the caret."""
+    ws, drv = desk
+    _tap(drv, ord("2"), 1)                      # Code: the Code pane focused
+    d = ws.editor_desk
+    ed = ws.editor
+    ed.set_text("\n".join("v%d = 1" % i for i in range(300)))
+    x, y, w, h = _pane(d, "code")
+    ox, oy = d._origin()
+    drv.hover(ox + x + w // 2, oy + y + h // 2)
+    drv.frame(DT)
+    for _ in range(110):
+        drv.wheel(0, 1)
+        drv.frame(DT)
+    assert ed.top + ed.ROWS == len(ed.lines), "the last line is shown"
+    assert (ed.row, ed.col) == (0, 0), "the caret stays"
+    _tap(drv, ord("x"))
+    assert ed.top <= ed.row < ed.top + ed.ROWS and ed.lines[0].startswith("x")
+
+
 def test_play_runs_the_game_in_the_run_slot_and_stop_ends_it(desk):
     ws, drv = desk
     d = ws.editor_desk
