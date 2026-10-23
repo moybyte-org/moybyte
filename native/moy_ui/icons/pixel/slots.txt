@@ -99,3 +99,10 @@
 98 grid
 99 volume
 100 loop
+101 trophy
+102 lock
+103 heart
+104 spark
+105 smile
+106 key
+107 secret

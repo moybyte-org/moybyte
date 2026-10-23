@@ -19,7 +19,10 @@
    "game": "#c9d3e6",
    "getcarts": "#46b843",
    "grid": "#9fd0ff",
+   "heart": "#e2582e",
    "home": "#f2a65a",
+   "key": "#f5c542",
+   "lock": "#f5c542",
    "map": "#9fd0ff",
    "moy": "#c9b8ff",
    "music": "#46b843",
@@ -33,10 +36,13 @@
    "run": "#46b843",
    "save": "#7da7ea",
    "settings": "#b8c0cc",
+   "smile": "#f5c542",
+   "spark": "#f5c542",
    "sprite": "#9be36b",
    "star_on": "#f5c542",
    "storybook": "#e2582e",
    "trash": "#c9d3e6",
+   "trophy": "#f5c542",
    "volume": "#c9d3e6",
    "wallpaper": "#9fd0ff",
    "warn": "#f5c542"
@@ -46,84 +52,84 @@
  "masks": {
   "coast-16": {
    "bpp": 2,
-   "bytes": 3682,
+   "bytes": 3960,
    "layer": "ink",
    "set": "coast",
    "size": 16
   },
   "coast-20": {
    "bpp": 4,
-   "bytes": 9505,
+   "bytes": 10275,
    "layer": "ink",
    "set": "coast",
    "size": 20
   },
   "coast-24": {
    "bpp": 4,
-   "bytes": 13420,
+   "bytes": 14557,
    "layer": "ink",
    "set": "coast",
    "size": 24
   },
   "default-16": {
    "bpp": 2,
-   "bytes": 4794,
+   "bytes": 5092,
    "layer": "ink",
    "set": "default",
    "size": 16
   },
   "default-20": {
    "bpp": 4,
-   "bytes": 12175,
+   "bytes": 12979,
    "layer": "ink",
    "set": "default",
    "size": 20
   },
   "default-24": {
    "bpp": 4,
-   "bytes": 16797,
+   "bytes": 17934,
    "layer": "ink",
    "set": "default",
    "size": 24
   },
   "luna-16": {
    "bpp": 2,
-   "bytes": 3794,
+   "bytes": 4072,
    "layer": "ink",
    "set": "luna",
    "size": 16
   },
   "luna-20": {
    "bpp": 4,
-   "bytes": 9743,
+   "bytes": 10526,
    "layer": "ink",
    "set": "luna",
    "size": 20
   },
   "luna-24": {
    "bpp": 4,
-   "bytes": 13448,
+   "bytes": 14585,
    "layer": "ink",
    "set": "luna",
    "size": 24
   },
   "luna.fill-16": {
    "bpp": 2,
-   "bytes": 1984,
+   "bytes": 2157,
    "layer": "fill",
    "set": "luna",
    "size": 16
   },
   "luna.fill-20": {
    "bpp": 4,
-   "bytes": 4656,
+   "bytes": 5100,
    "layer": "fill",
    "set": "luna",
    "size": 20
   },
   "luna.fill-24": {
    "bpp": 4,
-   "bytes": 6333,
+   "bytes": 6929,
    "layer": "fill",
    "set": "luna",
    "size": 24
@@ -248,7 +254,14 @@
   "pointer",
   "grid",
   "volume",
-  "loop"
+  "loop",
+  "trophy",
+  "lock",
+  "heart",
+  "spark",
+  "smile",
+  "key",
+  "secret"
  ],
  "tiers": {
   "desktop": [

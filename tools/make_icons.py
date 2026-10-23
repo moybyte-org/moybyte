@@ -64,7 +64,8 @@ FILLS = {
              "save": "#7da7ea", "sprite": "#9be36b", "map": "#9fd0ff", "mute": "#c9d3e6",
              "copy": "#ffffff", "palette": "#f2c38a",
              "export": "#f5c542", "warn": "#f5c542", "brush": "#e2582e", "pointer": "#ffffff",
-             "grid": "#9fd0ff", "volume": "#c9d3e6"},
+             "grid": "#9fd0ff", "volume": "#c9d3e6", "trophy": "#f5c542", "lock": "#f5c542",
+             "heart": "#e2582e", "spark": "#f5c542", "smile": "#f5c542", "key": "#f5c542"},
 }
 
 
