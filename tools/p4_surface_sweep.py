@@ -131,6 +131,10 @@ def run(b, name, verb):
         cx = w[0] + 1 + w[2] // 2
         ct = w[1] + 1 + w[4]
         y0, y1 = ct + (w[3] - w[4]) - 40, ct + 40
+        if name == "code":
+            # Above the touch symbol keys: they type on press, and the
+            # autosave would keep what the sweep typed into the cart.
+            y0 = ct + (w[3] - w[4]) * 3 // 5
         where = "win:" + k
     else:
         cx, y0, y1 = 512, 540, 80
