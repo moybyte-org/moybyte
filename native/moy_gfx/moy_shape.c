@@ -779,8 +779,9 @@ void moy_shape_shadow_pad(const moy_shape_shadow_t *s, int out[4]) {
 }
 
 // Pixels [X0, X1) of a row at one weight `a` of canonical `col`, as the
-// per-pixel loop writes them (over, rounded); each run of one colour blended
-// once. Answers the pixels written.
+// per-pixel loop writes them (over, rounded). A long run blends through a
+// table of each channel's 32 or 64 results, the same sums over() makes.
+// Answers the pixels written.
 static int shadow_run(uint16_t *row, int X0, int X1, uint16_t col, int a) {
     if (a == 0 || X1 <= X0) {
         return 0;
@@ -789,13 +790,31 @@ static int shadow_run(uint16_t *row, int X0, int X1, uint16_t col, int a) {
         mg_fill_run(row + X0, (size_t)(X1 - X0), wire(col));
         return X1 - X0;
     }
-    uint16_t from = row[X0], to = wire(over(col, can(from), a));
-    for (int X = X0; X < X1; X++) {
-        if (row[X] != from) {
-            from = row[X];
-            to = wire(over(col, can(from), a));
+    if (X1 - X0 < 64) {
+        uint16_t from = row[X0], to = wire(over(col, can(from), a));
+        for (int X = X0; X < X1; X++) {
+            if (row[X] != from) {
+                from = row[X];
+                to = wire(over(col, can(from), a));
+            }
+            row[X] = to;
         }
-        row[X] = to;
+        return X1 - X0;
+    }
+    int iw = 256 - a;
+    int fr = ((col >> 11) & 31) * a + 128, fg = ((col >> 5) & 63) * a + 128,
+        fb = (col & 31) * a + 128;
+    uint16_t tr[32], tg[64], tb[32];
+    for (int v = 0; v < 32; v++) {
+        tr[v] = (uint16_t)(((fr + v * iw) >> 8) << 11);
+        tb[v] = (uint16_t)((fb + v * iw) >> 8);
+    }
+    for (int v = 0; v < 64; v++) {
+        tg[v] = (uint16_t)(((fg + v * iw) >> 8) << 5);
+    }
+    for (int X = X0; X < X1; X++) {
+        uint16_t c = can(row[X]);
+        row[X] = wire((uint16_t)(tr[c >> 11] | tg[(c >> 5) & 63] | tb[c & 31]));
     }
     return X1 - X0;
 }
