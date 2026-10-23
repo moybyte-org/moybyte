@@ -240,6 +240,231 @@ contrast-dark_handheld_achievement-unlocked@3x.png — same, enlarged 3x (neares
 contrast-dark_handheld_about.png — About from the system menu over the washed home (no focus under it): Moy, the wordmark, the version and the board, then Updates (up to date) and Licences; focus on Updates; Contrast (dark); 320x240
 contrast-dark_handheld_about@3x.png — same, enlarged 3x (nearest)
 contrast-dark_desktop_achievements.png — Achievements as a page of the Settings window: six badges a row, To find peeking under Found, the focused badge's name, how it is found and its state in the foot; focus on Cart Explorer; Contrast (dark); 1024x600
+moy-light_handheld_splash.png — The boot splash: Moy at 4x over the wordmark, on the stored theme's ground; Moy Day; 320x240
+moy-light_handheld_splash@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_splash-boot.png — A first boot's splash: the track under the wordmark and what it is doing in dim; Moy Day; 320x240
+moy-light_handheld_splash-boot@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_loading.png — The loading pill on purpose over the cover being opened, flat, the hint strip quiet (a load cannot be cancelled); kept by the panel through the load; Moy Day; 320x240
+moy-light_handheld_loading@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_calendar.png — The clock's calendar, hung from the bar, flat, no wash: the month, the weekdays, today a bold number on a value disc, the weekend in dim; ← → page a month; Moy Day; 320x240
+moy-light_handheld_calendar@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_power.png — The battery's popover: the level and the time left, then Volume and Brightness as slider rows; focus on Brightness; Moy Day; 320x240
+moy-light_handheld_power@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_wifi.png — The Wi-Fi popover: the popover's card holding Settings' Wi-Fi page -- the radio, the joined network checked, the others' signal and lock, Other network; Moy Day; 320x240
+moy-light_handheld_wifi@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_crash.png — A game stopped: the stop card centred over the frozen game washed 60% -- Moy, the title and Stopped, the sentence, the error exact in the code face, See why, Restart and Home, its keys in its foot; Moy Day; 320x240
+moy-light_handheld_crash@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_crash-compiled.png — A compiled cart's trap: the same card with no See why (no source line behind it); Moy Day; 320x240
+moy-light_handheld_crash-compiled@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_notice.png — A cart this console cannot run, over the home washed whole: the same card, its words only what the sentence does not say, Open Updates and Home, its keys in its foot; Moy Day; 320x240
+moy-light_handheld_notice@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_crash-code.png — See why: the Code tab on the stopped line, its popover hung under it after the gutter, the error exact; the first edit or Mic closes it; Moy Day; 320x240
+moy-light_handheld_crash-code@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_code-find.png — Find in the Code tab: the field under the bar, the count, Aa; the matches tinted, the current one (2 of 5) stronger with a bar and the caret on it; the keys in the status line; Moy Day; 320x240
+moy-light_handheld_code-find@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_code-complete.png — Completion under _ba as it is typed: the names in the code face, the typed part in value, each one's kind; a flat popover; Moy Day; 320x240
+moy-light_handheld_code-complete@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_code-goto.png — Go to a definition: a popover with its own field over the cart's defs and their lines; Moy Day; 320x240
+moy-light_handheld_code-goto@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_code-files.png — The cart's scripts hung from the bar's Code tab: main.py checked as the open one, helpers.py focused, New script; Moy Day; 320x240
+moy-light_handheld_code-files@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_blocks-name.png — Blocks' name prompt as a dialog over the washed editor: the field; its keys in the hint strip, no button row on the T-Deck; Moy Day; 320x240
+moy-light_handheld_blocks-name@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_blocks-number.png — Blocks' number prompt: the field with the slot's value as its placeholder; Use a block a button the trackball rolls to; the keys type the digits, so no pad; Moy Day; 320x240
+moy-light_handheld_blocks-number@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_cart-info.png — Make it mine's Cart info: Title and Made by; the trackball moves between them, Enter saves, Mic cancels; Moy Day; 320x240
+moy-light_handheld_cart-info@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_new-script.png — Make it mine's New script: the name; Enter adds, Mic cancels; Moy Day; 320x240
+moy-light_handheld_new-script@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_project-files.png — The project's files as a page of Make it mine: Code (New script last) and Art and sound, each file's icon, name and the tab it opens in; Moy Day; 320x240
+moy-light_handheld_project-files@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_web-console.png — The web console: the QR on its white quiet zone, the address and the pin, K turns it off; Moy Day; 320x240
+moy-light_handheld_web-console@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_text-console.png — A script's text console: the scrollback in the code face, what was typed in value (the live answer too), the prompt line at the foot; Moy Day; 320x240
+moy-light_handheld_text-console@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_text-console-done.png — A script that ended: The script ended. in the prompt line's place; Moy Day; 320x240
+moy-light_handheld_text-console-done@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_home-grid.png — The home's grid arrangement: two rows of cards scrolling sideways, the last column cut by more than a third, titles cut to their card; focus grows and rings Hop Quest, its title bold; Moy Day; 320x240
+moy-light_handheld_home-grid@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_home-icons.png — The home's icons arrangement: icons alone, the focused one ringed, its name and line in the caption band at the grid's foot, which clips the top of a fourth row (the grid scrolls); Moy Day; 320x240
+moy-light_handheld_home-icons@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_theme-door.png — The door to the Editor's theme mode: Appearance's last row, Edit theme…, which on a seed makes a copy; Moy Day; 320x240
+moy-light_handheld_theme-door@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_theme-config.png — The Editor in theme mode, Config: custom's theme.json in the json mode, opened from Moy, the status line saying whose copy it is; ‹, the open tab labelled, the theme's name, no Play; long lines fade at the edge; Moy Day; 320x240
+moy-light_handheld_theme-config@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_theme-sprites.png — The Editor in theme mode, Sprites: Home, a smooth slot, its mask in solid ink on a plain ground at 9x, its 1x preview, the sheet with the pixel-art dot's legend, the tools, the palette; Moy Day; 320x240
+moy-light_handheld_theme-sprites@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_theme-sprites-edited.png — Sprites after a stroke in the red the palette holds: Home is pixel art now, dotted in the sheet; Home · pixels · Undo brings it back; Moy Day; 320x240
+moy-light_handheld_theme-sprites-edited@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_perf-hud.png — The perf HUD over Star Catcher: the fps chip, a flat pill in the surface's polarity; Moy Day; 320x240
+moy-light_handheld_perf-hud@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_perf-hud-detail.png — The perf HUD's breakdown: the frame against its 33 ms budget, each part its own hue; Moy Day; 320x240
+moy-light_handheld_perf-hud-detail@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_kernel-web.png — The kernel's web console screen: the address and the pin, no QR; Moy Day; 320x240
+moy-light_handheld_kernel-web@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_kernel-web-restarting.png — The kernel's web console screen while the console restarts; Moy Day; 320x240
+moy-light_handheld_kernel-web-restarting@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_splash-s3.png — The splash on the Guition S3 (480x320): Moy at 5x; Moy Day; 480x320
+moy-light_handheld_calendar-s3.png — The calendar on the Guition S3 (touch): 28 px rows and the two chevrons as its buttons; Moy Day; 480x320
+moy-light_handheld_power-s3.png — The power popover on the Guition S3: rows at the tap floor, no hint strip; Moy Day; 480x320
+moy-light_handheld_crash-s3.png — A game stopped on the Guition S3: the 320x240 canvas in its letterbox, the card centred at the glass's metrics with 28 px rows and no hints; Moy Day; 480x320
+moy-light_handheld_blocks-number-s3.png — Blocks' number prompt on the Guition S3: 30 px field, Use a block, Cancel and OK; Moy Day; 480x320
+moy-light_handheld_web-console-s3.png — The web console on the Guition S3: a larger QR and Turn off as a button; Moy Day; 480x320
+moy-light_handheld_home-grid-s3.png — The grid arrangement on the Guition S3: three rows; Moy Day; 480x320
+moy-light_handheld_tool-bar-s3.png — A tool cart on the Guition S3's separate 320x240 canvas: the compact bar over its 18 rows and as much of the letterbox, so ‹ and the title are a 36 px tap; Moy Day; 480x320
+moy-light_handheld_home-icons-s3.png — The icons arrangement on the Guition S3: 52 px tiles, the caption band at the foot over the top of a fourth row; Moy Day; 480x320
+moy-light_handheld_theme-config-s3.png — The theme mode's Config on the Guition S3: ‹ (Done) and 28 px tabs; Moy Day; 480x320
+moy-light_handheld_theme-sprites-s3.png — The theme mode's Sprites on the Guition S3: 28 px slots, swatches and tools, the sheet's page mark; Moy Day; 480x320
+moy-light_desktop_splash.png — The splash on the 1024x600 desk: Moy at 10x, the wordmark at 40 px; Moy Day; 1024x600
+moy-light_desktop_loading.png — The loading pill on the desk, in its own lane: the middle of the bar; Moy Day; 1024x600
+moy-light_desktop_calendar.png — The calendar hung from the desk bar's clock, its keys in its foot; Moy Day; 1024x600
+moy-light_desktop_power.png — The power popover hung from the battery; Moy Day; 1024x600
+moy-light_desktop_wifi.png — The Wi-Fi popover hung from the Wi-Fi; Moy Day; 1024x600
+moy-light_desktop_crash.png — A game stopped in console mode: the frozen game at 2x washed 60%, the stop card at the desk's metrics; Moy Day; 1024x600
+moy-light_desktop_crash-code.png — See why in the desk Editor: the stopped line and its popover across the code pane; Moy Day; 1024x600
+moy-light_desktop_code-find.png — Find in the desk Editor: the field under the code pane's header, the current match on the caret's line; Moy Day; 1024x600
+moy-light_desktop_code-complete.png — Completion under sp as it is typed on the desk; Moy Day; 1024x600
+moy-light_desktop_code-goto.png — Go to, hung from the code pane's jump tool; Moy Day; 1024x600
+moy-light_desktop_blocks-name.png — Blocks' name prompt on the desk over the washed Editor, the dialog's keys at its foot's left, the page's gone; Moy Day; 1024x600
+moy-light_desktop_cart-info.png — Cart info on the desk over Make it mine, the dialog's keys in its foot; Moy Day; 1024x600
+moy-light_desktop_web-console.png — The web console on the desk: the QR, the address, the pin and Turn off; Moy Day; 1024x600
+moy-light_desktop_text-console.png — A script's text console as a window on the desk; Moy Day; 1024x600
+moy-light_desktop_home-grid.png — The console mode's home in the grid arrangement: 128 px cards in three rows, the shelf bleeding off the right edge, the focused card ringed with its title bold; Moy Day; 1024x600
+moy-light_desktop_tool-bar.png — A tool cart in console mode at 2x: the compact bar drawn at the glass's resolution over its 18 rows, the bar's Moy tile; Moy Day; 1024x600
+moy-light_desktop_home-icons.png — The console mode's home in the icons arrangement: ten columns of 64 px tiles, each named in full under it, the focused one ringed with its name bold; Moy Day; 1024x600
+moy-light_desktop_theme-editor.png — The Editor in theme mode on the desk: Config's theme.json beside Sprites, the focused pane and its tab, every slot named under its tile, Home ringed and painted to pixels at 16x beside its 1x and 2x; Moy Day; 1024x600
+moy-light_desktop_perf-hud.png — The perf HUD in console mode, inside the letterbox's corner; Moy Day; 1024x600
+moy-light_desktop_kernel-web.png — The kernel's web console screen on the desk; Moy Day; 1024x600
+moy-dark_handheld_splash.png — The boot splash: Moy at 4x over the wordmark, on the stored theme's ground; Moy Night; 320x240
+moy-dark_handheld_splash@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_splash-boot.png — A first boot's splash: the track under the wordmark and what it is doing in dim; Moy Night; 320x240
+moy-dark_handheld_splash-boot@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_loading.png — The loading pill on purpose over the cover being opened, flat, the hint strip quiet (a load cannot be cancelled); kept by the panel through the load; Moy Night; 320x240
+moy-dark_handheld_loading@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_calendar.png — The clock's calendar, hung from the bar, flat, no wash: the month, the weekdays, today a bold number on a value disc, the weekend in dim; ← → page a month; Moy Night; 320x240
+moy-dark_handheld_calendar@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_power.png — The battery's popover: the level and the time left, then Volume and Brightness as slider rows; focus on Brightness; Moy Night; 320x240
+moy-dark_handheld_power@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_wifi.png — The Wi-Fi popover: the popover's card holding Settings' Wi-Fi page -- the radio, the joined network checked, the others' signal and lock, Other network; Moy Night; 320x240
+moy-dark_handheld_wifi@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_crash.png — A game stopped: the stop card centred over the frozen game washed 60% -- Moy, the title and Stopped, the sentence, the error exact in the code face, See why, Restart and Home, its keys in its foot; Moy Night; 320x240
+moy-dark_handheld_crash@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_crash-compiled.png — A compiled cart's trap: the same card with no See why (no source line behind it); Moy Night; 320x240
+moy-dark_handheld_crash-compiled@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_notice.png — A cart this console cannot run, over the home washed whole: the same card, its words only what the sentence does not say, Open Updates and Home, its keys in its foot; Moy Night; 320x240
+moy-dark_handheld_notice@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_crash-code.png — See why: the Code tab on the stopped line, its popover hung under it after the gutter, the error exact; the first edit or Mic closes it; Moy Night; 320x240
+moy-dark_handheld_crash-code@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_code-find.png — Find in the Code tab: the field under the bar, the count, Aa; the matches tinted, the current one (2 of 5) stronger with a bar and the caret on it; the keys in the status line; Moy Night; 320x240
+moy-dark_handheld_code-find@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_code-complete.png — Completion under _ba as it is typed: the names in the code face, the typed part in value, each one's kind; a flat popover; Moy Night; 320x240
+moy-dark_handheld_code-complete@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_code-goto.png — Go to a definition: a popover with its own field over the cart's defs and their lines; Moy Night; 320x240
+moy-dark_handheld_code-goto@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_code-files.png — The cart's scripts hung from the bar's Code tab: main.py checked as the open one, helpers.py focused, New script; Moy Night; 320x240
+moy-dark_handheld_code-files@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_blocks-name.png — Blocks' name prompt as a dialog over the washed editor: the field; its keys in the hint strip, no button row on the T-Deck; Moy Night; 320x240
+moy-dark_handheld_blocks-name@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_blocks-number.png — Blocks' number prompt: the field with the slot's value as its placeholder; Use a block a button the trackball rolls to; the keys type the digits, so no pad; Moy Night; 320x240
+moy-dark_handheld_blocks-number@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_cart-info.png — Make it mine's Cart info: Title and Made by; the trackball moves between them, Enter saves, Mic cancels; Moy Night; 320x240
+moy-dark_handheld_cart-info@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_new-script.png — Make it mine's New script: the name; Enter adds, Mic cancels; Moy Night; 320x240
+moy-dark_handheld_new-script@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_project-files.png — The project's files as a page of Make it mine: Code (New script last) and Art and sound, each file's icon, name and the tab it opens in; Moy Night; 320x240
+moy-dark_handheld_project-files@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_web-console.png — The web console: the QR on its white quiet zone, the address and the pin, K turns it off; Moy Night; 320x240
+moy-dark_handheld_web-console@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_text-console.png — A script's text console: the scrollback in the code face, what was typed in value (the live answer too), the prompt line at the foot; Moy Night; 320x240
+moy-dark_handheld_text-console@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_text-console-done.png — A script that ended: The script ended. in the prompt line's place; Moy Night; 320x240
+moy-dark_handheld_text-console-done@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_home-grid.png — The home's grid arrangement: two rows of cards scrolling sideways, the last column cut by more than a third, titles cut to their card; focus grows and rings Hop Quest, its title bold; Moy Night; 320x240
+moy-dark_handheld_home-grid@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_home-icons.png — The home's icons arrangement: icons alone, the focused one ringed, its name and line in the caption band at the grid's foot, which clips the top of a fourth row (the grid scrolls); Moy Night; 320x240
+moy-dark_handheld_home-icons@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_theme-door.png — The door to the Editor's theme mode: Appearance's last row, Edit theme…, which on a seed makes a copy; Moy Night; 320x240
+moy-dark_handheld_theme-door@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_theme-config.png — The Editor in theme mode, Config: custom's theme.json in the json mode, opened from Moy, the status line saying whose copy it is; ‹, the open tab labelled, the theme's name, no Play; long lines fade at the edge; Moy Night; 320x240
+moy-dark_handheld_theme-config@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_theme-sprites.png — The Editor in theme mode, Sprites: Home, a smooth slot, its mask in solid ink on a plain ground at 9x, its 1x preview, the sheet with the pixel-art dot's legend, the tools, the palette; Moy Night; 320x240
+moy-dark_handheld_theme-sprites@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_theme-sprites-edited.png — Sprites after a stroke in the red the palette holds: Home is pixel art now, dotted in the sheet; Home · pixels · Undo brings it back; Moy Night; 320x240
+moy-dark_handheld_theme-sprites-edited@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_perf-hud.png — The perf HUD over Star Catcher: the fps chip, a flat pill in the surface's polarity; Moy Night; 320x240
+moy-dark_handheld_perf-hud@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_perf-hud-detail.png — The perf HUD's breakdown: the frame against its 33 ms budget, each part its own hue; Moy Night; 320x240
+moy-dark_handheld_perf-hud-detail@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_kernel-web.png — The kernel's web console screen: the address and the pin, no QR; Moy Night; 320x240
+moy-dark_handheld_kernel-web@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_kernel-web-restarting.png — The kernel's web console screen while the console restarts; Moy Night; 320x240
+moy-dark_handheld_kernel-web-restarting@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_splash-s3.png — The splash on the Guition S3 (480x320): Moy at 5x; Moy Night; 480x320
+moy-dark_handheld_calendar-s3.png — The calendar on the Guition S3 (touch): 28 px rows and the two chevrons as its buttons; Moy Night; 480x320
+moy-dark_handheld_power-s3.png — The power popover on the Guition S3: rows at the tap floor, no hint strip; Moy Night; 480x320
+moy-dark_handheld_crash-s3.png — A game stopped on the Guition S3: the 320x240 canvas in its letterbox, the card centred at the glass's metrics with 28 px rows and no hints; Moy Night; 480x320
+moy-dark_handheld_blocks-number-s3.png — Blocks' number prompt on the Guition S3: 30 px field, Use a block, Cancel and OK; Moy Night; 480x320
+moy-dark_handheld_web-console-s3.png — The web console on the Guition S3: a larger QR and Turn off as a button; Moy Night; 480x320
+moy-dark_handheld_home-grid-s3.png — The grid arrangement on the Guition S3: three rows; Moy Night; 480x320
+moy-dark_handheld_tool-bar-s3.png — A tool cart on the Guition S3's separate 320x240 canvas: the compact bar over its 18 rows and as much of the letterbox, so ‹ and the title are a 36 px tap; Moy Night; 480x320
+moy-dark_handheld_home-icons-s3.png — The icons arrangement on the Guition S3: 52 px tiles, the caption band at the foot over the top of a fourth row; Moy Night; 480x320
+moy-dark_handheld_theme-config-s3.png — The theme mode's Config on the Guition S3: ‹ (Done) and 28 px tabs; Moy Night; 480x320
+moy-dark_handheld_theme-sprites-s3.png — The theme mode's Sprites on the Guition S3: 28 px slots, swatches and tools, the sheet's page mark; Moy Night; 480x320
+moy-dark_desktop_splash.png — The splash on the 1024x600 desk: Moy at 10x, the wordmark at 40 px; Moy Night; 1024x600
+moy-dark_desktop_loading.png — The loading pill on the desk, in its own lane: the middle of the bar; Moy Night; 1024x600
+moy-dark_desktop_calendar.png — The calendar hung from the desk bar's clock, its keys in its foot; Moy Night; 1024x600
+moy-dark_desktop_power.png — The power popover hung from the battery; Moy Night; 1024x600
+moy-dark_desktop_wifi.png — The Wi-Fi popover hung from the Wi-Fi; Moy Night; 1024x600
+moy-dark_desktop_crash.png — A game stopped in console mode: the frozen game at 2x washed 60%, the stop card at the desk's metrics; Moy Night; 1024x600
+moy-dark_desktop_crash-code.png — See why in the desk Editor: the stopped line and its popover across the code pane; Moy Night; 1024x600
+moy-dark_desktop_code-find.png — Find in the desk Editor: the field under the code pane's header, the current match on the caret's line; Moy Night; 1024x600
+moy-dark_desktop_code-complete.png — Completion under sp as it is typed on the desk; Moy Night; 1024x600
+moy-dark_desktop_code-goto.png — Go to, hung from the code pane's jump tool; Moy Night; 1024x600
+moy-dark_desktop_blocks-name.png — Blocks' name prompt on the desk over the washed Editor, the dialog's keys at its foot's left, the page's gone; Moy Night; 1024x600
+moy-dark_desktop_cart-info.png — Cart info on the desk over Make it mine, the dialog's keys in its foot; Moy Night; 1024x600
+moy-dark_desktop_web-console.png — The web console on the desk: the QR, the address, the pin and Turn off; Moy Night; 1024x600
+moy-dark_desktop_text-console.png — A script's text console as a window on the desk; Moy Night; 1024x600
+moy-dark_desktop_home-grid.png — The console mode's home in the grid arrangement: 128 px cards in three rows, the shelf bleeding off the right edge, the focused card ringed with its title bold; Moy Night; 1024x600
+moy-dark_desktop_tool-bar.png — A tool cart in console mode at 2x: the compact bar drawn at the glass's resolution over its 18 rows, the bar's Moy tile; Moy Night; 1024x600
+moy-dark_desktop_home-icons.png — The console mode's home in the icons arrangement: ten columns of 64 px tiles, each named in full under it, the focused one ringed with its name bold; Moy Night; 1024x600
+moy-dark_desktop_theme-editor.png — The Editor in theme mode on the desk: Config's theme.json beside Sprites, the focused pane and its tab, every slot named under its tile, Home ringed and painted to pixels at 16x beside its 1x and 2x; Moy Night; 1024x600
+moy-dark_desktop_perf-hud.png — The perf HUD in console mode, inside the letterbox's corner; Moy Night; 1024x600
+moy-dark_desktop_kernel-web.png — The kernel's web console screen on the desk; Moy Night; 1024x600
+contrast-dark_handheld_splash-boot.png — A first boot's splash: the track under the wordmark and what it is doing in dim; Contrast (dark); 320x240
+contrast-dark_handheld_splash-boot@3x.png — same, enlarged 3x (nearest)
+contrast-dark_handheld_calendar.png — The clock's calendar, hung from the bar, flat, no wash: the month, the weekdays, today a bold number on a value disc, the weekend in dim; ← → page a month; Contrast (dark); 320x240
+contrast-dark_handheld_calendar@3x.png — same, enlarged 3x (nearest)
+contrast-dark_handheld_crash.png — A game stopped: the stop card centred over the frozen game washed 60% -- Moy, the title and Stopped, the sentence, the error exact in the code face, See why, Restart and Home, its keys in its foot; Contrast (dark); 320x240
+contrast-dark_handheld_crash@3x.png — same, enlarged 3x (nearest)
+contrast-dark_handheld_loading.png — The loading pill on purpose over the cover being opened, flat, the hint strip quiet (a load cannot be cancelled); kept by the panel through the load; Contrast (dark); 320x240
+contrast-dark_handheld_loading@3x.png — same, enlarged 3x (nearest)
+contrast-dark_handheld_blocks-name.png — Blocks' name prompt as a dialog over the washed editor: the field; its keys in the hint strip, no button row on the T-Deck; Contrast (dark); 320x240
+contrast-dark_handheld_blocks-name@3x.png — same, enlarged 3x (nearest)
+contrast-dark_handheld_web-console.png — The web console: the QR on its white quiet zone, the address and the pin, K turns it off; Contrast (dark); 320x240
+contrast-dark_handheld_web-console@3x.png — same, enlarged 3x (nearest)
+contrast-dark_handheld_perf-hud-detail.png — The perf HUD's breakdown: the frame against its 33 ms budget, each part its own hue; Contrast (dark); 320x240
+contrast-dark_handheld_perf-hud-detail@3x.png — same, enlarged 3x (nearest)
+contrast-dark_desktop_crash.png — A game stopped in console mode: the frozen game at 2x washed 60%, the stop card at the desk's metrics; Contrast (dark); 1024x600
+moy-dark_handheld_home-icons-pop.png — The icons arrangement, variant pop: the focused tile popped out, its name's pill over the row below (rejected: the pill covers the next row's tiles, which a focus move must then repaint); Moy Night; 320x240
+moy-dark_handheld_home-icons-pop@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_home-icons-pop-s3.png — The icons arrangement, variant pop, on the Guition S3; Moy Night; 480x320
+moy-dark_handheld_home-icons-labels.png — The icons arrangement, variant labels: every tile its title (rejected on a handheld: names cut to Star Ca…, the focused one's too; the desk's pick); Moy Night; 320x240
+moy-dark_handheld_home-icons-labels@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_home-icons-labels-s3.png — The icons arrangement, variant labels, on the Guition S3; Moy Night; 480x320
+moy-dark_desktop_home-icons-pop.png — The icons arrangement in console mode, variant pop: the focused name's pill over the next row (rejected); Moy Night; 1024x600
+moy-dark_desktop_home-icons-caption.png — The icons arrangement in console mode, variant caption: the focused name in a band at the foot (rejected on the desk: the band sits far from a focus high on the grid); Moy Night; 1024x600
+moy-dark_handheld_saver.png — The saver, the same in every theme: a game's cover at 2x in a 1 px frame on black, its title, the clock small; one flat frame every six seconds; 320x240
+moy-dark_handheld_saver@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_saver-s3.png — The saver on the Guition S3: the cover at 3x; 480x320
+moy-dark_handheld_recovery.png — The kernel's recovery screen, in Moy Night whatever the stored theme: Moy, what happened, Try again, Safe start and the developer console as rows, what the kernel knows in the code face, the serial words; Moy Night; 320x240
+moy-dark_handheld_recovery@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_recovery-s3.png — The kernel's recovery screen, in Moy Night whatever the stored theme: Moy, what happened, Try again, Safe start and the developer console as rows, what the kernel knows in the code face, the serial words, on the Guition S3: 28 px rows, a tap chooses; Moy Night; 480x320
+moy-dark_desktop_recovery.png — The kernel's recovery screen, in Moy Night whatever the stored theme: Moy, what happened, Try again, Safe start and the developer console as rows, what the kernel knows in the code face, the serial words, on the desk; Moy Night; 1024x600
+mint-light_handheld_home-fallback.png — A colours-only store theme (Mint) with no look block: the default look's geometry and marks, flat, every derived colour from its roles, never the kernel's pixel fallbacks: the home; Mint; 320x240
+mint-light_handheld_home-fallback@3x.png — same, enlarged 3x (nearest)
+mint-light_handheld_settings-fallback.png — A colours-only store theme (Mint) with no look block: the default look's geometry and marks, flat, every derived colour from its roles, never the kernel's pixel fallbacks: Settings; Mint; 320x240
+mint-light_handheld_settings-fallback@3x.png — same, enlarged 3x (nearest)
+mint-light_desktop_fallback.png — A colours-only store theme (Mint) with no look block: the default look's geometry and marks, flat, every derived colour from its roles, never the kernel's pixel fallbacks: the desk; Mint; 1024x600
 calc_all_themes.png — Calc in all nine themes through one body and one kind table: the desk window over the theme's backdrop, and the handheld page below it; 1220x2600
 type_specimen.png — Type specimen: handheld sizes, the Code tab's mono and the desk body at 1, 2, 4 bpp and an 8-bit reference, on dark and on light; 860x336
 type_specimen@3x.png — same, enlarged 3x (nearest)

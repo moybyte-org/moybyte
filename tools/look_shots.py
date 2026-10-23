@@ -227,6 +227,7 @@ def _setup_table():
     }
     table.update(_apps_table())
     table.update(_about_table())
+    table.update(_old_look_table())
     return table
 
 
@@ -419,6 +420,57 @@ def _about_table():
                      "Achievements and About as built (step 32)")
             for screen, (config, setup) in ABOUT.items()}
 
+
+
+# The old look's last surfaces (plan step 33, rounds/round17.py): each
+# scene's screen -> (config, the screen it is drawn nearest today). The splash,
+# the loading pill, the popovers, a stopped run's card and the prompts are
+# frames the goldens' quiesce never holds, so each pairs with the screen it
+# opens from or over; the kernel's recovery and web screens draw before the
+# shell exists, so theirs is the screen the console starts on.
+_HH = ("splash", "splash-boot", "loading", "calendar", "power", "wifi", "notice", "text-console",
+       "text-console-done", "home-grid", "home-icons", "home-icons-pop", "home-icons-labels",
+       "saver", "home-fallback", "recovery", "kernel-web", "kernel-web-restarting")
+_HH_CODE = ("crash-code", "code-find", "code-complete", "code-goto", "code-files")
+_HH_RUN = ("crash", "crash-compiled", "perf-hud", "perf-hud-detail")
+_HH_CARDS = ("cart-info", "new-script", "project-files")
+_HH_SET = ("web-console", "settings-fallback", "theme-door", "theme-config", "theme-sprites",
+           "theme-sprites-edited")
+_S3 = ("splash-s3", "calendar-s3", "power-s3", "crash-s3", "blocks-number-s3", "web-console-s3",
+       "home-grid-s3", "tool-bar-s3", "saver-s3", "recovery-s3", "home-icons-s3",
+       "home-icons-pop-s3", "home-icons-labels-s3", "theme-config-s3", "theme-sprites-s3")
+_DK = ("splash", "loading", "calendar", "power", "wifi", "web-console", "text-console",
+       "theme-editor", "fallback", "recovery", "kernel-web")
+_DK_CODE = ("crash-code", "code-find", "code-complete", "code-goto")
+_DK_CONSOLE = ("crash", "perf-hud", "home-grid", "tool-bar", "home-icons", "home-icons-pop",
+               "home-icons-caption")
+
+
+def _old_look_table():
+    near = {"home": (_home, "nearest screen: home"),
+            "code": (_code, "nearest screen: the Code tab"),
+            "run": (_pause, "nearest screen: the pause menu over Star Catcher"),
+            "cards": (_tab("cards"), "nearest screen: the Editor's Make it mine tab"),
+            "blocks": (_tab("blocks"), "nearest screen: the Editor's Blocks tab"),
+            "settings": (_settings, "nearest screen: Settings"),
+            "desk": (_desk, "nearest screen: the desk"),
+            "console": (_console_home, "nearest screen: the console-mode home")}
+    rows = [("handheld_%s" % k, HANDHELD, "home") for k in _HH]
+    rows += [("handheld_%s" % k, HANDHELD, "code") for k in _HH_CODE]
+    rows += [("handheld_%s" % k, HANDHELD, "run") for k in _HH_RUN]
+    rows += [("handheld_%s" % k, HANDHELD, "cards") for k in _HH_CARDS]
+    rows += [("handheld_%s" % k, HANDHELD, "blocks") for k in ("blocks-name", "blocks-number")]
+    rows += [("handheld_%s" % k, HANDHELD, "settings") for k in _HH_SET]
+    rows += [("handheld_%s" % k, S3, "settings") for k in _S3]
+    rows += [("desktop_%s" % k, DESK, "desk") for k in _DK]
+    rows += [("desktop_%s" % k, DESK, "code") for k in _DK_CODE]
+    rows += [("desktop_%s" % k, CONSOLE, "console") for k in _DK_CONSOLE]
+    rows += [("desktop_blocks-name", DESK, "blocks"), ("desktop_cart-info", DESK, "cards")]
+    out = {}
+    for screen, config, kind in rows:
+        setup, what = near[kind]
+        out[screen] = (config, ("33",), False, setup, what)
+    return out
 
 # The apps' restyle (docs/media/look_2026-10/APPS_RESTYLE.md, plan step 31):
 # each scene's screen -> the app it is drawn from today, and the page of it.

@@ -444,6 +444,53 @@ it comes and goes.
 percent; the track in its own role, `track` (Contrast's an outline the fill
 keeps 3:1 or more against); no fill at nothing. **Cost:** 0.5 day.
 
+**49. The stop card:** `moy_chrome_panel` redrawn as the system modal card
+the pause card is, on the system canvas at the glass's metrics over the
+run's last frame washed: Moy, the title and its state, the sentence, the
+error in the code face on a `sunk` inset (a notice's words in the body
+face), the rows (See why, Restart, Home; no See why for a compiled cart)
+and its keys in its foot; `moy_chrome_strip_crash` deleted. **Cost:** 1.5 days. **Frame:** one
+full frame as it comes, nothing after.
+
+**50. The compact bar:** the tool cart's 18-row strip (`moy_chrome_strip_*`)
+in the look's roles and faces, drawn by the shell at the glass's resolution
+and metrics over the rows the cart lays out under (2 × on the desk's console
+mode, and into the letterbox above them on the S3, a 36 px band).
+**Cost:** 1 day.
+
+**51. The loading pill:** `ui.toast` with `o.icon` (the cart's kind) and
+`o.flat` (no shadow, no alpha), painted once on the frame an open is asked
+for, over the cover being opened on a handheld and in the desk bar's
+middle. **Cost:** 0.5 day.
+
+**52. A dialog's fields:** `ui.dialog` holding captioned `ui.field`s, Tab
+between them, the first focused, Enter the dialog's last button. **Cost:**
+1 day.
+
+**53. The month:** `ui.month(year, month, today)` in a popover: the
+weekdays in the caption, the days in seven columns, today on the current
+mark, the weekend in `dim`. **Cost:** 0.5 day.
+
+**54. The perf chip:** the HUD's pill and its breakdown card in flat fills
+and the code face's digits, repainting its own rect a frame; the parts in
+three hues (Contrast: solid, hatched, outline). **Cost:** 0.5 day.
+
+**55. The kernel's screens in the look:** recovery and the kernel's web
+console (`recovery.*`, `web.*`) drawn in moy_ui's built-in faces and roles
+(recovery in Moy Night), rows a touch glass taps, the strings in sentence
+case. **Cost:** 1 day.
+
+**56. The Editor's theme mode:** `EditorApp` opened on a theme package with
+two tabs, Config (`theme.json` in the json mode, its saves the look's
+`Appearance.file_write`) and Sprites (the package's icon sheet). The sprite
+tab needs a 16 × 16 cell size (today's cells are 8 × 8) and the slot names;
+a smooth slot is shown from its 2-bit mask and painting it writes a pixel
+tile with the slot in `icons.pixel_slots`, a key the loader learns
+(additive: an older reader ignores it); undo in the session's memory, no
+`journal/`. Appearance's Edit theme… row opens it (a seed copied to
+`custom` first, as EDIT FILE does); `ThemeLayer`, EDIT ICONS and the user's
+icon sheet are deleted. **Cost:** 4 days.
+
 ## Moot in this rendering
 
 The pixel round's star field, moonlit edge and focus halo; the Galmuri
@@ -455,4 +502,4 @@ docked to the content's foot (the apps as built take popovers and dialogs,
 2026-10-22).
 
 **Total:** about 96–104 developer days for gaps 1–26; gaps 27–30 add
-about 6, gap 31 about 19–22, gaps 32–44 about 10, and gaps 45–48 about 2.5.
+about 6, gap 31 about 19–22, gaps 32–44 about 10, gaps 45–48 about 2.5, and gaps 49–56 about 10.
