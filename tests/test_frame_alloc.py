@@ -40,6 +40,18 @@ frame (the edit itself handed in between frames, as shell_bench types), the
 frame each key paints allocates nothing either -- the verbs, the editor
 handle's draw, the host's bar and the Player's app frame included.
 
+Last it opens the shell's restyled apps on the public UI API -- Appearance,
+Storybook, Get Carts over an in-memory shelf, My Art -- each idle and with its
+content dragged, three swipes through the real pointer path. Idle, an app
+allocates nothing. A drag frame allocates nothing of its own: what it may
+allocate is the answers whose values the drag moved -- each card's (x, y, w,
+h, state), a tuple a frame whose y differs from every recent answer
+(modmoy_ui.c's ret_tuple ring keeps the ones that repeat), and the moving
+finger's: the app's read of it (surface.pointer()), the game pointer the
+console publishes while it is down, and the state the frame keeps to compare
+the next with. So a drag frame is held to one answer a card it drew and four
+more; the bar's clock turning its minute is an event of its own, one frame.
+
 WHEN IT FAILS. Something on the frame path allocates again, and the per-frame
 deltas are printed. What names the LINE is a MicroPython whose gc_alloc and
 gc_free charge each block to the Python line running (the code state's ip,
@@ -47,8 +59,10 @@ with MICROPY_PY_SYS_SETTRACE for the current-code-state pointer and its frame
 objects switched off); the commit that added this file says how it was built.
 """
 
+import hashlib
 import json
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -364,6 +378,7 @@ def measure(loop):
     info["held"] = _frames(loop, @WINDOW_MS@, True)
     gc.enable()
     notes(loop, info)
+    apps(loop, info)
     print("RESULT " + json.dumps(info))
 
 
@@ -427,6 +442,112 @@ def notes(loop, info):
     gc.enable()
 
 
+class _Resp:
+    def __init__(self, data, status=200):
+        import io
+        self._b = io.BytesIO(data)
+        self.status = status
+        self.length = len(data)
+        self.closed = False
+
+    def readinto(self, buf):
+        return self._b.readinto(buf)
+
+    def close(self):
+        self.closed = True
+
+
+class _Net:
+    """Get Carts' transport over the staged shelf: {url: file}."""
+
+    def __init__(self, routes):
+        self.routes = routes
+        self.up = True
+
+    def online(self):
+        return True
+
+    def open(self, url):
+        f = self.routes.get(url)
+        if f is None:
+            return _Resp(b"not found", 404)
+        with open(f, "rb") as fh:
+            return _Resp(fh.read())
+
+
+APPS = ("appearance", "storybook", "getcarts", "myart")
+
+
+def apps(loop, info):
+    """Each restyled app open, idle, then its content swiped: what each
+    frame allocates, and how many cards each drag frame drew."""
+    import moy_loop
+    import ui
+    from gc import mem_alloc
+    ws = loop.ws
+    ws.exit()
+    for _ in range(30):
+        loop.step()
+    ws.cart_net = _Net(json.load(open(ROOT + "/net/routes.json")))
+    cards = [0]
+    card = ui.card
+
+    def counted(title, sub="", o=None):
+        cards[0] += 1
+        return card(title, sub, o)
+
+    ui.card = counted
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    for app in APPS:
+        a = ws._apps_by_id[app]
+        info[app + "_open"] = ws.open_app(a)
+        for _ in range(60):
+            loop.step()
+        t0 = time.ticks_ms()
+        while time.ticks_diff(time.ticks_ms(), t0) < 20000:
+            now = time.ticks_ms()
+            if not (any(d and time.ticks_diff(d, now) > 0 for d in (
+                    ws._toast_until, ws._confetti_until, ws._egg_until))
+                    or getattr(a, "phase", "list") != "list"
+                    or getattr(a, "_covers", None)):
+                break
+            loop.step()
+        for _ in range(30):
+            loop.step()
+        info[app + "_top"] = ws.wm.top_kind()
+        gc.collect()
+        gc.disable()
+        idle = []
+        for _ in range(60):
+            m = mem_alloc()
+            loop.step()
+            idle.append(mem_alloc() - m)
+        info[app + "_idle"] = idle
+        gc.enable()
+        for y0, y1 in ((H * 3 // 4, H // 4), (H // 4, H * 3 // 4)):
+            moy_loop.swipe(W // 2, y0, W // 2, y1, 25)     # every picture met once
+            for _ in range(30):
+                loop.step()
+        drag = []
+        for rep in range(3):
+            y0, y1 = (H * 3 // 4, H // 4) if rep % 2 == 0 else (H // 4, H * 3 // 4)
+            moy_loop.swipe(W // 2, y0, W // 2, y1, 25)
+            gc.collect()
+            gc.disable()
+            for _ in range(30):
+                cards[0] = 0
+                d0 = ws._frames_drawn
+                m = mem_alloc()
+                loop.step()
+                drag.append((mem_alloc() - m, ws._frames_drawn - d0, cards[0]))
+            gc.enable()
+        info[app + "_drag"] = drag
+        ws.exit()
+        for _ in range(30):
+            loop.step()
+    ui.card = card
+
+
 class _Loop:
     """The kernel's loop as the measurement drives it: one step a frame over
     the console the board's run_desktop handed it."""
@@ -482,7 +603,7 @@ MANIFEST = {"format": "moy-1", "title": "Frame Probe", "runtime": "wasm",
 WINDOW_MS = 4500
 
 
-def _stage(dest, exe):
+def _stage(dest, exe, apps=False):
     sys.path.insert(0, str(ROOT / "tools"))
     try:
         import board_config
@@ -524,6 +645,55 @@ def _stage(dest, exe):
     (cart / "config.json").write_text("{}")
     shutil.copytree(ROOT / "system_carts" / "moybyte.notes.moy",
                     dest / "carts" / "moybyte.notes.moy")
+    if apps:
+        for app in ("appearance", "storybook", "get_carts", "my_art"):
+            shutil.copytree(ROOT / "system_carts" / ("moybyte.%s.moy" % app),
+                            dest / "carts" / ("moybyte.%s.moy" % app))
+        _stage_app_data(dest)
+
+
+def _stage_app_data(dest):
+    """What the apps show: a shelf of twelve carts with covers for Get Carts
+    (an index and its covers, served from files), eight stories, fourteen
+    drawings."""
+    from runtime import moy_carts
+    from runtime import story_doc as D
+    from cart_store_fixtures import INDEX_URL, snapshot
+    root = str(dest / "carts")
+    net = dest / "net"
+    net.mkdir()
+    index = json.loads(snapshot("index.json"))
+    base = INDEX_URL.rsplit("/", 1)[0] + "/"
+    pngs = sorted((ROOT / "system_carts").glob("*/cover.png"))
+    routes = {}
+    shelf = []
+    for i in range(12):
+        c = dict(index["carts"][i % len(index["carts"])])
+        c["id"] = "c%02d" % i
+        c["name"] = "Cart %02d" % i
+        c["folder"] = "c%02d.moy" % i
+        png = pngs[i % len(pngs)].read_bytes()
+        w, h = struct.unpack(">II", png[16:24])
+        url = "carts/c%02d/cover.png" % i
+        c["cover"] = {"url": url, "size": len(png), "w": w, "h": h,
+                      "sha256": hashlib.sha256(png).hexdigest()}
+        (net / ("%d.png" % i)).write_bytes(png)
+        routes[base + url] = str(net / ("%d.png" % i))
+        shelf.append(c)
+    index["carts"] = shelf
+    (net / "index.json").write_text(json.dumps(index))
+    routes[INDEX_URL] = str(net / "index.json")
+    (net / "routes.json").write_text(json.dumps(routes))
+    for i in range(8):
+        doc = D.new_doc("Story %d" % i)
+        moy_carts.save_file("stories", "story%d/story.json" % i, D.write(doc), root)
+    for i in range(14):
+        w, h = 320, 240
+        px = bytearray([1 + i % 15]) * (w * h)
+        for y in range(h // 4, h * 3 // 4):
+            px[y * w + w // 4:y * w + w * 3 // 4] = bytes([(i * 3) % 16]) * (w // 2)
+        moy_carts.save_file("drawings", "art%02d" % i,
+                            moy_carts.encode_moyimg(w, h, bytes(px)), root)
 
 
 def _run(tmp_path):
@@ -533,7 +703,7 @@ def _run(tmp_path):
             "the boards' Python heap. A board pays for garbage in whole-heap "
             "collections that stop the frame and starve a compiled cart's "
             "sound; nothing else in the suite measures a frame's allocation.")
-    _stage(tmp_path, exe)
+    _stage(tmp_path, exe, apps=True)
     script = tmp_path / "driver.py"
     script.write_text(DRIVER.replace("@ROOT@", repr(str(tmp_path)))
                       .replace("@WINDOW_MS@", str(WINDOW_MS)))
@@ -676,3 +846,27 @@ def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
         ui_draw.input_kind(was)
     assert ws._frames_drawn - painted >= 10, "the drag painted too few frames to say"
     assert len(rebuilt) <= 1, "the Code layout was rebuilt %d times in a drag" % len(rebuilt)
+
+
+@pytest.mark.parametrize("app", ("appearance", "storybook", "getcarts", "myart"))
+def test_an_app_idle_allocates_nothing(result, app):
+    info, text = result
+    assert info[app + "_open"] is True and info[app + "_top"] == app, text[-3000:]
+    _assert_quiet(info[app + "_idle"], app + " idle", text)
+
+
+# One answer tuple: a 5-tuple (the card's) is seven words, two 16-byte blocks.
+ANSWER = 32
+
+
+@pytest.mark.parametrize("app", ("appearance", "storybook", "getcarts", "myart"))
+def test_an_app_drag_frame_allocates_only_its_moved_answers(result, app):
+    """A drag frame of the app's content, its pictures met once before: the
+    frames drew, and each allocated no more than one answer a card it drew
+    and the finger's four, but for one frame (the clock's minute)."""
+    info, text = result
+    drag = info[app + "_drag"]
+    drawn = [d for d in drag if d[1]]
+    assert len(drawn) > 30, (app, len(drawn))
+    over = [d for d in drawn if d[0] > ANSWER * (d[2] + 4)]
+    assert len(over) <= 1, (app, over[:10])
