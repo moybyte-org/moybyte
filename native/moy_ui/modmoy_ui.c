@@ -1265,11 +1265,15 @@ static moy_ui_span_t span_if(mp_obj_t o) {
 // The answers the verbs hand back lately (a page's content rect, a table's
 // (cur, opened), a card's rect): an answer equal to one of them IS that tuple,
 // so a frame that lays out as the last one did allocates no answer. Tuples are
-// immutable, so sharing one is invisible to the app.
-#define RET_RING 16
-MP_REGISTER_ROOT_POINTER(mp_obj_t moy_ui_ret[16]);
+// immutable, so sharing one is invisible to the app. A new answer takes the
+// next slot whose answer was not handed back again since the hand passed it
+// (a clock), so the answers every frame repeats -- a page's rect, a font's --
+// outlive the ones a scroll moves, a card's rect, that come new each frame.
+#define RET_RING 32
+MP_REGISTER_ROOT_POINTER(mp_obj_t moy_ui_ret[32]);
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_ui_bar_last);
 static uint8_t s_ret_at;
+static uint8_t s_ret_used[RET_RING];
 
 // The same for the words the verbs hand back (the focused id): an answer
 // equal to a recent one IS that str.
@@ -1326,11 +1330,17 @@ static mp_obj_t ret_tuple(size_t n, const mp_obj_t *items) {
             k++;
         }
         if (k == n) {
+            s_ret_used[i] = 1;
             return r;
         }
     }
+    for (int i = 0; i < RET_RING && s_ret_used[s_ret_at]; i++) {
+        s_ret_used[s_ret_at] = 0;
+        s_ret_at = (uint8_t)((s_ret_at + 1) % RET_RING);
+    }
     mp_obj_t r = mp_obj_new_tuple(n, items);
     ring[s_ret_at] = r;
+    s_ret_used[s_ret_at] = 0;
     s_ret_at = (uint8_t)((s_ret_at + 1) % RET_RING);
     return r;
 }
