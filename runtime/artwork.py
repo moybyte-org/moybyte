@@ -590,13 +590,17 @@ class DrawingCovers:
 
     def __init__(self, files):
         self._files = files
-        self._got = {}
-        self._order = []
+        self._got = {}               # name -> [[w, h, bitmap or None, kind], ...]
+        self._order = []             # (name, its entry), the oldest first
 
     def get(self, name, w, h, kind="drawings"):
-        key = (kind, name, w, h)
-        if key in self._got:
-            return self._got[key]
+        # Looked up by name, then compared by size, so a frame that asks for
+        # pictures it has makes no key.
+        got = self._got.get(name)
+        if got is not None:
+            for e in got:
+                if e[0] == w and e[1] == h and e[3] == kind:
+                    return e[2]
         bmp = None
         try:
             blob, err = self._files.load(kind, name)
@@ -609,18 +613,28 @@ class DrawingCovers:
             raise
         except Exception:  # noqa: BLE001 -- a broken file draws no picture
             bmp = None
-        self._got[key] = bmp
-        self._order.append(key)
+        e = [w, h, bmp, kind]
+        if got is None:
+            got = self._got[name] = []
+        got.append(e)
+        self._order.append((name, e))
         if len(self._order) > self.KEEP:
-            self._got.pop(self._order.pop(0), None)
+            old, oe = self._order.pop(0)
+            sizes = self._got.get(old)
+            if sizes is not None:
+                sizes.remove(oe)
+                if not sizes:
+                    del self._got[old]
         return bmp
 
     def forget(self, name=None):
         """Drop the pictures of `name` (all, with none): its file changed."""
-        for key in list(self._got):
-            if name is None or key[1] == name:
-                self._got.pop(key, None)
-                self._order.remove(key)
+        if name is None:
+            self._got.clear()
+            del self._order[:]
+            return
+        self._got.pop(name, None)
+        self._order = [o for o in self._order if o[0] != name]
 
 
 class ArtworkService:

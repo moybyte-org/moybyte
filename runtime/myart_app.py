@@ -43,6 +43,11 @@ except ImportError:  # pragma: no cover - direct host import
 DRAWINGS = "drawings"
 TOAST_MS = 2000
 NEW = "New drawing"
+_NEW_CARD = {"id": NEW, "icon": "new", "tone": "value"}
+_DIM_CAPTION = {"tone": "dim", "face": "caption"}
+_BACK = ("back", "Back")
+_CLOSE = ("back", "Close")
+_GRID_HINTS = ("confirm", "Open", "N", "New", "M", "Menu", "back", "Back")
 # The verbs' keys, typed.
 _KEYS = {ord("n"): "new", ord("m"): "menu", ord("w"): "wallpaper", ord("g"): "game",
          ord("r"): "rename", 0x04: "dup", 0x7F: "trash", 0x08: "trash"}
@@ -87,6 +92,8 @@ class MyArtLayout:
             self.grid = (bx, by + 20 * fs, bw, bh - 20 * fs)
             self.margin = 16
             self.body = body
+        self.grid_o = {"cols": self.cols, "margin": self.margin,
+                       "foot": 30 if self.desk else 26, "top": 4}
 
 
 class MyArtAppLayer:
@@ -130,6 +137,10 @@ class MyArtAppLayer:
         self._focus = None
         self._focused = None
         self._key = 0
+        self._cards = None            # (drawings, wallpaper, [card]) as `_cards_of` made them
+        self._caption = None          # (count, wallpaper, left, right, right's width)
+        self._foot_k = None           # the desk foot as `_foot_of` made it
+        self._whole = (0, 0, 0, 0)    # the page's rect, the canvas's
 
     def is_app(self, cart):
         """True only for the shipped My Art identity, not a renamed or copied
@@ -150,6 +161,7 @@ class MyArtAppLayer:
         self.drawings = list(names or []) if err is None else []
         self.sizes = {}
         self.wallpaper = self._wall_source()
+        self._foot_k = None
 
     def _size(self, name):
         got = self.sizes.get(name)
@@ -329,9 +341,15 @@ class MyArtAppLayer:
         cv = self._surf.canvas()
         lay = self.layout
         th = self._theme.colors()
-        self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
+        whole = self._whole
+        if whole[2] != cv.w or whole[3] != cv.h:
+            whole = self._whole = (0, 0, cv.w, cv.h)
+        self._ui.begin(cv, th, whole, lay.desk, lay.windowed)
         ui.page("")
-        was = (self.menu, self.renaming is None, self.game is None, len(self.drawings))
+        was_menu = self.menu
+        was_renaming = self.renaming is None
+        was_game = self.game is None
+        was_n = len(self.drawings)
         if self._focus is not None:
             ui.focus(self._focus)
             self._focus = None
@@ -351,12 +369,10 @@ class MyArtAppLayer:
             self._grid(cv)
             if lay.desk:
                 self._foot(cv)
-            elif ui.hints_width(("back", "Back")) > 0:
-                ui.at(*lay.foot)
-                if self.menu:
-                    ui.hints(("back", "Close"))
-                else:
-                    ui.hints(("confirm", "Open", "N", "New", "M", "Menu", "back", "Back"))
+            elif ui.hints_width(_BACK) > 0:
+                r = lay.foot
+                ui.at(r[0], r[1], r[2], r[3])
+                ui.hints(_CLOSE if self.menu else _GRID_HINTS)
             if self.menu:
                 self._menu()
         self._rename_dialog()
@@ -370,7 +386,8 @@ class MyArtAppLayer:
             elif f == NEW:
                 self.cur = None
         ui.end()
-        if (self.menu, self.renaming is None, self.game is None, len(self.drawings)) != was:
+        if (self.menu != was_menu or (self.renaming is None) != was_renaming
+                or (self.game is None) != was_game or len(self.drawings) != was_n):
             self._damage.again()
 
     def _empty(self):
@@ -389,42 +406,62 @@ class MyArtAppLayer:
             ui.at(*lay.foot)
             ui.hints(("confirm", NEW, "back", "Back"))
 
+    def _cards_of(self):
+        """Each drawing's card: (name, words, override table, the same with
+        the current mark), made again when the drawings or the wallpaper's
+        source move."""
+        c = self._cards
+        if c is not None and c[0] is self.drawings and c[1] == self.wallpaper:
+            return c[2]
+        cards = []
+        for name in self.drawings:
+            o = {"id": self._card_id(name)}
+            if name == self.wallpaper:
+                o["badge"] = "wallpaper"
+            cur = dict(o)
+            cur["current"] = True
+            cards.append((name, shown(name), o, cur))
+        self._cards = (self.drawings, self.wallpaper, cards)
+        return cards
+
     def _grid(self, cv):
         lay = self.layout
         n = len(self.drawings)
-        left = "%d drawing%s" % (n, "" if n == 1 else "s")
+        cap = self._caption
+        if cap is None or cap[0] != n or cap[1] != self.wallpaper:
+            left = "%d drawing%s" % (n, "" if n == 1 else "s")
+            right = rw = None
+            if self.wallpaper is not None:
+                right = "Wallpaper: " + shown(self.wallpaper)
+                ui.face("caption")
+                rw = ui.text_size(right)[0]
+                ui.face()
+            cap = self._caption = (n, self.wallpaper, left, right, rw)
         x, y, w, h = lay.caption
         ui.at(x, y, w, h)
-        ui.label(left, {"tone": "dim", "face": "caption"})
-        if self.wallpaper is not None:
-            right = "Wallpaper: " + shown(self.wallpaper)
-            ui.face("caption")
-            rw = ui.text_size(right)[0]
-            ui.face()
-            ui.at(x + w - rw, y, rw, h)
-            ui.label(right, {"tone": "dim", "face": "caption"})
-        ui.at(*lay.grid)
+        ui.label(cap[2], _DIM_CAPTION)
+        if cap[3] is not None:
+            ui.at(x + w - cap[4], y, cap[4], h)
+            ui.label(cap[3], _DIM_CAPTION)
+        g = lay.grid
+        ui.at(g[0], g[1], g[2], g[3])
         ui.scroll("drawings")
         cw, ch = lay.card
-        ui.grid("drawings", cw, ch, {"cols": lay.cols, "margin": lay.margin,
-                                     "foot": 30 if lay.desk else 26, "top": 4})
-        x0, y0, w0, h0, st = ui.card(NEW, "", {"id": NEW, "icon": "new", "tone": "value"})
-        if st & ui.ACTIVATED:
+        ui.grid("drawings", cw, ch, lay.grid_o)
+        r = ui.card(NEW, "", _NEW_CARD)
+        if r[4] & ui.ACTIVATED:
             self._verb("new")
-        for name in self.drawings:
-            o = {"id": self._card_id(name)}
-            if self.menu and name == self.cur:
-                o["current"] = True
-            if name == self.wallpaper:
-                o["badge"] = "wallpaper"
-            cx, cy, cw_, ch_, st = ui.card(shown(name), "", o)
-            if cw_:
-                pic = self.covers.get(name, cw_, ch_)
+        menu = self.menu
+        for c in self._cards_of():
+            name = c[0]
+            r = ui.card(c[1], "", c[3] if menu and name == self.cur else c[2])
+            if r[2]:
+                pic = self.covers.get(name, r[2], r[3])
                 if pic is not None:
-                    cv.clip(*lay.grid)
-                    cv.picture(pic, cx, cy, cw_, ch_)
+                    cv.clip(g[0], g[1], g[2], g[3])
+                    cv.picture(pic, r[0], r[1], r[2], r[3])
                     cv.clip()
-            if st & ui.ACTIVATED and not self.menu:
+            if r[4] & ui.ACTIVATED and not menu:
                 self._verb("open", name)
         ui.grid()
         ui.end()
@@ -489,7 +526,27 @@ class MyArtAppLayer:
         fx, fy, fw, fh = lay.foot
         th = self._theme.colors()
         cv.rect(fx + 16, fy, fw - 32, 1, th["border"])
+        k = self._foot_of()
+        r = k[1]
+        ui.at(r[0], r[1], r[2], r[3])
+        ui.label(k[0], _DIM_CAPTION)
+        for b in k[2]:
+            r = b[4]
+            ui.at(r[0], r[1], r[2], r[3])
+            ui.icon(b[1])
+            if ui.button(b[0], b[2], b[5]):
+                self._verb(b[3])
+
+    def _foot_of(self):
+        """The desk foot for the drawing focus is on: (status, its rect,
+        [(label, icon, kind, verb, rect, override table)]), made again when
+        that drawing, the count or the layout moves."""
+        lay = self.layout
         name = self.cur
+        k = self._foot_k
+        if k is not None and k[0] is lay and k[1] == name and k[2] == len(self.drawings):
+            return k[3]
+        fx, fy, fw, fh = lay.foot
         verbs = [("Move to Trash", "trash", "danger", "trash"),
                  ("Use as wallpaper", "wallpaper", "normal", "wallpaper")]
         if name is not None and self._size(name) == (GAME_W, GAME_H):
@@ -508,14 +565,14 @@ class MyArtAppLayer:
                                             else "%dx%d" % (w, h))
         else:
             status = "%d drawings" % len(self.drawings)
-        ui.at(fx + 26, by, max(0, bx - fx - 34), 30)
-        ui.label(status, {"tone": "dim", "face": "caption"})
+        buttons = []
         for i, (label, icon, kind, verb) in enumerate(verbs):
-            ui.at(bx, by, widths[i], 30)
-            ui.icon(icon)
-            if ui.button(label, kind, {"id": "Foot " + verb}):
-                self._verb(verb)
+            buttons.append((label, icon, kind, verb, (bx, by, widths[i], 30),
+                            {"id": "Foot " + verb}))
             bx += widths[i] + 8
+        got = (status, (fx + 26, by, max(0, buttons[0][4][0] - fx - 34), 30), buttons)
+        self._foot_k = (lay, name, len(self.drawings), got)
+        return got
 
     def _rename_dialog(self):
         if self.renaming is None:
