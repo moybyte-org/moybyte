@@ -215,7 +215,7 @@ typedef struct {
     // options (moy_ui_api_text): each cleared once used and by begin.
     int16_t card_slot, card_glyph, card_blank, card_blank_glyph;
     int8_t card_tone;
-    uint8_t spread_cols;
+    uint8_t spread_cols, spread_wrap, grid_wrap;
     int16_t spread_foot, spread_top, spread_margin;
     int8_t txt_lines, txt_centre, txt_tone, txt_role;
     // The table drawn last: row 0's top (scrolled), the rows' height and
@@ -363,16 +363,19 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
 void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows);
 // The Python face's options the override block does not carry, each for the
 // next call of its verb: a label's text (`lines` its most, 0 one unwrapped;
-// `centre`; `tone` MOY_UI_TONE_*; `role` a font role, -1 the label's own),
+// `centre` 1 centred, 2 in from the page's edges as a group's caption is;
+// `tone` MOY_UI_TONE_*; `role` a font role, -1 the label's own),
 // a card's badge (icon `badge`, empty none), tone and blank picture (icon
 // `blank` on a tinted tile, empty none: moy_ui_card_blank), a grid's spread (its
 // `cols` columns spread across its rect, the gaps taking the rest; `foot`
 // the card's foot under its picture, `top` the room over its first row and
-// `margin` its rect's at either side, in pixels at the scale, 0 the style's).
+// `margin` its rect's at either side, in pixels at the scale, 0 the style's;
+// `wrap` its cards' titles take two lines where their foot holds them).
 void moy_ui_api_text(moy_ui_ctx_t *c, int lines, int centre, int tone, int role);
 void moy_ui_api_card_mark(moy_ui_ctx_t *c, moy_ui_span_t badge, int tone,
                           moy_ui_span_t blank);
-void moy_ui_api_grid_spread(moy_ui_ctx_t *c, int cols, int foot, int top, int margin);
+void moy_ui_api_grid_spread(moy_ui_ctx_t *c, int cols, int foot, int top, int margin,
+                            int wrap);
 // A group with no caption (ui.group's `card`): its rows on its card, from
 // the page's next row, until a group call ends it.
 void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s);

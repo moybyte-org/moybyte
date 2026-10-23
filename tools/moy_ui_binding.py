@@ -230,6 +230,11 @@ _DRAW_SIGS = (
     ("moy_ui_bar_part", [c.POINTER(_Sink), _I, _Box, _I], _I),
     ("moy_ui_bar_tile", [c.POINTER(_Sink), _Box, c.c_int32], _I),
     ("moy_ui_scrim", [c.POINTER(_Sink), _Box], _I),
+    ("moy_ui_tile", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, _I, _I], _I),
+    ("moy_ui_unlock", [c.POINTER(_Sink), _I, _I, _Span, _Span, _I, _I, _I, _I, _I,
+                       c.POINTER(_Box)], _I),
+    ("moy_ui_icon_slot", [c.c_char_p, _Z], _I),
+    ("moy_ui_icon_glyph", [c.c_char_p, _Z], _I),
     ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_depth", [], c.c_void_p),
     ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
@@ -306,7 +311,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_menu_danger", [c.c_void_p, c.c_uint32], None),
     ("moy_ui_api_text", [c.c_void_p, _I, _I, _I, _I], None),
     ("moy_ui_api_card_mark", [c.c_void_p, _Span, _I, _Span], None),
-    ("moy_ui_api_grid_spread", [c.c_void_p, _I, _I, _I, _I], None),
+    ("moy_ui_api_grid_spread", [c.c_void_p, _I, _I, _I, _I, _I], None),
     ("moy_ui_api_group_card", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_empty", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_char_p, _Z], _I),
     ("moy_ui_api_toast", [c.c_void_p, c.POINTER(_Sink), _Span, _Span], None),
@@ -710,6 +715,24 @@ def binding():
     def scrim(cv, look, rect):
         _check(lib.moy_ui_scrim(c.byref(sink(cv, look)), box_of(rect)))
 
+    def _icon(name):
+        b = _b(name or "")
+        return lib.moy_ui_icon_slot(b, len(b)), lib.moy_ui_icon_glyph(b, len(b))
+
+    def tile(cv, look, rect, icon, tone, r, fs, desk):
+        sl, gl = _icon(icon)
+        _check(lib.moy_ui_tile(c.byref(sink(cv, look)), box_of(rect), sl, gl, int(tone), int(r),
+                               int(fs), int(desk)))
+
+    def unlock(cv, look, cx, y, head, name, icon, burst, fs, desk):
+        sl, gl = _icon(icon)
+        h, keep = span(head)
+        n, keep2 = span(name)
+        out = _Box()
+        _check(lib.moy_ui_unlock(c.byref(sink(cv, look)), int(cx), int(y), h, n, sl, gl,
+                                 int(burst), int(fs), int(desk), c.byref(out)))
+        return (out.x, out.y, out.w, out.h)
+
     def frame_geom(w, h, title_h, active, mode):
         out = (_I * 6)()
         lib.moy_ui_frame_geom(int(w), int(h), int(title_h), 1 if active else 0, int(mode), out)
@@ -814,7 +837,7 @@ def binding():
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
-              scrim,
+              scrim, tile, unlock,
               frame_under, frame_under_onto, cast, dialog, text_field, panel, focus_ring, focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):
@@ -1075,9 +1098,9 @@ def binding():
         u, keep2 = _span0(blank)
         lib.moy_ui_api_card_mark(p, t, int(tone), u)
 
-    def api_grid_spread(ctx, cols, foot, top, margin):
+    def api_grid_spread(ctx, cols, foot, top, margin, wrap=0):
         p, _k = _ctx(ctx)
-        lib.moy_ui_api_grid_spread(p, int(cols), int(foot), int(top), int(margin))
+        lib.moy_ui_api_grid_spread(p, int(cols), int(foot), int(top), int(margin), int(wrap))
 
     def api_group_card(ctx, cv, look):
         p, _k = _ctx(ctx)

@@ -156,6 +156,13 @@ static int dark(const pd_t *d) {
     return 2126 * r + 7152 * g + 722 * b < 1280000;
 }
 
+// Whether the marks' current plate is solid (Contrast's): its parts take the
+// inverted treatment, a tile its colour and the ink on it.
+static int solid_marks(void) {
+    const moy_ui_marks_t *m = moy_ui_marks();
+    return m->on && m->cur_style == MOY_UI_CUR_PLATE && m->cur_alpha >= 255;
+}
+
 // The colour a page's ground is (moy_ui_page_ground) in the buffer's order,
 // in *c; 0 for none. Under a depth, in a window: the window's body as
 // moy_ui_depth_frame paints it.
@@ -717,16 +724,30 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
         }
         num[n++] = (char)('0' + pct % 10);
         num[n++] = '%';
-        int vw = tw(&fv, (const uint8_t *)num, (size_t)n, sc);
-        text(&d, &fv, (const uint8_t *)num, (size_t)n, b.x + b.w - vw, b.y, rh, pal(&d, dim), sc);
+        int vw = 0;
+        if (!r->steps) {
+            vw = tw(&fv, (const uint8_t *)num, (size_t)n, sc);
+            text(&d, &fv, (const uint8_t *)num, (size_t)n, b.x + b.w - vw, b.y, rh, pal(&d, dim),
+                 sc);
+        }
         if (r->label.n) {
             size_t ln = moy_text_fit_px(fl.id, r->label.p, r->label.n, b.w - vw - 8 * d.fs, sc);
             text(&d, &fl, r->label.p, ln, b.x, b.y, rh, pal(&d, lab), sc);
         }
         int ty = b.y + rh + (d.desk ? 2 : 1) * d.fs;
         uint16_t line = pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
-        uint16_t rest = mix(line, pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK)), 64);
-        rrect(&d, b.x, ty, b.w, bh, bh / 2, 1, rest, 0, 0);
+        uint16_t dimc = pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK));
+        uint16_t val_c = pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT));
+        uint16_t rest = mix(line, dimc, 64);
+        if (ratio_ge(val_c, rest, 3, 1)) {
+            rrect(&d, b.x, ty, b.w, bh, bh / 2, 1, rest, 0, 0);
+        } else {
+            // a track the fill would not keep 3:1 against: an outline in
+            // the dim ink on the ground (Contrast's)
+            uint16_t g = rest;
+            ground(&d, &g);
+            rrect(&d, b.x, ty, b.w, bh, bh / 2, 1, g, d.fs, dimc);
+        }
         int fw = (int)((int64_t)b.w * (r->v - r->lo) / span);
         if (fw > 0) {
             rrect(&d, b.x, ty, fw > bh ? fw : bh, bh, bh / 2, 1,
@@ -1105,20 +1126,40 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
     } else if ((flags & MOY_UI_F_ON) && solid && moy_ui_marks_shown() && cur_ink >= 0) {
         ink = dim = cur_ink;
     }
-    if (tone != MOY_UI_TONE_INK && tone != MOY_UI_TONE_DIM && dim != ink) {
+    if (tone != MOY_UI_TONE_INK && tone != MOY_UI_TONE_DIM && tone != MOY_UI_TONE_LOCKED
+        && dim != ink) {
         dim = tone_ink(&d, tone);
         if (!sub.n && tone == MOY_UI_TONE_VALUE) {
             ink = dim;                  // a card with no sub line: its title takes the tone
         }
     }
     pf_t ft = font_of(&d, MOY_UI_FONT_UI), fsub = font_of(&d, MOY_UI_FONT_CAPTION);
-    if (title.n && room > 0) {
-        centred_cut(&d, &ft, title, b.x, b.w, y, th, room, pal(&d, ink), sc);
-    }
     int sh = fsub.line * sc + 4 * d.fs;
     // on the handheld the sub line sits under the title's line, a desk's a
     // band below it
     int sy = y + th - d.fs - (d.desk ? 0 : 4 * d.fs);
+    // a title wider than the card breaks at its last word that fits, onto a
+    // second line, where the card's foot holds the line and the sub under it
+    size_t head = title.n;
+    int tl = th - (d.desk ? 4 : 2) * d.fs;   // the second line's step
+    if ((flags & MOY_UI_F_WRAP) && title.n && room > 0 && tw(&ft, title.p, title.n, sc) > room
+        && sy + tl + (sub.n ? 2 * d.fs + fsub.ascent * sc : 0) <= b.y + b.h) {
+        head = 0;
+        for (size_t i = 1; i < title.n; i++) {
+            if (title.p[i] == ' ' && tw(&ft, title.p, i, sc) <= room) {
+                head = i;
+            }
+        }
+    }
+    if (head > 0 && head < title.n) {
+        moy_ui_span_t a = {title.p, (uint16_t)head};
+        moy_ui_span_t z = {title.p + head + 1, (uint16_t)(title.n - head - 1)};
+        centred_cut(&d, &ft, a, b.x, b.w, y, th, room, pal(&d, ink), sc);
+        centred_cut(&d, &ft, z, b.x, b.w, y + tl, th, room, pal(&d, ink), sc);
+        sy += tl;
+    } else if (title.n && room > 0) {
+        centred_cut(&d, &ft, title, b.x, b.w, y, th, room, pal(&d, ink), sc);
+    }
     if (sub.n && room > 0 && sy + 2 * d.fs + fsub.ascent * sc <= b.y + b.h) {  // where the foot holds it
         centred_cut(&d, &fsub, sub, b.x, b.w, sy, sh, room, pal(&d, dim), sc);
     }
@@ -1212,6 +1253,11 @@ int moy_ui_card_badge(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, in
         }
         d.row->st[MOY_ST_N_FILL]++;
     }
+    if (tone == MOY_UI_TONE_LOCKED && slot < 0 && glyph < 0) {
+        static const uint8_t lock[] = "lock";
+        slot = moy_ui_icon_slot(lock, 4);
+        glyph = moy_ui_icon_glyph(lock, 4);
+    }
     if (slot < 0 && glyph < 0) {
         return MOY_UI_OK;
     }
@@ -1219,21 +1265,57 @@ int moy_ui_card_badge(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, in
     moy_ui_box_t disc = {(int16_t)(content.x + content.w - o - dd / 2),
                          (int16_t)(content.y + o - dd / 2), (int16_t)dd, (int16_t)dd};
     moy_ui_soft(s, disc, dd / 2, 102);
-    rrect(&d, disc.x, disc.y, disc.w, disc.h, dd / 2, 1,
-          pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), 0, 0);
+    uint16_t df = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
+    int ring = 0;
+    uint16_t rc = 0;
+    if (tone == MOY_UI_TONE_LOCKED && dark(&d)) {
+        // the veiled tile is dark too: a raised disc, ringed
+        ring = d.fs;
+        if (solid_marks()) {
+            ground(&d, &df);
+            rc = pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK));
+        } else {
+            df = pal(&d, tok(&d, MOY_UI_T_SURFACE_ALT, MOY_UI_T_SURFACE));
+            rc = mix(pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)),
+                     pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK)), 140);
+        }
+    }
+    rrect(&d, disc.x, disc.y, disc.w, disc.h, dd / 2, 1, df, ring, rc);
     icon_d(&d, slot, glyph, disc,
            tone == MOY_UI_TONE_DANGER ? tone_ink(&d, tone) : tone_ink(&d, MOY_UI_TONE_VALUE));
     return MOY_UI_OK;
 }
 
-int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph, int fs,
-                      int desk) {
+int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph,
+                      int tone, int fs, int desk) {
     pd_t d;
     open_pd(s, &d, fs, desk);
     int v = tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
     uint16_t surf = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
-    fill(&d, content.x, content.y, content.w, content.h,
-         mix(surf, pal(&d, v), dark(&d) ? 77 : 46));
+    int solid = solid_marks();
+    uint16_t tile = mix(surf, pal(&d, v), dark(&d) ? 77 : 46);
+    if (tone == MOY_UI_TONE_LOCKED) {
+        int dis = moy_ui_disabled();
+        v = dis >= 0 ? dis : tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
+        if (solid) {
+            ground(&d, &tile);
+            v = tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
+        } else if (dark(&d)) {
+            uint16_t g = surf;
+            ground(&d, &g);
+            tile = mix(pal(&d, tok(&d, MOY_UI_T_SURFACE_ALT, MOY_UI_T_SURFACE)), g, 128);
+        } else {
+            tile = pal(&d, tok(&d, MOY_UI_T_SUNK, MOY_UI_T_SURFACE));
+        }
+    } else if (solid) {
+        tile = pal(&d, v);
+        v = tok(&d, MOY_UI_T_VALUE_INK, MOY_UI_T_PANEL);
+    }
+    fill(&d, content.x, content.y, content.w, content.h, tile);
+    if (tone == MOY_UI_TONE_LOCKED && solid) {
+        rrect(&d, content.x, content.y, content.w, content.h, card_r(&d), 0, 0, 2 * d.fs,
+              pal(&d, v));
+    }
     uint32_t f24 = moy_ui_icon_font(1), f16 = moy_ui_icon_font(0);
     uint32_t font = f24 ? f24 : f16;
     int half = (content.w < content.h ? content.w : content.h) / 2;
@@ -1250,6 +1332,76 @@ int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, in
         return MOY_UI_OK;
     }
     icon_d(&d, slot, glyph, content, v);
+    return MOY_UI_OK;
+}
+
+int moy_ui_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, int tone, int r,
+                int fs, int desk) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    uint16_t surf = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
+    moy_ui_card_blank(s, b, slot, glyph, tone, fs, desk);
+    corners(&d, b, r * d.fs, surf);
+    if (tone == MOY_UI_TONE_LOCKED) {
+        moy_ui_card_badge(s, b, -1, -1, tone, surf, fs, desk);
+    }
+    return MOY_UI_OK;
+}
+
+// The confetti's MOY64 colours: red, yellow, green, blue, pink, orange.
+static const uint8_t s_confetti[6] = {8, 10, 11, 12, 14, 9};
+
+int moy_ui_unlock(const moy_ui_sink_t *s, int cx, int y, moy_ui_span_t head, moy_ui_span_t name,
+                  int slot, int glyph, int burst, int fs, int desk, moy_ui_box_t *out) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int sc = tscale(s);
+    pf_t fh = font_of(&d, MOY_UI_FONT_CAPTION), fn = font_of(&d, MOY_UI_FONT_TITLE);
+    int n = (d.desk ? 44 : 32) * d.fs, pad = (d.desk ? 10 : 6) * d.fs;
+    int hw = tw(&fh, head.p, head.n, sc), nw = tw(&fn, name.p, name.n, sc);
+    int w = (hw > nw ? hw : nw) + n + 3 * pad + (d.desk ? 14 : 10) * d.fs;
+    if (w > d.t.dw - 16 * d.fs) {
+        w = d.t.dw - 16 * d.fs;         // kept on the glass, its lines cut to it
+    }
+    int h = n + 2 * pad;
+    moy_ui_box_t b = {(int16_t)(cx - w / 2), (int16_t)y, (int16_t)w, (int16_t)h};
+    if (out != NULL) {
+        *out = b;
+    }
+    if (burst > 0) {
+        // a secret's: square bits in the MOY64 colours bursting from the
+        // banner's edges, `burst` (0..255) of the way out
+        int bx = b.x + b.w / 2, by = b.y + b.h / 2;
+        for (int k = 0; k < 34; k++) {
+            int ang = (k * 2458) % 6283;        // k times the golden angle, in milliradians
+            int reach = (6 + (k * 7) % 12) * d.fs * burst / 255;
+            // cos and sin by the parabola (within 6%), on [-pi, pi]
+            int a = ang > 3141 ? ang - 6283 : ang;
+            int sn = (4 * a * (3141 - (a < 0 ? -a : a))) / 9870;   // sin * 1000
+            int ac = a + 1571 > 3141 ? a + 1571 - 6283 : a + 1571;
+            int cs = (4 * ac * (3141 - (ac < 0 ? -ac : ac))) / 9870;
+            int ex = bx + cs * (b.w / 2 + reach) / 1000;
+            int ey = by + sn * (b.h / 2 + reach * 4 / 5) / 1000;
+            int dd = (k % 3 ? 3 : 2) * d.fs;
+            fill(&d, ex - dd / 2, ey - dd / 2, dd, dd, pal(&d, s_confetti[k % 6]));
+        }
+    }
+    moy_ui_modal(s, b, (moy_ui_span_t){NULL, 0}, fs, desk, 0);
+    if (solid_marks()) {
+        int r = moy_ui_depth()->on ? (d.desk ? 12 : 8) * d.fs : 0;
+        rrect(&d, b.x, b.y, b.w, b.h, r, 0, 0, 2 * d.fs, pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)));
+    }
+    moy_ui_box_t t = {(int16_t)(b.x + pad), (int16_t)(b.y + pad), (int16_t)n, (int16_t)n};
+    moy_ui_tile(s, t, slot, glyph, MOY_UI_TONE_INK, d.desk ? 8 : 6, fs, desk);
+    int tx = b.x + pad + n + pad + 2 * d.fs;
+    int room = b.x + b.w - pad - tx;
+    uint16_t hc = pal(&d, solid_marks() ? tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)
+                                        : tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT));
+    int mid = b.y + h / 2;
+    text_cut(&d, &fh, head, tx, mid - (d.desk ? 3 : 2) * d.fs - fh.ascent * sc, fh.line * sc,
+             room, hc, sc);
+    text_cut(&d, &fn, name, tx, mid + (d.desk ? 19 : 14) * d.fs - fn.ascent * sc, fn.line * sc,
+             room, pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)), sc);
     return MOY_UI_OK;
 }
 

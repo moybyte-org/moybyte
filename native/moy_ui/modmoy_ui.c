@@ -1804,6 +1804,36 @@ static mp_obj_t ui_scrim(mp_obj_t cv, mp_obj_t look, mp_obj_t rect) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_scrim_obj, ui_scrim);
 
+// tile(cv, look, rect, icon, tone, r, fs, desk): a badge's tile on a card's surface
+static mp_obj_t ui_tile(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    moy_ui_span_t ic = span_of(a[3]);
+    check(moy_ui_tile(&s, box_of(a[2]), moy_ui_icon_slot(ic.p, ic.n),
+                      moy_ui_icon_glyph(ic.p, ic.n), num(a[4]), num(a[5]), num(a[6]),
+                      num(a[7])));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_tile_obj, 8, 8, ui_tile);
+
+// unlock(cv, look, cx, y, head, name, icon, burst, fs, desk) -> (x, y, w, h): the
+// unlock banner
+static mp_obj_t ui_unlock(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    moy_ui_span_t ic = span_of(a[6]);
+    moy_ui_box_t b;
+    check(moy_ui_unlock(&s, num(a[2]), num(a[3]), span_of(a[4]), span_of(a[5]),
+                        moy_ui_icon_slot(ic.p, ic.n), moy_ui_icon_glyph(ic.p, ic.n), num(a[7]),
+                        num(a[8]), num(a[9]), &b));
+    mp_obj_t t[4] = {MP_OBJ_NEW_SMALL_INT(b.x), MP_OBJ_NEW_SMALL_INT(b.y),
+                     MP_OBJ_NEW_SMALL_INT(b.w), MP_OBJ_NEW_SMALL_INT(b.h)};
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_unlock_obj, 10, 10, ui_unlock);
+
 // frame_band(cv, look, rect, light, side): the bar's band
 static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2727,13 +2757,14 @@ static mp_obj_t ui_api_card_mark(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_card_mark_obj, 4, 4, ui_api_card_mark);
 
-// api_grid_spread(ctx, cols, foot, top, margin): the next grid's spread.
+// api_grid_spread(ctx, cols, foot, top, margin, wrap): the next grid's spread.
 static mp_obj_t ui_api_grid_spread(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
-    moy_ui_api_grid_spread(ctx_of(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
+    moy_ui_api_grid_spread(ctx_of(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]),
+                           num(a[5]));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_grid_spread_obj, 5, 5, ui_api_grid_spread);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_grid_spread_obj, 6, 6, ui_api_grid_spread);
 
 // api_group_card(ctx, cv, look): a group with no caption.
 static mp_obj_t ui_api_group_card(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
@@ -2997,6 +3028,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_frame_icon), MP_ROM_PTR(&ui_frame_icon_obj) },
     { MP_ROM_QSTR(MP_QSTR_bar_part), MP_ROM_PTR(&ui_bar_part_obj) },
     { MP_ROM_QSTR(MP_QSTR_scrim), MP_ROM_PTR(&ui_scrim_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tile), MP_ROM_PTR(&ui_tile_obj) },
+    { MP_ROM_QSTR(MP_QSTR_unlock), MP_ROM_PTR(&ui_unlock_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_band), MP_ROM_PTR(&ui_frame_band_obj) },
     { MP_ROM_QSTR(MP_QSTR_dialog), MP_ROM_PTR(&ui_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_field), MP_ROM_PTR(&ui_text_field_obj) },

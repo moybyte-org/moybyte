@@ -1078,11 +1078,14 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     int stacked;
     if (c->txt_lines || c->txt_centre || c->txt_tone || c->txt_role >= 0) {
         // the Python face's text options: lines wrapped, centred, a tone, a role
-        int lines = c->txt_lines, centre = c->txt_centre, tone = c->txt_tone;
+        int lines = c->txt_lines, centre = c->txt_centre == 1, tone = c->txt_tone;
         int role = c->txt_role >= 0 ? c->txt_role : MOY_UI_FONT_UI;
+        int pad = c->txt_centre == 2
+                      ? (kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET)
+                         + kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD)) * c->fs
+                      : kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
         c->txt_lines = c->txt_centre = c->txt_tone = 0;
         c->txt_role = -1;
-        int pad = kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
         moy_ui_box_t m = c->has_at ? c->at : c->page;
         if (!c->has_at) {
             m.x = (int16_t)(m.x + pad);
@@ -1556,12 +1559,27 @@ void moy_ui_api_progress(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
                          int32_t hi, const moy_ui_over_t *o) {
     o = over(o);
     int stacked;
-    moy_ui_box_t b = place(c, row_h(c), &stacked);
+    int count = o->steps == 1;
+    // a count stacked: its label on a row and its bar under it, in from the
+    // page's edges as a group's caption is
+    int placed = c->has_at;
+    int top = count && !placed ? (c->cls ? 14 : 6) * c->fs : 0;
+    int h = count ? top + row_h(c) + (c->cls ? 10 : 7) * c->fs : row_h(c);
+    moy_ui_box_t b = place(c, h, &stacked);
+    if (count && !placed) {
+        int in = (kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET)
+                  + kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD)) * c->fs;
+        b.x = (int16_t)(b.x + in);
+        b.w = (int16_t)(b.w - 2 * in);
+        b.y = (int16_t)(b.y + top);
+        b.h = (int16_t)(b.h - top);
+    }
     moy_ui_vrow_t r;
     vrow_init(c, &r, label);
     r.lo = 0;
     r.hi = hi > 0 ? hi : 1;
     r.v = v < 0 ? 0 : v > r.hi ? r.hi : v;
+    r.steps = count;
     vrow_draw(c, s, b, stacked, MOY_UI_V_PROGRESS, 0, o, &r);
 }
 
@@ -2401,7 +2419,7 @@ void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows) {
 
 void moy_ui_api_text(moy_ui_ctx_t *c, int lines, int centre, int tone, int role) {
     c->txt_lines = (int8_t)(lines < 0 ? 0 : lines > 16 ? 16 : lines);
-    c->txt_centre = (int8_t)(centre != 0);
+    c->txt_centre = (int8_t)(centre == 2 ? 2 : centre != 0);
     c->txt_tone = (int8_t)(tone < 0 || tone > MOY_UI_TONE_DANGER ? 0 : tone);
     c->txt_role = (int8_t)(role < 0 || role > MOY_UI_FONT_RESULT ? -1 : role);
 }
@@ -2410,12 +2428,14 @@ void moy_ui_api_card_mark(moy_ui_ctx_t *c, moy_ui_span_t badge, int tone,
                           moy_ui_span_t blank) {
     c->card_slot = (int16_t)(badge.n ? moy_ui_icon_slot(badge.p, badge.n) : -1);
     c->card_glyph = (int16_t)(badge.n ? moy_ui_icon_glyph(badge.p, badge.n) : -1);
-    c->card_tone = (int8_t)(tone < 0 || tone > MOY_UI_TONE_DANGER ? 0 : tone);
+    c->card_tone = (int8_t)(tone < 0 || tone > MOY_UI_TONE_LOCKED ? 0 : tone);
     c->card_blank = (int16_t)(blank.n ? moy_ui_icon_slot(blank.p, blank.n) : -1);
     c->card_blank_glyph = (int16_t)(blank.n ? moy_ui_icon_glyph(blank.p, blank.n) : -1);
 }
 
-void moy_ui_api_grid_spread(moy_ui_ctx_t *c, int cols, int foot, int top, int margin) {
+void moy_ui_api_grid_spread(moy_ui_ctx_t *c, int cols, int foot, int top, int margin,
+                            int wrap) {
+    c->spread_wrap = (uint8_t)(wrap != 0);
     c->spread_margin = (int16_t)(margin < 0 ? 0 : margin);
     c->spread_cols = (uint8_t)(cols < 0 ? 0 : cols > 255 ? 255 : cols);
     c->spread_foot = (int16_t)(foot < 0 ? 0 : foot);
@@ -2466,7 +2486,8 @@ static void card_finish(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     c->fin_on = 0;
     clip_t k;
     if (clip_row(&k, s, c->fin_content, c->grid_open == 1, c->page)) {
-        if (c->fin_slot >= 0 || c->fin_glyph >= 0 || c->fin_tone == MOY_UI_TONE_DANGER) {
+        if (c->fin_slot >= 0 || c->fin_glyph >= 0 || c->fin_tone == MOY_UI_TONE_DANGER
+            || c->fin_tone == MOY_UI_TONE_LOCKED) {
             moy_ui_card_badge(s, c->fin_content, c->fin_slot, c->fin_glyph, c->fin_tone,
                               c->fin_ground, c->fs, ground_of(c));
         }
@@ -2552,6 +2573,8 @@ void moy_ui_api_grid(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
         c->spread_cols = 0;
         c->spread_foot = c->spread_top = c->spread_margin = 0;
     }
+    c->grid_wrap = c->spread_wrap;
+    c->spread_wrap = 0;
     c->grid_w = (int16_t)w;
     c->grid_h = (int16_t)h;
     c->grid_row = (int16_t)(pmetric(c, MOY_UI_M_VALUE_ROW_CARD_TOP) + h + foot
@@ -2603,9 +2626,11 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         c->card_tone = 0;
         return;                     // scrolled out of view: nothing to draw into
     }
-    moy_ui_card(s, b, pic, title, sub, f, c->fs, ground_of(c), c->card_tone, &content, &g);
+    moy_ui_card(s, b, pic, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
+                ground_of(c), c->card_tone, &content, &g);
     if (c->card_blank >= 0 || c->card_blank_glyph >= 0) {
-        moy_ui_card_blank(s, content, c->card_blank, c->card_blank_glyph, c->fs, ground_of(c));
+        moy_ui_card_blank(s, content, c->card_blank, c->card_blank_glyph, c->card_tone, c->fs,
+                          ground_of(c));
     }
     clip_out(&k);
     c->fin_slot = c->card_slot;

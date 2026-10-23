@@ -221,13 +221,14 @@ def label(text, o=None):
     row's width, at most `lines` lines (16 where it names none) with an
     ellipsis after the last; `align` "center" centres each line; `tone`
     ("dim", "value", "danger") inks it; `face` ("title", "caption") sets it
-    in another type role. Such a label is as tall as its lines."""
+    in another type role; `inset` stands it in from the page's edges as a
+    group's caption is. Such a label is as tall as its lines."""
     t = _T
-    if o and ("wrap" in o or "align" in o or "tone" in o or "face" in o):
+    if o and ("wrap" in o or "align" in o or "tone" in o or "face" in o or "inset" in o):
         lines = (o.get("lines") or 16) if o.get("wrap") else 0
         f = o.get("face")
-        _C.api_text(t[0], lines, 1 if o.get("align") == "center" else 0, _tone(o),
-                    _FACES.index(f) if f in _FACES else -1)
+        _C.api_text(t[0], lines, 1 if o.get("align") == "center" else 2 if o.get("inset") else 0,
+                    _tone(o), _FACES.index(f) if f in _FACES else -1)
     _C.api_label(t[0], t[1], t[2], text, _over(o))
 
 
@@ -397,12 +398,16 @@ def icon(name, o=None):
     return _C.api_icon(_T[0], name)
 
 
+_COUNT = {"steps": True}
+
+
 def progress(label, v, hi, o=None):
     """A row showing `v` of `hi` done: a bar and its percent at the right;
     no stop. Placed (`at`) a row and its bar tall, the label and percent
-    stand on a line over the bar, which spans the rect."""
+    stand on a line over the bar, which spans the rect. With `o.count` it
+    is a count: its label alone says it, no percent."""
     t = _T
-    _C.api_progress(t[0], t[1], t[2], label, v, hi, _over(o))
+    _C.api_progress(t[0], t[1], t[2], label, v, hi, _over(_COUNT if o and o.get("count") else o))
 
 
 def _cells(items):
@@ -555,11 +560,13 @@ def grid(id=None, w=0, h=0, o=None):
     on the page's ground between the caption and the group's rows. `o`'s
     `cols` spreads that many columns across the rect, the gaps taking the
     rest, `margin` keeps that many pixels at either side, `foot` sets a
-    card's foot under its picture and `top` the room over its first row."""
+    card's foot under its picture, `top` the room over its first row and
+    `wrap` breaks a title wider than its card onto a second line where the
+    foot holds it."""
     t = _T
     if o and o.get("cols"):
         _C.api_grid_spread(t[0], o["cols"], o.get("foot") or 0, o.get("top") or 0,
-                           o.get("margin") or 0)
+                           o.get("margin") or 0, 1 if o.get("wrap") else 0)
     _C.api_grid(t[0], t[1], t[2], "" if id is None else id, w, h, _over(o))
 
 
@@ -572,10 +579,13 @@ def card(title, sub="", o=None):
     `o`'s `badge` names the icon on the picture's corner, and `tone`
     ("value", "danger") inks the sub line; "danger" also veils the picture
     and inks the badge. `icon` is a card with no picture of its own: that
-    icon on a tile tinted from `value`, and the app draws nothing there."""
+    icon on a tile tinted from `value`, and the app draws nothing there;
+    with `locked` the tile is veiled, the icon in the disabled ink, and a
+    lock badge on its corner."""
     t = _T
-    if o and ("badge" in o or "tone" in o or "icon" in o):
-        _C.api_card_mark(t[0], o.get("badge") or "", _tone(o), o.get("icon") or "")
+    if o and ("badge" in o or "tone" in o or "icon" in o or "locked" in o):
+        _C.api_card_mark(t[0], o.get("badge") or "", 4 if o.get("locked") else _tone(o),
+                         o.get("icon") or "")
     return _C.api_card(t[0], t[1], t[2], title, sub, _over(o))
 
 
@@ -594,6 +604,17 @@ def toast(text, kind="check"):
     for as long as it shows (two seconds, or until the next key)."""
     t = _T
     _C.api_toast(t[0], t[1], t[2], text, kind)
+
+
+def tile(x, y, w, h, icon, o=None):
+    """A badge's tile over the rect (x, y, w, h) on a card's surface (a
+    popover's): `icon` on a tile tinted from `value`, its corners cut to the
+    card radius; with `o.locked` veiled, the icon in the disabled ink and a
+    lock badge on its corner, as a locked card's picture."""
+    t = _T
+    desk = t[3] & 1
+    _C.tile(t[1], t[2], (x, y, w, h), icon, 4 if o and o.get("locked") else 0,
+            10 if desk else 8, _D._fs(t[1]), desk)
 
 
 def cursor(x, y, w, h):

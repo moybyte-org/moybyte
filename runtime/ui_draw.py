@@ -1451,6 +1451,22 @@ def frame_band(cv, th, rect, light=False, side=BAND_BOTTOM):
 BAR_BAND, BAR_HH_BAND, BAR_SYS, BAR_HH_SYS, BAR_CHIP, BAR_TILE = 0, 1, 2, 3, 4, 5
 
 
+def tile(cv, th, rect, icon, locked=False, r=8, desk=False):
+    """A badge's tile over `rect` on a card's surface: `icon` on a tile
+    tinted from `value`, or with `locked` veiled with a lock badge, its
+    corners cut to `r` (at the font scale) toward `surface`."""
+    _C.tile(cv, _LOOK if th is _TH else _look(th), rect, icon, 4 if locked else 0, r, _fs(cv),
+            _DESK if desk else 0)
+
+
+def unlock(cv, th, cx, y, head, name, icon, burst=0, desk=False):
+    """The unlock banner (GAPS 47), centred on `cx` from `y`: the badge's
+    tile, `head` in `value` and its `name`; a secret's with confetti
+    `burst` (1..255) of the way out from its edges. Its card's rect."""
+    return _C.unlock(cv, _LOOK if th is _TH else _look(th), cx, y, head, name, icon, burst,
+                     _fs(cv), _DESK if desk else 0)
+
+
 def scrim(cv, th, rect):
     """What a modal dims under it (D-01): `rect` washed in the look's
     `scrim`, drawn once a full frame, before the modal's card."""
@@ -1616,7 +1632,7 @@ def mark_reach(size="part"):
 # app's verbs with ui_frame, before the app's update, so `ui.keys_taken()`
 # answers there.
 
-UI_TARGET = [None, None, 0]
+UI_TARGET = [None, None, 0, 0]  # the frame's context, canvas, look and desk flags
 _DESK = 1                               # moy_ui.h's MOY_UI_DESK
 _WINDOW = 2                             # ... and MOY_UI_WINDOW
 _ELSEWHERE = 4                          # ... and MOY_UI_ELSEWHERE
@@ -1659,6 +1675,7 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
         if rect is None or rect[2] != cv.w or rect[3] != cv.h:
             rect = _WHOLE[0] = (0, 0, cv.w, cv.h)
     flags = (_DESK if desk else 0) | (_WINDOW if window else 0) | (_ELSEWHERE if elsewhere else 0)
+    t[3] = flags & (_DESK | _WINDOW)
     if app is not None:
         flags |= (_app_row(app) + 1) << _APP_SHIFT
     return _C.api_begin(ctx, inp, rect, flags, _fs(cv))

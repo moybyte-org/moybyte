@@ -472,7 +472,7 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, 
 enum {
     MOY_UI_F_ON = 1, MOY_UI_F_HOT = 2, MOY_UI_F_DISABLED = 4, MOY_UI_F_EDGE = 8,
     MOY_UI_F_BAND = 16, MOY_UI_F_EDGE_LAST = 32, MOY_UI_F_LABEL = 64, MOY_UI_F_ICON = 128,
-    MOY_UI_F_GLYPH = 256, MOY_UI_F_FOCUS = 512, MOY_UI_F_LEAD = 1024,
+    MOY_UI_F_GLYPH = 256, MOY_UI_F_FOCUS = 512, MOY_UI_F_LEAD = 1024, MOY_UI_F_WRAP = 2048,
 };
 // A widget whose caller draws an icon image (or its own glyph) between the
 // frame and the content draws in two calls, FRAME then CONTENT; every other
@@ -741,7 +741,8 @@ typedef struct {
     int32_t v, lo, hi;              // slider; progress: v of hi done (lo 0)
     int16_t fs, desk, card;         // card: on a group's card
     int16_t icon_slot, icon_glyph;  // the icon before the label (-1 none)
-    int16_t steps;                  // slider: a segment per step, no number
+    int16_t steps;                  // slider: a segment per step, no number;
+                                    // progress: a count, its label alone (no percent)
     int16_t kind;                   // MOY_UI_VROW_*: a danger row inks its label and icon
                                     // in the menu danger ink
     int16_t first;                  // the first row on its card (under the card's top frame)
@@ -788,7 +789,8 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
 // colour around the picture, which moy_ui_card_end cuts its corners to;
 // `desk` takes MOY_UI_WINDOW as the page's ground does.
 // `tone` (MOY_UI_TONE_*) is the sub line's ink: the dim ink, else `value`
-// or the danger ink.
+// or the danger ink. With F_WRAP a title wider than the card breaks at its
+// last word that fits onto a second line, where the card's foot holds it.
 int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
                 moy_ui_span_t sub, int flags, int fs, int desk, int tone, moy_ui_box_t *content,
                 uint16_t *gnd);
@@ -800,20 +802,39 @@ int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t conte
 // moy_ui_card_end (ui.card's `badge` and `tone`): a picture whose cart the
 // console cannot take (MOY_UI_TONE_DANGER) veiled toward the ground `gnd`,
 // then icon `slot` (else glyph table `glyph`; both -1 none) on a `surface`
-// disc at its top right, in `value` or the danger ink.
+// disc at its top right, in `value` or the danger ink. A locked card's
+// (MOY_UI_TONE_LOCKED) disc reads on the veiled tile: `surface` in a light
+// mode, `surface_alt` ringed in a dark one, the ground ringed under Contrast.
 int moy_ui_card_badge(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph,
                       int tone, uint16_t gnd, int fs, int desk);
 
 // A card with no picture of its own (ui.card's `icon`): its picture box
 // `content` a tile tinted from `value`, icon `slot` (else `glyph`) on it in
-// `value`, its largest mask at the largest whole scale that fits half the tile.
-int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph, int fs,
-                      int desk);
+// `value`, its largest mask at the largest whole scale that fits half the tile;
+// under Contrast the tile is `value` and the icon `value_ink`. A locked card
+// (`tone` MOY_UI_TONE_LOCKED) is veiled: the tile `sunk` (a dark mode's
+// `surface_alt` half way to the ground; Contrast's the ground, ringed in the
+// dim ink) and the icon in the disabled ink.
+int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph,
+                      int tone, int fs, int desk);
+// A badge's tile on a card's surface (an unlock banner's, a popover's): the
+// blank card's tile in box b, its corners cut to radius `r` (at the scale)
+// toward `surface`, and a locked one's lock badge.
+int moy_ui_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, int tone, int r,
+                int fs, int desk);
+// The unlock banner (docs/media/look_2026-10/GAPS.md 47): a card centred on
+// `cx` with its top at `y`, the badge's tile (icon `slot`, else `glyph`), the
+// line `head` in `value` and the badge's `name` in the title face; a secret's
+// with confetti bursting from its edges, `burst` (1..255) of the way out (0
+// none). *out is the card.
+int moy_ui_unlock(const moy_ui_sink_t *s, int cx, int y, moy_ui_span_t head, moy_ui_span_t name,
+                  int slot, int glyph, int burst, int fs, int desk, moy_ui_box_t *out);
 
 // The tones a line of text takes (ui.label's and ui.card's `tone`): the
 // part's ink, the dim ink, `value`, the danger ink (the look's `danger_ink`,
 // else the danger buttons' ink).
-enum { MOY_UI_TONE_INK = 0, MOY_UI_TONE_DIM = 1, MOY_UI_TONE_VALUE = 2, MOY_UI_TONE_DANGER = 3 };
+enum { MOY_UI_TONE_INK = 0, MOY_UI_TONE_DIM = 1, MOY_UI_TONE_VALUE = 2, MOY_UI_TONE_DANGER = 3,
+       MOY_UI_TONE_LOCKED = 4 };
 // Text in box b from its top (ui.label's `wrap`, `lines`, `align`, `tone`
 // and `face`): in font `role`, broken at word breaks in b.w into at most
 // `lines` lines (0: one), an ellipsis after the last where the text runs on;
