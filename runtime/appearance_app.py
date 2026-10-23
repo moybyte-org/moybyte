@@ -217,10 +217,7 @@ class _Built:
         self.status_room = -1      # the desk foot's status, cut to its room
         self.status = ""
         self.status_h = 0
-        self.aa_h = -1             # the panel height "Aa" was chosen for
-        self.aa_role = None
-        self.aa_lh = 0
-        self.aa_big = 1
+        self.aa = {}               # a panel height -> how "Aa" draws there (`_aa`)
 
 
 class AppearanceLayout:
@@ -716,6 +713,11 @@ class AppearanceAppLayer:
         b = self._built
         if b is not None:
             return b
+        return self._make(th)
+
+    def _make(self, th):
+        """`_build`'s making, its own function: the comprehensions' cells
+        would otherwise be made on every frame's call of `_build`."""
         b = self._built = _Built()
         ch = self._ch
         variant = ch["variant"]
@@ -875,27 +877,27 @@ class AppearanceAppLayer:
         """"Aa" centred down a panel of height `h` at `x`: the live theme's
         largest face whose line is at most half the panel, at its own size
         (its anti-aliasing unscaled), else the print font at the whole scale
-        that fits. The face is chosen once per panel height."""
-        if b.aa_h != h:
-            b.aa_h = h
-            b.aa_role = None
+        that fits. The face is chosen once per panel height (the focused
+        card's panel is taller)."""
+        a = b.aa.get(h)
+        if a is None:
+            a = None
             for role in _AA_FACES:
                 if ui.face(role, "Aa"):
                     lh = ui.text_size("Aa")[1]
                     ui.face()
                     if 2 * lh <= h:
-                        b.aa_role = role
-                        b.aa_lh = lh
+                        a = (role, lh, 1)
                         break
-            if b.aa_role is None:
+            if a is None:
                 big = max(1, h // (2 * ui.text_size("Aa")[1]))
-                b.aa_big = big
-                b.aa_lh = ui.text_size("Aa", big)[1]
-        if b.aa_role is not None and ui.face(b.aa_role, "Aa"):
-            cv.print("Aa", x, y + (h - b.aa_lh) // 2, c)
+                a = (None, ui.text_size("Aa", big)[1], big)
+            b.aa[h] = a
+        if a[0] is not None and ui.face(a[0], "Aa"):
+            cv.print("Aa", x, y + (h - a[1]) // 2, c)
             ui.face()
             return
-        cv.print_scaled("Aa", x, y + (h - b.aa_lh) // 2, c, b.aa_big)
+        cv.print_scaled(b"Aa", x, y + (h - a[1]) // 2, c, a[2])
 
     # -- the wallpapers --------------------------------------------------------
 
