@@ -226,7 +226,52 @@ def _setup_table():
                           "nearest screen: the Code tab on Star Catcher"),
     }
     table.update(_apps_table())
+    table.update(_about_table())
     return table
+
+
+# Achievements and About (plan step 32, rounds/round16.py): each scene's
+# screen -> (the surface it is drawn from today, what the render shows).
+# Today's achievements list and About box are overlays the goldens' quiesce
+# clears every frame, so their nearest screens are the pages they open from.
+S3 = "guition_tapfloor_dark"
+ABOUT = {
+    "handheld_achievements-empty": (HANDHELD, "settings"),
+    "handheld_achievements-few": (HANDHELD, "settings"),
+    "handheld_achievements": (HANDHELD, "settings"),
+    "handheld_achievements-scrolled": (HANDHELD, "settings"),
+    "handheld_achievement-unlocked": (HANDHELD, "home"),
+    "handheld_achievement-secret": (HANDHELD, "home"),
+    "handheld_settings-about": (HANDHELD, "settings"),
+    "handheld_about": (HANDHELD, "sysmenu"),
+    "handheld_about-update": (HANDHELD, "sysmenu"),
+    "handheld_licences": (HANDHELD, "settings"),
+    "handheld_licence": (HANDHELD, "settings"),
+    "handheld_achievements-s3": (S3, "settings"),
+    "handheld_achievement-unlocked-s3": (S3, "settings"),
+    "handheld_settings-about-s3": (S3, "settings"),
+    "handheld_about-s3": (S3, "settings"),
+    "desktop_achievements": (DESK, "desk"),
+    "desktop_achievement-unlocked": (DESK, "desk"),
+    "desktop_about": (DESK, "sysmenu"),
+    "desktop_about-update": (DESK, "sysmenu"),
+    "desktop_licences": (DESK, "desk"),
+}
+
+
+def _about_table():
+    what = {"settings": "nearest screen: Settings as it opens",
+            "home": "nearest screen: home (the unlock banner is cleared per frame)",
+            "sysmenu": "nearest screen: the system menu, where About opens",
+            "desk": "nearest screen: the desk"}
+    out = {}
+    for screen, (config, near) in ABOUT.items():
+        desk = config == DESK
+        setup = {"settings": _settings, "home": _home,
+                 "sysmenu": _sysmenu_desk if desk else _sysmenu_home,
+                 "desk": _desk}[near]
+        out[screen] = (config, ("32",), False, setup, what[near])
+    return out
 
 
 # The apps' restyle (docs/media/look_2026-10/APPS_RESTYLE.md, plan step 31):

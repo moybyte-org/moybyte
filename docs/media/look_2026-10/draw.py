@@ -10,7 +10,8 @@ scenes, the sheets, and the Editor's desk layouts and handheld tabs
 (round 12, `EDITOR_LAYOUT.md`). `rounds/round13.py` draws the apps'
 restyle: Paint, My Art, Get Carts, Notes and Storybook (`APPS_RESTYLE.md`),
 and `rounds/round15.py` Storybook and Paint at the desk's 1024x600 document
-size; `rounds/round14.py` adds the three readings of maximise and the resizable
+size, and `rounds/round16.py` Achievements and About
+(`docs/look_2026-10.md` step 32); `rounds/round14.py` adds the three readings of maximise and the resizable
 panes (`MAXIMISE_VARIANTS.md`). The icon sets' sources live in
 native/moy_ui/icons/ (tools/make_icons.py builds the shipped masks from
 them).
@@ -42,6 +43,8 @@ def main():
     round13.scenes()
     import round15  # noqa: E402 -- Storybook and Paint at 1024x600 (APPS_RESTYLE.md)
     round15.scenes()
+    import round16  # noqa: E402 -- Achievements and About (docs/look_2026-10.md step 32)
+    round16.scenes()
     M.calc_sheet()
     M.specimen()
     src = R12.scenes()

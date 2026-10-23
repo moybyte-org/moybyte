@@ -155,6 +155,75 @@ moy-dark_desktop_storybook-max.png — Storybook full screen: ‹ and the tools 
 storybook_present.png — Storybook presenting on the T-Deck: the 1024x600 slide at 5/16 (320x188) on black, its number in the margin; 320x240
 storybook_present@3x.png — same, enlarged 3x (nearest)
 storybook_present_desk.png — Storybook presenting on the 1024x600 board: the slide 1:1, the whole glass, its number in a half-black pill; 1024x600
+moy-light_handheld_achievements-empty.png — Achievements with none found: the progress row, a line on how they are found, every badge veiled under To find, the secrets named Secret; focus on First Steps; Moy Day; 320x240
+moy-light_handheld_achievements-empty@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_achievements-few.png — Achievements with three found: Found and To find as card grids, a found badge its icon on a tile tinted from value, a locked one veiled with a lock badge; focus on Little Artist; Moy Day; 320x240
+moy-light_handheld_achievements-few@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_achievements.png — Achievements with nine of eleven found, two secrets among them; focus on Lift Off!; Moy Day; 320x240
+moy-light_handheld_achievements@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_achievements-scrolled.png — Achievements scrolled to the end: the last found row under the bar, To find with Home Decorator and an unfound secret; focus on Home Decorator; Moy Day; 320x240
+moy-light_handheld_achievements-scrolled@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_achievement-unlocked.png — An achievement unlocked over the home: the system's banner under the bar, the badge's tile, what happened and its name; Moy Day; 320x240
+moy-light_handheld_achievement-unlocked@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_achievement-secret.png — A secret found (the Konami code): the banner says so, with confetti round it; Moy Day; 320x240
+moy-light_handheld_achievement-secret@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_settings-about.png — Settings scrolled to its About group: the facts, then Achievements (9 of 11) and Licences as rows; focus on Achievements; Moy Day; 320x240
+moy-light_handheld_settings-about@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_about.png — About from the system menu over the washed home: Moy, the wordmark, the version and the board, then Updates (up to date) and Licences as rows; focus on Updates; Moy Day; 320x240
+moy-light_handheld_about@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_about-update.png — About with an update ready: Updates says 0.9 is ready in value; Moy Day; 320x240
+moy-light_handheld_about-update@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_licences.png — Licences: a line on Moybyte's licence, then Moybyte's parts and what it is made with, each with its licence; focus on The console; Moy Day; 320x240
+moy-light_handheld_licences@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_licence.png — A licence's text, MicroPython's MIT licence, scrolling under the bar; Moy Day; 320x240
+moy-light_handheld_licence@3x.png — same, enlarged 3x (nearest)
+moy-light_handheld_achievements-s3.png — Achievements on the Guition S3 (480x320, touch): four badges a row at 80 px, no hint strip; focus on Lift Off!; Moy Day; 480x320
+moy-light_handheld_achievement-unlocked-s3.png — An achievement unlocked on the Guition S3, over Settings; Moy Day; 480x320
+moy-light_handheld_settings-about-s3.png — Settings' About group on the Guition S3: rows at the tap floor, no hint strip; Moy Day; 480x320
+moy-light_handheld_about-s3.png — About on the Guition S3 over washed Settings, the wash to the glass's foot; Moy Day; 480x320
+moy-light_desktop_achievements.png — Achievements as a page of the Settings window: five badges a row at 96 px, the focused badge's name, how it is found and its state in the foot; focus on Cart Explorer; Moy Day; 1024x600
+moy-light_desktop_achievement-unlocked.png — An achievement unlocked on the desk: the banner at the top right under the bar; Moy Day; 1024x600
+moy-light_desktop_about.png — About from the system menu over the washed desk: Moy at 64 px, the wordmark, version, board, Updates and Licences, Esc Close; Moy Day; 1024x600
+moy-light_desktop_about-update.png — About on the desk with an update ready; Moy Day; 1024x600
+moy-light_desktop_licences.png — Licences as a page of the Settings window: the parts at the left, the focused one's text at the right; Moy Day; 1024x600
+moy-dark_handheld_achievements-empty.png — Achievements with none found: the progress row, a line on how they are found, every badge veiled under To find, the secrets named Secret; focus on First Steps; Moy Night; 320x240
+moy-dark_handheld_achievements-empty@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_achievements-few.png — Achievements with three found: Found and To find as card grids, a found badge its icon on a tile tinted from value, a locked one veiled with a lock badge; focus on Little Artist; Moy Night; 320x240
+moy-dark_handheld_achievements-few@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_achievements.png — Achievements with nine of eleven found, two secrets among them; focus on Lift Off!; Moy Night; 320x240
+moy-dark_handheld_achievements@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_achievements-scrolled.png — Achievements scrolled to the end: the last found row under the bar, To find with Home Decorator and an unfound secret; focus on Home Decorator; Moy Night; 320x240
+moy-dark_handheld_achievements-scrolled@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_achievement-unlocked.png — An achievement unlocked over the home: the system's banner under the bar, the badge's tile, what happened and its name; Moy Night; 320x240
+moy-dark_handheld_achievement-unlocked@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_achievement-secret.png — A secret found (the Konami code): the banner says so, with confetti round it; Moy Night; 320x240
+moy-dark_handheld_achievement-secret@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_settings-about.png — Settings scrolled to its About group: the facts, then Achievements (9 of 11) and Licences as rows; focus on Achievements; Moy Night; 320x240
+moy-dark_handheld_settings-about@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_about.png — About from the system menu over the washed home: Moy, the wordmark, the version and the board, then Updates (up to date) and Licences as rows; focus on Updates; Moy Night; 320x240
+moy-dark_handheld_about@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_about-update.png — About with an update ready: Updates says 0.9 is ready in value; Moy Night; 320x240
+moy-dark_handheld_about-update@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_licences.png — Licences: a line on Moybyte's licence, then Moybyte's parts and what it is made with, each with its licence; focus on The console; Moy Night; 320x240
+moy-dark_handheld_licences@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_licence.png — A licence's text, MicroPython's MIT licence, scrolling under the bar; Moy Night; 320x240
+moy-dark_handheld_licence@3x.png — same, enlarged 3x (nearest)
+moy-dark_handheld_achievements-s3.png — Achievements on the Guition S3 (480x320, touch): four badges a row at 80 px, no hint strip; focus on Lift Off!; Moy Night; 480x320
+moy-dark_handheld_achievement-unlocked-s3.png — An achievement unlocked on the Guition S3, over Settings; Moy Night; 480x320
+moy-dark_handheld_settings-about-s3.png — Settings' About group on the Guition S3: rows at the tap floor, no hint strip; Moy Night; 480x320
+moy-dark_handheld_about-s3.png — About on the Guition S3 over washed Settings, the wash to the glass's foot; Moy Night; 480x320
+moy-dark_desktop_achievements.png — Achievements as a page of the Settings window: five badges a row at 96 px, the focused badge's name, how it is found and its state in the foot; focus on Cart Explorer; Moy Night; 1024x600
+moy-dark_desktop_achievement-unlocked.png — An achievement unlocked on the desk: the banner at the top right under the bar; Moy Night; 1024x600
+moy-dark_desktop_about.png — About from the system menu over the washed desk: Moy at 64 px, the wordmark, version, board, Updates and Licences, Esc Close; Moy Night; 1024x600
+moy-dark_desktop_about-update.png — About on the desk with an update ready; Moy Night; 1024x600
+moy-dark_desktop_licences.png — Licences as a page of the Settings window: the parts at the left, the focused one's text at the right; Moy Night; 1024x600
+contrast-dark_handheld_achievements.png — Achievements with nine of eleven found, two secrets among them; focus on Lift Off!; Contrast (dark); 320x240
+contrast-dark_handheld_achievements@3x.png — same, enlarged 3x (nearest)
+contrast-dark_handheld_achievement-unlocked.png — An achievement unlocked over the home: the system's banner under the bar, the badge's tile, what happened and its name; Contrast (dark); 320x240
+contrast-dark_handheld_achievement-unlocked@3x.png — same, enlarged 3x (nearest)
+contrast-dark_handheld_about.png — About from the system menu over the washed home: Moy, the wordmark, the version and the board, then Updates (up to date) and Licences as rows; focus on Updates; Contrast (dark); 320x240
+contrast-dark_handheld_about@3x.png — same, enlarged 3x (nearest)
+contrast-dark_desktop_achievements.png — Achievements as a page of the Settings window: five badges a row at 96 px, the focused badge's name, how it is found and its state in the foot; focus on Cart Explorer; Contrast (dark); 1024x600
 calc_all_themes.png — Calc in all nine themes through one body and one kind table: the desk window over the theme's backdrop, and the handheld page below it; 1220x2600
 type_specimen.png — Type specimen: handheld sizes, the Code tab's mono and the desk body at 1, 2, 4 bpp and an 8-bit reference, on dark and on light; 860x336
 type_specimen@3x.png — same, enlarged 3x (nearest)

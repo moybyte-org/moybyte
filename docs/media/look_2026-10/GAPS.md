@@ -421,6 +421,21 @@ strip gives way to the app's tool row. **Cost:** 1.5 days.
 **44. Tooltips:** `o.tip` on a button, shown under a resting pointer on the
 desk (the bar's Desk tooltip, `BACK_TIP`, as a verb). **Cost:** 0.5 day.
 
+**45. Icon slots for Achievements:** `trophy`, `lock`, `heart`, `spark`,
+`smile`, `key` and `secret` (a question mark), in every set (the default
+set's sources are in `rounds/round16.py`). **Cost:** 0.5 day.
+
+**46. A locked card:** `ui.card`'s `o.locked` with its `icon`: the icon in
+the disabled ink on `sunk` (a dark mode's `raised` half way to the ground),
+a `lock` badge in `dim`; still a stop. **Cost:** 0.5 day.
+
+**47. The unlock banner:** the kernel's toast body (`moy_chrome_toast`)
+redrawn as a card under the bar, centred on a handheld and at the top right
+on the desk: a 32 px tile (44 on the desk) tinted from `value` with the
+badge's icon, a line in `value` and the name in the semibold face, in the
+theme's fonts and RGB, over any surface; a secret's with confetti round it.
+**Cost:** 1 day. **Frame:** its rect repaints as it comes and goes.
+
 ## Moot in this rendering
 
 The pixel round's star field, moonlit edge and focus halo; the Galmuri
@@ -432,4 +447,4 @@ docked to the content's foot (the apps as built take popovers and dialogs,
 2026-10-22).
 
 **Total:** about 96–104 developer days for gaps 1–26; gaps 27–30 add
-about 6, gap 31 about 19–22, and gaps 32–44 about 10.
+about 6, gap 31 about 19–22, gaps 32–44 about 10, and gaps 45–47 about 2.
