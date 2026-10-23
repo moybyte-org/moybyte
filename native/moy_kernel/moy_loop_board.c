@@ -24,6 +24,7 @@
 
 #include <stdlib.h>
 
+#include "py/gc.h"
 #include "py/mphal.h"
 #include "py/runtime.h"
 
@@ -91,6 +92,47 @@ static void b_inputs(uint32_t now, bool *click, bool *active) {
     moy_input_loop_inputs(now, click, active);
 }
 
+// The quiet collect. A collection is a whole-heap mark and sweep inside
+// whichever frame's allocation set it off, a tab switch or a keypress as
+// often as not (#66 has its cost), so a board takes one where nobody waits
+// when the heap is close to needing one: once a pause -- a frame that drew
+// nothing, QUIET_MS after the last input (the idle ladder's activity, the
+// dev channel's lines with it) and the last drawn frame -- it reads the heap
+// (a walk of the allocation table) and collects when more than 3/4 of it is
+// allocated or its longest free run is under QUIET_RUN. The heap's growth
+// stays the allocator's: below that mark nothing is collected early. A cart
+// that draws every frame is never quiet, and a screen nobody touches is
+// read once.
+#if MOY_LOOP_ESP
+#define QUIET_MS 1000u
+#define QUIET_RUN (16u * 1024u)
+static uint32_t s_drew_at, s_checked_at;
+#endif
+
+static void quiet_collect(uint32_t now, bool drew) {
+    #if MOY_LOOP_ESP
+    if (drew) {
+        s_drew_at = now;
+        return;
+    }
+    uint32_t touched = moy_loop_idle()->idle_at;
+    if (!moy_loop_vm() || (int32_t)(touched - s_checked_at) <= 0
+        || now - touched < QUIET_MS || now - s_drew_at < QUIET_MS) {
+        return;
+    }
+    s_checked_at = now;
+    gc_info_t info;
+    gc_info(&info);
+    if (info.used > info.total - info.total / 4
+        || info.max_free * MICROPY_BYTES_PER_GC_BLOCK < QUIET_RUN) {
+        gc_collect();
+    }
+    #else
+    (void)now;
+    (void)drew;
+    #endif
+}
+
 #if MOY_LOOP_ESP
 #if MICROPY_HW_ESP_USB_SERIAL_JTAG
 #include "usb_serial_jtag.h"
@@ -151,6 +193,7 @@ static void b_tail(uint32_t now, bool drew) {
     if (!drew && moy_glass_loop_idle != NULL) {
         moy_glass_loop_idle();
     }
+    quiet_collect(now, drew);
 }
 
 #if MOY_LOOP_ESP
@@ -235,8 +278,6 @@ static uint32_t b_services(void) {
 // The words that read or act on kernel state, answered in C before any
 // console word. The host and the browser keep runtime/dev_channel.py's
 // copies, which say `-` for what a host cannot read.
-
-#include "py/gc.h"
 
 void moy_aud_hush(void) __attribute__((weak));
 

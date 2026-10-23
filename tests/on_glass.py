@@ -934,6 +934,23 @@ def py_probe_reaches_the_console(board):
     assert line == "PY True", line
 
 
+def a_quiet_console_collects_its_garbage(board):
+    """The quiet collect (native/moy_kernel/moy_loop_board.c): a heap left
+    more than 3/4 allocated is collected in a frame that drew nothing, a
+    second after the last line and the last drawn frame, with nothing of the
+    console's asking for it."""
+    import time
+    board.pyexec("import gc\n"
+                 "gc.collect()\n"
+                 "ws._qn = max(64, (gc.areas()[1] * 7 // 8 - gc.mem_alloc()) // 1024)\n"
+                 "ws._qg = [bytearray(1000) for _ in range(ws._qn)]\n"
+                 "ws._qg = None", strict=True)
+    c0 = board.pyval("__import__('gc').pauses()[0]", strict=True)
+    time.sleep(3.0)
+    c1 = board.pyval("__import__('gc').pauses()[0]", strict=True)
+    assert c1 > c0, "no collection in a quiet pause over a heap 7/8 allocated"
+
+
 def a_leaked_session_leaves_the_panel_flushing(board):
     """The bus rule of the app ABI's sessions (docs/kernel_appabi_2026-10.md
     section 2.6): on the T-Deck the card shares the panel's SPI host, and the

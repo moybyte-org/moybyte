@@ -521,6 +521,10 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
+def test_a_quiet_console_collects_its_garbage(board):
+    on_glass.a_quiet_console_collects_its_garbage(board)
+
+
 def test_the_saver_comes_and_its_wake_repaints(board):
     on_glass.idle_saver_and_wake(board)
 
