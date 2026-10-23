@@ -225,9 +225,12 @@ def label(text, o=None):
     ellipsis after the last; `align` "center" centres each line; `tone`
     ("dim", "value", "danger") inks it; `face` ("title", "caption") sets it
     in another type role; `inset` stands it in from the page's edges as a
-    group's caption is. Such a label is as tall as its lines."""
+    group's caption is. Such a label is as tall as its lines. (The board's
+    and the browser's module read these from the dict itself: modmoy_ui.c's
+    label_text.)"""
     t = _T
-    if o and ("wrap" in o or "align" in o or "tone" in o or "face" in o or "inset" in o):
+    if o and not _OVER_DICT and ("wrap" in o or "align" in o or "tone" in o or "face" in o
+                                 or "inset" in o):
         lines = (o.get("lines") or 16) if o.get("wrap") else 0
         f = o.get("face")
         _C.api_text(t[0], lines, 1 if o.get("align") == "center" else 2 if o.get("inset") else 0,

@@ -2346,13 +2346,62 @@ static mp_obj_t ui_api_page(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_page_obj, 5, 5, ui_api_page);
 
-// api_label(ctx, cv, look, text, o)
+// Which of `n` words string `v` is, -1 none (or no string).
+static int word_of(mp_obj_t v, const char *const *w, int n) {
+    if (!mp_obj_is_str(v)) {
+        return -1;
+    }
+    size_t len;
+    const char *p = mp_obj_str_get_data(v, &len);
+    for (int i = 0; i < n; i++) {
+        if (strlen(w[i]) == len && memcmp(w[i], p, len) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// A label's text options from its override dict, read as runtime/ui.py's
+// `label` reads them where the module takes no dict: any of `wrap` (with
+// `lines`), `align`, `inset`, `tone` and `face` present sets the next label's
+// text.
+static void label_text(moy_ui_ctx_t *c, mp_obj_t o) {
+    static const char *const tones[] = {"ink", "dim", "value", "danger"};
+    static const char *const faces[] = {"ui", "title", "mono", "caption"};
+    static const char *const centre[] = {"center"};
+    if (!mp_obj_is_type(o, &mp_type_dict)) {
+        return;
+    }
+    mp_map_t *m = mp_obj_dict_get_map(o);
+    mp_map_elem_t *wrap = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_wrap), MP_MAP_LOOKUP);
+    mp_map_elem_t *align = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_align), MP_MAP_LOOKUP);
+    mp_map_elem_t *tone = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_tone), MP_MAP_LOOKUP);
+    mp_map_elem_t *face = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_face), MP_MAP_LOOKUP);
+    mp_map_elem_t *inset = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_inset), MP_MAP_LOOKUP);
+    if (wrap == NULL && align == NULL && tone == NULL && face == NULL && inset == NULL) {
+        return;
+    }
+    int lines = 0;
+    if (wrap != NULL && mp_obj_is_true(wrap->value)) {
+        mp_map_elem_t *k = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_lines), MP_MAP_LOOKUP);
+        lines = k != NULL && mp_obj_is_true(k->value) ? (int)num(k->value) : 16;
+    }
+    int t = tone != NULL ? word_of(tone->value, tones, 4) : -1;
+    int al = align != NULL && word_of(align->value, centre, 1) == 0 ? 1
+             : inset != NULL && mp_obj_is_true(inset->value) ? 2 : 0;
+    moy_ui_api_text(c, lines, al,
+                    t < 0 ? 0 : t, face != NULL ? word_of(face->value, faces, 4) : -1);
+}
+
+// api_label(ctx, cv, look, text, o): a dict `o` carries the text options too
+// (label_text)
 static mp_obj_t ui_api_label(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_ctx_t *c = ctx_of(a[0]);
     moy_ui_sink_t s;
     sink_of(&s, a[1], a[2]);
     moy_ui_over_t o;
+    label_text(c, a[4]);
     moy_ui_api_label(c, &s, span_of(a[3]), over_of(a[4], &o));
     return mp_const_none;
 }

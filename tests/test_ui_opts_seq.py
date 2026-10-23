@@ -1,8 +1,9 @@
-"""A verb's options handed to the module as the list or tuple they are
-(native/moy_ui/modmoy_ui.c's `opts_of`, runtime/ui.py's `_opts`) draw what
-the joined bytes draw, answer what they answer, and, where they fit its
-buffer, build nothing: under the boards' MicroPython, the real module, each
-page drawn both ways."""
+"""What a verb hands the board's module as it is -- its options as the list
+or tuple they are (native/moy_ui/modmoy_ui.c's `opts_of`, runtime/ui.py's
+`_opts`), a label's text options in its override dict (`label_text`) --
+draws what the face's own encoding draws, answers what it answers, and,
+where the options fit the module's buffer, builds nothing: under the boards'
+MicroPython, the real module, each page drawn both ways."""
 
 import subprocess
 
@@ -53,6 +54,10 @@ ICONS = ("", "", "close")
 
 
 TABS = ["Sound", "Song"]
+TEXTS = ({"wrap": True, "lines": 2}, {"wrap": True}, {"align": "center"},
+         {"tone": "dim"}, {"face": "mono", "tone": None}, {"tone": "bogus"},
+         {"wrap": 0, "face": "title"}, {"inset": True}, {"align": "center", "inset": True},
+         {"id": "x"}, {})
 SHORT = [False]
 OUT = [0] * 5
 
@@ -70,6 +75,9 @@ def page():
     out[3] = ui.tabs("View", TABS, 0)
     ui.at(4, 140, 200, 60)
     out[4] = ui.menu("", MENU, ICONS)
+    for i in range(len(TEXTS)):
+        ui.at(120, 4 + 12 * i, 110, 24)
+        ui.label("a label long enough to wrap twice over", TEXTS[i])
     ui.end()
     return out
 
@@ -81,6 +89,7 @@ def frame():
 
 def run(seq):
     ui._SEQ = seq
+    ui._OVER_DICT = seq
     cv._buf[:] = bytes(len(cv._buf))
     for _ in range(3):
         got = list(frame())
@@ -93,6 +102,7 @@ b, pb = run(False)
 print("ANSWERS", a == b, a, b)
 print("PIXELS", pa == pb, sum(1 for i in range(0, len(pa), 2) if pa[i:i + 2] != pb[i:i + 2]))
 ui._SEQ = True
+ui._OVER_DICT = True
 SHORT[0] = True
 frame()
 frame()
@@ -113,7 +123,7 @@ print("DONE")
 '''
 
 
-def test_options_as_a_sequence_draw_and_answer_as_their_bytes():
+def test_what_the_module_reads_itself_draws_and_answers_as_the_face_encodes_it():
     exe = require_unix_mp("moy_ui", board_model=True,
                           why="the module's options read from a list or tuple")
     prog = DRIVER.replace("@ROOT@", repr(str(ROOT)))
