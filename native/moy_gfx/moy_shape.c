@@ -161,8 +161,11 @@ static int run(const tgt_t *g, int Y, int X0, int X1, uint16_t w) {
 
 // -- corner coverage ---------------------------------------------------------------
 
-#define COV_SLOTS 4
+#define COV_SLOTS 10
 #define COV_BYTES ((MOY_SHAPE_RMAX * MOY_SHAPE_RMAX + 1) / 2)
+// A slot is its radius's coverage, then each row's extents (cov_rows), smooth
+// and stepped.
+#define COV_SLOT (COV_BYTES + 4 * MOY_SHAPE_RMAX)
 // The slots are one allocation, made at the first corner (SHAPE_ALLOC);
 // without it a corner's coverage is computed as it draws -- the same values.
 static uint8_t *s_cov;
@@ -183,12 +186,14 @@ static int cov_compute(int r, int i, int j) {
     return (n * 15 + 8) / 16;
 }
 
+static inline int cov_read(const uint8_t *t, int r, int i, int j);
+
 static const uint8_t *cov_table(int r) {
     if (r <= 0) {
         return NULL;
     }
     if (s_cov == NULL) {
-        s_cov = (uint8_t *)SHAPE_ALLOC((size_t)COV_SLOTS * COV_BYTES);
+        s_cov = (uint8_t *)SHAPE_ALLOC((size_t)COV_SLOTS * COV_SLOT);
         if (s_cov == NULL) {
             return NULL;
         }
@@ -198,18 +203,40 @@ static const uint8_t *cov_table(int r) {
     for (int k = 0; k < COV_SLOTS; k++) {
         if (s_cov_r[k] == r) {
             s_cov_use[k] = s_tick;
-            return s_cov + (size_t)k * COV_BYTES;
+            return s_cov + (size_t)k * COV_SLOT;
         }
         if (s_cov_use[k] < s_cov_use[lru]) {
             lru = k;
         }
     }
-    uint8_t *t = s_cov + (size_t)lru * COV_BYTES;
+    uint8_t *t = s_cov + (size_t)lru * COV_SLOT;
     memset(t, 0, COV_BYTES);
     for (int i = 0; i < r; i++) {
         for (int j = 0; j < r; j++) {
             int idx = i * r + j, v = cov_compute(r, i, j);
             t[idx >> 1] |= (uint8_t)((idx & 1) ? v : v << 4);
+        }
+    }
+    // A row's coverage rises from the box's outer edge to the arc's centre:
+    // its columns before the first covered one, and its first whole one.
+    uint8_t *m = t + COV_BYTES;
+    for (int i = 0; i < r; i++) {
+        for (int st = 0; st < 2; st++) {
+            int z = r, a = r;
+            for (int j = r - 1; j >= 0; j--) {
+                int v = cov_read(t, r, i, j);
+                if (st) {
+                    v = v >= 8 ? 15 : 0;
+                }
+                if (v == 15) {
+                    a = j;
+                }
+                if (v > 0) {
+                    z = j;
+                }
+            }
+            m[st * 2 * MOY_SHAPE_RMAX + i] = (uint8_t)z;
+            m[st * 2 * MOY_SHAPE_RMAX + MOY_SHAPE_RMAX + i] = (uint8_t)a;
         }
     }
     s_cov_r[lru] = (uint8_t)r;
@@ -283,6 +310,31 @@ static int corners_cov(const corners_t *c, int i, int j) {
         v = v >= 8 ? 15 : 0;
     }
     return v;
+}
+
+// Row i of a corner's box of radius r, counted from the box's outer edge:
+// columns [0, *z) it does not cover, [*a, r) it covers whole (cov_table).
+static inline void cov_rows(const corners_t *c, int k, int i, int *z, int *a) {
+    const uint8_t *m = c->t[k] + COV_BYTES + (c->stepped ? 2 * MOY_SHAPE_RMAX : 0);
+    *z = m[i];
+    *a = m[MOY_SHAPE_RMAX + i];
+}
+
+// Row i of a box's left (side 0) or right (side 1) edge zone, as distances in
+// from that side: [0, *z) uncovered, [*a, ...) covered whole. A row outside the
+// box is uncovered (*z, *a past any zone).
+static void cov_side(const corners_t *c, int side, int i, int *z, int *a) {
+    *z = *a = 0;
+    if (i < 0 || i >= c->h) {
+        *z = *a = 1 << 14;
+        return;
+    }
+    int top = side ? 1 : 0, foot = side ? 2 : 3;
+    if (i < c->r[top]) {
+        cov_rows(c, top, i, z, a);
+    } else if (i >= c->h - c->r[foot]) {
+        cov_rows(c, foot, c->h - 1 - i, z, a);
+    }
 }
 
 // -- paints ------------------------------------------------------------------------
@@ -418,6 +470,10 @@ static int rr_px(const rr_t *s, const tgt_t *g, int mask, int i, int j, int X, u
         wr += wu;
         wu = 0;
     }
+    if (wu == 0 && (wr == 0 || wf == 0)) {
+        row[X] = wr ? ring_col(s, i, j) : prow_at(pr, X);   // whole: no mix
+        return 1;
+    }
     uint16_t rc = wr ? can(ring_col(s, i, j)) : 0;
     uint16_t fc = wf ? can(prow_at(pr, X)) : 0;
     uint16_t under = wu ? can(row[X]) : 0;
@@ -514,6 +570,8 @@ int moy_shape_rrect(const moy_text_target_t *t, int x, int y, int w, int h,
     int ph = sh->fill != NULL && sh->fill->h > 0 ? sh->fill->h : h;
     int n = 0;
     prow_t pr = {0, 0, 0};
+    // the corners' row extents where their tables are (cov_table)
+    int rows = s_cov != NULL;
     for (int i = 0; i < h; i++) {
         int Y = by + i;
         if (Y < g.y0 || Y >= g.y1) {
@@ -528,11 +586,41 @@ int moy_shape_rrect(const moy_text_target_t *t, int x, int y, int w, int h,
         int rl = i < r[0] ? r[0] : i >= h - r[3] ? r[3] : 0;
         int rr = i < r[1] ? r[1] : i >= h - r[2] ? r[2] : 0;
         int L = imin(imax(rl, s.line), w), R = imin(imax(rr, s.line), w - L);
-        for (int j = 0; j < L; j++) {
+        // Each edge zone: the columns the shape does not reach are skipped,
+        // and those the fill covers whole join the middle's run; only the
+        // arc's and the ring's own pixels go one at a time.
+        int jl0 = 0, jl1 = L, jr0 = w - R, jr1 = w;
+        int whole = 0;
+        if (rows) {
+            int z, a, zi, ai;
+            cov_side(&s.out, 0, i, &z, &a);
+            jl0 = imin(z, L);
+            cov_side(&s.out, 1, i, &zi, &ai);
+            jr1 = imax(w - zi, w - R);
+            whole = s.fill && pr.bits == 0 && mask != MOY_SHAPE_FRINGE
+                    && !(s.line > 0 && (!s.has_in || i < s.line || i >= h - s.line));
+            if (whole) {
+                int al = a, ar = ai;
+                if (s.line > 0) {
+                    int z2, a2;
+                    cov_side(&s.in, 0, i - s.line, &z2, &a2);
+                    al = imax(al, s.line + a2);
+                    cov_side(&s.in, 1, i - s.line, &z2, &a2);
+                    ar = imax(ar, s.line + a2);
+                }
+                jl1 = imax(jl0, imin(al, L));
+                jr0 = imin(jr1, imax(w - ar, w - R));
+            }
+        }
+        for (int j = jl0; j < jl1; j++) {
             n += rr_px(&s, &g, mask, i, j, bx + j, row, &pr);
         }
-        for (int j = w - R; j < w; j++) {
+        for (int j = jr0; j < jr1; j++) {
             n += rr_px(&s, &g, mask, i, j, bx + j, row, &pr);
+        }
+        if (whole) {
+            n += run(&g, Y, bx + jl1, bx + jr0, pr.c0);
+            continue;
         }
         if (mask == MOY_SHAPE_FRINGE || w - R <= L) {
             continue;

@@ -719,6 +719,31 @@ void mg_glyph_cov(uint16_t *dst, size_t dcap, int dw, const uint8_t *cov, int w,
     if (x >= cx1 || y >= cy1 || x + w * scale <= cx0 || y + h * scale <= cy0) return;
     const int top = (1 << bpp) - 1;
     const uint16_t col = k->col, colc = k->colc;
+    if (scale == 1) {
+        /* a pixel a pixel: the clip as row and column ranges, one store each */
+        int r0 = cy0 - y > 0 ? cy0 - y : 0, r1 = cy1 - y < h ? cy1 - y : h;
+        int c0 = cx0 - x > 0 ? cx0 - x : 0, c1 = cx1 - x < w ? cx1 - x : w;
+        for (int r = r0; r < r1; r++) {
+            uint16_t *drow = dst + (size_t)(y + r) * (size_t)dw;
+            size_t bit = ((size_t)r * (size_t)w + (size_t)c0) * (size_t)bpp;
+            for (int c = c0; c < c1; c++, bit += (size_t)bpp) {
+                int v = (cov[bit >> 3] >> (8 - bpp - (int)(bit & 7))) & top;
+                int wt = k->wt[v];
+                if (wt == 0) continue;
+                int X = x + c;
+                if (known) {
+                    drow[X] = k->ramp[v];
+                } else if (wt == 256) {
+                    drow[X] = col;
+                } else if (k->swap) {
+                    drow[X] = mg_bswap16(mg_blend565(colc, mg_bswap16(drow[X]), wt));
+                } else {
+                    drow[X] = mg_blend565(colc, drow[X], wt);
+                }
+            }
+        }
+        return;
+    }
     for (int r = 0; r < h; r++) {
         int by = y + r * scale;
         if (by >= cy1) break;

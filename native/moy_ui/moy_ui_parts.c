@@ -1595,19 +1595,24 @@ int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, 
         return MOY_UI_OK;
     }
     moy_text_target_t *t = &d.t;
-    for (int j = 0; j < b.h; j++) {
+    int x0 = b.x - t->cam_x, x1 = x0 + b.w;
+    x0 = x0 > t->cx0 ? x0 : t->cx0;
+    x1 = x1 < t->cx1 ? x1 : t->cx1;
+    for (int j = 0; j < b.h && x0 < x1; j++) {
         int k = (j + 1) * 255 / (b.h + 1);          // the edge's row nearly the colour
         int y = (up ? b.y + b.h - 1 - j : b.y + j) - t->cam_y;
         if (y < t->cy0 || y >= t->cy1) {
             continue;
         }
-        for (int i = 0; i < b.w; i++) {
-            int x = b.x + i - t->cam_x;
-            if (x < t->cx0 || x >= t->cx1) {
-                continue;
+        // a row mostly lies over a few colours: each mixed once
+        uint16_t *row = &t->px[(size_t)y * (size_t)t->dw];
+        uint16_t from = row[x0], to = mix(from, g, k);
+        for (int x = x0; x < x1; x++) {
+            if (row[x] != from) {
+                from = row[x];
+                to = mix(from, g, k);
             }
-            uint16_t *p = &t->px[(size_t)y * (size_t)t->dw + (size_t)x];
-            *p = mix(*p, g, k);
+            row[x] = to;
         }
     }
     d.row->st[MOY_ST_N_FILL]++;
