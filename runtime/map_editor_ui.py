@@ -32,6 +32,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import MapEditor, KeyEdge
 
 try:
+    from editor_map import bands as _bands
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editor_map import bands as _bands
+
+try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
@@ -780,7 +785,8 @@ class MapEditorUI:
         overview = self._mv_overview()
         # #163 span-batch: the per-cell rect+rectb pair (2 gated calls x every
         # visible cell, the tab's dominant dispatch cost) becomes THREE merged
-        # quad groups in two fill_rects calls, pixel-identical by construction:
+        # quad groups in a few fill_rects calls (the lattice a call per
+        # `editor_map.CHUNK` of it), pixel-identical by construction:
         #   1. backgrounds -- cells are disjoint, so the in-bounds block is ONE
         #      dark_blue quad and the out-of-bounds remainder two black strips;
         #   2. (the tiles between them are ONE map() -- see below);
@@ -797,8 +803,8 @@ class MapEditorUI:
             ny = 0
         # The packed geometry is a pure function of this key, so it is memoised:
         # a paint gesture re-hits it every frame (camera fixed), a pan/zoom/
-        # relayout re-keys and rebuilds (~4k int stores, ≈ the old per-cell
-        # dispatch it replaces). The LATTICE array is ordered band-by-band (per
+        # relayout re-keys and rebuilds: one band of the lattice, copied down
+        # the rows (`editor_map.bands`). The LATTICE array is ordered band-by-band (per
         # cell-row: 2 wide lines + the 2·cols short verticals of that band) --
         # full-height vertical lines drawn last measured +16ms on glass: 1px
         # column-major writes fetch one cache line per row, ~3.4MB of traffic,
@@ -818,17 +824,15 @@ class MapEditorUI:
             if ny < rows and nx:
                 bg += [x0, y0 + ny * cell,
                        nx * cell, (rows - ny) * cell, black]
-            lat = []
+            lat = ()
             if not overview:
                 gw = cols * cell
-                for k in range(rows):
-                    yb = y0 + k * cell
-                    lat += [x0, yb, gw, 1, grey]
-                    lat += [x0, yb + cell - 1, gw, 1, grey]
-                    for j in range(cols):
-                        lat += [x0 + j * cell, yb, 1, cell, grey]
-                        lat += [x0 + (j + 1) * cell - 1, yb, 1, cell, grey]
-            memo = (key, array("h", bg), array("h", lat))
+                band = [x0, y0, gw, 1, grey, x0, y0 + cell - 1, gw, 1, grey]
+                for j in range(cols):
+                    band += (x0 + j * cell, y0, 1, cell, grey,
+                             x0 + (j + 1) * cell - 1, y0, 1, cell, grey)
+                lat = _bands(array("h", band), rows, cell)
+            memo = (key, array("h", bg), lat)
             self._grid_memo = memo
         cv.fill_rects(memo[1])
         if overview:
@@ -842,7 +846,8 @@ class MapEditorUI:
             # the tile the cart draws.
             cv.map(tm, sheet, me.cam_x, me.cam_y, nx, ny, x0, y0, -1,
                    cell // sheet.TILE)
-            cv.fill_rects(memo[2])
+            for lat in memo[2]:
+                cv.fill_rects(lat)
         # RECT preview (#91): while a box is being dragged, outline the covered cells
         # (clamped to the visible window) so the fill region is visible before release.
         if self.map_tool == "rect" and self._map_rect is not None \

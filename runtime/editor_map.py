@@ -41,25 +41,79 @@ def times(a, b=None):
 _CHECKERS = {}                   # (w, h, s) packed in one int -> the dark squares
 
 
+# The bytes one array of `bands` may hold. A board's heap finds a free run
+# that long anywhere; one array for a whole checker or lattice (20 KB for the
+# Sprite tab's sheet) found none on a T-Deck's fragmented heap, and the
+# collection that allocation set off cost the frame 140-150 ms.
+CHUNK = 2048
+
+
+def bands(template, n, step):
+    """`n` copies of the packed quads `template` (x, y, w, h, colour), the
+    k-th moved down by k * `step`, in order, as a list of arrays of at most
+    CHUNK bytes (whole copies each, one `fill_rects` an array): each copy a
+    slice store and its y fields."""
+    L = len(template)
+    per = max(1, CHUNK // (2 * L)) if L else 1
+    out = []
+    k = 0
+    while k < n:
+        m = min(per, n - k)
+        a = array("h", bytes(2 * L * m))
+        i = 0
+        for _ in range(m):
+            a[i:i + L] = template
+            if k:
+                dy = k * step
+                for j in range(i + 1, i + L, 5):
+                    a[j] += dy
+            i += L
+            k += 1
+        out.append(a)
+    return out
+
+
+def _checker_quads(w, h, s):
+    """The dark squares of a w x h checker in squares of `s`, the first
+    row's first square light, band by band (`bands`' arrays): the two bands'
+    squares alternate, and the last band is cut to the height left."""
+    s2 = 2 * s
+    pair = []
+    for k in (0, 1):
+        for xx in range(s - k * s, w, s2):
+            pair += (xx, k * s, s if xx + s <= w else w - xx, s, 0)
+    first = 5 * len(range(s, w, s2))                # the first band's length
+    second = len(pair) - first
+    nb = (h + s - 1) // s
+    out = bands(array("h", pair), (nb + 1) // 2, s2)
+    odd = nb & 1
+    tail = out[-1]
+    if odd and second:
+        tail = out[-1] = tail[:len(tail) - second]   # the last pair's second band
+    last = (nb - 1) * s
+    if h - last < s:
+        n = len(tail)
+        for j in range(n - (first if odd else second) + 3, n, 5):
+            tail[j] = h - last
+    return out
+
+
 def checker(cv, x, y, w, h, s, dark, light):
     """Transparency's grey checker over (x, y, w, h) in squares of `s`, the
     first row's first square light (the Sprite tab's grid and swatch, the
-    Map's and the Scene's brushes): the light ground, then every dark square
-    in one `fill_rects` of a quad list kept per size."""
+    Map's and the Scene's brushes): the light ground, then the dark squares
+    in a `fill_rects` an array of quads kept per size."""
     cv.rect(x, y, w, h, light)
     if w <= 0 or h <= 0 or s <= 0:
         return
     key = (w & 0xFFF) | ((h & 0xFFF) << 12) | ((s & 0x3F) << 24)
     quads = _CHECKERS.get(key)
     if quads is None:
-        q = []
-        for yy in range(0, h, s):
-            for xx in range(s if (yy // s) & 1 == 0 else 0, w, 2 * s):
-                q += (xx, yy, min(s, w - xx), min(s, h - yy), 0)
         if len(_CHECKERS) >= 32:
             _CHECKERS.clear()
-        quads = _CHECKERS[key] = array("h", q)
-    cv.fill_rects(quads, -1, x, y, dark)
+        quads = _CHECKERS[key] = _checker_quads(w, h, s)
+    for q in quads:
+        cv.fill_rects(q, -1, x, y, dark)
 
 
 def _width(text):
