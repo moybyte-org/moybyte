@@ -1923,26 +1923,46 @@ def _cover_edge(a, f):
     return e if e > 0 else 0
 
 
+_initial_of = {}          # title -> (block, ink, its letter or None)
+_initial_quads = {}       # (letter, w, h) -> the letter's rects in a w x h card
+
+
 def initial_cover(cv, rect, r, title, stepped=False):
     """A cart with no cover's picture over `rect` (corners `r`): its title's
     first letter on a colour block that stays the cart's (`initial_block`),
     a pixel letter (petme128) drawn as a cover of INITIAL_SIDE scaled to
     `rect` would be -- each letter pixel the card columns and rows
     `cv.cover` samples it at -- so it keeps its proportion to its card at
-    every size a carousel's motion passes through, as a cover's art does."""
+    every size a carousel's motion passes through, as a cover's art does.
+    The letter's rects at a card's size are kept, and fill in one call."""
     x, y, w, h = rect
-    block, ink = initial_block(title)
+    got = _initial_of.get(title)
+    if got is None:
+        s = str(title or "").strip()
+        got = initial_block(title) + ((s[0].upper() if s else None),)
+        if len(_initial_of) >= 64:
+            _initial_of.clear()
+        _initial_of[title] = got
+    block, ink, letter = got
     cv.rrect(x, y, w, h, r, block, stepped=stepped)
-    s = str(title or "").strip()
-    if not s or w <= 0 or h <= 0:
+    if letter is None or w <= 0 or h <= 0:
         return
-    fx = (INITIAL_SIDE << 16) // w
-    fy = (INITIAL_SIDE << 16) // h
-    for x0, y0, x1, y1 in _initial_rects(cv, s[0].upper()):
-        a, b = _cover_edge(x0, fx), _cover_edge(y0, fy)
-        cw, ch = _cover_edge(x1, fx) - a, _cover_edge(y1, fy) - b
-        if cw > 0 and ch > 0:
-            cv.rect(x + a, y + b, cw, ch, ink)
+    key = (letter, w, h)
+    q = _initial_quads.get(key)
+    if q is None:
+        fx = (INITIAL_SIDE << 16) // w
+        fy = (INITIAL_SIDE << 16) // h
+        q = array("h")
+        for x0, y0, x1, y1 in _initial_rects(cv, letter):
+            a, b = _cover_edge(x0, fx), _cover_edge(y0, fy)
+            cw, ch = _cover_edge(x1, fx) - a, _cover_edge(y1, fy) - b
+            if cw > 0 and ch > 0:
+                q.extend((a, b, cw, ch, ink))
+        if len(_initial_quads) >= 64:
+            _initial_quads.clear()
+        _initial_quads[key] = q
+    if q:
+        cv.fill_rects(q, -1, x, y, ink)
 
 
 FADE_WELL = -3     # `fade`'s colour: a part's well (moy_ui_well's fill)

@@ -1873,9 +1873,10 @@ class Carousel(Launcher):
         if not d[0]:
             return 0
         r = d[2]
-        if self.desk():
-            return r * 7 // 5 if side > self._geom()[2] else r
-        return r if side > self._geom()[2] else r * 7 // 10
+        g = self._geom()
+        if g[9] is not None:              # the desk's
+            return r * 7 // 5 if side > g[2] else r
+        return r if side > g[2] else r * 7 // 10
 
     def _paint(self, cv, sheet_for, r):
         """The band, clipped to rect `r`: the handheld's (`_paint_hh`), or the
@@ -2083,15 +2084,16 @@ class Carousel(Launcher):
         _ui_draw.initial_cover(cv, rect, r, it.get("title") or "",
                                bool(_ui_draw.depth()[5]))
 
-    def _draw_hh_cover(self, cv, it, rect, centre):
+    def _draw_hh_cover(self, cv, it, rect, centre, r=None):
         """A card's picture: the whole cover scaled to the card (the
         neighbour's dimmed once and kept where the theme dims them, step 15),
-        else the title tile."""
-        r = self._corner_r(rect[2])
+        else the title tile. `r`: its corners, where the caller has them."""
+        if r is None:
+            r = self._corner_r(rect[2])
         stepped = bool(_ui_draw.depth()[5])
         cover = None
         if self.cover_for is not None:
-            dim = self.dim if self.handheld() else None
+            dim = self.dim if self.dim is not None and self.handheld() else None
             if dim is not None and not centre and self.tinted_for is not None:
                 cover = self.tinted_for(it, dim[0], dim[1])
                 if cover is not None:
@@ -2105,17 +2107,20 @@ class Carousel(Launcher):
         else:
             self._draw_title_tile(cv, it, rect, r)
 
-    def _draw_picture(self, cv, it, rect, centre, sheet_for=None):
+    def _draw_picture(self, cv, it, rect, centre, sheet_for=None, r=None):
         """A card's picture over its whole rect: the "+ New" card's blank
         page (`draw_new_art`) in the corners a cover of its size takes, else
-        its cover (`_draw_hh_cover`)."""
+        its cover (`_draw_hh_cover`). `r`: its corners, where the caller has
+        them."""
+        if r is None:
+            r = self._corner_r(rect[2])
         if it.get("type") in PSEUDO_TILE_TYPES:
-            draw_new_art(cv, self.theme or {}, rect, self._corner_r(rect[2]),
+            draw_new_art(cv, self.theme or {}, rect, r,
                          bool(_ui_draw.depth()[5]),
                          self.icon_spec() if self.icon_spec is not None else None,
                          self.layout.fs)
         else:
-            self._draw_hh_cover(cv, it, rect, centre)
+            self._draw_hh_cover(cv, it, rect, centre, r)
 
     def _mark_rect(self, cv, at, selected=False):
         """The rect a card at `at` hands its focus mark: `at` shrunk by as
@@ -2153,7 +2158,8 @@ class Carousel(Launcher):
             at = self._mark_rect(cv, rect, sel)
             _ink, rect = _ui_draw.focus(cv, self.theme, at, size="card",
                                         r=self._corner_r(rect[2]), selected=sel)
-        self._draw_picture(cv, it, rect, centre, sheet_for)
+        cr = self._corner_r(rect[2])
+        self._draw_picture(cv, it, rect, centre, sheet_for, cr)
         if centre and self.favorite_for is not None and not self.moving \
                 and not self.desk() \
                 and it.get("path") and it.get("type") not in PSEUDO_TILE_TYPES:
@@ -2162,10 +2168,10 @@ class Carousel(Launcher):
                              bool(self.favorite_for(it)))
         ring = th.get("author", 0) if it.get("type") in PSEUDO_TILE_TYPES \
             else None
-        if not self._corner_r(rect[2]):
+        if not cr:
             self._card_frame(cv, rect, centre and not marks, ring=ring)
         if mark or sel:
-            _ui_draw.focus(cv, self.theme, at, size="card", r=self._corner_r(rect[2]),
+            _ui_draw.focus(cv, self.theme, at, size="card", r=cr,
                            after=True, selected=sel)
 
 

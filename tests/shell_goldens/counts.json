@@ -23,7 +23,7 @@
     "settings_achievements": [17, 14],
     "settings_licence": [8, 9],
     "settings_licences": [17, 13],
-    "unlock_banner": [108, 11],
+    "unlock_banner": [94, 11],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -51,7 +51,7 @@
     "settings_achievements": [33, 34],
     "settings_licence": [8, 18],
     "settings_licences": [41, 28],
-    "unlock_banner": [76, 16],
+    "unlock_banner": [62, 16],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -82,7 +82,7 @@
     "settings_achievements": [43, 46],
     "settings_licence": [38, 55],
     "settings_licences": [39, 67],
-    "unlock_banner": [107, 30],
+    "unlock_banner": [78, 30],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -110,7 +110,7 @@
     "settings_achievements": [32, 30],
     "settings_licence": [8, 16],
     "settings_licences": [37, 26],
-    "unlock_banner": [76, 16],
+    "unlock_banner": [62, 16],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -141,7 +141,7 @@
     "settings_achievements": [45, 46],
     "settings_licence": [44, 59],
     "settings_licences": [45, 60],
-    "unlock_banner": [114, 30],
+    "unlock_banner": [85, 30],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -169,7 +169,7 @@
     "settings_achievements": [43, 46],
     "settings_licence": [39, 59],
     "settings_licences": [40, 60],
-    "unlock_banner": [107, 30],
+    "unlock_banner": [78, 30],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -200,7 +200,7 @@
     "settings_achievements": [47, 47],
     "settings_licence": [44, 59],
     "settings_licences": [45, 60],
-    "unlock_banner": [579, 30],
+    "unlock_banner": [550, 30],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -231,7 +231,7 @@
     "settings_achievements": [43, 46],
     "settings_licence": [39, 59],
     "settings_licences": [40, 60],
-    "unlock_banner": [107, 30],
+    "unlock_banner": [78, 30],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -274,7 +274,7 @@
     "settings_achievements": [45, 34],
     "settings_licence": [44, 58],
     "settings_licences": [45, 59],
-    "unlock_banner": [114, 30],
+    "unlock_banner": [85, 30],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -310,7 +310,7 @@
     "settings_achievements": [43, 46],
     "settings_licence": [39, 59],
     "settings_licences": [40, 60],
-    "unlock_banner": [107, 30],
+    "unlock_banner": [78, 30],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -348,7 +348,7 @@
     "settings_achievements": [44, 46],
     "settings_licence": [38, 57],
     "settings_licences": [39, 56],
-    "unlock_banner": [112, 28],
+    "unlock_banner": [78, 28],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -379,7 +379,7 @@
     "settings_achievements": [43, 46],
     "settings_licence": [39, 59],
     "settings_licences": [40, 59],
-    "unlock_banner": [107, 30],
+    "unlock_banner": [78, 30],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -412,7 +412,7 @@
     "settings_achievements": [43, 46],
     "settings_licence": [39, 59],
     "settings_licences": [40, 60],
-    "unlock_banner": [107, 30],
+    "unlock_banner": [78, 30],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -443,7 +443,7 @@
     "settings_achievements": [44, 65],
     "settings_licence": [23, 44],
     "settings_licences": [24, 47],
-    "unlock_banner": [115, 26],
+    "unlock_banner": [81, 26],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -474,7 +474,7 @@
     "settings_achievements": [46, 45],
     "settings_licence": [28, 44],
     "settings_licences": [29, 47],
-    "unlock_banner": [121, 26],
+    "unlock_banner": [87, 26],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -505,7 +505,7 @@
     "settings_achievements": [35, 22],
     "settings_licence": [25, 31],
     "settings_licences": [25, 32],
-    "unlock_banner": [106, 26],
+    "unlock_banner": [72, 26],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -533,7 +533,7 @@
     "settings_achievements": [28, 24],
     "settings_licence": [11, 14],
     "settings_licences": [29, 21],
-    "unlock_banner": [80, 14],
+    "unlock_banner": [66, 14],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -561,7 +561,7 @@
     "settings_achievements": [26, 24],
     "settings_licence": [8, 14],
     "settings_licences": [28, 21],
-    "unlock_banner": [75, 14],
+    "unlock_banner": [61, 14],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -591,7 +591,7 @@
     "settings_achievements": [26, 24],
     "settings_licence": [8, 14],
     "settings_licences": [28, 21],
-    "unlock_banner": [75, 14],
+    "unlock_banner": [61, 14],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -633,7 +633,7 @@
     "settings_achievements": [28, 23],
     "settings_licence": [11, 14],
     "settings_licences": [27, 19],
-    "unlock_banner": [80, 14],
+    "unlock_banner": [66, 14],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -661,7 +661,7 @@
     "settings_achievements": [28, 23],
     "settings_licence": [11, 14],
     "settings_licences": [27, 19],
-    "unlock_banner": [80, 14],
+    "unlock_banner": [66, 14],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
@@ -694,7 +694,7 @@
     "settings_achievements": [26, 24],
     "settings_licence": [8, 14],
     "settings_licences": [28, 21],
-    "unlock_banner": [75, 14],
+    "unlock_banner": [61, 14],
     "web_console": [176, 4],
     "web_console_address": [176, 6]
   },
