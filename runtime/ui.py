@@ -162,9 +162,12 @@ def _flag(o, key):
 
 
 # The board's and the browser's module read the table itself (modmoy_ui.c's
-# over_dict), so a verb given one builds nothing; the host's binding takes the
-# block below.
+# over_dict) and a verb's options as a list or tuple (opts_seq), so a verb
+# given either builds nothing; the host's binding takes the bytes below.
 _OVER_DICT = getattr(_C, "over_dict", False)
+_SEQ = getattr(_C, "opts_seq", False)
+_TUPLE = type(())
+_LIST = type([])            # `list` is the verb below
 
 
 def _over(o):
@@ -258,7 +261,9 @@ def list(label, items, cur, o=None):
     current mark; up and down move in it until its first or last row, and
     activation makes the focused row current: the new `cur`."""
     t = _T
-    b = "\0".join([str(i) for i in items]).encode("utf-8")
+    k = type(items)
+    b = items if _SEQ and (k is _TUPLE or k is _LIST) else \
+        "\0".join([str(i) for i in items]).encode("utf-8")
     return _C.api_list(t[0], t[1], t[2], label, b, -1 if cur is None else cur, _over(o))
 
 
@@ -320,6 +325,9 @@ def _memo_put(items, kind, b, copy):
 
 
 def _opts(items):
+    t = type(items)
+    if _SEQ and (t is _TUPLE or t is _LIST) and (not items or type(items[0]) is str):
+        return items                    # the module joins its words (opts_seq)
     b = _memo_get(items, 0)
     if b is None:
         b = _memo_put(items, 0, "\0".join([str(i) for i in items]).encode("utf-8"),

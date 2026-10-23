@@ -2261,6 +2261,52 @@ static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
     return out;
 }
 
+// A verb's options as the engine reads them, NUL-separated: bytes as they
+// are, or a list or tuple of the items, each as str() makes it, joined into
+// `buf` (OPTS_BUF bytes, the caller's) or, where they run longer, into the
+// heap. runtime/ui.py's `_opts` hands a sequence straight over where the
+// module takes one (`opts_seq`), so a verb given its options builds nothing.
+#define OPTS_BUF 512
+static void opts_of(mp_obj_t o, uint8_t *buf, mp_buffer_info_t *out) {
+    if (!mp_obj_is_type(o, &mp_type_list) && !mp_obj_is_type(o, &mp_type_tuple)) {
+        mp_get_buffer_raise(o, out, MP_BUFFER_READ);
+        return;
+    }
+    size_t n;
+    mp_obj_t *it;
+    mp_obj_get_array(o, &n, &it);
+    for (size_t i = 0; i < n; i++) {
+        if (!mp_obj_is_str(it[i])) {
+            mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(n, NULL));
+            for (size_t j = 0; j < n; j++) {
+                mp_obj_t v = it[j];
+                t->items[j] = mp_obj_is_str(v) ? v : mp_obj_str_make_new(&mp_type_str, 1, 0, &v);
+            }
+            it = t->items;
+            break;
+        }
+    }
+    size_t len = n ? n - 1 : 0;
+    for (size_t i = 0; i < n; i++) {
+        size_t k;
+        mp_obj_str_get_data(it[i], &k);
+        len += k;
+    }
+    uint8_t *dst = len <= OPTS_BUF ? buf : m_new(uint8_t, len);
+    size_t at = 0;
+    for (size_t i = 0; i < n; i++) {
+        size_t k;
+        const char *p = mp_obj_str_get_data(it[i], &k);
+        if (i) {
+            dst[at++] = 0;
+        }
+        memcpy(dst + at, p, k);
+        at += k;
+    }
+    out->buf = dst;
+    out->len = len;
+}
+
 // api_size() -> the bytes a context takes
 static mp_obj_t ui_api_size(void) {
     return MP_OBJ_NEW_SMALL_INT((mp_int_t)moy_ui_api_size());
@@ -2388,7 +2434,8 @@ static mp_obj_t ui_api_list(size_t n_args, const mp_obj_t *a) {
     sink_of(&s, a[1], a[2]);
     moy_ui_over_t o;
     mp_buffer_info_t b;
-    mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
+    uint8_t ob[OPTS_BUF];
+    opts_of(a[4], ob, &b);
     return mp_obj_new_int(moy_ui_api_list(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
                                           num(a[5]), over_of(a[6], &o)));
 }
@@ -2428,7 +2475,8 @@ static mp_obj_t ui_api_choice(size_t n_args, const mp_obj_t *a) {
     sink_of(&s, a[1], a[2]);
     moy_ui_over_t o;
     mp_buffer_info_t b;
-    mp_get_buffer_raise(a[5], &b, MP_BUFFER_READ);
+    uint8_t ob[OPTS_BUF];
+    opts_of(a[5], ob, &b);
     return mp_obj_new_int(moy_ui_api_choice(c, &s, num(a[3]), span_of(a[4]),
                                             (const uint8_t *)b.buf, b.len, num(a[6]),
                                             over_of(a[7], &o)));
@@ -2444,7 +2492,8 @@ static mp_obj_t ui_api_hints(size_t n_args, const mp_obj_t *a) {
     sink_of(&s, a[1], a[2]);
     moy_ui_over_t o;
     mp_buffer_info_t b;
-    mp_get_buffer_raise(a[3], &b, MP_BUFFER_READ);
+    uint8_t ob[OPTS_BUF];
+    opts_of(a[3], ob, &b);
     moy_ui_api_hints(c, &s, (const uint8_t *)b.buf, b.len, over_of(a[4], &o));
     return mp_const_none;
 }
@@ -2500,7 +2549,8 @@ static mp_obj_t ui_api_hints_w(size_t n_args, const mp_obj_t *a) {
     moy_ui_sink_t s;
     sink_of(&s, a[1], a[2]);
     mp_buffer_info_t b;
-    mp_get_buffer_raise(a[3], &b, MP_BUFFER_READ);
+    uint8_t ob[OPTS_BUF];
+    opts_of(a[3], ob, &b);
     return MP_OBJ_NEW_SMALL_INT(moy_ui_api_hints_w(c, &s, (const uint8_t *)b.buf, b.len));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_hints_w_obj, 4, 4, ui_api_hints_w);
@@ -2606,7 +2656,8 @@ static mp_obj_t ui_api_dialog(size_t n_args, const mp_obj_t *a) {
     sink_of(&s, a[1], a[2]);
     moy_ui_over_t o;
     mp_buffer_info_t b;
-    mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
+    uint8_t ob[OPTS_BUF];
+    opts_of(a[4], ob, &b);
     return mp_obj_new_int(moy_ui_api_dialog(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
                                             num(a[5]), over_of(a[6], &o)));
 }
@@ -2634,8 +2685,9 @@ static mp_obj_t ui_api_menu(size_t n_args, const mp_obj_t *a) {
     sink_of(&s, a[1], a[2]);
     moy_ui_over_t o;
     mp_buffer_info_t b, ib;
-    mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
-    mp_get_buffer_raise(a[5], &ib, MP_BUFFER_READ);
+    uint8_t ob[OPTS_BUF], oi[OPTS_BUF];
+    opts_of(a[4], ob, &b);
+    opts_of(a[5], oi, &ib);
     return mp_obj_new_int(moy_ui_api_menu(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
                                           (const uint8_t *)ib.buf, ib.len, over_of(a[6], &o)));
 }
@@ -2667,7 +2719,8 @@ static mp_obj_t ui_api_bar(size_t n_args, const mp_obj_t *a) {
     moy_ui_sink_t s;
     sink_of(&s, a[1], a[2]);
     mp_buffer_info_t b;
-    mp_get_buffer_raise(a[4], &b, MP_BUFFER_READ);
+    uint8_t ob[OPTS_BUF];
+    opts_of(a[4], ob, &b);
     // `back` apart from the bits: MOY_UI_BAR_BACK is no small int on a board.
     uint32_t off = (uint32_t)mp_obj_get_int_truncated(a[5]);
     if (n_args > 6 && mp_obj_is_true(a[6])) {
@@ -2782,7 +2835,8 @@ static mp_obj_t ui_api_empty(size_t n_args, const mp_obj_t *a) {
     moy_ui_sink_t s;
     sink_of(&s, a[1], a[2]);
     mp_buffer_info_t b;
-    mp_get_buffer_raise(a[5], &b, MP_BUFFER_READ);
+    uint8_t ob[OPTS_BUF];
+    opts_of(a[5], ob, &b);
     return mp_obj_new_int(moy_ui_api_empty(c, &s, span_of(a[3]), span_of(a[4]),
                                            (const uint8_t *)b.buf, b.len));
 }
@@ -2869,6 +2923,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ui) },
     { MP_ROM_QSTR(MP_QSTR_tokens), MP_ROM_PTR(&ui_tokens_obj) },
     { MP_ROM_QSTR(MP_QSTR_over_dict), MP_ROM_TRUE },
+    { MP_ROM_QSTR(MP_QSTR_opts_seq), MP_ROM_TRUE },
     { MP_ROM_QSTR(MP_QSTR_states), MP_ROM_PTR(&ui_states_obj) },
     { MP_ROM_QSTR(MP_QSTR_kinds), MP_ROM_PTR(&ui_kinds_obj) },
     { MP_ROM_QSTR(MP_QSTR_metric_kinds), MP_ROM_PTR(&ui_metric_kinds_obj) },
