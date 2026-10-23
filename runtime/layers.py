@@ -331,7 +331,12 @@ class _PauseLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
+        full = getattr(self.ws.wm, "_pause_full", None)
+        if full is not None:
+            full()                    # the windowed desk: a whole frame under it
         self.ws.pause.draw()
+        if full is not None:
+            full(True)
 
     def handle_input(self, i):
         self.ws.pause.handle_input(i)

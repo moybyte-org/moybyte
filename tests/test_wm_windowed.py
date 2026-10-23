@@ -4090,3 +4090,74 @@ def test_a_calm_desk_pays_its_buffers_debt_and_then_rests(tmp_path):
     ws.pointer.visible = True
     ws._dirty = True
     assert len(ring.settle(drv)) <= 2
+
+
+def _pause_desk(tmp_path, ride=True):
+    """A playtest of Star Catcher in its window on the desk, drawing the same
+    frame every tick, under the default look; triple-buffered, current."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    drv = _drv(ws)
+    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.open_desk()
+    select_on_home(ws, "Star Catcher")
+    ws.open()
+    player = ws._content_layers["desktop"]
+
+    def still_game(dt):
+        ws.canvas.cls(8)
+        ws.canvas.rect(10, 10, 40, 30, 12)
+    player.draw = still_game
+    for _ in range(20):
+        _quiesce(ws)
+        ws._confetti_until = ws._egg_until = 0
+        drv.frame(1 / 30)
+    ws.show_fps = False
+    if not ride:
+        ws.wm._wash_rides = lambda: False
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv, 4)
+    return ws, drv, ring
+
+
+def _pause_key(ws, name):
+    """A key handed to the pause menu as the router does: the frame is
+    marked only where the menu does not paint its own change."""
+    ws._pause_layer.handle_input(_Key(name))
+    if not ws.wm.popover_takes_keys():
+        ws.mark_dirty()
+
+
+def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path):
+    """Over a playtest paused in its window: the open, each move and the
+    Options page are the popover's frames alone, the close puts the
+    snapshot back under the resumed game's quiet frames, and after each
+    step every buffer holds the bytes the whole-repaint path leaves."""
+    ws, drv, ring = _pause_desk(tmp_path / "ride")
+    ref, rdrv, rring = _pause_desk(tmp_path / "ref", ride=False)
+    steps = (lambda w: w.pause.show(),
+             lambda w: _pause_key(w, "down"),
+             lambda w: _pause_key(w, "down"),
+             lambda w: _pause_key(w, "a"),          # Options: a card of its own size
+             lambda w: _pause_key(w, "b"),          # back to the menu
+             lambda w: _pause_key(w, "up"),
+             lambda w: setattr(w, "_dirty", True),  # a whole frame under it...
+             lambda w: _pause_key(w, "down"))       # ...and the next move still rides
+    for i, step in enumerate(steps):
+        step(ws)
+        step(ref)
+        stacks = ring.settle(drv, 12)
+        rring.settle(rdrv, 12)
+        assert stacks and set(stacks) == ({"full"} if i == 6 else {"pop"}), (i, stacks)
+        for a, b in zip(ring.bufs, rring.full(rdrv)):
+            assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+    ws.pause.close()
+    ref.pause.close()
+    stacks = ring.settle(drv, 4)
+    rring.settle(rdrv, 4)
+    assert stacks[:3] == ["qpop"] * 3, stacks
+    for a, b in zip(ring.bufs, rring.full(rdrv)):
+        assert a == b, _bbox(_differ(a, b), ws.sys_canvas.w)

@@ -276,7 +276,7 @@ class PauseMenu:
             self._host = _ui_draw.AppHost()
         else:
             self._host.reset()
-        ws._dirty = True
+        ws.pause_touch()
 
     def close(self):
         """Resume: the run is given back."""
@@ -286,14 +286,14 @@ class PauseMenu:
         self._put_under(self.ws.sys_canvas)   # the frame as the game left it
         self._drop_under()
         self.ws.player.resume()
-        self.ws._dirty = True
+        self.ws.pause_touch()
 
     def back(self):
         """Esc and B: Options back to the menu, the menu back to the game."""
         if self.page:
             self.page = 0
             self._host.reset()
-            self.ws._dirty = True
+            self.ws.pause_touch()
         else:
             self.close()
 
@@ -308,11 +308,14 @@ class PauseMenu:
         elif i == 2:
             self.page = 1
             self._host.reset()
+            ws.pause_touch()
+            return
         elif i == 3:
             self.close()
             ws._reset_canvas_state()
             ws._exit_to_caller()
-        ws._dirty = True
+        if i:
+            ws._dirty = True
 
     def _unwash_strip(self, cv):
         """The desk's PROJECTS window's hint strip names the dialog's keys
@@ -343,15 +346,15 @@ class PauseMenu:
             return
         if self.page:
             if self._host.keys(i):
-                self.ws._dirty = True
+                self.ws.pause_touch()
             return
         n = len(self.ITEMS)
         if i.pressed("up") and self.sel > 0:
             self.sel -= 1
-            self.ws._dirty = True
+            self.ws.pause_touch()
         elif i.pressed("down") and self.sel < n - 1:
             self.sel += 1
-            self.ws._dirty = True
+            self.ws.pause_touch()
         elif i.pressed("a") or i.pressed("run"):
             self.choose(self.sel)
 
@@ -362,7 +365,7 @@ class PauseMenu:
             if click and not _in_box(px, py, host.box("Pause")):
                 self.back()
             elif host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
-                ws._dirty = True
+                ws.pause_touch()
             return
         if not click:
             return
@@ -398,10 +401,8 @@ class PauseMenu:
     def _draw(self):
         ws = self.ws
         cv = ws.sys_canvas
-        host = self._host
-        desk = _desk_class()
         if self._capture:
-            self._keep_under(cv, desk)
+            self._keep_under(cv, _desk_class())
         else:
             self._put_under(cv)
         ws.icon_spec()                    # the theme's set in the engine, as the bar has it
@@ -409,11 +410,53 @@ class PauseMenu:
         # put back, or the composite just made, never over the last scrim;
         # the whole glass, or on the desk the content under its bar
         if self._under is not None or ws.canvas is not cv:
-            if getattr(ws.wm, "mode", None) == "desktop":
-                lay = ws.layout
-                _ui_draw.scrim(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch))
-            else:
-                _ui_draw.scrim(cv, ws.theme_colors, (0, 0, cv.w, cv.h))
+            _ui_draw.scrim(cv, ws.theme_colors, self.scrim_rect())
+        self._card()
+
+    def scrim_rect(self):
+        """What the card's scrim washes: on the desk the content under its
+        bar, else the glass."""
+        ws = self.ws
+        if getattr(ws.wm, "mode", None) == "desktop":
+            lay = ws.layout
+            return (lay.cx, lay.cy, lay.cw, lay.ch)
+        cv = ws.sys_canvas
+        return (0, 0, cv.w, cv.h)
+
+    def draw_card(self):
+        """The card alone, over a scrim already there: the desk's frame
+        that paints the card's change and nothing under it."""
+        was = _ui_draw.cart_text(False)
+        try:
+            self.ws.icon_spec()
+            self._card()
+        finally:
+            _ui_draw.cart_text(was)
+
+    def card_rect(self):
+        """The rect the card's last draw painted, its shadow's reach with
+        it, on the glass; None before it first draws. A draw that had not
+        settled lays its body out before it knows its height, down to the
+        foot of the surface it centres on."""
+        box = self._host.box("Pause") if self._host is not None else None
+        if box is None:
+            return None
+        x, y, w, h = box
+        dp = _ui_draw.depth()
+        r = (dp[9] + abs(dp[10]) + abs(dp[11]) + 2) * self.ws.layout.fs
+        cv = self.ws.sys_canvas
+        x0, y0 = max(0, x - r), max(0, y - r)
+        x1, y1 = min(cv.w, x + w + r), min(cv.h, y + h + r)
+        if self._host.owed:
+            sx, sy, sw, sh = self.surface()
+            y1 = max(y1, min(cv.h, sy + sh + r))
+        return (x0, y0, x1 - x0, y1 - y0)
+
+    def _card(self):
+        ws = self.ws
+        cv = ws.sys_canvas
+        host = self._host
+        desk = _desk_class()
         if not self.page:
             host.focus(self.ITEMS[self.sel])
         settled = host.begin(cv, ws.theme_colors, self.surface(), desk)

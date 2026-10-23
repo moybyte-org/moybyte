@@ -513,7 +513,14 @@ window as it shows once the menu holds the keys (no focus mark, ui.marks),
 and washes; each other buffer is stamped that window and washed once, and
 the close puts the snapshot back, with the window's buffer as the menu
 found it. A frame that repaints whole while it is up washes what it
-painted and keeps no snapshot, so the close then repaints whole too. A
+painted and keeps no snapshot, so the close then repaints whole too. The
+pause menu over a playtest paused in its window rides the same way
+(`pause_changed`): its game's held frame composited into each buffer
+before the wash, its card's change -- a row, Options, back -- painted over
+what its paints covered, put back from the snapshot and washed again, and
+its close put back around the resumed game's first frames; a frame that
+repaints whole under it takes the snapshot again before its scrim, so its
+rows keep riding. A
 pointer press whose only change was the popover's -- a bar widget's tap
 -- marks no frame (`popover_touch` takes it). A triple-buffered root's
 buffers behind the last change are painted while the desk is calm

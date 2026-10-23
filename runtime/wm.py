@@ -171,6 +171,10 @@ class FullscreenStackWM:
         """The popover opened, moved or closed: here the frame repaints."""
         self.ws._dirty = True
 
+    def pause_changed(self):
+        """The pause menu opened, moved or closed: here the frame repaints."""
+        self.ws._dirty = True
+
     def popover_owed(self):
         """True while the popover still owes a frame; never here."""
         return False

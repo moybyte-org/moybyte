@@ -259,10 +259,13 @@ class Run:
         return f
 
     def presses(self, target, names, gap=0.3):
-        """Key presses handed to `target`'s handle_input, `gap` s apart."""
+        """Key presses handed to `target`'s handle_input, `gap` s apart, the
+        frame marked as the router marks it: not where the keys are a
+        running cart's or a popover's that paints its own change."""
         def f():
             for n in names:
-                self.b.cmd("py %s.handle_input(ws._SBK(%r)) or ws.mark_dirty() or 1"
+                self.b.cmd("py %s.handle_input(ws._SBK(%r)) or ws.wm.keys_to_cart() or "
+                           "ws.wm.popover_takes_keys() or ws.mark_dirty() or 1"
                            % (target, n), wait_for="PY")
                 self.b.drain(gap)
         return f

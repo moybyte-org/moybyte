@@ -362,6 +362,21 @@ def _overlap(a, b):
 _SHOWN = 3
 
 
+def _bands(r, hole):
+    """Rect `r` (x, y, w, h) less `hole`: itself, or the bands above, below,
+    left and right of the hole's part in it."""
+    if hole is None:
+        return (r,)
+    x0, y0 = max(r[0], hole[0]), max(r[1], hole[1])
+    x1 = min(r[0] + r[2], hole[0] + hole[2])
+    y1 = min(r[1] + r[3], hole[1] + hole[3])
+    if x0 >= x1 or y0 >= y1:
+        return (r,)
+    bands = ((r[0], r[1], r[2], y0 - r[1]), (r[0], y1, r[2], r[1] + r[3] - y1),
+             (r[0], y0, x0 - r[0], y1 - y0), (x1, y0, r[0] + r[2] - x1, y1 - y0))
+    return tuple(b for b in bands if b[2] > 0 and b[3] > 0)
+
+
 def _grow(c, x0, y0, x1, y1):
     """Grow `c`, a rect [x0, y0, x1, y1), over another; an empty one (no
     area) grows nothing, and an empty `c` becomes the other."""
@@ -550,6 +565,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # shows without its focus (ui.marks): [window, its buffer as it was,
         # that buffer's _buf_stale, _lag, _marked], put back at the close.
         self._wash_win = [None, None, False, [0, 0, 0, 0, 0], False]
+        # The pause menu's card over its riding scrim: the frames still owed
+        # its paint, and the rect its paints have covered since it opened.
+        self._pause_owed = 0
+        self._pause_span = [0, 0, 0, 0]
+        self._pop_game_next = False   # this frame's popover stack composites the game
         self._pop_over_game = False   # ...and does it overlap the playtest's window
         # Its face, copied once painted while it overlaps a playtest: the
         # quiet frames put it back over the game instead of painting it.
@@ -1811,7 +1831,32 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         for s in self._pop_slots:
             if s[2] > 0:
                 return True
-        return self._pop_wash[2] > 0
+        return self._pop_wash[2] > 0 or self._pause_owed > 0
+
+    def pause_changed(self):
+        """The pause menu opened, moved or closed. Riding (`_wash_rides`):
+        its card is owed to every retained buffer, its scrim as the system
+        menu's is; otherwise the frame repaints."""
+        if not self._pop_rides():
+            self.ws._dirty = True
+            return
+        w = self._pop_wash
+        was = w[4]
+        n = self._pop_n()
+        if not self._pop_wash_changed(n):
+            self.ws._dirty = True
+        elif self._pause_rides():
+            if w[3] or w[2] > 0:
+                self._pause_owed = n      # its card, in every buffer
+            else:
+                self.ws._dirty = True     # a whole frame since: no snapshot
+        elif not (was and w[2] > 0):
+            self.ws._dirty = True         # not its riding close
+
+    def _pause_rides(self):
+        """Whether the pause menu rides as the system menu does: its scrim
+        and card painted alone over a playtest's window paused on the desk."""
+        return self._pop_wash[4] and self.ws.pause.open
 
     def _wash_rides(self):
         """Whether the system menu's scrim rides with it: the menu's own
@@ -1822,13 +1867,29 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         renders it again over the snapshot (`_wash_focus`)."""
         ws = self.ws
         m = ws.sysmenu
-        if not (m.open and m.comp is None and not ws._about and not ws.pause.open
-                and not ws.confirm.open and "desktop" not in self._wins):
+        if ws._about or ws.confirm.open:
             return False
         win = self._wins.get(self._focus) if self._focus is not None else None
+        if ws.pause.open:
+            # The pause menu over its playtest's window, the game composited
+            # (not drawn on the glass itself) and held.
+            game = self._wins.get("desktop")
+            return (not m.open and game is not None and not game.minimized
+                    and ws.canvas is not ws.sys_canvas and ws.player.paused
+                    and (win is None or win is game))
+        if not (m.open and m.comp is None and "desktop" not in self._wins):
+            return False
         return (win is None or win.minimized
                 or (self._order[-1] == self._focus and win.buf is not None
                     and win.ctx is not None))
+
+    def _wash_rects(self):
+        """The rects the riding scrim washes: the pause menu's, or the
+        system menu's bands."""
+        ws = self.ws
+        if ws.pause.open:
+            return (ws.pause.scrim_rect(),)
+        return ws.menu_ui.scrim_rects()
 
     def _pop_wash_changed(self, n):
         """Owe the scrim's change to every retained buffer: its wash while it
@@ -1845,13 +1906,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ride = True
         if up:
             ride = w[1] is None
-            rects = self.ws.menu_ui.scrim_rects()
+            rects = self._wash_rects()
             x0 = min(r[0] for r in rects)
             y0 = min(r[1] for r in rects)
             x1 = max(r[0] + r[2] for r in rects)
             y1 = max(r[1] + r[3] for r in rects)
             w[1] = (x0, y0, x1 - x0, y1 - y0)
             w[3] = False
+            sp = self._pause_span
+            sp[0] = sp[1] = sp[2] = sp[3] = 0
         elif self._scrim_up() or not w[3]:
             ride = False
             w[1] = None
@@ -1862,8 +1925,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def popover_takes_keys(self):
         """The open popover owns the keyboard and paints its own change, so
-        a key press does not mark the frame dirty (console.handle_input)."""
-        return self.ws.sysmenu.open and self._pop_rides()
+        a key press does not mark the frame dirty (console.handle_input);
+        so does the pause menu while it rides."""
+        return (self.ws.sysmenu.open or self._pause_rides()) and self._pop_rides()
 
     def _pop_live(self):
         """True while a popover is open or owed to a retained buffer."""
@@ -1886,6 +1950,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         w[2] = 0
         w[3] = False
         w[4] = False
+        self._pause_owed = 0
         self._wash_focus_drop()
 
     def _pop_note(self, r):
@@ -1914,7 +1979,19 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return
         if not w[4]:
             r = w[1]
-            root.blit_strip_rect(w[0], r[0], r[1], r[0], r[1], r[2], r[3])
+            hole = None
+            if self._pop_game_next:
+                win = self._wins.get("desktop")
+                if win is not None and not win.minimized:
+                    hole = self._game_rect(win)   # the game's frame comes next, opaque
+            lay = w[0]
+            asb = getattr(root, "blit_strip_async", None)
+            # Put back whole, it is the frame's last write there: the engine
+            # copies it after the frame has drawn (`blit_strip_async`).
+            if not (hole is None and asb is not None and lay.w == r[2] and lay.h == r[3]
+                    and asb(lay, r[0], r[1])):
+                for b in _bands(r, hole):
+                    root.blit_strip_rect(lay, r[0], r[1], b[0], b[1], b[2], b[3])
             self._pop_note(r)
             self._wash_focus_back()
             w[2] -= 1
@@ -2028,8 +2105,18 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             w[3] = False
             self.ws.menu_ui.scrim()
             return
-        if not w[4] or w[2] <= 0:
+        if not w[4]:
             return
+        if w[2] <= 0:
+            if self._pause_owed > 0:
+                self._pause_paint(False)
+            return
+        if self._pause_rides():
+            # Its game's frame, held, composited where a quiet frame deferred
+            # it past this buffer: what the wash goes over.
+            game = self._wins["desktop"]
+            self._draw_player_window(game, False, self._focus == "desktop", 0,
+                                     full=False, defer=False)
         if not w[3]:
             self._pop_wash_capture(w)
             self._wash_focus()
@@ -2038,9 +2125,68 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             cx, cy = win.content_rect()[:2]
             self._root_canvas.blit_strip(win.buf, cx, cy)
             self._win_chrome(win, True, quiet=False)
-        self.ws.menu_ui.scrim()
+        self._wash(self._wash_rects())
         self._pop_note(w[1])
         w[2] -= 1
+        if self._pause_owed > 0:
+            self._pause_paint(True)
+
+    def _wash(self, rects, clip=None):
+        """The scrim over `rects`, within `clip` where given."""
+        root = self._root_canvas
+        th = self.ws.theme_colors
+        for r in rects:
+            if clip is not None:
+                x0, y0 = max(r[0], clip[0]), max(r[1], clip[1])
+                x1 = min(r[0] + r[2], clip[0] + clip[2])
+                y1 = min(r[1] + r[3], clip[1] + clip[3])
+                if x0 >= x1 or y0 >= y1:
+                    continue
+                r = (x0, y0, x1 - x0, y1 - y0)
+            _ui_draw.scrim(root, th, r)
+
+    def _pause_paint(self, washed):
+        """The pause menu's card over the riding scrim: where the buffer
+        was not washed this frame, what its paints covered put back from
+        the snapshot and washed again first, since its shadow blends. A
+        card that has not settled owes every buffer its next paint."""
+        ws = self.ws
+        sp = self._pause_span
+        if not washed and sp[2] > sp[0]:
+            w = self._pop_wash
+            o = w[1]
+            r = (sp[0], sp[1], sp[2] - sp[0], sp[3] - sp[1])
+            self._root_canvas.blit_strip_rect(w[0], o[0], o[1], r[0], r[1], r[2], r[3])
+            self._wash(self._wash_rects(), r)
+        ws.pause.draw_card()
+        r = ws.pause.card_rect()
+        if r is not None:
+            _grow(sp, r[0], r[1], r[0] + r[2], r[1] + r[3])
+            self._pop_note((sp[0], sp[1], sp[2] - sp[0], sp[3] - sp[1]))
+        self._pause_owed -= 1
+        if ws._frame_requested:
+            ws._frame_requested = False
+            self._pause_owed = self._pop_n()
+        elif self._pause_owed <= 0 and r is not None:
+            # every buffer holds this paint now: the span is its rect
+            sp[0], sp[1], sp[2], sp[3] = r[0], r[1], r[0] + r[2], r[1] + r[3]
+
+    def _pause_full(self, drawn=False):
+        """A full frame under the riding pause menu, before its scrim and
+        card draw: what the scrim covers is snapshotted again, so its next
+        change still rides; `drawn`, after: the span takes the card."""
+        w = self._pop_wash
+        if not w[4] or w[1] is None:
+            self._pause_owed = 0
+            return
+        if drawn:
+            r = self.ws.pause.card_rect()
+            if r is not None:
+                _grow(self._pause_span, r[0], r[1], r[0] + r[2], r[1] + r[3])
+            return
+        self._pop_wash_capture(w)
+        w[2] = 0
+        self._pause_owed = 0
 
     def _wash_focus(self):
         """Keep the focused window's buffer as it is, then render it as it
@@ -2131,8 +2277,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # washes the game's own fresh pixels (_scrim_rides).
         up = self._scrim_up()
         w = self._pop_wash
-        if w[1] is not None and "desktop" in self._wins:
-            self._pop_reset()             # a playtest came under the wash
+        if w[4] and not self._wash_rides():
+            self._pop_reset()             # what it rides over changed (a playtest came)
             ws._dirty = True
         if up != self._scrim_was:
             self._scrim_was = up
@@ -2158,6 +2304,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # it: the quiet stack repaints the game window alone, so not then.
         quiet = (still and "desktop" in self._wins and not self._player_under
                  and (not up or self._scrim_rides()))
+        self._pop_game_next = quiet and pop and self._full_debt <= 0
         if quiet and self._full_debt <= 0:
             if pop:
                 return self._quiet_pop_stack
@@ -2177,10 +2324,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _still(self):
         """No input, overlay, gesture or cursor asks this frame to change
-        anything but a running game and the popover."""
+        anything but a running game and the popover (the riding pause menu
+        one)."""
         ws = self.ws
         return (not ws._dirty
-                and (self._cache_sig & ~66) == 0   # FPS chip (bit 2), popover (64)
+                and (self._cache_sig & ~(578 if self._pause_rides() else 66)) == 0
+                # FPS chip (bit 2), popover (64), the riding pause menu (512)
                 and ws.cart_error is None
                 and self._drag is None and self._drag_armed is None
                 and self._resize is None

@@ -379,7 +379,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 _HOME_CLASSES = {"carousel": Carousel, "grid": Launcher, "icons": IconHome}
 # The layers that draw a menu holding the keys (`Workstation._modal_layer`):
 # the system menu's own, and a desk popover frame's that paints it alone.
-_PAUSE_LAYERS = ("pause",)
+_PAUSE_LAYERS = ("pause", "popover_over")
 _CONFIRM_LAYERS = ("confirm",)
 _SYSMENU_LAYERS = ("sysmenu", "popover_over")
 # The inputs that type (`Workstation.can_type`), and what a text field says
@@ -1946,6 +1946,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         paints its rect alone where it can, else the frame repaints. A
         pointer press this frame was the popover's (`_press_owed`)."""
         self.wm.popover_changed()
+        self._press_taken = True
+
+    def pause_touch(self):
+        """The pause menu's pixels changed (opened, a row moved, its page,
+        closed): the WM paints its card alone where it can, else the frame
+        repaints. A pointer press this frame was the menu's."""
+        self.wm.pause_changed()
         self._press_taken = True
 
     def widget_tap(self, widget):
