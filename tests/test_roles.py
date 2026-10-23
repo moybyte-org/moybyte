@@ -214,7 +214,7 @@ def test_the_doc_table_lists_exactly_the_rows():
 # once per frame by every app: the lower bound that keeps the counter honest.
 
 BUDGETS = {
-    "artwork": {"surface.canvas": 1, "theme.colors": 25},
+    "artwork": {"surface.canvas": 1, "surface.pointer": 1, "theme.colors": 25},
     "appearance": {"surface.canvas": 1, "theme.colors": 3, "theme.gen": 1,
                    "wallpaper.preview": 1, "wallpaper.title": 1},
     "storybook": {"surface.canvas": 1, "theme.colors": 2, "carts.all": 1},

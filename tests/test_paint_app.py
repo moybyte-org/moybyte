@@ -798,11 +798,14 @@ def test_a_tap_on_the_handheld_bars_zoom_chip_steps_the_zoom(tmp_path):
 
 
 def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, bufs=1,
-                  keys=False):
+                  keys=False, chosen=False, start=(16, 14)):
     """The glass after every frame of one scripted stroke, how many of them
-    were stroke frames and the widest part of the view one repainted. `bufs`
-    > 1 presents from that many buffers in turn, as a board's ping-pong does:
-    each frame draws over the one `bufs` frames before it."""
+    were stroke frames, the widest part of the view one repainted, and which
+    frames from the press on were stroke frames. `bufs` > 1 presents from
+    that many buffers in turn, as a board's ping-pong does: each frame draws
+    over the one `bufs` frames before it. `chosen`: the tool was chosen before
+    the page was painted, so the press is the stroke's first change; `start`
+    is where in the view the pointer's stroke begins."""
     from runtime import paint_app
     if not stroke_frames:
         monkeypatch.setattr(paint_app, "_loop", None)
@@ -817,6 +820,9 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
     root = getattr(ws.wm, "_root_canvas", None) or ws.sys_canvas
     root.RETAINED_FRAMES = bufs
     held = []
+    if chosen:
+        app.tool = tool
+        app.shape = shape
 
     def frame():
         n = ws._frames_drawn
@@ -824,7 +830,8 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
         if bufs > 1 and ws._frames_drawn != n:
             held.append(bytes(root._buf))
             root._buf[:] = held[-bufs] if len(held) >= bufs else held[0]
-    for _ in range(3):
+    # chosen: frames enough that every buffer holds the page
+    for _ in range(3 + (bufs if chosen else 0)):
         ws._dirty = True
         frame()
     app.tool = tool
@@ -842,11 +849,12 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
     # The page below the bar, whose clock reads the wall's minute: the two
     # runs this compares are made at two moments.
     top = (oy if win is not None else app.layout.cy) * root.w * 2
-    made = [0, 0, 0]
+    made = [0, 0, 0, []]
     real = app._stroke_frame
 
     def counted(cv, th):
         got = real(cv, th)
+        made[3].append(got)
         if got:
             made[0] += 1
             c = app._chg
@@ -873,7 +881,7 @@ def _stroke_glass(tmp_path, monkeypatch, desk, stroke_frames, tool, shape=1, buf
         frame()
         shots.append(bytes((held[-1] if bufs > 1 else root._buf)[top:]))
         return shots, made, bytes(app.doc.pix)
-    pts = [(x + 16 + i * 5, y + 14 + (i * 3) % (h - 30)) for i in range(30)]
+    pts = [(x + start[0] + i * 5, y + start[1] + (i * 3) % (h - 30)) for i in range(30)]
     drv.touch(ox + pts[0][0], oy + pts[0][1])
     frame()
     for px, py in pts[1:]:
@@ -914,3 +922,81 @@ def test_a_stroke_frame_paints_what_a_whole_frame_paints(tmp_path, monkeypatch, 
         # a short step a frame: what a stroke frame repaints is the last few
         # steps' dots, never the stroke so far
         assert made[1] <= 48 and made[2] <= 48, made
+
+
+@pytest.mark.parametrize("desk, bufs", [(False, 1), (False, 2), (False, 3), (True, 1)])
+@pytest.mark.parametrize("tool", ["brush", "keys"])
+def test_a_stroke_is_stroke_frames_from_its_press(tmp_path, monkeypatch, desk, bufs, tool):
+    """A press on a page every buffer holds changes nothing but a mark: the
+    stroke's first frames are stroke frames, never whole ones (a fast stroke
+    begun on whole frames took its first samples far apart and drew them as
+    straight lines), and the glass is a whole frame's."""
+    from runtime import paint_app
+    k = tool == "keys"
+    # begun clear of the view's rounded corners, which take a whole frame
+    at = (48, 40)
+    whole, _, pix0 = _stroke_glass(tmp_path / "a", monkeypatch, desk, False, paint_app.BRUSH,
+                                   bufs=bufs, keys=k, chosen=True, start=at)
+    monkeypatch.undo()
+    part, made, pix1 = _stroke_glass(tmp_path / "b", monkeypatch, desk, True, paint_app.BRUSH,
+                                     bufs=bufs, keys=k, chosen=True, start=at)
+    stroke = made[3]
+    assert stroke[0], "the press was drawn whole"
+    if not (desk and k):
+        # (a desk draws frames of its own between a held key's steps, which
+        # Paint does not paint and so cannot count as its buffer's)
+        assert all(stroke[:-1]), "frames from the press drawn whole: %s" % stroke[:12]
+    assert pix0 == pix1
+    for i, (a, b) in enumerate(zip(whole, part)):
+        assert a == b, "frame %d of the stroke differs from a whole frame" % i
+
+
+@pytest.mark.parametrize("bufs", [1, 2, 3])
+@pytest.mark.parametrize("change", ["tool", "open"])
+def test_a_page_change_asks_for_the_frames_that_paint_it_into_every_buffer(tmp_path, bufs,
+                                                                           change):
+    """A board draws Paint only on a frame something asked for. So a whole
+    frame that moved the page -- a tool picked, the drawing opened -- either
+    asks for one more or leaves every buffer of the canvas holding the page,
+    RETAINED_FRAMES paints of it in a row; an idle board has then painted it
+    by the next press, which is a stroke frame from its first."""
+    from runtime import paint_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    (getattr(ws.wm, "_root_canvas", None) or ws.sys_canvas).RETAINED_FRAMES = bufs
+    for _ in range(4):
+        drv.frame(1 / 30)
+    asked = [0]
+    dmg = app._damage
+    for verb in ("again", "settle"):
+        real = getattr(dmg, verb)
+        setattr(dmg, verb, lambda _real=real: asked.__setitem__(0, asked[0] + 1) or _real())
+    whole = []
+    stroke = app._stroke_frame
+
+    def counted(cv, th):
+        got = stroke(cv, th)
+        if not got:
+            whole.append(paint_app._loop.drawn())
+        return got
+    app._stroke_frame = counted
+    draw = app.draw
+
+    def drawn(dt):
+        n, a = len(whole), asked[0]
+        draw(dt)
+        if len(whole) > n:
+            f = whole[-1]
+            assert asked[0] > a or app._kept(f + 1, app._epoch, None), (
+                "frame %d moved the page, asked for no frame after it, and left "
+                "a buffer without the page" % f)
+    app.draw = drawn
+    if change == "tool":
+        app.tool = paint_app.ERASER
+        app._damage.all()
+    else:
+        app.open()
+    for _ in range(6):
+        drv.frame(1 / 30)
+    assert whole and len(whole) <= bufs + 1, whole

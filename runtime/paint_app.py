@@ -366,7 +366,8 @@ def _grow(c, x0, y0, x1, y1):
 class _Damage:
     """Paint's damage role: `all` and `again` as the role's, each counted in
     `gen`; `mark` asks for a frame whose only change is a mark's -- the doc's
-    pixels and a shape's outline -- which the stroke frame paints alone."""
+    pixels and a shape's outline -- which the stroke frame paints alone;
+    `settle` asks, from a draw, for one more frame of the same page."""
 
     def __init__(self, role):
         self._role = role
@@ -382,6 +383,9 @@ class _Damage:
 
     def mark(self):
         self._role.all()
+
+    def settle(self):
+        self._role.again()
 
 
 # The most physical buffers a canvas rotates through (the scroll's paint ring
@@ -477,6 +481,7 @@ class PaintAppLayer:
         self._clip_r = None
         self._pv = [0, 0, 0, 0]
         self._sp = [0, 0, 0, 0]
+        self._sp_out = False
         self._cu = [0, 0, 0, 0]
         self._drip_c = 0
 
@@ -877,7 +882,7 @@ class PaintAppLayer:
         if down and not self._drawing_key:
             self._drawing_key = True
             self._press((self.cur[0], self.cur[1]))
-            self._damage.all()
+            self._damage.mark()
         elif not down and self._drawing_key:
             self._drawing_key = False
             self._release()
@@ -1040,10 +1045,11 @@ class PaintAppLayer:
                 self._down = True
                 if self.tool == MOVE:
                     self._panning = (px, py)
+                    self._damage.all()
                 else:
                     self.cur = [p[0], p[1]]
                     self._press(p)
-                self._damage.all()
+                    self._damage.mark()
                 return True
             if lay.swatch_page is not None and not lay.desk:
                 c = self._page_swatch(px, py)
@@ -1212,6 +1218,9 @@ class PaintAppLayer:
         self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
         if self._touch is None:
             self._touch = ui.hints_width(("back", "Back")) == 0
+            # the page this frame paints is the first a stroke frame may
+            # follow: one more frame begins bringing every buffer to it
+            self._damage.again()
             if self._touch != lay.touch and not lay.desk:
                 self.relayout(lay.w, lay.h, lay.fs, lay.cs)
                 lay = self.layout
@@ -1431,18 +1440,27 @@ class PaintAppLayer:
             _grow(c, cu[0], cu[1], cu[2], cu[3])
         else:
             cu[2] = cu[0]
+        # The pointer's sprite, drawn over the page after it: where it was
+        # and where it is, when it moved. One that reaches past the view is
+        # a whole frame.
         sp = self._sp
-        _grow(c, sp[0], sp[1], sp[2], sp[3])
-        p = self._surf.pointer() if self._down else None
+        x0, y0, x1, y1 = sp[0], sp[1], sp[2], sp[3]
+        p = self._surf.pointer()
         if p is not None and p[4]:
             u = self.layout.fs
             sp[0] = p[0] - 1
             sp[1] = p[1] - 1
             sp[2] = p[0] + 8 * u + 1
             sp[3] = p[1] + 13 * u + 1
-            _grow(c, sp[0], sp[1], sp[2], sp[3])
         else:
             sp[2] = sp[0]
+        if sp[0] != x0 or sp[1] != y0 or sp[2] != x1 or sp[3] != y1:
+            _grow(c, x0, y0, x1, y1)
+            _grow(c, sp[0], sp[1], sp[2], sp[3])
+            self._sp_out = (not self._in_view(x0, y0, x1, y1)
+                            or not self._in_view(sp[0], sp[1], sp[2], sp[3]))
+        else:
+            self._sp_out = False
         epoch = self._page_epoch(cv, th, d, spec)
         f = _loop.drawn() if _loop is not None else -1
         ok = self._region(cv, f, epoch)
@@ -1456,6 +1474,11 @@ class PaintAppLayer:
             e[5] = self._own[3]
             self._ring_cv = cv
         if not ok:
+            # A whole frame: until the canvas's every buffer holds this page,
+            # the frames after it are asked for now, while nothing is drawn,
+            # so the next press is a stroke frame from its first.
+            if f >= 0 and self._may(cv) and not self._kept(f + 1, epoch, None):
+                self._damage.settle()
             return False
         if c[2] > c[0] and c[3] > c[1]:
             self._clip_r = c
@@ -1481,22 +1504,10 @@ class PaintAppLayer:
         o[1] = c[1]
         o[2] = c[2]
         o[3] = c[3]
-        if (f < 0 or self.page is not None or self.pop is not None
-                or self.viewer is not None or self.toast is not None
-                or self._touch is None or cv is not self._ring_cv
-                or getattr(cv, "begin_surface", None) is not None):
+        if f < 0 or cv is not self._ring_cv or self._sp_out or not self._may(cv):
             return False
-        n = getattr(cv, "RETAINED_FRAMES", 0)
-        if n < 1 or n > _RING:
+        if not self._kept(f, epoch, c):
             return False
-        ring = self._ring
-        c = self._chg
-        for i in range(1, n + 1):
-            e = ring[(f - i) % (_RING + 1)]
-            if e[0] != f - i or e[1] != epoch:
-                return False
-            if i < n:
-                _grow(c, e[2], e[3], e[4], e[5])
         lay = self.layout
         vx, vy, vw, vh = lay.view
         if c[0] < vx:
@@ -1516,6 +1527,36 @@ class PaintAppLayer:
                 return False
         return True
 
+    def _in_view(self, x0, y0, x1, y1):
+        """Whether rect [x0, y0, x1, y1) is empty or inside the view."""
+        if x1 <= x0 or y1 <= y0:
+            return True
+        vx, vy, vw, vh = self.layout.view
+        return vx <= x0 and vy <= y0 and x1 <= vx + vw and y1 <= vy + vh
+
+    def _may(self, cv):
+        """Whether the page and the canvas are ones a stroke frame paints."""
+        if (self.page is not None or self.pop is not None or self.viewer is not None
+                or self.toast is not None or self._touch is None
+                or getattr(cv, "begin_surface", None) is not None):
+            return False
+        n = getattr(cv, "RETAINED_FRAMES", 0)
+        return 1 <= n <= _RING
+
+    def _kept(self, f, epoch, c):
+        """Whether the RETAINED_FRAMES frames before frame `f` all painted
+        page `epoch`, so the buffer `f` draws into holds it; `c`, when given,
+        grows over what those frames changed since that buffer was painted."""
+        n = self._ring_cv.RETAINED_FRAMES
+        ring = self._ring
+        for i in range(1, n + 1):
+            e = ring[(f - i) % (_RING + 1)]
+            if e[0] != f - i or e[1] != epoch:
+                return False
+            if c is not None and i < n:
+                _grow(c, e[2], e[3], e[4], e[5])
+        return True
+
     def _page_epoch(self, cv, th, d, spec):
         """The page's epoch: moved by any change a mark is not (the damage's
         own count) and by anything the page outside the view reads."""
@@ -1533,7 +1574,7 @@ class PaintAppLayer:
         h = (self.tool | self.shape << 4 | (1 if self.shape_fill else 0) << 6
              | self.size_i << 7 | self.color << 10 | (1 if self._unsaved else 0) << 16
              | (1 if d.history else 0) << 17 | (1 if d.future else 0) << 18
-             | (1 if self._cursor_shown() else 0) << 19 | (1 if self._touch else 0) << 20
+             | (1 if self._touch else 0) << 20
              | (1 if self._art.editable() else 0) << 21)
         moved = self._sig_eq(8, h) | moved
         moved = self._sig_eq(9, self.zoom) | moved
