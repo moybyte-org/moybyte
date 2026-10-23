@@ -60,7 +60,10 @@ def _text_bytes(s):
     "b'...'", so the conversion has to be this and not that. A str is
     UTF-8-encoded, which is the same buffer moy_gfx.text would have taken from
     it anyway."""
-    if isinstance(s, (bytes, bytearray)):
+    t = type(s)
+    if t is bytes or t is bytearray:
+        return s
+    if t is not str and isinstance(s, (bytes, bytearray)):
         return s
     return str(s).encode("utf-8")
 
@@ -2300,25 +2303,8 @@ class DeviceCanvas:
             g.blit565_resize(self._buf, self._stride, self._bh, x, y, tw, th,
                              buf, w, h, cx0, cy0, cx1, cy1)
             return
-        # No kernel: the same sampling (each target pixel's centre in the
-        # source), a target row at a time.
-        x0 = max(x, cx0)
-        x1 = min(x + tw, cx1)
-        if x1 <= x0:
-            return
-        cols = [((2 * (tx - x) + 1) * w) // (2 * tw) for tx in range(x0, x1)]
-        d = self._buf
-        stride = self._stride
-        row = bytearray(2 * (x1 - x0))
-        for ty in range(max(y, cy0), min(y + th, cy1)):
-            sy = ((2 * (ty - y) + 1) * h) // (2 * th)
-            base = 2 * w * sy
-            for k in range(len(cols)):
-                s = base + 2 * cols[k]
-                row[2 * k] = buf[s]
-                row[2 * k + 1] = buf[s + 1]
-            o = 2 * (ty * stride + x0)
-            d[o:o + len(row)] = row
+        _blit565_resize_py(self._buf, self._stride, buf, w, h, x, y, tw, th,
+                           cx0, cy0, cx1, cy1)
 
     def cover(self, buf, sw, sx, sy, cw, ch, x, y, w, h, r=0, stepped=False):
         """A home card's cover: the (sx, sy, cw, ch) sub-rect of a picture of
@@ -2490,9 +2476,8 @@ class DeviceCanvas:
         self.flush_batch()
         _dirty = getattr(layer, "_batch_arr", None)
         _dirty = _dirty is not None and _dirty[0] > 4    # layer edited THIS frame
-        _fb = getattr(layer, "flush_batch", None)
-        if _fb is not None:
-            _fb()
+        if _dirty:
+            layer.flush_batch()
         # The restore (native/moy_gfx/moy_gfx_kernels.h, mg_lr_blit): the clamp,
         # the predicted copy taken when nothing moved -- same layer, same cam_y,
         # not edited this frame -- and the synchronous copy otherwise, which
@@ -2531,9 +2516,9 @@ class DeviceCanvas:
         # span per row); rows outside the clip are one compare each. Fallback:
         # the blit_strip row loop with the extra bounds.
         self.flush_batch()             # #63: emit this canvas's queued sprites first
-        _fb = getattr(layer, "flush_batch", None)
-        if _fb is not None:
-            _fb()
+        ba = getattr(layer, "_batch_arr", None)    # a data read: no bound method made
+        if ba is not None and ba[0] > 4:
+            layer.flush_batch()
         dst_x = int(dst_x)
         dst_y = int(dst_y)
         rx = int(rx)
@@ -2695,6 +2680,28 @@ class SystemCanvas(DeviceCanvas):
 
 # What a released canvas draws into: nothing at all.
 _NO_PIXELS = bytearray(2)
+
+
+def _blit565_resize_py(d, stride, buf, w, h, x, y, tw, th, cx0, cy0, cx1, cy1):
+    """`blit565_resize` with no kernel: the same sampling (each target
+    pixel's centre in the source), a target row at a time. Its own function:
+    the comprehension's cells would otherwise be made on every call of the
+    method, kernel or not."""
+    x0 = max(x, cx0)
+    x1 = min(x + tw, cx1)
+    if x1 <= x0:
+        return
+    cols = [((2 * (tx - x) + 1) * w) // (2 * tw) for tx in range(x0, x1)]
+    row = bytearray(2 * (x1 - x0))
+    for ty in range(max(y, cy0), min(y + th, cy1)):
+        sy = ((2 * (ty - y) + 1) * h) // (2 * th)
+        base = 2 * w * sy
+        for k in range(len(cols)):
+            s = base + 2 * cols[k]
+            row[2 * k] = buf[s]
+            row[2 * k + 1] = buf[s + 1]
+        o = 2 * (ty * stride + x0)
+        d[o:o + len(row)] = row
 
 
 class _LayerComp:
