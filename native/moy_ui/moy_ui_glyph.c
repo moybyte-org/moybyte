@@ -8,7 +8,8 @@
 
 int moy_ui_glyph_id(const char *name, size_t n) {
     for (int i = 0; i < MOY_UI_GLYPHS; i++) {
-        if (strlen(moy_ui_glyph_names[i]) == n && memcmp(moy_ui_glyph_names[i], name, n) == 0) {
+        const char *g = moy_ui_glyph_names[i];
+        if ((n == 0 || g[0] == name[0]) && strlen(g) == n && memcmp(g, name, n) == 0) {
             return i;
         }
     }

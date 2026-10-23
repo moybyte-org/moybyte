@@ -693,7 +693,7 @@ static const char *const s_icon_alias[][2] = {
 #define ICON_ALIASES ((int)(sizeof(s_icon_alias) / sizeof(s_icon_alias[0])))
 
 static int named(const char *a, const uint8_t *name, size_t n) {
-    return strlen(a) == n && memcmp(a, name, n) == 0;
+    return (n == 0 || (uint8_t)a[0] == name[0]) && strlen(a) == n && memcmp(a, name, n) == 0;
 }
 
 int moy_ui_icon_slot(const uint8_t *name, size_t n) {
