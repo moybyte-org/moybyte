@@ -13,6 +13,7 @@ the engine's focus and navigation, and the shell-strict ratchet.
     and pass no override key but `id`, `current`, `disabled`, `steps` and `hint`.
 """
 
+import json
 import os
 import re
 import shutil
@@ -574,3 +575,51 @@ def test_a_python_pages_ground_is_a_colour_the_cart_canvas_has(tmp_path):
         assert py == lua, variant
         if variant == "light":
             assert py != b"\x00\x00", "the page's ground is black"
+
+
+# -- drawn on change, unless the manifest says it animates ---------------------------
+
+_TICKER = """
+frames = 0
+
+
+def _draw():
+    global frames
+    ui.page("Ticker")
+    ui.label("tick")
+    frames += 1
+"""
+
+
+@pytest.mark.parametrize("ven,every", [
+    ({}, False),
+    ({"animates": True}, True),
+    ({"permissions": ["audio"]}, True),     # the frame is where sound is pulled
+], ids=("on-change", "animates", "audio"))
+def test_an_app_cart_draws_on_change_unless_it_animates(tmp_path, ven, every):
+    """A Python app on the verbs draws while something changes and then
+    stops; one whose manifest's `moybyte` object says `"animates": true`
+    draws every frame, as one that plays sound does."""
+    root = tmp_path / "carts"
+    host_app.moy_carts.ensure_dirs(str(root))
+    d = root / "ticker.moy"
+    d.mkdir()
+    man = {"title": "Ticker", "runtime": "python", "main": "main.py", "canvas": "320x240",
+           "moybyte": dict({"type": "app", "permissions": []}, **ven)}
+    (d / "manifest.json").write_text(json.dumps(man))
+    (d / "main.py").write_text(_TICKER)
+    ws = host_app.build_workstation(str(root))
+    ws.look.select_wallpaper(None, persist=False)
+    open_cart(ws, "Ticker")
+    drv = make_drv(ws)
+    for _ in range(10):
+        quiesce(ws)
+        drv.frame(_DT)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.player.animates() == every
+    n = ws.player.ns["frames"]
+    for _ in range(20):
+        quiesce(ws)
+        drv.frame(_DT)
+    assert ws.player.ns["frames"] - n == (20 if every else 0)
+    ws.exit()

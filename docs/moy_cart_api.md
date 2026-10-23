@@ -82,7 +82,8 @@ def _draw():                 # every frame; render here
 
 An app cart (`"type": "app"`) is the exception: it is drawn on change, its
 `_update` and `_draw` running while input or its page moves and not while it
-sits still (`docs/ui_api_2026-10.md`, "Drawn on change").
+sits still (`docs/ui_api_2026-10.md`, "Drawn on change"), unless its
+manifest says `"animates": true` ("Turning a cart into an APP", below).
 
 ## Writing a cart in Lua (#67)
 
@@ -765,6 +766,16 @@ and never crashes, so there is no `try` to write.
 
 Anything you did not ask for **is not there** — no `carts`, no shell. Writing
 that name is an ordinary "name is not defined" error, like a typo.
+
+An app is drawn on change (the frame loop, above), so an idle one costs the
+console nothing. An app that moves on its own — a clock, a meter, an
+animation — says `"animates": true` beside its `type` and runs every frame
+like a game. One that lists `audio` in its permissions does too, since its
+sound is pulled in the frame:
+
+```json
+"moybyte": {"type": "app", "animates": true, "permissions": ["graphics", "input"]}
+```
 
 `system_carts/moybyte.notes.moy` is the worked example: it lists your notes, opens one
 through the editor handle below, and holds no text of its own. The full rules

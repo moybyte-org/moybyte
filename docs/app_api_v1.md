@@ -292,7 +292,9 @@ strip draws below. Under a strip at the bottom `bar_h()` is 0 and the strip
 covers your last rows, so a new app reads `content_rect()`.
 
 Like a shipped app, a user app paints only when something changed
-(`docs/ui_api_2026-10.md`, "Drawn on change").
+(`docs/ui_api_2026-10.md`, "Drawn on change"). One that moves on its own
+says so in its manifest, `"moybyte": {"type": "app", "animates": true}`, and
+draws every frame.
 
 ### A compiled user app (#224)
 

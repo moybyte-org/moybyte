@@ -859,6 +859,11 @@ def _load(path, whole, folder=None):
             "genre": _cart_listing.genre(man.get("genre")),
             "tags": _cart_listing.tags(man.get("tags")),
         }
+        if ven.get("animates") is True:
+            # An app on the `ui` verbs drawn every frame rather than on change
+            # (docs/ui_api_2026-10.md, "Drawn on change"); set only where the
+            # manifest says so, like `broken` below.
+            cart["animates"] = True
         if broken:
             # Set ONLY on a cart whose manifest would not parse, so every reader
             # is a `.get` and a repaired cart simply stops carrying the key.

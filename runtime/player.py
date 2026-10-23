@@ -1678,9 +1678,12 @@ class Player:
                 # bound method every frame.
                 self._masks = getattr(ws.input, "button_masks", None)
                 # An app on the verbs is drawn on change, as a shipped app is
-                # (docs/ui_api_2026-10.md, "Drawn on change"): one that plays
-                # sound keeps every frame, which is where the host pulls its mix.
+                # (docs/ui_api_2026-10.md, "Drawn on change"), unless its
+                # manifest says it animates. One that plays sound keeps every
+                # frame too: the frame is where the host and the browser pull
+                # its mix (`audio_out.tick`), and a still frame pulls none.
                 self._on_change = (self._app_id is not None and not self._script
+                                   and cart.get("animates") is not True
                                    and "audio" not in (cart.get("permissions") or ()))
                 self._owe = 2
         if console is not None:
