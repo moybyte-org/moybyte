@@ -1321,14 +1321,16 @@ class BarLayer:
         cv.backdrop(rec, ws.theme_colors["desktop"], surface=(x, y, sc.w, sc.h))
         return True
 
-    def repaint_cell(self, where, name):
+    def repaint_cell(self, where, name, span=None):
         """Paint the ground of cell `name` of an already-drawn bar again: the
         band the strip itself draws (the light-theme in-window band is a
         different token), minus its edge line so the repaint can never eat
         it. What draws in the cell next lands on fresh pixels -- the clock
         over its old digits, the taskbar chips' labels and corners, which
-        blend. (canvas, bar, cell rect on the canvas, whether the look drew
-        the band), or None where no bar places the cell."""
+        blend. `span(cell, bar)`, where given, names the rect in the bar
+        to paint instead: what draws there reaches past its cell. (canvas,
+        bar, cell rect on the canvas, whether the look drew the band), or
+        None where no bar places the cell."""
         cv = self._bar_canvas(where)
         if cv is None:
             return None
@@ -1338,18 +1340,20 @@ class BarLayer:
         bar, (x, y, w, h) = got
         edge, (bx, by, bw, bh), _dy, _cells = bar
         th = self.ws.theme_colors
+        cx, cy, cw, ch = span((x, y, w, h), bar) if span is not None else (x, y, w, h)
+        cx += bx
+        cy += by
         x += bx
         y += by
-        cx, cy, cw, ch = x, y, w, h
         if edge == "top":
-            ch = min(h, max(0, by + bh - 1 - y))
+            ch = min(ch, max(0, by + bh - 1 - cy))
         elif edge == "bottom":
             if cy == by:
-                cy, ch = by + 1, h - 1
+                cy, ch = by + 1, ch - 1
         elif edge == "left":
-            cw = min(w, max(0, bx + bw - 1 - x))
+            cw = min(cw, max(0, bx + bw - 1 - cx))
         elif cx == bx:
-            cx, cw = bx + 1, w - 1
+            cx, cw = bx + 1, cw - 1
         cv.clip(cx, cy, cw, ch)
         looked = not self._zone_is_game(where) and not self._in_window(where) \
             and (self._home_ground(cv, where, 0, 0)
@@ -1359,6 +1363,41 @@ class BarLayer:
                                 _BAND_SIDE[edge])
         cv.clip()
         return cv, bar, (x, y, w, h), looked
+
+    def tile_on(self):
+        """Whether the system button's tile shows open: its menu is up, under
+        a theme's look (the one state of the button's pixels)."""
+        m = self.ws.sysmenu
+        return bool(_ui_draw.depth()[0]) and m.open and m.widget == "menu"
+
+    def redraw_tile(self, where):
+        """Repaint JUST the system button's cell of an already-drawn bar, its
+        tile open or not as the menu now stands: the desk's change of it
+        when the menu's scrim rides, or a cached desk that holds the other
+        state. Without a look the button has one state: nothing to do."""
+        if not _ui_draw.depth()[0]:
+            return
+        got = self.repaint_cell(where, "menu", self._tile_span)
+        if got is None:
+            return
+        cv, bar, (x, y, w, h), looked = got
+        if not looked:
+            return
+        edge, (bx, by, bw, bh), _dy, _cells = bar
+        cv.camera(-bx, -by)
+        self._paint_look_cell(cv, where, "menu", (x - bx, y - by, w, h), None,
+                              (0, 0, bw, bh), edge in ("left", "right"))
+        cv.camera(0, 0)
+        self._strip_moved(cv, x, y, w, h)
+
+    def _tile_span(self, r, bar):
+        """The system button's cell and its tile, whose corners reach past
+        it, as one rect in its bar."""
+        edge, (_bx, _by, bw, bh) = bar[0], bar[1]
+        tx, ty, tw, th = self.sys_tile(r, (0, 0, bw, bh), edge in ("left", "right"))
+        x0, y0 = min(r[0], tx), min(r[1], ty)
+        x1, y1 = max(r[0] + r[2], tx + tw), max(r[1] + r[3], ty + th)
+        return (x0, y0, x1 - x0, y1 - y0)
 
     def redraw_clock(self, where):
         """Repaint JUST the clock cell of an already-drawn bar (#155).

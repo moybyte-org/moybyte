@@ -436,6 +436,14 @@ SHADOWS = [
     dict(x=-5, y=-3, w=30, h=20, r=9, b=5, dx=0, dy=4, col=0x0000, alpha=140,
          clip=(3, 2, 30, 20), cam=(2, 1)),
     dict(x=8, y=6, w=20, h=12, r=0, b=4, dx=0, dy=0, col=0x0000, alpha=200),
+    # a flat tint (a scrim): one weight for the whole run, at odd edges
+    dict(x=3, y=2, w=33, h=20, r=0, b=0, dx=0, dy=0, col=0x0000, alpha=102),
+    dict(x=2, y=1, w=34, h=22, r=0, b=0, dx=0, dy=0, col=0x18a8, alpha=46,
+         hole=(9, 5, 13, 9, 3)),
+    dict(x=1, y=1, w=35, h=20, r=6, b=6, dx=1, dy=2, col=0x0000, alpha=120,
+         hole=(12, 6, 9, 7, 2)),
+    dict(x=-3, y=-2, w=40, h=26, r=0, b=0, dx=0, dy=0, col=0xffff, alpha=200,
+         clip=(5, 3, 31, 19), cam=(1, 1)),
 ]
 
 

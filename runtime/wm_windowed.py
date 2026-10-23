@@ -541,6 +541,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._quiet_pop_stack = [_pu, _pw, _po]
         self._pop_slots = [[None, None, 0, False], [None, None, 0, False]]
         self._pop_cur = None          # the open popover's slot, or None
+        # The system menu's scrim on a still desk rides as one more slot,
+        # [layer, rect, debt, captured, up]: the pixels the wash covers,
+        # taken before its first wash; while `up` each retained buffer is
+        # owed the wash (`debt` frames), once down the snapshot put back.
+        self._pop_wash = [None, None, 0, False, False]
+        # ...and the focused window under it, which the menu taking the keys
+        # shows without its focus (ui.marks): [window, its buffer as it was,
+        # that buffer's _buf_stale, _lag, _marked], put back at the close.
+        self._wash_win = [None, None, False, [0, 0, 0, 0, 0], False]
         self._pop_over_game = False   # ...and does it overlap the playtest's window
         # Its face, copied once painted while it overlaps a playtest: the
         # quiet frames put it back over the game instead of painting it.
@@ -554,6 +563,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._backdrop_layer = _BackdropLayer(self)
         self._backdrop = None
         self._backdrop_valid = False
+        self._desk_tile = False           # the system button's state the cache holds
         self._backdrop_disabled = False   # A/B measurement knob (P4 remote `cache`)
         self._backdrop_unsupported = False  # the root canvas can't snapshot pixels
                                             # (the web CommandCanvas, #113): stop
@@ -906,6 +916,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if self._pop_face is not None:
                 self._release_layer(self._pop_face)
                 self._pop_face = None
+                held = True
+            if self._pop_wash[0] is not None:
+                self._release_layer(self._pop_wash[0])
+                self._pop_wash[0] = None
+                held = True
+            if self._wash_win[1] is not None:
+                self._release_layer(self._wash_win[1])
+                self._wash_win[1] = None
                 held = True
             if held:
                 return True
@@ -1766,6 +1784,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         m = self.ws.sysmenu
         n = self._pop_n()
         self._pop_face_ok = False
+        if not self._pop_wash_changed(n):
+            self.ws._dirty = True
         slots = self._pop_slots
         cur = self._pop_cur
         rect = self.ws.menu_ui.panel_rect() if m.open else None
@@ -1791,7 +1811,54 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         for s in self._pop_slots:
             if s[2] > 0:
                 return True
-        return False
+        return self._pop_wash[2] > 0
+
+    def _wash_rides(self):
+        """Whether the system menu's scrim rides with it: the menu's own
+        (not a card's, ABOUT's, the pause menu's or the delete confirm's)
+        over a desk with no playtest, whose quiet frames wash the game
+        instead (`_scrim_rides`). A focused window must be the top one: the
+        menu taking the keys changes what it shows (ui.marks), so the wash
+        renders it again over the snapshot (`_wash_focus`)."""
+        ws = self.ws
+        m = ws.sysmenu
+        if not (m.open and m.comp is None and not ws._about and not ws.pause.open
+                and not ws.confirm.open and "desktop" not in self._wins):
+            return False
+        win = self._wins.get(self._focus) if self._focus is not None else None
+        return (win is None or win.minimized
+                or (self._order[-1] == self._focus and win.buf is not None
+                    and win.ctx is not None))
+
+    def _pop_wash_changed(self, n):
+        """Owe the scrim's change to every retained buffer: its wash while it
+        is up, its snapshot put back once it is down. False when the change
+        cannot ride and the frame repaints whole: the scrim came back while
+        a buffer is still owed the last one's restore, or it goes with no
+        snapshot to put back, or another modal's scrim stays."""
+        w = self._pop_wash
+        up = self._wash_rides()
+        if up and not w[4] and self._scrim_was:
+            up = False                    # the scrim came up whole: it stays so
+        if up == w[4]:
+            return True
+        ride = True
+        if up:
+            ride = w[1] is None
+            rects = self.ws.menu_ui.scrim_rects()
+            x0 = min(r[0] for r in rects)
+            y0 = min(r[1] for r in rects)
+            x1 = max(r[0] + r[2] for r in rects)
+            y1 = max(r[1] + r[3] for r in rects)
+            w[1] = (x0, y0, x1 - x0, y1 - y0)
+            w[3] = False
+        elif self._scrim_up() or not w[3]:
+            ride = False
+            w[1] = None
+            w[3] = False
+        w[4] = up
+        w[2] = n if ride else 0
+        return ride
 
     def popover_takes_keys(self):
         """The open popover owns the keyboard and paints its own change, so
@@ -1805,7 +1872,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         for s in self._pop_slots:
             if s[1] is not None:
                 return True
-        return False
+        return self._pop_wash[1] is not None
 
     def _pop_reset(self):
         self._pop_face_ok = False
@@ -1814,6 +1881,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             s[2] = 0
             s[3] = False
         self._pop_cur = None
+        w = self._pop_wash
+        w[1] = None
+        w[2] = 0
+        w[3] = False
+        w[4] = False
+        self._wash_focus_drop()
 
     def _pop_note(self, r):
         nd = getattr(self._root_canvas, "note_damage", None)
@@ -1822,9 +1895,35 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _pop_restore(self, ride):
         """Put back each closing popover's rect (and, on a full frame, the
-        open one's, so the frame starts as if no popover were drawn)."""
+        open one's, so the frame starts as if no popover were drawn), then
+        the scrim's: a full frame repaints what it washed, and it is spent."""
         root = self._root_canvas
         cur = self._pop_cur
+        self._pop_restore_slots(root, cur, ride)
+        w = self._pop_wash
+        if w[1] is None:
+            return
+        if not ride:
+            if not w[4]:
+                w[1] = None
+                w[3] = False
+                self._wash_focus_drop()
+            w[2] = 0
+            return
+        if w[2] <= 0:
+            return
+        if not w[4]:
+            r = w[1]
+            root.blit_strip_rect(w[0], r[0], r[1], r[0], r[1], r[2], r[3])
+            self._pop_note(r)
+            self._wash_focus_back()
+            w[2] -= 1
+            if w[2] <= 0:
+                w[1] = None
+                w[3] = False
+        self.ws.bar_layer.redraw_tile("desk")   # the system button, as it now stands
+
+    def _pop_restore_slots(self, root, cur, ride):
         for i in range(2):
             s = self._pop_slots[i]
             r = s[1]
@@ -1869,6 +1968,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         playtest's window, which repaints beneath it."""
         cur = self._pop_cur
         m = self.ws.sysmenu
+        self._pop_wash_paint(ride)
         if cur is None or not m.open:
             if not ride:
                 self.ws.menu_ui._draw_sysmenu()
@@ -1895,8 +1995,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # the look's card casts a shadow: paint it over what it covers,
             # never over its own last paint
             self._root_canvas.blit_strip_rect(s[0], r[0], r[1], r[0], r[1], r[2], r[3])
-        self.ws.menu_ui._draw_sysmenu()
-        if self._pop_over_game and not self._pop_face_ok:
+        ws = self.ws
+        ws.menu_ui._draw_sysmenu()
+        if ride and ws._frame_requested:
+            # The card has not settled (its focus still moving): its rect
+            # is owed to every buffer from the next frame on, not the desk.
+            ws._frame_requested = False
+            self._pop_face_ok = False      # no face copy of a moving card
+            s[2] = self._pop_n() + 1
+        elif self._pop_over_game and not self._pop_face_ok:
             face = self._pop_face
             if face is None or face.w < r[2] or face.h < r[3]:
                 ow, oh = (face.w, face.h) if face is not None else (0, 0)
@@ -1909,6 +2016,85 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._pop_note(r)
         if s[2] > 0:
             s[2] -= 1
+
+    def _pop_wash_paint(self, ride):
+        """The scrim, before the card: on a full frame always; on a ride
+        while a buffer is owed it, the snapshot taken before the first."""
+        w = self._pop_wash
+        if not ride:
+            # A full frame washes what it painted. Its snapshot would cost
+            # the frame a copy of the glass: the next close repaints whole.
+            w[2] = 0
+            w[3] = False
+            self.ws.menu_ui.scrim()
+            return
+        if not w[4] or w[2] <= 0:
+            return
+        if not w[3]:
+            self._pop_wash_capture(w)
+            self._wash_focus()
+        win = self._wash_win[0]
+        if win is not None:
+            cx, cy = win.content_rect()[:2]
+            self._root_canvas.blit_strip(win.buf, cx, cy)
+            self._win_chrome(win, True, quiet=False)
+        self.ws.menu_ui.scrim()
+        self._pop_note(w[1])
+        w[2] -= 1
+
+    def _wash_focus(self):
+        """Keep the focused window's buffer as it is, then render it as it
+        shows under the menu: the wash stamps it into each buffer."""
+        ww = self._wash_win
+        win = self._wins.get(self._focus) if self._focus is not None else None
+        if win is None or win.minimized or win.kind == "desktop":
+            ww[0] = None
+            return
+        buf = win.buf
+        lay = ww[1]
+        if lay is None or lay.w < buf.w or lay.h < buf.h:
+            ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
+            self._release_layer(lay)
+            lay = ww[1] = self._root_canvas.new_layer(max(buf.w, ow), max(buf.h, oh))
+        lay.blit_strip(buf, 0, 0)
+        ww[0] = win
+        ww[2] = win._buf_stale
+        ww[3][:] = win._lag
+        ww[4] = win._marked
+        self._prewarm(win)
+
+    def _wash_focus_back(self):
+        """The close: the focused window's buffer as the menu found it."""
+        ww = self._wash_win
+        win = ww[0]
+        if win is None:
+            return
+        ww[0] = None
+        if win.buf is None or win not in self._wins.values():
+            return
+        win.buf.blit_strip_rect(ww[1], 0, 0, 0, 0, win.buf.w, win.buf.h)
+        win._buf_stale = ww[2]
+        win._lag[:] = ww[3]
+        win._marked = ww[4]
+
+    def _wash_focus_drop(self):
+        """A close that repaints whole: the window renders again as it is."""
+        win = self._wash_win[0]
+        self._wash_win[0] = None
+        if win is not None:
+            win._buf_stale = True
+            win._lag[4] = 0
+
+    def _pop_wash_capture(self, w):
+        x, y, ww, h = w[1]
+        lay = w[0]
+        if lay is None or lay.w < ww or lay.h < h:
+            root = self._root_canvas
+            ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
+            self._release_layer(lay)
+            lay = w[0] = root.new_layer(max(ww, ow), max(h, oh))
+        lay.blit_strip(self._root_canvas, -x, -y)
+        w[3] = True
 
     # -- the quiet-frame draw stack (#58 P4 perf) -------------------------------
 
@@ -1939,15 +2125,21 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # A system modal's scrim (D-01) dims every retained pixel once: the
         # frame it comes or goes repaints the desk whole, every window's
         # stamp and the desk's own streak voided, and while it is up no
-        # window or desk frame is retained (_frame_is_quiet). A playtest
-        # under the system menu keeps its quiet frames: each washes the
-        # game's own fresh pixels (_scrim_rides).
+        # window or desk frame is retained (_frame_is_quiet). The system
+        # menu's over a still desk rides with it instead (`_pop_wash`). A
+        # playtest under the system menu keeps its quiet frames: each
+        # washes the game's own fresh pixels (_scrim_rides).
         up = self._scrim_up()
+        w = self._pop_wash
+        if w[1] is not None and "desktop" in self._wins:
+            self._pop_reset()             # a playtest came under the wash
+            ws._dirty = True
         if up != self._scrim_was:
             self._scrim_was = up
-            self._win_sig = None
-            self._desk_streak = 0
-            ws._dirty = True
+            if w[1] is None or up != w[4]:
+                self._win_sig = None
+                self._desk_streak = 0
+                ws._dirty = True
         # Surface-model signals run BEFORE any layer draws or skip-decides
         # (recording tier only; a raster tier returns immediately). The dt is
         # nominal -- the one dt-sensitive predicate (wallpaper.is_animating)
@@ -1961,12 +2153,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # The popover (bit 64) rides the quiet stack too: its rect is the
         # frame's damage, never a reason to repaint the desk.
         pop = self._pop_live()
-        still = (not ws._dirty
-                 and (self._cache_sig & ~66) == 0   # FPS chip (bit 2), popover (64)
-                 and ws.cart_error is None
-                 and self._drag is None and self._drag_armed is None
-                 and self._resize is None
-                 and not getattr(ws.pointer, "visible", False))
+        still = self._still()
         # A window over the game's casts its shadow on it and must stay over
         # it: the quiet stack repaints the game window alone, so not then.
         quiet = (still and "desktop" in self._wins and not self._player_under
@@ -1975,19 +2162,57 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if pop:
                 return self._quiet_pop_stack
             return self._quiet_stack        # the FPS chip rides the player window
-        if (still and pop and not quiet and self.mode == "desktop"
-                and not self._recording and not ws._animating(1 / 60)):
+        settled = not quiet and self._settled(still)
+        if pop and settled:
             # A persistent root (one buffer) owes no other buffer anything.
             if self._full_debt <= 0 or self._pop_n() == 1:
                 return self._pop_stack
-            quiet = True                    # a full paint that pays the debt
-        if quiet:
+        if quiet or (settled and (pop or self._calm())):
             self._full_debt -= 1      # paying the other-buffer debt: full paint
         else:
             # A change painted: every OTHER physical buffer owes a full paint
             # before partial frames may resume (N-1 debts on an N-buffer root).
             self._full_debt = self._retained_n() - 1
         return self._cache_draw
+
+    def _still(self):
+        """No input, overlay, gesture or cursor asks this frame to change
+        anything but a running game and the popover."""
+        ws = self.ws
+        return (not ws._dirty
+                and (self._cache_sig & ~66) == 0   # FPS chip (bit 2), popover (64)
+                and ws.cart_error is None
+                and self._drag is None and self._drag_armed is None
+                and self._resize is None
+                and not getattr(ws.pointer, "visible", False))
+
+    def _settled(self, still):
+        """A still frame on the desk with nothing animating: what changes
+        is the popover's, if anything."""
+        return (still and self.mode == "desktop" and not self._recording
+                and not self.ws._animating(1 / 60))
+
+    def _calm(self):
+        """...and the pointer neither moved nor is down (a press reaches
+        content that marks nothing, §14.1): a full paint of such a frame
+        changes nothing, so it brings one more retained buffer up to date."""
+        ws = self.ws
+        return not ws._ptr_changed() and not getattr(ws.pointer, "down", False)
+
+    def debt_owed(self):
+        """True while a retained buffer is behind the last change and the
+        desk is calm: the console paints it now, while nothing waits on
+        it, so the next change finds every buffer current and its popover
+        or menu rides (a single-buffer root owes nothing)."""
+        if not (self._full_debt > 0 and self._pop_n() > 1
+                and self._settled(self._still()) and self._calm()):
+            return False
+        # ...and its frame would draw no window's content: the focused one's
+        # buffer holds its page under the look in force (§14.1's freeze).
+        win = self._wins.get(self._focus) if self._focus is not None else None
+        return (win is None or win.minimized or win.kind == "desktop"
+                or (win.buf is not None and not win._buf_stale
+                    and win._look_gen == self.ws.look.look_gen))
 
     # -- the drag backdrop cache (#58 drag perf) -------------------------------
 
@@ -2063,6 +2288,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self.ws.note_cost("desk.backdrop")
             cache.blit_strip(self._root_canvas, 0, 0)
             self._backdrop_valid = True
+            self._desk_tile = self.ws.bar_layer.tile_on()
         except Exception:  # noqa: BLE001 -- a failed capture (OOM, or a
             self._backdrop_valid = False   # recording root with no pixels to
             self._drop_backdrop()          # snapshot) forfeits the cache; the

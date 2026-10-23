@@ -506,8 +506,20 @@ setting, a row's action) marks the frame dirty as before. The system menu
 takes the same path; under a theme with a depth it is the look's card
 (docs/look_2026-10.md step 25a), whose rect -- the card and its shadow's
 reach, known before it draws (`SystemMenuUI.panel_rect`) -- a riding paint
-first restores from the snapshot, since the card's shadow blends. The bench scenarios of §13 step 6 say what each costs
-(#58, #66).
+first restores from the snapshot, since the card's shadow blends. Its
+scrim rides with it over a still desk with no playtest (`_pop_wash`): the
+frame it opens on snapshots what the scrim covers, renders the focused
+window as it shows once the menu holds the keys (no focus mark, ui.marks),
+and washes; each other buffer is stamped that window and washed once, and
+the close puts the snapshot back, with the window's buffer as the menu
+found it. A frame that repaints whole while it is up washes what it
+painted and keeps no snapshot, so the close then repaints whole too. A
+pointer press whose only change was the popover's -- a bar widget's tap
+-- marks no frame (`popover_touch` takes it). A triple-buffered root's
+buffers behind the last change are painted while the desk is calm
+(`debt_owed`: nothing animating, the pointer still), so the next popover
+finds them current instead of paying them first. The bench scenarios of
+§13 step 6 say what each costs (#58, #66).
 
 **Four components, fixed per widget, nothing to configure.** A component is
 one painter, one minimum size and one navigation handler; where it draws is

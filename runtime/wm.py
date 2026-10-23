@@ -175,6 +175,11 @@ class FullscreenStackWM:
         """True while the popover still owes a frame; never here."""
         return False
 
+    def debt_owed(self):
+        """True while a retained buffer still owes the last change and a
+        frame now would pay it; never here."""
+        return False
+
     def popover_takes_keys(self):
         """True when the open popover paints its own key presses (the
         windowed WM in desktop mode); never here."""

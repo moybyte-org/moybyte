@@ -200,7 +200,10 @@ def test_a_whole_frame_settles_every_buffer_before_the_next_press(tmp_path, monk
     app.size_i = 1
     app._damage.all()
     painted = sum(1 for _ in range(8) if frame())
-    assert painted == bufs, "the idle board painted %d frames" % painted
+    # the page's frames, then the desk's own debt (`debt_owed`): each a
+    # frame that changes nothing, and then the board rests
+    assert bufs <= painted <= 2 * bufs - 1, "the idle board painted %d frames" % painted
+    assert not frame()
     got = _spy(monkeypatch, ws, app, root, win)
     _pointer_stroke(drv, frame, shot, view, 4)
     assert all(got["frames"]), got["frames"]

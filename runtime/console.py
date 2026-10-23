@@ -1204,6 +1204,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._frame_dt_ms = 33.0      # last loop tick in ms (kinetic velocity, #113)
         self._pointer_dt_ms = 33.0    # ...as charged to the pointer SAMPLE (see
         self._stale_ptr_ms = 0.0      # _tick_pointer_dt), None while it's a repeat
+        self._press_owed = False      # a pointer press frame() marks dirty (handle_input)
+        self._press_taken = False     # ...unless a popover's change took it (popover_touch)
         self._frame_requested = False # a draw asked for another frame (request_frame:
                                       # a coasting fling re-arms the gate the
                                       # covers.take_deferred way -- set DURING a draw,
@@ -1941,8 +1943,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def popover_touch(self):
         """The popover's pixels changed (opened, navigated, closed): the WM
-        paints its rect alone where it can, else the frame repaints."""
+        paints its rect alone where it can, else the frame repaints. A
+        pointer press this frame was the popover's (`_press_owed`)."""
         self.wm.popover_changed()
+        self._press_taken = True
 
     def widget_tap(self, widget):
         """A bar widget's tap (docs/shell_layout_2026-10.md §8): the system
@@ -3639,7 +3643,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if (pressed or i.last_key or getattr(i, "wheel_y", 0) or getattr(i, "wheel_x", 0)
                 or getattr(i, "pointer_buttons", 0)):
             if not self.wm.keys_to_cart() and not self.wm.popover_takes_keys():
-                self._dirty = True
+                if pressed or i.last_key or getattr(i, "wheel_y", 0) \
+                        or getattr(i, "wheel_x", 0):
+                    self._dirty = True
+                else:
+                    # A pointer press alone: frame() marks it, unless what
+                    # it pressed was a popover's change the WM paints alone
+                    # (`popover_touch`) -- a bar widget opening its popover.
+                    self._press_owed = True
         # Undo journal (Stage 7): activity in an EDITOR TAB (re)arms the idle
         # autosave-commit debounce -- frame() fires the durable commit once the kid
         # stops for _edit_debounce_ms, so the store write lands in a gap. Marked
@@ -4298,6 +4309,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return True
         if self.wm.popover_owed():
             return True               # the popover's rect, owed to a buffer
+        if self.wm.debt_owed():
+            return True               # a buffer behind the last change, paid while calm
         if self._animating(dt):
             return True
         if self._ptr_changed():
@@ -4339,6 +4352,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # row's count; `carts.begin`, the handle's) ends here, at the next
         # frame: it holds no gate, so this is bookkeeping, never a flush held
         # off (docs/kernel_appabi_2026-10.md section 2.6).
+        if self._press_owed:
+            self._press_owed = False
+            if not self._press_taken:
+                self._dirty = True        # the press handle_input left owed
+        self._press_taken = False
         st = self.store
         if st.open:
             st.end_all()

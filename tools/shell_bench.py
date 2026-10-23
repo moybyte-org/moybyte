@@ -354,8 +354,11 @@ class Run:
         b.drain(1.5)
 
         def move():
-            for d in (1, 1, 1, -1, -1, -1):
-                b.cmd("py ws.sysmenu.move(%d) or ws.mark_dirty() or 1" % d,
+            # as the router hands the menu a key: the frame is marked only
+            # where the popover does not paint its own change
+            for d in ("down",) * 3 + ("up",) * 3:
+                b.cmd("py ws._sysmenu_layer.handle_input(ws._SBK(%r)) or "
+                      "ws.wm.popover_takes_keys() or ws.mark_dirty() or 1" % d,
                       wait_for="PY")
                 b.drain(0.3)
         self.measure("system menu move (6 rows)", move)

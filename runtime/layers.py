@@ -387,11 +387,11 @@ class _SysMenuLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
-        self.ws.menu_ui.scrim()       # a full frame: dim the content first
         paint = getattr(self.ws.wm, "_pop_paint", None)
         if paint is not None:
-            paint(False)              # the windowed WM snapshots what it covers
+            paint(False)              # the windowed WM: the scrim, its snapshots, the menu
         else:
+            self.ws.menu_ui.scrim()   # a full frame: dim the content first
             self.ws.menu_ui._draw_sysmenu()
 
     def _comp(self, fn, *args):

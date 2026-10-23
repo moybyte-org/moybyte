@@ -3950,3 +3950,143 @@ def test_a_press_in_a_resize_zone_is_never_a_content_capture(tmp_path):
     drv.touch_up()
     drv.frame(1 / 30)
     assert fed[0] == 0
+
+
+# -- the system menu's scrim rides on a still desk -----------------------------
+
+def _scrim_desk(tmp_path, ride=True, windows=False):
+    """The desk under the default look (its card and its scrim) -- bare, or
+    with three windows, the last focused -- on a triple-buffered root, every
+    buffer current. `ride` False is the reference: the scrim's changes
+    repaint whole, as they did."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    drv = _drv(ws)
+    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.open_desk()
+    if windows:
+        ws.open_settings()
+        for app in ("calc", "files"):
+            ws.open_app(ws._apps_by_id[app])
+    for _ in range(20):
+        _quiesce(ws)
+        ws._confetti_until = ws._egg_until = 0
+        drv.frame(1 / 30)
+    ws.show_fps = False
+    if not ride:
+        ws.wm._wash_rides = lambda: False
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv)
+    assert ws.wm._full_debt <= 0
+    return ws, drv, ring
+
+
+def _touch_widget(ws, drv, ring, name):
+    """A finger on bar widget `name`, lifted on the next frame (a board's
+    tap: `click` marks its release pass dirty, as a script's verb)."""
+    from runtime import shell_layout
+    lay = ws.wm._root_ctx.layout
+    i, (x, y, w, h) = shell_layout.cell_of(lay.bars, name)
+    bx, by = lay.bars[i][1][:2]
+    drv.touch(bx + x + w // 2, by + y + h // 2)
+    ring.frame(drv)
+    drv.touch_up()
+
+
+def _menu_steps(ws, drv, ring):
+    """The system button tapped, two rows down, the button tapped again."""
+    return (lambda: _touch_widget(ws, drv, ring, "menu"),
+            lambda: ws._sysmenu_layer.handle_input(_Key("down")),
+            lambda: ws._sysmenu_layer.handle_input(_Key("down")),
+            lambda: _touch_widget(ws, drv, ring, "menu"))
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_the_system_menus_scrim_rides_with_it_on_a_still_desk(tmp_path, windows):
+    """Open, two moves, close: every frame is the popover's alone -- the
+    wash painted into each buffer once (the focused window rendered as it
+    shows without the keys first), its snapshot put back once it closes --
+    and after each step every buffer holds the bytes the whole-repaint
+    path leaves, the focused window's own buffer too."""
+    ws, drv, ring = _scrim_desk(tmp_path / "ride", windows=windows)
+    ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False, windows=windows)
+    assert _ui_draw_depth()                   # the look's card, the scrim under it
+    for i, (step, rstep) in enumerate(zip(_menu_steps(ws, drv, ring), _menu_steps(ref, rdrv, rring))):
+        ring.stacks = []
+        step()
+        rstep()
+        stacks = ring.stacks + ring.settle(drv)
+        rring.settle(rdrv)
+        assert stacks and set(stacks) == {"pop"}, (i, stacks)
+        for a, b in zip(ring.bufs, rring.bufs):
+            assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+    assert not ws.wm._pop_live() and ring.settle(drv) == []
+    for key, win in ws.wm._wins.items():    # what a drag of each would stamp
+        assert bytes(win.buf._buf) == bytes(ref.wm._wins[key].buf._buf), key
+
+
+def _bbox(px, w):
+    """The (x0, y0, x1, y1) the 16-bit offsets `px` span, for a message."""
+    xs = [i // 2 % w for i in px]
+    ys = [i // 2 // w for i in px]
+    return (min(xs), min(ys), max(xs), max(ys)) if px else None
+
+
+def _ui_draw_depth():
+    from runtime import ui_draw
+    return bool(ui_draw.depth()[0])
+
+
+def test_a_full_frame_under_the_menu_makes_its_close_repaint_whole(tmp_path):
+    """A frame that repaints whole while the menu is up washes what it
+    painted and keeps no snapshot: the close repaints whole too, and every
+    buffer ends as the reference's."""
+    ws, drv, ring = _scrim_desk(tmp_path / "ride")
+    ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False)
+    for w, d, r in ((ws, drv, ring), (ref, rdrv, rring)):
+        w.widget_tap("menu")
+        r.settle(d)
+        w._dirty = True
+        r.settle(d)
+        w.widget_tap("menu")
+    assert "full" in ring.settle(drv)
+    rring.settle(rdrv)
+    assert ring.bufs == rring.bufs
+
+
+def test_a_menu_opened_while_its_restore_is_owed_repaints_whole(tmp_path):
+    ws, drv, ring = _scrim_desk(tmp_path / "ride")
+    ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False)
+    for w, d, r in ((ws, drv, ring), (ref, rdrv, rring)):
+        w.widget_tap("menu")
+        r.settle(d)
+        w.widget_tap("menu")
+        r.frame(d)                        # one buffer of three restored
+        w.widget_tap("menu")
+        r.settle(d)
+    assert ring.bufs == rring.bufs
+    ws.widget_tap("menu")
+    ref.widget_tap("menu")
+    ring.settle(drv)
+    rring.settle(rdrv)
+    assert ring.bufs == rring.bufs
+
+
+def test_a_calm_desk_pays_its_buffers_debt_and_then_rests(tmp_path):
+    """After a change every other buffer is owed it: a calm desk paints
+    them at once, so the next popover finds them current -- then no frame
+    at all. A visible cursor is never calm: it asks for nothing."""
+    ws, drv, ring = _scrim_desk(tmp_path)
+    ws._dirty = True
+    assert ring.settle(drv) == ["full"] * 3
+    assert ring.settle(drv) == []
+    ws.widget_tap("battery")
+    assert ring.settle(drv) == ["pop"] * 3
+    ws.widget_tap("battery")
+    ring.settle(drv)
+    ws.pointer.visible = True
+    ws._dirty = True
+    assert len(ring.settle(drv)) <= 2
