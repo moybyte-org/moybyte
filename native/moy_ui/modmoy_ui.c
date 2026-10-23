@@ -2069,45 +2069,6 @@ static void *rw(mp_obj_t o, size_t need, size_t *len) {
     return b.buf;
 }
 
-static mp_obj_t ui_hits_cap(void) {
-    return MP_OBJ_NEW_SMALL_INT(MOY_UI_HITS_CAP);
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(ui_hits_cap_obj, ui_hits_cap);
-
-static mp_obj_t ui_hits_clear(mp_obj_t buf) {
-    moy_ui_hits_clear(rw(buf, MOY_UI_HITS_HDR * 4, NULL));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(ui_hits_clear_obj, ui_hits_clear);
-
-// hits_add(buf, rect, id) -> False when full
-static mp_obj_t ui_hits_add(mp_obj_t buf, mp_obj_t rect, mp_obj_t id) {
-    size_t len;
-    int32_t *b = rw(buf, MOY_UI_HITS_HDR * 4, &len);
-    int32_t r[4];
-    rect_of(rect, r);
-    return mp_obj_new_bool(moy_ui_hits_add(b, len / 4, r[0], r[1], r[2], r[3],
-                                           mp_obj_get_int(id)) == MOY_UI_OK);
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_hits_add_obj, ui_hits_add);
-
-static mp_obj_t ui_hits_at(mp_obj_t buf, mp_obj_t px, mp_obj_t py) {
-    return MP_OBJ_NEW_SMALL_INT(moy_ui_hits_at(rw(buf, MOY_UI_HITS_HDR * 4, NULL), num(px),
-                                               num(py)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_hits_at_obj, ui_hits_at);
-
-// hits_pump(buf, px, py, down, pointing, pump): pump is an array('i') of
-// (hover, pressed, armed, down), read and written in place.
-static mp_obj_t ui_hits_pump(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_pump_t *p = rw(a[5], sizeof(moy_ui_pump_t), NULL);
-    moy_ui_hits_pump(rw(a[0], MOY_UI_HITS_HDR * 4, NULL), num(a[1]), num(a[2]),
-                     mp_obj_is_true(a[3]), mp_obj_is_true(a[4]), p);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_hits_pump_obj, 6, 6, ui_hits_pump);
-
 static float dt_of(mp_obj_t o) {
     return o == mp_const_none ? 0.0f : (float)mp_obj_get_float(o);
 }
@@ -3012,11 +2973,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fade), MP_ROM_PTR(&ui_fade_obj) },
     { MP_ROM_QSTR(MP_QSTR_list), MP_ROM_PTR(&ui_list_obj) },
     { MP_ROM_QSTR(MP_QSTR_calls), MP_ROM_PTR(&ui_calls_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hits_cap), MP_ROM_PTR(&ui_hits_cap_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hits_clear), MP_ROM_PTR(&ui_hits_clear_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hits_add), MP_ROM_PTR(&ui_hits_add_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hits_at), MP_ROM_PTR(&ui_hits_at_obj) },
-    { MP_ROM_QSTR(MP_QSTR_hits_pump), MP_ROM_PTR(&ui_hits_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_stop), MP_ROM_PTR(&ui_scroll_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_drag_start), MP_ROM_PTR(&ui_scroll_drag_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_drag_move), MP_ROM_PTR(&ui_scroll_drag_move_obj) },

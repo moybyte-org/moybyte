@@ -134,7 +134,6 @@ def generate(style, d=DIR):
     h.append("#define MOY_UI_COLOR_KINDS %d" % len(style["kinds"]))
     h.append("#define MOY_UI_SLOTS %d" % nslot)
     h.append("#define MOY_UI_SPECS %d" % len(t.specs))
-    h.append("#define MOY_UI_HITS_CAP %d" % style["hits_capacity"])
     h.append("#define MOY_UI_GLYPHS %d" % len(style["glyphs"]))
     h.append("#define MOY_UI_GLYPH_SIZE %d" % style["glyph_size"])
     h.append("")
@@ -164,7 +163,6 @@ def generate(style, d=DIR):
     h.append("extern const int moy_ui_n_tokens, moy_ui_n_roles, moy_ui_n_states, "
              "moy_ui_n_kinds,")
     h.append("    moy_ui_n_color_kinds, moy_ui_n_glyphs;")
-    h.append("extern const int moy_ui_hits_cap;")
     h.append("extern const char *const moy_ui_token_names[MOY_UI_TOKENS];")
     h.append("extern const char *const moy_ui_role_names[MOY_UI_ROLES];")
     h.append("extern const int8_t moy_ui_alias[MOY_UI_ROLES - MOY_UI_TOKENS][3];")
@@ -202,7 +200,6 @@ def generate(style, d=DIR):
     c.append("// The counts, for a binding that reads the tables by symbol.")
     for k in ("tokens", "roles", "states", "kinds", "color_kinds", "glyphs"):
         c.append("const int moy_ui_n_%s = MOY_UI_%s;" % (k, k.upper()))
-    c.append("const int moy_ui_hits_cap = MOY_UI_HITS_CAP;")
     c.append("")
 
     def names(decl, seq):

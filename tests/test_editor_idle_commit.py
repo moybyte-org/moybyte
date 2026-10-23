@@ -291,7 +291,7 @@ def test_a_lua_code_edit_commits_on_the_debounce(tmp_path):
     assert ws.editor.dirty is False
     assert ws.menu_view == "code"                 # ...and nobody left the tab
     assert "cls(9)" in moy_carts.load(path)["src"]
-    assert ws.save_status is None                 # no Python syntax error shown
+    assert ws.cart_error is None                  # no Python syntax error shown
 
 
 def test_a_broken_lua_chunk_commits_and_hard_commits(tmp_path):

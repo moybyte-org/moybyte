@@ -761,7 +761,7 @@ how an app draws rather than what it may touch: **`screen()`** (the canvas),
 the part of the screen the console's bar leaves you, wherever the bar sits —
 lay out inside it; in Lua it answers four values), **`bar_h()`** (its `y`, the
 rows above it) and **`ui`**, the console's own widget toolkit
-(buttons, rows, panels, rect maths, `ui.Hits`). Storage answers `(value, error)`
+(buttons, rows, panels, rect maths). Storage answers `(value, error)`
 and never crashes, so there is no `try` to write.
 
 Anything you did not ask for **is not there** — no `carts`, no shell. Writing

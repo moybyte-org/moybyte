@@ -12,11 +12,6 @@ copy that happens to agree today, and (b) the states it never enters -- the code
 editor's tool palette, find bar and popups are all closed on a fresh open, and
 the Config tab renders whatever the seed cart declares. So this file counts the
 toolkit calls a draw makes, in exactly those states.
-
-The `Hits` budget at the bottom is the measured P4 constraint, not a style
-rule: `runtime/ui.py`'s module docstring records that registering one hit rect
-per grid cell costs the map tab ~9.3ms (13% of its frame), so the Config tab's
-choice/thumbnail grids must keep their arithmetic hit-test forever.
 """
 
 from pathlib import Path

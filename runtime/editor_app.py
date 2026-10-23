@@ -271,7 +271,6 @@ class EditorApp:
     def open_map(self):
         ws = self.ws
         ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
-        ws.save_status = None
         ws.map_ui.on_open()          # fresh gesture/zoom state (#37)
         ws.set_menu_view("map")
         # Open with the camera at the top-left so the whole map shows at the default
@@ -294,7 +293,6 @@ class EditorApp:
         gesture/zoom state, then build via set_menu_view("scene")."""
         ws = self.ws
         ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
-        ws.save_status = None
         ws.scene_ui.on_open()        # fresh gesture/zoom/props state
         ws.set_menu_view("scene")
         # Open with the camera at the world origin so the game viewport's frame
@@ -309,7 +307,6 @@ class EditorApp:
         editor via set_menu_view("music")."""
         ws = self.ws
         ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
-        ws.save_status = None
         ws.music_ui._stop_music_preview()
         ws.set_menu_view("music")
 

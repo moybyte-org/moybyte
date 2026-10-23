@@ -10,7 +10,6 @@ const int moy_ui_n_states = MOY_UI_STATES;
 const int moy_ui_n_kinds = MOY_UI_KINDS;
 const int moy_ui_n_color_kinds = MOY_UI_COLOR_KINDS;
 const int moy_ui_n_glyphs = MOY_UI_GLYPHS;
-const int moy_ui_hits_cap = MOY_UI_HITS_CAP;
 
 const char *const moy_ui_token_names[MOY_UI_TOKENS] = {
     "panel",
@@ -45,7 +44,6 @@ const char *const moy_ui_token_names[MOY_UI_TOKENS] = {
     "shade_lo",
     "shade_dark",
     "ink_accent",
-    "ink_note",
     "band_light",
     "value",
     "value_ink",
@@ -87,7 +85,6 @@ const char *const moy_ui_role_names[MOY_UI_ROLES] = {
     "shade_lo",
     "shade_dark",
     "ink_accent",
-    "ink_note",
     "band_light",
     "value",
     "value_ink",
@@ -161,10 +158,10 @@ const char *const moy_ui_button_kinds[5][2] = {
 const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {0, {0, 0, 0}},
     {2, {-1, 60, 0}},
-    {2, {-44, 6, 0}},
-    {2, {-45, 1, 0}},
-    {3, {-42, -6, 13}},
-    {2, {-43, 7, 0}},
+    {2, {-43, 6, 0}},
+    {2, {-44, 1, 0}},
+    {3, {-41, -6, 13}},
+    {2, {-42, 7, 0}},
     {2, {-5, 10, 0}},
     {2, {-20, 8, 0}},
     {1, {7, 0, 0}},
@@ -172,7 +169,7 @@ const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {2, {-3, 13, 0}},
     {2, {-4, 0, 0}},
     {2, {-25, 7, 0}},
-    {3, {-41, -5, 10}},
+    {3, {-40, -5, 10}},
     {1, {0, 0, 0}},
     {2, {-2, 13, 0}},
     {2, {-18, 11, 0}},
@@ -183,8 +180,8 @@ const moy_ui_spec_t moy_ui_specs[MOY_UI_SPECS] = {
     {2, {-10, 7, 0}},
     {2, {-31, 0, 0}},
     {2, {-12, 0, 0}},
-    {2, {-35, 13, 0}},
-    {2, {-36, 7, 0}},
+    {2, {-34, 13, 0}},
+    {2, {-35, 7, 0}},
     {3, {-15, -6, 13}},
     {3, {-11, -1, 60}},
     {2, {-14, 0, 0}},
@@ -449,12 +446,12 @@ const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE] = {
 };
 
 const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
-    {39, 0, 6},  // code_text
-    {40, 0, 12},  // code_keyword
-    {41, 0, 11},  // code_string
-    {42, 0, 9},  // code_number
-    {43, 0, 22},  // code_comment
-    {44, 0, 14},  // code_builtin
+    {38, 0, 6},  // code_text
+    {39, 0, 12},  // code_keyword
+    {40, 0, 11},  // code_string
+    {41, 0, 9},  // code_number
+    {42, 0, 22},  // code_comment
+    {43, 0, 14},  // code_builtin
     {9, 0, 7},  // surface
     {10, 0, 52},  // surface_alt
     {11, 0, 0},  // ink
@@ -468,18 +465,17 @@ const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
     {19, 0, 8},  // danger
     {20, 0, 1},  // surface_light
     {23, 0, 1},  // bar_light
-    {33, 0, 1},  // band_light
+    {32, 0, 1},  // band_light
     {28, 0, 7},  // shade_hi
     {31, 1, 11},  // ink_accent
-    {32, 0, 4},  // ink_note
     {21, 1, 0},  // bar
     {22, 1, 6},  // bar_edge
-    {39, 0, 0},  // code_text
-    {40, 0, 59},  // code_keyword
-    {41, 0, 3},  // code_string
-    {42, 0, 4},  // code_number
-    {43, 0, 53},  // code_comment
-    {44, 0, 2},  // code_builtin
+    {38, 0, 0},  // code_text
+    {39, 0, 59},  // code_keyword
+    {40, 0, 3},  // code_string
+    {41, 0, 4},  // code_number
+    {42, 0, 53},  // code_comment
+    {43, 0, 2},  // code_builtin
     {7, 1, 0},  // desktop
     {8, 1, 6},  // desktop_pattern
     {9, 1, 0},  // surface
@@ -501,33 +497,32 @@ const moy_theme_rule_t moy_theme_rules[MOY_THEME_RULES] = {
     {19, 0, 8},  // danger
     {20, 0, 0},  // surface_light
     {23, 0, 0},  // bar_light
-    {33, 0, 0},  // band_light
+    {32, 0, 0},  // band_light
     {28, 1, 5},  // shade_hi
     {29, 1, 6},  // shade_lo
     {30, 0, 0},  // shade_dark
     {31, 1, 4},  // ink_accent
-    {32, 0, 15},  // ink_note
-    {45, 0, 10},  // block_events
-    {46, 0, 9},  // block_control
-    {47, 0, 12},  // block_actors
-    {48, 0, 2},  // block_looks
-    {49, 0, 3},  // block_draw
-    {50, 0, 13},  // block_input
-    {51, 0, 8},  // block_variables
-    {52, 0, 15},  // block_lists
-    {53, 0, 11},  // block_operators
-    {54, 0, 14},  // block_sound
-    {55, 0, 4},  // block_myblocks
-    {34, 1, 14},  // value
-    {35, 1, 15},  // value_ink
-    {36, 1, 10},  // sunk
-    {37, 1, 36},  // lcd
-    {38, 1, 11},  // lcd_ink
+    {44, 0, 10},  // block_events
+    {45, 0, 9},  // block_control
+    {46, 0, 12},  // block_actors
+    {47, 0, 2},  // block_looks
+    {48, 0, 3},  // block_draw
+    {49, 0, 13},  // block_input
+    {50, 0, 8},  // block_variables
+    {51, 0, 15},  // block_lists
+    {52, 0, 11},  // block_operators
+    {53, 0, 14},  // block_sound
+    {54, 0, 4},  // block_myblocks
+    {33, 1, 14},  // value
+    {34, 1, 15},  // value_ink
+    {35, 1, 10},  // sunk
+    {36, 1, 35},  // lcd
+    {37, 1, 11},  // lcd_ink
 };
 
-const uint8_t moy_theme_rules_at[3][2] = {{0, 6}, {6, 25}, {31, 43}};
+const uint8_t moy_theme_rules_at[3][2] = {{0, 6}, {6, 24}, {30, 42}};
 
-const uint8_t moy_theme_flag[MOY_THEME_ROLES] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+const uint8_t moy_theme_flag[MOY_THEME_ROLES] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 const char *const moy_theme_role_names[MOY_THEME_ROLES] = {
     "panel",
@@ -562,7 +557,6 @@ const char *const moy_theme_role_names[MOY_THEME_ROLES] = {
     "shade_lo",
     "shade_dark",
     "ink_accent",
-    "ink_note",
     "band_light",
     "value",
     "value_ink",
@@ -733,17 +727,17 @@ const uint8_t moy_theme_pairs[MOY_THEME_PAIRS][2] = {
     {0, 24},  // panel / chrome_ink
     {21, 24},  // bar / chrome_ink
     {27, 25},  // title_inactive / chrome_ink_dim
-    {34, 35},  // value / value_ink
-    {37, 38},  // lcd / lcd_ink
+    {33, 34},  // value / value_ink
+    {36, 37},  // lcd / lcd_ink
 };
 
 const uint8_t moy_theme_code[MOY_THEME_CODE] = {
-    39,  // code_text
-    40,  // code_keyword
-    41,  // code_string
-    42,  // code_number
-    43,  // code_comment
-    44,  // code_builtin
+    38,  // code_text
+    39,  // code_keyword
+    40,  // code_string
+    41,  // code_number
+    42,  // code_comment
+    43,  // code_builtin
 };
 
 const uint16_t moy_theme_lum[64] = {
@@ -977,7 +971,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "    \"selection_ink\": \"#000000\", \"focus\": \"#ffe600\", \"bar\": \"#000000\", \"bar_edge\": \"#ffffff\",\012"
     "    \"chrome_ink\": \"#ffffff\", \"chrome_ink_dim\": \"#ffffff\", \"title_active\": \"#ffffff\",\012"
     "    \"title_inactive\": \"#000000\", \"shade_hi\": \"#ffffff\", \"shade_lo\": \"#000000\",\012"
-    "    \"shade_dark\": \"#ffffff\", \"ink_accent\": \"#ffe600\", \"ink_note\": \"#ffe600\",\012"
+    "    \"shade_dark\": \"#ffffff\", \"ink_accent\": \"#ffe600\",\012"
     "    \"value\": \"#ffffff\", \"value_ink\": \"#000000\", \"danger\": \"#e5484d\",\012"
     "    \"sunk\": \"#1a1a1a\", \"lcd\": \"#000000\", \"lcd_ink\": \"#ffffff\",\012"
     "    \"code_text\": \"#ffffff\", \"code_keyword\": \"#ffe600\", \"code_string\": \"#7dff9a\",\012"
@@ -990,7 +984,7 @@ const char *const moy_theme_seed_src[MOY_THEME_SEEDS] = {
     "    \"selection_ink\": \"#000000\", \"focus\": \"#ffe600\", \"bar\": \"#ffffff\", \"bar_edge\": \"#000000\",\012"
     "    \"chrome_ink\": \"#000000\", \"chrome_ink_dim\": \"#000000\", \"title_active\": \"#000000\",\012"
     "    \"title_inactive\": \"#ffffff\", \"shade_hi\": \"#ffffff\", \"shade_lo\": \"#e6e6e6\",\012"
-    "    \"shade_dark\": \"#000000\", \"ink_accent\": \"#000000\", \"ink_note\": \"#000000\",\012"
+    "    \"shade_dark\": \"#000000\", \"ink_accent\": \"#000000\",\012"
     "    \"value\": \"#000000\", \"value_ink\": \"#ffffff\", \"danger\": \"#b3261e\",\012"
     "    \"sunk\": \"#e6e6e6\", \"lcd\": \"#ffffff\", \"lcd_ink\": \"#000000\",\012"
     "    \"surface_light\": true, \"bar_light\": true, \"band_light\": true,\012"
@@ -1053,7 +1047,7 @@ const int moy_theme_n_parts = MOY_THEME_PARTS;
 const int moy_theme_n_states = MOY_THEME_STATES;
 const int moy_theme_n_font_roles = MOY_THEME_FONT_ROLES;
 const int moy_theme_n_homes = MOY_THEME_HOMES;
-const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {5441, 4359, 4385};
+const uint16_t moy_theme_seed_len[MOY_THEME_SEEDS] = {5441, 4359, 4339};
 
 // themes/tiny5.fnt
 static const uint8_t font_0[682] = {
@@ -1253,12 +1247,12 @@ const uint8_t moy_theme_tints[MOY_THEME_TINTS][MOY_THEME_RAMP_MAX + 1] = {
 };
 
 const uint8_t moy_theme_classes[MOY_THEME_CLASSES][MOY_THEME_CLASS_MAX] = {
-    {0, 9, 10, 7, 8, 27, 21, 6, 5, 28, 29, 36, 37},  // background
+    {0, 9, 10, 7, 8, 27, 21, 6, 5, 28, 29, 35, 36},  // background
     {1, 13, 22, 30, 255, 255, 255, 255, 255, 255, 255, 255, 255},  // line
-    {4, 2, 26, 14, 34, 255, 255, 255, 255, 255, 255, 255, 255},  // accent
+    {4, 2, 26, 14, 33, 255, 255, 255, 255, 255, 255, 255, 255},  // accent
     {1, 13, 5, 28, 22, 8, 255, 255, 255, 255, 255, 255, 255},  // tied
     {16, 31, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255},  // accent_ink
-    {39, 40, 41, 42, 43, 44, 32, 255, 255, 255, 255, 255, 255},  // content
+    {38, 39, 40, 41, 42, 43, 255, 255, 255, 255, 255, 255, 255},  // content
 };
 
 const uint8_t moy_theme_dim_inks[MOY_THEME_DIM_INKS][5] = {{12, 11, 9, 255, 255}, {25, 24, 0, 21, 27}};
@@ -1272,8 +1266,8 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_ENUM, 4, 6, 0},  // focus.style
     {MOY_THEME_LK_ENUM, 4, 6, INT32_MIN},  // focus.card
     {MOY_THEME_LK_ENUM, 4, 6, INT32_MIN},  // focus.small
-    {MOY_THEME_LK_ENUM, 10, 56, 4},  // focus.color
-    {MOY_THEME_LK_ENUM, 66, 2, 0},  // focus.ink
+    {MOY_THEME_LK_ENUM, 10, 55, 4},  // focus.color
+    {MOY_THEME_LK_ENUM, 65, 2, 0},  // focus.ink
     {MOY_THEME_LK_NUM, 0, 800, 250},  // focus.ring.w
     {MOY_THEME_LK_NUM, 0, 800, 300},  // focus.ring.gap
     {MOY_THEME_LK_NUM, 0, 100, 100},  // focus.ring.alpha
@@ -1292,14 +1286,14 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // card.frame.w
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // card.frame.c
     {MOY_THEME_LK_CORNERS, 0, 15, 15},  // win_corners
-    {MOY_THEME_LK_ENUM, 68, 3, 0},  // shadow.kind
+    {MOY_THEME_LK_ENUM, 67, 3, 0},  // shadow.kind
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // shadow.c
     {MOY_THEME_LK_NUM, 0, 100, INT32_MIN},  // shadow.alpha
     {MOY_THEME_LK_NUM, 0, 6400, INT32_MIN},  // shadow.blur
     {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // shadow.dx
     {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // shadow.dy
     {MOY_THEME_LK_NUM, 0, 100, 55},  // shadow_back
-    {MOY_THEME_LK_ENUM, 71, 2, 0},  // edges
+    {MOY_THEME_LK_ENUM, 70, 2, 0},  // edges
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // home_bg
     {MOY_THEME_LK_NUM, 0, 100, 0},  // dim_neighbours
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // on_backdrop.ink
@@ -1308,16 +1302,16 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_NUM, 0, 100, INT32_MIN},  // on_backdrop.shadow.alpha
     {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // on_backdrop.shadow.dx
     {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // on_backdrop.shadow.dy
-    {MOY_THEME_LK_ENUM, 73, 4, 0},  // win.header
+    {MOY_THEME_LK_ENUM, 72, 4, 0},  // win.header
     {MOY_THEME_LK_INT, 16, 64, 44},  // win.h
-    {MOY_THEME_LK_ENUM, 77, 2, 0},  // win.align
+    {MOY_THEME_LK_ENUM, 76, 2, 0},  // win.align
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.ink
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.ink_back
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.tshadow.c
     {MOY_THEME_LK_NUM, 0, 100, INT32_MIN},  // win.tshadow.alpha
     {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // win.tshadow.dx
     {MOY_THEME_LK_INT, -16, 16, INT32_MIN},  // win.tshadow.dy
-    {MOY_THEME_LK_ENUM, 79, 6, 0},  // win.controls
+    {MOY_THEME_LK_ENUM, 78, 6, 0},  // win.controls
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // win.grad
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // win.grad_back
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // win.fill
@@ -1329,36 +1323,36 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // win.body
     {MOY_THEME_LK_INT, 0, 8, 1},  // win.rule
     {MOY_THEME_LK_BOOL, 0, 1, 1},  // win.icon
-    {MOY_THEME_LK_ENUM, 85, 3, 0},  // current.style
-    {MOY_THEME_LK_ENUM, 10, 56, 34},  // current.color
+    {MOY_THEME_LK_ENUM, 84, 3, 0},  // current.style
+    {MOY_THEME_LK_ENUM, 10, 55, 33},  // current.color
     {MOY_THEME_LK_NUM, 0, 100, 14},  // current.alpha
-    {MOY_THEME_LK_ENUM, 88, 3, 0},  // current.row
-    {MOY_THEME_LK_ENUM, 10, 56, INT32_MIN},  // current.ink
+    {MOY_THEME_LK_ENUM, 87, 3, 0},  // current.row
+    {MOY_THEME_LK_ENUM, 10, 55, INT32_MIN},  // current.ink
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // sel_back
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // disabled
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // danger_ink
-    {MOY_THEME_LK_ENUM, 91, 2, 0},  // bar.edge
+    {MOY_THEME_LK_ENUM, 90, 2, 0},  // bar.edge
     {MOY_THEME_LK_INT, 16, 64, 40},  // bar.h
-    {MOY_THEME_LK_ENUM, 93, 3, 0},  // bar.style
+    {MOY_THEME_LK_ENUM, 92, 3, 0},  // bar.style
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // bar.fill
     {MOY_THEME_LK_NUM, 0, 100, 100},  // bar.alpha
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // bar.line.w
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.line.c
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // bar.grad
-    {MOY_THEME_LK_ENUM, 96, 4, 0},  // bar.sysbtn
+    {MOY_THEME_LK_ENUM, 95, 4, 0},  // bar.sysbtn
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.sys.fill
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.sys.body
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.sys.eye
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // bar.sys_line.w
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.sys_line.c
-    {MOY_THEME_LK_ENUM, 100, 3, 0},  // bar.chips
+    {MOY_THEME_LK_ENUM, 99, 3, 0},  // bar.chips
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.chip_cur
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // bar.app_title
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.ink
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // bar.dim
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // bar.tray
-    {MOY_THEME_LK_ENUM, 103, 2, 0},  // bar.clock
-    {MOY_THEME_LK_ENUM, 105, 4, 0},  // hhbar.style
+    {MOY_THEME_LK_ENUM, 102, 2, 0},  // bar.clock
+    {MOY_THEME_LK_ENUM, 104, 4, 0},  // hhbar.style
     {MOY_THEME_LK_INT, 16, 48, 28},  // hhbar.h
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // hhbar.fill
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // hhbar.line.w
@@ -1368,10 +1362,10 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // hhbar.sys.fill
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // hhbar.sys.body
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // hhbar.sys.eye
-    {MOY_THEME_LK_ENUM, 109, 2, 0},  // tabs.style
+    {MOY_THEME_LK_ENUM, 108, 2, 0},  // tabs.style
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // tabs.pill
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // tabs.pill_ink
-    {MOY_THEME_LK_ENUM, 111, 2, 0},  // launcher
+    {MOY_THEME_LK_ENUM, 110, 2, 0},  // launcher
     {MOY_THEME_LK_COLOUR, 0, 0, 33554431},  // dock.fill
     {MOY_THEME_LK_NUM, 0, 100, 32},  // dock.alpha
     {MOY_THEME_LK_BOOL, 0, 1, 1},  // dock.frost
@@ -1401,45 +1395,45 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.normal.ink
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.normal.border.w
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.normal.border.c
-    {MOY_THEME_LK_ENUM, 113, 3, INT32_MIN},  // buttons.normal.shape
+    {MOY_THEME_LK_ENUM, 112, 3, INT32_MIN},  // buttons.normal.shape
     {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.normal.r
-    {MOY_THEME_LK_ENUM, 116, 2, INT32_MIN},  // buttons.normal.font
+    {MOY_THEME_LK_ENUM, 115, 2, INT32_MIN},  // buttons.normal.font
     {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.normal.bevel
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // buttons.primary.fill
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.primary.ink
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.primary.border.w
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.primary.border.c
-    {MOY_THEME_LK_ENUM, 113, 3, INT32_MIN},  // buttons.primary.shape
+    {MOY_THEME_LK_ENUM, 112, 3, INT32_MIN},  // buttons.primary.shape
     {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.primary.r
-    {MOY_THEME_LK_ENUM, 116, 2, INT32_MIN},  // buttons.primary.font
+    {MOY_THEME_LK_ENUM, 115, 2, INT32_MIN},  // buttons.primary.font
     {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.primary.bevel
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // buttons.tonal.fill
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.tonal.ink
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.tonal.border.w
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.tonal.border.c
-    {MOY_THEME_LK_ENUM, 113, 3, INT32_MIN},  // buttons.tonal.shape
+    {MOY_THEME_LK_ENUM, 112, 3, INT32_MIN},  // buttons.tonal.shape
     {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.tonal.r
-    {MOY_THEME_LK_ENUM, 116, 2, INT32_MIN},  // buttons.tonal.font
+    {MOY_THEME_LK_ENUM, 115, 2, INT32_MIN},  // buttons.tonal.font
     {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.tonal.bevel
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // buttons.danger.fill
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.danger.ink
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.danger.border.w
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.danger.border.c
-    {MOY_THEME_LK_ENUM, 113, 3, INT32_MIN},  // buttons.danger.shape
+    {MOY_THEME_LK_ENUM, 112, 3, INT32_MIN},  // buttons.danger.shape
     {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.danger.r
-    {MOY_THEME_LK_ENUM, 116, 2, INT32_MIN},  // buttons.danger.font
+    {MOY_THEME_LK_ENUM, 115, 2, INT32_MIN},  // buttons.danger.font
     {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.danger.bevel
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // buttons.toggle.fill
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.toggle.ink
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // buttons.toggle.border.w
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // buttons.toggle.border.c
-    {MOY_THEME_LK_ENUM, 113, 3, INT32_MIN},  // buttons.toggle.shape
+    {MOY_THEME_LK_ENUM, 112, 3, INT32_MIN},  // buttons.toggle.shape
     {MOY_THEME_LK_INT, 0, 99, INT32_MIN},  // buttons.toggle.r
-    {MOY_THEME_LK_ENUM, 116, 2, INT32_MIN},  // buttons.toggle.font
+    {MOY_THEME_LK_ENUM, 115, 2, INT32_MIN},  // buttons.toggle.font
     {MOY_THEME_LK_BOOL, 0, 1, INT32_MIN},  // buttons.toggle.bevel
     {MOY_THEME_LK_NUM, 0, 800, INT32_MIN},  // lcd_border.w
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // lcd_border.c
-    {MOY_THEME_LK_ENUM, 118, 3, 0},  // lcd_bevel
+    {MOY_THEME_LK_ENUM, 117, 3, 0},  // lcd_bevel
     {MOY_THEME_LK_COLOUR, 0, 0, INT32_MIN},  // lcd_dim
     {MOY_THEME_LK_PAINT, 0, 0, INT32_MIN},  // keycap.fill
     {MOY_THEME_LK_NUM, 0, 100, 100},  // keycap.alpha
@@ -1453,7 +1447,7 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_BOOL, 0, 1, 1},  // accents
     {MOY_THEME_LK_COLOUR, 0, 0, 16777216},  // scrim.c
     {MOY_THEME_LK_NUM, 0, 100, 40},  // scrim.alpha
-    {MOY_THEME_LK_ENUM, 121, 2, INT32_MIN},  // icons.kind
+    {MOY_THEME_LK_ENUM, 120, 2, INT32_MIN},  // icons.kind
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.set
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.swap
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // fam
@@ -1935,7 +1929,6 @@ const char *const moy_theme_enum_names[MOY_THEME_ENUM_NAMES] = {
     "shade_lo",
     "shade_dark",
     "ink_accent",
-    "ink_note",
     "band_light",
     "value",
     "value_ink",

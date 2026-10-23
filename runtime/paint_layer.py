@@ -1024,7 +1024,7 @@ class PaintLayer:
         cv.rectb(*(lay.panel + (th["author"],)))
         # No dirty star: SAVE (the button and the concept) is gone (#111) -- autosave
         # commits pending edits within seconds, so "unsaved" is not a state a kid can
-        # act on; write FAILURES surface loudly via ws.save_status instead.
+        # act on; write FAILURES surface loudly via ws.cart_error instead.
         title = ("ICONS  TILE " if ws._editing_icons else "PAINT  SPR ") + str(pe.n if pe else 0)
         cv.print(title, lay.title_xy[0], lay.title_xy[1],
                  th["ink"], 1)
@@ -1646,7 +1646,6 @@ class ThemeLayer:
         ws._dirty = True                 # screen change repaints (#44)
         ws._editing_icons = True
         ws.paint_status = None
-        ws.save_status = None
         ws.wm.goto("menu")               # Stage 6e: theme editor spawns on the back-stack
         ws.menu_view = "theme"
         # Build a PaintEditor over the icon sheet (PaintEditor is tile-size-agnostic,

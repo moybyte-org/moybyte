@@ -1,10 +1,9 @@
 """runtime/ui.py -- the shared immediate-mode widget toolkit (visual identity
-v1 Phase 3): rect algebra, the draw==tap Hits registry, themed widgets, and the
-one ScrollRegion model. Pixel checks run on a real SystemCanvas so the drawing
+v1 Phase 3): rect algebra, themed widgets, and the one ScrollRegion model. Pixel checks run on a real SystemCanvas so the drawing
 path is the one every tier shares.
 
 The 2026-08 UI refactor's Phase 3a additions -- the six-state interaction
-model, the `Hits` pointer pump, and the `row`/`cell` kinds -- are in
+model and the `row`/`cell` kinds -- are in
 `tests/test_ui_states.py`, which also pins every SHIPPED widget's pixels across
 the theme sets so a later phase cannot re-baseline them by accident. The
 palette themes these draw with are the fixture packages
@@ -52,19 +51,6 @@ def test_splits_cover_without_overlap():
     assert cols[-1][0] + cols[-1][2] == 103            # slack goes to the last
     rows = ui.vsplit((0, 0, 10, 91), 4)
     assert rows[-1][1] + rows[-1][3] == 91
-
-
-# -- Hits ----------------------------------------------------------------------
-
-def test_hits_topmost_wins_and_clear():
-    h = ui_draw.Hits()
-    h.add((0, 0, 100, 100), "under", 1)
-    h.add((10, 10, 20, 20), "over", 2)
-    assert h.at(15, 15) == ("over", 2)                 # drawn later = on top
-    assert h.at(50, 50) == ("under", 1)
-    assert h.at(200, 200) is None
-    h.clear()
-    assert h.at(15, 15) is None
 
 
 # -- widgets --------------------------------------------------------------------
@@ -171,16 +157,13 @@ def test_tab_row_geometry_and_overflow():
     assert len(tiny) < len(tabs)
 
 
-def test_tab_row_draws_active_selection_and_hits():
+def test_tab_row_draws_active_selection():
     cv = _cv(w=420)
-    hits = ui_draw.Hits()
     tabs = [("cards", "CONFIG", "edit"), ("code", "CODE", "code")]
-    rects = ui_draw.tab_row(cv, TH, (0, 0, 420, 18), tabs, "code", hits=hits)
+    rects = ui_draw.tab_row(cv, TH, (0, 0, 420, 18), tabs, "code")
     assert [r[0] for r in rects] == ["cards", "code"]
     _tid, (x, y, w, h), _l = rects[1]
     assert cv.pix(x + 1, y + 1) == TH["selection"]     # active tab field
-    assert hits.at(x + 2, y + 2) == ("tab", "code")
-    assert hits.at(rects[0][1][0] + 2, 2) == ("tab", "cards")
 
 
 def test_panel_and_status_row_paint():

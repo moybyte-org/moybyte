@@ -1120,7 +1120,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         # (cart_error + crash_line live on self.player now -- Stage 2; forwarding
         # properties below, so ws.cart_error / ws.crash_line are unchanged.)
-        self.save_status = None       # last save_code result text (e.g. a syntax error)
         self.code_err = None          # short inline syntax-error message (#24)
         self.code_err_row = None      # 0-based row the syntax error is on (#24)
         self.crash_popup = None       # full error text of the popup the code
@@ -2420,7 +2419,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             if _ui is not None:
                 _ui.reset()
         self.cart_error = None
-        self.save_status = None
         self.sheet = self._build_sheet()
         self.tilemap = self._build_tilemap()
         # No ws.flags projection: the legacy property-forward set can only
@@ -3275,7 +3273,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 self._fat_cart = None
             self.project = Project(self)
         self.cart_error = None
-        self.save_status = None
         self.show_achievements = False
         self.ach_ui._konami_pos = 0          # fresh Konami run on the home desktop (#21)
         self.ach_ui._clock_taps = 0

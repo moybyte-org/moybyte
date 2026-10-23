@@ -99,11 +99,17 @@ def test_the_token_row_is_the_app_abis_vocabulary_in_order():
     assert _style()["tokens"] == re.findall(r'"([a-z_]+)"', m.group(1))
 
 
-def test_hits_capacity_is_configuration():
-    """Twice the most rects any surface registers in the goldens' frames:
-    16 (the calculator's keypad), measured with step 1 of the toolkit pass.
-    tests/test_shell_goldens.py checks the frames still fit half of it."""
-    assert _style()["hits_capacity"] == 32
+def test_the_flag_roles_moy_app_names_by_index_are_the_flags():
+    """moy_app.c reads three flag roles by index; the index is the role's place
+    in the vocabulary, so a role added or dropped before one moves it."""
+    with open(TOKENS_C) as f:
+        src = f.read()
+    names = _style()["tokens"]
+    for const, role in (("TOKEN_SURFACE_LIGHT", "surface_light"),
+                        ("TOKEN_BAR_LIGHT", "bar_light"),
+                        ("TOKEN_BAND_LIGHT", "band_light")):
+        idx = int(re.search(r"#define %s (\d+)" % const, src).group(1))
+        assert names[idx] == role, (const, idx, names[idx])
 
 
 def _vocabulary():

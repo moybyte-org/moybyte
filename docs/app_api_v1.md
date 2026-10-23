@@ -161,8 +161,7 @@ An app draws with the public UI API, `docs/ui_api_2026-10.md` (owner,
 app make. The engine under them -- the rect-taking widgets (`button`,
 `chip`, `row`, `cell`, `list`, `label`, `glyph`, `tab_row`, `status_row`,
 `panel`, `toolbar`, `dialog`, `text_field`, `scroll_cues`), the marks
-(`focus` and `current`, and a part's `focus=` and `on=`), `ScrollRegion` and
-`Hits` -- is `runtime/ui_draw.py`, the chrome's; the shipped apps not yet
+(`focus` and `current`, and a part's `focus=` and `on=`), and `ScrollRegion` -- is `runtime/ui_draw.py`, the chrome's; the shipped apps not yet
 moved onto the verbs draw there too, pinned by `tests/test_ui_public.py`.
 An app on the verbs sets `UI = True` and draws them into the frame its
 host side, `ctx.ui` (`ui_draw.AppHost`), begins: its handlers hand it the

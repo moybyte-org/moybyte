@@ -268,7 +268,7 @@ def test_custom_resolves_to_its_seeds_shape(name):
 
 STORED = _src(
     "sunset",
-    colors={"dark": {"panel": 2, "title": 8, "accent": 9, "ink_note": 14},
+    colors={"dark": {"panel": 2, "title": 8, "accent": 9, "ink_accent": 14},
             "light": {"panel": 31, "title": 8, "accent": 9}},
     metrics={"radius": 2, "press_dx": 1},
     frame={"style": "win9x", "title_align": "center", "buttons": "T|ZMC"},

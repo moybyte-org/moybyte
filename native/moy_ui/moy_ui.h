@@ -664,29 +664,9 @@ void moy_ui_cell_art(const int32_t r[4], int fs, int32_t pad, int32_t caption_h,
 
 // -- interaction over caller-owned state (moy_ui_interact.c) ------------------------------
 //
-// Hits, ScrollRegion and DragTap's rules as pure functions over buffers the
+// ScrollRegion and DragTap's rules as pure functions over buffers the
 // CALLER owns (a bytearray inside the Python object, a span of a compiled
 // app's memory); the kernel holds nothing between calls.
-
-// A hit buffer: int32 words, a header then five words per rect (x, y, w, h,
-// id). Its capacity is the caller's; an add past it answers FULL and is
-// counted in the header.
-enum { MOY_UI_HITS_N = 0, MOY_UI_HITS_FULL = 1, MOY_UI_HITS_HDR = 2 };
-#define MOY_UI_HITS_WORDS(cap) (MOY_UI_HITS_HDR + 5 * (cap))
-void moy_ui_hits_clear(int32_t *b);
-int moy_ui_hits_add(int32_t *b, size_t words, int32_t x, int32_t y, int32_t w, int32_t h,
-                    int32_t id);
-// The topmost id at (px, py) -- the last added wins -- or -1.
-int32_t moy_ui_hits_at(const int32_t *b, int32_t px, int32_t py);
-// The pump (#177's rules): hover needs a POINTING cursor and a pointer that
-// is up; the press EDGE arms the rect under it, pressed holds while the
-// pointer stays on the armed rect; release clears both.
-typedef struct {
-    int32_t hover, pressed, armed;
-    int32_t down;
-} moy_ui_pump_t;
-void moy_ui_hits_pump(const int32_t *b, int32_t px, int32_t py, int down, int pointing,
-                      moy_ui_pump_t *p);
 
 // A scroll state's motion; the offset, the content extent and the view are
 // the caller's, passed in. Single-precision, as the boards' MicroPython

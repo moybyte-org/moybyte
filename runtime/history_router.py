@@ -500,10 +500,8 @@ class HistoryRouter:
         if not ok:
             return                        # don't autosave/journal un-parseable source
         # quiet=True keeps the autosave invisible (spec Section 7): it suppresses
-        # the "Code Wizard" achievement toast, and commit_* no longer writes a
-        # "SAVED" status at all (save_status carries FAILURES only) -- so the old
-        # save/restore dance around this call is gone. A failed store write still
-        # surfaces via save_status/cart_error, as it must.
+        # the "Code Wizard" achievement toast. A failed store write still
+        # surfaces via cart_error, as it must.
         ws.project.commit_code(src, quiet=True)   # persists + journals; clears ed.dirty
 
     def _autosave_tab(self):

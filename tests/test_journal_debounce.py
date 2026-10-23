@@ -61,7 +61,6 @@ def test_idle_debounce_autosaves_and_journals_invisibly(tmp_path):
     path = ws.cart["path"]
     new = "def _draw():\n    cls(4)  # autosaved\n"
     _open_code(ws, new)
-    ws.save_status = None
     ws.history.edit_ms = C._ticks_ms() - 5000       # 5s of no keystroke -> past 1.5s
     ws.frame(1 / 30)                                # the idle tick fires the commit
 
@@ -72,8 +71,6 @@ def test_idle_debounce_autosaves_and_journals_invisibly(tmp_path):
     assert ents, "the idle debounce must journal a durable step"
     from runtime import moy_journal
     assert moy_journal._journal_read_snap(path + "/journal", ents[-1]) == new
-    # Invisible (spec Section 7): the autosave does NOT flash the SAVE status.
-    assert ws.save_status != "SAVED"
 
 
 def test_autosave_skips_unparseable_source_without_nagging(tmp_path):
@@ -81,12 +78,11 @@ def test_autosave_skips_unparseable_source_without_nagging(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n")
     path = ws.cart["path"]
     _open_code(ws, "def _draw(:\n    cls(\n")        # mid-edit, won't parse
-    ws.save_status = None
     ws.history.edit_ms = C._ticks_ms() - 5000
     ws.frame(1 / 30)
 
     assert ws.editor.dirty                           # not committed (invalid) -> still pending
-    assert ws.save_status is None                    # no SYNTAX nag from the autosave
+    assert ws.cart_error is None                     # no SYNTAX nag from the autosave
     assert not [e for e in _entries(path) if e["file"] == "main.py"]
 
 

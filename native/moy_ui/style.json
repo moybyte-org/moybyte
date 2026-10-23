@@ -1,6 +1,6 @@
 {
   "about": "The toolkit's style as data (docs/kernel_toolkit_2026-10.md \u00a72.1): each kind's (field, ink, edge) token spec per state, each kind's metric slots, the state aliases, the button kinds (button(kind=...)'s names, the theme model's, each the kind it draws as), each kind's floor forms ((field, ink) specs its rest, hover and hot take, in order, where their own pair misses the contrast floor; the last when none reads), the quirks that stay code, the glyph vocabulary (12x12, # is ink; hand-traced in the Pixelarticons style, MIT (c) Gerrit Halfmann, https://pixelarticons.com), and the theme loader's data (its own about). tools/gen_ui_tables.py writes moy_ui_tables.c from it. A token spec is a palette index, a role name, a list tried left to right, or null (paint nothing).",
-  "tokens": ["panel", "edge", "title", "title_ink", "accent", "hilite", "dim", "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim", "border", "selection", "selection_ink", "focus", "play", "author", "danger", "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive", "shade_hi", "shade_lo", "shade_dark", "ink_accent", "ink_note", "band_light", "value", "value_ink", "sunk", "lcd", "lcd_ink"],
+  "tokens": ["panel", "edge", "title", "title_ink", "accent", "hilite", "dim", "desktop", "desktop_pattern", "surface", "surface_alt", "ink", "ink_dim", "border", "selection", "selection_ink", "focus", "play", "author", "danger", "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive", "shade_hi", "shade_lo", "shade_dark", "ink_accent", "band_light", "value", "value_ink", "sunk", "lcd", "lcd_ink"],
   "states": ["disabled", "pressed", "hot", "on", "hover", "rest"],
   "aliases": {
     "hover": ["dim"],
@@ -1069,7 +1069,6 @@
       "............"
     ]
   },
-  "hits_capacity": 32,
   "theme": {
     "about": "Theme packages, format 2 (docs/theming_2026-09.md \u00a73-\u00a75, \u00a77; a colour is a palette index or '#rrggbb', docs/look_2026-10.md step 5). The seed packages are themes/<name>.json, embedded in the tables in this order; the first is the default every chain ends at, which lends its roles, metrics, surfaces, fonts and layout to a package naming no `inherits`, and its look only to one that names it. A missing role is derived per variant: the variant's own list first, then 'both', each [role, value] filling the role only when the chain left it unset (a value is a palette index, a flag, or another role). 'look' is the theme model's fields (docs/media/look_2026-10/THEMES.md): each [path, type, ...] (a 'num' in hundredths, an 'enum' its names, then a default; no default: silent, the renderer derives it), 'buttons' each of 'button_kinds' with the 'button' fields, and the caps a package's look is held to. A role is a token (the live row apps read) or a 'content' role (code syntax and block colours, read by the Code and Blocks tabs). 'metrics' are the theme-wide metrics a package may set, each [min, max] (a value outside is clamped; the default seed sets every one). 'effects' are the text effects a part and state may name, at most 'effects_cap' per package. 'pairs' are the (background, ink) roles the readability check holds to 'contrast' (a WCAG ratio, x10) on each colour's luminance (an RGB colour's as its RGB565). 'code' holds each of its 'roles' (the Code tab's syntax colours) to its own 'contrast' on its 'bg', the code surface (docs/look_2026-10.md step 23). 'bytes' caps a theme.json, 'depth' the inherits chain. A package's 'text' and 'surfaces' are keyed by part, then state: the parts are the kinds, then 'parts' (the chrome the WMs and the bar draw); the states are the style's, then 'states' (a window's), and a state a part does not name follows 'chain' to rest. A surface is one line of the grammar (docs/theming_2026-09.md \u00a74.4): an edge of 'edges', a fill of 'fills' with its colours, 'border' with an optional colour, 'shadow'; a colour is a token or a palette index. A package holds at most 'surfaces_cap' surfaces of at most 'surface_len' bytes each. A package's 'frame' chooses a window frame: 'style' one of 'frames', 'title_align' one of 'title_aligns', 'buttons' each letter of 'frame_buttons' once (close, minimise, maximise, the title), a '|' between them allowed; what it leaves out is its style's. A package's 'fonts' name a font file of the package per role of 'font_roles' (1 to 24 of a-z, 0-9, '_', '-', '.', not starting with '.'); the file's format is the font loader's (native/moy_gfx/moy_text.h). 'preset_fonts' are the font files of themes/ the tables embed beside the seeds' own, for Appearance's Font presets. Each key of 'sheets' names a .moygfx file of the package (the same grammar, ending '.moygfx'), the cart sheet's hex format of at most 'sheet_rows' rows (docs/theming_2026-09.md \u00a74.6): 'sprites' is the ROLE sheet, each nibble a slot of 'sprite_slots' (null transparent, a token, or a palette index), its parts drawn from 'sprite_cells' ([part, state, title button of 'frame_button_names' or null, x, y, w, h] in 8-pixel tiles of a 128-wide sheet; a part of 'sprite_nine' is a 9-slice with 8-pixel corners), and 'icons' is the bar's IconSheet. A package's 'layout' holds 'bars' (docs/shell_layout_2026-10.md \u00a75): at most one bar per edge of 'layout.edges', each a 'size' clamped to 'layout.size' ('size_default' when absent); a 'home' names the home's arrangement, one of 'layout.homes', the first when absent or unknown, and the slots of 'layout.slots', each a list of at most 'slot_cap' names of 'layout.widgets', at most 'widget_cap' per layout; a widget placed twice keeps its first placement unless it is 'repeatable'; a bar's 'text' gives its 'text' widgets their strings by position, 1 to 'text_max' characters of printable ASCII. A layout that does not place every 'required' widget is refused, and the default's stands in. 'accents', 'tints' and 'recolour' are the accent-and-tint derivation's data (docs/theming_2026-09.md §4.10, moy_theme_derive): each accent is [name, A, deep], A one black clears; each preset is an accent in two values, [name, dark, light], dark one black clears and light one white clears, each its own deep, and is picked by its dark value; each tint is [name, its ramp of palette indices, dark to light, never 0 or 7]; 'recolour' names the role classes each of its steps rewrites: 'background' and 'line' take the tint ('line' only off black and white), 'accent' takes A and 'tied' takes A where the source tied it to its title or accent, 'accent_ink' the first of A, deep and ink that clears surface, each 'dim_ink' [role, its fallback, its backgrounds] the dimmest of the ramp and 'dim_greys' that clears them, and 'content' its derive-set value for the surface's side.",
     "format": 2,
@@ -1237,7 +1236,7 @@
         ["chrome_ink", 0], ["chrome_ink_dim", 51], ["selection_ink", 0],
         ["focus", 10], ["play", 11], ["author", 9], ["danger", 8],
         ["surface_light", true], ["bar_light", true], ["band_light", true],
-        ["shade_hi", 7], ["ink_accent", "ink"], ["ink_note", 4],
+        ["shade_hi", 7], ["ink_accent", "ink"],
         ["bar", "panel"], ["bar_edge", "dim"],
         ["code_text", 0], ["code_keyword", 59], ["code_string", 3],
         ["code_number", 4], ["code_comment", 53], ["code_builtin", 2]
@@ -1251,7 +1250,7 @@
         ["author", 10], ["danger", 8],
         ["surface_light", false], ["bar_light", false], ["band_light", false],
         ["shade_hi", "hilite"], ["shade_lo", "dim"], ["shade_dark", 0],
-        ["ink_accent", "accent"], ["ink_note", 15],
+        ["ink_accent", "accent"],
         ["block_events", 10], ["block_control", 9], ["block_actors", 12],
         ["block_looks", 2], ["block_draw", 3], ["block_input", 13],
         ["block_variables", 8], ["block_lists", 15], ["block_operators", 11],
@@ -1294,7 +1293,7 @@
       "dim_ink": [["ink_dim", "ink", ["surface"]], ["chrome_ink_dim", "chrome_ink", ["panel", "bar", "title_inactive"]]],
       "dim_greys": [5, 6, 13, 49, 50, 53],
       "content": ["code_text", "code_keyword", "code_string", "code_number", "code_comment",
-                  "code_builtin", "ink_note"]
+                  "code_builtin"]
     }
   }
 }

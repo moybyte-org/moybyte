@@ -7,8 +7,6 @@
 #   -- the theme's shape              use_shape, paint (C)
 #   -- window frames                  frame, frame_buttons, frame_band (C)
 #   -- depth                          use_depth, depth, frame_geom, frame_under, frame_under_onto, cast (C)
-#   -- draw == tap                    Hits
-#   Hits                              per-draw hit registry
 #   -- glyphs                         glyph, glyph_id (C); s, the string table (C)
 #   -- widgets                        button, chip
 #   -- button kinds                   use_buttons, button_unreadable, begin_frame, primary_warnings
@@ -24,8 +22,8 @@
 `runtime/ui.py` is the public UI API (docs/ui_api_2026-10.md), the verbs every
 app and cart draws with; this module is what lies under them and what the
 chrome keeps (§7 there): the rect-taking widgets -- buttons, rows, cells, tab
-rows, status rows, panels -- the marks (`focus`, `current`), the draw==tap
-`Hits` registry, the one `ScrollRegion` model, the theme's shape, depth and
+rows, status rows, panels -- the marks (`focus`, `current`), the one
+`ScrollRegion` model, the theme's shape, depth and
 fonts, and `ui_frame`, which a host calls to begin an app's frame of verbs.
 The shell's apps not yet moved onto the verbs draw here too, and
 tests/test_ui_public.py pins which. The rect algebra is `runtime/ui.py`'s.
@@ -56,22 +54,13 @@ Design rules (deliberate, argued in the redesign thread):
     surface's tap handler hit-tests the exact rects the draw used (the
     `action_rects` pattern, generalized) -- a cached bar strip can draw once
     while taps keep resolving.
-  * INTERACTION STATE belongs to the registry; SEMANTICS belong to the caller.
-    Six states resolve in ONE place with the precedence
-    `disabled > pressed > hot > on > hover > rest`: `on`/`hot`/`disabled` stay
+  * SIX STATES resolve in ONE place with the precedence
+    `disabled > pressed > hot > on > hover > rest`: `on`/`hot`/`disabled` are
     caller ARGUMENTS (they are meaning -- only the surface knows them), while
-    `hover`/`pressed` come from `Hits`'s pointer pump (they are interaction --
-    only the registry may write them). `rest` is byte-identical to what the
-    goldens already know: every state cue is a delta painted ON the rest look,
-    resolved through the theme's own semantic roles, never a new literal.
-  * `Hits` IS FOR BOUNDED WIDGET SETS -- toolbars, button rows, list rows --
-    and deliberately NOT for grids. That is MEASURED, not stylistic: making
-    the registry "the ONE state holder per surface" would have the P4's map
-    tab register ~395 rects per full draw (~9.3ms, 13% of that tab's frame)
-    where today it registers zero. A grid keeps its arithmetic hit-test
-    (`_cell_rect(i)` + `rect_in`) and feeds `cell(state=cell_state(i, hov,
-    prs))`; that is why `cell` takes no `hits` argument at all and therefore
-    CANNOT register one rect per cell. Do not "unify" this away.
+    `hover`/`pressed` arrive as a widget's `state` argument (they are
+    interaction). `rest` is byte-identical to what the goldens already know:
+    every state cue is a delta painted ON the rest look, resolved through the
+    theme's own semantic roles, never a new literal.
 
 Min-size convention: a window-content layout may expose `MIN_W` / `MIN_H`
 constants; app registration adopts them and the windowed WM clamps resizes to
@@ -399,9 +388,8 @@ def widget_state(on=False, hot=False, disabled=False, interact=None):
     """Resolve the six states to one, per STATES's precedence.
 
     `on`/`hot`/`disabled` are the CALLER's semantics (a toggle, an armed
-    destructive action, an unusable verb); `interact` is whatever
-    `Hits.state_of` returned for this widget's id -- HOVER, PRESSED or None --
-    and the registry's pump is the only thing allowed to produce it.
+    destructive action, an unusable verb); `interact` is the widget's
+    `state` argument -- HOVER, PRESSED or None.
     """
     if disabled:
         return DISABLED
@@ -580,205 +568,6 @@ def state_colors(th, kind, state):
         return _colors_slow(kind, state)
 
 
-def cell_state(index, hover_index=-1, pressed_index=-1):
-    """A GRID's arithmetic answer to `Hits.state_of` -- O(1), no registration.
-
-    See the module docstring: a grid must not put one hit rect per cell into
-    `Hits`. It already hit-tests arithmetically to find the cell under a tap
-    (`FileGridView.tap`, `cards_layer._choice_cells`); it feeds the two indices
-    it derived the same way here and pays nothing per cell.
-    """
-    # Grids spell "nothing selected" as -1 (FileGridView.sel), and so do the
-    # sentinels here -- so a negative index must never match itself into a cue.
-    if index < 0:
-        return None
-    if index == pressed_index:
-        return PRESSED
-    if index == hover_index:
-        return HOVER
-    return None
-
-
-# --- draw == tap: the Hits registry ------------------------------------------
-
-# Flag duplicate ids at registration. OFF in release (last registered wins, as
-# it always did); a dev/test build flips it and gets the ambiguity as an
-# exception at the draw that caused it, rather than as a cue attaching to the
-# wrong widget three surfaces later.
-HITS_DEBUG = False
-
-
-# The hit buffer's capacity: twice the most rects any surface registers in the
-# goldens' frames (native/moy_ui/style.json's hits_capacity).
-HITS_CAP = _C.hits_cap()
-
-
-class Hits:
-    """Per-draw hit registry AND the surface's interaction-state holder.
-
-    The draw pass `add`s each interactive rect with a verb (+ optional arg);
-    the pointer handler resolves a tap with `at` and pumps hover/pressed with
-    `pointer_frame`; the next draw reads the states back with `state_of`. One
-    list, reused via `clear()` -- no per-frame churn.
-
-    SCOPE: bounded widget sets only (toolbars, button rows, list rows). A grid
-    must NOT register one rect per cell -- see the module docstring for the
-    measurement, and `cell_state` for what a grid does instead.
-
-    The rules below are each a #177 hover-shelf bug made structural, so that
-    the same four bugs cannot be rediscovered once per surface again:
-
-      * **Ids are the draw's `(verb, arg)` pairs.** Duplicates are harmless for
-        taps (topmost-at-point wins) but AMBIGUOUS for `state_of`, so
-        `HITS_DEBUG` raises on registering one; last registered wins in release.
-      * **Rects live from one full draw to the next.** `clear()` wipes them;
-        hover/pressed ids PERSIST across clears and re-resolve against the fresh
-        rects on the next pointer sample. So a parked cursor re-seeds on the
-        next SAMPLE (a repeat sample at the same point is enough) rather than on
-        first sighting -- which is the stale-after-relayout bug closed.
-      * **Coordinates are surface-local** -- exactly what the draw registered.
-        (Window-local vs screen coords was its own shelf bug.)
-      * **Hover requires a POINTING cursor**: `visible or hovering, and not
-        down`. Touch never hovers -- it places the pointer hidden -- but touch
-        DOES press. Pressed clears on release, and while the finger is outside
-        the rect it went down on.
-      * **Leave is the router's job.** Whichever component stops feeding a
-        surface pointer samples (`wm_windowed`, the fullscreen stack, an app
-        hosting sub-layouts) MUST call `pointer_leave()`, or the cue it left
-        behind is stale forever.
-      * **The pump is the ONLY writer** of `hover`/`pressed`.
-
-    What the pump deliberately does NOT own is hover-as-SELECTION. A surface
-    whose hover moves the selection (Settings rows, the file grids) is doing
-    app state: it repaints through the ordinary dirty path and keeps its own
-    small glue. The pump only says where the pointer is.
-    """
-
-    def __init__(self, cap=None):
-        cap = HITS_CAP if cap is None else cap
-        # The rects live in a buffer this object owns, the rules in C
-        # (native/moy_ui); ids are interned per clear().
-        self._buf = array("i", bytes(4 * (2 + 5 * cap)))
-        self._keys = []         # id -> (verb, arg), this draw's
-        self._ids = {}          # (verb, arg) -> id
-        self._pump = array("i", [-1, -1, -1, 0])
-        self._said_full = False
-        self.hover = None       # (verb, arg) under a resting pointing cursor
-        self.pressed = None     # (verb, arg) held down, pointer still inside
-        self._armed = None      # what the press EDGE landed on
-        self._down = False      # last sample's held state (for the edge)
-
-    def clear(self):
-        _C.hits_clear(self._buf)
-        del self._keys[:]
-        self._ids.clear()
-
-    def add(self, rect, verb, arg=None):
-        key = (verb, arg)
-        i = self._ids.get(key)
-        if i is None:
-            i = len(self._keys)
-            self._keys.append(key)
-            self._ids[key] = i
-        elif HITS_DEBUG:
-            raise ValueError(
-                "duplicate Hits id (%r, %r): state_of() would be "
-                "ambiguous" % (verb, arg))
-        if not _C.hits_add(self._buf, rect, i):
-            self._full(key)
-
-    def _full(self, key):
-        """An add past the buffer's capacity: refused, said once per surface,
-        and an error under HITS_DEBUG -- a tap must never be lost silently."""
-        if HITS_DEBUG:
-            raise OverflowError("Hits full at %d rects: %r not registered"
-                                % (len(self._keys), key))
-        if not self._said_full:
-            self._said_full = True
-            print("HITS FULL: %d rects, %r and later ones not registered"
-                  % (len(self._keys), key))
-
-    @property
-    def _items(self):
-        """The registered (rect, verb, arg)s, in order -- for tests."""
-        b = self._buf
-        out = []
-        for i in range(b[0]):
-            r = b[2 + 5 * i:7 + 5 * i]
-            out.append(((r[0], r[1], r[2], r[3]), self._keys[r[4]][0],
-                        self._keys[r[4]][1]))
-        return out
-
-    def at(self, px, py):
-        """(verb, arg) of the topmost hit at (px, py), or None. Later adds win
-        (drawn later = on top), matching paint order."""
-        i = _C.hits_at(self._buf, px, py)
-        return self._keys[i] if i >= 0 else None
-
-    # -- the interaction pump --------------------------------------------------
-
-    def pointer_frame(self, px, py, pointer):
-        """ONE pump for hover AND pressed; True when either changed.
-
-        Call it once per pointer sample from the surface's pointer handler
-        (before or after the tap routing -- it reads, it never consumes), and
-        mark the surface dirty on True. `pointer` is duck-typed: `.down` and
-        `.visible`, plus the browser/mouse `.hovering` flag when a tier has one
-        (today's `moy_input.Pointer` does not, so a tier hovers exactly when its
-        cursor is visible -- trackball and mouse yes, touch never).
-        """
-        down = bool(getattr(pointer, "down", False))
-        pointing = bool(getattr(pointer, "visible", False)
-                        or getattr(pointer, "hovering", False))
-        p = self._pump
-        armed = self._armed
-        p[2] = -1 if armed is None else self._ids.get(armed, -1)
-        p[3] = 1 if self._down else 0
-        _C.hits_pump(self._buf, px, py, down, pointing, p)
-        keys = self._keys
-        new_hover = keys[p[0]] if p[0] >= 0 else None
-        new_pressed = keys[p[1]] if p[1] >= 0 else None
-        if not down:
-            self._armed = None
-        elif not self._down:
-            self._armed = keys[p[2]] if p[2] >= 0 else None   # the press EDGE
-        self._down = down
-        changed = (new_hover != self.hover) or (new_pressed != self.pressed)
-        self.hover = new_hover
-        self.pressed = new_pressed
-        return changed
-
-    def pointer_leave(self):
-        """The router stopped feeding this surface: drop both cues. True when
-        that changed anything, so a stale cue costs exactly one repaint and an
-        already-quiet surface costs none.
-
-        It forgets the press-edge HISTORY too: after a leave this surface has
-        no pointer past, so the next sample it receives is a fresh edge. That
-        is deliberate -- on a touch tier the first sample a newly-focused
-        surface sees IS the finger going down, and refusing to arm there would
-        cost exactly the feedback `pressed` exists to give.
-        """
-        changed = self.hover is not None or self.pressed is not None
-        self.hover = None
-        self.pressed = None
-        self._armed = None
-        self._down = False
-        return changed
-
-    def state_of(self, verb, arg=None):
-        """PRESSED / HOVER / None for one widget id, read back at draw. Takes
-        the id UNPACKED so a query allocates nothing (the ids themselves are
-        the two tuples the pump already built)."""
-        p = self.pressed
-        if p is not None and p[0] == verb and p[1] == arg:
-            return PRESSED
-        h = self.hover
-        if h is not None and h[0] == verb and h[1] == arg:
-            return HOVER
-        return None
-
-
 # --- glyphs: the icon vocabulary, drawn by native/moy_ui ------------------------
 #
 # The 12x12 glyphs are style.json's "glyphs"; one C raster derives each one's
@@ -898,8 +687,7 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
 
     `disabled` + `state` are the six-state model (see `widget_state`): they
     default to the untouched REST/`on` rendering the goldens pin, and only a
-    caller that opts in pays anything. `state` is what `Hits.state_of` returned
-    for this button's id.
+    caller that opts in pays anything. `state` is HOVER, PRESSED or None.
 
     The field/ink/edge come from the style under the key `kind` maps to
     (style.json's "button_kinds") and the live theme's button leaves
@@ -1111,17 +899,13 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
 def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
         state=None, colors=None, icon_img=None, glyph=None, glyph_draw=None,
         value=None, value_ink=None, edge=True, pad=None, text_dy=None,
-        hits=None, verb=None, arg=None, fs=None, pad_right=None, scale=1,
+        fs=None, pad_right=None, scale=1,
         glyph_ink=None, glyph_size=None, focus=False):
     """One list row: [field] [edge] [icon|glyph] [label] ... [value].
 
     Semantics are the caller's: `on` is the selection, `hot` the armed
-    destructive look, `disabled` the unusable one (dim ink AND no hit
-    registration -- an unusable row must not be tappable). Interaction comes
-    from the registry: pass `hits` + `verb` (+ `arg`) and the row registers its
-    own tap rect AND reads its own hover/pressed state back, so wiring a
-    surface up is the pump call plus nothing per row. `state` overrides that
-    read (what a grid-like surface with arithmetic hit-testing passes).
+    destructive look, `disabled` the unusable one (dim ink). `state` is the
+    interaction cue: HOVER, PRESSED or None.
 
     Knobs, each one a real site's frozen geometry:
       `pad`      left inset (default `ROW_PAD * fs`; Settings' frozen literal 4
@@ -1163,8 +947,6 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
     callers that need the content band call the PURE `row_content_rect`
     instead (the `cell_art_rect` precedent).
     """
-    if state is None and hits is not None and verb is not None:
-        state = hits.state_of(verb, arg)
     flags = (_F_ON if on else 0) | (_F_HOT if hot else 0) | (_F_FOCUS if focus else 0) | (
         _F_DISABLED if disabled else 0) | (_F_EDGE if edge else 0)
     gid = -1
@@ -1204,10 +986,6 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
         _C.row(cv, look, rect, kid, flags, act, label, value, gid, glyph_size,
                glyph_ink, value_ink, pad, pad_right, text_dy, scale, fs, colors,
                _CONTENT)
-    # A DISABLED row registers nothing: "dim ink, non-registering" is the whole
-    # point of the state.
-    if hits is not None and verb is not None and not disabled:
-        hits.add(rect, verb, arg)
 
 
 def row_content_rect(rect, fs=1, pad=None, pad_right=None, icon=False,
@@ -1244,9 +1022,8 @@ def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
     none of them. It draws the FRAME -- which is the part that is copied 16
     times -- and hands back where the picture goes.
 
-    There is deliberately NO `hits` argument. A grid registers no per-cell hit
-    rects (module docstring); it hit-tests arithmetically and passes
-    `state=cell_state(i, hover_i, pressed_i)`.
+    A grid hit-tests arithmetically (`FileGridView.tap`,
+    `cards_layer._choice_cells`); `state` is its cell's cue.
 
       `pad`        inset of the art (default `CELL_PAD * fs`; `FileGridView` 2,
                    the wallpaper cards `3 * fs`, a frame-only cell 0).
@@ -1344,15 +1121,14 @@ def tab_row_rects(rect, tabs, fs, gap=None):
     return out
 
 
-def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None,
+def tab_row(cv, th, rect, tabs, active, icon_for=None, ink=None,
             icon_draw=None):
     """The labeled tab ladder (mockup: Config | Blocks | Code | ...). `tabs` is
     a sequence of (id, label, icon_kind); the ACTIVE tab wears the selection
     color (grape in the shipped themes) with its title ink, inactive tabs stay
     quiet on the field. `icon_draw(kind, rect)` draws a tab's icon where it
-    can (a theme's icon set), else `icon_for(kind)`'s 16x16 image. Registers
-    ("tab", id) hits; returns the geometry list so a cached-strip caller can
-    hit-test without redrawing."""
+    can (a theme's icon set), else `icon_for(kind)`'s 16x16 image. Returns the
+    geometry list so a cached-strip caller can hit-test without redrawing."""
     fs = _fs(cv)
     icons = {}
     slim = []
@@ -1365,8 +1141,6 @@ def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None,
         img = icon_for(kind) if icon_for is not None else None
         tab(cv, th, r, tid == active, str(_tab_label(tabs, tid)), labels_on, ink, img,
             icon_draw=icon_draw, kind=kind)
-        if hits is not None:
-            hits.add(r, "tab", tid)
     return rects
 
 

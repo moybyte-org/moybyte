@@ -1,7 +1,7 @@
-"""runtime/ui.py Phase 3a: the six-state interaction model, the `Hits` pointer
-pump, and the two new widget kinds (`row`, `cell`).
+"""runtime/ui.py Phase 3a: the six-state interaction model and the two new
+widget kinds (`row`, `cell`).
 
-Three jobs, in the order they matter:
+Two jobs, in the order they matter:
 
 1. **Nothing existing moved.** `test_shipped_widgets_are_byte_identical` renders
    every SHIPPED widget across all 12 theme family x variant sets at four
@@ -13,8 +13,6 @@ Three jobs, in the order they matter:
    moved.
 2. **The state model resolves right** -- the full precedence lattice, not a
    sample of it.
-3. **The pump obeys its rules**, each of which is a #177 hover-shelf bug made
-   structural, and `Hits` stays BOUNDED (a grid registers zero rects).
 """
 
 import hashlib
@@ -39,22 +37,6 @@ TH = fixture_colors("machine")
 
 # --- test doubles --------------------------------------------------------------
 
-class _Ptr:
-    """The three fields the pump duck-types off moy_input.Pointer. `hovering` is
-    the browser/mouse flag today's Pointer does NOT have -- it is set only by
-    the test that proves the pump reads it when a tier grows one."""
-
-    def __init__(self, visible=True, down=False, hovering=None):
-        self.visible = visible
-        self.down = down
-        if hovering is not None:
-            self.hovering = hovering
-
-
-TOUCH = _Ptr(visible=False)              # touch places the pointer HIDDEN
-CURSOR = _Ptr(visible=True)              # trackball / mouse
-
-
 def _glyph_draw(kind, rect, color, cv):
     """A leaf-safe stand-in for ws._glyph: deterministic, rect + colour only."""
     x, y, w, h = rect
@@ -74,20 +56,6 @@ class _Img:
 
 
 IMG = _Img()
-
-
-class _CountingHits(ui_draw.Hits):
-    """Counts registrations. The budget test below asserts a FLOOR before a
-    cap, so deleting the counter (or the registration) fails rather than
-    passes -- the shape tests/test_top_bar.py established."""
-
-    def __init__(self):
-        ui_draw.Hits.__init__(self)
-        self.adds = 0
-
-    def add(self, rect, verb, arg=None):
-        self.adds += 1
-        ui_draw.Hits.add(self, rect, verb, arg)
 
 
 # =============================================================================
@@ -198,11 +166,10 @@ def _paint_shipped(cv, th):
     ui_draw.chip(cv, th, (104, 94, 60, 18), "G", glyph="edit",
             glyph_draw=_glyph_draw)
     ui_draw.chip(cv, th, (104, 114, 60, 18), "FS3", fs=3)
-    hits = ui_draw.Hits()
     ui_draw.tab_row(cv, th, (104, 136, 200, 20),
                (("cfg", "Config", "gear"), ("code", "Code", "edit"),
                 ("map", "Map", "map")), "code",
-               icon_for=lambda k: IMG, hits=hits)
+               icon_for=lambda k: IMG)
     ui_draw.tab_row(cv, th, (104, 158, 60, 20),
                (("cfg", "Config", "gear"), ("code", "Code", "edit"),
                 ("map", "Map", "map")), "cfg", icon_for=None, ink=5)
@@ -392,263 +359,6 @@ def test_ui_stays_a_leaf():
 
 
 # =============================================================================
-# 3. the pump
-# =============================================================================
-
-def _armed(rect=(10, 10, 40, 20), verb="btn", arg=1):
-    h = ui_draw.Hits()
-    h.add(rect, verb, arg)
-    return h
-
-
-def test_hover_needs_a_pointing_cursor():
-    h = _armed()
-    assert h.pointer_frame(20, 20, CURSOR) is True
-    assert h.hover == ("btn", 1)
-    assert h.state_of("btn", 1) == ui_draw.HOVER
-    assert h.pressed is None
-
-
-def test_touch_never_hovers_but_touch_does_press():
-    h = _armed()
-    assert h.pointer_frame(20, 20, TOUCH) is False     # hidden cursor: no hover
-    assert h.hover is None and h.pressed is None
-    down = _Ptr(visible=False, down=True)
-    assert h.pointer_frame(20, 20, down) is True
-    assert h.pressed == ("btn", 1)
-    assert h.state_of("btn", 1) == ui_draw.PRESSED
-    assert h.hover is None
-
-
-def test_a_down_cursor_does_not_hover():
-    """`visible or hovering, AND NOT down` -- a mouse dragging over a widget is
-    pressing something else, not hovering this."""
-    h = _armed()
-    h.pointer_frame(20, 20, CURSOR)
-    assert h.hover is not None
-    h.pointer_frame(20, 20, _Ptr(visible=True, down=True))
-    assert h.hover is None and h.pressed == ("btn", 1)
-
-
-def test_the_hovering_flag_is_read_when_a_tier_has_one():
-    """moy_input.Pointer has no `hovering` today; the browser/mouse tier will."""
-    h = _armed()
-    assert h.pointer_frame(20, 20, _Ptr(visible=False)) is False
-    assert h.pointer_frame(20, 20, _Ptr(visible=False, hovering=True)) is True
-    assert h.hover == ("btn", 1)
-
-
-def test_pressed_clears_on_release_and_on_leaving_the_rect():
-    h = _armed()
-    down = _Ptr(visible=False, down=True)
-    h.pointer_frame(20, 20, down)
-    assert h.pressed == ("btn", 1)
-    assert h.pointer_frame(200, 200, down) is True     # slid off: cue drops
-    assert h.pressed is None
-    assert h.pointer_frame(20, 20, down) is True       # slid back: re-arms
-    assert h.pressed == ("btn", 1)
-    assert h.pointer_frame(20, 20, TOUCH) is True      # release
-    assert h.pressed is None
-
-
-def test_a_press_that_starts_outside_never_arms():
-    """The press EDGE picks the target: dragging INTO a widget with the button
-    already down must not light it up."""
-    h = _armed()
-    down = _Ptr(visible=False, down=True)
-    h.pointer_frame(200, 200, down)                    # press edge on nothing
-    assert h.pressed is None
-    assert h.pointer_frame(20, 20, down) is False
-    assert h.pressed is None
-
-
-def test_pointer_frame_reports_change_only_when_something_changed():
-    h = _armed()
-    assert h.pointer_frame(20, 20, CURSOR) is True
-    assert h.pointer_frame(21, 21, CURSOR) is False    # same widget, no repaint
-    assert h.pointer_frame(200, 200, CURSOR) is True
-    assert h.pointer_frame(201, 201, CURSOR) is False
-
-
-def test_pointer_leave_drops_both_and_reports_correctly():
-    h = _armed()
-    h.pointer_frame(20, 20, CURSOR)
-    assert h.pointer_leave() is True
-    assert h.hover is None and h.pressed is None
-    assert h.pointer_leave() is False                  # already quiet: no repaint
-    h.pointer_frame(20, 20, _Ptr(visible=False, down=True))
-    assert h.pressed is not None
-    assert h.pointer_leave() is True
-    assert h.pressed is None
-    # Leaving forgets the press-EDGE history: the surface has no pointer past,
-    # so the next sample IS an edge. That is what makes a touch tier's first
-    # sample after a focus change -- which is the finger going down -- still
-    # produce the feedback `pressed` exists for.
-    assert h.pointer_frame(20, 20, _Ptr(visible=False, down=True)) is True
-    assert h.pressed == ("btn", 1)
-
-
-def test_ids_persist_across_clear_and_re_resolve_against_fresh_rects():
-    """Rects live from one full draw to the next; hover/pressed ids do not die
-    with them. This is the stale-after-relayout shelf bug, closed."""
-    h = _armed((10, 10, 40, 20), "btn", 1)
-    h.pointer_frame(20, 20, CURSOR)
-    assert h.hover == ("btn", 1)
-    h.clear()
-    assert h.at(20, 20) is None                        # the rect is gone
-    assert h.hover == ("btn", 1)                       # the id is not
-    h.add((10, 10, 40, 20), "other", 2)                # the surface relaid out
-    assert h.state_of("btn", 1) == ui_draw.HOVER            # still stale, until...
-    assert h.pointer_frame(20, 20, CURSOR) is True     # ...the next SAMPLE
-    assert h.hover == ("other", 2)
-    assert h.state_of("btn", 1) is None
-
-
-def test_a_parked_cursor_reseeds_on_the_next_sample_not_on_first_sighting():
-    """The cursor has not moved a pixel; a NEW widget was drawn under it. It
-    must light up on the next pointer sample -- never require the cursor to
-    move, and never light up merely because the draw happened."""
-    h = ui_draw.Hits()
-    h.add((100, 100, 40, 20), "far", None)
-    assert h.pointer_frame(20, 20, CURSOR) is False
-    assert h.hover is None
-    h.clear()
-    h.add((10, 10, 40, 20), "near", None)              # drawn under the cursor
-    assert h.hover is None                             # the DRAW changed nothing
-    assert h.pointer_frame(20, 20, CURSOR) is True     # the SAMPLE did
-    assert h.hover == ("near", None)
-
-
-def test_state_of_matches_on_both_halves_of_the_id():
-    h = ui_draw.Hits()
-    h.add((0, 0, 10, 10), "row", 3)
-    h.pointer_frame(5, 5, CURSOR)
-    assert h.state_of("row", 3) == ui_draw.HOVER
-    assert h.state_of("row", 4) is None                # same verb, other arg
-    assert h.state_of("cell", 3) is None               # same arg, other verb
-    assert h.state_of("row") is None                   # arg defaults to None
-
-
-def test_at_still_resolves_topmost_and_the_pump_agrees():
-    h = ui_draw.Hits()
-    h.add((0, 0, 100, 100), "under", 1)
-    h.add((10, 10, 20, 20), "over", 2)
-    assert h.at(15, 15) == ("over", 2)
-    h.pointer_frame(15, 15, CURSOR)
-    assert h.hover == ("over", 2)
-
-
-def test_hits_debug_flags_duplicate_ids():
-    """Duplicates are harmless for taps and AMBIGUOUS for state_of. Release
-    keeps the old behaviour (last registered wins); debug says so out loud."""
-    h = ui_draw.Hits()
-    h.add((0, 0, 10, 10), "row", 1)
-    h.add((0, 20, 10, 10), "row", 1)                   # release: allowed
-    assert h.at(5, 25) == ("row", 1)
-    assert ui_draw.HITS_DEBUG is False                      # OFF in the shipped build
-    ui_draw.HITS_DEBUG = True
-    try:
-        g = ui_draw.Hits()
-        g.add((0, 0, 10, 10), "row", 1)
-        g.add((0, 0, 10, 10), "row", 2)                # different arg: fine
-        try:
-            g.add((0, 20, 10, 10), "row", 1)
-        except ValueError as exc:
-            assert "duplicate" in str(exc)
-        else:
-            raise AssertionError("duplicate id not flagged in debug mode")
-    finally:
-        ui_draw.HITS_DEBUG = False
-
-
-# =============================================================================
-# 4. Hits stays BOUNDED -- the measured constraint, as a budget
-# =============================================================================
-
-def _draw_a_representative_surface(cv, th, hits):
-    """One bounded widget set (a tab ladder + a list) beside a 24-cell GRID --
-    the arrangement the P4 map tab has, where per-cell registration would cost
-    ~9.3ms."""
-    ui_draw.tab_row(cv, th, (0, 0, 300, 18),
-               (("a", "A", "gear"), ("b", "B", "edit"), ("c", "C", "map")),
-               "b", hits=hits)
-    for i in range(8):
-        ui_draw.row(cv, th, (0, 20 + i * 20, 200, 18), "ROW %d" % i,
-               on=(i == 2), hits=hits, verb="row", arg=i)
-    for i in range(24):
-        ui_draw.cell(cv, th, (200 + (i % 6) * 18, 20 + (i // 6) * 18, 16, 16),
-                on=(i == 5), state=ui_draw.cell_state(i, 7, -1))
-
-
-def test_hits_add_budget_per_full_draw():
-    """The Phase 3a perf ratchet, in tests/test_top_bar.py's shape: a FLOOR
-    first, so deleting the registrations (or the counter) fails rather than
-    sails through, then a cap."""
-    cv = SystemCanvas(320, 240)
-    th = fixture_colors("night")
-    hits = _CountingHits()
-    for _frame in range(3):                            # three full draws
-        hits.clear()
-        before = hits.adds
-        _draw_a_representative_surface(cv, th, hits)
-        adds = hits.adds - before
-        assert adds >= 11, (
-            "no hit rects registered (%d) -- did the widgets stop calling "
-            "hits.add?" % adds)
-        assert adds <= 12, (
-            "%d hit rects for 3 tabs + 8 rows + a 24-cell grid; the grid must "
-            "register ZERO (see the ui.py module docstring)" % adds)
-        assert len(hits._items) == adds                # nothing leaks per frame
-
-
-def test_a_grid_registers_nothing():
-    """The constraint stated directly: 24 cells, 0 rects. `cell` has no `hits`
-    parameter, so this cannot regress by someone 'unifying' a call site."""
-    cv = SystemCanvas(320, 240)
-    th = fixture_colors("night")
-    hits = _CountingHits()
-    for i in range(24):
-        ui_draw.cell(cv, th, ((i % 6) * 20, (i // 6) * 20, 18, 18), "N",
-                state=ui_draw.cell_state(i, 3, 4))
-    assert hits.adds == 0
-    import inspect
-    assert "hits" not in inspect.signature(ui_draw.cell).parameters
-    assert "hits" in inspect.signature(ui_draw.row).parameters
-
-
-def test_cell_state_is_the_grids_arithmetic_state_of():
-    assert ui_draw.cell_state(3, 3, -1) == ui_draw.HOVER
-    assert ui_draw.cell_state(3, 3, 3) == ui_draw.PRESSED        # pressed wins
-    assert ui_draw.cell_state(3, -1, 3) == ui_draw.PRESSED
-    assert ui_draw.cell_state(3) is None
-    # Grids spell "nothing selected" as -1 (FileGridView.sel), and so do the
-    # sentinels -- so -1 must never match itself into a cue.
-    assert ui_draw.cell_state(-1) is None
-    assert ui_draw.cell_state(-1, -1, -1) is None
-
-
-def test_a_row_reads_its_own_state_from_the_registry():
-    """The ergonomic half of the boundedness rule: a bounded surface wires the
-    pump once and every row registers AND reads itself."""
-    cv = SystemCanvas(200, 60)
-    th = fixture_colors("night")
-    hits = ui_draw.Hits()
-    for i in range(3):
-        ui_draw.row(cv, th, (0, i * 20, 200, 18), "R%d" % i,
-               hits=hits, verb="row", arg=i)
-    assert hits.pointer_frame(10, 25, CURSOR) is True
-    assert hits.hover == ("row", 1)
-    cv2 = SystemCanvas(200, 60)
-    hits.clear()
-    for i in range(3):
-        ui_draw.row(cv2, th, (0, i * 20, 200, 18), "R%d" % i,
-               hits=hits, verb="row", arg=i)
-    # Row 1 now wears the hover edge; rows 0 and 2 do not.
-    assert cv2.pix(0, 20) == th["focus"]
-    assert cv2.pix(0, 0) == th["dim"]
-
-
-# =============================================================================
 # 5. the row kind
 # =============================================================================
 
@@ -677,18 +387,12 @@ def test_row_field_none_paints_nothing_and_edge_is_optional():
     assert cv.pix(0, 0) == 3
 
 
-def test_row_disabled_dims_and_does_not_register():
-    """"dim ink, NON-registering": an unusable row must not be tappable, which
-    is exactly what the four hand-rolled disabled sites get wrong today."""
+def test_row_disabled_dims():
     th = fixture_colors("night")
-    cv = SystemCanvas(200, 20)
-    hits = ui_draw.Hits()
-    ui_draw.row(cv, th, (0, 0, 200, 20), "LOCKED", disabled=True,
-           hits=hits, verb="row", arg=0)
-    assert hits.at(10, 10) is None
-    hits.clear()
-    ui_draw.row(cv, th, (0, 0, 200, 20), "OPEN", hits=hits, verb="row", arg=0)
-    assert hits.at(10, 10) == ("row", 0)
+    a, b = SystemCanvas(200, 20), SystemCanvas(200, 20)
+    ui_draw.row(a, th, (0, 0, 200, 20), "LOCKED", disabled=True)
+    ui_draw.row(b, th, (0, 0, 200, 20), "LOCKED")
+    assert bytes(a._buf) != bytes(b._buf)
 
 
 def test_row_truncates_the_label_and_the_value_inside_the_rect():
@@ -950,29 +654,3 @@ def test_the_toggle_is_a_chip_that_reads_switched_on():
     ui_draw.chip(a, th, (2, 2, 70, 18), "ON", on=True, kind="toggle")
     ui_draw.chip(b, th, (2, 2, 70, 18), "ON", on=True)
     assert bytes(a._buf) != bytes(b._buf)
-
-
-def test_no_tap_is_lost_past_the_capacity(capsys):
-    """An add past the hit buffer's capacity is refused, said ONCE per
-    surface, and an error under HITS_DEBUG (docs/kernel_toolkit_2026-10.md
-    §3.4): the widget drawn last must never lose its tap silently."""
-    hits = ui_draw.Hits(cap=4)
-    for i in range(6):
-        hits.add((i * 10, 0, 10, 10), "k", i)
-    assert len(hits._items) == 4
-    assert hits.at(5, 5) == ("k", 0) and hits.at(45, 5) is None
-    out = capsys.readouterr().out
-    assert out.count("HITS FULL") == 1, out
-    assert ui_draw.HITS_CAP == 32
-    ui_draw.HITS_DEBUG = True
-    try:
-        h = ui_draw.Hits(cap=1)
-        h.add((0, 0, 1, 1), "a")
-        try:
-            h.add((0, 0, 1, 1), "b")
-        except OverflowError:
-            pass
-        else:
-            raise AssertionError("a full buffer did not raise under HITS_DEBUG")
-    finally:
-        ui_draw.HITS_DEBUG = False

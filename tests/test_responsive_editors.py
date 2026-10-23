@@ -380,7 +380,7 @@ def test_a_pending_commit_does_not_move_the_view_either(tmp_path):
 
     assert _view(ed) == was
     assert moy_carts.load(path)["src"] == ed.text()
-    assert (ws.save_status or "").startswith("SYNTAX"), ws.save_status
+    assert ws.code_err
 
 
 def test_the_code_tab_still_reflows_when_the_window_really_changes(tmp_path):

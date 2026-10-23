@@ -34,8 +34,7 @@ specs (field, ink, edge), and `DEFAULT_METRICS` each kind a tuple of pads,
 edge rings, boxes and alignment, flattened per theme into shared tuples behind a
 four-entry identity ring; `runtime/skin.py` holds the skins as deltas over
 both. Geometry is pure and separate from drawing. `widget_state` resolves the
-six-state ladder, `Hits` is the pointer pump for bounded widget sets and
-`ScrollRegion` the one scroll model.
+six-state ladder and `ScrollRegion` is the one scroll model.
 
 Not data yet: the widget bodies (each a Python function issuing three to eight
 canvas calls), the glyph vocabulary and its raster (twice: `chrome._blit_glyph`
@@ -259,20 +258,12 @@ the author's header the table generates.
 
 ### 3.4 Interaction state: caller-owned buffers, not handles
 
-`Hits` and `ScrollRegion` are state a surface owns for its life. Their rules
+`ScrollRegion` and `DragTap` are state a surface owns for its life. Their rules
 cross to C as pure functions over a state buffer **the caller owns**: a
 `bytearray` inside the Python object, or a span of the compiled app's linear
 memory. The kernel holds nothing between calls, so there is no table and
 nothing to end at a VM stop: the plan's §4.3 rule holds with no handle.
 
-- **Hits.** Ids are `int32`. A compiled app chooses its own. The Python face
-  interns `(verb, arg)` to an id per instance, **resets the intern at every
-  `clear()`**, and keeps `hover` and `pressed` as the `(verb, arg)` values
-  `state_of` compares, so they persist across a clear as today. The buffer's
-  rect capacity defaults to twice the most rects any surface registers in the
-  goldens' frames, which step 1 measures and records as configuration. An add
-  past it answers FULL, is counted and printed once per surface, and raises
-  under `HITS_DEBUG`. The grid rule stands: `cell` registers nothing.
 - **ScrollRegion and DragTap.** The offset, extent, drag and fling are the
   buffer's. The fling decays by `FRICTION ** dt` in single-precision float,
   which is what the boards' MicroPython computes, so the differential runs on
@@ -419,7 +410,7 @@ host. No pixel-moving theming phase and no Studio step overlaps the sprint
 | `runtime/ui.py`: `_token`, `state_token`, `_flatten_kind`, `_bind_theme`, `widget_state`, `metrics`, `state_colors` | the C style resolution (§3.1) | the bodies; `state_colors` and `metrics` stay as faces |
 | `runtime/ui.py`: `set_skin` and its callable seam `fn(th, kind, state)` | the skin by name in C | the seam, with `tests/test_ui_states.py`'s case that installs a callable; no runtime caller uses it |
 | `runtime/ui.py`: the widget bodies (button through `fill_uncovered`), `scroll_cues` | the C primitives (§3.3) | the bodies, kept under `tests/` as the twin |
-| `runtime/ui.py`: `Hits`, `ScrollRegion`, `DragTap`, `cell_state`, `row_drag` | C over caller-owned buffers (§3.4) | the rules; the objects stay as the buffers' owners, with `blit_shift` |
+| `runtime/ui.py`: `ScrollRegion`, `DragTap`, `row_drag` | C over caller-owned buffers (§3.4) | the rules; the objects stay as the buffers' owners, with `blit_shift` |
 | `runtime/ui.py`: `inset`, `cut_*`, `hsplit`, `vsplit`, `wrap_words` | `moy_ui` and `moy_text_wrap` | the bodies |
 | `runtime/skin.py` | the skins as deltas in the style file; `names`, `use`, `active` on the face | the module |
 | `runtime/chrome.py`: `_GLYPHS`, `_glyph_runs`, `_glyph_pack`, `_blit_glyph` | the style file's glyphs; `moy_ui_glyph` | those (§5 lists the readers) |
@@ -450,7 +441,7 @@ steps 2, 3 and 6, not only at the end.
    `native/moy_ui/style.json` and the strings' `en.json` written from today's
    tables and literals, held equal by a test; the widget matrix extended; the
    twin under `tests/` with its fuzz; per-widget op budgets pinned from the
-   twin's counted ops; the Hits capacity measured; a ratchet that every key a
+   twin's counted ops; a ratchet that every key a
    style spec reads, in every theme dict a widget is handed, is in the token
    vocabulary; the A side of every A/B (§10) captured into #66. No behaviour
    moves.
@@ -471,9 +462,8 @@ steps 2, 3 and 6, not only at the end.
 6. **Buttons and frames.** `button`, `chip` (with the toggle kind), `tab_row`,
    `status_row`, `panel`, `toolbar`, `focus_ring`, `dialog`, `text_field`, the
    game-canvas family, the rect algebra.
-7. **Interaction.** `Hits`, `ScrollRegion` and `DragTap` over caller-owned
-   buffers; `tests/test_ui_states.py`'s pump rules run against the C, the
-   physics on unix MicroPython.
+7. **Interaction.** `ScrollRegion` and `DragTap` over caller-owned
+   buffers, the physics on unix MicroPython.
 8. **Strings.** The table with English; moy_chrome's and the kernel's literals
    on it; the source tag's gate and the `PY` ratchet (§2.3).
 9. **The `ui` rows for wasm.** The rows in roles.json, the RUN sink with its
@@ -500,8 +490,6 @@ first runs it red against that bug, then green.
 | strings are data | `moy_text` refuses `LIT`, and the C-drawn screens rendered under a pseudo-locale draw no `LIT` call; a source ratchet finds no string literal passed to the raster in `native/`; a pack with a mismatched conversion reads English for that id | a literal left in C; a translation that breaks `snprintf` |
 | one text path | a source ratchet over `native/` and `runtime/`: `mg_text_raw` (petme128's lane) and `mg_text_font` (a loaded font's) are called only from `moy_text`, which the print gate enters, and `draw_scaled`, `panel_lines` and `wrap_words` have no body left; `tests/spec_conformance/hashes.json` and the Lua C API unchanged | a second rasteriser left behind; a cart pixel moved |
 | `surface.glyph` gone | roles.json and the role ratchet; `_GLYPHS` named nowhere in `runtime/`; no `chrome_glyph` | a pushed copy left to drift |
-| one pump | the pump rules run through the Python face and, in the wasm fixture, through input the console delivers to the run's snapshot (a scripted touch on the host and on glass), with the same states out | two pumps diverging; a fixture that feeds its pump by hand |
-| no tap is lost | a surface registering past the default capacity logs FULL in the test and raises under `HITS_DEBUG` | a silent drop of the widget drawn last |
 | a compiled app draws a button and a scrolling list | the fixture under WAMR on the host, in the browser suite, and on the T-Deck and the P4: pixels hashed per widget against the host, a drag scrolls the list, a cart `pal()` left set does not change them, zero upcalls of every class, the VM-free verdict unchanged | a `ui` row routed through Python; a RUN sink that draws through the cart's draw state |
 | the standing meters | all five boards passing; `KERNEL_SRAM`, internal SRAM free and its low-water with the radios up, within the plan's §6.1 share; mp_task's stack high-water no lower than step 1's; each image within this sprint's budget (§11) and over its floor | what every sprint's gate guards against, and a deeper C chain under the VM's stack |
 
@@ -547,8 +535,7 @@ meters check it.
 - Text measures bytes, the one accepted pixel difference, outside the goldens
   (§7).
 - Glyph spans are derived at draw time (§5); `chrome.NAMES` stays Python (§8).
-- Interaction state lives in buffers the caller owns, with the intern reset
-  per clear and a logged capacity (§3.4).
+- Interaction state lives in buffers the caller owns (§3.4).
 
 ## 13. Claims this sprint falsifies
 

@@ -198,7 +198,7 @@ def test_run_code_refuses_invalid_source_and_keeps_editor(tmp_path):
     ws.run_code()
 
     assert ws.screen == "menu" and ws.menu_view == "code"   # stayed in the editor
-    assert ws.save_status and "SYNTAX" in ws.save_status
+    assert ws.cart_error and "Syntax error" in ws.cart_error
     # The good source on disk is intact (refused write).
     assert moy_carts.load(path)["src"] == good
 
@@ -361,7 +361,6 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
     ws.editor.set_text("def _draw():\n    cls(7)\n")
     assert ws.save_code() is True
     assert ws.cart_error is None          # SAVE_OK cleared the stale crash text
-    assert ws.save_status is None         # ...and the stale SYNTAX text (invisible save)
     assert "cls(7)" in moy_carts.load(path)["src"]
 
     # Closing the editor (the X button) returns to the desktop and the FIXED cart
@@ -376,7 +375,7 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
 
 
 def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
-    # A failed sprite save must set save_status/cart_error (visible on device),
+    # A failed sprite save must set cart_error (visible on device),
     # mirroring save_code -- not fail silently.
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n", title="Sprites")
     assert ws.sheet is not None
@@ -386,7 +385,6 @@ def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
         raise OSError("disk full")
     monkeypatch.setattr(ws.carts_store, "save_sprites", _boom)
     ws.save_sprites()
-    assert ws.save_status == "CAN'T SAVE"
     assert ws.cart_error is not None and "sprites" in ws.cart_error.lower()
     assert ws.sheet.dirty is True         # not marked clean on failure
 

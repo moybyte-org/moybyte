@@ -17,7 +17,7 @@ through the injected store (`ws.carts_store`) inside the SD session
 `moy_journal`). It keeps a `ws` back-reference for the Workstation-owned deps
 the builders and commits need: the SD-session wrapper `ws._with_sd`, the cart
 store `ws.carts_store`, `ws.can_manage`, the run's audio session `ws.audio`,
-the save-status UI fields `ws.save_status`/`ws.cart_error` and
+the save-failure UI field `ws.cart_error` and
 the achievements tracker `ws.ach`.
 
 `Project` (runtime/project.py) is this class plus the Editor's half -- the
@@ -376,7 +376,7 @@ class ProjectStore:
     # These write the cart's live data back through the injected store inside the
     # SD session (ws._with_sd). The Workstation ws.save_* /
     # ws._save_config names stay as one-line forwards (tested surface); the
-    # save-status UI fields (ws.save_status/ws.cart_error) + achievements (ws.ach)
+    # save-failure UI field (ws.cart_error) + achievements (ws.ach)
     # they touch stay on Workstation, reached via the ws back-reference.
 
     def commit_config(self):
@@ -477,20 +477,14 @@ class ProjectStore:
                 lambda: ws.carts_store.save_code(self.cart, src, force, name))
             _t_write = _ticks_diff(_ticks_ms(), _t0)
             if status == ws.carts_store.SAVE_BAD_SYNTAX:
-                ws.save_status = "CAN'T SAVE " + str(smsg)
                 ws.cart_error = "Could not save -- " + str(smsg)
                 return False
             parsed = status == ws.carts_store.SAVE_OK
             if ws.editor is not None:
                 ws.editor.dirty = False
-            # Save is invisible (spec Section 7 / #111): no "SAVED" happy path --
-            # save_status carries FAILURES only, so a successful commit just
-            # CLEARS any stale failure text (the old "SAVED" write also did the
-            # clearing, by overwrite; same across every commit_* verb). A KEPT
-            # write leaves the syntax badge the code surface just wrote standing:
-            # the line is safe on disk AND it still does not parse.
-            if parsed:
-                ws.save_status = None
+            # Save is invisible (spec Section 7 / #111): no "SAVED" happy path.
+            # A KEPT write leaves the syntax badge the code surface just wrote
+            # standing: the line is safe on disk AND it still does not parse.
             # #111 phase 4: close any live typing burst, drain the code History's op
             # batch into this commit's journal line (mirrors commit_sprites/map), then
             # re-baseline (clear) -- the CLEAN boundary: in-RAM undo covers edits SINCE
@@ -535,29 +529,27 @@ class ProjectStore:
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
             ws.cart_error = "Could not save -- " + txt
             print("Moybyte save code failed:", txt)
             return False
 
     def _commit_asset(self, what, rel, payload, save, hist, clean=None, note=None):
         """ONE body for the asset commits (sprites / map / scene / sounds):
-        the store write under the SD wrapper, the editor marked clean, the
-        stale failure text cleared, then the durable undo line -- this
+        the store write under the SD wrapper, the editor marked clean, then
+        the durable undo line -- this
         snapshot IS a keyframe, so the tab's in-RAM op History is drained
         into the journal entry and re-baselined (#111): in-RAM undo covers
         edits SINCE the last commit, the journal covers commit-to-commit, and
         the two never double-count a stroke. flush() runs only after the store
         write succeeded, so a failed save cannot swallow the batch. A failed
-        save must be VISIBLE on device (no serial in the run loop), hence the
-        status + cart_error, _err_text-guarded so a weird exception's __str__
+        save must be VISIBLE on device (no serial in the run loop), hence
+        cart_error, _err_text-guarded so a weird exception's __str__
         cannot itself escape. Returns True on a persisted commit."""
         ws = self.ws
         try:
             ws._with_sd(save)
             if clean is not None:
                 clean.dirty = False
-            ws.save_status = None             # clear stale failure text (see commit_code)
             ops = hist.flush() if hist is not None else None
             self._journal(rel, payload, ops=ops)
             if hist is not None:
@@ -567,7 +559,6 @@ class ProjectStore:
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
             ws.cart_error = "Could not save " + what + " -- " + txt
             print("Moybyte save " + what + " failed:", txt)
             return False

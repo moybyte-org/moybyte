@@ -321,18 +321,16 @@ the look (`runtime/appearance.py`'s `content_colors`).
 **Additive roles come with the phase that draws them**, under §3's rule, each
 joining the token row (and native/moy_app's vocabulary, which
 `tests/test_ui_style_data.py` holds to it) with a derivation rule, so every
-existing theme keeps its pixels. Phase 3's painter added six (2026-10-12):
+existing theme keeps its pixels. Phase 3's painter added five (2026-10-12):
 
 | role | what it is | derived from |
 |---|---|---|
 | `shade_hi`, `shade_lo`, `shade_dark` | the bevel shades a surface's edges draw in (§4.4) | `hilite` (white in the light variant), `dim`, black |
 | `ink_accent` | emphasis text on the surface: the web console's pin | `accent`; `ink` in the light variant |
-| `ink_note` | a note's name in the Music tab's step list | peach; brown in the light variant |
 | `band_light` (a flag) | an in-window bar band is light, and its zone owners ink it dark | false; true in the light variant |
 
-They are the three `light_chrome()` branches outside a `_base` branch turned
-into tokens (`runtime/web_console_ui.py`, `runtime/music_editor_ui.py`,
-`runtime/bar_layer.py`). A seed sets them itself where its look needs them.
+They are the two `light_chrome()` branches outside a `_base` branch turned
+into tokens (`runtime/web_console_ui.py`, `runtime/bar_layer.py`). A seed sets them itself where its look needs them.
 An `_ink` for a fill role that lacks one comes when a surface first paints
 text on it.
 
@@ -982,13 +980,12 @@ Per variant, with B the source's row and R the result, R starting as B:
    `bar`, `title_inactive`) keep B's value if it clears them, else take the dimmest that does
    (the least ratio, the lower index on a tie) of the ramp and the greys 5,
    6, 13, 49, 50 and 53, else R's `ink` or `chrome_ink`.
-5. **Content.** `ink_note` keeps B's value if it clears R's `surface`,
-   else takes its value in style.json's derive set for a surface of that
-   side (the `light` set where black beats white on R's `surface`, the
-   `dark` set else) if that clears, else R's `ink`. Each `code_*` role does
-   the same at the code floor (`theme.code`, 4.5:1), and its last resort is
-   black or RGB white, the larger ratio: one of the two always reaches it,
-   where MOY64's white does not on a mid grey.
+5. **Content.** Each `code_*` role keeps B's value if it clears R's
+   `surface` at the code floor (`theme.code`, 4.5:1), else takes its value
+   in style.json's derive set for a surface of that side (the `light` set
+   where black beats white on R's `surface`, the `dark` set else) if that
+   clears, else black or RGB white, the larger ratio: one of the two always
+   reaches it, where MOY64's white does not on a mid grey.
    `block_*`, `play`, `author` and `danger` keep B's: they are meanings, not
    looks. A button kind that inks `danger` or `value` on its field holds the
    pair to the floor itself, through its floor forms (style.json's `floors`,

@@ -128,16 +128,13 @@ def _chip(m, cv, th, c):
 
 
 def _row(m, cv, th, c):
-    hits = m.Hits()
     m.row(cv, th, c["box"], c["label"], kind=c["kind"], on=c["on"],
           hot=c["hot"], disabled=c["disabled"], state=c["state"],
           icon_img=IMG if c["icon"] else None,
           glyph="gear" if c["glyph"] else None,
           glyph_draw=_gd(m, c),
           value=c["label2"] if c["flag"] else None, edge=c["n"] != 0,
-          pad=c["pad"], text_dy=c["dy"], hits=hits, verb="row", arg=c["int"],
-          scale=c["scale"])
-    return [(tuple(int(v) for v in it[0]), it[1], it[2]) for it in hits._items]
+          pad=c["pad"], text_dy=c["dy"], scale=c["scale"])
 
 
 def _cell(m, cv, th, c):
@@ -156,11 +153,9 @@ TABS = (("cfg", "Config", "gear"), ("code", "Code", "edit"),
 
 
 def _tab_row(m, cv, th, c):
-    hits = m.Hits()
-    rects = m.tab_row(cv, th, c["box"], TABS[:c["n"]], "code",
-                      icon_for=(lambda k: IMG) if c["icon"] else None,
-                      hits=hits, ink=c["int"] if c["flag"] else None)
-    return rects, [(it[0], it[1], it[2]) for it in hits._items]
+    return m.tab_row(cv, th, c["box"], TABS[:c["n"]], "code",
+                       icon_for=(lambda k: IMG) if c["icon"] else None,
+                       ink=c["int"] if c["flag"] else None)
 
 
 def _status_row(m, cv, th, c):

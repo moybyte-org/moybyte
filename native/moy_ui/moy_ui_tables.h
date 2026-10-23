@@ -5,14 +5,13 @@
 
 #include <stdint.h>
 
-#define MOY_UI_TOKENS 39
-#define MOY_UI_ROLES 45
+#define MOY_UI_TOKENS 38
+#define MOY_UI_ROLES 44
 #define MOY_UI_STATES 6
 #define MOY_UI_KINDS 27
 #define MOY_UI_COLOR_KINDS 20
 #define MOY_UI_SLOTS 52
 #define MOY_UI_SPECS 31
-#define MOY_UI_HITS_CAP 32
 #define MOY_UI_GLYPHS 63
 #define MOY_UI_GLYPH_SIZE 12
 
@@ -50,13 +49,12 @@ enum {
     MOY_UI_T_SHADE_LO = 29,
     MOY_UI_T_SHADE_DARK = 30,
     MOY_UI_T_INK_ACCENT = 31,
-    MOY_UI_T_INK_NOTE = 32,
-    MOY_UI_T_BAND_LIGHT = 33,
-    MOY_UI_T_VALUE = 34,
-    MOY_UI_T_VALUE_INK = 35,
-    MOY_UI_T_SUNK = 36,
-    MOY_UI_T_LCD = 37,
-    MOY_UI_T_LCD_INK = 38,
+    MOY_UI_T_BAND_LIGHT = 32,
+    MOY_UI_T_VALUE = 33,
+    MOY_UI_T_VALUE_INK = 34,
+    MOY_UI_T_SUNK = 35,
+    MOY_UI_T_LCD = 36,
+    MOY_UI_T_LCD_INK = 37,
 };
 
 // The states, strongest first (widget_state's precedence).
@@ -228,7 +226,6 @@ enum {
 typedef struct { int8_t n; int8_t t[3]; } moy_ui_spec_t;
 extern const int moy_ui_n_tokens, moy_ui_n_roles, moy_ui_n_states, moy_ui_n_kinds,
     moy_ui_n_color_kinds, moy_ui_n_glyphs;
-extern const int moy_ui_hits_cap;
 extern const char *const moy_ui_token_names[MOY_UI_TOKENS];
 extern const char *const moy_ui_role_names[MOY_UI_ROLES];
 extern const int8_t moy_ui_alias[MOY_UI_ROLES - MOY_UI_TOKENS][3];
@@ -257,7 +254,7 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_SEEDS 3
 #define MOY_THEME_BYTES 16384
 #define MOY_THEME_DEPTH 4
-#define MOY_THEME_RULES 74
+#define MOY_THEME_RULES 72
 #define MOY_THEME_PAIRS 10
 #define MOY_THEME_CONTRAST 30
 // The code roles, each held to its own floor on the code surface; bit
@@ -289,7 +286,7 @@ extern const moy_theme_cell_t moy_theme_cells[MOY_THEME_CELLS];
 extern const int8_t moy_theme_sprite_slots[MOY_THEME_SPRITE_SLOTS];
 extern const char *const moy_theme_sheet_keys[MOY_THEME_SHEETS];
 #define MOY_THEME_FONT_FILES 2  // the seeds' fonts and their licence texts
-#define MOY_THEME_ROLES 56  // the tokens, then the content roles
+#define MOY_THEME_ROLES 55  // the tokens, then the content roles
 #define MOY_THEME_METRICS 3
 #define MOY_THEME_EFFECTS 3
 #define MOY_THEME_EFFECTS_CAP 32
@@ -443,7 +440,7 @@ extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];
 #define MOY_THEME_LEAVES 202
 #define MOY_THEME_LOOK_FIELDS 166
 #define MOY_THEME_LOOK_GROUPS 30
-#define MOY_THEME_ENUM_NAMES 123
+#define MOY_THEME_ENUM_NAMES 122
 #define MOY_THEME_BTN_KINDS 5
 #define MOY_THEME_BTN_LEAVES 8
 #define MOY_THEME_BTN_LEAF0 131  // buttons.normal's first leaf

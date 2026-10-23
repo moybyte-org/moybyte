@@ -54,7 +54,7 @@ _TOKENS = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
            "ink_dim", "border", "selection", "selection_ink", "focus", "play",
            "author", "danger", "surface_light", "bar", "bar_edge", "bar_light",
            "chrome_ink", "chrome_ink_dim", "title_active", "title_inactive",
-           "shade_hi", "shade_lo", "shade_dark", "ink_accent", "ink_note",
+           "shade_hi", "shade_lo", "shade_dark", "ink_accent",
            "band_light", "value", "value_ink", "sunk", "lcd", "lcd_ink")
 _FLAGS = ("surface_light", "bar_light", "band_light")
 NAME_MAX = 31

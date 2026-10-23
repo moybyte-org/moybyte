@@ -1,7 +1,7 @@
 """The console APP API (docs/app_api_v1.md): register_app wires a cartridge
 identity to a responsive system process -- launcher dispatch, router kind,
 window minimums, text mode, relayout fan-out -- and Calc is the reference app
-built only on the public seams (ui toolkit + Hits + the registry)."""
+built only on the public seams (ui toolkit + the registry)."""
 
 from pathlib import Path
 

@@ -88,12 +88,12 @@ static const char *const TOKEN_NAMES[MOY_APP_TOKENS] = {
     "border", "selection", "selection_ink", "focus", "play", "author", "danger",
     "surface_light", "bar", "bar_edge", "bar_light", "chrome_ink",
     "chrome_ink_dim", "title_active", "title_inactive", "shade_hi", "shade_lo",
-    "shade_dark", "ink_accent", "ink_note", "band_light", "value", "value_ink",
+    "shade_dark", "ink_accent", "band_light", "value", "value_ink",
     "sunk", "lcd", "lcd_ink",
 };
 #define TOKEN_SURFACE_LIGHT 20
 #define TOKEN_BAR_LIGHT 23
-#define TOKEN_BAND_LIGHT 33
+#define TOKEN_BAND_LIGHT 32
 
 static const char *const KIND_NAMES[MOY_APP_KINDS] = {
     "docs", "drawings", "sprites", "music",

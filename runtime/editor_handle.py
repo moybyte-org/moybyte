@@ -707,7 +707,7 @@ class EditorHandle:
 
     def tap(self, px, py, click=True):
         """Route a pointer at `(px, py)` through the LAST DRAWN frame -- the
-        draw pass is the hit map, `ui.Hits`' rule.
+        draw pass is the hit map.
 
         Answers what the tap meant, so the skin can act on it:
         `("link", name)` a `[[note]]` (open it), `("check", row)` a checkbox

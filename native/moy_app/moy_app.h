@@ -102,7 +102,7 @@ enum {
 #define MOY_APP_CLIP_MAX 4096u  // the clipboard's text, in bytes (configuration)
 #define MOY_APP_KINDS 4u        // the files kinds a permission may name
 #define MOY_APP_NAME_MAX 31u    // a theme's and a variant's name bytes
-#define MOY_APP_TOKENS 39u      // the token vocabulary's roles
+#define MOY_APP_TOKENS 38u      // the token vocabulary's roles
 #define MOY_TOKEN_ABSENT INT32_MIN  // a role the live theme does not set
 #define MOY_APP_DOC_MAX 255u    // a picture's kind's and name's bytes
 #define MOY_APP_ARTWORK_NS "paint"  // the namespace Paint's open picture is kept in

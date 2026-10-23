@@ -111,7 +111,7 @@ INK_PAIRS = (("ink", ("surface", "surface_alt")), ("chrome_ink", ("panel", "bar"
 DIM_INKS = (("ink_dim", ("surface",)), ("chrome_ink_dim", ("panel", "bar", "title_inactive")))
 ACCENT_INKS = ("focus", "ink_accent")
 SYNTAX = ("code_text", "code_keyword", "code_string", "code_number", "code_comment",
-          "code_builtin", "ink_note")
+          "code_builtin")
 DIM_POOL = (5, 6, 13, 49, 50, 53)
 
 

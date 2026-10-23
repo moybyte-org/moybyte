@@ -1,4 +1,4 @@
-// The toolkit's interaction rules (moy_ui.h): Hits, ScrollRegion and DragTap
+// The toolkit's interaction rules (moy_ui.h): ScrollRegion and DragTap
 // as pure functions over state buffers their CALLER owns -- a bytearray in a
 // Python object, or a span of a compiled app's memory. The kernel keeps
 // nothing between calls: no table, no handle, nothing to end at a VM stop.
@@ -7,59 +7,6 @@
 #include <string.h>
 
 #include "moy_ui.h"
-
-// -- Hits -------------------------------------------------------------------------------
-
-void moy_ui_hits_clear(int32_t *b) {
-    b[MOY_UI_HITS_N] = 0;
-}
-
-int moy_ui_hits_add(int32_t *b, size_t words, int32_t x, int32_t y, int32_t w, int32_t h,
-                    int32_t id) {
-    int32_t n = b[MOY_UI_HITS_N];
-    size_t cap = (words - MOY_UI_HITS_HDR) / 5;
-    if (n < 0 || (size_t)n >= cap) {
-        b[MOY_UI_HITS_FULL]++;
-        return MOY_UI_FULL;
-    }
-    int32_t *r = b + MOY_UI_HITS_HDR + (size_t)n * 5;
-    r[0] = x;
-    r[1] = y;
-    r[2] = w;
-    r[3] = h;
-    r[4] = id;
-    b[MOY_UI_HITS_N] = n + 1;
-    return MOY_UI_OK;
-}
-
-int32_t moy_ui_hits_at(const int32_t *b, int32_t px, int32_t py) {
-    for (int32_t i = b[MOY_UI_HITS_N] - 1; i >= 0; i--) {    // drawn later = on top
-        const int32_t *r = b + MOY_UI_HITS_HDR + (size_t)i * 5;
-        if (r[0] <= px && px < r[0] + r[2] && r[1] <= py && py < r[1] + r[3]) {
-            return r[4];
-        }
-    }
-    return -1;
-}
-
-// One pointer sample. `p` carries the previous sample's held state and the
-// press edge's target (armed) in, and the new hover, pressed and armed out.
-void moy_ui_hits_pump(const int32_t *b, int32_t px, int32_t py, int down, int pointing,
-                      moy_ui_pump_t *p) {
-    int32_t hit = moy_ui_hits_at(b, px, py);
-    if (down) {
-        if (!p->down) {
-            p->armed = hit;                     // the press EDGE picks the target
-        }
-        p->pressed = (p->armed >= 0 && hit == p->armed) ? p->armed : -1;
-        p->hover = -1;                          // a pointer that is down never hovers
-    } else {
-        p->armed = -1;
-        p->pressed = -1;
-        p->hover = pointing ? hit : -1;
-    }
-    p->down = down ? 1 : 0;
-}
 
 // -- ScrollRegion -------------------------------------------------------------------------
 

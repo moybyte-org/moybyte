@@ -90,15 +90,6 @@ def _tap_bar(ws, rect):
     ws.pointer.click = False
 
 
-def _hit_rect(ns, verb, arg=None):
-    """The rect the cart's own draw pass registered for one widget -- so a tap
-    test aims at what the app drew rather than at a hardcoded number."""
-    for rect, v, a in ns["hits"]._items:
-        if v == verb and a == arg:
-            return rect
-    raise AssertionError("the cart registered no %r hit" % (verb,))
-
-
 # ---------------------------------------------------------------------------
 # the permission -> role map
 # ---------------------------------------------------------------------------

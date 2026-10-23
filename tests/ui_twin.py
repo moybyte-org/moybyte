@@ -1,6 +1,6 @@
 """The oracle for native/moy_ui (docs/kernel_toolkit_2026-10.md §7): the
 toolkit's Python bodies as they were before the crossing -- runtime/ui.py's
-style resolution, widgets, Hits, ScrollRegion and DragTap -- kept here as
+style resolution, widgets, ScrollRegion and DragTap -- kept here as
 tests/spine_twin.py keeps the spine's. The fuzz in
 tests/test_ui_twin.py draws every case through this and through the shipped
 toolkit and compares them pixel by pixel; tests/test_ui_style_data.py holds
@@ -343,81 +343,6 @@ def _bind_theme(th):
     ring.insert(0, (th, _FLAT))
     del ring[_FLAT_RING_MAX:]
 
-def cell_state(index, hover_index=-1, pressed_index=-1):
-    if index < 0:
-        return None
-    if index == pressed_index:
-        return PRESSED
-    if index == hover_index:
-        return HOVER
-    return None
-HITS_DEBUG = False
-
-class Hits:
-
-    def __init__(self):
-        self._items = []
-        self.hover = None
-        self.pressed = None
-        self._armed = None
-        self._down = False
-
-    def clear(self):
-        del self._items[:]
-
-    def add(self, rect, verb, arg=None):
-        if HITS_DEBUG:
-            items = self._items
-            for i in range(len(items)):
-                it = items[i]
-                if it[1] == verb and it[2] == arg:
-                    raise ValueError('duplicate Hits id (%r, %r): state_of() would be ambiguous' % (verb, arg))
-        self._items.append((rect, verb, arg))
-
-    def at(self, px, py):
-        for i in range(len(self._items) - 1, -1, -1):
-            (rect, verb, arg) = self._items[i]
-            if rect_in(px, py, rect):
-                return (verb, arg)
-        return None
-
-    def pointer_frame(self, px, py, pointer):
-        down = bool(getattr(pointer, 'down', False))
-        pointing = bool(getattr(pointer, 'visible', False) or getattr(pointer, 'hovering', False))
-        hit = self.at(px, py)
-        if down:
-            if not self._down:
-                self._armed = hit
-            armed = self._armed
-            new_pressed = armed if armed is not None and hit == armed else None
-            new_hover = None
-        else:
-            self._armed = None
-            new_pressed = None
-            new_hover = hit if pointing else None
-        self._down = down
-        changed = new_hover != self.hover or new_pressed != self.pressed
-        self.hover = new_hover
-        self.pressed = new_pressed
-        return changed
-
-    def pointer_leave(self):
-        changed = self.hover is not None or self.pressed is not None
-        self.hover = None
-        self.pressed = None
-        self._armed = None
-        self._down = False
-        return changed
-
-    def state_of(self, verb, arg=None):
-        p = self.pressed
-        if p is not None and p[0] == verb and (p[1] == arg):
-            return PRESSED
-        h = self.hover
-        if h is not None and h[0] == verb and (h[1] == arg):
-            return HOVER
-        return None
-
 def button(cv, th, rect, label, kind='normal', on=False, icon_img=None, glyph=None, glyph_draw=None, disabled=False, state=None):
     fs = _fs(cv)
     (x, y, w, h) = rect
@@ -502,12 +427,10 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None, glyph=None, glyph_dr
         oy = m[CHIP_MINY]
     cv.print(label, x + ox, y + oy, ink, 1)
 
-def row(cv, th, rect, label, kind='row', on=False, hot=False, disabled=False, state=None, colors=None, icon_img=None, glyph=None, glyph_draw=None, value=None, value_ink=None, edge=True, pad=None, text_dy=None, hits=None, verb=None, arg=None, fs=None, pad_right=None, scale=1, glyph_ink=None, glyph_size=None):
+def row(cv, th, rect, label, kind='row', on=False, hot=False, disabled=False, state=None, colors=None, icon_img=None, glyph=None, glyph_draw=None, value=None, value_ink=None, edge=True, pad=None, text_dy=None, fs=None, pad_right=None, scale=1, glyph_ink=None, glyph_size=None):
     if fs is None:
         fs = _fs(cv)
     (x, y, w, h) = rect
-    if state is None and hits is not None and (verb is not None):
-        state = hits.state_of(verb, arg)
     st = widget_state(on, hot, disabled, state)
     if colors is None:
         colors = state_colors(th, kind, st)
@@ -555,8 +478,6 @@ def row(cv, th, rect, label, kind='row', on=False, hot=False, disabled=False, st
         label = fit_bytes(label.encode('utf-8'), maxc)    # bytes (step 5)
         if label:
             cv.print(label.decode('utf-8'), tx, ty, ink, scale)
-    if hits is not None and verb is not None and (st != DISABLED):
-        hits.add(rect, verb, arg)
 
 def row_content_rect(rect, fs=1, pad=None, pad_right=None, icon=False, glyph=False, glyph_size=None):
     m = _METRICS['row']
@@ -668,7 +589,7 @@ def tab_row_rects(rect, tabs, fs, gap=None):
         x += cw + gap
     return out
 
-def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None):
+def tab_row(cv, th, rect, tabs, active, icon_for=None, ink=None):
     fs = _fs(cv)
     m = _METRICS['tab']
     (on_field, on_ink, _oe) = state_colors(th, 'tab', ON)
@@ -698,8 +619,6 @@ def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None):
             cv.spr(img, x + (pad if labels_on else (w - box) // 2), y + (h - box) // 2, fs)
         if labels_on:
             cv.print(str(_tab_label(tabs, tid)), x + pad + box + pad, y + (h - 8 * fs) // 2, ink_i, 1)
-        if hits is not None:
-            hits.add(r, 'tab', tid)
     return rects
 
 def _tab_label(tabs, tid):

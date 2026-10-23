@@ -163,8 +163,7 @@ Speed is not the case this doc rests on. What is known and predicted:
 - **PREDICTED:** shorter and rarer collects; a lower console floor under a cart
   (#158 splits the Guition S3's floor into touch polling, the Player's Python per
   tick, the composite and the diag meters — a few percent of Doom's fps, not a
-  multiple); cheaper hit registration (`runtime/ui.py`'s header: ~395 rects ≈
-  9.3 ms on the P4, which is why `Hits` is barred from grids).
+  multiple).
 - **Not a gain:** a Python app calling the kernel still pays the MicroPython→C
   call (~1.2 µs) plus any heap allocation for returned tuples. Native-to-native
   is cheap; Python-to-native is what it is today.

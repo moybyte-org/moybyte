@@ -1038,25 +1038,9 @@ def test_every_cover_builds_in_its_own_frame_under_test():
     assert cover_cache._COVER_SLICE_MS >= _COVER_SLICE_UNBOUNDED
 
 
-def _hits_peak(monkeypatch):
-    """The most rects one `ui_draw.Hits` holds at once while the goldens render."""
-    from runtime import ui_draw
-    peak = [0]
-    add = ui_draw.Hits.add
-
-    def counting(self, rect, verb, arg=None):
-        add(self, rect, verb, arg)
-        if len(self._items) > peak[0]:
-            peak[0] = len(self._items)
-
-    monkeypatch.setattr(ui_draw.Hits, "add", counting)
-    return peak
-
-
 @pytest.mark.parametrize("config_name", sorted(CONFIGS))
 def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
                                      monkeypatch):
-    peak = _hits_peak(monkeypatch)
     from runtime import ui
     from runtime import ui_draw
     del ui_draw.primary_warnings[:]
@@ -1069,16 +1053,6 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
     assert not many, (
         "a frame draws more than one focus mark (DESIGN.md, the marks: "
         "exactly one a screen, never in a window behind): %r" % many)
-    cap = json.loads((ROOT / "native" / "moy_ui" / "style.json").read_text())[
-        "hits_capacity"]
-    # (since Notes moved onto the verbs no golden surface registers any:
-    # the engine's stops are the verbs' hit map)
-    assert 2 * peak[0] <= cap, (
-        "a surface registers %d hit rects in the goldens' frames; the hit "
-        "buffer's capacity (style.json's hits_capacity, %d) is twice the most "
-        "any surface registers (docs/kernel_toolkit_2026-10.md §3.4)"
-        % (peak[0], cap))
-
     if _updating(request):
         assert not hasattr(request.config, "workerinput"), (
             "re-baselining under xdist would have every worker rewrite the "

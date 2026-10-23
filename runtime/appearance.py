@@ -1312,7 +1312,6 @@ class Appearance:
                 hexs, ws.carts_root, _ICON_VERSION))
             sheet.dirty = False
             self._user_icons = sheet
-            ws.save_status = None           # clear stale failure text (see commit_code)
             # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and
             # the next _draw_status_strip rebuilds its sprites from the freshest pixels.
             self.set_icon_sheet(sheet)
@@ -1321,7 +1320,6 @@ class Appearance:
             # A failed save must be VISIBLE on device (no serial in the run loop), not
             # silent. _err_text-guarded so a weird __str__ can't escape.
             txt = _err_text(exc)
-            ws.save_status = "CAN'T SAVE"
             ws.cart_error = "Could not save icons -- " + txt
             print("Moybyte save icons failed:", txt)
 
