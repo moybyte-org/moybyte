@@ -86,6 +86,24 @@ def test_the_packed_roster_is_much_smaller_than_the_plain_one():
         "plain one (%d B)" % (comp, plain))
 
 
+def test_the_zero_build_leaves_the_speed_tests_out():
+    """The Zero's store is 352 littlefs blocks and the roster fills it, so its
+    build skips the two perf-ledger fixtures; every other cart still ships."""
+    with open(os.path.join(ZERO, "build.sh")) as f:
+        build = f.read()
+    assert "--skip moybyte.bench,moybyte.bench_lua" in build
+    skip = ("moybyte.bench", "moybyte.bench_lua")
+    full = gen.build_packed(SYSTEM_CARTS)
+    zero = gen.build_packed(SYSTEM_CARTS, skip)
+    assert [t for t, _v, _b in full if (t, _v, _b) not in zero] == ["Bench", "Bench Lua"]
+    assert len(zero) == len(full) - 2
+
+
+def test_a_skip_that_names_no_cart_is_refused():
+    with pytest.raises(ValueError):
+        gen.build_packed(SYSTEM_CARTS, ("moybyte.no_such_cart",))
+
+
 # -- the store the two forms produce ---------------------------------------
 
 def _tree(root):

@@ -163,8 +163,11 @@ moybyte_patch_slice_store
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
+#    The two speed-test carts stay off: they are the perf ledger's fixtures,
+#    and a store of 352 littlefs blocks has no room for carts a headless
+#    board never runs (owner, 2026-10-23).
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed \
-  "${MODULES_DIR}/carts_data.py"
+  "${MODULES_DIR}/carts_data.py" --skip moybyte.bench,moybyte.bench_lua
 
 #    The OTA identity stamp (#53). `xiao_zero` is the board id inside the signed
 #    manifest -- reserved in board.toml since this board's rebuild and wired for

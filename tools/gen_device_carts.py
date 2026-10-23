@@ -388,10 +388,15 @@ def pack_cart(cart):
     return comp.compress(body) + comp.flush()
 
 
-def build_packed(system_carts_dir):
-    """The packed roster: [(title, version, blob)], in seed order."""
+def build_packed(system_carts_dir, skip=()):
+    """The packed roster: [(title, version, blob)], in seed order, less the
+    cart folders named in `skip`."""
+    folders = [f for f, _m in read_manifests(system_carts_dir)]
+    unknown = set(skip) - set(folders)
+    if unknown:
+        raise ValueError("--skip names no system cart: %s" % ", ".join(sorted(unknown)))
     return [(c["title"], int(c.get("version", 0)), pack_cart(c))
-            for c in build_carts(system_carts_dir)]
+            for f, c in zip(folders, build_carts(system_carts_dir)) if f not in skip]
 
 
 def render_packed_module(packed):
@@ -482,7 +487,9 @@ def main(argv):
     """CLI.
 
       gen_device_carts.py [OUT [SYSTEM_CARTS]]   the frozen carts_data.py
-      gen_device_carts.py --packed OUT [SRC]     the same, PACKED (the Zero)
+      gen_device_carts.py --packed OUT [SRC] [--skip F,F]
+                                                 the same, PACKED (the Zero),
+                                                 less the named cart folders
       gen_device_carts.py --app-decls [OUT]      regenerate runtime/app_decls.py
       gen_device_carts.py --roster TARGET        the cart folders for a target,
                                                  one `<folder>.moy` per line
@@ -496,6 +503,11 @@ def main(argv):
         sys.stdout.write(main.__doc__.split("\n", 1)[1].rstrip() + "\n")
         return 0
     src = _default_system_carts()
+    skip = ()
+    if "--skip" in argv:
+        i = argv.index("--skip")
+        skip = tuple(x for x in argv[i + 1].split(",") if x)
+        del argv[i:i + 2]
     packed = False
     if argv and argv[0] == "--packed":
         packed = True
@@ -521,7 +533,7 @@ def main(argv):
     if len(argv) > 1:
         src = argv[1]
     if packed:
-        blobs = build_packed(src)
+        blobs = build_packed(src, skip)
         text = render_packed_module(blobs)
         sys.stderr.write(
             "seed roster packed: %d carts, %d B compressed (%d KB), %d B plain\n"
