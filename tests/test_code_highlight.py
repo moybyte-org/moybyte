@@ -175,9 +175,9 @@ def test_clean_cart_has_no_crash_line(tmp_path):
 
 
 def _colour_at(runs, i):
-    """The colour a line's highlight runs (start, end, colour flat) give
+    """The colour a line's highlight runs (start, end, colour, text flat) give
     column i."""
-    for k in range(0, len(runs), 3):
+    for k in range(0, len(runs), 4):
         if runs[k] <= i < runs[k + 1]:
             return runs[k + 2]
     return None
@@ -190,7 +190,9 @@ def test_the_runs_are_the_highlight_in_stretches(tmp_path):
     cols = _highlight(line)
     runs = cl._runs(line)
     assert [_colour_at(runs, i) for i in range(len(line))] == cols
-    assert all(runs[k + 2] != runs[k + 5] for k in range(0, len(runs) - 3, 3))
+    assert all(runs[k + 2] != runs[k + 6] for k in range(0, len(runs) - 4, 4))
+    assert [runs[k + 3] for k in range(0, len(runs), 4)] == \
+        [line[runs[k]:runs[k + 1]] for k in range(0, len(runs), 4)]
 
 
 def test_highlight_cache_reuses_result(tmp_path):

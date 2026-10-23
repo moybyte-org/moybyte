@@ -170,7 +170,7 @@ def test_bar_undo_bits_never_reads_the_journal(tmp_path, monkeypatch):
         monkeypatch.setattr(
             history_router.moy_catalogue, name,
             (lambda n, r: lambda *a, **k: (reads.append(n), r(*a, **k))[1])(name, real))
-    assert ws.history.bar_undo_bits() == (False, False)
+    assert ws.history.bar_undo_bits() == 0
     assert reads == [], "the bar cache key reached the journal: " + repr(reads)
     # ...while the REPAINT-time query does read it, which is the contrast.
     assert ws.history.can_undo() is True
@@ -182,10 +182,10 @@ def test_bar_undo_bits_reports_an_unrecorded_typing_burst(tmp_path):
     UNDO icon stays dim until the debounce closes the burst ~1.5s later."""
     ws = _cart_ws(tmp_path)
     ed = _open_code(ws)
-    assert ws.history.bar_undo_bits() == (False, False)
+    assert ws.history.bar_undo_bits() == 0
     ws.history.code_burst_open()
     ed.set_text(SRC + "# typed\n")
-    assert ws.history.bar_undo_bits()[0] is True
+    assert ws.history.bar_undo_bits() & 1
 
 
 def test_reading_the_bits_does_not_seal_the_burst(tmp_path):
@@ -246,7 +246,7 @@ def test_a_rebuilt_editor_drops_the_stale_pre_image(tmp_path):
     _open_code(ws)                        # a fresh CodeEditor over the same cart
     assert ws.history.code_op_history() is not None
     assert ws.history._code_burst_before is None
-    assert ws.history.bar_undo_bits() == (False, False)
+    assert ws.history.bar_undo_bits() == 0
 
 
 def test_undo_seals_a_live_burst_before_it_looks_for_a_step(tmp_path):

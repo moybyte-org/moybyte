@@ -875,3 +875,128 @@ def test_an_app_drag_frame_allocates_only_its_moved_answers(result, app):
     assert len(drawn) > 30, (app, len(drawn))
     over = [d for d in drawn if d[0] > ANSWER * (d[2] + 4)]
     assert len(over) <= 1, (app, over[:10])
+
+
+# -- the Code tab's paint ------------------------------------------------------
+#
+# Two per-frame costs of a Code frame on the Waveshare P4, found with
+# tools/p4_alloc.py over p4_surface_sweep's Code drag, where they set how
+# often the collector came:
+#
+# * The bar reads the Editor's undo state into its strip key on every painted
+#   frame, and while a typing burst was open that read compared the whole
+#   source with the burst's start by joining it: ~44 KB a frame for a
+#   1759-line cart, through every frame after a keystroke (a press on the
+#   Code pane's symbol keys included) until the debounce closed the burst.
+# * Each visible line printed its highlight runs as slices of the line, and
+#   looked its runs up under a fresh (language, line) key: ~200 bytes a line,
+#   every line, every frame.
+#
+# Both are measured here on the board-model MicroPython, over the modules
+# themselves: they allocate nothing.
+
+BURST_DRIVER = r'''
+import sys, gc
+sys.path.insert(0, @RUNTIME@)
+from editors_code import CodeEditor
+from history_router import HistoryRouter
+
+
+class _Ws:
+    menu_view = "code"
+
+
+class _Project:
+    def history_for(self, view):
+        return router.code_op_history()
+
+
+ws = _Ws()
+ws.editor = CodeEditor("\n".join("x = %d  # a line of a long cart" % i
+                                 for i in range(1500)))
+ws.project = _Project()
+router = HistoryRouter(ws, None)
+idle = router.bar_undo_bits()
+router.code_burst_open()
+ws.editor.key(ord("."))
+typed = router.bar_undo_bits()
+read = router.bar_undo_bits
+gc.collect()
+gc.disable()
+n = 0
+m0 = gc.mem_alloc()
+while n < 50:
+    read()
+    n += 1
+print("RESULT", idle, typed, gc.mem_alloc() - m0)
+'''
+
+RUNS_DRIVER = r'''
+import sys, gc
+sys.path.insert(0, @RUNTIME@)
+import code_layer
+
+
+class _Canvas:
+    def print(self, s, x, y, c, scale):
+        pass
+
+
+class _Layout:
+    cell = 8
+
+
+class _Project:
+    cart = {"lang": "python"}
+
+
+class _Ws:
+    editor = None
+
+
+ws = _Ws()
+ws.sys_canvas = _Canvas()
+ws.code_layout = _Layout()
+ws.project = _Project()
+layer = code_layer.CodeLayer(ws, {})
+lines = ["x = %d + y  # a line of a long cart" % i for i in range(40)]
+draw = layer._draw_code_runs
+for line in lines:
+    draw(line, 0, 80, 0, 0, None)
+gc.collect()
+gc.disable()
+n = 0
+m0 = gc.mem_alloc()
+while n < 40:
+    draw(lines[n], 0, 80, 0, 0, None)
+    n += 1
+print("RESULT", gc.mem_alloc() - m0)
+'''
+
+
+def _mp_result(tmp_path, driver, why):
+    exe = require_unix_mp(board_model=True, why=why)
+    script = tmp_path / "driver.py"
+    script.write_text(driver.replace("@RUNTIME@", repr(str(ROOT / "runtime"))))
+    out = subprocess.run([exe, "-X", "heapsize=16M", str(script)],
+                         capture_output=True, text=True, timeout=60)
+    line = [ln for ln in out.stdout.splitlines() if ln.startswith("RESULT ")]
+    assert line, out.stdout + out.stderr
+    return [int(v) for v in line[0].split()[1:]]
+
+
+def test_the_bar_undo_read_allocates_nothing_through_a_typing_burst(tmp_path):
+    idle, typed, spent = _mp_result(
+        tmp_path, BURST_DRIVER,
+        "The bar's undo read runs on every painted Editor frame; only the "
+        "board-model MicroPython measures what it allocates.")
+    assert (idle, typed) == (0, 1), "the burst's edit does not light the bar's undo"
+    assert spent == 0, "50 bar undo reads through a typing burst allocated %d bytes" % spent
+
+
+def test_a_code_line_paints_without_allocating(tmp_path):
+    spent, = _mp_result(
+        tmp_path, RUNS_DRIVER,
+        "Every visible Code line paints on every painted Code frame; only "
+        "the board-model MicroPython measures what it allocates.")
+    assert spent == 0, "40 memoized code lines allocated %d bytes to paint" % spent

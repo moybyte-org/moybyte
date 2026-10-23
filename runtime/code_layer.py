@@ -349,6 +349,7 @@ class CodeLayer:
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self._hl_cache = {}           # per-line syntax-highlight memo (#24)
         self._hl_old = {}             # ...and the generation it retires (see _hl)
+        self._hl_lua = None           # ...the language both were built for
         self._t = None                # per-draw tone map (set by _draw_code)
         # -- #89 additions: selection / tools / find / gutter -----------------
         self._tools_open = False      # the tool palette row is shown
@@ -1359,10 +1360,12 @@ class CodeLayer:
 
     def _runs(self, line):
         """Memoized per-line syntax highlight (#24) as its runs: a flat list
-        of (start, end, colour) for each stretch of one colour. Lines recur
-        every frame, so cache by text (keyed with the language, so switching
-        a python project for a lua one never replays stale colors), and a
-        frame walks a line's few runs, never its characters.
+        of (start, end, colour, text) for each stretch of one colour, the
+        stretch's own text kept with it so a frame prints the memo's strings
+        and slices none (a slice is a new string on the heap, per stretch per
+        line per frame). Lines recur every frame, so cache by text; a memo
+        holds one language's colours, and a switch of language (a python
+        project for a lua one) empties it.
 
         The bound is TWO generations, not a clear. Dragging through a long file
         walks past the bound, and emptying the memo there re-highlights the whole
@@ -1371,10 +1374,13 @@ class CodeLayer:
         leaves the lines still on screen one lookup away and caps the memory at
         what the single larger bound it replaces held."""
         lua = self._is_lua()
-        key = (lua, line)
-        runs = self._hl_cache.get(key)
+        if lua is not self._hl_lua:
+            self._hl_lua = lua
+            self._hl_cache = {}
+            self._hl_old = {}
+        runs = self._hl_cache.get(line)
         if runs is None:
-            runs = self._hl_old.get(key)
+            runs = self._hl_old.get(line)
             if runs is None:
                 cols = _highlight(line, lua)
                 runs = []
@@ -1385,12 +1391,12 @@ class CodeLayer:
                     j = i + 1
                     while j < n and cols[j] == c:
                         j += 1
-                    runs += (i, j, c)
+                    runs += (i, j, c, line[i:j])
                     i = j
             if len(self._hl_cache) >= _HL_MEMO:
                 self._hl_old = self._hl_cache
                 self._hl_cache = {}
-            self._hl_cache[key] = runs
+            self._hl_cache[line] = runs
         return runs
 
     def _draw_code_runs(self, line, left, cols, y, x0, hl):
@@ -1398,24 +1404,28 @@ class CodeLayer:
         same-colored text (#24), each through `hl` (the theme's tones) when
         it has one. On the SYSTEM canvas at the layout's char-cell width
         (8*fs), so it scales with the font. `x0` is the text origin (shifted
-        right by the #89 line-number gutter)."""
+        right by the #89 line-number gutter). A run the window cuts is sliced;
+        a whole one prints its memoized text."""
         cv = self.ws.sys_canvas
         cell = self.ws.code_layout.cell
         runs = self._runs(line)
         right = left + cols
-        for k in range(0, len(runs), 3):
+        for k in range(0, len(runs), 4):
             a = runs[k]
             b = runs[k + 1]
             if b <= left:
                 continue
             if a >= right:
                 break
-            if a < left:
-                a = left
-            if b > right:
-                b = right
+            text = runs[k + 3]
+            if a < left or b > right:
+                if a < left:
+                    a = left
+                if b > right:
+                    b = right
+                text = line[a:b]
             cl = runs[k + 2]
-            cv.print(line[a:b], x0 + (a - left) * cell, y,
+            cv.print(text, x0 + (a - left) * cell, y,
                      hl.get(cl, cl) if hl else cl, 1)
 
     def _visible_span(self, ed, s, e, cols):

@@ -60,7 +60,8 @@ goes through a forward).
 
 `bar_undo_bits()` runs once per bar-strip cache key, i.e. per painted bar frame.
 It reads RAM ONLY, on purpose -- see its docstring; keying the strip cache on
-the journal would put an SD read in the paint path.
+the journal would put an SD read in the paint path. It allocates nothing
+either: an int of two bits, and an open burst compared by its lines.
 
 ## Reading late-injected things through `ws`, per call
 
@@ -114,7 +115,9 @@ class HistoryRouter:
         # codec over the live CodeEditor) + the open burst's pre-image text.
         # Created/rebound lazily by code_op_history() over whatever editor is
         # live, so a rebuilt editor (fresh cart / reopen) starts a fresh, empty
-        # History.
+        # History. The pre-image is the buffer's LINES (a shallow copy: the
+        # lines are immutable strings the buffer replaces, never edits), so the
+        # bar's per-frame dim read compares lists instead of joining the text.
         self._code_hist = None
         self._code_burst_before = None
         # The idle-typing debounce (Stage 7 of
@@ -177,7 +180,7 @@ class HistoryRouter:
         return self._code_hist
 
     def code_burst_open(self):
-        """Mark a code typing/delete burst's start: snapshot the buffer text ONCE
+        """Mark a code typing/delete burst's start: snapshot the buffer's lines ONCE
         (idempotent while a burst is open), so the net change since it began
         becomes one undo op when it closes. No-op with no code editor."""
         ed = self.ws.editor
@@ -185,7 +188,7 @@ class HistoryRouter:
             return
         self.code_op_history()          # ensure the History is bound to this editor
         if self._code_burst_before is None:
-            self._code_burst_before = ed.text()
+            self._code_burst_before = list(ed.lines)
 
     def close_code_burst(self):
         """Close the live code burst into ONE op = the net text diff since it
@@ -199,20 +202,21 @@ class HistoryRouter:
         ed = self.ws.editor
         if before is None or hist is None or ed is None:
             return
-        after = ed.text()
-        if before == after:
+        if before == ed.lines:
             return
-        op = text_diff_op(before, after)
+        op = text_diff_op("\n".join(before), ed.text())
         if op is not None:
             hist.record(op)
 
     def _code_burst_pending(self):
         """True iff a live code burst holds an un-recorded net change -- so
         can_undo() reports it WITHOUT the side effect of closing the burst (the
-        dim-state read)."""
+        dim-state read). The bar asks on every painted frame, so it compares
+        the lines, never the joined text: a join is the whole source in garbage
+        a frame."""
         ed = self.ws.editor
         return (self._code_burst_before is not None and ed is not None
-                and ed.text() != self._code_burst_before)
+                and ed.lines != self._code_burst_before)
 
     def _seal_active_local(self):
         """Close any in-progress edit on the active tab BEFORE an undo/redo, so a
@@ -250,10 +254,14 @@ class HistoryRouter:
         SD-backed journal check (`_journal_check` reads the journal log -- keying
         the per-frame cache on it would cost a disk read per frame); journal-level
         dim flips already invalidate the bar explicitly (`Project._journal`,
-        `_journal_walk`)."""
+        `_journal_walk`). 1 is undo, 2 is redo."""
         hist = self.active_history()
-        local_undo = (hist is not None and hist.can_undo()) or self._active_local_pending()
-        return (local_undo, hist is not None and hist.can_redo())
+        bits = 0
+        if (hist is not None and hist.can_undo()) or self._active_local_pending():
+            bits = 1
+        if hist is not None and hist.can_redo():
+            bits |= 2
+        return bits
 
     def _after_local_history(self):
         """After a fine-grained (paint/map/code/blocks) undo/redo: the editor

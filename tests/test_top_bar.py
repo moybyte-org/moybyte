@@ -581,14 +581,14 @@ def test_a_warm_bar_frame_fills_one_key_with_only_what_it_shows(tmp_path):
 
     def undo_bits():
         asked[0] += 1
-        return (False, False)
+        return 0
     ws.history.bar_undo_bits = undo_bits
     for _ in range(3):
         ws._dirty = True
         drv.frame(1 / 30)
     assert bl._keys["home"] is key
     assert asked[0] == 0
-    assert bl._cart_bar_key("home")[9] == (False, False) and asked[0] == 1
+    assert bl._cart_bar_key("home")[9] == 0 and asked[0] == 1
 
 
 def test_zoned_bar_rerenders_on_app_switch(tmp_path):

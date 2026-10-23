@@ -581,7 +581,7 @@ def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
     # and crucially computing them never touches the SD-backed journal check.
     ws = _make_ws_with_cart(tmp_path)
     ws.go_home()
-    assert ws.history.bar_undo_bits() == (False, False)
+    assert ws.history.bar_undo_bits() == 0
 
 
 # ==================================================================#
