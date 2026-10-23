@@ -2457,6 +2457,17 @@ static mp_obj_t mod_pmem_image(mp_obj_t out)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_pmem_image_obj, mod_pmem_image);
 
+// flag_xor(n, mask) -- an Editor flag edit reaching the running cart: tile
+// n's flag byte in the run's own table flips `mask`'s bits, so what the
+// cart's fset wrote to the other bits stays.
+static mp_obj_t mod_flag_xor(mp_obj_t n_obj, mp_obj_t mask_obj)
+{
+    if (RUN.open)
+        moycore_run_flag_xor(&RUN.c, mp_obj_get_int(n_obj), mp_obj_get_int(mask_obj));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_flag_xor_obj, mod_flag_xor);
+
 // retarget(fb) -- the double/triple-buffered tiers swap the framebuffer under
 // the canvas every frame, exactly as DeviceCanvas.sync_back does.
 static mp_obj_t mod_retarget(mp_obj_t fb_obj)
@@ -2813,6 +2824,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_perf_reset_obj, mod_perf_reset);
 static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),    MP_OBJ_NEW_QSTR(MP_QSTR_moycore) },
     { MP_ROM_QSTR(MP_QSTR_run_begin),   MP_ROM_PTR(&mod_run_begin_obj) },
+    { MP_ROM_QSTR(MP_QSTR_flag_xor),    MP_ROM_PTR(&mod_flag_xor_obj) },
     { MP_ROM_QSTR(MP_QSTR_p8_memory), MP_ROM_PTR(&mod_p8_memory_obj) },
     { MP_ROM_QSTR(MP_QSTR_register),    MP_ROM_PTR(&mod_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_exec),        MP_ROM_PTR(&mod_exec_obj) },

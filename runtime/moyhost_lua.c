@@ -223,6 +223,9 @@ void hl_set_sheet(host_lua *r, uint8_t *pix, int nbytes)
 void hl_set_flags(host_lua *r, const uint8_t *flags, int nbytes)
 { if (LIVE(r)) moycore_run_set_flags(&RUN.c, flags, nbytes > 0 ? (size_t)nbytes : 0); }
 
+void hl_flag_xor(host_lua *r, int n, int mask)
+{ if (LIVE(r)) moycore_run_flag_xor(&RUN.c, n, mask); }
+
 void hl_set_map(host_lua *r, uint8_t *cells, int nbytes, int w, int h)
 { if (LIVE(r)) moycore_run_set_map(&RUN.c, cells, nbytes > 0 ? (size_t)nbytes : 0, w, h); }
 

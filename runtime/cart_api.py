@@ -196,7 +196,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                            # edit), so a live sprite edit shows fresh art.
     _cache_gen = [None]
     # SPEC.md 3.5's tile flags, always a table so fget/fset/map(..., layers) are
-    # callable for every cart. `flags` is the project's live 512-byte one; a run
+    # callable for every cart. `flags` is the run's own 512-byte one
+    # (`ProjectStore.play_flags`, which an Editor flag edit reaches each frame); a run
     # without a project (a bare namespace, a test) gets a private zero table,
     # which reads exactly as the spec's "an absent file is all zero".
     tile_flags = flags if flags is not None else bytearray(512)
@@ -337,7 +338,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             tilemap.mset(x, y, tile)
 
     # SPEC.md 3.5/7.1: one flag byte per tile, 512 of them. The table is the
-    # PROJECT's (moy_carts loads flags.moyflags into it) and it is shared with
+    # RUN's (a copy of flags.moyflags as the Editor holds it) and it is shared with
     # every layer namespace below, so `fset` from inside a layer's pre-render is
     # the same write the screen's next map(..., layers) reads. A run with no
     # project gets a private zero table rather than a None to guard at each verb.

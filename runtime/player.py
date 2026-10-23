@@ -594,6 +594,7 @@ class Player:
         self._embed_ctx = None        # the shell's drawings grant, for a note's embeds
                                       # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
+        self._flag_put = None         # flag_edits' applier for the running cart
         self._lua = None              # #67: the running runtime cart's state -- the
                                       # handle a ws.runtimes factory returned, Lua or
                                       # wasm; _close_lua() on exit so the cart's whole
@@ -820,6 +821,10 @@ class Player:
                 pass
             self._cart_palette = None
             self._cart_palette_canvas = None
+
+    def _xor_play_flag(self, n, mask):
+        """A Python run's half of `ProjectStore.flag_edits`."""
+        self.ws.project.play_flags[n] ^= mask
 
     def _close_lua(self):
         """Tear down the previous run's Lua state (#67), if any. Idempotent and
@@ -1384,6 +1389,7 @@ class Player:
         # Scenes stands at its default scene with no world, so a load_scene()
         # switch never leaks across a re-run (#85's "resets on next _init").
         project.play_world(True)
+        self._flag_put = self._xor_play_flag   # a Python run's flags; a Lua run's below
         self._close_lua()              # a re-run replaces the previous run's Lua state
         # #63 leak fix: the PREVIOUS cart is dead and moycore has let go of it
         # -- return everything on loan to it (its make_layer worlds, its run
@@ -1647,7 +1653,7 @@ class Player:
                          project.play_scenes,   # #85: scene()/load_scene(), the run's own
                          net=net,           # #65: capability-gated net.* backend
                          gpio=gpio,         # #9: capability-gated physical pins
-                         flags=project.flags)   # SPEC.md 3.5 tile flags (fget/fset)
+                         flags=project.play_flags)   # SPEC.md 3.5: the run's own flags
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.
@@ -2224,6 +2230,7 @@ class Player:
             return False
         self._lua = lua
         self._lua_split = getattr(lua, "frame_split", None)
+        self._flag_put = getattr(lua, "flag_xor", None)
         self.cart_error = None
         self.crash_line = None
         self.crash_file = None
@@ -2297,6 +2304,10 @@ class Player:
                 # not. No-op when the cart has no net permission.
                 if self._net is not None:
                     self._net.pump()
+                # The Editor's flag edits since the last frame, into the run's
+                # own table (E-02: the cart's fset stays the run's).
+                if self._flag_put is not None:
+                    ws.project.flag_edits(self._flag_put)
                 np = self._netplay
                 stalled = False
                 if np is not None:            # a match: its clock, its stall

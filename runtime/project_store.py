@@ -98,6 +98,8 @@ class ProjectStore:
         self.play_map = None          # the run's own TileMap and Scenes, copied
         self.play_scenes = None       # from the two above (`play_world`)
         self._play_from = None        # (map, its gen, scenes, their gen) copied
+        self.play_flags = None        # the run's own tile flags (`play_world`)
+        self._flags_seen = None       # the Editor's flags as the run last took them
 
     # -- builders -------------------------------------------------------------
 
@@ -198,15 +200,20 @@ class ProjectStore:
         return Scenes(blobs, names)
 
     def play_world(self, fresh=False):
-        """The run's own map and scenes (EDITOR_LAYOUT.md E-02): a running
-        cart reads and writes these, never the Editor's, so a map or scene
-        edit waits for the next Play while sprite, sound and flag edits (the
-        sheet, the bank and the flags, shared) reach it at once. `fresh` (a
-        run's start) copies both anew; otherwise (Play, Restart) they take
-        the Editor's only where it changed since the last copy, in place, so
+        """The run's own map, scenes and tile flags (EDITOR_LAYOUT.md E-02): a
+        running cart reads and writes these, never the Editor's, so a map or
+        scene edit waits for the next Play while sprite and sound edits (the
+        sheet and the bank, shared) reach it at once, and a flag edit at its
+        next frame (`flag_edits`). `fresh` (a run's start) copies all three
+        anew; otherwise (Play, Restart) the map and the scenes take the
+        Editor's only where they changed since the last copy, in place, so
         a resumed run keeps its own `mset`s over a map nobody edited. True
         where the map's size changed, which a running cart cannot take in
         place (its map is bound by pointer): the caller restarts it."""
+        if fresh or self.play_flags is None:
+            fl = self.flags
+            self.play_flags = None if fl is None else bytearray(fl)
+            self._flags_seen = None if fl is None else bytearray(fl)
         tm, sc = self.tilemap, self.scenes
         was = self._play_from
         self._play_from = (tm, tm.gen if tm is not None else 0,
@@ -227,6 +234,25 @@ class ProjectStore:
             pm.cells[:] = tm.cells
             pm.gen += 1
         return False
+
+    def flag_edits(self, put):
+        """Hand the run the Editor's flag edits since it last took them:
+        `put(n, mask)` flips `mask`'s bits of tile `n`'s byte in the run's
+        own table (the Python tier's `play_flags`, the C one of a Lua run),
+        so a toggle reaches the running cart at its next frame and what the
+        cart's own `fset` wrote to the other bits stays. A frame with no
+        edit compares 512 bytes and allocates nothing. True where any."""
+        fl, seen = self.flags, self._flags_seen
+        if fl is None or seen is None or fl == seen:
+            return False
+        if len(fl) != len(seen):
+            return False
+        for n in range(len(fl)):
+            d = fl[n] ^ seen[n]
+            if d:
+                put(n, d)
+                seen[n] = fl[n]
+        return True
 
     def _build_audio(self):
         """Open the run's audio session (#16, owner "cart", focused) over the

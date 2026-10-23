@@ -83,6 +83,10 @@ void moycore_run_set_sheet(moycore_run_t *c, uint8_t *pix, size_t nbytes);
 void moycore_run_set_map(moycore_run_t *c, uint8_t *cells, size_t nbytes, int w, int h);
 // The tile flags, copied; a short blob leaves the rest zero.
 void moycore_run_set_flags(moycore_run_t *c, const uint8_t *flags, size_t nbytes);
+// Flip `mask`'s bits of tile `n`'s flag byte in the run's table: an edit the
+// Editor made while the run plays, laid over what the cart's own fset wrote.
+// A tile off the table is ignored.
+void moycore_run_flag_xor(moycore_run_t *c, int n, int mask);
 // The config table, copied: "key\0value\0" pairs. 0, or -1 when it would not
 // allocate (every key then reads absent).
 int moycore_run_set_cfg(moycore_run_t *c, const char *blob, size_t len);

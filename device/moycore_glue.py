@@ -168,6 +168,15 @@ def reserve_p8_memory():
     return bool(_p8_buffers())
 
 
+def _run_flags(project):
+    """The run's own tile flags (`ProjectStore.play_world`); a harness's bare
+    project carries only `flags`."""
+    if project is None:
+        return None
+    fl = getattr(project, "play_flags", None)
+    return fl if fl is not None else getattr(project, "flags", None)
+
+
 class MoycoreRun:
     """One cart run under moycore. Same shape as LuaCartRun."""
 
@@ -192,8 +201,9 @@ class MoycoreRun:
         # SPEC.md 3.5 tile flags. Unlike the sheet and the map this crosses as a
         # COPY (run_begin memcpys 512 bytes into the console's own table), so a
         # cart's fset writes are the C table's, not this bytearray's -- which is
-        # right: they are run state, and nothing persists them.
-        flags = getattr(project, "flags", None) if project is not None else None
+        # right: they are run state, and nothing persists them. An Editor flag
+        # edit reaches the table at the next frame (`flag_xor`).
+        flags = _run_flags(project)
 
         # Slot numbers bound ONCE: every one of these was a module attribute
         # lookup per frame in _refresh.
@@ -455,6 +465,13 @@ class MoycoreRun:
             raise RuntimeError(err)
 
     _buf = None
+
+    def flag_xor(self, n, mask):
+        """An Editor flag edit into the run's own table
+        (`ProjectStore.flag_edits`); a module built without it drops it."""
+        fx = getattr(_moycore, "flag_xor", None)
+        if fx is not None:
+            fx(n, mask)
 
     def _last_buf(self):
         return self._buf
@@ -949,7 +966,7 @@ class WasmRun(MoycoreRun):
         # project carries only `tilemap`
         tilemap = (getattr(project, "play_map", None) or getattr(project, "tilemap", None)
                    if project is not None else None)
-        flags = getattr(project, "flags", None) if project is not None else None
+        flags = _run_flags(project)
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP
         self._I_SNAP = snap_slots(_moycore)

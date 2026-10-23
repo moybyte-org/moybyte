@@ -285,6 +285,12 @@ void moycore_run_set_flags(moycore_run_t *c, const uint8_t *flags, size_t nbytes
     }
 }
 
+void moycore_run_flag_xor(moycore_run_t *c, int n, int mask) {
+    if (n >= 0 && n < MOY_FLAGS) {
+        c->flags[n] ^= (uint8_t)mask;
+    }
+}
+
 int moycore_run_set_cfg(moycore_run_t *c, const char *blob, size_t len) {
     free(c->cfg);
     c->cfg = NULL;

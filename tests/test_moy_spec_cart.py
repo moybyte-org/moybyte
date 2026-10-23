@@ -12,6 +12,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 RED64 = ["FF0000"] * 64
@@ -582,3 +584,63 @@ def test_scan_ignores_a_moy_archive_file(tmp_path):
     (Path(root) / "downloaded.moy").write_bytes(b"PK\x03\x04not-a-folder")
     found = moy_carts.scan(root)
     assert [c["title"] for c in found] == ["Real"]
+
+
+# -- E-02: the run's own flags, which an Editor flag edit reaches each frame ----------
+
+_FLAGS_PY = """
+F = -1
+def _init():
+    fset(2, 0x80)
+def _draw():
+    global F
+    F = fget(1)
+"""
+
+_FLAGS_LUA = """
+F = -1
+function _init()
+  fset(2, 0x80)
+end
+function _draw()
+  F = fget(1)
+end
+"""
+
+
+@pytest.mark.parametrize("lua", (False, True), ids=("python", "lua"))
+def test_a_flag_edit_reaches_the_running_cart_and_its_fset_stays_the_runs(tmp_path, lua):
+    """An Editor flag toggle during a playtest reaches the cart at its next
+    frame on both tiers, over what the cart's own fset wrote; the cart's
+    fset never reaches the Editor's table (EDITOR_LAYOUT.md E-02)."""
+    if lua:
+        pytest.importorskip("runtime.moycore")
+    man = {"format": "moy-1", "title": "Flags", "runtime": "lua" if lua else "python",
+           "main": "main.lua" if lua else "main.py"}
+    _write_moy1(tmp_path / "carts", "flags", man, _FLAGS_LUA if lua else _FLAGS_PY)
+    ws = _ws(tmp_path)
+    _open(ws, "Flags")
+    dt = 1 / 30
+
+    def frame():
+        ws.input.begin_frame()
+        ws.frame(dt)
+
+    def got():
+        if lua:
+            return int(float(ws.player._lua.get_global("F")))
+        return ws.player.ns["F"]
+
+    for _ in range(2):
+        frame()
+    assert ws.player.cart_error is None, ws.player.cart_error
+    assert got() == 0
+    flags = ws.project.flags
+    assert flags[2] == 0, "the cart's fset is the run's, not the Editor's"
+    flags[1] ^= 1 << 3                      # the Sprite tab's toggle (paint_layer)
+    frame()
+    assert got() == 8
+    flags[1] ^= 1 << 3 | 1                  # bit 3 off, bit 0 on
+    frame()
+    assert got() == 1
+    assert flags[2] == 0

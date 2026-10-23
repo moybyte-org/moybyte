@@ -105,6 +105,12 @@ def retarget(buf):
     _run().retarget(buf)
 
 
+def flag_xor(n, mask):
+    r = _RUN[0]
+    if r is not None:
+        r.flag_xor(n, mask)
+
+
 def view():
     r = _RUN[0]
     return r.view() if r is not None else None

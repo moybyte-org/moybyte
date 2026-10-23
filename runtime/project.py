@@ -5,10 +5,11 @@
 """The open cart's live WORKSPACE (Stage 1 of docs/history/shell_ux_technical_plan_v1.md).
 
 `Project` is the one object a tab edits and the one object the Player runs; it
-is NOT a copy -- the editors and a re-run share the same live sheet, flags and
-bank (edits reach a running cart via `gen` bumps); the map and the scenes a run
-reads are its own copies, taken at its start and at Play (`play_world`,
-EDITOR_LAYOUT.md E-02). Its data, builders and commit_*
+is NOT a copy -- the editors and a re-run share the same live sheet and bank
+(edits reach a running cart via `gen` bumps); the map, the scenes and the tile
+flags a run reads are its own copies, taken at its start (`play_world`,
+EDITOR_LAYOUT.md E-02): the map and the scenes again at Play, the flags'
+edits at every frame (`flag_edits`). Its data, builders and commit_*
 verbs are `ProjectStore` (runtime/project_store.py), the store's half, which
 crosses with the store (docs/native_kernel_2026-09.md, sprint 1b). What this
 file adds is the Editor's half: the per-tab op-history registry (`history_for`,

@@ -130,6 +130,7 @@ _SIGS = (
     ("hl_set_sheet", [_P, _P, _I], None),
     ("hl_set_map", [_P, _P, _I, _I, _I], None),
     ("hl_set_flags", [_P, _P, _I], None),
+    ("hl_flag_xor", [_P, _I, _I], None),
     ("hl_set_cfg", [_P, _P, _I], None),
     ("hl_retarget", [_P, _P], None),
     ("hl_set_dispatch", [_P, _P], None),
@@ -505,6 +506,9 @@ class HostLuaRun:
         self._cbuf = (ctypes.c_char * len(buf)).from_buffer(buf)
         self.buf = buf
         self._d.hl_retarget(self._r, ctypes.cast(self._cbuf, _P))
+
+    def flag_xor(self, n, mask):
+        self._d.hl_flag_xor(self._r, int(n), int(mask))
 
     def pmem_load(self, cells):
         img = (ctypes.c_int32 * 256)(*[int(c) for c in list(cells)[:256]])

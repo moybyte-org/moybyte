@@ -1291,9 +1291,9 @@ class PaintLayer:
         return None
 
     def _toggle_flag(self, k):
-        """A flag tapped: the sprite's bit flips, live in the running game
-        (the project's table is the one it reads); it is saved with the
-        sheet (`Project.commit_sprites`)."""
+        """A flag tapped: the sprite's bit flips, and reaches the running
+        game at its next frame (`ProjectStore.flag_edits`); it is saved with
+        the sheet (`Project.commit_sprites`)."""
         ws = self.ws
         flags = ws.project.flags
         pe = ws.paint
