@@ -1318,13 +1318,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     @property
     def editor_desk(self):
         """The desk Editor (`EditorDesk`), built at its first use on a desk;
-        None on a handheld, which never loads it."""
+        None on a handheld, which never loads it (the S3 images do not carry
+        it: their board.toml denies `editor_desk.py`)."""
         desk = self._editor_desk
         if desk is None and _layout_base.metric_class() == _layout_base.DESK:
             try:
                 from editor_desk import EditorDesk
             except ImportError:  # pragma: no cover - host fallback
-                from runtime.editor_desk import EditorDesk
+                try:
+                    from runtime.editor_desk import EditorDesk
+                except ImportError:  # an image without the desk tier
+                    return None
             desk = self._editor_desk = EditorDesk(self, _ui_draw.AppHost)
         return desk
 

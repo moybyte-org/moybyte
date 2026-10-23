@@ -77,7 +77,7 @@ def test_theme_settings_and_badges_survive_a_reload(tmp_path):
     assert sysdoc.get("desk_mru"), \
         "the run this load recorded never reached the store: %r\n%r" % (
             sysdoc, first["BATCHES"])
-    assert "first_open" in _doc(tree, "system/achievements.json")["unlocked"]
+    assert "first_open" in _doc(tree, "system/achievements.json")["found"]
     names = json.loads(tree.read_text())
     assert not [n for n in names if n.startswith("system/") and "~" in n], \
         "a committed write left its staging behind: %r" % sorted(names)

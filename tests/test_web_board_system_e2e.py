@@ -106,7 +106,7 @@ def test_the_theme_and_badges_a_page_picks_live_on_the_board(tmp_path):
         rows = json.loads((top / "system.json").read_text())
         assert rows["theme"] == "nikola", (rows, log.read_text()[-2000:])
         assert "first_open" in json.loads(
-            (top / "achievements.json").read_text())["unlocked"]
+            (top / "achievements.json").read_text())["found"]
         # ...the run under the board's own carts root, not the page's...
         star = str(top / "carts" / "moybyte.star_catcher.moy")
         assert star in rows.get("desk_mru", []), rows

@@ -241,6 +241,15 @@ why  = """
 See `wm_desk.py` above: the other half of the windowed WM, imported only by
 `wm_windowed.py`."""
 
+[[modules.shared.deny]]
+file = "editor_desk.py"
+kind = "tier"
+why  = """
+The desk Editor: the maximised Editor's workspaces and panes on a DESK metric
+class (`layout_base.DESK`, a declared glass of 5" or more). This board is a
+handheld, so `Workstation.editor_desk` never imports it and its bytes would
+freeze unused."""
+
 # -- no consumer here yet ----------------------------------------------------
 
 [[modules.shared.deny]]
