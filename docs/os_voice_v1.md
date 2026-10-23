@@ -267,8 +267,9 @@ Celebration is real but scarce, and it marks *capability*, not compliance:
 
 - **Graduation** (`YOU LEVELED UP TO CODE!`) is the ceiling — full banner, Moy
   delighted, exclamation point. It celebrates becoming *more* of a maker.
-- **Achievements** keep their Title-Case whimsy (`Lift Off!`) and the one-line
-  `ACHIEVEMENT UNLOCKED!` banner. Never for showing up — only for doing.
+- **Achievements** keep their Title-Case whimsy (`Lift Off!`) under the one-line
+  `You found a badge!` banner (a secret's `You found a secret!`). Never for
+  showing up — only for doing, and once: a badge found again says nothing.
 - Ordinary success is calm: `SAVED`, not `SAVED!` — a workshop where every glue
   joint gets applause is exhausting. Confetti-tier moments per Playdate: rare,
   physical, earned.

@@ -973,17 +973,14 @@ _CSIGS = (
     ("moy_chrome_set_inks", [ctypes.POINTER(ctypes.c_int16), _B, _CI], None),
     ("moy_chrome_clear", [_CP], None),
     ("moy_chrome_panel", [_CP, _CI, _CI, _B, _CS, _CS, _B], None),
-    ("moy_chrome_toast", [_CP, _CS, _CS], None),
-    ("moy_chrome_banner", [_CP, _CI, _CI, _CI, _CS, _CS, _B], None),
     ("moy_chrome_strip_crash", [_CP, _CI, _CI, _CS, _CS], None),
     ("moy_chrome_strip_band", [_CP, _CI, _CI, _B], None),
     ("moy_chrome_strip_cell", [_CP, _CS, _CI, _CI, _CI, _CI, _CI, _CI, _CS, _B], None),
     ("moy_chrome_menu", [_CP, _CP, _CP, _CI, _CI, _CI, _CI, _CI, _CI, _CI, _CI], None),
-    ("moy_chrome_about", [_CP, _CI, _CI, _CI, _CS], None),
     ("moy_chrome_raster", [_CP, _CP, _CI, _CI, _CP, _CI], None),
     ("moy_chrome_notice", [_CS, _CS, _B, _U32], None),
-    ("moy_chrome_toast_arm", [_CS, _CS, _U32], None),
-    ("moy_chrome_overlay", [_CP, _U32, _CI, _CI, _CI], _B),
+    ("moy_chrome_toast_arm", [_CS, _CS, _CS, _B, _U32], None),
+    ("moy_chrome_overlay_draw", [_CP, _CI, _CI, _CP, _U32], _B),
     ("moy_chrome_title", [_CS, ctypes.c_size_t, _CI, _CI], _CI),
     ("moy_chrome_crash_title", [_CS, ctypes.c_size_t, _CS, _CI], _CI),
     ("moy_chrome_fit_text", [_CS, ctypes.c_size_t, _CS, _U32, _U32, _U32, _U32], _CI),
@@ -1063,15 +1060,6 @@ def chrome_newer_text(title, missing):
     return _say("moy_chrome_newer_text", _b(title), _b(missing))
 
 
-def chrome_toast(title, glyph, raster=None):
-    return _chrome("moy_chrome_toast", _b(title), _b(glyph), raster=raster)
-
-
-def chrome_banner(lw, fs, status_h, title, sub, ok, raster=None):
-    return _chrome("moy_chrome_banner", int(lw), int(fs), int(status_h), _b(title),
-                   _b(sub), bool(ok), raster=raster)
-
-
 def chrome_strip_crash(cw, edit, clock, wifi):
     return _chrome("moy_chrome_strip_crash", int(cw), int(edit), _b(clock), _b(wifi))
 
@@ -1097,13 +1085,19 @@ def chrome_menu(rows, sel, x, y, w, h, fs, cs):
                    int(w), int(h), int(fs), int(cs))
 
 
-def chrome_about(cw, ch, fs, ver):
-    return _chrome("moy_chrome_about", int(cw), int(ch), int(fs), _b(ver))
-
-
 def chrome_notice(title, sub, ok, until_ms):
     _clib().moy_chrome_notice(_b(title), _b(sub), bool(ok), int(until_ms) & 0xFFFFFFFF)
 
 
-def chrome_toast_arm(title, glyph, until_ms):
-    _clib().moy_chrome_toast_arm(_b(title), _b(glyph), int(until_ms) & 0xFFFFFFFF)
+def chrome_toast_arm(head, name, icon, secret, until_ms):
+    _clib().moy_chrome_toast_arm(_b(head), _b(name), _b(icon), bool(secret),
+                                 int(until_ms) & 0xFFFFFFFF)
+
+
+def chrome_overlay_draw(buf, w, h, pal, now_ms):
+    """What a run the kernel drives shows over its frame at `now_ms`, drawn
+    into the RGB565 buffer `buf` (`w` x `h`, its 64-word palette `pal`)."""
+    pb = (_U16 * 64)(*pal)
+    return bool(_clib().moy_chrome_overlay_draw(ctypes.cast(buf, ctypes.c_void_p), int(w),
+                                                int(h), ctypes.cast(pb, ctypes.c_void_p),
+                                                int(now_ms) & 0xFFFFFFFF))

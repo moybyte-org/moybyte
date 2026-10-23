@@ -77,6 +77,7 @@ MODS_AT = 16
 CTRL, SHIFT, ALT, SUPER = 1, 2, 4, 8
 KEY_F1 = 0x101                  # ... KEY_F1 + 11 is F12
 KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN = 0x110, 0x111, 0x112, 0x113
+KEY_PGUP, KEY_PGDN = 0x114, 0x115
 # The pointer's buttons, a bit each.
 PB_PRIMARY, PB_MIDDLE, PB_SECONDARY = 1, 2, 4
 

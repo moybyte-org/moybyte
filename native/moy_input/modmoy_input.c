@@ -1696,6 +1696,8 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_KEY_RIGHT), MP_ROM_INT(MOY_INPUT_KEY_RIGHT) },
     { MP_ROM_QSTR(MP_QSTR_KEY_UP), MP_ROM_INT(MOY_INPUT_KEY_UP) },
     { MP_ROM_QSTR(MP_QSTR_KEY_DOWN), MP_ROM_INT(MOY_INPUT_KEY_DOWN) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_PGUP), MP_ROM_INT(MOY_INPUT_KEY_PGUP) },
+    { MP_ROM_QSTR(MP_QSTR_KEY_PGDN), MP_ROM_INT(MOY_INPUT_KEY_PGDN) },
 };
 static MP_DEFINE_CONST_DICT(moy_input_globals, moy_input_globals_table);
 

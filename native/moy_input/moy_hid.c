@@ -115,6 +115,8 @@ static int32_t plain_of(uint8_t u) {
         case 0x37: return '.';
         case 0x38: return '/';
         case 0x4C: return 0x7F;
+        case 0x4B: return MOY_INPUT_KEY_PGUP;
+        case 0x4E: return MOY_INPUT_KEY_PGDN;
         default: return 0;
     }
 }

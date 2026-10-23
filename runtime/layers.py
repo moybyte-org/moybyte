@@ -10,14 +10,14 @@ module holds the shell-side building blocks that are NOT the router itself:
                     home of the four draw-only overlays (splash / toast / notice /
                     cursor), which have no state worth a class of their own.
   * The Phase-1 adapters -- `_BlocksLayer` / `_UpdateLayer` / `_MapLayer` /
-                    `_MusicLayer` / `_PerfLayer` / `_AchOverlayLayer` / `_SysMenuLayer`
-                    / `_PauseLayer` / `_ConfirmLayer` / `_AboutLayer` -- real Layer
-                    types for the surfaces that were already their own objects
-                    (block_ui / update_ui / map_ui / music_ui / perf_ui / ach_ui /
-                    menu_ui / pause / confirm).
+                    `_MusicLayer` / `_PerfLayer` / `_SysMenuLayer` / `_PauseLayer` /
+                    `_ConfirmLayer` / `_AboutLayer` -- real Layer types for the
+                    surfaces that were already their own objects (block_ui /
+                    update_ui / map_ui / music_ui / perf_ui / menu_ui / pause /
+                    confirm / about).
 
-Every class here references ONLY its `self.ws` back-ref (and, for `_LegacyLayer` /
-`_AchOverlayLayer`, injected callables) -- no console module-level constants or
+Every class here references ONLY its `self.ws` back-ref (and, for `_LegacyLayer`,
+injected callables) -- no console module-level constants or
 NAMES -- so this file is a dependency-free leaf: console.py imports it, it imports
 nothing back (no circular import), and both the host and the device freeze the
 identical source (build.sh stages it into modules/ like editors.py).
@@ -321,22 +321,6 @@ class _PerfLayer(Layer):
             ws.perf_ui._draw_perf_hud()   # frame-time breakdown above the FPS chip
 
 
-class _AchOverlayLayer(Layer):
-    """A draw-only overlay adapter for the AchievementsUI surfaces (#21): the
-    confetti burst, the achievements list view, and the Easter-egg popup -- each a
-    separate z-ordered overlay gated in _overlay_stack, delegating to ach_ui."""
-
-    domain = "system"
-
-    def __init__(self, ws, id, fn):
-        self.ws = ws
-        self.id = id
-        self._fn = fn
-
-    def draw(self, dt):
-        self._fn()
-
-
 class _PauseLayer(Layer):
     """The pause menu's layer (docs/look_2026-10.md step 25a): its card over
     the frozen game, drawn on the system canvas; it takes every key and tap
@@ -481,7 +465,8 @@ class _SysMenuLayer(Layer):
 
 
 class _AboutLayer(Layer):
-    """The ABOUT info modal (#52): any tap / ESC / B / A / RUN dismisses it. Modal --
+    """About's card (about_ui.AboutCard) over the washed content: its rows
+    take the keys and taps; Esc, B or a tap outside closes it. Modal --
     always consumes + clears the game pointer's tap."""
 
     id = "about"
@@ -492,14 +477,16 @@ class _AboutLayer(Layer):
         self.ws.menu_ui._draw_about()
 
     def handle_input(self, i):
-        if i.pressed("b") or i.pressed("stop") or i.pressed("a") or i.pressed("run"):
-            self.ws._about = False
+        card = self.ws.menu_ui.about
+        if i.pressed("b") or i.pressed("stop"):
+            card.close()
+        elif card.host.keys(i):
+            self.ws._dirty = True
         return True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        if click:
-            ws._about = False
+        if ws.menu_ui.about.host.point(px, py, click, bool(getattr(ws.pointer, "down", False))):
             ws._dirty = True
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)

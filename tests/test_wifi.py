@@ -485,8 +485,8 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
     moy_carts.ensure_dirs(carts)
     moy_carts.save_system({"wallpaper": "moybyte.moy_night"}, carts)
     moy_carts.save_system({"wallpaper": "moybyte.moy_night", "theme": "outline"}, carts)
-    moy_carts.save_achievements(["first_cart"], carts)
-    moy_carts.save_achievements(["first_cart", "first_edit"], carts)
+    moy_carts.save_achievements({"found": {"first_open": 0}, "count": {}}, carts)
+    moy_carts.save_achievements({"found": {"first_open": 0, "first_run": 1}, "count": {}}, carts)
 
     for path in (moy_carts.system_store_path(carts),
                  moy_carts.achievements_store_path(carts)):
@@ -494,7 +494,8 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
 
     assert moy_carts.load_system(carts) == {"wallpaper": "moybyte.moy_night",
                                             "theme": "outline"}
-    assert moy_carts.load_achievements(carts) == ["first_cart", "first_edit"]
+    assert moy_carts.load_achievements(carts) == {"found": {"first_open": 0, "first_run": 1},
+                                                  "count": {}}
 
 
 # -- the radio is a LEASE (2026-09-07) ----------------------------------------

@@ -230,7 +230,8 @@ def test_get_reports_when_shared_sheet_is_empty(tmp_path):
 
 def _look_tab(tmp_path, theme="moy", variant="light"):
     from runtime import chrome
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    from ws_helpers import no_unlock_banner
+    ws = no_unlock_banner(host_app.build_workstation(str(tmp_path / "carts")))
     ws.look.set_theme(theme, persist=False, variant=variant)
     _open_cart(ws, "Star Catcher")
     ws._open_paint()

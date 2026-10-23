@@ -166,6 +166,16 @@ def quiesce(ws):
     ws._toast_until = 0
 
 
+def no_unlock_banner(ws):
+    """Every badge already found, so nothing a test opens raises the unlock
+    banner (achievements_ui), whose card at the top of the glass would cover
+    the pixels it reads."""
+    from runtime.widgets import ACHIEVEMENTS
+    for a in ACHIEVEMENTS:
+        ws.ach.unlocked.setdefault(a[0], 0)
+    return ws
+
+
 def build_ws_with_cart(tmp_path, src, title="Cart", type="app", edit=None,
                        editor=False):
     """A workstation over a store holding ONE hand-authored cart, opened.

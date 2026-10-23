@@ -15,11 +15,14 @@ The groups: General (Wi-Fi, the Bluetooth keyboard where a board has one,
 Appearance, Text size, Layout, Volume, Brightness, Name, and Edit icons
 where the theme draws the IconSheet), Play and Developer (the SETTINGS_TOGGLES registry's ON/OFF
 rows), Power (the idle ladder's rungs), Updates (the web console, the OTA
-channel and the update flows) and About (firmware, board, storage, battery
-and the achievements). Brightness and Name store a value nothing applies
-yet. The Wi-Fi panel, the Bluetooth picker, a toggle's warning and the last
-crash record are pages of their own in place of the rows; the Wi-Fi panel is
-also what the bar's wifi popover holds (`wifi_page`, runtime/popover.py).
+channel and the update flows) and About (the version and its channel, the
+board, storage, battery, Achievements and Licences). Brightness and Name
+store a value nothing applies yet. The Wi-Fi panel, the Bluetooth picker, a
+toggle's warning, the last crash record, Achievements
+(runtime/achievements_ui.py) and Licences (runtime/about_ui.py) are pages of
+their own in place of the rows, Settings' way back closing them; the Wi-Fi
+panel is also what the bar's wifi popover holds (`wifi_page`,
+runtime/popover.py).
 
 Boundary: SettingsLayer owns NO config. Every value it steps or shows is
 CART/SYSTEM state on Workstation -- ws.system (the system.json rows),
@@ -31,7 +34,7 @@ default, verb, capability gate, serial word -- and console.py and
 dev_channel.py import it back rather than each keeping a hand copy (#209
 section 7). Wallpaper + panel-theme picking is the Appearance app's; Settings
 deep-links to it. The actions Settings hosts delegate OUT to other layers
-(ws.open_app / ws.update_ui.open_update / ws.show_achievements);
+(ws.open_app / ws.update_ui.open_update);
 ws.open_settings / _exit_settings (the lifecycle) stay on ws. The frame the
 verbs draw in is begun by the host side the console hands it
 (the AppHost a shipped app is handed as `ctx.ui`), fed the keys and the
@@ -47,6 +50,14 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import layout_base as _lb
     from runtime.crash_guard import crash_available, crash_lines, last_crash
 
+try:
+    from achievements_ui import AchievementsPage
+    from about_ui import LicencesPage, version_words, board_words
+    from widgets import ACHIEVEMENTS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.achievements_ui import AchievementsPage
+    from runtime.about_ui import LicencesPage, version_words, board_words
+    from runtime.widgets import ACHIEVEMENTS
 try:
     from editors_base import TextEntry
     from audio_session import console_volume
@@ -215,9 +226,11 @@ def say(label):
 _SIZES = {1: "Medium", 2: "Large", 3: "Largest"}
 _STABLE_BETA = ("Stable", "Beta")
 
-# A board's name in About, by its OTA id (each board.toml's [board] ota).
-_BOARDS = {"tdeck": "T-Deck Plus", "p4": "ESP32-P4 7B", "guition_s3": "JC3248W535",
-           "guition_p4": "JC8012P4A1C", "xiao_zero": "XIAO ESP32-S3"}
+# A board's name in About, by its OTA id (each board.toml's [board] ota):
+# the name a reader knows it by.
+BOARDS = {"tdeck": "T-Deck Plus", "p4": "Waveshare P4 7″", "guition_s3": "Guition 3.5″",
+          "guition_p4": "Guition P4 10″", "xiao_zero": "XIAO ESP32-S3"}
+_PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences"}
 
 # The groups, in page order: (caption, row keys). A row of kind `idle` is
 # Power's.
@@ -374,6 +387,15 @@ class SettingsLayer:
         # The kernel's last crash record (Settings -> LAST CRASH): a read-only
         # page in place of the rows, on a board whose kernel keeps one.
         self.crash_view = False
+        # About's pages (docs/look_2026-10.md step 32): Achievements, and
+        # Licences with a licence's text a page under it
+        self.page = None              # "achievements", "licences" or None
+        self._ach_n = -1              # the badges the Achievements row last said
+        self._rect = (0, 0, 0, 0)     # the layout's content rect, as the page takes it
+        self._ach_words = ""
+        self.achievements = AchievementsPage(ws)
+        self.licences = LicencesPage(ws)
+        self.back_title = "Settings"
         self._typing = False          # the Name field holds focus: text mode
         self._name = None             # the Name being typed, until it is stored
 
@@ -392,8 +414,45 @@ class SettingsLayer:
             self.close_bluetooth()
         self.confirm_key = None
         self.crash_view = False
+        self.page = None
+        self._name_bar("Settings")
         self._typing = False
         self._about = self._read_about()
+
+    # -- About's pages: Achievements, Licences ------------------------------------
+
+    def open_page(self, page):
+        """Open About's `page` ("achievements", "licences") over the rows,
+        Settings' way back closing it."""
+        self.commit_name()
+        self.page = page
+        if page == "achievements":
+            self.achievements.open()
+        else:
+            self.licences.open()
+        self._name_bar(self.page_title() or "Settings")
+        self.ws._dirty = True
+
+    def close_page(self):
+        was = self.page
+        self.page = None
+        self._name_bar("Settings")
+        self._want = "Achievements" if was == "achievements" else "Licences"
+        self.ws._dirty = True
+
+    def _name_bar(self, title):
+        """The bar's title for the page shown, its zone drawn again when it
+        moves (`zone_gen`, the bar's cache key)."""
+        if title != self.back_title:
+            self.back_title = title
+            self.zone_gen += 1
+
+    def page_title(self):
+        """The open page's title, which the bar and a desk window show: a
+        licence's name over its text, else the page's."""
+        if self.page == "licences":
+            return self.licences.title()
+        return _PAGE_TITLES.get(self.page)
 
     # -- the cursor, as a row index ---------------------------------------------
 
@@ -1156,25 +1215,18 @@ class SettingsLayer:
     # -- About ----------------------------------------------------------------------
 
     def _read_about(self):
-        """About's facts for this visit, as (label, value) rows: the firmware,
-        the board, the store's free space (a board's), and nothing a tier
-        cannot answer."""
+        """About's facts for this visit, as (label, value) rows: the
+        version and its channel, the board, the store's free space (a
+        board's), and nothing a tier cannot answer."""
         ws = self.ws
         out = []
         u = ws.updater
-        if u is not None:
-            try:
-                out.append(("Firmware", str(u.version_label())))
-            except Exception:  # noqa: BLE001
-                pass
-        board = None
-        try:
-            import moy_ota
-            board = getattr(moy_ota, "BOARD", None)
-        except ImportError:
-            pass
+        v = version_words(ws)
+        if v:
+            out.append(("Version", v))
+        board = board_name()
         if board:
-            out.append(("Board", _BOARDS.get(board, str(board))))
+            out.append(("Board", board))
         if u is not None:
             free = self._free()
             if free is not None:
@@ -1393,10 +1445,16 @@ class SettingsLayer:
         if lvl is not None:
             _ui.info("Battery", "%d%%" % lvl)
         self._kinds["Achievements"] = "link"
-        if _ui.link("Achievements", str(ws.ach.count())):
-            ws.show_achievements = True
+        n = ws.ach.count()
+        if n != self._ach_n:
+            self._ach_n = n
+            self._ach_words = "%d of %d" % (n, len(ACHIEVEMENTS))
+        if _ui.link("Achievements", self._ach_words):
             ws.ach_ui._secret_taps = 0
-            ws._dirty = True
+            self.open_page("achievements")
+        self._kinds["Licences"] = "link"
+        if _ui.link("Licences"):
+            self.open_page("licences")
         _ui.group()
 
     # -- the frame --------------------------------------------------------------------
@@ -1410,7 +1468,7 @@ class SettingsLayer:
             return "confirm"
         if self.crash_view:
             return "crash"
-        return None
+        return self.page
 
     def _input_host(self):
         return self._host if self._page_of() is None else self._sub
@@ -1427,6 +1485,8 @@ class SettingsLayer:
             return True
         if i.pressed("b") or i.pressed("stop"):
             self.back()
+            return True
+        if view == "licences" and self.licences.keys(i):
             return True
         self._input_host().keys(i)
         return True
@@ -1450,6 +1510,13 @@ class SettingsLayer:
             self.close_confirm()
         elif view == "crash":
             self.close_crash()
+        elif view == "achievements":
+            if not self.achievements.back():
+                self.close_page()
+        elif view == "licences":
+            if not self.licences.back():
+                self.close_page()
+            self._name_bar(self.page_title() or "Settings")
         elif view == "wifi":
             if self.wifi_pick is not None:
                 self._wifi_cancel()
@@ -1461,12 +1528,6 @@ class SettingsLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        # The achievements view is a modal overlay: while it's up, any tap
-        # closes it (it has no controls of its own besides "tap to dismiss").
-        if ws.show_achievements:
-            if click:
-                ws.show_achievements = False
-            return True
         if click and ws.bar_layer.handle_bar_tap("settings", px, py):
             return True
         if click:
@@ -1479,9 +1540,8 @@ class SettingsLayer:
         wherever the bar sits), then the bar."""
         ws = self.ws
         cv = ws.sys_canvas
-        lay = ws.layout
         g = ws.theme_colors["panel"]
-        x, y, w, h = lay.cx, lay.cy, lay.cw, lay.ch
+        x, y, w, h = self._content()
         if y > 0:
             cv.rect(0, 0, cv.w, y, g)
         if y + h < cv.h:
@@ -1493,11 +1553,18 @@ class SettingsLayer:
         self._draw_page()
         ws.bar_layer._draw_status_strip("settings")
 
+    def _content(self):
+        """The rect the page fills: the layout's content rect."""
+        lay = self.ws.layout
+        r = self._rect
+        if r[0] != lay.cx or r[1] != lay.cy or r[2] != lay.cw or r[3] != lay.ch:
+            r = self._rect = (lay.cx, lay.cy, lay.cw, lay.ch)
+        return r
+
     def _draw_page(self):
         """The page the open panel is, else the rows, filling the content
         rect."""
         ws = self.ws
-        lay = ws.layout
         view = self._page_of()
         if view != self._view:
             if self._view is None:
@@ -1512,7 +1579,7 @@ class SettingsLayer:
         if want is not None:
             host.focus(want)          # before the frame: its keys act on it
             self._want = None
-        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch),
+        host.begin(ws.sys_canvas, ws.theme_colors, self._content(),
                    _lb.metric_class() == _lb.DESK, ws.windowed_chrome)
         was = ws._dirty
         ws._dirty = False             # what the rows' answers change marks it again
@@ -1539,6 +1606,11 @@ class SettingsLayer:
                 self._bt_page()
             elif view == "confirm":
                 self._confirm_page()
+            elif view == "achievements":
+                self.achievements.draw(self._content())
+            elif view == "licences":
+                self.licences.draw(self._content())
+                self._name_bar(self.page_title() or "Settings")
             else:
                 self._crash_page()
             self._sub_focused = _ui.focus()
@@ -1546,6 +1618,16 @@ class SettingsLayer:
         if ws._dirty or self._page_of() != view or host.owed or host.tap == 2:
             ws.request_frame()        # an answer changed what the page shows
         ws._dirty = was or ws._dirty
+
+
+def board_name():
+    """This board's name as About says it, None off a board (the host)."""
+    try:
+        import moy_ota
+    except ImportError:
+        return None
+    board = getattr(moy_ota, "BOARD", None)
+    return board_words(BOARDS.get(board, str(board))) if board else None
 
 
 def _idle_word(secs):

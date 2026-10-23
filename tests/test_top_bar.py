@@ -409,7 +409,8 @@ def _run_a_cart(tmp_path):
     state. A crashed frame is static, like the old paused one, so the tests force
     repaints with ws._dirty."""
     from runtime import host_app
-    ws = _ws(tmp_path)
+    from ws_helpers import no_unlock_banner
+    ws = no_unlock_banner(_ws(tmp_path))
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()

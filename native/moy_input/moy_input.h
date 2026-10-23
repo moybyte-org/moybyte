@@ -129,6 +129,8 @@ enum {
     MOY_INPUT_KEY_RIGHT,
     MOY_INPUT_KEY_UP,
     MOY_INPUT_KEY_DOWN,
+    MOY_INPUT_KEY_PGUP,
+    MOY_INPUT_KEY_PGDN,
 };
 #define MOY_INPUT_EVENT(code, mods) ((int32_t)(code) | ((int32_t)(mods) << MOY_INPUT_MODS_AT))
 #define MOY_INPUT_CODE(ev) ((int32_t)(ev) & 0xFFFF)

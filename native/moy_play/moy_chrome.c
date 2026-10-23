@@ -11,6 +11,7 @@
 #include "moy_gfx_kernels.h"
 #include "moy_text.h"
 #include "moy_ui.h"
+#include "moy_canvas.h"
 #include "moy.h"
 
 // -- the inks ----------------------------------------------------------------------
@@ -266,40 +267,6 @@ void moy_chrome_panel(moy_chrome_list_t *l, int cw, int ch, bool notice, const c
           -1, x + 8, y + h - 12, ink(MOY_INK_YELLOW), 1);
 }
 
-void moy_chrome_toast(moy_chrome_list_t *l, const char *title, const char *g) {
-    int x = 36, y = 26, w = 248, h = 38;
-    rect(l, x, y, w, h, ink(MOY_INK_DARK_PURPLE));
-    rectb(l, x, y, w, h, ink(MOY_INK_YELLOW));
-    rect(l, x, y, w, 12, ink(MOY_INK_YELLOW));
-    glyph(l, "trophy", x + 2, y - 1, 12, 12, ink(MOY_INK_BLACK), 0);
-    print(l, MOY_TEXT_TABLE, moy_str(MOY_S_CHROME_ACHIEVEMENT), -1, x + 16, y + 2,
-          ink(MOY_INK_BLACK), 1);
-    glyph(l, g != NULL ? g : "", x + 6, y + 16, 16, 16, ink(MOY_INK_YELLOW), 0);
-    print(l, MOY_TEXT_PY, title, 24, x + 28, y + 20, ink(MOY_INK_WHITE), 2);
-}
-
-void moy_chrome_banner(moy_chrome_list_t *l, int lw, int fs, int status_h, const char *title,
-                       const char *sub, bool ok) {
-    int accent = ink(ok ? MOY_INK_PLAY : MOY_INK_ORANGE);
-    int tn = (int)strlen(title);
-    int want = (tn + 2) * 8 * fs * 2;
-    if (want < 180 * fs) {
-        want = 180 * fs;
-    }
-    int w = lw - 16 * fs < want ? lw - 16 * fs : want;
-    int h = 34 * fs;
-    int x = (lw - w) / 2;
-    int y = status_h + 6 * fs;
-    rect(l, x, y, w, h, ink(MOY_INK_SURFACE));
-    rectb(l, x, y, w, h, accent);
-    rect(l, x, y, w, 3 * fs, accent);            // a lit edge, not a full title bar
-    glyph(l, "gear", x + 5 * fs, y + 8 * fs, 14 * fs, 14 * fs, accent, 0);
-    print(l, MOY_TEXT_PY, title, 22, x + 22 * fs, y + 7 * fs, ink(MOY_INK_INK), 2 * fs);
-    if (sub != NULL && *sub) {
-        print(l, MOY_TEXT_PY, sub, 26, x + 22 * fs, y + 22 * fs, ink(MOY_INK_INK_DIM), fs);
-    }
-}
-
 // The bar's fixed game-canvas geometry (runtime/bar_layer.py's constants).
 #define BAR_H 18
 #define BAR_ICON 16
@@ -433,37 +400,6 @@ void moy_chrome_menu(moy_chrome_list_t *l, const uint8_t *kind, const char *cons
     }
 }
 
-void moy_chrome_about(moy_chrome_list_t *l, int cw, int ch, int fs, const char *ver) {
-    const char *lines[4] = {moy_str(MOY_S_ABOUT_NAME),
-                            ver != NULL && *ver ? ver : moy_str(MOY_S_ABOUT_VERSION_UNKNOWN), "",
-                            moy_str(MOY_S_ABOUT_CLOSE)};
-    // The version is the caller's; the rest is the table's.
-    const uint8_t src[4] = {MOY_TEXT_TABLE, ver != NULL && *ver ? MOY_TEXT_PY : MOY_TEXT_TABLE,
-                            MOY_TEXT_TABLE, MOY_TEXT_TABLE};
-    int fw = 8 * fs;
-    int w = 0;
-    for (int i = 0; i < 4; i++) {
-        int lw = (int)strlen(lines[i]) * fw;
-        if (lw > w) {
-            w = lw;
-        }
-    }
-    w += 24 * fs;
-    if (w > cw - 16 * fs) {
-        w = cw - 16 * fs;
-    }
-    int h = 20 * fs + 4 * 12 * fs;
-    int x = (cw - w) / 2, y = (ch - h) / 2;
-    dialog(l, x, y, w, h);
-    int c = g_light ? ink(MOY_INK_INK) : ink(MOY_INK_CHROME);
-    int ly = y + 10 * fs;
-    for (int i = 0; i < 4; i++) {
-        int lw = (int)strlen(lines[i]) * fw;
-        print(l, src[i], lines[i], -1, x + (w - lw) / 2, ly, c, 1);
-        ly += 12 * fs;
-    }
-}
-
 // -- the raster --------------------------------------------------------------------
 
 void moy_chrome_raster(const moy_chrome_list_t *l, uint16_t *px, int w, int h,
@@ -516,8 +452,9 @@ static struct {
     bool ok;
     uint32_t until;
     bool up;
-    char toast[48], glyph[12];
-    uint32_t toast_until;
+    char head[48], name[48], icon[16];
+    bool secret;
+    uint32_t toast_at, toast_until;
     bool toast_up;
 } K;
 
@@ -529,26 +466,65 @@ void moy_chrome_notice(const char *title, const char *sub, bool ok, uint32_t unt
     K.up = true;
 }
 
-void moy_chrome_toast_arm(const char *title, const char *g, uint32_t until_ms) {
-    snprintf(K.toast, sizeof(K.toast), "%s", title ? title : "");
-    snprintf(K.glyph, sizeof(K.glyph), "%s", g ? g : "");
+void moy_chrome_toast_arm(const char *head, const char *name, const char *icon, bool secret,
+                          uint32_t until_ms) {
+    snprintf(K.head, sizeof(K.head), "%s", head ? head : "");
+    snprintf(K.name, sizeof(K.name), "%s", name ? name : "");
+    snprintf(K.icon, sizeof(K.icon), "%s", icon ? icon : "");
+    K.secret = secret;
     K.toast_until = until_ms;
+    K.toast_at = until_ms - MOY_CHROME_TOAST_MS;
     K.toast_up = true;
 }
 
-bool moy_chrome_overlay(moy_chrome_list_t *l, uint32_t now, int lw, int fs, int status_h) {
-    moy_chrome_clear(l);
+static moy_ui_span_t span(const char *s) {
+    return (moy_ui_span_t){(const uint8_t *)s, (uint16_t)strlen(s)};
+}
+
+bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now) {
     if (K.up && (int32_t)(K.until - now) <= 0) {
         K.up = false;
-    }
-    if (K.up) {
-        moy_chrome_banner(l, lw, fs, status_h, K.title, K.sub, K.ok);
     }
     if (K.toast_up && (int32_t)(K.toast_until - now) <= 0) {
         K.toast_up = false;
     }
-    if (K.toast_up) {
-        moy_chrome_toast(l, K.toast, K.glyph);
+    if (!K.up && !K.toast_up) {
+        return false;
     }
-    return l->n > 0;
+    // the run's canvas lent as a row of the shell's look: its palette below,
+    // the theme's block above, the theme's faces (a cart's boundary put aside
+    // for the banner, which is the system's)
+    moy_canvas_row_t row;
+    memset(&row, 0, sizeof(row));
+    row.px = px;
+    row.cap = (uint32_t)(w * h);
+    row.w = (uint16_t)w;
+    row.h = (uint16_t)h;
+    row.st[MOY_ST_CX1] = row.st[MOY_ST_W] = w;
+    row.st[MOY_ST_CY1] = row.st[MOY_ST_H] = h;
+    row.st[MOY_ST_FONT_SCALE] = 1;
+    memcpy(row.pal, pal, MOY_CANVAS_BLOCK * sizeof(uint16_t));
+    memcpy(&row.pal[MOY_CANVAS_BLOCK], moy_canvas_block_words(),
+           MOY_CANVAS_BLOCK * sizeof(uint16_t));
+    moy_ui_sink_t s = {MOY_UI_SINK_ROW, 1, 0, &row};
+    int was = moy_ui_cart_text(0);
+    if (K.up) {
+        static const char ok[] = "check", warn[] = "warn";
+        const char *ic = K.ok ? ok : warn;
+        size_t n = strlen(ic);
+        moy_ui_unlock(&s, w / 2, 6, span(K.title), span(K.sub),
+                      moy_ui_icon_slot((const uint8_t *)ic, n),
+                      moy_ui_icon_glyph((const uint8_t *)ic, n), 0, 1, 0, NULL);
+    }
+    if (K.toast_up) {
+        size_t n = strlen(K.icon);
+        uint32_t el = now - K.toast_at;
+        int burst = !K.secret ? 0 : el >= MOY_CHROME_BURST_MS ? 255
+                  : 1 + (int)(el * 254u / MOY_CHROME_BURST_MS);
+        moy_ui_unlock(&s, w / 2, 6, span(K.head), span(K.name),
+                      moy_ui_icon_slot((const uint8_t *)K.icon, n),
+                      moy_ui_icon_glyph((const uint8_t *)K.icon, n), burst, 1, 0, NULL);
+    }
+    moy_ui_cart_text(was);
+    return true;
 }

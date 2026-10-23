@@ -305,7 +305,7 @@ def test_a_copy_the_store_has_no_room_for_says_so_and_leaves_nothing(
     assert sorted(os.listdir(root)) == before
     assert len(ws.carts.all) == n0
     assert not any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
-    assert ws._notice == ("CAN'T COPY", "the store is full", "warn")
+    assert ws._notice == ("CAN'T COPY", "The store is full", "warn")
     assert ws.notice_active()
 
 
@@ -317,7 +317,7 @@ def test_a_new_cart_the_store_has_no_room_for_says_so(tmp_path, monkeypatch):
     _full_after(monkeypatch, 0)
     assert ws.carts.new() is None
     assert sorted(os.listdir(root)) == before
-    assert ws._notice == ("CAN'T MAKE", "the store is full", "warn")
+    assert ws._notice == ("CAN'T MAKE", "The store is full", "warn")
 
 
 def test_a_copy_that_fails_for_another_reason_stays_quiet(tmp_path, monkeypatch):

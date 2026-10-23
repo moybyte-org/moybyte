@@ -146,7 +146,7 @@ def test_moy_chromes_capped_prints_cut_no_codepoint():
     except RuntimeError:
         pytest.skip("no host Player (a C compiler builds it)")
     title = "Été à Montréal — 日本語のタイトル"
-    ops = moy_play.chrome_toast(title, "paint")
+    ops = moy_play.chrome_strip_cell("title", (0, 0, 80, 18), 1, 0, title, False)
     texts = [o[7] for o in ops if o[0] == 3]
     assert any(t and title.startswith(t) and t != title for t in texts), texts
 

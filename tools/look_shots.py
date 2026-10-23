@@ -231,53 +231,193 @@ def _setup_table():
 
 
 # Achievements and About (plan step 32, rounds/round16.py): each scene's
-# screen -> (the surface it is drawn from today, what the render shows).
-# Today's achievements list and About box are overlays the goldens' quiesce
-# clears every frame, so their nearest screens are the pages they open from.
+# screen -> (config, set up). The badges found are round 16's sets, the days
+# its two; About's version, board and storage are the targets' (a stub
+# updater and the board's `moy_ota.BOARD`).
 S3 = "guition_tapfloor_dark"
+_FOUND = {
+    "empty": (),
+    "few": ("first_open", "first_run", "first_paint"),
+    "many": ("first_open", "first_run", "first_paint", "first_map", "first_code", "play_five",
+             "toolbox", "konami", "clock_tinker"),
+    "all": ("first_open", "first_run", "first_paint", "first_map", "first_code", "play_five",
+            "toolbox", "decorator", "konami", "clock_tinker", "secret_door"),
+}
+_FOUND_ON = {"first_map": 20261012, "play_five": 20261009}
+_BOARD_OF = {HANDHELD: "tdeck", S3: "guition_s3", DESK: "p4", CONSOLE: "p4"}
+_FAKE_OTA = [False]
+
+
+class _Updater:
+    """The targets' firmware: 0.8 on Stable, nothing to install from a card."""
+
+    def __init__(self, offered=None):
+        self.offered = offered
+
+    def version_label(self):
+        return "0.8"
+
+    def channel(self):
+        return "stable"
+
+    def available(self):
+        return False
+
+
+class _Keep:
+    def free(self):
+        return (1300000,)                 # 1.2 MB free
+
+
+def _badges(ws, state):
+    ws.ach.unlocked = {k: _FOUND_ON.get(k, 20261001) for k in _FOUND[state]}
+    ws.ach.toast = None
+
+
+def _board(ws, config):
+    import types
+    sys.modules["moy_ota"] = types.SimpleNamespace(BOARD=_BOARD_OF[config])
+    _FAKE_OTA[0] = True
+    ws.updater = _Updater()
+    ws.cart_keep = _Keep()
+    ws.system.set("ota_channel", "stable")
+    if config == S3:
+        ws.use_inputs([("local", "touch")])     # the Guition's glass: no hint strip
+
+
+def _achievements(config, state, focus, pop=False, scroll=False):
+    def setup(g, ws):
+        _badges(ws, state)
+        _board(ws, config)
+        ws.open_settings()
+        if config in (DESK,):
+            ws.open_desk()
+            ws.open_settings()
+            _settle(g, ws, 2)
+            _place(ws, "settings", 226, 52, 680, 536)
+        sl = ws.settings_layer
+        sl.open_page("achievements")
+        page = sl.achievements
+        page._focus = "Badge " + focus
+        _settle(g, ws, 3)
+        if pop:
+            page._open(page._by_id["Badge " + focus])
+    return setup
+
+
+def _unlock(config, badge, game=False, secret=False):
+    def setup(g, ws):
+        _badges(ws, "many" if not secret else "few")
+        ws.ach.unlocked.pop(badge, None)
+        if game:
+            ws.go_home()
+            if getattr(ws.wm, "mode", None) is not None:
+                ws.open_library()
+            ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
+            ws.run(ws.project, ws.launcher_layer)
+            for _ in range(PAUSE_FRAMES):
+                g._quiesce(ws)
+                ws.frame(g._DT)
+        elif config == HANDHELD:
+            _home(g, ws)
+        elif config == S3:
+            _board(ws, config)
+            _settings_about(g, ws)
+        else:
+            _desk(g, ws)
+        _settle(g, ws, 2)
+        ws._golden_toast = True
+        ws.ach.award(badge)
+        ws._toast_at -= 10000             # the confetti burst out whole
+        ws._toast_until += 10000
+    return setup
+
+
+def _settings_about(g, ws):
+    ws.open_settings()
+    ws.settings_layer._want = "Licences"     # the page scrolled to its end
+    _settle(g, ws, 3)
+    ws.settings_layer._want = "Achievements"
+
+
+def _settings_about_at(config):
+    def setup(g, ws):
+        _badges(ws, "many")
+        _board(ws, config)
+        _settings_about(g, ws)
+    return setup
+
+
+def _about(config, update=False):
+    def setup(g, ws):
+        _badges(ws, "many")
+        _board(ws, config)
+        if update:
+            ws.update_ui.offered = "0.9"
+        if config == HANDHELD:
+            _home(g, ws)
+        elif config == S3:
+            _settings_about(g, ws)
+        else:
+            _desk(g, ws)
+        _settle(g, ws, 2)
+        ws._golden_about = True
+        ws.menu_ui._menu_about()
+    return setup
+
+
+def _licences(config, entry=None, focus="The console"):
+    def setup(g, ws):
+        _board(ws, config)
+        if config == DESK:
+            ws.open_desk()
+            ws.open_settings()
+            _settle(g, ws, 2)
+            _place(ws, "settings", 226, 52, 680, 536)
+        else:
+            ws.open_settings()
+        sl = ws.settings_layer
+        sl.open_page("licences")
+        sl.licences._focus = focus
+        if entry is not None:
+            sl.licences.entry = sl.licences._parts() and sl.licences._ids[entry]
+    return setup
+
+
 ABOUT = {
-    "handheld_achievements-empty": (HANDHELD, "settings"),
-    "handheld_achievements-few": (HANDHELD, "settings"),
-    "handheld_achievements": (HANDHELD, "settings"),
-    "handheld_achievements-scrolled": (HANDHELD, "settings"),
-    "handheld_achievements-all": (HANDHELD, "settings"),
-    "handheld_achievement-popover": (HANDHELD, "settings"),
-    "handheld_achievement-unlocked": (HANDHELD, "home"),
-    "handheld_achievement-unlocked-game": (HANDHELD, "game"),
-    "handheld_achievement-secret": (HANDHELD, "home"),
-    "handheld_settings-about": (HANDHELD, "settings"),
-    "handheld_about": (HANDHELD, "sysmenu"),
-    "handheld_about-update": (HANDHELD, "sysmenu"),
-    "handheld_licences": (HANDHELD, "settings"),
-    "handheld_licence": (HANDHELD, "settings"),
-    "handheld_achievements-s3": (S3, "settings"),
-    "handheld_achievement-unlocked-s3": (S3, "settings"),
-    "handheld_settings-about-s3": (S3, "settings"),
-    "handheld_about-s3": (S3, "settings"),
-    "desktop_achievements": (DESK, "desk"),
-    "desktop_achievement-popover": (DESK, "desk"),
-    "desktop_achievement-unlocked": (DESK, "desk"),
-    "desktop_achievement-unlocked-game": (CONSOLE, "game"),
-    "desktop_about": (DESK, "sysmenu"),
-    "desktop_about-update": (DESK, "sysmenu"),
-    "desktop_licences": (DESK, "desk"),
+    "handheld_achievements-empty": (HANDHELD, _achievements(HANDHELD, "empty", "first_open")),
+    "handheld_achievements-few": (HANDHELD, _achievements(HANDHELD, "few", "first_paint")),
+    "handheld_achievements": (HANDHELD, _achievements(HANDHELD, "many", "first_run")),
+    "handheld_achievements-scrolled": (HANDHELD, _achievements(HANDHELD, "many", "decorator")),
+    "handheld_achievements-all": (HANDHELD, _achievements(HANDHELD, "all", "first_open")),
+    "handheld_achievement-popover": (HANDHELD, _achievements(HANDHELD, "many", "first_map",
+                                                             pop=True)),
+    "handheld_achievement-unlocked": (HANDHELD, _unlock(HANDHELD, "first_map")),
+    "handheld_achievement-unlocked-game": (HANDHELD, _unlock(HANDHELD, "first_run", game=True)),
+    "handheld_achievement-secret": (HANDHELD, _unlock(HANDHELD, "konami", secret=True)),
+    "handheld_settings-about": (HANDHELD, _settings_about_at(HANDHELD)),
+    "handheld_about": (HANDHELD, _about(HANDHELD)),
+    "handheld_about-update": (HANDHELD, _about(HANDHELD, True)),
+    "handheld_licences": (HANDHELD, _licences(HANDHELD)),
+    "handheld_licence": (HANDHELD, _licences(HANDHELD, "MicroPython")),
+    "handheld_achievements-s3": (S3, _achievements(S3, "many", "first_run")),
+    "handheld_achievement-unlocked-s3": (S3, _unlock(S3, "first_map")),
+    "handheld_settings-about-s3": (S3, _settings_about_at(S3)),
+    "handheld_about-s3": (S3, _about(S3)),
+    "desktop_achievements": (DESK, _achievements(DESK, "many", "play_five")),
+    "desktop_achievement-popover": (DESK, _achievements(DESK, "many", "decorator", pop=True)),
+    "desktop_achievement-unlocked": (DESK, _unlock(DESK, "first_map")),
+    "desktop_achievement-unlocked-game": (CONSOLE, _unlock(CONSOLE, "first_run", game=True)),
+    "desktop_about": (DESK, _about(DESK)),
+    "desktop_about-update": (DESK, _about(DESK, True)),
+    "desktop_licences": (DESK, _licences(DESK, focus="MicroPython")),
 }
 
 
 def _about_table():
-    what = {"settings": "nearest screen: Settings as it opens",
-            "home": "nearest screen: home (the unlock banner is cleared per frame)",
-            "sysmenu": "nearest screen: the system menu, where About opens",
-            "desk": "nearest screen: the desk",
-            "game": "nearest screen: Star Catcher paused (the banner is cleared per frame)"}
-    out = {}
-    for screen, (config, near) in ABOUT.items():
-        desk = config != HANDHELD and config != S3
-        setup = {"settings": _settings, "home": _home,
-                 "sysmenu": _sysmenu_desk if desk else _sysmenu_home,
-                 "desk": _desk, "game": _pause}[near]
-        out[screen] = (config, ("32",), False, setup, what[near])
-    return out
+    return {screen: (config, ("32",), False, setup,
+                     "Achievements and About as built (step 32)")
+            for screen, (config, setup) in ABOUT.items()}
 
 
 # The apps' restyle (docs/media/look_2026-10/APPS_RESTYLE.md, plan step 31):
@@ -1363,6 +1503,9 @@ def render(g, config, theme, mode, setup, wallpaper, inputs=None):
     finally:
         moy_ui.theme_uninstall()
         ui_draw.input_kind("keys")
+        if _FAKE_OTA[0]:
+            sys.modules.pop("moy_ota", None)
+            _FAKE_OTA[0] = False
         shutil.rmtree(tmp, ignore_errors=True)
 
 

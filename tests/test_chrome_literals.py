@@ -24,7 +24,7 @@ _BRANCH = re.compile(r"light_chrome\(\)|\bis_light\(")
 # module -> (NAMES literals, light branches); a mention in a comment or a
 # docstring counts too, which only makes the ratchet stricter.
 PINNED = {
-    "achievements_ui.py": (11, 0),
+    "achievements_ui.py": (0, 0),
     "appearance.py": (0, 1),
     "block_editor_ui.py": (15, 0),
     "cards_layer.py": (26, 0),

@@ -946,7 +946,8 @@ def _shelves(tmp_path):
 def _app_ws(tmp_path, net, indexes=None):
     from runtime import host_app
     carts = tmp_path / "carts"
-    ws = host_app.build_workstation(str(carts))
+    from ws_helpers import no_unlock_banner
+    ws = no_unlock_banner(host_app.build_workstation(str(carts)))
     if indexes is not None:
         (tmp_path / ci.INDEXES_NAME).write_text(json.dumps({"indexes": indexes}))
     ws.cart_net = net

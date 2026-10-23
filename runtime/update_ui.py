@@ -23,7 +23,7 @@ The split follows the same discipline as the console's other sub-UIs:
 Dependency profile (the facade lens, shell_architecture_v1.md §2) -- through its
 `self.ws` back-reference:
   * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws._dirty,
-                             ws._set_text_mode, ws.show_achievements, ws.go_home,
+                             ws._set_text_mode, ws.go_home,
                              ws._mini_btn, ws._ota_channel
   * privileged (draft make_system_api): ws.updater -- the OtaUpdater handle
                              (find_bin/begin/step/finish/check_online/
@@ -68,6 +68,9 @@ class UpdateUI:
         self._upd_bin = None          # update screen: (path, size) of the found/downloaded image
         self._upd_at = 0              # update screen: timestamp the install finished
         self._online_manifest = None  # the fetched update manifest dict
+        # The version the last online check offered ("0.9"), which About's
+        # Updates row says is ready; None after one found nothing newer.
+        self.offered = None
         self._check_armed = False     # one-frame gate so CHECKING... draws before the blocking fetch
 
     def open_update(self):
@@ -75,7 +78,6 @@ class UpdateUI:
         the "confirm" phase when one is found, else "error" with a friendly reason."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
-        self.ws.show_achievements = False
         self.ws._set_text_mode(False)             # button-driven, not typing
         self._upd_bin = None
         self._upd_msg = ""
@@ -100,7 +102,6 @@ class UpdateUI:
         runs in _pump_update one frame later so a CHECKING... screen shows first."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
-        self.ws.show_achievements = False
         self.ws._set_text_mode(False)
         self._upd_bin = None
         self._upd_msg = ""
@@ -122,7 +123,6 @@ class UpdateUI:
         over SDIO -> reboot; the backend module's header carries the design."""
         self.ws.wm.goto("update")
         self.ws._dirty = True
-        self.ws.show_achievements = False
         self.ws._set_text_mode(False)
         self._upd_bin = None
         self._upd_msg = ""
@@ -401,8 +401,10 @@ class UpdateUI:
             # stable) or a newer version within the selected channel (#53).
             if not u.offers(manifest, ch):
                 self._upd_phase = "uptodate"
+                self.offered = None
                 return
             self._online_manifest = manifest
+            self.offered = str(manifest.get("label") or manifest.get("version") or "")
             self._upd_phase = "confirm_online"
         elif ph == "downloading":
             if u is None:

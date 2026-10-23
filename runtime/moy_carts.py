@@ -1684,16 +1684,21 @@ def save_system(settings, root=CARTS_DIR):
 
 # --- achievements (#21) -----------------------------------------------------
 #
-# The set of unlocked achievement ids (fun milestones a kid hits naturally, plus
-# the hidden Easter-egg rewards) persists to a single achievements.json that lives
-# BESIDE the carts dir (a sibling of `root`, like system.json/wifi.json/the shared
-# sheet) -- it is system state, not tied to any cart. Stored as {"unlocked": [id,
-# ...]}; the catalog of what each id MEANS lives in the shared console (host ==
-# device). Written atomically (same crash-safe path as the cart saves) so an
-# interrupted write can never lose a kid's earned badges. MicroPython-safe (json +
-# os only).
+# The badges a kid found (milestones hit naturally, plus the hidden Easter-egg
+# rewards) persist to a single achievements.json that lives BESIDE the carts
+# dir (a sibling of `root`, like system.json/wifi.json/the shared sheet) -- it
+# is system state, not tied to any cart. Stored as
+#   {"v": 2, "found": {id: YYYYMMDD, ...}, "count": {badge: [key, ...]}}
+# -- the day each was found (0 where the console had no clock) and a counter
+# badge's progress (Cart Explorer's carts, Toolbox Master's editors); the
+# catalog of what each id MEANS lives in the shared console (host == device).
+# The reader is strict: any other document, the ids-only one before it
+# included, reads as ABSENT (CLAUDE.md, no store migrations). Written
+# atomically (same crash-safe path as the cart saves) so an interrupted write
+# can never lose a kid's earned badges. MicroPython-safe (json + os only).
 
 ACHIEVEMENTS_STORE_NAME = "achievements.json"
+ACHIEVEMENTS_FORMAT = 2
 
 
 def achievements_store_path(root=CARTS_DIR):
@@ -1701,41 +1706,52 @@ def achievements_store_path(root=CARTS_DIR):
     return _sibling_path(root, ACHIEVEMENTS_STORE_NAME)
 
 
-def _unlocked_ids(data):
-    """The unlocked-id list out of a parsed achievements.json, or None when the
-    document isn't one (so _load_store_json falls through to the backup)."""
-    ids = data.get("unlocked") if isinstance(data, dict) else None
-    if not isinstance(ids, list):
+def achievements_doc(data):
+    """achievements.json's document out of its parsed JSON, `{"found": {id:
+    day}, "count": {badge: [key, ...]}}`, or None when it is not one of
+    this format (so _load_store_json falls through to the backup)."""
+    if not isinstance(data, dict) or data.get("v") != ACHIEVEMENTS_FORMAT:
         return None
-    out = []
-    seen = {}
-    for i in ids:
-        if isinstance(i, str) and i not in seen:
-            seen[i] = True
-            out.append(i)
-    return out
+    found, count = data.get("found"), data.get("count", {})
+    if not isinstance(found, dict) or not isinstance(count, dict):
+        return None
+    out = {}
+    for k, v in found.items():
+        if not isinstance(k, str) or type(v) is not int or v < 0:
+            return None
+        out[k] = v
+    keys = {}
+    for k, v in count.items():
+        if not isinstance(k, str) or not isinstance(v, list):
+            return None
+        got = []
+        for i in v:
+            if not isinstance(i, str):
+                return None
+            if i not in got:
+                got.append(i)
+        keys[k] = got
+    return {"found": out, "count": keys}
+
+
+def achievements_text(doc):
+    """achievements.json's text for `doc` (an `Achievements.doc()`)."""
+    return json.dumps({"v": ACHIEVEMENTS_FORMAT, "found": doc.get("found", {}),
+                       "count": doc.get("count", {})})
 
 
 def load_achievements(root=CARTS_DIR):
-    """Read the unlocked achievement ids as a list. Returns [] when nothing usable
-    has ever been saved (a corrupt store must never crash boot); recovers from the
-    .bak like load_wifi. Duplicates/non-strings are dropped so the loaded list is
-    clean."""
-    return _load_store_json(achievements_store_path(root), _unlocked_ids) or []
+    """The badges' document (`achievements_doc`), or None when nothing of this
+    format has been saved (a corrupt store must never crash boot); recovers
+    from the .bak like load_wifi."""
+    return _load_store_json(achievements_store_path(root), achievements_doc)
 
 
-def save_achievements(unlocked, root=CARTS_DIR):
-    """Persist the unlocked achievement ids (a list of strings), atomically.
+def save_achievements(doc, root=CARTS_DIR):
+    """Persist the badges' document (`Achievements.doc()`), atomically.
     Ensures the parent dir exists."""
     ensure_dirs(root)
-    clean = []
-    seen = {}
-    for i in unlocked:
-        s = str(i)
-        if s not in seen:
-            seen[s] = True
-            clean.append(s)
-    _write_atomic(achievements_store_path(root), json.dumps({"unlocked": clean}))
+    _write_atomic(achievements_store_path(root), achievements_text(doc))
 
 
 # --- cart management (create / duplicate / delete) --------------------------

@@ -209,12 +209,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.console_notices import SystemMenuUI, PauseMenu, DeleteConfirm
 
-# The Easter-egg subsystem + achievement/egg drawing (#21): the 3 hidden eggs +
-# their state + _draw_egg/_draw_confetti/_draw_achievements. The achievement
-# CORE (ach, show_achievements, load_achievements/_achievement_unlocked) is the
-# Workstation's, on the Notices mixin (console_notices.py), and the three
-# overlay DEADLINES those objects push into at event time are created in
-# _init_overlays below (#209 landing B). Same bare-or-package fallback.
+# The Easter eggs (#21): the 3 hidden eggs and their trigger state. The
+# achievement CORE (ach, load_achievements/_achievement_unlocked) is the
+# Workstation's, on the Notices mixin (console_notices.py), and the banner's
+# DEADLINE the unlock pushes into at event time is created in _init_overlays
+# below (#209 landing B). Same bare-or-package fallback.
 try:
     from achievements_ui import AchievementsUI
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -227,12 +226,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
                         _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
-                        _AchOverlayLayer, _SysMenuLayer, _AboutLayer, _WebConsoleLayer,
+                        _SysMenuLayer, _AboutLayer, _WebConsoleLayer,
                         _PauseLayer, _ConfirmLayer)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import (_LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer,
                                 _MapLayer, _MusicLayer, _SceneLayer, _PerfLayer,
-                                _AchOverlayLayer, _SysMenuLayer, _AboutLayer,
+                                _SysMenuLayer, _AboutLayer,
                                 _WebConsoleLayer, _PauseLayer, _ConfirmLayer)
 
 # The unified top bar surface (#46 -- see bar_layer.py). bar_layer.py is the
@@ -1140,34 +1139,24 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _init_overlays(self):
         """Achievements/eggs (#21), the system menu (#52), device hooks, and the
         #44 redraw gate."""
-        # THE OVERLAY DEADLINES (#209 landing B, rev 3). The achievement objects
-        # PUSH here at event time -- an unlock arms the toast, an egg arms the
-        # popup, the Konami code arms the confetti -- and the per-frame gates
-        # (`_animating`, the WM's `_overlay_sig`) read these plain ints and
-        # nothing else. Before this they POLLED `ach.toast_active()` /
-        # `ach_ui._egg_active()` / `ach_ui._confetti_until` every loop on every
-        # tier, to be told "no" on essentially every frame of the console's life.
-        # Same shape as `_notice_until` below; 0 means down, and the objects keep
-        # only the PAYLOAD they draw, which is read only while its deadline is up.
-        self._toast_until = 0          # _ticks_ms the achievement banner hides at
-        self._egg_until = 0            # _ticks_ms the Easter-egg popup hides at
-        self._confetti_until = 0       # _ticks_ms the Konami confetti ends at
+        # THE BANNER'S DEADLINE (#209 landing B, rev 3). An unlock PUSHES it
+        # at event time, and the per-frame gates (`_animating`, the WM's
+        # `_overlay_sig`) read this plain int and nothing else. Same shape as
+        # `_notice_until` below; 0 means down, and `ach` keeps only the PAYLOAD
+        # the banner draws, which is read only while its deadline is up.
+        self._toast_until = 0          # _ticks_ms the unlock banner hides at
+        self._toast_at = 0             # _ticks_ms it was armed (a secret's confetti bursts from it)
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() adds the SD store.
         # The unlock hook is wired from the START, not at that load: persistence
-        # waits for a store, but arming the toast is kernel behavior a build with
-        # no card still owes the kid.
-        self.ach = Achievements(on_unlock=self._achievement_unlocked)
-        # The Easter-egg subsystem + achievement/egg drawing (#21, extracted from
-        # this class -- see achievements_ui.py): the 3 hidden eggs + their trigger/
-        # popup state (_konami_pos/_clock_taps/_secret_taps/egg_msg) +
-        # _draw_egg/_draw_confetti/_draw_achievements. The achievement core
-        # (ach/show_achievements/load_achievements/...) and the deadlines above
-        # stay here. Egg trigger state is reset on screen changes
-        # (go_home/settings/desktop tap) via self.ach_ui.* so a stray sequence
-        # never carries between contexts.
-        self.ach_ui = AchievementsUI(self, NAMES, ACHIEVEMENTS)
-        self.show_achievements = False  # the locked/unlocked list overlay (Settings entry)
+        # waits for a store, but arming the banner is kernel behavior a build
+        # with no card still owes the kid.
+        self.ach = Achievements(on_unlock=self._achievement_unlocked, today=self._today_ymd)
+        # The three Easter eggs (#21, achievements_ui.py): their trigger state
+        # (_konami_pos/_clock_taps/_secret_taps), reset on screen changes
+        # (go_home/settings/desktop tap) so a stray sequence never carries
+        # between contexts.
+        self.ach_ui = AchievementsUI(self)
         # A transient SYSTEM banner (#53): something the machine did on its own and
         # the kid should hear about without going looking. Distinct from the
         # achievement toast, which celebrates something the KID did. First user is
@@ -1298,9 +1287,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # a game-domain overlay (drawn before the composite, riding the viewport); the
         # rest are system-domain, on top of the composited screen.
         self._perf_layer = _PerfLayer(self)
-        self._confetti_layer = _AchOverlayLayer(self, "confetti", self.ach_ui._draw_confetti)
-        self._ach_layer = _AchOverlayLayer(self, "achievements", self.ach_ui._draw_achievements)
-        self._egg_layer = _AchOverlayLayer(self, "egg", self.ach_ui._draw_egg)
         self._toast_layer = L("toast", "system", draw=lambda dt: self._draw_toast())
         self._notice_layer = L("notice", "system", draw=lambda dt: self._draw_notice())
         self._sysmenu_layer = _SysMenuLayer(self)
@@ -1767,7 +1753,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._dirty = True             # screen change repaints (#44)
         self.settings_layer.reset()    # reset the selection + scroll window (#53)
         self.wm.goto("settings")       # Stage 6e: push Settings onto the back-stack
-        self.show_achievements = False
         self.ach_ui._secret_taps = 0              # fresh secret-door run each visit (#21)
         self._set_text_mode(False)
 
@@ -3273,7 +3258,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 self._fat_cart = None
             self.project = Project(self)
         self.cart_error = None
-        self.show_achievements = False
         self.ach_ui._konami_pos = 0          # fresh Konami run on the home desktop (#21)
         self.ach_ui._clock_taps = 0
         # #197: while WASM MODE is on, HOME is the connection screen. Here and
@@ -4276,14 +4260,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 "install", "done", "checking", "downloading",
                 "c6_checking", "c6_downloading", "c6_flashing", "c6_done"):
             return True
-        # Transient overlays redraw while they're up. Three plain int reads (#209
-        # landing B): the achievement objects wrote these at their event, so this
-        # gate never calls into them -- and one clock read serves all three.
+        # The unlock banner redraws while it is up: a plain int read (#209
+        # landing B) the unlock wrote at its event, so this gate never calls
+        # into the achievements.
         now = _ticks_ms()
-        if self._confetti_until and _ticks_diff(self._confetti_until, now) > 0:
-            return True
-        if self._egg_until and _ticks_diff(self._egg_until, now) > 0:
-            return True
         if self._toast_until and _ticks_diff(self._toast_until, now) > 0:
             return True
         if self.notice_active():
@@ -4388,6 +4368,15 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The look's change, applied once a frame, and `custom`'s autosave
         # debounce (theming phase 6 step 5): one attribute read when idle.
         self.look.tick(dt)
+        # A banner over the system canvas this frame (the unlock's, a notice):
+        # its soft edges blend over what is under them, so an app that paints
+        # a part of its page (Paint's stroke frame) paints it whole meanwhile.
+        cv = self.sys_canvas
+        if cv is not None:
+            now = _ticks_ms()
+            cv.covered = bool((self._toast_until and _ticks_diff(self._toast_until, now) > 0
+                               and self.ach.toast is not None)
+                              or (self._notice is not None and self.notice_active(now)))
         # Input focus moved (a window clicked, a screen left): Settings stores
         # a Name still being typed and hands back the keyboard's text mode.
         h = self.wm.input_holder()

@@ -1665,7 +1665,7 @@ class Appearance:
         self._refused.add(name)
         notice = getattr(self.ws, "notice", None)
         if notice is not None:
-            notice(_ui_draw.s("notice.theme_refused") % name.upper(),
+            notice(_ui_draw.s("notice.theme_refused") % name,
                    _ui_draw.s("theme.why_" + _THEME_WHY[min(max(rc, 1), 7) - 1]), "warn")
 
     def _packages_moved(self):

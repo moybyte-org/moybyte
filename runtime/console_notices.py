@@ -1,5 +1,5 @@
 # Map (grep -n a name to jump there):
-#   Notices                     the achievements wiring, the notice banner, the toast
+#   Notices                     the achievements wiring, the notice banner, the unlock banner
 #   PauseMenu                   the card over a held game: Resume, Options, Quit
 #   DeleteConfirm               "Delete <title>?" before any cart is deleted
 #   SystemMenuUI                the system menu's rows and their actions
@@ -7,16 +7,17 @@
 #   SystemMenuUI.open_card      that group alone, hung at a card (long press, pad X)
 #   SystemMenuUI._draw_look     the rows as the look's popover card
 """What the console SAYS on its own: the achievements wiring (the tracker,
-the unlock's toast deadline + beep), the timed system notice banner and the
-firmware-update verdict that rides it, and the two overlay draws. A mixin of
-`Workstation`; the deadlines it arms are the flat kernel fields `_animating`
-and both WMs read.
+the unlock banner's deadline + beep), the timed system notice and the
+firmware-update verdict that rides it, and the two banners, both
+native/moy_ui's `moy_ui_unlock` (the unlock's from achievements_ui). A mixin
+of `Workstation`; the deadlines it arms are the flat kernel fields
+`_animating` and both WMs read.
 """
 
 try:
-    from chrome import (_ticks_ms, _ticks_diff, NAMES)
+    from chrome import (_ticks_ms, _ticks_diff)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import (_ticks_ms, _ticks_diff, NAMES)
+    from runtime.chrome import (_ticks_ms, _ticks_diff)
 try:
     from widgets import (Achievements, TOAST_MS, _POPUP_W,
                          DANGER_ICON as _DANGER_ICON)
@@ -41,6 +42,12 @@ try:
     from moy_store_base import builtin_name as _builtin_name
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import builtin_name as _builtin_name
+try:
+    import achievements_ui as _ach_ui
+    import about_ui as _about_ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import achievements_ui as _ach_ui
+    from runtime import about_ui as _about_ui
 
 
 # The 2026-10 look's words and icons for the system menu's rows, by string id
@@ -94,32 +101,45 @@ class Notices:
         """Wire a fresh Achievements over the badges the store remembers (#21).
 
         The read is `prefs`'; the WIRING is kernel -- persistence goes back to
-        the store, the unlock effects (the toast deadline + the beep) are the
-        kernel's own. Call after the store + carts_root are injected (host
+        the store, the day a badge is found comes off the bar's clock, and the
+        unlock effects (the banner's deadline + the beep) are the kernel's
+        own. Call after the store + carts_root are injected (host
         build_workstation / device run_desktop)."""
         self.ach = Achievements(self.prefs.load_achievements(),
                                 on_save=self.prefs.save_achievements,
-                                on_unlock=self._achievement_unlocked)
+                                on_unlock=self._achievement_unlocked,
+                                today=self._today_ymd)
+
+    def _today_ymd(self):
+        """Today as YYYYMMDD off the bar's wall clock, 0 without one (a board
+        that never set its clock reads a year before 2020)."""
+        y, m, d = self.bar_layer._today()
+        return y * 10000 + m * 100 + d if y >= 2020 else 0
 
     def _achievement_unlocked(self, ach_id):
-        """A fresh unlock's EFFECTS: arm the toast overlay, then celebrate with a
+        """A fresh unlock's EFFECTS: arm the banner, then celebrate with a
         short rising beep when audio is wired (#21, rev-3 event push).
 
         `Achievements` generates the effect and the kernel executes it. The
         deadline is written HERE, at the unlock, rather than polled per frame off
         the object -- `_animating` and the WM's overlay signature read the flat
-        field and never call into `ach` on the frame path. There is no toast
+        field and never call into `ach` on the frame path. There is no banner
         QUEUE to preserve: `award()` overwrites its payload, so a second unlock
         inside the window replaces the banner and extends the deadline, which is
-        exactly what a later write to this field does.
+        exactly what a later write to this field does. A badge found again
+        awards nothing, so it reaches neither the banner nor the beep.
 
         The deadline is armed BEFORE the beep so a silent (or broken) backend
         cannot cost the kid the banner; the beep itself is best-effort."""
-        self._toast_until = _ticks_ms() + TOAST_MS
+        now = _ticks_ms()
+        self._toast_at = now
+        self._toast_until = now + TOAST_MS
         # ...and the kernel's copy, which a run it drives draws over its frames.
         t = getattr(self.ach, "toast", None)
         if t:
-            _ch._moy_play().chrome_toast_arm(t[1], t[2], self._toast_until)
+            _ch._moy_play().chrome_toast_arm(
+                _ach_ui.HEAD_SECRET if t[3] else _ach_ui.HEAD_BADGE, t[1], t[2], bool(t[3]),
+                self._toast_until)
         au = self.audio
         if au is not None:
             try:
@@ -127,12 +147,6 @@ class Notices:
                 au.beep(1320, 0.12)
             except Exception:  # noqa: BLE001
                 pass
-
-    # The hidden Easter eggs (#21) are self.ach_ui's (achievements_ui.py,
-    # AchievementsUI): the 3 eggs + their trigger state + the popup payload +
-    # _show_egg + _draw_egg/_draw_confetti/_draw_achievements. The achievement
-    # core is the two methods above; the overlay deadlines those objects arm
-    # are created in Workstation._init_overlays.
 
     def notice(self, title, sub="", kind="ok", ms=6000):
         """Say something on whatever screen is up, briefly, and then stop.
@@ -175,28 +189,19 @@ class Notices:
         return True
 
     def _draw_notice(self):
-        """The system banner: a wide strip atop the content rect, title + one small
-        line, sized off `layout` so it looks deliberate on a 1024x600 desktop
-        too. The kernel's one body (moy_chrome_banner)."""
+        """The system notice: the unlock banner's card at the top centre of
+        the content, its tile a check (a warning's, the warning sign), the
+        title in `value` over the line under it. The card's rect."""
         cv = self.sys_canvas
         lay = self.layout
         title, sub, kind = self._notice
-        mp = _ch.chrome_inks(self.theme_colors, NAMES)
-        _ch.replay(mp.chrome_banner(lay.w, lay.fs, lay.cy, title, sub, kind == "ok"),
-                   cv, self)
+        desk = _desk_class()
+        return _ui_draw.unlock(cv, self.theme_colors, cv.w // 2, lay.cy + (12 if desk else 6 * lay.fs),
+                        title, sub or "", "check" if kind == "ok" else "warn", 0, desk)
 
     def _draw_toast(self):
-        """A small celebratory banner near the top: a trophy, "ACHIEVEMENT
-        UNLOCKED!", the achievement's name and its glyph, drawn last over
-        whatever screen is up. The kernel's one body (moy_chrome_toast)."""
-        cv = self.sys_canvas
-        _ach_id, title, glyph = self.ach.toast
-        mp = _ch.chrome_inks(self.theme_colors, NAMES)
-        _ch.replay(mp.chrome_toast(title, glyph), cv, self)
-
-    # _draw_egg / _draw_confetti / _draw_achievements (the egg popup, Konami
-    # confetti, and achievements-list overlay) now live on self.ach_ui
-    # (achievements_ui.py, AchievementsUI). frame() calls self.ach_ui._draw_*.
+        """The unlock banner over whatever screen is up (achievements_ui)."""
+        _ach_ui.unlock_banner(self)
 
 
 class PauseMenu:
@@ -591,9 +596,9 @@ def _peek(rows, cut, fade, rh):
 
 
 class SystemMenuUI:
-    """The ≡ system menu's rows and their actions (#52). Its drawing, and the
-    ABOUT box's, is the kernel's one body (moy_chrome_menu, moy_chrome_about),
-    replayed on the SYSTEM canvas. The `sysmenu` Popup, the `_about` flag,
+    """The ≡ system menu's rows and their actions (#52). Its drawing is the
+    look's card (`_draw_look`), else the kernel's one body (moy_chrome_menu)
+    replayed on the SYSTEM canvas; About is about_ui's card. The `sysmenu` Popup, the `_about` flag,
     `reboot_hook` and `toggle_sysmenu()` stay on the Workstation (its tested
     surface); the privileged verbs (REBOOT, DELETE) are reached through it."""
 
@@ -603,6 +608,7 @@ class SystemMenuUI:
         self._host = None           # the look's card: its verbs' context
         self._card_at = (0, 0)      # where a card's menu hangs (`open_card`)
         self._card_proj = False     # a card's menu hangs from PROJECTS' hero
+        self.about = _about_ui.AboutCard(ws)
 
     def _sysmenu_items(self):
         """The rows for this open of the ≡ menu (see class note for the tuple form).
@@ -724,8 +730,9 @@ class SystemMenuUI:
         self.ws.confirm.ask(None, self.ws.go_home)
 
     def _menu_about(self):
-        # A tiny dismissible info modal (any tap / ESC / B closes it), drawn on top.
+        # About's card over the washed content (about_ui.AboutCard).
         self.ws._dirty = True
+        self.about.open()
         self.ws._about = True
 
     def _menu_sleep(self):
@@ -1051,24 +1058,5 @@ class SystemMenuUI:
         return -1 if _in_box(px, py, host.box("System")) else None
 
     def _draw_about(self):
-        """ABOUT: the console's name and firmware version, centred; any tap,
-        ESC or B closes it."""
-        ws = self.ws
-        cv = ws.sys_canvas
-        mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)
-        _ch.replay(mp.chrome_about(cv.w, cv.h, getattr(cv, "font_scale", 1),
-                                   self._firmware_version_text()), cv, ws)
-
-    def _firmware_version_text(self):
-        """A short firmware-version string for ABOUT, or "" when unknown (host). Reads
-        the injected updater's version when present (device moy_ota.FIRMWARE_VERSION)."""
-        u = self.ws.updater
-        if u is not None:
-            v = getattr(u, "version", None)
-            try:
-                v = v() if callable(v) else v
-            except Exception:  # noqa: BLE001
-                v = None
-            if v is not None:
-                return "FW " + str(v)
-        return ""
+        """About: the look's card over the washed content (about_ui.AboutCard)."""
+        self.about.draw()

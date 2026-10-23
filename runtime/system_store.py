@@ -203,21 +203,22 @@ class SystemStore:
     # -- achievements.json (#21) ---------------------------------------------
 
     def load_achievements(self):
-        """The unlocked-id list off the store, or [] on an embedded/no-store
-        boot (the badges then stay in volatile RAM -- still awarded and toasted
-        this session, just not remembered)."""
+        """The badges' document off the store (moy_carts.achievements_doc), or
+        None on an embedded/no-store boot or a store that holds none of this
+        format (the badges then start empty -- still awarded and shown this
+        session, remembered once a write lands)."""
         if not self.store.ready():
-            return []
+            return None
         ws = self.ws
         try:
             return self.store.call(
-                lambda: ws.carts_store.load_achievements(ws.carts_root)) or []
+                lambda: ws.carts_store.load_achievements(ws.carts_root))
         except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
             print("Moybyte achievements load failed:", _err_text(exc))
-            return []
+            return None
 
-    def save_achievements(self, ids):
-        """Persist the unlocked-id list -- `Achievements`' `on_save` hook.
+    def save_achievements(self, doc):
+        """Persist the badges' document -- `Achievements`' `on_save` hook.
 
         No try/except here on purpose: `Achievements.award` already wraps the
         hook and prints the failure, so a second one would only decide the same
@@ -227,4 +228,4 @@ class SystemStore:
             return
         ws = self.ws
         self.store.call(
-            lambda: ws.carts_store.save_achievements(ids, ws.carts_root))
+            lambda: ws.carts_store.save_achievements(doc, ws.carts_root))

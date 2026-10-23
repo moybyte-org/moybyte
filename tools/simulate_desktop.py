@@ -203,7 +203,8 @@ def run_live(driver, dt, scale):
                 mod_keys[getattr(pygame, n)] = bit
     named = {pygame.K_RETURN: 0x0D, pygame.K_KP_ENTER: 0x0D, pygame.K_BACKSPACE: 0x08,
              pygame.K_TAB: 0x09, pygame.K_DELETE: 0x7F, pygame.K_LEFT: mi.KEY_LEFT,
-             pygame.K_RIGHT: mi.KEY_RIGHT, pygame.K_UP: mi.KEY_UP, pygame.K_DOWN: mi.KEY_DOWN}
+             pygame.K_RIGHT: mi.KEY_RIGHT, pygame.K_UP: mi.KEY_UP, pygame.K_DOWN: mi.KEY_DOWN,
+             pygame.K_PAGEUP: mi.KEY_PGUP, pygame.K_PAGEDOWN: mi.KEY_PGDN}
     for n in range(12):
         named[getattr(pygame, "K_F%d" % (n + 1))] = mi.KEY_F1 + n
     held_mods = set()

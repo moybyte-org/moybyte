@@ -13,6 +13,16 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _open_paint(ws):
+    """Paint open. The opening's "First Steps" banner stays up, so every frame
+    draws, but draws nothing: it would cover the page, whose stroke frames
+    wait while it shows."""
+    try:
+        return _opened_paint(ws)
+    finally:
+        ws.ach.toast = None
+
+
+def _opened_paint(ws):
     if select_on_home(ws, "Paint") is None:
         # Windowed tier (#105): system apps are desk-only, not on the shelf.
         assert ws.open_app(ws.artwork_app)
@@ -922,6 +932,21 @@ def test_a_stroke_frame_paints_what_a_whole_frame_paints(tmp_path, monkeypatch, 
         # a short step a frame: what a stroke frame repaints is the last few
         # steps' dots, never the stroke so far
         assert made[1] <= 48 and made[2] <= 48, made
+
+
+def test_a_banner_over_the_page_makes_every_frame_whole(tmp_path):
+    """The unlock banner's soft edges blend over what is under them, so a
+    stroke frame, which paints a part of the page, waits while it is up."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    ws.ach.award("first_run")
+    drv.frame(1 / 30)
+    assert ws._toast_until and ws.sys_canvas.covered
+    assert not app._may(ws.sys_canvas)
+    ws._toast_until = 0
+    drv.frame(1 / 30)
+    assert not ws.sys_canvas.covered
 
 
 @pytest.mark.parametrize("desk, bufs", [(False, 1), (False, 2), (False, 3), (True, 1)])

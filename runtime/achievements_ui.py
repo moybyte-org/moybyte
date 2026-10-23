@@ -1,45 +1,43 @@
-"""The hidden Easter-egg subsystem + achievement/egg DRAWING (#21), extracted
-from Workstation (runtime/console.py).
+# Map (grep -n a name to jump there):
+#   AchievementsUI              the three Easter eggs: their trigger state and steps
+#   AchievementsPage            Settings' Achievements page: the progress, the badges, a popover
+#   AchievementsPage._cards     the grids' rows as the page draws them, made on a change
+#   AchievementsPage._popover   a badge opened: its tile, name, how and the day it was found
+#   unlock_banner               the system's unlock banner over any surface (GAPS 47)
+"""Achievements on the console (#21, docs/look_2026-10.md step 32): the
+hidden Easter eggs, Settings' Achievements page and the unlock banner.
 
-The split keeps the achievement *core* on Workstation and moves the egg
-*subsystem* + all the celebration drawing here:
-  * STAYS on Workstation: the `ach` Achievements object, the `show_achievements`
-    overlay flag, the three overlay deadlines, and load_achievements /
-    _achievement_unlocked (the store wiring + on_save/on_unlock callbacks). Tests
-    drive ws.ach.* and ws.show_achievements, and the device calls
-    ws.load_achievements(); the core has NO back-dependency on the egg subsystem
-    (_achievement_unlocked arms the toast deadline and beeps).
-  * AchievementsUI (here): the three hidden eggs (Konami on the desktop, 7 clock
-    taps, 5 SETTINGS-title "secret door" taps) -- their trigger state
-    (_konami_pos / _clock_taps / _secret_taps), the egg popup's PAYLOAD
-    (egg_msg), the trigger steppers (_konami_step / _tap_clock /
-    _tap_secret_door / _show_egg), and the drawing (_draw_egg / _draw_confetti /
-    _draw_achievements). Each egg awards a hidden achievement via
-    ws.ach.award(...).
+The achievement CORE is `widgets.Achievements` on the Workstation (`ws.ach`),
+wired by `console_notices.Notices.load_achievements`; the store's document is
+moy_carts' achievements.json. This module draws, and keeps the eggs.
 
-The egg popup's and the confetti's DEADLINES are not here: they are flat kernel
-fields (ws._egg_until / ws._confetti_until) the arm sites write at event time
-(#209 landing B, rev 3), so the per-frame gates read plain ints instead of
-calling `_egg_active()` on every loop of the console's life. This object is
-touched only while an overlay is actually drawing.
-
-Dependency profile (the facade lens, shell_architecture_v1.md §2) -- through
-`self.ws`, all shared / non-privileged:
-  * ws.ach (award/has/count), ws.sys_canvas, ws._glyph
-
-`NAMES` + the `ACHIEVEMENTS` catalogue are injected at construction (circular-import
-reason as the other UIs: console.py builds the one AchievementsUI a Workstation
-holds). `_ticks_ms` / `_ticks_diff` are duplicated (time-only). The `_KONAMI` /
-tap-goal constants and every drawing body are still the pre-extraction versions
-verbatim (each aliases NAMES / ACHIEVEMENTS from the injected values), so what
-appears on the glass is unchanged (host == device).
+* The eggs: the Konami code on the home, seven taps on the bar's clock and
+  five on Settings' title, each awarding its hidden badge through
+  `ws.ach.award`. A first find shows the unlock banner ("You found a
+  secret!", with confetti); a second shows nothing.
+* The page is a page of Settings (`SettingsLayer`, Settings' way back): the
+  count as `ui.progress`'s `count`, then "Found" and "To find", each a card
+  grid a row at a time (a row as tall as its tallest caption) of
+  `ui.card(name, how)` over the badge's `icon` tile, a locked one veiled
+  (`locked`) and a secret one "Secret" until found. Enter or a tap opens a
+  badge's `ui.popover`, hung from its card. The desk's foot names the
+  focused badge. Everything a frame draws is made when what it shows
+  changes, so an idle or scrolled frame allocates nothing.
+* The banner (`unlock_banner`) is native/moy_ui's `moy_ui_unlock`, drawn on
+  the system canvas at the top centre: under the bar where there is one, at
+  the glass's top over a fullscreen game.
 """
 
-
 try:
+    import ui as _ui
     import ui_draw as _ui_draw
+    import layout_base as _lb
+    from widgets import ACHIEVEMENTS
 except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
+    from runtime import layout_base as _lb
+    from runtime.widgets import ACHIEVEMENTS
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_diff
@@ -47,153 +45,340 @@ except ImportError:                     # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_diff
 
 
+TITLE = "Achievements"
+NONE_LINE = "Play, draw and make things to find them."
+SECRET = "Secret"
+SECRET_HOW = "Keep exploring"
+FOUND, TO_FIND = "Found", "To find"
+NOT_FOUND = "Not found yet"
+HEAD_BADGE = "You found a badge!"
+HEAD_SECRET = "You found a secret!"
+BURST_MS = 420                 # the confetti's burst, from the banner's edges out
+DESK_IN = 20                   # a desk page's inset from its window's body, each side
+DESK_FOOT = 32                 # the desk window's foot: the focused badge and the keys
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+           "September", "October", "November", "December")
+_HINT_PAGE = ("confirm", "Open", "back", "Back")
+_HINT_POP = ("back", "Close")
+_COUNT = {"count": True}
+_DIM = {"tone": "dim"}
+_LINE = {"tone": "dim", "inset": True}
+_DIM_WRAP = {"tone": "dim", "wrap": True, "lines": 2}
+_NAME = {"face": "title"}
+_VALUE = {"tone": "value"}
+_PART = {"disabled": True, "fill": "surface", "id": "Badge picture"}
+_LOCKED = {"locked": True}
+
+
+def head_line(n, total):
+    """The page's count, said as its progress row says it."""
+    if n == 0:
+        return "None found yet"
+    if n >= total:
+        return "All %d found!" % total
+    return "%d of %d found" % (n, total)
+
+
+def day_line(day, today=0):
+    """When a badge was found, as its popover says it: "Found 12 October"
+    (its year where it is not this one), "Found" where the console had no
+    clock."""
+    if not day:
+        return "Found"
+    out = "Found %d %s" % (day % 100, _MONTHS[(day // 100 % 100 - 1) % 12])
+    if today and today // 10000 != day // 10000:
+        out += " %d" % (day // 10000)
+    return out
+
+
+def _desk():
+    return _lb.metric_class() == _lb.DESK
+
+
 class AchievementsUI:
+    """The three hidden Easter eggs: their trigger state and their steps.
+    Each awards its hidden badge (`ws.ach.award`), whose first find is the
+    unlock banner; the Konami code's badge, and every secret's, bursts
+    confetti from it."""
+
     _KONAMI = ("up", "up", "down", "down", "left", "right", "left", "right", "b", "a")
     _CLOCK_TAP_GOAL = 7
     _SECRET_TAP_GOAL = 5
 
-    def __init__(self, ws, names, ach_defs):
+    def __init__(self, ws):
         self.ws = ws
-        # Injected instead of imported back from console.py (see module docstring).
-        self._NAMES = names
-        self._ACHDEFS = ach_defs
-        # Easter-egg trigger + popup state (was Workstation's).
-        self._konami_pos = 0          # how far into the Konami sequence we are (desktop)
-        self._clock_taps = 0          # clock taps on the status strip (Time Traveler)
-        self._secret_taps = 0         # SETTINGS-title taps (Secret Finder door)
-        # The PAYLOAD only: (line, glyph) of the live Easter-egg popup, or None.
-        # Both this popup's deadline and the confetti's are flat kernel fields
-        # the arm sites below PUSH into (ws._egg_until / ws._confetti_until,
-        # #209 landing B) -- the frame loop's redraw gate and the WM's overlay
-        # signature read those ints and never call in here.
-        self.egg_msg = None
-
-    def _show_egg(self, line, glyph="smile", ms=2600):
-        """Pop a non-blocking Easter-egg banner (drawn over the current screen for
-        `ms`). Purely cosmetic + self-expiring. The ONE arm site all three eggs
-        come through, so the kernel deadline is written once."""
-        self.egg_msg = (line, glyph)
-        self.ws._egg_until = _ticks_ms() + ms
+        self._konami_pos = 0          # how far into the Konami sequence we are (home)
+        self._clock_taps = 0          # clock taps on the bar (Time Traveler)
+        self._secret_taps = 0         # Settings-title taps (Secret Finder's door)
 
     def _konami_step(self, name):
-        """Advance the desktop Konami sequence on a button press; the full code in
-        order fires the confetti egg + awards "Secret Coder". A wrong key restarts
-        (but still counts if it's the sequence's first key, so a fresh start works)."""
+        """Advance the home's Konami sequence on a button press; the full code in
+        order awards "Secret Coder". A wrong key restarts (but still counts if it's
+        the sequence's first key, so a fresh start works)."""
         seq = self._KONAMI
         if name == seq[self._konami_pos]:
             self._konami_pos += 1
         else:
-            # restart; the press may itself be the (new) first step
             self._konami_pos = 1 if name == seq[0] else 0
         if self._konami_pos >= len(seq):
             self._konami_pos = 0
-            self.ws._confetti_until = _ticks_ms() + 3000
-            self._show_egg("OH! YOU FOUND ME!", "smile", ms=3000)
             self.ws.ach.award("konami")
 
     def _tap_clock(self):
-        """Count a clock tap; the _CLOCK_TAP_GOAL'th in a row fires the time egg +
-        awards "Time Traveler". Any other desktop tap resets the run."""
+        """Count a clock tap; the _CLOCK_TAP_GOAL'th in a row awards "Time
+        Traveler". Any other bar tap resets the run."""
         self._clock_taps += 1
         if self._clock_taps >= self._CLOCK_TAP_GOAL:
             self._clock_taps = 0
-            self._show_egg("TICK TOCK... TIME TRAVELER!", "smile")
             self.ws.ach.award("clock_tinker")
 
     def _tap_secret_door(self):
-        """Count a SETTINGS-title tap (the hidden door); the _SECRET_TAP_GOAL'th
+        """Count a Settings-title tap (the hidden door); the _SECRET_TAP_GOAL'th
         knocks it open -> "Secret Finder"."""
         self._secret_taps += 1
         if self._secret_taps >= self._SECRET_TAP_GOAL:
             self._secret_taps = 0
-            self._show_egg("KNOCK KNOCK... OH! YOU FOUND ME!", "key", ms=3000)
             self.ws.ach.award("secret_door")
 
-    def _draw_egg(self):
-        """A non-blocking Easter-egg popup: a friendly character glyph + the secret
-        message, centered low so it reads as a surprise without covering the action.
-        Self-expiring (ws._egg_until); cosmetic only -- touches no cart data."""
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas
-        line, glyph = self.egg_msg
-        w = min(cv.w - 16, 24 + len(line) * 8 + 8)
-        x = (cv.w - w) // 2
-        y = 150
-        h = 30
-        _ui_draw.dialog(cv, (x, y, w, h), ring=NAMES["pink"], fill=NAMES["black"])
-        self.ws._glyph(glyph, (x + 4, y + 7, 16, 16), NAMES["peach"], cv)
-        # The banner's own 16x16 character glyph is wider than ui.row's 14px
-        # leading slot, so the caller draws it and hands `row` the rect that is
-        # LEFT -- the same "caller keeps its picture" split the grid cells use.
-        # fs=1 deliberately: this popup is sized in 8px glyph units (`w` above),
-        # so its clip budget is the frozen one, not the canvas font scale. The
-        # ink is a literal white on a literal black dialog -- an off-token
-        # surprise banner that no theme colours.
-        _ui_draw.row(cv, self.ws.theme_colors, (x + 24, y, w - 24, h), line,
-                colors=(None, NAMES["white"], None), edge=False, pad=0,
-                text_dy=11, fs=1)
 
-    def _draw_confetti(self):
-        """The Konami egg's celebration: a scatter of colored spark glyphs that
-        drift down with the elapsed time. Cheap + deterministic (no RNG state),
-        purely cosmetic, gone when ws._confetti_until passes."""
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas
-        t = (_ticks_diff(_ticks_ms(), 0) // 80) % 240
-        cols = (NAMES["red"], NAMES["yellow"], NAMES["green"], NAMES["blue"],
-                NAMES["pink"], NAMES["orange"])
-        for k in range(18):
-            sx = (k * 53 + 7) % (cv.w - 6)
-            sy = (k * 37 + t + (k * k)) % (cv.h - 6)
-            self.ws._glyph("spark", (sx, sy, 8, 8), cols[k % len(cols)], cv)
+class _Card:
+    """One badge's card as the page draws it, made when the page's rows are."""
 
-    def _draw_achievements(self):
-        """The achievements view (#21): a full panel listing every achievement,
-        unlocked ones with their name + glyph in bright color, locked ones greyed
-        with a lock + "???" (so a hidden secret stays a surprise). A two-column grid
-        so all ~11 fit at 320x240. Tap anywhere to dismiss (see _settings_pointer).
-        Indexed API + the shared glyph vocabulary only (host == device)."""
-        NAMES = self._NAMES
-        ACHIEVEMENTS = self._ACHDEFS
-        cv = self.ws.sys_canvas
-        th = self.ws.theme_colors
-        light = th.get("bar_light", False)
-        ink = th["ink"] if light else th["chrome_ink"]
-        dim = th["chrome_ink_dim"]
-        _ui_draw.dialog(cv, (6, 14, 308, 212), ring=th["accent"], fill=th["panel"])
-        self.ws._glyph("trophy", (12, 16, 14, 14), th["accent"], cv)
-        cv.print("ACHIEVEMENTS", 30, 18, ink, 2)
-        cv.print("%d / %d" % (self.ws.ach.count(), len(ACHIEVEMENTS)), 240, 20,
-                 th["accent"], 1)
-        col_w = 150
-        row_h = 18
-        x0 = 12
-        y0 = 36
-        per_col = 6
-        for k in range(len(ACHIEVEMENTS)):
-            ach_id, title, glyph, hidden = ACHIEVEMENTS[k]
-            col = k // per_col
-            row = k % per_col
-            x = x0 + col * col_w
-            y = y0 + row * row_h
-            got = self.ws.ach.has(ach_id)
-            if got:
-                g_col, label = th["accent"], title[:16]
-            else:
-                # A hidden (Easter-egg) achievement stays "???"; a normal locked one
-                # shows its name greyed so a kid knows what's there to earn.
-                glyph = "lock"
-                g_col = th["ink_dim"] if light else NAMES["dark_grey"]
-                label = "???" if hidden else title[:16]
-            # The glyph and the label carry DIFFERENT inks here (a bright badge
-            # beside quiet text), which `row`'s single-ink leading slot cannot
-            # express -- so the caller draws the badge and `row` takes the rect
-            # after it. `disabled` IS the locked semantics, and since #207 it is
-            # also where the colour comes from: the style's "row_chrome" kind
-            # reads bright at rest and dims when unusable, which is exactly this
-            # list. fs=1: this view's geometry is fixed.
-            self.ws._glyph(glyph, (x, y, 14, 14), g_col, cv)
-            _ui_draw.row(cv, th, (x + 16, y, col_w - 16, 14), label,
-                    kind="row_chrome", disabled=not got,
-                    edge=False, pad=0, text_dy=3, fs=1)
-        cv.print("TAP TO CLOSE", 110, 210, dim, 1)
+    __slots__ = ("id", "title", "sub", "o", "cur", "icon", "got", "how", "status")
+
+    def __init__(self, a, got):
+        secret = a[3] and not got
+        self.id = "Badge " + a[0]
+        self.title = SECRET if secret else a[1]
+        self.sub = SECRET_HOW if secret else a[4]
+        self.icon = "secret" if secret else a[2]
+        self.got = got
+        self.how = self.sub
+        self.o = {"id": self.id, "icon": self.icon}
+        if not got:
+            self.o["locked"] = True
+        self.cur = dict(self.o)
+        self.cur["current"] = True
+        self.status = None
+
+
+class AchievementsPage:
+    """Settings' Achievements page: drawn by `SettingsLayer` on its sub
+    page's host, its way back Settings'. `draw` answers nothing; `back`
+    closes an open popover first."""
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.pop = None               # the _Card whose popover is open
+        self._focus = None            # the card focus moves to next frame
+        self._pop_lines = ("", "")    # the open popover's how and state lines
+        self._pop_gone = False
+        # the rows as `_cards` made them, and what they were made from
+        self._made_n = -1
+        self._made_w = -1
+        self._made_desk = None
+        self._made_gen = -1
+        self._head = ""
+        self._groups = ()             # ((caption, ((grid id, grid override, (_Card, ...)), ...)), ...)
+        self._by_id = {}
+        self._card = (0, 0)           # the pictures' size
+        self._foot_of = None          # the desk foot's status, by the card it names
+        self._foot_status = ""
+
+    def open(self):
+        self.pop = None
+        self._focus = None
+        self._foot_of = None
+
+    def back(self):
+        """Esc, B or the bar's way back: an open popover closes. False where
+        none was open (Settings then leaves the page)."""
+        if self.pop is None:
+            return False
+        self._focus = self.pop.id
+        self.pop = None
+        self.ws._dirty = True
+        return True
+
+    # -- the rows ------------------------------------------------------------
+
+    def _geometry(self, w, desk, fs):
+        """(columns, picture w, picture h, margin) for a page `w` wide (a
+        desk's, its window's body less its two DESK_IN): a desk's columns
+        104 wide, as many as it holds."""
+        if desk:
+            cols = max(3, w // 104)
+            return cols, 92, 68, (w - cols * 104) // 2 + 6
+        if w >= 440 * fs:
+            cols, pw, ph = 4, 100 * fs, 72 * fs
+        else:
+            cols, pw, ph = 3, 84 * fs, 62 * fs
+        col = (w - 32 * fs) // cols
+        return cols, pw, ph, 16 * fs + (col - pw) // 2
+
+    def _cards(self, w, desk, fs):
+        """The page's rows, made again when the badges found, the page's
+        width or the look (a face's widths) move."""
+        ach = self.ws.ach
+        n = ach.count()
+        gen = self.ws.look.look_gen
+        if (n == self._made_n and w == self._made_w and desk == self._made_desk
+                and gen == self._made_gen):
+            return
+        self._made_n, self._made_w, self._made_desk, self._made_gen = n, w, desk, gen
+        cols, pw, ph, margin = self._geometry(w, desk, fs)
+        self._card = (pw, ph)
+        pad = 7 if desk else 5
+        room = pw + 2 * pad * fs - 2 * fs
+        _ui.face("ui")
+        groups = []
+        self._by_id = {}
+        k = 0
+        for cap, want in ((FOUND, True), (TO_FIND, False)):
+            cards = [_Card(a, want) for a in ACHIEVEMENTS if ach.has(a[0]) == want]
+            if not cards:
+                continue
+            rows = []
+            for i in range(0, len(cards), cols):
+                row = tuple(cards[i:i + cols])
+                two = False
+                for c in row:
+                    self._by_id[c.id] = c
+                    tw = _ui.text_size(c.title)[0]
+                    if tw > room and " " in c.title:
+                        two = True
+                # the card's foot: its name's lines and its how-to line
+                foot = (64 if two else 40) if desk else (41 if two else 27) * fs
+                o = {"cols": cols, "margin": margin, "foot": foot, "wrap": True}
+                if i == 0 or desk:
+                    o["top"] = 3 if i == 0 else 1
+                rows.append(("grid%d" % k, o, row))
+                k += 1
+            groups.append((cap, tuple(rows)))
+        _ui.face()
+        self._groups = tuple(groups)
+        self._head = head_line(n, len(ACHIEVEMENTS))
+        self._foot_of = None
+
+    def _open(self, c):
+        """Open card `c`'s popover: its lines made now, once."""
+        ach = self.ws.ach
+        aid = c.id[6:]
+        if c.got:
+            state = day_line(ach.found_on(aid) or 0, self.ws._today_ymd())
+        else:
+            got = ach.progress(aid)
+            state = "%d of %d" % got if got and got[0] else NOT_FOUND
+        self._pop_lines = (c.how, state)
+        self.pop = c
+        self.ws._dirty = True
+
+    # -- the frame -----------------------------------------------------------
+
+    def draw(self, rect):
+        """The page over `rect`, on the Settings host begun by
+        `SettingsLayer`; on the desk its foot under it."""
+        desk = _desk()
+        fs = self.ws.layout.fs if not desk else 1
+        x, y, w, h = _ui.page("")
+        if desk:
+            # the badges scroll in the body over the window's own foot
+            w -= 2 * DESK_IN
+            _ui.at(x + DESK_IN, y, w, h - DESK_FOOT)
+            _ui.scroll("Achievements")
+        else:
+            _ui.hints(_HINT_POP if self.pop is not None else _HINT_PAGE)
+        self._cards(w, desk, fs)
+        if self._focus is not None:
+            _ui.focus(self._focus)
+            self._focus = None
+        n = self.ws.ach.count()
+        _ui.progress(self._head, n, len(ACHIEVEMENTS), _COUNT)
+        if n == 0:
+            _ui.label(NONE_LINE, _LINE)
+        pw, ph = self._card
+        pop = self.pop
+        for cap, rows in self._groups:
+            _ui.group(cap)
+            for gid, o, cards in rows:
+                _ui.grid(gid, pw, ph, o)
+                for c in cards:
+                    r = _ui.card(c.title, c.sub, c.cur if c is pop else c.o)
+                    if r[4] & _ui.ACTIVATED and pop is None:
+                        self._open(c)
+                _ui.grid()
+            _ui.group()
+        if desk:
+            _ui.scroll()
+            self._foot(rect)
+        if self.pop is not None:
+            self._popover(desk, fs)
+
+    def _foot(self, rect):
+        """The desk's foot: the focused badge's name, how it is found and
+        its state, the keys at its right."""
+        f = self.pop.id if self.pop is not None else _ui.focus()
+        if f != self._foot_of:
+            self._foot_of = f
+            c = self._by_id.get(f)
+            self._foot_status = "" if c is None else "%s · %s · %s" % (
+                c.title, c.how, "found" if c.got else "not found yet")
+        desk_foot(self.ws, rect, self._foot_status,
+                  _HINT_POP if self.pop is not None else _HINT_PAGE)
+
+    def _popover(self, desk, fs):
+        c = self.pop
+        s = 2 if desk else fs
+        tw, th = 64 * s, 48 * s
+        if not _ui.popover("Badge", 420 if desk else 240 * fs):
+            self.back()
+        r = _ui.part("Badge picture", tw, th, _PART)
+        if r[2]:
+            _ui.tile(r[0], r[1], r[2], r[3], c.icon, None if c.got else _LOCKED)
+            tx = r[0] + tw + 10 * s
+            lw = max(0, (420 if desk else 240 * fs) - tw - 30 * s)
+            lh = (24 if desk else 15) * fs
+            how, state = self._pop_lines
+            _ui.at(tx, r[1] + (6 if desk else 0), lw, lh + 4 * s)
+            _ui.label(c.title, _NAME)
+            _ui.at(tx, r[1] + (6 if desk else 0) + lh + 4 * s, lw, lh)
+            _ui.label(how, _DIM)
+            _ui.at(tx, r[1] + (6 if desk else 0) + 2 * lh + 4 * s, lw, lh)
+            _ui.label(state, _VALUE if c.got else _DIM)
+        _ui.popover()
+
+
+def desk_foot(ws, rect, status, hints):
+    """A desk Settings window's foot under a page of `rect`'s: a rule,
+    `status` at its left in the dim ink and the `hints` at its right."""
+    x, y, w, h = rect
+    fy = y + h - DESK_FOOT
+    ws.sys_canvas.rect(x + 16, fy, w - 32, 1, ws.theme_colors["border"])
+    hw = _ui.hints_width(hints)
+    if status:
+        _ui.at(x + 18, fy + 10, max(0, w - hw - 40), 22)
+        _ui.label(status, _DIM)
+    _ui.at(x + w - hw - 12, fy + 6, hw, 26)
+    _ui.hints(hints)
+
+
+def unlock_banner(ws):
+    """The unlock banner over whatever is up (`ws.ach.toast`), at the top
+    centre of the glass: under the bar where there is one, at the glass's
+    top over a fullscreen game. A secret's bursts confetti from its edges."""
+    t = ws.ach.toast
+    if t is None:
+        return
+    cv = ws.sys_canvas
+    lay = ws.layout
+    desk = _desk()
+    wm = ws.wm
+    game = (wm.top_is_player() and getattr(wm, "mode", None) != "desktop"
+            and not ws._running_cart_shows_bar())
+    top = (8 if desk else 6 * lay.fs) if game else lay.cy + (12 if desk else 6 * lay.fs)
+    burst = 0
+    if t[3]:
+        el = _ticks_diff(_ticks_ms(), ws._toast_at)
+        burst = 255 if el >= BURST_MS else max(1, el * 255 // BURST_MS)
+    _ui_draw.unlock(cv, ws.theme_colors, cv.w // 2, top,
+                    HEAD_SECRET if t[3] else HEAD_BADGE, t[1], t[2], burst, desk)

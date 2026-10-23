@@ -324,13 +324,16 @@ def test_a_module_this_firmware_cannot_link_blames_the_console(tmp_path):
     sub = player.INTERP_NOTICE_SUB["firmware"]
     assert ws._notice == (player.INTERP_NOTICE_TITLE, sub, "warn")
     assert sub != player.INTERP_NOTICE_SUB["missing"]
-    printed = []
-    ws.sys_canvas.print = lambda text, *a, **k: printed.append(text)
+    from runtime import ui
+    cv = ws.sys_canvas
     for text in player.INTERP_NOTICE_SUB.values():
         ws._notice = (player.INTERP_NOTICE_TITLE, text, "warn")
-        del printed[:]
-        ws._draw_notice()
-        assert text in printed, (text, printed)
+        x, _y, w, _h = ws._draw_notice()
+        assert x >= 0 and x + w <= cv.w, (text, x, w)
+        ui.face("title")
+        tw = ui.text_size(text)[0]
+        ui.face()
+        assert tw + (32 + 3 * 6 + 10) * ws.layout.fs <= w, (text, tw, w)   # whole on its card
 
 
 def test_a_module_whose_signature_fails_keeps_the_error_panel(tmp_path):

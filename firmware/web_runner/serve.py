@@ -157,17 +157,17 @@ else:
             self.rows.adopt(moy_carts.load_system(carts))
             self.ach = Achievements(
                 moy_carts.load_achievements(carts),
-                on_save=lambda ids: moy_carts.save_achievements(ids, carts))
+                on_save=lambda doc: moy_carts.save_achievements(doc, carts))
             self.rx = moy_sync.SystemReceiver()
 
         def pull(self):
             with self.lock:
-                return moy_sync.system_pull(self.rows, self.ach.unlocked)
+                return moy_sync.system_pull(self.rows, self.ach.doc())
 
         def apply(self, ops):
             with self.lock:
                 applied, errors, _changed = self.rx.apply(
-                    ops, self.rows, lambda i: self.ach.award(i, quiet=True),
+                    ops, self.rows, lambda i, day: self.ach.award(i, quiet=True, day=day),
                     self.carts)
             return applied, errors
 

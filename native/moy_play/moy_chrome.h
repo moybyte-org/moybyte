@@ -118,12 +118,6 @@ int moy_chrome_fit_text(char *out, size_t n, const char *title, uint32_t total,
 int moy_chrome_newer_text(char *out, size_t n, const char *title, const char *missing);
 // The stopped run's own two refusals' texts (NOLOAD, CONSOLE).
 const char *moy_chrome_say_text(int say);
-// The achievement toast: `title` with the badge's `glyph`.
-void moy_chrome_toast(moy_chrome_list_t *l, const char *title, const char *glyph);
-// The notice banner, sized off the layout: its width `lw`, font scale `fs`
-// and bar height `status_h`; `ok` picks the accent.
-void moy_chrome_banner(moy_chrome_list_t *l, int lw, int fs, int status_h, const char *title,
-                       const char *sub, bool ok);
 
 // The strip. The crash bar (the running cart's tool switcher, on the fixed
 // 320-wide game canvas): `edit` 1 a Make-it-mine cart, 0 code, -1 a compiled
@@ -149,8 +143,6 @@ enum { MOY_MENU_ITEM = 0, MOY_MENU_HEADER = 1, MOY_MENU_SEP = 2 };
 #define MOY_MENU_ROWS 16
 void moy_chrome_menu(moy_chrome_list_t *l, const uint8_t *kind, const char *const *label,
                      int n, int sel, int x, int y, int w, int h, int fs, int cs);
-// The ABOUT box over a `cw` x `ch` canvas at font scale `fs`; `ver` "" when unknown.
-void moy_chrome_about(moy_chrome_list_t *l, int cw, int ch, int fs, const char *ver);
 
 // -- the raster ------------------------------------------------------------------
 
@@ -162,9 +154,19 @@ void moy_chrome_raster(const moy_chrome_list_t *l, uint16_t *px, int w, int h,
 
 // -- the kernel's state --------------------------------------------------------
 
+// The banners a run the kernel drives shows over its frames, the shell's
+// copies (runtime/console_notices.py): the system notice (`ok`, else a
+// warning) until `until_ms`, and the unlock banner -- `head` over the badge's
+// `name` on its `icon`'s tile, a secret's (`secret`) with confetti -- armed
+// for MOY_CHROME_TOAST_MS (widgets.TOAST_MS) up to `until_ms`.
+#define MOY_CHROME_TOAST_MS 2600u
+#define MOY_CHROME_BURST_MS 420u
 void moy_chrome_notice(const char *title, const char *sub, bool ok, uint32_t until_ms);
-void moy_chrome_toast_arm(const char *title, const char *glyph, uint32_t until_ms);
-// What is up at `now`, into `l`: the banner, then the toast. False: nothing.
-bool moy_chrome_overlay(moy_chrome_list_t *l, uint32_t now, int lw, int fs, int status_h);
+void moy_chrome_toast_arm(const char *head, const char *name, const char *icon, bool secret,
+                          uint32_t until_ms);
+// What is up at `now`, drawn over the run's RGB565 canvas `px` (`w` x `h`,
+// its palette `pal`) at the top centre in the live look (moy_ui_unlock): the
+// notice, then the unlock banner. False: nothing was.
+bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now);
 
 #endif // MOY_CHROME_H

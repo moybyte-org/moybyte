@@ -6,9 +6,10 @@ Why this file exists
 `_quiesce` deliberately closes every overlay and modal first. That leaves the
 four modules of this file group almost uncovered: it hashes the Settings screen
 in exactly ONE state (the first row focused, no OTA/webhost/bluetooth rows,
-wifi and bluetooth panels closed), and it hashes the system menu, the About modal, the
-achievements view, the Easter-egg banner and the whole firmware-update screen
-**not at all** -- its own docstring names the update screen as out of scope.
+wifi and bluetooth panels closed), and it hashes the system menu's rows, the
+Achievements page with a badge opened, the unlock banner and the notice, and
+the whole firmware-update screen **not at all** -- its own docstring names the
+update screen as out of scope.
 
 Those surfaces are precisely where Phase 3b transcribed hand-rolled row/dialog
 drawing onto `runtime/ui.py`'s kinds, so without this file the transcription had
@@ -273,15 +274,33 @@ def capture(cfg, carts_dir):
         m.sel = sel
         out["sysmenu_%d" % sel] = _shot(ws, lambda: ws.menu_ui._draw_sysmenu())
     ws.sysmenu.open = False
+    ws.menu_ui._menu_about()
+    for _ in range(2):              # its first frame lays its body out
+        ws.menu_ui._draw_about()
     out["about"] = _shot(ws, lambda: ws.menu_ui._draw_about())
+    ws._about = False
 
-    # The achievements view (locked AND unlocked rows) + the egg banner.
-    out["ach_none"] = _shot(ws, lambda: ws.ach_ui._draw_achievements())
+    # The Achievements page (locked AND found cards) with a badge opened,
+    # the unlock banner (a secret's, its confetti out whole) and the notice.
+    from runtime import achievements_ui
+    ws.ach.unlocked = {"first_open": 20261012, "secret_door": 0}
+    ws.open_settings()
+    sl.open_page("achievements")
+    out["ach_page"] = page(sl._sub)
+    pg = sl.achievements
+    pg._open(pg._by_id["Badge first_open"])
+    out["ach_popover"] = page(sl._sub)
+    sl.close_page()
+    sl.open_page("licences")
+    out["licences"] = page(sl._sub)
+    sl.close_page()
+    ws.go_home()
     ws.ach.award("konami")
-    ws.ach.award("secret_door")
-    out["ach_some"] = _shot(ws, lambda: ws.ach_ui._draw_achievements())
-    ws.ach_ui.egg_msg = ("KNOCK KNOCK... OH! YOU FOUND ME!", "key")
-    out["egg"] = _shot(ws, lambda: ws.ach_ui._draw_egg())
+    ws._toast_at -= 10000
+    out["banner"] = _shot(ws, lambda: achievements_ui.unlock_banner(ws))
+    ws._notice = ("Moybyte updated", "Now 0.8", "ok")
+    out["notice"] = _shot(ws, lambda: ws._draw_notice())
+    ws._notice = None
 
     # The firmware-update screen: every phase it can be in.
     uu = ws.update_ui
@@ -417,7 +436,7 @@ def test_the_hand_rolled_row_idiom_is_gone(tmp_path):
     pixel hash cannot see, because a hand-rolled copy that happens to be
     byte-identical to `ui.row` is exactly what this phase exists to delete."""
     import re
-    group = ("settings_layer.py", "achievements_ui.py",
+    group = ("settings_layer.py", "achievements_ui.py", "about_ui.py",
              "update_ui.py")
     pat = re.compile(
         r"cv\.rect\([^\n]*\bth\[[\"'](?:hilite|selection)[\"']\][^\n]*\)\s*\n"

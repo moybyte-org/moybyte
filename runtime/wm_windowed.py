@@ -2478,9 +2478,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                or (last is not None and (last[3] or last[4])))
         now = _ticks_ms()
         overlay = (ws._splash_until is not None
-                   or (ws._confetti_until
-                       and _ticks_diff(ws._confetti_until, now) > 0)
-                   or (ws._egg_until and _ticks_diff(ws._egg_until, now) > 0)
                    or (ws._toast_until and _ticks_diff(ws._toast_until, now) > 0))
         gesture = self._drag if self._drag is not None else self._resize
         if ws._dirty or overlay:

@@ -1538,7 +1538,8 @@ class PaintAppLayer:
         """Whether the page and the canvas are ones a stroke frame paints."""
         if (self.page is not None or self.pop is not None or self.viewer is not None
                 or self.toast is not None or self._touch is None
-                or getattr(cv, "begin_surface", None) is not None):
+                or getattr(cv, "begin_surface", None) is not None
+                or getattr(cv, "covered", False)):
             return False
         n = getattr(cv, "RETAINED_FRAMES", 0)
         return 1 <= n <= _RING

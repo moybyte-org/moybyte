@@ -768,7 +768,6 @@ static struct {
     const moy_front_ops_t *ops;
     uint32_t run;
     bool live;
-    moy_chrome_list_t *overlay;
 } F;
 
 void moy_play_reserve(void *(*alloc)(size_t n)) {
@@ -777,9 +776,6 @@ void moy_play_reserve(void *(*alloc)(size_t n)) {
         if (g_run != NULL) {
             memset(g_run, 0, sizeof(run_t));
         }
-    }
-    if (F.overlay == NULL) {
-        F.overlay = alloc(sizeof(moy_chrome_list_t));
     }
     watch_make();
 }
@@ -809,12 +805,6 @@ int moy_play_front(uint32_t run) {
     if (F.ops->canvas(F.ops->ctx, &w, &h) == NULL || w != moycore_RUN.c.canvas.w
             || h != moycore_RUN.c.canvas.h) {
         return MOY_PLAY_NORT;           // a canvas the present does not compose
-    }
-    if (F.overlay == NULL) {
-        F.overlay = moy_loop_alloc(sizeof(moy_chrome_list_t));
-        if (F.overlay == NULL) {
-            return MOY_PLAY_NOMEM;
-        }
     }
     F.run = run;
     F.live = true;
@@ -915,10 +905,7 @@ int moy_play_front_frame(uint32_t now, uint32_t dt_us) {
         return front_back();            // a view the console composes
     }
     if (render) {
-        moy_chrome_list_t *l = F.overlay;
-        if (moy_chrome_overlay(l, now, w, 1, 18)) {
-            moy_chrome_raster(l, px, w, h, moycore_RUN.c.canvas.wire, 1);
-        }
+        moy_chrome_overlay_draw(px, w, h, moycore_RUN.c.canvas.wire, now);
     }
     F.ops->present(F.ops->ctx, render);
     return render ? 1 : 0;

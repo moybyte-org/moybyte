@@ -8,13 +8,12 @@
 //   chrome_say_title(say, line), chrome_crash_title(text, line|None),
 //   chrome_fit_text(title, total, block, free, largest),
 //   chrome_newer_text(title, missing): the panels' words (#143)
-//   chrome_toast(title, glyph)
-//   chrome_banner(lw, fs, status_h, title, sub, ok)
 //   chrome_strip_crash(cw, edit, clock, wifi), chrome_strip_band(cw, bar_h,
 //   light), chrome_strip_cell(kind, rect, cs, dy, s|None, across)
-//   chrome_menu(rows, sel, x, y, w, h, fs, cs), chrome_about(cw, ch, fs, ver)
+//   chrome_menu(rows, sel, x, y, w, h, fs, cs)
 //   chrome_notice(title, sub, ok, until_ms),
-//   chrome_toast_arm(title, glyph, until_ms)
+//   chrome_toast_arm(head, name, icon, secret, until_ms): the banners a run the
+//   kernel drives shows over its frames
 
 #include <string.h>
 
@@ -118,22 +117,6 @@ static mp_obj_t ch_newer_text(mp_obj_t title, mp_obj_t missing) {
 }
 MP_DEFINE_CONST_FUN_OBJ_2(moy_chrome_newer_text_obj, ch_newer_text);
 
-static mp_obj_t ch_toast(mp_obj_t title, mp_obj_t glyph) {
-    moy_chrome_list_t *l = list();
-    moy_chrome_toast(l, s_of(title), s_of(glyph));
-    return ops(l);
-}
-MP_DEFINE_CONST_FUN_OBJ_2(moy_chrome_toast_obj, ch_toast);
-
-static mp_obj_t ch_banner(size_t n, const mp_obj_t *a) {
-    (void)n;
-    moy_chrome_list_t *l = list();
-    moy_chrome_banner(l, mp_obj_get_int(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
-                      s_of(a[3]), s_of(a[4]), mp_obj_is_true(a[5]));
-    return ops(l);
-}
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_banner_obj, 6, 6, ch_banner);
-
 static mp_obj_t ch_crash(size_t n, const mp_obj_t *a) {
     (void)n;
     moy_chrome_list_t *l = list();
@@ -187,15 +170,6 @@ static mp_obj_t ch_menu(size_t n, const mp_obj_t *a) {
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_menu_obj, 8, 8, ch_menu);
 
-static mp_obj_t ch_about(size_t n, const mp_obj_t *a) {
-    (void)n;
-    moy_chrome_list_t *l = list();
-    moy_chrome_about(l, mp_obj_get_int(a[0]), mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
-                     s_of(a[3]));
-    return ops(l);
-}
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_about_obj, 4, 4, ch_about);
-
 static mp_obj_t ch_notice(size_t n, const mp_obj_t *a) {
     (void)n;
     moy_chrome_notice(s_of(a[0]), s_of(a[1]), mp_obj_is_true(a[2]),
@@ -204,8 +178,10 @@ static mp_obj_t ch_notice(size_t n, const mp_obj_t *a) {
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_notice_obj, 4, 4, ch_notice);
 
-static mp_obj_t ch_toast_arm(mp_obj_t title, mp_obj_t glyph, mp_obj_t until) {
-    moy_chrome_toast_arm(s_of(title), s_of(glyph), (uint32_t)mp_obj_get_int_truncated(until));
+static mp_obj_t ch_toast_arm(size_t n, const mp_obj_t *a) {
+    (void)n;
+    moy_chrome_toast_arm(s_of(a[0]), s_of(a[1]), s_of(a[2]), mp_obj_is_true(a[3]),
+                         (uint32_t)mp_obj_get_int_truncated(a[4]));
     return mp_const_none;
 }
-MP_DEFINE_CONST_FUN_OBJ_3(moy_chrome_toast_arm_obj, ch_toast_arm);
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_toast_arm_obj, 5, 5, ch_toast_arm);

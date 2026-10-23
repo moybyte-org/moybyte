@@ -261,9 +261,6 @@ _FROZEN_HATCH = {
         "ENTRIES must paint no field when unselected, because their rects tile "
         "the panel edge to edge and any kind's rest field would erase the "
         "shell's own border a row at a time"),
-    "achievements_ui.py": (1,
-        "the Easter-egg banner: literal white on a literal black dialog, a "
-        "surprise no theme colours"),
 }
 
 
@@ -379,11 +376,10 @@ def test_the_hatch_that_moved_now_names_a_kind_instead():
         if k:
             named[path.name] = len(k)
     assert named == {
-        "achievements_ui.py": 1,        # the achievements list
         "cards_layer.py": 3,            # the cards, the ADVANCED row, its file list
         "popover.py": 2,                # the power popover's level line and its rows
     }, named
-    assert sum(named.values()) == 6
+    assert sum(named.values()) == 5
 
 
 def test_every_kind_a_surface_asks_the_catalog_for_exists():
@@ -449,12 +445,12 @@ _PRE_207_TRIPLES = {
         lambda th: (None, th["ink_dim"], None),
     ("row_list", ui_draw.ON):
         lambda th: (th["hilite"], th["selection_ink"], None),
-    ("row_chrome", ui_draw.REST):  # achievements_ui (earned), cards_layer (a card)
+    ("row_chrome", ui_draw.REST):  # cards_layer (a card)
         lambda th: (None, th["ink"] if th.get("bar_light", False)
                     else th["chrome_ink"], None),
     ("row_chrome", ui_draw.ON):
         lambda th: (th["hilite"], th["selection_ink"], None),
-    ("row_chrome", ui_draw.DISABLED):  # achievements_ui (locked)
+    ("row_chrome", ui_draw.DISABLED):  # no surface draws a disabled card row
         lambda th: (None, th["chrome_ink_dim"], None),
     ("row_cta", ui_draw.REST):   # a part of the frozen vocabulary no surface draws
         lambda th: (th["hilite"], 0, th["dim"]),

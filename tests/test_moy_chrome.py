@@ -58,14 +58,6 @@ def test_the_panel_rasters_as_the_canvas_draws_it(ws, notice, text):
     assert ops and canvas == raster
 
 
-def test_the_toast_and_banner_raster_as_the_canvas_draws_them(ws):
-    ops, canvas, raster = _both(ws, "chrome_toast", "Little Artist", "paint")
-    assert ops and canvas == raster
-    ops, canvas, raster = _both(ws, "chrome_banner", 320, 1, 18, "MOYBYTE UPDATED",
-                                "now 0.9.3", True)
-    assert ops and canvas == raster
-
-
 def test_a_piece_is_cut_rather_than_overrun():
     """A list that outgrows its slots stops; it never writes past them."""
     try:
@@ -110,3 +102,21 @@ def test_the_strip_draws_in_the_inks_the_theme_names(ws):
             assert {op[1] for op in ops} == {th["chrome_ink"]}, (name, variant, "menu")
             placed += th["chrome_ink_dim"] >= 64
     assert placed, "no theme here places its ink in the shell's block"
+
+
+def test_a_run_the_kernel_drives_shows_the_banners_until_their_deadlines(ws):
+    """The kernel's copies of the notice and the unlock banner draw over a
+    run's frame in the live look (moy_ui_unlock) until each deadline, and
+    nothing after."""
+    cv = ws.canvas
+    w, h = cv.w, cv.h
+    pal = [cv._wire[cv._pal_map[i]] for i in range(64)]
+    now = 1000000
+    moy_play.chrome_toast_arm("You found a badge!", "Map Maker", "map", False, now + 2600)
+    raw = (ctypes.c_uint16 * (w * h))()
+    assert moy_play.chrome_overlay_draw(raw, w, h, pal, now)
+    top = [i for i in range(w * h) if raw[i]]
+    assert top and max(top) // w < 70, "the banner stands at the top of the frame"
+    raw = (ctypes.c_uint16 * (w * h))()
+    assert not moy_play.chrome_overlay_draw(raw, w, h, pal, now + 2601)
+    assert not any(raw)

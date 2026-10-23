@@ -136,10 +136,6 @@ def _chrome_screens():
         for compiled in (False, True):
             out.append(("panel", moy_play.chrome_panel(320, 240, notice, "", "", compiled)))
     out.append(("panel_py", moy_play.chrome_panel(320, 240, False, "zz", "qq", False)))
-    out.append(("toast", moy_play.chrome_toast("qq", "gear")))
-    out.append(("banner", moy_play._chrome("moy_chrome_banner", 320, 1, 18, b"qq", b"zz", True)))
-    out.append(("about", moy_play._chrome("moy_chrome_about", 320, 240, 1, None)))
-    out.append(("about_ver", moy_play._chrome("moy_chrome_about", 320, 240, 1, b"9.9")))
     out.append(("strip", moy_play._chrome("moy_chrome_strip_crash", 320, 1, b"12:00", b"wifi3")))
     return out
 
@@ -180,22 +176,20 @@ def test_under_a_pseudo_locale_the_chrome_draws_no_english(chrome):
 def test_no_chrome_op_is_a_literal_and_the_sources_are_the_callers(chrome):
     srcs = (_srcs("moy_chrome_panel", 320, 240, False, b"", b"", False)
             + _srcs("moy_chrome_panel", 320, 240, False, b"zz", b"qq", True)
-            + _srcs("moy_chrome_panel", 320, 240, False, b"", b"", True)
-            + _srcs("moy_chrome_toast", b"qq", b"gear")
-            + _srcs("moy_chrome_about", 320, 240, 1, b"9.9"))
+            + _srcs("moy_chrome_panel", 320, 240, False, b"", b"", True))
     assert all(s != LIT for s, _ in srcs)
     by = {t: s for s, t in srcs}
     en = _en()
     assert by[en["say.crash"]] == TABLE and by[en["chrome.no_text"]] == TABLE
-    assert by[en["chrome.hint_home"]] == TABLE and by[en["about.close"]] == TABLE
-    assert by["zz"] == PY and by["qq"] == PY and by["9.9"] == PY
+    assert by[en["chrome.hint_home"]] == TABLE
+    assert by["zz"] == PY and by["qq"] == PY
 
 
 def test_a_literal_op_is_never_rastered(chrome):
     """moy_chrome's raster draws through moy_text, which refuses a LIT op."""
     lst = moy_play._ChList()
     p = ctypes.cast(ctypes.byref(lst), ctypes.c_void_p)
-    chrome.moy_chrome_about(p, 320, 240, 1, b"9.9")
+    chrome.moy_chrome_panel(p, 320, 240, False, b"", b"", False)
     pal = (ctypes.c_uint16 * 64)(*range(1, 65))
     for src, drawn in ((TABLE, True), (LIT, False)):
         for i in range(lst.n):
@@ -277,7 +271,7 @@ PY_SITES = {
     "native/moy_gfx/modmoy_gfx.c": 2,           # the system canvases' print
     "native/moy_gfx/moy_gfx_kernels.c": 1,      # the `text` kernel
     "native/moy_ui/moy_ui_draw.c": 1,           # every primitive's label
-    "native/moy_play/moy_chrome.c": 9,          # titles, texts, the clock, menu rows
+    "native/moy_play/moy_chrome.c": 5,          # titles, texts, the clock, menu rows
 }
 
 
@@ -297,7 +291,7 @@ def test_the_py_sites_only_come_down():
 # notices the runtime raises. A literal back in its file is a string the
 # language pack cannot reach.
 PY_FED_MOVED = {
-    "runtime/console_notices.py": ["MOYBYTE UPDATED", "UPDATE UNDONE", '"now %s"',
+    "runtime/console_notices.py": ["MOYBYTE UPDATED", "Moybyte updated", "UPDATE UNDONE", '"now %s"',
                                    '"still on %s"', '"CART"', "RESTART MOYBYTE",
                                    "DELETE CART", '"SYSTEM"', "CLEAR SEARCH",
                                    '"SEARCH"', '"SETTINGS"', '"ABOUT"', '"SLEEP"'],

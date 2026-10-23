@@ -413,7 +413,7 @@ def test_the_desktop_says_the_update_landed(tmp_path):
     assert ws.announce_update() is True
     assert ws.notice_active() is True
     title, sub, kind = ws._notice
-    assert "UPDATED" in title
+    assert "updated" in title
     assert "v2" in sub                    # the stub's version_label
     assert kind == "ok"
 

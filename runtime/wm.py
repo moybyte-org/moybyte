@@ -317,16 +317,10 @@ class FullscreenStackWM:
             sig |= 1
         if ws.show_fps and self.stack.top() == "desktop":
             sig |= 2
-        # The three achievement overlays are flat kernel deadlines the objects
-        # push at event time (#209 landing B) -- plain int reads, no call into
-        # ach/ach_ui from the hot path, one clock read for all three.
+        # The unlock banner is a flat kernel deadline the unlock pushes at
+        # event time (#209 landing B) -- a plain int read, no call into ach
+        # from the hot path.
         now = _ticks_ms()
-        if ws._confetti_until and _ticks_diff(ws._confetti_until, now) > 0:
-            sig |= 4
-        if ws.show_achievements:
-            sig |= 8
-        if ws._egg_until and _ticks_diff(ws._egg_until, now) > 0:
-            sig |= 16
         if ws._toast_until and _ticks_diff(ws._toast_until, now) > 0:
             sig |= 32
         if ws.sysmenu.open:
@@ -363,7 +357,7 @@ class FullscreenStackWM:
         self._rebuild(self.ws._content_layer(), sig)
 
     def _overlay_layers(self, sig):
-        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 4..256,
+        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..1024,
         cursor appended last so it sits above everything). One copy: a new
         overlay layer (like #53's notice banner) registers here ONCE and
         reaches the windowed WM's stack too -- the two _rebuild bodies used to
@@ -371,12 +365,6 @@ class FullscreenStackWM:
         the caller may extend. The GAME-domain perf HUD (bit 2) is per-tier."""
         ws = self.ws
         overlays = []
-        if sig & 4:
-            overlays.append(ws._confetti_layer)
-        if sig & 8:
-            overlays.append(ws._ach_layer)
-        if sig & 16:
-            overlays.append(ws._egg_layer)
         if sig & 32:
             overlays.append(ws._toast_layer)
         if sig & 64:

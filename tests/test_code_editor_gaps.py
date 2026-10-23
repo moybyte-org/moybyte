@@ -297,6 +297,9 @@ def _ws(tmp_path, **kw):
     ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
     ws.launcher.sel = 0
     ws.open()
+    # the opening's "First Steps" banner stays up, so every frame draws, but
+    # draws nothing over the lines these tests read
+    ws.ach.toast = None
     return ws
 
 

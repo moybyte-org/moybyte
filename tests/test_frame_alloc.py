@@ -40,7 +40,7 @@ frame (the edit itself handed in between frames, as shell_bench types), the
 frame each key paints allocates nothing either -- the verbs, the editor
 handle's draw, the host's bar and the Player's app frame included.
 
-Last it opens the shell's restyled apps on the public UI API -- Appearance,
+Then it opens the shell's restyled apps on the public UI API -- Appearance,
 Storybook, Get Carts over an in-memory shelf, My Art -- each idle and with its
 content dragged, three swipes through the real pointer path. Idle, an app
 allocates nothing. A drag frame allocates nothing of its own: what it may
@@ -51,6 +51,9 @@ finger's: the app's read of it (surface.pointer()), the game pointer the
 console publishes while it is down, and the state the frame keeps to compare
 the next with. So a drag frame is held to one answer a card it drew and four
 more; the bar's clock turning its minute is an event of its own, one frame.
+
+Then Settings' Achievements page (docs/look_2026-10.md step 32), idle at its
+top and idle again swiped to its end: it allocates nothing either way.
 
 WHEN IT FAILS. Something on the frame path allocates again, and the per-frame
 deltas are printed. What names the LINE is a MicroPython whose gc_alloc and
@@ -360,8 +363,7 @@ def measure(loop):
     t0 = time.ticks_ms()
     while time.ticks_diff(time.ticks_ms(), t0) < 10000:
         now = time.ticks_ms()
-        if not any(d and time.ticks_diff(d, now) > 0 for d in (
-                ws._toast_until, ws._confetti_until, ws._egg_until)):
+        if not (ws._toast_until and time.ticks_diff(ws._toast_until, now) > 0):
             break
         loop.step()
     for _ in range(30):                  # the held key's first edges, settled
@@ -379,6 +381,7 @@ def measure(loop):
     gc.enable()
     notes(loop, info)
     apps(loop, info)
+    achievements(loop, info)
     print("RESULT " + json.dumps(info))
 
 
@@ -506,8 +509,7 @@ def apps(loop, info):
         t0 = time.ticks_ms()
         while time.ticks_diff(time.ticks_ms(), t0) < 20000:
             now = time.ticks_ms()
-            if not (any(d and time.ticks_diff(d, now) > 0 for d in (
-                    ws._toast_until, ws._confetti_until, ws._egg_until))
+            if not ((ws._toast_until and time.ticks_diff(ws._toast_until, now) > 0)
                     or getattr(a, "phase", "list") != "list"
                     or getattr(a, "_covers", None)):
                 break
@@ -546,6 +548,37 @@ def apps(loop, info):
         for _ in range(30):
             loop.step()
     ui.card = card
+
+
+def achievements(loop, info):
+    """Settings' Achievements page, idle at its top, then swiped to its end
+    and idle there: what each idle frame allocates."""
+    import moy_loop
+    from gc import mem_alloc
+    ws = loop.ws
+    ws.ach.unlocked = {"first_open": 20261012, "first_run": 0, "konami": 0}
+    ws.open_settings()
+    ws.settings_layer.open_page("achievements")
+    for _ in range(60):
+        loop.step()
+    info["ach_page"] = ws.settings_layer.page
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    for key in ("ach_idle", "ach_scrolled"):
+        for _ in range(30):
+            loop.step()
+        gc.collect()
+        gc.disable()
+        idle = []
+        for _ in range(60):
+            m = mem_alloc()
+            loop.step()
+            idle.append(mem_alloc() - m)
+        info[key] = idle
+        gc.enable()
+        moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 25)
+    ws._exit_settings()
+    for _ in range(30):
+        loop.step()
 
 
 class _Loop:
@@ -858,6 +891,15 @@ def test_an_app_idle_allocates_nothing(result, app):
     info, text = result
     assert info[app + "_open"] is True and info[app + "_top"] == app, text[-3000:]
     _assert_quiet(info[app + "_idle"], app + " idle", text)
+
+
+@pytest.mark.parametrize("key", ("ach_idle", "ach_scrolled"))
+def test_the_achievements_page_allocates_nothing(result, key):
+    """Settings' Achievements page, idle at its top and idle scrolled: its
+    rows are made when the badges change, never a frame."""
+    info, text = result
+    assert info["ach_page"] == "achievements", text[-3000:]
+    _assert_quiet(info[key], key, text)
 
 
 # One answer tuple: a 5-tuple (the card's) is seven words, two 16-byte blocks.

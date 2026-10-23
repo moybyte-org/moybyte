@@ -407,9 +407,10 @@ class WindowChrome:
                 self._resize_window(win, win.w, win.h)
 
     def _page_named(self, win):
-        """The page a shell app names in its window's title (a story's), or
-        None."""
-        pt = getattr(self.ws._apps_by_id.get(win.kind), "page_title", None)
+        """The page a shell app names in its window's title (a story's,
+        Settings' Achievements), or None."""
+        app = self.ws.settings_layer if win.kind == "settings" else self.ws._apps_by_id.get(win.kind)
+        pt = getattr(app, "page_title", None)
         return pt() if pt is not None else None
 
     def _win_title(self, win):

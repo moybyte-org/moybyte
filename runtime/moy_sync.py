@@ -751,17 +751,17 @@ def rebase_value(key, value, carts_root):
     return value
 
 
-def system_pull(rows, unlocked):
+def system_pull(rows, badges):
     """The /console.json document: `{"system.json": text, "achievements.json":
     text}` -- the PORTABLE rows of `rows` (a Settings), cart paths as folder
-    names, and the `unlocked` badge ids in achievements.json's own shape."""
+    names, and `badges` (an `Achievements.doc()`) as achievements.json holds
+    it."""
     doc = {}
     for key in rows.keys():
         if key_class(key) == PORTABLE:
             doc[key] = rebase_value(key, rows.get(key), None)
-    ids = sorted(str(i) for i in unlocked)
     return {"system.json": _json.dumps(doc),
-            "achievements.json": _json.dumps({"unlocked": ids})}
+            "achievements.json": _moy_carts().achievements_text(badges)}
 
 
 def rebase_system(text, carts_root):
@@ -809,17 +809,17 @@ def merge_system(rows, text, carts_root):
 
 
 def merge_achievements(text, award):
-    """Award every badge id a browser's achievements.json `text` holds through
-    `award(id)` -- a union, never a replacement: a badge one console earned is
-    never taken away by the other's list. How many were new; ValueError when
-    the text is not achievements.json's shape."""
-    doc = _json.loads(text)
-    ids = doc.get("unlocked") if isinstance(doc, dict) else None
-    if not isinstance(ids, list):
-        raise ValueError("no unlocked list")
+    """Award every badge a browser's achievements.json `text` holds through
+    `award(id, day)`, with the day it was found there -- a union, never a
+    replacement: a badge one console earned is never taken away by the
+    other's list. How many were new; ValueError when the text is not
+    achievements.json's format."""
+    doc = _moy_carts().achievements_doc(_json.loads(text))
+    if doc is None:
+        raise ValueError("not achievements.json")
     n = 0
-    for i in ids:
-        if type(i) is str and award(i):
+    for i, day in doc["found"].items():
+        if award(i, day):
             n += 1
     return n
 

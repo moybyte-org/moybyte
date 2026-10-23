@@ -469,6 +469,8 @@ def test_settings_action_opens_settings(tmp_path):
 
 
 def test_about_action_opens_dismissible_modal(tmp_path):
+    """About is a card over the washed content: a tap outside it, or Esc
+    and B, closes it; its Licences row opens Settings' Licences page."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     _open_cart(ws)
@@ -476,8 +478,26 @@ def test_about_action_opens_dismissible_modal(tmp_path):
     drv.frame(1 / 30)
     _tap(drv, *_row_center(ws, "ABOUT"))
     assert ws._about and not ws.sysmenu.open
-    _tap(drv, 100, 100)                        # any tap dismisses
+    drv.frame(1 / 30)
+    card = ws.menu_ui.about.host.box("About")
+    assert card is not None
+    _tap(drv, card[0] + card[2] // 2, card[1] + 10)     # inside: it stays
+    assert ws._about
+    _tap(drv, 2, card[1] + card[3] - 4)                 # outside: it closes
+    drv.frame(1 / 30)
     assert not ws._about
+    ws.menu_ui._menu_about()
+    drv.frame(1 / 30)
+    drv.press("b")
+    drv.frame(1 / 30)
+    assert not ws._about
+    ws.menu_ui._menu_about()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)                     # the card's first frame lays its body out
+    x, y, w, h = ws.menu_ui.about.host.box("Licences")
+    _tap(drv, x + w // 2, y + h // 2)
+    assert not ws._about
+    assert ws.settings_layer.page == "licences"
 
 
 def test_delete_cart_action_asks_then_deletes_and_goes_home(tmp_path):

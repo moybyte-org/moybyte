@@ -270,13 +270,13 @@ class ConsoleSystem:
 
     def pull(self):
         ws = self.ws
-        return moy_sync.system_pull(ws.system, ws.ach.unlocked)
+        return moy_sync.system_pull(ws.system, ws.ach.doc())
 
     def apply(self, ops):
         """(applied, [(index, reason)]) of one batch's ops."""
         ws = self.ws
         applied, errors, changed = self._rx.apply(
-            ops, ws.system, lambda i: ws.ach.award(i, quiet=True),
+            ops, ws.system, lambda i, day: ws.ach.award(i, quiet=True, day=day),
             ws.carts_root)
         if changed:
             ws.apply_system_keys(changed)

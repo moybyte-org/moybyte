@@ -96,7 +96,7 @@ class Recorder:
         # fresh store unlocks "First Steps" on the very first open and the toast
         # would then sit across the top of every recording's opening seconds.
         for entry in WID.ACHIEVEMENTS:
-            self.ws.ach.unlocked[entry[0]] = True
+            self.ws.ach.unlocked[entry[0]] = 0
         self.ws.pointer.idle_ms = 10 ** 9        # never auto-hide the cursor
         self.ws.pointer.visible = True
         self.ws.show_fps = False                 # no dev chip over the payoff shot

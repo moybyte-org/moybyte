@@ -604,7 +604,7 @@ def test_a_copy_the_store_has_no_room_for_leaves_no_half_cart(tmp_path, monkeypa
     ws.carts.dup(next(c for c in ws.carts.all if c.get("title") == "Hello Wasm"))
     assert sorted(os.listdir(root)) == before
     assert not any(c["title"] == "Hello Wasm copy" for c in ws.carts.all)
-    assert ws._notice == ("CAN'T COPY", "the store is full", "warn")
+    assert ws._notice == ("CAN'T COPY", "The store is full", "warn")
 
 
 def test_the_sync_walk_leaves_the_module_home(tmp_path):

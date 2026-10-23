@@ -16,7 +16,8 @@ that don't belong to any one surface Layer or the router:
 
   * `_Blit`        -- the minimal blittable the cursor sprite + the #39 game->system
                       composite build (canvas.spr reads only w/h/pix/transparent).
-  * `Achievements` -- the milestone tracker (#21): the catalog + award-once + toast.
+  * `Achievements` -- the milestone tracker (#21): the catalog, award-once, the
+                      days found, the counters and the unlock banner's payload.
   * `Pmem`         -- a cart's persistent 256x uint32 memory (TIC-80 pmem()).
   * `Actor`/`Scenes` -- a cart's placed-actor scenes (#85): read-only data rows +
                       the scene()/load_scene() accessor over the .moyscene blobs.
@@ -27,8 +28,8 @@ that don't belong to any one surface Layer or the router:
 All are backend-agnostic + MicroPython-safe: they take NO NAMES/canvas (they don't
 draw chrome -- Popup/Launcher DRAWING lives on their owners), so this file is a
 dependency-free leaf. The trivial helpers a couple of them need (`_ticks_ms` /
-`_ticks_diff` / `_err_text` / `_in`) are duplicated here (time-/pure-only, exactly like
-achievements_ui.py does) rather than imported back from console -- no circular import.
+`_ticks_diff` / `_err_text` / `_in`) are duplicated here (time-/pure-only) rather
+than imported back from console -- no circular import.
 console.py imports these classes back so `console.Popup` /
 `console.ACHIEVEMENTS` / ... still resolve for its own use + the tests + host_app.
 (`json` is imported for Scenes, which parses the .moyscene blobs -- available on
@@ -134,31 +135,31 @@ def rotate_indices(pix, w, h, deg, transparent):
 
 # --- achievements + Easter eggs (#21) ---------------------------------------
 #
-# A small, tasteful set of fun milestones a kid hits naturally (open/run a cart,
-# paint a sprite, edit a map, save code, play a few carts, visit each editor) plus
-# the hidden Easter-egg rewards. Each is a tuple (id, name, glyph, hidden):
+# A small set of milestones a kid hits naturally (open/run a cart, save a
+# drawing, a map, some code, play five carts, use each editor, pick a
+# wallpaper) plus the three hidden Easter-egg rewards. Each is a tuple
+# (id, name, icon, hidden, how):
 #   id     -- stable key persisted in achievements.json
-#   name   -- the friendly title shown in the toast + the achievements view
-#   glyph  -- the glyph (`ui.glyph`) drawn beside it
-#   hidden -- True hides the name as "???" in the view until it's unlocked, so a
-#             secret stays a surprise (the Easter-egg rewards are all hidden).
+#   name   -- the badge's name on its card, its popover and the unlock banner
+#   icon   -- the icon slot its card's tile draws (`ui.card`'s `icon`)
+#   hidden -- a secret: named "Secret", "Keep exploring", until it is found
+#   how    -- how it is found, in one voice (what to do)
 # Backend-agnostic + MicroPython-safe (a plain tuple of tuples, frozen into the
-# device build). The store (moy_carts.load/save_achievements) holds only the
-# unlocked ids; this catalog is the single source of what each one MEANS, so host
-# and device show identical badges.
+# device build). The store (moy_carts.load/save_achievements) holds the day
+# each was found and the counters' progress; this catalog is the single source
+# of what each one MEANS, so host and device show identical badges.
 ACHIEVEMENTS = (
-    ("first_open",   "First Steps",     "app",    False),
-    ("first_run",    "Lift Off!",       "run",    False),
-    ("first_paint",  "Little Artist",   "paint",  False),
-    ("first_map",    "Map Maker",       "map",    False),
-    ("first_code",   "Code Wizard",     "code",   False),
-    ("play_five",    "Cart Explorer",   "star",   False),
-    ("toolbox",      "Toolbox Master",  "gear",   False),
-    ("decorator",    "Home Decorator",  "heart",  False),
-    # Hidden Easter-egg rewards (name shown as "???" until found):
-    ("konami",        "Secret Coder",    "spark",  True),
-    ("clock_tinker",  "Time Traveler",   "smile",  True),
-    ("secret_door",   "Secret Finder",   "key",    True),
+    ("first_open",   "First Steps",     "app",      False, "Open a cart"),
+    ("first_run",    "Lift Off!",       "run",      False, "Run a game"),
+    ("first_paint",  "Little Artist",   "paint",    False, "Save a drawing"),
+    ("first_map",    "Map Maker",       "map",      False, "Save a map"),
+    ("first_code",   "Code Wizard",     "code",     False, "Save some code"),
+    ("play_five",    "Cart Explorer",   "star",     False, "Play 5 carts"),
+    ("toolbox",      "Toolbox Master",  "settings", False, "Use 3 editors"),
+    ("decorator",    "Home Decorator",  "heart",    False, "Pick a wallpaper"),
+    ("konami",       "Secret Coder",    "spark",    True,  "Type the secret code"),
+    ("clock_tinker", "Time Traveler",   "smile",    True,  "Tap the clock 7 times"),
+    ("secret_door",  "Secret Finder",   "key",      True,  "Knock on Settings 5 times"),
 )
 
 # Which achievement(s) a plain milestone event unlocks. Counters (play_five,
@@ -177,41 +178,56 @@ _EVENT_ACHIEVEMENT = {
 # Editors a kid can visit; opening all of them earns "toolbox".
 _TOOLBOX_VIEWS = ("code", "paint", "map")
 _PLAY_GOAL = 5            # distinct carts opened to earn "Cart Explorer"
+# A counter's goal by its badge: what its "3 of 5" counts to.
+GOALS = {"play_five": _PLAY_GOAL, "toolbox": len(_TOOLBOX_VIEWS)}
 
 ACH_TITLE = {a[0]: a[1] for a in ACHIEVEMENTS}
 ACH_GLYPH = {a[0]: a[2] for a in ACHIEVEMENTS}
 ACH_HIDDEN = {a[0]: a[3] for a in ACHIEVEMENTS}
 
-TOAST_MS = 2600          # how long a celebratory unlock banner stays on screen
+TOAST_MS = 2600          # how long the unlock banner stays on screen
 
 
 class Achievements:
-    """Tracks which fun milestones a kid has unlocked, awards each exactly once,
-    persists the unlocked set, and queues a celebratory toast on a fresh unlock.
+    """Tracks which milestones a kid has found and on which day, awards each
+    exactly once, keeps the counters' progress, persists both, and queues
+    the unlock banner on a fresh find.
 
     Backend-agnostic + MicroPython-safe. The Workstation owns one of these, calls
     note(event[, key]) at the existing flow points (open/run/paint-save/...), and
     draws `toast` while the deadline its own `on_unlock` hook armed is up (#209
-    landing B). Persistence and the unlock EFFECTS are injected callbacks so this
-    class stays free of the SD wrapper, the audio backend and the overlay stack
-    (the Workstation wires all three), which also makes it trivially
-    unit-testable."""
+    landing B). Persistence, the day and the unlock EFFECTS are injected
+    callbacks so this class stays free of the SD wrapper, the clock, the audio
+    backend and the overlay stack (the Workstation wires them), which also
+    makes it trivially unit-testable.
 
-    def __init__(self, unlocked=None, on_save=None, on_unlock=None):
-        # `unlocked` is the list loaded from achievements.json (ids already valid).
-        self.unlocked = {}                 # id -> True (a set; dict for MP parity)
-        for i in (unlocked or ()):
-            self.unlocked[i] = True
-        self._on_save = on_save            # called(list_of_ids) to persist; None = volatile
+    `doc` is achievements.json as the store's strict reader answers it
+    (moy_carts.load_achievements): {"found": {id: YYYYMMDD, 0 an unknown
+    day}, "count": {badge: [key, ...]}}, or None for none."""
+
+    def __init__(self, doc=None, on_save=None, on_unlock=None, today=None):
+        self.unlocked = {}                 # id -> the day it was found (YYYYMMDD, 0 unknown)
+        self._seen_views = {}              # editor views visited (toolbox)
+        self._played = {}                  # distinct cart keys opened (play_five)
+        if doc:
+            for k, v in doc.get("found", {}).items():
+                if k in ACH_TITLE:
+                    self.unlocked[k] = v
+            count = doc.get("count", {})
+            for k in count.get("play_five", ()):
+                self._played[k] = True
+            for k in count.get("toolbox", ()):
+                self._seen_views[k] = True
+        self._on_save = on_save            # called(doc) to persist; None = volatile
         self._on_unlock = on_unlock        # called(id) on a FRESH unlock (e.g. a beep)
-        self._seen_views = {}              # editor views visited this session+history
-        self._played = {}                  # distinct cart keys opened (for play_five)
-        # The toast PAYLOAD only: (id, title, glyph) of the live banner, or None.
-        # Its deadline is the shell's (`ws._toast_until`, written by the
-        # `on_unlock` hook at the unlock -- #209 landing B): the console's redraw
-        # gate and the WM's overlay signature run every loop and must not have to
-        # ask an object whether a banner is still up. This payload is read only
-        # while that deadline is live, and a later award simply replaces it.
+        self._today = today                # () -> YYYYMMDD, 0 without a clock
+        # The banner's PAYLOAD only: (id, name, icon, hidden) of the live
+        # banner, or None. Its deadline is the shell's (`ws._toast_until`,
+        # written by the `on_unlock` hook at the unlock -- #209 landing B): the
+        # console's redraw gate and the WM's overlay signature run every loop
+        # and must not have to ask an object whether a banner is still up. This
+        # payload is read only while that deadline is live, and a later award
+        # simply replaces it.
         self.toast = None
 
     # -- queries -------------------------------------------------------------
@@ -221,24 +237,60 @@ class Achievements:
     def count(self):
         return len(self.unlocked)
 
-    # -- awarding ------------------------------------------------------------
-    def award(self, ach_id, quiet=False):
-        """Unlock `ach_id` if it isn't already and is a known achievement. Returns
-        True only on the FIRST unlock (so a milestone awards exactly once), and then
-        persists + raises a toast + fires the on_unlock hook. A repeat is a no-op.
-        `quiet` keeps a badge earned on another console (the page a board serves):
-        persisted, never celebrated a second time."""
-        if ach_id in self.unlocked or ach_id not in ACH_TITLE:
-            return False
-        self.unlocked[ach_id] = True
+    def found_on(self, ach_id):
+        """The day `ach_id` was found (YYYYMMDD, 0 where the clock did not
+        know it), or None while it is not found."""
+        return self.unlocked.get(ach_id)
+
+    def progress(self, ach_id):
+        """(done, goal) of a counter badge (Cart Explorer's carts, Toolbox
+        Master's editors), or None for one that is no counter."""
+        goal = GOALS.get(ach_id)
+        if goal is None:
+            return None
+        n = len(self._played) if ach_id == "play_five" else len(self._seen_views)
+        return (min(n, goal), goal)
+
+    def doc(self):
+        """achievements.json's document, as moy_carts.save_achievements
+        writes it."""
+        count = {}
+        if self._played and "play_five" not in self.unlocked:
+            count["play_five"] = list(self._played.keys())
+        if self._seen_views and "toolbox" not in self.unlocked:
+            count["toolbox"] = list(self._seen_views.keys())
+        return {"found": dict(self.unlocked), "count": count}
+
+    def _save(self):
         if self._on_save is not None:
             try:
-                self._on_save(list(self.unlocked.keys()))
+                self._on_save(self.doc())
             except Exception as exc:  # noqa: BLE001 -- a failed save must not crash the UI
                 print("Moybyte achievements save failed:", _err_text(exc))
+
+    # -- awarding ------------------------------------------------------------
+    def award(self, ach_id, quiet=False, day=None):
+        """Unlock `ach_id` if it isn't already and is a known achievement. Returns
+        True only on the FIRST unlock (so a milestone awards exactly once), and then
+        persists + raises the banner + fires the on_unlock hook. A repeat is a no-op:
+        nothing shows. `quiet` keeps a badge earned on another console (the page a
+        board serves) with the `day` it was found there: persisted, never
+        celebrated a second time."""
+        if ach_id in self.unlocked or ach_id not in ACH_TITLE:
+            return False
+        if day is None:
+            day = 0
+            if self._today is not None:
+                try:
+                    day = int(self._today()) or 0
+                except Exception:  # noqa: BLE001 -- no clock: an unknown day
+                    day = 0
+        self.unlocked[ach_id] = day
+        self._save()
         if quiet:
             return True
-        self.toast = (ach_id, ACH_TITLE[ach_id], ACH_GLYPH.get(ach_id, "trophy"))
+        self.toast = (ach_id, ACH_TITLE[ach_id], ACH_GLYPH.get(ach_id, "trophy"),
+                      ACH_HIDDEN.get(ach_id, False))
         # The payload is set BEFORE the hook, which is what arms the banner: a
         # live deadline must never point at a stale (or absent) payload.
         if self._on_unlock is not None:
@@ -253,19 +305,26 @@ class Achievements:
         per-event detail used by the counter milestones: for "open" it's the cart
         identity (distinct carts -> play_five); for "editor" it's the view name
         (visiting all editors -> toolbox). Direct-mapped events (open/run/saves)
-        award their id immediately. Safe to call every time the event happens --
+        award their id immediately. A counter's new step is persisted, so its
+        progress outlives a reboot. Safe to call every time the event happens --
         award() makes the once-only guarantee."""
         if event == "open":
-            if key is not None:
+            if key is not None and "play_five" not in self.unlocked \
+                    and key not in self._played:
                 self._played[key] = True
                 if len(self._played) >= _PLAY_GOAL:
                     self.award("play_five")
+                else:
+                    self._save()
             self.award("first_open")
         elif event == "editor":
-            if key in _TOOLBOX_VIEWS:
+            if key in _TOOLBOX_VIEWS and "toolbox" not in self.unlocked \
+                    and key not in self._seen_views:
                 self._seen_views[key] = True
                 if all(v in self._seen_views for v in _TOOLBOX_VIEWS):
                     self.award("toolbox")
+                else:
+                    self._save()
         elif event in _EVENT_ACHIEVEMENT:
             self.award(_EVENT_ACHIEVEMENT[event])
 

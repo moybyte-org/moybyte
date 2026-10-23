@@ -504,19 +504,20 @@ def _quiesce(ws):
     """Strip every transient + clock-driven thing off the frame.
 
     Called before EVERY frame, not once per surface: opening a cart or an app
-    notes achievements, which can re-arm the toast/confetti mid-sequence."""
+    notes achievements, which can re-arm the unlock banner mid-sequence. A
+    surface that IS the banner or About sets `_golden_toast` or
+    `_golden_about` to keep it."""
     if ws.pointer is not None:
         ws.pointer.visible = False
-    ws._toast_until = 0
-    ws._egg_until = 0
-    ws._confetti_until = 0
-    ws.show_achievements = False
+    if not getattr(ws, "_golden_toast", False):
+        ws._toast_until = 0
     ws.show_fps = False
     ws.perf_hud = False
     ws.perf_capture = False
     if not getattr(ws, "_golden_popover", False):
         ws.sysmenu.open = False
-    ws._about = False
+    if not getattr(ws, "_golden_about", False):
+        ws._about = False
     ws._notice = None
     ws._notice_until = 0
     # The bar prints a live HH:MM. Bind the accessor -- pinning the clock's
@@ -658,9 +659,48 @@ def _surface_plan(ws, cfg):
 
     plan.append(("launcher", home))
     plan.append(("settings", lambda: ws.open_settings()))
+
+    # About's pages and cards (docs/look_2026-10.md step 32): nine badges
+    # found, two on the targets' days, and the system menu's About over the
+    # home; then the unlock banner over the home, a secret's with its confetti
+    # out whole.
+    def achievements():
+        ws.ach.unlocked = dict(GOLDEN_BADGES)
+        ws.open_settings()
+        ws.settings_layer.open_page("achievements")
+
+    def licences():
+        ws.settings_layer.open_page("licences")
+
+    def licence():
+        page = ws.settings_layer.licences
+        page._parts()
+        page.entry = page._ids["MicroPython"]
+        page._focus = "MicroPython"
+
+    def about():
+        home()
+        ws._golden_about = True
+        ws.menu_ui._menu_about()
+
+    def unlock():
+        ws._golden_about = False
+        ws._about = False
+        ws.ach.unlocked.pop("konami", None)
+        ws._golden_toast = True
+        ws.ach.award("konami")
+        ws._toast_at -= 10000
+
+    plan.append(("settings_achievements", achievements))
+    plan.append(("settings_licences", licences))
+    plan.append(("settings_licence", licence))
+    plan.append(("about", about))
+    plan.append(("unlock_banner", unlock))
     cart = _cart_by_title(ws, _EDITOR_CART)
     for tab in TABS:
         def enter(tab=tab):
+            ws._golden_toast = False
+            ws._toast_until = 0
             # Re-open per tab. That alone does NOT buy independence -- the layouts
             # are ws singletons another tab can bind (#216); what pins it is
             # test_editor_tabs_render_independently. The desktop rows draw the
@@ -784,6 +824,10 @@ def _after_appearance(ws, enter):
 # The game the pause menu holds, and the frames it plays first.
 _PAUSE_CART, _PAUSE_FRAMES = "Star Catcher", 30
 MENU_SURFACES = ("sysmenu", "pause", "pause_options")
+# The badges the About surfaces show found, with the targets' two days.
+GOLDEN_BADGES = (("first_open", 20261001), ("first_run", 20261001), ("first_paint", 20261001),
+                 ("first_map", 20261012), ("first_code", 20261001), ("play_five", 20261009),
+                 ("toolbox", 20261001), ("konami", 20261001), ("clock_tinker", 20261001))
 
 
 def _menus_plan(ws, cfg):
@@ -938,6 +982,8 @@ def surface_names(config_name):
     if cfg["windowed"] and not cfg.get("console"):
         names += ["desk", "desk_window_calc", "desk_window_projects"]
     names += ["launcher", "settings"]
+    names += ["settings_achievements", "settings_licences", "settings_licence", "about",
+              "unlock_banner"]
     names += ["editor_" + t for t in TABS]
     for a in APPS:
         names.append("app_" + a)
