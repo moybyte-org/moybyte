@@ -262,6 +262,44 @@ def test_the_zeros_seed_fills_an_empty_store(tmp_path, monkeypatch):
     assert zero_host.seed_carts(root) == 0          # ...and nothing on a warm boot
 
 
+def test_a_warm_boot_says_nothing_about_inflating(tmp_path, monkeypatch, capsys):
+    """The "inflating N carts" line counts what is MISSING, under the folder
+    names the seed really writes (`moybyte.<slug>.moy`). Counted under the bare
+    slug it read every cart as missing on every boot of a fully seeded store."""
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    mod = _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    assert zero_host.seed_carts(root) == len(mod.CARTS_Z)
+    assert "inflating %d carts" % len(mod.CARTS_Z) in capsys.readouterr().out
+
+    assert zero_host.seed_carts(root) == 0
+    assert "ZERO seed" not in capsys.readouterr().out
+
+
+def test_a_seed_into_a_full_store_names_the_store_as_full(tmp_path, monkeypatch, capsys):
+    """A full littlefs refuses mkdir, the shared `_mkdir` swallows it, and the
+    first write raises a bare ENOENT. The board's only display is serial, so the
+    failure line carries the free-block count that explains it."""
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+
+    def refuse(*_a, **_k):
+        raise OSError(2, "ENOENT")
+
+    monkeypatch.setattr(moy_carts, "seed_packed", refuse)
+    monkeypatch.setattr(os, "statvfs",
+                        lambda _p: (4096, 4096, 352, 0, 0, 0, 0, 0, 0, 255),
+                        raising=False)
+
+    assert zero_host.seed_carts(root) == 0
+    out = capsys.readouterr().out
+    assert "ZERO seed: FAILED" in out
+    assert "FULL (0 of 352 blocks free)" in out
+
+
 def test_a_half_seeded_store_is_finished_on_the_next_boot(tmp_path, monkeypatch):
     """The power-cut case the emptiness gate named as its own price: a store
     with SOME carts in it read as "not empty" and was never completed."""

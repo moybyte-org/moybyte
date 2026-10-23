@@ -38,7 +38,10 @@
 #
 #   The price is the store, and it is the store that sets the ceiling: this
 #   board is a CART STORE, and the seed roster alone is ~820 KB of carts, so a
-#   kid's room for their own goes from ~1.1 MB to ~600 KB. Every slot byte is
+#   kid's room for their own goes from ~1.1 MB to ~600 KB BY BYTES. By blocks
+#   (littlefs, 4 KiB; a file costs a block, a folder two) the roster's ~180
+#   files and ~37 folders fill the 352 blocks of this vfs (measured on glass
+#   2026-10-23), so the bytes were not the capacity. Every slot byte is
 #   paid for twice and comes off the store.
 #
 # WHAT WOULD FALSIFY IT: the app image crossing ~3.2 MB, or the store filling

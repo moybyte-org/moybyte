@@ -107,9 +107,14 @@ them back on the next visit — but anything that existed *only* here is.
   had ~226 KB of headroom against the 200 KB floor, so on 2026-10-18 (owner)
   the slots became **3.25 MiB** (`0x340000`, at `0x20000` and `0x360000`) and
   the store the **1.375 MiB** `vfs` at `0x6A0000`: 494,544 B (483 KB) of
-  headroom. The seed carts are ~820 KB, so the room for a kid's own carts goes
-  from ~1.1 MB to ~600 KB. The CSV carries the full arithmetic and what would
-  falsify it; the build prints the headroom on every run beside the board's
+  headroom. The byte arithmetic that sized the store (seed carts ~820 KB, so
+  ~600 KB left for a kid's own) is not its capacity: the store is littlefs on
+  4 KiB blocks, a file under ~128 B inlines and every other file costs a whole
+  block, a folder two, and each seeded cart keeps its `manifest.json.bak`. The
+  roster's ~180 files and ~37 folders fill the 352 blocks of the 1.375 MiB
+  `vfs` (measured on glass 2026-10-23): the 31st cart's `mkdir` gets ENOSPC and
+  a kid's cart has no room. The boot line says `the store is FULL` when a seed
+  fails that way. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run beside the board's
   floor (`[image] headroom_floor_kib` in `board.toml`) and fails under it or on
   an overflow (#168).
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board

@@ -155,6 +155,20 @@ def store_is_empty(root=CARTS_DIR):
     return True
 
 
+def _space_note(root):
+    """What a failed seed says about the store's room: a full littlefs refuses
+    `mkdir` with ENOSPC, `moy_fs._mkdir` swallows every OSError, and the first
+    write into the missing folder then raises a bare ENOENT -- which names no
+    cause. Free blocks of zero or less ARE the cause."""
+    try:
+        st = os.statvfs(root)
+    except (OSError, AttributeError):
+        return ""
+    if st[3] <= 0:
+        return "-- the store is FULL (%d of %d blocks free)" % (st[3], st[2])
+    return "(%d of %d blocks free)" % (st[3], st[2])
+
+
 def seed_carts(root=CARTS_DIR):
     """Write any of the image's baked carts that this store is MISSING.
 
@@ -218,7 +232,8 @@ def seed_carts(root=CARTS_DIR):
         # boot it is the longest silence in the log -- and on a board with no
         # screen a silence is what a hang looks like.
         missing = sum(1 for t, _v, _b in CARTS_Z
-                      if not moy_carts._exists(moy_carts.cart_path(root, moy_carts.cart_folder(t))))
+                      if not moy_carts._exists(moy_carts.cart_path(
+                          root, moy_carts.cart_folder(t, moy_carts.BUILTIN_NS))))
         if missing:
             print("ZERO seed: inflating %d carts from the image" % missing)
         started = ticks._ticks_ms()
@@ -227,7 +242,8 @@ def seed_carts(root=CARTS_DIR):
         if not written:
             return 0
     except Exception as exc:             # noqa: BLE001 -- a partial store beats none
-        print("ZERO seed: FAILED (the store may be partly seeded):", exc)
+        print("ZERO seed: FAILED (the store may be partly seeded):", exc,
+              _space_note(root))
         return 0
     print("ZERO seed: %d carts inflated from the image in %d ms"
           % (written, elapsed))
