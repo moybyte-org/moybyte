@@ -240,7 +240,10 @@ ABOUT = {
     "handheld_achievements-few": (HANDHELD, "settings"),
     "handheld_achievements": (HANDHELD, "settings"),
     "handheld_achievements-scrolled": (HANDHELD, "settings"),
+    "handheld_achievements-all": (HANDHELD, "settings"),
+    "handheld_achievement-popover": (HANDHELD, "settings"),
     "handheld_achievement-unlocked": (HANDHELD, "home"),
+    "handheld_achievement-unlocked-game": (HANDHELD, "game"),
     "handheld_achievement-secret": (HANDHELD, "home"),
     "handheld_settings-about": (HANDHELD, "settings"),
     "handheld_about": (HANDHELD, "sysmenu"),
@@ -252,7 +255,9 @@ ABOUT = {
     "handheld_settings-about-s3": (S3, "settings"),
     "handheld_about-s3": (S3, "settings"),
     "desktop_achievements": (DESK, "desk"),
+    "desktop_achievement-popover": (DESK, "desk"),
     "desktop_achievement-unlocked": (DESK, "desk"),
+    "desktop_achievement-unlocked-game": (CONSOLE, "game"),
     "desktop_about": (DESK, "sysmenu"),
     "desktop_about-update": (DESK, "sysmenu"),
     "desktop_licences": (DESK, "desk"),
@@ -263,13 +268,14 @@ def _about_table():
     what = {"settings": "nearest screen: Settings as it opens",
             "home": "nearest screen: home (the unlock banner is cleared per frame)",
             "sysmenu": "nearest screen: the system menu, where About opens",
-            "desk": "nearest screen: the desk"}
+            "desk": "nearest screen: the desk",
+            "game": "nearest screen: Star Catcher paused (the banner is cleared per frame)"}
     out = {}
     for screen, (config, near) in ABOUT.items():
-        desk = config == DESK
+        desk = config != HANDHELD and config != S3
         setup = {"settings": _settings, "home": _home,
                  "sysmenu": _sysmenu_desk if desk else _sysmenu_home,
-                 "desk": _desk}[near]
+                 "desk": _desk, "game": _pause}[near]
         out[screen] = (config, ("32",), False, setup, what[near])
     return out
 

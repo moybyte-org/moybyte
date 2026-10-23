@@ -427,14 +427,22 @@ set's sources are in `rounds/round16.py`). **Cost:** 0.5 day.
 
 **46. A locked card:** `ui.card`'s `o.locked` with its `icon`: the icon in
 the disabled ink on `sunk` (a dark mode's `raised` half way to the ground),
-a `lock` badge in `dim`; still a stop. **Cost:** 0.5 day.
+and a `lock` badge in `value` (Get Carts' badge ink) on a disc of `surface`,
+`raised` with a ring in a dark mode, so the badge reads on the veiled tile;
+still a stop. **Cost:** 0.5 day.
 
 **47. The unlock banner:** the kernel's toast body (`moy_chrome_toast`)
-redrawn as a card under the bar, centred on a handheld and at the top right
-on the desk: a 32 px tile (44 on the desk) tinted from `value` with the
-badge's icon, a line in `value` and the name in the semibold face, in the
-theme's fonts and RGB, over any surface; a secret's with confetti round it.
-**Cost:** 1 day. **Frame:** its rect repaints as it comes and goes.
+redrawn as a card centred at the top: under the bar where there is one,
+at the glass's top over a fullscreen game (between the corners a
+game's HUD keeps), a 32 px tile (44 on the desk) tinted from `value` with
+the badge's icon, a line in `value` and the name in the semibold face, in
+the theme's fonts and RGB, over any surface; a secret's with confetti
+bursting from its edges. **Cost:** 1 day. **Frame:** its rect repaints as
+it comes and goes.
+
+**48. A count's progress:** `ui.progress`'s `o.count`: the label alone, no
+percent; the track in its own role, `track` (Contrast's an outline the fill
+keeps 3:1 or more against); no fill at nothing. **Cost:** 0.5 day.
 
 ## Moot in this rendering
 
@@ -447,4 +455,4 @@ docked to the content's foot (the apps as built take popovers and dialogs,
 2026-10-22).
 
 **Total:** about 96–104 developer days for gaps 1–26; gaps 27–30 add
-about 6, gap 31 about 19–22, gaps 32–44 about 10, and gaps 45–47 about 2.
+about 6, gap 31 about 19–22, gaps 32–44 about 10, and gaps 45–48 about 2.5.
