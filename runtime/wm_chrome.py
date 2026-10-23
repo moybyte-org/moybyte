@@ -163,7 +163,7 @@ class WindowChrome:
             self.ws.bar_layer.paint_band(self._root_canvas, (win.x, win.y, win.w, win.row))
         self._paint_row(win, self._root_canvas)
 
-    def _paint_row(self, win, cv):
+    def _paint_row(self, win, cv, title=None):
         """A full-screen row's head and controls on `cv` (the glass's
         coordinates): the back chevron where its app has a page open, the
         window's icon and title, then minimise, restore and close at the
@@ -173,8 +173,12 @@ class WindowChrome:
         btns = self._win_btns(win) | _ui_draw.FRAME_FULL
         rect = self._row_rect(win)
         game = win.kind == "desktop"
+        if game:
+            title = ""
+        elif title is None:
+            title = self._full_title(win)
         _ui_draw.frame(cv, self.ws.theme_colors, rect, win.title_h,
-                       "" if game else self._full_title(win), True, btns, self._fs())
+                       title, True, btns, self._fs())
         if not game:
             slot = _ui_draw.frame_icon(rect, win.title_h, btns)
             if slot is not None:

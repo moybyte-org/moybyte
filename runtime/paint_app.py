@@ -8,6 +8,7 @@
 #   PaintAppLayer.draw            the frame: the page in hand
 #   PaintAppLayer._canvas         the drawing in its view, the cursor and the rail
 #   PaintAppLayer._stroke_frame   a frame only a mark changed: the view's changed part alone
+#   PaintAppLayer.retained        the WM's word on a window draw's target (and `changed`)
 #   PaintAppLayer._more           More: the drawing's verbs
 """Paint: drawing with the public UI API's verbs (docs/ui_api_2026-10.md; the
 look's docs/media/look_2026-10/APPS_RESTYLE.md, Paint).
@@ -409,6 +410,9 @@ class PaintAppLayer:
     # artwork role's C rows read (native/moy_app's MOY_APP_ARTWORK_NS).
     PREFS_NS = "paint"
     UI = True
+    # The WM's shown protocol (docs/surface_model_v1.md §14.3): `retained`
+    # before a window draw, `changed` after it.
+    HELD = True
     AUTOSAVE_S = AUTOSAVE_S
     RETRY_S = RETRY_S
 
@@ -484,6 +488,17 @@ class PaintAppLayer:
         self._sp_out = False
         self._cu = [0, 0, 0, 0]
         self._drip_c = 0
+        # The window's word on the target of the next draw (`retained`):
+        # [known, x0, y0, x1, y1), whether the WM said it, and whether the
+        # draw before was one it said it of; and this draw's change, read by
+        # `changed`.
+        self._word = [0, 0, 0, 0, 0]
+        self._held_on = False
+        self._held_last = False
+        self._moved = True
+        self._said = False            # this draw's target is the one the WM said
+        self._sf_ran = False          # the last draw weighed a stroke frame
+        self._changed = False
 
     # -- the document ------------------------------------------------------------
 
@@ -886,7 +901,7 @@ class PaintAppLayer:
         elif not down and self._drawing_key:
             self._drawing_key = False
             self._release()
-            self._damage.all()
+            self._damage.mark()
         return True
 
     def _swatch_keys(self, inp):
@@ -1082,7 +1097,7 @@ class PaintAppLayer:
             self._down = False
             self._panning = None
             self._release()
-            self._damage.all()
+            self._damage.mark()
         return True
 
     def _page_swatch(self, px, py):
@@ -1192,7 +1207,35 @@ class PaintAppLayer:
 
     # -- draw ---------------------------------------------------------------------
 
+    # -- the WM's shown protocol (docs/surface_model_v1.md §14.3) ------------------
+
+    def retained(self, known, x0, y0, x1, y1):
+        """The window's word on the target of the draw that follows: when
+        `known`, it holds the page as this layer's last draw left it but for
+        [x0, y0, x1, y1)."""
+        h = self._word
+        h[0] = known
+        h[1] = x0
+        h[2] = y0
+        h[3] = x1
+        h[4] = y1
+        self._held_on = True
+
+    def changed(self):
+        """What the last draw changed of the page, [x0, y0, x1, y1), or None
+        when it was a whole frame."""
+        return self._own if self._changed else None
+
     def draw(self, dt):
+        # The window's word counts only when the draw before was one it said
+        # it of too, and weighed a stroke frame: anything else may have drawn
+        # the page since, or drawn one the page's signature never saw.
+        said = self._held_on
+        self._said = said and self._held_last and self._word[0] and self._sf_ran
+        self._sf_ran = False
+        self._held_on = False
+        self._held_last = said
+        self._changed = False
         cv = self._surf.canvas()
         if self._opened is not None and self._pointer() != self._opened \
                 and (self._doc is None or not self._doc.action_live):
@@ -1214,6 +1257,7 @@ class PaintAppLayer:
         lay = self.layout
         if (self.page is None and self.viewer is None and self._doc is not None
                 and self._stroke_frame(cv, th)):
+            self._changed = True
             return
         self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
         if self._touch is None:
@@ -1397,12 +1441,15 @@ class PaintAppLayer:
     # union of what those frames and this one changed, by the same calls a
     # whole frame makes, so the pixels are a whole frame's. A recording canvas
     # keeps nothing, and the loop's drawn-frame count is what says the frames
-    # were consecutive.
+    # were consecutive. In a desk window the WM says instead what the target
+    # holds (`retained`, docs/surface_model_v1.md §14.3), and is told what
+    # each frame changed (`changed`).
 
     def _stroke_frame(self, cv, th):
         """Paint this frame as a stroke frame where it may: True when it did
         (the frame is done), False when the whole page must be painted. Either
         way the doc's marks are baked and this frame's change is recorded."""
+        self._sf_ran = True
         d = self.doc
         spec = self._spec()
         c = self._chg
@@ -1463,7 +1510,7 @@ class PaintAppLayer:
             self._sp_out = False
         epoch = self._page_epoch(cv, th, d, spec)
         f = _loop.drawn() if _loop is not None else -1
-        ok = self._region(cv, f, epoch)
+        ok = self._region(cv, f, epoch, self._said)
         if f >= 0:
             e = self._ring[f % (_RING + 1)]
             e[0] = f
@@ -1493,20 +1540,27 @@ class PaintAppLayer:
             self._clip_r = None
         return True
 
-    def _region(self, cv, f, epoch):
+    def _region(self, cv, f, epoch, held=False):
         """Whether this frame may be a stroke frame; when it may, `_chg`
         becomes the part of the view it repaints: this frame's change and
-        those of the frames since the canvas's buffer was last painted. The
-        frame's own change stays in `_own`, which the ring records."""
+        those of the frames since the canvas's buffer was last painted -- or,
+        where the window said what the target holds (`held`), the part it
+        said lags. The frame's own change stays in `_own`, which the ring
+        records."""
         o = self._own
         c = self._chg
         o[0] = c[0]
         o[1] = c[1]
         o[2] = c[2]
         o[3] = c[3]
-        if f < 0 or cv is not self._ring_cv or self._sp_out or not self._may(cv):
+        if f < 0 or self._sp_out or not self._may(cv):
             return False
-        if not self._kept(f, epoch, c):
+        if held:
+            if self._moved:
+                return False
+            h = self._word
+            _grow(c, h[1], h[2], h[3], h[4])
+        elif cv is not self._ring_cv or not self._kept(f, epoch, c):
             return False
         lay = self.layout
         vx, vy, vw, vh = lay.view
@@ -1564,7 +1618,7 @@ class PaintAppLayer:
         g = self._damage.gen
         moved = g != self._gen
         self._gen = g
-        moved = self._sig_is(0, cv) | moved
+        cvm = self._sig_is(0, cv)
         moved = self._sig_is(1, self.layout) | moved
         moved = self._sig_is(2, th) | moved
         moved = self._sig_is(3, d) | moved
@@ -1582,7 +1636,10 @@ class PaintAppLayer:
         for i in range(9):
             moved = self._sig_eq(10 + i, spec[i]) | moved
         moved = self._sig_eq(19, self._drip_colour()) | moved
-        if moved:
+        # The page moved; a new canvas is a new epoch too, but where the
+        # window said what the target holds, it is only a new target.
+        self._moved = moved
+        if moved or cvm:
             self._epoch += 1
         return self._epoch
 

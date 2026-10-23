@@ -219,7 +219,10 @@ into the root's framebuffer ring through a viewport
   opens.
 
 The first frame after a release goes back into `win.buf`, so it is not a
-direct-render frame, and it paints in full.
+direct-render frame, and it paints in full. The surface model's §14.3 (the
+WM's shown ring) is where a window content's per-buffer history lives on a
+desk; a region whose app speaks that protocol is told what its target
+holds instead.
 
 ## 8. Why this is not a second invalidation mechanism
 

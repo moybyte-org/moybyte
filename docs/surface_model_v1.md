@@ -736,7 +736,8 @@ content draw is skipped and the retained `win.buf` stamp presents it instead.
   on other layers and need no exclusion.
 - **`win.buf` is not stale.** A rebuilt buffer, or a gesture's `_direct_render`
   painting past the buffer straight into the framebuffer, leaves it behind the
-  truth: the next paint renders live to refill it before the freeze resumes.
+  truth: the next paint renders live to refill it before the freeze resumes
+  (only its lag, where the content speaks §14.3's protocol).
 
 Pinned by `tests/test_wm_content_freeze.py` — a frozen-vs-live pixel-equality
 check plus a case per leg of the gate.
@@ -801,6 +802,62 @@ defect of this architecture, not an accident — which is why L3 forbids
 consumer-cleared booleans, L8 demands the silent-disable direction be
 testable, and §7 deletes each absorbed field with a grep-test instead of
 leaving it beside the model as a seventh mechanism.
+
+### 14.3 The shown ring: what each buffer holds of the focused window (2026-10-23)
+
+§14.1 skips a window's content draw when nothing changed; it says nothing
+about a content that changes a small part of itself every frame. Paint's
+stroke is that content, and on a desk it paid twice: a held-key stroke
+stamped the whole window buffer every frame, and a pointer stroke, which
+direct render draws into the root, began and ended on whole frames — the
+content's own record of its buffers saw a new canvas at the press, and the
+window buffer it went back to at the release was the stroke's whole length
+behind. #66 has the numbers.
+
+**The WM keeps §4's per-buffer last-seen for the focused window's content
+rect** (`WindowedWM._shown`, one entry a painted frame). An entry says the
+frame left that buffer's content rect holding the window's page with
+nothing over it — the window focused and on top, the chrome quiet, no
+overlay, popover, scrim or cursor, no window under it drawing into it — and
+the part of the page the frame changed: what the content says its draw
+changed, nothing on a frozen frame, unknown otherwise. When the
+RETAINED_FRAMES frames before this one all have entries, the buffer this
+frame paints holds the page but for the changes of all but the oldest, and:
+
+- **the stamp copies only those and this frame's**, nothing on a frame that
+  changed nothing;
+- **a direct render tells the content what lags** before it draws, and the
+  content repaints that and its own change. A buffer the ring cannot vouch
+  for is seeded by stamping the window buffer into it, when that buffer's
+  own lag is known;
+- **the window buffer direct render left behind keeps the content's
+  changes as its lag**, which the first frame after the release repaints
+  instead of the whole page;
+- **a frame whose next buffer the ring cannot vouch for asks for it** while
+  the board is idle, as Paint's own `settle` does for its canvas, so the
+  next press finds every buffer known. A frame asked for that changed
+  nothing known stops asking.
+
+**The protocol is three names on the content's Layer**: `HELD = True`;
+`retained(known, x0, y0, x1, y1)`, before each draw the WM makes of it in
+its window — whether the target holds its page as of its last draw, and the
+part that lags; `changed()`, after it — the part of the page the draw
+changed, or None. A content counts the WM's word only when its previous draw
+was one the WM spoke of too. A content without the names draws whole, as
+every content did before, and its stamps stay whole. Paint is the first to
+speak it.
+
+**This is not a second invalidation mechanism.** Nothing here decides
+whether a surface draws: the gate, the gens and §14.1's freeze still do. It
+is §4's last-seen per physical buffer, kept below surface granularity for
+one rect, from what the content says it painted on the frame it painted it —
+the trust `note_damage` already places in the WM (§5.2). On the rotated
+compositor the window's damage is that change rect, not the window.
+
+Pinned by `tests/test_wm_shown.py`: pointer and held-key strokes on one, two
+and three buffers presented in turn, every presented frame byte-equal to
+full repaints, every frame from the press through the release a stroke
+frame, and the stamps' bytes bounded.
 
 ## 15. Amendment: the Surface's home is the kernel (2026-10-07)
 
