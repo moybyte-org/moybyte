@@ -173,9 +173,13 @@ if [ "${WEB}" = "0" ] && [ "${NOWEB}" = "0" ] && web_touched; then
   WEB=1
 fi
 
-# The COMPILED-VS-COMPILED lane's prerequisite, and the blob check's. Not
-# cached-and-skipped: a stale binary is the failure this is here to catch, and
-# a warm build is under a minute.
+# The browser console first, whatever changed: the suite's
+# test_web_system_persist drives the built dist/ when one is there (CI's host
+# job has none and skips it), and a dist/ from before a rebase fails it for
+# code this branch never touched. Then the binary, which bakes that bundle.
+# Not cached-and-skipped: a stale binary is the failure this is here to catch,
+# and a warm build is under a minute.
+step "browser console builds"                       firmware/web_runner/build.sh
 step "desktop MicroPython with the native usermods" make unix-micropython
 step "docs agree with the tree"                     "${PY}" tools/check_docs.py
 # CI's cached step: the toolchain the showcase cart's goldens build with,
@@ -192,11 +196,8 @@ step "headless tour (fresh save dir)" \
     --gif "${TOUR_DIR}/demo.gif" --save-dir "${TOUR_DIR}/projects"
 
 if [ "${WEB}" = "1" ]; then
-  # Path-filtered in CI (`web_touched` above). The build comes first: the
-  # suites drive whatever `dist/` currently holds.
-  step "browser console builds"  firmware/web_runner/build.sh
-  step "...and the blob it baked is still what the binary serves" \
-    make unix-micropython
+  # Path-filtered in CI (`web_touched` above). The suites drive the `dist/`
+  # built at the top.
   step "browser suites in real Chrome" \
     env MOYBYTE_WEB_E2E=1 "${PY}" -m pytest -p xdist -n 4 -rs -q \
       tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
