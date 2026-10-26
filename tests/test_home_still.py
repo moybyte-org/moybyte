@@ -35,8 +35,12 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme=None):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     font_scale=1, windowed=True, panel_diagonal_in=7.0)
     if theme is not None:
+        from runtime.chrome import THEME_NAMES
         from ws_helpers import use_theme
-        use_theme(ws, theme)
+        if theme in THEME_NAMES:
+            ws.look.set_theme(theme, persist=False)
+        else:
+            use_theme(ws, theme)
         ws.look.select_wallpaper(None, persist=False)   # its backdrop, not a cart
     ws.open_library()
     ws.wallpaper.is_animating = lambda dt: False
@@ -84,6 +88,12 @@ def _session(ws, drv, frame):
         ws.mark_dirty()
         run(3 if k % 2 else 1)
     run(20)
+    ws.bar_layer._clock_text = lambda: "10:31"   # the bar moves, the parts do not
+    ws.mark_dirty()
+    run(6)
+    home.handle_input(_Key("left"))
+    ws.mark_dirty()
+    run(6)
     for t in ("mine", "apps", "make", "games"):
         ws.set_home_tab(t)
         run(6)
@@ -105,21 +115,31 @@ def _session(ws, drv, frame):
 
 
 @pytest.mark.parametrize("bufs", [1, 2, 3])
-@pytest.mark.parametrize("theme", [None, "night"], ids=["shipped", "night"])
+@pytest.mark.parametrize("theme", [None, "night", "blocks"], ids=["shipped", "night", "blocks"])
 def test_every_presented_frame_is_a_whole_repaints(tmp_path, monkeypatch, bufs, theme):
     with monkeypatch.context() as m:      # (the conftest's patches stay)
         ws, drv, frame, _ = _home(tmp_path / "a", m, bufs, True, theme)
         whole = _session(ws, drv, frame)
     ws, drv, frame, _ = _home(tmp_path / "b", monkeypatch, bufs, False, theme)
-    calls = {"still": 0}
+    calls = {"still": 0, "strip": 0}
     home = ws.launcher_layer
     real = home._try_still_frame
+    strip = ws.bar_layer._draw_status_strip
 
     def counted(cv, dt):
+        n = calls["strip"]
         r = real(cv, dt)
-        calls["still"] += 1 if r else 0
+        if r:
+            calls["still"] += 1
+        else:
+            calls["strip"] = n          # a whole frame's strip is not counted
         return r
+
+    def strips(where):
+        calls["strip"] += 1
+        return strip(where)
     home._try_still_frame = counted
+    ws.bar_layer._draw_status_strip = strips
     part = _session(ws, drv, frame)
     # A frame that brings a buffer to the glass's frame (`_still_debt`)
     # presents what the glass already shows: the glass's sequence of
@@ -129,6 +149,8 @@ def test_every_presented_frame_is_a_whole_repaints(tmp_path, monkeypatch, bufs, 
     for i, (a, b) in enumerate(zip(whole, part)):
         assert a == b, "the glass's picture %d differs from a full repaint's" % i
     assert calls["still"] > len(part) // 2, (calls, len(part))
+    # a still frame draws the bar's strip only where its buffer lacks it
+    assert calls["strip"] < calls["still"] // 2, calls
 
 
 def _changes(shots):

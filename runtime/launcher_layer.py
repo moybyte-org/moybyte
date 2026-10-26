@@ -2357,6 +2357,16 @@ def _wall_ink(ws):
     return white, black
 
 
+def _overlaps_any(rects, others):
+    """Whether any of `rects` meets any of `others` (x, y, w, h)."""
+    for a in rects:
+        for b in others:
+            if (a[0] < b[0] + b[2] and b[0] < a[0] + a[2]
+                    and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]):
+                return True
+    return False
+
+
 def _dim_of(ws):
     """The theme's neighbour dimming (`dim_neighbours`, Moy Night's): the
     colour the carousel's neighbours are dimmed toward -- the home's ground,
@@ -3019,16 +3029,19 @@ class LauncherHomeLayer:
         alone = getattr(wm, "content_alone", None)
         return alone is not None and alone()
 
-    def _note_still(self, cv, parts):
-        """Record this painted frame's parts in the ring, or with None
-        that its buffer holds something else."""
+    def _note_still(self, cv, parts, bar=None):
+        """Record this painted frame's parts in the ring, with the bar's key
+        (`shown_key`) its strip was drawn under, or with None that its
+        buffer holds something else."""
         ring = self._still_ring
         f = self.ws._frames_drawn
         if parts is None or (ring and ring[-1][0] != f - 1):
             del ring[:]                  # (another surface painted between)
         if parts is None:
             return
-        ring.append((f,) + parts)
+        if bar is None:
+            bar = self.ws.bar_layer.shown_key("home")
+        ring.append((f,) + parts + (bar,))
         if len(ring) > _retained_n(cv):
             del ring[0]
 
@@ -3049,7 +3062,8 @@ class LauncherHomeLayer:
             return False
         f = ws._frames_drawn
         base, sel, band = parts
-        sel_lag = band_lag = False
+        bar = ws.bar_layer.shown_key("home")
+        sel_lag = band_lag = bar_lag = False
         for k in range(1, n + 1):
             e = ring[-k]
             if e[0] != f - k or e[1] != base:
@@ -3058,11 +3072,15 @@ class LauncherHomeLayer:
                 sel_lag = True
             if e[3] != band:
                 band_lag = True
+            if e[4] != bar:
+                bar_lag = True
         fill = ws.wallpaper.restorer(cv, self._bd_now)
         g = self.grid
         wm = ws.wm
+        laid = []
         if sel_lag:
             r = self._sel_rect()
+            laid.append(r)
             self._fill_around_hero(cv, r, fill)
             cv.clip(r[0], r[1], r[2], r[3])
             g._paint_details(cv)
@@ -3072,20 +3090,25 @@ class LauncherHomeLayer:
         if band_lag:
             g.repaint_band(cv, ws.covers.sheet_icon, fill, sel_lag)
             bx, by, bw, bh = g.band_rect()
+            laid.append((bx, by, bw, bh))
             wm.hand_content_damage(cv, bx, by, bw, bh)
         h = g.foot()[5]
         if h[2] > 0 and h[3] > 0:
+            laid.append(h)
             fill(cv, h)
             self._draw_home_chrome(cv)
             wm.hand_content_damage(cv, h[0], h[1], h[2], h[3])
         g._scroll_region().note_painted(
             f, (g.paint_key(), self._statics_key(cv), ws.covers.gen),
             _cursor_stamp(ws))
-        ws.bar_layer._draw_status_strip("home")
+        # A strip this buffer holds under this key stays, unless a part
+        # above was put back over it.
+        if bar_lag or _overlaps_any(laid, ws.wallpaper.bars()):
+            ws.bar_layer._draw_status_strip("home")
         # The drag partial's streak counts whole frames under one statics
         # key: a selection painted here is not one of them.
         self._full_streak = 0
-        self._note_still(cv, parts)
+        self._note_still(cv, parts, bar)
         if self._still_held(parts):
             # every buffer holds this frame: the retained frame takes it
             self._capture_retained(cv, dt, parts)
