@@ -933,17 +933,26 @@ def a_quiet_console_collects_its_garbage(board):
     """The quiet collect (native/moy_kernel/moy_loop_board.c): a heap left
     more than 3/4 allocated is collected in a frame that drew nothing, a
     second after the last line and the last drawn frame, with nothing of the
-    console's asking for it."""
+    console's asking for it. The fill is measured against the heap it ends
+    in: a fragmented heap grows an area under it, and a fill sized from the
+    heap before then leaves it half allocated, which is no premise at all."""
     import time
     board.pyexec("import gc\n"
                  "gc.collect()\n"
-                 "ws._qn = max(64, (gc.areas()[1] * 7 // 8 - gc.mem_alloc()) // 1024)\n"
-                 "ws._qg = [bytearray(1000) for _ in range(ws._qn)]\n"
+                 "ws._qg = []\n"
+                 "for _ in range(8):\n"
+                 "    n = (gc.areas()[1] * 7 // 8 - gc.mem_alloc()) // 1024\n"
+                 "    if n <= 0:\n"
+                 "        break\n"
+                 "    ws._qg.extend(bytearray(1000) for _ in range(n))\n"
+                 "ws._qr = (gc.areas()[1], gc.mem_alloc())\n"
                  "ws._qg = None", strict=True)
+    held, used = board.pyval("ws._qr", strict=True)
+    assert used * 4 > held * 3, "the fill left the heap %d of %d bytes" % (used, held)
     c0 = board.pyval("__import__('gc').pauses()[0]", strict=True)
     time.sleep(3.0)
     c1 = board.pyval("__import__('gc').pauses()[0]", strict=True)
-    assert c1 > c0, "no collection in a quiet pause over a heap 7/8 allocated"
+    assert c1 > c0, "no collection in a quiet pause over a heap %d of %d bytes" % (used, held)
 
 
 def a_leaked_session_leaves_the_panel_flushing(board):
