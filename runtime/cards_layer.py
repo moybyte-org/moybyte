@@ -1329,7 +1329,7 @@ class CardsLayer:
         desk = _layout_base.metric_class() == _layout_base.DESK
         host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
         tdeck = _ui.input_kind() == "tdeck"
-        keys = (("up down", "Field") if len(p.texts) > 1 else ()) + (
+        keys = (("scroll", "Field") if len(p.texts) > 1 else ()) + (
             "confirm", p.ok, "cancel", "Cancel")
         if not _ui.input_kind() == "touch":
             b = _ui_draw.metrics("value_row")[17 if desk else 16] * lay.fs

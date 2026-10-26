@@ -62,7 +62,7 @@ def _fit(ws, comp):
 
 _MONTH_KEYS = ("change", "Month", "back", "Close")
 _MONTH_KEYS_DESK = ("change", "Month", "back", "Close")
-_POWER_KEYS = ("change", "Change", "up down", "Row", "back", "Close")
+_POWER_KEYS = ("change", "Change", "scroll", "Row", "back", "Close")
 _WIFI_KEYS = ("confirm", "Join", "back", "Close")
 
 

@@ -1304,7 +1304,7 @@ class BlockEditorUI:
         host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
         num = kind == "num"
         to_block = num and k.get("allow_block")
-        keys = (("confirm", "OK") + (("up down", "Use a block") if to_block else ())
+        keys = (("confirm", "OK") + (("scroll", "Use a block") if to_block else ())
                 + ("cancel", "Cancel"))
         _strip(ws, lay, keys, desk)
         tdeck = _ui.input_kind() == "tdeck"
