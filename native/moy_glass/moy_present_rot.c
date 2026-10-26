@@ -443,6 +443,8 @@ void moy_rot_flush(moy_rot_t *r) {
     r->ndamage = 0;
     bool stamp = r->has_stamp;
     r->has_stamp = false;
+    r->flushed = true;
+    r->flushed_stamp = stamp;
     int paint_buf = MOY_ROT_PAINT0 + r->pi;
     bool nb = r->async;
     if (r->pending >= 0) {
@@ -674,4 +676,19 @@ void moy_rot_fence(moy_rot_t *r) {
         r->ops->ppa_sync(r->ops->ctx);
         present(r, true);
     }
+}
+
+int moy_rot_last(moy_rot_t *r) {
+    if (!r->flushed) {
+        return -1;
+    }
+    if (r->flushed_stamp && r->pending >= 0) {
+        const moy_rot_ops_t *o = r->ops;
+        uint32_t t0 = o->ticks_us(o->ctx);
+        o->ppa_sync(o->ctx);
+        r->fences++;
+        r->fence_us += o->ticks_us(o->ctx) - t0;
+    }
+    r->flushed_stamp = false;
+    return 1 - r->pi;
 }

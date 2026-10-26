@@ -165,6 +165,27 @@ class HostCompositor:
     def gfx(self):
         return gfx_binding
 
+    # The picture the last frame presented, where it is not this buffer: a
+    # test's ring of buffers presented in turn sets it, as a board's
+    # rotation would hold it. None: the one buffer is the last frame's.
+    last = None
+
+    def copy_last(self, x, y, w, h):
+        """The rect of the buffer the last frame drew into, into the one
+        this frame draws into (docs/surface_model_v1.md §14.5)."""
+        src = self.last
+        if src is None:
+            return True
+        W, H = self._w, self._h
+        x0, y0 = max(0, x), max(0, y)
+        x1, y1 = min(W, x + w), min(H, y + h)
+        buf = self._buf
+        for r in range(y0, y1):
+            a = (r * W + x0) * 2
+            b = (r * W + x1) * 2
+            buf[a:b] = src[a:b]
+        return True
+
 
 def make_canvas(w, h, owner=None):
     """A DeviceCanvas over a HostCompositor -- the boards' raster, on CPython.

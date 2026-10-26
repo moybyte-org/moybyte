@@ -117,6 +117,7 @@ typedef struct {
     uint32_t shows;                         // shows since init
     uint32_t seq[MOY_PRESENT_MAX_FBS];      // each buffer's last show, by `shows`
     int32_t rseq[MOY_PRESENT_MAX_FBS];      // ...and the refresh count it was made at
+    int8_t last;                            // the buffer the last frame drew into, or -1
 } moy_dsi_t;
 
 void moy_dsi_init(moy_dsi_t *d, const moy_dsi_ops_t *ops, int nfbs);
@@ -132,6 +133,16 @@ void moy_dsi_show_landed(moy_dsi_t *d);
 void moy_dsi_present_pending(moy_dsi_t *d);
 // No PPA op in flight and no deferred show unpresented.
 void moy_dsi_fence(moy_dsi_t *d);
+// The buffer the last presented frame drew into, for a copy out of it into
+// the one this frame draws into (`copy_last`): a queued op still writing it
+// has landed. The drawn-into buffer itself where there is one; -1 before a
+// frame was drawn, or while it is the drawn-into buffer still (two buffers,
+// a deferred show).
+int moy_dsi_last(moy_dsi_t *d);
+// Copy the w x h block at (x, y) of one RGB565 picture into the same place of
+// another, both `stride` bytes a row: copy_last's CPU half.
+void moy_present_copy_rect(void *dst, const void *src, int stride, int x, int y,
+                           int w, int h);
 
 // ROTATED DSI (Guition P4): a LANDSCAPE desk on PORTRAIT glass. The console
 // paints one of two persistent landscape paint buffers and present ROTATES it
@@ -231,6 +242,7 @@ typedef struct {
     uint32_t dmg_n, dmg_rects, dmg_declined, bounced, stamp_n, refused;
     uint32_t def_n, pres_n, late_n, fences, fence_us, wait_n, wait_us;
     uint32_t strip_n, strip_covered;
+    bool flushed, flushed_stamp;    // a frame was flushed; its first op a stamp
 } moy_rot_t;
 
 moy_rect_t moy_rot_rect(int x, int y, int w, int h, int angle, int lw, int lh);
@@ -245,5 +257,9 @@ int moy_rot_on_glass(const moy_rot_t *r);
 void moy_rot_flush(moy_rot_t *r);
 void moy_rot_present_pending(moy_rot_t *r);
 void moy_rot_fence(moy_rot_t *r);
+// The paint buffer (0 or 1) the last flushed frame drew into, for a copy out
+// of it into the one this frame paints (`copy_last`): a deferred stamp it
+// queued into that buffer has landed. -1 before a frame was flushed.
+int moy_rot_last(moy_rot_t *r);
 
 #endif // MOY_PRESENT_H

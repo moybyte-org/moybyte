@@ -1281,6 +1281,78 @@ static mp_obj_t dsi_frame_fence(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(dsi_frame_fence_obj, dsi_frame_fence);
 
+// copy_last(x, y, w, h) -> True once that rect of the buffer the last frame
+// drew into is in the one this frame draws into (moy_dsi_last has fenced
+// what still writes it). Whole rows go through moy_ppa.copy, the AXI GDMA,
+// which moves them about twice as fast as the CPU on glass; any other rect,
+// or a span the engine refuses, is a row memcpy. With one buffer the last
+// frame's is the drawn-into one: True, nothing copied. False when there is
+// none to copy from yet.
+// A rect (r[0..3], clipped here to W x H) of `src` into `dst`, two W x H
+// RGB565 pictures: whole rows through ppa.copy where it takes them, else a
+// row memcpy. False: the rect is empty.
+static bool glass_copy(mp_obj_t ppa, mp_obj_t dst, mp_obj_t src, mp_int_t W, mp_int_t H,
+                       mp_int_t *r) {
+    if (r[0] < 0) {
+        r[2] += r[0];
+        r[0] = 0;
+    }
+    if (r[1] < 0) {
+        r[3] += r[1];
+        r[1] = 0;
+    }
+    if (r[0] + r[2] > W) {
+        r[2] = W - r[0];
+    }
+    if (r[1] + r[3] > H) {
+        r[3] = H - r[1];
+    }
+    if (r[2] <= 0 || r[3] <= 0) {
+        return false;
+    }
+    if (r[0] == 0 && r[2] == W && ppa != mp_const_none) {
+        mp_obj_t m[6];
+        mp_load_method_maybe(ppa, MP_QSTR_copy, m);
+        if (m[0] != MP_OBJ_NULL) {
+            m[2] = dst;
+            m[3] = src;
+            m[4] = mp_obj_new_int(r[1] * W * 2);
+            m[5] = mp_obj_new_int(r[3] * W * 2);
+            if (mp_obj_is_true(mp_call_method_n_kw(4, 0, m))) {
+                return true;
+            }
+        }
+    }
+    mp_buffer_info_t db, sb;
+    mp_get_buffer_raise(dst, &db, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(src, &sb, MP_BUFFER_READ);
+    size_t need = (size_t)W * (size_t)H * 2u;
+    if (db.len < need || sb.len < need) {
+        mp_raise_ValueError(MP_ERROR_TEXT("copy_last buffers"));
+    }
+    moy_present_copy_rect(db.buf, sb.buf, (int)(W * 2), (int)r[0], (int)r[1], (int)r[2],
+                          (int)r[3]);
+    return true;
+}
+
+static mp_obj_t dsi_copy_last(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    glass_dsi_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    mp_int_t r[4] = { mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]) };
+    int l = moy_dsi_last(&c->d);
+    if (l < 0) {
+        return mp_const_false;
+    }
+    if (l != c->d.back) {
+        glass_copy(c->ppa, mp_obj_subscr(c->fbs, MP_OBJ_NEW_SMALL_INT(c->d.back), MP_OBJ_SENTINEL),
+                   mp_obj_subscr(c->fbs, MP_OBJ_NEW_SMALL_INT(l), MP_OBJ_SENTINEL),
+                   c->w, c->h, r);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(dsi_copy_last_obj, 5, 5, dsi_copy_last);
+
 static mp_obj_t ppa_timeouts(mp_obj_t ppa) {
     if (ppa == mp_const_none) {
         return MP_OBJ_NEW_SMALL_INT(0);
@@ -1364,6 +1436,9 @@ static void dsi_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         case MP_QSTR__back:
             dest[0] = MP_OBJ_NEW_SMALL_INT(c->d.back);
             return;
+        case MP_QSTR__last:
+            dest[0] = c->d.last < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(c->d.last);
+            return;
         case MP_QSTR__pending:
             dest[0] = c->d.pending < 0 ? mp_const_none : MP_OBJ_NEW_SMALL_INT(c->d.pending);
             return;
@@ -1400,6 +1475,7 @@ static const mp_rom_map_elem_t dsi_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&dsi_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_present_pending), MP_ROM_PTR(&dsi_present_pending_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&dsi_sync_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_last), MP_ROM_PTR(&dsi_copy_last_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap_fence), MP_ROM_PTR(&dsi_snap_fence_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_fence), MP_ROM_PTR(&dsi_frame_fence_obj) },
     { MP_ROM_QSTR(MP_QSTR_overlap_stats), MP_ROM_PTR(&dsi_overlap_stats_obj) },
@@ -1641,6 +1717,24 @@ static mp_obj_t rot_paint_buf(mp_obj_t self_in) {
     return c->bufs[MOY_ROT_PAINT0 + c->r.pi];
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(rot_paint_buf_obj, rot_paint_buf);
+
+// copy_last(x, y, w, h): DsiCompositor.copy_last over the two landscape
+// paint buffers (moy_rot_last fences a stamp still landing in the last one).
+// The caller notes what it copied as damage, as it would a paint.
+static mp_obj_t rot_copy_last(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    glass_rot_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    mp_int_t r[4] = { mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]) };
+    int l = moy_rot_last(&c->r);
+    if (l < 0) {
+        return mp_const_false;
+    }
+    glass_copy(c->ppa, c->bufs[MOY_ROT_PAINT0 + c->r.pi], c->bufs[MOY_ROT_PAINT0 + l],
+               c->r.w, c->r.h, r);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rot_copy_last_obj, 5, 5, rot_copy_last);
 
 static mp_obj_t rot_gfx(mp_obj_t self_in) {
     return ((glass_rot_obj_t *)MP_OBJ_TO_PTR(self_in))->gfx;
@@ -1963,6 +2057,7 @@ static const mp_rom_map_elem_t rot_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_angle), MP_ROM_PTR(&rot_set_angle_obj) },
     { MP_ROM_QSTR(MP_QSTR_mark_game), MP_ROM_PTR(&rot_mark_game_obj) },
     { MP_ROM_QSTR(MP_QSTR_note_damage), MP_ROM_PTR(&rot_note_damage_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_last), MP_ROM_PTR(&rot_copy_last_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_strips), MP_ROM_PTR(&rot_set_strips_obj) },
     { MP_ROM_QSTR(MP_QSTR_strip_moved), MP_ROM_PTR(&rot_strip_moved_obj) },
     { MP_ROM_QSTR(MP_QSTR_strips), MP_ROM_PTR(&rot_strips_obj) },

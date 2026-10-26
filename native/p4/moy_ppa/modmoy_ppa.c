@@ -934,6 +934,84 @@ static mp_obj_t moy_ppa_dma_copy(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_dma_copy_obj, 5, 5, moy_ppa_dma_copy);
 
+// copy(dst, src, off, n) -> True once the n bytes at `off` of `src` are at
+//   `off` of `dst`, moved by the AXI GDMA (blocking, the GIL released): a scan
+//   buffer's whole rows out of another's (moy_glass.DsiCompositor.copy_last),
+//   at about twice the CPU's memcpy between the two on glass. The CPU's view
+//   of both stays true: the source's lines are written back first, the
+//   destination's written back and dropped before and dropped again after,
+//   so no line this core painted outlives the copy and none from before it
+//   is read. False when the engine is not to be had, the span is not 64-byte
+//   aligned at both ends, the engine refuses it or it does not land in time:
+//   the caller copies on the CPU.
+//
+//   The copy has an engine of its own for the call, installed and removed
+//   around it: the driver builds each transfer's descriptor lists in internal
+//   DMA memory and keeps them until that transaction slot is used again, and
+//   a whole scan buffer's lists are ~40 KB of it, which the idle desk would
+//   otherwise hold for good (the shared engine's slots keep theirs).
+static volatile bool s_copy_busy;
+static bool s_copy_dead;
+static uint32_t s_copies, s_copy_refused;
+
+static bool copy_done_cb(async_memcpy_handle_t h, async_memcpy_event_t *e, void *arg) {
+    (void)h; (void)e; (void)arg;
+    s_copy_busy = false;
+    return false;
+}
+
+static mp_obj_t moy_ppa_copy(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(args[1], &src, MP_BUFFER_READ);
+    mp_int_t off = mp_obj_get_int(args[2]);
+    mp_int_t n = mp_obj_get_int(args[3]);
+    if (n <= 0 || off < 0 || off + n > (mp_int_t)dst.len || off + n > (mp_int_t)src.len) {
+        mp_raise_ValueError(MP_ERROR_TEXT("copy span"));
+    }
+    uint8_t *d = (uint8_t *)dst.buf + off;
+    uint8_t *sp = (uint8_t *)src.buf + off;
+    async_memcpy_handle_t mcp = NULL;
+    async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
+    cfg.backlog = 1;
+    cfg.dma_burst_size = 64;
+    if ((((uintptr_t)d | (uintptr_t)sp | (uintptr_t)n) & 63u) != 0 || s_copy_dead
+            || esp_async_memcpy_install_gdma_axi(&cfg, &mcp) != ESP_OK) {
+        s_copy_refused++;
+        return mp_const_false;
+    }
+    esp_cache_msync(sp, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    esp_cache_msync(d, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    s_copy_busy = true;
+    if (esp_async_memcpy(mcp, d, sp, (size_t)n, copy_done_cb, NULL) != ESP_OK) {
+        s_copy_busy = false;
+        esp_async_memcpy_uninstall(mcp);
+        s_copy_refused++;
+        return mp_const_false;
+    }
+    int64_t deadline = esp_timer_get_time() + PPA_FENCE_TIMEOUT_US;
+    MP_THREAD_GIL_EXIT();
+    while (s_copy_busy && esp_timer_get_time() < deadline) {
+    }
+    MP_THREAD_GIL_ENTER();
+    if (s_copy_busy) {
+        // It may still land: the engine stays installed for it, and the
+        // copy is the CPU's from now on. What it writes late is what the
+        // caller's CPU copy writes.
+        s_copy_busy = false;
+        s_copy_dead = true;
+        s_timeouts++;
+        s_copy_refused++;
+        return mp_const_false;
+    }
+    esp_async_memcpy_uninstall(mcp);
+    esp_cache_msync(d, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    s_copies++;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_copy_obj, 4, 4, moy_ppa_copy);
+
 // -- THE FRAME SNAPSHOT: a compiled cart's frame, out of its memory ----------
 //
 // A compiled cart hands the console its frame where it made it, in its own
@@ -1462,6 +1540,7 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rotate_scale), MP_ROM_PTR(&moy_ppa_rotate_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate_bounce), MP_ROM_PTR(&moy_ppa_rotate_bounce_obj) },
     { MP_ROM_QSTR(MP_QSTR_dma_copy), MP_ROM_PTR(&moy_ppa_dma_copy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy), MP_ROM_PTR(&moy_ppa_copy_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap), MP_ROM_PTR(&moy_ppa_snap_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap_wait), MP_ROM_PTR(&moy_ppa_snap_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap_stats), MP_ROM_PTR(&moy_ppa_snap_stats_obj) },

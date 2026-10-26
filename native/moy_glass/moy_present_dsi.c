@@ -50,6 +50,7 @@ void moy_dsi_init(moy_dsi_t *d, const moy_dsi_ops_t *ops, int nfbs) {
     d->ops = ops;
     d->nfbs = (uint8_t)nfbs;
     d->pending = -1;
+    d->last = -1;
     // Two or more: scan buffer 0, draw into 1.
     if (nfbs > 1) {
         show_fb(d, 0);
@@ -125,6 +126,7 @@ void moy_dsi_present(moy_dsi_t *d, bool stamp_kicked) {
         o->msync(o->ctx);                 // single buffer: the CPU-cache msync only
         return;
     }
+    d->last = (int8_t)d->back;
     if (n >= 3) {
         if (d->composite_pending) {
             // An async composite (or drag stamp) targets this buffer: queue its
@@ -207,5 +209,36 @@ void moy_dsi_fence(moy_dsi_t *d) {
         drain_pending(d);
     } else if (d->pending >= 0) {
         moy_dsi_present_pending(d);
+    }
+}
+
+int moy_dsi_last(moy_dsi_t *d) {
+    if (d->nfbs <= 1) {
+        return d->back;
+    }
+    int l = d->last;
+    if (l < 0 || l == d->back) {
+        return -1;
+    }
+    if (busy(d, l)) {
+        const moy_dsi_ops_t *o = d->ops;
+        uint32_t t0 = o->ticks_us(o->ctx);
+        drain_pending(d);
+        d->fences++;
+        d->fence_us += o->ticks_us(o->ctx) - t0;
+    }
+    return l;
+}
+
+void moy_present_copy_rect(void *dst, const void *src, int stride, int x, int y,
+                           int w, int h) {
+    size_t off = (size_t)y * (size_t)stride + (size_t)x * 2u;
+    size_t n = (size_t)w * 2u;
+    if (x == 0 && n == (size_t)stride) {
+        memcpy((uint8_t *)dst + off, (const uint8_t *)src + off, n * (size_t)h);
+        return;
+    }
+    for (int r = 0; r < h; r++, off += (size_t)stride) {
+        memcpy((uint8_t *)dst + off, (const uint8_t *)src + off, n);
     }
 }

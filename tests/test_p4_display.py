@@ -427,6 +427,77 @@ def test_a_stamp_off_the_glass_kicks_the_block_on_it(stepped):
         assert ppa.last == (dst, 8, 8, 5, 0, src, 8, 8, 1, 0, 2, 3, 6)
 
 
+class PixDsi(FakeDsi):
+    """Scan buffers with pixels, small enough to compare whole."""
+
+    WIDTH, HEIGHT = 8, 4
+
+    def __init__(self, n=3):
+        FakeDsi.__init__(self, n)
+        self._fbs = [bytearray(8 * 4 * 2) for _ in range(n)]
+
+
+class CopyPpa(FakePpa):
+    """moy_ppa with the GDMA row copy, refusing it on demand."""
+
+    def __init__(self, done=True, takes=True):
+        FakePpa.__init__(self, done)
+        self.takes = takes
+        self.copies = []
+
+    def copy(self, dst, src, off, n):
+        self.copies.append((off, n))
+        if self.takes:
+            dst[off:off + n] = src[off:off + n]
+        return self.takes
+
+
+def test_copy_last_copies_out_of_the_buffer_the_last_frame_drew():
+    """copy_last (surface model §14.5): the rect of the buffer the last
+    presented frame drew into lands in the one this frame draws into --
+    whole rows through moy_ppa.copy, any other rect (or a refused span) a
+    row copy on the CPU; nothing before a frame was drawn."""
+    for takes in (True, False):
+        dsi, ppa = PixDsi(), CopyPpa(takes=takes)
+        with p4_display(dsi, ppa) as mod:
+            comp = mod.P4Compositor()
+            assert comp._last is None and not comp.copy_last(0, 0, 8, 4)
+            comp.framebuffer()[:] = bytes(range(64))
+            comp.flush()
+            assert comp._last == 1 and comp._back == 2
+            assert comp.copy_last(0, 1, 8, 2)
+            assert comp.framebuffer() == bytes(16) + bytes(range(16, 48)) + bytes(16)
+            assert ppa.copies == [(16, 32)]
+            assert comp.copy_last(2, -1, 3, 9)          # clipped to the glass
+            fb = comp.framebuffer()
+            assert all(fb[(y * 8 + x) * 2] == (y * 8 + x) * 2
+                       for y in range(4) for x in range(2, 5))
+            assert fb[:4] == bytes(4) and ppa.copies == [(16, 32)]
+
+
+def test_copy_last_fences_a_queued_op_still_writing_that_buffer():
+    """A deferred stamp still flying into the last frame's buffer has landed
+    before a copy reads it: the queue is fenced and shown, and counted."""
+    dsi, ppa = PixDsi(), CopyPpa(done=False)
+    with p4_display(dsi, ppa) as mod:
+        comp = mod.P4Compositor()
+        comp._stamp_pending = (comp.framebuffer(), 8, 4, 0, 0, bytearray(64), 8, 4)
+        comp.flush()
+        assert comp._busy3 == [1] and comp._last == 1
+        fences = comp.overlap_stats()[2]
+        assert comp.copy_last(0, 0, 8, 4)
+        assert ppa.syncs == 1 and comp._busy3 == [] and dsi.shown[-1] == 1
+        assert comp.overlap_stats()[2] == fences + 1
+
+
+def test_copy_last_on_one_buffer_copies_nothing():
+    dsi, ppa = PixDsi(1), CopyPpa()
+    with p4_display(dsi, ppa) as mod:
+        comp = mod.P4Compositor()
+        comp.flush()
+        assert comp.copy_last(0, 0, 8, 4) and ppa.copies == []
+
+
 def test_a_frame_with_both_a_stamp_and_a_game_composite_fences_blocking(stepped):
     """The kind is decided by the frame's WEAKEST guarantee. The stamp kick
     sets the same `_composite_pending` the game composite does, so filing the
@@ -2082,3 +2153,26 @@ def test_the_rotated_compositor_hands_the_screenshot_its_scan_buffer():
         assert len(comp._fbs) == 3 and 0 <= comp._front < 3
         assert (comp._pw, comp._ph) == (dsi.WIDTH, dsi.HEIGHT)
         assert (comp._w, comp._h) == (comp._ph, comp._pw) == comp.size()
+
+
+def test_the_rotated_copy_last_copies_the_other_paint_buffer():
+    """The rotated compositor's copy_last: the landscape paint buffer the
+    last frame drew into, into the one this frame paints; a deferred stamp
+    that frame queued into it has landed first."""
+    with rotated() as (_mod, comp, _dsi, ppa, _lit):
+        assert not comp.copy_last(0, 0, 1280, 800)
+        fb = comp.framebuffer()
+        fb[:] = bytes(range(256)) * (len(fb) // 256)
+        step(comp)
+        assert comp.framebuffer() is not fb
+        assert comp.copy_last(10, 20, 30, 40)
+        now = comp.framebuffer()
+        row = 1280 * 2
+        for y in (20, 59):
+            assert now[y * row + 20:y * row + 80] == fb[y * row + 20:y * row + 80]
+        assert now[19 * row + 20:19 * row + 80] == bytes(60)
+        comp._stamp_pending = (bytearray(128), 32, 2, 0, 0, bytearray(128), 32, 2)
+        comp.flush()                     # the stamp into `now`, deferred
+        syncs = ppa.syncs
+        assert comp.copy_last(0, 0, 1280, 1)
+        assert ppa.syncs == syncs + 1

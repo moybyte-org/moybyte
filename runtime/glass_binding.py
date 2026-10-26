@@ -522,7 +522,8 @@ class _Dsi(ctypes.Structure):
                 + [(n, ctypes.c_uint32) for n in ("deferred", "obsolete", "fences",
                                                   "fence_us", "game_n", "game_us")]
                 + [("front", ctypes.c_uint8), ("shows", ctypes.c_uint32),
-                   ("seq", ctypes.c_uint32 * 4), ("rseq", ctypes.c_int32 * 4)])
+                   ("seq", ctypes.c_uint32 * 4), ("rseq", ctypes.c_int32 * 4),
+                   ("last", ctypes.c_int8)])
 
 
 def _dsi_lib():
@@ -534,11 +535,38 @@ def _dsi_lib():
         lib.moy_dsi_present_pending.argtypes = [ctypes.POINTER(_Dsi)]
         lib.moy_dsi_fence.argtypes = [ctypes.POINTER(_Dsi)]
         lib.moy_dsi_show_landed.argtypes = [ctypes.POINTER(_Dsi)]
+        lib.moy_dsi_last.argtypes = [ctypes.POINTER(_Dsi)]
+        lib.moy_dsi_last.restype = ctypes.c_int
+        lib.moy_present_copy_rect.argtypes = [_P, _P] + [ctypes.c_int] * 5
+        lib.moy_present_copy_rect.restype = None
         for f in (lib.moy_dsi_init, lib.moy_dsi_present, lib.moy_dsi_show_landed,
                   lib.moy_dsi_present_pending, lib.moy_dsi_fence):
             f.restype = None
         lib._dsi_sigs = True
     return lib
+
+
+def _copy_rect(ppa, dst, src, W, H, x, y, w, h):
+    """modmoy_glass.c's glass_copy: the rect, clipped to W x H, of `src`
+    into `dst` -- whole rows through ppa.copy where it takes them, else a
+    row copy."""
+    if x < 0:
+        w, x = w + x, 0
+    if y < 0:
+        h, y = h + y, 0
+    w = min(w, W - x)
+    h = min(h, H - y)
+    if w <= 0 or h <= 0:
+        return
+    cp = getattr(ppa, "copy", None) if ppa is not None else None
+    if x == 0 and w == W and cp is not None and cp(dst, src, y * W * 2, h * W * 2):
+        return
+    if len(dst) < W * H * 2 or len(src) < W * H * 2:
+        raise ValueError("copy_last buffers")
+    da = (ctypes.c_char * len(dst)).from_buffer(dst)
+    sa = (ctypes.c_char * len(src)).from_buffer(src)
+    _dsi_lib().moy_present_copy_rect(ctypes.addressof(da), ctypes.addressof(sa),
+                                     W * 2, x, y, w, h)
 
 
 class DsiCompositor:
@@ -606,6 +634,10 @@ class DsiCompositor:
         return None if self._d.pending < 0 else self._d.pending
 
     @property
+    def _last(self):
+        return None if self._d.last < 0 else self._d.last
+
+    @property
     def _pend3(self):
         d = self._d
         return [(d.pend[i], "stamp" if d.kind[i] else "game") for i in range(d.npend)]
@@ -650,6 +682,15 @@ class DsiCompositor:
 
     def present_pending(self):
         _dsi_lib().moy_dsi_present_pending(ctypes.byref(self._d))
+
+    def copy_last(self, x, y, w, h):
+        last = _dsi_lib().moy_dsi_last(ctypes.byref(self._d))
+        if last < 0:
+            return False
+        if last != self._d.back:
+            _copy_rect(self._ppa, self._fbs[self._d.back], self._fbs[last],
+                       self._w, self._h, x, y, w, h)
+        return True
 
     def sync(self):
         _dsi_lib().moy_dsi_fence(ctypes.byref(self._d))
@@ -738,7 +779,8 @@ class _Rot(ctypes.Structure):
                    ("damage", _Rect * 32), ("nstrips", ctypes.c_int),
                    ("strip_moved", ctypes.c_uint8), ("strips", _Rect * 4),
                    ("game", _RotGame), ("stamp", _RotStamp)]
-                + [(n, ctypes.c_uint32) for n in _ROT_METERS])
+                + [(n, ctypes.c_uint32) for n in _ROT_METERS]
+                + [("flushed", ctypes.c_bool), ("flushed_stamp", ctypes.c_bool)])
 
 
 def _rot_lib():
@@ -753,12 +795,13 @@ def _rot_lib():
                            ("moy_rot_strip_moved", [R] + [ctypes.c_int] * 4),
                            ("moy_rot_set_strips", [R, ctypes.POINTER(_Rect), ctypes.c_int]),
                            ("moy_rot_flush", [R]), ("moy_rot_present_pending", [R]),
-                           ("moy_rot_fence", [R])):
+                           ("moy_rot_fence", [R]), ("moy_rot_last", [R])):
             f = getattr(lib, name)
             f.argtypes = args
             f.restype = None
         lib.moy_rot_on_glass.argtypes = [R]
         lib.moy_rot_on_glass.restype = ctypes.c_int
+        lib.moy_rot_last.restype = ctypes.c_int
         for name in ("moy_rot_rect", "moy_unrot_rect"):
             f = getattr(lib, name)
             f.argtypes = [ctypes.c_int] * 7
@@ -970,6 +1013,14 @@ class RotatedCompositor:
     def note_damage(self, x, y, w, h):
         _rot_lib().moy_rot_note_damage(ctypes.byref(self._r), int(x), int(y), int(w),
                                        int(h))
+
+    def copy_last(self, x, y, w, h):
+        last = _rot_lib().moy_rot_last(ctypes.byref(self._r))
+        if last < 0:
+            return False
+        _copy_rect(self._ppa, self._paints[self._r.pi], self._paints[last],
+                   self._w, self._h, x, y, w, h)
+        return True
 
     def flush(self):
         _rot_lib().moy_rot_flush(ctypes.byref(self._r))

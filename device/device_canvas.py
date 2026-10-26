@@ -2599,6 +2599,13 @@ class SystemCanvas(DeviceCanvas):
         # until the next set_font_scale.
         self.font_scale = max(1, int(font_scale))
         DeviceCanvas.__init__(self, comp)
+        # copy_last(x, y, w, h): the rect of the buffer the last frame drew
+        # into, into the one this frame draws into (surface model §14.5), for
+        # a part the last frame painted as this one would. Absent where the
+        # compositor names no such buffer.
+        cl = getattr(comp, "copy_last", None)
+        if cl is not None:
+            self.copy_last = cl
 
     def set_font_scale(self, scale):
         # Called UNGUARDED from console.py (the settings row and the font-scale
