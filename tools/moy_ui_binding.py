@@ -1531,7 +1531,7 @@ def binding():
     leaf_names = _names(lib, "moy_theme_leaf_names", n_leaves)
     enum_arr = (c.c_char_p * max(r.lo + r.hi for r in leaf_rows if r.kind == 2)).in_dll(
         lib, "moy_theme_enum_names")
-    _KINDS = ("colour", "paint", "enum", "int", "num", "bool", "text", "corners")
+    _KINDS = ("colour", "paint", "enum", "int", "num", "bool", "text", "corners", "bits")
     pmodes = ("smooth", "steps", "dither")
     btn_kinds = _names(lib, "moy_theme_btn_kinds", 5)
 

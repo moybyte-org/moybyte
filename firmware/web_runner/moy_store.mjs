@@ -117,8 +117,7 @@ export const ROOTS = [
     { id: "carts", vfs: "/moy/carts", endpoint: "carts.json", dcMin: 1, dcMax: 1 },
     { id: "files", vfs: "/moy/files", endpoint: "files.json", dcMin: 2, dcMax: null },
     { id: "system", vfs: "/moy", endpoint: "console.json", dcMin: null, dcMax: null,
-      top: ["system.json", "achievements.json", "system_icons.moygfx",
-            "system_icons.ver", "shared.moygfx"] },
+      top: ["system.json", "achievements.json", "shared.moygfx"] },
 ];
 
 export function rootById(id) {

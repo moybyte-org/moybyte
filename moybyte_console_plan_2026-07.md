@@ -327,7 +327,7 @@ The teachable moment is always: **the computer is made of editable things, and *
 
 - **Code editor (#3):** full-screen; caret nav, vertical+horizontal scroll, drag-to-scroll, tap-to-place, RUN/SAVE/CLOSE, and an on-screen symbol palette for `= ( ) [ ] { } < > %` (the T-Deck keyboard lacks `=`).
 - **Sprite / paint editor (#4):** `sprites.moygfx` storage (PICO-8 `__gfx__`-style indexed).
-- **IconSheet (#46):** 16×16 themeable system-bar icons; Settings → EDIT ICONS repaints them. The low-risk first slice of §5.5.
+- **IconSheet (#46):** 16×16 themeable system-bar icons; a theme's own are painted in the Editor's theme mode (`docs/look_2026-10.md` step 33). The low-risk first slice of §5.5.
 
 ### 8.2 Editors in progress / planned
 

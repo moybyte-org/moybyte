@@ -397,6 +397,8 @@ def generate_theme(style, t):
                       fb_names.index(sub) if sub is not None else 0,
                       x * 8, y * 8, w * 8, h_ * 8, int(nine), part, st, sub))
     sheet_rows = max(c[4] + c[6] for c in cells)
+    if th["sheet_rows"]["icons"] < 16 * -(-len(_icon_slots()) // 8):
+        raise SystemExit("theme.sheet_rows: icons holds no tile for every icon slot")
     h = ["// Theme packages, format 1 (moy_theme.c): the limits, the derivation",
          "// rules, the readability pairs, MOY64's luminance and the seeds.",
          "#define MOY_THEME_FORMAT %d" % th["format"],
@@ -423,6 +425,7 @@ def generate_theme(style, t):
          "#define MOY_THEME_SHEET_W 128",
          "#define MOY_THEME_SPRITES_MAX_ROWS %d" % th["sheet_rows"]["sprites"],
          "#define MOY_THEME_ICONS_MAX_ROWS %d" % th["sheet_rows"]["icons"],
+         "#define MOY_THEME_SLOT_BITS %d  // a `slots` leaf's icon slots" % SLOT_BITS,
          "#define MOY_THEME_SHEET_BYTES(rows) ((rows) * (MOY_THEME_SHEET_W + 2))",
          "#define MOY_THEME_SPRITE_ROWS %d" % sheet_rows,
          "#define MOY_THEME_SPRITE_SLOTS 16",
@@ -650,9 +653,19 @@ def _moy64():
 
 
 # A look leaf's kind, and a look field's type (moy_theme.h).
-_LEAF_KINDS = ("colour", "paint", "enum", "int", "num", "bool", "text", "corners")
+_LEAF_KINDS = ("colour", "paint", "enum", "int", "num", "bool", "text", "corners", "bits")
 _FIELD_TYPES = ("colour", "paint", "enum", "int", "num", "bool", "text", "corners",
-                "line", "shadow", "tshadow", "ring", "trio")
+                "line", "shadow", "tshadow", "ring", "trio", "slots")
+# A `slots` field's leaves: SLOT_BITS of the icon slots a leaf (a board's
+# small int holds them), as many leaves as the pixel set's slots.txt needs.
+SLOT_BITS = 30
+
+
+def _icon_slots():
+    """The icon slots, in order: the pixel set's slots.txt (moy_ui.c's table
+    and runtime/iconsets.py's SLOTS are held to it)."""
+    with open(os.path.join(ROOT, "native", "moy_ui", "icons", "pixel", "slots.txt")) as f:
+        return [ln.split()[-1] for ln in f if ln.strip() and not ln.startswith("#")]
 
 
 def _look_fields(lk, roles=()):
@@ -708,6 +721,9 @@ def _look_fields(lk, roles=()):
             return [(path, "text", 0, 0, None)]
         if t == "corners":
             return [(path, "corners", 0, 15, 15)]
+        if t == "slots":
+            n = -(-len(_icon_slots()) // SLOT_BITS)
+            return [("%s.%d" % (path, i), "bits", 0, 0, None) for i in range(n)]
         w0, w1 = lk["line_w"]
         o0, o1 = lk["offset"]
         b0, b1 = lk["shadow_blur"]

@@ -110,16 +110,19 @@ def test_appearance_cart_is_versioned_system_app():
             str(folder / "main.py"), "exec")
 
 
+EDIT_THEME = "Edit theme\u2026"           # the door to the Editor's theme mode
+
+
 def test_the_cards_then_the_rows_on_the_handheld_and_the_desk(tmp_path):
     small = _open(_ws(tmp_path / "s"))
-    rows = ["Mode", "Accent", "Tint", "Wallpaper", "Font", "Code font", "Theme file"]
+    rows = ["Mode", "Accent", "Tint", "Wallpaper", "Font", "Code font", EDIT_THEME]
     assert [k for k in small._kinds if not k.startswith("theme ")] == rows
     cards = [k[len("theme "):] for k in small._kinds if k.startswith("theme ")]
     assert cards == small._themes() == ["moy", "blocks", "contrast"]
     wide = _open(_ws(tmp_path / "w", **DESK))
     assert [k for k in wide._kinds if not k.startswith("theme ")] == [
         "Mode", "Accent", "Tint", "Wallpaper", "Window style", "Font", "Code font", "Chrome size",
-        "Theme file"]
+        EDIT_THEME]
     sim = _open(_ws(tmp_path / "b", sys_size=(1024, 600), windowed=True))
     assert "Chrome size" in sim._kinds          # the simulator's desk takes two
 
@@ -399,10 +402,10 @@ def test_every_row_answers_a_tap(tmp_path, kw):
     _frame(ws)
     _tap(ws, app, "theme blocks")
     assert look.theme_name == "blocks"
-    app._ui.focus("Theme file")
+    app._ui.focus(EDIT_THEME)
     _frame(ws)
-    _tap(ws, app, "Theme file")
-    assert look._editing is not None            # the text app holds the file
+    _tap(ws, app, EDIT_THEME)
+    assert ws.editor_app.theme is not None      # the Editor's theme mode holds it
 
 
 def test_the_tap_floor_holds_at_320x240(tmp_path):
@@ -420,9 +423,9 @@ def test_the_tap_floor_holds_at_320x240(tmp_path):
 def test_rows_that_do_not_fit_scroll_to_the_focus(tmp_path):
     ws = _ws(tmp_path, sys_size=(800, 480), font_scale=3)
     app = _open(ws)
-    _focus(ws, app, "Theme file")
+    _focus(ws, app, EDIT_THEME)
     _frame(ws)
-    x, y, w, h = app._ui.box("Theme file")
+    x, y, w, h = app._ui.box(EDIT_THEME)
     bx, by, bw, bh = app.layout.body
     assert by <= y and y + h <= by + bh
 
@@ -469,23 +472,44 @@ def test_a_window_close_writes_a_change_still_settling(tmp_path):
     assert _custom(tmp_path) is not None
 
 
-# -- the theme's file: the editor beside the rows ------------------------------------
+# -- Edit theme…: the theme mode beside the rows -------------------------------------
 
 def _edit(ws, app):
-    _focus(ws, app, "Theme file")
+    _focus(ws, app, EDIT_THEME)
     _press(ws, app, "a")
-    look = ws.look
-    assert look._editing is not None
-    h = look.file_watch(*look._editing)
-    assert h is look
-    return look
+    assert ws.editor_app.theme is not None and ws.menu_view == "theme_config"
+    return ws.look
+
+
+class _Config:
+    """The theme mode's Config as these tests drive it."""
+
+    def __init__(self, doc):
+        self.doc = doc
+        self.ed = doc.ed
+
+    def text(self):
+        return self.ed.text()
+
+    def set_text(self, t):
+        self.ed.set_text(t)
+        self.ed.dirty = True
+
+    def save(self):
+        return self.doc.save_config()
+
+    def dirty(self):
+        return not self.doc.clean("theme_config")
+
+    def draw(self, *_a):
+        self.doc.follow()
 
 
 def _handle(ws):
-    """The text app's editor handle on custom's theme.json."""
-    hs = [h for h in ws.player._editors if h._watch is ws.look]
-    assert hs, "the theme's file opened no watched editor"
-    return hs[-1]
+    """The theme mode's Config over custom's theme.json."""
+    doc = ws.editor_app.theme
+    assert doc is not None, "Edit theme… opened no theme"
+    return _Config(doc)
 
 
 def test_an_editor_save_writes_no_journal_into_the_package(tmp_path):
@@ -623,7 +647,7 @@ def test_name_shows_on_custom_only_and_keeps_it_by_keys(tmp_path, kw):
     assert "Name" not in app._kinds
     _to_custom(ws, app)
     _frame(ws)
-    assert list(app._kinds)[-1] == "Name"
+    assert list(app._kinds)[-2:] == ["Name", EDIT_THEME]
     _name(ws, app)
     _type(ws, app, "BubbleGum!")                # capitals and ! are not the grammar
     assert app.name_text == "ubbleum"

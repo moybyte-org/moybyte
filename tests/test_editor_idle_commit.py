@@ -116,7 +116,7 @@ def test_the_drawing_tabs_wait_longer_than_the_typed_ones(tmp_path):
     cannot be mistaken for a typing gap."""
     ws = _ws(tmp_path)
     assert ws.history.draw_debounce_ms > ws.history.edit_debounce_ms
-    assert DRAW_TABS == ("paint", "map", "scene", "music")
+    assert DRAW_TABS == ("paint", "map", "scene", "music", "theme_sprites")
 
 
 def test_the_long_quiet_period_commits_once(tmp_path):

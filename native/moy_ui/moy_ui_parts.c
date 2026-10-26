@@ -396,6 +396,16 @@ static void ball_sign(pd_t *d, int x, int y, int w, int h, uint16_t c) {
     d->row->st[MOY_ST_N_FILL]++;
 }
 
+// The T-Deck's trackball itself in the cap box (what it picks, rolled and
+// clicked): the ball alone.
+static void ball_only_sign(pd_t *d, int x, int y, int w, int h, uint16_t c) {
+    int k = d->fs, n = h / k;
+    int dia = (n * 7 / 15) | 1;
+    int bx = x + (w - dia * k) / 2, by = y + (h - dia * k) / 2;
+    rrect(d, bx, by, dia * k, dia * k, dia * k / 2, 1, c, 0, 0);
+    d->row->st[MOY_ST_N_FILL]++;
+}
+
 // A gamepad's d-pad pressed left or right in the cap box: its cross, the
 // left and right arms solid, the up and down ones outlined.
 static void dpad_sign(pd_t *d, int x, int y, int w, int h, uint16_t c) {
@@ -645,9 +655,9 @@ int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const m
 
 static moy_ui_box_t on_card_mark(const pd_t *d, moy_ui_box_t b, int first, int last, int *flags,
                                  int *r);
-// The keys a cap draws as a sign: the arrows, enter, the trackball rolled
-// and the d-pad pressed left or right.
-enum { SIGN_ENTER = 4, SIGN_BALL_LR = 5, SIGN_DPAD_LR = 6, SIGNS = 7 };
+// The keys a cap draws as a sign: the arrows, enter, the trackball rolled,
+// the d-pad pressed left or right, and the trackball itself.
+enum { SIGN_ENTER = 4, SIGN_BALL_LR = 5, SIGN_DPAD_LR = 6, SIGN_BALL = 7, SIGNS = 8 };
 static int key_sign(moy_ui_span_t k);
 
 int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
@@ -2160,7 +2170,7 @@ int moy_ui_key_moves(int input, moy_ui_span_t k) {
 
 static int key_sign(moy_ui_span_t k) {
     static const char *const names[SIGNS] = {"left", "right", "up", "down", "enter",
-                                             "ball_lr", "dpad_lr"};
+                                             "ball_lr", "dpad_lr", "ball"};
     for (int i = 0; i < SIGNS; i++) {
         if (span_is(k, names[i])) {
             return i;
@@ -2288,6 +2298,8 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                         ball_sign(&d, sx, y, sw, kh, capi);
                     } else if (sign == SIGN_DPAD_LR) {
                         dpad_sign(&d, sx, y, sw, kh, capi);
+                    } else if (sign == SIGN_BALL) {
+                        ball_only_sign(&d, sx, y, sw, kh, capi);
                     } else if (sign >= 0) {
                         arrow_sign(&d, sx, y, sw, kh, sign, 0, capi);
                     } else {

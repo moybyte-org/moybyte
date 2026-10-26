@@ -276,6 +276,47 @@ def _is_alpha(ch):
     return ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z")
 
 
+def _highlight_json(line):
+    """`_highlight`'s answer for a line of JSON (the theme mode's Config): a
+    key (a string a colon follows) as a builtin, a value's string as a
+    string, a number as a number, true, false and null as keywords."""
+    n = len(line)
+    out = [_HL_TEXT] * n
+    i = 0
+    while i < n:
+        ch = line[i]
+        if ch == '"':
+            j = i + 1
+            while j < n and line[j] != '"':
+                j += 2 if line[j] == "\\" else 1
+            j = min(n, j + 1)
+            k = j
+            while k < n and line[k] == " ":
+                k += 1
+            cl = _HL_BUILTIN if k < n and line[k] == ":" else _HL_STRING
+            while i < j:
+                out[i] = cl
+                i += 1
+            continue
+        if "0" <= ch <= "9" or (ch == "-" and i + 1 < n and "0" <= line[i + 1] <= "9"):
+            while i < n and (("0" <= line[i] <= "9") or line[i] in "-+.eE"):
+                out[i] = _HL_NUMBER
+                i += 1
+            continue
+        if _is_alpha(ch):
+            j = i
+            while j < n and _is_alpha(line[j]):
+                j += 1
+            if line[i:j] in ("true", "false", "null"):
+                while i < j:
+                    out[i] = _HL_KEYWORD
+                    i += 1
+            i = j
+            continue
+        i += 1
+    return out
+
+
 def _highlight(line, lua=False):
     """Return a list of palette indices, one per character of `line` (#24).
     Hand-rolled scanner -- no regex/tokenize, so it runs under MicroPython.
@@ -433,6 +474,10 @@ class CodeLayer:
         proj = self.ws.project
         cart = proj.cart if proj is not None else None
         return cart is not None and _modes.cart_lang(cart) == "lua"
+
+    def _lang(self):
+        """The highlighter's language: "lua" or "python" (a subclass's own)."""
+        return "lua" if self._is_lua() else "python"
 
     def _symbols(self):
         return symbols_for("lua" if self._is_lua() else "python")
@@ -1307,16 +1352,21 @@ class CodeLayer:
                                     t["caret"])
                         else:
                             cv.rect(tx0 + vcol * cell, y, fs, th, t["caret"])
-        # Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1" strip,
-        # the band across the content and its text on the code's column.
         if lay.status_band is not None and ed is not None:
-            issues = "1 issue" if ws.code_err else "No issues"
-            _ui_draw.status_row(cv, ws.theme_colors, lay.status_band, ())
-            _ui_draw.status_row(cv, ws.theme_colors, lay.status_text, (_status_line(
-                ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
-                 str(len(ed.lines)) + " lines", issues), lay.status_text[2], fs),))
+            self._draw_status(cv, lay, ed)
         self._draw_tools(lay, ed, t)             # #89: tools toggle + palette + find bar
         self._draw_symbols()
+
+    def _draw_status(self, cv, lay, ed):
+        """Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1"
+        strip, the band across the content and its text on the code's
+        column."""
+        ws = self.ws
+        issues = "1 issue" if ws.code_err else "No issues"
+        _ui_draw.status_row(cv, ws.theme_colors, lay.status_band, ())
+        _ui_draw.status_row(cv, ws.theme_colors, lay.status_text, (_status_line(
+            ("Ln " + str(ed.row + 1) + ", Col " + str(ed.col + 1),
+             str(len(ed.lines)) + " lines", issues), lay.status_text[2], lay.fs),))
 
     def _current_line(self, cv, lay, y, x0, x1):
         """The current line's mark, the columns [x0, x1) of it (x1 None: to
@@ -1362,16 +1412,17 @@ class CodeLayer:
         gesture the memo exists to make cheap. Retiring the older generation
         leaves the lines still on screen one lookup away and caps the memory at
         what the single larger bound it replaces held."""
-        lua = self._is_lua()
-        if lua is not self._hl_lua:
-            self._hl_lua = lua
+        lang = self._lang()
+        if lang != self._hl_lua:
+            self._hl_lua = lang
             self._hl_cache = {}
             self._hl_old = {}
         runs = self._hl_cache.get(line)
         if runs is None:
             runs = self._hl_old.get(line)
             if runs is None:
-                cols = _highlight(line, lua)
+                cols = (_highlight_json(line) if lang == "json"
+                        else _highlight(line, lang == "lua"))
                 runs = []
                 n = len(line)
                 i = 0

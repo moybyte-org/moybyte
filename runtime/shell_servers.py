@@ -93,7 +93,7 @@ class ThemeServer:
         self.__ws.look.set_chrome_scale(scale)
 
     def edit_file(self, g):
-        """EDIT FILE: the active theme's theme.json in the text app
+        """Edit theme…: the active theme in the Editor's theme mode
         (`Appearance.edit_file`). True when it opened."""
         return self.__ws.look.edit_file()
 

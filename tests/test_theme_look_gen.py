@@ -209,9 +209,8 @@ def test_a_save_through_edit_file_draws_what_a_boot_of_it_draws(tmp_path, desk):
     """Phase 6 step 6: custom's theme.json saved by hand is the same
     in-place install at the next frame -- every cache moves once, idle
     paints nothing after it, and a boot of the file as saved draws the
-    same. The handle's two calls (`file_check`, the write, `file_saved`)
-    are made here directly, so the text app's window is not in the
-    picture."""
+    same. The theme mode's calls (`file_check`, the write, `file_saved`)
+    are made here directly, so the Editor is not in the picture."""
     def boot():
         ws = (build_desktop_ws if desk else build_ws)(tmp_path)
         if ws.look.theme_name != "custom":

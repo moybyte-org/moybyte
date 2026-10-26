@@ -186,6 +186,11 @@ def _index(v):
     return v if v < RGB else nearest_of(v)
 
 
+def _edit_theme():
+    """The door to the Editor's theme mode (docs/look_2026-10.md step 33)."""
+    return "Edit theme\u2026" if ui.has_symbols() else "Edit theme..."
+
+
 def _title(name):
     """A theme's name as its card says it."""
     return name[:1].upper() + name[1:]
@@ -695,13 +700,14 @@ class AppearanceAppLayer:
             if got != cur:
                 self._theme.set_chrome_scale(ch["chromes"][got])
                 self._acted()
-        # the theme's file, and NAME on custom
-        if ui.link("Theme file", "theme.json"):
-            self._theme.edit_file()
-            self._acted()
+        # NAME on custom, then the door to the Editor's theme mode, the last
+        # row: on a seed or a package it makes custom from it first
         if ch["theme"] == "custom":
             if ui.link("Name", "Keep as a theme"):
                 self._open_name()
+        if ui.link(_edit_theme(), "" if ch["theme"] == "custom" else "Makes a copy"):
+            self._theme.edit_file()
+            self._acted()
         ui.group()
 
     def _build(self, th):
@@ -781,9 +787,9 @@ class AppearanceAppLayer:
             b.chrome_cur = chromes.index(ch["chrome"]) if ch["chrome"] in chromes else 0
             b.chrome_words = ["%d%s" % (c, x) for c in chromes]
             kinds["Chrome size"] = "step"
-        kinds["Theme file"] = "link"
         if name == "custom":
             kinds["Name"] = "link"
+        kinds[_edit_theme()] = "link"
         return b
 
     def _accents_offered(self, ch):

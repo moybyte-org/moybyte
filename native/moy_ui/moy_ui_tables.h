@@ -273,7 +273,8 @@ extern const uint16_t moy_ui_glyph_rows[MOY_UI_GLYPHS][MOY_UI_GLYPH_SIZE];
 #define MOY_THEME_SHEET_ICONS 1
 #define MOY_THEME_SHEET_W 128
 #define MOY_THEME_SPRITES_MAX_ROWS 256
-#define MOY_THEME_ICONS_MAX_ROWS 64
+#define MOY_THEME_ICONS_MAX_ROWS 224
+#define MOY_THEME_SLOT_BITS 30  // a `slots` leaf's icon slots
 #define MOY_THEME_SHEET_BYTES(rows) ((rows) * (MOY_THEME_SHEET_W + 2))
 #define MOY_THEME_SPRITE_ROWS 80
 #define MOY_THEME_SPRITE_SLOTS 16
@@ -437,8 +438,8 @@ extern const uint8_t moy_theme_dim_greys[MOY_THEME_DIM_GREYS];
 // The look (docs/look_2026-10.md step 5): the theme model's fields, each
 // one or more leaves; a leaf's kind, its range (an enum's first name and
 // count), its default (MOY_THEME_NONE: silent, the renderer derives it).
-#define MOY_THEME_LEAVES 202
-#define MOY_THEME_LOOK_FIELDS 166
+#define MOY_THEME_LEAVES 206
+#define MOY_THEME_LOOK_FIELDS 167
 #define MOY_THEME_LOOK_GROUPS 30
 #define MOY_THEME_ENUM_NAMES 122
 #define MOY_THEME_BTN_KINDS 5
@@ -479,6 +480,7 @@ enum {
     MOY_THEME_LK_BOOL = 5,
     MOY_THEME_LK_TEXT = 6,
     MOY_THEME_LK_CORNERS = 7,
+    MOY_THEME_LK_BITS = 8,
 };
 enum {
     MOY_THEME_FT_COLOUR = 0,
@@ -494,6 +496,7 @@ enum {
     MOY_THEME_FT_TSHADOW = 10,
     MOY_THEME_FT_RING = 11,
     MOY_THEME_FT_TRIO = 12,
+    MOY_THEME_FT_SLOTS = 13,
 };
 typedef struct { uint8_t kind; int32_t lo, hi, def; } moy_theme_leaf_t;
 typedef struct { const char *path; uint8_t type, n; uint16_t leaf; } moy_theme_field_t;

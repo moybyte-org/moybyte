@@ -511,7 +511,7 @@ static MP_DEFINE_CONST_FUN_OBJ_3(ui_theme_backdrop_obj, ui_theme_backdrop);
 // the look's vocabulary, what theme_look's tuples are in the order of.
 static mp_obj_t ui_theme_look_fields(void) {
     static const char *const kinds[] = {"colour", "paint", "enum", "int", "num", "bool",
-                                        "text", "corners"};
+                                        "text", "corners", "bits"};
     mp_obj_t names = mp_obj_new_tuple(MOY_THEME_LEAVES, NULL);
     mp_obj_t ks = mp_obj_new_tuple(MOY_THEME_LEAVES, NULL);
     for (int i = 0; i < MOY_THEME_LEAVES; i++) {

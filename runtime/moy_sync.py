@@ -446,8 +446,7 @@ FILES_ROOT = Root(
 
 # The console's own documents, the files a board keeps BESIDE its carts
 # folder (moy_carts' sibling stores): the Settings rows and everything else
-# `ws.system` holds, the earned badges, the edited bar icons with their
-# icon-set version, and the shared sprite sheet. A site-mode browser is its own
+# `ws.system` holds, the earned badges and the shared sprite sheet. A site-mode browser is its own
 # console, so it keeps them in its own OPFS the way a board keeps them on its
 # card, and a reload comes back on the same theme, Settings and badges.
 # Left out on purpose: wifi.json (a browser has no radio, and it is a secret),
@@ -455,11 +454,10 @@ FILES_ROOT = Root(
 # (each has its own crash-safe keeper, moy_store.commitInstall /
 # commitWritten), and install/ (staging).
 SYSTEM_ROOT_ID = "system"
-SYSTEM_FILES = ("system.json", "achievements.json", "system_icons.moygfx",
-                "system_icons.ver", "shared.moygfx")
+SYSTEM_FILES = ("system.json", "achievements.json", "shared.moygfx")
 # What crosses between a board and the page it serves: the pull, and the
-# documents a system batch may carry. The edited bar icons and the shared sheet
-# stay on each console in board mode.
+# documents a system batch may carry. The shared sheet stays on each console
+# in board mode.
 SYSTEM_PULL = "/console.json"
 SYSTEM_WIRE_FILES = ("system.json", "achievements.json")
 

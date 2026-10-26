@@ -809,7 +809,7 @@ def _console_dir(tmp_path):
     (top / "files" / "drawings").mkdir(parents=True)
     (top / "system.json").write_text('{"theme": "dusk", "show_fps": false}')
     (top / "achievements.json").write_text('{"unlocked": ["first_open"]}')
-    (top / "system_icons.moygfx").write_bytes(bytes(range(40)))
+    (top / "shared.moygfx").write_bytes(bytes(range(40)))
     (top / "wifi.json").write_text('[{"ssid": "Home", "pw": "secret"}]')
     (top / "installed.json").write_text("{}")
     (top / "system.json.bak").write_text("{}")
@@ -834,7 +834,6 @@ def test_the_system_files_are_the_stores_own_names():
     from runtime import moy_carts
     assert moy_sync.SYSTEM_FILES == (
         moy_carts.SYSTEM_STORE_NAME, moy_carts.ACHIEVEMENTS_STORE_NAME,
-        moy_carts.SYSTEM_ICONS_NAME, moy_carts.SYSTEM_ICONS_VER_NAME,
         moy_carts.SHARED_SHEET_NAME)
     assert moy_carts.WIFI_STORE_NAME not in moy_sync.SYSTEM_FILES
 
@@ -842,8 +841,7 @@ def test_the_system_files_are_the_stores_own_names():
 def test_the_system_watcher_carries_its_named_files_and_nothing_else(tmp_path):
     top = _console_dir(tmp_path)
     w = _system_watcher(top)
-    assert set(w._snap) == {"system.json", "achievements.json",
-                            "system_icons.moygfx"}
+    assert set(w._snap) == {"system.json", "achievements.json", "shared.moygfx"}
     assert not w.sweep(), "the store as seeded has nothing to tell"
     for name in ("wifi.json", "installed.json", "system.json.bak"):
         p = top / name
@@ -863,15 +861,15 @@ def test_the_system_watcher_carries_its_named_files_and_nothing_else(tmp_path):
                            "t": '{"theme": "night", "show_fps": false}'}]
 
 
-def test_an_edited_icon_sheet_crosses_as_its_bytes(tmp_path):
+def test_the_shared_sheet_crosses_as_its_bytes(tmp_path):
     top = _console_dir(tmp_path)
     w = _system_watcher(top)
-    p = top / "system_icons.moygfx"
+    p = top / "shared.moygfx"
     p.write_bytes(bytes(range(50)))
     _bump_mtime(p)
     w.sweep()
     import base64
-    assert w.take() == [{"p": "system_icons.moygfx",
+    assert w.take() == [{"p": "shared.moygfx",
                          "b": base64.b64encode(bytes(range(50))).decode()}]
 
 

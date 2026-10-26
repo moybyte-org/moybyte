@@ -13,7 +13,6 @@
 #   -- block source            load_blocks, save_blocks
 #   -- persistent cart memory  load_pmem, save_pmem
 #   -- shared sprite sheet     load_shared_sheet, save_shared_sheet
-#   -- system icon theme       load_system_icons
 #   -- known WiFi networks     load_wifi, save_wifi, remember_wifi
 #   -- system settings         load_system, save_system
 #   -- achievements            load_achievements, save_achievements
@@ -1507,57 +1506,6 @@ def save_shared_sheet(hex_text, root=CARTS_DIR):
     """Persist the shared sprite sheet's hex -- it's the highest-value shared
     asset, so the atomic sibling write matters most here."""
     _write_sibling(root, SHARED_SHEET_NAME, hex_text)
-
-
-# --- system icon theme (the unified top bar, Stage 1) -----------------------
-#
-# The top-bar icons render from an EDITABLE 16x16 IconSheet rather than hardcoded
-# glyphs (so the bar is themeable). Its theme persists to a single system_icons.moygfx
-# that lives BESIDE the carts dir (a sibling of `root`, like shared.moygfx) -- it is
-# system state, not tied to any cart. Same PICO-8 __gfx__-style hex format as the
-# sprite sheets. NOT seeded eagerly: a missing file means "use the baked default
-# theme" (load returns None), so the absent-file case is the common one. A save only
-# happens once on-device icon editing lands (Stage 2).
-
-SYSTEM_ICONS_NAME = "system_icons.moygfx"
-SYSTEM_ICONS_VER_NAME = "system_icons.ver"   # the saved theme's icon-set version (#47-style)
-
-
-def system_icons_path(root=CARTS_DIR):
-    """Well-known path of the system icon theme."""
-    return _sibling_path(root, SYSTEM_ICONS_NAME)
-
-
-def system_icons_version_path(root=CARTS_DIR):
-    """Sidecar holding the icon-set version the saved theme was written at (a sibling
-    of system_icons.moygfx). Lets a newer baked icon set re-seed a stale saved theme."""
-    return _sibling_path(root, SYSTEM_ICONS_VER_NAME)
-
-
-def load_system_icons(root=CARTS_DIR):
-    """Read the system icon theme's hex (PICO-8 __gfx__-style), or None if it has
-    never been saved -- in which case the caller uses the baked default IconSheet.
-    Caller turns the hex into an IconSheet via IconSheet.from_hex."""
-    return _read_sibling(root, SYSTEM_ICONS_NAME)
-
-
-def load_system_icons_version(root=CARTS_DIR):
-    """The icon-set version of the saved theme (0 when absent/unreadable, so a
-    pre-versioning theme always counts as stale and is re-seeded by a versioned set --
-    mirrors _cart_version)."""
-    try:
-        return int(_read(system_icons_version_path(root)).strip())
-    except (OSError, ValueError, AttributeError):
-        return 0
-
-
-def save_system_icons(hex_text, root=CARTS_DIR, version=0):
-    """Persist the system icon theme's hex (Stage 2 editing / a default re-seed) plus
-    its version sidecar. Ensures the parent dir exists. Written atomically (like the
-    shared sheet) -- a shared system asset whose interrupted write must never truncate."""
-    ensure_dirs(root)
-    _write_atomic(system_icons_path(root), hex_text)
-    _write_atomic(system_icons_version_path(root), str(int(version)))
 
 
 # --- known WiFi networks (system credential store, #38) ---------------------

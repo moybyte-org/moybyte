@@ -404,7 +404,7 @@ RETIRED_VER_NAME = "retired.ver"
 
 
 def retired_version_path(root=CARTS_DIR):
-    """Sidecar (a sibling of the carts dir, like system_icons.ver) holding the
+    """Sidecar (a sibling of the carts dir, like shared.moygfx) holding the
     RETIRED generation this store has already been swept for."""
     return _sibling_path(root, RETIRED_VER_NAME)
 

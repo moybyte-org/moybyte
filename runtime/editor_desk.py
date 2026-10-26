@@ -53,7 +53,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # layout its `relayout` builds (the window's layout context captures the same).
 _OWNERS = {"cards": ("cards_layer", "layout"), "blocks": ("block_ui", "block_layout"),
            "paint": ("paint_layer", "layout"), "map": ("map_ui", "layout"),
-           "scene": ("scene_ui", "layout"), "music": ("music_ui", "layout")}
+           "scene": ("scene_ui", "layout"), "music": ("music_ui", "layout"),
+           "theme_config": ("theme_config_layer", "layout"),
+           "theme_sprites": ("theme_sprites_layer", "layout")}
 
 # The Editor tabs whose desk pane is drawn here on the verbs over the tab's
 # editor core, not by the tab's own surface: the Sound pane.
@@ -63,12 +65,13 @@ _ON_VERBS = ("music",)
 # before anything else (Sprite, Map and Scene their `body_fill`, Code its
 # `cls`, Settings its `ui.page`): their card is drawn down to the header
 # only, its body never seen (tests/test_editor_desk.py holds it).
-_FILLS_BODY = ("paint", "map", "scene", "code", "cards")
+_FILLS_BODY = ("paint", "map", "scene", "code", "cards", "theme_config", "theme_sprites")
 
 # Which workspace shows an Editor tab, for a tab opened from elsewhere (a
 # crash's throw to Code, Files opening a sprite sheet).
 _HOME = {"cards": "settings", "code": "code", "blocks": "code", "paint": "art",
-         "map": "art", "scene": "world", "music": "sound"}
+         "map": "art", "scene": "world", "music": "sound",
+         "theme_config": P.THEME, "theme_sprites": P.THEME}
 
 # The tools a pane's header carries before its grow, right to left.
 _HEAD_TOOLS = {"paint": (("rotate", "Rotate\tR", "rot"), ("flip", "Flip\tF", "fliph")),
@@ -148,8 +151,25 @@ class EditorDesk(Layer):
     # -- where it applies -------------------------------------------------------
 
     def active(self):
-        """Whether the Editor shows workspaces: a desk and an open cart."""
-        return _lb.metric_class() == _lb.DESK and self.ws.cart is not None
+        """Whether the Editor shows workspaces: a desk, and an open cart or a
+        theme in the Editor's theme mode."""
+        return _lb.metric_class() == _lb.DESK and (
+            self.ws.cart is not None or self.ws.editor_app.theme is not None)
+
+    def theme_shown(self, on):
+        """The theme mode opened (`on`) or left: its one workspace, Config
+        beside Sprites, else the workspace the cart had."""
+        if on and self.key != P.THEME:
+            self._was = self.key
+            self.key = P.THEME
+        elif not on and self.key == P.THEME:
+            self.key = getattr(self, "_was", None) or "settings"
+        else:
+            return
+        self.grown = None
+        self._arr = None
+        self._placed = None
+        self._shown = None
 
     def _unit(self):
         return max(1, _lb.chrome_size(self.ws.look.effective_font_scale())
@@ -230,7 +250,7 @@ class EditorDesk(Layer):
     def switch(self, key):
         """Show workspace `key`. The panes left behind that hold an edit owe
         their commit (`EditorApp.commit_later`); focus lands where it was."""
-        if key == self.key or key not in P.KEYS:
+        if key == self.key or key not in P.KEYS or self.key == P.THEME:
             return False
         app = self.ws.editor_app
         for pane, _r, _p in self.panes():
@@ -249,6 +269,8 @@ class EditorDesk(Layer):
         return True
 
     def step(self, d):
+        if self.key not in P.KEYS:
+            return False
         i = (P.KEYS.index(self.key) + d) % len(P.KEYS)
         return self.switch(P.KEYS[i])
 

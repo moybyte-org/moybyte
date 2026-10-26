@@ -90,32 +90,16 @@ def test_default_icon_theme_paints_every_chrome_icon():
         assert any(p for p in img.pix), "%s should not be a blank tile" % kind
 
 
-def test_default_theme_loads_when_system_icons_absent(tmp_path):
-    """No system_icons.moygfx on disk => the workstation falls back to the baked default
-    IconSheet (a 16x16 themeable sheet, not None)."""
-    from runtime import moy_carts
-    carts_dir = str(tmp_path / "carts")
-    moy_carts.ensure_dirs(carts_dir)
-    assert moy_carts.load_system_icons(carts_dir) is None     # nothing saved
+def test_the_shells_icon_sheet_is_baked(tmp_path):
+    """The workstation's IconSheet is the baked default (a 16x16 sheet, not
+    None), whatever the store holds: a theme's own icons are its pixel
+    tiles, never a file beside the carts."""
+    from runtime import chrome as _chrome
     ws = _ws(tmp_path)
     assert ws.look.icon_sheet is not None
     assert ws.look.icon_sheet.TILE == 16
     assert ws.look.icon_sheet.count == 32
-
-
-def test_system_icons_load_save_round_trip(tmp_path):
-    """load/save_system_icons round-trip the theme hex through a file beside the carts
-    dir (mirrors shared.moygfx)."""
-    from runtime import moy_carts
-    from runtime import chrome as _chrome
-    carts_dir = str(tmp_path / "carts")
-    moy_carts.ensure_dirs(carts_dir)
-    hexs = _chrome._default_icon_sheet().to_hex()
-    moy_carts.save_system_icons(hexs, carts_dir)
-    assert moy_carts.load_system_icons(carts_dir) == hexs
-    # And a workstation built over that store loads the saved theme (not the default).
-    ws = _ws(tmp_path)
-    assert ws.look.icon_sheet.to_hex() == hexs
+    assert ws.look.icon_sheet.to_hex() == _chrome._default_icon_sheet().to_hex()
 
 
 # -- the bar renders without error on both screens at 18px ------------------
@@ -438,31 +422,6 @@ def test_cart_bar_blit_strip_used_each_frame(tmp_path):
         ws._dirty = True                          # crashed frames are static unless dirty
         drv.frame(1 / 30)
     assert calls[0] == 4, "the bar should blit its cached strip once per frame"
-
-
-def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
-    """A saved icon theme older than _ICON_VERSION is re-seeded to the baked default at
-    load (so shipped icon changes land on an already-themed device/desktop without a
-    manual wipe, #47-style); a theme stamped at the current version is kept (a user's
-    EDIT ICONS edit survives until the next bump)."""
-    from runtime import chrome as _chrome
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    store, root = ws.carts_store, ws.carts_root
-    default_hex = _chrome._default_icon_sheet().to_hex()
-    other = ("f" if default_hex[0] != "f" else "0") + default_hex[1:]   # valid but different
-    assert other != default_hex
-
-    # STALE (version 0 < _ICON_VERSION): re-seeded to the baked default, version stamped.
-    store.save_system_icons(other, root, 0)
-    ws.look.load_icon_sheet()
-    assert ws.look.icon_sheet.to_hex() == default_hex
-    assert store.load_system_icons_version(root) == _chrome._ICON_VERSION
-
-    # CURRENT (>= _ICON_VERSION): the saved theme is kept untouched.
-    store.save_system_icons(other, root, _chrome._ICON_VERSION)
-    ws.look.load_icon_sheet()
-    assert ws.look.icon_sheet.to_hex() == other
 
 
 # -- the zoned bar (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46): the

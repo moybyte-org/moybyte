@@ -648,7 +648,7 @@ TASKBAR (theming phase 6's last step, deferrable) edits the live bar, writes
 the edited bars into the theme's `layout`, making the theme `custom` first
 when it is a seed or an installed package, and clears this row, so what was
 edited is what shows; until it lands a layout is edited through Appearance's
-EDIT FILE (`docs/theming_2026-09.md` §9, phase 6).
+Edit theme…, the Editor's theme mode (`docs/look_2026-10.md` step 33).
 
 **Precedence, in one function.** `Appearance.layout()` (`runtime/appearance.py`,
 `ws.look`) resolves the picked package's `bars` if the row is set and

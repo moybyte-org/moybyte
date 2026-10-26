@@ -645,8 +645,67 @@ def _tool_cart(g, ws):
     ws.run(ws.project, ws.launcher_layer)
 
 
+# The Editor's theme mode (GAPS 56, rounds/round17.py's theme_*): the door,
+# Config on the copy just made (its caret on line 4, column 24) or on the
+# file once saved, Sprites on Home with Play already in pixels and the
+# cursor on column 6, row 3, and Home painted there in red.
+THEME_CUR = (6, 3)
+
+
+def _theme_door(g, ws):
+    ws.open_app(ws._apps_by_id["appearance"])
+    _app(ws, "appearance").show_row("Edit theme\u2026")
+
+
+def _theme(tab, copied=True, edited=False):
+    def setup(g, ws):
+        desk = getattr(ws.wm, "mode", None) == "desktop"
+        if desk:
+            ws.open_desk()
+        ws.open_app(ws._apps_by_id["appearance"])
+        _settle(g, ws, 2)
+        assert ws.look.edit_file()
+        doc = ws.editor_app.theme
+        if not copied:
+            doc.note = None
+        if desk:
+            _settle(g, ws, 2)
+            win = ws.wm._wins["menu"]
+            if win.full():
+                ws.wm._toggle_max(win)
+            dx, dy, dw, dh = ws.wm._desk_rect()
+            _place(ws, "menu", dx, dy, dw, dh)
+        play = _iconsets_slot("play")
+        doc._set_tile(play, doc.seed(play))
+        doc.flags[play] = 1
+        ws.look.preview_pixels(doc.sheet, doc.flags)
+        doc.cur[:] = THEME_CUR
+        ed = doc.ed
+        ed.row, ed.col = (11, 31) if desk else (3, 24)
+        if edited:
+            layer = ws.theme_sprites_layer
+            layer._press(doc, THEME_CUR[0], THEME_CUR[1])
+            layer._release(doc)
+        ws.editor_app.theme_tab("theme_sprites" if tab == "sprites" else "theme_config")
+        if desk:
+            _settle(g, ws, 2)
+    return setup
+
+
+def _iconsets_slot(name):
+    from runtime import iconsets
+    return iconsets.SLOT[name]
+
+
 # The scenes of step 33 the shell draws: screen -> (config, set up).
 OLD_LOOK = {
+    "handheld_theme-door": (HANDHELD, _theme_door),
+    "handheld_theme-config": (HANDHELD, _theme("config")),
+    "handheld_theme-sprites": (HANDHELD, _theme("sprites")),
+    "handheld_theme-sprites-edited": (HANDHELD, _theme("sprites", edited=True)),
+    "handheld_theme-config-s3": (S3, _theme("config", copied=False)),
+    "handheld_theme-sprites-s3": (S3, _theme("sprites")),
+    "desktop_theme-editor": (DESK, _theme("sprites", copied=False, edited=True)),
     "handheld_tool-bar-s3": (S3, _tool_cart),
     "desktop_tool-bar": (CONSOLE, _tool_cart),
     "handheld_code-find": (HANDHELD, _code_overlay("find")),

@@ -12,8 +12,9 @@
   9-slice and its title buttons through the frame; an empty cell is no
   sprite and a state falls back along the chain.
 * The look: a theme's sheet loads with it and goes with it, an accent
-  recolours a sprite with no new file, the bar takes the theme's icons under
-  the user's, and the sheets travel with `custom` and NAME….
+  recolours a sprite with no new file, the slots its look's
+  `icons.pixel_slots` names draw from its own tiles, and the sheets travel
+  with `custom` and NAME….
 """
 
 import json
@@ -394,10 +395,11 @@ def test_the_theme_brings_its_sheets_and_takes_them_away(tmp_path):
     _put(ws)
     ws.look.set_theme("sprig")
     assert ws.look.theme_name == "sprig" and all(moy_ui.sheet_set())
-    icons = (FIXTURE / "icons.moygfx").read_text().strip()
-    assert ws.look.icon_sheet.to_hex() == icons
+    assert ws.look.pixel_sheet is not None and ws.look.pixel_slots is None
+    assert ws.look.icon_sheet.to_hex() == default, "the shell's own sheet is its own"
     ws.look.set_theme("moy")
     assert not any(moy_ui.sheet_set())
+    assert ws.look.pixel_sheet is None
     assert ws.look.icon_sheet.to_hex() == default
     # a sheet that will not load leaves the parts on their surfaces
     (Path(ws.carts_root) / "sprig.moy" / "parts.moygfx").write_bytes(b"not hex")
@@ -406,21 +408,38 @@ def test_the_theme_brings_its_sheets_and_takes_them_away(tmp_path):
     assert ws.look.theme_name == "sprig" and not any(moy_ui.sheet_set())
 
 
-def test_the_users_icons_win_and_the_themes_are_never_saved_as_theirs(tmp_path):
+def test_the_slots_its_look_names_draw_from_its_tiles(tmp_path):
+    """`icons.pixel_slots` names the slots a theme draws from its own tiles
+    (its `icons` sheet in the pixel set's shape), over its icon set: those
+    alone, in its colours, at a whole scale."""
+    from runtime import iconsets
     ws = build_desktop_ws(tmp_path)
-    _put(ws)
-    ws.look.set_theme("sprig")
-    icons = (FIXTURE / "icons.moygfx").read_text().strip()
-    ws.look.save_icons()                     # EDIT ICONS left with no edit
-    assert ws.carts_store.load_system_icons(ws.carts_root) in (None, "")
-    sheet = ws.look.icon_sheet
-    sheet.pset(0, 0, 3)                      # an edit: the user's from now on
-    ws.look.save_icons()
-    mine = sheet.to_hex()
-    assert ws.carts_store.load_system_icons(ws.carts_root) == mine != icons
+    dst = Path(ws.carts_root) / "tiles.moy"
+    shutil.copytree(FIXTURE, dst)
+    (dst / "theme.json").write_text(json.dumps({
+        "format": 2, "name": "tiles", "icons": "icons.moygfx",
+        "look": {"icons": {"kind": "smooth", "set": "default", "pixel_slots": ["home"]}}}))
+    sheet = iconsets.blank_sheet()
+    ox, oy = sheet.tile_origin(iconsets.SLOT["home"])
+    for y in range(16):
+        for x in range(16):
+            sheet.pset(ox + x, oy + y, 8)
+    (dst / "icons.moygfx").write_text(sheet.to_hex())
+    ws.carts.rescan()
+    ws.look.set_theme("tiles")
+    assert ws.look.theme_name == "tiles"
+    flags = ws.look.pixel_slots
+    assert flags is not None and [i for i in range(len(flags)) if flags[i]] == [
+        iconsets.SLOT["home"]]
+    assert ws.look.pixel_image("home") is not None
+    assert ws.look.pixel_image("wifi") is None
+    cv = make_system_canvas(40, 40)
+    cv.cls(BG)
+    assert ws.draw_icon("home", (4, 4, 32, 32), 7, cv)
+    got = indices_of(cv)
+    assert got[4 * 40 + 4] == 8 and got[35 * 40 + 35] == 8, "a whole 2x tile"
     ws.look.set_theme("moy")
-    ws.look.set_theme("sprig")
-    assert ws.look.icon_sheet.to_hex() == mine
+    assert ws.look.pixel_image("home") is None
 
 
 def test_the_sheets_travel_with_custom_and_name(tmp_path):

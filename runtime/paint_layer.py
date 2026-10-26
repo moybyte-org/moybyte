@@ -3,28 +3,23 @@
 #   -- the tool row    PICO-8's tools, the more menu's operations, their keys
 #   PaintLayout        responsive paint-editor geometry
 #   PaintLayer         the paint editor content layer: draw, strokes, keys
-#   ThemeLayer         the icon-theme editor (EDIT ICONS)
-"""The sprite/icon PAINT editor (#4/#30), extracted from Workstation
+"""The sprite PAINT editor (#4/#30), extracted from Workstation
 (runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 
-ONE renderer/input serves BOTH sheets (so the theme chunk reuses it, no duplication):
-  * menu_view == "paint"  -> edits the cart's SpriteSheet   (ws.project.sheet)
-  * menu_view == "theme"  -> edits the system IconSheet     (ws.look.icon_sheet, EDIT ICONS)
-The active editor is `ws.paint` (a PaintEditor over whichever sheet); `ws._editing_icons`
-selects the mode (which sheet, where CLOSE returns/commits, GET/PUT hidden). SAVE is GONE
-(#111, owner decision 2026-07-21): there is no SAVE button anywhere in the editor -- CLOSE
-hard-commits the open sheet on its way out (paint's cart-sprite CLOSE runs ws._leave_menu,
-which is EditorApp.leave -- PLAY, a hard-commit trigger now; the theme's CLOSE is
-ThemeLayer.leave, which commits directly since it has no PLAY of its own), and the idle-
-typing autosave-commit + every other tab-leaving exit path (a tab switch, PROJECTS, a
-window/context-X, a workspace swap, going home) commit it too.
+It edits the cart's SpriteSheet (ws.project.sheet) through `ws.paint` (a PaintEditor).
+SAVE is GONE (#111, owner decision 2026-07-21): there is no SAVE button anywhere in the
+editor -- CLOSE hard-commits the sheet on its way out (ws._leave_menu, which is
+EditorApp.leave -- PLAY, a hard-commit trigger now), and the idle-typing autosave-commit +
+every other tab-leaving exit path (a tab switch, PROJECTS, a window/context-X, a workspace
+swap, going home) commit it too. A theme's icons are the Editor's theme mode's
+(runtime/theme_editor.py).
 
-Boundary (the anti-spaghetti line, per the doc): the SHEETS + the current-editor handle
-+ the persistence verbs stay on Workstation -- `ws.project.sheet` / `ws.look.icon_sheet` (single
-source of the pixels), `ws.paint` (the PaintEditor handle, device/test-pinned like
-ws.editor), `ws._editing_icons` / `ws.paint_status` (lifecycle mode/status), and
-`ws.save_sprites` / `ws.look.save_icons` / `ws.share_tile_get` / `ws.share_tile_put` (cart/
-system state the device + tests pin). PaintLayer READS those and DISPATCHES to them; it
+Boundary (the anti-spaghetti line, per the doc): the SHEET + the current-editor handle
++ the persistence verbs stay on Workstation -- `ws.project.sheet` (single source of the
+pixels), `ws.paint` (the PaintEditor handle, device/test-pinned like ws.editor),
+`ws.paint_status` (status), and `ws.save_sprites` / `ws.share_tile_get` /
+`ws.share_tile_put` (cart state the device + tests pin). PaintLayer READS those and
+DISPATCHES to them; it
 owns only the paint-UI: the DRAW, the grid/palette/button hit-testing, and the drag-
 stroke continuity state (_paint_drag). The paint-only constants live here (single source;
 console.py imports them back so tests + tools resolve console._PG_X0 / _PG_SPAN / ...).
@@ -32,15 +27,8 @@ console.py imports them back so tests + tools resolve console._PG_X0 / _PG_SPAN 
 `ui.rect_in`, imported directly;
 the shared draw toolkit (ws._btn/_icon_btn) stays on Workstation.
 
-The icon-theme editor (EDIT ICONS) is the same paint flow over the system icon sheet,
-so `ThemeLayer` (below) lives here too: it owns the theme lifecycle + mode flag and
-delegates all the editing to the shared PaintLayer.
-
 Stage 4 (#46 zoned bar): PaintLayer.draw() calls ws.bar_layer._draw_status_strip("menu")
-LAST (chrome over content) -- ThemeLayer has its OWN draw(), so this only ever fires for
-the cart-sprite "paint" tab, never EDIT ICONS. handle_pointer IS shared with ThemeLayer,
-so its bar-tap check is guarded on menu_view == "paint" (a theme-editor tap must reach
-the grid, not the Editor's tab ladder).
+LAST (chrome over content).
 
 Responsive (#39 step 3): the paint editor is SYSTEM-domain now -- it draws on the
 reflowed system canvas at the panel's native size via `PaintLayout`, whose
@@ -60,13 +48,6 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime.editor_map import checker as _checker
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 from editors import PaintEditor, KeyEdge, _pe_line
-
-# `default_icon_pixels` is the icon editor's per-slot RESET (#90) -- chrome.py owns
-# the baked default art, PaintEditor.reset_tile stays sheet-agnostic.
-try:
-    from chrome import default_icon_pixels
-except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
-    from runtime.chrome import default_icon_pixels
 
 try:
     from layout_base import (LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H,
@@ -433,8 +414,7 @@ class PaintLayout(LayoutBase):
             rects.append((x, fy, w_, bh))
             x += w_ + g2
         self.get_btn, self.put_btn, self.files_btn = rects
-        # The icon editor (EDIT ICONS) has no bar to leave by: its Close
-        # ends the row.
+        # Without a look the tab's Close ends the row.
         clw = _ui_draw.print_width("Close", fs) + 2 * (12 if desk else 5 * fs)
         self.close_btn = (rx + rw - clw, fy, clw, bh)
         self.status_xy = (x, fy + (bh - line) // 2)
@@ -450,7 +430,7 @@ class PaintLayer:
     gone -- the panel always covered every pixel of it anyway). draw = the paint UI
     at the PaintLayout geometry; handle_pointer routes taps to the grid/palette/
     buttons in SYSTEM coords; keyboard is no-op (paint is pointer-driven). Reads
-    ws.paint / ws.project.sheet / ws._editing_icons and dispatches SAVE/GET/PUT/
+    ws.paint / ws.project.sheet and dispatches SAVE/GET/PUT/
     CLOSE to Workstation."""
 
     id = "paint"
@@ -508,8 +488,8 @@ class PaintLayer:
                                       keys=self._keys())
 
     def reset_drag(self):
-        """Clear the drag-stroke origin (called by ws lifecycle: open_theme /
-        _leave_theme) so a new paint session's first stroke starts fresh."""
+        """Clear the drag-stroke origin so a new paint session's first stroke
+        starts fresh."""
         self._paint_drag = None
         self._fill_fired = False
         self._shape_start = None
@@ -524,14 +504,11 @@ class PaintLayer:
         # step 3). The frozen-cart backdrop (_draw_menu_backdrop) is gone: the body
         # fill + the bar cover every pixel it ever painted, so the pixels are
         # identical and the cart's _draw() no longer runs on editor frames. The game
-        # canvas still gets its state reset (degradation shares one canvas). (The
-        # theme variant clears to a black field first in ThemeLayer.draw(), then
-        # calls _draw_paint.)
+        # canvas still gets its state reset (degradation shares one canvas).
         self.ws._reset_canvas_state()
         self._draw_paint()
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
-        # PLAY. ThemeLayer has its OWN draw() (doesn't call this one), so this is
-        # unconditionally the cart-sprite "paint" tab, never the icon theme editor.
+        # PLAY.
         self.ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
@@ -619,15 +596,11 @@ class PaintLayer:
         ws = self.ws
         # SYSTEM coords (#39 step 3): the editor draws on the system canvas at
         # native size, so it hit-tests the raw pointer -- no _game_xy translation.
-        # The Editor's lent zone (Stage 4): ONLY for the cart-sprite "paint" tab --
-        # this handler is reused by ThemeLayer (EDIT ICONS) over the SAME grid/
-        # buttons, which has no bar at all, so guard on menu_view rather than
-        # unconditionally claiming the tap (a stray theme-editor tap must reach the
-        # paint grid, not the Editor's tab ladder).
-        if click and ws.menu_view == "paint" and ws.bar_layer.handle_bar_tap("menu", px, py):
+        # The Editor's lent zone (Stage 4) claims its taps first.
+        if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             self._pop = False
             return True
-        if click and not self._pop and not ws._editing_icons:
+        if click and not self._pop:
             k = self._flag_at(px, py)
             if k is not None:
                 self._toggle_flag(k)
@@ -646,8 +619,7 @@ class PaintLayer:
         # no fresh click keeps drawing on the grid so press-and-move draws a continuous
         # stroke / grows a shape's preview -- the same path for a host mouse drag and a
         # device touch drag (both = pointer.down + moving position). Releasing commits
-        # the stroke/shape/selection (#30/#90). The theme editor (EDIT ICONS) reuses
-        # this exact path over the icon sheet.
+        # the stroke/shape/selection (#30/#90).
         if click:
             self._paint_click(px, py)
         elif ws.pointer.down:
@@ -818,25 +790,18 @@ class PaintLayer:
             self._open_pickers()               # the sprite and its size, a popover
         elif _in(px, py, lay.size_btn):        # cycle 1x1 / 2x2 / 3x3 (#30)
             pe.cycle_size()
-        elif _in(px, py, lay.get_btn) and ws._editing_icons:
-            # RESET (icon editor only, #90): the shared sheet's GET has no meaning
-            # here, so this slot repurposes to restore the SELECTED icon slot's
-            # pixels to its built-in default -- one undo step, other slots untouched.
-            pe.reset_tile(pe.n, default_icon_pixels(pe.n))
-        elif _in(px, py, lay.get_btn) and not ws._editing_icons:
+        elif _in(px, py, lay.get_btn):
             ws.share_tile_get()              # import the tile from the shared sheet
-        elif _in(px, py, lay.put_btn) and not ws._editing_icons:
+        elif _in(px, py, lay.put_btn):
             ws.share_tile_put()              # save the tile to the shared sheet
         elif (getattr(lay, "files_btn", None) is not None
-              and _in(px, py, lay.files_btn) and not ws._editing_icons):
+              and _in(px, py, lay.files_btn)):
             ws.send_sprites_to_files()       # export the sheet to files/sprites/ (#108)
-        elif _in(px, py, lay.close_btn) and (ws._editing_icons or not lay.look):
-            # CLOSE returns to Settings (theme editor, hard-committing on the way --
-            # ThemeLayer.leave -- since it has no PLAY of its own) or runs+leaves to
-            # the cart (PAINT: ws._leave_menu is EditorApp.leave, PLAY, itself now a
-            # hard-commit trigger, #111 -- no SAVE tap exists anymore either way).
+        elif _in(px, py, lay.close_btn) and not lay.look:
+            # CLOSE runs+leaves to the cart (ws._leave_menu is EditorApp.leave, PLAY,
+            # itself a hard-commit trigger, #111 -- no SAVE tap exists anymore).
             # #184: deferred -- the commit+run happens behind the next paint.
-            ws.defer(ws._leave_theme if ws._editing_icons else ws._leave_menu)
+            ws.defer(ws._leave_menu)
 
     # -- tool row (#90) ------------------------------------------------------
 
@@ -997,8 +962,7 @@ class PaintLayer:
         self._sync_layout()
         lay = self.layout
         pe = ws.paint
-        # Edit the editor's OWN sheet -- the cart sprites for PAINT, the system icon
-        # sheet for the theme editor (EDIT ICONS) -- so one renderer serves both.
+        # Edit the editor's OWN sheet (the cart's sprites).
         sheet = pe.sheet if pe is not None else ws.project.sheet
         if lay.look:
             self._draw_look(sheet)
@@ -1026,7 +990,7 @@ class PaintLayer:
         # No dirty star: SAVE (the button and the concept) is gone (#111) -- autosave
         # commits pending edits within seconds, so "unsaved" is not a state a kid can
         # act on; write FAILURES surface loudly via ws.cart_error instead.
-        title = ("ICONS  TILE " if ws._editing_icons else "PAINT  SPR ") + str(pe.n if pe else 0)
+        title = "PAINT  SPR " + str(pe.n if pe else 0)
         cv.print(title, lay.title_xy[0], lay.title_xy[1],
                  th["ink"], 1)
         if pe is None or sheet is None:
@@ -1088,19 +1052,12 @@ class PaintLayer:
                         sheet.pget(ox + lx, oy + ly))
         cv.rectb(ppx, ppy, dim * ps, dim * ps, NAMES["dark_grey"])
         # Cross-cart sprite reuse (#18): GET pulls this tile out of the shared sheet,
-        # PUT pushes it in. Hidden in the theme editor -- the shared sheet is 8x8 cart
-        # sprites, not the 16x16 icon theme, so GET/PUT don't apply there; its freed
-        # GET slot repurposes to RESET (#90), the only icon-only control.
-        if ws._editing_icons:
-            # "rotate"'s circular-arrow glyph doubles as a refresh/restore cue here --
-            # the same reuse idiom as "fill" serving both the bucket and map FLOOD.
-            ws._icon_btn("rotate", "RESET", lay.get_btn, NAMES["dark_purple"], cv)
-        else:
-            ws._icon_btn("get", "GET", lay.get_btn, NAMES["indigo"], cv)
-            ws._icon_btn("put", "PUT", lay.put_btn, NAMES["dark_green"], cv)
-            fbtn = getattr(lay, "files_btn", None)
-            if fbtn is not None:             # export the sheet to files/sprites/ (#108)
-                ws._btn("FILE", fbtn, NAMES["dark_blue"], cv)
+        # PUT pushes it in.
+        ws._icon_btn("get", "GET", lay.get_btn, NAMES["indigo"], cv)
+        ws._icon_btn("put", "PUT", lay.put_btn, NAMES["dark_green"], cv)
+        fbtn = getattr(lay, "files_btn", None)
+        if fbtn is not None:                 # export the sheet to files/sprites/ (#108)
+            ws._btn("FILE", fbtn, NAMES["dark_blue"], cv)
         if ws.paint_status:
             cv.print(_ui_draw.print_cut(ws.paint_status, lay.status_w, lay.fs),
                      lay.status_xy[0], lay.status_xy[1],
@@ -1160,7 +1117,7 @@ class PaintLayer:
         cv.rect(*(lay.body_fill + (th["surface"],)))
         n = pe.n if pe is not None else 0
         if not lay.pane:
-            cv.print(("Icon " if ws._editing_icons else "Sprite ") + str(n),
+            cv.print("Sprite " + str(n),
                      lay.title_xy[0], lay.title_xy[1], th["ink_dim"], 1)
         if pe is None or sheet is None:
             return
@@ -1245,19 +1202,14 @@ class PaintLayer:
         self._draw_map(cv, lay, pe, sheet, th, greys)
         draw = self._icon_draw
         words = lay.btn_words
-        if ws._editing_icons:
-            _ui_draw.button(cv, th, lay.get_btn, "Reset" if words else "", "normal",
-                            glyph=("rotate", "rotate"), glyph_draw=draw)
-            _ui_draw.button(cv, th, lay.close_btn, "Close", "normal")
-        else:
-            for rect, word, kind in ((lay.get_btn, "Load", ("folder_open", "get")),
-                                     (lay.put_btn, "Save", ("save", "put")),
-                                     (lay.files_btn, "To Files", ("export", "folder"))):
-                if words:
-                    _ui_draw.button(cv, th, rect, word, "normal", glyph=kind,
-                                    glyph_draw=draw)
-                else:
-                    self._stepper(cv, th, rect, kind)
+        for rect, word, kind in ((lay.get_btn, "Load", ("folder_open", "get")),
+                                 (lay.put_btn, "Save", ("save", "put")),
+                                 (lay.files_btn, "To Files", ("export", "folder"))):
+            if words:
+                _ui_draw.button(cv, th, rect, word, "normal", glyph=kind,
+                                glyph_draw=draw)
+            else:
+                self._stepper(cv, th, rect, kind)
         if ws.paint_status:
             cv.print(_ui_draw.print_cut(ws.paint_status, lay.status_w, fs),
                      lay.status_xy[0], lay.status_xy[1], th["ink_dim"], 1)
@@ -1593,82 +1545,3 @@ class PaintLayer:
             ws.request_frame()
         elif not settled:
             ws.request_frame()
-
-
-class ThemeLayer:
-    """The icon-theme editor (EDIT ICONS, Settings -> #52): the SAME paint flow as the
-    cart sprite editor, pointed at the SYSTEM icon sheet. It owns the theme LIFECYCLE
-    (open/leave + the ws._editing_icons mode flag) and DELEGATES all the editing -- draw
-    + taps -- to the shared PaintLayer (one _paint_drag, one renderer). System domain,
-    like the paint tab it reuses (#39 step 3).
-
-    The lifecycle stays reachable on Workstation as thin forwarders (ws.open_theme is
-    device/test-pinned; ws._leave_theme is called by PaintLayer's CLOSE tap); the mode
-    flag ws._editing_icons stays on ws (the device backend reads it) and the
-    sheet/save trio is ws.look's (load_icon_sheet/set_icon_sheet/save_icons) --
-    ThemeLayer dispatches."""
-
-    id = "theme"
-    domain = "system"
-
-    def __init__(self, ws, paint_layer, names):
-        self.ws = ws
-        self._paint = paint_layer
-        self._NAMES = names
-
-    def draw(self, dt):
-        # EDIT ICONS (Stage 2): opened from Settings, NOT a running cart, so there's no
-        # cart backdrop to draw -- clear to black and reuse the shared PAINT renderer
-        # (over ws.look.icon_sheet, selected by ws._editing_icons), on the system canvas.
-        ws = self.ws
-        ws.sys_canvas.cls(self._NAMES["black"])
-        ws._reset_canvas_state()
-        self._paint._draw_paint()
-
-    def handle_input(self, i):
-        # EDIT ICONS is pointer/touch-driven like PAINT; B closes back to Settings.
-        # Share the paint editor's host Ctrl+Z/Y undo shortcut and its cursor
-        # keys here too (#90).
-        self._paint.handle_input(i)
-        self.ws._leave_or_home(self.leave)
-        return True
-
-    def handle_pointer(self, px, py, click):
-        return self._paint.handle_pointer(px, py, click)
-
-    def open(self):
-        """Open the PAINT editor on the SYSTEM icon sheet (Settings -> EDIT ICONS,
-        Stage 2 / #52). The same renderer/input as the cart PAINT flow, but pointed
-        at ws.look.icon_sheet: CLOSE persists system_icons.moygfx (not a cart, #111: no
-        SAVE tap -- leave() hard-commits) and returns to Settings. Starts from the
-        current theme (the baked default if no system_icons.moygfx exists yet); the
-        first commit creates the file."""
-        ws = self.ws
-        ws._dirty = True                 # screen change repaints (#44)
-        ws._editing_icons = True
-        ws.paint_status = None
-        ws.wm.goto("menu")               # Stage 6e: theme editor spawns on the back-stack
-        ws.menu_view = "theme"
-        # Build a PaintEditor over the icon sheet (PaintEditor is tile-size-agnostic,
-        # so the 16x16 IconSheet edits natively). A fresh editor each open so the
-        # brush/tile state doesn't leak in from a cart paint session.
-        if ws.look.icon_sheet is not None:
-            ws.paint = PaintEditor(ws.look.icon_sheet)
-        self._paint.reset_drag()
-        ws._set_text_mode(False)         # paint is pointer-driven, raw/game keyboard
-        ws.ach.note("editor", "paint")   # repainting the chrome counts toward Toolbox
-
-    def leave(self):
-        """CLOSE/back from the theme editor: hard-commit the icon sheet (#111 --
-        there's no SAVE tap, and the theme editor has no PLAY of its own to double
-        as one either, unlike the cart-sprite paint tab), then return to Settings
-        (not a cart/desktop -- the theme editor was opened from there). Drops the
-        editor + clears the editing-icons flag so the cart PAINT flow is untouched
-        next time."""
-        ws = self.ws
-        ws._dirty = True                 # screen change repaints (#44)
-        ws.look.save_icons()             # hard-commit BEFORE the editor drops (#111)
-        ws._editing_icons = False
-        ws.paint = None
-        self._paint.reset_drag()
-        ws.wm.goto("settings")           # Stage 6e: pop the theme editor, back to Settings

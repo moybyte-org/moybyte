@@ -12,8 +12,7 @@ engine owns focus, navigation, activation and the page's scroll; this layer
 owns what each row shows and does.
 
 The groups: General (Wi-Fi, the Bluetooth keyboard where a board has one,
-Appearance, Text size, Layout, Volume, Brightness, Name, and Edit icons
-where the theme draws the IconSheet), Play and Developer (the SETTINGS_TOGGLES registry's ON/OFF
+Appearance, Text size, Layout, Volume, Brightness and Name), Play and Developer (the SETTINGS_TOGGLES registry's ON/OFF
 rows), Power (the idle ladder's rungs), Updates (the web console, the OTA
 channel and the update flows) and About (the version and its channel, the
 board, storage, battery, Achievements and Licences). Brightness and Name
@@ -90,7 +89,7 @@ _SET_ROW_H = 26
 #            and the Settings row's dispatch key. All six were already the same
 #            string in three places; the registry is what pins that.
 #   label    the row text. THIS ORDER IS THE ON-SCREEN ORDER (the block sits
-#            below EDIT ICONS, above the injected web/OTA rows).
+#            below NAME, above the injected web/OTA rows).
 #   default  the value before system.json is read, and the fallback when the
 #            store says nothing about this key.
 #   setter   the `ws` verb every path goes through. Never a raw attribute
@@ -236,7 +235,7 @@ _PAGE_TITLES = {"achievements": "Achievements", "licences": "Licences"}
 # Power's.
 _GROUPS = (
     ("General", ("wifi", "bluetooth", "appearance", "font_scale", "layout_theme",
-                 "volume", "brightness", "name", "icons")),
+                 "volume", "brightness", "name")),
     ("Play", ("two_player", "steady", "crisp_pixels", "show_fps")),
     ("Power", ()),
     ("Updates", ("webhost", "ota_channel", "update_online", "update", "update_c6")),
@@ -325,9 +324,6 @@ class SettingsLayer:
         ("volume", "VOLUME", "level"),
         ("brightness", "BRIGHTNESS", "level"),
         ("name", "NAME", "name"),
-        # EDIT ICONS (Stage 2): opens the PAINT editor on the system icon
-        # sheet so a kid can repaint the top-bar chrome.
-        ("icons", "EDIT ICONS", "action"),
         # The ON/OFF gate rows are NOT here: they are declared once in
         # SETTINGS_TOGGLES above and spliced in by _toggle_rows below, in
         # registry order, directly after this row.
@@ -1053,8 +1049,8 @@ class SettingsLayer:
                 and web == self._rows_web and c6u == self._rows_c6
                 and tog is self._rows_tog and idle is self._rows_idle):
             return self._rows_cache
-        # The registry block sits directly after EDIT ICONS, which is where the
-        # hand-spliced FRAMESKIP/PERF DIAG rows were: same order, same indices.
+        # The registry block sits directly after NAME, which is where the
+        # hand-spliced FRAMESKIP/PERF DIAG rows were.
         rows = self._SETTINGS_ROWS + tog
         if ws.look.layout_choices() or ws.look.layout_theme() is not None:
             # LAYOUT (docs/shell_layout_2026-10.md §11): after FONT SIZE, and
@@ -1107,7 +1103,7 @@ class SettingsLayer:
 
     def _activate_settings_action(self, key):
         """Fire an "action" Settings row by key: APPEARANCE opens the Appearance app
-        (wallpaper + theme), EDIT ICONS opens the theme editor, UPDATE FW installs a
+        (wallpaper + theme, and its Edit theme… the Editor's theme mode), UPDATE FW installs a
         local SD image, UPDATE ONLINE checks WiFi for one (#53)."""
         ws = self.ws
         if key == "appearance":
@@ -1118,8 +1114,6 @@ class SettingsLayer:
             ws.update_ui.open_update_online()
         elif key == "update_c6":
             ws.update_ui.open_update_c6()
-        else:
-            ws.open_theme()       # EDIT ICONS (#52)
 
     def _toggle_diag_row(self, key):
         """Flip one of the "diag"-kind ON/OFF gate rows (any tap/step/A toggles).
@@ -1161,7 +1155,7 @@ class SettingsLayer:
     def settings_adjust(self, d, i=None):
         """Step the selected Settings row (or row `i`) by d. Font applies +
         persists; a level row (VOLUME, BRIGHTNESS) moves within its range
-        (`set_level`); an "action" row (APPEARANCE / EDIT ICONS) fires its
+        (`set_level`); an "action" row (APPEARANCE, an update) fires its
         action regardless of direction; NAME is typed, not stepped."""
         ws = self.ws
         key, _label, kind = self._settings_rows()[self.set_msel if i is None else i]
@@ -1171,7 +1165,7 @@ class SettingsLayer:
         if kind == "bluetooth":
             self.open_bluetooth()
             return
-        if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
+        if kind == "action":                    # APPEARANCE / UPDATE FW: open the tool
             self._activate_settings_action(key)
             return
         if kind == "diag":                      # the ON/OFF gates (#68 diag, #217 steady)
@@ -1460,13 +1454,11 @@ class SettingsLayer:
         _ui.hints(_HINT_TOGGLE[bool(self._on.get(f))] if kind == "toggle"
                   else _HINTS.get(kind, _HINT_OPEN))
         ws = self.ws
-        sheet = ws.icon_spec() is None        # EDIT ICONS paints the IconSheet
         for caption, rows in self._grouped():
             _ui.group(caption)
             self._footer = None
             for key, label, kind in rows:
-                if key != "icons" or sheet:
-                    self._row(key, label, kind)
+                self._row(key, label, kind)
             if self._footer is not None:
                 # a row's note under its group's card, on the page's ground
                 # in the captions' style

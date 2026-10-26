@@ -374,7 +374,8 @@ console needs while no Python app runs is OS.
 | `runtime/native_build.py` | host-only | — | builds the host's one library (`runtime/host_native.py`) and the builds that differ from it on purpose |
 | `netplay.py` | cart path | 4 | deleted by sprint 4 step 2: lockstep (inputs, never state) is `native/moy_play/moy_match.c` |
 | `runtime/op_history.py` | app | — | the in-RAM undo core every editor and Desk Lab app shares |
-| `runtime/paint_layer.py` | app | — | the sprite and icon paint editor, and EDIT ICONS |
+| `runtime/paint_layer.py` | app | — | the sprite paint editor |
+| `runtime/theme_editor.py` | app | — | the Editor's theme mode: a theme's theme.json and its icon tiles |
 | `runtime/palette.py` | glass | 3 | the MOY64 table the canvas converts through; the native canvas owns it |
 | `runtime/perf_hud.py` | frame tail | 3 | the FPS and frame-time overlay, drawn over any content |
 | `runtime/perf_line.py` | frame tail | 3 | the PERF line's one field table, formatter and parser |

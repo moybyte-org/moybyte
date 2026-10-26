@@ -696,6 +696,10 @@ static int named(const char *a, const uint8_t *name, size_t n) {
     return (n == 0 || (uint8_t)a[0] == name[0]) && strlen(a) == n && memcmp(a, name, n) == 0;
 }
 
+const char *moy_ui_icon_name(int slot) {
+    return slot >= 0 && slot < ICON_SLOTS ? s_icon_slots[slot] : NULL;
+}
+
 int moy_ui_icon_slot(const uint8_t *name, size_t n) {
     for (int k = 0; k < ICON_ALIASES; k++) {
         if (named(s_icon_alias[k][0], name, n)) {

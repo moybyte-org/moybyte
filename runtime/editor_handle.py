@@ -250,18 +250,9 @@ class EditorHandle:
     taps X never loses a note."""
 
     def __init__(self, files, kind, name, mode, canvas, theme,
-                 clip=None, host=None, images=None, watch=None, look=False):
+                 clip=None, host=None, images=None, look=False):
         self._files = files          # the (kind, name)-taking Files role
-        # The document's own reader, or None: an object whose
-        # `file_check(text)` is a second gate after the mode's, answering
-        # (ok, note, text to write) -- a note on a text it passes is the
-        # badge as it stands -- and whose `file_saved(text)` is told of
-        # a write that passed it -- custom's theme.json under EDIT FILE
-        # (`appearance.Appearance.file_watch`).
-        self._watch = watch
-        # The document's size cap: MAX_CHARS, or the watch's `max_chars` --
-        # a theme.json is indented on opening, past its minified cap.
-        self._max = getattr(watch, "max_chars", MAX_CHARS)
+        self._max = MAX_CHARS        # the document's size cap
         self._images = images or files   # the role a note's embedded drawings load through
         self._canvas = canvas
         self._theme = theme          # () -> the live token dict
@@ -285,7 +276,7 @@ class EditorHandle:
         self.history = History(self.ed, TextEditCodec())
         self.history.seed(files.history_ops(kind, self._name)[0] or [])
         self._burst = None           # text() at the live typing burst's start
-        self._badge = ""             # a gate's refusal or the watch's note, "" when clean
+        self._badge = ""             # the gate's refusal, "" when clean
         self._unsaved = False
         self._edit_ms = None         # when the idle autosave window opened
         self._focus = False
@@ -303,10 +294,6 @@ class EditorHandle:
         self._rect = (0, 0, 0, 0)    # where the last draw put it
         self._caret_at = None        # the caret's row the last draw scrolled to see
         self._caret_col = 0          # ...and its column
-        # The watch's `file_gen` this buffer last matched: a change made
-        # elsewhere (the Appearance rows) reloads a buffer with no edits; one
-        # with edits keeps them, and its save is the last write.
-        self._wgen = watch.file_gen if watch is not None else None
         self._fmemo = [None, None, None, None]   # look_gen, desk, its faces, font_info
         self._gen = 0                # bumped by every verb that changes what it draws
         self._drawn = -1             # the _gen the last draw showed
@@ -326,8 +313,8 @@ class EditorHandle:
         return bool(self._unsaved or self.ed.dirty or self._burst is not None)
 
     def badge(self):
-        """The gates' refusal for the text last saved, or the watch's note
-        on one it passed; "" when there is nothing to say."""
+        """The gate's refusal for the text last saved; "" when there is
+        nothing to say."""
         return self._badge
 
     def caret(self):
@@ -559,30 +546,17 @@ class EditorHandle:
         self._close_burst()
         body = self.ed.text()[:self._max]
         good, why = _modes.check(self._mode, body)
-        out = body
-        if good and self._watch is not None:
-            good, why, out = self._watch.file_check(body)
-            if not good:
-                out = body
         self._badge = why if good else (INVALID + " " + why).rstrip()
         if not good and soft:
             self._edit_ms = _ticks_ms()   # re-check on the next window, not next frame
             return (False, self._badge)
-        if self._watch is not None:
-            err = self._watch.file_write(out)
-        else:
-            _, err = self._files.save(self.kind, self._name,
-                                      self._files.encode_text(out))
+        _, err = self._files.save(self.kind, self._name, self._files.encode_text(body))
         if err is not None:
             return (False, str(err))
         self.ed.dirty = False
         self._unsaved = False
         self._edit_ms = None
         self._commit_history()
-        if self._watch is not None:
-            self._wgen = self._watch.file_gen   # the last write is the buffer's
-            if good:
-                self._watch.file_saved(out)
         return (True, self._badge)
 
     def close(self):
@@ -602,13 +576,10 @@ class EditorHandle:
 
     def owes(self):
         """Whether the handle has a frame to draw: a verb changed it since its
-        last draw (a key handed to it outside a drawn frame), the document
-        moved elsewhere, or its idle save is due -- what an app drawn on
-        change (`Player.animates`) asks of every handle it opened."""
+        last draw (a key handed to it outside a drawn frame) or its idle save
+        is due -- what an app drawn on change (`Player.animates`) asks of
+        every handle it opened."""
         if self._gen != self._drawn:
-            return True
-        w = self._watch
-        if w is not None and w.file_gen != self._wgen:
             return True
         if self.dirty():
             at = self._edit_ms
@@ -662,7 +633,6 @@ class EditorHandle:
             self._faces_in = (reg, bold, line)
         if self._m.wrap:
             self.ed.left = 0              # wrapped prose never scrolls sideways
-        self._follow_watch()
         self._autosave()
         self._drawn = self._gen
         self._keep_caret(cols, rows)
@@ -871,22 +841,6 @@ class EditorHandle:
         # An EDIT always re-shows the caret, wherever the reader had panned to:
         # the text just changed under it, and an undo can drop lines out from
         # under the view entirely.
-        self._caret_at = None
-
-    def _follow_watch(self):
-        """Reload the watched document when it moved elsewhere and this
-        buffer has no edits of its own (a new undo history with it)."""
-        w = self._watch
-        if w is None or w.file_gen == self._wgen or self.dirty():
-            return
-        self._wgen = w.file_gen
-        body = w.file_text()
-        if body is None:
-            return
-        self.ed.set_text(_modes.pretty(self._mode, body)[:self._max])
-        self.history = History(self.ed, TextEditCodec())
-        self._memo = {}
-        self._memo_old = {}
         self._caret_at = None
 
     def _autosave(self):

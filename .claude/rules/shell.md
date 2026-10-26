@@ -97,8 +97,9 @@ to whoever called it.
   tab ladder, UNDO, REDO and PLAY (on a desk its workspaces instead,
   `runtime/editor_desk.py`). Icons are the theme's icon set where its look names
   one and the image carries it (`runtime/iconsets.py`: a smooth set's masks or the pixel
-  set, a tile a slot of its `SLOTS`), else 16×16 sprites from the editable `IconSheet` (Settings → EDIT
-  ICONS). **The bar hides entirely while a GAME plays** (the cart
+  set, a tile a slot of its `SLOTS`), else 16×16 sprites from the shell's baked `IconSheet`; the slots a
+  theme's `icons.pixel_slots` names draw from its own tiles, painted in the Editor's theme mode
+  (`runtime/theme_editor.py`). **The bar hides entirely while a GAME plays** (the cart
   owns all 320×240); tools/apps run WITH the bar (Moy, back, title, status) so
   they're always exitable.
 - **Exit model (#71's BACKSPACE pause machinery is retired).** A game is left
@@ -107,7 +108,7 @@ to whoever called it.
   no hold gesture, so a `textmode(True)` game needs no exit of its own. Tools
   and apps leave by the bar's back. `docs/shell_ux_v1.md` §9 and §9a.
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
-  `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
+  `IconSheet` (16×16 icon tiles: the shell's baked bar icons and a theme's own pixel tiles). (frozen as `editors`)
 - **`runtime/moy_carts.py` is the `.moy` store** (and the per-project undo
   journal; the #108 user-files layer beside it is native/moy_store's
   `moy_ufiles`, which `moy_carts` names reach and the files role's C rows

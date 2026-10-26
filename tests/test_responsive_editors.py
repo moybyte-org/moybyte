@@ -616,13 +616,13 @@ def test_cards_editor_shows_more_cards_on_large_canvas(tmp_path):
 
 
 def test_theme_editor_320x240_is_byte_identical(tmp_path):
-    """EDIT ICONS (the theme reuse of the paint renderer) is byte-identical at
-    320x240 too."""
+    """The Editor's theme mode is byte-identical at 320x240 too."""
     a_ws = _ws_shared(tmp_path / "a")
     b_ws = _ws_distinct_320(tmp_path / "b")
     bufs = []
     for ws in (a_ws, b_ws):
-        ws.open_theme()
+        assert ws.edit_theme()
+        ws.editor_app.theme_tab("theme_sprites")
         _quiesce(ws)
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas._buf))

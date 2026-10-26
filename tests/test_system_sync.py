@@ -280,7 +280,7 @@ def test_the_receiver_takes_the_two_documents_and_refuses_the_rest():
         {"p": "system.json", "t": json.dumps({"theme": "night"})},
         {"p": "achievements.json", "t": _badges(first_open=0)},
         {"p": "system.json", "d": 1},
-        {"p": "system_icons.moygfx", "b": "AAAA"},
+        {"p": "shared.moygfx", "b": "AAAA"},
         {"p": "wifi.json", "t": "[]"},
         {"p": "achievements.json", "t": "nope"},
         "junk"], rows=_Rows({"theme": "dusk", "volume": 3}))

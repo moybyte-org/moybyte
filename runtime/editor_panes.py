@@ -55,6 +55,9 @@ CONTENTS = {
     "stamps": ("Stamps", "stamp", None, FLOOR),
     "palette": ("Block palette", "blocks", None, FLOOR),
     "made": ("Code", "lock", None, FLOOR),
+    # the Editor's theme mode (runtime/theme_editor.py): its two tabs
+    "theme_config": ("Config", "sliders", "theme_config", FLOOR),
+    "theme_sprites": ("Sprites", "sprite", "theme_sprites", (420, 330 + HEADER)),
 }
 
 # (key, label, icon) in the app's row's order; Ctrl+1 ... 5 is this order.
@@ -66,6 +69,9 @@ WORKSPACES = (
     ("sound", "Sound", "music"),
 )
 KEYS = tuple(k for k, _l, _i in WORKSPACES)
+# The theme mode's one workspace: Config beside Sprites. Not on the app's row,
+# which shows the two tabs instead.
+THEME = "theme"
 
 # The Editor tab each workspace stands for where one tab is asked of it
 # (the handheld ladder's, the history's): its first pane's.
@@ -88,6 +94,8 @@ def tree(key, w, h, unit=1, blocks=False):
     big = wide(w)
     rw = (660 if w >= 1240 * u and h >= 760 * u else 340) * u     # the right column
     rh = (512 if rw == 660 * u else 282) * u                      # its Run slot
+    if key == THEME:
+        return ("h", (("theme_config",), ("theme_sprites",)), ((352 if big else 260) * u, None))
     if key == "settings":
         return ("h", (("cards",), ("game",)), ((360 if big else 300) * u, None))
     if key == "code":

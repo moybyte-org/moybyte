@@ -5,6 +5,7 @@
 #   EditorApp.draw_zone  the tab ladder, UNDO/REDO and PLAY
 #   EditorApp.zone_tap   hit-test the ladder and dispatch
 #   EditorApp.save_tab   route one tab's commit to its owner
+#   EditorApp.open_theme  the theme mode: a theme package's Config and Sprites
 """The EDITOR app (Stage 3 of docs/history/shell_ux_technical_plan_v1.md).
 
 `EditorApp` is the console's authoring app: ONE app, opened on a `Project`, whose
@@ -127,9 +128,9 @@ _PLAY_SLOT = 170                # the desk Editor's Play slot, Play or Restart a
 
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
 # will owe -- derived from the ladder rather than listed a second time. The
-# sentinels (UNDO/REDO) and PLAY (None) are actions; "theme" is the
-# EDIT-ICONS reuse of the paint renderer and commits through its own leave, so
-# it is not a tab here either.
+# sentinels (UNDO/REDO) and PLAY (None) are actions; the theme mode's two tabs
+# commit through their ThemeDoc (runtime/theme_editor.py), so they are not
+# tabs here either.
 COMMIT_TABS = tuple(t for t, _g in _ZONE_TABS
                     if isinstance(t, str) and not t.startswith("\x00"))
 
@@ -163,7 +164,20 @@ _TAB_LAYOUT_UI = {
     "map": "map_ui",
     "scene": "scene_ui",
     "music": "music_ui",
+    "theme_config": "theme_config_layer",
+    "theme_sprites": "theme_sprites_layer",
 }
+# The theme mode's tabs (runtime/theme_editor.py's TAB_CONFIG, TAB_SPRITES).
+THEME_TABS = ("theme_config", "theme_sprites")
+
+
+def _te():
+    """runtime/theme_editor.py, imported at the theme mode's first use."""
+    try:
+        import theme_editor
+    except ImportError:  # pragma: no cover - host fallback when not yet aliased
+        from runtime import theme_editor
+    return theme_editor
 
 try:
     from editor_panes import WORKSPACES as _WORKSPACES
@@ -213,16 +227,20 @@ class EditorApp:
         # the next Play a fresh start (`start_owed`, its tabs).
         self.restart_owed = False
         self.start_owed = ()
+        # The theme mode (runtime/theme_editor.py): the theme package open in
+        # place of a cart (a ThemeDoc, else None), where Done returns to, and
+        # the tab the Editor held before it.
+        self.theme = None
+        self._theme_back = None
+        self._theme_was = None
         self.tab = "cards"            # active view -- ws.menu_view projects onto this:
                                       # "cards" | "code" | "paint" | "map" | "blocks"
-                                      # | "music" | "theme" (theme = the EDIT-ICONS
-                                      # reuse of the paint renderer, set via the
-                                      # menu_view setter, not a cart-editor tab)
+                                      # | "music" | "theme_config" | "theme_sprites"
 
     # -- the active tab (a self-defending property, Stage 4 review fix) -----------
     #
     # `tab` bumps zone_gen on every ACTUAL change, regardless of the write site --
-    # set_tab, the ws.menu_view setter (ThemeLayer sets "theme"), _open_workspace all
+    # set_tab, the ws.menu_view setter, _open_workspace all
     # assign `.tab`/`ws.menu_view` DIRECTLY -- so BarLayer's strip-cache key can trust
     # zone_gen instead of any writer remembering to bump it (mirrors Launcher.sel).
     # Idempotent writes (set_tab called with the current tab) don't bump, so the zoned
@@ -254,6 +272,7 @@ class EditorApp:
         break is reported and where the file that caused it is offered."""
         self.project = project
         ws = self.ws
+        self._drop_theme()
         ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         # Another cart may ladder differently (a compiled cart without `src/`
         # has no Code tab), so the lent zone repaints whatever tab it lands on.
@@ -264,7 +283,6 @@ class EditorApp:
     def open_paint(self):
         ws = self.ws
         ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
-        ws._editing_icons = False        # a CART sheet, not the system theme
         ws.paint_status = None
         ws.set_menu_view("paint")
 
@@ -310,6 +328,86 @@ class EditorApp:
         ws.music_ui._stop_music_preview()
         ws.set_menu_view("music")
 
+    # -- the theme mode (runtime/theme_editor.py) ----------------------------------
+
+    def open_theme(self, doc, back):
+        """Open the Editor on a theme package (`doc`, a ThemeDoc) in place of
+        a cart: its Config tab, then Sprites, nothing a cart has. A cart's tab
+        the Editor held is written first. Done returns to `back`, the
+        back-stack kind Edit theme… was opened from."""
+        ws = self.ws
+        if self.theme is None:
+            if self.project is not None and self.project is ws.project:
+                self.save_current()
+            self._theme_was = self.tab
+        else:
+            self.theme.commit()
+        self.theme = doc
+        self._theme_back = back
+        ws.editor = doc.ed
+        ws.history.drop_code_history()
+        ws.wm.activate("menu")
+        desk = getattr(ws, "_editor_desk", None)
+        if desk is not None:
+            desk.theme_shown(True)
+        self.zone_gen += 1
+        self.theme_tab("theme_config")
+
+    def theme_tab(self, tab):
+        """The theme mode's tab `tab` shown: the one left saves softly (a
+        switch is no exit), the keyboard in text mode for Config."""
+        ws = self.ws
+        doc = self.theme
+        if doc is None:
+            return
+        ws._dirty = True
+        if tab != self.tab and self.tab in THEME_TABS:
+            doc.save_tab(self.tab, soft=True)
+        self.tab = tab
+        self.build_tab(tab)
+        desk = self._desk()
+        if desk is not None:
+            desk.follow()
+        else:
+            self._relayout_tab(tab)
+        ws._set_text_mode(tab == "theme_config")
+        ws.bar_layer.invalidate()
+
+    def close_theme(self):
+        """Done (the bar's ‹, K, Esc, B): the theme's tabs written, the Editor
+        back to where Edit theme… was opened from."""
+        if self.theme is None:
+            return
+        back = self._theme_back
+        self._drop_theme()
+        ws = self.ws
+        ws._dirty = True
+        if back is not None and back != "menu":
+            ws.wm.goto(back)
+        else:
+            ws.wm.goto(ws.wm.root_kind())
+
+    def _drop_theme(self):
+        """Leave the theme mode where it is open: its tabs hard-committed, the
+        Editor's buffer and tab its own again."""
+        doc = self.theme
+        if doc is None:
+            return
+        ws = self.ws
+        doc.commit()
+        self.theme = None
+        if ws.editor is doc.ed:
+            ws.editor = None
+        ws.history.drop_code_history()
+        ws._set_text_mode(False)
+        desk = getattr(ws, "_editor_desk", None)
+        if desk is not None:
+            desk.theme_shown(False)
+        self.tab = self._theme_was if self._theme_was not in (None,) + THEME_TABS else "cards"
+        self._theme_was = None
+        self.zone_gen += 1
+        ws.bar_layer.invalidate()
+
     # -- tab builders (the old set_menu_view body, moved verbatim) -----------------
 
     def set_tab(self, view):
@@ -318,6 +416,10 @@ class EditorApp:
         source of truth; ws.menu_view projects onto it."""
         ws = self.ws
         ws._dirty = True             # sub-view change always repaints (#44)
+        if view in THEME_TABS:
+            self.theme_tab(view)
+            return
+        self._drop_theme()
         if view == "code" and ws.cart is not None and not ws.code_sources():
             # A compiled cart that ships no `src/` has no Code tab: there is no
             # text behind its main.wasm to show (docs/wasm_tier_plan_2026-09.md).
@@ -362,7 +464,7 @@ class EditorApp:
         ws = self.ws
         self.tab = view
         self.build_tab(view)
-        ws._set_text_mode(view == "code")
+        ws._set_text_mode(view == "code" or view == "theme_config")
         ws.ach.note("editor", view)
 
     def _desk(self):
@@ -375,6 +477,10 @@ class EditorApp:
         what entering the tab needs before it draws (a desk workspace builds
         every pane it shows)."""
         ws = self.ws
+        if view in THEME_TABS:
+            if self.theme is not None and view == "theme_config":
+                ws.editor = self.theme.ed
+            return
         if view == "code":
             if ws.editor is None and ws.cart is not None:
                 # WHICH script (SPEC.md 4, #89): `ws.code_file` is the Code tab's
@@ -461,6 +567,8 @@ class EditorApp:
         Editor on THIS tab (spec Section 2's launch-and-return), not to the home root.
         This is the deliberate navigation-semantics change: today's implicit run-on-
         close returned to the launcher; PLAY returns to the Editor."""
+        if self.theme is not None:
+            return                   # the theme mode runs nothing
         ws = self.ws
         ws._dirty = True             # back to the desktop repaints (#44)
         ws._set_text_mode(False)
@@ -549,6 +657,12 @@ class EditorApp:
         th = ws.theme_colors
         sets = ws.icon_spec() is not None
         desk = self._desk()
+        if self.theme is not None:
+            if desk is not None:
+                _te().draw_row(self, cv, rect)
+            else:
+                _te().draw_zone(self, cv, rect)
+            return
         if desk is not None:
             self._draw_row(cv, th, rect, desk, sets)
             return
@@ -832,6 +946,8 @@ class EditorApp:
         by the tab's pad, the least group gap and the tail. The bar gives a
         zone this narrower than its status widgets' room
         (`BarLayer._make_room`), so no shipped bar drops undo, redo or Play."""
+        if self.theme is not None:
+            return _te().zone_need(self, h)
         ic = h if h > 0 else _BAR_ICON
         fs = self._zone_scale()
         pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
@@ -1024,7 +1140,7 @@ class EditorApp:
         """Where tab `tab`'s chip is on the bar, (x, y, w, h) on the system
         canvas -- what the Code tab's scripts menu hangs from -- or None
         where the bar shows no chip for it (the desk's workspaces)."""
-        if self._desk() is not None:
+        if self._desk() is not None or self.theme is not None:
             return None
         bl = self.ws.bar_layer
         got = bl.cell("menu", "zone")
@@ -1052,6 +1168,10 @@ class EditorApp:
         side + stride derive from the rect height, matching draw_zone; the shelf
         tiers resolve against the SAME _zone_parts geometry the draw used."""
         desk = self._desk()
+        if self.theme is not None:
+            if desk is not None:
+                return _te().row_tap(self, px, py, rect)
+            return _te().zone_tap(self, px, py, rect)
         if desk is not None:
             return self._row_tap(px, py, rect, desk)
         if not self._compact(rect):
@@ -1194,6 +1314,8 @@ class EditorApp:
         clean. Code therefore compares content against the last persisted source
         (moy_carts.save_code keeps cart["src"] in step) -- an O(n) compare of a
         few KB, nothing next to the flash write it guards (#154)."""
+        if tab in THEME_TABS:
+            return self.theme is None or self.theme.clean(tab)
         ws = self.ws
 
         def _quiet(hist):
@@ -1292,10 +1414,11 @@ class EditorApp:
         FORCED here: half-typed Python is written rather than lost (#154). Config
         persists via commit_config (no re-run -- PLAY
         runs, handled separately in leave() so a crash can't overwrite good config).
-        The theme (EDIT ICONS) tab has no bar zone, so it's never routed here -- its
-        own CLOSE/leave hard-commits via ws.look.save_icons()
-        (paint_layer.ThemeLayer.leave)."""
+        In the theme mode it is the ThemeDoc's commit, both tabs'."""
         self.flush_pending()
+        if self.theme is not None:
+            self.theme.commit()
+            return
         self.save_tab(self.tab)
 
     def save_tab(self, tab):
@@ -1305,6 +1428,8 @@ class EditorApp:
         recorded can still be paid once the ladder has moved on. True when
         it committed."""
         ws = self.ws
+        if tab in THEME_TABS:
+            return self.theme is not None and self.theme.save_tab(tab)
         if self._tab_is_clean(tab):
             return False             # nothing changed -> nothing to persist
         if tab == "code":

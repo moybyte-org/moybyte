@@ -21,10 +21,11 @@ they cannot see is everything below, and it is most of what this object does:
     theme replaces it, it carries its fonts and picture, and it is written
     once the changes settle or at an exit -- never per press, never idle.
 
-  * **EDIT FILE (phase 6 step 6).** It opens custom's theme.json in the
-    text app (a seed made into `custom` first); a save the loader takes is
-    shown at the next frame and a hand-edited colour drops `from`; a refused
-    one is badged with the loader's note and moves nothing.
+  * **Edit theme… (phase 6 step 6, look step 33).** It opens custom in the
+    Editor's theme mode (a seed made into `custom` first), whose Config is
+    its theme.json; a save the loader takes is shown at the next frame and a
+    hand-edited colour drops `from`; a refused one is badged with the
+    loader's note and moves nothing.
 
   * **`set_font_scale` must land on the ROOT canvas**, not on whatever window
     buffer is installed while Settings draws (2026-07-26: "changing it while
@@ -634,16 +635,37 @@ def test_a_theme_switch_writes_custom_before_it_leaves(tmp_path):
     assert ws.look.custom_look() == {"from": "moy", "accent": _accent(7)}
 
 
-# -- EDIT FILE (phase 6 step 6) -----------------------------------------------
+# -- Edit theme… (phase 6 step 6, look step 33) --------------------------------
+
+class _Config:
+    """The theme mode's Config tab as these tests drive it: its buffer, its
+    saves (`ThemeDoc.save_config`) and its badge."""
+
+    def __init__(self, doc):
+        self.doc = doc
+
+    def text(self):
+        return self.doc.ed.text()
+
+    def set_text(self, t):
+        self.doc.ed.set_text(t)
+        self.doc.ed.dirty = True
+
+    def save(self, soft=False):
+        return self.doc.save_config(soft)
+
+    def badge(self):
+        return self.doc.badge
+
 
 def _edit(ws):
-    """EDIT FILE, and the frame the text app opens its document on: the
-    handle over custom's theme.json."""
+    """Edit theme…, and the frame the Editor opens on: its Config tab over
+    custom's theme.json."""
     assert ws.look.edit_file()
     ws.input.begin_frame()
     ws.frame(1 / 30)
-    assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
-    return ws.player.ns["ed"]
+    assert ws.wm.top_is("menu") and ws.menu_view == "theme_config"
+    return _Config(ws.editor_app.theme)
 
 
 def _hand_edit(ed, **dark):
@@ -660,8 +682,9 @@ def _custom_files(ws):
 
 
 def test_edit_file_on_a_seed_makes_custom_and_opens_its_file(tmp_path):
-    """A seed is firmware: EDIT FILE copies it to `custom`, switches to it
-    and opens custom's theme.json -- in the text app, not as a project."""
+    """A seed is firmware: Edit theme… copies it to `custom`, switches to it
+    and opens custom's theme.json -- in the Editor's theme mode, not as a
+    project; Done comes back."""
     import json
     ws = build_ws(tmp_path)
     ws.look.set_theme("contrast")
@@ -671,12 +694,11 @@ def test_edit_file_on_a_seed_makes_custom_and_opens_its_file(tmp_path):
     assert theme_colors("contrast") == contrast, "the seed moved"
     assert _look(ws) == {"from": "contrast"}
     assert _stored(ws)["theme"] == CUSTOM
-    assert (ed.name(), ed.mode()) == ("theme.json", "json")
-    assert ed.kind == moy_carts.project_kind(str(Path(ws.carts_root) / "custom.moy"))
+    assert ed.doc.note == "Contrast is built in: this is your copy, custom"
     assert json.loads(ed.text()) == _package(ws)
-    assert ws.project.cart is not None and ws.project.cart.get("title") == "Notes"
-    ws._exit_to_caller()
-    assert ws.wm.top_kind() != "menu", "the package opened as a project"
+    assert ws.cart is None, "the package opened as a project"
+    ws.editor_app.close_theme()
+    assert ws.wm.top_kind() != "menu" and ws.editor_app.theme is None
 
 
 def test_edit_file_on_custom_writes_its_change_first(tmp_path):
@@ -710,7 +732,7 @@ def test_a_saved_role_moves_the_look_and_drops_from(tmp_path):
     assert saved == ed.text().encode()
     assert ws.look.custom_look() == {}
 
-    ws._exit_to_caller()
+    ws.editor_app.close_theme()
     assert ws.look.change("tint", "plum") == 0
     _settle(ws)
     rc, want = ui_draw.theme_custom(saved, None, "plum")
@@ -732,7 +754,7 @@ def test_a_save_of_a_key_over_the_source_keeps_it(tmp_path):
     assert ed.save(soft=True)[0]
     ws.frame(1 / 30)
     assert _look(ws) == {"from": "moy", "accent": _accent(9)}
-    ws._exit_to_caller()
+    ws.editor_app.close_theme()
     assert ws.look.change("accent", _accent(1)) == 0
     _settle(ws)
     assert _package(ws)["frame"] == {"style": "platinum"}
@@ -760,7 +782,7 @@ def test_a_file_over_the_cap_as_typed_is_written_minified(tmp_path):
     ed = _edit(ws)
     d = json.loads(ed.text())
     ed.set_text(json.dumps(d, indent=32))
-    assert _THEME_BYTES < len(ed.text()) <= ws.look.max_chars   # the watch's cap
+    assert _THEME_BYTES < len(ed.text()) <= ws.look.max_chars   # Config's cap
     assert ed.save(soft=True) == (True, "")
     saved = (Path(ws.carts_root) / "custom.moy" / "theme.json").read_bytes()
     assert len(saved) <= _THEME_BYTES and json.loads(saved) == d

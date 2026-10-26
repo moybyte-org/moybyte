@@ -158,7 +158,7 @@ for (const sync of [true, false]) {
 
 // ---- the console's own documents: system.json and its siblings ---------------
 // A site-mode browser is its own console, so it keeps what a board keeps
-// beside its carts -- the Settings rows, the badges, the edited icons -- in an
+// beside its carts -- the Settings rows, the badges, the shared sheet -- in an
 // OPFS store of its own, and takes nothing else into it.
 const dirNames = async (d) => {
     const out = [];
@@ -173,26 +173,24 @@ for (const sync of [true, false]) {
     ok("the console's store opens beside the carts (" + label + ")",
        !!s && s.root.id === "system" && s.root.endpoint === "console.json");
     ok("a fresh console store is empty (" + label + ")", await store.isEmpty(s));
-    const icons = new Uint8Array(300).map((_, i) => (i * 7) & 255);
+    const sheet = new Uint8Array(300).map((_, i) => (i * 7) & 255);
     const SYS = '{"theme": "dusk", "show_fps": false, "volume": 3}';
     const ACH = '{"unlocked": ["first_open", "first_run"]}';
     const r = await store.applyOps(s, [
         { p: "system.json", t: SYS },
         { p: "achievements.json", t: ACH },
-        { p: "system_icons.moygfx", b: store.toBase64(icons) },
-        { p: "system_icons.ver", t: "3" },
+        { p: "shared.moygfx", b: store.toBase64(sheet) },
     ]);
-    ok("its documents land (" + label + ")", r.applied === 4 && !r.errors.length,
+    ok("its documents land (" + label + ")", r.applied === 3 && !r.errors.length,
        JSON.stringify(r.errors));
     let all = await store.readAll(s);
-    ok("...and read back, the icons as bytes (" + label + ")",
+    ok("...and read back, the sheet as bytes (" + label + ")",
        all["system.json"] === SYS && all["achievements.json"] === ACH
-       && all["system_icons.ver"] === "3"
-       && store.fileData(all["system_icons.moygfx"]).every((x, i) => x === icons[i]),
+       && store.fileData(all["shared.moygfx"]).every((x, i) => x === sheet[i]),
        JSON.stringify(Object.keys(all)));
     ok("a committed write leaves nothing beside the file (" + label + ")",
        (await dirNames(s.carts)).join() ===
-       "achievements.json,system.json,system_icons.moygfx,system_icons.ver",
+       "achievements.json,shared.moygfx,system.json",
        (await dirNames(s.carts)).join());
     ok("the console store is not empty now (" + label + ")", !(await store.isEmpty(s)));
     ok("...and the carts store never saw any of it (" + label + ")",
@@ -220,14 +218,14 @@ for (const sync of [true, false]) {
         { p: "../system.json", t: "x" },
         { p: "system.json", dc: 1 },
         { p: "carts/a.moy", dc: 1 },
-        { p: "system.json", b: store.toBase64(icons) },
+        { p: "system.json", b: store.toBase64(sheet) },
     ]);
     ok("a secret, another sibling, a cart path, a folder delete and bytes for a"
        + " text file are all refused (" + label + ")",
        bad.applied === 0 && bad.errors.length === 10, JSON.stringify(bad.errors));
     ok("...and nothing they named was written (" + label + ")",
        (await dirNames(s.carts)).join() ===
-       "system.json,system_icons.moygfx,system_icons.ver",
+       "shared.moygfx,system.json",
        (await dirNames(s.carts)).join());
 }
 

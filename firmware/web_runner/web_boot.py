@@ -25,7 +25,7 @@ Make tile and the editors are reachable in the browser. Every write lands in the
 browser's MEMFS first, and the sweep (`_build_watchers`) carries it to where the
 page's store of record is: a site-mode page's OPFS -- the carts with their
 journals and pmem, the drawings, and the console's own documents (system.json,
-achievements.json, the edited icons), so a reload comes back on the same shelf,
+achievements.json, the shared sheet), so a reload comes back on the same shelf,
 theme, Settings and badges -- or the serving board for its carts, files,
 portable Settings and badges (`moy_sync.SYSTEM_KEYS`; a board answering no
 /console.json leaves them in the tab). A page with no OPFS keeps everything in

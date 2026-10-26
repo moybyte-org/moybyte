@@ -175,9 +175,9 @@ Deliberately NOT covered
   * A RUNNING cart. That is the game domain -- pinned by
     `tests/test_spec_conformance.py` against the spec's own goldens -- and
     seed carts are free to use `rnd()`, so it is not deterministic here.
-  * The EDIT ICONS ("theme") surface and the OTA update screen: neither is in
-    the Phase 0 list, and the update screen's content is a live network state
-    machine.
+  * The OTA update screen: it is not in the Phase 0 list, and its content
+    is a live network state machine. (The Editor's theme mode is
+    tests/test_theme_mode.py's.)
 
 The draw budgets
 ----------------

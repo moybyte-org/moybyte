@@ -1450,6 +1450,10 @@ const moy_theme_leaf_t moy_theme_leaves[MOY_THEME_LEAVES] = {
     {MOY_THEME_LK_ENUM, 120, 2, INT32_MIN},  // icons.kind
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.set
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // icons.swap
+    {MOY_THEME_LK_BITS, 0, 0, INT32_MIN},  // icons.pixel_slots.0
+    {MOY_THEME_LK_BITS, 0, 0, INT32_MIN},  // icons.pixel_slots.1
+    {MOY_THEME_LK_BITS, 0, 0, INT32_MIN},  // icons.pixel_slots.2
+    {MOY_THEME_LK_BITS, 0, 0, INT32_MIN},  // icons.pixel_slots.3
     {MOY_THEME_LK_TEXT, 0, 0, INT32_MIN},  // fam
     {MOY_THEME_LK_INT, 100, 900, INT32_MIN},  // w_med
     {MOY_THEME_LK_INT, 100, 900, INT32_MIN},  // w_semi
@@ -1655,6 +1659,10 @@ const char *const moy_theme_leaf_names[MOY_THEME_LEAVES] = {
     "icons.kind",
     "icons.set",
     "icons.swap",
+    "icons.pixel_slots.0",
+    "icons.pixel_slots.1",
+    "icons.pixel_slots.2",
+    "icons.pixel_slots.3",
     "fam",
     "w_med",
     "w_semi",
@@ -1829,18 +1837,19 @@ const moy_theme_field_t moy_theme_fields[MOY_THEME_LOOK_FIELDS] = {
     {"icons.kind", MOY_THEME_FT_ENUM, 1, 187},
     {"icons.set", MOY_THEME_FT_TEXT, 1, 188},
     {"icons.swap", MOY_THEME_FT_TEXT, 1, 189},
-    {"fam", MOY_THEME_FT_TEXT, 1, 190},
-    {"w_med", MOY_THEME_FT_INT, 1, 191},
-    {"w_semi", MOY_THEME_FT_INT, 1, 192},
-    {"w_bold", MOY_THEME_FT_INT, 1, 193},
-    {"sizes.hh.title", MOY_THEME_FT_INT, 1, 194},
-    {"sizes.hh.key", MOY_THEME_FT_INT, 1, 195},
-    {"sizes.hh.op", MOY_THEME_FT_INT, 1, 196},
-    {"sizes.hh.result", MOY_THEME_FT_INT, 1, 197},
-    {"sizes.dk.title", MOY_THEME_FT_INT, 1, 198},
-    {"sizes.dk.key", MOY_THEME_FT_INT, 1, 199},
-    {"sizes.dk.op", MOY_THEME_FT_INT, 1, 200},
-    {"sizes.dk.result", MOY_THEME_FT_INT, 1, 201},
+    {"icons.pixel_slots", MOY_THEME_FT_SLOTS, 4, 190},
+    {"fam", MOY_THEME_FT_TEXT, 1, 194},
+    {"w_med", MOY_THEME_FT_INT, 1, 195},
+    {"w_semi", MOY_THEME_FT_INT, 1, 196},
+    {"w_bold", MOY_THEME_FT_INT, 1, 197},
+    {"sizes.hh.title", MOY_THEME_FT_INT, 1, 198},
+    {"sizes.hh.key", MOY_THEME_FT_INT, 1, 199},
+    {"sizes.hh.op", MOY_THEME_FT_INT, 1, 200},
+    {"sizes.hh.result", MOY_THEME_FT_INT, 1, 201},
+    {"sizes.dk.title", MOY_THEME_FT_INT, 1, 202},
+    {"sizes.dk.key", MOY_THEME_FT_INT, 1, 203},
+    {"sizes.dk.op", MOY_THEME_FT_INT, 1, 204},
+    {"sizes.dk.result", MOY_THEME_FT_INT, 1, 205},
 };
 
 const moy_theme_field_t moy_theme_btn_fields[7] = {

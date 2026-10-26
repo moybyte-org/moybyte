@@ -21,7 +21,7 @@ it refuses beyond that:
    every loop iteration on all three boards, and both WMs read `ws.show_fps`
    per painted game frame. The registry owns declaration, persistence and the
    row -- never a read path.
-3. **The row block keeps its place.** It sits directly after EDIT ICONS, in
+3. **The row block keeps its place.** It sits directly after NAME, in
    registry order, which is exactly where the hand-spliced rows were: the 87
    shell goldens and the ~300 Settings sub-surface hashes are the pixel proof,
    and this file pins the ORDER those hashes rest on.
@@ -254,14 +254,14 @@ def test_a_board_that_cannot_serve_a_toggle_shows_no_row(tmp_path):
 
 def test_a_granted_gate_adds_its_row_in_registry_order(tmp_path):
     """Grant both capabilities and the block is the registry, in order,
-    directly after EDIT ICONS. This is the order the Settings goldens rest on:
+    directly after NAME. This is the order the Settings goldens rest on:
     2 PLAYERS above STEADY, CRISP PIXELS below it."""
     ws = build_ws(tmp_path)
     ws.sys_canvas.set_crisp_scale = lambda on: None
     ws.ble_keyboard = _FakeSecondKeyboard()
     rows = ws.settings_layer._settings_rows()
     keys = [r[0] for r in rows]
-    start = keys.index("icons") + 1
+    start = keys.index("name") + 1
     assert keys[start:start + len(KEYS)] == KEYS
     for i, key in enumerate(KEYS):
         assert rows[start + i] == (key, SETTINGS_TOGGLES[i][1], "diag")

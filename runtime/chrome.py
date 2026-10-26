@@ -721,13 +721,12 @@ def _text_w(cv, s, mult=1):
 
 # --- the unified top bar's icon theme (Stage 1) -----------------------------
 #
-# The top bar's chrome controls are 16x16 sprites drawn from an EDITABLE IconSheet
-# (so the bar is themeable), not the fixed 12x12 glyphs -- which collapses the
+# Under a theme that names no icon set the top bar's chrome controls are 16x16
+# sprites of the shell's IconSheet, not the fixed 12x12 glyphs -- which collapses the
 # ~120 glyph rect-spans/frame the labeled button rows cost into ~12 cached sprite
 # blits (a measured ~15ms/frame device win). `_ICON` is the slot map: a chrome kind ->
-# its sprite id in the 8x4 IconSheet (row-major). The IconSheet is loaded from
-# system_icons.moygfx when present, else baked from `_ICON_ART` below. The _glyph
-# vocabulary stays for NON-chrome uses (the cards/paint/blocks editors).
+# its sprite id in the 8x4 IconSheet (row-major), baked from `_ICON_ART` below. The
+# _glyph vocabulary stays for NON-chrome uses (the cards/paint/blocks editors).
 _ICON = {
     "home": 0, "edit": 1, "code": 2, "paint": 3, "map": 4, "blocks": 5,
     "gear": 6, "wifi": 7, "batt": 8, "new": 9, "dup": 10, "del": 11,
@@ -886,16 +885,6 @@ _ICON_ART = {
         ".0dddddddddddd0.", "..022222222220..", "..02220002220...", "...000...000....",
     ),
 }
-
-# Bump whenever the baked _ICON_ART above changes: a saved system_icons.moygfx theme
-# written at an OLDER version is treated as stale and re-seeded to these new defaults
-# at load (mirrors cart versioning, #47), so an already-themed device/desktop picks up
-# new icons without a manual wipe. A bump discards a user's custom icon edits, exactly
-# like a built-in cart re-seed. (v1 = the first full restyle; v2 = added the "moy"
-# mascot slot for the boot logo; v3 = added the "wifi_off" no-connection status slot;
-# v4 = added the "scene" placement-editor tab slot, #85 Stage 2; v5 = added the
-# "undo"/"redo" bar-icon slots, #88.)
-_ICON_VERSION = 5
 
 
 # --- Panel THEMES ----------------------------------------------------------
@@ -1260,8 +1249,8 @@ def _nibble(ch):
 
 
 def _default_icon_sheet():
-    """Bake `_ICON_ART` into a fresh IconSheet at the `_ICON` slots -- the theme used
-    when no system_icons.moygfx exists. Each art entry is painted into its 16x16 tile
+    """Bake `_ICON_ART` into a fresh IconSheet at the `_ICON` slots -- the bar's
+    icons under a theme that names no icon set. Each art entry is painted into its 16x16 tile
     via tset, so the result serializes/loads through the same .moygfx hex as any sheet.
     Unmapped/short rows just leave that tile blank (transparent)."""
     sheet = IconSheet()
@@ -1279,31 +1268,6 @@ def _default_icon_sheet():
                     sheet.tset(n, lx, ly, c)
     sheet.dirty = False
     return sheet
-
-
-def default_icon_pixels(n):
-    """The TILE*TILE flat palette-index list `_default_icon_sheet` bakes into
-    icon slot n: `_ICON_ART`'s rows for the kind mapped there, or all-transparent
-    (0) for a slot no kind claims -- the same blank a fresh IconSheet starts
-    with. Used by the icon editor's per-slot RESET (#90): restoring one slot
-    needs the ONE tile's worth of default pixels, not a whole re-bake."""
-    t = IconSheet.TILE
-    pix = [0] * (t * t)
-    kind = None
-    for k, slot in _ICON.items():
-        if slot == n:
-            kind = k
-            break
-    rows = _ICON_ART.get(kind) if kind is not None else None
-    if rows:
-        for ly in range(t):
-            row = rows[ly] if ly < len(rows) else ""
-            for lx in range(t):
-                ch = row[lx] if lx < len(row) else "."
-                c = _nibble(ch)
-                if c >= 0:
-                    pix[ly * t + lx] = c
-    return pix
 
 
 def _cursor_delta(n):

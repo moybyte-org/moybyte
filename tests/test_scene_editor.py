@@ -355,10 +355,9 @@ def test_editor_resets_between_carts(tmp_path):
 
 def test_icon_and_glyph_vocabulary_carry_scene():
     from runtime import ui_draw
-    from runtime.chrome import _ICON, _ICON_ART, _ICON_VERSION
+    from runtime.chrome import _ICON, _ICON_ART
     assert ui_draw.glyph_id("scene") >= 0                   # the 12x12 fallback
-    assert "scene" in _ICON and "scene" in _ICON_ART   # the themeable 16x16 slot
-    assert _ICON_VERSION >= 4                          # stale saved themes re-seed
+    assert "scene" in _ICON and "scene" in _ICON_ART   # the shell's 16x16 slot
 
 
 def test_build_scripts_stage_the_new_modules():

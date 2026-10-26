@@ -54,10 +54,11 @@ except ImportError:  # pragma: no cover - host: the ctypes binding
 
 # THE EDITOR SURFACES ARE IMPORTED AT THEIR FIRST USE (docs/kernel_cartpath_2026-10.md
 # section 5.5): the block, map, scene and music editors' UIs and the sprite/icon
-# PAINT surface (paint_layer.py, one renderer for the cart sheet and the system
-# icon sheet) are modules a start that never opens the Editor does not load.
+# PAINT surface (paint_layer.py) and the theme mode's two tabs (theme_editor.py)
+# are modules a start that never opens the Editor does not load.
 # Each is a Workstation property (`block_ui`, `map_ui`, `scene_ui`, `music_ui`,
-# `paint_layer`, `theme_layer`) that imports its module and builds the one
+# `paint_layer`, `theme_config_layer`, `theme_sprites_layer`) that imports its
+# module and builds the one
 # instance when something first reads it; `built(attr)` answers without
 # building. Each module stays the single source of its geometry constants; the
 # names tests reach as `console.X` resolve through the module's __getattr__
@@ -70,7 +71,7 @@ _LAZY_MODULES = {
     "map_editor_ui": ("MapEditorUI", "_MV_ZOOMS"),
     "scene_editor_ui": ("SceneEditorUI",),
     "music_editor_ui": ("MusicEditorUI",),
-    "paint_layer": ("PaintLayer", "ThemeLayer", "_PG_X0", "_PG_Y0", "_PG_SPAN",
+    "paint_layer": ("PaintLayer", "_PG_X0", "_PG_Y0", "_PG_SPAN",
                     "_SW_X0", "_SW_Y0", "_SW", "_SW_COLS"),
 }
 
@@ -113,8 +114,12 @@ def _build_paint_layer(ws):
     return _lazy_module("paint_layer").PaintLayer(ws, NAMES)
 
 
-def _build_theme_layer(ws):
-    return _lazy_module("paint_layer").ThemeLayer(ws, ws.paint_layer, NAMES)
+def _build_theme_config_layer(ws):
+    return _lazy_module("theme_editor").ConfigLayer(ws, NAMES)
+
+
+def _build_theme_sprites_layer(ws):
+    return _lazy_module("theme_editor").SpritesLayer(ws, NAMES)
 
 
 def _first_use(attr, build):
@@ -436,9 +441,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # forwarding projection of EditorApp.tab; ws.set_menu_view/_open_*/_leave_menu
 # stay one-line forwards (tested surface).
 try:
-    from editor_app import (EditorApp, COMMIT_TABS)
+    from editor_app import (EditorApp, COMMIT_TABS, THEME_TABS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editor_app import (EditorApp, COMMIT_TABS)
+    from runtime.editor_app import (EditorApp, COMMIT_TABS, THEME_TABS)
 
 # FullscreenStackWM (wm.py): viewport composite (#39), the back-stack `screen`
 # projects onto, and the MEMOIZED visible/draw stack (rebuilt only on push/pop
@@ -647,7 +652,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     scene_ui = _first_use("scene_ui", _build_scene_ui)
     music_ui = _first_use("music_ui", _build_music_ui)
     paint_layer = _first_use("paint_layer", _build_paint_layer)
-    theme_layer = _first_use("theme_layer", _build_theme_layer)
+    theme_config_layer = _first_use("theme_config_layer", _build_theme_config_layer)
+    theme_sprites_layer = _first_use("theme_sprites_layer", _build_theme_sprites_layer)
     # The board's inputs as the hints know them (`use_inputs`): None until a
     # board declares them, and then the source names' kinds.
     input_kinds = None
@@ -1113,13 +1119,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # per-second clock cache (#66) and the bar tap slices live
         # on self.bar_layer; a look change reaches its strips through ws.look.look_gen.
         self.bar_layer = BarLayer(self, NAMES)
-        # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
-        # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
-        # It changes where SAVE writes (system_icons.moygfx, not the cart) and where
-        # CLOSE/back returns (Settings, not the running cart). menu_view == "theme"
-        # reuses the cart PAINT renderer/input over ws.look.icon_sheet (PaintEditor is
-        # tile-size-agnostic, so the 16x16 IconSheet edits natively).
-        self._editing_icons = False
         # (Settings' focus and page scroll live in self.settings_layer's UI
         # context, built in _build_layers with the rest of the stack.)
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
@@ -1230,13 +1229,13 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The cards ("Make it mine") surface is its own Layer now (#3/#15), owning its
         # selection/scroll state (msel/mtop) + draw + taps; cart config/apply stay on ws.
         self.cards_layer = CardsLayer(self, NAMES, _err_text)
-        # The PAINT editor surface (#4/#30): one renderer for the cart sheet ("paint")
-        # and the icon sheet ("theme"), keyed on ws._editing_icons. It reads ws.paint /
-        # ws.sheet + dispatches SAVE/GET/PUT/CLOSE to ws. The theme content is ThemeLayer
-        # -- it owns the EDIT-ICONS lifecycle + delegates all editing to this PaintLayer.
-        self._paint_layer = None      # built at its first use, as theme_layer
+        # The PAINT editor surface (#4/#30) over the cart sheet ("paint"). It reads
+        # ws.paint / ws.sheet + dispatches SAVE/GET/PUT/CLOSE to ws. The theme mode's
+        # tabs ("theme_config", "theme_sprites") are runtime/theme_editor.py's.
+        self._paint_layer = None      # built at its first use
         self._editor_desk = None      # the desk Editor, at its first use on a desk
-        self._theme_layer = None
+        self._theme_config_layer = None
+        self._theme_sprites_layer = None
         # The Settings app (#28/#39/#53): the aggregator screen. Owns its page of
         # rows and panels; reads ws config/system state + dispatches every
         # mutation to ws setters (it owns NO config).
@@ -1258,8 +1257,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self.projects_layer = HomeWindowLayer(self, NAMES)
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
         # surface is its own Layer/component -- the running-cart "desktop" is the
-        # _PlayerLayer adapter over ws.player, "theme" the ThemeLayer over the paint
-        # layer; the only _LegacyLayer entries are the four draw-only overlays
+        # _PlayerLayer adapter over ws.player; the only _LegacyLayer entries are the four draw-only overlays
         # (splash / toast / notice / cursor, built by `L` above).
         # SYSTEM APPS (docs/app_api_v1.md) are NOT listed here -- register_app below
         # adds each one's kind to this table.
@@ -1349,7 +1347,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         """The content layer for router key `key`, None for none. The paint and
         theme surfaces join the table at their first use."""
         layer = self._content_layers.get(key)
-        if layer is None and key in ("paint", "theme"):
+        if layer is None and key in ("paint", "theme_config", "theme_sprites"):
             layer = self._content_layers[key] = getattr(self, key + "_layer")
         return layer
 
@@ -2144,7 +2142,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     # The active editor view lives on self.editor_app.tab now; menu_view is a
     # forwarding PROJECTION of it (read AND write, the same shim ws.sheet got in
     # Stage 1), so the string-keyed router keeps routing on ws.menu_view unchanged and
-    # every writer (ThemeLayer sets "theme"; open()/set_menu_view set the cart tabs)
+    # every writer (open()/set_menu_view set the cart tabs, open_theme the theme mode's)
     # keeps working. EditorApp.tab is the source of truth; menu_view stays a faithful
     # tested-surface projection of it (like ws.screen over the WM back-stack -- plan
     # Section 6 keeps these shims as tested surface, the future OS-arch capability track
@@ -3108,10 +3106,22 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _open_paint(self):
         self.editor_app.open_paint()
 
-    def open_theme(self):
-        # EDIT ICONS (#52): the theme editor's lifecycle lives on self.theme_layer now;
-        # this stays as the reachable entry point (Settings + the device/tests call it).
-        self.theme_layer.open()
+    @property
+    def _editing_icons(self):
+        """Whether the Editor holds a theme (its theme mode, runtime/theme_editor.py):
+        the windowed WM's name for it, whose window X commits it through
+        `look.save_icons`."""
+        app = getattr(self, "editor_app", None)
+        return app is not None and app.theme is not None
+
+    def edit_theme(self, made=None):
+        """Appearance's Edit theme… (`Appearance.edit_file`, which makes `custom`
+        first): the theme opened in the Editor's theme mode, on its Config tab;
+        `made` names the theme a copy was just made from, which Config's status
+        line names once. Done comes back to the surface it was opened from."""
+        doc = _lazy_module("theme_editor").ThemeDoc(self, made)
+        self.editor_app.open_theme(doc, self.wm.top_kind())
+        return True
 
     def _open_map(self):
         self.editor_app.open_map()
@@ -3214,11 +3224,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._dirty = True
         return True
 
-    def _leave_theme(self):
-        # CLOSE/back from the theme editor -> the lifecycle lives on self.theme_layer;
-        # this stays reachable (PaintLayer's CLOSE tap dispatches ws._leave_theme()).
-        self.theme_layer.leave()
-
     def home_key(self):
         """The HOME key (owner, 2026-10-13: back out one level, everywhere).
         In desktop mode it shows the desktop -- every window minimised to its
@@ -3268,7 +3273,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if _editor_app is not None and _editor_app.project is self.project:
             _editor_app.save_current()
         if self._editing_icons:
-            self.look.save_icons()     # the theme editor has no bar of its own
+            self.look.save_icons()     # the theme mode's tabs
         self.look.commit()             # a change to the theme still settling
         self.settings_layer.commit_name()  # and a Name still being typed
         if self.settings_layer.wifi_view:
@@ -3281,7 +3286,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if not keep:
             self.editor = None
             self.paint = None
-            self._editing_icons = False    # never carry the theme-editing flag home
+            if _editor_app is not None:
+                _editor_app._drop_theme()  # never carry the theme mode home
             for _ui in ("map_ui", "scene_ui", "block_ui"):
                 _ui = self.built(_ui)        # one never built is fresh already
                 if _ui is not None:
@@ -3615,7 +3621,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         """The B-leaves-the-sub-view / HOME-backs-out (`home_key`) shape shared by
         several menu_view input branches (theme/map/music/the default card editor)
         and the block-editor outline: B calls the view's own `leave` callback (it
-        differs per view -- e.g. `_leave_theme` vs `_leave_menu`), HOME always goes
+        differs per view), HOME always goes
         to the HOME key's verb (`home_key`). Verified identical at every call site
         before extracting."""
         i = self.input
@@ -3702,7 +3708,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # rather than typed at, and a debounce they could not arm would fire
         # mid-stroke.
         if ((i.last_key or pressed)
-                and self.menu_view in COMMIT_TABS and self.wm.top_is("menu")):
+                and (self.menu_view in COMMIT_TABS or self.menu_view in THEME_TABS)
+                and self.wm.top_is("menu")):
             self.history.edit_ms = _ticks_ms()
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
@@ -3833,7 +3840,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # tab's) so it can never be left stale True by a gesture that ended
         # somewhere else; the router refuses to commit under it.
         self.history.pointer_down = p.down
-        if (click or p.down) and self.menu_view in COMMIT_TABS and self.wm.top_is("menu"):
+        if (click or p.down) and (self.menu_view in COMMIT_TABS
+                                  or self.menu_view in THEME_TABS) \
+                and self.wm.top_is("menu"):
             self.history.edit_ms = _ticks_ms()
         # THE APP BAR CONTRACT, input half (docs/app_api_v1.md): a tap in a
         # REGISTERED app's bar band belongs to the bar, and the router routes it
@@ -3931,10 +3940,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return False
         # Shift held extends the selection, as SELECT mode does.
         select = True if getattr(self.input, "mods", 0) & _SHIFT else None
-        if (self.wm.top_is("menu") and self.menu_view == "code"    # Stage 6d
+        view = self.menu_view
+        if (self.wm.top_is("menu") and view in ("code", "theme_config")    # Stage 6d
                 and self.editor is not None):
-            self.code_layer.stop_autoscroll()
-            if dy and self.code_layer.overlay_step(dy):
+            cl = self.code_layer if view == "code" else self.theme_config_layer
+            cl.stop_autoscroll()
+            if dy and cl.overlay_step(dy):
                 self._dirty = True         # a row of an open overlay picked
                 return True
             self.editor.move(dy, dx, select)
@@ -3957,7 +3968,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if not (dx or dy) or self.pause.open or self.confirm.open or self.sysmenu.open \
                 or self.wm.popover_takes_keys():
             return False
-        if not ((self.wm.top_is("menu") and self.menu_view == "code" and self.editor is not None)
+        if not ((self.wm.top_is("menu") and self.menu_view in ("code", "theme_config")
+                 and self.editor is not None)
                 or self.focused_cart_editor() is not None):
             return False
         self.nav(dx, dy)
@@ -4916,7 +4928,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         a bar icon over a non-black surface (the Library shelf's pseudo cards). The
         sheet's untouched pixels are 0: invisible on the black bar, a black plate
         anywhere else. tile_image memoises per (slot, transparent), so this shares
-        the sheet's own cache."""
+        the sheet's own cache. A slot the theme paints is its own tile."""
+        img = self.look.pixel_image(kind)
+        if img is not None:
+            return img
         sp = self.icon_spec()
         if sp is not None and sp[0] == "pixel":
             img = _iconsets.pixel_image(kind, sp[2])
@@ -4937,14 +4952,18 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         return self.look.icons
 
     def draw_icon(self, kind, rect, ink, cv=None):
-        """Draw icon `kind` of the live theme's icon set centred in `rect` in
-        colour index `ink` (a glyph_draw for ui.button and ui.tab). False,
-        drawing nothing, where the theme names no set or its set has no such
-        icon on this image."""
+        """Draw icon `kind` of the live theme centred in `rect` in colour index
+        `ink` (a glyph_draw for ui.button and ui.tab): the theme's own tile
+        where its look paints the slot (`Appearance.pixel_draw`), else its icon
+        set's. False, drawing nothing, where the theme names no set or its set
+        has no such icon on this image."""
+        cv = cv if cv is not None else self.sys_canvas
+        if self.look.pixel_draw(cv, kind, rect):
+            return True
         sp = self.icon_spec()
         if sp is None:
             return False
-        return _iconsets.draw(cv if cv is not None else self.sys_canvas, kind, rect, ink, sp)
+        return _iconsets.draw(cv, kind, rect, ink, sp)
 
     def _icon(self, kind, x, y, cv=None, scale=None, ink=None):
         """Draw the top-bar icon `kind` at (x, y), in a 16px box at the scale:
@@ -4963,6 +4982,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if fs < 1:
             fs = 1
         box = _BAR_ICON * fs
+        if self.look.pixel_draw(cv, kind, (x, y, box, box)):
+            return
         sp = self.look.icons
         if sp is not None and _iconsets.draw(
                 cv, kind, (x, y, box, box),

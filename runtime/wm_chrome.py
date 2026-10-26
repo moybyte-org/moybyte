@@ -53,6 +53,8 @@ RZ_CURSOR = {RZ_L: "ew", RZ_R: "ew", RZ_T: "ns", RZ_B: "ns",
 # as written.
 _TITLES = {"menu": "Editor", "projects": "Projects",
            "settings": "Settings", "update": "Update"}
+# The Editor's title in its theme mode (runtime/theme_editor.py).
+THEME_TITLE = "Theme"
 # The shell's own apps (runtime/app_decls.py), whose titles those seeds
 # capitalise; an installed app's title is drawn as its app names it.
 _SHELL_APPS = tuple(d["id"] for d in _APP_DECLS)
@@ -189,7 +191,10 @@ class WindowChrome:
         (EDITOR_LAYOUT.md's frame), cut to the title slot where the app's band
         follows it."""
         t = self._win_title(win)
-        if win.kind == "menu":
+        doc = self._theme_doc(win)
+        if doc is not None:
+            t = doc.name                        # the theme mode names its theme alone
+        elif win.kind == "menu":
             cart = self.ws.cart.get("title") if self.ws.cart else None
             if cart:
                 t = str(cart)
@@ -229,10 +234,20 @@ class WindowChrome:
         if not ws.draw_icon("app", slot, ink, sc):
             ws._glyph(_ICON_GLYPHS.get(win.kind, "app"), slot, ink, sc)
 
+    def _theme_doc(self, win):
+        """The theme the Editor's window holds in its theme mode, or None."""
+        if win.kind != "menu":
+            return None
+        app = getattr(self.ws, "editor_app", None)
+        return getattr(app, "theme", None)
+
     def _icon_slot(self, win):
         """The icon set's slot a window's line icon and its chip draw: its
-        kind's, or a window-bound app cart's own (Notes' `notes`)."""
+        kind's, the Editor's theme mode's palette, or a window-bound app
+        cart's own (Notes' `notes`)."""
         ws = self.ws
+        if self._theme_doc(win) is not None:
+            return "palette"
         if win.kind == "desktop" and ws.app_window_canvas and ws.cart:
             name = str(ws.cart.get("id") or "")
             name = name[name.rfind(".") + 1:]
@@ -445,6 +460,9 @@ class WindowChrome:
             lent = _ui_draw.bar_lent(host.ctx)
             if lent is not None and lent[0] and lent[0] != base:
                 return base + _title_sep() + lent[0]   # the document it lent ("Paint · Garden")
+        doc = self._theme_doc(win)
+        if doc is not None:
+            return THEME_TITLE + _title_sep() + doc.name     # "Theme · custom"
         if win.kind == "menu" and ws.cart:
             t = ws.cart.get("title")
             if t:

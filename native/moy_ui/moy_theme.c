@@ -599,6 +599,49 @@ static int32_t text_put(moy_theme_pkg_t *pkg, const item_t *it) {
     return ++pkg->n_text;
 }
 
+// A `slots` field's value into its n leaves: null (none), or a list of icon
+// slot names (moy_ui_icon_slot), slot s bit s % MOY_THEME_SLOT_BITS of leaf
+// s / MOY_THEME_SLOT_BITS. A name of no slot is dropped and noted. 1, 0 when
+// dropped, -1: malformed.
+static int slots_val(rd_t *r, moy_theme_pkg_t *pkg, int n, int32_t *vals) {
+    item_t it;
+    if (item(r, &it, 1) < 0) {
+        return -1;
+    }
+    if (it.k == I_NULL) {
+        for (int i = 0; i < n; i++) {
+            vals[i] = MOY_THEME_OFF;
+        }
+        return 1;
+    }
+    if (it.k != I_ARR) {
+        pkg->notes |= MOY_THEME_N_DROPPED;
+        return 0;
+    }
+    for (int i = 0; i < n; i++) {
+        vals[i] = 0;
+    }
+    if (eat(r, ']')) {
+        return 1;
+    }
+    for (;;) {
+        if (item(r, &it, 0) < 0) {
+            return -1;
+        }
+        int s = it.k == I_STR && !it.over
+                    ? moy_ui_icon_slot((const uint8_t *)it.s, strlen(it.s)) : -1;
+        if (s >= 0 && s / MOY_THEME_SLOT_BITS < n) {
+            vals[s / MOY_THEME_SLOT_BITS] |= (int32_t)1 << (s % MOY_THEME_SLOT_BITS);
+        } else {
+            pkg->notes |= MOY_THEME_N_DROPPED;
+        }
+        if (eat(r, ',')) {
+            continue;
+        }
+        return eat(r, ']') ? 1 : -1;
+    }
+}
+
 // One field's value into vals[0 .. f->n) (MOY_THEME_NONE where it sets none).
 // 1 when it set some, 0 when dropped, -1: malformed.
 static int field_val(rd_t *r, moy_theme_pkg_t *pkg, const moy_theme_field_t *f,
@@ -609,6 +652,9 @@ static int field_val(rd_t *r, moy_theme_pkg_t *pkg, const moy_theme_field_t *f,
     uint8_t *notes = &pkg->notes;
     if (f->type == MOY_THEME_FT_PAINT) {
         return paint_val(r, pkg, &vals[0]);
+    }
+    if (f->type == MOY_THEME_FT_SLOTS) {
+        return slots_val(r, pkg, f->n, vals);
     }
     item_t it[6];
     if (item(r, &it[0], 1) < 0) {
@@ -3819,6 +3865,28 @@ static void put_leaf(wr_t *w, const moy_theme_look_t *lk, const moy_theme_leaf_t
 // One field's value from its leaves at v.
 static void put_field(wr_t *w, const moy_theme_look_t *lk, const moy_theme_field_t *f,
                       const moy_theme_leaf_t *lv, const int32_t *v) {
+    if (f->type == MOY_THEME_FT_SLOTS) {
+        // the icon slots' names, in slot order; null where it is off
+        if (v[0] == MOY_THEME_OFF || v[0] == MOY_THEME_NONE) {
+            put_s(w, "null");
+            return;
+        }
+        int first = 1;
+        put(w, "[", 1);
+        for (int i = 0; i < f->n; i++) {
+            for (int b = 0; b < MOY_THEME_SLOT_BITS; b++) {
+                const char *name = moy_ui_icon_name(i * MOY_THEME_SLOT_BITS + b);
+                if (name != NULL && v[i] != MOY_THEME_OFF && v[i] != MOY_THEME_NONE
+                    && ((v[i] >> b) & 1)) {
+                    put_s(w, first ? "" : ",");
+                    put_str(w, name);
+                    first = 0;
+                }
+            }
+        }
+        put(w, "]", 1);
+        return;
+    }
     if (f->n == 1) {
         put_leaf(w, lk, &lv[0], v[0]);
         return;

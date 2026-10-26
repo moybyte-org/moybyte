@@ -92,10 +92,11 @@ Each was mocked and judged worse (§11).
   `print` is libmoy's `moy_print`.
 - **Icons:** the icon set a theme's look names (`icons.kind`, `icons.set`,
   `icons.swap`: `runtime/iconsets.py`, `docs/look_2026-10.md` step 16); a
-  theme that names none draws a themeable 16×16 `IconSheet`
-  (`runtime/editors_sheet.py`), baked from `chrome._ICON_ART`, or the theme's
-  own (`icons`, §4.6), or the user's own edited sheet, `system_icons.moygfx`
-  (Settings → EDIT ICONS), which wins.
+  theme that names none draws the shell's 16×16 `IconSheet`
+  (`runtime/editors_sheet.py`), baked from `chrome._ICON_ART`. In every
+  theme the slots its look's `icons.pixel_slots` names draw from its own
+  tiles instead (`icons`, §4.6), painted in the Editor's theme mode
+  (`docs/look_2026-10.md` step 33).
 - **Wallpapers** are carts with `"moybyte": {"type": "wallpaper"}`, or the
   theme's picture; which one the desk shows is the theme's (D6, §4.9), and
   apps reach the backdrop through `ctx.wallpaper`. A wallpaper cart may
@@ -231,7 +232,8 @@ step 4; format 2, RGB colours and `look`, 2026-10-15 by
   `docs/shell_layout_2026-10.md` §5 and §9, which owns it.
 - **`sprites`** and **`icons`**: a `.moygfx` file in the package each, a
   name of the `fonts` grammar ending `.moygfx` (another is dropped): the
-  role sheet the sprite parts draw from and the bar's icon sheet (§4.6).
+  role sheet the sprite parts draw from and the theme's own icon tiles
+  (§4.6).
 - **Reserved:** `images`, `wallpapers`, `sounds`, `editor` (style.json's
   `theme.reserved`) are accepted and not read yet. Each is defined, additively,
   by the phase that first reads it (§9).
@@ -587,8 +589,8 @@ shadow's reach).
   phase 6 step 9): `.moygfx`'s nibble names a slot — transparent, a role of
   the row, or black or white — resolved through the variant's table at the
   blit, so one sheet follows light and dark, an accent and a tint. No page
-  edits it: the package carries it and `theme.json` names it (EDIT FILE,
-  phase 6). A tinted glyph is a sheet in two slots. The slots and the cell map are style.json's.
+  edits it: the package carries it and `theme.json` names it (Edit theme…'s
+  Config, phase 6). A tinted glyph is a sheet in two slots. The slots and the cell map are style.json's.
 - **Drawn in C, in one call each** (`native/moy_ui/moy_ui_draw.c`'s
   `sprite`). A 9-slice is one C call, not nine `spr` wrapper calls: its
   8-pixel corners whole, its edges and centre tiled, scaled by the chrome
@@ -600,10 +602,14 @@ shadow's reach).
   the title strip, in place of the style's — under the title and the
   buttons; the ring's sides and foot and the shadow stay the style's, inside
   §4.5's footprint.
-- **Icons:** a theme may ship an icon sheet (`icons`, the `IconSheet` shape,
-  colours, not roles). **The user's own edited sheet (`system_icons.moygfx`)
-  is an override slot** that wins over the theme's, like the layout override
-  (D5); the theme's becomes the user's only when EDIT ICONS changes it.
+- **Icons:** a theme may ship its own icon tiles (`icons`, the pixel icon
+  set's shape: eight 16-pixel tiles a row, one a slot of
+  `runtime/iconsets.py`'s `SLOTS`, colours, not roles, its clear pixel 16),
+  and its look's `icons.pixel_slots` names the slots drawn from them over
+  its icon set (`Appearance.pixel_draw`). The Editor's theme mode paints
+  them: a smooth slot painted becomes a tile and is named there. The icons
+  are the theme's alone; no sheet beside the carts overrides them
+  (2026-10-26).
 
 ### 4.7 Fonts
 
@@ -1000,21 +1006,21 @@ made unreadable in `theme.pairs` stays reported as any hand edit is (§7).
 **Where the result lives: plain roles in `custom`'s `theme.json`.** Both
 variants, every role, written by `ui.theme_custom` (phase 6 step 4) with the
 source's `look` flattened beside them, so the loader reads it as any
-package, EDIT FILE shows the colours the
+package, Edit theme…'s Config shows the colours the
 console draws, and a console without the step, the web console and the
 carts repository read the same row. The inputs ride in the package's
 manifest, `"moybyte": {"type": "theme", "look": {"from": "moy", "accent":
 14, "tint": "plum"}}`, read by Appearance alone: ACCENT and TINT show them,
 and each change re-derives from `from`'s resolved rows, never from the last
 result, since a ramp quantises and quantising a quantised row drifts. A
-colour (or any key the derivation writes) saved through EDIT FILE drops
+colour (or any key the derivation writes) saved through Edit theme… drops
 `from`, and the file as saved is the source from then on. A package whose whole rows would pass `theme.bytes` (a
 source carrying a large `images` value, say: every seed's fits whole) is written without the roles whose value §5's
 rule gives back, which resolves to the same row, and one that does not fit
 even so is refused (`MOY_THEME_BIG`). Declined: `accent` and
 `tint` keys the loader derives from, smaller on the card, because the
 derivation would then run in the boot path and in every resolve, a console
-without it would draw the source's colours under the kid's name, EDIT FILE
+without it would draw the source's colours under the kid's name, Config
 would show two numbers in place of the colours, and a role set by hand
 would need a precedence over the rule.
 
@@ -1134,7 +1140,7 @@ Kids will trade themes, so a theme is untrusted input:
   colour, a kind's ink as the style resolves it and the chrome parts' as the
   frame and the bar draw them; a part that paints no label is not checked.
   The derivation (§4.10) never writes a pair under the floor; a hand edit
-  through EDIT FILE can, and its reader is the editor's badge at the save
+  through Edit theme… can, and its reader is Config's badge at the save
   (phase 6 step 6). Every seed passes both checks in both variants
   (`tests/test_theme_loader.py`), the code floor among them.
 - **The loader is the safety** (owner, 2026-10-14). A theme cannot run code,
@@ -1406,7 +1412,7 @@ instead:
   sixteen), TINT (one background tint), WALLPAPER (the wallpaper picker, out
   of the old tabs), WINDOW STYLE (the frame presets), FONT (the font
   presets, Tiny5 and petme128 only, owner 2026-10-14), CHROME SIZE (out of Settings, where the board has more than one
-  scale), EDIT FILE… and, on `custom` only, NAME…; ←→ on a row steps it in
+  scale), on `custom` only NAME…, and last Edit theme…; ←→ on a row steps it in
   place. The 2026-10 look's step 20 (2026-10-17) drew the page with the
   public UI API: THEME is a grid of cards above the rows, ACCENT eight
   swatches in its row, WALLPAPER a page of cards under tabs, NAME… a
@@ -1417,15 +1423,16 @@ instead:
   theme replaces `custom`. A theme the kid has NAMED is an installed theme
   like any other (owner, 2026-10-14): a change on it copies to `custom`,
   and NAME… → REPLACE keeps the change under the name. MODE, CHROME SIZE and THEME are not changes to a
-  theme; ACCENT, TINT, WALLPAPER, WINDOW STYLE, FONT, a save through EDIT
-  FILE and EDIT TASKBAR are.
+  theme; ACCENT, TINT, WALLPAPER, WINDOW STYLE, FONT, a save through Edit
+  theme… and EDIT TASKBAR are.
 - **Every colour role is derived** from the source theme, MODE, ACCENT and
   TINT, readable by construction (§4.10): no per-role picker and no "fails
   its pair" mark.
-- **ADVANCED is EDIT FILE**: the theme's `theme.json` in the console's text
-  editor, a save reloading the look live. Every role, the surfaces, the
-  sprites and the layout are reachable there and only there; no page edits a
-  role, a shape or a sprite visually.
+- **ADVANCED is Edit theme…**: the theme opened in the Editor's theme mode
+  (`docs/look_2026-10.md` step 33), its `theme.json` as Config, a save
+  reloading the look live, and its icons as Sprites. Every role, the
+  surfaces, the sprites and the layout are reachable in Config and only
+  there; no page edits a role or a shape visually.
 - **NAME… renames `custom`** to a name of the kid's, so it is a theme of its
   own in the grid (a package like any in the store) and `custom` is free.
   There is no SHARE and no PASTE (owner, the same day): moving a theme to
@@ -1437,7 +1444,7 @@ instead:
   wallpaper, and there is no separate persisted `wallpaper` setting (D6).
 - **EDIT TASKBAR** edits the live bar and writes the theme's `layout`; it is
   the last step and deferrable, and until it lands a layout is edited
-  through EDIT FILE.
+  through Edit theme…'s Config.
 
 The order puts the invalidation first (every later step edits a theme in
 place), then the package (every later step installs one), then the design,
@@ -1516,7 +1523,7 @@ port), never here.
      tab sources (`runtime/console.py`) skip it, the Make tab too, and
      `nav.projects()` (`runtime/shell_servers.py`) leaves it out, so the
      Files app never opens it in the Editor: Files lists it as a kind of its
-     own, THEMES, whose door is the Appearance app (its EDIT FILE… row from step 7). `Appearance.set_theme` takes a
+     own, THEMES, whose door is the Appearance app (its Edit theme… row from step 7). `Appearance.set_theme` takes a
      package's name: it reads the folder's `theme.json` into the slot, its
      fonts from the folder (`font_load` takes bytes, each at most
      `MOY_FONT_BYTES`; `_font_id` keyed on the package and the file) and, from
@@ -1675,7 +1682,10 @@ port), never here.
      golden moves: no seed names a wallpaper, and an unnamed one resolves to
      the default the setting's absence gives today; the configs set none.
 
-  6. **EDIT FILE** (landed 2026-10-14). `Appearance.edit_file()`
+  6. **EDIT FILE** (landed 2026-10-14; since 2026-10-26 the door is Edit
+     theme…, the Editor's theme mode, whose Config takes this step's
+     gate, write and install with no text app or watched handle:
+     `docs/look_2026-10.md` step 33, phase 3). `Appearance.edit_file()`
      (`runtime/appearance.py`, `ws.look`) opens the active theme's
      `theme.json` in the console's text app (`Workstation.open_text_cart`
      on the package's project kind, in the `json` mode of
@@ -1734,7 +1744,7 @@ port), never here.
      WIN9X, FLAT, each a whole `frame`), FONT (the two presets, Tiny5 and
      the built-in petme128 — `petme128`, a reserved name in `fonts` the
      loader answers with font row 0, additive; owner, 2026-10-14: these two
-     only, a package's own `.fnt` set through EDIT FILE), CHROME SIZE (moved
+     only, a package's own `.fnt` set through Edit theme…), CHROME SIZE (moved
      from Settings, present where `ws.chrome_scales` has more than one) and
      EDIT FILE… (step 6's `edit_file`, through a `theme.edit_file` role
      row). Every row but THEME, MODE, CHROME SIZE and EDIT FILE… calls step
@@ -1870,9 +1880,10 @@ port), never here.
      (integer, per run), corners whole and edges tiled, inside §4.5's
      footprint; nine calls never. `"icons": "<file>.moygfx"` is read the
      same step: a theme's bar icons in the `IconSheet` shape, under the
-     user's `system_icons.moygfx` (§4.6). No page edits a sheet (the
-     Appearance rulings): a package carries its sheets, `theme.json` names
-     them (EDIT FILE), and EDIT ICONS stays the user's icon sheet's.
+     user's override of the time (§4.6, which the Editor's theme mode
+     replaced on 2026-10-26: the icons are a pixel tile a slot, painted in
+     its Sprites). No page edits the role sheet (the Appearance rulings): a
+     package carries it and `theme.json` names it.
      Declined: a MOY64 `.moyimg` sheet (one sheet per variant, and the Paint
      canvas has no cells), per-part sprite keys in `theme.json` (the
      empty-cell rule needs none), a sprite page, and **the cursor** (its
@@ -1943,7 +1954,7 @@ port), never here.
      that reach). The tile and the pill are the desk's own bodies,
      `ui.icon_tile` and `ui.icon_label`, which the desk now draws through.
      The theme loader reads `icons` (style.json's `layout.homes`); a
-     theme's layout reaches it, or EDIT FILE on one. Goldens:
+     theme's layout reaches it, or Edit theme… on one. Goldens:
      `tdeck_320x240_fs1_homeicons` and `p4_1024x600_cs2_fs1_homeicons`,
      the home's four tabs each; `tools/p4_bench.py --icons` runs the
      scenarios beside the grid's; the numbers are #66's. Net:
@@ -1951,7 +1962,7 @@ port), never here.
 
   12. **EDIT TASKBAR** (owner, 2026-10-14; deferrable: nothing before it
      depends on it, and until it lands the page has no taskbar row and a
-     layout is edited through EDIT FILE). Its doors are a row of the bar's
+     layout is edited through Edit theme…). Its doors are a row of the bar's
      menu and an Appearance row, EDIT TASKBAR…. It is a mode of the LIVE
      bar, not a page: the items draw boxed, and ←→ (↑↓ on a side bar)
      select an item, the bar's own edge first; SPACE grabs and drops the
@@ -2054,7 +2065,7 @@ About eighteen systems were studied; the lessons that shaped this doc:
   SHAPES, FONTS, SPRITES and LAYOUT pages, a per-role picker with
   "fails its pair" marks, a name page and a byte budget (mockups on the
   unmerged branch `editordesign`, `937863c7`): too complex for what a kid
-  changes. One page of rows, every colour derived (§4.10), and EDIT FILE
+  changes. One page of rows, every colour derived (§4.10), and Edit theme…
   for the rest.
 - **SHARE and PASTE, the one-line form** (owner, 2026-10-14) — a theme
   travels as its package through the store (Files, the Zero's sync, the

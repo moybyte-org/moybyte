@@ -2,8 +2,8 @@
 18 and 25): what a theme's `icons` names and how an icon of it draws.
 
 A theme's look sets `icons.kind` (`pixel` or `smooth`), `icons.set` and, for
-a pixel set, `icons.swap`. A theme that sets no kind draws the bar's own
-IconSheet (`ws.look.icon_sheet`, Settings -> EDIT ICONS), as it always has,
+a pixel set, `icons.swap`. A theme that sets no kind draws the shell's own
+IconSheet (`ws.look.icon_sheet`, baked from chrome._ICON_ART),
 and so would an image that carried none of the set's files (`carried`).
 Every console image carries its tier's sets, the browser's the handheld's
 and the desk's (tools/make_font.py's `module`).
@@ -17,6 +17,10 @@ and the desk's (tools/make_font.py's `module`).
   `.fill` layer, where the set has one, under it in the set's fill colour.
   The largest size the box holds draws, centred. A slot the set lacks
   draws from the default set.
+* A THEME'S OWN TILES: the package's `icons` sheet, in the pixel set's
+  shape, and the slots its look's `icons.pixel_slots` names draw from it in
+  place of the set's (Appearance.pixel_draw), in every theme. The Editor's
+  theme mode paints them (runtime/theme_editor.py).
 * Both: Moy is the pixel set's, in every theme; redo is undo's mirror
   (built so: make_icons mirrors the masks, the pixel set's art mirrors
   undo).
@@ -26,6 +30,8 @@ and the desk's (tools/make_font.py's `module`).
   draw(cv, kind, rect, ink, spec) -> bool     False: the set cannot draw it
   ink_span(kind, w, h, spec) -> (a, b) | None the columns its ink covers
   pixel_image(kind, swap) -> image | None     a pixel set tile, keyed clear
+  pixel_slots(look) -> bytearray | None       the slots a theme draws from its own tiles
+  pixel_sheet_of(src) -> IconSheet | None     a theme's tiles, read in the pixel shape
   weight(spec) -> float | None                a smooth set's line weight
   plus(cv, rect, ink, spec, stepped)          the set's `new` at any size
 """
@@ -141,6 +147,82 @@ def pixel_sheet():
             sheet.dirty = False
         _PIXEL.append(sheet)
     return _PIXEL[0]
+
+
+# A `slots` look field's leaves hold this many slots each (tools/gen_ui_tables.py).
+SLOT_BITS = 30
+_SLOT_LEAVES = tuple("icons.pixel_slots.%d" % i for i in range(-(-len(SLOTS) // SLOT_BITS)))
+
+
+def pixel_slots(look):
+    """The slots a live look (`chrome.Live.look`) draws from its theme's own
+    tiles, as a bytearray of SLOTS flags, or None where it names none."""
+    leaves = look[0]
+    out = None
+    for i, name in enumerate(_SLOT_LEAVES):
+        v = leaves.get(name, _NONE)
+        if v is None or v < 0 or v == _NONE:
+            continue
+        for b in range(SLOT_BITS):
+            if v >> b & 1:
+                n = i * SLOT_BITS + b
+                if n < len(SLOTS):
+                    if out is None:
+                        out = bytearray(len(SLOTS))
+                    out[n] = 1
+    return out
+
+
+def mask16(set_name, slot):
+    """Smooth set `set_name`'s 16 px mask of `slot` (the default set's where
+    it has none) as 256 flags, 1 where it covers the pixel at all -- each
+    pixel the canvas inks -- or None where no 16 px mask of it is carried.
+    Read from the mask file's version 2 glyph record (native/moy_gfx/
+    moy_text.h): its box, its bearing and its rows of coverage."""
+    for name in (set_name, DEFAULT_SET):
+        src = _fontset.icon_file("%s-16.fnt" % name)
+        if src is None or len(src) < 16 + 256:
+            continue
+        bpp, count, nkern = src[5], src[9], src[10] | src[11] << 8
+        i = src[16 + FIRST + slot]
+        rec = 16 + 256 + 8 * i
+        if i >= count or len(src) < rec + 8 or not src[rec + 3]:
+            continue
+        cov = 16 + 256 + 8 * count + 3 * nkern
+        at = cov + (src[rec] | src[rec + 1] << 8 | src[rec + 2] << 16)
+        w, h, gx, gy = src[rec + 3], src[rec + 4], src[rec + 5], src[rec + 6]
+        if gx > 127:
+            gx -= 256
+        if gy > 127:
+            gy -= 256
+        gy = src[7] - gy                 # the bearing is above the baseline, at the ascent
+        top = (1 << bpp) - 1
+        out = bytearray(256)
+        for r in range(h):
+            for c in range(w):
+                bit = (r * w + c) * bpp
+                v = (src[at + (bit >> 3)] >> (8 - bpp - (bit & 7))) & top
+                x, y = gx + c, gy + r
+                if v and 0 <= x < 16 and 0 <= y < 16:
+                    out[y * 16 + x] = 1
+        return out
+    return None
+
+
+def blank_sheet():
+    """A theme's tiles with nothing painted: the pixel set's shape, its clear
+    pixel 16 (so black is a colour)."""
+    return IconSheet(PIXEL_COLS, PIXEL_ROWS, clear=16)
+
+
+def pixel_sheet_of(src):
+    """A theme's `icons` sheet bytes read in the pixel set's shape, or None
+    where they will not read."""
+    try:
+        return IconSheet.from_hex(src.decode("ascii") if type(src) is not str else src,
+                                  PIXEL_COLS, PIXEL_ROWS)
+    except (ValueError, UnicodeError):
+        return None
 
 
 def pixel_image(kind, swap=None):

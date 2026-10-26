@@ -257,6 +257,8 @@ int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint1
 // The icon set's slot named `name` (tools/make_icons.py's order; `gear`,
 // `batt` and `edit` are aliases of settings, battery and pencil), -1 none.
 int moy_ui_icon_slot(const uint8_t *name, size_t n);
+// Icon slot `slot`'s name, NULL past the last.
+const char *moy_ui_icon_name(int slot);
 // The glyph table's glyph named `name` or by an icon slot's alias, -1 none.
 int moy_ui_icon_glyph(const uint8_t *name, size_t n);
 // The live set's mask file at 24 px (`size24`) or 16 px, 0 where it has none.

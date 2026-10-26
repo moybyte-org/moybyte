@@ -2,9 +2,9 @@
 #   Appearance                       `ws.look`: theme, variant, font scale, wallpaper, icons, layout
 #   -- the wallpaper: the theme's    theme_wallpaper, the picture, the coordinator
 #   -- custom: a change              change / tick / commit, the one write path
-#   -- EDIT FILE                     edit_file, and the text app's saves (file_check / file_saved)
+#   -- Edit theme…                   edit_file, and the theme mode's writes (file_check / file_write / file_saved)
 #   Appearance.name_custom           NAME…: custom renamed into a theme of its own
-#   -- the top-bar icon sheet        the bar's IconSheet
+#   -- the icon sheets               the shell's IconSheet, the theme's pixel tiles
 #   Appearance.set_font_scale        the system font scale, relayout
 #   Appearance.set_chrome_scale      the chrome scale above the tap floor, relayout
 #   Appearance.set_theme             the panel theme: tokens, shape, fonts, layout
@@ -15,13 +15,15 @@
 
 Every verb that changes how the desktop looks: the panel theme and its
 dark/light variant, the system font scale, the desktop wallpaper and the
-top-bar icon sheet. Two axes plus a backdrop plus the bar art, which until this landing were five unrelated stretches of the kernel that
+icon sheets. Two axes plus a backdrop plus the bar art, which until this landing were five unrelated stretches of the kernel that
 happened to share a Settings screen. And `custom`, the theme a change makes
 (`change`, docs/theming_2026-09.md §9 phase 6 step 5): the one write path of
 the Appearance rows, applied once a frame (`tick`) and written once the
 changes settle or at an exit (`commit`), through Paint's mechanism (#108).
-And EDIT FILE (`edit_file`, step 6): custom's theme.json in the text app, a
-save the loader takes installed at the next frame. And NAME… (`name_custom`,
+And Edit theme… (`edit_file`, step 6 and docs/look_2026-10.md step 33):
+custom opened in the Editor's theme mode (runtime/theme_editor.py), whose
+saves of its theme.json and its pixel tiles come through the look's writes,
+the loader installing them at the next frame. And NAME… (`name_custom`,
 step 8): custom renamed to a name of the kid's, a package of its own in the
 THEME grid, `custom` free until the next change.
 
@@ -93,14 +95,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_store_base import BUILTIN_NS
 
 try:
-    from chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
+    from chrome import (_default_icon_sheet, _err_text,
                         DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
                         theme_known, THEME_NAMES,
                         THEME_VARIANTS, text_scale_floor, adopt_packages,
                         package, theme_names, forget_package, live_colors,
                         backdrop as _backdrop)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import (_default_icon_sheet, _err_text, _ICON_VERSION,
+    from runtime.chrome import (_default_icon_sheet, _err_text,
                                 DEFAULT_THEME, DEFAULT_VARIANT, forget_themes,
                                 theme_known,
                                 THEME_NAMES, THEME_VARIANTS, text_scale_floor,
@@ -121,10 +123,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                       wall_keys)
     from runtime.moy_store_base import cart_path
 from binascii import crc32 as _crc32
-try:
-    from editors_sheet import IconSheet
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_sheet import IconSheet
 try:
     import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -236,8 +234,8 @@ class Appearance:
     per-draw surface is `light_chrome()` and the `ws.theme_colors` dict it
     reads, both of which stay one cheap call and one flat attribute."""
 
-    # The text app's cap on custom's theme.json as typed (the editor handle
-    # reads it): the file opens indented, half again its minified size.
+    # The theme mode's Config cap on custom's theme.json as typed: the file
+    # opens indented, half again its minified size.
     max_chars = 2 * _THEME_BYTES
 
     # -- the wallpaper: the theme's (D6, docs/theming_2026-09.md §4.9) --------
@@ -320,17 +318,21 @@ class Appearance:
         self._cust = None
         self._unsaved = False
         self._idle = 0.0
-        # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
-        # chrome icons from. Loaded by `load_icon_sheet` at the end of the boot wiring
-        # (from system_icons.moygfx, else the baked default theme); None falls back to
-        # the kernel's _glyph.
+        # Unified top bar (Stage 1): the shell's 16x16 IconSheet the bar draws its
+        # chrome icons from under a theme that names no icon set, baked by
+        # `load_icon_sheet` at the end of the boot wiring; None falls back to the
+        # kernel's _glyph.
         self.icon_sheet = None
         # The theme's sheets (docs/theming_2026-09.md §4.6): what the loaded
-        # role sheet is of, the theme's icon sheet, and the user's own
-        # (system_icons.moygfx), which wins over the theme's.
+        # role sheet is of, and the theme's pixel tiles (its `icons` sheet, in
+        # the pixel set's shape) with the slots its look draws from them
+        # (`icons.pixel_slots`: a bytearray of SLOTS flags, None for none), each
+        # slot's keyed tile made once per sheet generation.
         self._sheet_key = None
-        self._theme_icons = None
-        self._user_icons = None
+        self.pixel_sheet = None
+        self.pixel_slots = None
+        self._pixel_imgs = {}
+        self._pixel_gen = -1
         self._crcs = {}                 # package_rows's sheet digests, see _sheet_crc
         # The shell layout (docs/shell_layout_2026-10.md §9-§11): the bars as
         # this tier, glass and mode resolved them, what the composer noted,
@@ -354,10 +356,10 @@ class Appearance:
         self._slot_gen = None
         self._refused = set()
         self.theme_note = None          # the last refusal: (name, rc)
-        self._editing = None            # (kind, name) EDIT FILE opened
-        # Moves with every change to custom's bytes but the editor's own
-        # save: an open EDIT FILE buffer with no edits reloads on it.
+        # Moves with every change to custom's bytes but the theme mode's
+        # Config save: its buffer, with no edits, reloads on it.
         self.file_gen = 0
+        self._sheet_epoch = 0           # moves with every write of a package's sheet
         self._styles = {}               # (source, store gen) -> frame style
 
     # -- wallpaper discovery -------------------------------------------------
@@ -683,7 +685,7 @@ class Appearance:
         return dict(c.look)
 
     # The WINDOW STYLE and FONT rows' presets (phase 6 step 7), each a whole
-    # `frame` or `fonts` value; a package's own `.fnt` is EDIT FILE's.
+    # `frame` or `fonts` value; a package's own `.fnt` is its theme.json's (Edit theme…).
     FRAMES = ("classic", "tab", "platinum", "win9x", "flat")
     FONTS = ("tiny5", PETME128)
     _FONT_VALUES = {"tiny5": {"ui": "tiny5.fnt", "title": "tiny5.fnt"},
@@ -884,17 +886,20 @@ class Appearance:
             rows.set("theme_variant", self.theme_variant)
         return True
 
-    # -- EDIT FILE: the theme's theme.json in the text app (phase 6 step 6) --
+    # -- Edit theme…: custom in the Editor's theme mode --------------------------
 
     def edit_file(self):
-        """Open the active theme's theme.json in the console's text app. On a
-        seed or an installed package `custom` is made from it first and
-        switched to (a seed is firmware); on `custom` its unwritten change is
-        written first, so the file opened is the look shown. The editor's
-        saves come back through `file_check` and `file_saved`. False when
-        there is no store, no text app, or `custom` cannot be made."""
+        """Appearance's Edit theme…: the active theme opened in the Editor's
+        theme mode (`Workstation.edit_theme`). On a seed or an installed
+        package `custom` is made from it first and switched to (a seed is
+        firmware); on `custom` its unwritten change is written first, so the
+        file opened is the look shown. The mode's saves come back through
+        `file_check`, `file_write` and `file_saved`. False when there is no
+        store or `custom` cannot be made."""
         ws = self.ws
+        made = None
         if self.theme_name != CUSTOM:
+            made = self.theme_name
             c = Custom({"from": self.theme_name}, fresh=True)
             if self._take(c, dict(c.look), {}, None, None) != 0:
                 return False
@@ -907,37 +912,34 @@ class Appearance:
         store = getattr(ws, "store", None)
         if store is None or not store.writable() or not self.commit():
             return False
-        kind = ws.carts_store.project_kind(self._custom_path())
-        self._editing = (kind, _THEME_MAIN)
-        return bool(ws.open_text_cart(_THEME_MAIN, kind, "json"))
-
-    def file_watch(self, kind, name):
-        """This look when (kind, name) is the file EDIT FILE opened, else
-        None: what the text app's editor handle reports its saves to."""
-        return self if self._editing == (kind, name) else None
+        return bool(ws.edit_theme(made))
 
     def file_text(self):
         """custom's theme.json as the look holds it, unwritten change and
-        all: what an open buffer with no edits reloads when `file_gen`
-        moves. None off custom."""
+        all: what the theme mode's Config opens and, with no edits, reloads
+        when `file_gen` moves. None off custom."""
         c = self._cust
         if self.theme_name != CUSTOM or c is None or c.theme is None:
             return None
         return c.theme.decode()
 
-    def file_write(self, text):
-        """Write custom's theme.json as `text`, the editor's save whether
-        its gate passed it or not: into the package's folder, as a change's
-        commit writes it. Never the project-file save, whose journal a
-        package must not carry -- a theme package is flat data (the carts
-        repository refuses any other file, and the browser's export zips
-        the folder). None, else the error."""
+    def file_write(self, text, sheets=None):
+        """Write custom's theme.json as `text`, the theme mode's save whether
+        its gate passed it or not, and its `sheets` (file -> bytes, the pixel
+        tiles) beside it: into the package's folder, as a change's commit
+        writes it. Never the project-file save, whose journal a package must
+        not carry -- a theme package is flat data (the carts repository
+        refuses any other file, and the browser's export zips the folder).
+        None, else the error."""
         ws = self.ws
         store = getattr(ws, "store", None)
         save = getattr(ws.carts_store, "save_package", None)
         if store is None or save is None or not store.writable():
             return "no store"
         files = {_THEME_MAIN: text.encode() if isinstance(text, str) else text}
+        if sheets:
+            files.update(sheets)
+            self._sheet_epoch += 1
         path = self._custom_path()
         try:
             store.call(lambda: save(path, files, (), False))
@@ -946,7 +948,7 @@ class Appearance:
         return None
 
     def file_check(self, text):
-        """The editor's gate for custom's theme.json: (ok, note, text), the
+        """The theme mode's gate for custom's theme.json: (ok, note, text), the
         text to write -- as typed, or minified when only that fits
         `theme.bytes`. A file the loader refuses, or one whose `name` is not
         custom's, answers the loader's note; one it takes with a pair under
@@ -1045,7 +1047,6 @@ class Appearance:
             return "store"
         self._cust = None
         self._unsaved = False
-        self._editing = None
         self._slot_src = None                  # store_moved leaves the look alone
         self.theme_name = name
         ws.carts.moved(src, dest)
@@ -1228,12 +1229,13 @@ class Appearance:
         ws._dirty = True
         self._apply_wallpaper()
 
-    # -- the top-bar icon sheet (#52) ----------------------------------------
+    # -- the icon sheets ---------------------------------------------------------
 
     def set_icon_sheet(self, sheet):
-        """Adopt the top-bar IconSheet (Stage 1) and drop the per-kind image cache so
-        the next frame rebuilds its sprites (and, on the device, their RGB565 copies)
-        from the new theme. None reverts the bar to the _glyph fallback."""
+        """Adopt the shell's IconSheet (the bar's icons under a theme that names
+        no icon set) and drop the per-kind image cache so the next frame rebuilds
+        its sprites (and, on the device, their RGB565 copies). None reverts the
+        bar to the _glyph fallback."""
         self.icon_sheet = sheet
         # The kernel's cache, cleared from here: it backs ws._bar_image/_icon, the
         # shared draw toolkit, and a stale entry would keep blitting old pixels.
@@ -1242,86 +1244,70 @@ class Appearance:
         self.ws._dirty = True
 
     def load_icon_sheet(self):
-        """Build the top-bar IconSheet (Stage 1): use the saved system_icons.moygfx theme
-        only if its stored version is >= the baked _ICON_VERSION; otherwise bake the
-        default theme. A saved theme older than _ICON_VERSION is STALE (the shipped
-        icons changed) -> re-seed it: bake the new default and overwrite the saved theme
-        + version, so an already-themed device/desktop picks up new icons automatically
-        (mirrors cart versioning, #47). A missing theme stays write-free (the common
-        "absent = default" case). Safe on an embedded/no-store boot (baked default)."""
-        ws = self.ws
-        hexs, saved_ver = None, 0
-        store = ws.carts_store
-        load = getattr(store, "load_system_icons", None) if store is not None else None
-        if load is not None and ws.carts_root is not None:
-            loadver = getattr(store, "load_system_icons_version", None)
+        """Bake the shell's IconSheet from `chrome._ICON_ART` (Stage 1): what the
+        bar draws under a theme that names no icon set. A theme's own icons are
+        its pixel tiles (`pixel_draw`), edited in the Editor's theme mode."""
+        self.set_icon_sheet(_default_icon_sheet())
 
-            def _read_theme():
-                return (load(ws.carts_root),
-                        loadver(ws.carts_root) if loadver is not None else _ICON_VERSION)
-            try:
-                hexs, saved_ver = ws._with_sd(_read_theme)
-            except Exception as exc:  # noqa: BLE001 -- a bad theme falls back to default
-                print("Moybyte icons load failed:", _err_text(exc))
-                hexs = None
-        sheet = None
-        if hexs and saved_ver >= _ICON_VERSION:        # current/newer saved theme -> keep it
-            try:
-                sheet = IconSheet.from_hex(hexs)
-            except Exception:  # noqa: BLE001
-                sheet = None
-        self._user_icons = sheet
-        if sheet is None:
-            sheet = _default_icon_sheet()
-            # Re-seed a STALE (or corrupt) saved theme to the new default so the new
-            # icons land; skip when nothing was saved (no churn) or the store predates
-            # versioning (no loadver -> _read_theme reported current, never stale).
-            if hexs and ws.carts_root is not None \
-                    and getattr(store, "save_system_icons", None) is not None:
-                try:
-                    ws._with_sd(lambda: store.save_system_icons(
-                        sheet.to_hex(), ws.carts_root, _ICON_VERSION))
-                except Exception as exc:  # noqa: BLE001
-                    print("Moybyte icons re-seed failed:", _err_text(exc))
-        if self._user_icons is None and self._theme_icons is not None:
-            sheet = self._theme_icons
-        self.set_icon_sheet(sheet)
+    def pixel_image(self, kind):
+        """Icon `kind`'s tile of the theme's pixel sheet, its clear pixel keyed,
+        where the theme's look draws that slot from it (`icons.pixel_slots`),
+        else None."""
+        flags = self.pixel_slots
+        sheet = self.pixel_sheet
+        if flags is None or sheet is None:
+            return None
+        slot = _iconsets.slot_of(kind)
+        if slot is None or slot >= len(flags) or not flags[slot] or slot >= sheet.count:
+            return None
+        if sheet.gen != self._pixel_gen:
+            self._pixel_imgs = {}
+            self._pixel_gen = sheet.gen
+        img = self._pixel_imgs.get(slot)
+        if img is None:
+            img = self._pixel_imgs[slot] = sheet.tile_image(slot, sheet.clear)
+        return img
+
+    def pixel_draw(self, cv, kind, rect):
+        """Draw icon `kind` from the theme's pixel sheet centred in `rect` at
+        the largest whole scale it holds (`pixel_image`); False where the theme
+        draws that slot otherwise."""
+        img = self.pixel_image(kind)
+        if img is None:
+            return False
+        x, y, w, h = rect
+        sc = max(1, min(w, h) // 16)
+        cv.spr(img, x + (w - 16 * sc) // 2, y + (h - 16 * sc) // 2, sc)
+        return True
+
+    def preview_pixels(self, sheet, flags):
+        """The Editor's theme mode shows its sheet live: `sheet` and the slot
+        flags `flags` are what the shell draws its icons from until the theme
+        is next installed (a save installs them as written)."""
+        self.pixel_sheet = sheet
+        self.pixel_slots = flags
+        self.pixels_moved()
+
+    def pixels_moved(self):
+        """The pixel sheet's pixels moved under a live edit: the cached tiles
+        and every bar strip that drew them go."""
+        self._pixel_imgs = {}
+        self._pixel_gen = -1
+        ws = self.ws
+        ws._bar_img_cache = {}
+        bl = getattr(ws, "bar_layer", None)
+        if bl is not None:
+            bl.invalidate()
+        ws._dirty = True
 
     def save_icons(self):
-        """Persist the edited system icon sheet to system_icons.moygfx (Stage 2 / #52),
-        the exact mirror of the cart-sprite save: to_hex -> the SAME SD wrapper
-        (host: direct write; device: with_sd_live). Then invalidate the bar caches so
-        the NEXT bar draw shows the new pixels live: set_icon_sheet drops the per-kind
-        _SheetSprite cache (and with it the device's per-Image RGB565 blit cache), and
-        the sheet's gen already bumped on each pset so any gen-keyed cache rebuilds
-        too. Surfaces a save status like the cart paint editor. A bad store/no SD root
-        is a no-op (writes deferred).
-
-        The theme editor has no SAVE tap (#111): this is the hard-commit verb its
-        every exit path calls -- ThemeLayer.leave, the windowed WM's window-X and
-        go_home."""
-        ws = self.ws
-        sheet = self.icon_sheet
-        if not (sheet and ws.carts_root and ws.can_manage):
-            return
-        if sheet is self._theme_icons and not sheet.dirty:
-            return                             # the theme's, untouched: not the user's yet
-        hexs = sheet.to_hex()
-        try:
-            ws._with_sd(lambda: ws.carts_store.save_system_icons(
-                hexs, ws.carts_root, _ICON_VERSION))
-            sheet.dirty = False
-            self._user_icons = sheet
-            # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and
-            # the next _draw_status_strip rebuilds its sprites from the freshest pixels.
-            self.set_icon_sheet(sheet)
-            ws.ach.note("paint_save")       # "Little Artist": a theme saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            # A failed save must be VISIBLE on device (no serial in the run loop), not
-            # silent. _err_text-guarded so a weird __str__ can't escape.
-            txt = _err_text(exc)
-            ws.cart_error = "Could not save icons -- " + txt
-            print("Moybyte save icons failed:", txt)
+        """The Editor's theme mode's hard commit (an exit, a window's X, going
+        home): what its tabs hold unwritten is written through the look's
+        writes (`file_write`). A no-op while no theme is open in the Editor."""
+        app = getattr(self.ws, "editor_app", None)
+        doc = getattr(app, "theme", None) if app is not None else None
+        if doc is not None:
+            doc.commit()
 
     # -- system font scale (#39) ---------------------------------------------
 
@@ -1833,13 +1819,13 @@ class Appearance:
 
     def _install_sheets(self, name):
         """Load theme `name`'s sheets (docs/theming_2026-09.md §4.6): its
-        role sheet (`sprites`) for every sprite part, and its icon sheet
-        (`icons`) for the bar, under the user's own. Read from the package's
-        folder once per theme, file and store change; a sheet that will not
-        load leaves its parts on their surfaces and the bar on the user's or
-        the default icons."""
+        role sheet (`sprites`) for every sprite part, and its pixel tiles
+        (`icons`, the pixel set's shape) for the slots its look's
+        `icons.pixel_slots` names. Read from the package's folder once per
+        theme, file and store change; a sheet that will not load leaves its
+        parts on their surfaces and its slots on the theme's icon set."""
         sprites, icons = _ui_draw.theme_sheets(name)
-        key = (name, sprites, icons, self._pkg_gen, self._pic_epoch)
+        key = (name, sprites, icons, self._pkg_gen, self._pic_epoch, self._sheet_epoch)
         if key == self._sheet_key:
             return
         self._sheet_key = key
@@ -1847,14 +1833,11 @@ class Appearance:
             if sprites is not None else None
         if src is None or _ui_draw.sheet_load(src) != 0:
             _ui_draw.sheet_clear()
-        was = self._theme_icons
-        self._theme_icons = None
+        self.pixel_sheet = None
         src = self._package_file(name, icons, _SHEET_CAPS[4]) if icons is not None else None
         if src is not None and _ui_draw.sheet_check(src, _SHEET_CAPS[2])[0] == 0:
-            self._theme_icons = IconSheet.from_hex(src.decode("ascii"))
-        if self.icon_sheet is not None and self._user_icons is None \
-                and (was is not None or self._theme_icons is not None):
-            self.set_icon_sheet(self._theme_icons or _default_icon_sheet())
+            self.pixel_sheet = _iconsets.pixel_sheet_of(src)
+        self.pixels_moved()
 
     def _font_id(self, key):
         """The loaded id of font `key`, (package, file): a store package's
@@ -1919,6 +1902,7 @@ class Appearance:
         # the image does not carry is no set: the shell's own icons draw.
         self.icons = _iconsets.carried(_iconsets.spec(self.live.look))
         _iconsets.use_parts(self.icons)
+        self.pixel_slots = _iconsets.pixel_slots(self.live.look)
         # Strictly rising: the console's look may move before its ABI exists.
         self.look_gen = gen if gen > self.look_gen else self.look_gen + 1
         _ui_draw.look_moved()

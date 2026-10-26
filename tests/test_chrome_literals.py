@@ -32,7 +32,7 @@ PINNED = {
     "console.py": (6, 0),
     "launcher_layer.py": (29, 0),
     "map_editor_ui.py": (7, 0),
-    "paint_layer.py": (22, 0),
+    "paint_layer.py": (20, 0),
     "perf_hud.py": (0, 0),
     "scene_editor_ui.py": (5, 0),
     "text_console.py": (0, 0),

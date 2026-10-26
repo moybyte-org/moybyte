@@ -644,10 +644,8 @@ class Player:
 
         Handed to `make_system_api` as its `editor` factory, so a cart reaches
         it only through the `open_editor` its manifest earned."""
-        look = getattr(self.ws, "look", None)
         ed = EditorHandle(files, kind, name, mode, canvas, self._theme_colors,
                           clip=clip, host=self.ws, images=self._embeds(),
-                          watch=look.file_watch(kind, name) if look else None,
                           look=self._look)
         self._editors.append(ed)
         return ed
