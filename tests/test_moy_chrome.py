@@ -112,6 +112,9 @@ def test_a_run_the_kernel_drives_shows_the_banners_until_their_deadlines(ws):
     w, h = cv.w, cv.h
     pal = [cv._wire[cv._pal_map[i]] for i in range(64)]
     now = 1000000
+    # The kernel's banners are process state: a notice an earlier test armed
+    # on the real clock may still be up at this made-up `now`.
+    moy_play.chrome_notice("", "", True, now)
     moy_play.chrome_toast_arm("You found a badge!", "Map Maker", "map", False, now + 2600)
     raw = (ctypes.c_uint16 * (w * h))()
     assert moy_play.chrome_overlay_draw(raw, w, h, pal, now)
