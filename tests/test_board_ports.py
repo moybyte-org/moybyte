@@ -326,6 +326,29 @@ def test_a_rejected_chunk_names_the_chunk():
     assert "chunk 0" in board.last_error and "SyntaxError" in board.last_error
 
 
+def test_a_rejected_upload_setup_is_sent_again():
+    """A dropped byte turns `setattr(ws, '_up', {})` into a line the board
+    rejects; uploading on would fail every chunk store with `no attribute
+    '_up'`, the false failure two Waveshare P4 passes showed on 2026-10-26."""
+    board, fake = _driver(["PY ERR SyntaxError: invalid syntax", "PY 1", "PY ok",
+                           "PY 1", "PY None"])
+    assert board.pyexec("a = 1\nb = a + 1\n") is True
+    assert sum(1 for s in fake.sent if "setattr(ws, '_up'" in s) == 2
+
+
+def test_a_setup_the_board_never_takes_fails_and_says_so():
+    board, _ = _driver(["PY ERR SyntaxError: invalid syntax"] * 3)
+    assert board.pyexec("a = 1\nb = a + 1\n") is False
+    assert "upload setup failed" in board.last_error
+
+
+def test_a_corrupted_chunk_is_stored_again():
+    board, fake = _driver(["PY 1", "PY ok", "PY ERR SyntaxError: invalid syntax",
+                           "PY 1", "PY None"])
+    assert board.pyexec("a = 1\nb = a + 1\n") is True
+    assert sum(1 for s in fake.sent if "ws._up.__setitem__" in s) == 2
+
+
 # -- every tool that drives a board asks WHICH board ---------------------------
 #
 # Ten of them defaulted --port to /dev/ttyACM0 and built the driver with no

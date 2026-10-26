@@ -727,6 +727,18 @@ class P4Board:
             return self._fail("unparseable reply %r (%s)"
                               % (line[:120], exc), strict)
 
+    def _idempotent(self, text, timeout, tries=3):
+        """`cmd` for a `py` line that is safe to run twice, sent again while
+        the board answers nothing or PY ERR: on the Waveshare P4's UART a
+        dropped byte turns the line into one the board rejects. The last
+        answer, or None."""
+        line = None
+        for _ in range(tries):
+            line = self.cmd(text, wait_for="PY", timeout=timeout)
+            if line is not None and "PY ERR" not in line:
+                return line
+        return line
+
     def pyexec(self, code, timeout=30.0, strict=False):
         """Run a multi-line snippet on the device (`ws`/`wm`/`pointer` in scope),
         uploaded in RX-safe chunks. Returns True if it ran clean, and leaves the
@@ -748,19 +760,25 @@ class P4Board:
                 self._fail(line.strip(), strict)
                 return False
             return True
-        self.cmd("py setattr(ws, '_up', {}) or 1", wait_for="PY")
         # NB: plain getattr-or, not ws.__dict__.setdefault -- a MicroPython
         # instance __dict__ is not a full dict (no setdefault; raises TypeError).
-        self.cmd("py ws._g = getattr(ws, '_g', None) or {'ws': ws, 'wm': ws.wm}",
-                 wait_for="PY")
+        for setup in ("py setattr(ws, '_up', {}) or 1",
+                      "py ws._g = getattr(ws, '_g', None) or {'ws': ws, 'wm': ws.wm}"):
+            line = self._idempotent(setup, timeout)
+            if line is None or "PY ERR" in line:
+                self._fail("upload setup failed: %s" % (line or "no reply").strip(), strict)
+                return False
         # A DICT keyed by chunk index, not a string being appended to: `+=` is
         # not idempotent, so a resend after a lost reply would double a chunk
         # and exec a corrupted snippet. Indexed stores make the resend a no-op.
         for k, i in enumerate(range(0, len(code), self.CHUNK)):
             part = code[i:i + self.CHUNK]
-            line = self.cmd("py ws._up.__setitem__(%d, %r) or 1" % (k, part),
-                            wait_for="PY", timeout=timeout) or ""
+            store = "py ws._up.__setitem__(%d, %r) or 1" % (k, part)
+            line = self.cmd(store, wait_for="PY", timeout=timeout) or ""
             if "PY ERR" in line:
+                again = self.cmd(store, wait_for="PY", timeout=timeout) or ""
+                if again.startswith("PY") and "PY ERR" not in again:
+                    continue
                 self._fail("chunk %d rejected: %s" % (k, line.strip()), strict)
                 return False
         line = self.cmd(
