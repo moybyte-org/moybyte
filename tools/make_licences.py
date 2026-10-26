@@ -190,7 +190,7 @@ def render():
             "    try:",
             "        import deflate",
             "        import io",
-            "        return deflate.DeflateIO(io.BytesIO(b), deflate.RAW).read()",
+            "        return deflate.DeflateIO(io.BytesIO(b), deflate.RAW, 15).read()",
             "    except ImportError:",
             "        import zlib",
             "        return zlib.decompress(b, -15)",
