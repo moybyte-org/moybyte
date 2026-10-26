@@ -2554,13 +2554,14 @@ class LauncherHomeLayer:
         # AFTER this layer, so the copy is exactly our output) and stamped back
         # on re-entry when NOTHING the frame reads has changed (_retained_key)
         # -- a repeat home visit becomes one full-screen blit instead of the
-        # ~150ms wallpaper + panel + cards + bar rebuild. NOT captured on idle
-        # frames, though that would be free: the P4 root ping-pongs (DPI
-        # num_fbs=2), so after present the canvas's CURRENT buffer holds the
-        # frame BEFORE last -- an idle capture can cache the previous screen's
-        # pixels under this frame's key.
+        # ~150ms wallpaper + panel + cards + bar rebuild. An idle frame
+        # captures only what every buffer holds (`capture_due`, owed by a
+        # still frame): the P4 root rotates its buffers, so after present the
+        # canvas's CURRENT buffer may hold an older frame, and an idle capture
+        # of it would cache another screen's pixels under this frame's key.
         self._lib_cache = None        # cv.new_layer sized to the canvas
         self._lib_key = None          # _retained_key at capture
+        self._cap_owed = None         # (frame, key, parts) a still frame owes
         self._lib_unsupported = False # web RecordingLayer: no pixels to copy
         # Paint-continuity guard for the ping-pong trust (#113's stale-by-2
         # rule): if OTHER surfaces painted since our last draw, the retained
@@ -3074,28 +3075,25 @@ class LauncherHomeLayer:
                 band_lag = True
             if e[4] != bar:
                 bar_lag = True
-        fill = ws.wallpaper.restorer(cv, self._bd_now)
         g = self.grid
         wm = ws.wm
-        laid = []
-        if sel_lag:
-            r = self._sel_rect()
-            laid.append(r)
-            self._fill_around_hero(cv, r, fill)
-            cv.clip(r[0], r[1], r[2], r[3])
-            g._paint_details(cv)
-            self._draw_details(cv)
-            cv.clip()
-            wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
-        if band_lag:
-            g.repaint_band(cv, ws.covers.sheet_icon, fill, sel_lag)
-            bx, by, bw, bh = g.band_rect()
-            laid.append((bx, by, bw, bh))
-            wm.hand_content_damage(cv, bx, by, bw, bh)
+        # A part the last frame painted as this one would is copied out of
+        # its buffer (§14.6): whole rows where the bar there is this one's.
+        e = ring[-1]
+        rows = e[4] == bar
+        lay_sel = sel_lag and not (e[2] == sel and self._copy_part(cv, self._sel_rect(), rows))
+        lay_band = band_lag and not (e[3] == band and self._copy_part(cv, g.band_rect(), rows))
+        if bar_lag and rows and not (lay_sel or lay_band):
+            for r in ws.wallpaper.bars():
+                if not self._copy_part(cv, r, True):
+                    break
+            else:
+                bar_lag = False
+        laid = self._lay_parts(cv, lay_sel, lay_band, sel_lag)
         h = g.foot()[5]
         if h[2] > 0 and h[3] > 0:
             laid.append(h)
-            fill(cv, h)
+            ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
             self._draw_home_chrome(cv)
             wm.hand_content_damage(cv, h[0], h[1], h[2], h[3])
         g._scroll_region().note_painted(
@@ -3110,11 +3108,68 @@ class LauncherHomeLayer:
         self._full_streak = 0
         self._note_still(cv, parts, bar)
         if self._still_held(parts):
-            # every buffer holds this frame: the retained frame takes it
-            self._capture_retained(cv, dt, parts)
+            # every buffer holds this frame: the retained frame takes it once
+            # nothing waits on the board (`capture_due`)
+            key = self._retained_key(cv)
+            if key != self._lib_key:
+                self._cap_owed = (ws._frames_drawn, key, parts)
         else:
             self._still_debt()
         return True
+
+    def capture_due(self):
+        """Take the retained frame a still frame owed (`_cap_owed`) on an
+        idle frame, or at the start of the next painted one before anything
+        draws: every buffer held that frame when it was owed and still does
+        while no frame has painted since and its key holds. Dropped
+        otherwise; the next still frame that finds every buffer holding it
+        owes it again."""
+        owed = self._cap_owed
+        self._cap_owed = None
+        ws = self.ws
+        if owed is None or ws._frames_drawn != owed[0] + 1:
+            return
+        cv = ws.sys_canvas
+        if self._retained_key(cv) == owed[1]:
+            self._capture_retained(cv, 1 / 60, owed[2])
+
+    def _copy_part(self, cv, r, rows):
+        """Part rect `r` copied out of the buffer the last frame drew into,
+        which holds it as this frame would draw it (§14.6) -- its whole rows
+        with `rows`: what else they hold, the backdrop and the bar, is this
+        frame's there too. False where the canvas cannot copy."""
+        cl = getattr(cv, "copy_last", None)
+        if rows:
+            r = (0, r[1], cv.w, r[3])
+        if cl is None or not cl(r[0], r[1], r[2], r[3]):
+            return False
+        self.ws.wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+        return True
+
+    def _lay_parts(self, cv, sel_lag, band_lag, marks):
+        """Put the lagging parts back over the backdrop and draw them; the
+        rects laid. `marks`: the buffer may hold the focus mark on another
+        card."""
+        ws = self.ws
+        fill = ws.wallpaper.restorer(cv, self._bd_now)
+        g = self.grid
+        wm = ws.wm
+        laid = []
+        if sel_lag:
+            r = self._sel_rect()
+            laid.append(r)
+            self._fill_around_hero(cv, r, fill)
+            cv.clip(r[0], r[1], r[2], r[3])
+            g._paint_details(cv)
+            self._draw_details(cv)
+            cv.clip()
+            wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+        if band_lag:
+            g.repaint_band(cv, ws.covers.sheet_icon, fill, marks)
+            bx, by, bw, bh = g.band_rect()
+            laid.append((bx, by, bw, bh))
+            wm.hand_content_damage(cv, bx, by, bw, bh)
+        return laid
 
     def _still_held(self, parts):
         """Whether every entry of the ring is `parts`: each retained buffer

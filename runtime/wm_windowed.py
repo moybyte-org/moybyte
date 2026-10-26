@@ -319,6 +319,29 @@ class _WindowStackLayer(Layer):
         return self.wm._route_pointer(px, py, click)
 
 
+class _RepeatLayer(Layer):
+    """A frame that repeats the last painted one (surface model §14.6):
+    nothing changed since it, so the buffer it presented holds this frame's
+    whole picture, and a copy of it brings the buffer this frame paints up
+    to it in place of a repaint. A refused copy paints the full stack."""
+
+    id = "repeat"
+    domain = "system"
+
+    def __init__(self, wm):
+        self.wm = wm
+
+    def draw(self, dt):
+        wm = self.wm
+        root = wm._root_canvas
+        if root.copy_last(0, 0, root.w, root.h):
+            wm._repeats_n += 1
+            wm._repeat_note()
+            return
+        for layer in wm._cache_draw:
+            layer.draw(dt)
+
+
 class _PlayerWindowLayer(Layer):
     """The QUIET-FRAME partial repaint (#58 P4 perf): while a game window is the
     only thing animating, this stand-in draw stack repaints JUST the player
@@ -355,6 +378,12 @@ class _PlayerWindowLayer(Layer):
 def _overlap(a, b):
     return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2]
             and a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
+
+
+def _inside(a, b):
+    """Rect `a` lies within rect `b` (None: nothing does)."""
+    return (b is not None and b[0] <= a[0] and b[1] <= a[1]
+            and a[0] + a[2] <= b[0] + b[2] and a[1] + a[3] <= b[1] + b[3])
 
 
 # The most physical buffers a root canvas rotates through (the Waveshare P4's
@@ -536,16 +565,37 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._in_draw = False         # the windows draw: a relayout waits for its end
         self._relayout_owed = False
         # Quiet-frame fast path (#58): the stand-in stacks + the ping-pong
-        # full-paint debt. After ANY full repaint the NEXT drawn frame must also be
-        # full -- a double-buffered panel alternates physical buffers, so one full
-        # paint only updates ONE of them; a partial frame on the other would swap
-        # in its pre-change desktop (visible flicker between old/new chrome).
+        # full-paint debt. After ANY full repaint the NEXT drawn frame must also
+        # bring its buffer to it -- a double-buffered panel alternates physical
+        # buffers, so one full paint only updates ONE of them; a partial frame on
+        # the other would swap in its pre-change desktop (visible flicker between
+        # old/new chrome). A still desk's debt frame copies the last painted
+        # frame's buffer (`_repeat_stack`, surface model §14.6).
         # The FPS chip (sig bit 2, show_fps default ON) draws on the GAME canvas
         # before the window blit, so it rides the quiet path too -- mirroring the
         # full stack's [.., perf, windows] order.
         _pw = _PlayerWindowLayer(self)
         self._quiet_stack = [_pw]
         self._full_debt = 0
+        # A debt frame of a still desk repeats the last painted frame: its
+        # buffer copied, not the desk painted again (§14.6). `_painted_f` is
+        # the frame the last draw_stack routed.
+        self._repeat_stack = [_RepeatLayer(self)]
+        self._painted_f = -2
+        self._repeats_n = 0
+        # ...and a popover's ride frame, while its state is as the last
+        # painted frame left it: `_pop_seq` counts the popover's changes,
+        # `_pop_seq_f` is the count the last draw_stack saw, and
+        # `_repeating` says this frame repeats the last one. The scrim
+        # counts its own (`_wash_seq`): a card still settling under a
+        # scrim that is not changes the card's rect alone (`_wash_repeats`).
+        self._pop_seq = 0
+        self._pop_seq_f = 0
+        self._repeating = False
+        self._wash_seq = 0
+        self._wash_seq_f = 0
+        self._wash_repeats = False
+        self._pop_wash_f = -1         # the frame whose wash was a copy
         # THE POPOVER ON THE QUIET STACK (docs/shell_layout_2026-10.md §8): a
         # frame whose only change is the popover's -- it opened, a row moved,
         # it closed -- draws the popover's rect alone over the retained frame
@@ -1812,6 +1862,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if not self._pop_rides():
             self.ws._dirty = True
             return
+        self._pop_seq += 1
         m = self.ws.sysmenu
         n = self._pop_n()
         self._pop_face_ok = False
@@ -1851,6 +1902,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if not self._pop_rides():
             self.ws._dirty = True
             return
+        self._pop_seq += 1
         w = self._pop_wash
         was = w[4]
         n = self._pop_n()
@@ -1914,6 +1966,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             up = False                    # the scrim came up whole: it stays so
         if up == w[4]:
             return True
+        self._wash_seq += 1
         ride = True
         if up:
             ride = w[1] is None
@@ -1950,6 +2003,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         return self._pop_wash[1] is not None
 
     def _pop_reset(self):
+        self._pop_seq += 1
+        self._wash_seq += 1
         self._pop_face_ok = False
         for s in self._pop_slots:
             s[1] = None
@@ -2079,6 +2134,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 root.blit_strip_rect(self._pop_face, r[0], r[1], r[0], r[1], r[2], r[3])
                 self._pop_note(r)
                 return
+        if self._repeating and not fresh and s[2] > 0:
+            # The last frame's card, as it was: inside the wash this frame
+            # copied, or copied itself.
+            w = self._pop_wash[1]
+            if ((self._pop_wash_f == self.ws._frames_drawn and _inside(r, w))
+                    or self._root_canvas.copy_last(r[0], r[1], r[2], r[3])):
+                self._pop_note(r)
+                s[2] -= 1
+                return
         if not fresh and self.ws.menu_ui.looked():
             # the look's card casts a shadow: paint it over what it covers,
             # never over its own last paint
@@ -2091,6 +2155,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             ws._frame_requested = False
             self._pop_face_ok = False      # no face copy of a moving card
             s[2] = self._pop_n() + 1
+            self._pop_seq += 1
         elif self._pop_over_game and not self._pop_face_ok:
             face = self._pop_face
             if face is None or face.w < r[2] or face.h < r[3]:
@@ -2121,6 +2186,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if w[2] <= 0:
             if self._pause_owed > 0:
                 self._pause_paint(False)
+            return
+        if self._wash_repeats and w[3] and self._root_canvas.copy_last(*w[1]):
+            # The last frame washed this same scrim: its buffer's wash, with
+            # what that frame's card left over it, which the card's own
+            # paint puts back first where it changed.
+            self._pop_note(w[1])
+            self._pop_wash_f = self.ws._frames_drawn
+            w[2] -= 1
+            if self._pause_owed > 0:
+                self._pause_paint(self._repeating)
             return
         if self._pause_rides():
             # Its game's frame, held, composited where a quiet frame deferred
@@ -2163,6 +2238,21 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         card that has not settled owes every buffer its next paint."""
         ws = self.ws
         sp = self._pause_span
+        if self._repeating:
+            # The last frame's card over its scrim, as this one would paint
+            # it: copied where its paints have covered, the card's rect too.
+            r = ws.pause.card_rect()
+            if r is not None:
+                _grow(sp, r[0], r[1], r[0] + r[2], r[1] + r[3])
+            s = (sp[0], sp[1], sp[2] - sp[0], sp[3] - sp[1])
+            if s[2] > 0 and ((self._pop_wash_f == ws._frames_drawn
+                              and _inside(s, self._pop_wash[1]))
+                             or self._root_canvas.copy_last(s[0], s[1], s[2], s[3])):
+                self._pop_note(s)
+                self._pause_owed -= 1
+                if self._pause_owed <= 0 and r is not None:
+                    sp[0], sp[1], sp[2], sp[3] = r[0], r[1], r[0] + r[2], r[1] + r[3]
+                return
         if not washed and sp[2] > sp[0]:
             w = self._pop_wash
             o = w[1]
@@ -2178,6 +2268,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if ws._frame_requested:
             ws._frame_requested = False
             self._pause_owed = self._pop_n()
+            self._pop_seq += 1
         elif self._pause_owed <= 0 and r is not None:
             # every buffer holds this paint now: the span is its rect
             sp[0], sp[1], sp[2], sp[3] = r[0], r[1], r[0] + r[2], r[1] + r[3]
@@ -2279,6 +2370,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         retained buffer carries the change before partial frames resume."""
         ws = self.ws
         self._ensure_stack()
+        follows = self._painted_f == ws._frames_drawn - 1
+        same_pop = self._pop_seq == self._pop_seq_f
+        same_wash = self._wash_seq == self._wash_seq_f
+        self._painted_f = ws._frames_drawn
+        self._pop_seq_f = self._pop_seq
+        self._wash_seq_f = self._wash_seq
+        self._repeating = self._wash_repeats = False
         # A system modal's scrim (D-01) dims every retained pixel once: the
         # frame it comes or goes repaints the desk whole, every window's
         # stamp and the desk's own streak voided, and while it is up no
@@ -2321,12 +2419,22 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 return self._quiet_pop_stack
             return self._quiet_stack        # the FPS chip rides the player window
         settled = not quiet and self._settled(still)
+        if (follows and settled and (self._calm() or self._pop_holds_input())
+                and ("desktop" not in self._wins or ws.player.paused)
+                and getattr(self._root_canvas, "copy_last", None) is not None):
+            self._repeating = same_pop
+            self._wash_repeats = same_wash
         if pop and settled:
             # A persistent root (one buffer) owes no other buffer anything.
             if self._full_debt <= 0 or self._pop_n() == 1:
                 return self._pop_stack
         if quiet or (settled and (pop or self._calm())):
-            self._full_debt -= 1      # paying the other-buffer debt: full paint
+            # Paying the other-buffer debt: the last painted frame again. A
+            # still desk with no playtest and no popover copies its buffer.
+            rep = self._repeating and not pop and self._full_debt > 0
+            self._full_debt -= 1
+            if rep:
+                return self._repeat_stack
         else:
             # A change painted: every OTHER physical buffer owes a full paint
             # before partial frames may resume (N-1 debts on an N-buffer root).
@@ -2359,9 +2467,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ws = self.ws
         return not ws._ptr_changed() and not getattr(ws.pointer, "down", False)
 
+    def _pop_holds_input(self):
+        """The open system menu or riding pause menu takes every press: a
+        tap outside closes it and reaches nothing, so a press or a release
+        under it changes no content."""
+        return ((self.ws.sysmenu.open and self._pop_cur is not None)
+                or self._pause_rides())
+
     def debt_owed(self):
         """True while a retained buffer is behind the last change and the
-        desk is calm: the console paints it now, while nothing waits on
+        desk is calm: the console brings it now, while nothing waits on
         it, so the next change finds every buffer current and its popover
         or menu rides (a single-buffer root owes nothing)."""
         if not (self._full_debt > 0 and self._pop_n() > 1
@@ -3399,6 +3514,29 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     and (own[4] or self._settle_f != f):
                 self._settle_f = f + 1
                 self.ws.request_frame()
+
+    def _repeat_note(self):
+        """A repeated frame's buffer holds what the last frame's held, so it
+        counts as that frame painted once more: the streaks of buffers that
+        hold the desk's cache, each window's stamp and the chips advance as
+        an unchanged whole frame advances them, and its shown ring entry is
+        the last frame's, the page unchanged."""
+        n = self._retained_n()
+        if self._backdrop_valid and self._desk_streak < n:
+            self._desk_streak += 1
+        for win in self._wins.values():
+            if not win.minimized:
+                win._stamp_streak = getattr(win, "_stamp_streak", 0) + 1
+        if self._chip_streak < n:
+            self._chip_streak += 1
+        f = self.ws._frames_drawn
+        ring = self._shown
+        p = ring[(f - 1) % (_SHOWN + 1)]
+        e = ring[f % (_SHOWN + 1)]
+        e[0] = f
+        e[1] = p[1] if p[0] == f - 1 else None
+        e[2] = 1
+        e[3] = e[4] = e[5] = e[6] = 0
 
     def _shown_part(self, win, x0, y0, x1, y1):
         """Name [x0, y0, x1, y1) of `win`'s content as the root rect it

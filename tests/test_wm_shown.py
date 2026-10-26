@@ -47,6 +47,7 @@ def _desk(tmp_path, monkeypatch, bufs, ref, full=False):
             return False
         if bufs > 1:
             held.append(bytes(root._buf))
+            root._comp.last = held[-1]
             root._buf[:] = held[-bufs] if len(held) >= bufs else held[0]
         return True
     held.append(bytes(root._buf))
@@ -212,11 +213,13 @@ def test_a_whole_frame_settles_every_buffer_before_the_next_press(tmp_path, monk
 
 def test_a_content_that_says_nothing_is_stamped_whole(tmp_path, monkeypatch):
     """A window whose content does not speak the protocol keeps the whole
-    stamp on every frame it renders."""
+    stamp on every frame it renders (a frame that repeats the last one
+    copies its buffer instead, §14.6)."""
     ws, app, drv, root, win, frame, shot, view = _desk(tmp_path, monkeypatch, 2, False)
     monkeypatch.setattr(type(app), "HELD", False)
     got = _spy(monkeypatch, ws, app, root, win)
     n = ws._frames_drawn
+    r = ws.wm._repeats_n
     _key_stroke(drv, frame, shot, 6)
-    painted = ws._frames_drawn - n
+    painted = ws._frames_drawn - n - (ws.wm._repeats_n - r)
     assert painted and got["stamped"] >= win.buf.w * win.buf.h * painted

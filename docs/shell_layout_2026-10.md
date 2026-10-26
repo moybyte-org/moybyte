@@ -512,7 +512,9 @@ first restores from the snapshot, since the card's shadow blends. Its
 scrim rides with it over a still desk with no playtest (`_pop_wash`): the
 frame it opens on snapshots what the scrim covers, renders the focused
 window as it shows once the menu holds the keys (no focus mark, ui.marks),
-and washes; each other buffer is stamped that window and washed once, and
+and washes; each other buffer takes that wash copied out of the buffer the
+last frame painted (docs/surface_model_v1.md §14.6), or, where the root
+cannot copy, is stamped that window and washed once, and
 the close puts the snapshot back, with the window's buffer as the menu
 found it. A frame that repaints whole while it is up washes what it
 painted and keeps no snapshot, so the close then repaints whole too. The
@@ -525,8 +527,9 @@ repaints whole under it takes the snapshot again before its scrim, so its
 rows keep riding. A
 pointer press whose only change was the popover's -- a bar widget's tap
 -- marks no frame (`popover_touch` takes it). A triple-buffered root's
-buffers behind the last change are painted while the desk is calm
-(`debt_owed`: nothing animating, the pointer still), so the next popover
+buffers behind the last change are brought to it while the desk is calm
+(`debt_owed`: nothing animating, the pointer still), each a copy of the
+last painted frame's buffer where the root has one, so the next popover
 finds them current instead of paying them first. The bench scenarios of
 §13 step 6 say what each costs (#58, #66).
 

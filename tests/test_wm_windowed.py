@@ -2960,8 +2960,10 @@ class _Ring:
         st = got[-1]
         self.stacks.append("pop" if st is wm._pop_stack else
                            "qpop" if st is wm._quiet_pop_stack else
-                           "quiet" if st is wm._quiet_stack else "full")
+                           "quiet" if st is wm._quiet_stack else
+                           "repeat" if st is wm._repeat_stack else "full")
         self.bufs[self.k] = bytes(self.cv._buf)
+        self.cv._comp.last = self.bufs[self.k] if self.n > 1 else None
         self.k = (self.k + 1) % self.n
         self.cv._buf[:] = self.bufs[self.k]
         return self.stacks[-1]
@@ -3975,6 +3977,7 @@ def _scrim_desk(tmp_path, ride=True, windows=False):
     ws.show_fps = False
     if not ride:
         ws.wm._wash_rides = lambda: False
+        del ws.sys_canvas.copy_last       # the reference paints every frame
     ring = _Ring(ws, 3)
     for _ in range(3):
         ws._dirty = True
@@ -4014,6 +4017,9 @@ def test_the_system_menus_scrim_rides_with_it_on_a_still_desk(tmp_path, windows)
     ws, drv, ring = _scrim_desk(tmp_path / "ride", windows=windows)
     ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False, windows=windows)
     assert _ui_draw_depth()                   # the look's card, the scrim under it
+    copies = []
+    real = ws.sys_canvas.copy_last
+    ws.sys_canvas.copy_last = lambda *r: copies.append(r) or real(*r)
     for i, (step, rstep) in enumerate(zip(_menu_steps(ws, drv, ring), _menu_steps(ref, rdrv, rring))):
         ring.stacks = []
         step()
@@ -4023,6 +4029,8 @@ def test_the_system_menus_scrim_rides_with_it_on_a_still_desk(tmp_path, windows)
         assert stacks and set(stacks) == {"pop"}, (i, stacks)
         for a, b in zip(ring.bufs, rring.bufs):
             assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+    # the open's and each move's later frames copy the last one's buffer
+    assert len(copies) >= 3 * 2, copies
     assert not ws.wm._pop_live() and ring.settle(drv) == []
     for key, win in ws.wm._wins.items():    # what a drag of each would stamp
         assert bytes(win.buf._buf) == bytes(ref.wm._wins[key].buf._buf), key
@@ -4038,6 +4046,35 @@ def _bbox(px, w):
 def _ui_draw_depth():
     from runtime import ui_draw
     return bool(ui_draw.depth()[0])
+
+
+def test_a_card_still_settling_over_a_still_scrim_copies_the_scrim(tmp_path):
+    """The menu's card asks for frames as it settles (its focus moving):
+    each of those frames copies the scrim out of the last frame's buffer
+    and paints the card again over it (§14.6), and every buffer ends as
+    whole repaints leave it."""
+    ws, drv, ring = _scrim_desk(tmp_path / "ride", windows=True)
+    ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False, windows=True)
+    for w in (ws, ref):
+        real = w.menu_ui._draw_sysmenu
+        n = [0]
+
+        def draw(real=real, n=n, w=w):
+            real()
+            n[0] += 1
+            if n[0] <= 2:
+                w.request_frame()
+        w.menu_ui._draw_sysmenu = draw
+    washes = []
+    real_copy = ws.sys_canvas.copy_last
+    ws.sys_canvas.copy_last = lambda *r: washes.append(r) or real_copy(*r)
+    ws.widget_tap("menu")
+    ref.widget_tap("menu")
+    assert set(ring.settle(drv)) == {"pop"}
+    rring.settle(rdrv)
+    wash = ws.wm._pop_wash[1]
+    assert sum(1 for r in washes if tuple(r) == tuple(wash)) >= 2, washes
+    assert list(ring.bufs) == rring.full(rdrv)
 
 
 def test_a_full_frame_under_the_menu_makes_its_close_repaint_whole(tmp_path):
@@ -4075,14 +4112,51 @@ def test_a_menu_opened_while_its_restore_is_owed_repaints_whole(tmp_path):
     assert ring.bufs == rring.bufs
 
 
+def test_a_debt_frame_repeats_the_last_painted_one(tmp_path):
+    """X back to three windows: the frame that comes back paints the desk
+    whole, and the frames that bring the other buffers to it each copy the
+    last painted frame's buffer (§14.6) -- every buffer then holds what
+    whole repaints leave."""
+    ws, drv, ring = _scrim_desk(tmp_path, windows=True)
+    ws.open_library()
+    ring.settle(drv)
+    ws.open_desk()
+    stacks = ring.settle(drv)
+    assert stacks[-2:] == ["repeat", "repeat"], stacks
+    seen = list(ring.bufs)
+    assert len(set(seen)) == 1
+    assert seen == ring.full(drv)
+
+
+def test_a_repeated_frame_counts_for_the_desk_and_window_streaks(tmp_path):
+    """A repeat holds what the frame it copied held, so it counts as that
+    frame painted once more: after a change and its repeats, the next dirty
+    frame skips the desk's restore and the settled windows' stamps as it
+    would after whole repaints, and every buffer ends as whole repaints
+    leave it."""
+    ws, drv, ring = _scrim_desk(tmp_path, windows=True)
+    wm = ws.wm
+    wm.close_window_kind("calc")              # a shape change: the desk anew
+    assert ring.settle(drv) == ["full", "repeat", "repeat"]
+    ws._dirty = True
+    assert ring.settle(drv) == ["full", "repeat", "repeat"]
+    ws._dirty = True
+    assert ring.frame(drv) == "full"
+    assert wm._desk_painted is False
+    seen = list(ring.bufs)
+    assert seen == ring.full(drv)
+
+
 def test_a_calm_desk_pays_its_buffers_debt_and_then_rests(tmp_path):
-    """After a change every other buffer is owed it: a calm desk paints
-    them at once, so the next popover finds them current -- then no frame
-    at all. A visible cursor is never calm: it asks for nothing."""
+    """After a change every other buffer is owed it: a calm desk pays them
+    at once, each the last painted frame repeated (its buffer copied, §14.6),
+    so the next popover finds them current -- then no frame at all. A
+    visible cursor is never calm: it asks for nothing."""
     ws, drv, ring = _scrim_desk(tmp_path)
     ws._dirty = True
-    assert ring.settle(drv) == ["full"] * 3
+    assert ring.settle(drv) == ["full", "repeat", "repeat"]
     assert ring.settle(drv) == []
+    assert len(set(ring.bufs)) == 1
     ws.widget_tap("battery")
     assert ring.settle(drv) == ["pop"] * 3
     ws.widget_tap("battery")
@@ -4115,6 +4189,7 @@ def _pause_desk(tmp_path, ride=True):
     ws.show_fps = False
     if not ride:
         ws.wm._wash_rides = lambda: False
+        del ws.sys_canvas.copy_last       # the reference paints every frame
     ring = _Ring(ws, 3)
     for _ in range(3):
         ws._dirty = True
@@ -4138,6 +4213,9 @@ def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path):
     step every buffer holds the bytes the whole-repaint path leaves."""
     ws, drv, ring = _pause_desk(tmp_path / "ride")
     ref, rdrv, rring = _pause_desk(tmp_path / "ref", ride=False)
+    copies = []
+    real = ws.sys_canvas.copy_last
+    ws.sys_canvas.copy_last = lambda *r: copies.append(r) or real(*r)
     steps = (lambda w: w.pause.show(),
              lambda w: _pause_key(w, "down"),
              lambda w: _pause_key(w, "down"),
@@ -4154,6 +4232,8 @@ def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path):
         assert stacks and set(stacks) == ({"full"} if i == 6 else {"pop"}), (i, stacks)
         for a, b in zip(ring.bufs, rring.full(rdrv)):
             assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+    # each riding step's later frames copy the last one's buffer (§14.6)
+    assert len(copies) >= 2 * (len(steps) - 1), len(copies)
     ws.pause.close()
     ref.pause.close()
     stacks = ring.settle(drv, 4)
@@ -4211,6 +4291,7 @@ def _drag_over(tmp_path, theme, under):
     held = drew["skipped"]
     shots += [b for _ in ring.settle(drv) for b in [ring.bufs[(ring.k - 1) % ring.n]]]
     drew["after"] = drew["skipped"] - held
+    drew["stacks"] = list(ring.stacks)
     if under:
         assert list(ring.bufs) == list(ring.full(drv)), "the release's buffers"
     return shots, drew
@@ -4227,6 +4308,8 @@ def test_a_drag_over_windows_draws_them_only_where_the_desk_was_laid(tmp_path, t
     for i, (a, b) in enumerate(zip(ref, got)):
         assert a == b, (i, _bbox(_differ(a, b), 1024))
     assert drew["skipped"] >= 10
-    # the frames after the release are drag frames that do not move: the
-    # windows under it draw where the restore laid the desk, in every buffer
-    assert drew["after"] >= 2 * 3
+    # the release's frame is a drag frame that does not move: the windows
+    # under it draw where the restore laid the desk; the frames after it
+    # repeat that one (§14.6)
+    assert drew["after"] >= 2
+    assert drew["stacks"][1:] == ["repeat"] * 2, drew["stacks"]

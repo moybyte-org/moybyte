@@ -61,6 +61,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme=None):
         stats["frames"] += 1
         held.append(bytes(root._buf))
         if bufs > 1:
+            root._comp.last = held[-1]
             root._buf[:] = held[-bufs] if len(held) > bufs else held[0]
         return held[-1]
 
@@ -140,6 +141,10 @@ def test_every_presented_frame_is_a_whole_repaints(tmp_path, monkeypatch, bufs, 
         return strip(where)
     home._try_still_frame = counted
     ws.bar_layer._draw_status_strip = strips
+    copied = []
+    cv = ws.sys_canvas
+    real_copy = cv.copy_last
+    cv.copy_last = lambda *r: copied.append(r) or real_copy(*r)
     part = _session(ws, drv, frame)
     # A frame that brings a buffer to the glass's frame (`_still_debt`)
     # presents what the glass already shows: the glass's sequence of
@@ -151,6 +156,9 @@ def test_every_presented_frame_is_a_whole_repaints(tmp_path, monkeypatch, bufs, 
     assert calls["still"] > len(part) // 2, (calls, len(part))
     # a still frame draws the bar's strip only where its buffer lacks it
     assert calls["strip"] < calls["still"] // 2, calls
+    # ...and a part the last frame painted as this one would is copied from
+    # its buffer (§14.6): each press's later frames
+    assert len(copied) >= 8, len(copied)
 
 
 def _changes(shots):
@@ -179,6 +187,29 @@ def test_a_change_settles_every_buffer_then_rests(tmp_path, monkeypatch, bufs):
     root = ws.wm._root_canvas
     assert home._lib_key == home._retained_key(root)
     assert bytes(home._lib_cache._buf) == shots[-1]
+
+
+@pytest.mark.parametrize("bufs", [2, 3])
+def test_the_retained_frame_waits_for_an_idle_frame(tmp_path, monkeypatch, bufs):
+    """The frame that brings the last buffer to a press captures nothing: an
+    idle frame after it takes the retained frame, which then holds the
+    glass's picture; a press first drops it."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, bufs, False)
+    home = ws.launcher_layer
+    caps = []
+    real = home._capture_retained
+    monkeypatch.setattr(home, "_capture_retained",
+                        lambda cv, dt, parts=None: caps.append(1) or real(cv, dt, parts))
+    for _ in range(2):
+        home.handle_input(_Key("right"))
+        ws.mark_dirty()
+        shots = [frame() for _ in range(bufs)]
+        assert None not in shots and caps == []
+    for _ in range(4):
+        assert frame() is None
+    assert caps == [1]
+    assert bytes(home._lib_cache._buf) == shots[-1]
+    assert home._lib_key == home._retained_key(ws.wm._root_canvas)
 
 
 @pytest.mark.parametrize("bufs", [2, 3])

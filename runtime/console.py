@@ -4575,12 +4575,16 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     # pre-collects, ~150ms nobody should wait for).
                     self.launcher_layer.prealloc_retained()
                     self.pause.prealloc()       # ... and the pause card's frame
+                    if getattr(self.launcher_layer, "_cap_owed", None) is not None:
+                        self.launcher_layer.capture_due()
                 except Exception as exc:  # noqa: BLE001 -- an idle tick never ends a session
                     if not self._idle_warned:
                         self._idle_warned = True
                         print("Moybyte idle work failed:", _err_text(exc))
             return
         self._quiet_frames = 0
+        if getattr(self.launcher_layer, "_cap_owed", None) is not None:
+            self.launcher_layer.capture_due()   # before anything draws
         if self._dirty:
             _glass.epoch()            # §15: a dirty frame is the un-attributed epoch
         # The fps the chip shows is the DRAWN rate (#217): an EMA over the
