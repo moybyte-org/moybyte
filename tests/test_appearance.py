@@ -629,6 +629,23 @@ def test_a_change_to_custom_forgets_custom_alone(tmp_path):
         assert chrome.theme_modes(n) == got[3]
 
 
+def test_the_list_of_themes_does_not_resolve_the_custom_just_installed(tmp_path, monkeypatch):
+    """A change installs custom's bytes, which is the loader's answer that
+    they resolve: the themes' list (Appearance's cards) does not resolve
+    them again, and a full ask for the package still reads them."""
+    from runtime import chrome
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(1))
+    ws.look.tick(0.0)
+    ws.look.change("accent", _accent(2))
+    ws.look.tick(0.0)
+    asked = []
+    real = ui_draw._C.theme_resolve
+    monkeypatch.setattr(ui_draw._C, "theme_resolve", lambda b: asked.append(1) or real(b))
+    assert CUSTOM in chrome.theme_names() and asked == []
+    assert chrome.package(CUSTOM)[0] == 0 and asked == [1]
+
+
 def test_idle_frames_write_nothing(tmp_path, monkeypatch):
     ws = build_ws(tmp_path)
     ws.look.change("accent", _accent(4))

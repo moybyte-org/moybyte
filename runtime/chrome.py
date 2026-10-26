@@ -922,6 +922,7 @@ LOOK_NONE = -2147483648     # a look leaf the theme leaves unset
 # The store's packages: name -> theme_resolve's answer, None until first read.
 _PACKAGES = {}
 _PKG_READ = [None]          # name -> its theme.json's bytes, or None
+_RESOLVES = set()           # packages known to resolve, their answer unread
 
 
 def adopt_packages(names, read):
@@ -929,6 +930,7 @@ def adopt_packages(names, read):
     `read(name)` (its theme.json's bytes, or None) the first time it is
     asked for: the look calls this at every store change."""
     _PACKAGES.clear()
+    _RESOLVES.clear()
     for n in names:
         _PACKAGES[n] = None
     _PKG_READ[0] = read
@@ -959,6 +961,8 @@ def package(name):
 
 def package_ok(name):
     """True for a store package that resolves."""
+    if name in _RESOLVES and _PACKAGES.get(name, 0) is None:
+        return True
     got = package(name)
     return got is not None and got[0] == 0
 
@@ -1027,11 +1031,17 @@ def theme_colors(name, variant=DEFAULT_VARIANT):
     return cached
 
 
-def forget_package(name):
+def forget_package(name, resolves=False):
     """Store package `name`'s bytes moved (a change to `custom`): its answer
     is read again at the next ask, and its own shared dicts go. No other
     theme's go: a package inherits nothing (the loader refuses `inherits` in
-    one, CHAIN), so its bytes move no other theme's tokens, look or modes."""
+    one, CHAIN), so its bytes move no other theme's tokens, look or modes.
+    `resolves`: the caller has just installed those bytes under `name`, so
+    whether it resolves is known without reading its answer."""
+    if resolves:
+        _RESOLVES.add(name)
+    else:
+        _RESOLVES.discard(name)
     if name in _PACKAGES:
         _PACKAGES[name] = None
     for cache in (_THEME_CACHE, _CONTENT_CACHE, _LIVE_CACHE, _LOOK_CACHE):

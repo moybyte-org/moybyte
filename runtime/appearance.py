@@ -1219,7 +1219,10 @@ class Appearance:
             return
         self._slot_src = c.theme
         self._slot_gen = self._pkg_gen
-        forget_package(CUSTOM)
+        # Installed under its own name, within the cap: the store package
+        # `custom` reads these same bytes, so it resolves.
+        forget_package(CUSTOM, resolves=(_ui_draw.theme_installed() == CUSTOM
+                                         and len(c.theme) <= _THEME_BYTES))
         if c.wall_moved:
             c.wall_moved = False
             self._pic_epoch += 1
