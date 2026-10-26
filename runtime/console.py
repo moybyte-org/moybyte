@@ -1967,6 +1967,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             opened()
         self.popover_touch()
 
+    def close_popover(self):
+        """Close the popover if one is open: its component's `closed` runs,
+        so the Wi-Fi card's radio lease goes with it. Every surface switch
+        calls it -- a switch made under an open popover lands under it."""
+        if self.sysmenu.open:
+            self.sysmenu.close()
+            self.popover_touch()
+
     def popover_touch(self):
         """The popover's pixels changed (opened, navigated, closed): the WM
         paints its rect alone where it can, else the frame repaints. A
@@ -3263,6 +3271,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         window (docs/shell_layout_2026-10.md §3)."""
         self._dirty = True             # screen change repaints (#44)
         self._set_text_mode(False)    # restore the game-button keyboard mode
+        self.close_popover()
         # The launcher root ends every return path: an app-to-app return that
         # outlived its journey here would drag an unrelated later exit into
         # Files. `_go_home_or_back` pops the slot BEFORE calling this.

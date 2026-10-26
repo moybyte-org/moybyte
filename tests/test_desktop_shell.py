@@ -1371,3 +1371,27 @@ def test_console_mode_hangs_each_widgets_popover_from_it(tmp_path):
     assert ws.sysmenu.open and ws.sysmenu.comp is None
     ws.widget_tap("menu")
     assert not ws.sysmenu.open
+
+
+def test_a_surface_switch_closes_the_popover_and_its_lease(tmp_path):
+    """go_home and open_app close an open bar popover, so the surface they
+    switch to is not drawn under it, and the Wi-Fi card's radio lease goes
+    with it -- in both modes."""
+    from ws_helpers import build_desktop_ws, build_ws
+    from runtime import host_app
+    for mode, build in (("console", build_ws), ("desktop", build_desktop_ws)):
+        ws = build(tmp_path / mode)
+        drv = host_app.ConsoleDriver(ws)
+        drv.frame(1 / 30)
+        assert ws.wm.mode == mode
+        m = ws.sysmenu
+        for switch in (ws.go_home,
+                       lambda: ws.open_app(ws._apps_by_id["calc"])):
+            ws.widget_tap("wifi")
+            drv.frame(1 / 30)
+            assert m.open and m.widget == "wifi"
+            assert ws.leases.holders() != []
+            switch()
+            drv.frame(1 / 30)
+            assert not m.open and m.comp is None
+            assert ws.leases.holders() == []
