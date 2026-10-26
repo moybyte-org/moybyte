@@ -6,7 +6,8 @@
 #   Run.editor_more    the Code scroll, the pickers, the desk's workspaces, the docked playtest
 #   Run.paint_more     Paint's window drag, the collector's stops under a long stroke
 #   Run.ui_page        the public UI API's fixture page: idle and a held arrow
-#   Run.pause          the pause menu over a running cart, and Resume
+#   Run.dialogs        the Editor's dialogs: Cart info, Blocks' number and name prompts
+#   Run.pause          the pause menu over a running cart, and Resume; the stop card
 #   gate               one board's whole run, in order, into a directory
 #   report             a run's tables, beside an earlier run's, with flags
 """The shell's scenarios on a board, and one board's measurement run.
@@ -36,7 +37,11 @@ it, the collector's stops summed (`gc`). The groups, in the order they run:
     myart     My Art as `apps` takes an app
     gc        the collector's stops under 27 s of Paint strokes
     uipage    tests/fixtures/ui_page's carts (pushed by --gate): idle, a held arrow
-    pause     the pause menu over Star Catcher: open, idle, a move, Resume
+    dialogs   the Editor's Cart info dialog and Blocks' number and name
+              prompts: open, typed into (a key every 0.25 s), Cart info's
+              fields moved
+    pause     the pause menu over Star Catcher: open, idle, a move, Resume;
+              the stop card over its run stopped: open, a move
     memhome   memory after the home's carousel ran (--gate runs it after --home)
 
 The baseline groups (mem to editor) keep the order they were first measured
@@ -80,7 +85,7 @@ PERF_FIELDS = ("busy", "draw", "flush", "logic", "render", "chrome",
                "wmr", "wmw", "wms", "fence_ms", "gfence_ms")
 
 GROUPS = ("mem", "idle", "menu", "apps", "paint", "projects", "notes",
-          "editor", "more", "myart", "gc", "uipage", "pause")
+          "editor", "more", "myart", "gc", "uipage", "dialogs", "pause")
 
 UI_PAGES = ("tests/fixtures/ui_page/page_py.moy",
             "tests/fixtures/ui_page/page_lua.moy")
@@ -548,6 +553,63 @@ class Run:
             self.no_cart()
         self.home()
 
+    def pooled(self, name, setup, action, n=4, settle=1.0):
+        """`n` repeats of `action` after an unmeasured `setup`, their
+        painted frames pooled into one row."""
+        ft = []
+        layers = {}
+        for _ in range(n):
+            setup()
+            self.b.drain(settle)
+            self.bench.start()
+            action()
+            self.b.drain(1.0)
+            r = self.bench.stop(name)
+            ft += self.pb.pyval(self.b, "list(ws._ft)") or []
+            layers = r["layers"]
+        return self._row(name, {"stats": self.pb.stats(ft), "layers": layers})
+
+    def typed(self, name, key_expr, text, gap=0.25):
+        """`text` typed a byte every `gap` s through `key_expr % byte`."""
+        def f():
+            for ch in text:
+                self.ex((key_expr % ord(ch)) + "\nws.mark_dirty()")
+                self.b.drain(gap)
+        return self.frames(name, f, 0.5)
+
+    def dialogs(self, title):
+        """The Editor's dialogs, each over its page: Blocks' number and name
+        prompts and Cart info."""
+        b = self.b
+        self._open_editor(title)
+        self.ex("ws.editor_app.set_tab('blocks')\nws.mark_dirty()")
+        b.drain(2.5)
+        shut = "ws.block_ui.blk_kbd and ws.block_ui._blk_kbd_cancel()\nws.mark_dirty()"
+        for kind, opener, text in (
+                ("number", "ws.block_ui._blk_open_kbd('num', cur=5, block={'t': 'set', "
+                           "'p': {}}, slot='value', allow_block=True)", "1234567890"),
+                ("name", "ws.block_ui._blk_open_kbd('var', var='score', slot_target=None)",
+                 "abcdefghij")):
+            self.pooled("Blocks %s dialog open" % kind, lambda: self.ex(shut),
+                        lambda opener=opener: self.ex(opener + "\nws.mark_dirty()"))
+            self.typed("Blocks %s dialog typing" % kind, "ws.block_ui._blk_kbd_key(%d)", text)
+            self.ex(shut)
+            b.drain(1.0)
+        self.ex("ws.editor_app.set_tab('cards')\nws.mark_dirty()")
+        b.drain(2.5)
+        shut = "ws.cards_layer.prompt and ws.cards_layer._close_prompt()"
+        self.pooled("Cart info dialog open", lambda: self.ex(shut),
+                    lambda: self.ex("ws.cards_layer._open_meta()"))
+        self.typed("Cart info dialog typing", "ws.cards_layer._prompt_key(%d)", "Hello world")
+        def fields():
+            for n in ("down", "up") * 6:
+                self.b.cmd("py ws.cards_layer._prompt_input(ws._SBK(%r)) and "
+                           "ws.mark_dirty() or 1" % n, wait_for="PY")
+                self.b.drain(0.3)
+        self.frames("Cart info dialog moving fields", fields, 0.5)
+        self.ex(shut)
+        self.home()
+
     def pause(self, title):
         b = self.b
         pb = self.pb
@@ -567,6 +629,19 @@ class Run:
                         self.bench.stop("Resume"))
         row["first_ms"] = pb.pyval(b, "ws._ft[:3]")
         self.save()
+        # the stop card: the run stopped as a crash stops it, over its last frame
+        self.ex("ws.cart_error = 'TypeError: a bench stop'\nws.mark_dirty()")
+        b.drain(1.5)
+        if pb.pyval(b, "ws.pause.open and ws.pause.stopped"):
+            self.pooled("stop card open (over %s stopped)" % title,
+                        lambda: self.ex("ws.pause.dismiss()\nws.mark_dirty()"),
+                        lambda: self.ex("ws.pause.stop()"), n=5)
+            self.frames("stop card move (its rows)",
+                        self.presses("ws.pause", ("down", "down", "up", "up") * 3), 0.5)
+        else:
+            print("      ! the stop card did not open")
+        # in one exec: a frame between the two would stop the run again
+        self.ex("ws.cart_error = None\nws.pause.dismiss()")
         b.leave_cart()
         self.no_cart()
         self.home()
@@ -610,6 +685,8 @@ def run_groups(b, out, only):
         r.paint_more()
     if want("uipage"):
         r.ui_page()
+    if want("dialogs"):
+        r.dialogs("Star Catcher")
     if want("pause"):
         r.pause("Star Catcher")
     if want("memhome"):
