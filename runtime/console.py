@@ -1201,6 +1201,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The pause menu over a fullscreen game (docs/look_2026-10.md step 25a):
         # Super holds the run and shows it; Esc or Super again gives it back.
         self.pause = PauseMenu(self)
+        # the layer a modal's held page lies in, and its holder (ui_draw.HeldPage)
+        self.held_pages = [None, None]
         self.confirm = DeleteConfirm(self)   # the question before a cart is deleted
         self._marks_held = False      # a modal turned the focus marks off
         # Reboot hook: the device injects a callable (machine.reset via the OTA
@@ -4284,6 +4286,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     # -- redraw-on-change (#44 step 1) ---------------------------------------
 
+    def release_held(self):
+        """Free one of the layers a modal holds what is under it in -- a
+        dialog's page (`ui_draw.HeldPage`), the frame under the pause card --
+        the fit check's last releases: True when there was one."""
+        return _ui_draw.release_held(self) or self.pause.release_under()
+
     def request_frame(self):
         """Ask for one more frame from WITHIN a draw (#113: a coasting fling).
         mark_dirty() would be lost here -- the gate clears _dirty right after
@@ -4566,6 +4574,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     # (idempotent after the first call; the device new_layer
                     # pre-collects, ~150ms nobody should wait for).
                     self.launcher_layer.prealloc_retained()
+                    self.pause.prealloc()       # ... and the pause card's frame
                 except Exception as exc:  # noqa: BLE001 -- an idle tick never ends a session
                     if not self._idle_warned:
                         self._idle_warned = True

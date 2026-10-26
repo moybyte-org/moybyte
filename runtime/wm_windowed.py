@@ -924,7 +924,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def release_cache(self):
         """The fit check's release: the parked stamps oldest-first, one per
         call, then the popover's snapshots when none is live, then the home's
-        retained frame."""
+        retained frame and the layer a dialog's page is held in."""
         p = self._parked
         if p is not None:
             for g in p.order:

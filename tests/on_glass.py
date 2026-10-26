@@ -1861,8 +1861,10 @@ def _free_heaps(board):
 
 
 # The pause menu keeps the paused frame whole in PSRAM (a 320x240 RGB565
-# layer, 153,600 bytes) so the scrim can dim it under the card, and gives it
-# back on resume. What it may take: the layer and the card's own widgets.
+# layer, 153,600 bytes) so the scrim can dim it under the card, and its
+# washed copy in another; both are minted on an idle frame and kept
+# (`PauseMenu.prealloc`). What it may take: a layer an idle frame had not
+# minted yet, and the card's own widgets.
 PAUSE_PSRAM_MAX = 160 * 1024
 # What a resume may leave behind in PSRAM, against the run before the menu.
 PAUSE_PSRAM_LEAK_MAX = 4096
@@ -1885,7 +1887,8 @@ def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
     """A running game's pause menu opens, dims the game and closes back to
     it, on the heap the suite already guards: internal SRAM stays at or above
     moycore's floor and within WASM_RUN_SRAM_MAX of the run before the menu,
-    and PSRAM gives back what the frozen-frame copy took. Opened and closed
+    and PSRAM gives back what the card took (its layers are kept from
+    before the run). Opened and closed
     by the console's one key (`ws.system_key`, the T-Deck's Mic).
 
     The dim is read off the glass, in the columns beside the card: the

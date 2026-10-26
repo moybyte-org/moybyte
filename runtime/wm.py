@@ -237,8 +237,9 @@ class FullscreenStackWM:
     def release_cache(self):
         """The fit check's release (shell_layout §3): free one retained
         cache a failed fit check can have back -- here the home's retained
-        frame. True when something was freed."""
-        return self.ws.launcher_layer.release_retained()
+        frame, then the layer a dialog's page is held in. True when
+        something was freed."""
+        return self.ws.launcher_layer.release_retained() or self.ws.release_held()
 
     def hand_content_damage(self, cv, x, y, w, h):
         """The fullscreen content layer painted only (x, y, w, h) of the root

@@ -895,6 +895,40 @@ Pinned by `tests/test_home_still.py`: a session of key presses, tab switches,
 a drag and a fling, and the buttons' focus, on one, two and three buffers
 presented in turn, the glass's every picture byte-equal to full repaints'.
 
+### 14.5 The page held under a dialog (2026-10-26)
+
+A dialog takes the keys and the pointer, so the page under it does not
+change while it stays up; a frame that types into it or moves its focus
+paid the page and its wash anyway, and on the T-Deck the two were most of
+the frame. #66 has the numbers.
+
+**A modal keeps the page under it washed** (`ui_draw.HeldPage`): the first
+frame draws the page, washes it (`ui_draw.wash_page`, the toolkit's own
+rule: the surface less the page's hint band at its foot) and copies the
+page's rect off; each frame after puts the copy back and draws the dialog
+over it with `{"wash": False}`, the override that tells a dialog its page
+is washed already. The copy is held under a key of what the page is a
+function of while the dialog is up — the dialog itself, the canvas, the
+page's rect, the font scale and the look — and only from a frame whose page
+was still (its context owed no frame), with nothing animating, on a canvas
+that retains its pixels and draws into its whole buffer: a pane's viewport
+(the desk Editor's) draws the page every frame. One modal is up at a time,
+so the holds share one layer of the canvas's size, kept across dialogs
+and freed by the Player's fit check after the home's retained frame
+(`docs/shell_layout_2026-10.md` §3). The Editor's Cart info
+dialog and Blocks' entry prompts hold their page; the pause and stop cards
+hold the run's frame washed beside the frame `_keep_under` keeps for the
+resumed game, whose layer is kept across cards and freed by the fit check
+the same way; where the game's frame is the system canvas (the handheld)
+an idle frame mints both, so no card's first frame does.
+
+**This is not a second invalidation mechanism.** Whether a frame paints is
+still the gate's; the copy only says what the page already is. Pinned by
+`tests/test_held_page.py`: the dialogs typed into and moved, on the handheld
+and the desk, and the cards over a run, on one and two buffers presented in
+turn, every presented frame byte-equal to frames that draw the page and let
+the dialog wash it, and the hold put back on most of them.
+
 ## 15. Amendment: the Surface's home is the kernel (2026-10-07)
 
 `docs/native_kernel_2026-09.md` §8 asked for this before its sprint 3, and

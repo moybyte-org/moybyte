@@ -2146,7 +2146,8 @@ class Player:
                 fit = _cart_fit(make, cart)
                 # A failed fit gets back what the WM holds as caches -- parked
                 # window stamps oldest-first, then the home's retained frame
-                # -- one at a time, until the check passes or nothing is left
+                # and a dialog's held page -- one at a time, until the check
+                # passes or nothing is left
                 # (docs/shell_layout_2026-10.md §3).
                 while (fit is not None and not _fits(fit)
                        and ws.wm.release_cache()):

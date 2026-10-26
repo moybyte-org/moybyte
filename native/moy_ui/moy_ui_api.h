@@ -336,8 +336,14 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
 // `buttons` (NUL-separated, the last of `kind`, the others normal) at its
 // foot, its body the rows stacked until a title of length 0 ends it. Answers
 // the button activated this frame (from 0), -1 none; the end answers -1.
+// Its wash is the surface, less the page's hint band at its foot; with the
+// override `wash` false it draws none, where the page under it was washed
+// already (`moy_ui_api_wash`, the page an app holds under its dialog).
 int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                           const uint8_t *buttons, size_t len, int kind, const moy_ui_over_t *o);
+// Washes what a dialog begun now would: the surface, less the page's hint
+// band at its foot.
+void moy_ui_api_wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // A popover (§1): `id` begins a card hung under ui.at's rect (else under the
 // stop that holds focus as it opens), above it where the surface has no room
 // below, `w` wide (0: the rect's width), its body the rows stacked until an

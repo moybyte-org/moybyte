@@ -17,6 +17,7 @@
 #   DragTap                           press/drag/release over a ScrollRegion
 #   ui_frame                          a host begins an app's frame of runtime/ui.py's verbs
 #   AppHost                           a shipped app's host side of the verbs (ctx.ui)
+#   HeldPage                          the page under a dialog, washed, held while it is up; release_held
 """The toolkit's engine layer: the rect-taking widgets under the public UI API.
 
 `runtime/ui.py` is the public UI API (docs/ui_api_2026-10.md), the verbs every
@@ -1862,6 +1863,111 @@ class AppHost:
         a[0] = a[1] = a[5] = a[7] = a[8] = 0
         self.owed = not settled
         return settled
+
+    def still(self):
+        """Whether the page this context drew last is what it draws next:
+        its input moved nothing, no tap waits and it owes no frame."""
+        return not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
+
+
+def wash_page():
+    """Wash, on the frame's canvas, what a dialog begun now would: the
+    surface, less the page's hint band at its foot. The dialog then takes
+    `{"wash": False}`."""
+    t = UI_TARGET
+    _C.api_wash(t[0], t[1], t[2])
+
+
+# What the held page's dialog takes: the page under it is washed already.
+NO_WASH = {"wash": False}
+
+
+class HeldPage:
+    """The page under a dialog, washed, held while the dialog is up
+    (docs/surface_model_v1.md §14.5). A dialog takes the keys and the
+    pointer, so the page under it does not change while it stays: the
+    first frame draws the page and washes it, and `keep` copies the page's
+    rect off; each frame after puts that copy back (`put`) instead of
+    drawing the page and its wash, and draws the dialog over it. `key` is
+    what the page's pixels are a function of while the dialog is up (the
+    dialog itself, the page's rect, the look); a key that differs, a page
+    that was not still, anything animating, a canvas that retains nothing
+    or one drawing into a viewport of its buffer draws it whole."""
+
+    def __init__(self):
+        self.key = None
+
+    def put(self, ws, cv, rect, key, dt=0):
+        """Put the held page back into `rect`: whether it was held under
+        `key` (else the frame draws the page)."""
+        held = ws.held_pages
+        if (self.key is None or held[1] is not self or self.key != key
+                or ws._animating(dt)):
+            return False
+        x, y, w, h = rect
+        cv.blit_strip_rect(held[0], 0, 0, x, y, w, h)
+        return True
+
+    def keep(self, ws, cv, rect, key, still, dt=0):
+        """Hold `rect` of the frame just drawn, the page washed, under
+        `key`; only where the page was `still`, nothing animates and the
+        canvas keeps its pixels and draws into its whole buffer (a pane's
+        viewport is copied from as the buffer it lies in, so it is not)."""
+        self.key = None
+        if (not still or ws._animating(dt)
+                or getattr(cv, "begin_surface", None) is not None
+                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+            return
+        vp = getattr(cv, "viewport", None)
+        if vp is not None and vp() != (0, 0, getattr(cv, "_stride", cv.w),
+                                       getattr(cv, "_bh", cv.h)):
+            return
+        lay = held_layer(ws, cv)
+        if lay is None:
+            return                      # no room: the page draws each frame
+        x, y, w, h = rect
+        lay.blit_strip_rect(cv, 0, 0, x, y, w, h)
+        ws.held_pages[1] = self
+        self.key = key
+
+    def drop(self):
+        """The dialog closed: the page is no longer held."""
+        self.key = None
+
+
+# A console's held pages share one layer of its canvas's size,
+# `ws.held_pages` = [the layer, the HeldPage whose page it holds]: one modal
+# is up at a time. Kept across dialogs (minting one is a third of a dialog's
+# first frame on the T-Deck: the pause card mints it on an idle frame); the
+# fit check's release frees it.
+
+def held_layer(ws, cv):
+    """Console `ws`'s held pages' layer, of canvas `cv`'s size: minted
+    where there is none of it (an idle frame's work where a modal will want
+    it, so the modal's first frame does not mint it); None with no room."""
+    lay = ws.held_pages[0]
+    if lay is not None and lay.w == cv.w and lay.h == cv.h:
+        return lay
+    release_held(ws)
+    try:
+        lay = ws.held_pages[0] = cv.new_layer(cv.w, cv.h)
+    except Exception:  # noqa: BLE001
+        return None
+    return lay
+
+
+def release_held(ws):
+    """Free console `ws`'s held pages' layer (the fit check's release):
+    True when there was one. The next dialog mints it again."""
+    held = ws.held_pages
+    lay = held[0]
+    held[0] = held[1] = None
+    if lay is None:
+        return False
+    rel = getattr(lay, "release", None)
+    if rel is not None:
+        rel()
+    return True
 
 
 # A coverless cart's cover (`initial_cover`): (block, ink) pairs of MOY64

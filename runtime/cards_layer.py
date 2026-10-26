@@ -257,6 +257,7 @@ class CardsLayer:
         self._dragv = None            # drag-to-scroll anchor (held vertical drag)
         # The open dialog (CART INFO or NEW SCRIPT), a `_Prompt`, or None.
         self.prompt = None
+        self._held = _ui_draw.HeldPage()   # the page under it (`_draw_prompt`)
         # The ADVANCED row's file list: None when closed, else
         # {"rows", "sel", "top", "msg"} -- see _open_files.
         self.files = None
@@ -284,6 +285,15 @@ class CardsLayer:
     def draw(self, dt):
         ws = self.ws
         ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        p = self.prompt
+        held = self._held
+        if p is None:
+            if held.key is not None:
+                held.drop()
+        elif held.put(ws, ws.sys_canvas, self._page_rect(), self._held_key(p), dt):
+            ws.bar_layer._draw_status_strip("menu")
+            self._draw_prompt(True, dt)
+            return
         try:
             self._draw_cards()
         except Exception as exc:  # noqa: BLE001
@@ -302,7 +312,24 @@ class CardsLayer:
         # An open dialog draws OVER the bar too -- same order as the block
         # editor's blk_kbd prompt (chrome, then any modal on top).
         if self.prompt is not None:
-            self._draw_prompt()
+            self._draw_prompt(False, dt)
+
+    def _page_rect(self):
+        lay = self.layout
+        return (lay.cx, lay.cy, lay.cw, lay.ch)
+
+    def _held_key(self, p):
+        """What the page under dialog `p` is a function of while it is up."""
+        ws = self.ws
+        return (p, ws.sys_canvas, self._page_rect(), ws.layout.fs, ws.look.look_gen)
+
+    def _page_still(self):
+        """Whether the page drawn last draws the same next frame."""
+        if self.files is not None:
+            return self._files_host.still()
+        if self._on_verbs():
+            return self._page is None or self._page.host.still()
+        return True
 
     def _draw_broken(self, text):
         """What a card that failed to draw leaves: the error, exact, under
@@ -1318,10 +1345,12 @@ class CardsLayer:
             self.ws._dirty = True
         return True
 
-    def _draw_prompt(self):
+    def _draw_prompt(self, held, dt):
         """The open dialog over the page, dimmed: its title, the line under
         it, a captioned field each, why it stayed open, and on a touch glass
-        or the desk Cancel and its last button."""
+        or the desk Cancel and its last button. `held`: the page under it
+        was put back washed (`HeldPage`), else it was drawn this frame and
+        is washed and held here."""
         ws = self.ws
         p = self.prompt
         lay = self.layout
@@ -1336,7 +1365,12 @@ class CardsLayer:
             ws.sys_canvas.rect(lay.cx, lay.cy + lay.ch - b, lay.cw, b, ws.theme_colors["panel"])
             _ui.at(lay.cx, lay.cy + lay.ch - b, lay.cw, b)
             _ui.hints(keys)
-        pick = _ui.dialog(p.title, () if tdeck else ("Cancel", p.ok))
+        if not held:
+            _ui_draw.wash_page()
+            self._held.keep(ws, ws.sys_canvas, self._page_rect(), self._held_key(p),
+                            self._page_still(), dt)
+        pick = _ui.dialog(p.title, () if tdeck else ("Cancel", p.ok), "primary",
+                          _ui_draw.NO_WASH)
         if p.sub:
             _ui.label(p.sub, _PROMPT_SUB)
         done = False

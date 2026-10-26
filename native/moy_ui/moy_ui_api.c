@@ -2082,6 +2082,10 @@ static void wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     moy_ui_scrim(s, sf);
 }
 
+void moy_ui_api_wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    wash(c, s);
+}
+
 int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
                           const uint8_t *buttons, size_t len, int kind, const moy_ui_over_t *o) {
     o = over(o);
@@ -2132,7 +2136,9 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     if (card.y < sf.y) {
         card.y = sf.y;
     }
-    wash(c, s);                         // everything under a dialog dims (D-01)
+    if (o->wash != 0) {
+        wash(c, s);                     // everything under a dialog dims (D-01)
+    }
     moy_ui_modal(s, card, title, fs, c->cls, rh);
     c->dlg_id = id;
     c->dlg_card = card;

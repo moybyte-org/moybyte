@@ -2760,6 +2760,15 @@ static mp_obj_t ui_api_dialog(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_dialog_obj, 7, 7, ui_api_dialog);
 
+// api_wash(ctx, cv, look): wash what a dialog begun now would
+static mp_obj_t ui_api_wash(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
+    moy_ui_sink_t s;
+    sink_of(&s, cv, look);
+    moy_ui_api_wash(ctx_of(ctx), &s);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_wash_obj, ui_api_wash);
+
 // api_popover(ctx, cv, look, id, w, o) -> 1, 0 the frame it is dismissed; an
 // id of length 0 ends the popover
 static mp_obj_t ui_api_popover(size_t n_args, const mp_obj_t *a) {
@@ -3134,6 +3143,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_scroll), MP_ROM_PTR(&ui_api_scroll_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_field), MP_ROM_PTR(&ui_api_field_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_dialog), MP_ROM_PTR(&ui_api_dialog_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_wash), MP_ROM_PTR(&ui_api_wash_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_fades), MP_ROM_PTR(&ui_api_fades_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },

@@ -239,6 +239,7 @@ class BlockEditorUI:
         self._blk_ekey = KeyEdge()    # #93: Ctrl+Z/Y edge tracker
         self.block_layout = BlockLayout()
         self._page = None             # the page on the verbs (editor_blocks.py)
+        self._held = _ui_draw.HeldPage()   # the page under blk_kbd (`_draw_blk_kbd`)
 
     def page(self):
         """The Blocks page on the verbs, built at its first use."""
@@ -1278,14 +1279,30 @@ class BlockEditorUI:
         """The Blocks tab: the page (`editor_blocks.BlocksPage`) in the content
         rect, the bar's strip, and an entry prompt over them."""
         ws = self.ws
-        lay = self.block_layout
-        self.page().draw(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch),
-                         False)
+        k = self.blk_kbd
+        held = self._held
+        if k is None:
+            if held.key is not None:
+                held.drop()
+        elif held.put(ws, ws.sys_canvas, self._page_rect(), self._held_key(k), dt):
+            ws.bar_layer._draw_status_strip("menu")
+            self._draw_blk_kbd(True, dt)
+            return
+        self.page().draw(ws.sys_canvas, ws.theme_colors, self._page_rect(), False)
         ws.bar_layer._draw_status_strip("menu")
         if self.blk_kbd is not None:
-            self._draw_blk_kbd()
+            self._draw_blk_kbd(False, dt)
 
-    def _draw_blk_kbd(self):
+    def _page_rect(self):
+        lay = self.block_layout
+        return (lay.cx, lay.cy, lay.cw, lay.ch)
+
+    def _held_key(self, k):
+        """What the page under prompt `k` is a function of while it is up."""
+        ws = self.ws
+        return (k, ws.sys_canvas, self._page_rect(), ws.layout.fs, ws.look.look_gen)
+
+    def _draw_blk_kbd(self, held=False, dt=0):
         """The entry prompt up (GAPS 52): `ui.dialog` with a captioned
         `ui.field`, over the Blocks page dimmed -- "Name your variable" (a
         block's, an input's) with the rule for a name, "Type some text", or
@@ -1293,7 +1310,9 @@ class BlockEditorUI:
         block where the slot takes one. The keys type, so it has no DEL or
         digit pad; the T-Deck's keys are its hint strip's, where a touch
         glass and the desk add Cancel and OK. On the SYSTEM canvas: the
-        game canvas is a hidden buffer on a bigger glass (#85/#93)."""
+        game canvas is a hidden buffer on a bigger glass (#85/#93). `held`:
+        the page under it was put back washed (`HeldPage`), else it was
+        drawn this frame and is washed and held here."""
         ws = self.ws
         k = self.blk_kbd
         kind = k.get("kind")
@@ -1307,9 +1326,13 @@ class BlockEditorUI:
         keys = (("confirm", "OK") + (("scroll", "Use a block") if to_block else ())
                 + ("cancel", "Cancel"))
         _strip(ws, lay, keys, desk)
+        if not held:
+            _ui_draw.wash_page()
+            self._held.keep(ws, ws.sys_canvas, self._page_rect(), self._held_key(k),
+                            self._page is None or self._page.host.still(), dt)
         tdeck = _ui.input_kind() == "tdeck"
         pick = _ui.dialog(_KBD_TITLES.get(kind, "Name your variable"),
-                          () if tdeck else ("Cancel", "OK"))
+                          () if tdeck else ("Cancel", "OK"), "primary", _ui_draw.NO_WASH)
         if not num and kind != "text":
             _ui.label(_KBD_NAME_RULE, _KBD_SUB)
         if num:

@@ -304,6 +304,7 @@ _DRAW_SIGS = (
      c.c_int32),
     ("moy_ui_api_dialog", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, _I, c.c_void_p],
      c.c_int32),
+    ("moy_ui_api_wash", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_owes", [c.c_void_p], _I),
     ("moy_ui_api_fades", [_I], c.c_uint32),
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
@@ -1078,6 +1079,11 @@ def binding():
         b = bytes(buttons)
         return int(lib.moy_ui_api_dialog(p, c.byref(s), t, b, len(b), int(kind_), ov))
 
+    def api_wash(ctx, cv, look):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        lib.moy_ui_api_wash(p, c.byref(s))
+
     def api_popover(ctx, cv, look, id_, w, o):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
@@ -1274,7 +1280,7 @@ def binding():
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
-              api_box, api_table, api_scroll, api_field, api_dialog, api_owes, api_fades,
+              api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_owes, api_fades,
               api_end,
               api_table_rows, api_table_pics,
               api_grid,
