@@ -3,14 +3,16 @@
 # The T-Deck's table, offset for offset (same chip, same 16MB flash): one set
 # of numbers to hold in the head (otadata 0x1D000 on BOTH S3 boards; only the
 # P4 differs at 0xD000) and the same slot arithmetic the #168 size guard
-# watches. The slots are 6 MiB (owner, 2026-10-15) for the reason the T-Deck's
-# CSV gives, and the vfs -- the store's fallback without a TF card -- is what
-# is left of the chip.
+# watches. The slots are 7 MiB (owner, 2026-10-26, the theme mode took the
+# image under its 512 KB headroom floor) for the reason the T-Deck's CSV gives,
+# and the vfs -- the store's fallback without a TF card -- is what is left of
+# the chip. Moving the slots moves the vfs: a board on an older table takes a
+# cable flash (tools/board_flash.py), and its store re-seeds.
 #
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x14000,
 otadata,  data, ota,     0x1D000,  0x2000,
 phy_init, data, phy,     0x1F000,  0x1000,
-ota_0,    app,  ota_0,   0x20000,  0x600000,
-ota_1,    app,  ota_1,   0x620000, 0x600000,
-vfs,      data, fat,     0xC20000, 0x3E0000,
+ota_0,    app,  ota_0,   0x20000,  0x700000,
+ota_1,    app,  ota_1,   0x720000, 0x700000,
+vfs,      data, fat,     0xE20000, 0x1E0000,
