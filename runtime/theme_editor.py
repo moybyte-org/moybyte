@@ -32,9 +32,11 @@ sheet (`icons.moygfx`, the pixel set's shape) and names it in the look's
 the live look as it is painted (`Appearance.preview_pixels`); a save writes
 the sheet and theme.json together.
 
-Keys: the T-Deck's are its hint strip's -- F and V flip, R rotates, the
-trackball picks a tool, a colour or a tab, K is Done, and in Config, where
-letters type, Mic is the menu. A keyboard steps the slot with Q and W (E on
+Keys: the T-Deck's are its hint strip's -- in Sprites F and V flip, R
+rotates, the trackball picks a tool, a colour or a tab and K is Done; in
+Config, where letters type and the trackball is the caret's arrows, Mic
+opens the menu on its Home row, which leaves saving as Done does, and the
+tabs are a touch's. A keyboard steps the slot with Q and W (E on
 the T-Deck, where W moves), moves the cursor with the arrows and paints
 where it stands with Enter; Ctrl+Tab changes tab, Esc is Done. The desk shows
 both tabs as panes side by side (runtime/editor_desk.py's `theme`
@@ -671,7 +673,7 @@ def _hints_for(tab):
         return ()
     if tab == TAB_CONFIG:
         if inp == "tdeck":
-            return ("ball", "Tabs and Done", "menu", "Menu")
+            return ("menu", "Home")     # the menu opens on its Home row
         if inp == "pad":
             return ("back", "Done")
         return ("Ctrl Tab", "Sprites", "back", "Done")

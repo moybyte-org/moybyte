@@ -5,11 +5,14 @@ as a tap does, down and back come off it.
 
 The system menu carries Home off the home: the way out of a surface with no
 back of its own, as the home key goes.
+
+The theme mode's Config names no trackball in its hints: its caret takes the
+ball, and Mic's menu, on its Home row, is the way out.
 """
 
 import pytest
 
-from runtime import bar_layer, host_app, ui_draw
+from runtime import bar_layer, host_app, theme_editor, ui_draw
 from test_v04_userland import select_first_game
 
 
@@ -311,3 +314,9 @@ def test_home_from_the_editor_keeps_an_edit(tmp_path):
     ed.save_current = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
     _home_row(ws, drv)
     assert ws.screen == "launcher" and calls, "the leave path saves the open tab"
+
+
+def test_the_theme_modes_config_names_no_trackball_on_the_tdeck():
+    keys = theme_editor._hints_for(theme_editor.TAB_CONFIG)
+    assert "ball" not in keys and "ball_lr" not in keys
+    assert keys == ("menu", "Home")

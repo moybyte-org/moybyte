@@ -199,8 +199,9 @@ def test_the_tdeck_hints_name_its_own_keys(tmp_path):
     try:
         assert theme_editor._hints_for("theme_sprites") == (
             "flip", "Flip", "rotate", "Rotate", "ball", "Colour", "back", "Done")
-        assert theme_editor._hints_for("theme_config") == (
-            "ball", "Tabs and Done", "menu", "Menu")
+        # Config's caret takes the ball and its letters type: Mic's menu,
+        # opening on Home, is the way out, and the tabs are a touch's
+        assert theme_editor._hints_for("theme_config") == ("menu", "Home")
     finally:
         ui_draw.input_kind("keys")
 
