@@ -915,6 +915,7 @@ _THEME_CACHE = {}
 _CONTENT_CACHE = {}
 _LIVE_CACHE = {}
 _LOOK_CACHE = {}
+_MODES_CACHE = {}
 RGB = 0x1000000             # a colour value at or above: RGB | 0xrrggbb
 PAINT = 0x2000000           # a look colour at or above is a paint, no colour
 LOOK_NONE = -2147483648     # a look leaf the theme leaves unset
@@ -991,14 +992,19 @@ def theme_modes(name):
     silent."""
     if not theme_known(name):
         name = DEFAULT_THEME
+    got = _MODES_CACHE.get(name)
+    if got is not None:
+        return got
     bits = None
     if name not in THEME_NAMES and name != _ui_draw._C.theme_installed():
-        got = package(name)
-        if got is not None and got[0] == 0:
-            bits = got[10]
+        pkg = package(name)
+        if pkg is not None and pkg[0] == 0:
+            bits = pkg[10]
     if bits is None:
         bits = _ui_draw._C.theme_modes(name)
-    return tuple(v for v in THEME_VARIANTS if bits & (1 << (v == "light")))
+    got = _MODES_CACHE[name] = tuple(v for v in THEME_VARIANTS
+                                     if bits & (1 << (v == "light")))
+    return got
 
 
 def theme_colors(name, variant=DEFAULT_VARIANT):
@@ -1023,10 +1029,15 @@ def theme_colors(name, variant=DEFAULT_VARIANT):
 
 def forget_package(name):
     """Store package `name`'s bytes moved (a change to `custom`): its answer
-    is read again at the next ask, and the shared dicts go."""
+    is read again at the next ask, and its own shared dicts go. No other
+    theme's go: a package inherits nothing (the loader refuses `inherits` in
+    one, CHAIN), so its bytes move no other theme's tokens, look or modes."""
     if name in _PACKAGES:
         _PACKAGES[name] = None
-    forget_themes()
+    for cache in (_THEME_CACHE, _CONTENT_CACHE, _LIVE_CACHE, _LOOK_CACHE):
+        for key in [k for k in cache if k[0] == name]:
+            del cache[key]
+    _MODES_CACHE.pop(name, None)
 
 
 def forget_themes():
@@ -1036,6 +1047,7 @@ def forget_themes():
     _CONTENT_CACHE.clear()
     _LIVE_CACHE.clear()
     _LOOK_CACHE.clear()
+    _MODES_CACHE.clear()
 
 
 def _look_raw(name, light):

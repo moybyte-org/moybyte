@@ -229,6 +229,41 @@ def test_the_backdrop_rasters_once_per_theme_load_on_the_desk(tmp_path):
     assert _at(drv, 600, 595) == M.q("#191c3e")       # Night's crescent
 
 
+def test_an_accent_change_keeps_the_desks_bake(tmp_path):
+    """The bake is keyed on the records and the RGB its fill paints, not on
+    the look's generation: an accent change, which moves neither, keeps it,
+    and the desk it leaves is the desk a fresh raster draws. A change that
+    moves the fill makes it again."""
+    from runtime import host_app
+    import moy_ui as mu
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    windowed=True, panel_diagonal_in=7.0)
+    drv = host_app.ConsoleDriver(ws)
+    ws.look.set_theme("moy", variant="light")
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert ws.look.backdrop("desk") and ws.wallpaper.rasters == 1
+    accents = [a for _n, a, _d in mu.theme_accents()]
+    for a in accents[:3]:
+        ws.look.change("accent", a)
+        for _ in range(4):
+            drv.frame(1 / 30)
+    assert ws.look.theme_name == "custom"
+    assert ws.wallpaper.rasters == 1
+    kept = drv.rgb888()
+    ws.wallpaper._bd_key = None                    # a fresh raster of the same desk
+    ws.wm._desk_sig = None
+    ws.mark_dirty()
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert ws.wallpaper.rasters == 2
+    assert drv.rgb888() == kept
+    ws.look.set_theme_variant("dark")
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert ws.wallpaper.rasters == 3
+
+
 def test_a_home_backdrop_rasters_once_under_the_carousel(tmp_path):
     from ws_helpers import build_ws_with_shelf
     from runtime import host_app
@@ -361,9 +396,12 @@ def test_the_benchs_backdrop_snippets_run_on_the_host(tmp_path):
                                             ticks_diff=lambda a, b: a - b)}
     exec(p4_bench.BACKDROP_SETUP.replace("import time, moy_ui", "import moy_ui"), ns)
     assert ws._bd_rc[0] == 0
+    was = (ws.look.backdrop("desk"), ws.wallpaper._bg_word(ws.theme_colors["desktop"]))
     ns["_bd_switch"]("bench-bd", "light")
     drv.frame(1 / 30)
-    assert ws.wallpaper.rasters - ws._bd_r0 == 1
+    now = (ws.look.backdrop("desk"), ws.wallpaper._bg_word(ws.theme_colors["desktop"]))
+    # the desk's bake is made again only where its records or its fill moved
+    assert ws.wallpaper.rasters - ws._bd_r0 == (1 if now != was else 0)
     nbytes, us = ns["_bd_raster"]("desk")
     assert nbytes == len(ws.look.backdrop("desk")) and us >= 0
     ws.open_library()

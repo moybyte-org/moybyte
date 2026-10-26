@@ -550,7 +550,7 @@ class Wallpaper:
             return ("bg", bg)
         img = self._bd_img
         if (k is not self._bd_key or img is None or getattr(img, "_rgb_i", None) is None
-                or k[1] != bg or k[2] != cv.w or k[3] != cv.h or k[4] != look.look_gen):
+                or k[1] != bg or k[2] != cv.w or k[3] != cv.h or k[4] != self._bg_word(bg)):
             return None
         return ("bd", k)
 
@@ -657,7 +657,7 @@ class Wallpaper:
         blit it 1:1 after. Where the bake cannot be had it is drawn onto the
         canvas inside its clip, each paint."""
         img = self._bd_img
-        key = (rec, bg, cv.w, cv.h, self.ws.look.look_gen)
+        key = (rec, bg, cv.w, cv.h, self._bg_word(bg))
         if img is None:
             img = self._bd_img = Bitmap(cv.w, cv.h, None, self.PIC_OWNER)
         if key != self._bd_key or getattr(img, "_rgb_i", None) is None:
@@ -675,6 +675,19 @@ class Wallpaper:
             self._bd_key = key
         cv.blit565(img._rgb_i, img.w, img.h, 0, 0)
         return True
+
+    def _bg_word(self, bg):
+        """What the fill `bg` paints: an index into the live theme's block
+        (64..) as the RGB565 word it names now, a MOY64 index as itself. The
+        bake is keyed on it and the records, so a look change that moves
+        neither (an accent) keeps the bake."""
+        if bg >= 64:
+            live = getattr(self.ws.look, "live", None)
+            blk = live.block if live is not None else ()
+            if bg - 64 < len(blk):
+                return 0x10000 | blk[bg - 64]
+            return (bg, self.ws.look.look_gen)
+        return bg
 
     def _paint(self, dt, home=False):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid

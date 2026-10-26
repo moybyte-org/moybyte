@@ -603,6 +603,32 @@ def test_ten_changes_land_where_one_would(tmp_path, monkeypatch):
     assert _look(ws)["accent"] == _accent(10)
 
 
+def test_a_change_to_custom_forgets_custom_alone(tmp_path):
+    """A change re-reads `custom`'s tokens, look and modes, and keeps every
+    other theme's shared dicts: a package inherits nothing, so its bytes move
+    no other theme. The kept dicts are what a fresh read answers."""
+    from runtime import chrome
+    ws = build_ws(tmp_path)
+    ws.look.change("accent", _accent(1))
+    ws.look.tick(0.0)
+    seeds = {(n, v): (theme_colors(n, v), chrome.theme_look(n, v), live_colors(n, v),
+                      chrome.theme_modes(n))
+             for n in THEME_NAMES for v in ("dark", "light")}
+    mine = theme_colors(CUSTOM, ws.look.theme_variant)
+    ws.look.change("accent", _accent(2))
+    ws.look.tick(0.0)
+    assert theme_colors(CUSTOM, ws.look.theme_variant) is not mine
+    assert ws.look.custom_look()["accent"] == _accent(2)
+    for (n, v), got in seeds.items():
+        now = (theme_colors(n, v), chrome.theme_look(n, v), live_colors(n, v),
+               chrome.theme_modes(n))
+        assert all(a is b for a, b in zip(got, now)), (n, v)
+    chrome.forget_themes()
+    for (n, v), got in seeds.items():
+        assert theme_colors(n, v) == got[0] and chrome.theme_look(n, v) == got[1]
+        assert chrome.theme_modes(n) == got[3]
+
+
 def test_idle_frames_write_nothing(tmp_path, monkeypatch):
     ws = build_ws(tmp_path)
     ws.look.change("accent", _accent(4))
