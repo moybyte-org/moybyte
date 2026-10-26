@@ -2122,9 +2122,10 @@ static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", 
 
 // The keys each input does each action with. The T-Deck's are its keyboard's
 // (native/moy_input/moy_kbd.c): Enter is `run`, K is `b` (back, as the bar's
-// chevron is), W A S D are the directions beside the trackball (`ball_lr`,
-// its sign; owner call, 2026-10-23), Q and E are the home's tab keys and Mic
-// is `start`. A gamepad's are its face buttons, its
+// chevron is), W A S D are the directions, and so is a roll of the trackball
+// wherever a surface takes the keys, its click Enter (`ball_lr`, its sign;
+// owner calls 2026-10-23 and 2026-10-26, Workstation.ball), Q and E are the
+// home's tab keys and Mic is `start`. A gamepad's are its face buttons, its
 // d-pad (`dpad_lr`), its shoulders and Start. Touch has none. Cancel is a
 // field's: in one the T-Deck's K types a letter, so Mic, which never types,
 // cancels there (owner call, 2026-10-18). The sprite tab's operations are

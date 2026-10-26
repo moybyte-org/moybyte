@@ -306,6 +306,7 @@ class SettingsLayer:
 
     id = "settings"
     domain = "system"
+    ball_steps = True               # the trackball steps its rows (Workstation.ball_steps)
     zone_gen = 0
     back_title = "Settings"
 

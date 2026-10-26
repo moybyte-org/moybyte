@@ -766,7 +766,7 @@ move the carousel by a card with the drag's glide (the handheld's 6-frame
 slide), run through the same `flinging` path as a touch fling
 (`_drag_partial`), so a held key is one continuous motion; up moves focus to
 the tabs in the bar, where left/right switch tabs and down or enter
-returns; the trackball is the same four directions. On the desk a key or a
+returns; the trackball points (a cursor its click taps with). On the desk a key or a
 tap on a shelf card selects it at once and the shelf glides to show it two
 cards in; a drag scrolls the shelf and selects nothing; up from the shelf
 puts the focus on the details pane's first button, where left/right move

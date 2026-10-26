@@ -27,6 +27,7 @@ class ListShellApp:
     """Mixin for the app layers. `_persist` expects the host class to provide
     `status` and `_save_failed`."""
 
+    ball_steps = True           # the trackball steps its rows (Workstation.ball_steps)
     APP_TITLE = None            # the shipped cart's title ("Files", ...)
     APP_PERM = None             # its identity permission ("browse", ...)
     APP_FOLDER = None           # its store folder ("moybyte.files.moy", ...)

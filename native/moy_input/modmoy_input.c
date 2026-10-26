@@ -1470,8 +1470,9 @@ static MP_DEFINE_CONST_FUN_OBJ_0(input_task_stack_free_obj, input_task_stack_fre
 // The stage is one C pass a frame: the input task's kick (at the head, or at
 // the tail where the board's task reads while the frame paces), the BLE
 // keyboard's reports and its mouse, the touch's sample, the merge, the
-// trackball, the pointer's sample. The trackball's pulses are the console's
-// to spend (a caret's arrows, else the cursor): nav() hands them over, once.
+// trackball, the pointer's sample. The trackball's pulses and its click are
+// the console's to spend (a caret's arrows, a surface's W A S D and Enter,
+// else the cursor and its click): nav() hands them over, once.
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_loop_objs[4]);
 
@@ -1482,6 +1483,7 @@ MP_REGISTER_ROOT_POINTER(mp_obj_t moy_input_loop_objs[4]);
 
 static bool s_kick_tail;
 static int32_t s_nav[2];
+static bool s_nav_click;
 static uint32_t s_devch_src;
 static bool s_devch;
 
@@ -1506,20 +1508,25 @@ static mp_obj_t input_loop_bind(size_t n_args, const mp_obj_t *pos, mp_map_t *kw
     o[LOOP_BALL] = mp_obj_is_type(a[ARG_ball].u_obj, &input_ball_type) ? a[ARG_ball].u_obj : MP_OBJ_NULL;
     s_kick_tail = a[ARG_kick_at_tail].u_bool;
     s_nav[0] = s_nav[1] = 0;
+    s_nav_click = false;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(input_loop_bind_obj, 1, input_loop_bind);
 
-// nav() -> the trackball's pulses this frame as one small int pair packed
-// (dx * 4096 + dy, each biased by 2048), 0 when it did not move: the
-// console's hook reads it with no allocation and spends it once.
+// nav() -> the trackball this frame as one small int: its pulses packed
+// (dx * 4096 + dy, each biased by 2048) and its click's press as bit 24, 0
+// when it neither moved nor clicked: the console's hook reads it with no
+// allocation and spends it once. The click is also this frame's pointer
+// click, which the console takes back where it spends it as Enter.
 static mp_obj_t input_nav(void) {
     int32_t dx = s_nav[0], dy = s_nav[1];
+    bool click = s_nav_click;
     s_nav[0] = s_nav[1] = 0;
-    if (!dx && !dy) {
+    s_nav_click = false;
+    if (!dx && !dy && !click) {
         return MP_OBJ_NEW_SMALL_INT(0);
     }
-    return MP_OBJ_NEW_SMALL_INT((dx + 2048) * 4096 + (dy + 2048));
+    return MP_OBJ_NEW_SMALL_INT((click ? 1 << 24 : 0) + (dx + 2048) * 4096 + (dy + 2048));
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(input_nav_obj, input_nav);
 
@@ -1594,6 +1601,7 @@ void moy_input_loop_inputs(uint32_t now_unused, bool *click, bool *active) {
         moy_ball_take(bo->b, c);
         ball_click = down && !bo->prev;
         bo->prev = down;
+        s_nav_click |= ball_click;
         s_nav[0] += (int32_t)c[3] - (int32_t)c[2];      // right - left
         s_nav[1] += (int32_t)c[1] - (int32_t)c[0];      // down - up
     }
@@ -1614,6 +1622,9 @@ void moy_input_loop_pointer(uint32_t now_unused, bool click, bool swallow) {
     moy_input_ptr_t *p = &((input_pointer_obj_t *)MP_OBJ_TO_PTR(ptr))->p;
     if (swallow) {
         p->down = false;
+    }
+    if (!click) {
+        s_nav_click = false;        // a click the idle ladder swallowed is no one's
     }
     p->click = click;
     moy_input_ptr_tick(p, now_ms());

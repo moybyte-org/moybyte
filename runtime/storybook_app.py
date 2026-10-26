@@ -514,6 +514,13 @@ class StorybookAppLayer(ListShellApp):
         self._key = k
         return typed
 
+    def ball_steps(self):
+        """The trackball steps the stories, the slides and a menu or a
+        dialog; the desk's slide editor is pointed at
+        (Workstation.ball_steps)."""
+        return (self.ed is None or self.page == "stories" or self.asking is not None
+                or self.menu is not None)
+
     def handle_input(self, inp):
         k = self._typed(inp)
         if self.toast is not None and (k or inp.pressed("a") or inp.pressed("b")):

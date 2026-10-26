@@ -78,8 +78,9 @@ class Desktop:
         What each upcall carries beyond the console's own entry is the Python
         half of a stage the kernel cannot do for a VM object: the canvases
         re-pointed at the compositor's new back buffer (handle_input, after
-        the kernel's present_pending), the trackball's pulses spent on a caret
-        or the cursor (handle_input, the T-Deck), the boot's first-frame
+        the kernel's present_pending), the trackball's pulses and click spent
+        on a surface's keys, a caret or the cursor (handle_input, the
+        T-Deck, `Workstation.ball`), the boot's first-frame
         report and the console's PERF half (frame). `after_frame(drew)` is a
         board's per-frame Python inside the frame upcall (the T-Deck's offline
         diag), never an upcall of its own."""
@@ -107,10 +108,10 @@ class Desktop:
             sys_canvas.sync_back()
             if nav is not None:
                 n = nav()
-                if n:
-                    dx = n // 4096 - 2048
-                    dy = n % 4096 - 2048
-                    if not ws.nav(dx, dy):
+                if n or ws.ball_owed:
+                    dx = (n >> 12 & 4095) - 2048 if n else 0
+                    dy = (n & 4095) - 2048 if n else 0
+                    if not ws.ball(dx, dy, n >> 24) & 1 and (dx or dy):
                         pointer.move(cursor(dx), cursor(dy))
             ws.handle_input()
 

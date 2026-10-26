@@ -128,6 +128,7 @@ class _BlocksLayer(Layer):
 
     id = "blocks"
     domain = "system"
+    ball_steps = True               # the trackball steps its outline (Workstation.ball_steps)
 
     def draw(self, dt):
         self.ws.block_ui._draw_blocks(dt)
@@ -146,6 +147,7 @@ class _UpdateLayer(Layer):
 
     id = "update"
     domain = "system"
+    ball_steps = True               # the trackball steps its buttons (Workstation.ball_steps)
 
     def draw(self, dt):
         self.ws.update_ui._pump_update(dt)   # advance the install / reboot countdown

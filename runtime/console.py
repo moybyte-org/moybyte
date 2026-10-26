@@ -1099,6 +1099,16 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
         # (The launcher's trackball-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
+        # The trackball's presses where a surface takes the keys (`ball`):
+        # its source, the pulses toward a step on each axis and when the last
+        # came, the steps owed (signed), the click owed, the press held now.
+        self._ball_src = None
+        self._ball_ax = self._ball_ay = 0
+        self._ball_at = 0
+        self._ball_qx = self._ball_qy = 0
+        self._ball_run = False
+        self._ball_down = None
+        self.ball_owed = False        # a press is held or owed: `ball` runs each frame
         # Crash isolation (#160 / Phase 8): the rows themselves, because they
         # stay the same object across a load. One ledger per role -- see
         # runtime/crash_guard.py, "Two roles, two ledgers".
@@ -3984,6 +3994,105 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._dirty = True
             return True
         return False
+
+    BALL_STEP = 2           # trackball pulses a step, on the roll's stronger axis
+    BALL_QUEUE = 3          # steps a fast roll may owe
+    BALL_IDLE_MS = 300      # a pause this long forgets a partial step
+
+    def ball_steps(self):
+        """Whether the trackball is the W A S D of the surface that holds
+        the keys: a popover, the system menu, the pause and stop cards, the
+        delete confirm, About, and a content layer whose `ball_steps` says
+        so (a list, a menu, a dialog). Elsewhere -- the home, the desk's
+        windows, a running cart, a canvas -- it points."""
+        if self._modal_layer() is not None or self._about:
+            return True
+        if self.windowed_chrome:
+            return False
+        steps = getattr(self._content_layer(), "ball_steps", False)
+        return bool(steps() if callable(steps) else steps)
+
+    def ball(self, dx, dy, click=False):
+        """The trackball this frame -- the T-Deck's, and the host's arrows
+        standing in for it: (dx, dy) pulses and its click's press. Where
+        the surface that holds the keys steps a selection (`ball_steps`),
+        every BALL_STEP pulses on the roll's stronger axis are the press of
+        the direction W A S D make there, the click is Enter's `run` and
+        the cursor stays hidden; else a caret takes the roll (`nav`), else
+        the roll is the cursor's and the click the pointer's. The presses
+        reach the surfaces through the input table, as the "ball" source's,
+        one a frame with a frame up between, so a surface reads them as it
+        reads the keys. Answers bit 1 when the roll was taken, bit 2 when
+        the click was (the pointer then sees no click)."""
+        took = 0
+        steps = (dx or dy or click or self._ball_qx or self._ball_qy
+                 or self._ball_run) and self.ball_steps()
+        if dx or dy:
+            if steps:
+                self._ball_roll(dx, dy)
+                took = 1
+            elif self.nav(dx, dy):
+                took = 1
+        if click and steps:
+            self._ball_run = True
+            took |= 2
+        if took:
+            p = self.pointer
+            if p is not None:
+                if took & 2:
+                    p.click = False
+                if p.visible:
+                    p.visible = False
+                    self._dirty = True
+        src = self._ball_src
+        if self._ball_down is not None:
+            src.set_button(self._ball_down, False)
+            self._ball_down = None
+        elif not steps:
+            self._ball_qx = self._ball_qy = 0
+            self._ball_run = False
+        elif self._ball_qx or self._ball_qy or self._ball_run:
+            if src is None:
+                src = self._ball_src = self.input.source("ball")
+            if self._ball_qx:
+                name = "right" if self._ball_qx > 0 else "left"
+                self._ball_qx += -1 if self._ball_qx > 0 else 1
+            elif self._ball_qy:
+                name = "down" if self._ball_qy > 0 else "up"
+                self._ball_qy += -1 if self._ball_qy > 0 else 1
+            else:
+                name = "run"
+                self._ball_run = False
+            src.set_button(name, True)
+            self._ball_down = name
+        self.ball_owed = bool(self._ball_down is not None or self._ball_qx
+                              or self._ball_qy or self._ball_run)
+        return took
+
+    def _ball_roll(self, dx, dy):
+        """Pulses toward the steps a roll owes: a reversal or a pause starts
+        the axis over, and a step on one axis forgets the other's."""
+        now = _ticks_ms()
+        if _ticks_diff(now, self._ball_at) > self.BALL_IDLE_MS:
+            self._ball_ax = self._ball_ay = 0
+        self._ball_at = now
+        ax, ay = self._ball_ax, self._ball_ay
+        ax = dx if (dx > 0) != (ax > 0) and dx else ax + dx
+        ay = dy if (dy > 0) != (ay > 0) and dy else ay + dy
+        n, cap = self.BALL_STEP, self.BALL_QUEUE
+        if abs(ax) >= abs(ay) and abs(ax) >= n:
+            k = int(abs(ax) // n)
+            q = self._ball_qx + (k if ax > 0 else -k)
+            self._ball_qx = max(-cap, min(cap, q))
+            ax = ax - k * n if ax > 0 else ax + k * n
+            ay = 0
+        elif abs(ay) >= n:
+            k = int(abs(ay) // n)
+            q = self._ball_qy + (k if ay > 0 else -k)
+            self._ball_qy = max(-cap, min(cap, q))
+            ay = ay - k * n if ay > 0 else ay + k * n
+            ax = 0
+        self._ball_ax, self._ball_ay = ax, ay
 
     def _caret_step(self, i):
         """A direction pressed while a caret has the keys: `nav` it, and

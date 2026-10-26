@@ -277,6 +277,7 @@ class AppearanceAppLayer:
 
     id = "appearance"
     domain = "system"
+    ball_steps = True               # the trackball steps its rows (Workstation.ball_steps)
     TITLE = "Appearance"
     # The shell roles this app uses (runtime/app_context.py). `wallpaper` is a
     # CAPABILITY, not a core role: this app and the two that copy a drawing

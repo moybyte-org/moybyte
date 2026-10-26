@@ -511,6 +511,11 @@ class PaintLayer:
         # PLAY.
         self.ws.bar_layer._draw_status_strip("menu")
 
+    def ball_steps(self):
+        """The trackball steps an open popover's rows (the more menu, a
+        picker) and points at the grid otherwise (Workstation.ball_steps)."""
+        return bool(self._pop)
+
     def handle_input(self, i):
         if self._pop:                  # the popover takes the keys while open
             if self._host.keys(i):

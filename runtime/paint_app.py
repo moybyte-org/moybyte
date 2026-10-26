@@ -826,6 +826,11 @@ class PaintAppLayer:
 
     # -- input --------------------------------------------------------------------
 
+    def ball_steps(self):
+        """The trackball steps an open popover (colours, brush, more) and
+        points at the drawing otherwise (Workstation.ball_steps)."""
+        return self.pop is not None
+
     def handle_input(self, inp):
         k = getattr(inp, "last_key", 0) or 0
         if not isinstance(k, int):

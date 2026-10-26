@@ -219,6 +219,7 @@ class ConsoleDriver:
         self._down = False      # touch/button currently held (for drag-scroll)
         self._tap = False       # click(): auto-release at the end of the frame
         self._pan = (0, 0)      # held-arrow trackball velocity (dx, dy in [-1,1])
+        self._ball_click = False  # ball_click(): the trackball's click, next frame
         self._src = ws.input.source("local")    # the keys this driver types
         self._key_btn = {}      # a key held down -> the button it holds
         self._super = False     # Super is held...
@@ -330,8 +331,13 @@ class ConsoleDriver:
             self._key_held = 0
 
     def pan(self, dx, dy):
-        # Arrow keys = the trackball: a relative, *visible*-cursor nudge each frame.
+        # Arrow keys = the trackball, held: `frame` spends it each frame.
         self._pan = (dx, dy)
+
+    def ball_click(self):
+        """The trackball's click, spent by the next frame: Enter where a
+        surface takes the keys, else a click where the cursor is."""
+        self._ball_click = True
 
     def touch(self, x, y):
         # Mouse = the touchscreen: place the pointer absolutely (cursor hidden, like
@@ -384,13 +390,6 @@ class ConsoleDriver:
 
     def in_code_editor(self):
         return self.ws.screen == "menu" and self.ws.menu_view == "code"
-
-    def in_caret_surface(self):
-        """A surface where a DIRECTION means the caret, not the cursor: the
-        Editor's Code tab, and a cart's focused editor handle (#181). The one
-        gate, so the host arrows and the T-Deck trackball answer alike."""
-        return (self.in_code_editor()
-                or self.ws.focused_cart_editor() is not None)
 
     def in_text_mode(self):
         # A RUNNING cart that opted into text input via textmode(True) (#38/#42).
@@ -452,12 +451,18 @@ class ConsoleDriver:
 
     # -- per-frame tick ------------------------------------------------------
     def frame(self, dt):
+        # The trackball (`pan`, `ball_click`), spent as the T-Deck's is
+        # (`Workstation.ball`): a surface's W A S D and Enter, a caret's
+        # arrows, else the cursor's nudge and the pointer's click.
         dx, dy = self._pan
-        if dx or dy:
-            if self.in_caret_surface():
-                self.ws.nav(dx, dy)          # arrows move the caret in the editor
-            else:
-                self.pointer.move(dx * PAN_SPEED, dy * PAN_SPEED)   # trackball nudge
+        bc = self._ball_click
+        self._ball_click = False
+        if dx or dy or bc or self.ws.ball_owed:
+            took = self.ws.ball(dx, dy, bc)
+            if (dx or dy) and not took & 1:
+                self.pointer.move(dx * PAN_SPEED, dy * PAN_SPEED)
+            if bc and not took & 2:
+                self._click = True
         for name in self._pending:
             self.input.set_held(name, True)
         self.input.begin_frame()

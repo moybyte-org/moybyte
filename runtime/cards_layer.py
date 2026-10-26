@@ -237,6 +237,7 @@ class CardsLayer:
 
     id = "cards"
     domain = "system"
+    ball_steps = True               # the trackball steps its cards (Workstation.ball_steps)
 
     # A card field MAY carry an optional `display` hint -- "gauge" | "count" |
     # "choice-icons" | "sprite-tiles" | "bg-thumbs" -- that draws the VALUE as a

@@ -127,6 +127,7 @@ class CalcAppLayer:
 
     id = "calc"
     domain = "system"
+    ball_steps = True               # the trackball steps its keys (Workstation.ball_steps)
     TITLE = "Calc"
     # The shell roles this app uses (runtime/app_context.py). The context
     # carries these and nothing else, so an undeclared reach-in is an

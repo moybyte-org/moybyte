@@ -82,9 +82,10 @@ SERIAL_CMDS = True
 # same 5 minutes every console ships unless a board has a reason not to.
 POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
 # The inputs as the hints know them (Workstation.use_inputs): the C3 keyboard
-# and the trackball write "kbd", in use from boot; a paired BLE keyboard is a
-# desk keyboard; the GT911 is touch, which hides the keycaps until a key.
-INPUT_KINDS = (("kbd", "tdeck"), ("ble", "keys"), ("touch", "touch"))
+# writes "kbd", in use from boot, and the trackball's presses where a surface
+# takes the keys "ball" (Workstation.ball); a paired BLE keyboard is a desk
+# keyboard; the GT911 is touch, which hides the keycaps until a key.
+INPUT_KINDS = (("kbd", "tdeck"), ("ball", "tdeck"), ("ble", "keys"), ("touch", "touch"))
 
 # #183: print a phase bracket around every SD session. This board has no REPL to
 # interrogate once the desktop owns the loop, so the trace IS the diagnostic.
