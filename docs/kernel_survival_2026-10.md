@@ -854,8 +854,11 @@ umount, open with the file object's read, write, seek and close, `ilistdir`,
 programs, each file's mtime as attribute 1), so a store written by either
 reads whole on the other. The VM's start mounts a `KVfs` at "/" in place of
 the port's _boot.py, after unlinking whatever the last VM left open in the
-instance; a partition the kernel cannot mount is the port's again, _boot.py
-and its inisetup included, since the kernel never formats. `moy_vol` resolves
+instance. The kernel formats an erased partition itself (the first block
+blank, inisetup's own rule), so the first boot after a cable flash mounts the
+same `KVfs` every later boot does; a partition that holds something else and
+does not mount is the port's again, _boot.py and its inisetup included.
+`moy_vol` resolves
 "/" to the kernel's instance, never a borrowed one. On the unix port the same
 type runs over a RAM medium, and `tests/test_store_on_vfs.py` holds it to
 `VfsLfs2` call for call and reads its image back through `VfsLfs2`.

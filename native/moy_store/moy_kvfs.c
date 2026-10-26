@@ -4,9 +4,10 @@
 // in kernel memory, mounted at the kernel's first ask and kept across every
 // VM. Python reaches it through `KVfs`, a VFS type of the kernel's that the
 // VM's start mounts at "/" in place of the port's `_boot.py` (which would mount
-// a VfsLfs2 of its own over the same flash). A partition the kernel cannot
-// mount is the port's again, _boot.py and its inisetup included. The
-// store's C (moy_vol) resolves "/" to this instance, never a borrowed one.
+// a VfsLfs2 of its own over the same flash). The kernel formats an erased
+// partition itself; one that holds something else and does not mount is the
+// port's again, _boot.py and its inisetup included. The store's C (moy_vol)
+// resolves "/" to this instance, never a borrowed one.
 //
 // KVfs is modelled on MicroPython's own littlefs VFS (extmod/vfs_lfsx.c and
 // vfs_lfsx_file.c, MIT): the same methods, the same errors, the same on-disk
@@ -179,17 +180,43 @@ static kvol_t *kvol_new(void) {
     return k;
 }
 
-// The kernel's instance, mounted at the first ask: the lfs2_t, or NULL.
+#if MOY_KVFS_FLASH
+// Whether the partition's first block is erased: the port's inisetup rule for
+// a store it may format (check_bootsec). Anything else that does not mount is
+// a store somebody wrote, and is never formatted here.
+static bool kv_blank(const kvol_t *k) {
+    uint32_t buf[16];
+    for (uint32_t off = 0; off < k->cfg.block_size; off += sizeof(buf)) {
+        if (esp_partition_read(k->part, off, buf, sizeof(buf)) != ESP_OK) {
+            return false;
+        }
+        for (size_t i = 0; i < MP_ARRAY_SIZE(buf); i++) {
+            if (buf[i] != 0xffffffffu) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+#endif
+
+// The kernel's instance, mounted at the first ask: the lfs2_t, or NULL. An
+// erased partition (a cable flash erases the store's first sectors when its
+// table moves it) is formatted first, so the first boot mounts the kernel's
+// volume as every later one does. A partition that holds something else and
+// does not mount is left to the port's _boot.py and inisetup.
 lfs2_t *moy_kvol_lfs(void) {
     if (s_kv == NULL) {
         s_kv = kvol_new();
         if (s_kv == NULL) {
             return NULL;
         }
-        // Never a format: a partition that does not mount is left to the
-        // port's _boot.py and inisetup, as before the kernel owned it, and the
-        // next boot mounts what they made.
         int rc = lfs2_mount(&s_kv->lfs, &s_kv->cfg);
+        #if MOY_KVFS_FLASH
+        if (rc < 0 && kv_blank(s_kv) && lfs2_format(&s_kv->lfs, &s_kv->cfg) == 0) {
+            rc = lfs2_mount(&s_kv->lfs, &s_kv->cfg);
+        }
+        #endif
         s_kv->err = rc < 0 ? -rc : 0;
     }
     return s_kv->err == 0 ? &s_kv->lfs : NULL;
