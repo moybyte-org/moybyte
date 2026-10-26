@@ -5,8 +5,9 @@
 #include <string.h>
 
 #include "moy_recovery.h"
-#include "moy_scr.h"
 #include "moy_str.h"
+
+#if MOY_KERNEL_SCR
 
 // Moy Night's (native/moy_ui/themes/moy.json, dark): the panel, the
 // surface, the ink, the dim ink, the border and the accent;
@@ -23,6 +24,7 @@ static const int16_t CHOICES[MOY_RV_CHOICES] = {
 static const int8_t MARKS[MOY_RV_CHOICES] = {
     MOY_SCR_ICON_RETRY, MOY_SCR_ICON_HOME, MOY_SCR_ICON_CODE,
 };
+#endif
 
 static const char *const PROTOCOL[MOY_RV_CHOICES] = {"RETRY", "SAFE", "REPL"};
 
@@ -45,6 +47,7 @@ void moy_rgeom_init(moy_rgeom_t *g, int w, int h, int rot, int swap) {
     }
 }
 
+#if MOY_KERNEL_SCR
 static void scr_of(moy_scr_t *s, uint16_t *fb, const moy_rgeom_t *g) {
     memset(s, 0, sizeof(*s));
     s->fb = fb;
@@ -60,6 +63,8 @@ static void scr_of(moy_scr_t *s, uint16_t *fb, const moy_rgeom_t *g) {
     s->scratch = g->scratch;
     s->scratch_n = g->scratch_n;
 }
+
+#endif
 
 // ---- the recovery screen ----------------------------------------------------------
 
@@ -102,6 +107,7 @@ int moy_recovery_hit(const moy_rgeom_t *g, int x, int y) {
     return (y - l.rows_y) / l.rh;
 }
 
+#if MOY_KERNEL_SCR
 typedef struct {
     const moy_rgeom_t *g;
     const moy_rview_t *v;
@@ -211,6 +217,8 @@ int moy_web_screen_render(uint16_t *fb, const moy_rgeom_t *g, const moy_rview_t 
     wctx_t w = {g, v, pal != NULL ? pal : moy_splash_day};
     return moy_scr_draw(&s, web_paint, &w);
 }
+
+#endif
 
 // ---- what it says -----------------------------------------------------------
 

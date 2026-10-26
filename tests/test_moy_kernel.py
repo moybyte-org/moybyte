@@ -119,6 +119,25 @@ def lib():
     return _lib()
 
 
+def test_the_kernel_builds_without_the_raster():
+    """The headless Zero denies moy_gfx, so its kernel compiles with no
+    moy_scr.h to include: the floor's words and its decision stay, the
+    screens are left out."""
+    so = native_build.build(
+        "moy_kernel_headless", os.path.join(KERNEL, "moy_recovery.c"),
+        ["moy_crash.c", "moy_crash.h", "moy_recovery.h", "moy_boot.c", "moy_boot.h",
+         "moy_str.h", "moy_str.c", "moy_str_table.h", "moy_str_table.c"],
+        os.path.join(ROOT, ".build", "host_kernel_headless"),
+        cflags=native_build.BASE_CFLAGS + ["-Wall", "-Werror"],
+        libmoy_dir=[KERNEL, os.path.join(ROOT, "native", "moy_spine")])
+    if so is None:
+        pytest.skip("no C compiler")
+    headless = ctypes.CDLL(so)
+    assert hasattr(headless, "moy_recovery_view") and hasattr(headless, "moy_boot_decide")
+    assert not hasattr(headless, "moy_recovery_render")
+    assert not hasattr(headless, "moy_boot_logo_render")
+
+
 def _record(**kw):
     r = Rec()
     r.kind, r.core, r.role = CRASH_FAULT, 1, ROLE_APP

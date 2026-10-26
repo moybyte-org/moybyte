@@ -4,7 +4,7 @@
 
 #include <string.h>
 
-#include "moy_scr.h"
+#if MOY_KERNEL_SCR
 
 int moy_boot_logo_render(uint16_t *fb, const moy_rgeom_t *g, const uint16_t *pal) {
     moy_scr_t s;
@@ -23,3 +23,5 @@ int moy_boot_logo_render(uint16_t *fb, const moy_rgeom_t *g, const uint16_t *pal
     s.scratch_n = g->scratch_n;
     return moy_splash(&s, pal, -1, NULL, 0);
 }
+
+#endif

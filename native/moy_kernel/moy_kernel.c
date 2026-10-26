@@ -111,7 +111,6 @@
 #include "moy_kernel.h"
 #include "moy_loop.h"
 #include "moy_recovery.h"
-#include "moy_scr.h"
 #include "moy_str.h"
 #include "../moy_spine/moy_route.h"
 
@@ -169,6 +168,9 @@ int MOY_KERNEL_PANEL(init)(void);
 uint16_t *MOY_KERNEL_PANEL(fb)(void);
 int MOY_KERNEL_PANEL(present)(void);
 void MOY_KERNEL_PANEL(backlight)(int on);
+#if !MOY_KERNEL_SCR
+#error "a board with a panel draws its screens through moy_gfx's moy_scr.h"
+#endif
 #endif
 
 // The port's, extern without a header (the second by

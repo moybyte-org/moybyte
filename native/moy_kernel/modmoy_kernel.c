@@ -39,7 +39,6 @@
 #include "moy_boot.h"
 #include "moy_crash.h"
 #include "moy_kernel.h"
-#include "moy_scr.h"
 
 // ---- moy_kernel ---------------------------------------------------------------
 
@@ -70,6 +69,10 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_boot_ok_obj, mod_boot_ok);
 // order), the one first light drew with; None on a board with no panel.
 // splash(b) keeps `b` for the next boot's first light: whether it wrote.
 static mp_obj_t mod_splash(size_t n_args, const mp_obj_t *args) {
+    #if !MOY_KERNEL_SCR
+    (void)args;
+    return n_args == 0 ? mp_const_none : mp_const_false;
+    #else
     uint16_t pal[MOY_SPLASH_PAL];
     if (n_args == 0) {
         if (moy_kernel_splash_pal(pal) < 0) {
@@ -84,6 +87,7 @@ static mp_obj_t mod_splash(size_t n_args, const mp_obj_t *args) {
     }
     memcpy(pal, b.buf, sizeof(pal));
     return mp_obj_new_bool(moy_kernel_splash_keep(pal));
+    #endif
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_splash_obj, 0, 1, mod_splash);
 

@@ -28,6 +28,15 @@
 
 #include "moy_crash.h"
 
+// The screens draw only where the image carries moy_gfx's raster; an image
+// without it (the headless Zero) has no panel, and its floor is serial only.
+#if __has_include("moy_scr.h")
+#define MOY_KERNEL_SCR 1
+#include "moy_scr.h"
+#else
+#define MOY_KERNEL_SCR 0
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
