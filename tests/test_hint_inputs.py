@@ -59,7 +59,8 @@ def test_a_spelled_out_key_names_no_action(th, action, spelled):
 # Every key an input does an action with (moy_ui_parts.c's ACT_KEYS), and the
 # spellings the hints took before they named actions.
 _ACTION_KEYS = {"enter", "Esc", "esc", "left right", "Q E", "K", "Super", "Mic",
-                "A", "B", "L R", "Start", "/", "Sym G"}
+                "A", "B", "L R", "Start", "/", "Sym G", "up down", "up down left right",
+                "left right up down", "A D ball_lr", "WASD", "W S"}
 
 
 def _py_callers():

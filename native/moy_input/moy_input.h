@@ -52,6 +52,8 @@
 // CART KEYS. While a game owns the keyboard (the console says, every frame)
 // a desk keyboard's letters are the game's buttons too (WASD the d-pad, Z X
 // and Space A and B); on every other surface they are keys and nothing else.
+// The T-Deck's keyboard reads it the other way: off a game and a text
+// surface its W A S D are the directions and no key (moy_kbd.c).
 //
 // THE POINTER. A source may also hold a pointer sample -- a place, down, the
 // press edge and whether the hardware measured it this frame -- written like

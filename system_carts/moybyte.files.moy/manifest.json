@@ -13,7 +13,7 @@
     "app": {
       "id": "files",
       "entry": "files_app:FilesAppLayer",
-      "text_mode": true,
+      "text_mode": false,
       "order": 60
     },
     "permissions": [

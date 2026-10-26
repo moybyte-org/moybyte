@@ -102,12 +102,18 @@ def test_late_app_metadata_reaches_windowed_wm(tmp_path):
     assert ws.wm._win_title(win) == "Story Editor"
 
 
-def test_files_registration_keeps_text_mode(tmp_path):
+def test_files_types_only_while_its_rename_field_shows(tmp_path):
+    """Files' rows are no text surface (the T-Deck's W A S D step them);
+    its Rename dialog's field is, while it shows."""
     ws = _ws(tmp_path)
     _select(ws, "Files")
     ws.launch_selected()
     assert ws.screen == "files"
-    assert ws.input.text_mode                             # typing app
+    assert not ws.input.text_mode
+    ws.files_app.dialog = "rename"
+    assert ws.input.text_mode
+    ws.files_app.dialog = None
+    assert not ws.input.text_mode
 
 
 # -- Calc, the reference app ----------------------------------------------------

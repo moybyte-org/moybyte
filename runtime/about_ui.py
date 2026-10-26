@@ -44,8 +44,8 @@ _TEXT = {}
 _CAPTION = {"face": "caption", "tone": "dim"}
 _NAME = {"face": "title"}
 _HINT_LIST = ("confirm", "Read", "back", "Back")
-_HINT_TEXT = ("up down", "Scroll", "back", "Back")
-_HINT_DESK = ("up down", "Move", "PgUp PgDn", "Scroll", "back", "Back")
+_HINT_TEXT = ("scroll", "Scroll", "back", "Back")
+_HINT_DESK = ("scroll", "Move", "PgUp PgDn", "Scroll", "back", "Back")
 _CHANNELS = {"stable": "Stable", "unstable": "Beta"}
 
 

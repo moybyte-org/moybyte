@@ -1918,7 +1918,7 @@ class GetCartsAppLayer(ListShellApp):
         if not lay.desk and ui.hints_width(("back", "Back")) > 0:
             ui.at(*lay.foot)
             f = self._focused
-            ui.hints(("up down", "Scroll", "back", "No") if f == "Licence"
+            ui.hints(("scroll", "Scroll", "back", "No") if f == "Licence"
                      else ("confirm", VERB[self._focused_verb(("NO", "I AGREE"))][0],
                            "back", "No"))
 

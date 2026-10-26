@@ -322,7 +322,7 @@ def test_the_boards_idle_check_still_sees_a_held_button_after_the_merge():
     kbd._i2c.frame = bytes([0x00, 0x04, 0, 0, 0])     # 'd' -> the `right` button
     kbd.poll()
     inp.begin_frame()
-    assert inp.any_held() and bool(inp.last_key)     # active -> backlight stays on
+    assert inp.any_held()                            # active -> backlight stays on
 
     kbd._i2c.frame = b"\x00\x00\x00\x00\x00"
     kbd.poll()

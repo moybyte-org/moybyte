@@ -58,11 +58,13 @@ class _Kbd(_Clock):
         self.writes.append(bytes(data))
 
 
-def _keyboard(frames=None, raw=False):
+def _keyboard(frames=None, raw=False, cart=True):
     """(table, driver, fake): the driver probed in ASCII (its first read), then
-    put in raw mode when asked, as a game would."""
+    put in raw mode when asked, as a game would; `cart` False is a shell
+    surface, where W A S D are moves and no key."""
     fake = _Kbd([b"\x00"])
     table = mi.InputTable()
+    table.cart_keys = cart
     drv = mi.KbdDriver(table, fake)
     fake.frames = frames
     fake.reads.clear()

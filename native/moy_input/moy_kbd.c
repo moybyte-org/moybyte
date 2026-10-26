@@ -16,6 +16,13 @@
 // is `stop` (ASCII path only). Every other key is a plain letter for
 // key()/keyp(), BACKSPACE (0x08) among them.
 //
+// THE MOVE KEYS (owner call, 2026-10-23): W A S D are the directions on every
+// surface where letters do not type -- the home, a list, a grid, a menu, a
+// popover, a dialog's rows -- beside the trackball, and there they are no
+// letter: the key slot stays empty, so no surface gives them a verb. A text
+// surface (`moy_input_text_mode`) types them as letters and presses nothing;
+// a game (`moy_input_cart_keys`) gets both, its buttons and its key().
+//
 // THE CONSOLE KEY (owner call, 2026-10-18) is Mic: `start`, the Super of every
 // other device, in every input mode and never a cart's. In the raw matrix it
 // is d0 bit 6. In ASCII mode the C3 sends NOTHING for a bare Mic (its table
@@ -33,6 +40,8 @@ enum {
     B_A = 1u << 4, B_B = 1u << 5, B_RUN = 1u << 6, B_STOP = 1u << 10,
     B_START = 1u << 14,
 };
+
+#define B_MOVES (B_LEFT | B_RIGHT | B_UP | B_DOWN)
 
 #define KBD_SHIFT_MIC 0xE0      // ASCII mode's Shift+Mic
 #define KBD_MIC_BYTE 0
@@ -216,6 +225,15 @@ static uint32_t text_mask(const moy_kbd_t *k, uint32_t mask) {
     return moy_input_text_mode(k->table) ? mask & B_START : mask;
 }
 
+// The byte `key` puts in the key slot: none for a move key where it only
+// moves (THE MOVE KEYS above).
+static int32_t slot_key(const moy_kbd_t *k, int32_t key) {
+    if (moy_input_text_mode(k->table) || moy_input_cart_keys(k->table)) {
+        return key;
+    }
+    return (moy_kbd_buttons_for_key(key) & B_MOVES) ? 0 : key;
+}
+
 void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
     if (!k->available) {
         return;
@@ -251,7 +269,7 @@ void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
                     k->raw_unsupported = true;
                     k->held = stray;
                     k->held_until = now + MOY_KBD_HOLD_MS;
-                    if (!(stray & B_START)) {
+                    if (!(stray & B_START) && slot_key(k, d[0])) {
                         moy_input_key(k->table, k->src, d[0]);
                     }
                     moy_input_set_mask(k->table, k->src, text_mask(k, stray));
@@ -269,7 +287,7 @@ void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
         // would release and re-press a held button, which btnp() reads as a
         // second press.
         if (!text) {
-            moy_input_set_key(k->table, k->src, k->raw_key);
+            moy_input_set_key(k->table, k->src, slot_key(k, k->raw_key));
         }
         moy_input_set_mask(k->table, k->src, text_mask(k, k->raw_held));
         return;
@@ -278,7 +296,7 @@ void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
     if (key != 0) {
         k->held = moy_kbd_buttons_for_key(key);
         k->held_until = now + MOY_KBD_HOLD_MS;
-        if (!(k->held & B_START)) {
+        if (!(k->held & B_START) && slot_key(k, key)) {
             moy_input_key(k->table, k->src, key);   // the console key is no typed key
         }
     } else if (moy_input_ticks_diff(k->held_until, now) <= 0) {

@@ -542,7 +542,9 @@ those. `SPACE` is jump and `ENTER` is `run` on both.
 On a desktop keyboard (the simulator's, the browser's, a BLE one) the letters
 and `SPACE` are buttons only while a game owns the keys; in the shell, the
 Editor and the apps they are keys and nothing else, and the arrows, `ENTER` and
-`ESC` navigate (the T-Deck, with no arrows, keeps `WASD` everywhere).
+`ESC` navigate. The T-Deck, with no arrows, keeps `WASD` everywhere: on every
+surface where letters do not type they are its directions and no letter, a
+text surface (`textmode(True)`) types them, and a game reads both.
 The console's key is no button a cart can read (see [The canvas](#the-canvas)).
 
 **Every other key is a plain character** a cart reads with `key()` / `keyp()`, firing

@@ -858,16 +858,17 @@ def _hint_band(theme, kind, items):
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
 def test_the_change_legend_draws_each_inputs_own_sign(theme):
-    """`change` is a keyboard's two arrow keys, the T-Deck's trackball and
-    a gamepad's d-pad: one square cap each for the last two (as wide as one
-    arrow's), each its own sign (the T-Deck and a pad drew a keyboard's
-    arrows)."""
+    """`change` is a keyboard's two arrow keys, the T-Deck's A and D beside
+    its trackball and a gamepad's d-pad: one square cap for the d-pad (as
+    wide as one arrow's), each its own sign (the T-Deck and a pad drew a
+    keyboard's arrows)."""
     keys, kpx = _hint_band(theme, "keys", ("change", "Change"))
     one, _px = _hint_band(theme, "keys", ("left", "Change"))
     tdeck, tpx = _hint_band(theme, "tdeck", ("change", "Change"))
     pad, ppx = _hint_band(theme, "pad", ("change", "Change"))
     assert keys > one, "a keyboard's two arrow caps"
-    assert tdeck == one and pad == one, "one cap: the trackball's, the d-pad's"
+    assert tdeck > keys, "the T-Deck's three: A, D and the trackball's"
+    assert pad == one, "one cap: the d-pad's"
     assert len({kpx, tpx, ppx}) == 3, "each input draws its own"
 
 

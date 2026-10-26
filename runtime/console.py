@@ -650,6 +650,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     input_kinds = None
     _news = None
     _cart_keys = False              # what the input table was told last
+    _menu_over = False              # a menu holds the keys over the surface (`_menu_keys`)
+    _text_back = None               # `_text_sets` when that menu took text mode away
+    _text_sets = 0                  # `_set_text_mode` calls, counted
     # A soft keyboard the board offers beside its inputs (the browser page's).
     soft_keyboard = False
     no_keyboard_text = NO_KEYBOARD_TEXT
@@ -3036,6 +3039,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # each window's own mode as focus moves (`note_text_mode` tells it a
         # mode set for a window still being opened); `_text_by` is the process
         # that set it last, which Settings asks before handing it back.
+        self._text_sets += 1
         wm = getattr(self, "wm", None)
         if wm is not None:
             note = getattr(wm, "note_text_mode", None)
@@ -3051,6 +3055,27 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         kb = self.keyboard
         if kb is not None:
             kb.set_game_mode(not on)
+
+    def _menu_keys(self):
+        """A menu over a text surface takes the keys as a list does: while
+        the pause menu, the delete confirm or the system menu shows on the
+        handheld, the keyboard is out of text mode, so the T-Deck's W A S D
+        step its rows (moy_kbd.c, THE MOVE KEYS) and K is its back. The
+        surface's text mode comes back as the menu closes, unless what the
+        menu did set a mode of its own (a row that opened another surface)."""
+        over = not self.windowed_chrome and self._modal_layer() is not None
+        if over == self._menu_over:
+            return
+        self._menu_over = over
+        if over:
+            self._text_back = None
+            if self.input.text_mode:
+                self._set_text_mode(False)
+                self._text_back = self._text_sets
+        elif self._text_back is not None:
+            if self._text_back == self._text_sets:
+                self._set_text_mode(True)
+            self._text_back = None
 
     def _sync_cart_text_mode(self):
         # Cart text input (#38/#42): a RUNNING cart opts into text-keyboard mode by
@@ -3616,6 +3641,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if ck != self._cart_keys:
             self._cart_keys = ck
             i.cart_keys = ck
+        self._menu_keys()
         # Super (the `start` button) is the console's from every surface, before
         # any layer: the system menu, or the pause menu over a fullscreen game.
         if i.pressed("start"):

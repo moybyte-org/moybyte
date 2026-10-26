@@ -2400,6 +2400,9 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
                 break;
             }
         }
+        if (moy_ui_key_moves(moy_ui_input(), key)) {
+            key.n = 0;
+        }
         moy_ui_vrow_t r;
         vrow_init(c, &r, t);
         r.value = key;

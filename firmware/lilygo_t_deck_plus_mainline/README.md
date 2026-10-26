@@ -771,7 +771,12 @@ Every one of these was learned by hanging or bricking a board.
   which is why a text surface reads the matrix too (a field's Cancel is
   Mic, owner call 2026-10-18, `docs/ui_api_2026-10.md`). The home takes its
   verb letters (C, N, Y, X, F) and Search's `/` (Sym+G, the symbol printed
-  on that key) from it, and a game its `key()`. A key already down when the
+  on that key) from it, and a game its `key()`. W A S D are the directions
+  beside the trackball wherever letters do not type — the home, lists,
+  grids, menus, popovers, dialog rows — and there they are no letter
+  (owner call 2026-10-23, `moy_kbd.c`'s THE MOVE KEYS): only a game
+  (`cart_keys`) reads them as both. A menu over a text surface takes the
+  keys out of text mode while it shows (`Workstation._menu_keys`). A key already down when the
   matrix starts, or when a surface turns to text, types nothing until it is
   pressed again, and `_set_text_mode(True)` seeds every typed-key edge with
   the byte already in `last_key`. `Workstation._set_text_mode` →

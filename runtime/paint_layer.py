@@ -588,7 +588,8 @@ class PaintLayer:
         / Ctrl+Y (0x19) undo and redo (#90), and PICO-8's sprite keys
         (`_KEY_OPS`): F and V flip, R rotates, Del and Backspace clear,
         Ctrl-C copies, Ctrl-X cuts, Ctrl-V stamps, M opens the more menu, and
-        Q and W step to the sprite before and after.
+        Q and W (PICO-8's) or E step to the sprite before and after -- Q and
+        E on the T-Deck, where W moves the cursor (moy_kbd.c, THE MOVE KEYS).
         Each has its place on the screen too, so touch reaches every one."""
         pe = self.ws.paint
         k = getattr(i, "last_key", 0) or 0
@@ -603,7 +604,7 @@ class PaintLayer:
         if k == 0x19:
             pe.redo()
             return
-        if k in (0x71, 0x51, 0x77, 0x57):     # Q and W: the sprite before, after
+        if k in (0x71, 0x51, 0x77, 0x57, 0x65, 0x45):   # Q, and W or E: the sprite before, after
             pe.select(-1 if k in (0x71, 0x51) else 1)
             self.ws.mark_dirty()
             return

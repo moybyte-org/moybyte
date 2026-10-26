@@ -28,7 +28,7 @@ APPS = [
     {'id': 'myart', 'entry': 'myart_app:MyArtAppLayer', 'text_mode': False, 'order': 15, 'folder': 'moybyte.my_art', 'title': 'My Art'},
     {'id': 'appearance', 'entry': 'appearance_app:AppearanceAppLayer', 'text_mode': False, 'order': 20, 'folder': 'moybyte.appearance', 'title': 'Appearance'},
     {'id': 'storybook', 'entry': 'storybook_app:StorybookAppLayer', 'text_mode': False, 'order': 40, 'folder': 'moybyte.storybook', 'title': 'Storybook'},
-    {'id': 'files', 'entry': 'files_app:FilesAppLayer', 'text_mode': True, 'order': 60, 'folder': 'moybyte.files', 'title': 'Files'},
+    {'id': 'files', 'entry': 'files_app:FilesAppLayer', 'text_mode': False, 'order': 60, 'folder': 'moybyte.files', 'title': 'Files'},
     {'id': 'calc', 'entry': 'calc_app:CalcAppLayer', 'text_mode': False, 'order': 70, 'folder': 'moybyte.calc', 'title': 'Calc'},
     {'id': 'getcarts', 'entry': 'getcarts_app:GetCartsAppLayer', 'text_mode': False, 'order': 80, 'folder': 'moybyte.get_carts', 'title': 'Get Carts'},
 ]

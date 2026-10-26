@@ -48,7 +48,7 @@ A system APP is two artifacts:
    ```python
    ws.register_app(MyAppLayer(ws.app_context("myapp", MyAppLayer.NEEDS),
                               NAMES, _in),
-                   text_mode=False,        # True = typing app (Files precedent)
+                   text_mode=False,        # True = an app that types on every page
                    min_size=(310, 230))    # windowed resize floor, fs-scaled
    ```
 

@@ -934,17 +934,22 @@ int moy_ui_input(void);
 // change (left and right), tabs (the previous and the next), menu (the
 // console's key), cancel (a field being edited: its text put back), the
 // sprite tab's operations: flip, rotate, shift, clear, copy and more (its
-// more menu), and the home's search.
+// more menu), the home's search, move (the four directions: a cursor, a pan)
+// and scroll (up and down).
 // Answers the action `k` names, else -1: a key spelled out (`enter`, `Esc`)
 // names none and draws as written.
 enum { MOY_UI_ACT_CONFIRM = 0, MOY_UI_ACT_BACK, MOY_UI_ACT_CHANGE, MOY_UI_ACT_TABS,
        MOY_UI_ACT_MENU, MOY_UI_ACT_CANCEL, MOY_UI_ACT_FLIP, MOY_UI_ACT_ROTATE,
        MOY_UI_ACT_SHIFT, MOY_UI_ACT_CLEAR, MOY_UI_ACT_COPY, MOY_UI_ACT_MORE,
-       MOY_UI_ACT_SEARCH, MOY_UI_ACTS };
+       MOY_UI_ACT_SEARCH, MOY_UI_ACT_MOVE, MOY_UI_ACT_SCROLL, MOY_UI_ACTS };
 int moy_ui_hint_action(moy_ui_span_t k);
 // The keys input `input` does action `act` with (the hints' key spelling), or
 // "" where it has none.
 const char *moy_ui_hint_keys(int input, int act);
+// Whether key `k` spelled out is one input `input` moves with and so answers
+// no verb: W, A, S or D on the T-Deck (native/moy_input/moy_kbd.c, THE MOVE
+// KEYS). A hint pair or a menu row's key spelled so draws nothing there.
+int moy_ui_key_moves(int input, moy_ui_span_t k);
 // Keycap hints in band `b`, from its left: `items` NUL-separated pairs of the
 // keys and what they do. A pair's keys are an action (moy_ui_hint_action),
 // drawn as the keys of the input in use, or keys spelled out (space-separated;

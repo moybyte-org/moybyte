@@ -1873,12 +1873,13 @@ int moy_ui_input(void) {
 // Each action's name.
 static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", "tabs", "menu",
                                                    "cancel", "flip", "rotate", "shift", "clear",
-                                                   "copy", "more", "search"};
+                                                   "copy", "more", "search", "move", "scroll"};
 
 // The keys each input does each action with. The T-Deck's are its keyboard's
 // (native/moy_input/moy_kbd.c): Enter is `run`, K is `b` (back, as the bar's
-// chevron is), the trackball steers (`ball_lr`, its sign), Q and E are the
-// home's tab keys and Mic is `start`. A gamepad's are its face buttons, its
+// chevron is), W A S D are the directions beside the trackball (`ball_lr`,
+// its sign; owner call, 2026-10-23), Q and E are the home's tab keys and Mic
+// is `start`. A gamepad's are its face buttons, its
 // d-pad (`dpad_lr`), its shoulders and Start. Touch has none. Cancel is a
 // field's: in one the T-Deck's K types a letter, so Mic, which never types,
 // cancels there (owner call, 2026-10-18). The sprite tab's operations are
@@ -1889,10 +1890,12 @@ static const char *const ACT_NAMES[MOY_UI_ACTS] = {"confirm", "back", "change", 
 // symbol layer).
 static const char *const ACT_KEYS[MOY_UI_INPUTS][MOY_UI_ACTS] = {
     {"enter", "Esc", "left right", "Q E", "Super", "Esc", "F V", "R", "left right up down",
-     "Del", "Ctrl C", "M", "/"},
-    {"enter", "K", "ball_lr", "Q E", "Mic", "Mic", "F V", "R", "", "Del", "", "M", "Sym G"},
-    {"A", "B", "dpad_lr", "L R", "Start", "B", "", "", "", "", "", "Y", ""},
-    {"", "", "", "", "", "", "", "", "", "", "", "", ""},
+     "Del", "Ctrl C", "M", "/", "up down left right", "up down"},
+    {"enter", "K", "A D ball_lr", "Q E", "Mic", "Mic", "F V", "R", "", "Del", "", "M", "Sym G",
+     "WASD", "W S"},
+    {"A", "B", "dpad_lr", "L R", "Start", "B", "", "", "", "", "", "Y", "", "up down left right",
+     "up down"},
+    {"", "", "", "", "", "", "", "", "", "", "", "", "", "", ""},
 };
 
 static int span_is(moy_ui_span_t k, const char *s) {
@@ -1913,6 +1916,11 @@ const char *moy_ui_hint_keys(int input, int act) {
         return "";
     }
     return ACT_KEYS[input][act];
+}
+
+int moy_ui_key_moves(int input, moy_ui_span_t k) {
+    return input == MOY_UI_INPUT_TDECK && k.n == 1
+           && (k.p[0] == 'W' || k.p[0] == 'A' || k.p[0] == 'S' || k.p[0] == 'D');
 }
 
 static int key_sign(moy_ui_span_t k) {
@@ -1987,6 +1995,8 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                 const char *keys = moy_ui_hint_keys(s_input, act);
                 t.p = (const uint8_t *)keys;
                 t.n = (uint16_t)strlen(keys);
+            } else if (moy_ui_key_moves(s_input, t)) {
+                t.n = 0;
             }
             shown = t.n > 0;
             size_t a = 0;

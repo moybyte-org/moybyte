@@ -261,7 +261,7 @@ class FilesAppLayer(ListShellApp):
         self.trash = ()
         self.status = ""
         self._save_failed = False
-        self.dialog = None            # None | rename | empty | game | used
+        self.dialog = None
         self.rename_text = ""
         self.project_names = ()       # GAME's targets
         self.target = -1
@@ -632,6 +632,20 @@ class FilesAppLayer(ListShellApp):
                 (art.last_error or "Can't add")
         self._focus = "files"
         self._damage.all()
+
+    @property
+    def dialog(self):
+        """None | rename | empty | game | used: the dialog that is up."""
+        return self._up
+
+    @dialog.setter
+    def dialog(self, d):
+        # Rename's field types, so the keyboard is in text mode while it
+        # shows, and only then: on the T-Deck W A S D step the rows.
+        was = getattr(self, "_up", None) == "rename"
+        self._up = d
+        if (d == "rename") != was:
+            self._nav.text_mode(d == "rename")
 
     def _close_dialog(self):
         self.dialog = None

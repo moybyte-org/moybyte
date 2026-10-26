@@ -2107,7 +2107,7 @@ class PaintAppLayer:
                 if v.zoom == FIT:
                     ui.hints(("Z", "Zoom", "M", "More", "back", "Back"))
                 else:
-                    ui.hints(("up down left right", "Pan", "Z", "Zoom", "M", "More"))
+                    ui.hints(("move", "Pan", "Z", "Zoom", "M", "More"))
         if self.pop == "more":
             self._more()
 
