@@ -346,12 +346,13 @@ class WindowChrome:
             return (g[10], g[11], g[5], g[6])
         return (win.x, win.y, win.w, win.h)
 
-    def _cast_onto(self, i):
+    def _cast_onto(self, i, within=None):
         """The windows above z-slot `i` cast their shadows and outline
         fringes over what window `i` has just painted -- its whole frame when
-        its chrome drew this frame, else its content rect -- bottom to top.
-        Window `i` painted those pixels afresh, so each blend lands once; what
-        it left alone keeps the casts it took when it was painted."""
+        its chrome drew this frame, else its content rect, and of that only
+        rect `within` where given -- bottom to top. Window `i` painted those
+        pixels afresh, so each blend lands once; what it left alone keeps the
+        casts it took when it was painted."""
         order = self._order
         n = len(order)
         if i >= n - 1 or not _ui_draw.depth()[13]:
@@ -367,6 +368,10 @@ class WindowChrome:
             else self._desk_rect()
         x0, y0 = max(dx, rx), max(dy, ry)
         x1, y1 = min(dx + dw, rx + rw), min(dy + dh, ry + rh)
+        if within is not None:
+            x0, y0 = max(x0, within[0]), max(y0, within[1])
+            x1 = min(x1, within[0] + within[2])
+            y1 = min(y1, within[1] + within[3])
         if x1 <= x0 or y1 <= y0:
             return
         rc = self._root_canvas

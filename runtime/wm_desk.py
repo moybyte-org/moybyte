@@ -174,7 +174,7 @@ class _BackdropLayer(Layer):
                         and wm._desk_streak >= wm._retained_n() and not wm._scrim_up():
                     wm._desk_painted = False   # untouched: windows may skip too
                     wm._damage_rects = []      # the desk changed nowhere
-                    self.ws.bar_layer.redraw_clock("desk")
+                    wm._desk_clock()
                     return
                 wm._desk_streak += 1
             wm._desk_painted = True
@@ -188,7 +188,7 @@ class _BackdropLayer(Layer):
             if union is not None:
                 wm._damage_rects = [union]     # the desk changed inside the gesture
             bar = self.ws.bar_layer
-            bar.redraw_clock("desk")
+            wm._desk_clock()
             if bar.tile_on() != wm._desk_tile:
                 bar.redraw_tile("desk")        # the cache holds the button's other state
             return

@@ -2181,16 +2181,15 @@ def test_a_clock_tick_does_not_re_render_the_desk(tmp_path):
     ws.bar_layer.redraw_clock = lambda where: (
         clocks.__setitem__(0, clocks[0] + 1), real_clock(where))[1]
     try:
-        # Force the clock string to change, as a minute boundary would.
-        ws.bar_layer._clock_at = -1
-        ws.bar_layer._clock_hm = (-1, -1)
-        ws.bar_layer._clock_cache = "00:00"
+        # The clock string changes, as at a minute boundary.
+        ws.bar_layer._clock_text = lambda: "12:34"
         for _ in range(4):
             ws.mark_dirty()
             drv.frame(1 / 30)
     finally:
         backdrop._draw_desktop = real
         ws.bar_layer.redraw_clock = real_clock
+        del ws.bar_layer._clock_text
     assert renders[0] == 0, "a clock tick re-rendered the whole desk"
     assert clocks[0] > 0, "the clock was never repainted over the cache"
 
@@ -4162,3 +4161,65 @@ def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path):
     assert stacks[:3] == ["qpop"] * 3, stacks
     for a, b in zip(ring.bufs, rring.full(rdrv)):
         assert a == b, _bbox(_differ(a, b), ws.sys_canvas.w)
+
+
+# -- a drag over other windows draws them only where the desk was laid -------
+
+def _drag_over(tmp_path, theme, under):
+    """Three windows on the desk, the last of them dragged over the other two
+    on a triple-buffered root: every presented buffer. `under` False is the
+    reference: every window under the gesture draws whole, as it did."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    drv = _drv(ws)
+    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.open_desk()
+    if theme is not None:
+        ws.look.set_theme(theme, persist=False, variant="light")
+    ws.open_settings()
+    for app in ("calc", "files"):
+        ws.open_app(ws._apps_by_id[app])
+    for _ in range(20):
+        _quiesce(ws)
+        ws._confetti_until = ws._egg_until = 0
+        drv.frame(1 / 30)
+    ws.show_fps = False
+    wm = ws.wm
+    drew = {"skipped": 0}
+    if not under:
+        wm._under_gesture = lambda win, focused, top: None
+    else:
+        real = wm._under_gesture
+
+        def counted(win, focused, top):
+            u = real(win, focused, top)
+            drew["skipped"] += u is not None
+            return u
+        wm._under_gesture = counted
+    ring = _Ring(ws, 3)
+    ring.settle(drv)
+    win = wm._wins[wm._order[-1]]
+    x, y = win.x + 40, win.y + win.title_h // 2
+    drv.touch(x, y)
+    shots = []
+    ring.frame(drv)
+    for k in range(1, 10):
+        drv.touch_drag(x - 25 * k, y + 9 * k)
+        ring.frame(drv)
+        shots.append(ring.bufs[(ring.k - 1) % ring.n])
+    drv.touch_up()
+    shots += [b for _ in ring.settle(drv) for b in [ring.bufs[(ring.k - 1) % ring.n]]]
+    return shots, drew["skipped"]
+
+
+@pytest.mark.parametrize("theme", [None, "blocks"], ids=["shipped", "blocks"])
+def test_a_drag_over_windows_draws_them_only_where_the_desk_was_laid(tmp_path, theme):
+    """Each drag frame's buffer is the one drawing every window under the
+    gesture whole leaves -- shadows, fringes and casts included -- while the
+    windows under it draw only where the restore laid the desk."""
+    ref, _ = _drag_over(tmp_path / "ref", theme, False)
+    got, skipped = _drag_over(tmp_path / "got", theme, True)
+    assert len(ref) == len(got)
+    for i, (a, b) in enumerate(zip(ref, got)):
+        assert a == b, (i, _bbox(_differ(a, b), 1024))
+    assert skipped >= 10

@@ -520,6 +520,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._held_in = None          # the window a held press went down in
         self._restored = False        # what the last cache restore covered: a
                                       # rect, None (all of it) or False (nothing)
+        self._restored_f = -1         # ...and the frame it was this frame's in
+        self._laid = []               # the rects of it the desk was laid in
+        self._clock_held = [None, -1, 0]  # the desk clock: text, frame, in a row
         self._foot_gen = None         # the look the windows' feet were sized under
         self._root_marks = None       # ui.marks' active before a window's install
         self._installed = None        # the window whose layouts are installed
@@ -2502,6 +2505,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         back to the full copy when the canvas lacks blit_strip_rect (the web
         RecordingLayer) or via the `union` A/B knob."""
         self._restored = False
+        self._restored_f = self.ws._frames_drawn
         if self._backdrop is None:
             return
         rc = self._root_canvas
@@ -2550,17 +2554,21 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             by0 = max(y0, wy + r)
             bx1 = min(x1, wx + bw)
             by1 = min(y1, wy + bh - r)
+        laid = self._laid
+        del laid[:]
         if win is None or bx0 >= bx1 or by0 >= by1:
-            stamp(self._backdrop, 0, 0, x0, y0, x1 - x0, y1 - y0)
+            laid.append((x0, y0, x1 - x0, y1 - y0))
         else:
             if by0 > y0:                                       # top strip
-                stamp(self._backdrop, 0, 0, x0, y0, x1 - x0, by0 - y0)
+                laid.append((x0, y0, x1 - x0, by0 - y0))
             if by1 < y1:                                       # bottom strip
-                stamp(self._backdrop, 0, 0, x0, by1, x1 - x0, y1 - by1)
+                laid.append((x0, by1, x1 - x0, y1 - by1))
             if bx0 > x0:                                       # left strip
-                stamp(self._backdrop, 0, 0, x0, by0, bx0 - x0, by1 - by0)
+                laid.append((x0, by0, bx0 - x0, by1 - by0))
             if bx1 < x1:                                       # right strip
-                stamp(self._backdrop, 0, 0, bx1, by0, x1 - bx1, by1 - by0)
+                laid.append((bx1, by0, x1 - bx1, by1 - by0))
+        for r in laid:
+            stamp(self._backdrop, 0, 0, r[0], r[1], r[2], r[3])
         self._gesture_hist = (self._gesture_hist + [ext])[-n:]
         self._restored = (x0, y0, x1 - x0, y1 - y0)
         return self._restored
@@ -3065,6 +3073,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if win is not top and not self._under_hit \
                     and _overlap(self._win_extent(win), top.content_rect()):
                 self._under_hit = True    # the top window's retained pixels are hit
+            u = self._under_gesture(win, focused, top)
+            if u is not None:
+                if u:
+                    touched.append(self._draw_under_gesture(win, i, u))
+                continue
             if win.kind == "desktop":
                 # The Player TICKS whenever its window is open, independent of
                 # input focus AND of what sits above it on the back-stack -- a
@@ -3103,7 +3116,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # one frame would corrupt the {"same":1} replay.
             _surf("chips", "system")
         if cover < 0:                              # the bar is covered with the desk
-            self._draw_taskbar_chips(quiet=self._chrome_quiet)
+            self._draw_taskbar_chips(quiet=self._chrome_quiet or self._chips_untouched(dt))
         if self._resize is not None:               # rubber-band resize preview
             g = self._resize
             kind, cw, chh, rx, ry = g[0], g[5], g[6], g[10], g[11]
@@ -3117,6 +3130,93 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                                     or not self._live_resize_ok()):
                 self._root_canvas.rectb(rx, ry, cw, chh,
                                         self.ws.theme_colors["accent"])
+
+    def _under_gesture(self, win, focused, top):
+        """While the top window is dragged or resized over the desk's cache,
+        the rects of window `win` under it that this frame's restore laid the
+        desk over (`_blit_backdrop_cache`): none where it laid none, so `win`'s
+        pixels in this buffer are as the gesture found them. None where `win`
+        draws whole -- the game's window, a window that renders again (a look
+        changed, its focus mark), a full-screen one, a restore of the whole
+        glass."""
+        r = self._restored
+        if not r or self._restored_f != self.ws._frames_drawn or win is top:
+            return None
+        g = self._drag if self._drag is not None else self._resize
+        if g is None or self._wins.get(g[0]) is not top:
+            return None
+        if (focused or win.kind == "desktop" or win.saved is not None or win.buf is None
+                or win._look_gen != self.ws.look.look_gen
+                or (win._marked and _ui_draw.marks_on())):
+            return None
+        ex = self._win_extent(win)
+        out = []
+        for r in self._laid:
+            x0, y0 = max(ex[0], r[0]), max(ex[1], r[1])
+            x1 = min(ex[0] + ex[2], r[0] + r[2])
+            y1 = min(ex[1] + ex[3], r[1] + r[3])
+            if x1 > x0 and y1 > y0:
+                out.append((x0, y0, x1 - x0, y1 - y0))
+        return out
+
+    def _desk_clock(self):
+        """The desk bar's clock over the cached desk: repainted unless the
+        RETAINED_FRAMES painted frames before this one, one after another,
+        each left this text in its buffer and this frame's restore laid the
+        cache over no bar."""
+        ws = self.ws
+        bar = ws.bar_layer
+        t = bar._clock_text()
+        f = ws._frames_drawn
+        h = self._clock_held
+        r = self._restored if self._restored_f == f else False
+        over = r is None
+        if r:
+            for b in self._root_ctx.layout.bars:
+                if _overlap(r, b[1]):
+                    over = True
+        if h[0] == t and h[1] == f - 1 and not over:
+            h[2] += 1
+        else:
+            h[0] = t
+            h[2] = 1
+        h[1] = f
+        if h[2] <= self._retained_n():
+            bar.redraw_clock("desk")
+
+    def _chips_untouched(self, dt):
+        """Whether this frame left the chips' bar as the last one did: a
+        gesture's restore laid the desk away from it, and no cursor or
+        animation draws over it."""
+        r = self._restored
+        if not r or self._restored_f != self.ws._frames_drawn:
+            return False
+        if getattr(self.ws.pointer, "visible", False) or self.ws._animating(dt):
+            return False
+        got = self._chips_cell()
+        if got is None:
+            return True
+        b = got[0][1]
+        return not _overlap(r, b)
+
+    def _draw_under_gesture(self, win, i, rects):
+        """Window `win` (z-slot `i`) under a gesture, in `rects` alone: its
+        stamp and what the windows above it cast on it in each, its chrome in
+        their bounding box, which the gesture's window covers between them.
+        Answers that box. The casts blend, so they land in the rects alone."""
+        rc = self._root_canvas
+        cx, cy, _cw, _ch = win.content_rect()
+        for r in rects:
+            rc.blit_strip_rect(win.buf, cx, cy, r[0], r[1], r[2], r[3])
+        u = self._union_bbox(rects)
+        rc.clip(u[0], u[1], u[2], u[3])
+        try:
+            self._win_chrome(win, False)
+        finally:
+            rc.clip()
+        for r in rects:
+            self._cast_onto(i, r)
+        return u
 
     def _direct_render(self, win, dt):
         """Draw the window's content into the framebuffer IN PLACE, through a
