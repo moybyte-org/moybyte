@@ -181,3 +181,37 @@ def test_the_stuck_words_and_the_budget_rule_are_the_tables():
                           "native", "moy_play", "moy_play.h")).read()
     # Under every board's task-watchdog timeout (15 s in each sdkconfig.board).
     assert "#define MOY_PLAY_STUCK_MAX_MS 10000u" in h
+
+
+def test_a_stuck_compiled_run_paints_its_stop_card_on_the_next_frame(tmp_path, watch):
+    """The stop card opens inside the frame that draws the stopped run, past
+    the stack that frame paints; that frame owes the next one, which paints
+    the card -- a stopped run animates nothing else that would."""
+    from runtime import wasm_binding, wasm_host
+    if not wasm_host.available():
+        pytest.skip("no host wasm binding: %s" % (wasm_binding.why_unavailable() or "?"))
+    root = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    d = os.path.join(root, "spin.moy")
+    os.makedirs(d)
+    with open(os.path.join(d, "manifest.json"), "w") as f:
+        f.write('{"format": "moy-1", "title": "Spin Wasm", "runtime": "wasm", '
+                '"main": "main.wasm", "memory": 1}')
+    with open(os.path.join(d, "main.wasm"), "wb") as f:
+        f.write(wat.assemble(SPIN))
+    ws = host_app.build_workstation(root)
+    for i, c in enumerate(ws.launcher.items):
+        if c["title"] == "Spin Wasm":
+            ws.launcher.sel = i
+            ws.open()
+    painted = []
+    draw = ws._pause_layer.draw
+    ws._pause_layer.draw = lambda dt: (painted.append(ws._frames_drawn), draw(dt))
+    for _ in range(4):
+        ws.frame(1 / 30)
+        if ws.pause.open:
+            break
+    assert ws.pause.open and ws.pause.stopped, ws.player.cart_error
+    assert ws._dirty, "the frame that opened the stop card owes the next one"
+    ws.frame(1 / 30)
+    assert painted, "the next frame paints the stop card"

@@ -2546,10 +2546,13 @@ class Player:
         # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full
         # 320x240 with NO chrome (the #71 pause frame is gone). A run that
         # stopped opens the stop card over its last frame (the pause card's
-        # sibling, drawn by its layer on the system canvas).
+        # sibling, drawn by its layer on the system canvas). It opens inside
+        # this draw, past the stack the frame is painting, so the frame owes
+        # the next one, which paints it: a stopped run animates nothing else.
         if self.cart_error is not None:
             if not ws.pause.open:
                 ws.pause.stop()
+                ws.request_frame()
         elif self._is_tool and not ws.app_window_canvas:   # #75: cached at start()
             # Part 4: a TOOL/APP runs WITH a minimal bar (back + title + status) so
             # it's exitable -- a GAME stays fullscreen-bar-hidden. The bar-visibility-by-
