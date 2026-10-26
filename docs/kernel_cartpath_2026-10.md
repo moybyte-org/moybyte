@@ -240,7 +240,8 @@ after the run's draw and before `end_frame`, the HUD's place (sprint 3's §7.3).
 The error, fit and newer-console panels take their words from one string
 table in C (§6 step 5 is #143's pass over it). Over a run the menu's rows are
 today's — DELETE CART (the store's delete, offered for a cart that is
-not a built-in), SETTINGS, ABOUT, SLEEP (where the board has an idle
+not a built-in), HOME (in console mode, as the home key goes), SETTINGS,
+ABOUT, SLEEP (where the board has an idle
 ladder), RESTART MOYBYTE — and a run restarts from the pause menu; SETTINGS ends the run with a route into Settings; no EDIT row
 joins them (§9 decision 1). The shell hands its own rows (SEARCH) when it
 opens the menu.

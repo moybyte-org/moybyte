@@ -200,8 +200,9 @@ def test_hamburger_tap_opens_menu_with_the_system_group(tmp_path):
     _menu_key(drv, ws)
     assert ws.sysmenu.open
     # a built-in: the console's own, so no Delete and no cart group (a run
-    # restarts from the pause menu); restarting the console is last
-    assert _labels(ws) == ["SYSTEM", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
+    # restarts from the pause menu); off the home, Home leads the System
+    # group, and restarting the console is last
+    assert _labels(ws) == ["SYSTEM", "HOME", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
     reboot = ws.sysmenu.items[-1]
     assert reboot[3] == "power" and reboot[4] == "Restart Moybyte"
 
@@ -234,7 +235,7 @@ def test_an_own_cart_offers_delete_last_in_its_group(tmp_path):
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     assert _labels(ws) == ["EXTRA", "DELETE CART",
-                           "SYSTEM", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
+                           "SYSTEM", "HOME", "SETTINGS", "ABOUT", "RESTART MOYBYTE"]
     head = ws.sysmenu.items[0]
     assert head[0] == "header" and head[4] == "Extra"     # the look's caption
 
@@ -314,11 +315,11 @@ def test_keyboard_nav_skips_headers(tmp_path):
     _open_own_cart(ws, tmp_path)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
-    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS"
+    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "HOME"
     _key(drv, "up")                            # skips the SYSTEM header + the sep
     assert ws.sysmenu.items[ws.sysmenu.sel][1] == "DELETE CART"
     _key(drv, "down")
-    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS"
+    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "HOME"
 
 
 # -- the cursor never opens on a danger row (design review R4-01) ------------
@@ -357,7 +358,7 @@ def _ladder(ws):
 
 
 @pytest.mark.parametrize("sleep", [False, True])
-def test_the_open_cart_menu_opens_on_settings_not_delete(tmp_path, sleep):
+def test_the_open_cart_menu_opens_on_home_not_delete(tmp_path, sleep):
     """One press of the key that opened it must not delete the open cart:
     the cursor lands on the System group's first row."""
     ws = _ws(tmp_path)
@@ -369,9 +370,9 @@ def test_the_open_cart_menu_opens_on_settings_not_delete(tmp_path, sleep):
     drv.frame(1 / 30)
     assert "DELETE CART" in _labels(ws)
     _assert_opens_safe(ws, "open cart")
-    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS"
+    assert ws.sysmenu.items[ws.sysmenu.sel][1] == "HOME"
     n0 = len(ws.carts.all)
-    _key(drv, "a")                             # the press runs Settings, deletes nothing
+    _key(drv, "a")                             # the press goes home, deletes nothing
     assert len(ws.carts.all) == n0
 
 

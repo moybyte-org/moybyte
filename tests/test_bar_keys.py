@@ -2,6 +2,9 @@
 §8): up from the home's tab row or past the top of the surface under a bar
 walks focus onto the bar's items, left and right walk them, confirm opens one
 as a tap does, down and back come off it.
+
+The system menu carries Home off the home: the way out of a surface with no
+back of its own, as the home key goes.
 """
 
 import pytest
@@ -237,3 +240,74 @@ def test_a_page_under_the_bar_lets_its_focus_go_while_the_keys_are_on_it(tmp_pat
     assert not ws.settings_layer._focused
     _press(drv, "down")
     assert ws.settings_layer._focused == first
+
+
+def _rows(ws):
+    return [r[4] for r in ws.menu_ui._sysmenu_items() if r[0] == "item"]
+
+
+def test_the_system_menu_has_home_off_the_home(tmp_path):
+    ws, drv = _home(tmp_path)
+    assert "Home" not in _rows(ws)
+    _editor(ws, drv)
+    assert ws.screen == "menu" and "Home" in _rows(ws)
+    ws.toggle_sysmenu()
+    drv.frame(1 / 30)
+    m = ws.sysmenu
+    m.sel = next(i for i, r in enumerate(m.items) if r[0] == "item" and r[4] == "Home")
+    _press(drv, "run")
+    assert ws.screen == "launcher" and not m.open, "Home leaves the Editor for the home"
+
+
+def test_settings_has_home_too(tmp_path):
+    ws, drv = _home(tmp_path)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    assert "Home" in _rows(ws)
+
+
+def _home_row(ws, drv):
+    ws.toggle_sysmenu()
+    drv.frame(1 / 30)
+    m = ws.sysmenu
+    m.sel = next(i for i, r in enumerate(m.items) if r[0] == "item" and r[4] == "Home")
+    _press(drv, "run")
+    assert not m.open
+
+
+def test_home_leaves_settings_an_app_and_a_running_cart(tmp_path):
+    from ws_helpers import select_on_home
+    ws, drv = _home(tmp_path)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    _home_row(ws, drv)
+    assert ws.screen == "launcher"
+
+    select_on_home(ws, "Files")
+    ws.open()
+    drv.frame(1 / 30)
+    assert ws.screen != "launcher"
+    _home_row(ws, drv)
+    assert ws.screen == "launcher"
+
+    select_on_home(ws, "Notes")
+    ws.open()
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert ws.wm.top_is_player() and ws.cart is not None
+    _home_row(ws, drv)
+    assert ws.screen == "launcher" and ws.cart is None and not ws.wm.top_is_player()
+
+
+def test_home_from_the_editor_keeps_an_edit(tmp_path):
+    """Home leaves the Editor by the home key's path, which commits what
+    is being typed: no prompt, nothing lost."""
+    ws, drv = _home(tmp_path)
+    _editor(ws, drv)
+    ed = ws.editor_app
+    ed.save_current()
+    calls = []
+    real = ed.save_current
+    ed.save_current = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+    _home_row(ws, drv)
+    assert ws.screen == "launcher" and calls, "the leave path saves the open tab"

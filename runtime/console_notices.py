@@ -56,10 +56,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 _LOOK_TEXT = {"menu.cart": "Cart", "menu.delete_cart": "Delete cart",
               "menu.favourite_add": "Add favourite",
               "menu.favourite_remove": "Remove favourite", "menu.system": "System",
+              "menu.home": "Home",
               "menu.clear_search": "Clear search", "menu.search": "Search",
               "menu.settings": "Settings", "menu.about": "About", "menu.sleep": "Sleep",
               "menu.reboot": "Restart Moybyte"}
-_LOOK_ICON = {"menu.delete_cart": "trash",
+_LOOK_ICON = {"menu.delete_cart": "trash", "menu.home": "home",
               "menu.favourite_add": "star", "menu.favourite_remove": "star_on",
               "menu.clear_search": "search", "menu.search": "search",
               "menu.settings": "settings", "menu.about": "doc", "menu.sleep": "sleep",
@@ -848,6 +849,12 @@ class SystemMenuUI:
                 rows.extend(card)
                 rows.append(("sep",))
         rows.append(_row("header", "menu.system"))
+        # Home, wherever the screen is not the home: the way out of a surface
+        # with no back of its own (the Editor's bar draws none, and the
+        # T-Deck's Code tab types K), as the home key goes (`home_key`).
+        ws = self.ws
+        if not ws.windowed_chrome and not ws.wm.top_is("launcher"):
+            rows.append(_row("item", "menu.home", ws.home_key))
         # SEARCH (#105): only meaningful over the run-grid, so it's offered ONLY
         # from the launcher home -- the label flips to CLEAR SEARCH once a query
         # is active/typing, so the same row both opens and dismisses it.

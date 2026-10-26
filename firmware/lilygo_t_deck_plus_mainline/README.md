@@ -799,7 +799,9 @@ Every one of these was learned by hanging or bricking a board.
   send the `0x04` revert.
 - **The Mic key is the console's key (owner call, 2026-10-18).** It is the
   `start` button — the pause menu over a fullscreen game, the system menu
-  anywhere else (`docs/shell_ux_v1.md` §9a) — and never reaches a cart;
+  anywhere else (`docs/shell_ux_v1.md` §9a), whose Home row off the home is
+  the way out of a surface where K types (the Editor's Code tab) — and
+  never reaches a cart;
   inside a text field being typed into it is the field's Cancel, because K
   types a letter there. BACKSPACE is a plain key (a typed 0x08 at a text
   surface, `key()` 0x08 in a game), with no hold gesture. What the C3 says

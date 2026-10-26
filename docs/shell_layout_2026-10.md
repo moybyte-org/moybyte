@@ -90,7 +90,9 @@ memory and compositors); this doc cites, it does not copy.
   `sysmenu` layer (`runtime/layers.py`): up/down move, A or Enter activates
   and closes, B or stop dismisses, a tap outside dismisses. Its rows
   (`runtime/console_notices.py`, `_sysmenu_items`) are the cart's restart and
-  delete, search, Settings, About and Reboot (under a theme with a depth, a
+  delete, search, Home (off the home, in console mode: the way out of a
+  surface with no back of its own, as the home key goes), Settings, About
+  and Reboot (under a theme with a depth, a
   `ui.popover` of captioned `ui.menu`s, docs/look_2026-10.md step 25a). Other overlays (the toast,
   the notice, About) disable the quiet stack and the damage description
   (`wm_windowed.py`: the quiet-frame path and `_hand_damage`); the popover
