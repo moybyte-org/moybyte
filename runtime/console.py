@@ -1097,7 +1097,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # (The code editor's keyboard-edge tracker (_ekey_prev) + drag-scroll origin
         # (_drag) + highlight memo (_hl_cache) live on self.code_layer now.)
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
-        # (The launcher's trackball-hover state (_lhover) lives on self.launcher_layer.)
+        # (The launcher's cursor-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
         # The trackball's presses where a surface takes the keys (`ball`):
         # its source, the pulses toward a step on each axis and when the last
@@ -4001,15 +4001,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def ball_steps(self):
         """Whether the trackball is the W A S D of the surface that holds
-        the keys: a popover, the system menu, the pause and stop cards, the
-        delete confirm, About, and a content layer whose `ball_steps` says
-        so (a list, a menu, a dialog). Elsewhere -- the home, the desk's
-        windows, a running cart, a canvas -- it points."""
+        the keys: every popover and menu, About, and every fullscreen
+        surface -- the home, the apps, the Editor's tabs -- but one whose
+        `ball_steps` says otherwise: a running cart, a canvas whose cursor
+        it moves (the sprite tab and Paint until a popover opens, the map,
+        the scene) and a caret, which takes it as arrows (`nav`). The desk's
+        windows are pointed at."""
         if self._modal_layer() is not None or self._about:
             return True
         if self.windowed_chrome:
             return False
-        steps = getattr(self._content_layer(), "ball_steps", False)
+        steps = getattr(self._content_layer(), "ball_steps", True)
         return bool(steps() if callable(steps) else steps)
 
     def ball(self, dx, dy, click=False):

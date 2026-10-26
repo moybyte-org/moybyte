@@ -112,6 +112,7 @@ class _PlayerLayer(Layer):
 
     id = "desktop"
     domain = "game"
+    ball_steps = False              # the trackball is the running cart's pointer
 
     def draw(self, dt):
         self.ws.player.tick(dt)
@@ -128,7 +129,6 @@ class _BlocksLayer(Layer):
 
     id = "blocks"
     domain = "system"
-    ball_steps = True               # the trackball steps its outline (Workstation.ball_steps)
 
     def draw(self, dt):
         self.ws.block_ui._draw_blocks(dt)
@@ -147,7 +147,6 @@ class _UpdateLayer(Layer):
 
     id = "update"
     domain = "system"
-    ball_steps = True               # the trackball steps its buttons (Workstation.ball_steps)
 
     def draw(self, dt):
         self.ws.update_ui._pump_update(dt)   # advance the install / reboot countdown
@@ -196,6 +195,7 @@ class _MapLayer(Layer):
 
     id = "map"
     domain = "system"
+    ball_steps = False              # the trackball moves the map's cursor
 
     def draw(self, dt):
         ws = self.ws
@@ -239,6 +239,7 @@ class _SceneLayer(Layer):
 
     id = "scene"
     domain = "system"
+    ball_steps = False              # the trackball points at the placements
 
     def draw(self, dt):
         ws = self.ws

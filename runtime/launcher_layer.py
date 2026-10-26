@@ -2520,7 +2520,7 @@ class LauncherHomeLayer:
     """The "launcher" content Layer (system domain): the home, console mode's root.
     draw composes the wallpaper backdrop -> the tab row and the cards (`grid`,
     ws.launcher) -> the top bar; input is the grid nav / selection, dispatching
-    the active tab's tap (ws.launch_selected). Owns the trackball hover state
+    the active tab's tap (ws.launch_selected). Owns the cursor's hover state
     (_lhover), the tab-row focus; `grid` is the single source
     it reads. `HomeWindowLayer` is the same home in a window."""
 
@@ -4027,7 +4027,7 @@ class LauncherHomeLayer:
     def _grid_pointer(self, px, py, click):
         """The grid arrangement's pointer: the footer arrows and the selected
         card's star fire on the press; a card fires the active tab's tap on a
-        clean RELEASE (ui.DragTap), so a drag never launches; the trackball's
+        clean RELEASE (ui.DragTap), so a drag never launches; a mouse's
         cursor selects the card it moves onto."""
         ws = self.ws
         grid = self.grid

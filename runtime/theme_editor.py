@@ -958,6 +958,7 @@ class SpritesLayer:
 
     id = TAB_SPRITES
     domain = "system"
+    ball_steps = False              # the trackball points at the icon and its colours
 
     def __init__(self, ws, names):
         self.ws = ws

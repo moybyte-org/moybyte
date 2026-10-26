@@ -776,9 +776,9 @@ Every one of these was learned by hanging or bricking a board.
   grids, menus, popovers, dialog rows — and there they are no letter
   (owner call 2026-10-23, `moy_kbd.c`'s THE MOVE KEYS): only a game
   (`cart_keys`) reads them as both. A roll of the trackball is those
-  directions, and its click Enter, where a surface takes the keys
-  (`Workstation.ball`, the "ball" input source; `docs/ui_api_2026-10.md`
-  says where). A menu over a text surface takes the
+  directions, and its click Enter, on every surface but a running cart, a
+  canvas and a caret (`Workstation.ball`, the "ball" input source;
+  `docs/ui_api_2026-10.md` says which). A menu over a text surface takes the
   keys out of text mode while it shows (`Workstation._menu_keys`). A key already down when the
   matrix starts, or when a surface turns to text, types nothing until it is
   pressed again, and `_set_text_mode(True)` seeds every typed-key edge with

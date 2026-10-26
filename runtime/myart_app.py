@@ -101,7 +101,6 @@ class MyArtAppLayer:
 
     id = "myart"
     domain = "system"
-    ball_steps = True               # the trackball steps its rows (Workstation.ball_steps)
     TITLE = "My Art"
     # The shell roles this app uses (runtime/app_context.py): the drawings
     # (`files`), Paint's door (`nav`), the wallpaper and a project's copy

@@ -383,6 +383,7 @@ class CodeLayer:
 
     id = "code"
     domain = "system"
+    ball_steps = False              # the trackball is the caret's arrows (`nav`)
 
     # The tool palette (#89): a tappable row (opened by the always-visible TLS
     # toggle) that reaches every range op the T-Deck keyboard has no key/combo for.

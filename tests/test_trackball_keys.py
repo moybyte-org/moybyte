@@ -1,6 +1,7 @@
 """The trackball where a surface takes the keys (owner call 2026-10-26): a
 roll is the W A S D press it matches and the click is Enter, and no cursor
-shows; on the home it points, and on a caret it is the arrows
+shows -- the home and every fullscreen surface; a running cart keeps the
+pointer, and a caret takes it as the arrows
 (`Workstation.ball`). The host's arrows-as-trackball (`ConsoleDriver.pan`,
 `ball_click`) spend it the way the T-Deck's handle_input does.
 """
@@ -95,29 +96,50 @@ def test_a_roll_steps_the_system_menu_and_a_click_confirms_it(tmp_path):
     assert picked == [m.sel], "the click is Enter on the focused row"
 
 
-def test_a_roll_on_the_home_moves_the_cursor(tmp_path):
-    ws, drv = _drv(tmp_path)
-    assert ws.screen == "launcher" and not ws.ball_steps()
+def _home(tmp_path):
+    from test_v04_userland import select_first_game
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
+    for _ in range(3):
+        drv.frame(1 / 30)
+    return ws, drv
+
+
+def test_a_roll_on_the_home_moves_its_selection(tmp_path):
+    ws, drv = _home(tmp_path)
+    assert ws.screen == "launcher" and ws.ball_steps()
+    first = ws.launcher.selected()
+    x = ws.pointer.x
+    _roll(drv, 1, 0, 2)
+    for _ in range(20):                       # the carousel's glide
+        drv.frame(1 / 30)
+    assert ws.launcher.selected() is not first, "a roll right is the next card"
+    assert ws.pointer.x == x and not ws.pointer.visible
+
+
+def test_a_click_on_the_home_plays_the_selected_card(tmp_path):
+    ws, drv = _home(tmp_path)
+    title = ws.launcher.selected()["title"]
+    drv.ball_click()
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert ws.screen == "desktop", "the click is Enter: the card plays"
+    assert (ws.cart or {}).get("title") == title
+
+
+def test_a_running_cart_keeps_the_pointer(tmp_path):
+    ws, drv = _home(tmp_path)
+    drv.ball_click()
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert ws.screen == "desktop" and not ws.ball_steps()
     x = ws.pointer.x
     drv.pan(1, 0)
     drv.frame(1 / 30)
     drv.pan(0, 0)
     assert ws.pointer.x > x and ws.pointer.visible
     assert not ws.ball_owed
-
-
-def test_a_click_on_the_home_is_the_pointer_click(tmp_path):
-    ws, drv = _drv(tmp_path)
-    clicks = []
-    real = ws.handle_pointer
-
-    def spy():
-        clicks.append(ws.pointer.click)
-        return real()
-    ws.handle_pointer = spy
-    drv.ball_click()
-    drv.frame(1 / 30)
-    assert True in clicks
 
 
 def _code_tab(tmp_path):
