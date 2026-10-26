@@ -783,7 +783,8 @@ floor: the carousel's band hands the same way.
 **The carousel, animated** (owner, 2026-10-13: the centre card is larger and
 grows and shrinks as cards pass through the centre, in motion as well as at
 rest), on the handheld; the desk's shelf cards keep one size, and its hero
-and details lie outside the band, repainted when the selection moves. The rule that keeps it inside the cost model: **a card's scale is a
+and details lie outside the band, repainted when the selection moves
+(`docs/surface_model_v1.md` §14.4: each buffer gets only the parts it lacks). The rule that keeps it inside the cost model: **a card's scale is a
 function of its distance from the centre and of nothing else** — `1.0` at one
 card pitch or more, rising to the centre scale at distance 0 — so there is no
 animation clock, a settled row is a still row, and "settled" is the kinetic
@@ -796,10 +797,12 @@ scroll's own condition (#113). The frame in motion:
   own (owner, 2026-10-14: "why is the background white? instead of showing
   the wallpaper"; no scrim either, theming doc §4.9), so its pixels cannot
   shift as #113's scroll-as-blit does — the wallpaper would slide with the
-  cards. Every full paint copies the wallpaper under the band
-  (`LauncherHomeLayer._band_bg`, an owned layer the
-  fit check releases with the retained frame), and a moving frame restores
-  it only around the cards, every card painting its whole square opaque
+  cards. A moving frame restores the wallpaper only around the cards: from
+  the wallpaper's own still image where it has one (`Wallpaper.restore_key`:
+  the picture, the theme's baked backdrop, the plain fill), else from the
+  copy every full paint takes of it under the band
+  (`LauncherHomeLayer._band_bg`, an owned layer the fit check releases with
+  the retained frame), every card painting its whole square opaque
   but the rows its rounded corners span, which are restored too: each
   card one scaled blit of its whole RGB565 cover bake at its scale
   (`DeviceCanvas.cover`), the focus mark on the

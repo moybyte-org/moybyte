@@ -859,6 +859,40 @@ and three buffers presented in turn, every presented frame byte-equal to
 full repaints, every frame from the press through the release a stroke
 frame, and the stamps' bytes bounded.
 
+### 14.4 The desk home's still backdrop (2026-10-26)
+
+The desk's console home is a still backdrop under three parts that change:
+the hero with its details pane (the selection), the shelf's band and the
+bar. A full paint draws the backdrop whole; on the P4 that is a third of the
+frame, and a key press on the shelf, a tab switch or a fling's last frame
+paid it because the selection or the tab sat in the statics key the drag
+partial gates on. #66 has the numbers.
+
+**The home keeps §4's per-buffer last-seen for its parts**
+(`LauncherHomeLayer._still_ring`, one entry a painted frame): the backdrop's
+key, the selection's and the band's, recorded only for a frame whose pixels
+were the home's alone (`content_alone`: no overlay, splash, cursor or owed
+pill over it, the home on top, nothing animating). When the RETAINED_FRAMES
+painted frames before this one all have entries under this frame's backdrop
+key, every buffer holds the backdrop, and a part whose key differs from any
+of theirs lags in the buffer this frame paints: it alone is put back over the
+backdrop and drawn, the bar strip over it as every partial frame does.
+Where it can be had, the backdrop's pixels come from the wallpaper itself
+(`Wallpaper.restore_key`: the picture, the theme's baked backdrop or the
+plain fill); a cart wallpaper keeps the drag partial and its band copy.
+
+**A change leaves the other buffers lagging, and the home asks for the frames
+that bring them to it** while nothing moves and no press waits (as the
+windowed WM's `debt_owed` does). The retained re-entry frame is captured once
+every buffer holds the frame, and copies only the parts that moved since the
+frame it holds (`_moved_rects`).
+
+**This is not a second invalidation mechanism.** Whether the home paints is
+still the gate's; the ring only says which of its parts the buffer lacks.
+Pinned by `tests/test_home_still.py`: a session of key presses, tab switches,
+a drag and a fling, and the buttons' focus, on one, two and three buffers
+presented in turn, the glass's every picture byte-equal to full repaints'.
+
 ## 15. Amendment: the Surface's home is the kernel (2026-10-07)
 
 `docs/native_kernel_2026-09.md` §8 asked for this before its sprint 3, and

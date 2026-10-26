@@ -155,6 +155,14 @@ def _build_id():
     return "%s|%s" % (sys.version, v)
 
 
+class _Strip:
+    """An RGB565 picture as `blit_strip_rect` reads a layer: its words and
+    its size."""
+    _buf = None
+    w = 0
+    h = 0
+
+
 class Wallpaper:
     """The wallpaper backdrop component (#28). Owns the RENDERING (draw) + the compiled
     wallpaper-cart cache; ws.look.wallpaper_id + the picker API are the look's."""
@@ -214,6 +222,11 @@ class Wallpaper:
         # rastered for, and how many rasters this component has made.
         self._bd_img = None
         self._bd_key = None
+        # What the last fill drew, for `restore_key`: (home, the bake's key)
+        # for the backdrop, (home, None) for the plain `desktop` fill; and
+        # the bake as a copy's source.
+        self._fill_did = None
+        self._bd_src = _Strip()
         self.rasters = 0
 
     def clear(self):
@@ -511,6 +524,61 @@ class Wallpaper:
         finally:
             self._stock_unbracket(b)
 
+    def restore_key(self, home=False):
+        """What the backdrop's pixels are as `draw` last put them on the
+        system canvas, where they are one still image drawn whole -- the
+        picture, the theme's baked backdrop or the plain `desktop` fill --
+        so `restore` can put any rect of them back; None where a cart draws
+        the backdrop, or no such image is ready."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        look = ws.look
+        if look.wallpaper_id == look.PICTURE or self._wp_pics is not None:
+            k = self._pic_key
+            if (self._pic_data is not None and self._pic_bitmap is not None
+                    and k is not None and k[1] == cv.w and k[2] == cv.h
+                    and k[0] == self._pic_id()):
+                return ("pic", k)
+        if self._wp_draw is not None:
+            return None
+        did = self._fill_did
+        if did is None or did[0] != home:
+            return None
+        bg = ws.theme_colors["desktop"]
+        k = did[1]
+        if k is None:
+            return ("bg", bg)
+        img = self._bd_img
+        if (k is not self._bd_key or img is None or getattr(img, "_rgb_i", None) is None
+                or k[1] != bg or k[2] != cv.w or k[3] != cv.h or k[4] != look.look_gen):
+            return None
+        return ("bd", k)
+
+    def restorer(self, cv, key):
+        """fill(cv, rect): put back a rect of the backdrop `restore_key`
+        answered `key` for, on canvas `cv`."""
+        kind = key[0]
+        if kind == "bg":
+            c = key[1]
+            return lambda cv, r: cv.rect(r[0], r[1], r[2], r[3], c)
+        if kind == "bd":
+            src = self._bd_src
+            img = self._bd_img
+            if src._buf is not img._rgb_i:
+                src._buf = img._rgb_i
+                src.w = img.w
+                src.h = img.h
+            return lambda cv, r: cv.blit_strip_rect(src, 0, 0, r[0], r[1], r[2], r[3])
+        pic = self._pic_bitmap
+
+        def fill(cv, r):
+            cv.clip(r[0], r[1], r[2], r[3])
+            try:
+                cv.spr(pic, 0, 0)
+            finally:
+                cv.clip()
+        return fill
+
     def bars(self):
         """The bars' quiet rectangles on the system canvas: every band of the
         glass outside the layout's content rect (docs/shell_layout_2026-10.md
@@ -572,13 +640,16 @@ class Wallpaper:
         cv = ws.sys_canvas
         bg = ws.theme_colors["desktop"]
         rec = ws.look.backdrop("home" if home else "desk")
+        self._fill_did = None
         if rec:
             try:
-                self._draw_backdrop(cv, rec, bg)
+                if self._draw_backdrop(cv, rec, bg):
+                    self._fill_did = (home, self._bd_key)
                 return
             except Exception as exc:  # noqa: BLE001 -- a bad backdrop draws the fill
                 print("Moybyte backdrop error:", _err_text(exc))
         cv.cls(bg)
+        self._fill_did = (home, None)
 
     def _draw_backdrop(self, cv, rec, bg):
         """Rasterise the backdrop once per (records, fill, size, look) into
@@ -600,9 +671,10 @@ class Wallpaper:
             except MemoryError:
                 img._rgb_i = None
                 cv.backdrop(rec, bg)
-                return
+                return False
             self._bd_key = key
         cv.blit565(img._rgb_i, img.w, img.h, 0, 0)
+        return True
 
     def _paint(self, dt, home=False):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid

@@ -1830,18 +1830,24 @@ class Carousel(Launcher):
         then the cards -- whatever the ring offers to shift."""
         self.repaint_band(cv, sheet_for, fill)
 
-    def repaint_band(self, cv, sheet_for, fill):
+    def repaint_band(self, cv, sheet_for, fill, marks=False):
         band = self.band_rect()
-        self._fill_around_cards(cv, fill, band)
+        self._fill_around_cards(cv, fill, band, marks)
         self._paint(cv, sheet_for, band)
 
-    def _fill_around_cards(self, cv, fill, r):
+    def _fill_around_cards(self, cv, fill, r, marks=False):
         """Restore rect `r`'s backdrop except where a card lies: every card
         paints its whole square opaque, so the backdrop is owed only around
-        them -- on a big panel most of the band's pixels are the cards'."""
+        them -- on a big panel most of the band's pixels are the cards'.
+        The focus mark's rounded ring blends over the corner rows of the card
+        it lies on, past the card's own corner: the selected card's rows
+        are restored that far, and with `marks` (the buffer may hold the
+        mark on another card) every card's."""
         x0, y0, x1, y1 = r[0], r[1], r[0] + r[2], r[1] + r[3]
         x = x0
-        for _i, c in sorted(self._visible(), key=lambda e: e[1][0]):
+        reach = _ui_draw.mark_reach("card") + 1
+        on = -1 if marks else self.nearest()
+        for i, c in sorted(self._visible(), key=lambda e: e[1][0]):
             cx0 = max(c[0], x)
             cx1 = min(c[0] + c[2], x1)
             if cx1 <= cx0:
@@ -1850,7 +1856,10 @@ class Carousel(Launcher):
                 fill(cv, (x, y0, cx0 - x, y1 - y0))
             ct = max(c[1], y0)
             cb = min(c[1] + c[3], y1)
-            k = min(self._corner_r(c[2]), (cb - ct) // 2)
+            k = self._corner_r(c[2])
+            if k and (on < 0 or i == on):
+                k += reach
+            k = min(k, (cb - ct) // 2)
             if k > 0:
                 # rounded cards leave their corners' pixels to the backdrop:
                 # the rows the corners span are restored too
@@ -2557,6 +2566,14 @@ class LauncherHomeLayer:
         # the theme, the wallpaper and the band rect.
         self._band_bg = None          # cv.new_layer sized to the band
         self._band_key = None
+        # The desk home's still-backdrop frames (`_try_still_frame`): one
+        # entry a painted frame, [frame, backdrop, selection, band] keys,
+        # the last RETAINED_FRAMES of them; the backdrop `restore_key` this
+        # frame answered; and the parts the retained frame was captured
+        # under (`_capture_retained` copies only the ones that moved).
+        self._still_ring = []
+        self._bd_now = None
+        self._lib_parts = None
 
     @property
     def grid(self):
@@ -2747,6 +2764,7 @@ class LauncherHomeLayer:
             if cache is None or cache.w != cv.w or cache.h != cv.h:
                 self._lib_cache = cv.new_layer(cv.w, cv.h)
                 self._lib_key = None      # freshly minted: no captured pixels
+                self._lib_parts = None
             self._band_layer(cv)
         except Exception:  # noqa: BLE001
             self._lib_cache = None
@@ -2780,6 +2798,7 @@ class LauncherHomeLayer:
                 rel()
             freed = True
         self._lib_key = None
+        self._lib_parts = None
         self._band_key = None
         return freed
 
@@ -2795,8 +2814,9 @@ class LauncherHomeLayer:
         on a canvas that retains nothing."""
         ws = self.ws
         self._band_key = None
-        if self._lib_unsupported or ws._animating(dt):
-            return
+        if (self._lib_unsupported or ws._animating(dt)
+                or ws.wallpaper.restore_key(True) is not None):
+            return                # (a wallpaper that restores needs no copy)
         if (getattr(cv, "begin_surface", None) is not None
                 or getattr(cv, "RETAINED_FRAMES", 0) < 1):
             return
@@ -2817,7 +2837,7 @@ class LauncherHomeLayer:
         bx, by, _bw, _bh = self.grid.band_rect()
         cv.blit_strip_rect(self._band_bg, bx, by, r[0], r[1], r[2], r[3])
 
-    def _capture_retained(self, cv, dt):
+    def _capture_retained(self, cv, dt, parts=None):
         """Capture the frame just painted into the retained cache -- called at
         the END of a live draw, while cv is still the back buffer being painted
         (pre-present, so it is provably THIS frame; see __init__'s ping-pong
@@ -2840,17 +2860,47 @@ class LauncherHomeLayer:
         key = self._retained_key(cv)
         if key == self._lib_key:
             return
+        if parts is None and self._carousel():
+            parts = self._still_parts(cv, ws.wallpaper.restore_key(True))
+        bar = ws.bar_layer.shown_key("home")
         try:
             cache = self._lib_cache
+            lp = self._lib_parts
             if cache is None or cache.w != cv.w or cache.h != cv.h:
                 cache = self._lib_cache = cv.new_layer(cv.w, cv.h)
+                lp = None
             ws.note_cost("home.frame.capture")
-            cache.blit_strip(cv, 0, 0)
+            if parts is not None and lp is not None and lp[0] == parts[0]:
+                # The captured frame has this one's backdrop: only the
+                # parts that moved since are copied.
+                for r in self._moved_rects(parts, lp, bar):
+                    cache.blit_strip_rect(cv, 0, 0, r[0], r[1], r[2], r[3])
+            else:
+                cache.blit_strip(cv, 0, 0)
             self._lib_key = key
+            self._lib_parts = None if parts is None else parts + (bar,)
         except Exception:  # noqa: BLE001 -- a recording root has no pixels to
             self._lib_cache = None     # copy; forfeit the mechanism for the
             self._lib_key = None       # session rather than retry every paint
+            self._lib_parts = None
             self._lib_unsupported = True
+
+    def _moved_rects(self, parts, was, bar):
+        """The rects of the desk home's frame `parts` (and bar key `bar`)
+        that differ from the frame `was` held, where the two share a
+        backdrop: the selection's, the band, the bar's and the hint strip."""
+        g = self.grid
+        out = []
+        if was[1] != parts[1]:
+            out.append(self._sel_rect())
+        if was[2] != parts[2]:
+            out.append(g.band_rect())
+        if was[3] != bar:
+            out.extend(self.ws.wallpaper.bars())
+        h = g.foot()[5]
+        if h[2] > 0 and h[3] > 0:
+            out.append(h)
+        return out
 
     def _carousel(self):
         """Whether the home shows the carousel (else the grid arrangement)."""
@@ -2868,12 +2918,197 @@ class LauncherHomeLayer:
         if not self._carousel():
             return _drag_partial(self, cv, dt, self.grid, self.id,
                                  self._surface_fill, self.strip, timed=True)
-        if self._band_bg is None or self._band_key != self._band_key_of(cv):
+        if self._bd_now is not None:
+            fill = self.ws.wallpaper.restorer(cv, self._bd_now)
+        elif self._band_bg is None or self._band_key != self._band_key_of(cv):
             return False
+        else:
+            fill = self._backdrop_fill
         if self._search_line() is not None:
             return False
         return _drag_partial(self, cv, dt, self.grid, self.id,
-                             self._backdrop_fill, self.strip, timed=True)
+                             fill, self.strip, timed=True)
+
+    # -- the desk home's still-backdrop frame ------------------------------
+    #
+    # On the desk the home is a still backdrop under three parts that
+    # change: the hero with its details pane (the selection), the shelf's
+    # band and the bar. A frame repaints only the parts the buffer it paints
+    # lacks, where the wallpaper can put its own pixels back
+    # (`Wallpaper.restore_key`): every buffer holds this backdrop once the
+    # RETAINED_FRAMES frames before this one were the home's alone, on it,
+    # and each of those frames left its buffer holding its own parts. A
+    # part that differs from any of theirs lags in this frame's buffer.
+
+    def _still_parts(self, cv, bd):
+        """(backdrop, selection, band) keys of the desk home's frame: what
+        everything outside the selection's rect and the band is a pure
+        function of (the wallpaper's `restore_key` `bd` among it), what the
+        hero and its details are, and what the shelf's band is. None off
+        the desk, or where the backdrop cannot be put back."""
+        g = self.grid
+        if bd is None or not g.desk():
+            return None
+        ws = self.ws
+        typing = getattr(ws, "search_typing", False)
+        base = (bd, cv.w, cv.h, ws.layout.fs, ws.look.look_gen, g._geom(),
+                ws.look.wallpaper_id, modal_keys(ws), getattr(ws, "search_query", ""),
+                typing, typing and ws.can_type(), self._tab_focus, self._back_tip)
+        items = g.items
+        it = items[g.nearest()] if items else None
+        st = ws.system
+        fav = st.text("favorites")
+        plays = st.text("plays")
+        gen = ws.covers.gen
+        sel = g.statics_sel()
+        return (base,
+                (g.tab, sel, it, it and it.get("title"), it and it.get("description"),
+                 gen, fav, plays, self._button_focus, g.today()),
+                (g.tab, sel, gen, self._lhover, tuple(i.get("title") for i in items),
+                 fav, plays, g.scroll, g.moving))
+
+    def _sel_rect(self):
+        """The desk home's hero and details pane with all they cast (the
+        hero's shadow, a button's focus mark, a legacy ground's plate),
+        between the bar and the shelf's band: what a change of the
+        selection repaints."""
+        g = self.grid
+        lay = self.ws.layout
+        q = g.quiet()[0]
+        d = _ui_draw.depth()
+        m = _ui_draw.mark_reach("part") + 1
+        if not d[0]:
+            m += 12 + lay.fs                 # the legacy ground's plate
+        elif d[6]:
+            m += d[9] + max(abs(d[10]), abs(d[11]))   # the hero's shadow
+        x0 = max(lay.cx, q[0] - m)
+        y0 = max(lay.cy, q[1] - m)
+        x1 = min(lay.cx + lay.cw, q[0] + q[2] + m)
+        y1 = min(g.band_rect()[1], q[1] + q[3] + m)
+        return (x0, y0, x1 - x0, y1 - y0)
+
+    def _fill_around_hero(self, cv, r, fill):
+        """Put the backdrop back in the selection's rect `r` but under the
+        hero, which paints its square opaque but for its corners' rows (as
+        a shelf card does, `Carousel._fill_around_cards`)."""
+        hx, hy, hs, _h = self.grid.hero_rect()
+        x0, y0, x1, y1 = r[0], r[1], r[0] + r[2], r[1] + r[3]
+        if not (x0 <= hx and y0 <= hy and hx + hs <= x1 and hy + hs <= y1):
+            fill(cv, r)
+            return
+        k = self.grid._corner_r(hs)
+        k = min(k + _ui_draw.mark_reach("card") + 1 if k else 0, hs // 2)
+        fill(cv, (x0, y0, r[2], hy - y0))
+        fill(cv, (x0, hy + hs, r[2], y1 - hy - hs))
+        fill(cv, (x0, hy, hx - x0, hs))
+        fill(cv, (hx + hs, hy, x1 - hx - hs, hs))
+        if k:
+            fill(cv, (hx, hy, hs, k))
+            fill(cv, (hx, hy + hs - k, hs, k))
+
+    def _content_alone(self, dt):
+        """Whether this frame's pixels are the home's alone: on top, nothing
+        animating, nothing drawn over it (`content_alone`)."""
+        ws = self.ws
+        wm = ws.wm
+        if ws._animating(dt):
+            return False
+        top = getattr(wm, "top_kind", None)
+        if top is not None and top() != self.id:
+            return False
+        alone = getattr(wm, "content_alone", None)
+        return alone is not None and alone()
+
+    def _note_still(self, cv, parts):
+        """Record this painted frame's parts in the ring, or with None
+        that its buffer holds something else."""
+        ring = self._still_ring
+        f = self.ws._frames_drawn
+        if parts is None or (ring and ring[-1][0] != f - 1):
+            del ring[:]                  # (another surface painted between)
+        if parts is None:
+            return
+        ring.append((f,) + parts)
+        if len(ring) > _retained_n(cv):
+            del ring[0]
+
+    def _try_still_frame(self, cv, dt):
+        """The desk home's frame over its still backdrop: the parts this
+        frame's buffer lacks put back over the wallpaper's own pixels, and
+        the bar. False when the frame must take another path."""
+        ws = self.ws
+        if (self._lib_unsupported or self._back_tip
+                or self._search_line() is not None):
+            return False
+        parts = self._still_parts(cv, self._bd_now)
+        if parts is None or not self._content_alone(dt):
+            return False
+        n = _retained_n(cv)
+        ring = self._still_ring
+        if len(ring) < n:
+            return False
+        f = ws._frames_drawn
+        base, sel, band = parts
+        sel_lag = band_lag = False
+        for k in range(1, n + 1):
+            e = ring[-k]
+            if e[0] != f - k or e[1] != base:
+                return False
+            if e[2] != sel:
+                sel_lag = True
+            if e[3] != band:
+                band_lag = True
+        fill = ws.wallpaper.restorer(cv, self._bd_now)
+        g = self.grid
+        wm = ws.wm
+        if sel_lag:
+            r = self._sel_rect()
+            self._fill_around_hero(cv, r, fill)
+            cv.clip(r[0], r[1], r[2], r[3])
+            g._paint_details(cv)
+            self._draw_details(cv)
+            cv.clip()
+            wm.hand_content_damage(cv, r[0], r[1], r[2], r[3])
+        if band_lag:
+            g.repaint_band(cv, ws.covers.sheet_icon, fill, sel_lag)
+            bx, by, bw, bh = g.band_rect()
+            wm.hand_content_damage(cv, bx, by, bw, bh)
+        h = g.foot()[5]
+        if h[2] > 0 and h[3] > 0:
+            fill(cv, h)
+            self._draw_home_chrome(cv)
+            wm.hand_content_damage(cv, h[0], h[1], h[2], h[3])
+        g._scroll_region().note_painted(
+            f, (g.paint_key(), self._statics_key(cv), ws.covers.gen),
+            _cursor_stamp(ws))
+        ws.bar_layer._draw_status_strip("home")
+        # The drag partial's streak counts whole frames under one statics
+        # key: a selection painted here is not one of them.
+        self._full_streak = 0
+        self._note_still(cv, parts)
+        if self._still_held(parts):
+            # every buffer holds this frame: the retained frame takes it
+            self._capture_retained(cv, dt, parts)
+        else:
+            self._still_debt()
+        return True
+
+    def _still_held(self, parts):
+        """Whether every entry of the ring is `parts`: each retained buffer
+        holds this frame."""
+        for e in self._still_ring:
+            if e[1] != parts[0] or e[2] != parts[1] or e[3] != parts[2]:
+                return False
+        return True
+
+    def _still_debt(self):
+        """Ask for the frame that brings one more buffer to this frame,
+        while nothing moves and no press waits on it (as the windowed WM
+        pays its own, `debt_owed`)."""
+        ws = self.ws
+        if (not self.grid.moving and not ws._ptr_changed()
+                and not getattr(ws.pointer, "down", False)):
+            ws.request_frame()
 
     def draw(self, dt):
         """The home desktop: wallpaper backdrop -> cart icon grid -> top status
@@ -2903,7 +3138,11 @@ class LauncherHomeLayer:
         self.grid.anim_frame(dt)
         if self.grid.flinging:
             ws.request_frame()
+        self._bd_now = ws.wallpaper.restore_key(True) if carousel else None
+        if carousel and self._try_still_frame(cv, dt):
+            return
         if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#58/#66)
+            self._note_still(cv, None)
             return
         # Retained-frame stamp (2026-07-27): a re-entry whose pixels are provably
         # identical to the captured frame presents it in one blit. Bookkeeping
@@ -2915,6 +3154,10 @@ class LauncherHomeLayer:
                 (self.grid.paint_key(), self._statics_key(cv), ws.covers.gen),
                 _cursor_stamp(ws))
             _advance_streak(self, cv)
+            parts = self._still_now(cv, dt)
+            self._note_still(cv, parts)
+            if parts is not None and len(self._still_ring) < _retained_n(cv):
+                self._still_debt()
             return
         # #76 sub-surface marks: on a RECORDING canvas, partition the home into
         # wallpaper / grid / bar streams so the web delta can skip the static grid +
@@ -2960,7 +3203,17 @@ class LauncherHomeLayer:
                            _ticks_diff(_t3, _t2))
         # A FULL paint landed in the current framebuffer.
         _advance_streak(self, cv)
-        self._capture_retained(cv, dt)   # retain this frame for re-entry stamps
+        parts = self._still_now(cv, dt)
+        self._note_still(cv, parts)
+        self._capture_retained(cv, dt, parts)   # retain this frame for re-entry stamps
+        if parts is not None and len(self._still_ring) < _retained_n(cv):
+            self._still_debt()
+
+    def _still_now(self, cv, dt):
+        """This whole frame's parts where it is the home's alone, else None."""
+        if not self._carousel() or not self._content_alone(dt):
+            return None
+        return self._still_parts(cv, self.ws.wallpaper.restore_key(True))
 
     def _hover_back(self, px, py, click, down):
         """Whether a mouse rests on the bar's chevron back to the desk (the

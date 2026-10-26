@@ -1651,6 +1651,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if self.mode == "console":
             FullscreenStackWM.hand_content_damage(self, cv, x, y, w, h)
 
+    def content_alone(self):
+        """Console mode's content alone on the glass, as the fullscreen
+        tier's; a desktop-mode frame is its windows'."""
+        return self.mode == "console" and FullscreenStackWM.content_alone(self)
+
     def keys_to_cart(self):
         """Console hook (#44 redraw gate), focus-aware like player_has_pointer:
         keyboard follows _focus (decoupled from the back-stack), so keys reach

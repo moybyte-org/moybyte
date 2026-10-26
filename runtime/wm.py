@@ -248,12 +248,18 @@ class FullscreenStackWM:
         the visible cursor, an owed LOADING pill -- and the whole frame is
         presented."""
         nd = getattr(cv, "note_damage", None)
-        if nd is None or self._cache_sig != 0:
-            return
+        if nd is not None and self.content_alone():
+            nd(x, y, w, h)
+
+    def content_alone(self):
+        """Whether the fullscreen content layer is all this frame draws: no
+        overlay, splash, perf HUD, visible cursor or owed LOADING pill over
+        it."""
+        if self._cache_sig != 0:
+            return False
         ws = self.ws
-        if getattr(ws.pointer, "visible", False) or (ws._deferred and ws._toast_owed()):
-            return
-        nd(x, y, w, h)
+        return not (getattr(ws.pointer, "visible", False)
+                    or (ws._deferred and ws._toast_owed()))
 
     def keys_to_cart(self):
         """Console hook (#44 redraw gate): this frame's keys are consumed by a
