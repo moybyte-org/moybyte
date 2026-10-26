@@ -228,6 +228,33 @@ def test_skip_build_flashes_and_no_flash_only_runs_the_suite(bench):
     assert [c for c, _e in steps.cmds if "pytest" in c]
 
 
+def test_build_only_builds_every_board_the_zero_too_and_touches_no_port(bench, monkeypatch):
+    monkeypatch.setattr(board, "resolve", lambda n, dirs: pytest.fail("resolved a port"))
+    steps = FakeSteps()
+    assert run_pass(bench, steps, "--all", "--build-only") == 0
+    built = [b for b in steps.builds() if b != board_pass.WEB_BUILD]
+    assert sorted(built) == sorted(os.path.join(d, "build.sh") for d in DIRS.values())
+    assert "xiao_zero" in DIRS
+    assert [c for c, _e in steps.cmds if c[0] != "bash"] == []
+
+
+def test_build_only_fails_on_a_failed_build(bench, capsys):
+    steps = FakeSteps(build_rc={"xiao_zero": 2})
+    assert run_pass(bench, steps, "--all", "--build-only") == 1
+    assert "build failed (xiao_zero.build.log)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("flag", [("--skip-build",), ("--no-flash",), ("--shot",), ("-k", "x")])
+def test_build_only_takes_no_other_step(flag):
+    with pytest.raises(board_pass.PassError, match="builds, and nothing else"):
+        board_pass.plan(args("--all", "--build-only", *flag), DIRS, main_checkout=False)
+
+
+def test_build_only_is_refused_in_the_main_checkout():
+    with pytest.raises(board_pass.PassError, match="main checkout"):
+        board_pass.plan(args("--all", "--build-only"), DIRS, main_checkout=True)
+
+
 def test_shot_takes_one_picture_a_board_at_the_end(bench):
     steps = FakeSteps()
     run_pass(bench, steps, "tdeck", "--shot")

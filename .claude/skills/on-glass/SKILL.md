@@ -84,6 +84,7 @@ python3 experiments/wasm_aot/doom/build_cart.py --out /tmp/carts   # never commi
 tools/board.py pass tdeck p4          # build each image from THIS tree, flash, boot, suite
 tools/board.py pass --all -k wasm     # every console board; -k goes to pytest
 tools/board.py pass tdeck --skip-build   # flash what dist/ has; --no-flash: the suite only
+tools/board.py pass --all --build-only    # every image, the Zero's too, no board: preflight's firmware lane
 tools/board.py pass --all --shot      # ...and a screenshot of each at the end
 ```
 

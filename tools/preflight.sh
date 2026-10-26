@@ -5,10 +5,19 @@
 #   tools/preflight.sh --web    # ...plus the browser suites in real Chrome
 #   tools/preflight.sh --no-web # ...without them even where the change reaches them
 #   tools/preflight.sh --full   # the host job even when only docs changed
+#   tools/preflight.sh --firmware     # ...plus every board's image, built here
+#   tools/preflight.sh --no-firmware  # ...without them even where the change reaches them
 #
 # The browser suites run on their own when the change touches what CI's
 # web-e2e.yml path filter covers (`web_touched`, below, mirrors that list);
-# `--web` forces them, `--no-web` skips them.
+# `--web` forces them, `--no-web` skips them. Every board's image is built
+# (`tools/board.py pass --all --build-only`) when the change touches what
+# firmware-build.yml's filter covers (`firmware_touched`); `--firmware` forces
+# it, `--no-firmware` skips it. That lane is CI's firmware job: an image under
+# its board's headroom floor, or a board whose staged modules no longer
+# compile, fails here instead of after the push. A local image is CI's within
+# a few KB (same pinned IDF and MicroPython), so the floor reads the same; a
+# warm build is a minute or two a board, and it needs a worktree.
 #
 # A branch whose changes against origin/dev are ALL documents (`*.md`, anything
 # under `docs/`) runs the docs check, the look-shot tests and every test file
@@ -52,17 +61,22 @@ PY="${ROOT}/.venv/bin/python"
 WEB=0
 NOWEB=0
 FULL=0
+FIRMWARE=0
+NOFIRMWARE=0
 for arg in "$@"; do
   case "${arg}" in
     --web) WEB=1 ;;
     --no-web) NOWEB=1 ;;
     --full) FULL=1 ;;
+    --firmware) FIRMWARE=1 ;;
+    --no-firmware) NOFIRMWARE=1 ;;
   esac
 done
 TOUR_DIR="$(mktemp -d)"
 trap 'rm -rf "${TOUR_DIR}"' EXIT
 
 fails=0
+failed=()
 step() {                        # step "name" cmd...
   local name="$1"; shift
   printf '== %s\n' "${name}"
@@ -72,6 +86,7 @@ step() {                        # step "name" cmd...
     printf '   FAIL\n'
     sed 's/^/   | /' /tmp/preflight.$$ | tail -25
     fails=$((fails + 1))
+    failed+=("${name}")
   fi
   rm -f /tmp/preflight.$$
 }
@@ -112,7 +127,28 @@ web_touched() {
   return 1
 }
 
-if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && docs_only; then
+# Whether the change touches what firmware-build.yml's `paths:` covers: keep
+# this list and that one the same (tests/test_preflight_web_filter.py).
+firmware_touched() {
+  local f
+  while IFS= read -r f; do
+    case "${f}" in
+      firmware/*|runtime/*|system_carts/*|device/*|native/*|patches/*) return 0 ;;
+      tools/esp32_build_lib.sh|tools/board_config.py|tools/gen_web_blob.py) return 0 ;;
+      tools/zopfli_gz.py|tools/gen_device_carts.py|tools/p8_import.py) return 0 ;;
+      tools/p8_lua_port.py|tools/p8_writer.py|site/build.py) return 0 ;;
+      tools/publish_firmware_release.py|.github/workflows/firmware-build.yml) return 0 ;;
+    esac
+  done <<< "$(changed)"
+  return 1
+}
+
+say_failed() {
+  printf '\npreflight: %d step(s) failed -- CI would too:\n' "${fails}"
+  printf '   %s\n' "${failed[@]}"
+}
+
+if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && [ "${FIRMWARE}" = "0" ] && docs_only; then
   printf 'preflight: only documents changed -- the docs lane (--full runs everything)\n'
   named=()
   while IFS= read -r f; do
@@ -125,7 +161,7 @@ if [ "${FULL}" = "0" ] && [ "${WEB}" = "0" ] && docs_only; then
   step "tests that name a changed document" \
     "${PYTEST[@]}" -p xdist -n auto -q "${named[@]}"
   if [ "${fails}" -ne 0 ]; then
-    printf '\npreflight: %d step(s) failed -- CI would too.\n' "${fails}"
+    say_failed
     exit 1
   fi
   printf '\npreflight: green (docs lane). A push should be too.\n'
@@ -170,8 +206,17 @@ if [ "${WEB}" = "1" ]; then
       tests/test_editor_ladder_icons.py
 fi
 
+if [ "${FIRMWARE}" = "0" ] && [ "${NOFIRMWARE}" = "0" ] && firmware_touched; then
+  printf 'preflight: the change reaches the board images (CI builds them) -- the firmware lane is on (--no-firmware skips it)\n'
+  FIRMWARE=1
+fi
+if [ "${FIRMWARE}" = "1" ]; then
+  step "every board's image builds, above its headroom floor" \
+    "${PY}" tools/board.py pass --all --build-only
+fi
+
 if [ "${fails}" -ne 0 ]; then
-  printf '\npreflight: %d step(s) failed -- CI would too.\n' "${fails}"
+  say_failed
   exit 1
 fi
 printf '\npreflight: green. A push should be too.\n'
