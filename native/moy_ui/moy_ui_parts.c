@@ -2242,15 +2242,29 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                 }
                 moy_ui_span_t k = {t.p + a, (uint16_t)(e - a)};
                 if (k.n) {
+                    // a chord ("Shift+enter") is one cap: its modifiers' legend,
+                    // then the last key's sign where it has one
+                    moy_ui_span_t mods = {k.p, 0};
+                    for (uint16_t m = k.n; m > 1; m--) {
+                        if (k.p[m - 1] == '+') {
+                            moy_ui_span_t last = {k.p + m, (uint16_t)(k.n - m)};
+                            if (key_sign(last) >= 0) {
+                                mods.n = m;
+                                k = last;
+                            }
+                            break;
+                        }
+                    }
                     int sign = key_sign(k);
                     int lw = sign >= 0 ? 0 : tw(&fk, k.p, k.n, sc);
+                    int mw = mods.n ? tw(&fk, mods.p, mods.n, sc) + 4 * d.fs : 0;
                     // a sign's cap and a one-glyph legend's are square, a
                     // word's grows with it; the enter sign's is a little wider
                     int w = sign == SIGN_ENTER ? kh + 3 * d.fs
                             : sign >= 0 || (one_glyph(k) && lw + 4 * d.fs <= kh)
                                 ? kh
                                 : lw + (d.desk ? 10 : 8) * d.fs;
-                    w = w < kh ? kh : w;
+                    w = (w < kh ? kh : w) + mw;
                     if (!draw) {
                         // measured only
                     } else if (kc->alpha >= 255) {
@@ -2262,18 +2276,22 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
                         rrect(&d, x, y, w, kh, r, 0, 0, kc->border_w * d.fs,
                               val(&d, kc->border_c));
                     }
+                    if (draw && mods.n) {
+                        text(&d, &fk, mods.p, mods.n, x + 4 * d.fs, y, kh, capi, sc);
+                    }
+                    int sx = x + mw, sw = w - mw;
                     if (!draw) {
                         // measured only
                     } else if (sign == SIGN_ENTER) {
-                        enter_sign(&d, x, y, w, kh, capi);
+                        enter_sign(&d, sx, y, sw, kh, capi);
                     } else if (sign == SIGN_BALL_LR) {
-                        ball_sign(&d, x, y, w, kh, capi);
+                        ball_sign(&d, sx, y, sw, kh, capi);
                     } else if (sign == SIGN_DPAD_LR) {
-                        dpad_sign(&d, x, y, w, kh, capi);
+                        dpad_sign(&d, sx, y, sw, kh, capi);
                     } else if (sign >= 0) {
-                        arrow_sign(&d, x, y, w, kh, sign, 0, capi);
+                        arrow_sign(&d, sx, y, sw, kh, sign, 0, capi);
                     } else {
-                        text(&d, &fk, k.p, k.n, x + (w - lw) / 2, y, kh, capi, sc);
+                        text(&d, &fk, k.p, k.n, sx + (sw - lw) / 2, y, kh, capi, sc);
                     }
                     x += w + 3 * d.fs;
                 }

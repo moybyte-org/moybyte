@@ -682,6 +682,7 @@ class EditorDesk(Layer):
                 if op == "more":
                     self.part_state["code more"] = (tx, y + hh, cell)
                 else:
+                    cl.jump_anchor = (tx, y, cell, hh) if op == "goto" else None
                     cl._run_tool(op, ws.editor)
                 ws._dirty = True
         name = ws.code_file_name() or ""

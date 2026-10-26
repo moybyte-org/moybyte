@@ -315,9 +315,37 @@ def _tap(drv, x, y):
     drv.frame(DT)
 
 
+@pytest.fixture(autouse=True)
+def _keys_after():
+    """Every test starts and ends on a keyboard's input."""
+    from runtime import ui_draw
+    ui_draw.input_kind("keys")
+    yield
+    ui_draw.input_kind("keys")
+
+
+def _touch(drv):
+    """The last input a touch, which shows the tools toggle and row (D-17)."""
+    from runtime import ui_draw
+    if ui_draw.input_kind() != "touch":
+        ui_draw.input_kind("touch")
+        drv.frame(DT)
+
+
+def _row_tap(ws, drv, id):
+    """Tap the overlay row (or field) whose id is `id`, where it last drew."""
+    b = ws.code_layer._ov_host.box(id)
+    assert b is not None, id
+    _tap(drv, b[0] + b[2] // 2, b[1] + b[3] // 2)
+    drv.touch_up()
+    drv.frame(DT)
+    drv.frame(DT)
+
+
 def _tap_tool(ws, drv, name):
     """Open the tool palette (if needed) and tap a named tool button."""
     cl = ws.code_layer
+    _touch(drv)
     lay = ws.code_layout
     if not cl._tools_open:
         b = cl._tls_btn(lay)
@@ -343,9 +371,10 @@ def test_tools_toggle_and_gutter_button(tmp_path):
     ws = _ws(tmp_path)
     drv = _enter_code(ws)
     cl = ws.code_layer
+    _touch(drv)
     lay = ws.code_layout
     assert not cl._tools_open
-    b = cl._tls_btn(lay)                           # the always-visible TLS toggle
+    b = cl._tls_btn(lay)                           # a touch glass's TLS toggle
     _tap(drv, b[0] + b[2] // 2, b[1] + b[3] // 2)
     assert cl._tools_open
     ws.editor.set_text("\n".join("row %d" % i for i in range(30)))
@@ -393,15 +422,18 @@ def test_find_bar_type_and_navigate(tmp_path):
     assert cl._find_q == "alpha"
     assert ws.editor.selected_text() == "alpha"    # incremental match landed
     r0 = (ws.editor.row, ws.editor.col)
-    lay = ws.code_layout
-    nxt = cl._find_btns(lay)["next"]
-    _tap(drv, nxt[0] + nxt[2] // 2, nxt[1] + nxt[3] // 2)   # next match
+    assert cl.find_count() == (1, 3)
+    drv.type_char(0x0D)                            # Enter: the next match
+    drv.frame(DT)
     assert (ws.editor.row, ws.editor.col) != r0
-    prv = cl._find_btns(lay)["prev"]
-    _tap(drv, prv[0] + prv[2] // 2, prv[1] + prv[3] // 2)   # prev goes back
+    assert cl.find_count() == (2, 3)
+    drv.frame(DT)                                  # the key comes up
+    drv.set_mods(2)                                # Shift+Enter goes back
+    drv.type_char(0x0D)
+    drv.frame(DT)
+    drv.set_mods(0)
     assert (ws.editor.row, ws.editor.col) == r0
-    cls_ = cl._find_btns(lay)["close"]
-    _tap(drv, cls_[0] + cls_[2] // 2, cls_[1] + cls_[3] // 2)
+    assert ws.cancel_field()                       # Mic (the T-Deck's cancel) closes it
     assert not cl._find_open
 
 
@@ -433,7 +465,7 @@ def test_sel_mode_then_typing_keeps_first_char(tmp_path):
 def test_find_survives_buffer_shrink_via_cut(tmp_path):
     # Regression (layer repro, used to IndexError in the frame loop): open find on
     # a deep caret, CUT a large span behind the still-open find bar (the tool
-    # palette stays tappable -- _find_tap only consumes taps on the bar's rect),
+    # palette stays tappable -- the find strip only takes taps on itself),
     # then type another query char. The incremental reset used to restore the
     # UNCLAMPED anchor row into the shrunken buffer.
     ws = _ws(tmp_path)
@@ -596,10 +628,8 @@ def test_autocomplete_popup_pick(tmp_path):
     cl = ws.code_layer
     _tap_tool(ws, drv, "auto")                     # open the completion popup
     assert cl._cmp_open and cl._cmp_items[0] == "circ"
-    lay = ws.code_layout
-    _panel, rects = cl._cmp_geom(lay, ws.editor)
-    r = rects[0]
-    _tap(drv, r[0] + r[2] // 2, r[1] + r[3] // 2)  # tap the first candidate
+    drv.frame(DT)
+    _row_tap(ws, drv, "circ\tverb")               # tap the first candidate
     assert not cl._cmp_open
     assert ws.editor.lines == ["circ"]
 
@@ -636,10 +666,8 @@ def test_jump_to_symbol_pick(tmp_path):
     _tap_tool(ws, drv, "goto")
     assert cl._jump_open
     assert [n for n, _ in cl._jump_items] == ["a", "b", "c"]
-    lay = ws.code_layout
-    _panel, rects = cl._jump_geom(lay)
-    r = rects[2]                                   # tap "c" (row 4)
-    _tap(drv, r[0] + r[2] // 2, r[1] + r[3] // 2)
+    drv.frame(DT)
+    _row_tap(ws, drv, "c\tline 5")                # tap "c" (row 4)
     assert not cl._jump_open
     assert ws.editor.row == 4
 
@@ -887,9 +915,10 @@ def test_the_status_band_is_one_height_and_starts_on_the_code_column(tmp_path):
 @pytest.mark.parametrize("variant", ("light", "dark"))
 @pytest.mark.parametrize("seed", ("moy", "blocks", "contrast"))
 def test_the_caret_and_a_find_match_read_on_the_code_surface(tmp_path, seed, variant):
-    """The caret and the find outline are the accent as an ink, at least
-    3:1 on the code surface under every seed theme; Contrast Light's own
-    accent is its yellow, 1.27:1 on white (design review R2-02)."""
+    """The caret is the accent as an ink, and the current find match's bar
+    the theme's value, each at least 3:1 on the code surface under every
+    seed theme; Contrast Light's own accent is its yellow, 1.27:1 on white
+    (design review R2-02)."""
     from runtime import ui_draw
 
     def lum(v):
@@ -902,8 +931,8 @@ def test_the_caret_and_a_find_match_read_on_the_code_surface(tmp_path, seed, var
     _ws, _drv, _lay, _ed = _look_ws(tmp_path, seed, variant)
     t = _ws.code_layer._tones()
     bg = lum(t["bg"])
-    for role in ("caret", "find"):
-        fg = lum(t[role])
+    for role, v in (("caret", t["caret"]), ("value", _ws.theme_colors["value"])):
+        fg = lum(v)
         ratio = (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
         assert ratio >= 3.0, (seed, variant, role, round(ratio, 2))
 

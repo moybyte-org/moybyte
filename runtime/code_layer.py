@@ -48,6 +48,17 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import ui_draw as _ui_draw
     from runtime import layout_base as _lb
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
+# The overlays' fields, lines and keys (`_draw_tools`): the keys every
+# board has, by action, Shift+Enter its own.
+_FIND_FIELD = {"id": "find", "hint": "Find"}
+_JUMP_FIELD = {"id": "goto", "hint": "Go to a definition"}
+_DIM = {"tone": "dim"}
+_MATCH_ALPHA = 96                 # a find match's tint of `value` over the code
+_NEW_SCRIPT = "New script"
+_FIND_KEYS = ("confirm", "Next", "Shift+enter", "Back", "cancel", "Close")
+_CMP_KEYS = ("scroll", "Pick", "confirm", "Insert", "cancel", "Close")
+_JUMP_KEYS = ("scroll", "Pick", "confirm", "Go", "cancel", "Close")
+_FILES_KEYS = ("scroll", "Pick", "confirm", "Open", "cancel", "Close")
 # See why's popover's lines (`_draw_crash_popup`).
 _STOP_HEAD = {"face": "title"}
 _STOP_TEXT = {"face": "mono", "wrap": True, "lines": 4}
@@ -381,9 +392,12 @@ class CodeLayer:
         self._jump_open = False       # the jump-to-symbol popup is shown
         self._jump_items = []         # (name, row) for every def/class line
         self._jump_sel = 0            # the highlighted symbol row
-        # -- #89 the cart's FILE, on a cart that has more than one ------------
-        self._files_open = False      # the file-switcher popup is shown
+        self._jump_q = ""             # what Go to's field filters them by
+        self.jump_anchor = None       # the desk pane's jump tool, Go to hung from it
+        # -- the cart's scripts, a menu hung from the bar's Code tab -----------
+        self._files_open = False      # the scripts menu is shown
         self._files_sel = 0           # the highlighted row (opens on the current file)
+        self._ov_host = _ui_draw.AppHost()   # the overlays' UI context (look step 33)
 
     def seed_key(self, k):
         """The byte that was live when this surface took the keyboard is NOT a
@@ -426,6 +440,11 @@ class CodeLayer:
     def wants_symbols(self):
         """Whether the Code tab lays out its symbol keys: the last input was
         a touch, which leaves a keyboard's symbols to type (D-17)."""
+        return _ui_draw.input_kind() == "touch"
+
+    def wants_tools(self):
+        """Whether the Code tab shows its tools toggle and row: a touch
+        glass's; a keyboard reaches each tool by its key (D-17)."""
         return _ui_draw.input_kind() == "touch"
 
     # -- Layer facets --------------------------------------------------------
@@ -476,7 +495,7 @@ class CodeLayer:
         if ed is not None:
             x += self._gutter_cols(ed) * lay.cell
             if row is not None and ed.top <= row < ed.top + ed.ROWS:
-                y, h = lay.y0 + (row - ed.top) * lay.lh, lay.lh
+                y, h = self._y0(lay) + (row - ed.top) * lay.lh, lay.lh
         e = 8 if desk else 4 * fs
         w = min(cv.w - x - e, 560 if desk else cv.w)
         _ui.at(x, y, w, h)
@@ -530,7 +549,7 @@ class CodeLayer:
     def _cell(self, px, py, lay, ed):
         """The document cell (row, col) under (px, py) in the code area."""
         col = (px - self._text_x0(lay, ed)) // lay.cell
-        return ed.top + (py - lay.y0) // lay.lh, ed.left + max(0, col)
+        return ed.top + (py - self._y0(lay)) // lay.lh, ed.left + max(0, col)
 
     def handle_pointer(self, px, py, click):
         # The code editor is responsive (#39 step 2): it draws on the SYSTEM canvas at
@@ -552,28 +571,25 @@ class CodeLayer:
             return True
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True
-        # #89 chrome, in overlay order: the always-visible tools toggle, then (when
-        # open) the find bar + the tool palette row, all before the code body.
-        if click and _in(px, py, self._tls_btn(lay)):
+        # #89 chrome, in overlay order: the tools toggle (a touch glass's, D-17),
+        # then (when open) an overlay and the tool palette row, before the code.
+        touch = self.wants_tools()
+        if click and touch and _in(px, py, self._tls_btn(lay)):
             self._tools_open = not self._tools_open
             ws.mark_dirty()
             return True
-        _fb = self._file_btn(lay)
-        if click and _fb is not None and _in(px, py, _fb):
-            if self._files_open:
-                self._files_open = False
+        # An open overlay (completion, Go to, the scripts) is modal over the code
+        # body: its UI context takes the tap, picking a row as it draws, and a
+        # press outside its card dismisses it; the find strip takes taps on it.
+        if self._cmp_open or self._jump_open or self._files_open:
+            if self._ov_host.point(px, py, click, ws.pointer.down):
                 ws.mark_dirty()
-            else:
-                self._open_files()
             return True
-        # An open autocomplete / jump / file popup is modal over the code body: a tap
-        # picks a row, a tap anywhere else dismisses it (the small-screen "escape").
-        if click and (self._cmp_open or self._jump_open or self._files_open) and \
-                self._popup_tap(px, py, lay, ed):
+        if self._find_open and _in(px, py, self._find_rect(lay)):
+            if self._ov_host.point(px, py, click, ws.pointer.down):
+                ws.mark_dirty()
             return True
-        if click and self._find_open and self._find_tap(px, py, lay):
-            return True
-        if click and self._tools_open and _in(px, py, self._toolbar_rect(lay)):
+        if click and touch and self._tools_open and _in(px, py, self._toolbar_rect(lay)):
             self._tool_tap(px, py, lay, ed)
             return True
         if click and _in(px, py, lay.sym_area) and ed is not None:
@@ -609,7 +625,7 @@ class CodeLayer:
                     col = (px - tx0) // lay.cell
                     if col < 0:
                         col = 0                           # a tap in the gutter -> column 0
-                    ed.place(col, (py - lay.y0) // lay.lh)
+                    ed.place(col, (py - self._y0(lay)) // lay.lh)
         else:
             self._drag = None
         return True
@@ -633,9 +649,13 @@ class CodeLayer:
                 if k in (0x0D, 0x0A):
                     self._popup_accept()
                     return
-                self._cmp_open = False
-                self._jump_open = False
-                self._files_open = False
+                if k == 27:
+                    self.close_overlay()
+                    return
+                if self._jump_open and (32 <= k < 127 or k in (8, 127)):
+                    self._jump_type(k)         # Go to's field filters the definitions
+                    return
+                self.close_overlay()
             # Host keyboard shortcuts (#89) layered over the touch tool palette: the
             # control bytes below are NEVER inserted as text (editor.key ignores them),
             # so they can't corrupt the buffer -- and each maps to a tool-palette button
@@ -649,6 +669,8 @@ class CodeLayer:
                 self._open_jump(ed)
             elif k == 0x06:                    # Ctrl+F toggles the find bar
                 self._toggle_find()
+            elif self._find_open and k == 27:
+                self.close_overlay()
             elif self._find_open:
                 self._find_key(k)              # find field owns the keyboard while open
             elif k == 0x1A:
@@ -798,7 +820,7 @@ class CodeLayer:
         col = (px - tx0) // lay.cell
         if col < 0:
             col = 0
-        row = (py - lay.y0) // lay.lh
+        row = (py - self._y0(lay)) // lay.lh
         if click:
             ed.place(col, row)                 # collapse + move the caret here
             ed.begin_select()
@@ -816,6 +838,10 @@ class CodeLayer:
         ed = self.ws.editor
         if self._find_open and ed is not None:
             self._find_anchor = (ed.row, ed.col)   # incremental search re-runs from here
+        if ed is not None:
+            self._apply_gutter(self.ws.code_layout, ed)   # the strip's rows
+            ed._scroll()
+        self._ov_host.reset()
         self.ws.mark_dirty()
 
     def _find_run(self, forward, reset=False):
@@ -840,8 +866,8 @@ class CodeLayer:
 
     def _find_key(self, code):
         # Edit the find query (the find field has the keyboard while it's open).
-        if code in (0x0D, 0x0A):               # enter -> next match
-            self._find_run(True)
+        if code in (0x0D, 0x0A):               # Enter the next match, Shift+Enter the last
+            self._find_run(not getattr(self.ws.input, "mods", 0) & _SHIFT)
         elif code in (0x08, 0x7F):             # backspace -> trim + re-search
             self._find_q = self._find_q[:-1]
             self._find_run(True, reset=True)
@@ -851,21 +877,55 @@ class CodeLayer:
             self._find_run(True, reset=True)
             self.ws.mark_dirty()
 
-    def _find_tap(self, px, py, lay):
-        btns = self._find_btns(lay)
-        if _in(px, py, btns["prev"]):
-            self._find_run(False)
-        elif _in(px, py, btns["next"]):
-            self._find_run(True)
-        elif _in(px, py, btns["case"]):
-            self._find_ci = not self._find_ci
-            self._find_run(True, reset=True)
-        elif _in(px, py, btns["close"]):
-            self._find_open = False
-            self.ws.mark_dirty()
-        elif not _in(px, py, self._find_rect(lay)):
+    def find_count(self):
+        """(the current match from 1, the matches) of the find's query in the
+        buffer, the current one the match at the caret or the last before
+        it; (0, 0) with no query or no match."""
+        ed = self.ws.editor
+        q = self._find_q
+        if ed is None or not q:
+            return 0, 0
+        if self._find_ci:
+            q = q.lower()
+        n = cur = 0
+        for r in range(len(ed.lines)):
+            line = ed.lines[r].lower() if self._find_ci else ed.lines[r]
+            at = line.find(q)
+            while at >= 0:
+                n += 1
+                if (r, at) <= (ed.row, ed.col):
+                    cur = n
+                at = line.find(q, at + 1)
+        return (cur or (1 if n else 0)), n
+
+    def overlay_step(self, d):
+        """Up or down (the arrows, the T-Deck's trackball) in an open
+        completion, Go to or the scripts: the row `d` away gets the focus.
+        True where one was open."""
+        if self._cmp_open:
+            n = min(len(self._cmp_items), self._POPUP_MAX)
+            self._cmp_sel = max(0, min(n - 1, self._cmp_sel + d))
+        elif self._jump_open:
+            n = min(len(self._jump_shown()), self._jump_rows())
+            self._jump_sel = max(0, min(n - 1, self._jump_sel + d))
+        elif self._files_open:
+            n = len(self.ws.code_sources()) + (1 if self.can_add_script() else 0)
+            self._files_sel = max(0, min(n - 1, self._files_sel + d))
+        else:
             return False
-        return True                            # a tap anywhere on the bar is consumed
+        self._ov_host.reset()              # the next draw focuses the row picked
+        return True
+
+    def close_overlay(self):
+        """Close whichever overlay is open (the find strip, completion, Go to,
+        the scripts): Esc, the T-Deck's Mic (`Workstation.cancel_field`) or a
+        press outside it. True where one was open."""
+        was = self._find_open or self._cmp_open or self._jump_open or self._files_open
+        self._find_open = self._cmp_open = self._jump_open = self._files_open = False
+        if was:
+            self._ov_host.reset()
+            self.ws.mark_dirty()
+        return was
 
     # -- autocomplete + jump-to-symbol popups (#89) --------------------------
     # Both are small overlay lists the CodeEditor core populates: autocomplete
@@ -884,20 +944,51 @@ class CodeLayer:
     def _open_completion(self, ed):
         if ed is None:
             return
-        self._jump_open = False
+        self._jump_open = self._files_open = False
         self._cmp_items = ed.completions(self._api_names())
         self._cmp_sel = 0
         self._cmp_open = bool(self._cmp_items)     # nothing to offer -> stay closed
+        self._ov_host.reset()
         self.ws.mark_dirty()
 
     def _open_jump(self, ed):
         if ed is None:
             return
-        self._cmp_open = False
+        self._cmp_open = self._files_open = False
         self._jump_items = ed.def_symbols()
         self._jump_sel = 0
+        self._jump_q = ""
         self._jump_open = bool(self._jump_items)
+        self._ov_host.reset()
         self.ws.mark_dirty()
+
+    def _jump_shown(self):
+        """Go to's definitions its query keeps, (name, row) in file order."""
+        q = self._jump_q.lower()
+        return [it for it in self._jump_items if q in it[0].lower()]
+
+    def _jump_rows(self):
+        """How many definitions Go to lists: what its card holds under its
+        field on the glass."""
+        return self._POPUP_MAX if _desk() else 6
+
+    def _jump_type(self, k):
+        if k in (8, 127):
+            self._jump_q = self._jump_q[:-1]
+        else:
+            self._jump_q += chr(k)
+        self._jump_sel = 0
+        self.ws.mark_dirty()
+
+    def _cmp_kind(self, word, defs):
+        """What a completion is, as its row says it."""
+        if word in defs:
+            return "def"
+        if word in _HL_BUILTINS:
+            return "verb"
+        if word in _HL_KEYWORDS or word in _HL_LUA_KEYWORDS:
+            return "word"
+        return "var"
 
     def _popup_accept(self):
         """Accept the highlighted row of whichever popup is open (Enter / the pointer
@@ -909,8 +1000,9 @@ class CodeLayer:
                 self._clear_err()
             self._cmp_open = False
         elif self._jump_open:
-            if ed is not None and self._jump_items:
-                _name, row = self._jump_items[self._jump_sel]
+            shown = self._jump_shown()
+            if ed is not None and self._jump_sel < len(shown):
+                _name, row = shown[self._jump_sel]
                 ed.goto_row(row, self._leading_spaces(ed.lines[row]))
             self._jump_open = False
         elif self._files_open:
@@ -921,6 +1013,9 @@ class CodeLayer:
             names = self.ws.code_sources()
             if self._files_sel < len(names):
                 self.ws.open_code_file(names[self._files_sel])
+            elif self._files_sel == len(names) and self.can_add_script():
+                self.new_script()
+        self._ov_host.reset()
         self.ws.mark_dirty()
 
     def _leading_spaces(self, line):
@@ -928,88 +1023,6 @@ class CodeLayer:
         while n < len(line) and line[n] == " ":
             n += 1
         return n
-
-    def _popup_tap(self, px, py, lay, ed):
-        """A tap while a popup is open: pick the tapped row, else dismiss. Always
-        consumes the tap (the popup is modal over the code body)."""
-        if self._cmp_open:
-            _panel, rects = self._cmp_geom(lay, ed)
-            for i in range(len(rects)):
-                if _in(px, py, rects[i]):
-                    self._cmp_sel = i
-                    self._popup_accept()
-                    return True
-            self._cmp_open = False
-        elif self._jump_open:
-            _panel, rects = self._jump_geom(lay)
-            for i in range(len(rects)):
-                if _in(px, py, rects[i]):
-                    self._jump_sel = i
-                    self._popup_accept()
-                    return True
-            self._jump_open = False
-        elif self._files_open:
-            _panel, rects = self._files_geom(lay)
-            for i in range(len(rects)):
-                if _in(px, py, rects[i]):
-                    self._files_sel = i
-                    self._popup_accept()
-                    return True
-            self._files_open = False
-        self.ws.mark_dirty()
-        return True
-
-    def _cmp_geom(self, lay, ed):
-        """(panel_rect, [row_rects]) for the autocomplete popup, anchored at the word
-        start just below the caret line and clamped inside the canvas. Flips above the
-        caret when it would cover the symbol palette."""
-        items = self._cmp_items
-        n = min(len(items), self._POPUP_MAX)
-        lh = lay.lh
-        cell = lay.cell
-        w = 1
-        for i in range(n):
-            if len(items[i]) > w:
-                w = len(items[i])
-        pw = (w + 1) * cell
-        plen = len(ed.word_prefix()) if ed is not None else 0
-        x = self._text_x0(lay, ed) + (ed.col - ed.left - plen) * cell
-        if x + pw > lay.cx + lay.cw:
-            x = lay.cx + lay.cw - pw
-        if x < 0:
-            x = 0
-        ph = n * lh
-        y = lay.y0 + (ed.row - ed.top + 1) * lh
-        if y + ph > lay.sym_y:                     # would cover the palette -> flip up
-            y = lay.y0 + (ed.row - ed.top) * lh - ph
-            if y < lay.y0:
-                y = lay.y0
-        panel = (x, y, pw, ph)
-        rects = [(x, y + i * lh, pw, lh) for i in range(n)]
-        return panel, rects
-
-    def _jump_geom(self, lay):
-        """(panel_rect, [row_rects]) for the jump-to-symbol popup: a centered list
-        with a one-row header. (More than _POPUP_MAX symbols show the first page --
-        kid carts rarely have that many defs.)"""
-        items = self._jump_items
-        n = min(len(items), self._POPUP_MAX)
-        lh = lay.lh
-        cell = lay.cell
-        w = 4
-        for i in range(n):
-            L = len(items[i][0]) + 5               # room for the " 12" line-number tail
-            if L > w:
-                w = L
-        pw = (w + 1) * cell
-        if pw > lay.cw:
-            pw = lay.cw
-        ph = (n + 1) * lh                          # +1 header row
-        x = lay.cx + (lay.cw - pw) // 2
-        y = lay.y0 + lh
-        panel = (x, y, pw, ph)
-        rects = [(x, y + (i + 1) * lh, pw, lh) for i in range(n)]
-        return panel, rects
 
     # -- #89 geometry (derived from CodeLayout; kept off the frozen constants) -
 
@@ -1024,66 +1037,40 @@ class CodeLayer:
         h = min(band[3], lay.lh)
         return (lay.cx + lay.cw - (lay.x0 - lay.cx) - w, band[1] + (band[3] - h) // 2, w, h)
 
-    # -- the cart's FILE (SPEC.md 4, #89) ------------------------------------
+    # -- the cart's scripts (SPEC.md 4, #89) ----------------------------------
     #
-    # A cart is usually ONE script and this chrome does not exist: `_file_btn`
-    # answers None at one source and every rect, tap and draw below is skipped.
-    # A PICO-8 port is the cart that has several -- p8.lua, main.lua and one
-    # file per PICO-8 tab -- and before this the only way to reach them was the
-    # Config tab's ADVANCED row, which opens a file in the text handle where
-    # there is no PLAY, no journal and no crash-to-code.
-    #
-    # The chip is a SWITCH, not a file manager: there is no new/rename/delete
-    # here, deliberately. The one door that adds a script is the ADVANCED row.
+    # A menu hung from the bar's Code tab (look step 33): a tap on that tab
+    # while the Code tab is open shows the cart's scripts, the open one
+    # marked, and New script last where a second script would run -- the
+    # door Make it mine's Files page holds too. A PICO-8 port is the cart that
+    # has several (p8.lua, main.lua and a file per PICO-8 tab).
 
-    _FILE_COLS = 6                # cells wide for the file chip (TLS is 3)
-
-    def _file_btn(self, lay):
-        """The file chip's rect, LEFT of the tools toggle on the status line --
-        or None when the cart is one file, which is when there is nothing to
-        switch between."""
-        if len(self.ws.code_sources()) < 2:
-            return None
-        w = self._FILE_COLS * lay.cell
-        t = self._tls_btn(lay)
-        return (t[0] - w, t[1], w, t[3])
-
-    def _file_label(self):
-        """The open file as the chip shows it: its bare name, upper-cased into
-        the chrome's vocabulary and clipped to the chip. `puzzles_list.lua` ->
-        PUZZLE, which is a glance, not an identity -- the popup has the names."""
-        name = self.ws.code_file_name()
-        cut = name.rfind(".")
-        return (name[:cut] if cut > 0 else name).upper()[:self._FILE_COLS]
-
-    def _files_geom(self, lay):
-        """(panel_rect, [row_rects]) for the file switcher -- `_jump_geom`'s
-        centered list with a one-row header, sized to the longest name."""
-        names = self.ws.code_sources()
-        n = min(len(names), self._POPUP_MAX)
-        lh = lay.lh
-        w = 4
-        for i in range(n):
-            if len(names[i]) > w:
-                w = len(names[i])
-        pw = (w + 1) * lay.cell
-        if pw > lay.cw:
-            pw = lay.cw
-        x = lay.cx + (lay.cw - pw) // 2
-        y = lay.y0 + lh
-        return (x, y, pw, (n + 1) * lh), [(x, y + (i + 1) * lh, pw, lh)
-                                          for i in range(n)]
-
-    def _open_files(self):
-        """Open the switcher on the file the tab is already showing, so the
-        highlighted row means "here" rather than "row 0"."""
-        self._cmp_open = False
-        self._jump_open = False
+    def open_scripts(self):
+        """The scripts menu, on the file the tab is already showing, so the
+        focused row means "here" rather than "row 0"; the Code tab tapped
+        again closes it."""
+        if self._files_open:
+            self.close_overlay()
+            return
+        self._cmp_open = self._jump_open = self._find_open = False
         names = self.ws.code_sources()
         cur = self.ws.code_file_name()
         self._files_sel = names.index(cur) if cur in names else 0
-        self._files_open = len(names) > 1
+        self._files_open = bool(names)
+        self._ov_host.reset()
         self.ws.mark_dirty()
+
+    def can_add_script(self):
+        """Whether the open cart may gain a script (Make it mine's rule)."""
+        proj = self.ws.project
+        cart = proj.cart if proj is not None else None
+        return cart is not None and self.ws.cards_layer._can_add_source(cart)
+
+    def new_script(self):
+        """New script, the scripts menu's last row: Make it mine's dialog."""
+        ws = self.ws
+        ws.editor_app.set_tab("cards")
+        ws.cards_layer._open_newf()
 
     def _toolbar_rect(self, lay):
         # The tool palette row, just above the status band / symbol palette.
@@ -1092,20 +1079,8 @@ class CodeLayer:
         return (lay.cx, top - h, lay.cw, h)
 
     def _find_rect(self, lay):
-        # The SECOND visible row, so the find bar's right-edge buttons never sit
-        # under the always-visible TLS toggle (which owns the top-right of row 0).
-        return (lay.cx, lay.y0 + lay.lh, lay.cw, lay.lh)
-
-    def _find_btns(self, lay):
-        # prev / next / case / close, packed against the right edge of the find bar.
-        r = self._find_rect(lay)
-        bw = 2 * lay.cell
-        x = r[0] + r[2]
-        out = {}
-        for name in ("close", "case", "next", "prev"):
-            x -= bw
-            out[name] = (x, r[1], bw, r[3])
-        return out
+        """The find strip over the code's top: a field's row and its ring."""
+        return (lay.cx, lay.y0, lay.cw, 38 if _desk() else 28 * lay.fs)
 
     def _gutter_cols(self, ed):
         # Line-number gutter width in cells (0 == off). Narrow: the digits of the
@@ -1121,11 +1096,23 @@ class CodeLayer:
         # Re-flow the editor's visible columns so long lines still fit beside the
         # gutter. Self-correcting every draw (a resize relayout resets ed.COLS to
         # lay.cols; this narrows it again while the gutter is on).
+        # The find strip takes the rows at the top it covers (`_top_rows`).
         if ed is None:
             return
         target = max(4, lay.cols - self._gutter_cols(ed))
-        if ed.COLS != target:
-            ed.set_view_size(target, lay.rows)
+        rows = max(1, lay.rows - self._top_rows(lay))
+        if (ed.COLS, ed.ROWS) != (target, rows):
+            ed.set_view_size(target, rows)
+
+    def _top_rows(self, lay):
+        """The lines the find strip takes from the code's top, 0 closed."""
+        if not self._find_open:
+            return 0
+        return -(-self._find_rect(lay)[3] // lay.lh)
+
+    def _y0(self, lay):
+        """Where the code's first line draws: under the find strip, open."""
+        return lay.y0 + self._top_rows(lay) * lay.lh
 
     def _code_drag(self, px, py):
         # Touch/mouse drag inside the code area pans the viewport (content follows
@@ -1177,18 +1164,18 @@ class CodeLayer:
     def _tones(self):
         """Per-draw color roles from the theme tokens, on every tier. The
         syntax remap is the theme's `code_*` content roles (`_hl_map`).
-        sel/find (#89): the selection tint (drawn BEHIND the text), the
-        find-match outline and the dim gutter number ink."""
+        sel (#89): the selection tint (drawn BEHIND the text), and the dim
+        gutter number ink."""
         NAMES = self._NAMES
         th = self.ws.theme_colors
         if _ui_draw.depth()[0]:
             # The 2026-10 look: the code surface and its chrome in the
-            # theme's roles, the caret and a find match in its accent as an
-            # ink (`ink_accent`, held at 3:1 on the code surface).
+            # theme's roles, the caret in its accent as an ink (`ink_accent`,
+            # held at 3:1 on the code surface).
             return _as_theme({"bg": th["surface"], "caret": th["ink_accent"],
                               "sym_bg": th["surface_alt"], "sym_edge": th["border"],
                               "sym_ink": th["ink"], "hl": self._hl_map(),
-                              "sel": th["hilite"], "find": th["ink_accent"],
+                              "sel": th["hilite"],
                               "gutter": th["ink_dim"], "gutter_cur": th["ink"],
                               "look": True})
         if th.get("ink", NAMES["white"]) != 0:      # dark surface -> dark set
@@ -1198,7 +1185,6 @@ class CodeLayer:
                            "sym_edge": th.get("hilite", NAMES["indigo"]),
                            "sym_ink": NAMES["white"], "hl": self._hl_map(),
                            "sel": th.get("hilite", NAMES["indigo"]),
-                           "find": NAMES["orange"],
                            "gutter": NAMES["dark_grey"]})
         else:
             t = _as_theme({"bg": th["surface"], "caret": th["ink"],
@@ -1206,7 +1192,6 @@ class CodeLayer:
                            "sym_edge": th["border"], "sym_ink": th["ink"],
                            "hl": self._hl_map(),
                            "sel": th.get("hilite", NAMES["indigo"]),
-                           "find": NAMES["orange"],
                            "gutter": th.get("border", NAMES["dark_grey"])})
         t["gutter_cur"] = t["gutter"]
         t["look"] = False
@@ -1281,7 +1266,7 @@ class CodeLayer:
             # longer than the view fading out over FADE pixels at its right.
             fx = tx0 + cols * cell - _FADE * fs if look else None
             for idx in range(len(vis)):
-                y = lay.y0 + idx * lh
+                y = self._y0(lay) + idx * lh
                 absrow = ed.top + idx
                 full = vis[idx]
                 on_err = errrow is not None and absrow == errrow
@@ -1299,7 +1284,7 @@ class CodeLayer:
                 if on_err:                       # inline error underline (#24)
                     cv.rect(tx0, y + th, cols * cell, fs, NAMES["red"])
                 self._draw_selection(ed, absrow, y, tx0, cell, cols, th, t["sel"])
-                self._draw_find_matches(ed, full, y, tx0, cell, cols, th, t["find"])
+                self._draw_find_matches(ed, absrow, full, y, tx0, cell, cols, th)
                 self._draw_code_runs(full, ed.left, cols, y, tx0, t.get("hl"))
                 if on_err and ws.code_err:      # short reason after the code, if it fits
                     mcol = max(0, min(cols, len(full) - ed.left)) + 1
@@ -1461,9 +1446,9 @@ class CodeLayer:
         cv = self.ws.sys_canvas
         cv.rect(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, h, color)
 
-    def _draw_find_matches(self, ed, line, y, tx0, cell, cols, h, color):
-        """Outline every occurrence of the find query on one visible row (#89): the
-        incremental "all matches" highlight the find bar drives."""
+    def _draw_find_matches(self, ed, absrow, line, y, tx0, cell, cols, h):
+        """Tint every occurrence of the find query on one visible row (#89),
+        under the code: the current one, at the caret, gets a bar beneath."""
         q = self._find_q
         if not (self._find_open and q):
             return
@@ -1471,6 +1456,8 @@ class CodeLayer:
         qq = q.lower() if self._find_ci else q
         L = len(qq)
         cv = self.ws.sys_canvas
+        value = self.ws.theme_colors["value"]
+        bar = max(1, h // 7)
         start = 0
         while True:
             i = hay.find(qq, start)
@@ -1479,7 +1466,10 @@ class CodeLayer:
             span = self._visible_span(ed, i, i + L, cols)
             if span is not None:
                 vs, ve = span
-                cv.rectb(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, h, color)
+                mx, mw = tx0 + (vs - ed.left) * cell, (ve - vs) * cell
+                cv.shadow(mx, y, mw, h, 0, value, _MATCH_ALPHA, 0)
+                if absrow == ed.row and i == ed.col:
+                    cv.rect(mx, y + h - bar, mw, bar, value)
             start = i + (L if L > 0 else 1)
 
     # The tool/find buttons ARE `ui.chip`s (Phase 3d): the private `_panel_btn`
@@ -1521,108 +1511,185 @@ class CodeLayer:
         cv.print(spec, gx, rect[1] + (rect[3] + 1 - lay.text_h) // 2, ink, 1)
 
     def _draw_tools(self, lay, ed, t):
-        """The #89 chrome: the always-visible TLS toggle, the tool palette row (when
-        open) and the find bar (when open). All overlay the code body -- drawn AFTER
-        the text so they sit on top -- and never move the layout's geometry."""
+        """The overlays over the code body, drawn AFTER the text so they sit
+        on top and never move the layout: a touch glass's tools toggle and
+        tool row (#89; a keyboard has the keys, D-17), the find strip, and
+        completion, Go to and the scripts as popovers (look step 33). Their
+        keys sit in the status line."""
         cv = self.ws.sys_canvas
         fs = lay.fs
-        # `glyph` carries the FACE spec (a glyph kind or the label text) and
-        # `_btn_face` draws it -- ui.py stays blind to the chrome vocabulary.
-        _ui_draw.chip(cv, t, _chip_rect(self._tls_btn(lay)), "TLS",
-                 on=self._tools_open, glyph=self._btn_spec("TLS", "tools"),
-                 glyph_draw=self._btn_face, fs=fs)
-        fb = self._file_btn(lay)
-        if fb is not None:
-            _ui_draw.chip(cv, t, _chip_rect(fb), self._file_label(),
-                     on=self._files_open, fs=fs)
-        if self._tools_open:
-            r = self._toolbar_rect(lay)
-            n = len(self._TOOLS)
-            bw = r[2] // n
-            for i in range(n):
-                name = self._TOOLS[i]
-                active = (name == "sel" and self._select_mode) or \
-                         (name == "find" and self._find_open) or \
-                         (name == "gutter" and self._gutter)
-                label = self._TOOL_LABEL[name]
-                _ui_draw.chip(cv, t, _chip_rect((r[0] + i * bw, r[1], bw, r[3])),
-                         label, on=active,
-                         glyph=self._btn_spec(label, self._TOOL_GLYPH.get(name)),
-                         glyph_draw=self._btn_face, fs=fs)
+        if self.wants_tools():
+            # `glyph` carries the FACE spec (a glyph kind or the label text) and
+            # `_btn_face` draws it -- ui.py stays blind to the chrome vocabulary.
+            _ui_draw.chip(cv, t, _chip_rect(self._tls_btn(lay)), "TLS",
+                          on=self._tools_open, glyph=self._btn_spec("TLS", "tools"),
+                          glyph_draw=self._btn_face, fs=fs)
+            if self._tools_open:
+                r = self._toolbar_rect(lay)
+                n = len(self._TOOLS)
+                bw = r[2] // n
+                for i in range(n):
+                    name = self._TOOLS[i]
+                    active = (name == "sel" and self._select_mode) or \
+                             (name == "find" and self._find_open) or \
+                             (name == "gutter" and self._gutter)
+                    label = self._TOOL_LABEL[name]
+                    _ui_draw.chip(cv, t, _chip_rect((r[0] + i * bw, r[1], bw, r[3])),
+                                  label, on=active,
+                                  glyph=self._btn_spec(label, self._TOOL_GLYPH.get(name)),
+                                  glyph_draw=self._btn_face, fs=fs)
+        if not (self._find_open or self._cmp_open or self._jump_open or self._files_open):
+            return
+        ws = self.ws
+        host = self._ov_host
+        host.begin(cv, ws.theme_colors, (lay.cx, lay.y0, lay.cw, lay.ch - (lay.y0 - lay.cy)),
+                   _desk())
         if self._find_open:
             self._draw_find(lay, ed, t)
-        if self._cmp_open:
-            self._draw_completion(lay, ed, t)
-        if self._jump_open:
-            self._draw_jump(lay, t)
-        if self._files_open:
-            self._draw_files(lay, t)
-
-    def _draw_listbox(self, cv, lay, t, panel, rects, labels, sel, title):
-        """A bordered overlay list (the autocomplete + jump popups): the sym_bg/edge
-        chrome palette, an optional accent title row, and the selected row tinted with
-        the selection color. Labels are pre-clipped by the caller's width."""
-        fs = lay.fs
-        # Both rows keep `colors=`, for two different reasons. The SHELL's ink is
-        # the FIND colour -- not a widget state, so no kind expresses it. The
-        # ENTRIES must paint no field when unselected: their rects tile the
-        # panel edge to edge, so a rest field (every kind has one) would erase
-        # the shell's own border a row at a time. Frozen by geometry, not taste.
-        _ui_draw.row(cv, t, _chip_rect(panel), title,
-                colors=(t["sym_bg"], t["find"], t["sym_edge"]),
-                pad=fs, text_dy=fs, fs=fs)
-        maxch = max(1, (panel[2] - 2 * fs) // lay.cell)
-        for i in range(len(rects)):
-            r = rects[i]
-            _ui_draw.row(cv, t, _chip_rect(r), labels[i][:maxch],
-                    colors=(t["sel"] if i == sel else None, t["sym_ink"], None),
-                    edge=False, pad=fs, text_dy=fs, fs=fs)
-
-    def _draw_completion(self, lay, ed, t):
-        cv = self.ws.sys_canvas
-        panel, rects = self._cmp_geom(lay, ed)
-        self._draw_listbox(cv, lay, t, panel, rects,
-                           self._cmp_items[:len(rects)], self._cmp_sel, None)
-
-    def _draw_jump(self, lay, t):
-        cv = self.ws.sys_canvas
-        panel, rects = self._jump_geom(lay)
-        labels = [self._jump_items[i][0] + " " + str(self._jump_items[i][1] + 1)
-                  for i in range(len(rects))]
-        self._draw_listbox(cv, lay, t, panel, rects, labels, self._jump_sel, "DEFS")
-
-    def _draw_files(self, lay, t):
-        panel, rects = self._files_geom(lay)
-        names = self.ws.code_sources()
-        self._draw_listbox(self.ws.sys_canvas, lay, t, panel, rects,
-                           names[:len(rects)], self._files_sel, "FILES")
+        elif self._cmp_open:
+            self._draw_completion(lay, ed)
+        elif self._jump_open:
+            self._draw_jump(lay)
+        else:
+            self._draw_files(lay)
+        keys = (_FIND_KEYS if self._find_open else _CMP_KEYS if self._cmp_open
+                else _JUMP_KEYS if self._jump_open else _FILES_KEYS)
+        band = lay.status_band
+        if band is not None and _ui.input_kind() != "touch":
+            _ui_draw.status_row(cv, ws.theme_colors, band, ())
+            _ui.at(band[0], band[1], band[2], band[3])
+            _ui.hints(keys)
+        if host.owed or host.tap == 2:
+            ws.request_frame()
 
     def _draw_find(self, lay, ed, t):
-        """The find bar: the typed query on the left + prev/next/case/close buttons
-        packed against the right (#89)."""
+        """The find strip (look step 33): a field holding the query in the
+        code face, the count ("2 of 5") and Aa, its state shown, under the bar;
+        on the desk the arrows and the close too, a pointer's targets. Enter
+        moves from the caret, Shift+Enter back."""
         cv = self.ws.sys_canvas
         fs = lay.fs
-        r = self._find_rect(lay)
-        btns = self._find_btns(lay)
-        qright = btns["prev"][0]                  # the query field ends where the buttons start
-        # The FIELD is a row; the query text + caret stay the caller's, because
-        # they are the field's live CONTENT (a tail slice plus a caret block) and
-        # `row` would re-clip the already-fitted string by its own symmetric pad.
-        _ui_draw.row(cv, t, (r[0], r[1], qright - r[0] - 1, r[3] - 1), None, fs=fs)
-        # As much of the tail of the query as fits, then a caret block.
-        avail = max(1, (qright - r[0]) // lay.cell - 2)
-        shown = self._find_q[-avail:] if len(self._find_q) > avail else self._find_q
-        cv.print(("F:" + shown)[-avail - 2:], r[0] + fs, r[1] + fs, t["sym_ink"], 1)
-        cx = r[0] + fs + (len(shown) + 2) * lay.cell
-        cv.rect(cx, r[1] + fs, fs, lay.text_h, t["caret"])
-        _ui_draw.chip(cv, t, _chip_rect(btns["prev"]), "<", glyph="<",
-                 glyph_draw=self._btn_face, fs=fs)
-        _ui_draw.chip(cv, t, _chip_rect(btns["next"]), ">", glyph=">",
-                 glyph_draw=self._btn_face, fs=fs)
-        _ui_draw.chip(cv, t, _chip_rect(btns["case"]), "Aa", on=not self._find_ci,
-                 glyph="Aa", glyph_draw=self._btn_face, fs=fs)
-        _ui_draw.chip(cv, t, _chip_rect(btns["close"]), "X", glyph="X",
-                 glyph_draw=self._btn_face, fs=fs)
+        desk = _desk()
+        x, y, w, h = self._find_rect(lay)
+        cv.rect(x, y, w, h, t["bg"])
+        pad = 3 * fs
+        cur, n = self.find_count()
+        count = ("%d of %d" % (cur, n)) if self._find_q else ""
+        cw = _ui_draw.text_width(count, fs, "ui") + 2 * pad if count else 0
+        bw = 28 * fs
+        tools = 3 if desk else 0
+        fw = w - 2 * pad - cw - bw - tools * (bw + pad) - pad
+        _ui.at(x + pad, y + pad, fw, h - 2 * pad)
+        _ui.field("", self._find_q, 64, _FIND_FIELD)
+        bx = x + pad + fw + pad
+        if count:
+            _ui.at(bx, y, cw, h)
+            _ui.label(count, _DIM)
+            bx += cw
+        _ui.at(bx, y + pad, bw, h - 2 * pad)
+        if _ui.button("Aa", "toggle", {"current": not self._find_ci, "id": "case"}):
+            self._find_ci = not self._find_ci
+            self._find_run(True, reset=True)
+        bx += bw + pad
+        for icon, word in (("arrow_up", "Back"), ("arrow_down", "Next"), ("close", "Close")) \
+                if desk else ():
+            _ui.at(bx, y + pad, bw, h - 2 * pad)
+            if _ui.tool(icon, word):
+                if icon == "close":
+                    self.close_overlay()
+                else:
+                    self._find_run(icon == "arrow_down")
+            bx += bw + pad
+
+    def _word_rect(self, lay, ed):
+        """The word being typed on the glass, (x, y, w, h): what completion
+        hangs under."""
+        plen = len(ed.word_prefix()) if ed is not None else 0
+        x = self._text_x0(lay, ed) + (ed.col - ed.left - plen) * lay.cell
+        y = self._y0(lay) + (ed.row - ed.top) * lay.lh
+        return (x, y, max(lay.cell, plen * lay.cell), lay.lh)
+
+    def _overlay_menu(self, label, items, sel, icons=()):
+        """`ui.menu` of an overlay's rows ("name\tvalue"), the row `sel` its
+        focus where nothing else holds it: the row picked, else -1."""
+        if sel < len(items) and _ui.focus() not in items:
+            _ui.focus(items[sel])
+        return _ui.menu(label, items, icons)
+
+    def _draw_completion(self, lay, ed):
+        """Completion (look step 33): `ui.menu`'s card under the word being
+        typed, each name and what it is."""
+        fs = lay.fs
+        defs = [d[0] for d in ed.def_symbols()] if ed is not None else []
+        words = self._cmp_items[:self._POPUP_MAX]
+        items = [w + "\t" + self._cmp_kind(w, defs) for w in words]
+        _ui.at(*self._word_rect(lay, ed))
+        shown = _ui.popover("complete", 220 if _desk() else 150 * fs)
+        got = self._overlay_menu("", items, self._cmp_sel)
+        f = _ui.focus()
+        if f in items:
+            self._cmp_sel = items.index(f)
+        if got >= 0:
+            self._cmp_sel = got
+            self._popup_accept()
+        _ui.popover()
+        if not shown:
+            self.close_overlay()
+
+    def _draw_jump(self, lay):
+        """Go to (look step 33): a popover with its own field over the cart's
+        definitions and their lines; what is typed filters them."""
+        fs = lay.fs
+        w = min(lay.cw - 16 * fs, 420 if _desk() else 228 * fs)
+        a = self.jump_anchor if _desk() else None
+        items = ["%s\tline %d" % (n, r + 1) for n, r in self._jump_shown()[:self._jump_rows()]]
+        if a is not None:
+            _ui.at(*a)
+        else:
+            _ui.at(lay.cx + (lay.cw - w) // 2, lay.y0 + 4 * fs, w, 0)
+        shown = _ui.popover("goto", w)
+        _ui.field("", self._jump_q, 32, _JUMP_FIELD)
+        got = self._overlay_menu("", items, self._jump_sel)
+        f = _ui.focus()
+        if f in items:
+            self._jump_sel = items.index(f)
+        if got >= 0:
+            self._jump_sel = got
+            self._popup_accept()
+        _ui.popover()
+        if not shown:
+            self.close_overlay()
+
+    def _draw_files(self, lay):
+        """The cart's scripts (look step 33): a menu hung from the bar's
+        Code tab, each script and its size, the open one marked, and New
+        script last where a second script would run."""
+        ws = self.ws
+        fs = lay.fs
+        names = ws.code_sources()
+        items = []
+        icons = []
+        for n in names:
+            size = ws.code_source_size(n)
+            kb = ("%.1f KB" % (size / 1024.0)) if size is not None else ""
+            items.append(n + "\t" + kb if kb else n)
+            icons.append("code")
+        if self.can_add_script():
+            items.append(_NEW_SCRIPT)
+            icons.append("new")
+        anchor = ws.editor_app.tab_box("code") or (lay.cx, lay.y0, lay.cw // 2, 0)
+        _ui.at(*anchor)
+        shown = _ui.popover("scripts", 260 if _desk() else 200 * fs)
+        got = self._overlay_menu("Scripts", items, self._files_sel, icons)
+        f = _ui.focus()
+        if f in items:
+            self._files_sel = items.index(f)
+        if got >= 0:
+            self._files_sel = got
+            self._popup_accept()
+        _ui.popover()
+        if not shown:
+            self.close_overlay()
 
     def _draw_symbols(self):
         # Tappable coding-symbol palette (supplies what the keyboard can't type). On

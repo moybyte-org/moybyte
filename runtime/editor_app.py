@@ -1020,6 +1020,31 @@ class EditorApp:
         tabs_area = (left, rest[1], max(0, rest[0] + rest[2] - gap - left - hist), rest[3])
         return tabs_area, play_r
 
+    def tab_box(self, tab):
+        """Where tab `tab`'s chip is on the bar, (x, y, w, h) on the system
+        canvas -- what the Code tab's scripts menu hangs from -- or None
+        where the bar shows no chip for it (the desk's workspaces)."""
+        if self._desk() is not None:
+            return None
+        bl = self.ws.bar_layer
+        got = bl.cell("menu", "zone")
+        if got is None:
+            return None
+        bar = got[0]
+        zone = bl.lent_zone("menu", bar)
+        if zone is None:
+            return None
+        bx, by = bar[1][0], bar[1][1]
+        if not self._compact(zone):
+            for tid, r, _labels_on in self._shelf_rects(self._zone_parts(zone)[0]):
+                if tid == tab:
+                    return (bx + r[0], by + r[1], r[2], r[3])
+            return None
+        for tid, _glyph, r in self._ladder_layout(zone)[0]:
+            if tid == tab:
+                return (bx + r[0], by + r[1], r[2], r[3])
+        return None
+
     def zone_tap(self, px, py, rect):
         """Hit-test the tab ladder + PLAY and dispatch. `rect` is the lent
         left-zone rect BarLayer drew into, and (px, py) are in the same bar
@@ -1080,6 +1105,8 @@ class EditorApp:
             return True
         if tab == "cards":
             ws._open_menu()
+        elif tab == "code" and self.tab == "code" and ws.menu_view == "code":
+            ws.code_layer.open_scripts()   # the tab tapped again: the cart's scripts
         elif tab == "code":
             ws.set_menu_view("code")
         elif tab == "paint":

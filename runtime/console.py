@@ -2953,6 +2953,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 self.crash_popup = None
                 self._dirty = True
                 return True
+            if self.menu_view == "code" and self.code_layer.close_overlay():
+                return True
             if self.menu_view == "cards" and self.cards_layer.prompt is not None:
                 self.cards_layer._close_prompt()
                 return True
@@ -3152,6 +3154,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if self.cart is None or self.carts_store is None:
             return []
         return self.carts_store.cart_sources(self.cart)
+
+    def code_source_size(self, name):
+        """Script `name`'s size in bytes, or None where the cart has none."""
+        text = self.carts_store.source_text(self.cart, name) if self.cart else None
+        return len(text) if text is not None else None
 
     def code_file_name(self):
         """The script the Code tab is on. Never None once a cart with code is
@@ -3909,6 +3916,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if (self.wm.top_is("menu") and self.menu_view == "code"    # Stage 6d
                 and self.editor is not None):
             self.code_layer.stop_autoscroll()
+            if dy and self.code_layer.overlay_step(dy):
+                self._dirty = True         # a row of an open overlay picked
+                return True
             self.editor.move(dy, dx, select)
             self._dirty = True             # caret moved -> redraw (#44)
             return True

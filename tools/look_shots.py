@@ -601,8 +601,33 @@ def _perf(detail):
     return setup
 
 
-# The scenes of step 33 the shell draws (phase 1): screen -> (config, set up).
+def _code_overlay(which):
+    """The Code tab on Star Catcher with one of its overlays open."""
+    def setup(g, ws):
+        _code(g, ws)
+        _settle(g, ws, 2)
+        cl, ed = ws.code_layer, ws.editor
+        if which == "find":
+            ed.row, ed.col = 34, 31
+            cl._toggle_find()
+            cl._find_q = "speed"
+        elif which == "complete":
+            ed.lines[41] = "    s[2] = _ba"
+            ed.row, ed.col = 41, len(ed.lines[41])
+            cl._open_completion(ed)
+        elif which == "goto":
+            cl._open_jump(ed)
+        else:
+            cl.open_scripts()
+    return setup
+
+
+# The scenes of step 33 the shell draws: screen -> (config, set up).
 OLD_LOOK = {
+    "handheld_code-find": (HANDHELD, _code_overlay("find")),
+    "handheld_code-complete": (HANDHELD, _code_overlay("complete")),
+    "handheld_code-goto": (HANDHELD, _code_overlay("goto")),
+    "handheld_code-files": (HANDHELD, _code_overlay("files")),
     "handheld_loading": (HANDHELD, _loading),
     "desktop_loading": (DESK, _loading),
     "handheld_crash": (HANDHELD, _stopped()),

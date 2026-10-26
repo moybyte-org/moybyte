@@ -129,8 +129,8 @@ QWERTY is planned.
    the Code tab holds a *file* (SPEC.md §4's `sources`), so every entry in the
    cart's load order routes there, where PLAY, the journal and crash-to-code
    are. This row is also where the one **New script** verb lives, offered only
-   on a cart whose runtime loads more than `main`; the Code tab's file chip is
-   a switcher and has no create.
+   on a cart whose runtime loads more than `main`; the Code tab's scripts
+   menu (its tab tapped again) switches files and offers the same verb last.
 6. The script runner with the text console surface.
 
 Related: #108 (user files), #181 (apps are carts), #112 (cart-facing undo —

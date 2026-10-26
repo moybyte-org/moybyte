@@ -267,47 +267,54 @@ def test_a_crash_marker_never_lands_on_the_wrong_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# the Code tab's surface: the chip and its popup
+# the Code tab's surface: the scripts menu, hung from the bar's Code tab
 # ---------------------------------------------------------------------------
 
-def test_a_one_file_cart_draws_no_file_chip(tmp_path):
-    """The control for the whole surface: at one source there is nothing to
-    switch between, so the chrome does not exist -- no rect, no tap, no draw."""
-    d = _write_cart(tmp_path / "carts", "plain.moy", "function _draw() end\n")
-    ws = _ws_with(tmp_path, d)
-    assert ws.code_layer._file_btn(ws.code_layout) is None
-    assert not ws.code_layer._files_open
+def _tap_box(drv, b):
+    drv.touch(b[0] + b[2] // 2, b[1] + b[3] // 2)
+    drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    drv.frame(DT)
 
 
-def test_tapping_the_chip_opens_the_list_and_picking_a_row_switches(tmp_path):
+def test_tapping_the_code_tab_again_opens_the_scripts_and_a_row_switches(tmp_path):
     ws = _ws_with(tmp_path, _multi(tmp_path))
     drv = host_app.ConsoleDriver(ws)
     cl = ws.code_layer
-    lay = ws.code_layout
-
-    b = cl._file_btn(lay)
-    assert b is not None
-    drv.touch(b[0] + b[2] // 2, b[1] + b[3] // 2)
     drv.frame(DT)
+    tab = ws.editor_app.tab_box("code")
+    assert tab is not None
+    _tap_box(drv, tab)
     assert cl._files_open
     assert cl._files_sel == ws.code_sources().index("main.lua"), \
-        "the switcher opens on the file the tab is showing, not on row 0"
-
-    _panel, rects = cl._files_geom(lay)
-    i = ws.code_sources().index("extra.lua")
-    r = rects[i]
-    drv.touch(r[0] + r[2] // 2, r[1] + r[3] // 2)
-    drv.frame(DT)
+        "the menu opens on the file the tab is showing, not on row 0"
+    b = next(cl._ov_host.box(i) for i in [r for r in _rows(ws) if r.startswith("extra.lua")])
+    _tap_box(drv, b)
     assert not cl._files_open
     assert ws.code_file_name() == "extra.lua"
     assert ws.editor.text() == "-- a tab\n"
 
 
-def test_the_chip_names_the_open_file(tmp_path):
+def _rows(ws):
+    """The scripts menu's rows as it lists them: each script and its size."""
+    out = []
+    for n in ws.code_sources():
+        size = ws.code_source_size(n)
+        out.append(n + "\t" + "%.1f KB" % (size / 1024.0) if size is not None else n)
+    return out
+
+
+def test_the_scripts_menu_lists_each_script_and_its_size(tmp_path):
     ws = _ws_with(tmp_path, _multi(tmp_path))
-    assert ws.code_layer._file_label() == "MAIN"
-    ws.open_code_file("extra.lua")
-    assert ws.code_layer._file_label() == "EXTRA"
+    drv = host_app.ConsoleDriver(ws)
+    ws.code_layer.open_scripts()
+    drv.frame(DT)
+    for row in _rows(ws):
+        assert ws.code_layer._ov_host.box(row) is not None, row
+    assert ws.code_source_size("extra.lua") == len("-- a tab\n")
+    ws.code_layer.overlay_step(1)                   # the trackball's roll picks the next
+    assert ws.code_layer._files_sel == ws.code_sources().index("main.lua") + 1
 
 
 # ---------------------------------------------------------------------------
@@ -443,3 +450,17 @@ def test_a_script_added_here_actually_runs(tmp_path):
     assert ws.cart_error is None, ws.cart_error
     assert ws.player._lua.get_global("seen") == 5, \
         "the added script's global never reached the cart's own chunk"
+
+
+def test_new_script_last_in_the_scripts_menu_opens_make_it_mines_dialog(tmp_path):
+    ws = _ws_with(tmp_path, _multi(tmp_path))
+    drv = host_app.ConsoleDriver(ws)
+    cl = ws.code_layer
+    assert cl.can_add_script()
+    cl.open_scripts()
+    drv.frame(DT)
+    assert cl._ov_host.box("New script") is not None
+    for _ in range(len(ws.code_sources())):
+        cl.overlay_step(1)
+    cl._popup_accept()
+    assert ws.editor_app.tab == "cards" and ws.cards_layer.prompt is not None
