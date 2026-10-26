@@ -567,13 +567,13 @@ def test_bar_cache_key_tracks_local_history(tmp_path):
     ws._open_paint()
     pe = ws.paint
     pe.n = 0
-    before = ws.bar_layer._cart_bar_key()
+    before = ws.bar_layer._cart_bar_key("menu")
     _stroke(pe, 3, 3, 6)
-    after = ws.bar_layer._cart_bar_key()
+    after = ws.bar_layer._cart_bar_key("menu")
     assert before != after                      # stroke -> key changes -> strip re-renders
     assert ws.history.can_undo() is True
     ws.history.undo()
-    assert ws.bar_layer._cart_bar_key() != after   # redo now possible -> changes again
+    assert ws.bar_layer._cart_bar_key("menu") != after   # redo now possible -> changes again
 
 
 def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):

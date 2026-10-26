@@ -49,7 +49,6 @@ def test_tap_schedules_the_run_behind_a_loading_paint(tmp_path):
     So after one frame() the STATE has transitioned but the CANVAS still
     holds the acknowledgment frame -- exactly what the panel retains on
     glass during the 1-2s device stall."""
-    from runtime.chrome import NAMES
     ws = _ws(tmp_path)
     for i, it in enumerate(ws.launcher.items):
         if it.get("path") and it.get("type") == "game":
@@ -64,15 +63,14 @@ def test_tap_schedules_the_run_behind_a_loading_paint(tmp_path):
     ws.frame(1 / 30)
     assert ws.screen == "desktop"        # the frame tail ran it
     assert not ws._deferred
-    # The canvas still shows the acknowledgment frame: the toast's border.
-    fs = ws.look.effective_font_scale()
-    from runtime import ui_draw
-    tw = ui_draw.print_width("LOADING...", fs) + 16 * fs
-    tx = (ws.sys_canvas.w - tw) // 2
-    assert ws.sys_canvas.pix(tx, 24 * fs) == NAMES["light_grey"]
-    # The NEXT frame paints the transitioned world (no toast left).
+    # The canvas still shows the acknowledgment frame: the pill, flat, over
+    # the card being opened (GAPS 51), saying what opens.
+    x, y, w, h = ws._loading_rect
+    assert w > 0 and h > 0
+    pill = [ws.sys_canvas.pix(x + w // 2, y + h // 2 + dy) for dy in (-1, 0, 1)]
+    # The NEXT frame paints the transitioned world (no pill left).
     ws.frame(1 / 30)
-    assert ws.sys_canvas.pix(tx, 24 * fs) != NAMES["light_grey"]
+    assert [ws.sys_canvas.pix(x + w // 2, y + h // 2 + dy) for dy in (-1, 0, 1)] != pill
 
 
 # -- the desktop renders without error -------------------------------------
@@ -224,33 +222,6 @@ def test_settings_back_returns_home(tmp_path):
     settings_back(ws, drv)
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
-
-
-def test_in_cart_menu_opens_settings_and_back_resumes_cart(tmp_path):
-    """Settings must be reachable from inside a running cart via the in-cart bar's ≡
-    system menu (#52), and Back must RESUME the cart, not strand you at the launcher
-    (#46). The in-cart menu prepends the cart's group, so SETTINGS is rows down."""
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    assert ws.screen == "desktop"
-    ws.cart_error = "boom"         # Stage 5 retired pause: the in-cart bar is CRASH chrome
-    ws._dirty = True
-    drv.click(C._SYSMENU_BTN[0] + 2, C._SYSMENU_BTN[1] + 2)   # ≡ on the in-cart bar
-    drv.frame(1 / 30)
-    assert ws.sysmenu.open
-    for _ in range(4):                           # down the cart's group to SETTINGS
-        if ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS":
-            break
-        drv.press("down"); drv.frame(1 / 30); drv.frame(1 / 30)
-    drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)     # activate SETTINGS
-    assert ws.screen == "settings"
-    settings_back(ws, drv)                                    # Back resumes the cart...
-    drv.frame(1 / 30)
-    assert ws.screen == "desktop"                             # ...not the launcher
 
 
 def _settings_page(tmp_path):
@@ -690,11 +661,11 @@ def test_launcher_draws_the_strip_and_no_in_cart_bar(tmp_path):
     assert seen["strip"] >= 1         # the status strip IS drawn (still present)
 
 
-def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
+def test_a_game_shows_no_bar_playing_or_stopped(tmp_path):
     """Stage 5 retired the #71 pause frame: while a cart PLAYS the game owns the full
-    canvas with NO chrome at all -- the in-cart tool bar (EDIT/PAINT/MAP/HOME) appears
-    ONLY on a CRASH, so the fix-it tools stay reachable. (Exit while playing a game is
-    the pause menu's Quit, not a bar tap.)"""
+    canvas with NO chrome at all, and a run that stops shows the stop card, the
+    pause card's sibling (docs/look_2026-10.md step 33), never a bar. (Exit while
+    playing a game is the pause menu's Quit, not a bar tap.)"""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -704,10 +675,12 @@ def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
     seen = _spy_draw(ws)
     drv.frame(1 / 30)
     assert seen["incart"] == 0        # playing: NO bar over the game
-    ws.cart_error = "boom"            # a crash brings up the in-cart tool buttons
+    ws.cart_error = "boom"            # a crash brings up the stop card
     ws._dirty = True
     drv.frame(1 / 30)
-    assert seen["incart"] >= 1        # crashed: the in-cart tool buttons ARE drawn
+    drv.frame(1 / 30)
+    assert seen["incart"] == 0
+    assert ws.pause.open and ws.pause.stopped
 
 
 def test_backspace_reaches_the_cart_as_a_plain_key_and_never_exits(tmp_path):
@@ -1383,19 +1356,22 @@ def test_the_cursor_hides_after_the_idle_window_and_a_move_wakes_it():
     assert not p.visible and (p.x, p.y) == (5, 5)
 
 
-# -- the bar widgets' fullscreen container (docs/shell_layout_2026-10.md §8) ---
+# -- the bar widgets' popovers in console mode (docs/shell_layout_2026-10.md §8) --
 
-def test_console_mode_opens_each_widget_fullscreen_and_back_pops_it(tmp_path):
-    """No popovers in console mode: the clock pushes the calendar as its own
-    kind (the clock again, B, HOME and the bar's X pop it); wifi and battery
-    open the Settings page at the WIFI panel and at VOLUME; the system menu
-    stays the popup it is."""
+def test_console_mode_hangs_each_widgets_popover_from_it(tmp_path):
+    """The clock, wifi and battery hang their popover from their widget in
+    console mode too (docs/look_2026-10.md step 33): nothing is pushed, the
+    widget tapped again, B or HOME closes it, the calendar pages by left and
+    right and opens on today, Wi-Fi's lease goes with its card, and the
+    system menu stays the popup it is."""
     from ws_helpers import build_ws
     from runtime import host_app
     ws = build_ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     assert ws.wm.mode == "console" and ws.screen == "launcher"
+    m = ws.sysmenu
+    layer = ws._sysmenu_layer
 
     class _K:
         last_key = 0
@@ -1406,36 +1382,32 @@ def test_console_mode_opens_each_widget_fullscreen_and_back_pops_it(tmp_path):
         def pressed(self, n):
             return n == self.n
 
-    pops = (lambda: ws.widget_tap("clock"),
-            lambda: ws.layer_of("calendar").handle_input(_K("b")),
-            lambda: ws.layer_of("calendar").handle_input(_K("home")),
-            lambda: ws.exit())
-    for pop in pops:
+    for close in (lambda: ws.widget_tap("clock"), lambda: layer.handle_input(_K("b")),
+                  lambda: layer.handle_input(_K("home"))):
         ws.widget_tap("clock")
         drv.frame(1 / 30)
-        assert ws.wm.stack.kinds() == ["launcher", "calendar"]
-        assert not ws.sysmenu.open
-        pop()
+        assert m.open and m.widget == "clock" and ws.wm.stack.kinds() == ["launcher"]
+        close()
         drv.frame(1 / 30)
-        assert ws.wm.stack.kinds() == ["launcher"]
-    cal = ws.layer_of("calendar")
+        assert not m.open
     ws.widget_tap("clock")
-    cal.handle_input(_K("right"))
-    assert cal.view.off == 1
-    ws.exit()
+    cal = m.comp
+    layer.handle_input(_K("right"))
+    assert cal.off == 1
+    layer.handle_input(_K("b"))
     ws.widget_tap("clock")
-    assert cal.view.off == 0                       # a fresh visit opens on today
-    ws.exit()
+    assert m.comp.off == 0                         # a fresh visit opens on today
+    layer.handle_input(_K("b"))
 
     ws.widget_tap("wifi")
-    assert ws.screen == "settings" and ws.settings_layer.wifi_view
-    ws.exit()
-    assert ws.screen == "launcher" and ws.leases.holders() == []
+    drv.frame(1 / 30)
+    assert m.open and m.widget == "wifi" and ws.screen == "launcher"
+    layer.handle_input(_K("b"))
+    assert ws.leases.holders() == []
     ws.widget_tap("battery")
-    sl = ws.settings_layer
-    assert ws.screen == "settings"
-    assert sl._settings_rows()[sl.set_msel][0] == "volume"
-    ws.exit()
+    drv.frame(1 / 30)
+    assert m.open and m.widget == "battery"
+    layer.handle_input(_K("b"))
     ws.widget_tap("menu")
     assert ws.sysmenu.open and ws.sysmenu.comp is None
     ws.widget_tap("menu")

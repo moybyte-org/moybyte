@@ -611,7 +611,7 @@ static void panel_wait(const char *title, const char *text, bool notice) {
     uint16_t *px = k_canvas(NULL, &w, &h);
     memset(px, 0, (size_t)w * (size_t)h * 2u);
     moy_chrome_clear(&S->chrome);
-    moy_chrome_panel(&S->chrome, w, h, notice, title, text, true);
+    moy_chrome_panel(&S->chrome, w, h, notice, title, text);
     moy_chrome_raster(&S->chrome, px, w, h, S->wire, 1);
     k_present(NULL, true);
     moy_input_t *in = moy_input_kernel();

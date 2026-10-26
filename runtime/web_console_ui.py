@@ -9,25 +9,21 @@ distributed-state problem, and the two-writer collision it exists to prevent is
 simply designed out instead: while a browser is editing this store, nothing on
 the glass can be editing it too, because the glass is showing this screen.
 
-The screen is three things and deliberately nothing else:
+The screen is a page (docs/look_2026-10.md step 33) and deliberately
+nothing else:
 
-  * THE QR CODE, which is the feature. The address is
-    `http://<ip>/?pin=NNNN` -- an IP and a pairing pin, ~30 characters a kid
-    would otherwise read off a 320x240 panel and type into a phone. Scanned, it
-    is one gesture and no transcription errors. The encoder is
+  * THE QR CODE, which is the feature, on its white quiet zone. The address
+    is `http://<ip>/?pin=NNNN` -- an IP and a pairing pin, ~30 characters a
+    kid would otherwise read off a 320x240 panel and type into a phone.
+    Scanned, it is one gesture and no transcription errors. The encoder is
     `runtime/moy_qr.py`.
-  * SHOW ADDRESS, because the QR is useless to a laptop and the address does
-    not fit the panel at 1x text alongside everything else. Tap-to-reveal, so
-    the common case stays uncluttered and the fallback is one tap away.
-  * TURN OFF, because the toggle that got here lives in Settings and Settings
-    is behind this screen. A mode with no visible way out is a trap.
-
-Layout note: the address band costs the QR its space only WHILE it is revealed,
-and the QR is re-fitted to what is left. Reserving the band unconditionally was
-the other option and it is the wrong one: hidden is the SCANNING state, and at
-font scale 3 a permanently reserved band halved the module size (148px to 74px
-on an 800x480 panel) to keep steady a layout nobody is looking at -- a kid who
-taps SHOW ADDRESS has already decided not to scan.
+  * "Open in a browser", the address in the code face and the pin large,
+    always shown: the look's 12 px type fits them beside the code, where the
+    8 px print face did not, so the address is no longer a tap away.
+  * Turning it off, because the toggle that got here lives in Settings and
+    Settings is behind this screen. A mode with no visible way out is a
+    trap: back (K on the T-Deck, Esc on a keyboard) turns it off, and a
+    touch or pointer glass adds Turn off as a button.
 
 Dependency profile is UpdateUI's (the other parked fullscreen surface, and the
 model this follows): everything reaches the console through `self.ws`, and
@@ -49,95 +45,51 @@ try:
 except ImportError:  # host: the runtime package
     from runtime import moy_qr as _qr
 
-# The Library shelf's DISPLAY type, for the one heading here. Not `cv.print`'s
-# `scale` argument -- that has been IGNORED on every tier since #39 (system-UI
-# scaling is the font_scale path), so passing 2 there is a no-op that reads in
-# the source like a larger title and renders like a smaller one.
 try:
-    from chrome import _print_scaled
-except ImportError:  # host fallback when not yet aliased
-    from runtime.chrome import _print_scaled
+    import layout_base as _lb
+except ImportError:  # host: the runtime package
+    from runtime import layout_base as _lb
 
+_HEAD = {"face": "title"}
+_SAY = {"tone": "dim", "wrap": True, "lines": 3}
+_ADDRESS = {"face": "mono", "tone": "value"}
+_PIN_CAP = {"tone": "dim", "face": "caption"}
+_PIN = {"face": "result"}
+_KEYS = ("back", "Turn off")
 
-
-def _sub_y(py, fs):
-    """The subtitle's top in a panel at `py`: under the heading, the `ui`
-    face at 2x from 4 rows down, and 4 rows of air; 24 rows at the font
-    scale at the least (a pixel face's place)."""
-    return py + max(24 * fs, 8 * fs + 2 * _ui_draw.font()[2])
 
 class WebConsoleUI:
 
     def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
-        # Revealed by the SHOW ADDRESS button; reset on every entry, so a kid
-        # who left the pin on screen does not find it there tomorrow.
-        self.show_address = False
         # The encoded matrix, cached by the url it encodes. Re-encoding costs
         # a Reed-Solomon pass per frame otherwise, and this screen repaints on
-        # every theme/reveal change.
+        # every theme change.
         self._qr_for = None
         self._qr = None
+        self.host = _ui_draw.AppHost()
 
     def on_enter(self):
-        self.show_address = False
-
-    # -- geometry (pure: the tap handler hit-tests the rects the draw used) ---
-
-    def rects(self):
-        """(qr, address band, SHOW ADDRESS, TURN OFF) for the current layout.
-
-        Pure, and shared by the draw and the tap handler -- the `action_rects`
-        pattern this repo's surfaces use, so a button is hit-tested at exactly
-        the pixels it was painted at. The panel is Settings' own
-        (`lay.settings_panel`), because the toggle that gets here lives on that
-        screen and the family resemblance is the whole navigational cue."""
-        lay = self.ws.layout
-        fs = lay.fs
-        px, py, pw, ph = lay.settings_panel
-        inset = 8 * fs
-        gap = 4 * fs
-        btn_h = 16 * fs
-        btn_y = py + ph - btn_h - gap
-        floor = btn_y - gap
-        addr_h = 20 * fs if self.show_address else 0   # two 8*fs lines + lead
-        addr = (px + inset, floor - addr_h, pw - 2 * inset, addr_h)
-        if addr_h:
-            floor = addr[1] - gap
-        # Below the display-type heading and the subtitle line, with room to
-        # breathe -- anything less and the QR's white quiet zone runs into the
-        # subtitle.
-        qr_top = _sub_y(py, fs) + _ui_draw.font()[2] * fs + 2 * fs
-        qr = (px + inset, qr_top, pw - 2 * inset, max(0, floor - qr_top))
-        bw = (pw - 2 * inset - 2 * gap) // 2
-        return (qr, addr,
-                (px + inset, btn_y, bw, btn_h),
-                (px + inset + bw + 2 * gap, btn_y, bw, btn_h))
+        self.host.reset()
 
     # -- input ---------------------------------------------------------------
 
     def handle_input(self, i):
-        if i.pressed("a"):
-            self.show_address = not self.show_address
-            self.ws._dirty = True
-        elif i.pressed("b") or i.pressed("home") or i.pressed("stop"):
+        if i.pressed("b") or i.pressed("home") or i.pressed("stop") \
+                or getattr(i, "last_key", 0) == 27:
             # HOME turns the mode off rather than trying to leave it. Leaving is
             # what the mode forbids -- every other exit path re-parks here (see
             # Workstation.go_home) -- so a HOME that did nothing would read as a
             # frozen console.
             self.ws.web.stop()
+        elif self.host.keys(i):
+            self.ws._dirty = True
         return True
 
     def handle_pointer(self, px, py, click):
-        if not click:
-            return True
-        _qrr, _addr, show, off = self.rects()
-        if _in(px, py, show):
-            self.show_address = not self.show_address
+        if self.host.point(px, py, click, getattr(self.ws.pointer, "down", False)):
             self.ws._dirty = True
-        elif _in(px, py, off):
-            self.ws.web.stop()
         return True
 
     # -- draw ----------------------------------------------------------------
@@ -158,29 +110,54 @@ class WebConsoleUI:
         return self._qr
 
     def draw(self, dt):
+        """The page under the bar: the code at the left, what to do at its
+        right -- "Open in a browser", how, the address in the code face, the
+        pin large -- and Turn off where a finger or a pointer is."""
         ws = self.ws
         cv = ws.sys_canvas
-        th = ws.theme_colors
         lay = ws.layout
         fs = lay.fs
-        NAMES = self._NAMES
-        cv.rect(0, 0, lay.w, lay.h, th["bar"])
-        px, py, pw, ph = lay.settings_panel
-        _ui_draw.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["surface"])
-        ws._glyph("wifi", (px + 6 * fs, py + 2 * fs, 16 * fs, 16 * fs),
-                  th["accent"], cv)
-        _print_scaled(cv, "WEB CONSOLE", px + 26 * fs, py + 4 * fs, th["ink"], 2)
-        cv.print("SCAN THIS WITH A PHONE", px + 10 * fs, _sub_y(py, fs),
-                 th["ink_dim"], 1)
-        qr_rect, addr, show, off = self.rects()
+        desk = _lb.metric_class() == _lb.DESK
+        cx, cy, cw, ch = lay.cx, lay.cy, lay.cw, lay.ch
+        self.host.begin(cv, ws.theme_colors, (cx, cy, cw, ch), desk)
+        _ui.page("")
+        _ui.hints(_KEYS)
         url = ws.web.url()
-        self._draw_qr(cv, qr_rect, url, NAMES)
-        if self.show_address:
-            self._draw_address(cv, th, addr, url, fs)
-        _ui_draw.button(cv, th, show,
-                   "HIDE ADDRESS" if self.show_address else "SHOW ADDRESS",
-                   on=self.show_address)
-        _ui_draw.button(cv, th, off, "TURN OFF", kind="danger")
+        host, pin = _split(url)
+        pad = (24 if desk else 14) * fs
+        foot = (_ui_draw.metrics("value_row")[17 if desk else 16] * fs
+                if _ui.input_kind() != "touch" else 0)
+        room_h = ch - foot - 2 * pad
+        side = min(room_h, (cw - 3 * pad) * 2 // 5)
+        qr = (cx + pad, cy + pad + (room_h - side) // 2, side, side)
+        self._draw_qr(cv, qr, url, self._NAMES)
+        x = qr[0] + side + pad
+        w = cx + cw - pad - x
+        y = qr[1]
+        y = self._line("Open in a browser", _HEAD, x, y, w, "title")
+        y = self._line("Scan this with a phone, or on a computer go to", _SAY, x, y, w,
+                       "ui", 2)
+        y = self._line(host or "Waiting for an address", _ADDRESS if host else _SAY, x, y, w,
+                       "mono")
+        if pin:
+            y += 6 * fs
+            y = self._line("Pin", _PIN_CAP, x, y, w, "caption")
+            y = self._line(pin, _PIN, x, y, w, "result")
+        if _ui.input_kind() == "touch" or desk:
+            _ui.at(x, y + 8 * fs, min(w, 120 * fs), 28 * fs)
+            if _ui.button("Turn off", "danger"):
+                ws.web.stop()
+        ws.bar_layer._draw_status_strip("webconsole")
+        if self.host.owed or self.host.tap == 2:
+            ws.request_frame()               # a tap's release, next frame
+
+    def _line(self, text, o, x, y, w, role, lines=1):
+        """`text` stacked at (x, y) `w` wide in `role`'s face, `lines` lines
+        at most: the y under it."""
+        h = _ui_draw.font(role)[2] * self.ws.layout.fs * lines + 4 * self.ws.layout.fs
+        _ui.at(x, y, w, h)
+        _ui.label(text, o)
+        return y + h
 
     def _draw_qr(self, cv, rect, url, NAMES):
         """The code, centered in `rect` at the largest whole-pixel module size
@@ -221,23 +198,13 @@ class WebConsoleUI:
                 cv.rect(ox + c * scale, y, (run - c) * scale, scale, dark)
                 c = run
 
-    def _draw_address(self, cv, th, rect, url, fs):
-        """The url as text, for a laptop or a phone that will not scan.
 
-        Split into the address and the pin on two lines: the whole url is ~35
-        characters and the panel holds ~35 at 1x with nothing to spare, so one
-        line would clip exactly where the digits are -- and the digits are the
-        half nobody can guess.
-
-        The pin's ink is the theme's `ink_accent`, not a constant: `accent` is
-        signal yellow, which on a dark panel is the loudest thing on the screen
-        and on a LIGHT one is yellow on cream, so a light surface's is its ink."""
-        x, y, _w, _h = rect
-        host = url.replace("http://", "")
-        pin = ""
-        if "?pin=" in host:
-            host, _sep, pin = host.partition("?pin=")
-        cv.print(host.rstrip("/") or "?", x, y, th["ink"], 1)
-        if pin:
-            cv.print("PIN " + pin, x, y + 10 * fs,
-                     th["ink_accent"], 1)
+def _split(url):
+    """(the address, the pin) of the console's url, "" where it has none."""
+    if not url:
+        return "", ""
+    host = url.replace("http://", "")
+    pin = ""
+    if "?pin=" in host:
+        host, _sep, pin = host.partition("?pin=")
+    return host.rstrip("/"), pin

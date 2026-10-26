@@ -393,11 +393,13 @@ class AboutCard:
             ws.request_frame()
 
     def _strip(self):
-        """The home's hint strip under the card, (x, y, w, h), or None."""
+        """The home's hint strip under the card, (x, y, w, h), or None (an
+        arrangement with no foot strip)."""
         ws = self.ws
         if ws.screen != "launcher" or _desk():
             return None
-        foot = ws.launcher_layer.grid.foot()
+        foot = getattr(ws.launcher_layer.grid, "foot", None)
+        foot = foot() if foot is not None else None
         if foot is None or foot[5][3] <= 0:
             return None
         return foot[5]

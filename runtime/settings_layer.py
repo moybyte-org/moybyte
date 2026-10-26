@@ -267,6 +267,7 @@ NAME_UNSET = "Not set"      # the read-only Name row's value with no name saved
 WIFI_PW_MAX = 64              # a Wi-Fi password's bytes (WPA2 takes 63)
 
 _NETS = 24                    # the networks the Wi-Fi page lists
+WIFI_SCAN = "Scan again"       # the Wi-Fi popover's last row
 
 
 def _capital(s):
@@ -802,6 +803,9 @@ class SettingsLayer:
                 connected, ssid, ip = ws.wifi.status()
             except Exception:  # noqa: BLE001
                 pass
+        if popover:
+            self._wifi_popover(connected, ssid)
+            return
         _ui.page("")
         if self.wifi_pick is not None and not ws.can_type():
             _ui.hints(("back", "Cancel"))     # the prompt has no field and no Connect
@@ -842,6 +846,35 @@ class SettingsLayer:
         f = _ui.focus()
         if f and f.startswith("net") and f[3:].isdigit():
             self.wifi_sel = int(f[3:])
+
+    def _wifi_popover(self, connected, ssid):
+        """The page in the bar's Wi-Fi popover: the connection on its head,
+        then the networks the last scan found as a menu (the joined one
+        checked, a lock where one needs a password) and Scan again."""
+        _ui.info("Wi-Fi", str(ssid) if connected and ssid else "Not connected")
+        names, icons = [], []
+        for k in range(min(len(self.wifi_nets), _NETS)):
+            ssid_k, _sig, locked = self.wifi_nets[k]
+            names.append(str(ssid_k)[:24])
+            icons.append("check" if connected and str(ssid_k) == str(ssid)
+                         else "lock" if locked else "wifi")
+        names.append(WIFI_SCAN)
+        icons.append("search")
+        got = _ui.menu("Networks" if len(names) > 1 else "", names, icons)
+        if _lb.metric_class() == _lb.DESK:
+            _ui.hints(("confirm", "Join", "back", "Close"))
+        if self.wifi_pick is not None:
+            self._wifi_prompt()
+            return
+        if got == len(names) - 1:
+            self._wifi_rescan()
+            self.ws._dirty = True
+        elif got >= 0:
+            self.wifi_sel = got
+            self._wifi_activate()
+        f = _ui.focus()
+        if f in names[:-1]:
+            self.wifi_sel = names.index(f)
 
     def _wifi_prompt(self):
         """The password for the network picked, over the list: a dialog of

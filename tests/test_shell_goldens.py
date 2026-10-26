@@ -738,11 +738,6 @@ def _surface_plan(ws, cfg):
             ws.webhost = _GoldenWebHost()
         if not ws.webhost_serving():
             ws.toggle_webhost()          # the real funnel: start, then park
-        ws.web.ui.show_address = False
-
-    def park_revealed():
-        park()
-        ws.web.ui.show_address = True
 
     def run_script():
         # From HOME, so the windowed tier runs it in console mode (where a
@@ -758,7 +753,6 @@ def _surface_plan(ws, cfg):
 
     plan.append(("script_console", run_script))
     plan.append(("web_console", park))
-    plan.append(("web_console_address", park_revealed))
     return plan
 
 
@@ -992,7 +986,7 @@ def surface_names(config_name):
     names += ["script_console"]
     names += ["app_" + a for a, _title in APP_CARTS]
     names += ["app_notes_note"]
-    names += ["web_console", "web_console_address"]
+    names += ["web_console"]
     return names
 
 

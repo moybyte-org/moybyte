@@ -209,8 +209,9 @@ def test_the_projects_strip_stays_unwashed_under_its_menus(tmp_path, theme, mode
     best = max(_contrast(v, ground) for v in hist)
     assert best >= 4.5, "%s %s: the strip's ink %.2f:1" % (theme, mode, best)
     # the rest of the window still dims: its lit pixels above the strip,
-    # clear of the menu's card
+    # clear of the menu's card and its 2 px drop
     card = ws.menu_ui.look_card()
+    card = (card[0], card[1], card[2], card[3] + 2 * ws.layout.fs)
     _close_menu(ws)
     clear = _frames(ws, 3)[-1]
     lit = [(x, y) for y in range(y0 - 120, y0, 3) for x in range(x0, x0 + w, 3)

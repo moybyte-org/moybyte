@@ -29,14 +29,15 @@ What the Player owns (moved verbatim from Workstation):
     console's key (`start`, Super) is read by the router before this layer and
     opens the pause menu (`pause`/`resume` below); a cart ends itself with `quit()`,
     and a tool/app exits through its bar's context-X.
-  * the crash `_draw_error_panel`.
+  * a stopped run's notice (`notice`, `newer`), which the console's stop card
+    shows (`console_notices.PauseMenu.stop`).
 
 The BUNDLE the Player reaches (spec Section 2): the open `Project` (its live data),
 plus the RAW canvas / input / audio / `make_api` / wifi through its `ws` back-ref --
 the SAME raw objects `Workstation._start` handed `make_api` before, so the hot draw
 path stays injected-direct (the Section 5 perf guardrail: WHO calls make_api moved,
 WHAT it closes over did not). It deliberately does NOT reach the store, the shell
-top bar, the home grid, or the layouts -- the crash-frame bar draw/tap is reached
+top bar, the home grid, or the layouts -- the stop card it opens is reached
 through thin `ws` helpers so this file never names them (a spike-test grep enforces
 the isolation). The cart-run fields it owns are exposed back on Workstation as
 forwarding properties, so every surface file + test is unchanged.
@@ -167,14 +168,12 @@ except ImportError:                     # host: the runtime package
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
 try:
     from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
-    from ui_draw import print_font as _print_font
     from ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
                          ui_owes as _ui_owes, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from moy_input import pointer_state as _pointer_state
     import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ui_draw import cart_text as _cart_text
-    from runtime.ui_draw import print_font as _print_font
     from runtime.ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
                                  ui_owes as _ui_owes, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from runtime.moy_input import pointer_state as _pointer_state
@@ -384,10 +383,10 @@ class _Refused(Exception):
     the title it is drawn under."""
 
 
-def newer_notice(title, missing):
+def newer_notice(missing):
     """The notice for a cart whose module imports `missing`, names this
     console's import table lacks."""
-    return _ch.newer_text(title, missing)
+    return _ch.newer_text(missing)
 
 
 def fit_notice(title, need, have):
@@ -2144,7 +2143,7 @@ class Player:
                 cart = ws.cart or {}
                 missing = _cart_missing(make, cart)
                 if missing:
-                    raise _Refused(newer_notice(cart.get("title"), missing),
+                    raise _Refused(newer_notice(missing),
                                    _ch.say_title(_ch.SAY_NEWER))
                 fit = _cart_fit(make, cart)
                 # A failed fit gets back what the WM holds as caches -- parked
@@ -2458,12 +2457,13 @@ class Player:
 
     def _capture_frame_error(self, ws, exc):
         """A cart that raised mid-frame: capture it, stop the cart, persist
-        pmem, and throw the kid into the code editor when there is one.
-        Returns True when the crash-to-code throw took the screen."""
+        pmem; the stop card then opens over its last frame (`_tick_tail`).
+        Returns True when the screen left the run (a parked console goes
+        home)."""
         # A cart that raises mid-frame must NOT escape the loop (the
         # device would hang silently). Capture it, stop running the
-        # broken cart, and fall through to paint the error panel; the
-        # desktop buttons stay so the kid can EDIT/CODE the fix.
+        # broken cart, and fall through to the stop card, whose See why
+        # opens the code on the line.
         # mark the line on EDIT (#24): a Lua cart's line comes from the
         # error text's `cart:N:` position (#67 Phase 5); a Python cart's
         # from the traceback, mapped back through the nativize insert.
@@ -2496,12 +2496,10 @@ class Player:
                 pm.flush()
             except Exception:  # noqa: BLE001
                 pass
-        # Owner ask 2026-07-23: no parked OOPS screen -- throw the kid
-        # straight into the code editor on the crashing line (popup +
-        # inline marker). The panel below survives only as the
-        # fallback when there is nothing to edit.
         ws._reset_canvas_state()
-        return ws._crash_to_code()
+        if ws.web.parked:
+            return ws._crash_to_code()
+        return False
 
     def _tick_tail(self, ws, render):
         """After the cart's frame: the periodic pmem flush, a quit() exit,
@@ -2547,13 +2545,12 @@ class Player:
         if self.cart_error is not None or self._is_tool:
             ws.settle_cart_frame()          # the chrome below draws over the frame
         # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full
-        # 320x240 with NO chrome (the #71 pause frame is gone). The ONLY chrome left
-        # is the CRASH panel + its top bar, so EDIT/CODE stay reachable to fix the cart.
-        # The top bar is the shell's (not the Player's); the Player just asks
-        # for it here.
+        # 320x240 with NO chrome (the #71 pause frame is gone). A run that
+        # stopped opens the stop card over its last frame (the pause card's
+        # sibling, drawn by its layer on the system canvas).
         if self.cart_error is not None:
-            self._draw_error_panel()
-            ws._draw_cart_bar()                 # unified top bar (crash tool switcher)
+            if not ws.pause.open:
+                ws.pause.stop()
         elif self._is_tool and not ws.app_window_canvas:   # #75: cached at start()
             # Part 4: a TOOL/APP runs WITH a minimal bar (back + title + status) so
             # it's exitable -- a GAME stays fullscreen-bar-hidden. The bar-visibility-by-
@@ -2580,15 +2577,11 @@ class Player:
         px, py = gx, gy
         # While a GAME plays the bar is hidden, so the game owns the full 320x240 and
         # every tap belongs to the cart (published as the game pointer by the router before
-        # this runs; the pause menu, a layer above, takes them while it shows). Two chrome
-        # cases DO hit-test a tap:
-        # the CRASH panel's top bar (HOME / EDIT|CODE / PAINT / MAP / BLOCKS / MUSIC -- the
-        # fix-it tool switcher) and -- Part 4 -- a running TOOL/APP's minimal bar (its
-        # context-X / wifi / ≡). Both route through thin ws helpers so this file never
+        # this runs; the pause menu and the stop card, a layer above, take them while they
+        # show). One chrome case DOES hit-test a tap: a running TOOL/APP's minimal bar
+        # (Part 4: its context-X / wifi / ≡), through a thin ws helper so this file never
         # reaches the bar surface directly.
-        if click and self.cart_error is not None:
-            ws._cart_bar_tap(px, py)            # crash-bar tool switcher (EDIT/CODE reachable)
-        elif click and self._is_tool:           # #75: cached type; error is None past the if
+        if click and self._is_tool and self.cart_error is None:
             if not ws.app_window_canvas and ws._tool_bar_tap(px, py):   # X exits, wifi/≡
                 # The bar consumed the tap -> clear the published game pointer's tap so the
                 # tool doesn't ALSO act on it this frame (mirrors the overlay-suppress rule).
@@ -2613,23 +2606,7 @@ class Player:
         n = self._notice
         return n if n is not None and n == self.cart_error else None
 
-    def _draw_error_panel(self, cv=None):
-        """The on-canvas crash report (the device never reaches serial, so it
-        is the ONLY error surface), or a notice in calmer colours under its
-        own title: a cart this console cannot hold, needs a newer one for, or
-        will not trust. The kernel's one body (moy_chrome_panel), replayed
-        through `cv` -- the GAME canvas for a crashed run; the cards tab passes
-        the system canvas for its malformed-card panel (#39 step 3)."""
-        if cv is None:
-            cv = self.ws.canvas
-        notice = self.notice is not None
-        title = (self._notice_title if notice
-                 else _ch.crash_title(self.cart_error, self.crash_line))
-        mp = _ch.chrome_inks(self.ws.theme_colors, self.NAMES)
-        # The panel and the pill are the kernel's pictures, laid out in its
-        # cells and drawn in petme128 with no VM too (moy_chrome.c).
-        was = _print_font(0)
-        _ch.replay(mp.chrome_panel(cv.w, cv.h, notice, title or "",
-                                   self.cart_error or "",
-                                   _compiled(self.ws.cart)), cv, self.ws)
-        _print_font(was)
+    @property
+    def newer(self):
+        """True while the notice up is the newer-console one."""
+        return self.notice is not None and self._notice_title == _ch.say_title(_ch.SAY_NEWER)

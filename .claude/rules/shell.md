@@ -29,11 +29,10 @@ to whoever called it.
   `docs/shell_ux_v1.md` is the UX authority; what neither can tell you:
   - **`Player` has zero knowledge of who launched it.** `run(cart)` plays until
     exit and returns to the CALLER — launcher→launcher, Editor-PLAY→the same tab.
-    A crash becomes the **crash-to-code throw**: the run exits into the Editor's
-    Code tab with the caret on the crashing line. The parked OOPS panel survives
-    as the no-open-cart fallback, and as the whole answer to a compiled
-    (`"runtime": "wasm"`) cart's trap, which has no source line to throw to and
-    offers no EDIT.
+    A run that stops opens the **stop card**, the pause card's sibling
+    (docs/look_2026-10.md step 33): its See why is the crash-to-code throw,
+    and with no open cart, or for a compiled (`"runtime": "wasm"`) cart's
+    trap, which has no source line, it offers Restart and Home alone.
   - **There is NO SAVE and no dirty star** (#111). Commits ride a typing-idle
     debounce plus every exit path; a commit also appends the undo journal and runs
     graduation detection.

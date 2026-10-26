@@ -81,6 +81,7 @@ def fit_text(title, total, block, free, largest):
                                        int(largest))
 
 
-def newer_text(title, missing):
-    """The newer-console notice; `missing` the names this console lacks."""
-    return _moy_play().chrome_newer_text(title or "", ", ".join(missing))
+def newer_text(missing):
+    """The newer-console notice's words; `missing` the names this console
+    lacks."""
+    return _moy_play().chrome_newer_text(", ".join(missing))

@@ -214,10 +214,23 @@ class PauseMenu:
     popover of the public UI API's with nothing to hang from, holding a
     `ui.menu`, drawn on the system canvas over the frozen frame; the menu's
     keys and taps are this object's, so an action runs in the input phase,
-    and Options' slider takes the engine's."""
+    and Options' slider takes the engine's.
+
+    A stopped run is its sibling, the stop card (GAPS 49, `stop`): the same
+    card over the run's last frame washed, naming the cart and Stopped, the
+    sentence (`say.crash_line`), the error exact in the code face on a
+    `sunk` inset, then See why (the Code tab on the line,
+    `Workstation._crash_to_code`; none for a compiled cart or one with
+    nothing to edit), Restart and Home, its keys in its foot. A notice (a
+    compiled cart this console cannot run) is the same card with its words
+    in the body face and Open Updates (a newer console's) or Home. Esc, B or
+    Super leave for Home."""
 
     ITEMS = ("Resume", "Restart", "Options", "Quit")
     ICONS = ("play", "rotate", "settings", "close")
+    SEE_WHY, RESTART, HOME, UPDATES = "See why", "Restart", "Home", "Open Updates"
+    _STOP_ICONS = {"See why": "code", "Restart": "rotate", "Home": "home",
+                   "Open Updates": "settings"}
 
     def __init__(self, ws):
         self.ws = ws
@@ -228,8 +241,14 @@ class PauseMenu:
         self._key = 0               # the key typed last frame (a press is its change)
         self._under = None          # what the card's band covered: (layer, x)
         self._capture = False       # take that band before the card first draws
+        self.stopped = False        # the stop card, over a run that stopped
+        self.rows = self.ITEMS      # the card's rows
+        self.icons = self.ICONS
 
     def _width(self, desk):
+        if self.stopped:
+            fs = self.ws.layout.fs
+            return 520 if desk else min(self.ws.sys_canvas.w - 32 * fs, 340 * fs)
         return 300 if desk else 188 * self.ws.layout.fs
 
     def _keep_under(self, cv, desk):
@@ -265,7 +284,33 @@ class PauseMenu:
 
     def show(self):
         ws = self.ws
+        if ws.cart_error is not None:
+            self.stop()
+            return
         ws.player.pause()
+        self.stopped = False
+        self.rows, self.icons = self.ITEMS, self.ICONS
+        self._open()
+
+    def stop(self):
+        """Open the stop card over the run that stopped (its error, or its
+        notice, is the Player's), its rows by the run's kind."""
+        ws = self.ws
+        player = ws.player
+        self.stopped = True
+        cart = ws.cart or {}
+        if player.notice is not None:
+            rows = (self.UPDATES, self.HOME) if player.newer else (self.HOME,)
+        elif ws.project is None or cart.get("runtime") == "wasm" or ws.web.parked:
+            rows = (self.RESTART, self.HOME)
+        else:
+            rows = (self.SEE_WHY, self.RESTART, self.HOME)
+        self.rows = rows
+        self.icons = tuple([self._STOP_ICONS[r] for r in rows])
+        self._open()
+
+    def _open(self):
+        ws = self.ws
         self.open = True
         self.sel = 0
         self.page = 0
@@ -279,8 +324,11 @@ class PauseMenu:
         ws.pause_touch()
 
     def close(self):
-        """Resume: the run is given back."""
+        """Resume: the run is given back (a stopped run's card goes Home)."""
         if not self.open:
+            return
+        if self.stopped:
+            self.choose_row(self.HOME)
             return
         self.open = False
         self._put_under(self.ws.sys_canvas)   # the frame as the game left it
@@ -297,8 +345,45 @@ class PauseMenu:
         else:
             self.close()
 
+    def dismiss(self):
+        """Close a stop card a run left, if one is up (its run gone)."""
+        if self.open and self.stopped:
+            self._shut()
+
+    def _shut(self):
+        """The stop card goes, the run's last frame put back."""
+        self.open = False
+        self.stopped = False
+        self._put_under(self.ws.sys_canvas)
+        self._drop_under()
+        self.ws.pause_touch()
+        self.ws._dirty = True
+
+    def choose_row(self, row):
+        """A stop card's row: See why throws into the Code tab on the line,
+        Restart runs the cart again, Open Updates opens Settings' Updates,
+        Home leaves for the run's caller."""
+        ws = self.ws
+        self._shut()
+        if row == self.SEE_WHY and ws._crash_to_code():
+            return
+        if row == self.RESTART:
+            ws._reset_canvas_state()
+            ws._start()
+            return
+        ws.cart_error = None
+        ws._reset_canvas_state()
+        if ws.wm.top_is_player():
+            ws._exit_to_caller()
+        if row == self.UPDATES:
+            ws.open_settings()
+            ws.settings_layer.show_row("ota_channel")
+
     def choose(self, i):
         ws = self.ws
+        if self.stopped:
+            self.choose_row(self.rows[i])
+            return
         if i == 0:
             self.close()
         elif i == 1:
@@ -348,7 +433,7 @@ class PauseMenu:
             if self._host.keys(i):
                 self.ws.pause_touch()
             return
-        n = len(self.ITEMS)
+        n = len(self.rows)
         if i.pressed("up") and self.sel > 0:
             self.sel -= 1
             self.ws.pause_touch()
@@ -369,12 +454,12 @@ class PauseMenu:
             return
         if not click:
             return
-        for j, t in enumerate(self.ITEMS):
+        for j, t in enumerate(self.rows):
             if _in_box(px, py, host.box(t)):
                 self.sel = j
                 self.choose(j)
                 return
-        if not _in_box(px, py, host.box("Pause")):
+        if not self.stopped and not _in_box(px, py, host.box("Pause")):
             self.close()                  # a press outside the card resumes
 
     def surface(self):
@@ -401,7 +486,9 @@ class PauseMenu:
     def _draw(self):
         ws = self.ws
         cv = ws.sys_canvas
-        if self._capture:
+        if not ws.wm.top_is_player():
+            self._capture = False         # a notice over the screen it opened from
+        elif self._capture:
             self._keep_under(cv, _desk_class())
         else:
             self._put_under(cv)
@@ -409,15 +496,16 @@ class PauseMenu:
         # the paused game dims under the card (D-01): over the frame just
         # put back, or the composite just made, never over the last scrim;
         # the whole glass, or on the desk the content under its bar
-        if self._under is not None or ws.canvas is not cv:
+        if self._under is not None or ws.canvas is not cv or not ws.wm.top_is_player():
             _ui_draw.scrim(cv, ws.theme_colors, self.scrim_rect())
         self._card()
 
     def scrim_rect(self):
-        """What the card's scrim washes: on the desk the content under its
-        bar, else the glass."""
+        """What the card's scrim washes: on the desk, and under a notice
+        over the screen it was asked from, the content under its bar, else
+        the glass."""
         ws = self.ws
-        if getattr(ws.wm, "mode", None) == "desktop":
+        if getattr(ws.wm, "mode", None) == "desktop" or not ws.wm.top_is_player():
             lay = ws.layout
             return (lay.cx, lay.cy, lay.cw, lay.ch)
         cv = ws.sys_canvas
@@ -458,11 +546,17 @@ class PauseMenu:
         host = self._host
         desk = _desk_class()
         if not self.page:
-            host.focus(self.ITEMS[self.sel])
+            host.focus(self.rows[self.sel])
         settled = host.begin(cv, ws.theme_colors, self.surface(), desk)
         _ui.popover("Pause", self._width(desk))
         cart = ws.cart
         _ui.icon("moy")
+        if self.stopped:
+            self._stop_body(cart)
+            _ui.popover()
+            if not settled:
+                ws.request_frame()
+            return
         _ui.info(str((cart.get("title") if cart else "") or "Game"), "Paused")
         if self.page:
             sl = ws.settings_layer
@@ -479,6 +573,32 @@ class PauseMenu:
         _ui.popover()
         if not settled:
             ws.request_frame()
+
+    def _stop_body(self, cart):
+        """The stop card's body under its icon: the cart and its state, what
+        happened, the rows and the keys."""
+        ws = self.ws
+        player = ws.player
+        title = str((cart.get("title") if cart else "") or "Game")
+        if player.notice is not None:
+            _ui.info(title, "")
+            _ui.rule()
+            _ui.label(str(player._notice_title or ""), _STOP_SENTENCE)
+            _ui.label(player.notice, _STOP_WORDS)
+        else:
+            _ui.info(title, "Stopped")
+            _ui.rule()
+            _ui.label(_ch.crash_title(ws.cart_error, ws.crash_line), _STOP_SENTENCE)
+            _ui.label(str(ws.cart_error or "").strip() or _ui_draw.s("chrome.no_text"),
+                      _STOP_ERROR)
+        _ui.menu("", self.rows, self.icons)
+        _ui.hints(("confirm", "Choose", "back", "Home"))
+
+
+# The stop card's lines: the sentence, a notice's words, the error exact.
+_STOP_SENTENCE = {"wrap": True, "lines": 2}
+_STOP_WORDS = {"wrap": True, "lines": 4, "tone": "dim"}
+_STOP_ERROR = {"wrap": True, "lines": 4, "face": "mono", "sunk": True}
 
 
 class DeleteConfirm:
@@ -810,11 +930,20 @@ class SystemMenuUI:
             return
         x, y, w, h = m.panel_rect()
         if m.comp is not None:
-            # A component's panel: the menu's dialog shell, its painter inside.
+            # A component's popover: the system's flat card, its drop inside
+            # the panel's rect, the component's verbs in it; on a handheld
+            # home the hint strip says its keys
             cv = ws.sys_canvas
             th = ws.theme_colors
-            _ui_draw.dialog(cv, (x, y, w, h), ring=th["edge"], fill=th["panel"])
-            m.comp.draw(cv, (x, y, w, h))
+            desk = _desk_class()
+            drop = 2 * (1 if desk else ws.layout.fs)
+            _ui_draw.modal(cv, th, (x, y, w, h - drop), desk)
+            m.comp.draw(cv, (x, y, w, h - drop))
+            strip = self.about._strip()
+            if strip is not None:
+                cv.rect(strip[0], strip[1], strip[2], strip[3], th["panel"])
+                _ui.at(strip[0], strip[1], strip[2], strip[3])
+                _ui.hints(m.comp.keys())
             return
         rows = []
         for it in m.items:

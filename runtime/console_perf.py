@@ -96,6 +96,8 @@ class PerfMeters:
         self._fb_sc_fn = None
         self._lb_wm = None        # frame()'s WM / letterbox_inplace
         self._lb_fn = None
+        self._loading_host = None  # the loading pill's UI context (_draw_loading_toast)
+        self._loading_rect = None  # ...and the rect it drew last
         self._dsf_comp = None     # _disarm_fn's compositor / disarm_scale_fold
         self._dsf_fn = None
         self._probe_sc = None     # frame()'s system-canvas probes (begin_surface

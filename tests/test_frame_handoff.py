@@ -170,13 +170,13 @@ def test_the_fps_chip_rides_the_frame_as_a_patch(tmp_path):
     cf = ws.cart_frame = FakeCartFrame()
     calls = _spy(ws)
     _frame(ws, drv, cf)
-    # The chip and the HUD line above it are opaque rects over the frame: they
-    # are declared, drawn on the game canvas, and the frame is still shown
-    # from the cart's memory with both taken from the canvas.
+    # The chip and the breakdown card over it are one opaque rect over the
+    # frame: declared, drawn on the game canvas, and the frame is still shown
+    # from the cart's memory with it taken from the canvas.
     patches = [e for e in cf.log if isinstance(e, tuple) and e[0] == "patch"]
-    assert len(patches) == 2
+    assert len(patches) == 1
     assert "settle" not in cf.log and cf.log[-2:] == ["take", "presented"]
-    assert calls[-1][0] == "present" and calls[-1][-1] == 2
+    assert calls[-1][0] == "present" and calls[-1][-1] == 1
     for _p, x, y, w, h in patches:
         assert 0 <= x and x + w <= 320 and 0 <= y and y + h <= 240
 
@@ -191,23 +191,25 @@ def test_a_frame_settled_after_the_chip_keeps_it(tmp_path):
     assert ("settle", True) in cf.log     # the canvas is handed over to keep
 
 
-def test_the_crash_panel_settles_the_frame_first(tmp_path):
+def test_a_stopped_run_settles_the_frame_before_its_card(tmp_path):
+    """The frame a run stopped on is settled before the stop card opens over
+    it (the card draws on the system canvas, over the kept frame)."""
     ws, drv = _playing(tmp_path)
     cf = ws.cart_frame = FakeCartFrame()
     _spy(ws)
-    drawn = []
-    real = ws.player._draw_error_panel
+    seen = []
+    real = ws.pause.stop
 
-    def panel(*a, **k):
-        drawn.append(list(cf.log))
+    def stop(*a, **k):
+        seen.append(list(cf.log))
         return real(*a, **k)
 
-    ws.player._draw_error_panel = panel
+    ws.pause.stop = stop
     ws.player.cart_error = "boom"           # the run crashed
     cf.owed = True
     cf.log.clear()
-    ws.player.tick(DT)                      # the crash frame, drawn over the cart's
-    assert drawn and drawn[0][-1] == "settle"
+    ws.player.tick(DT)
+    assert seen and seen[0][-1] == "settle"
 
 
 def test_desktop_mode_leaves_the_frame_to_the_player_window():

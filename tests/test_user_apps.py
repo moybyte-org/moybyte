@@ -272,14 +272,21 @@ def test_the_demo_apps_prefs_cannot_see_the_shells_own_settings(tmp_path):
 
 def test_a_user_app_is_always_exitable_through_the_hosts_bar(tmp_path):
     """The bar contract reaches carts too: the shell draws the strip over a
-    running app cart and routes its context-X, so a user app cannot trap a kid
+    running app cart and routes its way out (the chevron, or the context-X a
+    layout places), so a user app cannot trap a kid
     even if its own input handling is broken."""
     ws = build_ws(tmp_path)
     _open(ws, "Notes")
     _frames(ws)
     assert ws.wm.top_is_player()
-    _tap_bar(ws, _bar._ZONE_CONTEXT_X)
-    assert not ws.wm.top_is_player(), "the context-X did not exit the app"
+    bl = ws.bar_layer
+    where = "tool" if bl.cell("tool", "zone") is not None else "app"
+    rect = bl.back_rect(where)
+    if rect is None:
+        bar, (x, y, w, h) = bl.cell(where, "close")
+        rect = (bar[1][0] + x, bar[1][1] + y, w, h)
+    _tap_bar(ws, rect)
+    assert not ws.wm.top_is_player(), "the bar's way out did not exit the app"
 
 
 # ---------------------------------------------------------------------------

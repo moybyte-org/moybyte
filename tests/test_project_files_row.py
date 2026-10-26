@@ -47,11 +47,13 @@ def _frame(ws):
     ws.frame(1 / 30)
 
 
-def _row_named(cl, name):
-    for rect, got, k in cl._files_rects():
-        if got == name:
-            return rect, k
-    raise AssertionError("%r not listed: %r" % (name, cl.files["rows"]))
+def _row_named(cl, ws, name):
+    """The Files page's row for file `name`, as its last frame drew it."""
+    _frame(ws)
+    rect = cl._files_host.box(name)
+    if rect is None:
+        raise AssertionError("%r not listed: %r" % (name, cl.files["rows"]))
+    return rect
 
 
 # -- the row --------------------------------------------------------------
@@ -96,8 +98,12 @@ def test_the_row_opens_on_a_tap_and_on_A_and_backs_out(tmp_path):
         _frame(ws)
     assert cl.files is not None and cl.files["rows"]
 
-    # BACK returns to the cards
-    cl._files_pointer(cl.layout.info_btn[0] + 2, cl.layout.info_btn[1] + 2, True)
+    # back returns to the cards
+    ws.input.begin_frame()
+    ws.input.set_held("b", True)
+    ws.input.begin_frame()
+    cl.handle_input(ws.input)
+    ws.input.set_held("b", False)
     assert cl.files is None
 
     cl.page().host.focus("Files")
@@ -178,7 +184,7 @@ def test_an_asset_routes_to_its_own_tab(tmp_path):
     cl = _on_config(ws, ws.carts.reload(cart))
     cl._open_files()
     cl._files_open("extras/notes.bin")
-    assert cl.files["msg"] == "NO EDITOR FOR THIS"
+    assert cl.files["msg"] == "Nothing on this console opens that file."
     assert ws.wm.top_kind() == "menu"
 
 
@@ -237,8 +243,11 @@ def test_a_text_file_opens_in_the_handle_in_its_mode(tmp_path):
     cl = _on_config(ws, cart)
     cl._open_files()
 
-    rect, _k = _row_named(cl, "config.json")
+    rect = _row_named(cl, ws, "config.json")
     cl._files_pointer(rect[0] + 2, rect[1] + 2, True)
+    _frame(ws)
+    cl._files_pointer(rect[0] + 2, rect[1] + 2, False)
+    _frame(ws)
     _frame(ws)
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
     ed = ws.player.ns["ed"]

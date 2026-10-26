@@ -110,6 +110,11 @@ class IdleLadder:
         return secs
 
 
+# The saver's inks, the same in every theme: MOY64's white, light grey and
+# dark blue's frame.
+_INK, _DIM, _FRAME = 7, 6, 1
+
+
 class Saver:
     """The SAVER rung's screen. `frame(dt)` paints the system canvas and
     answers True on a frame that drew (the console flushes it), False on one
@@ -141,17 +146,34 @@ class Saver:
         return True
 
     def _cover(self, cv, cart):
-        """The cart's cover centred at the largest whole scale that fits, its
-        title under it; a cart with no cover is its title alone."""
-        try:
-            from launcher_layer import _draw_cover
-        except ImportError:  # host: the runtime package
-            from runtime.launcher_layer import _draw_cover
-        img = self.ws.covers.cover_for(cart)
+        """The saver in every theme (docs/look_2026-10.md step 33): on black,
+        the cart's cover at its largest whole scale in a 1 px frame, its
+        title in the title face under it, the clock small in the corner; a
+        cart with no cover is its title alone."""
+        ws = self.ws
+        img = ws.covers.cover_for(cart)
         w, h = cv.w, cv.h
-        band = 8 * 3
-        if img is not None:
-            _draw_cover(cv, img, 0, 0, w, h - band, h - band)
-        name = cart.get("title") or "?"
-        x = max(0, (w - _ui_draw.print_width(name)) // 2)
-        cv.print(name, x, h - band + 8, 7, 1)
+        fs = getattr(cv, "font_scale", 1) or 1
+        fid, _fw, line, _asc = _ui_draw.font("title")
+        was = _ui_draw.print_font(fid)
+        try:
+            title_h = line * fs + 16 * fs
+            top = 30 * fs
+            if img is not None:
+                room = h - top - title_h - 12 * fs
+                s = max(1, min((w - 32 * fs) // img.w, room // img.h))
+                sw, sh = img.w * s, img.h * s
+                x, y = (w - sw) // 2, top + (room - sh) // 2
+                cv.blit565(img.pix, img.w, img.h, x, y, s)
+                cv.rectb(x - fs, y - fs, sw + 2 * fs, sh + 2 * fs, _FRAME)
+                ty = y + sh + 14 * fs
+            else:
+                ty = (h - line * fs) // 2
+            name = str(cart.get("title") or "?")
+            cv.print(name, max(0, (w - _ui_draw.text_width(name, fs, "title")) // 2), ty,
+                     _INK, 1)
+            _ui_draw.print_font(_ui_draw.font("ui")[0])
+            clock = ws.bar_layer._clock_text()
+            cv.print(clock, w - _ui_draw.text_width(clock, fs, "ui") - 10 * fs, 8 * fs, _DIM, 1)
+        finally:
+            _ui_draw.print_font(was)

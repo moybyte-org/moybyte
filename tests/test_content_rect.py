@@ -110,14 +110,6 @@ def test_bar_and_content_partition_the_canvas(tmp_path, size, edge):
     assert ws.app_bar_h() == ws.app_content_rect()[1]
 
 
-def test_the_crash_chrome_stays_on_top(tmp_path):
-    """The running cart's crash bar is the Player's crash panel, laid out under
-    a top strip: it does not follow the bar."""
-    ws = build_ws(tmp_path)
-    _bottom(ws)
-    assert ws.bar_layer.bar_rects("desktop")[0][1] == 0
-
-
 # -- every layout lays out inside it -------------------------------------------
 
 def _open_every_surface(ws):

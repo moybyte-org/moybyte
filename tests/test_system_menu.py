@@ -53,6 +53,14 @@ def _tap(drv, x, y):
     drv.frame(1 / 30)
 
 
+def _menu_key(drv, ws):
+    """The ≡ menu's own entry point (the bar's ≡, the system key off a
+    fullscreen game)."""
+    ws.toggle_sysmenu()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+
+
 def _labels(ws):
     return [it[1] for it in ws.sysmenu.items if it[0] in ("header", "item")]
 
@@ -76,15 +84,12 @@ def _open_cart(ws):
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
-    # Stage 5 retired the #71 pause frame: the in-cart ≡/bar is CRASH chrome now (while
-    # a cart PLAYS the game owns the full canvas), so these ≡-dropdown tests drive the
-    # crashed state, where the bar (with the cart group in its ≡ menu) is drawn.
-    ws.cart_error = "boom"
-    ws._dirty = True
+    # The ≡ menu over an open cart, its cart group in it: what the system key
+    # opens over a cart that does not play fullscreen (`toggle_sysmenu`).
 
 
 def _open_own_cart(ws, tmp_path):
-    """Open a cart of the kid's own (not a built-in), crashed as `_open_cart`
+    """Open a cart of the kid's own (not a built-in), as `_open_cart`
     leaves one, with a second real cart beside it."""
     from runtime import moy_carts
     moy_carts.create("Extra", str(tmp_path / "carts"), src="def _draw():\n    cls(1)\n",
@@ -95,8 +100,6 @@ def _open_own_cart(ws, tmp_path):
     ws.launcher.sel = titles.index("Extra")
     ws.open()
     assert ws.screen == "desktop" and ws.cart.get("title") == "Extra"
-    ws.cart_error = "boom"
-    ws._dirty = True
 
 
 # -- the reusable Popup primitive -------------------------------------------
@@ -188,26 +191,13 @@ def test_sysmenu_popup_anchors_under_the_right_side_hamburger(tmp_path):
 
 # -- the ≡ icon placement (no overlap) --------------------------------------
 
-def test_hamburger_is_leftmost_and_switchers_shifted_right():
-    from runtime import console as C
-    # ≡ at x=2 (leftmost), the tool switchers each one stride to its right.
-    assert C._SYSMENU_BTN[0] == 2
-    assert C._HOME_BTN[0] == 2 + C._BAR_STRIDE
-    assert C._MENU_BTN[0] == 2 + 2 * C._BAR_STRIDE
-    assert C._BLOCKS_BTN[0] == 2 + 5 * C._BAR_STRIDE
-    # The rightmost switcher (blocks) ends well clear of the clock's left edge.
-    blocks_right = C._BLOCKS_BTN[0] + C._BAR_ICON
-    assert blocks_right <= C._BAR_CLOCK[0]
-
-
 # -- opening / contents ------------------------------------------------------
 
 def test_hamburger_tap_opens_menu_with_the_system_group(tmp_path):
-    from runtime import console as C
     ws = _ws(tmp_path)
     drv = _drv(ws)
     _open_cart(ws)
-    _tap(drv, *_center(C._SYSMENU_BTN))
+    _menu_key(drv, ws)
     assert ws.sysmenu.open
     # a built-in: the console's own, so no Delete and no cart group (a run
     # restarts from the pause menu); restarting the console is last
@@ -307,13 +297,12 @@ def test_outside_tap_dismisses(tmp_path):
 
 
 def test_hamburger_toggles_closed(tmp_path):
-    from runtime import console as C
     ws = _ws(tmp_path)
     drv = _drv(ws)
     _open_cart(ws)
-    _tap(drv, *_center(C._SYSMENU_BTN))
+    _menu_key(drv, ws)
     assert ws.sysmenu.open
-    _tap(drv, *_center(C._SYSMENU_BTN))        # ≡ again closes
+    _menu_key(drv, ws)                         # ≡ again closes
     assert not ws.sysmenu.open
 
 
@@ -544,21 +533,6 @@ def test_reboot_action_safe_stub_without_hook(tmp_path):
 
 
 # -- closed = zero behavior change ------------------------------------------
-
-def test_closed_menu_does_not_break_bar_or_mode_switch(tmp_path):
-    from runtime import console as C
-    ws = _ws(tmp_path)
-    drv = _drv(ws)
-    _open_cart(ws)
-    assert not ws.sysmenu.open
-    # The HOME icon (now one stride right of ≡) still goes home.
-    _tap(drv, *_center(C._HOME_BTN))
-    assert ws.screen == "launcher"
-    # The EDIT/CODE icon still opens the editor menu.
-    _open_cart(ws)
-    _tap(drv, *_center(C._MENU_BTN))
-    assert ws.screen == "menu"
-
 
 def test_menu_renders_on_top_without_error(tmp_path):
     ws = _ws(tmp_path)

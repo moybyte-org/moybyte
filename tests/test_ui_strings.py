@@ -102,7 +102,7 @@ def test_a_pack_with_other_conversions_reads_english(chrome):
         assert _str(chrome, sid) == en[sid]
     assert moy_play.chrome_say_title(0, 12) == en["say.crash_line"] % 12
     assert moy_play.chrome_say_title(1, 12) == "Stuck at 12."
-    hint = moy_play.chrome_panel(320, 240, False, "", "", True)
+    hint = moy_play.chrome_panel(320, 240, False, "", "")
     assert "HALTEN" in [o[7] for o in hint if o[0] == moy_play.CH_TEXT]
     # a refused entry replaces nothing a pack had taken before it
     assert _set_pack(chrome, {"say.stuck_line": "Stuck %s"}) == {"say.stuck_line": 1}
@@ -133,10 +133,8 @@ def _chrome_screens():
     """Every piece moy_chrome builds, each text path it has: (name, ops)."""
     out = []
     for notice in (False, True):
-        for compiled in (False, True):
-            out.append(("panel", moy_play.chrome_panel(320, 240, notice, "", "", compiled)))
-    out.append(("panel_py", moy_play.chrome_panel(320, 240, False, "zz", "qq", False)))
-    out.append(("strip", moy_play._chrome("moy_chrome_strip_crash", 320, 1, b"12:00", b"wifi3")))
+        out.append(("panel", moy_play.chrome_panel(320, 240, notice, "", "")))
+    out.append(("panel_py", moy_play.chrome_panel(320, 240, False, "zz", "qq")))
     return out
 
 
@@ -165,8 +163,7 @@ def test_under_a_pseudo_locale_the_chrome_draws_no_english(chrome):
                                    pseudo(en["fit.megabytes"]) % (5, 0),
                                    pseudo(en["fit.megabytes"]) % (1, 0),
                                    pseudo(en["fit.restart"])))
-    assert moy_play.chrome_newer_text("", "x") == pseudo(en["newer.text"]) % (
-        pseudo(en["fit.this_game"]), "x")
+    assert moy_play.chrome_newer_text("x") == pseudo(en["newer.text"]) % "x"
     stuck = moy_play._say("moy_chrome_stuck_text", 3000)
     assert stuck == pseudo(en["stuck.text"]) % 3
     # the runaway watch's words are recognised in the pack's spelling
@@ -174,9 +171,8 @@ def test_under_a_pseudo_locale_the_chrome_draws_no_english(chrome):
 
 
 def test_no_chrome_op_is_a_literal_and_the_sources_are_the_callers(chrome):
-    srcs = (_srcs("moy_chrome_panel", 320, 240, False, b"", b"", False)
-            + _srcs("moy_chrome_panel", 320, 240, False, b"zz", b"qq", True)
-            + _srcs("moy_chrome_panel", 320, 240, False, b"", b"", True))
+    srcs = (_srcs("moy_chrome_panel", 320, 240, False, b"", b"")
+            + _srcs("moy_chrome_panel", 320, 240, False, b"zz", b"qq"))
     assert all(s != LIT for s, _ in srcs)
     by = {t: s for s, t in srcs}
     en = _en()
@@ -189,7 +185,7 @@ def test_a_literal_op_is_never_rastered(chrome):
     """moy_chrome's raster draws through moy_text, which refuses a LIT op."""
     lst = moy_play._ChList()
     p = ctypes.cast(ctypes.byref(lst), ctypes.c_void_p)
-    chrome.moy_chrome_panel(p, 320, 240, False, b"", b"", False)
+    chrome.moy_chrome_panel(p, 320, 240, False, b"", b"")
     pal = (ctypes.c_uint16 * 64)(*range(1, 65))
     for src, drawn in ((TABLE, True), (LIT, False)):
         for i in range(lst.n):
@@ -271,7 +267,7 @@ PY_SITES = {
     "native/moy_gfx/modmoy_gfx.c": 2,           # the system canvases' print
     "native/moy_gfx/moy_gfx_kernels.c": 1,      # the `text` kernel
     "native/moy_ui/moy_ui_draw.c": 1,           # every primitive's label
-    "native/moy_play/moy_chrome.c": 5,          # titles, texts, the clock, menu rows
+    "native/moy_play/moy_chrome.c": 4,          # titles, texts, menu rows
 }
 
 

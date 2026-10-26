@@ -171,9 +171,8 @@ def test_the_stuck_words_and_the_budget_rule_are_the_tables():
     assert chrome_ops.say_title(chrome_ops.SAY_STUCK) == "Your game got stuck."
     assert chrome_ops.say_title(chrome_ops.SAY_FIT) == "Too big for this console."
     assert chrome_ops.say_title(chrome_ops.SAY_NEWER) == "Needs a newer console."
-    assert chrome_ops.newer_text("Newer Wasm", ["a", "b"]) == (
-        "Newer Wasm needs a newer console (missing: a, b). Update this console in "
-        "Settings, then try again.")
+    assert chrome_ops.newer_text(["a", "b"]) == (
+        "It uses a, b. Update in Settings, then try again.")
     # docs/os_voice_v1.md's law 3 and §3.2: none of the banned words, no "I".
     for say in range(4):
         t = chrome_ops.say_title(say, 3).lower()

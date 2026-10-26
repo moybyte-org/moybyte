@@ -155,7 +155,7 @@ The few Lua-specific notes:
   load with Lua's own "attempt to load a binary chunk" error, on every tier:
   Lua does not verify bytecode, and a crafted chunk can write outside the VM.
   It is the same door SPEC.md 4.1 shuts by removing `load`.
-- A crash opens the same error panel, and EDIT drops on the offending
+- A crash opens the same stop card, and its See why drops on the offending
   `main.lua` line. The code editor's tap-palette offers `~` (for `~=`) in a
   Lua project.
 - The blocks editor stays Python-only for now (compiles to Python by design).

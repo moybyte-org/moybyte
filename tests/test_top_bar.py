@@ -170,79 +170,6 @@ def _center(rect):
     return x + w // 2, y + h // 2
 
 
-def test_cart_bar_home_icon_goes_home(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    assert ws.screen == "desktop"
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._HOME_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "launcher"
-
-
-def test_cart_bar_edit_icon_opens_editor(tmp_path):
-    """The EDIT/CODE icon opens the cards menu (edit-schema cart) or the code editor
-    (no schema) -- either way leaves the running-cart screen for the menu."""
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._MENU_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "menu"
-
-
-def test_cart_bar_paint_icon_opens_paint(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._PAINT_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "menu" and ws.menu_view == "paint"
-
-
-def test_cart_bar_map_icon_opens_map(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._MAP_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "menu" and ws.menu_view == "map"
-
-
-def test_cart_bar_blocks_icon_opens_blocks(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._BLOCKS_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "menu" and ws.menu_view == "blocks"
-
-
 def test_launcher_bar_menu_opens_settings(tmp_path):
     """Settings moved off the bar into the ≡ system menu (#52). Tapping ≡ on the home
     bar opens the dropdown; SETTINGS (#105: the second selectable row now, after the
@@ -351,29 +278,29 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
     drv.frame(1 / 30)
     assert calls[0] == 0                        # unchanged state -> cache reused
     ws.wifi.connect("Home WiFi", "pw")          # link comes up -> the wifi glyph changes
-    ws._dirty = True                            # crashed frames are static: force a repaint
+    ws._dirty = True
     drv.frame(1 / 30)
     assert calls[0] == 1, "a wifi status change must re-render the bar once"
 
 
 def test_tapping_the_wifi_icon_opens_the_settings_wifi_panel(tmp_path):
     """The wifi widget's target is the Settings WIFI panel, the one wifi
-    implementation (docs/shell_layout_2026-10.md §8): in console mode the
-    Settings page opened at the panel, over whatever ran; never a cart."""
+    implementation (docs/shell_layout_2026-10.md §8): in console mode too
+    its popover hung from the widget (docs/look_2026-10.md step 33), over
+    whatever ran; never a cart."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
     drv.click(*_center(ws.layout.wifi_btn))     # tap the wifi status icon
     drv.frame(1 / 30)
-    assert ws.screen == "settings"
-    assert ws.settings_layer.wifi_view
-    assert ws.cart is None                      # nothing was launched
+    assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
+    assert ws.screen == "launcher" and ws.cart is None   # nothing was launched
     assert "settings" in ws.leases.holders()    # the panel holds the radio
-    drv.click(*_center(ws.layout.context_x_btn))
+    drv.click(*_center(ws.layout.wifi_btn))     # the widget again closes it
     drv.frame(1 / 30)
-    assert ws.screen == "launcher"
-    assert ws.leases.holders() == []            # ...and lets it go on the way out
+    assert not ws.sysmenu.open
+    assert ws.leases.holders() == []            # ...and lets the radio go
 
 
 def test_tapping_the_wifi_icon_on_the_desk_opens_the_panel_as_a_popover(tmp_path):
@@ -403,19 +330,19 @@ def _bar_rows(canvas):
 
 
 def _run_a_cart(tmp_path):
-    """A workstation with a cart open and CRASHED, one frame drawn. Stage 5 retired the
-    #71 pause frame -- the bar auto-hides while a cart PLAYS and shows only on a CRASH
-    (the surviving in-cart chrome), so the running-cart bar tests drive the crashed
-    state. A crashed frame is static, like the old paused one, so the tests force
-    repaints with ws._dirty."""
-    from runtime import host_app
+    """A workstation running a TOOL, one frame drawn: the running-cart bar a
+    game never shows (it owns the glass, and a run that stopped shows the
+    stop card) -- the tool's minimal bar on the game canvas."""
+    from runtime import host_app, moy_carts
     from ws_helpers import no_unlock_banner
     ws = no_unlock_banner(_ws(tmp_path))
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
+    made = moy_carts.create("Tooly", ws.carts_root, src="def _draw():\n    cls(1)\n",
+                            type="tool")
+    ws.carts.rescan()
+    ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
+    ws.run(ws.project, ws.launcher_layer)
     assert ws.screen == "desktop"
-    ws.cart_error = "boom"
     ws._dirty = True
     drv.frame(1 / 30)
     return ws, drv
@@ -432,7 +359,7 @@ def test_cached_cart_bar_is_pixel_identical_to_direct_render(tmp_path):
     # Direct render of the identical state onto a clean canvas.
     direct = make_system_canvas(ws.canvas.w, ws.canvas.h)
     direct.palette = ws.canvas.palette
-    ws.bar_layer._render_cart_bar(direct, ws.bar_layer._cart_bar_key())
+    ws.bar_layer._render_cart_bar(direct, ws.bar_layer._cart_bar_key("tool"))
     assert _bar_rows(direct) == cached
     # And it's a REAL picture (icons + glyph + text), not a blank band.
     assert len(set(cached)) > 2

@@ -316,12 +316,9 @@ def test_a_trap_ends_the_run_with_no_partial_frame_and_no_edit(tmp_path):
     corner = (ws.canvas.h - 1) * w
     px = ws.canvas._buf[2 * corner] | ws.canvas._buf[2 * corner + 1] << 8
     assert px == ws.canvas._wire[0], hex(px)
-    # The crash bar offers no EDIT/CODE for a compiled cart, and its slot
-    # does nothing when tapped.
-    from runtime import bar_layer
-    assert bar_layer._edit_kind(ws.cart) is None
-    x, y, bw, bh = bar_layer._MENU_BTN
-    assert ws.bar_layer.handle_cart_tap(x + 1, y + 1) is False
+    # The stop card offers no See why for a compiled cart: Restart and Home.
+    assert ws.pause.open and ws.pause.stopped
+    assert ws.pause.rows == (ws.pause.RESTART, ws.pause.HOME)
 
 
 # A cart that keeps the console's sample queue full: every _update asks for
@@ -689,7 +686,7 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     free, on the Player's panel drawn as a notice -- no error title, no EDIT,
     the same way out -- and the console runs the next cart as before."""
     _binding_or_skip()
-    from runtime import bar_layer, player
+    from runtime import player
     from runtime.dev_channel import _remote_state
     ws = host_app.build_workstation(_store(tmp_path, _huge, _hello))
     open_cart(ws, "Huge Wasm")
@@ -704,14 +701,11 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     assert p._lua is None and p._update is None and p._draw is None
     assert not ws.wm.top_is("menu"), "a notice threw into the Editor"
     _frames(ws, 3)
-    cv = ws.canvas
-    x, y = (cv.w - min(292, cv.w - 12)) // 2, min(40, (cv.h - min(132, cv.h - 16)) // 2)
-    assert _px(cv, x + 1, y + 1) == cv._wire[ws.player.NAMES["orange"]]
-    assert _px(cv, x + 1, y + 1) != cv._wire[ws.player.NAMES["red"]]
+    # the stop card says so over the screen it was asked from, Home its one row
+    assert ws.pause.open and ws.pause.stopped and ws.pause.rows == (ws.pause.HOME,)
     assert p._notice_title == "Too big for this console."
     st = _remote_state(ws)
     assert st["notice"] == p.notice and st["cart_error"] is None
-    assert bar_layer._edit_kind(ws.cart) is None
     ws._exit_to_caller()
     open_cart(ws, "Hello Wasm")
     assert ws.player.cart_error is None and ws.player.notice is None
@@ -863,8 +857,7 @@ def test_the_notice_never_reads_as_a_fit():
 # -- a cart built for a newer console ----------------------------------------------
 
 NEWER = os.path.join(FIXTURES, "newer.moy")
-NEWER_NOTICE = ("Newer Wasm needs a newer console (missing: later). "
-                "Update this console in Settings, then try again.")
+NEWER_NOTICE = "It uses later. Update in Settings, then try again."
 
 
 def _newer(root):
@@ -908,9 +901,8 @@ def test_a_console_without_write_erase_and_list_refuses_a_cart_that_keeps_files(
     monkeypatch.setattr(wasm_binding, "table", lambda: older)
     ws = host_app.build_workstation(_store(tmp_path, _files))
     open_cart(ws, "Files Wasm")
-    assert ws.player.notice == ("Files Wasm needs a newer console (missing: "
-                                "write, erase, list). Update this console in "
-                                "Settings, then try again."), \
+    assert ws.player.notice == ("It uses write, erase, list. Update in Settings, "
+                                "then try again."), \
         ws.player.cart_error
     ws._exit_to_caller()
     monkeypatch.undo()

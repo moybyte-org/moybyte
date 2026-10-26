@@ -34,7 +34,8 @@ except ImportError:  # pragma: no cover - host fallback
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
-from editors import BlockEditor, KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL, _clone_tree
+from editors import (BlockEditor, KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL, _clone_tree,
+                     text_key as _text_key)
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
 # host_app has aliased it on the host, or `runtime.blocks` when a test loads
@@ -51,8 +52,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    from runtime import layout_base as _layout_base
 
 # The page (editor_blocks.py): the objects' tab row over the outline, a row's
 # pitch and a depth's indent, and the foot under it.
@@ -69,27 +72,24 @@ _FONT_W = 8
 # then for some slots a small option picker), the page's popover; up/down + A
 # walk it, B backs out one level, scrolling by this many rows.
 _BLK_MENU_ROWS = 10
-# The variable name-entry prompt: a small modal with the live name + touch buttons
-# (the kid types on the keyboard; OK/DEL/X are for touch). #29 Bug 2.
-_BLK_KBD = (40, 78, 240, 84)          # the prompt panel
-_BLK_KBD_DEL = (52, 124, 50, 24)      # backspace
-_BLK_KBD_OK = (188, 124, 40, 24)      # confirm
-_BLK_KBD_X = (232, 124, 36, 24)       # cancel
-# The number-entry prompt (#29): a taller modal with an on-screen DIGIT GRID so a
-# kid can TAP a literal in (touch-only / device sym-key-free), plus type it on the
-# keyboard. The grid is 0-9 . - laid out 6-per-row; OK/DEL/X/BLOCK along the bottom.
-_BLK_NUM = (24, 36, 272, 168)         # the prompt panel
-_BLK_NUM_GX = 34                      # digit grid left
-_BLK_NUM_GY = 78                      # digit grid top
-_BLK_NUM_BW = 40                      # one key's width
-_BLK_NUM_BH = 26                      # one key's height
-_BLK_NUM_BPR = 6                      # keys per row
-_BLK_NUM_KEYS = ["1", "2", "3", "4", "5", "6",
-                 "7", "8", "9", "0", ".", "-"]
-_BLK_NUM_DEL = (34, 168, 56, 26)      # backspace
-_BLK_NUM_BLOCK = (96, 168, 60, 26)    # swap to a reporter block (expr slots only)
-_BLK_NUM_OK = (200, 168, 40, 26)      # confirm
-_BLK_NUM_X = (244, 168, 40, 26)       # cancel
+def _strip(ws, lay, keys, desk):
+    """`keys` on a band of their own at the foot of layout `lay`'s content,
+    over the page's foot (a dialog's keys; touch alone shows none)."""
+    if _ui.input_kind() == "touch":
+        return
+    b = _ui_draw.metrics("value_row")[17 if desk else 16] * lay.fs
+    ws.sys_canvas.rect(lay.cx, lay.cy + lay.ch - b, lay.cw, b, ws.theme_colors["panel"])
+    _ui.at(lay.cx, lay.cy + lay.ch - b, lay.cw, b)
+    _ui.hints(keys)
+
+
+# The entry prompts (`_draw_blk_kbd`): their titles by kind, the line under a
+# name's, and the field's caption by kind (a number's is its slot's).
+_KBD_TITLES = {"num": "Type a number", "text": "Type some text", "proc": "Name your block",
+               "param": "Name an input"}
+_KBD_NAME_RULE = "Use letters, numbers and underscores."
+_KBD_CAPTIONS = {"text": "Text"}
+_KBD_SUB = {"tone": "dim", "wrap": True, "lines": 2}
 # In-row slot editing: tapping/right-step on a selected block cycles to its NEXT
 # editable slot; that slot is highlighted, and A opens its editor (number bump,
 # variable/dropdown picker, expr -> a nested expression insert).
@@ -781,10 +781,22 @@ class BlockEditorUI:
         edge (#29): the tap/key that opened it is never its first keystroke."""
         entry = TextEntry(16, _BLK_KBD_ALLOW.get(kind, _blk_name_allow))
         _arm_prompt(self.ws)
-        entry.open(text, getattr(self.ws.input, "last_key", 0) or 0, guard=True)
+        seed = getattr(self.ws.input, "last_key", 0) or 0
+        entry.open(text, seed, guard=True)
+        host = _ui_draw.AppHost()
+        host.key = seed                # the byte that opened it types nothing
         fields["kind"] = kind
         fields["entry"] = entry
+        fields["host"] = host
         self.blk_kbd = fields
+
+    def cancel_prompt(self):
+        """Close the open entry prompt as its Cancel does (the T-Deck's Mic,
+        `Workstation.cancel_field`); False where none is open."""
+        if self.blk_kbd is None:
+            return False
+        self._blk_kbd_cancel()
+        return True
 
     def _blk_open_number_prompt(self, block, name, slot):
         """Open the on-screen number pad to TYPE a literal into a number / expr slot
@@ -1082,21 +1094,15 @@ class BlockEditorUI:
                     ws._dirty = True
                 return
         if self.blk_kbd is not None:
-            # The entry prompt owns input: typed bytes go through its TextEntry
-            # (one insert per physical press), Enter/A confirm, B cancels. The
-            # FIRST input pass after it opens only arms the guarded edge (#29),
-            # so the A/Enter/tap that opened it cannot carry in and close it.
-            entry = self.blk_kbd["entry"]
-            if entry.edge.arming(i.last_key):
-                return
-            ev = entry.feed(i)
-            if ev == TE_COMMIT:
-                self._blk_kbd_commit()
-            elif ev == TE_CANCEL:
-                self._blk_kbd_cancel()
-            if i.pressed("a") or i.pressed("run"):
-                self._blk_kbd_commit()
-            elif i.pressed("b"):
+            # The entry prompt owns input: its dialog's engine takes the typed
+            # bytes, the moves between its stops and Enter; Esc cancels (the
+            # T-Deck's Mic does through Workstation.cancel_field). The key that
+            # opened it types nothing (its host's seed, #29).
+            host = self.blk_kbd["host"]
+            if host.keys(i):
+                ws._dirty = True
+            if host.inp[5] == 27 or i.pressed("stop"):
+                host.inp[5] = 0
                 self._blk_kbd_cancel()
             return
         if self.blk_menu is not None:
@@ -1205,8 +1211,9 @@ class BlockEditorUI:
             if self.page().point(px, py, click, ws.pointer.down):
                 ws._dirty = True
             return
-        if click and self.blk_kbd is not None:
-            self._blk_kbd_click(px, py)
+        if self.blk_kbd is not None:
+            if self.blk_kbd["host"].point(px, py, click, ws.pointer.down):
+                ws._dirty = True
             return
         self._outline_drag(px, py)         # held drag scrolls the outline
         if not click:
@@ -1253,49 +1260,6 @@ class BlockEditorUI:
                             self.blk_slot = si
                     self._blk_reveal()
 
-    def _blk_kbd_click(self, px, py):
-        """Touch handling for the entry prompts. One-frame guard (#29): the tap that
-        OPENED the prompt must not carry into this first pass and immediately commit."""
-        if self.blk_kbd is not None and \
-                self.blk_kbd["entry"].edge.arming(self.ws.input.last_key):
-            return
-        if self.blk_kbd is not None and self.blk_kbd.get("kind") == "num":
-            self._blk_num_click(px, py)
-            return
-        # var / text prompt: DEL backspaces, OK confirms, X cancels (typing is the
-        # on-screen / T-Deck keyboard).
-        if _in(px, py, _BLK_KBD_DEL):
-            self._blk_kbd_key(8); return
-        if _in(px, py, _BLK_KBD_OK):
-            self._blk_kbd_commit(); return
-        if _in(px, py, _BLK_KBD_X):
-            self._blk_kbd_cancel(); return
-        # taps inside the panel are ignored (no dismiss-on-tap-outside: a stray tap
-        # shouldn't discard a half-typed name).
-
-    def _blk_num_click(self, px, py):
-        """Touch handling for the number pad: the on-screen digit grid types a literal
-        (so it works touch-only / without sym keys), DEL backspaces, OK/X confirm/cancel,
-        and BLOCK (expr slots) swaps in a reporter block instead."""
-        k = self.blk_kbd
-        # the digit grid
-        for idx in range(len(_BLK_NUM_KEYS)):
-            r = idx // _BLK_NUM_BPR
-            c = idx % _BLK_NUM_BPR
-            rx = _BLK_NUM_GX + c * _BLK_NUM_BW
-            ry = _BLK_NUM_GY + r * _BLK_NUM_BH
-            if _in(px, py, (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3)):
-                self._blk_kbd_key(ord(_BLK_NUM_KEYS[idx]))
-                return
-        if _in(px, py, _BLK_NUM_DEL):
-            self._blk_kbd_key(8); return
-        if k is not None and k.get("allow_block") and _in(px, py, _BLK_NUM_BLOCK):
-            self._blk_num_to_block(); return
-        if _in(px, py, _BLK_NUM_OK):
-            self._blk_kbd_commit(); return
-        if _in(px, py, _BLK_NUM_X):
-            self._blk_kbd_cancel(); return
-
     def _blk_num_to_block(self):
         """From the number pad, switch to dropping a reporter BLOCK into the slot
         (the Scratch white-oval -> drop-a-block move). Discards the typed number and
@@ -1322,65 +1286,60 @@ class BlockEditorUI:
             self._draw_blk_kbd()
 
     def _draw_blk_kbd(self):
-        """Render whichever entry prompt is up: the number pad (kind == 'num') or the
-        variable-name / text prompt. Indexed API + petme128 only (host == device)."""
-        if self.blk_kbd.get("kind") == "num":
-            self._draw_blk_num()
-            return
-        NAMES = self._NAMES
-        # The prompt is part of the EDITOR, so it draws on the SYSTEM canvas -- NOT
-        # ws.canvas (the 320x240 game canvas). They're the same object at 320x240 (so
-        # the device/small tier was fine), but on a bigger canvas (the Blocks+Scene
-        # workspace, P4, windowed web) the game canvas is a hidden 320x240 buffer, so
-        # drawing here left the modal INVISIBLE -- the editor looked frozen (#85/#93).
-        cv = self.ws.sys_canvas
-        x, y, w, h = _BLK_KBD
-        _ui_draw.dialog(cv, (x, y, w, h))
-        kind = self.blk_kbd.get("kind")
-        is_text = kind == "text"
-        title = {"text": "TYPE SOME TEXT", "proc": "NAME YOUR BLOCK",
-                 "param": "NAME AN INPUT"}.get(kind, "NAME YOUR VARIABLE")
-        cv.print(title, x + 10, y + 8, NAMES["white"], 1)
-        cv.print("type, then OK", x + 10, y + 18, NAMES["light_grey"], 1)
-        # the live edit buffer in a field with a blinking-ish caret bar
-        fx, fy, fw = x + 10, y + 30, w - 20
-        txt = self.blk_kbd["entry"].text[:24]
-        # empty buffer: the default name shows as a dim placeholder (OK keeps it)
-        ph = "" if is_text else str(self.blk_kbd.get("var", ""))[:24]
-        _ui_draw.text_field(cv, (fx, fy, fw, 14), txt, ph)
-        self.ws._btn("DEL", _BLK_KBD_DEL, NAMES["red"], cv)
-        self.ws._btn("OK", _BLK_KBD_OK, NAMES["green"], cv)
-        self.ws._btn("X", _BLK_KBD_X, NAMES["dark_grey"], cv)
-
-    def _draw_blk_num(self):
-        """The number-entry pad: a live value field + an on-screen digit grid (tap a
-        number in, or type it) + DEL/OK/X and a BLOCK swap for expr slots (#29)."""
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas    # the EDITOR's canvas, not the 320x240 game canvas
-                                   # (see _draw_blk_kbd -- same invisible-modal bug, #85/#93)
+        """The entry prompt up (GAPS 52): `ui.dialog` with a captioned
+        `ui.field`, over the Blocks page dimmed -- "Name your variable" (a
+        block's, an input's) with the rule for a name, "Type some text", or
+        "Type a number" with the slot's value as its placeholder and Use a
+        block where the slot takes one. The keys type, so it has no DEL or
+        digit pad; the T-Deck's keys are its hint strip's, where a touch
+        glass and the desk add Cancel and OK. On the SYSTEM canvas: the
+        game canvas is a hidden buffer on a bigger glass (#85/#93)."""
+        ws = self.ws
         k = self.blk_kbd
-        x, y, w, h = _BLK_NUM
-        _ui_draw.dialog(cv, (x, y, w, h))
-        cv.print("TYPE A NUMBER", x + 10, y + 6, NAMES["white"], 1)
-        # live value field; an empty buffer shows the slot's current value, dim (OK keeps it)
-        fx, fy, fw = x + 10, y + 18, w - 20
-        txt = k["entry"].text[:30]
-        cur = k.get("cur")
-        ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
-        _ui_draw.text_field(cv, (fx, fy, fw, 14), txt, ph[:30])
-        # the digit grid (0-9 . -)
-        for idx in range(len(_BLK_NUM_KEYS)):
-            r = idx // _BLK_NUM_BPR
-            c = idx % _BLK_NUM_BPR
-            rx = _BLK_NUM_GX + c * _BLK_NUM_BW
-            ry = _BLK_NUM_GY + r * _BLK_NUM_BH
-            self.ws._btn(_BLK_NUM_KEYS[idx],
-                      (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3), NAMES["indigo"], cv)
-        self.ws._btn("DEL", _BLK_NUM_DEL, NAMES["red"], cv)
-        if k.get("allow_block"):
-            self.ws._btn("BLOCK", _BLK_NUM_BLOCK, NAMES["green"], cv)
-        self.ws._btn("OK", _BLK_NUM_OK, NAMES["green"], cv)
-        self.ws._btn("X", _BLK_NUM_X, NAMES["dark_grey"], cv)
+        kind = k.get("kind")
+        entry = k["entry"]
+        host = k["host"]
+        desk = _layout_base.metric_class() == _layout_base.DESK
+        lay = self.block_layout
+        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        num = kind == "num"
+        to_block = num and k.get("allow_block")
+        keys = (("confirm", "OK") + (("up down", "Use a block") if to_block else ())
+                + ("cancel", "Cancel"))
+        _strip(ws, lay, keys, desk)
+        tdeck = _ui.input_kind() == "tdeck"
+        pick = _ui.dialog(_KBD_TITLES.get(kind, "Name your variable"),
+                          () if tdeck else ("Cancel", "OK"))
+        if not num and kind != "text":
+            _ui.label(_KBD_NAME_RULE, _KBD_SUB)
+        if num:
+            cur = k.get("cur")
+            hint = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
+            cap = str(k.get("slot") or "Number").replace("_", " ")
+            cap = cap[:1].upper() + cap[1:]
+        else:
+            hint = "" if kind == "text" else str(k.get("var", ""))
+            cap = _KBD_CAPTIONS.get(kind, "Name")
+        got, done = _ui.field(cap, entry.text, 24, {"id": "entry", "hint": hint[:24]})
+        if got != entry.text:
+            # what the kind takes of what was typed (a number's digits, a name's letters)
+            t = ""
+            for ch in got:
+                t, _ev = _text_key(t, ord(ch), entry.cap, entry.allow)
+            entry.text = t
+        used = False
+        if to_block:
+            _ui.icon("blocks")
+            used = _ui.button("Use a block")
+        _ui.dialog()
+        if used:
+            self._blk_num_to_block()
+        elif pick == 1 or done:
+            self._blk_kbd_commit()
+        elif pick == 0:
+            self._blk_kbd_cancel()
+        if host.owed or host.tap == 2:
+            ws.request_frame()
 
     def _blk_ink(self, fill_idx):
         """Black or white text, whichever reads on the fill colour (luminance)."""

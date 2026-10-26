@@ -128,7 +128,7 @@ QWERTY is planned.
    file that broke it. **A cart's own SCRIPT does not take this door** (#89):
    the Code tab holds a *file* (SPEC.md §4's `sources`), so every entry in the
    cart's load order routes there, where PLAY, the journal and crash-to-code
-   are. This row is also where the one **NEW SCRIPT** verb lives, offered only
+   are. This row is also where the one **New script** verb lives, offered only
    on a cart whose runtime loads more than `main`; the Code tab's file chip is
    a switcher and has no create.
 6. The script runner with the text console surface.

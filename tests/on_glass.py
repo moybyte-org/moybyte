@@ -3249,8 +3249,7 @@ def wasm_too_big_cart_opens_the_notice(board, board_dir):
 # engine's table (`moycore.wasm_table`) before anything loads.
 
 NEWER_TITLE = "Newer Wasm"
-NEWER_NOTICE = ("Newer Wasm needs a newer console (missing: later). "
-                "Update this console in Settings, then try again.")
+NEWER_NOTICE = "It uses later. Update in Settings, then try again."
 
 
 def wasm_newer_cart_opens_the_notice(board, board_dir):

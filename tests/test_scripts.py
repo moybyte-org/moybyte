@@ -108,11 +108,17 @@ def test_backspace_edits_the_prompt_line_and_never_exits(tmp_path):
 
 def test_the_symbol_palette_types_the_keys_the_keyboard_lacks(tmp_path):
     """The T-Deck has no `=`/`[`/`{`/`<`/`%` keys, so the Code tab shows a
-    tappable palette -- and the prompt shows the same one, because it is the
-    same keyboard."""
+    tappable palette -- and under touch the prompt shows the same one, because
+    it is the same keyboard (with keys, the console's band and hint strip
+    are the mockup's, no palette)."""
+    from runtime import ui_draw
     ws = _ws(tmp_path)
     con = _run(ws, "ask.py", "def _update(dt):\n    input('> ')\n")
-    _frame(ws)
+    ui_draw.input_kind("touch")
+    try:
+        _frame(ws)
+    finally:
+        ui_draw.input_kind("keys")
     assert con._sym_rects, "the palette is drawn while the console reads"
     r = con._sym_rects[0]
     con._pointer(r[0] + 1, r[1] + 1, True, True)

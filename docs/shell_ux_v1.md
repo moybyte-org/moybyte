@@ -79,19 +79,18 @@ never special-cases "was I launched from the editor?", the Editor never special-
 "how do I get back after a test run?", and adding a new caller (a debugger, a
 slideshow, the web view) costs nothing.
 
-*(2026-07-23: a CRASH is an exit too — the **crash-to-code throw**. A cart that
-fails to start or raises mid-frame no longer parks on an OOPS panel waiting for
-a manual TAP-CODE: the run exits straight into the Editor's Code tab with the
-caret on the crashing line, the inline marker set, and a tap/type-dismissible
-error popup over it (`ws._crash_to_code`). On a cart of several scripts
+*(2026-07-23: a CRASH is an exit too — the **crash-to-code throw**, a row of
+the stop card since docs/look_2026-10.md step 33. A cart that fails to start
+or raises mid-frame stops under the stop card, whose See why exits into the
+Editor's Code tab with the caret on the crashing line, the inline marker set,
+and a tap/type-dismissible popover hung under it (`ws._crash_to_code`). On a cart of several scripts
 (SPEC.md 4) it opens the FILE that raised, not whichever the tab was left on --
 on a PICO-8 port that is as often the generated half as the game, and a marker
 on somebody else's line N is worse than none (#89). The marker then RE-CHECKS on every
 edit/undo — it retires only when the source actually parses again, and follows
-the live syntax error while it doesn't. The old panel survives as the
-no-open-cart fallback, and for a compiled (`"runtime": "wasm"`) cart, whose
-trap has no source line behind it: the panel reports it, offers no EDIT, and
-points at HOME. This is still the caller model: the crash path is just one more
+the live syntax error while it doesn't. With no open cart, and for a
+compiled (`"runtime": "wasm"`) cart, whose trap has no source line behind
+it, the card offers no See why: Restart and Home. This is still the caller model: the crash path is just one more
 pop, into the one place the fix can happen.)*
 
 ---

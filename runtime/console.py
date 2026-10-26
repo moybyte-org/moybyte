@@ -235,18 +235,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                 _WebConsoleLayer, _PauseLayer, _ConfirmLayer)
 
 # The unified top bar surface (#46 -- see bar_layer.py). bar_layer.py is the
-# SINGLE SOURCE of the bar geometry constants (_STATUS_H / the tool-switcher
-# button rects); the ones tests reference as console._X are imported back here
-# rather than duplicated. NAMES is injected into the one BarLayer a Workstation
-# builds (circular-import dodge).
+# SINGLE SOURCE of the bar geometry constants (_STATUS_H, _BAR_*); the ones
+# tests reference as console._X are imported back here rather than
+# duplicated. NAMES is injected into the one BarLayer a Workstation builds
+# (circular-import dodge).
 try:
-    from bar_layer import (BarLayer, _BAR_ICON, _BAR_STRIDE, _SYSMENU_BTN, _HOME_BTN,
-                           _MENU_BTN, _PAINT_BTN, _MAP_BTN, _BLOCKS_BTN, _BAR_CLOCK,
-                           _STATUS_H)
+    from bar_layer import BarLayer, _BAR_ICON, _BAR_STRIDE, _STATUS_H
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import (BarLayer, _BAR_ICON, _BAR_STRIDE, _SYSMENU_BTN,
-                                   _HOME_BTN, _MENU_BTN, _PAINT_BTN, _MAP_BTN,
-                                   _BLOCKS_BTN, _BAR_CLOCK, _STATUS_H)
+    from runtime.bar_layer import BarLayer, _BAR_ICON, _BAR_STRIDE, _STATUS_H
 
 # The "Make it mine" config-card editor surface (#3/#15 -- see cards_layer.py).
 # cards_layer.py is the single source of the card geometry constants (_CARD_*);
@@ -267,10 +263,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # imported back here.
 try:
     from settings_layer import SettingsLayer
-    from popover import CalendarLayer, component_for as _component_for
+    from popover import component_for as _component_for
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import SettingsLayer
-    from runtime.popover import CalendarLayer, component_for as _component_for
+    from runtime.popover import component_for as _component_for
 
 # The Python code editor surface (#24/#39 -- see code_layer.py). CodeLayer owns
 # the full-screen text view + drawing + code-UI state; the shared ws.editor
@@ -392,8 +388,15 @@ NO_KEYBOARD_TEXT = "Pair a keyboard to type"
 
 try:
     import ui_draw as _ui_draw
+    import ui as _uiv
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui_draw as _ui_draw
+    from runtime import ui as _uiv
+
+# The loading pill's icon by the kind of cart being opened (GAPS 51).
+_LOADING_ICON = {"game": "game", "app": "app", "tool": "app", "wallpaper": "wallpaper",
+                 "theme": "palette"}
+_FLAT = {"flat": True}
 
 
 # Project (project.py): the open cart's DATA + commit_* verbs; its six data
@@ -1266,7 +1269,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             "settings": self.settings_layer,
             "update": _UpdateLayer(self),
             "webconsole": _WebConsoleLayer(self),   # #197: the parked wasm mode
-            "calendar": CalendarLayer(self),   # the clock's console-mode page
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
 
             "code": self.code_layer,
@@ -1894,34 +1896,39 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         of its bar: down from a top bar, up from a bottom one, inward from a
         side bar. Across a horizontal bar the panel right-aligns to the cell
         so it hangs toward the glass's middle; every anchor is clamped to the
-        canvas, a `ph`-tall panel kept on it. The popover draws on the SYSTEM
-        canvas, so it anchors to the responsive Layout's packing, not the
-        fixed crash-bar slot."""
+        canvas, a `ph`-tall panel kept on it; a component's card keeps the
+        popover's gap off its bar and the glass's edges, and on a handheld
+        hangs at the bar's end. The popover draws on the SYSTEM canvas, so it
+        anchors to the responsive Layout's packing."""
         m = self.sysmenu
         bars = self.layout.bars
         got = _shell_layout.cell_of(bars, widget)
         i, (bx, by, bw, bh) = got if got is not None else (0, self.layout.zone_left)
         edge, (rx, ry, rw, rh) = bars[i][0], bars[i][1]
         cw, ch = self.sys_canvas.w, self.sys_canvas.h
+        e = 0 if widget == "menu" else (8 if self.metric_class == _layout_base.DESK
+                                        else 4 * self.layout.fs)
         if edge == "left":
-            ax = rx + rw
+            ax = rx + rw + e
         elif edge == "right":
-            ax = rx - pw
-        else:
+            ax = rx - pw - e
+        elif self.metric_class == _layout_base.DESK or widget == "menu":
             ax = rx + bx + bw - pw
-        m.anchor_x = max(0, min(ax, cw - pw))
+        else:
+            ax = rx + rw - pw - e
+        m.anchor_x = max(e, min(ax, cw - pw - e))
         m.up = edge == "bottom"
         if edge == "top":
-            m.anchor_y = ry + rh
+            m.anchor_y = ry + rh + e
         elif edge == "bottom":
-            m.anchor_y = ry
+            m.anchor_y = ry - e
         else:
             m.anchor_y = ry + by
             if ph:
-                m.anchor_y = max(0, min(m.anchor_y, ch - ph))
+                m.anchor_y = max(e, min(m.anchor_y, ch - ph - e))
 
     def toggle_popover(self, widget):
-        """A bar widget's popover (desktop mode): open its component anchored
+        """A bar widget's popover: open its component anchored
         at the widget's cell -- one at a time, so another one closes -- or, on
         the anchor tapped again, close it."""
         m = self.sysmenu
@@ -1935,6 +1942,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         m.fs = self.look.effective_font_scale()
         m.cs = self.layout.cs
         w, h = comp.size()
+        desk = self.metric_class == _layout_base.DESK
+        h += 2 if desk else 2 * self.layout.fs   # the card's drop
         w = min(max(w, _POPUP_W * m.fs), self.sys_canvas.w)
         h = min(h, self.sys_canvas.h)
         self._place_popover(widget, w, h)
@@ -1960,21 +1969,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def widget_tap(self, widget):
         """A bar widget's tap (docs/shell_layout_2026-10.md §8): the system
-        menu is the popup it is in both modes; another widget opens its
-        component in a popover in desktop mode, and fullscreen in console
-        mode -- the calendar as its own kind, the wifi and power rows as the
-        Settings page opened at them."""
+        menu is the popup it is; another widget opens its component in a
+        popover hung from it, in both modes (docs/look_2026-10.md step 33)."""
         if widget == "menu":
             self.toggle_sysmenu()
-        elif self.wm.desk_open():
+        else:
             self.toggle_popover(widget)
-        elif widget == "clock":
-            self.open_calendar()
-        elif widget == "wifi":
-            self.open_wifi_panel()
-        elif widget == "battery":
-            self.open_settings()
-            self.settings_layer.show_row("volume")
 
     def open_wifi_panel(self):
         """The wifi widget's target: the Settings WIFI panel, the one wifi
@@ -1986,21 +1986,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return
         self.open_settings()
         self.settings_layer.open_wifi()
-
-    def open_calendar(self):
-        """The clock's console-mode page: the month calendar pushed as its own
-        kind; the clock tapped again, back, B and HOME pop it."""
-        if self.wm.top_is("calendar"):
-            self.close_calendar()
-            return
-        self._calendar_return = self.wm.top_kind()
-        self.layer_of("calendar").view.off = 0
-        self.wm.goto("calendar")
-        self._dirty = True
-
-    def close_calendar(self):
-        self.wm.goto(getattr(self, "_calendar_return", None) or self.wm.root_kind())
-        self._dirty = True
 
     def battery_level(self):
         """The battery's charge in percent, or None where the board reads none
@@ -2244,15 +2229,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self._dirty = True         # the transition's result must paint
 
     def _crash_to_code(self):
-        """A crashed cart run throws the kid STRAIGHT into the code editor on
-        the crashing line, with a dismissible error popup (owner ask
-        2026-07-23) -- replacing the parked OOPS panel + its manual TAP-CODE
-        step at both crash sites (a failed start via run(), a mid-frame crash
-        via Player._frame_running). Returns True when it navigated; False
-        (no open project/cart -- nothing to edit) keeps the caller on the old
-        panel fallback. The dead run's world is released exactly like a
-        normal exit; cart_error/crash_line survive it (the editor's inline
-        marker + the popup read them)."""
+        """The stop card's See why (docs/look_2026-10.md step 33): the code
+        editor on the line that stopped the run, the popover saying what
+        stopped it hung under the line (2026-07-23's crash-to-code throw,
+        now a row of the card). Returns True when it navigated; False (no
+        open project/cart -- nothing to edit; a compiled cart) keeps the
+        card. The dead run's world is released exactly like a normal exit;
+        cart_error/crash_line survive it (the editor's inline marker + the
+        popover read them). A parked console (#197) goes home instead."""
         if self.project is None or self.cart is None:
             return False
         # #197: while WASM MODE is on, the glass is PARKED and the browser owns
@@ -2267,8 +2251,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self.crash_line = None
             self.go_home()
             return True
-        # A compiled cart has no source to throw the kid into: its trap stays on
-        # the error panel, which offers no EDIT (docs/wasm_tier_plan_2026-09.md).
+        # A compiled cart has no source to open: its trap stays on the stop
+        # card, which offers no See why (docs/wasm_tier_plan_2026-09.md).
         if self.cart.get("runtime") == "wasm":
             return False
         err = self.cart_error or "crashed"
@@ -2300,19 +2284,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._dirty = True
         return True
 
-    def _draw_cart_bar(self):
-        """Draw the unified top bar over the CRASH frame (the only cart-path chrome
-        a game gets). The bar is the shell's, not the Player's; the Player asks
-        for it via this thin helper so player.py never reaches the bar surface
-        directly."""
-        self.bar_layer._draw_status_strip("desktop")   # unified top bar (tool switcher)
-
-    def _cart_bar_tap(self, px, py):
-        """Route a CRASH-frame tap to the top-bar tool switcher (bar-owned), returning
-        True iff a tool icon consumed it. Same isolation reason as _draw_cart_bar: the
-        Player calls this instead of reaching the bar surface."""
-        return self.bar_layer.handle_cart_tap(px, py)
-
     def _running_cart_shows_bar(self):
         """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs
         WITH a minimal bar (back + title + status) so it's EXITABLE (Part 4), unlike a
@@ -2331,8 +2302,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 and self.cart.get("type") in BAR_TYPES)
 
     def _draw_tool_bar(self):
-        """Draw the minimal TOOL bar over a running tool/app (Part 4). Shell-owned
-        like _draw_cart_bar; the Player asks for it via this thin helper so
+        """Draw the minimal TOOL bar over a running tool/app (Part 4). Shell-owned;
+        the Player asks for it via this thin helper so
         player.py never reaches the bar surface directly."""
         self.bar_layer._draw_status_strip("tool")   # minimal bar: title + status + X
 
@@ -2343,12 +2314,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         (so the tool underneath doesn't also act on it). Reuses handle_bar_tap("tool") --
         owner is None for "tool", so a non-button tap falls through to the tool."""
         return self.bar_layer.handle_bar_tap("tool", px, py)
-
-    def _draw_error_panel(self):
-        # The on-canvas crash report moved to Player (Stage 2); this stays as the tested
-        # ws. entry point the cards surface reuses for its own malformed-card panel
-        # (cards_layer sets ws.cart_error then calls ws._draw_error_panel()).
-        self.player._draw_error_panel()
 
     def _open_workspace(self, cart=None):
         # Build a fresh Project for `cart` (default: the launcher selection) + start it,
@@ -2979,9 +2944,28 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         search box closes, cleared; Settings' Name gets its text back and
         focus leaves it, its password prompt closes. The T-Deck's Mic does
         this inside a field (owner call, 2026-10-18), where its K types a
-        letter; anywhere else Mic is the console's key. True if it did."""
+        letter; anywhere else Mic is the console's key. The same key closes
+        what sits over the Editor's typing (See why's popover, the Make it
+        mine and Blocks dialogs) and stops a script reading a line. True if it
+        did."""
+        if self.screen == "menu":
+            if self.crash_popup is not None and self.menu_view == "code":
+                self.crash_popup = None
+                self._dirty = True
+                return True
+            if self.menu_view == "cards" and self.cards_layer.prompt is not None:
+                self.cards_layer._close_prompt()
+                return True
+            ui = self.built("block_ui")
+            if self.menu_view == "blocks" and ui is not None and ui.cancel_prompt():
+                self._dirty = True
+                return True
         if self.search_typing and self.screen == "launcher":
             self.close_search(clear=True)
+            return True
+        if self.wm.top_is_player() and self.cart is not None \
+                and self.cart.get("type") == "script" and self.script_console.reading():
+            self._exit_to_caller()        # the script's Stop, where its prompt types
             return True
         if (self.screen == "settings" or self.wm.input_holder() == "settings") \
                 and self.settings_layer.cancel_field():
@@ -3905,8 +3889,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     # (The desktop/running-cart pointer handler -- the pause QUIT/CONTINUE + FPS-chip
     # tap + top-bar tool-switcher routing -- moved to Player.handle_pointer (Stage 2,
-    # player.py); the "desktop" content layer routes to it via _PlayerLayer. The bar
-    # draw/tap it needs stay on the shell, reached via _draw_cart_bar / _cart_bar_tap.)
+    # player.py); the "desktop" content layer routes to it via _PlayerLayer. The tool
+    # bar's draw/tap stay on the shell, reached via _draw_tool_bar / _tool_bar_tap.)
 
     def nav(self, dx, dy):
         # Directional input (host arrows / device trackball). It belongs to
@@ -3974,22 +3958,38 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             rs()
 
     def _draw_loading_toast(self):
-        """#184: the deferred-transition acknowledgment -- a small top-center
-        pill painted on the frame between a
-        tap and its heavy transition. The panel retains this frame for the
-        whole load stall, so the kid sees LOADING instead of a frozen shelf.
-        Drawn on the system canvas above the whole stack; indexed API only
-        (host == device == web)."""
+        """#184: the deferred-transition acknowledgment (GAPS 51) -- the
+        toast's pill in flat fills, painted once on the frame between a tap
+        and its heavy transition, which the panel retains through the load:
+        the cart's kind as an icon and what opens ("Opening Sky Run..."),
+        over the middle of the card being opened on a handheld and in the
+        middle of the bar on the desk, the one band no window covers."""
         cv = self.sys_canvas
-        fs = self.look.effective_font_scale()
-        label = "LOADING..."
-        w = _ui_draw.print_width(label, fs) + 16 * fs
-        h = 16 * fs
-        x = (cv.w - w) // 2
-        y = 24 * fs                    # clear of the 18px-per-fs top bar
-        cv.rect(x, y, w, h, NAMES["black"])
-        cv.rectb(x, y, w, h, NAMES["light_grey"])
-        cv.print(label, x + 8 * fs, y + 4 * fs, NAMES["white"], fs)
+        lay = self.layout
+        desk = self.metric_class == _layout_base.DESK
+        cart = self.launcher.selected() if self.screen == "launcher" else None
+        title = str((cart or {}).get("title") or "").strip()
+        label = ("Opening %s\u2026" % title) if title else "Opening\u2026"
+        kind = _LOADING_ICON.get((cart or {}).get("type"), "play")
+        host = self._loading_host
+        if host is None:
+            host = self._loading_host = _ui_draw.AppHost()
+        host.begin(cv, self.theme_colors, (0, 0, cv.w, cv.h), desk)
+        h = (30 if desk else 20 * lay.fs)
+        if desk:
+            bx, by, bw, bh = lay.bars[0][1] if lay.bars else (0, 0, cv.w, lay.cy)
+            _uiv.at(bx, by + (bh - h) // 2, bw, h)
+        else:
+            r = None
+            if self.screen == "launcher":
+                grid = self.launcher_layer.grid
+                r = grid.tile_rect(getattr(grid, "sel", 0))
+            cy = r[1] + r[3] // 2 if r is not None else lay.cy + lay.ch // 2
+            _uiv.at(8 * lay.fs, cy - h // 2, cv.w - 16 * lay.fs, h)
+            strip = self.menu_ui.about._strip()
+            if strip is not None:         # a load cannot be cancelled: no keys
+                cv.rect(strip[0], strip[1], strip[2], strip[3], self.theme_colors["panel"])
+        self._loading_rect = _uiv.toast(label, kind, _FLAT)
 
     def _disarm_fn(self):
         """The compositor's disarm_scale_fold, or None: probed once per
@@ -4365,10 +4365,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     # -- content-layer draw bodies (routed from the frame() stack loop) -------
     #
-    # (The running-cart content body -- the cart tick + crash chrome -- is
-    # Player.tick (player.py). It fills the DRAWBRK perf split ws._pf_* and asks
-    # the shell for the top bar via _draw_cart_bar. The "desktop" content layer
-    # routes to it via _PlayerLayer.)
+    # (The running-cart content body -- the cart tick -- is Player.tick
+    # (player.py). It fills the DRAWBRK perf split ws._pf_* and opens the stop
+    # card over a run that stopped. The "desktop" content layer routes to it
+    # via _PlayerLayer.)
 
     # (_draw_menu_backdrop -- the frozen-cart backdrop under the cards/paint/map
     # panels -- was removed by the #39 step-3 conversions: every Editor tab is
@@ -4785,10 +4785,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         ui.game_icon_btn."""
         _ui_draw.game_icon_btn(cv if cv is not None else self.canvas, rect,
                              kind, label, fill, _ui_draw.glyph_draw)
-
-    # (_draw_error_panel -- the on-canvas crash report -- moved to Player (Stage 2,
-    # player.py): crash chrome is the Player's own UX, per spec Section 2's "guarantees
-    # the cart will exit".)
 
     def _draw_cursor(self):
         # The pointer lives in SYSTEM-canvas space (it ranges over the panel size),

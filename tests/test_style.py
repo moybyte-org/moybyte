@@ -247,8 +247,9 @@ def test_a_theme_switch_packs_once_and_then_stays_cached(monkeypatch, empty_ring
 _SHELL_KINDS = ("row_menu", "row_list", "row_chrome", "row_cta")
 # Kinds no surface asks for that stay in the table: the part list theme
 # packages name is frozen (docs/theming_2026-09.md §4.3), so a part outlives
-# its last surface. `row_cta` was the old Storybook's NEW row.
-_UNASKED_PARTS = ("row_cta",)
+# its last surface. `row_cta` was the old Storybook's NEW row, `row_list` the
+# power popover's level line (its rows are Settings' sliders since look step 33).
+_UNASKED_PARTS = ("row_cta", "row_list")
 
 _FROZEN_HATCH = {
     "cards_layer.py": (3,
@@ -376,10 +377,9 @@ def test_the_hatch_that_moved_now_names_a_kind_instead():
         if k:
             named[path.name] = len(k)
     assert named == {
-        "cards_layer.py": 3,            # the cards, the ADVANCED row, its file list
-        "popover.py": 2,                # the power popover's level line and its rows
+        "cards_layer.py": 2,            # the cards and the ADVANCED row
     }, named
-    assert sum(named.values()) == 5
+    assert sum(named.values()) == 2
 
 
 def test_every_kind_a_surface_asks_the_catalog_for_exists():
@@ -437,7 +437,7 @@ def test_every_kind_a_surface_asks_the_catalog_for_exists():
 # below IS netted by a golden (verified by mutation: `row_menu` REST turns all
 # ten golden rows red).
 _PRE_207_TRIPLES = {
-    ("row_menu", ui_draw.REST):  # the power popover's rows (popover.PowerRows), the system menu (moy_chrome)
+    ("row_menu", ui_draw.REST):  # the system menu (moy_chrome)
         lambda th: (None, th["chrome_ink_dim"], None),
     ("row_menu", ui_draw.ON):
         lambda th: (th["hilite"], th["selection_ink"], None),

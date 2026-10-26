@@ -191,7 +191,7 @@ def test_meta_modal_edits_title_and_author_and_commits(tmp_path):
     cl = ws.cards_layer
     cl._open_meta()
     assert cl.prompt.field == 0                          # starts on TITLE
-    assert cl.prompt.fields[0].text == "Tune Me"           # pre-filled from the cart
+    assert cl.prompt.texts[0] == "Tune Me"           # pre-filled from the cart
     # clear the pre-filled title, type a new one
     for _ in range(len("Tune Me")):
         cl._prompt_key(8)
@@ -220,13 +220,13 @@ def test_meta_modal_blank_title_stays_open_with_message(tmp_path):
 
     cl = ws.cards_layer
     cl._open_meta()
-    for _ in range(len(cl.prompt.fields[0].text)):
+    for _ in range(len(cl.prompt.texts[0])):
         cl._prompt_key(8)                                   # backspace to empty
-    assert cl.prompt.fields[0].text == ""
+    assert cl.prompt.texts[0] == ""
     cl._prompt_key(13)                                      # Enter -> try to commit
 
     assert cl.prompt is not None                            # stayed open
-    assert cl.prompt.msg == "TITLE CAN'T BE BLANK"
+    assert cl.prompt.msg == "Give it a title."
     assert ws.project.cart["title"] == "Tune Me"             # unchanged
 
 

@@ -78,12 +78,13 @@ void moy_chrome_clear(moy_chrome_list_t *l);
 
 // -- the pieces -----------------------------------------------------------------
 
-// The panel a crashed or refused run leaves: `notice` is the calmer one (a
-// cart this console cannot hold), titled `title` ("" or NULL: the table's
-// default for its kind); `text` word-wrapped; the hint names the way out (a
-// compiled cart has no source to show).
+// The panel the kernel's own run leaves when it refuses or stops a cart (the
+// shell's stop card is console_notices.PauseMenu's): `notice` is the calmer
+// one (a cart this console cannot hold), titled `title` ("" or NULL: the
+// table's default for its kind); `text` word-wrapped; the hint names the way
+// out.
 void moy_chrome_panel(moy_chrome_list_t *l, int cw, int ch, bool notice, const char *title,
-                      const char *text, bool compiled);
+                      const char *text);
 
 // THE PANELS' WORDS (#143): every word the error, fit and newer-console
 // panels say, in one table (moy_chrome.c's SAY), whichever tier draws them,
@@ -115,15 +116,11 @@ int moy_chrome_fit_text(char *out, size_t n, const char *title, uint32_t total,
                         uint32_t block, uint32_t free_, uint32_t largest);
 // The newer-console notice: `missing`, the imports this console's table
 // lacks, comma-separated.
-int moy_chrome_newer_text(char *out, size_t n, const char *title, const char *missing);
+int moy_chrome_newer_text(char *out, size_t n, const char *missing);
 // The stopped run's own two refusals' texts (NOLOAD, CONSOLE).
 const char *moy_chrome_say_text(int say);
 
-// The strip. The crash bar (the running cart's tool switcher, on the fixed
-// 320-wide game canvas): `edit` 1 a Make-it-mine cart, 0 code, -1 a compiled
-// cart (no EDIT slot).
-void moy_chrome_strip_crash(moy_chrome_list_t *l, int cw, int edit, const char *clock,
-                            const char *wifi);
+// The strip.
 // The band every other bar starts with: `light` is a light band (a window's
 // toolbar under a light theme, or a light theme's bar).
 void moy_chrome_strip_band(moy_chrome_list_t *l, int cw, int bar_h, bool light);

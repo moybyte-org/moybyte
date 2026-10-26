@@ -146,12 +146,18 @@ def test_code_popups_are_toolkit_rows(tmp_path, monkeypatch):
     assert counter.n["row"] == 1 + 2
 
 
-def test_the_crash_popup_is_a_toolkit_dialog(tmp_path, monkeypatch):
+def test_the_crash_popup_is_a_popover_of_the_verbs(tmp_path, monkeypatch):
+    """See why's popover (docs/look_2026-10.md step 33): `ui.popover`, hung
+    under the stopped line, never the old dialog shell."""
+    from runtime import ui
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
     counter = _Counter(monkeypatch)
+    opened = []
+    real = ui.popover
+    monkeypatch.setattr(ui, "popover", lambda *a, **k: (opened.append(a[:1]), real(*a, **k))[1])
     ws.crash_popup = "TypeError: unsupported types for __add__"
     _frame(ws)
-    assert counter.n["dialog"] == 1
+    assert counter.n["dialog"] == 0 and ("Stopped",) in opened
 
 
 # ------------------------------------------------------------- the config tab

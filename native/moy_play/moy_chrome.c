@@ -225,14 +225,12 @@ int moy_chrome_fit_text(char *out, size_t n, const char *title, uint32_t total,
     return moy_str_fmt(out, n, id, t, a, b, again);
 }
 
-int moy_chrome_newer_text(char *out, size_t n, const char *title, const char *missing) {
-    return moy_str_fmt(out, n, MOY_S_NEWER_TEXT,
-                       title != NULL && *title ? title : moy_str(MOY_S_FIT_THIS_GAME),
-                       missing != NULL ? missing : "");
+int moy_chrome_newer_text(char *out, size_t n, const char *missing) {
+    return moy_str_fmt(out, n, MOY_S_NEWER_TEXT, missing != NULL ? missing : "");
 }
 
 void moy_chrome_panel(moy_chrome_list_t *l, int cw, int ch, bool notice, const char *title,
-                      const char *text, bool compiled) {
+                      const char *text) {
     // Sized against the surface: a cart-declared small canvas still gets a
     // panel that fits.
     int w = cw - 12 < 292 ? cw - 12 : 292;
@@ -262,38 +260,8 @@ void moy_chrome_panel(moy_chrome_list_t *l, int cw, int ch, bool notice, const c
         panel_lines(l, src, text, cols, max_rows, x + 8, y + 20,
                     ink(notice ? MOY_INK_WHITE : MOY_INK_PEACH));
     }
-    // A compiled cart's trap has no source line behind it and no EDIT.
-    print(l, MOY_TEXT_TABLE, moy_str(compiled ? MOY_S_CHROME_HINT_HOME : MOY_S_CHROME_HINT_CODE),
-          -1, x + 8, y + h - 12, ink(MOY_INK_YELLOW), 1);
-}
-
-// The bar's fixed game-canvas geometry (runtime/bar_layer.py's constants).
-#define BAR_H 18
-#define BAR_ICON 16
-#define BAR_STRIDE 18
-#define BAR_Y 1
-#define BAR_BATT_X (320 - 2 - BAR_ICON)
-#define BAR_WIFI_X (BAR_BATT_X - BAR_STRIDE)
-#define BAR_CLOCK_X (BAR_WIFI_X - 2 - 5 * 8)
-
-void moy_chrome_strip_crash(moy_chrome_list_t *l, int cw, int edit, const char *clock,
-                            const char *wifi) {
-    rect(l, 0, 0, cw, BAR_H, ink(MOY_INK_BAR));
-    rect(l, 0, BAR_H - 1, cw, 1, ink(MOY_INK_BAR_EDGE));         // the shelf edge
-    // The tool switcher: the menu glyph leftmost, then HOME, EDIT|CODE (none
-    // for a compiled cart), PAINT, MAP, BLOCKS, MUSIC one stride apart.
-    glyph(l, "menu", 2, BAR_Y, BAR_ICON, BAR_ICON, ink(MOY_INK_CHROME), 0);
-    icon(l, "home", 2 + BAR_STRIDE, BAR_Y, 0);
-    if (edit >= 0) {
-        icon(l, edit ? "edit" : "code", 2 + 2 * BAR_STRIDE, BAR_Y, 0);
-    }
-    icon(l, "paint", 2 + 3 * BAR_STRIDE, BAR_Y, 0);
-    icon(l, "map", 2 + 4 * BAR_STRIDE, BAR_Y, 0);
-    icon(l, "blocks", 2 + 5 * BAR_STRIDE, BAR_Y, 0);
-    icon(l, "music", 2 + 6 * BAR_STRIDE, BAR_Y, 0);
-    print(l, MOY_TEXT_PY, clock, -1, BAR_CLOCK_X, 3, ink(MOY_INK_CHROME), 1);
-    icon(l, wifi, BAR_WIFI_X, BAR_Y, 0);
-    icon(l, "batt", BAR_BATT_X, BAR_Y, 0);
+    print(l, MOY_TEXT_TABLE, moy_str(MOY_S_CHROME_HINT_HOME), -1, x + 8, y + h - 12,
+          ink(MOY_INK_YELLOW), 1);
 }
 
 void moy_chrome_strip_band(moy_chrome_list_t *l, int cw, int bar_h, bool light) {

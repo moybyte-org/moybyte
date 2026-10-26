@@ -3020,7 +3020,8 @@ def test_a_widget_tap_opens_its_popover_at_its_cell(tmp_path):
         m = ws.sysmenu
         assert m.open and m.widget == name
         x, y, w, h = m.panel_rect()
-        assert y == ws.layout.bars[0][1][3]           # hangs from the top bar
+        # hangs from the top bar, a component's card the popover's gap below it
+        assert y == ws.layout.bars[0][1][3] + (0 if name == "menu" else 8)
         assert 0 <= x and x + w <= ws.sys_canvas.w
         assert (m.comp is None) == (name == "menu")
         _tap_widget(ws, drv, name)                    # the anchor again closes it

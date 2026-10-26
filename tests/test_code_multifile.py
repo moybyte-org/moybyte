@@ -359,10 +359,10 @@ def test_the_new_script_door_is_offered_only_where_it_would_run(tmp_path):
 
     cl = ws.cards_layer
     cl._open_files()
-    assert "+ NEW SCRIPT" in cl.files["rows"]
+    assert "New script" in cl.files["rows"]
     ws.open_in_editor(moy_carts.load(str(py)))
     cl._open_files()
-    assert "+ NEW SCRIPT" not in cl.files["rows"]
+    assert "New script" not in cl.files["rows"]
 
 
 def test_new_script_names_the_file_and_opens_it_in_the_code_tab(tmp_path):
@@ -370,9 +370,9 @@ def test_new_script_names_the_file_and_opens_it_in_the_code_tab(tmp_path):
     ws.set_menu_view("cards")
     cl = ws.cards_layer
     cl._open_files()
-    cl._files_open("+ NEW SCRIPT")
+    cl._files_open("New script")
     assert cl.prompt is not None and cl.prompt.kind == "newf"
-    cl.prompt.fields[0].text = "Enemy Helpers!"
+    cl.prompt.texts[0] = "Enemy Helpers!"
     cl._commit_prompt()
 
     assert cl.prompt is None and cl.files is None
@@ -389,13 +389,13 @@ def test_new_script_refuses_a_taken_name_and_an_unusable_one(tmp_path):
     ws.set_menu_view("cards")
     cl = ws.cards_layer
     cl._open_files()
-    cl._files_open("+ NEW SCRIPT")
-    cl.prompt.fields[0].text = "extra"
+    cl._files_open("New script")
+    cl.prompt.texts[0] = "extra"
     cl._commit_prompt()
-    assert cl.prompt is not None and cl.prompt.msg == "THAT NAME IS TAKEN"
-    cl.prompt.fields[0].text = "!!!"
+    assert cl.prompt is not None and cl.prompt.msg == "There's a file with that name."
+    cl.prompt.texts[0] = "!!!"
     cl._commit_prompt()
-    assert cl.prompt is not None and cl.prompt.msg == "NAME IT WITH LETTERS"
+    assert cl.prompt is not None and cl.prompt.msg == "Start its name with a letter."
 
 
 def test_a_projects_own_script_routes_to_the_code_tab_not_the_text_handle(
@@ -426,8 +426,8 @@ def test_a_script_added_here_actually_runs(tmp_path):
     ws.set_menu_view("cards")
     cl = ws.cards_layer
     cl._open_files()
-    cl._files_open("+ NEW SCRIPT")
-    cl.prompt.fields[0].text = "helpers"
+    cl._files_open("New script")
+    cl.prompt.texts[0] = "helpers"
     cl._commit_prompt()
     assert ws.code_file_name() == "helpers.lua"
     ws.editor.set_text("function bump() seen = seen + 1 end\n")

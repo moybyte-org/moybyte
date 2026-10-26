@@ -4,11 +4,11 @@
 // its canvas (runtime/ui.py's replay).
 //
 //   chrome_inks(inks, bar_light, rings)
-//   chrome_panel(cw, ch, notice, title, text, compiled)
+//   chrome_panel(cw, ch, notice, title, text)
 //   chrome_say_title(say, line), chrome_crash_title(text, line|None),
 //   chrome_fit_text(title, total, block, free, largest),
-//   chrome_newer_text(title, missing): the panels' words (#143)
-//   chrome_strip_crash(cw, edit, clock, wifi), chrome_strip_band(cw, bar_h,
+//   chrome_newer_text(missing): the panels' words (#143)
+//   chrome_strip_band(cw, bar_h,
 //   light), chrome_strip_cell(kind, rect, cs, dy, s|None, across)
 //   chrome_menu(rows, sel, x, y, w, h, fs, cs)
 //   chrome_notice(title, sub, ok, until_ms),
@@ -75,10 +75,10 @@ static mp_obj_t ch_panel(size_t n, const mp_obj_t *a) {
     (void)n;
     moy_chrome_list_t *l = list();
     moy_chrome_panel(l, mp_obj_get_int(a[0]), mp_obj_get_int(a[1]), mp_obj_is_true(a[2]),
-                     s_of(a[3]), s_of(a[4]), mp_obj_is_true(a[5]));
+                     s_of(a[3]), s_of(a[4]));
     return ops(l);
 }
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_panel_obj, 6, 6, ch_panel);
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_panel_obj, 5, 5, ch_panel);
 
 // The panels' words (#143), as strings.
 static mp_obj_t say_str(const char *b, int len) {
@@ -110,21 +110,12 @@ static mp_obj_t ch_fit_text(size_t n_args, const mp_obj_t *a) {
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_fit_text_obj, 5, 5, ch_fit_text);
 
-static mp_obj_t ch_newer_text(mp_obj_t title, mp_obj_t missing) {
+static mp_obj_t ch_newer_text(mp_obj_t missing) {
     char b[320];
-    int n = moy_chrome_newer_text(b, sizeof(b), s_of(title), s_of(missing));
+    int n = moy_chrome_newer_text(b, sizeof(b), s_of(missing));
     return say_str(b, n < (int)sizeof(b) ? n : (int)sizeof(b) - 1);
 }
-MP_DEFINE_CONST_FUN_OBJ_2(moy_chrome_newer_text_obj, ch_newer_text);
-
-static mp_obj_t ch_crash(size_t n, const mp_obj_t *a) {
-    (void)n;
-    moy_chrome_list_t *l = list();
-    moy_chrome_strip_crash(l, mp_obj_get_int(a[0]), mp_obj_get_int(a[1]), s_of(a[2]),
-                           s_of(a[3]));
-    return ops(l);
-}
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_crash_obj, 4, 4, ch_crash);
+MP_DEFINE_CONST_FUN_OBJ_1(moy_chrome_newer_text_obj, ch_newer_text);
 
 static mp_obj_t ch_band(mp_obj_t cw, mp_obj_t bar_h, mp_obj_t light) {
     moy_chrome_list_t *l = list();

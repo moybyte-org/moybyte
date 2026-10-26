@@ -371,14 +371,14 @@ an `app` block, a regenerated `app_decls.py` and a firmware build.
 
 ### Crash isolation: three strikes (#160)
 
-The Player has turned a cart exception into the friendly panel plus
-crash-to-code since 2026-07-23. What it cannot catch is a cart that does not
+The Player turns a cart exception into the stop card (its See why opens the
+code on the line; docs/look_2026-10.md step 33). What it cannot catch is a cart that does not
 raise -- a hang, an OOM, a native fault -- and if the thing that died runs
 itself, the next boot runs it again. `runtime/crash_guard.py` marks the app id in
 `system.json` BEFORE the cart's code is compiled and clears it after three
 painted frames (a compiled app whose frames the kernel's Player drew clears it
 at the run's end, from that run's own frame count); three unhealed opens and the console stops running it, landing
-the next tap on the ordinary error panel whose top bar carries EDIT/CODE. The
+the next tap on the ordinary stop card, whose See why opens its code. The
 cart stays on Make, because editing it is how it gets fixed.
 
 The Player arms it for `type: "app"` carts only. Two small settings writes per

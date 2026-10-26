@@ -281,7 +281,7 @@ word — it's a deliberate mapping that mirrors the product journey:
 
 | Word | When | Example surfaces |
 |---|---|---|
-| **cartridge / cart** | The object on the shelf — the thing you play and own. The universal noun; "everything is a cartridge" is the product | Library, `CART INFO`, the system menu's Delete cart, crash panel |
+| **cartridge / cart** | The object on the shelf — the thing you play and own. The universal noun; "everything is a cartridge" is the product | Library, Cart info, the system menu's Delete cart, the stop card |
 | **project** | The *same* cartridge while open in the Studio — yours, in progress | the home's Make tab (`N PROJECTS`), `YOUR PROJECTS`, MAKE captions |
 | **game** | Only cartridges that are actually games (attach-to-game flows, `NO GAMES YET`) | Files app verbs |
 | **app** | System tools (Files, Paint, Settings) | Docs, taskbar |

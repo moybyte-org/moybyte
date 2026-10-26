@@ -59,8 +59,19 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 try:
     from code_layer import symbols_for, draw_symbol_keys
+    import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import symbols_for, draw_symbol_keys
+    from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
+
+# Where an echoed line's answer starts in its row: what was typed draws in
+# `value` (`draw`), and the row as read has no mark.
+_ANSWER = "\x01"
+_ENDED = "The script ended."
+_KEYS_READING = ("confirm", "Send", "cancel", "Stop")
+_KEYS_ENDED = ("confirm", "Run again", "back", "Back")
 
 
 # Lua has no `input` of its own and libmoy owns `print` (the DRAW verb), so a
@@ -125,6 +136,8 @@ class TextConsole:
         self._lang = "python"
         self._drag = None         # (y, back) while a finger scrolls the log
         self._sym_rects = ()      # built by draw(), read by the tick's pointer
+        self.ended = False        # the script's run is over (its prompt band says so)
+        self._host = _ui_draw.AppHost()   # the hint strip's UI context
 
     # -- the ring -------------------------------------------------------------
 
@@ -143,7 +156,7 @@ class TextConsole:
         """Row `i`, oldest first."""
         if i < 0 or i >= self._n:
             return ""
-        return self._buf[(self._start + i) % self._cap]
+        return self._buf[(self._start + i) % self._cap].replace(_ANSWER, "")
 
     def text(self):
         """The whole scrollback as one string -- what a test reads."""
@@ -218,7 +231,7 @@ class TextConsole:
     def submit(self):
         """Enter: echo the line, then hand it to `on_line` or to `input()`."""
         line = self.ed.text()
-        self.write(self._prompt + line + "\n")
+        self.write(self._prompt + _ANSWER + line + "\n")
         self.ed.set_text("")
         if self.on_line is not None:
             self._armed = False
@@ -236,7 +249,12 @@ class TextConsole:
         self._ekey.prev = code or 0
 
     def key(self, code):
-        """One keyboard byte. Enter submits; everything else edits the line."""
+        """One keyboard byte. Enter submits; everything else edits the line.
+        After the script ended, Enter runs it again."""
+        if code in (0x0D, 0x0A) and self.ended and not self.reading():
+            self.ws._reset_canvas_state()
+            self.ws._start()
+            return True
         if not code or not self.reading():
             return False
         if code in (0x0D, 0x0A):
@@ -267,6 +285,7 @@ class TextConsole:
         self._lang = lang
         self._ekey = KeyEdge()
         self._drag = None
+        self.ended = False
 
     def api(self):
         """The names a cart with the `console` permission gets. `print` SHADOWS
@@ -313,6 +332,9 @@ class TextConsole:
                 _step(gen)
                 return
             if fn is None:
+                if not self.ended and not self.reading():
+                    self.ended = True     # a body that only printed, or a run that stopped
+                    self._dirty()
                 return
             try:
                 got = fn(dt)
@@ -385,47 +407,88 @@ class TextConsole:
         return max(1, int(getattr(self.ws.canvas, "font_scale", 1) or 1))
 
     def _lh(self):
-        return 10 * self._fs()
+        return _ui_draw.font("mono")[2] * self._fs() + 4 * self._fs()
 
     def draw(self):
         """The run's draw hook: the whole console, on whatever surface the
-        Player bound for this script. Takes no arguments -- it is called
-        exactly where a cart's `_draw` would be."""
+        Player bound for this script (docs/look_2026-10.md step 33): the code
+        surface, the scrollback in the code face, what was typed in `value`,
+        the prompt line on a band at the foot with the caret in `accent` --
+        or, after the script ended, that it did -- and the hint strip under
+        it. Takes no arguments -- it is called exactly where a cart's `_draw`
+        would be."""
+        # the shell's pixels, not the script's: its fonts and its colours,
+        # whatever the app-cart boundary is at
+        was = _ui_draw.cart_text(False)
+        try:
+            self._draw()
+        finally:
+            _ui_draw.cart_text(was)
+
+    def _draw(self):
         cv = self.ws.canvas
         th = self.ws.theme_colors
         fs = self._fs()
-        fw = 8 * fs
-        lh = 10 * fs
-        bg, out_ink, in_ink, accent = self._tones(th)
-        _cx, top, _cw, ch = self.ws.app_content_rect()   # under the host's strip
-        bottom = top + ch
-        pad = 3 * fs
-        cv.rect(0, top, cv.w, ch, bg)
-        # The band the prompt + its symbol palette own, reserved whether or not
-        # a line is being read so the log does not jump as a script starts and
-        # stops asking.
-        sym_h = 12 * fs + 2 * pad
-        band = lh + 2 * pad + sym_h
-        body_h = ch - band
-        self.cols = max(self.MIN_COLS, (cv.w - 2 * pad) // fw)
-        self.rows = max(self.MIN_ROWS, body_h // lh)
+        fid, cell, line, _asc = _ui_draw.font("mono")
+        fw = cell * fs
+        lh = line * fs + 4 * fs
+        out_ink, dim, value, accent = th["ink"], th["ink_dim"], th["value"], th["accent"]
+        cx, top, cw, ch = self.ws.app_content_rect()   # under the host's strip
+        self._host.begin(cv, th, (cx, top, cw, ch))
+        touch = _ui.input_kind() == "touch"
+        foot = 0
+        if not touch:
+            keys = _KEYS_READING if self.reading() else _KEYS_ENDED if self.ended else ()
+            if keys:
+                foot = _ui_draw.metrics("value_row")[16] * fs
+                cv.rect(cx, top + ch - foot, cw, foot, th["panel"])
+                _ui.at(cx, top + ch - foot, cw, foot)
+                _ui.hints(keys)
+        bottom = top + ch - foot
+        pad = 8 * fs
+        cv.rect(cx, top, cw, bottom - top, th["surface"])
+        sym_h = 12 * fs + 2 * 3 * fs if touch else 0
+        band = lh + 2 * pad
+        body_h = bottom - top - band - sym_h
+        self.cols = max(self.MIN_COLS, (cw - 2 * pad) // fw)
+        self.rows = max(self.MIN_ROWS, (body_h - pad) // lh)
         self.ed.set_view_size(self.cols, 1)
         self.ed._scroll()                # the one-line prompt follows its caret
-        # The log, oldest-visible first. `back` is how far up from the tail.
-        first = max(0, self._n - self.rows - self.back)
-        y = top + pad
-        for i in range(first, min(self._n, first + self.rows)):
-            cv.print(self.row(i), pad, y, out_ink, 1)
-            y += lh
-        self._sym_rects = ()
-        py = bottom - band + pad
-        if not self.reading():
-            return
-        line = self._prompt + self.ed.text()
-        show = line[-self.cols:] if len(line) > self.cols else line
-        cv.print(show, pad, py, in_ink, 1)
-        cv.rect(pad + len(show) * fw, py, fw, 8 * fs, accent)
-        self._draw_symbols(cv, bottom - sym_h, sym_h, fs)
+        was = _ui_draw.print_font(fid)
+        try:
+            # The log, oldest-visible first. `back` is how far up from the tail.
+            first = max(0, self._n - self.rows - self.back)
+            y = top + pad
+            for i in range(first, min(self._n, first + self.rows)):
+                raw = self._buf[(self._start + i) % self._cap]
+                cut = raw.find(_ANSWER)
+                if cut < 0:
+                    cv.print(raw, cx + pad, y, out_ink, 1)
+                else:
+                    cv.print(raw[:cut], cx + pad, y, dim, 1)
+                    cv.print(raw[cut + 1:], cx + pad + cut * fw, y, value, 1)
+                y += lh
+            self._sym_rects = ()
+            by = bottom - band - sym_h
+            cv.rect(cx, by, cw, band, th["surface_alt"])
+            cv.rect(cx, by, cw, fs, th["border"])
+            ty = by + pad
+            if self.reading():
+                typed = self.ed.text()
+                ask = self._prompt[-self.cols:]
+                room = max(0, self.cols - len(ask))
+                typed = typed[-room:] if room and len(typed) > room else typed[:room]
+                cv.print(ask, cx + pad, ty, dim, 1)
+                x = cx + pad + len(ask) * fw
+                cv.print(typed, x, ty, value, 1)
+                cv.rect(x + len(typed) * fw + fs, ty, fs, line * fs, accent)
+                if touch:
+                    self._draw_symbols(cv, bottom - sym_h, sym_h, fs)
+            elif self.ended:
+                _ui_draw.print_font(_ui_draw.font("ui")[0])
+                cv.print(_ENDED, cx + pad, ty, dim, 1)
+        finally:
+            _ui_draw.print_font(was)
 
     def _draw_symbols(self, cv, y, h, fs):
         """The Code tab's tappable symbol palette, under the prompt: the same
@@ -440,16 +503,6 @@ class TextConsole:
                          fs, (cell - 1 - 8 * fs) // 2 - 8 * fs,
                          (h - 1 - 8 * fs) // 2 - 8 * fs, rects, th=self.ws.theme_colors)
         self._sym_rects = tuple(rects)
-
-    def _tones(self, th):
-        """(background, output ink, typed ink, caret) -- the code editor's two
-        branches, because the console is the same kind of surface."""
-        NAMES = self.NAMES
-        if th.get("ink", NAMES["white"]) != 0:          # dark chrome
-            return (th.get("surface", NAMES["black"]), NAMES["light_grey"],
-                    NAMES["white"], th.get("accent", NAMES["yellow"]))
-        return (th["surface"], th.get("ink_dim", th["ink"]), th["ink"],
-                th.get("accent", NAMES["yellow"]))
 
 
 def _err_text(exc):

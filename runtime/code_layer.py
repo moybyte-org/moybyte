@@ -42,10 +42,20 @@ from editors_base import KeyEdge
 try:
     import ui as _ui
     import ui_draw as _ui_draw
+    import layout_base as _lb
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
+    from runtime import layout_base as _lb
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
+# See why's popover's lines (`_draw_crash_popup`).
+_STOP_HEAD = {"face": "title"}
+_STOP_TEXT = {"face": "mono", "wrap": True, "lines": 4}
+_STOP_DIM = {"tone": "dim"}
+
+
+def _desk():
+    return _lb.metric_class() == _lb.DESK
 try:
     from moy_input import PB_MIDDLE as _PB_MIDDLE, SHIFT as _SHIFT
 except ImportError:  # pragma: no cover - host fallback
@@ -351,6 +361,7 @@ class CodeLayer:
         self._hl_old = {}             # ...and the generation it retires (see _hl)
         self._hl_lua = None           # ...the language both were built for
         self._t = None                # per-draw tone map (set by _draw_code)
+        self._stop_host = None        # the stopped line's popover's UI context
         # -- #89 additions: selection / tools / find / gutter -----------------
         self._tools_open = False      # the tool palette row is shown
         self._select_mode = False     # SELECT mode: a code drag extends the selection
@@ -440,55 +451,48 @@ class CodeLayer:
         # CLOSE band: PLAY/X live in the bar now, SAVE is an automatic exit-path commit.
         self.ws.bar_layer._draw_status_strip("menu")
         if self.ws.crash_popup:
-            was = _ui_draw.print_font(_ui_draw.font("mono")[0])
-            try:
-                self._draw_crash_popup()   # crash-to-code (owner 2026-07-23): the
-            finally:                       # dismissible error popup over the marked line
-                _ui_draw.print_font(was)
+            self._draw_crash_popup()       # the stop card's See why: what stopped
+                                           # the run, hung under its line
 
     def _draw_crash_popup(self):
-        """The crash-to-code popup: the full error text in a danger-framed panel
-        over the code body (the caret already sits on the crashing line). A tap
-        anywhere -- or the first edit -- dismisses it (handle_pointer /
-        _clear_err). Theme-aware: reads the surface/ink tokens, so it works on
-        every theme and both variants."""
+        """See why's popover (docs/look_2026-10.md step 33): hung under the
+        line that stopped the run, after the gutter (the caret already sits
+        on it), "Stopped on this line", the error in the code face, and that
+        the first edit closes it; a tap anywhere, Esc (Mic on the T-Deck)
+        or the first edit dismisses it (handle_pointer / _clear_err)."""
         ws = self.ws
         cv = ws.sys_canvas
-        th = ws.theme_colors
-        fs = getattr(cv, "font_scale", 1)
-        fw = ws.code_layout.cell                # it prints in the mono face
-        lh = max(10 * fs, ws.code_layout.lh)
-        maxc = max(12, min(34, (cv.w - 32 * fs) // fw - 2))
-        text = str(ws.crash_popup)
-        lines = []
-        for raw in text.split("\n"):
-            raw = raw.rstrip()
-            while len(raw) > maxc and len(lines) < 4:
-                lines.append(raw[:maxc])
-                raw = raw[maxc:]
-            if len(lines) >= 4:
-                break
-            lines.append(raw)
-        lines = lines[:4]
-        title = "Stopped on this line."
-        foot = "TAP TO CLOSE"
-        w = (max([len(title), len(foot)] + [len(l) for l in lines]) + 2) * fw \
-            + 8 * fs
-        w = min(w, cv.w - 8 * fs)
-        strip = 12 * fs
-        h = strip + (len(lines) + 1) * lh + 14 * fs
-        x = (cv.w - w) // 2
-        y = max(20 * fs, (cv.h - h) // 3)
-        _ui_draw.dialog(cv, (x, y, w, h), ring=th["danger"], fill=th["surface"])
-        cv.rect(x + 1, y + 1, w - 2, strip, th["danger"])
-        cv.print(title, x + 4 * fs, y + 2 * fs, 7, 1)
-        ty = y + strip + 4 * fs
-        for l in lines:
-            cv.print(l, x + 4 * fs, ty, th["ink"], 1)
-            ty += lh
-        cv.print(foot, x + 4 * fs, y + h - 11 * fs, th["ink_dim"], 1)
+        lay = ws.code_layout
+        ed = ws.editor
+        fs = lay.fs
+        desk = _desk()
+        host = self._stop_host
+        if host is None:
+            host = self._stop_host = _ui_draw.AppHost()
+        host.begin(cv, ws.theme_colors, (0, 0, cv.w, cv.h), desk)
+        x = lay.x0
+        y, h = lay.y0, 0
+        row = ws.code_err_row
+        if ed is not None:
+            x += self._gutter_cols(ed) * lay.cell
+            if row is not None and ed.top <= row < ed.top + ed.ROWS:
+                y, h = lay.y0 + (row - ed.top) * lay.lh, lay.lh
+        e = 8 if desk else 4 * fs
+        w = min(cv.w - x - e, 560 if desk else cv.w)
+        _ui.at(x, y, w, h)
+        _ui.popover("Stopped", w)
+        _ui.icon("warn")
+        _ui.label("Stopped on this line", _STOP_HEAD)
+        _ui.label(str(ws.crash_popup).strip(), _STOP_TEXT)
+        _ui.label("Your first edit closes this.", _STOP_DIM)
+        _ui.hints(("cancel", "Close"))
+        _ui.popover()
 
     def handle_input(self, i):
+        if self.ws.crash_popup is not None and i.last_key == 27:
+            self.ws.crash_popup = None     # Esc closes See why's popover
+            self.ws.mark_dirty()
+            return True
         if i.last_key or i.any_pressed():
             self._mouse.stop()         # any key ends a latched autoscroll
         if self._mouse.armed:

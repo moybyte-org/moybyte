@@ -315,10 +315,7 @@ class _PerfLayer(Layer):
     domain = "game"
 
     def draw(self, dt):
-        ws = self.ws
-        ws.perf_ui._draw_fps()
-        if ws.perf_hud:
-            ws.perf_ui._draw_perf_hud()   # frame-time breakdown above the FPS chip
+        self.ws.perf_ui.draw()
 
 
 class _PauseLayer(Layer):
@@ -448,6 +445,9 @@ class _SysMenuLayer(Layer):
                 else:
                     m.close()             # outside dismisses
                     ws.popover_touch()
+                    c = ws.layout.clock_hit()
+                    if c[0] <= px < c[0] + c[2] and c[1] <= py < c[1] + c[3]:
+                        ws.ach_ui._tap_clock()    # the clock's egg counts the tap that closes it
             elif ws.menu_ui.looked():
                 hit = ws.menu_ui.look_hit(px, py)
                 if hit is None:

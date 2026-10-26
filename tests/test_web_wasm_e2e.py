@@ -242,8 +242,7 @@ def test_a_cart_built_for_a_newer_console_is_refused_with_the_notice(tmp_path):
     assert len(js) == 1, "the scenario did not run to its end:\n%s" % out[-3000:]
     st = json.loads(js[0])
     assert st["cart"] == "Newer Wasm" and st["err"] is None, st
-    assert st["notice"] == ("Newer Wasm needs a newer console (missing: later). "
-                            "Update this console in Settings, then try again."), st
+    assert st["notice"] == "It uses later. Update in Settings, then try again.", st
 
 APP_ROLES = ROOT / "tests" / "fixtures" / "wasm" / "app_roles.moy"
 _APP_STATE = ("__moyState().then(s => JSON.stringify({cart: s.cart, err: s.cart_error, "

@@ -288,7 +288,7 @@ def test_an_unsigned_cart_plays_on_the_interpreter_with_a_notice(tmp_path):
     already retried it on the interpreter before the Player ever saw an
     error, so the cart plays -- no notice panel, no error -- and the Player
     arms the short system notice that says the cart isn't signed."""
-    from runtime import bar_layer, player
+    from runtime import player
     from runtime.dev_channel import _remote_state
     ws = _open_interp_hello(tmp_path, "unsigned")
     p = ws.player
@@ -297,7 +297,6 @@ def test_an_unsigned_cart_plays_on_the_interpreter_with_a_notice(tmp_path):
     assert not ws.wm.top_is("menu")
     st = _remote_state(ws)
     assert st["notice"] is None and st["cart_error"] is None
-    assert bar_layer._edit_kind(ws.cart) is None
     assert ws._notice == (player.INTERP_NOTICE_TITLE,
                           player.INTERP_NOTICE_SUB["unsigned"], "warn")
     assert ws.notice_active()

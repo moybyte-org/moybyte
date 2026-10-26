@@ -841,10 +841,7 @@ def test_host_console_paint_via_mouse(tmp_path):
     select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    bx, by = C._PAINT_BTN[0], C._PAINT_BTN[1]            # click the PAINT overlay button
-    drv.click(bx + 2, by + 2)
+    ws._open_paint()                                     # the Editor's PAINT, over the run
     drv.frame(1 / 30)
     assert ws.menu_view == "paint" and ws.paint is not None
     sx = C._SW_X0 + (12 % C._SW_COLS) * C._SW            # palette swatch for color 12
@@ -1378,9 +1375,7 @@ def test_host_console_map_open_place_and_render(tmp_path):
     select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2)      # open the MAP overlay button
+    ws._open_map()                                       # the Editor's MAP, over the run
     drv.frame(1 / 30)
     assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     # pick the 2nd palette tile (id == map_page + 1) ...
@@ -1408,9 +1403,7 @@ def test_host_console_map_erase_and_pan(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    ws._open_map()                                       # the Editor's MAP, over the run
     ws.map_ui.mapedit.n = 3
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp tile 3 at (0,0)
@@ -1437,9 +1430,7 @@ def test_host_console_map_save_roundtrips(tmp_path):
     select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     cart_path = ws.cart["path"]
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    ws._open_map()                                       # the Editor's MAP, over the run
     ws.map_ui.mapedit.n = 6
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp tile 6 at (0,0)
@@ -1463,9 +1454,7 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     drv.press("run"); drv.frame(1 / 30)
     tm = ws.tilemap
     before = tm.gen
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    ws._open_map()                                       # the Editor's MAP, over the run
     mx, my = _mv0(ws)
     drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp a cell
     assert tm.gen > before                                # mset bumped gen (live pickup)

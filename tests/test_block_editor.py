@@ -205,19 +205,6 @@ def test_blocks_view_opens_and_renders(tmp_path):
     assert ws.cart_error is None
 
 
-def test_desktop_blocks_button_opens_editor(tmp_path):
-    import runtime.console as C
-    ws, _, _ = _ws_with_block_cart(tmp_path)
-    drv = _driver(ws)
-    drv.frame(1 / 30)                                  # on the desktop (cart running)
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    bx, by = C._BLOCKS_BTN[0] + 2, C._BLOCKS_BTN[1] + 2
-    drv.click(bx, by)
-    drv.frame(1 / 30)
-    assert ws.menu_view == "blocks"
-
-
 def _menu_word(ws, item):
     """The handheld menu's row for `item`, as the page names it."""
     bu = ws.block_ui
@@ -572,7 +559,7 @@ def test_name_prompt_keyboard_flow_through_the_driver(tmp_path):
         drv.type_char(ord(ch))
         drv.frame(1 / 30)
         drv.frame(1 / 30)                                # release so the next edge fires
-    drv.press("a")
+    drv.type_char(0x0D)                                  # Enter: the dialog's OK
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_kbd is None
@@ -622,7 +609,7 @@ def test_new_variable_prompt_survives_the_opening_keypress(tmp_path):
         drv.type_char(ord(ch))
         drv.frame(1 / 30)
         drv.frame(1 / 30)                               # release so each edge fires
-    drv.press("a")                                      # confirm
+    drv.type_char(0x0D)                                 # confirm: Enter, OK's
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_kbd is None
@@ -839,7 +826,7 @@ def test_number_prompt_typing_through_the_driver(tmp_path):
         drv.type_char(ord(ch))
         drv.frame(1 / 30)
         drv.frame(1 / 30)                         # release so each edge fires
-    drv.press("a")                               # confirm
+    drv.type_char(0x0D)                          # confirm: Enter, OK's
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_kbd is None

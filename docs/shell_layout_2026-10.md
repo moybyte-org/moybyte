@@ -29,7 +29,7 @@ memory and compositors); this doc cites, it does not copy.
 | L2 | **The mode is explicit WM state**, `wm.mode`, that every tier-sensitive branch consults; the desk's PLAY enters console mode, the `close` widget on the home leaves it; parked windows live outside the back-stack and survive the switch; nothing else switches and no boot setting exists | §3 |
 | L3 | A layout is **up to four bars**, one per edge, each with a size and three slots holding **built-in widgets** from a fixed catalogue; `layout` holds `bars` and nothing else | §4, §5 |
 | L4 | **The content rectangle is derived from the bars**; `content_rect()` is the app-cart contract, `bar_h()` a shim; the surface row grows additively; bars are global, every surface lays out off them; compiled apps and games are untouched | §7 |
-| L5 | **One popover mechanism**, desktop mode only: the system-menu `Popup` generalised, riding the quiet stack with its own rect as damage. Its contents are **components** that draw in a popover, or fullscreen in console mode | §8 |
+| L5 | **One popover mechanism**: the system-menu `Popup` generalised, riding the quiet stack with its own rect as damage. Its contents are **components** that draw in a popover, in both modes (docs/look_2026-10.md step 33, 2026-10-26; console mode's fullscreen pages before it) | §8 |
 | L6 | **One safety rule**: `menu`, `zone` and `close` placed after every drop, else the tier default; caps, the tap floor and a minimum content area checked once, deterministically | §9 |
 | L7 | **Precedence: user, then theme, then default.** The user's override is one strict-read row, `layout_theme`; `set_theme` never touches it (D5) | §11 |
 | L8 | **A bar is a cached strip re-rendered whole when its key moves**, as today, and blitted otherwise; a layout change is a relayout; no per-cell repaint and no new invalidation mechanism | §14 |
@@ -37,7 +37,7 @@ memory and compositors); this doc cites, it does not copy.
 | L10 | Pixels move only where a step restyles on purpose: new bar, popover and console-mode rows are NEW golden configs; the home is one named re-baseline; every other step holds every golden byte-identical | §13 |
 | L11 | **The HOME key backs out one level, everywhere** (owner, 2026-10-13). In desktop mode it shows the desktop, `show_desk()`: every window minimised to its chip and kept, HOME again restores them, and it never closes a window (Win+D's shape). In console mode it goes home, and from the home on a P4 to the desktop | §3 |
 | L12 | **The input model assumes a keyboard on every board** (owner, 2026-10-13): the T-Deck's own, a BLE keyboard on the Guition S3 and both P4s. Touch is supplementary -- a fullscreen game on a P4 is left by the keyboard alone -- and there is no on-screen home button: it would spend bar space on what the HOME key does | §4, §15 |
-| L13 | **Every bar widget is compact** (owner, 2026-10-14: "I only want the calendar to pop out"; "that should be the default for every widget, why would we want giant bars?"): an icon or a short value. Anything bigger opens as its component -- the popover in desktop mode, the fullscreen page in console mode -- and no widget is ever docked large in a bar, so a bar's `size` is a slim range, 16..32. Side bars stay, as thin bars | §4, §5, §8 |
+| L13 | **Every bar widget is compact** (owner, 2026-10-14: "I only want the calendar to pop out"; "that should be the default for every widget, why would we want giant bars?"): an icon or a short value. Anything bigger opens as its component -- its popover -- and no widget is ever docked large in a bar, so a bar's `size` is a slim range, 16..32. Side bars stay, as thin bars | §4, §5, §8 |
 | L14 | **The home has arrangements** (owner, 2026-10-14: carousel, the old big grid, and later a small icon-only grid; "we don't have to do it now"): one home component, its tabs, sources, taps and bar verbs shared, its card layout the layout's `home` key -- `carousel` (default), `grid` or `icons` | §5, §12 |
 | L15 | **One projects list** (owner, 2026-10-14): the project picker is deleted on every tier; the home's Make tab is the one list of projects (L0) | §12 |
 | L16 | **The Editor's bar has no PROJECTS button** (owner, 2026-10-14), in every console-mode Editor: its X backs out one level, to wherever the Editor was opened from -- CHANGE works from any home tab -- which is the back-stack's pop | §12 |
@@ -145,7 +145,7 @@ memory and compositors); this doc cites, it does not copy.
 | the WM | `FullscreenStackWM`'s presentation | `WindowedWM`'s |
 | the root of the back-stack | the home (§12) | the desk |
 | an app or the Editor opens | fullscreen, pushed; back pops -- but the Editor on a board with a desk goes back to the desk as a window, whose X comes back here (L18) | as a window on the desk |
-| a bar widget's tap | its component fullscreen, pushed; the system menu as the popup it is | a popover anchored to the cell (§8) |
+| a bar widget's tap | a popover hung from the cell, the system menu as the popup it is (§8) | a popover anchored to the cell (§8) |
 | boards | the T-Deck and the Guition S3 — this mode only; the P4 boards, the host and the browser when switched into it | the P4 boards, the host with `--windowed`, the browser's desktop arrangement — their default |
 
 **The mode is state, not a stack shape.** Today "fullscreen" on a P4 means
@@ -539,16 +539,20 @@ the container's business, not the component's.
 | `wifi` | the Settings WIFI panel's rows, the one implementation (owner, 2026-10-13: the `moybyte.wifi.moy` tool cart goes, §13 step 6) — its radio lease is released whenever the container closes, a tap outside included | rows; picking one runs the password step in the same container |
 | `battery` | Settings' level, VOLUME and BRIGHTNESS rows, drawn by Settings — one implementation, the popover a container for it | rows |
 
-**Two containers, one rule for which.** A component draws (a) in a popover
-in desktop mode; (b) fullscreen in console mode, pushed on the back-stack as
-a kind so back pops it: the calendar as its own kind, the wifi and power rows
-as the Settings page scrolled to them. (a) versus (b) is the mode's, not the
-board's. No component is docked in a bar (L13). No component is a registered app or a desk icon.
-The components are `runtime/popover.py`'s; the wifi panel is Settings' Wi-Fi
-page (`SettingsLayer.wifi_page`) drawn in the popover's rect over the
-component's own UI context, the power rows are `PowerRows`' own, the
-calendar's one painter is `draw_month`, and the battery's level reads None on
-every board today (no board measures one), drawn as `--`.
+**One container.** A component draws in a popover hung from its widget, in
+both modes (docs/look_2026-10.md step 33: the calendar's, power's and
+Wi-Fi's cards over the console-mode home too, the hint strip of a handheld
+home saying their keys). No component is docked in a bar (L13). No
+component is a registered app or a desk icon. The components are
+`runtime/popover.py`'s, each on the public UI API's verbs in the system's
+flat card: the wifi panel is Settings' Wi-Fi page
+(`SettingsLayer.wifi_page`, its popover form the joined network and the
+networks as a menu) over the component's own UI context, the power rows are
+the battery's line over Settings' Volume and Brightness sliders, the
+calendar is `ui.month`, and the battery's level reads None on every board
+today (no board measures one), its line then reading Battery. An app that
+asks for the Wi-Fi page (`Workstation.open_wifi_panel`) still gets Settings'
+page in console mode.
 
 ## 9. The safety rule, and what the loader checks
 

@@ -184,10 +184,13 @@ class SpineVerbs:
         run() makes the desktop layer active + records the caller. The launcher home root
         is one caller (pop == go_home); the Editor is the second (Stage 3), so PLAY
         returns to the same tab -- proving the Player is caller-agnostic."""
-        if self.cart_error is not None and self._crash_to_code():
-            return                     # the start already failed (syntax/init error):
-                                       # no parked OOPS screen -- straight to the line
+        if self.cart_error is not None and self.web.parked and self._crash_to_code():
+            return                     # a parked console goes home; else the stop card
+        if self.player.notice is not None:
+            self.pause.stop()          # a cart this console cannot run: its card over
+            return                     # the screen it was opened from
         self.crash_popup = None        # a clean launch retires any stale popup
+        self.pause.dismiss()           # ...and a stop card a run left
         kind = self._caller_kind(caller)
         self.returns.run(kind)
         # #178: the caller already says WHY this run is starting, so the windowed
@@ -226,6 +229,7 @@ class SpineVerbs:
         # next cart must build into a compact heap, not around this one's corpse
         # (see Player.release_world's docstring for the measured mechanism).
         self.player.release_world()
+        self.pause.dismiss()           # a stop card goes with its run
         back = self._project_return
         self._project_return = None
         # A run's caller is SPENT by its return. Leaving it set is what wedged
@@ -320,8 +324,6 @@ class SpineVerbs:
         Files shelf, not to the launcher)."""
         if self.wm.top_is("settings"):            # Stage 6d: ask the stack top
             self._exit_settings()
-        elif self.wm.top_is("calendar"):
-            self.close_calendar()
         elif not self.wm.top_is("launcher"):
             self._go_home_or_back()
 

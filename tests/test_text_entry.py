@@ -147,12 +147,16 @@ def _latched_frame(ws, byte=0x0D):
 
 
 def _typed_frame(ws, byte):
+    """One typed byte, and the frames that draw it: a dialog's field takes
+    its keys as it draws (ui.field)."""
     ws.input.begin_frame()
     ws.input.last_key = byte
     ws.handle_input()
+    ws.frame(1 / 30)
     ws.input.last_key = 0
     ws.input.begin_frame()
     ws.handle_input()
+    ws.frame(1 / 30)
 
 
 def test_cart_info_survives_the_keypress_that_opened_it(tmp_path):
@@ -165,10 +169,11 @@ def test_cart_info_survives_the_keypress_that_opened_it(tmp_path):
     assert cl.prompt is not None and ws.input.text_mode
     assert not ws.input.held("a")                 # arm_prompt: everybody let go
     _latched_frame(ws)
+    ws.frame(1 / 30)
     assert cl.prompt is not None, "the opening Enter must not commit the dialog"
-    assert cl.prompt.fields[0].text == "Lua One"
+    assert cl.prompt.texts[0] == "Lua One"
     _typed_frame(ws, ord("!"))
-    assert cl.prompt.fields[0].text == "Lua One!"
+    assert cl.prompt.texts[0] == "Lua One!"
 
 
 def test_new_script_survives_the_keypress_that_opened_it(tmp_path):
@@ -179,10 +184,11 @@ def test_new_script_survives_the_keypress_that_opened_it(tmp_path):
     cl._open_newf()
     assert cl.prompt is not None and cl.prompt.kind == "newf"
     _latched_frame(ws)
+    ws.frame(1 / 30)
     assert cl.prompt is not None, "the opening Enter must not commit the dialog"
-    assert cl.prompt.fields[0].text == ""
+    assert cl.prompt.texts[0] == ""
     _typed_frame(ws, ord("h"))
-    assert cl.prompt.fields[0].text == "h"
+    assert cl.prompt.texts[0] == "h"
 
 
 def test_block_prompt_survives_the_keypress_that_opened_it(tmp_path):
@@ -194,6 +200,7 @@ def test_block_prompt_survives_the_keypress_that_opened_it(tmp_path):
     bu._blk_open_kbd("text", "", block={"t": "x", "p": {}}, slot="s")
     assert bu.blk_kbd is not None and ws.input.text_mode
     _latched_frame(ws)
+    ws.frame(1 / 30)
     assert bu.blk_kbd is not None, "the opening Enter must not commit the prompt"
     assert bu.blk_kbd["entry"].text == ""
     _typed_frame(ws, ord("h"))
@@ -292,13 +299,13 @@ def test_new_script_refuses_a_bad_or_taken_name_and_stays_open(tmp_path):
     cl._open_newf()
     cl._prompt_key(ord("1"))
     cl._prompt_key(13)
-    assert cl.prompt is not None and cl.prompt.msg == "NAME IT WITH LETTERS"
+    assert cl.prompt is not None and cl.prompt.msg == "Start its name with a letter."
     cl._prompt_key(8)                              # an edit clears the message
     assert cl.prompt.msg is None
     for ch in "main":
         cl._prompt_key(ord(ch))
     cl._prompt_key(13)
-    assert cl.prompt is not None and cl.prompt.msg == "THAT NAME IS TAKEN"
+    assert cl.prompt is not None and cl.prompt.msg == "There's a file with that name."
     cl._prompt_key(27)
     assert cl.prompt is None and not ws.input.text_mode
     assert moy_carts.cart_sources(ws.project.cart) == ["main.lua"]
@@ -314,27 +321,29 @@ def test_new_script_is_closed_by_a_cart_switch(tmp_path):
     assert cl.prompt is None and not ws.input.text_mode
 
 
-def test_the_dialog_geometry_keeps_its_rows_apart_at_every_scale(tmp_path):
-    """One geometry for both dialogs: every field sits under its label, above
-    the status line, and the status line above the buttons -- at the font
-    scales the tiers run. NEW SCRIPT's own copy used to put its status line
-    THROUGH its field."""
-    from runtime.cards_layer import CardsLayout
+def test_the_dialogs_are_captioned_fields_and_the_tdeck_has_no_button_row(tmp_path):
+    """Cart info and New script are `ui.dialog`s of captioned `ui.field`s
+    (GAPS 52): each field under its caption inside the card, the first
+    focused; on the T-Deck no Cancel or OK (its keys are the hint strip's),
+    where a keyboard or a touch glass adds them."""
+    from runtime import ui_draw
     ws = _ws_with_lua_cart(tmp_path)
     cl = ws.cards_layer
-    for opener in (cl._open_meta, cl._open_newf):
-        opener()
-        for fs, (w, h) in ((1, (320, 240)), (2, (800, 480)), (3, (1024, 600))):
-            cl.layout = CardsLayout(w, h, fs)
-            (x, y, dw, dh), fields, ok_r, cancel_r = cl._prompt_rects()
-            msg_y = y + dh - 38 * fs
-            top = y + 8 * fs + 8 * fs                  # under the title line
-            for r in fields:
-                assert r[1] - 9 * fs >= top            # the label fits above
-                assert r[1] + r[3] <= msg_y            # ...and the field above the status
-                assert x <= r[0] and r[0] + r[2] <= x + dw
-                top = r[1] + r[3]
-            assert msg_y + 8 * fs <= ok_r[1]           # the status above the buttons
-            assert ok_r[0] + ok_r[2] <= cancel_r[0]
-            assert cancel_r[0] + cancel_r[2] <= x + dw
-        cl._close_prompt()
+    for kind in ("tdeck", "keys"):
+        ui_draw.input_kind(kind)
+        try:
+            for opener, labels in ((cl._open_meta, ("Title", "Made by")),
+                                   (cl._open_newf, ("Name",))):
+                opener()
+                ws.frame(1 / 30)
+                ws.frame(1 / 30)
+                host = cl.prompt.host
+                boxes = [host.box(lb) for lb in labels]
+                assert all(b is not None for b in boxes)
+                for a, b in zip(boxes, boxes[1:]):
+                    assert a[1] + a[3] <= b[1]
+                buttons = host.box("Cancel")
+                assert (buttons is None) == (kind == "tdeck")
+                cl._close_prompt()
+        finally:
+            ui_draw.input_kind("keys")

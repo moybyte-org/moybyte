@@ -78,9 +78,9 @@ def arm_prompt(ws):
     """Take the keyboard for a modal prompt and neutralise the input edge that
     opened it, so the prompt's first frame cannot carry the still-latched
     A/Enter/tap straight into commit or cancel (#29). ONE body for every
-    prompt that opens on a key or a tap (the block keypads, the Config tab's
-    CART INFO and NEW SCRIPT dialogs); the prompt's own TextEntry then opens
-    guarded (editors_base.TextEntry.open)."""
+    prompt that opens on a key or a tap (Blocks' prompts, the Config tab's
+    Cart info and New script dialogs); the prompt's own UI context then
+    takes the byte held as it opened as typing nothing (its host's key)."""
     ws._set_text_mode(True)
     # EVERYBODY let go: the shared object's meaning (every source), not a
     # driver's per-source "I hold nothing" (runtime/input.py).

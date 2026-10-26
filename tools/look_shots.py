@@ -446,6 +446,202 @@ _DK_CONSOLE = ("crash", "perf-hud", "home-grid", "tool-bar", "home-icons", "home
                "home-icons-caption")
 
 
+def _popover(widget, under=None):
+    def setup(g, ws):
+        (under or _home)(g, ws)
+        ws.widget_tap(widget)
+        ws._golden_popover = True
+    return setup
+
+
+_STOP_ERROR = "TypeError: unsupported types for __mul__: 'NoneType', 'float'"
+
+
+def _loading(g, ws):
+    """The frame an open is asked for, held: a queued open that queues
+    itself again, so every settled frame is the pill's."""
+    _home(g, ws)
+
+    def again():
+        ws.defer(again)
+    ws.defer(again)
+
+
+def _stopped(compiled=False):
+    """Star Catcher stopped mid-frame on line 42 (the targets' error)."""
+    def setup(g, ws):
+        ws.go_home()
+        if getattr(ws.wm, "mode", None) is not None:
+            ws.open_library()
+        ws._open_workspace(g._cart_by_title(ws, "Star Catcher"))
+        ws.run(ws.project, ws.launcher_layer)
+        for _ in range(PAUSE_FRAMES):
+            g._quiesce(ws)
+            ws.frame(g._DT)
+        if compiled:
+            ws.cart["runtime"] = "wasm"
+        ws.player._capture_frame_error(ws, TypeError(_STOP_ERROR[11:]))
+        ws.player.crash_line = 42
+    return setup
+
+
+def _notice(g, ws):
+    """Sky Run refused for a name this console lacks, over the home."""
+    from runtime import chrome_ops
+    _home(g, ws)
+    ws._open_workspace(g._cart_by_title(ws, "Sky Run"))
+    p = ws.player
+    p._notice = p.cart_error = chrome_ops.newer_text(["tilemap2"])
+    p._notice_title = chrome_ops.say_title(chrome_ops.SAY_NEWER)
+    ws.run(ws.project, ws.launcher_layer)
+
+
+def _see_why(g, ws):
+    _stopped()(g, ws)
+    _settle(g, ws, 2)
+    ws.pause.choose_row(ws.pause.SEE_WHY)
+    ed = ws.editor
+    if ed is not None:
+        ed.top = 37
+
+
+def _blocks_prompt(kind):
+    def setup(g, ws):
+        _tab("blocks")(g, ws)
+        _settle(g, ws, 2)
+        ui = ws.block_ui
+        if kind == "num":
+            ui._blk_open_kbd("num", cur=10, block={"t": "move", "p": {}}, slot="move_by",
+                             allow_block=True)
+        else:
+            ui._blk_open_kbd("var", var="var1")
+            ui.blk_kbd["entry"].text = "score"
+    return setup
+
+
+def _cards_prompt(which):
+    def setup(g, ws):
+        _tab("cards")(g, ws)
+        _settle(g, ws, 2)
+        cl = ws.cards_layer
+        if which == "meta":
+            cl._open_meta()
+        elif which == "newf":
+            cl._open_newf()
+        else:
+            cl._open_files()
+    return setup
+
+
+def _saver(g, ws):
+    _home(g, ws)
+    g._quiesce(ws)
+    ws.saver_state(True)
+    games = [c for c in ws.carts.all if c.get("type") == "game"] or ws.carts.all
+    titles = [c.get("title") for c in games]
+    ws._saver._i = titles.index("Star Catcher") - 1 if "Star Catcher" in titles else -1
+    ws._saver.frame(0)
+
+
+def _web(g, ws):
+    _settings(g, ws)
+    ws.system.set("web_pin", "4821")
+    if ws.webhost is None:
+        ws.webhost = _LookWebHost()
+    if not ws.webhost_serving():
+        ws.toggle_webhost()
+
+
+class _LookWebHost:
+    """The web console's server as the targets show it, on 192.168.1.42."""
+
+    serving = False
+    error = None
+
+    def start(self):
+        self.serving = True
+
+    def stop(self):
+        self.serving = False
+
+    def url(self):
+        return "http://192.168.1.42/"
+
+    def paired_url(self):
+        return "http://192.168.1.42/?pin=4821"
+
+
+_SCRIPT = ("print(\"Hello! I'm Ada's first script.\")\n"
+           "def _update(dt):\n"
+           "    name = input('What is your name? ')\n")
+
+
+def _script(done=False):
+    def setup(g, ws):
+        _home(g, ws)
+        ws.carts_store.save_file("docs", "first.py", "print('Hi')\n" if done else _SCRIPT,
+                                 ws.carts_root)
+        ws.run_script("docs", "first.py")
+    return setup
+
+
+def _perf(detail):
+    def setup(g, ws):
+        _pause(g, ws)
+        ws.pause.close()
+        frame = ws.frame
+
+        def held(dt):
+            # the HUD's numbers, set after the goldens' quiesce turns it off
+            ws.show_fps = True
+            ws.perf_hud = detail
+            ws._fps, ws._flush_ms, ws._draw_ms, ws._upd_ms = 30.0, 9.6, 19.3, 5.1
+            return frame(dt)
+        ws.frame = held
+    return setup
+
+
+# The scenes of step 33 the shell draws (phase 1): screen -> (config, set up).
+OLD_LOOK = {
+    "handheld_loading": (HANDHELD, _loading),
+    "desktop_loading": (DESK, _loading),
+    "handheld_crash": (HANDHELD, _stopped()),
+    "handheld_crash-compiled": (HANDHELD, _stopped(True)),
+    "handheld_crash-s3": (S3, _stopped()),
+    "desktop_crash": (CONSOLE, _stopped()),
+    "handheld_notice": (HANDHELD, _notice),
+    "handheld_crash-code": (HANDHELD, _see_why),
+    "desktop_crash-code": (DESK, _see_why),
+    "handheld_blocks-name": (HANDHELD, _blocks_prompt("var")),
+    "handheld_blocks-number": (HANDHELD, _blocks_prompt("num")),
+    "handheld_blocks-number-s3": (S3, _blocks_prompt("num")),
+    "desktop_blocks-name": (DESK, _blocks_prompt("var")),
+    "handheld_cart-info": (HANDHELD, _cards_prompt("meta")),
+    "handheld_new-script": (HANDHELD, _cards_prompt("newf")),
+    "handheld_project-files": (HANDHELD, _cards_prompt("files")),
+    "desktop_cart-info": (DESK, _cards_prompt("meta")),
+    "handheld_saver": (HANDHELD, _saver),
+    "handheld_saver-s3": (S3, _saver),
+    "handheld_web-console": (HANDHELD, _web),
+    "handheld_web-console-s3": (S3, _web),
+    "desktop_web-console": (DESK, _web),
+    "handheld_text-console": (HANDHELD, _script()),
+    "handheld_text-console-done": (HANDHELD, _script(True)),
+    "desktop_text-console": (DESK, _script()),
+    "handheld_perf-hud": (HANDHELD, _perf(False)),
+    "handheld_perf-hud-detail": (HANDHELD, _perf(True)),
+    "desktop_perf-hud": (CONSOLE, _perf(True)),
+    "handheld_calendar": (HANDHELD, _popover("clock")),
+    "handheld_power": (HANDHELD, _popover("battery")),
+    "handheld_wifi": (HANDHELD, _popover("wifi")),
+    "handheld_calendar-s3": (S3, _popover("clock", lambda g, ws: _settings(g, ws))),
+    "handheld_power-s3": (S3, _popover("battery")),
+    "desktop_calendar": (DESK, _popover("clock", lambda g, ws: _desk(g, ws))),
+    "desktop_power": (DESK, _popover("battery", lambda g, ws: _desk(g, ws))),
+    "desktop_wifi": (DESK, _popover("wifi", lambda g, ws: _desk(g, ws))),
+}
+
+
 def _old_look_table():
     near = {"home": (_home, "nearest screen: home"),
             "code": (_code, "nearest screen: the Code tab"),
@@ -469,6 +665,9 @@ def _old_look_table():
     out = {}
     for screen, config, kind in rows:
         setup, what = near[kind]
+        if screen in OLD_LOOK:
+            config, setup = OLD_LOOK[screen]
+            what = "the old look's last surfaces as built (step 33)"
         out[screen] = (config, ("33",), False, setup, what)
     return out
 

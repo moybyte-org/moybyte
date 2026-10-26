@@ -1,55 +1,31 @@
-"""The popover's components (docs/shell_layout_2026-10.md §8).
+"""The bar widgets' popovers (docs/shell_layout_2026-10.md §8, the look's
+step 33): each a component the popover (`widgets.Popup`) holds, hung from
+its widget on every glass in the system's flat card with no wash (D-01),
+its content on the public UI API's verbs.
 
-A component is one painter, one panel size and one navigation handler; where
-it draws is its container's business. Two containers hold them: the popover
-(`widgets.Popup`, desktop mode, one at a time) and a fullscreen page in
-console mode (the calendar as its own kind, `CalendarLayer`; the wifi and
-power rows as the Settings page opened at them). No component is docked in
-a bar: a bar widget is compact, and what is bigger opens (§1, 2026-10-14).
-
-  `clock`    MonthView   the month calendar, today marked; left/right page
-  `wifi`     WifiPanel   the Settings WIFI panel, the one implementation
-  `battery`  PowerRows   Settings' level, VOLUME and BRIGHTNESS rows
+  `clock`    MonthView   the month (`ui.month`), today marked; left/right page
+  `wifi`     WifiPanel   Settings' Wi-Fi page, the one implementation
+  `battery`  PowerRows   the battery's line, then Volume and Brightness
 
 The system menu is the popover's ROWS, not a component (`widgets.Popup`).
 
 Every component's interface: `size()` -> (w, h) in pixels at the current
-scales, `draw(cv, rect)`, `handle_input(i)` -> "local" when only the panel's
-pixels moved, "global" when something outside it did, None for nothing;
-`click(px, py, rect)` the same; `typing()` -> True while typed keys are its
-own (B and ESC are then the text field's); `closed()` on every close, a tap
-outside included.
+scales, `draw(cv, rect)` (the card is the popover's, `rect` inside it),
+`keys()` -> the hint strip's keys on a handheld, `handle_input(i)` ->
+"local" when only the panel's pixels moved, "global" when something outside
+it did, None for nothing; `click(px, py, rect)` the same; `typing()` ->
+True while typed keys are its own (B and ESC are then the text field's);
+`closed()` on every close, a tap outside included.
 """
 
 try:
     import ui as _ui
     import ui_draw as _ui_draw
-    from layers import Layer
+    import layout_base as _lb
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
-    from runtime.layers import Layer
-
-_in = _ui.rect_in
-
-MONTHS = ("JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY",
-          "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER")
-DAYS = "MTWTFSS"
-_DOW_T = (0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
-_MDAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-
-
-def weekday(y, m, d):
-    """0 for Monday .. 6 for Sunday (Sakamoto's rule: no datetime on a board)."""
-    if m < 3:
-        y -= 1
-    return (y + y // 4 - y // 100 + y // 400 + _DOW_T[m - 1] + d + 6) % 7
-
-
-def month_days(y, m):
-    if m == 2 and (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)):
-        return 29
-    return _MDAYS[m - 1]
+    from runtime import layout_base as _lb
 
 
 def shift_month(y, m, n):
@@ -57,49 +33,59 @@ def shift_month(y, m, n):
     return k // 12, k % 12 + 1
 
 
-def draw_month(cv, th, rect, y, m, today, fs, ink, dim):
-    """The month grid in `rect`: the month's name and year, the weekday
-    initials, then six weeks of `ui.cell`s from Monday, `today` (a day of
-    this month, or 0) marked on. The calendar's one painter: the bar cell,
-    the popover and the console-mode page all call it."""
-    x, y0, w, h = rect
-    fw = 8 * fs
-    head = 12 * fs
-    title = "%s %d" % (MONTHS[m - 1], y)
-    if len(title) * fw > w:
-        title = "%s %d" % (MONTHS[m - 1][:3], y)
-    cv.print(title, x + (w - len(title) * fw) // 2, y0 + (head - 8 * fs) // 2, ink, 1)
-    cw = w // 7
-    gx = x + (w - cw * 7) // 2
-    dy = y0 + head
-    for k in range(7):
-        cv.print(DAYS[k], gx + k * cw + (cw - fw) // 2, dy, dim, 1)
-    gy = dy + 10 * fs
-    ch = (y0 + h - gy) // 6
-    if ch <= 0:
-        return
-    first = weekday(y, m, 1)
-    n = month_days(y, m)
-    for d in range(1, n + 1):
-        i = first + d - 1
-        r = (gx + (i % 7) * cw, gy + (i // 7) * ch, cw, ch)
-        _ui_draw.cell(cv, th, r, label=str(d), on=(d == today), pad=0, fs=fs,
-                 text_dy=(ch - 8 * fs) // 2)
+def _desk():
+    return _lb.metric_class() == _lb.DESK
+
+
+def _pad(ws):
+    return 12 if _desk() else 9 * ws.layout.fs
+
+
+def _inner(ws, rect):
+    """The rows' rect inside a popover's card: its padding off the card's
+    top and foot, and the rows' own pad off its sides."""
+    p = _pad(ws)
+    x, y, w, h = rect
+    return (x + p, y + p, w - 2 * p, h - 2 * p)
+
+
+def _fit(ws, comp):
+    """Size the popover to `comp` again where what it lists moved (the
+    networks a scan found): the frame repaints at the new size."""
+    m = ws.sysmenu
+    w, h = comp.size()
+    h += 2 if _desk() else 2 * ws.layout.fs
+    if m.comp is comp and m.size[1] != h:
+        m.size = (m.size[0], h)
+        ws._dirty = True
+
+
+_MONTH_KEYS = ("change", "Month", "back", "Close")
+_MONTH_KEYS_DESK = ("change", "Month", "back", "Close")
+_POWER_KEYS = ("change", "Change", "up down", "Row", "back", "Close")
+_WIFI_KEYS = ("confirm", "Join", "back", "Close")
 
 
 class MonthView:
-    """The `clock` widget's component: the month calendar, today marked; the
-    arrows (left/right, or a tap on the title's halves) page months. The
-    day cursor is display only."""
+    """The `clock` widget's component: the month, today marked; the arrows
+    (left/right, or a chevron on the desk and under touch) page months."""
 
     def __init__(self, ws):
         self.ws = ws
         self.off = 0
+        self.host = _ui_draw.AppHost()
 
     def size(self):
-        lay = self.ws.layout
-        cs = lay.cs
-        return (7 * 22 * cs + 8 * cs, 22 * cs + 6 * 14 * cs + 8 * cs + 10 * lay.fs)
+        ws = self.ws
+        desk = _desk()
+        fs = 1 if desk else ws.layout.fs
+        y, m, _d = self.month()
+        p = _pad(ws)
+        h = _ui.month_h(y or 2026, m or 1, fs, desk) if y else 6 * 21 * fs
+        foot = _ui_draw.metrics("value_row")[_HINTS_DESK] if desk else 0
+        if desk:
+            return (264, p + h + foot + p // 2)
+        return (200 * fs, (6 + 3) * fs + h)
 
     def month(self):
         y, m, d = self.ws.bar_layer._today()
@@ -108,15 +94,26 @@ class MonthView:
         yy, mm = shift_month(y, m, self.off)
         return yy, mm, (d if self.off == 0 else 0)
 
+    def keys(self):
+        return _MONTH_KEYS
+
     def draw(self, cv, rect):
         ws = self.ws
-        th = ws.theme_colors
+        desk = _desk()
         y, m, today = self.month()
-        if not y:
-            return
-        p = 4 * ws.layout.cs
-        draw_month(cv, th, (rect[0] + p, rect[1] + p, rect[2] - 2 * p, rect[3] - 2 * p),
-                   y, m, today, ws.layout.fs, th["ink"], th["ink_dim"])
+        p = _pad(ws)
+        top = p if desk else 6 * ws.layout.fs
+        x0, y0, w0, h0 = rect
+        self.host.begin(cv, ws.theme_colors, (x0 + p, y0 + top, w0 - 2 * p, h0 - top), desk)
+        if y:
+            _ui.at(x0 + p, y0 + top, w0 - 2 * p,
+                   _ui.month_h(y, m, 1 if desk else ws.layout.fs, desk))
+            step = _ui.month(y, m, today)
+            if step:
+                self.off += step
+                ws.popover_touch()
+        if desk:
+            _ui.hints(_MONTH_KEYS_DESK)
 
     def page(self, n):
         self.off += n
@@ -130,10 +127,8 @@ class MonthView:
         return None
 
     def click(self, px, py, rect):
-        x, y, w, _h = rect
-        if py < y + 4 * self.ws.layout.cs + 12 * self.ws.layout.fs:
-            return self.page(-1 if px < x + w // 2 else 1)
-        return None
+        self.host.point(px, py, True)
+        return "local"
 
     def typing(self):
         return False
@@ -142,11 +137,16 @@ class MonthView:
         self.off = 0
 
 
+# value_row's slot of the desk's hint band (MOY_UI_M_VALUE_ROW_HINTS_DESK)
+_HINTS_DESK = 17
+
+
 class WifiPanel:
-    """The `wifi` widget's component: the Settings WIFI panel's page (scan,
-    pick, the password step, connect) drawn in the popover's rect over its
-    own UI context (`ui_draw.AppHost`), holding the radio lease Settings'
-    panel holds, released on every close. One implementation: `SettingsLayer.wifi_page`."""
+    """The `wifi` widget's component: Settings' Wi-Fi page (scan, pick, the
+    password step, connect) drawn in the popover's card over its own UI
+    context (`ui_draw.AppHost`), holding the radio lease Settings' page
+    holds, released on every close. One implementation:
+    `SettingsLayer.wifi_page`."""
 
     def __init__(self, ws):
         self.ws = ws
@@ -154,9 +154,17 @@ class WifiPanel:
         self.host = _ui_draw.AppHost()
 
     def size(self):
-        lay = self.ws.layout
-        fs = lay.fs
-        return (304 * fs, 6 * lay.cs + 5 * lay.set_row_h + 44 * fs)
+        desk = _desk()
+        fs = 1 if desk else self.ws.layout.fs
+        row = _ui_draw.metrics("row")
+        rh, gap = row[6 if desk else 5] * fs, row[7] * fs
+        cap = _ui_draw.metrics("group")[4 if desk else 3] * fs
+        n = min(len(self.ws.settings_layer.wifi_nets), 6) + 2
+        foot = _ui_draw.metrics("value_row")[_HINTS_DESK] if desk else 0
+        return ((300 if desk else 232 * fs), 2 * _pad(self.ws) + cap + n * (rh + gap) + foot)
+
+    def keys(self):
+        return _WIFI_KEYS
 
     def opened(self):
         self.host.reset()
@@ -166,7 +174,8 @@ class WifiPanel:
         ws = self.ws
         self.rect = rect
         before = self._radio()
-        self.host.begin(cv, ws.theme_colors, rect)
+        _fit(ws, self)
+        self.host.begin(cv, ws.theme_colors, _inner(ws, rect), _desk())
         ws.settings_layer.wifi_page(popover=True)
         if self._radio() != before:
             ws._dirty = True          # the radio's state shows outside the panel
@@ -203,92 +212,71 @@ class WifiPanel:
 
 
 class PowerRows:
-    """The `battery` widget's component: the level line and the VOLUME and
-    BRIGHTNESS rows. Up/down pick a row, left/right (or a tap on a row's
-    ends) step it through Settings (`step_row`)."""
+    """The `battery` widget's component: the battery's line (its level
+    where the board reads one), then Volume and Brightness as Settings'
+    sliders. Up/down pick a row, left/right (or a tap or a drag on a track)
+    change it through Settings (`set_level`)."""
 
     KEYS = ("volume", "brightness")
+    _LABELS = ("Volume", "Brightness")
 
     def __init__(self, ws):
         self.ws = ws
-        self.sel = 0
         self.rect = None
+        self.host = _ui_draw.AppHost()
 
     def size(self):
-        lay = self.ws.layout
-        return (208 * lay.fs, 12 * lay.cs + 3 * lay.set_row_h)
+        desk = _desk()
+        fs = 1 if desk else self.ws.layout.fs
+        row = _ui_draw.metrics("row")
+        rh = row[6 if desk else 5] * fs
+        gap = row[7] * fs
+        rule = (2 * row[7] + (9 if desk else 5)) * fs
+        foot = _ui_draw.metrics("value_row")[_HINTS_DESK] if desk else 0
+        return ((300 if desk else 236 * fs),
+                2 * _pad(self.ws) + 3 * rh + 3 * gap + rule + foot)
 
-    def _row_rect(self, rect, i):
-        lay = self.ws.layout
-        fs = lay.fs
-        return (rect[0] + 10 * fs, rect[1] + 6 * lay.cs + i * lay.set_row_h,
-                rect[2] - 20 * fs, lay.set_row_h - 2)
+    def keys(self):
+        return _POWER_KEYS
 
     def draw(self, cv, rect):
-        """The level line, then the two rows: the label, a gauge of the
-        row's steps (`SettingsLayer.level`) between chevrons, the cursor's
-        row filled."""
         ws = self.ws
+        desk = _desk()
         self.rect = rect
-        lay = ws.layout
-        fs = lay.fs
-        th = ws.theme_colors
-        dy = lay.row_text_dy
-        x, y, w, h = self._row_rect(rect, 0)
+        sl = ws.settings_layer
+        self.host.begin(cv, ws.theme_colors, _inner(ws, rect), desk)
         lvl = ws.battery_level()
-        ws._icon("batt", x, y + dy, cv)
-        _ui_draw.row(cv, th, (x, y, w, h),
-                     "BATTERY  " + ("--" if lvl is None else "%d%%" % lvl),
-                     kind="row_list", edge=False, pad=20 * fs, text_dy=5 + dy, fs=fs)
-        grey = th["ink_dim"]
+        _ui.icon("battery")
+        _ui.info("Battery" if lvl is None else "%d%%" % lvl, "")
+        _ui.rule()
         for k in range(len(self.KEYS)):
             key = self.KEYS[k]
-            x, y, w, h = self._row_rect(rect, k + 1)
-            _ui_draw.row(cv, th, (x, y, w, h), key.upper(), kind="row_menu",
-                         focus=k == self.sel, edge=False, pad=4, text_dy=5 + dy, fs=fs)
-            by = y + dy
-            cv.print("<", x + w - 88 * fs - 2, by + 5, th["author"], 2)
-            cv.print(">", x + w - 16 * fs + 2, by + 5, th["author"], 2)
-            vx = x + w - 78 * fs
-            lv, _lo, hi = ws.settings_layer.level(key)
-            for s in range(hi):
-                cv.rect(vx + s * 8 * fs, by + 6, 6 * fs, 8 * fs,
-                        th["play"] if s < lv else grey)
+            cur, lo, hi = sl.level(key)
+            _ui.icon("mute" if key == "volume" and cur == lo
+                     else "volume" if key == "volume" else "spark")
+            got = _ui.slider(self._LABELS[k], cur, lo, hi)
+            if got != cur:
+                sl.set_level(key, got)
+                ws._dirty = True
+        if desk:
+            _ui.hints(("change", "Change", "back", "Close"))
+        if self.host.owed or self.host.tap == 2:
+            ws.popover_touch()
 
     def handle_input(self, i):
-        if i.pressed("up") and self.sel > 0:
-            self.sel -= 1
+        if self.host.keys(i):
             return "local"
-        if i.pressed("down") and self.sel < len(self.KEYS) - 1:
-            self.sel += 1
-            return "local"
-        d = -1 if i.pressed("left") else (1 if i.pressed("right") else 0)
-        if d:
-            self.ws.settings_layer.step_row(self.KEYS[self.sel], d)
-            return "global"
         return None
 
     def click(self, px, py, rect):
-        sl = self.ws.settings_layer
-        edge = 5 * self.ws.layout.font_w
-        for k in range(len(self.KEYS)):
-            x, y, w, h = self._row_rect(rect, k + 1)
-            if _in(px, py, (x, y, w, h)):
-                self.sel = k
-                if px >= x + w - edge:
-                    sl.step_row(self.KEYS[k], 1)
-                    return "global"
-                if px <= x + edge:
-                    sl.step_row(self.KEYS[k], -1)
-                    return "global"
-                return "local"
-        return None
+        self.host.point(px, py, True)
+        return "local"
 
     def typing(self):
         return False
 
     def closed(self):
-        self.sel = 0
+        self.host.reset()
 
 
 def component_for(ws, widget):
@@ -300,49 +288,3 @@ def component_for(ws, widget):
     if widget == "battery":
         return PowerRows(ws)
     return None
-
-
-class CalendarLayer(Layer):
-    """The calendar as its own kind (console mode's container, §8 (c)): the
-    month grid over the content rect, pushed on the back-stack, so back, B,
-    HOME and the bar's X pop it. Left/right page months."""
-
-    id = "calendar"
-    domain = "system"
-    zone_gen = 0
-
-    def __init__(self, ws):
-        self.ws = ws
-        self.view = MonthView(ws)
-
-    def draw(self, dt):
-        ws = self.ws
-        cv = ws.sys_canvas
-        th = ws.theme_colors
-        cx, cy, cw, ch = ws.bar_layer.content_rect("calendar")
-        cv.rect(cx, cy, cw, ch, th["panel"])
-        y, m, today = self.view.month()
-        if y:
-            p = 6 * ws.layout.fs
-            draw_month(cv, th, (cx + p, cy + p, cw - 2 * p, ch - 2 * p), y, m,
-                       today, ws.layout.fs, th["ink"], th["ink_dim"])
-        ws.bar_layer._draw_status_strip("calendar")
-
-    def handle_input(self, i):
-        ws = self.ws
-        if i.pressed("b") or i.pressed("stop") or i.pressed("home"):
-            ws.close_calendar()
-        elif self.view.handle_input(i):
-            ws._dirty = True
-        return True
-
-    def handle_pointer(self, px, py, click):
-        ws = self.ws
-        if not click:
-            return True
-        if ws.bar_layer.handle_bar_tap("calendar", px, py):
-            return True
-        cx, cy, cw, ch = ws.bar_layer.content_rect("calendar")
-        if self.view.click(px, py, (cx, cy, cw, ch)):
-            ws._dirty = True
-        return True

@@ -59,10 +59,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
 
-try:
-    from editors_base import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_base import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
 
 try:
     from widgets import arm_prompt as _arm_prompt
@@ -73,44 +69,49 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 class _Prompt:
-    """One open dialog: `kind` names what OK does, `fields` are its TextEntry
-    buffers over ONE shared key edge (so Tab does not re-fire the byte that
-    switched fields), `field` the focused one, `msg` the inline status line.
-    `fields` is built from (label, placeholder, cap) triples."""
+    """One open dialog (`ui.dialog` with captioned `ui.field`s, GAPS 52):
+    `kind` names what its last button does, `texts` are its fields' text,
+    `field` the focused one (the tests' typing door), `msg` the line under
+    them that says why it stayed open. `fields` is built from (label,
+    placeholder, cap) triples; `sub` is the line under its title, `ok` its
+    last button's word."""
 
-    def __init__(self, kind, title, fields):
+    def __init__(self, kind, title, fields, sub, ok):
         self.kind = kind
         self.title = title
+        self.sub = sub
+        self.ok = ok
         self.labels = tuple(f[0] for f in fields)
         self.hints = tuple(f[1] for f in fields)
-        self.edge = KeyEdge()
-        self.fields = tuple(TextEntry(f[2], edge=self.edge) for f in fields)
+        self.caps = tuple(f[2] for f in fields)
+        self.texts = ["" for _f in fields]
         self.field = 0
         self.msg = None
+        self.host = _ui_draw.AppHost()
 
     def open(self, texts, seed):
-        for i, entry in enumerate(self.fields):
-            entry.open(texts[i], seed)
-        self.edge.seed(seed, guard=True)
+        for i in range(len(self.texts)):
+            self.texts[i] = str(texts[i])[:self.caps[i]]
+        self.host.key = seed           # the byte that opened it types nothing
 
     def key(self, ch):
-        """One typed byte: Tab moves the focus, anything else goes to the
-        focused field; returns the field's event (editors_base.text_key)."""
+        """One typed byte: Tab moves the focus, Enter commits, Esc cancels,
+        anything else goes to the focused field. "commit", "cancel" or None."""
         if ch == 9:
-            self.field = (self.field + 1) % len(self.fields)
+            self.field = (self.field + 1) % len(self.texts)
+            self.host.focus(self.labels[self.field])
             return None
-        ev = self.fields[self.field].key(ch)
-        if ev is not None:
-            self.msg = None
-        return ev
-
-    def feed(self, inp):
-        """One input frame: the event of a fresh byte, else None (the guarded
-        opening pass included)."""
-        k = inp.last_key
-        if self.edge.arming(k) or not self.edge.hit(k):
-            return None
-        return self.key(k)
+        if ch in (10, 13):
+            return "commit"
+        if ch == 27:
+            return "cancel"
+        t = self.texts[self.field]
+        if ch in (8, 127):
+            self.texts[self.field] = t[:-1]
+        elif 32 <= ch < 127 and len(t) < self.caps[self.field]:
+            self.texts[self.field] = t + chr(ch)
+        self.msg = None
+        return None
 
 
 
@@ -158,7 +159,19 @@ _ASSET_SUBDIR_TABS = {"scenes": "scene"}
 # the ONE door that adds a file to a cart (#89). A sentinel rather than a real
 # name, because the list's rows come from the store and a real file could be
 # called anything -- including this.
-_NEW_ROW = "+ NEW SCRIPT"
+_NEW_ROW = "New script"
+
+# The Files page's words for what a file is and the tab it opens in.
+_FILE_WORDS = {"sprites.moygfx": "Sprites", "map.moymap": "Map", "sounds.json": "Sounds",
+               "blocks.json": "Blocks"}
+_TAB_WORDS = {"code": "Code", "paint": "Art", "map": "World", "music": "Sound",
+              "blocks": "Blocks", "scene": "World"}
+_TAB_ICONS = {"code": "code", "paint": "sprite", "map": "map", "music": "music",
+              "blocks": "blocks", "scene": "scene"}
+_FILES_HINTS = ("confirm", "Open", "back", "Back")
+# The dialogs' lines: the one under the title, and why one stayed open.
+_PROMPT_SUB = {"tone": "dim", "wrap": True, "lines": 2}
+_PROMPT_MSG = {"tone": "danger", "wrap": True, "lines": 2}
 
 
 # The Config tab draws in its OWN palette (`_tones`), not the theme's, so the
@@ -239,6 +252,8 @@ class CardsLayer:
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
         self._t = None                # per-draw tone map (set by _draw_cards)
+        self._broken_host = None      # the UI context of a card that failed to draw
+        self._files_host = _ui_draw.AppHost()   # the Files page's
         self._dragv = None            # drag-to-scroll anchor (held vertical drag)
         # The open dialog (CART INFO or NEW SCRIPT), a `_Prompt`, or None.
         self.prompt = None
@@ -274,12 +289,12 @@ class CardsLayer:
         except Exception as exc:  # noqa: BLE001
             # A malformed card (e.g. a bad tiles/choices entry) must NOT escape the
             # frame loop -- the device would hang silently with no error surface. Fall
-            # back to a readable panel (on the SYSTEM canvas, where this layer lives);
+            # back to a readable page (on the SYSTEM canvas, where this layer lives);
             # the unified bar (drawn below) keeps the context X reachable so the kid
             # can exit.
             ws.cart_error = self._err_text(exc)
             print("Moybyte cards error:", exc)
-            ws.player._draw_error_panel(ws.sys_canvas)
+            self._draw_broken(ws.cart_error)
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
@@ -288,6 +303,18 @@ class CardsLayer:
         # editor's blk_kbd prompt (chrome, then any modal on top).
         if self.prompt is not None:
             self._draw_prompt()
+
+    def _draw_broken(self, text):
+        """What a card that failed to draw leaves: the error, exact, under
+        the bar."""
+        ws = self.ws
+        host = self._broken_host
+        if host is None:
+            host = self._broken_host = _ui_draw.AppHost()
+        lay = self.layout
+        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch))
+        _ui.page("")
+        _ui.empty("warn", "This page didn't draw", (str(text or ""),))
 
     def handle_input(self, i):
         ws = self.ws
@@ -1011,7 +1038,8 @@ class CardsLayer:
             msg = self._err_text(exc)
         if self._can_add_source(cart):
             rows = tuple(rows) + (_NEW_ROW,)
-        self.files = {"rows": rows, "sel": 0, "top": 0, "msg": msg}
+        self.files = {"rows": rows, "msg": msg}
+        self._files_host.reset()
         ws._dirty = True
 
     def _can_add_source(self, cart):
@@ -1027,12 +1055,6 @@ class CardsLayer:
         if self._page is not None:
             self._page.recount()
         self.ws._dirty = True
-
-    def _files_visible(self):
-        """How many rows the list band fits."""
-        lay = self.layout
-        return max(1, (lay.view_bottom - lay.card_y0)
-                   // (lay.card_h + lay.gap))
 
     def _files_open(self, name):
         """Route one project file. The main file is the Code tab (that is where
@@ -1069,101 +1091,93 @@ class CardsLayer:
             # shape: one Paint cannot edit opens read-only.
             self._close_files()
             if not ws.open_image(name, cart=cart):
-                self.files = {"rows": (), "sel": 0, "top": 0,
-                              "msg": "NO PAINT APP"}
+                self.files = {"rows": (), "msg": "There's no Paint app to open it in."}
             return
         if "/" in name:
             # Anything else in a subfolder no tab claims. Saying so beats
             # opening a blob as text.
-            self.files["msg"] = "NO EDITOR FOR THIS"
+            self.files["msg"] = "Nothing on this console opens that file."
             ws._dirty = True
             return
         mode = _modes.mode_for(name)
         self._close_files()
         if not ws.open_project_file(cart, name, mode):
-            self.files = {"rows": (), "sel": 0, "top": 0, "msg": "CAN'T OPEN"}
-
-    def _files_rects(self):
-        """(row rect, name) for each VISIBLE list row, plus the BACK button --
-        the draw pass and the hit-test read the same geometry."""
-        lay = self.layout
-        f = self.files
-        step = lay.card_h + lay.gap
-        out = []
-        y = lay.card_y0
-        for k in range(f["top"], min(len(f["rows"]),
-                                     f["top"] + self._files_visible())):
-            out.append(((lay.card_x, y, lay.card_w, lay.card_h), f["rows"][k], k))
-            y += step
-        return out
-
-    def _files_reveal(self):
-        f = self.files
-        vis = self._files_visible()
-        if f["sel"] < f["top"]:
-            f["top"] = f["sel"]
-        elif f["sel"] >= f["top"] + vis:
-            f["top"] = f["sel"] - vis + 1
+            self.files = {"rows": (), "msg": "That file didn't open."}
 
     def _files_input(self, i):
         ws = self.ws
-        f = self.files
-        n = len(f["rows"])
         if i.pressed("b") or i.pressed("home"):
             self._close_files()
             if i.pressed("home"):
                 ws.home_key()
             return True
-        if not n:
-            return True
-        if i.pressed("up"):
-            f["sel"] = (f["sel"] - 1) % n
-            self._files_reveal()
+        if self._files_host.keys(i):
             ws._dirty = True
-        if i.pressed("down"):
-            f["sel"] = (f["sel"] + 1) % n
-            self._files_reveal()
-            ws._dirty = True
-        if i.pressed("a") or i.pressed("run"):
-            self._files_open(f["rows"][f["sel"]])
         return True
 
     def _files_pointer(self, px, py, click):
-        if not click:
-            return True
-        if _in(px, py, self.layout.info_btn):
-            self._close_files()
-            return True
-        for rect, name, k in self._files_rects():
-            if _in(px, py, rect):
-                self.files["sel"] = k
-                self._files_open(name)
-                return True
+        if self._files_host.point(px, py, click, self.ws.pointer.down):
+            self.ws._dirty = True
         return True
 
+    def _file_row(self, name, tab):
+        """A file's row: its icon, its name, and the tab it opens in; True
+        the frame it is chosen."""
+        if tab is not None:
+            _ui.icon(_TAB_ICONS.get(tab, "doc"))
+            word = _TAB_WORDS.get(tab, "")
+        elif _modes.is_image(name):
+            _ui.icon("art")
+            word = "Paint"
+        else:
+            _ui.icon("doc")
+            word = "Text"
+        return _ui.link(_FILE_WORDS.get(name, name), word, {"id": name})
+
     def _draw_files(self):
+        """The project's files as a page of Make it mine (GAPS 52): Code (its
+        scripts, New script last) and Art and sound as groups, each file's
+        icon, its name and the tab it opens in."""
         ws = self.ws
-        cv = ws.sys_canvas
-        lay = self.layout
-        t = self._t
         f = self.files
-        cv.rect(*(lay.body + (t["body"],)))
-        cv.rectb(*(lay.body + (t["edge"],)))
-        ws._glyph("code", lay.head_glyph, t["accent"], cv)
-        cv.print("PROJECT FILES", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
-        _ui_draw.mini_btn(cv, lay.info_btn, "BACK", t["accent"])
-        rows = self._files_rects()
+        lay = self.layout
+        host = self._files_host
+        desk = _layout_base.metric_class() == _layout_base.DESK
+        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        _ui.page("Files")
+        _ui.hints(_FILES_HINTS)
+        cart = ws.project.cart if ws.project is not None else None
+        sources = ws.carts_store.cart_sources(cart) if cart and ws.carts_store else ()
+        rows = f["rows"]
+        pick = None
         if not rows:
-            cv.print(f["msg"] or "NO FILES", lay.card_x, lay.card_y0,
-                     t["text"], lay.fs)
-            return
-        for rect, name, k in rows:
-            _ui_draw.row(cv, t, rect, name, kind="row_chrome", on=(k == f["sel"]),
-                    edge=False, pad=6 * lay.fs, text_dy=1 * lay.fs, fs=lay.fs)
-        if f["msg"]:
-            cv.print(_ui_draw.print_cut(f["msg"], lay.card_w, lay.fs), lay.card_x,
-                     lay.view_bottom - _ui_draw.font("ui")[2] * lay.fs,
-                     self._NAMES["red"], lay.fs)
+            _ui.label(f["msg"] or "No files.")
+        code = [r for r in rows if r in sources or r == _NEW_ROW]
+        rest = [r for r in rows if r not in code]
+        if code:
+            _ui.group("Code")
+            for name in code:
+                if name == _NEW_ROW:
+                    _ui.icon("new")
+                    if _ui.link(_NEW_ROW, "", {"id": _NEW_ROW}):
+                        pick = name
+                elif self._file_row(name, "code"):
+                    pick = name
+        if rest:
+            _ui.group("Art and sound")
+            for name in rest:
+                tab = _ASSET_TABS.get(name)
+                if tab is None and "/" in name:
+                    tab = _ASSET_SUBDIR_TABS.get(name.split("/")[0])
+                if self._file_row(name, tab):
+                    pick = name
+        _ui.group()
+        if f["msg"] and rows:
+            _ui.label(f["msg"], {"tone": "danger"})
+        if pick is not None:
+            self._files_open(pick)
+        if host.owed or host.tap == 2:
+            ws.request_frame()
 
     # -- the two dialogs: CART INFO (#94) and NEW SCRIPT (#89) ---------------
     #
@@ -1176,19 +1190,18 @@ class CardsLayer:
     # cart, and a cart that is one file should stay one file unless somebody
     # went looking.
     #
-    # Typing is driven PURELY off `i.last_key` (never i.pressed("a")/("b")/
-    # nav): _set_text_mode(True) does not stop the T-Deck's ASCII-mode keyboard
-    # from ALSO firing a typed key's game-button alias (w/a/s/d/z/x), so a typed
-    # letter that collided with a checked button would fire it. Field switch is
-    # Tab (ASCII 9) or a tap, never up/down, for the same reason. The prompt
-    # opens through widgets.arm_prompt and its key edge opens GUARDED
-    # (editors_base.KeyEdge.seed): the tap/key that opened it can still be
-    # latched on its first input pass, and that pass only arms it.
+    # Both are `ui.dialog` with captioned `ui.field`s (GAPS 52) over the page
+    # dimmed (D-01), on their own UI context: the keys type (text mode, which
+    # `widgets.arm_prompt` takes), up/down, Tab or the trackball move between
+    # fields, Enter is the last button and Esc or the T-Deck's Mic (a
+    # field's cancel, `Workstation.cancel_field`) closes it. The T-Deck's
+    # dialog has no row of Cancel and OK -- its keys are the hint strip's --
+    # where a touch glass and the desk add them.
 
-    def _open_prompt(self, kind, title, fields, texts):
+    def _open_prompt(self, kind, title, fields, texts, sub, ok):
         ws = self.ws
         _arm_prompt(ws)
-        self.prompt = _Prompt(kind, title, fields)
+        self.prompt = _Prompt(kind, title, fields, sub, ok)
         self.prompt.open(texts, getattr(ws.input, "last_key", 0) or 0)
         ws._dirty = True
 
@@ -1196,14 +1209,17 @@ class CardsLayer:
         cart = self.ws.project.cart
         if not cart:
             return
-        self._open_prompt("meta", "CART INFO",
-                          (("TITLE", "", 24), ("AUTHOR", "(optional)", 24)),
+        self._open_prompt("meta", "Cart info",
+                          (("Title", "", 24), ("Made by", "Your name (you can leave it)", 24)),
                           (str(cart.get("title") or ""),
-                           str(cart.get("author") or "")))
+                           str(cart.get("author") or "")), None, "Save")
 
     def _open_newf(self):
-        self._open_prompt("newf", "NEW SCRIPT", (("NAME", "helpers", 24),),
-                          ("",))
+        cart = self.ws.project.cart or {}
+        main = cart.get("main", "main.py")
+        lang = "Lua" if main.endswith(".lua") else "Python"
+        self._open_prompt("newf", "New script", (("Name", "helpers", 24),), ("",),
+                          "A %s file beside %s" % (lang, main), "Add")
 
     def _close_prompt(self):
         self.prompt = None
@@ -1221,14 +1237,14 @@ class CardsLayer:
 
     def _commit_meta(self, p):
         ws = self.ws
-        title = p.fields[0].text.strip()
-        author = p.fields[1].text.strip()
+        title = p.texts[0].strip()
+        author = p.texts[1].strip()
         if not title:
-            p.msg = "TITLE CAN'T BE BLANK"
+            p.msg = "Give it a title."
             ws._dirty = True
             return                          # stay open: never persist a blank title
         if not ws.project.commit_manifest(title=title, author=author):
-            p.msg = "COULD NOT SAVE"
+            p.msg = "It didn't save. Try again."
             ws._dirty = True
             return
         self._close_prompt()
@@ -1262,15 +1278,15 @@ class CardsLayer:
     def _commit_newf(self, p):
         ws = self.ws
         cart = ws.project.cart
-        name = self._newf_filename(p.fields[0].text)
+        name = self._newf_filename(p.texts[0])
         if name is None:
-            p.msg = "NAME IT WITH LETTERS"
+            p.msg = "Start its name with a letter."
             ws._dirty = True
             return
         made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
                                                              "-- " + name + "\n"))
         if made is None:
-            p.msg = "THAT NAME IS TAKEN"
+            p.msg = "There's a file with that name."
             ws._dirty = True
             return
         self._close_prompt()
@@ -1279,9 +1295,9 @@ class CardsLayer:
         ws.open_code_file(made)
 
     def _prompt_event(self, ev):
-        if ev == TE_COMMIT:
+        if ev == "commit":
             self._commit_prompt()
-        elif ev == TE_CANCEL:
+        elif ev == "cancel":
             self._close_prompt()
 
     def _prompt_key(self, ch):
@@ -1289,54 +1305,59 @@ class CardsLayer:
         self._prompt_event(self.prompt.key(ch))
 
     def _prompt_input(self, i):
-        self._prompt_event(self.prompt.feed(i))
+        p = self.prompt
+        if p.host.keys(i):
+            self.ws._dirty = True
+        if p.host.inp[5] == 27 or i.pressed("stop"):
+            p.host.inp[5] = 0
+            self._close_prompt()
         return True
 
-    def _prompt_rects(self):
-        """Dialog geometry: a centered panel, one 14px field per entry under
-        its label, a status line and OK/X, scaled by the system font like
-        every other responsive Cards element."""
-        lay = self.layout
-        fs = lay.fs
-        n = len(self.prompt.fields)
-        w, h = 240 * fs, (52 + 28 * n) * fs
-        x = (lay.w - w) // 2
-        y = (lay.h - h) // 2
-        fields = tuple((x + 12 * fs, y + (26 + 28 * i) * fs, w - 24 * fs, 14 * fs)
-                       for i in range(n))
-        ok_r = (x + w - 96 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
-        cancel_r = (x + w - 50 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
-        return (x, y, w, h), fields, ok_r, cancel_r
-
     def _prompt_pointer(self, px, py, click):
-        if not click:
-            return True
-        _, fields, ok_r, cancel_r = self._prompt_rects()
-        for i, r in enumerate(fields):
-            if _in(px, py, r):
-                self.prompt.field = i
-        if _in(px, py, ok_r):
-            self._commit_prompt()
-        elif _in(px, py, cancel_r):
-            self._close_prompt()
-        self.ws._dirty = True
+        if self.prompt.host.point(px, py, click, self.ws.pointer.down):
+            self.ws._dirty = True
         return True
 
     def _draw_prompt(self):
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas
-        fs = self.layout.fs
+        """The open dialog over the page, dimmed: its title, the line under
+        it, a captioned field each, why it stayed open, and on a touch glass
+        or the desk Cancel and its last button."""
+        ws = self.ws
         p = self.prompt
-        (x, y, w, h), fields, ok_r, cancel_r = self._prompt_rects()
-        _ui_draw.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
-        cv.print(p.title, x + 10 * fs, y + _ui_draw.line_dy(8 * fs, fs), NAMES["white"], 1)
-        for i, r in enumerate(fields):
-            cv.print(p.labels[i], x + 12 * fs, r[1] - 9 * fs, NAMES["light_grey"], 1)
-            _ui_draw.text_field(cv, r, p.fields[i].text, p.hints[i])
-            if i == p.field:
-                cv.rectb(r[0], r[1], r[2], r[3], NAMES["yellow"])
+        lay = self.layout
+        host = p.host
+        desk = _layout_base.metric_class() == _layout_base.DESK
+        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        tdeck = _ui.input_kind() == "tdeck"
+        keys = (("up down", "Field") if len(p.texts) > 1 else ()) + (
+            "confirm", p.ok, "cancel", "Cancel")
+        if not _ui.input_kind() == "touch":
+            b = _ui_draw.metrics("value_row")[17 if desk else 16] * lay.fs
+            ws.sys_canvas.rect(lay.cx, lay.cy + lay.ch - b, lay.cw, b, ws.theme_colors["panel"])
+            _ui.at(lay.cx, lay.cy + lay.ch - b, lay.cw, b)
+            _ui.hints(keys)
+        pick = _ui.dialog(p.title, () if tdeck else ("Cancel", p.ok))
+        if p.sub:
+            _ui.label(p.sub, _PROMPT_SUB)
+        done = False
+        for i in range(len(p.texts)):
+            o = {"id": p.labels[i]}
+            if p.hints[i]:
+                o["hint"] = p.hints[i]
+            got, enter = _ui.field(p.labels[i], p.texts[i], p.caps[i], o)
+            if got != p.texts[i]:
+                p.texts[i] = got
+                p.msg = None
+            done = done or enter
         if p.msg:
-            cv.print(_ui_draw.print_cut(p.msg, w - 24 * fs, fs), x + 12 * fs, y + h - 38 * fs,
-                     NAMES["red"], 1)
-        _ui_draw.game_btn(cv, ok_r, "OK", NAMES["green"])
-        _ui_draw.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])
+            _ui.label(p.msg, _PROMPT_MSG)
+        _ui.dialog()
+        f = _ui.focus()
+        if f in p.labels:
+            p.field = p.labels.index(f)
+        if pick == 1 or done:
+            self._commit_prompt()
+        elif pick == 0:
+            self._close_prompt()
+        if host.owed or host.tap == 2:
+            ws.request_frame()

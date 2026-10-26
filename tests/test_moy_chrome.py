@@ -53,8 +53,7 @@ def _both(ws, piece, *args):
             "and\nsecond paragraph   with  gaps"),
 ])
 def test_the_panel_rasters_as_the_canvas_draws_it(ws, notice, text):
-    ops, canvas, raster = _both(ws, "chrome_panel", 320, 240, notice, "Too big.", text,
-                                False)
+    ops, canvas, raster = _both(ws, "chrome_panel", 320, 240, notice, "Too big.", text)
     assert ops and canvas == raster
 
 

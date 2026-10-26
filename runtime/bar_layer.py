@@ -7,19 +7,16 @@
 #   BarLayer._draw_bar        one bar's cached strip at its rect
 #   BarLayer.redraw_clock     repaint just the clock cell
 #   BarLayer.handle_bar_tap   the bars' tap slice, shared by every surface
-#   BarLayer.handle_cart_tap  the running-cart bar's tap slice
 """The shell's bars (#46; docs/shell_layout_2026-10.md §4, §7): every bar the
 theme's layout resolves to, on any edge, each a cached strip of widget cells
 (`shell_layout.pack`), extracted from Workstation (runtime/console.py) as its
 own surface -- docs/history/shell_layers_refactor_v1.md.
 
 This module is the SINGLE SOURCE of the bar geometry constants (`_STATUS_H`,
-`_BAR_*`, the fixed 320x240 tool-switcher button rects `_HOME_BTN`/`_MENU_BTN`/...).
-They're consumed BOTH here (BarLayer's draw + hit-testing) AND by console.py's own
-chrome (the `Layout` class + a few derived constants + the golden harness/tests that
-read `console._HOME_BTN`), so rather than duplicate them (drift), console.py imports
-them back from here (re-exported under the same names) -- the same pattern
-block_editor_ui.py uses for its `_BLK_*`.
+`_BAR_*`). They're consumed BOTH here (BarLayer's draw + hit-testing) AND by
+console.py's own chrome (the `Layout` class + a few derived constants), so rather
+than duplicate them (drift), console.py imports them back from here (re-exported
+under the same names) -- the same pattern block_editor_ui.py uses for its `_BLK_*`.
 
 The BOTTOM DOCK this module used to own is GONE (2026-08-21): a six-slot
 HOME/CODE/DRAW/MAP/RUN/SET tool switcher left over from the pre-2026-07 shell,
@@ -40,11 +37,11 @@ Workstation holds; the rect hit-test `_in` is widgets', imported directly. The t
 import time
 
 try:
-    from layout_base import (BAR_ROWS, DEFAULT_BARS, bar_rects_of, bars_in_force,
+    from layout_base import (BAR_ROWS, bar_rects_of, bars_in_force,
                              content_of)
     from shell_layout import pack as _pack, cell_of as _cell_of
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (BAR_ROWS, DEFAULT_BARS, bar_rects_of, bars_in_force,
+    from runtime.layout_base import (BAR_ROWS, bar_rects_of, bars_in_force,
                                      content_of)
     from runtime.shell_layout import pack as _pack, cell_of as _cell_of
 
@@ -74,27 +71,13 @@ def _release_layer(lay):
     rel = getattr(lay, "release", None)
     if rel is not None:
         rel()
-_SYSMENU_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)                 # ≡ dropdown toggle (slot 0)
-_HOME_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)      # back to launcher
-_MENU_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # Make-it-mine / code
-_PAINT_BTN = (2 + 3 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # paint editor
-_MAP_BTN = (2 + 4 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)   # map (tilemap) editor
-_BLOCKS_BTN = (2 + 5 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # block editor (#29)
-_MUSIC_BTN = (2 + 6 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # music/sound editor (#50)
-# Right cluster on the running-cart bar (GAME canvas, always 320 wide @ fs 1): batt
-# hard-right, then wifi, then the clock text. Mirrors the launcher Layout's right
-# cluster so both bars read identically. The clock egg hit-test uses _BAR_CLOCK.
-_BAR_BATT = (320 - 2 - _BAR_ICON, _BAR_Y, _BAR_ICON, _BAR_ICON)
-_BAR_WIFI = (_BAR_BATT[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
-_BAR_CLOCK = (_BAR_WIFI[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _STATUS_H = BAR_ROWS    # the bar's rows (16px icons + 1px top/bottom margin)
 
 # -- today's bar on the fixed 320x240 GAME canvas: the cells
 # `shell_layout.pack` gives the default layout there (a running tool/app's
 # strip, `BarLayer._zone_is_game`; tests/test_bars.py holds the packing to
-# them). A SEPARATE cluster from _SYSMENU_BTN/_HOME_BTN/.../_BAR_WIFI/_BAR_CLOCK
-# -- the crash bar's own fixed rects.
-_ZONE_BATT = _BAR_BATT                                          # same rightmost slot
+# them): the battery hard right.
+_ZONE_BATT = (320 - 2 - _BAR_ICON, _BAR_Y, _BAR_ICON, _BAR_ICON)
 # Wi-Fi a status gap from the battery (shell_layout.pack's at font scale 1).
 _ZONE_WIFI = (_ZONE_BATT[0] - _BAR_ICON - 4, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _ZONE_GEAR = (_ZONE_WIFI[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
@@ -151,9 +134,9 @@ _PAINTED = ("menu", "close", "wifi", "battery", "clock", "title", "text", "separ
 _TAPPED = ("clock", "menu", "wifi", "battery", "close")
 # A bar's titles where no running cart names one.
 _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
-           "calendar": "CALENDAR"}
-# _cart_bar_key's fields every bar folds, and the ones a widget adds. Field 2
-# (the EDIT|CODE slot) is drawn by the crash chrome alone, which folds all.
+           "webconsole": "Web console"}
+# _cart_bar_key's fields every bar folds, and the ones a widget adds (field 2
+# is no bar's).
 _KEY_ALWAYS = (0, 3, 4, 10)
 _KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (6, 8), "wifi": (7,),
            "menu": (11,)}
@@ -186,17 +169,6 @@ def _band_part():
     return _ui_draw.BAR_HH_BAND
 
 
-def _edit_kind(cart):
-    """The crash bar's EDIT|CODE slot for `cart`: True for a cart with a
-    Make-it-mine schema (pencil), False for code (the < > glyph), None for a
-    compiled ("runtime": "wasm") cart, whose trap offers no EDIT action at
-    all (docs/wasm_tier_plan_2026-09.md)."""
-    if not cart:
-        return False
-    if cart.get("runtime") == "wasm":
-        return None
-    return bool(cart.get("edit"))
-
 class BarLayer:
     """The shell's bars (#46), migrated out of Workstation as its own surface
     (docs/history/shell_layers_refactor_v1.md Phase 2): every bar of the
@@ -212,29 +184,23 @@ class BarLayer:
     middle, the clock, X, ≡, wifi and battery right.
 
     `where` still selects which screen is asking (`"home"` / `"settings"` /
-    `"menu"` / `"desktop"` / `"tool"`), but it's no longer a set of hardcoded draw
-    bodies: `"desktop"` stays the running-cart CRASH chrome (Stage 5 retired the
-    #71 pause frame -- for a GAME the bar shows only on a crash, never during play);
-    `"tool"` (Part 4) is the minimal bar a running TOOL/APP shows so it's exitable
-    (back + title + status, NO tab ladder). BOTH the `"desktop"` and `"tool"`
-    branches return before any `owner.draw_zone` call, so `draw_zone` stays
-    structurally unreachable while a Player is top-of-stack (the perf guardrail); the
-    home/settings/menu three route through the SAME generalized cache (below) into
-    whichever app owns `where`.
+    `"menu"` / `"tool"`), but it's no longer a set of hardcoded draw bodies: a
+    GAME shows no bar (Stage 5 retired the #71 pause frame, and a run that
+    stopped shows the stop card); `"tool"` (Part 4) is the minimal bar a running
+    TOOL/APP shows so it's exitable (back + title + status, NO tab ladder). The
+    `"tool"` branch returns before any `owner.draw_zone` call, so `draw_zone`
+    stays structurally unreachable while a Player is top-of-stack (the perf
+    guardrail); the home/settings/menu three route through the SAME generalized
+    cache (below) into whichever app owns `where`.
 
     The #43 strip cache is KEPT AND GENERALIZED, not duplicated: `_cart_bar_key`
-    takes `where` (default `"desktop"`, so the pinned zero-arg tests are
-    unchanged) and folds in the active app's `zone_gen` + `ws.can_manage`, so ONE
+    takes `where` and folds in the active app's `zone_gen` + `ws.can_manage`, so ONE
     offscreen strip per bar serves every `where` and re-renders WHOLE only when a
     key field that bar shows changes (app switch / clock tick / zone-content change
     / theme edit) -- never a bare frame, and never a bar for a widget it does not
-    hold. `_render_cart_bar(cv, key, i)` branches on `key[0]` (`where`) to render
-    either the crash body or bar `i` of the zoned layout.
+    hold. `_render_cart_bar(cv, key, i)` renders bar `i` of the zoned layout.
 
     Boundary decisions (deliberate, see the doc):
-      * The button-rect CONSTANTS are the module-level single source above --
-        the golden harness + tests reference console._HOME_BTN / _MENU_BTN / ...
-        (re-exported by console.py), and Layout also uses them.
       * The shared draw toolkit (ws._glyph / ws._icon / ws._mini_btn / ws._bar_image)
         stays on Workstation per the doc; the bar is a CONSUMER of it (via self.ws).
       * `_bar_img_cache` (per-kind icon Image cache backing ws._icon) stays on ws;
@@ -244,12 +210,11 @@ class BarLayer:
 
     The bar is CHROME the content composes, not a standalone stack layer: it's
     SYSTEM-domain on the launcher, Settings and every Editor tab (drawn on
-    sys_canvas) and GAME-domain on the running cart's crash chrome and a running
-    tool's strip (drawn on the fixed game canvas, `_zone_is_game`), and it draws
+    sys_canvas) and GAME-domain on a running tool's strip (drawn on the fixed game canvas, `_zone_is_game`), and it draws
     at their rects (`bar_rects`), LAST inside each content's paint, which lays
     out in what the bars leave (`content_rect`). So the content draws call
     _draw_status_strip(where) and the pointer methods delegate their bar slice to
-    handle_bar_tap(where, ...) / handle_cart_tap, which take
+    handle_bar_tap(where, ...), which takes
     canvas coordinates and hit-test in the coordinates of the bar they land on.
     An app's zone_tap takes the lent rect as a parameter: the zone's cell, in
     the game canvas's packing or the responsive layout's. Inside a window the
@@ -348,7 +313,7 @@ class BarLayer:
 
     def _draw_status_strip(self, where):
         """Entry point every content Layer calls; `where` is "home" / "settings" /
-        "menu" / "desktop". All four route through the ONE generalized cache
+        "menu" / "tool" / ... Each routes through the ONE generalized cache
         mechanism below (_draw_top_bar_cart) -- there is no more per-`where` draw
         body here; the zoning happens inside _render_cart_bar."""
         if self.held:
@@ -364,8 +329,8 @@ class BarLayer:
     # SAME bar.
 
     def _zone_owner(self, where):
-        """The app that owns `where`'s lent left zone, or None ("desktop" -- the
-        Player's crash chrome never lends a zone, see _render_cart_bar)."""
+        """The app that owns `where`'s lent left zone, or None (a running
+        tool's strip lends none, see _render_cart_bar)."""
         ws = self.ws
         if where == "home":
             return ws.launcher_layer
@@ -381,7 +346,7 @@ class BarLayer:
         """True for the surfaces that draw on the fixed 320x240 GAME canvas -- since
         the #39 step-3 conversions moved every Editor tab onto the responsive SYSTEM
         canvas, that's only the Part-4 "tool" bar (a running tool/app is on the game
-        canvas, like the running cart's crash chrome).
+        canvas).
 
         The one exception is a RESPONSIVE app cart (#181): it drew on the SYSTEM
         canvas, so its exitable strip has to be the responsive geometry too --
@@ -413,14 +378,14 @@ class BarLayer:
                 return self.ws.sys_canvas
             game = self._zone_is_game(where)
         # an "app" strip on the game canvas: that canvas IS the system one
-        if where == "desktop" or game:
+        if game:
             return self.ws.canvas
         return self.ws.sys_canvas
 
     def _bar_h(self, where):
         """The rows of a BAR_ROWS-row bar on `where`'s canvas: every bar's
         size is in those."""
-        if where == "desktop" or self._zone_is_game(where):
+        if self._zone_is_game(where):
             return _STATUS_H
         return self.ws.layout.status_h
 
@@ -431,14 +396,9 @@ class BarLayer:
     # responsive surfaces read the packing their layout made at relayout (a
     # window's layout packs its band); a strip on the fixed game canvas packs
     # the bars in force once per placement, at that canvas's 320x240 and
-    # scale 1. The running cart's crash chrome ("desktop") is the Player's
-    # crash panel, which lays out below a top strip, so it stays one bar at
-    # row 0.
+    # scale 1.
 
     def _packed(self, where, game=None):
-        if where == "desktop":
-            # The crash chrome: one strip across the top of the game canvas.
-            return (("top", (0, 0, self.ws.canvas.w, _STATUS_H), 0, ()),)
         if game is None:
             game = self._zone_is_game(where)
         if game:
@@ -514,8 +474,6 @@ class BarLayer:
         """`where`'s canvas less its bars: what the surface under them lays
         out in, (x, y, w, h)."""
         cv = self._bar_canvas(where)
-        if where == "desktop":
-            return content_of(cv.w, cv.h, _STATUS_H, DEFAULT_BARS)
         if where == "tool" and self.ws.app_window_canvas:
             wh = self.ws.app_window_size()       # a window's: its title strip is the bar
             return self._kept_rect(0, 0, wh[0], wh[1])
@@ -557,8 +515,7 @@ class BarLayer:
         return None
 
     def _zone_rect(self, where):
-        """The rect LENT to `where`'s app for its draw_zone/zone_tap (never asked
-        for "desktop", whose branch returns before any zone dispatch), in its
+        """The rect LENT to `where`'s app for its draw_zone/zone_tap, in its
         bar's coordinates."""
         for bar in self._packed(where):
             zone = self.lent_zone(where, bar)
@@ -617,11 +574,11 @@ class BarLayer:
         WM's title strip carries min/max/close instead. Always False on the
         fullscreen-stack tiers (ws.windowed_chrome stays False there)."""
         return getattr(self.ws, "windowed_chrome", False) and where not in (
-            "home", "desk", "desktop", "tool", "app")
+            "home", "desk", "tool", "app")
 
     # -- draw + cache (the #43 strip, generalized to every `where`) -----------
 
-    def _draw_top_bar_cart(self, where="desktop"):
+    def _draw_top_bar_cart(self, where):
         """The ONE cached bar draw for every `where` (Stage 4 generalizes what was
         the running-cart-only strip cache): each bar's pixels rendered ONCE into
         an offscreen strip and blit_strip'd each frame (one flat copy a bar)
@@ -676,8 +633,6 @@ class BarLayer:
                     for k in _KEY_OF.get(c[0], ()):
                         if k not in f:
                             f.append(k)
-                if not b[3]:                # the crash chrome: everything
-                    f = list(range(_KEY_N))
                 out.append(tuple(f))
                 for k in f:
                     need |= 1 << k
@@ -776,12 +731,11 @@ class BarLayer:
         if fresh:
             self._strip_moved(cv, bx, by, bw, bh)
 
-    def _cart_bar_key(self, where="desktop"):
+    def _cart_bar_key(self, where):
         """The cache key for the bar: every piece of state that changes ANY `where`
         variant's PIXELS. A different key forces a strip re-render; an unchanged key
         reuses the cached strip. `where` is key[0] (so a screen switch always
-        invalidates); then the clock text (ticks ~once/min), whether the open cart
-        has an edit schema (EDIT vs CODE icon, "desktop" only), the look's
+        invalidates); then the clock text (ticks ~once/min), the look's
         generation + the glyph font scale (a theme or icon edit / resize must
         repaint),
         whether writes are enabled (the launcher's NEW/DUP/DEL visibility), the
@@ -804,8 +758,6 @@ class BarLayer:
         key[0] = where
         if need & 2:
             key[1] = self._clock_text()
-        if need & 4:
-            key[2] = _edit_kind(ws.cart)
         key[3] = ws.look.look_gen
         key[4] = getattr(cv, "font_scale", 1)
         if need & 32:
@@ -838,24 +790,13 @@ class BarLayer:
     def _render_cart_bar(self, cv, key, i=0):
         """Render bar `i`'s pixels onto `cv` (the offscreen strip, or any canvas)
         for `key[0]` (`where`), in bar coordinates. The pieces are the kernel's
-        strip (native/moy_play/moy_chrome.c: the crash bar, a widget's cell)
-        and the toolkit's band, the one body every bar draws with; the lent
-        zone is its app's. Factored out of _draw_top_bar_cart so the SAME
-        drawing serves the cache build and the direct path. `key` carries the
-        already computed has_edit (index 2) so the icon choice can't drift
-        from it."""
+        strip (native/moy_play/moy_chrome.c: a widget's cell) and the
+        toolkit's band, the one body every bar draws with; the lent zone is its
+        app's. Factored out of _draw_top_bar_cart so the SAME drawing serves
+        the cache build and the direct path."""
         ws = self.ws
         where = key[0]
         mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)
-        if where == "desktop":
-            # The running-cart CRASH chrome: drawn only on a crash, never a
-            # "zone" (no draw_zone below this return, which keeps the zoned-bar
-            # dispatch off the play frame -- the Stage-4 guardrail).
-            has_edit = key[2]
-            edit = -1 if has_edit is None else (1 if has_edit else 0)
-            _ch.replay(mp.chrome_strip_crash(cv.w, edit, self._clock_text(),
-                                             ws._wifi_icon_kind()), cv, ws)
-            return
         packed = self._packed(where)[i]
         edge, rect, dy, cells = packed
         game = self._zone_is_game(where)
@@ -1515,10 +1456,10 @@ class BarLayer:
         else:
             ws.ach_ui._clock_taps = 0            # any other bar tap resets the run
         # The ≡, the clock, wifi and battery open their component
-        # (docs/shell_layout_2026-10.md §8): a popover in desktop mode, the
-        # system menu as the popup it is and the rest fullscreen in console
-        # mode -- wifi the Settings WIFI panel either way, the one wifi
-        # implementation. Consumed, so a tap never leaks to the lent zone.
+        # (docs/shell_layout_2026-10.md §8): the system menu as the popup it
+        # is, the rest a popover hung from the widget -- wifi the Settings
+        # WIFI page, the one wifi implementation. Consumed, so a tap never
+        # leaks to the lent zone.
         if name in ("clock", "menu", "wifi", "battery"):
             ws.widget_tap(name)
             return True
@@ -1560,28 +1501,3 @@ class BarLayer:
             return False
         return bool(owner.zone_tap(px, py, zone))
 
-    def handle_cart_tap(self, px, py):
-        """The running-cart top-bar tap slice (px, py in GAME coords): the TIC-80
-        one-tap tool switcher (≡ / HOME / EDIT|CODE / PAINT / MAP / BLOCKS / MUSIC).
-        Returns True if a tool switch consumed the tap (so the pause QUIT/CONTINUE
-        handling in the desktop pointer is skipped)."""
-        ws = self.ws
-        if _in(px, py, _SYSMENU_BTN):
-            ws.toggle_sysmenu()      # ≡ -> open the dropdown system menu (#52)
-        elif _in(px, py, _HOME_BTN):
-            ws.go_home()
-        elif _in(px, py, _MENU_BTN):
-            if _edit_kind(ws.cart) is None:
-                return False
-            ws._open_menu()
-        elif _in(px, py, _PAINT_BTN):
-            ws._open_paint()
-        elif _in(px, py, _MAP_BTN):
-            ws._open_map()
-        elif _in(px, py, _BLOCKS_BTN):
-            ws._open_blocks()
-        elif _in(px, py, _MUSIC_BTN):
-            ws._open_music()
-        else:
-            return False
-        return True

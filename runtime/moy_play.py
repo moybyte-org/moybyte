@@ -972,8 +972,7 @@ _CP, _CI, _CS = ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p
 _CSIGS = (
     ("moy_chrome_set_inks", [ctypes.POINTER(ctypes.c_int16), _B, _CI], None),
     ("moy_chrome_clear", [_CP], None),
-    ("moy_chrome_panel", [_CP, _CI, _CI, _B, _CS, _CS, _B], None),
-    ("moy_chrome_strip_crash", [_CP, _CI, _CI, _CS, _CS], None),
+    ("moy_chrome_panel", [_CP, _CI, _CI, _B, _CS, _CS], None),
     ("moy_chrome_strip_band", [_CP, _CI, _CI, _B], None),
     ("moy_chrome_strip_cell", [_CP, _CS, _CI, _CI, _CI, _CI, _CI, _CI, _CS, _B], None),
     ("moy_chrome_menu", [_CP, _CP, _CP, _CI, _CI, _CI, _CI, _CI, _CI, _CI, _CI], None),
@@ -984,7 +983,7 @@ _CSIGS = (
     ("moy_chrome_title", [_CS, ctypes.c_size_t, _CI, _CI], _CI),
     ("moy_chrome_crash_title", [_CS, ctypes.c_size_t, _CS, _CI], _CI),
     ("moy_chrome_fit_text", [_CS, ctypes.c_size_t, _CS, _U32, _U32, _U32, _U32], _CI),
-    ("moy_chrome_newer_text", [_CS, ctypes.c_size_t, _CS, _CS], _CI),
+    ("moy_chrome_newer_text", [_CS, ctypes.c_size_t, _CS], _CI),
 )
 _CREADY = [False]
 
@@ -1032,9 +1031,9 @@ def chrome_inks(inks, bar_light, rings):
     _clib().moy_chrome_set_inks(arr, bool(bar_light), int(rings))
 
 
-def chrome_panel(cw, ch, notice, title, text, compiled, raster=None):
+def chrome_panel(cw, ch, notice, title, text, raster=None):
     return _chrome("moy_chrome_panel", int(cw), int(ch), bool(notice), _b(title),
-                   _b(text), bool(compiled), raster=raster)
+                   _b(text), raster=raster)
 
 
 def _say(name, *args):
@@ -1056,12 +1055,9 @@ def chrome_fit_text(title, total, block, free, largest):
                 int(largest))
 
 
-def chrome_newer_text(title, missing):
-    return _say("moy_chrome_newer_text", _b(title), _b(missing))
+def chrome_newer_text(missing):
+    return _say("moy_chrome_newer_text", _b(missing))
 
-
-def chrome_strip_crash(cw, edit, clock, wifi):
-    return _chrome("moy_chrome_strip_crash", int(cw), int(edit), _b(clock), _b(wifi))
 
 
 def chrome_strip_band(cw, bar_h, light):

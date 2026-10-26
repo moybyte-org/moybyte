@@ -1487,32 +1487,62 @@ def test_the_parked_screen_is_static_so_the_redraw_gate_closes(tmp_path):
     assert ws._needs_redraw(1 / 30.0) is False
 
 
-def test_show_address_toggles_and_resets_on_every_entry(tmp_path):
-    """A pin left revealed on the glass is a pin the next person in the room
-    reads, so entering the mode always starts hidden."""
-    ws = _mode_ws(tmp_path)
-    ws.toggle_webhost()
+class _Back:
+    """One frame's input with B pressed."""
+
+    last_key = 0
+
+    def pressed(self, n):
+        return n == "b"
+
+
+def _turn_off_by_its_button(ws):
+    """Under touch the page carries Turn off as a button: a press and its
+    release on it."""
+    from runtime import ui_draw
     ui = ws.web.ui
-    assert ui.show_address is False
-    _qr, _addr, show, off = ui.rects()
-    assert show[2] > 0 and off[2] > 0
-    ui.handle_pointer(show[0] + 2, show[1] + 2, True)
-    assert ui.show_address is True
-    ui.handle_pointer(show[0] + 2, show[1] + 2, True)
-    assert ui.show_address is False
-    ui.show_address = True
-    ws.toggle_webhost()                      # off...
-    ws.toggle_webhost()                      # ...and on again
-    assert ui.show_address is False
+    ui_draw.input_kind("touch")
+    try:
+        ws._dirty = True
+        ws.frame(1 / 30.0)
+        x, y, w, h = ui.host.box("Turn off")
+        ui.handle_pointer(x + 2, y + 2, True)
+        for _ in range(2):                   # the press, then its release
+            ws._dirty = True
+            ws.frame(1 / 30.0)
+    finally:
+        ui_draw.input_kind("keys")
 
 
-def test_the_turn_off_button_turns_it_off(tmp_path):
-    """The toggle that got here lives in Settings, and Settings is behind this
-    screen -- a mode with no visible way out is a trap."""
+def test_the_page_always_shows_the_address_and_the_pin(tmp_path, monkeypatch):
+    """The look's type fits the address and the pin beside the code, so the
+    page shows them always (docs/look_2026-10.md step 33), the pin large."""
+    from runtime import ui
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
-    _qr, _addr, _show, off = ws.web.ui.rects()
-    ws.web.ui.handle_pointer(off[0] + 2, off[1] + 2, True)
+    said = []
+    real = ui.label
+    monkeypatch.setattr(ui, "label", lambda t, o=None: (said.append((t, (o or {}).get("face"))),
+                                                         real(t, o))[1])
+    ws._dirty = True
+    ws.frame(1 / 30.0)
+    url = ws.web_console_url()
+    host, _sep, pin = url.replace("http://", "").partition("?pin=")
+    assert (host.rstrip("/"), "mono") in said
+    assert (pin, "result") in said
+
+
+def test_back_and_the_turn_off_button_turn_it_off(tmp_path):
+    """The toggle that got here lives in Settings, and Settings is behind this
+    screen -- a mode with no visible way out is a trap. Back (K on the
+    T-Deck, Esc) turns it off; a touch glass adds the button."""
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    ws.web.ui.handle_input(_Back())
+    assert ws.webhost_serving() is False
+    assert ws.wm.top_kind() == "launcher"
+    ws.toggle_webhost()
+    _turn_off_by_its_button(ws)
     assert ws.webhost_serving() is False
     assert ws.wm.top_kind() == "launcher"
 
@@ -1520,15 +1550,14 @@ def test_the_turn_off_button_turns_it_off(tmp_path):
 def test_turn_off_still_turns_OFF_when_the_host_died_underneath(tmp_path):
     """The one state a plain toggle gets wrong. If the socket stopped from
     somewhere else, `toggle_webhost` reads "not serving" and STARTS it -- a
-    button labelled TURN OFF that turns it on, on the one screen whose whole
-    job is being the way out."""
+    way out that turns it on, on the one screen whose whole job is being the
+    way out."""
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
     ws.webhost.stop()                        # the host dies under the screen
     assert ws.webhost_serving() is False and ws.web.parked is True
-    _qr, _addr, _show, off = ws.web.ui.rects()
-    ws.web.ui.handle_pointer(off[0] + 2, off[1] + 2, True)
-    assert ws.webhost_serving() is False, "TURN OFF restarted the host"
+    ws.web.ui.handle_input(_Back())
+    assert ws.webhost_serving() is False, "turning it off restarted the host"
     assert ws.wm.top_kind() == "launcher"
 
 
