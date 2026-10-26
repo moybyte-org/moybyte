@@ -257,15 +257,20 @@ every clause was a race once), and a missing heap area, which fails before the
 VM touches anything, is drawn in the same boot.
 
 **What**: the record (cause, the app, uptime), the firmware label, and three
-choices: RETRY (start the VM as usual), SAFE (start it with `system.json`
-neither read nor written: the defaults, a fill instead of a wallpaper cart) and
-REPL (start it with `main.py` skipped, for a developer on serial).
+choices: Try again (RETRY on serial: start the VM as usual), Safe start (SAFE:
+start it with `system.json` neither read nor written: the defaults, a fill
+instead of a wallpaper cart) and Developer console (REPL: start it with
+`main.py` skipped, for a developer on serial). The serial words and the
+`sel=` names stay RETRY, SAFE and REPL whatever the rows say.
 
-**How it draws.** Its own raster, a few dozen lines: a filled rect and an 8×8
-glyph from libmoy's compiled-in `moy_font_data`, at an integer scale, with a
-rotation of 0/90/180/270 applied per pixel, into the panel module's own
-framebuffer 0. No libmoy canvas state, no compositor, no PPA, no allocation:
-the floor must not depend on what sprint 3 replaces. Each panel module gains
+**How it draws.** In the 2026-10 look (`docs/look_2026-10.md` step 33, in Moy
+Night): `native/moy_gfx/moy_scr.h`'s fills, rounded rects, three marks and the
+outline faces compiled into C (`moy_path_faces.h`), into the panel module's
+own framebuffer 0, a turned panel through a band of rows. No libmoy canvas
+state, no compositor, no PPA, and no draw allocates: the band and the faces'
+scratch (`moy_path_lend`) are one PSRAM block the kernel makes once, before
+the VM's first area or on the floor: the floor must not depend on what
+sprint 3 replaces. Each panel module gains
 four C entry points beside its MicroPython binding, which keeps calling the same
 bodies; the two that can fail answer 0 or an `esp_err_t`, because a floor whose
 panel will not come up still has serial. A board names its four, its geometry

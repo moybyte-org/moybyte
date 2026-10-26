@@ -17,7 +17,8 @@ add_library(usermod_moy_gfx INTERFACE)
 # moy_gfx_kernels.c is the COMPOSITOR (the loops runtime/moyhost_gfx.c also
 # links, so there is one copy); it carries its own -O3 pragma. moy_text.c is
 # the one UI text path, over its rasterizer; moy_backdrop.c a theme's
-# backdrop; moy_shape.c the 2026-10 look's shapes and shadows; moy_path.c
+# backdrop; moy_shape.c the 2026-10 look's shapes and shadows; moy_scr.c a
+# whole screen with no canvas (the boot splash, the kernel's screens); moy_path.c
 # filled paths and the outline faces (each its header).
 # THIS LIST AND
 # micropython.mk'S ARE TWINS -- the .mk is what the unix build reads, and the
@@ -30,6 +31,7 @@ target_sources(usermod_moy_gfx INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_backdrop.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_shape.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_path.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_scr.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy_kernels.c
 )
 

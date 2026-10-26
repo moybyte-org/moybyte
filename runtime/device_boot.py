@@ -137,8 +137,8 @@ class DeviceBoot(BootCarts):
         slow boot indistinguishable from a dead board -- a FIRST boot writes
         every built-in cartridge out before anything composes (17.5s of the
         P4's 25s). So this paints the SHIPPED boot logo (console.draw_splash --
-        the same picture arm_splash holds, or the machine appears to start
-        twice) with a bar and a status line under it.
+        the picture the kernel lit the glass with, or the machine appears to
+        start twice) with a track and the status in sentence case under it.
 
         `frac` given means this is a progress repaint: the bar moves, the wire
         stays quiet. `frac=None` is a STAGE and goes to serial as well.
@@ -157,7 +157,7 @@ class DeviceBoot(BootCarts):
             return
         try:
             self.canvas.sync_back()
-            draw_splash(self.canvas, frac=frac, status=msg)
+            draw_splash(self.canvas, frac=frac, status=msg[:1].upper() + msg[1:])
             self.comp.flush()
             if not self.lit:
                 # #45, and it needs a FENCE, not just an ordering. On a backend

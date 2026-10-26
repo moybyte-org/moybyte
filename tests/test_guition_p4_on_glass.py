@@ -96,7 +96,12 @@ TF_CARD_SRAM = 756
 # is PSRAM, and the binding's two root pointers; native/moycore: the frame's
 # split, which replaced the binding's own), 16 bytes of internal heap by the
 # heap's total against dev 502be7fd, fresh boots, 2026-10-08.
-KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432 - 348 + 16
+# And the kernel's screens in the look (native/moy_kernel, native/moy_gfx/
+# moy_path.c: the floor's view at 64 columns and its geometry's band and
+# scratch, the splash palette, the faces' lent scratch and the screens'
+# PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
+# 2026-10-26; the scratch and the band themselves are PSRAM.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 288 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 432 - 348 + 16 + 270
 WASM_IDLE_BASELINE = (188991 - TF_CARD_SRAM - KERNEL_SRAM, 94208)
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc8012p4a1c"
 

@@ -65,7 +65,7 @@ _MOY_GFX = os.path.dirname(native_build.LIBMOY)
 _LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
            "moy_gfx_kernels.h", "moy_gfx_kernels.c", "moy_text.h", "moy_text.c",
            "moy_backdrop.h", "moy_backdrop.c", "moy_shape.h", "moy_shape.c",
-           "moy_path.h", "moy_path.c", "moy_path_faces.h")
+           "moy_path.h", "moy_path.c", "moy_path_faces.h", "moy_scr.h", "moy_scr.c")
 
 # ...and where to find them. One tuple rather than a literal at the call site,
 # because a caller that reconstructs the build (tests/test_native_build_no_
@@ -129,6 +129,8 @@ _SIGS = (
     ("moy_path_width", [_I, _I, _P, _Z], _I),
     ("moy_path_metrics", [_I, _P], _I),
     ("moy_path_wire_swapped", [_I], None),
+    # The boot splash (native/moy_gfx/moy_scr.c).
+    ("moy_splash_buf", [_P, _Z, _I, _I, _I, _I, _I, _I, _P, _I, _P, _Z], _I),
     # ...and the host-side rest.
     ("hg_lr_size", [], _Z),
     ("hg_lr_engine", [_I], None),
@@ -372,6 +374,17 @@ def path_text(dst, dw, face, size, x, y, s, col, cam_x, cam_y, cx0, cy0, cx1, cy
     return _lib().mg_path_text(ctypes.cast(arr, _P), cap, int(dw), int(face), int(size),
                                int(x), int(y), ctypes.cast(sb, _P), sn, int(col), int(cam_x),
                                int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def splash(dst, stride, x0, y0, w, h, swap, pal, permille, status):
+    arr, cap = _buf(dst)
+    pb, pn = _bytes(pal)
+    if pn != 12:
+        raise ValueError("splash palette")
+    sb, sn = _bytes(status)
+    return _lib().moy_splash_buf(ctypes.cast(arr, _P), cap, int(stride), int(x0), int(y0),
+                                 int(w), int(h), int(bool(swap)), ctypes.cast(pb, _P),
+                                 int(permille), ctypes.cast(sb, _P), sn)
 
 
 def path_width(face, size, s):

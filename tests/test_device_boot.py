@@ -49,20 +49,8 @@ class FakeCanvas:
     def sync_back(self):
         self.syncs += 1
 
-    def cls(self, c=0):
+    def splash(self, pal, permille=-1, status=""):
         self.paints += 1
-
-    def spr(self, *a, **k):
-        pass
-
-    def print(self, *a, **k):
-        pass
-
-    def rect(self, *a, **k):
-        pass
-
-    def rectb(self, *a, **k):
-        pass
 
 
 class FakeComp:

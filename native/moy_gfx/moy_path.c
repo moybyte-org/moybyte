@@ -50,9 +50,18 @@ static int s_edge_cap;
 static int32_t *s_acc;
 static int s_acc_cap;
 
+static int s_lent;              // the scratch is a lent block: it never grows
+static edge_t *s_own_edges;
+static int s_own_edge_cap;
+static int32_t *s_own_acc;
+static int s_own_acc_cap;
+
 static int edges_room(int n) {
     if (n <= s_edge_cap) {
         return 1;
+    }
+    if (s_lent) {
+        return 0;
     }
     int cap = n < 256 ? 256 : n + n / 2;
     edge_t *e = PATH_ALLOC((size_t)cap * sizeof(edge_t));
@@ -72,6 +81,9 @@ static int acc_room(int n) {
     if (n <= s_acc_cap) {
         return 1;
     }
+    if (s_lent) {
+        return 0;
+    }
     int cap = n < 512 ? 512 : n;
     int32_t *a = PATH_ALLOC((size_t)cap * sizeof(int32_t));
     if (a == NULL) {
@@ -83,6 +95,34 @@ static int acc_room(int n) {
     s_acc = a;
     s_acc_cap = cap;
     return 1;
+}
+
+void moy_path_lend(void *mem, size_t n) {
+    if (mem != NULL && !s_lent) {
+        s_own_edges = s_edges;
+        s_own_edge_cap = s_edge_cap;
+        s_own_acc = s_acc;
+        s_own_acc_cap = s_acc_cap;
+    }
+    if (mem == NULL) {
+        if (s_lent) {
+            s_edges = s_own_edges;
+            s_edge_cap = s_own_edge_cap;
+            s_acc = s_own_acc;
+            s_acc_cap = s_own_acc_cap;
+            s_lent = 0;
+        }
+        return;
+    }
+    // a quarter for a row's coverage, the rest the edges
+    uintptr_t at = ((uintptr_t)mem + 7u) & ~(uintptr_t)7u;
+    size_t room = n > (size_t)(at - (uintptr_t)mem) ? n - (size_t)(at - (uintptr_t)mem) : 0;
+    size_t acc_n = room / 4 / sizeof(int32_t);
+    s_acc = (int32_t *)at;
+    s_acc_cap = (int)acc_n;
+    s_edges = (edge_t *)(at + acc_n * sizeof(int32_t));
+    s_edge_cap = (int)((room - acc_n * sizeof(int32_t)) / sizeof(edge_t));
+    s_lent = 1;
 }
 
 // One edge from (x0, y0) to (x1, y1); a level one adds nothing. 0 when the
@@ -348,6 +388,12 @@ static inline int32_t scale(int32_t v, int size, int upm) {
     return (int32_t)((int64_t)v * size / upm);
 }
 
+// a / n rounded down (n > 0): a curve's points move with the camera exactly,
+// whatever their sign.
+static inline int32_t fdiv(int64_t a, int64_t n) {
+    return (int32_t)(a >= 0 ? a / n : -((-a + n - 1) / n));
+}
+
 // A quadratic curve from (lx, ly) by (mx, my) to (tx, ty), 26.6, as lines:
 // more of them the more it bends.
 static int quad(int *n, int32_t lx, int32_t ly, int32_t mx, int32_t my, int32_t tx, int32_t ty) {
@@ -361,8 +407,8 @@ static int quad(int *n, int32_t lx, int32_t ly, int32_t mx, int32_t my, int32_t 
     int64_t nn = (int64_t)steps * steps;
     for (int i = 1; i <= steps; i++) {
         int64_t t = i, u = steps - i;
-        int32_t bx = (int32_t)((u * u * lx + 2 * t * u * mx + t * t * tx) / nn);
-        int32_t by = (int32_t)((u * u * ly + 2 * t * u * my + t * t * ty) / nn);
+        int32_t bx = fdiv(u * u * lx + 2 * t * u * mx + t * t * tx, nn);
+        int32_t by = fdiv(u * u * ly + 2 * t * u * my + t * t * ty, nn);
         if (!edge_add(n, ax, ay, bx, by)) {
             return 0;
         }

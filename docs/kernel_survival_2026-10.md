@@ -820,7 +820,9 @@ the window managers own: the pin's minting and its row in
 and the themed screen (`runtime/web_console_ui.py`, with its QR from
 `runtime/moy_qr.py`), which is the screen while the VM runs (§13, question 8).
 The kernel's plain screen, for a console whose VM does not run, is drawn by
-the loop task that runs with no VM (§7).
+the loop task that runs with no VM (§7): the address and the pin, the
+shell's page without its QR (`moy_web_screen_render`, `docs/look_2026-10.md`
+step 33).
 
 ### 6.5 The Zero
 
@@ -1034,7 +1036,8 @@ plus the PUMP, HITCH and LOOP lines `device/device_diag.py` formats.
 ### 7.4 The boot order
 
 `native/moy_kernel/moy_boot.c` is the kernel's first light: the logo drawn
-and lit before any VM (§13's question 9). `build_desktop`'s order is to follow
+and lit before any VM (§13's question 9), the console's boot splash itself
+(`moy_scr.h`'s, on the ground of the theme the console keeps in NVS). `build_desktop`'s order is to follow
 it there: the splash, the store (C), the runtime probe (Python until
 sprint 4), the Workstation and the window manager (Python), the
 services wired as kernel handles the Python side reads, the OTA verdict, the

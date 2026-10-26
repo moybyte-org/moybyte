@@ -144,6 +144,12 @@ class SpineVerbs:
                                                     self.look.theme_variant))
         if self.look.theme_name != name:
             self.look.set_theme_variant(DEFAULT_VARIANT, persist=False)
+        # The kernel lights the next boot's glass on this theme's ground.
+        try:
+            from console import keep_splash
+        except ImportError:  # pragma: no cover - host package lane
+            from runtime.console import keep_splash
+        keep_splash(self.theme_colors)
         # Every persisted ON/OFF setting, through the verb its registry entry
         # names (#209 section 7): the key is the system.json key, the default is
         # declared beside it, and a board that cannot serve one gets the honest

@@ -1,6 +1,5 @@
 # Map (grep -n a name to jump there):
-#   splash_image                     the Moy mascot as a 16x16 blittable
-#   draw_splash                      paint the boot logo
+#   draw_splash                      paint the boot splash (splash_pal: its palette)
 #   Workstation                      the console: canvases, the process stack, the store, every frame
 #   Workstation._init_canvases       the system and game canvases
 #   Workstation._init_components     the collaborators every surface reaches through ws
@@ -477,7 +476,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The console's stateless base layer -- the MOY64 palette (NAMES), the
 # responsive Layout/CodeLayout geometry (#39), the themeable top-bar IconSheet slot map + art
-# (_ICON/_ICON_ART), the cursor sprite (CURSOR), and the small pure helpers
+# (_ICON), the cursor sprite (CURSOR), and the small pure helpers
 # (_clamp_scroll/_cursor_delta/_ticks_*/_err_text) -- lives in chrome.py.
 # Imported back so every bare reference below and every `console.X` a test
 # still makes resolves (`_in` is one of those: nothing here calls it). chrome.py is a leaf (it imports only editors/widgets +
@@ -487,14 +486,14 @@ try:
     from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
                         RESIZE_CURSORS, NAMES,
                         _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
-                        _ICON, _ICON_ART, _nibble, chrome_scale_floor,
+                        _ICON, chrome_scale_floor,
                         chrome_scale_choices, _cursor_delta,
                         _clamp_scroll, _in, _SPLASH_MS)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
                                 RESIZE_CURSORS,
                                 NAMES, _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
-                                _ICON, _ICON_ART, _nibble,
+                                _ICON,
                                 chrome_scale_floor, chrome_scale_choices,
                                 _cursor_delta, _clamp_scroll, _in, _SPLASH_MS)
 
@@ -568,81 +567,98 @@ def _app_abi(rows):
     return app
 
 
-_SPLASH_IMG = None
+def _mix565(a, b, k):
+    """moy_scr_mix: a + (b - a) * k / 256 per channel of two RGB565 words."""
+    out = 0
+    for sh, m in ((11, 31), (5, 63), (0, 31)):
+        x, y = (a >> sh) & m, (b >> sh) & m
+        out |= (x + (((y - x) * k + 128) >> 8)) << sh
+    return out
 
 
-def splash_image():
-    """The Moy mascot as a 16x16 blittable built straight from _ICON_ART with REAL
-    transparency ("." -> -1), cached. Not the icon-sheet tile: an IconSheet is a
-    solid indexed grid where a blank pixel is index 0 (black) -- which is also Moy's
-    outline colour, so a sheet blit can't tell the outside from the outline and
-    boxes the mascot. Building the image here keeps the outline AND lets the dark
-    field (and the corner bite) show through."""
-    global _SPLASH_IMG
-    if _SPLASH_IMG is None:
-        art = _ICON_ART.get("moy", ())
-        pix = []
-        for ly in range(16):
-            row = art[ly] if ly < len(art) else ""
-            for lx in range(16):
-                pix.append(_nibble(row[lx]) if lx < len(row) else -1)
-        _SPLASH_IMG = _SheetSprite(16, 16, pix, -1)
-    return _SPLASH_IMG
+def _lum565(c):
+    """An RGB565 word's relative luminance (WCAG's)."""
+    out = 0.0
+    for sh, m, wt in ((11, 31, 0.2126), (5, 63, 0.7152), (0, 31, 0.0722)):
+        v = ((c >> sh) & m) / m
+        out += wt * (v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4)
+    return out
 
 
-def draw_splash(cv, frac=None, status=None):
-    """Paint the boot logo: 'Moy' (the moybyte mascot) scaled up over a dark field,
-    with the two-tone `moybyte` wordmark below. Drawn on the SYSTEM canvas (like the
-    launcher) so it fills the real panel; host and device share this one path.
+def splash_pal(th):
+    """The boot splash's palette for theme roles `th` (a theme_colors dict),
+    as moy_scr.h's six RGB565 words in bytes: the ground, the ink, the dim
+    ink, the value, and ui.progress's track -- the border mixed a quarter
+    toward the dim ink, or where the value would not keep 3:1 on it the
+    ground edged in the dim ink (Contrast's)."""
+    from array import array
+    try:
+        from chrome import rgb565_of
+    except ImportError:  # pragma: no cover - host package lane
+        from runtime.chrome import rgb565_of
+    bg, ink, dim = (rgb565_of(th[k]) for k in ("panel", "ink", "ink_dim"))
+    value = rgb565_of(th.get("value", th["accent"]))
+    rest = _mix565(rgb565_of(th["border"]), dim, 64)
+    lo, hi = sorted((_lum565(value), _lum565(rest)))
+    if (lo + 0.05) * 3 <= hi + 0.05:
+        track = edge = rest
+    else:
+        track, edge = bg, dim
+    return bytes(array("H", (bg, ink, dim, value, track, edge)))
 
-    `frac` (0..1) and `status` add a progress bar and a line of text under the
-    wordmark, which is how a board that boots slowly says so -- the P4's
-    full-erase boot spends 17 of its 25 seconds seeding cartridges, long before
-    a Workstation exists to own the screen. Hence a free function taking a
-    canvas rather than a Workstation method: the loading screen and the boot
-    logo have to BE the same picture, or the machine appears to start twice.
+
+def _kernel_splash():
+    """The palette the kernel's first light drew with (moy_kernel.splash),
+    or None off a console board."""
+    try:
+        import moy_kernel
+    except ImportError:
+        return None
+    get = getattr(moy_kernel, "splash", None)
+    return get() if get is not None else None
+
+
+def keep_splash(th):
+    """Keep theme roles `th`'s splash palette for the kernel's next first
+    light, so the next boot lights the glass on the stored theme's ground;
+    whether it wrote (a board keeps it once, in NVS)."""
+    try:
+        import moy_kernel
+    except ImportError:
+        return False
+    keep = getattr(moy_kernel, "splash", None)
+    if keep is None:
+        return False
+    try:
+        return bool(keep(splash_pal(th)))
+    except Exception:  # noqa: BLE001 -- a lost palette costs one boot's ground
+        return False
+
+
+def draw_splash(cv, frac=None, status=None, pal=None):
+    """Paint the boot splash (docs/look_2026-10.md step 33): Moy at a whole
+    scale over the `moybyte` wordmark on the theme's ground, and with
+    `frac` (0..1) a track under it, with `status` a line in the dim ink.
+    Drawn on the SYSTEM canvas so it fills the real panel.
+
+    The picture is moy_scr's splash (native/moy_gfx/moy_scr.c), the C the
+    kernel lights the glass with before any VM, so the two are one picture
+    or the machine appears to start twice. `pal` (splash_pal's bytes)
+    defaults to the one the kernel drew with -- the stored theme's, kept in
+    NVS -- and to Moy Day's off a board. A free function over a canvas: the
+    P4 spends most of a full-erase boot seeding carts, long before a
+    Workstation exists.
     """
-    W, H = cv.w, cv.h
-    cv.cls(NAMES["dark_blue"])
-    scale = min(W, H) // 56                    # Moy ~1/4 of the panel, reflows with size
-    if scale < 3:
-        scale = 3
-    side = 16 * scale
-    # Wordmark is drawn at text scale 1: the device's framebuf text is a fixed 8px
-    # and ignores a scale arg, so scale-1 is the ONLY size that renders identically
-    # on host and device (host==device parity). Kept small + centred under Moy.
-    word = 8                                   # one 8px char cell wide
-    gap = 10
-    block_h = side + gap + word
-    # The bar and its label extend the block DOWNWARD, so the logo keeps its
-    # own vertical centring when there is no progress to report.
-    bar_h, bar_gap = 10, 18
-    if frac is not None:
-        block_h += bar_gap + bar_h
-    if status:
-        block_h += bar_gap + word
-    top = (H - block_h) // 2
-    cv.spr(splash_image(), (W - side) // 2, top, scale)
-    wy = top + side + gap
-    # Two-tone wordmark: "moy" in cream, "byte" in the mascot's indigo body colour.
-    tw = 7 * word                             # "moybyte" is 7 chars
-    wx = (W - tw) // 2
-    cv.print("moy", wx, wy, NAMES["white"], 1)
-    cv.print("byte", wx + 3 * word, wy, NAMES["indigo"], 1)
-    y = wy + word
-    if frac is not None:
-        bar_w = W // 3
-        bx, by = (W - bar_w) // 2, y + bar_gap
-        # TIC-80 naming, and the trap in it: rect is FILLED and rectb is the
-        # outline -- there is no rectfill on the device canvas.
-        cv.rectb(bx - 2, by - 2, bar_w + 4, bar_h + 4, NAMES["dark_grey"])
-        fill = int(bar_w * (frac if frac < 1 else 1))
-        if fill > 0:
-            cv.rect(bx, by, fill, bar_h, NAMES["yellow"])
-        y = by + bar_h
-    if status:
-        cv.print(status, (W - len(status) * word) // 2, y + bar_gap,
-                 NAMES["light_grey"], 1)
+    if pal is None:
+        pal = _kernel_splash()
+    if pal is None:
+        try:
+            from chrome import theme_colors
+        except ImportError:  # pragma: no cover - host package lane
+            from runtime.chrome import theme_colors
+        pal = splash_pal(theme_colors("moy", "light"))
+    permille = -1 if frac is None else int(1000 * min(max(frac, 0.0), 1.0))
+    cv.splash(pal, permille, status or "")
 
 
 class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
@@ -4806,7 +4822,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _draw_splash(self):
         """Paint the boot logo on the system canvas (see draw_splash)."""
-        draw_splash(self.sys_canvas)
+        draw_splash(self.sys_canvas, pal=splash_pal(self.theme_colors))
 
     # -- desktop shell drawing (#28) -----------------------------------------
 

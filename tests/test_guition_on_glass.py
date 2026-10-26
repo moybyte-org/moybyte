@@ -90,7 +90,12 @@ EXFAT_SRAM = 640
 # is PSRAM, and the binding's two root pointers; native/moycore: the frame's
 # split, which replaced the binding's own), 8 bytes of internal heap by the
 # heap's total against dev 502be7fd, fresh boots, 2026-10-08.
-KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 92 + 8
+# And the kernel's screens in the look (native/moy_kernel, native/moy_gfx/
+# moy_path.c: the floor's view at 64 columns and its geometry's band and
+# scratch, the splash palette, the faces' lent scratch and the screens'
+# PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
+# 2026-10-26; the scratch and the band themselves are PSRAM.
+KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 92 + 8 + 270
 # And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
 # moy_sd initialises and keeps, and its sdspi device and driver structs (the
 # store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on

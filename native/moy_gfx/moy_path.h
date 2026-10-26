@@ -64,6 +64,13 @@ int moy_path_width(int face, int size, const uint8_t *s, size_t n);
 // units: 0 for an unknown face.
 int moy_path_metrics(int face, int out[3]);
 
+// Lend the scratch (a row's coverage and a glyph's edges) the `n` bytes at
+// `mem` until the next call: the draws then allocate nothing, and one that
+// needs more than the block holds draws nothing and answers -1. NULL gives
+// the scratch back its own (kept, grown on need). A quarter of the block is
+// the coverage, an int32 a column of the widest clip drawn.
+void moy_path_lend(void *mem, size_t n);
+
 // The byte order blends read and write in (moy_shape_wire_swapped calls it).
 void moy_path_wire_swapped(int swapped);
 

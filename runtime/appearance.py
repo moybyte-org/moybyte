@@ -226,6 +226,15 @@ _NOTE_FACES = {}        # (mono font id, desk) -> a note's (regular, bold)
 _FULL = [False]         # a load found the slots full and reset them
 
 
+def _keep_splash(th):
+    """The next boot's first light on theme roles `th` (console.keep_splash)."""
+    try:
+        from console import keep_splash
+    except ImportError:  # pragma: no cover - host package lane
+        from runtime.console import keep_splash
+    return keep_splash(th)
+
+
 class Appearance:
     """The look: theme, variant, font scale, wallpaper, icon sheet.
 
@@ -1453,6 +1462,7 @@ class Appearance:
         if persist:
             ws.system.set("theme", self.theme_name, persist=False)
             ws.system.set("theme_variant", self.theme_variant)
+            _keep_splash(ws.theme_colors)
         self._layouts = {}
         self._choices = None
         ws.set_render_scale(self.live.look[0].get("render.scale", 1))

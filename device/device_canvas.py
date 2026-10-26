@@ -1702,6 +1702,17 @@ class DeviceCanvas:
         """(em, ascent, descent) of face `face`, in its font units."""
         return self._gfx.path_metrics(int(face))
 
+    def splash(self, pal, permille=-1, status=""):
+        """The boot splash (native/moy_gfx/moy_scr.h) over the whole
+        viewport, camera and clip aside: `pal` its palette's six RGB565
+        words as bytes (console.splash_pal), `permille` the track's fill
+        (-1 none), `status` its line. The kernel's first light is the same
+        C. The draws that failed."""
+        self.flush_batch()
+        self._gfx.layer_drain(self._lrs)
+        return self._gfx.splash(self._buf, self._stride, self._ox, self._oy, self.w, self.h,
+                                PAL565_WIRE is not PAL565, pal, int(permille), status)
+
     def fillp(self, p=None, c=None):
         # SPEC.md 6: a 4x4 dither for the nine SHAPE verbs. `p` is sixteen bits
         # read row by row from the top-left, bit 15 first; a SET bit is a hole,

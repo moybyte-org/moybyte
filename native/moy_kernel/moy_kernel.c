@@ -111,6 +111,7 @@
 #include "moy_kernel.h"
 #include "moy_loop.h"
 #include "moy_recovery.h"
+#include "moy_scr.h"
 #include "moy_str.h"
 #include "../moy_spine/moy_route.h"
 
@@ -593,6 +594,105 @@ static bool k_touch(int *x, int *y) {
 }
 #endif
 
+#ifdef MOY_KERNEL_PANEL
+// What the kernel's screens draw with (moy_recovery.h): the outline faces'
+// scratch, lent for the draw, and on a turned panel the band each pass
+// draws into. One PSRAM block, made once before the VM's first area
+// (moy_kernel_reserve) or by the floor, which runs before it: no draw
+// allocates, and internal SRAM holds none of it. The screens never draw at
+// once (first light before the VM, the floor in place of one, the plain web
+// screen while none runs).
+// 12 KB holds every printable byte at each screen's sizes on the widest
+// panel (tests/test_moy_kernel.py draws them through it).
+#define K_SCRATCH 12288
+#if MOY_KERNEL_PANEL_ROT != 0
+#define K_BAND_ROWS 8
+#define K_BAND (MOY_KERNEL_PANEL_W * K_BAND_ROWS * 2)
+#else
+#define K_BAND 0
+#endif
+static uint8_t *s_scr_mem;
+
+static void k_scr_reserve(void) {
+    if (s_scr_mem == NULL) {
+        s_scr_mem = heap_caps_malloc(K_SCRATCH + K_BAND, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+}
+
+static void k_geom(moy_rgeom_t *g) {
+    moy_rgeom_init(g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
+                   MOY_KERNEL_PANEL_ROT, MOY_KERNEL_PANEL_SWAP);
+    #if defined(MOY_KERNEL_TOUCH_AXS15231)
+    g->touch = 1;
+    #endif
+    k_scr_reserve();
+    if (s_scr_mem == NULL) {
+        return;
+    }
+    g->scratch = s_scr_mem;
+    g->scratch_n = K_SCRATCH;
+    #if MOY_KERNEL_PANEL_ROT != 0
+    g->band = (uint16_t *)(s_scr_mem + K_SCRATCH);
+    g->band_rows = K_BAND_ROWS;
+    #endif
+}
+
+// The ground the boot splash and the plain web screen draw on: the palette
+// the console keeps for the stored theme (moy_kernel.splash), read once
+// from NVS; Moy Day's while none is kept.
+static uint16_t s_splash_pal[MOY_SPLASH_PAL];
+static bool s_splash_read, s_splash_kept;
+
+static const uint16_t *k_splash_pal(void) {
+    if (!s_splash_read) {
+        s_splash_read = true;
+        nvs_handle_t h;
+        size_t n = sizeof(s_splash_pal);
+        if (nvs_open("moy_kernel", NVS_READONLY, &h) == ESP_OK) {
+            s_splash_kept = nvs_get_blob(h, "splash", s_splash_pal, &n) == ESP_OK
+                            && n == sizeof(s_splash_pal);
+            nvs_close(h);
+        }
+    }
+    return s_splash_kept ? s_splash_pal : NULL;
+}
+#endif
+
+int moy_kernel_splash_pal(uint16_t *out) {
+    #ifdef MOY_KERNEL_PANEL
+    const uint16_t *p = k_splash_pal();
+    memcpy(out, p != NULL ? p : moy_splash_day, sizeof(s_splash_pal));
+    return p != NULL;
+    #else
+    (void)out;
+    return -1;
+    #endif
+}
+
+bool moy_kernel_splash_keep(const uint16_t *pal) {
+    #ifdef MOY_KERNEL_PANEL
+    const uint16_t *p = k_splash_pal();
+    if (p != NULL && memcmp(p, pal, sizeof(s_splash_pal)) == 0) {
+        return false;
+    }
+    nvs_handle_t h;
+    bool ok = false;
+    if (nvs_open("moy_kernel", NVS_READWRITE, &h) == ESP_OK) {
+        ok = nvs_set_blob(h, "splash", pal, sizeof(s_splash_pal)) == ESP_OK
+             && nvs_commit(h) == ESP_OK;
+        nvs_close(h);
+    }
+    if (ok) {
+        memcpy(s_splash_pal, pal, sizeof(s_splash_pal));
+        s_splash_kept = true;
+    }
+    return ok;
+    #else
+    (void)pal;
+    return false;
+    #endif
+}
+
 typedef struct {
     moy_rgeom_t g;
     moy_rview_t v;
@@ -606,7 +706,10 @@ static void k_draw(k_floor_t *k) {
         return;
     }
     #ifdef MOY_KERNEL_PANEL
-    moy_recovery_render(k->fb, &k->g, &k->v);
+    int fails = moy_recovery_render(k->fb, &k->g, &k->v);
+    if (fails != 0) {
+        k_printf("KERNEL recovery draw fails=%d\r\n", fails);
+    }
     k->crc = moy_crash_crc32(0, k->fb, (size_t)k->g.fb_w * k->g.fb_h * 2);
     int e = MOY_KERNEL_PANEL(present)();
     if (e != 0) {
@@ -773,10 +876,14 @@ static void moy_kernel_recovery(int why) {
     #endif
     k.why = why;
     #ifdef MOY_KERNEL_PANEL
-    moy_rgeom_init(&k.g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
-                   MOY_KERNEL_PANEL_ROT, MOY_KERNEL_PANEL_SWAP);
+    k_geom(&k.g);
     #endif
-    moy_recovery_view(&k.v, why, moy_kernel_last_crash(), MOY_FW_LABEL, hint);
+    #if defined(MOY_KERNEL_BUTTON_GPIO)
+    int serial = 1;              // the foot names the button, so serial gets a line
+    #else
+    int serial = 0;
+    #endif
+    moy_recovery_view(&k.v, why, moy_kernel_last_crash(), MOY_FW_LABEL, hint, serial);
     #if defined(MOY_KERNEL_IDLE_SAFE_MS)
     k.v.sel = 1;
     #endif
@@ -992,15 +1099,14 @@ bool moy_kernel_plain_web(void) {
     if (fb == NULL) {
         return false;
     }
-    moy_rgeom_t g;              // on the loop task's stack: no internal statics
+    moy_rgeom_t g;              // on the loop task's stack
     moy_rview_t v;
     char url[96];
     size_t n = moy_wc_url(url, sizeof(url), 1);
     url[n < sizeof(url) ? n : sizeof(url) - 1] = 0;
-    moy_rgeom_init(&g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
-                   MOY_KERNEL_PANEL_ROT, MOY_KERNEL_PANEL_SWAP);
-    moy_web_screen_view(&v, url, NULL, MOY_FW_LABEL);
-    moy_recovery_render_plain(fb, &g, moy_str(MOY_S_WEB_TITLE), &v);
+    k_geom(&g);
+    moy_web_screen_view(&v, url);
+    moy_web_screen_render(fb, &g, &v, k_splash_pal());
     return MOY_KERNEL_PANEL(present)() == 0;
     #else
     return false;
@@ -1029,9 +1135,11 @@ static void moy_kernel_first_light(void) {
         return;
     }
     moy_rgeom_t g;
-    moy_rgeom_init(&g, MOY_KERNEL_PANEL_W, MOY_KERNEL_PANEL_H,
-                   MOY_KERNEL_PANEL_ROT, MOY_KERNEL_PANEL_SWAP);
-    moy_boot_logo_render(fb, &g);
+    k_geom(&g);
+    int fails = moy_boot_logo_render(fb, &g, k_splash_pal());
+    if (fails != 0) {
+        k_printf("KERNEL first light: draw fails=%d\r\n", fails);
+    }
     e = MOY_KERNEL_PANEL(present)();
     if (e != 0) {
         k_printf("KERNEL first light: present err=0x%x\r\n", e);
@@ -1164,6 +1272,9 @@ static void moy_kernel_reserve(void) {
     }
     moy_play_reserve(kernel_psram);
     moy_aud_reserve();
+    #ifdef MOY_KERNEL_PANEL
+    k_scr_reserve();
+    #endif
 }
 
 void moy_kernel_resume_set(const char *text, size_t n) {

@@ -399,6 +399,9 @@ path_text(buf, 16, 0, 450, -100, 400, word, 0xffff, 0, 0, 0, 0, 16, 8)
 path_text(buf, 16, 2, 520, 64, 300, word, 0x0000, 1, -1, 2, 1, 14, 7)
 path_text(buf, 16, 3, 520, 64, 300, word, 0x0000, 0, 0, 0, 0, 16, 8)
 path_text(buf, 16, 0, 0, 64, 300, word, 0x0000, 0, 0, 0, 0, 16, 8)
+splash(buf, 16, 0, 0, 16, 8, 0, spal, -1, nostack)
+splash(buf, 16, 2, 1, 12, 6, 1, spal, 500, word)
+splash(buf, 16, 0, 0, 16, 9, 0, spal, 0, word)
 """
 
 # One byte a pixel (Paint's marks, moy_gfx_kernels.h): the arena read as a
@@ -512,6 +515,7 @@ ring = array.array("i", [128, 64, 832, 64, 832, 448, 128, 448,
                          256, 192, 256, 320, 704, 320, 704, 192])
 ring_ends = array.array("i", [4, 8])
 word = bytes([65, 98, 0xC3, 0xA9, 63])
+spal = bytes(array.array("H", [0xEF7E, 0x10A3, 0x5B2F, 0x49FA, 0xEF7E, 0x5B2F]))
 marks = bytearray(4)
 stack = bytearray(64)
 nostack = bytearray(0)
@@ -520,7 +524,7 @@ nostack = bytearray(0)
 _FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565", "spans",
                   "font", "msg", "empty", "long", "big", "pal8", "idx8",
                   "no_quads", "over_quads", "lr", "bdrec", "bdbad", "ptri", "ptri_ends",
-                  "bad_ends", "ring", "ring_ends", "word", "marks", "stack", "nostack")
+                  "bad_ends", "ring", "ring_ends", "word", "spal", "marks", "stack", "nostack")
 
 
 def _fixtures():
@@ -896,6 +900,7 @@ def blit_batch(*a): moy_gfx.blit_batch(*a); _shot()
 def blit_map(*a): moy_gfx.blit_map(*a); _shot()
 def path_fill(*a): moy_gfx.path_fill(*a); _shot()
 def path_text(*a): moy_gfx.path_text(*a); _shot()
+def splash(*a): moy_gfx.splash(*a); _shot()
 def line(*a): moy_gfx.line(*a); _shot()
 def circ(*a): moy_gfx.circ(*a); _shot()
 def circb(*a): moy_gfx.circb(*a); _shot()

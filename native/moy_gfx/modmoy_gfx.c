@@ -59,6 +59,7 @@
 #include "moy_backdrop.h"
 #include "moy_shape.h"
 #include "moy_path.h"
+#include "moy_scr.h"
 
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
@@ -1092,6 +1093,28 @@ static mp_obj_t moy_gfx_path_text(size_t n_args, const mp_obj_t *a) {
     return MP_OBJ_NEW_SMALL_INT(n);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_path_text_obj, 14, 14, moy_gfx_path_text);
+
+// splash(dst, stride, x0, y0, w, h, swap, pal, permille, status) -> the
+// draws that failed: the boot splash (moy_scr.h) into the w x h window at
+// (x0, y0); `pal` the palette's six words (bytes, native order), `permille`
+// -1 for no track, `status` bytes (empty for none).
+static mp_obj_t moy_gfx_splash(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_buffer_info_t pb, sb;
+    mp_get_buffer_raise(a[7], &pb, MP_BUFFER_READ);
+    mp_get_buffer_raise(a[9], &sb, MP_BUFFER_READ);
+    if (pb.len != MOY_SPLASH_PAL * sizeof(uint16_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("splash palette"));
+    }
+    int n = moy_splash_buf(dst, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                           mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                           mp_obj_is_true(a[6]), (const uint16_t *)pb.buf, mp_obj_get_int(a[8]),
+                           (const char *)sb.buf, sb.len);
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_splash_obj, 10, 10, moy_gfx_splash);
 
 static mp_obj_t moy_gfx_path_width(mp_obj_t face, mp_obj_t size, mp_obj_t s) {
     mp_buffer_info_t sb;
@@ -2327,6 +2350,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_path_fill),  MP_ROM_PTR(&moy_gfx_path_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_path_text),  MP_ROM_PTR(&moy_gfx_path_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_path_width), MP_ROM_PTR(&moy_gfx_path_width_obj) },
+    { MP_ROM_QSTR(MP_QSTR_splash),     MP_ROM_PTR(&moy_gfx_splash_obj) },
     { MP_ROM_QSTR(MP_QSTR_path_metrics), MP_ROM_PTR(&moy_gfx_path_metrics_obj) },
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },

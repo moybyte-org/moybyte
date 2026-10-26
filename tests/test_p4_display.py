@@ -123,19 +123,7 @@ class FakeCanvas:
     def sync_back(self):
         self.syncs += 1
 
-    def cls(self, c=0):
-        pass
-
-    def spr(self, *a, **k):
-        pass
-
-    def print(self, *a, **k):
-        pass
-
-    def rect(self, *a, **k):
-        pass
-
-    def rectb(self, *a, **k):
+    def splash(self, pal, permille=-1, status=""):
         pass
 
 

@@ -135,7 +135,7 @@
 #define MOY_KERNEL_PANEL_ROT                (0)
 #define MOY_KERNEL_PANEL_SWAP               (1)
 #define MOY_KERNEL_BUTTON_GPIO              (0)
-#define MOY_KERNEL_BUTTON_NAME              "CLICK"
+#define MOY_KERNEL_BUTTON_NAME              "the trackball"
 
 // The VM stop (docs/kernel_cartpath_2026-10.md section 5): this board's lever.
 // The kernel stops the VM for a VM-free game whose fit check fails with the VM

@@ -876,8 +876,9 @@ _ICON_ART = {
     # "Moy", the moybyte mascot: one big pixel (a byte) with a square bite chomped
     # from the top-right corner, two eyes + a smile + stubby feet. "Grape" skin --
     # body = indigo (d/13), shadow = dark-purple (2), sheen = light-grey (6), eyes
-    # white (7), outlined in black (0). The boot logo (see _draw_splash); not a bar
-    # control, so it has no _glyph fallback (the splash simply omits it if absent).
+    # white (7), outlined in black (0). The boot splash draws it from its own C
+    # copy (native/moy_gfx/moy_scr.c, held to this one by test_moy_kernel); not
+    # a bar control, so it has no _glyph fallback.
     "moy": (
         "................", "...0000000......", "..0ddddddd0.....", ".0d66ddddd0.....",
         ".0dddddddd0.....", ".0dddddddd0000..", ".0dd77d77ddddd0.", ".0dd70d70ddddd0.",

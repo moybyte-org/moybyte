@@ -104,7 +104,12 @@ EXFAT_SRAM = 568
 # is PSRAM, and the binding's two root pointers; native/moycore: the frame's
 # split, which replaced the binding's own), 8 bytes of internal heap by the
 # heap's total against dev 502be7fd, fresh boots, 2026-10-08.
-KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352 + 260 + 8
+# And the kernel's screens in the look (native/moy_kernel, native/moy_gfx/
+# moy_path.c: the floor's view at 64 columns and its geometry's band and
+# scratch, the splash palette, the faces' lent scratch and the screens'
+# PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
+# 2026-10-26; the scratch and the band themselves are PSRAM.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352 + 260 + 8 + 270
 # And less LOOK_SRAM, the 2026-10 look's statics in the UI and text kernels
 # (native/moy_gfx/moy_text.c's sixteen font slots, native/moy_ui's depth
 # paints and marks, the theme's block-nearest tables, the RUN face's shape,

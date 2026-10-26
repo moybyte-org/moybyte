@@ -29,13 +29,17 @@
 //   moy_crash.take()               this boot's fresh record, once, or None
 //   moy_crash.panic(how)           DEV: 'fault' (a store to 0) or 'abort', now
 
+#include <string.h>
+
 #include "py/runtime.h"
 #include "py/objstr.h"
 #include "py/builtin.h"
 #include "py/mphal.h"
 
+#include "moy_boot.h"
 #include "moy_crash.h"
 #include "moy_kernel.h"
+#include "moy_scr.h"
 
 // ---- moy_kernel ---------------------------------------------------------------
 
@@ -61,6 +65,27 @@ static mp_obj_t mod_lit(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_lit_obj, mod_lit);
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_boot_ok_obj, mod_boot_ok);
+
+// splash() -> the splash's palette as bytes (moy_scr.h's words, native
+// order), the one first light drew with; None on a board with no panel.
+// splash(b) keeps `b` for the next boot's first light: whether it wrote.
+static mp_obj_t mod_splash(size_t n_args, const mp_obj_t *args) {
+    uint16_t pal[MOY_SPLASH_PAL];
+    if (n_args == 0) {
+        if (moy_kernel_splash_pal(pal) < 0) {
+            return mp_const_none;
+        }
+        return mp_obj_new_bytes((const byte *)pal, sizeof(pal));
+    }
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(args[0], &b, MP_BUFFER_READ);
+    if (b.len != sizeof(pal)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("splash palette"));
+    }
+    memcpy(pal, b.buf, sizeof(pal));
+    return mp_obj_new_bool(moy_kernel_splash_keep(pal));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_splash_obj, 0, 1, mod_splash);
 
 static mp_obj_t mod_start(void) {
     return MP_OBJ_NEW_QSTR(moy_kernel_start() == MOY_START_RETURN ? MP_QSTR_return
@@ -233,6 +258,7 @@ static const mp_rom_map_elem_t moy_kernel_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_boot_ok), MP_ROM_PTR(&mod_boot_ok_obj) },
     { MP_ROM_QSTR(MP_QSTR_kstop), MP_ROM_PTR(&mod_kstop_obj) },
     { MP_ROM_QSTR(MP_QSTR_lit), MP_ROM_PTR(&mod_lit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_splash), MP_ROM_PTR(&mod_splash_obj) },
     { MP_ROM_QSTR(MP_QSTR_start), MP_ROM_PTR(&mod_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_stop), MP_ROM_PTR(&mod_stop_obj) },
     { MP_ROM_QSTR(MP_QSTR_resume), MP_ROM_PTR(&mod_resume_obj) },

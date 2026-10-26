@@ -476,9 +476,9 @@ and the code face's digits, repainting its own rect a frame; the parts in
 three hues (Contrast: solid, hatched, outline). **Cost:** 0.5 day.
 
 **55. The kernel's screens in the look:** recovery and the kernel's web
-console (`recovery.*`, `web.*`) drawn in moy_ui's built-in faces and roles
-(recovery in Moy Night), rows a touch glass taps, the strings in sentence
-case. **Cost:** 1 day.
+console (`recovery.*`, `web.*`) drawn in the outline faces compiled into C
+(`moy_path_faces.h`, through `moy_scr.h`) and the look's roles (recovery in
+Moy Night), rows a touch glass taps, the strings in sentence case. **Cost:** 1 day.
 
 **56. The Editor's theme mode:** `EditorApp` opened on a theme package with
 two tabs, Config (`theme.json` in the json mode, its saves the look's

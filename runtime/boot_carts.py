@@ -52,7 +52,7 @@ class BootCarts:
         if done and last is not None and _ticks_diff(now, last) < SEED_PAINT_MS:
             return
         self._seed_painted = now
-        self.note("loading cartridges  %d/%d" % (done + 1, total),
+        self.note("Setting up carts \u00b7 %d of %d" % (done + 1, total),
                   frac=float(done) / total if total else 1.0)
 
     def load_carts(self, store, seed, root=None, session=None, media="SD",

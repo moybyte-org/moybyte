@@ -1080,78 +1080,37 @@ def test_splash_draws_without_a_workstation_and_takes_a_progress_bar():
     A P4 spends 17 of the 25 seconds of a full-erase boot seeding cartridges --
     long before a Workstation exists -- and that loading screen has to BE the
     boot logo, or the machine appears to start twice. So draw_splash() takes a
-    canvas, and optionally a bar + status to extend it downward."""
-    from runtime import console
+    canvas, and optionally a track and a status line under the wordmark."""
+    from runtime import console, host_canvas
 
-    class Cv:                       # the drawing surface, recorded
-        w, h = 1024, 600
+    def shot(w, h, **kw):
+        cv = host_canvas.make_system_canvas(w, h)
+        console.draw_splash(cv, **kw)
+        return list(memoryview(cv._buf).cast("H"))
 
-        def __init__(self):
-            self.ops = []
+    def rows(px, w):
+        """The rows Moy's black outline reaches, and the last row drawn."""
+        ground = px[0]
+        black = [i // w for i, v in enumerate(px) if v == 0]
+        inked = [i // w for i, v in enumerate(px) if v != ground]
+        return black[0], inked[-1]
 
-        def cls(self, c):
-            self.ops.append(("cls",))
-
-        def spr(self, img, x, y, s):
-            self.ops.append(("spr", x, y, s))
-
-        def print(self, s, x, y, c, sc=1):
-            self.ops.append(("print", s, x, y))
-
-        def rect(self, x, y, w, h, c):
-            self.ops.append(("rect", x, y, w, h))
-
-        def rectb(self, x, y, w, h, c):
-            self.ops.append(("rectb", x, y, w, h))
-
-    plain = Cv()
-    console.draw_splash(plain)                       # no Workstation anywhere
-    kinds = [o[0] for o in plain.ops]
-    assert kinds.count("spr") == 1                   # Moy
-    assert [o[1] for o in plain.ops if o[0] == "print"] == ["moy", "byte"]
-    assert "rect" not in kinds and "rectb" not in kinds   # no bar when not asked
-
-    loading = Cv()
-    console.draw_splash(loading, frac=0.5, status="loading cartridges 16/32")
-    bar = [o for o in loading.ops if o[0] == "rect"]
-    trough = [o for o in loading.ops if o[0] == "rectb"]
-    assert len(bar) == 1 and len(trough) == 1
-    assert bar[0][3] == trough[0][3] // 2 or bar[0][3] < trough[0][3]  # half-filled
-    assert "loading cartridges 16/32" in [o[1] for o in loading.ops if o[0] == "print"]
-    # The logo stays centred: the bar extends the block DOWNWARD, so Moy sits
-    # higher than it does on the bare splash rather than the bar overlapping it.
-    moy_plain = [o for o in plain.ops if o[0] == "spr"][0]
-    moy_loading = [o for o in loading.ops if o[0] == "spr"][0]
-    assert moy_loading[2] < moy_plain[2]
-
-    full = Cv()
-    console.draw_splash(full, frac=1.0, status="done")
-    # frac=1 fills the trough exactly (its outline is drawn 2px outside), and
-    # anything over 1 is clamped rather than overrunning it.
-    inner = trough[0][3] - 4
-    assert [o for o in full.ops if o[0] == "rect"][0][3] == inner
-    over = Cv()
-    console.draw_splash(over, frac=1.4, status="done")
-    assert [o for o in over.ops if o[0] == "rect"][0][3] == inner
-
-    # The T-Deck's panel is 320x240 and runs the same loading screen, so the
-    # whole block (logo + wordmark + bar + status) has to fit on it, with the
-    # longest status the seeder produces.
-    class Small(Cv):
-        w, h = 320, 240
-
-    tiny = Small()
-    console.draw_splash(tiny, frac=0.5, status="loading cartridges  32/32")
-    for op in tiny.ops:
-        if op[0] == "spr":
-            assert op[2] >= 0
-        elif op[0] in ("rect", "rectb"):
-            assert op[1] >= 0 and op[2] >= 0
-            assert op[1] + op[3] <= tiny.w and op[2] + op[4] <= tiny.h
-        elif op[0] == "print":
-            assert op[2] >= 0 and op[3] >= 0
-            assert op[2] + len(op[1]) * 8 <= tiny.w and op[3] + 8 <= tiny.h
-
+    w, h = 1024, 600
+    plain = shot(w, h)
+    loading = shot(w, h, frac=0.5, status="Setting up carts \u00b7 16 of 32")
+    # The track and the line extend the block DOWNWARD: Moy rises, the
+    # picture reaches lower, and nothing else moves the logo.
+    (top_plain, end_plain), (top_loading, end_loading) = rows(plain, w), rows(loading, w)
+    assert top_loading < top_plain and end_loading > end_plain
+    # frac clamps to the track: over 1 is 1, under 0 is an empty track.
+    assert shot(w, h, frac=1.4, status="Done") == shot(w, h, frac=1.0, status="Done")
+    assert shot(w, h, frac=-1, status="Done") == shot(w, h, frac=0.0, status="Done")
+    assert shot(w, h, frac=0.5, status="Done") != shot(w, h, frac=0.0, status="Done")
+    # The T-Deck's 320x240 runs the same screen: the whole block fits it,
+    # the longest status the seeder produces included.
+    small = shot(320, 240, frac=0.5, status="Setting up carts \u00b7 32 of 32")
+    top, end = rows(small, 320)
+    assert top > 0 and end < 240 - 8
 
 def test_moy_mascot_baked_into_default_icon_sheet():
     """The 'moy' slot is a real, non-blank 16x16 sprite in the baked theme, so the

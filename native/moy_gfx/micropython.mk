@@ -20,7 +20,8 @@
 # one UI text path (its header), over that compositor's rasterizer.
 # moy_backdrop.c rasterises a theme's backdrop (its header); moy_shape.c the
 # 2026-10 look's shapes and shadows (its header); moy_path.c filled paths and the
-# outline faces at any size (its header).
+# outline faces at any size (its header); moy_scr.c a whole screen with no
+# canvas: the boot splash and the kernel's screens (its header).
 
 MOY_GFX_MOD_DIR := $(USERMOD_DIR)
 
@@ -30,6 +31,7 @@ SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_text.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_backdrop.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_shape.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_path.c
+SRC_USERMOD += $(MOY_GFX_MOD_DIR)/moy_scr.c
 SRC_USERMOD += $(MOY_GFX_MOD_DIR)/libmoy_kernels.c
 
 # MOY_PIXEL_RGB565 changes sizeof(moy_pixel) and therefore the layout of

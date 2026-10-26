@@ -116,10 +116,10 @@ def test_the_face_reads_the_table_and_refuses_a_broken_entry():
     en = _en()
     assert ui_draw.s("recovery.title") == en["recovery.title"]
     try:
-        assert ui_draw._C.str_set("web.pin", "PIN") is False
-        assert ui_draw.s("web.pin") == en["web.pin"]
-        assert ui_draw._C.str_set("web.pin", "CODE %s") is True
-        assert ui_draw.s("web.pin") == "CODE %s"
+        assert ui_draw._C.str_set("recovery.fw", "FW") is False
+        assert ui_draw.s("recovery.fw") == en["recovery.fw"]
+        assert ui_draw._C.str_set("recovery.fw", "FW %s") is True
+        assert ui_draw.s("recovery.fw") == "FW %s"
         with pytest.raises(KeyError):
             ui_draw.s("no.such_id")
     finally:
@@ -211,30 +211,31 @@ def test_under_a_pseudo_locale_the_kernels_screens_draw_no_english(kernel):
     for why in (tk.WHY_VM_START, tk.WHY_BOOT_LOOP, tk.WHY_HEAP):
         v = tk.View()
         rec = tk._record(task=b"", what=b"")
-        kernel.moy_recovery_view(ctypes.byref(v), why, ctypes.byref(rec), None, b"")
+        kernel.moy_recovery_view(ctypes.byref(v), why, ctypes.byref(rec), None, b"", 1)
         views.append(v)
-    v = tk.View()
-    kernel.moy_web_screen_view(ctypes.byref(v), None, b"1234", b"9.9")
-    views.append(v)
+    for url in (None, b"http://"):
+        v = tk.View()
+        kernel.moy_web_screen_view(ctypes.byref(v), url)
+        views.append(v)
     for v in views:
         for t in _lines(v):
             assert not [f for f in frags if f in t], t
     assert _lines(views[0])[:2] == [pseudo(en["recovery.not_started"]),
                                     pseudo(en["recovery.last"]) % (
                                         "fault", pseudo(en["recovery.unknown"]))]
-    # the serial protocol's names stay English whatever the pack draws
+    # the serial protocol's names are its own whatever the pack draws
     kernel.moy_recovery_choice_name.restype = ctypes.c_char_p
     assert [kernel.moy_recovery_choice_name(i).decode() for i in range(3)] == [
-        en["recovery.retry"], en["recovery.safe"], en["recovery.repl"]]
+        "RETRY", "SAFE", "REPL"]
 
 
 # --- the source ratchet -----------------------------------------------------------
 
 # Where text reaches a raster in native/: moy_chrome's display list, the
-# recovery raster and the lines it draws, and the one text path.
+# kernel's screens (moy_scr) and the lines they draw, and the one text path.
 _RASTER_CALL = re.compile(
-    r"\b(?:print\(l,\s*MOY_TEXT_\w+,|text\(fb,\s*g,[^;]*?|moy_text\([^;]*?|add\(v,"
-    r"|moy_crash_strcpy\(v->hint,[^,]*,|render_plain\([^,]*,[^,]*,)\s*\"")
+    r"\b(?:print\(l,\s*MOY_TEXT_\w+,|(?:moy_scr_text|text|centred)\(s,[^;]*?"
+    r"|moy_text\([^;]*?|add\(v,|moy_crash_strcpy\(v->hint,[^,]*,)\s*\"")
 _SKIP = ("moy_wasm", "libmoy", "moy_lua", "moycore")
 
 
