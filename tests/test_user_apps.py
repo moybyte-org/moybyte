@@ -520,7 +520,7 @@ def test_the_run_canvas_is_given_back_on_exit(tmp_path):
     _frames(ws)
     assert ws.canvas is stock
     assert ws.app_full_canvas is False
-    assert ws.bar_layer._zone_is_game("tool") is True
+    assert ws.bar_layer.tool_band() is not None     # the compact band's again
 
 
 def test_the_desk_world_gives_a_responsive_cart_its_window(tmp_path):

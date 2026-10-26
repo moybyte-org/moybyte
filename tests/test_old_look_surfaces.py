@@ -297,3 +297,55 @@ def test_the_dialog_caps_say_real_tdeck_keys():
         for word in ('"Tab"', '"Esc"', '"Ctrl', '"Mic"', '"K"'):
             assert word not in src, "%s spells %s: name the action" % (name, word)
 
+
+
+# -- a tool cart's compact bar (GAPS 50) ----------------------------------------------
+
+TOOL = "def _draw():\n    cls(1)\n"
+
+
+def _tool_on(tmp_path, sys_size):
+    from runtime import host_app
+    from ws_helpers import select_on_home
+    carts_dir = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts_dir)
+    host_app.moy_carts.create("Egg Timer", carts_dir, src=TOOL, type="tool")
+    ws = no_unlock_banner(host_app.build_workstation(carts_dir, sys_size=sys_size))
+    assert select_on_home(ws, "Egg Timer") is not None
+    ws.open()
+    _frames(ws, 3)
+    assert ws.wm.top_is_player()
+    return ws
+
+
+def test_a_tool_carts_bar_is_the_compact_band_on_the_glass(tmp_path):
+    """On a glass the game canvas is scaled onto, a tool's bar is drawn by
+    the shell at the glass's resolution over the canvas's 18 rows, and over
+    as much of the letterbox above them as makes it a 36 px tap: Moy's
+    tile, the chevron and the title, the battery and the clock."""
+    ws = _tool_on(tmp_path, (480, 320))
+    ox, oy, sc = ws.wm.viewport()
+    band = ws.bar_layer.tool_band()
+    assert band == (ox, oy + 18 * sc - 36, 320 * sc, 36)
+    names = [c[0] for c in ws.bar_layer._packed("tool")[0][3]]
+    assert "menu" in names and "zone" in names and "clock" in names and "battery" in names
+    assert "wifi" not in names and "close" not in names
+    # drawn on the system canvas, in the letterbox above the game too
+    from runtime import host_app
+    cv = ws.sys_canvas
+    px = memoryview(cv._buf).cast("H")
+    assert px[(band[1] + 2) * cv.w + band[0] + band[2] // 2] != px[(band[1] + 2) * cv.w + 2]
+    # the chevron exits, tapped on the glass
+    bx, by, bw, bh = ws.bar_layer.back_rect("tool")
+    drv = host_app.ConsoleDriver(ws)
+    drv.touch(bx + bw // 2, by + bh // 2)
+    drv.frame(DT)
+    drv.touch_up()
+    drv.frame(DT)
+    assert not ws.wm.top_is_player()
+
+
+def test_the_compact_band_on_the_desks_console_is_the_rows_at_2x(tmp_path):
+    ws = _tool_on(tmp_path, (1024, 600))
+    ox, oy, sc = ws.wm.viewport()
+    assert sc == 2 and ws.bar_layer.tool_band() == (ox, oy, 640, 36)

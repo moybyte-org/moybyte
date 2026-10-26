@@ -2573,6 +2573,7 @@ class Player:
         # A running cart + the editors live in the 320x240 GAME viewport, so translate
         # the panel pointer into game coords (#39; identity in the degradation case).
         ws = self.ws
+        sx, sy = px, py
         gx, gy = ws._game_xy(px, py)
         px, py = gx, gy
         # While a GAME plays the bar is hidden, so the game owns the full 320x240 and
@@ -2582,7 +2583,7 @@ class Player:
         # (Part 4: its context-X / wifi / ≡), through a thin ws helper so this file never
         # reaches the bar surface directly.
         if click and self._is_tool and self.cart_error is None:
-            if not ws.app_window_canvas and ws._tool_bar_tap(px, py):   # X exits, wifi/≡
+            if not ws.app_window_canvas and ws._tool_bar_tap(px, py, sx, sy):   # ‹ exits
                 # The bar consumed the tap -> clear the published game pointer's tap so the
                 # tool doesn't ALSO act on it this frame (mirrors the overlay-suppress rule).
                 gp = ws.input.game_pointer

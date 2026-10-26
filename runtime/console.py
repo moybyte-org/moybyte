@@ -2304,15 +2304,32 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _draw_tool_bar(self):
         """Draw the minimal TOOL bar over a running tool/app (Part 4). Shell-owned;
         the Player asks for it via this thin helper so
-        player.py never reaches the bar surface directly."""
-        self.bar_layer._draw_status_strip("tool")   # minimal bar: title + status + X
+        player.py never reaches the bar surface directly. Where the bar is the
+        compact band on the glass (`BarLayer.tool_band`) the frame draws it
+        after the composite instead (`_draw_tool_band`)."""
+        if self.bar_layer.tool_band() is None:
+            self.bar_layer._draw_status_strip("tool")   # minimal bar: title + status + X
 
-    def _tool_bar_tap(self, px, py):
-        """Route a running-TOOL tap (px, py in GAME coords) to the minimal bar: the
-        bar's back exits the tool, the wifi icon opens the Settings WIFI panel, the ≡ opens
-        the system menu, the clock its calendar. Returns True iff the bar consumed the tap
-        (so the tool underneath doesn't also act on it). Reuses handle_bar_tap("tool") --
-        owner is None for "tool", so a non-button tap falls through to the tool."""
+    def _draw_tool_band(self):
+        """A running tool cart's compact bar, on the system canvas over the
+        composited game's top rows: True where it drew."""
+        p = self.player
+        if not p._is_tool or p.cart_error is not None or self.app_window_canvas \
+                or not self.wm.top_is_player() or self.bar_layer.tool_band() is None:
+            return False
+        self.bar_layer._draw_status_strip("tool")
+        return True
+
+    def _tool_bar_tap(self, px, py, sx=None, sy=None):
+        """Route a running-TOOL tap (px, py in GAME coords, (sx, sy) on the
+        system canvas) to the minimal bar: the bar's back exits the tool, the
+        Moy tile opens the system menu, the clock its calendar. Returns True
+        iff the bar consumed the tap (so the tool underneath doesn't also act
+        on it). Reuses handle_bar_tap("tool") -- owner is None for "tool", so
+        a non-button tap falls through to the tool. The compact band
+        (`BarLayer.tool_band`) is on the system canvas, so it takes (sx, sy)."""
+        if sx is not None and self.bar_layer.tool_band() is not None:
+            px, py = sx, sy
         return self.bar_layer.handle_bar_tap("tool", px, py)
 
     def _open_workspace(self, cart=None):
@@ -4669,6 +4686,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     _game_open = False
                 self._composite_game()
                 _fold_live = True
+                if self.player._is_tool and self.bar_layer.tool_band() is not None:
+                    _dsf = self._disarm_fn()        # #190: the band paints the root
+                    if _dsf is not None:
+                        _dsf()
+                    self._draw_tool_band()
             if _fold_live and (layer is not self._cursor_layer
                                or (self.pointer is not None
                                    and self.pointer.visible)):

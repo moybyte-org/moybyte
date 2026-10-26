@@ -94,8 +94,9 @@ def test_the_private_panel_button_copy_is_gone(tmp_path):
 
 def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
     """Every chrome button on the code tab is a `ui_draw.chip`, and every symbol-
-    palette key is a `ui_draw.cell`. Counted with the tool palette AND the find bar
-    open -- the states no golden enters."""
+    palette key is a `ui_draw.cell`; the find strip is a `ui.field` of the verbs.
+    Counted with the tool palette AND the find strip open -- the states no golden
+    enters."""
     from runtime import ui_draw
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
     ui_draw.input_kind("touch")              # the palette shows after touch (D-17)
@@ -114,36 +115,40 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
     cl._find_open = True
     cl._find_q = "de"
     _frame(ws)
-    # TLS + one per tool + the find bar's prev/next/case/close.
-    assert counter.n["chip"] == 1 + len(cl._TOOLS) + 4
+    # TLS + one per tool; the find strip's field and Aa are the verbs'.
+    assert counter.n["chip"] == 1 + len(cl._TOOLS)
     assert counter.n["cell"] == keys
-    assert counter.n["row"] >= 1              # the find bar's query field
+    assert cl._ov_host.box("find") is not None and cl._ov_host.box("case") is not None
     # the responsive "LN n, COL n" band: its ground, then its text on the
     # code's column
     assert counter.n["status_row"] == 2
 
 
-def test_code_popups_are_toolkit_rows(tmp_path, monkeypatch):
-    """The autocomplete + jump-to-symbol popups are a panel row plus one row per
-    entry -- the selected one carrying the only field."""
+def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
+    """Completion and Go to are `ui.menu`s in a `ui.popover` (docs/look_2026-10.md
+    step 33): a row per entry, the picked one focused, and no toolkit row."""
+    from runtime import ui
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
     cl = ws.code_layer
     counter = _Counter(monkeypatch)
+    menus = []
+    real = ui.menu
+    monkeypatch.setattr(ui, "menu", lambda *a, **k: (menus.append(a[1]), real(*a, **k))[1])
 
     cl._cmp_open = True
     cl._cmp_items = ["circfill", "rectfill", "print"]
     cl._cmp_sel = 1
     _frame(ws)
-    # 1 shell + 3 entries (plus nothing else on this tab draws a row).
-    assert counter.n["row"] == 1 + 3
+    assert [len(m) for m in menus] == [3] and counter.n["row"] == 0
+    assert ui.focus() == menus[0][1]
 
-    counter.reset()
+    menus.clear()
     cl._cmp_open = False
     cl._jump_open = True
     cl._jump_items = [("update", 3), ("draw", 11)]
     cl._jump_sel = 0
     _frame(ws)
-    assert counter.n["row"] == 1 + 2
+    assert menus == [["update\tline 4", "draw\tline 12"]]
 
 
 def test_the_crash_popup_is_a_popover_of_the_verbs(tmp_path, monkeypatch):

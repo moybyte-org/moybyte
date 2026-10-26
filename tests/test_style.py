@@ -257,11 +257,6 @@ _FROZEN_HATCH = {
         "swatch is literal black + literal yellow (which is NOT `accent` on "
         "slate), and the bg-thumb cell must paint NO field because its picture "
         "is drawn BEFORE the frame"),
-    "code_layer.py": (2,
-        "the popup shell's ink is the FIND colour -- no widget state; the popup "
-        "ENTRIES must paint no field when unselected, because their rects tile "
-        "the panel edge to edge and any kind's rest field would erase the "
-        "shell's own border a row at a time"),
 }
 
 

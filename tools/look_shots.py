@@ -622,8 +622,33 @@ def _code_overlay(which):
     return setup
 
 
+# A tool cart on the game canvas: the targets' egg timer, its picture
+# under the bar's 18 rows.
+EGG_TIMER = """def _draw():
+    cls(col("dark_blue"))
+    circ(160, 60, 16, col("white"))
+    print("03:20", 160 - 40, 110, col("yellow"), 4)
+    print("A START   B RESET", 160 - 68, 164, col("light_grey"))
+"""
+
+
+def _tool_cart(g, ws):
+    """Egg Timer, a tool cart, running."""
+    from runtime import moy_catalogue
+    if getattr(ws.wm, "mode", None) == "console" or ws.wm.desk_open():
+        _console_home(g, ws)
+    else:
+        _home(g, ws)
+    made = moy_catalogue.create("Egg Timer", ws.carts_root, src=EGG_TIMER, type="tool")
+    ws.carts.rescan()
+    ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
+    ws.run(ws.project, ws.launcher_layer)
+
+
 # The scenes of step 33 the shell draws: screen -> (config, set up).
 OLD_LOOK = {
+    "handheld_tool-bar-s3": (S3, _tool_cart),
+    "desktop_tool-bar": (CONSOLE, _tool_cart),
     "handheld_code-find": (HANDHELD, _code_overlay("find")),
     "handheld_code-complete": (HANDHELD, _code_overlay("complete")),
     "handheld_code-goto": (HANDHELD, _code_overlay("goto")),

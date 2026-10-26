@@ -39,11 +39,11 @@ import time
 try:
     from layout_base import (BAR_ROWS, bar_rects_of, bars_in_force,
                              content_of)
-    from shell_layout import pack as _pack, cell_of as _cell_of
+    from shell_layout import pack as _pack, cell_of as _cell_of, without as _without
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (BAR_ROWS, bar_rects_of, bars_in_force,
                                      content_of)
-    from runtime.shell_layout import pack as _pack, cell_of as _cell_of
+    from runtime.shell_layout import pack as _pack, cell_of as _cell_of, without as _without
 
 
 # -- bar geometry (single source; console.py imports these back) --------------
@@ -72,6 +72,7 @@ def _release_layer(lay):
     if rel is not None:
         rel()
 _STATUS_H = BAR_ROWS    # the bar's rows (16px icons + 1px top/bottom margin)
+_BAND_TAP = 36          # a tool's compact band at its least: the chevron's tap
 
 # -- today's bar on the fixed 320x240 GAME canvas: the cells
 # `shell_layout.pack` gives the default layout there (a running tool/app's
@@ -272,6 +273,12 @@ class BarLayer:
         self._game_of = None
         self._game_size = None
         self._game_pack = None
+        self._band_wm = None          # the WM `_band_fs` was read off
+        self._band_fs = None          # ...its game_is_fullscreen
+        self._band_vp = None          # the viewport the tool band was placed for
+        self._band_of = None          # ...and the layout packing it took
+        self._band = None             # a tool cart's compact bar on the glass (tool_band)
+        self._band_pack = None
         self._fields_of = None
         self._fields = ()
         self._need = _KEY_ALL
@@ -365,10 +372,62 @@ class BarLayer:
             return ws.sys_canvas is ws.canvas and not _ui_draw.depth()[0]
         if where != "tool" or getattr(ws, "app_full_canvas", False):
             return False
-        # Under a theme's look a tool's strip on a canvas that IS the system
-        # one is the look's bar, the one every app shows (docs/look_2026-10.md
-        # step 27a).
-        return not (ws.sys_canvas is ws.canvas and _ui_draw.depth()[0])
+        # Under a theme's look a tool's strip is the look's bar on the system
+        # canvas: the one every app shows where that canvas is the game's
+        # (docs/look_2026-10.md step 27a), else the compact band over the
+        # game's top rows (`tool_band`, step 33); in a desk window, the
+        # game canvas's.
+        if not _ui_draw.depth()[0]:
+            return True
+        return ws.sys_canvas is not ws.canvas and self.tool_band() is None
+
+    def tool_band(self):
+        """Where a running tool cart's compact bar sits on the system
+        canvas, (x, y, w, h), or None where the tool draws on that canvas
+        itself: over the game canvas's 18 rows at the viewport's scale, and
+        where those are fewer than the glass's bar, the letterbox above them
+        too, so the chevron and the title are a tap. The console draws it
+        after the composite (`Workstation._draw_tool_band`)."""
+        ws = self.ws
+        gc = ws.canvas
+        if gc is ws.sys_canvas or getattr(ws, "app_full_canvas", False) \
+                or not _ui_draw.depth()[0]:
+            return None
+        wm = ws.wm
+        if wm is not self._band_wm:           # cached by WM identity: a bound
+            self._band_wm = wm                # method is an allocation a frame
+            self._band_fs = getattr(wm, "game_is_fullscreen", None)
+        if self._band_fs is not None and not self._band_fs():
+            return None
+        vp = wm.viewport()
+        if vp is not self._band_vp:
+            self._band_vp = vp
+            ox, oy, sc = vp
+            view = getattr(ws, "game_view", None)
+            gw = view[2] if view is not None else gc.w
+            h = _STATUS_H * sc
+            bottom = oy + h
+            y = max(0, min(oy, bottom - _BAND_TAP * ws.layout.fs))
+            self._band = (ox, y, gw * sc, bottom - y)
+        return self._band
+
+    def _tool_pack(self, band):
+        """The compact band's packing: the bar in force's first bar on the
+        band, its Moy tile, chevron and title, battery and clock (no Wi-Fi,
+        no X: the chevron is the way back)."""
+        layout = self.ws.layout
+        po = layout._pack_of
+        if self._band_pack is None or self._band_of is not po or self._band_pack[0][1] != band:
+            of, cs, fs, _sys_len = po
+            top = _without(of[:1], ("wifi", "close", "chips"))
+            bh = band[3]
+            got = _pack(band[2], bh, bh, cs, fs, layout.clock_w, _bar_text_w,
+                        of=((("top",) + top[0][1:]),),
+                        sys_len=_layout_base.sys_tile(bh)[2])
+            edge, _r, dy, cells = got[0]
+            self._band_pack = ((edge, band, dy, cells),)
+            self._band_of = po
+        return self._band_pack
 
     def _bar_canvas(self, where, game=None):
         """`where`'s canvas; `game` is `_zone_is_game(where)` where the caller
@@ -401,6 +460,10 @@ class BarLayer:
     def _packed(self, where, game=None):
         if game is None:
             game = self._zone_is_game(where)
+        if where == "tool" and not game:
+            band = self.tool_band()
+            if band is not None:
+                return self._tool_pack(band)
         if game:
             of = bars_in_force()
             cv = self.ws.canvas
