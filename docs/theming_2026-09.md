@@ -868,8 +868,9 @@ its backdrop where its `look` has one (`moy`), and else the console's default,
 the first wallpaper cart (Moy's night on a seeded store). The look reads the
 keys at every switch (`Appearance.theme_wallpaper`): the named cart where it
 is installed, else the picture, else NONE or the backdrop, else the default;
-a SAFE start runs no cart. The backdrop is rastered once per theme load and
-mode switch into the picture's own bake (`Wallpaper._draw_backdrop`): the
+a SAFE start runs no cart. The backdrop is rastered into the picture's own
+bake when its records or the colour its fill paints move (a theme load or
+mode switch; an accent change keeps it, `Wallpaper._draw_backdrop`): the
 desk draws `backdrop.desk`, the home and the handheld's every screen
 `backdrop.home`.
 

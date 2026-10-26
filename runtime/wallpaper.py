@@ -652,9 +652,9 @@ class Wallpaper:
         self._fill_did = (home, None)
 
     def _draw_backdrop(self, cv, rec, bg):
-        """Rasterise the backdrop once per (records, fill, size, look) into
-        the one wallpaper bake -- the picture's slot, PIC_OWNER (D6) -- and
-        blit it 1:1 after. Where the bake cannot be had it is drawn onto the
+        """Rasterise the backdrop once per (records, fill, size, the fill's
+        RGB `_bg_word`) into the one wallpaper bake -- the picture's slot,
+        PIC_OWNER (D6) -- and blit it 1:1 after. Where the bake cannot be had it is drawn onto the
         canvas inside its clip, each paint."""
         img = self._bd_img
         key = (rec, bg, cv.w, cv.h, self._bg_word(bg))

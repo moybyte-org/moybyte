@@ -876,7 +876,9 @@ pill over it, the home on top, nothing animating). When the RETAINED_FRAMES
 painted frames before this one all have entries under this frame's backdrop
 key, every buffer holds the backdrop, and a part whose key differs from any
 of theirs lags in the buffer this frame paints: it alone is put back over the
-backdrop and drawn, the bar strip over it as every partial frame does.
+backdrop and drawn; the bar's strip, outside every such rect, is drawn
+where the buffer's was drawn under another key (the ring keeps the bar's
+`shown_key` beside the parts) or a part put back meets it.
 Where it can be had, the backdrop's pixels come from the wallpaper itself
 (`Wallpaper.restore_key`: the picture, the theme's baked backdrop or the
 plain fill); a cart wallpaper keeps the drag partial and its band copy.
