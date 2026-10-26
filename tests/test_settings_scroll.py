@@ -83,7 +83,7 @@ def test_every_row_is_reachable_by_keyboard(tmp_path):
     assert "Update online" in seen, "the update rows below the fold are reached"
     assert seen[-1] == "Licences", "About's Licences link is the last stop"
     assert _band(ws) != top, "the page scrolled to keep focus in view"
-    for _ in range(len(seen)):
+    for _ in range(len(seen) - 1):      # one more goes on to the bar
         drv.press("up")
         drv.frame(_DT)
         drv.frame(_DT)

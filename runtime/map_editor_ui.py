@@ -293,6 +293,13 @@ class MapEditorUI:
 
     # -- input -----------------------------------------------------------------
 
+    def at_top(self):
+        """The map's camera on its top row and no popover open: an up goes
+        on to the bar (Workstation._bar_keys)."""
+        me = self.mapedit
+        page = self._page if self.layout.verbs else None
+        return me is not None and me.cam_y <= 0 and (page is None or page.pop is None)
+
     def _map_input(self):
         """The d-pad pans the visible map window (the grid is bigger than the
         screen); B leaves (#37). Painting stays pointer/touch-driven. Called from

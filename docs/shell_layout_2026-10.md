@@ -559,6 +559,23 @@ today (no board measures one), its line then reading Battery. An app that
 asks for the Wi-Fi page (`Workstation.open_wifi_panel`) still gets Settings'
 page in console mode.
 
+**The keys reach the bar** (owner call 2026-10-26), in console mode on every
+board and the browser. Up from the home's tab row, or up past the top of
+the surface under a bar -- a page's first row (`ui_draw.edge_take`, the
+engine's `api_edge`), the Editor's list, outline, step, map or sprite
+grid at its top (`at_top`) -- puts focus on the bar's items
+(`BarLayer.focus_items`): the OS widgets, the back chevron, a running app's
+lent tools and the zone's targets (the Editor's tabs, undo, redo and Play,
+`zone_targets`), the Editor's landing on its open tab. Left and right walk
+them, confirm opens one as a tap on it does (a widget's popover over the
+bar, focus staying on the widget under it), down, back and stop come off
+it; the focused item takes the theme's focus mark in the bar's strip, and
+the hint strip under it names the bar's keys (`ui_draw.BAR_KEYS`: change,
+confirm and back, in the input's own keys). A caret keeps up for itself, so
+the Code tab and the theme mode's Config walk no focus onto the bar: their
+bar is a touch's, and the system menu's Home is their way out. The desk's
+windows keep their own ways.
+
 ## 9. The safety rule, and what the loader checks
 
 **The rule.** A layout places `menu` and `zone` somewhere

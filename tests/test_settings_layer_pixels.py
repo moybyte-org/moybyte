@@ -463,7 +463,7 @@ def test_a_settled_settings_page_paints_nothing(tmp_path):
         drv.frame(_DT)
     assert ws._frames_drawn == drawn, "an idle Settings page painted"
     before = bytes(ws.sys_canvas._buf)
-    drv.press("up")                     # on the first row: nothing to move to
+    drv.press("left")                   # on a row with nothing beside it
     for _ in range(6):
         drv.frame(_DT)
     assert ws._frames_drawn == drawn + 1, "one frame for the press, then none"

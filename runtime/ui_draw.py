@@ -1732,6 +1732,38 @@ def bar_tap(ctx, i):
 
 
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
+_UP = 1 << 2                            # "up"'s bit in a frame's buttons
+_EDGE = [False]                         # an up press went past a page's top
+
+
+def edge_take():
+    """Whether an up press went past the top of a page drawn since the
+    last call (`api_edge`, outside a dialog): the shell walks focus onto
+    its bar. Reading clears it."""
+    got = _EDGE[0]
+    _EDGE[0] = False
+    return got
+
+
+# What every hint strip names while the keys are on the shell's bar
+# (`BarLayer.focus_enter`): left and right walk its items, confirm opens one,
+# back comes off it.
+BAR_KEYS = ("change", "Move", "confirm", "Open", "back", "Back")
+_ON_BAR = [False]
+
+
+def on_bar(on=None):
+    """Whether the keys are on the shell's bar, so a hint strip names
+    `BAR_KEYS` in its own keys' place; `on` sets it first."""
+    if on is not None:
+        _ON_BAR[0] = bool(on)
+    return _ON_BAR[0]
+
+
+def bar_or(items):
+    """`items`, or `BAR_KEYS` while the keys are on the bar (`on_bar`)."""
+    return BAR_KEYS if _ON_BAR[0] else items
+
 # The words of a frame's input (moy_ui_api.h's MOY_UI_IN_*): the buttons held
 # and pressed, the pointer's x, y and flags, the key typed, its modifiers,
 # and the wheel's steps across and down.
@@ -1848,7 +1880,8 @@ class AppHost:
         """Begin the frame on `cv` under theme `th`, its page `rect` (in a
         window's body when `window`): whether it is settled. `elsewhere`:
         the keys are a part's the app drives itself (a story's slide), so no
-        stop holds focus this frame."""
+        stop holds focus this frame, as while the keys are on the shell's
+        bar (`on_bar`): one focus mark a screen."""
         a = self.inp
         t = self.tap
         a[4] = 7 if t == 1 else 3 if t == 3 else 1 if t == 2 else 0
@@ -1858,7 +1891,9 @@ class AppHost:
                 a[3] = self.py
             a[4] |= 1 | (_P_MIDDLE if self.mid else 0)
         settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app,
-                           elsewhere=elsewhere)
+                           elsewhere=elsewhere or _ON_BAR[0])
+        if a[1] & _UP and _C.api_edge(self.ctx):
+            _EDGE[0] = True
         self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
         a[0] = a[1] = a[5] = a[7] = a[8] = 0
         self.owed = not settled

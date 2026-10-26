@@ -144,6 +144,15 @@ class MusicEditorUI:
 
     # -- input -------------------------------------------------------------------
 
+    def at_top(self):
+        """The cursor on the first step or slot and no popover open: an up
+        goes on to the bar (Workstation._bar_keys)."""
+        me = self.musicedit
+        page = self._page
+        if me is None or (page is not None and page.pop is not None):
+            return False
+        return (me.step if me.view == MusicEditor.SFX_VIEW else me.slot) <= 0
+
     def _music_input(self):
         """The page's popover takes the keys while it is open; otherwise
         up/down move the step/slot cursor, left/right change the value under

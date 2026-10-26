@@ -578,6 +578,13 @@ def _icon_in(ws, cv, icon, r, ink):
         ws._icon(icon, x, y, cv, ink=ink)
 
 
+def zone_targets(app, rect):
+    """The zone's targets the keys walk on the bar (`BarLayer.focus_items`):
+    Done, the two tabs, undo and redo."""
+    back, tabs, _line, _nx, undo, redo = zone_parts(app, rect)
+    return [back] + [t[3] for t in tabs] + [undo, redo]
+
+
 def zone_tap(app, px, py, rect):
     back, tabs, _line, _nx, undo, redo = zone_parts(app, rect)
     fs = app._zone_scale()

@@ -401,6 +401,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->page_stop = NO_PAGE;
     c->act = 0;
     c->keys = 0;
+    c->edge = 0;
     c->step_x = c->step_y = 0;
     c->dup = 0;
     c->grp_open = c->grp_n = c->grp_any = 0;
@@ -568,6 +569,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             int one = (dir & MOY_UI_B_UP) ? MOY_UI_B_UP : (dir & MOY_UI_B_DOWN) ? MOY_UI_B_DOWN
                       : (dir & MOY_UI_B_LEFT) ? MOY_UI_B_LEFT : MOY_UI_B_RIGHT;
             to = nearest(v, n, f, one);
+            c->edge = (uint8_t)(to < 0 && one == MOY_UI_B_UP && !c->modal);
         }
         if (to >= 0) {
             c->focus = v[to].id;
@@ -1685,6 +1687,10 @@ int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap) {
 
 int moy_ui_api_keys_taken(const moy_ui_ctx_t *c) {
     return c->keys;
+}
+
+int moy_ui_api_edge(const moy_ui_ctx_t *c) {
+    return c->edge;
 }
 
 void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h) {

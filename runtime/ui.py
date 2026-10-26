@@ -375,9 +375,10 @@ def hints(items, o=None):
     `change`, `tabs`, `menu` or `cancel`, which draws as the keys of the input in use
     -- or keys spelled out -- space-separated; `enter`, `left`, `right`,
     `up` and `down` draw as signs -- and what it does. Under touch alone
-    there are no hints and the rows take the band."""
+    there are no hints and the rows take the band. While the keys are on
+    the shell's bar, the strip names its keys."""
     t = _T
-    _C.api_hints(t[0], t[1], t[2], _opts(items), _over(o))
+    _C.api_hints(t[0], t[1], t[2], _opts(_D.bar_or(items)), _over(o))
 
 
 def fade(rect, up=False):
@@ -401,7 +402,7 @@ def hints_width(items):
     margin at either end included, so a band placed with `ui.at` can end
     where they do; 0 under touch alone."""
     t = _T
-    return _C.api_hints_w(t[0], t[1], t[2], _opts(items))
+    return _C.api_hints_w(t[0], t[1], t[2], _opts(_D.bar_or(items)))
 
 
 def icon(name, o=None):

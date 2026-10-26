@@ -180,6 +180,9 @@ typedef struct {
     // The frame begun over a dialog's stops (MODAL: the others take no input);
     // a layout from a stale measure owes the next frame (OWE).
     uint8_t modal, owe;
+    // An up press over a page's topmost stop, outside a dialog: the frame's
+    // keys went past the page's top (the shell walks focus onto its bar).
+    uint8_t edge;
     int8_t dlg_pick;                // the dialog button activated this frame, -1 none
     uint32_t modal_from;            // the focus a dialog took
     int32_t typed;                  // the key a focused field takes this frame, 0 none
@@ -477,6 +480,9 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // `buf` (NUL-terminated within `cap`); answers its length, -1 with none.
 int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap);
 int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
+// Whether this frame's up press found no stop above the focused one, outside
+// a dialog: the keys went past the page's top.
+int moy_ui_api_edge(const moy_ui_ctx_t *c);
 void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h);
 // Where stop `id` drew in the frame drawn last (the host's: a popover beside
 // a row, a test's tap), or the card of the popover `id` drawn then, or of

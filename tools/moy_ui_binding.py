@@ -335,6 +335,7 @@ _DRAW_SIGS = (
      None),
     ("moy_ui_api_focus", [c.c_void_p, _Span, c.c_char_p, c.c_size_t], _I),
     ("moy_ui_api_keys_taken", [c.c_void_p], _I),
+    ("moy_ui_api_edge", [c.c_void_p], _I),
     ("moy_ui_api_at", [c.c_void_p, _I, _I, _I, _I], None),
     ("moy_ui_api_dup", [c.c_void_p], c.c_char_p),
 )
@@ -1268,6 +1269,10 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_keys_taken(p))
 
+    def api_edge(ctx):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_edge(p))
+
     def api_at(ctx, x, y, w, h):
         p, _k = _ctx(ctx)
         lib.moy_ui_api_at(p, int(x), int(y), int(w), int(h))
@@ -1287,7 +1292,7 @@ def binding():
               api_card, api_part, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_rule,
-              api_focus, api_keys_taken, api_at, api_dup):
+              api_focus, api_keys_taken, api_edge, api_at, api_dup):
         setattr(m, f.__name__, f)
     m.calls = lambda: lib.moy_ui_calls()
     m.glyph_names = lambda: glyphs

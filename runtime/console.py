@@ -3748,6 +3748,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 and (self.menu_view in COMMIT_TABS or self.menu_view in THEME_TABS)
                 and self.wm.top_is("menu")):
             self.history.edit_ms = _ticks_ms()
+        if self._bar_keys(i, pressed):
+            return
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
         # reversed() iterator on a static top-of-stack.
@@ -4011,6 +4013,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return True
         if self.windowed_chrome:
             return False
+        if self.bar_layer.focus is not None:
+            return True
         steps = getattr(self._content_layer(), "ball_steps", True)
         return bool(steps() if callable(steps) else steps)
 
@@ -4095,6 +4099,79 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             ay = ay - k * n if ay > 0 else ay + k * n
             ax = 0
         self._ball_ax, self._ball_ay = ax, ay
+
+    def bar_where(self):
+        """The `where` of the bar over the fullscreen surface that holds the
+        keys -- the home, Settings, the Editor, an app -- or None: the desk,
+        a running cart, a surface with no bar."""
+        if self.windowed_chrome:
+            return None
+        kind = self.wm.top_kind()
+        if kind == "launcher":
+            return "home"
+        if kind in ("settings", "menu"):
+            return kind
+        if kind in self._apps_by_id:
+            return "app"
+        return None
+
+    def _bar_keys(self, i, pressed):
+        """The keys on the bar (`BarLayer.focus_keys`), and the ways onto
+        it: up from a surface at its top (its `at_top`: the home's tab row,
+        a list's first row) or an up that went past the top of a page drawn
+        last frame (`ui_draw.edge_take`). Neither under a menu, a popover or
+        a dialog, which hold the keys. True where the bar took them."""
+        bl = self.bar_layer
+        edge = _ui_draw.edge_take()
+        if bl.focus is None and not edge and not (pressed and i.pressed("up")):
+            return False
+        if bl.focus is not None and self.bar_where() != bl.focus_where:
+            bl.focus_leave()            # the surface under it went (a tap, a door)
+            return False
+        held = self._modal_layer() is not None or self._about
+        if bl.focus is not None:
+            took = False
+            if pressed and not held:
+                if bl.focus_where == "home":
+                    self.ach_ui.konami_watch(i)
+                took = bl.focus_keys(i)
+            # the strips name the bar's keys while it holds them, not under
+            # a popover one of its items opened
+            _ui_draw.on_bar(bl.focus is not None and self._modal_layer() is None
+                            and not self._about)
+            return took
+        if held:
+            return False
+        where = self.bar_where() if (edge or (pressed and i.pressed("up"))) else None
+        if where is None:
+            return False
+        layer = self._content_layer()
+        if edge:
+            # a page's: not a canvas's or a caret's, whose own popovers draw pages
+            steps = getattr(layer, "ball_steps", True)
+            if not (steps() if callable(steps) else steps):
+                return False
+        else:
+            top = getattr(layer, "at_top", None)
+            if top is None or not top():
+                return False
+        if not bl.focus_enter(where, "tabs" if where == "home" else "page",
+                              self.bar_open_x(where)) or not pressed:
+            return False
+        if where == "home":
+            self.ach_ui.konami_watch(i)
+        return True
+
+    def bar_open_x(self, where):
+        """Where on `where`'s bar the keys land (an x in its bar's
+        coordinates): the Editor's open tab's chip; None, the first item."""
+        if where != "menu":
+            return None
+        box = self.editor_app.tab_box(self.editor_app.tab)
+        got = self.bar_layer.cell("menu", "zone")
+        if box is None or got is None:
+            return None
+        return box[0] - got[0][1][0] + box[2] // 2
 
     def _caret_step(self, i):
         """A direction pressed while a caret has the keys: `nav` it, and

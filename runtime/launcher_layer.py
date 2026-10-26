@@ -1100,12 +1100,14 @@ _CONFIRM_KEYS = ("confirm", "Choose", "back", "Cancel")   # under the delete con
 
 def modal_keys(ws):
     """The keys a home's hint strip names while a system modal holds them:
-    the delete confirm's dialog's, the system menu's card's, else None (the
-    home's own verbs)."""
+    the delete confirm's dialog's, the system menu's card's, the bar's while
+    the keys are on it, else None (the home's own verbs)."""
     if ws.confirm.open:
         return _CONFIRM_KEYS
     if ws.menu_ui.looked():
         return _MENU_KEYS
+    if _ui_draw.on_bar():
+        return _ui_draw.BAR_KEYS
     return None
 _TAB_H = 16          # the tab row's height, in chrome-scale units
 _GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
@@ -2609,6 +2611,10 @@ class LauncherHomeLayer:
     def _tab_focus(self):
         return self._tab_keys
 
+    def at_top(self):
+        """Up goes on to the bar from the tab row (Workstation._bar_keys)."""
+        return bool(self._tab_keys)
+
     @_tab_focus.setter
     def _tab_focus(self, on):
         # one focus mark a screen: the tab row's takes it from the cards
@@ -3909,13 +3915,7 @@ class LauncherHomeLayer:
         ws = self.ws
         if getattr(ws, "search_typing", False):
             return self._handle_search_typing(i)
-        # Konami Easter egg (#21): watch every button press on the home desktop
-        # for the secret sequence (the nav below still runs normally -- the egg
-        # is a passive observer, so it never blocks the launcher).
-        for _b in ws.ach_ui._KONAMI:
-            if i.pressed(_b):
-                ws.ach_ui._konami_step(_b)
-                break
+        ws.ach_ui.konami_watch(i)
         if self._tab_focus:
             # The tab row (up from the carousel): left/right switch tabs,
             # down or enter returns to the row.

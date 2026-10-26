@@ -3007,6 +3007,12 @@ static mp_obj_t ui_api_keys_taken(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_keys_taken_obj, ui_api_keys_taken);
 
+// api_edge(ctx) -> whether this frame's up press went past the page's top
+static mp_obj_t ui_api_edge(mp_obj_t ctx) {
+    return mp_obj_new_bool(moy_ui_api_edge(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_edge_obj, ui_api_edge);
+
 // api_at(ctx, x, y, w, h)
 static mp_obj_t ui_api_at(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -3166,6 +3172,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_toast), MP_ROM_PTR(&ui_api_toast_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_edge), MP_ROM_PTR(&ui_api_edge_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_dup), MP_ROM_PTR(&ui_api_dup_obj) },
     { MP_ROM_QSTR(MP_QSTR_str_set), MP_ROM_PTR(&ui_str_set_obj) },

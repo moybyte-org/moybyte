@@ -111,6 +111,15 @@ class AchievementsUI:
         self._clock_taps = 0          # clock taps on the bar (Time Traveler)
         self._secret_taps = 0         # Settings-title taps (Secret Finder's door)
 
+    def konami_watch(self, i):
+        """The Konami Easter egg (#21) watches every button press on the
+        home, the bar's over it included, for the secret sequence: a passive
+        observer, so the nav still runs."""
+        for b in self._KONAMI:
+            if i.pressed(b):
+                self._konami_step(b)
+                return
+
     def _konami_step(self, name):
         """Advance the home's Konami sequence on a button press; the full code in
         order awards "Secret Coder". A wrong key restarts (but still counts if it's

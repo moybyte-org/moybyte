@@ -133,6 +133,14 @@ class _BlocksLayer(Layer):
     def draw(self, dt):
         self.ws.block_ui._draw_blocks(dt)
 
+    def at_top(self):
+        """Up goes on to the bar from the outline's first row
+        (Workstation._bar_keys)."""
+        bu = self.ws.block_ui
+        be = bu.blocks_ed
+        return (be is not None and be.cur == 0 and bu.blk_menu is None
+                and bu.blk_kbd is None and not be.moving())
+
     def handle_input(self, i):
         self.ws.block_ui._blocks_input()   # cursor nav + insert menu (#29)
         return True
@@ -202,6 +210,10 @@ class _MapLayer(Layer):
         ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.map_ui._draw_map()
         ws.bar_layer._draw_status_strip("menu")
+
+    def at_top(self):
+        """Up goes on to the bar from the map's top row (Workstation._bar_keys)."""
+        return self.ws.map_ui.at_top()
 
     def handle_input(self, i):
         self.ws.map_ui._map_input()
@@ -292,6 +304,10 @@ class _MusicLayer(Layer):
             mu.music_preview = None
         mu._draw_music()
         ws.bar_layer._draw_status_strip("menu")
+
+    def at_top(self):
+        """Up goes on to the bar from the first step (Workstation._bar_keys)."""
+        return self.ws.music_ui.at_top()
 
     def handle_input(self, i):
         # D-pad navigates the steps (#50): up/down move the step/slot cursor,

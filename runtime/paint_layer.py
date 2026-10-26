@@ -516,6 +516,12 @@ class PaintLayer:
         picker) and points at the grid otherwise (Workstation.ball_steps)."""
         return bool(self._pop)
 
+    def at_top(self):
+        """Up goes on to the bar from the grid's top row, where the keys move
+        its cursor (Workstation._bar_keys)."""
+        return (not self._pop and self.ws.paint is not None and self._cur[1] == 0
+                and _ui_draw.input_kind() != "keys")
+
     def handle_input(self, i):
         if self._pop:                  # the popover takes the keys while open
             if self._host.keys(i):
@@ -1355,7 +1361,9 @@ class PaintLayer:
         popover is open, only the key that closes it."""
         if lay.hints is None:
             return
-        if self._pop:
+        if _ui_draw.on_bar():
+            items = _ui_draw.BAR_KEYS
+        elif self._pop:
             items = _HINTS_POP
         elif pe.sel is None and lay.pane:
             items = _HINTS_PANE

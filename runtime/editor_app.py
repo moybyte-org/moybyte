@@ -1161,6 +1161,30 @@ class EditorApp:
                 return (bx + r[0], by + r[1], r[2], r[3])
         return None
 
+    def zone_targets(self, rect):
+        """The zone's targets the keys walk on the bar
+        (`BarLayer.focus_items`), in the bar coordinates of `rect`: the tabs,
+        undo and redo, and Play (Restart and Stop while a playtest runs);
+        the narrow bar's icons. Nothing on the desk, whose rows are the
+        workspaces' own."""
+        if self._desk() is not None:
+            return []
+        if self.theme is not None:
+            return _te().zone_targets(self, rect)
+        if not self._compact(rect):
+            tabs_area, play_r = self._zone_parts(rect)
+            rects = self._shelf_rects(tabs_area)
+            out = [r for _t, r, _on in rects]
+            hist = self._history_rects(rects)
+            if hist is not None:
+                out.extend(hist)
+            if self.playing():
+                out.extend(self._run_rects(play_r))
+            else:
+                out.append(play_r)
+            return out
+        return [r for _t, _g, r in self._ladder_layout(rect)[0]]
+
     def zone_tap(self, px, py, rect):
         """Hit-test the tab ladder + PLAY and dispatch. `rect` is the lent
         left-zone rect BarLayer drew into, and (px, py) are in the same bar

@@ -138,10 +138,10 @@ _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
            "webconsole": "Web console"}
 # _cart_bar_key's fields every bar folds, and the ones a widget adds (field 2
 # is no bar's).
-_KEY_ALWAYS = (0, 3, 4, 10)
+_KEY_ALWAYS = (0, 3, 4, 10, 12)
 _KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (6, 8), "wifi": (7,),
            "menu": (11,)}
-_KEY_N = 12
+_KEY_N = 13                 # 12: the item keys focus (`focus_item`)
 _KEY_ALL = (1 << _KEY_N) - 1
 _KEY_UNDO = 1 << 9          # drawn only by the Editor's zone ("menu")
 
@@ -284,6 +284,15 @@ class BarLayer:
         self._need = _KEY_ALL
         # Each `where`'s frame key, filled in place (_fill_key).
         self._keys = {}
+        # The keys on the bar (`focus_enter`): the `where` whose bar holds
+        # them, the item index, what the keys came from ("tabs": the home's
+        # tab row, "page": the surface under the bar) and the focused item
+        # as (bar index, rect in that bar's coordinates).
+        self.focus = None
+        self.focus_where = None
+        self.focus_from = None
+        self.focus_item = None
+        _ui_draw.on_bar(False)
 
     def invalidate(self):
         """Repaint every cached bar strip on the next frame: something its key
@@ -845,12 +854,21 @@ class BarLayer:
             # invalidate explicitly)
             key[9] = ws.history.bar_undo_bits()
         key[10] = self._bar_cache_gen
+        key[12] = self.focus_item if self.focus_where == where else None
         if need & 2048:
             m = getattr(ws, "sysmenu", None)       # the system button's open plate
             key[11] = bool(_ui_draw.depth()[0]) and m is not None and m.open \
                 and m.widget == "menu"
 
     def _render_cart_bar(self, cv, key, i=0):
+        """Bar `i` (`_render_bar`), and the focus mark on the item the keys
+        are on where it is in this bar (`focus_item`, key field 12)."""
+        self._render_bar(cv, key, i)
+        f = key[12]
+        if f is not None and f[0] == i:
+            _ui_draw.focus(cv, self.ws.theme_colors, f[1], "small")
+
+    def _render_bar(self, cv, key, i=0):
         """Render bar `i`'s pixels onto `cv` (the offscreen strip, or any canvas)
         for `key[0]` (`where`), in bar coordinates. The pieces are the kernel's
         strip (native/moy_play/moy_chrome.c: a widget's cell) and the
@@ -1472,6 +1490,134 @@ class BarLayer:
         where there is no wall clock."""
         self._clock_text()
         return self._date_cache
+
+    # -- the keys on the bar (owner call 2026-10-26) ---------------------------
+    #
+    # Up from the home's tab row, or past the top of the surface under a bar,
+    # walks focus onto the bar: left and right walk its items, confirm opens
+    # one as a tap on it does, down and back come off it. A window's bar keeps
+    # the desk's own ways.
+
+    def focus_items(self, where):
+        """The items the keys walk on `where`'s bars, left to right, as
+        [(bar index, rect in its bar's coordinates)]: the OS widgets a tap
+        opens, the back chevron, a running app's lent tools and the zone's
+        own targets (`zone_targets`, where its owner names them)."""
+        out = []
+        if self._in_window(where):
+            return out
+        packed = self._packed(where)
+        game = self._zone_is_game(where)
+        show_x = self._show_x(where)
+        back = self.draws_back(where)
+        for bi in range(len(packed)):
+            bar = packed[bi]
+            rects = []
+            for c in bar[3]:
+                if c[0] in _TAPPED and (show_x or c[0] != "close"):
+                    rects.append(c[1])
+            zone = self.lent_zone(where, bar)
+            if zone is not None:
+                owner = self._zone_owner(where)
+                if back:
+                    rects.append((zone[0], zone[1], self._back_w(game), zone[3]))
+                if where in ("tool", "app"):
+                    if back:
+                        box = (0, 0, bar[1][2], bar[1][3])
+                        end = self._title_end(where, zone, box, game)
+                        for hit, _i, off, _name, _r in self._lent_rects(where, end, box, game):
+                            if not off:
+                                rects.append(hit)
+                elif owner is not None and not (back and getattr(owner, "back_title", None)):
+                    targets = getattr(owner, "zone_targets", None)
+                    if targets is not None:
+                        rects.extend(targets(self.past_back(zone, game) if back else zone))
+            rects.sort(key=lambda r: r[0])
+            for r in rects:
+                out.append((bi, r))
+        return out
+
+    def focus_enter(self, where, came_from, at=None):
+        """The keys walk onto `where`'s bar from `came_from` ("tabs",
+        "page"): onto the item `at` (a bar-coordinate x the item spans), else
+        the first. False where the bar has no item."""
+        items = self.focus_items(where)
+        if not items:
+            return False
+        k = 0
+        if at is not None:
+            for j in range(len(items)):
+                r = items[j][1]
+                if r[0] <= at < r[0] + r[2]:
+                    k = j
+                    break
+        self.focus_where = where
+        self.focus_from = came_from
+        if came_from == "tabs":
+            self.ws.launcher_layer._tab_focus = False    # one focus mark a screen
+        self._focus_on(items, k)
+        return True
+
+    def _focus_on(self, items, k):
+        if not items:
+            self.focus_leave()
+            return
+        k = max(0, min(len(items) - 1, k))
+        self.focus = k
+        self.focus_item = items[k]
+        _ui_draw.on_bar(True)
+        self.ws._dirty = True
+
+    def focus_leave(self):
+        """The keys come off the bar, back where they came from."""
+        came = self.focus_from
+        self.focus = self.focus_where = self.focus_from = self.focus_item = None
+        _ui_draw.on_bar(False)
+        ws = self.ws
+        ws._dirty = True
+        if came == "tabs":
+            ws.launcher_layer._tab_focus = True
+
+    def focus_keys(self, i):
+        """A frame's keys while they are on the bar: left and right walk
+        its items, confirm opens the focused one (a tap at its middle), down,
+        back and stop come off it, up stays. True where they were the bar's."""
+        where = self.focus_where
+        items = self.focus_items(where)
+        if not items or self.ws.bar_where() != where:
+            self.focus_leave()
+            return False
+        if i.pressed("left"):
+            self._focus_on(items, self.focus - 1)
+        elif i.pressed("right"):
+            self._focus_on(items, self.focus + 1)
+        elif i.pressed("down") or i.pressed("b") or i.pressed("stop"):
+            self.focus_leave()
+        elif i.pressed("a") or i.pressed("run"):
+            bi, r = items[max(0, min(len(items) - 1, self.focus))]
+            bar = self._packed(where)[bi]
+            mid = r[0] + r[2] // 2
+            self._tap_bar(where, bar, mid, r[1] + r[3] // 2)
+            ws = self.ws
+            ws._dirty = True
+            if ws.bar_where() != where:
+                self.focus_leave()      # the tap left the surface (back, a door)
+            else:
+                # the item tapped, where the bar laid it out again (a tab
+                # opened takes its label): the open tab's, else the nearest
+                items = self.focus_items(where)
+                at = ws.bar_open_x(where)
+                if at is not None:
+                    mid = at
+                k = 0
+                for j in range(len(items)):
+                    q = items[j][1]
+                    if abs(q[0] + q[2] // 2 - mid) < abs(items[k][1][0] + items[k][1][2] // 2 - mid):
+                        k = j
+                self._focus_on(items, k)
+        elif not i.pressed("up"):
+            return False
+        return True
 
     def handle_bar_tap(self, where, px, py):
         """The zoned bars' tap slice (Stage 4), shared by every screen they draw
