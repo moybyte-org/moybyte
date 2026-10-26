@@ -1520,8 +1520,8 @@ class BarLayer:
             ws.ach_ui._clock_taps = 0            # any other bar tap resets the run
         # The ≡, the clock, wifi and battery open their component
         # (docs/shell_layout_2026-10.md §8): the system menu as the popup it
-        # is, the rest a popover hung from the widget -- wifi the Settings
-        # WIFI page, the one wifi implementation. Consumed, so a tap never
+        # is, the rest a popover hung from the widget, in both modes -- wifi's
+        # the Settings WIFI panel, the one wifi implementation. Consumed, so a tap never
         # leaks to the lent zone.
         if name in ("clock", "menu", "wifi", "battery"):
             ws.widget_tap(name)

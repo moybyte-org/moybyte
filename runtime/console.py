@@ -1977,9 +1977,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             self.toggle_popover(widget)
 
     def open_wifi_panel(self):
-        """The wifi widget's target: the Settings WIFI panel, the one wifi
-        implementation -- in desktop mode as the popover, in console mode as
-        the Settings page opened at it."""
+        """An app's way to the Settings WIFI panel, the one wifi
+        implementation (the `wifi` service): in desktop mode as the popover,
+        in console mode as the Settings page opened at it. The bar's wifi
+        widget opens the popover in both modes (`widget_tap`)."""
         if self.wm.desk_open():
             if not (self.sysmenu.open and self.sysmenu.widget == "wifi"):
                 self.toggle_popover("wifi")
