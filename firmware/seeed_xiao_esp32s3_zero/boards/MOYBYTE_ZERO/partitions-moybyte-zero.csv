@@ -3,7 +3,7 @@
 # arrangement.
 #
 # WHY THIS IS NOT THE CONSOLE TABLE. The S3 console layout is
-# nvs/otadata/phy + two 6 MiB app slots + a 3.875 MiB vfs, and it needs 16MB. Pointing
+# nvs/otadata/phy + two 6-7 MiB app slots + a vfs, and it needs 16MB. Pointing
 # this board at it does not fail at build time: the BOOTLOADER rejects the
 # table and the board boot loops with no console at all, which on a board with
 # no screen is indistinguishable from a dead one. That was learned here (see

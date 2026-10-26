@@ -16,7 +16,7 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
-# The dual-OTA partition table (#53): two 6 MiB app slots and the vfs; the
+# The dual-OTA partition table (#53): two 7 MiB app slots and the vfs; the
 # CSV carries the arithmetic and what a change to it costs a deployed board.
 # CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves relative to ports/esp32, so
 # build.sh stages the CSV there.

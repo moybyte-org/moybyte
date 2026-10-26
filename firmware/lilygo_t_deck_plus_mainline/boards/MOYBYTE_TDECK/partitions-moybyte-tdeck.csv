@@ -2,12 +2,13 @@
 #
 # The head is the fork build's: nvs is 0x14000 (not the mainline default's
 # 0x6000), which is why otadata lands at 0x1D000 ([flash] otadata_offset in
-# board.toml) and ota_0 at 0x20000. Both S3 console boards share this table.
+# board.toml) and ota_0 at 0x20000. The Guition S3's table has the same head.
 #
 # Slot sizes went 4MB -> 4.5MB (2026-07-27, #168, the app crossed 4MB) -> 5MB
-# (2026-07-29) -> 6 MiB (owner, 2026-10-15): the theme fonts stay in the image
-# and the 2026-10 look's text, shapes and font steps grow it, so the slots
-# take the room and the vfs gives it. The vfs is the store's fallback without
+# (2026-07-29) -> 6 MiB (owner, 2026-10-15) -> 7 MiB (owner, 2026-10-26, the
+# image back at its 512 KB headroom floor): the theme fonts stay in the image
+# and the 2026-10 look's steps grow it, so the slots take the room and the vfs
+# gives it. The vfs is the store's fallback without
 # a card. build.sh prints the remaining headroom against the board's floor.
 #
 # Moving the slots moves the vfs: a board on an older table takes a cable flash
@@ -19,6 +20,6 @@
 nvs,      data, nvs,     0x9000,   0x14000,
 otadata,  data, ota,     0x1D000,  0x2000,
 phy_init, data, phy,     0x1F000,  0x1000,
-ota_0,    app,  ota_0,   0x20000,  0x600000,
-ota_1,    app,  ota_1,   0x620000, 0x600000,
-vfs,      data, fat,     0xC20000, 0x3E0000,
+ota_0,    app,  ota_0,   0x20000,  0x700000,
+ota_1,    app,  ota_1,   0x720000, 0x700000,
+vfs,      data, fat,     0xE20000, 0x1E0000,

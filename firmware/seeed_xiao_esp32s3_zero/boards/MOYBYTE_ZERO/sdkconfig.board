@@ -23,8 +23,8 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
 # THE PARTITION TABLE, and the reason this board needed a new one rather than
-# the siblings' (2026-08-29). The console S3 layout is two 6 MiB app slots plus
-# a 3.875 MiB vfs in 16MB of flash; on 8MB it does not fit, and the failure is not a
+# the siblings' (2026-08-29). The console S3 layout is two 6-7 MiB app slots
+# plus a vfs in 16MB of flash; on 8MB it does not fit, and the failure is not a
 # build error -- the bootloader REJECTS the table at runtime and the board boot
 # loops with no console (learned on this board, README's hardware facts).
 # What makes two slots fit here at all is that this image is headless: no

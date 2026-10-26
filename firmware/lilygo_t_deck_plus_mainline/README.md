@@ -70,7 +70,7 @@ Same console, same baked browser bundle (572,693 B), same partition table —
 one 837-line C file. Both builds stamped OTA board id `tdeck` against a
 byte-identical partition table, so a payload from either installed into the
 other's inactive slot — which made the migration an OTA rather than a cable
-flash. The slots are 6 MiB since 2026-10-15 (the table's CSV,
+flash. The slots are 7 MiB since 2026-10-26 (the table's CSV,
 `boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why).
 
 ---
