@@ -233,6 +233,10 @@ _DRAW_SIGS = (
     ("moy_ui_tile", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, _I, _I], _I),
     ("moy_ui_unlock", [c.POINTER(_Sink), _I, _I, _Span, _Span, _I, _I, _I, _I, _I,
                        c.POINTER(_Box)], _I),
+    ("moy_ui_month_h", [_I, _I, _I], _I),
+    ("moy_ui_modal", [c.POINTER(_Sink), _Box, _Span, _I, _I, _I], _I),
+    ("moy_ui_perf", [c.POINTER(_Sink), _I, _I, _I, c.POINTER(c.c_int16), _I, _I, _Span, _I,
+                     _I, _I, c.POINTER(_Box)], _I),
     ("moy_ui_icon_slot", [c.c_char_p, _Z], _I),
     ("moy_ui_icon_glyph", [c.c_char_p, _Z], _I),
     ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], _I),
@@ -314,7 +318,9 @@ _DRAW_SIGS = (
     ("moy_ui_api_grid_spread", [c.c_void_p, _I, _I, _I, _I, _I], None),
     ("moy_ui_api_group_card", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_empty", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_char_p, _Z], _I),
-    ("moy_ui_api_toast", [c.c_void_p, c.POINTER(_Sink), _Span, _Span], None),
+    ("moy_ui_api_month", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, _I, _I, _I], _I),
+    ("moy_ui_api_toast", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_int,
+                          c.POINTER(c.c_int32)], None),
     ("moy_ui_api_tool", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p], _I),
     ("moy_ui_api_bar", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_uint32],
      c.c_int32),
@@ -733,6 +739,22 @@ def binding():
                                  int(burst), int(fs), int(desk), c.byref(out)))
         return (out.x, out.y, out.w, out.h)
 
+    def month_h(weeks, fs, desk):
+        return int(lib.moy_ui_month_h(int(weeks), int(fs), int(desk)))
+
+    def modal(cv, look, rect, fs, desk):
+        t, keep = span("")
+        _check(lib.moy_ui_modal(c.byref(sink(cv, look)), box_of(rect), t, int(fs), int(desk), 0))
+
+    def perf(cv, look, args, words, out):
+        v = [int(x) for x in args[:12]]
+        pa = (c.c_int16 * 4)(*v[8:12])
+        t, keep = span(words)
+        b = _Box()
+        _check(lib.moy_ui_perf(c.byref(sink(cv, look)), v[0], v[1], v[2], pa, v[3], v[4], t,
+                               v[5], v[6], v[7], c.byref(b)))
+        out[0], out[1], out[2], out[3] = b.x, b.y, b.w, b.h
+
     def frame_geom(w, h, title_h, active, mode):
         out = (_I * 6)()
         lib.moy_ui_frame_geom(int(w), int(h), int(title_h), 1 if active else 0, int(mode), out)
@@ -837,7 +859,7 @@ def binding():
     for f in (row, cell, label, bar_rect, scrollbar, scroll_cues, fill_uncovered, fade,
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
-              scrim, tile, unlock,
+              scrim, tile, unlock, modal, month_h, perf,
               frame_under, frame_under_onto, cast, dialog, text_field, panel, focus_ring, focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):
@@ -1115,12 +1137,21 @@ def binding():
         b = bytes(lines)
         return int(lib.moy_ui_api_empty(p, c.byref(s), t, u, b, len(b)))
 
-    def api_toast(ctx, cv, look, text, kind):
+    def api_month(ctx, cv, look, title, days, first, n, today):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        t, keep = _span0(title)
+        u, keep2 = _span0(days)
+        return int(lib.moy_ui_api_month(p, c.byref(s), t, u, int(first), int(n), int(today)))
+
+    def api_toast(ctx, cv, look, text, kind, flat):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
         t, keep = _span0(text)
         u, keep2 = _span0(kind)
-        lib.moy_ui_api_toast(p, c.byref(s), t, u)
+        out = (c.c_int32 * 4)()
+        lib.moy_ui_api_toast(p, c.byref(s), t, u, 1 if flat else 0, out)
+        return tuple(out)
 
     def api_tool(ctx, cv, look, icon, label, o):
         p, _k = _ctx(ctx)
@@ -1248,7 +1279,7 @@ def binding():
               api_table_rows, api_table_pics,
               api_grid,
               api_card, api_part, api_popover, api_menu, api_menu_danger,
-              api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_toast,
+              api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_rule,
               api_focus, api_keys_taken, api_at, api_dup):
         setattr(m, f.__name__, f)

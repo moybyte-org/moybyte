@@ -1387,10 +1387,6 @@ int moy_ui_unlock(const moy_ui_sink_t *s, int cx, int y, moy_ui_span_t head, moy
         }
     }
     moy_ui_modal(s, b, (moy_ui_span_t){NULL, 0}, fs, desk, 0);
-    if (solid_marks()) {
-        int r = moy_ui_depth()->on ? (d.desk ? 12 : 8) * d.fs : 0;
-        rrect(&d, b.x, b.y, b.w, b.h, r, 0, 0, 2 * d.fs, pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)));
-    }
     moy_ui_box_t t = {(int16_t)(b.x + pad), (int16_t)(b.y + pad), (int16_t)n, (int16_t)n};
     moy_ui_tile(s, t, slot, glyph, MOY_UI_TONE_INK, d.desk ? 8 : 6, fs, desk);
     int tx = b.x + pad + n + pad + 2 * d.fs;
@@ -1515,7 +1511,7 @@ int moy_ui_empty(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, mo
 }
 
 int moy_ui_toast(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t text_, int slot, int glyph,
-                 int fs, int desk, moy_ui_box_t *out) {
+                 int fs, int desk, int flat, moy_ui_box_t *out) {
     pd_t d;
     open_pd(s, &d, fs, desk);
     int sc = tscale(s);
@@ -1536,7 +1532,9 @@ int moy_ui_toast(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t text_, in
     if (!ground(&d, &g)) {
         g = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
     }
-    moy_ui_soft(s, p, h / 2, 153);
+    if (!flat) {
+        moy_ui_soft(s, p, h / 2, 153);
+    }
     rrect(&d, p.x, p.y, p.w, p.h, h / 2, 1,
           mix(g, pal(&d, tone_ink(&d, MOY_UI_TONE_INK)), 240), 0, 0);
     moy_ui_box_t ib = {(int16_t)(p.x + pad), (int16_t)(p.y + (h - side) / 2), (int16_t)side,
@@ -1544,6 +1542,243 @@ int moy_ui_toast(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t text_, in
     int gi = tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE);
     icon_d(&d, slot, glyph, ib, gi);
     text_cut(&d, &f, text_, p.x + pad + side + gap, p.y, h, room, g, sc);
+    return MOY_UI_OK;
+}
+
+// -- the perf HUD --------------------------------------------------------------------------
+
+// A number of tenths as digits ("33.0" with `point`, else whole), into out;
+// its length.
+static int tenths_of(char *out, int v, int point) {
+    if (v < 0) {
+        v = 0;
+    }
+    if (!point) {
+        v = (v + 5) / 10;
+    }
+    char t[8];
+    int n = 0;
+    int w = point ? v / 10 : v;
+    do {
+        t[n++] = (char)('0' + w % 10);
+        w /= 10;
+    } while (w && n < 6);
+    int k = 0;
+    while (n) {
+        out[k++] = t[--n];
+    }
+    if (point) {
+        out[k++] = '.';
+        out[k++] = (char)('0' + v % 10);
+    }
+    return k;
+}
+
+// The i-th of the NUL-separated `words`.
+static moy_ui_span_t word_at(moy_ui_span_t words, int i) {
+    size_t at = 0;
+    for (size_t j = 0; j <= words.n; j++) {
+        if (j == words.n || words.p[j] == 0) {
+            if (i-- == 0) {
+                return (moy_ui_span_t){words.p + at, (uint16_t)(j - at)};
+            }
+            at = j + 1;
+        }
+    }
+    return (moy_ui_span_t){words.p, 0};
+}
+
+// A part's fill: its hue; Contrast's the ink solid, hatched and an outline.
+static void perf_fill(pd_t *d, int i, int x, int y, int w, int h, uint16_t c, int solid) {
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    if (!solid) {
+        fill(d, x, y, w, h, c);
+    } else if (i == 0) {
+        fill(d, x, y, w, h, c);
+    } else if (i == 1) {
+        for (int yy = 0; yy < h; yy++) {
+            for (int xx = (3 - yy % 3) % 3; xx < w; xx += 3) {
+                fill(d, x + xx, y + yy, d->fs, 1, c);
+            }
+        }
+    } else {
+        rrect(d, x, y, w, h, 0, 0, 0, d->fs, c);
+    }
+}
+
+int moy_ui_perf(const moy_ui_sink_t *s, int right, int bottom, int fps, const int16_t *parts,
+                int frame, int detail, moy_ui_span_t words, int fs, int desk, int draw,
+                moy_ui_box_t *out) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int sc = tscale(s), k = d.fs;
+    int solid = solid_marks(), dk = dark(&d);
+    pf_t fm = font_of(&d, MOY_UI_FONT_MONO), fu = font_of(&d, MOY_UI_FONT_UI);
+    uint16_t surf = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
+    uint16_t ink = pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK));
+    uint16_t dim = pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_CHROME_INK_DIM));
+    uint16_t line = pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
+    uint16_t edge = solid ? ink : mix(line, dim, 77);
+    // the chip: a flat pill, the number in the code face's digits, "fps" dim
+    char num[8];
+    int nn = tenths_of(num, fps * 10, 0);
+    moy_ui_span_t unit = word_at(words, 5);
+    int ch = (d.desk ? 26 : 16) * k, cpad = (d.desk ? 10 : 6) * k, gap = 3 * k;
+    int nw = tw(&fm, (const uint8_t *)num, (size_t)nn, sc);
+    int cw = cpad + nw + gap + tw(&fu, unit.p, unit.n, sc) + cpad;
+    moy_ui_box_t chip = {(int16_t)(right - cw), (int16_t)(bottom - ch), (int16_t)cw, (int16_t)ch};
+    moy_ui_box_t all = chip;
+    // the card over it: the frame against its budget, then each part's row
+    int w = (d.desk ? 176 : 150) * k, rh = (d.desk ? 20 : 13) * k, pad = (d.desk ? 10 : 7) * k;
+    int bh = (d.desk ? 6 : 4) * k, bgap = (d.desk ? 8 : 6) * k;
+    int h = pad + rh + bh + bgap + 4 * rh + pad;
+    moy_ui_box_t card = {(int16_t)(right - w), (int16_t)(chip.y - (d.desk ? 8 : 4) * k - h),
+                         (int16_t)w, (int16_t)h};
+    if (detail) {
+        all.x = card.x < chip.x ? card.x : chip.x;
+        all.w = (int16_t)(right - all.x);
+        all.y = card.y;
+        all.h = (int16_t)(bottom - card.y);
+    }
+    if (out != NULL) {
+        *out = all;
+    }
+    if (!draw) {
+        return MOY_UI_OK;
+    }
+    rrect(&d, chip.x, chip.y, chip.w, chip.h, ch / 2, 1, surf, k, edge);
+    text(&d, &fm, (const uint8_t *)num, (size_t)nn, chip.x + cpad, chip.y, ch, ink, sc);
+    text(&d, &fu, unit.p, unit.n, chip.x + cpad + nw + gap, chip.y, ch, dim, sc);
+    if (!detail) {
+        return MOY_UI_OK;
+    }
+    int r = (d.desk ? 8 : 6) * k;
+    rrect(&d, card.x, card.y, card.w, card.h, r, 1, surf, solid ? 2 * k : k, solid ? ink : line);
+    uint16_t hue[3] = {
+        pal(&d, tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT)),
+        moy_shape_wire(moy_theme_rgb565(MOY_THEME_RGB | (dk ? 0x5fd0c0 : 0x138a7e))),
+        moy_shape_wire(moy_theme_rgb565(MOY_THEME_RGB | (dk ? 0xf0b85a : 0xb7791f))),
+    };
+    if (solid) {
+        hue[0] = hue[1] = hue[2] = ink;
+    }
+    char v[8];
+    int x0 = card.x + pad, x1 = card.x + w - pad, y = card.y + pad;
+    moy_ui_span_t head = word_at(words, 0), ms = word_at(words, 6);
+    text(&d, &fu, head.p, head.n, x0, y, rh, ink, sc);
+    int msw = tw(&fm, ms.p, ms.n, sc);
+    int vn = tenths_of(v, frame, 1);
+    text(&d, &fm, ms.p, ms.n, x1 - msw, y, rh, ink, sc);
+    int vw = tw(&fm, (const uint8_t *)v, (size_t)vn, sc) + tw(&fm, (const uint8_t *)" ", 1, sc);
+    text(&d, &fm, (const uint8_t *)v, (size_t)vn, x1 - msw - vw, y, rh, ink, sc);
+    y += rh;
+    int bw = x1 - x0, bx = x0;
+    fill(&d, x0, y, bw, bh, solid ? pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE))
+                                  : mix(line, surf, 51));
+    int budget = 333;                       // 33.3 ms, a 30 fps frame
+    for (int i = 0; i < 3; i++) {
+        int seg = bw * (parts[i] < 0 ? 0 : parts[i]) / budget;
+        seg = bx + seg > x1 ? x1 - bx : seg;
+        perf_fill(&d, i, bx, y, seg - k, bh, hue[i], solid);
+        bx += seg;
+    }
+    y += bh + bgap;
+    int sw = (d.desk ? 8 : 6) * k;
+    for (int i = 0; i < 4; i++) {
+        if (i < 3) {
+            perf_fill(&d, i, x0, y + (rh - sw) / 2, sw, sw, hue[i], solid);
+        }
+        moy_ui_span_t nm = word_at(words, i + 1);
+        text(&d, &fu, nm.p, nm.n, x0 + sw + (d.desk ? 8 : 5) * k, y, rh, solid ? ink : dim, sc);
+        vn = tenths_of(v, parts[i], 1);
+        int w2 = tw(&fm, (const uint8_t *)v, (size_t)vn, sc);
+        text(&d, &fm, (const uint8_t *)v, (size_t)vn, x1 - w2, y, rh, ink, sc);
+        y += rh;
+    }
+    return MOY_UI_OK;
+}
+
+// -- a month --------------------------------------------------------------------------
+
+int moy_ui_month_h(int weeks, int fs, int desk) {
+    int k = fs < 1 ? 1 : fs;
+    return ((desk ? 30 : 22) + (desk ? 22 : 26) + weeks * (desk ? 30 : 21)) * k;
+}
+
+int moy_ui_month(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title,
+                 moy_ui_span_t days, int first, int n, int today, int chevrons, int fs, int desk,
+                 moy_ui_box_t chev[2]) {
+    pd_t d;
+    open_pd(s, &d, fs, desk);
+    int sc = tscale(s), k = d.fs;
+    pf_t ft = font_of(&d, MOY_UI_FONT_TITLE), fc = font_of(&d, MOY_UI_FONT_CAPTION);
+    pf_t fu = font_of(&d, MOY_UI_FONT_UI);
+    int head = (d.desk ? 30 : 22) * k, cap = (d.desk ? 22 : 26) * k;
+    int pitch = (d.desk ? 30 : 21) * k;
+    uint16_t ink = pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK));
+    uint16_t dim = pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_CHROME_INK_DIM));
+    int cw = b.w / 7, gx = b.x + (b.w - 7 * cw) / 2;
+    int room = b.w;
+    if (chevrons) {
+        // the two chevrons at the head's right, each a tap's square
+        int side = (d.desk ? 24 : 26) * k;
+        for (int i = 0; i < 2; i++) {
+            moy_ui_box_t cb = {(int16_t)(b.x + b.w - (2 - i) * side), b.y, (int16_t)side,
+                               (int16_t)head};
+            if (chev != NULL) {
+                chev[i] = cb;
+            }
+            static const uint8_t back[] = "back", fwd[] = "forward";
+            const uint8_t *nm = i ? fwd : back;
+            size_t nn = i ? 7 : 4;
+            moy_ui_box_t ib = {(int16_t)(cb.x + (cb.w - 16 * k) / 2),
+                               (int16_t)(cb.y + (cb.h - 16 * k) / 2), (int16_t)(16 * k),
+                               (int16_t)(16 * k)};
+            icon_d(&d, moy_ui_icon_slot(nm, nn), moy_ui_icon_glyph(nm, nn), ib,
+                   tok(&d, MOY_UI_T_INK, MOY_UI_T_CHROME_INK));
+        }
+        room = b.w - 2 * side;
+    }
+    text_cut(&d, &ft, title, gx, b.y, head, room - (gx - b.x), ink, sc);
+    // the weekdays' initials, one a column
+    size_t at = 0;
+    for (int i = 0; i < 7 && at < days.n; i++) {
+        size_t e = at + 1;
+        while (e < days.n && (days.p[e] & 0xC0) == 0x80) {
+            e++;
+        }
+        int w = tw(&fc, days.p + at, e - at, sc);
+        text(&d, &fc, days.p + at, e - at, gx + i * cw + (cw - w) / 2, b.y + head, cap, dim, sc);
+        at = e;
+    }
+    int gy = b.y + head + cap;
+    int disc = (d.desk ? 28 : 20) * k;
+    disc = disc > cw ? cw : disc;
+    int solid = solid_marks();
+    for (int day = 1; day <= n; day++) {
+        int i = first + day - 1;
+        int col = i % 7, row = i / 7;
+        int cx = gx + col * cw, cy = gy + row * pitch;
+        char num[3];
+        int nl = day < 10 ? 1 : 2;
+        num[0] = (char)(day < 10 ? '0' + day : '0' + day / 10);
+        num[1] = (char)('0' + day % 10);
+        const pf_t *f = day == today ? &ft : &fu;
+        uint16_t c = col >= 5 ? dim : ink;
+        if (day == today) {
+            // today on a disc of `value`, its number bold in `value_ink`
+            int dx = cx + (cw - disc) / 2, dy = cy + (pitch - disc) / 2;
+            rrect(&d, dx, dy, disc, disc, disc / 2, 1,
+                  pal(&d, solid ? tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)
+                                : tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT)), 0, 0);
+            c = pal(&d, solid ? tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)
+                              : tok(&d, MOY_UI_T_VALUE_INK, MOY_UI_T_PANEL));
+        }
+        int w = tw(f, (const uint8_t *)num, (size_t)nl, sc);
+        text(&d, f, (const uint8_t *)num, (size_t)nl, cx + (cw - w) / 2, cy, pitch, c, sc);
+    }
     return MOY_UI_OK;
 }
 
@@ -2452,11 +2687,24 @@ int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, in
     open_pd(s, &d, fs, desk);
     const moy_ui_depth_t *dp = moy_ui_depth();
     int r = dp->on ? (dp->card_r < (desk ? 12 : 8) ? dp->card_r : (desk ? 12 : 8)) * d.fs : 0;
-    if (dp->on) {
-        moy_ui_cast(s, b, MOY_UI_CAST_CARD, MOY_UI_UNDER_FULL);
+    // flat: no soft shadow blended over what still reads under it, but a
+    // hard drop MOY_UI_DROP pixels at the scale in an opaque shade of the
+    // ground, then the surface and its edge (Contrast's: no drop, the ink's
+    // ring two pixels at the scale)
+    uint16_t edge = pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
+    uint16_t surf = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
+    if (solid_marks()) {
+        rrect(&d, b.x, b.y, b.w, b.h, r, 1, surf, 2 * d.fs,
+              pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)));
+    } else {
+        int dk = dark(&d);
+        uint16_t g = surf;
+        ground(&d, &g);
+        rrect(&d, b.x, b.y + MOY_UI_DROP * d.fs, b.w, b.h, r, 1, mix(g, 0, dk ? 115 : 31), 0, 0);
+        edge = mix(edge, pal(&d, dk ? tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)
+                                    : tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK)), dk ? 77 : 51);
+        rrect(&d, b.x, b.y, b.w, b.h, r, 1, surf, d.fs, edge);
     }
-    rrect(&d, b.x, b.y, b.w, b.h, r, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)),
-          d.fs, pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)));
     if (title.n) {
         int pad = moy_ui_modal_band(fs, desk);
         pf_t f = font_of(&d, MOY_UI_FONT_TITLE);

@@ -884,8 +884,8 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
 # --- list rows and grid cells: the two shapes the tree hand-rolls ~29 times ----
 #
 # Designed from the real call sites, not from first principles. `row` answers
-# `popover.PowerRows` (no field when unselected, a fixed label pad, a
-# right-hand value + a trailing icon), `files_app._draw_rows` (panel/
+# a row with no field when unselected, a fixed label pad, a right-hand value
+# and a trailing icon, `files_app._draw_rows` (panel/
 # title field, dim/accent edge, a truncated name), `storybook_app._draw_rows`
 # (an off-token field, a vertically centred label), the system menu's rows
 # (hilite on the selected row only, drawn by `moy_chrome`'s C) and
@@ -1465,6 +1465,29 @@ def unlock(cv, th, cx, y, head, name, icon, burst=0, desk=False):
     `burst` (1..255) of the way out from its edges. Its card's rect."""
     return _C.unlock(cv, _LOOK if th is _TH else _look(th), cx, y, head, name, icon, burst,
                      _fs(cv), _DESK if desk else 0)
+
+
+def modal(cv, th, rect, desk=False):
+    """A system card over `rect`, flat (the popover's and the pause card's:
+    a hard drop in a shade of the ground, the surface and its edge), for a
+    surface that lays out its own card."""
+    _C.modal(cv, _LOOK if th is _TH else _look(th), rect, _fs(cv), _DESK if desk else 0)
+
+
+# perf's argument slots in its array('h') of sixteen
+PERF_RIGHT, PERF_BOTTOM, PERF_FPS, PERF_FRAME, PERF_DETAIL, PERF_FS, PERF_DESK, PERF_DRAW = range(8)
+PERF_PARTS = 8
+
+
+def perf(cv, th, args, words, out):
+    """The perf HUD's chip, and with its `PERF_DETAIL` its breakdown card
+    (moy_ui_perf), from `args` -- an array('h') of sixteen: the bottom right
+    it hangs from, the fps, the frame in tenths of a ms, the detail, the
+    scale (the caller's: a game canvas has no font scale to ask), the desk
+    class and whether to draw, then from `PERF_PARTS` draw, flush, logic and
+    idle in tenths of a ms -- and `words` its NUL-separated labels; the box
+    it covers into `out`, an array('i', 4). Allocates nothing."""
+    _C.perf(cv, _LOOK if th is _TH else _look(th), args, words, out)
 
 
 def scrim(cv, th, rect):

@@ -1834,6 +1834,50 @@ static mp_obj_t ui_unlock(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_unlock_obj, 10, 10, ui_unlock);
 
+// month_h(weeks, fs, desk) -> a month's height (moy_ui_month_h)
+static mp_obj_t ui_month_h(mp_obj_t weeks, mp_obj_t fs, mp_obj_t desk) {
+    return mp_obj_new_int(moy_ui_month_h(num(weeks), num(fs), num(desk)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_month_h_obj, ui_month_h);
+
+// modal(cv, look, rect, fs, desk): a system card, flat (moy_ui_modal)
+static mp_obj_t ui_modal(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    check(moy_ui_modal(&s, box_of(a[2]), (moy_ui_span_t){NULL, 0}, num(a[3]), num(a[4]), 0));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_modal_obj, 5, 5, ui_modal);
+
+// perf(cv, look, args, words, out): the perf HUD; `args` sixteen int16 --
+// right, bottom, fps, frame (tenths of a ms), detail, fs, desk, draw, then
+// the parts (draw, flush, logic, idle, tenths of a ms) -- and its box into
+// `out` (four int32), so a frame that paints it allocates nothing (a call of
+// few arguments keeps its caller's frame on the C stack)
+static mp_obj_t ui_perf(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[0], a[1]);
+    mp_buffer_info_t ab, ob;
+    mp_get_buffer_raise(a[2], &ab, MP_BUFFER_READ);
+    mp_get_buffer_raise(a[4], &ob, MP_BUFFER_WRITE);
+    if (ab.len < 24 || ob.len < 16) {
+        mp_raise_ValueError(NULL);
+    }
+    const int16_t *v = (const int16_t *)ab.buf;
+    moy_ui_box_t b;
+    check(moy_ui_perf(&s, v[0], v[1], v[2], v + 8, v[3], v[4], span_of(a[3]), v[5], v[6], v[7],
+                      &b));
+    int32_t *o = (int32_t *)ob.buf;
+    o[0] = b.x;
+    o[1] = b.y;
+    o[2] = b.w;
+    o[3] = b.h;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_perf_obj, 5, 5, ui_perf);
+
 // frame_band(cv, look, rect, light, side): the bar's band
 static mp_obj_t ui_frame_band(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2367,7 +2411,8 @@ static int word_of(mp_obj_t v, const char *const *w, int n) {
 // text.
 static void label_text(moy_ui_ctx_t *c, mp_obj_t o) {
     static const char *const tones[] = {"ink", "dim", "value", "danger"};
-    static const char *const faces[] = {"ui", "title", "mono", "caption"};
+    static const char *const faces[] = {"ui", "title", "mono", "caption", "key", "op",
+                                        "result"};
     static const char *const centre[] = {"center"};
     if (!mp_obj_is_type(o, &mp_type_dict)) {
         return;
@@ -2378,7 +2423,9 @@ static void label_text(moy_ui_ctx_t *c, mp_obj_t o) {
     mp_map_elem_t *tone = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_tone), MP_MAP_LOOKUP);
     mp_map_elem_t *face = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_face), MP_MAP_LOOKUP);
     mp_map_elem_t *inset = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_inset), MP_MAP_LOOKUP);
-    if (wrap == NULL && align == NULL && tone == NULL && face == NULL && inset == NULL) {
+    mp_map_elem_t *sunk = mp_map_lookup(m, MP_OBJ_NEW_QSTR(MP_QSTR_sunk), MP_MAP_LOOKUP);
+    if (wrap == NULL && align == NULL && tone == NULL && face == NULL && inset == NULL
+        && sunk == NULL) {
         return;
     }
     int lines = 0;
@@ -2388,9 +2435,10 @@ static void label_text(moy_ui_ctx_t *c, mp_obj_t o) {
     }
     int t = tone != NULL ? word_of(tone->value, tones, 4) : -1;
     int al = align != NULL && word_of(align->value, centre, 1) == 0 ? 1
+             : sunk != NULL && mp_obj_is_true(sunk->value) ? 3
              : inset != NULL && mp_obj_is_true(inset->value) ? 2 : 0;
     moy_ui_api_text(c, lines, al,
-                    t < 0 ? 0 : t, face != NULL ? word_of(face->value, faces, 4) : -1);
+                    t < 0 ? 0 : t, face != NULL ? word_of(face->value, faces, 7) : -1);
 }
 
 // api_label(ctx, cv, look, text, o): a dict `o` carries the text options too
@@ -2891,16 +2939,30 @@ static mp_obj_t ui_api_empty(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_empty_obj, 6, 6, ui_api_empty);
 
-// api_toast(ctx, cv, look, text, kind)
+// api_month(ctx, cv, look, title, days, first, n, today) -> -1, 0 or 1
+static mp_obj_t ui_api_month(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    return mp_obj_new_int(moy_ui_api_month(c, &s, span_of(a[3]), span_of(a[4]), num(a[5]),
+                                           num(a[6]), num(a[7])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_month_obj, 8, 8, ui_api_month);
+
+// api_toast(ctx, cv, look, text, kind, flat) -> the pill's (x, y, w, h)
 static mp_obj_t ui_api_toast(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_ui_ctx_t *c = ctx_of(a[0]);
     moy_ui_sink_t s;
     sink_of(&s, a[1], a[2]);
-    moy_ui_api_toast(c, &s, span_of(a[3]), span_of(a[4]));
-    return mp_const_none;
+    int32_t b[4];
+    moy_ui_api_toast(c, &s, span_of(a[3]), span_of(a[4]), mp_obj_is_true(a[5]), b);
+    mp_obj_t t[4] = {mp_obj_new_int(b[0]), mp_obj_new_int(b[1]), mp_obj_new_int(b[2]),
+                     mp_obj_new_int(b[3])};
+    return mp_obj_new_tuple(4, t);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_toast_obj, 5, 5, ui_api_toast);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_toast_obj, 6, 6, ui_api_toast);
 
 // api_owes(ctx) -> whether the frame drawn last owes the next
 static mp_obj_t ui_api_owes(mp_obj_t ctx) {
@@ -3090,6 +3152,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_grid_spread), MP_ROM_PTR(&ui_api_grid_spread_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_group_card), MP_ROM_PTR(&ui_api_group_card_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_empty), MP_ROM_PTR(&ui_api_empty_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_month), MP_ROM_PTR(&ui_api_month_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_toast), MP_ROM_PTR(&ui_api_toast_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
@@ -3134,6 +3197,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_scrim), MP_ROM_PTR(&ui_scrim_obj) },
     { MP_ROM_QSTR(MP_QSTR_tile), MP_ROM_PTR(&ui_tile_obj) },
     { MP_ROM_QSTR(MP_QSTR_unlock), MP_ROM_PTR(&ui_unlock_obj) },
+    { MP_ROM_QSTR(MP_QSTR_modal), MP_ROM_PTR(&ui_modal_obj) },
+    { MP_ROM_QSTR(MP_QSTR_month_h), MP_ROM_PTR(&ui_month_h_obj) },
+    { MP_ROM_QSTR(MP_QSTR_perf), MP_ROM_PTR(&ui_perf_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_band), MP_ROM_PTR(&ui_frame_band_obj) },
     { MP_ROM_QSTR(MP_QSTR_dialog), MP_ROM_PTR(&ui_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_field), MP_ROM_PTR(&ui_text_field_obj) },

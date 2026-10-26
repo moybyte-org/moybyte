@@ -363,7 +363,8 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
 void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows);
 // The Python face's options the override block does not carry, each for the
 // next call of its verb: a label's text (`lines` its most, 0 one unwrapped;
-// `centre` 1 centred, 2 in from the page's edges as a group's caption is;
+// `centre` 1 centred, 2 in from the page's edges as a group's caption is, 3
+// on a `sunk` inset across the row, the text inside its padding;
 // `tone` MOY_UI_TONE_*; `role` a font role, -1 the label's own),
 // a card's badge (icon `badge`, empty none), tone and blank picture (icon
 // `blank` on a tinted tile, empty none: moy_ui_card_blank), a grid's spread (its
@@ -384,10 +385,17 @@ void moy_ui_api_group_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 // Its foot's y, where the page's verbs go.
 int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
                      moy_ui_span_t title, const uint8_t *lines, size_t n);
+// A month (ui.month) at `at`'s rect, else stacked on the page: `title`,
+// the weekdays' initials `days`, `n` days from column `first` (0 Monday),
+// `today` marked (0 none); on the desk and under touch its head carries the
+// two chevrons. -1 or 1 the frame a press lands on one, else 0.
+int moy_ui_api_month(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
+                     moy_ui_span_t days, int first, int n, int today);
 // A toast (ui.toast) over the foot of `at`'s rect, else of the page: the
-// `check` icon, else `kind`'s (the icon slot it names), and `text`.
+// `check` icon, else `kind`'s (the icon slot it names), and `text`; `flat`
+// with no soft shadow. Its pill's box in out[4].
 void moy_ui_api_toast(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
-                      moy_ui_span_t kind);
+                      moy_ui_span_t kind, int flat, int32_t out[4]);
 // A card grid (§1): `id` begins one whose cards' pictures are w x h, as
 // many columns as the row holds, the grid's rows stacking on the page (or
 // from ui.at's rect's top left, across its width); an id of length 0 ends it.

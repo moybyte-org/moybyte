@@ -545,6 +545,15 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         int to = -1;
         if (go) {
             c->act = c->focus;
+            if (field && (f->flags & STOP_MODAL)) {
+                // Enter in a dialog's field is its last button, where it has one
+                for (int i = n - 1; i >= 0; i--) {
+                    if (v[i].flags & STOP_DLG_BTN) {
+                        c->act = v[i].id;
+                        break;
+                    }
+                }
+            }
             c->tap_x = c->tap_y = INT16_MIN;
         } else if (tab) {
             to = step_order(v, n, fi, (in[MOY_UI_IN_MODS] & MOY_UI_MOD_SHIFT) != 0);
@@ -915,7 +924,9 @@ static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_
     if (c->modal && !dlg) {
         return 0;                   // under a dialog: drawn, and no input reaches it
     }
-    if (c->focus == 0 && !c->elsewhere) {
+    // focus free takes the first stop drawn -- in a dialog its body's, not
+    // a button its card draws first
+    if (c->focus == 0 && !c->elsewhere && !(flags & STOP_DLG_BTN)) {
         c->focus = id;
         c->focus_name[0] = 0;
     }
@@ -1080,6 +1091,7 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
         // the Python face's text options: lines wrapped, centred, a tone, a role
         int lines = c->txt_lines, centre = c->txt_centre == 1, tone = c->txt_tone;
         int role = c->txt_role >= 0 ? c->txt_role : MOY_UI_FONT_UI;
+        int sunk = c->txt_centre == 3 ? (c->cls ? 10 : 8) * c->fs : 0;
         int pad = c->txt_centre == 2
                       ? (kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET)
                          + kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD)) * c->fs
@@ -1091,8 +1103,31 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
             m.x = (int16_t)(m.x + pad);
             m.w = (int16_t)(m.w - 2 * pad);
         }
+        moy_ui_box_t well = m;
+        if (sunk) {
+            // the inset across the row, its text `sunk` pixels inside it
+            m.x = (int16_t)(m.x + sunk);
+            m.w = (int16_t)(m.w - 2 * sunk);
+        }
         int h = moy_ui_text_block(s, m, text, role, tone, lines, centre, c->icon_slot,
                                   c->icon_glyph, c->fs, ground_of(c), 0);
+        if (sunk) {
+            int hb = h + 2 * sunk - (c->cls ? 0 : 2 * c->fs);
+            moy_ui_box_t b = place(c, hb, &stacked);
+            well.y = b.y;
+            well.h = (int16_t)hb;
+            clip_t k;
+            if (clip_row(&k, s, well, stacked, c->page)) {
+                moy_ui_well(s, well, 0, moy_ui_token(s->look, MOY_UI_T_SUNK), c->fs,
+                            ground_of(c));
+                m.y = (int16_t)(b.y + sunk - (c->cls ? 0 : c->fs));
+                m.h = (int16_t)h;
+                moy_ui_text_block(s, m, text, role, tone, lines, centre, c->row_slot,
+                                  c->row_glyph, c->fs, ground_of(c), 1);
+                clip_out(&k);
+            }
+            return;
+        }
         int one = lines <= 1 && !c->has_at && h < row_h(c);
         moy_ui_box_t b = place(c, one ? row_h(c) : h, &stacked);
         b.x = m.x;
@@ -1983,7 +2018,12 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     // in a group the field fits the row (moy_ui_field); elsewhere the row
     // grows to hold the field and its ring
     int h = row_h(c), fh = c->grp_open ? h : moy_ui_field_h(s, c->fs, c->cls);
-    moy_ui_box_t b = place(c, fh > h ? fh : h, &stacked);
+    // in a dialog's body a field is captioned: its label over it, the field
+    // across the body
+    int caph = label.n && !c->grp_open && c->n_nest && c->nest[c->n_nest - 1].kind == 2
+                  ? kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_CAPTION + (c->cls ? 1 : 0)) * c->fs
+                  : 0;
+    moy_ui_box_t b = place(c, caph + (fh > h ? fh : h), &stacked);
     int disabled = o->disabled == 1;
     int st = disabled ? 0 : stop(c, id_of(o, label), b, STOP_FIELD, name_of(o, label));
     if (st < 0) {
@@ -2012,7 +2052,18 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         int f = mark_flags(st, o) & ~MOY_UI_F_ON;
         band(c, s, b, stacked, f);
         moy_ui_span_t t = {buf, (uint16_t)len};
-        moy_ui_field(s, b, label, t, o->hint, f | (disabled ? MOY_UI_F_DISABLED : 0), c->fs,
+        moy_ui_box_t fb = b;
+        if (caph) {
+            // the caption's letters over the field's left edge
+            int gp = kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD) * c->fs;
+            int fp = c->cls ? gp : kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
+            moy_ui_caption(s, (moy_ui_box_t){(int16_t)(b.x + fp - gp), b.y, b.w, (int16_t)caph},
+                           label, c->fs, c->cls);
+            fb.y = (int16_t)(b.y + caph);
+            fb.h = (int16_t)(b.h - caph);
+            label.n = 0;
+        }
+        moy_ui_field(s, fb, label, t, o->hint, f | (disabled ? MOY_UI_F_DISABLED : 0), c->fs,
                      c->cls, c->grp_open, c->grp_open && c->grp_first);
         clip_out(&k);
     }
@@ -2060,7 +2111,8 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         c->owe = 1;                     // its first frame: focus opens in it on the next
     }
     int pad = moy_ui_modal_band(fs, c->cls);
-    int foot = rh + 2 * pad;
+    int nb = moy_ui_fields(buttons, len);
+    int foot = nb ? rh + 2 * pad : pad;     // no buttons: the keys are the hint strip's
     int top = pad + rh + pad / 2;
     moy_ui_box_t sf = c->surface;
     int w = pmetric(c, MOY_UI_M_VALUE_ROW_MODAL);
@@ -2085,7 +2137,6 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     c->dlg_id = id;
     c->dlg_card = card;
     // the buttons at its foot, right-aligned, recorded left to right
-    int nb = moy_ui_fields(buttons, len);
     int gap = 8 * fs, bpad = (c->cls ? 16 : 12) * fs, minw = (c->cls ? 72 : 56) * fs;
     int bw[8];
     int total = 0;
@@ -2422,7 +2473,7 @@ void moy_ui_api_menu_danger(moy_ui_ctx_t *c, uint32_t rows) {
 
 void moy_ui_api_text(moy_ui_ctx_t *c, int lines, int centre, int tone, int role) {
     c->txt_lines = (int8_t)(lines < 0 ? 0 : lines > 16 ? 16 : lines);
-    c->txt_centre = (int8_t)(centre == 2 ? 2 : centre != 0);
+    c->txt_centre = (int8_t)(centre == 2 || centre == 3 ? centre : centre != 0);
     c->txt_tone = (int8_t)(tone < 0 || tone > MOY_UI_TONE_DANGER ? 0 : tone);
     c->txt_role = (int8_t)(role < 0 || role > MOY_UI_FONT_RESULT ? -1 : role);
 }
@@ -2463,8 +2514,45 @@ int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon
     return b.y + h;
 }
 
+int moy_ui_api_month(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
+                     moy_ui_span_t days, int first, int n, int today) {
+    int weeks = (first + n + 6) / 7;
+    int h = moy_ui_month_h(weeks, c->fs, c->cls);
+    int stacked;
+    moy_ui_box_t b;
+    if (c->has_at) {
+        b = c->at;
+        c->has_at = 0;
+        stacked = 0;
+    } else {
+        group_close(c, s);
+        b = place(c, h, &stacked);
+        int pad = kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
+        b.x = (int16_t)(b.x + pad);
+        b.w = (int16_t)(b.w - 2 * pad);
+    }
+    int chevrons = c->cls || moy_ui_input() == MOY_UI_INPUT_TOUCH;
+    moy_ui_box_t ch[2] = {{0, 0, 0, 0}, {0, 0, 0, 0}};
+    clip_t k;
+    if (clip_row(&k, s, b, stacked, c->page)) {
+        moy_ui_month(s, b, title, days, first, n, today, chevrons, c->fs, c->cls, ch);
+        clip_out(&k);
+    }
+    // a press on a chevron pages the month
+    int p = c->in[MOY_UI_IN_PTR];
+    if (chevrons && (p & MOY_UI_P_LIVE) && (p & MOY_UI_P_EDGE)) {
+        int x = c->in[MOY_UI_IN_X], y = c->in[MOY_UI_IN_Y];
+        for (int i = 0; i < 2; i++) {
+            if (inside(ch[i], x, y)) {
+                return i ? 1 : -1;
+            }
+        }
+    }
+    return 0;
+}
+
 void moy_ui_api_toast(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t text,
-                      moy_ui_span_t kind) {
+                      moy_ui_span_t kind, int flat, int32_t out[4]) {
     moy_ui_box_t m = c->page;
     if (c->has_at) {
         m = c->at;
@@ -2476,7 +2564,14 @@ void moy_ui_api_toast(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     static const uint8_t check[] = "check";
     moy_ui_span_t ic = kind.n ? kind : (moy_ui_span_t){check, 5};
     int slot = moy_ui_icon_slot(ic.p, ic.n), glyph = moy_ui_icon_glyph(ic.p, ic.n);
-    moy_ui_toast(s, m, text, slot, glyph, c->fs, ground_of(c), NULL);
+    moy_ui_box_t p = {0, 0, 0, 0};
+    moy_ui_toast(s, m, text, slot, glyph, c->fs, ground_of(c), flat, &p);
+    if (out != NULL) {
+        out[0] = p.x;
+        out[1] = p.y;
+        out[2] = p.w;
+        out[3] = p.h;
+    }
 }
 
 // -- card grids ----------------------------------------------------------------------

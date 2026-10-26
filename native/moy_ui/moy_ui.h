@@ -854,9 +854,33 @@ int moy_ui_empty(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, mo
                  const uint8_t *lines, size_t n, int fs, int desk, int draw);
 // A toast (ui.toast): a pill in the ink's colour holding icon `slot` (else
 // `glyph`) and `text` in the ground's colour, centred across b with its
-// foot on b's foot. Its box in *out.
+// foot on b's foot; `flat` draws no soft shadow under it (a pill painted
+// once, or over a running game). Its box in *out.
 int moy_ui_toast(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t text, int slot, int glyph,
-                 int fs, int desk, moy_ui_box_t *out);
+                 int fs, int desk, int flat, moy_ui_box_t *out);
+// The perf HUD (GAPS 54), flat: the fps chip, a pill in the surface's
+// polarity with `fps` in the code face's digits and `words`' sixth ("fps"),
+// its bottom right at (right, bottom); with `detail` the breakdown's card
+// over it -- `words`' first ("Frame") and `frame` (tenths of a ms) over a
+// bar of the parts against a 33.3 ms frame, then a row a part, `parts`
+// (draw, flush, logic, idle in tenths of a ms) named by `words`' second to
+// fifth, the first three each a hue (Contrast's the ink solid, hatched and
+// an outline). `words` is NUL-separated, its seventh "ms". The box both
+// cover in *out; nothing drawn unless `draw`.
+int moy_ui_perf(const moy_ui_sink_t *s, int right, int bottom, int fps, const int16_t *parts,
+                int frame, int detail, moy_ui_span_t words, int fs, int desk, int draw,
+                moy_ui_box_t *out);
+// A month (ui.month) from box b's top: `title` in the title role, the
+// weekdays' initials `days` (seven letters) in the caption role's dim ink,
+// then the `n` days in seven columns from column `first` (0 Monday), the
+// weekend's in the dim ink and day `today` (0 none) bold on a disc of
+// `value`. With `chevrons` the head's right holds the previous and the next
+// month's chevrons, their boxes in chev[2]. moy_ui_month_h is its height
+// for `weeks` rows.
+int moy_ui_month_h(int weeks, int fs, int desk);
+int moy_ui_month(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title,
+                 moy_ui_span_t days, int first, int n, int today, int chevrons, int fs, int desk,
+                 moy_ui_box_t chev[2]);
 // A text field row (ui.field): its label, then the field to the row's right
 // showing the text's tail and, focused (F_FOCUS), the caret. On a group's
 // card (`card`) the label sits where a value row's does and the field is the
@@ -872,8 +896,12 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
 // the field fits the stacked row instead, two pixels at the scale clear of
 // the rules over and under it.
 int moy_ui_field_h(const moy_ui_sink_t *s, int fs, int desk);
-// A modal card (ui.dialog) in box b: its shadow under a depth, the card and
-// its title in the `title_h` rows under the card's padding; the padding.
+// A modal card (ui.dialog, ui.popover, the system's cards) in box b, flat:
+// a hard drop MOY_UI_DROP pixels at the scale under it in an opaque shade of
+// the ground (no soft shadow, no alpha), the surface and its edge
+// (Contrast's: the ink's ring two pixels at the scale, no drop); then its
+// title in the `title_h` rows under the card's padding.
+#define MOY_UI_DROP 2
 int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs, int desk,
                  int title_h);
 int moy_ui_modal_band(int fs, int desk);

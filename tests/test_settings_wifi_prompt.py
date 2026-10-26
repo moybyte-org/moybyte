@@ -85,24 +85,12 @@ def test_esc_cancels_the_prompt_back_to_the_list(tmp_path):
 
 
 def _buttons(ws, sl):
-    """The dialog's buttons under its field, found in its pixels: the row
-    their top edges run along, and each button's (x0, x1) on it."""
-    px = _px(ws)
-    fx, fy, fw, fh = sl._sub.box("password")
-    card = px(fx + fw - 1, fy + fh // 2)
-    for y in range(fy + fh, ws.sys_canvas.h):
-        runs, x = [], fx
-        while x < fx + fw:
-            if px(x, y) != card:
-                s = x
-                while x < fx + fw and px(x, y) != card:
-                    x += 1
-                if x - s >= 30:
-                    runs.append((s, x))
-            x += 1
-        if runs:
-            return y, runs
-    return None, []
+    """The dialog's buttons under its field, where the engine drew them: the
+    row their tops run along, and each button's (x0, x1) on it."""
+    boxes = [sl._sub.box(n) for n in ("Cancel", "Connect")]
+    if None in boxes:
+        return None, []
+    return boxes[0][1], [(x, x + w) for x, _y, w, _h in boxes]
 
 
 @pytest.mark.parametrize("theme", _FIVE, ids=lambda t: "-".join(t))
@@ -116,8 +104,9 @@ def test_the_prompts_field_and_buttons_draw_apart_and_outlined(tmp_path, theme):
     assert runs[1][0] - runs[0][1] >= 4, "the buttons stand apart"
     assert top >= fy + fh + 8, "8 px or more between the field's row and the buttons"
     # the field's outline, found from its right end inwards, clears the
-    # dialog's card under it 3:1
-    mid = fy + fh // 2
+    # dialog's card under it 3:1 (the field under its caption, the stop's
+    # lower part)
+    mid = fy + fh * 3 // 4
     card = px(fx + fw - 1, mid)
     ring = next(px(x, mid) for x in range(fx + fw - 1, fx, -1) if px(x, mid) != card)
     assert _ratio(ring, card) >= 3.0, "the field's outline %.2f:1" % _ratio(ring, card)

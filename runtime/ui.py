@@ -211,7 +211,7 @@ def page(title, o=None):
 
 
 _TONES = ("ink", "dim", "value", "danger")
-_FACES = ("ui", "title", "mono", "caption")
+_FACES = ("ui", "title", "mono", "caption", "key", "op", "result")
 
 
 def _tone(o):
@@ -223,17 +223,20 @@ def label(text, o=None):
     """A row of text; no stop. `o`'s `wrap` breaks it at word breaks in the
     row's width, at most `lines` lines (16 where it names none) with an
     ellipsis after the last; `align` "center" centres each line; `tone`
-    ("dim", "value", "danger") inks it; `face` ("title", "caption") sets it
-    in another type role; `inset` stands it in from the page's edges as a
-    group's caption is. Such a label is as tall as its lines. (The board's
+    ("dim", "value", "danger") inks it; `face` ("title", "caption", "mono",
+    "result" -- Calc's display, the largest) sets it in another type role; `inset` stands it in from the page's edges as a
+    group's caption is; `sunk` sets it on a `sunk` inset across the row (a
+    stopped run's error, in the "mono" face). Such a label is as tall as its
+    lines. (The board's
     and the browser's module read these from the dict itself: modmoy_ui.c's
     label_text.)"""
     t = _T
     if o and not _OVER_DICT and ("wrap" in o or "align" in o or "tone" in o or "face" in o
-                                 or "inset" in o):
+                                 or "inset" in o or "sunk" in o):
         lines = (o.get("lines") or 16) if o.get("wrap") else 0
         f = o.get("face")
-        _C.api_text(t[0], lines, 1 if o.get("align") == "center" else 2 if o.get("inset") else 0,
+        _C.api_text(t[0], lines, 1 if o.get("align") == "center" else 3 if o.get("sunk")
+                    else 2 if o.get("inset") else 0,
                     _tone(o), _FACES.index(f) if f in _FACES else -1)
     _C.api_label(t[0], t[1], t[2], text, _over(o))
 
@@ -609,12 +612,53 @@ def empty(icon, title, lines=()):
     return _C.api_empty(t[0], t[1], t[2], icon, title, _opts(lines))
 
 
-def toast(text, kind="check"):
+MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+          "September", "October", "November", "December")
+_MDAYS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+_DOW = (0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
+
+
+def weekday(y, m, d):
+    """0 for Monday .. 6 for Sunday (Sakamoto's rule: no datetime on a board)."""
+    if m < 3:
+        y -= 1
+    return (y + y // 4 - y // 100 + y // 400 + _DOW[m - 1] + d + 6) % 7
+
+
+def month_days(y, m):
+    """The days month `m` of year `y` has."""
+    if m == 2 and y % 4 == 0 and (y % 100 != 0 or y % 400 == 0):
+        return 29
+    return _MDAYS[m - 1]
+
+
+def month_h(year, mon, fs=1, desk=False):
+    """The height `month(year, mon)` takes at font scale `fs` in the desk's
+    class or the handheld's."""
+    return _C.month_h((weekday(year, mon, 1) + month_days(year, mon) + 6) // 7, fs,
+                      1 if desk else 0)
+
+
+def month(year, mon, today=0):
+    """A month's calendar in `at`'s rect, else stacked on the page: its
+    name and year in the title face, the weekdays' initials, its days in
+    seven columns from Monday, the weekend's dim and day `today` (0 none)
+    bold on a disc of `value`. On the desk and under touch its head holds
+    the previous and next month's chevrons: -1 or 1 the frame one is
+    pressed, else 0."""
+    t = _T
+    return _C.api_month(t[0], t[1], t[2], "%s %d" % (MONTHS[mon - 1], year), "MTWTFSS",
+                        weekday(year, mon, 1), month_days(year, mon), today)
+
+
+def toast(text, kind="check", o=None):
     """A toast over the foot of `at`'s rect (else the page's): a pill with
     icon `kind` and `text`, a passing message. The app draws it each frame
-    for as long as it shows (two seconds, or until the next key)."""
+    for as long as it shows (two seconds, or until the next key). `o`'s
+    `flat` draws it with no soft shadow, as a pill painted once or over a
+    running game is. The pill's rect (x, y, w, h)."""
     t = _T
-    _C.api_toast(t[0], t[1], t[2], text, kind)
+    return _C.api_toast(t[0], t[1], t[2], text, kind, bool(o and o.get("flat")))
 
 
 def tile(x, y, w, h, icon, o=None):
