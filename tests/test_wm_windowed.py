@@ -4208,8 +4208,12 @@ def _drag_over(tmp_path, theme, under):
         ring.frame(drv)
         shots.append(ring.bufs[(ring.k - 1) % ring.n])
     drv.touch_up()
+    held = drew["skipped"]
     shots += [b for _ in ring.settle(drv) for b in [ring.bufs[(ring.k - 1) % ring.n]]]
-    return shots, drew["skipped"]
+    drew["after"] = drew["skipped"] - held
+    if under:
+        assert list(ring.bufs) == list(ring.full(drv)), "the release's buffers"
+    return shots, drew
 
 
 @pytest.mark.parametrize("theme", [None, "blocks"], ids=["shipped", "blocks"])
@@ -4218,8 +4222,11 @@ def test_a_drag_over_windows_draws_them_only_where_the_desk_was_laid(tmp_path, t
     gesture whole leaves -- shadows, fringes and casts included -- while the
     windows under it draw only where the restore laid the desk."""
     ref, _ = _drag_over(tmp_path / "ref", theme, False)
-    got, skipped = _drag_over(tmp_path / "got", theme, True)
+    got, drew = _drag_over(tmp_path / "got", theme, True)
     assert len(ref) == len(got)
     for i, (a, b) in enumerate(zip(ref, got)):
         assert a == b, (i, _bbox(_differ(a, b), 1024))
-    assert skipped >= 10
+    assert drew["skipped"] >= 10
+    # the frames after the release are drag frames that do not move: the
+    # windows under it draw where the restore laid the desk, in every buffer
+    assert drew["after"] >= 2 * 3

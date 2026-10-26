@@ -514,6 +514,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # the kid has since resized is never re-sized under them.
         self._play_intent = "play"
         self._drag = None             # (kind, grab_dx, grab_dy) while dragging
+        self._rest = None             # a released drag's tuple, and the painted
+        self._rest_end = 0            # frame it ends before (`_gesture`)
         self._grab = 0                # the last press was the WM's: 1 while it
                                       # is held, 2 once released; no content
                                       # has had it (_content_static)
@@ -836,6 +838,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._order = []
         self._focus = None
         self._drag = self._drag_armed = self._resize = None
+        self._rest = None
         self._grab = 0
         self._held_in = None
         self._content_gesture = False
@@ -2460,7 +2463,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         larger OR smaller -- max covers the no-live-resize outline mode too), its
         border and the 3px drop shadow, padded a couple px for safety. None when
         no gesture is in flight."""
-        g = self._drag if self._drag is not None else self._resize
+        g = self._gesture()
         if g is None:
             return None
         win = self._wins.get(g[0])
@@ -2476,6 +2479,19 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             x, y = min(x, rx), min(y, ry)
             w, h = x1 - x, y1 - y
         return self._pad_extent(win, x, y, w, h)
+
+    def _gesture(self):
+        """The gesture the desk's restore follows: a drag or a resize in
+        flight, else a released drag for the RETAINED_FRAMES painted frames
+        after its release (`_rest`), which bring each buffer to the window
+        where it came to rest as a drag frame that did not move would."""
+        if self._drag is not None:
+            return self._drag
+        if self._resize is not None:
+            return self._resize
+        if self._rest is not None and self.ws._frames_drawn >= self._rest_end:
+            self._rest = None
+        return self._rest
 
     def _seed_gesture_hist(self):
         """Prime the damage history at gesture START: every physical buffer
@@ -2539,7 +2555,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # window size. Decomposed as up to 4 strips (top/bottom/left/right of the
         # union minus the body); the resize body is the rubber rect (live-body
         # covers it opaquely too).
-        g = self._drag if self._drag is not None else self._resize
+        g = self._gesture()
         win = self._wins.get(g[0]) if g is not None else None
         bx0 = by0 = bx1 = by1 = 0
         if win is not None:
@@ -3142,7 +3158,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         r = self._restored
         if not r or self._restored_f != self.ws._frames_drawn or win is top:
             return None
-        g = self._drag if self._drag is not None else self._resize
+        g = self._gesture()
         if g is None or self._wins.get(g[0]) is not top:
             return None
         if (focused or win.kind == "desktop" or win.saved is not None or win.buf is None
@@ -3858,6 +3874,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 # this line alone fixes it; also forcing _full_debt (the first
                 # attempt) measured as no difference at all and was dropped.
                 self._desk_streak = 0
+                if win is not None and self._gesture_hist:
+                    self._rest = (kind, gdx, gdy)
+                    self._rest_end = ws._frames_drawn + self._retained_n()
             else:
                 self._move_window(win, px - gdx, py - gdy)
                 return True

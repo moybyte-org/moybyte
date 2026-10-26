@@ -145,6 +145,7 @@ class _BackdropLayer(Layer):
             wm._desk_painted = True           # wiped the buffer -> windows repaint
             if wm._gesture_hist and not gesture:
                 wm._gesture_hist = []         # gesture over: drop the damage trail
+            wm._rest = None                   # a live desk lays every buffer whole
             self._draw_desktop(dt)
             wm._capture_backdrop()
             wm._draw_unders()
@@ -194,6 +195,7 @@ class _BackdropLayer(Layer):
             return
         wm._desk_streak = 0
         wm._desk_painted = True
+        wm._rest = None
         self._draw_desktop(dt)                # cache lost: render + re-snapshot
         wm._capture_backdrop()
         wm._draw_unders()
