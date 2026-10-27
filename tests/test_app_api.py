@@ -138,6 +138,9 @@ class _Key:
         self.name = name
         self.last_key = typed
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         return n == self.name
 

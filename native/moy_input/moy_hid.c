@@ -296,6 +296,7 @@ static void clear_reports(moy_hid_t *h) {
     MOY_DRV_UNLOCK(&h->lock);
     moy_input_release(h->table, h->src);
     moy_input_set_key(h->table, h->src, 0);
+    moy_input_set_typing(h->table, h->src, 0);
 }
 
 static void reset_connection(moy_hid_t *h) {
@@ -1009,6 +1010,7 @@ void moy_hid_frame(moy_hid_t *h) {
     moy_input_set_mods(h->table, h->src, mods_of(level));
     moy_input_set_mask(h->table, h->src, buttons & ((1u << moy_input_nbuttons(h->table)) - 1u));
     moy_input_set_key(h->table, h->src, key);
+    moy_input_set_typing(h->table, h->src, key);    // the held key repeats as typing
     h->level_idle = !any && !mods && !tap;
 }
 

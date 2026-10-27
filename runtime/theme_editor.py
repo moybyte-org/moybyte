@@ -1274,8 +1274,8 @@ class SpritesLayer:
         if i.pressed("b"):
             ws.defer(app.close_theme)
             return True
-        dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
-        dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
+        dx = i.steps("right") - i.steps("left")
+        dy = i.steps("down") - i.steps("up")
         if dx or dy:
             doc.cur[0] = max(0, min(15, doc.cur[0] + dx))
             doc.cur[1] = max(0, min(15, doc.cur[1] + dy))

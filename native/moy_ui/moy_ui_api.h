@@ -43,12 +43,20 @@
 // scrolls across, so Shift's wheel, which turns it across, scrolls none.
 // Then the loop's tick in ms, the clock the scrolling nests' motion runs on
 // (moy_ui.h's moy_ui_scroll_t): the host's injected dt, never a clock read;
-// 0, no clock, lands every glide at once and flings nothing.
+// 0, no clock, lands every glide at once and flings nothing. Then the
+// steps this frame beyond the press edges (a held key's repeats, the
+// trackball's steps; moy_input_rep_word): four 8-bit counts, left, right <<
+// 8, up << 16, down << 24, each a step as a press of its direction is; and a
+// held key's typing repeats: the byte in the low 16 bits and the count above
+// (MOY_UI_KEYREP). A repeat is a step, never a press: nothing activates,
+// opens or commits on one.
 enum {
     MOY_UI_IN_BTN = 0, MOY_UI_IN_BTNP, MOY_UI_IN_X, MOY_UI_IN_Y, MOY_UI_IN_PTR, MOY_UI_IN_KEY,
-    MOY_UI_IN_MODS, MOY_UI_IN_WHEEL_X, MOY_UI_IN_WHEEL_Y, MOY_UI_IN_DT,
+    MOY_UI_IN_MODS, MOY_UI_IN_WHEEL_X, MOY_UI_IN_WHEEL_Y, MOY_UI_IN_DT, MOY_UI_IN_REP,
+    MOY_UI_IN_KEYREP,
     MOY_UI_IN_LEN
 };
+#define MOY_UI_KEYREP(byte, n) ((int32_t)(byte) | ((int32_t)(n) << 16))
 #define MOY_UI_MOD_SHIFT 2
 #define MOY_UI_WHEEL_ROWS 3
 // MIDDLE: the pointer's middle button is held (a mouse's), which drags the
@@ -147,7 +155,7 @@ typedef struct {
     int16_t tap_x, tap_y;           // where the activating tap was released
     int16_t press_x, press_y, drag_y;
     int16_t last_x, last_y;         // the pointer last frame
-    int8_t step_x, step_y;          // a key the focused stop keeps: -1 or 1
+    int8_t step_x, step_y;          // the steps a key the focused stop keeps makes, signed
     uint8_t keys, reveal, cls, fs;
     uint8_t win;                    // the page lies in a window's body
     uint8_t elsewhere;              // the keys are another surface's: no focus
@@ -200,6 +208,7 @@ typedef struct {
     int8_t dlg_pick;                // the dialog button activated this frame, -1 none
     uint32_t modal_from;            // the focus a dialog took
     int32_t typed;                  // the key a focused field takes this frame, 0 none
+    int32_t typed_n;                // ...and how many times (a held key's repeats)
     // ui.popover's: the card drawn this frame and last (w 0: none), the
     // rect it hangs from, and whether this frame's input dismissed it (a
     // press outside the card drawn last, or Esc).

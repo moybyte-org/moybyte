@@ -2486,21 +2486,21 @@ class LauncherHomeLayer:
             self._button_focus = None
             return False
         k = min(k, len(buttons) - 1)
-        if not any(i.pressed(n) for n in ("left", "right", "up", "down", "a", "run", "b",
-                                          "home")):
+        if not (any(i.steps(n) for n in ("left", "right", "up", "down"))
+                or any(i.pressed(n) for n in ("a", "run", "b", "home"))):
             return False                     # the strip's letters still act
         up, down = self._button_rows_apart(buttons, k)
-        if i.pressed("left"):
+        if i.steps("left"):
             self._button_focus = max(0, k - 1)
-        elif i.pressed("right"):
+        elif i.steps("right"):
             self._button_focus = min(len(buttons) - 1, k + 1)
-        elif i.pressed("up") and up is not None:
+        elif i.steps("up") and up is not None:
             self._button_focus = up
-        elif i.pressed("up"):
+        elif i.steps("up"):
             self._tab_focus = True
-        elif i.pressed("down") and down is not None:
+        elif i.steps("down") and down is not None:
             self._button_focus = down
-        elif i.pressed("down") or (i.pressed("b") and ws.ach_ui._konami_pos == 0):
+        elif i.steps("down") or (i.pressed("b") and ws.ach_ui._konami_pos == 0):
             self._button_focus = None
         elif i.pressed("a") or i.pressed("run"):
             v = buttons[k][0]
@@ -3623,9 +3623,9 @@ class LauncherHomeLayer:
             # The tab row (up from the carousel): left and right move the
             # focus along it (`_tab_step`), confirm opens the tab it is on
             # and takes the keys to its cards, down returns to them.
-            if i.pressed("left"):
+            if i.steps("left"):
                 self._tab_step(-1)
-            elif i.pressed("right"):
+            elif i.steps("right"):
                 self._tab_step(1)
             if i.pressed("a") or i.pressed("run"):
                 at = self.focused_tab()
@@ -3633,7 +3633,7 @@ class LauncherHomeLayer:
                 if at != self.grid.tab:
                     ws.set_home_tab(at, self.grid)
                 ws.mark_dirty()
-            elif i.pressed("down"):
+            elif i.steps("down"):
                 self._tab_focus = False
                 ws.mark_dirty()
             if i.pressed("b") and ws.ach_ui._konami_pos == 0:
@@ -3662,22 +3662,24 @@ class LauncherHomeLayer:
             else:
                 grid.nav2d(wx, wy)
             ws.mark_dirty()
-        if i.pressed("left"):
-            grid.nav2d(-1, 0)
+        # a step is a cell (a card on the carousel): a frame's steps, a held
+        # key's repeats and a roll's, move as many
+        dx = i.steps("right") - i.steps("left")
+        if dx:
+            grid.nav2d(dx, 0)
             ws.mark_dirty()
-        if i.pressed("right"):
-            grid.nav2d(1, 0)
-            ws.mark_dirty()
-        if i.pressed("up"):
+        up = i.steps("up")
+        if up:
             if self._desk_buttons():
                 self._button_focus = 0
             elif self._carousel() or self._grid_top_row():
                 self._tab_focus = True
             else:
-                grid.nav2d(0, -1)
+                grid.nav2d(0, -up)
             ws.mark_dirty()
-        if i.pressed("down") and not self._carousel():
-            grid.nav2d(0, 1)
+        down = i.steps("down")
+        if down and not self._carousel():
+            grid.nav2d(0, down)
             ws.mark_dirty()
         if i.pressed("a") or i.pressed("run"):
             # #184: DEFERRED -- the cart start runs behind the next painted

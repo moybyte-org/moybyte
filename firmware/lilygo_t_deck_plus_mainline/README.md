@@ -767,7 +767,10 @@ Every one of these was learned by hanging or bricking a board.
   key its symbol and Shift a letter its capital. A game reads the held key
   and its buttons (true hold-to-move); a text surface (`input.text_mode`)
   gets each key's press edge as one typed byte, as the ASCII mode types,
-  with no letter a button; and every surface sees Mic, the console's key,
+  with no letter a button, and the key typed last, while it is down, as its
+  source's typing level, which the input table repeats for the console's
+  text surfaces (`moy_input.h` REPEAT; a cart's `key()` never sees a
+  repeat); and every surface sees Mic, the console's key,
   which is why a text surface reads the matrix too (a field's Cancel is
   Mic, owner call 2026-10-18, `docs/ui_api_2026-10.md`). The home takes its
   verb letters (C, N, Y, X, F) and Search's `/` (Sym+G, the symbol printed

@@ -84,6 +84,7 @@ typedef struct {
     uint32_t stat_n, stat_max_us, stat_over5, stat_over20, stat_timeouts;
     bool stat_max_raw;
     bool raw_text;              // the matrix serves a text surface: it types press edges
+    int16_t typing;             // the RAW_KEYS entry typed last, while it is down; -1 none
 } moy_kbd_t;
 
 // The buttons a typed byte fires (an upper-case letter fires its lower case's).

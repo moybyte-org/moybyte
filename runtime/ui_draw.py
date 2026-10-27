@@ -1781,9 +1781,13 @@ def bar_or(items):
 
 # The words of a frame's input (moy_ui_api.h's MOY_UI_IN_*): the buttons held
 # and pressed, the pointer's x, y and flags, the key typed, its modifiers,
-# the wheel's steps across and down, and the frame's clock (ui_frame's).
-UI_IN_LEN = 10
+# the wheel's steps across and down, the frame's clock (ui_frame's), the
+# directions' steps beyond their presses (the input table's `rep_word`) and
+# a held key's typing repeats (its byte | count << 16).
+UI_IN_LEN = 12
 _IN_DT = 9
+_IN_REP = 10
+_IN_KEYREP = 11
 _P_MIDDLE = 8                           # MOY_UI_P_MIDDLE: the middle button held
 _PB_MIDDLE = 2                          # moy_input's PB_MIDDLE
 
@@ -1846,8 +1850,12 @@ class AppHost:
         a[6] = getattr(i, "mods", 0) or 0
         a[7] = getattr(i, "wheel_x", 0)
         a[8] = getattr(i, "wheel_y", 0)
+        rw = getattr(i, "rep_word", 0)
+        a[_IN_REP] = rw - 0x100000000 if rw >> 31 else rw    # a small-int test: no bigint
+        kn = getattr(i, "key_repeats", 0)
+        a[_IN_KEYREP] = (i.repeat_key & 0xFFFF) | kn << 16 if kn else 0
         mid = bool(getattr(i, "pointer_buttons", 0) & _PB_MIDDLE)
-        moved = mid or mid != self.mid or a[7] or a[8]
+        moved = mid or mid != self.mid or a[7] or a[8] or rw or kn
         self.mid = mid
         return (bool(b) or typed or self.owed or self.tap != 0 or bool(moved)
                 or _C.api_owes(self.ctx) or _C.api_moving(self.ctx))

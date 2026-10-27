@@ -167,14 +167,15 @@ overridable per board in its board.toml.
 
 A held button repeats in `moy_input`'s merge (`moy_input_begin_frame`,
 `native/moy_input/moy_input.h`), per source and per button, on a clock the
-caller passes in -- `begin_frame(t, now_ms)`; it takes no time today -- so
+caller passes in -- `begin_frame(t, now_ms)`, 0 for none -- so
 the count is against time, not the frame: after `REPEAT_DELAY_MS` of level,
 one repeat every `REPEAT_RATE_MS`, and a frame that took two periods owes
 two. The table exposes the count: `moy_input_repeats(button)` this frame
 (the binding's `repeats(name)`), and `steps(name)` = pressed edge +
 repeats. `btnp` stays an edge (a cart's `btnp` is unchanged, L9; a game that
-wants repeat has `btn`), and `moy_input_disarm` (a modal opening on a key)
-zeroes repeats with the edges.
+wants repeat has `btn`), and `moy_input_clear_edges` (a modal opening on a
+key) zeroes the repeats with the edges and starts each held key's delay
+over.
 
 Typed keys repeat from a level the table keeps for that purpose. A source's
 `key` is a level a BLE keyboard holds; the T-Deck in text mode types
@@ -191,12 +192,11 @@ new input words, `MOY_UI_IN_REP` (four 8-bit direction counts) and
 frame, so the one-shot queue's zero frame between equal keys does not cap
 the rate.
 
-**One repeat, from one place.** The browser's page sends the OS's
-autorepeat today (`page_core.html` forwards a repeating keydown for codes
-under 256) and the host's pygame path sends none, so the two tiers already
-differ; the page drops `e.repeat` for every code and the table repeats on
-every tier alike. The host's arrows are spent as a trackball pan each frame
-(`host_api.py`) and take §2.3's path.
+**One repeat, from one place.** The browser's page sends a key's down
+once, whatever the OS repeats (`e.repeat` dropped for every code); the
+host's and the browser's keyboards both reach `ConsoleDriver.key_down` and
+`key_up`, which hold the key's typing level, and the table repeats on every
+tier alike, on the frames' injected clock.
 
 Where the level is not known the lever is `None`: the T-Deck keyboard in
 its ASCII fallback (an older keyboard firmware) types edges with no matrix,
@@ -209,22 +209,23 @@ handling takes `go` and `tab` from the edge word only.
 
 ### 2.3 The trackball
 
-A pulse is a step at the input layer (`Console.ball`, `BALL_STEP`). Today
-the steps reach a surface as presses on the "ball" source, one per frame
-with a frame up between two, through a queue of `BALL_QUEUE` 3 that drops
-the rest (13 of 30 on the grid). Steps are delivered instead as a **count
-in the `MOY_UI_IN_REP` word** (and `steps(name)` for the Python layers),
-every pulse's step in the frame it arrived: no queue, no per-frame cap, so
-30 of 30 reach the surface. The glide absorbs them -- the target moves n
+A pulse is a step at the input layer (`Console.ball`, `BALL_STEP`). The
+steps are delivered as a **count in the `MOY_UI_IN_REP` word** (the table's
+`add_steps`, read as `steps(name)` by the Python layers), every pulse's step
+in the frame it arrived: no queue and no per-frame cap, so every step a roll
+makes reaches the surface (what a fast roll delivers is in #66). The glide absorbs them -- the target moves n
 steps and the view eases to it -- so the lag is bounded by construction:
 the view is always one glide (a few `GLIDE_HALF_MS`) behind the newest
 target, never a queue's length behind. A caret takes the count as lines
 (`nav`) as today.
 
 `BALL_COAST` is the parameter the owner tries by hand after the motion
-phase: steps a roll delivers above `BALL_COAST_RATE` per second become
-velocity (px/ms per surplus step) on the surface's scroll state instead of
-target steps; 0 is no momentum, the default.
+phase (a board's board.toml `[input] ball_coast`): steps a roll delivers
+above `BALL_COAST_RATE` per second become a coast instead of steps,
+`BALL_COAST` thousandths of a step a ms per surplus step, delivered on as
+steps that decay with the fling's friction -- so every surface that takes
+steps coasts, a focus-driven list as well as a page; 0 is no momentum, the
+default.
 
 ### 2.4 Who takes it, from one place
 

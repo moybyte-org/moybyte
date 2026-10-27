@@ -1678,17 +1678,17 @@ class BarLayer:
             self.focus_leave()
             return False
         split = self._tabs_split(where, items)
-        if i.pressed("left"):
+        if i.steps("left"):
             if split is not None and self.focus == split:
                 self._to_tabs(-1)
             else:
                 self._focus_on(items, self.focus - 1)
-        elif i.pressed("right"):
+        elif i.steps("right"):
             if split is not None and self.focus == split - 1:
                 self._to_tabs(1)
             else:
                 self._focus_on(items, self.focus + 1)
-        elif i.pressed("down") or i.pressed("b") or i.pressed("stop"):
+        elif i.steps("down") or i.pressed("b") or i.pressed("stop"):
             self.focus_leave()
         elif i.pressed("a") or i.pressed("run"):
             bi, r, _name = items[max(0, min(len(items) - 1, self.focus))]
@@ -1715,7 +1715,7 @@ class BarLayer:
                     if abs(q[0] + q[2] // 2 - mid) < abs(items[k][1][0] + items[k][1][2] // 2 - mid):
                         k = j
                 self._focus_on(items, k)
-        elif not i.pressed("up"):
+        elif not i.steps("up"):
             return False
         return True
 

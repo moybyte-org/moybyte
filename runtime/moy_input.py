@@ -139,7 +139,16 @@ _SIGS = (
     ("moy_input_key", [_P, _U32, _I32], _I),
     ("moy_input_source_key", [_P, _U32, ctypes.POINTER(_I32)], _I),
     ("moy_input_source_held", [_P, _U32], _U32),
-    ("moy_input_begin_frame", [_P], None),
+    ("moy_input_begin_frame", [_P, _U32], None),
+    ("moy_input_set_repeat", [_P, _I32, _I32], None),
+    ("moy_input_get_repeat", [_P, ctypes.POINTER(_I32), ctypes.POINTER(_I32)], None),
+    ("moy_input_add_steps", [_P, _U8, _U32], _I),
+    ("moy_input_repeats", [_P, _U8], _U32),
+    ("moy_input_rep_word", [_P], _U32),
+    ("moy_input_key_repeats", [_P, ctypes.POINTER(_I32)], _U32),
+    ("moy_input_ball_coast", [ctypes.POINTER(_I32)], _I32),
+    ("moy_input_set_typing", [_P, _U32, _I32], _I),
+    ("moy_input_source_typing", [_P, _U32], _I32),
     ("moy_input_release_all", [_P], None),
     ("moy_input_clear_edges", [_P], None),
     ("moy_input_keep_edges", [_P], None),
@@ -278,6 +287,16 @@ class InputSource:
         _check(_lib().moy_input_set_mods(self.state._t, self.h, int(value) & 0xFF), "mods")
 
     @property
+    def typing(self):
+        return _lib().moy_input_source_typing(self.state._t, self.h)
+
+    @typing.setter
+    def typing(self, value):
+        """The key this source holds down for typing (a key event, 0 none):
+        the table repeats it into `key_repeats`, and no cart reads it."""
+        _check(_lib().moy_input_set_typing(self.state._t, self.h, int(value or 0)), "typing")
+
+    @property
     def pointer_buttons(self):
         return _lib().moy_input_source_pointer_buttons(self.state._t, self.h)
 
@@ -347,8 +366,52 @@ class InputTable:
         return s
 
     # -- the frame -------------------------------------------------------------
-    def begin_frame(self):
-        _lib().moy_input_begin_frame(self._t)
+    def begin_frame(self, now=0):
+        """The merge, on the caller's clock in ms (0: none, so nothing
+        repeats)."""
+        _lib().moy_input_begin_frame(self._t, int(now) & _TICKS_MASK)
+
+    def set_repeat(self, delay_ms, rate_ms):
+        _lib().moy_input_set_repeat(self._t, int(delay_ms), int(rate_ms))
+
+    @property
+    def repeat(self):
+        """(delay, period) of a held button's repeat, in ms."""
+        d, r = _I32(), _I32()
+        _lib().moy_input_get_repeat(self._t, ctypes.byref(d), ctypes.byref(r))
+        return d.value, r.value
+
+    def repeats(self, name):
+        """This frame's repeats of button `name`, and the steps added to it
+        (a count, never an edge: btnp and pressed() do not see it)."""
+        b = _BIT.get(name)
+        return 0 if b is None else _lib().moy_input_repeats(self._t, b)
+
+    def steps(self, name):
+        """The steps `name` makes this frame: its press edge and its repeats."""
+        return int(self.pressed(name)) + self.repeats(name)
+
+    def add_steps(self, name, n):
+        """A producer's `n` steps on `name` this frame (the trackball's)."""
+        if n > 0:
+            _check(_lib().moy_input_add_steps(self._t, self._index(name), int(n)), "add_steps")
+
+    @property
+    def rep_word(self):
+        """The four directions' repeats, a byte each: left, right, up, down."""
+        return _lib().moy_input_rep_word(self._t)
+
+    @property
+    def key_repeats(self):
+        """This frame's repeats of the key held for typing."""
+        return _lib().moy_input_key_repeats(self._t, None)
+
+    @property
+    def repeat_key(self):
+        """The byte those repeats type."""
+        ev = _I32()
+        _lib().moy_input_key_repeats(self._t, ctypes.byref(ev))
+        return _lib().moy_input_typed(ev.value)
 
     def keep_edges(self):
         _lib().moy_input_keep_edges(self._t)
@@ -599,6 +662,14 @@ def trackball():
     return None
 
 
+def ball_coast():
+    """(coast, rate): the trackball's momentum as this build has it
+    (moy_input.h's MOY_INPUT_BALL_COAST); 0 is none."""
+    r = _I32()
+    c = _lib().moy_input_ball_coast(ctypes.byref(r))
+    return c, r.value
+
+
 def kick():
     return None
 
@@ -717,7 +788,7 @@ class _Kbd(ctypes.Structure):
                 ("raw_held", _U32), ("raw_key", _I32), ("raw_bytes", _U8 * 5),
                 ("raw_valid", _B), ("stat_n", _U32), ("stat_max_us", _U32),
                 ("stat_over5", _U32), ("stat_over20", _U32), ("stat_timeouts", _U32),
-                ("stat_max_raw", _B), ("raw_text", _B)]
+                ("stat_max_raw", _B), ("raw_text", _B), ("typing", ctypes.c_int16)]
 
 
 class _Touch(ctypes.Structure):

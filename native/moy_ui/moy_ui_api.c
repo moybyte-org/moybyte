@@ -573,14 +573,34 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     int off = f == NULL || (f->flags & STOP_HOLD)
               || (f->page != NO_PAGE && f->page < n && (v[f->page].flags & STOP_NAV_OFF));
     int field = f != NULL && (f->flags & STOP_FIELD);
+    c->typed_n = 0;
     if (field && key != c->last_typed && key != 0 && key != MOY_UI_KEY_TAB) {
         c->typed = key;             // a typed key, once per press
+        c->typed_n = 1;
         c->keys = 1;
         settled = 0;
     }
     c->last_typed = key;
+    int krep = in[MOY_UI_IN_KEYREP];
+    int kbyte = krep & 0xFFFF, kn = (krep >> 16) & 0xFF;
+    if (field && kn && (kbyte == 8 || kbyte == 127 || (kbyte >= 32 && kbyte < 127))
+        && (c->typed == 0 || c->typed == kbyte)) {
+        c->typed = kbyte;           // a held key types again: a step, never Enter
+        c->typed_n += kn;
+        c->keys = 1;
+        settled = 0;
+    }
     if (!off) {
-        int dir = pressed & (MOY_UI_B_LEFT | MOY_UI_B_RIGHT | MOY_UI_B_UP | MOY_UI_B_DOWN);
+        // the steps each direction makes: its press edge and its repeats
+        uint32_t rw = (uint32_t)in[MOY_UI_IN_REP];
+        int sx = ((pressed & MOY_UI_B_RIGHT) ? 1 : 0) + (int)((rw >> 8) & 0xFFu)
+                 - ((pressed & MOY_UI_B_LEFT) ? 1 : 0) - (int)(rw & 0xFFu);
+        int sy = ((pressed & MOY_UI_B_DOWN) ? 1 : 0) + (int)((rw >> 24) & 0xFFu)
+                 - ((pressed & MOY_UI_B_UP) ? 1 : 0) - (int)((rw >> 16) & 0xFFu);
+        int dir = (sx < 0 ? MOY_UI_B_LEFT : sx > 0 ? MOY_UI_B_RIGHT : 0)
+                  | (sy < 0 ? MOY_UI_B_UP : sy > 0 ? MOY_UI_B_DOWN : 0);
+        sx = sx < -127 ? -127 : sx > 127 ? 127 : sx;
+        sy = sy < -127 ? -127 : sy > 127 ? 127 : sy;
         int go = pressed & (field ? MOY_UI_B_RUN : (MOY_UI_B_A | MOY_UI_B_RUN));
         if (field && (c->typed == 13 || c->typed == 10)) {
             go = MOY_UI_B_RUN;
@@ -604,16 +624,27 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         } else if (tab) {
             to = step_order(v, n, fi, (in[MOY_UI_IN_MODS] & MOY_UI_MOD_SHIFT) != 0);
         } else if ((dir & (MOY_UI_B_LEFT | MOY_UI_B_RIGHT)) && (f->flags & STOP_KEEP_LR)) {
-            c->step_x = (int8_t)((dir & MOY_UI_B_LEFT) ? -1 : 1);
+            c->step_x = (int8_t)sx;
         } else if ((dir & MOY_UI_B_UP) && (f->flags & STOP_KEEP_UD) && !(f->flags & STOP_AT_TOP)) {
-            c->step_y = -1;
+            c->step_y = (int8_t)sy;
         } else if ((dir & MOY_UI_B_DOWN) && (f->flags & STOP_KEEP_UD)
                    && !(f->flags & STOP_AT_END)) {
-            c->step_y = 1;
+            c->step_y = (int8_t)sy;
         } else if (dir) {
+            // a step a stop, over last frame's stops: n steps walk n of them
             int one = (dir & MOY_UI_B_UP) ? MOY_UI_B_UP : (dir & MOY_UI_B_DOWN) ? MOY_UI_B_DOWN
                       : (dir & MOY_UI_B_LEFT) ? MOY_UI_B_LEFT : MOY_UI_B_RIGHT;
-            to = nearest(v, n, f, one);
+            int k = (one & (MOY_UI_B_UP | MOY_UI_B_DOWN)) ? (sy < 0 ? -sy : sy)
+                                                          : (sx < 0 ? -sx : sx);
+            const moy_ui_stop_t *at = f;
+            for (; k > 0; k--) {
+                int t = nearest(v, n, at, one);
+                if (t < 0) {
+                    break;
+                }
+                to = t;
+                at = &v[t];
+            }
             c->edge = (uint8_t)(to < 0 && one == MOY_UI_B_UP && !c->modal);
         }
         if (to >= 0) {
@@ -2199,15 +2230,17 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
     if ((st & MOY_UI_ST_FOCUS) && c->typed) {
         int k = c->typed;
         c->typed = 0;
-        if (k == 8 || k == 127) {
-            while (len > 0) {
-                len--;
-                if ((buf[len] & 0xC0) != 0x80) {
-                    break;
+        for (int i = c->typed_n > 0 ? c->typed_n : 1; i > 0; i--) {
+            if (k == 8 || k == 127) {
+                while (len > 0) {
+                    len--;
+                    if ((buf[len] & 0xC0) != 0x80) {
+                        break;
+                    }
                 }
+            } else if (k >= 32 && k < 127 && len < cap) {
+                buf[len++] = (uint8_t)k;
             }
-        } else if (k >= 32 && k < 127 && len < cap) {
-            buf[len++] = (uint8_t)k;
         }
     }
     if ((st & MOY_UI_ST_ACTIVATED) && c->tap_y == INT16_MIN) {

@@ -397,6 +397,9 @@ class FakeInput:
     def held(self, name):
         return name in self._held
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, name):
         return name in self._pressed
 
@@ -450,6 +453,9 @@ class MinimalInput:
 
     def held(self, name):
         return name in self._held
+
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
 
     def pressed(self, name):
         return name in self._pressed

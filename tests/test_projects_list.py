@@ -37,6 +37,9 @@ class _Keys:
         self._pressed = set(pressed)
         self.last_key = 0
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, name):
         return name in self._pressed
 

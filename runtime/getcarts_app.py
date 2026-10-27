@@ -1135,8 +1135,8 @@ class GetCartsAppLayer(ListShellApp):
             self._check()                 # R: check again
             return True
         if self.phase == "licence" and self._focused == "Licence" and not self.asking:
-            if (inp.pressed("up") or inp.pressed("down")) \
-                    and self._scroll_licence(-1 if inp.pressed("up") else 1):
+            if (inp.steps("up") or inp.steps("down")) \
+                    and self._scroll_licence(-1 if inp.steps("up") else 1):
                 return True               # the well scrolls; at its ends focus moves
         if self.phase in BUSY or self.phase == "pick":
             # A kid presses A at anything, and twice after Get: while work is

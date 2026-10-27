@@ -291,13 +291,15 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from widgets import (Achievements, Pmem, Popup,
                          ACHIEVEMENTS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W)
-    from moy_input import Pointer, SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
+    from moy_input import (Pointer, SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT,
+                           ball_coast as _ball_coast)
     from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import (Achievements, Pmem,
                                  Popup, ACHIEVEMENTS, _PLAY_GOAL, _POPUP_X,
                                  _POPUP_Y, _POPUP_W)
-    from runtime.moy_input import Pointer, SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
+    from runtime.moy_input import (Pointer, SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT,
+                                   ball_coast as _ball_coast)
     from runtime.audio_session import console_volume
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
@@ -1095,18 +1097,22 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
         # (The launcher's cursor-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
-        # The trackball's presses where a surface takes the keys (`ball`):
-        # its source, the pulses toward a step on each axis and when the last
-        # came, the steps owed (signed), the click owed, the press held now.
+        # The trackball's steps where a surface takes the keys (`ball`): its
+        # source, the pulses toward a step on each axis and when the last
+        # came, the click's press held now, and the coast (BALL_COAST): its
+        # direction, velocity in steps/ms and the part of a step it owes.
         self._ball_src = None
         self._ball_ax = self._ball_ay = 0
         self._ball_at = 0
         self._ball_axis = 0             # the axis a roll is stepping on: 1 x, 2 y
         self._ball_axis_at = 0          # its last pulse
-        self._ball_qx = self._ball_qy = 0
-        self._ball_run = False
         self._ball_down = None
-        self.ball_owed = False        # a press is held or owed: `ball` runs each frame
+        self._coast, self._coast_rate = _ball_coast()
+        self._coast_dir = None
+        self._coast_v = self._coast_acc = 0.0
+        self._coast_at = self._ball_rate_at = 0
+        self.ball_owed = False        # a press is held or a coast moves: `ball` runs next frame
+        self.ball_stepped = 0         # every step a roll delivered (the bench's count)
         # Crash isolation (#160 / Phase 8): the rows themselves, because they
         # stay the same object across a load. One ledger per role -- see
         # runtime/crash_guard.py, "Two roles, two ledgers".
@@ -3732,7 +3738,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # because a BLE keyboard reports last_key as LEVEL state (a held byte, not
         # the T-Deck's one-shot press edge): ANY held/mashed key collapsed P4 play
         # from ~30fps to ~10 (measured; the "every keypress slows the game" bug).
-        pressed = i.any_pressed()
+        # A step is a press here: a held key's repeats and the trackball's
+        # steps (`steps`) move what a press moves.
+        pressed = (i.any_pressed() or bool(getattr(i, "rep_word", 0))
+                   or bool(getattr(i, "key_repeats", 0)))
         # The arrows of a keyboard with arrows (the host's, the browser's, a
         # BLE one) or a d-pad step a caret where one has the keys -- the Code
         # tab, a cart's focused editor handle -- as the T-Deck's ball does
@@ -4014,7 +4023,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     BALL_STEP = 2           # trackball pulses a step, on the roll's stronger axis
     BALL_TURN = 4           # pulses a step across a roll takes while it rolls
     BALL_ROLLING_MS = 150   # a roll stops this long after its axis's last pulse
-    BALL_QUEUE = 3          # steps a fast roll may owe
     BALL_IDLE_MS = 300      # a pause this long forgets a partial step
 
     def ball_steps(self):
@@ -4038,17 +4046,17 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         """The trackball this frame -- the T-Deck's, and the host's arrows
         standing in for it: (dx, dy) pulses and its click's press. Where
         the surface that holds the keys steps a selection (`ball_steps`),
-        every BALL_STEP pulses on the roll's stronger axis are the press of
-        the direction W A S D make there, the click is Enter's `run` and
-        the cursor stays hidden; else a caret takes the roll (`nav`), else
-        the roll is the cursor's and the click the pointer's. The presses
-        reach the surfaces through the input table, as the "ball" source's,
-        one a frame with a frame up between, so a surface reads them as it
-        reads the keys. Answers bit 1 when the roll was taken, bit 2 when
-        the click was (the pointer then sees no click)."""
+        every BALL_STEP pulses on the roll's stronger axis are a step of the
+        direction W A S D make there, added to the input table's counts
+        this frame (`add_steps`: a surface reads them as `steps`, never as a
+        press, all of a fast roll's in the frame they came), the click is
+        Enter's `run` (a press on the "ball" source, let go the next frame)
+        and the cursor stays hidden; else a caret takes the roll (`nav`),
+        else the roll is the cursor's and the click the pointer's. Answers
+        bit 1 when the roll was taken, bit 2 when the click was (the pointer
+        then sees no click)."""
         took = 0
-        steps = (dx or dy or click or self._ball_qx or self._ball_qy
-                 or self._ball_run) and self.ball_steps()
+        steps = (dx or dy or click) and self.ball_steps()
         if dx or dy:
             if steps:
                 self._ball_roll(dx, dy)
@@ -4056,7 +4064,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             elif self.nav(dx, dy):
                 took = 1
         if click and steps:
-            self._ball_run = True
             took |= 2
         if took:
             p = self.pointer
@@ -4070,26 +4077,33 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if self._ball_down is not None:
             src.set_button(self._ball_down, False)
             self._ball_down = None
-        elif not steps:
-            self._ball_qx = self._ball_qy = 0
-            self._ball_run = False
-        elif self._ball_qx or self._ball_qy or self._ball_run:
+        if took & 2:
             if src is None:
                 src = self._ball_src = self.input.source("ball")
-            if self._ball_qx:
-                name = "right" if self._ball_qx > 0 else "left"
-                self._ball_qx += -1 if self._ball_qx > 0 else 1
-            elif self._ball_qy:
-                name = "down" if self._ball_qy > 0 else "up"
-                self._ball_qy += -1 if self._ball_qy > 0 else 1
-            else:
-                name = "run"
-                self._ball_run = False
-            src.set_button(name, True)
-            self._ball_down = name
-        self.ball_owed = bool(self._ball_down is not None or self._ball_qx
-                              or self._ball_qy or self._ball_run)
+            src.set_button("run", True)
+            self._ball_down = "run"
+        if self._coast_v:
+            self._ball_coast_tick(self.ball_steps())
+        self.ball_owed = self._ball_down is not None or bool(self._coast_v)
         return took
+
+    def _ball_coast_tick(self, on):
+        """A coasting roll's steps this frame: its velocity over the time
+        since the last, decaying as a fling does (`ScrollRegion.FRICTION`);
+        off a surface that steps, or below a step a second, it stops."""
+        now = _ticks_ms()
+        ms = max(0, _ticks_diff(now, self._coast_at))
+        self._coast_at = now
+        v = self._coast_v * _ui_draw.ScrollRegion.FRICTION ** ms
+        if not on or v < 0.001:
+            self._coast_v = self._coast_acc = 0.0
+            return
+        self._coast_v = v
+        self._coast_acc += v * ms
+        k = int(self._coast_acc)
+        if k:
+            self._coast_acc -= k
+            self._ball_steps(self._coast_dir, k, coast=False)
 
     def _ball_roll(self, dx, dy):
         """Pulses toward the steps a roll owes: a reversal or a pause starts
@@ -4098,7 +4112,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         step across it takes BALL_TURN pulses, so a roll along a row that
         drifts a pulse or two across it stays on the row (a sideways roll
         along the home's row never drops to its cards); once it stops, a
-        turn steps as any roll does."""
+        turn steps as any roll does. The steps go to the input table as this
+        frame's counts (`_ball_steps`)."""
         now = _ticks_ms()
         if _ticks_diff(now, self._ball_at) > self.BALL_IDLE_MS:
             self._ball_ax = self._ball_ay = 0
@@ -4110,24 +4125,46 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         ax, ay = self._ball_ax, self._ball_ay
         ax = dx if (dx > 0) != (ax > 0) and dx else ax + dx
         ay = dy if (dy > 0) != (ay > 0) and dy else ay + dy
-        n, cap = self.BALL_STEP, self.BALL_QUEUE
+        n = self.BALL_STEP
         nx = self.BALL_TURN if self._ball_axis == 2 else n
         ny = self.BALL_TURN if self._ball_axis == 1 else n
         if abs(ax) >= abs(ay) and abs(ax) >= nx:
             self._ball_axis, self._ball_axis_at = 1, now
             k = int(abs(ax) // n)
-            q = self._ball_qx + (k if ax > 0 else -k)
-            self._ball_qx = max(-cap, min(cap, q))
+            self._ball_steps("right" if ax > 0 else "left", k)
             ax = ax - k * n if ax > 0 else ax + k * n
             ay = 0
         elif abs(ay) >= ny and abs(ay) > abs(ax):
             self._ball_axis, self._ball_axis_at = 2, now
             k = int(abs(ay) // n)
-            q = self._ball_qy + (k if ay > 0 else -k)
-            self._ball_qy = max(-cap, min(cap, q))
+            self._ball_steps("down" if ay > 0 else "up", k)
             ay = ay - k * n if ay > 0 else ay + k * n
             ax = 0
         self._ball_ax, self._ball_ay = ax, ay
+
+    def _ball_steps(self, name, k, coast=True):
+        """`k` steps of `name` into this frame's counts; `ball_stepped`
+        counts every one delivered. Under BALL_COAST (moy_input.h; 0, none)
+        the steps a roll makes above BALL_COAST_RATE a second, measured over
+        the time since its last step, become the coast's velocity instead:
+        BALL_COAST thousandths of a step a ms each, delivered on by
+        `_ball_coast_tick` until it decays."""
+        if k <= 0:
+            return
+        if coast and self._coast:
+            now = _ticks_ms()
+            ms = max(1, _ticks_diff(now, self._ball_rate_at))
+            self._ball_rate_at = now
+            keep = max(1, self._coast_rate * ms // 1000)
+            if name != self._coast_dir:
+                self._coast_v = self._coast_acc = 0.0
+            if k > keep:
+                self._coast_dir = name
+                self._coast_v += (k - keep) * self._coast / 1000.0
+                self._coast_at = now
+                k = keep
+        self.input.add_steps(name, k)
+        self.ball_stepped += k
 
     def bar_where(self):
         """The `where` of the bar over the fullscreen surface that holds the
@@ -4153,7 +4190,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         a dialog, which hold the keys. True where the bar took them."""
         bl = self.bar_layer
         edge = _ui_draw.edge_take()
-        if bl.focus is None and not edge and not (pressed and i.pressed("up")):
+        if bl.focus is None and not edge and not (pressed and i.steps("up")):
             return False
         if bl.focus is not None and self.bar_where() != bl.focus_where:
             bl.focus_leave()            # the surface under it went (a tap, a door)
@@ -4172,7 +4209,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return took
         if held:
             return False
-        where = self.bar_where() if (edge or (pressed and i.pressed("up"))) else None
+        where = self.bar_where() if (edge or (pressed and i.steps("up"))) else None
         if where is None:
             return False
         layer = self._content_layer()
@@ -4206,8 +4243,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _caret_step(self, i):
         """A direction pressed while a caret has the keys: `nav` it, and
         no layer sees the press. False where no caret wants it."""
-        dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
-        dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
+        dx = i.steps("right") - i.steps("left")
+        dy = i.steps("down") - i.steps("up")
         if (getattr(i, "mods", 0) & (_CTRL | _ALT)) == _CTRL | _ALT:
             return False              # Ctrl+Alt+arrows move the desk Editor's dividers
         if not (dx or dy) or self.pause.open or self.confirm.open or self.sysmenu.open \

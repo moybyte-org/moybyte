@@ -129,6 +129,9 @@ class _Keys:
     def __init__(self, name):
         self.name = name
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, name, player=None):
         return name == self.name
 

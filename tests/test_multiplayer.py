@@ -33,6 +33,9 @@ class _StubInput:
     def held(self, n):
         return n in self._held
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         return n in self._pressed
 

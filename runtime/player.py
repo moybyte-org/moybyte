@@ -2394,6 +2394,14 @@ class Player:
             ws.input.cart_key = 0
             if k and k != self._cart_key_prev and not fed.key(k):
                 self._keyp_latch = k    # a key it did not take (Esc) is the cart's
+            # a held key types again at the input table's repeat: the
+            # handle's, never the cart's key()/keyp()
+            n = getattr(ws.input, "key_repeats", 0)
+            if n:
+                r = ws.input.repeat_key
+                if r in (8, 9, 10, 13, 127) or 32 <= r < 127:
+                    for _ in range(n):
+                        fed.key(r)
         self._cart_key_prev = k
 
     def _lockstep_step(self, ws, dt):

@@ -1314,6 +1314,9 @@ class _Keys:
         self.names = set(names)
         self.last_key = key
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         return n in self.names
 

@@ -29,14 +29,14 @@ def _drv(tmp_path):
 
 
 def _roll(drv, dx, dy, pulses):
-    """`pulses` frames of a one-pulse roll, then the frames its presses take.
+    """`pulses` frames of a one-pulse roll, then a few frames after it.
     Each is a roll of its own, after the last one stopped."""
     drv.ws._ball_axis_at -= drv.ws.BALL_ROLLING_MS + 1
     drv.pan(dx, dy)
     for _ in range(pulses):
         drv.frame(1 / 30)
     drv.pan(0, 0)
-    for _ in range(2 * drv.ws.BALL_QUEUE + 2):
+    for _ in range(3):
         drv.frame(1 / 30)
 
 
@@ -63,14 +63,12 @@ def test_a_step_is_two_pulses_of_one_roll(tmp_path):
     ws, drv = _drv(tmp_path)
     ws.BALL_IDLE_MS = 10 ** 6                 # the test's frames are no pause
     seen = []
-    real = ws.input.source("ball")
+    real = ws.input.add_steps
 
-    class Spy:
-        def set_button(self, name, held):
-            if held:
-                seen.append(name)
-            real.set_button(name, held)
-    ws._ball_src = Spy()
+    def spy(name, n):
+        seen.extend([name] * n)
+        real(name, n)
+    ws.input.add_steps = spy
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     _roll(drv, 0, 1, 1)

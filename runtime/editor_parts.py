@@ -662,8 +662,8 @@ def keys(desk, c, i):
     acted."""
     if c != "maps" or desk.ws.tilemap is None:
         return False
-    dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
-    dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
+    dx = i.steps("right") - i.steps("left")
+    dy = i.steps("down") - i.steps("up")
     if not (dx or dy):
         return False
     st = desk.part_state

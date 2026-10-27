@@ -121,9 +121,9 @@ class MonthView:
         return "local"
 
     def handle_input(self, i):
-        if i.pressed("left"):
+        if i.steps("left"):
             return self.page(-1)
-        if i.pressed("right"):
+        if i.steps("right"):
             return self.page(1)
         return None
 

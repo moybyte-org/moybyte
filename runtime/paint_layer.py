@@ -439,8 +439,8 @@ class PaintLayer:
         pe = ws.paint
         if pe is None:
             return
-        dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
-        dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
+        dx = i.steps("right") - i.steps("left")
+        dy = i.steps("down") - i.steps("up")
         c = self._cur
         if (dx or dy) and _ui_draw.input_kind() == "keys":
             pe.shift(dx, dy)

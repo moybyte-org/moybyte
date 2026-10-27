@@ -468,10 +468,10 @@ class PauseMenu:
                 self.ws.pause_touch()
             return
         n = len(self.rows)
-        if i.pressed("up") and self.sel > 0:
+        if i.steps("up") and self.sel > 0:
             self.sel -= 1
             self.ws.pause_touch()
-        elif i.pressed("down") and self.sel < n - 1:
+        elif i.steps("down") and self.sel < n - 1:
             self.sel += 1
             self.ws.pause_touch()
         elif i.pressed("a") or i.pressed("run"):

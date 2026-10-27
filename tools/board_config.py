@@ -505,6 +505,35 @@ def native_dest(board_dir):
 GENERATED = "*.gen.*"
 
 
+# board.toml [input]: the input table's parameters a board overrides, each a
+# compile definition every native module sees (moy_input.h has the defaults).
+INPUT_PARAMS = {
+    "repeat_delay_ms": "MOY_INPUT_REPEAT_DELAY_MS",
+    "repeat_rate_ms": "MOY_INPUT_REPEAT_RATE_MS",
+    "ball_coast": "MOY_INPUT_BALL_COAST",
+    "ball_coast_rate": "MOY_INPUT_BALL_COAST_RATE",
+}
+
+
+def input_defines(board_dir):
+    """board.toml [input] as (DEFINE, value) pairs, in INPUT_PARAMS order;
+    an unknown key or a value that is not a whole number >= 0 is refused."""
+    got = load(board_dir).get("input", {})
+    out = []
+    for key in got:
+        if key not in INPUT_PARAMS:
+            raise ValueError("%s/board.toml [input] has no %r (it takes %s)"
+                             % (board_dir, key, ", ".join(INPUT_PARAMS)))
+    for key, define in INPUT_PARAMS.items():
+        if key in got:
+            v = got[key]
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                raise ValueError("%s/board.toml [input] %s must be a whole number >= 0"
+                                 % (board_dir, key))
+            out.append((define, v))
+    return out
+
+
 def stage_native(board_dir, root=ROOT, quiet=False):
     """Stage the shared native modules into <board>/<native.dest> and write the
     cmake include list the board's tracked native/micropython.cmake pulls in.
@@ -535,6 +564,8 @@ def stage_native(board_dir, root=ROOT, quiet=False):
              # are already built with NDEBUG. The .mk twins need no equivalent:
              # the unix and wasm ports put -DNDEBUG in their own CFLAGS.
              "target_compile_definitions(usermod INTERFACE NDEBUG)"]
+    for define, v in input_defines(board_dir):
+        lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
     for m, src in mods:
         shutil.copytree(src, dest / m,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc",

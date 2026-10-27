@@ -391,6 +391,9 @@ class _PadX:
     """A frame's input with a gamepad's X pressed (the boards' sixteen-name
     vocabulary; the host's keyboard has no X button)."""
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, name):
         return name == "x"
 

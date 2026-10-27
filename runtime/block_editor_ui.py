@@ -1107,9 +1107,9 @@ class BlockEditorUI:
                 self._blk_kbd_cancel()
             return
         if self.blk_menu is not None:
-            if i.pressed("up"):
+            if i.steps("up"):
                 self._blk_menu_move(-1)
-            if i.pressed("down"):
+            if i.steps("down"):
                 self._blk_menu_move(1)
             if i.pressed("a") or i.pressed("run"):
                 self._blk_menu_select()
@@ -1121,9 +1121,9 @@ class BlockEditorUI:
             # MOVE mode (#93) is modal: nav to a destination, A drops it at an insert
             # point, B cancels. (A/complete + the cancel are the only exits, so
             # BACKSPACE/B doesn't leave the editor mid-move.)
-            if i.pressed("up"):
+            if i.steps("up"):
                 self._blk_move_cursor(-1)
-            if i.pressed("down"):
+            if i.steps("down"):
                 self._blk_move_cursor(1)
             if i.pressed("a"):
                 self._blk_a()
@@ -1136,16 +1136,16 @@ class BlockEditorUI:
         # on-screen UNDO/REDO buttons are the touch/device affordance.
         k = getattr(i, "last_key", 0) or 0
         moved = self._blk_ekey.undo_redo(k, self._blk_undo, self._blk_redo)
-        if i.pressed("up"):
+        if i.steps("up"):
             self._blk_move_cursor(-1)
             moved = True
-        if i.pressed("down"):
+        if i.steps("down"):
             self._blk_move_cursor(1)
             moved = True
-        if i.pressed("right"):
+        if i.steps("right"):
             self._blk_next_slot()                # step the highlighted slot
             moved = True
-        if i.pressed("left"):
+        if i.steps("left"):
             # left on a number slot decrements it (a quick tweak without the menu)
             self._blk_left()
             moved = True

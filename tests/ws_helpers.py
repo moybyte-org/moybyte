@@ -237,6 +237,9 @@ class StubInput:
     def held(self, n):
         return False
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         return False
 

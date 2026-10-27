@@ -766,70 +766,83 @@ class CodeLayer:
             return
         k = ws.input.last_key
         if self._ekey.hit(k):
-            # An open popup (autocomplete / jump-to-symbol) owns the keyboard: Enter
-            # accepts the highlighted row; any other key dismisses it and then edits
-            # normally (the small-screen "escape" -- the T-Deck has no Esc key).
-            if self._cmp_open or self._jump_open or self._files_open:
-                if k in (0x0D, 0x0A):
-                    self._popup_accept()
-                    return
-                if k == 27:
-                    self.close_overlay()
-                    return
-                if self._jump_open and (32 <= k < 127 or k in (8, 127)):
-                    self._jump_type(k)         # Go to's field filters the definitions
-                    return
+            self._typed(ed, k)
+        # A held key types again at the input table's repeat (a count beside
+        # the frame, never a second edge): text keys only, never into a popup.
+        n = getattr(ws.input, "key_repeats", 0)
+        if n and not (self._cmp_open or self._jump_open or self._files_open):
+            r = ws.input.repeat_key
+            if r in (8, 9, 10, 13, 127) or 32 <= r < 127:
+                for _ in range(n):
+                    self._typed(ed, r)
+
+    def _typed(self, ed, k):
+        """One typed byte `k` into the editor `ed`: an open popup's keys, the
+        shortcuts, the find field, else the text."""
+        ws = self.ws
+        # An open popup (autocomplete / jump-to-symbol) owns the keyboard: Enter
+        # accepts the highlighted row; any other key dismisses it and then edits
+        # normally (the small-screen "escape" -- the T-Deck has no Esc key).
+        if self._cmp_open or self._jump_open or self._files_open:
+            if k in (0x0D, 0x0A):
+                self._popup_accept()
+                return
+            if k == 27:
                 self.close_overlay()
-            # Host keyboard shortcuts (#89) layered over the touch tool palette: the
-            # control bytes below are NEVER inserted as text (editor.key ignores them),
-            # so they can't corrupt the buffer -- and each maps to a tool-palette button
-            # so touch-only devices reach the same feature. Ctrl+Z/Y (0x1A/0x19) are the
-            # Stage-7 journal walk; Ctrl+C/X/V (0x03/0x18/0x16) the clipboard; Ctrl+F
-            # (0x06) the find bar; Ctrl+E (0x05) autocomplete, Ctrl+G (0x07) jump-to-
-            # symbol. While the find bar is focused, typing feeds the query.
-            if k == 0x05:                      # Ctrl+E opens autocomplete
-                self._open_completion(ed)
-            elif k == 0x07:                    # Ctrl+G opens jump-to-symbol
-                self._open_jump(ed)
-            elif k == 0x06:                    # Ctrl+F toggles the find bar
-                self._toggle_find()
-            elif self._find_open and k == 27:
-                self.close_overlay()
-            elif self._find_open:
-                self._find_key(k)              # find field owns the keyboard while open
-            elif k == 0x1A:
-                ws.history.undo()
-            elif k == 0x19:
-                ws.history.redo()
-            elif k == 0x01:                    # Ctrl+A: select all (#132 parity)
-                ed.select_all()
-            elif k == 0x03:
-                ed.copy()
-            elif k == 0x18:
-                ws.history.code_burst_open()   # #111: a cut joins the typing burst
-                if ed.cut():
-                    self._recheck_err()
-            elif k == 0x16:
-                ws.history.code_burst_open()   # #111: a paste joins the typing burst
-                if ed.paste():
-                    self._recheck_err()
-            elif k == 0x09 and getattr(ws.input, "mods", 0) & _SHIFT:
-                ws.history.code_burst_open()   # Shift+Tab outdents, as << does
-                if ed.outdent_selection():
-                    self._recheck_err()
-            else:
-                # A text-editing key (printable / backspace / tab / enter). Open the
-                # typing burst BEFORE the edit lands (#111 phase 4), then close it on
-                # Enter -- the burst edge the spec names, alongside the autosave
-                # debounce + an undo press (both handled by ws.history). ed.key
-                # ignores control bytes it doesn't know, so a no-op key just leaves the
-                # burst open with an unchanged pre-image (a harmless later net no-op).
-                ws.history.code_burst_open()
-                if ed.key(k):                  # text changed -> re-check the marker
-                    self._recheck_err()
-                if k in (0x0D, 0x0A):
-                    ws.history.close_code_burst()
-        # (self._ekey.hit above already recorded k as the new previous byte.)
+                return
+            if self._jump_open and (32 <= k < 127 or k in (8, 127)):
+                self._jump_type(k)         # Go to's field filters the definitions
+                return
+            self.close_overlay()
+        # Host keyboard shortcuts (#89) layered over the touch tool palette: the
+        # control bytes below are NEVER inserted as text (editor.key ignores them),
+        # so they can't corrupt the buffer -- and each maps to a tool-palette button
+        # so touch-only devices reach the same feature. Ctrl+Z/Y (0x1A/0x19) are the
+        # Stage-7 journal walk; Ctrl+C/X/V (0x03/0x18/0x16) the clipboard; Ctrl+F
+        # (0x06) the find bar; Ctrl+E (0x05) autocomplete, Ctrl+G (0x07) jump-to-
+        # symbol. While the find bar is focused, typing feeds the query.
+        if k == 0x05:                      # Ctrl+E opens autocomplete
+            self._open_completion(ed)
+        elif k == 0x07:                    # Ctrl+G opens jump-to-symbol
+            self._open_jump(ed)
+        elif k == 0x06:                    # Ctrl+F toggles the find bar
+            self._toggle_find()
+        elif self._find_open and k == 27:
+            self.close_overlay()
+        elif self._find_open:
+            self._find_key(k)              # find field owns the keyboard while open
+        elif k == 0x1A:
+            ws.history.undo()
+        elif k == 0x19:
+            ws.history.redo()
+        elif k == 0x01:                    # Ctrl+A: select all (#132 parity)
+            ed.select_all()
+        elif k == 0x03:
+            ed.copy()
+        elif k == 0x18:
+            ws.history.code_burst_open()   # #111: a cut joins the typing burst
+            if ed.cut():
+                self._recheck_err()
+        elif k == 0x16:
+            ws.history.code_burst_open()   # #111: a paste joins the typing burst
+            if ed.paste():
+                self._recheck_err()
+        elif k == 0x09 and getattr(ws.input, "mods", 0) & _SHIFT:
+            ws.history.code_burst_open()   # Shift+Tab outdents, as << does
+            if ed.outdent_selection():
+                self._recheck_err()
+        else:
+            # A text-editing key (printable / backspace / tab / enter). Open the
+            # typing burst BEFORE the edit lands (#111 phase 4), then close it on
+            # Enter -- the burst edge the spec names, alongside the autosave
+            # debounce + an undo press (both handled by ws.history). ed.key
+            # ignores control bytes it doesn't know, so a no-op key just leaves the
+            # burst open with an unchanged pre-image (a harmless later net no-op).
+            ws.history.code_burst_open()
+            if ed.key(k):                  # text changed -> re-check the marker
+                self._recheck_err()
+            if k in (0x0D, 0x0A):
+                ws.history.close_code_burst()
 
     # -- #89 helpers: clipboard/find/tool/select routing ---------------------
 

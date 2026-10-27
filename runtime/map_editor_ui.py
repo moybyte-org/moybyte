@@ -314,13 +314,13 @@ class MapEditorUI:
             if page.owed():
                 ws._dirty = True
         if me is not None:
-            if i.pressed("up"):
+            if i.steps("up"):
                 self._map_pan(0, -1)
-            if i.pressed("down"):
+            if i.steps("down"):
                 self._map_pan(0, 1)
-            if i.pressed("left"):
+            if i.steps("left"):
                 self._map_pan(-1, 0)
-            if i.pressed("right"):
+            if i.steps("right"):
                 self._map_pan(1, 0)
             if i.pressed("a"):          # A cycles the zoom level (#37 follow-up)
                 self._map_cycle_zoom()

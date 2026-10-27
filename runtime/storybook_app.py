@@ -577,9 +577,9 @@ class StorybookAppLayer(ListShellApp):
 
     def _view_keys(self, inp, k):
         n = len(self.story.slides)
-        if inp.pressed("left") or k == ord(","):
+        if inp.steps("left") or k == ord(","):
             self._step_view(-1)
-        elif inp.pressed("right") or k == ord("."):
+        elif inp.steps("right") or k == ord("."):
             self._step_view(1)
         elif k == 112 or k == 80:                        # p, P
             self._start(self.cur)
@@ -1035,9 +1035,9 @@ class StorybookAppLayer(ListShellApp):
     def _present_keys(self, inp, k):
         if inp.pressed("b") or k == 27:
             self._stop()
-        elif inp.pressed("right") or inp.pressed("a") or k in (13, 10, 32):
+        elif inp.steps("right") or inp.pressed("a") or k in (13, 10, 32):
             self._next()
-        elif inp.pressed("left"):
+        elif inp.steps("left"):
             self._prev()
 
     def _present_pointer(self, px, py, click, down):

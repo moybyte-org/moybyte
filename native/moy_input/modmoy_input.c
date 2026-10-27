@@ -219,7 +219,15 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(table_source_obj, 2, table_source);
     } \
     static MP_DEFINE_CONST_FUN_OBJ_1(fn##_obj, fn)
 
-TABLE_VERB(table_begin_frame, moy_input_begin_frame);
+// begin_frame(now=0): the merge, on the caller's clock in ms (0: none, so
+// nothing repeats).
+static mp_obj_t table_begin_frame(size_t n_args, const mp_obj_t *args) {
+    uint32_t now = n_args > 1 && args[1] != mp_const_none ? (uint32_t)mp_obj_get_int(args[1]) : 0;
+    moy_input_begin_frame(table_of(args[0])->t, now);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(table_begin_frame_obj, 1, 2, table_begin_frame);
+
 TABLE_VERB(table_release_all, moy_input_release_all);
 TABLE_VERB(table_clear_edges, moy_input_clear_edges);
 TABLE_VERB(table_keep_edges, moy_input_keep_edges);
@@ -251,6 +259,42 @@ static mp_obj_t table_pressed(size_t n_args, const mp_obj_t *args) {
     return mp_obj_new_bool(b >= 0 && (p >> b) & 1u);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(table_pressed_obj, 2, 3, table_pressed);
+
+// repeats(name): this frame's repeats of a button (and steps added to it);
+// steps(name): its press edge and those.
+static mp_obj_t table_repeats(mp_obj_t self_in, mp_obj_t name) {
+    int b = name_bit(name);
+    return MP_OBJ_NEW_SMALL_INT(b >= 0 ? moy_input_repeats(table_of(self_in)->t, (uint8_t)b) : 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(table_repeats_obj, table_repeats);
+
+static mp_obj_t table_steps(mp_obj_t self_in, mp_obj_t name) {
+    input_table_obj_t *s = table_of(self_in);
+    int b = name_bit(name);
+    if (b < 0) {
+        return MP_OBJ_NEW_SMALL_INT(0);
+    }
+    uint32_t h, p;
+    moy_input_masks(s->t, MOY_INPUT_UNION, &h, &p);
+    return MP_OBJ_NEW_SMALL_INT(((p >> b) & 1u) + moy_input_repeats(s->t, (uint8_t)b));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(table_steps_obj, table_steps);
+
+static mp_obj_t table_add_steps(mp_obj_t self_in, mp_obj_t name, mp_obj_t n) {
+    int b = name_bit(name);
+    mp_int_t k = mp_obj_get_int(n);
+    if (b >= 0 && k > 0) {
+        check(moy_input_add_steps(table_of(self_in)->t, (uint8_t)b, (uint32_t)k));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(table_add_steps_obj, table_add_steps);
+
+static mp_obj_t table_set_repeat(mp_obj_t self_in, mp_obj_t delay, mp_obj_t rate) {
+    moy_input_set_repeat(table_of(self_in)->t, mp_obj_get_int(delay), mp_obj_get_int(rate));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(table_set_repeat_obj, table_set_repeat);
 
 static mp_obj_t table_released(mp_obj_t self_in, mp_obj_t name) {
     int b = name_bit(name);
@@ -417,6 +461,10 @@ static MP_DEFINE_CONST_FUN_OBJ_2(table_apply_pointer_obj, table_apply_pointer);
     { MP_ROM_QSTR(MP_QSTR_held), MP_ROM_PTR(&table_held_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_pressed), MP_ROM_PTR(&table_pressed_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_released), MP_ROM_PTR(&table_released_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_repeats), MP_ROM_PTR(&table_repeats_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_steps), MP_ROM_PTR(&table_steps_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_add_steps), MP_ROM_PTR(&table_add_steps_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_set_repeat), MP_ROM_PTR(&table_set_repeat_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_any_held), MP_ROM_PTR(&table_any_held_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_any_pressed), MP_ROM_PTR(&table_any_pressed_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_held_names), MP_ROM_PTR(&table_held_names_obj) }, \
@@ -453,6 +501,26 @@ static void table_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         }
         if (attr == MP_QSTR_mods) {
             dest[0] = MP_OBJ_NEW_SMALL_INT(s->t ? moy_input_mods(s->t) : 0);
+            return;
+        }
+        if (attr == MP_QSTR_rep_word) {
+            dest[0] = mp_obj_new_int_from_uint(s->t ? moy_input_rep_word(s->t) : 0);
+            return;
+        }
+        if (attr == MP_QSTR_key_repeats || attr == MP_QSTR_repeat_key) {
+            int32_t ev = 0;
+            uint32_t n = s->t ? moy_input_key_repeats(s->t, &ev) : 0;
+            dest[0] = MP_OBJ_NEW_SMALL_INT(attr == MP_QSTR_key_repeats ? (mp_int_t)n
+                                                                       : moy_input_typed(ev));
+            return;
+        }
+        if (attr == MP_QSTR_repeat) {
+            int32_t d = 0, r = 0;
+            if (s->t) {
+                moy_input_get_repeat(s->t, &d, &r);
+            }
+            mp_obj_t pair[2] = { MP_OBJ_NEW_SMALL_INT(d), MP_OBJ_NEW_SMALL_INT(r) };
+            dest[0] = mp_obj_new_tuple(2, pair);
             return;
         }
         if (attr == MP_QSTR_wheel_x || attr == MP_QSTR_wheel_y) {
@@ -635,6 +703,9 @@ static void source_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         } else if (attr == MP_QSTR_pointer_buttons) {
             dest[0] = MP_OBJ_NEW_SMALL_INT(
                 moy_input_source_pointer_buttons(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h));
+        } else if (attr == MP_QSTR_typing) {
+            dest[0] = MP_OBJ_NEW_SMALL_INT(
+                moy_input_source_typing(table_of(MP_OBJ_FROM_PTR(o->table))->t, o->h));
         } else {
             dest[1] = MP_OBJ_SENTINEL;
         }
@@ -659,6 +730,9 @@ static void source_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
         dest[0] = MP_OBJ_NULL;
     } else if (attr == MP_QSTR_pointer_buttons) {
         check(moy_input_set_pointer_buttons(t, o->h, (uint8_t)mp_obj_get_int(dest[1])));
+        dest[0] = MP_OBJ_NULL;
+    } else if (attr == MP_QSTR_typing) {
+        check(moy_input_set_typing(t, o->h, dest[1] == mp_const_none ? 0 : mp_obj_get_int(dest[1])));
         dest[0] = MP_OBJ_NULL;
     }
 }
@@ -1530,13 +1604,23 @@ static mp_obj_t input_nav(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(input_nav_obj, input_nav);
 
+// ball_coast() -> (coast, rate): the trackball's momentum as this build has it
+// (moy_input.h's MOY_INPUT_BALL_COAST, a board's board.toml [input]).
+static mp_obj_t input_ball_coast(void) {
+    int32_t rate;
+    int32_t c = moy_input_ball_coast(&rate);
+    mp_obj_t pair[2] = { MP_OBJ_NEW_SMALL_INT(c), MP_OBJ_NEW_SMALL_INT(rate) };
+    return mp_obj_new_tuple(2, pair);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(input_ball_coast_obj, input_ball_coast);
+
 // While the VM is stopped (docs/kernel_cartpath_2026-10.md section 5.3) the
 // loop's objects went with it: the kernel's table alone, its board drivers
 // kicked and its frame begun, which is every source a stopped run reads (the
 // keys and the buttons the board's input task writes into it).
 bool moy_loop_vm(void) __attribute__((weak));
 
-static void loop_inputs_down(bool *active) {
+static void loop_inputs_down(uint32_t now, bool *active) {
     moy_input_t *t = moy_input_kernel();
     if (t == NULL) {
         return;
@@ -1544,7 +1628,7 @@ static void loop_inputs_down(bool *active) {
     if (!s_kick_tail) {
         moy_input_board_kick();
     }
-    moy_input_begin_frame(t);
+    moy_input_begin_frame(t, now);
     uint32_t h, pr;
     moy_input_masks(t, MOY_INPUT_UNION, &h, &pr);
     *active = h != 0 || moy_input_last_key(t) != 0;
@@ -1557,7 +1641,7 @@ void moy_input_loop_inputs(uint32_t now_unused, bool *click, bool *active) {
     mp_obj_t *o = MP_STATE_VM(moy_input_loop_objs);
     if (o[LOOP_PTR] == MP_OBJ_NULL) {
         if (moy_loop_vm != NULL && !moy_loop_vm()) {
-            loop_inputs_down(active);
+            loop_inputs_down(now_ms(), active);
         }
         return;
     }
@@ -1590,7 +1674,7 @@ void moy_input_loop_inputs(uint32_t now_unused, bool *click, bool *active) {
         moy_touchdev_poll(tc->d, now, &pt);
         moy_input_point(t, tc->src, pt.x, pt.y, pt.down, pt.edge, tc->d->held.fresh);
     }
-    moy_input_begin_frame(t);
+    moy_input_begin_frame(t, now);
     bool ball_click = false;
     if (o[LOOP_BALL] != MP_OBJ_NULL) {
         input_ball_obj_t *bo = MP_OBJ_TO_PTR(o[LOOP_BALL]);
@@ -1683,6 +1767,7 @@ static const mp_rom_map_elem_t moy_input_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_task_stack_free), MP_ROM_PTR(&input_task_stack_free_obj) },
     { MP_ROM_QSTR(MP_QSTR_loop_bind), MP_ROM_PTR(&input_loop_bind_obj) },
     { MP_ROM_QSTR(MP_QSTR_nav), MP_ROM_PTR(&input_nav_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ball_coast), MP_ROM_PTR(&input_ball_coast_obj) },
     { MP_ROM_QSTR(MP_QSTR_SOURCES), MP_ROM_INT(MOY_INPUT_SOURCES) },
     { MP_ROM_QSTR(MP_QSTR_PLAYERS), MP_ROM_INT(MOY_INPUT_PLAYERS) },
     { MP_ROM_QSTR(MP_QSTR_UNION), MP_ROM_INT(MOY_INPUT_UNION) },

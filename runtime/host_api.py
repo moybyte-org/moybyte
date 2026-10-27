@@ -226,6 +226,7 @@ class ConsoleDriver:
         self._chord = False     # ...and another key went down meanwhile
         self._pb = 0            # the mouse's buttons held (moy_input PB_*)
         self._after = None      # where the pointer went after this frame's press
+        self._clock = 1.0       # the table's clock, ms: the frames' dt summed
 
     # -- input the sim feeds in ---------------------------------------------
     def press(self, name):
@@ -276,12 +277,15 @@ class ConsoleDriver:
             self.full_key()
             return
         self.type_char(ev)
+        self._src.typing = ev           # held, it repeats (the table's, every tier's)
         if 0x20 <= typed <= 0x7E:
             self.key_hold(typed, True)
 
     def key_up(self, code, mods=0):
-        """A desk keyboard's key came up: what it held lets go."""
+        """A desk keyboard's key came up: what it held lets go, and no key
+        repeats until one goes down again."""
         self.set_mods(mods)
+        self._src.typing = 0
         button = self._key_btn.pop(_fold(code), None)
         if button is not None and button not in self._key_btn.values():
             self.hold(button, False)
@@ -451,9 +455,15 @@ class ConsoleDriver:
 
     # -- per-frame tick ------------------------------------------------------
     def frame(self, dt):
-        # The trackball (`pan`, `ball_click`), spent as the T-Deck's is
-        # (`Workstation.ball`): a surface's W A S D and Enter, a caret's
-        # arrows, else the cursor's nudge and the pointer's click.
+        for name in self._pending:
+            self.input.set_held(name, True)
+        # The table's clock is the frames' injected one, so a held key
+        # repeats on the same frames on every run.
+        self._clock += max(0.0, dt) * 1000.0
+        self.input.begin_frame(int(self._clock))
+        # The trackball (`pan`, `ball_click`), spent after the merge as the
+        # T-Deck's is (`Workstation.ball`): a surface's steps and Enter, a
+        # caret's arrows, else the cursor's nudge and the pointer's click.
         dx, dy = self._pan
         bc = self._ball_click
         self._ball_click = False
@@ -463,9 +473,6 @@ class ConsoleDriver:
                 self.pointer.move(dx * PAN_SPEED, dy * PAN_SPEED)
             if bc and not took & 2:
                 self._click = True
-        for name in self._pending:
-            self.input.set_held(name, True)
-        self.input.begin_frame()
         # One queued byte per frame -- and in TEXT MODE, never the same byte in
         # two ADJACENT frames: the editors' KeyEdge dedups identical consecutive
         # bytes (it models the T-Deck's discrete press edges + the P4 BLE

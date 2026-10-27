@@ -126,6 +126,9 @@ def test_the_power_popovers_sliders_change_the_volume(tmp_path):
         def __init__(self, n):
             self.n = n
 
+        def steps(self, n):
+            return int(bool(self.pressed(n)))
+
         def pressed(self, n):
             return n == self.n
 

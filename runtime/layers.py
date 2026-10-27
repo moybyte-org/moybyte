@@ -439,10 +439,10 @@ class _SysMenuLayer(Layer):
             ws.popover_touch()
         elif comp is not None:
             self._comp(comp.handle_input, i)
-        elif i.pressed("up"):
+        elif i.steps("up"):
             m.move(-1)
             ws.popover_touch()
-        elif i.pressed("down"):
+        elif i.steps("down"):
             m.move(1)
             ws.popover_touch()
         elif i.pressed("a") or i.pressed("run"):

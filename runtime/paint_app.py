@@ -911,8 +911,8 @@ class PaintAppLayer:
     def _swatch_keys(self, inp):
         """The colours popover under keys: the arrows move its ring over the
         64, Enter or `a` takes the colour it is on."""
-        dx = (1 if inp.pressed("right") else 0) - (1 if inp.pressed("left") else 0)
-        dy = (1 if inp.pressed("down") else 0) - (1 if inp.pressed("up") else 0)
+        dx = inp.steps("right") - inp.steps("left")
+        dy = inp.steps("down") - inp.steps("up")
         if dx or dy:
             c = self.swatch
             x = max(0, min(7, c % 8 + dx))

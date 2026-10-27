@@ -148,7 +148,7 @@ static void step(moy_input_t *t, uint8_t nb) {
         }
         case 6:
         case 7: {
-            moy_input_begin_frame(t);
+            moy_input_begin_frame(t, 0);
             uint32_t held = 0;
             for (int i = 0; i < nsrc; i++) {
                 if (src[i].queued) {

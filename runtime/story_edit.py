@@ -518,13 +518,13 @@ class Editor:
                 self._type(k)
             return True
         step = self.step
-        if inp.pressed("left"):
+        if inp.steps("left"):
             self._move(-step, 0)
-        elif inp.pressed("right"):
+        elif inp.steps("right"):
             self._move(step, 0)
-        elif inp.pressed("up"):
+        elif inp.steps("up"):
             self._move(0, -step)
-        elif inp.pressed("down"):
+        elif inp.steps("down"):
             self._move(0, step)
         elif inp.pressed("a") or k in (13, 10):
             o = self._obj()

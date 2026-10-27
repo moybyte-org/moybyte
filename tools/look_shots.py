@@ -2075,6 +2075,9 @@ class _Pressed:
     def pressed(self, name):
         return name == self.name
 
+    def steps(self, name):
+        return int(name == self.name)
+
     def held(self, name):
         return name == self.name
 

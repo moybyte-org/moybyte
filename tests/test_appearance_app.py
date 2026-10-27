@@ -25,6 +25,9 @@ class K:
     def __init__(self, n):
         self.n = n
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         return n == self.n
 
@@ -34,6 +37,9 @@ class T:
 
     def __init__(self, k):
         self.last_key = k
+
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
 
     def pressed(self, n):
         return False

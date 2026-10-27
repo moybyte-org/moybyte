@@ -433,7 +433,7 @@ if(e.key=="Escape"){
 send(INPUT?{type:"super"}:{type:"esc"});e.preventDefault();return;}
 if(e.key in MODK){send({type:"mods",mods:kmods(e)});return;}
 var c=kcode(e);if(c===null||kept(e,c))return;
-if(!e.repeat||c<256)send({type:"kd",code:c,mods:kmods(e)});e.preventDefault();});
+if(!e.repeat)send({type:"kd",code:c,mods:kmods(e)});e.preventDefault();});
 cv.addEventListener("keyup",function(e){
 if(e.key in MODK){send({type:"mods",mods:kmods(e)});return;}
 var c=kcode(e);if(c!==null)send({type:"ku",code:c,mods:kmods(e)});});

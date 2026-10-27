@@ -137,6 +137,7 @@ void moy_kbd_init(moy_kbd_t *k, const moy_i2c_t *bus, moy_input_t *table, uint32
     k->src = src;
     k->raw_game = true;
     k->want = -1;
+    k->typing = -1;
     uint8_t b;
     k->available = bus->read(bus->ctx, MOY_KBD_ADDR, &b, 1) == 0;
 }
@@ -195,6 +196,8 @@ static void set_mode(moy_kbd_t *k, const moy_i2c_t *bus, bool want) {
     bus->write(bus->ctx, MOY_KBD_ADDR, &KEY, 1);
     k->raw_mode = false;
     k->held = 0;
+    k->typing = -1;
+    moy_input_set_typing(k->table, k->src, 0);
     // The switch drains its own byte: what the C3 holds now was typed while
     // the matrix streamed, before the text surface that asked for ASCII
     // existed, and delivered it is a letter the kid did not type.
@@ -208,15 +211,26 @@ static void set_mode(moy_kbd_t *k, const moy_i2c_t *bus, bool want) {
 
 // A text surface's typing from the matrix: each key down in `d` and up in
 // `was` is one typed byte, queued as the C3's ASCII mode queues it (once a
-// press, no autorepeat).
+// press). The key typed last is the source's typing level while it stays
+// down, which the table repeats (moy_input_set_typing); a carts' key()
+// never reads it.
 static void type_edges(moy_kbd_t *k, const uint8_t was[5], const uint8_t d[5]) {
     for (size_t i = 0; i < N_RAW_KEYS; i++) {
         uint8_t at = RAW_KEYS[i][0];
         uint8_t bit = RAW_KEYS[i][1];
         if ((d[at] & bit) && !(was[at] & bit)) {
             moy_input_key(k->table, k->src, key_byte(d, i));
+            k->typing = (int16_t)i;
         }
     }
+}
+
+static void typing_level(moy_kbd_t *k, const uint8_t d[5], bool text) {
+    int16_t i = k->typing;
+    if (!text || i < 0 || !(d[RAW_KEYS[i][0]] & RAW_KEYS[i][1])) {
+        k->typing = -1;
+    }
+    moy_input_set_typing(k->table, k->src, k->typing >= 0 ? key_byte(d, (size_t)k->typing) : 0);
 }
 
 // What a surface takes of `mask`: a text surface none of the aliases, and the
@@ -252,6 +266,7 @@ void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
             // a text surface takes typed bytes, a game the held key: neither
             // inherits the other's key
             k->raw_text = text;
+            k->typing = -1;
             moy_input_set_key(k->table, k->src, 0);
         }
         uint8_t d[5];
@@ -267,6 +282,8 @@ void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
                     // firmware ignored 0x03. The session stays on ASCII.
                     k->raw_mode = false;
                     k->raw_unsupported = true;
+                    k->typing = -1;
+                    moy_input_set_typing(k->table, k->src, 0);
                     k->held = stray;
                     k->held_until = now + MOY_KBD_HOLD_MS;
                     if (!(stray & B_START) && slot_key(k, d[0])) {
@@ -289,6 +306,7 @@ void moy_kbd_pass(moy_kbd_t *k, const moy_i2c_t *bus) {
         if (!text) {
             moy_input_set_key(k->table, k->src, slot_key(k, k->raw_key));
         }
+        typing_level(k, k->raw_bytes, text && k->raw_valid);
         moy_input_set_mask(k->table, k->src, text_mask(k, k->raw_held));
         return;
     }

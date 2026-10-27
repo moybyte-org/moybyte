@@ -313,6 +313,9 @@ THRASH_SETUP = """
 import time, moy_ui
 class _TK:
     last_key = 0
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         # the swatches stop at their ends: seven steps right, seven back
         return n == ('right' if (ws._th_i // 7) % 2 == 0 else 'left')
@@ -1060,6 +1063,9 @@ class _PK:
     last_key = 0
     def __init__(self, n):
         self.n = n
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         return n == self.n
 def _pk(n):
@@ -1397,6 +1403,9 @@ class _PK:
     last_key = 0
     def __init__(self, n):
         self.n = n
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         return n == self.n
 def _hk(n):

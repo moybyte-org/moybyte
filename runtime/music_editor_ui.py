@@ -174,17 +174,17 @@ class MusicEditorUI:
             if page.owed():
                 changed = True
         if me is not None:
-            if i.pressed("up"):
+            if i.steps("up"):
                 me.move_cursor(-1)
                 changed = True
-            if i.pressed("down"):
+            if i.steps("down"):
                 me.move_cursor(1)
                 changed = True
             song = me.view == MusicEditor.SONG_VIEW
-            if i.pressed("left"):
+            if i.steps("left"):
                 (me.nudge_slot if song else me.nudge_pitch)(-1)
                 changed = True
-            if i.pressed("right"):
+            if i.steps("right"):
                 (me.nudge_slot if song else me.nudge_pitch)(1)
                 changed = True
             if i.pressed("a"):

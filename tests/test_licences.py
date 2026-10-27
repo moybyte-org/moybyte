@@ -65,6 +65,9 @@ def test_the_page_lists_the_parts_and_opens_a_text(tmp_path):
         def __init__(self, name):
             self.name = name
 
+        def steps(self, n):
+            return int(bool(self.pressed(n)))
+
         def pressed(self, n):
             return n == self.name
 

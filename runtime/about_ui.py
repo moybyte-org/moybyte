@@ -163,9 +163,9 @@ class LicencesPage:
             if typed and k in (KEY_PGUP, KEY_PGDN):
                 step = (self._rows - 2) * (1 if k == KEY_PGDN else -1)
         elif self.entry is not None:
-            if i.pressed("down"):
+            if i.steps("down"):
                 step = 3
-            elif i.pressed("up"):
+            elif i.steps("up"):
                 step = -3
         if not step:
             return False

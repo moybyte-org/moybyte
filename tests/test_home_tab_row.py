@@ -173,26 +173,33 @@ def test_the_rows_strip_names_its_keys(tmp_path):
     assert launcher_layer._TAB_ROW_KEYS in seen
 
 
+def _stepped(ws):
+    """The steps `_ball_roll` delivers, as (name, n), instead of the table."""
+    got = []
+    ws._ball_steps = lambda name, k, coast=True: got.append((name, k))
+    return got
+
+
 def test_a_sideways_roll_that_drifts_down_stays_on_the_row(tmp_path):
     ws, _drv = _home(tmp_path)
+    got = _stepped(ws)
     ws._ball_roll(2, 0)
-    assert ws._ball_qx == 1
-    ws._ball_qx = 0
+    assert got == [("right", 1)]
     ws._ball_roll(0, 1)
     ws._ball_roll(0, 1)
     ws._ball_roll(0, 1)
-    assert ws._ball_qy == 0, "a pulse or three across a roll is drift"
+    assert got == [("right", 1)], "a pulse or three across a roll is drift"
     ws._ball_roll(0, 1)
-    assert ws._ball_qy == 2, "a turn of BALL_TURN pulses steps"
+    assert got[1:] == [("down", 2)], "a turn of BALL_TURN pulses steps"
 
 
 def test_a_turn_after_the_roll_stops_steps_at_once(tmp_path):
     ws, _drv = _home(tmp_path)
+    got = _stepped(ws)
     ws._ball_roll(2, 0)
-    ws._ball_qx = 0
     ws._ball_axis_at -= ws.BALL_ROLLING_MS + 1
     ws._ball_roll(0, -2)
-    assert ws._ball_qy == -1
+    assert got == [("right", 1), ("up", 1)]
 
 
 def test_a_touch_takes_the_keys_off_the_row_and_the_bar(tmp_path):

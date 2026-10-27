@@ -31,6 +31,7 @@ typedef struct {
     uint8_t qn;
     uint8_t queued;                 // the queue drives `key` at every begin_frame
     uint8_t mods;                   // the modifiers it holds
+    int32_t typing;                 // the key it holds down for typing, which repeats
     uint8_t pbuttons;               // its pointer's buttons
     uint8_t pbseen;                 // ...and every one held since the merge
     int16_t wx, wy;                 // wheel notches since the merge
@@ -76,6 +77,14 @@ struct moy_input {
     int32_t was_key[MOY_INPUT_SOURCES];     // and its key
     uint8_t news;                           // the source that brought news last, slot + 1
     moy_input_sample_t smp;
+    int32_t rep_delay, rep_rate;            // the repeat's parameters, ms
+    uint32_t now;                           // the clock at the last merge
+    uint32_t rep_due[MOY_INPUT_SOURCES][MOY_INPUT_BUTTONS];   // each held button's next repeat
+    uint8_t rep[MOY_INPUT_BUTTONS];         // this frame's repeats and added steps
+    int32_t krep_key[MOY_INPUT_SOURCES];    // the typing level each source repeats
+    uint32_t krep_due[MOY_INPUT_SOURCES];
+    int32_t krep_ev;                        // this frame's repeated key, and its count
+    uint8_t krep;
 };
 
 #define HANDLE(slot) ((1u << MOY_HTAB_GEN_SHIFT) | ((uint32_t)MOY_KIND_SRC << MOY_HTAB_KIND_SHIFT) | (slot))
@@ -150,6 +159,8 @@ static int init(moy_input_t *t, moy_input_front_t *front, uint8_t nbuttons) {
     front->key_src = -1;
     t->front = front;
     t->nbuttons = nbuttons;
+    t->rep_delay = MOY_INPUT_REPEAT_DELAY_MS;
+    t->rep_rate = MOY_INPUT_REPEAT_RATE_MS;
     uint32_t h;
     return moy_input_source(t, "local", 0, &h);
 }
@@ -372,6 +383,17 @@ int moy_input_set_mods(moy_input_t *t, uint32_t h, uint8_t mods) {
     return MOY_INPUT_OK;
 }
 
+int moy_input_set_typing(moy_input_t *t, uint32_t h, int32_t key) {
+    int s = slot_of(t, h);
+    if (s < 0) {
+        return MOY_INPUT_STALE;
+    }
+    LOCK(t);
+    t->front->src[s].typing = key;
+    UNLOCK(t);
+    return MOY_INPUT_OK;
+}
+
 static int16_t sat16(int32_t v) {
     return (int16_t)(v < INT16_MIN ? INT16_MIN : (v > INT16_MAX ? INT16_MAX : v));
 }
@@ -425,6 +447,11 @@ uint32_t moy_input_source_held(const moy_input_t *t, uint32_t h) {
     return s < 0 ? 0 : t->front->src[s].held;
 }
 
+int32_t moy_input_source_typing(const moy_input_t *t, uint32_t h) {
+    int s = slot_of(t, h);
+    return s < 0 ? 0 : t->front->src[s].typing;
+}
+
 int moy_input_point(moy_input_t *t, uint32_t h, int32_t x, int32_t y, bool down, bool edge,
                     bool fresh) {
     int s = slot_of(t, h);
@@ -472,8 +499,41 @@ static bool better(const moy_input_latch_t *a, const moy_input_latch_t *b) {
     return (int32_t)(a->pseq - b->pseq) > 0;
 }
 
-void moy_input_begin_frame(moy_input_t *t) {
+// Repeats owed by a level held since before this merge, its next one due at
+// *due: one a period from the delay on, the clock never more than a
+// saturated count behind.
+static uint32_t owed(const moy_input_t *t, uint32_t *due, uint32_t now) {
+    int32_t late = moy_input_ticks_diff(now, *due);
+    if (late < 0 || t->rep_rate <= 0) {
+        return 0;
+    }
+    uint32_t n = (uint32_t)late / (uint32_t)t->rep_rate + 1u;
+    if (n > MOY_INPUT_REP_MAX) {
+        n = MOY_INPUT_REP_MAX;
+    }
+    *due = (*due + n * (uint32_t)t->rep_rate) & (MOY_INPUT_TICKS_PERIOD - 1u);
+    if (moy_input_ticks_diff(now, *due) >= 0) {
+        *due = (now + (uint32_t)t->rep_rate) & (MOY_INPUT_TICKS_PERIOD - 1u);
+    }
+    return n;
+}
+
+// The key a typing level repeats: one that types a byte, with no chord.
+static int32_t repeats_as(int32_t ev) {
+    if (MOY_INPUT_MODS(ev) & (MOY_INPUT_MOD_CTRL | MOY_INPUT_MOD_ALT | MOY_INPUT_MOD_SUPER)) {
+        return 0;
+    }
+    return moy_input_typed(ev) ? ev : 0;
+}
+
+static uint32_t later(const moy_input_t *t, uint32_t now) {
+    return (now + (uint32_t)t->rep_delay) & (MOY_INPUT_TICKS_PERIOD - 1u);
+}
+
+void moy_input_begin_frame(moy_input_t *t, uint32_t now) {
     uint32_t held = 0;
+    uint32_t was[MOY_INPUT_SOURCES];
+    int32_t typing[MOY_INPUT_SOURCES];
     uint32_t ph[MOY_INPUT_PLAYERS] = {0};
     const moy_input_latch_t *best = NULL;
     moy_input_sample_t smp = {0};
@@ -501,6 +561,8 @@ void moy_input_begin_frame(moy_input_t *t) {
             || (l->pflags & (P_DOWN | P_EDGE)) == (P_DOWN | P_EDGE)) {
             t->news = (uint8_t)(i + 1);
         }
+        was[i] = t->was[i];
+        typing[i] = repeats_as(l->typing);
         t->was[i] = l->held;
         t->was_key[i] = l->key;
     }
@@ -532,6 +594,82 @@ void moy_input_begin_frame(moy_input_t *t) {
         t->p_pressed[p] = ph[p] & ~t->p_last[p];
         t->p_last[p] = ph[p];
     }
+    // the repeats: a level new at this merge starts its delay
+    now &= MOY_INPUT_TICKS_PERIOD - 1u;
+    bool clock = now != 0 && t->now != 0;   // a clock that just started arms anew
+    t->now = now;
+    memset(t->rep, 0, sizeof(t->rep));
+    t->krep = 0;
+    t->krep_ev = 0;
+    for (uint8_t i = 0; i < t->nsrc; i++) {
+        uint32_t h = t->was[i];
+        for (uint8_t b = 0; h >> b; b++) {
+            if (!(h & (1u << b))) {
+                continue;
+            }
+            if (!(was[i] & (1u << b)) || !clock) {
+                t->rep_due[i][b] = later(t, now);
+                continue;
+            }
+            uint32_t n = owed(t, &t->rep_due[i][b], now);
+            if (n > t->rep[b]) {
+                t->rep[b] = (uint8_t)n;
+            }
+        }
+        int32_t k = typing[i];
+        if (k != t->krep_key[i] || !clock) {
+            t->krep_key[i] = k;
+            t->krep_due[i] = later(t, now);
+        } else if (k) {
+            uint32_t n = owed(t, &t->krep_due[i], now);
+            if (n > t->krep) {
+                t->krep = (uint8_t)n;
+                t->krep_ev = k;
+            }
+        }
+    }
+}
+
+void moy_input_set_repeat(moy_input_t *t, int32_t delay_ms, int32_t rate_ms) {
+    t->rep_delay = delay_ms < 0 ? 0 : delay_ms;
+    t->rep_rate = rate_ms < 0 ? 0 : rate_ms;
+}
+
+void moy_input_get_repeat(const moy_input_t *t, int32_t *delay_ms, int32_t *rate_ms) {
+    *delay_ms = t->rep_delay;
+    *rate_ms = t->rep_rate;
+}
+
+int moy_input_add_steps(moy_input_t *t, uint8_t button, uint32_t n) {
+    if (button >= t->nbuttons) {
+        return MOY_INPUT_BAD;
+    }
+    uint32_t v = t->rep[button] + n;
+    t->rep[button] = (uint8_t)(v > MOY_INPUT_REP_MAX ? MOY_INPUT_REP_MAX : v);
+    return MOY_INPUT_OK;
+}
+
+int32_t moy_input_ball_coast(int32_t *rate) {
+    if (rate != NULL) {
+        *rate = MOY_INPUT_BALL_COAST_RATE;
+    }
+    return MOY_INPUT_BALL_COAST;
+}
+
+uint32_t moy_input_repeats(const moy_input_t *t, uint8_t button) {
+    return button < MOY_INPUT_BUTTONS ? t->rep[button] : 0;
+}
+
+uint32_t moy_input_rep_word(const moy_input_t *t) {
+    return (uint32_t)t->rep[0] | (uint32_t)t->rep[1] << 8 | (uint32_t)t->rep[2] << 16
+           | (uint32_t)t->rep[3] << 24;
+}
+
+uint32_t moy_input_key_repeats(const moy_input_t *t, int32_t *ev) {
+    if (ev != NULL) {
+        *ev = t->krep_ev;
+    }
+    return t->krep;
 }
 
 int moy_input_news(moy_input_t *t, uint32_t *h) {
@@ -558,6 +696,15 @@ void moy_input_release_all(moy_input_t *t) {
 }
 
 void moy_input_clear_edges(moy_input_t *t) {
+    memset(t->rep, 0, sizeof(t->rep));
+    t->krep = 0;
+    t->krep_ev = 0;
+    for (uint8_t i = 0; i < t->nsrc; i++) {
+        for (uint8_t b = 0; b < MOY_INPUT_BUTTONS; b++) {
+            t->rep_due[i][b] = later(t, t->now);
+        }
+        t->krep_due[i] = later(t, t->now);
+    }
     t->pb_pressed = 0;
     t->wheel_x = t->wheel_y = 0;
     t->pressed = 0;

@@ -298,7 +298,7 @@ def test_every_source_is_written_before_begin_frame():
     frame, a source written AFTER the merge is read one frame late --
     silently. Every console board runs this one stage."""
     body = _input_stage()
-    merge = body.index("moy_input_begin_frame(t);")
+    merge = body.index("moy_input_begin_frame(t, now);")
     for writer in ("moy_hid_frame(", "moy_touchdev_poll(", "moy_input_point("):
         assert body.index(writer) < merge, writer
 
@@ -307,7 +307,7 @@ def test_the_idle_check_reads_the_union_after_the_merge():
     # `active` holds the backlight on (the kernel's idle ladder), so a stale
     # read here blanks the screen under a held button.
     body = _input_stage()
-    merge = body.index("moy_input_begin_frame(t);")
+    merge = body.index("moy_input_begin_frame(t, now);")
     assert body.index("moy_input_masks(t, MOY_INPUT_UNION") > merge
     assert body.index("moy_input_last_key(t)") > merge
 

@@ -316,22 +316,22 @@ class SceneEditorUI:
         if se is not None:
             g = 8
             if se.selected() is not None:
-                if i.pressed("up"):
+                if i.steps("up"):
                     self._nudge(0, -1)
-                if i.pressed("down"):
+                if i.steps("down"):
                     self._nudge(0, 1)
-                if i.pressed("left"):
+                if i.steps("left"):
                     self._nudge(-1, 0)
-                if i.pressed("right"):
+                if i.steps("right"):
                     self._nudge(1, 0)
             else:
-                if i.pressed("up"):
+                if i.steps("up"):
                     self._pan(0, -g)
-                if i.pressed("down"):
+                if i.steps("down"):
                     self._pan(0, g)
-                if i.pressed("left"):
+                if i.steps("left"):
                     self._pan(-g, 0)
-                if i.pressed("right"):
+                if i.steps("right"):
                     self._pan(g, 0)
             if i.pressed("a"):
                 self._cycle_zoom()

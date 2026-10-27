@@ -100,6 +100,9 @@ class _Pad:
         self.name = name
         self.asked = set()
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, name):
         self.asked.add(name)
         return name == self.name

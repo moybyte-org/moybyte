@@ -62,6 +62,21 @@
 // driver and the dev channel's gestures are two such sources, so a scripted
 // tap reaches the pointer the way a finger does.
 //
+// REPEAT. A held button repeats at the merge, per source and per button, on
+// the clock begin_frame is given: after the table's repeat delay of level,
+// one repeat every repeat period, and a frame that took two periods owes two.
+// The frame's count for a button is the most any source owes it
+// (moy_input_repeats; moy_input_rep_word packs the four directions). A
+// source's TYPING LEVEL (moy_input_set_typing: the key a keyboard holds down
+// for typing, which no cart reads) repeats the same way into
+// moy_input_key_repeats; a chord (Ctrl, Alt, Super) and a key that types no
+// byte do not repeat. Repeats are counts beside the frame, never edges: they
+// enter no pressed mask, no key event and no last_key, so a cart's btnp,
+// key() and keyp() read what they read without them. moy_input_add_steps adds
+// a producer's steps (the trackball's) to the frame's counts after the merge.
+// moy_input_clear_edges zeroes the counts and starts every held repeat's delay
+// over. A clock of 0 at every merge repeats nothing.
+//
 // PLAYERS. A source sits on a player slot (0 .. MOY_INPUT_PLAYERS-1). The
 // union (MOY_INPUT_UNION) is every source; a player's view is its sources'.
 // While every source sits on one slot, that slot's view is the union and
@@ -94,6 +109,26 @@
 #define MOY_INPUT_NAME 15u          // a source name's bytes
 
 #define MOY_INPUT_CURSOR_IDLE_MS 2000
+
+// The repeat's parameters and the trackball's coast; a board's board.toml
+// [input] overrides them as compile definitions (tools/board_config.py).
+#ifndef MOY_INPUT_REPEAT_DELAY_MS
+#define MOY_INPUT_REPEAT_DELAY_MS 400
+#endif
+#ifndef MOY_INPUT_REPEAT_RATE_MS
+#define MOY_INPUT_REPEAT_RATE_MS 50
+#endif
+// Steps a trackball roll delivers above MOY_INPUT_BALL_COAST_RATE a second
+// become a coast instead: MOY_INPUT_BALL_COAST thousandths of a step a ms per
+// surplus step, delivered on as steps that decay as a fling does
+// (runtime/console.py Workstation._ball_steps); 0 is no momentum.
+#ifndef MOY_INPUT_BALL_COAST
+#define MOY_INPUT_BALL_COAST 0
+#endif
+#ifndef MOY_INPUT_BALL_COAST_RATE
+#define MOY_INPUT_BALL_COAST_RATE 20
+#endif
+#define MOY_INPUT_REP_MAX 255u      // a frame's count for one button, saturated
 #define MOY_INPUT_POINTER_LINGER_MS 1500
 
 enum {
@@ -197,18 +232,30 @@ int moy_input_release(moy_input_t *t, uint32_t h);                   // this sou
 int moy_input_set_key(moy_input_t *t, uint32_t h, int32_t key);      // the key event, as a level; drops the queue
 int moy_input_key(moy_input_t *t, uint32_t h, int32_t key);          // one-shot: one frame
 int moy_input_set_mods(moy_input_t *t, uint32_t h, uint8_t mods);    // the modifiers it holds now
+int moy_input_set_typing(moy_input_t *t, uint32_t h, int32_t key);   // the typing level, 0 none
 int moy_input_scroll(moy_input_t *t, uint32_t h, int32_t dx, int32_t dy);  // wheel notches, added
 int moy_input_set_pointer_buttons(moy_input_t *t, uint32_t h, uint8_t held);
 int moy_input_source_key(const moy_input_t *t, uint32_t h, int32_t *key);
 uint8_t moy_input_source_mods(const moy_input_t *t, uint32_t h);
 uint8_t moy_input_source_pointer_buttons(const moy_input_t *t, uint32_t h);
 uint32_t moy_input_source_held(const moy_input_t *t, uint32_t h);
+int32_t moy_input_source_typing(const moy_input_t *t, uint32_t h);
 // This source's pointer sample, which stands until it writes another.
 int moy_input_point(moy_input_t *t, uint32_t h, int32_t x, int32_t y, bool down, bool edge,
                     bool fresh);
 
 // -- the frame --
-void moy_input_begin_frame(moy_input_t *t);   // the latches merged, the edges computed
+// The latches merged, the edges and the repeats computed; `now` is the
+// caller's clock in ms (wrapping on MOY_INPUT_TICKS_PERIOD), 0 for none.
+void moy_input_begin_frame(moy_input_t *t, uint32_t now);
+// The repeat's delay and period in ms (a period of 0 repeats nothing).
+void moy_input_set_repeat(moy_input_t *t, int32_t delay_ms, int32_t rate_ms);
+void moy_input_get_repeat(const moy_input_t *t, int32_t *delay_ms, int32_t *rate_ms);
+// A producer's steps on `button` this frame, added to its repeat count.
+int moy_input_add_steps(moy_input_t *t, uint8_t button, uint32_t n);
+// The trackball's coast as this build has it (MOY_INPUT_BALL_COAST), and its
+// rate (rate, NULL: not asked).
+int32_t moy_input_ball_coast(int32_t *rate);
 // Everybody lets go: every source and the merged set; the edge snapshot stays.
 void moy_input_release_all(moy_input_t *t);
 // The edges this frame are none: a modal opening on a key must not act on it.
@@ -230,6 +277,13 @@ uint32_t moy_input_kept(const moy_input_t *t);   // the press edges a paced cart
 // the first ask after it, 0 until a merge brings more. The console reads the
 // input in use from it (the hints draw that input's keys).
 int moy_input_news(moy_input_t *t, uint32_t *h);
+// This frame's repeats (and added steps) of `button`, and of the four
+// directions packed a byte each: left, right << 8, up << 16, down << 24.
+uint32_t moy_input_repeats(const moy_input_t *t, uint8_t button);
+uint32_t moy_input_rep_word(const moy_input_t *t);
+// This frame's repeats of the typing level, and (ev, NULL: not asked) the key
+// event they repeat.
+uint32_t moy_input_key_repeats(const moy_input_t *t, int32_t *ev);
 int32_t moy_input_last_key(const moy_input_t *t);    // the byte the frame's key event types
 int32_t moy_input_key_event(const moy_input_t *t);   // the frame's key event
 void moy_input_set_last_key(moy_input_t *t, int32_t key);   // a direct write of an event; the next source write heals it

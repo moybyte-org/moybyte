@@ -372,6 +372,12 @@ class TextConsole:
         code = getattr(inp, "last_key", 0) or 0
         if self._ekey.hit(code):
             self.key(code)
+        n = getattr(inp, "key_repeats", 0)     # a held key types again, and
+        if n:                                  # Enter, which enters, does not
+            r = inp.repeat_key
+            if r in (8, 9, 127) or 32 <= r < 127:
+                for _ in range(n):
+                    self.key(r)
         gp = getattr(inp, "game_pointer", None)
         if gp is not None:
             self._pointer(gp[0], gp[1], bool(gp[2]),

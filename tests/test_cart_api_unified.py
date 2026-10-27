@@ -63,6 +63,9 @@ def test_the_base_namespace_keyset_is_pinned():
         def held(self, name):
             return False
 
+        def steps(self, n):
+            return int(bool(self.pressed(n)))
+
         def pressed(self, name):
             return False
 

@@ -1273,8 +1273,8 @@ class EditorDesk(Layer):
         ws = self.ws
         if ws.sheet is None:
             return False
-        dx = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
-        dy = (1 if i.pressed("down") else 0) - (1 if i.pressed("up") else 0)
+        dx = i.steps("right") - i.steps("left")
+        dy = i.steps("down") - i.steps("up")
         if not (dx or dy):
             return False
         n = max(0, min(ws.sheet.cols * ws.sheet.rows - 1, self._cur_sprite() + dx + dy * 16))

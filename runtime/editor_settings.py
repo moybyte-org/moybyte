@@ -184,7 +184,7 @@ class SettingsPage:
         owed = self.host.keys(i)
         foc = self._focus
         if foc in self._tiles:
-            d = (1 if i.pressed("right") else 0) - (1 if i.pressed("left") else 0)
+            d = i.steps("right") - i.steps("left")
             if d:
                 for f in self._fields():
                     if f["key"] == foc:

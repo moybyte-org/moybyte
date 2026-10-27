@@ -340,6 +340,9 @@ def _appearance(ws):
 class _Right:
     last_key = 0
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         return n == "right"
 

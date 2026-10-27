@@ -2947,6 +2947,9 @@ class _Key:
     def __init__(self, name):
         self.name = name
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, n):
         return n == self.name
 

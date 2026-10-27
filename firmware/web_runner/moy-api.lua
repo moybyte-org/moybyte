@@ -226,8 +226,8 @@ function key(code) end
 ---@return integer|boolean
 function keyp(code) end
 
----Switch the keyboard to TEXT input (clean typeable ASCII incl. autorepeat
----delete) or back to game mode. A textmode(true) cart MUST provide its own
+---Switch the keyboard to TEXT input (clean typeable ASCII, each typed key
+---once, Backspace a typed delete) or back to game mode. A textmode(true) cart MUST provide its own
 ---exit via quit().
 ---@param on? boolean
 function textmode(on) end

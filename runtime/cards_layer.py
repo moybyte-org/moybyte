@@ -368,15 +368,15 @@ class CardsLayer:
         n = self._card_count()
         if not n:
             return True
-        if i.pressed("up"):
+        if i.steps("up"):
             self.msel = (self.msel - 1) % n
             self._reveal_card(self.msel)
-        if i.pressed("down"):
+        if i.steps("down"):
             self.msel = (self.msel + 1) % n
             self._reveal_card(self.msel)
-        if i.pressed("left"):
+        if i.steps("left"):
             ws.adjust(-1)
-        if i.pressed("right"):
+        if i.steps("right"):
             ws.adjust(1)
         if self._is_advanced(self.msel):
             # The last row is a DOOR, not a stepper: A opens it rather than
