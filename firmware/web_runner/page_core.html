@@ -18,7 +18,10 @@
 html,body{margin:0;height:100%;background:#0b0f1a;color:#c2c3c7;
 font:14px ui-monospace,Menlo,Consolas,monospace;display:flex;flex-direction:column;
 align-items:center}
-h1{font-size:14px;color:#fff1e8;margin:8px;max-width:96vw;white-space:nowrap;
+/* html is a centring flex column, which would size body to its widest child's
+   min-content (the nowrap title) and push the document wider than the viewport. */
+body{width:100%}
+h1{font-size:14px;color:#fff1e8;margin:8px;max-width:calc(100% - 16px);white-space:nowrap;
 overflow:hidden;text-overflow:ellipsis}#s{color:#ffec27}
 /* Small phones (e.g. iPhone 13 mini): the full title used to wrap to two rows and
    steal canvas height -- drop the "device" suffix + the backtick hint (meaningless
@@ -273,16 +276,32 @@ if(awOn){awDepth+=n;awNode.port.postMessage({p:f},[f.buffer]);return;}
 var buf=actx.createBuffer(1,n,AUDIO_RATE);buf.getChannelData(0).set(f);
 var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
 var t=Math.max(actx.currentTime+0.02,audioNext);src.start(t);audioNext=t+buf.duration;}
+var fitSent=-1;
 function fit(){/* Fill the available viewport without the old integer-scale
 cliff (e.g. 1.95x used to collapse all the way to 1x on an ultrawide). Sized off
 the VISUAL viewport when the browser has one: iOS collapses it for the soft
 keyboard WITHOUT firing window.resize on close, which is how the canvas used to
 stick tiny after typing + PLAY (owner report 2026-07-23). */
-var hh=document.querySelector("h1"),ct=document.getElementById("ctl");
+/* The height left for the canvas is the viewport minus everything else the page
+lays out above and below it -- title, persistence row, link/import/pick cards,
+control bar, with their margins -- measured, so a row that wraps or a card that
+appears is accounted for and the document never outgrows the viewport (the
+embedded Try-it stage showed a scrollbar and a cut-off console). */
 var vv=window.visualViewport;
 var iw=vv?vv.width:window.innerWidth,ih=vv?vv.height:window.innerHeight;
-var rw=Math.max(64,iw-16);
-var rh=Math.max(64,ih-((hh?hh.offsetHeight:0)+(ct?ct.offsetHeight:0)+28));
+var used=2;/* the canvas's own 1px borders */
+for(var k=document.body.firstElementChild;k;k=k.nextElementSibling){
+if(k===cv||k.tagName==="SCRIPT"||k.tagName==="INPUT")continue;
+var cs=getComputedStyle(k);
+if(cs.display==="none"||cs.position==="fixed"||cs.position==="absolute")continue;
+used+=k.offsetHeight+(parseFloat(cs.marginTop)||0)+(parseFloat(cs.marginBottom)||0);}
+/* Framed (the project site's Try-it stage), the host page is told how much
+height the page needs besides the canvas, so it can size the frame to hold the
+console at its full width. */
+if(window.parent!==window&&used!==fitSent){fitSent=used;
+try{window.parent.postMessage({moyChrome:used+1},"*");}catch(e){}}
+var rw=Math.max(32,iw-16);
+var rh=Math.max(32,ih-used-1);
 // While the soft keyboard is up (#42) the viewport HEIGHT collapses (and the
 // gamepad block still counts against it), which used to shrink the canvas to a
 // stamp -- so size by width alone then; a phone is width-limited anyway.
@@ -295,6 +314,11 @@ cv.style.width=Math.round(W*s)+"px";cv.style.height=Math.round(H*s)+"px";
 // shown at its size or larger, it stays pixelated.
 cv.style.imageRendering=s*(window.devicePixelRatio||1)<1?"auto":"";}
 window.addEventListener("resize",fit);
+/* A row or card appearing, wrapping or going away changes what the canvas has
+left, with no window event to say so. */
+if(window.ResizeObserver){var fitRO=new ResizeObserver(fit);
+for(var fk=document.body.firstElementChild;fk;fk=fk.nextElementSibling)
+if(fk!==cv&&fk.tagName!=="SCRIPT"&&fk.tagName!=="INPUT")fitRO.observe(fk);}
 // The visual viewport is what actually changes when the soft keyboard opens/
 // closes -- listen permanently (kbScroll's focus-scoped listener is separate).
 if(window.visualViewport)window.visualViewport.addEventListener("resize",fit);

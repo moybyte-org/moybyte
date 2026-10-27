@@ -1074,10 +1074,35 @@ var stage = document.getElementById("stage");
 var expand = document.getElementById("expand");
 var shrink = document.getElementById("shrink");
 var tabs = [].slice.call(document.querySelectorAll(".tab:not(.exp)"));
+// The stage is the console's aspect ratio PLUS the height the player page needs
+// besides its canvas (title, the saved-in-this-browser bar): the player reports
+// that height as it lays out, so the canvas fills the stage's width and the
+// player's document never outgrows the frame (no scrollbar, nothing cut off).
+// Until it reports, the guess below holds the place.
+var chrome = 90;
+function sizeStage() {
+  if (stage.classList.contains("big")) {
+    stage.style.aspectRatio = "auto";
+    stage.style.height = "";
+    return;
+  }
+  var p = (stage.dataset.ar || "4 / 3").split("/");
+  var ratio = parseFloat(p[0]) / parseFloat(p[1]);
+  var h = Math.ceil((stage.clientWidth - 2) / ratio) + chrome + 2;
+  stage.style.aspectRatio = "auto";
+  stage.style.height = h + "px";
+}
+window.addEventListener("message", function (e) {
+  var f = stage.querySelector("iframe");
+  if (!f || e.source !== f.contentWindow || !e.data || typeof e.data.moyChrome !== "number") return;
+  chrome = e.data.moyChrome;
+  sizeStage();
+});
+window.addEventListener("resize", sizeStage);
 function show(tab) {
   tabs.forEach(function (t) { t.classList.toggle("on", t === tab); });
   stage.dataset.ar = tab.dataset.ar;
-  if (!stage.classList.contains("big")) stage.style.aspectRatio = tab.dataset.ar;
+  sizeStage();
   // Replace the IFRAME only -- the close button is a child of the stage too, and
   // clearing innerHTML (what this used to do) would take it with them.
   var old = stage.querySelector("iframe");
@@ -1102,7 +1127,7 @@ function fsEl() {
 function big(on) {
   stage.classList.toggle("big", on);
   document.body.classList.toggle("noscroll", on);
-  stage.style.aspectRatio = on ? "auto" : (stage.dataset.ar || "");
+  sizeStage();
 }
 expand.addEventListener("click", function () {
   big(true);
