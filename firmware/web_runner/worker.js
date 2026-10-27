@@ -971,6 +971,12 @@ async function init(search, coarse, channel, scheme) {
         // live Workstation, which boot() is what creates.
         + (updateDoc ? "web_boot.update_enable("
             + JSON.stringify(JSON.stringify(updateDoc)) + ")\n" : "")
+        // START OPTION: ?edit=<cart>[&tab=code|paint|map|...] opens that cart in
+        // the Editor (the p8 drop's edit_cart: ws.open_in_editor and a tab, with
+        // no badge), where a plain visit lands on the home. The cart is whatever the
+        // store holds, edited or seeded; an unknown name leaves the home.
+        + (qs.get("edit") ? "web_boot.start_edit(" + JSON.stringify(qs.get("edit"))
+            + (qs.get("tab") ? ", " + JSON.stringify(qs.get("tab")) : "") + ")\n" : "")
         + (desktop && cart ? "web_boot.open_cart(" + JSON.stringify(cart) + ")\n" : "")
         // Single-cart bundle: kiosk mode -- the exit gesture restarts the game
         // instead of dropping into the shell (the game IS the page).

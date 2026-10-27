@@ -355,13 +355,18 @@ for(var v=0;v<65536;v++){var p=swap?(((v&255)<<8)|(v>>8)):v;
 var r=(p>>11)&31,g=(p>>5)&63,b=p&31;
 L[v]=(255<<24)|(((b<<3)|(b>>2))<<16)|(((g<<2)|(g>>4))<<8)|((r<<3)|(r>>2));}
 LUT565=L;LUT_SWAP=swap;}
+/* Framed, the host page is told when the first frame is on the canvas (the
+project site swaps its still for the live console on it). */
+var firstBlit=true;
 function blit(fb){if(!fb||!rgba32||!LUT565)return;var t0=PT();
 var src=new Uint16Array(fb),n=rgba32.length,L=LUT565;
 if(src.length<n)n=src.length;
 for(var i=0;i<n;i++)rgba32[i]=L[src[i]];
 var t1=PT();cx.putImageData(img,0,0);var t2=PT();
 if(t1-t0>PERF.mb)PERF.mb=t1-t0;if(t2-t1>PERF.mu)PERF.mu=t2-t1;
-PERF.sb+=t1-t0;PERF.su+=t2-t1;PERF.sn++;}
+PERF.sb+=t1-t0;PERF.su+=t2-t1;PERF.sn++;
+if(firstBlit){firstBlit=false;if(window.parent!==window)
+try{window.parent.postMessage({moyLive:true},"*");}catch(e){}}}
 var q=[];function send(e){q.push(e);}
 function xy(cX,cY){var r=cv.getBoundingClientRect();var x=Math.floor((cX-r.left)/r.width*W),
 y=Math.floor((cY-r.top)/r.height*H);return{x:Math.max(0,Math.min(W-1,x)),y:Math.max(0,Math.min(H-1,y))};}

@@ -662,6 +662,20 @@ def edit_cart(name, tab=None):
     })
 
 
+def start_edit(name, tab=None):
+    """The start option (`?edit=<cart>&tab=<tab>`): boot into the Editor on
+    `name`'s `tab` where a plain visit boots to the home. It is `edit_cart`
+    without the First Steps badge -- opening the editor was the page's doing,
+    not a thing the visitor did, and a banner over the first frame would hide
+    the code the start option is there to show. Returns edit_cart's JSON."""
+    ws = _S["ws"]
+    note, ws.ach.note = ws.ach.note, lambda *a, **k: None
+    try:
+        return edit_cart(name, tab)
+    finally:
+        ws.ach.note = note
+
+
 def import_p8_json(path, name, out_dir):
     """Convert a dropped PICO-8 cart at `path` into a `.moy` folder (#194).
 

@@ -431,8 +431,12 @@ try {
   // ---- play-button splash ----------------------------------------------------
   // The p8-web-player pattern: the game starts on a CLICK, which is also the user
   // gesture that unlocks WebAudio, so sound works from frame one.
-  // ?dev=1 (the CLI hot-reload loop) skips it -- devs restart constantly.
-  if (new URLSearchParams(location.search).get("dev")) {
+  // ?dev=1 (the CLI hot-reload loop) skips it -- devs restart constantly. So
+  // does ?start=1, which an embedding page passes when its visitor's click
+  // already started this console (the project site's hero): the click that
+  // unlocks audio is then the page's, and the frame inherits it.
+  const qStart = new URLSearchParams(location.search);
+  if (qStart.get("dev") || qStart.get("start")) {
     window.__moyStart();
   } else {
     const ov = document.createElement("div");

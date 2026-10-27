@@ -78,9 +78,11 @@ FEATURES = {
                        and b"carts_link" in (DIST / "micropython.wasm").read_bytes()),
               "dist/ predates Get Carts in the browser (no carts pump, no file "
               "question, or no carts_link frozen in the wasm)"),
-    # The first-run theme: the page reads the scheme and hands it to the worker.
-    "firstrun": (lambda: "moyScheme" in (DIST / "index.html").read_text(),
-                 "dist/ predates the first-run theme"),
+    # The first-run theme and the start option: the page reads the scheme and
+    # hands it to the worker, and the frozen console has to know both.
+    "firstrun": (lambda: ("moyScheme" in (DIST / "index.html").read_text()
+                          and b"start_edit" in (DIST / "micropython.wasm").read_bytes()),
+                 "dist/ predates the first-run theme and the start option"),
 }
 
 
