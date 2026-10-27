@@ -1361,9 +1361,10 @@ def draw_gates_take_the_traffic(board, windowed=False):
     the wrong screen."""
     bufs = "[ws.sys_canvas]" + (
         " + [w.buf for w in ws.wm._wins.values()]" if windowed else "")
+    # Counted from before the open: a page's first frame draws whole, while a
+    # repaint of an unchanged verbs page is a rows frame that may draw nothing.
+    board.pyexec("for _c in [ws.sys_canvas]: _c.gate_counts_reset()")
     board.open("settings")
-    board.drain(1.0)
-    board.pyexec("for _c in %s: _c.gate_counts_reset()\nws.mark_dirty()" % bufs)
     board.drain(1.5)
     fills, texts = board.pyval(
         "[sum(c.gate_counts()[i] for c in %s) for i in (0, 1)]" % bufs)
