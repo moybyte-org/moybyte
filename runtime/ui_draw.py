@@ -1599,13 +1599,23 @@ def current_ink(cv, th, back=False):
                       _MARK_INK | (_MARK_BACK if back else 0), None)
 
 
+_MARKS_ON = [True]   # what `marks` last set, read with no tuple made (`marks_on`)
+
+
 def marks(active=None, reset=False):
     """(active, focus marks drawn, reach): whether focus draws (`active` sets it: the shell clears it
     while a window behind draws; under touch, `input_kind`, no focus draws
     whatever it says, as on a phone), the count of focus marks drawn (`reset`
     zeroes it after reading), and how far a card's focus mark reaches past
     the card's top edge."""
+    if active is not None:
+        _MARKS_ON[0] = bool(active)
     return _C.marks(active, reset)
+
+
+def marks_on():
+    """`marks()[0]`, allocating nothing: the one setter is `marks`."""
+    return _MARKS_ON[0]
 
 
 def mark_reach(size="part"):

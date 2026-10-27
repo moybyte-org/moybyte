@@ -386,6 +386,12 @@ def _inside(a, b):
             and a[0] + a[2] <= b[0] + b[2] and a[1] + a[3] <= b[1] + b[3])
 
 
+# The dirty mark the home's X leaves (`leave_console`): the desk comes back
+# whole, and no window's content changed with it, so §14.1's freeze holds
+# the focused one as it holds the others. Any handler's mark after it is
+# True, which the freeze reads as a change.
+MODE_MARK = 2
+
 # The most physical buffers a root canvas rotates through (the Waveshare P4's
 # triple framebuffer): the shown ring keeps one entry more.
 _SHOWN = 3
@@ -760,10 +766,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if layout is not None:
             self._root_ctx.app_layouts[app.id] = layout
 
-    def _install(self, ctx, win=None):
+    def _install(self, ctx, win=None, draws=True):
         # The focus mark draws only in the focused window (ui.marks), and in
         # none while a popover or the delete confirm above the windows holds
-        # the keys: one a screen.
+        # the keys: one a screen. `draws`: the window's buffer is drawn
+        # under it, so it holds the mark as set (`_marked`); input handled
+        # in its context leaves the buffer as it is.
         # The root context takes back the marks it had before the windows
         # drew -- off while the console holds them under a menu -- so what
         # the root draws after them marks only where it may.
@@ -778,10 +786,22 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._root_marks = _ui_draw.marks()[0]
             cx, cy, _cw, _ch = win.content_rect()
             ctx.install(self.ws, (cx, cy))
-            win._marked = (self._wins.get(self._focus) is win
-                           and not self.popover_takes_keys()
-                           and not self.ws.confirm.open)
-            _ui_draw.marks(win._marked)
+            word = self._mark_word(win)
+            if draws:
+                win._marked = word and _ui_draw.input_kind() != "touch"
+            _ui_draw.marks(word)
+
+    def _mark_word(self, win):
+        """The shell's word on `win`'s focus mark (ui.marks): the focused
+        window's, while no menu or confirm holds the keys (one a screen)."""
+        return (self._wins.get(self._focus) is win
+                and not self.popover_takes_keys()
+                and not self.ws.confirm.open)
+
+    def _marks_for(self, win):
+        """Whether `win`'s content shows its focus mark now: the shell's
+        word, under an input that shows focus (none does under touch)."""
+        return self._mark_word(win) and _ui_draw.input_kind() != "touch"
 
     def _make_ctx(self, buf, foot=0):
         """Build the layout set for a window buffer: run the console's own
@@ -949,7 +969,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._prewarm(win)
         self._win_sig = None
         self._desk_streak = 0             # every buffer holds the home
-        ws._dirty = True
+        ws._dirty = MODE_MARK
 
     def show_desk(self):
         """The HOME key in desktop mode (owner, 2026-10-13), Win+D's shape:
@@ -1253,7 +1273,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = self._wins.get(kind)
         if win is None or win.buf is None or win.ctx is None or self.mode == "console":
             return False
-        self._install(win.ctx, win)
+        self._install(win.ctx, win, draws=False)
         try:
             fn()
         finally:
@@ -2333,8 +2353,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         shows under the menu: the wash stamps it into each buffer."""
         ww = self._wash_win
         win = self._wins.get(self._focus) if self._focus is not None else None
-        if win is None or win.minimized or win.kind == "desktop":
-            ww[0] = None
+        if (win is None or win.minimized or win.kind == "desktop"
+                or win._marked == self._marks_for(win)):
+            ww[0] = None                  # it shows under the menu as it is
             return
         buf = win.buf
         lay = ww[1]
@@ -3619,7 +3640,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
         - Nothing marked the UI dirty. ws._dirty is still readable during the
           draw -- frame() clears it AFTER -- so a False here means no input or
-          state handler reported a visible change this frame.
+          state handler reported a visible change this frame. MODE_MARK, the
+          home's X bringing the desk back, is the WM's own and no change.
         - No pointer DOWN or CLICK was live this frame or last, unless the
           press is the WM's (`_grab`: a strip, a resize zone, a full-screen row's
           head), which no content is handed while it is held. The drag-driven
@@ -3654,8 +3676,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if win._look_gen != gen:
             win._look_gen = gen
             return False
-        if ws._dirty or win.buf is None or win._buf_stale:
+        d = ws._dirty
+        if (d and d is not MODE_MARK) or win.buf is None or win._buf_stale:
             return False
+        if win._marked != self._marks_for(win):
+            return False                  # it holds a focus mark it no longer shows, or lacks one
         cur = ws._ptr_state()
         last = ws._last_ptr
         if not self._grab:
@@ -3977,7 +4002,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if (i.pressed("b") or i.pressed("stop")) and self._win_back(win):
             return True               # the window's back chevron (`_win_back`)
         if win.ctx is not None:
-            self._install(win.ctx, win)
+            self._install(win.ctx, win, draws=False)
             try:
                 return bool(content.handle_input(i))
             finally:
@@ -4191,7 +4216,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if p.down:
             self._content_gesture = True    # scrolling INSIDE a window: the desk
                                             # is static -> _BackdropLayer caches
-        self._install(win.ctx, win)
+        self._install(win.ctx, win, draws=False)
         try:
             content.handle_pointer(lx, ly, click)
         finally:

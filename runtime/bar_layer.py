@@ -136,10 +136,10 @@ _TAPPED = ("clock", "menu", "wifi", "battery", "close")
 # A bar's titles where no running cart names one.
 _TITLES = {"projects": "PROJECTS", "settings": "SETTINGS", "desk": "DESK",
            "webconsole": "Web console"}
-# _cart_bar_key's fields every bar folds, and the ones a widget adds (field 2
-# is no bar's).
+# _cart_bar_key's fields every bar folds, and the ones a widget adds (field 2:
+# whether focus marks draw, which the lent zone's current tab shows).
 _KEY_ALWAYS = (0, 3, 4, 10, 12)
-_KEY_OF = {"clock": (1,), "zone": (5, 6, 8, 9), "title": (6, 8), "wifi": (7,),
+_KEY_OF = {"clock": (1,), "zone": (2, 5, 6, 8, 9), "title": (6, 8), "wifi": (7,),
            "menu": (11,)}
 _KEY_N = 13                 # 12: the item keys focus (`focus_item`)
 _KEY_ALL = (1 << _KEY_N) - 1
@@ -824,6 +824,8 @@ class BarLayer:
         key[0] = where
         if need & 2:
             key[1] = self._clock_text()
+        if need & 4:
+            key[2] = _ui_draw.marks_on()
         key[3] = ws.look.look_gen
         key[4] = getattr(cv, "font_scale", 1)
         if need & 32:

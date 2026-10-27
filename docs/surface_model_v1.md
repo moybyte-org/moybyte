@@ -713,11 +713,16 @@ primitives) stays there and is not carried forward; §8 keeps the verdicts.
 `wm_windowed._content_static` is §4's skip-draw generalization as built: on a
 PAINTED frame that provably did not change the focused window's content, the
 content draw is skipped and the retained `win.buf` stamp presents it instead.
-"Provably" is four checkable facts, all of them required.
+"Provably" is five checkable facts, all of them required.
 
-- **`ws._dirty` is false.** It is still readable during the draw — `frame()`
-  clears it after — so false means no input or state handler reported a visible
-  change this frame.
+- **`ws._dirty` is false, or the WM's own mode-switch mark.** It is still
+  readable during the draw — `frame()` clears it after — so false means no
+  input or state handler reported a visible change this frame. The home's X
+  bringing the desk back marks `MODE_MARK`, which no window's content moved
+  with; any handler's mark after it is `True`.
+- **The buffer holds the focus mark this frame draws** (`win._marked`, set
+  where the buffer is drawn, against `_marks_for`): one a screen, so a
+  window under a menu that holds the keys draws without it.
 - **No pointer DOWN or CLICK, this frame or last — unless the press is the
   WM's.** Class C (§3) mutates content without marking dirty, so any button
   activity renders live. The check reads BOTH frames because handlers consume

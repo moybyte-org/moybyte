@@ -2580,7 +2580,29 @@ def test_the_x_leaves_console_mode_with_the_windows_unrendered(tmp_path, monkeyp
         assert wm._wins[k] is w and w.buf is bufs[k]
     assert wm._parked is None
     drv.frame(1 / 30)
-    assert "settings" not in seen and "calc" not in seen   # stamped, not drawn
+    assert seen == [], "the focused window too is stamped, not drawn"
+    drv.press("down")                            # a key it takes: it renders
+    drv.frame(1 / 30)
+    assert seen == ["menu"]
+
+
+def test_the_x_back_is_a_full_repaint_in_every_buffer(tmp_path):
+    """The home's X on a triple-buffered root: the windows come back
+    stamped, the focused one's content held (§14.1), and every buffer
+    equals a full repaint of the desk they make."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ws.open_library()
+    ring.settle(drv, 4)
+    ws.open_desk()
+    ring.settle(drv, 4)
+    seen = list(ring.bufs)
+    assert seen == ring.full(drv)
 
 
 def test_a_released_stamp_re_renders_once_on_return(tmp_path, monkeypatch):

@@ -2273,7 +2273,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 print("DEFER ms=%d fn=%s"
                       % (_ticks_diff(_ticks_ms(), _t0),
                          getattr(fn, "__name__", "?")))
-        if paint:
+        if paint and not self._dirty:
             self._dirty = True         # the transition's result must paint
 
     def _crash_to_code(self):

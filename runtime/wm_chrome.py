@@ -511,7 +511,7 @@ class WindowChrome:
             return False
         app = self.ws.page_app(win.kind)
         if win.ctx is not None:
-            self._install(win.ctx, win)
+            self._install(win.ctx, win, draws=False)
         try:
             self.ws.app_back(app)
         finally:
