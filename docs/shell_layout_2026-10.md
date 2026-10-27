@@ -849,7 +849,8 @@ Open, New, or Change on Make), X for the card's list and the tabs'
 shoulders. Under touch there is no strip, and the home lays out in its
 height too; a long press opens the card's list.
 
-**Damage first.** The fullscreen home's drag partial hands its band rect to
+**Damage first.** The fullscreen home's band frame (`_drag_partial`) hands
+the rects it changed -- the band, or a step's cards and hint strip -- to
 the compositor's `note_damage` (`FullscreenStackWM.hand_content_damage`,
 nothing handed while an overlay, the cursor or an owed LOADING pill also
 drew), so a moving home frame on the Guition P4 rotates the band, not the

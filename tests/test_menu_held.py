@@ -109,6 +109,14 @@ def _session(ws, frame):
     return shots
 
 
+def _changes(shots):
+    out = []
+    for s in shots:
+        if not out or out[-1] != s:
+            out.append(s)
+    return out
+
+
 @pytest.mark.parametrize("bufs", [1, 2])
 @pytest.mark.parametrize("theme", [None, "night", "blocks"], ids=["shipped", "night", "blocks"])
 def test_every_presented_frame_is_a_whole_repaints(tmp_path, monkeypatch, bufs, theme):
@@ -124,6 +132,10 @@ def test_every_presented_frame_is_a_whole_repaints(tmp_path, monkeypatch, bufs, 
     ui.put_home = lambda cv, dt: puts.append(real_put(cv, dt)) or puts[-1]
     home._try_stamp_retained = lambda cv, dt: stamps.append(real_stamp(cv, dt)) or stamps[-1]
     part = _session(ws, frame)
+    # A frame that brings a buffer to the glass's frame (the home's debt)
+    # presents what the glass already shows: the glass's sequence of
+    # pictures is the full repaints'.
+    whole, part = _changes(whole), _changes(part)
     assert len(whole) == len(part)
     for i, (a, b) in enumerate(zip(whole, part)):
         assert a == b, "the glass's picture %d differs from a full repaint's" % i

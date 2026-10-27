@@ -2523,9 +2523,10 @@ def row_drag(anchor, py, step, top, top_max):
 
 
 # The largest physical-buffer rotation any canvas has (host 1, device
-# ping-pong 2, the P4's triple framebuffer 3 -- shipped, efcf5d1). The paint ring
-# keeps this many entries so blit_shift can verify RETAINED_FRAMES consecutive
-# paints on ANY tier; raise it if a canvas ever rotates more buffers.
+# ping-pong 2, the P4's triple framebuffer 3 -- shipped, efcf5d1). A paint
+# ring keeps this many entries so it can vouch for RETAINED_FRAMES
+# consecutive paints on ANY tier; raise it if a canvas ever rotates more
+# buffers.
 _MAX_RETAINED = 3
 
 
@@ -2535,14 +2536,19 @@ class PaintRing:
     per painted frame -- its number, the canvas it drew on, its key (what
     the pixels are a function of besides the region's own state, compared
     `==`, and an object compared `is`: a theme), the region's offset, a
-    stamp (a rect the caller drew over it, which it repaints) and whether
-    the paint left the region whole with nothing over it. The slots are
-    kept, never made again: noting a frame allocates nothing.
+    stamp (a rect the caller drew over it, which it repaints), what the
+    frame changed (its owner's record; None: unknown) and whether the paint
+    left the region whole with nothing over it. The slots are kept, never
+    made again: noting a frame allocates nothing.
 
     `vouch` is the shift frame's licence on the host's side: frame n-1
     painted the region whole under this key into the buffer `shift_last`
-    reads, so a shift brings n-1 to n. Under the windowed WM the shown ring
-    vouches instead (one voucher per region)."""
+    reads, so a shift brings n-1 to n. `held` names the paint the buffer a
+    frame draws into holds, RETAINED_FRAMES back. Under the windowed WM the
+    shown ring vouches for the buffer instead (one voucher per region) and
+    the content's ring answers only `vouch_key`. Every painted region -- a
+    full-screen app's page, a ScrollRegion, the home's band and the desk
+    home's still frames -- keeps one of these."""
 
     def __init__(self, n=_MAX_RETAINED):
         self.n = n
@@ -2552,6 +2558,7 @@ class PaintRing:
         self._obj = [None] * n
         self._cv = [None] * n
         self._stamp = [None] * n
+        self._change = [None] * n
         self._whole = bytearray(n)
         self._i = 0                     # the newest slot
         self.size = 0                   # the slots holding a frame
@@ -2560,9 +2567,10 @@ class PaintRing:
         """Forget every frame: the region repaints whole until it re-arms."""
         self.size = 0
         for i in range(self.n):
-            self._cv[i] = self._obj[i] = self._key[i] = self._stamp[i] = None
+            self._cv[i] = self._obj[i] = self._key[i] = self._stamp[i] = self._change[i] = None
 
-    def note(self, frame_no, key=None, offset=0, stamp=None, cv=None, obj=None, whole=True):
+    def note(self, frame_no, key=None, offset=0, stamp=None, cv=None, obj=None, whole=True,
+             change=None):
         """Frame `frame_no` painted the region at `offset`."""
         i = self._i + 1
         if i >= self.n:
@@ -2574,6 +2582,7 @@ class PaintRing:
         self._off[i] = offset
         self._stamp[i] = stamp
         self._cv[i] = cv
+        self._change[i] = change
         self._whole[i] = 1 if whole else 0
         if self.size < self.n:
             self.size += 1
@@ -2612,6 +2621,26 @@ class PaintRing:
         if not self._whole[i] or self._obj[i] is not obj or self._key[i] != key:
             return None
         return True
+
+    def change(self, back=0):
+        return self._change[self._slot(back)]
+
+    def whole(self, back=0):
+        return back < self.size and self._whole[self._slot(back)] == 1
+
+    def held(self, cv, frame_no):
+        """How many paints back the paint is whose pixels the buffer frame
+        `frame_no` draws into holds: RETAINED_FRAMES - 1, where the frames
+        between were this region's paints, one after another (a gap means
+        another surface may have painted the buffers) and that paint left
+        the region whole. None otherwise."""
+        k = getattr(cv, "RETAINED_FRAMES", 0)
+        if k < 1 or k > self.size:
+            return None
+        for b in range(k):
+            if self._f[self._slot(b)] != frame_no - 1 - b:
+                return None
+        return k - 1 if self._whole[self._slot(k - 1)] else None
 
     def vouch(self, cv, frame_no, key=None, obj=None):
         """True when frame `frame_no` - 1 painted the region whole under
@@ -2659,12 +2688,9 @@ class ScrollRegion:
         # glide's target, their flags) live in this buffer; the rules are
         # native/moy_ui's (moy_ui_scroll_t).
         self._st = bytearray(28)
-        # Scroll-as-blit paint ring (#113): the most recent painted frames.
-        # blit_shift compares the current offset against the paint whose
-        # pixels sit in the target framebuffer (RETAINED_FRAMES back -- 1 on
-        # the host's persistent buffer, 2 on the device ping-pong), so a
-        # scrolled view can shift its already-correct pixels and repaint only
-        # the exposed band.
+        # Scroll-as-blit paint ring (#113): what the canvas's buffers hold
+        # of this view (`PaintRing`), so a scrolled view can shift its
+        # already-correct pixels and repaint only the exposed band.
         self.ring = PaintRing()
 
     def set(self, view_rect, content):
@@ -2705,34 +2731,32 @@ class ScrollRegion:
         paints until the ring re-arms."""
         self.ring.clear()
 
-    def note_painted(self, frame_no, key=None, stamp=None):
+    def note_painted(self, frame_no, key=None, stamp=None, alone=True):
         """Record a paint of this view at the current offset. `key` pins the
         non-scroll state the pixels depend on; `stamp` is an opaque damage rect
         (the cursor sprite baked into this paint) returned by a later
-        blit_shift so the caller can repaint it. The ring keeps
-        _MAX_RETAINED paints: blit_shift needs RETAINED_FRAMES consecutive
-        ones, and this has no canvas to read the real N from."""
-        self.ring.note(frame_no, key, self.offset, stamp)
+        blit_shift so the caller can repaint it. `alone` False: something
+        was drawn over the view this frame, so the paint vouches for nothing.
+        The ring keeps _MAX_RETAINED paints: blit_shift needs
+        RETAINED_FRAMES consecutive ones, and this has no canvas to read
+        the real N from."""
+        self.ring.note(frame_no, key, self.offset, stamp, whole=alone)
 
     def blit_shift(self, cv, frame_no, key=None):
         """(delta, stamp) when the canvas's target framebuffer holds this
         view's pixels at a known offset, else None (caller paints full). delta
         is current offset minus the offset baked in the target buffer; stamp
         is that paint's recorded damage rect (or None)."""
-        k = getattr(cv, "RETAINED_FRAMES", 0)
         ring = self.ring
-        if (k < 1 or getattr(cv, "scroll_rect", None) is None
-                or ring.size < k):
+        if getattr(cv, "scroll_rect", None) is None:
             return None
-        for i in range(k):
-            if ring.frame(i) != frame_no - 1 - i:
-                return None            # not consecutive paints of THIS view
-        if ring.key(k - 1) != key:
+        b = ring.held(cv, frame_no)
+        if b is None or ring.key(b) != key:
             return None
-        delta = self.offset - ring.offset(k - 1)
+        delta = self.offset - ring.offset(b)
         if abs(delta) >= self._extent():
             return None                # nothing survives the shift
-        return (delta, ring.stamp(k - 1))
+        return (delta, ring.stamp(b))
 
     def scroll_to_show(self, p, size):
         """Nudge the offset so the content span [p, p+size) is inside the view."""

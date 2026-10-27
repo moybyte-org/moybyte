@@ -183,9 +183,11 @@ door — no setting, no mode:
   which coasts with friction and hard-stops at the ends; a slow or held release
   is a plain stop, and a touch mid-coast CATCHES it (that catching tap never
   activates a card). The physics lives in the shared `ui.ScrollRegion`, so the
-  grid and the icons fling identically; a scroll or fling frame repaints the
-  cards' band alone over its captured backdrop (the drag partial), never the
-  bars or the hint strip.
+  grid and the icons fling identically; a scroll, fling or step frame is the
+  band's alone (`launcher_layer._drag_partial`): on the plain ground the
+  band shifts and repaints the strip it exposed, a step repaints the two
+  cards whose focus moved and the hint strip, and over a baked backdrop or a
+  picture a moved band repaints whole over the backdrop's own pixels.
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
   v1 §1.2): PLAY runs it (same as the tap), CHANGE opens the SAME project in the
   Editor landing on Config — the bridge from playing to making, in place, never a

@@ -460,20 +460,22 @@ def test_a_copy_landing_at_its_fence_draws_the_same_frames(th, kind, bufs):
 
 def test_one_ring_body():
     """The painted-frame rings are `ui_draw.PaintRing` (docs/scroll_and_text_
-    2026-10.md §3.1): no other list of painted frames in the shell or the
-    toolkit. The home's still ring (§14.4) becomes one with the home's
-    phase (§15's P6)."""
+    2026-10.md §3.1), one class: no other list of painted frames in the
+    shell or the toolkit. A full-screen app's page, a ScrollRegion (the
+    home's band among them) and the desk home's still frames (§14.4) each
+    keep one; the windowed WM's `_shown` is the windows' ring."""
     import re
     root = Path(__file__).resolve().parent.parent
-    allowed = {("launcher_layer.py", "_still_ring")}
+    src = {p.name: p.read_text(encoding="utf-8") for p in (root / "runtime").glob("*.py")}
+    assert sum(s.count("class PaintRing") for s in src.values()) == 1
     found = []
-    for path in sorted((root / "runtime").glob("*.py")):
-        for m in re.finditer(r"self\.(_\w*(?:painted|ring)\w*) = \[\]", path.read_text()):
-            if (path.name, m.group(1)) not in allowed:
-                found.append("%s: %s" % (path.name, m.group(1)))
+    for name, text in sorted(src.items()):
+        for m in re.finditer(r"self\.(_\w*(?:painted|ring)\w*) = \[\]", text):
+            found.append("%s: %s" % (name, m.group(1)))
     assert not found, found
     assert isinstance(ui_draw.ScrollRegion().ring, ui_draw.PaintRing)
     assert isinstance(ui_draw.AppHost().ring, ui_draw.PaintRing)
+    assert "self._still_ring = _ui_draw.PaintRing()" in src["launcher_layer.py"]
 
 
 def test_the_band_is_the_floor_in_the_pages_coordinates(th, monkeypatch):

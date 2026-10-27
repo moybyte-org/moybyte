@@ -879,7 +879,7 @@ paid it because the selection or the tab sat in the statics key the drag
 partial gates on. #66 has the numbers.
 
 **The home keeps §4's per-buffer last-seen for its parts**
-(`LauncherHomeLayer._still_ring`, one entry a painted frame): the backdrop's
+(`LauncherHomeLayer._still_ring`, a `PaintRing` slot a painted frame): the backdrop's
 key, the selection's and the band's, recorded only for a frame whose pixels
 were the home's alone (`content_alone`: no overlay, splash, cursor or owed
 pill over it, the home on top, nothing animating). When the RETAINED_FRAMES
@@ -1095,10 +1095,12 @@ grep. Pinned by `tests/test_shift_frames.py` (the engine: drags, flings,
 glides, every move size, the clamps, a gen moving mid-fling, a cover landing,
 overlays, a theme change, a gap, a deferred copy landing at the fence),
 `tests/test_shift_apps.py` (Settings and its pages, My Art, Get Carts on the
-full-screen console, and a declared copy cost) and `tests/test_wm_records.py`
+full-screen console, and a declared copy cost), `tests/test_wm_records.py`
 (every app on the verbs in a desk window, windows overlapping, a focus
 change and a move mid-coast, a popover and the system menu's scrim over a
-glide), each presented frame, with up to three buffers taking
+glide) and `tests/test_home_band.py` (the home's band: grid, icons and
+carousel, handheld and desk, on plain, backdrop and picture themes), each
+presented frame, with up to three buffers taking
 turns, byte-equal to whole repaints, the share of shift frames held above a floor,
 and the engine's record audit failing any shift frame whose stops moved
 outside its floor.

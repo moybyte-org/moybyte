@@ -183,6 +183,61 @@ def test_blit_shift_rejects_a_full_view_shift_and_invalidate_clears():
     assert r.blit_shift(_Cv(), 11, key="k") is None
 
 
+
+# -- the PaintRing (docs/scroll_and_text_2026-10.md §3.1) ----------------------
+
+class _Cv3:
+    RETAINED_FRAMES = 3
+
+
+def test_the_ring_holds_the_paint_its_buffer_was_drawn_by():
+    """`held` answers how many paints back the paint is RETAINED_FRAMES
+    back, only over a run of consecutive paints, and only one that left the
+    region whole."""
+    from runtime import ui_draw
+
+    ring = ui_draw.PaintRing()
+    for f in range(10, 13):
+        ring.note(f, ("k", f), f * 10)
+    assert ring.held(_Cv(), 13) == 0 and ring.frame(0) == 12
+    b = ring.held(_Cv3(), 13)                         # three buffers: frame 10's
+    assert b == 2 and ring.offset(b) == 100 and ring.key(b) == ("k", 10)
+    assert ring.held(_Cv3(), 14) is None              # a gap: frame 13 painted elsewhere
+    ring.note(13, "k", 0, whole=False)                # an overlay over frame 13
+    assert ring.held(_Cv(), 14) is None
+    assert ring.frame(ring.held(_Cv3(), 14)) == 11    # ...which frame 16 would read
+    assert ring.size == 3
+    ring.clear()
+    assert ring.size == 0 and ring.held(_Cv(), 14) is None
+
+
+def test_the_ring_vouches_for_the_last_frame_under_its_key():
+    from runtime import ui_draw
+
+    cv = _Cv3()
+    ring = ui_draw.PaintRing()
+    ring.note(5, "k", 7, (1, 2, 3, 4), cv, change=("sel", 3))
+    assert ring.vouch(cv, 6, "k") and ring.stamp(0) == (1, 2, 3, 4)
+    assert ring.change(0) == ("sel", 3)
+    assert ring.vouch(cv, 6, "j") is None
+    assert ring.vouch(cv, 7, "k") is None
+    assert ring.vouch(_Cv3(), 6, "k") is None         # another canvas's buffers
+    assert ring.vouch(object(), 6, "k") is None       # a canvas that retains nothing
+
+
+def test_the_ring_reuses_its_slots():
+    """A note writes slots the ring already has: nothing made a frame."""
+    from runtime import ui_draw
+
+    ring = ui_draw.PaintRing()
+    held = (ring._f, ring._off, ring._key, ring._stamp, ring._change, ring._whole)
+    for f in range(20):
+        ring.note(f, None, f)
+    assert (ring._f, ring._off, ring._key, ring._stamp, ring._change, ring._whole) == held
+    assert all(a is b for a, b in zip(held, (ring._f, ring._off, ring._key, ring._stamp,
+                                             ring._change, ring._whole)))
+    assert [ring.frame(b) for b in range(3)] == [19, 18, 17]
+
 # -- the carousel + shelf pilots (the shared console, end to end) ------------
 
 def _spy_scroll_rect(ws):
@@ -323,16 +378,16 @@ def test_shelf_blit_arms_in_a_window(tmp_path):
     assert grid._region.ring.size, "the paint ring never survives a frame"
 
     shifts = [0]
-    region = grid._region
-    orig = region.blit_shift
+    ring = grid._region.ring
+    orig = ring.held
 
-    def spy(cv, frame_no, key=None):
-        r = orig(cv, frame_no, key)
+    def spy(cv, frame_no):
+        r = orig(cv, frame_no)
         if r is not None:
             shifts[0] += 1
         return r
 
-    region.blit_shift = spy
+    ring.held = spy
 
     lay = win.ctx.layout                     # window-local grid geometry
     gx, gy, gw, gh = lay.lib_grid

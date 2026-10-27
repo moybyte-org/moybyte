@@ -289,15 +289,15 @@ preallocated slots (no per-frame tuples: `tests/test_frame_alloc.py`'s pin
 extends to shell shift and rows frames). Full-screen contents (the
 handheld's home, apps and Editor; the P4's full-screen windows draw through
 the WM) have no window ring and keep the same entry themselves:
-`ui_draw.PaintRing`, the `ScrollRegion._painted` ring of #113 extracted --
-slots of (frame number, key, offset, stamp, change), `vouch(cv, frame_no,
+`ui_draw.PaintRing`, `ScrollRegion.ring` (#113's ring) extracted --
+slots of (frame number, canvas, key, offset, stamp, change, whole), `vouch(cv, frame_no,
 key)` answering whether frame n−1 painted this region completely under this
 key into the buffer `shift_last` reads, else None. **One voucher per
 region**: under the windowed WM only `_shown` vouches (a content's own ring
 never does there, or a toast drawn in n−1 would be shifted in); under the
 fullscreen WM the content's `PaintRing` does. `ScrollRegion` and `TextView`
-own one; the home's `_still_ring` (§14.4) becomes one whose change is its
-parts' rects. The one-body guard is a grep: no other list of painted frames
+own one; the home's `_still_ring` (§14.4) is one whose change is its
+parts' keys and the bar's. The one-body guard is a grep: no other list of painted frames
 in `runtime/` or `native/moy_ui/`.
 
 ### 3.2 The backend verb: `shift_last`
@@ -665,8 +665,8 @@ two changes and one honest limit:
   memcpy share), which is the carousel's cost today: over the target on the
   P4, and §15 says so with the next lever.
 
-The desk home's still ring (§14.4) keeps the parts' keys; its entries become
-`PaintRing` entries (§3.1). The PROJECTS window is a `Carousel` in a window
+The desk home's still ring (§14.4) keeps the parts' keys; it is a
+`PaintRing` (§3.1), the parts' keys its slots' change. The PROJECTS window is a `Carousel` in a window
 (`HomeWindowLayer`) and speaks the record through the WM like any windowed
 content. The carousel's settle frame (the selection changes when the row is
 still: the hero and details pane repaint) is the carousel's key-row p90 on

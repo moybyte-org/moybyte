@@ -22,6 +22,7 @@ presented frames.
 
     python3 tools/input_bench.py --board p4 --out DIR [--only code,home] [--inputs fling,type]
     python3 tools/input_bench.py --board tdeck --out DIR --no-null
+    python3 tools/input_bench.py --board p4 --out DIR --only home --theme blocks   # a backdrop
     python3 tools/input_bench.py --board tdeck --out DIR --split      # PERF DIAG lines, apart
     python3 tools/input_bench.py --report DIR/p4_input.json [--reanalyse]
 
@@ -46,7 +47,7 @@ copy of Coin Quest), which the bench makes at setup; the long note, the
 console script and My Art's drawings are `Bench Scratch` too. A seed cart is never opened for
 writing. A `finally` that runs on a failure and on Ctrl-C removes the copies,
 the note, the script and every doc the run made, and puts back the home's
-arrangement and tab, the theme's text, the console's name, the clipboard,
+arrangement and tab, the theme's text and a `--theme` run's theme, the console's name, the clipboard,
 full-screen windows, PERF DIAG, and every wrapper; it leaves the board on
 its home.
 
@@ -99,6 +100,7 @@ import os
 import statistics
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -362,6 +364,13 @@ def _play(ib, now):
         e = ev[ib.ei]
         ib.ei += 1
         k = e[1]
+        if k == 1:
+            pass
+        elif k == 2 or k == 5:
+            if ib.ts is not None:
+                ws.input_used(ib.ts)
+        elif ib.ks is not None:
+            ws.input_used(ib.ks)
         if k == 0:
             src.key(e[2])
         elif k == 1:
@@ -445,6 +454,16 @@ def _ib_arm(ev, probe, ms, null=False):
             ib.p0 = int(probe())
         except Exception:
             pass
+    # the board's sources a key and a finger stand for: the input in use
+    # follows what the bench plays, as it follows a real keyboard or touch
+    ik = getattr(ws, 'input_kinds', None) or {}
+    ib.ks = None
+    ib.ts = None
+    for _s in ik:
+        if ik[_s] == 'touch':
+            ib.ts = _s
+        elif ib.ks is None:
+            ib.ks = _s
     ib.done = False
     ib.t0 = _T()
     ib.end = ms
@@ -632,6 +651,8 @@ CLEANUP_STEPS = (
     "    if type(ws.launcher) is ws._ib_s['home']:\n"
     "        break",
     "ws.set_home_tab(ws._ib_s['tab'])",
+    "if 'tn' in ws._ib_s:\n"
+    "    ws.look.set_theme(ws._ib_s['tn'], persist=False)",
     "ws.go_home()\nws.mark_dirty()",
 )
 
@@ -1209,8 +1230,15 @@ class Bench:
             with open(self.out, "w") as f:
                 json.dump(self.rows, f)
 
-    def setup(self):
+    def setup(self, theme=None):
         self.ex(SNAPSHOT, strict=True)
+        if theme:
+            # shown for the run only (persist=False), the theme's own
+            # ground under the home: no wallpaper cart over it
+            self.ex("ws._ib_s['tn'] = ws.look.theme_name\n"
+                    "ws.look.set_theme(%r, persist=False)\n"
+                    "ws.look.select_wallpaper(None, persist=False)\n"
+                    "ws.mark_dirty()" % theme, settle=1.0, strict=True)
         self.ex(SCRATCH_MAKE % (STAR, SCRATCH, COIN, SCRATCH + " Blocks",
                                 NOTE_FILE, NOTE, SCRIPT_FILE, SCRIPT, DRAWINGS, SCRATCH),
                 settle=1.0, strict=True)
@@ -1224,6 +1252,19 @@ class Bench:
             self.ex(step, settle=0.3)
         self.ex(UNINSTALL)
         self.b.drain(1.0)
+
+    def settle_covers(self, still=0.5, limit=30.0):
+        """Until the cover pipeline rests: the scratch carts' rescan dropped
+        every cover, and each painted frame landing the next one moves the
+        covers' gen, which repaints a home's band whole -- a cost of the
+        setup, not of the row. The home is painted until the gen holds."""
+        t_end = time.time() + limit
+        last, same = None, 0
+        while time.time() < t_end and same < 3:
+            g = self.val("(ws.mark_dirty(), ws.covers.gen)[1]")
+            same = same + 1 if g == last else 0
+            last = g
+            self.b.drain(still)
 
     def content(self):
         """The top window's content rect in glass pixels, else the glass."""
@@ -1502,6 +1543,8 @@ def run_surface(bench, surf, inputs=None, split=False):
             bench.b.drain(settle)
         else:
             bench.ex(code, settle)
+    if surf.name in HOME:
+        bench.settle_covers()
     rect = _rect(bench, surf)
     try:
         if split:
@@ -1615,6 +1658,8 @@ def main():
     ap.add_argument("--no-null", action="store_true", help="skip the null-floor plays")
     ap.add_argument("--split", action="store_true",
                     help="each surface's long drag under PERF DIAG instead: LOOP/PUMP/PERF")
+    ap.add_argument("--theme", help="a theme shown for the run, over its own ground "
+                                    "(no wallpaper): `moy` a plain fill, `blocks` a backdrop")
     ap.add_argument("--report", help="a run's rows file: print its table")
     ap.add_argument("--reanalyse", action="store_true",
                     help="with --report: take every kept record's numbers again first")
@@ -1635,7 +1680,7 @@ def main():
     bench = None
     try:
         bench = Bench(b, a.board, path, null=not a.no_null)
-        bench.setup()
+        bench.setup(a.theme)
         for surf in surfaces():
             if only and not any(o in surf.name.lower() for o in only):
                 continue
