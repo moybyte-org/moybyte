@@ -1233,6 +1233,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._last_ptr = None         # (x, y, visible, down, click) last drawn, or None
         self._frames_drawn = 0        # frames that actually drew+flushed (test witness)
         self._frame_dt_ms = 33.0      # last loop tick in ms (kinetic velocity, #113)
+        self.ui_moving = False        # a verbs page the last painted frame drew moves on its own
         self._pointer_dt_ms = 33.0    # ...as charged to the pointer SAMPLE (see
         self._stale_ptr_ms = 0.0      # _tick_pointer_dt), None while it's a repeat
         self._dirty_in = True         # a change reported before this input (handle_input)
@@ -4579,10 +4580,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # gate after its first frame and hide newly-found devices/status changes.
         if kind == "settings" and self.settings_layer.bluetooth_animating():
             return True
-        # A released kinetic fling coasts the Settings rows for a second or so
-        # after the finger is gone (#113 Phase 5). Without this the gate closes
-        # on the release frame and the list stops dead under the thumb.
-        if kind == "settings" and self.settings_layer.rows_flinging():
+        # A verbs page the last painted frame drew coasts on a fling or eases
+        # on a glide (`api_moving`): its next frame is due with nothing dirty.
+        if self.ui_moving:
             return True
         # (The Appearance app's monitor shows a COMPUTED still on every tier,
         # so it needs no live-wallpaper redraw exception -- the gate closes
@@ -4694,6 +4694,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             # and has no dt of its own): feeds the kinetic scroll velocity
             # (#113). Clamped so a hitch can't spike the physics.
             self._frame_dt_ms = min(dt * 1000.0, 100.0)
+            # ... and the verbs engine's clock, the scrolling pages' motion
+            _ui_draw.frame_dt(self._frame_dt_ms)
         # The cover collaborator's two per-frame touches: this budget reset and
         # the deferred drain at the tail. Bound once, here, so both cost a call
         # and no second lookup (#209 landing C -- nothing else in the loop
@@ -5012,6 +5014,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # we just drew, so the NEXT frame only repaints if something changes again.
         self._dirty = False
         self._damage_drop()          # an app's `all` from this draw is spent
+        self.ui_moving = _ui_draw.moving_take()
         if covers.take_deferred():
             # A shelf cover build was pushed past this frame's budget -- stay
             # dirty so the remaining covers land on the following frames (the

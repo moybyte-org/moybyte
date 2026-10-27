@@ -28,6 +28,8 @@ enum {
     STOP_MODAL = 128,       // a dialog's or a popover's: while one is drawn, the others take no input
     STOP_DLG_BTN = 256,     // a dialog's button (focus opens on its body first)
     STOP_FIELD = 512,       // a text field: it takes the typed keys, and `a` is a letter
+    STOP_ROWS = 1024,       // a list's or a table's rows on its page: `row` and `top` hold
+    STOP_CARD = 2048,       // a dialog's or a popover's body: its scroll into view lands at once
 };
 
 static uint32_t hash(const uint8_t *p, size_t n, uint32_t salt) {
@@ -300,6 +302,7 @@ static moy_ui_keep_t *keep(moy_ui_ctx_t *c, uint32_t id, int make) {
     free_->a = free_->b = 0;
     free_->over = free_->foot = free_->peek = 0;
     free_->seen = 1;
+    memset(&free_->sc, 0, sizeof(free_->sc));
     return free_;
 }
 
@@ -319,14 +322,46 @@ static moy_ui_keep_t *keep_of(moy_ui_ctx_t *c, uint32_t id) {
 // group's first row brings its caption. Where rows run on below what shows,
 // the page's foot fades (foot_fade): the box stands above that fade, as far
 // as the rows go on.
+// The span page `p`'s scroll ranges over: its rows' height (and the room a
+// scroll into view past its rows keeps) and what shows of them.
+static void span_of(const moy_ui_stop_t *p, const moy_ui_keep_t *k, int32_t *content,
+                    int32_t *extent) {
+    *content = k->b + (k->over > 0 ? k->over : 0);
+    *extent = p->b.h - k->foot;
+}
+
+// The page stop kept as `k` among the frame's stops, or NULL.
+static const moy_ui_stop_t *page_of_keep(const moy_ui_stop_t *v, int n,
+                                         const moy_ui_keep_t *k) {
+    for (int i = 0; i < n; i++) {
+        if (v[i].id == k->id && (v[i].flags & STOP_PAGE)) {
+            return &v[i];
+        }
+    }
+    return NULL;
+}
+
+// Glide page `p`'s scroll to `to`: 1 where that moves it.
+static int aim(moy_ui_keep_t *k, const moy_ui_stop_t *p, int32_t to) {
+    int32_t content, extent;
+    span_of(p, k, &content, &extent);
+    moy_ui_scroll_glide_to(&k->sc, k->a, to, 0, content, extent);
+    return moy_ui_scroll_moving(&k->sc);
+}
+
+// Scroll page `p` so box `b` (as drawn last frame) shows where the page's
+// scroll is going (its glide's target while one is live): the glide aims
+// there (aim). 1 where the target moved.
 static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_t b) {
     moy_ui_keep_t *k = keep_of(c, p->id);
     if (k == NULL) {
         return 0;
     }
-    int32_t was = k->a;
-    int top = p->b.y, bottom = p->b.y + p->b.h, d = 0;
-    int32_t more = k->b - (k->a + p->b.h);       // the rows below what shows
+    int32_t base = (k->sc.flags & MOY_UI_SCROLL_GLIDE) ? k->sc.target : k->a;
+    int32_t to = base;
+    int sh = (int)(base - k->a);        // the page's window, moved to where it is going
+    int top = p->b.y + sh, bottom = p->b.y + p->b.h + sh, d = 0;
+    int32_t more = k->b - (base + p->b.h);       // the rows below what shows
     int fade = more > 0 ? FADE_H * c->fs : 0;
     if (b.y < top) {
         d = b.y - top;
@@ -351,15 +386,19 @@ static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_
                 t = cy;                 // up: the caption in, with the row
             }
         }
-        k->a += t - top;
+        to += t - top;
         // a scroll down past a caption may go past the rows' end by as
         // much: the page keeps that room while the scroll stays there
         k->over = (int16_t)(d > 0 ? t - top - d : 0);
     }
-    if (k->a < 0) {
-        k->a = 0;
+    if (to < 0) {
+        to = 0;
     }
-    return k->a != was;
+    if (to == base) {
+        return 0;
+    }
+    aim(k, p, to);
+    return 1;
 }
 
 // -- a frame -------------------------------------------------------------------------
@@ -393,6 +432,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         c->focus = 0;
     }
     c->app = (uint8_t)((flags >> MOY_UI_APP_SHIFT) & 0xff);
+    if (flags & MOY_UI_KEY_EDGE) {
+        c->last_key = c->last_typed = 0;    // whatever came before, this key is a press
+    }
     c->fs = (uint8_t)(fs > 0 ? fs : 1);
     c->y = 0;
     c->scroll = 0;
@@ -426,7 +468,10 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->tip_at.w = 0;
     c->bar_seen = 0;
     int settled = !c->owe;
+    int moved = 0;
+    int dt = in[MOY_UI_IN_DT];
     c->owe = 0;
+    c->step_rev = 0;
     uint32_t focus0 = c->focus;
     moy_ui_stop_t *v = c->prev;
     int n = c->n_prev;
@@ -449,7 +494,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             }
         }
         n = c->n_prev = (uint8_t)k;
-        if (c->focus == 0 || find(v, n, c->focus) < 0) {
+        if (!c->elsewhere && (c->focus == 0 || find(v, n, c->focus) < 0)) {
             if (c->focus && !c->modal_from) {
                 c->modal_from = c->focus;
             }
@@ -468,17 +513,17 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
                 c->focus = v[first].id;
                 c->focus_box = v[first].b;
                 c->focus_name[0] = 0;
-                settled = 0;
             }
         }
     } else if (c->modal_from) {
-        if (c->focus == 0 || find(v, n, c->focus) < 0) {
+        // the focus a dialog took comes back when it closes, unless the keys
+        // are another surface's now
+        if (!c->elsewhere && (c->focus == 0 || find(v, n, c->focus) < 0)) {
             int i = find(v, n, c->modal_from);
             if (i >= 0) {
                 c->focus = v[i].id;
                 c->focus_box = v[i].b;
                 c->focus_name[0] = 0;
-                settled = 0;
             }
         }
         c->modal_from = 0;
@@ -577,7 +622,20 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             c->focus_name[0] = 0;
             c->reveal = 1;
         }
-        if (c->act || c->step_x || c->step_y) {
+        if (c->step_y && (f->flags & STOP_ROWS) && f->row >= 0) {
+            // a row step on a list or a table on its page: the row's box is
+            // last frame's at the next index, so the page scrolls to it now
+            int rh = row_h(c);
+            c->step_rev = f->id;
+            c->step_row = (int16_t)(f->row + c->step_y);
+            c->reveal = 1;
+            c->reveal_box = (moy_ui_box_t){f->b.x, (int16_t)(f->top + c->step_row * rh), f->b.w,
+                                           (int16_t)rh};
+        }
+        if (c->step_y) {
+            moved = 1;
+        }
+        if (c->act || c->step_x) {
             settled = 0;
         }
     }
@@ -596,6 +654,12 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         }
         int h = stop_at(v, n, x, y);
         c->press = h >= 0 ? v[h].id : 0;
+        int pg = page_at(v, n, x, y);
+        moy_ui_keep_t *pk = pg >= 0 ? keep_of(c, v[pg].id) : NULL;
+        if (pk != NULL && (pk->sc.flags & MOY_UI_SCROLL_FLING)) {
+            moy_ui_scroll_stop(&pk->sc);
+            c->press = 0;           // a press that catches a fling taps nothing
+        }
         c->press_x = (int16_t)x;
         c->press_y = c->drag_y = (int16_t)y;
         c->gesture = 1;
@@ -616,21 +680,44 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
                 c->drag_page = pg >= 0 ? v[pg].id : 0;
                 c->press = 0;
                 c->gesture = 2;
+                moy_ui_keep_t *k = c->drag_page ? keep_of(c, c->drag_page) : NULL;
+                if (k != NULL) {
+                    moy_ui_scroll_drag_start(&k->sc, c->drag_y);
+                }
             }
         }
-        if (c->gesture == 2 && c->drag_page && y != c->drag_y) {
+        if (c->gesture == 2 && c->drag_page) {
+            // the page follows the finger; every sample, a still one too,
+            // feeds the release velocity
             moy_ui_keep_t *k = keep_of(c, c->drag_page);
-            if (k != NULL) {
-                k->a -= y - c->drag_y;
-                k->over = 0;
-                if (k->a < 0) {
-                    k->a = 0;
+            const moy_ui_stop_t *pp = k != NULL ? page_of_keep(v, n, k) : NULL;
+            if (pp != NULL) {
+                int32_t content, extent, off = k->a;
+                if (y != c->drag_y) {
+                    k->over = 0;
+                }
+                span_of(pp, k, &content, &extent);
+                moy_ui_scroll_drag_move(&k->sc, y, (float)dt, &off, content, extent);
+                if (off != k->a) {
+                    k->a = off;
+                    moved = 1;
                 }
             }
             c->drag_y = (int16_t)y;
-            settled = 0;
         }
     } else if (!held && c->gesture) {
+        if (c->gesture == 2 && c->drag_page) {
+            // a release flings the page on at the finger's speed
+            moy_ui_keep_t *k = keep_of(c, c->drag_page);
+            const moy_ui_stop_t *pp = k != NULL ? page_of_keep(v, n, k) : NULL;
+            if (pp != NULL) {
+                int32_t content, extent;
+                span_of(pp, k, &content, &extent);
+                moy_ui_scroll_drag_end(&k->sc, k->a, content, extent);
+            } else if (k != NULL) {
+                k->sc.flags &= ~MOY_UI_SCROLL_DRAG;
+            }
+        }
         if (c->gesture != 2 && c->press && live) {
             int h = stop_at(v, n, x, y);
             if (h >= 0 && v[h].id == c->press) {
@@ -653,12 +740,11 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         int pg = page_at(v, n, x, y);
         moy_ui_keep_t *k = pg >= 0 ? keep_of(c, v[pg].id) : NULL;
         if (k != NULL) {
-            k->a += wy * MOY_UI_WHEEL_ROWS * row_h(c);
+            int32_t content, extent;
             k->over = 0;
-            if (k->a < 0) {
-                k->a = 0;
-            }
-            settled = 0;
+            span_of(&v[pg], k, &content, &extent);
+            moy_ui_scroll_step(&k->sc, k->a, wy, MOY_UI_WHEEL_ROWS * row_h(c), content, extent);
+            moved = 1;
         }
     }
     // The middle button held drags the page it went down on by its travel.
@@ -669,12 +755,13 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         } else if (y != c->mid_y) {
             moy_ui_keep_t *k = keep_of(c, c->mid_page);
             if (k != NULL) {
+                moy_ui_scroll_stop(&k->sc);
                 k->a -= y - c->mid_y;
                 k->over = 0;
                 if (k->a < 0) {
                     k->a = 0;
                 }
-                settled = 0;
+                moved = 1;
             }
         }
         c->mid_y = (int16_t)y;
@@ -704,18 +791,47 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             moy_ui_keep_t *pk = first ? keep_of(c, v[v[i].page].id) : NULL;
             if (pk != NULL && pk->a > 0
                 && b.y + b.h + pk->a <= v[v[i].page].b.y + v[v[i].page].b.h) {
-                pk->a = 0;              // the page's first stop shows the page's top
-                settled = 0;
+                aim(pk, &v[v[i].page], 0);   // the page's first stop shows the page's top
+                moved = 1;
             } else if (reveal(c, &v[v[i].page], v[i].page, b)) {
-                settled = 0;
+                moved = 1;
+            }
+            // an app's focus move, and a card's body (a dialog, a popover: an
+            // overlay over the page), show at once
+            moy_ui_keep_t *rk = c->jump || (v[v[i].page].flags & STOP_CARD)
+                                ? keep_of(c, v[v[i].page].id) : NULL;
+            if (rk != NULL && (rk->sc.flags & MOY_UI_SCROLL_GLIDE)) {
+                moy_ui_scroll_land(&rk->sc, &rk->a);
             }
         }
     }
     c->reveal = 0;
+    c->jump = 0;
     c->reveal_box.w = 0;
-    if (c->focus != focus0) {
-        settled = 0;
+    // Every page's motion steps on the frame's clock; with none, it lands.
+    for (int i = 0; i < MOY_UI_API_KEEP; i++) {
+        moy_ui_keep_t *k = &c->keep[i];
+        if (k->id == 0 || !moy_ui_scroll_moving(&k->sc)) {
+            continue;
+        }
+        const moy_ui_stop_t *pp = page_of_keep(v, n, k);
+        int32_t off = k->a;
+        if (dt <= 0 || pp == NULL) {
+            moy_ui_scroll_land(&k->sc, &off);
+        } else {
+            int32_t content, extent;
+            span_of(pp, k, &content, &extent);
+            moy_ui_scroll_tick(&k->sc, (float)dt, &off, content, extent);
+        }
+        if (off != k->a) {
+            k->a = off;
+            moved = 1;
+        }
     }
+    if (c->focus != focus0) {
+        moved = 1;
+    }
+    c->moved = (uint8_t)moved;
     return settled;
 }
 
@@ -923,6 +1039,8 @@ static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_
     s->b = b;
     s->flags = (uint16_t)(flags | (dlg ? STOP_MODAL : 0));
     s->page = c->page_stop;
+    s->row = -1;
+    s->top = 0;
     if (c->modal && !dlg) {
         return 0;                   // under a dialog: drawn, and no input reaches it
     }
@@ -1041,8 +1159,8 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags) 
         // band its foot gave up last frame
         int32_t most = k->b - (ct.h - k->foot);
         k->foot = 0;
-        if (k->a <= most) {
-            k->over = 0;
+        if (k->a <= most && !(k->sc.flags & MOY_UI_SCROLL_GLIDE)) {
+            k->over = 0;            // (a glide past the rows keeps its room until it lands)
         }
         most += k->over;
         if (k->a > most) {
@@ -1062,6 +1180,8 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags) 
         p->b = ct;
         p->flags = (uint16_t)(STOP_PAGE | flags);
         p->page = NO_PAGE;
+        p->row = -1;
+        p->top = 0;
         c->page_stop = c->n_cur++;
     }
 }
@@ -1475,6 +1595,15 @@ int moy_ui_api_hints_w(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *i
     return w ? w + MOY_UI_HINT_LEAD(c->cls) * c->fs : 0;
 }
 
+// The stop `id` just drew is a list's or a table's: its focused row and row
+// 0's top on screen, which a key step on its page reveals at the next begin.
+static void rows_note(moy_ui_ctx_t *c, uint32_t id, int row, int top) {
+    if (c->n_cur > 0 && c->cur[c->n_cur - 1].id == id) {
+        c->cur[c->n_cur - 1].row = (int16_t)row;
+        c->cur[c->n_cur - 1].top = (int16_t)top;
+    }
+}
+
 int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                         const uint8_t *items, size_t len, int32_t cur, const moy_ui_over_t *o) {
     o = over(o);
@@ -1509,7 +1638,8 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
     if (row < 0) {
         row = 0;
     }
-    int flags = STOP_KEEP_UD | (row == 0 ? STOP_AT_TOP : 0) | (row >= count - 1 ? STOP_AT_END : 0);
+    int flags = STOP_KEEP_UD | (row == 0 ? STOP_AT_TOP : 0) | (row >= count - 1 ? STOP_AT_END : 0)
+                | (placed ? 0 : STOP_ROWS);
     int st = disabled ? 0 : stop(c, id, b, flags, name_of(o, label));
     if (st < 0) {
         st = 0;
@@ -1542,9 +1672,11 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         kp->b = placed ? offset + 1 : 1;
     }
     moy_ui_box_t rb = {b.x, (int16_t)(b.y + row * rh - offset), b.w, (int16_t)rh};
-    if (focused && c->step_y) {
-        c->reveal = 1;
+    rows_note(c, id, row, b.y);
+    if (focused && c->step_y && !(c->step_rev == id && c->step_row == row)) {
+        c->reveal = 1;              // a step begin did not reveal: the next frame does
         c->reveal_box = rb;
+        c->owe = 1;
     }
     clip_t k;
     if (clip_row(&k, s, b, stacked, c->page)) {
@@ -1658,6 +1790,8 @@ int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap) {
         if (h != c->focus) {
             c->focus = h;
             c->reveal = 1;
+            c->jump = 1;                // an app's focus move is no step: it shows at once
+            c->owe = 1;                 // the next frame reveals it
             int i = find(c->cur, c->n_cur, h);
             if (i < 0) {
                 i = find(c->prev, c->n_prev, h);
@@ -1683,6 +1817,12 @@ int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap) {
         buf[m] = 0;
     }
     return (int)n;
+}
+
+void moy_ui_api_focus_ahead(moy_ui_ctx_t *c, moy_ui_span_t id) {
+    uint8_t owe = c->owe;
+    moy_ui_api_focus(c, id, NULL, 0);
+    c->owe = owe;
 }
 
 int moy_ui_api_keys_taken(const moy_ui_ctx_t *c) {
@@ -1757,7 +1897,8 @@ static void nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, in
     n->stop = c->page_stop;
     n->kind = (uint8_t)kind;
     n->used = (int16_t)used;
-    open_page(c, id, b, flags | (kind >= 2 || in_dialog(c) ? STOP_MODAL : 0));
+    open_page(c, id, b, flags | (kind >= 2 || in_dialog(c) ? STOP_MODAL : 0)
+                        | (kind >= 2 ? STOP_CARD : 0));
 }
 
 // A list's edges in view `v`: where rows `rows` high scrolled by `scroll`
@@ -1896,8 +2037,11 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         p->b = view;
         p->flags = (uint16_t)(STOP_PAGE | (in_dialog(c) ? STOP_MODAL : 0));
         p->page = NO_PAGE;
+        p->row = -1;
+        p->top = 0;
     }
-    int flags = STOP_KEEP_UD | (row <= 0 ? STOP_AT_TOP : 0) | (row >= count - 1 ? STOP_AT_END : 0);
+    int flags = STOP_KEEP_UD | (row <= 0 ? STOP_AT_TOP : 0) | (row >= count - 1 ? STOP_AT_END : 0)
+                | (placed ? 0 : STOP_ROWS);
     int st = disabled ? 0 : stop(c, id, b, flags, name_of(o, label));
     if (st < 0) {
         st = 0;
@@ -1919,11 +2063,24 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         cur = row;
     }
     if (kp != NULL) {
+        // the rows' own scroll: a step glides it to the row, where the
+        // frame has a clock (with none, it is there at once)
+        kp->b = count * rh;
         if (focused && (c->step_y || (st & MOY_UI_ST_ACTIVATED)) && cur >= 0) {
-            if (cur * rh < offset) {
-                offset = cur * rh;
-            } else if ((cur + 1) * rh > offset + view.h) {
-                offset = (cur + 1) * rh - view.h;
+            int to = (kp->sc.flags & MOY_UI_SCROLL_GLIDE) ? kp->sc.target : offset;
+            int was = to;
+            if (cur * rh < to) {
+                to = cur * rh;
+            } else if ((cur + 1) * rh > to + view.h) {
+                to = (cur + 1) * rh - view.h;
+            }
+            if (to != was && c->in[MOY_UI_IN_DT] > 0) {
+                int32_t off = offset;   // the glide's first step is this frame's
+                moy_ui_scroll_glide_to(&kp->sc, offset, to, 0, kp->b, view.h);
+                moy_ui_scroll_tick(&kp->sc, (float)c->in[MOY_UI_IN_DT], &off, kp->b, view.h);
+                offset = off;
+            } else if (to != was) {
+                offset = to;
             }
         }
         int most = count * rh - view.h;
@@ -1935,9 +2092,12 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         }
         kp->a = offset;
     }
-    if (!placed && focused && c->step_y && cur >= 0) {
-        c->reveal = 1;
+    rows_note(c, id, cur, view.y);
+    if (!placed && focused && c->step_y && cur >= 0
+        && !(c->step_rev == id && c->step_row == cur)) {
+        c->reveal = 1;              // a step begin did not reveal: the next frame does
         c->reveal_box = (moy_ui_box_t){b.x, (int16_t)(view.y + cur * rh), b.w, (int16_t)rh};
+        c->owe = 1;
     }
     c->tbl_y0 = (int16_t)(view.y - offset);
     c->tbl_rh = (int16_t)rh;
@@ -2931,6 +3091,19 @@ void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i) {
 
 int moy_ui_api_owes(const moy_ui_ctx_t *c) {
     return c->owe;
+}
+
+int moy_ui_api_moved(const moy_ui_ctx_t *c) {
+    return c->moved;
+}
+
+int moy_ui_api_moving(const moy_ui_ctx_t *c) {
+    for (int i = 0; i < MOY_UI_API_KEEP; i++) {
+        if (c->keep[i].id && moy_ui_scroll_moving(&c->keep[i].sc)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int32_t moy_ui_api_offset(moy_ui_ctx_t *c, int x, int y) {

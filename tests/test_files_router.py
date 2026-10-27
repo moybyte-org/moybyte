@@ -356,14 +356,19 @@ def _view(app):
     return x, y + CAPTION + HEAD, w, h - CAPTION - HEAD
 
 
-def _drag(ws, x, y0, y1, steps=6):
+def _drag(ws, x, y0, y1, steps=6, still=4):
     """A finger drag, sample by sample -- a scroll is made of samples that are
-    not clicks, so it can only be driven this way."""
+    not clicks, so it can only be driven this way -- held still `still`
+    frames before it lets go, so the page rests where the finger left it
+    (a release at speed flings it on)."""
     drv = _drv(ws)
     drv.touch(x, y0)
     drv.frame(1 / 30)
     for k in range(1, steps + 1):
         drv.touch_drag(x, y0 + (y1 - y0) * k // steps)
+        drv.frame(1 / 30)
+    for _ in range(still):
+        drv.touch_drag(x, y1)
         drv.frame(1 / 30)
     drv.touch_up()
     _frames(drv)

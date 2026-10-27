@@ -169,13 +169,13 @@ except ImportError:                     # host: the runtime package
 try:
     from ui_draw import cart_text as _cart_text      # the app-cart boundary (§4.7)
     from ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
-                         ui_owes as _ui_owes, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
+                         ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from moy_input import pointer_state as _pointer_state
     import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ui_draw import cart_text as _cart_text
     from runtime.ui_draw import (ui_context as _ui_context, ui_frame as _ui_frame,
-                                 ui_owes as _ui_owes, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
+                                 ui_owes as _ui_owes, ui_moving as _ui_moving, UI_IN_LEN as _UI_IN_LEN, _P_MIDDLE, _PB_MIDDLE)
     from runtime.moy_input import pointer_state as _pointer_state
     from runtime import layout_base as _layout_base
 from array import array as _array
@@ -1598,7 +1598,8 @@ class Player:
             # state it left (a verb acts after its part drew, a tap on the
             # note moves the caret after the note drew); a frame with nothing
             # going on pays off one.
-            if not settled or self._input_active(inp) or _ui_owes(ctx):
+            if (not settled or self._input_active(inp) or _ui_owes(ctx)
+                    or _ui_moving(ctx)):
                 self._owe = 2
             elif self._owe:
                 self._owe -= 1
@@ -1607,7 +1608,8 @@ class Player:
         """Whether the running cart has a frame to draw now. A game always
         has. An app on the verbs (`_on_change`) has one while input is going
         on, while a frame it drew still owes the next, while the engine has a
-        part in motion (`api_owes`: a toast, a fade) and while an editor
+        part in motion (`api_owes`: a toast, a fade; `api_moving`: a page's
+        fling or glide) and while an editor
         handle it opened changed since it drew (`EditorHandle.owes`); still,
         it draws nothing, and its window keeps its last frame."""
         if not self._on_change:
@@ -1615,7 +1617,7 @@ class Player:
         if self._owe or self._input_active(self.ws.input):
             return True
         ui = self._ui
-        if ui is not None and _ui_owes(ui[0]):
+        if ui is not None and (_ui_owes(ui[0]) or _ui_moving(ui[0])):
             return True
         for ed in self._editors:
             if ed.owes():

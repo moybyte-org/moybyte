@@ -139,6 +139,7 @@ int moycore_frame(float dt, int draw, char *err, size_t n)
     moycore_run_tick_begin();
     if (!moycore_RUN.L)
         return hl_wasm_tick ? hl_wasm_tick(dt, draw, err, n) : 0;
+    moycore_run_tick_dt(dt);
     return moycore_lua_tick(dt, draw, err, n);
 }
 

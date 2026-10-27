@@ -51,7 +51,7 @@ class CRegion:
         self.content = content
         self.offset = 0
         self.horizontal = False
-        self._st = bytearray(16)
+        self._st = bytearray(28)
 
 class CTap:
     def __init__(self, r):
@@ -127,3 +127,76 @@ def test_the_physics_is_the_twins_in_single_precision():
     flings = int([ln for ln in out.stdout.splitlines() if ln.startswith("FLINGS")][0]
                  .split()[1])
     assert flings >= 10, "the script flung %d times: the coast went untested" % flings
+
+
+GLIDE = r'''
+import moy_ui as C
+
+class CRegion:
+    def __init__(self, extent, content, offset):
+        self.view = (0, 0, extent, extent)
+        self.content = content
+        self.offset = offset
+        self.horizontal = True
+        self._st = bytearray(28)
+
+    def glide_to(self, p, slide):
+        C.scroll_glide_to(self._st, self.offset, p, slide, self.content, self.view[2])
+
+    def tick(self, dt):
+        off = C.scroll_tick(self._st, dt, self.offset, self.content, self.view[2])
+        if off >= 0:
+            self.offset = off
+        return off >= 0
+
+ran = 0
+for seed in range(120):
+    slide = seed % 2 == 1
+    pitch = 20 + seed % 60
+    n = 3 + seed % 9
+    extent = 200
+    content = (n - 1) * pitch + extent
+    start = (seed * 7 % n) * pitch
+    a = ScrollRegion(horizontal=True)
+    a.set((0, 0, extent, extent), content)
+    a.offset = start
+    b = CRegion(extent, content, start)
+    goal = ((seed * 5 + 3) % n) * pitch
+    a.glide_to(goal, slide)
+    b.glide_to(goal, slide)
+    k = 0
+    while k < 200 and (a.animating or b.offset != a.offset):
+        dt = (8, 16, 33, 50, 16.7, 33.3, 250, 0)[(seed + k) % 8]
+        if k == 3 + seed % 4:
+            # a key held: the target moves on a card from where it was going
+            goal = min((n - 1) * pitch, goal + pitch)
+            a.glide_to(goal, slide)
+            b.glide_to(goal, slide)
+        a.tick(dt)
+        b.tick(dt)
+        if a.offset != b.offset:
+            print("DIFF", seed, k, a.offset, b.offset)
+            break
+        k += 1
+    if a.offset != goal or b.offset != goal:
+        print("SHORT", seed, a.offset, b.offset, goal)
+    ran += 1
+print("RAN", ran)
+print("DONE")
+'''
+
+
+def test_the_glide_is_the_carousels_in_single_precision():
+    """The glide and the slide moved from the home carousel into the scroll
+    state: in the boards' float model, the C's frames are the carousel's
+    old arithmetic's (the twin), frame for frame, a re-aim included, and
+    every glide lands on its target."""
+    exe = require_unix_mp("moy_ui", board_model=True,
+                          why="the glide in the boards' float model")
+    prog = "def rect_in(px, py, r):\n    return False\n_MAX_RETAINED = 3\n" + \
+        "\n".join(seg for seg in [_twin_source()]) + "\n" + GLIDE
+    out = subprocess.run([exe, "-c", prog], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert "DONE" in out.stdout, out.stdout[-2000:]
+    bad = [ln for ln in out.stdout.splitlines() if ln.startswith(("DIFF", "SHORT"))]
+    assert not bad, "\n".join(bad[:10])

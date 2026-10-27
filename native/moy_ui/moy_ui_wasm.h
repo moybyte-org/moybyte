@@ -42,6 +42,9 @@ void *moycore_ui_target(void);
 // The run's snapshot (native/moycore/moycore_run.h: SNAP_LEN words, NULL
 // with no run), the tick it is of and the run's serial: moycore_run.c's.
 const int32_t *moycore_ui_snap(uint32_t *tick, uint32_t *serial);
+// The run's ticks' dt in ms since the last call (the host's injected clock,
+// moycore_run.c's), which the frame begun next takes as its motion's.
+int32_t moycore_ui_dt_take(void);
 // The snapshot's slots the engine reads (moycore_run.h's SNAP_*).
 enum {
     MOYCORE_UI_SNAP_BTN = 0, MOYCORE_UI_SNAP_BTNP = 1, MOYCORE_UI_SNAP_X = 6,

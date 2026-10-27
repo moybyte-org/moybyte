@@ -3602,7 +3602,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
           animation-armed frames precisely because nothing marks dirty, so
           they are excluded by name. Sources OUTSIDE app windows (running
           cart, live wallpaper, splash, confetti/toast/egg overlays) draw on
-          other layers and need no exclusion.
+          other layers and need no exclusion. A verbs page coasting or gliding
+          (`ws.ui_moving`, the engine's `api_moving`) is one of them, read
+          as the declaration it is.
 
         win._buf_stale guards the buffer itself: a fresh/rebuilt buffer or a
         gesture's _direct_render (which paints past the buffer straight into
@@ -3629,6 +3631,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 return False
         if (cur is None) != (last is None):
             return False                  # pointer appeared/vanished: be safe
+        if ws.ui_moving:
+            return False                  # a verbs page coasts or glides on its own
         k = win.kind
         if k == "update":
             return False

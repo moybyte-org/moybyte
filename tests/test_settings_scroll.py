@@ -56,11 +56,23 @@ def _feed(ws, drv, x, y, *, press=False, down=True):
     drv.frame(_DT)
 
 
-def _drag(ws, drv, x, y0, dy, steps=12):
+def _drag(ws, drv, x, y0, dy, steps=12, still=0):
+    """A drag of `dy` in `steps` samples, held `still` frames before it lets go."""
     _feed(ws, drv, x, y0, press=True)
     for i in range(1, steps + 1):
         _feed(ws, drv, x, y0 + dy * i // steps)
+    for _ in range(still):
+        _feed(ws, drv, x, y0 + dy)
     _feed(ws, drv, x, y0 + dy, down=False)
+
+
+def _settle(ws, drv, most=60):
+    """Frames until no page of Settings glides or coasts."""
+    for _ in range(most):
+        if not ws.settings_layer._host.moving:
+            return
+        drv.frame(_DT)
+    raise AssertionError("the page never came to rest")
 
 
 def test_every_row_is_reachable_by_keyboard(tmp_path):
@@ -88,6 +100,7 @@ def test_every_row_is_reachable_by_keyboard(tmp_path):
         drv.frame(_DT)
         drv.frame(_DT)
     assert sl._focused == "Wi-Fi"
+    _settle(ws, drv)
     assert _band(ws) == top, "back at the top, the page is as it opened"
 
 
@@ -110,15 +123,39 @@ def test_a_drag_scrolls_the_page_and_is_no_tap(tmp_path):
     lay = ws.layout
     top = _band(ws)
     x = lay.cx + lay.cw // 2
-    _drag(ws, drv, x, lay.cy + lay.ch * 2 // 3, -lay.ch // 2)
+    _drag(ws, drv, x, lay.cy + lay.ch * 2 // 3, -lay.ch // 2, still=4)
     assert _band(ws) != top, "the rows moved under the finger"
     assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.confirm_key), \
         "letting go of a drag opened nothing"
     moved = _band(ws)
     for _ in range(10):
         drv.frame(_DT)
-    assert _band(ws) == moved, "the page rests where the finger left it"
-    assert sl.rows_flinging() is False
+    assert _band(ws) == moved, "a finger held still lets the page rest where it left it"
+    assert not sl._host.moving
+
+
+def test_a_fling_coasts_the_page_and_the_gate_recloses(tmp_path):
+    """A drag let go at speed flings the page on (the engine's fling, every
+    verbs page's): it keeps moving with no input, comes to rest, and then
+    the console paints nothing more."""
+    ws = _ws(tmp_path)
+    _force_ota_rows(ws)
+    drv = _drv(ws)
+    sl = ws.settings_layer
+    lay = ws.layout
+    x = lay.cx + lay.cw // 2
+    _drag(ws, drv, x, lay.cy + lay.ch * 2 // 3, -lay.ch // 3, steps=4)
+    assert sl._host.moving, "the release flung the page"
+    at = _band(ws)
+    drv.frame(_DT)
+    assert _band(ws) != at, "the page coasts on with no finger"
+    _settle(ws, drv)
+    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.confirm_key)
+    drv.frame(_DT)
+    drawn = ws._frames_drawn
+    for _ in range(5):
+        drv.frame(_DT)
+    assert ws._frames_drawn == drawn, "at rest, the gate closes"
 
 
 def test_a_tap_on_a_row_activates_it(tmp_path):
@@ -199,3 +236,33 @@ def test_the_c6_row_is_capability_gated_and_opens_the_flow(tmp_path):
     ws.update_ui.open_update_c6 = lambda: opened.append(1)
     ws.settings_layer._activate_settings_action("update_c6")
     assert opened == [1]
+
+
+def test_a_key_step_paints_once(tmp_path):
+    """A down press moves focus and its scroll at the engine's begin, so a
+    press that scrolls nothing paints one frame and owes none after it; one
+    that scrolls paints the glide's frames and rests when it lands
+    (docs/scroll_and_text_2026-10.md §7)."""
+    import moy_ui
+    ws = _ws(tmp_path)
+    _force_ota_rows(ws)
+    drv = _drv(ws)
+    sl = ws.settings_layer
+    lay = ws.layout
+    for _ in range(3):
+        drv.frame(_DT)
+    kinds = set()
+    for _ in range(10):
+        off = moy_ui.api_offset(sl._host.ctx, lay.cx + 4, lay.cy + lay.ch // 2)
+        drawn = ws._frames_drawn
+        drv.press("down")
+        for _ in range(20):
+            drv.frame(_DT)
+        paints = ws._frames_drawn - drawn
+        if moy_ui.api_offset(sl._host.ctx, lay.cx + 4, lay.cy + lay.ch // 2) == off:
+            assert paints == 1, "a step in view paints once: %d" % paints
+            kinds.add("still")
+        else:
+            assert 2 <= paints <= 12, "a glide's frames, then rest: %d" % paints
+            kinds.add("glide")
+    assert kinds == {"still", "glide"}

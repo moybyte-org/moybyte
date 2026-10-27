@@ -129,6 +129,7 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
         s_serial = serial;
         s_tick = tick - 1u;
         s_live = 1;
+        (void)moycore_ui_dt_take();         // the clock starts with the run
     }
     if (tick != s_tick) {
         int32_t in[MOY_UI_IN_LEN] = {0};
@@ -142,6 +143,7 @@ static moy_ui_ctx_t *run_ctx(const void *target) {
             in[MOY_UI_IN_PTR] = snap[MOYCORE_UI_SNAP_PTR];
             in[MOY_UI_IN_KEY] = snap[MOYCORE_UI_SNAP_KEY];
         }
+        in[MOY_UI_IN_DT] = moycore_ui_dt_take();   // the ticks' clock since the last frame
         moy_ui_box_t surf = s_ctx->surface;
         if (c != NULL) {
             surf.x = surf.y = 0;

@@ -2392,6 +2392,7 @@ int moycore_frame(float dt, int draw, char *err, size_t n)
 {
     moy_reset_state(&RUN.c.canvas);
     moycore_run_tick_begin();   // h_time_ms counts from here
+    moycore_run_tick_dt(dt);
     if (!RUN.L) {
         // A compiled cart: its two hooks on the engine's thread.
 #if MOYCORE_WASM

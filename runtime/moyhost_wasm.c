@@ -457,6 +457,7 @@ int hw_tick(host_wasm *r, float dt, int draw, char *err, int errlen)
     }
     moycore_run_cur = &moycore_RUN.c;
     moycore_run_tick_begin();              /* h_time counts from here */
+    moycore_run_tick_dt(dt);
     moy_reset_state(&moycore_RUN.c.canvas);
     if (moy_wasm_update(&r->w, dt, err, (size_t)errlen)) return trapped(r);
     if (draw && !r->w.quitting && moy_wasm_draw(&r->w, err, (size_t)errlen))

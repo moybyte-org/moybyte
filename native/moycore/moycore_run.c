@@ -45,6 +45,23 @@ void moycore_run_tick_begin(void) {
     g_ticks++;
 }
 
+// The ticks' dt since the RUN face last began a frame, in ms (a tick that
+// drew no verbs still moves the clock on).
+static float g_ui_dt;
+
+void moycore_run_tick_dt(float dt) {
+    if (dt > 0.0f) {
+        g_ui_dt += dt * 1000.0f;
+    }
+}
+
+int32_t moycore_ui_dt_take(void);
+int32_t moycore_ui_dt_take(void) {
+    int32_t ms = (int32_t)g_ui_dt;
+    g_ui_dt -= (float)ms;
+    return ms;
+}
+
 const int32_t *moycore_ui_snap(uint32_t *tick, uint32_t *serial);
 const int32_t *moycore_ui_snap(uint32_t *tick, uint32_t *serial) {
     *tick = g_ticks;

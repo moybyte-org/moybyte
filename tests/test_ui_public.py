@@ -438,7 +438,10 @@ def test_a_settled_page_draws_the_same_pixels():
     assert r.settled, "no input: the frame is settled"
     assert bytes(r.cv._buf) == before
     r.frame(("down",))
-    assert not r.settled
+    assert ui_draw._C.api_moved(r.ctx), "the focus moved"
+    assert r.settled, "begin applied the move and the pass drew it: nothing is owed"
+    r.frame(("a",))
+    assert not r.settled, "an activation owes the frame after it"
 
 
 # -- the shell is strict (§7) ------------------------------------------------------------

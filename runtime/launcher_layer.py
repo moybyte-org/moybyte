@@ -985,8 +985,6 @@ def modal_keys(ws):
     if _ui_draw.on_bar():
         return _ui_draw.BAR_KEYS
     return None
-_GLIDE_HALF_MS = 45.0  # the glide covers half the distance left in this long
-_SLIDE_MS = 200        # the handheld's slide: 6 frames at the home's 30 fps
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
            "Oct", "Nov", "Dec")
 
@@ -1123,8 +1121,6 @@ class Carousel(Launcher):
     def __init__(self, items, layout=None, names=None):
         self.motion = "full"
         self.scale = HOME_SCALE_HH
-        self._glide = None            # the offset a glide is carrying the row to
-        self._slide = None            # the handheld's slide: [from, ms so far]
         self._was_drag = False
         self._g_lay = None            # the layout _g was computed for
         self._g_reach = 0
@@ -1401,7 +1397,6 @@ class Carousel(Launcher):
         # run) brings its card to the centre; the settle's own assignment
         # lands where the row already rests.
         if self.layout is not None and not self.moving:
-            self._glide = None
             self._scroll = self._rest_of(value)
 
     def _rest_of(self, i):
@@ -1417,7 +1412,7 @@ class Carousel(Launcher):
         """True while the row coasts on its own: a released fling, or the
         glide that carries the nearest card to the centre (a key's motion
         too) -- the frames that take the drag partial."""
-        return self._region.animating or self._glide is not None
+        return self._region.animating
 
     @property
     def moving(self):
@@ -1443,12 +1438,11 @@ class Carousel(Launcher):
         return max(0, min(n - 1, (self.scroll + p // 2) // p))
 
     def set_items(self, items):
-        self._glide = None
         self._region.stop()
         Launcher.set_items(self, items)
 
     def _scroll_to_sel(self):
-        self._glide = None
+        self._region.stop()
         self._scroll = max(0, min(self._rest_of(self.sel), self.max_scroll()))
 
     def _scroll_region(self):
@@ -1459,24 +1453,23 @@ class Carousel(Launcher):
         return self._region
 
     def glide_to(self, i):
-        """Carry card `i` to the centre, frame by frame (`anim_frame`)."""
+        """Carry card `i` to the centre, frame by frame (`anim_frame`): on
+        the handheld the row slides there, on the desk the shelf glides --
+        the scroll model's two eases (`ScrollRegion.glide_to`)."""
         n = len(self.items)
         if not n:
             return
         self._region.stop()
+        region = self._scroll_region()
         i = max(0, min(n - 1, i))
         if self.desk():
             # the desk selects at once and the shelf glides to show it
             if i != self._sel:
                 self.zone_gen += 1
                 self._sel = i
-            t = self._rest_of(i)
-            self._glide = t if t != self._scroll else None
-            self._slide = None
+            region.glide_to(self._rest_of(i))
             return
-        t = i * self.pitch()
-        self._glide = t if t != self._scroll else None
-        self._slide = [self._scroll, 0] if self._glide is not None else None
+        region.glide_to(i * self.pitch(), slide=self.handheld())
 
     def nav2d(self, dx, dy):
         """Left/right move the row by a card with the glide; a key held is one
@@ -1487,7 +1480,9 @@ class Carousel(Launcher):
             self.glide_to(self._sel + dx)
             return
         p = self.pitch()
-        base = self._glide if self._glide is not None else self.nearest() * p
+        base = self._region.target
+        if base is None:
+            base = self.nearest() * p
         self.glide_to(base // p + dx)
 
     def _snap(self):
@@ -1496,43 +1491,20 @@ class Carousel(Launcher):
 
     def anim_frame(self, dt):
         """Advance the fling or the glide one frame (dt in SECONDS), and
-        settle the selection once the row is still. True when the view moved."""
+        settle the selection once the row is still: a fling that comes to
+        rest glides the nearest card the rest of the way. True when the view
+        moved."""
         moved = False
-        if self._region.animating:
-            moved = Launcher.anim_frame(self, dt)
-            if not self._region.animating:
+        region = self._region
+        if region.animating:
+            fling = region.flinging
+            was = self._scroll
+            self._scroll_region()
+            if region.tick(dt * 1000.0):
+                self._scroll = region.offset   # direct: the setter would stop it
+                moved = fling or self._scroll != was
+            if fling and not region.animating:
                 self._snap()
-        elif self._glide is not None and self._slide is not None and self.handheld():
-            # The handheld's slide (the 2026-10 look's motion): from where
-            # the row was to the card in _SLIDE_MS, eased out, in TIME so a
-            # slow board shows it in fewer frames; a key held retargets it
-            # from where it is.
-            sl = self._slide
-            sl[1] += max(1.0, min(200.0, dt * 1000.0))
-            u = min(1.0, sl[1] / _SLIDE_MS + 1e-6)
-            e = 1.0 - (1.0 - u) ** 3
-            to = self._glide if u >= 1.0 else sl[0] + int((self._glide - sl[0]) * e)
-            moved = to != self._scroll
-            self._scroll = to
-            if to == self._glide:
-                self._glide = None
-                self._slide = None
-        elif self._glide is not None:
-            # An ease-out in TIME (half the distance left every
-            # _GLIDE_HALF_MS), so a slow board shows the same motion in
-            # fewer frames rather than a jump.
-            rem = self._glide - self._scroll
-            ms = max(1, min(200, int(dt * 1000)))
-            step = int(rem * (1.0 - 0.5 ** (ms / _GLIDE_HALF_MS)))
-            lo = min(abs(rem), 2)
-            if abs(step) < lo:
-                step = lo if rem > 0 else -lo
-            if abs(step) > abs(rem):
-                step = rem
-            self._scroll += step
-            moved = step != 0
-            if self._scroll == self._glide:
-                self._glide = None
         if not self.moving and not self.desk():
             c = self.nearest()
             if c != self._sel:

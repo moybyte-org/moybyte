@@ -566,6 +566,10 @@ def achievements(loop, info):
     for key in ("ach_idle", "ach_scrolled"):
         for _ in range(30):
             loop.step()
+        for _ in range(300):              # the swipe's coast comes to rest
+            if not ws.settings_layer._input_host().moving:
+                break
+            loop.step()
         gc.collect()
         gc.disable()
         idle = []

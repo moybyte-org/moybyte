@@ -82,7 +82,12 @@ def _band(ws):
 
 
 def _frames(d, n=2):
+    """n frames, then on until the page's glide lands (a notch glides)."""
     for _ in range(n):
+        d.frame(DT)
+    for _ in range(60):
+        if not d.ws.settings_layer._host.moving:
+            return
         d.frame(DT)
 
 

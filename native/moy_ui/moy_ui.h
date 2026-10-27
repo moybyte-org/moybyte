@@ -680,16 +680,40 @@ void moy_ui_cell_art(const int32_t r[4], int fs, int32_t pad, int32_t caption_h,
 
 // A scroll state's motion; the offset, the content extent and the view are
 // the caller's, passed in. Single-precision, as the boards' MicroPython
-// computes; every dt is injected, never read from a clock.
+// computes; every dt is injected, never read from a clock. One `tick`
+// advances whichever motion is live:
+//
+// - a FLING coasts from a drag's release velocity, decaying by FRICTION a
+//   ms, and comes to rest below STOP_VEL or dead at either clamp;
+// - a GLIDE eases the offset to a target in time -- half the distance left
+//   every GLIDE_HALF_MS, at least GLIDE_MIN px a frame, so it lands on the
+//   target exactly -- and a new target while gliding re-aims from where the
+//   offset is; a SLIDE is a glide over a fixed SLIDE_MS, eased out (the
+//   handheld home's carousel). A frame advances a glide by 1 to
+//   FRAME_MS_MAX ms of its dt, so a stall is never a jump;
+// - a DRAG catches either.
+//
+// A step moves the target by whole steps from the target while a glide is
+// live, else from the offset: the view is never more than one glide behind.
 #define MOY_UI_FRICTION 0.995f      // per-ms decay: a fling coasts ~1 s
 #define MOY_UI_MIN_FLING 0.15f      // px/ms: a release slower than this is a stop
 #define MOY_UI_STOP_VEL 0.02f       // px/ms: coasting below this comes to rest
 #define MOY_UI_VEL_EMA 0.5f         // the release velocity's EMA weight
-enum { MOY_UI_SCROLL_DRAG = 1, MOY_UI_SCROLL_FLING = 2 };
+#define MOY_UI_GLIDE_HALF_MS 45.0f  // a glide halves the distance left in this long
+#define MOY_UI_GLIDE_MIN 2          // ...by at least this many px a frame
+#define MOY_UI_SLIDE_MS 200.0f      // a slide reaches its target in this long
+#define MOY_UI_FRAME_MS_MAX 200     // the most of one frame's dt a glide takes
+enum {
+    MOY_UI_SCROLL_DRAG = 1, MOY_UI_SCROLL_FLING = 2, MOY_UI_SCROLL_GLIDE = 4,
+    MOY_UI_SCROLL_SLIDE = 8
+};
 typedef struct {
     float vel, foff;
     int32_t drag;
     int32_t flags;
+    int32_t target;                 // a glide's target offset
+    int32_t from;                   // a slide's start
+    float ms;                       // a slide's time so far
 } moy_ui_scroll_t;
 void moy_ui_scroll_stop(moy_ui_scroll_t *s);
 void moy_ui_scroll_drag_start(moy_ui_scroll_t *s, int32_t p);
@@ -697,8 +721,23 @@ int moy_ui_scroll_drag_move(moy_ui_scroll_t *s, int32_t p, float dt_ms, int32_t 
                             int32_t content, int32_t extent);
 void moy_ui_scroll_drag_end(moy_ui_scroll_t *s, int32_t offset, int32_t content,
                             int32_t extent);
+// Aim a glide (a slide where `slide`) from `offset` at `target`, clamped to
+// the content; a target where the offset is ends any glide. Stops a fling.
+void moy_ui_scroll_glide_to(moy_ui_scroll_t *s, int32_t offset, int32_t target, int slide,
+                            int32_t content, int32_t extent);
+// Move the glide's target `n` steps of `size` (from the target while a glide
+// is live, else from `offset`); answers the target.
+int32_t moy_ui_scroll_step(moy_ui_scroll_t *s, int32_t offset, int32_t n, int32_t size,
+                           int32_t content, int32_t extent);
+// 1 while a fling coasts or a glide eases (the surface moves on its own).
+int moy_ui_scroll_moving(const moy_ui_scroll_t *s);
+// Advance the live motion by dt_ms: 1 when one was live (the offset in
+// *offset), 0 when nothing moves.
 int moy_ui_scroll_tick(moy_ui_scroll_t *s, float dt_ms, int32_t *offset, int32_t content,
                        int32_t extent);
+// End the live motion where it was going: a glide's offset is its target, a
+// fling stops where it is. 1 when one was live.
+int moy_ui_scroll_land(moy_ui_scroll_t *s, int32_t *offset);
 
 // Press/drag/release over a region: a press in the view arms a tap; travel
 // past `slop` turns it into a scroll; a clean release fires it; a press that
@@ -737,6 +776,10 @@ enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2 };
 // moy_ui_api_begin's: the keys are another surface's this frame (a cart's
 // editor handle holds them), so no stop holds focus.
 #define MOY_UI_ELSEWHERE 4
+// moy_ui_api_begin's flags: the key word is a press edge already -- the host
+// hands each typed key over once, on its press, and begins no frame for its
+// release -- so a key equal to the last one is a new press.
+#define MOY_UI_KEY_EDGE 16
 enum {
     MOY_UI_V_LABEL = 0, MOY_UI_V_INFO = 1, MOY_UI_V_LINK = 2, MOY_UI_V_CYCLE = 3,
     MOY_UI_V_SEG = 4, MOY_UI_V_SWATCH = 5, MOY_UI_V_TOGGLE = 6, MOY_UI_V_SLIDER = 7,

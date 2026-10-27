@@ -180,7 +180,7 @@ class WifiPanel:
         ws.settings_layer.wifi_page(popover=True)
         if self._radio() != before:
             ws._dirty = True          # the radio's state shows outside the panel
-        elif self.host.owed or self.host.tap == 2:
+        elif self.host.owed or self.host.tap == 2 or self.host.moved:
             ws.popover_touch()        # a tap's release, next frame
 
     def _radio(self):
@@ -261,7 +261,7 @@ class PowerRows:
                 ws._dirty = True
         if desk:
             _ui.hints(("change", "Change", "back", "Close"))
-        if self.host.owed or self.host.tap == 2:
+        if self.host.owed or self.host.tap == 2 or self.host.moved:
             ws.popover_touch()
 
     def handle_input(self, i):

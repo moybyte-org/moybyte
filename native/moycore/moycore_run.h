@@ -66,6 +66,9 @@ extern moycore_run_t *moycore_run_cur;
 uint32_t moycore_run_now_ms(void);
 // The tick begins: time() counts from here.
 void moycore_run_tick_begin(void);
+// The tick's dt in seconds, the host's injected clock: what the public UI
+// API's RUN face hands its pages' motion (moycore_ui_dt_take).
+void moycore_run_tick_dt(float dt);
 // A monotonic microsecond clock, for the frame's halves.
 uint32_t moycore_run_now_us(void);
 // The last frame's two halves, _update and _draw, in microseconds: set by the

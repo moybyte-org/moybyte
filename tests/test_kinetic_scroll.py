@@ -195,7 +195,7 @@ def test_fling_frame_is_pixel_faithful(tmp_path):
     off = ws.launcher.scroll
     lz = ws.launcher                       # freeze the coast at this offset,
     lz._region.stop()                      # still MOVING (a frame in motion
-    lz._glide = lz.max_scroll()            # draws no rest-only pixels)
+    lz._region.glide_to(lz.max_scroll())   # draws no rest-only pixels)
     lz.anim_frame = lambda dt: False
     ws.launcher_layer._full_streak = 0     # force the FULL path, same state
     ws.launcher._region.invalidate()

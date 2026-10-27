@@ -1645,12 +1645,33 @@ UI_TARGET = [None, None, 0, 0]  # the frame's context, canvas, look and desk fla
 _DESK = 1                               # moy_ui.h's MOY_UI_DESK
 _WINDOW = 2                             # ... and MOY_UI_WINDOW
 _ELSEWHERE = 4                          # ... and MOY_UI_ELSEWHERE
+_KEY_EDGE = 16                          # ... and MOY_UI_KEY_EDGE
 _APP_SHIFT = 8                          # moy_ui_api.h's MOY_UI_APP_SHIFT
 UI_SIZE = _C.api_size()
 
 
 _WHOLE = [None]                         # ui_frame's last whole-canvas rect
 ui_owes = _C.api_owes      # (ctx) whether the frame it drew last owes the next
+ui_moving = _C.api_moving  # (ctx) whether a page of it flings or glides
+_DT_MS = [0]                            # the loop's tick, the frames' clock (frame_dt)
+_MOVING = [False]                       # a frame begun since moving_take left a page moving
+
+
+def frame_dt(ms):
+    """The loop's tick in ms, which every frame begun until the next call
+    hands the engine as its clock (`MOY_UI_IN_DT`): the console sets it once
+    a loop pass. 0, no clock: a glide lands at once and nothing flings."""
+    _DT_MS[0] = int(ms)
+
+
+def moving_take():
+    """Whether a frame begun since the last call left a page of its
+    context moving (a fling, a glide): the console's frame gate reads it as
+    animation, so the motion's next frame comes with nothing dirty. Reading
+    clears it."""
+    got = _MOVING[0]
+    _MOVING[0] = False
+    return got
 
 
 def ui_context():
@@ -1659,7 +1680,7 @@ def ui_context():
 
 
 def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=None,
-             elsewhere=False):
+             elsewhere=False, edge=False):
     """Begin context `ctx`'s frame on canvas `cv` under theme `th`: a page
     fills `rect` (the canvas when None), `inp` is the frame's input in the
     run snapshot's shape (an array('i') of buttons held, buttons pressed --
@@ -1668,10 +1689,13 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
     rows and `window` says the page lies in a window's body, whose colour
     its ground then is; `app` is the shell app's id, whose
     `app_buttons[app]` its buttons take; `elsewhere`, the keys are another
-    surface's (a cart's editor handle holds them), so no stop holds focus.
-    Answers whether the frame is
-    settled: its input moved nothing, so a page drawn again draws the same
-    pixels. A duplicate id the last frame drew is logged, once."""
+    surface's (a cart's editor handle holds them), so no stop holds focus;
+    `edge`, the key in `inp` is a press edge already (the host sends each
+    typed key once and begins no frame for its release). The frame's clock is `frame_dt`'s. Answers whether the frame is settled:
+    it owes no frame after it -- what its input moved (a focus, a scroll)
+    this pass draws -- so a page drawn again draws the same pixels; a page
+    still moving on its own is `ui_moving`'s. A duplicate id the last frame
+    drew is logged, once."""
     t = UI_TARGET
     t[0] = ctx
     t[1] = cv
@@ -1683,11 +1707,17 @@ def ui_frame(ctx, cv, th, rect=None, inp=None, desk=False, window=False, app=Non
         rect = _WHOLE[0]
         if rect is None or rect[2] != cv.w or rect[3] != cv.h:
             rect = _WHOLE[0] = (0, 0, cv.w, cv.h)
-    flags = (_DESK if desk else 0) | (_WINDOW if window else 0) | (_ELSEWHERE if elsewhere else 0)
+    flags = ((_DESK if desk else 0) | (_WINDOW if window else 0)
+             | (_ELSEWHERE if elsewhere else 0) | (_KEY_EDGE if edge else 0))
     t[3] = flags & (_DESK | _WINDOW)
     if app is not None:
         flags |= (_app_row(app) + 1) << _APP_SHIFT
-    return _C.api_begin(ctx, inp, rect, flags, _fs(cv))
+    if inp is not None:
+        inp[_IN_DT] = _DT_MS[0]
+    settled = _C.api_begin(ctx, inp, rect, flags, _fs(cv))
+    if _C.api_moving(ctx):
+        _MOVING[0] = True
+    return settled
 
 
 def bar_lent(ctx):
@@ -1751,8 +1781,9 @@ def bar_or(items):
 
 # The words of a frame's input (moy_ui_api.h's MOY_UI_IN_*): the buttons held
 # and pressed, the pointer's x, y and flags, the key typed, its modifiers,
-# and the wheel's steps across and down.
-UI_IN_LEN = 9
+# the wheel's steps across and down, and the frame's clock (ui_frame's).
+UI_IN_LEN = 10
+_IN_DT = 9
 _P_MIDDLE = 8                           # MOY_UI_P_MIDDLE: the middle button held
 _PB_MIDDLE = 2                          # moy_input's PB_MIDDLE
 
@@ -1762,7 +1793,8 @@ class AppHost:
     with `UI = True`; Settings, the update screen and the wifi popover hold
     their own): its context, and the frame's input gathered from the app
     protocol's handlers in the run snapshot's shape. `keys` and `point`
-    answer whether the app owes a frame (its `damage.all()` is the caller's);
+    answer whether the app owes a frame, a page of it moving on its own
+    included (`moving`; its `damage.all()` is the caller's);
     `begin` begins the frame. A tap is a press frame then a release frame
     where it went down; a host that passes `point` the pointer's `down` on
     every sample also drags (the press held while it moves, released where
@@ -1818,7 +1850,7 @@ class AppHost:
         moved = mid or mid != self.mid or a[7] or a[8]
         self.mid = mid
         return (bool(b) or typed or self.owed or self.tap != 0 or bool(moved)
-                or _C.api_owes(self.ctx))
+                or _C.api_owes(self.ctx) or _C.api_moving(self.ctx))
 
     def point(self, x, y, click, down=None):
         """A pointer sample in the app's coordinates; a click starts a tap.
@@ -1843,8 +1875,9 @@ class AppHost:
 
     def focus(self, id):
         """Move focus to `id` ahead of the next frame, so that frame's keys
-        act on it (`ui.focus` inside a frame moves it after them)."""
-        _C.api_focus(self.ctx, id)
+        act on it and its begin shows it (`ui.focus` inside a frame moves it
+        after them, and owes the next frame)."""
+        _C.api_focus_ahead(self.ctx, id)
 
     def box(self, id):
         """(x, y, w, h) where stop `id` drew in the last frame, or None."""
@@ -1876,7 +1909,7 @@ class AppHost:
                 a[3] = self.py
             a[4] |= 1 | (_P_MIDDLE if self.mid else 0)
         settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app,
-                           elsewhere=elsewhere or _ON_BAR[0])
+                           elsewhere=elsewhere or _ON_BAR[0], edge=True)
         if a[1] & _UP and _C.api_edge(self.ctx):
             _EDGE[0] = True
         self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
@@ -1886,8 +1919,23 @@ class AppHost:
 
     def still(self):
         """Whether the page this context drew last is what it draws next:
-        its input moved nothing, no tap waits and it owes no frame."""
-        return not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
+        its input moved nothing, no tap waits, it owes no frame and no page
+        of it moves on its own."""
+        return (not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
+                and not _C.api_moving(self.ctx))
+
+    @property
+    def moving(self):
+        """Whether a page of this context flings or glides: its next frame
+        is due though no input comes."""
+        return _C.api_moving(self.ctx)
+
+    @property
+    def moved(self):
+        """Whether the frame begun last moved the focus or a scroll, which
+        its pass drew: a frame that owes nothing but is not the one before
+        it (a popover's card the WM owes every buffer)."""
+        return _C.api_moved(self.ctx)
 
 
 def wash_page(src=None, also=None):
@@ -2329,9 +2377,10 @@ class ScrollRegion:
     # BAR_W and the pixels drawn must never disagree. The module's last line
     # sets it from C.
     BAR_W = 4
-    # Kinetic scrolling (#113 Phase 4). Velocities are px/ms so the tuning is
-    # frame-rate independent; every dt is INJECTED (the loop's tick), never
-    # read from a clock, so the physics is deterministic under test.
+    # The motion -- a drag, the fling a release leaves, the glide a step or a
+    # reveal aims -- is native/moy_ui's (moy_ui_scroll_t); every dt is
+    # INJECTED (the loop's tick), never read from a clock, so the physics is
+    # deterministic under test. The fling's constants, as moy_ui.h has them:
     FRICTION = 0.995    # per-ms decay: a fling coasts ~1s (0.995^1000 ~ 0.007)
     MIN_FLING = 0.15    # px/ms (150 px/s): a release slower than this is a stop
     STOP_VEL = 0.02     # px/ms: coasting below this comes to rest
@@ -2342,10 +2391,11 @@ class ScrollRegion:
         self.view = (0, 0, 0, 0)
         self.content = 0            # content extent along the scroll axis
         self.offset = 0
-        # The drag and the fling (the last drag sample, the EMA finger velocity
-        # in px/ms, the float offset while coasting, their flags) live in this
-        # buffer; the rules are native/moy_ui's (moy_ui_scroll_t).
-        self._st = bytearray(16)
+        # The drag, the fling and the glide (the last drag sample, the EMA
+        # finger velocity in px/ms, the float offset while coasting, the
+        # glide's target, their flags) live in this buffer; the rules are
+        # native/moy_ui's (moy_ui_scroll_t).
+        self._st = bytearray(28)
         # Scroll-as-blit paint ring (#113): the most recent painted frames'
         # (frame_no, offset, key, stamp), newest first. blit_shift compares the
         # current offset against the paint whose pixels sit in the target
@@ -2466,21 +2516,57 @@ class ScrollRegion:
                            self.view[2] if self.horizontal else self.view[3])
 
     def stop(self):
-        """Kill any kinetic motion (a catching touch / a programmatic scroll)."""
+        """Kill any motion, a fling or a glide (a catching touch / a
+        programmatic scroll)."""
         _C.scroll_stop(self._st)
 
     @property
     def animating(self):
-        """True while a released fling is coasting -- the owner ticks it each
-        frame and keeps the redraw gate open until it rests."""
+        """True while the view moves on its own -- a released fling coasts
+        or a glide eases -- so the owner ticks it each frame and keeps the
+        redraw gate open until it rests."""
+        return bool(self._st[12] & 6)
+
+    @property
+    def flinging(self):
+        """True while a released fling coasts."""
         return bool(self._st[12] & 2)
 
+    @property
+    def gliding(self):
+        """True while a glide eases the view to its target."""
+        return bool(self._st[12] & 4)
+
+    @property
+    def target(self):
+        """The offset the glide is carrying the view to, None with none."""
+        if not self._st[12] & 4:
+            return None
+        return _unpack("<i", self._st, 16)[0]
+
+    def glide_to(self, p, slide=False):
+        """Carry the view to offset `p` (clamped), eased in time from where
+        it is; `slide`, over the fixed slide time instead (the handheld home's
+        carousel). A target where the view is ends any glide."""
+        _C.scroll_glide_to(self._st, self.offset, p, slide, self.content, self._extent())
+
+    def step(self, n, size):
+        """Move the glide's target `n` steps of `size` -- from the target
+        while a glide is live, else from the offset -- and answer it."""
+        return _C.scroll_step(self._st, self.offset, n, size, self.content, self._extent())
+
+    def land(self):
+        """End the motion where it was going (a glide at its target)."""
+        off = _C.scroll_land(self._st, self.offset)
+        if off >= 0:
+            self.offset = off
+
     def tick(self, dt_ms):
-        """Advance a coasting fling by one frame (dt_ms injected): integrate
-        the offset, decay the velocity, hard-stop at the clamp edges (#113
-        v1: no overshoot). Returns True when this frame moved the view."""
-        off = _C.scroll_tick(self._st, dt_ms, self.offset, self.content,
-                             self.view[2] if self.horizontal else self.view[3])
+        """Advance the fling or the glide by one frame (dt_ms injected): a
+        fling integrates the offset and decays, a glide eases toward its
+        target, each hard-stopping at the clamp edges (no overshoot).
+        Returns True when a motion was live this frame."""
+        off = _C.scroll_tick(self._st, dt_ms, self.offset, self.content, self._extent())
         if off < 0:
             return False
         self.offset = off

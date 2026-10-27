@@ -601,7 +601,7 @@ class PauseMenu:
         if self.stopped:
             self._stop_body(cart)
             _ui.popover()
-            if not settled:
+            if not settled or host.moved:
                 ws.request_frame()
             return
         _ui.info(str((cart.get("title") if cart else "") or "Game"), "Paused")
@@ -618,7 +618,7 @@ class PauseMenu:
             _ui.menu("", self.ITEMS, self.ICONS)
             _ui.hints(("back", "Resume"))
         _ui.popover()
-        if not settled:
+        if not settled or host.moved:
             ws.request_frame()
 
     def _stop_body(self, cart):
@@ -778,7 +778,7 @@ class DeleteConfirm:
         elif pick == 1:
             self.open = False         # the answer is in: the tail deletes
             ws.defer(self._delete, toast=False)
-        elif not settled:
+        elif not settled or self._host.moved:
             ws.request_frame()
 
 
@@ -1303,7 +1303,7 @@ class SystemMenuUI:
         if texts:
             _ui.menu(cap, texts, icons, kinds=kinds)
         _ui.popover()
-        if not settled:
+        if not settled or host.moved:
             ws.request_frame()
 
     def look_hit(self, px, py):

@@ -15,15 +15,19 @@ static int32_t clamp(int32_t off, int32_t content, int32_t extent) {
     return off < 0 ? 0 : (off > m ? m : off);
 }
 
+static int32_t iabs(int32_t v) {
+    return v < 0 ? -v : v;
+}
+
 void moy_ui_scroll_stop(moy_ui_scroll_t *s) {
-    s->flags &= ~MOY_UI_SCROLL_FLING;
+    s->flags &= ~(MOY_UI_SCROLL_FLING | MOY_UI_SCROLL_GLIDE | MOY_UI_SCROLL_SLIDE);
     s->vel = 0.0f;
 }
 
 void moy_ui_scroll_drag_start(moy_ui_scroll_t *s, int32_t p) {
     s->drag = p;
     s->flags |= MOY_UI_SCROLL_DRAG;
-    moy_ui_scroll_stop(s);                  // a new touch CATCHES a live fling
+    moy_ui_scroll_stop(s);                  // a new touch CATCHES a live fling or glide
 }
 
 int moy_ui_scroll_drag_move(moy_ui_scroll_t *s, int32_t p, float dt_ms, int32_t *offset,
@@ -51,9 +55,40 @@ void moy_ui_scroll_drag_end(moy_ui_scroll_t *s, int32_t offset, int32_t content,
     }
 }
 
-int moy_ui_scroll_tick(moy_ui_scroll_t *s, float dt_ms, int32_t *offset, int32_t content,
-                       int32_t extent) {
-    if (!(s->flags & MOY_UI_SCROLL_FLING) || dt_ms <= 0.0f) {
+void moy_ui_scroll_glide_to(moy_ui_scroll_t *s, int32_t offset, int32_t target, int slide,
+                            int32_t content, int32_t extent) {
+    target = clamp(target, content, extent);
+    s->flags &= ~MOY_UI_SCROLL_FLING;
+    s->vel = 0.0f;
+    if (target == offset) {
+        s->flags &= ~(MOY_UI_SCROLL_GLIDE | MOY_UI_SCROLL_SLIDE);
+        return;
+    }
+    s->target = target;
+    s->flags |= MOY_UI_SCROLL_GLIDE;
+    if (slide) {
+        s->flags |= MOY_UI_SCROLL_SLIDE;
+        s->from = offset;
+        s->ms = 0.0f;
+    } else {
+        s->flags &= ~MOY_UI_SCROLL_SLIDE;
+    }
+}
+
+int32_t moy_ui_scroll_step(moy_ui_scroll_t *s, int32_t offset, int32_t n, int32_t size,
+                           int32_t content, int32_t extent) {
+    int32_t base = (s->flags & MOY_UI_SCROLL_GLIDE) ? s->target : offset;
+    moy_ui_scroll_glide_to(s, offset, base + n * size, 0, content, extent);
+    return (s->flags & MOY_UI_SCROLL_GLIDE) ? s->target : offset;
+}
+
+int moy_ui_scroll_moving(const moy_ui_scroll_t *s) {
+    return (s->flags & (MOY_UI_SCROLL_FLING | MOY_UI_SCROLL_GLIDE)) != 0;
+}
+
+static int fling_tick(moy_ui_scroll_t *s, float dt_ms, int32_t *offset, int32_t content,
+                      int32_t extent) {
+    if (dt_ms <= 0.0f) {
         return 0;
     }
     s->foff += s->vel * dt_ms;
@@ -69,6 +104,64 @@ int moy_ui_scroll_tick(moy_ui_scroll_t *s, float dt_ms, int32_t *offset, int32_t
         moy_ui_scroll_stop(s);
     }
     *offset = (int32_t)(s->foff + 0.5f);
+    return 1;
+}
+
+static int glide_tick(moy_ui_scroll_t *s, float dt_ms, int32_t *offset, int32_t content,
+                      int32_t extent) {
+    int32_t off = *offset, t = s->target;
+    if (s->flags & MOY_UI_SCROLL_SLIDE) {
+        float ms = dt_ms < 1.0f ? 1.0f
+                   : (dt_ms > (float)MOY_UI_FRAME_MS_MAX ? (float)MOY_UI_FRAME_MS_MAX : dt_ms);
+        s->ms += ms;
+        float u = s->ms / MOY_UI_SLIDE_MS + 1e-6f;
+        if (u >= 1.0f) {
+            off = t;
+        } else {
+            off = s->from + (int32_t)((float)(t - s->from) * (1.0f - powf(1.0f - u, 3.0f)));
+        }
+    } else {
+        int32_t ms = (int32_t)dt_ms;
+        ms = ms < 1 ? 1 : (ms > MOY_UI_FRAME_MS_MAX ? MOY_UI_FRAME_MS_MAX : ms);
+        int32_t rem = t - off;
+        int32_t step = (int32_t)((float)rem
+                                 * (1.0f - powf(0.5f, (float)ms / MOY_UI_GLIDE_HALF_MS)));
+        int32_t lo = iabs(rem) < MOY_UI_GLIDE_MIN ? iabs(rem) : MOY_UI_GLIDE_MIN;
+        if (iabs(step) < lo) {
+            step = rem > 0 ? lo : -lo;
+        }
+        if (iabs(step) > iabs(rem)) {
+            step = rem;
+        }
+        off += step;
+    }
+    int32_t c = clamp(off, content, extent);
+    if (c != off || off == t) {
+        s->flags &= ~(MOY_UI_SCROLL_GLIDE | MOY_UI_SCROLL_SLIDE);   // landed, or a clamp
+    }
+    *offset = c;
+    return 1;
+}
+
+int moy_ui_scroll_tick(moy_ui_scroll_t *s, float dt_ms, int32_t *offset, int32_t content,
+                       int32_t extent) {
+    if (s->flags & MOY_UI_SCROLL_FLING) {
+        return fling_tick(s, dt_ms, offset, content, extent);
+    }
+    if (s->flags & MOY_UI_SCROLL_GLIDE) {
+        return glide_tick(s, dt_ms, offset, content, extent);
+    }
+    return 0;
+}
+
+int moy_ui_scroll_land(moy_ui_scroll_t *s, int32_t *offset) {
+    if (!moy_ui_scroll_moving(s)) {
+        return 0;
+    }
+    if (s->flags & MOY_UI_SCROLL_GLIDE) {
+        *offset = s->target;
+    }
+    moy_ui_scroll_stop(s);
     return 1;
 }
 

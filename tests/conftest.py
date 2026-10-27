@@ -211,6 +211,10 @@ def _theme_reset():
     layout_base.in_pane(False)
     ui_draw.input_kind("keys")
     ui_draw.marks(True, True)
+    # the frames' clock is the console's, set each loop pass: a test that
+    # begins frames itself starts with none (every glide lands at once)
+    ui_draw.frame_dt(0)
+    ui_draw.moving_take()
 
 
 @pytest.fixture(autouse=True)

@@ -2211,6 +2211,34 @@ static mp_obj_t ui_scroll_tick(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_tick_obj, 5, 5, ui_scroll_tick);
 
+// scroll_glide_to(st, offset, target, slide, content, extent)
+static mp_obj_t ui_scroll_glide_to(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_scroll_glide_to(scroll_of(a[0]), num(a[1]), num(a[2]), mp_obj_is_true(a[3]),
+                           num(a[4]), num(a[5]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_glide_to_obj, 6, 6, ui_scroll_glide_to);
+
+// scroll_step(st, offset, n, size, content, extent) -> the glide's target
+static mp_obj_t ui_scroll_step(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    return mp_obj_new_int(moy_ui_scroll_step(scroll_of(a[0]), num(a[1]), num(a[2]), num(a[3]),
+                                             num(a[4]), num(a[5])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scroll_step_obj, 6, 6, ui_scroll_step);
+
+// scroll_land(st, offset) -> the offset the live motion lands at, or -1
+// when nothing moves
+static mp_obj_t ui_scroll_land(mp_obj_t st, mp_obj_t offset) {
+    int32_t off = num(offset);
+    if (!moy_ui_scroll_land(scroll_of(st), &off)) {
+        return MP_OBJ_NEW_SMALL_INT(-1);
+    }
+    return mp_obj_new_int(off);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_scroll_land_obj, ui_scroll_land);
+
 // dragtap(tap, st, view, horizontal, px, py, click, down, slop, dt, offset,
 //         content, out) -> True on a clean tap; out (array('i')) gets the
 // offset and the tap's x and y
@@ -3001,6 +3029,18 @@ static mp_obj_t ui_api_owes(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_owes_obj, ui_api_owes);
 
+// api_moved(ctx) -> whether this frame's begin moved the focus or a scroll
+static mp_obj_t ui_api_moved(mp_obj_t ctx) {
+    return mp_obj_new_bool(moy_ui_api_moved(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_moved_obj, ui_api_moved);
+
+// api_moving(ctx) -> whether a page of the context flings or glides
+static mp_obj_t ui_api_moving(mp_obj_t ctx) {
+    return mp_obj_new_bool(moy_ui_api_moving(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_moving_obj, ui_api_moving);
+
 // api_offset(ctx, x, y) -> the scroll of the page under (x, y), -1 none
 static mp_obj_t ui_api_offset(mp_obj_t ctx, mp_obj_t x, mp_obj_t y) {
     return mp_obj_new_int(moy_ui_api_offset(ctx_of(ctx), num(x), num(y)));
@@ -3028,6 +3068,17 @@ static mp_obj_t ui_api_focus(mp_obj_t ctx, mp_obj_t id) {
     return n < 0 ? mp_const_none : ret_str(buf, strlen(buf));
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_focus_obj, ui_api_focus);
+
+// api_focus_ahead(ctx, id): focus on `id` from the next frame's begin
+static mp_obj_t ui_api_focus_ahead(mp_obj_t ctx, mp_obj_t id) {
+    moy_ui_span_t sp = span_of(id);
+    if (sp.p == NULL) {
+        sp.p = (const uint8_t *)"";
+    }
+    moy_ui_api_focus_ahead(ctx_of(ctx), sp);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_focus_ahead_obj, ui_api_focus_ahead);
 
 // api_keys_taken(ctx) -> whether the ui used this frame's keys
 static mp_obj_t ui_api_keys_taken(mp_obj_t ctx) {
@@ -3180,6 +3231,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_wash), MP_ROM_PTR(&ui_api_wash_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_wash_box), MP_ROM_PTR(&ui_api_wash_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_moved), MP_ROM_PTR(&ui_api_moved_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_moving), MP_ROM_PTR(&ui_api_moving_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_offset), MP_ROM_PTR(&ui_api_offset_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_fades), MP_ROM_PTR(&ui_api_fades_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },
@@ -3201,6 +3254,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_month), MP_ROM_PTR(&ui_api_month_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_toast), MP_ROM_PTR(&ui_api_toast_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_focus_ahead), MP_ROM_PTR(&ui_api_focus_ahead_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_edge), MP_ROM_PTR(&ui_api_edge_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },
@@ -3223,6 +3277,9 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_scroll_drag_move), MP_ROM_PTR(&ui_scroll_drag_move_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_drag_end), MP_ROM_PTR(&ui_scroll_drag_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_tick), MP_ROM_PTR(&ui_scroll_tick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_glide_to), MP_ROM_PTR(&ui_scroll_glide_to_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_step), MP_ROM_PTR(&ui_scroll_step_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_land), MP_ROM_PTR(&ui_scroll_land_obj) },
     { MP_ROM_QSTR(MP_QSTR_dragtap), MP_ROM_PTR(&ui_dragtap_obj) },
     { MP_ROM_QSTR(MP_QSTR_button), MP_ROM_PTR(&ui_button_obj) },
     { MP_ROM_QSTR(MP_QSTR_button_x), MP_ROM_PTR(&ui_button_x_obj) },

@@ -1235,10 +1235,6 @@ class SettingsLayer:
         if key == "volume":
             console_volume(v)
 
-    def rows_flinging(self):
-        """False: the page scrolls by the engine's drag, which has no coast."""
-        return False
-
     # -- About ----------------------------------------------------------------------
 
     def _read_about(self):

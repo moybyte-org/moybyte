@@ -118,7 +118,11 @@ float offset, and -- added -- a **glide target** and the glide's start. One
   gliding re-aims from the current offset, so a held key that owes steps
   reads as one movement at the step rate. A 20-40 px step is five or six
   halvings, ~230-270 ms of frames; that is the carousel's feel today, and
-  the parameter is where it is tuned;
+  the parameter is where it is tuned. The handheld home's carousel keeps
+  its slide, the glide's second ease: the target reached in `SLIDE_MS`
+  (200), eased out, re-aimed from where the row is. A reveal in a dialog's
+  or a popover's body (an overlay, §12) and a focus an app moves lands at
+  once;
 - **a drag** catches a fling or a glide, as today.
 
 A step is `step(n, size)`: the target moves by n steps of the surface's step
@@ -134,8 +138,9 @@ exists outside `moy_ui_interact.c`.
 
 **The engine gets a clock word.** `api_begin` has no dt today; `ui_frame`'s
 `inp` array gains `MOY_UI_IN_DT` (the loop's tick in ms, injected -- never a
-clock read -- so the physics stays deterministic under test), and the wasm
-head's snapshot carries it.
+clock read -- so the physics stays deterministic under test); a Lua or
+compiled app's run takes the sum of its ticks' injected dt since its last
+frame (`moycore_run_tick_dt`).
 
 **The verbs engine's nests scroll on it too.** A page body, a `ui.scroll`
 region and a `ui.table`'s rows are nests whose offset is a `moy_ui_keep_t`

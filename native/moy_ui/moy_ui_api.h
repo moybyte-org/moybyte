@@ -39,11 +39,14 @@
 // 4), the key typed this frame (9 is Tab) and the modifiers held with it
 // (moy_input.h's MOY_INPUT_MOD_*: Shift+Tab steps back), and the wheel's
 // notches this frame, across and down (positive right and down): a notch
-// down scrolls the page under the pointer by MOY_UI_WHEEL_ROWS rows. No page
+// down glides the page under the pointer MOY_UI_WHEEL_ROWS rows. No page
 // scrolls across, so Shift's wheel, which turns it across, scrolls none.
+// Then the loop's tick in ms, the clock the scrolling nests' motion runs on
+// (moy_ui.h's moy_ui_scroll_t): the host's injected dt, never a clock read;
+// 0, no clock, lands every glide at once and flings nothing.
 enum {
     MOY_UI_IN_BTN = 0, MOY_UI_IN_BTNP, MOY_UI_IN_X, MOY_UI_IN_Y, MOY_UI_IN_PTR, MOY_UI_IN_KEY,
-    MOY_UI_IN_MODS, MOY_UI_IN_WHEEL_X, MOY_UI_IN_WHEEL_Y,
+    MOY_UI_IN_MODS, MOY_UI_IN_WHEEL_X, MOY_UI_IN_WHEEL_Y, MOY_UI_IN_DT,
     MOY_UI_IN_LEN
 };
 #define MOY_UI_MOD_SHIFT 2
@@ -98,6 +101,9 @@ typedef struct {
     moy_ui_box_t b;                 // on screen, as drawn
     uint16_t flags;                 // STOP_* (moy_ui_api.c)
     uint8_t page;                   // the index of its page's stop, or 0xff
+    // A list's or a table's rows on its page (STOP_ROWS): the focused row
+    // and row 0's top on screen, so a key step reveals its row at begin.
+    int16_t row, top;
 } moy_ui_stop_t;
 
 // The page a scroll region, a dialog's body or a popover's stands in, kept
@@ -118,6 +124,7 @@ typedef struct {
     int16_t foot;                   // a page: the hint band its foot gave up last frame
     int16_t peek;                   // a popover: the body height its cut peeks a row at, 0 none
     uint8_t seen;
+    moy_ui_scroll_t sc;             // a page: its scroll's motion (a drag, a fling, a glide)
 } moy_ui_keep_t;
 
 typedef struct {
@@ -180,6 +187,13 @@ typedef struct {
     // The frame begun over a dialog's stops (MODAL: the others take no input);
     // a layout from a stale measure owes the next frame (OWE).
     uint8_t modal, owe;
+    // The frame's begin moved the focus or a page's scroll (drawn by the
+    // pass, owing nothing); the list or table whose key step begin revealed,
+    // and the row it revealed.
+    uint8_t moved;
+    uint8_t jump;                   // the reveal is the app's focus move: no glide
+    int16_t step_row;
+    uint32_t step_rev;
     // An up press over a page's topmost stop, outside a dialog: the frame's
     // keys went past the page's top (the shell walks focus onto its bar).
     uint8_t edge;
@@ -260,9 +274,14 @@ moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n);
 // is the window's; MOY_UI_ELSEWHERE: the keys are another surface's, so no
 // stop holds focus this frame; and, in the bits from MOY_UI_APP_SHIFT, the row of the
 // theme's app_buttons its buttons take plus one, 0 none, which only a shell
-// app's host passes) and the font scale. Answers 1 when the frame is SETTLED: its input moved no focus,
-// activated nothing, pressed nothing and scrolled nothing, so a page drawn
-// again draws the same pixels.
+// app's host passes) and the font scale. Answers 1 when the frame OWES
+// nothing: what its input changed, begin applied before the pass -- a focus
+// moved, a page scrolled or a scroll's motion stepped (moy_ui_api_moved) --
+// so the pass draws it and the frame after draws the same pixels. A frame
+// owes the next for what applies after its pass: an activation, a typed
+// key, a press or its release, a value a key stepped, a dismissed popover,
+// a pointer that moved over the stops, a layout found stale or a reveal set
+// during the pass (moy_ui_api_owes).
 #define MOY_UI_APP_SHIFT 8
 int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, int flags,
                      int fs);
@@ -467,9 +486,18 @@ const char *moy_ui_api_bar_chip(const moy_ui_ctx_t *c, int *at);
 // The host's bar activated tool `i` of the bar lent last (MOY_UI_BAR_UP its
 // way back); the next ui.bar answers it.
 void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i);
-// Whether the frame drawn last laid a dialog or a popover out from a stale measure, so
-// the next frame is owed though no input came.
+// Whether the frame drawn last owes the next though no input comes: a
+// dialog or a popover laid out from a stale measure, or a reveal its pass
+// set (a list's or a table's row stepped where begin could not reveal it, a
+// focus moved by the app).
 int moy_ui_api_owes(const moy_ui_ctx_t *c);
+// Whether this frame's begin moved the focus or a page's scroll.
+int moy_ui_api_moved(const moy_ui_ctx_t *c);
+// Whether a page of the context moves on its own -- a fling coasts or a
+// glide eases -- so the next frame is due though no input comes: the
+// declared animation (docs/surface_model_v1.md §3's Class B) a host's frame
+// gate reads.
+int moy_ui_api_moving(const moy_ui_ctx_t *c);
 // The scroll of the page that lies under (x, y) as the frame drawn last laid
 // it out -- the offset a drag at that point moves, in pixels -- or -1 where
 // no page lies there. A measuring tool's probe (tools/input_bench.py).
@@ -485,6 +513,10 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
 // Focus moved to `id` (id.p NULL: read only). The focused id's text into
 // `buf` (NUL-terminated within `cap`); answers its length, -1 with none.
 int moy_ui_api_focus(moy_ui_ctx_t *c, moy_ui_span_t id, char *buf, size_t cap);
+// Focus moved to `id` ahead of the next frame, between frames (a host's):
+// that frame's begin shows it, so it owes no frame of its own as a move
+// inside a pass does.
+void moy_ui_api_focus_ahead(moy_ui_ctx_t *c, moy_ui_span_t id);
 int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
 // Whether this frame's up press found no stop above the focused one, outside
 // a dialog: the keys went past the page's top.

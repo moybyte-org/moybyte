@@ -806,6 +806,8 @@ class ScrollRegion:
         self._vel = 0.0
         self._fling = False
         self._foff = 0.0
+        self._glide = None
+        self._slide = None
         self._painted = []
 
     def set(self, view_rect, content):
@@ -883,12 +885,49 @@ class ScrollRegion:
     def stop(self):
         self._fling = False
         self._vel = 0.0
+        self._glide = None
+        self._slide = None
 
     @property
     def animating(self):
-        return self._fling
+        return self._fling or self._glide is not None
+
+    # The glide and the slide: the home carousel's motion as
+    # runtime/launcher_layer.py's Carousel.anim_frame computed it before it
+    # moved into native/moy_ui's scroll state (docs/scroll_and_text_2026-10.md
+    # §2.1), over a dt in ms rather than the carousel's seconds.
+    def glide_to(self, p, slide=False):
+        p = max(0, min(int(p), self._max_offset()))
+        self._fling = False
+        self._vel = 0.0
+        self._glide = p if p != self.offset else None
+        self._slide = [self.offset, 0] if slide and self._glide is not None else None
+
+    def _glide_tick(self, dt_ms):
+        if self._slide is not None:
+            sl = self._slide
+            sl[1] += max(1.0, min(200.0, dt_ms))
+            u = min(1.0, sl[1] / 200 + 1e-6)
+            e = 1.0 - (1.0 - u) ** 3
+            self.offset = self._glide if u >= 1.0 else sl[0] + int((self._glide - sl[0]) * e)
+        else:
+            rem = self._glide - self.offset
+            ms = max(1, min(200, int(dt_ms)))
+            step = int(rem * (1.0 - 0.5 ** (ms / 45.0)))
+            lo = min(abs(rem), 2)
+            if abs(step) < lo:
+                step = lo if rem > 0 else -lo
+            if abs(step) > abs(rem):
+                step = rem
+            self.offset += step
+        if self.offset == self._glide:
+            self._glide = None
+            self._slide = None
+        return True
 
     def tick(self, dt_ms):
+        if self._glide is not None and not self._fling:
+            return self._glide_tick(dt_ms)
         if not self._fling or dt_ms <= 0:
             return False
         self._foff += self._vel * dt_ms

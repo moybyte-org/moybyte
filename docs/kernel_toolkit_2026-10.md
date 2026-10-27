@@ -268,12 +268,16 @@ cross to C as pure functions over a state buffer **the caller owns**: a
 memory. The kernel holds nothing between calls, so there is no table and
 nothing to end at a VM stop: the plan's §4.3 rule holds with no handle.
 
-- **ScrollRegion and DragTap.** The offset, extent, drag and fling are the
-  buffer's. The fling decays by `FRICTION ** dt` in single-precision float,
-  which is what the boards' MicroPython computes, so the differential runs on
-  the unix MicroPython build (`tests/unix_mp.py`), comparing integer offsets
-  per tick. `blit_shift` and `note_painted`, which copy canvas pixels, stay in
-  the Python face.
+- **ScrollRegion and DragTap.** The offset, extent, drag, fling and glide
+  are the buffer's (`moy_ui_scroll_t`, the one scroll model of
+  `docs/scroll_and_text_2026-10.md` §2.1, which the verbs engine's pages
+  carry too). The fling decays by `FRICTION ** dt` and the glide eases in
+  single-precision float, which is what the boards' MicroPython computes, so
+  the differentials run on the unix MicroPython build (`tests/unix_mp.py`),
+  comparing integer offsets per tick against the twin (`tests/ui_twin.py`,
+  whose glide is the home carousel's arithmetic before it crossed).
+  `blit_shift` and `note_painted`, which copy canvas pixels, stay in the
+  Python face.
 
 ### 3.5 The role table's `ui` rows
 

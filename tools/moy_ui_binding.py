@@ -270,6 +270,11 @@ _DRAW_SIGS = (
                                  c.c_int32], _I),
     ("moy_ui_scroll_drag_end", [c.c_void_p, c.c_int32, c.c_int32, c.c_int32], None),
     ("moy_ui_scroll_tick", [c.c_void_p, c.c_float, c.c_void_p, c.c_int32, c.c_int32], _I),
+    ("moy_ui_scroll_glide_to", [c.c_void_p, c.c_int32, c.c_int32, _I, c.c_int32, c.c_int32],
+     None),
+    ("moy_ui_scroll_step", [c.c_void_p, c.c_int32, c.c_int32, c.c_int32, c.c_int32,
+                            c.c_int32], c.c_int32),
+    ("moy_ui_scroll_land", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_dragtap_frame", [c.c_void_p, c.c_void_p, _R4, _I, c.c_int32, c.c_int32, _I, _I,
                               c.c_int32, c.c_float, c.c_void_p, c.c_int32, c.c_void_p,
                               c.c_void_p], _I),
@@ -309,6 +314,8 @@ _DRAW_SIGS = (
     ("moy_ui_api_wash", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_wash_box", [c.c_void_p], _Box),
     ("moy_ui_api_owes", [c.c_void_p], _I),
+    ("moy_ui_api_moved", [c.c_void_p], _I),
+    ("moy_ui_api_moving", [c.c_void_p], _I),
     ("moy_ui_api_offset", [c.c_void_p, _I, _I], c.c_int32),
     ("moy_ui_api_fades", [_I], c.c_uint32),
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
@@ -338,6 +345,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_card", [c.c_void_p, c.POINTER(_Sink), _Span, _Span, c.c_void_p, c.c_void_p],
      None),
     ("moy_ui_api_focus", [c.c_void_p, _Span, c.c_char_p, c.c_size_t], _I),
+    ("moy_ui_api_focus_ahead", [c.c_void_p, _Span], None),
     ("moy_ui_api_keys_taken", [c.c_void_p], _I),
     ("moy_ui_api_edge", [c.c_void_p], _I),
     ("moy_ui_api_at", [c.c_void_p, _I, _I, _I, _I], None),
@@ -922,6 +930,20 @@ def binding():
             return -1
         return off.value
 
+    def scroll_glide_to(st, offset, target, slide, content, extent):
+        lib.moy_ui_scroll_glide_to(_buf(st), int(offset), int(target), 1 if slide else 0,
+                                   int(content), int(extent))
+
+    def scroll_step(st, offset, n, size, content, extent):
+        return int(lib.moy_ui_scroll_step(_buf(st), int(offset), int(n), int(size),
+                                          int(content), int(extent)))
+
+    def scroll_land(st, offset):
+        off = c.c_int32(int(offset))
+        if not lib.moy_ui_scroll_land(_buf(st), c.byref(off)):
+            return -1
+        return off.value
+
     def dragtap(tap, st, view, horizontal, px, py, click, down, slop, dt, offset,
                 content, out):
         o = (c.c_int32 * 3)(int(offset), 0, 0)
@@ -933,7 +955,7 @@ def binding():
         return bool(tapped)
 
     for f in (scroll_stop, scroll_drag_start, scroll_drag_move, scroll_drag_end,
-              scroll_tick, dragtap):
+              scroll_tick, scroll_glide_to, scroll_step, scroll_land, dragtap):
         setattr(m, f.__name__, f)
 
     # -- the public UI API -----------------------------------------------------
@@ -1232,6 +1254,14 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
 
+    def api_moved(ctx):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_moved(p))
+
+    def api_moving(ctx):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_moving(p))
+
     def api_offset(ctx, x, y):
         p, _k = _ctx(ctx)
         return int(lib.moy_ui_api_offset(p, int(x), int(y)))
@@ -1296,6 +1326,14 @@ def binding():
         n = lib.moy_ui_api_focus(p, t, buf, 64)
         return None if n < 0 else buf.value.decode("utf-8", "replace")
 
+    def api_focus_ahead(ctx, id_):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        if not t.n:
+            keep = c.create_string_buffer(b"", 1)
+            t = _Span(c.addressof(keep), 0)
+        lib.moy_ui_api_focus_ahead(p, t)
+
     def api_keys_taken(ctx):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_keys_taken(p))
@@ -1317,14 +1355,14 @@ def binding():
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
-              api_owes, api_offset, api_fades,
+              api_owes, api_moved, api_moving, api_offset, api_fades,
               api_end,
               api_table_rows, api_table_pics,
               api_grid,
               api_card, api_part, api_popover, api_menu, api_menu_danger,
               api_text, api_card_mark, api_grid_spread, api_group_card, api_empty, api_month, api_toast,
               api_tool, api_bar, api_bar_lent, api_bar_tap, api_rule,
-              api_focus, api_keys_taken, api_edge, api_at, api_dup):
+              api_focus, api_focus_ahead, api_keys_taken, api_edge, api_at, api_dup):
         setattr(m, f.__name__, f)
     m.calls = lambda: lib.moy_ui_calls()
     m.glyph_names = lambda: glyphs
