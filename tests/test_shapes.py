@@ -483,6 +483,41 @@ def test_a_long_run_matches_the_reference(case, monkeypatch):
     assert got == want, _diff(got, want)
 
 
+@pytest.mark.parametrize("case", [
+    dict(x=0, y=0, w=150, h=6, r=0, b=0, alpha=102, col=0x0000),
+    dict(x=1, y=1, w=37, h=5, r=0, b=0, alpha=46, col=0x18a8),
+    dict(x=4, y=0, w=60, h=6, r=0, b=0, alpha=255, col=0xffff),
+    dict(x=8, y=1, w=50, h=4, r=2, b=1, alpha=180, col=0x0000),
+], ids=["scrim", "short", "opaque", "soft"])
+def test_a_shadow_over_another_buffer_lands_in_both(case, monkeypatch):
+    """moy_shape_shadow_io: the pixels blended are `src`'s, the results
+    stored to the target and to `also`, everything else in both left as
+    it was: the frame a shadow over `src` in place would leave."""
+    monkeypatch.setitem(globals(), "W", 150)
+    clip = (0, 0, 150, 6)
+    rnd = random.Random(11)
+    src = [rnd.randrange(65536) for _ in range(150 * 6)]
+    junk = [rnd.randrange(65536) for _ in range(150 * 6)]
+    junk2 = [rnd.randrange(65536) for _ in range(150 * 6)]
+    want = list(src)
+    ref_shadow(want, case["x"], case["y"], case["w"], case["h"], case["r"], case["b"], 0, 0,
+               case["col"], case["alpha"], False, None, (0, 0), clip)
+    b = case["b"]
+    box = [(X, Y) for Y in range(max(0, case["y"] - b), min(6, case["y"] + case["h"] + b))
+           for X in range(max(0, case["x"] - b), min(150, case["x"] + case["w"] + b))]
+    inside = set(Y * 150 + X for X, Y in box)
+    sbuf, buf, also = _buf(src), _buf(junk), _buf(junk2)
+    g.shadow_io(sbuf, also)
+    try:
+        _shadow(buf, case["x"], case["y"], case["w"], case["h"], case["r"], b, 0, 0,
+                case["col"], case["alpha"], False, None, (0, 0), clip)
+    finally:
+        g.shadow_io(None, None)
+    for got, rest in ((_words(buf), junk), (_words(also), junk2)):
+        exp = [want[i] if i in inside else rest[i] for i in range(150 * 6)]
+        assert got == exp, _diff(got, exp)
+
+
 def test_a_hole_is_left_alone():
     bg = _bg(8)
     buf = _buf(bg)

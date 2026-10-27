@@ -1010,14 +1010,21 @@ class SystemMenuUI:
         ws = self.ws
         f = ws._frames_drawn
         if self._put_f != f:
-            self.scrim()
             cv = ws.sys_canvas
             # the key the home's put asked this frame, before it drew
             key = self._key if self._key_f == f else self._home_key(cv)
-            if key is not None:
+            if key is None:
+                self.scrim()
+            else:
+                # the scrim stores to the held layer as it lands; the rest
+                # of the glass is copied there after it
                 g = ws.launcher_layer.grid
-                self._held.keep(ws, cv, (0, 0, cv.w, cv.h), key,
-                                not (g.dragging or g.flinging), dt)
+                still = not (g.dragging or g.flinging)
+                lay = self._held.layer(ws, cv, still, dt)
+                also = None if lay is None else getattr(lay, "_buf", None)
+                self.scrim(also)
+                self._held.keep(ws, cv, (0, 0, cv.w, cv.h), key, still, dt,
+                                self.scrim_rects() if also is not None else ())
         self._draw_sysmenu()
 
     def put_home(self, cv, dt):
@@ -1047,14 +1054,15 @@ class SystemMenuUI:
             return None
         return (self.ws.launcher_layer._retained_key(cv), self.scrim_rects())
 
-    def scrim(self):
+    def scrim(self, also=None):
         """Dim what the system menu, a card's menu or ABOUT covers: the
         content under the bars, which stay as they are (D-01). Once a full
         frame, before the modal draws; a frame that paints the popover's
-        rect alone keeps it."""
+        rect alone keeps it. `also`: a buffer each washed pixel is stored
+        to as well (the held layer's)."""
         ws = self.ws
         for rect in self.scrim_rects():
-            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect)
+            _ui_draw.scrim(ws.sys_canvas, ws.theme_colors, rect, None, also)
 
     def scrim_rects(self):
         """The rects `scrim` washes, on the glass: none for a bar widget's

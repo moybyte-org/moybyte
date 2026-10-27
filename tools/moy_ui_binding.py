@@ -232,6 +232,7 @@ _DRAW_SIGS = (
     ("moy_ui_bar_part", [c.POINTER(_Sink), _I, _Box, _I], _I),
     ("moy_ui_bar_tile", [c.POINTER(_Sink), _Box, c.c_int32], _I),
     ("moy_ui_scrim", [c.POINTER(_Sink), _Box], _I),
+    ("moy_ui_scrim_io", [c.POINTER(_Sink), _Box, c.c_void_p, c.c_void_p, c.c_size_t], _I),
     ("moy_ui_tile", [c.POINTER(_Sink), _Box, _I, _I, _I, _I, _I, _I], _I),
     ("moy_ui_unlock", [c.POINTER(_Sink), _I, _I, _Span, _Span, _I, _I, _I, _I, _I,
                        c.POINTER(_Box)], _I),
@@ -306,6 +307,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_dialog", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, _I, c.c_void_p],
      c.c_int32),
     ("moy_ui_api_wash", [c.c_void_p, c.POINTER(_Sink)], None),
+    ("moy_ui_api_wash_box", [c.c_void_p], _Box),
     ("moy_ui_api_owes", [c.c_void_p], _I),
     ("moy_ui_api_fades", [_I], c.c_uint32),
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
@@ -721,8 +723,31 @@ def binding():
         return bool(lib.moy_ui_bar_part(c.byref(sink(cv, look)), int(part), box_of(rect),
                                         int(on)))
 
-    def scrim(cv, look, rect):
-        _check(lib.moy_ui_scrim(c.byref(sink(cv, look)), box_of(rect)))
+    def _pixels(b, write):
+        """(pointer, bytes, what keeps it) of a buffer the C reads or writes."""
+        if isinstance(b, bytes):
+            if write:
+                raise TypeError("moy_ui: a read-only buffer")
+            keep = c.c_char_p(b)
+            return c.cast(keep, c.c_void_p), len(b), keep
+        mv = memoryview(b).cast("B")
+        keep = (c.c_char * mv.nbytes).from_buffer(mv)
+        return c.cast(keep, c.c_void_p), mv.nbytes, keep
+
+    def scrim(cv, look, rect, src=None, also=None):
+        s = sink(cv, look)
+        if src is None and also is None:
+            _check(lib.moy_ui_scrim(c.byref(s), box_of(rect)))
+            return
+        n = -1 & 0xFFFFFFFFFFFFFFFF
+        ps = pa = None
+        if src is not None:
+            ps, k, _ks = _pixels(src, False)
+            n = min(n, k)
+        if also is not None:
+            pa, k, _ka = _pixels(also, True)
+            n = min(n, k)
+        _check(lib.moy_ui_scrim_io(c.byref(s), box_of(rect), ps, pa, n))
 
     def _icon(name):
         b = _b(name or "")
@@ -1081,6 +1106,11 @@ def binding():
         s = sink(cv, look)
         lib.moy_ui_api_wash(p, c.byref(s))
 
+    def api_wash_box(ctx):
+        p, _k = _ctx(ctx)
+        b = lib.moy_ui_api_wash_box(p)
+        return (b.x, b.y, b.w, b.h)
+
     def api_popover(ctx, cv, look, id_, w, o):
         p, _k = _ctx(ctx)
         s = sink(cv, look)
@@ -1281,7 +1311,8 @@ def binding():
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
-              api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_owes, api_fades,
+              api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
+              api_owes, api_fades,
               api_end,
               api_table_rows, api_table_pics,
               api_grid,

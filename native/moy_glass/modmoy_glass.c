@@ -1051,6 +1051,17 @@ static mp_obj_t banded_copy_last(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(banded_copy_last_obj, 5, 5, banded_copy_last);
 
+// last_buffer() -> the buffer the last presented frame drew into, where it
+// is not the one this frame draws into; None with one buffer or before a
+// frame was presented. A pass that reads it (a wash over the last frame)
+// reads alongside the feeder.
+static mp_obj_t banded_last_buffer(mp_obj_t self_in) {
+    glass_banded_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    int l = moy_banded_last(&c->b);
+    return l < 0 || l == c->b.back ? mp_const_none : c->fbs[l];
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(banded_last_buffer_obj, banded_last_buffer);
+
 static const mp_rom_map_elem_t banded_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_size), MP_ROM_PTR(&banded_size_obj) },
     { MP_ROM_QSTR(MP_QSTR_framebuffer), MP_ROM_PTR(&banded_back_obj) },
@@ -1064,6 +1075,7 @@ static const mp_rom_map_elem_t banded_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&banded_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_bounce_stats), MP_ROM_PTR(&banded_bounce_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_last), MP_ROM_PTR(&banded_copy_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_last_buffer), MP_ROM_PTR(&banded_last_buffer_obj) },
 };
 static MP_DEFINE_CONST_DICT(banded_locals, banded_locals_table);
 

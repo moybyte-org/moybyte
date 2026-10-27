@@ -1336,8 +1336,7 @@ class BlockEditorUI:
                 + ("cancel", "Cancel"))
         _strip(ws, lay, keys, desk)
         if not held:
-            _ui_draw.wash_page()
-            self._held.keep(ws, ws.sys_canvas, self._page_rect(), self._held_key(k),
+            self._held.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(k),
                             self._page is None or self._page.host.still(), dt)
         tdeck = _ui.input_kind() == "tdeck"
         pick = _ui.dialog(_KBD_TITLES.get(kind, "Name your variable"),

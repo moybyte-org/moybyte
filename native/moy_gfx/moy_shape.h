@@ -117,6 +117,12 @@ int moy_shape_rrect(const moy_text_target_t *t, int x, int y, int w, int h,
 int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
                      const moy_shape_shadow_t *s, const moy_shape_hole_t *hole);
 
+// The next shadows blend over the pixels of `src` instead of the target's
+// and write each result to `also` as well, both buffers laid out as the
+// target's: a wash over another frame, kept as it lands. A pixel a shadow
+// does not touch is left as it was in both. NULL, NULL: in place again.
+void moy_shape_shadow_io(const uint16_t *src, uint16_t *also);
+
 // Canonical `f` over canonical `b` at `alpha` (0..255): the colour a shadow
 // of `f` at `alpha` leaves over `b` inside its corners, so a solid fill that
 // stands for a tint, painted beside one, matches it to the bit.

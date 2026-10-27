@@ -2686,6 +2686,11 @@ class SystemCanvas(DeviceCanvas):
         cl = getattr(comp, "copy_last", None)
         if cl is not None:
             self.copy_last = cl
+        # last_buffer(): that buffer itself, where it is not the one this
+        # frame draws into (a wash over the last frame reads it), else None.
+        lb = getattr(comp, "last_buffer", None)
+        if lb is not None:
+            self.last_buffer = lb
 
     def set_font_scale(self, scale):
         # Called UNGUARDED from console.py (the settings row and the font-scale

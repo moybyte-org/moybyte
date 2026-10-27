@@ -2079,13 +2079,17 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
 // The wash under a dialog or a modal popover: the surface, less the page's
 // hint band where it stands at the surface's foot (DESIGN: a wash never
 // covers a bar or the hint strip; the host's bars are drawn over it).
-static void wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+moy_ui_box_t moy_ui_api_wash_box(const moy_ui_ctx_t *c) {
     moy_ui_box_t sf = c->surface;
     moy_ui_box_t hb = c->hint_band;
     if (hb.h > 0 && hb.y + hb.h >= sf.y + sf.h && hb.y > sf.y) {
         sf.h = (int16_t)(hb.y - sf.y);
     }
-    moy_ui_scrim(s, sf);
+    return sf;
+}
+
+static void wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    moy_ui_scrim(s, moy_ui_api_wash_box(c));
 }
 
 void moy_ui_api_wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s) {

@@ -908,9 +908,11 @@ paid the page and its wash anyway, and on the T-Deck the two were most of
 the frame. #66 has the numbers.
 
 **A modal keeps the page under it washed** (`ui_draw.HeldPage`): the first
-frame draws the page, washes it (`ui_draw.wash_page`, the toolkit's own
-rule: the surface less the page's hint band at its foot) and copies the
-page's rect off; each frame after puts the copy back and draws the dialog
+frame draws the page and washes it (`HeldPage.wash` over
+`ui_draw.wash_page`, the toolkit's own rule: the surface less the page's
+hint band at its foot), the wash storing each pixel to the held layer as
+it lands (`moy_shape_shadow_io`) and the rest of the page's rect copied
+there after it; each frame after puts the copy back and draws the dialog
 over it with `{"wash": False}`, the override that tells a dialog its page
 is washed already. The copy is held under a key of what the page is a
 function of while the dialog is up — the dialog itself, the canvas, the
@@ -934,17 +936,18 @@ cursor or pill over it, nothing animating), and the input that opened the
 dialog changed nothing else in the page -- A on a Blocks slot with no move
 among its keys, A on Cart info's door -- with no change reported since
 that frame (the console's `_dirty_in`, taken before the input's own), the
-first frame puts that page back from the buffer the frame drew into
-(`copy_last`, §14.6; one persistent buffer holds it already) instead of
-drawing it, then washes and holds it as above. A dialog a page's own draw
+first frame washes that page out of the buffer the frame drew into
+(`last_buffer`, the compositor's face of §14.6's buffer; `copy_last` where
+a compositor names no such buffer; one persistent buffer holds it already)
+instead of drawing it, and holds it as above. A dialog a page's own draw
 opens (a tap on its link) draws the page, which drew this frame anyway. The system menu
 holds the handheld home the same way (`SystemMenuUI.put_home`): where the
 fullscreen WM draws the home and the menu's card alone, the whole frame
 under the card -- the bars, the washed content and the hint strip naming
 the menu's keys -- is held under the home's retained key and the scrim's
-rects, and kept across opens while that key holds. The home captures no
-retained frame under the hold, so the menu's close stamps the one from
-before it.
+rects, the scrim storing to the held layer as it lands, and kept across
+opens while that key holds. The home captures no retained frame under the
+hold, so the menu's close stamps the one from before it.
 
 **This is not a second invalidation mechanism.** Whether a frame paints is
 still the gate's; the copy only says what the page already is. Pinned by
@@ -975,7 +978,10 @@ still writing it (`moy_dsi_last`), whole rows through the AXI GDMA
 (`moy_ppa.copy`) and any other rect a row copy on the CPU; on an S3 a row
 copy on the CPU, the panel's feeder reading the same buffer alongside
 (`moy_banded_last`). One persistent buffer copies nothing; no frame yet
-answers False and the caller draws. It is the frame's first
+answers False and the caller draws. `last_buffer()`, bound the same way where the
+compositor has it (the S3s' banded one, the host's), answers that buffer
+itself where it is not the drawn-into one, None otherwise: for a pass that
+reads it instead of copying it out (a wash over the last frame, §14.5). It is the frame's first
 write to what it copies. The host compositor's `last` is a test's ring of
 buffers presented in turn.
 

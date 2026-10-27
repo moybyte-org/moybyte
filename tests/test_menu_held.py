@@ -52,6 +52,7 @@ def _home(tmp_path, monkeypatch, bufs, ref, theme):
             return None
         held.append(bytes(root._buf))
         if bufs > 1:
+            root._comp.last = held[-1]
             root._buf[:] = held[-bufs] if len(held) > bufs else held[0]
         return held[-1]
 
@@ -87,6 +88,11 @@ def _session(ws, frame):
     ws.mark_dirty()
     run(20)
     menu_round()                   # over a home that moved
+    for k in ("left", "left"):
+        ws.launcher_layer.handle_input(_Key(k))
+        ws.mark_dirty()
+        run(20)
+    menu_round()                   # over one that moved the other way
     ws.toggle_sysmenu()
     run(2)
     ws.bar_layer._clock_text = lambda: "10:31"   # the minute turns under the menu

@@ -1373,8 +1373,7 @@ class CardsLayer:
             _ui.at(lay.cx, lay.cy + lay.ch - b, lay.cw, b)
             _ui.hints(keys)
         if not held:
-            _ui_draw.wash_page()
-            self._held.keep(ws, ws.sys_canvas, self._page_rect(), self._held_key(p),
+            self._held.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(p),
                             self._page_still(), dt)
         pick = _ui.dialog(p.title, () if tdeck else ("Cancel", p.ok), "primary",
                           _ui_draw.NO_WASH)

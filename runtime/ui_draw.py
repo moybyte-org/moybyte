@@ -1462,10 +1462,17 @@ def perf(cv, th, args, words, out):
     _C.perf(cv, _LOOK if th is _TH else _look(th), args, words, out)
 
 
-def scrim(cv, th, rect):
+def scrim(cv, th, rect, src=None, also=None):
     """What a modal dims under it (D-01): `rect` washed in the look's
-    `scrim`, drawn once a full frame, before the modal's card."""
-    _C.scrim(cv, _LOOK if th is _TH else _look(th), rect)
+    `scrim`, drawn once a full frame, before the modal's card. `src`: a
+    buffer laid out as the canvas's whose pixels it washes instead of the
+    canvas's (the frame a buffer of the ring holds); `also`: one each result
+    is stored to as well (the layer a hold keeps)."""
+    look = _LOOK if th is _TH else _look(th)
+    if src is None and also is None:
+        _C.scrim(cv, look, rect)
+    else:
+        _C.scrim(cv, look, rect, src, also)
 
 
 def bar_part(cv, th, part, rect, on=0, fill=None):
@@ -1883,12 +1890,17 @@ class AppHost:
         return not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
 
 
-def wash_page():
+def wash_page(src=None, also=None):
     """Wash, on the frame's canvas, what a dialog begun now would: the
-    surface, less the page's hint band at its foot. The dialog then takes
-    `{"wash": False}`."""
+    surface, less the page's hint band at its foot; the rect it washed.
+    The dialog then takes `{"wash": False}`. `src` and `also` as `scrim`'s."""
     t = UI_TARGET
-    _C.api_wash(t[0], t[1], t[2])
+    box = _C.api_wash_box(t[0])
+    if src is None and also is None:
+        _C.api_wash(t[0], t[1], t[2])
+    else:
+        _C.scrim(t[1], t[2], box, src, also)
+    return box
 
 
 # What the held page's dialog takes: the page under it is washed already.
@@ -1899,24 +1911,26 @@ class HeldPage:
     """The page under a dialog, washed, held while the dialog is up
     (docs/surface_model_v1.md §14.5). A dialog takes the keys and the
     pointer, so the page under it does not change while it stays: the
-    first frame draws the page and washes it, and `keep` copies the page's
-    rect off; each frame after puts that copy back (`put`) instead of
-    drawing the page and its wash, and draws the dialog over it. `key` is
-    what the page's pixels are a function of while the dialog is up (the
-    dialog itself, the page's rect, the look); a key that differs, a page
-    that was not still, anything animating, a canvas that retains nothing
-    or one drawing into a viewport of its buffer draws it whole.
+    first frame draws the page and washes it (`wash`), the wash storing
+    to the held layer as it lands and the rest of the page's rect copied
+    there; each frame after puts that copy back (`put`) instead of drawing
+    the page and its wash, and draws the dialog over it. `key` is what the
+    page's pixels are a function of while the dialog is up (the dialog
+    itself, the page's rect, the look); a key that differs, a page that
+    was not still, anything animating, a canvas that retains nothing or
+    one drawing into a viewport of its buffer draws it whole.
 
     The first frame takes the page from the last frame instead of drawing
     it where that frame drew it alone and still, with no dialog up
     (`shown`), and the input that opened the dialog changed nothing else
-    in it with nothing reported before it (`opened`): `last` puts it back
-    from the buffer that frame drew into."""
+    in it with nothing reported before it (`opened`): `last` says so, and
+    the wash reads the page from the buffer that frame drew into."""
 
     def __init__(self):
         self.key = None
         self._shown = -1                # the frame that drew the page alone and still
         self._over = -1                 # the frame a dialog opened over it first draws
+        self._src = None                # this frame's page: the last frame's buffer
 
     def put(self, ws, cv, rect, key, dt=0):
         """Put the held page back into `rect`: whether it was held under
@@ -1929,19 +1943,50 @@ class HeldPage:
         cv.blit_strip_rect(held[0], 0, 0, x, y, w, h)
         return True
 
-    def keep(self, ws, cv, rect, key, still, dt=0):
-        """Hold `rect` of the frame just drawn, the page washed, under
-        `key`; only where the page was `still`, nothing animates and the
-        canvas keeps its pixels and draws into its whole buffer (a pane's
-        viewport is copied from as the buffer it lies in, so it is not)."""
-        self.key = None
+    def layer(self, ws, cv, still, dt=0):
+        """The held layer, where this frame's page may be held: only where
+        it is `still`, nothing animates and the canvas keeps its pixels and
+        draws into its whole buffer (a pane's viewport is copied from as
+        the buffer it lies in, so it is not). None otherwise, or with no
+        room for it."""
         if not still or ws._animating(dt) or not _whole_retained(cv):
-            return
-        lay = held_layer(ws, cv)
+            return None
+        return held_layer(ws, cv)
+
+    def wash(self, ws, cv, rect, key, still, dt=0):
+        """Wash the page in `rect` under the dialog begun on the frame's
+        verbs (`wash_page`) and hold it under `key` where it may be held
+        (`layer`): the wash stores to the held layer as it lands, and what
+        it leaves of `rect` -- the page's hint band, which the dialog's
+        keys drew this frame -- is copied there after it. Where `last`
+        took the page from the last frame, the wash reads it from that
+        frame's buffer."""
+        self.key = None
+        src = self._src
+        self._src = None
+        lay = self.layer(ws, cv, still, dt)
+        also = None if lay is None else getattr(lay, "_buf", None)
+        box = wash_page(src, also)
         if lay is None:
-            return                      # no room: the page draws each frame
-        x, y, w, h = rect
-        lay.blit_strip_rect(cv, 0, 0, x, y, w, h)
+            return
+        for r in _outside(rect, box) if also is not None else (rect,):
+            lay.blit_strip_rect(cv, 0, 0, r[0], r[1], r[2], r[3])
+        ws.held_pages[1] = self
+        self.key = key
+
+    def keep(self, ws, cv, rect, key, still, dt=0, washed=()):
+        """Hold `rect` of the frame drawn so far under `key`, where it may
+        be held (`layer`); `washed`: rects a scrim already stored to the
+        held layer (`scrim`'s `also`), which are not copied again."""
+        self.key = None
+        lay = self.layer(ws, cv, still, dt)
+        if lay is None:
+            return
+        parts = [rect]
+        for w in washed:
+            parts = [p for r in parts for p in _outside(r, w)]
+        for r in parts:
+            lay.blit_strip_rect(cv, 0, 0, r[0], r[1], r[2], r[3])
         ws.held_pages[1] = self
         self.key = key
 
@@ -1967,19 +2012,45 @@ class HeldPage:
         self._over = f if self._shown == f - 1 and not ws._dirty_in else -1
 
     def last(self, ws, cv, rect, dt=0):
-        """Put the page the last frame drew back into `rect` of the buffer
-        this frame draws into, on the first frame of the dialog `opened`
-        over it: whether it did (else the frame draws the page). One
-        retained buffer holds it already; more copy it out of the one that
-        frame drew into (`copy_last`)."""
+        """Whether this frame, the first of the dialog `opened` over the
+        page, takes the page in `rect` from the last frame instead of
+        drawing it (else the frame draws the page). One retained buffer
+        holds it already; more give the buffer that frame drew into, which
+        the wash reads (`last_buffer`), or copy it out (`copy_last`)."""
         over = self._over
         self._over = -1
+        self._src = None
         if over != ws._frames_drawn or ws._animating(dt) or not _whole_retained(cv):
             return False
         if cv.RETAINED_FRAMES == 1:
             return True
+        lb = getattr(cv, "last_buffer", None)
+        src = None if lb is None else lb()
+        if src is not None:
+            self._src = src
+            return True
         cl = getattr(cv, "copy_last", None)
         return cl is not None and bool(cl(rect[0], rect[1], rect[2], rect[3]))
+
+
+def _outside(r, hole):
+    """Rect `r` less rect `hole`: up to four rects, the bands above, below,
+    left and right of what they share."""
+    x0, y0, x1, y1 = r[0], r[1], r[0] + r[2], r[1] + r[3]
+    hx0, hy0 = max(x0, hole[0]), max(y0, hole[1])
+    hx1, hy1 = min(x1, hole[0] + hole[2]), min(y1, hole[1] + hole[3])
+    if hx1 <= hx0 or hy1 <= hy0:
+        return [r]
+    out = []
+    if hy0 > y0:
+        out.append((x0, y0, r[2], hy0 - y0))
+    if hy1 < y1:
+        out.append((x0, hy1, r[2], y1 - hy1))
+    if hx0 > x0:
+        out.append((x0, hy0, hx0 - x0, hy1 - hy0))
+    if hx1 < x1:
+        out.append((hx1, hy0, x1 - hx1, hy1 - hy0))
+    return out
 
 
 def _whole_retained(cv):

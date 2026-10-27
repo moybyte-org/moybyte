@@ -347,6 +347,8 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
 // Washes what a dialog begun now would: the surface, less the page's hint
 // band at its foot.
 void moy_ui_api_wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s);
+// The box that wash covers (moy_ui_scrim_io washes it over another frame).
+moy_ui_box_t moy_ui_api_wash_box(const moy_ui_ctx_t *c);
 // A popover (§1): `id` begins a card hung under ui.at's rect (else under the
 // stop that holds focus as it opens), above it where the surface has no room
 // below, `w` wide (0: the rect's width), its body the rows stacked until an

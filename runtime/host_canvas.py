@@ -170,6 +170,11 @@ class HostCompositor:
     # rotation would hold it. None: the one buffer is the last frame's.
     last = None
 
+    def last_buffer(self):
+        """The buffer the last frame drew into where it is not this one
+        (a test's ring), else None."""
+        return self.last
+
     def copy_last(self, x, y, w, h):
         """The rect of the buffer the last frame drew into, into the one
         this frame draws into (docs/surface_model_v1.md §14.5)."""

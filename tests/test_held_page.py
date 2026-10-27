@@ -75,7 +75,7 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
     monkeypatch.setattr(ui_draw.HeldPage, "last", last)
     if ref:
         # the dialog washes the page itself, as one with no held page did
-        monkeypatch.setattr(ui_draw, "wash_page", lambda: None)
+        monkeypatch.setattr(ui_draw, "wash_page", lambda *a: (0, 0, 0, 0))
         monkeypatch.setattr(ui_draw, "NO_WASH", None)
     carts = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(carts)

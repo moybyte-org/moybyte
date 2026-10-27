@@ -1806,13 +1806,30 @@ static mp_obj_t ui_bar_part(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_bar_part_obj, 5, 6, ui_bar_part);
 
 // scrim(cv, look, rect): what a modal dims under it
-static mp_obj_t ui_scrim(mp_obj_t cv, mp_obj_t look, mp_obj_t rect) {
+// scrim(cv, look, rect[, src, also]): over the pixels of buffer `src`, each
+// result stored to buffer `also` as well, both laid out as the canvas's
+// (None: the canvas's own, no second store)
+static mp_obj_t ui_scrim(size_t n_args, const mp_obj_t *a) {
     moy_ui_sink_t s;
-    sink_of(&s, cv, look);
-    check(moy_ui_scrim(&s, box_of(rect)));
+    sink_of(&s, a[0], a[1]);
+    const void *src = NULL;
+    void *also = NULL;
+    size_t len = (size_t)-1;
+    mp_buffer_info_t b;
+    if (n_args > 3 && a[3] != mp_const_none) {
+        mp_get_buffer_raise(a[3], &b, MP_BUFFER_READ);
+        src = b.buf;
+        len = b.len;
+    }
+    if (n_args > 4 && a[4] != mp_const_none) {
+        mp_get_buffer_raise(a[4], &b, MP_BUFFER_WRITE);
+        also = b.buf;
+        len = b.len < len ? b.len : len;
+    }
+    check(moy_ui_scrim_io(&s, box_of(a[2]), src, also, len));
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_3(ui_scrim_obj, ui_scrim);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_scrim_obj, 3, 5, ui_scrim);
 
 // tile(cv, look, rect, icon, tone, r, fs, desk): a badge's tile on a card's surface
 static mp_obj_t ui_tile(size_t n_args, const mp_obj_t *a) {
@@ -2768,6 +2785,12 @@ static mp_obj_t ui_api_wash(mp_obj_t ctx, mp_obj_t cv, mp_obj_t look) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_wash_obj, ui_api_wash);
 
+// api_wash_box(ctx) -> (x, y, w, h): what api_wash covers
+static mp_obj_t ui_api_wash_box(mp_obj_t ctx) {
+    return box_tuple(moy_ui_api_wash_box(ctx_of(ctx)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_wash_box_obj, ui_api_wash_box);
+
 // api_popover(ctx, cv, look, id, w, o) -> 1, 0 the frame it is dismissed; an
 // id of length 0 ends the popover
 static mp_obj_t ui_api_popover(size_t n_args, const mp_obj_t *a) {
@@ -3149,6 +3172,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_field), MP_ROM_PTR(&ui_api_field_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_dialog), MP_ROM_PTR(&ui_api_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_wash), MP_ROM_PTR(&ui_api_wash_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_wash_box), MP_ROM_PTR(&ui_api_wash_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_fades), MP_ROM_PTR(&ui_api_fades_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },

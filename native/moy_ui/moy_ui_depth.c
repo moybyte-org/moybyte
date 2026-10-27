@@ -1100,6 +1100,42 @@ int moy_ui_scrim(const moy_ui_sink_t *s, moy_ui_box_t b) {
     return MOY_UI_OK;
 }
 
+int moy_ui_scrim_io(const moy_ui_sink_t *s, moy_ui_box_t b, const void *src, void *also,
+                    size_t len) {
+    if (src == NULL && also == NULL) {
+        return moy_ui_scrim(s, b);
+    }
+    dd_t d;
+    open_dd(s, &d, 1);
+    if (len < d.t.cap * 2u) {
+        return MOY_UI_BAD;
+    }
+    uint16_t c = is_set(s_scrim_c) ? val(&d, s_scrim_c) : moy_shape_wire(0);
+    if (s_scrim_a >= 255) {
+        // opaque: nothing under it is read; what it filled goes to `also`
+        tint(&d, b.x, b.y, b.w, b.h, 0, c, s_scrim_a, NULL);
+        int rows = (int)(d.t.cap / (size_t)d.t.dw);
+        int x0 = b.x - d.t.cam_x, y0 = b.y - d.t.cam_y, x1 = x0 + b.w, y1 = y0 + b.h;
+        x0 = x0 > d.t.cx0 ? x0 : d.t.cx0;
+        x0 = x0 > 0 ? x0 : 0;
+        y0 = y0 > d.t.cy0 ? y0 : d.t.cy0;
+        y0 = y0 > 0 ? y0 : 0;
+        x1 = x1 < d.t.cx1 ? x1 : d.t.cx1;
+        x1 = x1 < d.t.dw ? x1 : d.t.dw;
+        y1 = y1 < d.t.cy1 ? y1 : d.t.cy1;
+        y1 = y1 < rows ? y1 : rows;
+        for (int y = y0; also != NULL && x1 > x0 && y < y1; y++) {
+            size_t o = (size_t)y * (size_t)d.t.dw + (size_t)x0;
+            memcpy((uint16_t *)also + o, d.t.px + o, (size_t)(x1 - x0) * 2u);
+        }
+        return MOY_UI_OK;
+    }
+    moy_shape_shadow_io(src != NULL ? (const uint16_t *)src : d.t.px, (uint16_t *)also);
+    tint(&d, b.x, b.y, b.w, b.h, 0, c, s_scrim_a, NULL);
+    moy_shape_shadow_io(NULL, NULL);
+    return MOY_UI_OK;
+}
+
 int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill) {
     dd_t d;
     open_dd(s, &d, 1);

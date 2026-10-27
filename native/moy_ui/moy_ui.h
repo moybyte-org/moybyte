@@ -652,6 +652,12 @@ int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill);
 // What a modal dims under it (docs/look_2026-10.md, D-01): box `b` washed in
 // the look's `scrim` colour at its alpha (black at 40% where it is silent).
 int moy_ui_scrim(const moy_ui_sink_t *s, moy_ui_box_t b);
+// The scrim over the pixels of `src` instead of the sink's, each result
+// stored to `also` as well (moy_shape_shadow_io); either NULL: the sink's
+// own pixels, no second store. Both are `len` bytes laid out as the sink's
+// canvas: MOY_UI_BAD where one is shorter than it.
+int moy_ui_scrim_io(const moy_ui_sink_t *s, moy_ui_box_t b, const void *src, void *also,
+                    size_t len);
 
 // -- rect algebra (int32: a scrolled content can outgrow a box) ---------------------------
 

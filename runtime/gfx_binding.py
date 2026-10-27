@@ -122,6 +122,7 @@ _SIGS = (
     ("moy_shape_stats", [_P], None),
     ("moy_shape_reset", [_I], None),
     ("moy_shape_wire_swapped", [_I], None),
+    ("moy_shape_shadow_io", [_P, _P], None),
     ("moy_shape_coverage", [_I, _I, _I], _I),
     # Paths and the outline faces (native/moy_gfx/moy_path.c).
     ("mg_path_fill", [_P, _Z, _I, _P, _I, _P, _I, _I, _I, _I, _I, _I, _I, _I], _I),
@@ -316,6 +317,20 @@ def shadow(dst, dw, x, y, w, h, r, blur, dx, dy, col, alpha, stepped, hole,
                             int(alpha), int(bool(stepped)),
                             None if hp is None else ctypes.cast(ctypes.pointer(hp), _P),
                             int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+_IO_KEEP = [None, None]
+
+
+def shadow_io(src, also):
+    """The next shadows blend over `src`'s pixels and store to `also` as
+    well (moy_shape_shadow_io); None, None: in place again. The arrays
+    are kept until then."""
+    a = None if src is None else _rbuf(src)[0]
+    b = None if also is None else _buf(also)[0]
+    _IO_KEEP[0], _IO_KEEP[1] = a, b
+    _lib().moy_shape_shadow_io(None if a is None else ctypes.cast(a, _P),
+                               None if b is None else ctypes.cast(b, _P))
 
 
 def cover(dst, dw, x, y, w, h, src, sw, sx, sy, cw, ch, r, stepped,

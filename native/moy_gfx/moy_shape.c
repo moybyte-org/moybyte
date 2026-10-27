@@ -805,6 +805,64 @@ static void run_tables(uint16_t col, int a) {
     s_run.swapped = s_swapped;
 }
 
+// Where the shadows' pixels come from and go to besides the target
+// (moy_shape_shadow_io).
+static struct {
+    const uint16_t *src;
+    uint16_t *also;
+} s_io;
+
+void moy_shape_shadow_io(const uint16_t *src, uint16_t *also) {
+    s_io.src = src;
+    s_io.also = also;
+}
+
+// shadow_run over row `src` into `row` and `also` (NULL: none), the rows of
+// a moy_shape_shadow_io: each pixel read once, the results stored to both.
+static int shadow_run_io(uint16_t *row, const uint16_t *src, uint16_t *also, int X0, int X1,
+                         uint16_t col, int a) {
+    if (X1 <= X0) {
+        return 0;
+    }
+    if (a == 0 || a >= 256) {
+        uint16_t v = wire(col);
+        for (int X = X0; X < X1; X++) {
+            uint16_t o = a == 0 ? src[X] : v;
+            row[X] = o;
+            if (also != NULL) {
+                also[X] = o;
+            }
+        }
+        return a == 0 ? 0 : X1 - X0;
+    }
+    uint16_t tr[32], tg[64], tb[32];
+    run_tables(col, a);
+    memcpy(tr, s_run.tr, sizeof(tr));
+    memcpy(tg, s_run.tg, sizeof(tg));
+    memcpy(tb, s_run.tb, sizeof(tb));
+    if (s_swapped) {
+        for (int X = X0; X < X1; X++) {
+            uint16_t w = src[X];
+            uint16_t o = (uint16_t)(tr[(w >> 3) & 31] | tg[((w & 7) << 3) | ((w >> 13) & 7)]
+                                    | tb[(w >> 8) & 31]);
+            row[X] = o;
+            if (also != NULL) {
+                also[X] = o;
+            }
+        }
+    } else {
+        for (int X = X0; X < X1; X++) {
+            uint16_t c = src[X];
+            uint16_t o = (uint16_t)(tr[c >> 11] | tg[(c >> 5) & 63] | tb[c & 31]);
+            row[X] = o;
+            if (also != NULL) {
+                also[X] = o;
+            }
+        }
+    }
+    return X1 - X0;
+}
+
 // Pixels [X0, X1) of a row at one weight `a` of canonical `col`, as the
 // per-pixel loop writes them (over, rounded). A long run blends through a
 // table of each channel's 32 or 64 results, the same sums over() makes.
@@ -907,7 +965,18 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
         tgt_row(&g, Y);
         int i = Y - sy;
         int ii = imin(i, h - 1 - i) + b;
-        uint16_t *row = g.px + (size_t)Y * (size_t)g.stride;
+        size_t off = (size_t)Y * (size_t)g.stride;
+        uint16_t *row = g.px + off;
+        const uint16_t *src = row;
+        uint16_t *also = NULL;
+        if (s_io.src != NULL || s_io.also != NULL) {
+            if (s_io.src != NULL) {
+                src = s_io.src + off;
+            }
+            if (s_io.also != NULL) {
+                also = s_io.also + off;
+            }
+        }
         int X = Xa;
         while (X < Xb) {
             if (X >= g.hx0 && X < g.hx1) {
@@ -916,16 +985,22 @@ int moy_shape_shadow(const moy_text_target_t *t, int x, int y, int w, int h,
             }
             if (X >= Ia && X < Ib) {
                 int stop = g.hx1 > g.hx0 && g.hx0 > X && g.hx0 < Ib ? g.hx0 : Ib;
-                n += shadow_run(row, X, stop, col, wt[mask_at(m, ii, C)]);
+                int wa = wt[mask_at(m, ii, C)];
+                n += src == row && also == NULL ? shadow_run(row, X, stop, col, wa)
+                                                : shadow_run_io(row, src, also, X, stop, col, wa);
                 X = stop;
                 continue;
             }
             int j = X - sx;
             int a = wt[mask_at(m, ii, imin(j, w - 1 - j) + b)];
-            if (a != 0) {
-                row[X] = wire(a >= 256 ? col : over(col, can(row[X]), a));
-                n++;
+            uint16_t o = a == 0 ? src[X] : wire(a >= 256 ? col : over(col, can(src[X]), a));
+            if (a != 0 || src != row) {
+                row[X] = o;
             }
+            if (also != NULL) {
+                also[X] = o;
+            }
+            n += a != 0;
             X++;
         }
     }
