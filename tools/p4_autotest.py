@@ -362,6 +362,22 @@ class DeviceError(RuntimeError):
     the board's words rather than by the absence of a value."""
 
 
+# What an ESP32 prints when it resets: the IDF's restart line and the ROM's
+# banner, either of which a reset that cut a line short still leaves whole.
+RESET_MARKS = ("Rebooting...", "ESP-ROM:", "rst:0x")
+# The lines that name why, ahead of them.
+CRASH_MARKS = ("task_wdt: Task watchdog got triggered", "Guru Meditation",
+               "abort() was called", "panic", "Brownout")
+
+
+def reset_in(lines):
+    """The reset among `lines` as one phrase naming its cause, or None."""
+    if not any(m in ln for ln in lines for m in RESET_MARKS):
+        return None
+    why = next((ln.strip() for ln in lines if any(m in ln for m in CRASH_MARKS)), None)
+    return "the board reset" + (": " + why if why else "")
+
+
 class P4Board:
     """Serial driver for the P4 desktop's dev commands."""
 
@@ -379,6 +395,7 @@ class P4Board:
         self.attach_only = bool(decl["attach_only"])
         self.expect_board = declared_board_id(board_dir or P4_BOARD_DIR)
         self.last_error = None    # why the last `py` round trip yielded nothing
+        self.reset_seen = None    # the reset the last `cmd` saw instead of a reply
         if ser is not None:
             self.ser = ser
             self._init_reader(chunk or decl["chunk"])
@@ -502,12 +519,22 @@ class P4Board:
         does not mean the command did not run. Every caller here is a probe, an
         assignment or an exec of an already-uploaded buffer; the one place that
         was not -- pyexec's `ws._up += part` -- is now an indexed store for
-        exactly this reason. Pass retry=False for anything that accumulates."""
+        exactly this reason. Pass retry=False for anything that accumulates.
+
+        A board that RESET while the command ran is not resent to: the console
+        that would answer is a fresh one, without whatever the command's
+        predecessors set up, so its answer would name the wrong failure (a
+        task-watchdog reset under an upload's exec once read as "no attribute
+        '_up'"). `reset_seen` then names the reset, and the reply is None."""
+        n0 = len(self.lines)
+        self.reset_seen = None
         self._write_line(text)
         if wait_for is None:
             wait_for = "REMOTE"
         line = self.wait_line(wait_for, timeout)
-        if line is None and retry:
+        if line is None:
+            self.reset_seen = reset_in(self.lines[n0:])
+        if line is None and retry and self.reset_seen is None:
             self.log("no reply; resending: " + text[:60])
             self._write_line(text)
             line = self.wait_line(wait_for, timeout)
@@ -717,7 +744,7 @@ class P4Board:
         self.last_error = None
         line = self.cmd("py " + expr, wait_for="PY", timeout=timeout)
         if line is None:
-            return self._fail("no reply to `py %s` within %gs"
+            return self._fail(self.reset_seen or "no reply to `py %s` within %gs"
                               % (expr[:120], timeout), strict)
         if "PY ERR" in line:
             return self._fail(line.strip(), strict)
@@ -735,7 +762,7 @@ class P4Board:
         line = None
         for _ in range(tries):
             line = self.cmd(text, wait_for="PY", timeout=timeout)
-            if line is not None and "PY ERR" not in line:
+            if (line is not None and "PY ERR" not in line) or self.reset_seen:
                 return line
         return line
 
@@ -766,7 +793,8 @@ class P4Board:
                       "py ws._g = getattr(ws, '_g', None) or {'ws': ws, 'wm': ws.wm}"):
             line = self._idempotent(setup, timeout)
             if line is None or "PY ERR" in line:
-                self._fail("upload setup failed: %s" % (line or "no reply").strip(), strict)
+                self._fail("upload setup failed: %s"
+                           % (line or self.reset_seen or "no reply").strip(), strict)
                 return False
         # A DICT keyed by chunk index, not a string being appended to: `+=` is
         # not idempotent, so a resend after a lost reply would double a chunk
@@ -774,7 +802,10 @@ class P4Board:
         for k, i in enumerate(range(0, len(code), self.CHUNK)):
             part = code[i:i + self.CHUNK]
             store = "py ws._up.__setitem__(%d, %r) or 1" % (k, part)
-            line = self.cmd(store, wait_for="PY", timeout=timeout) or ""
+            line = self.cmd(store, wait_for="PY", timeout=timeout)
+            if line is None:
+                self._fail("chunk %d: %s" % (k, self.reset_seen or "no reply"), strict)
+                return False
             if "PY ERR" in line:
                 again = self.cmd(store, wait_for="PY", timeout=timeout) or ""
                 if again.startswith("PY") and "PY ERR" not in again:
@@ -783,7 +814,11 @@ class P4Board:
                 return False
         line = self.cmd(
             "py exec(''.join(ws._up[k] for k in sorted(ws._up)), ws._g)",
-            wait_for="PY", timeout=timeout) or ""
+            wait_for="PY", timeout=timeout)
+        if line is None:
+            self._fail(self.reset_seen or "no reply to the upload's exec within %gs"
+                       % timeout, strict)
+            return False
         if "PY ERR" in line:
             self._fail(line.strip(), strict)
             return False

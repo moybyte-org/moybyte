@@ -349,6 +349,18 @@ def test_a_corrupted_chunk_is_stored_again():
     assert sum(1 for s in fake.sent if "ws._up.__setitem__" in s) == 2
 
 
+def test_an_exec_the_board_resets_under_is_not_resent():
+    """A snippet that trips the task watchdog resets the board; resent, the
+    exec reached the fresh console, which has no `_up`, and the suite read
+    "no attribute '_up'" (the quiet-collect test's fill, 2026-10-27)."""
+    crash = ("E (486556) task_wdt: Task watchdog got triggered.\n"
+             "Rebooting...\nESP-ROM:esp32p4-eco2-20240710\nMoybyte P4 boot")
+    board, fake = _driver(["PY 1", "PY ok", "PY 1", crash, "PY ERR AttributeError"])
+    assert board.pyexec("a = 1\nb = a + 1\n", timeout=0.3) is False
+    assert sum(1 for s in fake.sent if s.startswith("py exec(")) == 1
+    assert board.last_error.startswith("the board reset: E (486556) task_wdt")
+
+
 # -- every tool that drives a board asks WHICH board ---------------------------
 #
 # Ten of them defaulted --port to /dev/ttyACM0 and built the driver with no

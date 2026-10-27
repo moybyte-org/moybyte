@@ -935,16 +935,21 @@ def a_quiet_console_collects_its_garbage(board):
     second after the last line and the last drawn frame, with nothing of the
     console's asking for it. The fill is measured against the heap it ends
     in: a fragmented heap grows an area under it, and a fill sized from the
-    heap before then leaves it half allocated, which is no premise at all."""
+    heap before then leaves it half allocated, which is no premise at all.
+    The fill is 512-byte objects (a 496-byte buffer and its header), sizes
+    the allocator's run hints serve: a bigger one walks the table from the
+    first long free run, every allocation over the ones before it, and after
+    the suite's 19 MB heap 1000-byte pieces held the frame past the task
+    watchdog."""
     import time
     board.pyexec("import gc\n"
                  "gc.collect()\n"
                  "ws._qg = []\n"
                  "for _ in range(8):\n"
-                 "    n = (gc.areas()[1] * 7 // 8 - gc.mem_alloc()) // 1024\n"
+                 "    n = (gc.areas()[1] * 7 // 8 - gc.mem_alloc()) // 512\n"
                  "    if n <= 0:\n"
                  "        break\n"
-                 "    ws._qg.extend(bytearray(1000) for _ in range(n))\n"
+                 "    ws._qg.extend(bytearray(496) for _ in range(n))\n"
                  "ws._qr = (gc.areas()[1], gc.mem_alloc())\n"
                  "ws._qg = None", strict=True)
     held, used = board.pyval("ws._qr", strict=True)
