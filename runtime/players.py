@@ -330,7 +330,7 @@ BROADCAST = b"\xff\xff\xff\xff\xff\xff"
 BEACON_MS = 400
 PEER_TTL_MS = 2000
 START_TRIES = 12
-# The radio's recipe (T-Deck <-> Guition, 2026-08-20): rxbuf BEFORE active()
+# The radio's recipe (T-Deck <-> Guition): rxbuf BEFORE active()
 # (a live change desyncs the ring for good); 32768, not the default 526 (64 of
 # 200 messages arrived at the default while every send said True); RATE_54M
 # (a 48 KB payload went from 1680 ms to 65 ms); power save off only while
@@ -701,7 +701,7 @@ class EspNowLink:
 
     def _cycle_radio(self):
         """The recover: an active cycle with the recipe re-applied (the
-        cycle resets the PHY rate to the 1M default, 2026-08-24)."""
+        cycle resets the PHY rate to the 1M default)."""
         try:
             self.radio.active(False)
             self.radio.config(rxbuf=RXBUF)

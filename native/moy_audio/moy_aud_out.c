@@ -190,7 +190,7 @@ static void feeder(void *arg) {
             moy_aud_render(block + off, MIX_CHUNK);
         }
         // Blocks here while the DMA drains: that IS the pacing. NEVER abandon
-        // rendered frames (2026-08-10, the celeste 1.6x): the driver may accept
+        // rendered frames (the celeste 1.6x): the driver may accept
         // part of a block per call, and an abandoned tail advances the mix
         // without reaching the speaker -- the seam measured it at the audible
         // tempo error while both per-side clocks read 1.000. A timeout loops.

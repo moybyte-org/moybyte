@@ -442,13 +442,12 @@ why = """
 The ESP32-P4 SILICON tier: the C modules an ESP32-P4 board has BECAUSE it is a
 P4 and no S3 board could compile -- moy_dsi (the MIPI-DSI panel, parameterized
 by the board's panel define in mpconfigboard.cmake), moy_ppa (the pixel
-accelerator behind the game composite), moy_ble_hid (the NimBLE-host report
-queue over the C6's hosted radio) and moy_c6 (the ESP-NOW shim + C6 plumbing
-over ESP-Hosted). All four lived in THIS board's tree until 2026-09-06, when
+accelerator behind the game composite) and moy_c6 (the ESP-NOW shim + C6
+plumbing over ESP-Hosted). They lived in THIS board's tree until 2026-09-06, when
 the Guition JC8012P4A1C became their second consumer -- Phase C's rule
 (docs/board_ports_2026-08.md): a driver moves to a shared tree the day a
 second board carries the hardware, parameterized by board data, not before.
-Declared as a second SOURCE rather than as four denials on every S3 board:
+Declared as a second SOURCE rather than as denials on every S3 board:
 a board that names this tier has the silicon; one that does not has nothing
 to explain. Nothing is denied here -- every module in the tier is the
 silicon's, not a panel's, except moy_dsi, which each P4 board parameterizes

@@ -37,11 +37,10 @@ def _b64_decode(text):
 # --- the one wire form -------------------------------------------------------
 #
 # A ``.moyimg`` is a JSON header {format, w, h, data} where `data` is base64 of
-# a ZLIB stream of w*h MOY64 palette indices, one byte per pixel. ONE
-# format, since 2026-09-07: Paint used to write a second, uncompressed RLE codec
-# (`codec: "rle"`) because saving needed no compressor, and measured on every
-# shipped image that form is 2.5-10x BIGGER -- a 320x240 cover 72 KB against 26,
-# and big flat strings are what the S3 heap fails on first. There is no RLE
+# a ZLIB stream of w*h MOY64 palette indices, one byte per pixel. This is the
+# ONE format: an uncompressed RLE codec (`codec: "rle"`, retired 2026-09-07)
+# was 2.5-10x BIGGER on every shipped image -- a 320x240 cover 72 KB against
+# 26, and big flat strings are what the S3 heap fails on first. There is no RLE
 # READER anywhere: the decoders below speak one format, and a blob still in the
 # retired codec reads as an absent picture (None), which every caller on every
 # tier already draws as a placeholder.
@@ -50,9 +49,8 @@ def _b64_decode(text):
 # carries it. Without it the seam is the two tiers the packed seed roster reads
 # through (`moy_carts._packed_stream`): MicroPython replaced `zlib` with
 # `deflate` in v1.21, so a board has DeflateIO and no zlib, and CPython has
-# zlib and no deflate. Unlike the roster's raw stream this one is standard ZLIB-framed,
-# which is what makes the pre-2026-09 assets already in this format rather than
-# a legacy of it -- nothing had to be rewritten to make them the one form.
+# zlib and no deflate. Unlike the roster's raw stream this one is standard
+# ZLIB-framed, so an asset written by a CPython tool reads as it is.
 #
 # WBITS is pinned on the WRITE side only: a zlib header carries its own window
 # size, so a reader that asks for none takes the stream's. That is what lets a

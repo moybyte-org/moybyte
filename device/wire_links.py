@@ -43,8 +43,8 @@ def c6_updater_class():
 # download then takes TLS_SRAM_MIN more a record at a time: with mbedtls's
 # state in PSRAM (each console's sdkconfig.board), what is left internal is the
 # hardware AES/SHA's DMA bounce, 4.7 KB at its peak on the Guition S3
-# (2026-10-07, a 786 KB GitHub download). The driver measured 41 KB on the
-# T-Deck (2026-10-02). Short of the first, the radio does not come up
+# (a 786 KB GitHub download). The driver measured 41 KB on the
+# T-Deck. Short of the first, the radio does not come up
 # ("Expected to init 16 rx buffer, actual is 0"); short of the second, a
 # download stops partway. Only a restart gives the memory back.
 TLS_SRAM_MIN = 8192

@@ -11,11 +11,11 @@ variant baked into `boards/MOYBYTE_GUITION_P4`) + our native modules via
 **This port is a VARIANT of the Waveshare P4's**, and what it added to the tree
 is mostly what it took OUT of that board's directory: the P4-silicon C modules
 became the shared `native/p4/` tier (`moy_dsi` parameterized by a panel
-define, `moy_ppa`, `moy_ble_hid`, `moy_c6`), the DSI compositor became shared
+define, `moy_ppa`, `moy_c6`), the DSI compositor became shared
 (the kernel's `native/moy_glass` since sprint 3's glass pass), the PPA system
 canvas `device/p4_canvas.py`, and the
-two P4 patches moved to `patches/p4_*.patch` behind two shared build-lib
-functions. This directory owns what this glass decides: the panel define, the
+P4 silicon patch moved to `patches/p4_*.patch` behind a shared build-lib
+function. This directory owns what this glass decides: the panel define, the
 backlight, the touch driver + its firmware, and the rotated (landscape) desk.
 `docs/board_ports_2026-08.md` carries the checklist this port walked.
 
@@ -181,7 +181,7 @@ MOYBYTE_GUITION_P4_PORT=/dev/ttyACM4 .venv/bin/python -m pytest tests/test_guiti
 
 `build.sh` clones its own MicroPython v1.28.0 into `.build/`, reuses the
 Waveshare's ESP-IDF v5.5.1 checkout when present (its own clone otherwise —
-CI), applies the same patch ladder (the two `p4_*` patches through the shared
+CI), applies the same patch ladder (the `p4_*` patch through the shared
 lib, the ESP-Hosted 2.12.12 bump, REPR_C, native-code-free, the GC split
 reserve), stages the shared modules + the `native/p4` tier per `board.toml`,
 and builds `BOARD_DIR=boards/MOYBYTE_GUITION_P4`. The factory image (Guition's

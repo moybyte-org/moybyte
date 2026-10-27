@@ -76,7 +76,8 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     controller, pins and knobs in `mpconfigboard.h` (`MOY_INPUT_TOUCH_*`).
   * **The P4 silicon (2026-09-06, the Guition P4 as second consumer)**: four C
     modules (`moy_dsi` parameterized by a `MOY_DSI_PANEL_*` board define,
-    `moy_ppa`, `moy_ble_hid`, `moy_c6`) moved to **`native/p4/`**, declared by
+    `moy_ppa`, `moy_ble_hid`, `moy_c6`; the BLE central has since moved into
+    `native/moy_input`) moved to **`native/p4/`**, declared by
     a P4 board as a SECOND native source (`[native.p4]`) rather than denied by
     every S3 board — `native/p4/` carries no `micropython.cmake` of its own,
     so the shared scan never sees it. Two Python halves followed:
@@ -89,9 +90,9 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     passes its name, compositor, inputs, store and constants and takes the
     rest. The 2026-09-09 P4 promotion found the two boards' `run_desktop`s
     differing in fifty lines of which all but five were a print string).
-    The two P4
-    patches became `patches/p4_*.patch` behind two shared build-lib
-    functions. What stayed per board: the backlight (GPIO + polarity), the
+    The P4
+    silicon patch became `patches/p4_*.patch` behind a shared build-lib
+    function. What stayed per board: the backlight (GPIO + polarity), the
     touch driver, the canvas sizes, `run_desktop`.
   * **GSL3680**: the firmware blob is the BOARD's (`gsl_fw_jc8012.c` beside
     its `mpconfigboard.h`): it carries one glass's sensor geometry.

@@ -347,7 +347,7 @@ int moy_udp_send(int fd, const void *buf, size_t n, const uint8_t to[MOY_UDP_ADD
 // Whether a connect uses the stored password: when the one given is empty and
 // a stored one is not. The panel's known-network reconnect passes "" (it has
 // no credential access), and associating with "" AND remembering it destroyed
-// the saved password (the on-glass P4, 2026-07-25).
+// the saved password (the on-glass P4).
 static inline int moy_wifi_use_stored(size_t password_n, size_t stored_n) {
     return password_n == 0 && stored_n != 0;
 }

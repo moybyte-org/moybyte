@@ -544,7 +544,7 @@ class WindowChrome:
         GROUP's block (the group's span out to the window's edge on its side,
         plus a small overhang below the strip) resolves to the group's NEAREST
         button center. Per-button padding can't work at this pitch; same fix
-        class as _grip_hit_rect (2026-07-10)."""
+        class as _grip_hit_rect."""
         btns = self._frame_buttons(win)
         if not btns:
             return None

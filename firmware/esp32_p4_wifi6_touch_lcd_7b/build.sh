@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Moybyte P4 port (#58): build mainline MicroPython (ESP32_GENERIC_P4, C6_WIFI
 # variant) + the P4 silicon tier (native/p4: moy_dsi over the EK79007 MIPI-DSI
-# panel, moy_ppa, moy_ble_hid, moy_c6) for the Waveshare
+# panel, moy_ppa, moy_c6) for the Waveshare
 # ESP32-P4-WIFI6-Touch-LCD-7B.
 #
 # A plain mainline build with USER_C_MODULES -- the strategy both boards use

@@ -136,7 +136,7 @@ tools/worktree.py new NAME    # .claude/worktrees/NAME, builds and tests as is; 
 |---|---|---|---|---|
 | `boards.md` | `firmware/**`, `device/**`, `native/**`, board tools | | `on-glass` | ports, driving, flashing, pushing, screenshots, suites, recovery |
 | `shell.md` | `runtime/**` | | `perf` | measuring fps, the meters, the settled levers |
-| `rendering.md` | canvas, `ui`/`skin`/`chrome`, `*_layer` | | `issues` | the issue mirror and the ledger bodies |
+| `rendering.md` | canvas, `ui`/`ui_draw`/`chrome`, `*_layer` | | `issues` | the issue mirror and the ledger bodies |
 | `carts.md` | `system_carts/**`, cart API, Lua tier, audio | | `release` | branches, OTA channels, `make release` |
 | `web.md` | `firmware/web_runner/**`, sync RPC, webhost | | | |
 | `ota.md` | `device/moy_ota.py`, release and signing tools | | | |

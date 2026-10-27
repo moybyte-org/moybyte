@@ -598,7 +598,7 @@ P4 rows matter only if a P4 ever stops its VM (§10 question 5).
 | WiFi and its leases | the port never deinitialises the WLAN driver; the lease table is a kernel singleton the console's `Leases` views (`native/moy_spine/moy_route.h`'s `moy_spine_kernel`) | the radio left as it was | refused while a Python owner holds a lease; the kernel's own holders (the link, a cart's run) do not refuse | 2; 4 (landed, step 3) |
 | an OTA write | `device/moy_ota.py` streams into the inactive slot | — | refused while it runs | 2 |
 | ***Native tasks*** | | | | |
-| the flush feeder, the audio core-1 task, `moy_prof`'s timer; P4: `moy_c6`'s TX task, `moy_ble_hid`'s queue | `native/moy_flush/`, `native/moy_audio/`, `native/moy_prof/`, `native/p4/` | no VM calls; they survive | kept; the audio task silences the cart's sound | 3 |
+| the flush feeder, the audio core-1 task, `moy_prof`'s timer; P4: `moy_c6`'s TX task, the BLE central's queue | `native/moy_flush/`, `native/moy_audio/`, `native/moy_prof/`, `native/p4/` | no VM calls; they survive | kept; the audio task silences the cart's sound | 3 |
 
 **The order of a stop** follows from the table: the app's `close()`; the
 cooperative stops (threads joined, moycore's `close()`, the feeder drained and

@@ -405,9 +405,8 @@ why = """
 The ESP32-P4 SILICON tier: the C modules an ESP32-P4 board has BECAUSE it is a
 P4 -- moy_dsi (the MIPI-DSI panel; THIS board names MOY_DSI_PANEL_JD9365 in
 its mpconfigboard.cmake and the module drives the JD9365 at 800x1280),
-moy_ppa (the pixel accelerator behind the game composite), moy_ble_hid (the
-NimBLE-host report queue over the C6's hosted radio) and moy_c6 (the ESP-NOW
-shim + C6 plumbing over ESP-Hosted -- the C6 wiring here is the Waveshare's
+moy_ppa (the pixel accelerator behind the game composite) and moy_c6 (the
+ESP-NOW shim + C6 plumbing over ESP-Hosted -- the C6 wiring here is the Waveshare's
 pin for pin: SDIO CLK18/CMD19/D0-3 14-17, reset 54). This board is the
 SECOND consumer that moved the tier out of the Waveshare's tree (2026-09-06,
 Phase C of docs/board_ports_2026-08.md). Nothing is denied."""

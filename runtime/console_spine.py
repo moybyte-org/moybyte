@@ -153,8 +153,8 @@ class SpineVerbs:
         # Every persisted ON/OFF setting, through the verb its registry entry
         # names (#209 section 7): the key is the system.json key, the default is
         # declared beside it, and a board that cannot serve one gets the honest
-        # answer from the setter rather than a silent flag. Six hand-kept lines
-        # used to sit here, and a seventh toggle is now none.
+        # answer from the setter rather than a silent flag. A new toggle is one
+        # registry entry, not a line here.
         for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
             getattr(self, setter)(self.system.get(key, default), persist=False)
         # A key a retired setting left behind (#217 took FRAMESKIP) would ride
@@ -239,7 +239,7 @@ class SpineVerbs:
         back = self._project_return
         self._project_return = None
         # A run's caller is SPENT by its return. Leaving it set is what wedged
-        # Files (#108, on glass 2026-09-07): the returned-to APP's own context X
+        # Files (#108, on glass): the returned-to APP's own context X
         # routes here too, and a stale caller made it `goto` the app already on
         # top -- a no-op, so Files could never be left again once it had opened
         # a note.
@@ -459,7 +459,7 @@ class SpineVerbs:
         return False
 
     def wifi_hold(self, tag):
-        """Take the radio for `tag` (2026-09-07): the WiFi is OFF unless
+        """Take the radio for `tag`: the WiFi is OFF unless
         something holds it, and this is the only way to turn it on. Powers the
         interface up at once -- every holder scans or connects next, and the
         ESP-NOW link must find the service owning the interface it activates.

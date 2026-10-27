@@ -39,7 +39,7 @@ does; the pending marker lives in `update_dir`. The running build's label
 #       input polling, timers and compositing on either board; long enough that a
 #       crash in the ordinary run of things lands inside it, short enough that
 #       nobody power-cycles before it.
-#   HEALTHY_SERVES -- the HEADLESS twin of the pair above (the Zero, 2026-08-29).
+#   HEALTHY_SERVES -- the HEADLESS twin of the pair above (the Zero).
 #       That board paints nothing ever, so a paint threshold there is not a weak
 #       gate, it is an unreachable one: every update would roll back. What plays
 #       the part of "something reached the glass" is the only externally visible

@@ -641,7 +641,7 @@ void mg_text_raw(uint16_t *dst, size_t dcap, int dw,
 /* A loaded font's row (mg_font_t): its column bytes and its advance table.
  * Petme128 stays on mg_text_raw's cell loop: this loop drew petme128's chrome
  * text 1.3x slower on the T-Deck, and still 1.06x with mg_text_raw's own loop
- * behind a row dispatch (S3 A/Bs, 2026-10-13), so petme128's lane is the
+ * behind a row dispatch (S3 A/Bs), so petme128's lane is the
  * function it was and a loaded font is a lane of its own. */
 void mg_text_font(uint16_t *dst, size_t dcap, int dw,
                   const uint8_t *s, size_t slen, int x, int y, uint16_t col,

@@ -249,8 +249,7 @@ int moy_lockstep_advance(moy_match_t *m, uint8_t held, uint32_t now, bool timed)
             s->m_ema = e;
             s->has_ema = true;
             // One-sided: a thin margin pushes the phase later; a fat one is
-            // left alone (pulling it earlier chased the stall cliff,
-            // 2026-08-25).
+            // left alone (pulling it earlier chased the stall cliff).
             if (e < (float)(MOY_MATCH_SLEW_TARGET_MS - MOY_MATCH_SLEW_BAND_MS)) {
                 s->next_ms += 1u;
             }

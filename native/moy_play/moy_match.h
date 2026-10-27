@@ -4,8 +4,8 @@
 // match's end -- and the lockstep session it forms: inputs, never state; a
 // missing input STALLS, never extrapolates.
 //
-// WHY LOCKSTEP, AND ITS THREE RULES. Measured on glass, T-Deck <-> Guition,
-// 2026-08-20: a 16-byte input frame round-trips in 5.0 ms median / 14.2 ms
+// WHY LOCKSTEP, AND ITS THREE RULES. Measured on glass, T-Deck <-> Guition:
+// a 16-byte input frame round-trips in 5.0 ms median / 14.2 ms
 // p99, a 250-byte state blob in 15.0 / 17.1 ms, so the payload is the inputs
 // and both consoles run the same simulation from them.
 //   1. INPUT DELAY: frame N's input is sent during N-delay and played on N.
@@ -16,15 +16,15 @@
 //   2. REDUNDANCY, NOT RETRANSMIT: every packet carries the last REDUNDANCY
 //      frames of input (a byte each), and the frame its sender is waiting
 //      for, so a stalled peer is served the frame it is stuck on (the fixed
-//      window deadlocked two consoles on a desk, 2026-08-22). The radio's ack
+//      window deadlocked two consoles on a desk). The radio's ack
 //      lies (64 of 200 messages arrived while every send said True).
 //   3. A MISSING INPUT STALLS THE SIM. Advancing on a guess desyncs the two
 //      consoles permanently and invisibly.
 // Determinism: the tick is fixed (TICK_HZ), and each logic frame starts from
 // a seed derived from (seed, frame), so drawing, which consumes the random
-// stream at each board's own rate, cannot move it (2026-08-22). The session
+// stream at each board's own rate, cannot move it. The session
 // paces itself and drops any debt of a full tick by re-basing (burst
-// catch-up coupled two consoles into a 30% stall, 2026-08-25); a stalled tick
+// catch-up coupled two consoles into a 30% stall); a stalled tick
 // retries every loop frame, and between ticks the newest packet is resent.
 // The guest (index 1) slews its phase 1 ms a tick toward SLEW_TARGET_MS of
 // measured arrival margin while the delay is one; the host is the anchor.
@@ -33,7 +33,7 @@
 // same-cart: two consoles sitting on the same title find each other through
 // beacons, and the LOWER MAC hosts -- symmetric, so two never both host. The
 // handshake is broadcast with the destination in the payload (a unicast from
-// an unregistered peer is dropped, 2026-08-22). The host resends START until
+// an unregistered peer is dropped). The host resends START until
 // the guest's first input arrives and gives up after START_TRIES; a match
 // whose session declares itself dead, a peer's BYE and an unanswered START
 // all end the match and ask the console to re-run the cart solo.

@@ -2276,7 +2276,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
     def _crash_to_code(self):
         """The stop card's See why (docs/look_2026-10.md step 33): the code
         editor on the line that stopped the run, the popover saying what
-        stopped it hung under the line (2026-07-23's crash-to-code throw,
+        stopped it hung under the line (the crash-to-code throw,
         now a row of the card). Returns True when it navigated; False (no
         open project/cart -- nothing to edit; a compiled cart) keeps the
         card. The dead run's world is released exactly like a normal exit;
@@ -4431,7 +4431,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         In the windowed DESK world the system canvas is never bound: a cart
         lives in a WINDOW, and `wm_windowed._draw_player_window` blits
         `ws.canvas` into it, so with the system canvas bound the window blits
-        the screen into a rectangle OF that screen (measured, 2026-08-19).
+        the screen into a rectangle OF that screen (measured).
         There the app takes a window surface of its own instead
         (`_bind_window_canvas`). In console mode (`windowed_chrome` False) it
         gets the whole system surface."""

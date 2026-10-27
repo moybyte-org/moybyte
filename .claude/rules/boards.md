@@ -242,12 +242,12 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 
 - **`native/p4/` is the shared P4 silicon tier (2026-09-06)**: `moy_dsi`
   (parameterized by the board's `MOY_DSI_PANEL_*` define), `moy_ppa`,
-  `moy_ble_hid`, `moy_c6`, declared by a P4 board as a second `[native.p4]`
+  `moy_c6`, declared by a P4 board as a second `[native.p4]`
   source — never seen by the S3 scan — plus the kernel's DSI compositors
   (`native/moy_glass/moy_present.h`: `moy_glass.DsiCompositor` and
   `RotatedCompositor`, over the modules each board passes in), `device/p4_canvas.py` and
-  `device/p4_desktop.py` over `device/desktop_spine.py`. The two P4 patches
-  are `patches/p4_*.patch` behind `moybyte_patch_p4_ble_hid_fastpath` /
+  `device/p4_desktop.py` over `device/desktop_spine.py`. The P4's one silicon
+  patch is `patches/p4_esp_lcd_dsi_underrun_hook.patch` behind
   `moybyte_patch_p4_dsi_underrun`. Status and numbers: #58, #202.
 - **`moy_dsi` scans, it does not push**: DPI mode reads a PSRAM framebuffer
   continuously, so there is no per-frame flush (the P4 boards deny

@@ -687,13 +687,13 @@ bool moy_play_lockstep(uint32_t run, uint32_t now, uint8_t *ticks) {
     }
     // The radio drained BEFORE the tick looks for the peer's input: the
     // tail's drain left it up to a frame stale (8.0% -> 6.4% stalled ticks
-    // at DELAY=2 from this alone, on glass 2026-08-24).
+    // at DELAY=2 from this alone, on glass).
     moy_match_drain_input(m, now, MOY_MATCH_DRAIN_MAX);
     // Every advance and every resend is a broadcast. A due tick always runs;
     // a stalled tick's retry and the resend between ticks wait out
     // MOY_PLAY_LOCK_MS since the last send, the cadence of a console's loop
     // frame. The kernel's front loops far faster: a send each pass flooded
-    // the air (T-Deck and P4, 2026-10-09: 17 ticks/s, 47% of ticks stalled),
+    // the air (T-Deck and P4: 17 ticks/s, 47% of ticks stalled),
     // and a 4 ms retry did the same.
     bool due = moy_lockstep_due(m, now);
     if (!due && r->lock_any && now - r->lock_at < MOY_PLAY_LOCK_MS) {

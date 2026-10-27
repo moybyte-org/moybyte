@@ -141,7 +141,7 @@ class ProjectStore:
                 # exit/crash + the Player's periodic flush -- never per pmem()
                 # call anymore: the per-write version of this save WAS Letter
                 # Blitz's 81-130ms "word-event" logic spike (measured on glass
-                # 2026-07-14 by the PMEM diag line below, which stays to show
+                # by the PMEM diag line below, which stays to show
                 # the deferred cadence; perf_capture-gated like every diag line).
                 t0 = _ticks_ms()
                 try:

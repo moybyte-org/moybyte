@@ -1209,8 +1209,8 @@ int moycore_lua_load_finish(char *err, size_t n)
     // instead traverses only what was allocated since the last one, which is a
     // frame's worth by construction.
     //
-    // That cycle was #107's residual stutter, and on glass (P4, dank tomb,
-    // 2026-09-20) one 60s soak of it held one 42ms frame in every ~49 -- a
+    // That cycle was #107's residual stutter, and on glass (P4, dank tomb)
+    // one 60s soak of it held one 42ms frame in every ~49 -- a
     // dropped tick at the cart's 60Hz logic, and felt. The same soak
     // generational held none above 27ms, with the VM's heap peak a third
     // lower; #107 carries the arms.

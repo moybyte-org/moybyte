@@ -495,7 +495,7 @@ class SettingsLayer:
         is their only way out of a cart); a board that already has a keyboard
         (the T-Deck) starts nothing until a kid opens this picker. `start()`
         early-returns on an available service, so a live link is not
-        disturbed (found on glass 2026-08-21)."""
+        disturbed (found on glass)."""
         svc = self._bt_service()
         if svc is not None:
             try:
@@ -709,7 +709,7 @@ class SettingsLayer:
             # A saved/open network reconnects with "" -- the SERVICE resolves
             # the stored password. A LOCKED known net that still fails (a stale
             # saved password) reopens the prompt, so the kid can retype it
-            # (on-glass P4, 2026-07-25).
+            # (on-glass P4).
             ok = self._wifi_connect(ssid, "")
             if not ok and locked:
                 self._wifi_ask(ssid)

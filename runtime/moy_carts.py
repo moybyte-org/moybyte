@@ -615,7 +615,7 @@ def entry(path):
     gc heap grows to and keeps for the session (#224). A payload is also the
     allocation a fragmented heap refuses mid-session while the memory to serve
     it exists: a rescan that read sources dropped ten of forty-four carts off
-    the Guition S3's shelf as "unreadable" (2026-09-08).
+    the Guition S3's shelf as "unreadable".
 
     One field is the shelf's, and lives until the shelf takes the entry:
     `icon_rows`, the rows of the sprite sheet the cart's launcher icon is cut
@@ -1914,12 +1914,11 @@ def duplicate(cart, root=CARTS_DIR, new_title=None, ns=USER_NS):
                  pictures=cart.get("pictures"))              # a picture wallpaper
     # create() writes the CODE side of a project (manifest/main/config/scenes).
     # Everything else a cart owns -- sprites.moygfx, map.moymap, sounds.json,
-    # blocks.json, images/, docs/ -- lived only in the source FOLDER, so
-    # a copy used to arrive with just its code: COPY silently threw
-    # away the sprite sheet, tilemap, sounds and cover art of every project it
-    # duplicated. Copying the files (rather than re-serialising the loaded dict)
-    # also keeps assets this module doesn't model, which is the only lossless
-    # answer for a cart authored by a newer build.
+    # blocks.json, images/, docs/ -- lives only in the source FOLDER, so a copy
+    # takes the files themselves, not a re-serialised dict: that keeps the
+    # sprite sheet, tilemap, sounds and cover art, and assets this module
+    # doesn't model, which is the only lossless answer for a cart authored by a
+    # newer build.
     src_path = cart.get("path")
     if src_path and dup is not None:
         _whole_or_none(dup["path"], lambda: _copy_cart_files(

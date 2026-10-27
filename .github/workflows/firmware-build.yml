@@ -322,7 +322,7 @@ jobs:
       # SAME managed-component checkout the P4 image just built against, so
       # host and slave hosted versions cannot drift; the publisher stages it
       # into latest-p4.json's `c6` block and the console's Settings UPGRADE
-      # C6 flow streams it over SDIO (device/moy_c6_update.py). P4 job only.
+      # C6 flow streams it over SDIO (device/moy_ota.py's C6Updater). P4 job only.
       - name: Build the C6 co-processor image
         if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
         run: firmware/esp32_p4_wifi6_touch_lcd_7b/c6_slave/build.sh

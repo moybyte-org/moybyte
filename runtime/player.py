@@ -855,7 +855,7 @@ class Player:
         # down here on the way through, and stopping the radio then killed the
         # very session that triggered the restart. On glass that read as the host
         # stalling at frame 0 forever while the guest played on alone, with
-        # nothing logged anywhere (#65, 2026-08-22). release_world has already
+        # nothing logged anywhere (#65). release_world has already
         # cleared ws.netplay if the session belonged to THIS run, so what
         # survives here belongs to the next one.
         _link = getattr(self.ws, "link", None)

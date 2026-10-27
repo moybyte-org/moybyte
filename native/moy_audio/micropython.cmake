@@ -35,6 +35,6 @@ target_link_libraries(usermod INTERFACE usermod_moy_audio)
 # OPEN ITEM -- the mixer runs from FLASH on the device. The hand-written mixer
 # this replaced carried IRAM_ATTR, because both cores share the flash cache and
 # the core-1 task's mixing bursts evicting core 0's lines was a MEASURED
-# whole-console slowdown while a sound played (2026-08-03). libmoy is vendored
+# whole-console slowdown while a sound played. libmoy is vendored
 # and cannot be annotated; the way to restore the placement is an ESP-IDF
 # linker fragment mapping the object into IRAM (`noflash`), A/B'd against #66.

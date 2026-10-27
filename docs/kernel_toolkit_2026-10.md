@@ -26,14 +26,18 @@ their player window (§12).
 crossing moves one golden hash does not land. The one pixel difference it
 accepts is outside the goldens and named in §7.
 
+**Executed.** Step 2 deleted `runtime/skin.py`, `set_skin` and the callable
+seam; the skins are deltas in `native/moy_ui/style.json`. The lines below that
+name them in the present tense are the design as written.
+
 ## 1. The toolkit today
 
 SOURCE, `runtime/ui.py`. Immediate mode over the canvas verbs, no retained
 tree. Style is already data: `DEFAULT_SPECS` gives each kind and state three token
 specs (field, ink, edge), and `DEFAULT_METRICS` each kind a tuple of pads,
 edge rings, boxes and alignment, flattened per theme into shared tuples behind a
-four-entry identity ring; `runtime/skin.py` holds the skins as deltas over
-both. Geometry is pure and separate from drawing. `widget_state` resolves the
+four-entry identity ring; `runtime/skin.py` (deleted at step 2) held the skins
+as deltas over both. Geometry is pure and separate from drawing. `widget_state` resolves the
 six-state ladder and `ScrollRegion` is the one scroll model.
 
 Not data yet: the widget bodies (each a Python function issuing three to eight

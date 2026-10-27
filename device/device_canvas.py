@@ -504,7 +504,7 @@ _ST_LEN = 16
 _GATE_RECT, _GATE_RECTB, _GATE_PRINT, _GATE_PIX = 0, 1, 2, 3
 
 # The least block a backend's DMA fill takes (P4SystemCanvas.ppa_fill): below
-# it the engine's submit costs more than the CPU's fill (measured 2026-07-26).
+# it the engine's submit costs more than the CPU's fill (measured).
 _DMA_FILL_MIN = 16384
 
 # Image comes from moy_image now -- ONE definition, shared with the host canvas
@@ -2223,9 +2223,9 @@ class DeviceCanvas:
         # Native text (#62) in the print font (moy_text.h), petme128 unless the
         # shell names one: the whole string in ONE moy_gfx.text call,
         # camera + clip + pal honoured in C -- and pixel parity with the host at
-        # last (same glyph bytes, staged from runtime/font.py). The legacy per-call
-        # `scale` arg stays IGNORED, exactly like the host Canvas.print (system-UI
-        # scaling is the #39 font_scale path, not this arg). framebuf.text (same
+        # last (same glyph bytes, staged from runtime/font.py). The per-call
+        # `scale` arg is IGNORED (system-UI scaling is the #39 font_scale path,
+        # not this arg). framebuf.text (same
         # glyphs, screen-bounds clip only) remains the no-gfx / old-build fallback.
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: print() is a non-spr primitive -> break batch
@@ -2700,7 +2700,7 @@ class SystemCanvas(DeviceCanvas):
 
     def print(self, s, x, y, c, scale=1):
         # The print font (moy_text.h; petme128 unless the shell names one) at
-        # font_scale. The legacy per-call `scale` arg stays IGNORED
+        # font_scale. The per-call `scale` arg is IGNORED
         # on every tier (SPEC.md 6: cart text is always 8px; system-UI scaling
         # is the #39 font_scale path, not this argument).
         fs = self.font_scale
@@ -2834,7 +2834,7 @@ class _LayerComp:
         (or the drag backdrop) it backed is gone. Off-heap layer memory has
         no collector: before this, every window open leaked its buffer from
         heap_caps -- ~3.6MB per Library -> CHANGE -> home round on the
-        Guition P4, measured 2026-09-09. A lent layer goes back to the pool,
+        Guition P4. A lent layer goes back to the pool,
         anything else is freed, and the view is neutered (a stale draw
         raises, never writes freed RAM). Idempotent."""
         b = self._b

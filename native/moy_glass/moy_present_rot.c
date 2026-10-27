@@ -59,8 +59,8 @@
 // buffer only while the partner is still on glass, so the third's stale debt
 // is paid rarely rather than every frame.
 //
-// EVERY FRAME IS ASYNC (2026-09-08), and the paint buffer PING-PONGS to make
-// it so. A rotate is PPA time the CPU used to spend waiting -- ~11ms for a
+// EVERY FRAME IS ASYNC, and the paint buffer PING-PONGS to make it so. A
+// rotate is PPA time the CPU would spend waiting -- ~11ms for a
 // game frame, ~17ms for a drag's rect frame, ~48ms for a full one. Instead a
 // frame's ops are QUEUED and the show waits for the next present, and the
 // CPU paints the NEXT frame into the OTHER paint buffer meanwhile. Two paint

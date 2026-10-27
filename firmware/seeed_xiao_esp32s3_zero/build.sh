@@ -118,10 +118,6 @@ moybyte_patch_import_cache
 #    stays available to the C side (#66). What needs that PSRAM on a console is
 #    the canvas and the layer pool; this board is headless and has neither.
 #
-# DECLINED moybyte_patch_p4_ble_hid_fastpath -- an ESP32-P4 silicon patch: it
-#    edits modbluetooth.c for native/p4/moy_ble_hid, which this ESP32-S3 image
-#    does not compile.
-#
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
 #    the MIPI-DSI bridge-underrun ISR. No DSI peripheral, no panel.
 #

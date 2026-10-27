@@ -3,7 +3,6 @@ paths:
   - "runtime/*canvas*.py"
   - "runtime/ui.py"
   - "runtime/ui_draw.py"
-  - "runtime/skin.py"
   - "runtime/chrome.py"
   - "runtime/*_layer.py"
   - "runtime/*_ui.py"
