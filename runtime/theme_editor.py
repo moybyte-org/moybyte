@@ -597,6 +597,7 @@ def zone_tap(app, px, py, rect):
     for tab, _l, _i, r, _on in tabs:
         if r[0] <= px < r[0] + r[2] + _TAB_GAP * fs and r[1] <= py < r[1] + r[3]:
             app.theme_tab(tab)
+            app.zone_opened = True
             return True
     if undo[0] <= px < undo[0] + undo[2]:
         app.ws.history.undo()

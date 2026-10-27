@@ -1677,8 +1677,10 @@ class BarLayer:
     def focus_keys(self, i):
         """A frame's keys while they are on the bar: left and right walk
         its items (and on to the home's tabs where they sit among them),
-        confirm opens the focused one (a tap at its middle), down, back and
-        stop come off it, up stays. True where they were the bar's."""
+        confirm opens the focused one (a tap at its middle) -- a zone's tab
+        it opens takes the keys down into it (the owner's `zone_opened`) --
+        down, back and stop come off it, up stays. True where they were the
+        bar's."""
         where = self.focus_where
         items = self.focus_items(where)
         if not items or self.ws.bar_where() != where:
@@ -1701,18 +1703,21 @@ class BarLayer:
             bi, r, _name = items[max(0, min(len(items) - 1, self.focus))]
             bar = self._packed(where)[bi]
             mid = r[0] + r[2] // 2
+            owner = self._zone_owner(where)
+            if getattr(owner, "zone_opened", None) is not None:
+                owner.zone_opened = False
             self._tap_bar(where, bar, mid, r[1] + r[3] // 2)
             ws = self.ws
             ws._dirty = True
-            if ws.bar_where() != where:
-                self.focus_leave()      # the tap left the surface (back, a door)
+            if ws.bar_where() != where or getattr(owner, "zone_opened", False):
+                # the tap left the surface (back, a door), or opened one of
+                # the zone's tabs, which takes the keys down into it as the
+                # home's row does
+                self.focus_leave()
             else:
-                # the item tapped, where the bar laid it out again (a tab
-                # opened takes its label): the open tab's, else the nearest
+                # the item tapped (undo, a widget under its popover), the
+                # nearest where the bar laid it out again
                 items = self.focus_items(where)
-                at = ws.bar_open_x(where)
-                if at is not None:
-                    mid = at
                 k = 0
                 for j in range(len(items)):
                     q = items[j][1]

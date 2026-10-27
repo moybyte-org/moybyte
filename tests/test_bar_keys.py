@@ -150,9 +150,67 @@ def test_the_editors_bar_lands_on_its_open_tab_and_switches_tabs(tmp_path):
     assert bl.focus_item[1][0] <= ws.bar_open_x("menu") < bl.focus_item[1][0] + \
         bl.focus_item[1][2], "the keys land on the open tab"
     _press(drv, "right")
+    assert ws.menu_view == "cards", "the walk moves the focus and opens nothing"
     _press(drv, "a")
     assert ws.menu_view != "cards", "confirm on a tab opens it"
-    assert bl.focus is not None, "the keys stay on the bar to walk on"
+    assert bl.focus is None and not ui_draw.on_bar(), \
+        "and takes the keys down into it, as the home's row does"
+
+
+def _editor_row(ws):
+    """The Editor's bar on the T-Deck, left to right: (x, what), what a
+    tab id, "undo", "redo", "play" or a bar widget's name."""
+    from runtime import editor_app
+    bl = ws.bar_layer
+    bar = bl.cell("menu", "zone")[0]
+    zone = bl.lent_zone("menu", bar)
+    named = {}
+    for tab, _glyph, r in ws.editor_app._ladder_layout(zone)[0]:
+        named[r[0]] = {editor_app._ZONE_UNDO: "undo", editor_app._ZONE_REDO: "redo",
+                       None: "play"}.get(tab, tab)
+    return [(r[0], name or named[r[0]]) for _bi, r, name in bl.focus_items("menu")]
+
+
+def test_the_editors_tabs_and_the_bars_items_walk_as_one_row(tmp_path):
+    """On the T-Deck the Editor's tab ladder sits in the bar between the
+    system button and the status widgets: left and right walk all of them in
+    screen order and stop at the row's ends, and the walk opens no tab."""
+    ws, drv = _home(tmp_path)
+    bl = ws.bar_layer
+    _editor(ws, drv)
+    row = _editor_row(ws)
+    assert [w for _x, w in row] == ["menu", "cards", "blocks", "code", "paint", "map",
+                                    "scene", "music", "undo", "redo", "play",
+                                    "battery", "clock"]
+    _press(drv, "up")
+    assert row[bl.focus][1] == "cards", "the keys land on the open tab"
+    seen = []
+    for _ in range(len(row) + 2):
+        _press(drv, "right")
+        seen.append(row[bl.focus][1])
+        assert ws.menu_view == "cards", "the walk opens nothing"
+    assert seen[-3:] == ["clock"] * 3, "the row stops at its right end"
+    for _ in range(len(row) + 2):
+        _press(drv, "left")
+    assert row[bl.focus][1] == "menu", "and at its left end"
+    assert not ws.sysmenu.open and ws.menu_view == "cards"
+    _press(drv, "up")
+    assert bl.focus_where == "menu", "up stays on the row"
+
+
+def test_confirm_on_undo_keeps_the_keys_on_the_editors_bar(tmp_path):
+    """Undo and redo are verbs, not tabs: confirm runs one and the keys
+    stay on the row to run it again."""
+    ws, drv = _home(tmp_path)
+    bl = ws.bar_layer
+    _editor(ws, drv)
+    row = [w for _x, w in _editor_row(ws)]
+    _press(drv, "up")
+    while row[bl.focus] != "undo":
+        _press(drv, "right")
+    _press(drv, "a")
+    assert bl.focus is not None and row[bl.focus] == "undo"
+    assert ws.menu_view == "cards"
     _press(drv, "down")
     assert bl.focus is None
 

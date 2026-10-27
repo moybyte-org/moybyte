@@ -570,7 +570,8 @@ grid at its top (`at_top`) -- puts focus on the bar's items
 lent tools and the zone's targets (the Editor's tabs, undo, redo and Play,
 `zone_targets`), the Editor's landing on its open tab. Left and right walk
 them, confirm opens one as a tap on it does (a widget's popover over the
-bar, focus staying on the widget under it), down, back and stop come off
+bar, focus staying on the widget under it; a tab, the keys going down into
+it), down, back and stop come off
 it; the focused item takes the bar's focus pill (below), and
 the hint strip under it names the bar's keys (`ui_draw.BAR_KEYS`: change,
 confirm and back, in the input's own keys). A caret keeps up for itself, so
@@ -604,8 +605,19 @@ bar (`LauncherHomeLayer.tabs_in_bar` empty), the row stops at the tabs'
 ends and up goes on to the bar. A trackball roll steps on its stronger axis,
 and mid-roll the other axis takes `Workstation.BALL_TURN` pulses, so a roll
 along the row that drifts a pulse or two down stays on it; a pause frees it
-(`Workstation._ball_roll`). The Editor's tab ladder keeps switching on the
-move.
+(`Workstation._ball_roll`).
+
+**The Editor's tabs and the bar's items are one row too** (owner call
+2026-10-27). On a handheld the tab ladder sits in the bar: on the T-Deck the
+system button, Config, Blocks, Code, Sprites, Map, Scene, Music, undo, redo,
+Play, the battery and the clock, walked in that order and stopping at the
+ends. The walk moves the focus pill and opens nothing; confirm on a tab opens
+it and takes the keys down into it (`EditorApp.zone_opened`, the theme
+mode's two tabs the same), confirm on undo or redo runs it and the keys stay
+on the row, and a tap opens a tab at once. The focused tab wears the pill and
+the open one its current mark. The desk Editor's workspaces are a window's
+row, switched by their chords (`EditorDesk._chord`), and the keys do not walk
+it.
 
 ## 9. The safety rule, and what the loader checks
 

@@ -115,6 +115,7 @@ _ZONE_TABS = (
     (_ZONE_REDO, "redo"),   # -> ws.history.redo() (#88), dimmed with nothing to redo
     (None, "run"),          # PLAY
 )
+_OPENS = ("cards", "blocks", "code", "paint", "map", "scene", "music")   # the tabs
 _LADDER_GAP = 4                 # the narrow bar's widest gap between icons, at fs 1
 _GROUP_GAP = 8                  # ...the least gap between the tabs and the actions
 _GROUP_MAX = 12                 # ...and the most
@@ -234,6 +235,9 @@ class EditorApp:
         self.theme = None
         self._theme_back = None
         self._theme_was = None
+        # A tab the last zone tap opened (the ladder's or the theme mode's):
+        # the bar's keys then go down into it (`BarLayer.focus_keys`).
+        self.zone_opened = False
         self.tab = "cards"            # active view -- ws.menu_view projects onto this:
                                       # "cards" | "code" | "paint" | "map" | "blocks"
                                       # | "music" | "theme_config" | "theme_sprites"
@@ -1259,6 +1263,7 @@ class EditorApp:
                 desk.switch(tab[3:])
                 self.zone_gen += 1
             return True
+        self.zone_opened = tab in _OPENS
         if tab == "cards":
             ws._open_menu()
         elif tab == "code" and self.tab == "code" and ws.menu_view == "code":
