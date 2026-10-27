@@ -113,7 +113,10 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   `303a:4001` is the one without input. The board's README tells the
   three-part fix.
 - The P4's PPA verdicts: it only helps UPSCALE composites (a 1:1 full-screen
-  copy is the same CPU or PPA, PSRAM-bound against the scan-out); sprite
+  copy is the same CPU or PPA, PSRAM-bound against the scan-out; the AXI
+  GDMA, `moy_ppa.copy`, moves whole rows at about twice either, which is what
+  `copy_last` and a full-screen window's stamp take), and FILLS, which skip
+  the write-allocate read (cls, a big rect, an rrect's middle rows); sprite
   BATCHING on it is a dead end (~10× worse than `spr_batch`: per-op submit
   dwarfs a tiny blit); its scaler is fixed BILINEAR in silicon, so pixel art
   goes through Settings → CRISP PIXELS (`moy_ppa.blit_crisp`, a banded SRAM
