@@ -320,7 +320,7 @@ def test_shelf_blit_arms_in_a_window(tmp_path):
     grid = ws.projects_grid
 
     # The ring must be non-empty AFTER a frame -- the bug left it wiped.
-    assert grid._region._painted, "the paint ring never survives a frame"
+    assert grid._region.ring.size, "the paint ring never survives a frame"
 
     shifts = [0]
     region = grid._region
@@ -358,10 +358,12 @@ def test_set_layout_keeps_the_paint_ring(tmp_path):
         drv.frame(1 / 30)
     grid = ws.launcher
     region = grid._region
-    assert region._painted
-    before = list(region._painted)
+    ring = region.ring
+    assert ring.size
+    before = [(ring.frame(i), ring.offset(i), ring.key(i)) for i in range(ring.size)]
     grid.set_layout(grid.layout)             # the per-frame context swap
-    assert region._painted == before, "set_layout wiped the ring"
+    assert [(ring.frame(i), ring.offset(i), ring.key(i)) for i in range(ring.size)] == before, \
+        "set_layout wiped the ring"
     # ... but the geometry IS pinned: the statics key carries the grid rect.
     key = ws.launcher_layer._statics_key(ws.sys_canvas)
     assert grid.band_rect() in key

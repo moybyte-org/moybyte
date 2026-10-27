@@ -30,6 +30,10 @@ enum {
     STOP_FIELD = 512,       // a text field: it takes the typed keys, and `a` is a letter
     STOP_ROWS = 1024,       // a list's or a table's rows on its page: `row` and `top` hold
     STOP_CARD = 2048,       // a dialog's or a popover's body: its scroll into view lands at once
+    STOP_AT = 4096,         // placed by ui.at
+    STOP_PIC = 8192,        // the app draws a picture in it (a card, a part)
+    STOP_GEN = 16384,       // ...whose gen it gave
+    STOP_GRID = 32768,      // a card of a grid
 };
 
 static uint32_t hash(const uint8_t *p, size_t n, uint32_t salt) {
@@ -74,6 +78,8 @@ void moy_ui_over_none(moy_ui_over_t *o) {
     o->hint.p = NULL;
     o->hint.n = 0;
     o->wash = o->lead = -1;
+    o->has_gen = 0;
+    o->gen = 0;
 }
 
 static int32_t word(const uint8_t *w, int i) {
@@ -120,13 +126,18 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
             o->hint.n = (uint16_t)hn;
             at += (size_t)hn;
         }
-        // then a word of flags
+        // then a word of flags, and the gen's word where they say so
         if (n - at >= 4u) {
             int32_t fl;
             memcpy(&fl, w + at, 4);
+            at += 4u;
             if (fl >= 0) {
                 o->wash = (int8_t)((fl & MOY_UI_O_WASH) != 0);
                 o->lead = (int8_t)((fl & MOY_UI_O_LEAD) != 0);
+                if ((fl & MOY_UI_O_GEN) && n - at >= 4u) {
+                    memcpy(&o->gen, w + at, 4);
+                    o->has_gen = 1;
+                }
             }
         }
     }
@@ -140,7 +151,7 @@ int moy_ui_over_block(moy_ui_over_t *o, const uint8_t *w, size_t n) {
 
 static const moy_ui_over_t *over(const moy_ui_over_t *o) {
     static const moy_ui_over_t none = {MOY_UI_O_NONE, MOY_UI_O_NONE, MOY_UI_O_NONE, {NULL, 0},
-                                       -1, -1, -1, -1, -1, {NULL, 0}, -1, -1};
+                                       -1, -1, -1, -1, -1, {NULL, 0}, -1, -1, 0, 0};
     return o != NULL ? o : &none;
 }
 
@@ -404,6 +415,94 @@ static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_
 
 // -- a frame -------------------------------------------------------------------------
 
+static void floor_build(moy_ui_ctx_t *c, int p0, int n, int of);
+
+static int same_box(moy_ui_box_t a, moy_ui_box_t b) {
+    return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+}
+
+// The frame begin just resolved, as a shift frame (docs/scroll_and_text_
+// 2026-10.md §3.3): which page R it moves and by how much, where the input
+// it applied and the last pass license one. `owed` the last pass owed this
+// frame, `over` it drew something over its page, `flags` begin's.
+static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
+    c->sh_plan = MOY_UI_SHIFT_NONE;
+    c->sh_id = 0;
+    int p = c->in[MOY_UI_IN_PTR];
+    int live = p & MOY_UI_P_LIVE, held = live && (p & MOY_UI_P_HELD);
+    int same = c->was_flags == (uint16_t)(flags & ~MOY_UI_KEY_EDGE) && c->was_fs == c->fs
+               && c->was_hint == (uint8_t)moy_ui_hint_input()
+               && same_box(c->was_surface, c->surface);
+    // a press, an activation, a stepped value, a hover, an overlay: whole
+    if (!same || owed || over || c->modal || c->pop_prev.w > 0 || c->pop_gone || c->act
+        || c->step_x || c->step_y || (p & MOY_UI_P_EDGE) || (live && !held)
+        || (held && c->gesture != 2) || (p & MOY_UI_P_MIDDLE)) {
+        return;
+    }
+    const moy_ui_stop_t *v = c->prev;
+    int n = c->n_prev;
+    // the one page whose scroll moved, else (a rows frame) the largest page
+    // that may be R
+    moy_ui_keep_t *r = NULL;
+    int moved = 0;
+    int32_t area = -1;
+    moy_ui_keep_t *best = NULL;
+    for (int i = 0; i < MOY_UI_API_KEEP; i++) {
+        moy_ui_keep_t *k = &c->keep[i];
+        if (k->id == 0 || !(k->kd & MOY_UI_KD_PAGE)) {
+            continue;
+        }
+        if (k->a != k->drawn) {
+            moved++;
+            r = k;
+        }
+        int ok = (k->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN | MOY_UI_KD_BAD))
+                 == (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN);
+        const moy_ui_stop_t *ps = ok ? page_of_keep(v, n, k) : NULL;
+        if (ps != NULL && (int32_t)ps->b.w * ps->b.h > area) {
+            area = (int32_t)ps->b.w * ps->b.h;
+            best = k;
+        }
+    }
+    if (moved > 1) {
+        return;
+    }
+    if (r == NULL) {
+        r = best;
+    }
+    if (r == NULL || (r->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN | MOY_UI_KD_BAD))
+                         != (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN)) {
+        return;
+    }
+    if (held && c->drag_page != r->id) {
+        return;                         // a drag of another page
+    }
+    const moy_ui_stop_t *rp = page_of_keep(v, n, r);
+    int dy = (int)(r->drawn - r->a);
+    if (rp == NULL || rp->b.w <= 0 || rp->b.h <= 0 || (dy < 0 ? -dy : dy) >= rp->b.h
+        || r->s0 + r->sn > n) {
+        return;
+    }
+    c->sh_id = r->id;
+    c->sh_r = rp->b;
+    c->sh_dy = (int16_t)dy;
+    c->sh_head = 0;
+    // the floor this input asks for, as R's opening will build it: where it
+    // is most of R, moving the rest costs more than it saves
+    c->fl_n = 0;
+    floor_build(c, r->s0, r->sn, rp->b.y + rp->b.h);
+    int32_t rows = 0;
+    for (int i = 0; i < c->fl_n; i++) {
+        rows += c->fl[i].h;
+    }
+    c->fl_n = 0;
+    c->fl_pend = 0;
+    if (rows * 5 > (int32_t)rp->b.h * 3) {
+        return;
+    }
+    c->sh_plan = dy ? MOY_UI_SHIFT_MOVE : MOY_UI_SHIFT_ROWS;
+}
+
 int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, int flags,
                      int fs) {
     static const int32_t none[MOY_UI_IN_LEN] = {0};
@@ -469,9 +568,15 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->tip_at.w = 0;
     c->bar_seen = 0;
     int settled = !c->owe;
+    int owed_last = c->owe;
+    int over_last = c->fl_dirty;
     int moved = 0;
     int dt = in[MOY_UI_IN_DT];
     c->owe = 0;
+    c->fl_on = c->fl_stage = c->fl_n = c->fl_struct = c->fl_dirty = c->fl_susp = 0;
+    c->fl_lost = c->at_last = c->fl_cast = 0;
+    c->pic_clip = (moy_ui_box_t){0, 0, 0, 0};
+    c->fl_pend = 0;
     c->step_rev = 0;
     uint32_t focus0 = c->focus;
     moy_ui_stop_t *v = c->prev;
@@ -864,6 +969,11 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         moved = 1;
     }
     c->moved = (uint8_t)moved;
+    shift_plan(c, owed_last, over_last, flags);
+    c->was_flags = (uint16_t)(flags & ~MOY_UI_KEY_EDGE);
+    c->was_fs = c->fs;
+    c->was_hint = (uint8_t)moy_ui_hint_input();
+    c->was_surface = surface;
     return settled;
 }
 
@@ -906,6 +1016,7 @@ static moy_ui_box_t place_row(moy_ui_ctx_t *c, int h, int *stacked, int row) {
     c->row_slot = c->icon_slot;
     c->row_glyph = c->icon_glyph;
     c->icon_slot = c->icon_glyph = -1;
+    c->at_last = c->has_at;
     if (c->has_at) {
         c->has_at = 0;
         *stacked = 0;
@@ -945,11 +1056,269 @@ static moy_ui_box_t place(moy_ui_ctx_t *c, int h, int *stacked) {
     return place_row(c, h, stacked, 1);
 }
 
-// What a stacked row draws inside: the page's content rect.
+// -- the floor (docs/scroll_and_text_2026-10.md §3.3) ---------------------------------
+//
+// On a shift frame a host has moved the pixels the last frame drew in R by
+// the scroll's move, and the pass draws only what that leaves wrong: the
+// FLOOR, a list of disjoint rects inside R. Every draw goes through the
+// frame's PIECES -- everything outside R (four rects about it), and the
+// floor's rects once R is open -- once per piece it touches, clipped to it,
+// so a pixel in the floor takes every draw over it in the order a whole
+// frame draws them, and a pixel of R outside it keeps what the move left.
+
+typedef struct {
+    int32_t x0, y0, x1, y1;
+} rc_t;
+
+// The state bits whose marks a stop draws: a stop whose bits moved is
+// drawn again on a shift frame.
+#define MARKS (MOY_UI_ST_FOCUS | MOY_UI_ST_ACTIVATED | MOY_UI_ST_PRESSED | MOY_UI_ST_HOVER)
+
+static uint32_t s_audit_on, s_audit_fail;
+
+static rc_t rc_of(moy_ui_box_t b) {
+    return (rc_t){b.x, b.y, b.x + b.w, b.y + b.h};
+}
+
+static int rc_cut(rc_t *a, rc_t b) {
+    a->x0 = a->x0 > b.x0 ? a->x0 : b.x0;
+    a->y0 = a->y0 > b.y0 ? a->y0 : b.y0;
+    a->x1 = a->x1 < b.x1 ? a->x1 : b.x1;
+    a->y1 = a->y1 < b.y1 ? a->y1 : b.y1;
+    return a->x0 < a->x1 && a->y0 < a->y1;
+}
+
+static int rc_meets(rc_t a, rc_t b) {
+    return rc_cut(&a, b);
+}
+
+static moy_ui_box_t box_of(rc_t r) {
+    return (moy_ui_box_t){(int16_t)r.x0, (int16_t)r.y0, (int16_t)(r.x1 - r.x0),
+                          (int16_t)(r.y1 - r.y0)};
+}
+
+// Whether the pass draws through the pieces now: a host armed the floor,
+// and no dialog's or popover's body (an overlay, drawn whole) is open.
+static int armed(const moy_ui_ctx_t *c) {
+    return c->fl_on && !c->fl_susp;
+}
+
+// The pieces there are: four about R, then the floor once R is open.
+static int pieces(const moy_ui_ctx_t *c) {
+    return 4 + (c->fl_stage ? c->fl_n : 0);
+}
+
+static rc_t piece(const moy_ui_ctx_t *c, int i) {
+    const int32_t big = 1 << 20;
+    rc_t r = rc_of(c->sh_r);
+    switch (i) {
+        case 0:
+            return (rc_t){-big, -big, big, r.y0};
+        case 1:
+            return (rc_t){-big, r.y1, big, big};
+        case 2:
+            return (rc_t){-big, r.y0, r.x0, r.y1};
+        case 3:
+            return (rc_t){r.x1, r.y0, big, r.y1};
+        default:
+            return rc_of(c->fl[i - 4]);
+    }
+}
+
+// Whether box b lies wholly in the floor (its part inside R does).
+static int floor_holds(const moy_ui_ctx_t *c, moy_ui_box_t b) {
+    rc_t q = rc_of(b);
+    if (!rc_cut(&q, rc_of(c->sh_r))) {
+        return 1;
+    }
+    int32_t want = (q.x1 - q.x0) * (q.y1 - q.y0), got = 0;
+    for (int i = 0; i < c->fl_n; i++) {
+        rc_t f = rc_of(c->fl[i]);
+        if (rc_cut(&f, q)) {
+            got += (f.x1 - f.x0) * (f.y1 - f.y0);
+        }
+    }
+    return got >= want;
+}
+
+static int floor_meets(const moy_ui_ctx_t *c, moy_ui_box_t b) {
+    rc_t q = rc_of(b);
+    for (int i = 0; i < c->fl_n; i++) {
+        if (rc_meets(rc_of(c->fl[i]), q)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// The rect of the floor an app's picture in box b draws through: the one
+// holding it, else the one it meets (R opening made a picture meet no more
+// than one); w 0 where the frame draws it whole, w 0 and h -1 where it
+// draws none of it.
+static moy_ui_box_t floor_of(const moy_ui_ctx_t *c, moy_ui_box_t b) {
+    moy_ui_box_t none = {0, 0, 0, 0};
+    if (!armed(c) || c->fl_stage != 1 || !rc_meets(rc_of(b), rc_of(c->sh_r))) {
+        return none;
+    }
+    moy_ui_box_t met = {0, 0, 0, -1};
+    for (int i = 0; i < c->fl_n; i++) {
+        rc_t f = rc_of(c->fl[i]), q = rc_of(b);
+        if (!rc_cut(&q, f)) {
+            continue;
+        }
+        rc_t inr = rc_of(b);
+        rc_cut(&inr, rc_of(c->sh_r));
+        if (q.x0 == inr.x0 && q.y0 == inr.y0 && q.x1 == inr.x1 && q.y1 == inr.y1) {
+            return c->fl[i];
+        }
+        met = c->fl[i];
+    }
+    if (floor_holds(c, b)) {
+        rc_t q = rc_of(b);
+        rc_cut(&q, rc_of(c->sh_r));
+        return box_of(q);           // a picture drawn again: all of it, in pieces
+    }
+    return met;
+}
+
+// A picture in box b this frame's pass leaves as the move left it: inside R
+// on a shift frame, and no rect of the floor reaches it.
+static int outside_floor(const moy_ui_ctx_t *c, moy_ui_box_t b) {
+    return armed(c) && c->fl_stage == 1 && rc_meets(rc_of(b), rc_of(c->sh_r))
+           && !floor_meets(c, b);
+}
+
+// Box b, inside R, joins the floor: what of it the floor does not hold yet,
+// as rects; `ground` marks them for the page's ground before anything draws
+// over them.
+static void floor_add(moy_ui_ctx_t *c, rc_t b, int ground) {
+    rc_t q[32];
+    int n = 0;
+    if (!rc_cut(&b, rc_of(c->sh_r))) {
+        return;
+    }
+    q[n++] = b;
+    for (int i = 0; i < c->fl_n && n > 0; i++) {
+        rc_t e = rc_of(c->fl[i]);
+        rc_t out[32];
+        int m = 0;
+        for (int j = 0; j < n; j++) {
+            rc_t a = q[j], x = a;
+            if (!rc_cut(&x, e)) {
+                if (m < 32) {
+                    out[m++] = a;
+                }
+                continue;
+            }
+            rc_t parts[4] = {{a.x0, a.y0, a.x1, x.y0}, {a.x0, x.y1, a.x1, a.y1},
+                             {a.x0, x.y0, x.x0, x.y1}, {x.x1, x.y0, a.x1, x.y1}};
+            for (int k = 0; k < 4; k++) {
+                if (parts[k].x0 < parts[k].x1 && parts[k].y0 < parts[k].y1 && m < 32) {
+                    out[m++] = parts[k];
+                }
+            }
+        }
+        memcpy(q, out, (size_t)m * sizeof(rc_t));
+        n = m;
+    }
+    for (int j = 0; j < n; j++) {
+        if (c->fl_n >= MOY_UI_API_FLOOR) {
+            c->fl_lost = 1;
+            return;
+        }
+        if (ground) {
+            c->fl_pend |= 1u << c->fl_n;
+        }
+        c->fl[c->fl_n++] = box_of(q[j]);
+    }
+}
+
+// The rows y0..y1 of R, across it.
+static void floor_rows(moy_ui_ctx_t *c, int y0, int y1, int ground) {
+    moy_ui_box_t r = c->sh_r;
+    floor_add(c, (rc_t){r.x, y0, r.x + r.w, y1}, ground);
+}
+
+// Rows y0..y1 of R join the floor as R opens: one strip across R, merged
+// with every strip it meets or touches, every one wanting its ground.
+static void floor_strip(moy_ui_ctx_t *c, int y0, int y1) {
+    moy_ui_box_t r = c->sh_r;
+    y0 = y0 > r.y ? y0 : r.y;
+    y1 = y1 < r.y + r.h ? y1 : r.y + r.h;
+    if (y0 >= y1) {
+        return;
+    }
+    for (int i = 0; i < c->fl_n;) {
+        moy_ui_box_t f = c->fl[i];
+        if (f.y <= y1 && f.y + f.h >= y0) {
+            y0 = f.y < y0 ? f.y : y0;
+            y1 = f.y + f.h > y1 ? f.y + f.h : y1;
+            c->fl[i] = c->fl[--c->fl_n];
+            i = 0;
+            continue;
+        }
+        i++;
+    }
+    if (c->fl_n >= MOY_UI_API_FLOOR) {
+        c->fl_lost = 1;
+        return;
+    }
+    c->fl[c->fl_n++] = (moy_ui_box_t){r.x, (int16_t)y0, r.w, (int16_t)(y1 - y0)};
+    c->fl_pend = c->fl_n >= 32 ? 0xffffffffu : (1u << c->fl_n) - 1;
+}
+
+// How many of the floor's rects box b meets.
+static int floor_count(const moy_ui_ctx_t *c, moy_ui_box_t b) {
+    rc_t q = rc_of(b);
+    int n = 0;
+    for (int i = 0; i < c->fl_n; i++) {
+        n += rc_meets(rc_of(c->fl[i]), q);
+    }
+    return n;
+}
+
+// The page's ground over box b, clipped to it.
+static void ground_fill(const moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b) {
+    moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
+    int32_t *st = row->st, saved[4];
+    memcpy(saved, &st[MOY_ST_CX0], sizeof(saved));
+    rc_t q = rc_of(b);
+    q.x0 -= st[MOY_ST_CAM_X];
+    q.x1 -= st[MOY_ST_CAM_X];
+    q.y0 -= st[MOY_ST_CAM_Y];
+    q.y1 -= st[MOY_ST_CAM_Y];
+    if (rc_cut(&q, (rc_t){saved[0], saved[1], saved[2], saved[3]})) {
+        st[MOY_ST_CX0] = q.x0;
+        st[MOY_ST_CY0] = q.y0;
+        st[MOY_ST_CX1] = q.x1;
+        st[MOY_ST_CY1] = q.y1;
+        static const uint8_t none[1] = {0};
+        moy_ui_page_ground(s, b, (moy_ui_span_t){none, 0}, c->fs, (c->cls ? MOY_UI_DESK : 0)
+                           | (c->win ? MOY_UI_WINDOW : 0), NULL);
+    }
+    memcpy(&st[MOY_ST_CX0], saved, sizeof(saved));
+}
+
+// The floor's rects that want their ground get it.
+static void ground_due(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    uint32_t m = c->fl_pend;
+    c->fl_pend = 0;
+    for (int i = 0; m && i < c->fl_n; i++, m >>= 1) {
+        if (m & 1u) {
+            ground_fill(c, s, c->fl[i]);
+        }
+    }
+}
+
+// What a stacked row draws inside: the page's content rect; on a shift
+// frame, each piece of the frame's region in turn.
 typedef struct {
     moy_canvas_row_t *row;
     int32_t saved[4];
     int on;
+    moy_ui_ctx_t *c;                // NULL: one clip, no pieces
+    int i, stacked;
+    rc_t in, ext;
 } clip_t;
 
 static int clip_in(clip_t *k, const moy_ui_sink_t *s, moy_ui_box_t b) {
@@ -957,6 +1326,7 @@ static int clip_in(clip_t *k, const moy_ui_sink_t *s, moy_ui_box_t b) {
     int32_t *st = row->st;
     k->row = row;
     k->on = 1;
+    k->c = NULL;
     memcpy(k->saved, &st[MOY_ST_CX0], sizeof(k->saved));
     int x0 = b.x - st[MOY_ST_CAM_X], y0 = b.y - st[MOY_ST_CAM_Y];
     int x1 = x0 + b.w, y1 = y0 + b.h;
@@ -974,18 +1344,79 @@ static void clip_out(clip_t *k) {
     }
 }
 
-// Clip a box's draw to `in` when it stacks; answers whether any of it shows.
-static int clip_row(clip_t *k, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
-                    moy_ui_box_t in) {
-    k->on = 0;
-    if (!stacked) {
+// The next piece the draw reaches, its clip set: 0 where none is left.
+static int clip_piece(clip_t *k) {
+    const moy_ui_ctx_t *c = k->c;
+    int32_t *st = k->row->st;
+    int32_t cx = st[MOY_ST_CAM_X], cy = st[MOY_ST_CAM_Y];
+    int n = pieces(c);
+    while (++k->i < n) {
+        rc_t p = piece(c, k->i);
+        if ((k->stacked && !rc_cut(&p, k->in)) || !rc_meets(p, k->ext)) {
+            continue;
+        }
+        p.x0 -= cx;
+        p.x1 -= cx;
+        p.y0 -= cy;
+        p.y1 -= cy;
+        if (!rc_cut(&p, (rc_t){k->saved[0], k->saved[1], k->saved[2], k->saved[3]})) {
+            continue;
+        }
+        st[MOY_ST_CX0] = p.x0;
+        st[MOY_ST_CY0] = p.y0;
+        st[MOY_ST_CX1] = p.x1;
+        st[MOY_ST_CY1] = p.y1;
+        k->on = 1;
         return 1;
     }
-    if (b.y + b.h <= in.y || b.y >= in.y + in.h) {
+    return 0;
+}
+
+// Clip a box's draw to `in` when it stacks; answers whether any of it
+// shows. On a shift frame it answers once per piece the box reaches (with
+// what draws past its edges -- a mark's reach, a card's shadow), and
+// clip_next moves to the next: a draw is `for (ok = clip_row(..); ok; ok =
+// clip_next(&k))`.
+static int clip_row(moy_ui_ctx_t *c, clip_t *k, const moy_ui_sink_t *s, moy_ui_box_t b,
+                    int stacked, moy_ui_box_t in) {
+    k->on = 0;
+    k->c = NULL;
+    int cast = c->fl_cast;
+    c->fl_cast = 0;
+    if (stacked && (b.y + b.h <= in.y || b.y >= in.y + in.h)) {
         return 0;
     }
-    return clip_in(k, s, in);
+    if (!armed(c)) {
+        return stacked ? clip_in(k, s, in) : 1;
+    }
+    ground_due(c, s);
+    moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
+    k->row = row;
+    memcpy(k->saved, &row->st[MOY_ST_CX0], sizeof(k->saved));
+    k->c = c;
+    k->i = -1;
+    k->stacked = stacked;
+    k->in = rc_of(in);
+    // what draws past its box: a mark's reach, where the stop drawn last
+    // carries one, and a card's shadow; a pixel's rounding otherwise
+    int m = cast || (c->n_cur > 0 && (c->cur[c->n_cur - 1].st & MARKS)) ? 8 * c->fs : c->fs;
+    k->ext = (rc_t){b.x - m, b.y - m, b.x + b.w + m, b.y + b.h + m};
+    return clip_piece(k);
 }
+
+static int clip_next(clip_t *k) {
+    clip_out(k);
+    return k->c != NULL && clip_piece(k);
+}
+
+// A draw over box b that no row clips (a fade, a hint band, a page's
+// ground): through every piece it reaches on a shift frame, once otherwise.
+#define EACH_PIECE(c, k, s, b) \
+    for (int k##_ok = clip_row((c), &(k), (s), (b), 0, (b)); k##_ok; k##_ok = clip_next(&(k)))
+// A stacked row's draw: clipped to `in`, through every piece it reaches.
+#define EACH_ROW(c, k, s, b, stacked, in) \
+    for (int k##_ok = clip_row((c), &(k), (s), (b), (stacked), (in)); k##_ok; \
+         k##_ok = clip_next(&(k)))
 
 // -- groups (ui.group) ---------------------------------------------------------------
 
@@ -997,14 +1428,22 @@ static moy_ui_box_t card_of(const moy_ui_ctx_t *c) {
                           (int16_t)(c->page.w - 2 * in), 0};
 }
 
-// The card behind stacked row b, drawn under the row's clip; the row's marks
-// (MOY_UI_F_FOCUS, MOY_UI_F_ON) are kept for the card's foot.
+// A stacked row b of an open group shows: its marks (MOY_UI_F_FOCUS,
+// MOY_UI_F_ON) are kept for the card's foot -- whether or not a shift
+// frame's floor draws the row.
+static void band_mark(moy_ui_ctx_t *c, moy_ui_box_t b, int stacked, int marks) {
+    if (stacked && c->grp_open && b.y + b.h > c->page.y && b.y < c->page.y + c->page.h) {
+        c->grp_flags = (uint16_t)(marks & (MOY_UI_F_FOCUS | MOY_UI_F_ON));
+    }
+}
+
+// The card behind stacked row b, drawn under the row's clip (band_mark
+// keeps its marks).
 static void band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
                  int marks) {
     if (!stacked || !c->grp_open) {
         return;
     }
-    c->grp_flags = (uint16_t)(marks & (MOY_UI_F_FOCUS | MOY_UI_F_ON));
     // a focus mark that fills its row (invert, or the edge's plate) is the
     // line between it and its neighbours: neither it nor the row under it
     // draws a rule
@@ -1031,7 +1470,7 @@ static void group_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     c->grp_any = 1;
     if (c->grp_n) {
         clip_t k;
-        if (clip_row(&k, s, c->grp_last, 1, c->page)) {
+        EACH_ROW(c, k, s, c->grp_last, 1, c->page) {
             moy_ui_group_end(s, card_of(c), c->grp_last, c->grp_flags, c->fs, c->cls);
             clip_out(&k);
         }
@@ -1052,6 +1491,42 @@ static int in_dialog(const moy_ui_ctx_t *c) {
 
 // A stop recorded for the next frame's navigation: its state bits, or -1
 // where it is no stop (a duplicate id, or a full frame).
+// R's foot on screen.
+static int r_foot(const moy_ui_ctx_t *c) {
+    return c->sh_r.y + c->sh_r.h;
+}
+
+// Stop i was just recorded inside R on a shift frame: where it is not the
+// last frame's stop of that place (another id, another box once moved, a
+// mark of another state), the floor takes R from its top down -- the floor
+// only widens, and every stop after it draws whole.
+static void floor_check(moy_ui_ctx_t *c, int i) {
+    if (!armed(c) || c->fl_stage != 1 || c->fl_struct || i < c->fl_s0) {
+        return;
+    }
+    const moy_ui_stop_t *s = &c->cur[i];
+    int j = i - c->fl_s0;
+    const moy_ui_stop_t *q = j < c->fl_pn ? &c->prev[c->fl_p0 + j] : NULL;
+    if (q == NULL || q->id != s->id || q->b.x != s->b.x || q->b.w != s->b.w
+        || q->b.h != s->b.h || q->b.y + c->sh_dy != s->b.y
+        || (((q->st ^ s->st) & MARKS) && !floor_holds(c, s->b))) {
+        c->fl_struct = 1;
+        floor_rows(c, s->b.y, r_foot(c), 1);
+    }
+}
+
+// The L8 record (tests only): what the stop just recorded draws, mixed in.
+static void sig_mix(moy_ui_ctx_t *c, const void *p, size_t n) {
+    if (s_audit_on && c->n_cur > 0) {
+        moy_ui_stop_t *s = &c->cur[c->n_cur - 1];
+        s->sig = hash((const uint8_t *)p, n, s->sig);
+    }
+}
+
+static void sig_int(moy_ui_ctx_t *c, int32_t v) {
+    sig_mix(c, &v, sizeof(v));
+}
+
 static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_span_t name) {
     for (int i = 0; i < c->n_cur; i++) {
         if (c->cur[i].id == id && !(c->cur[i].flags & STOP_PAGE)) {
@@ -1069,11 +1544,15 @@ static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_
     moy_ui_stop_t *s = &c->cur[c->n_cur++];
     s->id = id;
     s->b = b;
-    s->flags = (uint16_t)(flags | (dlg ? STOP_MODAL : 0));
+    s->flags = (uint16_t)(flags | (dlg ? STOP_MODAL : 0) | (c->at_last ? STOP_AT : 0));
     s->page = c->page_stop;
     s->row = -1;
     s->top = 0;
+    s->st = 0;
+    s->gen = 0;
+    s->sig = s_audit_on ? hash(name.p, name.n, (uint32_t)s->flags) : 0;
     if (c->modal && !dlg) {
+        floor_check(c, c->n_cur - 1);
         return 0;                   // under a dialog: drawn, and no input reaches it
     }
     // focus free takes the first stop drawn -- in a dialog its body's, not
@@ -1103,7 +1582,41 @@ static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_
             st |= MOY_UI_ST_HOVER;
         }
     }
+    s->st = (uint8_t)st;
+    sig_int(c, st);
+    floor_check(c, c->n_cur - 1);
     return st;
+}
+
+// The stop just recorded is a card or a part: with `gen` the app says what
+// it shows there is a function of it. `pic`: the app draws the picture (a
+// card with no tile of the engine's, a part), which a shift frame's floor
+// holds whole or not at all, and which in R with no gen moves with no
+// shift (MOY_UI_KD_BAD). Answers whether, on a shift frame, its gen moved:
+// it then draws again.
+static int pic_note(moy_ui_ctx_t *c, const moy_ui_over_t *o, int pic) {
+    if (c->n_cur == 0) {
+        return 0;
+    }
+    int i = c->n_cur - 1;
+    moy_ui_stop_t *s = &c->cur[i];
+    s->flags |= (pic ? STOP_PIC : 0) | (o->has_gen ? STOP_GEN : 0);
+    s->gen = o->gen;
+    if (!armed(c) || c->fl_stage != 1 || c->fl_struct || i < c->fl_s0) {
+        return 0;
+    }
+    int j = i - c->fl_s0;
+    const moy_ui_stop_t *q = j < c->fl_pn ? &c->prev[c->fl_p0 + j] : NULL;
+    return q != NULL && (!(q->flags & STOP_GEN) || !o->has_gen || q->gen != o->gen);
+}
+
+// A picture whose gen moved draws again: the rect it shows in, where its
+// mark puts it (a lift) -- inside it what the card draws over the app's
+// picture, around it the mark, which the gen does not move.
+static void pic_redraw(moy_ui_ctx_t *c, moy_ui_box_t r) {
+    if (!floor_holds(c, r)) {
+        floor_add(c, rc_of(r), 1);
+    }
 }
 
 static int interact(int st) {
@@ -1156,8 +1669,17 @@ static void vrow_init(const moy_ui_ctx_t *c, moy_ui_vrow_t *r, moy_ui_span_t lab
 static void vrow_draw(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int stacked,
                       int kind, int st, const moy_ui_over_t *o, const moy_ui_vrow_t *r) {
     clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
-        int f = mark_flags(st, o) & ~MOY_UI_F_ON;
+    int f = mark_flags(st, o) & ~MOY_UI_F_ON;
+    if (s_audit_on && c->n_cur > 0) {
+        const moy_ui_box_t sb = c->cur[c->n_cur - 1].b;
+        if (sb.x == b.x && sb.y == b.y && sb.w == b.w && sb.h == b.h) {
+            int32_t w[5] = {kind, r->cur, r->v, r->lo, r->hi};
+            sig_mix(c, w, sizeof(w));
+            sig_mix(c, r->value.p, r->value.n);
+        }
+    }
+    band_mark(c, b, stacked, f);
+    EACH_ROW(c, k, s, b, stacked, c->page) {
         band(c, s, b, stacked, f);
         moy_ui_vrow(s, b, kind, f | (o->disabled == 1 ? MOY_UI_F_DISABLED : 0), r);
         clip_out(&k);
@@ -1178,9 +1700,120 @@ static void grid_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s);
 
 // -- the verbs -----------------------------------------------------------------------
 
+// How far a focus mark reaches past its box, any class, at the scale.
+static int mark_room(const moy_ui_ctx_t *c) {
+    int r = 0;
+    for (int i = 0; i < 3; i++) {
+        int m = moy_ui_mark_reach(i);
+        r = m > r ? m : r;
+    }
+    return (r + 2) * c->fs;
+}
+
+// R opens on a shift frame: its floor, from the stops the last frame drew
+// in it and this frame's input -- the band the move exposed, the fades at
+// either end and the outer page's foot fade over it, the rows of every stop
+// whose marks may move (the last frame's marked stops, the stop focus is
+// on) with the row after each, and every picture the floor reaches, whole.
+// Where R is not what the last frame drew (its box, its scroll, its gen),
+// the floor is all of R. Every rect wants the page's ground first.
+// The floor R's opening builds, from the last frame's stops (`p0`, `n` of
+// them) and this frame's input: the band the move uncovered, the fades at
+// either end and the outer page's foot (`of`, its bottom), the rows of
+// every stop whose marks change and the row after each, a mark R's edge
+// cuts while it moves, and the rows between two strips a picture reaches.
+static void floor_build(moy_ui_ctx_t *c, int p0, int n, int of) {
+    moy_ui_box_t r = c->sh_r;
+    int top = r.y, foot = r.y + r.h, dy = c->sh_dy;
+    if (dy < 0) {
+        floor_strip(c, foot + dy, foot);
+    } else if (dy > 0) {
+        floor_strip(c, top, top + dy);
+    }
+    if (dy) {
+        // R's edges, where it holds cards: a card's text a whole frame
+        // cuts there draws otherwise than the moved one, so what moved
+        // across an edge is drawn again
+        int cards = 0;
+        for (int j = 0; j < n && !cards; j++) {
+            cards = (c->prev[p0 + j].flags & STOP_GRID) != 0;
+        }
+        if (cards) {
+            int e = 12 * c->fs;
+            floor_strip(c, top, top + e);
+            floor_strip(c, foot - e, foot);
+        }
+        int f = FADE_H * c->fs;
+        floor_strip(c, foot - f + (dy < 0 ? dy : 0), foot);
+        if (c->sh_head) {
+            floor_strip(c, top, top + f + (dy > 0 ? dy : 0));
+        }
+        floor_strip(c, of - f, of);
+    }
+    int reach = mark_room(c);
+    const moy_ui_stop_t *v = &c->prev[p0];
+    for (int j = 0; j < n; j++) {
+        // a mark drawn last frame this one does not draw, or the other way:
+        // the frame's press, hover and activation are none (the plan)
+        int now = c->focus != 0 && v[j].id == c->focus && !c->elsewhere ? MOY_UI_ST_FOCUS : 0;
+        // a mark R's edge cuts is drawn to the edge: it moves with no shift
+        int cut = dy && (now || (v[j].st & MARKS))
+                  && (v[j].b.y - reach < top || v[j].b.y + v[j].b.h + reach > foot
+                      || v[j].b.y + dy - reach < top || v[j].b.y + v[j].b.h + dy + reach > foot);
+        if ((v[j].st & MARKS) == now && !cut) {
+            continue;
+        }
+        int y0 = v[j].b.y - reach, y1 = v[j].b.y + v[j].b.h;
+        if (j + 1 < n && v[j + 1].b.y + v[j + 1].b.h > y1) {
+            y1 = v[j + 1].b.y + v[j + 1].b.h;
+        }
+        floor_strip(c, y0 + dy, y1 + reach + dy);
+    }
+    for (int pass = 0; pass < 4; pass++) {
+        int grew = 0;
+        for (int j = 0; j < n; j++) {
+            if (!(v[j].flags & STOP_PIC)) {
+                continue;
+            }
+            moy_ui_box_t b = v[j].b;
+            b.y = (int16_t)(b.y + dy);
+            // a picture the app draws clips to the one rect it lies in
+            // (ui.card_clip); one two rects reach takes their rows between
+            if (floor_count(c, b) > 1) {
+                floor_strip(c, b.y, b.y + b.h);
+                grew = 1;
+            }
+        }
+        if (!grew) {
+            break;
+        }
+    }
+}
+
+static void floor_open(moy_ui_ctx_t *c, const moy_ui_keep_t *k, moy_ui_box_t ct, int scroll,
+                       const moy_ui_over_t *o, moy_ui_box_t outer) {
+    moy_ui_box_t r = c->sh_r;
+    int top = r.y, foot = r.y + r.h, dy = c->sh_dy;
+    c->fl_stage = 1;
+    c->fl_n = 0;
+    c->fl_pend = 0;
+    c->fl_p0 = k->s0;
+    c->fl_pn = k->sn;
+    if (o == NULL || !o->has_gen || !(k->kd & MOY_UI_KD_GEN) || o->gen != k->gen
+        || ct.x != r.x || ct.y != r.y || ct.w != r.w || ct.h != r.h
+        || scroll - k->drawn != -dy || c->fl_p0 + c->fl_pn > c->n_prev) {
+        c->fl_struct = 1;
+        floor_rows(c, top, foot, 1);
+        return;
+    }
+    floor_build(c, c->fl_p0, c->fl_pn, outer.y + outer.h);
+}
+
 // Make `ct` the page the rows stack in: its scroll kept by `id` (clamped by
-// the rows it held last frame) and its stop, which a drag scrolls.
-static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags) {
+// the rows it held last frame) and its stop, which a drag scrolls; `o` its
+// override block (its gen), `outer` the page it lies in.
+static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags,
+                      const moy_ui_over_t *o, moy_ui_box_t outer) {
     moy_ui_keep_t *k = keep(c, id, 1);
     c->page = ct;
     c->y = 0;
@@ -1189,6 +1822,7 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags) 
     if (k != NULL) {
         // the rows' height less what shows of them: the page less the hint
         // band its foot gave up last frame
+        int16_t foot = k->foot;
         int32_t most = k->b - (ct.h - k->foot);
         k->foot = 0;
         if (k->a <= most && !(k->sc.flags & MOY_UI_SCROLL_GLIDE)) {
@@ -1204,18 +1838,72 @@ static void open_page(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t ct, int flags) 
         c->scroll = (int16_t)k->a;
         k->b = 0;
         c->page_keep = (int8_t)(k - c->keep);
+        if (armed(c) && c->fl_stage == 0 && id == c->sh_id) {
+            moy_ui_box_t r = ct;
+            r.h = (int16_t)(r.h - foot);
+            floor_open(c, k, r, c->scroll, o, outer);
+        }
+        k->drawn = c->scroll;
+        k->gen = o != NULL ? o->gen : 0;
+        k->kd = (uint8_t)(MOY_UI_KD_PAGE | (o != NULL && o->has_gen ? MOY_UI_KD_GEN : 0));
     }
     c->page_stop = NO_PAGE;
     if (c->n_cur < MOY_UI_API_STOPS) {
         moy_ui_stop_t *p = &c->cur[c->n_cur];
+        memset(p, 0, sizeof(*p));
         p->id = id;
         p->b = ct;
         p->flags = (uint16_t)(STOP_PAGE | flags);
         p->page = NO_PAGE;
         p->row = -1;
-        p->top = 0;
         c->page_stop = c->n_cur++;
     }
+    if (c->fl_stage == 1 && id == c->sh_id) {
+        c->fl_s0 = c->n_cur;
+    }
+}
+
+// The open page is done (its nest closes, ui.end, the next page): what it
+// holds, for the next frame's plan -- the stops drawn in it and whether any
+// is one no shift may move: a stop ui.at placed, a picture with no gen. R
+// closing on a shift frame: the ground under the stops its tail lost, the
+// ground its floor still wants, and under the audit its stops' records
+// against the last frame's.
+static void page_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    moy_ui_keep_t *k = page_keep(c);
+    if (k == NULL || c->page_stop == NO_PAGE || c->cur[c->page_stop].id != k->id) {
+        return;
+    }
+    int s0 = c->page_stop + 1, sn = c->n_cur - s0;
+    int bad = 0;
+    for (int i = s0; i < c->n_cur; i++) {
+        uint16_t f = c->cur[i].flags;
+        if ((f & STOP_AT) || ((f & STOP_PIC) && !(f & STOP_GEN))) {
+            bad = 1;
+        }
+    }
+    if (armed(c) && c->fl_stage == 1 && k->id == c->sh_id) {
+        if (!c->fl_struct && sn < c->fl_pn) {
+            int y = sn > 0 ? c->cur[c->n_cur - 1].b.y + c->cur[c->n_cur - 1].b.h : c->sh_r.y;
+            floor_rows(c, y, r_foot(c), 1);
+        }
+        ground_due(c, s);
+        if (s_audit_on && !c->fl_struct) {
+            for (int j = 0; j < sn && j < c->fl_pn; j++) {
+                const moy_ui_stop_t *a = &c->cur[s0 + j], *q = &c->prev[c->fl_p0 + j];
+                if (a->sig != q->sig && !floor_holds(c, a->b)) {
+                    s_audit_fail++;
+                }
+            }
+        }
+        if (c->fl_lost && s_audit_on) {
+            s_audit_fail++;
+        }
+        c->fl_stage = 2;
+    }
+    k->s0 = (uint8_t)s0;
+    k->sn = (uint8_t)(sn > 0 ? sn : 0);
+    k->kd |= MOY_UI_KD_DRAWN | (bad ? MOY_UI_KD_BAD : 0);
 }
 
 void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
@@ -1223,15 +1911,32 @@ void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     o = over(o);
     grid_end(c, s);
     group_close(c, s);
+    if (c->n_nest == 0) {
+        page_close(c, s);
+    }
     c->grp_any = 0;
     moy_ui_box_t b = c->surface;
     if (c->has_at) {
         b = c->at;
         c->has_at = 0;
     }
-    moy_ui_box_t ct;
-    moy_ui_page_ground(s, b, title, c->fs, ground_of(c), &ct);
-    open_page(c, hash(title.p, title.n, PAGE_SALT), ct, o->nav == 0 ? STOP_NAV_OFF : 0);
+    moy_ui_box_t ct = b;
+    clip_t k;
+    int drew = 0;
+    EACH_PIECE(c, k, s, b) {
+        moy_ui_page_ground(s, b, title, c->fs, ground_of(c), &ct);
+        drew = 1;
+    }
+    if (!drew) {
+        // nothing of it is drawn this frame: its content rect all the same
+        moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
+        int32_t saved[4];
+        memcpy(saved, &row->st[MOY_ST_CX0], sizeof(saved));
+        row->st[MOY_ST_CX1] = row->st[MOY_ST_CX0];
+        moy_ui_page_ground(s, b, title, c->fs, ground_of(c), &ct);
+        memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
+    }
+    open_page(c, hash(title.p, title.n, PAGE_SALT), ct, o->nav == 0 ? STOP_NAV_OFF : 0, o, ct);
     if (content != NULL) {
         *content = ct;
     }
@@ -1271,7 +1976,7 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
             well.y = b.y;
             well.h = (int16_t)hb;
             clip_t k;
-            if (clip_row(&k, s, well, stacked, c->page)) {
+            EACH_ROW(c, k, s, well, stacked, c->page) {
                 moy_ui_well(s, well, 0, moy_ui_token(s->look, MOY_UI_T_SUNK), c->fs,
                             ground_of(c));
                 m.y = (int16_t)(b.y + sunk - (c->cls ? 0 : c->fs));
@@ -1291,7 +1996,7 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
             b.h = (int16_t)h;
         }
         clip_t k;
-        if (clip_row(&k, s, b, stacked, c->page)) {
+        EACH_ROW(c, k, s, b, stacked, c->page) {
             moy_ui_text_block(s, b, text, role, tone, lines, centre, c->row_slot, c->row_glyph,
                               c->fs, ground_of(c), 1);
             clip_out(&k);
@@ -1300,35 +2005,35 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     }
     moy_ui_box_t b = place(c, row_h(c), &stacked);
     clip_t k;
-    if (!clip_row(&k, s, b, stacked, c->page)) {
-        return;
-    }
-    // a group's row, or a label on the page's ground: the parts' ink
     if ((stacked && c->grp_open) || o->ink == MOY_UI_O_NONE) {
-        band(c, s, b, stacked, 0);
-        moy_ui_vrow_t r;
-        vrow_init(c, &r, text);
-        moy_ui_vrow(s, b, MOY_UI_V_LABEL, 0, &r);
-        clip_out(&k);
-        return;
+        band_mark(c, b, stacked, 0);
     }
-    int16_t pc[3];
-    moy_ui_colors(s->look, MOY_UI_K_PANEL, MOY_UI_REST, pc);
-    int16_t ink = colour(s->look, o->ink);
-    int pad = kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
-    moy_ui_box_t t = {(int16_t)(b.x + pad), b.y, (int16_t)(b.w - 2 * pad), b.h};
-    int li = ink == MOY_UI_FROM_STYLE ? pc[1] : ink;
-    if (c->row_slot >= 0 || c->row_glyph >= 0) {
-        int side = 16 * c->fs;
-        moy_ui_box_t ib = {t.x, (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)), (int16_t)side,
-                           (int16_t)side};
-        if (moy_ui_icon_in(s, c->row_slot, c->row_glyph, ib, li, c->fs)) {
-            t.x = (int16_t)(t.x + side + 4 * c->fs);
-            t.w = (int16_t)(t.w - side - 4 * c->fs);
+    EACH_ROW(c, k, s, b, stacked, c->page) {
+        // a group's row, or a label on the page's ground: the parts' ink
+        if ((stacked && c->grp_open) || o->ink == MOY_UI_O_NONE) {
+            band(c, s, b, stacked, 0);
+            moy_ui_vrow_t r;
+            vrow_init(c, &r, text);
+            moy_ui_vrow(s, b, MOY_UI_V_LABEL, 0, &r);
+            continue;
         }
+        int16_t pc[3];
+        moy_ui_colors(s->look, MOY_UI_K_PANEL, MOY_UI_REST, pc);
+        int16_t ink = colour(s->look, o->ink);
+        int pad = kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * c->fs;
+        moy_ui_box_t t = {(int16_t)(b.x + pad), b.y, (int16_t)(b.w - 2 * pad), b.h};
+        int li = ink == MOY_UI_FROM_STYLE ? pc[1] : ink;
+        if (c->row_slot >= 0 || c->row_glyph >= 0) {
+            int side = 16 * c->fs;
+            moy_ui_box_t ib = {t.x, (int16_t)(b.y + moy_ui_fdiv(b.h - side, 2)), (int16_t)side,
+                               (int16_t)side};
+            if (moy_ui_icon_in(s, c->row_slot, c->row_glyph, ib, li, c->fs)) {
+                t.x = (int16_t)(t.x + side + 4 * c->fs);
+                t.w = (int16_t)(t.w - side - 4 * c->fs);
+            }
+        }
+        moy_ui_label(s, t, text, li, MOY_TEXT_LEFT);
     }
-    moy_ui_label(s, t, text, li, MOY_TEXT_LEFT);
-    clip_out(&k);
 }
 
 int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label, int kind,
@@ -1347,7 +2052,8 @@ int moy_ui_api_button(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         st = 0;
     }
     clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
+    band_mark(c, b, stacked, mark_flags(st, o));
+    EACH_ROW(c, k, s, b, stacked, c->page) {
         band(c, s, b, stacked, mark_flags(st, o));
         moy_ui_button_t bt;
         bt.label = label;
@@ -1454,13 +2160,14 @@ void moy_ui_api_group(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t cap
         c->cap_cur[c->n_cap_cur++] = (moy_ui_cap_t){b.y, b.h, c->page_stop};
     }
     clip_t cl;
-    if (clip_row(&cl, s, b, 1, c->page)) {
-        if (!c->cls) {
-            int in = kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
-            b.x = (int16_t)(b.x + in);
-            b.w = (int16_t)(b.w - 2 * in);
-        }
-        moy_ui_caption(s, b, caption, c->fs, c->cls);
+    moy_ui_box_t cb = b;
+    if (!c->cls) {
+        int in = kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_INSET) * c->fs;
+        cb.x = (int16_t)(cb.x + in);
+        cb.w = (int16_t)(cb.w - 2 * in);
+    }
+    EACH_ROW(c, cl, s, b, 1, c->page) {
+        moy_ui_caption(s, cb, caption, c->fs, c->cls);
         clip_out(&cl);
     }
     c->grp_open = 1;
@@ -1612,7 +2319,10 @@ void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *it
     if (c->n_nest == 0) {
         c->hint_band = b;
     }
-    moy_ui_hints(s, b, items, len, c->fs, ground_of(c));
+    clip_t k;
+    EACH_PIECE(c, k, s, b) {
+        moy_ui_hints(s, b, items, len, c->fs, ground_of(c));
+    }
 }
 
 int moy_ui_api_hints_w(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *items,
@@ -1711,7 +2421,8 @@ int32_t moy_ui_api_list(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         c->owe = 1;
     }
     clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
+    band_mark(c, b, stacked, 0);
+    EACH_ROW(c, k, s, b, stacked, c->page) {
         band(c, s, b, stacked, 0);
         clip_t kb;
         int any = clip_in(&kb, s, b);
@@ -1797,11 +2508,15 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     uint32_t pid = o->id.p != NULL ? hash(o->id.p, o->id.n, 0) : hash(id.p, id.n, 0);
     int st = disabled ? 0
                       : stop(c, pid, b, o->nav == 0 ? STOP_HOLD : 0, o->id.p != NULL ? o->id : id);
+    if (!disabled && st >= 0 && pic_note(c, o, 1)) {
+        pic_redraw(c, b);
+    }
     if (st < 0) {
         st = 0;
     }
     clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
+    band_mark(c, b, stacked, mark_flags(st, o));
+    EACH_ROW(c, k, s, b, stacked, c->page) {
         band(c, s, b, stacked, mark_flags(st, o));
         int16_t oc[3];
         colours(s, o, oc);
@@ -1809,10 +2524,12 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
                     c->cls);
         clip_out(&k);
     }
-    out[0] = b.x;
-    out[1] = b.y;
-    out[2] = b.w;
-    out[3] = b.h;
+    int none = outside_floor(c, b);
+    c->pic_clip = floor_of(c, b);
+    out[0] = none ? 0 : b.x;
+    out[1] = none ? 0 : b.y;
+    out[2] = none ? 0 : b.w;
+    out[3] = none ? 0 : b.h;
     out[4] = st;
 }
 
@@ -1920,7 +2637,8 @@ static int pmetric(const moy_ui_ctx_t *c, int slot) {
 // popover's, kind 3) in
 // box b, the outer one kept until it closes.
 static void nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, int used,
-                      int flags) {
+                      int flags, const moy_ui_over_t *o) {
+    moy_ui_box_t outer = c->page;
     moy_ui_nest_t *n = &c->nest[c->n_nest++];
     n->page = c->page;
     n->y = c->y;
@@ -1930,7 +2648,7 @@ static void nest_open(moy_ui_ctx_t *c, int kind, uint32_t id, moy_ui_box_t b, in
     n->kind = (uint8_t)kind;
     n->used = (int16_t)used;
     open_page(c, id, b, flags | (kind >= 2 || in_dialog(c) ? STOP_MODAL : 0)
-                        | (kind >= 2 ? STOP_CARD : 0));
+                        | (kind >= 2 ? STOP_CARD : 0), o, outer);
 }
 
 // A list's edges in view `v`: where rows `rows` high scrolled by `scroll`
@@ -1951,14 +2669,19 @@ static void edge_fades(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t v, 
     if (h > v.h) {
         h = v.h;
     }
+    clip_t k;
     if (rows > scroll + v.h) {
         moy_ui_box_t b = {v.x, (int16_t)(v.y + v.h - h), v.w, (int16_t)h};
-        moy_ui_fade(s, b, ci, 0, c->fs, ground_of(c));
+        EACH_PIECE(c, k, s, b) {
+            moy_ui_fade(s, b, ci, 0, c->fs, ground_of(c));
+        }
         s_fades++;
     }
     if (head && scroll > 0) {
         moy_ui_box_t b = {v.x, v.y, v.w, (int16_t)h};
-        moy_ui_fade(s, b, ci, 1, c->fs, ground_of(c));
+        EACH_PIECE(c, k, s, b) {
+            moy_ui_fade(s, b, ci, 1, c->fs, ground_of(c));
+        }
         s_fades++;
     }
 }
@@ -1987,6 +2710,10 @@ static int nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
         edge_fades(c, s, c->page, page_keep(c)->b, c->scroll, MOY_UI_FADE_CARD, 1,
                    FADE_H * c->fs);
     }
+    page_close(c, s);
+    if (kind >= 2 && c->fl_susp) {
+        c->fl_susp--;
+    }
     int took = c->y;
     moy_ui_nest_t *n = &c->nest[--c->n_nest];
     c->page = n->page;
@@ -2010,6 +2737,7 @@ void moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     group_close(c, s);
     moy_ui_box_t b;
     int used = 0;
+    int placed = c->has_at;
     if (c->has_at) {
         b = c->at;
         c->has_at = 0;
@@ -2020,7 +2748,8 @@ void moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
                            (int16_t)(bottom > top ? bottom - top : 0)};
         used = b.h;
     }
-    nest_open(c, 1, hash(id.p, id.n, SCROLL_SALT), b, used, o->nav == 0 ? STOP_NAV_OFF : 0);
+    nest_open(c, 1, hash(id.p, id.n, SCROLL_SALT), b, used,
+              (o->nav == 0 ? STOP_NAV_OFF : 0) | (placed ? STOP_AT : 0), o);
 }
 
 void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
@@ -2123,6 +2852,8 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
             offset = 0;
         }
         kp->a = offset;
+        kp->drawn = offset;
+        kp->kd = MOY_UI_KD_PAGE;    // rows that scroll, which no shift frame moves
     }
     rows_note(c, id, cur, view.y);
     if (!placed && focused && c->step_y && cur >= 0
@@ -2136,8 +2867,18 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     c->tbl_n = (int16_t)count;
     c->tbl_view = view;
     c->tbl_px = c->tbl_pw = 0;
+    if (st >= 0 && !disabled) {
+        sig_int(c, cur);
+        sig_mix(c, cells, cells_n);
+    }
+    moy_ui_tgeo_t g;
+    moy_ui_table_geo(s, b, cols, cols_n, cells, cells_n, c->fs, c->cls, &g);
+    if (g.pic && !disabled && c->n_cur > 0 && c->cur[c->n_cur - 1].id == id) {
+        c->cur[c->n_cur - 1].flags |= STOP_PIC;     // the app draws its pictures: no gen
+    }
     clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
+    band_mark(c, b, stacked, 0);
+    EACH_ROW(c, k, s, b, stacked, c->page) {
         band(c, s, b, stacked, 0);
         if (cap_h) {
             moy_ui_caption(s, (moy_ui_box_t){b.x, b.y, b.w, (int16_t)cap_h}, label, c->fs, c->cls);
@@ -2145,8 +2886,6 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         // in a group, its rows are the group's: each on its card under a rule
         int grp = stacked && c->grp_open;
         moy_ui_box_t gcard = card_of(c);
-        moy_ui_tgeo_t g;
-        moy_ui_table_geo(s, b, cols, cols_n, cells, cells_n, c->fs, c->cls, &g);
         if (g.pic) {
             c->tbl_px = g.x[0];
             c->tbl_pw = g.w[0];
@@ -2248,11 +2987,16 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         done = 1;
     }
     clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
-        int f = mark_flags(st, o) & ~MOY_UI_F_ON;
+    int f = mark_flags(st, o) & ~MOY_UI_F_ON;
+    band_mark(c, b, stacked, f);
+    if (!disabled) {
+        sig_mix(c, buf, len);
+    }
+    EACH_ROW(c, k, s, b, stacked, c->page) {
         band(c, s, b, stacked, f);
         moy_ui_span_t t = {buf, (uint16_t)len};
         moy_ui_box_t fb = b;
+        moy_ui_span_t lb = label;
         if (caph) {
             // the caption's letters over the field's left edge
             int gp = kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD) * c->fs;
@@ -2261,9 +3005,9 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
                            label, c->fs, c->cls);
             fb.y = (int16_t)(b.y + caph);
             fb.h = (int16_t)(b.h - caph);
-            label.n = 0;
+            lb.n = 0;
         }
-        moy_ui_field(s, fb, label, t, o->hint, f | (disabled ? MOY_UI_F_DISABLED : 0), c->fs,
+        moy_ui_field(s, fb, lb, t, o->hint, f | (disabled ? MOY_UI_F_DISABLED : 0), c->fs,
                      c->cls, c->grp_open, c->grp_open && c->grp_first);
         clip_out(&k);
     }
@@ -2286,7 +3030,8 @@ static void wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     moy_ui_scrim(s, moy_ui_api_wash_box(c));
 }
 
-void moy_ui_api_wash(const moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+void moy_ui_api_wash(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
+    c->fl_dirty = 1;                    // over the page: the next frame draws it whole
     wash(c, s);
 }
 
@@ -2307,6 +3052,8 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         return -1;
     }
     group_close(c, s);
+    c->fl_susp++;                       // an overlay: drawn whole, over the page
+    c->fl_dirty = 1;
     c->has_at = 0;
     if (kind < 0 || kind >= 5) {
         kind = 1;
@@ -2387,7 +3134,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
     inner.w = (int16_t)(w - 2 * (pad - lp));
     inner.y = (int16_t)(card.y + top);
     inner.h = (int16_t)bh;
-    nest_open(c, 2, id, inner, body, 0);
+    nest_open(c, 2, id, inner, body, 0, NULL);
     int pick = -1;
     moy_ui_over_t none;
     moy_ui_over_none(&none);
@@ -2480,6 +3227,8 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
         return 0;
     }
     group_close(c, s);
+    c->fl_susp++;                       // an overlay: drawn whole, over the page
+    c->fl_dirty = 1;
     // the rect it hangs from: ui.at's, else the one it opened under
     if (c->has_at) {
         c->pop_at = c->at;
@@ -2562,7 +3311,7 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
                     : kmetric(MOY_UI_K_ROW, MOY_UI_M_ROW_PAD) * fs;
     moy_ui_box_t inner = {(int16_t)(card.x + pad - lp), (int16_t)(card.y + pad),
                           (int16_t)(w - 2 * (pad - lp)), (int16_t)bh};
-    nest_open(c, 3, pid, inner, body, 0);
+    nest_open(c, 3, pid, inner, body, 0, NULL);
     c->pop_card = card;
     c->pop_id = pid;
     return !c->pop_gone;
@@ -2615,7 +3364,7 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         int dx = (rpad - kmetric(MOY_UI_K_GROUP, MOY_UI_M_GROUP_PAD)) * fs;
         moy_ui_box_t cb = {(int16_t)(b.x + dx), b.y, (int16_t)(b.w - dx), b.h};
         clip_t k;
-        if (clip_row(&k, s, b, stacked, c->page)) {
+        EACH_ROW(c, k, s, b, stacked, c->page) {
             moy_ui_caption(s, cb, label, fs, c->cls);
             clip_out(&k);
         }
@@ -2623,7 +3372,7 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
         int stacked;
         moy_ui_box_t b = place_row(c, rule_h(c), &stacked, 0);
         clip_t k;
-        if (clip_row(&k, s, b, stacked, c->page)) {
+        EACH_ROW(c, k, s, b, stacked, c->page) {
             moy_ui_rule(s, b, fs, c->cls);
             clip_out(&k);
         }
@@ -2717,7 +3466,7 @@ int moy_ui_api_empty(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon
     b.x = m.x;
     b.w = m.w;
     clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
+    EACH_ROW(c, k, s, b, stacked, c->page) {
         moy_ui_empty(s, b, slot, glyph, title, lines, n, c->fs, ground_of(c), 1);
         clip_out(&k);
     }
@@ -2744,7 +3493,7 @@ int moy_ui_api_month(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     int chevrons = c->cls || moy_ui_input() == MOY_UI_INPUT_TOUCH;
     moy_ui_box_t ch[2] = {{0, 0, 0, 0}, {0, 0, 0, 0}};
     clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
+    EACH_ROW(c, k, s, b, stacked, c->page) {
         moy_ui_month(s, b, title, days, first, n, today, chevrons, c->fs, c->cls, ch);
         clip_out(&k);
     }
@@ -2775,6 +3524,7 @@ void moy_ui_api_toast(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     moy_ui_span_t ic = kind.n ? kind : (moy_ui_span_t){check, 5};
     int slot = moy_ui_icon_slot(ic.p, ic.n), glyph = moy_ui_icon_glyph(ic.p, ic.n);
     moy_ui_box_t p = {0, 0, 0, 0};
+    c->fl_dirty = 1;                    // over the page, whole
     moy_ui_toast(s, m, text, slot, glyph, c->fs, ground_of(c), flat, &p);
     if (out != NULL) {
         out[0] = p.x;
@@ -2793,7 +3543,8 @@ static void card_finish(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     }
     c->fin_on = 0;
     clip_t k;
-    if (clip_row(&k, s, c->fin_content, c->grid_open == 1, c->page)) {
+    c->fl_cast = 1;
+    EACH_ROW(c, k, s, c->fin_content, c->grid_open == 1, c->page) {
         if (c->fin_slot >= 0 || c->fin_glyph >= 0 || c->fin_tone == MOY_UI_TONE_DANGER
             || c->fin_tone == MOY_UI_TONE_LOCKED) {
             moy_ui_card_badge(s, c->fin_content, c->fin_slot, c->fin_glyph, c->fin_tone,
@@ -2894,6 +3645,7 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     o = over(o);
     card_finish(c, s);
     memset(out, 0, 5 * sizeof(int32_t));
+    c->pic_clip = (moy_ui_box_t){0, 0, 0, 0};
     if (!c->grid_open) {
         return;
     }
@@ -2919,28 +3671,50 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
                         c->grid_h};
     moy_ui_box_t b = {(int16_t)(pic.x - pad), (int16_t)y, (int16_t)(pic.w + 2 * pad),
                       (int16_t)(c->grid_row - pmetric(c, MOY_UI_M_VALUE_ROW_GRID_GAP))};
-    int st = 0;
+    int st = 0, moved = 0;
+    c->at_last = (uint8_t)!stacked;
     if (o->disabled != 1) {
         st = stop(c, id_of(o, title), b, 0, name_of(o, title));
+        if (st >= 0) {
+            // a blank card's picture is the engine's tile: the app draws none
+            moved = pic_note(c, o, c->card_blank < 0 && c->card_blank_glyph < 0);
+            c->cur[c->n_cur - 1].flags |= STOP_GRID;
+            sig_mix(c, sub.p, sub.n);
+        }
         st = st < 0 ? 0 : st;
     }
     int f = mark_flags(st, o);
     clip_t k;
     moy_ui_box_t content = pic;
     uint16_t g = 0;
-    if (!clip_row(&k, s, b, stacked, c->page)) {
+    int any = 0;
+    if (moved) {
+        // where the card puts its picture: measured under an empty clip
+        moy_canvas_row_t *row = (moy_canvas_row_t *)s->dst;
+        int32_t saved[4];
+        memcpy(saved, &row->st[MOY_ST_CX0], sizeof(saved));
+        row->st[MOY_ST_CX1] = row->st[MOY_ST_CX0];
+        moy_ui_card(s, b, pic, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
+                    ground_of(c), c->card_tone, &content, &g);
+        memcpy(&row->st[MOY_ST_CX0], saved, sizeof(saved));
+        pic_redraw(c, content);
+    }
+    c->fl_cast = 1;
+    EACH_ROW(c, k, s, b, stacked, c->page) {
+        moy_ui_card(s, b, pic, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
+                    ground_of(c), c->card_tone, &content, &g);
+        if (c->card_blank >= 0 || c->card_blank_glyph >= 0) {
+            moy_ui_card_blank(s, content, c->card_blank, c->card_blank_glyph, c->card_tone,
+                              c->fs, ground_of(c));
+        }
+        any = 1;
+    }
+    if (!any) {
         out[4] = st;
         c->card_slot = c->card_glyph = c->card_blank = c->card_blank_glyph = -1;
         c->card_tone = 0;
         return;                     // scrolled out of view: nothing to draw into
     }
-    moy_ui_card(s, b, pic, title, sub, f | (c->grid_wrap ? MOY_UI_F_WRAP : 0), c->fs,
-                ground_of(c), c->card_tone, &content, &g);
-    if (c->card_blank >= 0 || c->card_blank_glyph >= 0) {
-        moy_ui_card_blank(s, content, c->card_blank, c->card_blank_glyph, c->card_tone, c->fs,
-                          ground_of(c));
-    }
-    clip_out(&k);
     c->fin_slot = c->card_slot;
     c->fin_glyph = c->card_glyph;
     c->fin_tone = c->card_tone;
@@ -2951,11 +3725,15 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     c->fin_ground = g;
     c->fin_pic = pic;
     c->fin_content = content;
+    out[4] = st;
+    if (outside_floor(c, b)) {
+        return;                     // a shift frame's: what the app drew there stands
+    }
+    c->pic_clip = floor_of(c, content);
     out[0] = content.x;
     out[1] = content.y;
     out[2] = content.w;
     out[3] = content.h;
-    out[4] = st;
 }
 
 int moy_ui_api_table_rows(const moy_ui_ctx_t *c, int32_t out[8]) {
@@ -2983,9 +3761,11 @@ void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     if (c->n_nest == 0) {
         group_close(c, s);
         foot_fade(c, s);
+        page_close(c, s);
     }
     if (c->tip_at.w > 0 && c->tip[0]) {
         moy_ui_span_t t = {(const uint8_t *)c->tip, (uint16_t)strlen(c->tip)};
+        c->fl_dirty = 1;                // over the page, whole
         moy_ui_tip_draw(s, c->tip_at, t, c->surface, c->fs, ground_of(c));
         c->tip_at.w = 0;
     }
@@ -3019,7 +3799,7 @@ int moy_ui_api_tool(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t icon,
         st = 0;
     }
     clip_t k;
-    if (clip_row(&k, s, b, stacked, c->page)) {
+    EACH_ROW(c, k, s, b, stacked, c->page) {
         int fl = mark_flags(st, o) | (disabled ? MOY_UI_F_DISABLED : 0);
         moy_ui_tool_draw(s, b, slot, glyph, word, fl, interact(st), c->fs, ground_of(c));
         clip_out(&k);
@@ -3087,14 +3867,17 @@ void moy_ui_api_rule(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
         } else {
             b.h = (int16_t)c->fs;
         }
-        moy_ui_line(s, b, c->fs, ground_of(c));
+        clip_t k;
+        EACH_PIECE(c, k, s, b) {
+            moy_ui_line(s, b, c->fs, ground_of(c));
+        }
         return;
     }
     group_close(c, s);
     int stacked;
     moy_ui_box_t r = place(c, rule_h(c), &stacked);
     clip_t k;
-    if (clip_row(&k, s, r, stacked, c->page)) {
+    EACH_ROW(c, k, s, r, stacked, c->page) {
         moy_ui_rule(s, r, c->fs, c->cls);
         clip_out(&k);
     }
@@ -3144,4 +3927,157 @@ int32_t moy_ui_api_offset(moy_ui_ctx_t *c, int x, int y) {
     int pg = page_at(c->cur, c->n_cur, x, y);
     moy_ui_keep_t *k = pg >= 0 ? keep_of(c, c->cur[pg].id) : NULL;
     return k != NULL ? k->a : -1;
+}
+
+// -- shift frames (docs/scroll_and_text_2026-10.md §3.3) ---------------------------
+
+int moy_ui_api_shift_plan(const moy_ui_ctx_t *c, int32_t out[5]) {
+    out[0] = c->sh_r.x;
+    out[1] = c->sh_r.y;
+    out[2] = c->sh_r.w;
+    out[3] = c->sh_r.h;
+    out[4] = c->sh_dy;
+    return c->sh_plan;
+}
+
+void moy_ui_api_shift_arm(moy_ui_ctx_t *c) {
+    if (c->sh_plan != MOY_UI_SHIFT_NONE) {
+        c->fl_on = 1;
+    }
+}
+
+int moy_ui_api_shift_drawn(const moy_ui_ctx_t *c, int *clean) {
+    if (clean != NULL) {
+        *clean = !c->fl_dirty;
+    }
+    if (!c->fl_on || c->fl_stage == 0) {
+        return MOY_UI_SHIFT_NONE;
+    }
+    return c->sh_plan | (c->fl_struct ? MOY_UI_SHIFT_WIDE : 0);
+}
+
+int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap) {
+    if (!c->fl_on || c->fl_stage == 0) {
+        return -1;
+    }
+    for (int i = 0; i < c->fl_n && i < cap; i++) {
+        out[4 * i] = c->fl[i].x;
+        out[4 * i + 1] = c->fl[i].y;
+        out[4 * i + 2] = c->fl[i].w;
+        out[4 * i + 3] = c->fl[i].h;
+    }
+    return c->fl_n;
+}
+
+int moy_ui_api_card_clip(const moy_ui_ctx_t *c, int32_t r[4]) {
+    moy_ui_box_t f = c->pic_clip;
+    if (f.w <= 0 && f.h >= 0) {
+        return 0;
+    }
+    rc_t q = {r[0], r[1], r[0] + r[2], r[1] + r[3]};
+    if (f.w <= 0 || !rc_cut(&q, rc_of(f))) {
+        q.x1 = q.x0;
+        q.y1 = q.y0;
+    }
+    r[0] = q.x0;
+    r[1] = q.y0;
+    r[2] = q.x1 - q.x0;
+    r[3] = q.y1 - q.y0;
+    return 1;
+}
+
+int moy_ui_api_band(const moy_ui_ctx_t *c, int32_t out[4]) {
+    moy_ui_box_t pg = c->page;
+    if (c->page_stop == NO_PAGE) {
+        return 0;
+    }
+    rc_t b = rc_of(pg);
+    const moy_ui_keep_t *k = c->page_keep >= 0 ? &c->keep[c->page_keep] : NULL;
+    if (armed(c) && c->fl_stage == 1 && k != NULL && k->id == c->sh_id && !c->fl_struct) {
+        rc_t u = {0, 0, 0, 0};
+        for (int i = 0; i < c->fl_n; i++) {
+            rc_t f = rc_of(c->fl[i]);
+            if (u.x1 <= u.x0) {
+                u = f;
+            } else {
+                u.x0 = f.x0 < u.x0 ? f.x0 : u.x0;
+                u.y0 = f.y0 < u.y0 ? f.y0 : u.y0;
+                u.x1 = f.x1 > u.x1 ? f.x1 : u.x1;
+                u.y1 = f.y1 > u.y1 ? f.y1 : u.y1;
+            }
+        }
+        b = u;
+        if (b.x1 <= b.x0) {
+            b = (rc_t){pg.x, pg.y, pg.x, pg.y};
+        }
+    }
+    out[0] = b.x0 - pg.x;
+    out[1] = b.y0 - pg.y + c->scroll;
+    out[2] = b.x1 - b.x0;
+    out[3] = b.y1 - b.y0;
+    return 1;
+}
+
+int moy_ui_api_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int h) {
+    uint32_t sid = hash(id.p, id.n, 0);
+    int i = find(c->prev, c->n_prev, sid);
+    moy_ui_box_t b;
+    int stacked;
+    if (c->grid_open) {
+        // a card of the open grid, where the next card would lie
+        card_finish(c, s);
+        int col = c->grid_i % c->grid_cols;
+        if (col == 0 && c->grid_i > 0) {
+            c->grid_y = (int16_t)(c->grid_y + c->grid_row);
+        }
+        if (col == 0 && c->grid_open == 1) {
+            c->y = (int16_t)(c->grid_y + c->grid_row);
+            moy_ui_keep_t *k = page_keep(c);
+            if (k != NULL) {
+                k->b = c->y;
+            }
+        }
+        if (c->grid_i < 0xffff) {
+            c->grid_i++;
+        }
+        int pad = pmetric(c, MOY_UI_M_VALUE_ROW_CARD_PAD);
+        stacked = c->grid_open == 1;
+        int y = stacked ? c->page.y + c->grid_y - c->scroll : c->grid_y;
+        b = (moy_ui_box_t){(int16_t)(c->grid_x + col * c->grid_pitch - pad), (int16_t)y,
+                           (int16_t)(c->grid_w + 2 * pad),
+                           (int16_t)(c->grid_row - pmetric(c, MOY_UI_M_VALUE_ROW_GRID_GAP))};
+        c->at_last = (uint8_t)!stacked;
+    } else {
+        b = place(c, h > 0 ? h : row_h(c), &stacked);
+        if (i >= 0) {
+            b.x = c->prev[i].b.x;
+            b.w = c->prev[i].b.w;
+        }
+    }
+    uint16_t flags = i >= 0 ? (uint16_t)(c->prev[i].flags
+                                          & (STOP_KEEP_LR | STOP_KEEP_UD | STOP_AT_TOP
+                                             | STOP_AT_END | STOP_HOLD | STOP_FIELD))
+                            : 0;
+    int st = stop(c, sid, b, flags, id);
+    if (st < 0) {
+        return 0;
+    }
+    if (i >= 0) {
+        moy_ui_stop_t *q = &c->cur[c->n_cur - 1];
+        q->flags |= c->prev[i].flags & (STOP_PIC | STOP_GEN | STOP_GRID);
+        q->gen = c->prev[i].gen;
+        if (s_audit_on) {
+            q->sig = c->prev[i].sig;
+        }
+    }
+    return st;
+}
+
+uint32_t moy_ui_api_audit(int on) {
+    uint32_t n = s_audit_fail;
+    s_audit_fail = 0;
+    if (on >= 0) {
+        s_audit_on = (uint32_t)(on != 0);
+    }
+    return n;
 }

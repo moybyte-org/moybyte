@@ -68,6 +68,11 @@ class FullscreenStackWM:
     # Registered apps the home's Apps tab and the desk leave out: reached
     # through Settings instead.
     HIDDEN_APPS = ("appearance", "myart")
+    # A content's own paint ring vouches for what the buffers hold of it
+    # (docs/scroll_and_text_2026-10.md §3.4): the full-screen stack repaints
+    # everything around it, so a frame that moves its pixels shifts out of
+    # the frame before. The windowed WM's shown ring is its windows' voucher.
+    CONTENT_RING = True
 
     def __init__(self, ws):
         self.ws = ws

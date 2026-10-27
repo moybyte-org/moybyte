@@ -73,6 +73,7 @@ in that step and in the browser gives the frame back until its bytes come.
 """
 
 import json
+from array import array
 
 try:
     import ui
@@ -334,6 +335,13 @@ class GetCartsAppLayer(ListShellApp):
         self._nav = ctx.nav
         self._ui = ctx.ui
         self.names = names
+        # the shelf region's override table and the cards' gens
+        # (docs/scroll_and_text_2026-10.md §3.3)
+        self._shelf_o = {"gen": 0}
+        self._shelf_rows = None
+        self._shelf_n = -1
+        self._card_gen = 0
+        self._clip = array("i", [0, 0, 0, 0])   # a cover's clip (`ui.card_clip`)
         cv = self._surf.canvas()
         self.layout = GetCartsLayout(cv.w, cv.h, self._surf.font_scale(),
                                      self._surf.windowed(),
@@ -1312,8 +1320,13 @@ class GetCartsAppLayer(ListShellApp):
         elif shown in BLOCKED:
             o["tone"] = "danger"
         o["icon"] = genre_icon(row["cart"])
+        # the card's gen (docs/scroll_and_text_2026-10.md §3.3): it moves with
+        # the card made again, and its cover's coming tells the two apart
+        self._card_gen += 2
+        o["gen"] = self._card_gen
         o_pic = dict(o)
         del o_pic["icon"]
+        o_pic["gen"] = self._card_gen + 1
         c = row["_card"] = (st, self.free, row["cart"]["name"], sub, o, o_pic)
         return c
 
@@ -1348,18 +1361,29 @@ class GetCartsAppLayer(ListShellApp):
                 ui.at(r[0], r[1], r[2], r[3])
                 ui.hints(_SHELF_HINTS)
         g = lay.grid
+        rows = self.rows
+        so = self._shelf_o
+        if rows is not self._shelf_rows or len(rows) != self._shelf_n:
+            self._shelf_rows = rows
+            self._shelf_n = len(rows)
+            so["gen"] += 1              # the shelf's cards are others
         ui.at(g[0], g[1], g[2], g[3])
-        ui.scroll("shelf")
+        ui.scroll("shelf", so)
         side = lay.side
         ui.grid("carts", side, side, lay.grid_o)
-        rows = self.rows
         for i in range(len(rows)):
             row = rows[i]
             c = self._card(row)
             pic = self._pic(row)
             r = ui.card(c[2], c[3], c[4] if pic is None else c[5])
             if r[2] and pic is not None:
-                cv.clip(g[0], g[1], g[2], g[3])
+                k = self._clip
+                k[0] = g[0]
+                k[1] = g[1]
+                k[2] = g[2]
+                k[3] = g[3]
+                ui.card_clip(k)
+                cv.clip(k[0], k[1], k[2], k[3])
                 cv.cover(pic[1], pic[0], 0, 0, pic[0], pic[0], r[0], r[1], r[2], r[3], 0, False)
                 cv.clip()
             if r[4] & ui.ACTIVATED:

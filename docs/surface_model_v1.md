@@ -4,8 +4,9 @@
 which retires the web annex, the 2026-08-27 FOLD (§14), which absorbs the
 archived predecessor and changes no part of the model, and the 2026-10-07
 KERNEL AMENDMENT (§15), which moves the Surface's home and its mint into the
-native kernel and changes no law, and the 2026-10-27 REMOVAL (§16) of the
-surface table that nothing read.** Written, then put
+native kernel and changes no law, the 2026-10-27 REMOVAL (§16) of the
+surface table that nothing read, and the 2026-10-27 SHIFT FRAME (§14.7), the
+change record a content's frame may be, which adds no invalidation mechanism.** Written, then put
 through the parallel adversarial architecture + perf review passes
 (verdicts: **LOCK AFTER FIXES** / **PERF CASE STANDS WITH FIXES**); all twenty
 findings are folded into this revision — **§12 is the finding-by-finding
@@ -103,7 +104,8 @@ are always `!=`, never `>`.
 - **L2 — dirty is explicit, in three producer classes (§3).** Only producers
   signal change: gen bumps, the declared `animating` class, and the pointer
   leg. Inferring "static" from draw streams is FORBIDDEN (§8: Fold-2, web
-  scroll-as-blit).
+  scroll-as-blit). A draw-stream comparison may ASSERT, never license: the
+  shift frame's record audit (§14.7) is a test's net, not the frame's rule.
 - **L3 — gens come from one monotonic mint** (§2 above),
   compared `!=` per consumer against its own last-seen. Never a boolean a
   consumer clears: N consumers (the kernel's compositors, the L8 harness) must
@@ -175,7 +177,9 @@ preview's playhead, the bluetooth panel's async scan/pair states, the update
 screen's progress, splash/confetti/toast/egg overlays, and the running cart.
 Each declares `Surface.animating = True` while its animation is live — the
 by-name lists become the seed of the registration and are then **deleted**
-(§7). An animating surface needs no bumps and is never skipped.
+(§7). An animating surface needs no bumps and is never skipped. A verbs page
+moving on its own -- a fling's coast, a glide to a step's target -- declares
+itself through the engine (`moy_ui_api_moving`, `ws.ui_moving` for the gate).
 
 **Class C — pointer-armed mutators (the pre-#44 debt).** Paint strokes, map
 pans, block drags and kinetic scrolls mutate content **without marking
@@ -503,7 +507,7 @@ pinning the field's absence.
 | `WsClientState` SURF cache + keyframe latch | **kept**; latch generalized into §5.4's keyframe-production verb | never |
 | `RecordingLayer.RECORD_ONLY` (#175 follow-on) | **kept, orthogonal** — raster-half elision, not invalidation | never |
 | `ViewCanvas` + `view` bracket (#175) | **generalized** into L4; wire op converges in B+ | B+ |
-| scroll-as-blit `RETAINED_FRAMES` (#113) | **per-backend**: device root path unchanged; web root stays 0; per-surface in D under §6's invariants | — |
+| scroll-as-blit `RETAINED_FRAMES` (#113) | **per-backend**, and its ring is one body (§14.7): a content's frames are vouched for by ONE ring per region -- a window's by the windowed WM's shown ring (`_shown`, §14.3), a full-screen content's by its own `PaintRing` (`ui_draw`) -- never both | — |
 | `_cover_runs` / `_cover_gen`, `atlas_gen`, `sheet.gen` | **unchanged** — the L3 prior art | never |
 | `assets_json` memo key (wasm) | **unchanged** — serialization concern | never |
 
@@ -1005,6 +1009,69 @@ replaces the drawing of what they name. Pinned by
 GDMA and CPU halves), `tests/test_wm_windowed.py` (debt frames and the
 scrim's ride copying, every buffer then byte-equal to whole repaints) and
 `tests/test_home_still.py`.
+
+### 14.7 A frame that moves the last one: the shift frame (2026-10-27)
+
+§14.3 to §14.6 bring a lagging buffer to the glass by drawing what it lacks
+or copying what the last frame painted. A scrolling page moves: frame n
+draws the same rows as frame n-1, moved, plus a band. The shift frame is that
+change spoken as a record (`docs/scroll_and_text_2026-10.md` §3 is the
+design; this is the contract): what a frame changed is ROWS (rects the draw
+repainted), or one region R TRANSLATED by Δ -- the pixels moved, the |Δ|
+rows the move uncovered drawn, and rows beside them.
+
+**The two Δ rules.** Inside R a shift is always n-1 → n by this frame's Δ,
+out of the buffer frame n-1 drew, licensed only when frame n-1 painted R
+whole with nothing over it, whatever the ring's depth: translations never
+compose. Outside R, what a buffer lacks is every frame's rows since that
+buffer last took a paint, and those are drawn. Where a canvas has a single
+persistent buffer (the host's and the browser's root, window buffers,
+layers), that buffer held the frame before, and the move happens in place.
+
+**The backend verbs.** A canvas's `shift_last` moves the rect of the buffer the last presented frame drew into, by (dx, dy), into
+the buffer this frame draws into, and answers False where it cannot (the
+caller draws); `shift_fence()` makes the rows it wrote the CPU's to draw
+over. `copy_last_into(layer, ...)` copies a rect of that buffer into a
+layer. Per canvas: the P4s' 2D-DMA, the S3s' row copy beside the feeder, in
+place on one buffer (`device/device_canvas.py`, the compositors in
+`native/moy_glass`).
+
+**One voucher per region.** Who says frame n-1 painted R whole: under the
+windowed WM the shown ring (`_shown`) for a window's content, never the
+content; on the full-screen tier the content's own `PaintRing`
+(`ui_draw.PaintRing`, the slots `ScrollRegion`'s #113 ring also keeps),
+because the stack draws everything around R every frame. The WM says which
+(`CONTENT_RING`), and the console tells each painted frame whether the
+content is alone on the glass (`ui_draw.paint_frame`: no overlay, splash,
+cursor or owed pill over it, `content_alone`).
+
+**The verbs engine's floor.** What licenses a shift frame of a verbs page is
+known at the engine's begin: the input it applied (a drag, a coast's or a
+glide's step, a focus move, a key typed into a field) and the generation
+every page and picture inside R carries (`gen` in the override block, the
+app's word that what it draws there is a function of it). A page with no
+gen, a stop `ui.at` placed inside R, a picture with no gen, a press, an
+activation, a stepped value, a hover, a dialog, a popover, a tooltip: the
+frame draws whole. The pass then draws the FLOOR -- the band, the fades,
+the rows whose marks moved -- and every draw goes once through each piece
+of the frame's region it reaches (outside R, and the floor's rects), so a
+floor pixel takes every draw over it in a whole frame's order; the floor only
+widens during the pass (a stop unlike the last frame's takes R from its top
+down; a picture whose gen moved, its box). `moy_ui_api.h` is the authority.
+
+**This is not a second invalidation mechanism.** Whether a surface paints is
+still the gate's, the gens', §14.1's freeze's and the Class B declaration's
+(a moving page is `api_moving`); the record only says, for a frame that IS
+painting, what its buffer lacks, and `shift_last` replaces the drawing of
+what it moved, as `copy_last` does a whole frame. The one ring body is a
+grep. Pinned by `tests/test_shift_frames.py` (the engine: drags, flings,
+glides, every move size, the clamps, a gen moving mid-fling, a cover landing,
+overlays, a theme change, a gap, a deferred copy landing at the fence) and
+`tests/test_shift_apps.py` (Settings and its pages, My Art, Get Carts on the
+full-screen console), each presented frame, with up to three buffers taking
+turns, byte-equal to whole repaints, the share of shift frames held above a floor,
+and the engine's record audit failing any shift frame whose stops moved
+outside its floor.
 
 ## 15. Amendment: the Surface's home is the kernel (2026-10-07)
 

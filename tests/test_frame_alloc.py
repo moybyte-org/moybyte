@@ -541,7 +541,8 @@ def apps(loop, info):
                 d0 = ws._frames_drawn
                 m = mem_alloc()
                 loop.step()
-                drag.append((mem_alloc() - m, ws._frames_drawn - d0, cards[0]))
+                drag.append((mem_alloc() - m, ws._frames_drawn - d0, cards[0],
+                             ws.frame_change == "shift"))
             gc.enable()
         info[app + "_drag"] = drag
         ws.exit()
@@ -558,11 +559,30 @@ def achievements(loop, info):
     ws = loop.ws
     ws.ach.unlocked = {"first_open": 20261012, "first_run": 0, "konami": 0}
     ws.open_settings()
+    # the rows page swiped, its pictures met once: what each frame of a drag
+    # and its coast allocates, and which shifted
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    for _ in range(60):
+        loop.step()
+    drag = []
+    for rep in range(4):
+        y0, y1 = (H * 3 // 4, H // 4) if rep % 2 == 0 else (H // 4, H * 3 // 4)
+        moy_loop.swipe(W // 2, y0, W // 2, y1, 25)
+        gc.collect()
+        gc.disable()
+        for _ in range(30):
+            d0 = ws._frames_drawn
+            m = mem_alloc()
+            loop.step()
+            if rep:
+                drag.append((mem_alloc() - m, ws._frames_drawn - d0,
+                             ws.frame_change == "shift"))
+        gc.enable()
+    info["settings_drag"] = drag
     ws.settings_layer.open_page("achievements")
     for _ in range(60):
         loop.step()
     info["ach_page"] = ws.settings_layer.page
-    W, H = ws.sys_canvas.w, ws.sys_canvas.h
     for key in ("ach_idle", "ach_scrolled"):
         for _ in range(30):
             loop.step()
@@ -908,6 +928,33 @@ def test_the_achievements_page_allocates_nothing(result, key):
 
 # One answer tuple: a 5-tuple (the card's) is seven words, two 16-byte blocks.
 ANSWER = 32
+# A Settings frame's own answers: the strings and tuples its rows show, read
+# again each frame (`SettingsLayer._value`); the shift frame adds none.
+SETTINGS_FRAME = 1024
+
+
+@pytest.mark.parametrize("app", ("getcarts", "myart"))
+def test_an_app_drag_is_shift_frames(result, app):
+    """The drag frames of an app whose shelf carries its gens shift
+    (docs/scroll_and_text_2026-10.md §3.3) on the T-Deck's tier: the ring's
+    slots and the floor's rects are kept, so the budget the test below holds
+    every drawn frame to holds the shift frames."""
+    info, text = result
+    drawn = [d for d in info[app + "_drag"] if d[1]]
+    shifted = [d for d in drawn if d[3]]
+    assert len(shifted) > len(drawn) // 2, (app, len(shifted), len(drawn))
+
+
+def test_a_settings_drag_shifts_and_allocates_nothing(result):
+    """Settings' rows page dragged and coasting: its frames shift, and a
+    shift frame allocates no more than the rows' own answers."""
+    info, text = result
+    drag = info["settings_drag"]
+    drawn = [d for d in drag if d[1]]
+    shifted = [d for d in drawn if d[2]]
+    assert len(drawn) > 30 and len(shifted) > len(drawn) // 2, (len(shifted), len(drawn))
+    over = sorted(d[0] for d in shifted)
+    assert over[len(over) // 2] < SETTINGS_FRAME, ("a shift frame's median", over)
 
 
 @pytest.mark.parametrize("app", ("appearance", "storybook", "getcarts", "myart"))

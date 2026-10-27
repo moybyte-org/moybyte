@@ -395,6 +395,15 @@ class SettingsLayer:
         self.back_title = "Settings"
         self._typing = False          # the Name field holds focus: text mode
         self._name = None             # the Name being typed, until it is stored
+        # The rows page's gen (docs/scroll_and_text_2026-10.md §3.3), moved by
+        # `_poll` when a value it shows moves: the override table the page is
+        # given, kept, its gen updated in place.
+        self._gen = 0
+        self._page_o = {"gen": 0}
+        self._vals = []               # what each row showed, in the page's order
+        self._lvl = None              # the battery level About showed
+        self._about_was = None
+        self._could_type = None
 
     def reset(self):
         """A fresh visit (ws.open_settings): focus on the first row, the page
@@ -1304,12 +1313,13 @@ class SettingsLayer:
         title = _capital(name.replace("_", " ").replace("-", " "))
         return title + (" Day" if look.theme_variant == "light" else " Night")
 
-    def _row(self, key, label, kind):
-        """One row of the page: its verb, and what its answer does."""
+    def _value(self, key, kind):
+        """What row `key` of `kind` shows this frame, read before the page is
+        drawn: the page's gen moves when one does (docs/scroll_and_text_2026-10.md
+        §3.3), so a frame that shifts the rows never keeps one gone stale. The
+        Name field's text is its own (None): typing draws its row."""
         ws = self.ws
-        s = say(label)
         if kind == "wifi-net":
-            self._kinds[s] = "link"
             ssid = None
             if ws.wifi is not None:
                 try:
@@ -1317,35 +1327,108 @@ class SettingsLayer:
                     ssid = ssid if connected else None
                 except Exception:  # noqa: BLE001
                     ssid = None
-            if _ui.link(s, str(ssid)[:16] if ssid else "Off"):
-                self.open_wifi()
-        elif kind == "bluetooth":
-            self._kinds[s] = "link"
+            return str(ssid)[:16] if ssid else "Off"
+        if kind == "bluetooth":
             try:
                 enabled, state, name, _preferred, _error = \
                     self._bt_service().settings_status()
             except Exception:  # noqa: BLE001 -- a radio hiccup reads Off
                 enabled, state, name = False, "error", None
-            value = (str(name)[:12] if name else state[:1].upper() + state[1:]) \
+            return (str(name)[:12] if name else state[:1].upper() + state[1:]) \
                 if enabled else "Off"
-            if _ui.link(s, value):
+        if kind == "action":
+            return self._theme_title() if key == "appearance" else ""
+        if kind == "crash":
+            rec = last_crash()
+            v = str(rec.get("kind") or "?")[:8] if rec else "None"
+            return v[:1].upper() + v[1:]
+        if kind == "webhost":
+            return ws.webhost_label() if ws.webhost_serving() else "Off"
+        if kind == "diag":
+            return bool(getattr(ws, key, False))
+        if kind == "font":
+            scales = ws.look.FONT_SCALES
+            fs = ws.look.font_scale
+            return scales.index(fs) if fs in scales else 0
+        if kind == "layout":
+            pick = ws.look.layout_theme()
+            vals = (None,) + tuple(ws.look.layout_choices())
+            if pick is not None and pick not in vals:
+                vals = vals + (pick,)
+            return (vals.index(pick), vals)
+        if kind == "idle":
+            lad = ws.idle_ladder
+            steps = lad.steps()
+            v = lad.value(key)
+            return steps.index(v) if v in steps else 0
+        if kind == "channel":
+            return 1 if ws._ota_channel() == "unstable" else 0
+        if kind == "level":
+            return self.level(key)
+        if kind == "name" and not ws.can_type():
+            return str(ws.system.get(key, "") or "") or NAME_UNSET
+        return None
+
+    def _poll(self):
+        """Every value the rows page shows, read for this frame (`_value`),
+        and the page's gen moved where one differs from the last frame's."""
+        ws = self.ws
+        vals = self._vals
+        n = 0
+        moved = self._groups_of is not self._settings_rows()
+        for _caption, rows in self._grouped():
+            for key, _label, kind in rows:
+                v = self._value(key, kind)
+                if n < len(vals):
+                    if vals[n] != v:
+                        vals[n] = v
+                        moved = True
+                else:
+                    vals.append(v)
+                    moved = True
+                n += 1
+        lvl = ws.battery_level()
+        a = ws.ach.count()
+        if (lvl != self._lvl or a != self._ach_n or self._about is not self._about_was
+                or ws.can_type() != self._could_type):
+            self._lvl = lvl
+            self._about_was = self._about
+            self._could_type = ws.can_type()
+            moved = True
+        if a != self._ach_n:
+            self._ach_n = a
+            self._ach_words = "%d of %d" % (a, len(ACHIEVEMENTS))
+        if moved:
+            self._gen += 1
+            self._page_o["gen"] = self._gen
+
+    def _row(self, key, label, kind, v):
+        """One row of the page, showing `v` (`_value`): its verb, and what
+        its answer does."""
+        ws = self.ws
+        s = say(label)
+        if kind == "wifi-net":
+            self._kinds[s] = "link"
+            if _ui.link(s, v):
+                self.open_wifi()
+        elif kind == "bluetooth":
+            self._kinds[s] = "link"
+            if _ui.link(s, v):
                 self.open_bluetooth()
         elif kind == "action":
             self._kinds[s] = "link"
-            if _ui.link(s, self._theme_title() if key == "appearance" else ""):
+            if _ui.link(s, v):
                 self._activate_settings_action(key)
         elif kind == "crash":
             self._kinds[s] = "link"
-            rec = last_crash()
-            v = str(rec.get("kind") or "?")[:8] if rec else "None"
-            if _ui.link(s, v[:1].upper() + v[1:]):
+            if _ui.link(s, v):
                 self.open_crash()
         elif kind == "webhost":
             self._kinds[s] = "link"
-            if _ui.link(s, ws.webhost_label() if ws.webhost_serving() else "Off"):
+            if _ui.link(s, v):
                 ws.toggle_webhost()
         elif kind == "diag":
-            on = bool(getattr(ws, key, False))
+            on = v
             self._kinds[s] = "toggle"
             self._on[s] = on
             if _ui.toggle(s, on) != on:
@@ -1353,30 +1436,24 @@ class SettingsLayer:
         elif kind == "font":
             self._kinds[s] = "cycle"
             scales = ws.look.FONT_SCALES
-            fs = ws.look.font_scale
-            cur = scales.index(fs) if fs in scales else 0
+            cur = v
             words = self._words.get(scales)
             if words is None:
-                words = self._words[scales] = [_SIZES.get(v, "%dx" % v) for v in scales]
+                words = self._words[scales] = [_SIZES.get(f, "%dx" % f) for f in scales]
             got = _ui.cycle(s, words, cur)
             if got != cur:
                 ws.look.cycle_font_scale(got - cur)
         elif kind == "layout":
             self._kinds[s] = "cycle"
-            pick = ws.look.layout_theme()
-            vals = (None,) + tuple(ws.look.layout_choices())
-            if pick is not None and pick not in vals:
-                vals = vals + (pick,)
-            cur = vals.index(pick)
-            got = _ui.cycle(s, ["Theme" if v is None else _capital(str(v)) for v in vals], cur)
+            cur, vals = v
+            got = _ui.cycle(s, ["Theme" if c is None else _capital(str(c)) for c in vals], cur)
             if got != cur:
                 ws.look.cycle_layout_theme(got - cur)
         elif kind == "idle":
             self._kinds[s] = "cycle"
             lad = ws.idle_ladder
             steps = lad.steps()
-            v = lad.value(key)
-            cur = steps.index(v) if v in steps else 0
+            cur = v
             words = self._words.get(steps)
             if words is None:
                 words = self._words[steps] = [_idle_word(t) for t in steps]
@@ -1385,25 +1462,25 @@ class SettingsLayer:
                 lad.set(key, steps[got])
         elif kind == "channel":
             self._kinds[s] = "seg"
-            cur = 1 if ws._ota_channel() == "unstable" else 0
+            cur = v
             got = _ui.seg(s, _STABLE_BETA, cur)
             if got != cur:
                 ws._cycle_channel(got - cur)
         elif kind == "level":
             self._kinds[s] = "slider"
-            cur, lo, hi = self.level(key)
+            cur, lo, hi = v
             if key == "volume" and cur == lo:     # muted at 0
                 _ui.icon("mute")
             got = _ui.slider(s, cur, lo, hi, _STEPPED)  # the power popover's gauge
             if got != cur:
                 self.set_level(key, got)
-        elif kind == "name" and not ws.can_type():
+        elif kind == "name" and v is not None:
             # nothing can type (touch alone, a gamepad): the saved name shows,
             # read-only ("Not set" where none is), and the group's footer says
             # how to change it (`_rows_page`), instead of a field no key
             # reaches (#239 is the on-screen keyboard)
             self._kinds.pop(s, None)
-            _ui.info(s, str(ws.system.get(key, "") or "") or NAME_UNSET)
+            _ui.info(s, v)
             self._footer = NAME_NO_KEYBOARD
         elif kind == "name":
             self._kinds[s] = "field"
@@ -1444,17 +1521,21 @@ class SettingsLayer:
             self.set_msel = i - 1
 
     def _rows_page(self):
-        _ui.page("")
+        self._poll()
+        _ui.page("", self._page_o)
         f = _ui.focus()
         kind = self._kinds.get(f)
         _ui.hints(_HINT_TOGGLE[bool(self._on.get(f))] if kind == "toggle"
                   else _HINTS.get(kind, _HINT_OPEN))
         ws = self.ws
+        vals = self._vals
+        n = 0
         for caption, rows in self._grouped():
             _ui.group(caption)
             self._footer = None
             for key, label, kind in rows:
-                self._row(key, label, kind)
+                self._row(key, label, kind, vals[n])
+                n += 1
             if self._footer is not None:
                 # a row's note under its group's card, on the page's ground
                 # in the captions' style
@@ -1462,14 +1543,10 @@ class SettingsLayer:
         _ui.group("About")
         for label, value in self._about:
             _ui.info(label, value)
-        lvl = ws.battery_level()
+        lvl = self._lvl
         if lvl is not None:
             _ui.info("Battery", "%d%%" % lvl)
         self._kinds["Achievements"] = "link"
-        n = ws.ach.count()
-        if n != self._ach_n:
-            self._ach_n = n
-            self._ach_words = "%d of %d" % (n, len(ACHIEVEMENTS))
         if _ui.link("Achievements", self._ach_words):
             ws.ach_ui._secret_taps = 0
             self.open_page("achievements")

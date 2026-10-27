@@ -13,6 +13,7 @@
 #   -- list rows and grid cells       row, cell
 #   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
 #   -- scrolling                      drag_steps, pan_drag, row_drag, ScrollRegion, DragTap
+#   PaintRing                         what the last painted frames left of a region, per buffer
 #   ScrollRegion                      the one scroll model
 #   DragTap                           press/drag/release over a ScrollRegion
 #   ui_frame                          a host begins an app's frame of runtime/ui.py's verbs
@@ -1655,6 +1656,32 @@ ui_owes = _C.api_owes      # (ctx) whether the frame it drew last owes the next
 ui_moving = _C.api_moving  # (ctx) whether a page of it flings or glides
 _DT_MS = [0]                            # the loop's tick, the frames' clock (frame_dt)
 _MOVING = [False]                       # a frame begun since moving_take left a page moving
+# The painted frame the console draws (paint_frame): its number, and whether
+# its content is alone on the glass -- the content's ring vouches for its
+# buffers there (a full-screen tier's content, no overlay, cursor or pill
+# over it); then what the shift frames drawn in it made of it (change_take).
+_PAINT = [-1, False]
+_CHANGE = [None]
+_SHIFT = "shift"
+_ROWS = "rows"
+
+
+def paint_frame(n, alone):
+    """The console paints frame `n` (its count of painted frames), its
+    content alone on the glass where `alone`: an app's `AppHost` may then
+    make it a shift frame out of the frame before (`PaintRing`)."""
+    _PAINT[0] = n
+    _PAINT[1] = bool(alone)
+    _CHANGE[0] = None
+
+
+def change_take():
+    """What the frame painted since the last call changed, as its shift
+    frames said: "shift" (a region moved and its floor drawn), "rows" (the
+    floor alone), None (drawn whole, or nothing spoke). Reading clears it."""
+    got = _CHANGE[0]
+    _CHANGE[0] = None
+    return got
 
 
 def frame_dt(ms):
@@ -1817,10 +1844,13 @@ class AppHost:
         self.key = 0                    # the key typed last frame (a press is its change)
         self.px = self.py = -1          # where the pointer was last seen, in the app's space
         self.mid = False                # the middle button is held
+        self.ring = PaintRing(1)        # what the frame before left of the page in its buffer
+        self._plan = array("i", [0] * 5)
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
         self.ctx = ui_context()
+        self.ring.clear()
         self.clear()
 
     def clear(self):
@@ -1916,14 +1946,36 @@ class AppHost:
                 a[2] = self.px
                 a[3] = self.py
             a[4] |= 1 | (_P_MIDDLE if self.mid else 0)
+        self.ring.close(_C.api_shift_drawn(self.ctx) & 4)
         settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app,
                            elsewhere=elsewhere or _ON_BAR[0], edge=True)
+        self._shift(cv, th)
         if a[1] & _UP and _C.api_edge(self.ctx):
             _EDGE[0] = True
         self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
         a[0] = a[1] = a[5] = a[7] = a[8] = 0
         self.owed = not settled
         return settled
+
+    def _shift(self, cv, th):
+        """The frame begun as a shift frame where it may be one
+        (docs/scroll_and_text_2026-10.md §3.3): the engine licenses it from
+        the input it applied and the gens the last pass drew, the ring
+        vouches that the frame before drew the page whole into the buffer
+        `shift_last` reads, and the canvas moves that frame's pixels of the
+        page's region R by the scroll's move; the pass then draws R's floor
+        alone."""
+        f = _PAINT[0]
+        ring = self.ring
+        key = _GEN + _GEN + (1 if _MARKS_ON[0] else 0)
+        p = self._plan
+        if _PAINT[1] and _C.api_shift_plan(self.ctx, p) and ring.vouch(cv, f, key, th):
+            if cv.shift_last(p[0] + getattr(cv, "_ox", 0), p[1] + getattr(cv, "_oy", 0),
+                             p[2], p[3], 0, p[4]):
+                cv.shift_fence()        # the floor draws over rows the move wrote
+                _C.api_shift_arm(self.ctx)
+                _CHANGE[0] = _SHIFT if p[4] else _ROWS
+        ring.note(f, key, 0, None, cv, th, _PAINT[1])
 
     def still(self):
         """Whether the page this context drew last is what it draws next:
@@ -2371,6 +2423,91 @@ def row_drag(anchor, py, step, top, top_max):
 _MAX_RETAINED = 3
 
 
+class PaintRing:
+    """What the last painted frames left of one region in the buffers a
+    canvas presents in turn (docs/scroll_and_text_2026-10.md §3.1): a slot
+    per painted frame -- its number, the canvas it drew on, its key (what
+    the pixels are a function of besides the region's own state, compared
+    `==`, and an object compared `is`: a theme), the region's offset, a
+    stamp (a rect the caller drew over it, which it repaints) and whether
+    the paint left the region whole with nothing over it. The slots are
+    kept, never made again: noting a frame allocates nothing.
+
+    `vouch` is the shift frame's licence on the host's side: frame n-1
+    painted the region whole under this key into the buffer `shift_last`
+    reads, so a shift brings n-1 to n. Under the windowed WM the shown ring
+    vouches instead (one voucher per region)."""
+
+    def __init__(self, n=_MAX_RETAINED):
+        self.n = n
+        self._f = array("i", [-1] * n)
+        self._off = array("i", [0] * n)
+        self._key = [None] * n
+        self._obj = [None] * n
+        self._cv = [None] * n
+        self._stamp = [None] * n
+        self._whole = bytearray(n)
+        self._i = 0                     # the newest slot
+        self.size = 0                   # the slots holding a frame
+
+    def clear(self):
+        """Forget every frame: the region repaints whole until it re-arms."""
+        self.size = 0
+        for i in range(self.n):
+            self._cv[i] = self._obj[i] = self._key[i] = self._stamp[i] = None
+
+    def note(self, frame_no, key=None, offset=0, stamp=None, cv=None, obj=None, whole=True):
+        """Frame `frame_no` painted the region at `offset`."""
+        i = self._i + 1
+        if i >= self.n:
+            i = 0
+        self._i = i
+        self._f[i] = frame_no
+        self._key[i] = key
+        self._obj[i] = obj
+        self._off[i] = offset
+        self._stamp[i] = stamp
+        self._cv[i] = cv
+        self._whole[i] = 1 if whole else 0
+        if self.size < self.n:
+            self.size += 1
+
+    def close(self, whole):
+        """The newest frame's paint is done: whether it left the region
+        whole, with nothing drawn over it."""
+        if self.size and not whole:
+            self._whole[self._i] = 0
+
+    def _slot(self, back):
+        i = self._i - back
+        return i + self.n if i < 0 else i
+
+    def frame(self, back=0):
+        """The number of the frame `back` paints before the newest."""
+        return self._f[self._slot(back)] if back < self.size else -1
+
+    def offset(self, back=0):
+        return self._off[self._slot(back)]
+
+    def key(self, back=0):
+        return self._key[self._slot(back)]
+
+    def stamp(self, back=0):
+        return self._stamp[self._slot(back)]
+
+    def vouch(self, cv, frame_no, key=None, obj=None):
+        """True when frame `frame_no` - 1 painted the region whole under
+        `key` (and `obj`) on `cv`, whose `shift_last` reads that frame's
+        buffer; else None."""
+        if not self.size or getattr(cv, "RETAINED_FRAMES", 0) < 1:
+            return None
+        i = self._i
+        if (self._f[i] != frame_no - 1 or self._cv[i] is not cv or not self._whole[i]
+                or self._obj[i] is not obj or self._key[i] != key):
+            return None
+        return True
+
+
 class ScrollRegion:
     """The one scroll model: a view rect over larger content, on either AXIS
     (vertical by default -- the Settings rows; `horizontal=True` for the
@@ -2404,13 +2541,13 @@ class ScrollRegion:
         # glide's target, their flags) live in this buffer; the rules are
         # native/moy_ui's (moy_ui_scroll_t).
         self._st = bytearray(28)
-        # Scroll-as-blit paint ring (#113): the most recent painted frames'
-        # (frame_no, offset, key, stamp), newest first. blit_shift compares the
-        # current offset against the paint whose pixels sit in the target
-        # framebuffer (RETAINED_FRAMES back -- 1 on the host's persistent
-        # buffer, 2 on the device ping-pong), so a scrolled view can shift its
-        # already-correct pixels and repaint only the exposed band.
-        self._painted = []
+        # Scroll-as-blit paint ring (#113): the most recent painted frames.
+        # blit_shift compares the current offset against the paint whose
+        # pixels sit in the target framebuffer (RETAINED_FRAMES back -- 1 on
+        # the host's persistent buffer, 2 on the device ping-pong), so a
+        # scrolled view can shift its already-correct pixels and repaint only
+        # the exposed band.
+        self.ring = PaintRing()
 
     def set(self, view_rect, content):
         self.view = view_rect
@@ -2448,20 +2585,16 @@ class ScrollRegion:
     def invalidate(self):
         """Content changed under the pixels (items/layout/theme): force full
         paints until the ring re-arms."""
-        self._painted = []
+        self.ring.clear()
 
     def note_painted(self, frame_no, key=None, stamp=None):
         """Record a paint of this view at the current offset. `key` pins the
         non-scroll state the pixels depend on; `stamp` is an opaque damage rect
         (the cursor sprite baked into this paint) returned by a later
-        blit_shift so the caller can repaint it."""
-        self._painted.insert(0, (frame_no, self.offset, key, stamp))
-        # Keep _MAX_RETAINED entries: blit_shift needs RETAINED_FRAMES
-        # consecutive paints, and note_painted has no canvas to read the real
-        # N from. Trimming below the largest N anywhere (the P4's triple
-        # framebuffer) would silently disable scroll-as-blit there:
-        # len(_painted) < k forever.
-        del self._painted[_MAX_RETAINED:]
+        blit_shift so the caller can repaint it. The ring keeps
+        _MAX_RETAINED paints: blit_shift needs RETAINED_FRAMES consecutive
+        ones, and this has no canvas to read the real N from."""
+        self.ring.note(frame_no, key, self.offset, stamp)
 
     def blit_shift(self, cv, frame_no, key=None):
         """(delta, stamp) when the canvas's target framebuffer holds this
@@ -2469,19 +2602,19 @@ class ScrollRegion:
         is current offset minus the offset baked in the target buffer; stamp
         is that paint's recorded damage rect (or None)."""
         k = getattr(cv, "RETAINED_FRAMES", 0)
+        ring = self.ring
         if (k < 1 or getattr(cv, "scroll_rect", None) is None
-                or len(self._painted) < k):
+                or ring.size < k):
             return None
         for i in range(k):
-            if self._painted[i][0] != frame_no - 1 - i:
+            if ring.frame(i) != frame_no - 1 - i:
                 return None            # not consecutive paints of THIS view
-        _fno, off, pkey, stamp = self._painted[k - 1]
-        if pkey != key:
+        if ring.key(k - 1) != key:
             return None
-        delta = self.offset - off
+        delta = self.offset - ring.offset(k - 1)
         if abs(delta) >= self._extent():
             return None                # nothing survives the shift
-        return (delta, stamp)
+        return (delta, ring.stamp(k - 1))
 
     def scroll_to_show(self, p, size):
         """Nudge the offset so the content span [p, p+size) is inside the view."""

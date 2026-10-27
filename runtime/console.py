@@ -1240,6 +1240,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._frames_drawn = 0        # frames that actually drew+flushed (test witness)
         self._frame_dt_ms = 33.0      # last loop tick in ms (kinetic velocity, #113)
         self.ui_moving = False        # a verbs page the last painted frame drew moves on its own
+        # what the last painted frame's change was, as its shift frames said:
+        # "shift", "rows", None (whole, or nothing spoke); tools/input_bench.py
+        self.frame_change = None
         self._pointer_dt_ms = 33.0    # ...as charged to the pointer SAMPLE (see
         self._stale_ptr_ms = 0.0      # _tick_pointer_dt), None while it's a repeat
         self._dirty_in = True         # a change reported before this input (handle_input)
@@ -4974,7 +4977,12 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if _modal is not None or self._marks_held:
             self._marks_held = _modal is not None
             _ui_draw.marks(_modal is None)
-        for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
+        _stack = self.wm.draw_stack()               # memoized (Stage 6c) -- no per-frame alloc
+        # The content's own ring vouches for its buffers where it is alone on
+        # a full-screen tier (docs/scroll_and_text_2026-10.md §3.4).
+        _ui_draw.paint_frame(self._frames_drawn,
+                             self.wm.CONTENT_RING and self.wm.content_alone())
+        for layer in _stack:
             if _modal is not None and layer.id in _modal:
                 _ui_draw.marks(True)
             if _prev_domain == "game" and layer.domain == "system":
@@ -5052,6 +5060,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._dirty = False
         self._damage_drop()          # an app's `all` from this draw is spent
         self.ui_moving = _ui_draw.moving_take()
+        self.frame_change = _ui_draw.change_take()
         if covers.take_deferred():
             # A shelf cover build was pushed past this frame's budget -- stay
             # dirty so the remaining covers land on the following frames (the

@@ -163,7 +163,8 @@ class _Card:
         self.icon = "secret" if secret else a[2]
         self.got = got
         self.how = self.sub
-        self.o = {"id": self.id, "icon": self.icon}
+        # a badge's card is the engine's alone: its picture's gen never moves
+        self.o = {"id": self.id, "icon": self.icon, "gen": 0}
         if not got:
             self.o["locked"] = True
         self.cur = dict(self.o)
@@ -186,6 +187,7 @@ class AchievementsPage:
         self._made_w = -1
         self._made_desk = None
         self._made_gen = -1
+        self._page_o = {"gen": 0}     # the page's override table: its gen moves with the rows
         self._head = ""
         self._groups = ()             # ((caption, ((grid id, grid override, (_Card, ...)), ...)), ...)
         self._by_id = {}
@@ -234,6 +236,7 @@ class AchievementsPage:
                 and gen == self._made_gen):
             return
         self._made_n, self._made_w, self._made_desk, self._made_gen = n, w, desk, gen
+        self._page_o["gen"] += 1          # what the page shows moved
         cols, pw, ph, margin = self._geometry(w, desk, fs)
         self._card = (pw, ph)
         pad = 7 if desk else 5
@@ -288,12 +291,17 @@ class AchievementsPage:
         `SettingsLayer`; on the desk its foot under it."""
         desk = _desk()
         fs = self.ws.layout.fs if not desk else 1
-        x, y, w, h = _ui.page("")
+        po = self._page_o
+        if not desk:
+            # the page's rows (docs/scroll_and_text_2026-10.md §3.3): what
+            # they show moves only with the cards made again
+            self._cards(rect[2], desk, fs)
+        x, y, w, h = _ui.page("", None if desk else po)
         if desk:
             # the badges scroll in the body over the window's own foot
             w -= 2 * DESK_IN
             _ui.at(x + DESK_IN, y, w, h - DESK_FOOT)
-            _ui.scroll("Achievements")
+            _ui.scroll("Achievements", po)
         else:
             _ui.hints(_HINT_POP if self.pop is not None else _HINT_PAGE)
         self._cards(w, desk, fs)

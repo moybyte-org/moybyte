@@ -1,3 +1,11 @@
+# Map (grep -n a name to jump there):
+#   -- rect algebra          inset, cut_top, hsplit, vsplit: the rects the verbs take
+#   _over                    the override table as the engine reads it
+#   page                     a page and its rows; label, button, toggle, slider, list after it
+#   table                    a list in columns; scroll, field, dialog, popover, menu after it
+#   grid                     a grid of cards the app draws into; card
+#   band                     the rows a shift frame draws; card_clip, keep beside it
+#   focus                    focus, moved or read; keys_taken, at
 """The public UI API (docs/ui_api_2026-10.md): the verbs every app and cart
 draws its interface with, and the rect algebra they lay out with.
 
@@ -182,13 +190,17 @@ def _over(o):
     hint = o.get("hint")
     wash = o.get("wash")
     lead = o.get("lead")
+    gen = o.get("gen")
     flags = None
-    if wash is not None or lead is not None:
-        flags = (1 if wash else 0) | (2 if lead else 0)
+    if wash is not None or lead is not None or gen is not None:
+        flags = (1 if wash else 0) | (2 if lead else 0) | (4 if gen is not None else 0)
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:
         tail += _pack("<i", flags)
+    if gen is not None:
+        g = int(gen) & 0xffffffff
+        tail += _pack("<i", g - 0x100000000 if g & 0x80000000 else g)
     return _pack("<9i", _colour(o.get("fill")), _colour(o.get("ink")),
                  _colour(o.get("border")), _ABSENT if oid is None else len(idb),
                  _flag(o, "current"), _flag(o, "disabled"), _flag(o, "nav"),
@@ -590,7 +602,8 @@ def card(title, sub="", o=None):
     picture, the current mark where `o` says `current`: `(x, y, w, h,
     state)`, the picture's rect -- the app draws its picture there before
     its next ui call, which cuts its corners and rings it -- and the state
-    bits `part`'s are. `w` and `h` are 0 for a card scrolled out of view.
+    bits `part`'s are. `w` and `h` are 0 for a card scrolled out of view,
+    and on a shift frame for one its floor does not reach (`band`).
     `o`'s `badge` names the icon on the picture's corner, and `tone`
     ("value", "danger") inks the sub line; "danger" also veils the picture
     and inks the badge. `icon` is a card with no picture of its own: that
@@ -727,6 +740,37 @@ def part(id, w=0, h=0, o=None):
 
 FOCUS, ACTIVATED, PRESSED, HOVER = 1, 2, 4, 8
 UP = -2                                 # ui.bar's answer: the bar's way back
+
+
+def band(r=None):
+    """The rows of the page being laid out that this frame draws, as
+    `(x, y, w, h)` in the page's coordinates (y from its rows' top): on a
+    shift frame (docs/scroll_and_text_2026-10.md §3.3) only those whose
+    pixels the frame before left wrong, else what shows of the page. An app
+    that loops over many rows or cards skips the ones it lies outside of,
+    and passes `keep` for each it skips; None where no page is open. Given
+    `r`, an `array("i")` of four, written there and `r` answered."""
+    if r is None:
+        return _C.api_band(_T[0])
+    return _C.api_band(_T[0], r)
+
+
+def card_clip(r):
+    """`r`, an `array("i")` of x, y, w, h, cut in place to where the picture
+    of the card (or part) just answered draws this frame -- on a shift frame
+    the rect of its floor it lies in, else as it was -- and answered. An app
+    whose pictures carry a `gen` clips its picture's draw to it, so what the
+    frame moved stays; nothing is made."""
+    return _C.api_card_clip(_T[0], r)
+
+
+def keep(id, h=0):
+    """A stop the app does not draw this frame -- it lies outside `band` --
+    carried forward as the last frame drew it: a card of the open grid (`id`
+    its title or its `id` override), else a row `h` high, so layout, focus
+    and the frames after see it. Its state bits, as `part`'s."""
+    t = _T
+    return _C.api_keep(t[0], t[1], t[2], id, h)
 
 
 def focus(id=None):

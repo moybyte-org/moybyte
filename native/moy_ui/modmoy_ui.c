@@ -2330,6 +2330,11 @@ static void over_dict(mp_obj_t d, moy_ui_over_t *out) {
         out->wash = (int8_t)(wash != MP_OBJ_NULL && mp_obj_is_true(wash));
         out->lead = (int8_t)(lead != MP_OBJ_NULL && mp_obj_is_true(lead));
     }
+    v = over_key(m, MP_QSTR_gen);
+    if (v != MP_OBJ_NULL && v != mp_const_none) {
+        out->gen = (int32_t)mp_obj_get_int_truncated(v);
+        out->has_gen = 1;
+    }
 }
 
 static const moy_ui_over_t *over_of(mp_obj_t o, moy_ui_over_t *out) {
@@ -3080,6 +3085,89 @@ static mp_obj_t ui_api_focus_ahead(mp_obj_t ctx, mp_obj_t id) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_focus_ahead_obj, ui_api_focus_ahead);
 
+// api_shift_plan(ctx, out) -> the shift frame begin licensed (moy_ui_api.h's
+// MOY_UI_SHIFT_*); `out`, five writable int32 words: R's x, y, w, h and dy
+static mp_obj_t ui_api_shift_plan(mp_obj_t ctx, mp_obj_t out) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
+    if (b.len < 5 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("five words"));
+    }
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_shift_plan(ctx_of(ctx), (int32_t *)b.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_shift_plan_obj, ui_api_shift_plan);
+
+// api_shift_arm(ctx): R's pixels are moved; this frame's pass draws its floor
+static mp_obj_t ui_api_shift_arm(mp_obj_t ctx) {
+    moy_ui_api_shift_arm(ctx_of(ctx));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_shift_arm_obj, ui_api_shift_arm);
+
+// api_shift_drawn(ctx) -> what the pass begun last drew (MOY_UI_SHIFT_*),
+// plus 4 where it left R the page's alone
+static mp_obj_t ui_api_shift_drawn(mp_obj_t ctx) {
+    int clean = 0;
+    int k = moy_ui_api_shift_drawn(ctx_of(ctx), &clean);
+    return MP_OBJ_NEW_SMALL_INT(k | (clean ? 4 : 0));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_shift_drawn_obj, ui_api_shift_drawn);
+
+// api_card_clip(ctx, r): `r`, four writable int32 words x, y, w, h, cut in
+// place to the floor's rect the last card's picture draws through
+// (moy_ui_api_card_clip); nothing made
+static mp_obj_t ui_api_card_clip(mp_obj_t ctx, mp_obj_t r) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(r, &b, MP_BUFFER_WRITE);
+    if (b.len < 4 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
+    }
+    moy_ui_api_card_clip(ctx_of(ctx), (int32_t *)b.buf);
+    return r;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_card_clip_obj, ui_api_card_clip);
+
+// api_band(ctx[, r]) -> (x, y, w, h) of the open page this frame draws, in
+// the page's coordinates, or None with no page open; given `r`, four
+// writable int32 words, written there and `r` answered (nothing made)
+static mp_obj_t ui_api_band(size_t n_args, const mp_obj_t *a) {
+    int32_t v[4];
+    if (n_args > 1) {
+        mp_buffer_info_t b;
+        mp_get_buffer_raise(a[1], &b, MP_BUFFER_WRITE);
+        if (b.len < 4 * sizeof(int32_t)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("four words"));
+        }
+        return moy_ui_api_band(ctx_of(a[0]), (int32_t *)b.buf) ? a[1] : mp_const_none;
+    }
+    if (!moy_ui_api_band(ctx_of(a[0]), v)) {
+        return mp_const_none;
+    }
+    mp_obj_t t[4];
+    for (int i = 0; i < 4; i++) {
+        t[i] = mp_obj_new_int(v[i]);
+    }
+    return ret_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_band_obj, 1, 2, ui_api_band);
+
+// api_keep(ctx, cv, look, id, h) -> the state bits of a stop carried forward
+// undrawn
+static mp_obj_t ui_api_keep(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_keep(ctx_of(a[0]), &s, span_of(a[3]), num(a[4])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_keep_obj, 5, 5, ui_api_keep);
+
+// api_audit(on) -> the shift frames whose records moved outside the floor
+// since the last call (the tests' net); on -1 leaves the switch
+static mp_obj_t ui_api_audit(mp_obj_t on) {
+    return mp_obj_new_int_from_uint(moy_ui_api_audit(mp_obj_get_int(on)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_audit_obj, ui_api_audit);
+
 // api_keys_taken(ctx) -> whether the ui used this frame's keys
 static mp_obj_t ui_api_keys_taken(mp_obj_t ctx) {
     return mp_obj_new_bool(moy_ui_api_keys_taken(ctx_of(ctx)));
@@ -3255,6 +3343,13 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_toast), MP_ROM_PTR(&ui_api_toast_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus), MP_ROM_PTR(&ui_api_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_focus_ahead), MP_ROM_PTR(&ui_api_focus_ahead_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_shift_plan), MP_ROM_PTR(&ui_api_shift_plan_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_shift_arm), MP_ROM_PTR(&ui_api_shift_arm_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_shift_drawn), MP_ROM_PTR(&ui_api_shift_drawn_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_band), MP_ROM_PTR(&ui_api_band_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_card_clip), MP_ROM_PTR(&ui_api_card_clip_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_keep), MP_ROM_PTR(&ui_api_keep_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_audit), MP_ROM_PTR(&ui_api_audit_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keys_taken), MP_ROM_PTR(&ui_api_keys_taken_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_edge), MP_ROM_PTR(&ui_api_edge_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_at), MP_ROM_PTR(&ui_api_at_obj) },

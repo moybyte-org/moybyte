@@ -317,6 +317,14 @@ _DRAW_SIGS = (
     ("moy_ui_api_moved", [c.c_void_p], _I),
     ("moy_ui_api_moving", [c.c_void_p], _I),
     ("moy_ui_api_offset", [c.c_void_p, _I, _I], c.c_int32),
+    ("moy_ui_api_shift_plan", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_shift_arm", [c.c_void_p], None),
+    ("moy_ui_api_shift_drawn", [c.c_void_p, c.POINTER(_I)], _I),
+    ("moy_ui_api_band", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_card_clip", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_floor", [c.c_void_p, c.c_void_p, _I], _I),
+    ("moy_ui_api_keep", [c.c_void_p, c.POINTER(_Sink), _Span, _I], _I),
+    ("moy_ui_api_audit", [_I], c.c_uint32),
     ("moy_ui_api_fades", [_I], c.c_uint32),
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_table_pics", [c.c_void_p, c.POINTER(_Sink)], None),
@@ -1269,6 +1277,50 @@ def binding():
     def api_fades(reset):
         return int(lib.moy_ui_api_fades(1 if reset else 0))
 
+    def api_shift_plan(ctx, out):
+        p, _k = _ctx(ctx)
+        w = (c.c_int32 * 5).from_buffer(out)
+        return int(lib.moy_ui_api_shift_plan(p, c.addressof(w)))
+
+    def api_shift_arm(ctx):
+        p, _k = _ctx(ctx)
+        lib.moy_ui_api_shift_arm(p)
+
+    def api_shift_drawn(ctx):
+        p, _k = _ctx(ctx)
+        clean = _I(0)
+        k = int(lib.moy_ui_api_shift_drawn(p, c.byref(clean)))
+        return k | (4 if clean.value else 0)
+
+    def api_band(ctx, r=None):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 4)() if r is None else (c.c_int32 * 4).from_buffer(r)
+        if not lib.moy_ui_api_band(p, v):
+            return None
+        return tuple(v) if r is None else r
+
+    def api_floor(ctx):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 96)()
+        n = int(lib.moy_ui_api_floor(p, v, 24))
+        if n < 0:
+            return None
+        return tuple(tuple(v[4 * i:4 * i + 4]) for i in range(n))
+
+    def api_card_clip(ctx, r):
+        p, _k = _ctx(ctx)
+        v = (c.c_int32 * 4).from_buffer(r)
+        lib.moy_ui_api_card_clip(p, c.addressof(v))
+        return r
+
+    def api_keep(ctx, cv, look, id_, h):
+        p, _k = _ctx(ctx)
+        t, keep = span(id_)
+        return int(lib.moy_ui_api_keep(p, c.byref(sink(cv, look)), t, int(h)))
+
+    def api_audit(on):
+        return int(lib.moy_ui_api_audit(int(on)))
+
     def api_end(ctx, cv, look):
         p, _k = _ctx(ctx)
         lib.moy_ui_api_end(p, c.byref(sink(cv, look)))
@@ -1356,6 +1408,7 @@ def binding():
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
               api_owes, api_moved, api_moving, api_offset, api_fades,
+              api_shift_plan, api_shift_arm, api_shift_drawn, api_band, api_floor, api_card_clip, api_keep, api_audit,
               api_end,
               api_table_rows, api_table_pics,
               api_grid,

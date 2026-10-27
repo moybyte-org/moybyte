@@ -74,4 +74,5 @@ def test_scroll_ring_keeps_the_largest_n(tmp_path):
     r.set((0, 0, 100, 100), 1000)
     for f in range(5):
         r.note_painted(f)
-    assert len(r._painted) == _MAX_RETAINED
+    assert r.ring.size == _MAX_RETAINED
+    assert [r.ring.frame(i) for i in range(_MAX_RETAINED)] == [4, 3, 2]

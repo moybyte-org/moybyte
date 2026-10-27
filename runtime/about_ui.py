@@ -109,6 +109,11 @@ def wrap_lines(paras, w):
     return out
 
 
+# The list's override table: the parts this image holds never change while it
+# runs, so its gen never moves (docs/scroll_and_text_2026-10.md §3.3).
+_LIST_PAGE = {"gen": 0}
+
+
 class LicencesPage:
     """Settings' Licences page (`SettingsLayer` draws it on its sub page's
     host): the parts and their licences, and a part's licence text."""
@@ -220,7 +225,7 @@ class LicencesPage:
         return got
 
     def _draw_list(self):
-        _ui.page("")
+        _ui.page("", _LIST_PAGE)
         _ui.hints(_HINT_LIST)
         if self._focus is not None:
             _ui.focus(self._focus)

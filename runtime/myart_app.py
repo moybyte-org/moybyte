@@ -27,6 +27,8 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui
 
+from array import array
+
 try:
     from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
     from moy_store_base import builtin_name
@@ -46,7 +48,7 @@ except ImportError:  # pragma: no cover - direct host import
 DRAWINGS = "drawings"
 TOAST_MS = 2000
 NEW = "New drawing"
-_NEW_CARD = {"id": NEW, "icon": "new", "tone": "value"}
+_NEW_CARD = {"id": NEW, "icon": "new", "tone": "value", "gen": 0}
 _DIM_CAPTION = {"tone": "dim", "face": "caption"}
 _BACK = ("back", "Back")
 _CLOSE = ("back", "Close")
@@ -54,6 +56,14 @@ _GRID_HINTS = ("confirm", "Open", "N", "New", "M", "Menu", "back", "Back")
 # The verbs' keys, typed.
 _KEYS = {ord("n"): "new", ord("m"): "menu", ord("w"): "wallpaper", ord("g"): "game",
          ord("r"): "rename", 0x04: "dup", 0x7F: "trash", 0x08: "trash"}
+
+
+def _owes(owed, name):
+    """Whether `owed`, (name, w, h) a picture, names `name`."""
+    for o in owed:
+        if o[0] == name:
+            return True
+    return False
 
 
 class MyArtLayout:
@@ -141,6 +151,12 @@ class MyArtAppLayer:
         self._focused = None
         self._key = 0
         self._cards = None            # (drawings, wallpaper, [card]) as `_cards_of` made them
+        self._built = {}              # a drawing's name -> the pictures made for it
+        self._pic_wh = None           # a card's picture's size, as the grid drew it
+        self._gens_due = True         # the cards' gens to be read again (`_grid`)
+        self._clip = array("i", [0, 0, 0, 0])   # a picture's clip (`ui.card_clip`)
+        self._band = array("i", [0, 0, 0, 0])   # the rows the frame draws (`ui.band`)
+        self._grid_o = {"gen": 0}     # the grid's region's override table: its gen
         self._caption = None          # (count, wallpaper, left, right, right's width)
         self._foot_k = None           # the desk foot as `_foot_of` made it
         self._whole = (0, 0, 0, 0)    # the page's rect, the canvas's
@@ -199,6 +215,7 @@ class MyArtAppLayer:
         self.game = None
         self.toast = None
         self.covers.recheck()
+        self._gens_due = True
         self._refresh()
         self._ui.reset()
         self._focus = self._card_id(self.drawings[0]) if self.drawings else NEW
@@ -219,6 +236,8 @@ class MyArtAppLayer:
         if self._owed:
             name, w, h = self._owed.pop(0)
             self.covers.get(name, w, h)
+            self._built[name] = self._built.get(name, 0) + 1   # its picture landed
+            self._gens_due = True         # ...and the cache may have let one go
             self._damage.all()
         self.idle_owed = bool(self._owed)
 
@@ -433,13 +452,17 @@ class MyArtAppLayer:
             return c[2]
         cards = []
         for name in self.drawings:
-            o = {"id": self._card_id(name)}
+            # the card's gen (docs/scroll_and_text_2026-10.md §3.3), set as
+            # the grid draws it
+            o = {"id": self._card_id(name), "gen": 0}
             if name == self.wallpaper:
                 o["badge"] = "wallpaper"
             cur = dict(o)
             cur["current"] = True
             cards.append((name, shown(name), o, cur))
         self._cards = (self.drawings, self.wallpaper, cards)
+        self._grid_o["gen"] += 1          # the cards are others
+        self._gens_due = True
         return cards
 
     def _grid(self, cv):
@@ -462,8 +485,9 @@ class MyArtAppLayer:
             ui.at(x + w - cap[4], y, cap[4], h)
             ui.label(cap[3], _DIM_CAPTION)
         g = lay.grid
+        cards = self._cards_of()
         ui.at(g[0], g[1], g[2], g[3])
-        ui.scroll("drawings")
+        ui.scroll("drawings", self._grid_o)
         cw, ch = lay.card
         ui.grid("drawings", cw, ch, lay.grid_o)
         r = ui.card(NEW, "", _NEW_CARD)
@@ -472,16 +496,40 @@ class MyArtAppLayer:
         menu = self.menu
         covers = self.covers
         owed = self._owed
-        del owed[:]
-        for c in self._cards_of():
+        # a shift frame draws the cards its floor reaches alone: the pictures
+        # owed by the others stay owed
+        b = ui.band(self._band)
+        whole = b is None or b[3] >= g[3]
+        if whole:
+            del owed[:]
+        wh = self._pic_wh
+        if self._gens_due and wh is not None:
+            # each card's gen: the pictures made for it, and whether one is
+            # here to draw (a picture the cache let go is a blank again)
+            self._gens_due = False
+            built = self._built
+            for c in cards:
+                gen = built.get(c[0], 0) * 2 + (
+                    1 if covers.peek(c[0], wh[0], wh[1]) is not None else 0)
+                c[2]["gen"] = c[3]["gen"] = gen
+        for c in cards:
             name = c[0]
             r = ui.card(c[1], "", c[3] if menu and name == self.cur else c[2])
             if r[2]:
-                if covers.owed(name, r[2], r[3]):
+                if wh is None or wh[0] != r[2] or wh[1] != r[3]:
+                    wh = self._pic_wh = (r[2], r[3])
+                    self._gens_due = True
+                if covers.owed(name, r[2], r[3]) and (whole or not _owes(owed, name)):
                     owed.append((name, r[2], r[3]))
                 pic = covers.peek(name, r[2], r[3])
                 if pic is not None:
-                    cv.clip(g[0], g[1], g[2], g[3])
+                    k = self._clip
+                    k[0] = g[0]
+                    k[1] = g[1]
+                    k[2] = g[2]
+                    k[3] = g[3]
+                    ui.card_clip(k)
+                    cv.clip(k[0], k[1], k[2], k[3])
                     cv.picture(pic, r[0], r[1], r[2], r[3])
                     cv.clip()
             if r[4] & ui.ACTIVATED and not menu:

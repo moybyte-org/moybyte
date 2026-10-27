@@ -481,6 +481,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     canvas bigger than the 320x240 game canvas."""
 
     has_desk = True
+    # One voucher per region: the shown ring (`_shown`) speaks for a
+    # window's content here, never the content's own ring.
+    CONTENT_RING = False
     # `chips` (the taskbar's window chips) has a value in desktop mode only.
     LAYOUT_CATALOGUE = {"desktop": _LAYOUT_WIDGETS,
                         "console": FullscreenStackWM.LAYOUT_CATALOGUE["console"]}
