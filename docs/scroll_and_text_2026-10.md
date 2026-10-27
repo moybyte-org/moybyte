@@ -454,7 +454,13 @@ paint re-arms the ring.
 
 ## 5. Text editors: the edited line and the caret
 
-**One body: `TextView`** (`runtime/ui_draw.py`), the view of a text buffer
+**One body: `TextView`**, a verb of the C UI library (`native/moy_ui`) and
+part of the app-facing `ui` API (`docs/ui_api_2026-10.md`), not an Editor
+helper: an app that wants a text area -- a chat log, a terminal -- calls the
+same verb in Python, Lua or a compiled app and gets the same rows, its look
+from the theme like every other part and changed per call through the
+API's overrides (§3 there). The shell's editors are its first callers. It
+is the view of a text buffer
 in **visual rows** -- a wrapped paragraph's rows, a code line's one row --
 with the first visible row, the rows' pitch, the caret, the selection, and a
 `PaintRing`. The Code tab (`CodeLayer`, which the theme Config text extends
@@ -990,6 +996,14 @@ cart's to set.
 3. The host desk takes direct render of key frames like the P4, so the host
    is the test bed; its cursor is hidden in that bed.
 4. No rubber band at the clamp.
+5. The editors move onto the C UI library: the Code tab, theme Config, the
+   Blocks outline and prompts, Config's cards, Cart info, Map, Music and the
+   pickers lay out, focus and draw through the engine, as the apps do.
+   Their look does not change: the Editor goldens stay byte-identical, and
+   a detail the engine cannot draw extends the engine.
+6. `TextView` is a public `ui` verb, consistent with the rest of the API,
+   so any app (a chat app, a terminal) gets a text area and restyles it
+   through the theme and the per-call overrides.
 
 ## 18. Review ledger (2026-10-27)
 
