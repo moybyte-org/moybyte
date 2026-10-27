@@ -188,6 +188,35 @@ class P4SystemCanvas(SystemCanvas):
             P4SystemCanvas._ppa = None
             return False
 
+    # The least copy the AXI GDMA takes in blit_strip: below it the engine's
+    # install round trip is a large share of the copy.
+    GDMA_COPY_MIN = 65536
+
+    def blit_strip(self, layer, dst_x=0, dst_y=0):
+        """SystemCanvas.blit_strip, with a picture as wide as this surface,
+        placed at its top-left (a full-screen window's stamp), moved by the
+        AXI GDMA (`moy_ppa.copy`): its rows are one contiguous span in both
+        buffers. On the Waveshare's 1024x600 glass that is ~12 ms against the
+        CPU's ~26 (the copy_last measurements, docs/surface_model_v1.md
+        §14.5). Any other placement, an engine-less build or a span the
+        engine refuses is the CPU's copy."""
+        ppa = self._ppa
+        if (ppa is not None and dst_x == 0 and dst_y == 0 and layer.w == self.w
+                and layer.h <= self.h and self._ox == 0 and self._oy == 0
+                and self._stride == self.w):
+            n = 2 * layer.w * layer.h
+            cp = getattr(ppa, "copy", None)
+            if cp is not None and n >= self.GDMA_COPY_MIN:
+                self.flush_batch()
+                if hasattr(layer, "flush_batch"):
+                    layer.flush_batch()
+                try:
+                    if cp(self._buf, layer._buf, 0, n):
+                        return
+                except Exception:  # noqa: BLE001 -- a short buffer: the CPU's copy
+                    pass
+        SystemCanvas.blit_strip(self, layer, dst_x, dst_y)
+
     # new_layer is DeviceCanvas.new_layer's one body (the SystemCanvas
     # _make_layer hook constructs this class); its COMPACT-FIRST pre-collect
     # matters MORE here -- a collect on the P4 desk is ~55ms and the bar's

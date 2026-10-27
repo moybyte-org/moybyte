@@ -499,8 +499,13 @@ _ST_PROF = 9
 _ST_N_FILL, _ST_N_TEXT = 10, 11
 _ST_T_FILL, _ST_T_TEXT = 12, 13
 _ST_FILLP = 14
-_ST_LEN = 15
+_ST_DMA_MIN = 15
+_ST_LEN = 16
 _GATE_RECT, _GATE_RECTB, _GATE_PRINT, _GATE_PIX = 0, 1, 2, 3
+
+# The least block a backend's DMA fill takes (P4SystemCanvas.ppa_fill): below
+# it the engine's submit costs more than the CPU's fill (measured 2026-07-26).
+_DMA_FILL_MIN = 16384
 
 # Image comes from moy_image now -- ONE definition, shared with the host canvas
 # that used to carry the other copy. Re-exported because device_api and the cart
@@ -730,6 +735,9 @@ class DeviceCanvas:
         # read -- 4-5x a CPU fill above the crossover. None on backends without
         # one, so those keep the moy_gfx path untouched.
         self._ppa_fill = getattr(self, "ppa_fill", None)
+        if self._ppa_fill is not None:
+            # ...and the rect gate hands such a block back to rect -> _fill.
+            self._gate_state[_ST_DMA_MIN] = _DMA_FILL_MIN
         # What native/moy_ui's primitives draw through: this canvas's CANVAS
         # handle, and the sprite queue a primitive lands before it draws.
         self._ui = (self._crow.h, self._batch_arr)
@@ -1239,6 +1247,12 @@ class DeviceCanvas:
             y1 = cy1
         if x1 <= x0 or y1 <= y0:
             return
+        if (x1 - x0) * (y1 - y0) >= _DMA_FILL_MIN:
+            # A big block goes to the DMA fill where the backend has one (cls's
+            # #155 hook): it skips the write-allocate read a CPU fill pays.
+            pf = self._ppa_fill
+            if pf is not None and pf(x0, y0, x1 - x0, y1 - y0, col):
+                return
         if self._prof:
             _t0 = _ticks_us()          # #66 DRAW2: fill bucket (rect/rectb/circ spans)
             self._gfx.fill_rect(self._buf, self._stride, x0, y0, x1 - x0, y1 - y0, col)
@@ -1651,10 +1665,44 @@ class DeviceCanvas:
             | ((line & 255) << 8)
         hi = self._col(ring) if ring is not None else 0
         lo = self._col(ring_lo) if ring_lo is not None else -1
+        if self._ppa_fill is not None and isinstance(fill, int) and mask != 2 \
+                and w * h >= _DMA_FILL_MIN:
+            n = self._rrect_dma(int(x), int(y), int(w), int(h), int(r), opts, hi, lo,
+                                self._col(fill), line)
+            if n is not None:
+                return n
         return self._gfx.rrect(self._buf, self._stride, int(x), int(y), int(w), int(h),
                                int(r), opts, hi, lo, self._paint_arg(fill, y, h),
                                self._cam_x, self._cam_y, self._clip_x0, self._clip_y0,
                                self._clip_x1, self._clip_y1)
+
+    def _rrect_dma(self, x, y, w, h, r, opts, hi, lo, col, line):
+        """rrect with a solid fill whose middle is a big block: the block
+        (`r` and the ring's width in from every side, where every row is the
+        fill colour alone) to the backend's DMA fill, then the kernel over
+        the four bands of the clip round it -- the same pixels and the same
+        count. None where the block is small or the fill refused it."""
+        k = r if r > line else line
+        bx = x - self._cam_x
+        by = y - self._cam_y
+        cx0, cy0, cx1, cy1 = self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1
+        hx0 = bx + k if bx + k > cx0 else cx0
+        hy0 = by + k if by + k > cy0 else cy0
+        hx1 = bx + w - k if bx + w - k < cx1 else cx1
+        hy1 = by + h - k if by + h - k < cy1 else cy1
+        if hx1 <= hx0 or hy1 <= hy0 or (hx1 - hx0) * (hy1 - hy0) < _DMA_FILL_MIN:
+            return None
+        if not self._ppa_fill(hx0, hy0, hx1 - hx0, hy1 - hy0, col):
+            return None
+        n = (hx1 - hx0) * (hy1 - hy0)
+        rr = self._gfx.rrect
+        buf, stride, cam_x, cam_y = self._buf, self._stride, self._cam_x, self._cam_y
+        for b0, b1, b2, b3 in ((cx0, cy0, cx1, hy0), (cx0, hy1, cx1, cy1),
+                               (cx0, hy0, hx0, hy1), (hx1, hy0, cx1, hy1)):
+            if b2 > b0 and b3 > b1:
+                n += rr(buf, stride, x, y, w, h, r, opts, hi, lo, col,
+                        cam_x, cam_y, b0, b1, b2, b3)
+        return n
 
     def shadow(self, x, y, w, h, r, c, alpha, blur, dx=0, dy=0, hole=None,
                stepped=False):

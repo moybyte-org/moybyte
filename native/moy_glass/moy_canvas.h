@@ -39,6 +39,7 @@ enum {
     MOY_ST_N_FILL, MOY_ST_N_TEXT,
     MOY_ST_T_FILL, MOY_ST_T_TEXT,
     MOY_ST_FILLP,           // 1 while a fill pattern is set: rect/rectb gates decline
+    MOY_ST_DMA_MIN,         // a rect this many pixels or more goes to the canvas's DMA fill
     MOY_ST_LEN
 };
 

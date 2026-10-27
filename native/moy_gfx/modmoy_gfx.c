@@ -1453,6 +1453,8 @@ enum {
     ST_N_FILL, ST_N_TEXT,    // call counts (always) -- proof the gate is live
     ST_T_FILL, ST_T_TEXT,    // microseconds (only while ST_PROF)
     ST_FILLP,                // 1 while a fill pattern is set (rect/rectb decline)
+    ST_DMA_MIN,              // a rect this many pixels or more declines: the
+                             // canvas's own verb hands it to a DMA fill (0: never)
     ST_LEN
 };
 
@@ -1798,6 +1800,10 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
         if (!gate_num(args[i], &v[i])) {
             return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
         }
+    }
+    if (kind == GATE_RECT && st[ST_DMA_MIN] > 0 && v[2] > 0 && v[3] > 0
+        && v[2] * v[3] >= st[ST_DMA_MIN]) {
+        return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
     }
     uint16_t col = c->pal[(size_t)(v[4] & moy_canvas_cmask)];
     if (kind == GATE_RECT) {
