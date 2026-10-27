@@ -727,14 +727,14 @@ active one (a switch would rewrite its `inherits`).
 has no home of its own — its root is the desk, and PLAY enters console mode
 (§3). So there is one home component on every board, drawn by one layer, in
 an **arrangement** the layout's `home` key picks (L14, owner 2026-10-14): the
-`carousel` (the default, below), the `grid` -- the shelf, its two-row card
-grid on a panel, with the same tab row (in the panel's header), the same
-sources, taps and bar-zone verbs, and no Make tile (a tall "+ New" heads the
-Make tab) -- or `icons`, the small icon-only grid (Nintendo-style;
-`docs/theming_2026-09.md` §9 phase 6 step 11): the grid's panel, tab row,
-keys, taps and verbs over one-tile cards, each the cart's icon in the
-theme's `desk.icon` tile, the focused card's name in the desk's label pill
-under it and no other card's, "+ New" a card like the rest. The carousel:
+`carousel` (the default, below), the `grid` -- a shelf of cover cards, each
+titled under it, in the rows the glass holds, scrolling sideways -- or
+`icons`, the small icon-only grid (Nintendo-style; `docs/theming_2026-09.md`
+§9 phase 6 step 11): the covers' reduction in tiles that scroll down, the
+focused cart named in a caption band at the foot on a handheld and every
+tile named under it on the desk. All three take the same tabs in the bar,
+sources, taps, keys and hint strip, "+ New" a card like the rest
+(`docs/look_2026-10.md` step 33 draws the grid and the icons). The carousel:
 `LauncherHomeLayer` becomes it, the `Launcher` shelf engine under a **tab
 row** (`ui.tab_row`, a toolkit kind, drawn through C) with four sources. One
 class, four lists; the pinned Make tile goes, its job is the Make tab. The

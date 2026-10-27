@@ -176,22 +176,22 @@ door — no setting, no mode:
   larger; a card tap activates on RELEASE (tap-vs-drag slop, the shared
   `ui.DragTap` machine the Settings rows ride too), so a scroll can never
   launch a cart. The SAME home renders on every tier, the 320×240 T-Deck
-  included. Its other arrangement, and the one the desk's PROJECTS window
-  always shows, is the **shelf**: a grid of two rows that scrolls
-  continuously LEFT-RIGHT (2026-07-13 — paging retired), Make's ＋New card
-  heading its list.
+  included. A layout may pick another arrangement (`home`): the **grid**, a
+  shelf of cards in the rows the glass holds that scrolls LEFT-RIGHT, or the
+  **icons**, tiles that scroll down (`docs/look_2026-10.md` step 33).
 - **Scrolling is KINETIC** (#113, 2026-07-22): a fast release FLINGS the row,
   which coasts with friction and hard-stops at the ends; a slow or held release
   is a plain stop, and a touch mid-coast CATCHES it (that catching tap never
   activates a card). The physics lives in the shared `ui.ScrollRegion`, so the
-  shelf flings identically; scroll/fling frames repaint via
-  the scroll-as-blit band path (shift the retained pixels, redraw only the
-  exposed strip), which is what makes a 60Hz coast affordable on every backend.
+  grid and the icons fling identically; a scroll or fling frame repaints the
+  cards' band alone over its captured backdrop (the drag partial), never the
+  bars or the hint strip.
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
   v1 §1.2): PLAY runs it (same as the tap), CHANGE opens the SAME project in the
   Editor landing on Config — the bridge from playing to making, in place, never a
-  surprise duplicate. The verbs ride the lent bar zone as chips on every tier,
-  the active tab's set. The `C` (code) key is the keyboard route.
+  surprise duplicate. The verbs ride the home's hint strip on every tier (on
+  the desk also the details pane's buttons), the active tab's set. The `C`
+  (code) key is the keyboard route.
 - **Making is an app you launch:** the home's **Make** tab — fullscreen, or on
   the desk in the PROJECTS window — lists EVERY editable cart (wallpapers and
   built-ins included) after a **＋New** card. Picking a project opens it in the

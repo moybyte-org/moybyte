@@ -324,7 +324,7 @@ _s = _t.ticks_us()
 _items = ws._launcher_items(ws.carts.all)
 _i = _t.ticks_diff(_t.ticks_us(), _s)
 _s = _t.ticks_us()
-_l = _c.Launcher(_items, ws.layout, _c.NAMES, _c._uimod.glyph)
+_l = _c.Launcher(_items, ws.layout, _c.NAMES)
 _k = _t.ticks_diff(_t.ticks_us(), _s)
 ws._census_launch = (_i, _k, len(_items))
 _items = _l = None

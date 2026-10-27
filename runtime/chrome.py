@@ -365,11 +365,11 @@ class Layout(LayoutBase):
         self.icon_y0 = self.cy + 8 * fs
         self.grid_bottom = bottom - 4 * fs           # launcher grid floor
         self.icon_x0 = self.cx + _ICON_X0 * fs
-        # The home's grid arrangement, the SHELF (visual identity v1's library
-        # concept mockup), on EVERY tier -- the T-Deck's 320x240 baseline included (the home's
-        # carousel lays itself out in launcher_layer.Carousel). A card grid that
-        # SCROLLS continuously LEFT-RIGHT (owner call, 2026-07-13: a shelf slides
-        # sideways; no pages): slot 0 is the ONE tall
+        # The library SHELF's geometry (visual identity v1's library concept
+        # mockup). No home draws it: every arrangement lays itself out in
+        # launcher_layer (`Carousel`, `Launcher._lay_cells`); the on-glass
+        # tools read `lib_grid` as a drag rect. A card grid that SCROLLS
+        # continuously LEFT-RIGHT: slot 0 is the ONE tall
         # FEATURED card (the pinned "+ New", column 0 spanning both visible
         # rows at the head of the list); every other cartridge card stacks the
         # columns marching right, `rows` per column.
@@ -405,16 +405,6 @@ class Layout(LayoutBase):
         self.lib_card_h = (gh - self.lib_gap) // 2
         self.lib_step = self.lib_card_w + self.lib_gap   # one-column scroll step
         self.lib_grid = (gx, gy, gw, gh)
-        # Whether a card is big enough to carry its own PLAY/CHANGE button row
-        # (visual identity v1 Section 1.2): the row + title band (the exact
-        # heights the card draw uses) must leave the cover art at least half the
-        # card. Small-card tiers (the 320x240 baseline's ~69px-tall cards) keep
-        # the verbs as lent-bar-zone chips instead (Section 7: on the small tier
-        # selected actions use the zoned bar).
-        band_h = max(14 * fs, 20)
-        btn_area = max(13 * fs, 22) + 2 * max(2 * fs, 3)
-        self.lib_card_actions = (
-            self.lib_card_h - band_h - btn_area >= self.lib_card_h // 2)
 
         # -- the bars: icon size + stride (Stage 1) ----------------------------
         # Every bar control is a 16x16 IconSheet sprite (16px icons, 1px margin in the
@@ -456,19 +446,6 @@ class Layout(LayoutBase):
         self.clock_x = clock[0] if clock is not None else None
         zone = self._cell("zone") or (edge, _BAR_Y, 0, ic)
         self.zone_left = zone
-
-        # -- scroll nudge arrows (the pager's successors) ----------------------
-        # Boxed left/right arrow buttons in the Library panel footer's corners:
-        # each tap slides the card grid by one column (drag + scrollbar +
-        # keyboard nav are the primary scroll affordances; these are the big
-        # tap targets).
-        px_, py_, pw_, ph_ = self.lib_panel
-        ah = max(16 * fs, self.lib_footer_h * 2 // 3)   # touch-target floor at fs1
-        aw = max(22 * fs, 30)
-        am = max(10 * fs, 20)
-        ay = py_ + ph_ - self.lib_footer_h + (self.lib_footer_h - ah) // 2
-        self.scroll_lt = (px_ + am, ay, aw, ah)
-        self.scroll_rt = (px_ + pw_ - am - aw, ay, aw, ah)
 
         # -- Settings rows + panel (a row is a TAP TARGET -> the chrome scale) ---
         # The row list already scrolls (_settings_visible derives its window from

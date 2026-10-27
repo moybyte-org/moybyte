@@ -290,40 +290,6 @@ def test_carousel_moving_frame_restores_only_around_the_cards(tmp_path, monkeypa
     assert bw * bh - cards <= area[0] < bw * bh
 
 
-def test_shelf_blit_frame_is_pixel_faithful(tmp_path):
-    """The same band contract on the second pilot surface: the home in its
-    grid arrangement (the shelf on its panel)."""
-    from runtime import host_app
-
-    ws = _ws_with_carts(tmp_path, 14)
-    drv = host_app.ConsoleDriver(ws)
-    ws.set_home_arrangement("grid")
-    ws.set_home_tab("make")
-    for _ in range(80):                       # settle covers; arm streak + ring
-        drv.frame(1 / 30)
-    assert ws.screen == "launcher"
-    calls = _spy_scroll_rect(ws)
-    gx, gy, gw, gh = ws.layout.lib_grid
-    cx, cy = gx + gw - 10, gy + gh // 2
-    lastx = _drag_frames(drv, cx, cy, 7)
-    assert ws.launcher.dragging
-    assert calls[0] > 0
-    partial = bytes(ws.sys_canvas._buf)
-    scroll = ws.launcher.scroll
-    ws.launcher_layer._full_streak = 0
-    ws.launcher._region.invalidate()
-    ws.mark_dirty()
-    drv.touch_drag(lastx, cy)
-    drv.frame(1 / 30)
-    assert ws.launcher.scroll == scroll
-    full = bytes(ws.sys_canvas._buf)
-    row = ws.sys_canvas.w * ws.layout.status_h
-    assert full[row:] == partial[row:]
-    drv.touch_up()
-    drv.frame(1 / 30)
-    assert ws.screen == "launcher"            # the drag opened nothing
-
-
 # -- the web transport (#113 Phase 6: the scr op) ----------------------------
 
 def test_shelf_blit_arms_in_a_window(tmp_path):

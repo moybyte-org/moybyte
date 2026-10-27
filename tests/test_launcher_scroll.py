@@ -444,7 +444,6 @@ def test_the_grid_arrangement_shares_the_tabs_and_the_verbs(tmp_path):
     assert [t for t, _r, _on in home.tab_rects()] == ["games", "mine", "apps", "make"]
     ws.set_home_tab("games")
     drv.frame(1 / 30)
-    assert not g._featured()                             # no Make tile: uniform columns
     drv.press("down")
     drv.frame(1 / 30)
     drv.frame(1 / 30)
@@ -466,7 +465,7 @@ def test_the_grid_arrangement_shares_the_tabs_and_the_verbs(tmp_path):
     assert ws.screen == "desktop" and g.sel == game     # a card's tap runs it
     ws._exit_to_caller()
     ws.set_home_tab("make")
-    assert g._featured() and g.tile_rect(0)[3] > g.tile_rect(1)[3]   # "+ New" tall
+    assert g.items[0]["type"] == "new" and g.tile_rect(0)[3] == g.tile_rect(1)[3]
 
 
 def test_a_layouts_home_picks_the_arrangement(tmp_path):

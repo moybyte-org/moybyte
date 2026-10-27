@@ -3468,7 +3468,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         §12): the Carousel (the home window's, always), the shelf grid or
         the icon grid."""
         cls = _HOME_CLASSES.get(arrangement, Carousel)
-        g = cls(items, self.layout, NAMES, _ui_draw.glyph)
+        g = cls(items, self.layout, NAMES)
         # The "+ New" card draws the live icon set's plus (iconsets.plus).
         g.icon_spec = self.icon_spec
         g.cover_for = self.covers.cover_for

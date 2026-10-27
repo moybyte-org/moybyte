@@ -68,9 +68,10 @@ its keyboard's keys. They are written into OUT/kit/ with their own
 index.txt; `--only-kit` skips the mockup pairs.
 
 Every render is checked, and a failed check fails the run (exit 1): the
-handheld hero's focus mark lies under the bar, every cover a home draws is
-the whole 128 px cover at a clean scale, a menu over content leaves one focus
-mark on the screen, an open tab's pill has its ink padded alike both sides,
+handheld hero's focus mark lies under the bar, every cover a carousel or a
+shelf draws is the whole 128 px cover at a clean scale (a shelf's focused
+card grown by its focus; the icons draw the covers' reduction), a menu
+over content leaves one focus mark on the screen, an open tab's pill has its ink padded alike both sides,
 and a theme's bar packs alike in every mode the run drew it in. A kit
 scene draws the keys of the run's `--input`, else the T-Deck's on the
 handheld and the keyboard's on the desk, and its index says which. `--audit`
@@ -697,6 +698,21 @@ def _iconsets_slot(name):
     return iconsets.SLOT[name]
 
 
+def _arranged(arrangement, console=False):
+    """The home in the layout's `arrangement` ("grid" or "icons"), on Games
+    with the target's focus: the second card on the grid, the second row's
+    second tile in the icons."""
+    def setup(g, ws):
+        (_console_home if console else _home)(g, ws)
+        ws.set_home_arrangement(arrangement)
+        grid = ws.launcher
+        grid.sel = min(len(grid.items) - 1, grid.index_of(0, 1) if arrangement == "grid"
+                       else grid.index_of(1, 1))
+        grid.scroll = 0
+        grid._scroll_to_sel()
+    return setup
+
+
 # The scenes of step 33 the shell draws: screen -> (config, set up).
 OLD_LOOK = {
     "handheld_theme-door": (HANDHELD, _theme_door),
@@ -748,6 +764,19 @@ OLD_LOOK = {
     "desktop_calendar": (DESK, _popover("clock", lambda g, ws: _desk(g, ws))),
     "desktop_power": (DESK, _popover("battery", lambda g, ws: _desk(g, ws))),
     "desktop_wifi": (DESK, _popover("wifi", lambda g, ws: _desk(g, ws))),
+    "handheld_home-grid": (HANDHELD, _arranged("grid")),
+    "handheld_home-grid-s3": (S3, _arranged("grid")),
+    "desktop_home-grid": (CONSOLE, _arranged("grid", True)),
+    "handheld_home-icons": (HANDHELD, _arranged("icons")),
+    "handheld_home-icons-s3": (S3, _arranged("icons")),
+    "desktop_home-icons": (CONSOLE, _arranged("icons", True)),
+    # the variants the step declined, beside the icons as built
+    "handheld_home-icons-pop": (HANDHELD, _arranged("icons")),
+    "handheld_home-icons-labels": (HANDHELD, _arranged("icons")),
+    "handheld_home-icons-pop-s3": (S3, _arranged("icons")),
+    "handheld_home-icons-labels-s3": (S3, _arranged("icons")),
+    "desktop_home-icons-pop": (CONSOLE, _arranged("icons", True)),
+    "desktop_home-icons-caption": (CONSOLE, _arranged("icons", True)),
 }
 
 
@@ -2664,8 +2693,13 @@ def checks(ws, probe, img):
             top = geom[7] - geom[2] - ui_draw.mark_reach("card")
             out.append(("hero rim", top >= geom[1][1],
                         "mark top y %d, bar line y %d" % (top, geom[1][1])))
-    for dx, dy, dw, dh in (probe.last["covers"] if ws.screen == "launcher" else ()):
-        out.append(("clean cover", dw == dh and _clean(dw),
+    # the carousel's and the shelf's cards (the shelf's focused one grown by
+    # its focus); the icons are the covers' reduction
+    arr = getattr(grid, "arrangement", None)
+    grow = grid.grow() if arr == "grid" else 0
+    for dx, dy, dw, dh in (probe.last["covers"] if ws.screen == "launcher"
+                           and arr != "icons" else ()):
+        out.append(("clean cover", dw == dh and (_clean(dw) or _clean(dw - 2 * grow)),
                     "%dx%d at (%d, %d)" % (dw, dh, dx, dy)))
     if menu:
         out.append(("one focus mark", probe.marks <= 1,

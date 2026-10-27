@@ -100,7 +100,7 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     # head of a continuously left-right SCROLLING card list). Columns are
     # RESOLUTION-driven (cards target ~w/5, the mockup's proportions) -- a
     # bigger canvas buys bigger cards and crisper 1x text, not magnification.
-    assert ws.launcher.COLS >= 4 and ws.launcher.ROWS >= 2
+    assert ws.layout.cols >= 4 and ws.layout.rows >= 2
     assert ws.layout.grid_content_w(len(ws.launcher.items)) > 0
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
@@ -250,7 +250,7 @@ def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
     # shelf (3 columns at the small tier's card proportions).
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
-    assert ws.launcher.COLS == 3 and ws.launcher.ROWS == 2
+    assert ws.layout.cols == 3 and ws.layout.rows == 2
 
 
 def test_composite_safe_when_system_canvas_smaller_than_game(tmp_path):

@@ -20,8 +20,8 @@ carousel at any ratio through `DeviceCanvas.blit565_resize`
 no per-size variants). Two other decodes of the same file exist, each for one
 consumer:
 
-  * HALF, 64 x 64, its box-filtered reduction: the card whose art slot is
-    under 128 and whose cart names no icon (the T-Deck's home cards);
+  * HALF, 64 x 64, its box-filtered reduction: a card under 128 across
+    (the handheld shelf's cards and the icon home's tiles);
   * ICON, 16 x 16, a reduction in palette indices: the desktop icon of a cart
     that names no SPEC.md 3.4 icon (`icon_sheet_for`).
 

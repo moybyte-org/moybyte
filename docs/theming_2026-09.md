@@ -1943,23 +1943,15 @@ port), never here.
      on every console board on the desk; the carousel's and the grid's
      goldens hold.
      **As built.** `IconHome` (`runtime/launcher_layer.py`) is the grid's
-     `Launcher` over its own cells (`_IconCells`), which stand in as its
-     layout: square tiles with a label band under each, two or three rows
-     sized from the content width, the columns spread across the grid's
-     viewport -- so the grid's selection, keys, taps, scroll, fling and
-     drag partial run unchanged, on its panel and band. A cell's icon is the cover's ICON reduction
-     where the cart names no icon, else its sheet's tile, else its type
-     glyph, at a whole-number scale; the focused cell wears the ring, the
-     favourite star and the label pill, which reaches half a column past
-     its tile each side (the drag partial redraws the selected card over
-     that reach). The tile and the pill are the desk's own bodies,
-     `ui.icon_tile` and `ui.icon_label`, which the desk now draws through.
-     The theme loader reads `icons` (style.json's `layout.homes`); a
-     theme's layout reaches it, or Edit theme… on one. Goldens:
-     `tdeck_320x240_fs1_homeicons` and `p4_1024x600_cs2_fs1_homeicons`,
-     the home's four tabs each; `tools/p4_bench.py --icons` runs the
-     scenarios beside the grid's; the numbers are #66's. Net:
-     `tests/test_icon_home.py`.
+     `Launcher` model over its own cells. The theme loader reads `icons`
+     (style.json's `layout.homes`); a theme's layout reaches it, or Edit
+     theme… on one. Goldens: `tdeck_320x240_fs1_homeicons` and
+     `p4_1024x600_cs2_fs1_homeicons`, the home's four tabs each;
+     `tools/p4_bench.py --icons` runs the scenarios beside the grid's; the
+     numbers are #66's. The 2026-10 look's step 33 drew it again
+     (`docs/look_2026-10.md`): the covers' reduction in tiles that scroll
+     down, a caption band on the handheld. Net:
+     `tests/test_home_grid_icons.py`.
 
   12. **EDIT TASKBAR** (owner, 2026-10-14; deferrable: nothing before it
      depends on it, and until it lands the page has no taskbar row and a

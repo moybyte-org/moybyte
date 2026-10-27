@@ -1319,9 +1319,9 @@ def paint(cv, th, rect, part, state=REST):
 
 
 def icon_tile(cv, th, box):
-    """An icon's tile -- the desk's and the icon home's: the theme's
-    `desk.icon` part (a role-sheet cell or its surface), else a panel box on
-    the edge ink. The icon draws inside it."""
+    """An icon's tile on the desk: the theme's `desk.icon` part (a
+    role-sheet cell or its surface), else a panel box on the edge ink. The
+    icon draws inside it."""
     if not paint(cv, th, box, "desk.icon"):
         cv.rect(box[0], box[1], box[2], box[3], th["panel"])
         cv.rectb(box[0], box[1], box[2], box[3], th["edge"])
@@ -1335,9 +1335,9 @@ def icon_label_rect(band, text, fs):
 
 
 def icon_label(cv, th, band, text, on, fs):
-    """An icon's label under its tile -- the desk's and the icon home's: the
-    theme's `desk` surface as a pill the label's width, or, with none, a
-    chip the band's width."""
+    """An icon's label under its tile on the desk: the theme's `desk`
+    surface as a pill the label's width, or, with none, a chip the band's
+    width."""
     r = icon_label_rect(band, text, fs)
     if paint(cv, th, r, "desk"):
         label(cv, r, text, th["chrome_ink"], ALIGN_CENTER)
@@ -1579,12 +1579,12 @@ def focus_ring(cv, th, rect, fs=None):
 
 # The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
 _MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
-_MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_INK, _MARK_RING = 1, 2, 4, 8, 32
+_MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_INK, _MARK_RING, _MARK_COUNT = 1, 2, 4, 8, 32, 64
 _MARK_KEEP, _MARK_SELECTED, _MARK_PILL = 512, 1024, 2048
 
 
 def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, selected=False,
-          pill=False):
+          pill=False, flat=False):
     """The focus mark on `rect`, the theme's by its size class
     (docs/media/look_2026-10/DESIGN.md, the marks): `size` "card", "small",
     "part", or None to class it by its size. Drawn after the part's own fill
@@ -1601,9 +1601,16 @@ def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, select
     draws the bar's mark whatever the theme's style (an OS widget's, a tab's
     of the home): a plate of the mark's colour under the content, and with
     `after` a ring two units (`fs`) wide on `rect`'s edge, radius `r`; the
-    content keeps its own ink."""
+    content keeps its own ink. `flat` draws the theme's ring as the focus
+    mark, counted, whatever its style: a mark that moves with every focus
+    step and must not lift or shadow its neighbours (the home's grid and
+    icons, docs/look_2026-10.md step 33); a theme without marks draws its
+    own ring."""
+    if flat and _MARKS[0]:
+        ring = True
     return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_CLASS[size], r,
                     (_MARK_AFTER if after else 0) | (_MARK_RING if ring else 0)
+                    | (_MARK_COUNT if flat and _MARKS[0] else 0)
                     | (_MARK_SELECTED if selected else 0) | (_MARK_PILL if pill else 0), fs)
 
 
