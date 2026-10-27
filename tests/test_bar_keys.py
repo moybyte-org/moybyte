@@ -1,7 +1,8 @@
 """The keys reach the bar (owner call 2026-10-26, docs/shell_layout_2026-10.md
-§8): up from the home's tab row or past the top of the surface under a bar
-walks focus onto the bar's items, left and right walk them, confirm opens one
-as a tap does, down and back come off it.
+§8): up past the top of the surface under a bar walks focus onto the bar's
+items, left and right walk them, confirm opens one as a tap does, down and
+back come off it. On the home the bar's items and its tabs are one row
+(tests/test_home_tab_row.py).
 
 The system menu carries Home off the home: the way out of a surface with no
 back of its own, as the home key goes.
@@ -51,31 +52,45 @@ def _cell_x(ws, where, name):
     return r[0]
 
 
-def test_up_from_the_homes_tabs_walks_onto_the_bar_and_opens_a_widget(tmp_path):
+def _walk_to(ws, drv, name):
+    """Right along the home's row (the bar's items and the tabs) onto the
+    bar's `name`."""
+    x = _cell_x(ws, "home", name)
+    for _ in range(12):
+        it = ws.bar_layer.focus_item
+        if it is not None and it[1][0] == x:
+            return
+        _press(drv, "right")
+    raise AssertionError(name)
+
+
+def test_the_homes_row_walks_onto_the_bar_and_opens_a_widget(tmp_path):
     ws, drv = _home(tmp_path)
     bl = ws.bar_layer
     _press(drv, "up")
     assert ws.launcher_layer._tab_focus and bl.focus is None
-    _press(drv, "up")
-    assert bl.focus == 0 and not ws.launcher_layer._tab_focus
-    battery = _cell_x(ws, "home", "battery")
-    while bl.focus_item[1][0] != battery:
-        k = bl.focus
-        _press(drv, "right")
-        assert bl.focus == k + 1, "right walks the bar's items"
+    _press(drv, "left")
+    assert bl.focus == 0 and not ws.launcher_layer._tab_focus, \
+        "left off the first tab is the item left of the tabs"
+    _walk_to(ws, drv, "wifi")
+    k = bl.focus
+    _press(drv, "right")
+    assert bl.focus == k + 1, "right walks the bar's items"
     _press(drv, "a")
     assert ws.sysmenu.open and ws.sysmenu.widget == "battery", "confirm opens its popover"
     _press(drv, "b")
     assert not ws.sysmenu.open and bl.focus is not None, "the popover closes onto the bar"
     _press(drv, "down")
-    assert bl.focus is None and ws.launcher_layer._tab_focus, "down comes back to the tabs"
+    assert bl.focus is None and not ws.launcher_layer._tab_focus, \
+        "down comes off the row to the cards"
+    assert ws.launcher.tab == "games"
 
 
 def test_the_trackball_walks_the_bar(tmp_path):
     ws, drv = _home(tmp_path)
     bl = ws.bar_layer
     _press(drv, "up")
-    _press(drv, "up")
+    _walk_to(ws, drv, "wifi")
     assert ws.ball_steps()
     k = bl.focus
     drv.pan(1, 0)
@@ -99,7 +114,7 @@ def test_the_focused_item_is_marked_in_the_bars_strip(tmp_path):
                         for r in range(h))
     rest = band()
     _press(drv, "up")
-    _press(drv, "up")
+    _press(drv, "left")
     assert bl.focus is not None
     assert band() != rest, "the focus mark draws on the bar"
     _press(drv, "down")
@@ -146,7 +161,7 @@ def test_a_menu_over_the_bar_takes_the_keys(tmp_path):
     ws, drv = _home(tmp_path)
     bl = ws.bar_layer
     _press(drv, "up")
-    _press(drv, "up")
+    _press(drv, "left")
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     k, sel = bl.focus, ws.sysmenu.sel
@@ -163,7 +178,7 @@ def test_the_homes_strip_names_the_bars_keys_while_on_it(tmp_path):
     ws, drv = _home(tmp_path)
     assert launcher_layer.modal_keys(ws) is None
     _press(drv, "up")
-    _press(drv, "up")
+    _press(drv, "left")
     assert launcher_layer.modal_keys(ws) == ui_draw.BAR_KEYS
     _press(drv, "down")
     assert launcher_layer.modal_keys(ws) is None
@@ -205,7 +220,7 @@ def test_the_keys_come_off_the_bar_when_its_surface_goes(tmp_path):
     ws, drv = _home(tmp_path)
     bl = ws.bar_layer
     _press(drv, "up")
-    _press(drv, "up")
+    _press(drv, "left")
     assert bl.focus_where == "home"
     ws.open_settings()
     drv.frame(1 / 30)
@@ -217,10 +232,8 @@ def test_a_popover_the_bar_opened_names_its_own_keys(tmp_path):
     ws, drv = _home(tmp_path)
     bl = ws.bar_layer
     _press(drv, "up")
-    _press(drv, "up")
-    battery = _cell_x(ws, "home", "battery")
-    while bl.focus_item[1][0] != battery:
-        _press(drv, "right")
+    _press(drv, "left")
+    _walk_to(ws, drv, "battery")
     _press(drv, "a")
     assert ws.sysmenu.open and not ui_draw.on_bar()
     assert launcher_layer.modal_keys(ws) != ui_draw.BAR_KEYS
@@ -342,11 +355,9 @@ def test_the_bars_focus_pill_keeps_the_items_ink(tmp_path, theme, variant):
         k = 2 * ((by + y) * cv.w + bx + x)
         return bytes(cv._buf[k:k + 2])
     _press(drv, "up")
-    _press(drv, "up")
+    _press(drv, "left")
     for name in ("wifi", "battery"):
-        x = _cell_x(ws, "home", name)
-        while bl.focus_item[1][0] != x:
-            _press(drv, "right")
+        _walk_to(ws, drv, name)
         box, _r, _u = bl._pill("home", 0, bl.focus_item)
         r = bl.focus_item[1]
         icon = {px(r[0] + i, r[1] + j) for i in range(r[2]) for j in range(r[3])}
@@ -357,4 +368,4 @@ def test_the_bars_focus_pill_keeps_the_items_ink(tmp_path, theme, variant):
         plain = {px(box[0] + box[2] // 2, box[1] + k) for k in range(2)}
         assert ring != plain, (name, "the ring draws on the bar")
         _press(drv, "up")
-        _press(drv, "up")
+        _press(drv, "left")

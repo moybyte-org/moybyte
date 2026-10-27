@@ -1,9 +1,11 @@
-"""The home's tab row (owner call 2026-10-27, docs/shell_layout_2026-10.md
-§8): left and right move a focus along the tabs and stop at the row's ends,
-never onto the bar beside them; confirm opens the tab the focus is on and
-takes the keys to its cards; a tap opens a tab at once. The focused tab
-wears the focus pill and the open one its current mark, so the two read
-apart. A trackball roll along the row that drifts across it stays on it.
+"""The home's tab row (owner calls 2026-10-27, docs/shell_layout_2026-10.md
+§8): where the bar holds the tabs, the tabs and the bar's items are one row
+in screen order -- left and right walk all of them and stop at its ends, up
+stays, down goes to the cards. The walk moves a focus; confirm opens the tab
+the focus is on and takes the keys to its cards; a tap opens a tab at once.
+The focused tab wears the focus pill and the open one its current mark, so
+the two read apart. A trackball roll along the row that drifts across it
+stays on it.
 """
 
 import pytest
@@ -57,19 +59,70 @@ def test_left_and_right_move_the_focus_and_confirm_opens_its_tab(tmp_path):
     assert not ll._tab_focus, "and the keys go to its cards"
 
 
-def test_the_row_stops_at_its_ends_and_never_walks_onto_the_bar(tmp_path):
+def _at(ws):
+    """What the keys are on in the home's row: a tab id, or a bar item's
+    widget name."""
+    tab = ws.launcher_layer.focused_tab()
+    if tab is not None:
+        return tab
+    it = ws.bar_layer.focus_item
+    return None if it is None else it[2]
+
+
+_ROW = ["menu", "games", "mine", "apps", "make", "wifi", "battery", "clock"]
+
+
+def test_the_tabs_and_the_bars_items_walk_as_one_row(tmp_path):
+    """On the T-Deck the tabs sit in the bar between the system button and
+    the status widgets: left and right walk all of them in screen order and
+    stop at the row's ends, and the walk opens no tab."""
     ws, drv = _home(tmp_path)
-    ll = ws.launcher_layer
+    xs = [r[0] for _t, r, _on in ws.launcher_layer.tabs_in_bar()]
+    bl = ws.bar_layer
+    bx = bl.bar_rects("home")[0][0]
+    items = {it[2]: bx + it[1][0] for it in bl.focus_items("home")}
+    on_screen = sorted([(items[n], n) for n in items]
+                       + [(x, t) for x, (t, _l) in zip(xs, launcher_layer.HOME_TABS)])
+    assert [n for _x, n in on_screen] == _ROW
     _press(drv, "up")
-    for _ in range(3):
+    for _ in range(2):
         _press(drv, "left")
-    assert ll.focused_tab() == "games" and ws.bar_layer.focus is None
-    for _ in range(8):
+    seen = [_at(ws)]
+    for _ in range(len(_ROW)):
         _press(drv, "right")
-    assert ll.focused_tab() == "make" and ws.bar_layer.focus is None
-    assert ws.launcher.tab == "games"
+        seen.append(_at(ws))
+    assert seen == _ROW + ["clock"]
+    back = []
+    for _ in range(len(_ROW)):
+        _press(drv, "left")
+        back.append(_at(ws))
+    assert back == _ROW[::-1][1:] + ["menu"]
+    assert ws.launcher.tab == "games", "the walk opens no tab"
+
+
+@pytest.mark.parametrize("on", ["games", "make", "wifi", "menu"])
+def test_up_stays_on_the_row_and_down_goes_to_the_cards(tmp_path, on):
+    ws, drv = _home(tmp_path)
     _press(drv, "up")
-    assert ws.bar_layer.focus is not None, "only up goes onto the bar"
+    _press(drv, "left")
+    while _at(ws) != on:
+        _press(drv, "right")
+    _press(drv, "up")
+    assert _at(ws) == on, "the row is the top line"
+    _press(drv, "down")
+    assert _at(ws) is None and not ws.launcher_layer._tab_focus
+    assert ws.launcher.tab == "games"
+
+
+def test_confirm_on_a_tab_reached_from_the_bar_opens_it(tmp_path):
+    ws, drv = _home(tmp_path)
+    _press(drv, "up")
+    while _at(ws) != "wifi":
+        _press(drv, "right")
+    _press(drv, "left")
+    assert _at(ws) == "make"
+    _press(drv, "run")
+    assert ws.launcher.tab == "make" and not ws.launcher_layer._tab_focus
 
 
 def test_down_and_back_leave_the_row_without_switching(tmp_path):
@@ -120,17 +173,17 @@ def test_the_rows_strip_names_its_keys(tmp_path):
     assert launcher_layer._TAB_ROW_KEYS in seen
 
 
-def test_a_sideways_roll_that_drifts_up_stays_on_the_row(tmp_path):
+def test_a_sideways_roll_that_drifts_down_stays_on_the_row(tmp_path):
     ws, _drv = _home(tmp_path)
     ws._ball_roll(2, 0)
     assert ws._ball_qx == 1
     ws._ball_qx = 0
-    ws._ball_roll(0, -1)
-    ws._ball_roll(0, -1)
-    ws._ball_roll(0, -1)
+    ws._ball_roll(0, 1)
+    ws._ball_roll(0, 1)
+    ws._ball_roll(0, 1)
     assert ws._ball_qy == 0, "a pulse or three across a roll is drift"
-    ws._ball_roll(0, -1)
-    assert ws._ball_qy == -2, "a turn of BALL_TURN pulses steps"
+    ws._ball_roll(0, 1)
+    assert ws._ball_qy == 2, "a turn of BALL_TURN pulses steps"
 
 
 def test_a_turn_after_the_roll_stops_steps_at_once(tmp_path):
@@ -152,8 +205,39 @@ def test_a_touch_takes_the_keys_off_the_row_and_the_bar(tmp_path):
     assert not ws.launcher_layer._tab_focus
     ws.input_used("local")
     _press(drv, "up")
-    _press(drv, "up")
+    _press(drv, "left")
     assert ws.bar_layer.focus is not None
     ws.input_used("touch")
     assert ws.bar_layer.focus is None and not ws.launcher_layer._tab_focus
     assert launcher_layer.modal_keys(ws) is None
+
+
+def test_the_trackball_rolls_off_the_tabs_onto_the_bar_and_back(tmp_path):
+    ws, drv = _home(tmp_path)
+    _press(drv, "up")
+    while _at(ws) != "make":
+        _press(drv, "right")
+
+    def roll(dx):
+        drv.pan(dx, 0)
+        for _ in range(2):
+            drv.frame(1 / 30)
+        drv.pan(0, 0)
+        for _ in range(4):
+            drv.frame(1 / 30)
+    roll(1)
+    assert _at(ws) == "wifi"
+    roll(-1)
+    assert _at(ws) == "make" and ws.launcher.tab == "games"
+
+
+def test_the_cards_let_their_mark_go_while_the_bar_holds_the_keys(tmp_path):
+    """One focus mark a screen, anywhere on the row."""
+    ws, drv = _home(tmp_path)
+    _press(drv, "up")
+    while _at(ws) != "wifi":
+        assert ws.launcher.tab_focus, _at(ws)
+        _press(drv, "right")
+    assert ws.launcher.tab_focus
+    _press(drv, "down")
+    assert not ws.launcher.tab_focus

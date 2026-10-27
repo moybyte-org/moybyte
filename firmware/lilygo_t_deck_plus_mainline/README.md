@@ -779,7 +779,8 @@ Every one of these was learned by hanging or bricking a board.
   directions, and its click Enter, on every surface but a running cart, a
   canvas and a caret (`Workstation.ball`, the "ball" input source;
   `docs/ui_api_2026-10.md` says which); mid-roll a step across the roll's
-  axis takes a firmer turn, so a roll along the home's tabs stays on them
+  axis takes a firmer turn, so a roll along the home's row (the system
+  button, the tabs, Wi-Fi, the battery and the clock) stays on it
   (`Workstation.BALL_TURN`). The hint strips stay up under a tap: they name
   the keyboard's keys until another keyboard is used
   (`docs/ui_api_2026-10.md`, Hints). A menu over a text surface takes the

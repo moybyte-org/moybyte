@@ -562,8 +562,8 @@ asks for the Wi-Fi page (`Workstation.open_wifi_panel`) still gets Settings'
 page in console mode.
 
 **The keys reach the bar** (owner call 2026-10-26), in console mode on every
-board and the browser. Up from the home's tab row, or up past the top of
-the surface under a bar -- a page's first row (`ui_draw.edge_take`, the
+board and the browser. Up past the top of the surface under a bar (on
+the home, the tab row's left and right: below) -- a page's first row (`ui_draw.edge_take`, the
 engine's `api_edge`), the Editor's list, outline, step, map or sprite
 grid at its top (`at_top`) -- puts focus on the bar's items
 (`BarLayer.focus_items`): the OS widgets, the back chevron, a running app's
@@ -587,18 +587,25 @@ widgets it is one height, the system tile's and its ring, centred across the
 bar (`BarLayer._pill`); on the zone's targets it is their rect and a ring
 round it.
 
-**The home's tab row is its own line** (owner call 2026-10-27). Left and
-right move a focus along the tabs and stop at the row's ends; only up goes
-on to the bar. Confirm opens the tab the focus is on and takes the keys to
-its cards, down and back leave the row as it was, Q and E open the
-previous and the next tab at once, and a tap opens a tab at once
-(`LauncherHomeLayer.focused_tab`). The focused tab wears the pill and the
-open one its current mark, so the two read apart; the hint strip names the
-row's keys meanwhile. A trackball roll steps on its stronger axis, and
-mid-roll the other axis takes `Workstation.BALL_TURN` pulses, so a roll
-along the tabs that drifts a pulse or two up stays on them; a pause frees
-it (`Workstation._ball_roll`). The Editor's tab ladder keeps switching on
-the move.
+**The home's tabs and the bar's items are one row** (owner calls
+2026-10-27). Where the bar holds the tabs (the handheld's home: the T-Deck,
+the Guition S3, the browser), left and right walk the bar's items and the
+tabs in their order on the screen -- on the T-Deck the system button, Games,
+Mine, Apps, Make, Wi-Fi, the battery and the clock -- and stop at the row's
+ends (`BarLayer.focus_beside_tabs`, `_tabs_split`); up stays, the row being
+the top line, and down and back go to the cards from anywhere on it. The
+walk moves a focus and opens nothing: confirm opens the tab the focus is on
+and takes the keys to its cards, or opens a bar item as a tap on it does; Q
+and E open the previous and the next tab at once, and a tap opens a tab at
+once (`LauncherHomeLayer.focused_tab`). The focused tab wears the pill and
+the open one its current mark, so the two read apart; the hint strip names
+the row's keys, the bar's (`ui_draw.BAR_KEYS`). Where the tabs sit below the
+bar (`LauncherHomeLayer.tabs_in_bar` empty), the row stops at the tabs'
+ends and up goes on to the bar. A trackball roll steps on its stronger axis,
+and mid-roll the other axis takes `Workstation.BALL_TURN` pulses, so a roll
+along the row that drifts a pulse or two down stays on it; a pause frees it
+(`Workstation._ball_roll`). The Editor's tab ladder keeps switching on the
+move.
 
 ## 9. The safety rule, and what the loader checks
 
@@ -806,8 +813,8 @@ card (the desk's hero) or a verb (a hint, a desk button). T-Deck: left/right
 move the carousel by a card with the drag's glide (the handheld's 6-frame
 slide), run through the same `flinging` path as a touch fling
 (`_drag_partial`), so a held key is one continuous motion; up moves focus to
-the tabs in the bar, where left/right move the focus along them, enter
-opens the focused tab and down returns (§8); the trackball is the same
+the tabs in the bar, where left/right move the focus along them and the
+bar's items beside them, enter opens the focused one and down returns (§8); the trackball is the same
 four directions and its click is enter. On the desk a key or a
 tap on a shelf card selects it at once and the shelf glides to show it two
 cards in; a drag scrolls the shelf and selects nothing; up from the shelf

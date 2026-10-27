@@ -2541,6 +2541,7 @@ class LauncherHomeLayer:
         self._back_tip = False        # a mouse rests on the bar's way back to the desk
         self._hold = None             # a press on a card: [index, x, y, ms held]
         self._tab_at = None           # the tab the keys are on, on the tab row
+        self._on_bar = False          # the keys are on the home's bar (BarLayer.focus_enter)
         self._tab_focus = False       # keys drive the tab row (up from the carousel)
         # Drag-scroll PARTIAL repaint bookkeeping (#58/#66: a FULL home repaint
         # measured ~100-140ms on BOTH boards' glass -- backdrop + panel + cards
@@ -2616,8 +2617,25 @@ class LauncherHomeLayer:
         return self._tab_keys
 
     def at_top(self):
-        """Up goes on to the bar from the tab row (Workstation._bar_keys)."""
-        return bool(self._tab_keys)
+        """Up goes on to the bar from the tab row where the row is below
+        the bar (Workstation._bar_keys); where the bar holds the tabs they
+        are one row with its items, and up stays."""
+        return bool(self._tab_keys) and not self.tabs_in_bar()
+
+    def tabs_in_bar(self):
+        """`tab_rects` where the tabs sit in the bar's row (the handheld's
+        zone), so the keys walk them and the bar's items as one row
+        (`BarLayer.focus_beside_tabs`); else []."""
+        return self.tab_rects() if self._hh() else []
+
+    def tab_enter(self, k):
+        """The keys onto the tab row at its `k`th tab (-1 the last), from
+        the bar's items beside it."""
+        self._tab_focus = True
+        ids = self._tab_ids()
+        self._tab_at = ids[k]
+        self._zone_bump += 1
+        self.ws.mark_dirty()
 
     def _tab_ids(self):
         """The ids of the tabs the row shows, left to right."""
@@ -2633,11 +2651,14 @@ class LauncherHomeLayer:
         return at if at in ids else self.grid.tab
 
     def _tab_step(self, d):
-        """The tab row's focus `d` tabs along, stopping at its ends; the
-        open tab stays until a confirm."""
+        """The tab row's focus `d` tabs along; off its ends onto the bar's
+        item beside it where the bar holds the tabs, else it stops there.
+        The open tab stays until a confirm."""
         ids = self._tab_ids()
         at = self.focused_tab()
         k = ids.index(at) + d if at in ids else 0
+        if not 0 <= k < len(ids) and self.ws.bar_layer.focus_beside_tabs(d):
+            return
         k = max(0, min(len(ids) - 1, k))
         if ids[k] != self._tab_at:
             self._tab_at = ids[k]
@@ -2656,7 +2677,19 @@ class LauncherHomeLayer:
             self._btn = None
         g = self._grid_or_none()
         if g is not None:
-            g.tab_focus = on or getattr(self, "_btn", None) is not None
+            g.tab_focus = (on or getattr(self, "_btn", None) is not None
+                           or getattr(self, "_on_bar", False))
+
+    def bar_focus(self, on):
+        """The keys go on to the home's bar (`on`) or off it: the cards let
+        their focus mark go meanwhile, one mark a screen."""
+        if on != self._on_bar:
+            self._on_bar = on
+            self._zone_bump += 1
+        g = self._grid_or_none()
+        if g is not None:
+            g.tab_focus = on or self._tab_keys or getattr(self, "_btn", None) is not None
+        self.ws.mark_dirty()
 
     @property
     def _button_focus(self):
@@ -2674,7 +2707,8 @@ class LauncherHomeLayer:
             self._tab_keys = False
         g = self._grid_or_none()
         if g is not None:
-            g.tab_focus = k is not None or bool(getattr(self, "_tab_keys", False))
+            g.tab_focus = (k is not None or bool(getattr(self, "_tab_keys", False))
+                           or getattr(self, "_on_bar", False))
         self.ws.mark_dirty()
 
     @staticmethod
@@ -2746,7 +2780,7 @@ class LauncherHomeLayer:
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
             getattr(ws, "search_typing", False) and ws.can_type(),
             self.grid.tab, self._tab_focus, self._tab_at, self._button_focus,
-            self.grid.arrangement,
+            self._on_bar, self.grid.arrangement,
             self.grid.statics_sel(), self._back_tip)
 
     def _retained_key(self, cv):
@@ -3003,7 +3037,7 @@ class LauncherHomeLayer:
         base = (bd, cv.w, cv.h, ws.layout.fs, ws.look.look_gen, g._geom(),
                 ws.look.wallpaper_id, modal_keys(ws), getattr(ws, "search_query", ""),
                 typing, typing and ws.can_type(), self._tab_focus, self._tab_at,
-                self._back_tip)
+                self._on_bar, self._back_tip)
         items = g.items
         it = items[g.nearest()] if items else None
         st = ws.system
@@ -3959,11 +3993,11 @@ class LauncherHomeLayer:
         ws.ach_ui.konami_watch(i)
         if self._tab_focus:
             # The tab row (up from the carousel): left and right move the
-            # focus along it and stop at its ends, confirm opens the tab it
-            # is on and takes the keys to its cards, down returns to them.
+            # focus along it (`_tab_step`), confirm opens the tab it is on
+            # and takes the keys to its cards, down returns to them.
             if i.pressed("left"):
                 self._tab_step(-1)
-            if i.pressed("right"):
+            elif i.pressed("right"):
                 self._tab_step(1)
             if i.pressed("a") or i.pressed("run"):
                 at = self.focused_tab()

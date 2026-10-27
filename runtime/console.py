@@ -4095,9 +4095,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         the axis over, and a step on one axis forgets the other's. While a
         roll steps on one axis (a pulse on it in the last BALL_ROLLING_MS) a
         step across it takes BALL_TURN pulses, so a roll along a row that
-        drifts a pulse or two across it stays on the row (the home's tabs
-        never walk onto the bar by a sideways roll); once it stops, a turn
-        steps as any roll does."""
+        drifts a pulse or two across it stays on the row (a sideways roll
+        along the home's row never drops to its cards); once it stops, a
+        turn steps as any roll does."""
         now = _ticks_ms()
         if _ticks_diff(now, self._ball_at) > self.BALL_IDLE_MS:
             self._ball_ax = self._ball_ay = 0
@@ -4145,8 +4145,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _bar_keys(self, i, pressed):
         """The keys on the bar (`BarLayer.focus_keys`), and the ways onto
-        it: up from a surface at its top (its `at_top`: the home's tab row,
-        a list's first row) or an up that went past the top of a page drawn
+        it: up from a surface at its top (its `at_top`: a home's tab row
+        below the bar, a list's first row; the handheld home's tabs walk on
+        to it sideways, `BarLayer.focus_beside_tabs`) or an up that went past the top of a page drawn
         last frame (`ui_draw.edge_take`). Neither under a menu, a popover or
         a dialog, which hold the keys. True where the bar took them."""
         bl = self.bar_layer

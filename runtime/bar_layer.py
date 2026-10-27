@@ -1538,9 +1538,12 @@ class BarLayer:
 
     # -- the keys on the bar (owner call 2026-10-26) ---------------------------
     #
-    # Up from the home's tab row, or past the top of the surface under a bar,
-    # walks focus onto the bar: left and right walk its items, confirm opens
-    # one as a tap on it does, down and back come off it. A window's bar keeps
+    # Up past the top of the surface under a bar walks focus onto the bar:
+    # left and right walk its items, confirm opens one as a tap on it does,
+    # down and back come off it. Where the bar holds the home's tabs (the
+    # handheld's), its items and the tabs are one row: left and right walk off
+    # the tabs' ends onto the items beside them and back (owner call
+    # 2026-10-27), and down and back go to the cards. A window's bar keeps
     # the desk's own ways.
 
     def focus_items(self, where):
@@ -1584,26 +1587,62 @@ class BarLayer:
                 out.append((bi, r, name))
         return out
 
-    def focus_enter(self, where, came_from, at=None):
-        """The keys walk onto `where`'s bar from `came_from` ("tabs",
-        "page"): onto the item `at` (a bar-coordinate x the item spans), else
-        the first. False where the bar has no item."""
+    def focus_enter(self, where, came_from, at=None, k=None):
+        """The keys walk onto `where`'s bar from `came_from` ("tabs": up
+        from the home's tab row below the bar; "row": along the home's tab
+        row in the bar; "page"): onto item `k`, else the item `at` (a
+        bar-coordinate x the item spans), else the first. False where the
+        bar has no such item."""
         items = self.focus_items(where)
-        if not items:
+        if k is None:
+            k = 0
+            if at is not None:
+                for j in range(len(items)):
+                    r = items[j][1]
+                    if r[0] <= at < r[0] + r[2]:
+                        k = j
+                        break
+        if not 0 <= k < len(items):
             return False
-        k = 0
-        if at is not None:
-            for j in range(len(items)):
-                r = items[j][1]
-                if r[0] <= at < r[0] + r[2]:
-                    k = j
-                    break
         self.focus_where = where
         self.focus_from = came_from
-        if came_from == "tabs":
+        if came_from in ("tabs", "row"):
             self.ws.launcher_layer._tab_focus = False    # one focus mark a screen
+        if where == "home":
+            self.ws.launcher_layer.bar_focus(True)
         self._focus_on(items, k)
         return True
+
+    def _tabs_split(self, where, items):
+        """Where the home's tabs sit among `items` when the bar holds them
+        (the handheld's home, `LauncherHomeLayer.tabs_in_bar`): the index of
+        the first item right of them, so the bar's items and the tabs walk as
+        one row in screen order. None elsewhere."""
+        if where != "home":
+            return None
+        tabs = self.ws.launcher_layer.tabs_in_bar()
+        if not tabs:
+            return None
+        tx, ty = tabs[0][1][0], tabs[0][1][1]
+        rects = self.bar_rects(where)
+        n = 0
+        for bi, r, _name in items:
+            bx, by, _bw, bh = rects[bi]
+            if by + bh <= ty or (by <= ty and bx + r[0] < tx):
+                n += 1
+        return n
+
+    def focus_beside_tabs(self, d):
+        """The keys walk off an end of the home's tab row onto the bar item
+        beside it: `d` < 0 the one left of the tabs, else the one right.
+        False where there is none (the row stops there)."""
+        if self.ws.bar_where() != "home":
+            return False
+        items = self.focus_items("home")
+        split = self._tabs_split("home", items)
+        if split is None:
+            return False
+        return self.focus_enter("home", "row", k=split - 1 if d < 0 else split)
 
     def _focus_on(self, items, k):
         if not items:
@@ -1617,27 +1656,43 @@ class BarLayer:
 
     def focus_leave(self):
         """The keys come off the bar, back where they came from."""
-        came = self.focus_from
+        came, where = self.focus_from, self.focus_where
         self.focus = self.focus_where = self.focus_from = self.focus_item = None
         _ui_draw.on_bar(False)
         ws = self.ws
         ws._dirty = True
+        if where == "home":
+            ws.launcher_layer.bar_focus(False)
         if came == "tabs":
             ws.launcher_layer._tab_focus = True
 
+    def _to_tabs(self, d):
+        """The keys walk from the bar onto the home's tab row beside it:
+        `d` < 0 onto its last tab, else its first."""
+        self.focus_leave()
+        self.ws.launcher_layer.tab_enter(-1 if d < 0 else 0)
+
     def focus_keys(self, i):
         """A frame's keys while they are on the bar: left and right walk
-        its items, confirm opens the focused one (a tap at its middle), down,
-        back and stop come off it, up stays. True where they were the bar's."""
+        its items (and on to the home's tabs where they sit among them),
+        confirm opens the focused one (a tap at its middle), down, back and
+        stop come off it, up stays. True where they were the bar's."""
         where = self.focus_where
         items = self.focus_items(where)
         if not items or self.ws.bar_where() != where:
             self.focus_leave()
             return False
+        split = self._tabs_split(where, items)
         if i.pressed("left"):
-            self._focus_on(items, self.focus - 1)
+            if split is not None and self.focus == split:
+                self._to_tabs(-1)
+            else:
+                self._focus_on(items, self.focus - 1)
         elif i.pressed("right"):
-            self._focus_on(items, self.focus + 1)
+            if split is not None and self.focus == split - 1:
+                self._to_tabs(1)
+            else:
+                self._focus_on(items, self.focus + 1)
         elif i.pressed("down") or i.pressed("b") or i.pressed("stop"):
             self.focus_leave()
         elif i.pressed("a") or i.pressed("run"):
