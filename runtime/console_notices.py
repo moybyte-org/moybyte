@@ -820,6 +820,12 @@ class SystemMenuUI:
         self._card_at = (0, 0)      # where a card's menu hangs (`open_card`)
         self._card_proj = False     # a card's menu hangs from PROJECTS' hero
         self.about = _about_ui.AboutCard(ws)
+        # The handheld home under the card, washed (`put_home`), and the
+        # frame that put it back
+        self._held = _ui_draw.HeldPage()
+        self._put_f = -1
+        self._key = None            # the key `put_home` asked, on frame `_key_f`
+        self._key_f = -1
 
     def _sysmenu_items(self):
         """The rows for this open of the ≡ menu (see class note for the tuple form).
@@ -1020,6 +1026,51 @@ class SystemMenuUI:
         m = ws.sysmenu
         return (m.open and m.comp is None) or ws._about or ws.pause.open \
             or ws.confirm.open
+
+    def draw_full(self, dt):
+        """The menu on a frame of the whole glass: the scrim, then the card.
+        Where the handheld home lies under it alone the frame under the
+        card is held washed (`ui_draw.HeldPage`, surface model §14.5): a
+        frame that put it back draws the card alone."""
+        ws = self.ws
+        f = ws._frames_drawn
+        if self._put_f != f:
+            self.scrim()
+            cv = ws.sys_canvas
+            # the key the home's put asked this frame, before it drew
+            key = self._key if self._key_f == f else self._home_key(cv)
+            if key is not None:
+                g = ws.launcher_layer.grid
+                self._held.keep(ws, cv, (0, 0, cv.w, cv.h), key,
+                                not (g.dragging or g.flinging), dt)
+        self._draw_sysmenu()
+
+    def put_home(self, cv, dt):
+        """Put the home under the open menu back washed, as the frame that
+        held it left it: True when it was, and the home draws nothing."""
+        key = self._key = self._home_key(cv)
+        self._key_f = self.ws._frames_drawn
+        if key is None or not self._held.put(self.ws, cv, (0, 0, cv.w, cv.h), key, dt):
+            return False
+        self._put_f = self._key_f
+        return True
+
+    def holds_home(self):
+        """Whether the open menu holds the frame under it: the fullscreen
+        WM, the home under it and nothing else, where the home's retained
+        frame stays the one before the menu (its close stamps it)."""
+        wm = self.ws.wm
+        return (self.ws.sysmenu.open and getattr(wm, "_pop_paint", None) is None
+                and wm._overlay_sig() == 64 and wm.top_is("launcher"))
+
+    def _home_key(self, cv):
+        """What the frame under the card is a function of while the home
+        lies under it alone: the home's retained key (the menu's keys and
+        the marks it lets go among it) and the scrim's rects; None where
+        the menu does not hold it."""
+        if not self.holds_home():
+            return None
+        return (self.ws.launcher_layer._retained_key(cv), self.scrim_rects())
 
     def scrim(self):
         """Dim what the system menu, a card's menu or ABOUT covers: the

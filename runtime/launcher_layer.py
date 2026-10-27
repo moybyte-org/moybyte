@@ -3275,6 +3275,12 @@ class LauncherHomeLayer:
         ws = self.ws
         cv = ws.sys_canvas
         _paint_continuity(self, ws)           # foreign paints void the buffers
+        if ws.menu_ui.put_home(cv, dt):
+            # the system menu's frame of the home, washed: the buffers hold
+            # the scrim, no frame of the home's own
+            self._full_streak = 0
+            self._note_still(cv, None)
+            return
         # The board's motion verdict (a WM constant, §12's degradation order).
         wm = ws.wm
         carousel = self._carousel()
@@ -3299,7 +3305,8 @@ class LauncherHomeLayer:
         # identical to the captured frame presents it in one blit. Bookkeeping
         # matches a full paint exactly -- pixel-wise it IS one -- so the scroll
         # ring and the drag partial's streak stay honest.
-        if self._try_stamp_retained(cv, dt):
+        # (under the menu's hold the retained frame is the one before it)
+        if not ws.menu_ui.holds_home() and self._try_stamp_retained(cv, dt):
             self.grid._scroll_region().note_painted(
                 ws._frames_drawn,
                 (self.grid.paint_key(), self._statics_key(cv), ws.covers.gen),
@@ -3356,7 +3363,9 @@ class LauncherHomeLayer:
         _advance_streak(self, cv)
         parts = self._still_now(cv, dt)
         self._note_still(cv, parts)
-        self._capture_retained(cv, dt, parts)   # retain this frame for re-entry stamps
+        if not ws.menu_ui.holds_home():
+            # (under the menu the retained frame stays the one its close stamps)
+            self._capture_retained(cv, dt, parts)   # retain this frame for re-entry stamps
         if parts is not None and len(self._still_ring) < _retained_n(cv):
             self._still_debt()
 

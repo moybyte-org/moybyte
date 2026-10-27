@@ -412,8 +412,7 @@ class _SysMenuLayer(Layer):
         if paint is not None:
             paint(False)              # the windowed WM: the scrim, its snapshots, the menu
         else:
-            self.ws.menu_ui.scrim()   # a full frame: dim the content first
-            self.ws.menu_ui._draw_sysmenu()
+            self.ws.menu_ui.draw_full(dt)   # a full frame: dim the content first
 
     def _comp(self, fn, *args):
         """Run a component's handler: a change inside the panel is the

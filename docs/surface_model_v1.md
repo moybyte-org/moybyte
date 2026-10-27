@@ -920,7 +920,14 @@ dialog and Blocks' entry prompts hold their page; the pause and stop cards
 hold the run's frame washed beside the frame `_keep_under` keeps for the
 resumed game, whose layer is kept across cards and freed by the fit check
 the same way; where the game's frame is the system canvas (the handheld)
-an idle frame mints both, so no card's first frame does.
+an idle frame mints both, so no card's first frame does. The system menu
+holds the handheld home the same way (`SystemMenuUI.put_home`): where the
+fullscreen WM draws the home and the menu's card alone, the whole frame
+under the card -- the bars, the washed content and the hint strip naming
+the menu's keys -- is held under the home's retained key and the scrim's
+rects, and kept across opens while that key holds. The home captures no
+retained frame under the hold, so the menu's close stamps the one from
+before it.
 
 **This is not a second invalidation mechanism.** Whether a frame paints is
 still the gate's; the copy only says what the page already is. Pinned by
