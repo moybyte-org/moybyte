@@ -320,3 +320,41 @@ def test_the_theme_modes_config_names_no_trackball_on_the_tdeck():
     keys = theme_editor._hints_for(theme_editor.TAB_CONFIG)
     assert "ball" not in keys and "ball_lr" not in keys
     assert keys == ("menu", "Home")
+
+
+@pytest.mark.parametrize("theme,variant", [("moy", "dark"), ("moy", "light"),
+                                           ("contrast", "dark"), ("contrast", "light"),
+                                           ("blocks", "light"), ("blocks", "dark")])
+def test_the_bars_focus_pill_keeps_the_items_ink(tmp_path, theme, variant):
+    """The bar's mark is the pill whatever the theme's focus style: a plate
+    under the item and a ring round it, so an invert theme's mark never
+    blots the icon out. Each status widget's icon box keeps more than one
+    colour under it, and the ring draws where the bar was plain."""
+    ws, drv = _home(tmp_path)
+    ws.look.set_theme(theme, persist=False, variant=variant)
+    for _ in range(2):
+        drv.frame(1 / 30)
+    bl = ws.bar_layer
+    bx, by = bl.bar_rects("home")[0][:2]
+    cv = ws.sys_canvas
+
+    def px(x, y):
+        k = 2 * ((by + y) * cv.w + bx + x)
+        return bytes(cv._buf[k:k + 2])
+    _press(drv, "up")
+    _press(drv, "up")
+    for name in ("wifi", "battery"):
+        x = _cell_x(ws, "home", name)
+        while bl.focus_item[1][0] != x:
+            _press(drv, "right")
+        box, _r, _u = bl._pill("home", 0, bl.focus_item)
+        r = bl.focus_item[1]
+        icon = {px(r[0] + i, r[1] + j) for i in range(r[2]) for j in range(r[3])}
+        assert len(icon) > 2, (name, "the icon shows through the mark")
+        ring = {px(box[0] + box[2] // 2, box[1] + k) for k in range(2)}
+        _press(drv, "down")
+        drv.frame(1 / 30)
+        plain = {px(box[0] + box[2] // 2, box[1] + k) for k in range(2)}
+        assert ring != plain, (name, "the ring draws on the bar")
+        _press(drv, "up")
+        _press(drv, "up")

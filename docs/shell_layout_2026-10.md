@@ -571,12 +571,21 @@ lent tools and the zone's targets (the Editor's tabs, undo, redo and Play,
 `zone_targets`), the Editor's landing on its open tab. Left and right walk
 them, confirm opens one as a tap on it does (a widget's popover over the
 bar, focus staying on the widget under it), down, back and stop come off
-it; the focused item takes the theme's focus mark in the bar's strip, and
+it; the focused item takes the bar's focus pill (below), and
 the hint strip under it names the bar's keys (`ui_draw.BAR_KEYS`: change,
 confirm and back, in the input's own keys). A caret keeps up for itself, so
 the Code tab and the theme mode's Config walk no focus onto the bar: their
 bar is a touch's, and the system menu's Home is their way out. The desk's
 windows keep their own ways.
+
+**The bar's focus mark is the pill** (owner call 2026-10-27), in the tabs'
+shape whatever the theme's focus style (`ui_draw.focus`'s `pill`,
+`MOY_UI_MARK_PILL`): a plate of the focus colour under the item and a ring
+round it, the theme's `focus.outline` outside the ring, so the item keeps its
+own ink -- an invert theme's mark would blot a 16-pixel icon out. On the OS
+widgets it is one height, the system tile's and its ring, centred across the
+bar (`BarLayer._pill`); on the zone's targets it is their rect and a ring
+round it.
 
 ## 9. The safety rule, and what the loader checks
 

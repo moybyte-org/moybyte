@@ -862,13 +862,55 @@ class BarLayer:
 
     def _render_cart_bar(self, cv, key, i=0):
         """Bar `i` (`_render_bar`), and the focus mark on the item the keys
-        are on where it is in this bar (`focus_item`, key field 12)."""
-        self._render_bar(cv, key, i)
+        are on where it is in this bar (`focus_item`, key field 12): the
+        pill, its plate under the item and its ring round it."""
         f = key[12]
-        if f is not None and f[0] == i:
-            _ui_draw.focus(cv, self.ws.theme_colors, f[1], "small")
+        pill = self._pill(key[0], i, f) if f is not None and f[0] == i else None
+        self._render_bar(cv, key, i, pill)
+        if pill is not None:
+            _ui_draw.focus(cv, self.ws.theme_colors, pill[0], r=pill[1], fs=pill[2],
+                           after=True, pill=True)
 
-    def _render_bar(self, cv, key, i=0):
+    def _pill(self, where, i, item):
+        """(box, radius, unit) of the focus pill on `item` (`focus_items`)
+        in bar `i`, in its bar's coordinates. An OS widget's is one height on
+        every widget, the system tile's and a ring either side, centred
+        across the bar: as wide as the tile and its ring on the system
+        button, as a status icon and a ring and a unit either side, as the
+        clock's digits and a ring and a unit either side, inside the bar.
+        On the zone's targets, the back chevron and the lent tools it is
+        their rect and a ring round it. The corners are the home's tabs'
+        (`LauncherHomeLayer._draw_zone_tabs`)."""
+        _bi, r, name = item
+        bar = self._packed(where)[i][1]
+        bar = (0, 0, bar[2], bar[3])
+        u = _layout_base.unit()
+        fs = self.ws.layout.fs
+        rad = 5 * fs
+        across = self._packed(where)[i][0] in ("left", "right")
+        t = 2 * u
+        if across or name not in ("menu", "wifi", "battery", "clock"):
+            y0 = max(0, r[1] - t)
+            y1 = min(bar[3], r[1] + r[3] + t)
+            return (r[0] - t, y0, r[2] + 2 * t, y1 - y0), rad, u
+        thick = bar[3]
+        tile = self.sys_tile(r, bar, False)
+        h = min(thick, tile[3] + 2 * t)
+        y = (thick - h) // 2
+        if name == "menu":
+            return (tile[0] - t, y, tile[2] + 2 * t, h), rad, u
+        if name == "clock":
+            w = _ui_draw.print_width(self._clock_text(), fs)
+            x0, x1 = r[0] - t - u, r[0] + w + t + u
+        else:
+            dx = self._ink_dx.get(name, 0) if self._ink_dx else 0
+            side = 16 * u + 2 * (t + u)
+            x0 = r[0] + dx + (r[2] - side) // 2
+            x1 = x0 + side
+        x1 = min(x1, bar[2])
+        return (x0, y, x1 - x0, h), rad, u
+
+    def _render_bar(self, cv, key, i=0, pill=None):
         """Render bar `i`'s pixels onto `cv` (the offscreen strip, or any canvas)
         for `key[0]` (`where`), in bar coordinates. The pieces are the kernel's
         strip (native/moy_play/moy_chrome.c: a widget's cell) and the
@@ -898,6 +940,9 @@ class BarLayer:
                                                _BAND_SIDE[edge])):
             looked = False
             _ui_draw.frame_band(cv, ws.theme_colors, bar, light, _BAND_SIDE[edge])
+        if pill is not None:
+            # the focus pill's plate, under the item it marks
+            _ui_draw.focus(cv, ws.theme_colors, pill[0], r=pill[1], fs=pill[2], pill=True)
         if not inside:
             cs = 0 if game else ws.layout.cs
             across = edge in ("left", "right")
@@ -1500,9 +1545,10 @@ class BarLayer:
 
     def focus_items(self, where):
         """The items the keys walk on `where`'s bars, left to right, as
-        [(bar index, rect in its bar's coordinates)]: the OS widgets a tap
-        opens, the back chevron, a running app's lent tools and the zone's
-        own targets (`zone_targets`, where its owner names them)."""
+        [(bar index, rect in its bar's coordinates, widget name or None)]:
+        the OS widgets a tap opens, the back chevron, a running app's lent
+        tools and the zone's own targets (`zone_targets`, where its owner
+        names them)."""
         out = []
         if self._in_window(where):
             return out
@@ -1515,26 +1561,27 @@ class BarLayer:
             rects = []
             for c in bar[3]:
                 if c[0] in _TAPPED and (show_x or c[0] != "close"):
-                    rects.append(c[1])
+                    rects.append((c[1], c[0]))
             zone = self.lent_zone(where, bar)
             if zone is not None:
                 owner = self._zone_owner(where)
                 if back:
-                    rects.append((zone[0], zone[1], self._back_w(game), zone[3]))
+                    rects.append(((zone[0], zone[1], self._back_w(game), zone[3]), None))
                 if where in ("tool", "app"):
                     if back:
                         box = (0, 0, bar[1][2], bar[1][3])
                         end = self._title_end(where, zone, box, game)
                         for hit, _i, off, _name, _r in self._lent_rects(where, end, box, game):
                             if not off:
-                                rects.append(hit)
+                                rects.append((hit, None))
                 elif owner is not None and not (back and getattr(owner, "back_title", None)):
                     targets = getattr(owner, "zone_targets", None)
                     if targets is not None:
-                        rects.extend(targets(self.past_back(zone, game) if back else zone))
-            rects.sort(key=lambda r: r[0])
-            for r in rects:
-                out.append((bi, r))
+                        for r in targets(self.past_back(zone, game) if back else zone):
+                            rects.append((r, None))
+            rects.sort(key=lambda c: c[0][0])
+            for r, name in rects:
+                out.append((bi, r, name))
         return out
 
     def focus_enter(self, where, came_from, at=None):
@@ -1594,7 +1641,7 @@ class BarLayer:
         elif i.pressed("down") or i.pressed("b") or i.pressed("stop"):
             self.focus_leave()
         elif i.pressed("a") or i.pressed("run"):
-            bi, r = items[max(0, min(len(items) - 1, self.focus))]
+            bi, r, _name = items[max(0, min(len(items) - 1, self.focus))]
             bar = self._packed(where)[bi]
             mid = r[0] + r[2] // 2
             self._tap_bar(where, bar, mid, r[1] + r[3] // 2)

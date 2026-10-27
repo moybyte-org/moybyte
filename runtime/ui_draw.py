@@ -1569,10 +1569,11 @@ def focus_ring(cv, th, rect, fs=None):
 # The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
 _MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
 _MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_INK, _MARK_RING = 1, 2, 4, 8, 32
-_MARK_KEEP, _MARK_SELECTED = 512, 1024
+_MARK_KEEP, _MARK_SELECTED, _MARK_PILL = 512, 1024, 2048
 
 
-def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, selected=False):
+def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, selected=False,
+          pill=False):
     """The focus mark on `rect`, the theme's by its size class
     (docs/media/look_2026-10/DESIGN.md, the marks): `size` "card", "small",
     "part", or None to class it by its size. Drawn after the part's own fill
@@ -1585,10 +1586,14 @@ def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, select
     cursor's: the sprite editor's). `selected` marks the card a screen
     describes while focus is elsewhere or does not draw (touch): the card's
     mark as a current mark, drawn whatever the shell says of focus, with no
-    rim and no focus mark counted (the desk shelf's selected card)."""
+    rim and no focus mark counted (the desk shelf's selected card). `pill`
+    draws the bar's mark whatever the theme's style (an OS widget's, a tab's
+    of the home): a plate of the mark's colour under the content, and with
+    `after` a ring two units (`fs`) wide on `rect`'s edge, radius `r`; the
+    content keeps its own ink."""
     return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_CLASS[size], r,
                     (_MARK_AFTER if after else 0) | (_MARK_RING if ring else 0)
-                    | (_MARK_SELECTED if selected else 0), fs)
+                    | (_MARK_SELECTED if selected else 0) | (_MARK_PILL if pill else 0), fs)
 
 
 def cursor(cv, rect, keyline=0):

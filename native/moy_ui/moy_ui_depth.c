@@ -818,6 +818,22 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
         }
         return MOY_UI_OK;
     }
+    if (flags & MOY_UI_MARK_PILL) {
+        if (after) {
+            ring_a(&d, x, y, w, h, r, 2 * (fs < 1 ? 1 : fs), c, 255);
+            if (m->outline_w > 0 && set(m->outline_c)) {
+                int e = m->outline_w;
+                ring_a(&d, x - e, y - e, w + 2 * e, h + 2 * e, r ? r + e : 0, e,
+                       val(&d, m->outline_c), 255);
+            }
+        } else {
+            if (!(flags & (MOY_UI_MARK_AGAIN | MOY_UI_MARK_SELECTED))) {
+                s_marks.drawn++;
+            }
+            tint(&d, x, y, w, h, r, c, m->plate_alpha, NULL);
+        }
+        return MOY_UI_OK;
+    }
     if (!after) {
         if (!(flags & (MOY_UI_MARK_AGAIN | MOY_UI_MARK_SELECTED))) {
             s_marks.drawn++;

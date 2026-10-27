@@ -408,11 +408,15 @@ enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI
 // row's outline instead. SELECTED: the card the screen describes while focus
 // is elsewhere or does not draw (touch): its card mark draws whatever the
 // shell says of focus, as a current mark -- no rim, and no focus mark counted.
+// PILL: the pill, whatever the theme's focus style -- a plate of the mark's
+// colour under the part's content, and AFTER it a ring two units wide on the
+// box's edge and the theme's `focus.outline` round it -- the mark of a part
+// on a bar (an OS widget, a tab of the home's), whose own ink stays.
 enum {
     MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8,
     MOY_UI_MARK_AGAIN = 16, MOY_UI_MARK_RING = 32, MOY_UI_MARK_COUNT = 64,
     MOY_UI_MARK_TOP = 128, MOY_UI_MARK_FOOT = 256, MOY_UI_MARK_KEEP = 512,
-    MOY_UI_MARK_SELECTED = 1024,
+    MOY_UI_MARK_SELECTED = 1024, MOY_UI_MARK_PILL = 2048,
 };
 // focus.style's and current.style's values, in style.json's order
 enum {
