@@ -4792,6 +4792,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     # pre-collects, ~150ms nobody should wait for).
                     self.launcher_layer.prealloc_retained()
                     self.pause.prealloc()       # ... and the pause card's frame
+                    desk = self._editor_desk
+                    if desk is not None:
+                        desk.warm_step()        # the desk Editor's next workspace
                     if getattr(self.launcher_layer, "_cap_owed", None) is not None:
                         self.launcher_layer.capture_due()
                 except Exception as exc:  # noqa: BLE001 -- an idle tick never ends a session

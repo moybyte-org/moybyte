@@ -57,6 +57,10 @@ _OWNERS = {"cards": ("cards_layer", "layout"), "blocks": ("block_ui", "block_lay
            "theme_config": ("theme_config_layer", "layout"),
            "theme_sprites": ("theme_sprites_layer", "layout")}
 
+# The tabs whose pane layouts `warm_step` builds ahead: those `_pane_layout`
+# knows how to lay out.
+_OWNERS_OR_CODE = tuple(_OWNERS) + ("code",)
+
 # The Editor tabs whose desk pane is drawn here on the verbs over the tab's
 # editor core, not by the tab's own surface: the Sound pane.
 _ON_VERBS = ("music",)
@@ -146,6 +150,10 @@ class EditorDesk(Layer):
         self._back_tab = {}             # a pane's tab before Play took it to Game
         self._fresh = 0                 # this frame's key event, where it is new
         self._tools_x = {}              # pane index -> its header tools' left edge
+        self._warm = {}                 # sig -> (Arrangement, placed) built ahead
+        self._warm_for = None           # what the workspaces were warmed for
+        self._warm_left = []            # ...and those still to warm
+        self._warm_due = False          # a quiet frame has warming to do
         self.dt = 0
 
     # -- where it applies -------------------------------------------------------
@@ -203,11 +211,71 @@ class EditorDesk(Layer):
         arr = self._arr
         if arr is not None and arr.key == self.key and arr.area == area and arr.unit == u:
             return arr
-        arr = P.Arrangement(self.key, area, u, self._blocks())
-        arr.restore(self._saved().get(self._mem_key(arr)))
+        got = self._warm.pop(self._warm_sig(self.key, area, u), None) if self._warm else None
+        if got is not None:
+            self._arr, self._placed = got
+            return got[0]
+        arr = self._new_arrangement(self.key, area, u)
         self._arr = arr
         self._placed = None
         return arr
+
+    def _new_arrangement(self, key, area, u):
+        arr = P.Arrangement(key, area, u, self._blocks())
+        arr.restore(self._saved().get(self._mem_key(arr)))
+        return arr
+
+    def _warm_sig(self, key, area, u):
+        cart = self.ws.cart or {}
+        return (key, area, u, self._blocks(), cart.get("path") or cart.get("title"))
+
+    def warm_step(self):
+        """On a quiet frame, one workspace not on show made ready as its first
+        switch would make it -- its arrangement restored and placed, each of
+        its tab panes' layouts built at the pane's size -- so the switch only
+        draws. One a call, in the Editor window's layout context; nothing
+        once every workspace is ready for this cart and size, and nothing
+        while a pane stands alone or a divider is held. Each is taken by
+        `arrangement` once, as a fresh one would have been made."""
+        if not self._warm_due or self._drag is not None:
+            return
+        if not self.active() or self.key not in P.KEYS:
+            self._warm_due = False
+            return
+        run = getattr(self.ws.wm, "in_window", None)
+        if (run is None or not run("menu", self._warm_next)) and self.ws.screen == "menu":
+            self._warm_next()
+
+    def _warm_mark(self, area, u):
+        return self._warm_sig(None, area, u) + (self.ws.look.look_gen,)
+
+    def _warm_next(self):
+        area = self._area()
+        u = self._unit()
+        mark = self._warm_mark(area, u)
+        if self._warm_for != mark:
+            self._warm_for = mark
+            self._warm.clear()
+            self._warm_left = [k for k in P.KEYS if k != self.key]
+        left = self._warm_left
+        self._warm_due = len(left) > 1
+        while left:
+            key = left.pop(0)
+            sig = self._warm_sig(key, area, u)
+            if key == self.key or sig in self._warm:
+                continue
+            arr = self._new_arrangement(key, area, u)
+            mw, mh = arr.minimum()
+            if area[2] < mw or area[3] < mh:
+                continue                      # one pane at a time here
+            placed = arr.place()
+            self._warm[sig] = (arr, placed)
+            for pane, r, _path in placed[0]:
+                for c in pane:
+                    tab = P.CONTENTS[c][2]
+                    if tab is not None and c not in _ON_VERBS and tab in _OWNERS_OR_CODE:
+                        self._pane_layout(tab, self._body(r, u, pane))
+            return
 
     def placed(self):
         arr = self.arrangement()
@@ -458,6 +526,9 @@ class EditorDesk(Layer):
         self.dt = dt
         self.follow()
         self._play_tabs()
+        if not self._warm_due and self.key in P.KEYS \
+                and self._warm_for != self._warm_mark(self._area(), self._unit()):
+            self._warm_due = True
         cv = ws.sys_canvas
         th = ws.theme_colors
         lay = ws.layout

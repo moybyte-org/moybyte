@@ -1157,3 +1157,42 @@ def test_select_start_plays_and_restarts_and_start_alone_is_the_console_key(desk
     pad["held"], pad["pressed"] = set(), {"start"}
     drv.frame(DT)
     assert opened == [1]
+
+
+def test_quiet_frames_warm_the_other_workspaces_and_a_switch_draws_the_same(tmp_path, monkeypatch):
+    """`EditorDesk.warm_step` (the console's quiet frames): every workspace
+    not on show gets its arrangement placed and its tab panes laid out ahead,
+    one a frame, so its first switch builds none of it -- and draws the same
+    panes it draws unwarmed."""
+    made = []
+    real = P.Arrangement
+
+    class Counted(real):
+        def __init__(self, *a, **k):
+            made.append(a[0])
+            real.__init__(self, *a, **k)
+
+    shots = {}
+    for warm in (True, False):
+        ws = host_app.build_workstation(str(tmp_path / str(warm)), sys_size=(1024, 600),
+                                        panel_diagonal_in=7.0, font_scale=1, windowed=True)
+        ws.open_desk()
+        ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Sky Run"))
+        drv = host_app.ConsoleDriver(ws)
+        d = ws.editor_desk
+        if not warm:
+            d.warm_step = lambda: None
+        _painted(ws, drv, 12)
+        if warm:
+            assert sorted(sig[0] for sig in d._warm) == ["art", "code", "sound", "world"]
+        monkeypatch.setattr(P, "Arrangement", Counted)
+        del made[:]
+        for key in ("code", "art", "world", "sound"):
+            d.switch(key)
+            drv.frame(DT)
+            buf = ws.wm._wins["menu"].buf
+            shots[(warm, key)] = bytes(buf._buf[2 * buf.w * 46:])
+        assert made == ([] if warm else ["code", "art", "world", "sound"])
+        monkeypatch.setattr(P, "Arrangement", real)
+    for key in ("code", "art", "world", "sound"):
+        assert shots[(True, key)] == shots[(False, key)], key

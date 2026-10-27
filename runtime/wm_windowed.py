@@ -1243,6 +1243,21 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         finally:
             self._install(self._root_ctx)
 
+    def in_window(self, kind, fn):
+        """Run `fn()` in window `kind`'s layout context -- its canvas and its
+        layouts, as its content draws -- drawing nothing: work a content does
+        ahead of its next draw (`EditorDesk.warm_step`). False where no such
+        window has a buffer."""
+        win = self._wins.get(kind)
+        if win is None or win.buf is None or win.ctx is None or self.mode == "console":
+            return False
+        self._install(win.ctx, win)
+        try:
+            fn()
+        finally:
+            self._install(self._root_ctx)
+        return True
+
     def _row_over(self, win, cv, held=False):
         """Where `win` is full screen and its app's band is its row: the
         row's head and controls over the band its content just drew on `cv`,

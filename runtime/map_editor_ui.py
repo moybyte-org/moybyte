@@ -32,11 +32,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import MapEditor, KeyEdge
 
 try:
-    from editor_map import bands as _bands
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editor_map import bands as _bands
-
-try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H, pane as _in_pane
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
@@ -797,8 +792,8 @@ class MapEditorUI:
         #      dark_blue rect and the out-of-bounds remainder two black strips
         #      (rects, not quads: a big one is a DMA fill where the canvas has one);
         #   2. (the tiles between them are ONE map() -- see below);
-        #   3. the grid lattice, in fill_rects calls (one per `editor_map.CHUNK`
-        #      of it) -- each cell's rectb edges merged into full-length
+        #   3. the grid lattice, one fill_rects a cell-row -- each cell's
+        #      rectb edges merged into full-length
         #      1px lines (interior edges stay DOUBLED at k*cell and k*cell-1,
         #      exactly the pixels the per-cell outlines painted; overlaps at
         #      corners are same-color idempotent).
@@ -811,9 +806,10 @@ class MapEditorUI:
             ny = 0
         # The packed geometry is a pure function of this key, so it is memoised:
         # a paint gesture re-hits it every frame (camera fixed), a pan/zoom/
-        # relayout re-keys and rebuilds: one band of the lattice, copied down
-        # the rows (`editor_map.bands`). The LATTICE array is ordered band-by-band (per
-        # cell-row: 2 wide lines + the 2·cols short verticals of that band) --
+        # relayout re-keys and rebuilds: one band of the lattice, drawn down
+        # the rows by fill_rects' offset, so a rebuild is one row's quads. The
+        # lattice is drawn band-by-band (per cell-row: 2 wide lines + the
+        # 2·cols short verticals of that band) --
         # full-height vertical lines drawn last measured +16ms on glass: 1px
         # column-major writes fetch one cache line per row, ~3.4MB of traffic,
         # where a band's writes stay inside an L2-resident ~122KB window.
@@ -837,7 +833,7 @@ class MapEditorUI:
                 for j in range(cols):
                     band += (x0 + j * cell, y0, 1, cell, grey,
                              x0 + (j + 1) * cell - 1, y0, 1, cell, grey)
-                lat = _bands(array("h", band), rows, cell)
+                lat = array("h", band)
             memo = (key, tuple(bg), lat)
             self._grid_memo = memo
         for q in memo[1]:                  # rects: a big one is a DMA fill on a P4
@@ -853,8 +849,9 @@ class MapEditorUI:
             # the tile the cart draws.
             cv.map(tm, sheet, me.cam_x, me.cam_y, nx, ny, x0, y0, -1,
                    cell // sheet.TILE)
-            for lat in memo[2]:
-                cv.fill_rects(lat)
+            lat = memo[2]
+            for k in range(rows):
+                cv.fill_rects(lat, -1, 0, k * cell)
         # RECT preview (#91): while a box is being dragged, outline the covered cells
         # (clamped to the visible window) so the fill region is visible before release.
         if self.map_tool == "rect" and self._map_rect is not None \

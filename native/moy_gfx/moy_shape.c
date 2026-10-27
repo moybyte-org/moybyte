@@ -1060,12 +1060,22 @@ int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw
     for (int v = 0; v < 64; v++) {
         tg[v] = (uint16_t)(((fg + v * iw) >> 8) << 5);
     }
+    // The byte order is read once, not a pixel at a time: a loop each way.
+    const bool swapped = s_swapped;
     for (int i = 0; i < h; i++) {
         const uint16_t *s = src + (size_t)(sy + i) * (size_t)sw + sx;
         uint16_t *d = dst + (size_t)(dy + i) * (size_t)dw + dx;
-        for (int j = 0; j < w; j++) {
-            uint16_t b = can(s[j]);
-            d[j] = wire((uint16_t)(tr[b >> 11] | tg[(b >> 5) & 63] | tb[b & 31]));
+        if (swapped) {
+            for (int j = 0; j < w; j++) {
+                uint16_t b = (uint16_t)((s[j] << 8) | (s[j] >> 8));
+                uint16_t o = (uint16_t)(tr[b >> 11] | tg[(b >> 5) & 63] | tb[b & 31]);
+                d[j] = (uint16_t)((o << 8) | (o >> 8));
+            }
+        } else {
+            for (int j = 0; j < w; j++) {
+                uint16_t b = s[j];
+                d[j] = (uint16_t)(tr[b >> 11] | tg[(b >> 5) & 63] | tb[b & 31]);
+            }
         }
     }
     return w * h;
