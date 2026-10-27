@@ -269,3 +269,23 @@ def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
         r, g, b = rgb >> 16, (rgb >> 8) & 255, rgb & 255
         assert chrome.rgb565_of(hl[cls]) == ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3), cls
     ws.frame(1 / 30)
+
+
+def test_the_memo_runs_are_the_per_character_scan_grouped():
+    """`_highlight_runs` (the Code tab's memo, a token at a time) answers what
+    `_highlight`'s per-character colours grouped into runs answer, for every
+    line of every seed cart's code in its own language and the other, and the
+    edges: escapes, an unclosed string, numbers, either comment marker, a name
+    with digits and a character past ASCII."""
+    from pathlib import Path
+    from runtime.code_layer import _highlight_runs, _runs_of
+    root = Path(__file__).resolve().parent.parent / "system_carts"
+    lines = ['s = "a\\"b" + \'c\'', 'x = "open', "n = 0x1F + 1.5e3 - .5",
+             "a--b # c", "-- lua comment", "#len", "x1y2 = _z_9", "é = 'ü' # ö",
+             "", " ", "print(\"\\\\\") -- end", "x = '\\", "a-b-c--d"]
+    for p in sorted(root.glob("*.moy/main.*")):
+        lines += p.read_text(encoding="utf-8").splitlines()
+    assert len(lines) > 1000
+    for lua in (False, True):
+        for line in lines:
+            assert _highlight_runs(line, lua) == _runs_of(line, _highlight(line, lua)), line

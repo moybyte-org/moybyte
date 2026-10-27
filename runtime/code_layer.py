@@ -272,6 +272,96 @@ _HL_LANG_BUILTINS = (
 _HL_BUILTINS = tuple(_CART_VERBS) + _HL_LANG_BUILTINS
 
 
+# What a byte starts in `_highlight_runs`: 1 a name (letter or _), 2 a digit,
+# 3 a quote, 4 `#`, 5 `-`, 0 anything else (a run of those is one text run).
+_HL_CLASS = bytes((1 if (c == 95 or 65 <= c <= 90 or 97 <= c <= 122) else
+                   2 if 48 <= c <= 57 else 3 if c in (34, 39) else
+                   4 if c == 35 else 5 if c == 45 else 0) for c in range(128))
+# Each language's word -> its colour, one lookup a name.
+_HL_WORDS = ({}, {})
+for _w in _HL_BUILTINS:
+    _HL_WORDS[0][_w] = _HL_BUILTIN
+    _HL_WORDS[1][_w] = _HL_BUILTIN
+for _w in _HL_KEYWORDS:
+    _HL_WORDS[0][_w] = _HL_KEYWORD
+for _w in _HL_LUA_KEYWORDS:
+    _HL_WORDS[1][_w] = _HL_KEYWORD
+
+
+def _highlight_runs(line, lua=False):
+    """`_highlight` as the memo keeps it: a flat list of (start, end, colour,
+    text) for each stretch of one colour, scanned a token at a time over the
+    line's bytes (`_highlight` walks it a character at a time and a second
+    pass groups the colours). A line with a non-ASCII character takes that
+    walk."""
+    b = line.encode()
+    n = len(b)
+    if n != len(line):
+        return _runs_of(line, _highlight(line, lua))
+    cls = _HL_CLASS
+    words = _HL_WORDS[1 if lua else 0]
+    out = []
+    pc = -1
+    ps = 0
+    i = 0
+    while i < n:
+        k = cls[b[i]] if b[i] < 128 else 0
+        if k == 1:
+            j = i + 1
+            while j < n and b[j] < 128 and 0 < cls[b[j]] < 3:
+                j += 1
+            c = words.get(line[i:j], _HL_TEXT)
+        elif k == 2:
+            j = i + 1
+            while j < n and (48 <= b[j] <= 57 or b[j] == 46 or b[j] == 120):
+                j += 1
+            c = _HL_NUMBER
+        elif k == 3:
+            q = b[i]
+            j = i + 1
+            while j < n:
+                x = b[j]
+                if x == 92 and j + 1 < n:
+                    j += 2
+                    continue
+                j += 1
+                if x == q:
+                    break
+            c = _HL_STRING
+        elif (k == 4 and not lua) or (k == 5 and lua and i + 1 < n and b[i + 1] == 45):
+            j = n
+            c = _HL_COMMENT
+        else:
+            j = i + 1
+            while j < n and (b[j] >= 128 or cls[b[j]] == 0):
+                j += 1
+            c = _HL_TEXT
+        if c != pc:
+            if pc >= 0:
+                out += (ps, i, pc, line[ps:i])
+            pc = c
+            ps = i
+        i = j
+    if pc >= 0:
+        out += (ps, n, pc, line[ps:n])
+    return out
+
+
+def _runs_of(line, cols):
+    """Per-character colours as `_highlight_runs`' flat runs."""
+    runs = []
+    n = len(line)
+    i = 0
+    while i < n:
+        c = cols[i]
+        j = i + 1
+        while j < n and cols[j] == c:
+            j += 1
+        runs += (i, j, c, line[i:j])
+        i = j
+    return runs
+
+
 def _is_alpha(ch):
     return ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z")
 
@@ -1422,18 +1512,8 @@ class CodeLayer:
         if runs is None:
             runs = self._hl_old.get(line)
             if runs is None:
-                cols = (_highlight_json(line) if lang == "json"
-                        else _highlight(line, lang == "lua"))
-                runs = []
-                n = len(line)
-                i = 0
-                while i < n:
-                    c = cols[i]
-                    j = i + 1
-                    while j < n and cols[j] == c:
-                        j += 1
-                    runs += (i, j, c, line[i:j])
-                    i = j
+                runs = (_runs_of(line, _highlight_json(line)) if lang == "json"
+                        else _highlight_runs(line, lang == "lua"))
             if len(self._hl_cache) >= _HL_MEMO:
                 self._hl_old = self._hl_cache
                 self._hl_cache = {}
