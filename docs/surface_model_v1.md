@@ -965,7 +965,8 @@ drawing**, the lag it copies being the ring's own:
   last frame's, the page unchanged;
 - **a popover's ride** while the popover is as the last frame left it
   (`_pop_seq` counts its changes, `_repeating` is the frame's verdict): the
-  scrim's rect, the card's, the pause menu's over its paused playtest;
+  scrim's rect, the card's, the pause menu's over its paused playtest
+  and a stopped run's card over its stopped one;
 - **the desk home's still frame** whose ring's last entry holds this
   frame's parts and bar: the rows its lagging parts span, whole. Its
   retained re-entry frame, which every buffer then holds, is captured on
@@ -975,7 +976,8 @@ drawing**, the lag it copies being the ring's own:
 "The last frame held this one" is checkable: the last painted frame is the
 one before (`_painted_f`, the ring's entry for it), and nothing reported a
 change since -- the desk settled and calm (§14.1's terms), no popover
-change, no playtest window but a paused one, nothing animating.
+change, no playtest window but a held one (paused, or stopped under its
+card), nothing animating.
 
 **This is not a second invalidation mechanism.** Whether a surface paints
 and what a buffer lacks are still the gate's and the rings'; the copy only

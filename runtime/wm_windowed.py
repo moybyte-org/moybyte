@@ -1767,9 +1767,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         Deliberately NO gesture leg here: a WM gesture's repaint is guaranteed
         by the POINTER leg (window movement implies pointer movement; a
         held-still pointer moves nothing, so skipping is correct), and
-        _animating feeds the backdrop cache's "desk pixels are moving" test --
-        a gesture leg would force a live desk re-render every drag frame,
-        which is the exact #155 regression the cache exists to prevent.
+        _animating feeds the window freeze's "nothing is animating" test
+        (`_frame_is_quiet`) -- a gesture leg would void it on every drag
+        frame. The desk's own cache asks `desk_moves`, which no window's
+        content answers.
 
         A LIVE WALLPAPER does belong here (owner report 2026-07-31: "they only
         move when I move a window... but it doesn't happen while Settings is on
