@@ -5,8 +5,8 @@ Mirrors the moy-spec site generator's rule: the CANONICAL things live where they
 live, and this only assembles. The playable player is the real web runner build
 (firmware/web_runner/dist), copied in under player/ -- so what a visitor plays is
 the same bundle the repo ships, at the commit they are reading. The page's colours
-come from runtime/palette.py's MOY64, so the site cannot drift from the system's
-own palette.
+come from the Moy theme's roles (native/moy_ui/themes/moy.json, SITE_ROLES), so the
+site cannot drift from the system's own look.
 
     python3 site/build.py                  # -> _site/
     python3 site/build.py --out /tmp/x     # somewhere else
@@ -82,6 +82,53 @@ CHANNELS = {
 
 # page_tail.js's channel line, which stamp_player rewrites for a channel's site.
 CHANNEL_LINE = 'const MOY_CHANNEL = "";'
+
+
+# The page's colour variables, each named for the role of the OS's Moy theme it
+# takes (native/moy_ui/themes/moy.json: `colors` roles, and the `look` fields a
+# mode sets). Night is the dark scheme, Day the light one, so the page follows
+# the visitor's scheme the way the console follows its mode, and cannot drift
+# from the theme: this reads the theme's own file.
+SITE_ROLES = (
+    ("bg", ("colors", "panel")),            # the desk's ground
+    ("surface", ("colors", "surface")),     # a window's body
+    ("raised", ("colors", "surface_alt")),  # a button's fill
+    ("line", ("colors", "border")),         # hairlines: frames, dividers
+    ("field", ("look", "field", "border")),  # a text field's outline, 3:1
+    ("ink", ("colors", "ink")),
+    ("body", ("colors", "ink")),
+    ("muted", ("colors", "ink_dim")),
+    ("link", ("colors", "accent")),
+    ("accent", ("colors", "accent")),       # Moy's one accent: focus, current, primary
+    ("ok", ("colors", "code_string")),
+    ("wip", ("colors", "code_number")),
+    ("warn", ("look", "danger_ink")),
+    ("pri-ink", ("colors", "value_ink")),   # text on an accent fill
+)
+
+
+# Night's colours under a fixed name, for the one control that sits over the
+# console (a dark scrim in either scheme) and so must not follow the page's.
+NIGHT_ROLES = (
+    ("night-bg", ("colors", "panel")),
+    ("night-line", ("colors", "border")),
+    ("night-ink", ("colors", "ink")),
+    ("night-accent", ("colors", "accent")),
+)
+
+
+def moy_roles(mode, roles=SITE_ROLES):
+    """The `:root` variable declarations for Moy's `mode` ("dark" is Night,
+    "light" is Day), as CSS."""
+    with open(os.path.join(ROOT, "native", "moy_ui", "themes", "moy.json")) as f:
+        theme = json.load(f)
+    out = []
+    for var, (top, *path) in roles:
+        node = theme[top][mode]
+        for key in path:
+            node = node[key]
+        out.append("--%s:%s;" % (var, node))
+    return " ".join(out)
 
 
 def palette():
@@ -670,7 +717,6 @@ def channel_banner(channel):
 
 
 def page(pal, has_player, cards, channel=None):
-    tokens = "".join("--p%d:%s;" % (i, c) for i, c in enumerate(pal))
     tabs = "\n".join(
         '        <button class="tab%s" data-tier="%s" data-q="%s" data-ar="%s">'
         '<b>%s</b><span>%s</span></button>'
@@ -722,23 +768,17 @@ def page(pal, has_player, cards, channel=None):
 %(robots)s
 <meta name="description" content="A small operating system for ESP32 boards. Its software is cartridges you can open, change and run on the board itself. Try it in the browser.">
 <style>
-/* Every colour below is MOY64, generated from runtime/palette.py -- the site
-   cannot drift from the system's own palette. Roles are named so the light
-   scheme differs only in the block that follows. */
-:root{%(tokens)s
-  --bg:#05070d; --surface:#090d19; --raised:#0d1325; --line:#141e3a;
-  --ink:var(--p7); --body:var(--p6); --muted:#828899; --link:var(--p12);
-  --accent:var(--p10); --ok:var(--p11); --wip:var(--p9); --warn:var(--p8);
-  --pri-ink:var(--p1);
+/* Every colour below is a role of the OS's Moy theme, read from
+   native/moy_ui/themes/moy.json: Night (dark) is the default, Day (light)
+   follows the visitor's scheme. See SITE_ROLES in site/build.py. */
+:root{%(roles_dark)s
+  %(night)s
   --w:70rem;
   --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
 }
 @media (prefers-color-scheme: light){
-  :root{--bg:#fff9f5; --surface:#fff4ec; --raised:#fffcfa; --line:#b3a9a1;
-        --ink:var(--p1); --body:#2f323a; --muted:#4d525e; --link:#175f8c;
-        --accent:#74224c; --ok:#007446; --wip:#a86c00; --warn:#c2003b;
-        --pri-ink:#fff9f5;}
+  :root{%(roles_light)s}
 }
 %(font)s
 *{box-sizing:border-box}
@@ -834,9 +874,10 @@ section > .wrap > h2{margin:0;font-size:clamp(22px,3vw,30px)}
   aspect-ratio:auto !important;background:#000}
 body.noscroll{overflow:hidden}
 .shrink{position:absolute;top:8px;right:8px;z-index:2;appearance:none;cursor:pointer;
-  font:13px/1 var(--sans);padding:8px 11px;color:var(--ink);
-  background:rgba(5,7,13,.72);border:1px solid var(--line)}
-.shrink:hover{border-color:var(--accent);color:var(--accent)}
+  font:13px/1 var(--sans);padding:8px 11px;color:var(--night-ink);
+  background:color-mix(in srgb,var(--night-bg) 72%%,transparent);
+  border:1px solid var(--night-line)}
+.shrink:hover{border-color:var(--night-accent);color:var(--night-accent)}
 .stage:not(.big) .shrink{display:none}
 /* Landscape phone: the OS bar sits at the very top of the console, so a button
    in the corner would cover its clock. Nudge it clear of the safe area. */
@@ -896,7 +937,7 @@ body.noscroll{overflow:hidden}
 .devpick{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:22px 0 0;
   font-size:14px;color:var(--muted)}
 .devpick select{font:15px var(--sans);color:var(--ink);background:var(--surface);
-  border:1px solid var(--line);padding:8px 10px;min-width:min(20rem,100%%)}
+  border:1px solid var(--field);padding:8px 10px;min-width:min(20rem,100%%)}
 .cards.boards{grid-template-columns:minmax(0,40rem)}
 .boards li{display:flex;flex-direction:column}
 /* The column stretches its children, and a full-width chip reads as a field. */
@@ -913,7 +954,7 @@ body.noscroll{overflow:hidden}
 .pick{display:flex;gap:8px;align-items:center;margin:0 0 9px;
   font-size:12px;color:var(--muted)}
 .pick select{font:12px var(--mono);color:var(--ink);background:var(--bg);
-  border:1px solid var(--line);padding:3px 6px;flex:1 1 auto}
+  border:1px solid var(--field);padding:3px 6px;flex:1 1 auto}
 /* Flashing a version the site does not carry -- folded away, because it is the
    uncommon path and it asks the visitor to go and fetch a file first. */
 .older{margin:12px 0 0;font-size:12px;color:var(--muted)}
@@ -1167,7 +1208,8 @@ pickDevice();
 </body>
 </html>
 """ % {
-        "tokens": tokens, "font": font_face(), "tabs": tabs, "missing": missing,
+        "roles_dark": moy_roles("dark"), "roles_light": moy_roles("light"),
+        "night": moy_roles("dark", NIGHT_ROLES), "font": font_face(), "tabs": tabs, "missing": missing,
         "status": status, "features": features, "mark": moy_mark(pal),
         "targets": targets, "boards": boards, "device_options": device_options, "flash_js": flash_js,
         "flash_hint": flash_hint,
@@ -1236,8 +1278,7 @@ def main():
     # script must run with nothing installed (the Pages job has no Pillow, no
     # venv). Regenerate it with `make site-hero`, which is
     #   tools/make_site_gifs.py --windowed --scene code --wallpaper moy_night
-    # -- the moy_night backdrop is the point: it is the brand colorway, so the
-    # shot's own pixels are the same navy/yellow/cream the page is built from.
+    # -- the moy_night backdrop is the point: it is the brand colorway.
     # Frame 0 matters more than it looks: it IS the page's first paint, so the
     # recording has to open on a composed desk, not a boot wipe.
     # The flasher: the CI images the page can write, the vendored esptool-js
