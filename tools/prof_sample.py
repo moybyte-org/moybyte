@@ -24,8 +24,11 @@ WHAT THE NUMBERS MEAN, and the two ways to misread them:
     tell "all the time is in memcpy" from "who keeps calling memcpy". Run both;
     they answer different questions. The offset is resolved against the board's
     own `moy_prof.SELF`, so the same flag means the same thing on either arch.
-  * CALLER ATTRIBUTION IS XTENSA-ONLY TODAY. The P4 samples `mepc`, which is
-    exact but is one frame deep, so `--frame 1` has nothing to report there.
+  * ON THE P4 `--frame 1` IS THE INTERRUPTEE'S `ra`, read from the frame the
+    interrupt entry saved. For a leaf (memcpy, a fill kernel) that is the
+    caller; a function that has itself called since it was entered shows the
+    last return address it took instead. So read it for the leaves at the top
+    of `--frame 0`. On the S3 it is a real backtrace frame.
   * `??` rows are addresses with no symbol -- ROM routines and the
     @micropython.native exec arena, which is generated at runtime and is in no
     ELF. A large `??` share means the cart is running native-compiled code, not
@@ -184,9 +187,8 @@ def main():
     frames = board.pyval("__import__('moy_prof').FRAMES", timeout=30) or 1
     idx = self_idx + a.frame
     if idx >= frames:
-        sys.exit("--frame %d asks for frame %d of %d: this board records no caller "
-                 "frame (the P4 samples mepc, which is one deep)."
-                 % (a.frame, idx, frames))
+        sys.exit("--frame %d asks for frame %d of %d: this board records no "
+                 "frame that deep." % (a.frame, idx, frames))
     try:
         tally, _taken = capture(board, a.hz, a.samples, idx, a.secs, log)
     finally:
