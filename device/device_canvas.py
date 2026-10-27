@@ -1833,6 +1833,28 @@ class DeviceCanvas:
                        self._cam_x, self._cam_y,
                        self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
+    def blit_indices_scale(self, sheet, sx, sy, sw, sh, dx, dy, scale=1,
+                           colorkey=-1):
+        # The sw x sh rect at (sx, sy) of an index bitmap (sheet.pix, sheet.w x
+        # sheet.h), each pixel a scale x scale block at (dx, dy): the pixels of
+        # sspr(sheet, sx, sy, sw, sh, dx, dy, sw * scale, sh * scale, colorkey)
+        # for a source rect inside the bitmap, resolved once per source pixel
+        # rather than per destination pixel. Camera, clip, pal and palt apply as
+        # they do to sspr; a source rect past the bitmap draws nothing there.
+        self.flush_batch()
+        scale = int(scale)
+        sw = int(sw); sh = int(sh)
+        if sw <= 0 or sh <= 0 or scale <= 0:
+            return
+        self._gfx.blit_indices_scale(self._buf, self._stride, self._bh,
+                                     sheet.pix, sheet.w, sheet.h,
+                                     int(sx), int(sy), sw, sh,
+                                     int(dx) - self._cam_x, int(dy) - self._cam_y,
+                                     scale, self._wire_pal(), self._palt,
+                                     int(colorkey),
+                                     self._clip_x0, self._clip_y0,
+                                     self._clip_x1, self._clip_y1)
+
     def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
         # SPEC.md 6.1 tline (#167 shape B): exactly line()'s Bresenham pixels,
         # sampling the MAP as a virtual texture in 16.16 fixed point -- the

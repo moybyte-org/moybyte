@@ -48,7 +48,7 @@
 
 // The COMPOSITOR, which this file and runtime/moyhost_gfx.c both run and used
 // to both CONTAIN: fill/fill_rect/blit565/blit565_scale/blit_window/
-// scroll_rect/blit_indices/text plus the fill-run and libmoy-bridge helpers.
+// scroll_rect/blit_indices(_scale)/text plus the fill-run and libmoy-bridge helpers.
 // One copy now; that header says why, and why nothing may be forked back in
 // here. INCLUDED AFTER THE PRAGMA on purpose -- its mg_fill_run and canvas
 // helpers are `static inline` and are inlined into gate_fill/fill_spans below,
@@ -1321,6 +1321,41 @@ static mp_obj_t moy_gfx_blit_indices(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_obj, 9, 9, moy_gfx_blit_indices);
 
+// blit_indices_scale(dst, dw, dh, indices, iw, ih, sx, sy, sw, sh, dx, dy, scale,
+//                    pal565, palt, colorkey, cx0, cy0, cx1, cy1)
+// -- the sw x sh rect at (sx, sy) of an iw x ih index bitmap, each pixel a
+// scale x scale block at (dx, dy), clipped to [cx0, cx1) x [cy0, cy1): sspr's
+// pixels at an integer scale, one palette lookup per SOURCE pixel. `palt` is
+// the 64-byte transparency mask or None; colorkey compares the raw index (-1:
+// none); an index past pal565 is skipped. moy_gfx_kernels.h has the contract.
+static mp_obj_t moy_gfx_blit_indices_scale(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, pcap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    mp_buffer_info_t ibi;
+    mp_get_buffer_raise(a[3], &ibi, MP_BUFFER_READ);
+    const uint16_t *pal = moy_gfx_buf_r(a[13], &pcap);
+    const uint8_t *palt = NULL;
+    if (a[14] != mp_const_none) {
+        mp_buffer_info_t tb;
+        mp_get_buffer_raise(a[14], &tb, MP_BUFFER_READ);
+        if (tb.len >= 64) palt = (const uint8_t *)tb.buf;
+    }
+    mg_blit_indices_scale(dst, dcap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                          (const uint8_t *)ibi.buf, ibi.len,
+                          mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                          mp_obj_get_int(a[6]), mp_obj_get_int(a[7]),
+                          mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                          mp_obj_get_int(a[10]), mp_obj_get_int(a[11]),
+                          mp_obj_get_int(a[12]), pal, pcap, palt,
+                          mp_obj_get_int(a[15]),
+                          mp_obj_get_int(a[16]), mp_obj_get_int(a[17]),
+                          mp_obj_get_int(a[18]), mp_obj_get_int(a[19]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_scale_obj, 20, 20,
+                                           moy_gfx_blit_indices_scale);
+
 // One byte a pixel: a drawing's palette indices (moy_gfx_kernels.h has the
 // contracts). The marks Paint makes (runtime/artwork.py's PaintDocument).
 static uint8_t *moy_gfx_ibuf(mp_obj_t obj, size_t *cap, mp_uint_t flags) {
@@ -2387,6 +2422,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_layer_meter), MP_ROM_PTR(&moy_gfx_layer_meter_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_rect), MP_ROM_PTR(&moy_gfx_scroll_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit_indices_scale), MP_ROM_PTR(&moy_gfx_blit_indices_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_ifill), MP_ROM_PTR(&moy_gfx_ifill_obj) },
     { MP_ROM_QSTR(MP_QSTR_iline), MP_ROM_PTR(&moy_gfx_iline_obj) },
     { MP_ROM_QSTR(MP_QSTR_icopy), MP_ROM_PTR(&moy_gfx_icopy_obj) },

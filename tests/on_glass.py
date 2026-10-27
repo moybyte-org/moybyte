@@ -472,6 +472,88 @@ def sprites_match_host(board):
         assert bytes.fromhex(got) == frame, (what, args, fs)
 
 
+# The picker kernel's cases, run as this text on the host and on a board: a
+# sheet from an LCG both tiers compute, then per case the same ground, state
+# and call drawn through sspr into one layer and blit_indices_scale into
+# another. A case answers whether the two layers are byte-equal on that tier,
+# and the crc32 of the scaled one's palette indices, which the host's must
+# equal.
+_PICKER_CASES = """
+import binascii, device_canvas
+class _PkSheet:
+    pass
+def _pk_sheet():
+    s = _PkSheet()
+    s.w, s.h = 128, 256
+    pix = bytearray(128 * 256)
+    v = 7
+    for i in range(len(pix)):
+        v = (v * 1103515245 + 12345) & 0x7FFFFFFF
+        r = v >> 16
+        pix[i] = 0 if r % 10 < 3 else r % 64
+    s.pix = pix
+    return s
+def _pk_state(cv, st):
+    cv.pal()
+    cv.palt()
+    cv.clip()
+    cv.camera()
+    for y in range(0, 72, 5):
+        for x in range(0, 96, 7):
+            cv.rect(x, y, 7, 5, (x // 7 + y // 5) % 64)
+    if st == 1:
+        cv.clip(9, 7, 70, 51)
+        cv.camera(-5, 3)
+    elif st == 2:
+        for i in range(0, 64, 3):
+            cv.pal(i, (i * 5 + 1) % 64)
+        cv.palt(17, True)
+def _pk_cases(make):
+    sheet = _pk_sheet()
+    out = []
+    for scale in (1, 2, 3, 5):
+        for st in (0, 1, 2):
+            for ck in (-1, 0):
+                for sx, sy, sw, sh, dx, dy in ((0, 0, 8, 8, 3, 2),
+                                               (5, 40, 21, 13, -7, 9),
+                                               (100, 230, 28, 26, 60, 40)):
+                    a = make(96, 72)
+                    b = make(96, 72)
+                    try:
+                        _pk_state(a, st)
+                        _pk_state(b, st)
+                        a.sspr(sheet, sx, sy, sw, sh, dx, dy, sw * scale, sh * scale, ck)
+                        b.blit_indices_scale(sheet, sx, sy, sw, sh, dx, dy, scale, ck)
+                        same = bytes(a._buf) == bytes(b._buf)
+                        px = device_canvas.to_indices(b._buf, b._wire)
+                        out.append((same, binascii.crc32(bytes(px)) & 0xFFFFFFFF))
+                    finally:
+                        for c in (a, b):
+                            if hasattr(c, 'release'):
+                                c.release()
+    return out
+"""
+
+
+def picker_kernel_matches_sspr(board):
+    """The picker kernel (moy_gfx.blit_indices_scale, this board's C) draws
+    sspr's pixels on glass at every scale, state and colorkey of the cases,
+    and its frames are the host's: the scaled lane is one body on every tier
+    (docs/scroll_and_text_2026-10.md §13)."""
+    from runtime import host_canvas
+    host_canvas.install()
+    env = {}
+    exec(_PICKER_CASES, env)                       # noqa: S102 -- fixed text
+    want = env["_pk_cases"](host_canvas.make_system_canvas)
+    assert all(same for same, _ in want)
+    board.pyexec(_PICKER_CASES, strict=True)
+    got = board.pyval("ws._g['_pk_cases'](lambda w, h: "
+                      "(ws.sys_canvas or ws.canvas).new_layer(w, h))",
+                      timeout=120.0, strict=True)
+    assert [same for same, _ in got] == [True] * len(want)
+    assert [crc for _, crc in got] == [crc for _, crc in want]
+
+
 def sheet_corpus(n, seed=11):
     """The fixture sheet, its cuts and a mutant per draw: a nibble or a
     byte flipped anywhere, a line break dropped or doubled, bytes inserted

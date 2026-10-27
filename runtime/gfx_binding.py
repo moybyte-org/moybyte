@@ -101,6 +101,8 @@ _SIGS = (
                            _I, _I, _I, _I], None),
     ("mg_blit_window", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I], None),
     ("mg_blit_indices", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z], None),
+    ("mg_blit_indices_scale", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I,
+                               _I, _I, _I, _P, _Z, _P, _I, _I, _I, _I, _I], None),
     ("mg_ifill", [_P, _Z, _I, _I, _I, _I, _I, _I, ctypes.c_uint8], None),
     ("mg_iline", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, ctypes.c_uint8], None),
     ("mg_icopy", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I, _I], None),
@@ -619,6 +621,25 @@ def blit_indices(dst, dw, dh, dx, dy, idx, iw, ih, pal):
                            int(dx), int(dy),
                            ctypes.cast(iarr, _P), len(imv), int(iw), int(ih),
                            ctypes.cast(parr, _P), len(pmv) // 2)
+
+
+def blit_indices_scale(dst, dw, dh, idx, iw, ih, sx, sy, sw, sh, dx, dy, scale,
+                       pal, palt, colorkey, cx0, cy0, cx1, cy1):
+    darr, dcap = _buf(dst)
+    imv = memoryview(idx).cast("B")
+    iarr, _ = _rbuf(imv)
+    pmv = memoryview(pal).cast("B")
+    parr, _ = _rbuf(pmv)
+    tarr = None
+    if palt is not None and len(memoryview(palt).cast("B")) >= 64:
+        tarr, _ = _rbuf(memoryview(palt).cast("B"))
+    _lib().mg_blit_indices_scale(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                                 ctypes.cast(iarr, _P), len(imv), int(iw), int(ih),
+                                 int(sx), int(sy), int(sw), int(sh),
+                                 int(dx), int(dy), int(scale),
+                                 ctypes.cast(parr, _P), len(pmv) // 2,
+                                 ctypes.cast(tarr, _P) if tarr is not None else None,
+                                 int(colorkey), int(cx0), int(cy0), int(cx1), int(cy1))
 
 
 # One byte a pixel (moy_gfx_kernels.h): a drawing's palette indices.

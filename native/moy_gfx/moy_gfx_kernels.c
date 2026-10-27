@@ -373,6 +373,100 @@ void mg_blit_indices(uint16_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
     }
 }
 
+/* An index's pixel, or MG_BIS_SKIP where the pixel is left as it was. */
+#define MG_BIS_SKIP 0x10000u
+
+/* One destination row of a scaled source row: columns [x0, x1), the first
+ * block `first` pixels wide (the clip may cut it), every later one `scale`.
+ * Returns whether it left any pixel as it was. */
+static inline int mg_bis_row(uint16_t *d, const uint8_t *s, int x0, int x1,
+                             int first, int scale, const uint32_t *t)
+{
+    uint32_t skipped = 0;
+    if (scale == 1) {
+        for (int x = x0; x < x1; x++) {
+            uint32_t v = t[*s++];
+            skipped |= v;
+            if (!(v & MG_BIS_SKIP)) d[x] = (uint16_t)v;
+        }
+        return (skipped & MG_BIS_SKIP) != 0;
+    }
+    int x = x0, n = first;
+    while (x < x1) {
+        int e = x + n > x1 ? x1 : x + n;
+        uint32_t v = t[*s++];
+        skipped |= v;
+        if (!(v & MG_BIS_SKIP)) {
+            uint16_t c = (uint16_t)v;
+            for (int i = x; i < e; i++) d[i] = c;
+        }
+        x = e;
+        n = scale;
+    }
+    return (skipped & MG_BIS_SKIP) != 0;
+}
+
+void mg_blit_indices_scale(uint16_t *dst, size_t dcap, int dw, int dh,
+                           const uint8_t *idx, size_t icap, int iw, int ih,
+                           int sx, int sy, int sw, int sh, int dx, int dy, int scale,
+                           const uint16_t *pal, size_t pcap, const uint8_t *palt,
+                           int colorkey, int cx0, int cy0, int cx1, int cy1)
+{
+    if (dw <= 0 || dh <= 0 || iw <= 0 || ih <= 0 || sw <= 0 || sh <= 0 ||
+        scale <= 0 || pcap == 0) return;
+    if ((size_t)dw * (size_t)dh > dcap) dh = (int)(dcap / (size_t)dw);
+    if ((size_t)iw * (size_t)ih > icap) ih = (int)(icap / (size_t)iw);
+    /* The source rect inside the bitmap, its destination moved with it. */
+    int64_t ox = dx, oy = dy;
+    if (sx < 0) { ox -= (int64_t)sx * scale; sw += sx; sx = 0; }
+    if (sy < 0) { oy -= (int64_t)sy * scale; sh += sy; sy = 0; }
+    if (sx >= iw || sy >= ih) return;
+    if (sw > iw - sx) sw = iw - sx;
+    if (sh > ih - sy) sh = ih - sy;
+    if (sw <= 0 || sh <= 0) return;
+    /* The destination rect inside the clip, inside the buffer. */
+    if (cx0 < 0) cx0 = 0;
+    if (cy0 < 0) cy0 = 0;
+    if (cx1 > dw) cx1 = dw;
+    if (cy1 > dh) cy1 = dh;
+    int64_t ex0 = ox > cx0 ? ox : cx0, ey0 = oy > cy0 ? oy : cy0;
+    int64_t ex1 = ox + (int64_t)sw * scale, ey1 = oy + (int64_t)sh * scale;
+    if (ex1 > cx1) ex1 = cx1;
+    if (ey1 > cy1) ey1 = cy1;
+    if (ex0 >= ex1 || ey0 >= ey1) return;
+    /* Every byte's pixel, resolved once a call rather than once a pixel. */
+    uint32_t t[256];
+    for (int p = 0; p < 256; p++) {
+        t[p] = (p == colorkey || (size_t)p >= pcap ||
+                (palt != NULL && palt[p & 63])) ? MG_BIS_SKIP : pal[p];
+    }
+    int x0 = (int)ex0, x1 = (int)ex1, y0 = (int)ey0, y1 = (int)ey1;
+    int u0 = (int)((ex0 - ox) / scale);
+    int first = scale - (int)((ex0 - ox) % scale);
+    size_t run = (size_t)(x1 - x0) * 2u;
+    int v = (int)((ey0 - oy) / scale);
+    int y = y0, yend = y0 + scale - (int)((ey0 - oy) % scale);
+    while (y < y1) {
+        if (yend > y1) yend = y1;
+        const uint8_t *srow = idx + (size_t)(sy + v) * (size_t)iw + (size_t)(sx + u0);
+        uint16_t *drow = dst + (size_t)y * (size_t)dw;
+        int holes = mg_bis_row(drow, srow, x0, x1, first, scale, t);
+        /* The block's other rows: a copy of the first, or the same writes
+         * where it left pixels as they were. */
+        for (int r = y + 1; r < yend; r++) {
+            uint16_t *d = dst + (size_t)r * (size_t)dw;
+            if (holes) {
+                mg_bis_row(d, srow, x0, x1, first, scale, t);
+            } else {
+                memcpy(d + x0, drow + x0, run);
+            }
+        }
+        y = yend;
+        yend = y + scale;
+        v++;
+    }
+}
+
 /* ---- one byte a pixel ------------------------------------------------- */
 
 static int mg_ibh(size_t cap, int bw, int bh)

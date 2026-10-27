@@ -114,6 +114,7 @@ class _FakeGfx:
     tline = staticmethod(gfx_binding.tline)
     text = staticmethod(gfx_binding.text)
     sspr = staticmethod(gfx_binding.sspr)
+    blit_indices_scale = staticmethod(gfx_binding.blit_indices_scale)
     tri = staticmethod(gfx_binding.tri)
     circ = staticmethod(gfx_binding.circ)
     circb = staticmethod(gfx_binding.circb)

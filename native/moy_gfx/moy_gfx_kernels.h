@@ -7,10 +7,10 @@
  * is this console's compositor: a viewport-aware fill and fill_rect, the RGB565
  * blit with its opaque memcpy lane, the integer-upscale blit the windowed WM
  * composites through, the any-ratio resize the home's cards scale by,
- * blit_window, scroll_rect, blit_indices, the system-font (scale > 1)
- * text rasterizer, and the one-byte-a-pixel ops Paint's drawings are marked
- * with (ifill, iline, icopy, iflood). These loops were once written
- * twice (moyhost_gfx.c + modmoy_gfx.c) and had already drifted; this file is
+ * blit_window, scroll_rect, blit_indices and its scaled source-rect form
+ * (the sprite pickers'), the system-font (scale > 1) text rasterizer, and
+ * the one-byte-a-pixel ops Paint's drawings are marked with (ifill, iline,
+ * icopy, iflood). These loops were once written twice (moyhost_gfx.c + modmoy_gfx.c) and had already drifted; this file is
  * the one copy.
  *
  * WHY IT MATTERS MORE THAN A TIDY-UP. The goldens
@@ -316,6 +316,19 @@ void mg_blit_window(uint16_t *dst, size_t dcap, int dw, int dh,
 void mg_blit_indices(uint16_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
                      const uint8_t *idx, size_t icap, int iw, int ih,
                      const uint16_t *pal, size_t pcap);
+
+/* The sw x sh rect at (sx, sy) of an iw x ih palette-INDEX bitmap, each pixel
+ * a `scale` x `scale` block at (dx, dy), inside the clip [cx0, cx1) x
+ * [cy0, cy1): exactly sspr's pixels for a destination of sw*scale x sh*scale
+ * (nearest-neighbour, texel i / scale), resolved per source pixel rather than
+ * per destination pixel. A pixel whose index equals `colorkey`, is flagged in
+ * `palt` (64 bytes, or NULL) or lies past the palette is left as it was; the
+ * part of the rect outside the bitmap draws nothing. */
+void mg_blit_indices_scale(uint16_t *dst, size_t dcap, int dw, int dh,
+                           const uint8_t *idx, size_t icap, int iw, int ih,
+                           int sx, int sy, int sw, int sh, int dx, int dy, int scale,
+                           const uint16_t *pal, size_t pcap, const uint8_t *palt,
+                           int colorkey, int cx0, int cy0, int cx1, int cy1);
 
 /* ---- one byte a pixel: a drawing's palette indices (runtime/artwork.py) --
  * A bw x bh buffer of `cap` bytes; every op clips to it (a cap short of
