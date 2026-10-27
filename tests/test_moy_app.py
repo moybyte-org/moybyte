@@ -243,7 +243,9 @@ def run(sp, ap, say, mi, root):
     say("refused", f.list("selfies"), f.load("project:", "x"), f.save("recordings", "a", "b"))
     notes = app.grant("local.notes2", ("files",), kind="docs", run=True)
     scoped = ap.Files(app, notes)
-    say("scoped", scoped.list("docs"), scoped.save("docs", "note", "n"))
+    # the two docs may differ in mtime by a second: the order is the store's, not this test's
+    names, err = scoped.list("docs")
+    say("scoped", (sorted(names), err), scoped.save("docs", "note", "n"))
     try:
         scoped.list("drawings")
         say("scoped allowed")
