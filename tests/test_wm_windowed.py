@@ -2985,7 +2985,9 @@ class _Ring:
         self.stacks.append("pop" if st is wm._pop_stack else
                            "qpop" if st is wm._quiet_pop_stack else
                            "quiet" if st is wm._quiet_stack else
-                           "repeat" if st is wm._repeat_stack else "full")
+                           "repeat" if st is wm._repeat_stack else
+                           "lpop" if st is getattr(wm, "_lead_pop_stack", 0) else
+                           "lquiet" if st is getattr(wm, "_lead_quiet_stack", 0) else "full")
         self.bufs[self.k] = bytes(self.cv._buf)
         self.cv._comp.last = self.bufs[self.k] if self.n > 1 else None
         self.k = (self.k + 1) % self.n
@@ -3133,31 +3135,25 @@ def test_the_wifi_popover_runs_the_password_step_in_place(tmp_path):
 
 def test_a_popover_change_paints_its_rect_alone(tmp_path):
     """Open, a row moved, close: on a persistent root each is ONE frame of the
-    popover layers alone, its rect the frame's damage -- never the desk."""
+    popover layers alone, its rect the frame's damage -- never the desk. The
+    open and the close stamp the focused window first, its focus mark let go
+    and taken back."""
     ws, drv = _popover_desk(tmp_path)
     damage = []
     ws.sys_canvas.note_damage = lambda *r: damage.append(r)
     ring = _Ring(ws, 1)
     ring.settle(drv)
-    for step in (lambda: ws.widget_tap("battery"),
-                 lambda: ws._sysmenu_layer.handle_input(_Key("down")),
-                 lambda: ws.widget_tap("battery")):
+    win = ws.wm._wins["calc"].content_rect()
+    for step, marks in ((lambda: ws.widget_tap("battery"), [win]),
+                        (lambda: ws._sysmenu_layer.handle_input(_Key("down")), []),
+                        (lambda: ws.widget_tap("battery"), [win])):
         rect = ws.sysmenu.panel_rect() if ws.sysmenu.open else None
         damage.clear()
         step()
         rect = rect or ws.sysmenu.panel_rect()
         assert ring.settle(drv) == ["pop"]
-        assert damage == [rect]
+        assert sorted(damage) == sorted(marks + [rect])
     assert ring.settle(drv) == []                     # idle: no frame at all
-
-
-# Under the look (every theme's since docs/look_2026-10.md step 33) the
-# riding popover's rounded card re-blends its corners over its own last
-# frame, and the system menu's card over a playtest takes five full frames
-# before its quiet ones: a ridden frame no longer equals a full repaint.
-# Both nets held only while they ran on a theme with no look.
-_LOOK_RIDE = pytest.mark.xfail(strict=True, reason="the look's popover ride differs "
-                               "from a full repaint (docs/look_2026-10.md step 33)")
 
 
 def test_a_component_popovers_card_repaints_over_what_it_covers(tmp_path):
@@ -3184,10 +3180,11 @@ def test_a_component_popovers_card_repaints_over_what_it_covers(tmp_path):
     assert seen == [card(b) for b in ring.full(drv)]
 
 
-@_LOOK_RIDE
 def test_a_popover_is_pixel_identical_in_every_buffer(tmp_path):
     """On a triple-buffered root, after the popover opens, moves and closes,
-    every buffer equals a full repaint of the same state."""
+    every buffer equals a full repaint of the same state: the focused window
+    under it shown without its focus mark while the popover holds the keys
+    (one a screen), with it again once it closes."""
     for name in ("clock", "wifi", "menu"):
         ws, drv = _popover_desk(tmp_path / name)
         ring = _Ring(ws, 3)
@@ -3205,6 +3202,81 @@ def test_a_popover_is_pixel_identical_in_every_buffer(tmp_path):
         ring.settle(drv)
         seen = list(ring.bufs)
         assert seen == ring.full(drv), name
+
+
+def test_the_wifi_card_that_grows_is_a_full_repaint_in_every_buffer(tmp_path):
+    """The Wi-Fi card sized to what its scan finds: opened, then grown by a
+    rescan that finds more networks, every buffer is a full repaint's -- no
+    part of its larger card left over what its first rect kept."""
+    ws, drv = _popover_desk(tmp_path)
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv)
+    ws.widget_tap("wifi")
+    ring.settle(drv)
+    assert ws.sysmenu.panel_rect()[3] > 200        # its four networks counted
+    nets = list(ws.wifi.scan())
+    ws.wifi.scan = lambda: nets + [("Attic", 20, False), ("Porch", 10, True)]
+    h = ws.sysmenu.panel_rect()[3]
+    ws.sysmenu.comp.host.focus("Scan again")
+    drv.press("a")
+    ring.settle(drv)
+    assert ws.sysmenu.panel_rect()[3] > h
+    assert list(ring.bufs) == ring.full(drv)
+    ws.widget_tap("wifi")
+    ring.settle(drv)
+    assert list(ring.bufs) == ring.full(drv)
+
+
+def test_a_popover_keeps_the_focused_windows_buffer_for_its_close(tmp_path, monkeypatch):
+    """Its open draws the focused window once without its mark; its close
+    puts the buffer it kept back rather than drawing it again."""
+    ws, drv = _popover_desk(tmp_path)
+    ring = _Ring(ws, 3)
+    ring.settle(drv)
+    calc = ws.wm._content_for("calc")
+    seen = []
+    orig = calc.draw
+    monkeypatch.setattr(calc, "draw", lambda dt: (seen.append(dt), orig(dt))[1])
+    ws.widget_tap("clock")
+    assert ring.settle(drv) == ["pop"] * 3
+    assert len(seen) == 1 and not ws.wm._wins["calc"]._marked
+    ws.widget_tap("clock")
+    assert ring.settle(drv) == ["pop"] * 3
+    assert len(seen) == 1 and ws.wm._wins["calc"]._marked
+
+
+def test_under_touch_a_menu_leaves_the_focused_window_as_it_is(tmp_path, monkeypatch):
+    """Touch shows no focus mark, so a popover or the system menu taking
+    the keys changes nothing in the focused window: neither draws it, and
+    every buffer is still a full repaint's."""
+    from runtime import ui_draw
+    ws, drv = _popover_desk(tmp_path)
+    was = ui_draw.input_kind()
+    ui_draw.input_kind("touch")
+    try:
+        ring = _Ring(ws, 3)
+        for _ in range(3):
+            ws._dirty = True
+            ring.frame(drv)
+        ring.settle(drv)
+        calc = ws.wm._content_for("calc")
+        seen = []
+        orig = calc.draw
+        monkeypatch.setattr(calc, "draw", lambda dt: (seen.append(dt), orig(dt))[1])
+        for name in ("clock", "menu"):
+            ws.widget_tap(name)
+            ring.settle(drv)
+            assert seen == [], name
+            assert list(ring.bufs) == ring.full(drv), name
+            seen.clear()
+            ws.widget_tap(name)
+            ring.settle(drv)
+            seen.clear()
+    finally:
+        ui_draw.input_kind(was)
 
 
 def test_a_popover_over_a_playtest_keeps_the_quiet_stack(tmp_path):
@@ -3226,13 +3298,14 @@ def _differ(a, b):
     return {i for i in range(0, len(a), 2) if a[i:i + 2] != b[i:i + 2]}
 
 
-@_LOOK_RIDE
 def test_the_system_menu_over_a_playtest_keeps_the_quiet_stack(tmp_path):
-    """The system menu's scrim (D-01) over a running game: once the frame it
-    came on is in every buffer, the game's frames are quiet ones -- its own
-    pixels composited and washed, the menu's face put back over them -- and
-    every buffer equals a full repaint of the same state, as a quiet frame
-    without the menu does."""
+    """The system menu's scrim (D-01) over a running game: every frame is
+    a quiet one -- the game's own pixels composited and washed, the menu's
+    card painted while it opens, its face put back over them once it has
+    settled. The frame the scrim comes on copies the last painted frame and
+    washes it whole, and the two that bring the other buffers to it go over
+    a copy of the last painted frame too. Every buffer equals a full
+    repaint of the same state, as a quiet frame without the menu does."""
     ws, drv = _popover_desk(tmp_path, game=True)
     player = ws._content_layers["desktop"]
     ticks = [0]
@@ -3251,7 +3324,7 @@ def test_the_system_menu_over_a_playtest_keeps_the_quiet_stack(tmp_path):
     ring.settle(drv, 4)
     ws.widget_tap("menu")
     assert ws.menu_ui.scrims()
-    assert ring.settle(drv, 6)[-3:] == ["qpop"] * 3
+    assert ring.settle(drv, 6) == ["lpop"] * 3 + ["qpop"] * 3
     assert ws.wm._pop_over_game, "the menu's card is not over the game"
     n = ticks[0]
     seen = list(ring.bufs)
@@ -3263,6 +3336,29 @@ def test_the_system_menu_over_a_playtest_keeps_the_quiet_stack(tmp_path):
     assert not ws.menu_ui.scrims()
     ring.settle(drv, 4)
     assert ring.settle(drv, 3) == ["quiet"] * 3
+
+
+def test_a_playtests_debt_frames_copy_the_last_frame(tmp_path):
+    """A whole frame beside a running game (a dirty desk): the frames that
+    bring the other buffers to it copy the last painted frame and draw the
+    quiet stack over it, and every buffer is then a full repaint's."""
+    ws, drv = _popover_desk(tmp_path, game=True)
+    player = ws._content_layers["desktop"]
+
+    def still_game(dt):
+        ws.canvas.cls(8)
+        ws.canvas.rect(10, 10, 40, 30, 12)
+
+    player.draw = still_game
+    ring = _Ring(ws, 3)
+    assert set(ring.settle(drv, 4)) == {"quiet"}
+    owed = _differ(ring.bufs[0], ring.full(drv)[0])
+    ring.settle(drv, 4)
+    ws._dirty = True
+    assert ring.settle(drv, 4) == ["full", "lquiet", "lquiet", "quiet"]
+    seen = list(ring.bufs)
+    for a, b in zip(seen, ring.full(drv)):
+        assert _differ(a, b) == owed
 
 
 def _game_only_moved(ws, drv, ring, over=None):

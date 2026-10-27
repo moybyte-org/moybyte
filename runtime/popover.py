@@ -51,13 +51,14 @@ def _inner(ws, rect):
 
 def _fit(ws, comp):
     """Size the popover to `comp` again where what it lists moved (the
-    networks a scan found): the frame repaints at the new size."""
+    networks a scan found): the next frame repaints at the new size (a mark
+    made inside a draw is spent with it, so it asks for that frame)."""
     m = ws.sysmenu
     w, h = comp.size()
     h += 2 if _desk() else 2 * ws.layout.fs
     if m.comp is comp and m.size[1] != h:
         m.size = (m.size[0], h)
-        ws._dirty = True
+        ws.request_frame()
 
 
 _MONTH_KEYS = ("change", "Month", "back", "Close")

@@ -306,10 +306,10 @@
   },
   "p4_1024x600_cs2_fs1_popovers": {
     "desk_window_calc": "45db6ee8391211291d5cc511dff3851dce0acaca0f77d61a7bdbd8f30b737926",
-    "popover_battery": "c78b85f3349eb48a6f0a2b278a7e1790b95634ad152e0e2e8b02db3db0a64266",
+    "popover_battery": "780a71b504639ed71a2f6a2435701be34ba45df0463ec571ec6c51a2f6c0378d",
     "popover_clock": "2194d6b6e104db457f59ef15e177a3de8fee67afbc945e62b6614818bbe0515f",
     "popover_menu": "ccd51905dfabc9a9edef6b3759f94e211f01c93074c31fd6e81cbe587d2ec681",
-    "popover_wifi": "88c3c52e17bb23abd4f2993d42ed579e4abe887f919c72c5c468bcab7abe97e9"
+    "popover_wifi": "a1171b562db9186249428aba257bd370c3b07af226075d6034cec61be98b4a23"
   },
   "p4_1024x600_cs2_fs1_twobars": {
     "about": "169d97a5f178abc00cd8dd9773f8cf5336d8047476f5e9ef6333327037bcdc90",

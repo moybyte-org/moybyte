@@ -1980,6 +1980,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return
         m.fs = self.look.effective_font_scale()
         m.cs = self.layout.cs
+        opened = getattr(comp, "opened", None)
+        if opened is not None:
+            opened()                  # first: its size counts what it found (a scan)
         w, h = comp.size()
         desk = self.metric_class == _layout_base.DESK
         h += 2 if desk else 2 * self.layout.fs   # the card's drop
@@ -1987,9 +1990,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         h = min(h, self.sys_canvas.h)
         self._place_popover(widget, w, h)
         m.show_component(comp, widget, (w, h))
-        opened = getattr(comp, "opened", None)
-        if opened is not None:
-            opened()
         self.popover_touch()
 
     def close_popover(self):

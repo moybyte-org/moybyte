@@ -504,7 +504,13 @@ snapshot again before painting it; its damage carries the popover's rect.
 With a playtest the quiet stack is the popover's restore, the player window,
 the popover: the game keeps ticking, and while the popover overlaps the
 game's window its face -- copied once it is painted -- is put back over each
-game frame, one copy rather than a paint. The snapshots and the face are
+game frame, one copy rather than a paint. The focused window under a bar
+widget's popover shows no focus mark while the popover holds the keys (one
+a screen, ui.marks): the open keeps its buffer, draws it once without the
+mark and stamps it into each buffer before the popover paints; the close
+puts the kept buffer back and stamps it again (`_pop_marks`). A card that
+sizes itself again -- the Wi-Fi card to the networks a scan found -- asks
+for a frame that repaints whole at its new rect. The snapshots and the face are
 released by the fit check (§3) once no popover is live. A change outside the panel (a connect, a stepped
 setting, a row's action) marks the frame dirty as before. The system menu
 takes the same path; it is the look's card
@@ -528,7 +534,11 @@ its close put back around the resumed game's first frames; a frame that
 repaints whole under it takes the snapshot again before its scrim, so its
 rows keep riding. A
 pointer press whose only change was the popover's -- a bar widget's tap
--- marks no frame (`popover_touch` takes it). A triple-buffered root's
+-- marks no frame (`popover_touch` takes it). With a playtest under the system menu
+the frame the scrim comes on copies the last painted frame, composites the
+game's and washes the scrim's rects once (`_wash_all`), and each other
+buffer is that frame copied whole with the quiet stack over it
+(`_lead_pop_stack`). A triple-buffered root's
 buffers behind the last change are brought to it while the desk is calm
 (`debt_owed`: nothing animating, the pointer still), each a copy of the
 last painted frame's buffer where the root has one, so the next popover

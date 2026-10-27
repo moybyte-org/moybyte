@@ -968,6 +968,13 @@ drawing**, the lag it copies being the ring's own:
 - **the windowed WM's debt frame of a still desk** with no popover and no
   playtest (`_RepeatLayer`): the whole glass. Its shown ring entry is the
   last frame's, the page unchanged;
+- **a playtest's debt frame** -- the quiet one after a whole frame, and
+  the frame the system menu's scrim comes over the game on, which washes
+  the copy once: the whole glass
+  (whole rows are the GDMA's; round the game's rect they would not be), then
+  the quiet stack over it (`_lead_quiet_stack`,
+  `_lead_pop_stack`), the game's fresh frame composited (and washed) and the
+  popover's debts paid out of the copy;
 - **a popover's ride** while the popover is as the last frame left it
   (`_pop_seq` counts its changes, `_repeating` is the frame's verdict): the
   scrim's rect, the card's, the pause menu's over its paused playtest
@@ -982,7 +989,8 @@ drawing**, the lag it copies being the ring's own:
 one before (`_painted_f`, the ring's entry for it), and nothing reported a
 change since -- the desk settled and calm (§14.1's terms), no popover
 change, no playtest window but a held one (paused, or stopped under its
-card), nothing animating.
+card), nothing animating; or, beside a running playtest, nothing changed
+but its game (the quiet frame's terms).
 
 **This is not a second invalidation mechanism.** Whether a surface paints
 and what a buffer lacks are still the gate's and the rings'; the copy only
