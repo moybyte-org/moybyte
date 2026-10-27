@@ -923,8 +923,9 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_shape_obj, 19, 19, moy_gfx_sh
 // -- the 2026-10 look's shapes (moy_shape.h) --------------------------------------
 //
 // rrect(dst, dw, x, y, w, h, r, opts, hi, lo, fill, cam_x, cam_y, cx0, cy0,
-// cx1, cy1): `fill` is None, a wire colour, or a paint as a flat tuple
-// (mode, steps, y0, h, t0, c0, t1, c1, ...).
+// cx1, cy1[, hole]): `fill` is None, a wire colour, or a paint as a flat tuple
+// (mode, steps, y0, h, t0, c0, t1, c1, ...); `hole` None or (x, y, w, h, r),
+// left alone and not counted.
 static int shape_paint(mp_obj_t o, moy_shape_paint_t *p) {
     if (o == mp_const_none) {
         return 0;
@@ -956,20 +957,30 @@ static int shape_paint(mp_obj_t o, moy_shape_paint_t *p) {
 }
 
 static mp_obj_t moy_gfx_rrect(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     size_t cap;
     uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
     moy_shape_paint_t p;
     int has = shape_paint(a[10], &p);
+    moy_shape_hole_t hole = {0, 0, 0, 0, 0}, *hp = NULL;
+    if (n_args > 17 && a[17] != mp_const_none) {
+        mp_obj_t *it;
+        mp_obj_get_array_fixed_n(a[17], 5, &it);
+        hole.x = mp_obj_get_int(it[0]);
+        hole.y = mp_obj_get_int(it[1]);
+        hole.w = mp_obj_get_int(it[2]);
+        hole.h = mp_obj_get_int(it[3]);
+        hole.r = mp_obj_get_int(it[4]);
+        hp = &hole;
+    }
     int n = mg_rrect(dst, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
                      mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
                      mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
                      has ? &p : NULL, mp_obj_get_int(a[11]), mp_obj_get_int(a[12]),
                      mp_obj_get_int(a[13]), mp_obj_get_int(a[14]), mp_obj_get_int(a[15]),
-                     mp_obj_get_int(a[16]));
+                     mp_obj_get_int(a[16]), hp);
     return MP_OBJ_NEW_SMALL_INT(n);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_rrect_obj, 17, 17, moy_gfx_rrect);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_rrect_obj, 17, 18, moy_gfx_rrect);
 
 // shadow(dst, dw, x, y, w, h, r, blur, dx, dy, col, alpha, stepped, hole,
 // cam_x, cam_y, cx0, cy0, cx1, cy1): `hole` None or (x, y, w, h, r).
@@ -1017,19 +1028,25 @@ static mp_obj_t moy_gfx_cover(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_cover_obj, 20, 20, moy_gfx_cover);
 
-// tint(dst, src, sw, sx, sy, w, h, col, alpha): a picture's sub-rect copied
-// into dst with `col` over it at `alpha` (moy_shape.h). Answers the pixels.
+// tint(dst, src, sw, sx, sy, w, h, col, alpha[, dw, dx, dy]): a picture's
+// sub-rect copied into dst (at (dx, dy), dw words a row; else a picture of
+// its own) with `col` over it at `alpha` (moy_shape.h). Answers the pixels.
 static mp_obj_t moy_gfx_tint(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     size_t cap, scap;
     uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
     const uint16_t *src = moy_gfx_buf_r(a[1], &scap);
+    int dw = 0, dx = 0, dy = 0;
+    if (n_args >= 12) {
+        dw = mp_obj_get_int(a[9]);
+        dx = mp_obj_get_int(a[10]);
+        dy = mp_obj_get_int(a[11]);
+    }
     int n = mg_tint(dst, cap, src, scap, mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
                     mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
-                    (uint16_t)mp_obj_get_int(a[7]), mp_obj_get_int(a[8]));
+                    (uint16_t)mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), dw, dx, dy);
     return MP_OBJ_NEW_SMALL_INT(n);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tint_obj, 9, 9, moy_gfx_tint);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tint_obj, 9, 12, moy_gfx_tint);
 
 // shape_stats() -> moy_shape.h's counters; shape_reset(caches); shape_order(swapped).
 static mp_obj_t moy_gfx_shape_stats(void) {

@@ -921,6 +921,8 @@ class EditorDesk(Layer):
         live = ws.editor_app.playing() and not self.paused
         if live:
             cv.blit565_resize(gc._buf, gc.w, gc.h, gx, gy, gw, gh)
+        elif s == 1:
+            cv.tint565_at(gc._buf, gc.w, 0, 0, gc.w, gc.h, gx, gy, th["panel"], 140)
         else:
             # The still dimmed at the game's own size, then scaled: the same
             # pixels as the panel's colour over the scaled frame, at a

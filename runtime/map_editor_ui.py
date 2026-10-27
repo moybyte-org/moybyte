@@ -792,12 +792,13 @@ class MapEditorUI:
         overview = self._mv_overview()
         # #163 span-batch: the per-cell rect+rectb pair (2 gated calls x every
         # visible cell, the tab's dominant dispatch cost) becomes THREE merged
-        # quad groups in a few fill_rects calls (the lattice a call per
-        # `editor_map.CHUNK` of it), pixel-identical by construction:
+        # groups, pixel-identical by construction:
         #   1. backgrounds -- cells are disjoint, so the in-bounds block is ONE
-        #      dark_blue quad and the out-of-bounds remainder two black strips;
+        #      dark_blue rect and the out-of-bounds remainder two black strips
+        #      (rects, not quads: a big one is a DMA fill where the canvas has one);
         #   2. (the tiles between them are ONE map() -- see below);
-        #   3. the grid lattice -- each cell's rectb edges merged into full-length
+        #   3. the grid lattice, in fill_rects calls (one per `editor_map.CHUNK`
+        #      of it) -- each cell's rectb edges merged into full-length
         #      1px lines (interior edges stay DOUBLED at k*cell and k*cell-1,
         #      exactly the pixels the per-cell outlines painted; overlaps at
         #      corners are same-color idempotent).
@@ -824,13 +825,11 @@ class MapEditorUI:
             grey = NAMES["dark_grey"]
             bg = []
             if nx and ny:
-                bg += [x0, y0, nx * cell, ny * cell, blue]
+                bg.append((x0, y0, nx * cell, ny * cell, blue))
             if nx < cols:
-                bg += [x0 + nx * cell, y0,
-                       (cols - nx) * cell, rows * cell, black]
+                bg.append((x0 + nx * cell, y0, (cols - nx) * cell, rows * cell, black))
             if ny < rows and nx:
-                bg += [x0, y0 + ny * cell,
-                       nx * cell, (rows - ny) * cell, black]
+                bg.append((x0, y0 + ny * cell, nx * cell, (rows - ny) * cell, black))
             lat = ()
             if not overview:
                 gw = cols * cell
@@ -839,9 +838,10 @@ class MapEditorUI:
                     band += (x0 + j * cell, y0, 1, cell, grey,
                              x0 + (j + 1) * cell - 1, y0, 1, cell, grey)
                 lat = _bands(array("h", band), rows, cell)
-            memo = (key, array("h", bg), lat)
+            memo = (key, tuple(bg), lat)
             self._grid_memo = memo
-        cv.fill_rects(memo[1])
+        for q in memo[1]:                  # rects: a big one is a DMA fill on a P4
+            cv.rect(q[0], q[1], q[2], q[3], q[4])
         if overview:
             self._draw_map_blocks(cv, tm, sheet, me, x0, y0, cell, nx, ny)
         else:

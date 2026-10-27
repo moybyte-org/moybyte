@@ -1679,30 +1679,26 @@ class DeviceCanvas:
     def _rrect_dma(self, x, y, w, h, r, opts, hi, lo, col, line):
         """rrect with a solid fill whose middle is a big block: the block
         (`r` and the ring's width in from every side, where every row is the
-        fill colour alone) to the backend's DMA fill, then the kernel over
-        the four bands of the clip round it -- the same pixels and the same
-        count. None where the block is small or the fill refused it."""
+        fill colour alone) to the backend's DMA fill, then the kernel round
+        it with the block as its hole -- the same pixels and the same count.
+        None where the block is small or the fill refused it."""
         k = r if r > line else line
-        bx = x - self._cam_x
-        by = y - self._cam_y
-        cx0, cy0, cx1, cy1 = self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1
-        hx0 = bx + k if bx + k > cx0 else cx0
-        hy0 = by + k if by + k > cy0 else cy0
-        hx1 = bx + w - k if bx + w - k < cx1 else cx1
-        hy1 = by + h - k if by + h - k < cy1 else cy1
+        cam_x = self._cam_x
+        cam_y = self._cam_y
+        bx = x - cam_x
+        by = y - cam_y
+        hx0 = bx + k if bx + k > self._clip_x0 else self._clip_x0
+        hy0 = by + k if by + k > self._clip_y0 else self._clip_y0
+        hx1 = bx + w - k if bx + w - k < self._clip_x1 else self._clip_x1
+        hy1 = by + h - k if by + h - k < self._clip_y1 else self._clip_y1
         if hx1 <= hx0 or hy1 <= hy0 or (hx1 - hx0) * (hy1 - hy0) < _DMA_FILL_MIN:
             return None
         if not self._ppa_fill(hx0, hy0, hx1 - hx0, hy1 - hy0, col):
             return None
-        n = (hx1 - hx0) * (hy1 - hy0)
-        rr = self._gfx.rrect
-        buf, stride, cam_x, cam_y = self._buf, self._stride, self._cam_x, self._cam_y
-        for b0, b1, b2, b3 in ((cx0, cy0, cx1, hy0), (cx0, hy1, cx1, cy1),
-                               (cx0, hy0, hx0, hy1), (hx1, hy0, cx1, hy1)):
-            if b2 > b0 and b3 > b1:
-                n += rr(buf, stride, x, y, w, h, r, opts, hi, lo, col,
-                        cam_x, cam_y, b0, b1, b2, b3)
-        return n
+        return (hx1 - hx0) * (hy1 - hy0) + self._gfx.rrect(
+            self._buf, self._stride, x, y, w, h, r, opts, hi, lo, col, cam_x, cam_y,
+            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1,
+            (hx0 + cam_x, hy0 + cam_y, hx1 - hx0, hy1 - hy0, 0))
 
     def shadow(self, x, y, w, h, r, c, alpha, blur, dx=0, dy=0, hole=None,
                stepped=False):
@@ -2415,6 +2411,27 @@ class DeviceCanvas:
         The pixels written, 0 where either buffer is short."""
         return self._gfx.tint(dst, buf, int(sw), int(sx), int(sy), int(w), int(h),
                               self._col(c), int(alpha))
+
+    def tint565_at(self, buf, sw, sx, sy, w, h, x, y, c, alpha):
+        """tint565 drawn onto this canvas: the (sx, sy, w, h) sub-rect of a
+        picture of RGB565 words `sw` a row placed at (x, y), camera and clip
+        honoured, colour `c` over every pixel at `alpha` -- the pixels the
+        dimmed picture blitted 1:1 would leave, without the picture between.
+        The pixels written."""
+        self.flush_batch()
+        w = int(w)
+        h = int(h)
+        bx = int(x) - self._cam_x
+        by = int(y) - self._cam_y
+        x0 = bx if bx > self._clip_x0 else self._clip_x0
+        y0 = by if by > self._clip_y0 else self._clip_y0
+        x1 = bx + w if bx + w < self._clip_x1 else self._clip_x1
+        y1 = by + h if by + h < self._clip_y1 else self._clip_y1
+        if x1 <= x0 or y1 <= y0:
+            return 0
+        return self._gfx.tint(self._buf, buf, int(sw), int(sx) + x0 - bx, int(sy) + y0 - by,
+                              x1 - x0, y1 - y0, self._col(c), int(alpha),
+                              self._stride, x0, y0)
 
     def bake565(self, indices, w, h, out):
         """MOY64 indices (w x h) as this canvas's RGB565 words, into `out`

@@ -41,12 +41,13 @@ the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 try:
     import ui as _ui              # frozen on device
     import ui_draw as _ui_draw
-    from editor_map import checker as _checker
+    from editor_map import checker as _checker, checker_quads as _checker_quads
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
     from runtime import ui_draw as _ui_draw
-    from runtime.editor_map import checker as _checker
+    from runtime.editor_map import checker as _checker, checker_quads as _checker_quads
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
+from array import array
 from editors import PaintEditor, KeyEdge, _pe_line
 
 try:
@@ -457,6 +458,7 @@ class PaintLayer:
         self._pop_tap = None
         self._shape = PaintEditor.OVAL   # the shape button's shape when not in use
         self._shifts = False          # the more menu shows its shifts' page
+        self._grid_q = None           # the grid's coloured and clear cells, as quads
         sc = ws.sys_canvas
         self._lay_args = (sc.w, sc.h, getattr(sc, "font_scale", 1), None)
         self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1),
@@ -1145,15 +1147,48 @@ class PaintLayer:
         cs = max(3 * fs, cell // 3)
         if lines:
             cv.rect(gx0 - 1, gy0 - 1, span + 1, span + 1, th["border"])
+        # The cells are disjoint, so the coloured ones are the quads of one
+        # fill_rects, the clear ones' light ground those of another, and the
+        # clear ones' dark squares follow: the pixels of a rect or a checker a
+        # cell. (A quad's own colour is a palette index; the ground may be the
+        # theme's, which only a call's colour carries.)
+        n2 = 5 * dim * dim
+        q = self._grid_q
+        if q is None or len(q[0]) < n2:
+            q = self._grid_q = (array("h", bytes(2 * n2)), array("h", bytes(2 * n2)))
+        cq, gq = q
+        pix = sheet.pix
+        sw_ = sheet.w
+        inside = ox + dim <= sw_ and oy + dim <= sheet.h
+        k = g = 0
         for ly in range(dim):
             y = gy0 + ly * cell
+            base = (oy + ly) * sw_ + ox
             for lx in range(dim):
                 x = gx0 + lx * cell
-                v = sheet.pget(ox + lx, oy + ly)
+                v = pix[base + lx] if inside else sheet.pget(ox + lx, oy + ly)
                 if v:
-                    cv.rect(x, y, inner, inner, v)
+                    cq[k] = x
+                    cq[k + 1] = y
+                    cq[k + 2] = inner
+                    cq[k + 3] = inner
+                    cq[k + 4] = v
+                    k += 5
                 else:
-                    self._checker(cv, x, y, inner, inner, cs, greys)
+                    gq[g] = x
+                    gq[g + 1] = y
+                    gq[g + 2] = inner
+                    gq[g + 3] = inner
+                    g += 5
+        if k:
+            cv.fill_rects(cq, k // 5)
+        if g:
+            cv.fill_rects(gq, g // 5, 0, 0, greys[1])
+            dark = greys[0]
+            sq = _checker_quads(inner, inner, cs)
+            for i in range(0, g, 5):
+                for a in sq:
+                    cv.fill_rects(a, -1, gq[i], gq[i + 1], dark)
         if pe.size > 1:
             tpx = span // pe.size
             for t in range(1, pe.size):
@@ -1276,12 +1311,17 @@ class PaintLayer:
         x, y, w, h = lay.preview
         line = _ui_draw.font("ui")[2] * lay.fs
         dim = pe.dim
-        img = sheet.tile_span_image(pe.n, pe.size, pe.size, 0)
+        # The sprite's span on the sheet (tile_span_image's, clamped at its
+        # edge), each size one native stretch of it with colour 0 clear.
+        ox, oy = sheet.tile_origin(pe.n)
+        T = sheet.TILE
+        pw = min(pe.size, (sheet.w - ox) // T) * T
+        ph = min(pe.size, (sheet.h - oy) // T) * T
         for z in (1, 2, 4):
             side = dim * z
             if x + side > lay.preview[0] + w or side > h + dim * 2:
                 break
-            cv.spr(img, x, y + h - side, z)
+            cv.sspr(sheet, ox, oy, pw, ph, x, y + h - side, pw * z, ph * z, 0)
             cv.print("%d\u00d7" % z if _ui.has_symbols() else "%dx" % z,
                      x + side + 4, y + h - line, th["ink_dim"], 1)
             x += side + 4 + _ui_draw.print_width("4x", lay.fs) + 14

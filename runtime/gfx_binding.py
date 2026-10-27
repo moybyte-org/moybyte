@@ -113,12 +113,12 @@ _SIGS = (
     # The 2026-10 look's shapes (native/moy_gfx/moy_shape.c), flat as the
     # usermod's wrappers call them.
     ("mg_rrect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, ctypes.c_int32, ctypes.c_int32,
-                  _P, _I, _I, _I, _I, _I, _I], _I),
+                  _P, _I, _I, _I, _I, _I, _I, _P], _I),
     ("mg_shadow", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, ctypes.c_int32, _I, _I,
                    _P, _I, _I, _I, _I, _I, _I], _I),
     ("mg_cover", [_P, _Z, _I, _I, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I,
                   _I, _I, _I, _I, _I, _I], _I),
-    ("mg_tint", [_P, _Z, _P, _Z, _I, _I, _I, _I, _I, ctypes.c_uint16, _I], _I),
+    ("mg_tint", [_P, _Z, _P, _Z, _I, _I, _I, _I, _I, ctypes.c_uint16, _I, _I, _I, _I], _I),
     ("moy_shape_stats", [_P], None),
     ("moy_shape_reset", [_I], None),
     ("moy_shape_wire_swapped", [_I], None),
@@ -295,13 +295,16 @@ def _paint(fill):
     return p
 
 
-def rrect(dst, dw, x, y, w, h, r, opts, hi, lo, fill, cam_x, cam_y, cx0, cy0, cx1, cy1):
+def rrect(dst, dw, x, y, w, h, r, opts, hi, lo, fill, cam_x, cam_y, cx0, cy0, cx1, cy1,
+          hole=None):
     arr, cap = _buf(dst)
     p = _paint(fill)
+    hp = None if hole is None else _Hole(*(int(v) for v in hole))
     return _lib().mg_rrect(ctypes.cast(arr, _P), cap, int(dw), int(x), int(y), int(w),
                            int(h), int(r), int(opts), int(hi), int(lo),
                            None if p is None else ctypes.cast(ctypes.pointer(p), _P),
-                           int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
+                           int(cam_x), int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1),
+                           None if hp is None else ctypes.cast(ctypes.pointer(hp), _P))
 
 
 def shadow(dst, dw, x, y, w, h, r, blur, dx, dy, col, alpha, stepped, hole,
@@ -325,11 +328,12 @@ def cover(dst, dw, x, y, w, h, src, sw, sx, sy, cw, ch, r, stepped,
                            int(cam_y), int(cx0), int(cy0), int(cx1), int(cy1))
 
 
-def tint(dst, src, sw, sx, sy, w, h, col, alpha):
+def tint(dst, src, sw, sx, sy, w, h, col, alpha, dw=0, dx=0, dy=0):
     arr, cap = _buf(dst)
     sarr, scap = _rbuf(src)
     return _lib().mg_tint(ctypes.cast(arr, _P), cap, ctypes.cast(sarr, _P), scap, int(sw),
-                          int(sx), int(sy), int(w), int(h), int(col) & 0xFFFF, int(alpha))
+                          int(sx), int(sy), int(w), int(h), int(col) & 0xFFFF, int(alpha),
+                          int(dw), int(dx), int(dy))
 
 
 def shape_stats():

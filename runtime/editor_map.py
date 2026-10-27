@@ -106,14 +106,21 @@ def checker(cv, x, y, w, h, s, dark, light):
     cv.rect(x, y, w, h, light)
     if w <= 0 or h <= 0 or s <= 0:
         return
+    for q in checker_quads(w, h, s):
+        cv.fill_rects(q, -1, x, y, dark)
+
+
+def checker_quads(w, h, s):
+    """The dark squares of a w x h checker in squares of `s` from (0, 0), as
+    `fill_rects` arrays, kept per size: what `checker` draws over its light
+    ground."""
     key = (w & 0xFFF) | ((h & 0xFFF) << 12) | ((s & 0x3F) << 24)
     quads = _CHECKERS.get(key)
     if quads is None:
         if len(_CHECKERS) >= 32:
             _CHECKERS.clear()
         quads = _CHECKERS[key] = _checker_quads(w, h, s)
-    for q in quads:
-        cv.fill_rects(q, -1, x, y, dark)
+    return quads
 
 
 def _width(text):

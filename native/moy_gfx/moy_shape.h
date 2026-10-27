@@ -152,9 +152,11 @@ void moy_shape_reset(int caches);
 #define MOY_SHAPE_OPT_STEPPED 16
 #define MOY_SHAPE_OPT_MASK(m) ((m) << 5)
 #define MOY_SHAPE_OPT_LINE(n) ((n) << 8)
+// `hole` (NULL: none) is left alone, and its pixels are not counted: a caller
+// that fills a solid rrect's middle itself (a DMA fill) draws the rest here.
 int mg_rrect(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h, int r, int opts,
              int32_t hi, int32_t lo, const moy_shape_paint_t *fill, int cam_x, int cam_y,
-             int cx0, int cy0, int cx1, int cy1);
+             int cx0, int cy0, int cx1, int cy1, const moy_shape_hole_t *hole);
 int mg_shadow(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h, int r, int blur,
               int dx, int dy, int32_t col, int alpha, int stepped, const moy_shape_hole_t *hole,
               int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
@@ -171,10 +173,12 @@ int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
              const uint16_t *src, size_t scap, int sw, int sx, int sy, int cw, int ch,
              int r, int stepped, int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 // The tint (step 15): the sub-rect (sx, sy, w, h) of a picture `sw` words a
-// row copied into `dst`, w words a row, `col` over each pixel at `alpha`
-// (0..255), all in the wire order: a dimmed neighbour's cover, made once and
-// kept. Answers the pixels written: 0 where either buffer is short.
+// row copied into `dst` at (dx, dy), `dw` words a row (0: w, a picture of its
+// own), `col` over each pixel at `alpha` (0..255), all in the wire order: a
+// dimmed neighbour's cover, made once and kept, or a dimmed picture drawn
+// straight onto a surface. Answers the pixels written: 0 where the rect does
+// not fit either buffer.
 int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw, int sx,
-            int sy, int w, int h, uint16_t col, int alpha);
+            int sy, int w, int h, uint16_t col, int alpha, int dw, int dx, int dy);
 
 #endif

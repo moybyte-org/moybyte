@@ -934,11 +934,14 @@ static void flat_target(moy_text_target_t *t, uint16_t *dst, size_t cap, int dw,
 
 int mg_rrect(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h, int r, int opts,
              int32_t hi, int32_t lo, const moy_shape_paint_t *fill, int cam_x, int cam_y,
-             int cx0, int cy0, int cx1, int cy1) {
+             int cx0, int cy0, int cx1, int cy1, const moy_shape_hole_t *hole) {
     moy_text_target_t t;
     flat_target(&t, dst, cap, dw, cam_x, cam_y, cx0, cy0, cx1, cy1);
     moy_shape_rrect_t s;
     memset(&s, 0, sizeof(s));
+    if (hole != NULL) {
+        s.hole = *hole;
+    }
     for (int k = 0; k < 4; k++) {
         s.r[k] = (uint8_t)((opts >> k) & 1 ? imax(0, imin(r, 255)) : 0);
     }
@@ -1032,9 +1035,13 @@ int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
 }
 
 int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw, int sx,
-            int sy, int w, int h, uint16_t col, int alpha) {
+            int sy, int w, int h, uint16_t col, int alpha, int dw, int dx, int dy) {
+    if (dw <= 0) {
+        dw = w;
+    }
     if (dst == NULL || src == NULL || w <= 0 || h <= 0 || sw <= 0 || sx < 0 || sy < 0
-        || sx + w > sw || (size_t)w * (size_t)h > dcap
+        || dx < 0 || dy < 0 || sx + w > sw || dx + w > dw
+        || (size_t)(dy + h - 1) * (size_t)dw + (size_t)(dx + w) > dcap
         || (size_t)(sy + h) * (size_t)sw > scap) {
         return 0;
     }
@@ -1055,7 +1062,7 @@ int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw
     }
     for (int i = 0; i < h; i++) {
         const uint16_t *s = src + (size_t)(sy + i) * (size_t)sw + sx;
-        uint16_t *d = dst + (size_t)i * (size_t)w;
+        uint16_t *d = dst + (size_t)(dy + i) * (size_t)dw + dx;
         for (int j = 0; j < w; j++) {
             uint16_t b = can(s[j]);
             d[j] = wire((uint16_t)(tr[b >> 11] | tg[(b >> 5) & 63] | tb[b & 31]));

@@ -1186,6 +1186,33 @@ def test_tint565_dims_a_sub_rect_into_its_own_buffer():
         assert bytes(c._buf) == before, name
 
 
+def test_tint565_at_draws_what_the_tint_then_a_1to1_blit_draws():
+    """`DeviceCanvas.tint565_at` -- the desk's Run slot at 1x: the dimmed
+    picture drawn straight onto the canvas leaves the pixels that
+    tint565 into a picture of its own and blit565_resize at its own size
+    leave, through a camera and a clip that cut it on every side."""
+    sw, sh = 9, 7
+    words = [((i * 2246822519) >> 11) & 0xFFFF for i in range(sw * sh)]
+    for cam, clip, at in (((0, 0), None, (5, 4)), ((3, -2), (6, 5, 9, 6), (4, 2)),
+                          ((0, 0), None, (W - 4, H - 3)), ((0, 0), (0, 0, W, H), (-3, -2))):
+        out = []
+        for direct in (True, False):
+            c = Canvas(W, H)
+            c.cls(5)
+            src = _words_in(c, words)
+            c.camera(*cam)
+            if clip:
+                c.clip(*clip)
+            if direct:
+                c.tint565_at(src, sw, 2, 1, 6, 5, at[0], at[1], 12, 140)
+            else:
+                dim = bytearray(2 * 6 * 5)
+                c.tint565(dim, src, sw, 2, 1, 6, 5, 12, 140)
+                c.blit565_resize(dim, 6, 5, at[0], at[1], 6, 5)
+            out.append(bytes(c._buf))
+        assert out[0] == out[1], (cam, clip, at)
+
+
 def test_blit_indices_matches_host():
     # Place an index bitmap (a paint-app image) at a range of offsets -- including
     # negative and past the right/bottom edge (clamped), plus an index past the palette
@@ -2350,3 +2377,34 @@ def test_blit565_places_direct_colour_on_every_lane():
             c.clip()
             got = (_host_rgb565(c) if name == "kernel" else _dev_rgb565(c))
             assert got == expect, (name, x, y, s, clip, cam)
+
+
+def test_the_sprite_preview_stretch_draws_what_its_span_image_drew():
+    """The Sprite pane's preview (`PaintLayer._draw_preview`) draws the
+    sprite's span with one `sspr` a size where it built a `tile_span_image`
+    and `spr`'d it: the same pixels at 1x, 2x and 4x for every sprite size,
+    at the sheet's right and bottom edges too, colour 0 clear."""
+    try:
+        from runtime.editors_sheet import SpriteSheet
+    except ImportError:  # pragma: no cover
+        from editors_sheet import SpriteSheet
+    sheet = SpriteSheet()
+    for i in range(len(sheet.pix)):
+        sheet.pix[i] = (i * 7 + i // 13) % 16
+    last = sheet.count - 1
+    for n in (0, 5, 17, last - 1, last):
+        for size in (1, 2, 4):
+            for z in (1, 2, 4):
+                out = []
+                for lane in ("image", "stretch"):
+                    c = Canvas(W, H)
+                    c.cls(3)
+                    if lane == "image":
+                        c.spr(sheet.tile_span_image(n, size, size, 0), 2, 1, z)
+                    else:
+                        ox, oy = sheet.tile_origin(n)
+                        pw = min(size, (sheet.w - ox) // 8) * 8
+                        ph = min(size, (sheet.h - oy) // 8) * 8
+                        c.sspr(sheet, ox, oy, pw, ph, 2, 1, pw * z, ph * z, 0)
+                    out.append(bytes(c._buf))
+                assert out[0] == out[1], (n, size, z)
