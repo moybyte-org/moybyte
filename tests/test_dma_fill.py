@@ -43,11 +43,12 @@ class FakePpa:
             mv[o:o + 2 * w] = word * w
         return True
 
-    def copy(self, dst, src, off, n):
-        self.copies.append((off, n))
+    def copy(self, dst, src, off, n, src_off=None):
+        src_off = off if src_off is None else src_off
+        self.copies.append((off, n, src_off))
         if not self.takes_copy:
             return False
-        memoryview(dst)[off:off + n] = memoryview(src)[off:off + n]
+        memoryview(dst)[off:off + n] = memoryview(src)[src_off:src_off + n]
         return True
 
 
@@ -123,7 +124,7 @@ def test_a_big_rect_goes_to_the_engine_a_small_one_and_a_refusal_to_the_cpu(p4):
         assert out[0] == out[1]
 
 
-def test_a_full_width_stamp_at_the_origin_is_one_engine_copy(p4):
+def test_a_full_width_stamp_or_band_is_one_engine_copy(p4):
     mod, comp = p4
     for takes in (True, False):
         out = []
@@ -134,15 +135,21 @@ def test_a_full_width_stamp_at_the_origin_is_one_engine_copy(p4):
             win = cv.new_layer(320, 150)
             win._buf[:] = bytes((i * 13) & 255 for i in range(len(win._buf)))
             cv.blit_strip(win, 0, 0)
-            cv.blit_strip(win, 0, 40)            # not at the origin: the CPU
+            cv.blit_strip(win, 0, 70)            # lower: its rows on the glass
+            cv.blit_strip(win, 2, 0)             # not at the left edge: the CPU
             narrow = cv.new_layer(300, 150)
             narrow._buf[:] = win._buf[:len(narrow._buf)]
             cv.blit_strip(narrow, 0, 0)          # not full width: the CPU
-            out.append(bytes(cv._buf))
+            band = cv.new_layer(320, 120)
+            band.blit_strip(cv, 0, -50)          # a band of the glass taken
+            out.append(bytes(cv._buf) + bytes(band._buf))
             if ppa is not None:
-                assert ppa.copies == [(0, 2 * 320 * 150)]
+                row = 2 * 320
+                assert ppa.copies == [(0, row * 150, 0), (row * 70, row * 130, 0),
+                                      (0, row * 120, row * 50)]
             win.release()
             narrow.release()
+            band.release()
         assert out[0] == out[1]
 
 

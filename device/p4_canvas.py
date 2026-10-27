@@ -193,25 +193,31 @@ class P4SystemCanvas(SystemCanvas):
     GDMA_COPY_MIN = 65536
 
     def blit_strip(self, layer, dst_x=0, dst_y=0):
-        """SystemCanvas.blit_strip, with a picture as wide as this surface,
-        placed at its top-left (a full-screen window's stamp), moved by the
-        AXI GDMA (`moy_ppa.copy`): its rows are one contiguous span in both
-        buffers. On the Waveshare's 1024x600 glass that is ~12 ms against the
-        CPU's ~26 (the copy_last measurements, docs/surface_model_v1.md
-        §14.5). Any other placement, an engine-less build or a span the
-        engine refuses is the CPU's copy."""
+        """SystemCanvas.blit_strip, with a picture as wide as this surface at
+        its left edge, moved by the AXI GDMA (`moy_ppa.copy`): the rows they
+        share are one contiguous span in both buffers -- a full-screen
+        window's stamp, and a band of the glass taken into a layer as wide
+        (a scrim's snapshot, `dst_y` negative). On the Waveshare's 1024x600
+        glass a whole screen is ~12 ms against the CPU's ~26 (the copy_last
+        measurements, docs/surface_model_v1.md §14.5). Any other placement,
+        an engine-less build or a span the engine refuses is the CPU's copy."""
         ppa = self._ppa
-        if (ppa is not None and dst_x == 0 and dst_y == 0 and layer.w == self.w
-                and layer.h <= self.h and self._ox == 0 and self._oy == 0
-                and self._stride == self.w):
-            n = 2 * layer.w * layer.h
+        w = self.w
+        if (ppa is not None and dst_x == 0 and layer.w == w and self._ox == 0
+                and self._oy == 0 and self._stride == w
+                and getattr(layer, "_stride", w) == w
+                and getattr(layer, "_ox", 0) == 0 and getattr(layer, "_oy", 0) == 0):
+            r0 = -dst_y if dst_y < 0 else 0     # the picture's first row shown
+            d0 = dst_y if dst_y > 0 else 0
+            rows = min(layer.h - r0, self.h - d0)
+            n = 2 * w * rows
             cp = getattr(ppa, "copy", None)
             if cp is not None and n >= self.GDMA_COPY_MIN:
                 self.flush_batch()
                 if hasattr(layer, "flush_batch"):
                     layer.flush_batch()
                 try:
-                    if cp(self._buf, layer._buf, 0, n):
+                    if cp(self._buf, layer._buf, 2 * w * d0, n, 2 * w * r0):
                         return
                 except Exception:  # noqa: BLE001 -- a short buffer: the CPU's copy
                     pass

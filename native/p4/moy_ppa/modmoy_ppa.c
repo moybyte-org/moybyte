@@ -934,9 +934,11 @@ static mp_obj_t moy_ppa_dma_copy(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_dma_copy_obj, 5, 5, moy_ppa_dma_copy);
 
-// copy(dst, src, off, n) -> True once the n bytes at `off` of `src` are at
-//   `off` of `dst`, moved by the AXI GDMA (blocking, the GIL released): a scan
-//   buffer's whole rows out of another's (moy_glass.DsiCompositor.copy_last),
+// copy(dst, src, off, n[, src_off]) -> True once the n bytes at `src_off`
+//   (`off` where not given) of `src` are at `off` of `dst`, moved by the AXI
+//   GDMA (blocking, the GIL released): a scan buffer's whole rows out of
+//   another's (moy_glass.DsiCompositor.copy_last), a band of the glass into a
+//   layer as wide,
 //   at about twice the CPU's memcpy between the two on glass. The CPU's view
 //   of both stays true: the source's lines are written back first, the
 //   destination's written back and dropped before and dropped again after,
@@ -961,17 +963,18 @@ static bool copy_done_cb(async_memcpy_handle_t h, async_memcpy_event_t *e, void 
 }
 
 static mp_obj_t moy_ppa_copy(size_t n_args, const mp_obj_t *args) {
-    (void)n_args;
     mp_buffer_info_t dst, src;
     mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
     mp_get_buffer_raise(args[1], &src, MP_BUFFER_READ);
     mp_int_t off = mp_obj_get_int(args[2]);
     mp_int_t n = mp_obj_get_int(args[3]);
-    if (n <= 0 || off < 0 || off + n > (mp_int_t)dst.len || off + n > (mp_int_t)src.len) {
+    mp_int_t soff = n_args > 4 ? mp_obj_get_int(args[4]) : off;
+    if (n <= 0 || off < 0 || soff < 0 || off + n > (mp_int_t)dst.len
+            || soff + n > (mp_int_t)src.len) {
         mp_raise_ValueError(MP_ERROR_TEXT("copy span"));
     }
     uint8_t *d = (uint8_t *)dst.buf + off;
-    uint8_t *sp = (uint8_t *)src.buf + off;
+    uint8_t *sp = (uint8_t *)src.buf + soff;
     async_memcpy_handle_t mcp = NULL;
     async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
     cfg.backlog = 1;
@@ -1010,7 +1013,7 @@ static mp_obj_t moy_ppa_copy(size_t n_args, const mp_obj_t *args) {
     s_copies++;
     return mp_const_true;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_copy_obj, 4, 4, moy_ppa_copy);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_copy_obj, 4, 5, moy_ppa_copy);
 
 // -- THE FRAME SNAPSHOT: a compiled cart's frame, out of its memory ----------
 //

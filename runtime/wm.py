@@ -241,6 +241,10 @@ class FullscreenStackWM:
         something was freed."""
         return self.ws.launcher_layer.release_retained() or self.ws.release_held()
 
+    def prealloc(self):
+        """An idle frame's mint of what a WM's first modal frame would
+        otherwise mint: nothing on the fullscreen stack."""
+
     def hand_content_damage(self, cv, x, y, w, h):
         """The fullscreen content layer painted only (x, y, w, h) of the root
         this frame (the shelf's drag partial): hand it to a root that presents

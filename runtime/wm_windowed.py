@@ -2350,14 +2350,36 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             win._buf_stale = True
             win._lag[4] = 0
 
+    def prealloc(self):
+        """The riding scrim's snapshot layer at the layout's content rect,
+        minted on an idle frame (the device new_layer pre-collects), so a
+        menu's first open over the desk copies into it instead. Its size
+        allocates nothing once minted; release_cache gives it back."""
+        if not self._pop_rides() or self._pop_live():
+            return
+        lay = self._pop_wash[0]
+        cw, ch = self.ws.layout.cw, self.ws.layout.ch
+        if lay is not None and lay.w >= cw and lay.h >= ch:
+            return
+        try:
+            self._pop_wash_mint(cw, ch)
+        except Exception:  # noqa: BLE001 -- no room: the open mints it, or repaints
+            pass
+
+    def _pop_wash_mint(self, ww, h):
+        w = self._pop_wash
+        lay = w[0]
+        ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
+        self._release_layer(lay)
+        w[0] = None
+        lay = w[0] = self._root_canvas.new_layer(max(ww, ow), max(h, oh))
+        return lay
+
     def _pop_wash_capture(self, w):
         x, y, ww, h = w[1]
         lay = w[0]
         if lay is None or lay.w < ww or lay.h < h:
-            root = self._root_canvas
-            ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
-            self._release_layer(lay)
-            lay = w[0] = root.new_layer(max(ww, ow), max(h, oh))
+            lay = self._pop_wash_mint(ww, h)
         lay.blit_strip(self._root_canvas, -x, -y)
         w[3] = True
 

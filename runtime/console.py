@@ -4792,6 +4792,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     # pre-collects, ~150ms nobody should wait for).
                     self.launcher_layer.prealloc_retained()
                     self.pause.prealloc()       # ... and the pause card's frame
+                    self.wm.prealloc()          # ... and a modal's scrim snapshot
                     desk = self._editor_desk
                     if desk is not None:
                         desk.warm_step()        # the desk Editor's next workspace

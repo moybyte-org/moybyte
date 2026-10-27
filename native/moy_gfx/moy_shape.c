@@ -835,20 +835,47 @@ static int shadow_run(uint16_t *row, int X0, int X1, uint16_t col, int a) {
     memcpy(tg, s_run.tg, sizeof(tg));
     memcpy(tb, s_run.tb, sizeof(tb));
     uint16_t *p = row + X0, *e = row + X1;
+    // Two pixels a 32-bit word once `p` is 4-byte aligned, the lower address
+    // in the low half (every tier is little-endian): half the loads and
+    // stores of a pixel at a time, the same three lookups each.
     if (s_swapped) {
         // The words as the buffer holds them: each channel read straight off
         // the swapped word, the tables' results swapped already.
-        for (; p < e; p++) {
-            uint16_t w = *p;
-            *p = (uint16_t)(tr[(w >> 3) & 31] | tg[((w & 7) << 3) | (w >> 13)]
-                            | tb[(w >> 8) & 31]);
+        #define SW(w) ((uint32_t)(tr[((w) >> 3) & 31] | tg[(((w) & 7) << 3) | (((w) >> 13) & 7)] \
+                                  | tb[((w) >> 8) & 31]))
+        if (((uintptr_t)p & 2u) != 0) {
+            uint32_t w = *p;
+            *p++ = (uint16_t)SW(w);
         }
+        uint32_t *q = (uint32_t *)p, *qe = q + ((e - p) >> 1);
+        for (; q < qe; q++) {
+            uint32_t v = *q, lo = v & 0xFFFFu, hi = v >> 16;
+            *q = SW(lo) | (SW(hi) << 16);
+        }
+        p = (uint16_t *)q;
+        if (p < e) {
+            uint32_t w = *p;
+            *p = (uint16_t)SW(w);
+        }
+        #undef SW
         return X1 - X0;
     }
-    for (; p < e; p++) {
-        uint16_t c = *p;
-        *p = (uint16_t)(tr[c >> 11] | tg[(c >> 5) & 63] | tb[c & 31]);
+    #define CN(c) ((uint32_t)(tr[(c) >> 11] | tg[((c) >> 5) & 63] | tb[(c) & 31]))
+    if (((uintptr_t)p & 2u) != 0) {
+        uint32_t c = *p;
+        *p++ = (uint16_t)CN(c);
     }
+    uint32_t *q = (uint32_t *)p, *qe = q + ((e - p) >> 1);
+    for (; q < qe; q++) {
+        uint32_t v = *q, lo = v & 0xFFFFu, hi = v >> 16;
+        *q = CN(lo) | (CN(hi) << 16);
+    }
+    p = (uint16_t *)q;
+    if (p < e) {
+        uint32_t c = *p;
+        *p = (uint16_t)CN(c);
+    }
+    #undef CN
     return X1 - X0;
 }
 
