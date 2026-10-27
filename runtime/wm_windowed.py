@@ -1746,6 +1746,18 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         win = self._focus_win()
         return win is not None and win.kind == "desktop"
 
+    def desk_moves(self, dt):
+        """Whether the desk's own pixels change this frame with nothing
+        marking them: a live wallpaper, the boot logo, the unlock banner or a
+        notice over it. A running game, a music preview or any other
+        content animates inside its window, over the desk's cache."""
+        ws = self.ws
+        if ws._splash_until is not None or ws.wallpaper.is_animating(dt):
+            return True
+        if ws._toast_until and _ticks_diff(ws._toast_until, _ticks_ms()) > 0:
+            return True
+        return ws.notice_active()
+
     def keeps_animating(self, dt):
         """Console hook (the #44 redraw gate): keep frames flowing while a RUNNING
         cart's window is open anywhere on the desktop -- not just while it's the

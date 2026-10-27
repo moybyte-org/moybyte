@@ -4239,6 +4239,33 @@ def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path):
         assert a == b, _bbox(_differ(a, b), ws.sys_canvas.w)
 
 
+def test_a_running_playtest_leaves_the_desk_to_its_cache(tmp_path):
+    """A game running in its window animates inside its window: a whole
+    frame beside it (a mark, the system menu's open and close) lays the
+    desk from its cache instead of rendering it, and every frame's buffer
+    holds the bytes the desk rendered live leaves."""
+    ws, drv, ring = _pause_desk(tmp_path / "cache")
+    ref, rdrv, rring = _pause_desk(tmp_path / "ref")
+    ref.wm.desk_moves = lambda dt: True               # the desk rendered live
+    assert ws._animating(1 / 30) and not ws.wm.desk_moves(1 / 30)
+    desk = ws.wm._backdrop_layer
+    renders = []
+    draw = desk._draw_desktop
+    desk._draw_desktop = lambda dt: renders.append(1) or draw(dt)
+    steps = (lambda w: setattr(w, "_dirty", True),
+             lambda w: w.widget_tap("menu"),
+             lambda w: w.widget_tap("menu"))
+    for i, step in enumerate(steps):
+        step(ws)
+        step(ref)
+        for k in range(6):
+            got = ring.frame(drv)
+            assert got == rring.frame(rdrv), (i, k)
+            assert ring.bufs == rring.bufs, (i, k)
+    assert ring.stacks.count("full") >= 2
+    assert renders == []
+
+
 def test_a_stopped_runs_card_rides_over_its_playtest(tmp_path):
     """A run stopped in its window (a crash): the stop card's open and each
     move are the popover's frames alone, as the pause menu's are, and every

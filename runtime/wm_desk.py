@@ -138,7 +138,7 @@ class _BackdropLayer(Layer):
             wm._damage_rects = []
             return
         if (stale or wm._backdrop_disabled or wm._backdrop_unsupported
-                or self.ws._animating(dt)):   # a toast/confetti moves desk pixels
+                or wm.desk_moves(dt)):        # its pixels move on their own
             wm._desk_sig = sig
             wm._backdrop_valid = False        # live: re-render, then re-snapshot
             wm._desk_streak = 0
