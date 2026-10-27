@@ -1677,28 +1677,43 @@ class DeviceCanvas:
                                self._clip_x1, self._clip_y1)
 
     def _rrect_dma(self, x, y, w, h, r, opts, hi, lo, col, line):
-        """rrect with a solid fill whose middle is a big block: the block
-        (`r` and the ring's width in from every side, where every row is the
-        fill colour alone) to the backend's DMA fill, then the kernel round
-        it with the block as its hole -- the same pixels and the same count.
-        None where the block is small or the fill refused it."""
+        """rrect with a solid fill over a big middle. Its rows `r` (and the
+        ring's width) in from the top and the bottom are each the ring's
+        `line` pixels at either side and the fill between: the fill to the
+        backend's DMA fill, the ring's two strips filled solid, then the
+        kernel over the rest with those rows as its hole -- the same pixels
+        and the same count. None where the middle is small, the ring wider
+        than half the shape, or the fill refused it."""
+        if 2 * line > (w if w < h else h):
+            return None
         k = r if r > line else line
         cam_x = self._cam_x
         cam_y = self._cam_y
         bx = x - cam_x
         by = y - cam_y
-        hx0 = bx + k if bx + k > self._clip_x0 else self._clip_x0
-        hy0 = by + k if by + k > self._clip_y0 else self._clip_y0
-        hx1 = bx + w - k if bx + w - k < self._clip_x1 else self._clip_x1
-        hy1 = by + h - k if by + h - k < self._clip_y1 else self._clip_y1
-        if hx1 <= hx0 or hy1 <= hy0 or (hx1 - hx0) * (hy1 - hy0) < _DMA_FILL_MIN:
+        cx0, cy0, cx1, cy1 = self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1
+        y0 = by + k if by + k > cy0 else cy0
+        y1 = by + h - k if by + h - k < cy1 else cy1
+        fx0 = bx + line if bx + line > cx0 else cx0
+        fx1 = bx + w - line if bx + w - line < cx1 else cx1
+        if y1 <= y0 or fx1 <= fx0 or (fx1 - fx0) * (y1 - y0) < _DMA_FILL_MIN:
             return None
-        if not self._ppa_fill(hx0, hy0, hx1 - hx0, hy1 - hy0, col):
+        if not self._ppa_fill(fx0, y0, fx1 - fx0, y1 - y0, col):
             return None
-        return (hx1 - hx0) * (hy1 - hy0) + self._gfx.rrect(
+        n = (fx1 - fx0) * (y1 - y0)
+        if line:
+            for sx0, sx1, c in ((bx, bx + line, hi),
+                                (bx + w - line, bx + w, hi if lo < 0 else lo)):
+                if sx0 < cx0:
+                    sx0 = cx0
+                if sx1 > cx1:
+                    sx1 = cx1
+                if sx1 > sx0:
+                    self._gfx.fill_rect(self._buf, self._stride, sx0, y0, sx1 - sx0, y1 - y0, c)
+                    n += (sx1 - sx0) * (y1 - y0)
+        return n + self._gfx.rrect(
             self._buf, self._stride, x, y, w, h, r, opts, hi, lo, col, cam_x, cam_y,
-            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1,
-            (hx0 + cam_x, hy0 + cam_y, hx1 - hx0, hy1 - hy0, 0))
+            cx0, cy0, cx1, cy1, (x, y0 + cam_y, w, y1 - y0, 0))
 
     def shadow(self, x, y, w, h, r, c, alpha, blur, dx=0, dy=0, hole=None,
                stepped=False):
