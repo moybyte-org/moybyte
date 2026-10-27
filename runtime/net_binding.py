@@ -470,10 +470,6 @@ def web_stop(why=None):
     _lib().moy_web_stop(None if why is None else _bytes(why))
 
 
-def web_set_pin(pin):
-    _lib().moy_web_set_pin(None if not pin else _bytes(pin))
-
-
 def web_poll():
     return bool(_lib().moy_web_poll())
 

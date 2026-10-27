@@ -208,9 +208,7 @@ class StorybookLayout:
             self.margin = 16 * fs
             self.stories_grid = (bx, by + 16 * fs, bw, bh - 16 * fs)
             self.grid_o = {"cols": self.cols, "margin": self.margin, "foot": 32, "top": 4}
-            vz = (fs, 4)
             sw, sh = R.size(fs, 4)
-            self.view_zoom = vz
             self.view = (bx + (bw - sw) // 2, by + 4 * fs, sw, sh)
             self.stepper = (bx, by + 4 * fs + sh + 4 * fs, bw, 16 * fs)
             self.note = (bx, self.stepper[1] + 16 * fs, bw, 14 * fs)

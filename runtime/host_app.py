@@ -97,7 +97,7 @@ from .moy_image import Image  # noqa: E402,F401  (re-exported: host_app.Image)
 # extracted to host_api.py so non-CPython targets can freeze it (#151 web runner);
 # re-exported here so host_app.make_api / .ConsoleDriver / ... are unchanged for
 # the sim, the web console, and the tests.
-from .host_api import (PAN_SPEED, ConsoleDriver, FakeWifi,  # noqa: E402,F401
+from .host_api import (ConsoleDriver, FakeWifi,  # noqa: E402,F401
                        _Layer, _NullComp, _decode_moyimg, make_api, make_wifi)
 from .audio_session import PcmPump  # noqa: E402
 from .input import InputState  # noqa: E402

@@ -352,19 +352,6 @@ class Recorder:
                     lay.y0 + (row - ed.top + 0.5) * lay.lh)
         return self.local(_r)
 
-    def code_rows(self):
-        """How many code lines the editor shows (differs per tier/window size)."""
-        return self.local(lambda: (self.ws.code_layout.rows, 0))[0] \
-            if not self.windowed else self._win_code_rows()
-
-    def _win_code_rows(self):
-        wm = self.ws.wm
-        wm._install(wm._wins["menu"].ctx)
-        try:
-            return self.ws.code_layout.rows
-        finally:
-            wm._install(wm._root_ctx)
-
     # -- PLAY (windowed): park the playtest window beside the Editor ----------
     def park_player(self):
         """On the desktop tier a PLAY spawns a player WINDOW on the cascade, which

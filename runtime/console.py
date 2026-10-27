@@ -30,8 +30,6 @@ tree so the device freezes it (same pattern as editors.py). Keep it dependency-
 free apart from the shared editor cores below.
 """
 
-import time
-
 # The cores the shell itself needs, from their own modules: importing the
 # `editors` umbrella would pull every editor core into a start that may never
 # open the Editor.
@@ -244,9 +242,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # duplicated. NAMES is injected into the one BarLayer a Workstation builds
 # (circular-import dodge).
 try:
-    from bar_layer import BarLayer, _BAR_ICON, _BAR_STRIDE, _STATUS_H
+    from bar_layer import BarLayer, _BAR_ICON, _STATUS_H
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import BarLayer, _BAR_ICON, _BAR_STRIDE, _STATUS_H
+    from runtime.bar_layer import BarLayer, _BAR_ICON, _STATUS_H
 
 # The "Make it mine" config-card editor surface (#3/#15 -- see cards_layer.py).
 # cards_layer.py is the single source of the card geometry constants (_CARD_*);
@@ -279,11 +277,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # geometry constants + the MicroPython-safe syntax highlighter; the constants
 # tests reach as console._X are imported back here.
 try:
-    from code_layer import (CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA,
-                            _CODE_SYMBOLS, _SYM_Y, _SYM_CELL, _SYM_AREA)
+    from code_layer import CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_SYMBOLS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA,
-                                    _CODE_SYMBOLS, _SYM_Y, _SYM_CELL, _SYM_AREA)
+    from runtime.code_layer import (CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH,
+                                    _CODE_SYMBOLS)
 
 # Self-contained support widgets (see widgets.py): the Achievements milestone
 # tracker (+ its ACHIEVEMENTS catalog), Pmem (cart persistent RAM) and the
@@ -293,14 +290,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # Workstation + host_app + tests.
 try:
     from widgets import (Achievements, Pmem, Popup,
-                         ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y,
-                         _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
+                         ACHIEVEMENTS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W)
     from moy_input import Pointer, SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
     from audio_session import console_volume
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import (Achievements, Pmem,
-                                 Popup, ACHIEVEMENTS, TOAST_MS, _PLAY_GOAL, _POPUP_X,
-                                 _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_SEP_H)
+                                 Popup, ACHIEVEMENTS, _PLAY_GOAL, _POPUP_X,
+                                 _POPUP_Y, _POPUP_W)
     from runtime.moy_input import Pointer, SHIFT as _SHIFT, CTRL as _CTRL, ALT as _ALT
     from runtime.audio_session import console_volume
 

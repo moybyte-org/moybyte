@@ -28,13 +28,9 @@ code_layer, none of which import console/chrome -- so there is no cycle. Same
 bare-or-package fallback as those modules.
 """
 
-from array import array
-
 try:
-    from editors_code import CodeEditor
     from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_code import CodeEditor
     from runtime.editors_sheet import IconSheet
 
 try:
@@ -181,9 +177,7 @@ _ICON_COLS = 4
 _ICON_ROWS = 2
 _ICON_W = 70            # tile footprint (icon box + label)
 _ICON_H = 84
-_ICON_GAP_X = 6
 _ICON_GAP_Y = 6
-_ICON_X0 = 8            # left margin so the COLS tiles + gaps center in 320px
 _ICON_Y0 = _STATUS_H + 8
 _ICON_BOX = 40          # the inner art box of a tile (the tappable icon proper)
 # Page chevrons (when more carts than one page): tap to flip pages.
@@ -359,12 +353,10 @@ class Layout(LayoutBase):
         # the Settings panel keeps its _PANEL_FLOOR inset -- see above.)
         self.icon_w = _ICON_W * fs
         self.icon_h = _ICON_H * fs
-        self.icon_gap_x = _ICON_GAP_X * fs
         self.icon_gap_y = _ICON_GAP_Y * fs
         self.icon_box = _ICON_BOX * fs
         self.icon_y0 = self.cy + 8 * fs
         self.grid_bottom = bottom - 4 * fs           # launcher grid floor
-        self.icon_x0 = self.cx + _ICON_X0 * fs
         # The library SHELF's geometry (visual identity v1's library concept
         # mockup). No home draws it: every arrangement lays itself out in
         # launcher_layer (`Carousel`, `Launcher._lay_cells`); the on-glass
@@ -442,8 +434,6 @@ class Layout(LayoutBase):
         self.wifi_btn = self._cell("wifi")
         self.sysmenu_btn = self._cell("menu")
         self.context_x_btn = self._cell("close")
-        clock = self._cell("clock")
-        self.clock_x = clock[0] if clock is not None else None
         zone = self._cell("zone") or (edge, _BAR_Y, 0, ic)
         self.zone_left = zone
 
@@ -466,14 +456,8 @@ class Layout(LayoutBase):
         pr = self.settings_panel[0] + self.settings_panel[2]   # panel right edge
         self.set_back = (pr - 20 * cs, py0 + 2 * cs, 18 * cs, 14 * cs)
         self.set_ach = (pr - 46 * cs, py0 + 2 * cs, 22 * cs, 14 * cs)
-        self.set_title_hit = (self.settings_panel[0] + 14 * fs, py0 + 2 * cs,
-                              10 * self.font_w, 16 * cs)
 
     # -- derived rects (mirror the old module-constant arithmetic) ----------
-    def settings_row_rect(self, i):
-        return (self.set_x, self.set_row_y0 + i * self.set_row_h,
-                self.set_w, self.set_row_h - 2)
-
     def row_band(self, rect):
         """The fs-tall band inside a chrome-scaled row (#203) -- where the row's
         own hand-tuned content sits, so a bottom-anchored mark (the wifi list's
@@ -507,16 +491,6 @@ class Layout(LayoutBase):
             return (0, 0)
         j = i - 1
         return (j % self.rows, 1 + j // self.rows)
-
-    def tile_index(self, row, col, featured=True):
-        """Inverse of tile_cell: the grid slot at (row, col) -- with
-        `featured`, column 0 is the tall slot 0 at any row. No bounds check
-        (callers clamp to n)."""
-        if not featured:
-            return col * self.rows + row
-        if col <= 0:
-            return 0
-        return 1 + (col - 1) * self.rows + row
 
     def tile_rect(self, i, scroll=0, featured=True):
         """Grid-cell rect for cart index `i` at pixel scroll offset `scroll`, or

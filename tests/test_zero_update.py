@@ -50,7 +50,6 @@ class _FakeOta:
         self.manifest = manifest
         self.absent = absent
         self.error = None
-        self.to_slot = False        # set by begin_download; the Zero always asks
         self.boot_verdict = None
         self.confirmed = False
         self.dl_total = 0
@@ -93,9 +92,8 @@ class _FakeOta:
         self.checked_channel = channel
         return self.manifest
 
-    def begin_download(self, manifest, to_slot=False):
+    def begin_download(self, manifest):
         self.calls.append("begin_download")
-        self.to_slot = to_slot
         if self.error:
             raise ValueError(self.error)
         self.dl_total = int(manifest.get("size", 0) or 0)
@@ -111,10 +109,10 @@ class _FakeOta:
         self.calls.append("download_finish")
         if self.error:
             return None
-        return "<slot>" if self.to_slot else "/moy/update/firmware.bin"
+        return "<slot>"
 
     def staged_in_slot(self):
-        return bool(self.to_slot)
+        return True
 
     def begin(self, path):
         self.calls.append("begin")
@@ -522,24 +520,6 @@ def test_the_update_route_does_not_shadow_the_store(host):
         b"HTTP/1.1 404")
     code, _ = _status(host.handle_http("GET", "/carts.json", None))
     assert code == 403, "the store's own gate still applies"
-
-
-def test_this_board_downloads_STRAIGHT_INTO_THE_SLOT():
-    """Not a preference on the Zero -- the difference between working and not.
-
-    Its whole filesystem (1.375MB) is smaller than its image (~2.9MB), so a
-    staged copy cannot fit on an EMPTY volume; the symptom is `OSError 28`
-    (ENOSPC) part-way through the transfer. The inactive slot is 3.25MB and empty.
-    """
-    ota = _FakeOta(MANIFEST)
-    task = zero_host.ZeroUpdate(ota)
-    _to_offer(task)
-    task.request("download")
-    _drive(task)
-
-    assert ota.to_slot is True, (
-        "the download staged to a file -- on this board that is ENOSPC, not a "
-        "slower path")
 
 
 def test_an_image_already_in_the_slot_installs_without_a_second_pass():

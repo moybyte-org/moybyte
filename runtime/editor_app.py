@@ -915,7 +915,6 @@ class EditorApp:
     def _run_rects(self, play_r):
         """Restart's and Stop's rects in Play's place while a playtest runs,
         Stop at the zone's right end."""
-        fs = self._zone_scale()
         w = play_r[2] // 2
         return ((play_r[0], play_r[1], w, play_r[3]),
                 (play_r[0] + w, play_r[1], play_r[2] - w, play_r[3]))

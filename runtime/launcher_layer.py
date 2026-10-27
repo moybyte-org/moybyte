@@ -3541,7 +3541,6 @@ class LauncherHomeLayer:
         if self.searchable and (query or typing):
             n = 0
         desk = self.grid.desk()
-        pad = self._hint_pad()
         if n:
             _ui_draw.hints(cv, th, self._hint_inner(rect), items[:2 * n], desk)
         elif self.searchable and (query or typing):

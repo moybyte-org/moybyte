@@ -258,7 +258,6 @@ class GetCartsLayout:
             gw = self.cols * self.side + (self.cols - 1) * 16
             self.grid = (sx, sy + 34, 24 + gw + 24, sh - 34)
             self.margin = 24
-            self.foot_pad = 8
             self.grid_o = {"cols": self.cols, "foot": 0, "top": 0, "margin": self.margin}
         else:
             self.foot, self.body = ui.cut_bottom(content, 20 * fs)

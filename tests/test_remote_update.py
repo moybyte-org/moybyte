@@ -97,12 +97,7 @@ class _FakeOta:
         self.checked_channel = channel
         return self.manifest
 
-    def begin_download(self, manifest, to_slot=False):
-        # `to_slot` streams into the inactive partition instead of a staging
-        # file (the Zero's whole filesystem is smaller than its own image). The
-        # BOARD chooses it; this double only has to accept it, since what these
-        # tests drive is the screen above the wire.
-        self.to_slot = to_slot
+    def begin_download(self, manifest):
         if self.error:
             raise ValueError(self.error)
         self.dl_total = int(manifest.get("size") or 0)
@@ -117,11 +112,10 @@ class _FakeOta:
     def download_finish(self):
         if self.error:
             return None
-        return "<slot>" if getattr(self, "to_slot", False) \
-            else "/moy/update/firmware.bin"
+        return "<slot>"
 
     def staged_in_slot(self):
-        return bool(getattr(self, "to_slot", False))
+        return True
 
     def begin(self, path):
         self.total = 1000

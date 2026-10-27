@@ -521,7 +521,7 @@ class OtaUpdater(SlotHealth):
             m.get("version"), m.get("channel"), m.get("size")))
         return m
 
-    def begin_download(self, manifest, to_slot=True, sink=SINK_SLOT):
+    def begin_download(self, manifest, sink=SINK_SLOT):
         """Open the stream and the sink for the manifest's image (the inactive
         slot, or the C6 for its block). Raises with the reason."""
         self.error = None

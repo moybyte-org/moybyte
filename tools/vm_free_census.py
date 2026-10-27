@@ -87,7 +87,6 @@ def on_glass(board, host, secs=3.0, say=print):
     """Run every cart on `board`'s shelf whose folder `host` (folder ->
     (runtime, vm_free, why)) knows; [(title, folder, want, run, books, front,
     frames, disagreements)]."""
-    import time
     items = board.pyval("[(c.get('title'), c.get('path', '').rstrip('/').rsplit('/', 1)[-1]) "
                         "for c in ws.carts.all]", strict=True)
     rows = []

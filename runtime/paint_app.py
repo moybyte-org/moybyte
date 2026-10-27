@@ -448,7 +448,6 @@ class PaintAppLayer:
         self.page = None              # a page over the canvas: game | story | show
         self.viewer = None            # a desk's drawing, looked at
         self.toast = None             # (text, icon, until ms, undo or None)
-        self._pending_toast = None
         self.game = None
         self.story = None
         self._stroke = None           # the last drawing pixel a stroke reached

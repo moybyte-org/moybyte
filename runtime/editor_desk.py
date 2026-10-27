@@ -135,7 +135,6 @@ class EditorDesk(Layer):
         self._zoomed = None             # the cart the desk zooms were set for
         self._flash = None              # (pane, why): a divider stopped at its minimum
         self._sheet_page = 0
-        self._sheet_hold = False
         self._loupe = None              # (tile, x, y): a press held on the Sheet
         self._still = None
         self._cursors = []

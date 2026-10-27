@@ -79,15 +79,6 @@ def _require(module, package, what, extra, hint=""):
                  % (what, package, sys.executable, extra, hint))
 
 
-def _coerce(value):
-    for cast in (int, float):
-        try:
-            return cast(value)
-        except ValueError:
-            pass
-    return value
-
-
 def parse_size(text):
     """Parse a '--size WxH' string into (w, h). The SYSTEM canvas size (#39): the
     desktop renders here, responsive; the game stays a fixed 320x240 viewport. The

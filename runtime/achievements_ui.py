@@ -181,7 +181,6 @@ class AchievementsPage:
         self.pop = None               # the _Card whose popover is open
         self._focus = None            # the card focus moves to next frame
         self._pop_lines = ("", "")    # the open popover's how and state lines
-        self._pop_gone = False
         # the rows as `_cards` made them, and what they were made from
         self._made_n = -1
         self._made_w = -1

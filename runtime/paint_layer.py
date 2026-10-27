@@ -393,16 +393,6 @@ class PaintLayer:
             w, h, fs, cs = self._lay_args
             self.layout = PaintLayout(w, h, fs, chrome_scale=cs, keys=self._keys())
 
-    def reset_drag(self):
-        """Clear the drag-stroke origin so a new paint session's first stroke
-        starts fresh."""
-        self._paint_drag = None
-        self._fill_fired = False
-        self._shape_start = None
-        self._shape_end = None
-        self._pop = False
-        self._pop_tap = None
-
     # -- Layer facets --------------------------------------------------------
 
     def draw(self, dt):

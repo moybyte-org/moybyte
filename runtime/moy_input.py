@@ -1063,11 +1063,6 @@ def usage_to_keycode(usage, modifiers=0, caps=False):
     return _lib().moy_hid_keycode(usage, modifiers, caps)
 
 
-def usage_to_event(usage, modifiers=0, caps=False):
-    """A usage typed with a report's modifier byte -> its key event."""
-    return _lib().moy_hid_event(usage, modifiers, caps)
-
-
 def hid_buttons_for_key(key, cart=True):
     """The buttons a typed byte presses; `cart`, a game owns the keys."""
     bits = _lib().moy_hid_buttons_for_key(key, bool(cart))

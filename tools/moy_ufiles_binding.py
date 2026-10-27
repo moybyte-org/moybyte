@@ -17,7 +17,6 @@ values, and a list of names becomes a list.
 """
 
 import ctypes as c
-import errno as _errno
 import json
 import os
 import types

@@ -266,11 +266,6 @@ def row(h):
     return tuple(out)
 
 
-def set_holder(h, holder):
-    if _lib().moy_buf_set_holder(int(h), int(holder)) != OK:
-        _raise(STALE, "buffer")
-
-
 def rows(own=None):
     lib = _lib()
     out = []

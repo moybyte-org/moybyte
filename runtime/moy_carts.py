@@ -74,11 +74,11 @@ try:
                                 CART_FORMAT, CANVAS_SIZES, IMAGES_DIR,
                                 IMAGE_EXT, FLAGS_NAME, TILE_FLAGS, SCENES_DIR,
                                 SCENE_EXT, _normalize_canvas, _canvas_str,
-                                _sibling_path, slug, ensure_dirs, _is_dir,
+                                _sibling_path, slug, ensure_dirs,
                                 _rmtree, COVER_FILE, COVER_MAX_BYTES,
                                 SPRITES_NAME, icon_rows, _listing, _absent,
                                 _has, _cwd, _enter, _leave, CART_EXT,
-                                cart_path, cart_folder, store_path,
+                                cart_path, cart_folder,
                                 USER_NS, BUILTIN_NS, VENDOR_KEY, vendor,
                                 is_cart_id, THEME_NAME_MAX, theme_name_ok)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -88,11 +88,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         TILE_FLAGS, SCENES_DIR, SCENE_EXT,
                                         _normalize_canvas, _canvas_str,
                                         _sibling_path, slug, ensure_dirs,
-                                        _is_dir, _rmtree, COVER_FILE,
+                                        _rmtree, COVER_FILE,
                                         COVER_MAX_BYTES, SPRITES_NAME,
                                         icon_rows, _listing, _absent, _has,
                                         _cwd, _enter, _leave, CART_EXT,
-                                        cart_path, cart_folder, store_path,
+                                        cart_path, cart_folder,
                                         USER_NS, BUILTIN_NS, VENDOR_KEY,
                                         vendor, is_cart_id, THEME_NAME_MAX,
                                         theme_name_ok)
@@ -2200,16 +2200,16 @@ def _theme_of(folder, stem):
 # `moy_carts.X`, so the umbrella is the import site and the leaves stay leaves.
 try:
     from moy_seed import (
-        _cart_version, _RESEED_PRESERVE, seed_builtins,
-        _SEED_WBITS, _packed_stream, unpack_seed, seed_packed, is_packed,
-        RETIRED, RETIRED_GEN, RETIRED_VER_NAME, retired_version_path,
+        seed_builtins,
+        _SEED_WBITS, unpack_seed, seed_packed, is_packed,
+        RETIRED, RETIRED_GEN, retired_version_path,
         load_retired_version, prune_retired, sweep_store, seed_any,
         embedded_floor)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_seed import (
-        _cart_version, _RESEED_PRESERVE, seed_builtins,
-        _SEED_WBITS, _packed_stream, unpack_seed, seed_packed, is_packed,
-        RETIRED, RETIRED_GEN, RETIRED_VER_NAME, retired_version_path,
+        seed_builtins,
+        _SEED_WBITS, unpack_seed, seed_packed, is_packed,
+        RETIRED, RETIRED_GEN, retired_version_path,
         load_retired_version, prune_retired, sweep_store, seed_any,
         embedded_floor)
 

@@ -529,12 +529,11 @@ class ZeroUpdate:
             self.error = "nothing to install"
             return
         try:
-            # STRAIGHT INTO THE SLOT on this board, and it is not a preference.
-            # The whole filesystem here is smaller than the image (1.375MB
-            # against ~2.9MB): a staged copy cannot fit on an EMPTY volume, and
-            # the symptom is OSError 28 (ENOSPC). The inactive slot is 3.25MB and
-            # empty, which is what it is for.
-            self.ota.begin_download(self.manifest, to_slot=True)
+            # The updater streams STRAIGHT INTO THE SLOT, which this board
+            # needs: the whole filesystem is smaller than the image (1.375MB
+            # against ~2.9MB), so a staged copy cannot fit on an EMPTY volume
+            # and fails with OSError 28 (ENOSPC). The inactive slot is 3.25MB.
+            self.ota.begin_download(self.manifest)
         except Exception as exc:         # noqa: BLE001 -- bad url / non-200
             self.state = "error"
             self.error = self.ota.error or str(exc)

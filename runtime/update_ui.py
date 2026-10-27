@@ -161,7 +161,7 @@ class UpdateUI:
             return
         self.ws._dirty = True
         try:
-            u.begin_download(self._online_manifest, to_slot=True)
+            u.begin_download(self._online_manifest)
             self._upd_phase = "downloading"
         except Exception as exc:               # noqa: BLE001 -- shown to the kid
             self._upd_phase = "error"

@@ -143,8 +143,6 @@ class _LayoutCtx:
             if _lay is not None:
                 ctx.app_layouts[_app.id] = _lay
         ctx.artwork_layout = ctx.app_layouts.get("artwork")
-        ctx.appearance_layout = ctx.app_layouts.get("appearance")
-        ctx.storybook_layout = ctx.app_layouts.get("storybook")
         return ctx
 
     def install(self, ws, origin=(0, 0)):
@@ -1617,9 +1615,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 and self.ws.editor_layer() is self.ws.editor_desk:
             return
         self.dock("desktop", None)
-
-    def _top_win(self):
-        return self._wins.get(self._order[-1]) if self._order else None
 
     def _focus_win(self):
         """The window holding INPUT focus, or None (the desktop root)."""

@@ -1757,10 +1757,6 @@ class DeviceCanvas:
         """The advance `s` takes in face `face` at em `size`."""
         return self._gfx.path_width(int(face), int(size), s)
 
-    def face_metrics(self, face):
-        """(em, ascent, descent) of face `face`, in its font units."""
-        return self._gfx.path_metrics(int(face))
-
     def splash(self, pal, permille=-1, status=""):
         """The boot splash (native/moy_gfx/moy_scr.h) over the whole
         viewport, camera and clip aside: `pal` its palette's six RGB565
