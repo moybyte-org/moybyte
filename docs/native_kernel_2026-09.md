@@ -389,7 +389,7 @@ console needs while no Python app runs is OS.
 | `runtime/shell_servers.py` | roles | 5, stays | the console's servers of the role table's shell rows, which stay Python with the console (`docs/kernel_appabi_2026-10.md` §2.1) |
 | `runtime/skin.py` | toolkit | 6 | deleted by sprint 6's step 2: the skins are deltas in `native/moy_ui/style.json`, installed by name in C |
 | `runtime/storybook_app.py` | app | — | Storybook |
-| `runtime/surface.py` | glass | 3 | the Surface and its dirty protocol, kernel-owned after the `surface_model_v1.md` amendment (§8) |
+| `runtime/surface.py` | glass | 3 | the Surface and its dirty protocol, kernel-owned after the `surface_model_v1.md` amendment (§8), removed 2026-10-27 (its §16) |
 | `runtime/system_api.py` | roles | 5 | the user-app permission filter over the roles |
 | `system_menu_ui.py` | cart path | 4 | deleted by sprint 4 step 2: the menu's drawing is `native/moy_play/moy_chrome.c`, its rows and actions `runtime/console_notices.py`'s |
 | `runtime/system_store.py` | spine | 2 | `system.json`'s owner, the settings store |
@@ -923,7 +923,8 @@ Trackers (#66, #95, #97–#99, #105) and issues about apps alone are not listed.
   `runtime/surface.py` as the Surface's home and its dirty signals are
   producer-owned Python counters. **Amendment before sprint 3:** the Surface and
   its dirty protocol are kernel-owned, producers signal through the kernel's
-  handles, and the laws and the §4 compositor contract are unchanged. Its §8
+  handles (the table itself was removed on 2026-10-27, `surface_model_v1.md` §16),
+  and the laws and the §4 compositor contract are unchanged. Its §8
   graveyard stands, why-not-LVGL included: the kernel is our own code built for
   the host, with no widget tree (L7).
 - **`ui_damage_model_v1.md` §0.065.** Cited for its split (§1.8), not for a

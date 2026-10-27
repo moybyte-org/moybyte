@@ -75,6 +75,8 @@ thesis. Regenerated over the then-live `canvas.py` + `web_view.py` (both since d
 **Total canvas-receiver probes in `runtime/`: 76** — not v1.0's "~30", which was
 asserted rather than counted. Corrections: `flush_batch` and `reclaim_layers`
 are on **both** boards (`device_canvas.py`); `begin_surface` is 6 sites, not 2.
+(`begin_surface` and `skip_surface` were the recording canvases' verbs; no
+canvas defines them now and the probes are deleted, `surface_model_v1.md` §16.)
 
 **The headline survives the correction.** `.buf` is defined on **one** of the
 four, the host, and ten shared sites branch on it. "No `.buf`" is the majority
@@ -132,7 +134,7 @@ removing a capability probe is out of scope.
 - **L2. No optional verbs on the contract.** Contract verbs are defined on the
   base; a backend overrides, never omits.
 - **L3. Inert defaults only where one exists.** The base supplies a no-op for
-  `flush_batch`, `begin_surface`, `skip_surface`, `place_span`. It does **not**
+  `flush_batch`, `place_span`. It does **not**
   supply one for `composite_game` — that is **abstract**. *(Revised: v1.0 said
   the base always implements "the slow, correct, portable path". False here —
   host `buf` is 1-byte palette indices, device `_buf` is RGB565. An index loop
@@ -177,14 +179,11 @@ class Presenter:
         raise NotImplementedError      # L3: no portable default exists
 
     def flush_batch(self): pass
-    def begin_surface(self, sid, domain): pass
-    def skip_surface(self, sid, domain): return False
     def place_span(self, ox=None, oy=0, scale=1, w=0, h=0): pass
 ```
 
 - `HostPresenter` — indexed raster, the reference implementation
 - `DevicePresenter` — `moy_gfx` + PPA (`pixels = "rgb565"`)
-- `RecordingPresenter` — command stream: `spr` composite + span bracket
 
 Selected by a **factory over the (game, system, world) pair** of §1.1, not by
 "which board am I".

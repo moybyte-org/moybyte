@@ -2056,8 +2056,7 @@ def _outside(r, hole):
 def _whole_retained(cv):
     """Whether canvas `cv` keeps its pixels from frame to frame and draws
     into its whole buffer (a pane's viewport is not its buffer)."""
-    if (getattr(cv, "begin_surface", None) is not None
-            or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+    if getattr(cv, "RETAINED_FRAMES", 0) < 1:
         return False
     vp = getattr(cv, "viewport", None)
     return vp is None or vp() == (0, 0, getattr(cv, "_stride", cv.w),

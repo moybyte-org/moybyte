@@ -40,7 +40,7 @@ pass needs from the one before it.
 
 | pass | subsystem | why here | agents |
 |---|---|---|---|
-| **1** | **the glass** (§3): canvas and buffer ownership, the layer pool, the surface table, present on the three compositor kinds | the riskiest crossing and the one every later proof reads through; it fixes the kernel's PSRAM share (the pool, §6.1 of the plan) and executes the `surface_model_v1.md` amendment the plan orders first | one, alone on the boards |
+| **1** | **the glass** (§3): canvas and buffer ownership, the layer pool, present on the three compositor kinds | the riskiest crossing and the one every later proof reads through; it fixes the kernel's PSRAM share (the pool, §6.1 of the plan) and executed the `surface_model_v1.md` amendment the plan orders first (whose surface table was removed again, §3.3) | one, alone on the boards |
 | **2** | **input** (§4), **audio** (§5) and **the links with the internal volumes** (§6) | three subsystems that share no file once the carve (§2) has split the board glue, the widgets, the dev channel's words and the build registrations; their host halves are long and their board halves short | three in parallel on disjoint files; the boards are a queue (below) |
 | **3** | **the frame tail** (§7): the loop, the pump, idle, OTA health, PERF, serial and diag, the boot order, each board's `moy_runtime.py` | last, because every service it would have to call up into has crossed; its gate is the upcall count, and that count is only meaningful once input, present, audio and the tail polls are C calls | one, alone on the boards |
 
@@ -75,7 +75,7 @@ suite run every pass, `tools/preflight.sh` before the report).
 | what | Python today (the twin after the carve) | C | pass |
 |---|---|---|---|
 | canvas rows, the off-heap buffer table, the pool, lending and bakes | `device/device_canvas.py`, `_LayerComp`, `_LAYER_POOL`, `_LENT_BAKES` (`runtime/moy_glass.py`) | `native/moy_glass/moy_canvas.h`, `native/moy_glass/moy_buf.h` | 1 |
-| the surface table and the mint | `runtime/surface.py` (`runtime/moy_glass.py`) | `native/moy_glass/moy_surface.h` | 1 |
+| the kernel epoch (the surface table was removed, §3.3) | `runtime/surface.py` (`runtime/moy_glass.py`) | `native/moy_glass/moy_buf.h` | 1 |
 | the banded compositor, the fold | `device/banded_panel.py`, `modules/tdeck_panel.py`, `modules/guition_panel.py` | `native/moy_glass/moy_present_banded.c` over `native/moy_flush/` and each board's panel module | 1 |
 | the DSI compositor, rotated included | `device/dsi_panel.py`, `device/p4_canvas.py`, `modules/p4_display.py`, `modules/guition_p4_display.py` | `native/moy_glass/moy_present_dsi.c` over `native/p4/moy_dsi/` and `native/p4/moy_ppa/`; the backlight is the panel entry sprint 2 gave the floor | 1 |
 | the palette | `runtime/palette.py` | the canvas's table in `moy_canvas.h` | 1 |
@@ -182,7 +182,7 @@ made here, not promised.
    (`native/moy_kernel/moy_bus.c`: one master bus per board define, devices
    added by address) and the handle kinds of §3.1 in `native/moy_spine/moy_htab.h`.
 7. **The twins take the native call shapes.** `runtime/moy_glass.py`: tables
-   of kind CANVAS, BUF, SURF and OWNER over `moy_spine.Table`, the pool keyed
+   of kind CANVAS, BUF and OWNER over `moy_spine.Table`, the pool keyed
    by byte size with an owner per loan, and `present`, `fence` and
    `present_pending` as the three verbs the compositors answer;
    `device/device_canvas.py` is rebased so every buffer it holds is a row.
@@ -226,7 +226,7 @@ by whatever starts a lifetime (a cart run, the wallpaper, a window, the map
 cache, the Paint document) and released when it ends; `reclaim` takes the
 owner's handle, so a recycled lifetime cannot free another's loans — the slot's
 generation refuses it. `moy_htab.h`'s kinds become APP, BUF (the buffer
-table, no longer only reserved), CANVAS, SURF, OWNER, SRC, PEER and AUDIO,
+table, no longer only reserved), CANVAS, OWNER, SRC, PEER and AUDIO (SURF's id 4 stays reserved),
 added in the carve (§2 item 6).
 
     int moy_canvas_new(uint32_t *h, uint16_t w, uint16_t h_px, uint32_t caps, uint32_t owner);
@@ -309,50 +309,25 @@ The window buffers of the P4 desk, which `_LayerComp.release` frees by origin
 today, keep that behaviour: a window's buffer is an ALLOC row, freed on
 release, never pooled, because the desk re-mints at every size.
 
-### 3.3 The surface table
+### 3.3 The kernel epoch
 
-The amendment `docs/surface_model_v1.md` §15 records (2026-10-07) is executed
-here, at the scope that is true of the code. The registry
-(`runtime/surface.py`: `Surface`, `SurfaceSet`, the one mint, the set-level
-epoch, the prefix-scoped sync) is inert on every shipping tier — no canvas
-defines `begin_surface`, so `wm_windowed`'s `_recording` is never set — and
-nothing reads a gen: the P4 desk's retained caches and streaks
-(`wm_windowed.py`'s stamp and desk streaks, `runtime/launcher_layer.py`'s
-`_advance_streak`) are the Python window managers' and stay theirs (sprint 7
-does not run). Pass 1 ports the registry as a kernel table of kind SURF with the
-same fields and the same three producer verbs, deletes the Python leaf, and
-adds the one thing the kernel needs now: a signal in the other direction.
+The surface table `docs/surface_model_v1.md` §15 moved into the kernel was
+removed on 2026-10-27 (that doc's §16): nothing read a gen. What the glass
+keeps of it is the signal in the other direction:
 
-    int  moy_surface_get(uint32_t *h, const char *sid, uint8_t domain);   // created with fresh gens
-    void moy_surface_touch(uint32_t h);      // Class A, attributed
-    void moy_surface_move(uint32_t h);       // placement only (L1)
-    void moy_surface_animating(uint32_t h, bool on);   // Class B
-    void moy_surface_epoch(void);            // Class A, un-attributed: everything changed
-    uint32_t moy_surface_content_gen(uint32_t h);      // folded with the epoch, compared !=
-    uint32_t moy_surface_kernel_epoch(void); // the kernel's own draws bump it
+    uint32_t moy_glass_kernel_epoch(void);   // the kernel's own draws bump it
+    void     moy_glass_kernel_bump(void);
 
 **The kernel-to-WM signal.** The kernel draws under a Python window manager
 from this sprint on — the idle wake, the screensaver, the parked web-console
 screen, the floor's text, the HUD — and a Python gate that does not know
 would leave the panel holding the kernel's last frame (the `IdleBlank`
 behaviour its docstring numbers second). So `runtime/console.py`'s
-`_needs_redraw` gains a leg: a kernel epoch newer than the one this console
+`_needs_redraw` has a leg: a kernel epoch newer than the one this console
 last painted under reads as dirty, and stays dirty for as many frames as the
 backend retains, so no buffer keeps the kernel's picture. The WMs' caches
 need no change: a repaint under the gate is what they already do on a dirty
 frame.
-
-Why the table crosses now and not with the window managers: so that sprint 4's
-VM-free cart has a producer it can reach — L9 holds for a cart with no VM,
-content-dirty on exactly the frames it renders, and the signal must be a
-kernel call — and so that the kernel's own draws have the epoch above to move.
-The per-buffer N-deep last-seen of §4 and the predicate of the frame gate
-would be re-expressed in C by Phase C of that document's §9 (the column its §7
-ledger names), which was sprint 7 and does not run. `runtime/console.py`'s
-frame gate stays Python and folds `ws._dirty` into one `moy_surface_epoch()` per dirty
-frame; the roughly 135 write sites across 31 files are untouched, which keeps
-L6 true on the S3 (one C call per painted frame, none per write) and matches
-§7's "writes never".
 
 ### 3.4 Present: three compositors, one contract
 

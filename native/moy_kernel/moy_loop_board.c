@@ -55,7 +55,7 @@ void moy_glass_loop_fence(void) __attribute__((weak));
 void moy_glass_loop_idle(void) __attribute__((weak));
 bool moy_glass_loop_light(int level) __attribute__((weak));
 bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has) __attribute__((weak));
-void moy_surface_kernel_bump(void) __attribute__((weak));
+void moy_glass_kernel_bump(void) __attribute__((weak));
 extern uint32_t moybyte_gc_pause[3] __attribute__((weak));
 
 #if MOY_LOOP_ESP && defined(MOY_NET_WIFI) && MOY_NET_WIFI
@@ -171,8 +171,8 @@ static void b_fence(void) {
 }
 
 static void b_repaint(void) {
-    if (moy_surface_kernel_bump != NULL) {
-        moy_surface_kernel_bump();
+    if (moy_glass_kernel_bump != NULL) {
+        moy_glass_kernel_bump();
     }
 }
 

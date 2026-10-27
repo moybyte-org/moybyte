@@ -6,7 +6,6 @@
 #   WindowedWM                    the windowed tier's presentation of the back-stack
 #   WindowedWM.draw_stack         the frame router's draw list
 #   WindowedWM.keys_to_cart       focus-aware key routing
-#   WindowedWM.surface_skip       the skip-draw probe
 #   WindowedWM.close_window_kind  close one window by its kind
 #   WindowedWM.enter_console      the desk's PLAY: park the windows, the home fullscreen
 #   WindowedWM.leave_console      the home's X: the route's restore op, the windows back
@@ -84,7 +83,6 @@ try:
     from layers import Layer
     # (from widgets, not palette: runtime/palette.py needs colorsys -- host-only)
     from widgets import _Blit, _in, _ticks_ms, _ticks_diff
-    import moy_glass as _glass        # the surface table (docs/surface_model_v1.md §15)
     from wm_desk import _BackdropLayer
     from wm_chrome import WindowChrome, _SHADOW, RZ_L, RZ_R, RZ_T, RZ_B, RZ_CURSOR
     from moy_spine import EDITOR
@@ -95,7 +93,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
     from runtime.widgets import _Blit, _in, _ticks_ms, _ticks_diff
-    from runtime import glass_binding as _glass
     from runtime.wm_desk import _BackdropLayer
     from runtime.wm_chrome import (WindowChrome, _SHADOW, RZ_L, RZ_R, RZ_T, RZ_B,
                                    RZ_CURSOR)
@@ -107,8 +104,6 @@ try:
     from moy_input import PB_MIDDLE as _PB_MIDDLE
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_input import PB_MIDDLE as _PB_MIDDLE
-
-import time as _time                  # the bar clock's minute (localtime)
 
 _DRAG_MIN = 4                         # px of travel before a press becomes a drag
 
@@ -524,19 +519,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._order = []
         self._front = None            # the kind a goto() asked to bring forward
         self._player_under = False    # a window above the game window overlaps it
-        # Surface model v1 (docs/surface_model_v1.md): the registry and the
-        # one monotonic gen mint are the kernel's surface table (§15, the
-        # glass). Window records mirror _wins ("win:<slot key>" -- REGISTRY
-        # keys, never content kinds, §2); _surface_signals bumps the epoch /
-        # attributes gestures; skip-draw (§4) consults the gens on the
-        # RECORDING tier only -- the P4/host raster paths see zero new
-        # per-frame work (_recording False -> signals early-return, and their
-        # canvases have no skip_surface so the console probe stays None).
-        self._recording = hasattr(self._root_canvas, "begin_surface")
-        self._drawn_gens = {}         # sid -> content gen last actually DRAWN
-        self.surface_keyframe = False  # armed by the serve loop (§5.4)
-        self._kf_active = False        # this frame's latched keyframe state
-        self._clock_min = -1           # bar HH:MM minute, for the clock touch
         # INPUT FOCUS -- decoupled from the back-stack (the owner call that fixed
         # "clicking anything else kills my playtest"): the stack still owns what's
         # OPEN and who TICKS (the Player ticks while it's the stack top), but the
@@ -943,8 +925,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._held_in = None
         self._content_gesture = False
         self._gesture_hist = []
-        if self._recording:
-            _glass.sync([])
         self.mode = "console"
         self.stack.goto("launcher")
         self._on_nav()
@@ -1125,11 +1105,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         elif front is not None and front in self._wins and self.mode == "desktop":
             self._bring_forward(front)
         self._text_left = False
-        # Surface model: window records mirror the slot set. A dropped slot's
-        # surface goes with it; a re-opened one is REBORN with fresh gens from
-        # the monotonic mint, so no client cache can alias it (§2).
-        if self._recording:
-            _glass.sync(["win:" + g for g in self._order])
 
     def set_play_intent(self, intent):
         """Record WHY the next cart run is starting -- "dev" (a playtest launched
@@ -1886,8 +1861,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _pop_rides(self):
         """True where a popover change paints its rect alone: desktop mode on
-        a raster root (the recording tier's surfaces replay by layer)."""
-        return self.mode == "desktop" and not self._recording
+        a raster root."""
+        return self.mode == "desktop"
 
     def _scrim_up(self):
         """Whether a system modal's scrim is up (D-01): the system menu or a
@@ -2581,11 +2556,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     self._wash_all = True
                 else:
                     ws._dirty = True
-        # Surface-model signals run BEFORE any layer draws or skip-decides
-        # (recording tier only; a raster tier returns immediately). The dt is
-        # nominal -- the one dt-sensitive predicate (wallpaper.is_animating)
-        # only tests dt > 0.
-        self._surface_signals(1 / 60)
         # NOTE deliberately NO pointer-state condition: a finger playing a touch
         # cart moves the (hidden) pointer every frame, and the desktop shows no
         # hover feedback while the cursor is hidden -- real UI reactions all set
@@ -2667,7 +2637,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _settled(self, still):
         """A still frame on the desk with nothing animating: what changes
         is the popover's, if anything."""
-        return (still and self.mode == "desktop" and not self._recording
+        return (still and self.mode == "desktop"
                 and not self.ws._animating(1 / 60))
 
     def _calm(self):
@@ -3237,132 +3207,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return False
         return True
 
-    def _surface_signals(self, dt):
-        """Per-frame surface-model signal bookkeeping (§3). Runs at the TOP of
-        draw_stack -- BEFORE any layer's skip decision -- or a dirty frame's
-        epoch would land after the desk already declared itself clean.
-
-        Signals: a ws._dirty write (Class A un-attributed) or a transient
-        overlay bumps the set EPOCH -- everything reads changed, today's
-        full-repaint behavior expressed as gens. A WM GESTURE in flight is the
-        first AUDITED flow (§3 Class C -> A): the change is the moving window
-        (+ the chips outline on a resize), so only those sids are touched --
-        which is exactly what lets the desk/bar/other windows SKIP during a
-        drag. Pointer activity outside a WM gesture stays the conservative
-        epoch (content handlers mutate without marking dirty -- the pre-#44
-        debt). Class B declarations follow _animating's by-name list
-        (pure-read predicates, verified before mirroring)."""
-        if not self._recording:
-            return                    # raster tiers: zero new per-frame work
-        ws = self.ws
-        self._kf_active = self.surface_keyframe
-        self.surface_keyframe = False
-        cur = ws._ptr_state()
-        last = ws._last_ptr
-        ptr = ((cur is not None and (cur[3] or cur[4]))
-               or (last is not None and (last[3] or last[4])))
-        now = _ticks_ms()
-        overlay = (ws._splash_until is not None
-                   or (ws._toast_until and _ticks_diff(ws._toast_until, now) > 0))
-        gesture = self._drag if self._drag is not None else self._resize
-        if ws._dirty or overlay:
-            _glass.epoch()
-        elif gesture is not None:
-            key = gesture[0]
-            if self._wins.get(key) is not None:
-                _glass.touch(_glass.surface("win:" + key))   # pre-L4 streams carry the position
-                if gesture is self._resize:
-                    _glass.touch(_glass.surface("chips"))    # the rubber-band outline rides there
-        elif ptr and self._content_gesture and self._focus is not None:
-            # A CONTENT gesture (a finger scrolling/selecting INSIDE the
-            # focused window): the desk cannot change under it (the backdrop
-            # cache's own invariant), so attribute the change to that window
-            # alone. Without this the pointer leg epoch'd everything and the
-            # desk -- whose pixel cache the web root cannot use -- re-rendered
-            # LIVE at ~627KB of garbage per frame (measured, the code-editor
-            # drag), which is what marched the GC into mid-gesture collects.
-            _glass.touch(_glass.surface("win:" + self._focus))
-        elif ptr or cur != last:
-            # `cur != last` is a POSITION-only change: a hovering mouse. The
-            # shell's hover feedback (desk icon highlight, cards msel) is drawn
-            # by surfaces that do not all mark dirty for it, so a gen-clean
-            # skip would swallow exactly the repaint hover needs. Epoch is the
-            # honest cost of hover -- it lasts only while the mouse MOVES (a
-            # still pointer is inert again, and the idle desktop stays free).
-            _glass.epoch()
-        # The desk clock (bar HH:MM renders inside the "launcher" backdrop
-        # surface): a minute flip is a content change nobody marks -- attribute
-        # it here so a skipped desk can never show a stale clock.
-        try:
-            mm = _time.localtime()[4]
-        except Exception:  # noqa: BLE001 -- no RTC: the bar shows mm:ss uptime
-            mm = None
-        if mm != self._clock_min:
-            self._clock_min = mm
-            _glass.touch(_glass.surface("launcher"))
-        # Class B for the non-window surfaces: the desk under a live wallpaper,
-        # the visible cursor (its stream follows the pointer position) -- and
-        # console mode's home while its row coasts on a kinetic fling or glide.
-        # Fling frames paint via request_frame() (no dirty, no pointer), so
-        # without this declaration every gen read clean and skip-draw FROZE the
-        # coasting grid until the next real signal -- the owner's "fast drags
-        # lag" (a fast drag flings; a slow one doesn't). In the desk world the
-        # home's row isn't visible, so launcher.flinging is False there and
-        # the desk backdrop keeps skipping.
-        _glass.animating(_glass.surface("launcher"), (
-            ws.wallpaper.is_animating(dt)
-            or bool(getattr(ws.launcher, "flinging", False))))
-        _glass.animating(_glass.surface("cursor"),
-                         bool(getattr(ws.pointer, "visible", False)))
-
-    def _surface_windows(self):
-        """Window-record bookkeeping, AFTER _sync_windows (live slot set):
-        placement mirrored by compare (the WM owns x/y/w/h -- diffing its own
-        writes covers every write site from one place: drag, maximize, resize
-        apply, relayout clamp) and the §3 Class B declarations (the
-        _content_static by-name list, becoming its registration seed)."""
-        if not self._recording:
-            return
-        ws = self.ws
-        for z, key in enumerate(self._order):
-            win = self._wins[key]
-            s = _glass.surface("win:" + key)
-            _glass.place(s, win.x, win.y, win.w, win.h, z)
-            _glass.animating(s, win.kind in ("desktop", "update")
-                           or (win.kind == "settings"
-                               and ws.settings_layer.bluetooth_animating())
-                           or (win.kind == "menu" and ws.menu_view == "music"
-                               and ws.music_ui.music_preview is not None))
-
-    def surface_skip(self, layer_id):
-        """The console draw-stack probe (§4 skip-draw): True = do not draw this
-        layer this frame; the recorder keeps its z-slot and the wire ships a
-        {"same":1} stub. Recording tier only; only the desk backdrop is layer-
-        eligible for now (windows skip individually inside _draw_windows --
-        their layer carries the sync/bookkeeping and must always run)."""
-        if not self._recording or self._kf_active or layer_id != "launcher":
-            return False
-        h = _glass.surface_find(layer_id)
-        if _glass.animating(h):
-            return False
-        gen = _glass.content_gen(h)
-        if gen == self._drawn_gens.get(layer_id):
-            self.ws.note_cost("surface.skip")
-            return True
-        self._drawn_gens[layer_id] = gen      # it WILL draw this frame
-        return False
-
     def _draw_windows(self, dt):
         self._sync_windows()
         self._undock_orphans()
         self._resize_feet()
-        self._surface_windows()
-        # Per-window surface marks (§2: this is the Stage 9 re-partition -- the
-        # one "windows" span becomes one span per window + a "chips" residual).
-        # Probed like console.draw_stack's _surf: None on a raw canvas -> no
-        # call, no allocation, pixels byte-identical.
-        _surf = getattr(self._root_canvas, "begin_surface", None)
-        _skip = getattr(self._root_canvas, "skip_surface", None)
         n = len(self._order)
         # A full-screen window covers the glass: nothing under it is drawn.
         cover = self.full_cover()
@@ -3381,32 +3229,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             key = self._order[i]
             win = self._wins[key]
             focused = (key == self._focus)
-            sid = "win:" + key
             if win.minimized:
                 continue                  # hidden: no z-slot, not replayed
             if i < first:
-                # The raster partial path settled this window. On the recording
-                # tier its z-slot must still reach the wire (the page replays
-                # surfaces in listed order -- an omitted window would vanish
-                # under the desk's cls), so keep it as a skip stub.
-                if _skip is not None:
-                    _skip(sid, "system")
-                continue
-            if _skip is not None and not self._kf_active:
-                # §4 skip-draw: gen-clean + non-animating -> don't draw at all;
-                # the client replays its retained stream. The gesture target
-                # can never match (its touch in _surface_signals moved the gen)
-                # and a reborn window's fresh mint always differs (§2).
-                sh = _glass.surface_find(sid)
-                gen = _glass.content_gen(sh)
-                if (gen == self._drawn_gens.get(sid)
-                        and not _glass.animating(sh)):
-                    _skip(sid, "system")
-                    self.ws.note_cost("surface.skip")
-                    continue
-                self._drawn_gens[sid] = gen
-            if _surf is not None:
-                _surf(sid, "system")
+                continue                  # the raster partial path settled this window
             win._stamp_streak = getattr(win, "_stamp_streak", 0) + 1
             self._win_touched = False
             self._chrome_drew = False
@@ -3442,20 +3268,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # when the chip draw says it moved; the resize outline lies inside the
         # gesture union. Neither is a rect of its own.
         self._hand_damage(touched)
-        if _skip is not None and not self._kf_active:
-            # The chips residual skips like a window: its content moves on
-            # focus/order/minimize (dirty -> epoch) and on a resize outline
-            # (attributed in _surface_signals).
-            gen = _glass.content_gen(_glass.surface_find("chips"))
-            if gen == self._drawn_gens.get("chips"):
-                _skip("chips", "system")
-                return
-            self._drawn_gens["chips"] = gen
-        if _surf is not None:
-            # The residual span: chips + the resize outline. Its OWN sid --
-            # SurfaceDelta's cache is sid-keyed, so a second "windows" span in
-            # one frame would corrupt the {"same":1} replay.
-            _surf("chips", "system")
         if cover < 0:                              # the bar is covered with the desk
             self._draw_taskbar_chips(quiet=self._chrome_quiet or self._chips_untouched(dt))
         if self._resize is not None:               # rubber-band resize preview
@@ -3656,7 +3468,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         that window alone: it is on top and focused, nothing under it drew
         into it, and nothing above it draws -- no overlay, popover, scrim or
         cursor, the chrome quiet (no drag, resize or desk repaint)."""
-        if self._recording or not self._chrome_quiet or self._under_hit:
+        if not self._chrome_quiet or self._under_hit:
             return False
         if (self._cache_sig & ~2) != 0 or self._pop_live() or self.popover_owed():
             return False
@@ -4188,8 +4000,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 rx, ry, cw, ch = self._rubber(win, edges, wx, wy, ow, oh,
                                               px - ox, py - oy)
                 self._resize = (kind, ox, oy, ow, oh, cw, ch, edges, wx, wy, rx, ry)
-                # Attributed like _move_window (§3): keeps_animating's gesture
-                # leg owns the repaint; _surface_signals touches the sids.
+                # keeps_animating's gesture leg owns the repaint.
                 return True
             else:
                 self._resize = None
@@ -4413,11 +4224,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self.close_window_kind(kind)
 
     def _move_window(self, win, nx, ny):
-        # An ATTRIBUTED placement write (surface model §3): no un-attributed
-        # ws._dirty here -- the repaint is guaranteed by keeps_animating's
-        # gesture leg + the pointer leg, and _surface_signals attributes the
-        # gesture to the moving window's sid. This is what lets the desk/bar/
-        # other windows SKIP during a drag (the 70ms->3ms wasm frame class).
+        # No ws._dirty here: the repaint is guaranteed by keeps_animating's
+        # gesture leg + the pointer leg.
         # The content rect clamps it: a window may hang off the glass's left
         # or right edge with 40 columns still on the desk, and never crosses
         # a bar -- a side bar is a wall, as the top and bottom ones are.

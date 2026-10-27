@@ -2,7 +2,7 @@
 #   Buf                          a BUF row and its view (buf() makes one)
 #   owner                        an OWNER row: a lifetime that holds loans
 #   Canvas                       a CANVAS row: pixels, draw state, colour table
-#   surface                      the surface table's verbs
+#   kernel_epoch                 the kernel's own-draw counter the frame gate reads
 #   DsiCompositor                the Waveshare's present, over a dsi and a ppa
 #   RotatedCompositor            the Guition P4's rotated present
 #   rotate_rect                  a landscape rect -> the portrait rect it lands on
@@ -34,7 +34,7 @@ _UI = os.path.join(native_build.ROOT, "native", "moy_ui")
 _GFX = os.path.join(native_build.ROOT, "native", "moy_gfx")
 _SHIM = os.path.join(_GLASS, "moy_glass_host.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_glass")   # an edited style's
-_SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_surface.h", "moy_present.h",
+_SOURCES = ("moy_buf.h", "moy_canvas.h", "moy_present.h",
             "moy_glass.c", "moy_present_banded.c", "moy_present_dsi.c", "moy_present_rot.c", "moy_htab.h", "moy_htab.c",
             "moy_ui.h", "moy_ui.c", "moy_ui_glyph.c", "moy_ui_draw.c", "moy_ui_paint.c", "moy_ui_depth.c", "moy_ui_parts.c",
             "moy_ui_interact.c", "moy_ui_api.h", "moy_ui_api.c",
@@ -77,8 +77,6 @@ _SIGS = (
     ("moy_glass_host_canvas_row", [_U32], _P),
     ("moy_glass_host_canvas_state_offset", [], _Z),
     ("moy_glass_host_canvas_pal_offset", [], _Z),
-    ("moy_glass_host_surface_row", [_U32, ctypes.POINTER(ctypes.c_int32)], _I),
-    ("moy_glass_host_surface_place", [_U32, _I, _I, _I, _I, _I], _I),
     ("moy_glass_set_pool_bound", [_U32], None),
     ("moy_glass_evict", [], None),
     ("moy_glass_stats", [ctypes.POINTER(_Stats)], None),
@@ -95,18 +93,8 @@ _SIGS = (
     ("moy_canvas_point", [_U32, _P, _U32, _U32], _I),
     ("moy_canvas_release", [_U32], _I),
     ("moy_canvas_count", [], _U32),
-    ("moy_surface_get", [_PU32, ctypes.c_char_p, ctypes.c_uint8], _I),
-    ("moy_surface_find", [ctypes.c_char_p], _U32),
-    ("moy_surface_touch", [_U32], None),
-    ("moy_surface_move", [_U32], None),
-    ("moy_surface_animating", [_U32, ctypes.c_bool], None),
-    ("moy_surface_epoch", [], None),
-    ("moy_surface_mint", [], _U32),
-    ("moy_surface_content_gen", [_U32], _U32),
-    ("moy_surface_drop", [_U32], _I),
-    ("moy_surface_sync", [ctypes.POINTER(ctypes.c_char_p), _Z, ctypes.c_char_p], None),
-    ("moy_surface_kernel_epoch", [], _U32),
-    ("moy_surface_kernel_bump", [], None),
+    ("moy_glass_kernel_epoch", [], _U32),
+    ("moy_glass_kernel_bump", [], None),
     ("moy_canvas_block", [_P], None),
     ("moy_canvas_cart", [_I], None),
     ("moy_canvas_block_words", [], _P),
@@ -371,87 +359,14 @@ class Canvas:
             pass
 
 
-# -- surfaces -----------------------------------------------------------------
-
-def surface(sid, domain=0):
-    h = ctypes.c_uint32()
-    rc = _lib().moy_surface_get(ctypes.byref(h), sid.encode(), int(domain))
-    if rc != OK:
-        _raise(rc, "surface")
-    return h.value
-
-
-def surface_find(sid):
-    return _lib().moy_surface_find(sid.encode())
-
-
-def touch(h):
-    _lib().moy_surface_touch(int(h))
-
-
-def move(h):
-    _lib().moy_surface_move(int(h))
-
-
-def animating(h, on=None):
-    lib = _lib()
-    if on is not None:
-        lib.moy_surface_animating(int(h), bool(on))
-        return None
-    out = (ctypes.c_int32 * 9)()
-    return lib.moy_glass_host_surface_row(int(h), out) == OK and bool(out[8])
-
-
-def epoch():
-    _lib().moy_surface_epoch()
-
-
-def content_gen(h):
-    return _lib().moy_surface_content_gen(int(h))
-
-
-def gens(h):
-    out = (ctypes.c_int32 * 9)()
-    if _lib().moy_glass_host_surface_row(int(h), out) != OK:
-        _raise(STALE, "surface")
-    return (out[0], out[1])
-
-
-def mint():
-    return _lib().moy_surface_mint()
-
-
-def place(h, x, y, w, hh, z):
-    rc = _lib().moy_glass_host_surface_place(int(h), int(x), int(y), int(w),
-                                             int(hh), int(z))
-    if rc < 0:
-        _raise(STALE, "surface")
-    return bool(rc)
-
-
-def placement(h):
-    out = (ctypes.c_int32 * 9)()
-    if _lib().moy_glass_host_surface_row(int(h), out) != OK:
-        _raise(STALE, "surface")
-    return [out[2], out[3], out[7], out[6]]
-
-
-def drop(h):
-    _lib().moy_surface_drop(int(h))
-
-
-def sync(alive, prefix="win:"):
-    names = [s.encode() for s in alive]
-    arr = (ctypes.c_char_p * max(1, len(names)))(*names)
-    _lib().moy_surface_sync(arr, len(names), prefix.encode())
-
+# -- the kernel epoch ---------------------------------------------------------
 
 def kernel_epoch():
-    return _lib().moy_surface_kernel_epoch()
+    return _lib().moy_glass_kernel_epoch()
 
 
 def kernel_bump():
-    _lib().moy_surface_kernel_bump()
+    _lib().moy_glass_kernel_bump()
 
 
 def block(words):

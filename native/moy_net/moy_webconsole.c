@@ -18,7 +18,6 @@
 
 extern int moy_net_link(uint32_t *ip) __attribute__((weak));
 extern int moy_wifi_connect_kept(void) __attribute__((weak));
-extern void moy_surface_epoch(void) __attribute__((weak));
 
 typedef struct {
     moy_wc_state_t st;
@@ -164,9 +163,6 @@ void moy_wc_set_pin(const char *pin) {
 void moy_wc_park(int on) {
     if (ready() && s_wc->st.parked != (on != 0)) {
         s_wc->st.parked = on != 0;
-        if (moy_surface_epoch != NULL) {
-            moy_surface_epoch();    // the glass changes owner: everything is dirty
-        }
     }
 }
 

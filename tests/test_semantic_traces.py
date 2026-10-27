@@ -1446,15 +1446,6 @@ say("reuse", rows("cart"), int(again._comp._b.origin == mg.ORIGIN_POOL),
 console.release()
 st = mg.stats()
 say("release", "rows", st[0], "heap", st[5], "kernel", st[7], "cart", st[8])
-s1 = mg.surface("win:make")
-s2 = mg.surface("bar")
-g0 = mg.content_gen(s1)
-mg.touch(s1)
-mg.epoch()
-say("surf", h_(s1), h_(s2), int(mg.content_gen(s1) > g0),
-    int(mg.content_gen(s2) == mg.content_gen(mg.surface("chips"))))
-mg.sync(["win:other"])
-say("sync", mg.surface_find("win:make"), h_(mg.surface_find("bar")))
 k0 = mg.kernel_epoch()
 mg.kernel_bump()
 say("kernel", int(mg.kernel_epoch() != k0))
@@ -1468,8 +1459,6 @@ lent 2.0.1:r1:o2:4096,2.1.1:r1:o2:1024,2.2.1:r1:o2:1024 console 2.3.1
 reclaim - pool [(1024, 2), (4096, 1)] live 0 0 0
 reuse 2.0.3:r1:o1:4096 1 pool [(1024, 2)]
 release rows 3 heap 0 kernel 0 cart 4096
-surf 4.0.1 4.1.1 1 0
-sync 0 4.1.1
 kernel 1
 """
 

@@ -1,5 +1,5 @@
-// moy_glass's MicroPython binding: the glass's tables (moy_buf.h, moy_canvas.h,
-// moy_surface.h) as the module `moy_glass`, the same names the host's ctypes
+// moy_glass's MicroPython binding: the glass's tables (moy_buf.h, moy_canvas.h)
+// as the module `moy_glass`, the same names the host's ctypes
 // binding (runtime/glass_binding.py) gives CPython.
 //
 //   buf(nbytes, role, owner=0) -> Buf     a BUF row and its bytes
@@ -7,8 +7,7 @@
 //   owner(tag, cls=CLASS_CART) -> h       an OWNER row
 //   reclaim(owner, roles=0), owner_end(owner)
 //   row(h), loans(owner), pool(), stats(), set_pool_bound(n), evict()
-//   the surface table's verbs: surface(sid), touch, move, animating, epoch,
-//   content_gen, mint, place, drop, sync, kernel_epoch, kernel_bump
+//   kernel_epoch(), kernel_bump()
 //
 // A Buf holds its row: `view` is a writable memoryview of its bytes, and when
 // the row goes -- release(), its owner's end, or the Buf's own collection --
@@ -42,7 +41,6 @@
 #include "moy_buf.h"
 #include "moy_canvas.h"
 #include "moy_present.h"
-#include "moy_surface.h"
 
 #ifndef MOY_GLASS_POOL_BYTES
 #define MOY_GLASS_POOL_BYTES (4u * 1024u * 1024u)
@@ -517,146 +515,17 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     locals_dict, &canvas_locals
     );
 
-// -- surfaces -------------------------------------------------------------------
-
-static mp_obj_t glass_surface(size_t n_args, const mp_obj_t *a) {
-    ready();
-    uint32_t h;
-    int rc = moy_surface_get(&h, mp_obj_str_get_str(a[0]),
-                             n_args > 1 ? (uint8_t)mp_obj_get_int(a[1]) : 0u);
-    if (rc != MOY_GLASS_OK) {
-        raise_rc(rc, "surface");
-    }
-    return mp_obj_new_int_from_uint(h);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_surface_obj, 1, 2, glass_surface);
-
-static mp_obj_t glass_surface_find(mp_obj_t sid) {
-    ready();
-    return mp_obj_new_int_from_uint(moy_surface_find(mp_obj_str_get_str(sid)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(glass_surface_find_obj, glass_surface_find);
-
-static mp_obj_t glass_touch(mp_obj_t h) {
-    moy_surface_touch(h_arg(h));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(glass_touch_obj, glass_touch);
-
-static mp_obj_t glass_move(mp_obj_t h) {
-    moy_surface_move(h_arg(h));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(glass_move_obj, glass_move);
-
-static mp_obj_t glass_animating(size_t n_args, const mp_obj_t *a) {
-    if (n_args > 1) {
-        moy_surface_animating(h_arg(a[0]), mp_obj_is_true(a[1]));
-        return mp_const_none;
-    }
-    moy_surf_row_t *r;
-    return mp_obj_new_bool(moy_surface_row(h_arg(a[0]), &r) == MOY_GLASS_OK
-                           && r->animating);
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_animating_obj, 1, 2, glass_animating);
-
-static mp_obj_t glass_epoch(void) {
-    ready();
-    moy_surface_epoch();
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(glass_epoch_obj, glass_epoch);
-
-static mp_obj_t glass_content_gen(mp_obj_t h) {
-    ready();
-    return mp_obj_new_int_from_uint(moy_surface_content_gen(h_arg(h)));
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(glass_content_gen_obj, glass_content_gen);
-
-// gens(h) -> (content_gen, place_gen), the row's own.
-static mp_obj_t glass_gens(mp_obj_t h) {
-    moy_surf_row_t *r;
-    if (moy_surface_row(h_arg(h), &r) != MOY_GLASS_OK) {
-        raise_rc(MOY_GLASS_STALE, "surface");
-    }
-    mp_obj_t t[2] = { mp_obj_new_int_from_uint(r->content_gen),
-                      mp_obj_new_int_from_uint(r->place_gen) };
-    return mp_obj_new_tuple(2, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(glass_gens_obj, glass_gens);
-
-static mp_obj_t glass_mint(void) {
-    ready();
-    return mp_obj_new_int_from_uint(moy_surface_mint());
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(glass_mint_obj, glass_mint);
-
-// place(h, x, y, w, h, z) -> True when the placement moved (its gen minted).
-static mp_obj_t glass_place(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_surf_row_t *r;
-    if (moy_surface_row(h_arg(a[0]), &r) != MOY_GLASS_OK) {
-        raise_rc(MOY_GLASS_STALE, "surface");
-    }
-    int16_t x = (int16_t)mp_obj_get_int(a[1]), y = (int16_t)mp_obj_get_int(a[2]);
-    uint16_t w = (uint16_t)mp_obj_get_int(a[3]), hh = (uint16_t)mp_obj_get_int(a[4]);
-    int16_t z = (int16_t)mp_obj_get_int(a[5]);
-    if (r->x == x && r->y == y && r->w == w && r->h == hh && r->z == z) {
-        return mp_const_false;
-    }
-    r->x = x;
-    r->y = y;
-    r->w = w;
-    r->h = hh;
-    r->z = z;
-    moy_surface_move(h_arg(a[0]));
-    return mp_const_true;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_place_obj, 6, 6, glass_place);
-
-// placement(h) -> [x, y, scale, z], the wire shape (surface_model_v1 §6).
-static mp_obj_t glass_placement(mp_obj_t h) {
-    moy_surf_row_t *r;
-    if (moy_surface_row(h_arg(h), &r) != MOY_GLASS_OK) {
-        raise_rc(MOY_GLASS_STALE, "surface");
-    }
-    mp_obj_t t[4] = { MP_OBJ_NEW_SMALL_INT(r->x), MP_OBJ_NEW_SMALL_INT(r->y),
-                      MP_OBJ_NEW_SMALL_INT(r->scale), MP_OBJ_NEW_SMALL_INT(r->z) };
-    return mp_obj_new_list(4, t);
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(glass_placement_obj, glass_placement);
-
-static mp_obj_t glass_drop(mp_obj_t h) {
-    moy_surface_drop(h_arg(h));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(glass_drop_obj, glass_drop);
-
-// sync(alive, prefix="win:"): drop every `prefix` surface not in `alive`.
-static mp_obj_t glass_sync(size_t n_args, const mp_obj_t *a) {
-    ready();
-    const char *prefix = n_args > 1 ? mp_obj_str_get_str(a[1]) : "win:";
-    mp_obj_t it = mp_getiter(a[0], NULL);
-    const char *alive[MOY_GLASS_ROWS];
-    size_t n = 0;
-    mp_obj_t o;
-    while ((o = mp_iternext(it)) != MP_OBJ_STOP_ITERATION && n < MOY_GLASS_ROWS) {
-        alive[n++] = mp_obj_str_get_str(o);
-    }
-    moy_surface_sync(alive, n, prefix);
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_sync_obj, 1, 2, glass_sync);
+// -- the kernel epoch -----------------------------------------------------------
 
 static mp_obj_t glass_kernel_epoch(void) {
     ready();
-    return mp_obj_new_int_from_uint(moy_surface_kernel_epoch());
+    return mp_obj_new_int_from_uint(moy_glass_kernel_epoch());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(glass_kernel_epoch_obj, glass_kernel_epoch);
 
 static mp_obj_t glass_kernel_bump(void) {
     ready();
-    moy_surface_kernel_bump();
+    moy_glass_kernel_bump();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(glass_kernel_bump_obj, glass_kernel_bump);
@@ -2447,19 +2316,6 @@ static const mp_rom_map_elem_t glass_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&glass_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_pool_bound), MP_ROM_PTR(&glass_set_pool_bound_obj) },
     { MP_ROM_QSTR(MP_QSTR_evict), MP_ROM_PTR(&glass_evict_obj) },
-    { MP_ROM_QSTR(MP_QSTR_surface), MP_ROM_PTR(&glass_surface_obj) },
-    { MP_ROM_QSTR(MP_QSTR_surface_find), MP_ROM_PTR(&glass_surface_find_obj) },
-    { MP_ROM_QSTR(MP_QSTR_touch), MP_ROM_PTR(&glass_touch_obj) },
-    { MP_ROM_QSTR(MP_QSTR_move), MP_ROM_PTR(&glass_move_obj) },
-    { MP_ROM_QSTR(MP_QSTR_animating), MP_ROM_PTR(&glass_animating_obj) },
-    { MP_ROM_QSTR(MP_QSTR_epoch), MP_ROM_PTR(&glass_epoch_obj) },
-    { MP_ROM_QSTR(MP_QSTR_content_gen), MP_ROM_PTR(&glass_content_gen_obj) },
-    { MP_ROM_QSTR(MP_QSTR_gens), MP_ROM_PTR(&glass_gens_obj) },
-    { MP_ROM_QSTR(MP_QSTR_mint), MP_ROM_PTR(&glass_mint_obj) },
-    { MP_ROM_QSTR(MP_QSTR_place), MP_ROM_PTR(&glass_place_obj) },
-    { MP_ROM_QSTR(MP_QSTR_placement), MP_ROM_PTR(&glass_placement_obj) },
-    { MP_ROM_QSTR(MP_QSTR_drop), MP_ROM_PTR(&glass_drop_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&glass_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_kernel_epoch), MP_ROM_PTR(&glass_kernel_epoch_obj) },
     { MP_ROM_QSTR(MP_QSTR_kernel_bump), MP_ROM_PTR(&glass_kernel_bump_obj) },
     { MP_ROM_QSTR(MP_QSTR_block), MP_ROM_PTR(&glass_block_obj) },

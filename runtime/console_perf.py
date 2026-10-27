@@ -100,9 +100,9 @@ class PerfMeters:
         self._loading_rect = None  # ...and the rect it drew last
         self._dsf_comp = None     # _disarm_fn's compositor / disarm_scale_fold
         self._dsf_fn = None
-        self._probe_sc = None     # frame()'s system-canvas probes (begin_surface
-        self._probe_surf = None   # / skip_surface / view) and the game canvas's
-        self._probe_sksurf = None # `buf`, re-taken only when the object changes
+        self._probe_sc = None     # frame()'s system-canvas probe (view) and the
+                                  # game canvas's `buf`, re-taken only when the
+                                  # object changes
         self._probe_view = None
         self._probe_gc = None
         self._probe_buf = None

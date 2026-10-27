@@ -115,8 +115,7 @@ exactly n−1, because a gap means the buffer was painted by something else.
 **One body with `ScrollRegion`.** The entry lives in the native scroll state
 (`moy_ui_scroll_t`, which already holds a `ScrollRegion`'s drag and fling).
 `ScrollRegion`'s paint ring (`note_painted` / `blit_shift`, `_painted`) moves
-into that same body, as an N-entry use of it. The kernel surface table
-(§15 of the surface model) is the alternative home, if it lands first. The
+into that same body, as an N-entry use of it. The
 build adds a one-body guard: a grep test that no second paint ring exists in
 `runtime/` or `native/moy_ui/`.
 

@@ -1,5 +1,5 @@
 // The glass's tables under a random walk: buffers made, released and reclaimed
-// by owners that begin and end, canvases and surfaces, with the pixel and the
+// by owners that begin and end, and canvases, with the pixel and the
 // table allocators failing on a schedule. A model beside the C says what each
 // handle must be; ASan and UBSan say what the C did to memory. A seeded driver
 // (`fuzz_glass SEED STEPS`) or libFuzzer (`-DMOY_LIBFUZZER`) over the same step.
@@ -10,7 +10,6 @@
 
 #include "moy_buf.h"
 #include "moy_canvas.h"
-#include "moy_surface.h"
 
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "fuzz_glass: %s:%d %s\n", \
                                           __FILE__, __LINE__, #c); abort(); } } while (0)
@@ -116,7 +115,7 @@ static void step(void) {
     uint32_t r = next();
     int i = (int)(r >> 8) % NB;
     int o = (int)(r >> 16) % NO;
-    switch (r % 10u) {
+    switch (r % 9u) {
         case 0: case 1: {                           // a buffer
             if (bufs[i].h) {
                 break;
@@ -180,26 +179,7 @@ static void step(void) {
                 }
             }
             break;
-        case 7: {                                   // the surface table
-            char sid[12];
-            snprintf(sid, sizeof(sid), "win:%u", (unsigned)(r >> 20) % 12u);
-            uint32_t h;
-            if (moy_surface_get(&h, sid, 0) == MOY_GLASS_OK) {
-                uint32_t g0 = moy_surface_content_gen(h);
-                moy_surface_touch(h);
-                CHECK(moy_surface_content_gen(h) != g0);
-                if (next() & 1u) {
-                    moy_surface_drop(h);
-                    CHECK(moy_surface_find(sid) == 0u);
-                }
-            }
-            if ((r >> 4) % 5u == 0u) {
-                const char *alive[1] = { "win:3" };
-                moy_surface_sync(alive, 1, "win:");
-            }
-            break;
-        }
-        case 8:                                     // the bound moves
+        case 7:                                     // the bound moves
             moy_glass_set_pool_bound((next() % 4u) * 4096u);
             break;
         default:                                    // reclaim a role

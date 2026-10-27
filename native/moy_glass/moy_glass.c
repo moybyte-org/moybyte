@@ -1,5 +1,5 @@
-// The glass's tables: OWNER, BUF, CANVAS and SURF rows, the pool and the
-// surface gens (moy_buf.h, moy_canvas.h and moy_surface.h have the contracts).
+// The glass's tables: OWNER, BUF and CANVAS rows, the pool and the kernel
+// epoch (moy_buf.h and moy_canvas.h have the contracts).
 //
 // One state per image, made by moy_glass_init. The CANVAS table is reserved
 // whole, so a canvas row never moves and the gates and the binding's views may
@@ -9,7 +9,6 @@
 
 #include "moy_buf.h"
 #include "moy_canvas.h"
-#include "moy_surface.h"
 
 typedef struct {
     const moy_htab_mem_t *mem;
@@ -17,14 +16,11 @@ typedef struct {
     moy_htab_t *owners;
     moy_htab_t *bufs;
     moy_htab_t *canvases;
-    moy_htab_t *surfs;
     uint32_t pool_bound;
     uint32_t pool_bytes;
     uint32_t pool_rows;
     uint32_t peak;
     uint32_t evictions;
-    uint32_t gen;               // the surface mint
-    uint32_t epoch;             // the set-level un-attributed gen
     uint32_t kepoch;            // the kernel's own draws
 } glass_t;
 
@@ -44,8 +40,6 @@ int moy_glass_init(const moy_htab_mem_t *mem, const moy_glass_px_t *px,
     G.mem = mem;
     G.px = px;
     G.pool_bound = pool_bound;
-    G.gen = 1u;
-    G.epoch = 1u;
     G.kepoch = 1u;
     G.owners = moy_htab_new(mem, MOY_KIND_OWNER, MOY_GLASS_ROWS,
                             sizeof(moy_owner_row_t));
@@ -53,14 +47,11 @@ int moy_glass_init(const moy_htab_mem_t *mem, const moy_glass_px_t *px,
                           sizeof(moy_buf_row_t));
     G.canvases = moy_htab_new(mem, MOY_KIND_CANVAS, MOY_GLASS_ROWS,
                               sizeof(moy_canvas_row_t));
-    G.surfs = moy_htab_new(mem, MOY_KIND_SURF, MOY_GLASS_ROWS,
-                           sizeof(moy_surf_row_t));
     if (G.owners == NULL || G.bufs == NULL || G.canvases == NULL
-        || G.surfs == NULL || moy_htab_reserve(G.canvases) != MOY_HTAB_OK) {
+        || moy_htab_reserve(G.canvases) != MOY_HTAB_OK) {
         moy_htab_free(G.owners);
         moy_htab_free(G.bufs);
         moy_htab_free(G.canvases);
-        moy_htab_free(G.surfs);
         memset(&G, 0, sizeof(G));
         return MOY_GLASS_NOMEM;
     }
@@ -86,7 +77,6 @@ void moy_glass_deinit(void) {
     moy_htab_free(G.owners);
     moy_htab_free(G.bufs);
     moy_htab_free(G.canvases);
-    moy_htab_free(G.surfs);
     memset(&G, 0, sizeof(G));
 }
 
@@ -487,126 +477,12 @@ uint32_t moy_canvas_count(void) {
     return G.canvases ? moy_htab_count(G.canvases) : 0u;
 }
 
-// -- surfaces -------------------------------------------------------------------
+// -- the kernel epoch -----------------------------------------------------------
 
-uint32_t moy_surface_mint(void) {
-    G.gen = G.gen >= 0x7fffffffu ? 2u : G.gen + 1u;
-    return G.gen;
-}
-
-uint32_t moy_surface_find(const char *sid) {
-    if (G.surfs == NULL) {
-        return 0u;
-    }
-    for (uint32_t s = 0; s < moy_htab_slots(G.surfs); s++) {
-        if (moy_htab_live(G.surfs, s)
-            && strncmp(((moy_surf_row_t *)moy_htab_row(G.surfs, s))->sid, sid,
-                       MOY_SURF_SID + 1u) == 0) {
-            return moy_htab_handle(G.surfs, s);
-        }
-    }
-    return 0u;
-}
-
-int moy_surface_get(uint32_t *h, const char *sid, uint8_t domain) {
-    size_t n = strlen(sid);
-    if (n == 0u || n > MOY_SURF_SID) {
-        return MOY_GLASS_BAD;
-    }
-    uint32_t f = moy_surface_find(sid);
-    if (f != 0u) {
-        *h = f;
-        return MOY_GLASS_OK;
-    }
-    void *row;
-    int rc = moy_htab_add(G.surfs, h, &row);
-    if (rc != MOY_HTAB_OK) {
-        return rc;
-    }
-    moy_surf_row_t *r = row;
-    memcpy(r->sid, sid, n);
-    r->domain = domain;
-    r->scale = 1u;
-    r->content_gen = r->place_gen = moy_surface_mint();
-    return MOY_GLASS_OK;
-}
-
-int moy_surface_row(uint32_t h, moy_surf_row_t **row) {
-    if (G.surfs == NULL) {
-        return MOY_GLASS_STALE;
-    }
-    return moy_htab_get(G.surfs, h, (void **)row);
-}
-
-void moy_surface_touch(uint32_t h) {
-    moy_surf_row_t *r;
-    if (moy_surface_row(h, &r) == MOY_HTAB_OK) {
-        r->content_gen = moy_surface_mint();
-    }
-}
-
-void moy_surface_move(uint32_t h) {
-    moy_surf_row_t *r;
-    if (moy_surface_row(h, &r) == MOY_HTAB_OK) {
-        r->place_gen = moy_surface_mint();
-    }
-}
-
-void moy_surface_animating(uint32_t h, bool on) {
-    moy_surf_row_t *r;
-    if (moy_surface_row(h, &r) == MOY_HTAB_OK) {
-        r->animating = on ? 1u : 0u;
-    }
-}
-
-void moy_surface_epoch(void) {
-    G.epoch = moy_surface_mint();
-}
-
-uint32_t moy_surface_content_gen(uint32_t h) {
-    moy_surf_row_t *r;
-    uint32_t g = 0u;
-    if (moy_surface_row(h, &r) == MOY_HTAB_OK) {
-        g = r->content_gen;
-    }
-    return g > G.epoch ? g : G.epoch;
-}
-
-int moy_surface_drop(uint32_t h) {
-    if (G.surfs == NULL) {
-        return MOY_GLASS_STALE;
-    }
-    return moy_htab_release(G.surfs, h);
-}
-
-void moy_surface_sync(const char *const *alive, size_t n, const char *prefix) {
-    size_t pn = strlen(prefix);
-    for (uint32_t s = 0; G.surfs && s < moy_htab_slots(G.surfs); s++) {
-        if (!moy_htab_live(G.surfs, s)) {
-            continue;
-        }
-        moy_surf_row_t *r = moy_htab_row(G.surfs, s);
-        if (strncmp(r->sid, prefix, pn) != 0) {
-            continue;
-        }
-        size_t i = 0;
-        while (i < n && strncmp(alive[i], r->sid, MOY_SURF_SID + 1u) != 0) {
-            i++;
-        }
-        if (i == n) {
-            moy_htab_release(G.surfs, moy_htab_handle(G.surfs, s));
-        }
-    }
-}
-
-uint32_t moy_surface_kernel_epoch(void) {
+uint32_t moy_glass_kernel_epoch(void) {
     return G.kepoch;
 }
 
-void moy_surface_kernel_bump(void) {
+void moy_glass_kernel_bump(void) {
     G.kepoch = G.kepoch >= 0x7fffffffu ? 2u : G.kepoch + 1u;
-}
-
-uint32_t moy_surface_count(void) {
-    return G.surfs ? moy_htab_count(G.surfs) : 0u;
 }

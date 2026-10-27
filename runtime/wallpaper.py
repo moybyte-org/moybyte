@@ -584,11 +584,10 @@ class Wallpaper:
         with the system canvas's (0, 0) at (x, y) of `cv`: the pixels
         `cv.backdrop(rec, desktop, surface=(x, y, ...))` draws, since the
         bake is that draw at the canvas's size. True when copied; False
-        where the bake holds anything else, or the system canvas records
-        or retains nothing, and the caller draws it."""
+        where the bake holds anything else, or the system canvas retains
+        nothing, and the caller draws it."""
         sc = self.ws.sys_canvas
-        if (getattr(sc, "begin_surface", None) is not None
-                or getattr(sc, "RETAINED_FRAMES", 0) < 1):
+        if getattr(sc, "RETAINED_FRAMES", 0) < 1:
             return False
         k = self.restore_key(True)
         if k is None or k[0] != "bd" or k[1][0] != rec:

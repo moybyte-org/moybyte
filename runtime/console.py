@@ -4810,8 +4810,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._quiet_frames = 0
         if getattr(self.launcher_layer, "_cap_owed", None) is not None:
             self.launcher_layer.capture_due()   # before anything draws
-        if self._dirty:
-            _glass.epoch()            # §15: a dirty frame is the un-attributed epoch
         # The fps the chip shows is the DRAWN rate (#217): an EMA over the
         # frames that reach the glass, so a paced cart reads its draw rate and
         # not the loop's spin between ticks.
@@ -4860,32 +4858,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # cursor is always the top system layer, so a game-domain content is always
         # composited before it -- reproducing the pre-refactor single composite step.
         _prev_domain = None
-        # WM-surface mark (Stage 9, docs/history/shell_ux_technical_plan_v1.md): when a RECORDING system
-        # canvas is installed (the opt-in web view), tag each WM-stack surface so the recorder
-        # slices the frame into ONE stream per surface (bar / app-content / player-viewport) --
-        # the browser then composites them (a second WM backend). `begin_surface` exists only on
-        # the recording canvas, so on the RAW canvas (the default) `_surf` is None: no call, no
-        # allocation, byte-identical pixels -- the golden set can't move. Probed ONCE per frame.
-        # The four canvas probes below are re-taken only when a canvas object
+        # The canvas probes below are re-taken only when a canvas object
         # changes (#66 lever 1): a probe answers for the object, so keying on
         # identity is the same answer at a compare's cost instead of a getattr
         # with a default (~30us each on the S3, four of them every play frame).
         _sc = self.sys_canvas
         if _sc is not self._probe_sc:
             self._probe_sc = _sc
-            self._probe_surf = getattr(_sc, "begin_surface", None)
-            self._probe_sksurf = getattr(_sc, "skip_surface", None)
             self._probe_view = getattr(_sc, "view", None)
-        _surf = self._probe_surf
-        # Surface model §4 skip-draw (docs/surface_model_v1.md): a WM that
-        # tracks surface gens may decline a gen-clean layer's draw entirely --
-        # the recorder keeps its z-slot as a zero-width skip mark and the wire
-        # ships a {"same":1} stub. Same probe shape as _surf: on the S3 the WM
-        # has no surface_skip and the canvas no skip_surface -> two Nones, no
-        # per-layer cost, byte-identical (the L6 no-op pattern).
-        _lskip = getattr(self.wm, "surface_skip", None) if _surf is not None \
-            else None
-        _sksurf = self._probe_sksurf
         # FULLSCREEN GAME-DOMAIN PLACEMENT on a COMMAND-ONLY game canvas (#175).
         # There the cart's frame has no pixels for _composite_game to scale up,
         # so its draw span must be BRACKETED instead -- otherwise every
@@ -4974,13 +4954,6 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 if _dsf is not None:
                     _dsf()
                 _fold_live = False
-            if (_lskip is not None and _sksurf is not None
-                    and layer.domain == "system" and _lskip(layer.id)):
-                _sksurf(layer.id, layer.domain)     # z-slot survives, draw doesn't
-                _prev_domain = layer.domain
-                continue
-            if _surf is not None:
-                _surf(layer.id, layer.domain)       # start this surface's command stream
             if _vp is not None and layer.domain == "game" and not _game_open:
                 _ox, _oy, _sc = _vp()
                 # LETTERBOX FIRST. The pixel composite fills the bezel AFTER the

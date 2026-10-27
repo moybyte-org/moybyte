@@ -122,6 +122,13 @@ void moy_glass_set_pool_bound(uint32_t bytes);  // evicts down to it
 void moy_glass_evict(void);                     // frees every pool row
 void moy_glass_stats(moy_glass_stats_t *out);
 
+// The KERNEL EPOCH: the kernel's own draws (the idle wake, the saver, the
+// parked screen, the floor, the HUD) bump it, and the Python frame gate reads
+// a moved epoch as dirty while a buffer it retains still holds the kernel's
+// picture. Compare with !=, never >.
+uint32_t moy_glass_kernel_epoch(void);
+void moy_glass_kernel_bump(void);
+
 // A buffer of `nbytes` on loan to `owner` (0: the kernel's): the pool's free row
 // of that size first, then the allocator, then -- after evicting the pool -- the
 // allocator once more. OK, FULL, NOMEM, STALE (a dead owner) or BAD.

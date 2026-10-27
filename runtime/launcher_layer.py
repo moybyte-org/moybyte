@@ -2583,14 +2583,9 @@ class LauncherHomeLayer:
                 or self.grid.dragging or self.grid.flinging
                 or ws._animating(dt)):
             return False
-        # A RECORDING canvas (the wasm head's CommandCanvas root) can't replay
-        # a framebuffer capture -- its stream would blit a layer no command
-        # ever defined. Two probes: the recording marker (begin_surface, same
-        # probe frame() uses) and the retention contract (recording canvases
-        # declare RETAINED_FRAMES = 0 for exactly this reason; a canvas that
-        # retains nothing can't be captured from either).
-        if (getattr(cv, "begin_surface", None) is not None
-                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+        # A canvas that retains nothing (RETAINED_FRAMES < 1) holds no frame to
+        # capture from or replay.
+        if getattr(cv, "RETAINED_FRAMES", 0) < 1:
             return False
         if cache.w != cv.w or cache.h != cv.h:
             return False
@@ -2610,8 +2605,7 @@ class LauncherHomeLayer:
         if self._lib_unsupported:
             return
         cv = ws.sys_canvas
-        if (getattr(cv, "begin_surface", None) is not None
-                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+        if getattr(cv, "RETAINED_FRAMES", 0) < 1:
             return
         cache = self._lib_cache
         try:
@@ -2671,8 +2665,7 @@ class LauncherHomeLayer:
         if (self._lib_unsupported or ws._animating(dt)
                 or ws.wallpaper.restore_key(True) is not None):
             return                # (a wallpaper that restores needs no copy)
-        if (getattr(cv, "begin_surface", None) is not None
-                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+        if getattr(cv, "RETAINED_FRAMES", 0) < 1:
             return
         key = self._band_key_of(cv)
         try:
@@ -2705,12 +2698,8 @@ class LauncherHomeLayer:
         if (self._lib_unsupported or self.grid.dragging
                 or self.grid.flinging or ws._animating(dt)):
             return
-        if (getattr(cv, "begin_surface", None) is not None
-                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
-            return              # recording/non-retaining canvas: a framebuffer
-                                # copy is not a recordable op (see
-                                # _try_stamp_retained); the raster side would
-                                # diverge from the recorded stream
+        if getattr(cv, "RETAINED_FRAMES", 0) < 1:
+            return              # a canvas that retains nothing has no frame to copy
         key = self._retained_key(cv)
         if key == self._lib_key:
             return
@@ -3080,13 +3069,6 @@ class LauncherHomeLayer:
             if parts is not None and len(self._still_ring) < _retained_n(cv):
                 self._still_debt()
             return
-        # #76 sub-surface marks: on a RECORDING canvas, partition the home into
-        # wallpaper / grid / bar streams so the web delta can skip the static grid +
-        # bar while a live wallpaper animates underneath (they were one "launcher"
-        # surface -- the wallpaper's motion re-shipped everything each frame). The
-        # marks are positional slices of the same flat stream: replayed in order the
-        # pixels are identical, and on the RAW canvas _surf is None (zero cost).
-        _surf = getattr(cv, "begin_surface", None)
         # perf_capture (#66 instrument-before-cutting): time the home frame's
         # three sections so a slow launcher frame names its eater (PERF's
         # home= field carries ws._pf_home -- wallpaper vs grid vs bar).
@@ -3094,8 +3076,6 @@ class LauncherHomeLayer:
         ws.wallpaper.draw(dt, home=True, quiet=self._quiet(ws))
         self._capture_band_backdrop(cv, dt)
         _t1 = _ticks_ms() if _t0 is not None else None
-        if _surf is not None:
-            _surf("home-grid", "system")
         # The hint strip and the cells' band (docs/shell_layout_2026-10.md
         # §12) over the wallpaper; the cards draw inside the band.
         self._draw_home_chrome(cv)
@@ -3110,8 +3090,6 @@ class LauncherHomeLayer:
             (self.grid.paint_key(), self._statics_key(cv), ws.covers.gen),
             _cursor_stamp(ws))
         _t2 = _ticks_ms() if _t0 is not None else None
-        if _surf is not None:
-            _surf("home-bar", "system")
         ws.bar_layer._draw_status_strip("home")
         if self._back_tip:
             self._draw_back_tip(cv)

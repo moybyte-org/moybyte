@@ -7,7 +7,6 @@
 
 #include "moy_buf.h"
 #include "moy_canvas.h"
-#include "moy_surface.h"
 
 static size_t host_live_bytes;
 
@@ -83,40 +82,6 @@ size_t moy_glass_host_canvas_state_offset(void) {
 
 size_t moy_glass_host_canvas_pal_offset(void) {
     return offsetof(moy_canvas_row_t, pal);
-}
-
-int moy_glass_host_surface_row(uint32_t h, int32_t out[9]) {
-    moy_surf_row_t *r;
-    if (moy_surface_row(h, &r) != MOY_GLASS_OK) {
-        return MOY_GLASS_STALE;
-    }
-    out[0] = (int32_t)r->content_gen;
-    out[1] = (int32_t)r->place_gen;
-    out[2] = r->x;
-    out[3] = r->y;
-    out[4] = r->w;
-    out[5] = r->h;
-    out[6] = r->z;
-    out[7] = r->scale;
-    out[8] = r->animating;
-    return MOY_GLASS_OK;
-}
-
-int moy_glass_host_surface_place(uint32_t h, int x, int y, int w, int hh, int z) {
-    moy_surf_row_t *r;
-    if (moy_surface_row(h, &r) != MOY_GLASS_OK) {
-        return -1;
-    }
-    if (r->x == x && r->y == y && r->w == w && r->h == hh && r->z == z) {
-        return 0;
-    }
-    r->x = (int16_t)x;
-    r->y = (int16_t)y;
-    r->w = (uint16_t)w;
-    r->h = (uint16_t)hh;
-    r->z = (int16_t)z;
-    moy_surface_move(h);
-    return 1;
 }
 
 // -- the present engines over a fake transport (tests/test_banded_panel.py) -----
