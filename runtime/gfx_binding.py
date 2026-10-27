@@ -175,11 +175,7 @@ def _lib():
         if path is None:
             _LIB[0] = False
         else:
-            d = ctypes.CDLL(path)
-            for name, args, res in _SIGS:
-                fn = getattr(d, name)
-                fn.argtypes = args
-                fn.restype = res
+            d = native_build.load_cdll(path, _SIGS)
             if d.hg_lr_size() > LR_SIZE:
                 raise RuntimeError("gfx_binding: LR_SIZE is short of mg_lrestore_t")
             _LIB[0] = d

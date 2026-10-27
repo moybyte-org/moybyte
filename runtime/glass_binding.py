@@ -134,11 +134,7 @@ def _lib():
         path = build()
         if path is None:
             raise ImportError("moy_glass: no C compiler for the host build")
-        d = ctypes.CDLL(path)
-        for name, args, res in _SIGS:
-            fn = getattr(d, name)
-            fn.argtypes = args
-            fn.restype = res
+        d = native_build.load_cdll(path, _SIGS)
         if d.moy_glass_host_init(POOL_BYTES) != OK:
             raise MemoryError("glass: no tables")
         _LIB[0] = d

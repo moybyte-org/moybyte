@@ -198,12 +198,7 @@ def _lib():
         path = build()
         if path is None:
             raise ImportError("moy_net: no C compiler for the host build")
-        d = ctypes.CDLL(path)
-        for name, args, res in _SIGS:
-            fn = getattr(d, name)
-            fn.argtypes = args
-            fn.restype = res
-        _LIB[0] = d
+        _LIB[0] = native_build.load_cdll(path, _SIGS)
     return _LIB[0]
 
 

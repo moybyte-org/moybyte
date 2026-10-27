@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import contextlib
+import ctypes
 import hashlib
 import os
 import shutil
@@ -181,6 +182,21 @@ def cache_key(compiler, sources, cflags):
     except Exception:   # noqa: BLE001 -- version only refines the cache key
         pass
     return h.hexdigest()[:16]
+
+
+def load_cdll(path, sigs):
+    """`ctypes.CDLL(path)` with every `(name, argtypes, restype)` row of `sigs`
+    applied. Every argtype is explicit on purpose: a function left without them
+    takes ctypes' default int conversion, which truncates a 64-bit pointer -- a
+    segfault with no traceback, not a TypeError. What a binding does when
+    `path` is None (raise, or cache a miss), and what it checks of the loaded
+    library, stays in that binding."""
+    lib = ctypes.CDLL(path)
+    for name, args, res in sigs:
+        fn = getattr(lib, name)
+        fn.argtypes = args
+        fn.restype = res
+    return lib
 
 
 @contextlib.contextmanager

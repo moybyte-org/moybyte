@@ -222,14 +222,7 @@ def _lib():
         if path is None:
             _LIB[0] = False
         else:
-            d = ctypes.CDLL(path)
-            # Every argtype explicit: a function left without them takes the
-            # default int conversion, which truncates a 64-bit pointer -- a
-            # segfault, not a TypeError.
-            for name, args, res in _SIGS:
-                fn = getattr(d, name)
-                fn.argtypes = args
-                fn.restype = res
+            d = native_build.load_cdll(path, _SIGS)
             if d.hl_play_info_size() != ctypes.sizeof(PlayInfo):
                 raise ImportError("moy_play_info_t's layout is not this file's")
             d.hl_img_decoder(ctypes.cast(_IMG_CB, _P))
