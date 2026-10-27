@@ -587,6 +587,124 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_backlight_obj, 0, 1, glass_back
 #define MOY_GLASS_BANDED 0
 #endif
 
+// -- shift_last and copy_last_into: every compositor's ---------------------------
+//
+// shift_last(x, y, w, h, dx, dy) -> True once the rect of the buffer the last
+// presented frame drew into is in the one this frame draws into, moved by
+// (dx, dy) inside the rect (moy_gfx's mg_shift_rect: pixels that would leave
+// it are dropped, the band the move exposes keeps what this buffer held, the
+// caller draws it). Buffer coordinates. Across two buffers the 2D-DMA moves it
+// where the transport has one (moy_ppa.fbcpy), queued, and every verb that
+// reads or presents this buffer fences it first, as shift_fence() does; the
+// CPU otherwise. With one buffer the last frame's is this one: in place on the
+// CPU. False when there is no last frame to shift from (or the engine is busy
+// with what the shift must not wait behind), and the caller draws the rect.
+//
+// copy_last_into(buf, stride, x, y, w, h[, lx, ly]) -> True once the rect of
+// that buffer is at (lx, ly) of `buf`, an RGB565 picture `stride` px a row (a
+// window's layer), clipped to both: blocking, the 2D-DMA where it takes the
+// block, else the CPU.
+
+// moy_gfx_kernels.h (moy_gfx is in every console).
+void mg_shift_rect(uint16_t *dst, const uint16_t *src, size_t cap, int stride,
+                   int rx, int ry, int rw, int rh, int dx, int dy);
+int mg_shift_clip(int stride, int rows, int rx, int ry, int rw, int rh,
+                  int dx, int dy, int *b);
+void mg_copy_block(uint16_t *dst, size_t dcap, int dstride,
+                   const uint16_t *src, size_t scap, int sstride,
+                   int dx, int dy, int sx, int sy, int w, int h);
+int mg_block_clip(int dw, int dh, int sw, int sh, int *b);
+
+// The transport's 2D-DMA block copy (moy_ppa.fbcpy): True when it took it.
+static bool glass_fbcpy(mp_obj_t ppa, mp_obj_t dst, mp_int_t dw, mp_int_t dh, mp_obj_t src,
+                        mp_int_t sw, mp_int_t sh, const int *b, bool nb) {
+    if (ppa == MP_OBJ_NULL || ppa == mp_const_none) {
+        return false;
+    }
+    mp_obj_t m[15];
+    mp_load_method_maybe(ppa, MP_QSTR_fbcpy, m);
+    if (m[0] == MP_OBJ_NULL) {
+        return false;
+    }
+    m[2] = dst;
+    m[3] = mp_obj_new_int(dw);
+    m[4] = mp_obj_new_int(dh);
+    m[5] = mp_obj_new_int(b[0]);
+    m[6] = mp_obj_new_int(b[1]);
+    m[7] = src;
+    m[8] = mp_obj_new_int(sw);
+    m[9] = mp_obj_new_int(sh);
+    m[10] = mp_obj_new_int(b[2]);
+    m[11] = mp_obj_new_int(b[3]);
+    m[12] = mp_obj_new_int(b[4]);
+    m[13] = mp_obj_new_int(b[5]);
+    m[14] = mp_obj_new_bool(nb);
+    return mp_obj_is_true(mp_call_method_n_kw(13, 0, m));
+}
+
+// A shift still flying has landed and its rows are out of the CPU's cache.
+static void glass_shift_fence(mp_obj_t ppa, bool *fly) {
+    if (*fly) {
+        *fly = false;
+        mp_obj_t m[2];
+        mp_load_method_maybe(ppa, MP_QSTR_fbcpy_wait, m);
+        if (m[0] != MP_OBJ_NULL) {
+            mp_call_method_n_kw(0, 0, m);
+        }
+    }
+}
+
+// shift_last's body over `dst` (this frame's buffer) and `src` (the last
+// frame's), both W x H: the block it moved in `b` (x, y, sx, sy, w, h); false
+// when nothing moves. `fly`: the copy is queued.
+static bool glass_shift(mp_obj_t ppa, mp_obj_t dst, mp_obj_t src, mp_int_t W, mp_int_t H,
+                        const mp_obj_t *a, bool *fly, int *b) {
+    mp_buffer_info_t db, sb;
+    mp_get_buffer_raise(dst, &db, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(src, &sb, MP_BUFFER_READ);
+    size_t need = (size_t)W * (size_t)H * 2u;
+    if (db.len < need || sb.len < need) {
+        mp_raise_ValueError(MP_ERROR_TEXT("shift_last buffers"));
+    }
+    int x = (int)mp_obj_get_int(a[0]), y = (int)mp_obj_get_int(a[1]);
+    int w = (int)mp_obj_get_int(a[2]), h = (int)mp_obj_get_int(a[3]);
+    int dx = (int)mp_obj_get_int(a[4]), dy = (int)mp_obj_get_int(a[5]);
+    if (!mg_shift_clip((int)W, (int)H, x, y, w, h, dx, dy, b)) {
+        return false;
+    }
+    if (db.buf != sb.buf && glass_fbcpy(ppa, dst, W, H, src, W, H, b, true)) {
+        *fly = true;
+        return true;
+    }
+    mg_shift_rect(db.buf, sb.buf, (size_t)W * (size_t)H, (int)W, x, y, w, h, dx, dy);
+    return true;
+}
+
+// copy_last_into's body: the rect of `src` (W x H) into the picture a[0].
+static void glass_copy_into(mp_obj_t ppa, mp_obj_t src, mp_int_t W, mp_int_t H,
+                            size_t n_args, const mp_obj_t *a) {
+    mp_buffer_info_t db, sb;
+    mp_get_buffer_raise(a[0], &db, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(src, &sb, MP_BUFFER_READ);
+    mp_int_t stride = mp_obj_get_int(a[1]);
+    if (stride <= 0 || sb.len < (size_t)W * (size_t)H * 2u) {
+        mp_raise_ValueError(MP_ERROR_TEXT("copy_last_into buffers"));
+    }
+    mp_int_t rows = (mp_int_t)(db.len / 2u / (size_t)stride);
+    int b[6] = { n_args > 6 ? (int)mp_obj_get_int(a[6]) : 0,
+                 n_args > 7 ? (int)mp_obj_get_int(a[7]) : 0,
+                 (int)mp_obj_get_int(a[2]), (int)mp_obj_get_int(a[3]),
+                 (int)mp_obj_get_int(a[4]), (int)mp_obj_get_int(a[5]) };
+    if (!mg_block_clip((int)stride, (int)rows, (int)W, (int)H, b)) {
+        return;
+    }
+    if (db.buf != sb.buf && glass_fbcpy(ppa, a[0], stride, rows, src, W, H, b, false)) {
+        return;
+    }
+    mg_copy_block(db.buf, db.len / 2u, (int)stride, sb.buf, sb.len / 2u, (int)W,
+                  b[0], b[1], b[2], b[3], b[4], b[5]);
+}
+
 // -- present: the banded compositor (moy_present.h) -------------------------------
 //
 // BandedCompositor(panel, nfbs=2, async_flush=True): the T-Deck's and the
@@ -920,6 +1038,34 @@ static mp_obj_t banded_copy_last(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(banded_copy_last_obj, 5, 5, banded_copy_last);
 
+// shift_last / copy_last_into (above): a row copy on the CPU, the feeder
+// reading the last frame's buffer alongside.
+static mp_obj_t banded_shift_last(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    glass_banded_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    int l = moy_banded_last(&c->b);
+    if (l < 0) {
+        return mp_const_false;
+    }
+    bool fly = false;
+    int b[6];
+    glass_shift(mp_const_none, c->fbs[c->b.back], c->fbs[l], c->w, c->h, a + 1, &fly, b);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(banded_shift_last_obj, 7, 7, banded_shift_last);
+
+static mp_obj_t banded_copy_last_into(size_t n_args, const mp_obj_t *a) {
+    glass_banded_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    int l = moy_banded_last(&c->b);
+    if (l < 0) {
+        return mp_const_false;
+    }
+    glass_copy_into(mp_const_none, c->fbs[l], c->w, c->h, n_args - 1, a + 1);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(banded_copy_last_into_obj, 7, 9,
+                                           banded_copy_last_into);
+
 // last_buffer() -> the buffer the last presented frame drew into, where it
 // is not the one this frame draws into; None with one buffer or before a
 // frame was presented. A pass that reads it (a wash over the last frame)
@@ -944,6 +1090,8 @@ static const mp_rom_map_elem_t banded_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&banded_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_bounce_stats), MP_ROM_PTR(&banded_bounce_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_last), MP_ROM_PTR(&banded_copy_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_last), MP_ROM_PTR(&banded_shift_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_last_into), MP_ROM_PTR(&banded_copy_last_into_obj) },
     { MP_ROM_QSTR(MP_QSTR_last_buffer), MP_ROM_PTR(&banded_last_buffer_obj) },
 };
 static MP_DEFINE_CONST_DICT(banded_locals, banded_locals_table);
@@ -979,6 +1127,7 @@ typedef struct {
     mp_obj_t stamp;             // the deferred stamp's argument tuple, or None
     mp_obj_t refreshes;         // the panel's refresh count, or None
     mp_int_t w, h;
+    bool shift_fly;             // a shift_last's copy is queued
 } glass_dsi_obj_t;
 
 static const mp_obj_type_t glass_dsi_type;
@@ -1034,6 +1183,7 @@ static mp_obj_t dsi_make_new(const mp_obj_type_t *type, size_t n_args,
     mp_arg_check_num(n_args, n_kw, 1, 2, false);
     mp_obj_t dsi = args[0];
     glass_dsi_obj_t *c = mp_obj_malloc(glass_dsi_obj_t, type);
+    c->shift_fly = false;
     c->dsi = dsi;
     c->ppa = n_args > 1 ? args[1] : mp_const_none;
     c->stamp = mp_const_none;
@@ -1110,6 +1260,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(dsi_gfx_obj, dsi_gfx);
 static mp_obj_t dsi_flush(mp_obj_t self_in) {
     glass_dsi_obj_t *c = MP_OBJ_TO_PTR(self_in);
     bool kicked = false;
+    glass_shift_fence(c->ppa, &c->shift_fly);
     moy_dsi_show_landed(&c->d);
     if (c->stamp != mp_const_none) {
         mp_obj_t st = c->stamp;
@@ -1165,7 +1316,9 @@ static mp_obj_t dsi_present_pending(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(dsi_present_pending_obj, dsi_present_pending);
 
 static mp_obj_t dsi_sync(mp_obj_t self_in) {
-    moy_dsi_fence(&((glass_dsi_obj_t *)MP_OBJ_TO_PTR(self_in))->d);
+    glass_dsi_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    glass_shift_fence(c->ppa, &c->shift_fly);
+    moy_dsi_fence(&c->d);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(dsi_sync_obj, dsi_sync);
@@ -1180,6 +1333,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(dsi_snap_fence_obj, dsi_snap_fence);
 // Nothing still writes or reads a compiled cart's frame copy.
 static mp_obj_t dsi_frame_fence(mp_obj_t self_in) {
     glass_dsi_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    glass_shift_fence(c->ppa, &c->shift_fly);
     dsi_call0(c->ppa, MP_QSTR_snap_wait);
     dsi_call0(c->ppa, MP_QSTR_sync);
     return mp_const_none;
@@ -1245,6 +1399,7 @@ static mp_obj_t dsi_copy_last(size_t n_args, const mp_obj_t *a) {
     glass_dsi_obj_t *c = MP_OBJ_TO_PTR(a[0]);
     mp_int_t r[4] = { mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
                       mp_obj_get_int(a[3]), mp_obj_get_int(a[4]) };
+    glass_shift_fence(c->ppa, &c->shift_fly);
     int l = moy_dsi_last(&c->d);
     if (l < 0) {
         return mp_const_false;
@@ -1257,6 +1412,45 @@ static mp_obj_t dsi_copy_last(size_t n_args, const mp_obj_t *a) {
     return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(dsi_copy_last_obj, 5, 5, dsi_copy_last);
+
+// shift_last / copy_last_into / shift_fence (above the banded compositor).
+static mp_obj_t dsi_fb(glass_dsi_obj_t *c, int n) {
+    return mp_obj_subscr(c->fbs, MP_OBJ_NEW_SMALL_INT(n), MP_OBJ_SENTINEL);
+}
+
+static mp_obj_t dsi_shift_last(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    glass_dsi_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    glass_shift_fence(c->ppa, &c->shift_fly);
+    int l = moy_dsi_last(&c->d);
+    if (l < 0) {
+        return mp_const_false;
+    }
+    int b[6];
+    glass_shift(c->ppa, dsi_fb(c, c->d.back), dsi_fb(c, l), c->w, c->h, a + 1,
+                &c->shift_fly, b);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(dsi_shift_last_obj, 7, 7, dsi_shift_last);
+
+static mp_obj_t dsi_shift_fence(mp_obj_t self_in) {
+    glass_dsi_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    glass_shift_fence(c->ppa, &c->shift_fly);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(dsi_shift_fence_obj, dsi_shift_fence);
+
+static mp_obj_t dsi_copy_last_into(size_t n_args, const mp_obj_t *a) {
+    glass_dsi_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    glass_shift_fence(c->ppa, &c->shift_fly);
+    int l = moy_dsi_last(&c->d);
+    if (l < 0) {
+        return mp_const_false;
+    }
+    glass_copy_into(c->ppa, dsi_fb(c, l), c->w, c->h, n_args - 1, a + 1);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(dsi_copy_last_into_obj, 7, 9, dsi_copy_last_into);
 
 static mp_obj_t ppa_timeouts(mp_obj_t ppa) {
     if (ppa == mp_const_none) {
@@ -1381,6 +1575,9 @@ static const mp_rom_map_elem_t dsi_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_present_pending), MP_ROM_PTR(&dsi_present_pending_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&dsi_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_last), MP_ROM_PTR(&dsi_copy_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_last), MP_ROM_PTR(&dsi_shift_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_fence), MP_ROM_PTR(&dsi_shift_fence_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_last_into), MP_ROM_PTR(&dsi_copy_last_into_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap_fence), MP_ROM_PTR(&dsi_snap_fence_obj) },
     { MP_ROM_QSTR(MP_QSTR_frame_fence), MP_ROM_PTR(&dsi_frame_fence_obj) },
     { MP_ROM_QSTR(MP_QSTR_overlap_stats), MP_ROM_PTR(&dsi_overlap_stats_obj) },
@@ -1417,6 +1614,8 @@ typedef struct {
     mp_obj_t held;              // the glass Bufs the paint buffers and scratch are
     mp_obj_t rotate, rotate_scale, bounce, refreshes;   // the transport's verbs
     size_t scratch_n;
+    bool shift_fly;             // a shift_last's copy is queued
+    uint32_t shifts, shift_refused;     // shift_last: taken, refused behind a rotate
 } glass_rot_obj_t;
 
 static const mp_obj_type_t glass_rot_type;
@@ -1541,6 +1740,8 @@ static mp_obj_t rot_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_
     }
     mp_obj_t dsi = a[ARG_dsi].u_obj, ppa = a[ARG_ppa].u_obj;
     glass_rot_obj_t *c = mp_obj_malloc(glass_rot_obj_t, type);
+    c->shift_fly = false;
+    c->shifts = c->shift_refused = 0;
     c->dsi = dsi;
     c->ppa = ppa;
     c->stamp = mp_const_none;
@@ -1631,6 +1832,7 @@ static mp_obj_t rot_copy_last(size_t n_args, const mp_obj_t *a) {
     glass_rot_obj_t *c = MP_OBJ_TO_PTR(a[0]);
     mp_int_t r[4] = { mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
                       mp_obj_get_int(a[3]), mp_obj_get_int(a[4]) };
+    glass_shift_fence(c->ppa, &c->shift_fly);
     int l = moy_rot_last(&c->r);
     if (l < 0) {
         return mp_const_false;
@@ -1640,6 +1842,61 @@ static mp_obj_t rot_copy_last(size_t n_args, const mp_obj_t *a) {
     return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rot_copy_last_obj, 5, 5, rot_copy_last);
+
+// shift_last (above the banded compositor) over the two landscape paint
+// buffers. False while a rotate (or any PPA op) is in flight: it shares the
+// DMA2D, and a shift queued behind it would wait its 20-30 ms. The block it
+// moved is noted as this frame's damage, or the frame would never rotate it,
+// so a frame that shifts notes every other rect it paints too.
+static mp_obj_t rot_shift_last(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    glass_rot_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    glass_shift_fence(c->ppa, &c->shift_fly);
+    if (!rot_ppa_done(c)) {
+        c->shift_refused++;
+        return mp_const_false;
+    }
+    int l = moy_rot_last(&c->r);
+    if (l < 0) {
+        return mp_const_false;
+    }
+    int b[6];
+    if (glass_shift(c->ppa, c->bufs[MOY_ROT_PAINT0 + c->r.pi], c->bufs[MOY_ROT_PAINT0 + l],
+                    c->r.w, c->r.h, a + 1, &c->shift_fly, b)) {
+        moy_rot_note_damage(&c->r, b[0], b[1], b[4], b[5]);
+    }
+    c->shifts++;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rot_shift_last_obj, 7, 7, rot_shift_last);
+
+static mp_obj_t rot_shift_fence(mp_obj_t self_in) {
+    glass_rot_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    glass_shift_fence(c->ppa, &c->shift_fly);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(rot_shift_fence_obj, rot_shift_fence);
+
+// shift_stats() -> (shifts taken, refused behind a rotate).
+static mp_obj_t rot_shift_stats(mp_obj_t self_in) {
+    glass_rot_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    mp_obj_t t[2] = { mp_obj_new_int_from_uint(c->shifts),
+                      mp_obj_new_int_from_uint(c->shift_refused) };
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(rot_shift_stats_obj, rot_shift_stats);
+
+static mp_obj_t rot_copy_last_into(size_t n_args, const mp_obj_t *a) {
+    glass_rot_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    glass_shift_fence(c->ppa, &c->shift_fly);
+    int l = moy_rot_last(&c->r);
+    if (l < 0) {
+        return mp_const_false;
+    }
+    glass_copy_into(c->ppa, c->bufs[MOY_ROT_PAINT0 + l], c->r.w, c->r.h, n_args - 1, a + 1);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(rot_copy_last_into_obj, 7, 9, rot_copy_last_into);
 
 static mp_obj_t rot_gfx(mp_obj_t self_in) {
     return ((glass_rot_obj_t *)MP_OBJ_TO_PTR(self_in))->gfx;
@@ -1762,6 +2019,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(rot_strips_obj, rot_strips);
 
 static mp_obj_t rot_flush(mp_obj_t self_in) {
     glass_rot_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    glass_shift_fence(c->ppa, &c->shift_fly);
     moy_rot_flush(&c->r);
     if (!c->r.has_stamp) {
         c->stamp = mp_const_none;
@@ -1779,7 +2037,9 @@ static mp_obj_t rot_present_pending(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(rot_present_pending_obj, rot_present_pending);
 
 static mp_obj_t rot_sync(mp_obj_t self_in) {
-    moy_rot_fence(&((glass_rot_obj_t *)MP_OBJ_TO_PTR(self_in))->r);
+    glass_rot_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    glass_shift_fence(c->ppa, &c->shift_fly);
+    moy_rot_fence(&c->r);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(rot_sync_obj, rot_sync);
@@ -1792,6 +2052,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(rot_snap_fence_obj, rot_snap_fence);
 
 static mp_obj_t rot_frame_fence(mp_obj_t self_in) {
     glass_rot_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    glass_shift_fence(c->ppa, &c->shift_fly);
     if (c->r.has_game && c->r.game.frame) {
         c->r.has_game = false;
     }
@@ -1963,6 +2224,10 @@ static const mp_rom_map_elem_t rot_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_mark_game), MP_ROM_PTR(&rot_mark_game_obj) },
     { MP_ROM_QSTR(MP_QSTR_note_damage), MP_ROM_PTR(&rot_note_damage_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_last), MP_ROM_PTR(&rot_copy_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_last), MP_ROM_PTR(&rot_shift_last_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_fence), MP_ROM_PTR(&rot_shift_fence_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_stats), MP_ROM_PTR(&rot_shift_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_last_into), MP_ROM_PTR(&rot_copy_last_into_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_strips), MP_ROM_PTR(&rot_set_strips_obj) },
     { MP_ROM_QSTR(MP_QSTR_strip_moved), MP_ROM_PTR(&rot_strip_moved_obj) },
     { MP_ROM_QSTR(MP_QSTR_strips), MP_ROM_PTR(&rot_strips_obj) },

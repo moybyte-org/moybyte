@@ -133,36 +133,103 @@ void mg_fill_spans(uint16_t *dst, size_t cap, int dw, const int16_t *q, int n,
 
 /* ---- scroll ----------------------------------------------------------- */
 
+int mg_shift_clip(int stride, int rows, int rx, int ry, int rw, int rh,
+                  int dx, int dy, int *b)
+{
+    if (stride <= 0 || rows <= 0 || rw <= 0 || rh <= 0) return 0;
+    long x0 = rx < 0 ? 0 : rx;
+    long y0 = ry < 0 ? 0 : ry;
+    long x1 = (long)rx + rw; if (x1 > stride) x1 = stride;
+    long y1 = (long)ry + rh; if (y1 > rows) y1 = rows;
+    /* The destination: the part of the rect whose source is also inside it. */
+    long tx0 = x0 + (dx > 0 ? dx : 0);
+    long tx1 = x1 + (dx < 0 ? dx : 0);
+    long ty0 = y0 + (dy > 0 ? dy : 0);
+    long ty1 = y1 + (dy < 0 ? dy : 0);
+    if (tx0 >= tx1 || ty0 >= ty1) return 0;
+    b[0] = (int)tx0;
+    b[1] = (int)ty0;
+    b[2] = (int)(tx0 - dx);
+    b[3] = (int)(ty0 - dy);
+    b[4] = (int)(tx1 - tx0);
+    b[5] = (int)(ty1 - ty0);
+    return 1;
+}
+
+void mg_shift_rect(uint16_t *dst, const uint16_t *src, size_t cap, int stride,
+                   int rx, int ry, int rw, int rh, int dx, int dy)
+{
+    if (stride <= 0 || (dst == src && dx == 0 && dy == 0)) return;
+    int b[6];
+    if (!mg_shift_clip(stride, (int)(cap / (size_t)stride), rx, ry, rw, rh, dx, dy, b)) {
+        return;
+    }
+    size_t cw = (size_t)b[4] * 2u;
+    size_t st = (size_t)stride;
+    if (dst != src) {
+        for (int r = 0; r < b[5]; r++) {
+            memcpy(dst + (size_t)(b[1] + r) * st + (size_t)b[0],
+                   src + (size_t)(b[3] + r) * st + (size_t)b[2], cw);
+        }
+        return;
+    }
+    /* In place: a per-row memmove (horizontal overlap safe), the rows walked
+     * against dy so each is read before it is overwritten. */
+    if (dy > 0) {
+        for (int r = b[5] - 1; r >= 0; r--) {
+            memmove(dst + (size_t)(b[1] + r) * st + (size_t)b[0],
+                    src + (size_t)(b[3] + r) * st + (size_t)b[2], cw);
+        }
+    } else {
+        for (int r = 0; r < b[5]; r++) {
+            memmove(dst + (size_t)(b[1] + r) * st + (size_t)b[0],
+                    src + (size_t)(b[3] + r) * st + (size_t)b[2], cw);
+        }
+    }
+}
+
 void mg_scroll_rect(uint16_t *px, size_t cap, int stride,
                     int rx, int ry, int rw, int rh, int dx, int dy)
 {
-    if (stride <= 0 || (dx == 0 && dy == 0)) return;
-    int rows = (int)(cap / (size_t)stride);
-    int x0 = rx < 0 ? 0 : rx;
-    int y0 = ry < 0 ? 0 : ry;
-    int x1 = rx + rw; if (x1 > stride) x1 = stride;
-    int y1 = ry + rh; if (y1 > rows) y1 = rows;
-    /* Destination span: the part of the rect whose source is also inside it. */
-    int tx0 = x0 + (dx > 0 ? dx : 0);
-    int tx1 = x1 + (dx < 0 ? dx : 0);
-    int ty0 = y0 + (dy > 0 ? dy : 0);
-    int ty1 = y1 + (dy < 0 ? dy : 0);
-    if (tx0 >= tx1 || ty0 >= ty1) return;
-    size_t cw = (size_t)(tx1 - tx0) * 2u;
-    /* Per-row memmove (horizontal overlap safe); the vertical iteration order
-     * follows dy so rows are read before they are overwritten. */
-    if (dy > 0) {
-        for (int ty = ty1 - 1; ty >= ty0; ty--) {
-            memmove(px + (size_t)ty * (size_t)stride + (size_t)tx0,
-                    px + (size_t)(ty - dy) * (size_t)stride + (size_t)(tx0 - dx),
-                    cw);
-        }
-    } else {
-        for (int ty = ty0; ty < ty1; ty++) {
-            memmove(px + (size_t)ty * (size_t)stride + (size_t)tx0,
-                    px + (size_t)(ty - dy) * (size_t)stride + (size_t)(tx0 - dx),
-                    cw);
-        }
+    mg_shift_rect(px, px, cap, stride, rx, ry, rw, rh, dx, dy);
+}
+
+int mg_block_clip(int dw, int dh, int sw, int sh, int *b)
+{
+    long dx = b[0], dy = b[1], sx = b[2], sy = b[3], w = b[4], h = b[5];
+    if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return 0;
+    if (sx < 0) { w += sx; dx -= sx; sx = 0; }
+    if (sy < 0) { h += sy; dy -= sy; sy = 0; }
+    if (dx < 0) { w += dx; sx -= dx; dx = 0; }
+    if (dy < 0) { h += dy; sy -= dy; dy = 0; }
+    if (sx + w > sw) w = sw - sx;
+    if (sy + h > sh) h = sh - sy;
+    if (dx + w > dw) w = dw - dx;
+    if (dy + h > dh) h = dh - dy;
+    if (w <= 0 || h <= 0) return 0;
+    b[0] = (int)dx;
+    b[1] = (int)dy;
+    b[2] = (int)sx;
+    b[3] = (int)sy;
+    b[4] = (int)w;
+    b[5] = (int)h;
+    return 1;
+}
+
+void mg_copy_block(uint16_t *dst, size_t dcap, int dstride,
+                   const uint16_t *src, size_t scap, int sstride,
+                   int dx, int dy, int sx, int sy, int w, int h)
+{
+    if (dstride <= 0 || sstride <= 0) return;
+    int b[6] = { dx, dy, sx, sy, w, h };
+    if (!mg_block_clip(dstride, (int)(dcap / (size_t)dstride), sstride,
+                       (int)(scap / (size_t)sstride), b)) {
+        return;
+    }
+    for (int r = 0; r < b[5]; r++) {
+        memmove(dst + (size_t)(b[1] + r) * (size_t)dstride + (size_t)b[0],
+                src + (size_t)(b[3] + r) * (size_t)sstride + (size_t)b[2],
+                (size_t)b[4] * 2u);
     }
 }
 

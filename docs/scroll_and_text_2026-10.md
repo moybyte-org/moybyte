@@ -723,7 +723,7 @@ Per canvas, then per source:
 |---|---|---|
 | `shift_last` across buffers | the P4 roots (2D-DMA), the S3 roots (CPU row copy) | a one-buffer canvas (shifts in place instead); the Guition's root while a rotate is in flight (answers False, the frame draws) |
 | `shift_last` in place | one persistent buffer: the host's and web's root, every `win.buf`, every layer, a cart's canvas | the P4 and S3 roots (a second buffer exists; the CPU in-place shift loses) |
-| `copy_last_into` a layer | roots with a `last` buffer (the P4s, the S3s) | one persistent buffer (the window buffer is the root's twin already on the host) |
+| `copy_last_into` a layer | roots with a `last` buffer (the P4s, the S3s), and the host's compositor, whose `last` is a test's ring as for `copy_last` | one persistent buffer with no ring: the web's canvas, every layer |
 | the PPA ground fill before R opens | the P4s | the S3s, the host, the web |
 | a shift frame of a nest | a nest whose app passes every gen it draws inside R | a nest with a `ui.part` and no gen, a placed `ui.at` stop, a Lua or wasm app |
 | held-key repeat | every level source: the T-Deck matrix, BLE, the host's and browser's keyboards, a gamepad | the T-Deck keyboard's ASCII fallback |

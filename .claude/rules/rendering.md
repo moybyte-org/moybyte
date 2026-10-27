@@ -49,7 +49,7 @@ path), and re-measuring on 2026-08-07 reversed two of the three; adopting `spr`
 also deleted the RGB565 tile atlas, which handed back 64 KB of S3 internal SRAM
 and removed a ~100ms first-use bake nobody had attributed. What `moy_gfx` still
 owns is its COMPOSITOR — viewport-aware `fill`/`fill_rect`, `blit565_scale`, `blit565_resize`,
-the layer restore (`layer_*`), `scroll_rect`, `blit_window`, `blit_indices`, `blit_indices_scale`, `fill_spans`,
+the layer restore (`layer_*`), `scroll_rect` and `shift_rect` (a canvas's `shift_last`), `copy_block` (its `copy_last_into`), `blit_window`, `blit_indices`, `blit_indices_scale`, `fill_spans`,
 `draw_ctx`, and the one-byte-a-pixel marks Paint's drawings take (`ifill`/`iline`/`icopy`/`iflood`,
 called from `runtime/artwork.py`) — which the spec's raster has no counterpart for.
 **`native/moy_gfx/libmoy/UPSTREAM.md` is the authority on which verbs cross and

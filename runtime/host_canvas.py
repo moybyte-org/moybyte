@@ -191,6 +191,22 @@ class HostCompositor:
             buf[a:b] = src[a:b]
         return True
 
+    def shift_last(self, x, y, w, h, dx, dy):
+        """The rect of the buffer the last frame drew into, moved by (dx, dy)
+        inside it, into the one this frame draws into (moy_gfx's shift_rect);
+        in place on the one buffer (docs/scroll_and_text_2026-10.md §3.2)."""
+        src = self.last
+        gfx_binding.shift_rect(self._buf, self._buf if src is None else src, self._w,
+                               x, y, w, h, dx, dy)
+        return True
+
+    def copy_last_into(self, buf, stride, x, y, w, h, lx=0, ly=0):
+        """The rect of the buffer the last frame drew into, at (lx, ly) of
+        `buf` (a layer `stride` px a row), clipped to both."""
+        src = self._buf if self.last is None else self.last
+        gfx_binding.copy_block(buf, stride, src, self._w, lx, ly, x, y, w, h)
+        return True
+
 
 def make_canvas(w, h, owner=None):
     """A DeviceCanvas over a HostCompositor -- the boards' raster, on CPython.

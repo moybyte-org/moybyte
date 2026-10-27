@@ -554,6 +554,167 @@ def picker_kernel_matches_sspr(board):
     assert [crc for _, crc in got] == [crc for _, crc in want]
 
 
+# shift_last and copy_last_into on the live root (docs/scroll_and_text_2026-10.md
+# §3.2, §13): a pattern frame presented, then the verb into the next one,
+# held to a reference the snippet builds from row slices. Everything runs
+# inside one `py` exchange, between two of the console's frames; the desk is
+# repainted after.
+_SHIFT_CASES = r"""
+def _sl_rows(W, k):
+    base = bytearray(4 * W)
+    for i in range(2 * W):
+        v = (i * 2654435761 + k * 40503) & 0xFFFF
+        base[2 * i] = v & 255
+        base[2 * i + 1] = v >> 8
+    return memoryview(base)
+
+def _sl_paint(buf, W, H, k):
+    rows = _sl_rows(W, k)
+    n = 2 * W
+    for y in range(H):
+        o = ((y * 7 + k * 5) % W) * 2
+        buf[y * n:(y + 1) * n] = rows[o:o + n]
+
+def _sl_block(W, H, x, y, w, h, dx, dy):
+    x0, y0, x1, y1 = max(0, x), max(0, y), min(W, x + w), min(H, y + h)
+    tx0, tx1 = x0 + max(dx, 0), x1 + min(dx, 0)
+    ty0, ty1 = y0 + max(dy, 0), y1 + min(dy, 0)
+    if tx0 >= tx1 or ty0 >= ty1:
+        return None
+    return (tx0, ty0, tx0 - dx, ty0 - dy, tx1 - tx0, ty1 - ty0)
+
+def _sl_present(comp):
+    comp.flush()
+    pp = getattr(comp, 'present_pending', None)
+    if pp is not None:
+        pp()
+
+def _sl_engine():
+    try:
+        import moy_ppa
+        return moy_ppa
+    except ImportError:
+        return None
+
+def _sl_check(back, W, H, kd, prev, b, extra=None):
+    # Each row of `back` against the pattern painted into it, with the block
+    # taken from `prev` (the last frame's buffer, unwritten since): no
+    # picture-sized copy, which the S3s' heaps cannot spare.
+    rows = _sl_rows(W, kd)
+    n = 2 * W
+    for y in range(H):
+        o = ((y * 7 + kd * 5) % W) * 2
+        want = bytearray(rows[o:o + n])
+        if b is not None and b[1] <= y < b[1] + b[5]:
+            s0 = ((y - b[1] + b[3]) * W + b[2]) * 2
+            want[b[0] * 2:(b[0] + b[4]) * 2] = bytes(prev[s0:s0 + 2 * b[4]])
+        if extra is not None and y == 0:
+            want[0:2] = bytes(prev[0:2])
+        if bytes(back[y * n:(y + 1) * n]) != want:
+            return False
+    return True
+
+def _sl_cases(cases, k=0):
+    cv = ws.sys_canvas or ws.canvas
+    comp = cv._comp
+    W, H = comp.size()
+    ppa = _sl_engine()
+    rot = getattr(comp, 'rotated', False)
+    stats = ppa is not None and hasattr(ppa, 'fbcpy_stats')
+    out = []
+    for (x, y, w, h, dx, dy) in cases:
+        k += 1
+        prev = comp.framebuffer()
+        _sl_paint(prev, W, H, k)
+        _sl_present(comp)
+        refused = None
+        if rot:
+            refused = comp.shift_last(x, y, w, h, dx, dy) is False
+            ppa.sync()
+        back = comp.framebuffer()
+        _sl_paint(back, W, H, k + 500)      # the destination's lines dirty in the cache
+        n0 = ppa.fbcpy_stats()[0] if stats else None
+        ok = cv.shift_last(x, y, w, h, dx, dy)
+        flying = ppa.fbcpy_busy() if stats else None
+        if k % 2:
+            cv.shift_fence()
+        else:
+            comp.copy_last(0, 0, 1, 1)      # a verb that reads the buffer fences it
+        b = _sl_block(W, H, x, y, w, h, dx, dy)
+        same = _sl_check(back, W, H, k + 500, prev, b, k % 2 == 0 or None)
+        dma = ppa.fbcpy_stats()[0] - n0 if stats else None
+        out.append((bool(ok), same, refused, flying, dma))
+    return out
+
+def _sl_into():
+    cv = ws.sys_canvas or ws.canvas
+    comp = cv._comp
+    W, H = comp.size()
+    ppa = _sl_engine()
+    rot = getattr(comp, 'rotated', False)
+    out = []
+    prev = comp.framebuffer()
+    _sl_paint(prev, W, H, 77)
+    _sl_present(comp)
+    if rot:
+        ppa.sync()
+    for lw in (96, 97):                     # whole cache-line rows, and not
+        lay = cv.new_layer(lw, 61)
+        try:
+            for (x, y, lx, ly) in ((10, 20, 0, 0), (W - 50, H - 30, 3, 4), (-8, -5, 0, 0)):
+                lay._buf[:] = bytes(len(lay._buf))
+                ok = cv.copy_last_into(lay, x, y, lw, 61, lx, ly)
+                want = bytearray(len(lay._buf))
+                c0, c1 = max(lx, lx - x), min(lw, lx + W - x)
+                for r in range(ly, 61):
+                    sy = y + r - ly
+                    if 0 <= sy < H and c1 > c0:
+                        a = (r * lw + c0) * 2
+                        s0 = (sy * W + x + c0 - lx) * 2
+                        want[a:a + 2 * (c1 - c0)] = bytes(prev[s0:s0 + 2 * (c1 - c0)])
+                out.append((bool(ok), bytes(lay._buf) == want, None, None, None))
+        finally:
+            lay.release()
+    comp.flush()                            # the rotated one's noted damage goes
+    return out
+"""
+
+
+def shift_last_matches_the_reference(board, p4=False, rotated=False):
+    """shift_last on the root, every sign and an edge clip, against the
+    reference; copy_last_into into a layer, clipped. On a P4 each shift is
+    the 2D-DMA's, queued (flying after the call) and fenced by shift_fence or
+    by the next verb that reads the buffer, read back through destination
+    lines the CPU had cached; on the rotated compositor a shift answers False
+    while the frame's rotate flies. On an S3 the copy runs while the feeder
+    ships its source."""
+    w, h = board.pyval("(ws.sys_canvas or ws.canvas)._comp.size()", strict=True)
+    rw, rh = min(400, w - 80), min(220, h - 60)
+    cases = [(40, 30, rw, rh, 0, 8), (40, 30, rw, rh, 0, -8), (40, 30, rw, rh, 0, 1),
+             (40, 30, rw, rh, 0, -1), (40, 30, rw, rh, 6, 0), (40, 30, rw, rh, -6, 0),
+             (40, 30, rw, rh, 5, -37), (40, 30, rw, rh, 0, rh - 1), (40, 30, rw, rh, 0, 0),
+             (-12, -9, rw, rh, 0, 13), (w - rw + 30, h - rh + 20, rw, rh, -3, -11),
+             (0, 0, w, h, 0, 24)]
+    board.pyexec(_SHIFT_CASES, strict=True)
+    got = []
+    try:
+        for i, case in enumerate(cases):     # one a command: the loop runs between
+            got += board.pyval("ws._g['_sl_cases'](%r, %d)" % ([case], i), timeout=60.0,
+                               strict=True)
+        got += board.pyval("ws._g['_sl_into']()", timeout=60.0, strict=True)
+    finally:
+        board.pyexec("ws._dirty = True", strict=True)
+        _home_desk(board)
+    shifts, into = got[:len(cases)], got[len(cases):]
+    assert [ok for ok, *_ in shifts] == [True] * len(cases), shifts
+    assert [same for _, same, *_ in shifts] == [True] * len(cases), shifts
+    assert into and all(ok and same for ok, same, *_ in into), into
+    if p4:
+        assert all(fly and dma == 1 for *_, fly, dma in shifts[:9]), shifts
+    if rotated:
+        assert all(refused for _, _, refused, *_ in shifts), shifts
+
+
 def sheet_corpus(n, seed=11):
     """The fixture sheet, its cuts and a mutant per draw: a nibble or a
     byte flipped anywhere, a line break dropped or doubled, bytes inserted

@@ -434,6 +434,10 @@ def test_the_picker_kernel_matches_sspr(board):
     on_glass.picker_kernel_matches_sspr(board)
 
 
+def test_shift_last_and_copy_last_into_match_the_reference(board):
+    on_glass.shift_last_matches_the_reference(board, p4=True)
+
+
 def test_a_fuzzed_font_corpus_loads_as_on_the_host(board):
     on_glass.fonts_match_host(board)
 

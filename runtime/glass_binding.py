@@ -475,6 +475,52 @@ def _copy_rect(ppa, dst, src, W, H, x, y, w, h):
                                      W * 2, x, y, w, h)
 
 
+def _fbcpy(ppa, dst, dw, dh, src, sw, sh, b, nb):
+    """modmoy_glass.c's glass_fbcpy: the transport's 2D-DMA took the block."""
+    fb = getattr(ppa, "fbcpy", None) if ppa is not None else None
+    return fb is not None and bool(fb(dst, dw, dh, b[0], b[1], src, sw, sh, b[2], b[3],
+                                      b[4], b[5], nb))
+
+
+def _shift_fence(ppa, comp):
+    """modmoy_glass.c's glass_shift_fence."""
+    if comp._shift_fly:
+        comp._shift_fly = False
+        w = getattr(ppa, "fbcpy_wait", None)
+        if w is not None:
+            w()
+
+
+def _shift(ppa, dst, src, W, H, x, y, w, h, dx, dy, comp):
+    """modmoy_glass.c's glass_shift: the block moved (x, y, sx, sy, w, h), or
+    None; the 2D-DMA's copy queued sets `comp._shift_fly`."""
+    from . import gfx_binding
+    if len(dst) < W * H * 2 or len(src) < W * H * 2:
+        raise ValueError("shift_last buffers")
+    b = gfx_binding.shift_clip(W, H, x, y, w, h, dx, dy)
+    if b is None:
+        return None
+    if dst is not src and _fbcpy(ppa, dst, W, H, src, W, H, b, True):
+        comp._shift_fly = True
+        return b
+    gfx_binding.shift_rect(dst, src, W, x, y, w, h, dx, dy)
+    return b
+
+
+def _copy_into(ppa, src, W, H, buf, stride, x, y, w, h, lx=0, ly=0):
+    """modmoy_glass.c's glass_copy_into."""
+    from . import gfx_binding
+    if stride <= 0 or len(src) < W * H * 2:
+        raise ValueError("copy_last_into buffers")
+    rows = len(buf) // 2 // stride
+    b = gfx_binding.block_clip(stride, rows, W, H, lx, ly, x, y, w, h)
+    if b is None:
+        return
+    if buf is not src and _fbcpy(ppa, buf, stride, rows, src, W, H, b, False):
+        return
+    gfx_binding.copy_block(buf, stride, src, W, *b)
+
+
 class DsiCompositor:
     """moy_glass.DsiCompositor on CPython: the backend contract plus the
     deferred present, over `dsi` and `ppa`."""
@@ -483,6 +529,7 @@ class DsiCompositor:
         self._dsi = dsi
         self._ppa = ppa
         self._stamp_pending = None
+        self._shift_fly = False
         dsi.backlight(False)        # dark until the first composed frame
         dsi.init()
         self._w = dsi.WIDTH
@@ -566,6 +613,7 @@ class DsiCompositor:
 
     def flush(self):
         kicked = False
+        _shift_fence(self._ppa, self)
         _dsi_lib().moy_dsi_show_landed(ctypes.byref(self._d))
         st = self._stamp_pending
         if st is not None:
@@ -590,6 +638,7 @@ class DsiCompositor:
         _dsi_lib().moy_dsi_present_pending(ctypes.byref(self._d))
 
     def copy_last(self, x, y, w, h):
+        _shift_fence(self._ppa, self)
         last = _dsi_lib().moy_dsi_last(ctypes.byref(self._d))
         if last < 0:
             return False
@@ -598,13 +647,36 @@ class DsiCompositor:
                        self._w, self._h, x, y, w, h)
         return True
 
+    def shift_last(self, x, y, w, h, dx, dy):
+        _shift_fence(self._ppa, self)
+        last = _dsi_lib().moy_dsi_last(ctypes.byref(self._d))
+        if last < 0:
+            return False
+        _shift(self._ppa, self._fbs[self._d.back], self._fbs[last], self._w, self._h,
+               x, y, w, h, dx, dy, self)
+        return True
+
+    def shift_fence(self):
+        _shift_fence(self._ppa, self)
+
+    def copy_last_into(self, buf, stride, x, y, w, h, lx=0, ly=0):
+        _shift_fence(self._ppa, self)
+        last = _dsi_lib().moy_dsi_last(ctypes.byref(self._d))
+        if last < 0:
+            return False
+        _copy_into(self._ppa, self._fbs[last], self._w, self._h, buf, stride, x, y, w, h,
+                   lx, ly)
+        return True
+
     def sync(self):
+        _shift_fence(self._ppa, self)
         _dsi_lib().moy_dsi_fence(ctypes.byref(self._d))
 
     def snap_fence(self):
         self._ppa.snap_wait()
 
     def frame_fence(self):
+        _shift_fence(self._ppa, self)
         self._ppa.snap_wait()
         self._ppa.sync()
 
@@ -746,6 +818,8 @@ class RotatedCompositor:
             raise OSError("moy_ppa init failed: a portrait panel needs the rotate")
         self._dsi = dsi
         self._ppa = ppa
+        self._shift_fly = False
+        self.shifts = self.shift_refused = 0
         self._pw = dsi.WIDTH
         self._ph = dsi.HEIGHT
         self._w = self._ph
@@ -921,6 +995,7 @@ class RotatedCompositor:
                                        int(h))
 
     def copy_last(self, x, y, w, h):
+        _shift_fence(self._ppa, self)
         last = _rot_lib().moy_rot_last(ctypes.byref(self._r))
         if last < 0:
             return False
@@ -928,7 +1003,38 @@ class RotatedCompositor:
                    self._w, self._h, x, y, w, h)
         return True
 
+    def shift_last(self, x, y, w, h, dx, dy):
+        _shift_fence(self._ppa, self)
+        if not self._ppa.done():
+            self.shift_refused += 1
+            return False
+        last = _rot_lib().moy_rot_last(ctypes.byref(self._r))
+        if last < 0:
+            return False
+        b = _shift(self._ppa, self._paints[self._r.pi], self._paints[last], self._w,
+                   self._h, x, y, w, h, dx, dy, self)
+        if b is not None:
+            self.note_damage(b[0], b[1], b[4], b[5])
+        self.shifts += 1
+        return True
+
+    def shift_fence(self):
+        _shift_fence(self._ppa, self)
+
+    def shift_stats(self):
+        return (self.shifts, self.shift_refused)
+
+    def copy_last_into(self, buf, stride, x, y, w, h, lx=0, ly=0):
+        _shift_fence(self._ppa, self)
+        last = _rot_lib().moy_rot_last(ctypes.byref(self._r))
+        if last < 0:
+            return False
+        _copy_into(self._ppa, self._paints[last], self._w, self._h, buf, stride, x, y, w,
+                   h, lx, ly)
+        return True
+
     def flush(self):
+        _shift_fence(self._ppa, self)
         _rot_lib().moy_rot_flush(ctypes.byref(self._r))
         self._game = self._game if self._r.has_game else None
 
@@ -936,12 +1042,14 @@ class RotatedCompositor:
         _rot_lib().moy_rot_present_pending(ctypes.byref(self._r))
 
     def sync(self):
+        _shift_fence(self._ppa, self)
         _rot_lib().moy_rot_fence(ctypes.byref(self._r))
 
     def snap_fence(self):
         self._ppa.snap_wait()
 
     def frame_fence(self):
+        _shift_fence(self._ppa, self)
         if self._r.has_game and self._r.game.frame:
             self._r.has_game = False
         self._ppa.snap_wait()

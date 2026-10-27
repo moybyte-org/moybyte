@@ -551,6 +551,10 @@ class DeviceCanvas:
         self._crow = _glass_mod.Canvas(self.w, self.h)
         self._crow.point(self._buf, getattr(compositor, "buf_h", 0))
         self._gfx = compositor.gfx()                  # the native kernel, every tier
+        # shift_last's engine where the compositor names a last frame's buffer;
+        # None: one persistent buffer, shifted in place.
+        self._comp_shift = getattr(compositor, "shift_last", None)
+        self._comp_shift_fence = getattr(compositor, "shift_fence", None)
         # The shapes blend over the buffer, so they read its word order.
         self._gfx.shape_order(WIRE_SWAPPED)
         # Native petme128 text (#62): the kernel's text op over the staged
@@ -2652,6 +2656,36 @@ class DeviceCanvas:
                           dst_x + self._ox, dst_y + self._oy,
                           layer._buf, sw, sh, -1, cx0, cy0, cx1, cy1)
 
+    def shift_last(self, x, y, w, h, dx, dy):
+        """The rect (x, y, w, h) of the buffer the last presented frame drew
+        into, moved by (dx, dy) inside it, into the buffer this frame draws
+        into; buffer coordinates, no camera or clip. Pixels that would leave
+        the rect are dropped and the band the move exposes keeps what this
+        buffer held: the caller draws it. True once done or queued; False
+        where it cannot (no last frame, an engine busy with what the shift
+        must not wait behind) and the caller draws the rect.
+
+        The compositor's where it names a last frame's buffer (the P4s' 2D-DMA,
+        the S3s' row copy); on one persistent buffer -- a layer, a window
+        buffer, a cart's canvas, the host's and the browser's root -- the last
+        frame's is this one and the shift is in place. A queued copy is
+        fenced by shift_fence(), and by anything that reads or presents this
+        buffer; until then the caller writes no row the shift writes
+        (docs/scroll_and_text_2026-10.md §3.2)."""
+        self.flush_batch()
+        cs = self._comp_shift
+        if cs is not None:
+            return cs(x, y, w, h, dx, dy)
+        self._gfx.scroll_rect(self._buf, self._stride, x, y, w, h, dx, dy)
+        return True
+
+    def shift_fence(self):
+        """A queued shift_last has landed and the rows it wrote are this
+        core's to draw into; nothing where the shift was synchronous."""
+        f = self._comp_shift_fence
+        if f is not None:
+            f()
+
     def scroll_rect(self, rx, ry, rw, rh, dx, dy):
         # Shift the pixels inside rect (rx, ry, rw, rh) by (dx, dy) IN PLACE --
         # the #113 scroll-as-blit primitive (host twin: runtime/canvas.py
@@ -2709,6 +2743,15 @@ class SystemCanvas(DeviceCanvas):
         lb = getattr(comp, "last_buffer", None)
         if lb is not None:
             self.last_buffer = lb
+        # copy_last_into(layer, x, y, w, h[, lx, ly]): the same buffer's rect
+        # into a layer (a window buffer brought up from the glass). Absent
+        # where the compositor names no last frame's buffer.
+        if getattr(comp, "copy_last_into", None) is not None:
+            self.copy_last_into = self._copy_last_into
+
+    def _copy_last_into(self, layer, x, y, w, h, lx=0, ly=0):
+        layer.flush_batch()
+        return self._comp.copy_last_into(layer._buf, layer._stride, x, y, w, h, lx, ly)
 
     def set_font_scale(self, scale):
         # Called UNGUARDED from console.py (the settings row and the font-scale

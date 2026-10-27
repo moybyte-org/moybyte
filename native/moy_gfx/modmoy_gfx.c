@@ -1294,6 +1294,40 @@ static mp_obj_t moy_gfx_scroll_rect(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_scroll_rect_obj, 8, 8, moy_gfx_scroll_rect);
 
+// shift_rect(dst, src, stride_px, rx, ry, rw, rh, dx, dy) -- scroll_rect's
+// pixels out of `src` into `dst` (both stride_px a row): the CPU's shift_last
+// on a canvas whose last frame is another buffer, and scroll_rect itself when
+// dst is src. The band the move exposes keeps what `dst` held.
+static mp_obj_t moy_gfx_shift_rect(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    const uint16_t *src = moy_gfx_buf_r(a[1], &scap);
+    if (scap < cap) {
+        cap = scap;
+    }
+    mg_shift_rect(dst, src, cap, mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                  mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                  mp_obj_get_int(a[7]), mp_obj_get_int(a[8]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_shift_rect_obj, 9, 9, moy_gfx_shift_rect);
+
+// copy_block(dst, dstride, src, sstride, dx, dy, sx, sy, w, h) -- the w x h
+// block at (sx, sy) of `src` to (dx, dy) of `dst`, clipped to both: a rect of
+// the last frame's buffer into a layer (copy_last_into).
+static mp_obj_t moy_gfx_copy_block(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    const uint16_t *src = moy_gfx_buf_r(a[2], &scap);
+    mg_copy_block(dst, dcap, mp_obj_get_int(a[1]), src, scap, mp_obj_get_int(a[3]),
+                  mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                  mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_get_int(a[9]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_block_obj, 10, 10, moy_gfx_copy_block);
+
 // blit_indices(dst, dw, dh, dx, dy, indices, iw, ih, pal565) -- place an iw x ih palette-
 // INDEX bitmap (1 byte/pixel, like blit_map's cells) at (dx, dy) into the RGB565 `dst` (dw
 // px/row), converting each index through `pal565` (an index->RGB565 table, 1 uint16/entry).
@@ -2421,6 +2455,8 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_layer_blit), MP_ROM_PTR(&moy_gfx_layer_blit_obj) },
     { MP_ROM_QSTR(MP_QSTR_layer_meter), MP_ROM_PTR(&moy_gfx_layer_meter_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_rect), MP_ROM_PTR(&moy_gfx_scroll_rect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_rect), MP_ROM_PTR(&moy_gfx_shift_rect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_block), MP_ROM_PTR(&moy_gfx_copy_block_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices_scale), MP_ROM_PTR(&moy_gfx_blit_indices_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_ifill), MP_ROM_PTR(&moy_gfx_ifill_obj) },

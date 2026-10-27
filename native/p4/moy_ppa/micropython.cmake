@@ -19,4 +19,10 @@ target_include_directories(usermod_moy_ppa INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx
 )
 
+# fbcpy is esp_lcd's 2D-DMA block copy (esp_async_fbcpy, built into esp_lcd on
+# every DMA2D chip), whose header esp_lcd keeps private.
+target_include_directories(usermod_moy_ppa INTERFACE
+    ${IDF_PATH}/components/esp_lcd/priv_include
+)
+
 target_link_libraries(usermod INTERFACE usermod_moy_ppa)

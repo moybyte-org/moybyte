@@ -94,6 +94,10 @@ _SIGS = (
     ("mg_fill_spans", [_P, _Z, _I, _P, _I, _I, _I, _I, _P,
                        _I, _I, _I, _I, _I, _I], None),
     ("mg_scroll_rect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_shift_rect", [_P, _P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_shift_clip", [_I, _I, _I, _I, _I, _I, _I, _I, _P], _I),
+    ("mg_copy_block", [_P, _Z, _I, _P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_block_clip", [_I, _I, _I, _I, _P], _I),
     ("mg_blit565", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I,
                     _I, _I, _I, _I], None),
     ("mg_blit565_scale", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I], None),
@@ -423,6 +427,42 @@ def scroll_rect(buf, stride, rx, ry, rw, rh, dx, dy):
     arr, cap = _buf(buf)
     _lib().mg_scroll_rect(ctypes.cast(arr, _P), cap, int(stride), int(rx),
                           int(ry), int(rw), int(rh), int(dx), int(dy))
+
+
+def shift_rect(dst, src, stride, rx, ry, rw, rh, dx, dy):
+    darr, dcap = _buf(dst)
+    if src is dst:
+        _lib().mg_shift_rect(ctypes.cast(darr, _P), ctypes.cast(darr, _P), dcap, int(stride),
+                             int(rx), int(ry), int(rw), int(rh), int(dx), int(dy))
+        return
+    sarr, scap = _rbuf(src)
+    _lib().mg_shift_rect(ctypes.cast(darr, _P), ctypes.cast(sarr, _P), min(dcap, scap),
+                         int(stride), int(rx), int(ry), int(rw), int(rh), int(dx), int(dy))
+
+
+def shift_clip(stride, rows, rx, ry, rw, rh, dx, dy):
+    """mg_shift_clip: (x, y, sx, sy, w, h) of the block a shift moves, or None."""
+    b = (ctypes.c_int * 6)()
+    if not _lib().mg_shift_clip(int(stride), int(rows), int(rx), int(ry), int(rw),
+                                int(rh), int(dx), int(dy), b):
+        return None
+    return tuple(b)
+
+
+def copy_block(dst, dstride, src, sstride, dx, dy, sx, sy, w, h):
+    darr, dcap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    _lib().mg_copy_block(ctypes.cast(darr, _P), dcap, int(dstride), ctypes.cast(sarr, _P),
+                         scap, int(sstride), int(dx), int(dy), int(sx), int(sy), int(w),
+                         int(h))
+
+
+def block_clip(dw, dh, sw, sh, dx, dy, sx, sy, w, h):
+    """mg_block_clip: (dx, dy, sx, sy, w, h) inside both pictures, or None."""
+    b = (ctypes.c_int * 6)(int(dx), int(dy), int(sx), int(sy), int(w), int(h))
+    if not _lib().mg_block_clip(int(dw), int(dh), int(sw), int(sh), b):
+        return None
+    return tuple(b)
 
 
 def blit565(dst, dw, dh, dx, dy, src, sw, sh, key,

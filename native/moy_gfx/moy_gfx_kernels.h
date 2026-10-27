@@ -7,7 +7,7 @@
  * is this console's compositor: a viewport-aware fill and fill_rect, the RGB565
  * blit with its opaque memcpy lane, the integer-upscale blit the windowed WM
  * composites through, the any-ratio resize the home's cards scale by,
- * blit_window, scroll_rect, blit_indices and its scaled source-rect form
+ * blit_window, scroll_rect and shift_rect, copy_block, blit_indices and its scaled source-rect form
  * (the sprite pickers'), the system-font (scale > 1) text rasterizer, and
  * the one-byte-a-pixel ops Paint's drawings are marked with (ifill, iline,
  * icopy, iflood). These loops were once written twice (moyhost_gfx.c + modmoy_gfx.c) and had already drifted; this file is
@@ -270,11 +270,30 @@ void mg_fill_spans(uint16_t *dst, size_t cap, int dw, const int16_t *q, int n,
                    int ox, int oy, int cov, const uint16_t *pal,
                    int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 
-/* Shift the pixels inside (rx, ry, rw, rh) by (dx, dy) IN PLACE: the #113
- * scroll-as-blit primitive. Pixels that would leave the rect are dropped; the
- * strip shifted in from outside keeps its stale content. */
+/* The pixels inside (rx, ry, rw, rh) of `src` moved by (dx, dy) into the
+ * same rect of `dst`, both `stride` px a row and `cap` px: the scroll-as-blit
+ * primitive (#113), across buffers (a canvas's `shift_last`) or IN PLACE when
+ * dst is src. The rect is clipped to the buffer; pixels that would leave it
+ * are dropped, and the band the move exposes keeps what `dst` held there. */
+void mg_shift_rect(uint16_t *dst, const uint16_t *src, size_t cap, int stride,
+                   int rx, int ry, int rw, int rh, int dx, int dy);
+/* mg_shift_rect in place. */
 void mg_scroll_rect(uint16_t *px, size_t cap, int stride,
                     int rx, int ry, int rw, int rh, int dx, int dy);
+/* mg_shift_rect's block, for an engine that copies it: b = {x, y, sx, sy, w,
+ * h}, the destination block and its source's top-left, in a buffer of
+ * stride x rows. 0: nothing moves. */
+int mg_shift_clip(int stride, int rows, int rx, int ry, int rw, int rh,
+                  int dx, int dy, int *b);
+/* A w x h block at (sx, sy) of `src` (sstride px a row) to (dx, dy) of `dst`
+ * (dstride px a row), clipped to both buffers: what a canvas's
+ * `copy_last_into` copies into a layer. */
+void mg_copy_block(uint16_t *dst, size_t dcap, int dstride,
+                   const uint16_t *src, size_t scap, int sstride,
+                   int dx, int dy, int sx, int sy, int w, int h);
+/* mg_copy_block's clip: b = {dx, dy, sx, sy, w, h} in, the block inside a
+ * dw x dh destination and an sw x sh source out. 0: empty. */
+int mg_block_clip(int dw, int dh, int sw, int sh, int *b);
 
 /* key < 0 opaque (memcpy lane), else source pixels equal to `key` are skipped.
  * The clip rect [cx0,cy0)..[cx1,cy1) is intersected with the destination. */
