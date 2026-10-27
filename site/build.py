@@ -11,9 +11,12 @@ site cannot drift from the system's own look.
     python3 site/build.py                  # -> _site/
     python3 site/build.py --out /tmp/x     # somewhere else
     python3 site/build.py --no-player      # skip the ~1.6 MB player copy
+    python3 site/build.py --no-stills      # skip capturing the hero's stills
     python3 site/build.py --channel dev --out _site/dev   # the dev site
 
-Build the player first, or there is nothing to embed:
+The hero shows a still of the running console until the visitor clicks it, and
+the build captures that still from the player it ships (capture_stills: node 22
+and Google Chrome). Build the player first, or there is nothing to embed:
 
     firmware/web_runner/build.sh           # production (frozen, no modules.json)
     firmware/web_runner/build.sh --stage-only   # dev (fast, ships modules.json)
@@ -43,6 +46,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -716,7 +720,133 @@ def channel_banner(channel):
             % (" &middot; ".join(bits), ch["note"]))
 
 
-def page(pal, has_player, cards, channel=None):
+# The script that runs the console in the hero; emitted only when there is a
+# player to run.
+CONSOLE_JS = r"""// THE CONSOLE. Nothing of it is loaded until the visitor starts it: the stage
+// holds a still (captured from the built player at site-build time) and no
+// iframe, so the wasm is not fetched. The start is a click on the still (a
+// button, so Enter too) or on the hero's own button. Tabs own ONE iframe and
+// swap its src, so only one wasm VM is ever live (two would mean two heaps and
+// two frame loops competing for the main thread).
+var stage = document.getElementById("stage");
+var still = document.getElementById("still");
+var tabBar = document.getElementById("tabs");
+var expand = document.getElementById("expand");
+var shrink = document.getElementById("shrink");
+var tabs = [].slice.call(document.querySelectorAll(".tab:not(.exp)"));
+// What the console is asked to start as: the player skips its own play-button
+// (the visitor's click was this page's), and opens Star Catcher on its Code tab
+// -- the picture the still shows -- in either tier. The colour scheme rides
+// along so a first-run console wears Moy Night or Moy Day to match this page.
+function startQuery() {
+  var dark = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+  return "&start=1&edit=moybyte.star_catcher.moy&tab=code&scheme=" + (dark ? "dark" : "light");
+}
+// The stage is the console's aspect ratio PLUS the height the player page needs
+// besides its canvas (title, the saved-in-this-browser bar): the player reports
+// that height as it lays out, so the canvas fills the stage's width and the
+// player's document never outgrows the frame (no scrollbar, nothing cut off).
+// Until it reports, the guess below holds the place.
+var chrome = 90;
+function sizeStage() {
+  if (stage.classList.contains("big")) {
+    stage.style.aspectRatio = "auto";
+    stage.style.height = "";
+    return;
+  }
+  var p = (stage.dataset.ar || "4 / 3").split("/");
+  var ratio = parseFloat(p[0]) / parseFloat(p[1]);
+  // Idle, the stage is the still alone; the player's chrome joins it at the start.
+  var h = Math.ceil((stage.clientWidth - 2) / ratio) +
+    (stage.classList.contains("idle") ? 0 : chrome) + 2;
+  stage.style.aspectRatio = "auto";
+  stage.style.height = h + "px";
+}
+window.addEventListener("message", function (e) {
+  var f = stage.querySelector("iframe");
+  if (!f || e.source !== f.contentWindow || !e.data) return;
+  // The player's first live frame: the still has done its job.
+  if (e.data.moyLive) stage.classList.add("live");
+  if (typeof e.data.moyChrome !== "number") return;
+  chrome = e.data.moyChrome;
+  sizeStage();
+});
+window.addEventListener("resize", sizeStage);
+function show(tab) {
+  tabs.forEach(function (t) { t.classList.toggle("on", t === tab); });
+  stage.dataset.ar = tab.dataset.ar;
+  stage.classList.remove("idle");
+  tabBar.hidden = false;
+  // The still is the desktop's; the handheld has none to hold the place.
+  if (tab !== tabs[0]) stage.classList.add("live");
+  sizeStage();
+  // Replace the IFRAME only -- the close button is a child of the stage too, and
+  // clearing innerHTML (what this used to do) would take it with them.
+  var old = stage.querySelector("iframe");
+  if (old) old.parentNode.removeChild(old);
+  var f = document.createElement("iframe");
+  f.setAttribute("title", tab.querySelector("b").textContent + " tier");
+  f.setAttribute("allow", "autoplay");
+  f.setAttribute("allowfullscreen", "");
+  f.src = "player/index.html" + tab.dataset.q + startQuery();
+  stage.appendChild(f);
+}
+tabs.forEach(function (t) { t.addEventListener("click", function () { show(t); }); });
+function start() {
+  if (stage.classList.contains("idle")) show(tabs[0]);
+}
+still.addEventListener("click", start);
+document.getElementById("go").addEventListener("click", function () {
+  start();
+  stage.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+sizeStage();
+
+// EXPAND. The class is what actually resizes the player (a fixed overlay, which
+// every browser has); real fullscreen is requested on top where it exists, for
+// the browser chrome. No manual resize event is needed: resizing the iframe
+// element fires `resize` inside its own document, which is what the player's
+// fit() listens to, so the console rescales to whatever it is given.
+function fsEl() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+function big(on) {
+  stage.classList.toggle("big", on);
+  document.body.classList.toggle("noscroll", on);
+  sizeStage();
+}
+expand.addEventListener("click", function () {
+  big(true);
+  var req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+  // iOS Safari has no element fullscreen; the overlay above is already the
+  // whole viewport there, so a rejection changes nothing the user can see.
+  if (req) { try { Promise.resolve(req.call(stage)).catch(function () {}); } catch (e) {} }
+});
+function collapse() {
+  var exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (fsEl() && exit) { try { exit.call(document); } catch (e) {} }
+  big(false);
+}
+shrink.addEventListener("click", collapse);
+// Esc in real fullscreen is handled by the browser, which then fires this --
+// so the overlay comes down with it instead of stranding a fixed black box.
+document.addEventListener("fullscreenchange", function () { if (!fsEl()) big(false); });
+document.addEventListener("webkitfullscreenchange", function () { if (!fsEl()) big(false); });
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape" && stage.classList.contains("big")) collapse();
+});
+
+"""
+
+
+STILL_ALT = ("The Moybyte desktop with Star Catcher's code open in the editor")
+
+
+def page(pal, has_player, cards, channel=None, stills=False):
+    still_html = (
+        '<picture><source media="(prefers-color-scheme: dark)" '
+        'srcset="media/console-night.png"><img src="media/console-day.png" '
+        'width="1024" height="600" alt="%s"></picture>' % STILL_ALT)
     tabs = "\n".join(
         '        <button class="tab%s" data-tier="%s" data-q="%s" data-ar="%s">'
         '<b>%s</b><span>%s</span></button>'
@@ -725,6 +855,14 @@ def page(pal, has_player, cards, channel=None):
     missing = "" if has_player else (
         '    <p class="warnbox">The player bundle is not built yet &mdash; run '
         '<code>firmware/web_runner/build.sh</code>, then <code>make site</code>.</p>\n')
+    stage = (
+        '    <div class="stage idle" id="stage" data-ar="1024 / 600" '
+        'style="aspect-ratio:1024 / 600">\n'
+        '      <button class="still" id="still" type="button" '
+        'aria-label="Start the console">%s<span class="go"><i></i>'
+        'Start the console</span></button>\n'
+        '      <button class="shrink" id="shrink" type="button">Close &#10005;</button>\n'
+        '    </div>' % (still_html if stills else '')) if has_player else ""
     status = "\n".join(
         '      <li><i class="%s"></i><b>%s</b> %s</li>' % (k, name, note)
         for k, name, note in STATUS)
@@ -817,21 +955,27 @@ h1 em{font-style:normal;color:var(--accent)}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn.pri{background:var(--accent);border-color:var(--accent);color:var(--pri-ink);font-weight:600}
 .btn.pri:hover{filter:brightness(1.08);color:var(--pri-ink)}
-/* --- the machine, shown rather than tabulated ------------------------------ */
-/* The recording is 1024 wide and it is PIXEL ART: shrink it and the 8px glyphs
-   turn to mush, so the shot gets its own full-width band and is capped at
-   exactly its native size (1024 + the bezel's 2x10 padding + borders). Below
-   that width it has to scale, and a non-integer downscale looks better smoothed
-   than snapped -- hence the image-rendering flip. */
-.shot{margin:40px auto 0}
-.screen{margin:0 auto;max-width:1046px}
-.bezel{background:var(--surface);border:1px solid var(--line);padding:10px 10px 26px;
-  position:relative}
-.bezel:after{content:"";position:absolute;left:50%%;bottom:9px;transform:translateX(-50%%);
-  width:34px;height:4px;background:var(--line)}
-.bezel img{display:block;width:100%%;image-rendering:pixelated;border:1px solid var(--line)}
-@media (max-width:1100px){.bezel img{image-rendering:auto}}
-.screen figcaption{margin:11px 2px 0;color:var(--muted);font-size:13px;max-width:74ch}
+/* --- the console in the hero ----------------------------------------------- */
+.console{margin:40px 0 0}
+.console .slead{margin:0 0 4px;max-width:none}
+/* Before the click the stage holds a still of the real console (site/build.py
+   captures it from the built player) and nothing else: no iframe, no wasm. The
+   still is PIXEL ART, so it is shown crisp where it is near its native 1024
+   and smoothed where a phone scales it well below. */
+.still{position:absolute;left:0;top:0;width:100%%;aspect-ratio:1024 / 600;display:block;
+  appearance:none;border:0;padding:0;margin:0;background:none;cursor:pointer;font:inherit}
+.still:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.still img{display:block;width:100%%;height:100%%;image-rendering:pixelated}
+@media (max-width:1100px){.still img{image-rendering:auto}}
+.stage.live .still,.stage:not(.idle) .go{display:none}
+.go{position:absolute;left:50%%;top:50%%;transform:translate(-50%%,-50%%);
+  display:flex;align-items:center;gap:10px;padding:12px 20px;font-size:16px;
+  color:var(--night-ink);background:color-mix(in srgb,var(--night-bg) 82%%,transparent);
+  border:1px solid var(--night-accent);pointer-events:none;white-space:nowrap}
+.go i{width:0;height:0;border-top:8px solid transparent;border-bottom:8px solid transparent;
+  border-left:13px solid var(--night-accent)}
+.still:hover .go{background:var(--night-accent);color:var(--night-bg)}
+.still:hover .go i{border-left-color:var(--night-bg)}
 /* --- the mascot ------------------------------------------------------------ */
 .moy{image-rendering:pixelated;vertical-align:-4px}
 nav .moy{width:22px;height:22px;margin-right:9px}
@@ -989,7 +1133,7 @@ footer a{margin-right:4px}
 %(chbar)s<nav><div class="wrap">
   <a class="brand px" href="#top"><img class="moy" src="%(mark)s" alt="">moy<em>byte</em></a>
   <span class="sp"></span>
-  <a class="l" href="#try">Try it</a>
+  <a class="l" href="#console">Try it</a>
   <a class="l" href="#flash">Flash a board</a>
   <a class="l" href="#in">What's in it</a>
   <a class="l" href="#runs">Runs on</a>
@@ -1008,7 +1152,7 @@ footer a{margin-right:4px}
       <p class="sub">It runs on five off-the-shelf ESP32 boards, on a PC, and in
         the browser below.</p>
       <div class="btns">
-        <a class="btn pri" href="#try">Try it in the browser &#9656;</a>
+        <button class="btn pri" id="go" type="button">Try it in the browser &#9656;</button>
         <a class="btn" href="https://github.com/moybyte-org/moybyte">Source</a>
         <a class="btn" href="https://github.com/moybyte-org/moy-spec">The cart spec</a>
       </div>
@@ -1021,30 +1165,21 @@ footer a{margin-right:4px}
     </aside>
   </div>
 
-  <figure class="screen shot">
-    <div class="bezel"><img src="media/desktop.gif" alt="The windowed desktop at night: the code editor open on Star Catcher, the same cart running in a window beside it, and the sprite scale being changed from 4 to 8 in the source" loading="lazy"></div>
-    <figcaption>Change <code>SPR_SCALE</code> in the code editor, press play, and
-      the game in the next window comes back bigger. The wallpaper is a cart
-      too.</figcaption>
-  </figure>
-</div>
-
-<section id="try"><div class="wrap">
-  <h2>Try it</h2>
-  <p class="slead">The same system the boards run, compiled to WebAssembly.</p>
-  <div class="tabs" id="tabs">
+  <div class="console" id="console">
+    <p class="slead">The same system the boards run, compiled to WebAssembly.
+      Click it to start.</p>
+    <div class="tabs" id="tabs" hidden>
 %(tabs)s
-    <button class="tab exp" id="expand" type="button"><b>Expand &#8663;</b><span>fill the screen</span></button>
-  </div>
-  <div class="stage" id="stage">
-    <button class="shrink" id="shrink" type="button">Close &#10005;</button>
-  </div>
-  <div class="hint">
-    <span>Click the screen, then use the arrow keys, Z and X. Pick <b>Make</b> for
-      the editors.</span>
-    <span>Carts you make are kept in this browser.</span>
-  </div>
-%(missing)s</div></section>
+      <button class="tab exp" id="expand" type="button"><b>Expand &#8663;</b><span>fill the screen</span></button>
+    </div>
+%(stage)s
+    <div class="hint">
+      <span>Click the screen, then use the arrow keys, Z and X. Pick <b>Make</b> for
+        the editors.</span>
+      <span>Carts you make are kept in this browser.</span>
+    </div>
+%(missing)s  </div>
+</div>
 
 <section id="flash"><div class="wrap">
   <h2>Put it on a board</h2>
@@ -1108,90 +1243,7 @@ firmware/web_runner/build.sh &amp;&amp; make site</pre>
   </footer>
 </div></section>
 <script>
-// Tabs own ONE iframe and swap its src, so only one wasm VM is ever live (two
-// would mean two heaps and two frame loops competing for the main thread). The
-// first tab loads immediately; switching reboots the system for that tier.
-var stage = document.getElementById("stage");
-var expand = document.getElementById("expand");
-var shrink = document.getElementById("shrink");
-var tabs = [].slice.call(document.querySelectorAll(".tab:not(.exp)"));
-// The stage is the console's aspect ratio PLUS the height the player page needs
-// besides its canvas (title, the saved-in-this-browser bar): the player reports
-// that height as it lays out, so the canvas fills the stage's width and the
-// player's document never outgrows the frame (no scrollbar, nothing cut off).
-// Until it reports, the guess below holds the place.
-var chrome = 90;
-function sizeStage() {
-  if (stage.classList.contains("big")) {
-    stage.style.aspectRatio = "auto";
-    stage.style.height = "";
-    return;
-  }
-  var p = (stage.dataset.ar || "4 / 3").split("/");
-  var ratio = parseFloat(p[0]) / parseFloat(p[1]);
-  var h = Math.ceil((stage.clientWidth - 2) / ratio) + chrome + 2;
-  stage.style.aspectRatio = "auto";
-  stage.style.height = h + "px";
-}
-window.addEventListener("message", function (e) {
-  var f = stage.querySelector("iframe");
-  if (!f || e.source !== f.contentWindow || !e.data || typeof e.data.moyChrome !== "number") return;
-  chrome = e.data.moyChrome;
-  sizeStage();
-});
-window.addEventListener("resize", sizeStage);
-function show(tab) {
-  tabs.forEach(function (t) { t.classList.toggle("on", t === tab); });
-  stage.dataset.ar = tab.dataset.ar;
-  sizeStage();
-  // Replace the IFRAME only -- the close button is a child of the stage too, and
-  // clearing innerHTML (what this used to do) would take it with them.
-  var old = stage.querySelector("iframe");
-  if (old) old.parentNode.removeChild(old);
-  var f = document.createElement("iframe");
-  f.setAttribute("title", tab.querySelector("b").textContent + " tier");
-  f.setAttribute("allow", "autoplay");
-  f.setAttribute("allowfullscreen", "");
-  f.src = "player/index.html" + tab.dataset.q;
-  stage.appendChild(f);
-}
-tabs.forEach(function (t) { t.addEventListener("click", function () { show(t); }); });
-
-// EXPAND. The class is what actually resizes the player (a fixed overlay, which
-// every browser has); real fullscreen is requested on top where it exists, for
-// the browser chrome. No manual resize event is needed: resizing the iframe
-// element fires `resize` inside its own document, which is what the player's
-// fit() listens to, so the console rescales to whatever it is given.
-function fsEl() {
-  return document.fullscreenElement || document.webkitFullscreenElement || null;
-}
-function big(on) {
-  stage.classList.toggle("big", on);
-  document.body.classList.toggle("noscroll", on);
-  sizeStage();
-}
-expand.addEventListener("click", function () {
-  big(true);
-  var req = stage.requestFullscreen || stage.webkitRequestFullscreen;
-  // iOS Safari has no element fullscreen; the overlay above is already the
-  // whole viewport there, so a rejection changes nothing the user can see.
-  if (req) { try { Promise.resolve(req.call(stage)).catch(function () {}); } catch (e) {} }
-});
-function collapse() {
-  var exit = document.exitFullscreen || document.webkitExitFullscreen;
-  if (fsEl() && exit) { try { exit.call(document); } catch (e) {} }
-  big(false);
-}
-shrink.addEventListener("click", collapse);
-// Esc in real fullscreen is handled by the browser, which then fires this --
-// so the overlay comes down with it instead of stranding a fixed black box.
-document.addEventListener("fullscreenchange", function () { if (!fsEl()) big(false); });
-document.addEventListener("webkitfullscreenchange", function () { if (!fsEl()) big(false); });
-document.addEventListener("keydown", function (e) {
-  if (e.key === "Escape" && stage.classList.contains("big")) collapse();
-});
-show(tabs[0]);
-
+%(console_js)s
 // The flash section's device dropdown: one board card at a time. The browser
 // keeps the choice across a reload, so apply whatever it restored.
 var device = document.getElementById("device");
@@ -1212,11 +1264,61 @@ pickDevice();
         "night": moy_roles("dark", NIGHT_ROLES), "font": font_face(), "tabs": tabs, "missing": missing,
         "status": status, "features": features, "mark": moy_mark(pal),
         "targets": targets, "boards": boards, "device_options": device_options, "flash_js": flash_js,
-        "flash_hint": flash_hint,
+        "flash_hint": flash_hint, "stage": stage,
+        "console_js": CONSOLE_JS if has_player else "",
         "title_pre": "[dev] " if channel else "",
         "robots": '<meta name="robots" content="noindex,nofollow">' if channel else "",
         "chbar": channel_banner(channel) if channel else "",
     }
+
+
+# The hero's two stills: the console's home as the real browser build draws it
+# for a first-time visitor, one per colour scheme the page follows (Moy Night
+# under a dark scheme, Moy Day under a light one). They are CAPTURED on every
+# site build, from the player bundle this build ships (so the picture cannot
+# lag the console, nor the console's theme), by the same headless-Chrome driver
+# the browser tests use (firmware/web_runner/browsershot.mjs: node 22 and
+# Google Chrome). The console is started the way the hero starts it (Star
+# Catcher open on its Code tab), and each capture checks the console itself
+# says it is in that state and that variant, so a still of the wrong thing
+# fails the build rather than shipping.
+STILLS = (("night", "dark"), ("day", "light"))
+STILL_QUERY = "?desktop=1&start=1&edit=moybyte.star_catcher.moy&tab=code"
+
+
+def capture_stills(player, media):
+    """Write media/console-night.png and media/console-day.png from the built
+    player bundle at `player`. Exits the build, naming the cause, when they
+    cannot be made: a stale or absent still is worse than a failed build."""
+    runner = os.path.join(ROOT, "firmware", "web_runner")
+    os.makedirs(media, exist_ok=True)
+    if shutil.which("node") is None or shutil.which(
+            os.environ.get("MOY_CHROME", "google-chrome")) is None:
+        sys.exit("!! the hero's stills need node 22 and Google Chrome "
+                 "(MOY_CHROME names another browser); install them, or build "
+                 "the page without the stills: site/build.py --no-stills")
+    for name, scheme in STILLS:
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = os.path.join(tmp, "still.json")
+            with open(scenario, "w") as f:
+                json.dump({"query": STILL_QUERY, "scheme": scheme,
+                           "boot_ms": 60000, "steps": [
+                    {"wait": 2500},
+                    {"js": "window.__moyState().then(s => 'STILL ' + "
+                           "JSON.stringify([s.edit.tab, s.theme.name, s.theme.variant]))"},
+                    {"shot": "still"}]}, f)
+            r = subprocess.run(
+                ["node", "browsershot.mjs", scenario, tmp], cwd=runner,
+                env=dict(os.environ, MOY_DIST=player), capture_output=True,
+                text=True, timeout=300)
+            m = re.search(r'STILL (\[.*?\])', r.stdout.replace('\\"', '"'))
+            want = ["code", "moy", scheme]
+            if r.returncode != 0 or not m or json.loads(m.group(1)) != want:
+                sys.exit("!! capturing the %s still failed (wanted %s, the console "
+                         "said %s):\n%s\n%s" % (name, want, m and m.group(1),
+                                                r.stdout[-2500:], r.stderr[-500:]))
+            shutil.copyfile(os.path.join(tmp, "still.png"),
+                            os.path.join(media, "console-%s.png" % name))
 
 
 def stamp_player(player, channel):
@@ -1254,6 +1356,9 @@ def main():
     ap.add_argument("--channel", choices=sorted(CHANNELS),
                     help="publish a channel's site (its banner, its firmware "
                          "first, its own browser storage) instead of stable")
+    ap.add_argument("--no-stills", action="store_true",
+                    help="build the hero without its two stills of the console "
+                         "(they are captured with node and Chrome)")
     ap.add_argument("--firmware", default=FIRMWARE_SRC,
                     help="CI firmware folder for the flasher "
                          "(tools/fetch_ci_firmware.py's output)")
@@ -1274,13 +1379,12 @@ def main():
         else:
             print("!! no player bundle at %s -- build it first" % PLAYER_SRC)
 
-    # The hero's screen: a real recording of the system, committed because this
-    # script must run with nothing installed (the Pages job has no Pillow, no
-    # venv). Regenerate it with `make site-hero`, which is
-    #   tools/make_site_gifs.py --windowed --scene code --wallpaper moy_night
-    # -- the moy_night backdrop is the point: it is the brand colorway.
-    # Frame 0 matters more than it looks: it IS the page's first paint, so the
-    # recording has to open on a composed desk, not a boot wipe.
+    # The hero's stills of the running console, captured from the player this
+    # build ships (capture_stills).
+    stills = has_player and not args.no_stills
+    if stills:
+        capture_stills(os.path.join(out, "player"), os.path.join(out, "media"))
+
     # The flasher: the CI images the page can write, the vendored esptool-js
     # that writes them, and a manifest that says what each one is. All three
     # only ship when there is at least one image to flash.
@@ -1305,15 +1409,8 @@ def main():
     shutil.copytree(FEATURE_SRC, os.path.join(out, "media", "features"),
                     ignore=shutil.ignore_patterns("*.gif"))
 
-    gif = os.path.join(HERE, "hero.gif")
-    if not os.path.exists(gif):
-        gif = os.path.join(ROOT, "docs", "media", "desktop", "code.gif")
-    if os.path.exists(gif):
-        os.makedirs(os.path.join(out, "media"), exist_ok=True)
-        shutil.copyfile(gif, os.path.join(out, "media", "desktop.gif"))
-
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
-        f.write(page(palette(), has_player, cards, args.channel))
+        f.write(page(palette(), has_player, cards, args.channel, stills))
 
     total = sum(os.path.getsize(os.path.join(d, n))
                 for d, _, ns in os.walk(out) for n in ns)

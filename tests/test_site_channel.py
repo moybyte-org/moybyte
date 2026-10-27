@@ -64,8 +64,9 @@ def _firmware(root):
 def _site(tmp_path, monkeypatch, *flags, line=None):
     monkeypatch.setattr(build, "PLAYER_SRC", _player(str(tmp_path), line))
     out = str(tmp_path / "_site")
-    monkeypatch.setattr(sys, "argv", ["build.py", "--out", out, "--firmware",
-                                      _firmware(str(tmp_path))] + list(flags))
+    monkeypatch.setattr(sys, "argv", ["build.py", "--out", out, "--no-stills",
+                                      "--firmware", _firmware(str(tmp_path))]
+                        + list(flags))
     build.main()
     html = open(os.path.join(out, "index.html"), encoding="utf-8").read()
     return out, html

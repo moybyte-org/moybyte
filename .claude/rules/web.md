@@ -84,6 +84,20 @@ nor those docs will warn you about:
   stable site's carts. A new store opens through the worker's `opfsNav`, never
   `navigator` (`tests/test_site_channel.py` holds the call sites), and a player
   the build cannot stamp is not published at all.
+- **What an embedding page can ask of the console, all read at boot and absent
+  from a plain visit** (the project site's hero passes the first three):
+  `?scheme=dark|light` (else the browser's `prefers-color-scheme`) is the
+  theme VARIANT of a first run, handed to `console.wire_workstation_core(
+  first_variant=)` -- the absent-row default of `load_system`, so a saved
+  Settings choice always wins and booting on the scheme saves nothing; `?start=1`
+  skips the play button; `?edit=<cart>&tab=code` opens that cart in the Editor
+  (`web_boot.start_edit`, without the First Steps badge) from whatever the
+  browser's store holds, so a visitor's edits are kept. The framed player posts
+  `{moyChrome}` and, at its first painted frame, `{moyLive}`.
+  `tests/test_web_first_run_e2e.py` drives them. The hero's two stills (Night,
+  Day) are CAPTURED by `site/build.py` from the player it ships, through
+  `browsershot.mjs` (node 22 + Chrome, which pages.yml installs): a capture that
+  fails fails the build.
 - **The journal lives with the STORE OF RECORD** (owner call) — there is one
   durable journal per cart, where the cart durably lives, so a kid gets undo on
   both ends without a byte of history on the wire. **The wire predicate itself

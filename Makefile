@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-hero site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-p8-import vendor-wamr
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-p8-import vendor-wamr
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -72,7 +72,7 @@ check-venv:
 	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
 
 VENV_TARGETS := test preflight preflight-web board-modules \
-                site-gifs site-hero site-tiles sync-issues release ota-keygen \
+                site-gifs site-tiles sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3 \
@@ -324,7 +324,8 @@ unix-micropython:
 # runner's dist/ as the playable player, so build that first for a live page:
 #   firmware/web_runner/build.sh && make site
 # It also embeds whatever `make site-firmware` last pulled down, which is what
-# the page's board flasher writes; without it the flash section says so.
+# the page's board flasher writes; without it the flash section says so. The
+# hero's stills of the console are captured on every build (node 22 + Chrome).
 site:
 	$(PYTHON) site/build.py
 
@@ -337,13 +338,6 @@ site-firmware:
 # Regenerate the teaser-site demo GIFs from the real console (headless).
 site-gifs:
 	$(PYTHON) tools/make_site_gifs.py
-
-# Re-record the site's hero shot (site/hero.gif, committed -- the Pages job has
-# no Pillow). moy_night is deliberate: the site's colours ARE that wallpaper's.
-site-hero:
-	$(PYTHON) tools/make_site_gifs.py --windowed --scene code \
-		--wallpaper moy_night --out $(CURDIR)/site
-	mv $(CURDIR)/site/code.gif $(CURDIR)/site/hero.gif
 
 # Redraw the "What's in it" tiles (docs/media/features, committed for the same
 # reason as the hero).
