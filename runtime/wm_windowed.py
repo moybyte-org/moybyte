@@ -82,7 +82,7 @@ try:
     from wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from layers import Layer
     # (from widgets, not palette: runtime/palette.py needs colorsys -- host-only)
-    from widgets import _Blit, _in, _ticks_ms, _ticks_diff
+    from widgets import _Blit, _in, _ticks_ms, _ticks_diff, _err_text
     from wm_desk import _BackdropLayer
     from wm_chrome import WindowChrome, _SHADOW, RZ_L, RZ_R, RZ_T, RZ_B, RZ_CURSOR
     from moy_spine import EDITOR
@@ -92,7 +92,7 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
-    from runtime.widgets import _Blit, _in, _ticks_ms, _ticks_diff
+    from runtime.widgets import _Blit, _in, _ticks_ms, _ticks_diff, _err_text
     from runtime.wm_desk import _BackdropLayer
     from runtime.wm_chrome import (WindowChrome, _SHADOW, RZ_L, RZ_R, RZ_T, RZ_B,
                                    RZ_CURSOR)
@@ -509,6 +509,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._root_ctx = _LayoutCtx.capture(ws)
         self._win_layer = _WindowStackLayer(self)
         self._wins = {}               # slot key -> _Win
+        self._prewarm_failed = set()  # window kinds whose prewarm draw has been reported
         # Two orders of the same slots: `_kinds` is the back-stack's above the
         # desk (the order the windows opened in, which the chips keep), and
         # `_order` is the Z-ORDER, bottom -> top, which the focus raises
@@ -1248,8 +1249,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
 
     def _prewarm(self, win):
         """One-shot render of an app window's content into its buffer (defensive:
-        a content error just leaves the buffer blank -- the live path will report
-        it when the window is focused)."""
+        a content error leaves the buffer blank and stale, reported once per
+        window kind)."""
         if win.buf is None or win.ctx is None:
             return
         content = self._content_for(win.kind)
@@ -1261,8 +1262,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._row_over(win, win.buf)
             win._buf_stale = False
             win._look_gen = self.ws.look.look_gen
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001 -- a prewarm never ends a session
+            if win.kind not in self._prewarm_failed:
+                self._prewarm_failed.add(win.kind)
+                print("Moybyte window draw failed:", win.kind, _err_text(exc))
         finally:
             self._install(self._root_ctx)
 

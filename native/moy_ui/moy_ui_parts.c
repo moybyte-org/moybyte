@@ -680,7 +680,6 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     if (kind == MOY_UI_V_PROGRESS && b.h >= rh + bh + d.fs) {
         // a progress row given room for it: its label and percent on a
         // line, the bar the width of the row under them
-        int sc = tscale(s);
         int span = r->hi > r->lo ? r->hi - r->lo : 1;
         int pct = (int)((int64_t)100 * (r->v - r->lo) / span);
         char num[8];

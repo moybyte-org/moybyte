@@ -53,3 +53,18 @@ def test_the_system_menu_draws_no_focus_mark_under_touch(tmp_path):
     _frames(drv)
     assert ws.sysmenu.open
     assert _marks_drawn(ws, drv) == 0, "a focus mark under touch"
+
+
+def test_the_marks_mirror_is_the_c_marks_state():
+    """`ui_draw.marks_on()` reads a Python mirror of the word `marks` sets in
+    C so a caller allocates nothing; the two answer alike for every value set,
+    under touch included (touch masks the drawing, not the word)."""
+    try:
+        for kind in ("keys", "touch"):
+            ui_draw.input_kind(kind)
+            for on in (False, True, False, True):
+                ui_draw.marks(on)
+                assert ui_draw.marks_on() is on
+                assert ui_draw.marks()[0] is on
+    finally:
+        ui_draw.marks(True)
