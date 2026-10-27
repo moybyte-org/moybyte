@@ -323,11 +323,12 @@ static moy_ui_keep_t *keep_of(moy_ui_ctx_t *c, uint32_t id) {
 // the page's foot fades (foot_fade): the box stands above that fade, as far
 // as the rows go on.
 // The span page `p`'s scroll ranges over: its rows' height (and the room a
-// scroll into view past its rows keeps) and what shows of them.
+// scroll into view past its rows keeps) and what shows of them, the page's
+// stop, which a hint band at its foot has already given up (hints).
 static void span_of(const moy_ui_stop_t *p, const moy_ui_keep_t *k, int32_t *content,
                     int32_t *extent) {
     *content = k->b + (k->over > 0 ? k->over : 0);
-    *extent = p->b.h - k->foot;
+    *extent = p->b.h;
 }
 
 // The page stop kept as `k` among the frame's stops, or NULL.

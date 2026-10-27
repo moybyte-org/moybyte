@@ -257,3 +257,36 @@ def test_the_ease_lives_in_one_place():
             if pat.search(line):
                 bad.append("%s:%d: %s" % (path.name, n, line.strip()))
     assert not bad, "\n".join(bad)
+
+
+
+def test_a_walk_to_the_end_over_a_hint_band_comes_to_rest(tmp_path):
+    """Settings' page has a hint band at its foot, and its stop's box is
+    what shows above the band: the begin's glide and the pass agree on the
+    end, so a key walk there lands and the page stops moving (it once
+    aimed past the end by the band's height and glided on every frame)."""
+    from runtime import host_app
+    was = ui_draw.input_kind()
+    ui_draw.input_kind("tdeck")
+    try:
+        ws = build_ws(Path(tmp_path))
+        drv = host_app.ConsoleDriver(ws)
+        ws.open_settings()
+        for _ in range(5):
+            drv.frame(1 / 30)
+        h = ws.settings_layer._input_host()
+        for _ in range(30):
+            drv.hold("down", True)
+            drv.frame(1 / 30)
+            drv.hold("down", False)
+            drv.frame(1 / 30)
+        for _ in range(40):
+            drv.frame(1 / 30)
+        assert _C.api_offset(h.ctx, 160, 150) > 0
+        assert not _C.api_moving(h.ctx), "the page came to rest at its end"
+        drawn = ws._frames_drawn
+        for _ in range(10):
+            drv.frame(1 / 30)
+        assert ws._frames_drawn == drawn, "and paints nothing more"
+    finally:
+        ui_draw.input_kind(was)
