@@ -108,6 +108,10 @@ moybyte_patch_slice_store
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache
+# The VM's thread state in a `__thread` variable, not a FreeRTOS TLS slot
+# whose lookup masks interrupts: tools/patch_thread_state_tls.py carries the
+# P4 profile behind it.
+moybyte_patch_thread_state_tls
 
 # 2f) A 4 KB stdin ring, in TCM, and a UART RX ISR that wakes the reader: this
 #     board's serial is the CH343's UART, with no flow control, and the stock

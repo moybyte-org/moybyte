@@ -230,6 +230,17 @@ moybyte_patch_import_cache() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_import_cache.py" "${MPY_DIR}" || exit 1
 }
 
+# The VM's per-thread state in a `__thread` variable: every MP_STATE_THREAD
+# access (each call's globals swap, the stack check, nlr, gc_alloc) otherwise
+# asks FreeRTOS for a TLS slot through xTaskGetCurrentTaskHandle, which masks
+# interrupts each time -- ~5% of a P4 Editor frame. tools/patch_thread_state_tls.py
+# is the patch and the measurement: all-or-nothing, idempotent, the TLS slot
+# still written.
+moybyte_patch_thread_state_tls() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_thread_state_tls.py" "${MPY_DIR}" || exit 1
+}
+
 # A 4 KB stdin ring, in the ESP32-P4's TCM, for a board whose serial is a
 # UART, and an RX ISR that wakes the reader. The port's stock ring is 260 bytes
 # and the UART has no flow control, so a heap collection landing while a long

@@ -910,6 +910,41 @@ def test_the_import_cache_patch_is_idempotent_and_refuses_a_changed_fallback(tmp
     assert pic.MARKER not in g.read_text(encoding="utf-8")
 
 
+# -- the VM's thread state in a __thread variable ---------------------------------
+
+def test_the_thread_state_patch_is_idempotent_and_refuses_a_changed_pair(tmp_path):
+    """mp_thread_get_state reads the __thread variable and set_state writes it
+    and still the TLS slot; a warm tree is left as it is, and a stock pair that
+    changed shape stops the build with nothing written."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import patch_thread_state_tls as pts
+    finally:
+        sys.path.pop(0)
+
+    def port(root, body):
+        d = root / "ports" / "esp32"
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / "mpthreadport.c"
+        f.write_text("#include \"py/mpthread.h\"\n\n" + body + "\nint x;\n",
+                     encoding="utf-8")
+        return f, sh("moybyte_patch_thread_state_tls", MPY_DIR=str(root),
+                     REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+    f, r = port(tmp_path, pts.STOCK)
+    assert r.returncode == 0, r.stderr
+    once = f.read_text(encoding="utf-8")
+    assert pts.MARKER in once and pts.STOCK not in once
+    assert "    return moy_thread_state;\n" in once
+    assert "vTaskSetThreadLocalStoragePointer(NULL, 1, state);" in once
+    r = sh("moybyte_patch_thread_state_tls", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    g, r = port(tmp_path / "b", pts.STOCK.replace("(NULL, 1)", "(NULL, 2)"))
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert pts.MARKER not in g.read_text(encoding="utf-8")
+
+
 def test_a_repr_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
     """The guard is the point: a silent no-op is a board quietly running boxed
     floats again, which costs a 130-175ms GC hitch -- and, since the ESP-NOW

@@ -83,6 +83,10 @@ moybyte_patch_slice_store
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache
+# The VM's thread state in a `__thread` variable, not a FreeRTOS TLS slot
+# whose lookup masks interrupts: tools/patch_thread_state_tls.py carries the
+# P4 profile behind it.
+moybyte_patch_thread_state_tls
 
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # MOYBYTE_GC_SPLIT_RESERVE is set by the two S3 boards' mpconfigboard.h alone,

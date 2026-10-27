@@ -70,6 +70,10 @@ moybyte_patch_slice_store
 # A found extensible built-in enters sys.modules: every board takes it,
 # and tools/patch_import_cache.py carries the measurement.
 moybyte_patch_import_cache
+# DECLINED moybyte_patch_thread_state_tls -- the VM's thread state as a
+# `__thread` variable. Measured on the P4s (RISC-V), where the TLS slot's
+# lookup was ~5% of an Editor frame; on this Xtensa board it is unmeasured,
+# and a board takes it when a profile here shows the same path.
 moybyte_patch_gc_split_reserve
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.
