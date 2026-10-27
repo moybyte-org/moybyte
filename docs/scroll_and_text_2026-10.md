@@ -9,7 +9,9 @@ keystroke is the edited line and the caret, and a press is paid once. It
 revises the scroll-as-blit design of 2026-10-23 (this file, under the name
 scroll_blit_2026-10 until 2026-10-27), which reached the touch drag and fling
 of six shell apps on the P4 and nothing else: §1 says what the baselines
-found and why that scope was wrong.
+found and why that scope was wrong. The revision was put through parallel
+adversarial architecture and performance reviews on 2026-10-27; §18 is the
+ledger of what each finding changed.
 
 **The measurements.** Every number this doc reasons from lives in an issue:
 the per-board shift costs in
@@ -20,9 +22,10 @@ and the T-Deck's in
 [#66's T-Deck comment of 2026-10-27](https://github.com/moybyte-org/moybyte/issues/66#issuecomment-6441869611)
 (both at dev `06fad00a`). Where a row is named below with a number, the
 number is that baseline's p90 at that commit, and the number after the arrow
-is ESTIMATED from the row's own frame split, by the arithmetic §14 states
-once; the build's measurement step (§15) replaces every estimate with a
-verdict in #66.
+is ESTIMATED by §14's arithmetic from the row's own frames; the build's
+measurement step (§15) replaces every estimate with a verdict in #66, and
+§15's last paragraph names the rows that stay over the target after every
+phase, with the next lever for each.
 
 **The goals (owner, 2026-10-27).** Scrolling and text editing everywhere --
 Code, Play, the Editor's tabs, every app -- at most 33 ms a frame at p90,
@@ -30,10 +33,10 @@ Code, Play, the Editor's tabs, every app -- at most 33 ms a frame at p90,
 are measured, not targets. Every scroll is kinetic: a touch drag and fling
 coast with momentum everywhere; a key, held-key or trackball step carries no
 momentum (a step moves exactly one step) but glides to its target eased, and
-a held key reads as one continuous movement. Whether a fast trackball roll
-gets a little momentum is tried by hand, so it is a parameter (§2.3). The
-browser never looks different from the boards: host and device are one
-codebase, and every mechanism here runs on the host under test.
+a held key reads as one continuous movement. A fast trackball roll's
+momentum is a parameter tried by hand (§2.3). The browser never looks
+different from the boards: host and device are one codebase, and every
+mechanism here runs on the host under test.
 
 **Where it sits.** `docs/surface_model_v1.md` is the presentation contract;
 this design extends its §4 and §14 (§14.3's shown ring, §14.5's held pages,
@@ -50,44 +53,52 @@ The two comments carry the tables; the causes, as the comments rank them:
 
 - **P4.** 143 of 164 rows are over 33 ms at p90. The surface rasterizes its
   whole window or pane on every painted frame (the raster alone is over
-  33 ms in two thirds of the over-target rows; without it 97% of the rows
-  fit 33 ms on their mean frame). Key and typing frames are not direct
-  render: they draw into the window buffer and stamp it (19.5-19.9 ms
-  windowed, 12.2-12.7 full screen). A key step is paid two to three times:
-  two whole paints right after the press, then two whole-glass debt copies
-  of 12-13 ms, so presses at 20/s coalesce (of a 112-character line typed
-  on Code, 43 characters never get a frame of their own). A held key repeats once per
-  painted frame with no initial delay (Code, Notes, Music at ~11 Hz).
-  Momentum exists on the home carousel and PROJECTS only. My Art builds its
-  covers inside its draw (one 0.6-2.5 s frame per gesture). The home's grid
-  and icons arrangements paint 84-115 ms a frame.
+  33 ms in two thirds of the over-target rows). Key and typing frames are
+  not direct render: they draw into the window buffer and stamp it
+  (19.5-19.9 ms windowed, 12.2-12.7 full screen). A key step is paid two to
+  three times: two whole paints right after the press, then two whole-glass
+  debt copies of 12-13 ms, so presses at 20/s coalesce (of a 112-character
+  line typed on Code, 43 characters never get a frame of their own). A held
+  key repeats once per painted frame with no initial delay (Code, Notes,
+  Music at ~11 Hz). Momentum exists on the home carousel and PROJECTS only.
+  My Art builds its covers inside its draw (one 0.6-2.5 s frame per
+  gesture). The home's grid and icons arrangements paint 84-115 ms a frame.
+  The first frame of every gesture is the p90 of most fling rows: it stamps
+  the window buffer and restores the backdrop (Settings 54 ms against 21
+  steady).
 - **T-Deck.** 26 of 142 rows are over; most surfaces paint 18-28 ms, the
   flush never holds a frame (it runs on core 0 behind the next frame), and
-  the loop's floor is ~60 fps. The home's grid and icons repaint the whole
-  home every frame (58% of the over rows); the sprite pickers draw the sheet
-  pixel by pixel (23%); the frame a motion starts or settles on is a whole
-  repaint (12%). No shell surface repeats a held key; a fast roll outruns
-  the three-step queue (13 of 30 steps on the grid). The comment's own
-  model: a scroll-as-blit that also skips the per-row work outside the band
-  reaches the loop's floor on Settings (~60 fps) and better on Code and
-  Notes; the shift's cross-buffer copy costs 3.4 ms for 320×190.
+  the loop's floor is ~60 fps. All 26 are the home's grid and icons (15,
+  which repaint the whole home every frame), the sprite pickers (6, the
+  sheet drawn pixel by pixel), the frames a motion starts or settles on (3),
+  Code's find and My Art's row step. No shell surface repeats a held key; a
+  fast roll outruns the three-step queue (13 of 30 steps on the grid). A
+  Settings drag frame is 41% Python VM, 32% raster, 14% memcpy; the comment's
+  model for a shift that also skips the per-row work outside the band is
+  the loop's floor on Settings, and the cross copy of the other buffer costs
+  4.3 ms for 320×212 with the feeder running.
 - **The 2026-10-23 design** reaches 28 of the P4's rows (the six apps' drags
   and flings) and none of the key, typing or text rows: it ruled a key step
   out of the shift by design ("focus is in the key"), kept the S3 boards at
-  `None` from a measurement that assumed the rows' Python still ran, and
-  did not see causes 2 to 7 at all.
+  `None` from a measurement that priced the region's fill and not the rows'
+  work, and did not see the stamp, the double paint, the press frame, the
+  held-key repeat, the home or the pickers at all.
 
-Two of the P4's causes are one mechanism seen twice. A key step paints twice
-because the verbs engine answers `settled` false for any frame whose input
-moved something -- a focus move and the page's scroll to it, which
-`api_begin` applies before the pass (`reveal` in `native/moy_ui/moy_ui_api.c`,
-over the last frame's stops) and the pass draws, as much as an activation
-the app acts on after the pass -- and every host paints an owed frame on it
-(`App.owed`, the `host.owed` checks in each layer). The first paint is right;
-the second is a precaution the engine cannot yet tell from a needed one. The
-two debt copies are the windowed WM's `_full_debt` (`RETAINED_FRAMES` − 1 on
-the Waveshare's ring of three) brought up by `copy_last` of the whole glass
-once the desk is calm, §14.6. §7 removes the first and shrinks the second.
+**Why a key step paints twice** -- three causes, each a frame. The verbs
+engine answers `settled` false for any frame whose input moved anything,
+including a focus move and the page's scroll to it that `api_begin` applied
+before the pass (`reveal` in `native/moy_ui/moy_ui_api.c`, over the last
+frame's stops) and the pass drew; the host owes a frame on it (`AppHost.owed`,
+the `host.owed` checks in each layer). Some reveals are set DURING the pass
+and applied at the next begin -- a list row's step, a table's, `ui.focus`
+-- and that second frame is needed. And four apps mark the whole page
+after the pass when an answer changed: Files and Get Carts set their
+current item from `ui.focus()` read after the pass and call
+`_damage.all()`; Storybook and Appearance call `damage.again()`/`all()`
+the same way. The two debt copies are the windowed WM's `_full_debt`
+(`RETAINED_FRAMES` − 1 on the Waveshare's ring of three) brought up by
+`copy_last` of the whole glass once the desk is calm, §14.6. §7 takes each
+apart.
 
 ## 2. One scroll model
 
@@ -105,17 +116,26 @@ float offset, and -- added -- a **glide target** and the glide's start. One
   every `GLIDE_HALF_MS` (the carousel's `_GLIDE_HALF_MS`, 45, moved into C),
   rounded to the pixel, and reaches the target exactly; a new target while
   gliding re-aims from the current offset, so a held key that owes steps
-  reads as one movement at the step rate, not as a stutter;
+  reads as one movement at the step rate. A 20-40 px step is five or six
+  halvings, ~230-270 ms of frames; that is the carousel's feel today, and
+  the parameter is where it is tuned;
 - **a drag** catches a fling or a glide, as today.
 
 A step is `step(n, size)`: the target moves by n steps of the surface's step
 size (a row, a card, a line) from the target if a glide is live, else from
-the offset -- a step moves exactly one step, never more. `glide_to(p)` aims
-at a content position (a focus reveal, §7). `ScrollRegion` (`runtime/ui_draw.py`)
-stays the Python face over the same buffer and gains `step`, `glide_to` and
-`gliding`; `Carousel.anim_frame`'s own glide (`runtime/launcher_layer.py`)
-is deleted for it, with a grep guard that no `_GLIDE_HALF_MS` or ease
-arithmetic exists outside `moy_ui_interact.c`.
+the offset -- a step moves exactly one step, never more, and n steps in one
+frame move the target n steps at once (the view is never more than one
+glide behind its target). `glide_to(p)` aims at a content position (a focus
+reveal, §7). `ScrollRegion` (`runtime/ui_draw.py`) stays the Python face
+over the same buffer and gains `step`, `glide_to` and `gliding`;
+`Carousel.anim_frame`'s own glide (`runtime/launcher_layer.py`) is deleted
+for it, with a grep guard that no `_GLIDE_HALF_MS` or ease arithmetic
+exists outside `moy_ui_interact.c`.
+
+**The engine gets a clock word.** `api_begin` has no dt today; `ui_frame`'s
+`inp` array gains `MOY_UI_IN_DT` (the loop's tick in ms, injected -- never a
+clock read -- so the physics stays deterministic under test), and the wasm
+head's snapshot carries it.
 
 **The verbs engine's nests scroll on it too.** A page body, a `ui.scroll`
 region and a `ui.table`'s rows are nests whose offset is a `moy_ui_keep_t`
@@ -125,33 +145,57 @@ the same `moy_ui_dragtap_frame` the launcher rides, so a release flings and
 `api_begin` ticks every live state before the pass. The physics is therefore
 ONE function on every surface, and the twin test runs it once.
 
-Parameters are configuration, not measurements, and live in
-`moy_ui_interact.c` beside `MOY_UI_FRICTION`: `GLIDE_HALF_MS` 45,
-`REPEAT_DELAY_MS` 400, `REPEAT_RATE_MS` 50, `BALL_COAST` 0 (§2.3).
+**Motion is a declared Class B source.** `api_moving(ctx)` answers whether
+any nest of the context glides or flings; `AppHost.keys()` and `still()`
+read it beside `owed`, the frame gate reads it as animation, and the
+windowed WM reads it in place of `ws._animating` for the content freeze and
+direct render (§8): a surface moving on its own is the one legitimate
+reason to paint with nothing dirty, and the WM must know it is the focused
+window's content and nothing else.
+
+Parameters are configuration, not measurements: `GLIDE_HALF_MS` 45 in
+`moy_ui_interact.c` beside `MOY_UI_FRICTION`; `REPEAT_DELAY_MS` 400,
+`REPEAT_RATE_MS` 50 and `BALL_COAST` 0 in `moy_input` (§2.2, §2.3), each
+overridable per board in its board.toml.
 
 ### 2.2 The inputs: a held key repeats at the input layer
 
 A held button repeats in `moy_input`'s merge (`moy_input_begin_frame`,
-`native/moy_input/moy_input.h`), per source and per button, on the table's
-own ms clock: after `REPEAT_DELAY_MS` of level, one repeat every
-`REPEAT_RATE_MS`, counted against the clock, not the frame -- a frame that
-took two periods owes two. The table exposes the count:
-`moy_input_repeats(button)` this frame (the binding's `repeats(name)`), and
-`steps(name)` = pressed edge + repeats. `btnp` stays an edge: a cart's
-`btnp` is unchanged (L9; a game that wants repeat has `btn`), and
-`moy_input_disarm` (a modal opening on a key) zeroes repeats with the
-edges. Typed keys repeat the same way: the key level a source holds re-queues
-its event every period, delivered as a count (`moy_input_key_repeats`), so a
-text surface takes the count rather than one key per frame -- the one-shot
-queue's zero frame between equal keys does not cap the rate. The verbs engine
-reads two new input words, `MOY_UI_IN_REP` (four 8-bit direction counts) and
-`MOY_UI_IN_KEYREP`; `ui_frame`'s `inp` array grows by them.
+`native/moy_input/moy_input.h`), per source and per button, on a clock the
+caller passes in -- `begin_frame(t, now_ms)`; it takes no time today -- so
+the count is against time, not the frame: after `REPEAT_DELAY_MS` of level,
+one repeat every `REPEAT_RATE_MS`, and a frame that took two periods owes
+two. The table exposes the count: `moy_input_repeats(button)` this frame
+(the binding's `repeats(name)`), and `steps(name)` = pressed edge +
+repeats. `btnp` stays an edge (a cart's `btnp` is unchanged, L9; a game that
+wants repeat has `btn`), and `moy_input_disarm` (a modal opening on a key)
+zeroes repeats with the edges.
+
+Typed keys repeat from a level the table keeps for that purpose. A source's
+`key` is a level a BLE keyboard holds; the T-Deck in text mode types
+one-shot press edges from its matrix (`moy_kbd.c` `type_edges`) and holds no
+key level, and its `text_mask` strips the aliased buttons. The driver writes
+the matrix's typing key into a **typing-level slot** of its source that
+carts never read, and the merge repeats from that slot and from a BLE
+source's key level, delivering a count (`moy_input_key_repeats`) beside the
+frame's key event. Repeat counts never enter `key()`, `keyp()` or `last_key`:
+a cart in text mode is promised each typed key once
+(`docs/moy_cart_api.md`), and that promise holds. The verbs engine reads two
+new input words, `MOY_UI_IN_REP` (four 8-bit direction counts) and
+`MOY_UI_IN_KEYREP`; a text surface takes the count rather than one key per
+frame, so the one-shot queue's zero frame between equal keys does not cap
+the rate.
+
+**One repeat, from one place.** The browser's page sends the OS's
+autorepeat today (`page_core.html` forwards a repeating keydown for codes
+under 256) and the host's pygame path sends none, so the two tiers already
+differ; the page drops `e.repeat` for every code and the table repeats on
+every tier alike. The host's arrows are spent as a trackball pan each frame
+(`host_api.py`) and take §2.3's path.
 
 Where the level is not known the lever is `None`: the T-Deck keyboard in
-its ASCII fallback (an older keyboard firmware, `moy_kbd.c`) types press
-edges with no level, so it repeats nothing; its matrix mode, which serves
-every surface on current firmware, holds the level and repeats. A BLE
-keyboard's key is a level already.
+its ASCII fallback (an older keyboard firmware) types edges with no matrix,
+so it repeats nothing.
 
 The consumer rule, for every surface: a repeat is a step, not a press.
 Nothing that opens, activates or commits runs on a repeat; only motion
@@ -160,29 +204,39 @@ handling takes `go` and `tab` from the edge word only.
 
 ### 2.3 The trackball
 
-A pulse is a step at the input layer (`Console.ball`, `BALL_STEP`), and a
-step moves the target (§2.1), so steps are never lost to a queue: the
-`BALL_QUEUE` cap of 3, which dropped 17 of 30 steps on the grid, goes, and
-`ball_steps` hands every step on. The glide carries the view, so a roll's
-cost is the glide's frames, not one frame per step. `BALL_COAST` is the
-parameter the owner tries by hand: steps a roll delivers above
-`BALL_COAST_RATE` per second become velocity (px/ms per surplus step) on the
-surface's scroll state instead of target steps; 0 is no momentum, the
-default. A caret takes the ball as lines (`nav`) as today, from the same
-steps.
+A pulse is a step at the input layer (`Console.ball`, `BALL_STEP`). Today
+the steps reach a surface as presses on the "ball" source, one per frame
+with a frame up between two, through a queue of `BALL_QUEUE` 3 that drops
+the rest (13 of 30 on the grid). Steps are delivered instead as a **count
+in the `MOY_UI_IN_REP` word** (and `steps(name)` for the Python layers),
+every pulse's step in the frame it arrived: no queue, no per-frame cap, so
+30 of 30 reach the surface. The glide absorbs them -- the target moves n
+steps and the view eases to it -- so the lag is bounded by construction:
+the view is always one glide (a few `GLIDE_HALF_MS`) behind the newest
+target, never a queue's length behind. A caret takes the count as lines
+(`nav`) as today.
+
+`BALL_COAST` is the parameter the owner tries by hand after the motion
+phase: steps a roll delivers above `BALL_COAST_RATE` per second become
+velocity (px/ms per surplus step) on the surface's scroll state instead of
+target steps; 0 is no momentum, the default.
 
 ### 2.4 Who takes it, from one place
 
 | surface | scrolls through | drag/fling | key, repeat, ball steps |
 |---|---|---|---|
-| verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Files, Get Carts, Storybook, My Art, Calc, Appearance, Config, the Blocks outline, Music's steps, every app on the verbs) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
+| verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Files, Get Carts, Storybook, My Art, Calc, Appearance, Music's steps; the Blocks outline and Config's cards once ported onto nests, §15 P5) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
 | the home's carousel, grid and icons; the PROJECTS window | `ScrollRegion` (`Launcher._scroll_region`) | as today | the selection moves; `glide_to` the card |
-| the Code tab, theme Config text, Notes, the fields, the text console | `TextView` (§5) over a `ScrollRegion` in lines | the view's region | a caret move reveals through `glide_to`; a page key is `step` |
+| the Code tab, theme Config text, Notes, the fields, the text console | `TextView` (§5) over a `ScrollRegion` in visual rows | the view's region | a caret move reveals through `glide_to`; a page key is `step` |
 | the Map's camera, the sprite pickers | `ScrollRegion` on two axes | as today | `step` |
 
-Carts are out: a cart's `btn`/`btnp` and its own scrolling are the cart's
-(L9), and the one surface that scrolls inside a cart window, Notes, scrolls
-through the shell's `EditorHandle`, which is shell code (§5).
+The Blocks outline and Config's cards scroll in Python by whole rows today
+(`block_editor_ui._outline_drag` and `blk_top`; `cards_layer`'s `mtop`),
+each drawn by a Python loop whose every box moves: they take the model only
+once they are `ui.scroll` nests, which §15's P5 does. Carts are out: a
+cart's `btn`/`btnp` and its own scrolling are the cart's (L9); Notes is a
+system cart on the verbs engine whose text is the shell's `EditorHandle`,
+and §5 says what it gets.
 
 ### 2.5 The browser
 
@@ -204,217 +258,284 @@ what a change can be. A change is one of:
 
 - **rows**: a rect list the draw repainted (a focused row and the one it
   left; an edited line and the caret's; a changed cell);
-- **a translation**: a rect R moved by Δ along its axis, plus the band of
-  |Δ| rows R exposed, plus rows (the fades, the scrollbar, a stop whose
-  record changed under the move).
+- **a translation**: a scrolling region R moved by Δ along its axis, plus
+  the band of |Δ| rows R exposed, plus rows (inside R: the stops the frame
+  widened to, §3.3; outside R: what else the frame drew).
 
-The WM's shown ring (`WindowedWM._shown`) records the change as given. A
-buffer's lag, which `retained` reports, composes the changes of the frames
-since that buffer was painted: translations of the same R compose by adding
-their Δ, and a lag that is a translation plus rows is what the content
-repaints cheaply -- `shift_last` for the translation (§3.2), the rows and
-the band drawn. A lag that composes to anything else (two regions, a
-resize, a look change) is reported as "unknown" and the content draws whole,
-as every content did before.
+**Two rules keep the Δ right**, because a cross-buffer shift and an
+in-place shift are different models and the 2026-10-23 text mixed them (the
+bug `device/p4_canvas.py` records: a picker drag shifted by twice its
+delta and ghosted every card):
 
-Full-screen contents (the handheld's home, apps and Editor; the P4's
-full-screen windows draw through the WM) have no window ring. They keep the
-same entry themselves: `ui_draw.PaintRing`, the `ScrollRegion._painted` ring
-of #113 extracted -- entries of (frame number, key, offset, stamp, change),
-`vouch(cv, frame_no, key)` answering the entry whose buffer this frame paints
-into and the translation since, else None. `ScrollRegion` and `TextView` own
-one; the home's `_still_ring` (§14.4) becomes one whose change is its parts'
-rects. The WM's `_shown` stays the windows'. The one-body guard is a grep:
-no other list of painted frames in `runtime/` or `native/moy_ui/`.
+- **Inside R, a shift is always n−1 → n by this frame's Δ**, out of the
+  buffer frame n−1 drew, licensed only when frame n−1 was a complete paint
+  of R (its entry vouched, §3.3) -- whatever the ring's depth. Translations
+  never compose: the ring keeps R's offset per entry, and the one Δ that
+  matters is the last frame's to this one.
+- **Outside R, the buffer this frame paints lags by the rows** of every
+  frame since it was last painted (the union of their records' rows), and
+  those are drawn as rows. On a one-buffer canvas (the host's, the web's, a
+  window buffer, a layer) the last frame IS this buffer, so the shift is
+  in place by the same Δ and nothing lags outside R but this frame's rows.
+
+The WM's shown ring (`WindowedWM._shown`) records the change as given, in
+preallocated slots (no per-frame tuples: `tests/test_frame_alloc.py`'s pin
+extends to shell shift and rows frames). Full-screen contents (the
+handheld's home, apps and Editor; the P4's full-screen windows draw through
+the WM) have no window ring and keep the same entry themselves:
+`ui_draw.PaintRing`, the `ScrollRegion._painted` ring of #113 extracted --
+slots of (frame number, key, offset, stamp, change), `vouch(cv, frame_no,
+key)` answering whether frame n−1 painted this region completely under this
+key into the buffer `shift_last` reads, else None. **One voucher per
+region**: under the windowed WM only `_shown` vouches (a content's own ring
+never does there, or a toast drawn in n−1 would be shifted in); under the
+fullscreen WM the content's `PaintRing` does. `ScrollRegion` and `TextView`
+own one; the home's `_still_ring` (§14.4) becomes one whose change is its
+parts' rects. The one-body guard is a grep: no other list of painted frames
+in `runtime/` or `native/moy_ui/`.
 
 ### 3.2 The backend verb: `shift_last`
 
-`shift_last(x, y, w, h, dx, dy)` on the root canvas, beside §14.6's
-`copy_last`: the rect of the last presented frame's buffer, copied into the
-one this frame draws into, moved by (dx, dy). It answers False where it
-cannot (no last frame, a gap, a rect it does not have), and the caller draws.
-Per tier:
+`shift_last(x, y, w, h, dx, dy)` on a canvas, beside §14.6's `copy_last`:
+the rect of the last presented frame's buffer, copied into the one this
+frame draws into, moved by (dx, dy). It answers False where it cannot (no
+last frame, a gap, a rect it does not have, an engine busy with something
+it must not wait behind), and the caller draws. The lever is **per canvas**,
+not per board: a root's ring and a one-buffer layer are different canvases
+on the same board.
 
-| tier | the last frame's buffer | the shift | cost (#113's comment) |
+| canvas | the last frame's buffer | the shift | cost (#113's comment) |
 |---|---|---|---|
-| Waveshare and Guition P4 (DSI and rotated compositors, `moy_dsi_last`) | another buffer of the ring (the front or pending one), fenced as `copy_last` fences | the 2D-DMA M2M block copy (`esp_async_fbcpy`), submitted async, fenced at the content's close; cross-buffer in either direction | 0.04 ms to submit; 4.6-10.4 ms to land beside the pass's Python |
-| T-Deck and Guition S3 (the banded compositor, `moy_banded_last`) | the other of two buffers, the one the feeder is shipping | a CPU row copy, synchronous, reading alongside the feeder (read against read) | 3.4 ms for 320×190; 2.8 for 296×160 |
-| host, web runner (one persistent buffer) | this buffer | `moy_gfx.scroll_rect` in place | the host's; the wasm's |
+| the Waveshare P4's root (the DSI compositor, `moy_dsi_last`) | the ring's front or pending buffer, fenced as `copy_last` fences | the 2D-DMA M2M block copy (`esp_async_fbcpy`), submitted async, fenced at the content's close; cross-buffer in either direction | 0.04 ms to submit on a clean buffer; 4.6-6.5 ms to land beside the pass's Python; the live submit's writeback and the fence's invalidate measured in P1a |
+| the Guition P4's root (the rotated compositor, `moy_rot_last`) | the other of its two landscape paint buffers (`retained_frames` 2) | the same 2D-DMA; **answers False while a rotate is in flight** (the rotate shares the DMA2D; a shift queued behind it would wait 20-30 ms); the shifted R is handed to `note_damage` or the compositor never rotates it | the same engine |
+| the T-Deck's and Guition S3's root (the banded compositor, `moy_banded_last`) | the other of two buffers, the one the feeder is shipping | a CPU row copy, synchronous, reading alongside the feeder (read against read) | 4.3 ms for 320×212 with the feeder running; expect ~5 on core 1 beside it |
+| one persistent buffer: the host's and web runner's root, every window buffer (`win.buf`), every layer, a cart's canvas (`RETAINED_FRAMES` 1) | this buffer | `moy_gfx.scroll_rect` in place | the CPU's; the wasm's |
 
-The S3 lever flips from `None` (the 2026-10-23 verdict) because what the
-shift buys there is not the region's fill, which that verdict priced, but
-the rows' Python and raster outside the band, which §3.4 skips -- the
-T-Deck comment's second model. The CPU in-place shift stays out everywhere
-a second buffer exists: it costs twice the cross copy on the S3s and loses
-on the P4s. No tier reports `None` for `shift_last` today: every root
-retains at least its one buffer; a backend that retained nothing would.
+The S3 root lever flips from `None` (the 2026-10-23 verdict) because what
+the shift buys there is not the region's fill, which that verdict priced,
+but the rows' Python and raster outside the band, which §3.3 skips for an
+app that reads `ui.band()` -- and §14 prices honestly what an app that does
+not read it keeps. The CPU in-place shift stays out everywhere a second
+buffer exists: it costs twice the cross copy on the S3s and loses on the
+P4s.
 
 **The P4's fence** keeps the four rules of the 2026-10-23 design: before
 the submit, fence every op pending on the source buffer (a deferred stamp,
 a rotate in flight) and write back the destination rows' dirty cache lines;
 between submit and fence, no CPU write lands in a cache line of the
-destination rows -- a write that would (through the choke point, §3.3)
-fences first; at the fence, wait and invalidate the destination rows'
+destination rows; at the fence, wait and invalidate the destination rows'
 cache; the frame's own async ops keep their order, the shift landing before
-the content's close so `end_frame`'s last-write op is still last. The
-Guition's rotate shares the DMA2D, so a shift waits behind a rotate in
-flight; the gain is measured on a live whole frame, never in isolation.
+the content's close so `end_frame`'s last-write op is still last. **The
+rows the frame draws inside R are drawn after the fence** (§3.3 step 4), so
+the Python pass overlaps the DMA and the CPU never waits mid-pass; the
+band's raster beside a landing DMA runs ~6× slower (PSRAM contention,
+#113), which §14 prices.
+
+**A verb for the window buffer.** `copy_last_into(layer, x, y, w, h)`
+copies the rect of the last presented frame's buffer into a layer (a window
+buffer), with the P4's fence; `copy_last` writes only into the drawn-into
+back buffer and nothing today brings a window buffer up from the root. §8
+needs it.
 
 ### 3.3 A shift frame, in the verbs engine
 
-A frame of a nest R whose only change is its offset is a **shift frame**:
+A frame of a nest R whose change is its offset plus a known set of rows is
+a **shift frame**. Everything that licenses it is known at `api_begin`,
+before the pass, from the input the engine consumed and the producers'
+gens; nothing is inferred from the pass:
 
-1. **Licensed by producer signals**: nothing marked the console dirty but
-   R's own motion (its drag, fling or glide), no press is live but R's
-   claimed drag, nothing animates over the surface, no tooltip, toast,
-   popover, menu or scrim shows, R's view rect, content extent, look and
-   window content rect equal the ring entry's, every gen R depends on
-   equals the entry's (`o.gen` on `ui.scroll`, `ui.page` and `ui.table` for
-   what the app draws inside R itself: covers, thumbnails, pictures), and
-   the entry recorded no overdraw of R after R's close but the cursor stamp.
-2. **The ground leaves R out**; at R's open the engine submits `shift_last`
-   for R's rect by Δ and sets the **floor**: the band of |Δ| rows, filled
-   with R's ground.
-3. **The app's pass runs.** Every verb runs its layout, focus and
-   hit-testing; its raster is clipped to the floor. A stop wholly outside
-   the floor answers 0-size and draws nothing; a stop that touches it draws
-   clipped. **The floor widens**: a stop whose record (kind, id, text,
-   value, state, box relative to the offset, a table's cells) differs from
-   the last frame's stop of the same id has changed under the move, so its
-   box joins the floor, its ground is filled and it draws whole. The
-   comparison can only ADD to the floor; it never licenses a skip (L2).
-4. **At R's close** the engine fences the shift, lifts the floor, writes
-   back the keeps the shift moved (the fades `moy_ui_fade` captured, the
-   cursor stamp's pixels at the stamp's rect minus Δ) in drawing order, cut
-   to outside the band, and takes the new keeps after the fence.
-5. **A structural change** -- a stop the last frame had that this pass did
-   not draw, a new stop, an order change -- is known only at the close. The
-   engine then re-runs the pass unclipped as a **replay** (`ui_frame`
-   begins with the input consumed, so no stop activates twice), and R takes
-   no shift for a hold-off of 8 frames. A replay is the only path that
-   costs a second pass; a stop whose content changes is paid as its rows.
+1. **Licensed at begin** when: nothing marked the console dirty but R's own
+   motion (its drag, fling or glide, through `api_moving`) and the input
+   the engine applies itself (a key step's focus move and reveal, a drag
+   sample, a typed key into a field); no press is live but R's claimed
+   drag; nothing animates over the surface; no tooltip, toast, popover,
+   menu or scrim shows; R's view rect, content extent, look, font scale and
+   window content rect equal the entry's; **every stop the app draws inside
+   R carries its gen** (`o.gen` on `ui.scroll`, `ui.page`, `ui.table` and
+   on a card's stop for its cover, picture or thumbnail; a `ui.part` inside
+   R with no gen, a nest with a placed `ui.at` stop, and a Lua or wasm app
+   report `None` and never shift); and the entry is frame n−1's complete
+   paint of R with nothing drawn over R after its close but the cursor
+   stamp (the WM's word, `_shown_ok`, not a canvas hook).
+2. **The widened set is deterministic**, built at begin from those facts:
+   the old and new focus rows and the row after each (a row's rule depends
+   on whether the row before it is focused, `after_mark`); the foot of each
+   group either touches (drawn with the last row's marks); the fade rects
+   (n−1's moved by Δ, which now hold blended pixels shifted, and n's --
+   `moy_ui_fade` blends in place and captures nothing); the cursor stamp's
+   rect moved by Δ; the scrollbar's rect; a typed field's row; and every
+   stop whose gen moved since the entry (a cover landing is that card's
+   rect, not a whole paint).
+3. **The ground leaves R out**; at R's open the engine submits `shift_last`
+   for R by Δ and sets the **floor**: the band of |Δ| rows plus the widened
+   set, a rect list in C. The app's pass runs: every verb runs its layout,
+   focus and hit-testing and the engine RECORDS each stop's draw; a stop
+   wholly outside the floor answers 0-size; **the floor only widens**: at
+   the first stop whose id or order differs from frame n−1's, the floor
+   grows to the rest of R below it (correct for stacked layouts, and only
+   adds); a stop that vanished from the tail has the ground filled under it
+   at close. There is no replay: the engine cannot re-run the host's pass
+   (the layers call `host.begin` and then their verbs; `api_begin` is not
+   idempotent), and a frame that found a structural change pays rows, never
+   a second pass.
+4. **At R's close** the engine fences the shift, then rasterizes the floor
+   from its records -- the band's ground and the stops that touch the
+   floor, clipped to it, each rect from the ground up -- and the fade and
+   scrollbar last. Drawing after the fence is what lets the pass overlap the
+   DMA (§3.2).
+5. **The app's own writes inside R** (`cv.cover`, `cv.picture`, `blit565`
+   for a card's cover) go through the canvas clip, which is one rect: inside
+   R it is the floor's bounding rect. Such a write is legal under the
+   licence because its gen holds, so it rewrites pixels the shift already
+   placed with the same bytes; the parity test proves it byte for byte. An
+   app that reads `ui.band()` skips what it need not draw.
 
-**The choke point.** The C row's write entry (`native/moy_glass/moy_canvas.h`)
-applies the floor, records overdraw and fences, for every write path: the
-verbs' fills, text and masks; `rect`, `cls`, `blit565`, `cover`,
-`picture`; the PPA fill and cover; `reset_state` and `set_viewport`.
-`clip(...)` inside R stores the rect intersected with the floor; `clip()`
-returns to it (`device/device_canvas.py` and the C row alike). The band
-invariant holds: inside the floor every pixel is painted from the ground
-up, so an anti-aliased edge never blends over itself.
+**The record comparison is a test, not a mechanism.** Under test, every
+shift frame's stop records (kind, id, text, value, state, box relative to
+the offset, cells) are compared with frame n−1's, and a difference outside
+the widened set fails the frame (L8's correctness direction). In the shipped
+engine the licence and the widened set are the whole rule, so a producer
+that changes a pixel without a signal is a bug the suite sees, not a hash
+the frame pays.
 
-**Skipping the per-row Python outside the band.** The engine's pass is C
-per verb, but the app's loop issuing the verbs is Python, and on the T-Deck
-that is 40% of a frame. `ui.band()` answers the floor in page coordinates
-(the whole page on a full paint); an app that loops over cards skips the
-cards it does not touch -- Get Carts, My Art, Storybook, Files' side -- and
-`ui.table` skips its own rows. An app that does not read it pays the
-dispatch and is still correct. This is a Moybyte-side verb of the public UI
-API (`docs/ui_api_2026-10.md`), not moy-spec's.
+**`ui.band()` and `ui.keep(id, h)`.** `ui.band()` answers the floor in page
+coordinates (the whole page on a full paint); an app that loops over cards
+skips the cards it does not touch -- Get Carts, My Art, Storybook, Files'
+side. A skipped card still has a record: the app passes `ui.keep(id, h)`
+for it, which carries the stop's record forward with its height, so flow
+layout, focus and the structural check see it; a key step onto a kept stop
+finds it. Both are Moybyte-side verbs of the public UI API
+(`docs/ui_api_2026-10.md`), not moy-spec's. An app that reads neither pays
+its loop's Python and is still correct.
+
+**Ops that ignore the clip** -- `cls` and the DMA fill, the PPA fill and
+cover, `blit_strip` and the async stamp, `copy_last`, `set_viewport`, the
+cursor -- are each a break when they land inside R on a shift frame: the
+frame paints whole. The cursor is the one allowed overdraw, as a stamp.
 
 ### 3.4 The T-Deck, and full screen
 
 The handheld paints full screen through `FullscreenStackWM`, whose stack
 repaints whole under the gate; it has no debt and no shown ring, and keeps
-them so (§5.1 of the surface model: do nothing here, beyond the verb). The
-content's own `PaintRing` entry vouches for the buffer: the last painted
-frame is frame n−1 (a gap is harmless on this tier -- an idle loop changes
-neither buffer -- but a frame that painted anything else between them
-breaks the chain), its key equals this frame's, and the buffer the feeder
-is shipping is the source. A shift frame then is the cross copy (3.4 ms),
-the band, the rows, and the bar strip. On a P4 full-screen window the WM's
-ring vouches, as windowed.
+them so (§5.1 of the surface model: do nothing here, beyond the verb). On a
+shift frame **everything outside R draws**, as every frame draws it today
+(the bars, the hint strip, the chrome): only R is vouched, by the content's
+`PaintRing`, and only one frame deep -- the last painted frame is frame
+n−1 (a gap is harmless on this tier, an idle loop changes neither buffer,
+but a frame that painted anything else between them breaks the chain), its
+key equals this frame's, and the buffer the feeder is shipping is the
+source. A shift frame then is the cross copy (~4.3-5 ms), the floor's
+rows, and the rest of the page's chrome. On a P4 full-screen window the
+WM's ring vouches, as windowed.
 
 ### 3.5 Text contents and the home
 
 The same record, two more speakers. A `TextView` (§5) reports its change as
-a translation of the text rect by k lines plus the lines it edited and the
-caret's; a home arrangement (§8) as a translation of its band plus the cells
-whose selection changed. Each draws its lag from the record: rows are drawn,
-translations shift.
+a translation of the text rect by k visual rows plus the rows it edited and
+the caret's; a home arrangement (§9) as a translation of its band plus the
+cells whose selection changed. Each draws its lag from the record: rows are
+drawn, translations shift.
 
 ## 4. The verbs engine: which frames become shift frames
-
-With §2 and §3 together, a verbs page's frames are:
 
 | frame | today | designed |
 |---|---|---|
 | drag, fling | whole window; a fling stops at release | shift frame; the fling coasts in shift frames |
-| key step, repeat step, ball step | two whole paints, then N−1 whole-glass copies | one frame: focus moves (two rows) and the reveal becomes a glide; each glide frame a shift frame with the two rows; then N−1 copies of the window's rows (§7) |
+| the press frame (a finger lands) | whole window stamped, the backdrop restored | a content frame under direct render (§8): the window's rows only |
+| key step, repeat step, ball step | two or three whole paints, then N−1 whole-glass copies | one frame: focus moves (its rows) and the reveal becomes a glide; each glide frame a shift frame; then N−1 copies of R's rows (§7) |
 | typing into a field | whole window | the field's row (§6) |
 | a tap, a value change | whole window | the stop's rows |
 
 The rows are the floor of §3.3 with no translation: a frame whose change is
-rows only (a focus move with no scroll, a typed key) licenses the same way,
-the floor the rows' union, every other stop clipped to nothing. Where a
-change is neither (a page switch, a look change, a dialog opening), the page
-paints whole, as today, and that full paint re-arms the ring.
+rows only licenses the same way, the floor the rows' union, every other
+stop clipped to nothing. Where a change is neither (a page switch, a look
+change, a dialog opening), the page paints whole, as today, and that full
+paint re-arms the ring.
 
 ## 5. Text editors: the edited line and the caret
 
 **One body: `TextView`** (`runtime/ui_draw.py`), the view of a text buffer
-in lines: the first visible line, the lines' pitch, the caret, the
-selection, and a `PaintRing`. The Code tab (`CodeLayer`, which the theme
-Config text extends as `ConfigLayer`), the editor handle (`EditorHandle`,
-which the Player makes for Notes and which the cart's canvas draws), the
-verbs' fields and the text console draw their lines through it. The buffer
-stays where it is (`CodeEditor`, the handle's document, the console's ring);
-`TextView` is given what changed:
+in **visual rows** -- a wrapped paragraph's rows, a code line's one row --
+with the first visible row, the rows' pitch, the caret, the selection, and a
+`PaintRing`. The Code tab (`CodeLayer`, which the theme Config text extends
+as `ConfigLayer`), the editor handle (`EditorHandle`, which the Player makes
+for Notes), the verbs' fields and the text console draw their rows through
+it. The buffer stays where it is (`CodeEditor`, the handle's document, the
+console's ring); `TextView` is given what changed, in visual rows:
 
-- **an edit** marks the edited line(s) -- the line typed into, every line
-  below it when a line was split or joined (a translation of the lines below
-  by one pitch, plus the two lines), a paste's range;
-- **a caret move** marks the caret's old and new lines (the caret is solid,
+- **an edit** marks the rows of the edited paragraph or line as laid out
+  before and after; when its row count changed (a split, a join, a wrap
+  that gained or lost a row), everything below is a translation by the
+  difference plus those rows; a paste marks its range the same way;
+- **a caret move** marks the caret's old and new rows (the caret is solid,
   §14.1's invariant, so the two rows are the whole change);
-- **a scroll** by k lines is a translation of the text rect by k pitches plus
-  the k exposed lines; a drag scrolls by pixels through the view's
-  `ScrollRegion`, a key page by lines through `step`, a caret leaving the
+- **a scroll** by k rows is a translation of the text rect by k pitches plus
+  the k exposed rows; a drag scrolls by pixels through the view's
+  `ScrollRegion`, a key page by rows through `step`, a caret leaving the
   view reveals it through `glide_to`, every frame of which is a translation.
 
+**What draws the whole view**, named so none is inferred: a horizontal
+scroll (the Code tab's `ed.left` moves every row); a gutter width change
+(the line count crossed a digit); a font, scale, wrap or look change; a
+find whose match lies outside the view (a scroll of more than a view is a
+page change, and its p90 is priced as one in §15); and a buffer replaced.
+**Overlays over the text rect** -- the Code tab's completion popup, its
+crash popup, the jump and files overlays, the autoscroll mark -- are rows:
+the overlay's old and new rects join the frame's rows, under the ground
+they cover.
+
 `TextView.draw(cv, ...)` takes the lag from the WM's `retained` (windowed) or
-its own ring (full screen), composes it with the frame's change, shifts the
-translation with `shift_last` and draws the rows: the line's ground, its
-text (the Code tab's highlighter runs for those lines only), the gutter
-number, the caret, the selection's spans. Lines outside the rows are not
-laid out -- the T-Deck's `qstr_find_strn` share (strings interned per frame
-for every visible line) goes with them. The whole view draws when the lag is
-unknown, the font or wrap changed, or the find's match highlight moved
-(a find's next match is a scroll plus the match's rows).
+its own ring (full screen), draws the lagging rows, shifts the translation
+with `shift_last` and draws the frame's rows: the row's ground, its text
+(the Code tab's highlighter runs for those rows only), the gutter number,
+the caret, the selection's spans. Rows outside the set are not laid out --
+the T-Deck's `qstr_find_strn` share (strings interned per frame for every
+visible line) goes with them.
 
 **Each editor, what it keeps and what it drops.**
 
 - *The Code tab* keeps `draw_lines` as the row renderer and loses its
   whole-pane loop; the status band and the bar strip are outside the text
-  rect and draw as today (the strip through the WM's bar word, `strip_moved`).
-  Its drag pans by whole lines on any upward movement today
+  rect and draw as today (the strip through the WM's bar word,
+  `strip_moved`). Its drag pans by whole lines on any upward movement today
   (`CodeLayer._code_drag` floors the delta); the view's `ScrollRegion` in
   pixels replaces it, and a drag scrolls as a finger does.
 - *The theme Config text* is the Code tab's class and takes all of it;
   `ThemeDoc.follow` runs before the draw as today.
-- *Notes* runs as a cart in a window, and its handle draws into the cart's
-  canvas, one persistent buffer: the translation is an in-place
-  `scroll_rect` there, the rows drawn over it. The cart's frame is composited
-  by the Player; the handle DECLARES its change rect through the cart's
-  frame (as `patch_cart_frame` declares the FPS chip's rect, §5.1 of the
-  surface model), so the composite copies the rows and not the canvas, and
-  a frame with no change composites nothing. The cart still ticks at its
-  rate; what it draws is the rows.
 - *The fields* (`ui.field`: Settings' name, Cart info's, Blocks' prompts,
   Notes' new-note name) are one row each inside the verbs engine: a typed
   key changes the field stop's record, so §3.3's floor is the field's box.
-  Under a dialog the page is held (§14.5) and the dialog's own rows are its
-  floor; the Blocks prompts' 121 ms keystroke becomes the field's row.
+  Under a dialog the page is held (§14.5): the held page is put back each
+  frame today, which would wipe the dialog's rows, so a rows frame under a
+  dialog skips the put-back and draws the dialog's rows alone.
+- *Notes* is a system cart on the verbs engine: its `_draw` runs its whole
+  verbs page every tick (`ui.bar`, `ui.page("")`, the hints, the sheet),
+  and the page's ground fills the cart's canvas before the handle draws, so
+  rows in the handle alone save nothing. Notes takes the floor as any verbs
+  page does: the handle tells the engine its pending rows at begin (the
+  handle is shell code; the cart's pass runs under the floor, the page
+  ground fills the floor only), and the handle draws rows only when the
+  canvas's gate counters (`MOY_ST_N_FILL`, `MOY_ST_N_TEXT`) show nothing
+  else wrote the canvas since its last draw -- otherwise whole. The cart
+  verb `ed.draw(x, y, w, h)` keeps its meaning for every other cart (render
+  the document into that rect, this frame): a cart that `cls()`es and calls
+  it gets the whole document, because its counters moved. The cart's canvas
+  is one persistent buffer, so the translation is an in-place `scroll_rect`
+  there; the Player window's content speaks the record (the handle's rows)
+  through the shown ring, so the composite copies the rows and the ring's
+  lag, not the canvas. It is the last phase (§15 P8), priced honestly, and
+  §15 says what it costs if the cart floor does not hold.
 - *The text console* (`runtime/text_console.py`) draws through the view for
   its scrollback rows and its prompt line; a script that prints appends
-  rows, which are a translation of the scrollback by the lines appended
-  plus those lines. Its frame cadence is the script's (a cart's loop), and
-  both boards measure it under target; it takes the view for the one body,
-  not for a row it needs.
+  rows, a translation of the scrollback by the rows appended plus those
+  rows. Its frame cadence is the script's (a cart's loop), and both boards
+  measure it under target; it takes the view for the one body, not for a
+  row it needs.
 
-**The cost** of a keystroke becomes the row's raster (one line of glyphs,
+**The cost** of a keystroke becomes the row's raster (one row of glyphs,
 ~0.3-0.5 ms on the P4 at the mono font, a few hundred µs on the T-Deck) and
 the frame's fixed part; of a caret step the same twice; of a scroll by a
-line the shift plus a line.
+row the shift plus a row.
 
 ## 6. Typing and one row
 
@@ -432,155 +553,194 @@ owns and nowhere else.
 
 ## 7. One paint per press
 
-**Why two paints and two copies today.** §1 says it: the verbs engine
-reports every frame whose input moved anything as unsettled, the host owes
-a frame on it and paints the page whole again; then the windowed WM's
-`_full_debt` brings the other buffers up by copying the whole glass, once
-per buffer, while the desk is calm. A gamepad press pays the same; the
-T-Deck's lists pay the two paints (16 painted frames for 8 presses on
-Settings and Licences) and no copies.
+**Why two paints and two copies today.** §1 names the three causes of the
+second paint and the one of the copies. Each is taken apart:
 
-**The engine tells a move it drew from an action it owes.** `settled`
-splits in two: `moved` -- the focus and the offset changed, which
-`api_begin` applied before the pass and the pass drew, so nothing is owed --
-and `owed` -- an activation (`act`), a typed key the app applies to its own
-text, a tap, a dismissed popover, or a geometry change found at the close
-(the focused row grew under the reveal), each of which the app may act on
-after the pass. Only `owed` marks the next frame; `App.owed` and `still()`
-read it, and the layers' `host.owed` checks are unchanged. The reveal keeps
-its place at `api_begin` and sets the nest's glide target (`glide_to`,
-§2.1) instead of the offset, so the first frame after a press draws the
-focus in its two rows and the glide's first step as a shift frame. One paint
-per press on every tier.
-
-**The debt is rows, and it is paid by copy.** A change leaves the ring's
-other buffers lagging by the change's record (§3.1), not by the glass; the
-windowed WM's debt frame copies the record's rects out of the last buffer
-(`copy_last` of the window's rows for a page that scrolled -- whole buffer
-rows for the GDMA, which is what a window's content rows are) instead of
-the whole glass, and brings a buffer that lags by rows only up by those
-rows. During a glide no buffer is calm, so no debt is paid until the glide
-rests; then N−1 row copies, each a fraction of 13 ms by the rows' share of
-the glass, while nothing waits. The intermittent `_full_debt` stuck at 2
-after a Blocks-outline fling (the P4 comment, twice in six tries) is in
-this code, and the phase that rewrites it (§15) reproduces it first.
+- **The engine tells a move it drew from an action it owes.** `settled`
+  splits in two: `moved` -- the focus and the offset changed, which
+  `api_begin` applied before the pass and the pass drew, so nothing is owed
+  -- and `owed` -- an activation (`act`), a typed key the app applies to its
+  own text, a tap, a dismissed popover, a layout the engine found wrong at
+  the close (`c->owe`), or **a reveal set during the pass** (a list row's
+  step, a table's, `ui.focus`), which applies at the next begin and needs
+  its frame. `api_owes` answers `owed`; `AppHost.owed` and `still()` read it,
+  the layers' `host.owed` checks are unchanged. The pass-time reveals are
+  moved into begin where the last frame's boxes allow it (a list's and a
+  table's row step: the row's box is the last frame's at the same index),
+  so the common key step owes nothing; `ui.focus` from app code keeps its
+  owed frame.
+- **The reveal keeps its place at `api_begin`** and sets the nest's glide
+  target (`glide_to`, §2.1) instead of the offset, so the first frame after
+  a press draws the focus in its rows and the glide's first step as a shift
+  frame.
+- **The apps stop marking the page after the pass.** Files and Get Carts
+  read `ui.focus()` BEFORE drawing the pane (the reveal is applied at
+  begin, so the focus is this frame's) and report the pane as rows;
+  Storybook and Appearance report rows instead of `again()`/`all()`. A grep
+  ratchet fails a `damage.all()` after the pass in a verbs app. Without this
+  the engine's split removes nothing on those four: a dirty console fails
+  the licence and the page paints whole.
+- **The debt is R's rows, paid by copy, off the paint path.** A change
+  leaves the ring's other buffers lagging by the change's record (§3.1):
+  after a glide or coast that is all of R (the window's content rows, ~75%
+  of a 13 ms whole-glass copy for a default window) plus the rows outside;
+  after a pure focus move, a few rows. The windowed WM's debt frame copies
+  those rects out of the last buffer (`copy_last`, whole buffer rows to the
+  GDMA) instead of the whole glass, **asynchronously on the 2D-DMA where the
+  board has it and preemptible by input**: a press cancels the debt, and the
+  next change's paint pays it. During a glide no buffer is calm, so no debt
+  is paid until the glide rests. The tool reports the debt in per-press
+  latency (§14). The intermittent `_full_debt` stuck at 2 after a
+  Blocks-outline fling (the P4 comment, twice in six tries) is in this
+  code, and the phase that rewrites it (§15 P1d) reproduces it first.
 
 ## 8. Key and typing frames on the P4 without the stamp
 
 A key frame draws into `win.buf` and stamps it (19.5 ms windowed) because
 direct render (`wm_windowed._direct_render`, #155) is taken for content
-gestures only -- a frame that paints into the root ring leaves the window
-buffer behind, and only a content that speaks §14.3 can be told what lags.
-Every scrolling and text content speaks it now (§3.1), so **a speaking
-content direct-renders on every frame it draws**, key frames included,
-when the WM's `_shown_ok` holds (the window focused and on top, nothing over
-it, the chrome quiet). The window buffer then lags, as it does after a
-pointer gesture today, and is refilled where it is needed: when the window
-loses focus, is occluded, moved or resized, or at idle through the debt
-path (a copy of the content rect out of the root, not a redraw). A frame
-the ring cannot vouch for seeds it by stamping the window buffer into it,
-as §14.3 does today. The stamp disappears from the key and typing rows; a
-full-screen window's 12.2-12.7 ms stamp goes the same way.
+gestures only, and because its gates refuse everything else: `_chrome_quiet`
+and `_shown_ok` are false on a press frame (the desk and chrome repaint
+after a calm desk: 6.5 ms of window pass against 3.7 on a steady drag, 2.1
+of home against 0.4), `_frame_is_quiet` is false whenever `ws._animating`,
+and `_content_flinging` knows only the launcher and PROJECTS. Three changes:
 
-## 9. The home's arrangements, PROJECTS and the sprite pickers
+- **A speaking content direct-renders on every frame it draws**, key,
+  glide, coast and press frames included, when the window is focused and on
+  top with nothing over it. The window buffer lags, as it does after a
+  pointer gesture today.
+- **A frame whose only change is inside the focused window repaints no
+  desk and no chrome.** The WM reads `api_moving` and the content's record
+  in place of `ws._animating` for the freeze and for direct render: a
+  content moving on its own, or a press that reached the content and
+  nothing else, is a content frame. This is what reaches the press frame
+  (the stamp and the 16-17 ms backdrop restore both go) and every coast
+  frame of a verbs nest.
+- **The window buffer is refilled from the root, not redrawn**, through
+  `copy_last_into` (§3.2): asynchronously on the 2D-DMA at idle through
+  the debt path, preemptible by input, and before any reader of `win.buf`
+  (a focus loss, occlusion, a move, a resize, the freeze's own leg 5): the
+  shown ring is the authority on what the buffer lacks and every reader
+  refills first. `debt_owed` is rewritten for this case -- today it answers
+  False while `win.buf` is stale, which would leave the debt unpaid for
+  good. The refill is the stamp run backwards (6.5-20 ms a change at PSRAM
+  rates) moved off the paint path, not removed; the tool reports it with
+  the debt.
+
+The stamp disappears from the key and typing rows; a full-screen window's
+12.2-12.7 ms stamp goes the same way. The host desk takes direct render of
+key frames too, so the host is the test bed; its cursor is hidden in those
+tests (a visible cursor makes `_shown_ok` false, as it should).
+
+## 9. The home's arrangements, PROJECTS, the sprite pickers, My Art
 
 **The grid and icons arrangements** (`Launcher`, `IconHome`) repaint the
-whole home every painted frame (84-115 ms on the P4, 60-102 on the T-Deck),
+whole home every painted frame (97-123 ms on the P4, 80-102 on the T-Deck),
 while the carousel repaints a band and shifts the rest (24-27 on the
-T-Deck's same inputs, 32-40 on the P4's). The same path reaches them, with
-two changes:
+T-Deck's same inputs, 33-57 on the P4's). The same path reaches them, with
+two changes and one honest limit:
 
-- **a selection step is two cells**: the drag fast path (`_draw_home_fast`)
-  runs on a key, repeat or ball step too, its floor the cells whose
-  selection changed, and on a glide the band's translation plus the cells
-  exposed;
-- **the band shifts where the ground is still**: `Launcher.draw_shift`
-  repaints the band whole today because the cards lie on the wallpaper. Where
-  the backdrop has a restore key that is a plain fill or the theme's baked
-  backdrop (`Wallpaper.restore_key`, §14.4), the ground moves with the cards
-  and the band is a translation; a picture wallpaper and a cart wallpaper
-  keep the band repaint, with only the exposed cells drawn (the covers are
-  one `blit_batch`, not a blit per card, which is the T-Deck's 33% memcpy
-  share).
+- **a selection step is two cells**: the drag fast path
+  (`_try_drag_partial`) runs on a key, repeat or ball step too, its floor
+  the cells whose selection changed, and on a glide the band's translation
+  plus the cells exposed;
+- **the band shifts only on a plain ground**: `Launcher.draw_shift` repaints
+  the band whole today because the cards lie on the wallpaper, and the
+  wallpaper's restorer puts a baked backdrop (`bd`) or a picture back at
+  glass coordinates -- they stay put while the cards move. Only the plain
+  fill (`bg`) moves with the cards, and there the band is a translation.
+  On a `bd` or picture theme the band repaint stays, with only the exposed
+  cells drawn and the covers through one `blit_batch` (the T-Deck's 33%
+  memcpy share), which is the carousel's cost today: over the target on the
+  P4, and §15 says so with the next lever.
 
-The desk home's still ring (§14.4) already keeps the parts' keys; its
-entries become `PaintRing` entries (§3.1). The PROJECTS window is a
-`Carousel` in a window (`HomeWindowLayer`) and speaks the record through the
-WM like any windowed content. The tab switch by key (113-121 ms on the P4)
-is a page change and paints whole; its rows are under their own 100 ms
-target on the T-Deck and the P4's are reached by the backdrop's restore
-(§14.4), not by this design.
+The desk home's still ring (§14.4) keeps the parts' keys; its entries become
+`PaintRing` entries (§3.1). The PROJECTS window is a `Carousel` in a window
+(`HomeWindowLayer`) and speaks the record through the WM like any windowed
+content. The carousel's settle frame (the selection changes when the row is
+still: the hero and details pane repaint) is the carousel's key-row p90 on
+both boards; it is a rows change (the pane's rect) under §14.4's restore,
+and §15 prices it as one. The tab switch by key is a page change and paints
+whole, under its own 100 ms target.
 
-**The sprite pickers** (`paint_layer.py`'s grid, the theme editor's)
-read the sheet pixel by pixel into quads (`sheet.pget`, `moy_sheet_pget` 15%
-of the T-Deck's busy samples). The picker is a scaled view of an indexed
-sheet: it draws through `moy_gfx.blit_indices` (the compositor's
-indexed-to-565 blit) at the cell scale in one call per visible sheet rect,
-the grid lines and the selection over it, and scrolls as a `ScrollRegion`
-on two axes with the band contract. 39-40 ms a frame on the T-Deck becomes
-one blit of the visible cells.
+**The sprite pickers** (`paint_layer.py`'s grid, the theme editor's) read
+the sheet pixel by pixel into quads (`sheet.pget`, `moy_sheet_pget` 15% of
+the T-Deck's busy samples). The picker is a scaled view of an indexed
+sheet; `moy_gfx.blit_indices` places an index bitmap 1:1 with no scale and
+no source rect, so the picker needs a canvas-tier kernel of its own:
+`blit_indices_scale(src, sx, sy, sw, sh, dx, dy, scale, pal)` in `moy_gfx`'s
+compositor, nearest-neighbour, bounds-clamped, one call per visible sheet
+rect, the grid lines and the selection over it; the picker scrolls as a
+`ScrollRegion` on two axes with the band contract. The grid's fills and the
+picker's own Python stay, so §15 prices it at a fraction of today, not at a
+blit's cost.
 
 **My Art's covers** are built inside its draw (a 0.6-2.5 s frame per
 gesture on the P4). They move off the paint path: built one per idle frame
-through the console's idle step, as Get Carts' cover runs are, with the
-app's `o.gen` moving as each lands. This is a fix, not a mechanism, and it is
-the first thing built (§15).
+through the console's idle step, as Get Carts' cover runs are, each landing
+reported as that card's gen (its rect joins the floor, §3.3 step 2 -- never
+a whole paint per cover). This is a fix, not a mechanism, and it is the
+first thing built (§15 P0).
 
 ## 10. Why this is not a second invalidation mechanism
 
-Whether a surface draws is still decided by the gate, the gens and §14.1's
-freeze. The record only says, for a frame that IS drawing, what the buffer
-lacks and how much of the content to rasterize; `shift_last` only replaces
-the drawing of a lag the record names, as `copy_last` does for a whole
-frame. That is L5's line: the shared layer decides whether, the backend
-how. Against §8's graveyard: no widget reports damage (one region, one
-translation, one record per frame); nothing is inferred (a shift frame is
-licensed by producer signals and gens, and the per-stop comparison and the
-replay can only widen or force a repaint, never license a skip -- the line
-L2 gains); no root framebuffer is retained across web frames (the wasm
-canvas is one persistent buffer and shifts in place, which is retention of
-one buffer, as every raster tier declares); the PPA copies nothing 1:1
-(the 2D-DMA is a different engine, and what it buys is the CPU's time); and
-the cost that goes is the region's raster and the rows' Python, measured on
-a live whole frame.
+Whether a surface draws is still decided by the gate, the gens, §14.1's
+freeze and the one new Class B source, `api_moving`, which a nest declares
+while it moves. The record only says, for a frame that IS drawing, what the
+buffer lacks and how much of the content to rasterize; `shift_last` only
+replaces the drawing of a lag the record names, as `copy_last` does for a
+whole frame. That is L5's line: the shared layer decides whether, the
+backend how. Against §8's graveyard: no widget reports damage (one region,
+one translation, one record per frame, and the widened set is built from
+the input the engine consumed and the producers' gens, never from the
+pass); nothing is inferred (a stop whose content changes without a gen is a
+bug the L8 assertion fails under test, not a hash the frame pays -- the
+line L2 gains: a draw-stream comparison may assert, never license); no
+root framebuffer is retained across web frames (the wasm canvas is one
+persistent buffer and shifts in place, which is retention of one buffer, as
+every raster tier declares); the PPA copies nothing 1:1 (the 2D-DMA is a
+different engine, and what it buys is the CPU's time); and the cost that
+goes is the region's raster and the rows' Python, measured on a live whole
+frame.
 
 **The surface model is amended in the same commit** as the first ring
-entry: a §14.7 that states the change record and `shift_last` (§3.1, §3.2
-here, in the model's voice), §7's scroll-as-blit row naming the two ring
-bodies (the windows' `_shown`, the contents' `PaintRing`), and L2's added
-line.
+entry (§15 P1c): a §14.7 that states the change record, the two Δ rules and
+`shift_last`/`copy_last_into` (§3.1, §3.2 here, in the model's voice),
+§7's scroll-as-blit row naming the two ring bodies (the windows' `_shown`,
+the contents' `PaintRing`) and the one-voucher rule, `api_moving` in §3's
+Class B list, and L2's added line.
 
 ## 11. What reports `None`
 
+Per canvas, then per source:
+
 | lever | present | `None` |
 |---|---|---|
-| `shift_last` across buffers | P4s (2D-DMA), S3s (CPU row copy) | -- (a one-buffer root shifts in place) |
-| `shift_last` in place | host, web runner | the P4s and S3s (a second buffer exists; the CPU in-place shift loses) |
-| the PPA ground fill before R opens | P4s | S3s, host, web |
+| `shift_last` across buffers | the P4 roots (2D-DMA), the S3 roots (CPU row copy) | a one-buffer canvas (shifts in place instead); the Guition's root while a rotate is in flight (answers False, the frame draws) |
+| `shift_last` in place | one persistent buffer: the host's and web's root, every `win.buf`, every layer, a cart's canvas | the P4 and S3 roots (a second buffer exists; the CPU in-place shift loses) |
+| `copy_last_into` a layer | roots with a `last` buffer (the P4s, the S3s) | one persistent buffer (the window buffer is the root's twin already on the host) |
+| the PPA ground fill before R opens | the P4s | the S3s, the host, the web |
+| a shift frame of a nest | a nest whose app passes every gen it draws inside R | a nest with a `ui.part` and no gen, a placed `ui.at` stop, a Lua or wasm app |
 | held-key repeat | every level source: the T-Deck matrix, BLE, the host's and browser's keyboards, a gamepad | the T-Deck keyboard's ASCII fallback |
-| the trackball's steps and `BALL_COAST` | the T-Deck | every board without a ball |
+| the trackball's steps and `BALL_COAST` | the T-Deck (and the host's arrow pan) | every board without a ball |
 | direct render of key frames | the windowed WM over a root with `set_viewport` (the P4s, the host desk) | the web runner's canvas (keeps the stamp); the fullscreen WM (no window) |
 | the debt copy of rows | roots with `copy_last` and a ring deeper than one | one persistent buffer (owes nothing) |
 
 Where a lever is `None` none of its bookkeeping runs: no ring entry is
-written for a shift that cannot happen, no keeps are taken, no overdraw is
-recorded. The host runs every mechanism under test as an emulated tier
+written for a shift that cannot happen, no widened set is built, no refill
+is queued. The host runs every mechanism under test as an emulated tier
 (§13), which is how a `None` that should have been a value is caught (L8).
 
 ## 12. Deliberately left out
 
-- Lua and compiled carts, and a cart's own scrolling: a cart may read `btn`
-  in its draw and its `cls` writes past any floor (the 2026-10-23 design's
-  reason stands); the Player composites a declared rect at most (§5).
+- A cart's own scrolling, and every Lua and compiled cart: a cart may read
+  `btn` in its draw and its `cls` writes past any floor; the Player
+  composites a declared rect at most (§5, Notes, whose pass is shell code).
 - An overshoot or a rubber band at the clamp: the fling hard-stops, as #113
-  v1 did. A parameter the owner can ask for later; it changes the physics
-  twin only.
-- The first frame of a gesture (the press frame's stamp and backdrop
-  restore, Settings' 54 ms against 21 steady): it is the §14.3 seed and
-  §14.4's restore, and a shift frame does not reach it.
-- A hash of R's raster bytes with a replay on mismatch: replaced by the
-  per-stop comparison at draw and the structural replay (§3.3). The hash
-  cost a second pass on every mismatch and could not say WHICH stop moved.
+  v1 did (owner, 2026-10-27).
+- A replay of the app's pass (§3.3): no host has a re-run hook and the
+  engine's begin is not idempotent; a structural change pays rows.
+- A hash of R's raster bytes: replaced by the deterministic widened set and
+  the L8 record assertion.
 - The home's tab switch and every page switch: whole paints, under their own
   target.
 - The text console's cadence (a script's loop) and the web console (no
@@ -589,6 +749,9 @@ recorded. The host runs every mechanism under test as an emulated tier
   (§5), and a popover is overlay, which forces full paints under it; a long
   popover that scrolls takes the nest's state like a page and shifts only
   when a later measurement says it must.
+- A per-cell retained layer for the home's cards on a picture wallpaper:
+  the next lever for the rows §15 leaves over, named there, not designed
+  here.
 
 ## 13. The guards
 
@@ -599,18 +762,22 @@ on one, two and three buffers presented in turn (the host compositor's
 
 - **The motion** (`tests/test_ui_physics.py`, `test_kinetic_scroll.py`):
   the glide reaches its target exactly, re-aims without a jump, a step moves
-  one step from the target, a repeat count of n moves n; the C against the
-  twin on the desktop MicroPython in the boards' float model.
+  one step from the target, a count of n moves n in one frame; the C against
+  the twin on the desktop MicroPython in the boards' float model, dt through
+  the input word.
 - **The input layer** (`tests/test_tdeck_input.py` and the table's own
-  suite): a held button repeats after the delay at the rate on the table's
+  suite): a held button repeats after the delay at the rate on the passed
   clock, a frame of two periods owes two, `btnp` stays an edge, a disarm
   zeroes repeats, the ASCII fallback repeats nothing (`None`), a typed key
-  repeats as a count and the queue's zero frame does not cap it; every
+  repeats as a count from the typing-level slot and `key()`/`keyp()`/
+  `last_key` never carry it, the queue's zero frame does not cap it; every
   modal, menu and dialog activates on an edge only (a fuzz over the
-  surfaces with repeats on: no activation count moves).
+  surfaces with repeats on: no activation count moves); the web page
+  forwards no `e.repeat`.
 - **The trackball**: 30 of 30 steps delivered at 30 steps/s on every
-  stepping surface (the merged bench's `ball_fast` row, §14), `BALL_COAST`
-  0 adds no velocity, a value adds the surplus's.
+  stepping surface AND the view within one glide of the target at every
+  presented frame (the merged bench's `ball_fast` row reports both, §14);
+  `BALL_COAST` 0 adds no velocity, a value adds the surplus's.
 - **The shift frame** (the verbs engine, console-level through the WM and
   full screen): for every verbs app and every text surface, a scripted drag,
   fling, key step, held key and typed line, rendered shift-and-rows and
@@ -618,37 +785,52 @@ on one, two and three buffers presented in turn (the host compositor's
   with the cursor showing, with a tooltip and a toast arriving mid-gesture
   (each forces a full paint and the pixels still match), both directions,
   |Δ| from 1 to the view less one, fades at either end, the clamp at either
-  end; the fixtures carry decoded covers.
+  end, a cover landing mid-fling (its rect joins the floor, no whole paint),
+  an app that skips through `ui.band()`/`ui.keep()` while flinging; the
+  fixtures carry decoded covers.
+- **The L8 record assertion**: on every shift frame of those sessions the
+  stop records equal frame n−1's outside the widened set; a stop whose
+  neighbour's focus changed, a group foot, a fade rect, each fails the frame
+  if left out of the set.
 - **Two emulated DMAs** (the copy landing at submit, and at the fence) must
   produce the same frames.
-- **Each break forces a full paint**, with a counting canvas: a cover
-  landing mid-drag, a look change, a window moved during a fling, a
-  painted-frame gap, an overdraw other than the cursor, an app that draws in
-  R with no gen, a stop that vanished (the replay fires, once, then the
-  hold-off).
-- **The liar**: an app that mutates a stop's text without a signal still
-  matches the full paint (its row joins the floor).
-- **The floor and the choke point**: `clip` inside R intersects the floor
-  and `clip()` returns to it; `cover`, `picture`, `blit565`, `cls`, the PPA
-  fill and `set_viewport` write no pixel outside the floor inside R, or
-  fence first; `ui.band()` equals the floor in page coordinates.
+- **Each break forces a full paint**, with a counting canvas: a look change,
+  a window moved during a fling, a painted-frame gap, an overdraw other than
+  the cursor, an app that draws in R with no gen, a placed `ui.at` stop, a
+  stop that vanished at the tail (the ground filled, no second pass), an op
+  that ignores the clip landing in R.
+- **The floor**: `clip` inside R intersects the floor's bounding rect and
+  `clip()` returns to it; the engine's own raster lands in no pixel outside
+  the floor's rects; `ui.band()` equals the floor in page coordinates; a
+  shift frame's rows are drawn after the fence (an ordering probe).
 - **One paint per press**: a key step on every verbs page paints exactly one
-  frame, then N−1 copies whose bytes are bounded by the window's rows; the
-  intermittent stuck debt has a regression test once reproduced.
-- **Direct render of key frames**: the window buffer's lag is the record's
-  composition; a focus loss, occlusion, move and resize find it refilled
-  byte-equal to a live draw.
+  frame (the pass-time reveals moved into begin; `ui.focus` from app code
+  still owes one), then N−1 copies whose bytes are bounded by R's rows;
+  the `damage.all()`-after-pass ratchet; the stuck debt has a regression
+  test once reproduced.
+- **Direct render of key frames**: on the host desk with the cursor hidden,
+  a key, glide, coast and press frame of a speaking content each engage
+  direct render (an L8 engagement count per frame class) and repaint no
+  desk or chrome (a counting backdrop); the window buffer's lag is the
+  record's composition, and a focus loss, occlusion, move, resize and the
+  freeze's leg 5 each find it refilled byte-equal to a live draw.
 - **The text view**: for the Code tab, theme Config, Notes, each field and
-  the console: typing, caret moves, split and join, paste, find, a page key,
-  a drag -- every frame byte-equal to a whole draw; the highlighter runs
-  for the rows only (a counting highlighter).
+  the console: typing, caret moves, split and join, a wrap that gains and
+  loses a row, paste, find in and out of the view, a page key, a drag, a
+  horizontal scroll, a gutter crossing a digit, each overlay opening and
+  closing -- every frame byte-equal to a whole draw; the highlighter runs
+  for the rows only (a counting highlighter); a cart that `cls()`es and
+  calls `ed.draw` gets the whole document.
 - **The home and the pickers**: a selection step draws two cells, a shift
-  on a plain ground is a translation, a picture wallpaper repaints the
-  exposed cells only, the picker's blit matches the per-pixel draw byte for
-  byte on every scale and scroll.
+  on a plain fill is a translation, a `bd` and a picture theme repaint the
+  exposed cells only through one `blit_batch`, the picker's kernel matches
+  the per-pixel draw byte for byte on every scale, source rect and scroll.
+- **Allocation**: `tests/test_frame_alloc.py`'s pin extends to a shell shift
+  frame and a rows frame (preallocated ring slots and record rects); Files'
+  per-frame row list is rebuilt only when its rows change.
 - **L8's silent-disable direction**: over a scripted fling, a glide and a
-  typed line, the count of shift frames and row frames stays above a floor,
-  per surface; a mechanism that quietly never engages fails.
+  typed line, the fraction of shift frames and rows frames stays above a
+  floor, per surface; a mechanism that quietly never engages fails.
 - **One body**: the grep guards of §2.1 and §3.1.
 - **The web**: `tools/web.py shot` of a page mid-fling and mid-glide under
   injected dt equals the host's screenshot (the existing web goldens gain
@@ -656,10 +838,11 @@ on one, two and three buffers presented in turn (the host compositor's
 - **On glass, in each board's suite**: `shift_last` byte-exact against
   `moy_gfx.scroll_rect` in both directions; on a P4 the primed-cache test
   (destination lines pulled into cache before the copy, read after the
-  fence) and a CPU write into the destination rows during the flight
-  fenced first; on an S3 the copy exact while the feeder ships the source.
+  fence), a CPU write into the destination rows during the flight fenced
+  first, and the Guition's refusal during a rotate; on an S3 the copy exact
+  while the feeder ships the source; `copy_last_into` exact on each.
 
-## 14. One measuring tool
+## 14. One measuring tool, and the arithmetic
 
 Two tools were written for the baselines: `+tools/scroll_bench.py` (commit
 `83d2ccaa`, worktree `scrollbase_p4`: the P4, the frame's split into content,
@@ -685,68 +868,209 @@ broke Star Catcher on the T-Deck. Neither is on dev; one tool lands:
   the scratch project, note and script deleted, the home's tab, the theme
   and the window sizes restored, PERF DIAG and `uncap` put back, the board
   left on the home.
-- **Its rows** carry: paints (n, median, p90, max), debt copies, the longest
-  gap while the input moves, the paint rate under live input, what moved
-  after the input (coast or glide frames, and for how long), per-press
-  latency, presses coalesced, keys dropped, steps delivered of steps rolled,
-  and the frame's split; `--against` prints a run beside an earlier one with
-  regressions flagged, as `shell_bench.py --report --against` does.
-- **The estimate's arithmetic**, stated once: a reached row's expected
-  frame = the baseline's `rest` + `other` (the frame's fixed part and the
-  layers outside the surface) + the shift's CPU cost on that tier (§3.2) +
-  the rows' raster (a band of |Δ| rows, or the changed lines, at the
-  baseline's content raster scaled by their share of the view). The tool
-  prints this expectation beside each row of a baseline run, so a phase's
-  gate is a column, not a conversation.
+- **The gates are presented frames, split by what moved.** A row's p90 is
+  over the **presented interval** while the input or the view moves --
+  the buffer switch on a P4, the feeder's completion on an S3 -- not over
+  painted frames alone, because painted-frame p90 excludes the debt copies,
+  the T-Deck's 3-5 ms of upcalls and the flush. Each row reports **live,
+  coast and glide** p90 separately (a coast cannot dilute a press frame),
+  **the max of the first three frames of every gesture** (the press frame
+  is its own gate), the debt copies and the window-buffer refill in
+  per-press latency, and **the fraction of shift and rows frames** (L8).
+  "Keeps up with a hand" is per frame: the scheduled finger position
+  against the content's offset at presentation, and the release velocity
+  against the finger's. The T-Deck's loop split under PERF DIAG (+4 ms) is
+  a separate run from the numbers.
+- **The null-floor run.** Before any shift exists, a diag mode clips every
+  content raster to an empty floor and runs each surface's rows: what
+  remains is the surface's **pass cost** (its Python loop, the engine's C
+  layout, the WM's window pass), which is the shift frame's lower bound and
+  the one number the arithmetic below needs measured, not guessed. It is
+  P0's first deliverable.
+- **The arithmetic**, per frame, for a reached row:
+
+      expected = total − content − stamp
+                 + 1.1               (the direct-render stamp, measured)
+                 + pass               (the null-floor run; until it exists
+                                      40% of content, 20% for an app that
+                                      reads ui.band)
+                 + shift              (P4: ~0.04 submit + a live submit's
+                                      writeback; S3: ~4.3-5 copy; host/web:
+                                      scroll_rect in place)
+                 + fence wait         (P4: 0 when the rows draw after the
+                                      fence and the pass outlasts the DMA;
+                                      else the DMA's remainder, 0-5)
+                 + rows               (the band and the widened set at the
+                                      content raster's rate, ×6 under DMA
+                                      contention on a P4: ~1.5 ms a band)
+
+  `total`, `content` and `stamp` are the row's own frames (the frame
+  classes above, never the mean split, which averages debt copies in).
+  Whole-content removal -- "97% of rows fit 33 ms without the raster" -- is
+  the bound for removing the content DRAW, Python included, and no phase
+  reaches it: the pass stays. The tool prints this expectation beside each
+  row of a baseline run, so a phase's gate is a column, not a conversation,
+  and a presented-interval floor for the T-Deck: `ws.frame` + 3-5 ms, and
+  the 12.8-13.5 ms flush below it, so a painted frame under ~13 ms presents
+  no faster than the feeder (~70 fps).
 
 ## 15. Build order
 
-Phases are sized for one agent each, worst rows first; the ones that touch
-the Editor's surfaces (P4, P5, P7) run one after another; P6 is
-independent of them. Each phase ends with its measurement step on the
-Waveshare P4 and the T-Deck through §14's tool, verdicts to #66, and the
-Guitions measured when a P4 or an S3 path changed.
+Phases are sized for one agent each, worst rows first within what the
+dependencies allow; the ones that touch the Editor's surfaces (P3, P4, P5,
+P7b) run one after another; P6 and P7a are independent of the shift work
+and run beside it from the start, because they are the T-Deck's actual
+over-target rows. Each phase ends with its measurement step on the boards
+it names through §14's tool, verdicts to #66; the Guitions are measured
+when a P4 or an S3 path changed. Estimates are §14's arithmetic at the
+provisional pass cost; P0's null-floor run re-prices every one before P1a.
 
-| phase | builds | rows reached (baseline p90 → expected, P4 / T-Deck) | guard |
-|---|---|---|---|
-| **P0 the tool** | `+tools/input_bench.py` merged (§14); My Art's covers off the paint path (§9) | My Art every row (0.6-2.5 s frames gone; drag 73 → ~57 / 25) | the tool's own test on the host sim; My Art's fling frames bounded |
-| **P1 the shift frame** | `shift_last` on every tier with the P4 fence and the S3 row copy; the floor and the choke point; the verbs' nests' ring entries and change record; `ui.band()`; the surface model's §14.7 | every verbs app's drag and fling, windowed and full screen: P4 Settings fling 55 → ~12, Files 79 → ~15, Get Carts 58 → ~14, Storybook 73 → ~12, Appearance 87 → ~15, Calc 54-65 → ~12, Config 67 → ~15, the Blocks outline 66-92 → ~16; T-Deck Settings 25 → ~13, Get Carts 20 → ~11, Calc 23 → ~11, Config 25 → ~12, My Art 25-30 → ~13 | §13's shift-frame, floor, DMA, break and liar tests; on-glass verb tests |
-| **P2 one paint per press** | the reveal at begin; the debt as rows by copy; direct render of key frames; the stuck-debt reproduction | every verbs page's key, held-key and 20/s row: P4 Settings key steps 33 → ~11, Files 56-60 → ~14, Get Carts 51-59 → ~13, Appearance 56-64 → ~14, Calc 31-63 → ~12, Config 68 → ~15, Music steps 86 → ~16, Blocks outline 96 → ~17; T-Deck's list pages lose their second paint (Settings and Licences 16 paints for 8 presses → 8) | one-paint test; the debt's bytes bounded; the direct-render lag tests |
-| **P3 the motion** | the glide in `moy_ui_scroll_t`; the fling on every nest; the carousel's glide deleted; the input layer's repeat and counts; the trackball's steps and `BALL_COAST` | every row's motion: a fling coasts everywhere, a key step glides in shift frames; the T-Deck's `ball_fast` rows deliver 30 of 30 (13-27 today); held keys move on every surface (none today); the P4's held-key rows stop repeating per frame (Code, Notes, Music ~11 Hz with no delay → the rate) | physics twin, input-table suite, the ball rows, the edge-only activation fuzz |
-| **P4 the Code tab and theme Config** | `TextView` over `draw_lines`; the view's `ScrollRegion`; the WM record for the text rect; the Code tab's drag by pixels | P4 Code key steps 86 → ~12, typing 86-92 → ~12, held key 84 → ~12, fling 87-105 → ~14, find 104 → ~20, drag 57-82 → ~14; theme Config text 91-121 → ~12-14; T-Deck Code type 40 → ~10, find 68 → ~18, drag 24 → ~10, theme Config 12-15 → ~8 | the text-view tests on 1, 2 and 3 buffers; the counting highlighter |
-| **P5 fields, dialogs, Notes, the console** | the field's row in the engine; Notes' handle on `TextView` with the declared rect through the Player; the console's rows | P4 Blocks prompts 123 → ~15, Cart info fields 86 → ~14, Notes typing 59-93 → ~20 (the cart's tick stays), Notes key steps 93 → ~20; T-Deck Notes 21-23 → ~9, the Settings name field 25 → ~9, Blocks prompts 19 → ~8 | the field and dialog rows under the held page; Notes' declared rect byte-equal to a whole composite |
-| **P6 the home and PROJECTS** | the fast path on steps; the band's translation on a still ground; `blit_batch` covers; the still ring as `PaintRing` | P4 home grid 99-123 → ~35 (the carousel's 33-57 is the evidence), home icons 97-123 → ~35; T-Deck grid 80-87 → ~25, icons 92-102 → ~25, the carousel's settle frame 48-51 → ~26 | §13's home tests; `test_home_still.py` extended |
-| **P7 the pickers and the Editor's panes** | the picker's indexed blit and two-axis region; the Map's camera, Music's steps and Config's cards on the nest state (they are verbs pages or two-axis regions already by P3) | T-Deck sprite pickers 40 → ~15; P4 sprite picker 93-96 → ~20, Map 68-81 → ~18 | the picker's byte-equality on every scale and scroll |
+| phase | builds | boards | parallel with | rows reached (baseline p90 → expected, P4 / T-Deck) |
+|---|---|---|---|---|
+| **P0 the tool** | `+tools/input_bench.py` merged (§14) with the presented-interval gates, the frame-class split, the first-three-frames max, the finger-vs-content probe and the null-floor run; My Art's covers off the paint path as rows (§9) | P4, T-Deck | -- | My Art every row (0.6-2.5 s frames gone; drag 73 → ~35-40 / 25 → ~22); every other row re-priced |
+| **P1a the verb** | `shift_last` per canvas (§3.2): the P4 2D-DMA synchronous first then async with the fence, the Guition's refusal during a rotate and its `note_damage`, the S3 row copy, in place on one-buffer canvases; `copy_last_into`; on-glass tests; the live submit, writeback and fence measured | P4, T-Deck | P6, P7a | none directly (a verb) |
+| **P1b the motion** | the glide and the fling in `moy_ui_scroll_t` and on every nest, the dt word, `api_moving`, the carousel's glide deleted, the pass-time reveals into begin, `settled` → `moved`/`owed` | host; a feel check on both | P1a, P6, P7a | a fling coasts on every verbs page and a key step glides (at full paints until P1c: its frames cost today's, so P1b's gate is the motion's correctness and the single paint per press on the T-Deck's lists -- Settings and Licences 16 paints for 8 presses → 8) |
+| **P1c the floor on the host** | the licence, the widened set, the floor list, monotone widening, drawing after the fence, `ui.band()`/`ui.keep()`, the apps' gens for covers, `PaintRing`, the L8 record assertion, surface model §14.7 | host; T-Deck | P2 | T-Deck verbs drag and fling: Settings 25 → ~19-21, Calc 23 → ~17, Get Carts 20 → ~13, Achievements 21-22 → ~16, Licences 18 → ~13, My Art 25-30 → ~15, Storybook 12 → ~10 (all under already; the T-Deck gains little here) |
+| **P1d the WM records and direct render** | `_shown` change records, direct render on every frame of a speaking content, the content-only frame (no desk, no chrome), the window-buffer refill, `debt_owed` rewritten, the debt as rows async and preemptible, the four apps' rows instead of `damage.all()`, the stuck-debt reproduction | P4 | P2 | P4 verbs drags: Settings 24 → ~14-15, Files 53 → ~18-22, Get Carts 57 → ~17, Storybook 28 → ~14, Appearance 61 → ~23, Calc 21 → ~13-14 (full screen +4-7); press frames: Settings' first frame 55 → ~20-25, so fling p90 55 → ~20-25, Files 79 → ~25, Get Carts 58 → ~22, Storybook 73 → ~20, Appearance 87 → ~28, Calc 54-65 → ~18-22; key rows: Settings 33 → ~15-18, Calc 31 → ~15-18, Storybook 48 → ~15-18, Appearance 56-64 → ~20-25, Files 56-60 → ~18-22, Get Carts 51-59 → ~18-22 |
+| **P2 repeat and the ball** | `begin_frame(now)`, the repeat counts, the typing-level slot, the page's `e.repeat` dropped, the ball as counts, `BALL_COAST`; then the owner's hand trial | T-Deck, host | P1c, P1d | T-Deck `ball_fast` rows 13-27 of 30 → 30 of 30 within one glide; held keys move on every surface (none today); P4 held-key rows (Code, Notes, Music ~11 Hz with no delay) repeat at the rate |
+| **P3 fields and dialogs** (Editor sequence begins) | the field's row; the held page's put-back skipped on rows frames; Blocks' prompts, Cart info, Settings' name, Notes' name field | P4, T-Deck | P6 | P4 Blocks prompts 123 → ~14-20, Cart info fields 86 → ~14-20; T-Deck fields 19-25 → ~12-15 |
+| **P4 the Code tab and theme Config** | `TextView` in visual rows, the whole-draw triggers, overlays as rows, the pixel drag | P4, T-Deck | P6 | P4 Code key steps 86 → ~14-18, typing 86-92 → ~14-18, held 84 → ~14-18, drag 57-82 → ~17-22, fling 87-105 → ~17-22, find 104 → ~50-60 (a find past the view is a whole view under direct render); theme Config keys and typing 91-94 → ~14-18, fling 121 → ~17-22; T-Deck Code type 40 → ~25-40 (its p90 is two outliers P0's tool must name before P4 prices them), drag 24 → ~14-17, find 68 → ~25-45, theme Config 12-15 → ~9-11 |
+| **P5 the Editor's panes** | the Blocks outline and Config's cards ported onto `ui.scroll` nests; Music's steps and the Map's camera on the nest state | P4, T-Deck | P6 | P4 Blocks outline 66-96 → ~20-30, Config 66-68 → ~20-30, Music steps 86 → ~20-30, Map 68-81 → ~22-30; T-Deck Blocks, Config, Music 22-28 → ~15-20 |
+| **P6 the home and PROJECTS** | steps on `_try_drag_partial`, two cells, the `bg` translation, `blit_batch` covers, the still ring as `PaintRing`, the settle frame as the pane's rows | P4, T-Deck | everything but P1d's WM edits (coordinate the `_shown` slot shape) | P4 grid and icons 97-123 → ~25-35 on `bg`, ~30-55 on `bd` and picture themes (over); carousel key rows 54-57 → ~35-45 (over: the settle frame's pane); T-Deck grid and icons 80-102 → ~25-30 on `bg`, ~30-50 on `bd`/picture (over), carousel settle 48-51 → ~35-45 (over) |
+| **P7a the picker kernel** | `blit_indices_scale` in `moy_gfx`, host and on-glass byte tests | host; one board | P1a onward | none directly (a kernel) |
+| **P7b the pickers** (Editor sequence) | the picker on the kernel, the two-axis region | T-Deck, P4 | -- | T-Deck sprite pickers 40 → ~18-22; P4 93-96 → ~22-30 |
+| **P8 Notes** | the handle's rows at begin, the cart's pass under the floor, the counters' licence, the Player's declared rect through the shown ring | P4, T-Deck | -- | P4 Notes 59-93 → ~22-28 with the cart floor (~35-45 without it: content 33 stays and only the composite shrinks); T-Deck 21-23 → ~15-19 |
 
-**Order and dependencies.** P0 first (the tool measures every later gate).
-P1 before P3: a glide before the shift frame would cost the T-Deck its frame
-rate (seven whole paints a step, the T-Deck comment's last bullet). P2
-before P3 for the same reason on the P4 (a glide of frames each paying two
-paints and two copies). P4 → P5 → P7 in that order on the Editor; P6 may
-run beside P4. The surface model amendment lands with P1.
+**Dependencies.** P0 first (the tool measures every later gate and the
+null-floor run prices every row). P1a → P1c (the floor needs the verb);
+P1b → P1c (the floor's licence reads `api_moving`); P1c → P1d; P1b → P2
+(the counts land on the glide: a glide before the shift frame would cost
+the T-Deck its frame rate, which is why P1b's gate is correctness, not
+frames); P1d → P3 → P4 → P5 → P7b on the Editor; P7a any time after P0;
+P6 from the start beside P1a, sharing only the `_shown` slot shape with
+P1d; P8 last. The surface model amendment lands with P1c.
+
+**Rows that stay over 33 ms after every phase, and the next lever for
+each.** On the P4: the Code tab's and theme Config's find past the view
+(~50-60; the next lever is the Code tab's per-row raster, its highlighter
+and glyph cost, a kernel question, not a scroll one); the home's grid and
+icons on `bd` and picture themes (~30-55) and the carousel's key rows
+(~35-45, the settle frame's hero and details pane; the next lever is a
+per-cell retained layer for the cards, keyed on the cover gen and the
+selection, stamped by blit -- §12 names it, this design does not build it);
+Notes if the cart floor does not hold (~35-45; the lever is then the
+Player's composite of a declared rect alone, which P8 measures first); and
+Files' and Get Carts' key rows if their `damage.all()` is not moved
+(~38-45). On the T-Deck: the home's grid and icons on `bd` and picture
+themes (~30-50) and the carousel's settle (~35-45), the same lever; the
+Code tab's typing (~25-40) and find (~25-45) until P0's tool names the
+outliers' cause. Everything else lands under the target by the
+arithmetic, and the tool's column says where it did not.
 
 ## 16. moy-spec's verb table
 
 Nothing here touches it. `btn` and `btnp` keep their meaning for a cart (a
-repeat is a console-side count, never a cart's edge); the cart canvas verbs
-are unchanged (`scroll_rect`, `blit_indices` and `shift_last` are
-`moy_gfx`'s compositor and the root canvas's, not SPEC.md's); `ui.band()`
-and the kinetic `ui.scroll` are the public UI API, Moybyte's
-(`docs/ui_api_2026-10.md`), and an app on the verbs passes nothing new to
-get them. The physics' parameters are not a cart's to set.
+repeat is a console-side count, never a cart's edge); `key()`, `keyp()` and
+`last_key` never carry a repeat; `ed.draw(x, y, w, h)` keeps its meaning
+(the whole document into that rect, this frame) for every cart but the one
+whose pass is shell code under the floor; the cart canvas verbs are
+unchanged (`scroll_rect`, `blit_indices`, `blit_indices_scale`, `shift_last`
+and `copy_last_into` are `moy_gfx`'s compositor and a canvas's, not
+SPEC.md's); `ui.band()`, `ui.keep()` and the kinetic `ui.scroll` are the
+public UI API, Moybyte's (`docs/ui_api_2026-10.md`), and an app on the
+verbs passes nothing new to get them. The physics' parameters are not a
+cart's to set.
 
-## 17. Open questions for the owner
+## 17. Decisions taken (2026-10-27)
 
-1. **The trackball's momentum** (§2.3): `BALL_COAST` ships at 0; the value,
-   if any, is tried by hand on the T-Deck once P3 lands. The design asks
-   nothing else.
-2. **The repeat's feel**: `REPEAT_DELAY_MS` 400 and `REPEAT_RATE_MS` 50 are
-   a desktop keyboard's defaults; a child's hand on the T-Deck may want a
-   longer delay. Configuration, settable per board in board.toml if the
-   trial says so.
-3. **Direct render of key frames on the host desk** (§8): the host sim takes
-   it like the P4, which changes nothing a golden sees but makes the host
-   the test bed; the alternative is to keep the host on the stamp and test
-   direct render only on glass. The design takes the first.
-4. **A rubber band at the clamp** (§12): left out; a yes adds a parameter
-   to the twin and a frame or two to a fling's end.
+1. `BALL_COAST` ships at 0 and is tried by hand on the T-Deck after P2.
+2. `REPEAT_DELAY_MS` 400 and `REPEAT_RATE_MS` 50, in `moy_input`, overridable
+   per board in its board.toml.
+3. The host desk takes direct render of key frames like the P4, so the host
+   is the test bed; its cursor is hidden in that bed.
+4. No rubber band at the clamp.
+
+## 18. Review ledger (2026-10-27)
+
+Two adversarial reviews read the first revision (commit `5262cd8e`); every
+finding was checked against the code before it changed the design. What
+changed, by finding:
+
+**Architecture (verdict: do not build as written).** B1, two buffer models
+and a wrong Δ: §3.1 now has the two Δ rules (inside R always n−1 → n by
+this frame's Δ; outside R the rows' union; in place only on one-buffer
+canvases) and translations never compose. B2, the structural replay cannot
+be built: gone (§3.3 step 3, §12); the floor widens monotonically to the
+rest of R and fills the ground under vanished tail stops. B3, the per-stop
+comparison was inferred damage and missed pixels (the band rule after a
+focused row, the group foot, the fade that blends in place, `ui.part`):
+the licence is begin-known input changes plus every gen; the widened set
+is deterministic and lists those cases; the record comparison is an L8
+test assertion (§3.3, §13). B4, Notes broke `ed.draw` and could not gain:
+the verb keeps its meaning, Notes' own pass runs under the floor with the
+handle's rows known at begin and the canvas counters as the handle's
+licence, the Player's rect goes through the shown ring, and it is the last
+phase with both prices stated (§5, §15 P8). M1, the pass-time reveals: the
+common ones move into begin and the rest count as `owed` (§7). M2, the
+order: §15 is rebuilt as P1a-d. M3, the stale window buffer:
+`copy_last_into`, the ring as authority, `debt_owed` rewritten (§3.2, §8).
+M4, repeat: `begin_frame(now)`, the T-Deck's typing-level slot, counts
+never in `key()`/`keyp()`/`last_key`, the page drops `e.repeat`,
+parameters in `moy_input` (§2.2). M5, the ball: counts in the REP word, no
+queue, lag bounded by the glide (§2.3). M6, the Guition: `moy_rot_last`'s
+two paint buffers, refusal during a rotate, `note_damage` (§3.2). M7, no
+write entry exists: the floor is a rect list the engine's own raster
+honours in C, the canvas clip is its bounding rect for the app's
+gen-licensed writes, and the clip-ignoring ops are listed as breaks
+(§3.3). M8, `None` per canvas (§11). M9, `TextView` in visual rows with
+every whole-draw trigger and the overlays as rows (§5). S1-S8: the T-Deck
+draws everything outside R; one voucher per region; rows after the fence;
+the picker kernel; the held page's put-back skipped; the dt word; the
+host's cursor hidden; the names (`AppHost.owed`, `_try_drag_partial`, no
+fade is captured, no table clock).
+
+Where the design differs from a review's fix: M7 asked for the floor as
+the clip iterated per rect; the engine draws its own raster from records
+at close, so a rect list in C costs no extra pass, and the app's writes
+take the bounding rect under the gen licence (§3.3 step 5), which the
+parity test proves. B4 offered dropping Notes; it stays, last, because its
+pass is shell code and the floor reaches it, with the no-floor price
+beside it.
+
+**Performance (verdict: mechanisms mostly sound, numbers 1.5-3×
+optimistic).** 1, the arithmetic priced the whole content column as
+raster: §14's formula is per frame and keeps the pass, with the null-floor
+run measuring it; every estimate went through it. 2, P1's fling rows could
+not move at P1 and P3 improved them by dilution: the press frame is in
+scope (§4, §8), the gates split live, coast and glide and report the first
+three frames' max (§14), and the reach is stated at P1d. 3, the second
+paint is app-driven on Files, Get Carts, Storybook and Appearance: the
+apps read `ui.focus()` before the pane and report rows, with a ratchet
+(§7). 4, direct render would not engage: `api_moving` replaces
+`ws._animating` for the freeze, a content-only frame repaints no desk or
+chrome, with an engagement count (§8, §13). 5, the Blocks outline and
+Config's cards are not nests: ported in P5, their rows priced there and
+nowhere earlier (§2.4, §15). 6, `ui.band()` skipping collided with the
+structural check: `ui.keep(id, h)` (§3.3). 7, the T-Deck's Python stays
+for apps not reading `ui.band()` and the copy is ~4.3-5 ms: re-priced
+(§15 P1c) and said to gain little there. 8, the fence mid-pass and PSRAM
+contention: rows drawn after the fence, the contention priced (§3.2,
+§14). 9, the baked backdrop is not translation-invariant: only `bg`
+shifts, `bd` and picture themes keep the band repaint and are stated as
+over the target with the next lever (§9, §15). 10, Notes needs the floor
+inside the cart's pass: specified (§5), both prices in §15. 11, the text
+tails: find past the view priced as a whole view, the T-Deck's typing
+outliers handed to P0's tool (§15). 12, the debt copies and the refill:
+async, preemptible, reported in latency (§7, §8). 13, the Guition's rotate:
+refusal (§3.2). 14, glides multiply frames and covers forced whole paints:
+the glide's cost is stated at its parameter, a cover landing is the card's
+rect (§2.1, §9). 15, the gates: presented interval, the frame-class split,
+first-three max, finger-vs-content at presentation, the L8 fraction, the
+null-floor run, the diag split as a separate run (§14). 16, allocations:
+preallocated slots and the `test_frame_alloc` pin (§3.1, §13). 17, the
+order: P6 and P7a from the start, fields in P3 right after P1d (§15).
+
+Where the design differs: finding 14's glide count is taken as the
+parameter's trade (the carousel's feel today) and not shortened by design;
+the owner's hand trial of `BALL_COAST` is the place to retune
+`GLIDE_HALF_MS` if the frames read as load beside a playtest.
