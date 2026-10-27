@@ -508,10 +508,10 @@ def _pk_state(cv, st):
         for i in range(0, 64, 3):
             cv.pal(i, (i * 5 + 1) % 64)
         cv.palt(17, True)
-def _pk_cases(make):
+def _pk_cases(make, scales=(1, 2, 3, 5)):
     sheet = _pk_sheet()
     out = []
-    for scale in (1, 2, 3, 5):
+    for scale in scales:
         for st in (0, 1, 2):
             for ck in (-1, 0):
                 for sx, sy, sw, sh, dx, dy in ((0, 0, 8, 8, 3, 2),
@@ -547,9 +547,11 @@ def picker_kernel_matches_sspr(board):
     want = env["_pk_cases"](host_canvas.make_system_canvas)
     assert all(same for same, _ in want)
     board.pyexec(_PICKER_CASES, strict=True)
-    got = board.pyval("ws._g['_pk_cases'](lambda w, h: "
-                      "(ws.sys_canvas or ws.canvas).new_layer(w, h))",
-                      timeout=120.0, strict=True)
+    got = []
+    for scale in (1, 2, 3, 5):      # one scale a command: all 72 trip an S3's task watchdog late in a suite
+        got += board.pyval("ws._g['_pk_cases'](lambda w, h: "
+                           "(ws.sys_canvas or ws.canvas).new_layer(w, h), (%d,))" % scale,
+                           timeout=60.0, strict=True)
     assert [same for same, _ in got] == [True] * len(want)
     assert [crc for _, crc in got] == [crc for _, crc in want]
 
