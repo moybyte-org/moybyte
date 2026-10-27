@@ -626,8 +626,8 @@ class MapEditorUI:
         if me is None or last is None:
             return
         x0, y0, cell, cols, rows = self._mv_metrics()
-        dcx = (last[0] - px) // cell           # content follows the finger: drag
-        dcy = (last[1] - py) // cell           # right -> see cells to the left
+        dcx = _ui_draw.drag_steps(last[0] - px, cell)   # content follows the finger:
+        dcy = _ui_draw.drag_steps(last[1] - py, cell)   # drag right -> see cells to the left
         if dcx or dcy:
             self._map_pan(dcx, dcy)
             # advance the anchor by whole cells consumed (keep the sub-cell remainder

@@ -732,7 +732,7 @@ class EditorHandle:
             got = self._cell_at(px, py)
             return got is not None and self._mouse.drag(self.ed, got[0], got[1])
         if self._drag is None:
-            self._drag = (px, py)
+            self._drag = (px, py, 0, 0)
             return False
         if self.ed.select_sticky:
             got = self._cell_at(px, py)
@@ -741,13 +741,10 @@ class EditorHandle:
             self._place(got[0], got[1], True)
             return True
         _x, _y, cell, lh, _scale = self._geom
-        drows = (py - self._drag[1]) // lh
-        dcols = 0 if self._m.wrap else (px - self._drag[0]) // cell
-        if not (drows or dcols):
-            return False
-        self._drag = (px, py)
-        self.ed.scroll(-drows, -dcols)
-        return True
+        drag = self._drag
+        self._drag = _ui_draw.pan_drag(drag, self.ed, px, py,
+                                       0 if self._m.wrap else cell, lh)
+        return self._drag is not drag
 
     def mouse_frame(self, inp, x, y, dt):
         """One frame of a mouse over the handle, the pointer at (x, y) in

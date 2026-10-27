@@ -1249,13 +1249,9 @@ class CodeLayer:
             self._drag = None
             return
         if self._drag is None:
-            self._drag = (px, py)
+            self._drag = (px, py, 0, 0)
             return
-        drows = (py - self._drag[1]) // lay.lh
-        dcols = (px - self._drag[0]) // lay.cell
-        if drows or dcols:
-            ed.scroll(-drows, -dcols)
-            self._drag = (px, py)
+        self._drag = _ui_draw.pan_drag(self._drag, ed, px, py, lay.cell, lay.lh)
 
     # -- draw ----------------------------------------------------------------
 

@@ -411,8 +411,8 @@ class SceneEditorUI:
         if last is None:
             return
         x0, y0, scale, vw, vh = self._sv_metrics()
-        dx = (last[0] - px) // scale
-        dy = (last[1] - py) // scale
+        dx = _ui_draw.drag_steps(last[0] - px, scale)
+        dy = _ui_draw.drag_steps(last[1] - py, scale)
         if dx or dy:
             self._pan(dx, dy)
             self._drag = (last[0] - dx * scale, last[1] - dy * scale)

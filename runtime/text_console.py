@@ -388,7 +388,7 @@ class TextConsole:
                 self._drag = (py, self.back)
             else:
                 lh = self._lh()
-                moved = (py - self._drag[0]) // lh if lh else 0
+                moved = _ui_draw.drag_steps(py - self._drag[0], lh) if lh else 0
                 top = max(0, self._n - self.rows)
                 self.back = max(0, min(top, self._drag[1] + moved))
                 self._dirty()

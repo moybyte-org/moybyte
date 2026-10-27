@@ -12,7 +12,7 @@
 #   -- button kinds                   use_buttons, button_unreadable, begin_frame, primary_warnings
 #   -- list rows and grid cells       row, cell
 #   -- the classic game-canvas button family  game_btn, mini_btn, toolbar
-#   -- scrolling                      row_drag, ScrollRegion, DragTap
+#   -- scrolling                      drag_steps, pan_drag, row_drag, ScrollRegion, DragTap
 #   ScrollRegion                      the one scroll model
 #   DragTap                           press/drag/release over a ScrollRegion
 #   ui_frame                          a host begins an app's frame of runtime/ui.py's verbs
@@ -2256,6 +2256,39 @@ def fill_uncovered(cv, inner, outer, col):
 
 
 # --- scrolling ------------------------------------------------------------------
+
+def drag_steps(d, step):
+    """The whole `step`s in `d` pixels of drag travel, rounded toward zero
+    so a finger moved a pixel either way scrolls nothing. A drag that
+    carries its remainder advances its anchor by `drag_steps(d, step) * step`."""
+    return d // step if d >= 0 else -(-d // step)
+
+
+def pan_drag(drag, ed, px, py, cell, lh):
+    """One frame of a text pan, content following the finger: `ed` (its
+    `top`/`left` and `scroll(rows, cols)`) sits `drag_steps` of the finger's
+    travel from the anchor, so a drag moves it by the lines the finger moved,
+    either way, at any speed. `drag` is (x, y, cols, rows): the anchor and
+    what has scrolled since it. An edge that stops the pan re-anchors that
+    axis at the finger, so the way back answers at once. `cell` 0 pans rows
+    only. Returns the new drag, the same object when nothing was asked."""
+    ax, ay, nc, nr = drag
+    dr = drag_steps(py - ay, lh) - nr
+    dc = drag_steps(px - ax, cell) - nc if cell else 0
+    if not (dr or dc):
+        return drag
+    top, left = ed.top, ed.left
+    ed.scroll(-dr, -dc)
+    if top - ed.top == dr:
+        nr += dr
+    else:
+        ay, nr = py, 0
+    if left - ed.left == dc:
+        nc += dc
+    else:
+        ax, nc = px, 0
+    return (ax, ay, nc, nr)
+
 
 def row_drag(anchor, py, step, top, top_max):
     """PURE row-snapped drag scrolling, the Settings-rows contract: a held

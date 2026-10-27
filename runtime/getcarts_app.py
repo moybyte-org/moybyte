@@ -1193,7 +1193,9 @@ class GetCartsAppLayer(ListShellApp):
         lh = max(1, ui.text_size("Ag")[1])
         ui.face()
         lines = self.lic[1] or ()
-        top = max(0, min(top0 - (py - y0) // lh, len(lines) - self._well_rows()))
+        d = py - y0
+        moved = d // lh if d >= 0 else -(-d // lh)     # whole lines, toward zero
+        top = max(0, min(top0 - moved, len(lines) - self._well_rows()))
         if top != self.lic[2]:
             self.lic[2] = top
             self._damage.all()
