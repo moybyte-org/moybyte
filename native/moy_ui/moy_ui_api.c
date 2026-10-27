@@ -2932,3 +2932,9 @@ void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i) {
 int moy_ui_api_owes(const moy_ui_ctx_t *c) {
     return c->owe;
 }
+
+int32_t moy_ui_api_offset(moy_ui_ctx_t *c, int x, int y) {
+    int pg = page_at(c->cur, c->n_cur, x, y);
+    moy_ui_keep_t *k = pg >= 0 ? keep_of(c, c->cur[pg].id) : NULL;
+    return k != NULL ? k->a : -1;
+}

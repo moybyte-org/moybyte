@@ -309,6 +309,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_wash", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_wash_box", [c.c_void_p], _Box),
     ("moy_ui_api_owes", [c.c_void_p], _I),
+    ("moy_ui_api_offset", [c.c_void_p, _I, _I], c.c_int32),
     ("moy_ui_api_fades", [_I], c.c_uint32),
     ("moy_ui_api_end", [c.c_void_p, c.POINTER(_Sink)], None),
     ("moy_ui_api_table_pics", [c.c_void_p, c.POINTER(_Sink)], None),
@@ -1231,6 +1232,10 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_owes(p))
 
+    def api_offset(ctx, x, y):
+        p, _k = _ctx(ctx)
+        return int(lib.moy_ui_api_offset(p, int(x), int(y)))
+
     def api_fades(reset):
         return int(lib.moy_ui_api_fades(1 if reset else 0))
 
@@ -1312,7 +1317,7 @@ def binding():
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
-              api_owes, api_fades,
+              api_owes, api_offset, api_fades,
               api_end,
               api_table_rows, api_table_pics,
               api_grid,

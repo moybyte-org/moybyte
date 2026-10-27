@@ -846,14 +846,15 @@ on one, two and three buffers presented in turn (the host compositor's
 
 Two tools were written for the baselines: `+tools/scroll_bench.py` (commit
 `83d2ccaa`, worktree `scrollbase_p4`: the P4, the frame's split into content,
-stamp, home, copy and rest, a wall-clock input source) and
-`+tools/input_bench.py` (commit `2cb0bc05`, worktree `scrollbase_td`: the
+stamp, home, copy and rest, a wall-clock input source) and an earlier
+`tools/input_bench.py` (commit `2cb0bc05`, worktree `scrollbase_td`: the
 T-Deck, the trackball through `ws.ball`, keys and held buttons through an
-input-table source, the loop's split under PERF DIAG). Both type into real
+input-table source, the loop's split under PERF DIAG). Both typed into real
 seed carts (Star Catcher, Coin Quest), left their fixtures behind, and one
-broke Star Catcher on the T-Deck. Neither is on dev; one tool lands:
+broke Star Catcher on the T-Deck. Neither landed; the one tool merged from
+them did (P0, 2026-10-27):
 
-- **`+tools/input_bench.py`**, for every board: `scroll_bench`'s frame split
+- **`tools/input_bench.py`**, for every board: `scroll_bench`'s frame split
   and groups folded in (the P4's rows need the WM's split, the T-Deck's the
   loop's), one input vocabulary (`fling`, `drag`, `key_steps`, `key_held`,
   `key_20`, `type`, `type_fast`, `type_line`, `ball_slow`, `ball_fast`,
@@ -862,8 +863,8 @@ broke Star Catcher on the T-Deck. Neither is on dev; one tool lands:
   a key goes down and up on its schedule whatever the frame rate.
 - **A scratch project.** The bench copies a seed cart into a project of its
   own name (`Bench Scratch`) at setup and types, pastes and finds in that; it
-  makes its long note and its console script under the same name; a seed
-  cart is never opened for writing.
+  makes its long note, its console script and My Art's drawings under the
+  same name; a seed cart is never opened for writing.
 - **Cleanup on exit**, in a `finally` that runs on a failure and on Ctrl-C:
   the scratch project, note and script deleted, the home's tab, the theme
   and the window sizes restored, PERF DIAG and `uncap` put back, the board
@@ -927,7 +928,7 @@ provisional pass cost; P0's null-floor run re-prices every one before P1a.
 
 | phase | builds | boards | parallel with | rows reached (baseline p90 → expected, P4 / T-Deck) |
 |---|---|---|---|---|
-| **P0 the tool** | `+tools/input_bench.py` merged (§14) with the presented-interval gates, the frame-class split, the first-three-frames max, the finger-vs-content probe and the null-floor run; My Art's covers off the paint path as rows (§9) | P4, T-Deck | -- | My Art every row (0.6-2.5 s frames gone; drag 73 → ~35-40 / 25 → ~22); every other row re-priced |
+| **P0 the tool** | `tools/input_bench.py` merged (§14) with the presented-interval gates, the frame-class split, the first-three-frames max, the finger-vs-content probe and the null-floor run; My Art's covers off the paint path as rows (§9) | P4, T-Deck | -- | My Art every row (0.6-2.5 s frames gone; drag 73 → ~35-40 / 25 → ~22); every other row re-priced |
 | **P1a the verb** | `shift_last` per canvas (§3.2): the P4 2D-DMA synchronous first then async with the fence, the Guition's refusal during a rotate and its `note_damage`, the S3 row copy, in place on one-buffer canvases; `copy_last_into`; on-glass tests; the live submit, writeback and fence measured | P4, T-Deck | P6, P7a | none directly (a verb) |
 | **P1b the motion** | the glide and the fling in `moy_ui_scroll_t` and on every nest, the dt word, `api_moving`, the carousel's glide deleted, the pass-time reveals into begin, `settled` → `moved`/`owed` | host; a feel check on both | P1a, P6, P7a | a fling coasts on every verbs page and a key step glides (at full paints until P1c: its frames cost today's, so P1b's gate is the motion's correctness and the single paint per press on the T-Deck's lists -- Settings and Licences 16 paints for 8 presses → 8) |
 | **P1c the floor on the host** | the licence, the widened set, the floor list, monotone widening, drawing after the fence, `ui.band()`/`ui.keep()`, the apps' gens for covers, `PaintRing`, the L8 record assertion, surface model §14.7 | host; T-Deck | P2 | T-Deck verbs drag and fling: Settings 25 → ~19-21, Calc 23 → ~17, Get Carts 20 → ~13, Achievements 21-22 → ~16, Licences 18 → ~13, My Art 25-30 → ~15, Storybook 12 → ~10 (all under already; the T-Deck gains little here) |

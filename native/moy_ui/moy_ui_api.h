@@ -470,6 +470,10 @@ void moy_ui_api_bar_tap(moy_ui_ctx_t *c, int i);
 // Whether the frame drawn last laid a dialog or a popover out from a stale measure, so
 // the next frame is owed though no input came.
 int moy_ui_api_owes(const moy_ui_ctx_t *c);
+// The scroll of the page that lies under (x, y) as the frame drawn last laid
+// it out -- the offset a drag at that point moves, in pixels -- or -1 where
+// no page lies there. A measuring tool's probe (tools/input_bench.py).
+int32_t moy_ui_api_offset(moy_ui_ctx_t *c, int x, int y);
 // The fades drawn at the edges lists run on past (a page's foot, a scroll
 // region's, a cut popover body's, a table's), in every context since the
 // count was last reset; `reset` zeroes it after reading. The review kit's

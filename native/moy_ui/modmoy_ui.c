@@ -3001,6 +3001,12 @@ static mp_obj_t ui_api_owes(mp_obj_t ctx) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(ui_api_owes_obj, ui_api_owes);
 
+// api_offset(ctx, x, y) -> the scroll of the page under (x, y), -1 none
+static mp_obj_t ui_api_offset(mp_obj_t ctx, mp_obj_t x, mp_obj_t y) {
+    return mp_obj_new_int(moy_ui_api_offset(ctx_of(ctx), num(x), num(y)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_api_offset_obj, ui_api_offset);
+
 // api_fades(reset) -> the list fades drawn since the count was reset
 static mp_obj_t ui_api_fades(mp_obj_t reset) {
     return mp_obj_new_int_from_uint(moy_ui_api_fades(mp_obj_is_true(reset)));
@@ -3174,6 +3180,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_wash), MP_ROM_PTR(&ui_api_wash_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_wash_box), MP_ROM_PTR(&ui_api_wash_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_owes), MP_ROM_PTR(&ui_api_owes_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_offset), MP_ROM_PTR(&ui_api_offset_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_fades), MP_ROM_PTR(&ui_api_fades_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_end), MP_ROM_PTR(&ui_api_end_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_table_rows), MP_ROM_PTR(&ui_api_table_rows_obj) },
