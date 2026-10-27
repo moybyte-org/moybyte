@@ -2180,9 +2180,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._pop_note(r)
                 s[2] -= 1
                 return
-        if not fresh and self.ws.menu_ui.looked():
-            # the look's card casts a shadow: paint it over what it covers,
-            # never over its own last paint
+        if not fresh:
+            # the look's card (the menu's or a component's) has rounded,
+            # shadowed edges: paint it over what it covers, never over its
+            # own last paint
             self._root_canvas.blit_strip_rect(s[0], r[0], r[1], r[0], r[1], r[2], r[3])
         ws = self.ws
         ws.menu_ui._draw_sysmenu()

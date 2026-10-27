@@ -3138,6 +3138,30 @@ _LOOK_RIDE = pytest.mark.xfail(strict=True, reason="the look's popover ride diff
                                "from a full repaint (docs/look_2026-10.md step 33)")
 
 
+def test_a_component_popovers_card_repaints_over_what_it_covers(tmp_path):
+    """A bar widget's popover (a component card under the look) that
+    changes while it rides repaints over the snapshot of what it covers,
+    never over its own last paint, whose corners and shadow it would blend
+    again: after a move every buffer's card is a full repaint's."""
+    ws, drv = _popover_desk(tmp_path)
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv)
+    ws.widget_tap("clock")
+    ring.settle(drv)
+    ws._sysmenu_layer.handle_input(_Key("right"))
+    assert ring.settle(drv) == ["pop"] * 3
+    x, y, w, h = ws.sysmenu.panel_rect()
+    W = ws.sys_canvas.w
+
+    def card(buf):
+        return [buf[2 * (r * W + x):2 * (r * W + x + w)] for r in range(y, y + h)]
+    seen = [card(b) for b in ring.bufs]
+    assert seen == [card(b) for b in ring.full(drv)]
+
+
 @_LOOK_RIDE
 def test_a_popover_is_pixel_identical_in_every_buffer(tmp_path):
     """On a triple-buffered root, after the popover opens, moves and closes,
