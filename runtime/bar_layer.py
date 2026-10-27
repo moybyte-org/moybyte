@@ -1384,6 +1384,8 @@ class BarLayer:
         rec = ws.look.backdrop("home")
         if not rec:
             return False
+        if ws.wallpaper.put_baked(cv, rec, x, y):
+            return True
         sc = ws.sys_canvas
         cv.backdrop(rec, ws.theme_colors["desktop"], surface=(x, y, sc.w, sc.h))
         return True

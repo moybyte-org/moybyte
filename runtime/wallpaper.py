@@ -579,6 +579,29 @@ class Wallpaper:
                 cv.clip()
         return fill
 
+    def put_baked(self, cv, rec, x, y):
+        """Copy the home backdrop of records `rec` from its bake onto `cv`
+        with the system canvas's (0, 0) at (x, y) of `cv`: the pixels
+        `cv.backdrop(rec, desktop, surface=(x, y, ...))` draws, since the
+        bake is that draw at the canvas's size. True when copied; False
+        where the bake holds anything else, or the system canvas records
+        or retains nothing, and the caller draws it."""
+        sc = self.ws.sys_canvas
+        if (getattr(sc, "begin_surface", None) is not None
+                or getattr(sc, "RETAINED_FRAMES", 0) < 1):
+            return False
+        k = self.restore_key(True)
+        if k is None or k[0] != "bd" or k[1][0] != rec:
+            return False
+        img = self._bd_img
+        src = self._bd_src
+        if src._buf is not img._rgb_i:
+            src._buf = img._rgb_i
+            src.w = img.w
+            src.h = img.h
+        cv.blit_strip_rect(src, x, y, 0, 0, cv.w, cv.h)
+        return True
+
     def bars(self):
         """The bars' quiet rectangles on the system canvas: every band of the
         glass outside the layout's content rect (docs/shell_layout_2026-10.md

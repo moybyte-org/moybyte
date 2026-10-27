@@ -353,6 +353,8 @@ class Appearance:
         self._choices = None
         self.layout_gen = 0             # moves with every resolve: the Settings row's memo
         self.look_gen = 0               # moves with every publish(); see the module doc
+        # surface -> [theme, variant, look_gen, records]: `backdrop`'s answers
+        self._backdrops = {}
         self.icons = None               # the live look's icon set, (kind, set, swap): publish()
         # The store's theme packages (docs/theming_2026-09.md §9 phase 6 step
         # 2): stem -> folder, as of the roster generation `_pkg_gen`; the
@@ -463,8 +465,16 @@ class Appearance:
     def backdrop(self, surface):
         """The active theme's backdrop for `surface` ("home" or "desk") in the
         mode shown: `chrome.backdrop`'s records, b"" where the surface is its
-        `desktop` fill. The fill a wallpaper of None draws (`theme_wallpaper`)."""
-        return _backdrop(self.theme_name, self.theme_variant, surface)
+        `desktop` fill. The fill a wallpaper of None draws (`theme_wallpaper`).
+        Read once per look generation: a resolve is milliseconds on a board,
+        and every home paint and bar render asks."""
+        got = self._backdrops.get(surface)
+        if (got is None or got[2] != self.look_gen or got[0] != self.theme_name
+                or got[1] != self.theme_variant):
+            got = self._backdrops[surface] = [
+                self.theme_name, self.theme_variant, self.look_gen,
+                _backdrop(self.theme_name, self.theme_variant, surface)]
+        return got[3]
 
     def _has_backdrop(self):
         return any(_backdrop(self.theme_name, v, s)
