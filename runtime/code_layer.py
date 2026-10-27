@@ -194,17 +194,13 @@ def symbols_for(lang):
     return _LUA_SYMBOLS if lang == "lua" else _CODE_SYMBOLS
 
 
-def draw_symbol_keys(cv, t, syms, x0, y, cell, h, fs, dx=0, dy=0, rects=None,
-                     th=None, w=None):
+def draw_symbol_keys(cv, th, syms, x0, y, cell, h, fs, rects=None, w=None):
     """The symbol palette renderer, ONE body for the Code tab and the script
-    console: each key is a grid CELL whose picture is the symbol itself, laid
-    out `cell` apart from `x0`. `cell` draws the frame and hands back where
-    the picture goes; the symbol sits at the frozen +6px inside it, nudged by
-    `dx`/`dy` (the Code tab re-centres it in a key the chrome scale grew,
-    #203). Under the 2026-10 look (`t["look"]`) each key is a normal button
-    of theme `th` inside its rect instead. `w` (the strip's width) shares it
-    out whole instead, cell i starting at x0 + i * w // n. Appends each key's
-    rect to `rects` when a list is given."""
+    console: each key a normal button of theme `th` in a cell `cell` apart
+    from `x0`, inset by fs (2*fs apart, fs off the strip's edges), its
+    picture the symbol itself. `w` (the strip's width) shares it out whole
+    instead, cell i starting at x0 + i * w // n. Appends each key's rect to
+    `rects` when a list is given."""
     n = len(syms)
     for i in range(n):
         if w is None:
@@ -212,18 +208,10 @@ def draw_symbol_keys(cv, t, syms, x0, y, cell, h, fs, dx=0, dy=0, rects=None,
         else:
             kx = x0 + i * w // n
             kw = x0 + (i + 1) * w // n - kx
-        r = (kx, y, kw - 1, h - 1)
         if rects is not None:
-            rects.append(r)
-        if t.get("look") and th is not None:
-            # Each key inset by fs inside its cell: 2*fs apart, fs off the
-            # strip's edges.
-            _ui_draw.button(cv, th, (kx + fs, r[1] + fs, kw - 2 * fs, h - 2 * fs),
-                            syms[i], kind="normal", app="code")
-            continue
-        art = _ui_draw.cell(cv, t, r, pad=0, caption_h=0, fs=fs)
-        cv.print(syms[i], art[0] + 6 * fs + dx, art[1] + 6 * fs + dy,
-                 t["sym_ink"], 1)
+            rects.append((kx, y, kw - 1, h - 1))
+        _ui_draw.button(cv, th, (kx + fs, y + fs, kw - 2 * fs, h - 2 * fs),
+                        syms[i], kind="normal", app="code")
 
 
 # --- code-editor syntax highlighting (#24) ---------------------------------
@@ -1298,40 +1286,18 @@ class CodeLayer:
         return self._hl_val
 
     def _tones(self):
-        """Per-draw color roles from the theme tokens, on every tier. The
-        syntax remap is the theme's `code_*` content roles (`_hl_map`).
+        """Per-draw color roles from the theme tokens, on every tier: the
+        code surface and its chrome in the theme's roles, the caret in its
+        accent as an ink (`ink_accent`, held at 3:1 on the code surface).
+        The syntax remap is the theme's `code_*` content roles (`_hl_map`).
         sel (#89): the selection tint (drawn BEHIND the text), and the dim
         gutter number ink."""
-        NAMES = self._NAMES
         th = self.ws.theme_colors
-        if _ui_draw.depth()[0]:
-            # The 2026-10 look: the code surface and its chrome in the
-            # theme's roles, the caret in its accent as an ink (`ink_accent`,
-            # held at 3:1 on the code surface).
-            return _as_theme({"bg": th["surface"], "caret": th["ink_accent"],
-                              "sym_bg": th["surface_alt"], "sym_edge": th["border"],
-                              "sym_ink": th["ink"], "hl": self._hl_map(),
-                              "sel": th["hilite"],
-                              "gutter": th["ink_dim"], "gutter_cur": th["ink"],
-                              "look": True})
-        if th.get("ink", NAMES["white"]) != 0:      # dark surface -> dark set
-            t = _as_theme({"bg": th.get("surface", NAMES["black"]),
-                           "caret": th.get("accent", NAMES["yellow"]),
-                           "sym_bg": NAMES["dark_grey"],
-                           "sym_edge": th.get("hilite", NAMES["indigo"]),
-                           "sym_ink": NAMES["white"], "hl": self._hl_map(),
-                           "sel": th.get("hilite", NAMES["indigo"]),
-                           "gutter": NAMES["dark_grey"]})
-        else:
-            t = _as_theme({"bg": th["surface"], "caret": th["ink"],
-                           "sym_bg": th.get("surface_alt", NAMES["dark_grey"]),
-                           "sym_edge": th["border"], "sym_ink": th["ink"],
-                           "hl": self._hl_map(),
-                           "sel": th.get("hilite", NAMES["indigo"]),
-                           "gutter": th.get("border", NAMES["dark_grey"])})
-        t["gutter_cur"] = t["gutter"]
-        t["look"] = False
-        return t
+        return _as_theme({"bg": th["surface"], "caret": th["ink_accent"],
+                          "sym_bg": th["surface_alt"], "sym_edge": th["border"],
+                          "sym_ink": th["ink"], "hl": self._hl_map(),
+                          "sel": th["hilite"],
+                          "gutter": th["ink_dim"], "gutter_cur": th["ink"]})
 
     def draw_lines(self, lines, first, rect):
         """Lines of code read only in `rect` from line `first`, numbered, in
@@ -1382,7 +1348,6 @@ class CodeLayer:
         th = lay.text_h                          # the glyph box: caret, selection
         ed = ws.editor
         t = self._t = self._tones()
-        look = t["look"]
         cv.cls(t["bg"])                         # full-screen editor
         # The old title + RUN/SAVE/CLOSE top band is gone (Stage 4 rollout): the unified
         # bar (drawn after this in draw()) owns the top 18px -- PLAY runs (and persists,
@@ -1397,17 +1362,17 @@ class CodeLayer:
             cols = ed.COLS
             vis = ed.visible_lines()
             errrow = ws.code_err_row
-            # The 2026-10 look (a theme with a depth): the current line on the
-            # theme's current mark with a `value` bar at its left, and a line
-            # longer than the view fading out over FADE pixels at its right.
-            fx = tx0 + cols * cell - _FADE * fs if look else None
+            # The current line on the theme's current mark with a `value`
+            # bar at its left, and a line longer than the view fading out
+            # over FADE pixels at its right.
+            fx = tx0 + cols * cell - _FADE * fs
             for idx in range(len(vis)):
                 y = self._y0(lay) + idx * lh
                 absrow = ed.top + idx
                 full = vis[idx]
                 on_err = errrow is not None and absrow == errrow
-                cur = look and absrow == ed.row
-                fade = look and len(full) - ed.left > cols
+                cur = absrow == ed.row
+                fade = len(full) - ed.left > cols
                 if cur:
                     self._current_line(cv, lay, y, lay.mark_x, fx if fade else None)
                 if gc:                           # #89: line-number gutter (crash mark integrated)
@@ -1434,15 +1399,11 @@ class CodeLayer:
                 if absrow == ed.row:            # caret on the cursor's line
                     vcol = ed.col - ed.left
                     if 0 <= vcol <= cols:
-                        if look:
-                            # One scale wide, in the column before the cell:
-                            # a mono face leaves its cells two blank columns
-                            # between glyphs, and a caret filling both read as
-                            # the next stem's bold (design review R3-24).
-                            cv.rect(tx0 + vcol * cell - fs, y + fs, fs, th - 2 * fs,
-                                    t["caret"])
-                        else:
-                            cv.rect(tx0 + vcol * cell, y, fs, th, t["caret"])
+                        # One scale wide, in the column before the cell: a
+                        # mono face leaves its cells two blank columns between
+                        # glyphs, and a caret filling both read as the next
+                        # stem's bold (design review R3-24).
+                        cv.rect(tx0 + vcol * cell - fs, y + fs, fs, th - 2 * fs, t["caret"])
         if lay.status_band is not None and ed is not None:
             self._draw_status(cv, lay, ed)
         self._draw_tools(lay, ed, t)             # #89: tools toggle + palette + find bar
@@ -1834,7 +1795,5 @@ class CodeLayer:
         sc = lay.sym_cell
         sy = lay.sym_y
         sh = lay.sym_h
-        t = self._t if self._t is not None else self._tones()
-        draw_symbol_keys(cv, t, self._symbols(), lay.sym_area[0], sy, sc, sh,
-                         fs, lay.sym_text_dx, lay.sym_text_dy, th=self.ws.theme_colors,
-                         w=lay.sym_area[2])
+        draw_symbol_keys(cv, self.ws.theme_colors, self._symbols(), lay.sym_area[0], sy, sc,
+                         sh, fs, w=lay.sym_area[2])

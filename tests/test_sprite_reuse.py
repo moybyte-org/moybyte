@@ -19,8 +19,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 
@@ -195,7 +195,7 @@ def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):
     assert _tile_pixels(shared, src_tile) == painted
 
     # Cart B: a different cart, same tile id starts blank. GET imports from shared.
-    _tap(ws, ws.paint_layer.layout.close_btn)
+    ws.go_home()
     _open_cart(ws, "Tap Only Red")
     ws._open_paint()
     ws.paint.n = src_tile
@@ -265,16 +265,13 @@ def _cell(lay, pe, lx, ly):
     return lay.pg_x0 + lx * cell, lay.pg_y0 + ly * cell, cell
 
 
-def test_a_theme_with_a_depth_takes_the_looks_layout_and_one_without_keeps_todays(tmp_path):
+def test_the_sprite_tab_takes_the_looks_layout(tmp_path):
     ws, drv, _c = _look_tab(tmp_path)
     lay = ws.paint_layer.layout
-    assert lay.look and lay.pg_span == 144, "the grid is the largest 48 that fits"
+    assert lay.pg_span == 144, "the grid is the largest 48 that fits"
     assert lay.sw_x0 > lay.pg_x0 + lay.pg_span, "the palette lies beside the grid"
-    for r in list(lay.tool_btns) + [lay.close_btn, lay.files_btn]:
+    for r in list(lay.tool_btns) + [lay.files_btn]:
         assert r[1] + r[3] <= ws.sys_canvas.h, r
-    ws.look.set_theme("night", persist=False, variant="dark")
-    _frames(drv)
-    assert not ws.paint_layer.layout.look
 
 
 def test_a_clear_pixel_lies_on_the_grey_checker_and_a_colour_fills_its_cell(tmp_path):

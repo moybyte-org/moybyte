@@ -58,21 +58,18 @@ typedef struct {
 } moy_chrome_list_t;
 
 // The inks, in this order: the named palette the chrome uses, then the
-// theme's roles, then the system menu's row colours (-1: no field).
+// theme's roles.
 enum {
     MOY_INK_BLACK, MOY_INK_WHITE, MOY_INK_RED, MOY_INK_ORANGE, MOY_INK_YELLOW,
     MOY_INK_PEACH, MOY_INK_DARK_BLUE, MOY_INK_DARK_PURPLE, MOY_INK_LIGHT_GREY,
     MOY_INK_DARK_GREY,
     MOY_INK_BAR, MOY_INK_BAR_EDGE, MOY_INK_CHROME, MOY_INK_CHROME_DIM, MOY_INK_SURFACE,
     MOY_INK_BORDER, MOY_INK_INK, MOY_INK_INK_DIM, MOY_INK_PLAY, MOY_INK_PANEL, MOY_INK_EDGE,
-    MOY_INK_MENU_FIELD_ON, MOY_INK_MENU_INK_ON, MOY_INK_MENU_FIELD_OFF, MOY_INK_MENU_INK_OFF,
-    MOY_INK_MENU_HEADER,
     MOY_INKS,
 };
 
-// The theme: the inks above, whether its bar is light, the dialog's ring
-// count (a skin metric).
-void moy_chrome_set_inks(const int16_t inks[MOY_INKS], bool bar_light, int dialog_rings);
+// The theme: the inks above and whether its bar is light.
+void moy_chrome_set_inks(const int16_t inks[MOY_INKS], bool bar_light);
 
 void moy_chrome_clear(moy_chrome_list_t *l);
 
@@ -132,14 +129,6 @@ void moy_chrome_strip_band(moy_chrome_list_t *l, int cw, int bar_h, bool light);
 // sits on its line, `dy` below the 18-row bar's.
 void moy_chrome_strip_cell(moy_chrome_list_t *l, const char *kind, int x, int y, int w, int h,
                            int cs, int dy, const char *s, bool across);
-
-// The system menu: `n` rows of `kind` (0 item, 1 header, 2 separator) and
-// `label`, the panel at (x, y, w, h), `sel` the selected row, `fs` its text
-// scale and `cs` its row scale.
-enum { MOY_MENU_ITEM = 0, MOY_MENU_HEADER = 1, MOY_MENU_SEP = 2 };
-#define MOY_MENU_ROWS 16
-void moy_chrome_menu(moy_chrome_list_t *l, const uint8_t *kind, const char *const *label,
-                     int n, int sel, int x, int y, int w, int h, int fs, int cs);
 
 // -- the raster ------------------------------------------------------------------
 

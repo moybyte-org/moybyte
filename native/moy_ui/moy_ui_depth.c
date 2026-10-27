@@ -45,8 +45,8 @@ static int16_t whole(const moy_theme_look_t *lk, const char *name, int dflt) {
     return (int16_t)(moy_theme_leaves[i].kind == MOY_THEME_LK_NUM ? (v + 50) / 100 : v);
 }
 
-static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, size_t n,
-                    int light);
+static void depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, size_t n,
+                     int light);
 
 // The look's paints the parts name, copied out of the look at install: a
 // paint leaf reads as MOY_THEME_PAINT | its slot here.
@@ -99,13 +99,6 @@ uint32_t moy_ui_marks_drawn(int reset) {
     return n;
 }
 
-// A leaf of the marks: focus.*, current.* and sel_back, which a theme may set
-// without a depth (Contrast keeps its frames and keys and draws the marks).
-static int mark_leaf(const char *name) {
-    return strncmp(name, "focus.", 6) == 0 || strncmp(name, "current.", 8) == 0
-           || strcmp(name, "sel_back") == 0;
-}
-
 static uint8_t alpha_of(const moy_theme_look_t *lk, const char *name, int dflt) {
     int v = num(leaf(lk, name), dflt);
     return (uint8_t)((v < 0 ? 0 : v > 100 ? 100 : v) * 255 / 100);
@@ -113,7 +106,6 @@ static uint8_t alpha_of(const moy_theme_look_t *lk, const char *name, int dflt) 
 
 // The marks of a look read with its defaults (DESIGN.md, the marks).
 static void marks_of(moy_ui_marks_t *m, const moy_theme_look_t *lk, int light) {
-    m->on = 1;
     m->dark = (uint8_t)!light;
     int st = num(leaf(lk, "focus.style"), MOY_UI_FOCUS_RING);
     m->style[MOY_UI_MARK_PART] = (uint8_t)st;
@@ -194,7 +186,7 @@ static void display_of(const moy_theme_look_t *lk) {
     s_scrim_a = alpha_of(lk, "scrim.alpha", 40);
 }
 
-int moy_ui_depth_use(const char *name, size_t n, int light) {
+void moy_ui_depth_use(const char *name, size_t n, int light) {
     moy_ui_depth_t *d = &s_depth;
     memset(d, 0, sizeof(*d));
     keycap_none();
@@ -209,43 +201,23 @@ int moy_ui_depth_use(const char *name, size_t n, int light) {
     memset(&s_marks, 0, sizeof(s_marks));
     s_marks.active = active;
     s_marks.drawn = drawn;
-    moy_theme_look_t *look = name != NULL ? malloc(sizeof(moy_theme_look_t)) : NULL;
-    if (look == NULL) {
-        return 0;
+    if (name == NULL) {
+        name = moy_theme_seed_names[0];
+        n = strlen(name);
     }
-    int on = depth_of(d, look, name, n, light);
-    free(look);
-    return on;
+    moy_theme_look_t *look = malloc(sizeof(moy_theme_look_t));
+    if (look != NULL) {
+        depth_of(d, look, name, n, light);
+        free(look);
+    }
 }
 
-static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, size_t n,
-                    int light) {
-    int variant = light ? MOY_THEME_LIGHT : MOY_THEME_DARK;
-    moy_theme_look(name, n, variant, 0, lk);
-    int any = lk->n_paints || lk->n_tiles || lk->n_appbtn;
-    int marks = 0;
-    for (int i = 0; i < MOY_THEME_LEAVES; i++) {
-        if (lk->v[i] != MOY_THEME_NONE) {
-            if (mark_leaf(moy_theme_leaf_names[i])) {
-                marks = 1;
-            } else {
-                any = 1;
-            }
-        }
-    }
-    if (!any && !marks) {
-        return 0;
-    }
-    moy_theme_look(name, n, variant, 1, lk);
+static void depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, size_t n,
+                     int light) {
+    moy_theme_look(name, n, light ? MOY_THEME_LIGHT : MOY_THEME_DARK, 1, lk);
     keycap_of(lk);
     display_of(lk);
-    if (marks || any) {
-        marks_of(&s_marks, lk, light);
-    }
-    if (!any) {
-        return 0;
-    }
-    d->on = 1;
+    marks_of(&s_marks, lk, light);
     d->frames = (uint8_t)moy_theme_look_frames(name, n);
     d->win_r = (uint8_t)num(leaf(lk, "win_r"), 12);
     d->card_r = (uint8_t)num(leaf(lk, "card_r"), 10);
@@ -308,7 +280,6 @@ static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, s
     d->tile_line_c = leaf(lk, "tile_outline.c");
     d->sys_line_w = whole(lk, "bar.sys_line.w", 0);
     d->sys_line_c = leaf(lk, "bar.sys_line.c");
-    return 1;
 }
 
 // -- geometry -------------------------------------------------------------------
@@ -317,7 +288,7 @@ static int depth_of(moy_ui_depth_t *d, moy_theme_look_t *lk, const char *name, s
 // offset, or none.
 static int shadow_of(const moy_ui_depth_t *d, int r, int active, int mode,
                      moy_shape_shadow_t *s) {
-    if (!d->on || d->shadow == 0 || mode == MOY_UI_UNDER_NONE) {
+    if (d->shadow == 0 || mode == MOY_UI_UNDER_NONE) {
         return 0;
     }
     s->r = r;
@@ -730,9 +701,6 @@ static int ink_over(const dd_t *d, int ci) {
 
 int moy_ui_mark_reach(int cls) {
     const moy_ui_marks_t *m = &s_marks;
-    if (!m->on) {
-        return 0;
-    }
     int o = m->outline_w;
     switch (m->style[cls < 0 || cls > 2 ? 0 : cls]) {
         case MOY_UI_FOCUS_RING:
@@ -781,7 +749,7 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
     }
     *ink = -1;
     if (flags & MOY_UI_MARK_INK) {
-        if (m->on && m->active) {
+        if (m->active) {
             int st = m->style[moy_ui_mark_class(b, cls, fs)];
             int ci = moy_ui_token(s->look, m->color);
             if (st == MOY_UI_FOCUS_INVERT) {
@@ -795,13 +763,9 @@ int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int 
         return MOY_UI_OK;
     }
     int sel = (flags & MOY_UI_MARK_SELECTED) != 0;
-    if (!m->on && m->active && !after && !sel && !(flags & MOY_UI_MARK_RING)) {
-        s_marks.drawn++;
-        return moy_ui_focus_ring(s, b, fs);     // a theme with no marks: its ring
-    }
     dd_t d;
     open_dd(s, &d, crossing);
-    if (!m->on || !(m->active || sel)) {
+    if (!(m->active || sel)) {
         return MOY_UI_OK;
     }
     int x = b.x, y = b.y, w = b.w, h = b.h;
@@ -959,9 +923,6 @@ int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, 
     open_dd(s, &d, crossing);
     const moy_ui_marks_t *m = &s_marks;
     *ink = -1;
-    if (!m->on) {
-        return MOY_UI_OK;
-    }
     int back = (flags & MOY_UI_MARK_BACK) != 0;
     // the current content's second cue beside the mark (`current.ink`), the
     // fill's selection ink under its own
@@ -1030,7 +991,7 @@ int moy_ui_current(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int
 }
 
 int moy_ui_current_rows_under(void) {
-    return s_marks.on && s_marks.cur_row == MOY_UI_CUR_ROW_UNDERLINE;
+    return s_marks.cur_row == MOY_UI_CUR_ROW_UNDERLINE;
 }
 
 int moy_ui_current_under(const moy_ui_sink_t *s, moy_ui_box_t b, int fs) {
@@ -1080,9 +1041,6 @@ int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on) {
     dd_t d;
     open_dd(s, &d, 1);
     const moy_ui_depth_t *dp = &s_depth;
-    if (!dp->on) {
-        return 0;
-    }
     moy_shape_paint_t p;
     int ink;
     switch (part) {
@@ -1146,9 +1104,6 @@ int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill) {
     dd_t d;
     open_dd(s, &d, 1);
     const moy_ui_depth_t *dp = &s_depth;
-    if (!dp->on) {
-        return 0;
-    }
     // tile_r on the desk's 44-pixel tile, in proportion on another
     int r = moy_ui_fdiv(dp->tile_r * b.h + 22, 44);
     r = r < b.h / 2 ? r : b.h / 2;

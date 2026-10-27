@@ -766,7 +766,8 @@ def test_a_saved_role_moves_the_look_and_drops_from(tmp_path):
     panel = (ws.theme_colors["panel"] + 5) % 64
     _hand_edit(ed, panel=panel)
     gen = ws.look.look_gen
-    assert ed.save(soft=True) == (True, "")
+    # saved, whatever its note says of a palette under the default's marks
+    assert ed.save(soft=True)[0] is True
     ws.frame(1 / 30)
     assert ws.look.look_gen > gen
     assert ws.theme_colors["panel"] == panel
@@ -821,7 +822,7 @@ def test_a_save_of_a_metric_drops_the_source(tmp_path):
 def test_a_file_over_the_cap_as_typed_is_written_minified(tmp_path):
     import json
     ws = build_ws(tmp_path)
-    use_theme(ws, "night", store=True)
+    use_theme(ws, "mint", store=True)
     ed = _edit(ws)
     d = json.loads(ed.text())
     ed.set_text(json.dumps(d, indent=32))

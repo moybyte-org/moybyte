@@ -35,17 +35,20 @@ def _legend(th):
 
 @pytest.fixture
 def theme():
-    """Install a package and make its shape the toolkit's; the empty shape
-    again afterwards, so no other test draws with it."""
+    """Install a package and make its shape the toolkit's, and its depth: a
+    square look (`key_r` 0), the one whose parts draw their surfaces; the
+    empty shape again afterwards, so no other test draws with it."""
     def use(**kw):
         d = json.loads(fixture_theme("night"))
         d["name"] = "painted"
         for k in ("surfaces", "text", "metrics", "frame"):
             d.pop(k, None)
+        d["look"] = {"key_r": 0, "card_r": 0, "win_r": 0}
         d.update(kw)
         rc, _notes = moy_ui.theme_install(json.dumps(d).encode())
         assert rc == 0
         ui_draw.use_shape("painted")
+        ui_draw.use_depth("painted", False)
         return theme_colors("painted", "dark")
     yield use
     ui_draw.use_shape(None)

@@ -188,21 +188,7 @@ def _audio_console_level_back():
         na.volume(7)
 
 
-@pytest.fixture(autouse=True)
-def _theme_shape_back():
-    """The toolkit's installed shape is one per process (native/moy_ui), as it
-    is one per board, and a workstation installs its theme's at boot. A test
-    that built one would restyle every widget a later test on the worker
-    draws, so the empty shape goes back after each, the depth a workstation's
-    `_go_live` installed (the shape does not carry it) is switched off, the
-    installed theme package is dropped (a later test's Settings would list
-    its layout), every font role and the print font go back to petme128, the
-    bars go back to the default's, and the input in use, the marks' focus
-    switch and the metric class go back to a fresh process's (keys, on, the
-    handheld's): a workstation places its class as it boots, and a test that
-    left the desk's or touch in force would lay out and mark every later
-    test's parts as that one's."""
-    yield
+def _theme_reset():
     try:
         from runtime import ui_draw
     except ImportError:
@@ -216,7 +202,7 @@ def _theme_shape_back():
     ui_draw.use_hero(0)
     ui_draw.print_font(0)
     # ...and the bars a look placed (its layout, its bar heights) are the
-    # default's again, as the depth is off
+    # default's again, as the depth is
     from runtime import layout_base
     layout_base.place_bar_h()
     layout_base.place_bars(layout_base.DEFAULT_BARS)
@@ -225,6 +211,26 @@ def _theme_shape_back():
     layout_base.in_pane(False)
     ui_draw.input_kind("keys")
     ui_draw.marks(True, True)
+
+
+@pytest.fixture(autouse=True)
+def _theme_shape_back():
+    """The toolkit's installed shape is one per process (native/moy_ui), as it
+    is one per board, and a workstation installs its theme's at boot. A test
+    that built one would restyle every widget a later test on the worker
+    draws, so before and after each test the empty shape is in force, the
+    depth and the marks are the default theme's in its dark mode (the shape
+    does not carry them; a workstation's `_go_live` installs its own), no
+    theme package is installed (a later test's Settings would list its
+    layout), every font role and the print font are petme128, the bars are
+    the default's, and the input in use, the marks' focus switch and the
+    metric class are a fresh process's (keys, on, the handheld's): a
+    workstation places its class as it boots, and a test that left the
+    desk's or touch in force would lay out and mark every later test's parts
+    as that one's."""
+    _theme_reset()
+    yield
+    _theme_reset()
 
 
 # What `_cover_budget_unbounded` raises the cover slice to: every cover builds

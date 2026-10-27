@@ -134,9 +134,10 @@ def _free_slots():
     return len(got)
 
 
-def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
+def test_a_theme_switch_installs_frees_and_relayouts(tmp_path):
     """On the `night` fixture (tests/fixtures/themes/, Tiny5 for `ui` and
-    `title`), against every seed and a theme that names no font."""
+    `title`, the default's family for the roles it names no file for: it has
+    no look, so it takes the default's), against every seed."""
     from ws_helpers import build_ws, use_theme
     ws = build_ws(tmp_path)
     use_theme(ws, "night", "dark")
@@ -144,6 +145,9 @@ def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
     assert fid != 0 and ui_draw.font("title")[0] == fid and ui_draw.font("mono")[0] == 0
     assert ui_draw.print_font() == fid
     assert ws.layout.font_w == 6 and ws.layout.line_h == 8
+    night = dict(appearance._FONTS)
+    assert (None, "tiny5.fnt") in night
+    assert all(f.startswith("inter-") for _p, f in night if f != "tiny5.fnt")
     for _ in range(3):
         for name in appearance.THEME_NAMES:
             ws.look.set_theme(name, persist=False)
@@ -153,21 +157,9 @@ def test_a_theme_switch_installs_frees_and_relayouts(tmp_path, monkeypatch):
             # contrast the same with Atkinson's (26b, 26c)
             assert len(appearance._FONTS) == 8
         ws.look.set_theme("night", persist=False)
-    assert len(appearance._FONTS) == 1
+    assert set(appearance._FONTS) == set(night)
     iconsets.reset()            # an icon set's masks hold font rows of their own
-    assert _free_slots() == SLOTS - 1
-    # A theme that names no font: every role and the print font on petme128,
-    # nothing left loaded, the layout rebuilt on petme128's cell.
-    real = ui_draw.theme_fonts
-    monkeypatch.setattr(appearance._ui_draw, "theme_fonts",
-                        lambda n: () if n == "night" else real(n))
-    ws.look.set_theme("night", persist=False)
-    assert [ui_draw.font(r)[0] for r in ("ui", "title", "mono", "caption")] == [0, 0, 0, 0]
-    assert ui_draw.print_font() == 0 and appearance._FONTS == {}
-    assert ws.layout.font_w == 8 and _free_slots() == SLOTS
-    monkeypatch.undo()
-    ws.look.set_theme("night", persist=False)
-    assert ui_draw.font("ui")[0] != 0 and ws.layout.font_w == 6
+    assert _free_slots() == SLOTS - len(night)
 
 
 def test_the_floor_lifts_the_effective_font_scale(tmp_path):

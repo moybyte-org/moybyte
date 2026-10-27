@@ -62,11 +62,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import _SET_ROW_H
 
 try:
-    from code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_CELL, _SYM_H,
+    from code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_H,
                             _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS, _CODE_INSET,
                             _CODE_MARK)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_CELL, _SYM_H,
+    from runtime.code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_H,
                                     _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS, _CODE_INSET,
                                     _CODE_MARK)
 
@@ -429,7 +429,7 @@ class Layout(LayoutBase):
         # a theme whose modes set different faces keeps one bar
         self.clock_w = (max(_ui_draw.print_width("00:00", fs), _lb_metric("clock", fs))
                         if _ui_draw.font_v2(_ui_draw.font()[0]) else 5 * self.font_w)
-        sys_len = _sys_tile(self.status_h)[2] if _ui_draw.depth()[0] else 0
+        sys_len = _sys_tile(self.status_h)[2]
         of = _lb_bars()
         self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs,
                                        self.clock_w, _bar_text_w, of=of, sys_len=sys_len)
@@ -616,8 +616,6 @@ class CodeLayout(LayoutBase):
         span = self.cw - 2 * (ins - fs)
         self.sym_cell = max(_SYM_MIN * fs, span // n)
         self.sym_h = _SYM_H * cs if self.symbols else 0
-        self.sym_text_dx = max(0, (self.sym_cell - _SYM_CELL * fs) // 2)
-        self.sym_text_dy = (self.sym_h - _SYM_H * fs) // 2
         if self.symbols:
             self.sym_y = self.cy + self.ch - self.sym_h - (m - fs)
             self.sym_area = (self.cx + ins - fs, self.sym_y,

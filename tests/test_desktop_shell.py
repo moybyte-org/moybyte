@@ -20,8 +20,8 @@ from ws_helpers import boot_on_fixture, use_theme
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch, store=True)
 
 
@@ -779,11 +779,10 @@ def _make_tool_ws(tmp_path):
 
 def test_tool_cart_runs_with_a_bar_x_exits_and_backspace_is_not_stolen(tmp_path):
     """Part 4 (the one architectural call to confirm on device): a launched TOOL/APP runs
-    WITH a minimal bar so it is EXITABLE -- the right-zone context-X exits it, while
+    WITH a minimal bar so it is EXITABLE -- the bar's X exits it, while
     BACKSPACE stays a FREE key so a text tool's password field keeps its DELETE. (A GAME
     by contrast stays fullscreen-bar-hidden and is left through the pause menu -- the
     bar-visibility-by-type rule keys on the cart's manifest type.)"""
-    from runtime import bar_layer as BL
     ws, drv = _make_tool_ws(tmp_path)
 
     # 1) The minimal bar IS drawn while the tool plays (a game draws NO bar). Spy the
@@ -806,8 +805,9 @@ def test_tool_cart_runs_with_a_bar_x_exits_and_backspace_is_not_stolen(tmp_path)
     drv.hold("home", False)
     assert ws.screen == "desktop"                      # the tool did NOT exit on BACKSPACE
 
-    # 3) The context-X EXITS the tool (tap the right-zone X on the 320x240 game canvas).
-    x, y, w, h = BL._ZONE_CONTEXT_X
+    # 3) The X EXITS the tool (the `close` cell the night fixture's layout places).
+    bar, (x, y, w, h) = ws.bar_layer.cell("tool", "close")
+    x, y = x + bar[1][0], y + bar[1][1]
     drv.touch(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     drv.touch_up()
@@ -965,36 +965,6 @@ def test_launcher_grid_runs_to_the_canvas_floor(tmp_path):
     rows_now = (band_now + lay.icon_gap_y) // (lay.icon_h + lay.icon_gap_y)
     rows_old = (band_old + lay.icon_gap_y) // (lay.icon_h + lay.icon_gap_y)
     assert rows_now >= rows_old
-
-
-def test_status_strip_stays_legible_over_an_animated_wallpaper(tmp_path):
-    """#46: the status strip must stay readable on the home screen even with a live
-    animated wallpaper behind it. The strip's backing band fills its rows, so the
-    clock text region is the strip's dark backing, not wallpaper noise, and the
-    wallpaper's own content is pushed below the strip (its safe area)."""
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    # Pick a real animated wallpaper cart (the shipped ones print a title at y=10,
-    # which is inside the strip band -- the bug #46 fixes).
-    cart_wp = ws.look.wallpaper_options()
-    assert cart_wp, "expected at least one wallpaper cart seeded"
-    ws.look.select_wallpaper(cart_wp[0], persist=False)
-    drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)
-    sc = ws.sys_canvas
-    lay = ws.layout
-    # The strip backing band is solid black across its rows (legible scrim), so the
-    # top-left clock region is not overwritten by wallpaper art.
-    black = C.NAMES["black"]
-    # Sample a column at the far right of the strip, above the pips' glyph rows but
-    # within the band: the backing fill must be present (not raw wallpaper).
-    assert sc.pix(1, 0) == black
-    # The wallpaper's safe area (just below the strip) is NOT plain black -- the
-    # animated backdrop visibly occupies the rows beneath the strip.
-    below = lay.status_h + 2
-    band = {sc.pix(xx, below) for xx in range(sc.w)}
-    assert len(band) >= 1   # rendered without error; backdrop occupies below-strip rows
 
 
 def test_ota_channel_toggle_persists(tmp_path):

@@ -124,7 +124,7 @@ class _BackdropLayer(Layer):
         s = wm._shape_sig()
         # order + geometry; focus too under the depth, whose shadows and
         # outline fringes (drawn here, _draw_unders) follow it
-        wsig = (s[0], s[2], s[1]) if _ui_draw.depth()[13] else (s[0], s[2])
+        wsig = (s[0], s[2], s[1]) if _ui_draw.depth()[12] else (s[0], s[2])
         if wsig != wm._desk_win_sig:
             wm._desk_win_sig = wsig
             if wm._drag is None and wm._resize is None:
@@ -256,12 +256,10 @@ class _BackdropLayer(Layer):
         return self.wm.HIDDEN_APPS
 
     def _icon_catalog(self):
-        """[(key, label, cart)]: under a look the labels are the titles as
-        their apps name them, else in capitals."""
+        """[(key, label, cart)]: the labels are the titles as their apps name
+        them."""
         ws = self.ws
-        looked = bool(_ui_draw.depth()[0])
-        out = [("play", "Play" if looked else "PLAY", None),
-               ("projects", "Projects" if looked else "PROJECTS", None)]
+        out = [("play", "Play", None), ("projects", "Projects", None)]
         for app, _text in getattr(ws, "_apps", ()):
             if app.id in self.HIDDEN_APPS:
                 continue
@@ -270,8 +268,7 @@ class _BackdropLayer(Layer):
                 if app.is_app(c):
                     cart = c
                     break
-            title = str(ws.app_title(app.id) or app.id.upper())
-            out.append((app.id, title if looked else title.upper(), cart))
+            out.append((app.id, str(ws.app_title(app.id) or app.id.upper()), cart))
         return out
 
     def _icon_rects(self):
@@ -281,47 +278,15 @@ class _BackdropLayer(Layer):
         fs = ws.look.effective_font_scale()
         dx, dy, dw, dh = self.wm._desk_rect()
         box = _layout_base.metric("tile", fs)
-        catalog = self._icon_catalog()
-        if _ui_draw.depth()[0]:
-            return self._look_rects(catalog, box, fs, dx, dy, dw, dh)
-        gut = 10 * fs                   # the cell's trailing gutter: pill = cell_w - gut
-        cell_h = _layout_base.metric("tile_cell", fs)
-        x0 = dx + 14 * fs
-        y0 = dy + _layout_base.metric("tile_top", fs)
-        bottom = dy + dh - 6 * fs
-        # The pill must hold the longest catalog label or the chip clips it
-        # (#174: a fixed 66*fs cell cut PROJECTS/STORYBOOK) -- but only as wide
-        # as the columns it takes still fit the canvas, or a long app title
-        # marches the last column off the right edge and out of reach. The last
-        # column draws no gutter, so its width is not charged against the fit.
-        maxw = max((_ui_draw.text_width(label, fs, "ui") for _k, label, _c in catalog),
-                   default=0)
-        rows = max(1, (bottom - y0) // cell_h)
-        cols = max(1, (len(catalog) + rows - 1) // rows)
-        fit_w = (dx + dw - x0 + gut) // cols
-        cell_w = max(66 * fs, maxw + gut + 4)
-        cell_w = max(box + gut, min(cell_w, fit_w))
-        x = x0
-        y = y0
-        out = []
-        for key, label, cart in catalog:
-            if y + cell_h > bottom:
-                y = y0
-                x += cell_w
-            bx = x + (cell_w - gut - box) // 2
-            out.append((key,
-                        (bx, y, box, box),
-                        (x, y + box + 3 * fs, cell_w - gut, 13 * fs),
-                        label, cart))
-            y += cell_h
-        return out
+        return self._look_rects(self._icon_catalog(), box, fs, dx, dy, dw, dh)
 
     def _look_rects(self, catalog, box, fs, dx, dy, dw, dh):
         """The column under a look (docs/look_2026-10.md step 25): `box`
         tiles on the class's pitch, their centres 54 of the tile's 44 in from
         the desk's edge or further where a label needs it, each label under
         its tile, 2 of the 44 below it, as wide as the column: nearer its own
-        tile than the next one down."""
+        tile than the next one down. A label longer than the columns leave
+        room for is cut to its band, so every column stays on the desk."""
         k = box / 44
         cell_h = _layout_base.metric("tile_cell", fs)
         y0 = dy + _layout_base.metric("tile_top", fs)
@@ -329,6 +294,9 @@ class _BackdropLayer(Layer):
         line = _ui_draw.font("ui")[2] * fs
         maxw = max((_ui_draw.text_width(label, fs, "ui") for _k, label, _c in catalog),
                    default=0)
+        rows = max(1, (bottom - y0 - box - int(2 * k) - line) // cell_h + 1)
+        cols = max(1, (len(catalog) + rows - 1) // rows)
+        maxw = min(maxw, (dw - int(54 * k)) * 2 // (2 * cols - 1) - int(20 * k))
         pitch = max(box + int(20 * k), maxw + int(20 * k))
         cx = dx + max(int(54 * k), (maxw + 1) // 2 + int(10 * k))
         gap = int(2 * k)
@@ -385,31 +353,7 @@ class _BackdropLayer(Layer):
 
     def _draw_desk_icons(self):
         ws = self.ws
-        cv = ws.sys_canvas
-        th = ws.theme_colors
-        fs = ws.look.effective_font_scale()
-        if _ui_draw.depth()[0]:
-            self._draw_look_icons(ws, cv, th)
-            return
-        for key, box, pill, label, cart in self._icon_rects():
-            _ui_draw.icon_tile(cv, th, box)
-            img = ws.covers.icon_sheet_for(cart) if cart is not None else None
-            if img is not None:
-                sc = max(1, (box[2] - 8 * fs) // 16)
-                cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
-                       box[1] + (box[3] - 16 * sc) // 2, sc)
-            else:
-                glyph = self.ICON_GLYPHS.get(key, "app")
-                ink = th.get("accent", 10) if key == "play" else th.get("title_ink", 0)
-                ws._glyph(glyph, (box[0] + 6 * fs, box[1] + 6 * fs,
-                                  box[2] - 12 * fs, box[3] - 12 * fs), ink, cv)
-            _ui_draw.icon_label(cv, th, pill, label, key == "play", fs)
-
-    @staticmethod
-    def label_rect(pill, label, fs):
-        """The pill a label is drawn in (`ui.icon_label_rect`; the hit-test
-        keeps the whole band)."""
-        return _ui_draw.icon_label_rect(pill, label, fs)
+        self._draw_look_icons(ws, ws.sys_canvas, ws.theme_colors)
 
     def _open_icon(self, key):
         ws = self.ws

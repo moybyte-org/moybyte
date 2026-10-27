@@ -139,11 +139,14 @@ def test_the_tap_targets_grow_and_the_text_does_not():
     assert floored.bar_icon == 2 * plain.bar_icon
     assert floored.bar_stride == 2 * plain.bar_stride
     assert floored.set_row_h == 2 * plain.set_row_h
-    for rect in ("sysmenu_btn", "wifi_btn", "batt_btn", "context_x_btn",
-                 "set_back", "set_ach"):
+    for rect in ("wifi_btn", "batt_btn", "context_x_btn", "set_back", "set_ach"):
         was = getattr(plain, rect)
         now = getattr(floored, rect)
         assert now[2] == 2 * was[2] and now[3] == 2 * was[3], rect
+    # the system button is the look's tile, its cell the tile's on the bar
+    from runtime import layout_base
+    for lay in (plain, floored):
+        assert lay.sysmenu_btn[2] == layout_base.sys_tile(lay.status_h)[2]
 
     # ...and the text side is untouched.
     assert floored.fs == plain.fs
@@ -179,17 +182,11 @@ def test_the_text_offsets_re_centre_only_when_the_box_grew():
     """The hand-tuned offsets (the bar's y=3, a Settings row's y=5) are frozen
     pixels. The `*_dy` fields shift the fs-tall band into the middle of a
     cs-tall box, so they must be exactly 0 wherever the box did not grow."""
-    from runtime.code_layer import _SYM_CELL
     for w, h, fs in TIERS:
         lay = Layout(w, h, fs, chrome_scale=fs)
         assert lay.bar_text_dy == 0
         assert lay.row_text_dy == 0
         assert lay.set_head_dy == 0
-        code = CodeLayout(w, h, fs, chrome_scale=fs)
-        # A symbol key's width is the strip's share, so its x offset centres
-        # the symbol in what the key grew by; its height is the tap target's.
-        assert code.sym_text_dx == max(0, (code.sym_cell - _SYM_CELL * fs) // 2)
-        assert code.sym_text_dy == 0
     w, h, fs, cs = GUITION
     lay = Layout(w, h, fs, chrome_scale=cs)
     assert lay.bar_text_dy > 0 and lay.row_text_dy > 0 and lay.set_head_dy > 0

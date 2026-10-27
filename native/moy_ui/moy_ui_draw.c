@@ -396,15 +396,11 @@ static int dflt(int16_t v, int d) {
 
 // -- the marks a part draws (moy_ui.h, the marks) ------------------------------------
 //
-// Under a theme with marks, FOCUS is the theme's focus mark and ON the
-// current mark, each over the part's rest field and under its content; in a
-// window behind, the current mark is the back one and no focus is drawn.
-// Under a theme without, FOCUS draws as ON always has. mark_flags answers the
-// flags the part's state reads.
+// FOCUS is the theme's focus mark and ON the current mark, each over the
+// part's rest field and under its content; in a window behind, the current
+// mark is the back one and no focus is drawn. mark_flags answers the flags
+// the part's state reads.
 static int mark_flags(int flags) {
-    if (!moy_ui_marks()->on) {
-        return (flags & MOY_UI_F_FOCUS) ? flags | MOY_UI_F_ON : flags;
-    }
     return flags & ~MOY_UI_F_ON;
 }
 
@@ -424,9 +420,6 @@ static int clears(int a, int b) {
 static void part_marks(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fs, int draw,
                        int side, int r, int card, int *ink, int *on) {
     const moy_ui_marks_t *m = moy_ui_marks();
-    if (!m->on) {
-        return;
-    }
     int field = *on;
     int mi, how = (draw ? 0 : MOY_UI_MARK_INK) | side;
     if (flags & MOY_UI_F_ON) {
@@ -927,7 +920,7 @@ int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, i
     int shaped = (bs.shape != BTN_SQUARE && bs.r > 0) || bs.shape == BTN_CIRCLE || bs.bevel > 0;
     if ((phase & MOY_UI_PHASE_FRAME) && (shaped || !surface(&d, b, kind, state, bg, edge))) {
         button_body(&d, b, &bs, &on, &ring);
-        if (state == MOY_UI_DISABLED && on >= 0 && moy_ui_depth()->on) {
+        if (state == MOY_UI_DISABLED && on >= 0) {
             // a disabled key's plate is faded too, half way to the surface
             // under it, as its ink is the disabled ink
             int r = bs.shape == BTN_SQUARE || bs.r < 0 ? 0 : bs.r;
@@ -1094,15 +1087,14 @@ int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on
     draw_t d;
     open_draw(s, &d);
     int16_t c[3];
-    int marked = active && moy_ui_marks()->on;     // the current mark, not the ON look
-    int state = active && !marked ? MOY_UI_ON : MOY_UI_REST;
+    int state = MOY_UI_REST;                     // the current mark, not the ON look
     moy_ui_colors(d.look, MOY_UI_K_TAB, state, c);
-    int ink_i = active && !marked ? c[1] : (ink == MOY_UI_FROM_STYLE ? c[1] : ink);
+    int ink_i = ink == MOY_UI_FROM_STYLE ? c[1] : ink;
     if ((phase & MOY_UI_PHASE_FRAME) && !surface(&d, r, MOY_UI_K_TAB, state, c[0], c[2])
         && c[0] >= 0) {
         fill(&d, r.x, r.y, r.w, r.h, c[0]);
     }
-    if (marked) {
+    if (active) {
         // the current tab's mark is a pill, as the home's and the bar's tabs
         // wear it (their plate's radius, 5 at the scale)
         int mi = -1, how = (phase & MOY_UI_PHASE_FRAME) ? 0 : MOY_UI_MARK_INK;
@@ -1338,23 +1330,6 @@ int moy_ui_panel(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, in
     }
     if (content != NULL) {
         *content = ct;
-    }
-    return MOY_UI_OK;
-}
-
-int moy_ui_focus_ring(const moy_ui_sink_t *s, moy_ui_box_t b, int fs) {
-    draw_t d;
-    open_draw(s, &d);
-    int16_t c[3];
-    moy_ui_colors(d.look, MOY_UI_K_FOCUS, MOY_UI_REST, c);
-    int n = metric(MOY_UI_K_FOCUS, MOY_UI_M_FOCUS_RINGS);
-    if (n < fs) {
-        n = fs;
-    }
-    int gap = metric(MOY_UI_K_FOCUS, MOY_UI_M_FOCUS_GAP);
-    for (int i = 0; i < n; i++) {
-        int dd = fs + gap + i;
-        rectb(&d, b.x - dd, b.y - dd, b.w + 2 * dd, b.h + 2 * dd, c[2]);
     }
     return MOY_UI_OK;
 }

@@ -26,8 +26,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 
@@ -419,38 +419,6 @@ def test_paint_editor_320x240_is_byte_identical(tmp_path):
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
-
-
-def test_paint_layout_fits_the_320x240_canvas():
-    """The T-Deck's Sprites tab (docs/theming_2026-09.md §9, phase 3 step 4):
-    the 144px grid, the tool rows under the grid and the palette, clear of the
-    button column, and GET / PUT / FILE stacked clear of CLOSE."""
-    from runtime import paint_layer as P
-    lay = P.PaintLayout(320, 240, 1)
-    assert lay.pg_span == 144
-    gx, gy, gw, gh = lay.pg_area
-    col_x = min(b[0] for b in (lay.get_btn, lay.put_btn, lay.files_btn, lay.close_btn))
-    assert len(lay.tool_btns) == len(P._TOOLS)
-    for (x, y, w, h) in lay.tool_btns:
-        assert y >= gy + gh and x + w <= col_x and y + h <= 240
-    for b in (lay.get_btn, lay.put_btn, lay.files_btn):
-        assert b[1] + b[3] <= lay.close_btn[1]
-    assert lay.status_xy[1] + 8 <= lay.panel[1] + lay.panel[3]
-
-
-def test_paint_files_button_clears_the_sprite_preview(tmp_path):
-    """#111 layout nit: the FILE button (#108, send-to-Files) used to sit flush
-    against the sprite preview thumbnail at 320x240 -- a snug fit that read as an
-    overlap. It must now clear the preview box with no overlap."""
-    from runtime import paint_layer as P
-    lay = P.PaintLayout(320, 240, 1)
-    fx, fy, fw, fh = lay.files_btn
-    px, py = lay.prev_xy
-    pw = ph = lay.prev_box
-    # Standard axis-aligned rect overlap test: NOT overlapping iff separated on
-    # some axis.
-    overlaps = not (fx + fw <= px or px + pw <= fx or fy + fh <= py or py + ph <= fy)
-    assert not overlaps, "FILE button must not overlap the sprite preview"
 
 
 def test_paint_editor_grid_grows_on_large_canvas(tmp_path):

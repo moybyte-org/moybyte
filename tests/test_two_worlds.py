@@ -6,7 +6,6 @@ PLAY icon in, the home's X out)."""
 import pytest
 
 from runtime import host_app, ui_draw
-from runtime.host_canvas import make_system_canvas
 
 
 from ws_helpers import build_desktop_ws as _ws, select_on_home
@@ -14,8 +13,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 
@@ -82,29 +81,6 @@ def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
     return ws
 
 
-def _ink(cv, rect, col):
-    x, y, w, h = rect
-    return sum(1 for yy in range(y, y + h) for xx in range(x, x + w)
-               if cv.pix(xx, yy) == col)
-
-
-def _label_ink(label, fs, ink, field):
-    """The ink a WHOLE label costs, rasterized outside ui_draw.chip -- comparing a
-    chip against a chip would only prove the clip agrees with itself."""
-    cv = make_system_canvas(ui_draw.print_width(label, fs) + 8, ui_draw.font("ui")[2] * fs + 8,
-                            font_scale=fs)
-    cv.cls(field)
-    cv.print(label, 4, 4, ink, 1)
-    return _ink(cv, (0, 0, cv.w, cv.h), ink)
-
-
-def _label_colors(ws):
-    """The default theme paints a label in a pill of its `desk` surface, in
-    the bar's colours."""
-    th = ws.theme_colors
-    return th["bar"], th["chrome_ink"]
-
-
 def _on_canvas(cv, r):
     return (r[0] >= 0 and r[1] >= 0
             and r[0] + r[2] <= cv.w and r[1] + r[3] <= cv.h)
@@ -117,17 +93,15 @@ def _overlaps(a, b):
 
 @pytest.mark.parametrize("size,fs", _WINDOWED)
 def test_desk_labels_render_whole_on_the_open_machine_wallpaper(tmp_path, size, fs):
-    """Every shipped desk label draws every one of its glyphs, at every
-    windowed config -- PROJECTS drew as PROJECT and STORYBOOK as STORYBO."""
+    """Every shipped desk label fits its band whole, at every windowed config
+    -- PROJECTS drew as PROJECT and STORYBOOK as STORYBO."""
     ws = _desk_on_open_machine(tmp_path, size, fs)
     cv = ws.sys_canvas
     efs = ws.look.effective_font_scale()
     seen = []
     desk = ws.wm._backdrop_layer
-    field, ink = _label_colors(ws)
     for key, box, pill, label, _cart in desk._icon_rects():
-        drawn = desk.label_rect(pill, label, efs)
-        assert _ink(cv, drawn, ink) == _label_ink(label, efs, ink, field), label
+        assert ui_draw.text_width(label, efs, "ui") <= pill[2], label
         assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
         assert not any(_overlaps(pill, p) for p in seen), key
         seen.append(pill)
@@ -137,11 +111,10 @@ def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
     """A user may add an app, and its manifest title is what the desk labels
     its icon with. The cell sizes to the LONGEST label, so an unbounded title
     marched the last column past the right edge -- and an icon drawn off the
-    canvas is unreachable, not merely ugly. It clips inside its pill instead."""
+    canvas is unreachable, not merely ugly. It clips inside its band instead."""
     long_title = "CALCULATING MACHINE DELUXE"
     ws = _desk_on_open_machine(tmp_path, fs=3, titles={"calc": long_title})
     cv = ws.sys_canvas
-    fs = ws.look.effective_font_scale()
     rects = ws.wm._backdrop_layer._icon_rects()
     assert any(label == long_title for _k, _b, _p, label, _c in rects)
     seen = []
@@ -149,10 +122,6 @@ def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
         assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
         assert not any(_overlaps(pill, p) for p in seen), key
         seen.append(pill)
-        field, ink = _label_colors(ws)
-        drawn = ws.wm._backdrop_layer.label_rect(pill, label, fs)
-        fits = len(ui_draw.print_fit(label, drawn[2], fs))
-        assert _ink(cv, drawn, ink) == _label_ink(label[:fits], fs, ink, field), label
 
 
 def test_desk_bar_has_no_context_x(tmp_path):
@@ -451,3 +420,4 @@ def test_fullscreen_tiers_are_untouched(tmp_path):
     ws.launcher.sel = 0                           # Make's "+ New"
     ws.launch_selected()
     assert ws.wm.top_kind() == "menu"             # a new game, in the Editor
+

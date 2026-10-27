@@ -919,8 +919,8 @@ host runs instead).
   could not reach the real case, a kid's own busy picture as the wallpaper
   in `custom`, which turns nothing on; and an opaque scrim hides the
   wallpaper the home exists to show. Where a carousel title proves hard to
-  read on glass, the planned answer is the desk's label pill
-  (`ui.icon_label`) under the focused card's title; it is not built.
+  read on glass, the planned answer is a label pill under the focused
+  card's title; it is not built.
 - **Prefer wallpapers that need no VM.** A live Python wallpaper keeps the
   Python VM up, against the kernel doc's memory goal (§4.4 there). Images and
   Lua or wasm wallpapers are preferred; a Python wallpaper stays allowed and is
@@ -1032,8 +1032,11 @@ Every key but `format` and `name` is optional. A theme resolves through
 at the default seed, `moy`, which sets every role. The default lends a
 package that names no `inherits` its roles, metrics, surfaces, fonts and
 layout, but not its look (its fields and backdrops), which a chain takes only
-by name (`docs/look_2026-10.md` step 27): a package of its own draws
-lookless, as `blocks` and `contrast` draw their own looks alone. A user
+by name (`docs/look_2026-10.md` step 27), as `blocks` and `contrast` draw
+their own looks alone; a chain that sets no look at all (a colours-only
+package) takes the default's geometry and marks flat, no shadow and no
+backdrop, every colour the look would set derived from its own roles
+(step 33). A user
 theme is a standalone copy, flattened when `custom` is made, with no `inherits` (owner,
 2026-10-14; phase 6 steps 2 and 5), and a role a copy lacks — one a later
 format added — takes the default's, as any unset role does. The chain

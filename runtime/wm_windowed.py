@@ -773,7 +773,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._root_marks = None
         else:
             if self._root_marks is None:
-                self._root_marks = _ui_draw.marks()[1]
+                self._root_marks = _ui_draw.marks()[0]
             cx, cy, _cw, _ch = win.content_rect()
             ctx.install(self.ws, (cx, cy))
             win._marked = (self._wins.get(self._focus) is win
@@ -1114,7 +1114,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # foot) under the game and at each side of it (`_win_edge`), which
             # the content rect leaves out.
             foot = (_ui_draw.frame_geom(full.w, full.h, th)[1]
-                    if _ui_draw.depth()[13] else 0)
+                    if _ui_draw.depth()[12] else 0)
             e = max(foot, self._frame_edge())
             fit = max(1, min((full.w - 24 - 2 * e) // self.ws.canvas.w,
                              (self._desk_rect()[3] - 24 - th - e)
@@ -3293,7 +3293,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return None
         if (focused or win.kind == "desktop" or win.saved is not None or win.buf is None
                 or win._look_gen != self.ws.look.look_gen
-                or (win._marked and _ui_draw.marks_on())):
+                or win._marked):
             return None
         ex = self._win_extent(win)
         out = []
@@ -3653,8 +3653,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                       and self._wins.get(self._resize[0]) is win))
         if moving:
             self._win_touched = True
-        elif not focused and (win._look_gen != self.ws.look.look_gen
-                              or (win._marked and _ui_draw.marks_on())):
+        elif not focused and (win._look_gen != self.ws.look.look_gen or win._marked):
             # A background window's retained buffer under an older look, or
             # drawn while it had the focus mark.
             win._look_gen = self.ws.look.look_gen

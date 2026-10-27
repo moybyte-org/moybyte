@@ -30,8 +30,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 
@@ -834,7 +834,6 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
 
 
 def test_host_console_paint_via_mouse(tmp_path):
-    from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
@@ -844,12 +843,13 @@ def test_host_console_paint_via_mouse(tmp_path):
     ws._open_paint()                                     # the Editor's PAINT, over the run
     drv.frame(1 / 30)
     assert ws.menu_view == "paint" and ws.paint is not None
-    sx = C._SW_X0 + (12 % C._SW_COLS) * C._SW            # palette swatch for color 12
-    sy = C._SW_Y0 + (12 // C._SW_COLS) * C._SW
+    lay = ws.paint_layer.layout
+    sx = lay.sw_x0 + (12 % lay.sw_cols) * lay.sw        # palette swatch for color 12
+    sy = lay.sw_y0 + (12 // lay.sw_cols) * lay.sw
     drv.click(sx + 2, sy + 2)
     drv.frame(1 / 30)
     assert ws.paint.color == 12
-    drv.click(C._PG_X0 + 2, C._PG_Y0 + 2)               # paint sprite 0, pixel (0,0)
+    drv.click(lay.pg_x0 + 2, lay.pg_y0 + 2)             # paint sprite 0, pixel (0,0)
     drv.frame(1 / 30)
     assert ws.sheet.tget(0, 0, 0) == 12
 

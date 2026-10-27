@@ -14,9 +14,10 @@ from ws_helpers import build_ws as _build_ws, select_on_home, use_theme
 
 
 def _ws(tmp_path, **kw):
-    """A workstation on the lookless `night` fixture (tests/fixtures/themes/)
-    in its dark mode, whose tool apps exit by the bar's context X; a test of
-    a look sets its theme."""
+    """A workstation on the `night` fixture (tests/fixtures/themes/) in its
+    dark mode, a palette theme with no look (the default's, flat) whose
+    layout places the bar's context X its tool apps exit by; a test of a
+    look sets its theme."""
     ws = _build_ws(tmp_path, **kw)
     use_theme(ws, "night", "dark")
     return ws

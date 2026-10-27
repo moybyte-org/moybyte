@@ -268,7 +268,7 @@ PY_SITES = {
     "native/moy_gfx/modmoy_gfx.c": 2,           # the system canvases' print
     "native/moy_gfx/moy_gfx_kernels.c": 1,      # the `text` kernel
     "native/moy_ui/moy_ui_draw.c": 1,           # every primitive's label
-    "native/moy_play/moy_chrome.c": 4,          # titles, texts, menu rows
+    "native/moy_play/moy_chrome.c": 3,          # titles and texts
 }
 
 

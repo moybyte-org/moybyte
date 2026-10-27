@@ -15,8 +15,9 @@ from runtime import host_app
 
 
 # The fixture theme packages (tests/fixtures/themes/<name>.moy): the seeds
-# the 2026-10 look deleted (docs/look_2026-10.md step 27), each standalone,
-# for the tests that draw a lookless pixel theme, a frame style or a palette.
+# the 2026-10 look deleted (docs/look_2026-10.md step 27), each standalone
+# with no look of its own (so the default's, flat: step 33), for the tests
+# that draw a palette theme or a frame style; `mint`, a colours-only package.
 FIXTURE_THEMES = Path(__file__).resolve().parent / "fixtures" / "themes"
 
 
@@ -94,9 +95,9 @@ def use_theme(ws, name, variant=None, store=False):
 
 def boot_on_fixture(monkeypatch, name="night", variant="dark", store=False):
     """Every workstation the test builds boots on fixture package `name` in
-    `variant` (`use_theme`'s `store`): for the suites that pin the lookless
-    pixel bar, its context X and the 320x240 coordinates (the default is
-    Moy, whose look moves them). A store that names a theme boots it."""
+    `variant` (`use_theme`'s `store`): for the suites that pin a palette
+    theme's bar, its layout's context X and the 320x240 coordinates under
+    the default's look drawn flat. A store that names a theme boots it."""
     real = host_app.build_workstation
 
     def build(*a, **kw):

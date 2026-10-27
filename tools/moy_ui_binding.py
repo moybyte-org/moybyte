@@ -139,7 +139,7 @@ class _Span(c.Structure):
 
 
 class _Depth(c.Structure):
-    _fields_ = ([(n, c.c_uint8) for n in ("on", "win_r", "card_r", "key_r", "corners",
+    _fields_ = ([(n, c.c_uint8) for n in ("win_r", "card_r", "key_r", "corners",
                                           "stepped", "shadow", "edges", "frames")]
                 + [("shadow_565", c.c_uint16)]
                 + [(n, c.c_int16) for n in ("alpha", "blur", "dx", "dy", "back", "line",
@@ -241,7 +241,7 @@ _DRAW_SIGS = (
                      _I, _I, c.POINTER(_Box)], _I),
     ("moy_ui_icon_slot", [c.c_char_p, _Z], _I),
     ("moy_ui_icon_glyph", [c.c_char_p, _Z], _I),
-    ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], _I),
+    ("moy_ui_depth_use", [c.c_char_p, c.c_size_t, _I], None),
     ("moy_ui_depth", [], c.c_void_p),
     ("moy_ui_frame_geom", [_I, _I, _I, _I, _I, c.POINTER(_I)], None),
     ("moy_ui_frame_under", [c.POINTER(_Sink), _Box, _I, _I, _I], _I),
@@ -258,7 +258,6 @@ _DRAW_SIGS = (
     ("moy_ui_dialog", [c.POINTER(_Sink), _Box, _I, _I], _I),
     ("moy_ui_text_field", [c.POINTER(_Sink), _Box, _Span, _Span, c.c_void_p, _I], _I),
     ("moy_ui_panel", [c.POINTER(_Sink), _Box, _Span, _I, c.POINTER(_Box)], _I),
-    ("moy_ui_focus_ring", [c.POINTER(_Sink), _Box, _I], _I),
     ("moy_ui_inset32", [_R4, c.c_int32, c.c_int32, _R4], None),
     ("moy_ui_cut", [_R4, _I, c.c_int32, _R4, _R4], None),
     ("moy_ui_split", [_R4, _I, c.c_int32, _I, c.c_void_p, _I], _I),
@@ -804,10 +803,6 @@ def binding():
                                 c.byref(out)))
         return (out.x, out.y, out.w, out.h)
 
-    def focus_ring(cv, look, rect, fs):
-        s = sink(cv, look)
-        _check(lib.moy_ui_focus_ring(c.byref(s), box_of(rect), fs_or(fs, s)))
-
     def focus(cv, look, rect, cls, r, flags, fs):
         s = sink(cv, look)
         out, ink = _Box(), _I()
@@ -825,8 +820,7 @@ def binding():
     def marks(active, reset):
         if active is not None:
             lib.moy_ui_marks_active(1 if active else 0)
-        on = c.cast(lib.moy_ui_marks(), c.POINTER(c.c_uint8 * 2)).contents[0]
-        return (bool(on), bool(lib.moy_ui_marks_shown()), lib.moy_ui_marks_drawn(1 if reset else 0),
+        return (bool(lib.moy_ui_marks_shown()), lib.moy_ui_marks_drawn(1 if reset else 0),
                 lib.moy_ui_mark_reach(1))
 
     def mark_reach(cls):
@@ -864,7 +858,7 @@ def binding():
               button, button_x, chip, tab_rects, tab, status, hints, game_btn, game_icon_btn,
               mini_btn, toolbar, paint, frame, frame_buttons, frame_band, frame_geom, frame_icon, bar_part,
               scrim, tile, unlock, modal, month_h, perf,
-              frame_under, frame_under_onto, cast, dialog, text_field, panel, focus_ring, focus, current,
+              frame_under, frame_under_onto, cast, dialog, text_field, panel, focus, current,
               marks, mark_reach, inset, cut,
               split, row_content, cell_art):
         setattr(m, f.__name__, f)
@@ -1411,9 +1405,8 @@ def binding():
             b = _b(name)
             lib.moy_ui_depth_use(b, len(b), 1 if light else 0)
         d = _Depth.from_address(lib.moy_ui_depth())
-        return (d.on, d.win_r, d.card_r, d.key_r, d.corners, d.stepped, d.shadow, d.edges,
-                d.alpha, d.blur, d.dx, d.dy, d.back, d.frames,
-                d.bar_h if d.on else 0, d.hh_h if d.on else 0)
+        return (d.win_r, d.card_r, d.key_r, d.corners, d.stepped, d.shadow, d.edges,
+                d.alpha, d.blur, d.dx, d.dy, d.back, d.frames, d.bar_h, d.hh_h)
 
     m.use_depth = use_depth
 

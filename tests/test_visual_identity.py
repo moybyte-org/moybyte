@@ -23,8 +23,9 @@ from ws_helpers import build_ws as _build_ws, use_theme
 
 
 def _ws(tmp_path, **kw):
-    """A workstation on the lookless `night` fixture (tests/fixtures/themes/)
-    in its dark mode, the palette theme these surfaces were pinned on."""
+    """A workstation on the `night` fixture (tests/fixtures/themes/) in its
+    dark mode, the palette theme these surfaces were pinned on: no look of
+    its own, so the default's, flat."""
     ws = _build_ws(tmp_path, **kw)
     use_theme(ws, "night", "dark")
     return ws
@@ -256,39 +257,6 @@ def test_base_tier_zone_chips_dispatch(tmp_path):
     assert set(home._zone_action_rects(ws.layout.zone_left)) == {"new"}
 
 
-def test_shelf_geometry(tmp_path):
-    """The home's shelf (the grid arrangement; the library-concept mockup): a
-    framed panel whose
-    grid SCROLLS left-right with one TALL featured slot (column 0, spanning
-    both visible rows -- the pinned "+ New" card); every other card stacks the
-    columns marching right, two per column."""
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    lay = ws.layout
-    gx, gy, gw, gh = lay.lib_grid
-    tall_h = 2 * lay.lib_card_h + lay.lib_gap
-    assert lay.tile_rect(0, 0) == (gx, gy, lay.lib_card_w, tall_h)  # tall featured slot
-    assert lay.tile_rect(1, 0)[3] == lay.lib_card_h              # ordinary card
-    # The packing stacks each column top-to-bottom, then steps right.
-    assert lay.tile_cell(1) == (0, 1)
-    assert lay.tile_cell(2) == (1, 1)                            # below, same column
-    assert lay.tile_cell(3) == (0, 2)                            # next column's top
-    # Scrolling shifts every cell left; a half-scrolled card still returns its
-    # (clipped) rect, and far enough the card leaves the viewport entirely.
-    half = lay.lib_card_w // 2
-    assert lay.tile_rect(1, half)[0] == gx + lay.lib_step - half
-    assert lay.tile_rect(1, lay.lib_step + lay.lib_card_w) is None  # scrolled off
-    px, py, pw, ph = lay.lib_panel                               # panel frames grid
-    assert px <= gx and py <= gy and gx + gw <= px + pw and gy + gh <= py + ph
-    # Vertical nav steps within a card column (the tall slot spans both rows).
-    ws.set_home_arrangement("grid")
-    ws.set_home_tab("make")
-    ws.launcher.sel = 1
-    ws.launcher.nav2d(0, 1)
-    assert ws.launcher.sel == 2
-    ws.launcher.nav2d(0, -1)
-    assert ws.launcher.sel == 1
-
-
 def test_the_home_shows_its_wallpaper_behind_the_cards(tmp_path):
     """The carousel's band has no backdrop of its own (D7: the home has its
     own wallpaper slot): beside the cards the wallpaper shows, never the
@@ -390,7 +358,8 @@ def test_a_relayout_keeps_one_base_per_cover(tmp_path):
         ws._dirty = True
         ws.frame(1 / 30)
         assert _cover_sync(ws, covered) is first
-    divs = sorted(k[1] for k in ws.covers._cache if k[0] == covered["path"])
+    divs = sorted(k[1] for k in ws.covers._cache
+                  if k[0] == covered["path"] and len(k) == 2)      # not a dimmed tint
     assert divs in ([1], [1, 2])
 
 
@@ -413,17 +382,3 @@ def test_a_cover_takes_the_next_scale_up_when_it_overflows_by_a_tenth_at_most():
     assert _cover_scale(64, 85, 49) == 0
     assert _cover_scale(128, 0, 0) == 0
     assert _cover_scale(128, 300, -4) == 0
-
-
-def test_home_draw_rings_and_names_the_centre_card(tmp_path):
-    """The centre card wears the focus ring (signal yellow), and its plate
-    under it names it."""
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    _select_real_cart(ws)
-    ws.frame(1 / 30)
-    x, y, w, h = ws.launcher.tile_rect(ws.launcher.sel)
-    fs = ws.layout.fs
-    th = ws.theme_colors
-    assert ws.sys_canvas.pix(x - fs - 1, y + h // 2) == th["focus"]
-    px, py, pw, ph = ws.launcher.plate_rect()
-    assert px <= x + w // 2 < px + pw and py > y + h

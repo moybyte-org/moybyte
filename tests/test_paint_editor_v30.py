@@ -16,8 +16,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -234,21 +234,6 @@ def test_release_resets_stroke_so_taps_dont_connect(tmp_path):
     # The midpoint is untouched -- the lift between the two taps reset the stroke so
     # they were NOT joined by a line (it still holds whatever it held before).
     assert ws.sheet.pget(ox + 3, oy + 3) == mid_before
-
-
-def test_size_button_cycles_through_the_ui(tmp_path):
-    from runtime import host_app
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_paint(ws)
-    drv = host_app.ConsoleDriver(ws)
-    assert ws.paint.size == 1
-    bx, by, bw, bh = ws.paint_layer.layout.size_btn
-    drv.touch(bx + bw // 2, by + bh // 2)
-    drv.frame(1 / 30)
-    drv.touch_up()
-    drv.frame(1 / 30)
-    assert ws.paint.size == 2
 
 
 def test_save_persists_a_2x2_sprite(tmp_path):

@@ -371,23 +371,18 @@ class BarLayer:
         fixed app cart and every shipped system app, so nothing else moves.
 
         "app" is a REGISTERED system app's strip (console.py's host guarantee):
-        the app draws on the SYSTEM canvas, so its strip does too, and takes
-        the fixed cluster only where that canvas IS the 320x240 game canvas.
-        Drawn on the game canvas instead, a board with a separate system
-        canvas (the Guition S3's 480x320) showed the app's bar band empty and
-        had no context-X under the finger."""
+        the app draws on the SYSTEM canvas, so its strip does too. Drawn on
+        the game canvas instead, a board with a separate system canvas (the
+        Guition S3's 480x320) showed the app's bar band empty and had no
+        context-X under the finger."""
         ws = self.ws
-        if where == "app":
-            return ws.sys_canvas is ws.canvas and not _ui_draw.depth()[0]
         if where != "tool" or getattr(ws, "app_full_canvas", False):
             return False
-        # Under a theme's look a tool's strip is the look's bar on the system
-        # canvas: the one every app shows where that canvas is the game's
+        # A tool's strip is the look's bar on the system canvas: the one
+        # every app shows where that canvas is the game's
         # (docs/look_2026-10.md step 27a), else the compact band over the
         # game's top rows (`tool_band`, step 33); in a desk window, the
         # game canvas's.
-        if not _ui_draw.depth()[0]:
-            return True
         return ws.sys_canvas is not ws.canvas and self.tool_band() is None
 
     def tool_band(self):
@@ -399,8 +394,7 @@ class BarLayer:
         after the composite (`Workstation._draw_tool_band`)."""
         ws = self.ws
         gc = ws.canvas
-        if gc is ws.sys_canvas or getattr(ws, "app_full_canvas", False) \
-                or not _ui_draw.depth()[0]:
+        if gc is ws.sys_canvas or getattr(ws, "app_full_canvas", False):
             return None
         wm = ws.wm
         if wm is not self._band_wm:           # cached by WM identity: a bound
@@ -857,8 +851,7 @@ class BarLayer:
         key[12] = self.focus_item if self.focus_where == where else None
         if need & 2048:
             m = getattr(ws, "sysmenu", None)       # the system button's open plate
-            key[11] = bool(_ui_draw.depth()[0]) and m is not None and m.open \
-                and m.widget == "menu"
+            key[11] = m is not None and m.open and m.widget == "menu"
 
     def _render_cart_bar(self, cv, key, i=0):
         """Bar `i` (`_render_bar`), and the focus mark on the item the keys
@@ -932,14 +925,12 @@ class BarLayer:
         tool = where in ("tool", "app")
         light = False if tool else self.zone_band_light(where)
         inside = self._in_window(where)
-        looked = not game and not inside and _ui_draw.depth()[0]
+        looked = not game and not inside
         bar = (0, 0, rect[2], rect[3])
-        if looked and self._home_ground(cv, where, -rect[0], -rect[1]):
-            pass
-        elif not (looked and _ui_draw.bar_part(cv, ws.theme_colors, _band_part(), bar,
-                                               _BAND_SIDE[edge])):
-            looked = False
+        if not looked:
             _ui_draw.frame_band(cv, ws.theme_colors, bar, light, _BAND_SIDE[edge])
+        elif not self._home_ground(cv, where, -rect[0], -rect[1]):
+            _ui_draw.bar_part(cv, ws.theme_colors, _band_part(), bar, _BAND_SIDE[edge])
         if pill is not None:
             # the focus pill's plate, under the item it marks
             _ui_draw.focus(cv, ws.theme_colors, pill[0], r=pill[1], fs=pill[2], pill=True)
@@ -1424,28 +1415,26 @@ class BarLayer:
         elif cx == bx:
             cx, cw = bx + 1, cw - 1
         cv.clip(cx, cy, cw, ch)
-        looked = not self._zone_is_game(where) and not self._in_window(where) \
-            and (self._home_ground(cv, where, 0, 0)
-                 or _ui_draw.bar_part(cv, th, _band_part(), (bx, by, bw, bh), _BAND_SIDE[edge]))
+        looked = not self._zone_is_game(where) and not self._in_window(where)
         if not looked:
             _ui_draw.frame_band(cv, th, (bx, by, bw, bh), self.zone_band_light(where),
                                 _BAND_SIDE[edge])
+        elif not self._home_ground(cv, where, 0, 0):
+            _ui_draw.bar_part(cv, th, _band_part(), (bx, by, bw, bh), _BAND_SIDE[edge])
         cv.clip()
         return cv, bar, (x, y, w, h), looked
 
     def tile_on(self):
-        """Whether the system button's tile shows open: its menu is up, under
-        a theme's look (the one state of the button's pixels)."""
+        """Whether the system button's tile shows open: its menu is up (the
+        one state of the button's pixels)."""
         m = self.ws.sysmenu
-        return bool(_ui_draw.depth()[0]) and m.open and m.widget == "menu"
+        return m.open and m.widget == "menu"
 
     def redraw_tile(self, where):
         """Repaint JUST the system button's cell of an already-drawn bar, its
         tile open or not as the menu now stands: the desk's change of it
         when the menu's scrim rides, or a cached desk that holds the other
-        state. Without a look the button has one state: nothing to do."""
-        if not _ui_draw.depth()[0]:
-            return
+        state."""
         got = self.repaint_cell(where, "menu", self._tile_span)
         if got is None:
             return

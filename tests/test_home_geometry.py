@@ -199,7 +199,7 @@ def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
     g._quiesce(ws)
     ws._dirty = True
     ws.frame(g._DT)
-    assert ui_draw.marks(None, False)[2] == 1, \
+    assert ui_draw.marks(None, False)[1] == 1, \
         "the home behind the system menu still draws its focus"
     ws.toggle_sysmenu()
     assert not ws.sysmenu.open
@@ -208,7 +208,7 @@ def test_one_focus_mark_under_the_system_menu(tmp_path, theme, mode):
     g._quiesce(ws)
     ws._dirty = True
     ws.frame(g._DT)
-    assert ui_draw.marks(None, False)[2] == 1, "the closed menu left the focus off"
+    assert ui_draw.marks(None, False)[1] == 1, "the closed menu left the focus off"
 
 
 def test_one_focus_mark_under_the_pause_menu(tmp_path):
@@ -225,7 +225,7 @@ def test_one_focus_mark_under_the_pause_menu(tmp_path):
     g._quiesce(ws)
     ws._dirty = True
     ws.frame(g._DT)
-    assert ui_draw.marks(None, False)[2] == 1
+    assert ui_draw.marks(None, False)[1] == 1
 
 
 @pytest.mark.parametrize("theme,mode", [("moy", "light"), ("contrast", "dark")])

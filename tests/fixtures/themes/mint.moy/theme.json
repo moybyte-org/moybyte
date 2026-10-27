@@ -1,0 +1,43 @@
+{
+ "format": 2,
+ "name": "mint",
+ "modes": [
+  "light"
+ ],
+ "colors": {
+  "light": {
+   "panel": "#e6f2ec",
+   "desktop": "#e6f2ec",
+   "desktop_pattern": "#c2d8cb",
+   "edge": "#c2d8cb",
+   "bar_edge": "#c2d8cb",
+   "border": "#c2d8cb",
+   "surface": "#ffffff",
+   "surface_alt": "#f0f7f3",
+   "title": "#ffffff",
+   "title_active": "#ffffff",
+   "title_inactive": "#f0f7f3",
+   "bar": "#ffffff",
+   "shade_hi": "#ffffff",
+   "shade_lo": "#d9eae1",
+   "shade_dark": "#c2d8cb",
+   "dim": "#d9eae1",
+   "sunk": "#d9eae1",
+   "lcd": "#d9eae1",
+   "lcd_ink": "#0f2419",
+   "ink": "#0f2419",
+   "chrome_ink": "#0f2419",
+   "title_ink": "#0f2419",
+   "ink_dim": "#4d695b",
+   "chrome_ink_dim": "#4d695b",
+   "accent": "#0f7a58",
+   "hilite": "#0f7a58",
+   "selection": "#0f7a58",
+   "focus": "#0f7a58",
+   "ink_accent": "#0f7a58",
+   "value": "#0f7a58",
+   "value_ink": "#ffffff",
+   "selection_ink": "#ffffff"
+  }
+ }
+}

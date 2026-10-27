@@ -5,11 +5,6 @@ a piece is a display list, replayed here through the canvas it lands on (the
 canvas keeps its damage, its batch order and a web view's recording), and
 rasterised by the kernel for a frame it draws with no VM call."""
 
-try:
-    import ui_draw as _ui_draw
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import ui_draw as _ui_draw
-
 _CHROME_NAMED = ("black", "white", "red", "orange", "yellow", "peach", "dark_blue",
                  "dark_purple", "light_grey", "dark_grey")
 _CHROME_ROLES = ("bar", "bar_edge", "chrome_ink", "chrome_ink_dim", "surface",
@@ -29,17 +24,13 @@ def _moy_play():
 
 def chrome_inks(th, names):
     """Hand the kernel's chrome the inks this theme draws with: the named
-    palette it uses, the theme's roles, the system menu's row colours and the
-    dialog's ring count. Before every chrome draw, so a theme edited in place
-    is never drawn stale."""
-    on = _ui_draw.state_colors(th, "row_menu", _ui_draw.ON)
-    off = _ui_draw.state_colors(th, "row_menu", _ui_draw.REST)
+    palette it uses and the theme's roles. Before every chrome draw, so a
+    theme edited in place is never drawn stale."""
     inks = [names[n] for n in _CHROME_NAMED]
     for r in _CHROME_ROLES:
         inks.append(th.get(r))
-    inks += [on[0], on[1], off[0], off[1], None]
     mp = _moy_play()
-    mp.chrome_inks(inks, bool(th.get("bar_light", False)), _ui_draw.dialog_rings())
+    mp.chrome_inks(inks, bool(th.get("bar_light", False)))
     return mp
 
 

@@ -479,7 +479,7 @@ extern const mp_obj_fun_builtin_fixed_t moy_chrome_inks_obj,
     moy_chrome_say_title_obj, moy_chrome_crash_title_obj, moy_chrome_newer_text_obj;
 extern const mp_obj_fun_builtin_var_t moy_chrome_panel_obj,
     moy_chrome_cell_obj, moy_chrome_toast_arm_obj,
-    moy_chrome_menu_obj, moy_chrome_notice_obj, moy_chrome_fit_text_obj;
+    moy_chrome_notice_obj, moy_chrome_fit_text_obj;
 
 static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_play) },
@@ -519,7 +519,6 @@ static const mp_rom_map_elem_t moy_play_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_chrome_newer_text), MP_ROM_PTR(&moy_chrome_newer_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_strip_band), MP_ROM_PTR(&moy_chrome_band_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_strip_cell), MP_ROM_PTR(&moy_chrome_cell_obj) },
-    { MP_ROM_QSTR(MP_QSTR_chrome_menu), MP_ROM_PTR(&moy_chrome_menu_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_notice), MP_ROM_PTR(&moy_chrome_notice_obj) },
     { MP_ROM_QSTR(MP_QSTR_chrome_toast_arm), MP_ROM_PTR(&moy_chrome_toast_arm_obj) },
 };

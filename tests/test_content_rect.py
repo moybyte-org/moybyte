@@ -23,8 +23,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 DT = 1.0 / 30.0
@@ -95,7 +95,10 @@ def test_bar_and_content_partition_the_canvas(tmp_path, size, edge):
     ws = build_ws(tmp_path, **SIZES[size])
     ws.place_bar(edge)
     bl = ws.bar_layer
-    for where in ("home", "picker", "settings", "menu", "tool", "app"):
+    # a tool on a game canvas of its own keeps the compact band over the
+    # game's rows (docs/look_2026-10.md step 33), no partition of the glass
+    tool = ("tool",) if bl.tool_band() is None else ()
+    for where in ("home", "picker", "settings", "menu", "app") + tool:
         cv = bl._bar_canvas(where)
         (bx, by, bw, bh), = bl.bar_rects(where)
         cx, cy, cw, ch = bl.content_rect(where)
@@ -385,21 +388,20 @@ def test_an_app_cart_reads_the_content_rect(tmp_path, edge, lua):
            else ws.player.ns["RECT"])
     x, y, w, h = ws.app_content_rect()
     assert got == "%d,%d,%d,%d,%d" % (x, y, w, h, y)     # Lua answers four values
-    assert (y == 0) == (edge == "bottom") and h == 240 - 18
+    assert (y == 0) == (edge == "bottom") and h == 240 - ws.bar_layer._bar_h("tool")
 
 
 def test_a_tool_cart_exits_on_the_bottom_bars_x(tmp_path):
-    from runtime.bar_layer import _ZONE_CONTEXT_X
     _write_app(tmp_path / "carts", "Rect", APP_PY)
     ws = build_ws(tmp_path)
     _bottom(ws)
     select_on_home(ws, "Rect")
     ws.open()
     ws.frame(DT)
-    x, y, w, h = _ZONE_CONTEXT_X
-    assert not ws._tool_bar_tap(x + w // 2, y + h // 2)   # the app's top rows
+    bar, (x, y, w, h) = ws.bar_layer.cell("tool", "close")      # the layout's X
     by = ws.bar_layer.bar_rect(0, "tool")[1]
-    assert by == 240 - 18
+    assert by == bar[1][1] == 240 - ws.bar_layer._bar_h("tool")
+    assert not ws._tool_bar_tap(x + w // 2, y + h // 2)   # the app's top rows
     assert ws._tool_bar_tap(x + w // 2, by + y + h // 2)
     assert ws.wm.top_kind() == "launcher"
 

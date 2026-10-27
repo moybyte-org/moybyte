@@ -953,8 +953,7 @@ class Match:
 # same list for a frame it draws with no VM.
 
 CH_RECT, CH_RECTB, CH_TEXT, CH_GLYPH, CH_ICON = 1, 2, 3, 4, 5
-INKS = 26
-MENU_ITEM, MENU_HEADER, MENU_SEP = 0, 1, 2
+INKS = 21
 
 
 class _ChOp(ctypes.Structure):
@@ -970,12 +969,11 @@ class _ChList(ctypes.Structure):
 
 _CP, _CI, _CS = ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p
 _CSIGS = (
-    ("moy_chrome_set_inks", [ctypes.POINTER(ctypes.c_int16), _B, _CI], None),
+    ("moy_chrome_set_inks", [ctypes.POINTER(ctypes.c_int16), _B], None),
     ("moy_chrome_clear", [_CP], None),
     ("moy_chrome_panel", [_CP, _CI, _CI, _B, _CS, _CS], None),
     ("moy_chrome_strip_band", [_CP, _CI, _CI, _B], None),
     ("moy_chrome_strip_cell", [_CP, _CS, _CI, _CI, _CI, _CI, _CI, _CI, _CS, _B], None),
-    ("moy_chrome_menu", [_CP, _CP, _CP, _CI, _CI, _CI, _CI, _CI, _CI, _CI, _CI], None),
     ("moy_chrome_raster", [_CP, _CP, _CI, _CI, _CP, _CI], None),
     ("moy_chrome_notice", [_CS, _CS, _B, _U32], None),
     ("moy_chrome_toast_arm", [_CS, _CS, _CS, _B, _U32], None),
@@ -1026,9 +1024,9 @@ def _chrome(name, *args, raster=None):
     return _ops(lst)
 
 
-def chrome_inks(inks, bar_light, rings):
+def chrome_inks(inks, bar_light):
     arr = (ctypes.c_int16 * INKS)(*[(-1 if v is None else int(v)) for v in inks])
-    _clib().moy_chrome_set_inks(arr, bool(bar_light), int(rings))
+    _clib().moy_chrome_set_inks(arr, bool(bar_light))
 
 
 def chrome_panel(cw, ch, notice, title, text, raster=None):
@@ -1068,17 +1066,6 @@ def chrome_strip_cell(kind, rect, cs, dy, s, across):
     x, y, w, h = rect
     return _chrome("moy_chrome_strip_cell", _b(kind), int(x), int(y), int(w), int(h),
                    int(cs), int(dy), _b(s), bool(across))
-
-
-def chrome_menu(rows, sel, x, y, w, h, fs, cs):
-    """`rows`: [(kind, label)] with kind MENU_ITEM, MENU_HEADER or MENU_SEP."""
-    n = len(rows)
-    kinds = (_U8 * max(n, 1))(*[int(r[0]) for r in rows])
-    keep = [_b(r[1] if len(r) > 1 else "") for r in rows]
-    labels = (ctypes.c_char_p * max(n, 1))(*keep)
-    return _chrome("moy_chrome_menu", ctypes.cast(kinds, ctypes.c_void_p),
-                   ctypes.cast(labels, ctypes.c_void_p), n, int(sel), int(x), int(y),
-                   int(w), int(h), int(fs), int(cs))
 
 
 def chrome_notice(title, sub, ok, until_ms):

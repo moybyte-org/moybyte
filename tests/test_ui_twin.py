@@ -3,7 +3,7 @@
 `tests/ui_twin.py` is the toolkit's Python as it was before the crossing. Two
 nets hold the shipped toolkit (`runtime/ui.py` and what it calls) to it:
 
-* **The fuzz.** Every widget, drawn over random cases -- boxes smaller than
+* **The fuzz.** Every widget the theme's look does not draw, over random cases -- boxes smaller than
   their label, negative and float coordinates, ASCII and UTF-8 labels, font
   scales 1 to 3, every state -- once through the twin and once
   through the toolkit, each case on its own canvas, compared pixel by pixel
@@ -111,51 +111,8 @@ def _case(r):
 
 # One driver per widget: draw case `c` through toolkit module `m`.
 
-def _button(m, cv, th, c):
-    m.button(cv, th, c["box"], c["label"], kind=c["bkind"], on=c["on"],
-             icon_img=IMG if c["icon"] else None,
-             glyph="run" if c["glyph"] else None,
-             glyph_draw=_gd(m, c),
-             disabled=c["disabled"], state=c["state"])
-
-
-def _chip(m, cv, th, c):
-    m.chip(cv, th, c["box"], c["label"], on=c["on"], hot=c["hot"],
-           fs=c["fs"] if c["flag"] else None,
-           glyph="edit" if c["glyph"] else None,
-           glyph_draw=_gd(m, c),
-           disabled=c["disabled"], state=c["state"])
-
-
-def _row(m, cv, th, c):
-    m.row(cv, th, c["box"], c["label"], kind=c["kind"], on=c["on"],
-          hot=c["hot"], disabled=c["disabled"], state=c["state"],
-          icon_img=IMG if c["icon"] else None,
-          glyph="gear" if c["glyph"] else None,
-          glyph_draw=_gd(m, c),
-          value=c["label2"] if c["flag"] else None, edge=c["n"] != 0,
-          pad=c["pad"], text_dy=c["dy"], scale=c["scale"])
-
-
-def _cell(m, cv, th, c):
-    return m.cell(cv, th, c["box"], label=c["label"] if c["flag"] else None,
-                  kind=c["kind"], on=c["on"], hot=c["hot"],
-                  disabled=c["disabled"], state=c["state"],
-                  band=c["n"] > 2, pad=c["pad"],
-                  icon_img=IMG if c["icon"] else None,
-                  glyph="map" if c["glyph"] else None,
-                  glyph_draw=_gd(m, c),
-                  text_dy=c["dy"], edge_last=c["hot"])
-
-
 TABS = (("cfg", "Config", "gear"), ("code", "Code", "edit"),
-        ("map", "Map", "map"), ("u", "café", "paint"))
-
-
-def _tab_row(m, cv, th, c):
-    return m.tab_row(cv, th, c["box"], TABS[:c["n"]], "code",
-                       icon_for=(lambda k: IMG) if c["icon"] else None,
-                       ink=c["int"] if c["flag"] else None)
+        ("map", "Map", "map"), ("u", "caf\u00e9", "paint"))
 
 
 def _status_row(m, cv, th, c):
@@ -175,7 +132,6 @@ def _frames(m, cv, th, c):
     m.dialog(cv, c["box"], ring=c["int"] if c["flag"] else None)
     content = m.panel(cv, th, c["box2"], title=c["label"] or None,
                       fs=c["fs"] if c["hot"] else None)
-    m.focus_ring(cv, th, c["box"], fs=c["fs"] if c["on"] else None)
     return content
 
 
@@ -213,20 +169,12 @@ def _label(m, cv, th, c):
     return m.label(cv, c["box"], c["label"], c["int"] & 63, c["n"] % 3)
 
 
-def _list(m, cv, th, c):
-    sr = m.ScrollRegion()
-    sr.offset = 0
-    items = [c["label"], c["label2"], "Row", "caf\u00e9", ""][:c["n"] + 1]
-    rect = tuple(int(v) for v in c["box"])
-    m.list(cv, th, rect, items, sr, max(1, 8 + c["int"]), c["int"] % 4, c["kind"])
-    sr.scroll_by(c["n"] * 7)
-    m.list(cv, th, rect, items, sr, max(1, 8 + c["int"]), -1, c["kind"])
-
-
+# The widgets whose bodies the theme's look draws (a button, a chip, a row,
+# a cell, a tab row, a list) left the fuzz when every theme took one
+# (docs/look_2026-10.md step 33): the twin draws them as a theme with no
+# look did; their op budgets below are the look's.
 WIDGETS = {
-    "label": _label, "list": _list,
-    "button": _button, "chip": _chip, "row": _row, "cell": _cell,
-    "tab_row": _tab_row, "status_row": _status_row,
+    "label": _label, "status_row": _status_row,
     "game_family": _game_family, "frames": _frames,
     "text_field": _text_field, "scroll": _scroll, "algebra": _algebra,
 }
@@ -238,9 +186,8 @@ CASES = 48
 # draws the truncated case. The widgets whose bodies are C take raw floats.
 # A ScrollRegion is Python on both sides and keeps its view as given (its
 # offset clamps to a float extent), so the scroll case is truncated for both.
-FACE_TRUNCATES = set(("row", "cell", "button", "chip", "tab_row",
-                      "status_row", "game_family", "frames", "text_field",
-                      "algebra", "label", "list"))
+FACE_TRUNCATES = set(("status_row", "game_family", "frames", "text_field", "algebra",
+                      "label"))
 
 
 def _truncated(c):
@@ -374,10 +321,6 @@ def _b_panel(m, cv, th):
     m.panel(cv, th, (4, 4, 60, 60), title="TOOLS")
 
 
-def _b_focus(m, cv, th):
-    m.focus_ring(cv, th, (8, 8, 40, 20))
-
-
 def _b_scrollbar(m, cv, th):
     sr = m.ScrollRegion()
     sr.set((0, 0, 60, 100), 400)
@@ -403,18 +346,13 @@ def _b_glyph(m, cv, th):
 # (fills, texts) per call at font scale 2 on the machine theme: what the twin
 # issues, and so what a C primitive must issue.
 OP_BUDGETS = {
-    "button": (_b_button, (2, 1)),
-    "button_icon": (_b_button_icon, (2, 1)),
-    "button_glyph": (_b_button_glyph, (4, 1)),
     "chip": (_b_chip, (2, 1)),
     "chip_glyph": (_b_chip_glyph, (4, 0)),
     "row": (_b_row, (2, 2)),
     "row_menu": (_b_row_menu, (0, 1)),
-    "row_menu_on": (_b_row_menu_on, (1, 1)),
     "row_glyph": (_b_row_glyph, (4, 1)),
     "cell": (_b_cell, (2, 1)),
     "cell_band": (_b_cell_band, (3, 1)),
-    "tab_row": (_b_tab_row, (1, 0)),
     "status": (_b_status, (2, 1)),
     "game_btn": (_b_game_btn, (2, 1)),
     "game_icon_btn": (_b_game_icon_btn, (4, 1)),
@@ -423,11 +361,20 @@ OP_BUDGETS = {
     "dialog": (_b_dialog, (2, 0)),
     "text_field": (_b_text_field, (3, 1)),
     "panel": (_b_panel, (4, 1)),
-    "focus": (_b_focus, (2, 0)),
     "scrollbar": (_b_scrollbar, (2, 0)),
     "scroll_cues": (_b_scroll_cues, (0, 2)),
     "fill_uncovered": (_b_fill_uncovered, (4, 0)),
     "glyph": (_b_glyph, (10, 0)),                 # one fill per span
+}
+
+
+# The look's bodies (WIDGETS' note): the toolkit's counts alone.
+LOOK_BUDGETS = {
+    "button": (_b_button, (1, 1)),
+    "button_icon": (_b_button_icon, (1, 1)),
+    "button_glyph": (_b_button_glyph, (3, 1)),
+    "row_menu_on": (_b_row_menu_on, (0, 1)),
+    "tab_row": (_b_tab_row, (0, 0)),
 }
 
 
@@ -439,10 +386,11 @@ def _ops(m, fn):
     return cv.gate_counts()[:2]
 
 
-@pytest.mark.parametrize("name", sorted(OP_BUDGETS))
+@pytest.mark.parametrize("name", sorted(OP_BUDGETS) + sorted(LOOK_BUDGETS))
 def test_each_widget_issues_its_budgeted_ops(name):
-    fn, budget = OP_BUDGETS[name]
-    assert _ops(twin, fn) == budget, "the twin's count is the budget"
+    fn, budget = OP_BUDGETS[name] if name in OP_BUDGETS else LOOK_BUDGETS[name]
+    if name in OP_BUDGETS:
+        assert _ops(twin, fn) == budget, "the twin's count is the budget"
     assert _ops(TOOLKIT, fn) == budget, (
         "%s issues %r ops, budgeted %r: a body drawing more or fewer ops "
         "than the one it replaced" % (name, _ops(TOOLKIT, fn), budget))

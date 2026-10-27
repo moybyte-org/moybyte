@@ -2,10 +2,10 @@
 docs/theming_2026-09.md §4.5): the `frame` key, each style inside the WM's
 footprint, the button layout the hit-test reads, and the bar's band.
 
-Classic is the frame the WM drew in Python. The lookless palette theme
-these draw under is the `night` fixture package (tests/fixtures/themes/,
-the seed docs/look_2026-10.md step 27 deleted) with the frame each test
-names.
+Classic is the frame the WM drew in Python. The palette theme these draw
+under is the `night` fixture package (tests/fixtures/themes/, the seed
+docs/look_2026-10.md step 27 deleted) with the frame each test names: a
+frame style nearer than the look it takes, so the frame is the style's.
 """
 
 import json
@@ -36,9 +36,11 @@ def frame():
         rc, notes = moy_ui.theme_install(json.dumps(d).encode())
         assert rc == OK
         ui_draw.use_shape("framed")
+        ui_draw.use_depth("framed", False)
         return notes
     yield use
     ui_draw.use_shape(None)
+    ui_draw.use_depth(None, False)
 
 
 def _names(btns):
@@ -83,16 +85,6 @@ def test_a_theme_orders_the_buttons(frame):
     assert _names(btns) == [("max", False), ("close", True), ("min", True)]
     left = btns[0][1]
     assert left[0] == 2 and btns[-1][1][0] + btns[-1][1][2] == 200 - 2
-
-
-def test_classic_is_the_frame_without_a_theme():
-    ui_draw.use_shape(None)
-    btns = ui_draw.frame_buttons((10, 10, 300, 200), 36, "HELLO", True, 2)
-    ic = 32
-    assert [r for _n, r, _s in btns] == [
-        (10 + 300 - 2 - ic - 2 * (ic + 4), 13, ic, ic),
-        (10 + 300 - 2 - ic - (ic + 4), 13, ic, ic),
-        (10 + 300 - 2 - ic, 13, ic, ic)]
 
 
 @pytest.mark.parametrize("style", TH["frames"])
@@ -255,8 +247,9 @@ def test_a_header_fill_and_close_alone(looked):
         _uninstall()
 
 
-def test_a_theme_without_a_look_keeps_its_frame():
-    """Legacy seeds draw their frame style: no icon slot, their own boxes."""
+def test_a_theme_naming_a_frame_style_keeps_its_frame():
+    """A package whose `frame` is nearer than its look draws its frame style:
+    no icon slot, its own boxes."""
     install_theme("night")
     ui_draw.use_depth("night", False)
     try:
@@ -316,16 +309,3 @@ def test_a_tile_takes_its_apps_colour(looked):
     assert _px(cv, 62, 40) == _px(cv, 62, 41) == _rgb("1a1530")     # the ink outline
     assert ui_draw.bar_part(cv, th, ui_draw.BAR_TILE, (140, 40, 44, 44))
     assert _px(cv, 162, 62) == _rgb("fff8ec")                      # no tile_fill: raised
-
-
-def test_a_theme_without_a_look_draws_no_tile():
-    install_theme("night")
-    ui_draw.use_depth("night", False)
-    try:
-        cv = SystemCanvas(80, 80)
-        cv.cls(BG)
-        assert not ui_draw.bar_part(cv, theme_colors("night"), ui_draw.BAR_TILE,
-                                    (8, 8, 44, 44))
-        assert set(indices_of(cv)) == {BG}
-    finally:
-        ui_draw.use_depth(None, False)

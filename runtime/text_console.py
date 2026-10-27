@@ -499,9 +499,7 @@ class TextConsole:
         cell = max(8 * fs + 2, cv.w // len(syms))
         syms = syms[:max(1, cv.w // cell)]
         rects = []
-        draw_symbol_keys(cv, self.ws.code_layer._tones(), syms, 0, y, cell, h,
-                         fs, (cell - 1 - 8 * fs) // 2 - 8 * fs,
-                         (h - 1 - 8 * fs) // 2 - 8 * fs, rects, th=self.ws.theme_colors)
+        draw_symbol_keys(cv, self.ws.theme_colors, syms, 0, y, cell, h, fs, rects)
         self._sym_rects = tuple(rects)
 
 

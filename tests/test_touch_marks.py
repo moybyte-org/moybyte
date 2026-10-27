@@ -23,7 +23,7 @@ def _marks_drawn(ws, drv):
     ws._dirty = True
     ui_draw.marks(None, True)
     _frames(drv, 2)
-    return ui_draw.marks()[2]
+    return ui_draw.marks()[1]
 
 
 def test_the_card_menu_a_long_press_opens_draws_no_focus_mark(tmp_path):

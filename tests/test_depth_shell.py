@@ -52,15 +52,17 @@ def _spy(monkeypatch, mod, name):
 def test_the_depth_is_the_live_themes_in_its_mode(tmp_path):
     ws, _ = _desk(tmp_path)
     d = ui_draw.depth()
-    assert d[0] and d[13]                          # on, and the frame is its
-    assert (d[1], d[2], d[3]) == (12, 10, 10)      # the model's radii
-    assert d[6] == 1 and (d[9], d[10], d[11]) == (16, 0, 8)
-    assert d[8] == (18 * 255 + 50) // 100           # Day: 18%
+    assert d[12]                                   # the frame is the depth's
+    assert (d[0], d[1], d[2]) == (12, 10, 10)      # the model's radii
+    assert d[5] == 1 and (d[8], d[9], d[10]) == (16, 0, 8)
+    assert d[7] == (18 * 255 + 50) // 100           # Day: 18%
     ws.look.set_theme("moy", persist=False, variant="dark")
     d = ui_draw.depth()
-    assert (d[9], d[11], d[8]) == (14, 6, (55 * 255 + 50) // 100)
-    use_theme(ws, "indigo")                     # a fixture with no look
-    assert ui_draw.depth()[0] == 0                      # no look: the style's frame
+    assert (d[8], d[10], d[7]) == (14, 6, (55 * 255 + 50) // 100)
+    use_theme(ws, "mint", "light")              # a colours-only package
+    d = ui_draw.depth()
+    assert d[12] and (d[0], d[1], d[2]) == (12, 10, 10)   # Moy's geometry...
+    assert d[5] == 0                                       # ... flat
 
 
 def test_a_theme_naming_a_frame_style_keeps_it(tmp_path):
@@ -71,7 +73,7 @@ def test_a_theme_naming_a_frame_style_keeps_it(tmp_path):
     assert rc == 0
     ws.look.set_theme("boxed", persist=False, variant="light")
     d = ui_draw.depth()
-    assert d[0] and not d[13]
+    assert not d[12]
     assert ui_draw.frame_geom(400, 300, 36) == (0,) * 6
 
 
@@ -86,9 +88,11 @@ def test_a_window_has_a_foot_for_its_rounded_corners(tmp_path):
     assert r == 12 and foot == 11 == win.foot
     assert win.content_rect()[3] == win.h - 2 - win.title_h - foot
     assert win.buf.h == win.content_rect()[3]
-    # a theme without depth gives the rows back (its bars re-pack: the window
-    # is laid out again)
-    use_theme(ws, "indigo")                     # a fixture with no look
+    # a theme naming a frame style gives the rows back (its bars re-pack:
+    # the window is laid out again)
+    pkg = {"format": 2, "name": "boxed", "inherits": "moy", "frame": {"style": "win9x"}}
+    assert ui_draw._C.theme_install(json.dumps(pkg).encode())[0] == 0
+    ws.look.set_theme("boxed", persist=False, variant="light")
     ws._dirty = True
     drv.frame(0.0)
     win = ws.wm._wins["settings"]

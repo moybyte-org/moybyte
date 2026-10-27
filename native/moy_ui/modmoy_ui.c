@@ -1902,21 +1902,21 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_frame_band_obj, 5, 5, ui_frame_ban
 
 static mp_obj_t depth_tuple(void) {
     const moy_ui_depth_t *d = moy_ui_depth();
-    mp_obj_t t[16] = {
-        MP_OBJ_NEW_SMALL_INT(d->on), MP_OBJ_NEW_SMALL_INT(d->win_r),
-        MP_OBJ_NEW_SMALL_INT(d->card_r), MP_OBJ_NEW_SMALL_INT(d->key_r),
-        MP_OBJ_NEW_SMALL_INT(d->corners), MP_OBJ_NEW_SMALL_INT(d->stepped),
-        MP_OBJ_NEW_SMALL_INT(d->shadow), MP_OBJ_NEW_SMALL_INT(d->edges),
-        MP_OBJ_NEW_SMALL_INT(d->alpha), MP_OBJ_NEW_SMALL_INT(d->blur),
-        MP_OBJ_NEW_SMALL_INT(d->dx), MP_OBJ_NEW_SMALL_INT(d->dy),
-        MP_OBJ_NEW_SMALL_INT(d->back), MP_OBJ_NEW_SMALL_INT(d->frames),
-        MP_OBJ_NEW_SMALL_INT(d->on ? d->bar_h : 0), MP_OBJ_NEW_SMALL_INT(d->on ? d->hh_h : 0)};
-    return mp_obj_new_tuple(16, t);
+    mp_obj_t t[15] = {
+        MP_OBJ_NEW_SMALL_INT(d->win_r), MP_OBJ_NEW_SMALL_INT(d->card_r),
+        MP_OBJ_NEW_SMALL_INT(d->key_r), MP_OBJ_NEW_SMALL_INT(d->corners),
+        MP_OBJ_NEW_SMALL_INT(d->stepped), MP_OBJ_NEW_SMALL_INT(d->shadow),
+        MP_OBJ_NEW_SMALL_INT(d->edges), MP_OBJ_NEW_SMALL_INT(d->alpha),
+        MP_OBJ_NEW_SMALL_INT(d->blur), MP_OBJ_NEW_SMALL_INT(d->dx),
+        MP_OBJ_NEW_SMALL_INT(d->dy), MP_OBJ_NEW_SMALL_INT(d->back),
+        MP_OBJ_NEW_SMALL_INT(d->frames), MP_OBJ_NEW_SMALL_INT(d->bar_h),
+        MP_OBJ_NEW_SMALL_INT(d->hh_h)};
+    return mp_obj_new_tuple(15, t);
 }
 
-// use_depth(name, light): install theme `name`'s depth in a mode (None: off);
-// the depth as (on, win_r, card_r, key_r, corners, stepped, shadow, edges,
-// alpha, blur, dx, dy, back, frames, bar_h, hhbar_h).
+// use_depth(name, light): install theme `name`'s depth in a mode (None: the
+// default's); the depth as (win_r, card_r, key_r, corners, stepped, shadow,
+// edges, alpha, blur, dx, dy, back, frames, bar_h, hhbar_h).
 static mp_obj_t ui_use_depth(mp_obj_t name, mp_obj_t light) {
     if (name == mp_const_none) {
         moy_ui_depth_use(NULL, 0, 0);
@@ -2020,16 +2020,6 @@ static mp_obj_t ui_panel(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_panel_obj, 5, 5, ui_panel);
 
-// focus_ring(cv, look, rect, fs)
-static mp_obj_t ui_focus_ring(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    moy_ui_sink_t s;
-    sink_of(&s, a[0], a[1]);
-    check(moy_ui_focus_ring(&s, box_of(a[2]), fs_or(a[3], &s)));
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_focus_ring_obj, 4, 4, ui_focus_ring);
-
 // focus(cv, look, rect, cls, r, flags, fs) -> (ink or None, content rect)
 static mp_obj_t ui_focus(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2056,17 +2046,16 @@ static mp_obj_t ui_current(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_current_obj, 6, 6, ui_current);
 
-// marks(active=None, reset=False) -> (marks on, active, focus marks drawn,
-// a card's focus reach)
+// marks(active=None, reset=False) -> (active, focus marks drawn, a card's
+// focus reach)
 static mp_obj_t ui_marks(mp_obj_t active, mp_obj_t reset) {
     if (active != mp_const_none) {
         moy_ui_marks_active(mp_obj_is_true(active));
     }
-    const moy_ui_marks_t *m = moy_ui_marks();
-    mp_obj_t out[4] = {mp_obj_new_bool(m->on), mp_obj_new_bool(moy_ui_marks_shown()),
+    mp_obj_t out[3] = {mp_obj_new_bool(moy_ui_marks_shown()),
                        mp_obj_new_int_from_uint(moy_ui_marks_drawn(mp_obj_is_true(reset))),
                        MP_OBJ_NEW_SMALL_INT(moy_ui_mark_reach(MOY_UI_MARK_CARD))};
-    return mp_obj_new_tuple(4, out);
+    return mp_obj_new_tuple(3, out);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_marks_obj, ui_marks);
 
@@ -3232,7 +3221,6 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_dialog), MP_ROM_PTR(&ui_dialog_obj) },
     { MP_ROM_QSTR(MP_QSTR_text_field), MP_ROM_PTR(&ui_text_field_obj) },
     { MP_ROM_QSTR(MP_QSTR_panel), MP_ROM_PTR(&ui_panel_obj) },
-    { MP_ROM_QSTR(MP_QSTR_focus_ring), MP_ROM_PTR(&ui_focus_ring_obj) },
     { MP_ROM_QSTR(MP_QSTR_focus), MP_ROM_PTR(&ui_focus_obj) },
     { MP_ROM_QSTR(MP_QSTR_current), MP_ROM_PTR(&ui_current_obj) },
     { MP_ROM_QSTR(MP_QSTR_marks), MP_ROM_PTR(&ui_marks_obj) },

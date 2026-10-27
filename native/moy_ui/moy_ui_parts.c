@@ -145,45 +145,28 @@ static uint16_t hold(uint16_t c, uint16_t g, uint16_t to) {
     return to;
 }
 
-// Whether the look is a dark one: the marks say, else the panel's luminance.
+// Whether the look is a dark one: the marks say.
 static int dark(const pd_t *d) {
-    const moy_ui_marks_t *m = moy_ui_marks();
-    if (m->on) {
-        return m->dark;
-    }
-    uint16_t c = moy_shape_wire(pal(d, tok(d, MOY_UI_T_PANEL, MOY_UI_T_PANEL)));
-    int r = (c >> 11) * 255 / 31, g = ((c >> 5) & 63) * 255 / 63, b = (c & 31) * 255 / 31;
-    return 2126 * r + 7152 * g + 722 * b < 1280000;
+    (void)d;
+    return moy_ui_marks()->dark;
 }
 
 // Whether the marks' current plate is solid (Contrast's): its parts take the
 // inverted treatment, a tile its colour and the ink on it.
 static int solid_marks(void) {
     const moy_ui_marks_t *m = moy_ui_marks();
-    return m->on && m->cur_style == MOY_UI_CUR_PLATE && m->cur_alpha >= 255;
+    return m->cur_style == MOY_UI_CUR_PLATE && m->cur_alpha >= 255;
 }
 
 // The colour a page's ground is (moy_ui_page_ground) in the buffer's order,
-// in *c; 0 for none. Under a depth, in a window: the window's body as
-// moy_ui_depth_frame paints it.
-static int ground(const pd_t *d, uint16_t *c) {
+// in *c. In a window: the window's body as moy_ui_depth_frame paints it.
+static uint16_t ground(const pd_t *d) {
     const moy_ui_depth_t *dp = moy_ui_depth();
-    if (dp->on) {
-        if (d->win) {
-            *c = set(dp->body) ? val(d, dp->body)
-                               : pal(d, tok(d, MOY_UI_T_SURFACE, MOY_UI_T_SURFACE));
-        } else {
-            *c = pal(d, tok(d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
-        }
-        return 1;
+    if (d->win) {
+        return set(dp->body) ? val(d, dp->body)
+                             : pal(d, tok(d, MOY_UI_T_SURFACE, MOY_UI_T_SURFACE));
     }
-    int16_t pc[3];
-    moy_ui_colors(d->look, MOY_UI_K_PANEL, MOY_UI_REST, pc);
-    if (pc[0] < 0) {
-        return 0;
-    }
-    *c = pal(d, pc[0]);
-    return 1;
+    return pal(d, tok(d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
 }
 
 static void fill(pd_t *d, int x, int y, int w, int h, uint16_t c) {
@@ -426,24 +409,12 @@ static void dpad_sign(pd_t *d, int x, int y, int w, int h, uint16_t c) {
 // -- the current mark on an option -------------------------------------------------------
 
 // The current mark on box b (radius r): the theme's (`side` MOY_UI_MARK_SIDE on
-// a row, whose current `bar` is beside it), or under a theme without marks the
-// selection colour (`ring` a ring instead). The ink the option takes.
-static int current(const moy_ui_sink_t *s, pd_t *d, moy_ui_box_t b, int r, int ring, int ink,
-                   int side) {
-    const moy_ui_marks_t *m = moy_ui_marks();
-    if (m->on) {
-        int mi = -1;
-        moy_ui_current_in(s, b, r, (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK) | side, d->fs,
-                          &mi, 0);
-        return mi >= 0 ? mi : ink;
-    }
-    int sel = tok(d, MOY_UI_T_SELECTION, MOY_UI_T_ACCENT);
-    if (ring) {
-        rrect(d, b.x, b.y, b.w, b.h, r, 0, 0, d->fs, pal(d, sel));
-        return ink;
-    }
-    rrect(d, b.x, b.y, b.w, b.h, r, 1, pal(d, sel), 0, 0);
-    return tok(d, MOY_UI_T_SELECTION_INK, MOY_UI_T_INK);
+// a row, whose current `bar` is beside it). The ink the option takes.
+static int current(const moy_ui_sink_t *s, pd_t *d, moy_ui_box_t b, int r, int ink, int side) {
+    int mi = -1;
+    moy_ui_current_in(s, b, r, (moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK) | side, d->fs, &mi,
+                      0);
+    return mi >= 0 ? mi : ink;
 }
 
 // -- icons -------------------------------------------------------------------------------
@@ -689,28 +660,16 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     if (flags & MOY_UI_F_DISABLED) {
         lab = ink = dim = moy_ui_disabled() >= 0 ? moy_ui_disabled() : dim;
     } else if (flags & MOY_UI_F_FOCUS) {
-        if (m->on) {
-            int mi = -1, mf = 0, mr = 0;
-            moy_ui_box_t mb = on_card ? on_card_mark(&d, b, r->first, 0, &mf, &mr) : b;
-            moy_ui_focus_in(s, mb, MOY_UI_MARK_PART, mr, mf, d.fs, NULL, &mi, 0);
-            lab = mi >= 0 ? mi : ink;
-            if (mi >= 0 && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT) {
-                // the whole row is on the mark: its controls too take the
-                // mark's ink, the mark's colour showing through them
-                ink = dim = mi;
-                int fc = moy_ui_token(d.look, m->color);
-                rowfill = fc >= 0 ? fc : -1;
-            }
-        } else if (m->active) {
-            int16_t c[3];
-            moy_ui_colors(d.look, MOY_UI_K_ROW, MOY_UI_ON, c);
-            if (c[0] >= 0) {
-                fill(&d, b.x, b.y, b.w, b.h, pal(&d, c[0]));
-                rowfill = c[0];
-            }
-            if (c[1] >= 0) {
-                lab = ink = dim = c[1];
-            }
+        int mi = -1, mf = 0, mr = 0;
+        moy_ui_box_t mb = on_card ? on_card_mark(&d, b, r->first, 0, &mf, &mr) : b;
+        moy_ui_focus_in(s, mb, MOY_UI_MARK_PART, mr, mf, d.fs, NULL, &mi, 0);
+        lab = mi >= 0 ? mi : ink;
+        if (mi >= 0 && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT) {
+            // the whole row is on the mark: its controls too take the
+            // mark's ink, the mark's colour showing through them
+            ink = dim = mi;
+            int fc = moy_ui_token(d.look, m->color);
+            rowfill = fc >= 0 ? fc : -1;
         }
     }
     int pad = pad_of(&d, r);
@@ -754,9 +713,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
         } else {
             // a track the fill would not keep 3:1 against: an outline in
             // the dim ink on the ground (Contrast's)
-            uint16_t g = rest;
-            ground(&d, &g);
-            rrect(&d, b.x, ty, b.w, bh, bh / 2, 1, g, d.fs, dimc);
+            rrect(&d, b.x, ty, b.w, bh, bh / 2, 1, ground(&d), d.fs, dimc);
         }
         int fw = (int)((int64_t)b.w * (r->v - r->lo) / span);
         if (fw > 0) {
@@ -769,9 +726,9 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
     // edge mark's plate where the row has focus
     uint16_t rg = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
     if (!on_card) {
-        ground(&d, &rg);
+        rg = ground(&d);
     }
-    if ((flags & MOY_UI_F_FOCUS) && m->on && m->active
+    if ((flags & MOY_UI_F_FOCUS) && m->active
         && m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_EDGE) {
         rg = plate_of(rg, pal(&d, moy_ui_token(d.look, m->color)), m->plate_alpha);
     }
@@ -839,7 +796,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                     rrect(&d, o.x, o.y, o.w, o.h, (d.desk ? 6 : 4) * d.fs, 1, cink, 0, 0);
                     c = rowfill;
                 } else if (i == r->cur) {
-                    c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, 0, ink, 0);
+                    c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, ink, 0);
                 }
                 text(&d, &fv, t.p, t.n, o.x + g.gap / 2, b.y, b.h, pal(&d, c), sc);
                 right = o.x;
@@ -852,7 +809,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
                 moy_ui_span_t t = option(r->value, i);
                 int c = dim;
                 if (i == r->cur) {
-                    c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, 0, lab, 0);
+                    c = current(s, &d, o, (d.desk ? 6 : 4) * d.fs, lab, 0);
                 }
                 text(&d, &fl, t.p, t.n, o.x + g.gap / 2, b.y, b.h, pal(&d, c), sc);
             }
@@ -863,7 +820,7 @@ int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
             if (rowfill >= 0) {
                 gnd = pal(&d, rowfill);
             } else if (!on_card) {
-                ground(&d, &gnd);
+                gnd = ground(&d);
             }
             // a dot in its ground's colour would be lost: then every dot of
             // the row wears a keyline in the row's ink
@@ -1055,13 +1012,9 @@ static void centred_cut(pd_t *d, const pf_t *f, moy_ui_span_t t, int x, int w, i
 
 // -- cards (ui.card) -------------------------------------------------------------------
 
-// The card's picture radius at the scale, under the depth's card radius; 0
-// without a depth.
+// The card's picture radius at the scale, under the depth's card radius.
 static int card_r(const pd_t *d) {
     const moy_ui_depth_t *dp = moy_ui_depth();
-    if (!dp->on) {
-        return 0;
-    }
     int r = pm(d, MOY_UI_M_VALUE_ROW_CARD_R, 1), cr = dp->card_r * d->fs;
     return cr < r ? cr : r;
 }
@@ -1096,25 +1049,18 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
     open_pd(s, &d, fs, desk);
     const moy_ui_marks_t *m = moy_ui_marks();
     int r = card_r(&d);
-    uint16_t gc;
-    if (!ground(&d, &gc)) {
-        gc = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
-    }
+    uint16_t gc = ground(&d);
     // a solid current plate (Contrast's) inverts the labels on it; behind,
     // it is its outline and the ground stays
-    int solid = m->on && m->cur_style == MOY_UI_CUR_PLATE && m->cur_alpha >= 255;
+    int solid = m->cur_style == MOY_UI_CUR_PLATE && m->cur_alpha >= 255;
     int cur_ink = -1;
     if (flags & MOY_UI_F_ON) {
-        int pr = moy_ui_depth()->on ? pm(&d, MOY_UI_M_VALUE_ROW_PLATE_R, 1) : 0;
-        cur_ink = current(s, &d, b, pr, 0, -1, 0);
-        if (m->on) {
-            int alpha = moy_ui_marks_shown() ? m->cur_alpha : m->cur_alpha * 6 / 10;
-            if (m->cur_style == MOY_UI_CUR_PLATE && (moy_ui_marks_shown() || !solid)) {
-                gc = mix(gc, pal(&d, moy_ui_token(d.look, m->cur_color)), alpha);
-            } else if (m->cur_style == MOY_UI_CUR_FILL && m->active) {
-                gc = pal(&d, tok(&d, MOY_UI_T_SELECTION, MOY_UI_T_ACCENT));
-            }
-        } else {
+        int pr = pm(&d, MOY_UI_M_VALUE_ROW_PLATE_R, 1);
+        cur_ink = current(s, &d, b, pr, -1, 0);
+        int alpha = moy_ui_marks_shown() ? m->cur_alpha : m->cur_alpha * 6 / 10;
+        if (m->cur_style == MOY_UI_CUR_PLATE && (moy_ui_marks_shown() || !solid)) {
+            gc = mix(gc, pal(&d, moy_ui_token(d.look, m->cur_color)), alpha);
+        } else if (m->cur_style == MOY_UI_CUR_FILL && m->active) {
             gc = pal(&d, tok(&d, MOY_UI_T_SELECTION, MOY_UI_T_ACCENT));
         }
     }
@@ -1131,9 +1077,7 @@ int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui
     int room = b.w - 2 * d.fs;
     int ink = tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK);
     int dim = tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM);
-    if ((flags & MOY_UI_F_ON) && !m->on) {
-        ink = dim = tok(&d, MOY_UI_T_SELECTION_INK, MOY_UI_T_INK);
-    } else if ((flags & MOY_UI_F_ON) && solid && moy_ui_marks_shown() && cur_ink >= 0) {
+    if ((flags & MOY_UI_F_ON) && solid && moy_ui_marks_shown() && cur_ink >= 0) {
         ink = dim = cur_ink;
     }
     if (tone != MOY_UI_TONE_INK && tone != MOY_UI_TONE_DIM && tone != MOY_UI_TONE_LOCKED
@@ -1234,7 +1178,7 @@ int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t conte
     corners(&d, content, r, gnd);
     rrect(&d, content.x, content.y, content.w, content.h, r, 0, 0, d.fs,
           pal(&d, tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)));
-    if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->active && moy_ui_marks()->on) {
+    if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->active) {
         int mi = -1;
         moy_ui_focus_in(s, pic, MOY_UI_MARK_CARD, r, MOY_UI_MARK_AFTER, d.fs, NULL, &mi, 0);
     }
@@ -1282,7 +1226,7 @@ int moy_ui_card_badge(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, in
         // the veiled tile is dark too: a raised disc, ringed
         ring = d.fs;
         if (solid_marks()) {
-            ground(&d, &df);
+            df = ground(&d);
             rc = pal(&d, tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK));
         } else {
             df = pal(&d, tok(&d, MOY_UI_T_SURFACE_ALT, MOY_UI_T_SURFACE));
@@ -1308,12 +1252,10 @@ int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, in
         int dis = moy_ui_disabled();
         v = dis >= 0 ? dis : tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
         if (solid) {
-            ground(&d, &tile);
+            tile = ground(&d);
             v = tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
         } else if (dark(&d)) {
-            uint16_t g = surf;
-            ground(&d, &g);
-            tile = mix(pal(&d, tok(&d, MOY_UI_T_SURFACE_ALT, MOY_UI_T_SURFACE)), g, 128);
+            tile = mix(pal(&d, tok(&d, MOY_UI_T_SURFACE_ALT, MOY_UI_T_SURFACE)), ground(&d), 128);
         } else {
             tile = pal(&d, tok(&d, MOY_UI_T_SUNK, MOY_UI_T_SURFACE));
         }
@@ -1493,10 +1435,7 @@ int moy_ui_empty(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, mo
     if (!draw) {
         return end - b.y;
     }
-    uint16_t g;
-    if (!ground(&d, &g)) {
-        g = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
-    }
+    uint16_t g = ground(&d);
     int v = tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);
     uint16_t disc = dark(&d) ? pal(&d, tok(&d, MOY_UI_T_SURFACE_ALT, MOY_UI_T_SURFACE))
                              : mix(g, pal(&d, v), 26);
@@ -1538,10 +1477,7 @@ int moy_ui_toast(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t text_, in
     if (out != NULL) {
         *out = p;
     }
-    uint16_t g;
-    if (!ground(&d, &g)) {
-        g = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
-    }
+    uint16_t g = ground(&d);
     if (!flat) {
         moy_ui_soft(s, p, h / 2, 153);
     }
@@ -1796,14 +1732,9 @@ int moy_ui_month(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title,
 
 int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
                        int desk, moy_ui_box_t *content) {
-    if (!moy_ui_depth()->on) {
-        return moy_ui_panel(s, b, title, fs, content);
-    }
     pd_t d;
     open_pd(s, &d, fs, desk);
-    uint16_t gc;
-    ground(&d, &gc);
-    fill(&d, b.x, b.y, b.w, b.h, gc);
+    fill(&d, b.x, b.y, b.w, b.h, ground(&d));
     moy_ui_box_t ct = b;
     if (title.n) {
         int sh = metric(MOY_UI_K_PANEL, MOY_UI_M_PANEL_STRIP) * d.fs;
@@ -1836,8 +1767,8 @@ int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, 
         g = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
     } else if (ci != MOY_UI_DEFAULT) {
         g = pal(&d, ci);
-    } else if (!ground(&d, &g)) {
-        return MOY_UI_OK;
+    } else {
+        g = ground(&d);
     }
     moy_text_target_t *t = &d.t;
     int x0 = b.x - t->cam_x, x1 = x0 + b.w;
@@ -1875,11 +1806,8 @@ int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int
     open_pd(s, &d, fs, desk);
     const moy_ui_depth_t *dp = moy_ui_depth();
     const moy_ui_display_t *ds = moy_ui_display();
-    int r = 0;
-    if (dp->on) {
-        int cap = desk ? 10 : 8;
-        r = (dp->key_r < cap ? dp->key_r : cap) * d.fs;
-    }
+    int cap = desk ? 10 : 8;
+    int r = (dp->key_r < cap ? dp->key_r : cap) * d.fs;
     moy_shape_paint_t p;
     memset(&p, 0, sizeof(p));
     p.n = 1;
@@ -1907,15 +1835,11 @@ int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int
     d.row->st[MOY_ST_N_FILL]++;
     const moy_ui_marks_t *m = moy_ui_marks();
     int mi = -1;
-    if ((flags & MOY_UI_F_ON) && m->on) {
+    if (flags & MOY_UI_F_ON) {
         moy_ui_current_in(s, b, r, moy_ui_marks_shown() ? 0 : MOY_UI_MARK_BACK, d.fs, &mi, 0);
     }
     if ((flags & MOY_UI_F_FOCUS) && m->active) {
-        if (m->on) {
-            moy_ui_focus_in(s, b, MOY_UI_MARK_AUTO, r, 0, d.fs, NULL, &mi, 0);
-        } else {
-            moy_ui_focus_ring(s, b, d.fs);
-        }
+        moy_ui_focus_in(s, b, MOY_UI_MARK_AUTO, r, 0, d.fs, NULL, &mi, 0);
     }
     return MOY_UI_OK;
 }
@@ -1924,28 +1848,24 @@ int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int
 
 int moy_ui_group_r(int fs) {
     const moy_ui_depth_t *dp = moy_ui_depth();
-    if (!dp->on) {
-        return 0;
-    }
     int r = gm(MOY_UI_M_GROUP_R, fs);
     int cr = dp->card_r * (fs < 1 ? 1 : fs);
     return cr < r ? cr : r;
 }
 
-// The card's ring: the look's `card.frame`, else a theme without a depth,
-// or a dark one, rings its cards.
+// The card's ring: the look's `card.frame`, else a dark theme rings its cards.
 static int card_line(const pd_t *d) {
     const moy_ui_depth_t *dp = moy_ui_depth();
-    if (dp->on && dp->card_line > 0) {
+    if (dp->card_line > 0) {
         return dp->card_line * d->fs;
     }
-    if (!dp->on || dark(d)) {
+    if (dark(d)) {
         return d->fs;
     }
     // a light card in its page's ground's colour (Contrast Light's white on
     // white) is its line alone
-    uint16_t g;
-    return ground(d, &g) && !ratio_ge(pal(d, tok(d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), g, 21, 20)
+    uint16_t g = ground(d);
+    return !ratio_ge(pal(d, tok(d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)), g, 21, 20)
                ? d->fs
                : 0;
 }
@@ -1953,7 +1873,7 @@ static int card_line(const pd_t *d) {
 // The card's shape from its top to `bottom` (exclusive), drawn where the clip lets it.
 static void card(pd_t *d, moy_ui_box_t c, int bottom) {
     const moy_ui_depth_t *dp = moy_ui_depth();
-    uint16_t lc = dp->on && dp->card_line > 0 && set(dp->card_line_c)
+    uint16_t lc = dp->card_line > 0 && set(dp->card_line_c)
                       ? val(d, dp->card_line_c)
                       : pal(d, tok(d, MOY_UI_T_BORDER, MOY_UI_T_EDGE));
     rrect(d, c.x, c.y, c.w, bottom - c.y, moy_ui_group_r(d->fs), 1,
@@ -1973,7 +1893,7 @@ static moy_ui_box_t on_card_mark(const pd_t *d, moy_ui_box_t b, int first, int l
     int st = m->style[MOY_UI_MARK_PART];
     *flags = 0;
     *r = 0;
-    if (d->desk || !m->on || (st != MOY_UI_FOCUS_INVERT && st != MOY_UI_FOCUS_EDGE)) {
+    if (d->desk || (st != MOY_UI_FOCUS_INVERT && st != MOY_UI_FOCUS_EDGE)) {
         return b;
     }
     int f = card_line(d);
@@ -2036,8 +1956,7 @@ int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t c, moy_ui_box_t last, 
     if (r <= 0) {
         return MOY_UI_OK;
     }
-    uint16_t gc;
-    int has_gc = ground(&d, &gc);
+    uint16_t gc = ground(&d);
     moy_canvas_row_t *row = d.row;
     int32_t saved[4];
     memcpy(saved, &row->st[MOY_ST_CX0], sizeof(saved));
@@ -2048,9 +1967,7 @@ int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t c, moy_ui_box_t last, 
         if (k.t.cx0 >= k.t.cx1 || k.t.cy0 >= k.t.cy1) {
             continue;
         }
-        if (has_gc) {
-            fill(&k, x, bottom - r, r, r, gc);
-        }
+        fill(&k, x, bottom - r, r, r, gc);
         card(&k, c, bottom);
         if (flags & (MOY_UI_F_FOCUS | MOY_UI_F_ON)) {
             row->st[MOY_ST_CX0] = k.t.cx0;
@@ -2061,7 +1978,7 @@ int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t c, moy_ui_box_t last, 
             if (flags & MOY_UI_F_ON) {
                 moy_ui_current_in(s, last, 0, 0, fs, &ink, 0);
             }
-            if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->on) {
+            if (flags & MOY_UI_F_FOCUS) {
                 int mf = 0, mr = 0;
                 moy_ui_box_t mb = on_card_mark(&d, last, 0, 1, &mf, &mr);
                 moy_ui_focus_in(s, mb, MOY_UI_MARK_PART, mr, MOY_UI_MARK_AGAIN | mf, fs, NULL,
@@ -2225,10 +2142,7 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
     int sc = tscale(s);
     int kh = pm(&d, MOY_UI_M_VALUE_ROW_KEY, 1), hgap = pm(&d, MOY_UI_M_VALUE_ROW_HINT_GAP, 1);
     int dk = dark(&d);
-    uint16_t bg;
-    if (!ground(&d, &bg)) {
-        bg = pal(&d, 0);
-    }
+    uint16_t bg = ground(&d);
     uint16_t ink = pal(&d, tok(&d, MOY_UI_T_CHROME_INK, MOY_UI_T_INK));
     uint16_t dim = pal(&d, tok(&d, MOY_UI_T_CHROME_INK_DIM, MOY_UI_T_INK_DIM));
     uint16_t capc = set(kc->fill) ? val(&d, kc->fill) : mix(bg, ink, dk ? 41 : 26);
@@ -2510,34 +2424,23 @@ int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t
     if ((flags & MOY_UI_F_LEAD) && !(flags & MOY_UI_F_DISABLED)) {
         lab = tok(&d, MOY_UI_T_VALUE, MOY_UI_T_ACCENT);   // the table's verb, in `value`
     }
-    int r = moy_ui_depth()->on ? (desk ? 7 : 4) * d.fs : 0;
+    int r = (desk ? 7 : 4) * d.fs;
     if (flags & MOY_UI_F_DISABLED) {
         lab = dim;
     } else {
         if (flags & MOY_UI_F_ON) {
-            int c = current(s, &d, b, r, 0, ink, MOY_UI_MARK_SIDE);
+            int c = current(s, &d, b, r, ink, MOY_UI_MARK_SIDE);
             if (c != ink) {
                 lab = meta = c;
             }
         }
         if (flags & MOY_UI_F_FOCUS) {
-            if (m->on) {
-                int mi = -1;
-                moy_ui_focus_in(s, b, MOY_UI_MARK_PART, r, 0, d.fs, NULL, &mi, 0);
-                if (mi >= 0) {
-                    lab = mi;
-                    if (m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT) {
-                        meta = mi;
-                    }
-                }
-            } else if (m->active) {
-                int16_t c[3];
-                moy_ui_colors(d.look, MOY_UI_K_ROW, MOY_UI_ON, c);
-                if (c[0] >= 0) {
-                    fill(&d, b.x, b.y, b.w, b.h, pal(&d, c[0]));
-                }
-                if (c[1] >= 0) {
-                    lab = meta = c[1];
+            int mi = -1;
+            moy_ui_focus_in(s, b, MOY_UI_MARK_PART, r, 0, d.fs, NULL, &mi, 0);
+            if (mi >= 0) {
+                lab = mi;
+                if (m->style[MOY_UI_MARK_PART] == MOY_UI_FOCUS_INVERT) {
+                    meta = mi;
                 }
             }
         }
@@ -2615,7 +2518,7 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     // mark's ink); elsewhere -- a dialog's body, a page -- the field's own
     // ring is its focus, as a text field's is on every desk
     int mi = -1, invert = 0;
-    if (focused && m->on && card) {
+    if (focused && card) {
         int mf = 0, mr = 0;
         moy_ui_box_t mb = on_card ? on_card_mark(&d, b, first, 0, &mf, &mr) : b;
         moy_ui_focus_in(s, mb, MOY_UI_MARK_PART, mr, mf, d.fs, NULL, &mi, 0);
@@ -2653,12 +2556,12 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
         return MOY_UI_OK;
     }
     const moy_ui_depth_t *dp = moy_ui_depth();
-    int r = dp->on ? (dp->key_r < (desk ? 8 : 6) ? dp->key_r : (desk ? 8 : 6)) * d.fs : 0;
+    int r = (dp->key_r < (desk ? 8 : 6) ? dp->key_r : (desk ? 8 : 6)) * d.fs;
     // focused, the field is being typed in: its ring is two pixels at the
     // scale, the second outside the box, in the focus colour (the mark's ink
     // on an invert mark), whether or not focus marks show
     uint16_t under = pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL));
-    int fc = m->on ? moy_ui_token(d.look, m->color) : -1;
+    int fc = moy_ui_token(d.look, m->color);
     fc = fc >= 0 && ratio_ge(pal(&d, fc), under, 3, 1) ? fc : -1;  // Contrast's yellow on white
     int ring_c = !focused ? tok(&d, MOY_UI_T_BORDER, MOY_UI_T_EDGE)
                  : invert ? mi
@@ -2673,11 +2576,9 @@ int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, mo
     }
     rrect(&d, f.x, f.y, f.w, f.h, r, 1, pal(&d, tok(&d, MOY_UI_T_SURFACE, MOY_UI_T_PANEL)),
           d.fs, ring);
-    if (focused && m->on) {
+    if (focused) {
         int fi = -1;
         moy_ui_focus_in(s, f, MOY_UI_MARK_PART, r, MOY_UI_MARK_AFTER, d.fs, NULL, &fi, 0);
-    } else if (focused && m->active) {
-        moy_ui_focus_ring(s, f, d.fs);
     }
     // the text from the corner's radius and 3 pixels at the scale, the
     // caret's room kept inside the ring on the right
@@ -2728,7 +2629,7 @@ int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, in
     pd_t d;
     open_pd(s, &d, fs, desk);
     const moy_ui_depth_t *dp = moy_ui_depth();
-    int r = dp->on ? (dp->card_r < (desk ? 12 : 8) ? dp->card_r : (desk ? 12 : 8)) * d.fs : 0;
+    int r = (dp->card_r < (desk ? 12 : 8) ? dp->card_r : (desk ? 12 : 8)) * d.fs;
     // flat: no soft shadow blended over what still reads under it, but a
     // hard drop MOY_UI_DROP pixels at the scale in an opaque shade of the
     // ground, then the surface and its edge (Contrast's: no drop, the ink's
@@ -2740,9 +2641,8 @@ int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, in
               pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)));
     } else {
         int dk = dark(&d);
-        uint16_t g = surf;
-        ground(&d, &g);
-        rrect(&d, b.x, b.y + MOY_UI_DROP * d.fs, b.w, b.h, r, 1, mix(g, 0, dk ? 115 : 31), 0, 0);
+        rrect(&d, b.x, b.y + MOY_UI_DROP * d.fs, b.w, b.h, r, 1, mix(ground(&d), 0, dk ? 115 : 31),
+              0, 0);
         edge = mix(edge, pal(&d, dk ? tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)
                                     : tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK)), dk ? 77 : 51);
         rrect(&d, b.x, b.y, b.w, b.h, r, 1, surf, d.fs, edge);
@@ -2796,10 +2696,7 @@ int moy_ui_tool_draw(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph
     pd_t d;
     open_pd(s, &d, fs, desk);
     int k = d.fs, r = (b.w < 30 * k ? 6 : 8) * k;
-    uint16_t g = 0;
-    if (!ground(&d, &g)) {
-        g = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
-    }
+    uint16_t g = ground(&d);
     int ink_i = tok(&d, MOY_UI_T_INK, MOY_UI_T_INK);
     int word_i = tok(&d, MOY_UI_T_INK_DIM, MOY_UI_T_INK);
     int disabled = (flags & MOY_UI_F_DISABLED) != 0;
@@ -2816,7 +2713,7 @@ int moy_ui_tool_draw(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph
         under = plate_of(g, pal(&d, ink_i), interact == MOY_UI_PRESSED ? 51 : 26);
         rrect(&d, b.x, b.y, b.w, b.h, r, 1, under, 0, 0);
     }
-    if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->active && moy_ui_marks()->on) {
+    if ((flags & MOY_UI_F_FOCUS) && moy_ui_marks()->active) {
         int mi = -1;
         moy_ui_focus_in(s, b, MOY_UI_MARK_AUTO, r, 0, d.fs, NULL, &mi, 0);
         if (mi >= 0) {
@@ -2868,10 +2765,7 @@ int moy_ui_tip_draw(const moy_ui_sink_t *s, moy_ui_box_t at, moy_ui_span_t t, mo
     if (y + h > in.y + in.h) {
         y = at.y - 4 * k - h;           // no room under it: over it
     }
-    uint16_t g = 0;
-    if (!ground(&d, &g)) {
-        g = pal(&d, tok(&d, MOY_UI_T_PANEL, MOY_UI_T_SURFACE));
-    }
+    uint16_t g = ground(&d);
     rrect(&d, x, y, w, h, 6 * k, 1, pal(&d, tok(&d, MOY_UI_T_INK, MOY_UI_T_INK)), 0, 0);
     text(&d, &f, t.p, t.n, x + pad, y, h, g, sc);
     return MOY_UI_OK;

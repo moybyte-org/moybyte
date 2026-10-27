@@ -436,16 +436,6 @@ def test_the_look_card_follows_the_menus_keys(tmp_path):
     assert ui.focus() == ws.sysmenu.items[ws.sysmenu.sel][4]
 
 
-def test_a_theme_without_a_depth_keeps_the_kernels_menu(tmp_path):
-    ws = build_ws(tmp_path)
-    drv = make_drv(ws)
-    _frames(drv)
-    drv.system_key()
-    _frames(drv)
-    if not ui_draw.depth()[0]:
-        assert not ws.menu_ui.looked() and ws.menu_ui._host is None
-
-
 @pytest.mark.parametrize("desk", [False, True])
 def test_the_pause_cards_title_row_draws_moy_in_its_icon_slot(tmp_path, desk):
     """The title row names Moy as its icon (`ui.icon("moy")`), and the engine

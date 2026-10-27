@@ -1318,33 +1318,6 @@ def paint(cv, th, rect, part, state=REST):
                     _THEME_STATE_ID[state])
 
 
-def icon_tile(cv, th, box):
-    """An icon's tile on the desk: the theme's `desk.icon` part (a
-    role-sheet cell or its surface), else a panel box on the edge ink. The
-    icon draws inside it."""
-    if not paint(cv, th, box, "desk.icon"):
-        cv.rect(box[0], box[1], box[2], box[3], th["panel"])
-        cv.rectb(box[0], box[1], box[2], box[3], th["edge"])
-
-
-def icon_label_rect(band, text, fs):
-    """The pill an icon's label is drawn in (D1: the label in a pill under
-    the tile): the label's width, centred in the label band `band`."""
-    w = min(band[2], text_width(text, fs, "ui") + 6 * fs)
-    return (band[0] + (band[2] - w) // 2, band[1], w, band[3])
-
-
-def icon_label(cv, th, band, text, on, fs):
-    """An icon's label under its tile on the desk: the theme's `desk`
-    surface as a pill the label's width, or, with none, a chip the band's
-    width."""
-    r = icon_label_rect(band, text, fs)
-    if paint(cv, th, r, "desk"):
-        label(cv, r, text, th["chrome_ink"], ALIGN_CENTER)
-    else:
-        chip(cv, th, band, text, on=on, fs=fs)
-
-
 # --- window frames ---------------------------------------------------------------
 # The window decoration and the bar's band in the frame style the theme
 # chooses (docs/theming_2026-09.md §4.5): the styles are C, a theme only picks
@@ -1375,14 +1348,14 @@ def frame_buttons(rect, title_h, title, btns, fs):
 def frame_icon(rect, title_h, btns=0):
     """The slot (x, y, w, h) the frame leaves for the window's line icon left
     of its title, past a back chevron `btns` asks for, or None where it draws
-    none (no depth, `win.icon` off)."""
+    none (a frame style's frame, `win.icon` off)."""
     return _C.frame_icon(rect, title_h, int(btns))
 
 
 # --- depth: the theme's radii, shadow and edges (docs/look_2026-10.md step 6) ---
 #
-# Installed with the theme and its mode (`use_depth`); off for a theme with no
-# `look`, and a theme whose chain names a frame style nearer than its look
+# Installed with the theme and its mode (`use_depth`); a theme with no `look`
+# takes the default's, flat, and a theme whose chain names a frame style nearer than its look
 # keeps that frame (moy_theme_look_frames). A window's shadow and its
 # rounded outline's fringe blend over whatever lies under it: the desk layer
 # casts them over what it repainted (`frame_under`, runtime/wm_desk.py), and
@@ -1392,40 +1365,27 @@ def frame_icon(rect, title_h, btns=0):
 
 UNDER_FULL, UNDER_SMALL, UNDER_NONE = 0, 1, 2
 CAST_WINDOW, CAST_CARD, CAST_KEY = 0, 1, 2
-_DEPTH = [(0,) * 16]
-_MARKS = [False, 0]                 # the installed theme's: marks on, a card's reach
+_DEPTH = [(0,) * 15]
 
 
 def use_depth(name, light):
-    """Install theme `name`'s depth in a mode (None: off), and its marks."""
+    """Install theme `name`'s depth in a mode (None: the default's), and its
+    marks."""
     _DEPTH[0] = tuple(_C.use_depth(name, light))
-    m = _C.marks(None, False)
-    _MARKS[0], _MARKS[1] = m[0], m[3]
-
-
-def marks_on():
-    """Whether the installed theme draws the marks (`focus`, `current`)."""
-    return _MARKS[0]
-
-
-def mark_reach():
-    """How far the installed theme's focus mark on a card reaches past the
-    card's top edge, in pixels."""
-    return _MARKS[1]
 
 
 def depth():
-    """The installed depth: (on, win_r, card_r, key_r, corners, stepped,
-    shadow, edges, alpha, blur, dx, dy, back, frames, bar_h, hhbar_h);
-    shadow 0 none, 1 soft, 2 hard; `frames` when the window frame is the
-    depth's; the desk bar's and the handheld bar's heights (0 with depth off)."""
+    """The installed depth: (win_r, card_r, key_r, corners, stepped, shadow,
+    edges, alpha, blur, dx, dy, back, frames, bar_h, hhbar_h); shadow 0 none,
+    1 soft, 2 hard; `frames` when the window frame is the depth's; the desk
+    bar's and the handheld bar's heights."""
     return _DEPTH[0]
 
 
 def frame_geom(w, h, title_h, active=True, mode=UNDER_FULL):
     """A w x h window's (radius, foot, pad left, up, right, down) under the
     depth: the foot is the rows under its content its bottom corners take,
-    the pads how far its shadow at `mode`'s size reaches. Zeros with depth off."""
+    the pads how far its shadow at `mode`'s size reaches."""
     return _C.frame_geom(w, h, title_h, active, mode)
 
 
@@ -1513,8 +1473,7 @@ def bar_part(cv, th, part, rect, on=0, fill=None):
     a desk or handheld bar's band (`on` the band's BAND_* side), the system
     button's tile (`on`: its menu is open), a desk chip's field (`on`: the
     focused window's) or a desk icon's tile (step 25, BAR_TILE; `fill`, a
-    look colour, is its app's of the look's `tiles`, step 26b). False,
-    drawing nothing, under a theme with no depth."""
+    look colour, is its app's of the look's `tiles`, step 26b)."""
     look = _LOOK if th is _TH else _look(th)
     if fill is not None:
         return _C.bar_part(cv, look, part, rect, int(on), fill)
@@ -1534,12 +1493,6 @@ def dialog(cv, rect, ring=None, fill=None):
     stays the caller's (their hit rects are test-pinned constants); only the
     shell drawing is shared. `ring`/`fill` default to the style's."""
     _C.dialog(cv, rect, ring, fill)
-
-
-def dialog_rings():
-    """How many rings the style draws around a dialog (`dialog`'s edge
-    count): what the kernel's chrome draws its menu and ABOUT box with."""
-    return _METRICS["dialog"][DLG_EDGE]
 
 
 def text_field(cv, rect, text, placeholder="", colors=None, fs=None):
@@ -1571,12 +1524,6 @@ def autoscroll_mark(cv, th, x, y, s=1):
     cv.tri(x - 2 * s, y + s, x + 2 * s, y + s, x, y + 4 * s, th["ink"])
 
 
-def focus_ring(cv, th, rect, fs=None):
-    """The ring a theme without marks draws as its focus (`focus` draws it
-    for such a theme; an app calls `focus`)."""
-    _C.focus_ring(cv, _LOOK if th is _TH else _look(th), rect, fs)
-
-
 # The focus mark's size classes and the marks' flags (native/moy_ui/moy_ui.h).
 _MARK_CLASS = {"part": 0, "card": 1, "small": 2, None: 3}
 _MARK_AFTER, _MARK_BACK, _MARK_SIDE, _MARK_INK, _MARK_RING, _MARK_COUNT = 1, 2, 4, 8, 32, 64
@@ -1604,13 +1551,12 @@ def focus(cv, th, rect, size=None, r=0, after=False, fs=None, ring=False, select
     content keeps its own ink. `flat` draws the theme's ring as the focus
     mark, counted, whatever its style: a mark that moves with every focus
     step and must not lift or shadow its neighbours (the home's grid and
-    icons, docs/look_2026-10.md step 33); a theme without marks draws its
-    own ring."""
-    if flat and _MARKS[0]:
+    icons, docs/look_2026-10.md step 33)."""
+    if flat:
         ring = True
     return _C.focus(cv, _LOOK if th is _TH else _look(th), rect, _MARK_CLASS[size], r,
                     (_MARK_AFTER if after else 0) | (_MARK_RING if ring else 0)
-                    | (_MARK_COUNT if flat and _MARKS[0] else 0)
+                    | (_MARK_COUNT if flat else 0)
                     | (_MARK_SELECTED if selected else 0) | (_MARK_PILL if pill else 0), fs)
 
 
@@ -1654,8 +1600,7 @@ def current_ink(cv, th, back=False):
 
 
 def marks(active=None, reset=False):
-    """(marks on, active, focus marks drawn, reach): whether the theme draws
-    the marks, whether focus draws (`active` sets it: the shell clears it
+    """(active, focus marks drawn, reach): whether focus draws (`active` sets it: the shell clears it
     while a window behind draws; under touch, `input_kind`, no focus draws
     whatever it says, as on a phone), the count of focus marks drawn (`reset`
     zeroes it after reading), and how far a card's focus mark reaches past

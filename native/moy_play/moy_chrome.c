@@ -18,12 +18,10 @@
 
 static int16_t g_ink[MOY_INKS];
 static bool g_light;
-static int g_rings = 1;
 
-void moy_chrome_set_inks(const int16_t inks[MOY_INKS], bool bar_light, int dialog_rings) {
+void moy_chrome_set_inks(const int16_t inks[MOY_INKS], bool bar_light) {
     memcpy(g_ink, inks, sizeof(g_ink));
     g_light = bar_light;
-    g_rings = dialog_rings;
 }
 
 static uint8_t ink(int i) {
@@ -314,57 +312,6 @@ void moy_chrome_strip_cell(moy_chrome_list_t *l, const char *kind, int x, int y,
         } else {
             rect(l, x + w / 2, y, 1, h, ink(MOY_INK_CHROME_DIM));
         }
-    }
-}
-
-// The system menu's frozen geometry (runtime/widgets.py's _POPUP_*).
-#define POPUP_ROW_H 12
-#define POPUP_PAD_X 4
-#define POPUP_SEP_H 1
-
-static void dialog(moy_chrome_list_t *l, int x, int y, int w, int h) {
-    rect(l, x, y, w, h, ink(MOY_INK_PANEL));
-    int c = ink(MOY_INK_EDGE);
-    for (int i = 0; i < g_rings; i++) {
-        rectb(l, x + i, y + i, w - 2 * i, h - 2 * i, c);
-    }
-}
-
-void moy_chrome_menu(moy_chrome_list_t *l, const uint8_t *kind, const char *const *label,
-                     int n, int sel, int x, int y, int w, int h, int fs, int cs) {
-    dialog(l, x, y, w, h);
-    int cy = y;                     // the rows start at the panel's top edge
-    int row_h = POPUP_ROW_H * cs;
-    // Rows sit 1px inside the ring, so the label's inset from the PANEL edge
-    // is one less from the row's.
-    int pad = POPUP_PAD_X * fs - 1;
-    int dy = 2 * fs + (row_h - POPUP_ROW_H * fs) / 2;
-    int fw = 8 * fs;
-    for (int i = 0; i < n; i++) {
-        if (kind[i] == MOY_MENU_SEP) {
-            rect(l, x + 1, cy, w - 2, POPUP_SEP_H * cs, ink(MOY_INK_EDGE));
-            cy += POPUP_SEP_H * cs;
-            continue;
-        }
-        bool header = kind[i] == MOY_MENU_HEADER;
-        bool on = !header && i == sel;
-        int field = header ? -1 : g_ink[on ? MOY_INK_MENU_FIELD_ON : MOY_INK_MENU_FIELD_OFF];
-        int c = header ? (g_light ? ink(MOY_INK_INK_DIM) : ink(MOY_INK_DARK_GREY))
-                       : ink(on ? MOY_INK_MENU_INK_ON : MOY_INK_MENU_INK_OFF);
-        int rx = x + 1, rw = w - 2;
-        if (field >= 0) {
-            rect(l, rx, cy, rw, row_h, field);
-        }
-        int tx = rx + pad;
-        int right = rx + rw - pad;
-        int maxc = (right - tx) / fw;
-        if (maxc < 0) {
-            maxc = 0;
-        }
-        if (label[i] != NULL && label[i][0] && maxc > 0) {
-            print(l, MOY_TEXT_PY, label[i], maxc, tx, cy + dy, c, 1);
-        }
-        cy += row_h;
     }
 }
 

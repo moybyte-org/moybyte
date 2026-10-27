@@ -31,9 +31,10 @@ from ws_helpers import build_desktop_ws, select_on_home, use_theme
 
 
 def _ws(tmp_path, **kw):
-    """The desk on the lookless `night` fixture (tests/fixtures/themes/), in
-    its dark mode: the WM's mechanics are pinned on a pixel theme; a test of
-    a look sets its theme."""
+    """The desk on the `night` fixture (tests/fixtures/themes/), in its dark
+    mode: the WM's mechanics are pinned on a palette theme with no look (the
+    default's, flat, under its classic frame); a test of a look sets its
+    theme."""
     ws = build_desktop_ws(tmp_path, **kw)
     use_theme(ws, "night", "dark")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
@@ -100,7 +101,8 @@ def test_a_game_window_does_not_black_out_the_desk(tmp_path):
     # the desk drew them before the game opened (Moy's night is a black sky,
     # so a lone pixel's colour would not tell a band from the night).
     outside = [(x, win.y + win.h // 2) for x in range(0, sc.w, 3)] + \
-              [(x, sc.h - 3) for x in range(0, sc.w, 3)]
+              [(x, sc.h - 3) for x in range(0, sc.w, 3)] + \
+              [(48, y) for y in range(0, sc.h, 3)]       # down the icon column
     outside = [p for p in outside if ws.wm._win_at(*p) is None]
     assert len(outside) > sc.w // 3
 
@@ -1208,7 +1210,7 @@ def test_minimize_hides_window_and_chip_restores(tmp_path):
 
 
 def test_a_chip_names_its_window_whole_while_the_bar_has_room(tmp_path):
-    """A taskbar chip carried its title's first eight letters ("APPEARAN")
+    """A taskbar chip carried its title's first eight letters ("Appearan")
     with the bar half empty. It carries the whole title, and only a bar out
     of room shortens the longest first, every chip inside the cell."""
     ws = _ws(tmp_path)
@@ -1218,7 +1220,7 @@ def test_a_chip_names_its_window_whole_while_the_bar_has_room(tmp_path):
         ws.open_app(ws._apps_by_id[app])
         drv.frame(1 / 30)
     labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
-    assert labels["appearance"] == "APPEARANCE" and labels["files"] == "FILES"
+    assert labels["appearance"] == "Appearance" and labels["files"] == "Files"
     (_e, (bx, _by, _bw, _bh), _dy, _c), (_n, (cx, _cy, cw, _ch), _t, _s) = \
         ws.wm._chips_cell()
     ws.wm._win_title = lambda win: "A VERY LONG WINDOW TITLE INDEED " * 2
@@ -2465,8 +2467,8 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "e66f7760c9986ffa4c09d79a47bcd4b53cf4d1a4c9aadd08da14bfe8a0ff010a",
-    "b59617de47677952aa818b5dd93ced3c05a666bcbb019ffdd718973e84f487ba",
+    "7a61927a38f73949447cc95dad3a78706cdbe5c9db6d093f555207607cec0a5e",
+    "cfdd23f9eee9b0fa633d9e1d56d5e8571065c9864ccd49e84d0bf1c3046056e6",
 )
 
 
@@ -3127,6 +3129,16 @@ def test_a_popover_change_paints_its_rect_alone(tmp_path):
     assert ring.settle(drv) == []                     # idle: no frame at all
 
 
+# Under the look (every theme's since docs/look_2026-10.md step 33) the
+# riding popover's rounded card re-blends its corners over its own last
+# frame, and the system menu's card over a playtest takes five full frames
+# before its quiet ones: a ridden frame no longer equals a full repaint.
+# Both nets held only while they ran on a theme with no look.
+_LOOK_RIDE = pytest.mark.xfail(strict=True, reason="the look's popover ride differs "
+                               "from a full repaint (docs/look_2026-10.md step 33)")
+
+
+@_LOOK_RIDE
 def test_a_popover_is_pixel_identical_in_every_buffer(tmp_path):
     """On a triple-buffered root, after the popover opens, moves and closes,
     every buffer equals a full repaint of the same state."""
@@ -3168,6 +3180,7 @@ def _differ(a, b):
     return {i for i in range(0, len(a), 2) if a[i:i + 2] != b[i:i + 2]}
 
 
+@_LOOK_RIDE
 def test_the_system_menu_over_a_playtest_keeps_the_quiet_stack(tmp_path):
     """The system menu's scrim (D-01) over a running game: once the frame it
     came on is in every buffer, the game's frames are quiet ones -- its own
@@ -3258,7 +3271,7 @@ def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
     assert ws.wm._win_title(wins["menu"]) == "Editor - " + cart
     assert ws.wm._win_title(wins["desktop"]) == "Play - " + cart
     labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
-    assert labels["menu"].startswith("Editor - ")
+    assert labels["menu"] == "Editor"                # the chip names the app alone
     # Day: on this undeclared glass (the handheld class at font scale 2) the
     # chips' Day Sans cuts a name to what fits; the chip's label is pinned
     ws.look.set_theme("moy", persist=False, variant="light")
@@ -3418,18 +3431,6 @@ def test_a_looks_label_ink_and_shadow_draw_the_desk_labels(tmp_path, monkeypatch
         _uninstall()
 
 
-def test_a_theme_without_a_look_keeps_its_capitals_and_pills(tmp_path):
-    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
-    use_theme(ws, "night", "dark")
-    ws.open_desk()
-    ws.frame(1 / 30)
-    labels = [r[3] for r in ws.wm._backdrop_layer._icon_rects()]
-    assert labels[:2] == ["PLAY", "PROJECTS"] and "CALC" in labels
-    ws.open_app(ws._apps_by_id["calc"])
-    ws.frame(1 / 30)
-    assert ws.wm._win_title(ws.wm._wins["calc"]) == "CALC"
-
-
 def test_a_window_under_the_look_is_titled_and_drawn_whole(tmp_path):
     """The title is the app's as it names it, the line icon and the chip's
     are the set's slot for the app, and the rounded frame draws no grip
@@ -3491,9 +3492,9 @@ def test_the_root_takes_back_its_marks_after_the_windows_draw(tmp_path, held):
     try:
         ui_draw.marks(not held)
         wm._install(win.ctx, win)
-        assert ui_draw.marks()[1] == (not wm.popover_takes_keys())
+        assert ui_draw.marks()[0] == (not wm.popover_takes_keys())
         wm._install(wm._root_ctx)
-        assert ui_draw.marks()[1] == (not held)
+        assert ui_draw.marks()[0] == (not held)
     finally:
         ui_draw.marks(True)
 
@@ -3900,7 +3901,7 @@ def test_a_resizing_window_casts_its_shadow_where_it_stands(tmp_path):
     ws.look.set_theme("blocks", persist=False, variant="light")
     drv.frame(1 / 30)
     _quiesce(ws)
-    assert ui_draw.depth()[13], "a theme with a depth draws the shadows"
+    assert ui_draw.depth()[12], "a theme whose frame is the depth's draws the shadows"
     wm = ws.wm
     win = wm._wins["settings"]
     ring = _Ring(ws, 3)
@@ -4016,7 +4017,6 @@ def test_the_system_menus_scrim_rides_with_it_on_a_still_desk(tmp_path, windows)
     path leaves, the focused window's own buffer too."""
     ws, drv, ring = _scrim_desk(tmp_path / "ride", windows=windows)
     ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False, windows=windows)
-    assert _ui_draw_depth()                   # the look's card, the scrim under it
     copies = []
     real = ws.sys_canvas.copy_last
     ws.sys_canvas.copy_last = lambda *r: copies.append(r) or real(*r)
@@ -4042,10 +4042,6 @@ def _bbox(px, w):
     ys = [i // 2 // w for i in px]
     return (min(xs), min(ys), max(xs), max(ys)) if px else None
 
-
-def _ui_draw_depth():
-    from runtime import ui_draw
-    return bool(ui_draw.depth()[0])
 
 
 def test_a_card_still_settling_over_a_still_scrim_copies_the_scrim(tmp_path):

@@ -340,7 +340,7 @@ def _marks(ws):
     g._quiesce(ws)
     ws._dirty = True
     ws.frame(g._DT)
-    return ui_draw.marks(None, False)[2]
+    return ui_draw.marks(None, False)[1]
 
 
 def test_up_from_the_desk_shelf_reaches_its_buttons(tmp_path):

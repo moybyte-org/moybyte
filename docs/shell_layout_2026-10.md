@@ -92,8 +92,8 @@ memory and compositors); this doc cites, it does not copy.
   (`runtime/console_notices.py`, `_sysmenu_items`) are the cart's restart and
   delete, search, Home (off the home, in console mode: the way out of a
   surface with no back of its own, as the home key goes), Settings, About
-  and Reboot (under a theme with a depth, a
-  `ui.popover` of captioned `ui.menu`s, docs/look_2026-10.md step 25a). Other overlays (the toast,
+  and Reboot (a `ui.popover` of captioned `ui.menu`s, docs/look_2026-10.md
+  step 25a). Other overlays (the toast,
   the notice, About) disable the quiet stack and the damage description
   (`wm_windowed.py`: the quiet-frame path and `_hand_damage`); the popover
   rides them since step 6 (§8).
@@ -507,7 +507,7 @@ game's window its face -- copied once it is painted -- is put back over each
 game frame, one copy rather than a paint. The snapshots and the face are
 released by the fit check (§3) once no popover is live. A change outside the panel (a connect, a stepped
 setting, a row's action) marks the frame dirty as before. The system menu
-takes the same path; under a theme with a depth it is the look's card
+takes the same path; it is the look's card
 (docs/look_2026-10.md step 25a), whose rect -- the card and its shadow's
 reach, known before it draws (`SystemMenuUI.panel_rect`) -- a riding paint
 first restores from the snapshot, since the card's shadow blends. Its

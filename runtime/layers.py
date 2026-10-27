@@ -466,7 +466,7 @@ class _SysMenuLayer(Layer):
                     c = ws.layout.clock_hit()
                     if c[0] <= px < c[0] + c[2] and c[1] <= py < c[1] + c[3]:
                         ws.ach_ui._tap_clock()    # the clock's egg counts the tap that closes it
-            elif ws.menu_ui.looked():
+            else:
                 hit = ws.menu_ui.look_hit(px, py)
                 if hit is None:
                     m.close()             # outside dismisses
@@ -475,13 +475,6 @@ class _SysMenuLayer(Layer):
                     m.activate()
                     ws._dirty = True
                 ws.popover_touch()
-            elif m.row_at(px, py) is None:
-                m.close()                 # outside dismisses
-                ws.popover_touch()
-            else:
-                m.click(px, py)           # a row: move+select
-                ws.popover_touch()
-                ws._dirty = True
         gp = ws.input.game_pointer
         ws.input.game_pointer = (gp[0], gp[1], False, False)
         return True

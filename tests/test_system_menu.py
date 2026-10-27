@@ -29,8 +29,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 
@@ -66,17 +66,13 @@ def _labels(ws):
 
 
 def _row_center(ws, label):
-    """Pointer center of the named selectable row in the open dropdown. The panel
-    now anchors under the right-zone ≡ button (Stage 4), so take the live left edge
-    from panel_rect() rather than the flush-left _POPUP_X."""
-    from runtime import console as C
-    px = ws.sysmenu.panel_rect()[0]      # anchored left edge (right-side ≡, Stage 4)
-    cy = C._POPUP_Y
+    """Pointer center of the named selectable row in the open menu's card,
+    as the look's card laid it out (`SystemMenuUI.look_hit`'s boxes)."""
     for it in ws.sysmenu.items:
-        rh = C._POPUP_SEP_H if it[0] == "sep" else C._POPUP_ROW_H
         if it[0] == "item" and it[1] == label:
-            return (px + 10, cy + rh // 2)
-        cy += rh
+            box = ws.menu_ui._host.box(it[4])
+            assert box is not None, "the card has not drawn %r" % label
+            return (box[0] + box[2] // 2, box[1] + box[3] // 2)
     raise AssertionError("no row %r" % label)
 
 

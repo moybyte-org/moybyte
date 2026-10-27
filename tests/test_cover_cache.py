@@ -42,8 +42,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 
@@ -657,8 +657,8 @@ def test_a_card_without_a_cover_wears_its_generated_cover(tmp_path):
     cv = SystemCanvas(320, 240)
     cv.cls(th["desktop"])
     lw._draw_home_card(cv, it, (20, 20, w, h), False, None)
-    px = indices_of(cv)
+    px = indices_of(cv, strict=False)            # the card's corners anti-alias
     block, ink_i = ui_draw.initial_block("PIN")
-    assert px[(20 + 2) * 320 + 20 + 2] == block                   # the block
+    assert px[(20 + h // 2) * 320 + 20 + 2] == block              # the block
     ink = [(i % 320, i // 320) for i in range(len(px)) if px[i] == ink_i]
     assert ink and all(20 < x < 20 + w and 20 < y < 20 + h for x, y in ink)

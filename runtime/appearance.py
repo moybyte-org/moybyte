@@ -203,8 +203,8 @@ def role_fonts(name, variant, desk=False, own=()):
     carries. The files the theme's chain names; then `own`, the installed
     package's own (role, file) pairs; then, where the look sets a family
     (`fam`) and `own` names no `ui`, that family's face for each role of
-    `fontset.ROLES` and `fontset.CALC_ROLES`. A role it leaves out draws in
-    petme128."""
+    `fontset.ROLES` and `fontset.CALC_ROLES` no file named. A role it leaves
+    out draws in petme128."""
     files = {}
     for role, f in _ui_draw.theme_fonts(name):
         files[role] = (None, f)
@@ -213,6 +213,8 @@ def role_fonts(name, variant, desk=False, own=()):
     fam, steps, sizes = _fam(name, variant, desk)
     if fam is not None and "ui" not in dict(own):
         for role in tuple(_fontset.ROLES) + tuple(_fontset.CALC_ROLES):
+            if role in files:
+                continue
             face = _fontset.role_face(fam, role, desk, steps, sizes)
             if face is not None:
                 files[role] = (None, face)
@@ -308,7 +310,6 @@ class Appearance:
         # docstring. `set_theme` is its only author; this is the first write.
         self.live = None
         self._bars_moved = False
-        self._looked = False
         self._go_live(DEFAULT_THEME)
         # The wallpaper in force: a wallpaper cart's id, PICTURE, or None for
         # the theme's `desktop` fill -- the theme's (`_apply_wallpaper`),
@@ -1937,11 +1938,9 @@ class Appearance:
         `ws.theme_colors`; and its depth (`ui.use_depth`)."""
         live = live_colors(name, self.theme_variant)
         _ui_draw.use_depth(name, self.theme_variant == "light")
-        # The look's bars: their heights, and a system button that takes a
-        # tile's cell (layout_base.sys_tile), re-pack the bars.
+        # The look's bars: their heights re-pack the bars.
         d = _ui_draw.depth()
-        moved = _layout_base.place_bar_h(d[15], d[14]) or bool(d[0]) != self._looked
-        self._looked = bool(d[0])
+        moved = _layout_base.place_bar_h(d[14], d[13])
         if moved and getattr(self.ws, "bar_layer", None) is not None:
             self.ws.bar_layer.invalidate()
             self._bars_moved = True

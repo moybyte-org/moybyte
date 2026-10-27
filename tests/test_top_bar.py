@@ -16,9 +16,9 @@ from ws_helpers import build_ws as _build_ws, use_theme  # noqa: E402
 
 
 def _ws(tmp_path, **kw):
-    """A workstation on the lookless `night` fixture (tests/fixtures/themes/)
-    in its dark mode: the bar's mechanics are pinned on the pixel IconSheet
-    and the pixel bar; a test of a look sets its theme. Its bar's HH:MM is
+    """A workstation on the `night` fixture (tests/fixtures/themes/) in its
+    dark mode: a palette theme with no look, so the default's, flat; a test
+    of a look sets its theme. Its bar's HH:MM is
     pinned (`_pin_clock`): a test that counts strip renders across frames
     counts a real minute rollover too, and a loaded machine stretches the
     frames across one; a test of the clock sets `_clock_text` itself."""
@@ -102,13 +102,15 @@ def test_the_shells_icon_sheet_is_baked(tmp_path):
     assert ws.look.icon_sheet.to_hex() == _chrome._default_icon_sheet().to_hex()
 
 
-# -- the bar renders without error on both screens at 18px ------------------
+# -- the bar renders without error on both screens ----------------------------
 
-def test_bar_is_18px_on_both_screens(tmp_path):
+def test_the_bar_renders_on_both_screens(tmp_path):
+    """The handheld bar is the look's, `hhbar.h` rows (28: the default's,
+    which a theme with no look takes); the game canvas's strip keeps 18."""
     from runtime import console as C
     assert C._STATUS_H == 18
     ws = _ws(tmp_path)
-    assert ws.layout.status_h == 18
+    assert ws.layout.status_h == 28
     from runtime import host_app
     drv = host_app.ConsoleDriver(ws)
     # Launcher bar renders.

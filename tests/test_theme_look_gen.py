@@ -98,10 +98,11 @@ def _keys(ws, desk):
     return out
 
 
-# A role each cache's pixels show: the bar strips, the home's statics and
-# its retained frame, the window chrome (focused and behind), the windows'
-# content, the desk.
-_CASES = [(False, "bar"), (False, "panel"), (False, "focus"), (False, "surface"),
+# A role each cache's pixels show: the bar strips (the handheld's band is the
+# home's ground, `desktop`, under the default's look), the home's statics and
+# its retained frame (the current mark in `value`), the window chrome (focused
+# and behind), the windows' content, the desk.
+_CASES = [(False, "desktop"), (False, "panel"), (False, "value"), (False, "surface"),
           (True, "bar"), (True, "title_active"), (True, "title_inactive"),
           (True, "panel"), (True, "accent"), (True, "title_ink")]
 

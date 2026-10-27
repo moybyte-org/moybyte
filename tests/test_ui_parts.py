@@ -144,21 +144,12 @@ def test_a_group_is_a_caption_and_a_card_its_corners_rounded_by_the_depth():
     assert r.px(INSET + PAD + 40, top) != card, "the focused row is on its plate"
 
 
-def test_a_theme_without_a_depth_draws_a_square_ringed_card():
-    r = _group_page(theme=("night", "dark"))
-    r.frame()
-    r.frame()
-    top = r.out["rect"][1] + CAPTION
-    ring = r.px(INSET, top + 10)
-    assert r.px(INSET, top) == ring and r.px(319 - INSET, top + 3 * ROW - 1) == ring
-
-
 def test_the_cards_foot_keeps_the_last_rows_focus_mark_and_draws_no_second():
     last = _group_page(n=3, last_focus=True)
     for _ in range(3):
         ui_draw.marks(None, True)
         last.frame()
-    assert ui_draw.marks()[2] == 1, "one focus mark a frame"
+    assert ui_draw.marks()[1] == 1, "one focus mark a frame"
     top = last.out["rect"][1] + CAPTION
     y = top + 3 * ROW - 4                 # inside the foot's corner, on the edge bar
     bar = last.px(INSET + 1, y)
@@ -181,14 +172,14 @@ def test_touch_draws_no_focus_mark_and_a_key_brings_it_back(theme):
             r.frame()
             r.frame()
         ui_draw.input_kind("touch")
-        assert ui_draw.marks()[1], "the shell's word stays: focus draws"
+        assert ui_draw.marks()[0], "the shell's word stays: focus draws"
         touch = _group_page(n=3, last_focus=True, theme=theme)
         rest_t = _group_page(n=3, theme=theme)
         for r in (touch, rest_t):
             r.frame()
             ui_draw.marks(None, True)
             r.frame()
-            assert ui_draw.marks()[2] == 0, "no focus mark is drawn under touch"
+            assert ui_draw.marks()[1] == 0, "no focus mark is drawn under touch"
         assert bytes(touch.cv._buf) == bytes(rest_t.cv._buf), "the focused row draws as at rest"
         ui_draw.input_kind("pad")
         touch.frame()
@@ -1314,16 +1305,14 @@ def test_a_buttons_font_leaf_draws_its_label_in_the_key_face():
     """Moy's Night names `key` for Calc's normal keys and `op` for its
     operators (app_buttons.calc): a shell app's host passes its id, and its
     labels draw in those faces; any other page keeps the ui face, as does a
-    label the face does not cover and a theme that installs no face."""
+    label the face does not cover."""
     pages = {}
     for name, label, kind, app, theme in (
             ("ui", "7", "normal", None, ("moy", "dark")),
             ("key", "7", "normal", "calc", ("moy", "dark")),
             ("op", "7", "tonal", "calc", ("moy", "dark")),
             ("arrow", "\u2190", "normal", "calc", ("moy", "dark")),
-            ("arrow_ui", "\u2190", "normal", None, ("moy", "dark")),
-            ("pixel", "7", "normal", "calc", ("night", "dark")),
-            ("pixel_ui", "7", "normal", None, ("night", "dark"))):
+            ("arrow_ui", "\u2190", "normal", None, ("moy", "dark"))):
         r = pages[name] = _key_page(label, kind, app, theme)
         r.frame()
         r.frame()
@@ -1331,7 +1320,6 @@ def test_a_buttons_font_leaf_draws_its_label_in_the_key_face():
     assert tall["ui"] < tall["key"] <= tall["op"], tall
     assert bytes(pages["key"].cv._buf) != bytes(pages["op"].cv._buf)
     assert bytes(pages["arrow"].cv._buf) == bytes(pages["arrow_ui"].cv._buf)
-    assert bytes(pages["pixel"].cv._buf) == bytes(pages["pixel_ui"].cv._buf)
 
 
 def _field_page(text, mx=8):

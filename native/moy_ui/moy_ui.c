@@ -390,15 +390,15 @@ int moy_ui_button_style(int look, int kind, int state, int app, moy_ui_btn_style
         out->edge_w = (int8_t)((bw + 50) / 100);
     }
     // shape, radius and bevel where the theme is silent: a round key of the
-    // depth's key_r, bevelled under `edges: bevel` (a theme with no look: 0, square)
+    // depth's key_r, bevelled under `edges: bevel`
     const moy_ui_depth_t *dp = moy_ui_depth();
     int8_t v8 = btn_small(btn_leaf(u, app, bk, BL_SHAPE));
     out->shape = v8 >= 0 ? v8 : 0;
     v8 = btn_small(btn_leaf(u, app, bk, BL_R));
-    out->r = v8 >= 0 ? v8 : (int8_t)(dp->on ? dp->key_r : 0);
+    out->r = v8 >= 0 ? v8 : (int8_t)dp->key_r;
     out->font = btn_small(btn_leaf(u, app, bk, BL_FONT));
     v8 = btn_small(btn_leaf(u, app, bk, BL_BEVEL));
-    out->bevel = v8 >= 0 ? v8 : (int8_t)(dp->on && dp->edges == 1);
+    out->bevel = v8 >= 0 ? v8 : (int8_t)(dp->edges == 1);
     return MOY_UI_OK;
 }
 

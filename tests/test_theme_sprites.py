@@ -82,17 +82,22 @@ def _cell(part, state, sub=0):
 
 def _install(name="spr", **kw):
     """Install `name`: the `night` fixture's colours (a palette theme,
-    tests/fixtures/themes/) under `kw`; its dark colours."""
+    tests/fixtures/themes/) under `kw`, with a square look (the parts a
+    sheet paints are square ones) and the classic frame (the one a sheet's
+    window cells paint); its dark colours, its depth in force."""
     pkg = json.loads(fixture_theme("night"))
-    for k in ("surfaces", "text", "metrics", "frame"):
+    for k in ("surfaces", "text", "metrics"):
         pkg.pop(k, None)
     pkg["name"] = name
+    pkg["frame"] = {"style": "classic"}
+    pkg["look"] = {"key_r": 0, "card_r": 0, "win_r": 0}
     for v, roles in kw.pop("colors", {}).items():
         pkg["colors"][v].update(roles)
     pkg.update(kw)
     assert moy_ui.theme_install(json.dumps(pkg).encode())[0] == OK
     chrome.forget_themes()
     ui_draw.use_shape(name)
+    ui_draw.use_depth(name, False)
     return theme_colors(name, "dark")
 
 

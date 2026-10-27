@@ -755,7 +755,7 @@ def test_the_desk_window_is_titled_with_the_drawing(tmp_path):
     win = ws.wm._wins["artwork"]
     assert ws.wm._win_title(win).startswith("Paint")
     assert app.doc_title() in ws.wm._win_title(win)
-    assert ws.wm._chip_title(win, True) == "Paint"
+    assert ws.wm._chip_title(win) == "Paint"
 
 
 def _idle_paints(ws):

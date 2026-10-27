@@ -1209,7 +1209,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # the row builder + per-item actions; the drawing is the kernel's chrome.
         # toggle_sysmenu() + the sysmenu Popup + _about flag stay here (tested ws.
         # surface); the menu just delegates item-building/drawing to this.
-        self.menu_ui = SystemMenuUI(self, NAMES)
+        self.menu_ui = SystemMenuUI(self)
         # The pause menu over a fullscreen game (docs/look_2026-10.md step 25a):
         # Super holds the run and shows it; Esc or Super again gives it back.
         self.pause = PauseMenu(self)

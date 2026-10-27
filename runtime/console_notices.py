@@ -19,10 +19,10 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_diff)
 try:
-    from widgets import (Achievements, TOAST_MS, _POPUP_W,
+    from widgets import (Achievements, TOAST_MS,
                          DANGER_ICON as _DANGER_ICON)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import (Achievements, TOAST_MS, _POPUP_W,
+    from runtime.widgets import (Achievements, TOAST_MS,
                                  DANGER_ICON as _DANGER_ICON)
 try:
     import chrome_ops as _ch
@@ -51,8 +51,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 
 # The 2026-10 look's words and icons for the system menu's rows, by string id
-# (docs/look_2026-10.md step 25a); a theme without a depth draws the kernel's
-# chrome menu in the string table's capitals.
+# (docs/look_2026-10.md step 25a).
 _LOOK_TEXT = {"menu.cart": "Cart", "menu.delete_cart": "Delete cart",
               "menu.favourite_add": "Add favourite",
               "menu.favourite_remove": "Remove favourite", "menu.system": "System",
@@ -579,7 +578,7 @@ class PauseMenu:
             return None
         x, y, w, h = box
         dp = _ui_draw.depth()
-        r = (dp[9] + abs(dp[10]) + abs(dp[11]) + 2) * self.ws.layout.fs
+        r = (dp[8] + abs(dp[9]) + abs(dp[10]) + 2) * self.ws.layout.fs
         cv = self.ws.sys_canvas
         x0, y0 = max(0, x - r), max(0, y - r)
         x1, y1 = min(cv.w, x + w + r), min(cv.h, y + h + r)
@@ -808,14 +807,12 @@ def _peek(rows, cut, fade, rh):
 
 class SystemMenuUI:
     """The ≡ system menu's rows and their actions (#52). Its drawing is the
-    look's card (`_draw_look`), else the kernel's one body (moy_chrome_menu)
-    replayed on the SYSTEM canvas; About is about_ui's card. The `sysmenu` Popup, the `_about` flag,
+    look's card (`_draw_look`); About is about_ui's card. The `sysmenu` Popup, the `_about` flag,
     `reboot_hook` and `toggle_sysmenu()` stay on the Workstation (its tested
     surface); the privileged verbs (REBOOT, DELETE) are reached through it."""
 
-    def __init__(self, ws, names):
+    def __init__(self, ws):
         self.ws = ws
-        self._NAMES = names
         self._host = None           # the look's card: its verbs' context
         self._card_at = (0, 0)      # where a card's menu hangs (`open_card`)
         self._card_proj = False     # a card's menu hangs from PROJECTS' hero
@@ -915,7 +912,6 @@ class SystemMenuUI:
         m.fs = ws.look.effective_font_scale()
         m.cs = ws.layout.cs
         m.w = 0
-        cv = ws.sys_canvas
         # from the desk's PROJECTS window the menu hangs from its hero's
         # cover, below or above it and inside the window (`_menu_cell`,
         # `surface`), never over the cover it acts on
@@ -924,18 +920,8 @@ class SystemMenuUI:
         if self._card_proj:
             hx, hy, hw, hh = proj[2]
             at = (hx + hw // 2, hy + hh)
-        x, y = at
-        # the Popup's own panel (a theme with no depth): under the point,
-        # over it where the glass has no room below
-        pw = _POPUP_W * m.fs
-        m.anchor_x = max(0, min(x - pw // 2, cv.w - pw))
-        m.anchor_y = y
-        m.up = False
-        self._card_at = (x, y)
+        self._card_at = at
         m.show(rows, widget="card")
-        x0, y0, w0, h0 = m.panel_rect()
-        if y0 + h0 > cv.h:
-            m.up = True
         ws.popover_touch()
         return True
 
@@ -979,41 +965,30 @@ class SystemMenuUI:
         self.ws.go_home()                 # safe stub when no reboot hook is wired
 
     def _draw_sysmenu(self):
-        """The popover: the ≡ dropdown's rows -- a panel flush against the
-        bar, one row per item, the selected one on the accent fill, headers
-        dim, a 1px line between groups; `fs` (#39/#58) scales the text and
-        `cs` (#203) the rows -- or a component in the same dialog shell."""
+        """The popover: the menu's rows as the look's card (`_draw_look`), or
+        a component in the system's flat card."""
         ws = self.ws
         m = ws.sysmenu
         if self.looked():
             self._draw_look()
             return
-        x, y, w, h = m.panel_rect()
-        if m.comp is not None:
-            # A component's popover: the system's flat card, its drop inside
-            # the panel's rect, the component's verbs in it; on a handheld
-            # home the hint strip says its keys
-            cv = ws.sys_canvas
-            th = ws.theme_colors
-            desk = _desk_class()
-            drop = 2 * (1 if desk else ws.layout.fs)
-            _ui_draw.modal(cv, th, (x, y, w, h - drop), desk)
-            m.comp.draw(cv, (x, y, w, h - drop))
-            strip = self.about._strip()
-            if strip is not None:
-                cv.rect(strip[0], strip[1], strip[2], strip[3], th["panel"])
-                _ui.at(strip[0], strip[1], strip[2], strip[3])
-                _ui.hints(m.comp.keys())
+        if m.comp is None:
             return
-        rows = []
-        for it in m.items:
-            kind = it[0]
-            if kind == "sep":
-                rows.append((2, ""))
-            else:
-                rows.append((1 if kind == "header" else 0, it[1]))
-        mp = _ch.chrome_inks(ws.theme_colors, self._NAMES)
-        _ch.replay(mp.chrome_menu(rows, m.sel, x, y, w, h, m.fs, m.cs), ws.sys_canvas, ws)
+        # A component's popover: the system's flat card, its drop inside the
+        # panel's rect, the component's verbs in it; on a handheld home the
+        # hint strip says its keys
+        x, y, w, h = m.panel_rect()
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        desk = _desk_class()
+        drop = 2 * (1 if desk else ws.layout.fs)
+        _ui_draw.modal(cv, th, (x, y, w, h - drop), desk)
+        m.comp.draw(cv, (x, y, w, h - drop))
+        strip = self.about._strip()
+        if strip is not None:
+            cv.rect(strip[0], strip[1], strip[2], strip[3], th["panel"])
+            _ui.at(strip[0], strip[1], strip[2], strip[3])
+            _ui.hints(m.comp.keys())
 
     # -- the 2026-10 look's card (docs/look_2026-10.md step 25a) ----------------
 
@@ -1177,9 +1152,10 @@ class SystemMenuUI:
         return (x, y, w, h)
 
     def looked(self):
-        """The menu's rows show as the look's card: a theme with a depth."""
+        """The menu's rows show as the look's card: the menu is open on
+        rows, not a component."""
         m = self.ws.sysmenu
-        return m.open and m.comp is None and bool(_ui_draw.depth()[0])
+        return m.open and m.comp is None
 
     def _look_w(self, desk):
         return 220 if desk else 150 * self.ws.layout.fs
@@ -1248,7 +1224,7 @@ class SystemMenuUI:
         x, y, w, h = self.look_card()
         dp = _ui_draw.depth()
         fs = self.ws.layout.fs
-        r = (dp[9] + abs(dp[10]) + abs(dp[11]) + 2) * fs
+        r = (dp[8] + abs(dp[9]) + abs(dp[10]) + 2) * fs
         cv = self.ws.sys_canvas
         x0, y0 = max(0, x - r), max(0, y - r)
         x1, y1 = min(cv.w, x + w + r), min(cv.h, y + h + r)

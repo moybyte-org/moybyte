@@ -2284,7 +2284,7 @@ static void derive(int32_t row[MOY_THEME_ROLES], int at) {
 // chain ends at the default seed; with `implicit` 0 it ends before it unless
 // the default is the theme itself or a package names it in `inherits`: the
 // look (its fields and backdrops) is lent only by name, so a package with
-// none of its own draws lookless, whatever the default's is.
+// none of its own takes the default's flat (look_flat) and no backdrop.
 typedef void (*apply_fn)(const moy_theme_pkg_t *pkg, void *ctx);
 
 static int chain_walk(const char *name, size_t n, apply_fn apply, void *ctx, int implicit) {
@@ -2868,41 +2868,34 @@ static int plate_reads(const char *name, size_t n, int variant, const int32_t *r
         free(lk);
         return 1;
     }
-    moy_theme_look(name, n, variant, 0, lk);
-    int any = 0;
-    for (int i = 0; i < MOY_THEME_LEAVES && !any; i++) {
-        any = lk->v[i] != MOY_THEME_NONE;
-    }
     int ok = 1;
-    if (any) {
-        moy_theme_look(name, n, variant, 1, lk);
-        int32_t st = lk->v[ls], cr = lk->v[lc], al = lk->v[la], fr = lk->v[lf];
-        if (st == 1 && cr >= 0 && cr < MOY_THEME_ROLES && fr >= 0 && fr < MOY_THEME_ROLES
-            && al >= 0 && row[MOY_UI_T_SURFACE] >= 0 && row[cr] >= 0 && row[fr] >= 0) {
-            uint16_t g = moy_theme_rgb565(row[MOY_UI_T_SURFACE]), c = moy_theme_rgb565(row[cr]);
-            int k = al > 100 ? 100 : al;
-            int gr = g >> 11, gg = (g >> 5) & 63, gb = g & 31;
-            int cr5 = c >> 11, cg = (c >> 5) & 63, cb = c & 31;
-            uint16_t p = (uint16_t)(((gr + (cr5 - gr) * k / 100) << 11)
-                                    | ((gg + (cg - gg) * k / 100) << 5) | (gb + (cb - gb) * k / 100));
-            int32_t edge = row[fr];
-            if (low >= 0 && loc >= 0 && lk->v[low] > 0
-                && lk->v[loc] >= 0) {
-                edge = lk->v[loc];
-            }
-            int32_t lp = lum565(p), la2 = moy_theme_lum_of(edge);
-            int32_t hi = lp > la2 ? lp : la2, lo = lp > la2 ? la2 : lp;
-            ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500)
-                 || (lfs >= 0 && lk->v[lfs] == MOY_UI_FOCUS_INVERT);
-            // and the ink the current content takes on it (`current.ink`)
-            int li = look_leaf("current.ink");
-            int32_t ci = li >= 0 ? lk->v[li] : -1;
-            if (ok && ci >= 0 && ci < MOY_THEME_ROLES && row[ci] >= 0) {
-                int32_t lq = moy_theme_lum_of(row[ci]);
-                hi = lp > lq ? lp : lq;
-                lo = lp > lq ? lq : lp;
-                ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
-            }
+    moy_theme_look(name, n, variant, 1, lk);
+    int32_t st = lk->v[ls], cr = lk->v[lc], al = lk->v[la], fr = lk->v[lf];
+    if (st == 1 && cr >= 0 && cr < MOY_THEME_ROLES && fr >= 0 && fr < MOY_THEME_ROLES
+        && al >= 0 && row[MOY_UI_T_SURFACE] >= 0 && row[cr] >= 0 && row[fr] >= 0) {
+        uint16_t g = moy_theme_rgb565(row[MOY_UI_T_SURFACE]), c = moy_theme_rgb565(row[cr]);
+        int k = al > 100 ? 100 : al;
+        int gr = g >> 11, gg = (g >> 5) & 63, gb = g & 31;
+        int cr5 = c >> 11, cg = (c >> 5) & 63, cb = c & 31;
+        uint16_t p = (uint16_t)(((gr + (cr5 - gr) * k / 100) << 11)
+                                | ((gg + (cg - gg) * k / 100) << 5) | (gb + (cb - gb) * k / 100));
+        int32_t edge = row[fr];
+        if (low >= 0 && loc >= 0 && lk->v[low] > 0
+            && lk->v[loc] >= 0) {
+            edge = lk->v[loc];
+        }
+        int32_t lp = lum565(p), la2 = moy_theme_lum_of(edge);
+        int32_t hi = lp > la2 ? lp : la2, lo = lp > la2 ? la2 : lp;
+        ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500)
+             || (lfs >= 0 && lk->v[lfs] == MOY_UI_FOCUS_INVERT);
+        // and the ink the current content takes on it (`current.ink`)
+        int li = look_leaf("current.ink");
+        int32_t ci = li >= 0 ? lk->v[li] : -1;
+        if (ok && ci >= 0 && ci < MOY_THEME_ROLES && row[ci] >= 0) {
+            int32_t lq = moy_theme_lum_of(row[ci]);
+            hi = lp > lq ? lp : lq;
+            lo = lp > lq ? lq : lp;
+            ok = (hi + 500) * 10 >= MOY_THEME_CONTRAST * (lo + 500);
         }
     }
     free(lk);
@@ -3062,14 +3055,64 @@ static void apply_look(const moy_theme_pkg_t *pkg, void *ctx) {
     }
 }
 
-static int resolve_look(const char *name, size_t n, int variant, int defaults,
-                        moy_theme_look_t *out) {
+static void look_clear(moy_theme_look_t *out) {
     memset(out, 0, sizeof(*out));
     for (int i = 0; i < MOY_THEME_LEAVES; i++) {
         out->v[i] = MOY_THEME_NONE;
     }
+}
+
+static int look_silent(const moy_theme_look_t *lk) {
+    if (lk->n_paints || lk->n_tiles || lk->n_appbtn) {
+        return 0;
+    }
+    for (int i = 0; i < MOY_THEME_LEAVES; i++) {
+        if (lk->v[i] != MOY_THEME_NONE) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int colour_leaf(const moy_theme_leaf_t *l) {
+    return l->kind == MOY_THEME_LK_COLOUR || l->kind == MOY_THEME_LK_PAINT;
+}
+
+// A theme whose chain sets no look (a colours-only package) takes the
+// default's geometry and marks, flat: no shadow, and every colour and paint
+// silent, so the renderer derives each from the theme's own roles. Its
+// backdrop is none (moy_theme_backdrop walks its own chain).
+static int look_flat(int variant, moy_theme_look_t *out) {
+    const char *def = moy_theme_seed_names[0];
+    look_ctx_t c = {out, variant == MOY_THEME_LIGHT ? 2 : 1};
+    look_clear(out);
+    int rc = chain_walk(def, strlen(def), apply_look, &c, 0);
+    for (int i = 0; i < MOY_THEME_LEAVES; i++) {
+        if (colour_leaf(&moy_theme_leaves[i])) {
+            out->v[i] = MOY_THEME_NONE;
+        }
+    }
+    out->v[look_leaf("shadow.kind")] = MOY_THEME_NONE;
+    out->n_paints = 0;
+    out->n_tiles = 0;
+    for (int i = 0; i < out->n_appbtn; i++) {
+        for (int k = 0; k < MOY_THEME_BTN_LEAVES; k++) {
+            if (colour_leaf(&moy_theme_leaves[MOY_THEME_BTN_LEAF0 + k])) {
+                out->appbtn[i].v[k] = MOY_THEME_NONE;
+            }
+        }
+    }
+    return rc;
+}
+
+static int resolve_look(const char *name, size_t n, int variant, int defaults,
+                        moy_theme_look_t *out) {
+    look_clear(out);
     look_ctx_t c = {out, variant == MOY_THEME_LIGHT ? 2 : 1};
     int rc = chain_walk(name, n, apply_look, &c, 0);
+    if (rc == MOY_THEME_OK && look_silent(out)) {
+        rc = look_flat(variant, out);
+    }
     for (int i = 0; defaults && variant == MOY_THEME_DARK && i < MOY_THEME_DARK_DEFS; i++) {
         int32_t *v = &out->v[moy_theme_dark_defs[i][0]];
         if (*v == MOY_THEME_NONE) {

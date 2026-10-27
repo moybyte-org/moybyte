@@ -19,12 +19,12 @@ from runtime import layout_base, shell_layout
 from runtime.layout_base import DEFAULT_BARS, LayoutBase
 from test_content_rect import _inside, _layouts, _open_every_surface, _rect_map, _settle, _tap
 from ws_helpers import build_desktop_ws, build_ws
-from ws_helpers import boot_on_fixture, fixture_theme
+from ws_helpers import boot_on_fixture, fixture_theme, use_theme
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 DT = 1.0 / 30.0
@@ -135,7 +135,11 @@ def test_every_layout_lays_out_inside_what_four_bars_leave(tmp_path):
     for name, lay in _layouts(ws):
         where = "app" if not isinstance(lay, LayoutBase) else "menu"
         assert (lay.cx, lay.cy, lay.cw, lay.ch) == bar.content_rect(where), name
-    assert bar.content_rect("menu") == (20, 18, 480 - 40, 320 - 36)
+    # the look's bar heights size the four (Moy's flat look, the night
+    # fixture's): the content rect is what their rects leave
+    (t, b, lf, rt) = bar.bar_rects("menu")
+    assert t[1] == 0 and b[1] + b[3] == 320 and lf[0] == 0 and rt[0] + rt[2] == 480
+    assert bar.content_rect("menu") == (lf[2], t[3], 480 - lf[2] - rt[2], 320 - t[3] - b[3])
     four = _rect_map(ws)
     bad, checked = [], 0
     for key, (r, content) in sorted(top.items()):
@@ -211,10 +215,13 @@ def test_every_bar_is_a_strip_the_rotated_compositor_presents(tmp_path):
         def set_strips(self, rects):
             got.append(rects)
     ws.bar_layer.publish_strips(Root())
-    assert got[-1] == [(0, 0, 1280, 36)]
+    top = got[-1]
+    assert len(top) == 1 and top[0][:3] == (0, 0, 1280)
     _pick(ws, (_bar("top", 18, ["zone"], ["chips"], ["clock", "close", "menu"]),
                _bar("left", 24, ["wifi", "battery"])))
-    assert got[-1] == [(0, 0, 1280, 36), (0, 36, 48, 800 - 36)]
+    h = got[-1][0][3]
+    assert got[-1][0] == (0, 0, 1280, h) and got[-1][1][:2] == (0, h)
+    assert got[-1][1][3] == 800 - h and got[-1][1][2] > 0
 
 
 # -- the desk ------------------------------------------------------------------
@@ -226,7 +233,8 @@ def test_the_desk_keeps_icons_windows_and_chips_off_a_side_bar(tmp_path):
     ws.open_desk()
     wm = ws.wm
     dx, dy, dw, dh = wm._desk_rect()
-    assert (dx, dy) == (48, 36)
+    (top, left), = [ws.bar_layer.bar_rects("desk")]
+    assert (dx, dy) == (left[2], top[3])
     for _key, box, pill, _label, _cart in wm._backdrop_layer._icon_rects():
         assert _inside(box, (dx, dy, dw, dh)) and _inside(pill, (dx, dy, dw, dh))
     ws.open_app(ws._apps_by_id["calc"])
@@ -288,8 +296,8 @@ def test_moys_bar_is_the_moy_button_then_status(tmp_path, desk):
     """Moy's layout: the Moy button first, its tile's cell, then the chips
     (desk) and the zone; Wi-Fi, battery and the clock at the right, no X
     (docs/look_2026-10.md step 27a);
-    the handheld bar 28 rows (`hhbar.h`), the desk's 40, and back to 18 on a
-    theme with no look."""
+    the handheld bar 28 rows (`hhbar.h`), the desk's 40, and the same on a
+    theme with no look, which takes Moy's flat."""
     ws = _looked_ws(tmp_path, desk=desk)
     L = ws.layout
     assert L.status_h == (40 if desk else 28)
@@ -300,9 +308,9 @@ def test_moys_bar_is_the_moy_button_then_status(tmp_path, desk):
     assert menu[0] == 2 * L.cs and menu[2] == layout_base.sys_tile(L.status_h)[2]
     tile = ws.bar_layer.sys_tile(menu, L.bars[0][1], False)
     assert tile[2:] == ((36, 34) if desk else (22, 20))
-    ws.look.set_theme("night", persist=False)
-    assert ws.layout.status_h == (40 if desk else 18)
-    assert ws.layout.bars[0][3][0][0] == "zone"
+    use_theme(ws, "mint", "light")
+    assert ws.layout.status_h == (40 if desk else 28)
+    assert _names_of(ws.layout.bars)[0][0] == "menu"
 
 
 def _px(cv, x, y):

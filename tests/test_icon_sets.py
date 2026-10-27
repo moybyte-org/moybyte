@@ -12,8 +12,8 @@ from ws_helpers import build_ws as _build_ws, install_theme, use_theme  # noqa: 
 
 
 def _ws(tmp_path, **kw):
-    """A workstation on the lookless `night` fixture (tests/fixtures/themes/)
-    in its dark mode; a test of a look sets its theme."""
+    """A workstation on the `night` fixture (tests/fixtures/themes/) in its
+    dark mode, a palette theme with no look; a test of a look sets its theme."""
     ws = _build_ws(tmp_path, **kw)
     use_theme(ws, "night", "dark")
     return ws
@@ -184,11 +184,24 @@ def test_a_bad_swap_is_no_swap():
 
 
 def test_icons_names_a_set_and_a_theme_without_it_keeps_its_sheet():
+    """A look names its set; a theme with no look takes the default's (Moy's
+    smooth set), and a look that names none keeps the shell's sheet."""
     for name in ("moy", "contrast"):
         assert iconsets.spec(chrome.live_colors(name, "light").look) == ("smooth", "default", None)
     for name in ("night", "platinum", "win95"):
         install_theme(name)
-        assert iconsets.spec(chrome.live_colors(name, "dark").look) is None, name
+        assert iconsets.spec(chrome.live_colors(name, "dark").look) == \
+            ("smooth", "default", None), name
+    _square_look()
+    assert iconsets.spec(chrome.live_colors("sq", "dark").look) is None
+
+
+def _square_look():
+    """A package whose look names no icon set, in the install slot."""
+    import moy_ui
+    assert moy_ui.theme_install(json.dumps(
+        {"format": 2, "name": "sq", "look": {"win_r": 4}}).encode())[0] == 0
+    chrome.forget_themes()
 
 
 def _pixels(cv, rect):
@@ -223,7 +236,8 @@ def test_the_bar_draws_the_themes_set(tmp_path):
     cv.rect(0, 0, 40, 20, 0)
     iconsets.draw(cv, "wifi", (0, 0, 16, 16), 7, ("smooth", "default", None))
     assert smooth == _pixels(cv, (0, 0, 16, 16))
-    use_theme(ws, "night", "dark")
+    _square_look()
+    ws.look.set_theme("sq", persist=False, variant="dark")
     assert ws.icon_spec() is None
     assert not ws.draw_icon("wifi", (0, 0, 16, 16), 7, cv)
 

@@ -3,14 +3,13 @@
 // list: [(op, c, scale, x, y, w, h, text)], which the shell replays through
 // its canvas (runtime/ui.py's replay).
 //
-//   chrome_inks(inks, bar_light, rings)
+//   chrome_inks(inks, bar_light)
 //   chrome_panel(cw, ch, notice, title, text)
 //   chrome_say_title(say, line), chrome_crash_title(text, line|None),
 //   chrome_fit_text(title, total, block, free, largest),
 //   chrome_newer_text(missing): the panels' words (#143)
 //   chrome_strip_band(cw, bar_h,
 //   light), chrome_strip_cell(kind, rect, cs, dy, s|None, across)
-//   chrome_menu(rows, sel, x, y, w, h, fs, cs)
 //   chrome_notice(title, sub, ok, until_ms),
 //   chrome_toast_arm(head, name, icon, secret, until_ms): the banners a run the
 //   kernel drives shows over its frames
@@ -58,7 +57,7 @@ static const char *s_of(mp_obj_t o) {
     return o == mp_const_none ? "" : mp_obj_str_get_str(o);
 }
 
-static mp_obj_t ch_inks(mp_obj_t inks, mp_obj_t light, mp_obj_t rings) {
+static mp_obj_t ch_inks(mp_obj_t inks, mp_obj_t light) {
     int16_t v[MOY_INKS];
     size_t n;
     mp_obj_t *items;
@@ -66,10 +65,10 @@ static mp_obj_t ch_inks(mp_obj_t inks, mp_obj_t light, mp_obj_t rings) {
     for (size_t i = 0; i < MOY_INKS; i++) {
         v[i] = (int16_t)(i < n && items[i] != mp_const_none ? mp_obj_get_int(items[i]) : -1);
     }
-    moy_chrome_set_inks(v, mp_obj_is_true(light), mp_obj_get_int(rings));
+    moy_chrome_set_inks(v, mp_obj_is_true(light));
     return mp_const_none;
 }
-MP_DEFINE_CONST_FUN_OBJ_3(moy_chrome_inks_obj, ch_inks);
+MP_DEFINE_CONST_FUN_OBJ_2(moy_chrome_inks_obj, ch_inks);
 
 static mp_obj_t ch_panel(size_t n, const mp_obj_t *a) {
     (void)n;
@@ -135,31 +134,6 @@ static mp_obj_t ch_cell(size_t n, const mp_obj_t *a) {
     return ops(l);
 }
 MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_cell_obj, 6, 6, ch_cell);
-
-static mp_obj_t ch_menu(size_t n, const mp_obj_t *a) {
-    (void)n;
-    size_t rn;
-    mp_obj_t *rows;
-    mp_obj_get_array(a[0], &rn, &rows);
-    if (rn > MOY_MENU_ROWS) {
-        rn = MOY_MENU_ROWS;
-    }
-    uint8_t kind[MOY_MENU_ROWS];
-    const char *label[MOY_MENU_ROWS];
-    for (size_t i = 0; i < rn; i++) {
-        size_t k;
-        mp_obj_t *it;
-        mp_obj_get_array(rows[i], &k, &it);
-        kind[i] = (uint8_t)(k > 0 ? mp_obj_get_int(it[0]) : 0);
-        label[i] = k > 1 ? s_of(it[1]) : "";
-    }
-    moy_chrome_list_t *l = list();
-    moy_chrome_menu(l, kind, label, (int)rn, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
-                    mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
-                    mp_obj_get_int(a[6]), mp_obj_get_int(a[7]));
-    return ops(l);
-}
-MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_chrome_menu_obj, 8, 8, ch_menu);
 
 static mp_obj_t ch_notice(size_t n, const mp_obj_t *a) {
     (void)n;

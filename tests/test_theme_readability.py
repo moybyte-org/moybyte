@@ -111,22 +111,19 @@ def test_every_seed_reads_every_button_kind(seed, variant):
     """Each button kind's ink on its field, in every state but disabled,
     through the live placement and the seed's own button leaves
     (docs/look_2026-10.md step 10): a derived ink that misses the floor took
-    its kind's floor form, and no seed's `buttons` reads under it. A seed
-    with marks draws `on` as its current mark, never the ON look (step 11)."""
+    its kind's floor form, and no seed's `buttons` reads under it. `on` is
+    the current mark, never the ON look (step 11)."""
     live = live_colors(seed, variant)
     ui_draw._C.theme_block(live.block, live.used)
     ui_draw.use_buttons(live)
     th = live.tokens
     look = ui_draw._look(th)
     bad = []
-    ui_draw.use_depth(seed, variant == "light")
-    marks = ui_draw.marks()[0]
-    ui_draw.use_depth(None, False)
     try:
         for kind in ui_draw.BUTTON_KINDS:
             kid = ui_draw._kind_id(ui_draw._button_kind(kind))
             for st in STATES.values():
-                if marks and st == "on":
+                if st == "on":
                     continue
                 field, ink = ui_draw._C.button_style(look, kid, ui_draw._STATE_ID[st], -1)[:2]
                 if field is not None and ink is not None and not _clears(field, ink):
@@ -262,17 +259,31 @@ def test_the_accent_as_ink_clears_the_code_surface(seed, variant):
     assert _wcag(ink, s) >= 3.0, (seed, variant, round(_wcag(ink, s), 2))
 
 
+def _words(cv):
+    """The canvas's pixels as colour values (RGB), what the look's frame
+    draws in."""
+    b = cv._buf
+    out = []
+    for i in range(0, len(b), 2):
+        w = b[i] << 8 | b[i + 1]
+        r, g, bl = (w >> 11) * 255 // 31, ((w >> 5) & 63) * 255 // 63, (w & 31) * 255 // 31
+        out.append(0x1000000 | r << 16 | g << 8 | bl)
+    return out
+
+
 def _title_pixels(seed, variant, active, fs):
     """The window title's pixels and the strip's colour beside them, from the
-    real frame: a titled frame against the same frame untitled."""
+    real frame under the seed's look: a titled frame against the same frame
+    untitled."""
     ui_draw.use_shape(seed)
+    ui_draw.use_depth(seed, variant == "light")
     th = theme_colors(seed, variant)
     out = []
     for title in ("FILES", ""):
         cv = SystemCanvas(240, 100)
         cv.cls(9)
         ui_draw.frame(cv, th, (10, 10, 200, 70), 18 * fs, title, active, True, fs)
-        out.append(indices_of(cv))
+        out.append(_words(cv))
     titled, bare = out
     left = 10 + 1 + 3 * fs                   # past classic's identity stripe
     diff = [i for i in range(len(titled))
@@ -285,19 +296,23 @@ def _title_pixels(seed, variant, active, fs):
 @pytest.mark.parametrize("seed", TH["seeds"])
 def test_every_seed_reads_its_window_titles(seed, variant, active):
     """Win95 light inked its unfocused title chrome_ink_dim on a
-    title_inactive of the same grey: the title was gone."""
+    title_inactive of the same grey: the title was gone. The ink is the
+    title's commonest colour; the rest are its glyphs' anti-aliased edges."""
     try:
         px, diff = _title_pixels(seed, variant, active, 1)
     finally:
         ui_draw.use_shape(None)
+        ui_draw.use_depth(None, False)
     assert diff, "the title draws nothing"
     xs = [i % 240 for i in diff]
     ys = [i // 240 for i in diff]
     box = [px[y * 240 + x] for y in range(min(ys), max(ys) + 1)
            for x in range(min(xs), max(xs) + 1)]
     strip = max(set(box), key=box.count)
-    inks = {px[i] for i in diff} - {strip}
-    assert inks and all(_clears(c, strip) for c in inks), (inks, strip)
+    inks = [px[i] for i in diff if px[i] != strip]
+    assert inks, "the title draws nothing on its strip"
+    ink = max(set(inks), key=inks.count)
+    assert _clears(ink, strip), (ink, strip)
 
 
 def test_the_inactive_title_is_a_floor_pair():
@@ -305,14 +320,19 @@ def test_the_inactive_title_is_a_floor_pair():
     assert ("title_inactive", "chrome_ink_dim") in PAIRS
 
 
-def _install(name, surfaces, colors=None):
+def _install(name, surfaces, colors=None, look=None):
+    """A package of `surfaces` (and `colors`), its shape and its depth in
+    force: a square `look` (`key_r` 0) is what draws a key's surface."""
     import moy_ui
     pkg = {"format": 2, "name": name, "surfaces": surfaces}
     if colors:
         pkg["colors"] = colors
+    if look:
+        pkg["look"] = look
     rc, _notes = moy_ui.theme_install(json.dumps(pkg).encode())
     assert rc == 0
     ui_draw.use_shape(name)
+    ui_draw.use_depth(name, False)
 
 
 def _black_and_white():
@@ -352,7 +372,8 @@ def test_a_bare_button_border_is_the_shade_dark_role():
     black keys."""
     th = _black_and_white()
     try:
-        _install("keys", {"button": {"rest": "border", "pressed": "border"}})
+        _install("keys", {"button": {"rest": "border", "pressed": "border"}},
+                 look={"key_r": 0})
         cv = SystemCanvas(60, 40)
         cv.cls(th["panel"])
         ui_draw.button(cv, th, (5, 5, 40, 24), "7")

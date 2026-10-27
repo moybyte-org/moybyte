@@ -127,6 +127,11 @@ THEME_STEPS = {"moy-dark": ("26a",), "moy": (), "blocks": ("26b",),
                "luna": ("29",), "coast": ("29",), "pico": ("29",),
                "bench": ("29",), "adw": ("29",)}
 
+# The themes a target draws that are no seed: a package a kid installed,
+# put in the loader's install slot for its scene (Mint, a colours-only
+# package: a theme with no look).
+STORE_THEMES = {"mint": os.path.join(ROOT, "tests", "fixtures", "themes", "mint.moy")}
+
 # The surfaces of the shell, as `tests/test_shell_goldens.py` configures them.
 HANDHELD = "tdeck_320x240_fs1_dark"
 DESK = "p4_1024x600_cs2_fs1_windowed"
@@ -715,6 +720,9 @@ def _arranged(arrangement, console=False):
 
 # The scenes of step 33 the shell draws: screen -> (config, set up).
 OLD_LOOK = {
+    "handheld_home-fallback": (HANDHELD, lambda g, ws: _home(g, ws)),
+    "handheld_settings-fallback": (HANDHELD, _settings_about_at(HANDHELD)),
+    "desktop_fallback": (DESK, lambda g, ws: _desk(g, ws)),
     "handheld_theme-door": (HANDHELD, _theme_door),
     "handheld_theme-config": (HANDHELD, _theme("config")),
     "handheld_theme-sprites": (HANDHELD, _theme("sprites")),
@@ -1855,8 +1863,13 @@ def render(g, config, theme, mode, setup, wallpaper, inputs=None):
     the render's `checks`, its `audit` pairs and its `bars` (clock cell and
     packing)."""
     import moy_ui
-    from runtime import ui_draw
+    from runtime import chrome, ui_draw
     moy_ui.theme_uninstall()
+    if theme in STORE_THEMES:
+        with open(os.path.join(STORE_THEMES[theme], "theme.json"), "rb") as f:
+            rc, _notes = moy_ui.theme_install(f.read())
+        assert rc == 0, (theme, rc)
+        chrome.forget_themes()
     tmp = tempfile.mkdtemp(prefix="look_shots_")
     try:
         cfg = dict(g.CONFIGS[config], variant=mode)
@@ -1905,7 +1918,7 @@ def themes_held(g):
     try:
         moy_ui.theme_uninstall()
         ws = g._build(dict(g.CONFIGS[HANDHELD]), os.path.join(tmp, "carts"))
-        return set(ws.look.theme_names())
+        return set(ws.look.theme_names()) | set(STORE_THEMES)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -2548,7 +2561,7 @@ class Probe:
                     got.append((rec[0] + o[0], rec[1] + o[1]) + tuple(rec[2:]))
             if got:
                 self.last[k] = got
-        self.marks = max(self.marks, ui_draw.marks(None, False)[2])
+        self.marks = max(self.marks, ui_draw.marks(None, False)[1])
 
     def install(self, ws):
         """Wrap the verbs the probes read; `remove` puts them back."""
@@ -2687,7 +2700,7 @@ def checks(ws, probe, img):
     grid = getattr(ws, "launcher", None)
     menu = ws.sysmenu.open or ws.pause.open or ws.confirm.open
     if (ws.screen == "launcher" and layout_base.metric_class() == layout_base.HANDHELD
-            and hasattr(grid, "_geom") and not menu and ui_draw.marks_on()):
+            and hasattr(grid, "_geom") and not menu):
         geom = grid._geom()
         if geom[1] is not None and geom[0] is None:
             top = geom[7] - geom[2] - ui_draw.mark_reach("card")
@@ -3154,7 +3167,7 @@ def _mark_pairs(ws, img, box, view, kind=None):
     the focus colour's run at the row's leading edge spans the row's height
     as it shows, a field's row included."""
     from runtime import ui_draw
-    if not ui_draw.marks_on() or ui_draw.input_kind() == "touch" or kind == "card":
+    if ui_draw.input_kind() == "touch" or kind == "card":
         return []           # touch shows no focus; a card wears a card's mark
     r = _clip(box, view) if view is not None else box
     if r is None:

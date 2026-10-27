@@ -251,7 +251,8 @@ def _live(name, variant="dark"):
 
 def _field(th, kind, app=None, state=None):
     """The field and ink a button of `kind` draws at rest, read off its pixels:
-    the corner inside the edge, and the most common other colour."""
+    inside the edge at its left, half way down, past the look's rounded
+    corner."""
     from runtime import ui_draw
     from runtime.host_canvas import make_system_canvas
     cv = make_system_canvas(80, 24)
@@ -259,7 +260,7 @@ def _field(th, kind, app=None, state=None):
         cv.theme_block(_BLOCK[0])
     cv.cls(1)
     ui_draw.button(cv, th, (0, 0, 80, 24), "MMMM", kind=kind, app=app, state=state)
-    i = (3 * cv.w + 3) * 2
+    i = (12 * cv.w + 3) * 2
     return cv._buf[i] << 8 | cv._buf[i + 1]          # the wire order
 
 
@@ -406,6 +407,7 @@ NONE = -2147483648
 OFF = NONE + 1
 toks = moy_ui.tokens()
 kinds = ("normal", "primary", "tonal", "danger", "toggle")
+moy_ui.use_depth(None, False)          # the default's: a key's radius is its key_r
 moy_ui.buttons_clear()
 moy_ui.buttons_set(None, 0, [12, 1, 200, 8, NONE, NONE, NONE, NONE])
 moy_ui.buttons_set(None, 2, [NONE, 9, NONE, NONE, 1, 40, 1, 1])
@@ -464,15 +466,11 @@ def _drawn(th, kind, app=None, rect=(0, 0, 80, 24)):
 
 
 def test_a_kind_draws_its_shape():
-    """A theme with a look rounds its keys at key_r (a circle, a square or a
-    radius where it says so; a bevel under `edges: bevel`); a theme with no
-    look keeps them square."""
+    """A theme's look rounds its keys at key_r (a circle, a square or a
+    radius where it says so; a bevel under `edges: bevel`)."""
     from runtime import ui_draw
     bg = _word(1)
-    th = fixture_colors("machine")
     _BLOCK[0] = None
-    sq = _drawn(th, "primary")
-    assert _px(sq, 0, 0) == _px(sq, 40, 0) == _word(th["value"])
     _install({"format": 2, "name": "ks", "inherits": "machine", "look": {
         "key_r": 8, "edges": "bevel",
         "app_buttons": {"calc": {"primary": {"shape": "circle"},
@@ -538,7 +536,7 @@ def _marked(name, light, draw, size=(120, 40)):
 def test_on_is_the_current_mark_and_focus_the_focus_mark():
     """Under Moy Day a row's `on` is the current plate (value at 0.14 over the
     surface), not the ON field, and its `focus` the 4 px edge bar on its
-    leading edge; a theme without marks draws `focus` as it drew `on`."""
+    leading edge."""
     from runtime import ui_draw
     try:
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
@@ -553,15 +551,9 @@ def test_on_is_the_current_mark_and_focus_the_focus_mark():
             cv, th, (10, 10, 100, 20), "", kind="row_list", focus=True))
         # the focus edge stands on a light accent plate across the row (D-04)
         lit = _px(cv, 60, 15)
-        assert lit not in (_word(th["surface"]), _word(th["accent"])) and ui_draw.marks()[2] == 1
+        assert lit not in (_word(th["surface"]), _word(th["accent"])) and ui_draw.marks()[1] == 1
     finally:
         ui_draw.use_depth(None, False)
-    for name in ("night", "win95"):
-        a = _marked(name, False, lambda d, cv, th: ui_draw.row(
-            cv, th, (10, 10, 100, 20), "x", kind="row_list", focus=True))[0]
-        b = _marked(name, False, lambda d, cv, th: ui_draw.row(
-            cv, th, (10, 10, 100, 20), "x", kind="row_list", on=True))[0]
-        assert bytes(a._buf) == bytes(b._buf), name
 
 
 def test_a_current_bar_is_beside_a_row_and_under_a_chip():
@@ -619,7 +611,7 @@ def test_a_window_behind_draws_no_focus_mark():
         cv, th = _marked("moy", True, lambda d, cv, th: ui_draw.row(
             cv, th, (10, 10, 100, 20), "", kind="row_list", focus=True, on=True))
         assert _px(cv, 11, 15) == _px(cv, 60, 15) != _word(th["accent"])
-        assert ui_draw.marks()[2] == 0
+        assert ui_draw.marks()[1] == 0
     finally:
         ui_draw.marks(True)
         ui_draw.use_depth(None, False)

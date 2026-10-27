@@ -29,8 +29,8 @@ from ws_helpers import boot_on_fixture, fixture_colors
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

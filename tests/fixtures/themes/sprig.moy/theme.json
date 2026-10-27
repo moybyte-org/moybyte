@@ -1,1 +1,1 @@
-{"format":2,"name":"sprig","frame":{"style":"classic"},"sprites":"parts.moygfx","icons":"icons.moygfx","colors":{"dark":{"accent":11,"title":3,"hilite":19}}}
+{"format":2,"name":"sprig","frame":{"style":"classic"},"look":{"key_r":0,"card_r":0,"win_r":0},"sprites":"parts.moygfx","icons":"icons.moygfx","colors":{"dark":{"accent":11,"title":3,"hilite":19}}}

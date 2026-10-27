@@ -281,11 +281,11 @@ uint32_t moy_ui_calls(void);
 //
 // The theme's look as the shapes draw it: radii, the shadow and the edges,
 // resolved once per theme and mode (moy_ui_depth_use) and read by the window
-// frame and the casts. A theme with no `look` installs depth off, and its
-// frame draws as its style always has. Colours are look values (moy_theme.h):
-// an index, a slot, or RGB.
+// frame and the casts. A theme with no `look` takes the default's, flat
+// (moy_theme_look). Colours are look values (moy_theme.h): an index, a slot,
+// or RGB.
 typedef struct {
-    uint8_t on, win_r, card_r, key_r, corners, stepped, shadow, edges;
+    uint8_t win_r, card_r, key_r, corners, stepped, shadow, edges;
     uint8_t frames;                 // the window frame is the depth's
                                     // (moy_theme_look_frames)
     uint16_t shadow_565;            // canonical RGB565
@@ -336,13 +336,14 @@ enum { MOY_UI_HH_NONE = 0, MOY_UI_HH_FLAT = 1, MOY_UI_HH_GRAD = 2, MOY_UI_HH_GLA
 // (step 25: `tile_fill`, else the raised surface, at `tile_r` on a 44-pixel
 // tile and in proportion on another, ringed by `tile_outline`, and without
 // one over the theme's soft shadow at MOY_UI_TILE_SHADOW percent). Answers
-// 0, drawing nothing, where the theme has no depth.
+// 0, drawing nothing, for an unknown part.
 enum {
     MOY_UI_BARP_BAND = 0, MOY_UI_BARP_HH_BAND = 1, MOY_UI_BARP_SYS = 2, MOY_UI_BARP_HH_SYS = 3,
     MOY_UI_BARP_CHIP = 4, MOY_UI_BARP_TILE = 5,
 };
-// Install theme `name`'s depth in a mode (light 1: its `light` look). Answers on.
-int moy_ui_depth_use(const char *name, size_t n, int light);
+// Install theme `name`'s depth in a mode (light 1: its `light` look); NULL
+// installs the default's.
+void moy_ui_depth_use(const char *name, size_t n, int light);
 const moy_ui_depth_t *moy_ui_depth(void);
 // A shadow's size: the theme's, a smaller one (a quarter of the blur, half the
 // offset: a window being dragged), or none.
@@ -389,9 +390,7 @@ int moy_ui_soft(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int k);
 // part's size class (a CARD 48 px and up, a SMALL part under 28 px both ways,
 // any other a PART), `current` as a plate, a fill or a bar. They resolve with
 // the depth (moy_ui_depth_use) from the look's focus.*, current.* and
-// sel_back, which a theme may set without a depth. A theme with no marks
-// draws its focus as its ring (moy_ui_focus_ring) and no current mark.
-// Focus is drawn only while the marks are ACTIVE: the shell clears that while
+// sel_back. Focus is drawn only while the marks are ACTIVE: the shell clears that while
 // a window behind draws, so a screen shows one focus mark, in the focused
 // window. `drawn` counts the focus marks drawn, for the nets.
 enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI_MARK_AUTO = 3 };
@@ -430,7 +429,7 @@ enum { MOY_UI_CUR_BAR = 0, MOY_UI_CUR_PLATE = 1, MOY_UI_CUR_FILL = 2 };
 // label (moy_ui_current_under), the mark a theme's parts wear as current
 enum { MOY_UI_CUR_ROW_PLATE = 0, MOY_UI_CUR_ROW_OUTLINE = 1, MOY_UI_CUR_ROW_UNDERLINE = 2 };
 typedef struct {
-    uint8_t on, active, dark, ink_accent;
+    uint8_t active, dark, ink_accent;
     uint8_t style[3];               // per class: PART, CARD, SMALL
     uint8_t ring_alpha, plate_alpha, rim_alpha, cur_alpha, cur_style, outline_w, cur_row;
     int16_t color, cur_color;       // tokens
@@ -589,7 +588,6 @@ moy_ui_box_t moy_ui_inset(moy_ui_box_t r, int dx, int dy);
 // A panel; answers its content box (inside the border, below a title strip).
 int moy_ui_panel(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
                  moy_ui_box_t *content);
-int moy_ui_focus_ring(const moy_ui_sink_t *s, moy_ui_box_t b, int fs);
 // Paint `part`'s sprite in `state` (theme part and state ids) into the box
 // when the role sheet sets its cell, else its surface, as a primitive paints
 // its frame. *painted: 0 when the part has neither there (nothing drawn).
@@ -619,8 +617,8 @@ enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2, MOY_UI_FB_BACK
 // app has opened a page of it shows (docs/look_2026-10.md step 27a).
 // MOY_UI_FRAME_MATTE rides the same word and is no button: the window's
 // content stands in from its sides by the foot (the game window's matte,
-// WindowChrome._win_edge), so under a depth the body paints those columns
-// too, as it paints the foot. MOY_UI_FRAME_FULL is a full-screen window's
+// WindowChrome._win_edge), so the body paints those columns too, as it
+// paints the foot. MOY_UI_FRAME_FULL is a full-screen window's
 // row (docs/media/look_2026-10/MAXIMISE_VARIANTS.md, V2): the strip's title
 // and buttons alone, on the ground already under them -- no ring, strip,
 // line or shadow -- and maximise drawn as restore.
@@ -645,11 +643,11 @@ int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t win, int title_h, moy_ui_s
 // right column); a Win9x frame shades both long sides instead.
 enum { MOY_UI_BAND_BOTTOM = 0, MOY_UI_BAND_TOP = 1, MOY_UI_BAND_RIGHT = 2, MOY_UI_BAND_LEFT = 3 };
 int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light, int side);
-// A bar part under the depth (MOY_UI_BARP_*); 0 where the theme has none.
+// A bar part under the depth (MOY_UI_BARP_*); 0 for an unknown part.
 int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on);
 // A desk icon's tile (MOY_UI_BARP_TILE) filled with look colour `fill`, an
 // app's colour of the look's `tiles` (step 26b), or with MOY_THEME_NONE the
-// tile's own fill. Answers 0, drawing nothing, where the theme has no depth.
+// tile's own fill.
 int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill);
 // What a modal dims under it (docs/look_2026-10.md, D-01): box `b` washed in
 // the look's `scrim` colour at its alpha (black at 40% where it is silent).
@@ -718,9 +716,8 @@ int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t 
 // and track -- or a tab row's tabs from the left, on the page's ground or on
 // a group's card; the group's caption
 // and card; and a strip of keycap hints. A row's FOCUS is the theme's focus
-// mark (a theme without marks fills it with the row's `on` field); a seg's
-// and a tab row's current option wear the current mark (a theme without: the
-// selection colour), a swatch picker's current dot a ring in the row's ink
+// mark; a seg's and a tab row's current option wear the current mark, a
+// swatch picker's current dot a ring in the row's ink
 // off a gap of its ground; a tab row's are in the label's face. Geometry is
 // style.json's `group` and `value_row` metrics at font scale `fs`, a `_desk`
 // slot where `desk` is set; colours are tokens of the sink's look; text is
@@ -933,14 +930,12 @@ int moy_ui_group_band(const moy_ui_sink_t *s, moy_ui_box_t card, moy_ui_box_t ro
 // whose marks (`flags`' F_FOCUS and F_ON) draw again in them.
 int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t card, moy_ui_box_t last, int flags,
                      int fs, int desk);
-// The card's corner radius: the group metric, under the depth's card radius;
-// 0 for a theme without a depth.
+// The card's corner radius: the group metric, under the depth's card radius.
 int moy_ui_group_r(int fs);
-// A page's ground in box b: under a theme with a depth the `panel` colour,
-// or in a window (`desk`'s MOY_UI_WINDOW) the window's body as the frame
-// paints it (the look's `win.body`, else `surface`), its title (if any) a
-// heading in the title role over a panel strip's height; under one without,
-// moy_ui_panel. *content: where its rows go.
+// A page's ground in box b: the `panel` colour, or in a window (`desk`'s
+// MOY_UI_WINDOW) the window's body as the frame paints it (the look's
+// `win.body`, else `surface`), its title (if any) a heading in the title
+// role over a panel strip's height. *content: where its rows go.
 int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
                        int desk, moy_ui_box_t *content);
 // A fade over box b, `b.h` rows from nothing to nearly colour `ci` (a look
@@ -1035,9 +1030,9 @@ const moy_ui_display_t *moy_ui_display(void);
 // A part's ground (ui.part): the display inset, the `lcd` role's fill
 // (`fill` in its place unless MOY_UI_FROM_STYLE), ringed by `lcd_border` or
 // bevelled by `lcd_bevel`, its corners the depth's key radius up to 8
-// pixels on the handheld and 10 on the desk (square without a depth), then
+// pixels on the handheld and 10 on the desk, then
 // the marks `flags` holds: the current mark (MOY_UI_F_ON) and the focus mark
-// (MOY_UI_F_FOCUS), the theme's by size class, or its ring without marks.
+// (MOY_UI_F_FOCUS), the theme's by size class.
 int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int fs,
                 int desk);
 

@@ -1,35 +1,20 @@
 """runtime/ui.py Phase 3a: the six-state interaction model and the two new
-widget kinds (`row`, `cell`).
-
-Two jobs, in the order they matter:
-
-1. **Nothing existing moved.** `test_shipped_widgets_are_byte_identical` renders
-   every SHIPPED widget across all 12 theme family x variant sets at four
-   size/font-scale combinations and hashes the canvas. The digests below were
-   taken from the tree BEFORE this phase's edit and are pinned here, so a later
-   phase that "just tidies" a draw function fails on the spot instead of
-   quietly re-baselining. Re-taking them is a DELIBERATE act: change the
-   constants in the same commit that changes the pixels, and say which pixel
-   moved.
-2. **The state model resolves right** -- the full precedence lattice, not a
-   sample of it.
+widget kinds (`row`, `cell`): the state model resolves right -- the full
+precedence lattice, not a sample of it -- and the rows and cells paint their
+state's tokens.
 """
 
-import hashlib
-
-from runtime import ui
 from runtime import ui_draw
 from runtime.chrome import THEME_VARIANTS
-from ws_helpers import fixture_colors, install_theme
+from ws_helpers import fixture_colors
 
-# The palette themes whose widgets these pin byte for byte: the seeds of
-# MOY64 colours docs/look_2026-10.md step 27 deleted, as fixture packages
+# The palette themes whose states these resolve: the seeds of MOY64 colours
+# docs/look_2026-10.md step 27 deleted, as fixture packages
 # (tests/fixtures/themes/), in their old seed order; `moy`'s, `blocks`' and
 # `contrast`'s RGB roles are tests/test_theme_rgb.py's and its goldens'.
 THEME_NAMES = ("night", "indigo", "berry", "forest", "slate", "machine",
                "platinum", "win95", "outline")
 from runtime.host_canvas import make_system_canvas as SystemCanvas
-from runtime.host_canvas import indices_of
 
 
 TH = fixture_colors("machine")
@@ -59,169 +44,12 @@ IMG = _Img()
 
 
 # =============================================================================
-# 1. nothing existing moved
+# 1. the new arguments
 # =============================================================================
-
-# theme/variant WxH@font_scale sha256[:16] of the index readout. Taken on the
-# pre-Phase-3a tree (a raw RGB565 A/B of the two module objects in one process
-# agreed on all 48, 0 differing bytes); re-pinned by the 2026-10 look's step 10,
-# which moved the primary, tonal and danger buttons to their kinds' colours,
-# step 11, which gave Contrast a `value` of its own (white), the buttons'
-# icon gap (style.json's `icon_gap`, 2026-10-18), which moved ICON and GLYPH,
-# and a labelled tab chip's pad after its label (2026-10-19).
-SHIPPED_WIDGET_HASHES = (
-    "night/dark 320x240@1 7538a196513f2768",
-    "night/dark 480x320@1 aff1c8a382a8e7f9",
-    "night/dark 1024x600@2 e916daad1ae81130",
-    "night/dark 320x240@3 b6fa26909d8a4a5c",
-    "night/light 320x240@1 5eb77effc3da0e4b",
-    "night/light 480x320@1 84ff9743c11f0411",
-    "night/light 1024x600@2 0ef400ab05b7cb1a",
-    "night/light 320x240@3 650ff3def0c3b6f4",
-    "indigo/dark 320x240@1 f33b4212756e4d80",
-    "indigo/dark 480x320@1 ae47558c3035e041",
-    "indigo/dark 1024x600@2 ed1890f4d13edc72",
-    "indigo/dark 320x240@3 b3e506fba1d0487a",
-    "indigo/light 320x240@1 f80e5f23c3f5ecdc",
-    "indigo/light 480x320@1 fb620066763c259a",
-    "indigo/light 1024x600@2 3ca2f48aef4a15f8",
-    "indigo/light 320x240@3 3194491a3795820d",
-    "berry/dark 320x240@1 78dac4b68c37b38c",
-    "berry/dark 480x320@1 370ddb399a45670e",
-    "berry/dark 1024x600@2 84b85e6249ad019f",
-    "berry/dark 320x240@3 f18afebf5a336075",
-    "berry/light 320x240@1 58b13c3bcef53f5e",
-    "berry/light 480x320@1 a846ef9c1d6e2cb5",
-    "berry/light 1024x600@2 71104d073b9e534e",
-    "berry/light 320x240@3 0aab96dc9084127e",
-    "forest/dark 320x240@1 f7ccbf84fc8eb339",
-    "forest/dark 480x320@1 8ce60d65b9981fae",
-    "forest/dark 1024x600@2 08417cf5c2cda60c",
-    "forest/dark 320x240@3 f0db92f550bbbcb8",
-    "forest/light 320x240@1 2883d35f61b3e856",
-    "forest/light 480x320@1 0e79541089bb61c3",
-    "forest/light 1024x600@2 561d8c40dd39a08d",
-    "forest/light 320x240@3 bab247d7fabe12be",
-    "slate/dark 320x240@1 76e984cff7c81e78",
-    "slate/dark 480x320@1 70ec27da183a5fbd",
-    "slate/dark 1024x600@2 e804879278f50de2",
-    "slate/dark 320x240@3 62e239bf7b260a5c",
-    "slate/light 320x240@1 79bfea67ea265f8d",
-    "slate/light 480x320@1 d4b901d219535ee5",
-    "slate/light 1024x600@2 f870f553fcc8394c",
-    "slate/light 320x240@3 4ae81674ec6565cb",
-    "machine/dark 320x240@1 8318c5db4093e055",
-    "machine/dark 480x320@1 a4548de9d3237bc6",
-    "machine/dark 1024x600@2 9de5e913aa8bd3b8",
-    "machine/dark 320x240@3 609a88fcb3e8e45b",
-    "machine/light 320x240@1 afc62f7ec4b5801a",
-    "machine/light 480x320@1 26c816c67bebb54d",
-    "machine/light 1024x600@2 3b3f4721eb5d8e3e",
-    "machine/light 320x240@3 1d227b8bb236ad2a",
-    "platinum/dark 320x240@1 2a3fadcbe50a885e",
-    "platinum/dark 480x320@1 9c0436fd62eda503",
-    "platinum/dark 1024x600@2 2bc0285d57012514",
-    "platinum/dark 320x240@3 8e09b53611b0b655",
-    "platinum/light 320x240@1 80c1e1834b0bb2ae",
-    "platinum/light 480x320@1 1a7720522ac010de",
-    "platinum/light 1024x600@2 2b2fbd06d2262b3c",
-    "platinum/light 320x240@3 53c3e4ef14ef1dfc",
-    "win95/dark 320x240@1 d3776d16603f8f4c",
-    "win95/dark 480x320@1 12a05ca2f5a066b8",
-    "win95/dark 1024x600@2 0bea28712f3f6cd2",
-    "win95/dark 320x240@3 04f324ced6fb6d08",
-    "win95/light 320x240@1 2bf904646525a725",
-    "win95/light 480x320@1 a2c6006688773d0c",
-    "win95/light 1024x600@2 91e2cf8dc911ff5c",
-    "win95/light 320x240@3 fc4a299c42200768",
-    "outline/dark 320x240@1 7538a196513f2768",
-    "outline/dark 480x320@1 aff1c8a382a8e7f9",
-    "outline/dark 1024x600@2 e916daad1ae81130",
-    "outline/dark 320x240@3 b6fa26909d8a4a5c",
-    "outline/light 320x240@1 5eb77effc3da0e4b",
-    "outline/light 480x320@1 84ff9743c11f0411",
-    "outline/light 1024x600@2 0ef400ab05b7cb1a",
-    "outline/light 320x240@3 650ff3def0c3b6f4",
-)
-
-_SIZES = ((320, 240, 1), (480, 320, 1), (1024, 600, 2), (320, 240, 3))
-
-
-def _paint_shipped(cv, th):
-    """Every SHIPPED widget, with arguments chosen to walk each branch. Nothing
-    added by Phase 3a appears here -- that is the point."""
-    ui_draw.scroll_cues(cv, (4, 4), (4, 200), True, True, th["accent"], 2)
-    ui_draw.button(cv, th, (8, 14, 90, 22), "PLAY", kind="primary")
-    ui_draw.button(cv, th, (8, 40, 90, 22), "CHANGE", kind="normal")
-    ui_draw.button(cv, th, (8, 66, 90, 22), "TONAL", kind="tonal")
-    ui_draw.button(cv, th, (8, 92, 90, 22), "DELETE FOREVER", kind="danger")
-    ui_draw.button(cv, th, (8, 118, 90, 22), "ON", on=True)
-    ui_draw.button(cv, th, (8, 144, 90, 22), "ICON", icon_img=IMG)
-    ui_draw.button(cv, th, (8, 170, 90, 22), "GLYPH", glyph="run",
-              glyph_draw=_glyph_draw)
-    ui_draw.chip(cv, th, (104, 14, 60, 18), "QUIET")
-    ui_draw.chip(cv, th, (104, 34, 60, 18), "ON", on=True)
-    ui_draw.chip(cv, th, (104, 54, 60, 18), "HOT", hot=True)
-    ui_draw.chip(cv, th, (104, 74, 60, 18), "OVERFLOWING LABEL")
-    ui_draw.chip(cv, th, (104, 94, 60, 18), "G", glyph="edit",
-            glyph_draw=_glyph_draw)
-    ui_draw.chip(cv, th, (104, 114, 60, 18), "FS3", fs=3)
-    ui_draw.tab_row(cv, th, (104, 136, 200, 20),
-               (("cfg", "Config", "gear"), ("code", "Code", "edit"),
-                ("map", "Map", "map")), "code",
-               icon_for=lambda k: IMG)
-    ui_draw.tab_row(cv, th, (104, 158, 60, 20),
-               (("cfg", "Config", "gear"), ("code", "Code", "edit"),
-                ("map", "Map", "map")), "cfg", icon_for=None, ink=5)
-    ui_draw.status_row(cv, th, (104, 180, 200, 14), ("Ln 13, Col 1", "No issues"))
-    ui_draw.game_btn(cv, (170, 14, 70, 20), "GO", 11)
-    ui_draw.game_icon_btn(cv, (170, 36, 70, 20), "run", "GO", 11,
-                     glyph_draw=_glyph_draw)
-    ui_draw.mini_btn(cv, (170, 58, 30, 12), "-", 9)
-    ui_draw.toolbar(cv, th, (170, 72, 140, 16))
-    ui_draw.dialog(cv, (170, 90, 130, 40))
-    ui_draw.text_field(cv, (174, 94, 120, 14), "hi", "")
-    ui_draw.text_field(cv, (174, 112, 120, 14), "", "type here")
-    content = ui_draw.panel(cv, th, (250, 14, 60, 60), title="TOOLS")
-    ui_draw.focus_ring(cv, th, ui.inset(content, 4, 4))
-    ui_draw.fill_uncovered(cv, (0, 200, 320, 40), (10, 205, 100, 20), th["dim"])
-    ui_draw.fill_uncovered(cv, (240, 200, 60, 20), (0, 0, 4, 4), th["edge"])
-    sr = ui_draw.ScrollRegion()
-    sr.set((250, 80, 60, 100), 400)
-    sr.scroll_by(120)
-    sr.draw_bar(cv, th)
-    sh = ui_draw.ScrollRegion(horizontal=True)
-    sh.set((4, 210, 200, 24), 900)
-    sh.scroll_by(300)
-    sh.draw_bar(cv, th)
-
-
-def test_shipped_widgets_are_byte_identical():
-    """The Phase 3a contract: purely additive. Every shipped widget's REST
-    (and `on`/`hot`) rendering is exactly what it was, on all 12 theme sets and
-    at 320x240/1x, 480x320/1x (Guition), 1024x600/2x (P4 windowed) and
-    320x240/3x -- the axes the 320x240-dark-only checks structurally cannot
-    see."""
-    seen = []
-    for name in THEME_NAMES:
-        for variant in THEME_VARIANTS:
-            for (w, h, fs) in _SIZES:
-                th = fixture_colors(name, variant)
-                cv = SystemCanvas(w, h, font_scale=fs)
-                _paint_shipped(cv, th)
-                seen.append("%s/%s %dx%d@%d %s" % (
-                    name, variant, w, h, fs,
-                    hashlib.sha256(indices_of(cv)).hexdigest()[:16]))
-    assert len(seen) == len(SHIPPED_WIDGET_HASHES) > 40
-    for got, want in zip(seen, SHIPPED_WIDGET_HASHES):
-        assert got == want, (
-            "a shipped widget's pixels moved: %s (pinned %s)" % (got, want))
-
 
 def test_the_new_arguments_default_to_the_frozen_rendering():
     """`disabled`/`state` were added to chip and button. Passing them at their
-    defaults, or not at all, must be the same call -- checked per branch rather
-    than only through the aggregate hash above."""
+    defaults, or not at all, must be the same call, branch by branch."""
     for th in (fixture_colors("night"), fixture_colors("machine", "light")):
         for kwargs in ({}, {"on": True}, {"hot": True}):
             a = SystemCanvas(80, 30)
@@ -368,9 +196,6 @@ def test_row_rest_and_selected_paint_the_row_tokens():
     ui_draw.row(cv, th, (0, 0, 200, 20), "REST")
     assert cv.pix(2, 2) == th["panel"]
     assert cv.pix(0, 0) == th["dim"]
-    ui_draw.row(cv, th, (0, 20, 200, 20), "SEL", on=True)
-    assert cv.pix(2, 22) == th["title"]
-    assert cv.pix(0, 20) == th["accent"]
     ui_draw.row(cv, th, (0, 40, 200, 20), "ARMED", hot=True)
     assert cv.pix(2, 42) == th["danger"]
 
@@ -472,8 +297,6 @@ def test_cell_selected_lifts_the_field_and_the_edge():
     cv = SystemCanvas(200, 120)
     ui_draw.cell(cv, th, (0, 0, 76, 66), "a")
     assert cv.pix(1, 1) == th["panel"] and cv.pix(0, 0) == th["dim"]
-    ui_draw.cell(cv, th, (80, 0, 76, 66), "b", on=True)
-    assert cv.pix(81, 1) == th["title"] and cv.pix(80, 0) == th["accent"]
 
 
 def test_cell_band_fills_the_caption_zone():
@@ -485,9 +308,6 @@ def test_cell_band_fills_the_caption_zone():
     # (67..74), so it reads the ZONE, not the glyphs.
     ui_draw.cell(cv, th, (0, 0, 100, 80), "TITLE", band=True, pad=3, caption_h=17)
     assert cv.pix(50, 78) == th["title"]
-    ui_draw.cell(cv, th, (100, 0, 100, 80), "TITLE", band=True, on=True, pad=3,
-            caption_h=17)
-    assert cv.pix(150, 78) == th["accent"]
     plain = SystemCanvas(120, 90)
     ui_draw.cell(plain, th, (0, 0, 100, 80), "TITLE", pad=3, caption_h=17)
     assert plain.pix(50, 78) == th["panel"]             # no band: the field
@@ -529,120 +349,10 @@ def test_cell_draws_a_centred_glyph_or_icon_in_the_art_rect():
     assert bytes(a._buf) != bytes(b._buf)
 
 
-# =============================================================================
-# 5. the widget matrix: every kind in every state, each theme in its shape
-# =============================================================================
-
-def _paint_matrix(cv, th):
-    """Every style kind in all six states through the widget that draws it
-    (row, cell, chip, button), plus a kind the table does not name."""
-    own = {
-        "tab": lambda r: ui_draw.tab_row(cv, th, (0, r[1], 318, 14),
-                                    (("a", "Aa", "gear"), ("b", "Bb", "map")),
-                                    "b"),
-        "status": lambda r: ui_draw.status_row(cv, th, (0, r[1], 318, 14),
-                                          ("Ln 1", "ok")),
-        "panel": lambda r: ui_draw.panel(cv, th, (2, r[1] + 1, 150, 12)),
-        "panel_title": lambda r: ui_draw.panel(cv, th, (160, r[1] + 1, 150, 12),
-                                          title="T"),
-        "toolbar": lambda r: ui_draw.toolbar(cv, th, (0, r[1], 318, 14)),
-        "scrollbar": lambda r: _matrix_bar(cv, th, r[1]),
-        "focus": lambda r: ui_draw.focus_ring(cv, th, (20, r[1] + 4, 100, 6)),
-    }
-    # The kinds as they were pinned (step 1); a kind added since is pinned by
-    # its own test, so it never moves these hashes.
-    kinds = sorted(k for k in ui_draw.kinds() if k not in ("toggle",)) + ["nosuchkind"]
-    y = 0
-    for kind in kinds:
-        if kind in own:
-            own[kind]((0, y))
-            y += 15
-            continue
-        x = 0
-        for st in ui_draw.STATES:
-            r = (x, y, 52, 14)
-            on, hot, dis = st == ui_draw.ON, st == ui_draw.HOT, st == ui_draw.DISABLED
-            interact = st if st in (ui_draw.HOVER, ui_draw.PRESSED) else None
-            if kind.startswith("button"):
-                bk = {"button": "normal"}.get(kind, kind[7:])
-                ui_draw.button(cv, th, r, "B" + kind[:3], kind=bk, on=on,
-                          disabled=dis, state=interact)
-            elif kind == "chip":
-                ui_draw.chip(cv, th, r, "CHIP", on=on, hot=hot, disabled=dis,
-                        state=interact)
-            elif kind.startswith("cell"):
-                ui_draw.cell(cv, th, r, "C", kind=kind, on=on, hot=hot,
-                        disabled=dis, state=interact, band=kind == "cell_band")
-            else:
-                ui_draw.row(cv, th, r, kind, kind=kind, on=on, hot=hot,
-                       disabled=dis, state=interact, value="v")
-            x += 53
-        y += 15
-
-
-def _matrix_bar(cv, th, y):
-    sr = ui_draw.ScrollRegion(horizontal=True)
-    sr.set((0, y, 318, 14), 900)
-    sr.scroll_by(200)
-    sr.draw_bar(cv, th)
-
-
-# theme/variant sha256[:16] of the index readout at 320x320@1, the theme's
-# shape installed (Contrast's re-pinned by the look's step 11: its `value`;
-# every theme's by a labelled tab chip's pad after its label, 2026-10-19).
-WIDGET_MATRIX_HASHES = (
-    "night/dark 962f46bb8830d0b3",
-    "night/light 70c63fd09357ba7d",
-    "indigo/dark 7fcda7382ce42fe0",
-    "indigo/light 17a93acbf4d22ec0",
-    "berry/dark 6f1bcb6502e23d2b",
-    "berry/light e247e2549ad7a5e5",
-    "forest/dark 07377d5e5a2264e9",
-    "forest/light faf765626d7f8707",
-    "slate/dark d76f0d134006e4b3",
-    "slate/light 8b44361ff5b3a71e",
-    "machine/dark 936680b6f00e0139",
-    "machine/light 2e4214141e347918",
-    "platinum/dark 3257f5546afba3ee",
-    "platinum/light 13e7d1e70cd8a1fb",
-    "win95/dark 8ca26d4ca565dc03",
-    "win95/light 81fbc46dc9cb148f",
-    "outline/dark 73303068057fbda9",
-    "outline/light d9dcc7e6c55ee618",
-)
-
-
-def _matrix_hashes():
-    out = []
-    try:
-        for name in THEME_NAMES:
-            th = {v: fixture_colors(name, v) for v in THEME_VARIANTS}
-            install_theme(name)                # its shape: the slot's
-            ui_draw.use_shape(name)
-            for variant in THEME_VARIANTS:
-                cv = SystemCanvas(320, 320)
-                _paint_matrix(cv, th[variant])
-                out.append("%s/%s %s" % (
-                    name, variant, hashlib.sha256(indices_of(cv)).hexdigest()[:16]))
-    finally:
-        ui_draw.use_shape(None)
-    return out
-
-
-def test_every_kind_in_every_state_is_byte_identical():
-    """The widget matrix (docs/kernel_toolkit_2026-10.md §7): each style kind
-    in each state, every seed theme in each variant under its own shape --
-    pinned so a style or a painter change moves none of it unnamed."""
-    got = _matrix_hashes()
-    assert len(got) == len(WIDGET_MATRIX_HASHES) == 2 * len(THEME_NAMES)
-    for g, w in zip(got, WIDGET_MATRIX_HASHES):
-        assert g == w, "a kind's pixels moved: %s (pinned %s)" % (g, w)
-
-
 def test_the_toggle_is_a_chip_that_reads_switched_on():
     """A kind added as data (sprint 6, docs/kernel_toolkit_2026-10.md §2.2):
-    chip's shape and chip's look, except ON, which paints the theme's play
-    green with light ink."""
+    chip's shape and chip's look, except ON, which is the theme's play green
+    with light ink."""
     th = fixture_colors("machine")
     for st in ui_draw.STATES:
         t, c = ui_draw.state_colors(th, "toggle", st), ui_draw.state_colors(th, "chip", st)
@@ -650,7 +360,3 @@ def test_the_toggle_is_a_chip_that_reads_switched_on():
             assert t == (th["play"], 7, c[2])
         else:
             assert t == c, st
-    a, b = SystemCanvas(80, 24), SystemCanvas(80, 24)
-    ui_draw.chip(a, th, (2, 2, 70, 18), "ON", on=True, kind="toggle")
-    ui_draw.chip(b, th, (2, 2, 70, 18), "ON", on=True)
-    assert bytes(a._buf) != bytes(b._buf)

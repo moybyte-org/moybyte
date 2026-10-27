@@ -188,9 +188,10 @@ def test_a_cart_colour_is_its_index_modulo_64():
 # -- the look -----------------------------------------------------------------------
 
 def _bare():
-    """A package of no look (it names no `inherits`, and the default lends
-    its look only by name): the model's defaults."""
-    assert moy_ui.theme_install(b'{"format": 2, "name": "bare"}')[0] == 0
+    """A package whose look sets one leaf to its default (it names no
+    `inherits`, and the default lends its look only by name; a package with
+    no look at all takes the default's flat): the model's defaults."""
+    assert moy_ui.theme_install(b'{"format": 2, "name": "bare", "look": {"win_r": 12}}')[0] == 0
     return "bare"
 
 

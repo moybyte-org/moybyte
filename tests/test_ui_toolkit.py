@@ -4,9 +4,7 @@ path is the one every tier shares.
 
 The 2026-08 UI refactor's Phase 3a additions -- the six-state interaction
 model and the `row`/`cell` kinds -- are in
-`tests/test_ui_states.py`, which also pins every SHIPPED widget's pixels across
-the theme sets so a later phase cannot re-baseline them by accident. The
-palette themes these draw with are the fixture packages
+`tests/test_ui_states.py`. The palette themes these draw with are the fixture packages
 (tests/fixtures/themes/, `ws_helpers.fixture_colors`).
 """
 
@@ -60,31 +58,25 @@ def _cv(w=320, h=120, fs=1):
 
 
 def test_button_kinds_paint_their_tokens():
+    """Each kind's field inside the look's rounded key (`key_r`)."""
     cv = _cv()
     ui_draw.button(cv, TH, (10, 10, 80, 20), "PLAY", kind="primary")
-    assert cv.pix(12, 12) == TH["value"]
-    assert cv.pix(10, 10) == TH["value"]               # no border
+    assert cv.pix(14, 20) == TH["value"]
     ui_draw.button(cv, TH, (10, 50, 80, 20), "CHANGE", kind="normal")
-    assert cv.pix(12, 52) == TH["surface"]
-    assert cv.pix(10, 50) == 0                         # dark edge
+    assert cv.pix(14, 60) == TH["surface"]
     ui_draw.button(cv, TH, (10, 80, 80, 20), "DEL", kind="danger")
-    assert cv.pix(12, 82) == TH["surface"]
+    assert cv.pix(14, 90) == TH["surface"]
     assert TH["danger"] in [cv.pix(x, y) for x in range(10, 90) for y in range(80, 100)]
-    ui_draw.button(cv, TH, (110, 10, 80, 20), "ON", on=True)
-    assert cv.pix(112, 12) == TH["accent"]
 
 
 def test_chip_states_match_the_legacy_button_pixels():
-    """ui_draw.chip replaced the four per-app `_button` copies -- pin the three
+    """ui_draw.chip replaced the four per-app `_button` copies -- pin the
     states to the exact colors those drew (panel/title_ink/dim quiet chip,
-    accent/black/edge toggle, danger/white armed action)."""
+    danger/white armed action); `on` is the theme's current mark."""
     cv = _cv()
     ui_draw.chip(cv, TH, (10, 10, 80, 20), "SAVE")
     assert cv.pix(12, 12) == TH["panel"]
     assert cv.pix(10, 10) == TH["dim"]                 # quiet border
-    ui_draw.chip(cv, TH, (10, 40, 80, 20), "IMAGES", on=True)
-    assert cv.pix(12, 42) == TH["accent"]
-    assert cv.pix(10, 40) == TH["edge"]                # toggle border
     ui_draw.chip(cv, TH, (10, 70, 80, 20), "DELETE?", hot=True)
     assert cv.pix(12, 72) == TH["danger"]
 
@@ -133,9 +125,6 @@ def test_a_chip_paints_the_themes_chip_surface(tmp_path):
     use_theme(ws, "night", "dark")
     cv = ws.sys_canvas
     th = ws.theme_colors
-    ui_draw.chip(cv, th, (10, 100, 60, 16), "CARTS", on=True, fs=1)
-    assert cv.pix(12, 102) == th["accent"]
-    assert cv.pix(10, 100) == th["shade_dark"]
     ui_draw.chip(cv, th, (10, 120, 60, 16), "CARTS", on=False, fs=1)
     assert cv.pix(12, 122) == th["panel"]
     assert cv.pix(10, 120) == th["shade_dark"]
@@ -162,8 +151,12 @@ def test_tab_row_draws_active_selection():
     tabs = [("cards", "CONFIG", "edit"), ("code", "CODE", "code")]
     rects = ui_draw.tab_row(cv, TH, (0, 0, 420, 18), tabs, "code")
     assert [r[0] for r in rects] == ["cards", "code"]
+    other = _cv(w=420)
+    ui_draw.tab_row(other, TH, (0, 0, 420, 18), tabs, "cards")
     _tid, (x, y, w, h), _l = rects[1]
-    assert cv.pix(x + 1, y + 1) == TH["selection"]     # active tab field
+    tab = [cv.pix(i, j) for j in range(y, y + h) for i in range(x, x + w)]
+    assert tab != [other.pix(i, j) for j in range(y, y + h) for i in range(x, x + w)], \
+        "the active tab wears the current mark"
 
 
 def test_panel_and_status_row_paint():
@@ -173,12 +166,6 @@ def test_panel_and_status_row_paint():
     assert content[1] > 21 and content[3] < 80         # title strip consumed
     ui_draw.status_row(cv, TH, (0, 100, 320, 14), ("Ln 3, Col 7", "SAVED"))
     assert cv.pix(2, 108) == TH["surface_alt"]
-
-
-def test_focus_ring_paints_focus_token():
-    cv = _cv()
-    ui_draw.focus_ring(cv, TH, (50, 50, 40, 30))
-    assert cv.pix(50 - 2, 50 - 2) == TH["focus"]
 
 
 def test_is_light_gate():

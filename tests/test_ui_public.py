@@ -215,7 +215,7 @@ _TH = []
 
 
 def _theme():
-    """The lookless `night` fixture's colours, installed afresh for each page:
+    """The `night` fixture's colours, installed afresh for each page:
     the installed look is process-wide, as on a board, and these pages' stops
     sit where night lays them out."""
     if not _TH:
@@ -232,7 +232,7 @@ def _page():
     def draw():
         ui.page("Nav")
         st["a"] = ui.button("A")
-        ui.at(200, 14, 60, 18)
+        ui.at(200, 12, 60, 20)          # on A's line (its row: 12, 20 tall)
         st["side"] = ui.button("Side")
         st["b"] = ui.button("B")
         st["c"] = ui.button("C")
@@ -333,12 +333,11 @@ def test_mark_off_draws_no_focus_mark_but_keeps_the_state():
     assert on.out[4] & ui.FOCUS and off.out[4] & ui.FOCUS
     ui_draw.marks(None, True)
     on.frame()
-    drew_on = ui_draw.marks(None, True)[2]
+    drew_on = ui_draw.marks(None, True)[1]
     off.frame()
-    drew_off = ui_draw.marks(None, True)[2]
-    if ui_draw.marks_on():
-        assert drew_on == 1 and drew_off == 0
-    assert bytes(on.cv._buf) != bytes(off.cv._buf) or not ui_draw.marks_on()
+    drew_off = ui_draw.marks(None, True)[1]
+    assert drew_on == 1 and drew_off == 0
+    assert bytes(on.cv._buf) != bytes(off.cv._buf)
 
 
 def test_a_lists_row_and_a_sliders_value_are_kept_by_id():
@@ -623,3 +622,4 @@ def test_an_app_cart_draws_on_change_unless_it_animates(tmp_path, ven, every):
         drv.frame(_DT)
     assert ws.player.ns["frames"] - n == (20 if every else 0)
     ws.exit()
+

@@ -57,17 +57,6 @@ def test_the_panel_rasters_as_the_canvas_draws_it(ws, notice, text):
     assert ops and canvas == raster
 
 
-def test_a_piece_is_cut_rather_than_overrun():
-    """A list that outgrows its slots stops; it never writes past them."""
-    try:
-        moy_play._clib()
-    except RuntimeError:
-        pytest.skip("no host Player")
-    rows = [(0, "ROW %d" % i) for i in range(16)]
-    ops = moy_play.chrome_menu(rows, 3, 0, 18, 120, 200, 1, 1)
-    assert 0 < len(ops) <= 128
-
-
 def test_a_minimal_bars_title_is_in_the_chrome_ink(ws):
     """The title the tool/app bar prints reads in `chrome_ink`, the role the
     other bars' titles use: the dim ink is pale under an RGB theme's light

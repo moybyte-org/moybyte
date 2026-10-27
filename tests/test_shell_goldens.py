@@ -543,7 +543,7 @@ def _render(ws, surface, config_name):
         cv.gate_counts_reset()
         _ui().marks(None, True)
         ws.frame(_DT)
-        marked = max(marked, _ui().marks()[2])
+        marked = max(marked, _ui().marks()[1])
         cur = bytes(ws.glass_canvas._buf)
         if cur == prev:
             fills, texts = cv.gate_counts()[:2]

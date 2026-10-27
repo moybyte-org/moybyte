@@ -18,13 +18,12 @@ from runtime import ui_draw
 from runtime.chrome import CodeLayout, Layout, theme_colors
 from runtime.host_canvas import indices_of
 from runtime.host_canvas import make_system_canvas as SystemCanvas
-from runtime.wm_desk import _BackdropLayer as Desk
 from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 ROOT = runtime.__path__[0] + "/.."
@@ -59,7 +58,8 @@ def _ink(draw, w=200, h=80, fs=1):
         cv = SystemCanvas(w, h, font_scale=fs)
         cv.cls(BG)
         draw(cv, text)
-        planes.append(indices_of(cv))
+        b = bytes(cv._buf)
+        planes.append([b[2 * i:2 * i + 2] for i in range(w * h)])
     hit = [i for i in range(w * h) if planes[0][i] != planes[1][i]]
     if not hit:
         return None
@@ -251,15 +251,6 @@ def test_the_game_canvas_stays_on_petme128():
         for role in ROLES:
             ui_draw.use_font(role, 0)
         ui_draw._C.font_free(fid)
-
-
-@pytest.mark.parametrize("fs", [1, 2])
-def test_a_desk_label_pill_is_its_labels_width(sample, fs):
-    pill = (0, 0, 120, 13 * fs)
-    for label in ("FILES", "STORYBOOK"):
-        r = Desk.label_rect(pill, label, fs)
-        assert r[2] == min(pill[2], ui_draw.text_width(label, fs, "ui") + 6 * fs)
-        assert pill[0] <= r[0] and r[0] + r[2] <= pill[0] + pill[2]
 
 
 @pytest.mark.parametrize("fs", [1, 2, 3])

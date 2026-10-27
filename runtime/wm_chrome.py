@@ -28,12 +28,10 @@ try:
     import layout_base as _layout_base
     import ui_draw as _ui_draw
     import iconsets as _iconsets
-    from app_decls import APPS as _APP_DECLS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import layout_base as _layout_base
     from runtime import ui_draw as _ui_draw
     from runtime import iconsets as _iconsets
-    from runtime.app_decls import APPS as _APP_DECLS
 
 # The frame itself (ring, strip, title, buttons, shadow) is the theme's frame
 # style, drawn in C (ui.frame); the letterbox bezel keeps the shadow's black.
@@ -48,16 +46,11 @@ RZ_CURSOR = {RZ_L: "ew", RZ_R: "ew", RZ_T: "ns", RZ_B: "ns",
              RZ_R | RZ_T: "nesw", RZ_L | RZ_B: "nesw"}
 
 # Shell-process title strips (registered apps contribute TITLE through the app
-# registry instead; the player shows the live cart title). A theme without a
-# depth (the older seeds) draws an app's and these in capitals, the Editor's
-# as written.
+# registry instead; the player shows the live cart title).
 _TITLES = {"menu": "Editor", "projects": "Projects",
            "settings": "Settings", "update": "Update"}
 # The Editor's title in its theme mode (runtime/theme_editor.py).
 THEME_TITLE = "Theme"
-# The shell's own apps (runtime/app_decls.py), whose titles those seeds
-# capitalise; an installed app's title is drawn as its app names it.
-_SHELL_APPS = tuple(d["id"] for d in _APP_DECLS)
 # The title of an Editor or a playtest, "Editor · Star Catcher": the app, the
 # separator and the cart; the separator is a hyphen in a face without the dot
 # (petme128). A chip under the 2026-10 look shows the app alone.
@@ -95,7 +88,7 @@ class WindowChrome:
         it is the one piece the chrome freeze can never skip. A depth's
         rounded frame draws none (its corner still resizes,
         `_grip_hit_rect`)."""
-        if not focused or _ui_draw.depth()[13] or win.saved is not None:
+        if not focused or _ui_draw.depth()[12] or win.saved is not None:
             return
         sc = self._root_canvas
         ink = self.ws.theme_colors["chrome_ink"]
@@ -219,7 +212,7 @@ class WindowChrome:
         sc = self._root_canvas if cv is None else cv
         x, y, w, h = slot
         role = "chrome_ink" if focused else "chrome_ink_dim"
-        if focused and not row and _ui_draw.depth()[13] \
+        if focused and not row and _ui_draw.depth()[12] \
                 and ws.look.live.look[0].get("win.header") == _HEAD_FILL:
             role = "value_ink"            # on the `value` header (moy_ui_depth_title_ink)
         ink = ws.theme_colors[role]
@@ -276,15 +269,15 @@ class WindowChrome:
     # -- depth: rounded frames and shadows (ui.use_depth) ---------------------
 
     def _win_radius(self, win):
-        """The depth's corner radius for `win` (0 with depth off)."""
-        if not _ui_draw.depth()[13]:
+        """The depth's corner radius for `win` (0 under a frame style's frame)."""
+        if not _ui_draw.depth()[12]:
             return 0
         return _ui_draw.frame_geom(win.w, win.h, win.title_h)[0]
 
     def _win_foot(self, win):
         """The rows under `win`'s content its rounded bottom corners take
         (none full screen)."""
-        if not _ui_draw.depth()[13] or win.saved is not None:
+        if not _ui_draw.depth()[12] or win.saved is not None:
             return 0
         return _ui_draw.frame_geom(win.w, win.h, win.title_h)[1]
 
@@ -294,7 +287,7 @@ class WindowChrome:
         out (and the bottom line's, where no foot holds it), so no content
         pixel lies under the frame and a row's mark stands off it (design
         review R3-25)."""
-        if not _ui_draw.depth()[13]:
+        if not _ui_draw.depth()[12]:
             return 0
         lk = self.ws.look.live.look[0]
         w = max(lk.get("win.frame.w", 0), lk.get("win.frame_back.w", 0))
@@ -317,7 +310,7 @@ class WindowChrome:
         full-screen window draws nothing past the glass it covers."""
         if win.saved is not None:
             return (x, y, w, h)
-        if _ui_draw.depth()[13]:
+        if _ui_draw.depth()[12]:
             g = _ui_draw.frame_geom(w, h, win.title_h)
             return (x - g[2] - 2, y - g[3] - 2, w + g[2] + g[4] + 4, h + g[3] + g[5] + 4)
         return (x - 2, y - 2, w + 7, h + 7)
@@ -330,7 +323,7 @@ class WindowChrome:
         above it are its own repaint's (`_cast_onto`), so each lands once on
         freshly painted pixels. A window being dragged or resized casts the
         same shadow as a still one: a moving thing keeps its shadow."""
-        if not _ui_draw.depth()[13]:
+        if not _ui_draw.depth()[12]:
             return
         rc = self._root_canvas
         th = self.ws.theme_colors
@@ -370,7 +363,7 @@ class WindowChrome:
         casts it took when it was painted."""
         order = self._order
         n = len(order)
-        if i >= n - 1 or not _ui_draw.depth()[13]:
+        if i >= n - 1 or not _ui_draw.depth()[12]:
             return
         key = order[i]
         win = self._wins[key]
@@ -447,13 +440,10 @@ class WindowChrome:
             if lent is not None and lent[0]:
                 return t + _title_sep() + lent[0]     # the page an app lent ("Notes · Story ideas")
             return t
-        shell = win.kind in _TITLES or win.kind in _SHELL_APPS
         named = self._page_named(win)
         if named:
             return named                      # the page a shell app names (a story's)
         base = ws.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
-        if shell and win.kind != "menu" and not _ui_draw.depth()[0]:
-            base = base.upper()
         app = ws._apps_by_id.get(win.kind)
         host = getattr(app, "_ui", None) if getattr(app, "UI", False) else None
         if host is not None:
@@ -469,7 +459,7 @@ class WindowChrome:
                 return base + _title_sep() + str(t)
         return base
 
-    def _chip_title(self, win, looked):
+    def _chip_title(self, win):
         """A window's chip label: its title, or under the 2026-10 look the app
         alone where the title names the app and a cart ("Editor"), and a
         playtest's the cart alone ("Star Catcher", D-23), never a second
@@ -478,15 +468,14 @@ class WindowChrome:
         named = self._page_named(win)
         if named and t == named:
             t = self.ws.app_title(win.kind) or t  # the chip names the app
-        if looked:
-            for sep in (_SEP_DOT, _SEP_ASCII):
-                at = t.find(sep)
-                if at > 0 and win.kind == "desktop" and self.ws.app_window_canvas:
-                    return t[:at]                 # an app's chip names the app
-                if at > 0 and win.kind == "desktop":
-                    return t[at + len(sep):]      # a playtest's chip names the cart
-                if at > 0 and (win.kind == "menu" or win.kind in self.ws._apps_by_id):
-                    return t[:at]                 # the Editor's, an app's: the app
+        for sep in (_SEP_DOT, _SEP_ASCII):
+            at = t.find(sep)
+            if at > 0 and win.kind == "desktop" and self.ws.app_window_canvas:
+                return t[:at]                     # an app's chip names the app
+            if at > 0 and win.kind == "desktop":
+                return t[at + len(sep):]          # a playtest's chip names the cart
+            if at > 0 and (win.kind == "menu" or win.kind in self.ws._apps_by_id):
+                return t[:at]                     # the Editor's, an app's: the app
         return t
 
     def _win_btns(self, win):
@@ -720,10 +709,9 @@ class WindowChrome:
                 out.append((k, (x, y, side, side), self._win_title(self._wins[k])[:1]))
                 y += side + 2 * fs
             return out
-        looked = bool(_ui_draw.depth()[0])
-        titles = [self._chip_title(self._wins[k], looked) for k in kinds]
-        pad = _CHIP_PAD if looked else 2 * 4 * fs   # the look's: icon slot and margins
-        gap = 6 if looked else 2 * fs
+        titles = [self._chip_title(self._wins[k]) for k in kinds]
+        pad = _CHIP_PAD                    # the look's: icon slot and margins
+        gap = 6
         room = cw - 4 * fs - (len(titles) - 1) * gap
         cap = max(len(t) for t in titles)
         while True:
@@ -740,11 +728,8 @@ class WindowChrome:
         else:
             x = cx
         x += bx
-        y = by + 1 * fs
-        h = bh - 2 * fs
-        if looked:
-            h = min(bh * 28 // 40, bh - 8)
-            y = by + (bh - h) // 2
+        h = min(bh * 28 // 40, bh - 8)
+        y = by + (bh - h) // 2
         end = bx + cx + cw - 4 * fs
         for i, k in enumerate(kinds):
             if x + widths[i] > end:
@@ -782,23 +767,7 @@ class WindowChrome:
         # in the root's bar, so a chip repaint is a full repaint's pixels.
         self.ws.bar_layer.repaint_cell("desk", "chips")
         line_h = self._root_ctx.layout.line_h
-        if _ui_draw.depth()[0]:
-            self._draw_look_chips(sc, th, fs, line_h)
-            return
-        for key, (x, y, w, h), label in self._chip_rects():
-            win = self._wins[key]
-            focused = (key == self._focus and not win.minimized)
-            bg = th["accent"] if focused else th["panel"]
-            if focused:
-                fg = _ui_draw.state_colors(th, "chip", _ui_draw.ON)[1]
-            else:
-                fg = th["chrome_ink"]       # a minimized chip is not dimmed (D-25)
-            state = _ui_draw.ON if focused else _ui_draw.REST
-            if not _ui_draw.paint(sc, th, (x, y, w, h), "bar.item", state):
-                sc.rect(x, y, w, h, bg)
-                sc.rectb(x, y, w, h, th["chrome_ink"])
-            tx = x + (w - _ui_draw.text_width(label, fs, "ui")) // 2
-            sc.print(label, tx, y + (h - line_h) // 2, fg, 1)
+        self._draw_look_chips(sc, th, fs, line_h)
 
     def _draw_look_chips(self, sc, th, fs, line_h):
         """The taskbar chips as the look's tabs (docs/look_2026-10.md step 14):

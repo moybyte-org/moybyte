@@ -19,8 +19,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 DT = 1 / 30
@@ -816,14 +816,6 @@ def test_the_current_line_wears_the_current_mark_and_the_value_bar(tmp_path):
     ed.row = 3
     drv.frame(DT)
     assert _w(cv, mx, mid) == surface and _w(cv, mx, mid + 3 * lay.lh) == value
-
-
-def test_a_theme_without_a_depth_keeps_its_code_tab(tmp_path):
-    ws, _drv, lay, _ed = _look_ws(tmp_path, "night", "dark")
-    cv = ws.sys_canvas
-    mid = lay.y0 + lay.lh // 2
-    bg = cv._col(ws.code_layer._t["bg"])
-    assert _w(cv, lay.cx, mid) == _w(cv, lay.x0 + 10 * lay.cell, mid) == bg
 
 
 def _band(cv, x0, x1, y, h):

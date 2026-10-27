@@ -23,8 +23,8 @@ from ws_helpers import boot_on_fixture
 
 @pytest.fixture(autouse=True)
 def _on_the_night_fixture(monkeypatch):
-    """These pin the lookless pixel bar and its coordinates: every
-    workstation here boots on the `night` fixture (ws_helpers)."""
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
     boot_on_fixture(monkeypatch)
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -94,7 +94,7 @@ def test_the_private_panel_button_copy_is_gone(tmp_path):
 
 def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
     """Every chrome button on the code tab is a `ui_draw.chip`, and every symbol-
-    palette key is a `ui_draw.cell`; the find strip is a `ui.field` of the verbs.
+    palette key is a `ui_draw.button`; the find strip is a `ui.field` of the verbs.
     Counted with the tool palette AND the find strip open -- the states no golden
     enters."""
     from runtime import ui_draw
@@ -107,7 +107,7 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
     cl._find_open = False
     _frame(ws)
     keys = len(cl._symbols())
-    assert counter.n["cell"] == keys          # the symbol palette
+    assert counter.n["button"] == keys        # the symbol palette
     assert counter.n["chip"] == 1             # the always-visible TLS toggle
 
     counter.reset()
@@ -117,7 +117,7 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
     _frame(ws)
     # TLS + one per tool; the find strip's field and Aa are the verbs'.
     assert counter.n["chip"] == 1 + len(cl._TOOLS)
-    assert counter.n["cell"] == keys
+    assert counter.n["button"] == keys
     assert cl._ov_host.box("find") is not None and cl._ov_host.box("case") is not None
     # the responsive "LN n, COL n" band: its ground, then its text on the
     # code's column

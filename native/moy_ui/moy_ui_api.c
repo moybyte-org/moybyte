@@ -862,7 +862,7 @@ static void band(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_box_t b, int st
     // draws a rule
     const moy_ui_marks_t *m = moy_ui_marks();
     int st = m->style[MOY_UI_MARK_PART];
-    int fills = m->on && m->active && (st == MOY_UI_FOCUS_INVERT || st == MOY_UI_FOCUS_EDGE);
+    int fills = m->active && (st == MOY_UI_FOCUS_INVERT || st == MOY_UI_FOCUS_EDGE);
     int after_mark = (c->grp_prev & MOY_UI_F_FOCUS) && fills;
     int own = (marks & MOY_UI_F_FOCUS) && fills;
     // a row the page's foot cuts inside its fade draws no rule: the fade
@@ -1151,8 +1151,8 @@ void moy_ui_api_label(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t tex
     if (!clip_row(&k, s, b, stacked, c->page)) {
         return;
     }
-    // a group's row, or a label on a depth's ground: the parts' ink
-    if ((stacked && c->grp_open) || (o->ink == MOY_UI_O_NONE && moy_ui_depth()->on)) {
+    // a group's row, or a label on the page's ground: the parts' ink
+    if ((stacked && c->grp_open) || o->ink == MOY_UI_O_NONE) {
         band(c, s, b, stacked, 0);
         moy_ui_vrow_t r;
         vrow_init(c, &r, text);

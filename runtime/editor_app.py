@@ -855,14 +855,10 @@ class EditorApp:
 
     def _open_mark(self, cv, r):
         """The open tab's mark on the narrow bar, the home's bar tabs' own: the
-        theme's current mark as a pill (a theme without marks: the tab's ON
-        field). The ink its icon and name take, None for the chrome ink."""
-        th = self.ws.theme_colors
-        if _ui_draw.marks_on():
-            fs = self._zone_scale()
-            return _ui_draw.current(cv, th, r, r=5 * fs, fs=fs)
-        _ui_draw.tab(cv, th, r, True)
-        return th["selection_ink"]
+        theme's current mark as a pill. The ink its icon and name take, None
+        for the chrome ink."""
+        fs = self._zone_scale()
+        return _ui_draw.current(cv, self.ws.theme_colors, r, r=5 * fs, fs=fs)
 
     def _set_icon(self, cv, ink=None, open_kind=None, open_ink=None, lead=False):
         """A tab's icon_draw: the theme's icon set's slot for a ladder kind,

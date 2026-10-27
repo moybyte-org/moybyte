@@ -143,8 +143,7 @@ def draw_new_art(cv, th, rect, r, stepped, spec, fs=1):
     a filled cover's does where a thin line at `r` reads square (design
     review R5-10, F6-04)."""
     x, y, w, h = rect
-    d = _ui_draw.depth()
-    if d[0] and not d[6]:
+    if not _ui_draw.depth()[5]:
         line = 2 * fs
         cv.rrect(x, y, w, h, r + line, th.get("border", 0), stepped=stepped)
         cv.rrect(x + line, y + line, w - 2 * line, h - 2 * line, r, th.get("surface", 0),
@@ -431,7 +430,7 @@ class Launcher:
                 break
         p = side + gap
         grow = _GROW[1] if desk else _GROW[0]
-        return _Cells(side, depth[2] if depth[0] else 0, lay.cx + margin, lay.cy + top,
+        return _Cells(side, depth[1], lay.cx + margin, lay.cy + top,
                       p, side + room, rows, (avail - 1) // p + 1, band, hints, None,
                       side + base - _ui_draw.font()[3] * fs, side,
                       grow, desk)
@@ -746,7 +745,7 @@ class Launcher:
         if c.r:
             cv.rrect(pic[0], pic[1], pic[2], pic[3], r, None, ring=th.get("edge", 0))
         else:
-            self._card_frame(cv, pic, False)
+            self._card_frame(cv, pic)
         if focus:
             _ui_draw.focus(cv, self.theme, pic, size="card", r=r, flat=True)
         self._draw_title(cv, it, x + n // 2, y + c.title_dy, c.title_w, focus)
@@ -783,7 +782,7 @@ class Launcher:
         initial on the colour block that stays the cart's
         (`ui_draw.initial_cover`)."""
         _ui_draw.initial_cover(cv, rect, r, it.get("title") or "",
-                               bool(_ui_draw.depth()[5]))
+                               bool(_ui_draw.depth()[4]))
 
     def _draw_hh_cover(self, cv, it, rect, centre, r=None, div=_COVER_BASE):
         """A card's picture: the whole cover (decode `div`) scaled to the
@@ -792,7 +791,7 @@ class Launcher:
         the caller has them."""
         if r is None:
             r = self._corner_r(rect[2])
-        stepped = bool(_ui_draw.depth()[5])
+        stepped = bool(_ui_draw.depth()[4])
         cover = None
         if self.cover_for is not None:
             dim = self._dims(centre)
@@ -819,7 +818,7 @@ class Launcher:
             r = self._corner_r(rect[2])
         if it.get("type") in PSEUDO_TILE_TYPES:
             draw_new_art(cv, self.theme or {}, rect, r,
-                         bool(_ui_draw.depth()[5]),
+                         bool(_ui_draw.depth()[4]),
                          self.icon_spec() if self.icon_spec is not None else None,
                          self.layout.fs)
         else:
@@ -834,25 +833,17 @@ class Launcher:
         x, y, w, _h = rect
         fs = self.layout.fs
         sz = max(14 * fs, 16, 12 * _lb.unit()) | 1      # odd: the star centres on a pixel
-        d = _ui_draw.depth()
-        pad = max(2 * fs, (d[2] // 2 + 2) if d[0] else 0)
+        pad = max(2 * fs, _ui_draw.depth()[1] // 2 + 2)
         return (x + w - sz - pad, y + pad, sz, sz)
 
-    def _card_frame(self, cv, rect, selected, ring=None):
-        """A card's thin border where a theme has no depth (square cards),
-        and its focus ring where the theme has no marks."""
-        NAMES = self._NAMES
+    def _card_frame(self, cv, rect):
+        """A card's thin border where the theme's cards are square (`card_r`
+        0)."""
         th = self.theme or {}
         fs = self.layout.fs
         x, y, w, h = rect
         for i in range(fs):
-            cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i,
-                     th.get("border", NAMES["black"]))
-        if selected and not _ui_draw.marks_on():
-            color = ring if ring is not None else th.get("focus", NAMES["yellow"])
-            for i in range(max(2, fs)):
-                d = fs + 1 + i
-                cv.rectb(x - d, y - d, w + 2 * d, h + 2 * d, color)
+            cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, th.get("border", self._NAMES["black"]))
 
     # -- the selected card's words -------------------------------------------
 
@@ -1315,8 +1306,8 @@ class Carousel(Launcher):
         shelf = hero // 2
         spare = max(0, hints[1] - cy - top - block - cap_h - shelf)
         d = _ui_draw.depth()
-        blur = d[9] if d[0] and d[6] else 0
-        down = max(ring, blur + d[11])
+        blur = d[8] if d[5] else 0
+        down = max(ring, blur + d[10])
         # the caption SHELF_GAP under the details, the spare height under the
         # shelf; a height short of that splits what it has, keeping the
         # shelf's lift and shadow off the strip
@@ -1753,11 +1744,8 @@ class Carousel(Launcher):
         """The corner radius of a card `side` across under the theme's depth:
         on the handheld its `card_r` on the hero and 7/10 of it on a
         neighbour, on the desk `card_r` on the shelf and 7/5 of it on the
-        hero; 0 without one."""
-        d = _ui_draw.depth()
-        if not d[0]:
-            return 0
-        r = d[2]
+        hero."""
+        r = _ui_draw.depth()[1]
         g = self._geom()
         if g[9] is not None:              # the desk's
             return r * 7 // 5 if side > g[2] else r
@@ -1795,8 +1783,7 @@ class Carousel(Launcher):
 
     def _draw_shelf_caption(self, cv):
         """The shelf's caption over its first card: the tab and its count,
-        apart by a dot, in the dim ink on the home's ground under a depth,
-        on the bar's plate in its ink without one."""
+        apart by a dot, in the dim ink on the home's ground."""
         th = self.theme or {}
         fs = self.layout.fs
         dk = self._geom()[9]
@@ -1809,10 +1796,6 @@ class Carousel(Launcher):
         sep = 6 * fs
         nw = _ui_draw.print_width(name, sc)
         dim = th.get("ink_dim", 6)
-        if not _ui_draw.depth()[0]:
-            w = nw + 2 * sep + sc + _ui_draw.print_width(count, sc)
-            cv.rect(x - sep, y - 3 * fs, w + 2 * sep, lh + 6 * fs, th.get("bar", 0))
-            dim = th.get("chrome_ink_dim", 6)
         cv.print_scaled(name, x, y, dim, sc)
         x += nw + sep
         cv.rect(x, _dot_top(y, sc, sc), sc, sc, dim)
@@ -1836,7 +1819,7 @@ class Carousel(Launcher):
                              self._favorite_badge_geom(hero),
                              bool(self.favorite_for(it)))
         if not self._corner_r(hero[2]):
-            self._card_frame(cv, hero, False)
+            self._card_frame(cv, hero)
 
     def _paint_hh(self, cv, sheet_for, r):
         """The handheld home's band (docs/look_2026-10.md step 17): every
@@ -1897,16 +1880,8 @@ class Carousel(Launcher):
         name, tw, parts, ws_, mw = cap[2], cap[3], cap[4], cap[5], cap[6]
         was = _ui_draw.print_font()
         ink, dim = th.get("ink", 7), th.get("ink_dim", 6)
-        if not _ui_draw.depth()[0]:
-            pw = min(bw, max(tw, mw) + 16 * fs)
-            px, py = bx + (bw - pw) // 2, ty - 3 * fs
-            ph = my + mh + 3 * fs - py
-            cv.rect(px, py, pw, ph, th.get("bar", 0))
-            for k in range(fs):
-                cv.rectb(px - k, py - k, pw + 2 * k, ph + 2 * k, th.get("border", 0))
-            ink, dim = th.get("chrome_ink", 7), th.get("chrome_ink_dim", 6)
         wall = self.wall_ink
-        if wall is not None and _ui_draw.depth()[0]:
+        if wall is not None:
             ink = dim = wall[0]
         tx = bx + (bw - tw) // 2
         swap = _ui_draw.print_font(fid)
@@ -1952,18 +1927,16 @@ class Carousel(Launcher):
 
     def _draw_home_card(self, cv, it, rect, centre, sheet_for):
         NAMES = self._NAMES
-        th = self.theme or {}
         # The centre card at rest takes the theme's focus mark (ui.focus; a
-        # lifted card draws raised, `_mark_rect`); a theme without marks rings it.
-        marks = _ui_draw.marks_on()
-        rest = centre and not self.moving and marks
+        # lifted card draws raised, `_mark_rect`).
+        rest = centre and not self.moving
         mark = rest and not self.tab_focus
         # On the desk the selected card is the one the details pane
         # describes: under touch, and while the tabs or the pane's buttons
         # hold the focus, it keeps its lift as a current mark (design review
         # R4-09); the theme's focus mark is the shelf's own focus.
         sel = rest and self.desk() and (self.tab_focus or _ui_draw.input_kind() == "touch"
-                                        or not _ui_draw.marks()[1])
+                                        or not _ui_draw.marks()[0])
         at = rect
         if mark or sel:
             at = self._mark_rect(cv, rect, sel)
@@ -1977,10 +1950,8 @@ class Carousel(Launcher):
             _draw_star_badge(cv, NAMES, self.theme or {},
                              self._favorite_badge_geom(rect),
                              bool(self.favorite_for(it)))
-        ring = th.get("author", 0) if it.get("type") in PSEUDO_TILE_TYPES \
-            else None
         if not cr:
-            self._card_frame(cv, rect, centre and not marks, ring=ring)
+            self._card_frame(cv, rect)
         if mark or sel:
             _ui_draw.focus(cv, self.theme, at, size="card", r=cr,
                            after=True, selected=sel)
@@ -2019,7 +1990,7 @@ class IconHome(Launcher):
         p = t + gap
         cols = max(1, (lay.cw - margin) // p)
         py = t + room
-        return _Cells(t, depth[2] if depth[0] else 0,
+        return _Cells(t, depth[1],
                       lay.cx + (lay.cw - cols * p) // 2 + gap // 2, lay.cy + top, p, py,
                       max(1, (band[3] - top - 1) // py + 1), cols, band, hints, caption,
                       title_dy, p, _GROW[0], desk)
@@ -2090,7 +2061,7 @@ class IconHome(Launcher):
         if c.r:
             cv.rrect(pic[0], pic[1], pic[2], pic[3], r, None, ring=th.get("edge", 0))
         else:
-            self._card_frame(cv, pic, False)
+            self._card_frame(cv, pic)
         if focus:
             _ui_draw.focus(cv, self.theme, pic, size="card", r=r, flat=True)
 
@@ -2146,10 +2117,10 @@ class IconHome(Launcher):
 
 def _wall_ink(ws):
     """(white, black) where the home lies on a wallpaper -- a cart or a
-    picture, pixels the theme does not know -- under a theme with a depth,
-    else None: its text is then white over a black shadow, as the desk's
-    labels are (docs/look_2026-10.md steps 25 and 28)."""
-    if ws.look.wallpaper_id is None or not _ui_draw.depth()[0]:
+    picture, pixels the theme does not know -- else None: its text is then
+    white over a black shadow, as the desk's labels are
+    (docs/look_2026-10.md steps 25 and 28)."""
+    if ws.look.wallpaper_id is None:
         return None
     black, white = ws.look.live.fixed[2:]
     return white, black
@@ -2844,7 +2815,7 @@ class LauncherHomeLayer:
 
     def _sel_rect(self):
         """The desk home's hero and details pane with all they cast (the
-        hero's shadow, a button's focus mark, a legacy ground's plate),
+        hero's shadow, a button's focus mark),
         between the bar and the shelf's band: what a change of the
         selection repaints."""
         g = self.grid
@@ -2852,10 +2823,8 @@ class LauncherHomeLayer:
         q = g.quiet()[0]
         d = _ui_draw.depth()
         m = _ui_draw.mark_reach("part") + 1
-        if not d[0]:
-            m += 12 + lay.fs                 # the legacy ground's plate
-        elif d[6]:
-            m += d[9] + max(abs(d[10]), abs(d[11]))   # the hero's shadow
+        if d[5]:
+            m += d[8] + max(abs(d[9]), abs(d[10]))    # the hero's shadow
         x0 = max(lay.cx, q[0] - m)
         y0 = max(lay.cy, q[1] - m)
         x1 = min(lay.cx + lay.cw, q[0] + q[2] + m)
@@ -3374,20 +3343,10 @@ class LauncherHomeLayer:
             return
         it = g.items[g.nearest()]
         th = ws.theme_colors
-        fs = ws.layout.fs
         dk = g._geom()[9]
         dx, dw, hy = dk[1], dk[2], dk[6]
         ts, ms, ks, vs, bh, block, u = dk[5]
         ink, dim = th["ink"], th["ink_dim"]
-        if not _ui_draw.depth()[0]:
-            # a legacy ground is any colour: the pane on the bar's plate
-            p = 12 // u
-            cv.rect(dx - p, hy, dw + 2 * p, block, th["bar"])
-            for k in range(fs):
-                cv.rectb(dx - p - k, hy - k, dw + 2 * (p + k), block + 2 * k, th["border"])
-            ink, dim = th["chrome_ink"], th["chrome_ink_dim"]
-            dx += p
-            dw -= 2 * p
         name = it.get("title") or ""
         if it.get("type") == NEW_TILE_TYPE:
             name = "New"
@@ -3601,18 +3560,12 @@ class LauncherHomeLayer:
         typing = getattr(self.ws, "search_typing", False)
         if self.searchable and (query or typing):
             n = 0
-        if not _ui_draw.depth()[0]:
-            # a legacy ground is any colour: the strip on the bar's band
-            x, y, w, h = rect
-            cv.rect(x, y, w, h, th["bar"])
-            cv.rect(x, y, w, self.ws.layout.fs, th["border"])
         desk = self.grid.desk()
         pad = self._hint_pad()
         if n:
             _ui_draw.hints(cv, th, self._hint_inner(rect), items[:2 * n], desk)
         elif self.searchable and (query or typing):
-            ink = th["ink"] if _ui_draw.depth()[0] else th["chrome_ink"]
-            self._draw_search(cv, th, ink)
+            self._draw_search(cv, th, th["ink"])
         for v, x0, _x1 in spans:
             if v == "tabs":
                 left = x0 - (rect[0] + self._hint_lead())
@@ -4033,7 +3986,7 @@ class LauncherHomeLayer:
 
     def _draw_zone_tabs(self, cv, rect):
         """The tabs in the bar (step 17): the active one under the current
-        mark (a theme without marks: its selection), the rest in the dim
+        mark, the rest in the dim
         chrome ink; while the keys are the tab row's, the focus pill on the
         one they are on (`focused_tab`), its plate under the label and its
         ring round the plate, so the focused tab and the open one read
@@ -4041,28 +3994,19 @@ class LauncherHomeLayer:
         ws = self.ws
         th = ws.theme_colors
         fs = ws.layout.fs
-        marks = _ui_draw.marks_on()
         sc, _h, pad, _gap = self._zone_tab_metrics()
         at = self.focused_tab()
         u = _lb.unit()
         for tid, label, r in self.zone_tabs(rect):
             on = tid == self.grid.tab
             ink = th["chrome_ink_dim"]
-            if on and marks:
+            if on:
                 got = _ui_draw.current(cv, th, r, r=5 * fs, fs=fs)
                 ink = th["chrome_ink"] if got is None else got
-            elif on:
-                cv.rect(r[0], r[1], r[2], r[3], th["selection"])
-                ink = th["selection_ink"]
             if tid == at:
-                if marks:
-                    _ui_draw.focus(cv, th, r, r=5 * fs, fs=u, pill=True)
-                    if not on:
-                        ink = th["chrome_ink"]
-                else:
-                    for k in range(max(2, fs)):
-                        cv.rectb(r[0] - k, r[1] - k, r[2] + 2 * k, r[3] + 2 * k,
-                                 th["focus"])
+                _ui_draw.focus(cv, th, r, r=5 * fs, fs=u, pill=True)
+                if not on:
+                    ink = th["chrome_ink"]
             if sc == fs:
                 # the line centred on the plate, as the bar's clock is on the bar,
                 # so the two share a baseline
@@ -4070,7 +4014,7 @@ class LauncherHomeLayer:
             else:
                 lh = _ui_draw.font()[2] * sc
                 cv.print_scaled(label, r[0] + pad, r[1] + (r[3] - lh) // 2, ink, sc)
-            if tid == at and marks:
+            if tid == at:
                 _ui_draw.focus(cv, th, r, r=5 * fs, fs=u, after=True, pill=True)
 
     def _zone_action_rects(self, rect):
