@@ -145,6 +145,13 @@ store write for an app nobody edited — a write is a floor plus the payload
 `commit()` (see "The bar contract" below) is its forced twin for an explicit
 exit GESTURE: the bar's back, or the WM strip's X on the windowed tier.
 
+`idle_step()` is optional too: work that must not land in a draw -- a file
+read, a decode -- that the app owes while `idle_owed` is True. The console
+calls it on a frame it has nothing to paint (the idle branch that warms the
+home's covers), once a frame, for the first app that owes; the app asks for
+the frame that shows the result through `ctx.damage`. My Art makes its cards'
+pictures this way, so its draw shows only pictures already made.
+
 This replaced a ladder in `go_home()` that named four apps and four different
 verbs. An app persisting on a debounce that nobody added to that list lost the
 kid's work -- the same shape as the bar bug, one level down. Neither list exists

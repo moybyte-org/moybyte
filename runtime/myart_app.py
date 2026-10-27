@@ -2,6 +2,7 @@
 #   MyArtLayout                   the page's rects: the caption, the grid, a desk's foot
 #   MyArtAppLayer                 the My Art app: the drawings as cards
 #   MyArtAppLayer.draw            the frame: the grid, a card's menu, the pages
+#   MyArtAppLayer.idle_step       one owed picture made, on a frame with nothing to paint
 #   MyArtAppLayer._verb           a drawing's verbs: open, wallpaper, game, rename, trash
 """My Art -- the drawings' page, which Paint's Open... and Files' Art open
 alike, drawn with the public UI API's verbs (docs/ui_api_2026-10.md; the
@@ -9,7 +10,9 @@ look's docs/media/look_2026-10/APPS_RESTYLE.md, My Art).
 
 The drawings are cards, three a row on the handheld and five on the desk,
 each its drawing at 4:3 read a row at a time from its file
-(`artwork.DrawingCovers`) and its name; New drawing is the first card. The
+(`artwork.DrawingCovers`) and its name; New drawing is the first card. A
+picture is made off the paint path, one on each frame the console has
+nothing to paint (`idle_step`), and a card shows it from the frame after. The
 drawing that is the wallpaper wears the `wallpaper` badge, and the caption
 says it. Enter (a tap) opens a drawing in Paint; M opens a card's menu --
 Open in Paint, Use as wallpaper, Put in a game... (a 320 x 240 drawing),
@@ -141,6 +144,8 @@ class MyArtAppLayer:
         self._caption = None          # (count, wallpaper, left, right, right's width)
         self._foot_k = None           # the desk foot as `_foot_of` made it
         self._whole = (0, 0, 0, 0)    # the page's rect, the canvas's
+        self._owed = []               # (name, w, h): the cards drawn whose picture is owed
+        self.idle_owed = False        # the console's idle step has a picture to make
 
     def is_app(self, cart):
         """True only for the shipped My Art identity, not a renamed or copied
@@ -203,6 +208,19 @@ class MyArtAppLayer:
         self.menu = False
         self.renaming = None
         self.game = None
+        del self._owed[:]
+        self.idle_owed = False
+
+    def idle_step(self):
+        """One owed picture made, on a frame the console has nothing to
+        paint (docs/app_api_v1.md): the card it lands on draws it next frame.
+        A cover is a file read and a decode -- most of a second for a large
+        drawing on a P4 -- so the draw only ever shows what is made."""
+        if self._owed:
+            name, w, h = self._owed.pop(0)
+            self.covers.get(name, w, h)
+            self._damage.all()
+        self.idle_owed = bool(self._owed)
 
     def has_page(self):
         return self.menu or self.renaming is not None or self.game is not None
@@ -452,11 +470,16 @@ class MyArtAppLayer:
         if r[4] & ui.ACTIVATED:
             self._verb("new")
         menu = self.menu
+        covers = self.covers
+        owed = self._owed
+        del owed[:]
         for c in self._cards_of():
             name = c[0]
             r = ui.card(c[1], "", c[3] if menu and name == self.cur else c[2])
             if r[2]:
-                pic = self.covers.get(name, r[2], r[3])
+                if covers.owed(name, r[2], r[3]):
+                    owed.append((name, r[2], r[3]))
+                pic = covers.peek(name, r[2], r[3])
                 if pic is not None:
                     cv.clip(g[0], g[1], g[2], g[3])
                     cv.picture(pic, r[0], r[1], r[2], r[3])
@@ -466,6 +489,7 @@ class MyArtAppLayer:
         ui.grid()
         ui.end()
         ui.scroll()
+        self.idle_owed = bool(owed)
 
     def _menu_rows(self, keys):
         name = self.cur

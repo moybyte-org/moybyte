@@ -646,6 +646,29 @@ class DrawingCovers:
                     self._checked.pop(old, None)
         return bmp
 
+    def peek(self, name, w, h, kind="drawings"):
+        """The picture `get` answers for `name` at w x h as it stands, read
+        from no file: None where there is none yet (or its file is broken)."""
+        got = self._got.get(name)
+        if got is not None:
+            for e in got:
+                if e[0] == w and e[1] == h and e[3] == kind:
+                    return e[2]
+        return None
+
+    def owed(self, name, w, h, kind="drawings"):
+        """Whether `get` has a read to make for `name` at w x h: no picture
+        at that size yet, or one not checked against its file since
+        `recheck`."""
+        if name not in self._checked:
+            return True
+        got = self._got.get(name)
+        if got is not None:
+            for e in got:
+                if e[0] == w and e[1] == h and e[3] == kind:
+                    return False
+        return True
+
     def forget(self, name=None):
         """Drop the pictures of `name` (all, with none): its file changed."""
         if name is None:

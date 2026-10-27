@@ -2,6 +2,8 @@
 and its verbs, on the public UI API (docs/media/look_2026-10/APPS_RESTYLE.md,
 My Art)."""
 
+import os
+
 from runtime import artwork, host_app, moy_carts
 
 _DT = 1.0 / 30.0
@@ -24,11 +26,21 @@ def _frames(ws, n=3):
         ws.frame(_DT)
 
 
+def _idle(ws, n=40):
+    """Frames with nothing marked: the console's idle branch, where My Art
+    makes the pictures its cards owe (an unlock banner on a wall clock
+    would hold the frames painting)."""
+    ws._toast_until = 0
+    for _ in range(n):
+        ws.frame(_DT)
+
+
 def _open(ws):
     app = ws._apps_by_id["myart"]
     assert ws.open_app(app)
     _frames(ws)
     assert ws.wm.top_kind() == "myart"
+    _idle(ws)
     return app
 
 
@@ -85,12 +97,48 @@ def test_a_reopen_decodes_only_the_drawings_that_changed(tmp_path, monkeypatch):
     _open(ws)
     assert len(decoded) == 2, "a drawing no app wrote was decoded again"
     ws.go_home()
+    path = moy_carts.file_path("drawings", "rocket", ws.carts_root)
+    was = os.stat(path).st_mtime
     _draw(ws, "rocket", c=2)            # another app writes it meanwhile
+    os.utime(path, (was, was))          # ...in the same second: the page keeps its order
     _frames(ws)
     _open(ws)
     assert len(decoded) == 3
     assert app.covers.get("rocket", 88, 66).pix[0] == 2
     assert app.covers.get("garden", 88, 66).pix[0] == 8
+
+
+def test_the_pictures_are_made_on_idle_frames_one_a_frame_never_in_a_draw(
+        tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    for i, c in enumerate((1, 2, 3)):
+        _draw(ws, "pic%d" % i, c=c)
+    made = []
+    real = artwork.read_cover
+    app = ws._apps_by_id["myart"]
+    draw = app.draw
+
+    def drawing(dt):
+        app._in_draw = True
+        try:
+            return draw(dt)
+        finally:
+            app._in_draw = False
+
+    def read_cover(blob, pix, w, h):
+        assert not getattr(app, "_in_draw", False), "a picture made inside the draw"
+        made.append(ws._frames_drawn)
+        return real(blob, pix, w, h)
+    monkeypatch.setattr(artwork, "read_cover", read_cover)
+    monkeypatch.setattr(app, "draw", drawing)
+    assert ws.open_app(app)
+    _frames(ws)
+    assert made == [] and app.idle_owed, "the cards drew without their pictures"
+    _idle(ws)
+    assert len(made) == 3 and not app.idle_owed
+    assert len(set(made)) == 3, "one picture a frame, each shown by a paint of its own"
+    _frames(ws)
+    assert len(made) == 3 and not app.idle_owed, "every card drew its picture"
 
 
 def test_an_empty_page_offers_new_drawing(tmp_path):

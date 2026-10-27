@@ -4771,8 +4771,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             # Nothing to paint. Spend the frame warming the next cover instead
             # (#155) -- after two quiet frames, so the gap between two gestures
             # is not spent on a 108ms flash read. This is the ONLY work the idle
-            # branch does, and it never dirties anything: the visible cards are
-            # built by the draw path, the prefetch is for the ones off-screen.
+            # branch does. The warmers dirty nothing (the home's visible cards
+            # are built by the draw path, the prefetch is for the ones
+            # off-screen); an app's idle step asks for the frame that shows
+            # what it made, through its own damage.
             self._quiet_frames += 1
             if self._quiet_frames > 2:
                 # NOTHING HERE MAY RAISE. This branch runs on a frame with no
@@ -4796,6 +4798,10 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     desk = self._editor_desk
                     if desk is not None:
                         desk.warm_step()        # the desk Editor's next workspace
+                    for app, _t in self._apps:  # ... and an app's owed work (My Art's pictures)
+                        if getattr(app, "idle_owed", False):
+                            app.idle_step()
+                            break
                     if getattr(self.launcher_layer, "_cap_owed", None) is not None:
                         self.launcher_layer.capture_due()
                 except Exception as exc:  # noqa: BLE001 -- an idle tick never ends a session
