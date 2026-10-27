@@ -205,6 +205,7 @@ class EditorApp:
     def __init__(self, ws, names=None):
         self.ws = ws
         self._NAMES = names
+        self._row_memo = None         # (inputs, the desk row's layout)
         self.project = None           # the open cart's workspace (set by open())
         # Stage 4 (#46 zoned bar): bumped whenever the active tab ACTUALLY changes --
         # the ONLY thing that varies in the Editor's lent left zone (which icon is
@@ -751,8 +752,19 @@ class EditorApp:
         labelled where the row is short; undo and redo at a fixed place, a
         hairline, then the Play slot, which never changes width.
         ([(id, label, kind, rect, labelled)], undo rect, redo rect,
-        hairline x, Play slot)."""
+        hairline x, Play slot). Kept for its inputs: the rect, the scale, the
+        workspace shown and the look (its fonts and metrics measure the
+        labels)."""
         fs = self._zone_scale()
+        key = (tuple(rect), fs, desk.key, self.ws.look.look_gen)
+        got = self._row_memo
+        if got is not None and got[0] == key:
+            return got[1]
+        out = self._row_layout_of(rect, desk, fs)
+        self._row_memo = (key, out)
+        return out
+
+    def _row_layout_of(self, rect, desk, fs):
         x, y, w, h = rect
         play_r = (x + w - _PLAY_SLOT * fs, y, _PLAY_SLOT * fs, h)
         ic = _BAR_ICON * fs
