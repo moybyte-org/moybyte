@@ -1095,6 +1095,9 @@ DESC_LINES = 3       # the desk home's description: at most this many lines,
 DESC_EMS = 48        # ... as wide as this many n's: about 60 characters of
                      # running text, the width of the buttons' row
 _MENU_KEYS = ("back", "Close")   # the strip under the system menu
+# The strip while the keys are on the tab row: left and right move the focus
+# along it, confirm opens the tab it is on, back comes off the row.
+_TAB_ROW_KEYS = ("change", "Move", "confirm", "Open", "back", "Back")
 _CONFIRM_KEYS = ("confirm", "Choose", "back", "Cancel")   # under the delete confirm
 
 
@@ -2537,6 +2540,7 @@ class LauncherHomeLayer:
         self._lhover = (-1, -1)       # the last pointer sample (a release is not a move)
         self._back_tip = False        # a mouse rests on the bar's way back to the desk
         self._hold = None             # a press on a card: [index, x, y, ms held]
+        self._tab_at = None           # the tab the keys are on, on the tab row
         self._tab_focus = False       # keys drive the tab row (up from the carousel)
         # Drag-scroll PARTIAL repaint bookkeeping (#58/#66: a FULL home repaint
         # measured ~100-140ms on BOTH boards' glass -- backdrop + panel + cards
@@ -2615,11 +2619,38 @@ class LauncherHomeLayer:
         """Up goes on to the bar from the tab row (Workstation._bar_keys)."""
         return bool(self._tab_keys)
 
+    def _tab_ids(self):
+        """The ids of the tabs the row shows, left to right."""
+        return [t[0] for t in self.tab_rects()] or [t for t, _l in HOME_TABS]
+
+    def focused_tab(self):
+        """The tab the keys are on while the tab row has them (it opens on
+        confirm), else None."""
+        if not self._tab_keys:
+            return None
+        ids = self._tab_ids()
+        at = self._tab_at
+        return at if at in ids else self.grid.tab
+
+    def _tab_step(self, d):
+        """The tab row's focus `d` tabs along, stopping at its ends; the
+        open tab stays until a confirm."""
+        ids = self._tab_ids()
+        at = self.focused_tab()
+        k = ids.index(at) + d if at in ids else 0
+        k = max(0, min(len(ids) - 1, k))
+        if ids[k] != self._tab_at:
+            self._tab_at = ids[k]
+            self._zone_bump += 1
+            self.ws.mark_dirty()
+
     @_tab_focus.setter
     def _tab_focus(self, on):
         # one focus mark a screen: the tab row's takes it from the cards
         if on != getattr(self, "_tab_keys", None):
             self._zone_bump = getattr(self, "_zone_bump", 0) + 1
+            g = self._grid_or_none()
+            self._tab_at = g.tab if on and g is not None else None
         self._tab_keys = on
         if on:
             self._btn = None
@@ -2714,7 +2745,8 @@ class LauncherHomeLayer:
             ws.look.wallpaper_id, modal_keys(ws),
             getattr(ws, "search_query", ""), getattr(ws, "search_typing", False),
             getattr(ws, "search_typing", False) and ws.can_type(),
-            self.grid.tab, self._tab_focus, self._button_focus, self.grid.arrangement,
+            self.grid.tab, self._tab_focus, self._tab_at, self._button_focus,
+            self.grid.arrangement,
             self.grid.statics_sel(), self._back_tip)
 
     def _retained_key(self, cv):
@@ -2970,7 +3002,8 @@ class LauncherHomeLayer:
         typing = getattr(ws, "search_typing", False)
         base = (bd, cv.w, cv.h, ws.layout.fs, ws.look.look_gen, g._geom(),
                 ws.look.wallpaper_id, modal_keys(ws), getattr(ws, "search_query", ""),
-                typing, typing and ws.can_type(), self._tab_focus, self._back_tip)
+                typing, typing and ws.can_type(), self._tab_focus, self._tab_at,
+                self._back_tip)
         items = g.items
         it = items[g.nearest()] if items else None
         st = ws.system
@@ -3392,11 +3425,14 @@ class LauncherHomeLayer:
         tabs = [(tid, label, _TAB_ICON[tid]) for tid, label in HOME_TABS]
         _ui_draw.tab_row(cv, th, grid.tabs_rect(), tabs, grid.tab,
                     icon_for=getattr(ws, "_icon_image_keyed", None), ink=th["ink"])
-        if self._tab_focus:
+        at = self.focused_tab()
+        if at is not None:
             for tid, r, _on in rects:
-                if tid == grid.tab and _ui_draw.marks_on():
-                    _ui_draw.focus(cv, th, r, fs=fs)
-                elif tid == grid.tab:
+                if tid == at and _ui_draw.marks_on():
+                    u = _lb.unit()
+                    _ui_draw.focus(cv, th, r, r=5 * fs, fs=u, pill=True)
+                    _ui_draw.focus(cv, th, r, r=5 * fs, fs=u, after=True, pill=True)
+                elif tid == at:
                     for k in range(max(2, fs)):
                         d = fs + k
                         cv.rectb(r[0] - d, r[1] - d, r[2] + 2 * d, r[3] + 2 * d,
@@ -3793,6 +3829,8 @@ class LauncherHomeLayer:
         if wall is not None:
             th = self._wall_theme(th, wall[0])
         keys = modal_keys(self.ws)
+        if keys is None and self._tab_keys:
+            keys = _TAB_ROW_KEYS
         if keys is not None:
             # the system menu's card or the delete confirm is up over the
             # home: the keys it takes, never the home's verbs
@@ -3877,6 +3915,9 @@ class LauncherHomeLayer:
         ch = chr(k).lower()
         if ch in ("q", "e"):
             self.ws.step_home_tab(-1 if ch == "q" else 1, self.grid)
+            if self._tab_keys:
+                self._tab_at = self.grid.tab
+                self._zone_bump += 1
             return True
         if ch == _FAVOURITE_KEY:
             return self.toggle_favourite()
@@ -3917,13 +3958,20 @@ class LauncherHomeLayer:
             return self._handle_search_typing(i)
         ws.ach_ui.konami_watch(i)
         if self._tab_focus:
-            # The tab row (up from the carousel): left/right switch tabs,
-            # down or enter returns to the row.
+            # The tab row (up from the carousel): left and right move the
+            # focus along it and stop at its ends, confirm opens the tab it
+            # is on and takes the keys to its cards, down returns to them.
             if i.pressed("left"):
-                ws.step_home_tab(-1, self.grid)
+                self._tab_step(-1)
             if i.pressed("right"):
-                ws.step_home_tab(1, self.grid)
-            if i.pressed("down") or i.pressed("a") or i.pressed("run"):
+                self._tab_step(1)
+            if i.pressed("a") or i.pressed("run"):
+                at = self.focused_tab()
+                self._tab_focus = False
+                if at != self.grid.tab:
+                    ws.set_home_tab(at, self.grid)
+                ws.mark_dirty()
+            elif i.pressed("down"):
                 self._tab_focus = False
                 ws.mark_dirty()
             if i.pressed("b") and ws.ach_ui._konami_pos == 0:
@@ -4235,13 +4283,17 @@ class LauncherHomeLayer:
     def _draw_zone_tabs(self, cv, rect):
         """The tabs in the bar (step 17): the active one under the current
         mark (a theme without marks: its selection), the rest in the dim
-        chrome ink, the focus mark on the active one while the keys are the
-        tab row's."""
+        chrome ink; while the keys are the tab row's, the focus pill on the
+        one they are on (`focused_tab`), its plate under the label and its
+        ring round the plate, so the focused tab and the open one read
+        apart."""
         ws = self.ws
         th = ws.theme_colors
         fs = ws.layout.fs
         marks = _ui_draw.marks_on()
         sc, _h, pad, _gap = self._zone_tab_metrics()
+        at = self.focused_tab()
+        u = _lb.unit()
         for tid, label, r in self.zone_tabs(rect):
             on = tid == self.grid.tab
             ink = th["chrome_ink_dim"]
@@ -4251,9 +4303,11 @@ class LauncherHomeLayer:
             elif on:
                 cv.rect(r[0], r[1], r[2], r[3], th["selection"])
                 ink = th["selection_ink"]
-            if on and self._tab_focus:
+            if tid == at:
                 if marks:
-                    _ui_draw.focus(cv, th, r, fs=fs)
+                    _ui_draw.focus(cv, th, r, r=5 * fs, fs=u, pill=True)
+                    if not on:
+                        ink = th["chrome_ink"]
                 else:
                     for k in range(max(2, fs)):
                         cv.rectb(r[0] - k, r[1] - k, r[2] + 2 * k, r[3] + 2 * k,
@@ -4265,6 +4319,8 @@ class LauncherHomeLayer:
             else:
                 lh = _ui_draw.font()[2] * sc
                 cv.print_scaled(label, r[0] + pad, r[1] + (r[3] - lh) // 2, ink, sc)
+            if tid == at and marks:
+                _ui_draw.focus(cv, th, r, r=5 * fs, fs=u, after=True, pill=True)
 
     def _zone_action_rects(self, rect):
         """{verb: rect} of the verb chips in the lent bar zone, flush left in

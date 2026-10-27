@@ -1105,6 +1105,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._ball_src = None
         self._ball_ax = self._ball_ay = 0
         self._ball_at = 0
+        self._ball_axis = 0             # the axis a roll is stepping on: 1 x, 2 y
+        self._ball_axis_at = 0          # its last pulse
         self._ball_qx = self._ball_qy = 0
         self._ball_run = False
         self._ball_down = None
@@ -3998,6 +4000,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         return False
 
     BALL_STEP = 2           # trackball pulses a step, on the roll's stronger axis
+    BALL_TURN = 4           # pulses a step across a roll takes while it rolls
+    BALL_ROLLING_MS = 150   # a roll stops this long after its axis's last pulse
     BALL_QUEUE = 3          # steps a fast roll may owe
     BALL_IDLE_MS = 300      # a pause this long forgets a partial step
 
@@ -4077,22 +4081,35 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 
     def _ball_roll(self, dx, dy):
         """Pulses toward the steps a roll owes: a reversal or a pause starts
-        the axis over, and a step on one axis forgets the other's."""
+        the axis over, and a step on one axis forgets the other's. While a
+        roll steps on one axis (a pulse on it in the last BALL_ROLLING_MS) a
+        step across it takes BALL_TURN pulses, so a roll along a row that
+        drifts a pulse or two across it stays on the row (the home's tabs
+        never walk onto the bar by a sideways roll); once it stops, a turn
+        steps as any roll does."""
         now = _ticks_ms()
         if _ticks_diff(now, self._ball_at) > self.BALL_IDLE_MS:
             self._ball_ax = self._ball_ay = 0
         self._ball_at = now
+        if (dx if self._ball_axis == 1 else dy if self._ball_axis == 2 else 0):
+            self._ball_axis_at = now
+        elif _ticks_diff(now, self._ball_axis_at) > self.BALL_ROLLING_MS:
+            self._ball_axis = 0
         ax, ay = self._ball_ax, self._ball_ay
         ax = dx if (dx > 0) != (ax > 0) and dx else ax + dx
         ay = dy if (dy > 0) != (ay > 0) and dy else ay + dy
         n, cap = self.BALL_STEP, self.BALL_QUEUE
-        if abs(ax) >= abs(ay) and abs(ax) >= n:
+        nx = self.BALL_TURN if self._ball_axis == 2 else n
+        ny = self.BALL_TURN if self._ball_axis == 1 else n
+        if abs(ax) >= abs(ay) and abs(ax) >= nx:
+            self._ball_axis, self._ball_axis_at = 1, now
             k = int(abs(ax) // n)
             q = self._ball_qx + (k if ax > 0 else -k)
             self._ball_qx = max(-cap, min(cap, q))
             ax = ax - k * n if ax > 0 else ax + k * n
             ay = 0
-        elif abs(ay) >= n:
+        elif abs(ay) >= ny and abs(ay) > abs(ax):
+            self._ball_axis, self._ball_axis_at = 2, now
             k = int(abs(ay) // n)
             q = self._ball_qy + (k if ay > 0 else -k)
             self._ball_qy = max(-cap, min(cap, q))

@@ -370,11 +370,11 @@ def test_up_takes_the_keys_to_the_tab_row(tmp_path):
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.launcher_layer._tab_focus
-    drv.press("right")                                   # the next tab
+    drv.press("right")                                   # the focus on the next tab
     drv.frame(1 / 30)
     drv.frame(1 / 30)
-    assert ws.launcher.tab == "mine"
-    drv.press("down")                                    # back to the row
+    assert ws.launcher_layer.focused_tab() == "mine" and ws.launcher.tab == "games"
+    drv.press("run")                                     # opens it, back to the row
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert not ws.launcher_layer._tab_focus

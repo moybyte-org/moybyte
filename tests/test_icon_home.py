@@ -142,6 +142,10 @@ def test_keys_and_taps_are_the_grids(tmp_path):
     drv.press("right")
     drv.frame(1 / 30)
     drv.frame(1 / 30)
+    assert home.focused_tab() == "mine" and g.tab == "games"
+    drv.press("run")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
     assert g.tab == "mine"
     home._tab_focus = False
     ws.set_home_tab("games")

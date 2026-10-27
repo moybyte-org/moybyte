@@ -778,7 +778,9 @@ Every one of these was learned by hanging or bricking a board.
   (`cart_keys`) reads them as both. A roll of the trackball is those
   directions, and its click Enter, on every surface but a running cart, a
   canvas and a caret (`Workstation.ball`, the "ball" input source;
-  `docs/ui_api_2026-10.md` says which). A menu over a text surface takes the
+  `docs/ui_api_2026-10.md` says which); mid-roll a step across the roll's
+  axis takes a firmer turn, so a roll along the home's tabs stays on them
+  (`Workstation.BALL_TURN`). A menu over a text surface takes the
   keys out of text mode while it shows (`Workstation._menu_keys`). A key already down when the
   matrix starts, or when a surface turns to text, types nothing until it is
   pressed again, and `_set_text_mode(True)` seeds every typed-key edge with

@@ -587,6 +587,19 @@ widgets it is one height, the system tile's and its ring, centred across the
 bar (`BarLayer._pill`); on the zone's targets it is their rect and a ring
 round it.
 
+**The home's tab row is its own line** (owner call 2026-10-27). Left and
+right move a focus along the tabs and stop at the row's ends; only up goes
+on to the bar. Confirm opens the tab the focus is on and takes the keys to
+its cards, down and back leave the row as it was, Q and E open the
+previous and the next tab at once, and a tap opens a tab at once
+(`LauncherHomeLayer.focused_tab`). The focused tab wears the pill and the
+open one its current mark, so the two read apart; the hint strip names the
+row's keys meanwhile. A trackball roll steps on its stronger axis, and
+mid-roll the other axis takes `Workstation.BALL_TURN` pulses, so a roll
+along the tabs that drifts a pulse or two up stays on them; a pause frees
+it (`Workstation._ball_roll`). The Editor's tab ladder keeps switching on
+the move.
+
 ## 9. The safety rule, and what the loader checks
 
 **The rule.** A layout places `menu` and `zone` somewhere
@@ -793,9 +806,9 @@ card (the desk's hero) or a verb (a hint, a desk button). T-Deck: left/right
 move the carousel by a card with the drag's glide (the handheld's 6-frame
 slide), run through the same `flinging` path as a touch fling
 (`_drag_partial`), so a held key is one continuous motion; up moves focus to
-the tabs in the bar, where left/right switch tabs and down or enter
-returns; the trackball is the same four directions and its click is
-enter. On the desk a key or a
+the tabs in the bar, where left/right move the focus along them, enter
+opens the focused tab and down returns (§8); the trackball is the same
+four directions and its click is enter. On the desk a key or a
 tap on a shelf card selects it at once and the shelf glides to show it two
 cards in; a drag scrolls the shelf and selects nothing; up from the shelf
 puts the focus on the details pane's first button, where left/right move

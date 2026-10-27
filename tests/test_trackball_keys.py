@@ -29,7 +29,9 @@ def _drv(tmp_path):
 
 
 def _roll(drv, dx, dy, pulses):
-    """`pulses` frames of a one-pulse roll, then the frames its presses take."""
+    """`pulses` frames of a one-pulse roll, then the frames its presses take.
+    Each is a roll of its own, after the last one stopped."""
+    drv.ws._ball_axis_at -= drv.ws.BALL_ROLLING_MS + 1
     drv.pan(dx, dy)
     for _ in range(pulses):
         drv.frame(1 / 30)
