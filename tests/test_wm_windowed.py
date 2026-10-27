@@ -4239,6 +4239,31 @@ def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path):
         assert a == b, _bbox(_differ(a, b), ws.sys_canvas.w)
 
 
+def test_a_stopped_runs_card_rides_over_its_playtest(tmp_path):
+    """A run stopped in its window (a crash): the stop card's open and each
+    move are the popover's frames alone, as the pause menu's are, and every
+    buffer holds the bytes the whole-repaint path leaves."""
+    ws, drv, ring = _pause_desk(tmp_path / "ride")
+    ref, rdrv, rring = _pause_desk(tmp_path / "ref", ride=False)
+
+    def crash(w):
+        w.cart_error = "TypeError: a bench stop"
+        w.pause.stop()
+    steps = (crash,
+             lambda w: _pause_key(w, "down"),
+             lambda w: _pause_key(w, "down"),
+             lambda w: _pause_key(w, "up"))
+    for i, step in enumerate(steps):
+        step(ws)
+        step(ref)
+        stacks = ring.settle(drv, 12)
+        rring.settle(rdrv, 12)
+        assert ws.pause.open and ws.pause.stopped
+        assert stacks and set(stacks) == {"pop"}, (i, stacks)
+        for a, b in zip(ring.bufs, rring.full(rdrv)):
+            assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+
+
 # -- a drag over other windows draws them only where the desk was laid -------
 
 def _drag_over(tmp_path, theme, under):

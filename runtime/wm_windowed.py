@@ -1951,17 +1951,24 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return False
         win = self._wins.get(self._focus) if self._focus is not None else None
         if ws.pause.open:
-            # The pause menu over its playtest's window, the game composited
-            # (not drawn on the glass itself) and held.
+            # The pause menu (or a stopped run's card) over its playtest's
+            # window, the game composited (not drawn on the glass itself) and
+            # held.
             game = self._wins.get("desktop")
             return (not m.open and game is not None and not game.minimized
-                    and ws.canvas is not ws.sys_canvas and ws.player.paused
+                    and ws.canvas is not ws.sys_canvas and self._game_held()
                     and (win is None or win is game))
         if not (m.open and m.comp is None and "desktop" not in self._wins):
             return False
         return (win is None or win.minimized
                 or (self._order[-1] == self._focus and win.buf is not None
                     and win.ctx is not None))
+
+    def _game_held(self):
+        """The playtest's game holds its frame: paused, or a stopped run
+        under its card."""
+        ws = self.ws
+        return ws.player.paused or (ws.pause.open and ws.pause.stopped)
 
     def _wash_rects(self):
         """The rects the riding scrim washes: the pause menu's, or the
@@ -2459,7 +2466,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return self._quiet_stack        # the FPS chip rides the player window
         settled = not quiet and self._settled(still)
         if (follows and settled and (self._calm() or self._pop_holds_input())
-                and ("desktop" not in self._wins or ws.player.paused)
+                and ("desktop" not in self._wins or self._game_held())
                 and getattr(self._root_canvas, "copy_last", None) is not None):
             self._repeating = same_pop
             self._wash_repeats = same_wash
@@ -2483,12 +2490,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _still(self):
         """No input, overlay, gesture or cursor asks this frame to change
         anything but a running game and the popover (the riding pause menu
-        one)."""
+        one, or a stopped run's riding card)."""
         ws = self.ws
         return (not ws._dirty
                 and (self._cache_sig & ~(578 if self._pause_rides() else 66)) == 0
                 # FPS chip (bit 2), popover (64), the riding pause menu (512)
-                and ws.cart_error is None
+                and (ws.cart_error is None or self._pause_rides())
                 and self._drag is None and self._drag_armed is None
                 and self._resize is None
                 and not getattr(ws.pointer, "visible", False))
