@@ -294,17 +294,18 @@ class CardsLayer:
             ws.bar_layer._draw_status_strip("menu")
             self._draw_prompt(True, dt)
             return
-        try:
-            self._draw_cards()
-        except Exception as exc:  # noqa: BLE001
-            # A malformed card (e.g. a bad tiles/choices entry) must NOT escape the
-            # frame loop -- the device would hang silently with no error surface. Fall
-            # back to a readable page (on the SYSTEM canvas, where this layer lives);
-            # the unified bar (drawn below) keeps the context X reachable so the kid
-            # can exit.
-            ws.cart_error = self._err_text(exc)
-            print("Moybyte cards error:", exc)
-            self._draw_broken(ws.cart_error)
+        if p is None or not held.last(ws, ws.sys_canvas, self._page_rect(), dt):
+            try:
+                self._draw_cards()
+            except Exception as exc:  # noqa: BLE001
+                # A malformed card (e.g. a bad tiles/choices entry) must NOT escape the
+                # frame loop -- the device would hang silently with no error surface.
+                # Fall back to a readable page (on the SYSTEM canvas, where this layer
+                # lives); the unified bar (drawn below) keeps the context X reachable
+                # so the kid can exit.
+                ws.cart_error = self._err_text(exc)
+                print("Moybyte cards error:", exc)
+                self._draw_broken(ws.cart_error)
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
@@ -313,6 +314,8 @@ class CardsLayer:
         # editor's blk_kbd prompt (chrome, then any modal on top).
         if self.prompt is not None:
             self._draw_prompt(False, dt)
+        else:
+            held.shown(ws, ws.sys_canvas, self._page_still(), dt)
 
     def _page_rect(self):
         lay = self.layout
@@ -353,6 +356,10 @@ class CardsLayer:
             page = self.page()
             if (i.pressed("run") or i.pressed("a")) and not page.on_door():
                 ws.defer(ws._leave_menu)   # Enter PLAYs (a device's Enter is "a")
+                return True
+            if page.open_door(i):
+                if self.prompt is not None:
+                    self._held.opened(ws)  # Cart info over the page as it was
                 return True
             if page.keys(i):
                 ws._dirty = True

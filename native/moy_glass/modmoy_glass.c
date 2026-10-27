@@ -795,6 +795,9 @@ typedef struct {
 
 static const mp_obj_type_t glass_banded_type;
 
+static bool glass_copy(mp_obj_t ppa, mp_obj_t dst, mp_obj_t src, mp_int_t W, mp_int_t H,
+                       mp_int_t *r);
+
 static mp_obj_t banded_make_new(const mp_obj_type_t *type, size_t n_args,
                                 size_t n_kw, const mp_obj_t *args) {
     enum { ARG_panel, ARG_nfbs, ARG_async };
@@ -1028,6 +1031,26 @@ static void banded_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     dest[1] = MP_OBJ_SENTINEL;          // the locals dict
 }
 
+// copy_last(x, y, w, h) -> True once that rect of the buffer the last frame
+// drew into is in the one this frame draws into: a row memcpy, the feeder
+// reading the same buffer alongside. With one buffer the last frame's is the
+// drawn-into one: True, nothing copied. False before a frame was presented.
+static mp_obj_t banded_copy_last(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    glass_banded_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    mp_int_t r[4] = { mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]) };
+    int l = moy_banded_last(&c->b);
+    if (l < 0) {
+        return mp_const_false;
+    }
+    if (l != c->b.back) {
+        glass_copy(mp_const_none, c->fbs[c->b.back], c->fbs[l], c->w, c->h, r);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(banded_copy_last_obj, 5, 5, banded_copy_last);
+
 static const mp_rom_map_elem_t banded_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_size), MP_ROM_PTR(&banded_size_obj) },
     { MP_ROM_QSTR(MP_QSTR_framebuffer), MP_ROM_PTR(&banded_back_obj) },
@@ -1040,6 +1063,7 @@ static const mp_rom_map_elem_t banded_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_backlight), MP_ROM_PTR(&banded_set_backlight_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&banded_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_bounce_stats), MP_ROM_PTR(&banded_bounce_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_last), MP_ROM_PTR(&banded_copy_last_obj) },
 };
 static MP_DEFINE_CONST_DICT(banded_locals, banded_locals_table);
 

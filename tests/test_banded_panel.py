@@ -33,6 +33,7 @@ def _lib():
             ("moy_glass_host_banded_present", [], ctypes.c_int),
             ("moy_glass_host_banded_fence", [], ctypes.c_int),
             ("moy_glass_host_banded_back", [], ctypes.c_int),
+            ("moy_glass_host_banded_last", [], ctypes.c_int),
             ("moy_glass_host_banded_overlap", [], ctypes.c_int),
             ("moy_glass_host_kick_err", [ctypes.c_int], None),
             ("moy_glass_host_log", [], ctypes.c_char_p)):
@@ -58,6 +59,10 @@ class Engine:
     @property
     def back(self):
         return self.lib.moy_glass_host_banded_back()
+
+    @property
+    def last(self):
+        return self.lib.moy_glass_host_banded_last()
 
     @property
     def overlap(self):
@@ -102,6 +107,17 @@ def test_the_ping_pong_walks_every_slot_and_wraps(n, expected):
         e.flush()
         seen.append(e.back)
     assert seen == expected
+
+
+@pytest.mark.parametrize("n, overlap", [(1, True), (2, True), (2, False), (3, True)])
+def test_the_last_buffer_is_the_one_the_last_presented_frame_drew_into(n, overlap):
+    # copy_last's source: none before a frame, then the buffer each flush took
+    e = Engine(nfbs=n, overlap=overlap)
+    assert e.last == -1
+    for _ in range(5):
+        drawn = e.back
+        e.flush()
+        assert e.last == drawn
 
 
 def test_the_overlap_needs_two_buffers_a_kick_and_the_flag():

@@ -46,6 +46,13 @@ int moy_banded_present(moy_banded_t *b) {
     return o->kick(o->ctx, front);
 }
 
+int moy_banded_last(const moy_banded_t *b) {
+    if (b->presents == 0) {
+        return -1;
+    }
+    return (int)((b->back + b->nfbs - 1u) % b->nfbs);
+}
+
 bool moy_banded_fence(moy_banded_t *b) {
     return b->ops->drain(b->ops->ctx);
 }

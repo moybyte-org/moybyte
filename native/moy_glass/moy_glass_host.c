@@ -181,6 +181,10 @@ int moy_glass_host_banded_back(void) {
     return host_banded.back;
 }
 
+int moy_glass_host_banded_last(void) {
+    return moy_banded_last(&host_banded);
+}
+
 int moy_glass_host_banded_overlap(void) {
     return host_banded.overlap;
 }

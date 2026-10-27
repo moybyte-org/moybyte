@@ -1905,10 +1905,18 @@ class HeldPage:
     what the page's pixels are a function of while the dialog is up (the
     dialog itself, the page's rect, the look); a key that differs, a page
     that was not still, anything animating, a canvas that retains nothing
-    or one drawing into a viewport of its buffer draws it whole."""
+    or one drawing into a viewport of its buffer draws it whole.
+
+    The first frame takes the page from the last frame instead of drawing
+    it where that frame drew it alone and still, with no dialog up
+    (`shown`), and the input that opened the dialog changed nothing else
+    in it with nothing reported before it (`opened`): `last` puts it back
+    from the buffer that frame drew into."""
 
     def __init__(self):
         self.key = None
+        self._shown = -1                # the frame that drew the page alone and still
+        self._over = -1                 # the frame a dialog opened over it first draws
 
     def put(self, ws, cv, rect, key, dt=0):
         """Put the held page back into `rect`: whether it was held under
@@ -1927,13 +1935,7 @@ class HeldPage:
         canvas keeps its pixels and draws into its whole buffer (a pane's
         viewport is copied from as the buffer it lies in, so it is not)."""
         self.key = None
-        if (not still or ws._animating(dt)
-                or getattr(cv, "begin_surface", None) is not None
-                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
-            return
-        vp = getattr(cv, "viewport", None)
-        if vp is not None and vp() != (0, 0, getattr(cv, "_stride", cv.w),
-                                       getattr(cv, "_bh", cv.h)):
+        if not still or ws._animating(dt) or not _whole_retained(cv):
             return
         lay = held_layer(ws, cv)
         if lay is None:
@@ -1946,6 +1948,49 @@ class HeldPage:
     def drop(self):
         """The dialog closed: the page is no longer held."""
         self.key = None
+
+    def shown(self, ws, cv, still, dt=0):
+        """This frame drew the page with no dialog up: noted where it was
+        `still` and is all the frame draws on a canvas that keeps it (no
+        banner, overlay, cursor or pill over it, nothing animating)."""
+        alone = getattr(ws.wm, "content_alone", None)
+        ok = (still and not getattr(cv, "covered", False) and alone is not None
+              and alone() and not ws._animating(dt) and _whole_retained(cv))
+        self._shown = ws._frames_drawn if ok else -1
+
+    def opened(self, ws):
+        """A dialog opened over the page from an input that changed nothing
+        else in it: its first frame may take the page from the last frame
+        (`last`), where that frame drew it (`shown`) and no change was
+        reported since (the console's `_dirty_in`)."""
+        f = ws._frames_drawn
+        self._over = f if self._shown == f - 1 and not ws._dirty_in else -1
+
+    def last(self, ws, cv, rect, dt=0):
+        """Put the page the last frame drew back into `rect` of the buffer
+        this frame draws into, on the first frame of the dialog `opened`
+        over it: whether it did (else the frame draws the page). One
+        retained buffer holds it already; more copy it out of the one that
+        frame drew into (`copy_last`)."""
+        over = self._over
+        self._over = -1
+        if over != ws._frames_drawn or ws._animating(dt) or not _whole_retained(cv):
+            return False
+        if cv.RETAINED_FRAMES == 1:
+            return True
+        cl = getattr(cv, "copy_last", None)
+        return cl is not None and bool(cl(rect[0], rect[1], rect[2], rect[3]))
+
+
+def _whole_retained(cv):
+    """Whether canvas `cv` keeps its pixels from frame to frame and draws
+    into its whole buffer (a pane's viewport is not its buffer)."""
+    if (getattr(cv, "begin_surface", None) is not None
+            or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+        return False
+    vp = getattr(cv, "viewport", None)
+    return vp is None or vp() == (0, 0, getattr(cv, "_stride", cv.w),
+                                  getattr(cv, "_bh", cv.h))
 
 
 # A console's held pages share one layer of its canvas's size,

@@ -8,11 +8,14 @@ turn, as a board's framebuffers are: once as it ships, and once with the
 hold off and the dialog washing the page itself (every frame draws the
 page, as before there was a hold), and holds the first's
 glass, picture by picture, to the second's bytes -- and that the hold put
-the page back on most of the session's frames, so it cannot silently stop."""
+the page back on most of the session's frames, so it cannot silently stop.
+The dialogs the keys open run on frames the gate lets through, as a
+board's, and their first frames take the page from the last frame's
+buffer (`HeldPage.last`) where it may."""
 
 import pytest
 
-from runtime import host_app, ui_draw
+from runtime import block_editor_ui, host_app, ui_draw
 from ws_helpers import no_unlock_banner, open_cart, quiesce
 
 # A game whose frames are a function of its frame count alone.
@@ -44,9 +47,16 @@ def _cart(ws, title):
     raise AssertionError(title)
 
 
-def _console(tmp_path, monkeypatch, bufs, ref, windowed):
-    puts = [0]
+def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
+    """A console whose presented frames are kept (`shots`) on `bufs`
+    buffers presented in turn; `ref`: the page drawn on every frame and
+    the dialog washing it. `force`: every frame paints (else only those
+    the gate lets through, as on a board). `puts` counts the frames that
+    put the held page back, and the first frames that took the page from
+    the last frame (`HeldPage.last`)."""
+    puts = [0, 0]
     real = ui_draw.HeldPage.put
+    real_last = ui_draw.HeldPage.last
 
     def put(self, *a, **k):
         if ref:
@@ -54,7 +64,15 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed):
         got = real(self, *a, **k)
         puts[0] += got
         return got
+
+    def last(self, *a, **k):
+        if ref:
+            return False
+        got = real_last(self, *a, **k)
+        puts[1] += got
+        return got
     monkeypatch.setattr(ui_draw.HeldPage, "put", put)
+    monkeypatch.setattr(ui_draw.HeldPage, "last", last)
     if ref:
         # the dialog washes the page itself, as one with no held page did
         monkeypatch.setattr(ui_draw, "wash_page", lambda: None)
@@ -79,14 +97,17 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed):
     def frame(n=1):
         for _ in range(n):
             k = ws._frames_drawn
-            ws._dirty = True
+            if force:
+                ws._dirty = True
             drv.frame(1 / 30)
             if ws._frames_drawn == k:
                 continue
             held.append(bytes(root._buf))
             shots.append(held[-1])
             if bufs > 1:
+                root._comp.last = held[-1]
                 root._buf[:] = held[-bufs] if len(held) > bufs else held[0]
+    frame.drv = drv
     return ws, frame, shots, puts
 
 
@@ -120,6 +141,107 @@ def _dialogs(ws, frame):
         cl._prompt_input(_Key(n))
         frame(2)
     cl._close_prompt()
+    frame(3)
+
+
+def _keyed(ws, frame):
+    """The dialogs as the keys open them: A on each Blocks slot down a
+    script, a prompt typed into and cancelled, a menu backed out of; then
+    Cart info, A on its door, typed into and cancelled."""
+    drv = frame.drv
+    ws.open_in_editor(_cart(ws, "Tap Game"))
+    ws.set_menu_view("blocks")
+    frame(4)
+    bu = ws.block_ui
+    prompts = menus = 0
+    opens = None                        # a row whose first slot A prompts for
+    for _ in range(14):
+        drv.press("down")
+        frame(3)
+        for step in (False, True):
+            if step:
+                drv.press("right")
+                frame(3)
+            drv.press("a")
+            frame(3)
+            if bu.blk_kbd is not None:
+                prompts += 1
+                if not step:
+                    opens = bu.blocks_ed.cur
+                for ch in "12":
+                    drv.type_char(ord(ch))
+                    frame(2)
+                bu._blk_kbd_cancel()
+                frame(3)
+                break
+            m = bu.blk_menu
+            if m is not None and block_editor_ui._NUM_LITERAL_ITEM in m["items"]:
+                # "type a number" from the chooser: the prompt over the
+                # page the menu has left
+                for _ in range(m["items"].index(block_editor_ui._NUM_LITERAL_ITEM)
+                               - m["sel"]):
+                    drv.press("down")
+                    frame(2)
+                drv.press("a")
+                frame(3)
+                assert bu.blk_kbd is not None
+                menus += 1
+                bu._blk_kbd_cancel()
+                frame(3)
+                break
+            if m is not None:
+                drv.press("b")
+                frame(3)
+    assert prompts >= 2 and menus >= 1
+    # the prompt opened with a move among its keys, after a move no frame
+    # painted, and under the trackball's cursor
+    assert opens is not None
+    for case in ("keys", "unpainted", "cursor"):
+        while bu.blocks_ed.cur != opens + 1:
+            drv.press("down" if bu.blocks_ed.cur < opens + 1 else "up")
+            frame(3)
+        if case == "keys":
+            drv.press("up")
+        elif case == "unpainted":
+            bu._blk_move_cursor(-1)
+            ws._dirty = True
+        else:
+            drv.press("up")
+            frame(3)
+            p = ws.pointer
+            p.move(12 - p.x, 190 - p.y)  # over the page, clear of the dialog
+            frame(3)
+            assert ws.pointer.visible
+        drv.press("a")
+        frame(3)
+        assert bu.blk_kbd is not None and bu.blocks_ed.cur == opens
+        drv.type_char(ord("7"))
+        if case == "cursor":
+            p.move(280, 0)              # off what it covered
+        frame(3)
+        bu._blk_kbd_cancel()
+        frame(3)
+    ws.pointer.visible = False
+    ws._dirty = True
+    frame(2)
+    ws.exit()
+    ws.open_in_editor(_cart(ws, "Star Catcher"))
+    ws.set_menu_view("cards")
+    frame(4)
+    page = ws.cards_layer.page()
+    for _ in range(12):
+        if page._focus == "Cart info":
+            break
+        drv.press("down")
+        frame(3)
+    assert page._focus == "Cart info"
+    drv.press("a")
+    frame(3)
+    assert ws.cards_layer.prompt is not None
+    for ch in "ab":
+        drv.type_char(ord(ch))
+        frame(2)
+    ws.cards_layer._close_prompt()
     frame(3)
 
 
@@ -166,6 +288,23 @@ def test_a_held_page_under_a_dialog_is_the_page_drawn(tmp_path, monkeypatch, buf
         assert puts == 0
     else:
         assert puts >= 20, "the hold put the page back on %d frames" % puts
+
+
+@pytest.mark.parametrize("bufs", (1, 2))
+def test_a_dialog_the_keys_open_takes_the_page_from_the_last_frame(tmp_path, monkeypatch,
+                                                                   bufs):
+    got = []
+    for ref in (False, True):
+        ws, frame, shots, puts = _console(tmp_path / str(ref), monkeypatch, bufs, ref,
+                                          False, force=False)
+        _keyed(ws, frame)
+        got.append((shots, puts))
+    (shots, puts), (want, _none) = got
+    assert len(shots) == len(want)
+    for i, (a, b) in enumerate(zip(shots, want)):
+        assert a == b, "frame %d of %d differs from the page drawn" % (i, len(shots))
+    assert puts[1] >= 3, "the last frame's page was taken on %d first frames" % puts[1]
+    assert puts[0] >= 6, "the hold put the page back on %d frames" % puts[0]
 
 
 @pytest.mark.parametrize("bufs", (1, 2))

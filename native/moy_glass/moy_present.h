@@ -48,6 +48,11 @@ void moy_banded_init(moy_banded_t *b, const moy_banded_ops_t *ops, int nfbs,
 int moy_banded_present(moy_banded_t *b);
 // Leave no panel transfer in flight.
 bool moy_banded_fence(moy_banded_t *b);
+// The buffer the last presented frame drew into, for a copy out of it into
+// the one this frame draws into (`copy_last`): the drawn-into buffer itself
+// with one; -1 before a frame was presented. A feeder still reading it
+// reads alongside the copy.
+int moy_banded_last(const moy_banded_t *b);
 
 // DSI (Waveshare P4): moy_dsi SCANS a PSRAM framebuffer continuously, so a
 // present is a zero-copy switch of the scanned buffer, not a transfer. With

@@ -925,7 +925,19 @@ dialog and Blocks' entry prompts hold their page; the pause and stop cards
 hold the run's frame washed beside the frame `_keep_under` keeps for the
 resumed game, whose layer is kept across cards and freed by the fit check
 the same way; where the game's frame is the system canvas (the handheld)
-an idle frame mints both, so no card's first frame does. The system menu
+an idle frame mints both, so no card's first frame does.
+
+**A dialog's first frame takes the page from the last frame where it can**
+(`HeldPage.shown`, `opened`, `last`): where the frame before drew the page
+with no dialog up, still and alone on the glass (no banner, overlay,
+cursor or pill over it, nothing animating), and the input that opened the
+dialog changed nothing else in the page -- A on a Blocks slot with no move
+among its keys, A on Cart info's door -- with no change reported since
+that frame (the console's `_dirty_in`, taken before the input's own), the
+first frame puts that page back from the buffer the frame drew into
+(`copy_last`, §14.6; one persistent buffer holds it already) instead of
+drawing it, then washes and holds it as above. A dialog a page's own draw
+opens (a tap on its link) draws the page, which drew this frame anyway. The system menu
 holds the handheld home the same way (`SystemMenuUI.put_home`): where the
 fullscreen WM draws the home and the menu's card alone, the whole frame
 under the card -- the bars, the washed content and the hint strip naming
@@ -937,9 +949,12 @@ before it.
 **This is not a second invalidation mechanism.** Whether a frame paints is
 still the gate's; the copy only says what the page already is. Pinned by
 `tests/test_held_page.py`: the dialogs typed into and moved, on the handheld
-and the desk, and the cards over a run, on one and two buffers presented in
-turn, every presented frame byte-equal to frames that draw the page and let
-the dialog wash it, and the hold put back on most of them.
+and the desk, the dialogs the keys open (after a move no frame painted, with
+a move among their keys, under the trackball's cursor), and the cards over
+a run, on one and two buffers presented in turn, every presented frame
+byte-equal to frames that draw the page and let the dialog wash it, the
+hold put back on most of them and the last frame's page taken on the first
+frames that may.
 
 ### 14.6 A frame the last one painted: the copy out of its buffer (2026-10-26)
 
@@ -952,13 +967,15 @@ this frame's picture, and copying it out is cheaper than drawing it again.
 
 **The backend verb is `copy_last(x, y, w, h)` on the root canvas**, bound
 from its compositor where that compositor names the buffer the last
-presented frame drew into, absent elsewhere (the S3s' banded compositor,
-the web's recording canvas and the rotated compositor have none). It copies
-the rect, in buffer coordinates, from that buffer into the one this frame
-draws into, after fencing any queued op still writing it
-(`moy_dsi_last`): whole rows through the AXI GDMA (`moy_ppa.copy`), any
-other rect a row copy on the CPU. One persistent buffer copies nothing; no
-frame yet answers False and the caller draws. It is the frame's first
+presented frame drew into (the P4s' DSI and rotated compositors, the S3s'
+banded one), absent elsewhere (the web's canvas, one persistent buffer,
+has none). It copies the rect, in buffer coordinates, from that buffer
+into the one this frame draws into: on a P4 after fencing any queued op
+still writing it (`moy_dsi_last`), whole rows through the AXI GDMA
+(`moy_ppa.copy`) and any other rect a row copy on the CPU; on an S3 a row
+copy on the CPU, the panel's feeder reading the same buffer alongside
+(`moy_banded_last`). One persistent buffer copies nothing; no frame yet
+answers False and the caller draws. It is the frame's first
 write to what it copies. The host compositor's `last` is a test's ring of
 buffers presented in turn.
 

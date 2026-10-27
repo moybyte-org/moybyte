@@ -199,6 +199,18 @@ class SettingsPage:
         """Whether the focus is on Cart info or Files, which A opens."""
         return self._focus in ("Cart info", "Files")
 
+    def open_door(self, i):
+        """A on Cart info or Files with no move among this frame's keys:
+        open it, as its link does, the page left as it was drawn. Whether
+        it did."""
+        if not (i.pressed("a") and self.on_door()):
+            return False
+        for n in ("up", "down", "left", "right", "b", "run"):
+            if i.pressed(n):
+                return False
+        self._doors[0 if self._focus == "Cart info" else 1]()
+        return True
+
     def point(self, px, py, click, down):
         """A pointer sample in the page's surface; a click on a picker's tile
         takes it."""

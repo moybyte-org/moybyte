@@ -1239,6 +1239,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._frame_dt_ms = 33.0      # last loop tick in ms (kinetic velocity, #113)
         self._pointer_dt_ms = 33.0    # ...as charged to the pointer SAMPLE (see
         self._stale_ptr_ms = 0.0      # _tick_pointer_dt), None while it's a repeat
+        self._dirty_in = True         # a change reported before this input (handle_input)
         self._press_owed = False      # a pointer press frame() marks dirty (handle_input)
         self._press_taken = False     # ...unless a popover's change took it (popover_touch)
         self._frame_requested = False # a draw asked for another frame (request_frame:
@@ -3687,6 +3688,9 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # this frame's keys before they can leak to the screen underneath; the active
         # content layer is at the bottom and always consumes.
         i = self.input
+        # Whether a change was reported since the last painted frame, before
+        # this input's own (`HeldPage.opened`).
+        self._dirty_in = self._dirty or self._press_owed
         # Multiplayer (#65): advance every extra player slot's press-edge for this
         # frame, aligned with the local InputState.begin_frame() the driver already
         # ran. A no-op (empty loop) with no extra controllers registered, so the
