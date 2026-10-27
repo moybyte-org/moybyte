@@ -462,6 +462,27 @@ def test_shadows_match_the_reference(case):
     assert got == want, _diff(got, want)
 
 
+@pytest.mark.parametrize("case", [
+    dict(x=0, y=0, w=150, h=6, alpha=102, col=0x0000),
+    dict(x=1, y=1, w=137, h=5, alpha=46, col=0x18a8),        # an odd start and width
+    dict(x=3, y=0, w=140, h=6, alpha=200, col=0xffff, hole=(40, 2, 30, 3, 0)),
+], ids=["scrim", "odd", "hole"])
+def test_a_long_run_matches_the_reference(case, monkeypatch):
+    """A row's run of 64 pixels or more at one weight (a scrim's) blends
+    through its tables, in the words the buffer holds."""
+    monkeypatch.setitem(globals(), "W", 150)
+    clip = (0, 0, 150, 6)
+    bg = [random.Random(9).randrange(65536) for _ in range(150 * 6)]
+    want = list(bg)
+    ref_shadow(want, case["x"], case["y"], case["w"], case["h"], 0, 0, 0, 0, case["col"],
+               case["alpha"], False, case.get("hole"), (0, 0), clip)
+    buf = _buf(bg)
+    _shadow(buf, case["x"], case["y"], case["w"], case["h"], 0, 0, 0, 0, case["col"],
+            case["alpha"], False, case.get("hole"), (0, 0), clip)
+    got = _words(buf)
+    assert got == want, _diff(got, want)
+
+
 def test_a_hole_is_left_alone():
     bg = _bg(8)
     buf = _buf(bg)

@@ -778,6 +778,33 @@ void moy_shape_shadow_pad(const moy_shape_shadow_t *s, int out[4]) {
     out[3] = imax(0, b + s->dy);
 }
 
+// A long run's tables, each channel's 32 or 64 results of over() at one
+// weight `a` of canonical `col`, as words the buffer holds: kept for the
+// next run at the same colour and weight (a scrim's every row).
+static struct {
+    uint16_t tr[32], tg[64], tb[32];
+    int col, a, swapped;
+} s_run = {{0}, {0}, {0}, -1, -1, -1};
+
+static void run_tables(uint16_t col, int a) {
+    if (s_run.col == col && s_run.a == a && s_run.swapped == s_swapped) {
+        return;
+    }
+    int iw = 256 - a;
+    int fr = ((col >> 11) & 31) * a + 128, fg = ((col >> 5) & 63) * a + 128,
+        fb = (col & 31) * a + 128;
+    for (int v = 0; v < 32; v++) {
+        s_run.tr[v] = wire((uint16_t)(((fr + v * iw) >> 8) << 11));
+        s_run.tb[v] = wire((uint16_t)((fb + v * iw) >> 8));
+    }
+    for (int v = 0; v < 64; v++) {
+        s_run.tg[v] = wire((uint16_t)(((fg + v * iw) >> 8) << 5));
+    }
+    s_run.col = col;
+    s_run.a = a;
+    s_run.swapped = s_swapped;
+}
+
 // Pixels [X0, X1) of a row at one weight `a` of canonical `col`, as the
 // per-pixel loop writes them (over, rounded). A long run blends through a
 // table of each channel's 32 or 64 results, the same sums over() makes.
@@ -801,20 +828,26 @@ static int shadow_run(uint16_t *row, int X0, int X1, uint16_t col, int a) {
         }
         return X1 - X0;
     }
-    int iw = 256 - a;
-    int fr = ((col >> 11) & 31) * a + 128, fg = ((col >> 5) & 63) * a + 128,
-        fb = (col & 31) * a + 128;
+    // Three lookups a pixel, into copies on the stack (internal RAM).
     uint16_t tr[32], tg[64], tb[32];
-    for (int v = 0; v < 32; v++) {
-        tr[v] = (uint16_t)(((fr + v * iw) >> 8) << 11);
-        tb[v] = (uint16_t)((fb + v * iw) >> 8);
+    run_tables(col, a);
+    memcpy(tr, s_run.tr, sizeof(tr));
+    memcpy(tg, s_run.tg, sizeof(tg));
+    memcpy(tb, s_run.tb, sizeof(tb));
+    uint16_t *p = row + X0, *e = row + X1;
+    if (s_swapped) {
+        // The words as the buffer holds them: each channel read straight off
+        // the swapped word, the tables' results swapped already.
+        for (; p < e; p++) {
+            uint16_t w = *p;
+            *p = (uint16_t)(tr[(w >> 3) & 31] | tg[((w & 7) << 3) | (w >> 13)]
+                            | tb[(w >> 8) & 31]);
+        }
+        return X1 - X0;
     }
-    for (int v = 0; v < 64; v++) {
-        tg[v] = (uint16_t)(((fg + v * iw) >> 8) << 5);
-    }
-    for (int X = X0; X < X1; X++) {
-        uint16_t c = can(row[X]);
-        row[X] = wire((uint16_t)(tr[c >> 11] | tg[(c >> 5) & 63] | tb[c & 31]));
+    for (; p < e; p++) {
+        uint16_t c = *p;
+        *p = (uint16_t)(tr[c >> 11] | tg[(c >> 5) & 63] | tb[c & 31]);
     }
     return X1 - X0;
 }
