@@ -51,9 +51,10 @@ hit-test is `ui.rect_in`. No circular import: this is a leaf (the only console t
 for a bare Launcher() that no caller ever constructs).
 
 The lent bar zone (#46): each home layer draws and taps it (`draw_zone`/`zone_tap`)
-and proxies its grid's `zone_gen` -- an int the grid bumps whenever its `sel` (a
-property) or `items` changes, so BarLayer's strip cache trusts one int instead of
-re-deriving "did the selection move". The zone carries the home's tabs.
+and answers its `zone_gen` -- one int of what the zone shows, the home's tabs (the
+open one and the tab row's focus), so BarLayer's strip cache trusts one int. The
+grid's own `zone_gen` (bumped whenever its `sel` or `items` changes) is the
+grid's.
 """
 
 
@@ -895,6 +896,7 @@ def _cover_div_for(side):
 HOME_TABS = (("games", "Games"), ("mine", "Mine"), ("apps", "Apps"),
              ("make", "Make"))
 _TAB_NAME = dict(HOME_TABS)
+_TAB_ORDER = {tid: i for i, (tid, _label) in enumerate(HOME_TABS)}
 _TAB_ICON = {"games": "run", "mine": "moy", "apps": "gear", "make": "edit"}
 _TAB_NOUN = {"games": ("GAME", "GAMES"), "mine": ("CART", "CARTS"),
              "apps": ("APP", "APPS"), "make": ("PROJECT", "PROJECTS")}
@@ -3915,9 +3917,11 @@ class LauncherHomeLayer:
 
     @property
     def zone_gen(self):
-        """Proxy onto the grid's zone_gen -- the GRID owns sel/items (the state
-        that actually varies the zone's pixels) -- plus the zone's own bump."""
-        return self.grid.zone_gen + self._zone_bump
+        """What the zone's pixels follow, as one int for the bar's strip key:
+        the open tab and the tab row's focus (`_zone_bump`). The zone draws
+        the tabs alone, so a selection moving along the row (a held key's
+        glide) leaves the bar's strip as it is."""
+        return self._zone_bump * 8 + _TAB_ORDER.get(self.grid.tab, 7)
 
     def zone_verbs(self):
         """The active tab's verbs on the selected card (§12's table): Games

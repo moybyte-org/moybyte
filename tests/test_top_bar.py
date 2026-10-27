@@ -532,11 +532,10 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
     assert calls[0] == 1, "after the re-render the new strip is reused"
 
 
-def test_zoned_bar_rerenders_on_launcher_selection_change(tmp_path):
-    """Moving the home's selection bumps zone_gen (via the `sel` property), so
-    the cached strip picks up the new card's verbs -- ONCE: the carousel's
-    glide leaves `sel` alone until the row settles (docs/shell_layout_2026-10.md
-    §12), so the moving frames reuse the strip."""
+def test_zoned_bar_follows_the_home_tabs_not_its_selection(tmp_path):
+    """The home's zone draws its tabs alone: moving the selection along the
+    row (a held key's glide) reuses the cached strip, whose pixels are the
+    ones a fresh render paints, and a tab switch renders it once."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -548,16 +547,29 @@ def test_zoned_bar_rerenders_on_launcher_selection_change(tmp_path):
         calls[0] += 1
         return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
-    ws.launcher.nav2d(1, 0)           # glide a card -> zone_gen bumps on settle
+    ws.launcher.nav2d(1, 0)
     ws._dirty = True
     for _ in range(60):
         drv.frame(1 / 30)
     assert not ws.launcher.moving and ws.launcher.sel == 1
-    assert calls[0] == 1, "a selection change must re-render the zoned bar once"
+    assert calls[0] == 0, "a selection the zone does not show re-rendered the bar"
+    bar = ws.layout.bars[0][1]
+    w = ws.sys_canvas.w
+
+    def strip():
+        return [drv.rgb888()[(y * w + bar[0]) * 3:(y * w + bar[0] + bar[2]) * 3]
+                for y in range(bar[1], bar[1] + bar[3])]
+    kept = strip()
+    ws.bar_layer.invalidate()
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert strip() == kept
+    calls[0] = 0
+    ws.set_home_tab("apps")
     for _ in range(3):
         ws._dirty = True
         drv.frame(1 / 30)
-    assert calls[0] == 1
+    assert calls[0] == 1, "a tab switch must re-render the zoned bar once"
 
 
 def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
