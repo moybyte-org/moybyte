@@ -164,6 +164,12 @@ if (scenario.device) {
     await cdp("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     await cdp("Emulation.setEmitTouchEventsForMouse", { enabled: true, configuration: "mobile" });
 }
+// {"scheme":"dark"|"light"}: the browser's prefers-color-scheme, which a console
+// with no saved theme boots in (page_tail.js moyScheme).
+if (scenario.scheme) {
+    await cdp("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-color-scheme", value: scenario.scheme }] });
+}
 // READY, not a guess: `#s` is the page's own status line, mirroring every
 // {t:"status"} the worker posts (worker.js's say()) -- "live" once boot()
 // has run and the first assets landed, or the terminal "needs a pin"/crash

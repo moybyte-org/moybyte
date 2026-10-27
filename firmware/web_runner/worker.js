@@ -18,7 +18,7 @@
 // JS replayer, the wire protocol and the per-surface delta are gone.
 //
 // Protocol -- main -> worker:
-//   {t:"init", search, coarse, channel}  boot the console; `search` is
+//   {t:"init", search, coarse, channel, scheme}  boot the console; `search` is
 //                        location.search (tier + cart), `coarse` the page's
 //                        (pointer: coarse), `channel` its MOY_CHANNEL
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
@@ -863,7 +863,7 @@ function crashMessage(e) {
              s: !stack ? msg : stack.startsWith(msg) ? stack : msg + "\n" + stack };
 }
 
-async function init(search, coarse, channel) {
+async function init(search, coarse, channel, scheme) {
     opfsNav = store.channelNav(navigator, channel);
     const qs = new URLSearchParams(search || "");
     // Read BEFORE the first fetch, not after: since 2026-08-25 the board's read
@@ -945,7 +945,11 @@ async function init(search, coarse, channel) {
     const bootArgs = (desktop
         ? ", None, " + dw + ", " + dh + ", True"
         : (cart ? ", cart=" + JSON.stringify(cart) : ""))
-        + (coarse ? ", coarse=True" : "");
+        + (coarse ? ", coarse=True" : "")
+        // The page's colour scheme (page_tail.js: ?scheme= or prefers-color-scheme):
+        // the theme variant of a first run. Anything else leaves the default.
+        + (scheme === "dark" || scheme === "light"
+            ? ", scheme=" + JSON.stringify(scheme) : "");
     // #9: does whoever served this page have PINS? ONE probe, here, before the
     // console exists -- so `pin_write`/`pin_read` are decided once and a cart
     // either has the names or has never heard of them. An empty batch is the
@@ -1592,7 +1596,7 @@ self.onmessage = async (ev) => {
     const m = ev.data;
     try {
         if (m.t === "init") {
-            await init(m.search, !!m.coarse, m.channel || "");
+            await init(m.search, !!m.coarse, m.channel || "", m.scheme);
         } else if (m.t === "input") {
             inbox.push(m.json);
         } else if (m.t === "ahead") {

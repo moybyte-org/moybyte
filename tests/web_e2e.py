@@ -78,6 +78,9 @@ FEATURES = {
                        and b"carts_link" in (DIST / "micropython.wasm").read_bytes()),
               "dist/ predates Get Carts in the browser (no carts pump, no file "
               "question, or no carts_link frozen in the wasm)"),
+    # The first-run theme: the page reads the scheme and hands it to the worker.
+    "firstrun": (lambda: "moyScheme" in (DIST / "index.html").read_text(),
+                 "dist/ predates the first-run theme"),
 }
 
 
@@ -228,14 +231,17 @@ def serve(site, port):
 
 
 def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000,
-        device=None):
+        device=None, scheme=None):
     """One browsershot scenario against `base` in the Chrome profile
     `profile`: (its stdout, every `js` step's value in order). `device` is
-    browsershot's phone/tablet shape ({"width", "height", "dpr", "mobile"})."""
+    browsershot's phone/tablet shape ({"width", "height", "dpr", "mobile"});
+    `scheme` the browser's prefers-color-scheme ("dark" or "light")."""
     path = tmp_path / ("%s.json" % name)
     scenario = {"query": query, "boot_ms": boot_ms, "steps": steps}
     if device:
         scenario["device"] = device
+    if scheme:
+        scenario["scheme"] = scheme
     path.write_text(json.dumps(scenario))
     r = subprocess.run(
         ["node", "browsershot.mjs", str(path), str(tmp_path / ("shots_" + name))],

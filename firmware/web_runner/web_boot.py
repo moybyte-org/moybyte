@@ -183,14 +183,16 @@ DESK_DIAGONAL_IN = 7.0
 
 
 def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
-         windowed=False, font_scale=0, hud=True, coarse=False):
+         windowed=False, font_scale=0, hud=True, coarse=False, scheme=None):
     """Build the shared Workstation over the RGB565 canvas + the VFS store.
     The page/harness wrote the cart bundle into `carts_root` before calling.
 
     `hud=False` suppresses the perf HUD -- see the note at the ws.show_fps
     assignment below for why a bundle would want that. `coarse` is the
     page's `(pointer: coarse)`: touch is then its input in use until a key
-    is pressed (WEB_TOUCH_INPUTS).
+    is pressed (WEB_TOUCH_INPUTS). `scheme` is the page's colour scheme ("dark"
+    or "light"): the theme variant of a first run, before the visitor has saved
+    one (`console.wire_workstation_core`'s `first_variant`).
 
     Two presentation TIERS out of one wasm binary (the page picks per tab), and
     both are now the SAME arrangement their hardware twin uses:
@@ -288,7 +290,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         ws, moy_carts, carts_root, _make_api,
         None,
         audio_out=_RunnerPump(), runtimes=runtimes, can_manage=True,
-        pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
+        pointer=console.Pointer(sysc.w, sysc.h), inp=inp, first_variant=scheme)
     # AUTHORING IS ON, BOTH TIERS (owner call): the browser build is the whole
     # console, not the player-only runner #151 originally scoped -- the Make tile
     # and the editors are the point. This used to add "and nothing persists

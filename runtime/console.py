@@ -482,7 +482,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # Same bare-or-package fallback as the surfaces above.
 try:
     from chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
-                        RESIZE_CURSORS, NAMES,
+                        RESIZE_CURSORS, NAMES, THEME_VARIANTS,
                         _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
                         _ICON, chrome_scale_floor,
                         chrome_scale_choices, _cursor_delta,
@@ -490,7 +490,7 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (_ticks_ms, _ticks_us, _ticks_diff, _err_text, CURSOR,
                                 RESIZE_CURSORS,
-                                NAMES, _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
+                                NAMES, THEME_VARIANTS, _CURSOR_BASE, _CURSOR_ACCEL, Layout, CodeLayout,
                                 _ICON,
                                 chrome_scale_floor, chrome_scale_choices,
                                 _cursor_delta, _clamp_scroll, _in, _SPLASH_MS)
@@ -5278,7 +5278,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
 def wire_workstation_core(ws, store, carts_root, make_api, wifi,
                           audio_out=None, runtimes=None, can_manage=None,
                           before_slim=None, pointer=None, inp=None,
-                          keyboard=None):
+                          keyboard=None, first_variant=None):
     """The board-agnostic Workstation service wiring, in the ONE canonical order
     every backend used to hand-copy (host build_workstation + both boards'
     run_desktop -- the P4 literally carried a "same order as host" comment).
@@ -5286,7 +5286,9 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     and hands them in; board glue that must land between the store hookup and
     the #66 cart diet (the T-Deck's _with_sd + OTA updater) goes through
     `before_slim(ws)`. can_manage defaults to "the store root is known"; the
-    host passes True. Ends with the three boot loads (system.json settings /
+    host passes True. `first_variant` ("dark" or "light") is the theme variant
+    a console with no saved `theme_variant` row boots in -- a page's colour
+    scheme; None keeps `DEFAULT_VARIANT`, and a saved row always wins. Ends with the three boot loads (system.json settings /
     icon theme / achievements) -- install a WindowedWM AFTER this returns, so
     the persisted font scale is applied before the root layout context is
     captured (#73/#58)."""
@@ -5316,6 +5318,8 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     if keyboard is not None:
         ws.keyboard = keyboard      # lets the code editor switch to text (ASCII) mode
         ws.sync_keyboard_mode()
+    if first_variant in THEME_VARIANTS:
+        ws.look.theme_variant = first_variant   # load_system's absent-row default
     ws.load_system()            # #28: system.json, the theme and its wallpaper
     try:                            # the console's level, the Settings row
         console_volume(int(ws.system.get("volume", 7)))

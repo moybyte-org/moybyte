@@ -289,8 +289,10 @@ def _seed_system_carts(carts_dir):
 
 
 def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
-                      windowed=False, panel_diagonal_in=None):
+                      windowed=False, panel_diagonal_in=None, first_variant=None):
     """Build the shared console.Workstation wired to host backends.
+    `first_variant` ("dark"/"light") is the theme variant of a first run, as
+    `console.wire_workstation_core` takes it.
 
     The two-domain seam (#39): `sys_size` is the SYSTEM canvas size (w, h) -- the
     panel/window the desktop renders on, responsive. The GAME canvas is always the
@@ -367,7 +369,8 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     console.wire_workstation_core(
         ws, moy_carts, carts_dir, make_api, make_wifi(moy_carts, carts_dir),
         audio_out=PcmPump(), runtimes=runtimes, can_manage=True,
-        pointer=console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h), inp=inp)
+        pointer=console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h), inp=inp,
+        first_variant=first_variant)
     # Multiplayer (#65): a host-side fake net transport (the sim's fake radio, for
     # net.*), so a "multiplayer"-permission cart runs in the sim. Unlinked here (a
     # solo desktop has no second console) -> send() drops; a test link()s two. The

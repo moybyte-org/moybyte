@@ -394,6 +394,15 @@ try {
   // whose build (site/build.py --channel) rewrites this one line. The worker
   // keeps that page's stores apart from the stable site's (moy_store.channelNav).
   const MOY_CHANNEL = "";
+  // The colour scheme a first-run console takes its theme variant from: the
+  // url's ?scheme=dark|light (the project site passes its visitor's), else the
+  // browser's own prefers-color-scheme.
+  function moyScheme() {
+    const q = new URLSearchParams(location.search).get("scheme");
+    if (q === "dark" || q === "light") return q;
+    return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark" : "light";
+  }
   // The worker url carries a CACHE BUSTER, and it is not superstition: browsers
   // cache worker scripts stubbornly, and a hard reload that refreshes the
   // document will happily keep an old worker.js. That is not hypothetical --
@@ -410,7 +419,8 @@ try {
   window.__moyAttach(w);
   // A coarse pointer is a finger: the console's hints start on touch.
   w.postMessage({ t: "init", search: location.search, channel: MOY_CHANNEL,
-                  coarse: !!(window.matchMedia && matchMedia("(pointer: coarse)").matches) });
+                  coarse: !!(window.matchMedia && matchMedia("(pointer: coarse)").matches),
+                  scheme: moyScheme() });
   // Leaving the page ends the VM with it. A page the back-forward cache keeps
   // keeps its worker too -- and on iOS that worker's wasm memory, so the next
   // console in the same tab (the desk's "small screen?" link) instantiates
