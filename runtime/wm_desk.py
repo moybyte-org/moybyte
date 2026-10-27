@@ -201,7 +201,8 @@ class _BackdropLayer(Layer):
         wm._draw_unders()
 
     def _desk_sig(self):
-        """Everything the desk's wallpaper + icon column depends on.
+        """Everything the desk's wallpaper + icon column depends on, the
+        layout's content rect among it (the bars a mode switch moves).
 
         Deliberately NOT the clock (repainted over the cache instead) and NOT
         ws.covers.gen: a cover landing in the picker would otherwise invalidate
@@ -209,9 +210,11 @@ class _BackdropLayer(Layer):
         compute -- no per-frame scan of the cart list."""
         ws = self.ws
         cv = ws.sys_canvas
+        lay = ws.layout
         return (cv.w, cv.h, ws.look.look_gen, ws.look.effective_font_scale(),
                 ws.look.wallpaper_id,
-                len(getattr(ws, "_apps", ())), len(ws.carts.all))
+                len(getattr(ws, "_apps", ())), len(ws.carts.all),
+                lay.cx, lay.cy, lay.cw, lay.ch)
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt, quiet=self.quiet())

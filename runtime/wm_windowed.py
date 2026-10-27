@@ -734,8 +734,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._root_ctx = _LayoutCtx.capture(ws)
         self._pop_reset()             # a relayout repaints what a popover covered
         if self._mode_switch:
+            # The desk's cache stays good: its signature carries the layout's
+            # content rect, so a switch that moves the desk's bars renders it
+            # again, and leave_console restarts its streak.
             self.content_gen += 1
-            self._backdrop_valid = False
             return
         if self._parked is not None:
             for win in self._parked.wins.values():
@@ -946,7 +948,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             elif p.stale.get(g):
                 self._prewarm(win)
         self._win_sig = None
-        self._desk_sig = None
+        self._desk_streak = 0             # every buffer holds the home
         ws._dirty = True
 
     def show_desk(self):

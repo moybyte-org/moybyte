@@ -24,7 +24,7 @@ import pytest
 import runtime  # noqa: F401  (registers the host's moy_ui)
 import moy_ui
 from runtime import gfx_binding as gfx
-from ws_helpers import use_theme
+from ws_helpers import no_unlock_banner, quiesce, use_theme
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 with open(os.path.join(ROOT, "native", "moy_ui", "style.json")) as _f:
@@ -262,6 +262,45 @@ def test_an_accent_change_keeps_the_desks_bake(tmp_path):
     for _ in range(4):
         drv.frame(1 / 30)
     assert ws.wallpaper.rasters == 3
+
+
+def test_the_desk_comes_back_from_console_mode_out_of_its_cache(tmp_path):
+    """PLAY and the home's X are a mode switch each: the desk's cache stays
+    good across them (its signature carries the layout's content rect), so
+    the way back stamps it instead of rendering the desk again, and the desk
+    it shows is the one a fresh render paints."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    windowed=True, panel_diagonal_in=7.0)
+    ws.bar_layer._clock_text = lambda: "10:30"
+    no_unlock_banner(ws)
+    quiesce(ws)
+    drv = host_app.ConsoleDriver(ws)
+    ws.look.set_theme("moy", variant="light")
+    ws.open_app(ws._apps_by_id["calc"])
+    for _ in range(6):
+        drv.frame(1 / 30)
+    assert not ws._animating(1 / 30)
+    desk = ws.wm._backdrop_layer
+    renders = []
+    draw = desk._draw_desktop
+    desk._draw_desktop = lambda dt: renders.append(1) or draw(dt)
+    ws.open_library()
+    for _ in range(6):
+        drv.frame(1 / 30)
+    assert ws.wm.mode == "console"
+    ws.open_desk()
+    for _ in range(6):
+        drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and "calc" in ws.wm._wins
+    assert renders == []
+    kept = drv.rgb888()
+    ws.wm._desk_sig = None                          # the desk rendered afresh
+    ws.mark_dirty()
+    for _ in range(6):
+        drv.frame(1 / 30)
+    assert renders == [1]
+    assert drv.rgb888() == kept
 
 
 def test_a_home_backdrop_rasters_once_under_the_carousel(tmp_path):
