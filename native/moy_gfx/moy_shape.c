@@ -1040,11 +1040,25 @@ int mg_tint(uint16_t *dst, size_t dcap, const uint16_t *src, size_t scap, int sw
     }
     int wt = (imax(0, imin(alpha, 255)) * 256 + 127) / 255;
     uint16_t c = can(col);
+    // over(c, b, wt) a channel at a time, through each channel's 32 or 64
+    // results (shadow_run's tables): the same sums, a lookup a channel.
+    int iw = 256 - wt;
+    int fr = ((c >> 11) & 31) * wt + 128, fg = ((c >> 5) & 63) * wt + 128,
+        fb = (c & 31) * wt + 128;
+    uint16_t tr[32], tg[64], tb[32];
+    for (int v = 0; v < 32; v++) {
+        tr[v] = (uint16_t)(((fr + v * iw) >> 8) << 11);
+        tb[v] = (uint16_t)((fb + v * iw) >> 8);
+    }
+    for (int v = 0; v < 64; v++) {
+        tg[v] = (uint16_t)(((fg + v * iw) >> 8) << 5);
+    }
     for (int i = 0; i < h; i++) {
         const uint16_t *s = src + (size_t)(sy + i) * (size_t)sw + sx;
         uint16_t *d = dst + (size_t)i * (size_t)w;
         for (int j = 0; j < w; j++) {
-            d[j] = wire(over(c, can(s[j]), wt));
+            uint16_t b = can(s[j]);
+            d[j] = wire((uint16_t)(tr[b >> 11] | tg[(b >> 5) & 63] | tb[b & 31]));
         }
     }
     return w * h;
