@@ -1686,6 +1686,16 @@ static mp_obj_t ui_input(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_input_obj, 0, 1, ui_input);
 
+// hint_input([kind]) -> kind: the input whose keys the hints draw
+// (moy_ui_hint_input); set when `kind` is given.
+static mp_obj_t ui_hint_input(size_t n_args, const mp_obj_t *a) {
+    if (n_args > 0) {
+        moy_ui_set_hint_input(mp_obj_get_int(a[0]));
+    }
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_hint_input());
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_hint_input_obj, 0, 1, ui_hint_input);
+
 // game_btn(cv, rect, label, fill)
 static mp_obj_t ui_game_btn(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -3201,6 +3211,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tab), MP_ROM_PTR(&ui_tab_obj) },
     { MP_ROM_QSTR(MP_QSTR_hints), MP_ROM_PTR(&ui_hints_obj) },
     { MP_ROM_QSTR(MP_QSTR_input), MP_ROM_PTR(&ui_input_obj) },
+    { MP_ROM_QSTR(MP_QSTR_hint_input), MP_ROM_PTR(&ui_hint_input_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&ui_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_game_btn), MP_ROM_PTR(&ui_game_btn_obj) },
     { MP_ROM_QSTR(MP_QSTR_game_icon_btn), MP_ROM_PTR(&ui_game_icon_btn_obj) },

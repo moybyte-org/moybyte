@@ -1283,7 +1283,7 @@ class Carousel(Launcher):
         shows its whole cover at a clean scale (`_clean_side`)."""
         lay = self.layout
         reach = _ui_draw.mark_reach("card")    # the centre card's focus mark
-        keys = _ui_draw.input_kind() != "touch"    # touch shows no hint strip
+        keys = _ui_draw.hint_kind() != "touch"    # touch alone shows no hint strip
         if self._g_lay is lay and self._g_reach == reach and self._g_keys == keys:
             return self._g
         self._g = (self._geom_hh(lay, reach, keys) if _lb.metric_class() == _lb.HANDHELD
@@ -3738,7 +3738,7 @@ class LauncherHomeLayer:
             # the keys on the desk's buttons: confirm presses the one they are on
             buttons = self._desk_buttons()
             on = buttons[min(on, len(buttons) - 1)][0] if buttons else None
-        if _ui_draw.input_kind() not in _LETTER_INPUTS:
+        if _ui_draw.hint_kind() not in _LETTER_INPUTS:
             tap = on or self._confirm_verb(zone)
             if tap:
                 items.append("confirm")

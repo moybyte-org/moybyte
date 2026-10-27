@@ -2105,14 +2105,24 @@ int moy_ui_rule(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk) {
 // -- keycap hints -----------------------------------------------------------------------
 
 static int s_input = MOY_UI_INPUT_KEYS;
+static int s_keys = MOY_UI_INPUT_KEYS;
 
 void moy_ui_set_input(int input) {
     s_input = input >= 0 && input < MOY_UI_INPUTS ? input : MOY_UI_INPUT_KEYS;
+    s_keys = s_input;
     moy_ui_marks_refresh();         // touch shows no focus
 }
 
 int moy_ui_input(void) {
     return s_input;
+}
+
+void moy_ui_set_hint_input(int input) {
+    s_keys = input >= 0 && input < MOY_UI_INPUTS ? input : MOY_UI_INPUT_KEYS;
+}
+
+int moy_ui_hint_input(void) {
+    return s_keys;
 }
 
 // Each action's name.
@@ -2199,7 +2209,7 @@ int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, s
 
 int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
                     int fs, int desk, int draw, int16_t *spans, int cap) {
-    if (s_input == MOY_UI_INPUT_TOUCH) {
+    if (s_keys == MOY_UI_INPUT_TOUCH) {
         return 0;
     }
     pd_t d;
@@ -2239,10 +2249,10 @@ int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items
             }
             int act = moy_ui_hint_action(t);
             if (act >= 0) {
-                const char *keys = moy_ui_hint_keys(s_input, act);
+                const char *keys = moy_ui_hint_keys(s_keys, act);
                 t.p = (const uint8_t *)keys;
                 t.n = (uint16_t)strlen(keys);
-            } else if (moy_ui_key_moves(s_input, t)) {
+            } else if (moy_ui_key_moves(s_keys, t)) {
                 t.n = 0;
             }
             shown = t.n > 0;

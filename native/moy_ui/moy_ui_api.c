@@ -1422,7 +1422,7 @@ void moy_ui_api_hints(moy_ui_ctx_t *c, const moy_ui_sink_t *s, const uint8_t *it
                       const moy_ui_over_t *o) {
     (void)o;
     moy_ui_box_t b;
-    if (moy_ui_input() == MOY_UI_INPUT_TOUCH) {
+    if (moy_ui_hint_input() == MOY_UI_INPUT_TOUCH) {
         // touch alone shows no keys: no band, and the rows take its height
         c->has_at = 0;
         return;
@@ -2463,7 +2463,7 @@ int32_t moy_ui_api_menu(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t l
                 break;
             }
         }
-        if (moy_ui_key_moves(moy_ui_input(), key)) {
+        if (moy_ui_key_moves(moy_ui_hint_input(), key)) {
             key.n = 0;
         }
         moy_ui_vrow_t r;

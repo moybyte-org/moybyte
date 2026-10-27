@@ -126,7 +126,7 @@ class WebConsoleUI:
         host, pin = _split(url)
         pad = (24 if desk else 14) * fs
         foot = (_ui_draw.metrics("value_row")[17 if desk else 16] * fs
-                if _ui.input_kind() != "touch" else 0)
+                if _ui_draw.hint_kind() != "touch" else 0)
         room_h = ch - foot - 2 * pad
         side = min(room_h, (cw - 3 * pad) * 2 // 5)
         qr = (cx + pad, cy + pad + (room_h - side) // 2, side, side)

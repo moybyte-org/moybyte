@@ -780,7 +780,9 @@ Every one of these was learned by hanging or bricking a board.
   canvas and a caret (`Workstation.ball`, the "ball" input source;
   `docs/ui_api_2026-10.md` says which); mid-roll a step across the roll's
   axis takes a firmer turn, so a roll along the home's tabs stays on them
-  (`Workstation.BALL_TURN`). A menu over a text surface takes the
+  (`Workstation.BALL_TURN`). The hint strips stay up under a tap: they name
+  the keyboard's keys until another keyboard is used
+  (`docs/ui_api_2026-10.md`, Hints). A menu over a text surface takes the
   keys out of text mode while it shows (`Workstation._menu_keys`). A key already down when the
   matrix starts, or when a surface turns to text, types nothing until it is
   pressed again, and `_set_text_mode(True)` seeds every typed-key edge with

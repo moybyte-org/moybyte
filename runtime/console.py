@@ -1832,21 +1832,32 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         input table's -- a board's "kbd", "touch" and "ble", the host's
         "local") with the input it is to the hints (`ui_draw.INPUTS`), and the
         first pair's is the input in use until another one is used. Every
-        hint strip draws the keys of the input in use, and touch hides them.
-        A board that declares none (None) leaves them on the desk keyboard's."""
+        hint strip draws the keys of the last input with keys used
+        (`ui_draw.hint_kind`): a touch after keys leaves them up, and a board
+        whose first input is touch shows none until keys are used. A board
+        that declares none (None) leaves them on the desk keyboard's."""
         self.input_kinds = None if kinds is None else dict(kinds)
         self._news = None if kinds is None else getattr(self.input, "news", None)
         if kinds:
-            self.input_used(kinds[0][0])
+            _ui_draw.input_kind(kinds[0][1])
+            self._dirty = True
 
     def input_used(self, source):
         """Input source `source` was used: the input in use becomes its kind
         (a source the board did not declare changes nothing), and a change
-        repaints, as its keys show in every hint strip."""
+        repaints. A key's input is the hints' too; a touch keeps theirs, and
+        takes the keys off the bar and the home's tab row, as it shows no
+        focus: the strips then name the surface's own keys."""
         kinds = self.input_kinds
         kind = kinds.get(source) if kinds is not None else None
         if kind is not None and kind != _ui_draw.input_kind():
+            keys = _ui_draw.hint_kind()
             _ui_draw.input_kind(kind)
+            if kind == "touch":
+                _ui_draw.hint_kind(keys)
+                if self.bar_layer.focus is not None:
+                    self.bar_layer.focus_leave()
+                self.launcher_layer._tab_focus = False
             self._dirty = True
 
     # -- top-bar system menu (#52) -------------------------------------------

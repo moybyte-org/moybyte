@@ -1607,7 +1607,7 @@ class CodeLayer:
         keys = (_FIND_KEYS if self._find_open else _CMP_KEYS if self._cmp_open
                 else _JUMP_KEYS if self._jump_open else _FILES_KEYS)
         band = lay.status_band
-        if band is not None and _ui.input_kind() != "touch":
+        if band is not None and _ui_draw.hint_kind() != "touch":
             _ui_draw.status_row(cv, ws.theme_colors, band, ())
             _ui.at(band[0], band[1], band[2], band[3])
             _ui.hints(keys)

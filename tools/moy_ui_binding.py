@@ -218,6 +218,8 @@ _DRAW_SIGS = (
      _I),
     ("moy_ui_set_input", [_I], None),
     ("moy_ui_input", [], _I),
+    ("moy_ui_set_hint_input", [_I], None),
+    ("moy_ui_hint_input", [], _I),
     ("moy_ui_game_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I], _I),
     ("moy_ui_game_icon_btn", [c.POINTER(_Sink), _Box, _I, _Span, _I, _I, _I], _I),
     ("moy_ui_mini_btn", [c.POINTER(_Sink), _Box, _Span, _I, _I, _I], _I),
@@ -1733,6 +1735,13 @@ def binding():
         return lib.moy_ui_input()
 
     m.input = input_
+
+    def hint_input(*kind):
+        if kind:
+            lib.moy_ui_set_hint_input(int(kind[0]))
+        return lib.moy_ui_hint_input()
+
+    m.hint_input = hint_input
     m.print_font = print_font
     m.cart_text = cart_text
     m.font_free = font_free

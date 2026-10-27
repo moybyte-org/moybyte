@@ -437,7 +437,7 @@ class TextConsole:
         self._host.begin(cv, th, (cx, top, cw, ch))
         touch = _ui.input_kind() == "touch"
         foot = 0
-        if not touch:
+        if _ui_draw.hint_kind() != "touch":
             keys = _KEYS_READING if self.reading() else _KEYS_ENDED if self.ended else ()
             if keys:
                 foot = _ui_draw.metrics("value_row")[16] * fs

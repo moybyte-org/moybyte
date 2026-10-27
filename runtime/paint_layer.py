@@ -468,8 +468,8 @@ class PaintLayer:
 
     @staticmethod
     def _keys():
-        """Whether the input in use has keys, and so the tab a hint strip."""
-        return _ui_draw.input_kind() != "touch"
+        """Whether the hints have keys to name, and so the tab a hint strip."""
+        return _ui_draw.hint_kind() != "touch"
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39) -- called by ws._relayout on a
@@ -1468,7 +1468,7 @@ class PaintLayer:
         th = ws.theme_colors
         fs = lay.fs
         settled = self._host.begin(cv, th, lay.body_fill, lay.desk)
-        keys = _OP_KEYS.get(_ui_draw.input_kind(), {})
+        keys = _OP_KEYS.get(_ui_draw.hint_kind(), {})
         rows = self._more_rows(lay.desk)
         # the operations, then the danger rows set apart under a rule
         parts = ([], [])

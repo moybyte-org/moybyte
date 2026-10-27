@@ -1360,7 +1360,7 @@ class CardsLayer:
         tdeck = _ui.input_kind() == "tdeck"
         keys = (("scroll", "Field") if len(p.texts) > 1 else ()) + (
             "confirm", p.ok, "cancel", "Cancel")
-        if not _ui.input_kind() == "touch":
+        if _ui_draw.hint_kind() != "touch":
             b = _ui_draw.metrics("value_row")[17 if desk else 16] * lay.fs
             ws.sys_canvas.rect(lay.cx, lay.cy + lay.ch - b, lay.cw, b, ws.theme_colors["panel"])
             _ui.at(lay.cx, lay.cy + lay.ch - b, lay.cw, b)

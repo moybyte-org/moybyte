@@ -1188,18 +1188,29 @@ INPUTS = ("keys", "tdeck", "pad", "touch")
 
 
 def input_kind(name=None):
-    """The input in use, one of INPUTS, which every hint strip draws the keys
-    of; `name` sets it first. The console sets it from the last input used."""
+    """The input in use, one of INPUTS; `name` sets it first, and the keys
+    the hint strips draw with it (`hint_kind`). The console sets it from the
+    last input used."""
     if name is not None:
         _C.input(INPUTS.index(name))
     return INPUTS[_C.input()]
+
+
+def hint_kind(name=None):
+    """The input whose keys every hint strip draws, one of INPUTS: the input
+    in use, but where a touch follows keys the strips keep those keys, so
+    they stay up under a finger on a board with keys; "touch" (no keys used
+    yet: touch alone) shows none. `name` sets it first."""
+    if name is not None:
+        _C.hint_input(INPUTS.index(name))
+    return INPUTS[_C.hint_input()]
 
 
 def hints(cv, th, rect, items, desk=False, draw=True):
     """Keycap hints in band `rect`, from its left (the public `ui.hints`'s
     part, for chrome that lays itself out): `items` alternate an action --
     `confirm`, `back`, `change`, `tabs`, `menu` or `cancel`, drawn as the keys of the
-    input in use (`input_kind`) -- or keys spelled out -- space-separated;
+    hint input (`hint_kind`) -- or keys spelled out -- space-separated;
     `enter`, `left`, `right`, `up` and `down` draw as signs -- and what they
     do. Answers
     each pair's (x0, x1) across the band, what a tap hit-tests (x0 == x1 for

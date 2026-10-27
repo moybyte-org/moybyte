@@ -141,3 +141,19 @@ def test_a_turn_after_the_roll_stops_steps_at_once(tmp_path):
     ws._ball_roll(0, -2)
     assert ws._ball_qy == -1
 
+
+def test_a_touch_takes_the_keys_off_the_row_and_the_bar(tmp_path):
+    """Touch shows no focus, and the strips stay up: so a touch leaves the
+    keys on no row the strip would name."""
+    ws, drv = _home(tmp_path)
+    ws.use_inputs((("local", "tdeck"), ("touch", "touch")))
+    _press(drv, "up")
+    ws.input_used("touch")
+    assert not ws.launcher_layer._tab_focus
+    ws.input_used("local")
+    _press(drv, "up")
+    _press(drv, "up")
+    assert ws.bar_layer.focus is not None
+    ws.input_used("touch")
+    assert ws.bar_layer.focus is None and not ws.launcher_layer._tab_focus
+    assert launcher_layer.modal_keys(ws) is None

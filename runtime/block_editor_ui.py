@@ -75,7 +75,7 @@ _BLK_MENU_ROWS = 10
 def _strip(ws, lay, keys, desk):
     """`keys` on a band of their own at the foot of layout `lay`'s content,
     over the page's foot (a dialog's keys; touch alone shows none)."""
-    if _ui.input_kind() == "touch":
+    if _ui_draw.hint_kind() == "touch":
         return
     b = _ui_draw.metrics("value_row")[17 if desk else 16] * lay.fs
     ws.sys_canvas.rect(lay.cx, lay.cy + lay.ch - b, lay.cw, b, ws.theme_colors["panel"])

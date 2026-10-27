@@ -956,14 +956,20 @@ int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int 
 // A rule across band `b` (inside the group pad), one unit thick, centred in
 // its height: what parts a menu from the rows above it in a card.
 int moy_ui_rule(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk);
-// The input in use, which the hints draw the keys of (docs/ui_api_2026-10.md,
-// "Hints"): a desk keyboard, the T-Deck's keyboard, a gamepad, or touch alone,
-// which shows no keycaps. The console sets it from the last input used, among
-// the inputs its board declares; it starts at the desk keyboard.
+// The input in use (docs/ui_api_2026-10.md, "Hints"): a desk keyboard, the
+// T-Deck's keyboard, a gamepad, or touch. The console sets it from the last
+// input used, among the inputs its board declares; it starts at the desk
+// keyboard. The hints draw the keys of the hint input: the input set, until a
+// touch is used, which leaves them on the keys before it
+// (moy_ui_set_hint_input), so a strip stays up under a finger on a board with
+// keys; touch alone (the hint input touch: no keys used yet) shows none.
 enum { MOY_UI_INPUT_KEYS = 0, MOY_UI_INPUT_TDECK, MOY_UI_INPUT_PAD, MOY_UI_INPUT_TOUCH,
        MOY_UI_INPUTS };
 void moy_ui_set_input(int input);
 int moy_ui_input(void);
+// The input whose keys the hints draw; moy_ui_set_input sets it too.
+void moy_ui_set_hint_input(int input);
+int moy_ui_hint_input(void);
 // The hints' actions, which a pair names in place of its keys: confirm, back,
 // change (left and right), tabs (the previous and the next), menu (the
 // console's key), cancel (a field being edited: its text put back), the

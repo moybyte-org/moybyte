@@ -4,8 +4,10 @@
 * each input draws its own keys for an action -- the desk keyboard's Esc, the
   T-Deck's K, a gamepad's B -- and a key spelled out draws as written on
   every input, so no caller spells out a key an action covers;
-* under touch alone no hint draws and `ui.hints` takes no band, so the rows
-  reach the page's foot;
+* under touch alone (no keys used yet) no hint draws and `ui.hints` takes no
+  band, so the rows reach the page's foot; a touch after keys leaves the
+  strips up on those keys (`ui_draw.hint_kind`), on every board and the
+  browser alike;
 * the input table names the source that brought news (a button going down, a
   new key, a press of its pointer) once, and the console switches the input
   in use to the kind the board declared for that source, ignoring a source it
@@ -234,6 +236,38 @@ def test_the_console_follows_the_last_input_used(tmp_path):
     drv.press("down")
     drv.frame(1 / 30)
     assert ui_draw.input_kind() == "tdeck", "a key brings the keys back"
+
+
+def test_a_touch_after_keys_keeps_the_hints_up(tmp_path):
+    """Owner call 2026-10-27: the strips stay up the whole time. A touch on
+    a board with keys is the input in use (a finger's parts, no focus mark),
+    but the hints keep naming the keys used last, and the home keeps its
+    strip's band."""
+    ws = build_ws(Path(tmp_path))
+    drv = make_drv(ws)
+    ws.use_inputs((("local", "tdeck"), ("touch", "touch")))
+    ws.go_home()
+    drv.frame(1 / 30)
+    band = ws.launcher.foot()[5][3]
+    assert band > 0
+    drv.click(160, 120)
+    assert ui_draw.input_kind() == "touch" and ui_draw.hint_kind() == "tdeck"
+    assert ws.launcher.foot()[5][3] == band, "the home's strip stays"
+    cv = make_system_canvas(320, 240)
+    assert ui_draw.hints(cv, ws.theme_colors, BAND, ("confirm", "Open"), draw=False)
+
+
+def test_a_touch_first_board_shows_hints_once_keys_are_used(tmp_path):
+    """A board whose first input is touch (a P4 with no keyboard paired, a
+    phone's page) has no keys to name until one is used; then a touch
+    leaves them up."""
+    ws = build_ws(Path(tmp_path))
+    ws.use_inputs((("touch", "touch"), ("ble", "keys")))
+    assert ui_draw.hint_kind() == "touch"
+    ws.input_used("ble")
+    assert ui_draw.hint_kind() == "keys"
+    ws.input_used("touch")
+    assert ui_draw.input_kind() == "touch" and ui_draw.hint_kind() == "keys"
 
 
 def test_an_undeclared_source_changes_nothing(tmp_path):

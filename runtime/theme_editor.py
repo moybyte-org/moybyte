@@ -665,10 +665,10 @@ def row_tap(app, px, py, rect):
 
 
 def _hints_for(tab):
-    """The tab's hint strip for the input in use: the T-Deck's are its own
-    keys (moy_ui_parts.c's ACT_KEYS), a keyboard's its chords, none under
-    touch."""
-    inp = _ui_draw.input_kind()
+    """The tab's hint strip for the hint input (`ui_draw.hint_kind`): the
+    T-Deck's are its own keys (moy_ui_parts.c's ACT_KEYS), a keyboard's its
+    chords, none under touch alone."""
+    inp = _ui_draw.hint_kind()
     if inp == "touch":
         return ()
     if tab == TAB_CONFIG:
@@ -734,7 +734,7 @@ class ConfigLayer(CodeLayer):
 
     def relayout(self, w, h, fs, cs=None):
         self._args = (w, h, fs, cs)
-        self.layout = ConfigLayout(w, h, fs, cs, keys=_ui_draw.input_kind() != "touch")
+        self.layout = ConfigLayout(w, h, fs, cs, keys=_ui_draw.hint_kind() != "touch")
 
     def _sync(self):
         """Lay the tab out where nothing has (a desk pane lays it out at the
@@ -746,7 +746,7 @@ class ConfigLayer(CodeLayer):
             self.relayout(sc.w, sc.h, ws.look.effective_font_scale(),
                           ws.look.effective_chrome_scale())
         elif (self._args is not None and ws.editor_app._desk() is None
-              and self.layout.keys != (_ui_draw.input_kind() != "touch")):
+              and self.layout.keys != (_ui_draw.hint_kind() != "touch")):
             self.relayout(*self._args)
 
     def _doc(self):
@@ -980,7 +980,7 @@ class SpritesLayer:
 
     def relayout(self, w, h, fs, cs=None):
         self._args = (w, h, fs, cs)
-        self.layout = SpritesLayout(w, h, fs, cs, keys=_ui_draw.input_kind() != "touch")
+        self.layout = SpritesLayout(w, h, fs, cs, keys=_ui_draw.hint_kind() != "touch")
 
     def _sync(self):
         """Lay the tab out where nothing has (a desk pane lays it out at the
@@ -992,7 +992,7 @@ class SpritesLayer:
             self.relayout(sc.w, sc.h, ws.look.effective_font_scale(),
                           ws.look.effective_chrome_scale())
         elif (self._args is not None and ws.editor_app._desk() is None
-              and self.layout.keys != (_ui_draw.input_kind() != "touch")):
+              and self.layout.keys != (_ui_draw.hint_kind() != "touch")):
             self.relayout(*self._args)
 
     def _doc(self):
@@ -1221,7 +1221,7 @@ class SpritesLayer:
     def _foot(self, cv, th, lay, doc):
         if lay.desk:
             _ui_draw.status_row(cv, th, lay.status, ())
-            items = () if _ui_draw.input_kind() == "touch" else ("Q W", "Icon", "F6", "Next pane")
+            items = () if _ui_draw.hint_kind() == "touch" else ("Q W", "Icon", "F6", "Next pane")
             x, y, w, h = lay.status
             tx = x + 10
             spans = _ui_draw.hints(cv, th, (x, y, w - 8, h), items, True, draw=False) \
