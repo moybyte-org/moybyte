@@ -193,7 +193,7 @@ class MyArtAppLayer:
         self.renaming = None
         self.game = None
         self.toast = None
-        self.covers.forget()
+        self.covers.recheck()
         self._refresh()
         self._ui.reset()
         self._focus = self._card_id(self.drawings[0]) if self.drawings else NEW

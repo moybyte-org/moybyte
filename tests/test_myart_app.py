@@ -2,7 +2,7 @@
 and its verbs, on the public UI API (docs/media/look_2026-10/APPS_RESTYLE.md,
 My Art)."""
 
-from runtime import host_app, moy_carts
+from runtime import artwork, host_app, moy_carts
 
 _DT = 1.0 / 30.0
 
@@ -65,6 +65,32 @@ def test_the_drawings_are_cards_new_drawing_first_and_the_wallpapers_badge(tmp_p
     # the cards' pictures are read at the card's size, never the drawing's
     pic = app.covers.get("garden", 88, 66)
     assert (pic.w, pic.h) == (88, 66) and pic.pix[0] == 8
+
+
+def test_a_reopen_decodes_only_the_drawings_that_changed(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    _draw(ws, "garden")
+    _draw(ws, "rocket", c=1)
+    decoded = []
+    real = artwork.read_cover
+
+    def read_cover(blob, pix, w, h):
+        decoded.append(blob)
+        return real(blob, pix, w, h)
+    monkeypatch.setattr(artwork, "read_cover", read_cover)
+    app = _open(ws)
+    assert len(decoded) == 2
+    ws.go_home()
+    _frames(ws)
+    _open(ws)
+    assert len(decoded) == 2, "a drawing no app wrote was decoded again"
+    ws.go_home()
+    _draw(ws, "rocket", c=2)            # another app writes it meanwhile
+    _frames(ws)
+    _open(ws)
+    assert len(decoded) == 3
+    assert app.covers.get("rocket", 88, 66).pix[0] == 2
+    assert app.covers.get("garden", 88, 66).pix[0] == 8
 
 
 def test_an_empty_page_offers_new_drawing(tmp_path):

@@ -584,14 +584,20 @@ class PaintDocument:
 class DrawingCovers:
     """The drawings' pictures at a card's size, read a row at a time from
     their files (`read_cover`) and kept by (name, w, h) until the drawing
-    changes: My Art's cards, Paint's stories. A broken file keeps None."""
+    changes: My Art's cards, Paint's stories. A broken file keeps None.
+    A picture outlives `recheck` where its file's bytes are kept beside it
+    (a file of up to KEEP_BYTES): the first ask after it reads the file
+    again and decodes it only where the bytes moved -- a read is a tenth of
+    a decode on the T-Deck."""
 
     KEEP = 24
+    KEEP_BYTES = 16384
 
     def __init__(self, files):
         self._files = files
-        self._got = {}               # name -> [[w, h, bitmap or None, kind], ...]
+        self._got = {}               # name -> [[w, h, bitmap or None, kind, bytes or None], ...]
         self._order = []             # (name, its entry), the oldest first
+        self._checked = {}           # names whose pictures are the file's as it is
 
     def get(self, name, w, h, kind="drawings"):
         # Looked up by name, then compared by size, so a frame that asks for
@@ -600,23 +606,35 @@ class DrawingCovers:
         if got is not None:
             for e in got:
                 if e[0] == w and e[1] == h and e[3] == kind:
-                    return e[2]
+                    if name in self._checked:
+                        return e[2]
+                    blob, err = self._files.load(kind, name)
+                    if err is None and blob is not None and blob == e[4]:
+                        self._checked[name] = True
+                        return e[2]
+                    self.forget(name)
+                    got = None
+                    break
         bmp = None
+        keep = None
         try:
             blob, err = self._files.load(kind, name)
             if err is None and blob:
                 pix = bytearray(w * h)
                 if read_cover(blob, pix, w, h) is not None:
                     bmp = Bitmap(w, h, pix)
+                if len(blob) <= self.KEEP_BYTES:
+                    keep = blob if isinstance(blob, (str, bytes)) else bytes(blob)
             blob = None
         except MemoryError:
             raise
         except Exception:  # noqa: BLE001 -- a broken file draws no picture
             bmp = None
-        e = [w, h, bmp, kind]
+        e = [w, h, bmp, kind, keep]
         if got is None:
             got = self._got[name] = []
         got.append(e)
+        self._checked[name] = True
         self._order.append((name, e))
         if len(self._order) > self.KEEP:
             old, oe = self._order.pop(0)
@@ -625,6 +643,7 @@ class DrawingCovers:
                 sizes.remove(oe)
                 if not sizes:
                     del self._got[old]
+                    self._checked.pop(old, None)
         return bmp
 
     def forget(self, name=None):
@@ -632,9 +651,22 @@ class DrawingCovers:
         if name is None:
             self._got.clear()
             del self._order[:]
+            self._checked.clear()
             return
         self._got.pop(name, None)
+        self._checked.pop(name, None)
         self._order = [o for o in self._order if o[0] != name]
+
+    def recheck(self):
+        """The files may have changed since the pictures were made (another
+        app wrote them): each picture kept with its file's bytes is checked
+        against the file at its next ask, the rest dropped."""
+        self._checked.clear()
+        for name in list(self._got):
+            for e in self._got[name]:
+                if e[4] is None:
+                    self.forget(name)
+                    break
 
 
 class ArtworkService:
