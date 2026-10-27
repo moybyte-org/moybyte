@@ -1210,8 +1210,12 @@ class BlockEditorUI:
         are the page's verbs (the bar's first)."""
         ws = self.ws
         lay = self.block_layout
+        # A press the page took stays the page's until its release, wherever
+        # the finger goes: a release it never saw would hold its tap for good.
+        page = self._page
+        held = page is not None and page.host.hold
         if (self.blk_kbd is None
-                and (self.blk_menu is not None
+                and (self.blk_menu is not None or held
                      or not _in(px, py, lay.area()) and self._dragv is None)):
             if click and ws.bar_layer.handle_bar_tap("menu", px, py):
                 return

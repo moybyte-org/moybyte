@@ -709,7 +709,7 @@ class CodeLayer:
             if self._ov_host.point(px, py, click, ws.pointer.down):
                 ws.mark_dirty()
             return True
-        if self._find_open and _in(px, py, self._find_rect(lay)):
+        if self._find_open and (self._ov_host.hold or _in(px, py, self._find_rect(lay))):
             if self._ov_host.point(px, py, click, ws.pointer.down):
                 ws.mark_dirty()
             return True
