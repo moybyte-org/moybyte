@@ -51,6 +51,7 @@ The cart's undo journal (runtime/moy_journal.py), by handle:
   journal_append(h, file, data, grad=None, ops=None) -> seq | None
   journal_undo(h, files=None) / journal_redo(h, files=None) -> file | None
   journal_can_undo(h, files=None) / journal_can_redo(h, files=None) -> bool
+  journal_can_both(h, files=None) -> (undo, redo)   the two of one read
   journal_compact(h)
   journal_list(h, file=None) -> [entry]    #136: a file's timeline, oldest first
   journal_snap(h, seq) -> text | None      one entry's snapshot
@@ -241,6 +242,11 @@ def journal_can_undo(h, files=None):
 def journal_can_redo(h, files=None):
     p = path(h)
     return moy_journal.journal_can_redo(p, files)
+
+
+def journal_can_both(h, files=None):
+    p = path(h)
+    return moy_journal.journal_can_both(p, files)
 
 
 def journal_compact(h):

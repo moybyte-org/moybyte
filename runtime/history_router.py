@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   HistoryRouter                     the Editor's one UNDO/REDO pair over every tab
+#   HistoryRouter.active_history      the active tab's in-RAM op history
+#   HistoryRouter.code_burst_open     the Code tab's typing burst
+#   HistoryRouter.bar_undo_bits       the bar cache key's RAM-only dims
+#   HistoryRouter.undo                undo: the tab's op, else the journal
+#   HistoryRouter.can_both            the two dims of one journal read
+#   HistoryRouter.active_tab_files    the journal files a tab walks
+#   HistoryRouter._journal_walk       a journal undo or redo, reloaded
+#   HistoryRouter.idle_tick           the typing-idle autosave
 """The #111 UNDO ROUTER (#209 landing E) -- `Workstation.history`.
 
 One bar pair -- UNDO and REDO in the Editor's lent top-bar zone -- has to mean
@@ -360,6 +370,21 @@ class HistoryRouter:
             return True
         return self._journal_check(True)
 
+    def can_both(self):
+        """(can_undo(), can_redo()) with the journal read once at most: what
+        a repaint of the bar's two icons asks."""
+        doc = self._theme()
+        if doc is not None:
+            v = self.ws.menu_view
+            return (doc.can(self, v, False), doc.can(self, v, True))
+        hist = self.active_history()
+        u = hist is not None and (hist.can_undo() or self._active_local_pending())
+        r = hist is not None and hist.can_redo()
+        if u and r:
+            return (True, True)
+        ju, jr = self._journal_both()
+        return (u or ju, r or jr)
+
     # -- the durable journal walk --------------------------------------------
 
     def active_tab_files(self):
@@ -423,6 +448,21 @@ class HistoryRouter:
         except Exception as exc:  # noqa: BLE001 -- a check failure must never crash the shell
             print("Moybyte journal check failed:", _err_text(exc))
             return False
+
+    def _journal_both(self):
+        """`_journal_check` for both directions, of one read."""
+        ws = self.ws
+        if not self.store.writable() or not ws.cart:
+            return (False, False)
+        h = ws.cart.get("h")
+        if not h:
+            return (False, False)
+        files = self.active_tab_files()
+        try:
+            return self.store.call(lambda: moy_catalogue.journal_can_both(h, files))
+        except Exception as exc:  # noqa: BLE001 -- a check failure must never crash the shell
+            print("Moybyte journal check failed:", _err_text(exc))
+            return (False, False)
 
     def _journal_walk(self, redo):
         ws = self.ws

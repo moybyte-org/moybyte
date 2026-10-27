@@ -800,8 +800,8 @@ class EditorApp:
                          icon_for(kind) if icon_for is not None else None,
                          icon_draw=draw, kind=kind)
         ic = _BAR_ICON * self._zone_scale()
-        for glyph, r, can in (("undo", undo_r, ws.history.can_undo()),
-                              ("redo", redo_r, ws.history.can_redo())):
+        can_u, can_r = ws.history.can_both()
+        for glyph, r, can in (("undo", undo_r, can_u), ("redo", redo_r, can_r)):
             self._draw_history_icon(cv, glyph, r[0] + (r[2] - ic) // 2,
                                     r[1] + (r[3] - ic) // 2, ic, can)
         fs = self._zone_scale()

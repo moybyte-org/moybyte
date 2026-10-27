@@ -610,8 +610,13 @@ int moy_journal_can(const char *cart, int redo, const char *const *files,
         && load_cursors(&j) == 0) {
         const jent_t *t;
         cur_t *c;
-        ok = redo ? redo_target(&j, files, nfiles, &t, &c)
-                  : undo_target(&j, files, nfiles, &t, &c);
+        if (redo == 2) {
+            ok = (undo_target(&j, files, nfiles, &t, &c) ? 1 : 0)
+                 | (redo_target(&j, files, nfiles, &t, &c) ? 2 : 0);
+        } else {
+            ok = redo ? redo_target(&j, files, nfiles, &t, &c)
+                      : undo_target(&j, files, nfiles, &t, &c);
+        }
     }
     moy_arena_free(&j.a);
     return ok;

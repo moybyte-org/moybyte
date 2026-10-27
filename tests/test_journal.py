@@ -370,6 +370,11 @@ def test_scoped_redo_dim_is_per_file(tmp_path):
     assert mc.journal_can_redo(path, ("map.moymap",)) is False  # the map stays DIM
     # ...and the whole-project (files=None) view sees the redo (compat).
     assert mc.journal_can_redo(path) is True
+    # The bar's one read answers both, as the two checks do.
+    from runtime import moy_journal
+    for scope in (("main.py",), ("map.moymap",), None):
+        assert moy_journal.journal_can_both(path, scope) == (
+            mc.journal_can_undo(path, scope), mc.journal_can_redo(path, scope))
 
 
 def test_per_file_truncation_preserves_the_other_files_redo_tail(tmp_path):

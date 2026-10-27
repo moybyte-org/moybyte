@@ -43,7 +43,8 @@ int moy_journal_undo(const char *cart, const char *const *files, size_t nfiles,
                      char *out, size_t cap);
 int moy_journal_redo(const char *cart, const char *const *files, size_t nfiles,
                      char *out, size_t cap);
-// Whether an undo (redo != 0: a redo) would restore something: 1 or 0.
+// Whether an undo (redo 0) or a redo (redo 1) would restore something: 1 or 0.
+// redo 2 asks both of one read: bit 0 an undo, bit 1 a redo.
 int moy_journal_can(const char *cart, int redo, const char *const *files,
                     size_t nfiles);
 // Entries dropped to bring the journal within its budget (>= 0), or a

@@ -611,7 +611,8 @@ for step in range(@STEPS@):
         print("redo", moy_journal.journal_redo(cart, scope))
     elif op == 9:
         print("can", moy_journal.journal_can_undo(cart, scope),
-              moy_journal.journal_can_redo(cart, scope))
+              moy_journal.journal_can_redo(cart, scope),
+              moy_journal.journal_can_both(cart, scope))
     elif op == 10:
         es = moy_journal.journal_list(cart, f if rnd(2) else None)
         print("list", len(es), [e["seq"] for e in es])

@@ -177,6 +177,28 @@ def test_bar_undo_bits_never_reads_the_journal(tmp_path, monkeypatch):
     assert reads == ["journal_can_undo"]
 
 
+def test_can_both_answers_the_two_checks_of_one_journal_read(tmp_path, monkeypatch):
+    """The desk Editor's row repaints its UNDO and REDO dims with can_both:
+    the pair can_undo and can_redo answer, through the journal's two-way read
+    once rather than a read each -- before an undo, after one, and once the
+    in-RAM history answers alone."""
+    ws = _cart_ws(tmp_path)
+    ed = _open_code(ws, SRC + "# c1\n")
+    assert ws.save_code() is True
+    ed.set_text(SRC + "# c2\n"); ed.dirty = True
+    assert ws.save_code() is True
+    reads = []
+    real = history_router.moy_catalogue.journal_can_both
+    monkeypatch.setattr(history_router.moy_catalogue, "journal_can_both",
+                        lambda *a, **k: (reads.append(1), real(*a, **k))[1])
+    for step in range(3):
+        del reads[:]
+        assert ws.history.can_both() == (ws.history.can_undo(), ws.history.can_redo())
+        assert len(reads) <= 1
+        if step == 0:
+            ws.history.undo()
+
+
 def test_bar_undo_bits_reports_an_unrecorded_typing_burst(tmp_path):
     """A burst holds a net change that is on no History yet; without it the bar
     UNDO icon stays dim until the debounce closes the burst ~1.5s later."""

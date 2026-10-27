@@ -1012,10 +1012,11 @@ static mp_obj_t mod_journal_can(mp_obj_t cart_o, mp_obj_t redo, mp_obj_t files_o
     size_t nf;
     const char *const *files = file_list(files_o, &nf);
     int ok = 0;
+    mp_int_t which = mp_obj_get_int(redo);
     GUARD_BEGIN
-    ok = moy_journal_can(cart, mp_obj_is_true(redo), files, nf);
+    ok = moy_journal_can(cart, which == 2 ? 2 : which != 0, files, nf);
     GUARD_END
-    return mp_obj_new_bool(ok);
+    return which == 2 ? MP_OBJ_NEW_SMALL_INT(ok) : mp_obj_new_bool(ok);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(mod_journal_can_obj, mod_journal_can);
 

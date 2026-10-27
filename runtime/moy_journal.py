@@ -632,6 +632,18 @@ def journal_can_redo(cart_dir, files=None):
     return _journal_redo_target(entries, cursors, files) is not None
 
 
+def journal_can_both(cart_dir, files=None):
+    """(journal_can_undo, journal_can_redo) of one read of the journal: the
+    bar's two dims on a repaint."""
+    jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
+    entries = _journal_load_entries(log_path)
+    if not entries:
+        return (False, False)
+    cursors = _journal_cursors(cur_path, entries)
+    return (_journal_undo_target(entries, cursors, files) is not None,
+            _journal_redo_target(entries, cursors, files) is not None)
+
+
 def journal_redo(cart_dir, files=None):
     """Re-apply the next commit's snapshot over the live file and step ONLY that file's
     cursor forward (#111 scoped). `files` scopes the walk to the active tab's file(s);
@@ -773,6 +785,10 @@ if _native is not None:
     def journal_can_redo(cart_dir, files=None):  # noqa: F811
         return _native.journal_can(cart_dir, True,
                                    None if files is None else list(files))
+
+    def journal_can_both(cart_dir, files=None):  # noqa: F811
+        bits = _native.journal_can(cart_dir, 2, None if files is None else list(files))
+        return (bool(bits & 1), bool(bits & 2))
 
     def journal_compact(cart_dir):  # noqa: F811
         return _native.journal_compact(cart_dir)
