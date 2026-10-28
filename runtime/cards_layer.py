@@ -265,6 +265,10 @@ class CardsLayer:
         self._err_text = err_text
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
+        # a desk pane's word for its page (EditorDesk._tab_pane): 2 where the
+        # buffer `shift_last` reads holds it as the last draw left it, 1 a
+        # window's frame drawn whole, 0 none (the handheld)
+        self.vouch = 0
         self._t = None                # per-draw tone map (set by _draw_cards)
         self._broken_host = None      # the UI context of a card that failed to draw
         self._files_host = _ui_draw.AppHost()   # the Files page's
@@ -827,7 +831,13 @@ class CardsLayer:
             return
         if self._on_verbs():
             desk = _layout_base.metric_class() == _layout_base.DESK
-            self.page().draw(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+            if self.vouch:
+                _ui_draw.window_frame(self.vouch)
+            try:
+                self.page().draw(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+            finally:
+                if self.vouch:
+                    _ui_draw.window_frame(0)
             return
         # Fullscreen "Make it mine" panel below the unified bar (fix B/C): edge to
         # edge, no centered mini-card. GO/CODE/CLOSE are gone -- PLAY/Code-tab/X are all

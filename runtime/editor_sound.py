@@ -327,7 +327,7 @@ def _graph(desk, me, s, cv, th, g, u):
         cv.rrect(cx + 3 * u, top, cw - 6 * u, semi, 3 * u, ink)
         if i == sel:
             named = (cx, top, p)
-    cv.clip()
+    desk.unclip(cv)
     for k in range(0, SPAN, 12):
         ui.at(gx - 30 * u, gy + gh - k * semi - 14 * u, 28 * u, 14 * u)
         ui.label(note_name(lo + k), {"tone": "dim"})
@@ -500,7 +500,7 @@ def pointer(desk, r, u, px, py, click, down):
 def keys(desk, i, ev):
     """The pane's keys while it is focused (EDITOR_LAYOUT.md: a pane keeps its
     own keys): left and right pick a step, up and down move its note
-    (Shift an octave), W the next wave, R a rest, [ and ] the speed, L
+    (Shift an octave), held at the repeat rate, W the next wave, R a rest, [ and ] the speed, L
     loop, Space plays, + and - the volume, Del deletes, Ctrl+C/V/D copy,
     paste and duplicate, Alt+Left/Right move the step, F2 renames. `i` is
     the input (an arrow alone is the d-pad, no key event), `ev` this
@@ -512,10 +512,13 @@ def keys(desk, i, ev):
     if st.get("rename") is not None or st.get("menu"):
         return False
     code, mods = ev & 0xFFFF, ev >> 16
+    n = 1
     if not ev:
+        # an arrow alone: its press and, held, its repeats at the rate
         mods = getattr(i, "mods", 0) or 0
         for name, c in (("left", _LEFT), ("right", _RIGHT), ("up", _UP), ("down", _DOWN)):
-            if i.pressed(name):
+            n = i.steps(name)
+            if n:
                 code = c
                 break
         if not code:
@@ -523,7 +526,7 @@ def keys(desk, i, ev):
     ctrl, shift, alt = mods & _CTRL, mods & _SHIFT, mods & _ALT
     _sfx_view(me)
     if code in (_LEFT, _RIGHT):
-        d = -1 if code == _LEFT else 1
+        d = -n if code == _LEFT else n
         if alt:
             _do(desk, "earlier" if d < 0 else "later")
         else:
@@ -533,7 +536,7 @@ def keys(desk, i, ev):
         if cur is not None and cur[0] < 0:
             me.toggle_rest(low(desk, me) + 12)
         else:
-            me.nudge_pitch((12 if shift else 1) * (1 if code == _UP else -1))
+            me.nudge_pitch((12 if shift else 1) * (n if code == _UP else -n))
     elif ctrl and code in (ord("c"), ord("C"), 3):
         _do(desk, "copy")
     elif ctrl and code in (ord("v"), ord("V"), 22):

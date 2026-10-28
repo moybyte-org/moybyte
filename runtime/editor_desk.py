@@ -72,6 +72,14 @@ _ON_VERBS = ("music",)
 # `cls`, Settings its `ui.page`): their card is drawn down to the header
 # only, its body never seen (tests/test_editor_desk.py holds it).
 _CODE_TABS = ("code", "theme_config")
+
+# The panes whose frames may be their own, as the Code pane's are: a frame
+# whose input reached that pane alone draws it alone (`_pane_rows`).
+_OWN_FRAMES = ("blocks", "cards", "map", "music")
+
+# The Editor tabs drawn as one verbs page whose gen says what it shows: a
+# frame of the page may move its pixels or draw its changed rows alone.
+_PAGES = ("cards",)
 _FILLS_BODY = ("paint", "map", "scene", "code", "cards", "theme_config", "theme_sprites")
 
 # Which workspace shows an Editor tab, for a tab opened from elsewhere (a
@@ -165,7 +173,7 @@ class EditorDesk(Layer):
         self._rows_key = None
         self._changed = None
         self._acts = 0                  # input the desk took itself (a press, a chord)
-        self._in_code = False           # this press went to the Code pane's text
+        self._in_code = False           # this press went to the focused pane (its own frames)
         self._box = array("i", [0] * 4)
         # ...and while its focused pane is the Code tab (or theme Config), on
         # every frame: the WM's word for the buffer, the lag it named, what
@@ -175,6 +183,8 @@ class EditorDesk(Layer):
         # holds it too, else 1, 0 untold).
         self._ret = array("i", [0] * 5)
         self._code_key = None
+        self._own_key = None            # ...and at the last frame of a pane of its own
+        self._clip = None               # the rect a frame of the Sound pane's own is clipped to
         self._vouch = 0
 
     # -- where it applies -------------------------------------------------------
@@ -535,9 +545,19 @@ class EditorDesk(Layer):
             else:
                 ws.code_layout = old
 
-    def _tab_pane(self, tab, r, dt):
+    def _tab_pane(self, tab, r, dt, own=False):
         layer = self.ws.layer_of(tab)
         if layer is None:
+            return
+        if tab in _PAGES:
+            # the page's own shift and rows frames, on a frame of its pane's
+            # own where the WM says the buffer `shift_last` reads holds it as
+            # the last draw left it; a whole frame draws it whole
+            layer.vouch = 2 if own and self._vouch >= 2 else 1
+            try:
+                self._in_pane(tab, r, layer.draw, dt)
+            finally:
+                layer.vouch = 0
             return
         if tab not in _CODE_TABS:
             self._in_pane(tab, r, layer.draw, dt)
@@ -580,7 +600,8 @@ class EditorDesk(Layer):
 
     @property
     def HELD(self):
-        return self._prompt() is not None or self._code_pane() is not None
+        return (self._prompt() is not None or self._code_pane() is not None
+                or self._own_pane() is not None)
 
     def retained(self, known, x0, y0, x1, y1):
         self._known = bool(known) and (x1 <= x0 or y1 <= y0)
@@ -602,10 +623,16 @@ class EditorDesk(Layer):
         and leave the next buffer as far behind."""
         if lag[2] <= lag[0] or lag[3] <= lag[1]:
             return True
-        code = self._code_pane() if self._prompt() is None else None
-        if code is None:
+        if self._prompt() is not None:
             return False
-        b = code[3]
+        code = self._code_pane()
+        if code is not None:
+            b = code[3]
+        else:
+            own = self._own_pane()
+            if own is None:
+                return False
+            b = own[3] if own[0] == "music" else own[4]
         return (lag[0] >= b[0] and lag[1] >= b[1] and lag[2] <= b[0] + b[2]
                 and lag[3] <= b[1] + b[3])
 
@@ -671,6 +698,116 @@ class EditorDesk(Layer):
     def changed(self):
         return self._changed
 
+    def unclip(self, cv):
+        """A draw's own clip let go: back to the frame's (`_pane_rows`)."""
+        if self._clip is None:
+            cv.clip()
+        else:
+            cv.clip(*self._clip)
+
+    # -- a pane's own frames (docs/scroll_and_text_2026-10.md §15 P5) -------------
+    #
+    # While the focused pane shows Blocks, Settings, the Map or the Sound
+    # pane, the desk speaks the shown protocol as it does for the Code pane:
+    # a frame whose input reached only that pane and changed nothing another
+    # pane draws (no edit the other panes show: the made code, the sounds
+    # list) draws that pane alone and names it as what it changed. A tab's
+    # pane draws its body (its header holds nothing the frame moved); the
+    # Sound pane, drawn on the desk's own verbs, its card, header and body.
+
+    def _own_pane(self):
+        """(content, tab, pane, rect, body, index) of the focused pane where
+        its frames may be its own, else None."""
+        pane, r, _path = self.focused()
+        alone = self.alone()
+        if alone is not None:
+            if pane != alone:
+                return None
+            r = self._area()
+        c = self.tab_of(pane)
+        if c not in _OWN_FRAMES:
+            return None
+        tab = P.CONTENTS[c][2]
+        if c != "music" and self.ws.layer_of(tab) is None:
+            return None
+        return (c, tab, pane, r, self._body(r, self._unit(), pane),
+                self._focus.get(self.key, 0))
+
+    def _own_data(self, c):
+        """What the frame's input may change that a pane besides `c` draws or
+        `c`'s header shows: an edit's undo step, the sounds, the blocks'
+        object, the Map's tools."""
+        ws = self.ws
+        if c == "blocks":
+            bu = ws.block_ui
+            be = bu.blocks_ed
+            if be is None:
+                return None
+            return (id(be), be._hist.gen, be.target, bu.blk_graduated)
+        if c == "music":
+            me = Sound.editor(self)
+            if me is None:
+                return None
+            st = Sound._state(self)
+            if st.get("rename") is not None or st.get("menu"):
+                return False            # a popover over the panes beside it
+            return (id(me), me._hist.gen, me.view, me.sfx_idx, me.track_idx,
+                    len(me.bank.sfx), len(me.bank.music), ws.music_ui.music_preview)
+        if c == "map":
+            mu = ws.map_ui
+            return (mu.map_tool, mu.map_erase)
+        return None
+
+    def _pane_rows(self, own, dt):
+        """The frame as the focused pane's alone, where it may be one: True
+        where the pane drew and nothing else changed."""
+        ws = self.ws
+        c, tab, pane, r, body, n = own
+        cv = ws.sys_canvas
+        look = ws.look
+        app = ws.editor_app
+        data = self._own_data(c)
+        key = (c, self._acts, self.key, n, self.grown, pane, r, self.placed()[0],
+               cv.w, cv.h, look.look_gen, look.effective_font_scale(),
+               look.effective_chrome_scale(), ws.bar_layer.shown_key("menu"), data,
+               self._loupe, self._flash, self.part_state.get("code more"),
+               self.part_state.get("head more"))
+        ret = self._ret
+        same = key == self._own_key
+        # a frame the WM did not speak to (the content not held when it
+        # asked) arms nothing: its row is the WM's to settle first
+        self._own_key = key if ret[0] else None
+        if (not same or data is False or not ret[0] or app.playing()
+                or ws._animating(dt, False)
+                or self._spills()):
+            return False
+        if c == "music" and not self._host.quiet():
+            return False                # the desk's verbs take input: focus may move off the pane
+        b = r if c == "music" else body
+        x0, y0, x1, y1 = b[0], b[1], b[0] + b[2], b[1] + b[3]
+        if ret[3] > ret[1] and ret[4] > ret[2] and (ret[1] < x0 or ret[2] < y0
+                                                     or ret[3] > x1 or ret[4] > y1):
+            return False                # the buffer lags outside the pane
+        if c == "music":
+            # the desk's verbs run whole (focus rests on the first pane's
+            # header), their pixels clipped to the pane
+            th = ws.theme_colors
+            u = self._unit()
+            self._corners(cv, th["panel"], r[0], r[1], r[2], r[3], P.RADIUS * u)
+            self._card(cv, th, r, True, u)
+            self._cursors = []
+            self._clip = r
+            cv.clip(*r)
+            try:
+                self._frame(cv, th, self._shown_panes(), u)
+            finally:
+                self._clip = None
+                cv.clip()
+        else:
+            self._tab_pane(tab, body, dt, True)
+        self._changed = [x0, y0, x1, y1]
+        return True
+
     def _prompt_rows(self, dt):
         """The frame as a prompt's rows frame, where it may be one: True
         where the prompt drew its changed rows alone."""
@@ -720,10 +857,19 @@ class EditorDesk(Layer):
         self._changed = None
         try:
             if not (self.HELD and self._prompt_rows(dt)):
-                code = self._code_pane() if self._prompt() is None else None
-                if code is None or not self._code_rows(code, dt):
+                free = self._prompt() is None
+                code = self._code_pane() if free else None
+                own = self._own_pane() if free and code is None else None
+                if code is not None:
+                    alone = self._code_rows(code, dt)
+                else:
+                    self._code_key = None
+                    alone = own is not None and self._pane_rows(own, dt)
+                if own is None:
+                    self._own_key = None
+                if not alone:
                     self._draw(dt)
-                    if code is not None:
+                    if code is not None or own is not None:
                         cv = ws.sys_canvas
                         self._changed = [0, 0, cv.w, cv.h]
         finally:
@@ -1354,7 +1500,7 @@ class EditorDesk(Layer):
         tab = P.CONTENTS[c][2]
         if c == "music":
             if Sound.keys(self, i, self._fresh):
-                i.clear_edges()
+                i.spend_edges()                 # a held arrow keeps its repeats
             elif self._host.keys(i):
                 ws._dirty = True
             return True
@@ -1681,6 +1827,7 @@ class EditorDesk(Layer):
             if Sound.pointer(self, body, u, px, py, click, down) \
                     or host.point(px, py, click, down):
                 ws._dirty = True
+            self._in_code = True
             return True
         if tab is not None:
             layer = ws.layer_of(tab)
@@ -1688,7 +1835,7 @@ class EditorDesk(Layer):
                 return False
             got = bool(self._in_pane(tab, body, layer.handle_pointer,
                                      px - body[0], py - body[1], click))
-            self._in_code = tab in _CODE_TABS
+            self._in_code = tab in _CODE_TABS or c in _OWN_FRAMES
             if click or tab != "code":
                 self._owe_restart(tab)         # Code's pointer edits are taps (its keys)
             if tab == "scene" and self._blocks():

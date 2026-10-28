@@ -201,6 +201,7 @@ class History(object):
         self._redo = []                 # undone ops (newest first pop) -> redo
         self._pending = []              # ops recorded since the last flush()
         self._since_keyframe = 0        # ops persisted since the last keyframe (cap gate)
+        self.gen = 0                    # moves with every record, undo, redo and clear
         self._invert = _has(codec, "invert")
         if not self._invert:
             if not (_has(codec, "snapshot") and _has(codec, "restore")):
@@ -219,6 +220,7 @@ class History(object):
         """Push `op` (the surface has ALREADY applied it to the doc): grow the
         undo stack, clear the redo stack (a new action forks the timeline --
         the Google-Docs rule), and queue it for the next flush(). No I/O."""
+        self.gen += 1
         self._undo.append(op)
         self._cap_undo()
         if self._redo:
@@ -248,6 +250,7 @@ class History(object):
         Returns the op, or None at the floor (nothing to undo)."""
         if not self._undo:
             return None
+        self.gen += 1
         op = self._undo.pop()
         if self._invert:
             self.codec.invert(self.doc, op)
@@ -273,6 +276,7 @@ class History(object):
         stack. Returns the op, or None (nothing to redo)."""
         if not self._redo:
             return None
+        self.gen += 1
         op = self._redo.pop()
         self.codec.apply(self.doc, op)
         self._undo.append(op)
@@ -324,6 +328,7 @@ class History(object):
     def clear(self):
         """Drop all in-RAM history (a fresh open / a discard). Re-baselines the
         replay snapshot to the doc's current state."""
+        self.gen += 1
         self._undo = []
         self._redo = []
         self._pending = []
@@ -344,6 +349,7 @@ class History(object):
         construction, before any record(). A no-op for an empty/None list."""
         if not ops:
             return
+        self.gen += 1
         self._undo.extend(ops)
         self._since_keyframe += len(ops)
 

@@ -49,6 +49,11 @@ class SettingsPage:
         self._tiles = {}                # a picker's key -> [(rect, choice index)]
         self._focus = None
         self._count = (None, 0)         # (the cart's path, its files)
+        # the page's override table: its gen moves with what the page shows
+        # (docs/scroll_and_text_2026-10.md §3.3), so a frame that only moves
+        # the focus or the scroll draws the rows it changed
+        self._o = {"gen": 0}
+        self._shows = None
 
     # -- the data ---------------------------------------------------------------
 
@@ -75,14 +80,20 @@ class SettingsPage:
         """The page in `rect` of `cv`, under theme `th`."""
         host = self.host
         host.begin(cv, th, rect, desk, False)
+        fields = self._fields()
+        cart = self.ws.cart
+        shows = (id(cart), str(cart.get("title") or ""), self._file_count(),
+                 tuple(self._get(f) for f in fields), len(fields))
+        if shows != self._shows:
+            self._shows = shows
+            self._o["gen"] += 1
         ui.at(*rect)
-        ui.page("")
+        ui.page("", self._o)
         ui.group("", {"card": True})
         tap = None
-        for f in self._fields():
+        for f in fields:
             self._card(cv, th, f, desk, tap)
         ui.group()
-        cart = self.ws.cart
         ui.group("This project")
         if ui.link("Cart info", str(cart.get("title") or "")):
             self._doors[0]()

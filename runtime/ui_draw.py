@@ -2142,6 +2142,13 @@ class AppHost:
         self._again = True
         _AGAIN[0] = True
 
+    def quiet(self):
+        """Whether no input waits for the next frame: no button, typed key,
+        repeat, wheel or press, and no frame owed."""
+        a = self.inp
+        return not (a[1] or a[5] or a[7] or a[8] or a[_IN_REP] or a[_IN_KEYREP]
+                    or self.tap or self.owed)
+
     def still(self):
         """Whether the page this context drew last is what it draws next:
         its input moved nothing, no tap waits, it owes no frame and no page

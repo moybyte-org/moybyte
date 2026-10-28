@@ -94,7 +94,12 @@ def _console(tmp_path, app, ships):
     ws.pointer.visible = False
     if not ships:
         ws.wm.CONTENT_RING = False
-    if app in ("settings", "licences", "achievements"):
+    if app.startswith("editor "):
+        # an Editor tab over a cart: "editor TAB CART TITLE"
+        _e, tab, title = app.split(" ", 2)
+        ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == title))
+        ws.editor_app.set_tab(tab)
+    elif app in ("settings", "licences", "achievements"):
         ws.open_settings()
         if app != "settings":
             ws.settings_layer.open_page(app)
@@ -201,9 +206,10 @@ class Pair:
         so where the first's dead-step rule takes a step out its frame must
         show the same."""
         st = self._state.setdefault(id(ws), [None, [-1, False, None] + [-1] * (
-            len(ui_draw._PAINT) - 3)])
+            len(ui_draw._PAINT) - 3), False])
         ui_draw._KEYS_HOST[0] = st[0]
         ui_draw._PAINT[:] = st[1]
+        ui_draw._EDGE[0] = st[2]
         twin = ws is self.b
         if twin:
             sd, dead = ui_draw.steps_dead, ui_draw.AppHost.dead
@@ -216,6 +222,7 @@ class Pair:
                 ui_draw.steps_dead, ui_draw.AppHost.dead = sd, dead
             st[0] = ui_draw._KEYS_HOST[0]
             st[1] = list(ui_draw._PAINT)
+            st[2] = ui_draw._EDGE[0]
 
     def both(self, verb, *args):
         getattr(self.da, verb)(*args)
@@ -424,3 +431,24 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
     p.keys("down", 2)
     p.keys("up", 1)
     p.settle()
+
+
+# The Editor's tabs on the verbs (docs/scroll_and_text_2026-10.md §15 P5).
+# A cart's picker of pictures (Hop Quest's, Moy Night's) is a part with no
+# gen: its page draws whole, and its frames are held to a whole draw's alone.
+EDITOR_TABS = ("editor cards Coin Quest", "editor cards Bench", "editor cards Hop Quest",
+               "editor cards Moy Night")
+_PICTURES = ("editor cards Hop Quest", "editor cards Moy Night")
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+@pytest.mark.parametrize("app", EDITOR_TABS)
+def test_an_editor_tabs_key_steps_draw_rows_byte_for_byte(tmp_path, app, bufs):
+    p = Pair(tmp_path, app, bufs)
+    del p.kinds[:]
+    p.keys("down", 6)
+    p.keys("up", 3)
+    p.settle()
+    if app not in _PICTURES:
+        assert p.share() > 0.5, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
+            app, p.share(), p.kinds)

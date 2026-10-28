@@ -601,6 +601,29 @@ def test_the_sound_panes_keys_move_the_step_and_its_note(desk):
     assert not ws.editor_app._tab_is_clean("music")
 
 
+def test_a_held_arrow_in_the_sound_pane_steps_at_the_repeat_rate(desk):
+    """A held arrow moves the note once on the press and then at the
+    repeat rate, as a held arrow does on every surface; the desk's own
+    verbs never see its repeats (their focus stays where it was)."""
+    from runtime import moy_input as mi
+    ws, drv, d, me, S = _sound(desk)
+    me.select_cursor(0)
+    p = me.cur_step()[0]
+    focus = _desk_focus(d)
+    drv.key_down(mi.KEY_DOWN)
+    for _ in range(30):                          # a second held
+        drv.frame(DT)
+    drv.key_up(mi.KEY_DOWN)
+    drv.frame(DT)
+    assert me.cur_step()[0] < p - 2
+    assert _desk_focus(d) == focus
+
+
+def _desk_focus(d):
+    from runtime import ui_draw
+    return ui_draw._C.api_focus(d._host.ctx)
+
+
 def test_a_sound_is_renamed_and_its_name_saved_with_the_bank(desk):
     ws, drv, d, me, S = _sound(desk)
     _tap(drv, 0x101 + 1)                         # F2
