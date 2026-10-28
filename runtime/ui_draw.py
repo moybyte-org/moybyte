@@ -2590,6 +2590,15 @@ def initial_cover(cv, rect, r, title, stepped=False):
     every size a carousel's motion passes through, as a cover's art does.
     The letter's rects at a card's size are kept, and fill in one call."""
     x, y, w, h = rect
+    block, ink, q = _initial_parts(cv, title, w, h)
+    cv.rrect(x, y, w, h, r, block, stepped=stepped)
+    if q:
+        cv.fill_rects(q, -1, x, y, ink)
+
+
+def _initial_parts(cv, title, w, h):
+    """(block, ink, the letter's rects in a w x h card or None) of the
+    title tile `initial_cover` draws, each kept."""
     got = _initial_of.get(title)
     if got is None:
         s = str(title or "").strip()
@@ -2598,9 +2607,8 @@ def initial_cover(cv, rect, r, title, stepped=False):
             _initial_of.clear()
         _initial_of[title] = got
     block, ink, letter = got
-    cv.rrect(x, y, w, h, r, block, stepped=stepped)
     if letter is None or w <= 0 or h <= 0:
-        return
+        return block, ink, None
     key = (letter, w, h)
     q = _initial_quads.get(key)
     if q is None:
@@ -2615,8 +2623,15 @@ def initial_cover(cv, rect, r, title, stepped=False):
         if len(_initial_quads) >= 64:
             _initial_quads.clear()
         _initial_quads[key] = q
-    if q:
-        cv.fill_rects(q, -1, x, y, ink)
+    return block, ink, q
+
+
+def initial_parts(cv, title, w, h):
+    """(block, the letter's rects or None) of the title tile `initial_cover`
+    draws over a w x h card: its colour block's rounded rect, and the rects
+    (x, y, w, h, ink) its letter fills over it, kept."""
+    block, _ink, q = _initial_parts(cv, title, w, h)
+    return block, q or None
 
 
 FADE_WELL = -3     # `fade`'s colour: a part's well (moy_ui_well's fill)

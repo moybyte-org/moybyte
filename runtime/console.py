@@ -3479,6 +3479,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The "+ New" card draws the live icon set's plus (iconsets.plus).
         g.icon_spec = self.icon_spec
         g.cover_for = self.covers.cover_for
+        g.cover_ready = self.covers.ready_for
         g.tinted_for = self.covers.tinted
         # The favorite-star badge on the selected card (#105).
         g.favorite_for = self.carts.is_favorite
@@ -3501,6 +3502,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         g.sel = old.sel
         g._scroll_to_sel()
         self.launcher = g
+        old.release_faces()
         self._dirty = True
 
     def set_home_tab(self, tab, grid=None):

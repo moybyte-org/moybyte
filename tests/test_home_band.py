@@ -4,17 +4,21 @@ the grid and the icons repaints the two cells whose focus moved, a scroll on
 the plain ground (`bg`) shifts the band and repaints the strip it exposed,
 a baked backdrop (`bd`) or a picture keeps the band's repaint, and the
 handheld carousel's settle frame repaints the band and the hint strip, not
-the home.
+the home. The grid's and the icons' cards come out of their kept faces
+(`launcher_layer._Faces`), each drawn once into a slot of one layer and
+copied, the rows under a card's corners drawn over a backdrop, which goes
+back under the whole band in one copy.
 
 Each case runs a scripted session twice on one, two and three buffers
 presented in turn, as a board's framebuffers are: once as it ships, and
-once with every partial path off (each frame a whole repaint), and holds
-the first's glass, picture by picture, to the second's bytes."""
+once with every partial path and the kept faces off (each frame a whole
+repaint drawing every card), and holds the first's glass, picture by
+picture, to the second's bytes."""
 
 import pytest
 
-from runtime import host_app, launcher_layer, moy_carts, ui_draw
-from ws_helpers import no_unlock_banner, quiesce
+from runtime import cover_cache, host_app, launcher_layer, moy_carts, ui_draw
+from ws_helpers import cover_bytes, no_unlock_banner, quiesce
 
 
 @pytest.fixture(autouse=True)
@@ -63,6 +67,7 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
         monkeypatch.setattr(L, "_try_still_frame", lambda self, cv, dt: False, raising=False)
         monkeypatch.setattr(L, "_try_drag_partial", lambda self, cv, dt: False)
         monkeypatch.setattr(L, "_try_stamp_retained", lambda self, cv, dt: False)
+        monkeypatch.setattr(launcher_layer.Launcher, "_faces_for", lambda self, *a: None)
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts, **_TIERS[tier])
     for i in range(n):
@@ -184,6 +189,69 @@ def _session(ws, drv, frame):
     return shots
 
 
+def _edits(ws, drv, frame):
+    """What a card's kept face is drawn from changing under the band's
+    frames: steps, a cart renamed, a cover landing on a card the band
+    shows, the theme changed and back, and the keys going up to the tab
+    row and down again (the selected card loses its focus and gets it
+    back), with steps between."""
+    shots = []
+
+    def run(n):
+        for _ in range(n):
+            s = frame()
+            if s is not None:
+                shots.append(s)
+
+    home = ws.launcher_layer
+    g = ws.launcher
+    fwd, back = ("down", "up") if not g.horizontal else ("right", "left")
+
+    def step(k, n=2):
+        home.handle_input(_Key(k))
+        ws.mark_dirty()
+        run(n)
+
+    for _ in range(3):
+        step(fwd)
+    run(6)
+    carts = [it for it in g.items if it.get("path")]
+    assert moy_carts.save_manifest_meta(carts[1]["path"], title="Renamed Cart")
+    ws.carts.rescan()
+    ws.mark_dirty()
+    run(6)
+    assert any(it.get("title") == "Renamed Cart" for it in ws.launcher.items)
+    step(fwd)
+    slice_ms = cover_cache._COVER_SLICE_MS
+    cover_cache._COVER_SLICE_MS = -1      # a decode's 16 rows a frame: it lands later
+    try:
+        moy_carts.save_cover(carts[2], cover_bytes(9, stripes=12))
+        ws.carts.rescan()
+        ws.mark_dirty()
+        run(23)
+    finally:
+        cover_cache._COVER_SLICE_MS = slice_ms
+    step(back)
+    step(back)
+    was = ws.look.theme_name
+    ws.look.set_theme("contrast" if was != "contrast" else "moy", persist=False)
+    ws.mark_dirty()
+    run(6)
+    step(fwd)
+    ws.look.set_theme(was, persist=False)
+    ws.mark_dirty()
+    run(6)
+    for _ in range(4):
+        step("up")
+    run(4)
+    for _ in range(4):
+        step("down")
+    run(4)
+    step(fwd)
+    run(8)
+    return shots
+
+
 def _changes(shots):
     out = []
     for s in shots:
@@ -192,14 +260,15 @@ def _changes(shots):
     return out
 
 
-def _parity(tmp_path, monkeypatch, tier, arrangement, theme, bufs, cursor=False, tab="mine"):
+def _parity(tmp_path, monkeypatch, tier, arrangement, theme, bufs, cursor=False, tab="mine",
+            session=_session):
     with monkeypatch.context() as m:      # (the conftest's patches stay)
         ws, drv, frame, _ = _home(tmp_path / "a", m, tier, arrangement, theme, bufs, True,
                                   cursor=cursor, tab=tab)
-        whole = _session(ws, drv, frame)
+        whole = session(ws, drv, frame)
     ws, drv, frame, stats = _home(tmp_path / "b", monkeypatch, tier, arrangement, theme,
                                   bufs, False, cursor=cursor, tab=tab)
-    part = _session(ws, drv, frame)
+    part = session(ws, drv, frame)
     whole, part = _changes(whole), _changes(part)
     assert len(whole) == len(part), (len(whole), len(part))
     for i, (a, b) in enumerate(zip(whole, part)):
@@ -226,13 +295,14 @@ def test_desk_band_frames_are_whole_repaints(tmp_path, monkeypatch, arrangement,
 
 
 @pytest.mark.parametrize("bufs", [2, 3])
-@pytest.mark.parametrize("arrangement", ["grid", "carousel"])
+@pytest.mark.parametrize("theme", ["moy", "blocks"])
+@pytest.mark.parametrize("arrangement", ["grid", "icons", "carousel"])
 def test_band_frames_under_the_cursor_are_whole_repaints(tmp_path, monkeypatch, arrangement,
-                                                         bufs):
+                                                         theme, bufs):
     """The cursor's stamp, over the band, is repainted where each buffer
-    holds it, through steps, the shift and the copies out of the last
-    buffer."""
-    _ws, stats = _parity(tmp_path, monkeypatch, "handheld", arrangement, "moy", bufs, True)
+    holds it, through steps, the shift, the kept faces and the copies out
+    of the last buffer."""
+    _ws, stats = _parity(tmp_path, monkeypatch, "handheld", arrangement, theme, bufs, True)
     assert stats["band"] * 2 > stats["frames"], stats
 
 
@@ -243,3 +313,56 @@ def test_band_frames_over_covers_are_whole_repaints(tmp_path, monkeypatch, arran
     its corners' rows, so a band repaint restores the ground around them."""
     _ws, stats = _parity(tmp_path, monkeypatch, "handheld", arrangement, theme, 2, tab="games")
     assert stats["band"] * 2 > stats["frames"], stats
+
+
+@pytest.mark.parametrize("bufs", [1, 2, 3])
+@pytest.mark.parametrize("theme", ["moy", "blocks", "picture"])
+@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+def test_kept_faces_follow_what_they_show(tmp_path, monkeypatch, arrangement, theme, bufs):
+    """The cards' kept faces (`launcher_layer._Faces`) through a rename, a
+    cover landing, a theme change and the focus leaving the cards for the
+    tab row: every picture byte-equal to whole repaints that draw every
+    card, and the faces kept."""
+    ws, stats = _parity(tmp_path, monkeypatch, "handheld", arrangement, theme, bufs,
+                        session=_edits)
+    assert stats["band"] * 4 > stats["frames"], stats      # (a rescan paints whole)
+    assert ws.launcher.faces_bytes() > 0
+
+
+@pytest.mark.parametrize("theme", ["moy", "blocks", "picture"])
+@pytest.mark.parametrize("arrangement", ["grid", "icons", "carousel"])
+def test_desk_kept_faces_follow_what_they_show(tmp_path, monkeypatch, arrangement, theme):
+    ws, stats = _parity(tmp_path, monkeypatch, "desk", arrangement, theme, 3, session=_edits)
+    assert ws.launcher.faces_bytes() > 0
+
+
+def test_kept_faces_are_released(tmp_path, monkeypatch):
+    """The faces' layer is owned: the fit check's release and leaving the
+    arrangement give it back."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", "icons", "blocks", 2, False)
+    g = ws.launcher
+    lay = g._faces.lay
+    assert ws.launcher_layer.release_retained()
+    assert g._faces is None and len(lay._buf) == 2   # (the released view)
+    ws.launcher_layer.handle_input(_Key("down"))
+    ws.mark_dirty()
+    assert frame() is not None
+    assert g.faces_bytes() > 0
+    lay = g._faces.lay
+    ws.set_home_arrangement("grid")
+    assert g._faces is None and len(lay._buf) == 2   # (the released view)
+
+
+
+@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+def test_idle_frames_draw_the_next_rows_faces(tmp_path, monkeypatch, arrangement):
+    """On frames nothing waits on the faces of the cells past the band's
+    edge are drawn, so the step that brings them in copies them."""
+    ws, drv, frame, _ = _home(tmp_path, monkeypatch, "handheld", arrangement, "blocks", 2,
+                              False)
+    g = ws.launcher
+    shown = {i for i, _r in g._visible()}
+    for _ in range(12):
+        drv.frame(1 / 30)
+    kept = {k for k, j in g._faces.of.items() if g._faces.item[j] is not None}
+    assert kept - shown, (sorted(shown), sorted(kept))

@@ -312,22 +312,22 @@ def test_carousel_moving_frame_keeps_the_wallpaper_still(tmp_path):
     assert ws.screen == "launcher"            # and the release opened nothing
 
 
-def test_carousel_moving_frame_restores_only_around_the_cards(tmp_path, monkeypatch):
-    """Every card paints its whole square opaque, so a moving frame restores
-    the wallpaper only around them: less than the band, and at least the band
-    less the cards."""
+def test_carousel_moving_frame_restores_the_band_in_one_copy(tmp_path, monkeypatch):
+    """A moving frame puts the wallpaper back under the whole band in one
+    copy and the cards paint over it: the cut round the cards cost a board
+    more in calls than the bytes it saved (`restore_whole`)."""
     from runtime import host_app
 
     ws = _ws_with_carts(tmp_path, 14)
     drv = host_app.ConsoleDriver(ws)
     for _ in range(80):
         drv.frame(1 / 30)
-    area = [0]
+    rects = []
     home = ws.launcher_layer
     orig = home._backdrop_fill
 
     def spy(cv, r):
-        area[0] += r[2] * r[3]
+        rects.append(tuple(r))
         return orig(cv, r)
 
     monkeypatch.setattr(home, "_backdrop_fill", spy)
@@ -335,14 +335,10 @@ def test_carousel_moving_frame_restores_only_around_the_cards(tmp_path, monkeypa
     cx, cy = bx + bw - 10, by + bh // 2
     lastx = _drag_frames(drv, cx, cy, 6)
     assert ws.launcher.dragging
-    area[0] = 0
+    del rects[:]
     drv.touch_drag(lastx - 9, cy)             # one moving frame
     drv.frame(1 / 30)
-    cards = 0
-    for _i, r in ws.launcher._visible():
-        w = min(r[0] + r[2], bx + bw) - max(r[0], bx)
-        cards += max(0, w) * r[3]
-    assert bw * bh - cards <= area[0] < bw * bh
+    assert rects == [(bx, by, bw, bh)]
 
 
 # -- the web transport (#113 Phase 6: the scr op) ----------------------------

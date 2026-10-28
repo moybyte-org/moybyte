@@ -322,6 +322,15 @@ class CoverCache:
             self._jobs.pop(key, None)
             return self._finish(key, None)
 
+    def ready_for(self, cart, div=BASE):
+        """What `cover_for` would answer now without building or touching
+        anything: the decoded cover, None for a cart known to carry none,
+        and False while it is not decoded."""
+        path = cart.get("path")
+        if path is None or path in self._none:
+            return None
+        return self._cache.get((path, div), False)
+
     def none_for(self, cart):
         """Whether `cart` is known to carry no cover (its `cover_for` answers
         None for good, not while a decode is in flight): one with no path

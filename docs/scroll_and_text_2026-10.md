@@ -664,10 +664,21 @@ two changes and one honest limit:
   wallpaper's restorer puts a baked backdrop (`bd`) or a picture back at
   glass coordinates -- they stay put while the cards move. Only the plain
   fill (`bg`) moves with the cards, and there the band is a translation.
-  On a `bd` or picture theme the band repaint stays, with only the exposed
-  cells drawn and the covers through one `blit_batch` (the T-Deck's 33%
-  memcpy share), which is the carousel's cost today: over the target on the
-  P4, and §15 says so with the next lever.
+  On a `bd` or picture theme the band repaint stays, its cards out of their
+  KEPT FACES (`launcher_layer._Faces`, 2026-10-28): a card that wears no
+  focus is drawn once into a slot of one owned layer -- its picture and
+  rim, keyed on the item, its title, the cover object it was drawn from and
+  the look's gen -- and copied; over anything but the plain ground a
+  corner's partly covered pixels blend over what lies under them, so the
+  copy is `moy_gfx.face` (`mg_face`, `moy_shape.h`), which draws those
+  pixels as the cover or the title tile and the edge ring draw them and
+  copies the rest, one call a card. The desk shelf's cards take the same
+  faces; the handheld carousel's change size with the offset and draw. Idle
+  frames draw the faces of the row past either end of the band
+  (`Launcher.warm_faces`), so a step copies the row it brings in. The
+  backdrop goes back under the whole band in one copy and the pictures
+  paint over it: its cut round the cards cost more in calls than the bytes
+  it saved (a block that big is the P4s' 2D-DMA's, `FBCPY_MIN_PX`).
 
 The desk home's still ring (§14.4) keeps the parts' keys; it is a
 `PaintRing` (§3.1), the parts' keys its slots' change. The PROJECTS window is a `Carousel` in a window
@@ -765,9 +776,6 @@ is queued. The host runs every mechanism under test as an emulated tier
   (§5), and a popover is overlay, which forces full paints under it; a long
   popover that scrolls takes the nest's state like a page and shifts only
   when a later measurement says it must.
-- A per-cell retained layer for the home's cards on a picture wallpaper:
-  the next lever for the rows §15 leaves over, named there, not designed
-  here.
 
 ## 13. The guards
 

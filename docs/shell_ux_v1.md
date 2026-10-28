@@ -187,7 +187,9 @@ door — no setting, no mode:
   band's alone (`launcher_layer._drag_partial`): on the plain ground the
   band shifts and repaints the strip it exposed, a step repaints the two
   cards whose focus moved and the hint strip, and over a baked backdrop or a
-  picture a moved band repaints whole over the backdrop's own pixels.
+  picture a moved band repaints whole over the backdrop's own pixels, each
+  card that wears no focus copied out of its kept face (drawn once, the
+  pixels its corners blend drawn over the backdrop).
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
   v1 §1.2): PLAY runs it (same as the tap), CHANGE opens the SAME project in the
   Editor landing on Config — the bridge from playing to making, in place, never a
