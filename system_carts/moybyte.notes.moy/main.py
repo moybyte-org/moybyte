@@ -48,11 +48,15 @@ UNDO_O = ({"disabled": False}, {"disabled": True})
 OFF = ((False, False), (True, False), (False, True), (True, True))
 STATUS_O = {"id": "status"}
 MODE_O = {"id": "mode"}
-VAULT_O = {"id": "vault", "lead": True}
+VAULT_O = {"id": "vault", "lead": True, "gen": 0}   # gen: moved with the rows
 DIM_O = {"tone": "dim"}
 FIELD_O = {"id": "Name", "hint": "my note"}
 WRAP_O = {"wrap": True, "tone": "dim"}
 WASH_O = {"wash": True}
+# The page's gen: bumped when what the page shows beside the note changes,
+# so a frame that changes the note alone draws its rows alone.
+PAGE_O = {"gen": 0}
+_shows = [None] * 11   # what the page showed beside the note last frame
 
 ed = None              # the open note's editor handle (None: the list)
 names = None           # the vault, newest first (None: no storage)
@@ -98,6 +102,7 @@ def _refresh(keep=None):
     rows = [("new", "New note")] + [(ICON.get(files.badge(m), "doc"), shown(m))
                                     for m in names or ()]
     caption = "%d note%s" % (n, "" if n == 1 else "s")
+    VAULT_O["gen"] += 1
     if keep is not None and names and keep in names:
         cur = names.index(keep) + 1
     cur = max(0, min(cur, n))
@@ -379,7 +384,7 @@ def _note_page(x, y, w, h):
         _close()
         return
     ui.at(x, y, w, h)
-    ui.page("")
+    ui.page("", _page_o(False))
     foot = 34
     _sheet(x + 6, y + 3, w - 12, h - foot - 5, 8 * FS)
     fy = y + h - foot + 1
@@ -388,6 +393,29 @@ def _note_page(x, y, w, h):
         _tool(i)
     ui.at(x + w - 120, fy + 5, 114, 22)
     ui.info("", _status(), STATUS_O)
+    ui.end()
+
+
+def _page_o(desk):
+    """The note's page's overrides: its gen, moved when what the page shows
+    beside the note does -- the tools' states, the foot's word and, on the
+    desk, the vault's rows and the undo and redo tools."""
+    moved = (_seen(0, ed.name()) | _seen(1, ed.selecting()) | _seen(2, ed.has_selection())
+             | _seen(3, ed.can_paste()) | _seen(4, _status()) | _seen(5, FS) | _seen(6, desk))
+    if desk:
+        moved |= (_seen(7, rows) | _seen(8, cur) | _seen(9, ed.can_undo())
+                  | _seen(10, ed.can_redo()))
+    if moved:
+        PAGE_O["gen"] += 1
+    return PAGE_O
+
+
+def _seen(i, v):
+    """1 where `v` is not what slot `i` of the page held last frame."""
+    if _shows[i] is v or _shows[i] == v:
+        return 0
+    _shows[i] = v
+    return 1
 
 
 def _tool(i):
@@ -448,7 +476,7 @@ def _desk(x, y, w, h):
     keys."""
     ui.bar(_title(ed.name()) if ed is not None else "")
     ui.at(x, y, w, h)
-    ui.page("")
+    ui.page("", _page_o(True) if ed is not None and names is not None else None)
     if names is None:
         _blank(x, y, w, h, "No storage", NO_STORE)
         return

@@ -546,6 +546,9 @@ class DeviceCanvas:
     # leaves less than that much of R undrawn draws whole instead
     # (`ui_draw._pays`). None where nobody measured it: it shifts.
     SHIFT_COST = None
+    # The clears this canvas took (`cls`): an editor handle's rows read it
+    # beside the gate counters, since a clear is no gated verb.
+    clears = 0
 
     def __init__(self, compositor):
         self._comp = compositor
@@ -1271,6 +1274,7 @@ class DeviceCanvas:
 
     def cls(self, c=0):
         # Full-surface reset: ignores camera/clip (like TIC-80) but honours pal.
+        self.clears += 1
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         self._gfx.layer_drain(self._lrs)   # #54 St.2: a predicted restore in flight
                                           # for a frame that ISN'T drawing the layer

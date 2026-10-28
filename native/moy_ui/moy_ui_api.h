@@ -34,6 +34,7 @@
 #define MOY_UI_API_CHIP 12          // a lent chip's words (ui.bar), NUL-terminated
 #define MOY_UI_API_BAR 6            // the tools an app lends its bar
 #define MOY_UI_API_FLOOR 24         // the rects a shift frame's floor holds
+#define MOY_UI_API_HOST 6           // the rects a host's rows frame names (moy_ui_api_shift_rows)
 
 // The input a frame resolves over, the run snapshot's shape: the buttons held
 // and pressed this frame (bit i is MOY_INPUT_NAMES[i]: left, right, up, down,
@@ -334,6 +335,12 @@ typedef struct {
     moy_ui_box_t pic_clip;          // the floor's rect the last card's picture draws through
     uint8_t pic_tbl;                // ...or the floor of the placed table drawn last as R
     uint8_t fl_s0, fl_p0, fl_pn;
+    // sh_quiet: begin found nothing that draws the frame whole (no press,
+    // activation, step, hover, overlay or owed frame), so a host may name the
+    // rows its own drawing changed (hr, hr_n of them: moy_ui_api_shift_rows);
+    // hover_off: no pointer held, and no stop under it this frame or last.
+    uint8_t sh_quiet, hr_n, hover_off;
+    moy_ui_box_t hr[MOY_UI_API_HOST];
     uint32_t fl_pend;
     moy_ui_box_t fl[MOY_UI_API_FLOOR];
     // what the last pass began under, which a shift frame's must equal
@@ -678,6 +685,7 @@ enum {
     MOY_UI_KD_BAD = 4,              // ...holding what no shift may move (MOY_UI_SHIFT_NONE)
     MOY_UI_KD_PAGE = 8,             // a page (or a placed table's rows): its `a` is a scroll
     MOY_UI_KD_TABLE = 16,           // ...a placed table's rows, R its view
+    MOY_UI_KD_AT = 32,              // ...holding a stop ui.at placed, which no move carries
 };
 // After begin: the frame the engine licenses (MOY_UI_SHIFT_*). out: R's x,
 // y, w, h on screen as the last frame drew it, dy, the shift that brings
@@ -708,6 +716,26 @@ int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap);
 // The floor's bounding rect as the pass drew it, x, y, w, h on screen into
 // out: 1, or 0 where the pass drew whole (or drew no floor at all).
 int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]);
+// A rows frame its host asks for (docs/scroll_and_text_2026-10.md §5): the
+// host draws part of the page itself (a cart's editor handle, which is not a
+// stop) and names the rects of it its drawing will change this frame, `n` of
+// them as x, y, w, h each, MOY_UI_API_HOST at most. Called after begin, where
+// begin planned no frame of its own and found it quiet: R is the page the
+// last pass drew under its gen, holding every rect, with no page scrolling;
+// a page with stops ui.at placed qualifies, since nothing moves. The floor
+// is what begin's input changes (the marks, a typed field) and the rects,
+// each wanting the page's ground. Answers MOY_UI_SHIFT_ROWS, its plan as
+// moy_ui_api_shift_plan's into out, or MOY_UI_SHIFT_NONE where the frame
+// draws whole (no such page, a rect outside it, a floor that is most of it).
+int moy_ui_api_shift_rows(moy_ui_ctx_t *c, const int32_t *r, int n, int32_t out[8]);
+// While R is open on an armed frame: rect x, y, w, h joins the floor, and
+// the ground every rect of the floor still wants is filled now, so the host
+// draws over the page's ground what it changed there. 1 where it did; 0
+// where the frame draws whole or R is not open (the host draws whole).
+int moy_ui_api_floor_take(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, int w, int h);
+// The frame draws whole from here: a host saw an op that ignores the floor
+// (a cart's cls) land on its page. The pass after it draws every stop.
+void moy_ui_api_shift_break(moy_ui_ctx_t *c);
 // ui.card_clip(rect): `r` (x, y, w, h, in and out) cut to the floor's rect
 // the picture the last card or part answered lies in, which is where the
 // app draws it on a shift frame; 0, `r` as it was, where the frame draws

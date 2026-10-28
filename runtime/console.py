@@ -4597,20 +4597,21 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # A running cart on the desktop draws every frame, unless it crashed (the
         # error panel is static) or its run is held (the pause menu's card is
         # drawn on a change, over the frozen frame; a hidden window, the desk
-        # Editor's paused Run slot).
+        # Editor's paused Run slot). An app on the verbs, drawn on change,
+        # changes its own content alone, as a verbs page does (`pages`).
         player = self.player
         # (The Player's own fields: ws._update/_draw are property forwards to
         # exactly these.) An app on the verbs draws on change.
         if kind == "desktop" and self.cart_error is None and not self.pause.open \
                 and not player.paused and (
                     player._update is not None or player._draw is not None) \
-                and player.animates():
+                and (pages or not player._on_change) and player.animates():
             return True
         # Windowed WM (#73): a running cart's WINDOW keeps animating even when
         # another window sits above it on the stack (Settings over a game, the
         # editor beside a playtest). No hook on the fullscreen-stack WM.
         _ka = getattr(self.wm, "keeps_animating", None)
-        if _ka is not None and _ka(dt):
+        if _ka is not None and _ka(dt, pages):
             return True
         # A music-editor preview must keep ticking the mixer + redrawing the PLAY/STOP
         # button (and clearing the flag when the effect ends) without input (#50).

@@ -809,7 +809,7 @@ Everything else is on the handle you get back:
 
 | call | does |
 |---|---|
-| `ed.draw(x, y, w, h)` | render the document into that rect of your canvas, this frame. Add a `scale` for a big screen |
+| `ed.draw(x, y, w, h)` | render the document into that rect of your canvas, this frame. Add a `scale` for a big screen. On a `ui.page` given a `gen` it draws only the rows that changed (docs/ui_api_2026-10.md) |
 | `ed.tap(x, y, click)` | forward a pointer PRESS. Answers what the tap MEANT: `("link", name)` a tapped `[[note]]` — open it — `("check", row)` a checkbox it just ticked, `("caret", None)` a plain place, `None` outside |
 | `ed.drag(x, y, down)` | forward what follows the press. It PANS — down the page, and sideways too in a mode that does not wrap — or, in SELECT mode, grows the selection to the finger |
 | `ed.nav(dx, dy)` | move the caret by cells. The console already feeds this from the T-Deck trackball and the host arrow keys while your handle has focus; call it yourself for an on-screen d-pad |

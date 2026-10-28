@@ -547,22 +547,38 @@ over the chrome's), where every frame draws whole.
   frame today, which would wipe the dialog's rows, so a rows frame under a
   dialog skips the put-back and draws the dialog's rows alone.
 - *Notes* is a system cart on the verbs engine: its `_draw` runs its whole
-  verbs page every tick (`ui.bar`, `ui.page("")`, the hints, the sheet),
-  and the page's ground fills the cart's canvas before the handle draws, so
-  rows in the handle alone save nothing. Notes takes the floor as any verbs
-  page does: the handle tells the engine its pending rows at begin (the
-  handle is shell code; the cart's pass runs under the floor, the page
-  ground fills the floor only), and the handle draws rows only when the
-  canvas's gate counters (`MOY_ST_N_FILL`, `MOY_ST_N_TEXT`) show nothing
-  else wrote the canvas since its last draw -- otherwise whole. The cart
-  verb `ed.draw(x, y, w, h)` keeps its meaning for every other cart (render
-  the document into that rect, this frame): a cart that `cls()`es and calls
-  it gets the whole document, because its counters moved. The cart's canvas
-  is one persistent buffer, so the translation is an in-place `scroll_rect`
-  there; the Player window's content speaks the record (the handle's rows)
-  through the shown ring, so the composite copies the rows and the ring's
-  lag, not the canvas. It is the last phase (§15 P8), priced honestly, and
-  §15 says what it costs if the cart floor does not hold.
+  verbs page every tick (`ui.bar`, `ui.page`, the hints, the sheet), and
+  the page's ground fills the cart's canvas before the handle draws, so
+  rows in the handle alone save nothing. Notes takes the floor as a host's
+  rows frame. Its page and its vault table carry a gen (`PAGE_O`, moved
+  when the tools, the foot's word or the vault change). At begin the Player
+  asks the handle the rows its next draw changes (`EditorHandle.rows_plan`:
+  each visual row's laid line, caret cell and selection against the last
+  draw's, the bands of rows that differ; an embed, a moved view or a new
+  look is the whole document), adds what the buffer it draws into lags
+  (its `PaintRing`: on a glass of two or three buffers the floors the
+  frames since changed, else the last frame's page moved over with
+  `shift_last`), and the engine plans the frame
+  (`moy_ui_api_shift_rows`): R is the page under its gen, which may hold
+  stops `ui.at` placed since nothing moves, and the floor is those rects
+  and what begin's input changes, under a hover over no stop. The cart's
+  pass runs under the floor, the page's ground filling it alone; the handle
+  takes each band into the floor over the ground (`moy_ui_api_floor_take`),
+  papers it and draws its rows, with the row above where a link's underline
+  reaches into it. Where no floor is drawn and the canvas is one buffer
+  only the run draws, the handle draws its rows when the canvas's gate
+  counters (`MOY_ST_N_FILL`, `MOY_ST_N_TEXT`) and its clears show nothing
+  else wrote it since its last draw -- otherwise whole. A `cls` under a
+  floor breaks the frame (`moy_ui_api_shift_break`: the pass draws whole
+  from there) and a declared `background` draws every frame whole. The
+  cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other cart
+  (render the document into that rect, this frame): a cart that `cls()`es
+  and calls it gets the whole document. What a frame changed of the canvas
+  is the floor's bounding rect (`Player.change`); the Player's window on
+  the desk copies it and the shown ring's lag onto the glass
+  (`WindowedWM._player_rows`, `blit_strip_rect`), not the canvas. It is
+  the last phase (§15 P8), priced honestly, and §15 says what it costs if
+  the cart floor does not hold.
 - *The text console* (`runtime/text_console.py`) draws through the view for
   its scrollback rows and its prompt line; a script that prints appends
   rows, a translation of the scrollback by the rows appended plus those
@@ -771,6 +787,7 @@ Per canvas, then per source:
 | `copy_last_into` a layer | roots with a `last` buffer (the P4s, the S3s), and the host's compositor, whose `last` is a test's ring as for `copy_last` | one persistent buffer with no ring: the web's canvas, every layer |
 | the PPA ground fill before R opens | the P4s | the S3s, the host, the web |
 | a shift frame of a nest | a nest whose app passes every gen it draws inside R | a nest with a `ui.part` and no gen, a placed `ui.at` stop, a Lua or wasm app |
+| a host's rows frame (an editor handle's) | a Python app on the verbs with one handle, its page under a gen | a Lua or wasm app, two handles, a declared `background`, an embed in view |
 | held-key repeat | every level source: the T-Deck matrix, BLE, the host's and browser's keyboards, a gamepad | the T-Deck keyboard's ASCII fallback |
 | the trackball's steps and `BALL_COAST` | the T-Deck (and the host's arrow pan) | every board without a ball |
 | direct render of key frames | the windowed WM over a root with `set_viewport` (the P4s, the host desk) | the web runner's canvas (keeps the stamp); the fullscreen WM (no window) |

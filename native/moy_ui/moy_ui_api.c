@@ -494,6 +494,7 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     c->sh_id = 0;
     c->sh_rows = c->sh_pics = 0;
     c->sh_dlg = 0;
+    c->sh_quiet = 0;
     int p = c->in[MOY_UI_IN_PTR];
     int live = p & MOY_UI_P_LIVE, held = live && (p & MOY_UI_P_HELD);
     int same = c->was_flags == (uint16_t)(flags & ~MOY_UI_KEY_EDGE) && c->was_fs == c->fs
@@ -503,6 +504,11 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
         dialog_plan(c, owed, same);
         return;
     }
+
+    // a host's rows frame: nothing but a hover over no stop
+    c->sh_quiet = (uint8_t)(same && !owed && !over && c->pop_prev.w == 0 && !c->pop_gone
+                            && !c->act && !c->step_x && !c->step_y && c->hover_off
+                            && !(p & (MOY_UI_P_EDGE | MOY_UI_P_MIDDLE)));
     // a press, an activation, a stepped value, a hover, an overlay: whole
     if (!same || owed || over || c->modal || c->pop_prev.w > 0 || c->pop_gone || c->act
         || c->step_x || (p & MOY_UI_P_EDGE) || (live && !held)
@@ -526,7 +532,7 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
             moved++;
             r = k;
         }
-        int ok = (k->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN | MOY_UI_KD_BAD))
+        int ok = (k->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN | MOY_UI_KD_BAD | MOY_UI_KD_AT))
                  == (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN);
         const moy_ui_stop_t *ps = ok ? page_of_keep(v, n, k) : NULL;
         if (ps != NULL && (int32_t)ps->b.w * ps->b.h > area) {
@@ -540,7 +546,7 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     if (r == NULL) {
         r = best;
     }
-    if (r == NULL || (r->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN | MOY_UI_KD_BAD))
+    if (r == NULL || (r->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN | MOY_UI_KD_BAD | MOY_UI_KD_AT))
                          != (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN)) {
         return;
     }
@@ -750,6 +756,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->dlg_held = 0;
     c->fl_top = c->fl_mute = 0;
     c->typed_box.w = 0;
+    c->hr_n = 0;
     c->hint_band.h = 0;
     c->tip_at.w = 0;
     c->tip_shown = 0;
@@ -1103,6 +1110,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     // under it, then or now: a stop's hover mark is all a hover draws, so a
     // touch's linger running out over the page's ground draws nothing.
     int was_live = c->last_ptr & MOY_UI_P_LIVE;
+    // a hover over no stop, then or now, draws nothing (a host's rows frame)
+    c->hover_off = (uint8_t)(!held && !was_held && (!live || stop_at(v, n, x, y) < 0)
+                             && (!was_live || stop_at(v, n, c->last_x, c->last_y) < 0));
     if ((live && (x != c->last_x || y != c->last_y)) || live != was_live) {
         if (held || was_held || (live && stop_at(v, n, x, y) >= 0)
             || (was_live && stop_at(v, n, c->last_x, c->last_y) >= 0)) {
@@ -2051,6 +2061,9 @@ static void floor_build(moy_ui_ctx_t *c, int p0, int n, int of) {
         // the field typed into: its text and its caret
         floor_strip(c, c->typed_box.y + dy, c->typed_box.y + c->typed_box.h + dy);
     }
+    for (int i = 0; i < c->hr_n; i++) {
+        floor_add(c, rc_of(c->hr[i]), 1);       // what the host's own drawing changes
+    }
     c->fl_early = (uint8_t)floor_reach(c, p0, n, 0, 1, 0);
     for (int pass = 0; pass < 4; pass++) {
         int grew = 0;
@@ -2248,10 +2261,11 @@ static void page_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
         return;
     }
     int s0 = c->page_stop + 1, sn = c->n_cur - s0;
-    int bad = 0;
+    int bad = 0, at = 0;
     for (int i = s0; i < c->n_cur; i++) {
         uint16_t f = c->cur[i].flags;
-        if ((f & STOP_AT) || ((f & STOP_PIC) && !(f & STOP_GEN))) {
+        at |= (f & STOP_AT) != 0;
+        if ((f & STOP_PIC) && !(f & STOP_GEN)) {
             bad = 1;
         }
     }
@@ -2281,7 +2295,7 @@ static void page_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
     }
     k->s0 = (uint8_t)s0;
     k->sn = (uint8_t)(sn > 0 ? sn : 0);
-    k->kd |= MOY_UI_KD_DRAWN | (bad ? MOY_UI_KD_BAD : 0);
+    k->kd |= MOY_UI_KD_DRAWN | (bad ? MOY_UI_KD_BAD : 0) | (at ? MOY_UI_KD_AT : 0);
 }
 
 void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
@@ -4722,6 +4736,100 @@ int moy_ui_api_shift_drawn(const moy_ui_ctx_t *c, int *clean) {
         return MOY_UI_SHIFT_NONE;
     }
     return c->sh_plan | (c->fl_struct ? MOY_UI_SHIFT_WIDE : 0);
+}
+
+int moy_ui_api_shift_rows(moy_ui_ctx_t *c, const int32_t *r, int n, int32_t out[8]) {
+    c->hr_n = 0;
+    if (c->sh_plan != MOY_UI_SHIFT_NONE || !c->sh_quiet || n < 0 || n > MOY_UI_API_HOST) {
+        return MOY_UI_SHIFT_NONE;
+    }
+    const moy_ui_stop_t *v = c->prev;
+    int np = c->n_prev;
+    moy_ui_keep_t *k = NULL;
+    const moy_ui_stop_t *rp = NULL;
+    for (int i = 0; i < MOY_UI_API_KEEP; i++) {
+        moy_ui_keep_t *q = &c->keep[i];
+        if (q->id == 0 || !(q->kd & MOY_UI_KD_PAGE)) {
+            continue;
+        }
+        if (q->a != q->drawn || moy_ui_scroll_moving(&q->sc)) {
+            return MOY_UI_SHIFT_NONE;   // a page scrolls: not the host's rows alone
+        }
+        const moy_ui_stop_t *ps = page_of_keep(v, np, q);
+        if (ps == NULL || (q->kd & (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN | MOY_UI_KD_BAD
+                                    | MOY_UI_KD_TABLE)) != (MOY_UI_KD_DRAWN | MOY_UI_KD_GEN)) {
+            continue;
+        }
+        int holds = 1;
+        for (int j = 0; j < n && holds; j++) {
+            const int32_t *b = &r[4 * j];
+            holds = b[2] > 0 && b[3] > 0 && b[0] >= ps->b.x && b[1] >= ps->b.y
+                    && b[0] + b[2] <= ps->b.x + ps->b.w && b[1] + b[3] <= ps->b.y + ps->b.h;
+        }
+        if (holds && (rp == NULL || (int32_t)ps->b.w * ps->b.h < (int32_t)rp->b.w * rp->b.h)) {
+            k = q;                      // the innermost page holding them all
+            rp = ps;
+        }
+    }
+    if (k == NULL || k->s0 + k->sn > np) {
+        return MOY_UI_SHIFT_NONE;
+    }
+    for (int j = 0; j < n; j++) {
+        c->hr[j] = (moy_ui_box_t){(int16_t)r[4 * j], (int16_t)r[4 * j + 1],
+                                  (int16_t)r[4 * j + 2], (int16_t)r[4 * j + 3]};
+    }
+    c->hr_n = (uint8_t)n;
+    c->sh_id = k->id;
+    c->sh_r = rp->b;
+    c->sh_dy = 0;
+    c->sh_head = 0;
+    c->fl_early = 0;
+    c->fl_n = 0;
+    c->fl_lost = 0;
+    c->fl_pend = 0;
+    floor_build(c, k->s0, k->sn, rp->b.y + rp->b.h);
+    int32_t area = 0, rows = 0;
+    for (int i = 0; i < c->fl_n; i++) {
+        area += (int32_t)c->fl[i].w * c->fl[i].h;
+        rows += c->fl[i].h;
+    }
+    if (!c->fl_early) {
+        c->fl_n = 0;
+        c->fl_pend = 0;
+    }
+    if (c->fl_lost || area * 5 > (int32_t)rp->b.w * rp->b.h * 3) {
+        c->fl_n = 0;
+        c->fl_pend = 0;
+        c->fl_early = 0;
+        c->fl_lost = 0;
+        c->hr_n = 0;
+        return MOY_UI_SHIFT_NONE;
+    }
+    c->sh_rows = (int16_t)(rows > rp->b.h ? rp->b.h : rows);
+    c->sh_pics = 0;
+    c->sh_plan = MOY_UI_SHIFT_ROWS;
+    return moy_ui_api_shift_plan(c, out);
+}
+
+int moy_ui_api_floor_take(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int x, int y, int w, int h) {
+    if (!armed(c) || c->fl_stage != 1 || c->fl_mute || c->sh_dlg) {
+        return 0;
+    }
+    ground_due(c, s);
+    int at = c->fl_n;
+    floor_add(c, (rc_t){x, y, x + w, y + h}, 1);
+    if (c->fl_lost) {
+        return 0;
+    }
+    for (int i = at; i < c->fl_n; i++) {
+        ground_fill(c, s, c->fl[i]);
+    }
+    c->fl_pend = 0;
+    return 1;
+}
+
+void moy_ui_api_shift_break(moy_ui_ctx_t *c) {
+    c->fl_on = 0;
 }
 
 int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap) {

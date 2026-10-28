@@ -82,10 +82,13 @@ try:
     from ticks import _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - direct host import
     from runtime.ticks import _ticks_ms, _ticks_diff
+from array import array as _array
 
 
 MAX_CHARS = 8000       # per document -- bounds the SD write + device memory
 _VIS_ROW = (0, 0, 0)
+_SIG_ROW = (0, -1, -1, -1)
+_ST_N_FILL, _ST_N_TEXT = 10, 11   # the canvas's fill and text counters (moy_canvas.h's MOY_ST_N_*)
 AUTOSAVE_MS = 2500     # idle before a SOFT save (Writer's #108 debounce)
 INVALID = "INVALID"    # the badge a mode's gate raises (#154's SYNTAX twin)
 
@@ -100,6 +103,8 @@ DESK_W = 600           # a canvas this wide is a desk's
 
 # Laid-out lines held per generation of the `_row` memo (two generations live).
 _MEMO = 120
+_BANDS = 6             # the bands of rows a draw paints alone, at most
+_FLOOR = 24            # the floor's rects the frame's pass reads back
 
 _BURST_BREAK = ".,!?;:"   # a typing burst closes here (#111 phase 3)
 
@@ -250,7 +255,7 @@ class EditorHandle:
     taps X never loses a note."""
 
     def __init__(self, files, kind, name, mode, canvas, theme,
-                 clip=None, host=None, images=None, look=False):
+                 clip=None, host=None, images=None, look=False, frame=None):
         self._files = files          # the (kind, name)-taking Files role
         self._max = MAX_CHARS        # the document's size cap
         self._images = images or files   # the role a note's embedded drawings load through
@@ -297,6 +302,31 @@ class EditorHandle:
         self._fmemo = [None, None, None, None]   # look_gen, desk, its faces, font_info
         self._gen = 0                # bumped by every verb that changes what it draws
         self._drawn = -1             # the _gen the last draw showed
+        # The rows: what each visual row of the last draw showed (its laid
+        # line `_sl`; its segment, caret cell and selection's cells, four a
+        # row in `_ss`), what every row of it is a function of besides its
+        # own (`_key`) and the draw's arguments; the walk of the next draw
+        # beside them (`_nl`, `_ns`); the bands, y0 and y1 a band, the rows
+        # that differ; what the last draw changed of the canvas (`drew`: x0,
+        # y0, x1, y1) and the canvas's counters after it (`_seen`). `frame`
+        # is the run's frame (the Player): whether its pass draws a floor
+        # this frame, which the rows draw into (docs/scroll_and_text_2026-10.md §5).
+        self._frame = frame
+        self._args = None
+        self._key = None
+        self._nr = -1
+        self._walked = -1
+        self._spill = False
+        self._lt = [0] * 8
+        self._sl = []
+        self._ss = []
+        self._nl = []
+        self._ns = []
+        self._band = [0] * (2 * _BANDS)
+        self._fr = _array("i", [0] * (4 * _FLOOR))
+        self.drew = [0, 0, 0, 0]
+        self.rows_only = False
+        self._seen = [None, 0, 0, 0]
 
     # -- what the skin asks ---------------------------------------------------
 
@@ -590,11 +620,90 @@ class EditorHandle:
         """Render the document into `(x, y, w, h)` of the cart's canvas, on
         its paper (corners of radius `r`).
 
+        Where the canvas holds the last draw but for what this frame's pass
+        put over the page's ground under it (its run's frame draws a floor),
+        or holds it untouched (nothing wrote the canvas since: its counters),
+        only the rows that differ from the last draw's are drawn
+        (docs/scroll_and_text_2026-10.md §5); otherwise the document whole.
+
         Also where the idle autosave lands: the shipped notebook has always
         run its debounce off the draw pass (Writer's `#108` model), and a kid
         pressing save is the thing this console does not do."""
         cv = self._canvas
         th = self._theme()
+        g = self._lay(x, y, w, h, scale)
+        # one name at a time: a wider unpack builds a tuple every draw
+        tx = g[0]
+        ty = g[1]
+        cols = g[2]
+        rows = g[3]
+        cell = g[4]
+        lh = g[5]
+        scale = g[6]
+        px = g[7]
+        x = int(x)
+        y = int(y)
+        w = int(w)
+        h = int(h)
+        r = int(r)
+        self._autosave()
+        self._drawn = self._gen
+        self._keep_caret(cols, rows)
+        nb = self._rows(cv, th, x, y, w, h, r, ty, rows, lh)
+        reg = self._faces_in[0]
+        was = _ui_draw.print_font(reg) if reg else None
+        d = self.drew
+        try:
+            if nb < 0:
+                # Clipped to the rect the skin gave: a long line, a tall embed
+                # and the last part-row stop at the editor's edge instead of
+                # over the skin's own chrome. Released to the full canvas
+                # afterwards, which is where the Player leaves it for every
+                # cart frame anyway.
+                cv.clip(x, y, w, h)
+                self._paper(cv, th, x, y, w, h, r)
+                self._paint(cv, th, tx, ty, w - 2 * px, cols, rows, cell, lh, scale)
+                a = self.autoscrolling()
+                if a is not None:
+                    _ui_draw.autoscroll_mark(cv, th, a[0], a[1], max(1, cell // 7))
+                d[0] = x
+                d[1] = y
+                d[2] = x + w
+                d[3] = y + h
+            else:
+                # Each band on fresh paper; its rows drawn into it, and the
+                # row above it where that row's underline reaches into it.
+                b = self._band
+                d[0] = x
+                d[2] = x + w
+                d[1] = d[3] = y
+                up = lh if self._spill else 0
+                for i in range(0, 2 * nb, 2):
+                    cv.clip(x, b[i], w, b[i + 1] - b[i])
+                    self._paper(cv, th, x, y, w, h, r)
+                    self._paint(cv, th, tx, ty, w - 2 * px, cols, rows, cell, lh, scale,
+                                b[i] - up, b[i + 1])
+                    if i == 0 or b[i] < d[1]:
+                        d[1] = b[i]
+                    if b[i + 1] > d[3]:
+                        d[3] = b[i + 1]
+        finally:
+            if was is not None:
+                _ui_draw.print_font(was)
+            cv.clip()
+        self.rows_only = nb >= 0
+        self._note_seen(cv)
+
+    def _paper(self, cv, th, x, y, w, h, r):
+        if r:
+            cv.rrect(x, y, w, h, r, th["surface"])
+        else:
+            cv.rect(x, y, w, h, th["surface"])
+
+    def _lay(self, x, y, w, h, scale):
+        """Size the view for a draw at `(x, y, w, h)`, as the draw keeps it:
+        `_lt`, [text x, text y, cols, rows, cell, line height, scale, pad x]."""
+        cv = self._canvas
         desk = getattr(cv, "w", 0) >= DESK_W
         reg, bold = self._faces(desk)
         if reg:
@@ -621,40 +730,247 @@ class EditorHandle:
         g = self._geom
         if g[0] != tx or g[1] != ty or g[2] != cell or g[3] != lh or g[4] != scale:
             self._geom = (tx, ty, cell, lh, scale)
-        x = int(x)
-        y = int(y)
-        w = int(w)
-        h = int(h)
         g = self._rect
         if g[0] != x or g[1] != y or g[2] != w or g[3] != h:
-            self._rect = (x, y, w, h)
+            self._rect = (int(x), int(y), int(w), int(h))
         g = self._faces_in
         if g[0] is not reg or g[1] is not bold or g[2] != line:
             self._faces_in = (reg, bold, line)
+        # A link's underline lies a line under the text's top: where that is
+        # the row's foot, it is the next row's first line.
+        self._spill = bool(reg) and (lh - line) // 2 + line >= lh
         if self._m.wrap:
             self.ed.left = 0              # wrapped prose never scrolls sideways
+        t = self._lt
+        t[0] = tx
+        t[1] = ty
+        t[2] = cols
+        t[3] = rows
+        t[4] = cell
+        t[5] = lh
+        t[6] = scale
+        t[7] = px
+        return t
+
+    # -- the rows a draw changes (docs/scroll_and_text_2026-10.md §5) ----------
+
+    def rows_plan(self, out, at):
+        """At a frame's begin, before the cart's pass: the rects of the
+        canvas the next draw changes -- the bands of rows that differ from
+        the last draw's, across its rect -- into `out` from slot `at`, x, y,
+        w, h each. Their count, or -1 where that draw is the document whole
+        (nothing drawn yet, the view moved, its look or size changed, an
+        embed shows). The idle save lands here, before the page reads the
+        badge it leaves."""
+        a = self._args
+        if a is None or self._nr < 0:
+            return -1
         self._autosave()
-        self._drawn = self._gen
+        x, y, w, h, scale, r = a
+        g = self._lay(x, y, w, h, scale)
+        ty = g[1]
+        cols = g[2]
+        rows = g[3]
+        lh = g[5]
         self._keep_caret(cols, rows)
-        # Clipped to the rect the skin gave: a long line, a tall embed and the
-        # last part-row stop at the editor's edge instead of over the skin's
-        # own chrome. Released to the full canvas afterwards, which is where
-        # the Player leaves it for every cart frame anyway.
-        cv.clip(x, y, w, h)
+        nb = self._diff(self._theme(), x, y, w, h, r, ty, rows, lh, False)
+        if nb < 0 or at + nb > len(out) // 4:
+            return -1
+        b = self._band
+        for i in range(nb):
+            k = 4 * (at + i)
+            out[k] = x
+            out[k + 1] = b[2 * i]
+            out[k + 2] = w
+            out[k + 3] = b[2 * i + 1] - b[2 * i]
+        return nb
+
+    def _rows(self, cv, th, x, y, w, h, r, ty, rows, lh):
+        """The bands this draw paints into `_band`, their count; -1 for the
+        whole document. Each band is a run of rows that differ from the last
+        draw's, across the rect; where the run's frame draws a floor, every
+        row its floor reaches joins them and each band is taken into the
+        floor over the page's ground."""
+        nb = self._diff(th, x, y, w, h, r, ty, rows, lh, True)
+        self._sl, self._nl = self._nl, self._sl
+        self._ss, self._ns = self._ns, self._ss
+        self._nr = self._walked
+        fr = self._frame
+        if nb < 0 or fr is None:
+            return -1
+        if fr.floor_on():
+            f = self._fr
+            n = fr.floor_rects(f)
+            for i in range(0, 4 * n, 4):
+                y0 = f[i + 1]
+                y1 = y0 + f[i + 3]
+                if f[i] >= x + w or f[i] + f[i + 2] <= x or y1 <= y or y0 >= y + h:
+                    continue
+                nb = self._band_add(nb, y0, y1, y, h, ty, rows, lh)
+                if nb < 0:
+                    return -1
+            b = self._band
+            for i in range(0, 2 * nb, 2):
+                if not fr.floor_take(cv, x, b[i], w, b[i + 1] - b[i]):
+                    return -1
+            return nb
+        # Nothing wrote the canvas since the last draw, which it still
+        # holds: the bands over the rows the last draw left, where no band
+        # crosses the paper's round corners (their edge blends over itself).
+        if not fr.holds(cv) or not self._unseen(cv):
+            return -1
         if r:
-            cv.rrect(x, y, w, h, r, th["surface"])
-        else:
-            cv.rect(x, y, w, h, th["surface"])
-        was = _ui_draw.print_font(reg) if reg else None
-        try:
-            self._paint(cv, th, tx, ty, int(w) - 2 * px, cols, rows, cell, lh, scale)
-        finally:
-            if was is not None:
-                _ui_draw.print_font(was)
-        a = self.autoscrolling()
-        if a is not None:
-            _ui_draw.autoscroll_mark(cv, th, a[0], a[1], max(1, cell // 7))
-        cv.clip()
+            b = self._band
+            for i in range(0, 2 * nb, 2):
+                if b[i] < y + r or b[i + 1] > y + h - r:
+                    return -1
+        return nb
+
+    def _band_add(self, nb, y0, y1, y, h, ty, rows, lh):
+        """Rows y0..y1 of the canvas join the bands, widened to whole rows
+        (the pad above the first and the part-row under the last are rows
+        of their own); runs that meet merge. The count, -1 past _BANDS."""
+        foot = ty + rows * lh
+        a = y if y0 < ty else ty + (y0 - ty) // lh * lh
+        e = y + h if y1 > foot else ty + (y1 - ty + lh - 1) // lh * lh
+        if a < y:
+            a = y
+        if e > y + h:
+            e = y + h
+        if e <= a:
+            return nb
+        b = self._band
+        i = 0
+        while i < 2 * nb:
+            if b[i] <= e and b[i + 1] >= a:
+                a = b[i] if b[i] < a else a
+                e = b[i + 1] if b[i + 1] > e else e
+                nb -= 1
+                b[i] = b[2 * nb]
+                b[i + 1] = b[2 * nb + 1]
+                i = 0
+                continue
+            i += 2
+        if nb >= _BANDS:
+            return -1
+        b[2 * nb] = a
+        b[2 * nb + 1] = e
+        return nb + 1
+
+    def _diff(self, th, x, y, w, h, r, ty, rows, lh, draw):
+        """Walk the view as this draw lays it out into `_nl`/`_ns` and
+        compare it with the last draw's: the bands of rows that differ, into
+        `_band`, their count; -1 where it is the whole document. A `draw`
+        keeps what its rows are a function of for the next."""
+        reg, bold, line = self._faces_in
+        g = self._geom
+        k = self._key
+        a = self._args
+        same = (k is not None and k[0] is th and k[1] == _ui_draw._GEN and k[2] == g[2]
+                and k[3] == lh and k[4] == g[4] and k[5] is reg and k[6] is bold
+                and k[7] == line and k[8] == self.ed.left and a is not None and a[0] == x
+                and a[1] == y and a[2] == w and a[3] == h and a[5] == r and g[1] == ty)
+        if not same and draw:
+            self._key = (th, _ui_draw._GEN, g[2], lh, g[4], reg, bold, line, self.ed.left)
+            self._args = (x, y, w, h, g[4], r)
+        n = self._walk(rows)
+        self._walked = n
+        if not same or n < 0 or self._nr < 0 or self.autoscrolling() is not None:
+            return -1
+        sl = self._sl
+        ss = self._ss
+        nl = self._nl
+        ns = self._ns
+        m = self._nr if self._nr > n else n
+        nb = 0
+        run = -1
+        for i in range(m + 1):
+            differs = False
+            if i < m:
+                if i >= n or i >= self._nr or sl[i] is not nl[i]:
+                    differs = True
+                else:
+                    j = 4 * i
+                    differs = (ss[j] != ns[j] or ss[j + 1] != ns[j + 1]
+                               or ss[j + 2] != ns[j + 2] or ss[j + 3] != ns[j + 3])
+            if differs and run < 0:
+                run = i
+            elif not differs and run >= 0:
+                # a row's underline that reaches the next row moved with it
+                e = i + 1 if self._spill else i
+                nb = self._band_add(nb, ty + run * lh, ty + e * lh, y, h, ty, rows, lh)
+                if nb < 0:
+                    return -1
+                run = -1
+        return nb
+
+    def _walk(self, rows):
+        """Lay out the view's visual rows into `_nl` (each row's laid line)
+        and `_ns` (its segment, the caret's cell in it or -1, the
+        selection's cells or -1, -1): how many; -1 where an embed shows,
+        whose picture is no row's."""
+        ed = self.ed
+        cols = self._view[0]
+        nl, ns = self._nl, self._ns
+        bounds = ed.selection_bounds()
+        wrap = self._m.wrap
+        k = 0
+        brow = ed.top
+        n = len(ed.lines)
+        while k < rows and brow < n:
+            laid = self._row(ed.lines[brow], cols)
+            if laid.img is not None:
+                return -1
+            here = laid.shown(ed.col) if brow == ed.row else -1
+            segs = laid.segs
+            for si in range(len(segs)):
+                if k >= rows:
+                    break
+                seg, base = segs[si]
+                if wrap:
+                    ln = len(seg)
+                else:
+                    base = ed.left
+                    ln = min(cols, max(0, len(seg) - base))
+                c = here - base if here >= 0 and base <= here <= base + ln else -1
+                s0 = e0 = -1
+                if bounds is not None and bounds[0] <= brow <= bounds[2]:
+                    s = laid.shown(bounds[1]) if brow == bounds[0] else 0
+                    e = laid.shown(bounds[3]) if brow == bounds[2] else base + ln
+                    s = s if s > base else base
+                    e = e if e < base + ln else base + ln
+                    if e > s:
+                        s0, e0 = s, e
+                if len(nl) <= k:
+                    nl.append(None)
+                    ns.extend(_SIG_ROW)
+                nl[k] = laid
+                j = 4 * k
+                ns[j] = si
+                ns[j + 1] = c
+                ns[j + 2] = s0
+                ns[j + 3] = e0
+                k += 1
+            brow += 1
+        return k
+
+    def _note_seen(self, cv):
+        """The canvas's counters as this draw left them (`_unseen`)."""
+        st = getattr(cv, "_gate_state", None)
+        s = self._seen
+        s[0] = cv if st is not None else None
+        if st is not None:
+            s[1] = st[_ST_N_FILL]
+            s[2] = st[_ST_N_TEXT]
+            s[3] = getattr(cv, "clears", 0)
+
+    def _unseen(self, cv):
+        """Nothing wrote the canvas since the last draw: its fill and text
+        counters and its clears are where that draw left them."""
+        st = getattr(cv, "_gate_state", None)
+        s = self._seen
+        return (st is not None and s[0] is cv and st[_ST_N_FILL] == s[1]
+                and st[_ST_N_TEXT] == s[2] and getattr(cv, "clears", 0) == s[3])
 
     def _faces(self, desk):
         """The note's (regular, bold) faces, (0, 0) for petme128's cells;
@@ -952,7 +1268,9 @@ class EditorHandle:
 
     # -- the paint pass -------------------------------------------------------
 
-    def _paint(self, cv, th, x, y, w, cols, rows, cell, lh, scale):
+    def _paint(self, cv, th, x, y, w, cols, rows, cell, lh, scale, lo=None, hi=0):
+        """The view's rows, every one, or those whose top lies in lo..hi
+        (the hit map `_vis` is every row's)."""
         ed = self.ed
         reg, _bold, line = self._faces_in
         dy = (lh - line) // 2 if reg else 0
@@ -997,12 +1315,13 @@ class EditorHandle:
                 vis[nv + 1] = si
                 vis[nv + 2] = yy
                 nv += 3
-                sel = self._paint_selection(cv, th, brow, laid, base, seg, x, yy, cell, lh)
-                self._paint_seg(cv, th, laid, seg, base, x, yy + dy, cell, lh, scale, hl)
-                if sel is not None:
-                    s0, s1 = sel
-                    cv.print(seg[s0 - base:s1 - base], x + (s0 - base) * cell, yy + dy,
-                             th["selection_ink"], scale)
+                if lo is None or lo <= yy < hi:
+                    sel = self._paint_selection(cv, th, brow, laid, base, seg, x, yy, cell, lh)
+                    self._paint_seg(cv, th, laid, seg, base, x, yy + dy, cell, lh, scale, hl)
+                    if sel is not None:
+                        s0, s1 = sel
+                        cv.print(seg[s0 - base:s1 - base], x + (s0 - base) * cell, yy + dy,
+                                 th["selection_ink"], scale)
                 if base <= here <= base + len(seg) and here >= 0:
                     cx = x + (here - base) * cell
                     cy = yy
@@ -1010,7 +1329,7 @@ class EditorHandle:
                 yy += lh
             brow += 1
         self._nvis = nv // 3
-        if cx is not None and x <= cx < x + w:
+        if cx is not None and x <= cx < x + w and (lo is None or lo <= cy < hi):
             if reg:
                 cv.rect(cx, cy + 2, 2, lh - 4, th["accent"])
             else:
