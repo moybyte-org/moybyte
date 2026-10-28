@@ -91,6 +91,8 @@ class MusicPage:
         self._o = {"gen": 0}
         self._shows = None
         self._drawn = None               # (gen, cursor, top) of the last frame drawn
+        self._seen = {}                  # each row's content the last frame drew, by index
+        self._now = {}
         self._asked = False              # this frame asked for its rows
         self._rects = array("i", [0] * 24)
         self._floor = array("i", [0] * 64)
@@ -110,9 +112,9 @@ class MusicPage:
 
     def _gen(self, me, song, n, rect, desk):
         """The page's gen: it moves with everything the page shows but the
-        steps' cursor and their scroll."""
+        steps' rows (their cursor, their scroll and what each holds)."""
         obj = me.cur_track() if song else me.cur_sfx()
-        shows = (id(me), me._hist.gen, song, me.sfx_idx, me.track_idx, n,
+        shows = (id(me), song, me.sfx_idx, me.track_idx, n,
                  sound_name(me.bank, me.sfx_idx), len(me.bank.sfx),
                  obj.speed if obj is not None else 0, bool(obj.loop) if obj is not None else False,
                  self.pop, self.mu.music_preview is not None, rect, desk)
@@ -121,11 +123,25 @@ class MusicPage:
             self._o["gen"] += 1
         return self._o["gen"]
 
+    def _contents(self, me, song, n, rows, top):
+        """Each shown row's content by index, into `_now`."""
+        now = self._now
+        now.clear()
+        if song:
+            t = me.cur_track()
+            for i in range(top, min(n, top + rows)):
+                v = t.pattern[i]
+                now[i] = tuple(v) if isinstance(v, list) else v
+        else:
+            st = me.cur_sfx().steps
+            for i in range(top, min(n, top + rows)):
+                now[i] = tuple(st[i])
+
     def _plan(self, gen, x, y, cur, rows, top):
         """Ask the host for this frame's rows where the last frame drawn
-        differs from it only by the cursor and the scroll: the cursor's
-        rows, then and now, and the rows a scroll shows, the steps moved
-        out of the last frame by the rows they scrolled."""
+        differs from it only by its rows: the cursor's rows, then and now,
+        each row whose content changed, and the rows a scroll shows, the
+        steps moved out of the last frame by the rows they scrolled."""
         self._asked = False
         d = self._drawn
         if d is None or d[0] != gen:
@@ -135,8 +151,15 @@ class MusicPage:
             return
         r = self._rects
         n = 0
-        for vi in (cur - top, d[1] - top):
-            if 0 <= vi < rows and (n == 0 or r[1] != y + vi * ROW):
+        seen = self._seen
+        for vi in range(rows):
+            i = top + vi
+            if i == cur or i == d[1] or (i in seen and self._now.get(i) != seen[i]):
+                if n and r[4 * n - 3] + r[4 * n - 1] == y + vi * ROW:
+                    r[4 * n - 1] += ROW     # the run of rows above, one row longer
+                    continue
+                if n == 5:
+                    return
                 r[4 * n] = x
                 r[4 * n + 1] = y + vi * ROW
                 r[4 * n + 2] = 184
@@ -160,6 +183,7 @@ class MusicPage:
         if me is not None:
             song = me.view == me.SONG_VIEW
             n, cur, rows, top = self._window(me, song, y + 24, foot)
+            self._contents(me, song, n, rows, top)
             self._plan(self._gen(me, song, n, rect, desk), x, y + 24, cur, rows, top)
         host.begin(cv, th, rect, desk, False, elsewhere=self.pop is None)
         ui.at(*rect)
@@ -178,6 +202,7 @@ class MusicPage:
             self._speed(me, song)
         ui.end()
         self._drawn = (self._o["gen"], cur, top)
+        self._seen, self._now = self._now, self._seen
 
     def _head(self, me, song, x, y, w):
         ui.at(x + 4, y + 2, 98, 20)

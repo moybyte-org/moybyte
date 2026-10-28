@@ -452,6 +452,9 @@ def test_an_editor_tabs_key_steps_draw_rows_byte_for_byte(tmp_path, app, bufs):
     if "blocks" in app or "music" in app:
         p.keys("down", 14)              # the rows scroll by whole rows
         p.keys("up", 14)
+    if "music" in app:
+        p.keys("right", 4)              # the step's value: its row alone
+        p.keys("left", 2)
     p.settle()
     if app not in _PICTURES:
         assert p.share() > 0.5, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
