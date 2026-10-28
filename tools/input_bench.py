@@ -1452,7 +1452,8 @@ class Surface:
     "OFF:<app>" for a verbs page's offset under the finger), the `axis` it
     scrolls on and the `keys` that step it (forward, back), the `inputs` it
     takes, its `teardown`, the finger's `rect` as fractions of the content
-    rect, and `where` it exists ("desk": the windowed tier, "full": a
+    rect ("pane": inside the desk Editor's focused Code or theme Config pane,
+    which a press outside would leave; CODE_RECT on a handheld), and `where` it exists ("desk": the windowed tier, "full": a
     windowed tier's window made full screen)."""
 
     def __init__(self, name, setup, probe=None, px=False, axis="v", keys=("down", "up"),
@@ -1559,7 +1560,7 @@ def surfaces():
                                             "ws.editor.top = 0\nws.mark_dirty()", 1.0)],
                      _EDPROBE, inputs=("fling", "drag", "key_steps", "key_held", "type",
                                        "type_fast", "ball_slow", "ball_fast"),
-                     rect=CODE_RECT,
+                     rect="pane",
                      teardown=("_d = ws.editor_app.theme\n_d.ed.set_text(ws._ib_theme0)\n"
                                "_d.ed.dirty = False\n_d.saved = True\n"
                                "ws.history.drop_code_history()")))
@@ -1621,6 +1622,12 @@ def _rect(bench, surf):
     if r == "projects":
         v = bench.val("ws.projects_grid._region.view")
         return (x + v[0], y + v[1], v[2], v[3]) if v else (x, y, w, h)
+    if r == "pane":
+        b = bench.val("(lambda d, c: c and c[3])(ws.editor_desk, ws.editor_desk is not None "
+                      "and ws.editor_desk.active() and ws.editor_desk._code_pane())")
+        if b:
+            return (x + b[0] + b[2] // 16, y + b[1] + b[3] // 16, b[2] * 7 // 8, b[3] * 7 // 8)
+        r = CODE_RECT                   # a handheld's Editor: the code fills the content
     if r is None:
         return (x, y, w, h)
     return (x + int(w * r[0]), y + int(h * r[1]), int(w * r[2]), int(h * r[3]))
@@ -1699,7 +1706,8 @@ def report(path, md=True):
         if r.get("v_finger"):
             kept.append("release %s of %s px/ms" % (r.get("v_content"), r["v_finger"]))
         frac = ("%d%% / %d%%" % (100 * r["shift_frac"], 100 * r["rows_frac"])
-                if r.get("speaks") else "None")
+                if r.get("speaks") and "shift_frac" in r else
+                "-" if r.get("speaks") else "None")      # "-": no frame painted
         out.append("| %s | %s | %s | %s / %s / %s | %s | %s / %s | %s | %s / %s | %s | %s | %s | %s |"
                    % (r["surface"], r["input"], _v(r.get("gate")), _v(r.get("live")),
                       _v(r.get("coast")), _v(r.get("glide")), r.get("first3", "-"),
