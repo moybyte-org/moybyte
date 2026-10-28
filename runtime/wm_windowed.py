@@ -345,6 +345,8 @@ class _RepeatLayer(Layer):
             wm._repeats_n += 1
             wm._debt_px += px
             wm._repeat_note()
+            if not self.lead:
+                _ui_draw.repeat_frame()
             return
         # A lead copy (a quiet frame paying a buffer's debt, the quiet
         # stack's layers after it): refused, the layers after it stand down.

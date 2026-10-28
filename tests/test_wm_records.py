@@ -8,7 +8,8 @@ reads it, and the debt a buffer owes is copied as the rows that changed.
 
 Each case runs one session on two desks: one as it ships, and one whose WM
 takes none of it (no content speaks, no shift is vouched: every frame of the
-focused window renders into its buffer and stamps it, as the WM did before);
+focused window renders into its buffer and stamps it, as the WM did before;
+and no held key's step is dead, so every step paints);
 after every loop pass the glass of the first -- the buffer last presented,
 with one, two and three buffers presented in turn -- is held to the
 second's bytes."""
@@ -152,6 +153,7 @@ class Pair:
         self.da = make_drv(self.a)
         self.db = make_drv(self.b)
         self.bufs = bufs
+        self._state = {}
         self.held = {}
         for ws in (self.a, self.b):
             root = ws.wm._root_canvas
@@ -194,6 +196,29 @@ class Pair:
             ws._dirty = True
         self.settle(check=False)
 
+    def _drive(self, ws, drv):
+        """One loop pass of `ws` with the toolkit's per-console state its
+        own, as on a board with one console: the painted frame and the host
+        that took the keys. The second desk is the twin a held key's steps
+        always reach (no step is dead), so where the first desk's dead-step
+        rule paints nothing the twin's frame must show the same."""
+        st = self._state.setdefault(id(ws), [None, [-1, False, None] + [-1] * (
+            len(ui_draw._PAINT) - 3)])
+        ui_draw._KEYS_HOST[0] = st[0]
+        ui_draw._PAINT[:] = st[1]
+        twin = ws is self.b
+        if twin:
+            sd, dead = ui_draw.steps_dead, ui_draw.AppHost.dead
+            ui_draw.steps_dead = lambda rw, console=None: False
+            ui_draw.AppHost.dead = lambda host, rw: False
+        try:
+            drv.frame(_DT)
+        finally:
+            if twin:
+                ui_draw.steps_dead, ui_draw.AppHost.dead = sd, dead
+            st[0] = ui_draw._KEYS_HOST[0]
+            st[1] = list(ui_draw._PAINT)
+
     def glass(self, ws):
         h = self.held[id(ws)]
         return h[-1] if self.bufs > 1 else bytes(ws.wm._root_canvas._buf)
@@ -205,7 +230,7 @@ class Pair:
             ws.pointer.visible = False
             k = ws._frames_drawn
             r = ws.wm._repeats_n
-            drv.frame(_DT)
+            self._drive(ws, drv)
             if ws._frames_drawn != k:
                 painted = True
                 root = ws.wm._root_canvas
@@ -363,6 +388,13 @@ def test_the_p4_desk_shifts_its_apps_pages_byte_for_byte(tmp_path, app, bufs):
     p.keys("up", 2)
     p.settle()
     p.hold("down", 8)
+    p.settle()
+    p.keys("down", 12)
+    p.settle()
+    a, b = p.a._frames_drawn, p.b._frames_drawn
+    p.hold("down", 40)                # at the end: its steps move nothing
+    a, b = p.a._frames_drawn - a, p.b._frames_drawn - b
+    assert a < b, "the held steps at %s's end painted %d frames, every step %d" % (app, a, b)
     p.settle()
     assert p.share() > 0.5, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
         app, p.share(), p.kinds)

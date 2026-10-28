@@ -671,7 +671,9 @@ class StorybookAppLayer(ListShellApp):
         self._dialogs()
         if self.toast is not None:
             self._toast()
-        self._focused = ui.focus()
+        f = ui.focus()
+        if f != _PRESENT["id"] and f != _OPEN["id"]:
+            self._focused = f         # the foot's verbs act on the story focused before
         if (self.page != page or self.asking != asking or self.menu != menu
                 or self.show is not None):
             self._ui.again()          # an answer changed what the page drew before it

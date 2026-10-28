@@ -1675,8 +1675,9 @@ _AGAIN = [False]                        # a pass since again_take owes the next 
 # The painted frame the console draws (paint_frame): its number, and whether
 # its content is alone on the glass -- the content's ring vouches for its
 # buffers there (a full-screen tier's content, no overlay, cursor or pill
-# over it); then what the shift frames drawn in it made of it (change_take).
-_PAINT = [-1, False, None]
+# over it); the console; the last painted frame before it that drew (not a
+# repeat of the one before it, `repeat_frame`); and the last repeat.
+_PAINT = [-1, False, None, -1, -1]
 # A window's content drawn by the windowed WM: 0 none, 1 a window frame, 2 one
 # whose target the WM's shown ring vouches holds the page as the frame before
 # left it (`window_frame`): the one voucher of a window's pages.
@@ -1690,6 +1691,8 @@ def paint_frame(n, alone, console=None):
     """`console` paints frame `n` (its count of painted frames), its
     content alone on the glass where `alone`: an app's `AppHost` may then
     make it a shift frame out of the frame before (`PaintRing`)."""
+    if _PAINT[4] != _PAINT[0]:
+        _PAINT[3] = _PAINT[0]
     _PAINT[0] = n
     _PAINT[1] = bool(alone)
     _PAINT[2] = console
@@ -1699,6 +1702,18 @@ def paint_frame(n, alone, console=None):
 def painted():
     """The number of the frame the console paints (`paint_frame`)."""
     return _PAINT[0]
+
+
+def repeat_frame():
+    """The painted frame repeats the one before it (the windowed WM's
+    copy, surface model §14.6): a page that frame drew is as it left it."""
+    _PAINT[4] = _PAINT[0]
+
+
+def _drew_last():
+    """The last painted frame that drew, a run of repeats after it seen
+    through."""
+    return _PAINT[3] if _PAINT[4] == _PAINT[0] else _PAINT[0]
 
 
 def window_frame(v):
@@ -2107,11 +2122,12 @@ class AppHost:
 
     def dead(self, rw):
         """Whether a held key's (or the ball's) steps `rw` (the input
-        table's `rep_word`) would move nothing: each is a direction the last
-        painted frame's steps took to no effect, and the page owes nothing
-        and does not move."""
+        table's `rep_word`) would move nothing: each is a direction the
+        steps of the last painted frame that drew (the repeats of it after
+        it seen through) took to no effect, and the page owes nothing and
+        does not move."""
         d = self._dead
-        return (d != 0 and (_rep_dirs(rw) & ~d) == 0 and self._began == _PAINT[0]
+        return (d != 0 and (_rep_dirs(rw) & ~d) == 0 and self._began == _drew_last()
                 and not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
                 and not _C.api_moving(self.ctx))
 
