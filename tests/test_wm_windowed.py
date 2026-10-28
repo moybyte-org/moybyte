@@ -2467,8 +2467,8 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(
 # installs each window's layout context: a row the console shared, or one read
 # from the last window installed, lays an app out at the other window's size.
 TWO_WINDOWS = (
-    "7a61927a38f73949447cc95dad3a78706cdbe5c9db6d093f555207607cec0a5e",
-    "cfdd23f9eee9b0fa633d9e1d56d5e8571065c9864ccd49e84d0bf1c3046056e6",
+    "971104d7fe543fcfb19aa684cacec9fece63959979ac9d0727d4d228af5145d7",
+    "b98866d823781cc12ea989aadfd727446edfdf581e95e5fafd1b241a41c95faa",
 )
 
 
@@ -3464,22 +3464,48 @@ def _px(cv, x, y):
 
 def test_the_desk_column_is_tiles_with_their_labels_over_the_backdrop(tmp_path):
     """Under the look the column is 44-pixel tiles on the 74-row pitch, the
-    first 18 under the bar, centred 54 in from the desk's edge; each label is
-    the title its app names, 2 under its tile (nearer it than the next tile),
-    on the backdrop with no plate."""
+    first 18 under the bar, centred 54 in from the desk's edge, wrapping into
+    a further column to its right; each label is the title its app names, 2
+    under its tile (nearer it than the next tile), on the backdrop with no
+    plate."""
     ws = _moy_desk(tmp_path)
     rects = ws.wm._backdrop_layer._icon_rects()
     labels = [r[3] for r in rects]
     assert labels[:2] == ["Play", "Projects"]
-    assert {"Paint", "Storybook", "Files", "Calc", "Get carts"} <= set(labels)
+    assert {"Paint", "Storybook", "Files", "Calc", "Get carts", "Notes"} <= set(labels)
     dx, dy, _dw, _dh = ws.wm._desk_rect()
     cv = ws.sys_canvas
+    x, row = dx + 32, 0
     for i, (_key, box, band, _label, _cart) in enumerate(rects):
-        assert box == (dx + 32, dy + 18 + 74 * i, 44, 44)
+        if i and box[1] == dy + 18:
+            assert box[0] > x
+            x, row = box[0], 0
+        assert box == (x, dy + 18 + 74 * row, 44, 44)
+        row += 1
         assert band[1] == box[1] + 46 and band[0] + band[2] // 2 == box[0] + 22
         # no plate: the band's edge is the backdrop either side of it
         assert _px(cv, band[0] + 1, band[1] + 1) == _px(cv, band[0] - 1, band[1] + 1)
         assert _px(cv, box[0] + 2, box[1] + 22) == 0xFFFF       # the tile's fill
+
+
+def test_the_desk_column_holds_every_app_the_home_apps_tab_does(tmp_path):
+    """The desk is the windowed tier's launch surface for apps, so its column
+    holds the Apps tab's carts: the registered apps' and the app carts no
+    app claims, Notes among them, whose tile is its icon set slot and whose
+    tap runs the cart in a window."""
+    ws = _moy_desk(tmp_path)
+    desk = ws.wm._backdrop_layer
+    rows = desk._icon_catalog()
+    shown = {id(c) for _k, _l, c in rows if c is not None}
+    apps = ws._launcher_items(ws.carts.all, "apps")
+    assert apps and all(id(c) in shown for c in apps), \
+        [c.get("title") for c in apps if id(c) not in shown]
+    notes = [r for r in rows if r[1] == "Notes"]
+    assert len(notes) == 1 and notes[0][0] == "notes"
+    opened = []
+    ws.open = lambda cart=None: opened.append(cart)
+    desk._open_icon("notes", notes[0][2])
+    assert opened == [notes[0][2]]
 
 
 def test_a_desk_tile_draws_its_apps_icon_from_the_set(tmp_path):
@@ -3766,7 +3792,9 @@ def test_a_new_window_keeps_clear_of_the_wallpapers_subject(tmp_path):
 @pytest.mark.parametrize("key", ["menu", "files", "calc", "appearance"])
 def test_a_new_window_opens_clear_of_the_icon_column(tmp_path, key):
     """A new window opens in the work area right of the launchers (macOS and
-    GNOME place one in the free area), never over their labels."""
+    GNOME place one in the free area), never over their labels; one wider
+    than that area (the column wraps into a second at 1024x600) opens as far
+    right as the desk allows, clear of the first column."""
     ws = _moy_desk(tmp_path)
     if key == "menu":
         ws.system.set("win_full", {"menu": False})     # restored (E-04 opens it full)
@@ -3777,9 +3805,15 @@ def test_a_new_window_opens_clear_of_the_icon_column(tmp_path, key):
         ws.open_app(ws._apps_by_id[key])
     ws.frame(1 / 30)
     win = ws.wm._wins[key]
-    right = max(max(b[0] + b[2], l[0] + l[2])
-                for _k, b, l, _t, _c in ws.wm._backdrop_layer._icon_rects())
-    assert win.x >= right, (key, win.x, right)
+    rects = ws.wm._backdrop_layer._icon_rects()
+    right = max(max(b[0] + b[2], l[0] + l[2]) for _k, b, l, _t, _c in rects)
+    dx, _dy, dw, _dh = ws.wm._desk_rect()
+    if win.w <= dx + dw - right:
+        assert win.x >= right, (key, win.x, right)
+    else:
+        first = max(max(b[0] + b[2], l[0] + l[2])
+                    for _k, b, l, _t, _c in rects if b[0] == rects[0][1][0])
+        assert win.x == dx + dw - win.w and win.x >= first, (key, win.x, first)
 
 
 # -- every edge and corner resizes; a full-screen row's drag restores --------

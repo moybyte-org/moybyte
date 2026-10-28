@@ -130,7 +130,8 @@ boundary). The P4 device port of this tier rides #58.)*
 *(Status 2026-07-20 — TWO WORLDS, #105; two MODES since 2026-10-13,
 `docs/shell_layout_2026-10.md` §3: the windowed tier BOOTS onto the
 **desktop** — wallpaper + a static icon column (PLAY, PROJECTS — the home in
-a window, on Make — and the system apps) + the one OS bar with taskbar chips — desktop mode's floor:
+a window, on Make — then every app on the home's Apps tab, Notes and any
+installed app cart among them) + the one OS bar with taskbar chips — desktop mode's floor:
 everything opened there is a window, and the desk bar draws no X (nothing is
 beneath it). The **PLAY icon** enters console mode: the desk's windows wait
 parked, off the back-stack, and the fullscreen **home** shows — the same

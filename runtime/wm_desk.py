@@ -249,7 +249,9 @@ class _BackdropLayer(Layer):
     # -- desk icons (#105: desktop mode's launch surface) ---------------------
     #
     # A static v1 column: PLAY (console mode, over the home), PROJECTS (the
-    # home in a window, on Make), then every desktop-only system app. Geometry is deterministic
+    # home in a window, on Make), then the home's Apps tab: every registered
+    # app (minus HIDDEN_APPS), then the installed app- and tool-typed carts no
+    # app claims (Notes; a kid's installed app). Geometry is deterministic
     # (the _chip_rects pattern -- computed per call, no stored state), so draw
     # and hit-test can never disagree, and the icons render before the drag
     # backdrop capture, so the drag cache carries them for free. Under a
@@ -266,18 +268,28 @@ class _BackdropLayer(Layer):
 
     def _icon_catalog(self):
         """[(key, label, cart)]: the labels are the titles as their apps name
-        them."""
+        them. A registered app's key is its id; an unclaimed app cart's is
+        its icon set slot where its id's last part names one (Notes'
+        `notes`) and no registered app has that id, else its whole id."""
         ws = self.ws
         out = [("play", "Play", None), ("projects", "Projects", None)]
-        for app, _text in getattr(ws, "_apps", ()):
+        carts = ws.carts.all
+        apps = getattr(ws, "_apps", ())
+        for app, _text in apps:
             if app.id in self.HIDDEN_APPS:
                 continue
             cart = None
-            for c in ws.carts.all:
+            for c in carts:
                 if app.is_app(c):
                     cart = c
                     break
             out.append((app.id, str(ws.app_title(app.id) or app.id.upper()), cart))
+        ids = ws._apps_by_id
+        for c in ws.unclaimed_apps(carts):
+            cid = str(c.get("id") or c.get("title") or "")
+            tail = cid.rsplit(".", 1)[-1]
+            key = tail if tail in _iconsets.SLOT and tail not in ids else cid
+            out.append((key, str(c.get("title") or tail), c))
         return out
 
     def _icon_rects(self):
@@ -364,7 +376,9 @@ class _BackdropLayer(Layer):
         ws = self.ws
         self._draw_look_icons(ws, ws.sys_canvas, ws.theme_colors)
 
-    def _open_icon(self, key):
+    def _open_icon(self, key, cart=None):
+        """Open the tile `key` names: an unclaimed app cart's tile (`cart`
+        set, no registered app's) runs its cart as the home's Apps tab does."""
         ws = self.ws
         if key == "play":
             ws.open_library()
@@ -372,8 +386,10 @@ class _BackdropLayer(Layer):
             ws.open_projects()
         else:
             app = ws._apps_by_id.get(key)
-            if app is not None:
+            if app is not None and (cart is None or app.is_app(cart)):
                 ws.open_app(app)
+            elif cart is not None:
+                ws.open(cart)
 
     def handle_input(self, i):
         return True
@@ -383,8 +399,8 @@ class _BackdropLayer(Layer):
             if self.ws.bar_layer.bar_at("desk", px, py):
                 self.ws.bar_layer.handle_bar_tap("desk", px, py)
                 return True
-            for key, box, pill, _label, _cart in self._icon_rects():
+            for key, box, pill, _label, cart in self._icon_rects():
                 if _in(px, py, box) or _in(px, py, pill):
-                    self._open_icon(key)
+                    self._open_icon(key, cart)
                     return True
         return True

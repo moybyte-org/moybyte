@@ -3421,10 +3421,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                     if app.is_app(c):
                         out.append(c)
                         break
-            for c in carts:
-                if (c.get("type") in ("app", "tool") and not own(c)
-                        and not self.is_system_app(c)):
-                    out.append(c)
+            out.extend(self.unclaimed_apps(carts))
             return out
         out = []
         for c in carts:
@@ -3438,6 +3435,14 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         if tab == "mine" and not out and manage:
             out.append(new_tile())
         return out
+
+    def unclaimed_apps(self, carts):
+        """The installed app- and tool-typed carts of `carts` that no
+        registered app claims and the kid did not make: the Apps tab's tail
+        and the desk column's (`wm_desk`)."""
+        own = self.carts.is_own
+        return [c for c in carts if c.get("type") in ("app", "tool")
+                and not own(c) and not self.is_system_app(c)]
 
     def _runnable_items(self):
         """Every cart a tap on the home RUNS or opens -- Games, Mine and Apps,
