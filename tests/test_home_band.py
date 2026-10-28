@@ -117,15 +117,14 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
     for _ in range(40):
         ws._dirty = True
         frame()
-    if not ref:
-        real = ws.launcher_layer._try_drag_partial
-
-        def counted(cv, dt):
-            r = real(cv, dt)
-            if r:
-                stats["band"] += 1
-            return r
-        ws.launcher_layer._try_drag_partial = counted
+    if not ref:                            # the band's frames: the drag partial's
+        for name in ("_try_drag_partial", "_try_still_frame"):     # and the desk's still
+            def counted(cv, dt, real=getattr(ws.launcher_layer, name)):
+                r = real(cv, dt)
+                if r:
+                    stats["band"] += 1
+                return r
+            setattr(ws.launcher_layer, name, counted)
     stats["frames"] = 0
     return ws, drv, frame, stats
 
@@ -220,7 +219,7 @@ def test_handheld_band_frames_are_whole_repaints(tmp_path, monkeypatch, arrangem
 
 @pytest.mark.parametrize("bufs", [1, 3])
 @pytest.mark.parametrize("theme", ["moy", "blocks"])
-@pytest.mark.parametrize("arrangement", ["grid", "icons"])
+@pytest.mark.parametrize("arrangement", ["grid", "icons", "carousel"])
 def test_desk_band_frames_are_whole_repaints(tmp_path, monkeypatch, arrangement, theme, bufs):
     _ws, stats = _parity(tmp_path, monkeypatch, "desk", arrangement, theme, bufs)
     assert stats["band"] * 2 > stats["frames"], stats

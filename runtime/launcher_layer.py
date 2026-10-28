@@ -1866,8 +1866,9 @@ class Carousel(Launcher):
         x = x0
         reach = _ui_draw.mark_reach("card") + 1
         on = -1 if marks else self.nearest()
-        for i, c in sorted(self._visible(), key=lambda e: e[1][0]):
-            cx0 = max(c[0], x)
+        lim, vis = (x0, self._visible()) if self.handheld() else self._shelf()
+        for i, c in sorted(vis, key=lambda e: e[1][0]):
+            cx0 = max(c[0], x, lim)
             cx1 = min(c[0] + c[2], x1)
             if cx1 <= cx0:
                 continue
@@ -1910,9 +1911,7 @@ class Carousel(Launcher):
         last and at rest under the theme's focus mark."""
         if self.handheld():
             return self._paint_hh(cv, sheet_for, r)
-        g = self._geom()
-        # the shelf starts at its margin: a card scrolled past it is gone
-        left = g[1][0] + g[9][4] - g[5]
+        left, vis = self._shelf()
         if r[0] < left:
             r = (left, r[1], max(0, r[0] + r[2] - left), r[3])
         clip = getattr(cv, "clip", None)
@@ -1921,10 +1920,6 @@ class Carousel(Launcher):
             clip(*r)
         self._draw_shelf_caption(cv)
         c = self.nearest()
-        moving = self.moving
-        # at rest a card the scroll left across the margin is not shown
-        vis = [e for e in self._visible()
-               if ((e[1][0] + e[1][2] > left) if moving else (e[1][0] >= left))]
         for _i, t in vis:
             _ui_draw.cast(cv, self.theme, t, _ui_draw.CAST_CARD, _ui_draw.UNDER_SMALL)
         for i, t in vis:
@@ -1932,6 +1927,17 @@ class Carousel(Launcher):
         if clip is not None:
             self._card_clip = None
             clip()
+
+    def _shelf(self):
+        """(left, cards) of the desk's shelf: it starts at its margin
+        `left`, where a card scrolled past it is cut, and at rest one the
+        scroll left across it is not shown; `cards` the (index, rect) it
+        shows."""
+        g = self._geom()
+        left = g[1][0] + g[9][4] - g[5]
+        moving = self.moving
+        return left, [e for e in self._visible()
+                      if ((e[1][0] + e[1][2] > left) if moving else (e[1][0] >= left))]
 
     def _draw_shelf_caption(self, cv):
         """The shelf's caption over its first card: the tab and its count,
