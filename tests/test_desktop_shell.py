@@ -1285,6 +1285,36 @@ def test_the_cursor_hides_after_the_idle_window_and_a_move_wakes_it():
     assert not p.visible and (p.x, p.y) == (5, 5)
 
 
+def test_a_pointer_nothing_has_touched_is_dead_until_a_real_event(monkeypatch):
+    """A fresh console parks its pointer at the centre; that is no event, so no
+    hover is owed the row under it. Only a move, a place, a press or a mouse
+    makes it live, and a touched one lingers POINTER_LINGER_MS."""
+    from runtime import moy_input
+    from runtime.moy_input import Pointer, POINTER_LINGER_MS
+
+    now = [1000]
+    monkeypatch.setattr(moy_input, "_ticks_ms", lambda: now[0])
+    p = Pointer(320, 240)
+    assert not p.live() and (p.x, p.y) == (160, 120)
+    now[0] += 10
+    assert not p.live()
+    p.place(5, 5)
+    assert p.live()
+    now[0] += POINTER_LINGER_MS - 1
+    assert p.live()
+    now[0] += 1
+    assert not p.live()
+    q = Pointer(320, 240)
+    q.move(1, 0)
+    assert q.live()
+    r = Pointer(320, 240)
+    r.hovers = True
+    assert r.live()
+    d = Pointer(320, 240)
+    d.down = True
+    assert d.live()
+
+
 # -- the bar widgets' popovers in console mode (docs/shell_layout_2026-10.md §8) --
 
 def test_console_mode_hangs_each_widgets_popover_from_it(tmp_path):

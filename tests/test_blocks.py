@@ -529,6 +529,7 @@ def test_tap_game_scores_on_a_tap_on_the_target(tmp_path):
         ws.frame(1 / 30)
     tx, ty = ws.ns["tx"], ws.ns["ty"]
     before = ws.ns["score"]
+    ws.input.pointer.place(int(tx) + 14, int(ty) + 14)           # a tap touches the pointer
     ws.input.game_pointer = (int(tx) + 14, int(ty) + 14, True)   # tap the target center
     ws.frame(1 / 30)
     assert ws.ns["score"] == before + 1                 # scored

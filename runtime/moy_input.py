@@ -100,13 +100,13 @@ class Pointer(ctypes.Structure):
     relatively and shows it; touch places it absolutely and keeps it hidden;
     it auto-hides after `idle_ms` without trackball movement. `hovers` is set
     by a source that reports a position with nothing held (a mouse): such a
-    pointer never expires, a touched one lingers POINTER_LINGER_MS. `fresh` says
+    pointer never expires, a touched one lingers POINTER_LINGER_MS, and one nothing has touched is dead. `fresh` says
     this frame's sample came from the hardware rather than a repeat."""
 
     _fields_ = [("w", _I32), ("h", _I32), ("x", _I32), ("y", _I32),
                 ("idle_ms", _I32), ("_sampled", _U32), ("_last_move", _U32),
                 ("click", _B), ("down", _B), ("hovers", _B), ("fresh", _B),
-                ("visible", _B), ("div", _I32)]
+                ("visible", _B), ("touched", _B), ("div", _I32)]
 
     def __init__(self, w, h, idle_ms=CURSOR_IDLE_MS):
         super().__init__()
@@ -119,7 +119,7 @@ class Pointer(ctypes.Structure):
         _lib().moy_input_ptr_place(ctypes.byref(self), int(x), int(y), _now())
 
     def live(self):
-        """Held, hovered, or released less than POINTER_LINGER_MS ago."""
+        """Held, hovered, or moved or placed less than POINTER_LINGER_MS ago."""
         return _lib().moy_input_ptr_live(ctypes.byref(self), _now())
 
     def tick(self, now):

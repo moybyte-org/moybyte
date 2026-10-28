@@ -204,13 +204,14 @@ static inline int32_t moy_input_ticks_diff(uint32_t a, uint32_t b) {
 typedef struct {
     int32_t w, h, x, y;
     int32_t idle_ms;
-    uint32_t sampled;       // the last sample, moved or placed
+    uint32_t sampled;       // the last sample, moved or placed; meaningful once `touched`
     uint32_t last_move;     // the last trackball move: the cursor's idle clock
     bool click;             // went down this frame
     bool down;              // held this frame
     bool hovers;            // the source reports a position with nothing held
     bool fresh;             // this frame's sample came from the hardware
     bool visible;
+    bool touched;           // a move or a place has happened: a pointer nothing touched is never live
     int32_t div;            // glass pixels per surface pixel: a placed position is divided by it
 } moy_input_ptr_t;
 

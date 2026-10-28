@@ -818,6 +818,7 @@ static bool *pointer_flag(moy_input_ptr_t *p, qstr attr) {
         case MP_QSTR_hovers: return &p->hovers;
         case MP_QSTR_fresh: return &p->fresh;
         case MP_QSTR_visible: return &p->visible;
+        case MP_QSTR_touched: return &p->touched;
         default: return NULL;
     }
 }

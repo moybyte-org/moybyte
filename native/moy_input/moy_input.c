@@ -867,7 +867,6 @@ void moy_input_ptr_init(moy_input_ptr_t *p, int32_t w, int32_t h, int32_t idle_m
     p->x = w / 2;
     p->y = h / 2;
     p->idle_ms = idle_ms;
-    p->sampled = now;
     p->last_move = now;
     p->fresh = true;
     p->visible = true;
@@ -880,6 +879,7 @@ void moy_input_ptr_move(moy_input_ptr_t *p, int32_t dx, int32_t dy, uint32_t now
     p->visible = true;
     p->last_move = now;
     p->sampled = now;
+    p->touched = true;
 }
 
 void moy_input_ptr_place(moy_input_ptr_t *p, int32_t x, int32_t y, uint32_t now) {
@@ -891,11 +891,12 @@ void moy_input_ptr_place(moy_input_ptr_t *p, int32_t x, int32_t y, uint32_t now)
     p->y = clamp(y, p->h - 1);
     p->visible = false;
     p->sampled = now;
+    p->touched = true;
 }
 
 bool moy_input_ptr_live(const moy_input_ptr_t *p, uint32_t now) {
     return p->down || p->hovers
-           || moy_input_ticks_diff(now, p->sampled) < MOY_INPUT_POINTER_LINGER_MS;
+           || (p->touched && moy_input_ticks_diff(now, p->sampled) < MOY_INPUT_POINTER_LINGER_MS);
 }
 
 void moy_input_ptr_tick(moy_input_ptr_t *p, uint32_t now) {
