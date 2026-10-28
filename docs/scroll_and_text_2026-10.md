@@ -599,9 +599,12 @@ whole.
   rows its floor reaches into the floor (`floor_take`) and draws them
   clipped to it. Its cursor plate is a stop, and a moved stop floors the
   page from its top down, so a step floors from the cursor to the foot and
-  the engine's share rule draws a step near the top whole. Music's steps
-  draw each row's verbs first and its own pixels (the cursor bar, the
-  meters, which overlap no verb) after, where the floor reaches.
+  the engine's share rule draws a step near the top whole. Music's page
+  keeps what each shown row held, so an edit of one step is that row's
+  frame too; its rows draw their verbs first and their own pixels (the
+  cursor bar, the meters, which overlap no verb) after, and the rows and
+  the pad the floor misses are kept as the last frame drew them
+  (`ui.keep`).
 - *The text console* (`runtime/text_console.py`) draws through the view for
   its scrollback rows and its prompt line; a script that prints appends
   rows, a translation of the scrollback by the rows appended plus those
@@ -828,7 +831,7 @@ Per canvas, then per source:
 | the PPA ground fill before R opens | the P4s | the S3s, the host, the web |
 | a shift frame of a nest | a nest whose app passes every gen it draws inside R | a nest with a `ui.part` and no gen, a placed `ui.at` stop, a Lua or wasm app |
 | a host's rows frame (an editor handle's) | a Python app on the verbs with one handle, its page under a gen | a Lua or wasm app, two handles, a declared `background`, an embed in view |
-| a page's own rows frame (`AppHost.rows`) | the Blocks outline and Music's steps, a frame whose only change is the cursor or a whole-row scroll | an edit, a press, a floor past three fifths of the page |
+| a page's own rows frame (`AppHost.rows`) | the Blocks outline and Music's steps, a frame whose only change is the cursor or a whole-row scroll (and on Music a step's value) | an edit the head or foot shows, a press, a floor past three fifths of the page |
 | held-key repeat | every level source: the T-Deck matrix, BLE, the host's and browser's keyboards, a gamepad | the T-Deck keyboard's ASCII fallback |
 | the trackball's steps and `BALL_COAST` | the T-Deck (and the host's arrow pan) | every board without a ball |
 | direct render of key frames | the windowed WM over a root with `set_viewport` (the P4s, the host desk) | the web runner's canvas (keeps the stamp); the fullscreen WM (no window) |
