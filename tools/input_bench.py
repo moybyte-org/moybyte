@@ -23,6 +23,7 @@ presented frames.
     python3 tools/input_bench.py --board p4 --out DIR [--only code,home] [--inputs fling,type]
     python3 tools/input_bench.py --board tdeck --out DIR --no-null
     python3 tools/input_bench.py --board p4 --out DIR --only home --theme blocks   # a backdrop
+    python3 tools/input_bench.py --board p4 --out DIR --only home --theme picture  # a picture
     python3 tools/input_bench.py --board tdeck --out DIR --split      # PERF DIAG lines, apart
     python3 tools/input_bench.py --report DIR/p4_input.json [--reanalyse]
 
@@ -47,7 +48,7 @@ copy of Coin Quest), which the bench makes at setup; the long note, the
 console script and My Art's drawings are `Bench Scratch` too. A seed cart is never opened for
 writing. A `finally` that runs on a failure and on Ctrl-C removes the copies,
 the note, the script and every doc the run made, and puts back the home's
-arrangement and tab, the theme's text and a `--theme` run's theme, the console's name, the clipboard,
+arrangement and tab, the theme's text and a `--theme` run's theme or wallpaper, the console's name, the clipboard,
 full-screen windows, PERF DIAG, and every wrapper; it leaves the board on
 its home.
 
@@ -614,8 +615,90 @@ for _i in range(%d):
 _pix = _row = None
 """
 
+# A picture wallpaper reaches the glass through a theme: the pick forks the
+# theme in force into the store's `custom` package (any custom before is
+# replaced) and copies the wallpaper copy into it. So the run keeps the
+# custom package's files, the wallpaper copy and the look it found, and
+# PICTURE_PUT_BACK writes them back.
+PICTURE_MAKE = """
+import os as _ib_os
+import moy_carts as _ib_mcarts
+def _ib_files(d):
+    out = {}
+    for _n in _ib_os.listdir(d):
+        try:
+            with open(d + '/' + _n, 'rb') as _f:
+                out[_n] = _f.read()
+        except OSError:
+            pass                          # (a folder: the thumbnails, rebuilt)
+    return out
+_d = ws.look._pkg_paths.get('custom')
+ws._ib_s['pic'] = (ws.look.theme_name, ws.look.theme_variant, ws.look.wallpaper_id,
+                   _ib_files(_d) if _d is not None else None,
+                   _ib_mcarts.load_copy(ws.carts_root))
+_w, _h = ws.sys_canvas.w, ws.sys_canvas.h
+_row = bytes((x * 7) % 60 for x in range(_w + 64))
+_pix = bytearray(_w * _h)
+for _y in range(_h):
+    _o = (_y * 3) % 60
+    _pix[_y * _w:(_y + 1) * _w] = _row[_o:_o + _w]
+_ib_mcarts.save_copy(_ib_mcarts.encode_image(_w, _h, bytes(_pix)), ws.carts_root)
+_pix = _row = None
+ws.look.select_wallpaper(ws.look.PICTURE)
+ws.look.tick(0.0)
+ws.look.tick(ws.look.AUTOSAVE_S)
+ws.mark_dirty()
+"""
+
+PICTURE_PUT_BACK = """
+import os as _ib_os
+import moy_carts as _ib_mcarts
+_tn, _tv, _wp, _cf, _cp = ws._ib_s.pop('pic')
+_d = ws.look._pkg_paths.get('custom')
+if _d is not None:
+    for _n in _ib_os.listdir(_d):
+        if _cf is None or _n not in _cf:
+            try:
+                _ib_os.remove(_d + '/' + _n)
+            except OSError:
+                pass
+    if _cf is None:
+        try:
+            _ib_os.rmdir(_d + '/thumbs')
+        except OSError:
+            pass
+        try:
+            _ib_os.rmdir(_d)
+        except OSError:
+            pass
+    else:
+        for _n, _b in _cf.items():
+            with open(_d + '/' + _n, 'wb') as _f:
+                _f.write(_b)
+_a = ws.carts_root.rsplit('/', 1)[0] + '/artwork.moyimg'
+if _cp is None:
+    for _n in (_a, _a + '.bak'):
+        try:
+            _ib_os.remove(_n)
+        except OSError:
+            pass
+else:
+    _ib_mcarts.save_copy(_cp, ws.carts_root)
+ws.carts.rescan()
+ws.look.store_moved()
+ws.look.set_theme(_tn, persist=True, variant=_tv)
+ws.look.tick(0.0)
+ws.look.tick(ws.look.AUTOSAVE_S)
+if ws.look.wallpaper_id != _wp:
+    ws.look.select_wallpaper(_wp, persist=False)
+ws.mark_dirty()
+"""
+
 CLEANUP_STEPS = (
     "_ib_desk()",
+    # a --theme picture run's custom package, wallpaper copy and look back
+    "if 'pic' in ws._ib_s:\n"
+    + "".join("    " + _l + "\n" for _l in PICTURE_PUT_BACK.strip().split("\n")),
     # the theme's text as it was, and Config clean, so no exit writes it
     "_d = getattr(ws.editor_app, 'theme', None)\n"
     "if _d is not None:\n"
@@ -1232,7 +1315,11 @@ class Bench:
 
     def setup(self, theme=None):
         self.ex(SNAPSHOT, strict=True)
-        if theme:
+        if theme == "picture":
+            # a picture wallpaper the size of the glass, over the theme in
+            # force; the wallpaper it had goes back at cleanup
+            self.ex(PICTURE_MAKE, settle=2.0, strict=True)
+        elif theme:
             # shown for the run only (persist=False), the theme's own
             # ground under the home: no wallpaper cart over it
             self.ex("ws._ib_s['tn'] = ws.look.theme_name\n"
@@ -1664,7 +1751,8 @@ def main():
     ap.add_argument("--split", action="store_true",
                     help="each surface's long drag under PERF DIAG instead: LOOP/PUMP/PERF")
     ap.add_argument("--theme", help="a theme shown for the run, over its own ground "
-                                    "(no wallpaper): `moy` a plain fill, `blocks` a backdrop")
+                                    "(no wallpaper): `moy` a plain fill, `blocks` a backdrop; "
+                                    "`picture`: a picture wallpaper over the theme in force")
     ap.add_argument("--report", help="a run's rows file: print its table")
     ap.add_argument("--reanalyse", action="store_true",
                     help="with --report: take every kept record's numbers again first")
