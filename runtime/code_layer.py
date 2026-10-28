@@ -366,6 +366,7 @@ class CodeLayer:
         self.vouch = 0                # a desk pane's word for its buffer (EditorDesk.vouched)
         self._t = None                # per-draw tone map (set by _draw_code)
         self._stop_host = None        # the stopped line's popover's UI context
+        self._stop_card = None        # and the card its last pass drew
         # -- #89 additions: selection / tools / find / gutter -----------------
         self._tools_open = False      # the tool palette row is shown
         self._select_mode = False     # SELECT mode: a code drag extends the selection
@@ -507,6 +508,10 @@ class CodeLayer:
         _ui.hints(("cancel", "Close"))
         _ui.popover()
         self._covered(host, fs)
+        card = tuple(self._pop)
+        if card != self._stop_card:
+            self._stop_card = card
+            host.again()                   # the card takes its body's height next frame
 
     def handle_input(self, i):
         if self.ws.crash_popup is not None and i.last_key == 27:
