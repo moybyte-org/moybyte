@@ -78,6 +78,11 @@ FEATURES = {
                        and b"carts_link" in (DIST / "micropython.wasm").read_bytes()),
               "dist/ predates Get Carts in the browser (no carts pump, no file "
               "question, or no carts_link frozen in the wasm)"),
+    # The first-run theme and the start option: the page reads the scheme and
+    # hands it to the worker, and the frozen console has to know both.
+    "firstrun": (lambda: ("moyScheme" in (DIST / "index.html").read_text()
+                          and b"start_edit" in (DIST / "micropython.wasm").read_bytes()),
+                 "dist/ predates the first-run theme and the start option"),
 }
 
 
@@ -117,6 +122,28 @@ def require(*features):
                     "tick over an untested hosted console.")
     warnings.warn(UserWarning(text), stacklevel=2)
     pytest.skip("browser e2e prerequisites missing (see the warning above)")
+
+
+_WARM = [False]
+
+
+def warm_host_library():
+    """Compile the host's one native library now, in the test process.
+
+    `serve.py --carts` runs the real `moy_webhost`, whose transport loads the
+    library `runtime/host_native.py` compiles (`.build/host/moyhost-<hash>.so`).
+    A cold cache -- a CI checkout, or any source edit -- costs seconds of C
+    compiling, and under xdist several servers start together: the first
+    compiles while the rest wait on its lock, which is longer than the 5 s a
+    twin is given to answer. The build is content-addressed and locked, so
+    asking here once makes every server start on a warm cache."""
+    if _WARM[0]:
+        return
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from runtime import host_native
+    host_native.build()
+    _WARM[0] = True
 
 
 def free_port():
@@ -205,11 +232,19 @@ def serve(site, port):
     pytest.fail("serve.py never answered")
 
 
-def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000):
+def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000,
+        device=None, scheme=None):
     """One browsershot scenario against `base` in the Chrome profile
-    `profile`: (its stdout, every `js` step's value in order)."""
+    `profile`: (its stdout, every `js` step's value in order). `device` is
+    browsershot's phone/tablet shape ({"width", "height", "dpr", "mobile"});
+    `scheme` the browser's prefers-color-scheme ("dark" or "light")."""
     path = tmp_path / ("%s.json" % name)
-    path.write_text(json.dumps({"query": query, "boot_ms": boot_ms, "steps": steps}))
+    scenario = {"query": query, "boot_ms": boot_ms, "steps": steps}
+    if device:
+        scenario["device"] = device
+    if scheme:
+        scenario["scheme"] = scheme
+    path.write_text(json.dumps(scenario))
     r = subprocess.run(
         ["node", "browsershot.mjs", str(path), str(tmp_path / ("shots_" + name))],
         cwd=RUNNER, env=dict(os.environ, MOY_BASE=base, MOY_PROFILE=str(profile),
@@ -219,3 +254,43 @@ def run(tmp_path, name, query, steps, base, profile, env=None, boot_ms=15000):
         name, r.stdout[-4000:], r.stderr[-500:])
     js = [json.loads(j) for j in re.findall(r"js -> (.*)$", r.stdout, re.M)]
     return r.stdout, js
+
+
+def get_carts_taps(n=3):
+    """Where a tap lands on Get Carts' 320x240 handheld pages, as the browser
+    draws them: `cards` the centres of the shelf's first `n` cards (in the
+    shelf's order, by name), `verb` the cart page's one button (Get) and
+    `agree` the licence page's I agree. The cards are read off the app's own
+    frame, the buttons off its layout; the browser draws in the theme's
+    fonts, which a host workstation installs into this process first."""
+    import tempfile
+    sys.path.insert(0, str(ROOT / "tests"))
+    from cart_store_fixtures import MemNet, Repo
+    from runtime import cart_index, host_app
+    repo = Repo("https://mit.example/carts", "Test carts")
+    for i in range(n):
+        repo.add("c%d" % i, runtime="lua", modules=())
+
+    def centre(r):
+        return [r[0] + r[2] // 2, r[1] + r[3] // 2]
+    with tempfile.TemporaryDirectory() as d:
+        ws = host_app.build_workstation(os.path.join(d, "carts"))
+        with open(os.path.join(d, cart_index.INDEXES_NAME), "w") as f:
+            json.dump({"indexes": [repo.url("index.json")]}, f)
+        ws.cart_net = MemNet(repo.routes())
+        app = ws._apps_by_id["getcarts"]
+        ws.open_app(app)
+        for _ in range(60):
+            ws._dirty = True
+            ws.frame(1 / 30)
+            if app.phase == "list":
+                break
+        for _ in range(3):
+            ws._dirty = True
+            ws.frame(1 / 30)
+        assert app.phase == "list" and len(app.rows) == n, app.phase
+        lay = app.layout
+        assert (lay.w, lay.h, lay.fs, lay.desk) == (320, 240, 1, False)
+        cards = [centre(app._ui.box(app._card_id(r))) for r in app.rows]
+        return {"cards": cards, "verb": centre(lay.split_verbs(lay.page_verbs(), 1)[0]),
+                "agree": centre(lay.licence_verbs()[1])}

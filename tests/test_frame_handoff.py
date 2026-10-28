@@ -10,15 +10,15 @@ what this file drives through the real frame walk on the host:
 
   * the composite point hands an owed frame to the system canvas
     (`present_frame`) and, when that takes it, composites nothing -- the
-    fullscreen composite, the play world's over its bezel, and a windowed
+    fullscreen composite, console mode's over its bezel, and a windowed
     desk's player window;
   * a frame the system canvas declines is SETTLED into the game canvas
     first, so the ordinary composite reads the pixels the blit would have
     written;
   * a frame the cart did not replace is shown again from the kept copy;
-  * anything that draws on the game canvas over the frame -- the
-    hold-to-exit toast, a crash panel -- settles it before it draws, so
-    correctness never depends on the fast path;
+  * anything that draws on the game canvas over the frame -- a crash panel,
+    a tool's bar -- settles it before it draws, so correctness never depends
+    on the fast path;
   * the FPS chip and the perf HUD line, opaque rects, are declared instead
     (`patch_cart_frame`): the frame still goes to the glass from the cart's
     memory and the flush takes those rects from the game canvas; a frame
@@ -37,6 +37,7 @@ from types import SimpleNamespace
 from runtime import host_app
 from runtime.console import Workstation
 from runtime.wm_windowed import WindowedWM
+from ws_helpers import select_first_game  # noqa: E402
 
 DT = 1.0 / 30
 
@@ -80,7 +81,7 @@ class FakeCartFrame:
 def _playing(tmp_path, **kw):
     ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
+    select_first_game(ws)
     ws.open()
     ws._splash_until = None
     ws._toast_until = 0
@@ -169,13 +170,13 @@ def test_the_fps_chip_rides_the_frame_as_a_patch(tmp_path):
     cf = ws.cart_frame = FakeCartFrame()
     calls = _spy(ws)
     _frame(ws, drv, cf)
-    # The chip and the HUD line above it are opaque rects over the frame: they
-    # are declared, drawn on the game canvas, and the frame is still shown
-    # from the cart's memory with both taken from the canvas.
+    # The chip and the breakdown card over it are one opaque rect over the
+    # frame: declared, drawn on the game canvas, and the frame is still shown
+    # from the cart's memory with it taken from the canvas.
     patches = [e for e in cf.log if isinstance(e, tuple) and e[0] == "patch"]
-    assert len(patches) == 2
+    assert len(patches) == 1
     assert "settle" not in cf.log and cf.log[-2:] == ["take", "presented"]
-    assert calls[-1][0] == "present" and calls[-1][-1] == 2
+    assert calls[-1][0] == "present" and calls[-1][-1] == 1
     for _p, x, y, w, h in patches:
         assert 0 <= x and x + w <= 320 and 0 <= y and y + h <= 240
 
@@ -190,32 +191,29 @@ def test_a_frame_settled_after_the_chip_keeps_it(tmp_path):
     assert ("settle", True) in cf.log     # the canvas is handed over to keep
 
 
-def test_the_hold_to_exit_toast_settles_the_frame_first(tmp_path):
+def test_a_stopped_run_settles_the_frame_before_its_card(tmp_path):
+    """The frame a run stopped on is settled before the stop card opens over
+    it (the card draws on the system canvas, over the kept frame)."""
     ws, drv = _playing(tmp_path)
     cf = ws.cart_frame = FakeCartFrame()
     _spy(ws)
-    drawn = []
-    real = ws.player._draw_hold_progress
+    seen = []
+    real = ws.pause.stop
 
-    def hold():
-        drawn.append(list(cf.log))
-        return real()
+    def stop(*a, **k):
+        seen.append(list(cf.log))
+        return real(*a, **k)
 
-    ws.player._draw_hold_progress = hold
-    real_input = ws.player.handle_input
-
-    def holding(i):
-        out = real_input(i)
-        ws.player._home_holding = True      # BACKSPACE held down
-        return out
-
-    ws.player.handle_input = holding
-    _frame(ws, drv, cf)
-    assert drawn and drawn[0][-1] == "settle"
+    ws.pause.stop = stop
+    ws.player.cart_error = "boom"           # the run crashed
+    cf.owed = True
+    cf.log.clear()
+    ws.player.tick(DT)
+    assert seen and seen[0][-1] == "settle"
 
 
-def test_the_desk_world_leaves_the_frame_to_the_player_window():
-    wm = SimpleNamespace(_order=["desktop"])
+def test_desktop_mode_leaves_the_frame_to_the_player_window():
+    wm = SimpleNamespace(mode="desktop")
     assert WindowedWM.present_frame(wm, FakeCartFrame(), memoryview(b"")) is False
 
 
@@ -453,15 +451,15 @@ def test_a_window_with_nothing_shown_composites_the_canvas(tmp_path):
     assert calls == [("blit_game",)] and cf.log == ["take"]
 
 
-def test_the_play_world_shows_the_frame_over_its_bezel(tmp_path):
-    """From the fullscreen Library the game is the play world's: the frame
+def test_console_mode_shows_the_frame_over_its_bezel(tmp_path):
+    """From console mode's home the game is fullscreen: the frame
     goes where composite_game would have composited the canvas, and the
     letterbox bezel is painted the same way first."""
     from ws_helpers import build_desktop_ws, open_cart
     ws = build_desktop_ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(DT)
-    ws.go_home()
+    ws.open_library()
     open_cart(ws, "Star Catcher")
     ws._toast_until = 0
     ws.show_fps = False

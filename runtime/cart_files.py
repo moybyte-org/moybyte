@@ -27,13 +27,14 @@ ONE WRITER: the cart's session is the only thing that writes the folder, so
 what is written is read once when the session opens and kept, and `where`
 and `list` never touch the store after that.
 
-THE TIERS: the boards' and the browser's moycore call this on the
-MicroPython task (native/moycore/modmoycore.c, through moy_wasm_on_vm) and the
-host's binding through ctypes (runtime/wasm_binding.py). `gate(fn)` runs fn
-inside the store's session -- the T-Deck's SD gate. In the browser the VFS is
-memory and OPFS is the store of record: `keep` is the page's keeper
-(firmware/web_runner/carts_link.py's WebCartKeep), which a write and an erase
-hand to the worker to make durable there, as an install's files are.
+THE TIERS: a run's requests are native/moy_store/moy_files.c's on every
+tier -- the boards' and the browser's moycore on the MicroPython task
+(native/moycore/modmoycore.c, through moy_wasm_on_vm), the host's run by
+ctypes (runtime/moyhost_wasm.c). This module is the reference
+tests/test_moy_files.py holds that C to, rule for rule, and the store's half:
+`remove` and `cart_id`, which Get Carts' REMOVE calls. `gate(fn)` runs fn
+inside the store's session -- the T-Deck's SD gate. In the browser `keep` is
+the page's keeper (firmware/web_runner/carts_link.py's WebCartKeep).
 
 Paths cross as bytes, so every path the rule allows is kept as it is.
 MicroPython-safe: os only, no os.path.
@@ -84,9 +85,14 @@ def key(path):
     return k
 
 
+_HEX = "0123456789abcdefABCDEF"
+
+
 def path_of(name):
-    """A key back to its path (bytes), or None for a name that is not one."""
-    if not name or "~" in name:
+    """A key back to its path (bytes), or None for a name that is not one: a
+    name holding anything a key never holds ('~' among them), or an escape
+    that is not '%' and two hex digits."""
+    if not name:
         return None
     out = bytearray()
     i = 0
@@ -94,16 +100,15 @@ def path_of(name):
         c = name[i]
         if c == "%":
             h = name[i + 1:i + 3]
-            if len(h) != 2:
+            if len(h) != 2 or h[0] not in _HEX or h[1] not in _HEX:
                 return None
-            try:
-                out.append(int(h, 16))
-            except ValueError:
-                return None
+            out.append(int(h, 16))
             i += 3
-        else:
+        elif c == "." or ord(c) < 128 and ord(c) in _KEPT:
             out.append(ord(c))
             i += 1
+        else:
+            return None
     return bytes(out)
 
 

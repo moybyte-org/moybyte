@@ -1,0 +1,93 @@
+{
+  "format": 2,
+  "name": "moy",
+  "modes": ["dark", "light"],
+  "fonts": { "mono": "jbmono-11-400-2.fnt" },
+  "metrics": { "radius": 0, "press_dx": 0, "press_dy": 0 },
+  "colors": {
+    "dark": {
+      "panel": "#0f1127", "edge": "#2b2f57", "title": "#b6a8f7", "title_ink": "#15123a",
+      "accent": "#b6a8f7", "hilite": "#b6a8f7", "dim": "#23274b", "desktop": "#0f1127",
+      "desktop_pattern": "#23274b", "surface": "#181b38", "surface_alt": "#23274b",
+      "ink": "#eef0fb", "ink_dim": "#a1a6cc", "border": "#33385f", "selection": "#b6a8f7",
+      "selection_ink": "#15123a", "focus": "#b6a8f7", "bar": "#0b0d1e", "bar_edge": "#2b2f57",
+      "chrome_ink": "#eef0fb", "chrome_ink_dim": "#a1a6cc", "title_active": "#b6a8f7",
+      "title_inactive": "#23274b", "shade_hi": "#23274b", "shade_lo": "#0b0d1e",
+      "shade_dark": "#2b2f57", "ink_accent": "#b6a8f7",
+      "value_ink": "#15123a", "sunk": "#0b0d1e", "lcd": "#0b0d1e", "lcd_ink": "#eef0fb",
+      "code_text": "#eef0fb", "code_keyword": "#c9a2ff", "code_string": "#9be3a5",
+      "code_number": "#ffb070", "code_comment": "#abb0da", "code_builtin": "#7fd0ff"
+    },
+    "light": {
+      "panel": "#eceef3", "edge": "#e2e5ec", "title": "#ffffff", "title_ink": "#15161d",
+      "accent": "#4c3fd6", "hilite": "#4c3fd6", "dim": "#e3e6ed", "desktop": "#eceef3",
+      "desktop_pattern": "#e2e5ec", "surface": "#ffffff", "surface_alt": "#f4f5f8",
+      "ink": "#15161d", "ink_dim": "#5f6478", "border": "#cfd3dc", "selection": "#4c3fd6",
+      "selection_ink": "#ffffff", "focus": "#4c3fd6", "bar": "#ffffff", "bar_edge": "#e2e5ec",
+      "chrome_ink": "#15161d", "chrome_ink_dim": "#5f6478", "title_active": "#ffffff",
+      "title_inactive": "#f4f5f8", "shade_hi": "#ffffff", "shade_lo": "#e3e6ed",
+      "shade_dark": "#cfd3dc", "ink_accent": "#4c3fd6",
+      "value_ink": "#ffffff", "sunk": "#e3e6ed", "lcd": "#f1f2f6", "lcd_ink": "#15161d",
+      "code_text": "#15161d", "code_keyword": "#6a35c4", "code_string": "#1b6e34",
+      "code_number": "#9a4a09", "code_comment": "#5f6478", "code_builtin": "#1662a8"
+    }
+  },
+  "layout": {
+    "bars": [{ "edge": "top", "size": 18, "left": ["menu", "chips", "zone"],
+               "right": ["wifi", "battery", "clock"] }]
+  },
+  "look": {
+    "focus": { "style": "edge", "card": "lift", "small": "underline" },
+    "current": { "style": "plate", "ink": "ink_accent" }, "shadow_back": 0.3,
+    "icons": { "kind": "smooth", "set": "default" },
+    "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
+                               "primary": { "font": "op" } } },
+    "dark": {
+      "fam": "inter",
+      "focus": { "lift": { "rim": ["#b6a8f7", 0.6] }, "plate": { "alpha": 0.14 } },
+      "shadow": ["soft", "#000000", 0.55, 14, 6], "dim_neighbours": 0.3,
+      "win": { "header": "bar", "frame": [1, "#2b2f57"], "frame_back": [1, "#2b2f57"],
+               "fill_back": "#0f1127" },
+      "field": { "border": "#60648b" },
+      "bar": { "fill": "#0b0d1e", "alpha": 0.85, "sys": ["#23274b", "#b6a8f7", "#23274b"],
+               "chip_cur": "#0b0d1e" },
+      "tile_fill": "#23274b", "disabled": "#686c92", "danger_ink": "#ff8f8f",
+      "buttons": { "normal": { "fill": "#23274b" }, "tonal": { "fill": "#2e3360" },
+                   "danger": { "ink": "#ff8f8f" } },
+      "app_buttons": { "home": { "normal": { "border": [1, "#848aad"] } },
+                       "calc": { "danger": { "ink": "#eef0fb" } } },
+      "backdrop": { "desk": [{ "k": "circle", "at": [801, 850, 433], "p": "#191c3e" },
+                             { "k": "circle", "at": [889, 733, 433], "p": "#0f1127" }] }
+    },
+    "light": {
+      "fam": "daysans",
+      "focus": { "lift": { "rim": ["#4c3fd6", 0.6] }, "plate": { "alpha": 0.12 } },
+      "shadow": ["soft", "#1b2040", 0.18, 16, 8],
+      "win": { "header": "bar", "fill_back": "#e3e6ed" },
+      "field": { "border": "#8f94a3" },
+      "keycap": { "border": [1, "#c0c3ce"] },
+      "bar": { "fill": "#ffffff", "alpha": 0.92, "line": [1, "#e2e5ec"],
+               "sys": ["#f4f5f8", "#4c3fd6", "#f4f5f8"], "chip_cur": "#f4f5f8" },
+      "hhbar": { "sys": ["#ffffff", "#4c3fd6", "#ffffff"] },
+      "tile_fill": "#ffffff", "disabled": "#9a9eb0", "danger_ink": "#b3261e",
+      "buttons": { "normal": { "fill": "#f4f5f8" }, "tonal": { "fill": "#e3e6ed" },
+                   "danger": { "ink": "#b3261e" } },
+      "app_buttons": { "home": { "normal": { "border": [1, "#7b8294"] } },
+                       "calc": { "danger": { "ink": "#15161d" } } },
+      "backdrop": { "desk": [{ "k": "circle", "at": [918, 1000, 500], "p": "#e2e5ee" },
+                             { "k": "circle", "at": [88, 983, 350], "p": "#e5e3f1" }] }
+    }
+  },
+  "surfaces": {
+    "button": { "rest": "fill surface_alt, border shade_dark, shadow",
+                "hover": "fill surface_alt, border focus, shadow",
+                "on": "border shade_dark, shadow", "pressed": "border shade_dark" },
+    "button_primary": { "rest": "border shade_dark, shadow", "pressed": "border shade_dark" },
+    "button_tonal": { "rest": "border shade_dark, shadow", "pressed": "border shade_dark" },
+    "button_danger": { "rest": "border shade_dark, shadow", "pressed": "border shade_dark" },
+    "chip": { "rest": "border shade_dark" },
+    "panel": { "rest": "border shade_dark" },
+    "desk.icon": { "rest": "fill panel, border shade_dark, shadow" },
+    "desk": { "rest": "fill bar" }
+  }
+}

@@ -11,7 +11,8 @@ commit re-baselines the History, so the two never double-count a stroke)."""
 from pathlib import Path
 
 from blocks_helpers import go_to_insert
-from ws_helpers import build_ws_with_cart
+from ws_helpers import build_ws_with_cart, select_on_home
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -502,10 +503,7 @@ def _make_ws_with_config_cart(tmp_path, title="Cfg"):
         edit=[{"key": "spd", "type": "int", "min": 0, "max": 10, "default": 3,
               "card": "SPD {value}"}])
     ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, title)
     ws.open_in_editor()
     assert ws.menu_view == "cards"
     return ws
@@ -569,13 +567,13 @@ def test_bar_cache_key_tracks_local_history(tmp_path):
     ws._open_paint()
     pe = ws.paint
     pe.n = 0
-    before = ws.bar_layer._cart_bar_key()
+    before = ws.bar_layer._cart_bar_key("menu")
     _stroke(pe, 3, 3, 6)
-    after = ws.bar_layer._cart_bar_key()
+    after = ws.bar_layer._cart_bar_key("menu")
     assert before != after                      # stroke -> key changes -> strip re-renders
     assert ws.history.can_undo() is True
     ws.history.undo()
-    assert ws.bar_layer._cart_bar_key() != after   # redo now possible -> changes again
+    assert ws.bar_layer._cart_bar_key("menu") != after   # redo now possible -> changes again
 
 
 def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
@@ -583,7 +581,7 @@ def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
     # and crucially computing them never touches the SD-backed journal check.
     ws = _make_ws_with_cart(tmp_path)
     ws.go_home()
-    assert ws.history.bar_undo_bits() == (False, False)
+    assert ws.history.bar_undo_bits() == 0
 
 
 # ==================================================================#
@@ -653,7 +651,7 @@ def test_graduated_blocks_tab_undo_ungraduates_under_scoped_walk(tmp_path):
             blocks.make_block("cls", {"color": "black"}),
             blocks.make_block("set_var", {"var": "score", "value": 7})])]}
     assert moy_carts.save_blocks(cart, prog)[0] == moy_carts.SAVE_OK
-    ws.launcher.items = moy_carts.scan(root)
+    ws.launcher.items = shelf(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == "Grad":
             ws.launcher.sel = i

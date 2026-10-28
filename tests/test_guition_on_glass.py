@@ -36,8 +36,84 @@ def board():
 # the file on purpose: the comparison is against a fresh boot, and the wasm
 # block at the end brings the radios up. Measured 2026-09-25 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
-# internal SRAM.
-WASM_IDLE_BASELINE = (95507, 55296)
+# internal SRAM -- less EXFAT_SRAM, what FatFS's exFAT build holds in internal
+# SRAM at the idle desk (2026-10-05, the same image and a fresh boot:
+# 93091 free with it, 93731 without), so the guard keeps measuring the engine's
+# own cost.
+EXFAT_SRAM = 640
+# And less KERNEL_SRAM, the kernel's static share (native/moy_kernel: its
+# panic wrapper in IRAM and its statics), which every console image carries
+# and docs/native_kernel_2026-09.md section 6.1 bounds on its own: measured
+# 2026-10-06 on this board, the internal heap an image that takes
+# the module has against the same tree denying it (the worse of two fresh
+# boots: 93067 and 93131 free without it, 92039 with it).
+# Plus the glass's statics (native/moy_glass: its tables' roots and the
+# present engine), 56 bytes of .dram0.bss by the link map against dev
+# 82144715, 2026-10-07.
+# And the links' statics (native/moy_net/moy_link.c: the link's ring header,
+# its latch and its flag), 40 bytes of .bss and .data by the objects' sizes,
+# 2026-10-07; the port's espnow module they replace held its ring in the heap.
+# And the WiFi driver's (native/moy_net/moy_wifi.c: its state, latch and
+# connect flag), 56 bytes of .bss and .data by the object's sizes, 2026-10-07.
+# Plus input's statics (native/moy_input: the kernel table's latches, the
+# drivers' state, the kernel's I2C bus, which the carve compiled as a stub, and
+# NimBLE's bond cache, ble_store_config, in place of MicroPython's bluetooth),
+# 1024 bytes of .dram0 by the link map against dev 8ecf490a, 2026-10-07.
+# And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
+# which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
+# And the WiFi driver's reconnect timer handle and backoff, 5 bytes of .bss by
+# the link map, 2026-10-07 (the esp_timer it creates is the heap's).
+# And the updater's (native/moy_net/moy_ota.c: the pointers to its state, its
+# clients, its keys and the trusted set, which are PSRAM), its slot's position
+# (moy_net_port.c) and the WiFi driver's kept-network flag, 38 bytes of .bss by
+# the objects' sizes, 2026-10-07.
+# And the web-console switch's (native/moy_net/moy_webconsole.c: the pointer
+# to its state, which is PSRAM), 4 bytes of .bss by the object's size,
+# 2026-10-07.
+# And the setup portal's responder (native/moy_net/moy_dns.c: the pointer to
+# its state, PSRAM) and the WiFi driver's access-point interface, 8 bytes of
+# .bss by the objects' sizes, 2026-10-08.
+# And the internal flash volume's (native/moy_store/moy_kvfs.c: the pointer to
+# the kernel's littlefs instance, whose config and caches are PSRAM), 4 bytes
+# of .bss by the object's size, 2026-10-08.
+# And the frame's (native/moy_kernel: the loop's, the reader's and the
+# ladder's statics and the VM-side stage table; the meters, the PERF window
+# and the line buffer are PSRAM), 488 bytes of idle internal heap measured
+# 2026-10-08 against the same tree's dev image on a fresh boot.
+# Less what moy_alloc's registry gave back: its nodes moved to PSRAM beside
+# their buffers (native/moy_alloc), 580 bytes of idle internal heap measured
+# 2026-10-08 against the same tree's image before the move, fresh boots.
+# And first light's, the board's dev-channel words' and the kernel's HITCH and
+# LOOP lines', 92 bytes of idle internal heap measured 2026-10-08 against the
+# same tree before them, fresh boots.
+# And the cart path's statics (native/moy_play: the run's pointer, whose state
+# is PSRAM, and the binding's two root pointers; native/moycore: the frame's
+# split, which replaced the binding's own), 8 bytes of internal heap by the
+# heap's total against dev 502be7fd, fresh boots, 2026-10-08.
+# And the kernel's screens in the look (native/moy_kernel, native/moy_gfx/
+# moy_path.c: the floor's view at 64 columns and its geometry's band and
+# scratch, the splash palette, the faces' lent scratch and the screens'
+# PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
+# 2026-10-26; the scratch and the band themselves are PSRAM.
+KERNEL_SRAM = 1092 + 56 + 40 + 56 + 1024 + 4 + 5 + 38 + 4 + 8 + 4 + 488 - 580 + 92 + 8 + 270
+# And less CARD_SRAM, the card volume's remaining internal SRAM: the SPI3 bus
+# moy_sd initialises and keeps, and its sdspi device and driver structs (the
+# store's FATFS, read cache and card state are PSRAM): measured 2026-10-07 on
+# this board, the same tree with tf_card mounting the card volume and with it
+# left out, fresh boots at the launcher (91747 free with it, 93551 without,
+# twice each).
+CARD_SRAM = 1804
+# And less LOOK_SRAM, the 2026-10 look's statics in the UI and text kernels
+# (native/moy_gfx/moy_text.c's sixteen font slots, native/moy_ui's depth
+# paints and marks, the theme's block-nearest tables, the RUN face's shape,
+# native/moy_app's theme row): 1272 bytes of .dram0 by the heap's start
+# against dev 64572552, 2026-10-18, which the idle heap's total and free both
+# fell by on a fresh boot (91727 free before, 90455 after), and the largest
+# block with them, by one of the heap's steps (51200 before, 49152 after).
+# The look's corner and shadow caches and the UI API's run context are PSRAM.
+LOOK_SRAM = (1272, 2048)
+WASM_IDLE_BASELINE = (95507 - EXFAT_SRAM - KERNEL_SRAM - CARD_SRAM - LOOK_SRAM[0],
+                      55296 - LOOK_SRAM[1])
 WASM_BOARD_DIR = ROOT / "firmware" / "guition_jc3248w535"
 
 
@@ -188,19 +264,11 @@ def test_the_jet_showcase_holds_its_floor_at_full_width(board):
                                  shading="phong")
 
 
-# Doom, built by the recipe (experiments/wasm_aot/doom/): its load needs the
-# linear memory's block, the pool and the text at once, more PSRAM than this
-# board -- the floor board -- has free in its 3 MB cart-runtime reserve with
-# the shell resident, even on a fresh boot, so its fit check refuses it. The
-# cart is not installed here, and this skips, saying so, until the reserve or
-# the cart changes.
-DOOM_SHORT = ("Doom does not fit this board's 3 MB cart-runtime reserve with "
-              "the shell resident: its fit check refuses it (measured "
-              "2026-09-26; experiments/wasm_aot/doom/README.md)")
-
-
+# Doom, built by the recipe (experiments/wasm_aot/doom/): its frames held to
+# the host's. It fits this board with the VM up (#224 holds the fit figures);
+# a launch whose fit check fails stops the VM for it (the checks below).
 def test_doom_frames_match_the_host(board):
-    on_glass.doom_frames_match_the_host(board, WASM_BOARD_DIR, short=DOOM_SHORT)
+    on_glass.doom_frames_match_the_host(board, WASM_BOARD_DIR)
 
 
 def test_state_snapshot_has_the_fullscreen_tier_shape(board):
@@ -228,12 +296,60 @@ def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
 
 
+def test_the_painter_matches_the_host(board):
+    on_glass.painter_matches_host(board)
+
+
+def test_the_sprites_match_the_host(board):
+    on_glass.sprites_match_host(board)
+
+
+def test_the_picker_kernel_matches_sspr(board):
+    on_glass.picker_kernel_matches_sspr(board)
+
+
+def test_shift_last_and_copy_last_into_match_the_reference(board):
+    on_glass.shift_last_matches_the_reference(board)
+
+
+def test_a_fuzzed_font_corpus_loads_as_on_the_host(board):
+    on_glass.fonts_match_host(board)
+
+
+def test_a_fuzzed_layout_corpus_reads_as_on_the_host(board):
+    on_glass.layouts_match_host(board)
+
+
+def test_custom_themes_derive_as_on_the_host(board):
+    on_glass.theme_custom_matches_host(board)
+
+
+def test_the_theme_font_is_installed(board):
+    on_glass.the_theme_font_is_installed(board)
+
+
+def test_the_font_set_is_the_tiers(board):
+    on_glass.the_font_set_is_the_tiers(board, 'handheld')
+
+
+def test_the_glyph_lane_draws_the_hosts_bytes(board):
+    on_glass.glyph_lane_matches_host(board, 'handheld')
+
+
+def test_a_stale_handle_is_refused_loudly(board):
+    on_glass.stale_handle_is_refused_loudly(board)
+
+
 def test_diag_toggle_roundtrips(board):
     on_glass.diag_toggle_roundtrips(board)
 
 
 def test_swipe_rides_the_real_pointer_feed(board):
     on_glass.home_shelf_fling(board, 400, 80, 160)
+
+
+def test_a_long_press_opens_the_cards_verbs(board):
+    on_glass.home_long_press_opens_card_verbs(board)
 
 
 def test_a_failed_flush_is_recovered_from(board):
@@ -275,6 +391,34 @@ def test_a_lua_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "sakura lua", title="Sakura Lua")
 
 
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
+    on_glass.a_vm_free_frame_makes_no_crossing(board, spec, title)
+
+
+# The compiled half of the same check: the blit fixture's frames run in the
+# kernel's Player on the engine's thread, and neither its frames nor its run's
+# books since launch hold an APP, SERVICE or REFUSED crossing; the hello
+# fixture reads its greeting from its own folder at _init, in C.
+@pytest.mark.parametrize("which", ("blit", "hello"))
+def test_a_compiled_frame_makes_no_crossing(board, wasm_carts, which):
+    title = wasm_carts[which]
+    on_glass.a_vm_free_frame_makes_no_crossing(board, title.lower(), title,
+                                               runtime="wasm")
+
+
+# The runaway watch (native/moy_play/moy_play.h): a frame that never comes
+# back is ended, Lua on its line and a compiled cart at its next import call.
+@pytest.fixture(scope="module")
+def stuck_carts(board):
+    on_glass.stuck_carts_push(board, WASM_BOARD_DIR)
+
+
+@pytest.mark.parametrize("runtime", ("lua", "wasm"))
+def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
+    on_glass.a_stuck_run_is_ended(board, runtime)
+
+
 def test_idle_screen_blank_and_wake(board):
     on_glass.idle_blank_and_wake(board)
     on_glass.idle_timeout_restored(board)
@@ -282,6 +426,23 @@ def test_idle_screen_blank_and_wake(board):
 
 def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
+
+
+def test_a_quiet_console_collects_its_garbage(board):
+    on_glass.a_quiet_console_collects_its_garbage(board)
+
+
+def test_the_saver_comes_and_its_wake_repaints(board):
+    on_glass.idle_saver_and_wake(board)
+
+
+def test_internal_flash_commits_under_a_running_cart(board):
+    ms = on_glass.internal_flash_commits_under_a_cart(board)
+    print("\nlongest internal-flash commit under a cart: %d ms" % ms)
+
+
+def test_the_frame_is_the_kernels(board):
+    on_glass.the_frame_is_the_kernels(board)
 
 
 def test_wifi_is_off_at_rest(board):
@@ -292,12 +453,24 @@ def test_wifi_status_is_readable(board):
     on_glass.wifi_status_is_readable(board)
 
 
+def test_the_kernel_verifies_a_signed_manifest(board):
+    on_glass.the_kernel_verifies_a_signed_manifest(board)
+
+
+def test_the_internal_volume_is_the_kernels(board):
+    on_glass.the_internal_volume_is_the_kernels(board)
+
+
 def test_draw_gates_are_installed(board):
     on_glass.draw_gates_are_installed(board)
 
 
 def test_draw_gates_take_the_traffic(board):
     on_glass.draw_gates_take_the_traffic(board)
+
+
+def test_the_cart_store_is_the_card_when_one_mounted(board):
+    on_glass.cart_store_follows_the_card(board)
 
 
 def test_the_web_console_is_baked_into_this_image(board):
@@ -327,7 +500,7 @@ def _skip_unparked(board, why):
 def test_sync_push_writes_the_store_and_the_shelf_follows(board):
     """The 3.4 sync RPC against the REAL board: bring the webhost up, POST a
     batch from this machine over the LAN, and read the result back over
-    serial -- the file on the TF card, the cart on the LIVE launcher (the
+    serial -- the file on the TF card, the cart on the LIVE home's tabs (the
     shelf rescan, with no reboot anywhere), then a dc batch that removes it
     again. Skips rather than fails when the bench has no shared network:
     everything up to the HTTP hop is the other tests' job.
@@ -394,7 +567,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         board.drain(0.5)
         line = board.cmd(
             "py print('SYNCED=' + repr(any((c.get('path') or '')"
-            ".endswith('pytest_sync.moy') for c in ws.launcher.items)))",
+            ".endswith('pytest_sync.moy') for c in ws._runnable_items())))",
             wait_for="SYNCED=", timeout=8.0)
         assert line is not None and "SYNCED=True" in line, line
         # ...and the dc op takes it back off the card AND the shelf.
@@ -409,7 +582,7 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         line = board.cmd(
             "py import os; print('GONE=' + repr("
             "any((c.get('path') or '').endswith('pytest_sync.moy') "
-            "for c in ws.launcher.items) is False "
+            "for c in ws._runnable_items()) is False "
             "and 'pytest_sync.moy' not in os.listdir(ws.carts_root)))",
             wait_for="GONE=", timeout=8.0)
         assert line is not None and "GONE=True" in line, line
@@ -439,3 +612,53 @@ def test_load_unload_loop_under_a_live_cart_and_wifi(board, wasm):
 
 def test_a_run_with_wifi_and_ble_up_costs_at_most_a_constant(board, wasm):
     on_glass.wasm_low_water_with_radios_up(board, wasm)
+
+
+def test_the_kernel_lit_the_logo_before_any_vm(board):
+    on_glass.the_kernel_lit_the_logo(board)
+
+
+def test_heapcaps_mem_and_hush_are_the_kernels_words(board):
+    on_glass.board_words_are_the_kernels(board)
+
+
+def test_loop_is_the_kernels_line_with_every_stage(board):
+    on_glass.loop_line_is_the_kernels(board)
+
+
+# A VM-free seed game's 320x240 canvas is not the 480x320 panel the kernel's
+# present shows, so the console's frame drives the same C Player: its CONSOLE
+# crossing is the only one, and a Ctrl-C reaches the REPL.
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_front_run_makes_no_crossing(board, spec, title):
+    on_glass.a_front_run_makes_no_crossing(board, spec, title, front=False)
+
+
+def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
+    on_glass.a_ctrl_c_ends_a_front_run(board, front=False)
+
+
+# The VM stop (docs/kernel_cartpath_2026-10.md section 5): the kernel stops the
+# VM and starts it again with no cart, the routes and the lease read back and
+# PSRAM flat while it is down; Doom runs with no VM (its fit forced to fail),
+# its end -- the dev channel's `end`, or a Ctrl-C -- brings a VM back over the
+# card's open volume; and a stopped run whose frame never ends is ended.
+def test_vm_stops_leave_psram_flat_and_the_routes_read_back(board):
+    on_glass.vm_stops_leave_psram_flat(board, n=5)
+
+
+def test_doom_runs_with_the_vm_down(board):
+    on_glass.doom_runs_with_the_vm_down(board, hold_link=True)
+
+
+def test_a_ctrl_c_during_a_stopped_run_reaches_a_vm(board):
+    on_glass.doom_runs_with_the_vm_down(board, ctrl_c=True)
+
+
+def test_a_stuck_run_with_the_vm_down_is_ended(board, stuck_carts):
+    on_glass.a_stuck_run_with_the_vm_down_is_ended(board)
+
+
+# LAST in the file: twenty soft resets end on a freshly started VM.
+def test_twenty_soft_resets_leave_psram_flat(board):
+    on_glass.soft_resets_leave_psram_flat(board, n=20)

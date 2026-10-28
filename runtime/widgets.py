@@ -1,55 +1,53 @@
 # Map (grep -n a name to jump there):
 #   arm_prompt                 take the keyboard for a modal prompt
-#   ConfirmTap                 a two-tap guard on a destructive button
 #   _Blit                      the cursor sprite's blittable
-#   Pointer                    a screen-space cursor
-#   -- achievements            Achievements, Clipboard, Pmem
+#   -- achievements            Achievements, Pmem
 #   Achievements               the milestones a kid has unlocked
-#   Clipboard                  the one system clipboard
 #   Pmem                       a cart's 256 persistent signed ints
 #   -- placed-actor scenes     Actor, Scenes, SceneWorld
 #   Actor                      one placed actor from a scene
 #   Scenes                     a cart's scenes, parsed
 #   SceneWorld                 the live actor world a cart mutates
-#   _SilentAudio               the no-op audio backend
-#   -- reusable overlay popup  Popup
-#   Popup                      a self-contained dropdown overlay
+#   -- the popover             Popup
+#   Popup                      the one popover: rows or a component
 """Self-contained console support widgets, extracted from Workstation
 (runtime/console.py) -- the cohesive, boundaried little classes with their own state
 that don't belong to any one surface Layer or the router:
 
   * `_Blit`        -- the minimal blittable the cursor sprite + the #39 game->system
                       composite build (canvas.spr reads only w/h/pix/transparent).
-  * `Pointer`      -- the screen-space cursor (trackball-relative / touch-absolute,
-                      auto-hides after CURSOR_IDLE_MS idle).
-  * `Achievements` -- the milestone tracker (#21): the catalog + award-once + toast.
+  * `Achievements` -- the milestone tracker (#21): the catalog, award-once, the
+                      days found, the counters and the unlock banner's payload.
   * `Pmem`         -- a cart's persistent 256x uint32 memory (TIC-80 pmem()).
   * `Actor`/`Scenes` -- a cart's placed-actor scenes (#85): read-only data rows +
                       the scene()/load_scene() accessor over the .moyscene blobs.
-  * `_SilentAudio` -- the no-op audio backend (#16) when none was injected.
-  * `Popup`        -- the reusable dropdown overlay primitive (#52) the ≡ menu is
-                      built on.
-  * `ConfirmTap`   -- the two-tap guard every destructive button shares.
+  * `Popup`        -- the one popover (#52, docs/shell_layout_2026-10.md §8): the
+                      system menu's rows, or a bar widget's component.
   * `arm_prompt`   -- the input-edge neutraliser a modal prompt opens with.
 
 All are backend-agnostic + MicroPython-safe: they take NO NAMES/canvas (they don't
 draw chrome -- Popup/Launcher DRAWING lives on their owners), so this file is a
 dependency-free leaf. The trivial helpers a couple of them need (`_ticks_ms` /
-`_ticks_diff` / `_err_text` / `_in`) are duplicated here (time-/pure-only, exactly like
-achievements_ui.py does) rather than imported back from console -- no circular import.
-console.py imports these classes back so `console.Pointer` / `console.Popup` /
+`_ticks_diff` / `_err_text` / `_in`) are duplicated here (time-/pure-only) rather
+than imported back from console -- no circular import.
+console.py imports these classes back so `console.Popup` /
 `console.ACHIEVEMENTS` / ... still resolve for its own use + the tests + host_app.
 (`json` is imported for Scenes, which parses the .moyscene blobs -- available on
 both CPython and MicroPython.)
 
 (Launcher stayed in console.py: its draw() needs the palette NAMES + the shared
-`_blit_glyph` glyph vocabulary + the tile-type constants, and its bare-construction
+glyph raster (`ui.glyph`) + the tile-type constants, and its bare-construction
 default needs Layout -- moving it would inject NAMES/a glyph fn into a class the
 Workstation constructs, or pull the whole glyph vocabulary out here, i.e. the ugly
 cross-import web. It's cohesive with the launcher-home rendering, so it's left put.)
 """
 import json
 
+
+try:
+    from layout_base import bar_rows as _bar_rows
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import bar_rows as _bar_rows
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_diff
@@ -80,53 +78,19 @@ def arm_prompt(ws):
     """Take the keyboard for a modal prompt and neutralise the input edge that
     opened it, so the prompt's first frame cannot carry the still-latched
     A/Enter/tap straight into commit or cancel (#29). ONE body for every
-    prompt that opens on a key or a tap (the block keypads, the Config tab's
-    CART INFO and NEW SCRIPT dialogs); the prompt's own TextEntry then opens
-    guarded (editors_base.TextEntry.open)."""
+    prompt that opens on a key or a tap (Blocks' prompts, the Config tab's
+    Cart info and New script dialogs); the prompt's own UI context then
+    takes the byte held as it opened as typing nothing (its host's key)."""
     ws._set_text_mode(True)
     # EVERYBODY let go: the shared object's meaning (every source), not a
     # driver's per-source "I hold nothing" (runtime/input.py).
     ws.input.release_all()
-    try:
-        ws.input._pressed = set()
-        ws.input._released = set()
-        ws.input._last = set()          # device InputState edge snapshot
-        ws.input._prev = set()          # host InputState edge snapshot
-    except AttributeError:
-        pass
+    clear = getattr(ws.input, "clear_edges", None)
+    if clear is not None:
+        clear()
     ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
     if ws.pointer is not None:
         ws.pointer.click = False        # the tap that opened the prompt is not OK
-
-
-class ConfirmTap:
-    """A two-tap guard on a destructive button: the first tap ARMS, the
-    second (while still armed) confirms, and any other gesture disarms.
-    `gen` counts every arm/disarm so a surface whose chrome is cached by a
-    generation key (the picker's bar zone) repaints the armed prompt."""
-
-    def __init__(self):
-        self.armed = False
-        self.gen = 0
-
-    def arm(self):
-        if not self.armed:
-            self.armed = True
-            self.gen += 1
-
-    def disarm(self):
-        if self.armed:
-            self.armed = False
-            self.gen += 1
-
-    def tap(self):
-        """One tap on the guarded button: True when it confirms (and disarms),
-        False when it only armed."""
-        if self.armed:
-            self.disarm()
-            return True
-        self.arm()
-        return False
 
 
 class _Blit:
@@ -169,181 +133,33 @@ def rotate_indices(pix, w, h, deg, transparent):
     return out, ow, oh
 
 
-CURSOR_IDLE_MS = 2000  # hide the trackball cursor after this long with no movement
-# How long a touchscreen pointer OUTLIVES the finger that made it. A touch
-# panel reports a position only while it is being touched, and a cart wants a
-# MOUSE: hold and drag, then let go and the pointer is still where you left it
-# for a moment before it is gone. Without the linger a released finger reads as
-# "no pointer" on the very next frame, which is not a mouse and is not what a
-# cart's cursor, drag handle or hover highlight is written against.
-POINTER_LINGER_MS = 1500
-
-
-class Pointer:
-    """A screen-space cursor. The trackball drives it relatively (and shows it);
-    touch places it absolutely (finger is the pointer, so it stays hidden). The
-    cursor auto-hides after CURSOR_IDLE_MS without trackball movement."""
-
-    def __init__(self, w, h, idle_ms=CURSOR_IDLE_MS):
-        self.w = w
-        self.h = h
-        self.x = w // 2
-        self.y = h // 2
-        self.click = False
-        self.down = False         # touch/button currently held (for drag gestures)
-        # Does this pointer's SOURCE report a position with no button down? A
-        # mouse does (host, browser) and a touch panel does not, and that is
-        # the whole of the difference: a hovering pointer never expires, a
-        # touched one lingers (POINTER_LINGER_MS) and then reads as absent.
-        # Set by whoever feeds a hover, so a console inherits its own answer
-        # rather than being told which kind of machine it is.
-        self.hovers = False
-        self._sampled = _ticks_ms()
-        # Did THIS frame's sample come from the input hardware, or is it a repeat
-        # of the last one? A mouse always reports a level, so the host never sets
-        # this False; the T-Deck's GT911 hands over ~20-30 samples/s while a
-        # finger drags (it clock-stretches 20-45ms on most finger-down reads,
-        # #74), which is well under the frame rate -- so its backend holds the
-        # last point and marks the repeats stale. Kinetic scrolling (#113) reads
-        # it: a repeat carries NO new information about finger speed, so charging
-        # it a zero delta would decay the fling velocity toward nothing.
-        self.fresh = True
-        self.visible = True
-        self.idle_ms = idle_ms
-        self._last_move = _ticks_ms()
-
-    def move(self, dx, dy):
-        # Relative move from the trackball: clamp, and wake the cursor.
-        self.x = max(0, min(self.w - 1, self.x + dx))
-        self.y = max(0, min(self.h - 1, self.y + dy))
-        self.visible = True
-        self._last_move = self._sampled = _ticks_ms()
-
-    def place(self, x, y):
-        # Absolute position from touch: hit-test there, but keep the cursor
-        # hidden (the finger already shows where you are).
-        self.x = max(0, min(self.w - 1, x))
-        self.y = max(0, min(self.h - 1, y))
-        self.visible = False
-        self._sampled = _ticks_ms()
-
-    def live(self):
-        """Is there a pointer for a CART to read right now?
-
-        Held is live, hovered is live, and a just-released touch stays live for
-        POINTER_LINGER_MS so a drag that ends does not teleport the cart's
-        cursor into nowhere on the next frame. Past that a touch console
-        honestly has no pointer, which is what `touch()` answers None/nil for.
-        """
-        return (self.down or self.hovers
-                or _ticks_diff(_ticks_ms(), self._sampled) < POINTER_LINGER_MS)
-
-    def tick(self, now):
-        # Auto-hide once the trackball has been idle long enough.
-        if self.visible and _ticks_diff(now, self._last_move) >= self.idle_ms:
-            self.visible = False
-
-
-# The pointer a CART sees, resolved once for every tier.
-#
-# Python carts reach it through cart_api's `touch()`; Lua carts reach it through
-# the snapshot the glues fill (device/moycore_glue.py, runtime/lua_host.py) and
-# libmoy's `touch()` reads. Those are two code paths and they must not be two
-# ANSWERS -- "one cart, every tier" is the whole contract, and a pointer that
-# expires on one tier and not the other breaks it silently, in a cart that draws
-# a cursor.
-#
-# ONE INTEGER, because the Lua snapshot has one slot to say all three things in
-# (see moycore_glue / moyhost_lua's h_touch). FLAGS and not a ladder: `click`
-# and `down` are independent, not nested -- a scripted tap (host_api.click, the
-# suites) raises the edge with the finger already lifted, and a ladder that
-# assumed down >= click swallowed it, which `letter blitz` scores with.
-P_NONE = 0
-P_LIVE = 1                     # there is a pointer at all
-P_HELD = 2                     # the finger/button is down this frame
-P_CLICK = 4                    # ...and it went down THIS frame (the press edge)
-
-
-def pointer_state(inp, out):
-    """Fill `out` as `[x, y, state, ms]` and return it. `state` is P_*.
-
-    `ms` is 0 and the slot is vestigial: it carried a press duration only so
-    h_touch could read `held` out of it, and `held` is a flag now. The slot
-    stays because it is in the C snapshot ABI, not because anything reads it.
-
-    `out` is CALLER-OWNED and reused: this runs once per frame on the play
-    path, and a fresh tuple here is an allocation the S3 charges most of a
-    millisecond for when the collector comes round (#66).
-    """
-    out[2] = P_NONE
-    # A LINKED MATCH HAS NO POINTER. Only buttons cross the radio, so a touch
-    # read here would move this screen's player and not the other one's -- a
-    # divergence the lockstep exchange cannot see and cannot heal, the same
-    # class of bug as drawing from the shared random stream. Reporting "no
-    # pointer" makes a touch-driven cart fall back to its button path, which is
-    # the honest answer while two consoles share one game.
-    if getattr(inp, "netplay_live", False):
-        return out
-    p = getattr(inp, "pointer", None)
-    if p is None:
-        return out
-    # LIVENESS IS THE POINTER'S, always, and asking it FIRST is the whole point.
-    # A touch panel reports a position only while it is touched; the pointer
-    # outlives the finger by POINTER_LINGER_MS so a released drag does not
-    # teleport a cart's cursor into nowhere, and a hovering source never
-    # expires at all. The game-space publication below is a coordinate MAPPING
-    # of this pointer, not a second opinion about whether there is one --
-    # console.py republishes it with a position every frame whether or not the
-    # pointer is alive, so reading liveness off it left a p8 cart holding a
-    # cursor over its board forever and its d-pad stamped over every frame.
-    if hasattr(p, "live") and not p.live():   # hasattr: no bound method
-        return out
-    # Two-domain seam (#39): the game-space publication wins where the console
-    # makes one (a distinct big system canvas, or a cart with a smaller
-    # canvas), so a cart reads its own viewport coordinates rather than the
-    # desktop's -- and its own tap/hold flags, which an overlay may have
-    # stripped on the way through.
-    gp = getattr(inp, "game_pointer", None)
-    if gp is not None:
-        out[0], out[1] = gp[0], gp[1]
-        out[2] = (P_LIVE | (P_CLICK if bool(gp[2]) else 0)
-                  | (P_HELD if (len(gp) > 3 and gp[3]) else 0))
-        out[3] = 0
-        return out
-    out[0], out[1] = p.x, p.y
-    out[2] = (P_LIVE | (P_HELD if getattr(p, "down", False) else 0)
-              | (P_CLICK if getattr(p, "click", False) else 0))
-    out[3] = 0
-    return out
-
-
 # --- achievements + Easter eggs (#21) ---------------------------------------
 #
-# A small, tasteful set of fun milestones a kid hits naturally (open/run a cart,
-# paint a sprite, edit a map, save code, play a few carts, visit each editor) plus
-# the hidden Easter-egg rewards. Each is a tuple (id, name, glyph, hidden):
+# A small set of milestones a kid hits naturally (open/run a cart, save a
+# drawing, a map, some code, play five carts, use each editor, pick a
+# wallpaper) plus the three hidden Easter-egg rewards. Each is a tuple
+# (id, name, icon, hidden, how):
 #   id     -- stable key persisted in achievements.json
-#   name   -- the friendly title shown in the toast + the achievements view
-#   glyph  -- the icon from _GLYPHS drawn beside it
-#   hidden -- True hides the name as "???" in the view until it's unlocked, so a
-#             secret stays a surprise (the Easter-egg rewards are all hidden).
+#   name   -- the badge's name on its card, its popover and the unlock banner
+#   icon   -- the icon slot its card's tile draws (`ui.card`'s `icon`)
+#   hidden -- a secret: named "Secret", "Keep exploring", until it is found
+#   how    -- how it is found, in one voice (what to do)
 # Backend-agnostic + MicroPython-safe (a plain tuple of tuples, frozen into the
-# device build). The store (moy_carts.load/save_achievements) holds only the
-# unlocked ids; this catalog is the single source of what each one MEANS, so host
-# and device show identical badges.
+# device build). The store (moy_carts.load/save_achievements) holds the day
+# each was found and the counters' progress; this catalog is the single source
+# of what each one MEANS, so host and device show identical badges.
 ACHIEVEMENTS = (
-    ("first_open",   "First Steps",     "app",    False),
-    ("first_run",    "Lift Off!",       "run",    False),
-    ("first_paint",  "Little Artist",   "paint",  False),
-    ("first_map",    "Map Maker",       "map",    False),
-    ("first_code",   "Code Wizard",     "code",   False),
-    ("play_five",    "Cart Explorer",   "star",   False),
-    ("toolbox",      "Toolbox Master",  "gear",   False),
-    ("decorator",    "Home Decorator",  "heart",  False),
-    # Hidden Easter-egg rewards (name shown as "???" until found):
-    ("konami",        "Secret Coder",    "spark",  True),
-    ("clock_tinker",  "Time Traveler",   "smile",  True),
-    ("secret_door",   "Secret Finder",   "key",    True),
+    ("first_open",   "First Steps",     "app",      False, "Open a cart"),
+    ("first_run",    "Lift Off!",       "run",      False, "Run a game"),
+    ("first_paint",  "Little Artist",   "paint",    False, "Save a drawing"),
+    ("first_map",    "Map Maker",       "map",      False, "Save a map"),
+    ("first_code",   "Code Wizard",     "code",     False, "Save some code"),
+    ("play_five",    "Cart Explorer",   "star",     False, "Play 5 carts"),
+    ("toolbox",      "Toolbox Master",  "settings", False, "Use 3 editors"),
+    ("decorator",    "Home Decorator",  "heart",    False, "Pick a wallpaper"),
+    ("konami",       "Secret Coder",    "spark",    True,  "Type the secret code"),
+    ("clock_tinker", "Time Traveler",   "smile",    True,  "Tap the clock 7 times"),
+    ("secret_door",  "Secret Finder",   "key",      True,  "Knock on Settings 5 times"),
 )
 
 # Which achievement(s) a plain milestone event unlocks. Counters (play_five,
@@ -362,41 +178,56 @@ _EVENT_ACHIEVEMENT = {
 # Editors a kid can visit; opening all of them earns "toolbox".
 _TOOLBOX_VIEWS = ("code", "paint", "map")
 _PLAY_GOAL = 5            # distinct carts opened to earn "Cart Explorer"
+# A counter's goal by its badge: what its "3 of 5" counts to.
+GOALS = {"play_five": _PLAY_GOAL, "toolbox": len(_TOOLBOX_VIEWS)}
 
 ACH_TITLE = {a[0]: a[1] for a in ACHIEVEMENTS}
 ACH_GLYPH = {a[0]: a[2] for a in ACHIEVEMENTS}
 ACH_HIDDEN = {a[0]: a[3] for a in ACHIEVEMENTS}
 
-TOAST_MS = 2600          # how long a celebratory unlock banner stays on screen
+TOAST_MS = 2600          # how long the unlock banner stays on screen
 
 
 class Achievements:
-    """Tracks which fun milestones a kid has unlocked, awards each exactly once,
-    persists the unlocked set, and queues a celebratory toast on a fresh unlock.
+    """Tracks which milestones a kid has found and on which day, awards each
+    exactly once, keeps the counters' progress, persists both, and queues
+    the unlock banner on a fresh find.
 
     Backend-agnostic + MicroPython-safe. The Workstation owns one of these, calls
     note(event[, key]) at the existing flow points (open/run/paint-save/...), and
     draws `toast` while the deadline its own `on_unlock` hook armed is up (#209
-    landing B). Persistence and the unlock EFFECTS are injected callbacks so this
-    class stays free of the SD wrapper, the audio backend and the overlay stack
-    (the Workstation wires all three), which also makes it trivially
-    unit-testable."""
+    landing B). Persistence, the day and the unlock EFFECTS are injected
+    callbacks so this class stays free of the SD wrapper, the clock, the audio
+    backend and the overlay stack (the Workstation wires them), which also
+    makes it trivially unit-testable.
 
-    def __init__(self, unlocked=None, on_save=None, on_unlock=None):
-        # `unlocked` is the list loaded from achievements.json (ids already valid).
-        self.unlocked = {}                 # id -> True (a set; dict for MP parity)
-        for i in (unlocked or ()):
-            self.unlocked[i] = True
-        self._on_save = on_save            # called(list_of_ids) to persist; None = volatile
+    `doc` is achievements.json as the store's strict reader answers it
+    (moy_carts.load_achievements): {"found": {id: YYYYMMDD, 0 an unknown
+    day}, "count": {badge: [key, ...]}}, or None for none."""
+
+    def __init__(self, doc=None, on_save=None, on_unlock=None, today=None):
+        self.unlocked = {}                 # id -> the day it was found (YYYYMMDD, 0 unknown)
+        self._seen_views = {}              # editor views visited (toolbox)
+        self._played = {}                  # distinct cart keys opened (play_five)
+        if doc:
+            for k, v in doc.get("found", {}).items():
+                if k in ACH_TITLE:
+                    self.unlocked[k] = v
+            count = doc.get("count", {})
+            for k in count.get("play_five", ()):
+                self._played[k] = True
+            for k in count.get("toolbox", ()):
+                self._seen_views[k] = True
+        self._on_save = on_save            # called(doc) to persist; None = volatile
         self._on_unlock = on_unlock        # called(id) on a FRESH unlock (e.g. a beep)
-        self._seen_views = {}              # editor views visited this session+history
-        self._played = {}                  # distinct cart keys opened (for play_five)
-        # The toast PAYLOAD only: (id, title, glyph) of the live banner, or None.
-        # Its deadline is the shell's (`ws._toast_until`, written by the
-        # `on_unlock` hook at the unlock -- #209 landing B): the console's redraw
-        # gate and the WM's overlay signature run every loop and must not have to
-        # ask an object whether a banner is still up. This payload is read only
-        # while that deadline is live, and a later award simply replaces it.
+        self._today = today                # () -> YYYYMMDD, 0 without a clock
+        # The banner's PAYLOAD only: (id, name, icon, hidden) of the live
+        # banner, or None. Its deadline is the shell's (`ws._toast_until`,
+        # written by the `on_unlock` hook at the unlock -- #209 landing B): the
+        # console's redraw gate and the WM's overlay signature run every loop
+        # and must not have to ask an object whether a banner is still up. This
+        # payload is read only while that deadline is live, and a later award
+        # simply replaces it.
         self.toast = None
 
     # -- queries -------------------------------------------------------------
@@ -406,20 +237,60 @@ class Achievements:
     def count(self):
         return len(self.unlocked)
 
-    # -- awarding ------------------------------------------------------------
-    def award(self, ach_id):
-        """Unlock `ach_id` if it isn't already and is a known achievement. Returns
-        True only on the FIRST unlock (so a milestone awards exactly once), and then
-        persists + raises a toast + fires the on_unlock hook. A repeat is a no-op."""
-        if ach_id in self.unlocked or ach_id not in ACH_TITLE:
-            return False
-        self.unlocked[ach_id] = True
+    def found_on(self, ach_id):
+        """The day `ach_id` was found (YYYYMMDD, 0 where the clock did not
+        know it), or None while it is not found."""
+        return self.unlocked.get(ach_id)
+
+    def progress(self, ach_id):
+        """(done, goal) of a counter badge (Cart Explorer's carts, Toolbox
+        Master's editors), or None for one that is no counter."""
+        goal = GOALS.get(ach_id)
+        if goal is None:
+            return None
+        n = len(self._played) if ach_id == "play_five" else len(self._seen_views)
+        return (min(n, goal), goal)
+
+    def doc(self):
+        """achievements.json's document, as moy_carts.save_achievements
+        writes it."""
+        count = {}
+        if self._played and "play_five" not in self.unlocked:
+            count["play_five"] = list(self._played.keys())
+        if self._seen_views and "toolbox" not in self.unlocked:
+            count["toolbox"] = list(self._seen_views.keys())
+        return {"found": dict(self.unlocked), "count": count}
+
+    def _save(self):
         if self._on_save is not None:
             try:
-                self._on_save(list(self.unlocked.keys()))
+                self._on_save(self.doc())
             except Exception as exc:  # noqa: BLE001 -- a failed save must not crash the UI
                 print("Moybyte achievements save failed:", _err_text(exc))
-        self.toast = (ach_id, ACH_TITLE[ach_id], ACH_GLYPH.get(ach_id, "trophy"))
+
+    # -- awarding ------------------------------------------------------------
+    def award(self, ach_id, quiet=False, day=None):
+        """Unlock `ach_id` if it isn't already and is a known achievement. Returns
+        True only on the FIRST unlock (so a milestone awards exactly once), and then
+        persists + raises the banner + fires the on_unlock hook. A repeat is a no-op:
+        nothing shows. `quiet` keeps a badge earned on another console (the page a
+        board serves) with the `day` it was found there: persisted, never
+        celebrated a second time."""
+        if ach_id in self.unlocked or ach_id not in ACH_TITLE:
+            return False
+        if day is None:
+            day = 0
+            if self._today is not None:
+                try:
+                    day = int(self._today()) or 0
+                except Exception:  # noqa: BLE001 -- no clock: an unknown day
+                    day = 0
+        self.unlocked[ach_id] = day
+        self._save()
+        if quiet:
+            return True
+        self.toast = (ach_id, ACH_TITLE[ach_id], ACH_GLYPH.get(ach_id, "trophy"),
+                      ACH_HIDDEN.get(ach_id, False))
         # The payload is set BEFORE the hook, which is what arms the banner: a
         # live deadline must never point at a stale (or absent) payload.
         if self._on_unlock is not None:
@@ -434,44 +305,28 @@ class Achievements:
         per-event detail used by the counter milestones: for "open" it's the cart
         identity (distinct carts -> play_five); for "editor" it's the view name
         (visiting all editors -> toolbox). Direct-mapped events (open/run/saves)
-        award their id immediately. Safe to call every time the event happens --
+        award their id immediately. A counter's new step is persisted, so its
+        progress outlives a reboot. Safe to call every time the event happens --
         award() makes the once-only guarantee."""
         if event == "open":
-            if key is not None:
+            if key is not None and "play_five" not in self.unlocked \
+                    and key not in self._played:
                 self._played[key] = True
                 if len(self._played) >= _PLAY_GOAL:
                     self.award("play_five")
+                else:
+                    self._save()
             self.award("first_open")
         elif event == "editor":
-            if key in _TOOLBOX_VIEWS:
+            if key in _TOOLBOX_VIEWS and "toolbox" not in self.unlocked \
+                    and key not in self._seen_views:
                 self._seen_views[key] = True
                 if all(v in self._seen_views for v in _TOOLBOX_VIEWS):
                     self.award("toolbox")
+                else:
+                    self._save()
         elif event in _EVENT_ACHIEVEMENT:
             self.award(_EVENT_ACHIEVEMENT[event])
-
-
-class Clipboard:
-    """The ONE system clipboard (#132): a tiny typed holder every editor
-    writes THROUGH while keeping its local behavior. `kind` is "text" (v1)
-    or "pixels" (the planned Paint lane); no host-OS clipboard integration
-    anywhere -- ours end-to-end, so host/device parity holds by construction.
-    Every copy in every attached editor lands here, so this is always the
-    NEWEST copy across apps; a paste that wants text just reads text()."""
-
-    def __init__(self):
-        self.kind = None          # "text" | "pixels" | None (empty)
-        self.data = None
-        self.seq = 0              # bumps per put -- lets a lane detect updates
-
-    def put_text(self, s):
-        self.kind = "text"
-        self.data = str(s)
-        self.seq += 1
-
-    def text(self):
-        """The clipboard's text, or '' (empty / holding a non-text kind)."""
-        return self.data if self.kind == "text" and self.data else ""
 
 
 class Pmem:
@@ -588,6 +443,11 @@ class Scenes:
         self.active = self._default
         self._cache = {}                   # name -> [Actor], parsed once
         self._world = None                 # #109: the live mutable actor world (lazy)
+        self.gen = 0                       # bumps on every put
+
+    def copy(self):
+        """An independent Scenes over the same blobs, at its default scene."""
+        return Scenes(self._raw, self.names)
 
     def reset(self):
         """Back to the default active scene -- called at each run's start so a
@@ -657,12 +517,13 @@ class Scenes:
     def put(self, name, text):
         """Replace scene `name`'s raw blob IN the live object (#85 Stage 2: the
         placement editor syncs each committed gesture here, so a PLAY without an
-        explicit SAVE runs the freshest placement -- the same live-edit semantics
-        the shared TileMap gives the map editor). A NEW name joins the order (and
+        explicit SAVE runs the freshest placement, which the run copies,
+        `ProjectStore.play_world`). A NEW name joins the order (and
         becomes the default when there was none); the parse cache entry drops so
         the next scene() re-parses."""
         known = name in self._raw
         self._raw[name] = text
+        self.gen += 1
         if not known:
             self.names.append(name)
             if self._default is None:
@@ -765,66 +626,37 @@ class SceneWorld:
                 a.y < b.y + 8 and b.y < a.y + 8)
 
 
-class _SilentAudio:
-    """No-op audio backend (#16): wraps an AudioEngine but never produces sound.
-    The default when no make_audio backend was injected. Exposes the same control
-    surface the api binds to, so make_api stays identical whether or not real
-    playback is wired. (Permission-gating audio on the manifest 'sound' permission
-    is future work -- the v0.4 console doesn't yet enforce any cart permissions.)"""
-
-    def __init__(self, engine):
-        self.engine = engine
-
-    def sfx(self, n, chan=None):
-        pass
-
-    def beep(self, freq, dur=0.15):
-        pass
-
-    def music(self, track, loop=True):
-        pass
-
-    def music_stop(self):
-        pass
-
-    def sound_stop(self, chan=None):
-        pass
-
-    def volume(self, level):
-        pass
-
-    def is_active(self):
-        return False        # nothing is ever audible on the silent backend
-
-    def tick(self, dt):
-        pass
-
-
-# --- reusable overlay popup (#52) -------------------------------------------
-# A minimal left-anchored dropdown drawn ON TOP of whatever screen is up, with its
-# OWN open/selected state. It's the primitive the top-bar system menu is built on,
-# and is reusable for #55 (system-as-cart) / future menus. Index-only drawing (the
-# existing cls/rect/rectb/print verbs -- host == device, no new native primitive),
-# petme128 8x8 text, the _glyph fallback contract for an optional per-row icon.
+# --- the popover (#52; docs/shell_layout_2026-10.md §8) ----------------------
+# The ONE popover: a panel anchored to a bar widget's cell, opening into the
+# content side of its bar, drawn ON TOP of whatever screen is up, with its OWN
+# open/selected state. Its contents are either ROWS -- the system menu, its
+# first content -- or a COMPONENT (popover.py: the calendar, the wifi panel,
+# the power rows), one at a time. Index-only drawing (the existing verbs --
+# host == device, no new native primitive).
 #
-# Items are tuples; the first element is a kind:
+# Rows are tuples; the first element is a kind:
 #   ("header", text)               -- a dim section title; NOT cursor-selectable
 #   ("sep",)                        -- a 1px separator line between groups
 #   ("item", text, action)         -- a selectable row; `action` is called on activate
 # The cursor (`sel`) only ever lands on "item" rows (move()/_clamp skip the rest);
 # activate() runs the selected item's action then closes (close-on-select).
 _POPUP_X = 0                  # panel left edge (flush to the screen left, x = 0)
-_POPUP_Y = 18                 # top edge flush under the 18px bar (== bar_layer._STATUS_H)
+_POPUP_Y = 18                 # the hang edge with no anchor: under an 18px top bar
 _POPUP_W = 128                # panel width (~120-140px band; 128 keeps it clear of clock)
 _POPUP_ROW_H = 12             # per-row height (selectable + header rows alike)
 _POPUP_PAD_X = 4              # text inset from the panel left
 _POPUP_SEP_H = 1              # separator line height
+# A row whose icon (its 4th element) is this destroys: it draws in the danger
+# rows' ink, and the cursor never OPENS on it, so one press of the key that
+# opened the menu cannot delete.
+DANGER_ICON = "trash"
 
 
 class Popup:
-    """A self-contained dropdown overlay (#52): owns open/closed + the moving cursor,
-    dismisses on outside-tap / ESC, and draws on top. Backend-agnostic -- the host and
-    the device drive it through the same indexed canvas."""
+    """The popover (#52, docs/shell_layout_2026-10.md §8): owns open/closed, what
+    it holds (rows or a component) and the cursor; dismisses on an outside tap,
+    B or ESC. Backend-agnostic -- the host and the device drive it through the
+    same indexed canvas. `widget` names the bar widget it hangs from."""
 
     def __init__(self):
         self.open = False
@@ -836,6 +668,11 @@ class Popup:
         # opening; it defaults to _POPUP_X so a Popup opened without an anchor (tests /
         # any future caller) still lands flush-left.
         self.anchor_x = _POPUP_X
+        # The edge the panel hangs from: the bar's content-side edge, set by
+        # toggle_sysmenu from the bar's rect. `up` grows it upward (a bar at the
+        # bottom). None is a top bar's bottom (`layout_base.bar_rows`).
+        self.anchor_y = None
+        self.up = False
         # Geometry scale (#39/#58): the popup's rows hold fs-scaled petme128 text,
         # so the panel/row/hit geometry must scale WITH the system font or the rows
         # overlap (glass-found on the P4 at font scale 2). toggle_sysmenu sets this
@@ -847,16 +684,45 @@ class Popup:
         # what keeps every tier byte-identical; the panel WIDTH stays on `fs`
         # because it is sized to hold text, not to be hit.
         self.cs = 1
+        # A COMPONENT in place of the rows (popover.py), its panel size fixed
+        # at open; `widget` the bar widget the panel hangs from.
+        self.comp = None
+        self.widget = None
+        self.size = (0, 0)
+        # The width the anchor was placed for (toggle_popover); 0 is the rows'
+        # own `_POPUP_W * fs`.
+        self.w = 0
 
     # -- open/close ----------------------------------------------------------
-    def show(self, items):
+    def show(self, items, widget="menu"):
         """Open with `items`, cursor on the first selectable row."""
+        self._drop_comp()
         self.items = list(items)
+        self.widget = widget
         self.open = True
         self.sel = self._first_selectable()
 
+    def show_component(self, comp, widget, size):
+        """Open holding `comp` (a popover.py component) in a `size` panel."""
+        self._drop_comp()
+        self.items = []
+        self.comp = comp
+        self.widget = widget
+        self.size = size
+        self.open = True
+        self.sel = 0
+
+    def _drop_comp(self):
+        comp = self.comp
+        self.comp = None
+        if comp is not None:
+            self.widget = None        # it no longer holds what it held
+            comp.closed()
+
     def close(self):
         self.open = False
+        self.widget = None
+        self._drop_comp()
 
     def toggle(self, items):
         """≡ pressed: open with `items` if closed, else close (the same control
@@ -871,10 +737,17 @@ class Popup:
         return 0 <= i < len(self.items) and self.items[i][0] == "item"
 
     def _first_selectable(self):
+        """The first "item" row that is not a danger row (`DANGER_ICON`); the
+        first "item" row where every one is; 0 where none is."""
+        first = None
         for i in range(len(self.items)):
-            if self.items[i][0] == "item":
-                return i
-        return 0
+            it = self.items[i]
+            if it[0] == "item":
+                if len(it) < 4 or it[3] != DANGER_ICON:
+                    return i
+                if first is None:
+                    first = i
+        return 0 if first is None else first
 
     def _clamp_sel(self):
         if not self._is_selectable(self.sel):
@@ -914,10 +787,17 @@ class Popup:
         defaults to _POPUP_X (flush left). Rows and the drop under the bar scale by
         `cs`, the text-sized width by `fs`; equal is the byte-identical baseline."""
         fs, cs = self.fs, self.cs
-        h = 0
-        for it in self.items:
-            h += _POPUP_SEP_H * cs if it[0] == "sep" else _POPUP_ROW_H * cs
-        return (self.anchor_x, _POPUP_Y * cs, _POPUP_W * fs, h)
+        if self.comp is not None:
+            w, h = self.size
+        else:
+            w = self.w or _POPUP_W * fs
+            h = 0
+            for it in self.items:
+                h += _POPUP_SEP_H * cs if it[0] == "sep" else _POPUP_ROW_H * cs
+        y = _bar_rows(cs) if self.anchor_y is None else self.anchor_y
+        if self.up:
+            y -= h
+        return (self.anchor_x, y, w, h)
 
     def row_at(self, px, py):
         """Index of the row under (px, py), or None when outside the panel."""
@@ -927,7 +807,7 @@ class Popup:
         if not _in(px, py, (x, y, w, h)):
             return None
         cs = self.cs
-        cy = _POPUP_Y * cs
+        cy = y
         for i in range(len(self.items)):
             rh = _POPUP_SEP_H * cs if self.items[i][0] == "sep" else _POPUP_ROW_H * cs
             if cy <= py < cy + rh:
@@ -942,6 +822,13 @@ class Popup:
         True when the tap was consumed (so the caller stops dispatching it)."""
         if not self.open:
             return False
+        if self.comp is not None:
+            r = self.panel_rect()
+            if _in(px, py, r):
+                self.comp.click(px, py, r)
+            else:
+                self.close()          # tap OUTSIDE dismisses
+            return True
         i = self.row_at(px, py)
         if i is None:
             self.close()              # tap OUTSIDE dismisses

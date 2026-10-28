@@ -4,8 +4,8 @@
 """Sign an OTA manifest, so a device can tell our firmware from someone else's.
 
 The threat this closes is a network attacker, which is the realistic one for a
-console on a home or school WiFi. TLS alone does not close it: MicroPython's
-`ssl.wrap_socket` performs no certificate verification, and the manifest's
+console on a home or school WiFi. TLS alone does not close it: the board's
+TLS client verifies no certificate, and the manifest's
 sha256 is no help against an attacker who supplies the manifest too -- it would
 bind a forgery to itself perfectly.
 
@@ -31,9 +31,9 @@ the url or the label:
     already do by replaying an older signed manifest, which the version check
     is what bounds.
 
-A hand-built string rather than canonical JSON, because the verifier is
-MicroPython: its `json.dumps` has no `sort_keys` and no `separators`, so
-"re-serialize and compare" has no stable meaning over there.
+A hand-built string rather than canonical JSON: the verifier (the kernel's C,
+native/moy_net/moy_ota.c) builds the same lines from the fields, and
+"re-serialize and compare" would tie both sides to one JSON printer.
 
     make ota-keygen                      # once: your key + what to paste where
     tools/ota_sign.py sign latest.json   # needs MOYBYTE_OTA_SIGNING_KEY
@@ -56,7 +56,7 @@ SCHEME = "moybyte-ota-v2"        # v2 added `board` -- see canonical()
 # keep doing so -- widening it would make every deployed verifier refuse the
 # manifest), so without this an attacker who cannot touch the signed app entry
 # could still rewrite the c6 block and hand the radio co-processor their own
-# firmware. Mirrored by device/moy_c6_update._canonical_c6.
+# firmware. Mirrored by native/moy_net/moy_ota.c's canonical text.
 C6_SCHEME = "moybyte-c6-v1"
 EXPONENT = 65537
 KEY_BITS = 2048
@@ -75,7 +75,7 @@ DEFAULT_KEY = os.path.expanduser("~/.moybyte-ota-signing-key.pem")   # where key
 
 
 def canonical(manifest):
-    """The exact bytes the signature covers. Mirrored by moy_ota._canonical --
+    """The exact bytes the signature covers. Mirrored by moy_ota.c's canonical --
     change one and you MUST change the other, which is what
     test_ota_signing.py::test_the_two_canonical_forms_agree is for.
 
@@ -108,7 +108,7 @@ def pkcs1_v15_block(digest, k=KEY_BYTES):
 def verify(manifest, signature_hex, n, e=EXPONENT):
     """True when `signature_hex` is a valid signature over `manifest` for the
     public key (n, e). Pure arithmetic -- no crypto library, byte-identical in
-    intent to the device's moy_ota._verify_sig."""
+    intent to the device's moy_ota_verify."""
     return _verify_bytes(canonical(manifest), signature_hex, n, e)
 
 
@@ -175,7 +175,7 @@ def _sign_bytes(payload, key_pem):
 def canonical_c6(manifest):
     """The bytes c6_sig covers: the c6 block plus the board (an image for one
     co-processor must not replay onto another board's manifest). Mirrored by
-    device/moy_c6_update._canonical_c6 -- change one, change both
+    native/moy_net/moy_ota.c -- change one, change both
     (tests/test_ota_signing.py pins the agreement)."""
     c6 = manifest.get("c6") or {}
     return ("%s\n%s\n%d\n%d\n%s" % (
@@ -221,7 +221,8 @@ def keygen(path):
 
 
 def key_constant(n, e=EXPONENT):
-    """The line to paste into moy_ota.OTA_PUBLIC_KEYS."""
+    """The line to paste into moy_ota.OTA_PUBLIC_KEYS (its hex is also
+    moy_ota.c's KEYS_HEX entry)."""
     h = "%x" % n
     body = "\n".join("     '%s'" % h[i:i + 64] for i in range(0, len(h), 64))
     return "OTA_PUBLIC_KEYS = (\n    (\n%s,\n     %d),\n)" % (body, e)
@@ -257,9 +258,10 @@ def main(argv=None):
         print("2. Give it to CI:\n")
         print("     gh secret set %s < %s\n" % (ENV_KEY, args.out))
         print("3. Bake the public half into the firmware -- replace\n"
-              "   OTA_PUBLIC_KEYS in firmware/lilygo_t_deck_plus_mainline/"
-              "device/moy_ota.py with:\n")
+              "   OTA_PUBLIC_KEYS in device/moy_ota.py with:\n")
         print(key_constant(n, e))
+        print("\n   and KEYS_HEX in native/moy_net/moy_ota.c with the same hex\n"
+              "   (tests/test_ota_signing.py holds the two equal).")
         print("\n   Boards already in the field trust the key in the image they\n"
               "   are RUNNING, so this takes effect for them one update later.")
         return 0

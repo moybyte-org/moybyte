@@ -1,0 +1,54 @@
+{
+  "format": "moy-1",
+  "version": 7,
+  "title": "Ocean Desktop",
+  "id": "moybyte.ocean_desktop",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "wallpaper",
+    "system": true,
+    "order": 50,
+    "permissions": [
+      "graphics",
+      "input"
+    ],
+    "config": {
+      "bubble_count": 60,
+      "rise_speed": 25,
+      "water": "blue"
+    },
+    "edit": [
+      {
+        "key": "bubble_count",
+        "label": "BUBBLES",
+        "type": "int",
+        "min": 10,
+        "max": 200,
+        "step": 10,
+        "card": "ADD {value} BUBBLES"
+      },
+      {
+        "key": "rise_speed",
+        "label": "RISE",
+        "type": "int",
+        "min": 5,
+        "max": 80,
+        "step": 5,
+        "card": "BUBBLES RISE AT {value}"
+      },
+      {
+        "key": "water",
+        "label": "WATER",
+        "type": "choice",
+        "choices": [
+          "blue",
+          "indigo",
+          "dark_blue"
+        ],
+        "card": "WATER IS {value}"
+      }
+    ]
+  }
+}

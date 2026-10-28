@@ -1,16 +1,128 @@
 #!/usr/bin/env python3
+# Map (grep -n a name to jump there):
+#   Bench            frame recording around ws.frame(), the per-layer split
+#   bench_all        the panel run (desk, projects, editor, settings, apps, console)
+#   bench_popovers   --popovers: the bar widgets' popovers
+#   bench_repaint    --repaint: surfaces repainted every frame
+#   bench_kernel     --kernel: the home's scaled-blit kernel (step 7a)
+#   bench_home       --home: the home's carousel scenarios (step 7b)
+#   idle_edit        --edit: an in-place theme re-install on an idle screen
+#   edit_thrash      --edit: a held key on the Appearance page's ACCENT row
+#   store_switch     --store: a switch to a store theme package, and its boot delta
+#   bench_sprites    --sprites: chrome painted from a theme's role sheet, and without it
+#   bench_painter    --painter: a surface's, a sprite's and a 9-slice's us per call
+#   bench_icons      --icons: the icon home beside the grid it is drawn from
+#   bench_backdrop   --backdrop: a theme's backdrop raster, and the home and desk over it
+#   bench_desk_scale  --desk-scale: the desk at render scale 1 and 2 (step 9)
 """Panel-by-panel P4 UI benchmark: open each surface, perform real actions
 (tap / drag / scroll / tab switch), and log end-to-end FRAME times.
 
 Why end-to-end: timing a layer's draw() in isolation is misleading -- it misses
 the window stamp, the desk backdrop under it, and the compositor flush. The
-2026-07-26 session learned this the hard way (a picker drag measured 26ms by
-content-draw and 181ms by real frame). So every number here is measured around
+2026-07-26 session learned this the hard way (a shelf drag in a window measured
+26ms by content-draw and 181ms by real frame). So every number here is measured around
 `ws.frame()`, the whole loop iteration the glass actually shows.
 
 Usage:
     python tools/p4_bench.py --board p4 [--out bench.md]
+    python tools/p4_bench.py --board tdeck --repaint settings,files,editor:code
+    python tools/p4_bench.py --board p4 --layout '[{"edge": "left", ...}]'
+    python tools/p4_bench.py --board p4 --popovers [--layout ...]
+    python tools/p4_bench.py --board tdeck --kernel
 
+`--layout` benches under a theme layout's bars (docs/shell_layout_2026-10.md
+§5): installed as a package beside the seeds and picked, as Settings does,
+after the board is reset or attached, and unpicked at the end.
+
+`--popovers` benches the bar widgets' popovers alone (docs/shell_layout_2026-10.md
+§8): open, navigate, idle and close, over three desk windows and over a
+playtest, and a frame on a minute boundary. The open and close are real taps on the widget's cell;
+a key is the popover layer's own handler, with the router's dirty mark where
+the image's WM does not let the popover take keys.
+
+`--home` benches the home (docs/shell_layout_2026-10.md §12, step 7b) on
+any board: idle, a slow drag, a fling and the frames it paints until idle,
+short flicks, the held-key glide (a key press every 120 ms through the home
+layer's own handler), a tab switch where the home has tabs, and idle and a
+drag over a live home wallpaper.
+
+`--edit` benches the in-place theme edit alone (docs/theming_2026-09.md §9,
+phase 6 step 1; also the default run's, after desk idle): a package over the
+live theme is installed and picked, then re-installed under its own name with
+one role changed on the idle screen -- one repaint, then idle zero. An image
+without `install_theme` re-applies its live theme under the same name instead.
+Then `edit thrash` (phase 6 steps 5 and 7): a held key on the Appearance
+page's ACCENT row, its `right` handled once a frame for three seconds from
+the live theme (an image without the page calls `ws.look.change("accent",
+...)` instead), so the first change makes `custom`: the key's ms and the
+painted frames per change, then the frames after release; it counts the store's
+writes (the package and system.json) and asserts none while held and exactly
+one package write once it settles. The live theme is put back after, and
+`custom` stays on the store.
+
+`--store` benches a switch to a theme package from the store (phase 6 step
+2): tests/fixtures/themes/dusk.moy is pushed onto the board's store
+(tools/push_cart.py), then the console switches to it from the live theme --
+the call (its folder's theme.json and fonts read, the install) and the frames
+it paints -- and back to the seed, beside it. The boot delta is the same call
+cold, as boot makes it (the store's packages unread, the slot empty, the
+package's fonts unloaded), less a seed's cold switch.
+
+`--sprites` benches chrome painted from a theme's role sheet (phase 6 step
+9): tests/fixtures/themes/sprig.moy, whose sheet sets every cell, is pushed
+onto the board's store and picked, and each scenario runs with its sheet and
+again with the sheet cleared (every part on its surface fallback, the same
+image and theme): `sprite chrome drag` (a window dragged over Settings), a
+Settings scroll drag, cursor motion (a hovering pointer moved a step a
+command) and idle, which must paint zero. A fullscreen tier has no window
+and no cursor: its drag is the Settings scroll. The live theme is put back.
+
+`--painter` times one part three ways on the board, into a scratch layer: a
+`button` painted from a surface (`raised, fill surface, border edge`), the
+same part from the sheet's 9-slice, and a window frame with and without the
+sheet's `window` 9-slice and title buttons -- µs per call, N calls each; then
+the 2026-10 look's shapes under Moy Day (docs/look_2026-10.md step 6): the
+depth's window frame, what it leaves to the desk at each shadow size, a
+card's shadow and the canvas's `rrect` and `shadow` bare.
+
+`--shadows` is step 8's shadow run: on a windowed tier Calc dragged over
+Files under the live theme and under Moy's Day and Night, the dragged
+window casting the theme's shadow, with the idle desk after it; on every
+tier the carousel under the same themes (home idle, the key glide, idle
+after it, a fling), its cards casting their shadows in motion as at rest.
+The live theme is put back.
+
+`--icons` benches the icon home (phase 6 step 11) beside the grid
+arrangement it is drawn from, on the same image and store: each set on the
+console (`ws.set_home_arrangement`, no package), then `home idle`, the slow
+drag and a fling with its frames until idle on the Make tab (the longest
+list on every board), and `tab` (the four tabs, then back). The scenario
+names carry the arrangement (`icon home drag`, `grid home drag`...). The
+layout's own arrangement is put back.
+
+`--kernel` benches the home's scaled-blit kernel (step 7a): one call per card
+size and a synthetic focus-band frame into the canvas the home draws into,
+the shelf's drag frame beside them, and the board's pixels for a fixed set of
+calls against the host binding's.
+
+`--backdrop` benches a theme's backdrop (docs/look_2026-10.md step 7, run at
+step 8) on any board: the package `bench-bd` (the `moy` seed with a home
+backdrop of a dither fill, a translucent disc and a wave beside its desk
+discs) is installed and picked. `backdrop raster` is the C raster alone into
+the bake, timed on the board per surface; `backdrop theme load` and
+`backdrop mode switch` the switch call and the frames it paints, with the
+rasters the switch made; then `home idle` and, on a desk, `desk idle` (both
+paint zero), and the home's drag, fling and held-key glide over the backdrop,
+which raster nothing. The live theme is put back and the package dropped.
+
+`--desk-scale` benches a desk at each render scale (docs/look_2026-10.md
+step 9, run at the phase gate on p4 and guition_p4): at the live theme
+(`render.scale` 1, the desk's native metrics) and under the package
+`bench-x2` (the live theme with `render.scale: 2`, the desk drawn at half
+size and doubled onto the glass), with Settings, Calc and Files open: `desk
+idle, three windows` (paints zero), `window drag (settings)`, and `files
+scroll` (Files on its projects rows, a drag up its list), each named with its
+scale. The live theme is put back and the package dropped.
 Reports per scenario: frame count, median, p90, max (ms) plus the per-Layer
 median split, so the worst offender in a slow frame is named, not guessed.
 """
@@ -18,7 +130,9 @@ median split, so the worst offender in a slow frame is named, not guessed.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from p4_autotest import add_board_args, board_from_args  # noqa: E402
@@ -45,9 +159,12 @@ ws._D = time.ticks_diff
 ws._ft = []
 ws._lt = {}
 ws._recording = False
+ws._force = False
 if not hasattr(ws, '_bench_installed'):
     _of = ws.frame
     def _f(dt, _of=_of):
+        if ws._recording and ws._force:
+            ws.mark_dirty()        # --repaint: every frame paints the surface
         a = ws._T()
         n0 = ws._frames_drawn
         r = _of(dt)
@@ -114,9 +231,10 @@ class Bench:
         self.rows.append(row)
         if st:
             worst = sorted(layers.items(), key=lambda kv: -kv[1])[:3]
-            print("  %-34s n=%-4d median=%-5d p90=%-5d max=%-5d  %s"
+            print("  %-34s n=%-4d median=%-5d p90=%-5d max=%-5d  %s%s"
                   % (name, st["n"], st["median"], st["p90"], st["max"],
-                     " ".join("%s=%d" % (k, v) for k, v in worst)))
+                     " ".join("%s=%d" % (k, v) for k, v in worst),
+                     "  (" + note + ")" if note else ""))
         else:
             print("  %-34s (no frames captured) %s" % (name, note))
         return row
@@ -139,12 +257,669 @@ class Bench:
 
 
 def win_geom(b, key):
-    """(origin_x, origin_y, window-local layout) for an open window."""
+    """(origin_x, origin_y, window-local layout) for an open window; None
+    when it is not open or the tier has no windows (`state` carries no
+    `wins` on a fullscreen tier)."""
     st = b.state()
-    w = st["wins"].get(key)
+    w = st.get("wins", {}).get(key)
     if w is None:
         return None
     return (w[0] + 1, w[1] + 1 + w[4], w)
+
+
+def home(b):
+    """Home, and on a windowed tier the desk: go_home in console mode lands
+    on the fullscreen Library, where an app opens without a window."""
+    pyexec(b, "ws.go_home()"); b.drain(2.0)
+    if b.state().get("desk") is False:
+        pyexec(b, "ws.open_desk()"); b.drain(1.0)
+
+
+def pick_layout(b, bars):
+    """Install `bars` (a JSON list of bar objects) as the package `bench`
+    and pick it; None unpicks it. The pick is a settings row, a flash write:
+    its own short `cmd`, never inside a `pyexec` upload. What the console
+    resolved goes to stdout."""
+    if bars is not None:
+        pkg = json.dumps({"format": 2, "name": "bench",
+                          "layout": {"bars": json.loads(bars)}})
+        pyexec(b, "import moy_ui\nws._bench_rc = moy_ui.theme_install(%r)"
+               % pkg.encode())
+    b.cmd("py ws.system.set('layout_theme', %r) or 1"
+          % ("bench" if bars is not None else None), wait_for="PY")
+    b.cmd("py ws.look.set_theme(ws.look.theme_name, persist=False) or 1",
+          wait_for="PY")
+    b.drain(2.0)
+    print("  layout: %r" % (pyval(b, "ws.look.bars"),))
+
+
+EDIT_SETUP = """
+import json
+ws._edit_base = ws.look.theme_name
+ws._edit_ink = ws.theme_colors['accent']
+def _edit(k):
+    src = json.dumps({'format': 1, 'name': 'bench-edit', 'inherits': ws._edit_base,
+                      'colors': {ws.look.theme_variant: {'accent': (ws._edit_ink + k) % 64}}})
+    if hasattr(ws.look, 'install_theme'):
+        ws._edit_rc = ws.look.install_theme(src.encode())[0]
+    else:
+        ws.look.set_theme(ws.look.theme_name, persist=False)
+        ws._edit_rc = None
+ws._edit = _edit
+"""
+
+
+THRASH_SETUP = """
+import time, moy_ui
+class _TK:
+    last_key = 0
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
+    def pressed(self, n):
+        # the swatches stop at their ends: seven steps right, seven back
+        return n == ('right' if (ws._th_i // 7) % 2 == 0 else 'left')
+ws._th_key = _TK()
+ws._th_app = getattr(ws, 'appearance_app', None)
+if ws._th_app is not None and not hasattr(ws._th_app, 'show_row'):
+    ws._th_app = None
+ws._th_acc = [a for _n, a, _d in moy_ui.theme_accents()]
+ws._th_i = 0
+ws._th_on = False
+ws._th_ms = []
+ws._th_writes = [0, 0]
+ws._th_was = ws.look.theme_name
+_cs = ws.carts_store
+if not hasattr(_cs, '_th_wrapped'):
+    def _count(f, i):
+        def g(*a):
+            ws._th_writes[i] += 1
+            return f(*a)
+        return g
+    _cs.save_package = _count(_cs.save_package, 0)
+    _cs.save_system = _count(_cs.save_system, 1)
+    _cs._th_wrapped = True
+if not hasattr(ws, '_th_frame'):
+    _of = ws.frame
+    def _thr(dt, _of=_of):
+        if ws._th_on:
+            ws._th_i += 1
+            t = time.ticks_us()
+            if ws._th_app is not None:
+                ws._th_app.handle_input(ws._th_key)
+            else:
+                ws.look.change('accent', ws._th_acc[ws._th_i % len(ws._th_acc)])
+            ws._th_ms.append(time.ticks_diff(time.ticks_us(), t) / 1000)
+        return _of(dt)
+    ws.frame = _thr
+    ws._th_frame = True
+"""
+
+
+def edit_thrash(b, bench):
+    """`edit thrash`: a held key on the Appearance page's Accent swatches (the
+    verb on an image without the page), from the live theme (so the first change makes `custom`), the painted frames per
+    change and after release; zero store writes while held, one package
+    write once it settles. Puts the live theme back."""
+    pyexec(b, THRASH_SETUP)
+    if not pyval(b, "hasattr(ws.look, 'change')"):
+        print("  edit thrash: this image has no change verb")
+        return
+    keys = bool(pyval(b, "ws._th_app is not None"))
+    if keys:
+        pyexec(b, "ws.open_app(ws._th_app)\n"
+                  "ws._th_app.show_row('Accent')")
+        b.drain(2.0)
+    print("  edit thrash: %s" % ("the Accent swatches by keys" if keys
+                                 else "the verb (no Appearance page)"))
+    b.drain(1.0)
+    pyexec(b, "ws._th_writes[0] = ws._th_writes[1] = 0")
+    bench.start()
+    pyexec(b, "ws._th_on = True")
+    b.drain(3.0)
+    pyexec(b, "ws._th_on = False")
+    held = pyval(b, "list(ws._th_writes)") or [None, None]
+    n = pyval(b, "ws._th_i")
+    ms = sorted(pyval(b, "ws._th_ms") or [])
+    verb = ms[len(ms) // 2] if ms else None
+    bench.stop("edit thrash (held, %s changes)" % n,
+               "%s median %s ms" % ("key" if keys else "change()",
+                                    None if verb is None else round(verb, 2)))
+    bench.start()
+    b.drain(4.0)
+    bench.stop("edit thrash (after release)")
+    after = pyval(b, "list(ws._th_writes)") or [None, None]
+    ok = held == [0, 0] and after[0] == 1
+    print("  edit thrash: writes held=%r settled=%r (package, system.json) -> %s"
+          % (held, after, "PASS" if ok else "FAIL"))
+    pyexec(b, "ws.look.set_theme(ws._th_was)")
+    if keys:
+        pyexec(b, "if hasattr(ws.wm, 'close_window_kind'): ws.wm.close_window_kind('appearance')\n"
+                  "else: ws.go_home()")
+    b.drain(2.0)
+
+
+def idle_edit(b, bench):
+    """The in-place edit on the screen the board stands on: one repaint, then
+    idle zero. Puts the live theme back after."""
+    pyexec(b, EDIT_SETUP)
+    pyexec(b, "ws._edit(9)\nif ws._edit_rc == 0: ws.look.set_theme('bench-edit', persist=False)")
+    b.drain(2.0)
+    bench.start()
+    pyexec(b, "ws._edit(18)")
+    b.drain(3.0)
+    bench.stop("p4 idle edit", "rc=%r" % (pyval(b, "ws._edit_rc"),))
+    bench.start(); b.drain(3.0); bench.stop("idle after the edit")
+    pyexec(b, "ws.look.set_theme(ws._edit_base, persist=False)\n"
+              "if hasattr(ws.look, 'uninstall_theme'): ws.look.uninstall_theme()")
+    b.drain(2.0)
+
+
+STORE_THEME = "dusk"
+STORE_FIXTURE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / \
+    "themes" / (STORE_THEME + ".moy")
+
+STORE_SETUP = """
+import time, moy_ui
+def _sw(name, cold):
+    look = ws.look
+    if cold:
+        look._pkg_gen = None
+        if name not in moy_ui.themes():
+            moy_ui.theme_uninstall()
+            look._slot_src = None
+        look._packages()
+        import chrome
+        chrome.forget_themes()
+    t = time.ticks_ms()
+    look.set_theme(name, persist=False)
+    ws._sw_ms = time.ticks_diff(time.ticks_ms(), t)
+ws._sw = _sw
+"""
+
+
+def store_switch(b, bench):
+    """A switch to the store package and back to a seed (the live theme
+    when it is one, else the default), each the call and the frames it
+    paints, then both cold (the boot delta); the live theme is put back.
+    The package is on the store already (`push_store_fixture`)."""
+    pyexec(b, STORE_SETUP)
+    was = pyval(b, "ws.look.theme_name")
+    seeds = pyval(b, "__import__('moy_ui').themes()") or ()
+    base = was if was in seeds else seeds[0]
+    pyexec(b, "ws.look.set_theme(%r, persist=False)" % base)
+    names = pyval(b, "ws.look.theme_names()") or ()
+    if STORE_THEME not in names:
+        print("  %s is not on this board's store: %r" % (STORE_THEME, names))
+        return
+    out = {}
+    for label, name, cold in (("switch from store", STORE_THEME, False),
+                              ("switch to a seed", base, False),
+                              ("cold switch from store", STORE_THEME, True),
+                              ("cold switch to a seed", base, True)):
+        b.drain(2.0)
+        bench.start()
+        pyexec(b, "ws._sw(%r, %r)" % (name, cold))
+        b.drain(3.0)
+        ms = pyval(b, "ws._sw_ms")
+        out[label] = ms
+        row = bench.stop(label, "set_theme %s ms" % ms)
+        st = row["stats"]
+        if st:
+            print("    %s: set_theme %s ms + first painted frame <= %d ms"
+                  % (label, ms, st["max"]))
+    if None not in (out["cold switch from store"], out["cold switch to a seed"]):
+        print("  boot delta (store package over a seed): %d ms"
+              % (out["cold switch from store"] - out["cold switch to a seed"]))
+    pyexec(b, "ws.look.set_theme(%r, persist=False)" % was)
+    b.drain(2.0)
+
+
+def push_store_fixture(args):
+    """Put the fixture package on the board's store (push_cart rescans)."""
+    import subprocess
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / "push_cart.py"),
+           str(STORE_FIXTURE), "--board", args.board, "--port", args.port]
+    subprocess.run(cmd, check=True)
+
+
+def bench_store(b, out_path):
+    bench = Bench(b)
+    print("\n=== switch from the store (painted frames) ===")
+    home(b)
+    store_switch(b, bench)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+def bench_edit(b, out_path):
+    bench = Bench(b)
+    print("\n=== in-place theme edit (painted frames) ===")
+    home(b)
+    bench.start(); b.drain(3.0); bench.stop("idle before the edit")
+    idle_edit(b, bench)
+    edit_thrash(b, bench)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+SPRITE_THEME = "sprig"
+SPRITE_FIXTURE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / \
+    "themes" / (SPRITE_THEME + ".moy")
+
+SPRITE_SETUP = """
+import ui
+import ui_draw
+def _sheet(on):
+    ws.look._sheet_key = None
+    ws.look.set_theme(%r, persist=False)
+    if not on:
+        ui_draw.sheet_clear()
+        ws.look.publish()
+    ws.mark_dirty()
+def _hover(x, y):
+    pointer.place(x, y)
+    pointer.hovers = True
+    ws.mark_dirty()
+ws._sheet = _sheet
+ws._hover = _hover
+""" % SPRITE_THEME
+
+
+def sprite_scenarios(b, bench, tag):
+    """The sprite scenarios on the board as it is (its sheet on or off),
+    each a row labelled with `tag`."""
+    windowed = b.state().get("desk") is not None and b.state().get("wins") is not None
+    home(b)
+    b.open("settings"); b.drain(2.0)
+    o = win_geom(b, "settings")
+    if o is not None:
+        pyval(b, "ws.open_app(ws._apps_by_id['calc'])"); b.drain(2.0)
+        bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
+        bench.stop("sprite chrome drag %s" % tag)
+        home(b)
+        b.open("settings"); b.drain(2.0)
+        o = win_geom(b, "settings")
+        lay = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_h")
+        sx = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_x")
+        sw = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_w")
+        sy = pyval(b, "ws.wm._wins['settings'].ctx.layout.set_row_y0")
+        x0, y0 = o[0] + sx + sw // 2, o[1] + sy
+    else:
+        lay = pyval(b, "ws.layout.set_row_h")
+        sx, sw = pyval(b, "ws.layout.set_x"), pyval(b, "ws.layout.set_w")
+        y0 = pyval(b, "ws.layout.set_row_y0")
+        x0 = (sx or 0) + (sw or 0) // 2
+    if lay:
+        y = y0 + 4 * lay
+        bench.start()
+        b.swipe(x0, y, x0, y - 3 * lay, frames=25); b.drain(1.5)
+        bench.stop("settings scroll drag %s" % tag)
+    if windowed and o is not None:
+        bench.start()
+        for k in range(30):
+            pyexec(b, "ws._hover(%d, %d)" % (x0 - 150 + 10 * k, y0 + 2 * k))
+        b.drain(1.0)
+        bench.stop("cursor motion %s" % tag)
+        pyexec(b, "pointer.hovers = False")
+    bench.start(); b.drain(3.0); bench.stop("idle %s" % tag)
+
+
+def bench_sprites(b, out_path):
+    bench = Bench(b)
+    print("\n=== sprites: chrome from a role sheet, and its surface fallback ===")
+    pyexec(b, SPRITE_SETUP)
+    # the `py` scope's pointer, into the namespace the uploads run in
+    b.cmd("py ws._g.__setitem__('pointer', pointer) or 1", wait_for="PY")
+    was = pyval(b, "ws.look.theme_name")
+    if SPRITE_THEME not in (pyval(b, "ws.look.theme_names()") or ()):
+        print("  %s is not on this board's store" % SPRITE_THEME)
+        return bench
+    for on, tag in ((True, "[sheet]"), (False, "[surfaces]")):
+        pyexec(b, "ws._sheet(%r)" % on); b.drain(2.0)
+        print("  cells set: %r" % (pyval(b, "sum(__import__('moy_ui').sheet_set())"),))
+        sprite_scenarios(b, bench, tag)
+    pyexec(b, "ws.look._sheet_key = None\nws.look.set_theme(%r, persist=False)" % was)
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+PAINTER_BENCH = """
+import time, ui, ui_draw, moy_ui, chrome
+def _pb(n, sheet):
+    cv = (ws.sys_canvas or ws.canvas).new_layer(240, 120)
+    try:
+        assert moy_ui.theme_install(%r)[0] == 0
+        ui_draw.use_shape('bench-spr')
+        th = chrome.theme_colors('bench-spr')
+        out = {}
+        for label, on in (('surface', False), ('sprite', True)):
+            if on:
+                assert ui_draw.sheet_load(sheet) == 0
+            else:
+                ui_draw.sheet_clear()
+            t = time.ticks_us()
+            for _i in range(n):
+                ui_draw.paint(cv, th, (8, 8, 96, 32), 'button')
+            out['button ' + label] = time.ticks_diff(time.ticks_us(), t) // n
+            t = time.ticks_us()
+            for _i in range(n):
+                ui_draw.frame(cv, th, (2, 2, 230, 110), 14, 'BENCH', True, True, 1)
+            out['frame ' + label] = time.ticks_diff(time.ticks_us(), t) // n
+        return out
+    finally:
+        cv.release()
+        chrome.forget_themes()
+        ws.look._sheet_key = None
+        ws.look.set_theme(ws.look.theme_name, persist=False)
+        ws.mark_dirty()
+""" % (json.dumps({"format": 2, "name": "bench-spr", "surfaces": {
+    "button": {"rest": "raised, fill surface, border edge"}}}).encode(),)
+
+
+# The 2026-10 look's shapes (docs/look_2026-10.md step 6) under Moy Day: a
+# window frame drawn by the depth and what it leaves to the desk (its shadow
+# at each size and its fringe), a card's shadow, and the canvas verbs bare.
+SHAPES_BENCH = """
+import time, ui, ui_draw
+def _ps(n):
+    cv = (ws.sys_canvas or ws.canvas).new_layer(320, 200)
+    th = ws.theme_colors
+    try:
+        ui_draw.use_shape('moy')
+        ui_draw.use_depth('moy', True)
+        out = {}
+        def t(label, fn):
+            fn()
+            t0 = time.ticks_us()
+            for _i in range(n):
+                fn()
+            out[label] = time.ticks_diff(time.ticks_us(), t0) // n
+        r = (40, 30, 230, 140)
+        t('frame (depth)', lambda: ui_draw.frame(cv, th, r, 18, 'BENCH', True, True, 1))
+        for name, mode in (('full', 0), ('small', 1), ('none', 2)):
+            t('frame_under ' + name, lambda: ui_draw.frame_under(cv, th, r, 18, True, mode))
+        t('cast card 96x96', lambda: ui_draw.cast(cv, th, (60, 40, 96, 96), 1))
+        t('rrect 230x140 r12', lambda: cv.rrect(40, 30, 230, 140, 12, 7))
+        t('rrect ring 230x140 r12', lambda: cv.rrect(40, 30, 230, 140, 12, None, ring=0))
+        t('rrect smooth paint 230x140', lambda: cv.rrect(40, 30, 230, 140, 12,
+                                                       (0, 0, ((0, 7), (1000, 1)))))
+        t('shadow 230x140 blur16', lambda: cv.shadow(40, 30, 230, 140, 12, 0, 46, 16, 0, 8,
+                                                   hole=(40, 30, 230, 140, 12)))
+        return out
+    finally:
+        cv.release()
+        ws.look.set_theme(ws.look.theme_name, persist=False)
+        ws.mark_dirty()
+"""
+
+
+def bench_painter(b, out_path, n=50):
+    """µs per call of a part painted from its surface and from the sheet,
+    of a window frame without and with the sheet's 9-slice, and of the
+    look's shapes (SHAPES_BENCH)."""
+    sheet = (SPRITE_FIXTURE / "parts.moygfx").read_bytes()
+    pyexec(b, "_PB_SHEET = %r\n" % sheet + PAINTER_BENCH)
+    pyexec(b, "ws._pbr = None\nws._pbr = _pb(%d, _PB_SHEET)" % n, timeout=120)
+    r = pyval(b, "ws._pbr", timeout=30)
+    b.drain(1.0)
+    if not r:
+        print("  painter bench: no answer")
+        return None
+    lines = ["| part | surface us/call | sprite us/call |", "|---|---|---|",
+             "| button 96x32 (9-slice) | %d | %d |" % (r["button surface"], r["button sprite"]),
+             "| window frame 230x110 (9-slice + 3 title buttons) | %d | %d |"
+             % (r["frame surface"], r["frame sprite"])]
+    pyexec(b, SHAPES_BENCH)
+    pyexec(b, "ws._psr = None\nws._psr = _ps(%d)" % n, timeout=120)
+    sh = pyval(b, "ws._psr", timeout=30)
+    b.drain(1.0)
+    if sh:
+        lines += ["", "| shape (Moy Day) | us/call |", "|---|---|"]
+        lines += ["| %s | %d |" % (k, sh[k]) for k in sorted(sh)]
+    text = "\n".join(lines)
+    print(text)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(text + "\n")
+    return r
+
+
+def _set_moy(b, variant):
+    pyexec(b, "ws.look.set_theme('moy', persist=False, variant=%r)\nws.mark_dirty()"
+           % variant)
+    b.drain(2.0)
+
+
+def bench_shadows(b, out_path):
+    """Step 8's shadow scenarios (docs/look_2026-10.md): on a windowed tier
+    a window dragged over the desk beside a still one, under the live theme
+    and under Moy's Day and Night, with the desk idle after, which paints
+    zero; on every tier the home's carousel under the same themes: idle, the
+    key glide (every frame casts the cards' shadows), idle after it and a
+    fling. The live theme is put back."""
+    bench = Bench(b)
+    pyexec(b, HOME_KEY)
+    was = pyval(b, "(ws.look.theme_name, ws.look.theme_variant)")
+    windowed = bool(pyval(b, "hasattr(ws.wm, '_draw_unders')"))
+    themes = [("live", None), ("moy day", "light"), ("moy night", "dark")]
+    for tag, variant in themes:
+        if variant is not None:
+            _set_moy(b, variant)
+        if windowed:
+            home(b)
+            for app in ("files", "calc"):
+                pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % app)
+                b.drain(2.5)
+            bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30)
+            b.drain(1.0)
+            bench.stop("window drag (calc over files), %s" % tag)
+            bench.start(); b.drain(2.0)
+            bench.stop("desk idle after it, %s" % tag)
+        pyexec(b, "ws.open_library()"); b.drain(6.0)
+        bench.start(); b.drain(2.0); bench.stop("home idle, %s" % tag)
+        pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")
+        b.drain(1.5)
+        bench.start()
+        for _k in range(12):
+            b.cmd("py ws._hk('right') or 1", wait_for="PY")
+            b.drain(0.12)
+        b.drain(2.0)
+        bench.stop("held-key glide (12 presses right), %s" % tag)
+        bench.start(); b.drain(2.0); bench.stop("idle after the glide, %s" % tag)
+        band = pyval(b, "ws.launcher.band_rect()")
+        if band:
+            bx, by, bw, bh = band
+            cy = by + bh // 2
+            b.swipe(bx + bw * 3 // 4, cy, bx + bw // 4, cy, frames=5)
+            bench.start(); b.drain(4.0)
+            bench.stop("fling: frames until idle, %s" % tag)
+        home(b)
+    if was:
+        pyexec(b, "ws.look.set_theme(%r, persist=False, variant=%r)\nws.mark_dirty()"
+               % (was[0], was[1]))
+        b.drain(1.5)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+def push_sprite_fixture(args):
+    import subprocess
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / "push_cart.py"),
+           str(SPRITE_FIXTURE), "--board", args.board, "--port", args.port]
+    subprocess.run(cmd, check=True)
+
+
+BACKDROP_HOME = [
+    {"k": "fill", "p": ["#1d2b53", "#1d2b53", "#7e2553"], "mode": "dither"},
+    {"k": "circle", "at": [500, 470, 520], "p": "#ffe066", "a": 0.35},
+    {"k": "wave", "at": [[0, 760], [300, 700], [650, 780], [1000, 720]],
+     "p": ["#6252bd", "#43389c"]},
+]
+BACKDROP_PKG = json.dumps({"format": 2, "name": "bench-bd", "inherits": "moy",
+                           "look": {"backdrop": {"home": BACKDROP_HOME}}}).encode()
+
+BACKDROP_SETUP = """
+import time, moy_ui
+ws._bd_was = (ws.look.theme_name, ws.look.theme_variant)
+ws._bd_rc = ws.look.install_theme(%r)
+def _bd_raster(surface, n=3):
+    wp = ws.wallpaper
+    cv = ws.sys_canvas
+    rec = ws.look.backdrop(surface)
+    img = wp._bd_img
+    if not rec or img is None:
+        return None
+    bg = ws.theme_colors['desktop']
+    t = time.ticks_us()
+    for _i in range(n):
+        cv.backdrop(rec, bg, img)
+    us = time.ticks_diff(time.ticks_us(), t) // n
+    wp._bd_key = None
+    return (len(rec), us)
+def _bd_switch(name=None, variant=None):
+    r0 = ws.wallpaper.rasters
+    t = time.ticks_us()
+    if name is not None:
+        ws.look.set_theme(name, persist=False, variant=variant)
+    else:
+        ws.look.set_theme_variant(variant, persist=False)
+    ws._bd_call = time.ticks_diff(time.ticks_us(), t) // 1000
+    ws._bd_r0 = r0
+ws._bd_raster = _bd_raster
+ws._bd_switch = _bd_switch
+""" % (BACKDROP_PKG,)
+
+
+def bench_backdrop(b, out_path):
+    """A theme's backdrop (step 7, measured at step 8): its raster, the
+    switches that make one, and the home and desk over it."""
+    bench = Bench(b)
+    print("\n=== backdrop: the raster, the switches, the home and desk over it ===")
+    pyexec(b, BACKDROP_SETUP)
+    pyexec(b, HOME_KEY)
+    print("  install: %r" % (pyval(b, "ws._bd_rc"),))
+    desk = bool(pyval(b, "ws.wm is not None and ws.wm.mode == 'desk'"))
+    rows = []
+
+    def switch(label, code):
+        bench.start()
+        pyexec(b, code); b.drain(3.0)
+        made = pyval(b, "ws.wallpaper.rasters - ws._bd_r0")
+        bench.stop(label, "call %sms, rasters %s" % (pyval(b, "ws._bd_call"), made))
+
+    home(b)
+    switch("backdrop theme load", "ws._bd_switch('bench-bd', 'light')")
+    for variant in ("dark", "light"):
+        switch("backdrop mode switch (%s)" % variant, "ws._bd_switch(None, %r)" % variant)
+    if desk:
+        bench.start(); b.drain(3.0); bench.stop("desk idle over the backdrop")
+        rows.append(("desk", pyval(b, "ws._bd_raster('desk')", timeout=60)))
+    pyexec(b, "ws.open_library()"); b.drain(4.0)
+    rows.append(("home", pyval(b, "ws._bd_raster('home')", timeout=60)))
+    b.drain(2.0)
+    bench.start(); b.drain(3.0); bench.stop("home idle over the backdrop")
+    r0 = pyval(b, "ws.wallpaper.rasters")
+    bx, by, bw, bh = pyval(b, "ws.launcher.band_rect()")
+    cy = by + bh // 2
+    bench.start()
+    b.swipe(bx + bw - 20, cy, bx + 20, cy, frames=40); b.drain(3.0)
+    bench.stop("home drag over the backdrop")
+    b.swipe(bx + bw * 3 // 4, cy, bx + bw // 4, cy, frames=5)
+    bench.start(); b.drain(4.0)
+    bench.stop("home fling over the backdrop: frames until idle")
+    bench.start()
+    for _k in range(12):
+        b.cmd("py ws._hk('right') or 1", wait_for="PY")
+        b.drain(0.12)
+    b.drain(2.0)
+    bench.stop("home glide over the backdrop (12 presses right)",
+               "rasters %s" % (pyval(b, "ws.wallpaper.rasters") - r0))
+    pyexec(b, "ws.look.set_theme(ws._bd_was[0], persist=False, variant=ws._bd_was[1])\n"
+              "ws.look.uninstall_theme()")
+    home(b)
+    lines = ["| surface | records (bytes) | raster us |", "|---|---|---|"]
+    for surface, got in rows:
+        lines.append("| %s | %s | %s |" % ((surface,) + (tuple(got) if got else ("-", "-"))))
+    table = bench.table() + "\n\n" + "\n".join(lines)
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+DESK_X2 = """
+import json
+ws._dx_was = (ws.look.theme_name, ws.look.theme_variant)
+ws._dx_rc = ws.look.install_theme(json.dumps({"format": 2, "name": "bench-x2",
+    "inherits": ws._dx_was[0], "look": {"render": {"scale": 2}}}).encode())
+"""
+
+
+def bench_desk_scale(b, out_path):
+    """The desk at render scale 1 and 2 (step 9): three windows idle, a
+    window drag and a Files scroll at each."""
+    bench = Bench(b)
+    print("\n=== the desk at render scale 1 and 2 ===")
+    pyexec(b, DESK_X2)
+    print("  install: %r" % (pyval(b, "ws._dx_rc"),))
+    for scale in (1, 2):
+        if scale == 2:
+            pyexec(b, "ws.look.set_theme('bench-x2', persist=False, "
+                      "variant=ws._dx_was[1])")
+        r = pyval(b, "ws.render_scale") or 1
+        tag = "%dx" % r
+        home(b)
+        pyexec(b, "ws.open_app(ws._apps_by_id['files'])\n"
+                  "ws.open_app(ws._apps_by_id['calc'])\n"
+                  "ws.open_settings()")
+        b.drain(4.0)
+        bench.start(); b.drain(3.0); bench.stop("desk idle, three windows, " + tag)
+        bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
+        bench.stop("window drag (settings), " + tag)
+        pyexec(b, "ws.open_app(ws._apps_by_id['files'])\n"
+                  "ws._apps_by_id['files'].open_place('projects')")
+        b.drain(2.0)
+        o = win_geom(b, "files")
+        # the projects' table: its rows scroll under a drag in the list rect
+        rows = pyval(b, "ws._apps_by_id['files'].layout.list"
+                        " if 'files' in ws.wm._wins else None")
+        if o and rows:
+            cx = (o[0] + rows[0] + rows[2] // 2) * r
+            y0 = (o[1] + rows[1] + rows[3] * 3 // 4) * r
+            y1 = (o[1] + rows[1] + rows[3] // 4) * r
+            bench.start()
+            b.swipe(cx, y0, cx, y1, frames=25); b.drain(1.5)
+            bench.stop("files scroll, " + tag)
+        else:
+            print("  %-34s (no Files rows on this image)" % ("files scroll, " + tag))
+    pyexec(b, "ws.look.set_theme(ws._dx_was[0], persist=False, variant=ws._dx_was[1])\n"
+              "ws.look.uninstall_theme()")
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
 
 
 def bench_all(b, out_path):
@@ -152,23 +927,27 @@ def bench_all(b, out_path):
     print("\n=== P4 panel benchmark (end-to-end frame ms) ===")
 
     # -- desk ---------------------------------------------------------------
+    home(b)
     bench.start(); b.drain(3.0); bench.stop("desk idle")
+    idle_edit(b, bench)
+    edit_thrash(b, bench)
+    store_switch(b, bench)
 
-    # -- picker (PROJECTS) --------------------------------------------------
-    b.open("picker"); b.drain(1.0)
-    bench.start(); b.drain(12.0); bench.stop("picker open+settle")
-    g = pyval(b, "ws.wm._wins['make'].ctx.layout.lib_grid")
-    o = win_geom(b, "make")
+    # -- the desk's PROJECTS: the home in a window, on Make -----------------
+    b.open("projects"); b.drain(1.0)
+    bench.start(); b.drain(12.0); bench.stop("projects window open+settle")
+    g = pyval(b, "ws.wm._wins['projects'].ctx.layout.lib_grid")
+    o = win_geom(b, "projects")
     if g and o:
         gx, gy, gw, gh = g
         cy = o[1] + gy + gh // 2
         bench.start()
         b.swipe(o[0] + gx + gw - 40, cy, o[0] + gx + 60, cy, frames=30)
         b.drain(2.0)
-        bench.stop("picker drag-scroll")
+        bench.stop("projects window drag-scroll")
         bench.start()
         b.tap(o[0] + gx + 120, cy, settle=0.2); b.drain(2.5)
-        bench.stop("picker tap card (opens Editor)")
+        bench.stop("projects window tap card (opens Editor)")
 
     # -- editor tabs --------------------------------------------------------
     if pyval(b, "ws.screen") == "menu":
@@ -178,7 +957,7 @@ def bench_all(b, out_path):
             b.drain(2.0)
             bench.stop("editor tab: %s" % tab)
         bench.start(); b.drain(3.0); bench.stop("editor idle (blocks)")
-        pyexec(b, "ws.open_picker()"); b.drain(2.0)
+        pyexec(b, "ws.open_projects()"); b.drain(2.0)
 
     # -- settings -----------------------------------------------------------
     b.open("settings"); b.drain(2.0)
@@ -218,10 +997,16 @@ def bench_all(b, out_path):
             w = st["wins"][key[-1]]
             ox, oy = w[0] + 1, w[1] + 1 + w[4]
             cx, cy = ox + w[2] // 2, oy + (w[3] - w[4]) // 2
-            bench.start()
-            b.swipe(cx + 150, cy, cx - 150, cy, frames=20); b.drain(1.5)
-            bench.stop("app drag: %s" % app)
-        pyexec(b, "ws.go_home()"); b.drain(2.0)
+            if app != "artwork":    # a drag over Paint is a stroke: an edit
+                bench.start()
+                b.swipe(cx + 150, cy, cx - 150, cy, frames=20); b.drain(1.5)
+                bench.stop("app drag: %s" % app)
+            # the app's own window by its title strip: its frame, outline
+            # and shadow repainted at every step
+            bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30)
+            b.drain(1.0)
+            bench.stop("window drag: %s" % app)
+        home(b)
 
     # -- fullscreen Library (the smooth reference) --------------------------
     pyexec(b, "ws.open_library()"); b.drain(12.0)
@@ -234,6 +1019,36 @@ def bench_all(b, out_path):
         b.swipe(bx + bw - 40, cy, bx + 60, cy, frames=30); b.drain(2.0)
         bench.stop("library drag-scroll  [reference]")
 
+    # -- console mode (docs/shell_layout_2026-10.md §3): the switch's spikes,
+    # read as the rows' max (the single-frame maximum) --------------------
+    home(b)
+    pyexec(b, "ws.open_settings()\n"
+              "ws.open_app(ws._apps_by_id['calc'])\n"
+              "ws.open_app(ws._apps_by_id['files'])")
+    b.drain(4.0)
+    bench.start(); pyexec(b, "ws.defer(ws.open_library)"); b.drain(4.0)
+    bench.stop("PLAY, three windows parked")
+    bench.start(); pyexec(b, "ws.defer(ws.open_desk)"); b.drain(4.0)
+    bench.stop("X, three windows back")
+    pyexec(b, "ws.open_library()"); b.drain(3.0)
+    pyexec(b, "ws.wm.release_cache()")
+    bench.start(); pyexec(b, "ws.defer(ws.open_desk)"); b.drain(4.0)
+    bench.stop("X, one stamp released")
+    # A live wallpaper behind the parked desk: the home's own backdrop is the
+    # only one that may animate.
+    live = pyval(b, "[ws.look.wp_id_for(c) for c in ws.look.wallpaper_carts()]") or []
+    was = pyval(b, "ws.look.wallpaper_id")
+    for wp in live:
+        pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % wp)
+        if pyval(b, "ws.wallpaper.is_animating(0.03)"):
+            pyexec(b, "ws.open_library()"); b.drain(3.0)
+            bench.start(); b.drain(3.0)
+            bench.stop("library idle, live wallpaper %s (desk parked)" % wp)
+            pyexec(b, "ws.open_desk()"); b.drain(1.0)
+            break
+    pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % was)
+    home(b)
+
     table = bench.table()
     print("\n" + table)
     if out_path:
@@ -243,16 +1058,553 @@ def bench_all(b, out_path):
         print("\nwrote %s" % out_path)
     return bench
 
+KEY = """
+class _PK:
+    last_key = 0
+    def __init__(self, n):
+        self.n = n
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
+    def pressed(self, n):
+        return n == self.n
+def _pk(n):
+    ws._sysmenu_layer.handle_input(_PK(n))
+    if not getattr(ws.wm, 'popover_takes_keys', lambda: False)():
+        ws.mark_dirty()
+ws._pk = _pk
+"""
+
+
+MINUTE = """
+ws._bl = ws.bar_layer
+ws._bl._clock_text = lambda: '12:00'
+ws._rn = [0]
+def _rc(cv, key, i=0, _or=ws._bl._render_cart_bar):
+    ws._rn[0] += 1
+    return _or(cv, key, i)
+ws._bl._render_cart_bar = _rc
+"""
+
+
+def widget_cell(b, name):
+    """The screen centre of the bar widget `name`'s cell, or None."""
+    bars = pyval(b, "[(x[1], [(c[0], c[1]) for c in x[3]]) for x in ws.layout.bars]")
+    for rect, cells in bars or ():
+        for n, (x, y, w, h) in cells:
+            if n == name:
+                return rect[0] + x + w // 2, rect[1] + y + h // 2
+    return None
+
+
+def popover_rows(b, bench, where):
+    for widget, key in (("menu", "down"), ("clock", "right"), ("battery", "down")):
+        xy = widget_cell(b, widget)
+        if xy is None:
+            print("  %-34s (not on this layout)" % ("popover: " + widget))
+            continue
+        tag = "%s, %s" % (widget, where)
+        bench.start(); b.tap(*xy, settle=0.2); b.drain(1.5)
+        bench.stop("popover open: " + tag)
+        if not pyval(b, "ws.sysmenu.open"):
+            print("  %-34s (opens no popover on this image)" % tag)
+            continue
+        bench.start()
+        for _ in range(4):
+            pyexec(b, "ws._pk(%r)" % key); b.drain(0.4)
+        b.drain(1.0)
+        bench.stop("popover navigate x4: " + tag)
+        bench.start(); b.drain(3.0); bench.stop("popover idle: " + tag)
+        bench.start(); b.tap(*xy, settle=0.2); b.drain(1.5)
+        bench.stop("popover close: " + tag)
+
+
+def bench_popovers(b, out_path):
+    bench = Bench(b)
+    pyexec(b, KEY)
+    print("\n=== popover benchmark (end-to-end frame ms) ===")
+    home(b)
+    pyexec(b, "ws.open_settings()\n"
+              "ws.open_app(ws._apps_by_id['calc'])\n"
+              "ws.open_app(ws._apps_by_id['files'])")
+    b.drain(4.0)
+    bench.start(); b.drain(3.0); bench.stop("desk idle, three windows")
+    popover_rows(b, bench, "over windows")
+    bench.start(); b.cmd("drag 60 6"); b.wait_line("drag done", 30); b.drain(1.0)
+    bench.stop("window drag (files)  [reference]")
+    # a playtest beside them: the quiet stack is the reference
+    pyexec(b, "ws.launcher.sel = [i for i, c in enumerate(ws.launcher.items) "
+              "if c.get('title') == 'Star Catcher'][0]\nws.open()")
+    b.drain(4.0)
+    bench.start(); b.drain(3.0); bench.stop("playtest alone  [reference]")
+    popover_rows(b, bench, "over playtest")
+    pyexec(b, "ws.wm.close_window_kind('desktop')"); b.drain(2.0)
+    # a minute boundary: the next painted frame re-renders the clock's strip
+    # and nothing else's
+    pyexec(b, MINUTE)
+    b.drain(1.0)
+    bench.start(); pyexec(b, "ws._rn[0] = 0\nws.mark_dirty()"); b.drain(1.0)
+    bench.stop("dirty frame, same minute")
+    same = pyval(b, "ws._rn[0]")
+    bench.start()
+    pyexec(b, "ws._rn[0] = 0\nws._bl._clock_text = lambda: '12:01'\nws.mark_dirty()")
+    b.drain(1.0)
+    bench.stop("minute boundary frame")
+    tick = pyval(b, "ws._rn[0]")
+    print("  strip renders: same minute %s, minute boundary %s" % (same, tick))
+    bench.rows[-1]["note"] = "strip renders %s" % tick
+    pyexec(b, "del ws._bl._render_cart_bar\ndel ws._bl._clock_text")
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+def bench_repaint(b, surfaces, seconds, out_path):
+    """The widget A/B (docs/kernel_toolkit_2026-10.md §10): each surface open
+    and repainted EVERY frame for `seconds`, painted-frame ms. Board-neutral,
+    so the S3s take it with the P4s."""
+    bench = Bench(b)
+    print("\n=== repaint benchmark (painted-frame ms) ===")
+    home(b)
+    for name in surfaces:
+        if name == "settings":
+            b.open("settings")
+        elif name.startswith("editor:"):
+            # an Editor tab on Star Catcher, as the shell goldens open it
+            pyexec(b, "ws.open_in_editor([c for c in ws.carts.all "
+                      "if c.get('title') == 'Star Catcher'][0])\n"
+                      "ws.set_menu_view('%s')" % name[7:])
+        elif not pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % name):
+            print("  %-34s (app not available)" % name)
+            continue
+        b.drain(2.5)
+        bench.start(); b.drain(3.0); bench.stop("idle: %s" % name)
+        b.cmd("py setattr(ws, '_force', True) or 1", wait_for="PY")
+        bench.start(); b.drain(seconds); bench.stop("repaint: %s" % name)
+        b.cmd("py setattr(ws, '_force', False) or 1", wait_for="PY")
+        home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+# -- --kernel: the home's scaled-blit kernel (docs/shell_layout_2026-10.md
+# section 12, step 7a) ---------------------------------------------------------
+
+# The scales a card is benched at, relative to the cover's size on today's
+# card: 1.0 is the outer cards, the rest bracket the centre card's.
+KERNEL_SCALES = (1.0, 1.25, 1.5, 2.0)
+
+# The cases the board must answer with the host's pixels: (dx, dy, tw, th,
+# sw, sh), into a 64 x 40 target, each hashed after the call.
+KERNEL_PIXEL_CASES = ((0, 0, 40, 24, 13, 9), (-7, -5, 50, 40, 16, 16),
+                      (1, 2, 12, 7, 31, 23), (5, 4, 25, 25, 20, 20),
+                      (30, 20, 50, 50, 7, 5), (-60, 0, 61, 40, 9, 9))
+
+KERNEL_PIXELS = """
+def _kb_pixels(gfx, cases):
+    out = []
+    for dx, dy, tw, th, sw, sh in cases:
+        src = bytearray(sw * sh * 2)
+        for i in range(sw * sh):
+            v = (i * 40503 + 7) & 0xFFFF
+            src[2 * i] = v & 0xFF
+            src[2 * i + 1] = v >> 8
+        dst = bytearray(64 * 40 * 2)
+        gfx.blit565_resize(dst, 64, 40, dx, dy, tw, th, src, sw, sh)
+        h = 0
+        for b in dst:
+            h = (h * 31 + b) & 0xFFFFFFFF
+        out.append(h)
+    return out
+"""
+
+KERNEL_BENCH = """
+import gc, time, moy_gfx
+import launcher_layer as _ll
+_T, _D = time.ticks_us, time.ticks_diff
+
+def _kb_med(f, n=15):
+    ts = []
+    for _ in range(n):
+        a = _T()
+        f()
+        ts.append(_D(_T(), a))
+    ts.sort()
+    return ts[len(ts) // 2]
+
+def _kb_run(scales):
+    cv = ws.sys_canvas            # the home's canvas; ws.canvas is the game's
+    buf, W, H = cv._buf, cv._stride, cv.h
+    lay = ws.launcher.layout
+    fs = lay.fs
+    band_h = max(14 * fs, 20)
+    cw, ch = lay.lib_card_w, lay.lib_card_h
+    art = ch - band_h
+    side = _ll._COVER_SIDE if _ll._cover_scale(_ll._COVER_SIDE, cw, art) \\
+        else _ll._COVER_SIDE // 2
+    s = max(1, _ll._cover_scale(side, cw, art))
+    base = side * s
+    src = None
+    for img in ws.covers._cache.values():
+        if img is not None and img.w == side and img.h == side:
+            src = img.pix
+            break
+    real = src is not None
+    if src is None:
+        src = bytearray(side * side * 2)
+        for i in range(0, len(src), 2):
+            src[i] = i & 0xFF
+            src[i + 1] = (i >> 7) & 0xFF
+    bx, by, bw, bh = ws.launcher.band_rect()
+    pitch = lay.lib_step
+    if bx < 0 or by < 0 or bx + bw > W or by + bh > H:
+        raise ValueError("the band %r is off the %dx%d canvas" % ((bx, by, bw, bh), W, H))
+    gc.collect()
+    r = {"canvas": (W, H), "card": (cw, ch), "pitch": pitch,
+         "band_rect": (bx, by, bw, bh), "bake": side, "cover_scale": s,
+         "base": base, "real_cover": real}
+    # today's draw of one cover: blit565 at 1x, blit565_scale above it
+    if s == 1:
+        r["today_us"] = _kb_med(lambda: moy_gfx.blit565(
+            buf, W, H, bx, by, src, side, side, -1, bx, by, bx + bw, by + bh))
+    else:
+        r["today_us"] = _kb_med(lambda: moy_gfx.blit565_scale(
+            buf, W, H, bx, by, src, side, side, s))
+    cy = by + bh // 2
+    cards = []
+    for k in scales:
+        t = int(base * k + 0.5)
+        x, y = bx + bw // 2 - t // 2, cy - t // 2
+        us = _kb_med(lambda: moy_gfx.blit565_resize(
+            buf, W, H, x, y, t, t, src, side, side, bx, by, bx + bw, by + bh))
+        vis = (min(x + t, bx + bw) - max(x, bx)) * (min(y + t, by + bh) - max(y, by))
+        cards.append((k, t, vis, us))
+    r["cards"] = cards
+    # the moving frame at each centre scale (docs/shell_layout_2026-10.md
+    # section 12): the focus band -- the centre +- 1.5 pitches -- cleared, the
+    # centre card at k and its two neighbours at 1.0 (the most the three
+    # cards cover), each with its title band, the centre's outline and pill;
+    # and the outer rects either side of it shifted by #113's scroll-as-blit
+    mid = bx + bw // 2
+    fx0 = max(bx, mid - 3 * pitch // 2)
+    fx1 = min(bx + bw, mid + 3 * pitch // 2)
+    r["focus"] = (fx0, by, fx1 - fx0, bh)
+    clear = _kb_med(lambda: moy_gfx.fill_rect(buf, W, fx0, by, fx1 - fx0, bh,
+                                              0x2104))
+    def shift():
+        if fx0 > bx:
+            moy_gfx.scroll_rect(buf, W, bx, by, fx0 - bx, bh, 8, 0)
+        if bx + bw > fx1:
+            moy_gfx.scroll_rect(buf, W, fx1, by, bx + bw - fx1, bh, 8, 0)
+    sh = _kb_med(shift)
+    band = []
+    for k in scales:
+        t = int(base * k + 0.5)
+        def frame(t=t):
+            moy_gfx.fill_rect(buf, W, fx0, by, fx1 - fx0, bh, 0x2104)
+            for i, tt in ((-1, base), (1, base), (0, t)):
+                x = mid + i * pitch - tt // 2
+                y = cy - tt // 2
+                moy_gfx.blit565_resize(buf, W, H, x, y, tt, tt, src, side,
+                                       side, fx0, by, fx1, by + bh)
+                x0, x1 = max(x, fx0), min(x + tt, fx1)
+                if x1 > x0:
+                    moy_gfx.fill_rect(buf, W, x0, min(y + tt, by + bh - band_h),
+                                      x1 - x0, band_h, 0)
+            x = mid - t // 2
+            y = cy - t // 2
+            y0, y1 = max(y, by), min(y + t, by + bh)
+            x0, x1 = max(x, fx0), min(x + t, fx1)
+            o = 2 * fs
+            moy_gfx.fill_rect(buf, W, x0, y0, x1 - x0, o, 0xFFFF)
+            moy_gfx.fill_rect(buf, W, x0, y1 - o, x1 - x0, o, 0xFFFF)
+            moy_gfx.fill_rect(buf, W, x0, y0, o, y1 - y0, 0xFFFF)
+            moy_gfx.fill_rect(buf, W, x1 - o, y0, o, y1 - y0, 0xFFFF)
+            moy_gfx.fill_rect(buf, W, mid - t // 4, y0 + 4 * fs, t // 2,
+                              10 * fs, 0x07E0)
+        band.append((k, clear, _kb_med(frame), sh))
+    r["band"] = band
+    return r
+"""
+
+
+def bench_kernel(b, out_path):
+    """The step-7a micro-bench: the scaled-blit kernel per call at the card
+    sizes the home draws, and a synthetic focus-band frame, into the canvas
+    the home draws into, beside the shelf's drag frame today; and the board's
+    pixels against the host's for the same calls."""
+    sys.path.insert(0, __file__.rsplit("/", 2)[0])
+    from runtime import gfx_binding
+    ns = {}
+    exec(KERNEL_PIXELS, ns)                    # noqa: S102 -- fixed text
+    host = ns["_kb_pixels"](gfx_binding, KERNEL_PIXEL_CASES)
+    pyexec(b, KERNEL_PIXELS + "import moy_gfx\n"
+              "ws._kbp = _kb_pixels(moy_gfx, %r)" % (KERNEL_PIXEL_CASES,))
+    dev = pyval(b, "ws._kbp")
+    print("  pixels: %s" % ("board == host" if dev == host
+                             else "DIFFER board %r host %r" % (dev, host)))
+    bench = Bench(b)
+    home(b)
+    pyexec(b, "ws.open_library()"); b.drain(8.0)
+    band = pyval(b, "ws.launcher.band_rect()")
+    if band:
+        bx, by, bw, bh = band
+        cy = by + bh // 2
+        bench.start()
+        b.swipe(bx + bw - 40, cy, bx + 60, cy, frames=30); b.drain(2.0)
+        bench.stop("library drag-scroll")
+    pyexec(b, KERNEL_BENCH)
+    # two lines: a one-line upload is evaluated as an expression
+    pyexec(b, "ws._kb = None\nws._kb = _kb_run(%r)" % (KERNEL_SCALES,),
+           timeout=120)
+    r = pyval(b, "ws._kb", timeout=30)
+    pyexec(b, "ws.mark_dirty()"); b.drain(1.0)
+    if not r:
+        print("  kernel bench: no answer")
+        return None
+    lines = ["canvas %dx%d, card %dx%d, pitch %d, band %r; cover bake %d^2 "
+             "drawn at %dx = %d px (%s); today's cover draw %d us"
+             % (r["canvas"] + r["card"] + (r["pitch"], r["band_rect"], r["bake"],
+                r["cover_scale"], r["base"],
+                "a real cover" if r["real_cover"] else "synthetic",
+                r["today_us"])),
+             "",
+             "| scale | card px | visible px | blit565_resize us | ns/px |",
+             "|---|---|---|---|---|"]
+    for k, t, vis, us in r["cards"]:
+        lines.append("| %.2f | %d^2 | %d | %d | %.1f |"
+                     % (k, t, vis, us, 1000.0 * us / max(1, vis)))
+    lines += ["", "focus band %r" % (r["focus"],), "",
+              "| centre scale | band clear us | focus band frame us (clear + "
+              "3 cards + fills) | outer shift us | moving frame us |",
+              "|---|---|---|---|---|"]
+    for k, clear, us, sh in r["band"]:
+        lines.append("| %.2f | %d | %d | %d | %d |"
+                     % (k, clear, us, sh, us + sh))
+    lines += ["", bench.table()]
+    text = "\n".join(lines)
+    print(text)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(text + "\n")
+    return r
+
+
+HOME_KEY = """
+class _PK:
+    last_key = 0
+    def __init__(self, n):
+        self.n = n
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
+    def pressed(self, n):
+        return n == self.n
+def _hk(n):
+    ws.launcher_layer.handle_input(_PK(n))
+    ws.mark_dirty()
+ws._hk = _hk
+"""
+
+
+def bench_home(b, out_path):
+    """The home's scenarios (step 7b), the same on every board and on the
+    images before and after it: what the eye sees of the carousel's motion
+    is the painted-frame cadence, and a settled row paints nothing."""
+    bench = Bench(b)
+    pyexec(b, HOME_KEY)
+    pyexec(b, "ws.open_library()"); b.drain(8.0)
+    tabs = bool(pyval(b, "hasattr(ws, 'set_home_tab')"))
+    bench.start(); b.drain(3.0); bench.stop("home idle")
+    band = pyval(b, "ws.launcher.band_rect()")
+    bx, by, bw, bh = band
+    cy = by + bh // 2
+    bench.start()
+    b.swipe(bx + bw - 20, cy, bx + 20, cy, frames=40); b.drain(3.0)
+    bench.stop("home drag-scroll (slow)")
+    pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")
+    b.drain(1.5)
+    b.swipe(bx + bw * 3 // 4, cy, bx + bw // 4, cy, frames=5)
+    bench.start(); b.drain(4.0)
+    bench.stop("fling: frames until idle")
+    bench.start(); b.drain(2.0); bench.stop("idle after the fling")
+    bench.start()
+    for k in range(5):
+        x0, x1 = (bx + bw * 3 // 5, bx + bw * 2 // 5) if k % 2 == 0 \
+            else (bx + bw * 2 // 5, bx + bw * 3 // 5)
+        b.swipe(x0, cy, x1, cy, frames=4); b.drain(0.8)
+    b.drain(1.5)
+    bench.stop("five short flicks")
+    pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")
+    b.drain(1.5)
+    bench.start()
+    for _k in range(12):
+        b.cmd("py ws._hk('right') or 1", wait_for="PY")
+        b.drain(0.12)
+    b.drain(2.0)
+    bench.stop("held-key glide (12 presses right)")
+    bench.start(); b.drain(2.0); bench.stop("idle after the glide")
+    if tabs:
+        bench.start()
+        for t in ("mine", "apps", "make", "games"):
+            pyexec(b, "ws.set_home_tab(%r)" % t); b.drain(1.2)
+        bench.stop("tab switch (x4)")
+    live = pyval(b, "[ws.look.wp_id_for(c) for c in ws.look.wallpaper_carts()]") or []
+    was = pyval(b, "ws.look.wallpaper_id")
+    for wp in live:
+        pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % wp)
+        if pyval(b, "ws.wallpaper.is_animating(0.03)"):
+            pyexec(b, "ws.mark_dirty()"); b.drain(2.0)
+            bench.start(); b.drain(3.0)
+            bench.stop("home idle, live wallpaper %s" % wp)
+            bench.start()
+            b.swipe(bx + bw - 20, cy, bx + 20, cy, frames=40); b.drain(2.0)
+            bench.stop("home drag, live wallpaper %s" % wp)
+            break
+    pyexec(b, "ws.look.select_wallpaper(%r, persist=False)" % was)
+    pyexec(b, "ws.mark_dirty()"); b.drain(1.0)
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
+
+def bench_icons(b, out_path):
+    """The icon home and the grid, the same scenarios each (the docstring's
+    `--icons`)."""
+    bench = Bench(b)
+    pyexec(b, "ws.open_library()"); b.drain(8.0)
+    for arr, name in (("grid", "grid home"), ("icons", "icon home")):
+        pyexec(b, "ws.set_home_arrangement(%r)\nws.set_home_tab('make')\n"
+                  "ws.launcher.sel = 0\nws.launcher.scroll = 0\n"
+                  "ws.mark_dirty()" % arr)
+        b.drain(4.0)
+        bench.start(); b.drain(3.0); bench.stop("%s idle" % name)
+        bx, by, bw, bh = pyval(b, "ws.launcher.band_rect()")
+        cy = by + bh // 2
+        bench.start()
+        b.swipe(bx + bw - 20, cy, bx + 20, cy, frames=40); b.drain(3.0)
+        bench.stop("%s drag" % name)
+        pyexec(b, "ws.launcher.sel = 0\nws.launcher.scroll = 0\nws.mark_dirty()")
+        b.drain(1.5)
+        b.swipe(bx + bw * 3 // 4, cy, bx + bw // 4, cy, frames=5)
+        bench.start(); b.drain(4.0)
+        bench.stop("%s fling: frames until idle" % name)
+        bench.start(); b.drain(2.0); bench.stop("%s idle after the fling" % name)
+        bench.start()
+        for t in ("games", "mine", "apps", "make"):
+            pyexec(b, "ws.set_home_tab(%r)" % t); b.drain(1.2)
+        bench.stop("%s tab (x4)" % name)
+    pyexec(b, "ws.set_home_arrangement(ws.look.home)\nws.mark_dirty()")
+    b.drain(1.0)
+    home(b)
+    table = bench.table()
+    print("\n" + table)
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(table + "\n")
+    return bench
+
 
 def main():
     ap = argparse.ArgumentParser()
     add_board_args(ap)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--repaint", default=None, metavar="SURFACES",
+                    help="comma-separated surfaces (settings, files, storybook,"
+                         " editor:TAB, ...) to repaint every frame instead of"
+                         " the panel run")
+    ap.add_argument("--seconds", type=float, default=6.0)
+    ap.add_argument("--popovers", action="store_true",
+                    help="the popover scenarios alone")
+    ap.add_argument("--kernel", action="store_true",
+                    help="the home's scaled-blit kernel and a focus-band "
+                         "frame, beside the shelf's drag frame")
+    ap.add_argument("--home", action="store_true",
+                    help="the home's scenarios: idle, drag, fling, flicks, "
+                         "the key glide, tabs, a live wallpaper")
+    ap.add_argument("--edit", action="store_true",
+                    help="the in-place theme edit (one repaint, then idle "
+                         "zero) and the edit thrash, alone")
+    ap.add_argument("--store", action="store_true",
+                    help="a switch to a store theme package, and its boot "
+                         "delta, alone (pushes tests/fixtures/themes/dusk.moy)")
+    ap.add_argument("--sprites", action="store_true",
+                    help="chrome from a theme's role sheet and without it "
+                         "(pushes tests/fixtures/themes/sprig.moy)")
+    ap.add_argument("--painter", action="store_true",
+                    help="a surface's, a sprite's and a 9-slice's us per call")
+    ap.add_argument("--icons", action="store_true",
+                    help="the icon home beside the grid: idle, drag, fling, tab")
+    ap.add_argument("--backdrop", action="store_true",
+                    help="a theme's backdrop: its raster, the theme load and "
+                         "mode switch, the home and desk idle and the "
+                         "carousel over it")
+    ap.add_argument("--shadows", action="store_true",
+                    help="a window drag under Moy's soft shadows at each drag "
+                         "size, and the carousel's hero at rest and moving")
+    ap.add_argument("--desk-scale", action="store_true",
+                    help="the desk at render scale 1 and 2: three windows idle, "
+                         "a window drag, a Files scroll")
+    ap.add_argument("--layout", default=None, metavar="BARS",
+                    help="a JSON list of bar objects to bench under")
     args = ap.parse_args()
+    if args.store or not (args.repaint or args.popovers or args.kernel
+                          or args.home or args.edit or args.sprites or args.painter
+                          or args.icons or args.backdrop
+                          or args.shadows or args.desk_scale):
+        push_store_fixture(args)
+    if args.sprites:
+        push_sprite_fixture(args)
     b = board_from_args(args)
     try:
-        b.reset()
-        bench_all(b, args.out)
+        if (not args.repaint and not args.kernel and not args.home
+                and not args.edit and not args.store and not args.sprites
+                and not args.painter and not args.icons and not args.backdrop
+                and not args.shadows and not args.desk_scale
+                and not b.attach_only):
+            b.reset()               # an attach-only board is benched as found
+        if args.layout:
+            pick_layout(b, args.layout)
+        if args.repaint:
+            bench_repaint(b, args.repaint.split(","), args.seconds, args.out)
+        elif args.popovers:
+            bench_popovers(b, args.out)
+        elif args.kernel:
+            bench_kernel(b, args.out)
+        elif args.home:
+            bench_home(b, args.out)
+        elif args.edit:
+            bench_edit(b, args.out)
+        elif args.store:
+            bench_store(b, args.out)
+        elif args.sprites:
+            bench_sprites(b, args.out)
+        elif args.painter:
+            bench_painter(b, args.out)
+        elif args.icons:
+            bench_icons(b, args.out)
+        elif args.backdrop:
+            bench_backdrop(b, args.out)
+        elif args.shadows:
+            bench_shadows(b, args.out)
+        elif args.desk_scale:
+            bench_desk_scale(b, args.out)
+        else:
+            bench_all(b, args.out)
+        if args.layout:
+            pick_layout(b, None)
     finally:
         b.close()
     return 0

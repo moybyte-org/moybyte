@@ -1,90 +1,39 @@
-"""Surface model v1 -- Phase A gates (docs/surface_model_v1.md §9).
+"""Surface model v1 (docs/surface_model_v1.md): the frame gate's kernel-epoch
+leg, the leaf discipline around the glass binding, and the windowed-tier
+fixtures the rest of this file builds on.
 
-Two layers of gate:
-  * SurfaceSet semantics (§2): one monotonic mint, reborn-with-fresh-gens,
-    the set-level epoch covering unknown sids, prefix-scoped sync.
-  * Leaf-module discipline (§2/L6): wm.py/console.py never import surface;
-    the S3 build stages nothing new; the P4 build stages the leaf.
-
-The third layer is GONE as of moycore stage 4: the L8 stream-hash accounting
-ran over a windowed RECORDING session, and the recording tier it measured
-(per-surface command streams, skip-draw, the keyframe verb) was deleted when
-the wasm head started rasterizing. Those were the doc's Phase B/D machinery,
-whose retirement the §5.4 stage-4 amendment records. What survives here is the
-registry itself -- Phase A/C groundwork for the raster tiers, which do not
-drive it yet -- and the discipline that keeps it a leaf.
-
-The fixture is therefore the ordinary raster workstation in windowed mode.
+The kernel epoch (native/moy_glass) is the one glass signal the Python frame
+gate reads: pinned on the binding the host reaches the C through, which is the
+same C every board and the browser link.
 """
 
 import os
 
+from runtime import glass_binding as g
 from runtime import host_app, web_input
-from runtime.surface import Surface, SurfaceSet
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-# ---------------------------------------------------------------------------
-# SurfaceSet semantics (§2)
-# ---------------------------------------------------------------------------
-
-def test_mint_is_monotonic_and_shared():
-    ss = SurfaceSet()
-    a = ss.get("win:make")
-    b = ss.get("bar")
-    gens = [a._content_gen, a.place_gen, b._content_gen, b.place_gen]
-    ss.touch("win:make")
-    ss.move("bar")
-    assert ss.get("win:make")._content_gen > max(gens)
-    assert ss.get("bar").place_gen > ss.get("win:make")._content_gen
-
-
-def test_reborn_surface_gets_fresh_gens():
-    """The aliasing hazard (§2): a client cached gen G for a sid; the window
-    closes and reopens. The reborn record must NEVER reuse a gen a client
-    could hold -- fresh mint, strictly newer."""
-    ss = SurfaceSet()
-    old = ss.content_gen("win:settings")  # forces nothing: unknown sid = epoch
-    ss.touch("win:settings")
-    seen = ss.content_gen("win:settings")
-    ss.sync(set())                        # window closed: record dropped
-    ss.touch("win:settings")              # reopened + first change
-    assert ss.content_gen("win:settings") > seen > old
-
-
-def test_epoch_covers_unknown_sids():
-    """Class A un-attributed: a ws._dirty write nobody attributed must make
-    EVERY surface -- even one with no record -- read as changed (§3)."""
-    ss = SurfaceSet()
-    g0 = ss.content_gen("never-registered")
-    ss.epoch()
-    assert ss.content_gen("never-registered") != g0
-    # ...and a consumer that saw the epoch'd value sees no change until the
-    # next signal (compare is !=, per-consumer last-seen).
-    g1 = ss.content_gen("never-registered")
-    assert ss.content_gen("never-registered") == g1
-
-
-def test_sync_is_prefix_scoped():
-    ss = SurfaceSet()
-    ss.touch("win:make")
-    ss.touch("chips")
-    ss.get("cursor")
-    ss.sync({"win:other"})
-    assert "win:make" not in ss.surfaces          # dropped with its slot
-    assert "chips" in ss.surfaces                 # non-window: never dropped
-    assert "cursor" in ss.surfaces
-
-
-def test_placement_wire_shape():
-    s = Surface("win:make", "system", 7)
-    s.x, s.y, s.scale, s.z = 40, 30, 2, 1
-    assert s.place() == [40, 30, 2, 1]
+def test_the_kernel_epoch_reads_as_dirty_for_every_retained_frame(tmp_path):
+    """The kernel draws frames of its own under a Python WM (the idle wake,
+    the saver, the floor): the frame gate reads its epoch as one more leg,
+    dirty for as many frames as the backend retains (§15)."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(4):
+        drv.frame(1 / 60)
+    assert not ws._needs_redraw(1 / 60)
+    g.kernel_bump()
+    retained = max(1, getattr(ws._sys_canvas or ws.canvas, "RETAINED_FRAMES", 1))
+    for _ in range(retained):
+        assert ws._needs_redraw(1 / 60)
+        ws._dirty = False
+    assert not ws._needs_redraw(1 / 60)
 
 
 # ---------------------------------------------------------------------------
-# The L8 accounting gate over a real windowed recording session
+# Leaf discipline
 # ---------------------------------------------------------------------------
 
 def _read(rel):
@@ -92,48 +41,37 @@ def _read(rel):
         return f.read()
 
 
-def test_surface_is_a_leaf_module():
-    for shared in ("runtime/wm.py", "runtime/console.py"):
-        src = _read(shared)
-        assert "import surface" not in src and "from surface" not in src, (
-            "%s must never import the surface leaf (spec L6/§2)" % shared)
+def test_wm_never_signals_the_table():
+    src = _read("runtime/wm.py")
+    assert "moy_glass" not in src and "glass_binding" not in src, (
+        "the fullscreen WM signals nothing: the frame gate reads the "
+        "kernel's epoch (spec L6/§15)")
 
 
-def test_s3_build_does_not_stage_the_leaf():
-    # Both boards stage by DENYLIST since #161 Phase 3 (board.toml), so the
-    # exclusion is now a line with a reason on it rather than an absence from a
-    # shell script -- but the claim is unchanged, and it is asked of the staged
-    # set rather than of build.sh's text.
-    from tools.board_config import staged_modules, denials
-
-    board = os.path.join(_REPO, "firmware", "lilygo_t_deck_plus_mainline")
-    assert "surface.py" not in staged_modules(board, _REPO), (
-        "the S3 is the fullscreen-stack tier and the surface leaf must stay off it")
-    assert denials(board)["surface.py"]["kind"] == "tier", (
-        "the S3's denial of surface.py must be recorded as a TIER decision, "
-        "not as a host-only or broken-import one")
+def test_the_console_reads_only_the_kernel_epoch():
+    src = _read("runtime/console.py")
+    assert src.count("_glass.kernel_epoch()") == 2
+    assert src.count("_glass.") == 2
 
 
-def test_p4_build_stages_the_leaf():
+def test_the_s3_build_stages_no_windowed_tier():
     from tools.board_config import staged_modules
 
-    board = os.path.join(_REPO, "firmware", "esp32_p4_wifi6_touch_lcd_7b")
+    board = os.path.join(_REPO, "firmware", "lilygo_t_deck_plus_mainline")
     staged = staged_modules(board, _REPO)
-    assert "surface.py" in staged, (
-        "the P4 stages wm_windowed.py, which imports surface -- the leaf "
-        "must ride along or the frozen import fails")
-    assert "wm_windowed.py" in staged
+    assert "wm_windowed.py" not in staged and "surface.py" not in staged
 
 
 # ---------------------------------------------------------------------------
-# System-app carts are hidden from the Editor picker (TEMPORARY -- see
-# _picker_items; #181 editable system apps removes this).
+# System-app carts are hidden from the Make tab (TEMPORARY -- see
+# _make_items; #181 editable system apps removes this).
 # ---------------------------------------------------------------------------
 
-def test_picker_hides_claimed_system_apps(tmp_path):
+def test_make_hides_claimed_system_apps(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True)
-    titles = [c.get("title") for c in ws.picker.items if c.get("path")]
+    ws.open_projects()
+    titles = [c.get("title") for c in ws.projects_grid.items if c.get("path")]
     claimed = []
     for cart in ws.carts.all:
         for app, _t in getattr(ws, "_apps", ()):
@@ -143,13 +81,13 @@ def test_picker_hides_claimed_system_apps(tmp_path):
     assert claimed, "fixture has no system-app carts -- test proves nothing"
     for t in claimed:
         assert t not in titles, "%r is a shell app, not an editable project" % t
-    # ...and the picker still offers real projects + the New tile.
-    assert any(not c.get("path") for c in ws.picker.items), "the + New tile"
+    # ...and Make still offers real projects + the New card.
+    assert any(not c.get("path") for c in ws.projects_grid.items), "the + New card"
     assert titles, "non-app carts must still be listed"
 
 
 def test_desk_still_offers_system_apps(tmp_path):
-    """Hiding is PICKER-only: the DESK icon column still opens them (on this
+    """Hiding is MAKE-only: the DESK icon column still opens them (on this
     tier apps leave the shelf by design -- "apps are windows, games are
     fullscreen" -- so the desk is their access path), and the filter must not
     cost a kid access to Files or Paint."""

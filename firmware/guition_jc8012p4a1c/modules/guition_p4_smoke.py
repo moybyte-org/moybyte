@@ -13,7 +13,8 @@ def panel(hold_s=4):
     the cost of a full-screen native fill. Separates "panel path broken" from
     "framebuffer path broken" from "console broken"."""
     import moy_dsi
-    from guition_p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
+    from moy_runtime import P4Compositor
 
     comp = P4Compositor()
     w, h = comp.size()
@@ -62,23 +63,28 @@ def touch(seconds=15):
     """Stage 2: bring the GSL3680 up (firmware upload) and stream every sample
     for `seconds` -- raw + mapped + the knob state -- so a tap on each corner
     calibrates the flips."""
-    from guition_p4_input import Touch
-    import guition_p4_input as knobs
+    import moy_input
 
     t0 = time.ticks_ms()
-    tp = Touch(progress=lambda k, n: print("  fw %d/%d" % (k, n)))
-    print("Moybyte Guition P4 touch smoke: available=%s (init %dms) swap=%s flip_x=%s flip_y=%s"
-          % (tp.available, time.ticks_diff(time.ticks_ms(), t0),
-             knobs.SWAP_XY, knobs.FLIP_X, knobs.FLIP_Y))
+    tp = moy_input.touch(1280, 800)
+    sig = tp.gsl_sig
+    print("Moybyte Guition P4 touch smoke: available=%s (init %dms, %d fw records, "
+          "%d bring-up(s), the last %dms, %d failed writes, 0xB0=%s) "
+          "swap=%s flip_x=%s flip_y=%s"
+          % (tp.available, time.ticks_diff(time.ticks_ms(), t0), tp.loaded,
+             tp.gsl_tries, tp.gsl_ms, tp.gsl_werr,
+             "no answer" if sig is None else "%08x" % sig,
+             tp.swap_xy, tp.flip_x, tp.flip_y))
     if not tp.available:
         return
     last = None
     end = time.ticks_add(time.ticks_ms(), seconds * 1000)
     n = 0
     while time.ticks_diff(end, time.ticks_ms()) > 0:
+        moy_input.kick()
         p = tp.poll()
-        if p is not None and (p[2] or p[:2] != last):
-            last = p[:2]
+        if p is not None and (p[2] or (p[0], p[1]) != last):
+            last = (p[0], p[1])
             n += 1
             print("TAP%s mapped=(%d,%d) raw=%s fingers=%d"
                   % ("*" if p[2] else " ", p[0], p[1], tp.raw, tp.fingers))

@@ -9,10 +9,10 @@ for the rules.
 | chase a performance number | the `perf` skill, then **#66** / **#58** / `docs/perf_native_gap_v1.md` (#77) | numbers live in issues, never in a doc; per-board verdicts do not transfer |
 | change a draw verb / the raster | `docs/surface_model_v1.md` §4, then `device/device_canvas.py` | ONE canvas class runs on every tier. `tools/p4_conformance.py` is the only check that reaches the real C on real glass |
 | add or port a board | `docs/board_ports_2026-08.md` — its stage-6 "TAKE THESE" list | shared bodies are taken, not copied; a lever a board lacks is ABSENCE, never 0; `git add` the board's modules BEFORE its first build or the stager prunes them |
-| touch an ESP32-P4 board | that board's README, then `native/p4/` | the panel is a board DEFINE (`MOY_DSI_PANEL_*`); compositor `device/dsi_panel.py`, PPA canvas `device/p4_canvas.py`, P4 tier `device/p4_desktop.py` over `device/desktop_spine.py` — a fix lands once |
+| touch an ESP32-P4 board | that board's README, then `native/p4/` | the panel is a board DEFINE (`MOY_DSI_PANEL_*`); compositors `native/moy_glass/moy_present_*.c`, PPA canvas `device/p4_canvas.py`, P4 tier `device/p4_desktop.py` over `device/desktop_spine.py` — a fix lands once |
 | touch a panel flush | `native/moy_flush/moy_flush.c`'s header | "every clause was a race once"; `tests/moy_flush_harness/` compiles it with no board |
 | touch SD or the panel bus | that board dir's README | the two drivers share one SPI host; a per-op teardown hangs the board with no panic |
-| change the shell / a WM / an app | `runtime/README.md`, `docs/app_api_v1.md` | pixel goldens are the net, and the 320×240/1× row does NOT exercise the toolkit |
+| change the shell / a WM / an app | `runtime/README.md`, `docs/app_api_v1.md` | pixel goldens are the net, and every row draws through the toolkit: a layout formula moves the T-Deck's 320×240 too |
 | add a cart verb | `docs/moy_cart_api.md`, and SPEC.md in moy-spec | the verb table is a PUBLIC spec; Python and Lua must agree verbatim |
 | touch a compiled (wasm) cart or the tier | `docs/wasm_tier_plan_2026-09.md`, then `experiments/wasm_aot/README.md` | the ABI is moy-spec's (proposals/wasm-runtime.md), the measurements are **#158**, and how a host EXECUTES a module never enters the spec |
 | touch `native/moy_wasm/` | its README | VENDORED from our WAMR fork (`make vendor-wamr`, pin in `native/moy_wasm/wamr_pin.h`): fix the fork and re-vendor, never edit the copy; a board TAKES or denies it in board.toml |
@@ -70,7 +70,9 @@ carts live in one repo, moybyte-org/carts, each under the licence in its own
 folder (#230); user carts go through the planned store (#122–#124). How a console runs them
 stays here: boards, shell, store, OTA, per-chip compiling and signing, and the
 seed set (`system_carts/`: the shell's apps and wallpapers, Python-only games,
-and the fixtures the perf ledger and parity harness use).
+and the fixtures the perf ledger and parity harness use). moy-spec is a game
+console spec, not Moybyte's: an app feature goes in a Moybyte-side field
+(`docs/moy_cart_api.md`).
 
 The shipped shell is the **2026-07 shell** (everything-is-a-process; spec
 `docs/shell_ux_v1.md`). **One version ladder**: the firmware's
@@ -104,8 +106,8 @@ their `v0_N` names under `docs/history/`. Two format names stay on purpose: the
 ```bash
 make setup                 # venv + pip install -e '.[dev,sim]' (hermetic)
 make test                  # pytest; one file: .venv/bin/python -m pytest tests/x.py -k name
-tools/preflight.sh         # what CI runs, in CI's order -- before pushing (--web adds Chrome)
-python tools/simulate_desktop.py [--cart system_carts/star_catcher.moy]
+tools/preflight.sh         # what CI runs, in CI's order -- before pushing; builds every board image when the change reaches firmware
+python tools/simulate_desktop.py [--cart system_carts/moybyte.star_catcher.moy]
 tools/board.py ports       # which board is on which port, and who holds it
 tools/board.py pass tdeck p4  # from a worktree: build, flash, boot, suite -- one table
 tools/worktree.py new NAME    # .claude/worktrees/NAME, builds and tests as is; `rm NAME` removes it
@@ -134,10 +136,10 @@ tools/worktree.py new NAME    # .claude/worktrees/NAME, builds and tests as is; 
 |---|---|---|---|---|
 | `boards.md` | `firmware/**`, `device/**`, `native/**`, board tools | | `on-glass` | ports, driving, flashing, pushing, screenshots, suites, recovery |
 | `shell.md` | `runtime/**` | | `perf` | measuring fps, the meters, the settled levers |
-| `rendering.md` | canvas, `ui`/`skin`/`chrome`, `*_layer` | | `issues` | the issue mirror and the ledger bodies |
+| `rendering.md` | canvas, `ui`/`ui_draw`/`chrome`, `*_layer` | | `issues` | the issue mirror and the ledger bodies |
 | `carts.md` | `system_carts/**`, cart API, Lua tier, audio | | `release` | branches, OTA channels, `make release` |
 | `web.md` | `firmware/web_runner/**`, sync RPC, webhost | | | |
 | `ota.md` | `device/moy_ota.py`, release and signing tools | | | |
-| `netplay.md` | `runtime/netplay.py`, `device/moy_espnow.py` | | | |
+| `netplay.md` | `native/moy_play/moy_match*`, `runtime/players.py` | | | |
 | `testing.md` | `tests/**` | | | |
 | `docs.md` | any `.md` | | | |

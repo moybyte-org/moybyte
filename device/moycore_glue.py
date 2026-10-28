@@ -12,26 +12,29 @@
 #   make_runtimes         every runtime this image has
 """The host half of moycore (stage 2): what the frame loop does around tick().
 
-`LuaCartRun` next door registers ~40 Python closures as Lua globals and the
-cart calls back into Python hundreds of times a frame. `MoycoreRun` registers
-nothing: libmoy's own binding installs the whole verb table as C functions, and
-this class does the three things that cannot live in C --
+`MoycoreRun` registers nothing per verb: libmoy's own binding installs the
+whole verb table as C functions. Around the tick there are three jobs --
 
-  * REFRESH the input snapshot before the tick. Buttons, time, the pointer and
-    the last typed key are written into one `array("i")`; the cart's btn() is
-    then an array read on the C side of the wall, however many times it asks.
-  * DRAIN the audio queue after it, through the SAME `make_api` closures a
-    Python cart uses. That is deliberate: sfx/music semantics (bank sync, the
-    volume model the Settings surface reads, the diag triggers) stay in one
-    place, and what the crossing deletes is the per-CALL trip, not the
-    behaviour. Order is preserved because the queue is a queue.
-  * PERSIST pmem at boundaries. The C side owns 256 int32 slots with a dirty
-    flag, which is the shape the device already deferred to (#66) -- RAM during
-    play, written at exit, crash capture, workspace swap and the periodic
-    frame-boundary save.
+  * REFRESH the input snapshot before the tick: buttons, time, the pointer and
+    the last typed key in one `array("i")`, so the cart's btn() is an array
+    read on the C side of the wall, however many times it asks.
+  * PLAY the audio queue after it, into the run's kernel session, in the
+    queue's order.
+  * PERSIST pmem at boundaries.
+
+The first two are the kernel's Player's (native/moy_play/moy_play.c) once
+`play_begin` hands it the run: `play_frame` is then one call a frame, and
+only the pointer, the framebuffer swap, quit and the view stay here. A run
+the Player does not take (a lockstep match, an input that is no kernel
+table) ticks through `_update`, which does both in Python (lua_ext's
+snap_shared and drain_audio). PERSIST is here either way: the C side owns
+256 int32 slots with a dirty flag, which is the shape the device already
+deferred to (#66) -- RAM during play, written at exit, crash capture,
+workspace swap and the periodic frame-boundary save.
 
 Everything else the shell needs from a run -- `init`/`update`/`draw`/`close` --
-has the same shape `LuaCartRun` exposes, so `Player` needs no branch.
+has the shape every runtime exposes, so `Player` needs no branch beyond
+asking for `play_begin`.
 
 EVERY Lua cart runs here. moybyte's superset verbs (scenes,
 flags, the batch forms) are not in libmoy's table, so they are REGISTERED on
@@ -59,38 +62,51 @@ from array import array
 
 try:
     from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                         LIBMOY_VERBS, NOT_REGISTRABLE, install_handles,
+                         LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
+                         install_handles, put_scenes, layer_restore, layer_restore_end,
                          snap_slots, audio_ops, snap_shared, sync_view,
-                         drain_audio)
+                         drain_audio, cfg_blob)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS, cart_chunks,
-                                 LIBMOY_VERBS, NOT_REGISTRABLE,
-                                 install_handles, snap_slots, audio_ops,
-                                 snap_shared, sync_view, drain_audio)
+                                 LIBMOY_VERBS, NOT_REGISTRABLE, NATIVE_NAMES,
+                                 install_handles, put_scenes, layer_restore,
+                                 layer_restore_end, snap_slots, audio_ops,
+                                 snap_shared, sync_view, drain_audio, cfg_blob)
 
 try:
-    from widgets import pointer_state
+    from moy_input import pointer_state
 except ImportError:                      # host tests importing the device module
-    from runtime.widgets import pointer_state
-
-try:
-    import cart_files as _cart_files
-except ImportError:                      # host tests importing the device module
-    from runtime import cart_files as _cart_files
+    from runtime.moy_input import pointer_state
 
 try:
     import moycore as _moycore
-except ImportError:                      # a build without the module
-    _moycore = None
+except ImportError:
+    try:                                 # the host: its ctypes binding
+        import runtime.moycore as _moycore
+    except ImportError:                  # a build without the module
+        _moycore = None
 
 try:
     import moy_wasm as _moy_wasm         # the compiled cart's engine
 except ImportError:                      # a build without it: no wasm runtime
     _moy_wasm = None
 
+try:
+    import moy_play as _moy_play         # the kernel's Player: the run's frame
+except ImportError:
+    try:                                 # the host: its ctypes binding
+        import runtime.moy_play as _moy_play
+    except ImportError:
+        _moy_play = None
+
 # The cart's clock: ms since the Player's stamp, which snap_shared writes into
 # the snapshot's time slot -- the base libmoy's time() adds the milliseconds
 # inside the tick to (modmoycore.c's h_time_ms).
+try:
+    import moy_glass as _glass           # the frame fold's scratch is a BUF row
+except ImportError:                      # host tests: the ctypes binding
+    from runtime import glass_binding as _glass
+
 try:
     from ticks import _since_ms
 except ImportError:                      # host tests importing the device module
@@ -152,6 +168,15 @@ def reserve_p8_memory():
     return bool(_p8_buffers())
 
 
+def _run_flags(project):
+    """The run's own tile flags (`ProjectStore.play_world`); a harness's bare
+    project carries only `flags`."""
+    if project is None:
+        return None
+    fl = getattr(project, "play_flags", None)
+    return fl if fl is not None else getattr(project, "flags", None)
+
+
 class MoycoreRun:
     """One cart run under moycore. Same shape as LuaCartRun."""
 
@@ -169,12 +194,16 @@ class MoycoreRun:
         canvas = ws.canvas
         project = getattr(ws, "project", None)
         sheet = getattr(project, "sheet", None) if project is not None else None
-        tilemap = getattr(project, "tilemap", None) if project is not None else None
+        # the run's own map (`ProjectStore.play_world`); a harness's bare
+        # project carries only `tilemap`
+        tilemap = (getattr(project, "play_map", None) or getattr(project, "tilemap", None)
+                   if project is not None else None)
         # SPEC.md 3.5 tile flags. Unlike the sheet and the map this crosses as a
         # COPY (run_begin memcpys 512 bytes into the console's own table), so a
         # cart's fset writes are the C table's, not this bytearray's -- which is
-        # right: they are run state, and nothing persists them.
-        flags = getattr(project, "flags", None) if project is not None else None
+        # right: they are run state, and nothing persists them. An Editor flag
+        # edit reaches the table at the next frame (`flag_xor`).
+        flags = _run_flags(project)
 
         # Slot numbers bound ONCE: every one of these was a module attribute
         # lookup per frame in _refresh.
@@ -184,7 +213,7 @@ class MoycoreRun:
         # the same reason the SNAP_* lookups above are bound at construction.
         self._I_SNAP = snap_slots(_moycore)
         self._aq_ops = audio_ops(_moycore)
-        self._touch_out = [0, 0, 0, 0]   # reused; see widgets.pointer_state
+        self._touch_out = [0, 0, 0, 0]   # reused; see moy_input.pointer_state
         self._masks = [0, 0]             # reused: button_masks' answer
         self._mask_inp = None            # the input _mask_ok answers for
         self._mask_ok = False
@@ -193,7 +222,7 @@ class MoycoreRun:
         self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
-        self.aq = array("h", bytearray(2 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
+        self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
 
         pmem = getattr(ws, "pmem", None)
@@ -221,7 +250,7 @@ class MoycoreRun:
             except Exception:  # noqa: BLE001 -- no table: libmoy uses the spec palette
                 wire = None
 
-        cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
+        cfg = cfg_blob(ns.get("_moy_cfg") if hasattr(ns, "get") else None) or None
         # The PICO-8 machine's memory (moy-spec libmoy moy_p8.c), from THIS
         # heap and handed over like the framebuffer -- not from the ESP heap,
         # which the S3 boards' MicroPython heap leaves 1.5KB of. Allocated
@@ -246,19 +275,27 @@ class MoycoreRun:
         try:
             for name in ns:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
-                        and callable(ns[name])):
+                        and name not in NATIVE_NAMES and callable(ns[name])):
                     _moycore.register(name, ns[name])
-            # The object-valued verbs and their Lua wrappers -- the same two
-            # halves moy_lua uses, from the same source. Without this a cart
-            # calling make_layer() gets "unsupported value" back from the
-            # trampoline and the whole run falls to the old runtime, which is
-            # what sakura_lua/brick_siege/ray did before this landed.
-            self._layers, self._images = install_handles(ns, _moycore.register)
+            # The object-valued verbs are the prelude's Lua over the run's C:
+            # the layers, paint images and scenes are the run's own
+            # (moycore_lua.c, moycore_scene.h), their texts handed over once,
+            # here, so nothing of them crosses after. Only the editor handle
+            # stays a Python registry (lua_ext.install_handles).
+            imgs = ns.get("_moy_images") if hasattr(ns, "get") else None
+            for name in (imgs or ()):
+                blob = imgs[name]
+                if isinstance(blob, (str, bytes)):
+                    _moycore.image_put(name, blob)
+            put_scenes(ns, _moycore.scene_put)
+            self._pins = install_handles(ns, _moycore.register)
+            if hasattr(_moycore, "layer_restore"):
+                layer_restore(_moycore.layer_restore, canvas, self)
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 raise RuntimeError(err)
             # The namespace's OWN prelude, if it brought one (the text console's
-            # `print`/`input` binding -- see runtime/lua_host.py's twin of this).
+            # `print`/`input` binding -- runtime/text_console.py's).
             # A string, so the registration loop above skipped it.
             extra = ns.get("_moy_prelude")
             if extra:
@@ -267,6 +304,7 @@ class MoycoreRun:
                     raise RuntimeError(err)
         except Exception:  # noqa: BLE001 -- a bad verb must not strand the VM
             _moycore.close()
+            layer_restore_end(canvas, self)
             raise
         # The cart's scripts in one call (SPEC.md 4, runtime/lua_ext.py): main
         # keeps the "@cart" name, so a runtime error in it renders `cart:12:`
@@ -277,6 +315,7 @@ class MoycoreRun:
         if err:
             try:
                 _moycore.close()
+                layer_restore_end(canvas, self)
             finally:
                 raise RuntimeError(err)
 
@@ -319,12 +358,11 @@ class MoycoreRun:
             self._mask_ok = getattr(inp, "button_masks", None) is not None
         if not self._mask_ok:
             # The guard is BACK, and the reason is worth keeping: it was removed
-            # on the argument that every tier builds the real InputState, which
-            # was wrong -- there are TWO InputState classes (runtime/input.py
-            # and modules/moybyte/input.py), the boards use the second, and
-            # removing this dropped a Lua cart into the crash-to-code editor
+            # on the argument that every tier builds the real input table,
+            # which was wrong for an input this file had never heard of, and
+            # removing it dropped a Lua cart into the crash-to-code editor
             # with `no attribute button_masks`. One getattr per input object is
-            # cheap insurance against an input this file has never heard of.
+            # cheap insurance.
             #
             # The fallback walks MOY_BUTTONS too. It used to carry its own copy
             # of the order, which made it the fourth in the tree and -- because
@@ -340,7 +378,8 @@ class MoycoreRun:
             held, pressed = inp.button_masks(MOY_BUTTONS, None, self._masks)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
-        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms)
+        snap_shared(s, inp, self._I_SNAP, pointer_state, self._touch_out, _since_ms,
+                    getattr(self.ws, "windowed_chrome", False))
         s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):
@@ -358,7 +397,7 @@ class MoycoreRun:
     def _drain_queued(self, n):
         aq = self.aq
         slots = _moycore.AQ_SLOTS
-        drain_audio(self.ns, self._aq_ops,
+        drain_audio(getattr(self.ws, "audio", None), self._aq_ops,
                     ((aq[1 + i * slots], aq[2 + i * slots], aq[3 + i * slots])
                      for i in range(n)))
 
@@ -412,9 +451,7 @@ class MoycoreRun:
         # A LUA cart ends itself the same way a Python one does. libmoy's quit()
         # is a host callback that sets SNAP_QUIT (h_quit), and nothing read it:
         # the flag was written on every tier and translated on none, so `quit()`
-        # was a no-op for every Lua cart -- including the textmode(True) carts
-        # the cart API says MUST provide their own exit, because hold-BACKSPACE
-        # cannot reach one. Route it into the flag the Player already honours
+        # was a no-op for every Lua cart. Route it into the flag the Player already honours
         # after _update (player.tick), and clear the slot so one quit is one
         # exit.
         if self.snap[self._I_QUIT]:
@@ -429,8 +466,68 @@ class MoycoreRun:
 
     _buf = None
 
+    def flag_xor(self, n, mask):
+        """An Editor flag edit into the run's own table
+        (`ProjectStore.flag_edits`); a module built without it drops it."""
+        fx = getattr(_moycore, "flag_xor", None)
+        if fx is not None:
+            fx(n, mask)
+
     def _last_buf(self):
         return self._buf
+
+    # -- the frame in C (native/moy_play) -------------------------------------
+
+    _run = 0
+
+    def play_begin(self, run, tick):
+        """Hand this run's frame to the kernel's Player, which launched `run`
+        before this runtime loaded (the Player's _launch_play): `bind` gives
+        it the console's input table, the cart's audio session and the Tick a
+        paced run notes its costs into (None: unpaced), `open` checks the
+        runtime the constructor opened. Returns `play_frame`, which the Player
+        calls in place of its per-tick `update`; None where there is no Player
+        in the image or an input that is no kernel table -- the run then
+        ticks through `update` as before. Either way the run is this one's
+        from here, ended at its close: its loans live as long as the runtime."""
+        if _moy_play is None or not run:
+            return None
+        self._run = run
+        try:
+            au = getattr(self.ws, "audio", None)
+            _moy_play.bind(run, self.ws.input, int(getattr(au, "h", 0) or 0), tick)
+            _moy_play.open(run)
+        except (RuntimeError, TypeError) as exc:
+            print("PLAY bind:", exc)
+            return None
+        return self.play_frame
+
+    def play_frame(self, n, dt, draw):
+        """`n` ticks of `dt` in C, the last drawing when `draw`: the snapshot
+        from the input table, the cart's frame, its audio into the session.
+        What stays here is what the console knows and C does not yet: the
+        framebuffer a swapping tier re-points, the pointer in the cart's
+        coordinates, the quit flag the Player honours and the view the WM
+        composites from."""
+        ws = self.ws
+        inp = ws.input
+        buf = ws.canvas._buf
+        if buf is not self._buf:
+            _moycore.retarget(buf)
+            self._buf = buf
+        out = self._touch_out
+        try:
+            pointer_state(inp, out)
+            x, y, st = int(out[0]), int(out[1]), int(out[2])
+        except Exception:  # noqa: BLE001 -- no pointer this frame, not a dead cart
+            x = y = st = 0
+        bits = _moy_play.frame(self._run, n, dt, draw, x, y, st,
+                               getattr(ws, "windowed_chrome", False))
+        if bits:
+            if bits & _moy_play.QUIT:
+                inp.cart_quit = True
+            if bits & _moy_play.VIEW:
+                self._sync_view()
 
     # -- exit ---------------------------------------------------------------
 
@@ -454,16 +551,40 @@ class MoycoreRun:
                 break
         return True
 
+    # -- probes: what a harness asks the run's state (the parity suites) ------
+
+    def get_global(self, name):
+        """A cart global as a number or a string, or None."""
+        return _moycore.get_global(name) if _moycore is not None else None
+
+    def get_global_len(self, name):
+        """The length of a table global, or None (a module that cannot say)."""
+        f = getattr(_moycore, "get_global_len", None)
+        return f(name) if f is not None else None
+
+    def exec(self, src, name="probe"):
+        """Run a chunk in the cart's state: None, or the error text."""
+        return _moycore.exec(src, name)
+
     def close(self):
+        # The hooks go with the state: the Player and its tests read
+        # `update is None` as "this run is over".
+        self.update = None
+        self.draw = None
         try:
             self.flush_pmem()
         finally:
             # Drop the handle registries: they are what PIN the run's layers
             # and images, and a layer is a full-canvas allocation.
-            self._layers = None
-            self._images = None
+            self._pins = None
             if _moycore is not None:
                 _moycore.close()
+            layer_restore_end(self.ws.canvas, self)
+            # After the runtime's close: the run's end returns whatever of its
+            # loans the close left (native/moy_play).
+            if self._run:
+                _moy_play.end(self._run)
+                self._run = 0
 
 
 # -- the compiled cart (docs/wasm_tier_plan_2026-09.md, phase 3) ------------
@@ -659,6 +780,7 @@ class CartFrame:
         self.kept_off = 0                # where the last frame shown sits in the scratch
         self.fmt = 0                     # its layout: moy_fold's LE565 1 / IDX8 2
         self._scratch = None
+        self._scratch_b = None           # the glass row the scratch is
         self._kv = None                  # kept_view's slice, and what it was cut for
         self._kv_s = None
         self._kv_off = -1
@@ -748,11 +870,14 @@ class CartFrame:
             return s
         self._free()
         try:
-            import moy_alloc
-            s = moy_alloc.alloc(n, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
-        except (ImportError, AttributeError, MemoryError):
-            s = None
-        self._scratch = s
+            b = _glass.buf(n, _glass.ROLE_SCRATCH)
+        except MemoryError:
+            return None
+        if b.origin == _glass.ORIGIN_HEAP:
+            b.release()                  # the fold reads it on the feeder: PSRAM or nothing
+            return None
+        self._scratch_b = b
+        s = self._scratch = b.view
         return s
 
     def close(self, comp):
@@ -771,15 +896,11 @@ class CartFrame:
         self._free()
 
     def _free(self):
-        s = self._scratch
-        self._scratch = None
+        b = self._scratch_b
+        self._scratch = self._scratch_b = None
         self._kv = self._kv_s = None
-        if s is not None:
-            try:
-                import moy_alloc
-                moy_alloc.free(s)
-            except (ImportError, AttributeError, ValueError):
-                pass
+        if b is not None:
+            b.release()
 
 
 class WasmRun(MoycoreRun):
@@ -841,8 +962,11 @@ class WasmRun(MoycoreRun):
         self._dt = 0.0
         canvas = ws.canvas
         sheet = getattr(project, "sheet", None) if project is not None else None
-        tilemap = getattr(project, "tilemap", None) if project is not None else None
-        flags = getattr(project, "flags", None) if project is not None else None
+        # the run's own map (`ProjectStore.play_world`); a harness's bare
+        # project carries only `tilemap`
+        tilemap = (getattr(project, "play_map", None) or getattr(project, "tilemap", None)
+                   if project is not None else None)
+        flags = _run_flags(project)
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP
         self._I_SNAP = snap_slots(_moycore)
@@ -856,7 +980,7 @@ class WasmRun(MoycoreRun):
         self._I_QUIT = _moycore.SNAP_QUIT
         self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
-        self.aq = array("h", bytearray(2 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
+        self.aq = array("i", bytearray(4 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
         pmem = getattr(ws, "pmem", None)
         cells = getattr(pmem, "cells", None) if pmem is not None else None
@@ -868,8 +992,8 @@ class WasmRun(MoycoreRun):
         if wire is None:
             wire = device_canvas._PAL565_WIRE_BUF
         swapped = device_canvas.PAL565_WIRE is not device_canvas.PAL565
-        cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
-        self._layers = self._images = None
+        cfg = cfg_blob(ns.get("_moy_cfg") if hasattr(ns, "get") else None) or None
+        self._pins = None
         _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),
@@ -877,27 +1001,21 @@ class WasmRun(MoycoreRun):
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
             self.snap, self.aq, self.pmem_img, cfg, flags, False)
         self.snap[_moycore.SNAP_PLAYERS] = 1
-        # Every `read` the cart makes runs inside the store's gate, as every
-        # other store access does: on the T-Deck it drains the panel's flush
-        # first, because the card shares the panel's SPI bus. The owner's
-        # Unknown sources setting, as it stands at this load, decides whether
-        # an AOT module with no signature may load; the engine checks
-        # everything else either way. The engine raises MemoryError when it
-        # cannot hold the module file, and a run left open here would refuse
-        # every later cart's run_begin.
-        gate = getattr(ws, "_with_sd", None)
+        # The cart's reads and its written files (moy-spec SPEC.md 16.12) are
+        # moycore's C over the kernel's volume, inside the board's bus gate
+        # (native/moy_store/moy_files.h). The owner's Unknown sources
+        # setting, as it stands at this load, decides whether an AOT module
+        # with no signature may load; the engine checks everything else
+        # either way. The engine raises MemoryError when it cannot hold the
+        # module file, and a run left open here would refuse every later
+        # cart's run_begin.
         unknown_sources = bool(getattr(ws, "unknown_sources", False))
-        # The cart's written files (moy-spec SPEC.md 16.12), kept beside the
-        # carts store under the same gate; in the browser the page's keeper
-        # makes each write durable in OPFS (runtime/cart_files.py).
         writable = cart.get("writable") or ()
-        files = _cart_files.CartFiles(path, gate, getattr(ws, "cart_keep", None))
         joined = "\0".join(writable) if writable else None
 
         def _open(target, target_sha, interp):
             return _moycore.wasm_open(target, head, int(pages), target_sha, path,
-                                      swapped, gate, unknown_sources, interp,
-                                      joined, files)
+                                      swapped, unknown_sources, interp, joined)
 
         try:
             if has_module:

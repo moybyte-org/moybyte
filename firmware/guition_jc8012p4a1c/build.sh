@@ -43,10 +43,8 @@ moybyte_setup_idf esp32p4 \
 # 2) The patch ladder -- the Waveshare's, because it is the same silicon.
 # ---------------------------------------------------------------------------
 
-# 2a) The P4 SILICON patches (shared lib, both P4 boards): the BLE-HID
-#     notification fast path into MicroPython's modbluetooth.c, and the #106
-#     DSI bridge-underrun ISR backport into the (shared) ESP-IDF checkout.
-moybyte_patch_p4_ble_hid_fastpath
+# 2a) The P4 SILICON patch (shared lib, both P4 boards): the #106 DSI
+#     bridge-underrun ISR backport into the (shared) ESP-IDF checkout.
 moybyte_patch_p4_dsi_underrun
 
 # 2b) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel
@@ -61,7 +59,6 @@ moybyte_patch_esp_hosted_bump esp32p4
 
 # 2d) Un-static esp_native_code_free_all (#66) -- shared with every board.
 moybyte_patch_native_code_free
-moybyte_patch_espnow_ring_race
 
 # The console is the SoC's USB-Serial/JTAG: it takes, when it starts, what a
 # host sent during the bootloader, instead of leaving it in the FIFO for a
@@ -77,6 +74,19 @@ moybyte_patch_map_cache_for_repr_c
 # Size-class run hints for gc_alloc (#66): every console board takes it; the
 # lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
 moybyte_patch_gc_run_hints
+# The gc meters (gc.pauses, gc.areas): every console board takes them, for
+# the PERF line's gc= field and the dev channel's `heapcaps` word.
+moybyte_patch_gc_meters
+# An equal-length slice store moves no tail: every board takes it, and
+# tools/patch_slice_store.py carries the measurement.
+moybyte_patch_slice_store
+# A found extensible built-in enters sys.modules: every board takes it,
+# and tools/patch_import_cache.py carries the measurement.
+moybyte_patch_import_cache
+# The VM's thread state in a `__thread` variable, not a FreeRTOS TLS slot
+# whose lookup masks interrupts: tools/patch_thread_state_tls.py carries the
+# P4 profile behind it.
+moybyte_patch_thread_state_tls
 
 # DECLINED moybyte_patch_gc_split_reserve -- the split-heap growth cap (#66).
 # MOYBYTE_GC_SPLIT_RESERVE is set by the two S3 boards' mpconfigboard.h alone,
@@ -115,12 +125,16 @@ moybyte_stage_native
 #    raw-deflate blob per cart.
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed "${MODULES_DIR}/carts_data.py"
 
+#    fonts_data.py: the font set this board's tier takes (tools/make_font.py,
+#    native/moy_ui/fonts/), frozen so its bytes stay in flash.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/make_font.py" module "${SCRIPT_DIR}" "${MODULES_DIR}/fonts_data.py"
+
 #    The OTA identity stamp (#53): a fresh board id -- an OTA payload is an
 #    app-partition image and the manifest is per board.
 moybyte_ota_identity guition_p4 "${REPO_ROOT}/device/moy_ota.py"
 
 # ---------------------------------------------------------------------------
-# 4) Frozen manifest + partition table (OTA-shaped 2x4MB app slots + auto-vfs
+# 4) Frozen manifest + partition table (OTA-shaped 2x7.5 MiB app slots + auto-vfs
 #    tail on 16MB) + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------
 moybyte_frozen_manifest "${MANIFEST}"

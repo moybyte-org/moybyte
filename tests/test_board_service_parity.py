@@ -32,7 +32,7 @@ WHAT COUNTS AS AN INJECTION. Two sites, because the wiring lives in two:
     is not thereby a board that has an FPS preference the others lack.
 
   * an argument to `console.wire_workstation_core`, which is where `make_api`,
-    `wifi`, `make_audio`, `runtimes`, `keyboard`, `pointer`, `can_manage`
+    `wifi`, `audio_out`, `runtimes`, `keyboard`, `pointer`, `can_manage`
     and the store actually land on `ws`. That mapping is DERIVED from
     `wire_workstation_core`'s own body rather than restated here, so a new
     parameter that assigns to `ws` is picked up without editing this file --
@@ -100,13 +100,14 @@ INJECTED = True     # the target wires this service; anything else must be a
 # what is actually being given up.
 SERVICES = {
     "make_api": "the cart API factory: what a cart's globals are built from",
-    "make_audio": "the audio backend the AudioBank model is played through",
+    "audio_out": "the per-frame pull of the kernel's audio mix, where no feeder "
+                 "task plays it to a speaker",
     "runtimes": "the .moy cart engines by manifest runtime (#67 lua -> moycore, "
                 "wasm -> moycore over moy_wasm)",
     "make_game_canvas": "per-run canvas factory for a cart with a small raster",
     "carts_store": "the moy_carts module the shell reads/writes the store with",
     "carts_root": "where that store lives on this target",
-    "can_manage": "are writes to the store enabled (Make tile, editors)",
+    "can_manage": "are writes to the store enabled (the + New card, editors)",
     "wifi": "the #38 WiFi service behind Settings -> WIFI",
     "pointer": "the cursor model, sized to the SYSTEM canvas",
     "keyboard": "the physical keyboard, for the code editor's text/raw flip",
@@ -140,7 +141,9 @@ SERVICES = {
 WIRING = {
     "tdeck": {
         "make_api": INJECTED,
-        "make_audio": INJECTED,
+        "audio_out": "the kernel's feeder task plays the mix to the speaker "
+                     "(native/moy_audio/moy_aud_out.c); nothing pulls it from "
+                     "Python",
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -177,10 +180,9 @@ WIRING = {
     },
     "p4": {
         "make_api": INJECTED,
-        "make_audio": "no ES8311 bring-up on this board yet (#82). The codec is "
-                      "on the hardware and unwired; until it is, injecting a "
-                      "backend would give the console an audio path that plays "
-                      "into nothing",
+        "audio_out": "the kernel's feeder task plays the mix to the speaker "
+                     "(native/moy_audio/moy_aud_out.c); nothing pulls it from "
+                     "Python",
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -217,10 +219,9 @@ WIRING = {
     # the same three absences for the same reasons.
     "guition_p4": {
         "make_api": INJECTED,
-        "make_audio": "no ES8311 bring-up on this board yet (#82). The codec is "
-                      "on the hardware and unwired; until it is, injecting a "
-                      "backend would give the console an audio path that plays "
-                      "into nothing",
+        "audio_out": "the kernel's feeder task plays the mix to the speaker "
+                     "(native/moy_audio/moy_aud_out.c); nothing pulls it from "
+                     "Python",
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -255,11 +256,9 @@ WIRING = {
     },
     "guition": {
         "make_api": INJECTED,
-        "make_audio": "audio is stage 5 of this board's bring-up and OPEN: "
-                      "which amp (if any) is populated and on which I2S pins "
-                      "is unverified, and its board.toml denies the moy_audio "
-                      "usermod for the same reason. Wire both together at "
-                      "stage 5",
+        "audio_out": "no audio: stage 5 of this board's bring-up is OPEN "
+                     "(which amp, which I2S pins), and its board.toml denies "
+                     "the moy_audio usermod for the same reason",
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -297,7 +296,7 @@ WIRING = {
     },
     "host": {
         "make_api": INJECTED,
-        "make_audio": INJECTED,
+        "audio_out": INJECTED,
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -347,7 +346,7 @@ WIRING = {
     },
     "web": {
         "make_api": INJECTED,
-        "make_audio": INJECTED,
+        "audio_out": INJECTED,
         "runtimes": INJECTED,
         "make_game_canvas": INJECTED,
         "carts_store": INJECTED,
@@ -417,6 +416,10 @@ NOT_A_SERVICE = {
                  "LIVE value (dev_channel._remote_state's psave field). Both "
                  "boards set it beside their IdleBlank; the host and web have "
                  "no panel to blank",
+    "soft_keyboard": "a fact about the page, not a backend: its ⌨ summons the "
+                     "browser's own keyboard, so a text field can be typed "
+                     "under touch there (Workstation.can_type). The boards "
+                     "have no such keyboard and keep the class default",
 }
 
 
@@ -429,11 +432,18 @@ def _wire_param_map():
     Derived rather than restated so that adding a parameter that lands on `ws`
     is seen here immediately. `ws.can_manage` mentions two parameters (it
     defaults from carts_root), so a same-name match wins over a sole mention.
+    A service the Workstation takes through its setter (`ws.set_pointer(p)`)
+    lands on `ws.pointer` the same way.
     """
     fn = _func(ROOT / "runtime" / "console.py", "wire_workstation_core")
     params = {a.arg for a in fn.args.args}
     out = {}
     for n in ast.walk(fn):
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and _is_ws_attr(n.func) and n.func.attr.startswith("set_")
+                and len(n.args) == 1 and isinstance(n.args[0], ast.Name)
+                and n.args[0].id in params):
+            out[n.func.attr[4:]] = n.args[0].id
         if not isinstance(n, ast.Assign):
             continue
         for t in n.targets:
@@ -527,22 +537,28 @@ def _resolved(target):
     `dead` is the set of that link's own parameters this target left
     unsupplied (or supplied as None), carried down from the link before."""
     out = []
-    dead = frozenset()
-    links = _links(target)
-    for i, (path, fname) in enumerate(links):
+    for i, (path, fname) in enumerate(_links(target)):
         fn = _func(path, fname)
-        out.append((path, fn, dead))
-        if i + 1 == len(links):
-            break
-        nfn = _func(*links[i + 1])
-        params = _params(nfn)
-        given = set()
-        for n in ast.walk(fn):
-            if isinstance(n, ast.Call) and _called(n) == nfn.name:
+        if not out:
+            out.append((path, fn, frozenset()))
+            continue
+        # The link that CALLS this one (the latest before it that does): a
+        # spine calls its providers, each in turn, not one another.
+        params = _params(fn)
+        dead = frozenset()
+        for _p, caller, cdead in reversed(out):
+            calls = [n for n in ast.walk(caller)
+                     if isinstance(n, ast.Call) and _called(n) == fn.name]
+            if not calls:
+                continue
+            given = set()
+            for n in calls:
                 for prm, val in _call_args(n, params).items():
-                    if _real(val, dead):
+                    if _real(val, cdead):
                         given.add(prm)
-        dead = frozenset(set(params) - given)
+            dead = frozenset(set(params) - given)
+            break
+        out.append((path, fn, dead))
     return out
 
 
@@ -633,7 +649,7 @@ def test_the_extractor_still_sees_the_wiring():
     """A parse that finds nothing would make every assertion below vacuous --
     and this file reads four sources by path, any of which can be moved."""
     pmap = _wire_param_map()
-    for expect in ("make_api", "wifi", "make_audio", "runtimes", "keyboard"):
+    for expect in ("make_api", "wifi", "audio_out", "runtimes", "keyboard"):
         assert expect in pmap, "wire_workstation_core no longer wires %s" % expect
     for target in TARGETS:
         found = injections(target)
@@ -799,13 +815,30 @@ Via = collections.namedtuple("Via", "path func")
 # ratchet below deletes it the day the target starts making the call itself.
 Lazy = collections.namedtuple("Lazy", "path func why")
 
+# The call is the KERNEL's: the wiring binds the service's object into the
+# kernel loop's input stage (moy_input.loop_bind), whose C polls it every
+# frame (native/moy_input/modmoy_input.c, moy_input_loop_inputs). Checked on
+# both halves: the spine binds it, and the stage makes the call.
+Kernel = collections.namedtuple("Kernel", "kw c_call")
+
+_KBD = Kernel("ble", "moy_hid_frame(")
+
+# The call is the kernel loop's TAIL (native/moy_kernel/moy_loop_board.c's
+# b_tail), with no binding at all: the radio link's protocol is C
+# (native/moy_play/moy_match.c), polled every frame with no crossing.
+Tail = collections.namedtuple("Tail", "path func c_call")
+
+_LINK_POLL = Tail("native/moy_kernel/moy_loop_board.c", "static void b_tail(",
+                  "moy_match_kernel_poll(now);")
+_SERVICE = "device/desktop_spine.py"
+
 LIFECYCLE = {
     "tdeck": {
         # The spine's guarded start() -- TDeckKeyboard has none (the C3 is on
         # I2C0 and answers from __init__), so on this board the call is the
         # getattr saying no.
         ("keyboard", "start"): HERE,
-        ("keyboard", "poll"): HERE,
+        ("keyboard", "poll"): Kernel(None, "moy_input_board_kick();"),
         ("ble_keyboard", "start"): Lazy(
             "runtime/settings_layer.py", "open_bluetooth",
             "auto_start=False on purpose -- scanning is what makes BLE "
@@ -813,31 +846,31 @@ LIFECYCLE = {
             "comes up when a kid opens the picker. The touch-only boards start "
             "theirs at boot because a paired keyboard is their only way out of "
             "a cart"),
-        ("ble_keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("ble_keyboard", "poll"): _KBD,
+        ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
+        ("link", "poll"): _LINK_POLL,
     },
     "p4": {
         ("keyboard", "start"): HERE,
-        ("keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("keyboard", "poll"): _KBD,
+        ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
+        ("link", "poll"): _LINK_POLL,
     },
     "guition": {
         ("keyboard", "start"): HERE,
-        ("keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("keyboard", "poll"): _KBD,
+        ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
+        ("link", "poll"): _LINK_POLL,
     },
     "guition_p4": {
         ("keyboard", "start"): HERE,
-        ("keyboard", "poll"): HERE,
-        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("keyboard", "poll"): _KBD,
+        ("webhost", "poll"): Via(_SERVICE, "make_service"),
         ("link", "start"): Via("runtime/player.py", "start"),
-        ("link", "poll"): Via("runtime/device_boot.py", "poll_link"),
+        ("link", "poll"): _LINK_POLL,
     },
 }
 
@@ -934,7 +967,7 @@ class _Handles:
 
         per_frame is True when the call sits in a loop or inside a nested def
         -- a frame hook, which is what `poll_inputs`/`tail` are handed to
-        device_boot.FrameLoop as. That distinction is the point: a poll() on a
+        frame_loop.FrameLoop as. That distinction is the point: a poll() on a
         board's boot path runs once and reads, in every static sense, exactly
         like one that runs every frame.
         """
@@ -968,6 +1001,10 @@ class _Handles:
 def _chain_maps(links):
     """Per link: ({parameter: service}, {local name: {service}}).
 
+    A link may call any link after it -- the spine calls each provider in turn
+    -- so every later link is a callee, and what a caller knows is carried
+    forward into the parameters it hands on.
+
     The first says which of a link's OWN parameters land on the Workstation as
     a service -- directly (`ws.svc = <param>`) or by being handed on, to the
     next link or to wire_workstation_core, under a parameter that does. The
@@ -993,9 +1030,9 @@ def _chain_maps(links):
                     if _is_ws_attr(t) and t.attr in SERVICES:
                         m[n.value.id] = t.attr
         callees = [(wire.name, _params(wire), inv)]
-        if i + 1 < len(links):
-            nfn = _func(*links[i + 1])
-            callees.append((nfn.name, _params(nfn), maps[i + 1]))
+        for j in range(i + 1, len(links)):     # every later link it may call
+            nfn = _func(*links[j])
+            callees.append((nfn.name, _params(nfn), maps[j]))
         for n in ast.walk(fn):
             if not isinstance(n, ast.Call):
                 continue
@@ -1008,6 +1045,20 @@ def _chain_maps(links):
                         if val.id in params:
                             m[val.id] = cmap[prm]
         maps[i], seeds[i] = m, seed
+    # And forward: a name a link knows as a service is that service in the
+    # parameter it is handed under (the spine's `keyboard` into a provider).
+    for i in range(len(links)):
+        fn = _func(*links[i])
+        for j in range(i + 1, len(links)):
+            nfn = _func(*links[j])
+            order = _params(nfn)
+            for n in ast.walk(fn):
+                if not (isinstance(n, ast.Call) and _called(n) == nfn.name):
+                    continue
+                for prm, val in _call_args(n, order).items():
+                    if isinstance(val, ast.Name) and val.id in seeds[i]:
+                        seeds[j].setdefault(prm, set()).update(
+                            seeds[i][val.id])
     return maps, seeds
 
 
@@ -1069,7 +1120,7 @@ def test_every_driven_service_declares_its_lifecycle(target):
 @pytest.mark.parametrize("target", sorted(TARGETS))
 def test_every_lifecycle_absence_carries_a_reason(target):
     for (service, verb), value in sorted(LIFECYCLE.get(target, {}).items()):
-        if value is HERE or isinstance(value, Via):
+        if value is HERE or isinstance(value, (Via, Kernel, Tail)):
             continue
         why = value.why if isinstance(value, Lazy) else value
         assert isinstance(why, str) and why.strip(), (
@@ -1094,6 +1145,22 @@ def test_the_target_drives_exactly_what_the_lifecycle_says(target):
                 "%s calls %s.poll() on its BOOT PATH, not from a frame hook -- "
                 "it runs once and then never again" % (target, service))
             continue
+        if isinstance(value, Tail):
+            body = (ROOT / value.path).read_text(encoding="utf-8")
+            body = body[body.index(value.func):]
+            assert value.c_call in body[:body.index("\n}\n")], (target, value)
+            continue
+        if isinstance(value, Kernel):
+            spine = (ROOT / _SERVICE).read_text(encoding="utf-8")
+            run = spine[spine.index("    def run(self"):spine.index("def make_service(")]
+            assert "moy_input.loop_bind(" in run, target
+            if value.kw is not None:
+                assert "%s=%s" % (value.kw, value.kw) in run, (target, value)
+            stage = (ROOT / "native" / "moy_input" / "modmoy_input.c").read_text(
+                encoding="utf-8")
+            stage = stage[stage.index("void moy_input_loop_inputs("):]
+            assert value.c_call in stage[:stage.index("\n}\n")], (target, value)
+            continue
         if isinstance(value, (Via, Lazy)):
             assert (service, verb) in _module_handles(value.path).verbs(
                 value.func), (
@@ -1113,7 +1180,7 @@ def test_no_lifecycle_excuse_has_gone_stale():
     stale = []
     for target in sorted(TARGETS):
         for (service, verb), value in sorted(LIFECYCLE.get(target, {}).items()):
-            if value is HERE or isinstance(value, Via):
+            if value is HERE or isinstance(value, (Via, Kernel)):
                 continue
             if _driven_here(target, service, verb)[0]:
                 stale.append("%s/%s/%s" % (target, service, verb))
@@ -1126,10 +1193,11 @@ def test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for():
     """The concrete regressions, kept as their own assertion so a refactor of
     the machinery cannot lose them: the T-Deck polls its BLE keyboard EVERY
     FRAME, and something really does start it."""
-    found, per_frame = _driven_here("tdeck", "ble_keyboard", "poll")
-    assert found and per_frame, (
-        "the T-Deck stopped polling ws.ble_keyboard from its frame hook -- a "
-        "paired keyboard cannot produce a keypress (#26)")
+    assert LIFECYCLE["tdeck"][("ble_keyboard", "poll")] == _KBD
+    spine = (ROOT / _SERVICE).read_text(encoding="utf-8")
+    assert 'getattr(ws, "ble_keyboard", None)' in spine, (
+        "the T-Deck stopped binding ws.ble_keyboard into the kernel's input "
+        "stage -- a paired keyboard cannot produce a keypress (#26)")
     start = LIFECYCLE["tdeck"][("ble_keyboard", "start")]
     assert ("ble_keyboard", "start") in _module_handles(start.path).verbs(
         start.func), (

@@ -6,8 +6,8 @@
 #
 # Follows the board build.sh pattern: toolchain cloned into .build/ (gitignored),
 # canonical module sources staged as COPIES from runtime/ every build, output to
-# dist/. Unlike the boards this needs no ESP-IDF -- just emsdk (auto-installed
-# here) and node (for the harness).
+# dist/. Unlike the boards this needs no ESP-IDF -- just emsdk (installed at
+# EMSDK_VERSION below, by tools/emsdk_tree.sh) and node (for the harness).
 #
 #   ./build.sh              # stage + FROZEN build + assemble dist/ (the ship
 #                           # shape: the console is frozen bytecode inside the
@@ -34,6 +34,8 @@
 #     assertions abort on the port's own patterns).
 #   - library.js: mp_hal_get_interrupt_char ccall passed 1 arg to a 0-arg C
 #     function (node-only path; assertions abort).
+#   - py/obj.h: an equal-length slice store moves no tail
+#     (tools/patch_slice_store.py, the VM patch every board takes).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,6 +48,10 @@ EMSDK_DIR="${BUILD_DIR}/emsdk"
 PORT_DIR="${MPY_DIR}/ports/webassembly"
 STAGE_DIR="${BUILD_DIR}/stage"
 MPY_TAG="${MPY_TAG:-v1.28.0}"
+# The emscripten the bundle is compiled with: emcc's output is not byte-reproducible
+# across versions, and this bundle rides every board image. It is the version
+# moy-spec's preflight builds its player in (EMSDK_IMAGE there); move them together.
+EMSDK_VERSION="${EMSDK_VERSION:-6.0.7}"
 
 PY="${REPO_ROOT}/.venv/bin/python"
 [ -x "${PY}" ] || PY=python3
@@ -60,30 +66,23 @@ esac
 # ---------------------------------------------------------------------------
 if [ "${STAGE_ONLY}" = "0" ]; then
   mkdir -p "${BUILD_DIR}"
-  if [ ! -d "${EMSDK_DIR}" ]; then
-    echo "== installing emsdk (one-time, ~1GB)"
-    git clone --quiet https://github.com/emscripten-core/emsdk.git "${EMSDK_DIR}"
-    (cd "${EMSDK_DIR}" && ./emsdk install latest && ./emsdk activate latest)
-  fi
-  if [ ! -d "${MPY_DIR}" ]; then
-    # Prefer the P4 target's existing local checkout (same tag) to skip the network.
-    P4_MPY="${REPO_ROOT}/firmware/esp32_p4_wifi6_touch_lcd_7b/.build/micropython"
-    if [ -d "${P4_MPY}" ]; then
-      echo "== cloning micropython ${MPY_TAG} (local, from the P4 checkout)"
-      git clone --quiet "${P4_MPY}" "${MPY_DIR}"
-    else
-      echo "== cloning micropython ${MPY_TAG}"
-      git clone --depth 1 -b "${MPY_TAG}" --quiet \
-        https://github.com/micropython/micropython "${MPY_DIR}"
-    fi
-  fi
-  # OUTSIDE the clone guard on purpose. Two reasons, both learned from the first
+  # Absent: cloned and installed (~1 GB, once). Present at another version: moved
+  # to EMSDK_VERSION. Unobtainable: the build stops. A tree at the pin is a no-op.
+  bash "${REPO_ROOT}/tools/emsdk_tree.sh" "${EMSDK_DIR}" "${EMSDK_VERSION}"
+  # Cloned when absent -- from the P4 target's local checkout when it has one,
+  # which skips the network -- and, on every run, put at MPY_TAG: a tree at
+  # another tag is reset to stock (the patches below re-apply), never compiled.
+  bash "${REPO_ROOT}/tools/mpy_tree.sh" "${MPY_DIR}" "${MPY_TAG}" \
+    "${REPO_ROOT}/firmware/esp32_p4_wifi6_touch_lcd_7b/.build/micropython"
+  # SEPARATE from the clone on purpose. Three reasons, both learned from the first
   # Pages deploy: `--quiet` has to precede the path (after it, git reads it as a
   # second pathspec and dies with "pathspec '--quiet' did not match"), and a
   # checkout can exist WITHOUT its submodule -- which is exactly what that failed
   # run left in the CI cache, since the clone succeeded and only this line broke.
   # Guarding it meant a half-built .build/ could never repair itself. It is a
   # no-op once the submodule is there, so running it every build costs nothing.
+  # (Third: a tree just reset to another tag carries that tag's pin, which
+  # only this moves the submodule to.)
   (cd "${MPY_DIR}" && git submodule update --init --quiet lib/micropython-lib)
 
   # Port patches (idempotent -- grep-guarded).
@@ -126,9 +125,18 @@ good = '"mp_hal_get_interrupt_char",\n                "number",\n               
 if bad in src:
     open(p, "w").write(src.replace(bad, good))
 PYEOF
+  # The VM patch every board takes: an equal-length slice store moves no tail.
+  "${PY}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}"
 
   # The moybyte variant (canonical copy lives in variant/, re-staged every build).
   mkdir -p "${PORT_DIR}/variants/moybyte"
+  # make does not rebuild an object whose FLAGS changed, and the variant's .mk
+  # sets per-file optimisation: a changed one starts the build tree afresh, or
+  # the bundle would depend on which objects a machine happened to have.
+  if ! cmp -s "${SCRIPT_DIR}/variant/mpconfigvariant.mk" \
+              "${PORT_DIR}/variants/moybyte/mpconfigvariant.mk"; then
+    rm -rf "${PORT_DIR}/build-moybyte"
+  fi
   cp "${SCRIPT_DIR}/variant/"* "${PORT_DIR}/variants/moybyte/"
 
   # moy_lua usermod (#67, third architecture): stage the vendored VM + bridge
@@ -186,6 +194,31 @@ PYEOF
   # same code. Pure C with its own micropython.mk, like moy_audio.
   cp -r "${REPO_ROOT}/native/moy_png" \
         "${USERMODS_DIR}/moy_png"
+
+  # moy_index usermod: the store's native index. Its fragment compiles it unless
+  # MOY_INDEX_IMPL=py (tools/moy_index_spike.py's header), and board_config's
+  # stage below then leaves runtime/moy_index.py out.
+  cp -r "${REPO_ROOT}/native/moy_index" \
+        "${USERMODS_DIR}/moy_index"
+
+  # moy_store usermod: the store's volume seam and crash-safe write, native;
+  # its volume here is POSIX on the worker's MEMFS, the tree VfsPosix shows.
+  cp -r "${REPO_ROOT}/native/moy_store" \
+        "${USERMODS_DIR}/moy_store"
+
+  # moy_spine usermod: the kernel's spine, native here as on every image, and
+  # the handle table moy_index shares (so it stages beside it).
+  cp -r "${REPO_ROOT}/native/moy_spine" \
+        "${USERMODS_DIR}/moy_spine"
+
+  # Sprint 3's kernel modules (docs/kernel_survival_2026-10.md section 2): the
+  # glass, input, the links and the kernel's frame (moy_kernel's portable
+  # half: the module `moy_loop`, whose driver tier the worker's frame steps),
+  # sprint 4's Player (the module `moy_play`), sprint 5's app ABI
+  # (`moy_app`) and sprint 6's toolkit (`moy_ui`).
+  for m in moy_glass moy_input moy_net moy_kernel moy_play moy_app moy_ui; do
+    cp -r "${REPO_ROOT}/native/${m}" "${USERMODS_DIR}/${m}"
+  done
 
   # moy_wasm_web usermod: the browser's compiled-cart ENGINE -- the session
   # surface the boards' WAMR engine implements, over the page's own
@@ -292,6 +325,14 @@ out.append(inspect.getsource(p.rgb888_table))
 open(sys.argv[1], "w").write("\n".join(out))
 PYEOF
 
+# fonts_data.py: the font set the console's themes draw in (tools/make_font.py,
+# native/moy_ui/fonts/), the module every console board freezes too. The
+# board.toml's `font_tier` picks the faces (the handheld's: the browser lays out
+# on the handheld's metrics in both arrangements). It freezes into the wasm the
+# way a board's freezes into its image, so the font bytes ride the baked,
+# compressed micropython.wasm and no page fetch carries them.
+"${PY}" "${REPO_ROOT}/tools/make_font.py" module "${SCRIPT_DIR}" "${STAGE_DIR}/modules/fonts_data.py"
+
 # ---------------------------------------------------------------------------
 # 3. The cart bundle: the runner's shelf roster packed as one JSON
 #    {"<cart>.moy/<relpath>": text}, and {"b": base64} for a cart's cover.png
@@ -303,11 +344,11 @@ echo "== packing carts"
 # ships everywhere unless its own manifest.json says otherwise, so this build
 # asks tools/gen_device_carts.py which folders declare a "web" target instead
 # of carrying a hand-written list that nothing compared against system_carts/.
-# (The WALLPAPER carts -- moy_night + ocean/open_machine/wallpaper_space --
+# (The WALLPAPER carts -- moy_night + ocean_desktop/open_machine/space_desktop --
 # ride along even though they never appear on the run-grid: they are the
 # Appearance app's CARTS catalog, and shipping only moy_night left that tab
 # with one choice, owner report 2026-07-31. Excluded here are the dev/test
-# carts and wifi.moy, each by a `"targets"` line in its OWN manifest.)
+# carts, each by a `"targets"` line in its OWN manifest.)
 ROSTER="${MOYBYTE_WEB_CARTS:-$("${PY}" "${REPO_ROOT}/tools/gen_device_carts.py" --roster web)}"
 "${PY}" - "${REPO_ROOT}/system_carts" "${STAGE_DIR}/carts.json" ${ROSTER} <<'PYEOF'
 import base64, json, os, sys
@@ -387,8 +428,18 @@ EOF
   # shellcheck disable=SC1091
   source "${EMSDK_DIR}/emsdk_env.sh" >/dev/null 2>&1
   make -C "${MPY_DIR}/mpy-cross" -j"$(nproc)" >/dev/null
+  # MicroPython keeps a source's generated qstr and module entries until that
+  # source is preprocessed again, so a build that drops a usermod source
+  # (MOY_INDEX_IMPL back to py) would link a module table naming code it no
+  # longer has. A changed hook starts the generated headers afresh.
+  INDEX_STAMP="${PORT_DIR}/build-moybyte/moy_index_impl"
+  INDEX_HOOK="${MOY_INDEX_IMPL:-c}${MOY_INDEX_BENCH:++bench}"
+  if [ "$(cat "${INDEX_STAMP}" 2>/dev/null || echo py)" != "${INDEX_HOOK}" ]; then
+    rm -rf "${PORT_DIR}/build-moybyte/genhdr"
+  fi
   make -C "${PORT_DIR}" VARIANT=moybyte USER_C_MODULES="${USERMODS_DIR}" \
     FROZEN_MANIFEST="${BUILD_DIR}/frozen_manifest.py" -j"$(nproc)" >/dev/null
+  echo "${INDEX_HOOK}" > "${INDEX_STAMP}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -409,9 +460,9 @@ cp "${SCRIPT_DIR}/moy_store.mjs" "${DIST_DIR}/"
 # The two worker modules ship WITHOUT THEIR COMMENTS. They ride every board
 # image, and the prose in them is most of their bytes (worker.js gzips to
 # under half without it): the source is where it is read. emsdk's own terser
-# re-prints them with comments=false and nothing else -- no compression, no
-# renaming, still one statement a line -- so the code that runs is the code in
-# the tree, and a stack trace still names its function.
+# re-prints them with comments=false and no indentation, and nothing else -- no
+# compression, no renaming, still one statement a line -- so the code that runs
+# is the code in the tree, and a stack trace still names its function and line.
 # tests/test_web_worker_protocol.py holds dist/ to that.
 JS_NODE="$(ls -d "${EMSDK_DIR}"/node/*/bin 2>/dev/null | head -1)/node"
 [ -x "${JS_NODE}" ] || JS_NODE="$(command -v node || true)"
@@ -422,13 +473,36 @@ if [ -z "${JS_NODE}" ] || [ ! -f "${TERSER}" ]; then
 fi
 for f in worker.js moy_store.mjs; do
   "${JS_NODE}" "${TERSER}" "${DIST_DIR}/${f}" --module \
-    --format comments=false,beautify=true -o "${DIST_DIR}/${f}.tmp"
+    --format comments=false,beautify=true,indent_level=0 -o "${DIST_DIR}/${f}.tmp"
   mv "${DIST_DIR}/${f}.tmp" "${DIST_DIR}/${f}"
 done
+# The page ships without its comments for the same reason (they were half its
+# gzipped bytes): its one script through the same terser, and the comments of
+# its markup and stylesheet dropped. site/build.py's CHANNEL_LINE survives
+# the re-print, which tests/test_site_channel.py holds.
+"${PY}" - "${DIST_DIR}/index.html" "${JS_NODE}" "${TERSER}" <<'EOF'
+import re, subprocess, sys
+page, node, terser = sys.argv[1:4]
+html = open(page, encoding="utf-8").read()
+if html.count("<script>") != 1 or html.count("</script>") != 1:
+    sys.exit("build.sh: index.html must carry exactly one <script> to strip")
+a, b = html.index("<script>") + len("<script>"), html.index("</script>")
+head = re.sub(r"/\*.*?\*/", "", re.sub(r"<!--.*?-->\n?", "", html[:a], flags=re.S), flags=re.S)
+js = subprocess.run([node, terser, "--format", "comments=false,beautify=true,indent_level=0"],
+                    input=html[a:b], capture_output=True, text=True, check=True).stdout
+with open(page, "w", encoding="utf-8") as f:
+    f.write(head + "\n" + js + html[b:])
+EOF
 if [ "${STAGE_ONLY}" = "1" ]; then
   cp "${STAGE_DIR}/modules.json" "${DIST_DIR}/"
 else
-  cp "${PORT_DIR}/build-moybyte/micropython.mjs" "${DIST_DIR}/"
+  # The VM's loader ships without comments too: the port appends its api.js,
+  # objpyproxy.js and proxy_js.js to emcc's glue as they are in the tree,
+  # licence headers and prose included (MicroPython's licence is the console's
+  # About screen's, runtime/licences.py). The same re-print, unindented like
+  # the glue it follows; nothing is compressed or renamed.
+  "${JS_NODE}" "${TERSER}" "${PORT_DIR}/build-moybyte/micropython.mjs" --module \
+    --format comments=false -o "${DIST_DIR}/micropython.mjs"
   cp "${PORT_DIR}/build-moybyte/micropython.wasm" "${DIST_DIR}/"
   rm -f "${DIST_DIR}/modules.json"
 fi
@@ -439,12 +513,15 @@ fi
 # no Content-Encoding, and a browser handed gzip bytes without that header sees
 # garbage -- so raw has to stay the default and .gz has to be opt-in by a server
 # that knows to advertise it.
-# -n omits the mtime, so an unchanged asset produces a byte-identical .gz and
-# the push tool's per-file compare stays meaningful.
+# tools/zopfli_gz.py compresses with zopfli: standard gzip, a few percent
+# smaller than `gzip -9` (every byte is image headroom), no mtime or name in the
+# header, so an unchanged asset produces a byte-identical .gz and the push tool's
+# per-file compare stays meaningful. It fails when the `zopfli` package is
+# missing (pyproject.toml's dev extra), and does NOT fall back to gzip.
+GZ_FILES=()
 for f in index.html worker.js moy_store.mjs micropython.mjs micropython.wasm; do
-  if [ -f "${DIST_DIR}/${f}" ]; then
-    gzip -9 -n -c "${DIST_DIR}/${f}" > "${DIST_DIR}/${f}.gz"
-  fi
+  if [ -f "${DIST_DIR}/${f}" ]; then GZ_FILES+=("${DIST_DIR}/${f}"); fi
 done
+"${PY}" "${REPO_ROOT}/tools/zopfli_gz.py" "${GZ_FILES[@]}"
 echo "== dist/ ready:"
 ls -la "${DIST_DIR}"

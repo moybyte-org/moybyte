@@ -41,8 +41,8 @@ the decisions below record what they changed.
   Lua (2026-09-30); until then SPEC.md §15 named `"wasm"` the reference
   console's vendor runtime.
 - **One engine, one import table, every tier.** The host runs the same C
-  binding over WAMR through ctypes, exactly as `runtime/lua_host.py` runs
-  Lua, because a host and a device that disagree about what a verb does is
+  binding over WAMR through ctypes, exactly as the host runs Lua through
+  the boards' own glue and C (`runtime/moycore.py`), because a host and a device that disagree about what a verb does is
   the disease that deleted lupa. There is no wasmtime tier; the spike's host
   runner stays an oracle inside `experiments/wasm_aot/doom/`. The browser
   adapts the same C thunks in JavaScript: its own engine runs the cart's
@@ -77,9 +77,11 @@ the decisions below record what they changed.
   pin does to every *installed* cart (ESP 88), which is what forced the
   reversal -- see "A cart survives its firmware" below. The interpreter
   chosen and its per-board cost are #158's.
-- **Cart storage is the board's.** The SD card on the T-Deck, the flash VFS on
-  the P4 boards; an SD card can become a P4 requirement if cart sizes demand
-  it. Assets are read through the cart's own folder and nothing else.
+- **Cart storage is the board's.** The SD card on the T-Deck; on the P4 boards
+  and the Guition S3 a card when one mounts, the flash VFS when not (never a
+  requirement; the P4s' and the Guition S3's mount is `device/card_store.py`,
+  FAT32 or exFAT).
+  Assets are read through the cart's own folder and nothing else.
 - **Every console board, not two.** Each board declares or denies the module
   in its `board.toml` with a reason, and the gate runs on every board that
   declares it. The Guition S3 is the floor board for memory.

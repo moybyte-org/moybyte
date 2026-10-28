@@ -39,9 +39,9 @@ console boards ship three different shapes between them):
 |---|---|---|
 | Waveshare P4 `run_desktop` | `DeviceCanvas` | `P4SystemCanvas` — **distinct objects** |
 | Guition P4 `run_desktop` | `DeviceCanvas` | `P4SystemCanvas` — **distinct**, over a `RotatedCompositor` |
-| T-Deck `run_desktop` | `DeviceCanvas` | *the same object* |
+| T-Deck `run_desktop` | `SystemCanvas` | *the same object* |
 | Guition S3 `run_desktop` | `DeviceCanvas` 320×240 | `SystemCanvas` 480×320 — **distinct** |
-| host sim 320×240 | `DeviceCanvas` (via `host_canvas`) | *the same object* |
+| host sim 320×240 | `HostSystemCanvas` | *the same object* |
 | host sim windowed | `DeviceCanvas` | `HostSystemCanvas` |
 | wasm handheld tier | `WebSystemCanvas` | *the same object* |
 | wasm desktop tier | `WebSystemCanvas` 320×240 | `WebSystemCanvas` — **distinct** |
@@ -75,6 +75,8 @@ thesis. Regenerated over the then-live `canvas.py` + `web_view.py` (both since d
 **Total canvas-receiver probes in `runtime/`: 76** — not v1.0's "~30", which was
 asserted rather than counted. Corrections: `flush_batch` and `reclaim_layers`
 are on **both** boards (`device_canvas.py`); `begin_surface` is 6 sites, not 2.
+(`begin_surface` and `skip_surface` were the recording canvases' verbs; no
+canvas defines them now and the probes are deleted, `surface_model_v1.md` §16.)
 
 **The headline survives the correction.** `.buf` is defined on **one** of the
 four, the host, and ten shared sites branch on it. "No `.buf`" is the majority
@@ -94,7 +96,7 @@ kept the previous screen. Same family: a region that stops being written while
 N buffers rotate.
 
 **A third instance already shipped**, on a seam v1.0 did not cover at all:
-`moy_webserver.py`'s missing `effective_input_kinds` re-export dead-ended the
+the since-deleted `moy_webserver.py`'s missing `effective_input_kinds` re-export dead-ended the
 T-Deck web view from 2026-07-21 to 2026-08-01 and presented to the owner as
 *"T-Deck WiFi is broken."* See §8.
 
@@ -132,7 +134,7 @@ removing a capability probe is out of scope.
 - **L2. No optional verbs on the contract.** Contract verbs are defined on the
   base; a backend overrides, never omits.
 - **L3. Inert defaults only where one exists.** The base supplies a no-op for
-  `flush_batch`, `begin_surface`, `skip_surface`, `place_span`. It does **not**
+  `flush_batch`, `place_span`. It does **not**
   supply one for `composite_game` — that is **abstract**. *(Revised: v1.0 said
   the base always implements "the slow, correct, portable path". False here —
   host `buf` is 1-byte palette indices, device `_buf` is RGB565. An index loop
@@ -177,14 +179,11 @@ class Presenter:
         raise NotImplementedError      # L3: no portable default exists
 
     def flush_batch(self): pass
-    def begin_surface(self, sid, domain): pass
-    def skip_surface(self, sid, domain): return False
     def place_span(self, ox=None, oy=0, scale=1, w=0, h=0): pass
 ```
 
 - `HostPresenter` — indexed raster, the reference implementation
 - `DevicePresenter` — `moy_gfx` + PPA (`pixels = "rgb565"`)
-- `RecordingPresenter` — command stream: `spr` composite + span bracket
 
 Selected by a **factory over the (game, system, world) pair** of §1.1, not by
 "which board am I".
@@ -263,8 +262,9 @@ sequences **after** Phase 0 here — the conformance suite is what makes it safe
 ## 6. Risks, honestly
 
 - **L9 / the S3 budget — the correction that matters.** v1.0 claimed
-  `+present.py` would be "a leaf module, staged per-target like `surface.py`".
-  **Inverted.** `surface.py` escapes the S3 only because its sole importer is
+  `+present.py` would be "a leaf module, staged per-target like `surface.py`"
+  (the surface leaf, deleted 2026-10-07 when the kernel's glass took the table).
+  **Inverted.** That leaf escaped the S3 only because its sole importer was
   `wm_windowed.py`, the one file the S3 build denylists. The probe sites are not
   leaf-shaped: `wm.py`, `wallpaper.py`, `console.py`, `launcher_layer.py`,
   `player.py` and `ui.py` are **all staged to the S3** and hold the
@@ -275,7 +275,7 @@ sequences **after** Phase 0 here — the conformance suite is what makes it safe
   self-failing at ~2KB for `+present.py` alone), boot `free-int` unchanged, and
   launcher live set unchanged via `micropython.mem_info()` — **not** bare
   `gc.mem_free()`, which reads ~28MB against ~1.4MB real on the P4 port.
-  Flash is not the scarce resource here (S3 app slots 4MB, P4 45% headroom);
+  Flash is not the scarce resource here (each build prints its app slot's headroom);
   **internal SRAM and GC live set are.**
 - **The dispatch tax is real but small, and v1.0 pointed at the wrong hazard.**
   None of the converted sites is per-**draw-call**; they are per-frame,
@@ -305,7 +305,7 @@ sequences **after** Phase 0 here — the conformance suite is what makes it safe
    Presenter is per-canvas and process-long; §4's last-seen is per **physical
    buffer** on the P4 and per **connection** on the web (`WsClientState` is
    re-minted on reconnect); the gen mint is per **WM** and destroyed wholesale
-   on a world flip. Merging is buildable but is a **redesign of a locked doc**,
+   on a mode switch. Merging is buildable but is a **redesign of a locked doc**,
    which its own rules say must start there. Re-open after its Phase C.
 3. Do the layer/`Image` probes (`reclaim_layers`, 4 sites, both boards) belong
    on the Presenter or on a separate layer-allocator contract?

@@ -20,6 +20,9 @@ What it proves, in real Chrome against the built dist/:
     fixture writes on one load and finds them on the next, out of OPFS;
   * a cart importing a name the browser's table lacks (the Newer Wasm
     fixture) is refused before it loads, with the Player's notice naming it;
+  * a compiled app (App Roles Wasm) reaches its prefs and theme rows through
+    imports from "moybyte.app" with no upcall of any class, and the same
+    module one permission short is refused at load, the import named;
   * Get Carts offers a compiled cart from a local index and installs it --
     reading only the members this console keeps, by range, so not one byte
     of a chip's module crosses -- and the installed cart plays on the next
@@ -239,8 +242,108 @@ def test_a_cart_built_for_a_newer_console_is_refused_with_the_notice(tmp_path):
     assert len(js) == 1, "the scenario did not run to its end:\n%s" % out[-3000:]
     st = json.loads(js[0])
     assert st["cart"] == "Newer Wasm" and st["err"] is None, st
-    assert st["notice"] == ("Newer Wasm needs a newer console (missing: later). "
-                            "Update the firmware."), st
+    assert st["notice"] == "It uses later. Update in Settings, then try again.", st
+
+APP_ROLES = ROOT / "tests" / "fixtures" / "wasm" / "app_roles.moy"
+_APP_STATE = ("__moyState().then(s => JSON.stringify({cart: s.cart, err: s.cart_error, "
+              "notice: s.notice, play: s.play && s.play.upcalls, ups: s.upcall_totals}))")
+
+
+def test_a_compiled_app_reaches_its_roles_with_no_upcall(tmp_path):
+    """App Roles Wasm (its src/main.wat says what it does) imports prefs and
+    theme rows from "moybyte.app": in the browser they are the page's adapters
+    over the same C rows (native/moy_app/moy_app_wasm.c), so no crossing of
+    any class but the page's own frame (CONSOLE) is made. The same module with no "prefs" permission
+    is refused at load, naming prefs_get."""
+    web_e2e.require("store")
+    ok = _built(APP_ROLES, tmp_path / "carts" / "app_roles.moy")
+    short = _built(APP_ROLES, tmp_path / "carts" / "app_short.moy")
+    man = json.loads((short / "manifest.json").read_text())
+    man["title"] = "App Short Wasm"
+    man["moybyte"]["permissions"] = []
+    (short / "manifest.json").write_text(json.dumps(man))
+    site = _site(tmp_path, [ok, short])
+    got = {}
+    for name in ("app_roles", "app_short"):
+        out, js = _play(tmp_path, site, name, "?handheld=1&dev=1&cart=%s.moy" % name, [
+            {"wait": 3000}, {"js": _APP_STATE}, {"shot": name},
+        ])
+        assert len(js) == 1, "the scenario did not run to its end:\n%s" % out[-4000:]
+        got[name] = json.loads(js[0])
+    st = got["app_roles"]
+    assert st["cart"] == "App Roles Wasm" and st["err"] is None and st["notice"] is None, st
+    # The page drives the console's frame (CONSOLE: the frame upcalls); every
+    # other class, ROLE among them, stays at zero for the run.
+    assert st["ups"][1:] == [0, 0, 0, 0, 0], "the run crossed into Python: %r" % (st,)
+    st = got["app_short"]
+    assert "moybyte.app.prefs_get" in (st["err"] or ""), st
+
+
+APP_UI = ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"
+# What App UI Wasm's page covers below the host's strip (its src/main.wat).
+_APP_UI_RECTS = ((0, 40, 320, 120),)
+
+
+def _app_ui_host_words(tmp_path):
+    """The fixture's frame on the host's WAMR (tests/test_ui_public.py's
+    run), as canonical RGB565 words: the font and icon sets are the same, the
+    browser's handheld faces and masks being the ones the host's handheld
+    class loads (runtime/fontset.py)."""
+    from runtime import host_app, wasm_host
+    from tools import wasm_cart
+    from ws_helpers import make_drv, open_cart, quiesce
+    if not wasm_host.available():
+        pytest.skip("no host wasm binding to hold the page to")
+    root = str(tmp_path / "host_carts")
+    host_app.moy_carts.ensure_dirs(root)
+    wasm_cart.build(str(APP_UI), os.path.join(root, "app_ui.moy"))
+    ws = host_app.build_workstation(root)
+    ws.pointer.visible = False
+    open_cart(ws, "App UI Wasm")
+    drv = make_drv(ws)              # each frame's input edges begin and end, as on a board
+    ws.pointer.place(319, 239)      # the host's mouse rests on no stop: no hover
+    for _ in range(9):
+        quiesce(ws)
+        ws._dirty = True
+        drv.frame(1.0 / 30.0)
+    words = tier_frame.from_canvas(ws.sys_canvas._buf, True)     # the host keeps panel order
+    ws.exit()
+    return words
+
+
+def _rects(words):
+    out = []
+    for x, y, w, h in _APP_UI_RECTS:
+        out.append([words[j * tier_frame.W + i] for j in range(y, y + h) for i in range(x, x + w)])
+    return out
+
+
+def test_a_compiled_app_draws_the_ui_page_in_the_browser(tmp_path):
+    """App UI Wasm (its src/main.wat says what it does) draws the public UI
+    API's fixture page through the `ui` rows: in the browser they are the
+    page's adapters over the same C (native/moy_ui/moy_ui_wasm.c), so the run
+    makes no crossing but the page's frame, and the page's pixels are the
+    host's run's."""
+    web_e2e.require("store")
+    sys.path.insert(0, str(ROOT))
+    app = _built(APP_UI, tmp_path / "carts" / "app_ui.moy")
+    out, js = _play(tmp_path, _site(tmp_path, [app]), "app_ui",
+                    "?handheld=1&dev=1&cart=app_ui.moy", [
+        {"wait": 3000}, {"js": _APP_STATE}, {"js": _CANVAS},
+        # a last step, so the canvas's long line is flushed before the page closes
+        {"shot": "app_ui"},
+    ])
+    assert len(js) == 2, "the scenario did not run to its end:\n%s" % out[-4000:]
+    st = json.loads(js[0])
+    assert st["cart"] == "App UI Wasm" and st["err"] is None and st["notice"] is None, st
+    assert st["ups"][1:] == [0, 0, 0, 0, 0], "the run crossed into Python: %r" % (st,)
+    size, b64 = js[1].split(":", 1)
+    assert size == "%dx%d" % (tier_frame.W, tier_frame.H), size
+    page = _rects(tier_frame.from_rgba(base64.b64decode(b64)))
+    host = _rects(_app_ui_host_words(tmp_path))
+    for rect, a, b in zip(_APP_UI_RECTS, page, host):
+        assert a == b, "the page drew %r otherwise than the host's run" % (rect,)
+
 
 def test_the_jet_carts_play_in_the_browser(tmp_path):
     web_e2e.require("store")
@@ -336,17 +439,14 @@ def test_get_carts_installs_a_compiled_cart_without_its_modules_and_it_plays(tmp
     server, base = web_e2e.serve(site, web_e2e.free_port())
     profile = tmp_path / "chrome"
     sys.path.insert(0, str(ROOT))
-    from runtime.getcarts_app import GetCartsLayout
-    lay = GetCartsLayout(320, 240, 1, False, 1)
-    row = lay.row_rect(0)
-    one = lay.buttons(1)[0]
+    at = web_e2e.get_carts_taps(1)
     try:
-        out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"note": "Get Carts lists the compiled cart as one to GET", "wait": 4000},
             {"shot": "list"},
-            {"click": [row[0] + row[2] // 2, row[1] + row[3] // 2]},
+            {"click": at["cards"][0]},
             {"wait": 800}, {"shot": "cart"},
-            {"click": [one[0] + one[2] // 2, one[1] + one[3] // 2]},
+            {"click": at["verb"]},
             {"wait": 6000}, {"shot": "ready"},
             {"js": "window.__moyInstalled || ''"},
         ], base, profile)

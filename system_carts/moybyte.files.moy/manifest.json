@@ -1,0 +1,27 @@
+{
+  "format": "moy-1",
+  "version": 5,
+  "title": "Files",
+  "id": "moybyte.files",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 330,
+    "app": {
+      "id": "files",
+      "entry": "files_app:FilesAppLayer",
+      "text_mode": false,
+      "order": 60
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "files"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

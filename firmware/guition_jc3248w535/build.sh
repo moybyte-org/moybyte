@@ -50,9 +50,7 @@ moybyte_setup_idf esp32s3 \
 # ---------------------------------------------------------------------------
 # 2) The patch ladder -- THIS BOARD'S half of the build, deliberately short.
 #    Not applied, each a decision: the esp_lcd tx_color no-acquire patch
-#    (moy_axs drives spi_master raw, no esp_lcd anywhere in this build) and
-#    the #69 I2C GIL release (no input-poller thread here -- the AXS touch is
-#    one 8-byte read per frame on an otherwise idle bus).
+#    (moy_axs drives spi_master raw, no esp_lcd anywhere in this build).
 # ---------------------------------------------------------------------------
 
 # 2a) REPR_C unboxed floats (#66) -- the same chip-class lever the T-Deck
@@ -63,11 +61,23 @@ moybyte_patch_map_cache_for_repr_c
 # Size-class run hints for gc_alloc (#66): every console board takes it; the
 # lib and tools/patch_gc_run_hints.py say why, and the verdict is per board.
 moybyte_patch_gc_run_hints
+# The gc meters (gc.pauses, gc.areas): every console board takes them, for
+# the PERF line's gc= field and the dev channel's `heapcaps` word.
+moybyte_patch_gc_meters
+# An equal-length slice store moves no tail: every board takes it, and
+# tools/patch_slice_store.py carries the measurement.
+moybyte_patch_slice_store
+# A found extensible built-in enters sys.modules: every board takes it,
+# and tools/patch_import_cache.py carries the measurement.
+moybyte_patch_import_cache
+# DECLINED moybyte_patch_thread_state_tls -- the VM's thread state as a
+# `__thread` variable. Measured on the P4s (RISC-V), where the TLS slot's
+# lookup was ~5% of an Editor frame; on this Xtensa board it is unmeasured,
+# and a board takes it when a profile here shows the same path.
 moybyte_patch_gc_split_reserve
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.
 moybyte_patch_native_code_free
-moybyte_patch_espnow_ring_race
 
 # The console is the SoC's USB-Serial/JTAG: it takes, when it starts, what a
 # host sent during the bootloader, instead of leaving it in the FIFO for a
@@ -78,9 +88,6 @@ moybyte_patch_usj_rx_init
 #     sdkconfig.board (adopted 2026-08-19).
 moybyte_patch_psram_retune
 
-# DECLINED moybyte_patch_p4_ble_hid_fastpath -- an ESP32-P4 silicon patch: it
-# edits modbluetooth.c for native/p4/moy_ble_hid, a module this board does not
-# compile.
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
 # the MIPI-DSI bridge-underrun ISR. This board has no DSI peripheral.
 
@@ -116,6 +123,10 @@ moybyte_stage_native
 #    the roster only grows and the slot does not. `moy_carts.seed_any` picks the
 #    decoder off the roster's FORM, so nothing else in the boot changed.
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed "${MODULES_DIR}/carts_data.py"
+
+#    fonts_data.py: the font set this board's tier takes (tools/make_font.py,
+#    native/moy_ui/fonts/), frozen so its bytes stay in flash.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/make_font.py" module "${SCRIPT_DIR}" "${MODULES_DIR}/fonts_data.py"
 
 #    The OTA identity stamp (#53): a fresh board id -- an OTA payload is an
 #    app-partition image and the manifest is per board.

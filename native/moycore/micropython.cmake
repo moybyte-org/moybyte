@@ -15,6 +15,8 @@ add_library(usermod_moycore INTERFACE)
 
 target_sources(usermod_moycore INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoycore.c
+    ${CMAKE_CURRENT_LIST_DIR}/moycore_run.c
+    ${CMAKE_CURRENT_LIST_DIR}/moycore_lua.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy_binding.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy_p8_binding.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy/moy_wasm.c
@@ -24,14 +26,22 @@ target_include_directories(usermod_moycore INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx/libmoy
     ${CMAKE_CURRENT_LIST_DIR}/../moy_lua/lua
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_spine
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_store
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_glass
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_gfx
+    ${CMAKE_CURRENT_LIST_DIR}/../moy_ui
 )
 
 # MOY_PIXEL_RGB565 changes sizeof(moy_pixel) and therefore moy_canvas's layout,
 # so it must match every translation unit that sees moy.h -- moy_gfx compiles
 # with the same define. MOY_WITH_LUA is what compiles libmoy's binding at all.
+# MOYCORE_UI opens the public UI API's Lua face (moycore_ui.h), whose verbs are
+# native/moy_ui's: every board that takes moycore takes moy_ui.
 target_compile_definitions(usermod_moycore INTERFACE
     MOY_PIXEL_RGB565=1
     MOY_WITH_LUA=1
+    MOYCORE_UI=1
 )
 
 target_link_libraries(usermod INTERFACE usermod_moycore)

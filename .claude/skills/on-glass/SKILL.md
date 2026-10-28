@@ -45,6 +45,7 @@ tools/board.py tdeck py "ws.screen" "len(ws.carts.all)"   # eval on the live con
 tools/board.py tdeck py --exec "ws._x = 1"    # statements, in the shared ws._g namespace
 tools/board.py tdeck pmem [--text]            # the running cart's 256 cells (--text: a string)
 tools/board.py tdeck mem                      # python heap, internal SRAM, PSRAM
+tools/board.py tdeck tail 3 --send heapcaps --grep HEAPCAPS  # every heap's total/free/largest/low-water, one line
 tools/board.py tdeck tap 160 120              # swipe X0 Y0 X1 Y1 [FRAMES] / open settings
 tools/board.py tdeck tail 10 --send "diag 1" --grep PERF
 tools/board.py tdeck perf "Brick Siege"       # see the perf skill
@@ -83,6 +84,7 @@ python3 experiments/wasm_aot/doom/build_cart.py --out /tmp/carts   # never commi
 tools/board.py pass tdeck p4          # build each image from THIS tree, flash, boot, suite
 tools/board.py pass --all -k wasm     # every console board; -k goes to pytest
 tools/board.py pass tdeck --skip-build   # flash what dist/ has; --no-flash: the suite only
+tools/board.py pass --all --build-only    # every image, the Zero's too, no board: preflight's firmware lane
 tools/board.py pass --all --shot      # ...and a screenshot of each at the end
 ```
 
@@ -129,6 +131,15 @@ when it has; a suite started earlier errors every test with "did not answer
    usb_reset`, which its `[flash]` block declares and `reboot` uses.
 4. Still silent after a reboot: the image. Hold the T-Deck's trackball (GPIO0)
    while powering on to reach the ROM loader, then `flash`.
+5. It prints `KERNEL recovery reason=...` lines and answers nothing else: the
+   board is on the kernel's recovery floor (`native/moy_kernel/`) -- the VM
+   failed to start or crashed into a boot loop. Read the crash it shows, then
+   send `retry`, `safe` (boots on default settings, `system.json` neither
+   read nor written, no wallpaper cart) or `repl` (skips `main.py`) as a line; each is a restart. A console that cannot start
+   its VM can still take a release there: `update` says what this build's
+   channel offers, `update install` installs it and restarts, over the
+   network the WiFi driver kept from its last address.
+   `tools/kernel_gate.py BOARD` drives the floor end to end.
 
 When a suite fails on a board you have just been driving, suspect your own
 leftovers first: `desk`, check `state`'s stack, reboot if unsure.

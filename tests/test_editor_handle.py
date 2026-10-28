@@ -23,8 +23,15 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe                              # noqa: E402
-from ws_helpers import build_ws, device_frames as _dframe  # noqa: E402
+from ws_helpers import build_ws, device_frames as _dframe, select_on_home  # noqa: E402
 from runtime import editor_handle, moy_carts, text_modes  # noqa: E402
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
 
 DT = 1.0 / 30
 
@@ -54,7 +61,7 @@ def _draw(ws, ed, rect=(0, 0, 320, 200)):
 
 def _row_y(ed, buffer_row, seg=0):
     """The y the last draw put one buffer line's visual row at."""
-    for brow, si, y in ed._vis:
+    for brow, si, y in ed._visible():
         if brow == buffer_row and si == seg:
             return y
     raise AssertionError("row %d/%d was not drawn" % (buffer_row, seg))
@@ -118,16 +125,13 @@ def _device_ws(tmp_path):
     There are two InputState classes and the boards use `device/moybyte/input.py`
     -- a keyboard SOURCE writes `last_key` and the merge is what the console
     reads. Notes is opened the way a kid opens it: from the launcher."""
-    from device.moybyte.input import InputState as DeviceInputState
+    from runtime.moy_input import InputTable as DeviceInputState
 
     ws = build_ws(tmp_path)
     inp = DeviceInputState()
     inp.cart_start_ms = 0
     ws.input = inp
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Notes":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Notes")
     ws.open()
     return ws, inp.source("kbd")
 
@@ -191,6 +195,18 @@ def test_a_blurred_handle_still_takes_a_key_the_skin_feeds_it(tmp_path):
     ed.key(ord("a"))
     ed.key(ord("b"))
     assert ed.text() == "ab"
+
+
+def test_delete_takes_the_character_after_the_caret(tmp_path):
+    """A handle's Delete (Notes) is forward delete; Backspace goes back."""
+    ws = build_ws(tmp_path)
+    ed = _handle(ws, "manual")
+    for ch in "abc":
+        ed.key(ord(ch))
+    ed.ed.col = 1
+    assert ed.key(0x7F) is not False and ed.text() == "ac"
+    ed.key(0x08)
+    assert ed.text() == "c"
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +311,7 @@ def test_a_read_only_store_keeps_the_text_and_reports_the_failure(tmp_path):
     ed = _handle(ws, "stuck")
     ed.set_text("still here")
     ws.can_manage = False
+    ws.store.bind()                            # the C rows read the store's state as bound
     ok, why = ed.save()
     assert ok is False and why
     assert ed.text() == "still here"           # editing is untouched
@@ -305,10 +322,7 @@ def test_leaving_the_cart_writes_a_dirty_handle(tmp_path):
     passes -- the X, the hold gesture, quit(), a crash -- so a kid who taps X
     never loses a note."""
     ws = build_ws(tmp_path)
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Notes":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Notes")
     ws.open()
     ws.input.begin_frame()
     ws.frame(DT)
@@ -346,7 +360,7 @@ def test_a_checkbox_is_tappable_and_the_tick_paints(tmp_path):
     cv = _draw(ws, ed)
     y = _row_y(ed, 0)
     empty = probe.painted_pixels_rect(cv, 0, y, 8 * 3, 8)
-    assert ed.tap(8 * 3 + 2, y + 3) == ("check", 0)
+    assert ed.tap(8 + 2, y + 3) == ("check", 0)          # the box, its first cells
     assert ed.text() == "- [x] milk\n"
     cv = _draw(ws, ed)
     assert probe.painted_pixels_rect(cv, 0, _row_y(ed, 0), 8 * 3, 8) > empty
@@ -362,11 +376,13 @@ def test_a_link_is_underlined_and_a_tap_on_it_names_the_note(tmp_path):
     cv = _draw(ws, ed)
     th = ws.theme_colors
     y = _row_y(ed, 0)
-    # The RULE under the link, and nothing under the words either side of it.
+    # The RULE under the link (its brackets are not drawn: "go to other
+    # now"), and nothing under the words either side of it.
     rule = y + 7
-    assert probe.word_of(th["focus"], cv) in _band(cv, rule, 1, 6 * 8, 15 * 8)
-    assert probe.word_of(th["focus"], cv) not in _band(cv, rule, 1, CARET, 6 * 8)
-    assert probe.word_of(th["focus"], cv) not in _band(cv, rule, 1, 15 * 8)
+    link = probe.word_of(th.get("value", th["focus"]), cv)
+    assert link in _band(cv, rule, 1, 6 * 8, 11 * 8)
+    assert link not in _band(cv, rule, 1, CARET, 6 * 8)
+    assert link not in _band(cv, rule, 1, 11 * 8)
     assert ed.tap(6 * 8 + 2, y + 3) == ("link", "other")
     # and a tap OFF the link is an ordinary caret place
     assert ed.tap(1, y + 3) == ("caret", None)
@@ -404,8 +420,8 @@ def test_wrap_is_the_modes_and_only_prose_wraps(tmp_path):
     _draw(ws, code)
     assert text_modes.MODES[text_modes.MD].wrap is True
     assert text_modes.MODES[text_modes.CODE].wrap is False
-    assert len(prose._vis) > 1, "one prose line must occupy several rows"
-    assert len(code._vis) == 1, "a code line scrolls sideways, it does not wrap"
+    assert len(prose._visible()) > 1, "one prose line must occupy several rows"
+    assert len(code._visible()) == 1, "a code line scrolls sideways, it does not wrap"
 
 
 def test_the_layout_memo_holds_a_line_and_an_edit_invalidates_it(tmp_path):
@@ -447,10 +463,11 @@ def test_a_checkbox_line_can_still_carry_a_link(tmp_path):
     ed = _handle(ws, "both")
     cv = _draw(ws, ed)
     y = _row_y(ed, 0)
-    assert probe.word_of(ws.theme_colors["focus"], cv) in \
-        _band(cv, y + 7, 1, 11 * 8, 20 * 8)
-    assert ed.tap(13 * 8, y + 3) == ("link", "other")
-    assert ed.tap(3 * 8 + 2, y + 3) == ("check", 0)
+    th = ws.theme_colors
+    assert probe.word_of(th.get("value", th["focus"]), cv) in \
+        _band(cv, y + 7, 1, 8 * 8, 13 * 8)      # "   read other": the box, then the words
+    assert ed.tap(10 * 8, y + 3) == ("link", "other")
+    assert ed.tap(8 + 2, y + 3) == ("check", 0)
 
 
 def test_a_resize_drops_the_memo_because_the_wrap_moved(tmp_path):
@@ -458,9 +475,9 @@ def test_a_resize_drops_the_memo_because_the_wrap_moved(tmp_path):
     moy_carts.save_file("docs", "wide", "word " * 30, ws.carts_root)
     ed = _handle(ws, "wide")
     _draw(ws, ed, (0, 0, 320, 200))
-    wide = len(ed._vis)
+    wide = len(ed._visible())
     _draw(ws, ed, (0, 0, 120, 200))
-    assert len(ed._vis) > wide, "a narrower page wraps into more rows"
+    assert len(ed._visible()) > wide, "a narrower page wraps into more rows"
 
 
 def test_the_caret_stays_on_screen_in_a_wrapped_document(tmp_path):
@@ -471,7 +488,7 @@ def test_the_caret_stays_on_screen_in_a_wrapped_document(tmp_path):
     _draw(ws, ed, (0, 0, 320, 100))
     ed.ed.row = len(ed.ed.lines) - 1
     _draw(ws, ed, (0, 0, 320, 100))
-    assert any(brow == ed.ed.row for brow, _si, _y in ed._vis)
+    assert any(brow == ed.ed.row for brow, _si, _y in ed._visible())
 
 
 @pytest.mark.parametrize("cols,expected", [
@@ -592,7 +609,7 @@ def test_the_caret_is_reachable_at_the_bottom_of_a_long_note(tmp_path):
     ed.nav(0, 200)                          # roll to the end
     _draw(ws, ed, (4, 40, 312, 186))
     assert ed.caret()[0] == 79
-    assert any(brow == 79 for brow, _si, _y in ed._vis), "the last line is drawn"
+    assert any(brow == 79 for brow, _si, _y in ed._visible()), "the last line is drawn"
 
 
 # ---------------------------------------------------------------------------

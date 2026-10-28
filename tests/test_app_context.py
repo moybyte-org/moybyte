@@ -36,7 +36,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 RUNTIME = ROOT / "runtime"
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, use_theme
 
 from runtime import app_context as _ac
 from runtime import chrome as _chrome
@@ -45,17 +45,14 @@ from runtime import system_api as _api
 from runtime.app_decls import APPS
 
 
-# Every (module, class) on the app side of the seam. The seven registered apps
-# come from the generated declaration -- so a NEW app is covered by these tests
-# the moment it is declared, with no list to remember here (Phase 5's point).
-# ArtworkService is not a Layer and so is not in APPS, but it is on the app side
-# and takes a context exactly as an app does.
+# Every (module, class) on the app side of the seam: the registered apps, from
+# the generated declaration -- so a NEW app is covered by these tests the
+# moment it is declared, with no list to remember here (Phase 5's point).
 def _app_targets():
     out = []
     for d in APPS:
         mod, _, cls = str(d["entry"]).partition(":")
         out.append((mod, cls))
-    out.append(("artwork", "ArtworkService"))
     return out
 
 
@@ -70,13 +67,38 @@ def _class_node(mod_name, cls_name):
     raise AssertionError("no class %s in runtime/%s.py" % (cls_name, mod_name))
 
 
-def _roles_named(cls_node):
+# The modules an app's model classes live in: a class an app builds over its
+# own context (Paint's `ArtworkService(ctx)`, `PictureCopies(ctx)`) reaches
+# roles on the app's behalf, so its source counts as the app's.
+_MODEL_MODULES = ("artwork", "picture_copies")
+
+
+def _model_node(name):
+    for mod in _MODEL_MODULES:
+        tree = ast.parse((RUNTIME / (mod + ".py")).read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == name:
+                return node
+    return None
+
+
+def _roles_named(cls_node, seen=None):
     """Every AppContext ROLE the class's source reaches, however it is spelled:
-    `ctx.files`, `self.ctx.files`, or the hoist `f = ctx.files`. Every form goes
-    through one `<something>.ctx.<role>` or `ctx.<role>` attribute node, so one
-    walk catches them all."""
+    `ctx.files`, `self.ctx.files`, or the hoist `f = ctx.files` -- and the
+    roles of every model class it builds over its context (`Model(ctx)`).
+    Every form goes through one `<something>.ctx.<role>` or `ctx.<role>`
+    attribute node, so one walk catches them all."""
+    seen = set() if seen is None else seen
+    seen.add(cls_node.name)
     found = set()
     for node in ast.walk(cls_node):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id not in seen
+                and any(isinstance(a, ast.Name) and a.id == "ctx" for a in node.args)):
+            model = _model_node(node.func.id)
+            if model is not None:
+                found |= _roles_named(model, seen)
+            continue
         if not isinstance(node, ast.Attribute) or node.attr not in _ac.ROLES:
             continue
         base = node.value
@@ -129,9 +151,7 @@ def test_an_app_declares_nothing_it_does_not_use(mod, cls):
 def test_the_context_carries_only_the_declared_roles(tmp_path):
     ws = _ws(tmp_path)
     for _mod, cls in APP_TARGETS:
-        app = ws.artwork if cls == "ArtworkService" else None
-        if app is None:
-            app = next(a for a, _t in ws._apps if type(a).__name__ == cls)
+        app = next(a for a, _t in ws._apps if type(a).__name__ == cls)
         ctx = app.ctx
         declared = set(_declared(_mod, cls))
         for role in _ac.ROLES:
@@ -188,52 +208,9 @@ def test_no_role_uses_a_property_forward():
 
 
 # -- PERF: the hoist is applied -------------------------------------------------
-
-_HOT = {
-    # app id -> the cap on `ctx.surface.canvas()` calls in one drawn frame.
-    # ONE is the target: `cv = self._surf.canvas()` at the top of draw(). The
-    # caps are the MEASURED counts (2026-08-19) with no slack above the highest
-    # observed value, so a canvas() call added inside a per-widget helper fails
-    # here instead of costing a hop per widget on glass.
-    "calc": 1, "artwork": 1, "appearance": 1,
-    "storybook": 1, "files": 1,
-}
-
-
-@pytest.mark.parametrize("kind", sorted(_HOT))
-def test_the_canvas_role_is_hoisted_once_per_drawn_frame(tmp_path, kind):
-    """The hoist mandate as a counter budget. `ctx.surface` is a plain attribute
-    and cannot be counted without adding the very descriptor this file forbids,
-    so the countable signal is the role's own verb: how many times a frame asks
-    the surface role for the canvas.
-
-    LOWER BOUND FIRST -- without it the test passes when the app stops drawing
-    at all, or when the counter is wired to the wrong object, which is exactly
-    how a budget quietly stops being one (test_top_bar.py records the same
-    lesson from a real regression)."""
-    ws = _ws(tmp_path)
-    app = ws._apps_by_id[kind]
-    assert ws.open_app(app), kind + " has no identity cart"
-    surf = app.ctx.surface
-    calls = [0]
-    real = surf.canvas
-
-    def counted():
-        calls[0] += 1
-        return real()
-
-    surf.canvas = counted
-    frames = 4
-    for _ in range(frames):
-        ws._dirty = True
-        app.draw(1 / 30.0)
-    assert calls[0] >= frames, \
-        "no canvas() call counted in %d frames -- is the counter on the right role?" \
-        % frames
-    per_frame = calls[0] / float(frames)
-    assert per_frame <= _HOT[kind], \
-        "%s asks ctx.surface for the canvas %.1f times per frame (cap %d): hoist it" \
-        % (kind, per_frame, _HOT[kind])
+#
+# The per-frame role budgets, `surface.canvas` at one read per drawn frame
+# among them, are `tests/test_roles.py`'s.
 
 
 def _quiesce_frame(ws):
@@ -266,10 +243,13 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
     render as CAN'T SAVE None instead of CAN'T SAVE HERE."""
     from runtime import app_shell
     from runtime import artwork
+    from runtime import shell_servers
     assert app_shell.NO_STORE is _ac.NO_STORE
     assert artwork.NO_STORE is _ac.NO_STORE
+    assert shell_servers.NO_STORE is _ac.NO_STORE
     ws = _ws(tmp_path)
     ws.carts_store = None
+    ws.store.bind()
     _v, err = ws.app_context("demo", ("files",)).files.load("docs", "x")
     assert ws.files_app._persist((None, err)) is False
     assert ws.files_app.status == "CAN'T SAVE HERE"
@@ -277,8 +257,9 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
 
 # -- PERF: the roles are built at BOOT, never per frame ------------------------
 
+# Every role's type (native/moy_app's, Python classes on the host binding).
 _ROLE_CLASSES = ("Damage", "Surface", "Theme", "Files", "Carts", "Nav", "Prefs",
-                 "Notify", "WallpaperRole", "_RawFiles", "_RawCarts")
+                 "Notify", "Wallpaper", "Artwork", "Clipboard", "Install")
 
 
 def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
@@ -290,9 +271,10 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
     What it guards: a context rebuilt per frame -- the obvious way to make
     `ctx` "always fresh" and the one that would put eleven object allocations
     into every frame on a board with ~23KB of internal SRAM free in play."""
+    import moy_app
     built = []
     for name in _ROLE_CLASSES:
-        cls = getattr(_ac, name)
+        cls = getattr(moy_app, name)
         real = cls.__init__
 
         def counted(self, *a, _r=real, _n=name, **kw):
@@ -303,10 +285,10 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
 
     ws = _ws(tmp_path)
     boot = len(built)
-    # Lower bound first: eight contexts (seven apps + ArtworkService), each with
-    # several roles, are built during boot. A zero here means the counter is not
+    # Lower bound first: seven contexts, one per app, each with several roles,
+    # are built during boot. A zero here means the counter is not
     # on the construction path any more.
-    assert boot >= 8, "no role construction counted at boot (%d)" % boot
+    assert boot >= 7, "no role construction counted at boot (%d)" % boot
 
     app = ws._apps_by_id["files"]
     assert ws.open_app(app)
@@ -365,36 +347,33 @@ def test_storage_verbs_report_no_store_instead_of_raising(tmp_path):
     ws = _ws(tmp_path)
     ctx = ws.app_context("demo", ("files", "carts"))
     ws.carts_store = None
+    ws.store.bind()
     assert ctx.files.ready() is False
     for res in (ctx.files.load("docs", "x"),
                 ctx.files.save("docs", "x", "y"),
                 ctx.files.trash_list(),
-                ctx.files.batch(lambda f: f.list("docs")),
-                ctx.carts.load_deck({"path": "/nope"}),
-                ctx.carts.save_code({"path": "/nope"}, "x")):
+                ctx.files.begin(),
+                ctx.carts.begin(),
+                ctx.carts.images({"path": "/nope"}),
+                ctx.carts.save_image({"path": "/nope"}, "x", "y")):
         value, err = res
         assert value is None
         assert err is _ac.NO_STORE
 
 
 def test_a_failing_store_surfaces_as_err_text_not_an_exception(tmp_path):
+    """A medium that refuses the write: the user-files root is a FILE, so the
+    kind's folder cannot be made and the publish fails. The failure is the
+    pair's text, never NO_STORE and never a raise; a load of nothing there is
+    no value and no failure."""
     ws = _ws(tmp_path)
     ctx = ws.app_context("demo", ("files",))
-
-    class _Boom:
-        @staticmethod
-        def load_file(kind, name, root):
-            raise OSError("disk on fire")
-
-        @staticmethod
-        def save_file(kind, name, blob, root):
-            raise OSError("disk on fire")
-
-    ws.carts_store = _Boom()
-    value, err = ctx.files.load("docs", "x")
-    assert value is None and "disk on fire" in str(err) and err is not _ac.NO_STORE
+    with open(_store.files_root(ws.carts_root), "w") as f:
+        f.write("not a folder")
     value, err = ctx.files.save("docs", "x", "y")
-    assert value is None and "disk on fire" in str(err)
+    assert value is None and err and err is not _ac.NO_STORE
+    assert "Errno" in str(err)
+    assert ctx.files.load("docs", "x") == (None, None)
 
 
 def test_the_persist_status_contract_still_distinguishes_the_two(tmp_path):
@@ -404,6 +383,7 @@ def test_the_persist_status_contract_still_distinguishes_the_two(tmp_path):
     ws = _ws(tmp_path)
     app = ws.files_app
     ws.carts_store = None
+    ws.store.bind()
     assert app._persist((None, _ac.NO_STORE)) is False
     assert app.status == "CAN'T SAVE HERE"
     assert app._save_failed is True
@@ -421,6 +401,7 @@ def test_the_no_store_sentinel_renders_as_words(tmp_path):
     assert str(_ac.NO_STORE) == "NO STORAGE"
     ws = _ws(tmp_path)
     ws.carts_store = None
+    ws.store.bind()
     _v, err = ws.app_context("demo", ("files",)).files.save("docs", "x", "y")
     assert "%s" % (err,) == "NO STORAGE"
 
@@ -430,11 +411,11 @@ def test_the_no_store_sentinel_renders_as_words(tmp_path):
 def test_prefs_namespace_defaults_to_the_app_id(tmp_path):
     ws = _ws(tmp_path)
     ctx = ws.app_context("demo", ("prefs",))
-    ctx.prefs.set("scroll", 7, persist=False)
-    assert ws.system["demo_scroll"] == 7
+    ctx.prefs.set("scroll", 7)
+    assert ws.system.get("demo_scroll") == 7
     assert ctx.prefs.get("scroll") == 7
-    ctx.prefs.clear("scroll", persist=False)
-    assert "demo_scroll" not in ws.system
+    ctx.prefs.clear("scroll")
+    assert ws.system.text("demo_scroll") is None
     assert ctx.prefs.get("scroll", "fallback") == "fallback"
 
 
@@ -458,7 +439,7 @@ def test_prefs_writes_and_clears_reach_system_json(tmp_path):
     prefs.set("doc", "sketch_1")
     assert _system_json(ws)["demo_doc"] == "sketch_1"
     prefs.clear("doc")
-    assert "demo_doc" not in ws.system
+    assert ws.system.text("demo_doc") is None
     assert "demo_doc" not in _system_json(ws)
 
 
@@ -468,7 +449,7 @@ def test_prefs_writes_and_clears_reach_system_json(tmp_path):
 # A statement-level sweep of the whole suite found TEN verbs on this module
 # whose bodies had never executed -- the seven #208 names (`Files.count`,
 # `Files.empty_trash`, `Files.decode_text`, `_RawFiles.empty_trash`,
-# `Carts.save_deck`, `Carts.images`, `Theme.set_variant`) plus `Files.history`,
+# `Carts.images`, `Theme.set_variant`) plus `Files.history`,
 # `_RawFiles.history` and `_NoStore.__str__` -- and two branches nothing
 # reached: `Nav.open_app`'s id resolution and `Prefs.clear`'s persist.
 #
@@ -501,9 +482,9 @@ def _files(tmp_path):
 def _new_cart(carts, title):
     """A cart of this test's own making. Borrowing `ws.carts.all[0]` makes an
     assertion about a cart's FOLDER hostage to whichever seed sorts first --
-    one with a deck.json or an images/ dir would read as a role verb that
+    one with an images/ dir would read as a role verb that
     wrote when it should not have."""
-    cart, err = carts.batch(lambda raw: raw.create(title, type="story"))
+    cart, err = carts.create(title, None, "story")
     assert err is None, err
     return cart
 
@@ -561,6 +542,7 @@ def test_empty_trash_is_a_WRITE_and_a_read_only_store_keeps_the_trash(tmp_path):
     files.save("docs", "note", _store.encode_text("hi"))
     files.delete("docs", "note")
     ws.can_manage = False
+    ws.store.bind()
     assert files.readable() is True and files.ready() is False
     assert files.empty_trash() == (None, _ac.NO_STORE)
     assert os.listdir(_trash_dir(ws, "docs")) == ["note" + _kind_ext("docs")]
@@ -578,34 +560,78 @@ def test_stamp_passes_the_blob_through_when_there_is_no_store(tmp_path):
     ws, files = _files(tmp_path)
     blob = _store.encode_moyimg(1, 1, bytearray([0]))
     ws.carts_store = None
+    ws.store.bind()
     assert files.sig(blob) is None                  # the siblings' degradation
     assert files.stamp(blob, "drawings", "kite", 7) == blob
     ws.carts_store = _store
+    ws.store.bind()
     stamped = files.stamp(blob, "drawings", "kite", files.sig(blob))
     assert stamped != blob and "drawings/kite" in stamped
 
 
-def test_the_raw_view_runs_the_same_verbs_inside_one_session(tmp_path):
-    """`batch(fn)` hands `fn` the RAW view -- bare values, exceptions
-    propagating -- so that no verb name ever has two return shapes. `_RawFiles`
-    is a separate class for exactly that, and its bodies are reachable ONLY
-    this way, so nothing else in the suite executes them."""
+def test_a_session_is_bookkeeping_and_the_verbs_answer_the_same_in_it(tmp_path):
+    """`begin`/`end` bracket a session, and inside one a verb answers exactly
+    as it does outside one: there is no raw view, so no verb has two return
+    shapes. A session left open ends at the next frame, and at a run's end."""
     ws, files = _files(tmp_path)
     files.save("docs", "note", _store.encode_text("hi"))
-    files.history_commit("docs", "note", [["ins", 1]])
-    files.delete("docs", "note")
-    seen, err = files.batch(lambda raw: (raw.count("docs"),
-                                         raw.trash_list(),
-                                         raw.history("docs", "note"),
-                                         raw.empty_trash(),
-                                         raw.trash_list()))
-    assert err is None
-    assert seen == (0, [("docs", "note")], [], None, [])
-    assert os.listdir(_trash_dir(ws, "docs")) == []
-    # RAW means a failure RAISES -- and `batch`'s one try/except is what turns
-    # it back into the module's `(value, err)`.
-    value, err = files.batch(lambda raw: raw.count("nope"))
-    assert value is None and "nope" in str(err) and err is not _ac.NO_STORE
+    outside = (files.count("docs"), files.list("docs"), files.count("nope"))
+    assert files.begin() == (True, None)
+    inside = (files.count("docs"), files.list("docs"), files.count("nope"))
+    files.end()
+    assert ws.app_abi.files_end_all() == 0, "end closed the session"
+    assert inside == outside
+    assert inside[2][0] is None and inside[2][1]
+    files.begin()
+    files.begin()
+    ws._dirty = True
+    ws.frame(1 / 30.0)
+    assert ws.app_abi.files_end_all() == 0, "a frame left the sessions open"
+    files.begin()
+    ws.player._end_grant()
+    assert ws.app_abi.files_end_all() == 0, "a run's end left a session open"
+
+
+def test_a_leaked_session_leaves_the_panel_flushing(tmp_path):
+    """The bus rule (docs/kernel_appabi_2026-10.md section 2.6): on the
+    T-Deck the card shares the panel's SPI host, and the gate that drains the
+    flush is held only around one store op. This is the host's model of it: a
+    gate held while `_with_sd` runs a cart-store op (the files rows take the
+    kernel's gate, moy_vol_gate_enter, which the T-Deck's suite holds them to
+    and the host has none of), and a present that cannot flush while it is
+    held. A session of either role leaked across frames must present every
+    frame and never be held at a present."""
+    ws, files = _files(tmp_path)
+    carts = ws.app_context("demo2", ("carts",)).carts
+    gate = [0]
+    held_at_present = []
+
+    def with_sd(fn):
+        gate[0] += 1
+        try:
+            return fn()
+        finally:
+            gate[0] -= 1
+
+    ws._with_sd = with_sd
+    real_flush = ws.comp.flush
+
+    def flush(*a, **kw):
+        held_at_present.append(gate[0])
+        return real_flush(*a, **kw)
+
+    ws.comp.flush = flush
+    files.begin()                                  # never ended
+    carts.begin()                                  # never ended
+    files.save("docs", "leak", _store.encode_text("x"))
+    assert carts.images({"path": str(tmp_path / "nope.moy")}) == ({}, None)
+    before = ws._frames_drawn
+    for _ in range(4):
+        ws._dirty = True
+        ws.frame(1 / 30.0)
+    assert ws._frames_drawn - before == 4, "the panel stopped presenting"
+    assert held_at_present and set(held_at_present) == {0}, held_at_present
+    assert ws.app_abi.files_end_all() == 0 and ws.store.open == 0
 
 
 def test_decode_text_reads_a_stored_document_and_a_bare_string_is_one(tmp_path):
@@ -625,6 +651,7 @@ def test_decode_text_reads_a_stored_document_and_a_bare_string_is_one(tmp_path):
     assert files.decode_text(files.encode_text("")) == []
     assert files.decode_text("") == [] and files.decode_text(None) == []
     ws.carts_store = None
+    ws.store.bind()
     assert files.decode_text(blob) == []                 # no store, no codec
 
 
@@ -654,25 +681,6 @@ def test_the_history_role_reads_back_what_history_commit_wrote(tmp_path):
 
 # -- ctx.carts -----------------------------------------------------------------
 
-def test_save_deck_writes_the_deck_into_the_carts_own_folder(tmp_path):
-    """Storybook's authoring verb, and the reason `carts` is a role of its own:
-    it writes into a CART, which is executable content."""
-    ws = _ws(tmp_path)
-    carts = ws.app_context("demo", ("carts",)).carts
-    cart = _new_cart(carts, "Deck Test")
-    deck = '{"format": "moydeck-v1", "pages": []}'
-    assert carts.load_deck(cart) == (None, None)          # never a deck before
-    assert carts.save_deck(cart, deck) == (None, None)
-    path = cart["path"] + "/" + _store.DECK_NAME
-    with open(path) as fh:
-        assert fh.read() == deck
-    assert carts.load_deck(cart) == (deck, None)
-    ws.can_manage = False
-    assert carts.save_deck(cart, "{}") == (None, _ac.NO_STORE)
-    with open(path) as fh:
-        assert fh.read() == deck                          # the refusal wrote nothing
-
-
 def test_carts_images_reads_the_assets_by_name_from_a_cart_or_a_path(tmp_path):
     """`moy_carts.load_images` takes the cart's PATH, so the raw verb accepts a
     path string as well as a cart dict. Both spellings are live -- and the
@@ -700,27 +708,30 @@ def test_carts_images_reads_the_assets_by_name_from_a_cart_or_a_path(tmp_path):
 def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
     """The DARK/LIGHT half of the theme (visual_identity_v1 4.3). Three things
     have to happen together: `light()` -- the gate every surface's light branch
-    reads -- follows; `ws.theme_colors` is REBOUND, because the launcher's cache
-    keys fold `id(ws.theme_colors)` and the rebind IS the invalidation; and the
-    choice reaches system.json or it is gone at the next boot."""
+    reads -- follows; the app's colour dict is a new one, rebuilt at the
+    table's new generation; and the choice reaches system.json or it is gone
+    at the next boot."""
     ws = _ws(tmp_path)
     theme = ws.app_context("demo", ("theme",)).theme
-    assert theme.variant() == "dark" and theme.light() is False
+    assert theme.variant() == "light" and theme.light() is True    # Moy's Day
     before = theme.colors()
     family = theme.name()
-    theme.set_variant("light")
-    assert theme.variant() == "light" and theme.light() is True
+    theme.set_variant("dark")
+    assert theme.variant() == "dark" and theme.light() is False
     assert theme.name() == family                    # the FAMILY does not move
     assert theme.colors() is not before
-    assert ws.system["theme_variant"] == "light"
-    assert _system_json(ws)["theme_variant"] == "light"
+    assert ws.system.get("theme_variant") == "dark"
+    assert _system_json(ws)["theme_variant"] == "dark"
 
 
-def test_set_variant_without_persist_leaves_the_stored_choice_alone(tmp_path):
+def test_the_shells_unpersisted_variant_leaves_the_stored_choice_alone(tmp_path):
+    """`persist` is not in the app ABI: an app's set_variant always persists,
+    and only the shell's own calls (boot restore, cycling) take the look's
+    `persist=False` path."""
     ws = _ws(tmp_path)
     theme = ws.app_context("demo", ("theme",)).theme
     theme.set_variant("light")
-    theme.set_variant("dark", persist=False)
+    ws.look.set_theme_variant("dark", persist=False)
     assert theme.variant() == "dark" and theme.light() is False
     assert _system_json(ws)["theme_variant"] == "light"
 
@@ -747,10 +758,8 @@ def test_nav_opens_a_registered_app_by_id_and_refuses_an_unknown_one(tmp_path):
     ws = _ws(tmp_path)
     nav = ws.app_context("demo", ("nav",)).nav
     assert ws.screen == "launcher"
-    assert nav.app("no_such_app") is None
     assert nav.open_app("no_such_app") is False
     assert ws.screen == "launcher"
-    assert nav.app("calc") is ws._apps_by_id["calc"]
     assert nav.open_app("calc") is True
     assert ws.screen == "calc"
 
@@ -799,6 +808,7 @@ def test_the_scoped_handle_degrades_to_NO_STORE_rather_than_raising(tmp_path):
     ws, files = _files(tmp_path)
     scoped = _api.ScopedFiles(files, "docs")
     ws.carts_store = None
+    ws.store.bind()
     assert scoped.ready() is False
     assert scoped.save_text("note", "hi") == (None, _ac.NO_STORE)
     assert scoped.load_text("note") == ("", _ac.NO_STORE)
@@ -816,23 +826,31 @@ def test_the_scoped_handle_degrades_to_NO_STORE_rather_than_raising(tmp_path):
 # manifest; nothing called them.
 
 def test_the_ungated_verbs_answer_for_every_app_cart(tmp_path):
-    """`ui`/`theme()`/`screen()`/`bar_h()` are published with no permission at
-    all, because they are not capabilities -- they are how an app draws.
-    `bar_h` exists so a cart stops hardcoding 18 (a documented defect in
-    several seed carts), so it has to answer a number where the host passes no
-    strip rather than raise."""
+    """`ui`/`theme()`/`screen()`/`content_rect()`/`bar_h()` are published with
+    no permission at all, because they are not capabilities -- they are how an
+    app draws. `content_rect` and `bar_h` exist so a cart stops hardcoding 18
+    (a documented defect in several seed carts), so they have to answer where
+    the host passes no strip rather than raise."""
     ws = _ws(tmp_path)
     canvas = ws.sys_canvas
-    ns = _api.make_system_api(ws.app_context, {"title": "Plain"},
-                              canvas=canvas, bar_h=lambda: 18)
+    ns = _api.make_system_api(ws.app_context, {"title": "Plain"}, canvas=canvas)
     assert ns["ui"] is not None
     assert ns["screen"]() is canvas
-    assert ns["bar_h"]() == 18
-    assert ns["theme"]() is ws.theme_colors
-    ws.look.set_theme("berry")
-    assert ns["theme"]() is ws.theme_colors      # live tokens, never a snapshot
+    # The grant's surface row's bar: the host strip's rows, what the shell
+    # draws, whichever the strip is now.
+    assert ns["bar_h"]() == ws.app_bar_h() > 0
+    assert ns["content_rect"]() == ws.app_content_rect()
+    assert ns["content_rect"]()[1] == ns["bar_h"]()
+    # On a palette theme the app's tokens are the shell's; an RGB theme's
+    # are their nearest MOY64 inside the cart boundary
+    use_theme(ws, "night", "dark")
+    first = ns["theme"]()
+    assert first == ws.theme_colors
+    ws.look.set_theme("blocks")
+    assert ns["theme"]() != first                # live tokens, never a snapshot
+    assert ns["theme"]() is ns["theme"]()        # one dict per generation
     bare = _api.make_system_api(ws.app_context, {"title": "Plain"})
-    assert bare["screen"]() is None and bare["bar_h"]() == 0
+    assert bare["screen"]() is None and bare["bar_h"]() == ws.app_bar_h()
 
 
 def test_the_appearance_grant_publishes_a_working_theme_picker(tmp_path):
@@ -842,19 +860,20 @@ def test_the_appearance_grant_publishes_a_working_theme_picker(tmp_path):
     ws = _ws(tmp_path)
     ns = _api.make_system_api(ws.app_context,
                               {"title": "Skinner", "permissions": ["appearance"]})
-    assert sorted(ns) == ["bar_h", "screen", "set_theme", "theme", "themes", "ui"]
+    assert sorted(ns) == ["bar_h", "content_rect", "screen", "set_theme", "theme",
+                          "themes", "ui"]
     # NAMES, one per installed theme -- the round trip the docstring promises,
     # since `set_theme` takes a name and falls back to DEFAULT_THEME silently on
     # anything else. Feeding the picker's own output back is the case that used
     # to always land on "night".
-    assert ns["themes"]() == [n for n, _t in _chrome.THEMES]
+    assert ns["themes"]() == [n for n in _chrome.THEME_NAMES]
     for name in ns["themes"]():
         ns["set_theme"](name)
         assert ws.look.theme_name == name
-    ns["set_theme"]("berry")
-    assert ws.look.theme_name == "berry"
-    assert ns["theme"]() is ws.theme_colors
-    assert _system_json(ws)["theme"] == "berry"
+    ns["set_theme"]("blocks")
+    assert ws.look.theme_name == "blocks"
+    assert ns["theme"]() is ns["theme"]()
+    assert _system_json(ws)["theme"] == "blocks"
 
 
 def test_the_launch_grant_opens_apps_by_id_and_nothing_else(tmp_path):
@@ -870,13 +889,13 @@ def test_the_launch_grant_opens_apps_by_id_and_nothing_else(tmp_path):
 
 
 def test_an_untitled_cart_still_gets_a_stable_prefs_namespace():
-    """`app_id_for` keys an app's prefs namespace and its crash-guard strikes.
-    An empty id would put a bare `_scroll` into the shell's own settings dict,
-    beside `theme` and `font_scale`."""
-    assert _api.app_id_for(None) == "app"
-    assert _api.app_id_for({}) == "app"
-    assert _api.app_id_for({"title": ""}) == "app"
-    assert _api.app_id_for({"title": "My Notes!"}) == "my_notes"
+    """`moy_app.id_for` keys an app's grant, prefs namespace and crash-guard
+    strikes. An empty id would put a bare `_scroll` into the shell's own
+    settings dict, beside `theme` and `font_scale`."""
+    import moy_app
+    assert moy_app.id_for(None, None) == "app"
+    assert moy_app.id_for("", "") == "app"
+    assert moy_app.id_for(None, "My Notes!") == "my_notes"
 
 
 # -- the LEAVING hook is a host guarantee -------------------------------------
@@ -938,8 +957,9 @@ def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
 # `runtime/*_app.py runtime/artwork.py`, whose glob also catches editor_app.py
 # and host_app.py -- neither is a system app and neither is in Phase 6's scope,
 # so that condition is unsatisfiable as written.
-MIGRATED = ("calc_app", "appearance_app", "storybook_app",
-            "files_app", "artwork", "app_shell", "getcarts_app")
+MIGRATED = ("calc_app", "appearance_app", "storybook_app", "files_app",
+            "artwork", "picture_copies", "app_shell", "getcarts_app",
+            "file_widgets")
 
 
 @pytest.mark.parametrize("mod", MIGRATED)
@@ -958,37 +978,13 @@ def test_no_migrated_module_reaches_the_workstation(mod):
             "%s:%d still reaches through ws" % (mod, line_no)
 
 
-# `ctx.shell` is the un-narrowed Workstation and exists for ONE reason: the
-# shared FileGridView widget still duck-types on ws.carts_store / ws.carts_root /
-# ws._with_sd. This set may only SHRINK -- giving that widget the files role is
-# what deletes the escape hatch, and Phase 7 must never grant it to a cart.
-SHELL_CONSUMERS = {"PaintAppLayer", "FilesAppLayer"}
-
-
-def test_the_shell_escape_hatch_has_a_pinned_consumer_list():
-    have = set()
+def test_no_role_hands_out_the_console():
+    """The roles are the whole line between an app and the console: none of
+    them is the Workstation (the escape hatch `ctx.shell` was, until the file
+    grid took the files role), so an app reaches the shell only through a
+    role. The modules' own reach is the test above's."""
+    assert "shell" not in _ac.ROLES
     for mod, cls in APP_TARGETS:
-        if "shell" in _declared(mod, cls):
-            have.add(cls)
-    assert have <= SHELL_CONSUMERS, \
-        "new ctx.shell consumer(s) %s -- use a role, or argue in app_api_v1.md" % (
-            sorted(have - SHELL_CONSUMERS),)
-    assert have == SHELL_CONSUMERS, (
-        "ctx.shell consumers shrank to %s -- update SHELL_CONSUMERS (good news)"
-        % sorted(have))
-
-
-def test_the_only_shell_use_is_constructing_the_file_grid():
-    """Pins WHY the hatch is open. Every `ctx.shell` reference in an app module
-    must be handing the raw Workstation to FileGridView; anything else is a
-    reach-in wearing the hatch's clothes."""
-    for mod, _cls in APP_TARGETS:
+        assert "shell" not in _declared(mod, cls), cls
         src = (RUNTIME / (mod + ".py")).read_text(encoding="utf-8")
-        for line_no, line in enumerate(src.splitlines(), 1):
-            if "ctx.shell" not in line and "self._shell" not in line:
-                continue
-            ok = ("FileGridView(" in line
-                  or "self._shell = ctx.shell" in line
-                  or line.strip().startswith("#"))
-            assert ok, "%s:%d uses the shell hatch for something else: %s" % (
-                mod, line_no, line.strip())
+        assert "ctx.shell" not in src, mod

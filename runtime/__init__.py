@@ -10,10 +10,83 @@ There is no host canvas CLASS to export any more: the raster is the boards' own
 (`make_canvas` / `make_system_canvas`).
 """
 
-from . import palette
-from .editors import CodeEditor, PaintEditor, SpriteSheet
-from .input import InputState
-from .moy_image import Image
+import sys as _sys
+
+
+def _native_spine():
+    """The kernel's spine is C on every tier (docs/kernel_spine_2026-10.md):
+    on the CPython host it is native/moy_spine in the host's one library
+    (runtime/host_native.py) over ctypes
+    (`tools/moy_spine_binding.py`), registered as `moy_spine` and
+    `runtime.moy_spine` before anything imports either name. Its Python twin
+    is the suites' oracle (tests/spine_twin.py), never the host's."""
+    if "moy_spine" in _sys.modules:
+        mod = _sys.modules["moy_spine"]
+    else:
+        from tools import moy_spine_binding
+        mod = moy_spine_binding.binding()
+        if mod is None:
+            raise ImportError("the host's spine needs a C compiler "
+                              "(native/moy_spine over ctypes)")
+        _sys.modules["moy_spine"] = mod
+    _sys.modules["runtime.moy_spine"] = mod
+    return mod
+
+
+moy_spine = _native_spine()
+
+
+def _native_app():
+    """The app ABI's C rows (native/moy_app) over the host's one library,
+    registered as `moy_app` like the spine."""
+    if "moy_app" in _sys.modules:
+        return _sys.modules["moy_app"]
+    from tools import moy_app_binding
+    mod = moy_app_binding.binding()
+    if mod is None:
+        raise ImportError("the host's app ABI needs a C compiler "
+                          "(native/moy_app over ctypes)")
+    _sys.modules["moy_app"] = mod
+    return mod
+
+
+moy_app = _native_app()
+
+
+def _native_ufiles():
+    """The user-files layer (native/moy_store/moy_ufiles.h) over ctypes,
+    registered as `moy_ufiles` like the boards' module. Its library is built at
+    the first verb a caller uses (tools/moy_ufiles_binding.py)."""
+    if "moy_ufiles" in _sys.modules:
+        return _sys.modules["moy_ufiles"]
+    from tools import moy_ufiles_binding
+    mod = moy_ufiles_binding.binding()
+    _sys.modules["moy_ufiles"] = mod
+    return mod
+
+
+moy_ufiles = _native_ufiles()
+
+def _native_ui():
+    """The toolkit's C (native/moy_ui) over the host's one library,
+    registered as `moy_ui` like the boards' module (tools/moy_ui_binding.py)."""
+    if "moy_ui" in _sys.modules:
+        return _sys.modules["moy_ui"]
+    from tools import moy_ui_binding
+    mod = moy_ui_binding.binding()
+    if mod is None:
+        raise ImportError("the host's toolkit needs a C compiler "
+                          "(native/moy_ui over ctypes)")
+    _sys.modules["moy_ui"] = mod
+    return mod
+
+
+moy_ui = _native_ui()
+
+from . import palette  # noqa: E402
+from .editors import CodeEditor, PaintEditor, SpriteSheet  # noqa: E402
+from .input import InputState  # noqa: E402
+from .moy_image import Image  # noqa: E402
 
 __all__ = [
     "Image",

@@ -1,74 +1,46 @@
-"""Settings list scrolls to keep the selection visible (#53 added enough rows --
-UPDATE FW / CHANNEL / UPDATE ONLINE -- that the panel overflows). Before the fix the
-bottom rows were simply unreachable. The base set itself is 7 rows since #68 added
-PERF DIAG (vs 6 visible at fs=1), so even the host without an OTA updater scrolls
-by one; the availability flags force the 10-row device case on top of that.
+"""Settings' rows page scrolls (docs/look_2026-10.md step 19): the public
+UI API's page (runtime/ui.py) keeps the focused row in view as the keys move
+it, a finger drag scrolls it and is no tap, and a clean tap activates the row
+under it. The rows are the session's (`_settings_rows`, memoized on the
+capabilities), the page its groups of them.
 """
 
+import hashlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+_DT = 1 / 30
 
 
-def _ws(tmp_path):
+def _ws(tmp_path, **kw):
     from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
     ws.open_settings()
     return ws
 
 
 def _force_ota_rows(ws):
-    # No real updater on the host; flip the cached availability flags so _settings_rows
-    # appends UPDATE FW + CHANNEL + UPDATE ONLINE (the device's overflowing 9-row case).
+    # No real updater on the host; flip the cached availability flags so
+    # _settings_rows appends UPDATE FW + CHANNEL + UPDATE ONLINE.
     ws._updater_ok = True
     ws._online_ok = True
 
 
-def test_host_base_rows_all_reachable(tmp_path):
-    # The base set (7 rows since #68's PERF DIAG) may exceed one screen; the #53
-    # scroll machinery must keep every row reachable, top and bottom.
-    ws = _ws(tmp_path)
-    rows = ws.settings_layer._settings_rows()
-    ws.settings_layer.set_msel = len(rows) - 1
-    ws.settings_layer._settings_scroll()
-    assert ws.settings_layer._settings_row_visible(len(rows) - 1)      # bottom row scrolls into view
-    ws.settings_layer.set_msel = 0
-    ws.settings_layer._settings_scroll()
-    assert ws.settings_layer.set_top == 0                              # ... and back to the top
-    assert ws.settings_layer._settings_row_visible(0)
+def _drv(ws):
+    from runtime import host_app
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(_DT)
+    drv.frame(_DT)
+    return drv
 
 
-def test_overflow_scrolls_selection_into_view(tmp_path):
-    ws = _ws(tmp_path)
-    _force_ota_rows(ws)
-    rows = ws.settings_layer._settings_rows()
-    vis = ws.settings_layer._settings_visible()
-    last = len(rows) - 1
-    assert last >= vis                                  # genuinely overflows the panel
-    assert not ws.settings_layer._settings_row_visible(last)           # bottom rows start hidden
-    # Selecting the last row scrolls it into view, and the top row scrolls off.
-    ws.settings_layer.set_msel = last
-    ws.settings_layer._settings_scroll()
-    assert ws.settings_layer._settings_row_visible(last)
-    assert ws.settings_layer.set_top == len(rows) - vis
-    assert not ws.settings_layer._settings_row_visible(0)
-    # Back to the top scrolls back.
-    ws.settings_layer.set_msel = 0
-    ws.settings_layer._settings_scroll()
-    assert ws.settings_layer.set_top == 0
-    assert ws.settings_layer._settings_row_visible(0)
-
-
-def test_offscreen_rows_are_not_tappable(tmp_path):
-    """A row scrolled out of the window must not be hit by a tap (the pointer loop
-    skips non-visible rows), so its computed rect can't steal a tap."""
-    ws = _ws(tmp_path)
-    _force_ota_rows(ws)
-    ws.settings_layer.set_msel = len(ws.settings_layer._settings_rows()) - 1
-    ws.settings_layer._settings_scroll()
-    assert ws.settings_layer.set_top > 0
-    # row 0 is now above the window -> not visible -> excluded from hit-testing
-    assert not ws.settings_layer._settings_row_visible(0)
+def _band(ws):
+    """A digest of the page's content rect, the bar's rows left out."""
+    cv = ws.sys_canvas
+    lay = ws.layout
+    buf = bytes(cv._buf)
+    row = 2 * cv.w
+    return hashlib.sha1(buf[lay.cy * row:(lay.cy + lay.ch) * row]).hexdigest()
 
 
 def _feed(ws, drv, x, y, *, press=False, down=True):
@@ -81,124 +53,139 @@ def _feed(ws, drv, x, y, *, press=False, down=True):
     else:
         ws.pointer.place(int(x), int(y))
         drv.touch_up()
-    drv.frame(1 / 30)
+    drv.frame(_DT)
 
 
-def _drag_rows(ws, drv, x, y0, dy, steps=12):
-    """Press at (x, y0), drag by dy over `steps` samples, release at the end."""
+def _drag(ws, drv, x, y0, dy, steps=12, still=0):
+    """A drag of `dy` in `steps` samples, held `still` frames before it lets go."""
     _feed(ws, drv, x, y0, press=True)
     for i in range(1, steps + 1):
         _feed(ws, drv, x, y0 + dy * i // steps)
+    for _ in range(still):
+        _feed(ws, drv, x, y0 + dy)
     _feed(ws, drv, x, y0 + dy, down=False)
 
 
-def test_touch_drag_scrolls_the_rows(tmp_path):
-    """A finger drag up scrolls the list (the on-glass P4 report: the rows
-    would not move at all). The per-frame keep-selection-visible clamp used to
-    yank set_top back to the selected row on EVERY frame, so a drag could never
-    accumulate: set_top went 0 -> (drag) -> 0."""
-    from runtime import host_app
+def _settle(ws, drv, most=60):
+    """Frames until no page of Settings glides or coasts."""
+    for _ in range(most):
+        if not ws.settings_layer._host.moving:
+            return
+        drv.frame(_DT)
+    raise AssertionError("the page never came to rest")
+
+
+def test_every_row_is_reachable_by_keyboard(tmp_path):
+    """Walking down reaches the page's last stop, scrolled into view, and
+    walking back up reaches the first with the page back at its top."""
     ws = _ws(tmp_path)
     _force_ota_rows(ws)
-    drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)
-    lay = ws.layout
-    row_h = lay.set_row_h
-    x = lay.set_x + lay.set_w // 2
-    _drag_rows(ws, drv, x, lay.set_row_y0 + 4 * row_h, -3 * row_h)
-    assert ws.settings_layer.set_top > 0
-
-
-def test_scroll_position_survives_the_release(tmp_path):
-    """Letting go must leave the list where the finger put it -- the second
-    half of the on-glass report ('when i drag and let go i get thrown at the
-    start').
-
-    A release may COAST from there: the rows are kinetic since #113 Phase 5, so
-    the position this pins is where the motion comes to REST, never a snap back
-    to the top. Once at rest nothing may move it again without input.
-    """
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    _force_ota_rows(ws)
-    drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)
-    lay = ws.layout
-    row_h = lay.set_row_h
-    x = lay.set_x + lay.set_w // 2
-    _drag_rows(ws, drv, x, lay.set_row_y0 + 4 * row_h, -3 * row_h)
-    released = ws.settings_layer.set_top
-    assert released > 0
-    for _ in range(60):                     # let any fling run itself out
-        drv.frame(1 / 30)
-    rest = ws.settings_layer.set_top
-    assert rest >= released                 # it coasted onward, never backwards
-    for _ in range(20):                     # idle frames: nothing may re-snap it
-        drv.frame(1 / 30)
-    assert ws.settings_layer.set_top == rest
-
-
-def test_drag_carries_the_selection_into_view(tmp_path):
-    """The highlighted row follows the scrolled view, so the next d-pad press
-    doesn't yank the list back to where the selection was left behind."""
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    _force_ota_rows(ws)
-    drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)
-    lay = ws.layout
-    row_h = lay.set_row_h
-    x = lay.set_x + lay.set_w // 2
-    _drag_rows(ws, drv, x, lay.set_row_y0 + 4 * row_h, -3 * row_h)
+    drv = _drv(ws)
     sl = ws.settings_layer
-    assert sl._settings_row_visible(sl.set_msel)
-    top = sl.set_top
-    drv.press("down")                       # a d-pad step must not jump the view
-    drv.frame(1 / 30)
-    assert abs(sl.set_top - top) <= 1
+    top = _band(ws)
+    assert sl._focused == "Wi-Fi"
+    seen = [sl._focused]
+    for _ in range(40):
+        drv.press("down")
+        drv.frame(_DT)
+        drv.frame(_DT)
+        if sl._focused == seen[-1]:
+            break
+        seen.append(sl._focused)
+    assert "Update online" in seen, "the update rows below the fold are reached"
+    assert seen[-1] == "Licences", "About's Licences link is the last stop"
+    assert _band(ws) != top, "the page scrolled to keep focus in view"
+    for _ in range(len(seen) - 1):      # one more goes on to the bar
+        drv.press("up")
+        drv.frame(_DT)
+        drv.frame(_DT)
+    assert sl._focused == "Wi-Fi"
+    _settle(ws, drv)
+    assert _band(ws) == top, "back at the top, the page is as it opened"
 
 
-def test_windowed_settings_rows_scroll(tmp_path):
-    """The same drag inside the P4/desktop tier's Settings WINDOW (window-local
-    coords under the window's own layout context) -- the tier the bug was
-    reported on."""
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"),
-                                    sys_size=(1024, 600), font_scale=2,
-                                    windowed=True)
-    drv = host_app.ConsoleDriver(ws)
-    ws.open_settings()
-    drv.frame(1 / 30)
-    _force_ota_rows(ws)
-    win = ws.wm._wins["settings"]
-    lay = win.ctx.layout                    # window-local geometry
-    row_h = lay.set_row_h
-    ox, oy = win.x + 1, win.y + 1 + win.title_h
-    x = ox + lay.set_x + lay.set_w // 2
-    y0 = oy + lay.set_row_y0 + 4 * row_h
-    _drag_rows(ws, drv, x, y0, -3 * row_h)
-    top = ws.settings_layer.set_top
-    assert top > 0
-    for _ in range(20):
-        drv.frame(1 / 30)
-    assert ws.settings_layer.set_top == top
+def test_set_msel_reads_and_moves_the_focused_row(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    sl = ws.settings_layer
+    rows = sl._settings_rows()
+    i = [r[0] for r in rows].index("font_scale")
+    sl.set_msel = i
+    drv.frame(_DT)
+    assert sl._focused == "Text size" and sl.set_msel == i
 
 
-def test_update_online_reachable_by_keyboard(tmp_path):
-    """Walking the d-pad down reaches the formerly-off-screen UPDATE ONLINE row."""
-    from runtime import host_app
+def test_a_drag_scrolls_the_page_and_is_no_tap(tmp_path):
     ws = _ws(tmp_path)
     _force_ota_rows(ws)
-    rows = ws.settings_layer._settings_rows()
-    assert "UPDATE ONLINE" in [r[1] for r in rows]      # the row that used to be cut off
-    drv = host_app.ConsoleDriver(ws)
-    last = len(rows) - 1
-    for _ in range(last):
-        drv.press("down")
-        drv.frame(1 / 30)
-        drv.frame(1 / 30)
-    assert ws.settings_layer.set_msel == last
-    assert ws.settings_layer._settings_row_visible(last)               # scrolled into view, reachable
+    drv = _drv(ws)
+    sl = ws.settings_layer
+    lay = ws.layout
+    top = _band(ws)
+    x = lay.cx + lay.cw // 2
+    _drag(ws, drv, x, lay.cy + lay.ch * 2 // 3, -lay.ch // 2, still=4)
+    assert _band(ws) != top, "the rows moved under the finger"
+    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.confirm_key), \
+        "letting go of a drag opened nothing"
+    moved = _band(ws)
+    for _ in range(10):
+        drv.frame(_DT)
+    assert _band(ws) == moved, "a finger held still lets the page rest where it left it"
+    assert not sl._host.moving
+
+
+def test_a_fling_coasts_the_page_and_the_gate_recloses(tmp_path):
+    """A drag let go at speed flings the page on (the engine's fling, every
+    verbs page's): it keeps moving with no input, comes to rest, and then
+    the console paints nothing more."""
+    ws = _ws(tmp_path)
+    _force_ota_rows(ws)
+    drv = _drv(ws)
+    sl = ws.settings_layer
+    lay = ws.layout
+    x = lay.cx + lay.cw // 2
+    _drag(ws, drv, x, lay.cy + lay.ch * 2 // 3, -lay.ch // 3, steps=4)
+    assert sl._host.moving, "the release flung the page"
+    at = _band(ws)
+    drv.frame(_DT)
+    assert _band(ws) != at, "the page coasts on with no finger"
+    _settle(ws, drv)
+    assert not (sl.wifi_view or sl.bt_view or sl.crash_view or sl.confirm_key)
+    drv.frame(_DT)
+    drawn = ws._frames_drawn
+    for _ in range(5):
+        drv.frame(_DT)
+    assert ws._frames_drawn == drawn, "at rest, the gate closes"
+
+
+def test_a_tap_on_a_row_activates_it(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    lay = ws.layout
+    sl = ws.settings_layer
+    # The first group's first row: under its caption, at the content's top.
+    y = lay.cy + 19 * lay.fs + 10 * lay.fs + 8 * lay.fs
+    _feed(ws, drv, lay.cx + lay.cw // 2, y, press=True)
+    _feed(ws, drv, lay.cx + lay.cw // 2, y, down=False)
+    drv.frame(_DT)
+    assert sl.wifi_view, "the tapped Wi-Fi row opened its panel"
+
+
+def test_the_windowed_page_scrolls(tmp_path):
+    """The same drag inside the desk's Settings WINDOW (window-local coords
+    under the window's own layout)."""
+    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
+    _force_ota_rows(ws)
+    drv = _drv(ws)
+    win = ws.wm._wins["settings"]
+    lay = win.ctx.layout
+    ox, oy = win.x + 1, win.y + 1 + win.title_h
+    sl = ws.settings_layer
+    before = hashlib.sha1(bytes(ws.sys_canvas._buf)).hexdigest()
+    _drag(ws, drv, ox + lay.cx + lay.cw // 2, oy + lay.cy + lay.ch * 2 // 3, -lay.ch // 2)
+    after = hashlib.sha1(bytes(ws.sys_canvas._buf)).hexdigest()
+    assert after != before
+    assert not sl.wifi_view
 
 
 # -- the row set is memoized (P4 allocation, 2026-07-26) ------------------------
@@ -251,109 +238,31 @@ def test_the_c6_row_is_capability_gated_and_opens_the_flow(tmp_path):
     assert opened == [1]
 
 
-# -- #113 Phase 5: the rows travel by PIXELS ------------------------------
-# set_top stays the row-slot state of record, but the ScrollRegion underneath it
-# now carries the offset a finger actually produced, and rows draw at their slot
-# MINUS that sub-row remainder. Before the conversion a drag shorter than one row
-# moved nothing at all, and the list jumped a whole row when it finally crossed.
-
-
-def _drag_hold(ws, drv, x, y0, dy, steps=12):
-    """Press and drag by dy WITHOUT releasing, so the view can be read
-    mid-gesture -- before a release can turn leftover velocity into a fling."""
-    _feed(ws, drv, x, y0, press=True)
-    for i in range(1, steps + 1):
-        _feed(ws, drv, x, y0 + dy * i // steps)
-
-
-def _settle(ws, drv, x, y, n=6):
-    """Hold still, then let go. The release-velocity EMA decays toward zero
-    while the finger does not move, so this is a STOP and not a fling -- the
-    region's own hold-then-release rule, used here to isolate the static
-    offset from the kinetic behaviour tested separately below."""
-    for _ in range(n):
-        _feed(ws, drv, x, y)
-    _feed(ws, drv, x, y, down=False)
-
-
-def _settings_drv(tmp_path):
-    from runtime import host_app
+def test_a_key_step_paints_once(tmp_path):
+    """A down press moves focus and its scroll at the engine's begin, so a
+    press that scrolls nothing paints one frame and owes none after it; one
+    that scrolls paints the glide's frames and rests when it lands
+    (docs/scroll_and_text_2026-10.md §7)."""
+    import moy_ui
     ws = _ws(tmp_path)
     _force_ota_rows(ws)
-    drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)
-    return ws, drv
-
-
-def test_a_sub_row_drag_moves_the_rows_by_pixels(tmp_path):
-    ws, drv = _settings_drv(tmp_path)
+    drv = _drv(ws)
     sl = ws.settings_layer
     lay = ws.layout
-    row_h = lay.set_row_h
-    x = lay.set_x + lay.set_w // 2
-    y_before = sl._settings_row_rect(0)[1]
-    _drag_hold(ws, drv, x, lay.set_row_y0 + 4 * row_h, -(row_h - 6))
-    y_after = sl._settings_row_rect(0)[1]
-    assert sl.set_top == 0                      # no whole row was crossed
-    assert 0 < y_before - y_after < row_h       # ... yet the rows MOVED, by pixels
-
-
-def test_the_row_below_the_fold_becomes_partly_visible(tmp_path):
-    """A pixel offset puts a PARTIAL row at the bottom edge, so visibility is a
-    band intersection and not a slot range. The draw clips it to the band."""
-    ws, drv = _settings_drv(tmp_path)
-    sl = ws.settings_layer
-    lay = ws.layout
-    vis = sl._settings_visible()
-    assert len(sl._settings_rows()) > vis       # genuinely overflows
-    assert not sl._settings_row_visible(vis)    # fully below the fold at rest
-    _drag_hold(ws, drv, lay.set_x + lay.set_w // 2,
-               lay.set_row_y0 + 4 * lay.set_row_h, -(lay.set_row_h - 6))
-    assert sl._settings_row_visible(vis)        # its top edge is inside the band now
-
-
-def test_a_dpad_step_lands_row_aligned(tmp_path):
-    """The keyboard thinks in ROWS: whatever sub-row remainder a finger left
-    behind, a d-pad step puts the list back on a row boundary."""
-    ws, drv = _settings_drv(tmp_path)
-    sl = ws.settings_layer
-    lay = ws.layout
-    x = lay.set_x + lay.set_w // 2
-    y = lay.set_row_y0 + 4 * lay.set_row_h
-    dy = -(lay.set_row_h - 6)
-    _drag_hold(ws, drv, x, y, dy)
-    _settle(ws, drv, x, y + dy)
-    assert sl._scroll_px() > 0                  # the finger left a remainder
-    drv.press("down")
-    drv.frame(1 / 30)
-    assert sl._scroll_px() == 0                 # the step re-aligned it
-
-
-def test_a_released_fling_coasts_the_rows(tmp_path):
-    """ScrollRegion has carried the fling physics all along, but nothing here
-    ticked it, so a Settings fling stopped dead on the release frame."""
-    ws, drv = _settings_drv(tmp_path)
-    sl = ws.settings_layer
-    lay = ws.layout
-    x = lay.set_x + lay.set_w // 2
-    _drag_rows(ws, drv, x, lay.set_row_y0 + 5 * lay.set_row_h,
-               -4 * lay.set_row_h, steps=3)
-    assert sl.rows_flinging()                   # the release armed a fling
-    assert ws._animating(1 / 30)                # ... and the redraw gate knows
-    off = sl.scroll.offset
-    drv.frame(1 / 30)
-    assert sl.scroll.offset != off              # it coasted with no input at all
-
-
-def test_a_fling_comes_to_rest(tmp_path):
-    """Friction stops it, and the row slot agrees with where the pixels landed."""
-    ws, drv = _settings_drv(tmp_path)
-    sl = ws.settings_layer
-    lay = ws.layout
-    x = lay.set_x + lay.set_w // 2
-    _drag_rows(ws, drv, x, lay.set_row_y0 + 5 * lay.set_row_h,
-               -4 * lay.set_row_h, steps=3)
-    for _ in range(200):
-        drv.frame(1 / 30)
-    assert not sl.rows_flinging()
-    assert sl.set_top == int(sl.scroll.offset) // lay.set_row_h
+    for _ in range(3):
+        drv.frame(_DT)
+    kinds = set()
+    for _ in range(10):
+        off = moy_ui.api_offset(sl._host.ctx, lay.cx + 4, lay.cy + lay.ch // 2)
+        drawn = ws._frames_drawn
+        drv.press("down")
+        for _ in range(20):
+            drv.frame(_DT)
+        paints = ws._frames_drawn - drawn
+        if moy_ui.api_offset(sl._host.ctx, lay.cx + 4, lay.cy + lay.ch // 2) == off:
+            assert paints == 1, "a step in view paints once: %d" % paints
+            kinds.add("still")
+        else:
+            assert 2 <= paints <= 12, "a glide's frames, then rest: %d" % paints
+            kinds.add("glide")
+    assert kinds == {"still", "glide"}

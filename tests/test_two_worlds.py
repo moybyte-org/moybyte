@@ -1,15 +1,21 @@
-"""The two-worlds windowed tier (#105): the DESK (make world -- wallpaper +
-icons + windows) vs the fullscreen PLAY world (Library + games), and the
-navigation loop between them (PLAY icon <-> Make tile / CHANGE)."""
+"""The windowed tier's two modes (docs/shell_layout_2026-10.md §3): DESKTOP
+mode -- the desk, wallpaper + icons + windows -- and CONSOLE mode -- the home
+and everything fullscreen above it -- and the one way between them (the desk's
+PLAY icon in, the home's X out)."""
 
 import pytest
 
-from runtime import host_app
-from runtime import ui as _ui
-from runtime.host_canvas import make_system_canvas
+from runtime import host_app, ui_draw
 
 
-from ws_helpers import build_desktop_ws as _ws
+from ws_helpers import build_desktop_ws as _ws, select_on_home
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
 
 
 def _drv(ws):
@@ -19,17 +25,15 @@ def _drv(ws):
 
 
 def _select(ws, title):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == title:
-            ws.launcher.sel = i
-            return True
+    if select_on_home(ws, title) is not None:
+        return True
     return False
 
 
 def test_boot_lands_on_the_desk(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    assert ws.wm._stack == ["launcher", "desk"]
+    assert ws.wm.stack.kinds() == ["launcher", "desk"]
     assert ws.wm.desk_open() and ws.windowed_chrome
     assert ws.wm._order == []                     # a floor, not a window
     # The desk draws its icon column: PLAY + PROJECTS + the system apps.
@@ -47,7 +51,7 @@ def test_desk_icon_labels_fit_their_pills(tmp_path):
     _drv(ws)
     fs = ws.look.effective_font_scale()
     for _key, _box, pill, label, _cart in ws.wm._backdrop_layer._icon_rects():
-        assert len(label) * 8 * fs + 4 <= pill[2], label
+        assert ui_draw.text_width(label, fs, "ui") + 4 <= pill[2], label
 
 
 # -- #174: the desk column, DRAWN, on the wallpaper that hid the bug ----------
@@ -63,8 +67,11 @@ _WINDOWED = [((480, 320), 1), ((1024, 600), 1), ((1024, 600), 2),
 def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
     ws = _ws(tmp_path, sys_size=size, font_scale=fs)
     if titles:
-        ws._app_titles.update(titles)      # an app's manifest title, as declared
-    ws.look.select_wallpaper("open_machine", persist=False)
+        # An app's manifest title, as declared: the registry's rows are
+        # written once, so the test registers its own title over the read.
+        declared = ws.app_title
+        ws.app_title = lambda kind: titles.get(kind) or declared(kind)
+    ws.look.select_wallpaper("moybyte.open_machine", persist=False)
     ws.open_desk()
     ws.pointer.visible = False
     ws._toast_until = 0
@@ -72,26 +79,6 @@ def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     return ws
-
-
-def _ink(cv, rect, col):
-    x, y, w, h = rect
-    return sum(1 for yy in range(y, y + h) for xx in range(x, x + w)
-               if cv.pix(xx, yy) == col)
-
-
-def _label_ink(label, fs, ink, field):
-    """The ink a WHOLE label costs, rasterized outside ui.chip -- comparing a
-    chip against a chip would only prove the clip agrees with itself."""
-    cv = make_system_canvas(len(label) * 8 * fs + 8, 8 * fs + 8, font_scale=fs)
-    cv.cls(field)
-    cv.print(label, 4, 4, ink, 1)
-    return _ink(cv, (0, 0, cv.w, cv.h), ink)
-
-
-def _chip_colors(ws, key):
-    st = _ui.ON if key == "play" else _ui.REST
-    return _ui.state_colors(ws.theme_colors, "chip", st)
 
 
 def _on_canvas(cv, r):
@@ -106,15 +93,15 @@ def _overlaps(a, b):
 
 @pytest.mark.parametrize("size,fs", _WINDOWED)
 def test_desk_labels_render_whole_on_the_open_machine_wallpaper(tmp_path, size, fs):
-    """Every shipped desk label draws every one of its glyphs, at every
-    windowed config -- PROJECTS drew as PROJECT and STORYBOOK as STORYBO."""
+    """Every shipped desk label fits its band whole, at every windowed config
+    -- PROJECTS drew as PROJECT and STORYBOOK as STORYBO."""
     ws = _desk_on_open_machine(tmp_path, size, fs)
     cv = ws.sys_canvas
     efs = ws.look.effective_font_scale()
     seen = []
-    for key, box, pill, label, _cart in ws.wm._backdrop_layer._icon_rects():
-        field, ink, _edge = _chip_colors(ws, key)
-        assert _ink(cv, pill, ink) == _label_ink(label, efs, ink, field), label
+    desk = ws.wm._backdrop_layer
+    for key, box, pill, label, _cart in desk._icon_rects():
+        assert ui_draw.text_width(label, efs, "ui") <= pill[2], label
         assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
         assert not any(_overlaps(pill, p) for p in seen), key
         seen.append(pill)
@@ -124,11 +111,10 @@ def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
     """A user may add an app, and its manifest title is what the desk labels
     its icon with. The cell sizes to the LONGEST label, so an unbounded title
     marched the last column past the right edge -- and an icon drawn off the
-    canvas is unreachable, not merely ugly. It clips inside its pill instead."""
+    canvas is unreachable, not merely ugly. It clips inside its band instead."""
     long_title = "CALCULATING MACHINE DELUXE"
     ws = _desk_on_open_machine(tmp_path, fs=3, titles={"calc": long_title})
     cv = ws.sys_canvas
-    fs = ws.look.effective_font_scale()
     rects = ws.wm._backdrop_layer._icon_rects()
     assert any(label == long_title for _k, _b, _p, label, _c in rects)
     seen = []
@@ -136,9 +122,6 @@ def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
         assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
         assert not any(_overlaps(pill, p) for p in seen), key
         seen.append(pill)
-        field, ink, _edge = _chip_colors(ws, key)
-        fits = (pill[2] - 4) // (8 * fs)
-        assert _ink(cv, pill, ink) == _label_ink(label[:fits], fs, ink, field), label
 
 
 def test_desk_bar_has_no_context_x(tmp_path):
@@ -153,7 +136,7 @@ def test_desk_bar_has_no_context_x(tmp_path):
     assert ws.wm.desk_open()
 
 
-def test_play_icon_drops_to_the_fullscreen_library(tmp_path):
+def test_play_icon_enters_console_mode(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_settings()                            # an open desk window
@@ -161,24 +144,24 @@ def test_play_icon_drops_to_the_fullscreen_library(tmp_path):
     assert ws.wm._order == ["settings"]
     ws.wm._backdrop_layer._open_icon("play")
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher"]           # leaving closes the desk's windows
+    assert ws.wm.stack.kinds() == ["launcher"]    # the route at its root
     assert not ws.windowed_chrome
-    assert ws.wm._order == []
+    assert ws.wm._order == [] and ws.wm._parked.order == ["settings"]
     assert ws.wm.visible_stack()[0] is ws.launcher_layer
 
 
-def test_library_shelf_hides_system_apps_but_keeps_kid_carts(tmp_path):
-    ws = _ws(tmp_path)
-    _drv(ws)
-    titles = [c.get("title") for c in ws.launcher.items]
-    for app_cart in ("Files", "Paint", "Storybook", "Calc"):
-        assert app_cart not in titles
-    assert "Star Catcher" in titles               # games stay
-    assert "Notes" in titles                      # kid-style app carts stay
-    # The fullscreen tier keeps EVERYTHING on its launcher.
-    ws2 = host_app.build_workstation(str(tmp_path / "carts2"))
-    titles2 = [c.get("title") for c in ws2.launcher.items]
-    assert "Paint" in titles2 and "Files" in titles2
+def test_the_home_splits_games_and_apps_the_same_on_every_tier(tmp_path):
+    for ws in (_ws(tmp_path), host_app.build_workstation(str(tmp_path / "c2"))):
+        titles = [c.get("title") for c in ws.launcher.items]
+        for app_cart in ("Files", "Paint", "Storybook", "Calc", "Notes"):
+            assert app_cart not in titles             # Games holds no app
+        assert "Star Catcher" in titles
+        ws.set_home_tab("apps")
+        titles = [c.get("title") for c in ws.launcher.items]
+        for app_cart in ("Files", "Paint", "Storybook", "Calc", "Notes"):
+            assert app_cart in titles                 # the Apps tab holds them
+        assert "Appearance" not in titles             # one of HIDDEN_APPS
+        assert "Star Catcher" not in titles
 
 
 def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
@@ -190,7 +173,7 @@ def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
     ws.open()
     drv.frame(1 / 30)
     assert ws.cart_error is None
-    assert ws.wm._stack == ["launcher", "desktop"]
+    assert ws.wm.stack.kinds() == ["launcher", "desktop"]
     assert ws.wm._order == []                     # fullscreen: no player window
     # The fullscreen composite paints the game onto the big system canvas
     # (probe a mid-viewport pixel -- corners can carry overlay stamps).
@@ -203,7 +186,7 @@ def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
     assert sys_px == game_px
     ws._exit_to_caller()
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher"]           # back in the Library
+    assert ws.wm.stack.kinds() == ["launcher"]           # back in the Library
     assert ws.cart is None                        # full go_home cleanup ran
 
 
@@ -303,23 +286,93 @@ def test_relaunching_a_cart_repaints_the_letterbox_bezel(tmp_path):
     assert sc.pix(px, py) != 42, "the letterbox kept the previous screen's pixels"
 
 
-def test_make_tile_and_change_return_to_the_desk(tmp_path):
+def test_make_change_and_new_from_the_console_home_open_a_desk_window(tmp_path):
+    """On a board with a desk the Editor is a window (owner, 2026-10-20): a
+    tap on the Make tab, CHANGE and NEW from the console-mode home each give
+    console mode back to the desk and open the Editor in a window there,
+    over the windows the desk had. Closing that window gives the glass back
+    to the console-mode home, on the tab and the card it came from (R5-05)."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_app(ws._apps_by_id["calc"])
+    drv.frame(1 / 30)
+    ws.open_library()
+    drv.frame(1 / 30)
+    ws.set_home_tab("make")
+    assert _select(ws, "Star Catcher")
+    want = ws.launcher.selected().get("path")
+    ws.launch_selected()                          # Make's tap edits
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm.desk_open()
+    assert ws.wm._order == ["calc", "menu"] and ws.screen == "menu"
+    assert ws.cart.get("path") == want
+    ws.wm.close_window_kind("menu")               # the Editor's X
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.screen == "launcher"
+    assert ws.launcher.tab == "make" and ws.launcher.selected().get("path") == want
+    ws.set_home_tab("games")
+    drv.frame(1 / 30)
+    assert _select(ws, "Star Catcher")
+    ws.change_selected()                          # CHANGE = the Editor, a window
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
+    ws.wm.close_window_kind("menu")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.launcher.tab == "games"
+    assert ws.launcher.selected().get("path") == want
+    ws.set_home_tab("make")
+    ws.launcher.sel = 0                           # the "+ New" card
+    n0 = len(ws.carts.all)
+    ws.launch_selected()
+    drv.frame(1 / 30)
+    assert len(ws.carts.all) == n0 + 1
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["calc", "menu"]
+    assert ws.cart.get("type") == "game"
+    made = ws.cart.get("path")
+    ws.wm.close_window_kind("menu")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.launcher.tab == "make"
+    assert ws.launcher.selected().get("path") == made, "back on the cart it made"
+    # The parked windows came through the trip untouched.
+    ws.open_desk()
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["calc"]
+
+
+def test_closing_the_editor_stays_on_the_desk_once_another_window_opened(tmp_path):
+    """The one exception to R5-05's return: a window the kid opened on the
+    desk meanwhile keeps them there when the Editor closes."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_library()
     drv.frame(1 / 30)
-    ws.launcher.sel = 0                           # the pinned Make tile
+    ws.set_home_tab("make")
+    assert _select(ws, "Star Catcher")
     ws.launch_selected()
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "desk"]
-    ws.open_library()
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["menu"]
+    ws.wm._backdrop_layer._open_icon("files")
     drv.frame(1 / 30)
-    assert _select(ws, "Star Catcher")
-    ws.change_selected()                          # CHANGE = desk + Editor window
+    ws.wm.close_window_kind("menu")
     drv.frame(1 / 30)
-    assert ws.wm.desk_open()
-    assert ws.wm._order == ["make"]
-    assert ws.wm._wins["make"].kind == "menu"
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["files"]
+
+
+def test_an_editor_opened_on_the_desk_closes_onto_the_desk(tmp_path):
+    """Only a hand-off from the console-mode home returns there: an Editor
+    the desk's PROJECTS opened closes onto the desk."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_projects()
+    drv.frame(1 / 30)
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("path"))
+    ws.launch_selected(g)
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["projects", "menu"]
+    ws.wm.close_window_kind("menu")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["projects"]
 
 
 def test_desk_icons_open_windows(tmp_path):
@@ -330,39 +383,41 @@ def test_desk_icons_open_windows(tmp_path):
     assert ws.wm._order == ["files"]
     ws.wm._backdrop_layer._open_icon("projects")
     drv.frame(1 / 30)
-    assert ws.wm._order == ["files", "make"]
+    assert ws.wm._order == ["files", "projects"]
     # Pointer path: a tap on the PLAY icon box through the desk root layer.
     for key, box, _pill, _label, _cart in ws.wm._backdrop_layer._icon_rects():
         if key == "play":
             ws.wm._backdrop_layer.handle_pointer(box[0] + 2, box[1] + 2, True)
             break
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher"]
+    assert ws.wm.stack.kinds() == ["launcher"]
 
 
 def test_font_scale_flip_inside_desk_never_leaks_chrome(tmp_path):
     """The F4 regression: layouts rebuilt inside the desk carry desk chrome;
-    the world flip must rebuild them for the play world on the way out."""
+    the mode switch must rebuild them for console mode on the way out."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.look.set_font_scale(1)                          # relayout INSIDE the desk
     drv.frame(1 / 30)
     ws.open_library()
-    drv.frame(1 / 30)                             # world flip relayouts again
+    drv.frame(1 / 30)                             # the mode switch relayouts again
     assert not ws.windowed_chrome
     assert _select(ws, "Star Catcher")
     ws.open()
     drv.frame(1 / 30)
-    assert ws.cart_error is None                  # play world renders cleanly
+    assert ws.cart_error is None                  # console mode renders cleanly
     ws._exit_to_caller()
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher"]
+    assert ws.wm.stack.kinds() == ["launcher"]
 
 
 def test_fullscreen_tiers_are_untouched(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     assert not getattr(ws.wm, "has_desk", False)
     assert not ws.windowed_chrome
-    ws.launcher.sel = 0                           # Make tile
+    ws.set_home_tab("make")
+    ws.launcher.sel = 0                           # Make's "+ New"
     ws.launch_selected()
-    assert ws.wm.top_kind() == "picker"           # fullscreen Make -> picker
+    assert ws.wm.top_kind() == "menu"             # a new game, in the Editor
+

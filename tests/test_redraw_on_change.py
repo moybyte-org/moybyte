@@ -24,7 +24,7 @@ def _static_launcher(tmp_path):
     cleanest 'nothing changes' screen to prove idle frames are skipped."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
-    ws.look.select_wallpaper("fill:dark_blue", persist=False)
+    ws.look.select_wallpaper(None, persist=False)
     ws._toast_until = 0
     return ws, drv
 
@@ -87,7 +87,7 @@ def test_button_press_triggers_exactly_one_redraw(tmp_path):
     ws, drv = _static_launcher(tmp_path)
     _settle(ws, drv)
     before = ws._frames_drawn
-    drv.press("right")          # one nav press
+    drv.press("up")             # one press: the keys move to the tab row
     drv.frame(DT)
     assert ws._frames_drawn - before == 1, "press should draw exactly one frame"
     # ...and the screen is idle again afterwards.
@@ -95,6 +95,24 @@ def test_button_press_triggers_exactly_one_redraw(tmp_path):
     for _ in range(10):
         drv.frame(DT)
     assert ws._frames_drawn == after, "screen should be static again after the press"
+
+
+def test_a_glide_draws_until_the_row_rests_then_idles(tmp_path):
+    """A right press glides the home's row a card (docs/shell_layout_2026-10.md
+    §12): it draws every frame of the motion, then nothing once it rests."""
+    ws, drv = _static_launcher(tmp_path)
+    _settle(ws, drv)
+    before = ws._frames_drawn
+    drv.press("right")
+    for _ in range(60):
+        drv.frame(DT)
+    assert not ws.launcher.moving
+    moved = ws._frames_drawn - before
+    assert 2 <= moved <= 30, moved
+    after = ws._frames_drawn
+    for _ in range(10):
+        drv.frame(DT)
+    assert ws._frames_drawn == after, "the row should be still once it rests"
 
 
 def test_keypress_in_editor_triggers_exactly_one_redraw(tmp_path):
@@ -139,7 +157,7 @@ def test_live_wallpaper_keeps_launcher_animating(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     # Pick a wallpaper CART with a live _update (a STATIC cart -- Moy Night --
     # deliberately has none, so walk the options until an animating one is found).
-    cart_opts = [o for o in ws.look.wallpaper_options() if not str(o).startswith("fill:")]
+    cart_opts = ws.look.wallpaper_options()
     for opt in cart_opts:
         ws.look.select_wallpaper(opt, persist=False)
         if ws.wallpaper._wp_update is not None:
@@ -167,7 +185,8 @@ def test_navigation_updates_pixels(tmp_path):
     before_pixels = hashlib.md5(drv.rgb888()).hexdigest()
     before_sel = ws.launcher.sel
     drv.press("right")
-    drv.frame(DT)
+    for _ in range(60):          # the glide, then the settle
+        drv.frame(DT)
     assert ws.launcher.sel != before_sel, "selection should have moved"
     after_pixels = hashlib.md5(drv.rgb888()).hexdigest()
     assert before_pixels != after_pixels, "moving the selection must repaint the grid"

@@ -1,0 +1,17 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
+  {"note": "a theme package (named on the host) dropped in, exported, and dropped in again", "wait": 2500},
+  {"file": "$MOY_THEME_ZIP", "as": "__theme"},
+  {"js": "WORKER.postMessage({t:'import',name:window.__themeName,buf:window.__theme.slice(0)}),'sent'"},
+  {"wait": 3000},
+  {"js": "'IMPORTED ' + (window.__moyImported || 'nothing')"},
+  {"js": "window.__moyState().then(s => 'STATE ' + JSON.stringify(s.theme || s.theme_err))"},
+  {"note": "the worker's export of the folder, caught instead of downloaded"},
+  {"js": "window.__zip=null,pzDownload=function(n,b){window.__zip={n:n,b:b};},WORKER.postMessage({t:'export',cart:'sunset.moy'}),'asked'"},
+  {"wait": 1500},
+  {"js": "window.__zip ? 'ZIP ' + window.__zip.n + ' ' + btoa(String.fromCharCode.apply(null, new Uint8Array(window.__zip.b))) : 'ZIP none'"},
+  {"note": "the same bytes into the same store: the name is taken"},
+  {"js": "WORKER.postMessage({t:'import',name:window.__zip.n,buf:window.__zip.b.slice(0)}),'sent'"},
+  {"wait": 3000},
+  {"js": "'IMPORTED2 ' + (window.__moyImported || 'nothing')"},
+  {"js": "window.__moyState().then(s => 'STATE2 ' + JSON.stringify(s.theme || s.theme_err))"}
+]}

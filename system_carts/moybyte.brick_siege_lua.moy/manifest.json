@@ -1,0 +1,58 @@
+{
+  "format": "moy-1",
+  "version": 12,
+  "title": "Brick Siege Lua",
+  "id": "moybyte.brick_siege_lua",
+  "fps": "free",
+  "runtime": "lua",
+  "main": "main.lua",
+  "canvas": "320x240",
+  "input": [
+    "buttons"
+  ],
+  "description": "The same tank battle as Brick Siege, written in Lua.",
+  "genre": "action",
+  "moybyte": {
+    "type": "game",
+    "system": true,
+    "order": 190,
+    "permissions": [
+      "graphics",
+      "input",
+      "audio",
+      "multiplayer"
+    ],
+    "config": {
+      "enemies": 6,
+      "autoplay": 0
+    },
+    "edit": [
+      {
+        "key": "enemies",
+        "label": "ENEMIES",
+        "type": "int",
+        "min": 1,
+        "max": 16,
+        "step": 1,
+        "display": "count",
+        "icon": "dot",
+        "card": "FIGHT {value} TANKS"
+      },
+      {
+        "key": "autoplay",
+        "label": "AUTOPLAY",
+        "type": "choice",
+        "choices": [
+          0,
+          1
+        ],
+        "icons": [
+          "close",
+          "run"
+        ],
+        "display": "choice-icons",
+        "card": "AUTOPLAY {value}"
+      }
+    ]
+  }
+}

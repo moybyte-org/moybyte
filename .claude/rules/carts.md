@@ -21,11 +21,12 @@ unequal instrument loudness, the pitched noise walk, the Hz-linear slide, the
 109/110 phaser detune — and moy-spec ships its own C implementation of it,
 **libmoy**. That source is vendored verbatim into
 `native/moy_audio/libmoy/` and
-**compiled into** the T-Deck and the web runner; `modmoy_audio.c` is a thin
-binding that forwards the six §8.2 verbs and owns I2S. libmoy owns the bank,
-both sequencers and the mixer, so the boards are conformant by construction and
-nothing marshals across the boundary per frame — the bank crosses ONCE per cart
-as `sounds.json` text.
+**compiled into** every board that plays sound, the web runner and the host;
+the kernel's sessions (`moy_aud.c`) drive it and `modmoy_audio.c` is a thin
+binding. libmoy owns each session's bank, both sequencers and the mixer, so the
+boards are conformant by construction and nothing marshals across the boundary
+per frame — a bank crosses ONCE per cart (and per editor change) as
+`sounds.json` text.
 
 **Heard on a T-Deck (owner-verified, 2026-08-09, firmware 0.9 over OTA).** Until
 then the swap had only host evidence — `tests/test_audio_parity.py` diffs every
@@ -56,24 +57,26 @@ only safe because the conformance goldens pin every pixel; §8.3 deliberately
 exempts audio from pixel conformance, so there is no golden to catch a drifting
 twin.
 
-**The Python twin synth is DEAD (moycore stage 0, 2026-08-11).** The host sim
-now binds the vendored C itself: `runtime/audio_binding.py` compiles the
-DOUBLE-WIDENED source (the parity harness's own recipe — the strict suite had
-proven the twin bit-identical to exactly that program, so the swap moved no
-sample) plus a small shim (`runtime/moyhost_audio.c`) into a hash-cached `.so`
-under `.build/host_audio/`; `make setup` pre-builds it, first use builds
-lazily. `AudioEngine` keeps its name/shape everywhere as the bank/MODEL
-holder (the device constructs it too); **no compiler / no native module means
-SILENCE, not a fallback synth** (owner call, KISS — `DeviceAudio`'s
-Python-engine lane is deleted). `tests/test_audio_parity.py` still gates: the
-strict pass now pins the BINDING bit-exactly against an independently-driven
-reference render (any difference is marshalling, never the synth), the
-device-precision pass still measures the double-vs-float gap, and it still
-drives the NATIVE module under a desktop MicroPython build when one exists.
-Run `.venv/bin/python experiments/audio_parity/audio_parity.py -v` for the
-report. The data model (`SFX`/`MusicTrack`/`AudioBank`, `sounds.json`, the
-Music editor) is still ordinary shared Python and is not affected by any of
-this.
+**The Python twin synth is DEAD (moycore stage 0, 2026-08-11), and the
+playing is the kernel's (sprint 3, 2026-10-07).** `native/moy_audio/moy_aud.h`
+holds the sessions (one per owner, only the FOCUSED one heard), the mix and
+the sample voice over libmoy; `moy_aud_out.c` is the board's speaker, started
+at the first focus. Every tier reaches it as the module `moy_audio`: the
+usermod on the boards, the browser and the desktop MicroPython, and on the
+host `runtime/audio_binding.py`, which compiles it with the DOUBLE-WIDENED
+libmoy (the parity harness's own recipe) into a hash-cached `.so` under
+`.build/host_audio/`. `runtime/audio_session.py` is the Python face
+(`AudioSession`, the per-frame `PcmPump` of the host and the browser). **No
+compiler / no native module means SILENCE, not a fallback synth** (owner call,
+KISS): a session then holds no handle and its verbs do nothing.
+`tests/test_audio_parity.py` gates: the strict pass pins the host's module
+bit-exactly against an independently-driven reference render (any difference
+is marshalling, never the synth), the device-precision pass measures the
+double-vs-float gap, and it drives the NATIVE module under a desktop
+MicroPython build when one exists. Run
+`.venv/bin/python experiments/audio_parity/audio_parity.py -v` for the report.
+The data model (`SFX`/`MusicTrack`/`AudioBank`, `sounds.json`, the Music
+editor) is ordinary shared Python.
 
 
 - **Cart versioning (#47):** every `system_carts/*/manifest.json` carries an integer `"version"`. `seed_builtins` re-seeds an on-SD built-in only when the baked version is **newer**, and preserves the kid's data (`pmem.json` saves + `config.json` tuning) across the re-seed. **Bump a built-in's manifest `version` whenever you change its content**, or an already-seeded device keeps the stale copy.

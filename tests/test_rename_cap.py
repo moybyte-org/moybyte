@@ -1,5 +1,5 @@
-"""The Desk-Lab rename field: `app_shell.ListShellApp` types into it up to
-RENAME_MAX (a `TextEntry` cut to that cap), and the app SEEDS it from the
+"""The rename field: Files' `ui.field` takes at most RENAME_MAX bytes (the
+cap `app_shell.ListShellApp` declares), and the app SEEDS it from the
 current name. The two used to be
 hand-synced through a per-module MAX_NAME constant, so a class that set one
 without the other seeded a name longer than typing could ever reproduce -- the
@@ -8,32 +8,29 @@ tail could be backspaced away but never typed back."""
 from runtime import host_app, moy_carts
 from runtime.app_shell import ListShellApp
 from runtime.files_app import FilesAppLayer
+from ws_helpers import select_on_home  # noqa: E402
 
 
 LONG = "a_very_long_user_file_name_indeed"
 
 
-class _FakeInp:
-    def __init__(self, key=0):
-        self.last_key = key
-
-    def pressed(self, _name):
-        return False
-
-
 def _open(ws, title):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == title:
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, title)
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)
 
 
-def _type_one(app, ch):
-    app._typed_rename(_FakeInp(ord(ch)))
-    app._typed_rename(_FakeInp(0))
+def _frames(drv, n=2):
+    for _ in range(n):
+        drv.ws.mark_dirty()
+        drv.frame(1 / 30)
+
+
+def _type_one(drv, ch):
+    """One typed key, then a frame with none: each press its own edge."""
+    drv.type_char(ord(ch))
+    _frames(drv)
 
 
 def _files(tmp_path):
@@ -42,9 +39,11 @@ def _files(tmp_path):
     ws = host_app.build_workstation(carts)
     _open(ws, "Files")
     app = ws.files_app
-    app._enter_kind("docs")
+    app.open_place("docs")
     app._act("NAME", LONG)
-    return app
+    drv = host_app.ConsoleDriver(ws)
+    _frames(drv, 3)
+    return app, drv
 
 
 OPENERS = (("files", _files),)
@@ -55,16 +54,15 @@ def test_every_rename_seed_is_typable(tmp_path):
     have produced. A seed longer than RENAME_MAX is un-retypable."""
     assert len(LONG) > ListShellApp.RENAME_MAX
     for name, open_app in OPENERS:
-        app = open_app(tmp_path / name)
-        assert app.mode == "rename", name
-        assert len(app.rename.text) == app.RENAME_MAX, name
+        app, drv = open_app(tmp_path / name)
+        assert app.dialog == "rename", name
+        assert len(app.rename_text) == app.RENAME_MAX, name
         # Full: one more key is refused. One backspace: the same key is taken.
-        _type_one(app, "z")
-        assert len(app.rename.text) == app.RENAME_MAX, name
-        app._typed_rename(_FakeInp(0x08))
-        app._typed_rename(_FakeInp(0))
-        _type_one(app, "z")
-        assert app.rename.text == LONG[:app.RENAME_MAX - 1] + "z", name
+        _type_one(drv, "z")
+        assert len(app.rename_text) == app.RENAME_MAX, name
+        _type_one(drv, "\b")
+        _type_one(drv, "z")
+        assert app.rename_text == LONG[:app.RENAME_MAX - 1] + "z", name
 
 
 def test_rename_cap_lives_only_on_the_class(tmp_path):

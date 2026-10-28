@@ -12,10 +12,16 @@ deliberately importable with no board and no console (its device_util import
 falls back to a self-contained shim), which is what makes this testable at all.
 """
 
+import sys
 import hashlib
 import json
+import types
 
+import pytest
+
+from runtime import moy_input
 from runtime.dev_channel import (DevChannel, PERF_EVENTS, _remote_state,
+                                 heapcaps_line,
                                  luaprof_line, perfcnt_line, shim_line_range,
                                  cart_shim_range,
                                  verbs_line)
@@ -32,25 +38,13 @@ class FakePointer:
         self.placed.append((x, y))
 
 
-class FakeIdle:
-    """The IdleBlank surface `power` drives (device_boot.IdleBlank's shape)."""
-
-    def __init__(self, timeout_ms=300000):
-        self.timeout_ms = timeout_ms
-        self.asleep = False
-        self.blanked = False
-        self.woken = 0
-
-    def blank(self):
-        self.blanked = True
-
-    def wake(self, now):
-        self.woken += 1
-        self.asleep = False
+class _Stack:
+    def kinds(self):
+        return ["home"]
 
 
 class FullscreenWM:
-    _stack = ["home"]
+    stack = _Stack()
 
 
 class Win:
@@ -91,6 +85,7 @@ class FakeWS:
         self._dirty = False
         self._psave_ms = 300000
         self._psave_asleep = False
+        self.input = moy_input.HostInputTable()
 
 
 def make(ws=None, **kw):
@@ -107,12 +102,12 @@ def test_state_carries_both_tiers_shapes(capsys):
     (psave/desk/order/wins) and the T-Deck's (stack) from the same function."""
     full = _remote_state(FakeWS())
     assert full["stack"] == ["home"]
-    assert full["psave"] == [False, 300]
     assert "wins" not in full
 
     windowed = _remote_state(FakeWS(wm=WindowedWM()))
     assert windowed["desk"] is True
     assert windowed["order"] == ["settings"]
+    assert windowed["parked"] == []
     assert windowed["wins"]["settings"][:4] == [100, 80, 640, 400]
     assert "stack" not in windowed
 
@@ -126,40 +121,43 @@ def test_state_is_one_line_json(capsys):
     assert st["screen"] == "home"
 
 
-def test_state_reports_every_frame_stage_with_its_budget_and_misses():
+def test_state_reports_every_frame_stage_and_the_ladder_from_the_kernel(monkeypatch):
     """#210's route. `state` is the one every board serves -- the Guition
-    stages no device_diag and has no PUMP line -- so the per-stage deadline
-    meters ride it, in the loop's invariant order and with its field shape."""
-    from runtime import device_boot
+    stages no device_diag and has no PUMP line -- so the kernel loop's
+    per-stage deadline meters ride it, in the loop's invariant order and with
+    its field shape, with the idle ladder and the frame's upcalls beside."""
+    from runtime import dev_channel
+    from runtime import moy_loop as L
 
-    class CapWS(FakeWS):
-        def __init__(self):
-            FakeWS.__init__(self)
-            self.perf_capture = True
-            self.stage_meters = device_boot.StageMeters(self)
-
-    ws = CapWS()
-    m = ws.stage_meters
-    m.start(m.slot_ms)
-    m.mark(device_boot._S_FRAME)
-
-    st = _remote_state(ws)
-    assert list(st["stages"]) == list(device_boot.STAGE_ORDER)
+    monkeypatch.setattr(dev_channel, "_loop", L)
+    L.trace_init(60, True, 1000)
+    L.register(lambda: None, lambda: None, lambda dt: 1)
+    L.idle(L.BLANK, 300)
+    L.capture(True)
+    L.step()
+    st = _remote_state(FakeWS())
+    L.unregister()
+    assert list(st["stages"]) == list(L.stages())
     for row in st["stages"].values():
         assert sorted(row) == ["avg_us", "budget_us", "last_us", "max_us",
                                "misses", "n"]
     frame = st["stages"]["frame"]
     assert frame["n"] == 1 and frame["budget_us"] == 16 * 780
-    # A stage no hook filled, and one with no deadline to miss: None either
-    # way, never the 0 that reads identically to a broken meter.
-    assert st["stages"]["inputs"]["last_us"] is None
+    # A stage with no deadline to miss: None, never the 0 that reads
+    # identically to a broken meter.
     assert st["stages"]["tail"]["budget_us"] is None
+    assert st["psave"] == [False, 300]
+    assert st["idle"]["blank"] == 300
+    assert st["upcalls"] == [3, 0, 0, 0, 0, 0]
 
 
-def test_state_reports_no_stages_at_all_where_no_shared_loop_runs():
-    """The host simulator and the wasm head run their own loops, so there are
-    no stage meters to dump -- and that is None, not eleven zeroed rows."""
-    assert _remote_state(FakeWS())["stages"] is None
+def test_state_reports_no_stages_at_all_where_no_kernel_loop_runs(monkeypatch):
+    """A tier whose frames are not the kernel's has no stage meters to dump --
+    and that is None, not eleven zeroed rows."""
+    from runtime import dev_channel
+    monkeypatch.setattr(dev_channel, "_loop", None)
+    st = _remote_state(FakeWS())
+    assert st["stages"] is None and st["psave"] is None and st["upcalls"] is None
 
 
 def test_state_reports_the_sram_headroom_the_run_had_or_none():
@@ -180,54 +178,71 @@ def test_state_reports_the_sram_headroom_the_run_had_or_none():
 
 
 # -- gesture scripts -----------------------------------------------------------
+#
+# The words find their aim (a named button, the top window's title strip) and
+# the kernel plays the gesture (native/moy_kernel/moy_devch.c): one sample a
+# frame into the channel's source, logged here by the loop's trace tier.
 
 
-def test_swipe_is_press_hold_release(capsys):
+def _played(frames=40):
+    """The pointer samples the kernel's gesture player wrote, a frame each."""
+    from runtime import moy_loop as L
+
+    out = []
+    for _ in range(frames):
+        L.step()
+        out += [t[3:] for t in L.trace_log().split() if t.startswith("pt=")]
+    return out
+
+
+@pytest.fixture
+def kernel():
+    from runtime import moy_loop as L
+
+    L.trace_init(60, True, 1000)
+    L.register(lambda: None, lambda: None, lambda dt: 1)
+    L.trace_log()
+    yield L
+    L.unregister()
+
+
+def test_swipe_is_press_hold_release(capsys, kernel):
     """i==0 press edge, held interpolation, i==n a real RELEASE sample at the
     end point (down=False) -- the shape the fling estimators need."""
     ws, ch = make()
     ch.run(ws, "swipe 0 0 100 0 5")
-    samples = []
-    while ch._swipe is not None:
-        ch.click = False
-        ch._scripts()
-        if ch._swipe is not None or samples[-1:] != []:
-            pass
-        samples.append((ch.pointer.placed[-1] if ch.pointer.placed else None,
-                        ch.pointer.down, ch.click))
-    out = capsys.readouterr().out
-    assert "REMOTE swipe 0,0 -> 100,0 frames=5" in out
-    assert "REMOTE swipe done" in out
-    # 6 pointer frames for n=5 (0..5), then the done frame cleared the script.
-    xs = [p[0][0] for p in samples if p[0] is not None]
-    assert xs[0] == 0 and xs[-1] == 100
-    press = samples[0]
-    assert press[1] is True and press[2] is True          # press edge clicks
-    release = samples[5]
-    assert release[1] is False                            # real release sample
-    assert all(s[1] is True for s in samples[1:5])        # held in between
-    assert all(s[2] is False for s in samples[1:])        # click frame 0 only
-    assert all(s[0] is not None for s in samples[:6])
-    assert ch.pointer.fresh is True                       # scripted = fresh
+    samples = _played()
+    assert "REMOTE swipe 0,0 -> 100,0 frames=5" in capsys.readouterr().out
+    assert samples == ["0,0,1,1", "25,0,1,0", "50,0,1,0", "75,0,1,0",
+                       "100,0,1,0", "100,0,0,0"]
 
 
-def test_drag_declines_without_windows_and_runs_with(capsys):
+def test_a_tap_is_a_press_then_a_release_a_frame_apart(capsys, kernel):
+    ws, ch = make()
+    ch.run(ws, "tap 40 50")
+    assert "REMOTE tap 40 50" in capsys.readouterr().out
+    assert kernel.trace_log().split() == ["pt=40,50,1,1"]   # pressed by the word
+    kernel.step()
+    assert "pt=" not in kernel.trace_log()                   # the press is merged
+    kernel.step()
+    assert "pt=40,50,0,0" in kernel.trace_log()
+
+
+def test_drag_declines_without_windows_and_runs_with(capsys, kernel):
     ws, ch = make()                                        # fullscreen tier
     ch.run(ws, "drag")
     assert "REMOTE drag: no window open" in capsys.readouterr().out
-    assert ch._drag is None
+    assert _played(3) == []
 
-    ws2, ch2 = make(ws=FakeWS(wm=WindowedWM()))
+    ws2 = FakeWS(wm=WindowedWM())
+    ch2 = DevChannel(ws2, moy_input.Pointer(320, 240))
     ch2.run(ws2, "drag 12 3")
     out = capsys.readouterr().out
     assert "REMOTE drag win=settings" in out and "frames=12 step=3" in out
-    n = 0
-    while ch2._drag is not None:
-        ch2._scripts()
-        n += 1
-    assert "REMOTE drag done" in capsys.readouterr().out
-    assert n == 13                                        # 12 frames + done
-    assert ch2.pointer.down is False                      # released at the end
+    samples = _played(20)
+    assert len(samples) == 13                             # 12 frames + release
+    assert samples[0] == "130,89,1,1"                     # the title strip
+    assert samples[-1] == "130,89,0,0"                    # released at the end
 
 
 # -- board extras and the py env -----------------------------------------------
@@ -256,49 +271,43 @@ def test_py_env_reaches_injected_names(capsys):
     assert "PY 42" in capsys.readouterr().out
 
 
-# -- power over the injected IdleBlank ------------------------------------------
+def test_kstale_hands_the_spine_four_dead_handles_and_all_are_refused(capsys):
+    """The spine's handle gate on glass is this word (#224): a released, a
+    forged, a wrong-kind and a zero handle, each a StaleHandle that names its
+    table, with the live handle still served."""
+    from runtime.moy_spine import AppRegistry
+
+    ws, ch = make()
+    ws.apps = AppRegistry()
+    ws.apps.register("artwork", "Paint")
+    ch.run(ws, "kstale")
+    line = [ln for ln in capsys.readouterr().out.splitlines()
+            if ln.startswith("REMOTE kstale")][0]
+    assert line.startswith("REMOTE kstale ok impl=native "), line
+    for name in ("released", "forged", "kind", "zero"):
+        assert "%s=stale app handle " % name in line, line
 
 
-def test_power_retune_off_and_disable(capsys):
-    idle = FakeIdle()
-    ws, ch = make(idle=idle)
-    ch.run(ws, "power 3")
-    assert idle.timeout_ms == 3000
-    assert ws._psave_ms == 3000                # `state`'s psave stays live
-    ch.run(ws, "power off")
-    assert idle.blanked is True                # explicit blank is a REQUEST...
-    ch.run(ws, "power 0")
-    assert idle.timeout_ms == 0
+def test_kstale_fails_loudly_when_a_dead_handle_is_served(capsys):
+    from runtime.moy_spine import AppRegistry
+
+    class Serving(AppRegistry):
+        def title(self, h):
+            return "served"
+
+    ws, ch = make()
+    ws.apps = Serving()
+    ws.apps.register("artwork", "Paint")
+    ch.run(ws, "kstale")
     out = capsys.readouterr().out
-    assert "REMOTE power timeout=3s asleep=False" in out
-    assert "REMOTE power off" in out
-    assert "REMOTE power timeout=0s asleep=False" in out
-
-
-def test_power_without_idle_declines(capsys):
-    ws, ch = make()
-    ch.run(ws, "power 3")
-    assert "no idle blank" in capsys.readouterr().out
-
-
-def test_bl_without_backlight_declines_and_with_it_drives(capsys):
-    ws, ch = make()
-    ch.run(ws, "bl 0")
-    assert "no backlight control" in capsys.readouterr().out
-    lit = []
-    idle = FakeIdle()
-    ws2, ch2 = make(set_backlight=lit.append, idle=idle)
-    ch2.run(ws2, "bl 0")
-    ch2.run(ws2, "bl 1")
-    assert lit == [False, True]
-    assert idle.asleep is False and idle.woken == 1
+    assert "REMOTE kstale FAIL" in out and "forged=SERVED" in out
 
 
 # -- `link`: arming the radio from outside a cart ------------------------------
 
 
 class FakeLink:
-    """`ws.link` (device/moy_espnow.py's Link) narrowed to what `link` drives."""
+    """`ws.link` (runtime/players.py's EspNowLink) narrowed to what `link` drives."""
 
     def __init__(self):
         self.active = False
@@ -806,20 +815,6 @@ def test_a_window_the_board_cannot_hold_is_refused(tmp_path, capsys):
     assert not (tmp_path / "a.lua.new").exists()
 
 
-def test_bytes_the_line_reader_already_swallowed_are_not_lost(
-        tmp_path, capsys):
-    """Empty by construction -- the reader dispatches on the newline, so its
-    partial buffer holds nothing when `recv` runs. Taken anyway: a byte it DID
-    swallow is one the payload would never see, and a silent one-byte shift is
-    the failure this whole path is hashed to catch."""
-    ws, ch, _raw, _poll = raw_channel(b"llo")
-    ch.buf = bytearray(b"he")
-    ch.run(ws, "recv 5 512 %s" % (tmp_path / "a.lua"))
-    assert (tmp_path / "a.lua.new").read_bytes() == b"hello"
-    assert ch.buf == bytearray()
-    assert "RECV done" in _said(capsys)[-1]
-
-
 def test_a_channel_with_no_8_bit_stdin_declines_the_probe_too(capsys):
     """The decline comes BEFORE the caps line, whatever was asked: a board that
     cannot carry every byte value must not advertise a window. push_cart reads
@@ -1167,9 +1162,10 @@ def test_a_window_with_no_frames_says_so_instead_of_dividing_by_it():
     assert verbs_line(0, 10, [("spr", 5, 5)]) == "VERBS frames=0"
 
 
-def test_verbs_declines_on_a_board_with_no_moycore(capsys):
+def test_verbs_declines_on_a_board_with_no_moycore(capsys, monkeypatch):
     """Every board freezes this channel; only the ones with the Lua tier can
     answer. The decline is a line, not an ImportError into the loop."""
+    monkeypatch.setitem(sys.modules, "moycore", None)
     ws, ch = make()
     ch.run(ws, "verbs")
     assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
@@ -1319,9 +1315,10 @@ def test_the_luaprof_line_survives_a_window_with_no_frames():
     assert "smp=0" in luaprof_line((1000000, 0, 1024, (0,) * 10, (), ()), None)
 
 
-def test_luaprof_declines_on_a_board_without_the_lua_tier(capsys):
+def test_luaprof_declines_on_a_board_without_the_lua_tier(capsys, monkeypatch):
     """Same shape as `verbs`: a decline is a line, not an ImportError thrown
     into the frame loop."""
+    monkeypatch.setitem(sys.modules, "moycore", None)
     ws, ch = make()
     ch.run(ws, "luaprof")
     assert "no moycore on this board" in _said(capsys, "REMOTE ")[0]
@@ -1380,16 +1377,27 @@ def text_channel(root):
     ws, ch = make(ws)
     stdin = FakeText()
     poll = FakeTextPoll(stdin)
-    ch._stdin, ch._rawin, ch._ipoll, ch.armed = stdin, stdin, poll.ipoll, True
+    ch._stdin, ch._rawin, ch._ipoll = stdin, stdin, poll.ipoll
     return ws, ch, stdin
 
 
 def pump(ws, ch, stdin, frames=200):
-    """Frames until stdin is drained; how many it took."""
+    """Frames until stdin is drained; how many it took. The kernel's line
+    reader (native/moy_kernel/moy_devch.c, tested in tests/test_moy_loop.py)
+    is played by a line a frame: what arrives up to a newline goes to the
+    channel's words, as the loop's word upcall hands it."""
     for n in range(frames):
         if not stdin.data:
             return n
-        ch.poll(ws)
+        line = []
+        while stdin.data:
+            c = stdin.read(1)
+            if c in ("\n", "\r", b"\n", b"\r"):
+                break
+            line.append(c if isinstance(c, str) else c.decode("latin-1"))
+        text = "".join(line).strip()
+        if text:
+            ch.word(ws, text)
     raise AssertionError("stdin never drained")
 
 
@@ -1400,61 +1408,6 @@ def put_lines(path, data):
     lines = ["moy-put %s %d" % (path, len(data))]
     lines += [b64[i:i + 504] for i in range(0, len(b64), 504)]
     return "\n".join(lines + ["."]) + "\n"
-
-
-class FakeBytes(FakeText):
-    """`sys.stdin.buffer`: a byte at a time, only the ones that have arrived."""
-
-    def __init__(self, data=b""):
-        self.data = [bytes((b,)) for b in data]
-
-    def read(self, n):
-        return self.data.pop(0) if self.data else b""
-
-
-def _bytes_channel(tmp_path, data):
-    ws, ch, _stdin = text_channel(tmp_path)
-    stdin = FakeBytes(data)
-    ch._stdin, ch._rawin, ch._ipoll = stdin, stdin, FakeTextPoll(stdin).ipoll
-    return ws, ch, stdin
-
-
-def test_a_byte_that_is_not_text_costs_its_line_not_the_channel(
-        tmp_path, capsys):
-    """A rate switch, or a payload's tail, can leave bytes on the line that are
-    not UTF-8. That drops the line they are in; the channel stays armed and
-    the next command runs."""
-    ws, ch, stdin = _bytes_channel(tmp_path, b"st\xffate\nmoy?\n")
-    pump(ws, ch, stdin)
-    assert ch.armed is True
-    assert ch.dropped == 1
-    assert _said(capsys, "moy-info ")
-
-
-def test_a_byte_of_line_noise_never_waits_for_more(tmp_path, capsys):
-    """The line reader takes BYTES: a byte of 0x80 or more is part of a UTF-8
-    character to a text read(1), which then waits inside the read for the
-    rest of it. On the T-Deck a USB line-state request that reached stdin
-    during the bootloader held its first frame for 29 s that way, until the
-    host happened to write again. Here the frame drains what arrived and
-    returns, and the noise costs only its own line."""
-    ws, ch, stdin = _bytes_channel(tmp_path, b"\x00\xc2\x01\x00\x08moy?\n\xf0")
-    pump(ws, ch, stdin)
-    assert not stdin.data
-    assert ch.buf == bytearray(b"\xf0")
-    assert ch.dropped == 1
-    assert not _said(capsys, "moy-info ")
-    stdin.data = [bytes((b,)) for b in b"\nmoy?\n"]
-    pump(ws, ch, stdin)
-    assert _said(capsys, "moy-info ")
-
-
-def test_a_command_in_utf8_arrives_whole(tmp_path, capsys):
-    """A line is decoded whole, so a `py` line with a character past ASCII
-    in it runs as written."""
-    ws, ch, stdin = _bytes_channel(tmp_path, "py len('\u00e9\u00e9')\n".encode())
-    pump(ws, ch, stdin)
-    assert _said(capsys, "PY ") == ["PY 2"]
 
 
 def test_moy_query_answers_the_descriptor(tmp_path, capsys):
@@ -1507,10 +1460,14 @@ def test_moy_put_reads_through_moy_serial_and_hands_back_what_follows(
     head, rest = put_lines("c.moy/main.lua", data).split("\n", 1)
     raw = FakeRawIn((rest + "sta").encode())
     monkeypatch.setattr(dc, "_moy_serial", FakeMoySerial(raw))
+    handed = []
+    monkeypatch.setattr(dc, "_loop", types.SimpleNamespace(
+        devch_unread=lambda b: handed.append(bytes(b)),
+        devch_budget=lambda n: None))
     ch.run(ws, head)
     assert (tmp_path / "c.moy" / "main.lua").read_bytes() == data
     assert _said(capsys, "moy-") == ["moy-ok", "moy-ok"]
-    assert ch.buf == bytearray(b"sta")
+    assert handed == [b"sta"]
     assert sessions == [1]
 
 
@@ -1597,3 +1554,149 @@ def test_a_put_whose_stream_stops_ends_short_and_leaves_nothing(tmp_path, capsys
     assert said[1].startswith("moy-err d.moy/main.lua: the stream stopped after")
     assert ch._put is None
     assert not list(tmp_path.rglob("*.new")) and not (tmp_path / "d.moy" / "main.lua").exists()
+
+
+# -- the HEAPCAPS line (docs/native_kernel_2026-09.md sprint 0) ----------------
+
+
+class FakeEsp32:
+    """`esp32.idf_heap_info(caps)`: a list of (total, free, largest, min free)
+    per region carrying those caps."""
+
+    def __init__(self, regions):
+        self.regions = regions
+
+    def idf_heap_info(self, caps):
+        return self.regions.get(caps, [])
+
+
+class FakeGc:
+    def __init__(self, areas=(2, 3145728), live=812000, has_areas=True):
+        self.calls = []
+        self._areas = areas
+        self._live = live
+        if has_areas:
+            self.areas = self._read_areas
+
+    def _read_areas(self):
+        self.calls.append("areas")
+        return self._areas
+
+    def collect(self):
+        self.calls.append("collect")
+
+    def mem_alloc(self):
+        self.calls.append("mem_alloc")
+        return self._live
+
+
+def test_the_heapcaps_line_sums_regions_as_idf_does():
+    """Total, free and low-water add over a set's regions -- the low-water sum
+    is exactly IDF's own heap_caps_get_minimum_free_size -- and the largest
+    free block is the largest of any one region, since no allocation spans
+    two."""
+    esp = FakeEsp32({
+        0x400: [(8388608, 4000000, 3900000, 3500000)],
+        0x800: [(200000, 30000, 12000, 9000), (100000, 20000, 15000, 4000)],
+        0x808: [(200000, 25000, 12000, 8000)],
+    })
+    line = heapcaps_line(esp, FakeGc())
+    assert line == ("HEAPCAPS psram=8388608/4000000/3900000/3500000 "
+                    "sram=300000/50000/15000/13000 "
+                    "dma=200000/25000/12000/8000 gc=3145728/812000/2")
+
+
+def test_the_heapcaps_line_reads_what_the_heap_holds_before_collecting():
+    """A split heap gives an area back only when a sweep empties it, so a
+    collect ahead of gc.areas() would report what the heap held after the
+    word's own collect. Held first; then the collect that makes `live` mean
+    live."""
+    g = FakeGc()
+    heapcaps_line(FakeEsp32({}), g)
+    assert g.calls == ["areas", "collect", "mem_alloc"]
+
+
+def test_a_figure_the_board_cannot_read_is_a_dash_and_never_a_zero():
+    """A host has no esp32 module; a board with no PSRAM has no region with
+    those caps; a build without the gc meters patch has no gc.areas(); CPython
+    has no gc.mem_alloc(). Each is absence, and each says so in its own slot."""
+    assert heapcaps_line(None, None) == \
+        "HEAPCAPS psram=- sram=- dma=- gc=-/-/-"
+    esp = FakeEsp32({0x800: [(300000, 50000, 15000, 13000)],
+                     0x808: [(200000, 25000, 12000, 8000)]})
+    line = heapcaps_line(esp, FakeGc(has_areas=False))
+    assert line.startswith("HEAPCAPS psram=- sram=300000/")
+    assert line.endswith(" gc=-/812000/-")
+
+    class Raises:
+        def idf_heap_info(self, caps):
+            raise OSError(caps)
+    assert heapcaps_line(Raises(), None).startswith(
+        "HEAPCAPS psram=- sram=- dma=- ")
+
+
+def test_heapcaps_is_a_dev_channel_word(capsys):
+    """On the host: no esp32, and CPython's gc has neither meter."""
+    ws, ch = make()
+    ch.run(ws, "heapcaps")
+    out = capsys.readouterr().out.splitlines()
+    assert "HEAPCAPS psram=- sram=- dma=- gc=-/-/-" in out
+
+
+def test_each_subsystem_registers_its_words():
+    """The words are registered per subsystem (docs/kernel_survival_2026-10.md
+    section 2 item 3), so a pass edits its own table and never the reader's."""
+    from runtime import devch_audio, devch_input, devch_links
+    assert sorted(devch_input.WORDS) == ["drag", "swipe", "tap"]
+    assert sorted(devch_audio.WORDS) == ["hush", "vol"]
+    assert sorted(devch_links.WORDS) == ["link", "moy-del", "moy-put",
+                                         "moy-rescan", "moy-run", "moy?",
+                                         "recv", "web"]
+    _ws, ch = make()
+    assert ch.words == dict(devch_input.WORDS, **devch_audio.WORDS,
+                            **devch_links.WORDS)
+
+
+def test_a_short_swipe_falls_through_to_the_extras():
+    seen = []
+    _ws, ch = make(extra={"swipe": lambda ws, parts, line: seen.append(line)})
+    ch.run(_ws, "swipe 1 2")
+    assert seen == ["swipe 1 2"]
+
+
+def test_kstop_hands_the_kernel_its_count_and_leaves_the_console(monkeypatch,
+                                                                 capsys):
+    """`kstop N` is the kernel's teardown guard (#224): the kernel runs N soft
+    resets, so the word hands it N and the console leaves by SystemExit, the
+    exit the VM service turns into a soft reset."""
+    import sys
+    import types
+    asked = []
+
+    def kstop(n):
+        asked.append(n)
+        raise SystemExit
+
+    monkeypatch.setitem(sys.modules, "moy_kernel", types.SimpleNamespace(kstop=kstop))
+    ws, ch = make()
+    try:
+        ch.run(ws, "kstop 3")
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("the console stayed")
+    assert asked == [3] and "REMOTE kstop 3" in capsys.readouterr().out
+
+
+def test_start_parts_split_the_kernels_stamps():
+    """`state`'s `start` (docs/kernel_cartpath_2026-10.md section 5.5): each
+    part is the gap between two of the kernel's stamps, the total from the
+    last VM's end; a part with a missing end is None, never 0."""
+    from runtime.dev_channel import start_parts
+    got = start_parts("return", (1000, 1150, 2200, 3500, 4500, 4650))
+    assert got == {"kind": "return", "vm": 150, "imports": 1050,
+                   "workstation": 1300, "wiring": 1000, "first_frame": 150,
+                   "total": 3650}
+    got = start_parts("boot", (0, 430, 1300, None, None, None))
+    assert got["vm"] == 430 and got["imports"] == 870
+    assert got["workstation"] is None and got["total"] is None

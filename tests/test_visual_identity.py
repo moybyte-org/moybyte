@@ -2,7 +2,8 @@
 vertical slice:
 
   * semantic theme roles (Section 4.3): theme_colors() resolves every role for
-    every theme, the "machine" theme is opt-in, and "night" stays byte-identical;
+    every theme, and the default is Moy in its Day mode (docs/look_2026-10.md
+    step 27, which deleted `night` and the opt-in `machine`);
   * the Library verbs (Sections 1.2-1.3): the selected card exposes PLAY and
     CHANGE, primary activation still always plays, CHANGE opens the SAME project
     in the Editor landing on Config;
@@ -14,12 +15,20 @@ so these assert host==device behavior."""
 
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _build_ws, use_theme
+
+
+def _ws(tmp_path, **kw):
+    """A workstation on the `night` fixture (tests/fixtures/themes/) in its
+    dark mode, the palette theme these surfaces were pinned on: no look of
+    its own, so the default's, flat."""
+    ws = _build_ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark")
+    return ws
 
 
 def _home_layer(ws):
@@ -29,91 +38,41 @@ def _home_layer(ws):
 # -- Section 4.3: semantic theme roles ---------------------------------------
 
 def test_every_theme_resolves_every_semantic_role():
-    from runtime.chrome import THEMES, theme_colors
+    from runtime.chrome import THEME_NAMES, theme_colors, RGB
     roles = ("desktop", "desktop_pattern", "surface", "surface_alt", "border",
              "ink", "ink_dim", "selection", "focus", "play", "author", "danger")
-    for name, _tokens in THEMES:
+    for name in THEME_NAMES:
         th = theme_colors(name)
         for role in roles:
             assert role in th, (name, role)
-            assert 0 <= th[role] <= 63
+            assert 0 <= th[role] <= 63 or th[role] >= RGB
         assert isinstance(th["surface_light"], bool)
 
 
-def test_night_base_tokens_are_byte_identical():
-    """The shipped default keeps today's exact values (Section 4.3: Open Machine
-    is an additional theme, never an in-place mutation of "night")."""
-    from runtime.chrome import theme_colors
-    th = theme_colors("night")
-    assert {k: th[k] for k in ("panel", "edge", "title", "title_ink",
-                               "accent", "hilite", "dim")} == {
-        "panel": 60, "edge": 13, "title": 13, "title_ink": 0,
-        "accent": 10, "hilite": 13, "dim": 1}
-    # The semantic fallbacks ARE today's hardcoded literals.
-    assert th["ink"] == 7 and th["ink_dim"] == 6
-    assert th["focus"] == th["accent"] == 10
-    assert th["play"] == 11 and th["danger"] == 8
-    assert th["author"] == 10          # the frozen Make-tile yellow
-
-
-def test_machine_theme_is_optional_and_selectable(tmp_path):
-    """Open Machine ships as an opt-in Settings theme with the Section 4.2 jobs:
-    dark-blue field, signal verbs (play green / author orange / focus yellow)."""
-    from runtime.chrome import THEMES, DEFAULT_THEME, theme_colors
-    assert DEFAULT_THEME == "night"
-    assert any(n == "machine" for n, _t in THEMES)
-    th = theme_colors("machine")
-    assert th["panel"] == th["desktop"] == 1     # dark blue construction field
-    assert th["play"] == 11 and th["author"] == 9 and th["focus"] == 10
-    assert th["danger"] == 8
-    ws = _ws(tmp_path)
-    ws.look.set_theme("machine")
-    assert ws.look.theme_name == "machine"
-    assert ws.launcher.theme is ws.theme_colors
-    # Persisted like any theme choice.
-    assert ws.system.get("theme") == "machine"
+def test_the_default_is_moy_in_its_day_mode(tmp_path):
+    """The seed set is Moy, Blocks and Contrast, Moy's Day the default
+    (docs/look_2026-10.md step 27); a deleted seed's name is no theme."""
+    from runtime.chrome import THEME_NAMES, DEFAULT_THEME, DEFAULT_VARIANT
+    assert (DEFAULT_THEME, DEFAULT_VARIANT) == ("moy", "light")
+    assert THEME_NAMES == ("moy", "blocks", "contrast")
+    ws = _build_ws(tmp_path)
+    assert (ws.look.theme_name, ws.look.theme_variant) == ("moy", "light")
 
 
 def test_unknown_theme_falls_back_to_default():
     from runtime.chrome import theme_colors
-    assert theme_colors("no-such-theme") == theme_colors("night")
+    assert theme_colors("no-such-theme") == theme_colors("moy")
+    assert theme_colors("night") == theme_colors("moy")
 
 
 # -- Light/dark variants (owner ask 2026-07-23) -------------------------------
 
-def test_every_theme_has_a_light_variant_resolving_every_role():
-    """Each theme family ships DARK + LIGHT presentations of the same identity:
-    the light set resolves every semantic role, is marked surface_light, and
-    flips the chrome ink dark (light fields need dark text)."""
-    from runtime.chrome import THEMES, THEME_LIGHT, theme_colors
-    roles = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
-             "desktop", "desktop_pattern", "surface", "surface_alt", "border",
-             "ink", "ink_dim", "chrome_ink", "chrome_ink_dim", "selection",
-             "focus", "play", "author", "danger",
-             "title_active", "title_inactive")
-    for name, _tokens in THEMES:
-        assert name in THEME_LIGHT, name
-        th = theme_colors(name, "light")
-        for role in roles:
-            assert role in th, (name, role)
-            assert 0 <= th[role] <= 63
-        assert th["surface_light"] is True
-        assert th["ink"] == 0 and th["chrome_ink"] == 0
-        # The signal verbs keep their Section 4.2 jobs in both variants.
-        assert th["play"] == 11 and th["danger"] == 8 and th["focus"] == 10
-
-
-def test_dark_variant_is_the_legacy_token_set():
-    """theme_colors(name) == theme_colors(name, "dark") -- the one-arg call
-    (every existing caller) keeps its exact pre-variant pixels, including the
-    chrome ink statics (white / light-grey)."""
-    from runtime.chrome import THEMES, theme_colors
-    for name, _tokens in THEMES:
-        th = theme_colors(name)
-        assert th is theme_colors(name, "dark")
-        if name != "machine":
-            assert th["ink"] == 7 and th["ink_dim"] == 6
-        assert th["chrome_ink"] == 7 and th["chrome_ink_dim"] == 6
+def test_the_one_arg_call_is_the_default_variant():
+    """theme_colors(name) is theme_colors(name, DEFAULT_VARIANT): the one-arg
+    call answers the mode the console boots in."""
+    from runtime.chrome import THEME_NAMES, DEFAULT_VARIANT, theme_colors
+    for name in THEME_NAMES:
+        assert theme_colors(name) is theme_colors(name, DEFAULT_VARIANT)
 
 
 def test_theme_variant_applies_and_persists(tmp_path):
@@ -127,33 +86,35 @@ def test_theme_variant_applies_and_persists(tmp_path):
     assert ws.system.get("theme_variant") == "light"
     carts = ws.carts_root
     assert moy_carts.load_system(carts).get("theme_variant") == "light"
-    # A theme pick keeps the variant; an unknown variant falls back to dark.
-    ws.look.set_theme("berry")
-    assert ws.look.theme_variant == "light" and ws.theme_colors["panel"] == 7
+    # A theme pick keeps the variant; an unknown variant falls back to the
+    # default's.
+    ws.look.set_theme("blocks")
+    assert ws.look.theme_variant == "light"
+    ws.look.set_theme_variant("dark")
     ws.look.set_theme_variant("nonsense")
-    assert ws.look.theme_variant == "dark"
+    assert ws.look.theme_variant == "light"
 
 
 def test_variant_survives_reboot(tmp_path):
-    ws = _ws(tmp_path)
-    ws.look.set_theme("forest")
-    ws.look.set_theme_variant("light")
-    ws2 = _ws(tmp_path)
-    assert ws2.look.theme_name == "forest" and ws2.look.theme_variant == "light"
-    assert ws2.theme_colors["surface_light"] is True
+    ws = _build_ws(tmp_path)
+    ws.look.set_theme("contrast")
+    ws.look.set_theme_variant("dark")
+    ws2 = _build_ws(tmp_path)
+    assert ws2.look.theme_name == "contrast" and ws2.look.theme_variant == "dark"
+    assert ws2.theme_colors["surface_light"] is False
 
 
-def test_base_tier_editors_follow_light_chrome(tmp_path):
-    """The 320x240 _base editor branches keep their frozen literals ONLY in dark
-    chrome; a light variant themes the base tier too (owner ask 2026-07-23 --
-    'editors follow the styles')."""
-    from runtime.chrome import NAMES
+def test_base_tier_editors_follow_the_theme(tmp_path):
+    """The 320x240 tier's editors read the theme's tokens in both variants
+    (owner ask 2026-07-23 -- 'editors follow the styles'; the frozen dark
+    literals retired with theming's phase 2b)."""
     ws = _ws(tmp_path)                      # 320x240 base tier
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and it.get("edit"))
     ws.change_selected()
     t = ws.cards_layer._tones()
-    assert t["body"] == NAMES["dark_purple"]        # frozen dark baseline
+    assert t["body"] == ws.theme_colors["surface"]  # themed in dark too
+    assert ws.code_layer._tones()["bg"] == ws.theme_colors["surface"]
     ws.look.set_theme_variant("light")
     t = ws.cards_layer._tones()
     assert t["body"] == ws.theme_colors["surface"]  # themed on light
@@ -185,9 +146,9 @@ def test_bar_icons_get_plateless_light_variants(tmp_path):
 # -- Sections 1.2/6.1: the Library card's PLAY / CHANGE verbs ----------------
 
 def _select_real_cart(ws):
-    """Move the launcher selection onto the first real (non-pseudo) cart."""
+    """Move the launcher selection onto the first real (non-pseudo) game."""
     for i, it in enumerate(ws.launcher.items):
-        if it.get("path"):
+        if it.get("path") and it.get("type") == "game":
             ws.launcher.sel = i
             return it
     raise AssertionError("no real cart in the launcher grid")
@@ -204,12 +165,13 @@ def test_change_selected_opens_editor_on_config(tmp_path):
     assert ws.editor_app.tab == ("cards" if ws.cart.get("edit") else "code")
 
 
-def test_change_selected_ignores_the_make_tile(tmp_path):
+def test_change_selected_ignores_the_new_card(tmp_path):
     ws = _ws(tmp_path)
-    ws.launcher.sel = 0                           # the pinned Make pseudo tile
+    ws.set_home_tab("make")
+    ws.launcher.sel = 0                           # Make's "+ New" pseudo card
     assert ws.launcher.selected().get("path") is None
     ws.change_selected()
-    assert ws.screen == "launcher"                # no-op: Make has one verb, its tap
+    assert ws.screen == "launcher"                # no-op: "+ New" has one verb, its tap
 
 
 def test_primary_activation_still_always_plays(tmp_path):
@@ -244,50 +206,35 @@ def test_studio_play_returns_to_same_tab(tmp_path):
     assert ws.cart["path"] == cart["path"]
 
 
-def test_action_rects_only_on_desktop_density(tmp_path):
-    """320x240 baseline: no on-card buttons (the zoned bar carries the verbs);
-    desktop density: the selected real card exposes both rects."""
-    ws = _ws(tmp_path)
-    _select_real_cart(ws)
-    assert ws.launcher.action_rects() is None     # base tier
-    ws2 = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    _select_real_cart(ws2)
-    ar = ws2.launcher.action_rects()
-    assert ar is not None and set(ar) == {"play", "change"}
-    tile = ws2.launcher.tile_rect(ws2.launcher.sel)
-    for x, y, w, h in ar.values():
-        assert y >= tile[1] and y + h <= tile[1] + tile[3]   # inside the card row
-    # The pinned Make tile exposes no PLAY/CHANGE row (one verb: its tap).
-    ws2.launcher.sel = 0
-    assert ws2.launcher.action_rects() is None
-    # The picker grid never grows the row (a pick has one meaning there).
-    assert ws2.picker.action_rects() is None
-
-
-def test_desktop_card_buttons_dispatch(tmp_path):
-    """Clicking the selected card's PLAY / CHANGE rects dispatches the verbs
-    (#184: a tap SCHEDULES the transition; the next frame lands it behind the
-    LOADING paint, so the assert follows a frame pump)."""
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    _select_real_cart(ws)
-    ar = ws.launcher.action_rects()
-    home = _home_layer(ws)
-    x, y, w, h = ar["change"]
-    home.handle_pointer(x + w // 2, y + h // 2, True)
-    ws.frame(1 / 30)
-    assert ws.screen == "menu"                    # CHANGE -> Studio/Editor
-    # Back out, then PLAY via the button.
-    ws.go_home()
-    _select_real_cart(ws)
-    ar = ws.launcher.action_rects()
-    x, y, w, h = ar["play"]
-    home.handle_pointer(x + w // 2, y + h // 2, True)
-    ws.frame(1 / 30)
-    assert ws.screen == "desktop"                 # PLAY -> Player
+def test_the_zone_carries_the_active_tabs_verbs_on_every_tier(tmp_path):
+    """docs/shell_layout_2026-10.md §12: no card carries a verb row; the lent bar
+    zone carries the active tab's verbs on the selected card, on every tier."""
+    for ws in (_ws(tmp_path / "a"), _ws(tmp_path / "b", sys_size=(1024, 600),
+                                         font_scale=2)):
+        home = _home_layer(ws)
+        _select_real_cart(ws)
+        assert ws.launcher.action_rects() is None
+        assert home.zone_verbs() == ("play", "change", "search")
+        ws.set_home_tab("mine")                   # nothing made yet: "+ New"
+        assert home.zone_verbs() == ("new",)
+        ws.set_home_tab("apps")
+        assert home.zone_verbs() == ("open",)
+        ws.set_home_tab("make")
+        assert home.zone_verbs() == ("new",)      # "+ New" first
+        ws.launcher.sel = 1
+        assert home.zone_verbs() == ("new", "change", "copy")     # a built-in
+        ws.carts.dup(ws.launcher.selected())      # a project of the kid's own
+        ws.set_home_tab("make")
+        ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                               if (it.get("title") or "").endswith(" copy"))
+        assert home.zone_verbs() == ("new", "change", "copy", "delete")
+        chips = home._zone_action_rects(ws.layout.zone_left)
+        # ...and the selected cart's favourite star where the strip has room
+        assert set(chips) - {"favourite"} == {"new", "change", "copy", "delete"}
 
 
 def test_base_tier_zone_chips_dispatch(tmp_path):
-    """On the 320x240 baseline the lent bar zone carries the PLAY / CHANGE chips."""
+    """The lent bar zone's PLAY / CHANGE chips dispatch their verbs."""
     ws = _ws(tmp_path)
     _select_real_cart(ws)
     home = _home_layer(ws)
@@ -303,54 +250,26 @@ def test_base_tier_zone_chips_dispatch(tmp_path):
     assert home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
     ws.frame(1 / 30)
     assert ws.screen == "desktop"
-    # With the Make tile selected there are no chips (nothing to claim).
+    # On Make's "+ New" card the one chip is NEW: no PLAY to tap.
     ws._exit_to_caller()
+    ws.set_home_tab("make")
     ws.launcher.sel = 0
-    assert home._zone_action_rects(ws.layout.zone_left) is None
-    assert not home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
+    assert set(home._zone_action_rects(ws.layout.zone_left)) == {"new"}
 
 
-def test_library_shelf_geometry(tmp_path):
-    """The desktop-density Library shelf (the library-concept mockup): a framed
-    panel whose grid SCROLLS left-right with one TALL featured slot (column 0,
-    spanning both visible rows -- the pinned MAKE card); every other card
-    stacks the columns marching right, two per column."""
+def test_the_home_shows_its_wallpaper_behind_the_cards(tmp_path):
+    """The carousel's band has no backdrop of its own (D7: the home has its
+    own wallpaper slot): beside the cards the wallpaper shows, never the
+    theme's surface."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    lay = ws.layout
-    gx, gy, gw, gh = lay.lib_grid
-    tall_h = 2 * lay.lib_card_h + lay.lib_gap
-    assert lay.tile_rect(0, 0) == (gx, gy, lay.lib_card_w, tall_h)  # tall featured slot
-    assert lay.tile_rect(1, 0)[3] == lay.lib_card_h              # ordinary card
-    # The packing stacks each column top-to-bottom, then steps right.
-    assert lay.tile_cell(1) == (0, 1)
-    assert lay.tile_cell(2) == (1, 1)                            # below, same column
-    assert lay.tile_cell(3) == (0, 2)                            # next column's top
-    # Scrolling shifts every cell left; a half-scrolled card still returns its
-    # (clipped) rect, and far enough the card leaves the viewport entirely.
-    half = lay.lib_card_w // 2
-    assert lay.tile_rect(1, half)[0] == gx + lay.lib_step - half
-    assert lay.tile_rect(1, lay.lib_step + lay.lib_card_w) is None  # scrolled off
-    px, py, pw, ph = lay.lib_panel                               # panel frames grid
-    assert px <= gx and py <= gy and gx + gw <= px + pw and gy + gh <= py + ph
-    # Vertical nav steps within a card column (the tall slot spans both rows).
-    ws.launcher.sel = 1
-    ws.launcher.nav2d(0, 1)
-    assert ws.launcher.sel == 2
-    ws.launcher.nav2d(0, -1)
-    assert ws.launcher.sel == 1
-
-
-def test_library_shelf_panel_paints_surface(tmp_path):
-    """The machine theme's Library panel is the warm-light tool surface (cream)
-    over the dark construction field."""
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    ws.look.set_theme("machine")
+    use_theme(ws, "machine", "dark")
     ws.frame(1 / 30)
-    px, py, pw, ph = ws.layout.lib_panel
+    bx, by, bw, bh = ws.launcher.band_rect()
     th = ws.theme_colors
     assert th["surface"] == 7
-    # A point in the panel header band (left of the LIBRARY heading's start).
-    assert ws.sys_canvas.pix(px + 2, py + 2) == th["surface"]
+    cv = ws.sys_canvas
+    # The band's left edge: card 0 rests at the centre, nothing left of it.
+    assert all(cv.pix(bx + 2, y) != th["surface"] for y in range(by, by + bh, 7))
 
 
 def _cover_sync(ws, cart, div=1):
@@ -439,7 +358,8 @@ def test_a_relayout_keeps_one_base_per_cover(tmp_path):
         ws._dirty = True
         ws.frame(1 / 30)
         assert _cover_sync(ws, covered) is first
-    divs = sorted(k[1] for k in ws.covers._cache if k[0] == covered["path"])
+    divs = sorted(k[1] for k in ws.covers._cache
+                  if k[0] == covered["path"] and len(k) == 2)      # not a dimmed tint
     assert divs in ([1], [1, 2])
 
 
@@ -462,161 +382,3 @@ def test_a_cover_takes_the_next_scale_up_when_it_overflows_by_a_tenth_at_most():
     assert _cover_scale(64, 85, 49) == 0
     assert _cover_scale(128, 0, 0) == 0
     assert _cover_scale(128, 300, -4) == 0
-
-
-def _drawn_cover(slot, outer, art_h=None):
-    """A 128x128 picture of distinct words drawn by the shelf's cover draw
-    into `slot` -- scaled for a card whose unselected slot is `art_h` tall
-    (None: the slot's own height) -- on a 320x300 canvas whose cards clip to
-    `outer`: the canvas's words, the picture's, and the clip it was left
-    with."""
-    from runtime import host_canvas
-    from runtime.cover_cache import _CoverImage
-    from runtime.launcher_layer import _draw_cover
-    cv = host_canvas.make_canvas(320, 300)
-    cv.cls(3)
-    words = [((i * 2654435761) >> 9) & 0xFFFF for i in range(128 * 128)]
-    pix = bytearray()
-    for w_ in words:
-        pix += bytes((w_ & 255, w_ >> 8))
-    cv.clip(*outer)
-    _draw_cover(cv, _CoverImage(128, 128, pix), *slot,
-                slot[3] if art_h is None else art_h, outer)
-    left = (cv._clip_x0, cv._clip_y0, cv._clip_x1, cv._clip_y1)
-    cv.clip()
-    cv.flush_batch()
-    return list(memoryview(cv._buf).cast("H")), words, left
-
-
-def test_a_near_fit_cover_is_cropped_to_its_slot_centred():
-    """2x of a 128 cover in the Guition P4's 258x245 slot is 256x256: one
-    column of slot either side, 5 rows cropped off the top and 6 off the
-    bottom, nothing drawn outside the slot -- and the cards' clip is what the
-    draw leaves behind."""
-    sx, sy, sw, sh = 20, 30, 258, 245
-    got, words, left = _drawn_cover((sx, sy, sw, sh), (10, 25, 290, 270))
-    bg = got[0]
-    ox, oy = sx + 1, sy - 5
-    for y in range(300):
-        for x in range(320):
-            if sx <= x < sx + sw and sy <= y < sy + sh and ox <= x < ox + 256:
-                want = words[((y - oy) // 2) * 128 + (x - ox) // 2]
-            else:
-                want = bg
-            assert got[y * 320 + x] == want, (x, y)
-    assert left == (10, 25, 300, 295)
-
-
-def test_a_selected_cards_shorter_slot_crops_its_cover_centred():
-    """The Guition P4's selected card: its PLAY/CHANGE row shortens the
-    258x245 slot to 258x217, and the cover keeps the 2x its unselected slot
-    takes, 39 rows cropped, 19 off the top and 20 off the bottom."""
-    sx, sy, sw, sh = 20, 30, 258, 217
-    got, words, left = _drawn_cover((sx, sy, sw, sh), (10, 25, 290, 270), 245)
-    bg = got[0]
-    ox, oy = sx + 1, sy - 19
-    for y in range(300):
-        for x in range(320):
-            if sx <= x < sx + sw and sy <= y < sy + sh and ox <= x < ox + 256:
-                want = words[((y - oy) // 2) * 128 + (x - ox) // 2]
-            else:
-                want = bg
-            assert got[y * 320 + x] == want, (x, y)
-    assert left == (10, 25, 300, 295)
-
-
-BOARD_SHELVES = {
-    "tdeck": dict(sys_size=None, font_scale=1, windowed=False),
-    "guition_s3": dict(sys_size=(480, 320), font_scale=1, windowed=False,
-                       panel_diagonal_in=3.5),
-    "p4": dict(sys_size=(1024, 600), font_scale=1, windowed=True,
-               panel_diagonal_in=7.0),
-    "guition_p4": dict(sys_size=(1280, 800), font_scale=1, windowed=True,
-                       panel_diagonal_in=10.1),
-}
-
-
-class _BlitLog:
-    """The canvas a card draws on, logging each blit565's (w, y, scale)."""
-
-    def __init__(self, cv):
-        self._cv = cv
-        self.blits = []
-
-    def blit565(self, buf, w, h, x, y, scale=1):
-        self.blits.append((w, y, scale))
-        self._cv.blit565(buf, w, h, x, y, scale)
-
-    def __getattr__(self, name):
-        return getattr(self._cv, name)
-
-
-@pytest.mark.parametrize("board", sorted(BOARD_SHELVES))
-def test_selecting_a_card_never_changes_its_covers_scale(tmp_path, board):
-    """A cover that shrank on selection would read as a glitch: on every
-    board a card's cover is the same decode at the same scale selected or
-    not (the HALF on the S3s too), and the selected card's shorter slot only
-    crops it. Its prefetch spec does not move with the selection either."""
-    ws = _ws(tmp_path, **BOARD_SHELVES[board])
-    if BOARD_SHELVES[board]["windowed"]:
-        ws.open_library()
-    ws.frame(1 / 30)
-    la = ws.launcher
-    covered, _bare = _covered_and_bare(ws)
-    i = la.items.index(covered)
-    _cover_sync(ws, covered, 1)
-    _cover_sync(ws, covered, 2)
-    specs = []
-    drawn = []
-    for selected in (False, True):
-        la.sel = i if selected else (i + 1) % len(la.items)
-        la._scroll_to_sel()
-        rect = dict(la._visible())[i]
-        specs.append([d for c, d in la.cover_specs() if c is covered])
-        log = _BlitLog(ws.sys_canvas)
-        la._card_clip = None
-        la._draw_cart_card(log, covered, rect, selected, None)
-        assert len(log.blits) == 1, (board, selected)
-        drawn.append(log.blits[0])
-    assert specs[0] == specs[1] != []
-    (w0, _y0, s0), (w1, _y1, s1) = drawn
-    assert (w0, s0) == (w1, s1)
-    if board == "guition_p4":
-        assert (w0, s0) == (128, 2)
-        if la.action_rects() is not None:
-            assert drawn[1][1] < drawn[0][1]     # cropped, centred higher
-
-
-def test_a_cover_its_card_clip_cuts_stays_inside_both():
-    """A card scrolled half out of the shelf: the crop is the slot inside the
-    cards' clip, so the cover never draws past the shelf's edge."""
-    got, _words, left = _drawn_cover((20, 30, 258, 245), (10, 25, 100, 270))
-    bg = got[0]
-    assert all(got[y * 320 + x] == bg for y in range(300) for x in range(110, 320))
-    assert got[40 * 320 + 60] != bg
-    assert left == (10, 25, 110, 295)
-
-
-def test_a_cover_that_fits_draws_centred_and_leaves_the_clip_alone():
-    """The Waveshare's 206x173 slot takes 1x: the cover centred, the clip
-    never touched."""
-    got, words, left = _drawn_cover((20, 30, 206, 173), (10, 25, 290, 270))
-    ox, oy = 20 + (206 - 128) // 2, 30 + (173 - 128) // 2
-    assert all(got[(oy + y) * 320 + ox + x] == words[y * 128 + x]
-               for y in range(128) for x in range(128))
-    assert left == (10, 25, 300, 295)
-
-
-def test_home_draw_includes_action_row_desktop(tmp_path):
-    """The desktop-density home frame actually paints the PLAY row (signal green
-    is reserved for PLAY, so its presence is a faithful marker)."""
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    _select_real_cart(ws)
-    ws.frame(1 / 30)
-    ar = ws.launcher.action_rects()
-    x, y, w, h = ar["play"]
-    th = ws.theme_colors
-    assert ws.sys_canvas.pix(x + 2, y + 2) == th["play"]
-    # CHANGE is the mockup's warm-light button (cream field, dark ink).
-    x, y, w, h = ar["change"]
-    assert ws.sys_canvas.pix(x + 2, y + 2) == 7

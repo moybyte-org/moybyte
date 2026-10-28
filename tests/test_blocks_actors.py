@@ -7,7 +7,7 @@
 
 Each new block is asserted to compile to correct, MicroPython-safe Python; the
 compiled coin-collector EXECUTES with the right behaviour against a real SceneWorld;
-and the shipped coin_quest.moy seed cart's blocks.json compiles bit-stably to its
+and the shipped moybyte.coin_quest.moy seed cart's blocks.json compiles bit-stably to its
 main.py (the #109 "pin a golden"). Mirrors tests/test_blocks.py's run harness."""
 
 import ast
@@ -282,11 +282,11 @@ def test_actor_program_round_trips_for_graduation():
 
 
 # ----------------------------------------------------------------------------
-# The shipped coin_quest.moy seed cart: its blocks.json is the source of truth
+# The shipped moybyte.coin_quest.moy seed cart: its blocks.json is the source of truth
 # ----------------------------------------------------------------------------
 
 def _coin_quest_dir():
-    return str(ROOT / "system_carts" / "coin_quest.moy")
+    return str(ROOT / "system_carts" / "moybyte.coin_quest.moy")
 
 
 def test_coin_quest_blocks_json_compiles_to_shipped_main():
@@ -335,5 +335,5 @@ def test_coin_quest_pickup_asks_for_a_sound_that_exists(tmp_path):
     ws = build_ws(tmp_path)
     open_cart(ws, "Coin Quest")
     assert ws.cart_error is None
-    sfx0 = ws.audio.engine.bank.get_sfx(0)
+    sfx0 = ws.audio.bank.get_sfx(0)
     assert sfx0 is not None and sfx0.steps, "Coin Quest picks up in silence"

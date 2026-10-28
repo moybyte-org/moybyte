@@ -85,7 +85,7 @@ PATH_RE = re.compile(
 # bare `.c`/`.h` is almost always upstream MicroPython or ESP-IDF, which lives
 # in the untracked .build/ clones and cannot be resolved here.
 # Generated at build time -- real on a built tree, absent in a clean checkout.
-GENERATED_RE = re.compile(r"^(_ota_build|carts_data|app_decls)\.py$")
+GENERATED_RE = re.compile(r"^(_ota_build|carts_data|app_decls|fonts_data)\.py$")
 
 # "deleted", "removed", "gone"... -- the vocabulary of a removal note.
 BURIED_RE = re.compile(
@@ -120,6 +120,7 @@ NOT_OURS = (
     "dist/", ".build/",
     "ports/celeste.moy",     # gitignored: CC BY-NC-SA, never committed
     "p8_lua_port.py",        # lives in the moy-spec repo, not here
+    "runtime/moy_spine.py",  # the spine's twin, now the oracle tests/spine_twin.py (#224)
     # The streaming web view, deleted 2026-08-12 (moycore plan 3.2 sunset), and
     # the recording stack that outlived it by a day (stage 4: the wasm head
     # rasterizes, so the recorder + the page's JS replayer went too). The plan,
@@ -128,6 +129,35 @@ NOT_OURS = (
     "tools/web_console.py", "modules/device_webview.py", "device_webview.py",
     "runtime/web_view.py", "runtime/web_view_page.py", "tests/webharness.py",
     "tests/test_web_recording.py",
+    # The surface leaf and the glass's Python twin, deleted by sprint 3's glass
+    # pass (2026-10-07) when the kernel's native/moy_glass took the table and
+    # the rows. The kernel plans and the surface model name them to say what
+    # crossed.
+    "runtime/surface.py", "runtime/moy_glass.py",
+    # The host's Lua twin, deleted by sprint 4's host pass (2026-10-09) when
+    # the host's Lua carts moved onto the boards' glue over runtime/moycore.py;
+    # the cart-path plan names it to say what crossed.
+    "runtime/lua_host.py",
+    # ...and the compositors' Python it crossed into native/moy_glass.
+    "device/banded_panel.py", "modules/tdeck_panel.py", "modules/guition_panel.py",
+    "modules/p4_display.py", "device/dsi_panel.py", "modules/guition_p4_display.py",
+    # The Python frame loop, deleted by sprint 3's frame-tail pass (2026-10-08)
+    # when native/moy_kernel/moy_loop.c took the frame.
+    "runtime/frame_loop.py",
+    # The Python tick model, deleted by sprint 4's step 1 when
+    # native/moy_play/moy_tick.c took it. The kernel plans name it to say what
+    # crossed.
+    "runtime/tick_model.py",
+    # ...and the host's copy of the console half, which became
+    # native/moycore/moycore_run.c, the one the boards run too.
+    "runtime/moyhost_console.h",
+    # The user-files layer, deleted by sprint 5's step 7 when
+    # native/moy_store/moy_ufiles.c took it; the kernel plans and the tests'
+    # golden name them to say what crossed.
+    "runtime/moy_files.py", "runtime/moy_file_ops.py",
+    # The skin catalog, deleted by sprint 6's step 2 when its deltas moved
+    # into native/moy_ui/style.json; the plans name it to say what crossed.
+    "runtime/skin.py", "skin.py",
 )
 
 

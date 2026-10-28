@@ -20,9 +20,9 @@
 // exactly while the USB path is being debugged.
 #define MICROPY_HW_ENABLE_UART_REPL         (0)
 
-// I2C0 is the AXS15231's touch bus (addr 0x3B). device/axs_touch.py passes
-// these pins explicitly; setting them here means a bare machine.I2C(0) is also
-// right. (Pins from the owner's working ESPHome definition.)
+// I2C0 is the AXS15231's touch bus (addr 0x3B), the kernel's bus (MOY_BUS_I2C_*
+// below): nothing opens a machine.I2C on port 0. (Pins from the owner's
+// working ESPHome definition.)
 #define MICROPY_HW_I2C0_SCL                 (8)
 #define MICROPY_HW_I2C0_SDA                 (4)
 
@@ -34,6 +34,13 @@
 // guard (there SD shares the panel host and machine.SDCard wedges the board);
 // that hazard does not exist on this wiring.
 #define MICROPY_HW_ENABLE_SDCARD            (1)
+
+// exFAT in FatFS (lib/oofatfs, whose ffconf.h reads this define; ESP32 ports
+// leave it off). A card over 32 GB ships exFAT, and without it a read-only
+// vfs.mount of one fails with ENODEV: the TF slot is the console's cart store
+// when a card is in it (device/card_store.py), and a big card is the common one.
+// FAT12/16/32 cards mount as before. LFN is already on, which exFAT needs.
+#define MICROPY_FATFS_EXFAT                 (1)
 
 // The Python heap may grow on demand (split heap), but never into this much
 // of PSRAM: it is the Lua VM's, the panel DMA's and the layer pool's share.
@@ -83,3 +90,68 @@
 // lands while the store writes the last one instead of stalling the USB
 // endpoint at the port's 260 bytes. The module's header says which boards may.
 #define MOY_SERIAL_RING_BYTES               (32768)
+
+// The kernel's recovery floor (native/moy_kernel): moy_axs's entry points, its
+// landscape 480x320 framebuffer in wire order (the module turns the bands onto
+// the portrait glass), and the AXS15231's touch on I2C0, polled from C.
+#define MOY_KERNEL_PANEL(fn)                moy_axs_k##fn
+#define MOY_KERNEL_PANEL_W                  (480)
+#define MOY_KERNEL_PANEL_H                  (320)
+#define MOY_KERNEL_PANEL_ROT                (0)
+#define MOY_KERNEL_PANEL_SWAP               (1)
+#define MOY_KERNEL_TOUCH_AXS15231           (1)
+#define MOY_KERNEL_TOUCH_SDA                MICROPY_HW_I2C0_SDA
+#define MOY_KERNEL_TOUCH_SCL                MICROPY_HW_I2C0_SCL
+#define MOY_KERNEL_TOUCH_ADDR               (0x3B)
+
+// The VM stop (docs/kernel_cartpath_2026-10.md section 5): this board's lever.
+// The kernel stops the VM for a VM-free game whose fit check fails with the VM
+// up (the `need` policy: a Doom-sized compiled cart), runs it with no VM over
+// the panel's own framebuffer (moy_axs's kernel entry points above), and
+// starts the VM again after it, mounting the card's open volume with no bus
+// traffic (native/moy_play/moy_play_stop.c). A board without it keeps the VM
+// for every run.
+#define MOY_VM_STOP                         (1)
+
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the AXS15231 touch.
+#define MOY_BUS_I2C_PORT                    (0)
+#define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
+#define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
+#define MOY_BUS_I2C_HZ                      (400000)
+
+// Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
+// central over NimBLE, its bonds in NVS. There is no `bluetooth` module.
+#define MOY_INPUT_BLE                       (1)
+#define MICROPY_PY_BLUETOOTH                (0)
+
+// Input's touch (native/moy_input/moy_input_task.c): the AXS15231B bridge at
+// 0x3B, portrait-native, mapped onto the landscape console (moy_axs rot 0:
+// swap, then flip x), extrapolated through its lift window with a 90 ms hold.
+#define MOY_INPUT_TOUCH_KIND                (3)     // MOY_TOUCH_AXS
+#define MOY_INPUT_TOUCH_ADDR                (0x3B)
+#define MOY_INPUT_TOUCH_SWAP                (1)
+#define MOY_INPUT_TOUCH_FLIP_X              (1)
+#define MOY_INPUT_TOUCH_FLIP_Y              (0)
+#define MOY_INPUT_TOUCH_EXTRAPOLATE         (1)
+#define MOY_INPUT_TOUCH_HOLD_MS             (90)
+
+// The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
+// released layer buffers it keeps for the next run, inside the kernel's 1 MiB
+// PSRAM share (docs/native_kernel_2026-09.md §6.1). One 320x240 layer: a
+// scroll cart's 384,000-byte world is freed at exit and allocated again.
+#define MOY_GLASS_POOL_BYTES                (160 * 1024)
+
+// The banded present (native/moy_glass/moy_present.h): this panel module's
+// kernel transport (kwait/kkick/kship) under the kernel's frame state machine.
+#define MOY_GLASS_BANDED                    (1)
+
+// The radio link is the kernel's (native/moy_net/moy_link.c, moy_net.Link): it
+// holds esp_now's one receive callback, so the port's espnow module is out of
+// the image and Python cannot take the callback from it, and a soft reset
+// (which would deinit the port's) leaves the link and its ring up.
+#define MICROPY_PY_ESPNOW                   (0)
+#define MOY_NET_LINK                        (1)
+// The WiFi driver is the kernel's too (native/moy_net/moy_wifi.c): the station
+// starts and stops as the spine's lease asks, and Python never constructs the
+// port's network.WLAN on this board.
+#define MOY_NET_WIFI                        (1)

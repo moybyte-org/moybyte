@@ -1,0 +1,27 @@
+{
+  "format": "moy-1",
+  "version": 7,
+  "title": "Paint",
+  "id": "moybyte.paint",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 270,
+    "app": {
+      "id": "artwork",
+      "entry": "paint_app:PaintAppLayer",
+      "text_mode": false,
+      "order": 10
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "artwork"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

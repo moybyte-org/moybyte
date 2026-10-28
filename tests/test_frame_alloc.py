@@ -11,12 +11,20 @@ speaker ran dry each time (#158 has the numbers). None of it was the cart's:
 every byte was the console's frame.
 
 So this boots the REAL T-Deck desktop -- `moy_runtime.run_desktop`, the shared
-boot spine, the FrameLoop, the Workstation, the Player, `moycore_glue`'s
+boot spine, the kernel's frame loop (`moy_loop`), the Workstation, the Player, `moycore_glue`'s
 WasmRun with its CartFrame hand-off -- on the desktop MicroPython built in the
-BOARDS' object model (32-bit words, REPR_C, single floats: see `make
-unix-micropython`), with its hardware replaced underneath by fakes that return
-what the C returns in the shapes the C returns them. It runs a compiled cart,
-lets it warm up, and then counts `gc.mem_alloc()` across whole loop frames.
+BOARDS' model (32-bit words, REPR_C, single floats, threads under one GIL: see
+`make unix-micropython`), with its hardware replaced underneath by fakes that
+return what the C returns in the shapes the C returns them. It runs a compiled
+cart, lets it warm up, and then counts `gc.mem_alloc()` across whole loop frames.
+
+THE GIL IS PART OF THE MODEL. The console's input poller is a thread that
+mutates the keyboard object while the frame loop runs, and a board's threads
+take turns under one GIL. The unix port's default is parallel threads with no
+GIL, and on that build the poller and the loop corrupt each other's maps and
+collections free what the other thread holds: a segfault or a lost attribute
+mid-boot, with the driver reporting nothing. `tests/unix_mp.py` refuses a
+board-model binary that is not under a GIL.
 
 WHAT IT PINS. The frames allocate nothing -- with nothing held, and with a
 button held down -- over windows long enough to take in two PERF periods and a
@@ -26,6 +34,27 @@ call 2026-09-30), so there is no frame that is allowed to allocate. The `perf`
 skill lists the idioms that allocate on a board while reading as free; a dozen
 of them were on this path at once.
 
+It then runs Notes, the app cart on the public UI API, with a note open: idle
+it paints nothing and allocates nothing, and typed into, one key every fourth
+frame (the edit itself handed in between frames, as shell_bench types), the
+frame each key paints allocates nothing either -- the verbs, the editor
+handle's draw, the host's bar and the Player's app frame included.
+
+Then it opens the shell's restyled apps on the public UI API -- Appearance,
+Storybook, Get Carts over an in-memory shelf, My Art -- each idle and with its
+content dragged, three swipes through the real pointer path. Idle, an app
+allocates nothing. A drag frame allocates nothing of its own: what it may
+allocate is the answers whose values the drag moved -- each card's (x, y, w,
+h, state), a tuple a frame whose y differs from every recent answer
+(modmoy_ui.c's ret_tuple ring keeps the ones that repeat), and the moving
+finger's: the app's read of it (surface.pointer()), the game pointer the
+console publishes while it is down, and the state the frame keeps to compare
+the next with. So a drag frame is held to one answer a card it drew and four
+more; the bar's clock turning its minute is an event of its own, one frame.
+
+Then Settings' Achievements page (docs/look_2026-10.md step 32), idle at its
+top and idle again swiped to its end: it allocates nothing either way.
+
 WHEN IT FAILS. Something on the frame path allocates again, and the per-frame
 deltas are printed. What names the LINE is a MicroPython whose gc_alloc and
 gc_free charge each block to the Python line running (the code state's ip,
@@ -33,8 +62,10 @@ with MICROPY_PY_SYS_SETTRACE for the current-code-state pointer and its frame
 objects switched off); the commit that added this file says how it was built.
 """
 
+import hashlib
 import json
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -229,21 +260,14 @@ def mem():
 ''',
     # The real moycore for everything a desktop build has, and for the compiled
     # run what a board's C does: open the console (a Lua VM holding no cart
-    # stands in for the engine), hand over ONE re-aimed frame view, and serve a
-    # store read through the board's gate every few ticks -- Doom streams its
-    # WAD at about eleven reads a second.
+    # stands in for the engine) and hand over ONE re-aimed frame view. The
+    # cart's store reads are C (moycore's files, over moy_files) and never
+    # reach Python.
     "moycore_shim.py": '''
 _frame = bytearray(320 * 240)
 _view = memoryview(_frame)
 _state = [False]
 _real = [None]
-_gate = [None]
-_ticks = [0]
-READ_EVERY = 3
-
-
-def _read_now():
-    return None
 
 
 def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
@@ -252,21 +276,13 @@ def run_begin(fb, w, h, wire, sheet, cells, mw, mh, snap, aq, pmem, cfg, flags,
                               pmem, cfg, flags, True)
 
 
-def wasm_open(module, head, pages, sha, path, swapped, gate=None,
-              allow_unsigned=False, interp=False, writable=None, files=None):
-    _gate[0] = gate
+def wasm_open(module, head, pages, sha, path, swapped, allow_unsigned=False,
+              interp=False, writable=None):
     return None
 
 
 def tick(dt, draw=True):
-    err = _real[0].tick(dt, draw)
-    g = _gate[0]
-    if g is not None:
-        n = _ticks[0] + 1
-        _ticks[0] = n
-        if n % READ_EVERY == 0:
-            g(_read_now)
-    return err
+    return _real[0].tick(dt, draw)
 
 
 def take_frames(on, palette=True):
@@ -302,23 +318,6 @@ def install(real, mod):
     mod.WASM = 1
     mod.TICK_DRAW = 1
     _real[0] = real
-''',
-    # The feeder runs on core 1 on the board; nothing of it is per-frame Python.
-    "moy_audio_shim.py": '''
-def audio_start(bck, ws, dout, rate):
-    return True
-
-
-def running():
-    return False
-
-
-def install(real, mod):
-    for k in dir(real):
-        if not k.startswith("__"):
-            setattr(mod, k, getattr(real, k))
-    mod.audio_start = audio_start
-    mod.running = running
 ''',
 }
 
@@ -364,8 +363,7 @@ def measure(loop):
     t0 = time.ticks_ms()
     while time.ticks_diff(time.ticks_ms(), t0) < 10000:
         now = time.ticks_ms()
-        if not any(d and time.ticks_diff(d, now) > 0 for d in (
-                ws._toast_until, ws._confetti_until, ws._egg_until)):
+        if not (ws._toast_until and time.ticks_diff(ws._toast_until, now) > 0):
             break
         loop.step()
     for _ in range(30):                  # the held key's first edges, settled
@@ -381,11 +379,246 @@ def measure(loop):
     _frames(loop, 100, True)             # the press edge itself may allocate
     info["held"] = _frames(loop, @WINDOW_MS@, True)
     gc.enable()
+    notes(loop, info)
+    apps(loop, info)
+    achievements(loop, info)
     print("RESULT " + json.dumps(info))
 
 
-class _Measured(Exception):
-    pass
+def _typing(loop, ms):
+    """Notes' note typed into, one key every fourth frame, handed to its
+    editor handle as shell_bench's typing hands it (the edit is the
+    document's, outside the frame measured): what each frame allocates."""
+    from gc import mem_alloc
+    keys = b"the quick brown fox jumps over the lazy dog "
+    fed = loop.ws.player._focus_editor
+    out = []
+    n = 0
+    t0 = time.ticks_ms()
+    while time.ticks_diff(time.ticks_ms(), t0) < ms:
+        if n % 4 == 0:
+            fed.key(keys[(n // 4) % len(keys)])
+        n += 1
+        a = mem_alloc()
+        loop.step()
+        out.append(mem_alloc() - a)
+    return out
+
+
+def notes(loop, info):
+    """Notes with a note open, idle and typed into: the app cart a desk
+    runs every day, on the verbs."""
+    ws = loop.ws
+    ws.exit()
+    for _ in range(30):
+        loop.step()
+    info["notes_title"] = ws.launch_named("Notes")
+    for _ in range(30):
+        loop.step()
+    ns = ws.player.ns
+    got, err = ns["files"].new_name("probe")
+    ns["_open"](got)
+    for _ in range(60):
+        loop.step()
+    info["notes_error"] = str(ws.cart_error)
+    info["notes_focused"] = ws.player._focus_editor is not None
+    _typing(loop, 1500)                  # the first keys' edges, settled
+    # ...and the idle save they owe (EditorHandle.AUTOSAVE_MS), an event of
+    # its own: idle is what comes after it.
+    fed = ws.player._focus_editor
+    t0 = time.ticks_ms()
+    while fed.dirty() and time.ticks_diff(time.ticks_ms(), t0) < 15000:
+        loop.step()
+    info["notes_saved"] = not fed.dirty()
+    for _ in range(30):
+        loop.step()
+    gc.collect()
+    gc.disable()
+    d0 = ws._frames_drawn
+    info["notes_idle"] = _frames(loop, @WINDOW_MS@, False)
+    d1 = ws._frames_drawn
+    info["notes_text0"] = len(ws.player._focus_editor.text())
+    info["notes_typing"] = _typing(loop, @WINDOW_MS@)
+    info["notes_idle_drawn"] = d1 - d0
+    info["notes_typing_drawn"] = ws._frames_drawn - d1
+    info["notes_text"] = len(ws.player._focus_editor.text())
+    gc.enable()
+
+
+class _Resp:
+    def __init__(self, data, status=200):
+        import io
+        self._b = io.BytesIO(data)
+        self.status = status
+        self.length = len(data)
+        self.closed = False
+
+    def readinto(self, buf):
+        return self._b.readinto(buf)
+
+    def close(self):
+        self.closed = True
+
+
+class _Net:
+    """Get Carts' transport over the staged shelf: {url: file}."""
+
+    def __init__(self, routes):
+        self.routes = routes
+        self.up = True
+
+    def online(self):
+        return True
+
+    def open(self, url):
+        f = self.routes.get(url)
+        if f is None:
+            return _Resp(b"not found", 404)
+        with open(f, "rb") as fh:
+            return _Resp(fh.read())
+
+
+APPS = ("appearance", "storybook", "getcarts", "myart")
+
+
+def apps(loop, info):
+    """Each restyled app open, idle, then its content swiped: what each
+    frame allocates, and how many cards each drag frame drew."""
+    import moy_loop
+    import ui
+    from gc import mem_alloc
+    ws = loop.ws
+    ws.exit()
+    for _ in range(30):
+        loop.step()
+    ws.cart_net = _Net(json.load(open(ROOT + "/net/routes.json")))
+    cards = [0]
+    card = ui.card
+
+    def counted(title, sub="", o=None):
+        cards[0] += 1
+        return card(title, sub, o)
+
+    ui.card = counted
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    for app in APPS:
+        a = ws._apps_by_id[app]
+        info[app + "_open"] = ws.open_app(a)
+        for _ in range(60):
+            loop.step()
+        t0 = time.ticks_ms()
+        while time.ticks_diff(time.ticks_ms(), t0) < 20000:
+            now = time.ticks_ms()
+            if not ((ws._toast_until and time.ticks_diff(ws._toast_until, now) > 0)
+                    or getattr(a, "phase", "list") != "list"
+                    or getattr(a, "_covers", None)):
+                break
+            loop.step()
+        for _ in range(30):
+            loop.step()
+        info[app + "_top"] = ws.wm.top_kind()
+        gc.collect()
+        gc.disable()
+        idle = []
+        for _ in range(60):
+            m = mem_alloc()
+            loop.step()
+            idle.append(mem_alloc() - m)
+        info[app + "_idle"] = idle
+        gc.enable()
+        for y0, y1 in ((H * 3 // 4, H // 4), (H // 4, H * 3 // 4)):
+            moy_loop.swipe(W // 2, y0, W // 2, y1, 25)     # every picture met once
+            for _ in range(30):
+                loop.step()
+        # ...and made: My Art makes a picture a quiet frame, and a loaded
+        # machine's longer frames carry a swipe past more of them
+        for _ in range(600):
+            if not getattr(a, "idle_owed", False):
+                break
+            loop.step()
+        drag = []
+        for rep in range(3):
+            y0, y1 = (H * 3 // 4, H // 4) if rep % 2 == 0 else (H // 4, H * 3 // 4)
+            moy_loop.swipe(W // 2, y0, W // 2, y1, 25)
+            gc.collect()
+            gc.disable()
+            for _ in range(30):
+                cards[0] = 0
+                d0 = ws._frames_drawn
+                m = mem_alloc()
+                loop.step()
+                drag.append((mem_alloc() - m, ws._frames_drawn - d0, cards[0],
+                             ws.frame_change == "shift"))
+            gc.enable()
+        info[app + "_drag"] = drag
+        ws.exit()
+        for _ in range(30):
+            loop.step()
+    ui.card = card
+
+
+def achievements(loop, info):
+    """Settings' Achievements page, idle at its top, then swiped to its end
+    and idle there: what each idle frame allocates."""
+    import moy_loop
+    from gc import mem_alloc
+    ws = loop.ws
+    ws.ach.unlocked = {"first_open": 20261012, "first_run": 0, "konami": 0}
+    ws.open_settings()
+    # the rows page swiped, its pictures met once: what each frame of a drag
+    # and its coast allocates, and which shifted
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    for _ in range(60):
+        loop.step()
+    drag = []
+    for rep in range(4):
+        y0, y1 = (H * 3 // 4, H // 4) if rep % 2 == 0 else (H // 4, H * 3 // 4)
+        moy_loop.swipe(W // 2, y0, W // 2, y1, 25)
+        gc.collect()
+        gc.disable()
+        for _ in range(30):
+            d0 = ws._frames_drawn
+            m = mem_alloc()
+            loop.step()
+            if rep:
+                drag.append((mem_alloc() - m, ws._frames_drawn - d0,
+                             ws.frame_change == "shift"))
+        gc.enable()
+    info["settings_drag"] = drag
+    ws.settings_layer.open_page("achievements")
+    for _ in range(60):
+        loop.step()
+    info["ach_page"] = ws.settings_layer.page
+    for key in ("ach_idle", "ach_scrolled"):
+        for _ in range(30):
+            loop.step()
+        for _ in range(300):              # the swipe's coast comes to rest
+            if not ws.settings_layer._input_host().moving:
+                break
+            loop.step()
+        gc.collect()
+        gc.disable()
+        idle = []
+        for _ in range(60):
+            m = mem_alloc()
+            loop.step()
+            idle.append(mem_alloc() - m)
+        info[key] = idle
+        gc.enable()
+        moy_loop.swipe(W // 2, H * 3 // 4, W // 2, H // 4, 25)
+    ws._exit_settings()
+    for _ in range(30):
+        loop.step()
+
+
+class _Loop:
+    """The kernel's loop as the measurement drives it: one step a frame over
+    the console the board's run_desktop handed it."""
+
+    def __init__(self, desktop):
+        import moy_loop
+        self.ws = desktop.ws
+        self.step = moy_loop.step
 
 
 def main():
@@ -396,10 +629,6 @@ def main():
         import moycore_shim
         moycore_shim.install(_real_moycore, moycore_shim)
         sys.modules["moycore"] = moycore_shim
-        import moy_audio as _real_audio
-        import moy_audio_shim
-        moy_audio_shim.install(_real_audio, moy_audio_shim)
-        sys.modules["moy_audio"] = moy_audio_shim
 
         import moybyte_sd
         moybyte_sd._live_mounted = True      # the card attached at boot
@@ -412,20 +641,9 @@ def main():
             self.on_sd = True                # the T-Deck's store is its card
             return carts, root, None
 
-        def _nosleep(ms):
-            return None
-
-        def _run(self):
-            measure(self)
-            raise _Measured()
-
         moy_runtime._Storage.load = _load
         moy_runtime.POWER_SAVE_MS = 0
-        device_boot._sleep_ms = _nosleep     # the loop's pacing; nothing else
-        device_boot.FrameLoop.run = _run
-        moy_runtime.run_desktop()
-    except _Measured:
-        pass
+        measure(_Loop(moy_runtime.run_desktop()))
     except BaseException as exc:             # noqa -- say it, then end the run
         sys.print_exception(exc)
     DONE.release()
@@ -448,7 +666,7 @@ MANIFEST = {"format": "moy-1", "title": "Frame Probe", "runtime": "wasm",
 WINDOW_MS = 4500
 
 
-def _stage(dest, exe):
+def _stage(dest, exe, apps=False):
     sys.path.insert(0, str(ROOT / "tools"))
     try:
         import board_config
@@ -461,7 +679,7 @@ def _stage(dest, exe):
     for name, src in board_config.staged_packages(TDECK, root=ROOT).items():
         shutil.copytree(src, stage / name,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    for name in ("moy_runtime.py", "tdeck_panel.py"):
+    for name in ("moy_runtime.py", "tdeck_input.py"):
         shutil.copyfile(TDECK / "modules" / name, stage / name)
     (stage / "carts_data.py").write_text("CARTS_Z = []\n")
     # FROZEN, as on a board: compiled ahead by the tree's own mpy-cross. A
@@ -488,6 +706,57 @@ def _stage(dest, exe):
     (cart / "main.wasm").write_bytes(b"\0asm\1\0\0\0\5\3\1\0\x10")
     (cart / ("main.xtensa.f%s.aot" % format_version())).write_bytes(b"AOT")
     (cart / "config.json").write_text("{}")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.notes.moy",
+                    dest / "carts" / "moybyte.notes.moy")
+    if apps:
+        for app in ("appearance", "storybook", "get_carts", "my_art"):
+            shutil.copytree(ROOT / "system_carts" / ("moybyte.%s.moy" % app),
+                            dest / "carts" / ("moybyte.%s.moy" % app))
+        _stage_app_data(dest)
+
+
+def _stage_app_data(dest):
+    """What the apps show: a shelf of twelve carts with covers for Get Carts
+    (an index and its covers, served from files), eight stories, fourteen
+    drawings."""
+    from runtime import moy_carts
+    from runtime import story_doc as D
+    from cart_store_fixtures import INDEX_URL, snapshot
+    root = str(dest / "carts")
+    net = dest / "net"
+    net.mkdir()
+    index = json.loads(snapshot("index.json"))
+    base = INDEX_URL.rsplit("/", 1)[0] + "/"
+    pngs = sorted((ROOT / "system_carts").glob("*/cover.png"))
+    routes = {}
+    shelf = []
+    for i in range(12):
+        c = dict(index["carts"][i % len(index["carts"])])
+        c["id"] = "c%02d" % i
+        c["name"] = "Cart %02d" % i
+        c["folder"] = "c%02d.moy" % i
+        png = pngs[i % len(pngs)].read_bytes()
+        w, h = struct.unpack(">II", png[16:24])
+        url = "carts/c%02d/cover.png" % i
+        c["cover"] = {"url": url, "size": len(png), "w": w, "h": h,
+                      "sha256": hashlib.sha256(png).hexdigest()}
+        (net / ("%d.png" % i)).write_bytes(png)
+        routes[base + url] = str(net / ("%d.png" % i))
+        shelf.append(c)
+    index["carts"] = shelf
+    (net / "index.json").write_text(json.dumps(index))
+    routes[INDEX_URL] = str(net / "index.json")
+    (net / "routes.json").write_text(json.dumps(routes))
+    for i in range(8):
+        doc = D.new_doc("Story %d" % i)
+        moy_carts.save_file("stories", "story%d/story.json" % i, D.write(doc), root)
+    for i in range(14):
+        w, h = 320, 240
+        px = bytearray([1 + i % 15]) * (w * h)
+        for y in range(h // 4, h * 3 // 4):
+            px[y * w + w // 4:y * w + w * 3 // 4] = bytes([(i * 3) % 16]) * (w // 2)
+        moy_carts.save_file("drawings", "art%02d" % i,
+                            moy_carts.encode_moyimg(w, h, bytes(px)), root)
 
 
 def _run(tmp_path):
@@ -497,7 +766,7 @@ def _run(tmp_path):
             "the boards' Python heap. A board pays for garbage in whole-heap "
             "collections that stop the frame and starve a compiled cart's "
             "sound; nothing else in the suite measures a frame's allocation.")
-    _stage(tmp_path, exe)
+    _stage(tmp_path, exe, apps=True)
     script = tmp_path / "driver.py"
     script.write_text(DRIVER.replace("@ROOT@", repr(str(tmp_path)))
                       .replace("@WINDOW_MS@", str(WINDOW_MS)))
@@ -534,9 +803,14 @@ def result(tmp_path_factory):
 SLACK = 256
 
 
-def _assert_quiet(deltas, what, text):
+def _assert_quiet(deltas, what, text, minute=False):
+    """`minute`: a surface under the bar may pay one frame for the clock's
+    minute turning inside the window (its text re-set, about 1.5 KB)."""
     assert len(deltas) > 20, "%s: only %d frames measured" % (what, len(deltas))
     spent = [d for d in deltas if d]
+    if minute and spent:
+        deltas = list(deltas)
+        deltas.remove(max(deltas))
     assert sum(deltas) < SLACK, (
         "%s: %d bytes over %d frames; the frames that moved: %s\n%s"
         % (what, sum(deltas), len(deltas), spent[:40], text[-3000:]))
@@ -560,3 +834,263 @@ def test_a_play_frame_allocates_nothing(result):
 def test_a_play_frame_with_a_button_held_allocates_nothing(result):
     info, text = result
     _assert_quiet(info["held"], "'up' held", text)
+
+
+def test_notes_is_the_run_being_measured(result):
+    info, text = result
+    assert info["notes_title"] == "Notes", text[-3000:]
+    assert info["notes_error"] == "None", text[-3000:]
+    assert info["notes_focused"] is True, text[-3000:]
+    assert info["notes_saved"] is True, "the idle save never came"
+    # The typing window typed, and every key it fed reached the note. The
+    # window is wall-clock, so how many keys fit depends on the machine.
+    keys = (len(info["notes_typing"]) + 3) // 4
+    assert keys >= 4, keys
+    assert info["notes_text"] - info["notes_text0"] == keys, (
+        info["notes_text0"], info["notes_text"], keys)
+
+
+def test_notes_idle_paints_nothing_and_a_key_paints_its_frame(result):
+    """An app on the verbs is drawn on change (Player.animates): idle, not a
+    frame; typed into, the frame each key lands in."""
+    info, text = result
+    assert info["notes_idle_drawn"] == 0, info["notes_idle_drawn"]
+    keys = (len(info["notes_typing"]) + 3) // 4
+    assert keys - 1 <= info["notes_typing_drawn"] <= keys + 1, (
+        info["notes_typing_drawn"], keys)
+
+
+def test_notes_idle_allocates_nothing(result):
+    info, text = result
+    _assert_quiet(info["notes_idle"], "Notes idle, a note open", text, minute=True)
+
+
+def test_notes_typing_allocates_nothing(result):
+    info, text = result
+    _assert_quiet(info["notes_typing"], "Notes typed into", text, minute=True)
+
+
+# -- the desk Editor's Code pane -----------------------------------------------
+#
+# Not a play frame, but the same bill: on the Waveshare P4 a drag in the desk
+# Code pane allocated ~136 KB EVERY frame, so how often the collector came
+# depended on the heap's layout (1 collection on one image, 8 on another,
+# for the same code). The bytes were a whole Code layout rebuilt per frame:
+# the pane's cached layout said "no symbol keys" while the last input, a
+# touch, asked for them, so the tab re-laid itself out as it drew and the
+# pane put its stale layout back after. What allocated is pinned here by the
+# work it did, on the host: the board-model MicroPython above boots a
+# handheld, which has no panes.
+
+def test_a_desk_code_drag_frame_does_not_rebuild_the_code_layout(tmp_path):
+    sys.path.insert(0, str(ROOT))
+    from runtime import host_app, ui_draw
+    dt = 1 / 30
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    panel_diagonal_in=7.0, font_scale=1, windowed=True)
+    ws.open_desk()
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(3):
+        drv.frame(dt)
+    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
+    ws.editor_app.set_tab("code")
+    for _ in range(4):
+        drv.frame(dt)
+    rebuilt = []
+    real = ws._relayout_code
+    ws._relayout_code = lambda: rebuilt.append(1) or real()
+    was = ui_draw.input_kind()
+    ui_draw.input_kind("touch")
+    try:
+        drv.touch(400, 420)
+        drv.frame(dt)
+        painted = ws._frames_drawn
+        for i in range(12):
+            drv.touch_drag(400, 400 - 20 * i)
+            drv.frame(dt)
+        drv.touch_up()
+        drv.frame(dt)
+    finally:
+        ui_draw.input_kind(was)
+    assert ws._frames_drawn - painted >= 10, "the drag painted too few frames to say"
+    assert len(rebuilt) <= 1, "the Code layout was rebuilt %d times in a drag" % len(rebuilt)
+
+
+@pytest.mark.parametrize("app", ("appearance", "storybook", "getcarts", "myart"))
+def test_an_app_idle_allocates_nothing(result, app):
+    info, text = result
+    assert info[app + "_open"] is True and info[app + "_top"] == app, text[-3000:]
+    _assert_quiet(info[app + "_idle"], app + " idle", text)
+
+
+@pytest.mark.parametrize("key", ("ach_idle", "ach_scrolled"))
+def test_the_achievements_page_allocates_nothing(result, key):
+    """Settings' Achievements page, idle at its top and idle scrolled: its
+    rows are made when the badges change, never a frame."""
+    info, text = result
+    assert info["ach_page"] == "achievements", text[-3000:]
+    _assert_quiet(info[key], key, text)
+
+
+# One answer tuple: a 5-tuple (the card's) is seven words, two 16-byte blocks.
+ANSWER = 32
+# A Settings frame's own answers: the strings and tuples its rows show, read
+# again each frame (`SettingsLayer._value`); the shift frame adds none.
+SETTINGS_FRAME = 1024
+
+
+@pytest.mark.parametrize("app", ("getcarts", "myart"))
+def test_an_app_drag_is_shift_frames(result, app):
+    """The drag frames of an app whose shelf carries its gens shift
+    (docs/scroll_and_text_2026-10.md §3.3) on the T-Deck's tier: the ring's
+    slots and the floor's rects are kept, so the budget the test below holds
+    every drawn frame to holds the shift frames."""
+    info, text = result
+    drawn = [d for d in info[app + "_drag"] if d[1]]
+    shifted = [d for d in drawn if d[3]]
+    assert len(shifted) > len(drawn) // 2, (app, len(shifted), len(drawn))
+
+
+def test_a_settings_drag_shifts_and_allocates_nothing(result):
+    """Settings' rows page dragged and coasting: its frames shift, and a
+    shift frame allocates no more than the rows' own answers."""
+    info, text = result
+    drag = info["settings_drag"]
+    drawn = [d for d in drag if d[1]]
+    shifted = [d for d in drawn if d[2]]
+    assert len(drawn) > 30 and len(shifted) > len(drawn) // 2, (len(shifted), len(drawn))
+    over = sorted(d[0] for d in shifted)
+    assert over[len(over) // 2] < SETTINGS_FRAME, ("a shift frame's median", over)
+
+
+@pytest.mark.parametrize("app", ("appearance", "storybook", "getcarts", "myart"))
+def test_an_app_drag_frame_allocates_only_its_moved_answers(result, app):
+    """A drag frame of the app's content, its pictures met once before: the
+    frames drew, and each allocated no more than one answer a card it drew
+    and the finger's four, but for one frame (the clock's minute)."""
+    info, text = result
+    drag = info[app + "_drag"]
+    drawn = [d for d in drag if d[1]]
+    assert len(drawn) > 30, (app, len(drawn))
+    over = [d for d in drawn if d[0] > ANSWER * (d[2] + 4)]
+    assert len(over) <= 1, (app, over[:10])
+
+
+# -- the Code tab's paint ------------------------------------------------------
+#
+# Two per-frame costs of a Code frame on the Waveshare P4, found with
+# tools/p4_alloc.py over p4_surface_sweep's Code drag, where they set how
+# often the collector came:
+#
+# * The bar reads the Editor's undo state into its strip key on every painted
+#   frame, and while a typing burst was open that read compared the whole
+#   source with the burst's start by joining it: ~44 KB a frame for a
+#   1759-line cart, through every frame after a keystroke (a press on the
+#   Code pane's symbol keys included) until the debounce closed the burst.
+# * Each visible line printed its highlight runs as slices of the line, and
+#   looked its runs up under a fresh (language, line) key: ~200 bytes a line,
+#   every line, every frame.
+#
+# Both are measured here on the board-model MicroPython, over the modules
+# themselves: they allocate nothing.
+
+BURST_DRIVER = r'''
+import sys, gc
+sys.path.insert(0, @RUNTIME@)
+from editors_code import CodeEditor
+from history_router import HistoryRouter
+
+
+class _Ws:
+    menu_view = "code"
+
+
+class _Project:
+    def history_for(self, view):
+        return router.code_op_history()
+
+
+ws = _Ws()
+ws.editor = CodeEditor("\n".join("x = %d  # a line of a long cart" % i
+                                 for i in range(1500)))
+ws.project = _Project()
+router = HistoryRouter(ws, None)
+idle = router.bar_undo_bits()
+router.code_burst_open()
+ws.editor.key(ord("."))
+typed = router.bar_undo_bits()
+read = router.bar_undo_bits
+gc.collect()
+gc.disable()
+n = 0
+m0 = gc.mem_alloc()
+while n < 50:
+    read()
+    n += 1
+print("RESULT", idle, typed, gc.mem_alloc() - m0)
+'''
+
+RUNS_DRIVER = r'''
+import sys, gc
+sys.path.insert(0, @RUNTIME@)
+from array import array
+import moy_ui
+
+# The Code tab's text view planning a frame: its rows' gens against its
+# record, every frame, the view scrolled a row each time.
+st = bytearray(moy_ui.text_size())
+v = array("i", [0] * @TV_LEN@)
+v[2] = 320
+v[3] = 200
+v[4] = 10           # lh
+v[5] = 8            # cell
+v[6] = 8            # text_h
+v[7] = 1            # fs
+v[11] = 4           # gutter
+v[12] = 38          # cols
+v[16] = 3           # the caret's row
+v[18] = -1          # no selection
+v[22] = -1          # no error
+v[24] = 1           # python
+lines = ["x = %d + y  # a line of a long cart" % i for i in range(400)]
+for i in range(3):
+    moy_ui.text_plan(st, v, lines, None, None)
+gc.collect()
+gc.disable()
+n = 0
+m0 = gc.mem_alloc()
+while n < 40:
+    v[13] = n
+    moy_ui.text_plan(st, v, lines, None, "cart")
+    n += 1
+print("RESULT", gc.mem_alloc() - m0)
+'''
+
+
+def _mp_result(tmp_path, driver, why):
+    exe = require_unix_mp(board_model=True, why=why)
+    script = tmp_path / "driver.py"
+    script.write_text(driver.replace("@RUNTIME@", repr(str(ROOT / "runtime"))))
+    out = subprocess.run([exe, "-X", "heapsize=16M", str(script)],
+                         capture_output=True, text=True, timeout=60)
+    line = [ln for ln in out.stdout.splitlines() if ln.startswith("RESULT ")]
+    assert line, out.stdout + out.stderr
+    return [int(v) for v in line[0].split()[1:]]
+
+
+def test_the_bar_undo_read_allocates_nothing_through_a_typing_burst(tmp_path):
+    idle, typed, spent = _mp_result(
+        tmp_path, BURST_DRIVER,
+        "The bar's undo read runs on every painted Editor frame; only the "
+        "board-model MicroPython measures what it allocates.")
+    assert (idle, typed) == (0, 1), "the burst's edit does not light the bar's undo"
+    assert spent == 0, "50 bar undo reads through a typing burst allocated %d bytes" % spent
+
+
+def test_the_code_tabs_rows_plan_without_allocating(tmp_path):
+    from runtime import ui_draw
+    spent, = _mp_result(
+        tmp_path, RUNS_DRIVER.replace("@TV_LEN@", str(ui_draw.TV_LEN)),
+        "The Code tab's text view plans every painted Code frame; only "
+        "the board-model MicroPython measures what it allocates.")
+    assert spent == 0, "40 planned Code frames allocated %d bytes" % spent

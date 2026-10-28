@@ -6,11 +6,12 @@ sha256 is no defence, because the same attacker writes the manifest. What
 answers it is a signature over the manifest, checked against a public key baked
 into the image the owner flashed over a cable.
 
-The VERIFIER is the security-critical half and it lives on the device, in
-MicroPython, where there is no crypto library -- just `pow` and a byte compare.
-So the tests carry their own 2048-bit key and sign with `pow(m, d, n)` rather
-than reaching for `cryptography`, which means the whole round trip runs in CI
-(where only the dev extra is installed) and not merely on a release machine.
+The VERIFIER is the security-critical half and it lives in the kernel
+(native/moy_net/moy_ota.c: the canonical text, SHA-256 and an RSA-2048 modexp
+of its own), run here over runtime/net_binding.py. The tests carry their own
+2048-bit key and sign with `pow(m, d, n)` rather than reaching for
+`cryptography`, so the whole round trip runs in CI (where only the dev extra is
+installed) and not merely on a release machine.
 
 `cryptography` is needed for real KEYGEN and for signing with a PEM, and those
 two tests skip without it.
@@ -82,6 +83,16 @@ def _load_moy_ota():
     return m
 
 
+def nb():
+    from runtime import net_binding
+    return net_binding
+
+
+def verify(manifest, keys=TEST_KEYS):
+    """The kernel's verdict on a manifest's signature alone (no board, required)."""
+    return nb().ota_judge(json.dumps(manifest), None, True, keys) is None
+
+
 @pytest.fixture
 def device():
     m = _load_moy_ota()
@@ -96,17 +107,18 @@ def signed(**overrides):
 
 # -- the round trip ----------------------------------------------------------
 
-def test_the_device_accepts_what_the_publisher_signs(device):
-    _m, u = device
-    assert u.verify_manifest(signed(), TEST_KEYS) is True
+def test_the_device_accepts_what_the_publisher_signs():
+    assert verify(signed()) is True
 
 
-def _load_c6_update():
-    p = ROOT / "device" / "moy_c6_update.py"
-    spec = importlib.util.spec_from_file_location("moy_c6_update_signing", p)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
+def test_the_kernel_trusts_exactly_the_keys_the_image_bakes():
+    """The keys are written twice -- moy_ota.c's KEYS_HEX and moy_ota.py's
+    OTA_PUBLIC_KEYS (the host tools and the wasm tier read the second) -- and
+    only this holds them to each other."""
+    m = _load_moy_ota()
+    want = tuple(int(h, 16).to_bytes(256, "big") for h, e in m.OTA_PUBLIC_KEYS)
+    assert all(e == 65537 for _h, e in m.OTA_PUBLIC_KEYS)
+    assert nb().ota_keys() == want
 
 
 C6_MANIFEST = dict(MANIFEST, c6={
@@ -118,15 +130,14 @@ C6_MANIFEST = dict(MANIFEST, c6={
 
 
 def test_the_two_c6_canonical_forms_agree():
-    """Same contract as the manifest's own canonical, for the c6 block: the
-    bytes c6_sig covers are written twice (tools/ota_sign.canonical_c6 and
-    moy_c6_update._canonical_c6) and only this runs them together."""
-    cu = _load_c6_update()
+    """The bytes c6_sig covers are written twice (tools/ota_sign.canonical_c6
+    and moy_ota.c's) and only this runs them together."""
     for manifest in (C6_MANIFEST,
                      dict(C6_MANIFEST, board="p4"),
                      dict(C6_MANIFEST, c6={}),
                      dict(C6_MANIFEST, c6={"version": None, "size": None})):
-        assert cu.C6Updater._canonical_c6(manifest)             == ota_sign.canonical_c6(manifest)
+        assert nb().ota_canonical_c6(json.dumps(manifest)) \
+            == ota_sign.canonical_c6(manifest)
 
 
 def test_the_c6_signature_round_trips_and_tamper_is_refused():
@@ -139,36 +150,38 @@ def test_the_c6_signature_round_trips_and_tamper_is_refused():
     block = ota_sign.pkcs1_v15_block(digest, (TEST_N.bit_length() + 7) // 8)
     sig = "%x" % pow(int.from_bytes(block, "big"), TEST_D, TEST_N)
     assert ota_sign.verify_c6(m, sig, TEST_N) is True
-    ota_mod = _load_moy_ota()
-    assert ota_mod.verify_sig(
-        _load_c6_update().C6Updater._canonical_c6(m), sig, TEST_KEYS) is True
+    assert nb().ota_judge_c6(json.dumps(dict(m, c6_sig=sig)), True, TEST_KEYS) is None
     tampered = dict(m, c6=dict(m["c6"], sha256="cd" * 32))
     assert ota_sign.verify_c6(tampered, sig, TEST_N) is False
-    assert ota_mod.verify_sig(
-        _load_c6_update().C6Updater._canonical_c6(tampered), sig, TEST_KEYS) is False
+    assert nb().ota_judge_c6(json.dumps(dict(tampered, c6_sig=sig)), True,
+                             TEST_KEYS) == "bad c6 signature"
+    assert nb().ota_judge_c6(json.dumps(m), True, TEST_KEYS) == "unsigned c6 image"
+    assert nb().ota_judge_c6(json.dumps(m), False, TEST_KEYS) is None
 
 
-def test_the_two_canonical_forms_agree(device):
-    """The signed bytes are written twice -- once in Python, once in MicroPython
-    -- and nothing executes them together but this. If they drift, every update
+def test_the_two_canonical_forms_agree():
+    """The signed bytes are written twice -- tools/ota_sign.py and the kernel --
+    and nothing executes them together but this. If they drift, every update
     stops verifying and the only symptom is 'unsigned update' on the glass."""
-    _m, u = device
     for manifest in (MANIFEST,
                      dict(MANIFEST, channel="unstable", version=1785659788),
                      dict(MANIFEST, sha256="", size=0),
+                     dict(MANIFEST, sha256="AB" * 32),
                      dict(MANIFEST, channel=None, version=None, size=None)):
-        assert u._canonical(manifest) == ota_sign.canonical(manifest)
+        assert nb().ota_canonical(json.dumps(manifest)) == ota_sign.canonical(manifest)
 
 
-def test_the_host_verifier_mirrors_the_device_one(device):
+def test_the_host_verifier_mirrors_the_device_one():
     """tools/ota_sign.verify exists so a release can be checked before it ships;
-    it has to answer exactly what the device will."""
-    _m, u = device
+    it has to answer exactly what the device will -- and so does moy_ota.py's
+    verify_sig, which the wasm tier and the host's tools run."""
+    m = _load_moy_ota()
     for manifest in (signed(), signed(channel="unstable"),
                      dict(signed(), version=99)):
         sig = manifest.get("sig")
-        assert ota_sign.verify(manifest, sig, TEST_N) == \
-            u.verify_manifest(manifest, TEST_KEYS)
+        assert ota_sign.verify(manifest, sig, TEST_N) == verify(manifest)
+        assert m.verify_sig(ota_sign.canonical(manifest), sig, TEST_KEYS) \
+            == verify(manifest)
 
 
 # -- what a network attacker gets to try -------------------------------------
@@ -180,47 +193,38 @@ def test_the_host_verifier_mirrors_the_device_one(device):
     ("channel", "unstable"),             # a beta smuggled onto stable
     ("board", "p4"),                     # an Xtensa image aimed at a RISC-V chip
 ])
-def test_editing_a_signed_field_breaks_the_signature(device, field, value):
-    _m, u = device
+def test_editing_a_signed_field_breaks_the_signature(field, value):
     tampered = signed()
     assert tampered[field] != value
     tampered[field] = value
-    assert u.verify_manifest(tampered, TEST_KEYS) is False
+    assert verify(tampered) is False
 
 
-def test_the_url_and_label_are_deliberately_not_signed(device):
+def test_the_url_and_label_are_deliberately_not_signed():
     """So a school can mirror the official manifest to a LAN host and rewrite
     the url. The bytes are still pinned: sha256 is signed, and the download is
     rejected unless it hashes to it."""
-    _m, u = device
     moved = dict(signed(), url="http://192.168.1.9:8000/firmware.bin",
                  label="mirrored")
-    assert u.verify_manifest(moved, TEST_KEYS) is True
+    assert verify(moved) is True
 
 
-def test_a_signature_from_another_key_is_refused(device):
-    _m, u = device
+def test_a_signature_from_another_key_is_refused():
     other_n = TEST_N - 2         # same size, not the key
     forged = dict(MANIFEST)
     forged["sig"] = sign_with_test_key(forged, n=other_n, d=TEST_D)
-    assert u.verify_manifest(forged, TEST_KEYS) is False
+    assert verify(forged) is False
 
 
 @pytest.mark.parametrize("sig", [None, "", "not hex", "00", "ff" * 256,
-                                 "%x" % (TEST_N + 1)])
-def test_a_junk_signature_is_refused_without_raising(device, sig):
-    """Whatever arrives off the wire lands straight in int(sig, 16) and pow();
-    a crash here is a denial of the update path, not just a rejection."""
-    _m, u = device
+                                 "%x" % (TEST_N + 1), 12345, ["ab"]])
+def test_a_junk_signature_is_refused_without_raising(sig):
+    """Whatever arrives off the wire lands straight in the hex parser and the
+    modexp; a crash here is a denial of the update path, not just a rejection."""
     m = dict(MANIFEST)
     if sig is not None:
         m["sig"] = sig
-    assert u.verify_manifest(m, TEST_KEYS) is False
-
-
-def test_an_unsigned_manifest_is_not_a_valid_one(device):
-    _m, u = device
-    assert u.verify_manifest(MANIFEST, TEST_KEYS) is False
+    assert verify(m) is False
 
 
 @pytest.mark.parametrize("junk", [
@@ -228,17 +232,20 @@ def test_an_unsigned_manifest_is_not_a_valid_one(device):
     (None, 65537),                   # a half-edited tuple
     ("%x" % 3, 65537),               # too small for the PKCS#1 block
 ])
-def test_one_unusable_key_does_not_disable_the_others(device, junk):
+def test_one_unusable_key_does_not_disable_the_others(junk):
     """OTA_PUBLIC_KEYS is a TUPLE so a compromised key can be ROTATED: an image
     trusted by the old key ships signed by the new one, and for that window an
     image carries two. A bad entry among them must be skipped, not fatal --
     losing the loop to one typo would refuse every update on every board
     carrying that image, with a cable flash as the only way back."""
-    _m, u = device
     signed_m = signed()
-    assert u.verify_manifest(signed_m, (junk,) + TEST_KEYS) is True
-    assert u.verify_manifest(signed_m, TEST_KEYS + (junk,)) is True
-    assert u.verify_manifest(signed_m, (junk,)) is False
+    assert verify(signed_m, (junk,) + TEST_KEYS) is True
+    assert verify(signed_m, TEST_KEYS + (junk,)) is True
+    assert verify(signed_m, (junk,)) is False
+    m = _load_moy_ota()
+    canon = ota_sign.canonical(signed_m)
+    assert m.verify_sig(canon, signed_m["sig"], (junk,) + TEST_KEYS) is True
+    assert m.verify_sig(canon, signed_m["sig"], (junk,)) is False
 
 
 # -- when a signature is REQUIRED --------------------------------------------
@@ -260,24 +267,30 @@ def test_a_build_with_no_baked_key_cannot_require_one(device):
     assert u._require_signature(from_card=False) is False
 
 
-def _online(u, manifest, from_card=False):
-    u._manifest_source = lambda channel=None: ("https://h/latest.json", from_card)
-    u.ensure_online = lambda: True
-    u._http_get_text = lambda url, limit=8192: json.dumps(manifest)
-    return u.check_online()
+def _online(m, u, manifest, from_card=False):
+    """check_online against a served manifest, the kernel trusting TEST_KEYS."""
+    from ota_http import Server
+
+    m.OTA_PUBLIC_KEYS = TEST_KEYS
+    nb()._trust(TEST_KEYS)
+    try:
+        with Server({"/latest.json": (200, {}, json.dumps(manifest).encode())}) as srv:
+            u._manifest_source = lambda channel=None: (srv.url("/latest.json"), from_card)
+            u.ensure_online = lambda: True
+            return u.check_online()
+    finally:
+        nb()._trust(None)
 
 
 def test_check_online_refuses_an_unsigned_manifest_from_a_baked_url(device):
     m, u = device
-    m.OTA_PUBLIC_KEYS = TEST_KEYS
-    assert _online(u, MANIFEST) is None
+    assert _online(m, u, MANIFEST) is None
     assert u.error == "unsigned update"
 
 
 def test_check_online_accepts_a_signed_one(device):
     m, u = device
-    m.OTA_PUBLIC_KEYS = TEST_KEYS
-    got = _online(u, signed())
+    got = _online(m, u, signed())
     assert got is not None and got["version"] == MANIFEST["version"]
     assert u.error is None
 
@@ -287,15 +300,13 @@ def test_a_tampered_signature_is_refused_even_where_none_was_required(device):
     that does not check out has been meddled with, and that is worse news than
     one carrying none."""
     m, u = device
-    m.OTA_PUBLIC_KEYS = TEST_KEYS
-    assert _online(u, dict(signed(), version=999), from_card=True) is None
+    assert _online(m, u, dict(signed(), version=999), from_card=True) is None
     assert u.error == "bad signature"
 
 
 def test_an_unsigned_manifest_from_the_card_still_works(device):
     m, u = device
-    m.OTA_PUBLIC_KEYS = TEST_KEYS
-    assert _online(u, MANIFEST, from_card=True) is not None
+    assert _online(m, u, MANIFEST, from_card=True) is not None
 
 
 # -- the publisher -----------------------------------------------------------
@@ -356,9 +367,7 @@ def test_a_generated_key_signs_something_the_device_accepts(tmp_path):
 
     manifest = dict(MANIFEST)
     manifest["sig"] = ota_sign.sign(manifest, pem)
-    _m, u = _load_moy_ota(), None
-    u = _m.OtaUpdater(with_sd=lambda fn: fn())
-    assert u.verify_manifest(manifest, (("%x" % n, e),)) is True
+    assert verify(manifest, (("%x" % n, e),)) is True
 
     # And the constant the tool tells you to paste really is that key.
     ns = ota_sign.key_constant(n, e)
@@ -390,14 +399,9 @@ def test_a_manifest_for_another_board_is_refused_by_name(device):
     Xtensa on the T-Deck and RISC-V on the P4, so the wrong one is a valid
     image that cannot boot -- rollback territory, for one field's prevention."""
     m, u = device
-    m.OTA_PUBLIC_KEYS = TEST_KEYS
     other = signed(board="p4")            # correctly signed, wrong silicon
-    assert u.verify_manifest(other, TEST_KEYS) is True
-
-    u._manifest_source = lambda channel=None: ("https://h/latest-p4.json", False)
-    u.ensure_online = lambda: True
-    u._http_get_text = lambda url, limit=8192: json.dumps(other)
-    assert u.check_online() is None
+    assert verify(other) is True
+    assert _online(m, u, other) is None
     assert u.error == "wrong board"
 
 
@@ -411,29 +415,3 @@ def test_the_default_url_carries_the_board(device):
         assert m.default_manifest_url(channel).endswith("/latest-tdeck.json")
         assert m.default_manifest_url(channel, "p4").endswith("/latest-p4.json")
     assert m.default_manifest_url("nonesuch") is None
-
-
-# -- the on-glass extraction (tests/test_p4_on_glass.py) ---------------------
-
-def test_the_on_glass_extraction_still_carries_a_whole_verifier():
-    """The board suite does not retype this verifier, it ast-EXTRACTS it -- and
-    for a fortnight it extracted a `_verify_manifest` whose arithmetic had moved
-    out from under it. `607ba35` promoted the PKCS#1 block compare to a
-    module-level `verify_sig` so the C6 image's second signature could share it;
-    the extractor named its pieces by hand, so the snippet it uploaded called a
-    name it never sent. The board answered `NameError` to every probe, the
-    harness discarded the text, and three tests failed as `assert None is False`
-    -- misfiled as a flaky serial upload because nothing said otherwise.
-
-    The extraction runs HERE now, in CPython, with no board on the desk: the
-    same drift is a named failure on every `make test`."""
-    import test_p4_on_glass
-
-    snippet = test_p4_on_glass._extract_verifier()
-    assert test_p4_on_glass._free_names(snippet) == set(), \
-        "the extracted verifier reads names it does not upload"
-    env = {}
-    exec(compile(snippet, "<moy_ota extract>", "exec"), env)   # noqa: S102
-    assert env["_verify_manifest"](signed(), TEST_KEYS) is True
-    assert env["_verify_manifest"](dict(signed(), size=1), TEST_KEYS) is False
-    assert env["_verify_manifest"](dict(signed(), sig="zz"), TEST_KEYS) is False

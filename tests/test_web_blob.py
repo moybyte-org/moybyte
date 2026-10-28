@@ -16,6 +16,7 @@ HOST compiler, which is the same `.incbin` mechanism the two cross toolchains
 use -- and reads the bytes back out.
 """
 
+import gzip
 import importlib.util
 import os
 import shutil
@@ -35,20 +36,26 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import board_config as bc                                         # noqa: E402
 import gen_web_blob as gwb                                        # noqa: E402
-import moy_webhost as wh                                          # noqa: E402
+
+ASSETS = gwb.asset_names()
+
+
+def _put(d, name, raw):
+    """One asset the way build.sh leaves it: the file and its gzip beside it."""
+    (d / name).write_bytes(raw)
+    (d / (name + ".gz")).write_bytes(gzip.compress(raw, 9, mtime=0))
 
 
 def _dist(tmp_path, names=None, sizes=None):
-    """A fake `firmware/web_runner/dist` holding pre-gzipped assets."""
+    """A fake `firmware/web_runner/dist`: every asset raw, plus its gzip."""
     d = tmp_path / "dist"
     d.mkdir()
-    names = names if names is not None else list(wh.ASSETS)
+    names = names if names is not None else list(ASSETS)
     for i, name in enumerate(names):
         n = (sizes or {}).get(name, 1000 + i * 37)
         # Not a repeating byte: a length bug that drops or doubles a chunk is
         # invisible in a run of identical bytes.
-        (d / (name + ".gz")).write_bytes(bytes((i * 7 + j) % 251
-                                               for j in range(n)))
+        _put(d, name, bytes((i * 7 + j * (i + 3)) % 251 for j in range(n)))
     return d
 
 
@@ -63,17 +70,25 @@ def _generate(tmp_path, dist, **kw):
 
 def test_what_is_baked_is_what_the_server_serves():
     """Two lists would be one 404 on a board that has the bytes, or dead weight
-    in a 5MB slot. The generator reads moy_webhost.ASSETS itself; this pins
-    that it is still that module's list and not a copy that drifted."""
-    assert gwb.asset_names() == list(wh.ASSETS)
-    assert "micropython.wasm" in gwb.asset_names()
+    in an app slot. The generator reads the webhost's own table
+    (native/moy_net/moy_webhost.c); this pins that every name it bakes is one
+    the server answers with its bytes."""
+    from runtime import net_binding as nb
+    assert "micropython.wasm" in ASSETS and "moy_store.mjs" in ASSETS
+    nb._bake({n + ".gz": n.encode() for n in ASSETS})
+    try:
+        nb.web_start(0, "/nonexistent", None, None, None, ())
+        for n in ASSETS:
+            r = nb.web_handle("GET", "/" + n, b"")
+            assert r.startswith(b"HTTP/1.1 200") and r.endswith(n.encode()), n
+    finally:
+        nb._bake({})
 
 
 def test_the_gz_is_what_gets_baked_when_there_is_one(tmp_path):
     """Raw does not fit: the four assets are 1,155,953 B raw against 572,693 B
     gzipped, and the T-Deck's slot had ~765KB free."""
     d = _dist(tmp_path)
-    (d / "index.html").write_bytes(b"raw copy, also present")
     path, served = gwb.pick(str(d), "index.html")
     assert served == "index.html.gz" and path.endswith(".gz")
 
@@ -83,11 +98,11 @@ def test_a_raw_only_bundle_still_bakes(tmp_path):
     lookup handles both, so the generator must too."""
     d = tmp_path / "dist"
     d.mkdir()
-    for name in wh.ASSETS:
+    for name in ASSETS:
         (d / name).write_bytes(b"x" * 10)
     assets, missing = gwb.collect(str(d))
     assert not missing
-    assert [a[0] for a in assets] == list(wh.ASSETS)
+    assert [a[0] for a in assets] == list(ASSETS)
 
 
 # -- the generated C, compiled -----------------------------------------------
@@ -138,13 +153,13 @@ def test_the_baked_bytes_come_back_byte_for_byte(tmp_path):
     assert rc == 0
     stamp, count, table, blob = _compile_and_read(tmp_path, gen_c)
 
-    assert count == len(wh.ASSETS)
+    assert count == len(ASSETS)
     expect = b""
-    for name in wh.ASSETS:
+    for name in ASSETS:
         expect += (d / (name + ".gz")).read_bytes()
     assert blob == expect, "the embedded bytes are not the bundle's"
-    assert [row[0] for row in table] == [n + ".gz" for n in wh.ASSETS]
-    for row, name in zip(table, wh.ASSETS):
+    assert [row[0] for row in table] == [n + ".gz" for n in ASSETS]
+    for row, name in zip(table, ASSETS):
         assert int(row[1]) == (d / (name + ".gz")).stat().st_size
         assert row[2] == "0", "%s is not 4-byte aligned" % row[0]
     assert stamp.startswith("%d %d " % (count, len(expect)))
@@ -175,6 +190,7 @@ def test_a_half_built_bundle_is_no_bundle(tmp_path):
     """ALL OR NOTHING. A console missing its wasm is not a partial console --
     it is a page that dies at boot with an error nobody will read."""
     d = _dist(tmp_path)
+    (d / "micropython.wasm").unlink()
     (d / "micropython.wasm.gz").unlink()
     assets, missing = gwb.collect(str(d))
     assert assets == [] and missing == ["micropython.wasm"]
@@ -219,6 +235,87 @@ def test_a_missing_bundle_is_never_quiet(tmp_path, capsys, monkeypatch):
     assert "web_runner/build.sh" in err
 
 
+# -- what counts as the bundle: bytes, never timestamps ----------------------
+
+def _empty_table(gen_c):
+    text = gen_c.read_text()
+    return '"0 0 none"' in text and ".incbin" not in text
+
+
+def test_a_gz_left_behind_by_a_removed_bundle_is_not_a_bundle(
+        tmp_path, monkeypatch, capsys):
+    """Removing the console's files (the raw ones are what the web build
+    copies in) left the pre-gzipped copies behind, and the generator baked
+    those: a 790 KB console nobody had built in a while, in an image rebuilt
+    to be rid of it. The raw file is the bundle; its gzip is derived."""
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("MOYBYTE_REQUIRE_WEB_BUNDLE", raising=False)
+    d = _dist(tmp_path)
+    for name in ASSETS:
+        (d / name).unlink()
+    assets, missing = gwb.collect(str(d))
+    assert assets == [] and missing == list(ASSETS)
+    rc, gen_c = _generate(tmp_path, d)
+    assert rc == 0 and _empty_table(gen_c)
+    err = capsys.readouterr().err
+    assert "only its .gz is there" in err and "NO BROWSER CONSOLE" in err
+    assert _generate(tmp_path, d, require=True)[0] == 1
+
+
+def test_a_gz_that_is_not_the_files_gzip_is_not_a_bundle(tmp_path):
+    """A build that stopped between the raw copy and the gzip leaves the old
+    gzip beside a new file. Preferring it bakes the old console; so does one
+    that is not a gzip at all, and neither may raise out of the generator."""
+    d = _dist(tmp_path)
+    (d / "worker.js").write_bytes(b"a new worker, its .gz not yet remade")
+    (d / "moy_store.mjs.gz").write_bytes(b"not gzip data at all")
+    assets, missing = gwb.collect(str(d))
+    assert assets == [] and set(missing) == {"worker.js", "moy_store.mjs"}
+    assert "not the gzip" in gwb.diagnose(str(d), "worker.js")
+    assert "not the gzip" in gwb.diagnose(str(d), "moy_store.mjs")
+
+
+def test_the_bytes_decide_not_the_timestamps(tmp_path):
+    """A bundle restored from a backup (everything ancient), a gz newer than
+    the file it no longer matches, and a gz older than a file it does match:
+    the first two are decided by content, the last is a bundle."""
+    d = _dist(tmp_path)
+    _, gen_c = _generate(tmp_path, d)
+    first = gen_c.read_text()
+    # Other bytes, ancient mtimes (what `cp -p` from an older build brings).
+    _put(d, "micropython.wasm", b"\0asm an older console")
+    for p in (d / "micropython.wasm", d / "micropython.wasm.gz"):
+        os.utime(p, (1, 1))
+    assert _generate(tmp_path, d)[0] == 0
+    assert gen_c.read_text() != first, "an old mtime kept the old blob"
+    assert not _empty_table(gen_c)
+    # The gz is NEWER than the raw file and does not match it.
+    os.utime(d / "micropython.wasm", (1, 1))
+    (d / "micropython.wasm").write_bytes(b"\0asm yet another console")
+    os.utime(d / "micropython.wasm", (1, 1))
+    assert "micropython.wasm" in gwb.collect(str(d))[1]
+    # The gz is OLDER than the raw file and matches it.
+    _put(d, "micropython.wasm", b"\0asm and the one after")
+    os.utime(d / "micropython.wasm.gz", (1, 1))
+    assert gwb.collect(str(d))[1] == []
+
+
+def test_a_removed_bundle_rewrites_the_baked_file(tmp_path, monkeypatch):
+    """The generated file is the only thing the image build reads, so it has
+    to follow the bundle down to nothing: removed dist, same out path, an
+    out file that is itself newer than anything that fed it."""
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("MOYBYTE_REQUIRE_WEB_BUNDLE", raising=False)
+    d = _dist(tmp_path)
+    _, gen_c = _generate(tmp_path, d)
+    assert not _empty_table(gen_c) and ".incbin" in gen_c.read_text()
+    future = gen_c.stat().st_mtime + 3600
+    os.utime(gen_c, (future, future))
+    shutil.rmtree(d)
+    rc, again = _generate(tmp_path, d)
+    assert rc == 0 and again == gen_c and _empty_table(gen_c)
+
+
 # -- the stamp, and why it is code ------------------------------------------
 
 def test_the_stamp_is_a_string_in_the_source_not_a_comment(tmp_path):
@@ -257,8 +354,8 @@ def test_a_changed_bundle_changes_the_stamp(tmp_path):
     first = gen_c.read_text()
     # Same SIZE, different bytes: a size-only stamp would miss this, and a
     # rebuilt wasm is usually about as big as the one it replaces.
-    p = d / "micropython.wasm.gz"
-    p.write_bytes(bytes((b + 1) % 251 for b in p.read_bytes()))
+    raw = d / "micropython.wasm"
+    _put(d, "micropython.wasm", bytes((b + 1) % 251 for b in raw.read_bytes()))
     _generate(tmp_path, d)
     assert gen_c.read_text() != first
 
@@ -411,7 +508,7 @@ def test_the_p4_usermod_list_includes_the_module():
 
 @pytest.mark.parametrize("name,path", BOARDS, ids=[b for b, _ in BOARDS])
 def test_an_image_too_big_for_its_slot_fails_the_build(name, path):
-    """Baking ~573KB into the app leaves the T-Deck ~188KB of its 5MB slot. An
+    """The baked browser console is a large share of every app image. An
     overflow used to be a WARNING that still produced a full set of artifacts
     -- an image esptool refuses and no board can take over OTA. It fails now,
     on both boards (the P4 had no guard at all).

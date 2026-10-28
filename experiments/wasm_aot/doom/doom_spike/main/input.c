@@ -6,7 +6,7 @@
  * and nothing on hold or release, so a game cannot know a key is still down;
  * command 0x03 switches it to streaming the raw key MATRIX (five bytes, one
  * bit per key, level state), which is what the console uses for hold-to-move
- * (device/moybyte/input.py, RAW_KEYS -- the table below is that one). Firmware
+ * (native/moy_input/moy_kbd.c, RAW_KEYS -- the table below is that one). Firmware
  * older than 2025-06-12 ignores 0x03 and keeps sending ASCII; on such a board
  * build with KBD_ASCII_ONLY and keys are timed holds. Rolling the ball keeps
  * extending its direction either way.
@@ -65,7 +65,7 @@ static int s_raw;                 /* the matrix streams (0x03 accepted) */
 volatile int g_dump_request;      /* 'o' pressed: main.c dumps the next frame */
 static uint64_t s_matrix_down;    /* Doom keys down per the last matrix read */
 
-/* the vendor matrix: byte index, bit -> ASCII (device/moybyte/input.py) */
+/* the vendor matrix: byte index, bit -> ASCII (native/moy_input/moy_kbd.c) */
 typedef struct {
     uint8_t byte, bit, ascii;
 } matrix_key_t;

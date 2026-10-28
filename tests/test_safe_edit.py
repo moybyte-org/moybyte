@@ -168,12 +168,22 @@ def test_cart_that_raises_in_update_shows_error_panel(tmp_path):
     assert ws.cart_error is not None and "bad update" in ws.cart_error
 
 
+def _see_why(ws):
+    """The stop card a run that stopped leaves (docs/look_2026-10.md step
+    33), then its See why: the crash-to-code throw."""
+    ws.frame(1 / 30)
+    p = ws.pause
+    assert p.open and p.stopped and p.rows[0] == p.SEE_WHY
+    p.choose_row(p.SEE_WHY)
+
+
 def test_cart_with_syntax_error_at_start_shows_panel_not_silence(tmp_path):
     # A cart whose source won't even exec (e.g. saved-around our guard, or shipped
-    # broken) must never die silently: the crash-to-code throw (owner 2026-07-23)
-    # lands the kid in the CODE editor on the offending line with the error popup
-    # armed -- no parked OOPS screen, no manual TAP-CODE step.
+    # broken) must never die silently: the stop card opens, and its See why
+    # lands the kid in the CODE editor on the offending line with the error
+    # popover armed.
     ws = _make_ws_with_cart(tmp_path, "def _draw(:\n    cls(1)\n")
+    _see_why(ws)
     assert ws.screen == "menu" and ws.menu_view == "code"
     assert ws.cart_error is not None
     assert ws.crash_popup is not None          # the dismissible popup is up
@@ -198,7 +208,7 @@ def test_run_code_refuses_invalid_source_and_keeps_editor(tmp_path):
     ws.run_code()
 
     assert ws.screen == "menu" and ws.menu_view == "code"   # stayed in the editor
-    assert ws.save_status and "SYNTAX" in ws.save_status
+    assert ws.cart_error and "Syntax error" in ws.cart_error
     # The good source on disk is intact (refused write).
     assert moy_carts.load(path)["src"] == good
 
@@ -249,6 +259,7 @@ def test_evil_str_cart_at_start_does_not_escape(tmp_path):
     # throw to the code editor with the error captured, never propagate out of
     # _start's print (crash-to-code, owner 2026-07-23).
     ws = _make_ws_with_cart(tmp_path, _EVIL_AT_START_SRC)   # open() runs _start()
+    _see_why(ws)
     assert ws.screen == "menu" and ws.menu_view == "code"
     assert ws.cart_error is not None and "Evil" in ws.cart_error
     assert ws.crash_popup is not None
@@ -257,13 +268,14 @@ def test_evil_str_cart_at_start_does_not_escape(tmp_path):
 
 
 def test_runtime_crash_throws_to_code_line_with_popup(tmp_path):
-    """A mid-frame crash = the same throw: straight to the code editor, caret on
-    the raising line, popup up; a tap anywhere dismisses it (and is consumed),
+    """A mid-frame crash = the same card, its See why the same throw: the code
+    editor, caret on the raising line, popover up; a tap anywhere dismisses it (and is consumed),
     typing a fix dismisses it too (crash-to-code, owner 2026-07-23)."""
     ws = _make_ws_with_cart(tmp_path,
                             "def _draw():\n    raise ValueError('boom')\n")
     assert ws.screen == "desktop"              # started clean
     ws.frame(1 / 30)                           # first frame raises
+    _see_why(ws)
     assert ws.screen == "menu" and ws.menu_view == "code"
     assert "boom" in (ws.crash_popup or "")
     assert ws.code_err_row == 1                # the raise is on line 2
@@ -277,6 +289,7 @@ def test_runtime_crash_throws_to_code_line_with_popup(tmp_path):
     ws.run(ws.project, ws.editor_app)
     assert ws.screen == "desktop"
     ws.frame(1 / 30)
+    _see_why(ws)
     assert ws.screen == "menu" and "again" in (ws.crash_popup or "")
     # A FIXING edit retires the marker via the re-check (the popup goes with
     # the first edit either way).
@@ -290,6 +303,7 @@ def test_marker_follows_until_the_error_is_actually_fixed(tmp_path):
     error keeps the red underline (it follows the live syntax error, without
     yanking the caret); only code that parses again retires it."""
     ws = _make_ws_with_cart(tmp_path, "def _draw(:\n    cls(1)\n")
+    _see_why(ws)
     assert ws.screen == "menu" and ws.code_err_row == 0     # crash-to-code
     ed = ws.editor
     # An unrelated edit leaves it broken: the marker STAYS on the bad line
@@ -322,7 +336,8 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     ws.cart["src"] = ed.text()
     ws._start()
     ws.run(ws.project, ws.editor_app)
-    ws.frame(1 / 30)                            # crash -> thrown back to code
+    ws.frame(1 / 30)                            # crash -> the stop card
+    _see_why(ws)
     assert ws.screen == "menu" and ws.code_err_row == 1
     assert ws.crash_popup is not None
     assert ws.history.undo() is True                    # unwinds the burst
@@ -361,7 +376,6 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
     ws.editor.set_text("def _draw():\n    cls(7)\n")
     assert ws.save_code() is True
     assert ws.cart_error is None          # SAVE_OK cleared the stale crash text
-    assert ws.save_status is None         # ...and the stale SYNTAX text (invisible save)
     assert "cls(7)" in moy_carts.load(path)["src"]
 
     # Closing the editor (the X button) returns to the desktop and the FIXED cart
@@ -376,7 +390,7 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
 
 
 def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
-    # A failed sprite save must set save_status/cart_error (visible on device),
+    # A failed sprite save must set cart_error (visible on device),
     # mirroring save_code -- not fail silently.
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n", title="Sprites")
     assert ws.sheet is not None
@@ -386,7 +400,6 @@ def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
         raise OSError("disk full")
     monkeypatch.setattr(ws.carts_store, "save_sprites", _boom)
     ws.save_sprites()
-    assert ws.save_status == "CAN'T SAVE"
     assert ws.cart_error is not None and "sprites" in ws.cart_error.lower()
     assert ws.sheet.dirty is True         # not marked clean on failure
 

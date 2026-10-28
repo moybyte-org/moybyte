@@ -1,7 +1,7 @@
 """`CartManager` direct (#209 landing C, docs/history/console_architecture_2026-08.md).
 
 The roster is the shell's most-read piece of state, and what the extraction put
-at risk is not "does a cart appear" -- the goldens and `test_editor_picker`
+at risk is not "does a cart appear" -- the goldens and `test_projects_list`
 already draw that -- but four things a whole-screen hash cannot see:
 
   * **`all` is REBOUND, never mutated in place.** `ws.system` could stay a plain
@@ -28,6 +28,8 @@ already draw that -- but four things a whole-screen hash cannot see:
 import ast
 import inspect
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
+from runtime import moy_catalogue  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -64,7 +66,7 @@ def test_apply_rebinds_the_list_so_a_captured_reference_goes_stale(tmp_path):
     root = str(ws.carts_root)
     captured = ws.carts.all
     _mk(root, "Latecomer")
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     assert ws.carts.all is not captured
     assert "Latecomer" in [c["title"] for c in ws.carts.all]
     assert "Latecomer" not in [c["title"] for c in captured]
@@ -84,28 +86,33 @@ def test_apply_invalidates_covers_before_slimming_and_re_derives_both_grids(tmp_
     """The four steps, in order. `slim` bakes each icon and then DELETES the
     sprite art, so an invalidation after it leaves a slimmed cart with no icon
     and nothing to rebuild one from (test_cover_cache runs that mutant end to
-    end); the two grid rebuilds must both read the SAME scan."""
+    end); the two grid rebuilds -- the home's and the home window's -- must
+    both read the SAME scan."""
     ws = build_ws(tmp_path)
+    ws.projects_grid = ws._home_grid("grid", [])
+    ws.projects_grid.tab = "make"
     order = []
     real_slim = ws.carts.slim
     ws.covers.invalidate_all = lambda: order.append("invalidate")
     ws.carts.slim = lambda: (order.append("slim"), real_slim())[1]
     ws.launcher.set_items = lambda items: order.append(("launcher", len(items)))
-    ws.picker.set_items = lambda items: order.append(("picker", len(items)))
+    ws.projects_grid.set_items = lambda items: order.append(("projects", len(items)))
 
-    ws.carts.apply(moy_carts.scan(str(ws.carts_root)))
+    ws.carts.apply(shelf(str(ws.carts_root)))
     assert order[0] == "invalidate"
     assert order[1] == "slim"
-    assert [o[0] for o in order[2:]] == ["launcher", "picker"]
+    assert [o[0] for o in order[2:]] == ["launcher", "projects"]
 
 
 def test_the_grids_follow_a_create_through_apply(tmp_path):
     ws = build_ws(tmp_path)
     root = str(ws.carts_root)
     _mk(root, "Freshly")
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
+    ws.set_home_tab("mine")                   # made here: the kid's own
     assert "Freshly" in _titles(ws.launcher)
-    assert "Freshly" in _titles(ws.picker)
+    ws.set_home_tab("make")
+    assert "Freshly" in _titles(ws.launcher)
 
 
 # -- rescan + the one forward -------------------------------------------------
@@ -118,8 +125,9 @@ def test_rescan_adopts_what_landed_on_the_store_and_marks_dirty(tmp_path):
     _mk(str(ws.carts_root), "Synced")
     ws._dirty = False
     ws.carts.rescan()
-    assert "Synced" in _titles(ws.launcher)
     assert ws._dirty is True
+    ws.set_home_tab("mine")                   # made here: the kid's own
+    assert "Synced" in _titles(ws.launcher)
 
 
 def test_rescan_is_a_no_op_with_no_store_wired(tmp_path):
@@ -132,17 +140,14 @@ def test_rescan_is_a_no_op_with_no_store_wired(tmp_path):
     assert ws.carts.all is before
 
 
-def test_rescan_keeps_the_old_shelf_when_the_scan_raises(tmp_path):
+def test_rescan_keeps_the_old_shelf_when_the_scan_raises(tmp_path, monkeypatch):
     ws = build_ws(tmp_path)
     before = ws.carts.all
 
-    class _Boom:
-        def __getattr__(self, name):
-            def _raise(*a, **kw):
-                raise OSError("card gone")
-            return _raise
+    def _raise(*a, **kw):
+        raise OSError("card gone")
 
-    ws.carts_store = _Boom()
+    monkeypatch.setattr(moy_catalogue, "catalogue", _raise)
     ws.carts.rescan()
     assert ws.carts.all is before
 
@@ -156,6 +161,7 @@ def test_the_webhosts_on_sync_lambda_still_finds_the_shelf(tmp_path):
     on_sync = lambda: ws.rescan_carts()          # noqa: E731 -- the webhost's shape
     _mk(str(ws.carts_root), "Pushed")
     on_sync()
+    ws.set_home_tab("mine")                   # made here: the kid's own
     assert "Pushed" in _titles(ws.launcher)
 
 
@@ -180,7 +186,9 @@ def test_one_store_handle_backs_prefs_carts_and_the_app_roles(tmp_path):
     assert ctx.carts.readable() is True
     assert ctx.files.ready() is True
     ws.can_manage = False
-    assert ctx.files.ready() is False          # reads THROUGH ws, per call
+    assert ctx.carts.ready() is False          # reads THROUGH ws, per call
+    ws.store.bind()                            # the files rows' C, as the handle binds it
+    assert ctx.files.ready() is False
     assert ws.store.writable() is False
 
 
@@ -190,14 +198,13 @@ def test_a_read_only_store_refuses_every_write_verb(tmp_path):
     never a crash and never a partial create."""
     ws = build_ws(tmp_path)
     _mk(str(ws.carts_root), "Second")
-    ws.carts.apply(moy_carts.scan(str(ws.carts_root)))
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("title") == "Second")
+    ws.carts.apply(shelf(str(ws.carts_root)))
+    second = next(c for c in ws.carts.all if c.get("title") == "Second")
     before = list(ws.carts.all)
     ws.can_manage = False
     assert ws.carts.new() is None
-    ws.carts.dup()
-    ws.carts.delete()
+    ws.carts.dup(second)
+    ws.carts.delete(second)
     assert [c["title"] for c in ws.carts.all] == [c["title"] for c in before]
 
 
@@ -206,7 +213,7 @@ def test_a_read_only_store_refuses_every_write_verb(tmp_path):
 def test_new_creates_a_cart_adopts_it_and_hands_it_back(tmp_path):
     """ONE body where there were two: `new_cart` and the first half of
     `new_cart_and_edit` were the same six lines, and `new_cart` had no caller
-    anywhere. The RETURN is what let the second one keep its picker-select +
+    anywhere. The RETURN is what let the second one keep its select-on-Make +
     open-in-editor tail as kernel policy."""
     ws = build_ws(tmp_path)
     n0 = len(ws.carts.all)
@@ -214,18 +221,20 @@ def test_new_creates_a_cart_adopts_it_and_hands_it_back(tmp_path):
     assert made is not None and made.get("path")
     assert len(ws.carts.all) == n0 + 1
     assert any(c["path"] == made["path"] for c in ws.carts.all)
-    assert made["path"] in [it.get("path") for it in ws.picker.items]
+    ws.set_home_tab("make")
+    assert made["path"] in [it.get("path") for it in ws.launcher.items]
 
 
 def test_new_cart_and_edit_opens_the_cart_new_returned(tmp_path):
-    """The kernel half: select the fresh project in the picker, then open it in
+    """The kernel half: select the fresh project on Make, then open it in
     the Editor. It reads the cart off `carts.new()` rather than re-deriving it
     from the roster, which is what keeps the two halves from disagreeing about
     WHICH cart was just made."""
     ws = build_ws(tmp_path)
+    ws.set_home_tab("make")
     ws.new_cart_and_edit()
     assert ws.cart is not None
-    assert ws.picker.selected().get("path") == ws.cart["path"]
+    assert ws.launcher.selected().get("path") == ws.cart["path"]
 
 
 def test_new_cart_and_edit_stays_put_on_a_read_only_store(tmp_path):
@@ -235,16 +244,14 @@ def test_new_cart_and_edit_stays_put_on_a_read_only_store(tmp_path):
     assert ws.cart is None
 
 
-def test_dup_reads_the_pickers_selection(tmp_path):
+def test_dup_copies_the_cart_it_is_given(tmp_path):
     ws = build_ws(tmp_path)
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("path"))
-    other = ws.launcher.selected()["path"]
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("path") and it["path"] != other)
-    target = ws.picker.selected()
-    ws.carts.dup()
+    target = next(c for c in ws.carts.all if c.get("path"))
+    ws.carts.dup(target)
     assert any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
+    n = len(ws.carts.all)
+    ws.carts.dup(None)                       # nothing given: nothing copied
+    assert len(ws.carts.all) == n
 
 
 def test_dup_rehydrates_the_source_first(tmp_path):
@@ -252,12 +259,10 @@ def test_dup_rehydrates_the_source_first(tmp_path):
     already deleted them off a slimmed cart -- so the rehydrate is what stops a
     duplicate coming out empty."""
     ws = build_ws(tmp_path)
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("path"))
-    target = ws.picker.selected()
+    target = next(c for c in ws.carts.all if c.get("path"))
     ws.carts.slim()
     assert target.get("lazy") is True and "src" not in target
-    ws.carts.dup()
+    ws.carts.dup(target)
     copy = next(c for c in ws.carts.all
                 if c["title"] == target["title"] + " copy")
     assert moy_carts.load(copy["path"]).get("src")
@@ -279,29 +284,28 @@ def _full_after(monkeypatch, n):
     monkeypatch.setattr(moy_carts, "_write", _write)
 
 
-def _first_real(grid):
-    grid.sel = next(i for i, it in enumerate(grid.items) if it.get("path"))
-    return grid.selected()
+def _first_real(ws):
+    return next(c for c in ws.carts.all if c.get("path"))
 
 
 def test_a_copy_the_store_has_no_room_for_says_so_and_leaves_nothing(
         tmp_path, monkeypatch):
-    """The picker's COPY on a full store: the half-written copy goes (a cart
+    """Make's COPY on a full store: the half-written copy goes (a cart
     whose manifest landed and whose main did not is a tile that can never
     run), the roster is as it was, and the system banner says why nothing
     appeared -- where it used to be a line on a serial port nobody reads."""
     import os
     ws = build_ws(tmp_path)
-    target = _first_real(ws.picker)
+    target = _first_real(ws)
     root = str(ws.carts_root)
     before = sorted(os.listdir(root))
     n0 = len(ws.carts.all)
     _full_after(monkeypatch, 1)            # the manifest lands, then no room
-    ws.carts.dup()
+    ws.carts.dup(target)
     assert sorted(os.listdir(root)) == before
     assert len(ws.carts.all) == n0
     assert not any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
-    assert ws._notice == ("CAN'T COPY", "the store is full", "warn")
+    assert ws._notice == ("CAN'T COPY", "The store is full", "warn")
     assert ws.notice_active()
 
 
@@ -313,19 +317,19 @@ def test_a_new_cart_the_store_has_no_room_for_says_so(tmp_path, monkeypatch):
     _full_after(monkeypatch, 0)
     assert ws.carts.new() is None
     assert sorted(os.listdir(root)) == before
-    assert ws._notice == ("CAN'T MAKE", "the store is full", "warn")
+    assert ws._notice == ("CAN'T MAKE", "The store is full", "warn")
 
 
 def test_a_copy_that_fails_for_another_reason_stays_quiet(tmp_path, monkeypatch):
     """Only a full store is the banner: an unreadable asset is still skipped
     (degrade-don't-throw), and an unexpected failure prints, as before."""
     ws = build_ws(tmp_path)
-    _first_real(ws.picker)
+    target = _first_real(ws)
 
     def _broken(cart, root):
         raise OSError(5, "I/O error")
     monkeypatch.setattr(moy_carts, "duplicate", _broken)
-    ws.carts.dup()
+    ws.carts.dup(target)
     assert ws._notice is None
 
 
@@ -337,44 +341,42 @@ def test_the_store_knows_a_full_store_from_every_other_failure():
     assert not moy_carts.store_full(ValueError(28))
 
 
-def test_delete_prefers_the_open_cart_over_the_pickers_selection(tmp_path):
-    """The sysmenu DELETE CART path: a cart opened from the picker is not
-    necessarily still the picker's selection."""
+def test_delete_with_no_cart_given_deletes_the_open_one(tmp_path):
+    """The sysmenu DELETE CART path: the open cart, never the home's
+    selection; Make's DEL names its cart."""
     ws = build_ws(tmp_path)
     root = str(ws.carts_root)
     _mk(root, "Opened")
     _mk(root, "Selected")
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     opened = next(c for c in ws.carts.all if c["title"] == "Opened")
     ws._open_workspace(opened)
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("title") == "Selected")
     ws.carts.delete()
     titles = [c["title"] for c in ws.carts.all]
     assert "Opened" not in titles and "Selected" in titles
+    ws.carts.delete(next(c for c in ws.carts.all if c["title"] == "Selected"))
+    assert "Selected" not in [c["title"] for c in ws.carts.all]
 
 
 def test_delete_keeps_the_last_cart(tmp_path):
     """A device that deleted its way to an empty shelf has no way back."""
     ws = build_ws(tmp_path)
-    only = ws.carts.all[0]
+    only = next(c for c in ws.carts.all if c.get("type") == "game")
     ws.carts.all = [only]
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("path") == only.get("path"))
-    ws.carts.delete()
+    ws.carts.delete(only)
     assert ws.carts.all == [only]
 
 
 # -- the #66 live-set diet ----------------------------------------------------
 
 def test_slim_strips_the_heavy_keys_and_rehydrate_refills_the_same_dict(tmp_path):
-    """IN PLACE is the contract: the launcher and the picker hold the same dict,
+    """IN PLACE is the contract: the home's tabs and window hold the same dict,
     so one load fattens every reference at once."""
     ws = build_ws(tmp_path)
     cart = next(c for c in ws.carts.all if c.get("path"))
     ws.carts.slim()
     assert cart["lazy"] is True
-    assert not [k for k in cart_manager._HEAVY_CART_KEYS if k in cart]
+    assert not [k for k in moy_carts.PAYLOADS if k in cart]
 
     same = ws.carts.rehydrate(cart)
     assert same is cart
@@ -389,7 +391,7 @@ def test_slim_bakes_the_grid_icon_while_the_art_is_still_in_ram(tmp_path):
     `slim` skips a cart that is already `lazy` -- that skip is the reason the
     icon prune keeps exactly the slimmed entries (test_cover_cache owns it)."""
     ws = build_ws(tmp_path)
-    ws.carts.all = moy_carts.scan(str(ws.carts_root))     # fat again
+    ws.carts.all = shelf(str(ws.carts_root))     # fat again
     assert not any(c.get("lazy") for c in ws.carts.all)
     drawn = [c for c in ws.carts.all if c.get("sprites")]
     assert drawn, "the seeded roster carries no sprite art -- nothing to prove"
@@ -431,7 +433,6 @@ def test_the_launcher_takes_the_collaborators_bound_method(tmp_path):
     fn = ws.launcher.favorite_for
     assert fn.__self__ is ws.carts
     assert fn.__func__ is cart_manager.CartManager.is_favorite
-    assert ws.picker.favorite_for is None       # only the RUN grid plays
 
 
 def test_toggling_a_favorite_persists_through_prefs(tmp_path):
@@ -449,9 +450,10 @@ def test_toggling_a_favorite_persists_through_prefs(tmp_path):
 
 
 def test_a_pseudo_tile_is_never_starred_or_recorded(tmp_path):
-    """The pinned Make / + New tiles carry no path, and a path is the identity
+    """The "+ New" card carries no path, and a path is the identity
     everything here keys on."""
     ws = build_ws(tmp_path)
+    ws.set_home_tab("make")
     make = ws.launcher.items[0]
     assert make.get("path") is None
     assert ws.carts.is_favorite(make) is False
@@ -467,14 +469,14 @@ def test_recents_move_to_the_front_without_duplicating_and_cap(tmp_path):
     root = str(ws.carts_root)
     for i in range(ws.carts._MRU_CAP + 3):
         _mk(root, "Filler %d" % i)
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     made = [c for c in ws.carts.all if c["title"].startswith("Filler ")]
 
     first = made[0]
     for c in made:
         ws.carts.note_recent(c)
     ws.carts.note_recent(first)
-    mru = ws.system["desk_mru"]
+    mru = ws.system.get("desk_mru")
     assert mru[0] == first["path"]
     assert len(mru) == ws.carts._MRU_CAP
     assert len(set(mru)) == len(mru)
@@ -487,7 +489,7 @@ def test_recent_resolves_paths_back_to_live_carts_and_drops_the_missing(tmp_path
     ws.carts.note_recent(b)
     assert [c["path"] for c in ws.carts.recent()] == [b["path"], a["path"]]
 
-    ws.system["desk_mru"] = ["gone/forever"] + ws.system["desk_mru"]
+    ws.system.set("desk_mru", ["gone/forever"] + ws.system.get("desk_mru"))
     assert [c["path"] for c in ws.carts.recent()] == [b["path"], a["path"]]
 
 
@@ -499,7 +501,7 @@ def test_a_launcher_run_records_the_cart_as_recent(tmp_path):
                            if it.get("path"))
     cart = ws.launcher.selected()
     ws.launch_selected()
-    assert ws.system["desk_mru"][0] == cart["path"]
+    assert ws.system.get("desk_mru")[0] == cart["path"]
 
 
 # -- the frame loop -----------------------------------------------------------
@@ -535,11 +537,11 @@ def test_the_cover_prefetch_walks_the_collaborators_list(tmp_path):
     assert ws.covers._pf_i == 0
 
 
-# -- the shelf scan reads no source (2026-09-08) ------------------------------
+# -- the shelf scan reads no cart whole ----------------------------------------
 
 def test_a_shelf_scan_carries_no_source_but_still_needs_the_file(tmp_path):
     """The source is the one allocation a fragmented heap refuses mid-session,
-    and nothing on the shelf reads it: `scan(src=False)` leaves the key ABSENT
+    and nothing on the shelf reads it: a catalogue entry leaves the key ABSENT
     (the open path reads absent as slim and rehydrates), while a cart whose
     main file is missing is skipped exactly as before."""
     root = str(tmp_path / "carts")
@@ -547,7 +549,7 @@ def test_a_shelf_scan_carries_no_source_but_still_needs_the_file(tmp_path):
     _mk(root, "Whole")
     gone = _mk(root, "Headless")
     (Path(gone["path"]) / gone["main"]).unlink()
-    carts = moy_carts.scan(root, src=False)
+    carts = moy_carts.catalogue(root)
     assert [c["title"] for c in carts] == ["Whole"]
     assert "src" not in carts[0]
     assert carts[0]["main"] == "main.py"
@@ -555,14 +557,14 @@ def test_a_shelf_scan_carries_no_source_but_still_needs_the_file(tmp_path):
     assert fat[0]["src"].startswith("def _draw")
 
 
-def test_rescan_reads_no_source_and_the_open_path_rehydrates_it(tmp_path):
+def test_rescan_loads_no_cart_whole_and_the_open_path_rehydrates_it(tmp_path):
     ws = build_ws(tmp_path)
     reads = []
     real = ws.carts_store.load
 
-    def counting_load(path, src=True):
-        reads.append(src)
-        return real(path, src)
+    def counting_load(path):
+        reads.append(path)
+        return real(path)
 
     _mk(str(ws.carts_root), "Synced")
     ws.carts_store.load = counting_load
@@ -570,8 +572,76 @@ def test_rescan_reads_no_source_and_the_open_path_rehydrates_it(tmp_path):
         ws.carts.rescan()
     finally:
         ws.carts_store.load = real
-    assert reads and not any(reads), "a rescan read a cart's source"
+    assert not reads, "a rescan loaded a cart whole"
     cart = next(c for c in ws.carts.all if c.get("title") == "Synced")
     assert cart.get("lazy") is True and "src" not in cart
     ws.carts.rehydrate(cart)
     assert cart["src"].startswith("def _draw") and cart["lazy"] is False
+
+
+# -- the play records (docs/look_2026-10.md step 18) ---------------------------
+
+def _real(ws, n=1):
+    return [c for c in ws.carts.all if c.get("path")][:n]
+
+
+def test_a_run_counts_a_play_and_stamps_the_day(tmp_path):
+    ws = build_ws(tmp_path)
+    a, b = _real(ws, 2)
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    assert ws.carts.plays(a) is None
+    ws.carts.note_recent(a)
+    ws.bar_layer._today = lambda: (2026, 10, 15)
+    ws.carts.note_recent(a)
+    assert ws.carts.plays(a) == (2, 20261015)
+    assert ws.carts.plays(b) is None
+    assert ws.system.get("plays") == {a["path"]: [2, 20261015]}
+
+
+def test_a_launcher_run_writes_the_play_record(tmp_path):
+    ws = build_ws(tmp_path)
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path"))
+    cart = ws.launcher.selected()
+    ws.launch_selected()
+    assert ws.carts.plays(cart)[0] == 1
+
+
+def test_a_board_without_a_wall_clock_keeps_the_day_it_had(tmp_path):
+    ws = build_ws(tmp_path)
+    a, = _real(ws)
+    ws.bar_layer._today = lambda: (2000, 1, 1)     # an unset RTC
+    ws.carts.note_recent(a)
+    assert ws.carts.plays(a) == (1, 0)
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.carts.note_recent(a)
+    ws.bar_layer._today = lambda: (0, 0, 0)
+    ws.carts.note_recent(a)
+    assert ws.carts.plays(a) == (3, 20261014)
+
+
+def test_a_play_record_of_another_shape_reads_as_absent(tmp_path):
+    """Strict readers, no migration: a value the store did not write reads
+    as None, its neighbours as written, and the next run starts it over."""
+    ws = build_ws(tmp_path)
+    a, b, c, d = _real(ws, 4)
+    ws.system.set("plays", {a["path"]: [3, 20261001], b["path"]: "12",
+                            c["path"]: [0, 20261001], d["path"]: [2, 20261001, 1]})
+    assert ws.carts.plays(a) == (3, 20261001)
+    assert [ws.carts.plays(x) for x in (b, c, d)] == [None, None, None]
+    ws.carts.note_recent(b)
+    assert ws.carts.plays(b)[0] == 1
+    assert ws.carts.plays(a) == (3, 20261001)
+    ws.system.set("plays", ["not", "a", "map"])
+    assert ws.carts.plays(a) is None
+
+
+def test_the_play_records_drop_the_one_played_longest_ago_past_the_cap(tmp_path):
+    ws = build_ws(tmp_path)
+    cap = ws.carts._PLAYS_CAP
+    ws.system.set("plays", {"p/%d" % i: [1, 20260101 + i] for i in range(cap)})
+    a, = _real(ws)
+    ws.carts.note_recent(a)
+    got = ws.system.get("plays")
+    assert len(got) == cap and a["path"] in got and "p/0" not in got
+    assert "p/1" in got

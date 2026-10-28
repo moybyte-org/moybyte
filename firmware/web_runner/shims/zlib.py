@@ -10,7 +10,7 @@ nothing.
 STAGED, NEVER ON A HOST'S sys.path. It lives in `shims/` and `build.sh` copies
 it into the frozen module set as plain `zlib.py`. A file called `zlib.py` beside
 the runner's other modules would shadow CPython's real one for anything that put
-that directory on sys.path (`tests/test_zero_gpio.py` does), and the CLI import
+that directory on sys.path (a test of the runner's modules would), and the CLI import
 path needs the real zlib in the same process.
 
 `wbits`/`bufsize` exist to match the CPython signature the converter is written

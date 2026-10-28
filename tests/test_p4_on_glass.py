@@ -45,8 +45,73 @@ def board():
 # the file on purpose: the comparison is against a fresh boot, and the wasm
 # block at the end brings the radios up. Measured 2026-09-30 on a module-free
 # image of the same tree, at the launcher right after boot: (free, largest)
-# internal SRAM.
-WASM_IDLE_BASELINE = (276743, 188416)
+# internal SRAM -- less TF_CARD_SRAM, what the card driver holds once the card
+# is the cart store (2026-10-05, same image and same fresh boot: 275143 free
+# with the engine and no card code, 274299 with the card mounted). The engine's
+# own cost stays the bound the guard measures.
+TF_CARD_SRAM = 844
+# And less KERNEL_SRAM, the kernel's static share (native/moy_kernel: its
+# panic wrapper in IRAM and its statics), which every console image carries
+# and docs/native_kernel_2026-09.md section 6.1 bounds on its own: measured
+# 2026-10-06 on the Waveshare P4; the Guition P4 runs the same code, the internal heap an image that takes
+# the module has against the same tree denying it.
+# Plus the glass's statics (native/moy_glass: its tables' roots and the
+# present engine), 48 bytes of .dram0.bss by the link map against dev
+# 82144715, 2026-10-07.
+# And the links' statics (native/moy_net/moy_link.c: the link's ring header,
+# its latch and its flag), 40 bytes of .bss and .data by the objects' sizes,
+# 2026-10-07; the port's espnow module they replace held its ring in the heap.
+# And the WiFi driver's (native/moy_net/moy_wifi.c: its state, latch and
+# connect flag), 56 bytes of .bss and .data by the object's sizes, 2026-10-07.
+# Plus the kernel's audio (native/moy_audio, which this
+# board takes since #82: its table roots, counters and output state), 304 bytes
+# of .dram0.data and .bss by the link map against dev cafae3a2, 2026-10-07; the
+# feeder's stack, ring and lock are allocated at the first cart, not at boot.
+# Plus input's statics (native/moy_input: the kernel table's latches, the
+# drivers' state, the kernel's I2C bus, which the carve compiled as a stub, and
+# NimBLE's bond cache, ble_store_config, in place of MicroPython's bluetooth),
+# 1455 bytes of .dram0.bss and .data by the objects' sizes, 2026-10-07.
+# And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
+# which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
+# And the WiFi driver's reconnect timer handle and backoff, 5 bytes of .bss by
+# the link map, 2026-10-07 (the esp_timer it creates is the heap's).
+# And the updater's (native/moy_net/moy_ota.c: the pointers to its state, its
+# clients, its keys and the trusted set, which are PSRAM), its slot's position
+# (moy_net_port.c) and the WiFi driver's kept-network flag, 38 bytes of .bss by
+# the objects' sizes, 2026-10-07.
+# And the web-console switch's (native/moy_net/moy_webconsole.c: the pointer
+# to its state, which is PSRAM), 4 bytes of .bss by the object's size,
+# 2026-10-07.
+# And the setup portal's responder (native/moy_net/moy_dns.c: the pointer to
+# its state, PSRAM) and the WiFi driver's access-point interface, 8 bytes of
+# .bss by the objects' sizes, 2026-10-08.
+# And the internal flash volume's (native/moy_store/moy_kvfs.c: the pointer to
+# the kernel's littlefs instance, whose config and caches are PSRAM), 4 bytes
+# of .bss by the object's size, 2026-10-08.
+# And the frame's (native/moy_kernel: the loop's, the reader's and the
+# ladder's statics and the VM-side stage table; the meters, the PERF window
+# and the line buffer are PSRAM), 756 bytes of idle internal heap measured
+# 2026-10-08 against the same tree's dev image on a fresh boot.
+# Less what moy_alloc's registry gave back, its nodes moved to PSRAM beside
+# their buffers (native/moy_alloc), net of first light, the board's
+# dev-channel words and the kernel's HITCH and LOOP lines: 312 bytes of idle
+# internal heap measured 2026-10-08 against dev 326a147f, fresh boots.
+# And the cart path's statics (native/moy_play: the run's pointer, whose state
+# is PSRAM, and the binding's two root pointers; native/moycore: the frame's
+# split, which replaced the binding's own), 16 bytes of internal heap by the
+# heap's total against dev 502be7fd, fresh boots, 2026-10-08.
+# And the kernel's screens in the look (native/moy_kernel, native/moy_gfx/
+# moy_path.c: the floor's view at 64 columns and its geometry's band and
+# scratch, the splash palette, the faces' lent scratch and the screens'
+# PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
+# 2026-10-26; the scratch and the band themselves are PSRAM.
+KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312 + 16 + 270
+# And less TEXT_SRAM, the text view's statics (native/moy_ui/moy_ui_text.c,
+# moy_ui_api.c, moy_ui_wasm.c, modmoy_ui.c: the code tones, the compiled
+# face's line cursor and the pointers to the block the views share, which
+# is PSRAM): 44 bytes of .bss and .data by the objects' sizes, 2026-10-28.
+TEXT_SRAM = 44
+WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM - TEXT_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
 
@@ -106,6 +171,16 @@ WASM_BLIT_FPS_FLOOR = 50
 @pytest.fixture(scope="module")
 def wasm_carts(board):
     return on_glass.wasm_carts_push(board, WASM_BOARD_DIR)
+
+
+def test_a_compiled_app_reaches_its_roles_through_imports(board):
+    root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
+    on_glass.wasm_app_reaches_its_roles(board, root)
+
+
+def test_a_compiled_app_draws_the_toolkits_widgets(board):
+    root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
+    on_glass.wasm_app_draws_the_toolkit(board, root)
 
 
 def test_the_hello_wasm_cart_holds_its_floor(board, wasm_carts):
@@ -229,16 +304,25 @@ def test_wifi_status_is_readable(board):
     on_glass.wifi_status_is_readable(board)
 
 
+def test_the_kernel_verifies_a_signed_manifest(board):
+    on_glass.the_kernel_verifies_a_signed_manifest(board)
+
+
+def test_the_internal_volume_is_the_kernels(board):
+    on_glass.the_internal_volume_is_the_kernels(board)
+
+
 def test_wifi_is_off_at_rest(board):
     on_glass.wifi_is_off_at_rest(board)
 
 
+def test_the_bar_wifi_widget_opens_the_wifi_panel(board):
+    on_glass.the_bar_wifi_widget_opens_the_wifi_panel(board)
+
+
 def test_appearance_cart_is_claimed(board):
-    """The Appearance app must claim its cart on the DEVICE store. The device
-    seeds the folder from the TITLE slug (appearance.moy) while the host copies
-    the source folder (theme_picker.moy); an is_app that knows only the host
-    name reads False and Settings' APPEARANCE row silently does nothing (the
-    on-glass 2026-07-25 report)."""
+    """The Appearance app must claim its cart on the DEVICE store, or Settings'
+    APPEARANCE row silently does nothing."""
     st = board.state()
     cart = st.get("appearance_cart")
     assert cart, "no Appearance cart in the device store"
@@ -250,6 +334,11 @@ def test_every_system_app_claims_exactly_one_cart(board):
     on_glass.every_app_claims_one_cart(board)
 
 
+def test_leaving_paint_saves_a_stroke(board):
+    """A stroke on a blank page, then home: saved, read back, no reset."""
+    on_glass.paint_saves_a_stroke_on_leaving(board)
+
+
 def test_open_settings_window(board):
     board.open("settings")
     board.drain(0.5)
@@ -259,18 +348,24 @@ def test_open_settings_window(board):
 
 def test_settings_rows_scroll_on_swipe(board):
     st = board.state()
+    y0 = board.settings_scrolled(st)
     board.swipe_settings(st)
     st = board.state()
-    assert (st["settings"]["set_top"] or 0) > 0, st["settings"]
+    assert y0 is not None and board.settings_scrolled(st) < y0, st["settings"]
 
 
 def test_scroll_survives_release(board):
     """Letting go must NOT snap the rows back to the top (the on-glass
-    'thrown at the start' report)."""
-    top = board.state()["settings"]["set_top"]
+    'thrown at the start' report): a release may coast on in the swipe's
+    direction, then the rows hold where it stopped."""
+    y = board.settings_scrolled(board.state())
     board.drain(1.0)
     st = board.state()
-    assert st["settings"]["set_top"] == top, st["settings"]
+    rest = board.settings_scrolled(st)
+    assert rest <= y, st["settings"]
+    board.drain(1.0)
+    st = board.state()
+    assert board.settings_scrolled(st) == rest, st["settings"]
 
 
 def test_appearance_opens(board):
@@ -280,11 +375,39 @@ def test_appearance_opens(board):
     assert "appearance" in st.get("order", ()), (line, st.get("order"))
 
 
-def test_picker_opens(board):
-    board.open("picker")
+def test_projects_opens(board):
+    board.open("projects")
     board.drain(6.0)              # first-open cover pop-in settles
     st = board.state()
-    assert "make" in st.get("order", ())
+    assert "projects" in st.get("order", ())
+
+
+def test_play_parks_the_windows_and_the_back_brings_them_back(board):
+    """Console mode on glass (docs/shell_layout_2026-10.md §3): the desk's
+    PLAY parks the open windows and truncates the route to the home; the
+    home's back, tapped where the bar draws it, puts every window back; the
+    HOME key shows the desktop and brings the windows back."""
+    before = board.state().get("order")
+    assert before, "no window open to park"
+    board.pyexec("ws.open_library()", strict=True)
+    st = board._settle(lambda s: s.get("desk") is False, 0.5)
+    assert st.get("stack") == ["launcher"], st.get("stack")
+    assert not st.get("order") and st.get("parked") == before, st
+    x, y, w, h = board.pyval("ws.bar_layer.back_rect('home') or ws.layout.context_x_btn",
+                             strict=True)
+    board.tap(x + w // 2, y + h // 2)
+    st = board._settle(lambda s: s.get("desk") is True, 0.5)
+    assert st.get("order") == before and not st.get("parked"), st
+    # The HOME key on the desk minimises every window and closes none; HOME
+    # again brings them back (owner, 2026-10-13).
+    mins = "[ws.wm._wins[k].minimized for k in ws.wm._order]"
+    board.pyexec("ws.home_key()", strict=True)
+    board.drain(0.5)
+    assert board.pyval(mins, strict=True) == [True] * len(before)
+    assert board.state().get("order") == before
+    board.pyexec("ws.home_key()", strict=True)
+    board.drain(0.5)
+    assert board.pyval(mins, strict=True) == [False] * len(before)
 
 
 def test_window_buffers_are_single_retained_surfaces(board):
@@ -302,11 +425,55 @@ def test_draw_gates_are_installed(board):
 
 
 def test_draw_gates_take_the_traffic(board):
-    on_glass.draw_gates_take_the_traffic(board)
+    on_glass.draw_gates_take_the_traffic(board, windowed=True)
 
 
 def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
+
+
+def test_the_painter_matches_the_host(board):
+    on_glass.painter_matches_host(board)
+
+
+def test_the_sprites_match_the_host(board):
+    on_glass.sprites_match_host(board)
+
+
+def test_the_picker_kernel_matches_sspr(board):
+    on_glass.picker_kernel_matches_sspr(board)
+
+
+def test_shift_last_and_copy_last_into_match_the_reference(board):
+    on_glass.shift_last_matches_the_reference(board, p4=True)
+
+
+def test_a_fuzzed_font_corpus_loads_as_on_the_host(board):
+    on_glass.fonts_match_host(board)
+
+
+def test_a_fuzzed_layout_corpus_reads_as_on_the_host(board):
+    on_glass.layouts_match_host(board)
+
+
+def test_custom_themes_derive_as_on_the_host(board):
+    on_glass.theme_custom_matches_host(board)
+
+
+def test_the_theme_font_is_installed(board):
+    on_glass.the_theme_font_is_installed(board)
+
+
+def test_the_font_set_is_the_tiers(board):
+    on_glass.the_font_set_is_the_tiers(board, 'desktop')
+
+
+def test_the_glyph_lane_draws_the_hosts_bytes(board):
+    on_glass.glyph_lane_matches_host(board, 'desktop')
+
+
+def test_a_stale_handle_is_refused_loudly(board):
+    on_glass.stale_handle_is_refused_loudly(board)
 
 
 def test_diag_toggle_roundtrips(board):
@@ -315,6 +482,23 @@ def test_diag_toggle_roundtrips(board):
 
 def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
+
+
+def test_a_quiet_console_collects_its_garbage(board):
+    on_glass.a_quiet_console_collects_its_garbage(board)
+
+
+def test_the_saver_comes_and_its_wake_repaints(board):
+    on_glass.idle_saver_and_wake(board)
+
+
+def test_internal_flash_commits_under_a_running_cart(board):
+    ms = on_glass.internal_flash_commits_under_a_cart(board)
+    print("\nlongest internal-flash commit under a cart: %d ms" % ms)
+
+
+def test_the_frame_is_the_kernels(board):
+    on_glass.the_frame_is_the_kernels(board)
 
 
 def test_no_display_underruns(board):
@@ -379,11 +563,11 @@ def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
         once per frame.
 
     Counted on the build/read side only, so this net costs nothing when healthy."""
-    board.open("picker")
+    board.open("projects")
     board.drain(16.0)                    # let the idle prefetch finish the store
-    g = board.pyval("ws.wm._wins['make'].ctx.layout.lib_grid")
-    assert g is not None, "picker did not open as a window"
-    w = board.state()["wins"]["make"]
+    g = board.pyval("ws.wm._wins['projects'].ctx.layout.lib_grid")
+    assert g is not None, "the projects window did not open"
+    w = board.state()["wins"]["projects"]
     ox, oy = w[0] + 1, w[1] + 1 + w[4]
     gx, gy, gw, gh = g
     cy = oy + gy + gh // 2
@@ -421,139 +605,12 @@ def test_idle_screen_blank_and_wake(board):
     board.cmd("power 300", wait_for="REMOTE power")     # restore the default
 
 
-# -- the OTA manifest verifier, on real MicroPython (#53) ---------------------
+# -- the OTA manifest verifier, in the kernel (#53, #224) ----------------------
 #
-# The P4 has no moy_ota -- the updater is T-Deck-only -- but it is the board
-# with a live REPL, and the thing worth proving is language-level, not
-# board-level: that the SHIPPED verifier runs under MicroPython at all. The host
-# suite proves the maths in CPython, where int(hex, 16) at 512 characters,
-# int.to_bytes(256, 'big') and a 2048-bit 3-argument pow are all free. On the
-# device each of those is a build-configuration question that was read out of
-# mpconfig.h and asserted. This executes them.
-#
-# The code under test is EXTRACTED from moy_ota.py by ast rather than retyped,
-# so a change there is picked up here instead of drifting; the only edits are
-# mechanical (dedent the methods, drop `self`).
-#
-# NAMING THE PIECES BY HAND WAS THE DRIFT (2026-08-27). `607ba35` promoted the
-# PKCS#1 block compare out of the class into a module-level `verify_sig` so the
-# C6 image's second signature could share it, and this extractor -- which knew
-# about class methods and module-level ASSIGNMENTS -- kept uploading a
-# `_verify_manifest` whose body had left the building. The board said
-# `NameError: name 'verify_sig' isn't defined` once per command; the harness
-# discarded the text and every assertion downstream read `assert None is False`.
-# So the closure is now DERIVED: whatever the extracted code still references,
-# the extractor goes and fetches, and what it cannot fetch it names, here, in
-# milliseconds, instead of on the wire as an absence.
-
-def _free_names(snippet):
-    """Names `snippet` READS that nothing in it (or in builtins) defines."""
-    import ast
-    import builtins
-
-    def params(args):
-        got = {a.arg for a in list(args.posonlyargs) + list(args.args)
-               + list(args.kwonlyargs)}
-        return got | {a.arg for a in (args.vararg, args.kwarg) if a}
-
-    tree = ast.parse(snippet)
-    top = set(dir(builtins))
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            top.update(t.id for t in node.targets if isinstance(t, ast.Name))
-        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
-            top.add(node.name)
-
-    free = set()
-    for fn in [n for n in tree.body if isinstance(n, ast.FunctionDef)]:
-        # Bindings first, reads second: ast.walk does not visit a store before
-        # the load it feeds, so a one-pass check would flag ordinary locals.
-        local = params(fn.args)
-        for node in ast.walk(fn):
-            if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
-                local.add(node.id)
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                local.update((a.asname or a.name).split(".")[0]
-                             for a in node.names)
-            elif isinstance(node, ast.ExceptHandler) and node.name:
-                local.add(node.name)
-            elif isinstance(node, (ast.FunctionDef, ast.Lambda)):
-                local |= params(node.args)
-        free.update(n.id for n in ast.walk(fn)
-                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
-                    and n.id not in local and n.id not in top)
-    return free
-
-
-def _extract_verifier():
-    import ast
-    import textwrap
-
-    path = ROOT / "device" / "moy_ota.py"
-    src = path.read_text(encoding="utf-8")
-    tree = ast.parse(src)
-
-    def const(name):
-        for node in tree.body:
-            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == name:
-                return ast.get_source_segment(src, node)
-        raise AssertionError("constant vanished from moy_ota: " + name)
-
-    def method(name):
-        for cls in tree.body:
-            if isinstance(cls, ast.ClassDef) and cls.name == "OtaUpdater":
-                for f in cls.body:
-                    if isinstance(f, ast.FunctionDef) and f.name == name:
-                        out = textwrap.dedent(ast.get_source_segment(src, f))
-                        out = out.replace("def %s(self, " % name, "def %s(" % name)
-                        return out.replace("self._", "_")
-        raise AssertionError("method vanished from moy_ota: " + name)
-
-    def top_level(name):
-        """A module-level def or assignment the extracted code needs, or None
-        (a stdlib name, or something genuinely missing -- the caller says so)."""
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and node.name == name:
-                return ast.get_source_segment(src, node)
-            if isinstance(node, ast.Assign) and any(
-                    getattr(t, "id", "") == name for t in node.targets):
-                return ast.get_source_segment(src, node)
-        return None
-
-    parts = [const("OTA_SCHEME"), const("_SHA256_DER"), const("OTA_PUBLIC_KEYS"),
-             method("_canonical"), method("_verify_manifest")]
-    have = {"OTA_SCHEME", "_SHA256_DER", "OTA_PUBLIC_KEYS",
-            "_canonical", "_verify_manifest"}
-    for _ in range(8):                      # a chain, not a single hop
-        missing = sorted(_free_names("\n".join(parts)) - have)
-        if not missing:
-            break
-        for name in missing:
-            got = top_level(name)
-            assert got is not None, (
-                "the extracted verifier calls %r, which moy_ota does not define "
-                "at module level -- the device would answer NameError and the "
-                "test would read it as a missing value" % name)
-            parts.append(got)
-            have.add(name)
-    snippet = "\n".join(parts)
-    assert not _free_names(snippet), (
-        "the extracted verifier does not close over its own names: %s"
-        % sorted(_free_names(snippet)))
-    return snippet
-
-
-def _val(board, expr, timeout=30):
-    """Evaluate `expr` in the PERSISTENT device namespace.
-
-    The device's `py` handler builds a FRESH env per command, so anything
-    pyexec uploaded lives in ws._g and nowhere else -- a bare pyval of a name
-    defined up there comes back None (a device NameError), which reads exactly
-    like a failed assertion and is not one. strict=True is what makes that
-    distinction: a device exception arrives as DeviceError carrying the board's
-    own words, never as a value the caller then asserts against."""
-    return board.pyval("eval(%r, ws._g)" % expr, timeout=timeout, strict=True)
-
+# The verifier is native/moy_net/moy_ota.c's: the canonical text, SHA-256 and
+# the RSA-2048 modexp in C. The host suite runs the same C over net_binding;
+# every console's suite runs the image's own build of it
+# (on_glass.the_kernel_verifies_a_signed_manifest), and this one times it.
 
 SIGNED_MANIFEST = {
     "channel": "unstable", "version": 1785665581, "size": 4292512,
@@ -562,10 +619,10 @@ SIGNED_MANIFEST = {
 }
 
 
-def test_the_shipped_verifier_runs_on_micropython(board):
-    """Signed here rather than pasted from a release: the test has to keep
-    working when the key is rotated, and the private half of the real one is a
-    GitHub secret that is deliberately not on this machine."""
+def test_verification_is_fast_enough_to_not_think_about(board):
+    """It runs once per update check, behind a screen already waiting on the
+    network; the bound catches an order-of-magnitude regression only."""
+    import json as _json
     import sys as _sys
 
     _sys.path.insert(0, str(ROOT / "tests"))
@@ -573,55 +630,19 @@ def test_the_shipped_verifier_runs_on_micropython(board):
 
     manifest = dict(SIGNED_MANIFEST)
     manifest["sig"] = sign_with_test_key(manifest)
-
-    assert board.pyexec(_extract_verifier(), timeout=90), board.last_error
-    assert board.pyexec(
-        "KEYS = %r\nMANIFEST = %r\n" % (TEST_KEYS, manifest),
-        timeout=90), board.last_error
-
-    # The MicroPython API questions, asked one at a time so a failure names itself.
-    assert _val(board, "int(KEYS[0][0], 16).__class__.__name__") == "int"
-    assert _val(board, "len(int(KEYS[0][0], 16).to_bytes(256, 'big'))") == 256
-    assert _val(board,
-        "__import__('hashlib').sha256(b'moybyte').digest()[:4]") == b"\xbd\xd3\xd1\xb4"
-
-    assert _val(board, "_verify_manifest(MANIFEST, KEYS)") is True
-
-
-def test_verification_is_fast_enough_to_not_think_about(board):
-    """Measured 2026-08-02: 35ms modexp, 41ms whole verify. The bound is loose
-    on purpose -- it exists to catch an ORDER-of-magnitude regression (a
-    software-int fallback, a bigger key), not to police jitter. It runs once per
-    update check, behind a screen already waiting on the network."""
     assert board.pyexec(
         "import time\n"
+        "KEYS = %r\n"
+        "M = %r\n"
         "t0 = time.ticks_us()\n"
         "for _ in range(5):\n"
-        "    _verify_manifest(MANIFEST, KEYS)\n"
-        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n",
+        "    __import__('moy_net').ota_judge(M, None, True, KEYS)\n"
+        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n"
+        % (TEST_KEYS, _json.dumps(manifest)),
         timeout=60), board.last_error
     us = board.pyval("ws._g['VERIFY_US']", strict=True)
-    print("\nverify_manifest: %dus (%.1fms)" % (us, us / 1000.0))
+    print("\nota_judge: %dus (%.1fms)" % (us, us / 1000.0))
     assert 0 < us < 500_000, "verify took %dus -- something got much slower" % us
-
-
-def test_a_tampered_manifest_is_refused_on_the_device(board):
-    """Every field the signature covers, refused on real hardware -- and junk in
-    the signature refused without raising, because whatever arrives off the wire
-    lands straight in int(sig, 16) and pow()."""
-    for field, value in (("sha256", "0" * 64), ("version", 999),
-                         ("size", 1), ("channel", "stable")):
-        got = _val(board, "_verify_manifest(dict(MANIFEST, **{%r: %r}), KEYS)"
-                          % (field, value))
-        assert got is False, "tampering with %s was accepted" % field
-
-    assert _val(
-        board, "_verify_manifest({k: v for k, v in MANIFEST.items() if k != 'sig'}, KEYS)"
-    ) is False, "an unsigned manifest verified"
-
-    for junk in ("", "zz", "00", "ff" * 256):
-        assert _val(board, "_verify_manifest(dict(MANIFEST, sig=%r), KEYS)"
-                           % junk) is False, "junk signature %r accepted" % junk
 
 
 def test_the_ota_updater_is_live_on_this_board(board):
@@ -662,14 +683,12 @@ def test_the_rollback_confirm_comes_from_the_frame_loop(board):
     2026-08-02: 15/15, both directions, banner and verdict correct each time.
     Not re-run here because one install is ~2min and leaves the board on the
     other slot, which every later test would inherit."""
-    ota = "__import__('moy_ota')"
+    # The kernel's loop makes it (native/moy_kernel/moy_loop.c, its two
+    # thresholds pinned in tests/test_moy_loop.py) and its service upcall
+    # tells the updater; the loop has run at least that many frames since.
     assert board.pyval("ws.updater.confirmed") is True
-    loops = board.pyval("ws.updater._loops")
-    assert loops >= board.pyval("%s.HEALTHY_LOOPS" % ota), \
-        "confirmed after %s loop iterations -- not from the frame loop" % loops
-    # A paint threshold above 1 would be unreachable: the console repaints only
-    # when something changes, so an untouched desktop paints once and stops.
-    assert board.pyval("%s.HEALTHY_PAINTS" % ota) == 1
+    frames = board.pyval("__import__('moy_loop').frames()")
+    assert frames >= 120, "confirmed after %s loop frames" % frames
     assert board.pyval("ws._frames_drawn") >= 1
 
 
@@ -677,17 +696,17 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
     """The marker round trip against the real filesystem, without a 3MB install.
 
     What is device-specific here is exactly what a host test cannot reach: this
-    board has no SD, so `with_sd` is a plain call-through and the marker lands on
-    the internal VFS -- the same path that has to hold a rollback's evidence
-    across a reboot.
+    board's card has a bus of its own, so `with_sd` is a plain call-through, and
+    the marker lands on the internal VFS whatever the store is -- the same path
+    that has to hold a rollback's evidence across a reboot.
 
-    The mkdir is not scaffolding, it is the firmware's own step: `update_dir`
-    does NOT exist on a board whose VFS has never taken an OTA, and `finish()`
-    and the download opener each create it before their first write. This test
-    writes the marker directly, so it has to do the same -- without it the test
-    passes only on a board that happens to have downloaded an update earlier,
-    and fails on any freshly-flashed one (a full cable flash wipes the VFS).
-    That is exactly how it failed on 2026-08-15 after the canvas-flip reflash.
+    The mkdirs are not scaffolding, they are the firmware's own step:
+    `update_dir` does NOT exist on a board whose VFS has never taken an OTA, nor
+    does its parent `/moy` when the store is the card, and `finish()` creates
+    every level before its first write. This test writes the marker directly,
+    so it has to do the same -- without it the test passes only on a board that
+    happens to have the directories already, and fails on any freshly-flashed
+    one (a cable flash that moves the store formats the VFS).
 
     AND IT HAS TO BE ITS OWN SHORT COMMAND, not a line of the snippet below.
     `pyexec` uploads a multi-line snippet in chunks; `cmd` sends one line. A
@@ -700,8 +719,9 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
     present mkdir raises EEXIST immediately, never stalls, and the upload is
     clean. Any device call that blocks on flash belongs outside a chunked
     upload for the same reason."""
-    board.cmd("py (lambda: (__import__('os').mkdir(ws.updater.update_dir), 1)[1])()",
-              wait_for="PY", timeout=20)     # EEXIST if it is already there
+    for d in ("/moy", "/moy/update"):     # the path test_the_ota_updater_is_live_on_this_board pins
+        board.cmd("py (lambda: (__import__('os').mkdir(%r), 1)[1])()" % d,
+                  wait_for="PY", timeout=20)     # EEXIST if it is already there
     assert board.pyexec(
         "import json\n"
         "f = open(ws.updater._pending_path(), 'w')\n"
@@ -726,6 +746,10 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
 # -- the browser console baked into the image (moy_web) -----------------------
 
 
+def test_the_cart_store_is_the_card_when_one_mounted(board):
+    on_glass.cart_store_follows_the_card(board)
+
+
 def test_the_web_console_is_baked_into_this_image(board):
     on_glass.web_console_is_baked_into_the_image(board)
 
@@ -736,12 +760,12 @@ def test_the_console_is_served_out_of_the_firmware_image(board):
     assert board.pyexec(
         "import moy_webhost\n"
         "H = moy_webhost.WebHost('/moy/carts')\n"
-        "R = H.handle_http('GET', '/micropython.wasm', b'')\n")
-    kind = board.pyval("eval('type(R).__name__', ws._g)")
-    assert kind == "BlobResponse", kind
-    head = board.pyval("eval('R.head()', ws._g)")
+        "R = H.handle_http('GET', '/worker.js', b'')\n"
+        "HEAD, BODY = R.split(bytes((13, 10, 13, 10)), 1)\n")
+    head = board.pyval("eval('HEAD', ws._g)")
     assert b"Content-Encoding: gzip" in head, head
     assert b"200 OK" in head and b"no-store" in head
+    assert board.pyval("eval('bytes(BODY[:3])', ws._g)") == b"\x1f\x8b\x08"
     note = board.pyval("eval('H.source_note()', ws._g)")
     assert "baked into this firmware" in note, note
 
@@ -754,11 +778,45 @@ def test_a_lua_cart_runs_and_exits(board):
 
 def test_a_cart_runs_and_exits(board):
     """The desk tier's door: ws.exit() out, not the cart-quit flag. A `run`
-    from the tour's picker arrangement opens the cart under it, where the
+    from the tour's projects arrangement opens the cart under it, where the
     first draft's cart-quit exit did not pop -- so this board pins the launch
     and the shell's own close, while the fullscreen tiers pin the kid-facing
     flag."""
     on_glass.cart_runs_and_exits(board, "star", door="shell", clear=3)
+
+
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
+    on_glass.a_vm_free_frame_makes_no_crossing(board, spec, title, door="shell",
+                                               clear=3)
+
+
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_front_run_makes_no_crossing(board, spec, title):
+    on_glass.a_front_run_makes_no_crossing(board, spec, title, clear=3)
+
+
+# The compiled half of the same check: the blit fixture's frames run in the
+# kernel's Player on the engine's thread, and neither its frames nor its run's
+# books since launch hold an APP, SERVICE or REFUSED crossing; the hello
+# fixture reads its greeting from its own folder at _init, in C.
+@pytest.mark.parametrize("which", ("blit", "hello"))
+def test_a_compiled_frame_makes_no_crossing(board, wasm_carts, which):
+    title = wasm_carts[which]
+    on_glass.a_vm_free_frame_makes_no_crossing(board, title.lower(), title,
+                                               door="shell", clear=3, runtime="wasm")
+
+
+# The runaway watch (native/moy_play/moy_play.h): a frame that never comes
+# back is ended, Lua on its line and a compiled cart at its next import call.
+@pytest.fixture(scope="module")
+def stuck_carts(board):
+    on_glass.stuck_carts_push(board, WASM_BOARD_DIR)
+
+
+@pytest.mark.parametrize("runtime", ("lua", "wasm"))
+def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
+    on_glass.a_stuck_run_is_ended(board, runtime)
 
 
 # -- the engine's radio guards (docs/wasm_tier_plan_2026-09.md, phase 1) ------
@@ -772,3 +830,24 @@ def test_load_unload_loop_under_a_live_cart_and_wifi(board, wasm):
 
 def test_a_run_with_wifi_and_ble_up_costs_at_most_a_constant(board, wasm):
     on_glass.wasm_low_water_with_radios_up(board, wasm)
+
+
+def test_the_kernel_lit_the_logo_before_any_vm(board):
+    on_glass.the_kernel_lit_the_logo(board)
+
+
+def test_heapcaps_mem_and_hush_are_the_kernels_words(board):
+    on_glass.board_words_are_the_kernels(board)
+
+
+def test_loop_is_the_kernels_line_with_every_stage(board):
+    on_glass.loop_line_is_the_kernels(board)
+
+
+def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
+    on_glass.a_ctrl_c_ends_a_front_run(board, clear=3)
+
+
+# LAST in the file: twenty soft resets end on a freshly started VM.
+def test_twenty_soft_resets_leave_psram_flat(board):
+    on_glass.soft_resets_leave_psram_flat(board, n=20)

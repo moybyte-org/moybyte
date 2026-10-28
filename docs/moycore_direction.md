@@ -10,10 +10,14 @@ the rows still open, and the gates that can still kill a claim. Numbers live in
 
 ## 1. What the engine IS now
 
-A Lua cart's whole frame runs inside libmoy: `moycore.tick(dt)` calls `_update`
-and `_draw` back to back with no return to Python. MicroPython is the shell and
-is not the engine. There is exactly **one** Lua runtime on every tier — boards,
-browser, host — and `import moy_lua` is meant to fail.
+A Lua cart's whole frame runs inside libmoy: moycore's frame calls `_update`
+and `_draw` back to back with no return to Python, and the kernel's Player
+(`native/moy_play/moy_play.c`) is what calls it. MicroPython is neither the
+engine nor the cart's loop: a VM-free Lua run (`docs/kernel_cartpath_2026-10.md`
+§2) is the kernel loop's foreground on the boards — its input, ticks, chrome
+and present in C, no upcall from launch to exit — and the VM stays up only
+for the shell around it. There is exactly **one** Lua runtime on every tier —
+boards, browser, host — and `import moy_lua` is meant to fail.
 
 The ladder that got there, one line each, because none of it is direction any
 more: stage 0 host-embedded audio `ff69071` (2026-08-11) · the cheap M0 levers
@@ -48,7 +52,9 @@ extensions failed that test first.
 **Known gaps, so nobody mistakes the pin for wider than it is.** Covered today:
 cls default form, map with colorkey and scale, clip clamped both directions,
 camera's return value read back, pal past index 63 and a repeated tint, palt
-un-setting, the 2-arg `pix` read, btn/btnp edges, pmem wrap, audio order. NOT
+un-setting, the 2-arg `pix` read, btn/btnp edges, pmem wrap, audio order, and
+drawing INTO a layer — its own camera (set and read back), clip, pal and the
+shape, text, sprite, map and textured-line verbs, read across their edges. NOT
 covered: `key`/`keyp`, `touch`/`mouse`, `textmode`/`quit`/`view`, the
 player-slot form `btn(name, p)`, scenes, the exit-time state
 read-back, and non-draw-lane **liveness guards** — the draw lanes assert they
@@ -57,7 +63,7 @@ can pass vacuously.
 
 **Input MAPPING is a separate net and stays one** (`tests/test_moy_button_order.py`,
 2026-08-14): the bit order is libmoy's ABI, read out of `moy.h` rather than
-restated, and checked behaviourally against both InputState classes. A frame
+restated, and checked behaviourally against both tiers' InputState. A frame
 hash cannot see a rotated d-pad — the bug that shipped to both boards for a day
 was invisible to every other net in the tree, this harness included, because it
 builds the host InputState.
@@ -96,11 +102,18 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   three (`make_layer`/`draw_layer`/`image`) ride int handles plus a Lua prelude
   because a trampoline marshals scalars and tuples. A cart needing a
   Python-backed verb does not need a second engine.
-  **What would reopen C layers:** a Lua cart that makes layers per-frame-HOT —
-  `draw_layer` inside a sprite loop, or many layers composited per frame. Today
-  the census is one cart at one blit per frame, and the cost of C layers is a
-  second console in C (each moybyte layer is a full canvas with the whole verb
-  table bound to it).
+  **What a cart DRAWS into a layer is libmoy's (#225, 2026-10-04).** Each
+  layer method is the screen's libmoy verb with the console's canvas pointed
+  at the layer's buffer for one call (`native/moycore/moycore_layers.h`, the
+  shape of libmoy's own layer method and of the wasm binding's `target`).
+  That gives a layer SPEC.md 6's whole verb set with no trampoline per verb,
+  which could not have carried `sspr` and `tline` anyway (more arguments than
+  either bridge passes). It was forced by conformance — moy-spec `403680a`'s
+  five `layer_*` scenes — not by a hot cart, and it is not a second console in
+  C: the canvas is the screen's `moy_canvas`, the verbs are the screen's. On
+  the boards and in the browser the layer's pixels, its `draw_layer` blit and
+  a paint image are the run's own C (#224, `bc88eb2`), so a layer cart makes
+  no crossing; the host keeps the console's layer object behind a trampoline.
 - **Registration is a DENY list, not an allow list** — what is stable and
   enumerable is what libmoy OWNS. One definition, `runtime/lua_ext.py`, imported
   by every runtime including the host's; an allow list silently drops any verb

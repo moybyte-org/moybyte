@@ -46,14 +46,14 @@ def _run_until_pop(ws, want, max_frames=40, dt=1 / 30):
 def test_letter_blitz_folder_present_and_valid():
     import json
 
-    d = SYSTEM_CARTS / "letter_blitz.moy"
+    d = SYSTEM_CARTS / "moybyte.letter_blitz.moy"
     assert (d / "manifest.json").is_file()
     assert (d / "main.py").is_file()
     man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
     assert man["format"] == "moy-1"          # SPEC.md 3.1
-    assert man["type"] == "game"
+    assert man["moybyte"]["type"] == "game"
     assert man["main"] == "main.py"
-    assert man["edit"], "no Make-it-mine cards"
+    assert man["moybyte"]["edit"], "no Make-it-mine cards"
     src = (d / "main.py").read_text(encoding="utf-8")
     compile(src, str(d / "main.py"), "exec")
     assert "_init" in src and "_update" in src and "_draw" in src
@@ -447,10 +447,10 @@ def test_letter_blitz_trace_completes_early_when_letter_drawn(tmp_path):
 
 
 def test_letter_blitz_exit_button_quits_to_launcher(tmp_path):
-    """Letter Blitz is a TEXT-mode typing game (it calls textmode(True)), so the console's
-    hold-BACKSPACE game exit can't reach it (BACKSPACE is a typed delete, and the T-Deck
-    keyboard has no autorepeat). The cart provides its OWN exit: a tap-anytime X button in
-    the top-right corner that calls quit(). Tapping it pops back to the launcher."""
+    """Letter Blitz is a TEXT-mode typing game (it calls textmode(True)), BACKSPACE is
+    a typed delete there. Besides the console's own pause menu the cart has its own exit: a
+    tap-anytime X button in the top-right corner that calls quit(). Tapping it pops back to
+    the launcher."""
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))

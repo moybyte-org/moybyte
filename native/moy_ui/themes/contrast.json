@@ -1,0 +1,79 @@
+{
+  "format": 2,
+  "name": "contrast",
+  "modes": ["dark", "light"],
+  "fonts": { "mono": "jbmono-11-400-2.fnt" },
+  "colors": { "dark": {
+    "panel": "#000000", "edge": "#ffffff", "title": "#ffffff", "title_ink": "#000000",
+    "accent": "#ffe600", "hilite": "#ffe600", "dim": "#1a1a1a", "desktop": "#000000",
+    "desktop_pattern": "#1a1a1a", "surface": "#000000", "surface_alt": "#000000",
+    "ink": "#ffffff", "ink_dim": "#ffffff", "border": "#ffffff", "selection": "#ffe600",
+    "selection_ink": "#000000", "focus": "#ffe600", "bar": "#000000", "bar_edge": "#ffffff",
+    "chrome_ink": "#ffffff", "chrome_ink_dim": "#ffffff", "title_active": "#ffffff",
+    "title_inactive": "#000000", "shade_hi": "#ffffff", "shade_lo": "#000000",
+    "shade_dark": "#ffffff", "ink_accent": "#ffe600",
+    "value": "#ffffff", "value_ink": "#000000", "danger": "#e5484d",
+    "sunk": "#1a1a1a", "lcd": "#000000", "lcd_ink": "#ffffff",
+    "code_text": "#ffffff", "code_keyword": "#ffe600", "code_string": "#7dff9a",
+    "code_number": "#ffb070", "code_comment": "#c8c8c8", "code_builtin": "#7fd0ff"
+  }, "light": {
+    "panel": "#ffffff", "edge": "#000000", "title": "#000000", "title_ink": "#ffffff",
+    "accent": "#ffe600", "hilite": "#ffe600", "dim": "#e6e6e6", "desktop": "#ffffff",
+    "desktop_pattern": "#e6e6e6", "surface": "#ffffff", "surface_alt": "#ffffff",
+    "ink": "#000000", "ink_dim": "#000000", "border": "#000000", "selection": "#ffe600",
+    "selection_ink": "#000000", "focus": "#ffe600", "bar": "#ffffff", "bar_edge": "#000000",
+    "chrome_ink": "#000000", "chrome_ink_dim": "#000000", "title_active": "#000000",
+    "title_inactive": "#ffffff", "shade_hi": "#ffffff", "shade_lo": "#e6e6e6",
+    "shade_dark": "#000000", "ink_accent": "#000000",
+    "value": "#000000", "value_ink": "#ffffff", "danger": "#b3261e",
+    "sunk": "#e6e6e6", "lcd": "#ffffff", "lcd_ink": "#000000",
+    "surface_light": true, "bar_light": true, "band_light": true,
+    "code_text": "#000000", "code_keyword": "#4b1fb8", "code_string": "#1a6b2e",
+    "code_number": "#8a4300", "code_comment": "#4d4d4d", "code_builtin": "#0b5394"
+  } },
+  "layout": {
+    "bars": [{ "edge": "top", "size": 18, "left": ["menu", "chips", "zone"],
+      "right": ["wifi", "battery", "clock"] }]
+  },
+  "look": {
+    "fam": "atkinson", "w_med": 600, "w_semi": 700, "w_bold": 800,
+    "sizes": { "hh": { "title": 15, "key": 18, "op": 19, "result": 30 },
+      "dk": { "title": 17, "key": 26, "op": 28, "result": 50 } },
+    "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3, "gap": 2 } },
+    "current": { "style": "plate", "ink": "value_ink" }, "accents": false,
+    "icons": { "kind": "smooth", "set": "default" },
+    "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
+      "primary": { "font": "op" } } },
+    "win_r": 4, "card_r": 4, "key_r": 4,
+    "win": { "header": "fill", "rule": 2 },
+    "dark": {
+      "current": { "alpha": 1 }, "disabled": "#5c5c5c",
+      "tile_outline": [2, "#ffffff"],
+      "card": { "frame": [2, "#ffffff"] },
+      "win": { "frame": [2, "#ffffff"], "frame_back": [2, "#ffffff"] },
+      "bar": { "fill": "#000000", "line": [2, "#ffffff"], "chip_cur": "#ffffff",
+               "sys_line": [2, "#ffffff"] },
+      "buttons": {
+        "normal": { "fill": "#000000", "border": [2, "#ffffff"] },
+        "tonal": { "fill": "#262626", "ink": "#ffffff", "border": [2, "#ffffff"] },
+        "danger": { "ink": "#ff8f8f", "border": [2, "#ffffff"] } },
+      "lcd_border": [2, "#ffffff"],
+      "keycap": { "border": [1.25, "#ffffff"] }
+    },
+    "light": {
+      "current": { "alpha": 1 }, "disabled": "#949494",
+      "tile_outline": [2, "#000000"],
+      "card": { "frame": [2, "#000000"] },
+      "focus": { "outline": [2, "#000000"] },
+      "win": { "frame": [2, "#000000"], "frame_back": [2, "#000000"] },
+      "bar": { "fill": "#ffffff", "line": [2, "#000000"], "chip_cur": "#000000",
+               "sys_line": [2, "#000000"] },
+      "buttons": {
+        "normal": { "fill": "#ffffff", "border": [2, "#000000"] },
+        "tonal": { "fill": "#e6e6e6", "ink": "#000000", "border": [2, "#000000"] },
+        "danger": { "ink": "#b3261e", "border": [2, "#000000"] } },
+      "lcd_border": [2, "#000000"],
+      "keycap": { "border": [1.25, "#000000"] }
+    }
+  }
+}

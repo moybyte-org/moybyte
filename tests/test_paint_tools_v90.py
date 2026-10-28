@@ -9,6 +9,14 @@ real pointer/input dispatch the device loop uses.
 """
 
 from pathlib import Path
+import pytest
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -390,6 +398,130 @@ def test_erase_toggle_makes_fill_transparent():
     assert _region(pe) == [0] * 64
 
 
+# -- mirror-draw toggle (#90) -------------------------------------------------
+
+def test_mirror_off_by_default_and_paint_is_unaffected():
+    pe = _pe()
+    assert pe.mirror is False
+    pe.color = 4
+    pe.paint(0, 0)
+    assert _region(pe)[0] == 4 and _region(pe)[7] == 0   # no echo at the far edge
+
+
+def test_mirror_toggle_echoes_pen_across_the_vertical_centre():
+    pe = _pe()
+    pe.color = 7
+    pe.toggle_mirror()
+    assert pe.mirror is True
+    pe.paint(1, 3)                      # dim is 8 -> mirror column is 8-1-1 = 6
+    assert pe.sheet.pget(*_xy(pe, 1, 3)) == 7
+    assert pe.sheet.pget(*_xy(pe, 6, 3)) == 7
+    assert _region(pe).count(7) == 2    # nothing else painted
+
+
+def test_mirror_toggle_echoes_erase_too():
+    # Erase writes through the SAME paint() ink path, so the mirror echoes a
+    # carved-out hole exactly like a painted pixel.
+    pe = _pe()
+    pe.color = 5
+    pe.paint(1, 0)
+    pe.paint(6, 0)
+    assert _region(pe)[:8] == [0, 5, 0, 0, 0, 0, 5, 0]
+    pe.toggle_erase()
+    pe.toggle_mirror()
+    pe.paint(1, 0)                      # erases column 1 AND its mirror, column 6
+    assert _region(pe)[:8] == [0, 0, 0, 0, 0, 0, 0, 0]
+
+
+def test_mirror_respects_multi_tile_size():
+    # A 2x2 sprite mirrors across the WHOLE 16px span, not each 8px tile on its own.
+    pe = _pe()
+    pe.cycle_size()                     # 2x2 (16x16)
+    assert pe.dim == 16
+    pe.color = 9
+    pe.toggle_mirror()
+    pe.paint(2, 0)                      # mirror column is 16-1-2 = 13, in the FAR tile
+    assert pe.sheet.pget(*_xy(pe, 2, 0)) == 9
+    assert pe.sheet.pget(*_xy(pe, 13, 0)) == 9
+    assert pe.sheet.pget(*_xy(pe, 5, 0)) == 0   # not mirrored onto the near tile's edge
+
+
+def test_mirrored_stroke_is_one_undo_step():
+    pe = _pe()
+    pe.color = 3
+    pe.toggle_mirror()
+    pe.begin_stroke()
+    for x in range(4):
+        pe.paint(x, 0)                  # paints x=0..3 AND their mirrors x=7..4
+    pe.end_stroke()
+    assert _region(pe)[:8] == [3] * 8
+    assert pe.can_undo()
+    pe.undo()
+    assert _region(pe)[:8] == [0] * 8   # the whole mirrored stroke reverts together
+    assert not pe.can_undo()
+
+
+def test_mirror_toggle_does_not_affect_fill():
+    pe = _pe()
+    pe.color = 6
+    pe.tool = pe.FILL
+    pe.toggle_mirror()
+    pe.fill(0, 0)
+    assert _region(pe) == [6] * 64      # fill floods everything anyway, but mirror
+                                         # plays no part: a half-flood is never possible
+
+
+def test_mirror_toggle_does_not_affect_shapes():
+    pe = _pe()
+    pe.color = 8
+    pe.tool = pe.LINE
+    pe.toggle_mirror()
+    pe.stamp_shape(0, 0, 3, 0)          # a horizontal line on the left half only
+    assert _region(pe)[:8] == [8, 8, 8, 8, 0, 0, 0, 0]   # no mirrored echo on the right
+
+
+def test_mirror_toggle_button(tmp_path):
+    from runtime import console as C
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    ws.paint.color = 9
+    ox, oy = ws.sheet.tile_origin(ws.paint.n)
+
+    _pick_more(drv, ws, "mirror")      # the more menu's "Turn on mirror"
+    assert ws.paint.mirror is True
+    assert ws.paint_layer._pop is False   # a pick closes the menu
+
+    cx, cy = _cell_center(C, 1, 2, ws.paint.dim)
+    drv.touch(cx, cy)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.sheet.pget(ox + 1, oy + 2) == 9
+    assert ws.sheet.pget(ox + 6, oy + 2) == 9      # the mirrored echo landed too
+
+    _pick_more(drv, ws, "mirror")
+    assert ws.paint.mirror is False
+
+
+def _pick_more(drv, ws, oid):
+    """Open the more menu with its button and pick row `oid` with the keys:
+    focus opens on its first row, down walks it, enter activates."""
+    _tap_tool(drv, ws, "more")
+    assert ws.paint_layer._pop == "more"
+    drv.frame(1 / 30)
+    rows = [r[0] for r in ws.paint_layer._more_rows(ws.paint_layer.layout.desk)]
+    for _ in range(rows.index(oid)):
+        drv.press("down")
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)               # the key comes up between presses
+    drv.press("run")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+
+
 # -- region select / copy / paste (#90) --------------------------------------
 
 def test_selection_normalizes_and_clamps():
@@ -476,10 +608,36 @@ def test_cut_selection_moves_pixels():
     assert _region(pe)[2 * 8 + 2] == 5
 
 
-def test_copy_with_no_selection_is_a_noop():
+def test_copy_with_no_selection_copies_the_whole_sprite():
     pe = _pe()
-    assert pe.copy_selection() is False
-    assert pe.paste(0, 0) is False       # nothing on the clipboard
+    assert pe.paste(0, 0) is False       # nothing on the clipboard yet
+    pe.paint(1, 2)
+    assert pe.copy_selection() is True
+    w, h, buf = pe.clip
+    assert (w, h) == (pe.dim, pe.dim) and list(buf) == _region(pe)
+
+
+def test_an_operation_acts_on_the_selection_else_the_whole_sprite():
+    """PICO-8's rule: flip, rotate, shift and clear take the selection
+    where there is one, else the whole sprite."""
+    pe = _pe()
+    pe.color = 7
+    pe.paint(0, 0)
+    pe.paint(5, 5)
+    pe.set_selection(4, 4, 7, 7)
+    pe.flip_h()                          # (5, 5) -> (6, 5) inside the box
+    r = _region(pe)
+    assert r[0] == 7 and r[5 * pe.dim + 6] == 7 and r[5 * pe.dim + 5] == 0
+    pe.clear()                           # the box only
+    r = _region(pe)
+    assert r[0] == 7 and r[5 * pe.dim + 6] == 0
+    pe.set_selection(0, 0, 3, 1)
+    assert pe.rotate() is False          # not square: no rotation
+    pe.clear_selection()
+    pe.shift(1, 0)                       # the whole sprite, wrapping
+    assert _region(pe)[1] == 7
+    pe.clear()
+    assert set(_region(pe)) == {0}
 
 
 # -- tool-row UI + keyboard shortcut (through the shared console) -------------
@@ -649,7 +807,12 @@ def test_line_tool_button_and_grid_drag(tmp_path):
     ws.paint.clear()
     ws.paint.color = 12
 
-    _tap_tool(drv, ws, "line")
+    # One shape button: oval first, then a tap a shape: rect, line.
+    _tap_tool(drv, ws, "shape")
+    assert ws.paint.tool == ws.paint.OVAL
+    _tap_tool(drv, ws, "shape")
+    assert ws.paint.tool == ws.paint.RECT
+    _tap_tool(drv, ws, "shape")
     assert ws.paint.tool == ws.paint.LINE
 
     # Press-drag-release a horizontal line: press at (1,1), drag to (5,1), release.
@@ -668,30 +831,38 @@ def test_line_tool_button_and_grid_drag(tmp_path):
     assert ws.paint.can_undo()
 
 
-def test_erase_toggle_button(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
+def test_the_operation_keys_act_on_the_sprite(tmp_path):
+    """PICO-8's keys on a keyboard: F and V flip, R rotates, Del clears,
+    the arrows shift (a desk keyboard's; the cursor is the pointer there),
+    M opens the more menu."""
+    from runtime import host_app, ui_draw
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_paint(ws)
     drv = host_app.ConsoleDriver(ws)
-    ws.paint.color = 9
-    ox, oy = ws.sheet.tile_origin(ws.paint.n)
-
-    cx, cy = _cell_center(C, 2, 2, ws.paint.dim)
-    drv.touch(cx, cy)
+    ui_draw.input_kind("keys")
+    pe = ws.paint
+    pe.clear()
+    pe.color = 7
+    pe.paint(0, 0)
+    ox, oy = ws.sheet.tile_origin(pe.n)
+    last = pe.dim - 1
+    drv.type_char(ord("f"))
     drv.frame(1 / 30)
-    drv.touch_up()
+    assert ws.sheet.pget(ox + last, oy) == 7 and ws.sheet.pget(ox, oy) == 0
+    drv.type_char(ord("v"))
     drv.frame(1 / 30)
-    assert ws.sheet.pget(ox + 2, oy + 2) == 9
-
-    _tap_tool(drv, ws, "erase")
-    assert ws.paint.erase is True
-    drv.touch(cx, cy)                  # paint again -> now erases
+    assert ws.sheet.pget(ox + last, oy + last) == 7
+    drv.press("left")
     drv.frame(1 / 30)
-    drv.touch_up()
+    assert ws.sheet.pget(ox + last - 1, oy + last) == 7
+    drv.type_char(0x7F)
     drv.frame(1 / 30)
-    assert ws.sheet.pget(ox + 2, oy + 2) == 0
+    assert all(ws.sheet.pget(ox + x, oy + y) == 0
+               for x in range(pe.dim) for y in range(pe.dim))
+    drv.type_char(ord("m"))
+    drv.frame(1 / 30)
+    assert ws.paint_layer._pop == "more"
 
 
 def test_select_copy_paste_through_the_ui(tmp_path):
@@ -723,11 +894,21 @@ def test_select_copy_paste_through_the_ui(tmp_path):
     drv.frame(1 / 30)
     assert ws.paint.sel == (1, 1, 2, 1)
 
-    _tap_tool(drv, ws, "copy")
-    assert ws.paint.has_clip
+    drv.type_char(0x03)                         # Ctrl-C copies the selection
+    drv.frame(1 / 30)
+    assert ws.paint.has_clip and ws.paint.clip[:2] == (2, 1)
 
-    # A tap in SELECT mode (no drag) stamps the clip at the tapped cell.
+    # A tap in SELECT mode (no drag) drops the selection.
     dest = _cell_center(C, 4, 4, ws.paint.dim)
+    drv.touch(*dest)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.paint.sel is None
+
+    # The stamp tool stamps the clip at the tapped cell.
+    _tap_tool(drv, ws, "stamp")
+    assert ws.paint.tool == ws.paint.STAMP
     drv.touch(*dest)
     drv.frame(1 / 30)
     drv.touch_up()
@@ -795,3 +976,49 @@ def test_the_line_walker_is_integer_only():
     for node in ast.walk(fn):
         assert not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Div)
         assert not (isinstance(node, ast.Constant) and isinstance(node.value, float))
+
+
+def test_clear_is_set_apart_and_the_keys_still_reach_it(tmp_path):
+    """Clear, the more menu's danger row, stands under a rule of its own
+    (design review R4-13), and focus walks down into it as into any row."""
+    from runtime import host_app, ui
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    menus = []
+    real = ui.menu
+
+    def spy(label, items, icons=(), o=None, kinds=()):
+        menus.append((label, list(items), list(kinds)))
+        return real(label, items, icons, o, kinds)
+    ui.menu = spy
+    try:
+        pe = ws.paint
+        pe.color = 7
+        pe.paint(0, 0)
+        _pick_more(drv, ws, "clear")
+    finally:
+        ui.menu = real
+    ox, oy = ws.sheet.tile_origin(pe.n)
+    assert ws.sheet.pget(ox, oy) == 0
+    held = [m for m in menus if any(i.startswith("Clear") for i in m[1])]
+    assert held
+    for _label, items, kinds in held:
+        assert [i.split("\t")[0] for i in items] == ["Clear"] and kinds == ["danger"]
+
+
+
+def test_a_selection_shrinks_with_the_sprite_and_a_shift_stays_inside_it():
+    pe = _pe()
+    pe.size = 3
+    pe.set_selection(0, 0, 23, 23)
+    pe.size = 2
+    assert pe.sel == (0, 0, 15, 15)
+    pe.shift(1, 0)                       # read past the 16x16 region before
+    pe.set_selection(18, 18, 23, 23)
+    assert pe.sel == (15, 15, 15, 15)
+    pe.size = 3
+    pe.set_selection(18, 18, 23, 23)
+    pe.size = 1
+    assert pe.sel is None
+    pe.flip_h()

@@ -5,7 +5,7 @@ runtimes**: carts from other fantasy consoles ported to the #67 Lua runtime
 with the moy-spec CLI's `moy port` (the one converter, spec-side —
 `p8_lua_port.py` there), and `jet/`, a third-party engine's example compiled
 for the WebAssembly tier. They are deliberately **NOT seed carts**: seeding is declared per cart now (a
-`system_carts/*/manifest.json` carries `"system": true` and an `"order"`, and
+`system_carts/*/manifest.json` carries `"moybyte": {"system": true, "order": …}`, and
 `tools/gen_device_carts.py` reads those), and nothing here carries either
 declaration or lives in `system_carts/` — so none of it is baked into a
 firmware image or seeded onto a device. To play one, copy the `.moy` folder into a cart store
@@ -25,14 +25,15 @@ for seeding them, which nothing does yet.
 `tools/gen_p8_ports.py` builds `ports/p8/<lid>.moy` for each cart in moy-spec's
 `conformance/p8_corpus.json`. The carts are **not in this repo and must not be**
 — they are their authors' work, several under licences that forbid
-redistribution. The bytes come from that file's links, cached outside the tree by
-moy-spec's `conformance/fetch_p8_corpus.py` (`~/.cache/moy/p8`), which is what
-moy-spec CI already does. What IS committed is `ports/p8/perf/<lid>.lua`: our own
-~10 lines per cart naming the scene to measure in and why.
+redistribution. The bytes come from that file's links, downloaded BY HAND in a
+browser into `~/.cache/moy/p8` — the Lexaloffle BBS's terms ask that no script
+fetch from it, so nothing here or in moy-spec does. What IS committed is
+`ports/p8/perf/<lid>.lua`: our own ~10 lines per cart naming the scene to
+measure in and why.
 
 ```bash
-python3 ../moy-spec/conformance/fetch_p8_corpus.py   # once, ~570KB
-python3 tools/gen_p8_ports.py                        # -> ports/p8/*.moy
+python3 ../moy-spec/conformance/p8_corpus.py   # what to download, and what is missing
+python3 tools/gen_p8_ports.py                  # -> ports/p8/*.moy
 ```
 
 **ONE cart, not two.** The corpus is two things at once — the COMPATIBILITY set
@@ -96,7 +97,7 @@ normally, `1` starts it in the measured scene. A kid never sees it; a measuremen
 session flips it in the Editor's Config tab with no re-push, and
 `host_app._SEED_PRESERVE` keeps the value across a re-seed. `0`/`1` rather than
 `true`/`false` because that is what the shipped carts already use
-(`brick_siege_lua.moy/config.json`). Measured on Guition P4 glass the day it
+(`moybyte.brick_siege_lua.moy/config.json`). Measured on Guition P4 glass the day it
 landed — moss moss: `perf 0` logic 21ms / 30 fps drawn, `perf 1` logic 28ms /
 13 fps, which reproduces the retired twin cart's numbers from one cart.
 

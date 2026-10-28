@@ -14,15 +14,7 @@ inside a guarded method), which is what lets the whole handshake and a full
 two-console match run here instead of only on glass.
 """
 
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "device"))
-import moy_espnow  # noqa: E402
-sys.path.remove(str(ROOT / "device"))
-
-from runtime import netplay, players as players_mod  # noqa: E402
+from runtime import players as moy_espnow, players as netplay, players as players_mod
 
 BROADCAST = moy_espnow.BROADCAST
 
@@ -154,11 +146,15 @@ def _pair(launch=None):
 
 
 def _see_each_other(a, b, clock, cart="Brick Siege"):
-    a.announce(cart, 1)
-    b.announce(cart, 1)
+    # Each hears the other's beacon. Announced idle, so the beacon tick's own
+    # pairing attempt (which needs a console IN the cart) leaves the match to
+    # the test's offer.
+    a.announce(cart, 0)
+    b.announce(cart, 0)
     clock.advance(10)
     a.poll()
     b.poll()
+    a.state = b.state = 1
 
 
 # -- the recipe -------------------------------------------------------------
@@ -353,6 +349,33 @@ def test_a_cart_message_crosses_and_is_pumped_not_delivered_mid_send():
     assert got == [{"hi": 5}]
 
 
+def test_net_pump_and_send_import_nothing(monkeypatch):
+    """net.pump() runs every frame of a multiplayer cart. On a board `json` is
+    an extensible built-in that never enters sys.modules, so an `import json`
+    there is a filesystem search on every call, and one inside pump halved
+    Brick Siege and Harpoon Pop on every console board (#66)."""
+    import builtins
+    air, clock, a, b = _pair()
+    got = []
+    b.net.on_message(got.append)
+    assert a.net.send({"hi": 5}) is True
+    b.poll()
+    seen = []
+    real = builtins.__import__
+
+    def spy(name, *args, **kw):
+        seen.append(name)
+        return real(name, *args, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", spy)
+    b.net.pump()                        # a frame with a message in
+    b.net.pump()                        # and one with none
+    a.net.send({"again": 1})
+    monkeypatch.undo()
+    assert seen == [], "the frame path imported %r" % seen
+    assert got == [{"hi": 5}]
+
+
 def test_an_oversized_message_is_dropped_whole_rather_than_truncated():
     """A half-delivered message reads as a game-logic bug at the other end, so
     the honest failure is to refuse it and say so."""
@@ -424,16 +447,7 @@ def test_drain_input_dispatches_inputs_and_parks_everything_else():
     frame."""
     air, clock, a, _b = _pair()
 
-    got = []
-
-    class _S:
-        session = 0
-
-        def on_packet(self, m, now_ms=None):
-            got.append(bytes(m))
-            return True
-
-    a.session = _S()
+    a._m.begin(0, 7, 0, None)             # a live session, as a match leaves it
     peer_mac = b"\xaa" * 6
     inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0, 5])
     beacon = bytes([moy_espnow.PROTO, netplay.T_BEACON, 0]) + b"kid|tdeck|"
@@ -441,11 +455,11 @@ def test_drain_input_dispatches_inputs_and_parks_everything_else():
     a.radio.inbox.append((peer_mac, beacon))
     n = a.drain_input()
     assert n == 2
-    assert got == [inp], "only the input frame reaches the session mid-frame"
-    assert a._deferred == [(peer_mac, beacon)]
-    a.session = None
+    assert a._m.packets_in == 1, "only the input frame reaches the session mid-frame"
+    assert peer_mac not in a.peers and a._m._m.defer_n == 1, "the beacon is parked"
+    a._m.close()
     a.poll(None)
-    assert a._deferred == []
+    assert a._m._m.defer_n == 0
     assert peer_mac in a.peers, "the parked beacon was dispatched by the tail poll"
 
 
@@ -604,16 +618,16 @@ def test_the_link_rides_the_radio_lease(tmp_path):
     assert ws.wifi.radio is False
     open_cart(ws, "Brick Siege")           # a "multiplayer" cart: the link runs
     assert ws.link.calls == ["start"]
-    assert "link" in ws._wifi_holders and ws.wifi.radio is True
+    assert "link" in ws.leases.holders() and ws.wifi.radio is True
 
     ws.netplay = object()                  # a session arranged for the next run
     ws.player.release_world()
-    assert "link" in ws._wifi_holders and ws.wifi.radio is True
+    assert "link" in ws.leases.holders() and ws.wifi.radio is True
 
     ws.netplay = None
     ws.player.release_world()
     assert ws.link.calls[-1] == "stop"
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 def _lose_invites(air, n):
@@ -671,7 +685,7 @@ def test_a_guest_still_asking_gets_told_again():
     b.poll(wsb)
     assert wsb.netplay is None
 
-    b._unicast(a.mac, bytes(bytearray([netplay.PROTO, netplay.T_JOIN])))
+    b.broadcast(bytes(bytearray([netplay.PROTO, netplay.T_JOIN])) + a.mac)
     a.poll(wsa)                              # the host answers the ask
     b.poll(wsb)
     assert wsb.netplay is not None
@@ -825,7 +839,7 @@ def test_the_chase_stops_the_moment_the_guest_is_heard():
     assert a.session.packets_in > 0
     clock.advance(moy_espnow.BEACON_MS + 1)
     a.poll(wsa)
-    assert a._start_frame is None, "an answered invite is not chased"
+    assert a._m.start_len == 0, "an answered invite is not chased"
     assert a.session is not None
 
 

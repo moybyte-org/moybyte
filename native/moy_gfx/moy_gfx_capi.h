@@ -33,7 +33,7 @@ typedef struct _moy_gfx_draw_ctx_obj_t moy_gfx_draw_ctx_t;
 moy_gfx_draw_ctx_t *moy_gfx_capi_ctx(mp_obj_t obj);
 
 // False until set_buf has pointed the ctx at a destination buffer.
-bool moy_gfx_capi_ready(const moy_gfx_draw_ctx_t *c);
+bool moy_gfx_capi_ready(moy_gfx_draw_ctx_t *c);
 
 // True when the canvas's sprite queue holds quads: the caller must upcall
 // canvas.flush_batch BEFORE drawing (the #63 order rule -- queued sprites
@@ -57,8 +57,8 @@ bool moy_gfx_capi_batch_src(const moy_gfx_draw_ctx_t *c);
 // to the canvas.flush_batch upcall -- no registered source, no destination,
 // or the pending run belongs to ANOTHER writer (its sheet is whatever
 // canvas._batch_sheet says, which only the Python flush knows). Pure C: no
-// upcalls, no allocation, never raises. The caller owns the pump feed and any
-// profiling counters, exactly as with the draw verbs above.
+// upcalls, no allocation, never raises. The caller owns any profiling
+// counters, exactly as with the draw verbs above.
 bool moy_gfx_capi_flush_batch(moy_gfx_draw_ctx_t *c, int token);
 
 // #67 stage-1b: the sheet-sampling verbs, against the ctx-registered sources.
@@ -88,12 +88,6 @@ mp_obj_t moy_gfx_capi_canvas(const moy_gfx_draw_ctx_t *c);
 // against a 1x1 fill.
 bool moy_gfx_capi_prof(const moy_gfx_draw_ctx_t *c);
 
-// Pump bookkeeping (#163 door 1, T-Deck root canvas): decrement the shared
-// cadence counter by `nops`; when the pump is due, returns the registered
-// callable for the CALLER to invoke (protected), else MP_OBJ_NULL. Ctxs with
-// no pump (every canvas but the T-Deck root) always return MP_OBJ_NULL.
-mp_obj_t moy_gfx_capi_pump_due(moy_gfx_draw_ctx_t *c, int nops);
-
 // Draw verbs. Coordinates are canvas coords (camera applied inside), `ci` a
 // MOY64 palette index resolved through the ctx's pal-remapped RGB565 table.
 // All clip to the ctx clip rect intersected with the buffer; all are pure C
@@ -108,3 +102,13 @@ void moy_gfx_capi_tri(moy_gfx_draw_ctx_t *c, int x1, int y1, int x2, int y2,
                       int x3, int y3, int ci);
 void moy_gfx_capi_print(moy_gfx_draw_ctx_t *c, const uint8_t *s, size_t slen,
                         int x, int y, int ci);
+
+// The layer restore (moy_gfx_kernels.h's mg_lr_*) over this image's copy
+// engine: a Lua run's native draw_layer, against the state its screen canvas
+// keeps (`state`, moy_gfx_k_layer_size() bytes: the canvas's `_lrs`). forget
+// before a layer the state may predict is freed.
+size_t moy_gfx_k_layer_size(void);
+void moy_gfx_k_layer_blit(void *state, uint16_t *dst, size_t dcap, int dw, int dh,
+                          const uint16_t *src, size_t scap, int sw, int sh,
+                          int cam_x, int cam_y, bool edited);
+void moy_gfx_k_layer_forget(void *state);

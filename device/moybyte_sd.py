@@ -20,49 +20,25 @@ SD_CS = 39
 SD_LIVE_FREQ_KHZ = 20000
 
 
-class _NativeSDBlockDev:
-    """MicroPython block device backed by moy_sd (FAT via vfs.mount)."""
-
-    def __init__(self, sectors):
-        self.sectors = sectors
-
-    def readblocks(self, block, buf, off=0):
-        import moy_sd
-
-        if off:
-            raise OSError(22)  # EINVAL: byte-offset addressing unsupported (FAT uses 512-blocks)
-        moy_sd.read(block, buf, len(buf) // moy_sd.SECTOR_SIZE)
-        return 0
-
-    def writeblocks(self, block, buf, off=0):
-        import moy_sd
-
-        if off:
-            raise OSError(22)
-        moy_sd.write(block, buf, len(buf) // moy_sd.SECTOR_SIZE)
-        return 0
-
-    def ioctl(self, op, arg):
-        if op == 4:        # MP_BLOCKDEV_IOCTL_BLOCK_COUNT
-            return self.sectors
-        if op == 5:        # MP_BLOCKDEV_IOCTL_BLOCK_SIZE
-            import moy_sd
-
-            return moy_sd.SECTOR_SIZE
-        return 0           # INIT / DEINIT / SYNC / BLOCK_ERASE: nothing to do
-
-
 def mount_sd_live(host=SPI_HOST, cs=SD_CS, freq_khz=SD_LIVE_FREQ_KHZ):
-    """Attach + mount the SD card on the display-shared host via moy_sd."""
+    """Attach the SD card on the display-shared host via moy_sd and mount the
+    store's own volume over it: native/moy_store's card, a FATFS over a C
+    block device with the sector cache (moy_card.c), which VfsFat and the
+    store share."""
+    global device
     import moy_sd
+    import moy_store
 
     sectors = moy_sd.init(host, cs, freq_khz)
-    bd = _NativeSDBlockDev(sectors)
+    bd = moy_store.card(sectors)
     _mount(bd, SD_MOUNT)
+    device = bd
     return bd
 
 
 _live_mounted = False
+# The card volume mounted at SD_MOUNT, once one is.
+device = None
 
 
 def with_sd_live(fn):

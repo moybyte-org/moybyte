@@ -1,0 +1,251 @@
+{
+ "_": "SPEC.md 3.7: manifest fields, and the description, genre and tags a host reads from them. Hand your reader each case's manifest (with format and title added) and compare; null is absent. Run against moycore by `make -C libmoy manifest-test`.",
+ "cases": [
+  {
+   "name": "all three",
+   "manifest": {
+    "description": "Catch the stars.",
+    "genre": "arcade",
+    "tags": [
+     "one-button",
+     "score-attack"
+    ]
+   },
+   "description": "Catch the stars.",
+   "genre": "arcade",
+   "tags": [
+    "one-button",
+    "score-attack"
+   ]
+  },
+  {
+   "name": "none",
+   "manifest": {},
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "genre in another case",
+   "manifest": {
+    "genre": "Arcade"
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "genre off the list",
+   "manifest": {
+    "genre": "shmup"
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "genre empty",
+   "manifest": {
+    "genre": ""
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "genre a number",
+   "manifest": {
+    "genre": 3
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "genre an array",
+   "manifest": {
+    "genre": [
+     "puzzle"
+    ]
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "genre null",
+   "manifest": {
+    "genre": null
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "tags off the rule dropped, a repeat once",
+   "manifest": {
+    "tags": [
+     "Pico8",
+     "two player",
+     "",
+     "xxxxxxxxxxxxxxxxx",
+     "ok",
+     7,
+     "a_b",
+     "pico8",
+     "ok"
+    ]
+   },
+   "description": null,
+   "genre": null,
+   "tags": [
+    "ok",
+    "pico8"
+   ]
+  },
+  {
+   "name": "a tag of sixteen characters",
+   "manifest": {
+    "tags": [
+     "xxxxxxxxxxxxxxxx"
+    ]
+   },
+   "description": null,
+   "genre": null,
+   "tags": [
+    "xxxxxxxxxxxxxxxx"
+   ]
+  },
+  {
+   "name": "ten tags, eight read",
+   "manifest": {
+    "tags": [
+     "t0",
+     "t1",
+     "t2",
+     "t3",
+     "t4",
+     "t5",
+     "t6",
+     "t7",
+     "t8",
+     "t9"
+    ]
+   },
+   "description": null,
+   "genre": null,
+   "tags": [
+    "t0",
+    "t1",
+    "t2",
+    "t3",
+    "t4",
+    "t5",
+    "t6",
+    "t7"
+   ]
+  },
+  {
+   "name": "a good ninth entry is not read",
+   "manifest": {
+    "tags": [
+     "bad!",
+     "bad!",
+     "bad!",
+     "bad!",
+     "bad!",
+     "bad!",
+     "bad!",
+     "bad!",
+     "late"
+    ]
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "tags not an array",
+   "manifest": {
+    "tags": "pico8"
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "tags empty",
+   "manifest": {
+    "tags": []
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "description: control characters are spaces",
+   "manifest": {
+    "description": " two\nlines\t"
+   },
+   "description": "two lines",
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "description: nothing but spaces",
+   "manifest": {
+    "description": "  \n "
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "description: not a string",
+   "manifest": {
+    "description": [
+     "x"
+    ]
+   },
+   "description": null,
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "description: 300 bytes, cut at 240",
+   "manifest": {
+    "description": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "description": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "description: the cut would split a character",
+   "manifest": {
+    "description": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaééééé"
+   },
+   "description": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "description: a character ends at byte 240",
+   "manifest": {
+    "description": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaééééé"
+   },
+   "description": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé",
+   "genre": null,
+   "tags": []
+  },
+  {
+   "name": "description: three-byte characters",
+   "manifest": {
+    "description": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"
+   },
+   "description": "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€",
+   "genre": null,
+   "tags": []
+  }
+ ]
+}

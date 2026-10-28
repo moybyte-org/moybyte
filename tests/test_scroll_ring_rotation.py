@@ -73,7 +73,7 @@ def _shift_or_full(cv, region, frame_no):
 
 
 def _run(k):
-    from runtime.ui import ScrollRegion
+    from runtime.ui_draw import ScrollRegion
     from runtime.host_canvas import make_canvas as Canvas
     cv = _RotatingCanvas(k)
     region = ScrollRegion()

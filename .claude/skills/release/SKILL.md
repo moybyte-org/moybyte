@@ -12,7 +12,9 @@ board can run is ever pushed straight to master.
 **The two branches ARE the two OTA channels.** A push to `dev` builds a beta
 (channel `unstable` → the `firmware-beta` release); a push to `master` builds a
 stable (→ `firmware-latest`, which the site's flasher writes and the stable OTA
-offers). Host CI runs on both; the site republishes only off master. Firmware
+offers). Host CI runs on both. The project site is two pages in one deploy
+(`.github/workflows/pages.yml`): master's tree at `/moybyte/`, dev's at
+`/moybyte/dev/`, and a push to either branch rebuilds both. Firmware
 builds are path-filtered, and the workflow's per-ref `cancel-in-progress`
 collapses a burst of dev pushes into one build of the last commit.
 

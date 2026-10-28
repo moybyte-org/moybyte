@@ -826,80 +826,46 @@ def test_the_host_transport_reports_a_missing_file_and_a_cut_body(tmp_path, serv
     _untouched(root, "jet.moy")
 
 
-class _Sock:
-    def __init__(self, data):
-        self.data, self.pos, self.closed, self.sent = data, 0, False, b""
-
-    def settimeout(self, _):
-        pass
-
-    def connect(self, _):
-        pass
-
-    def write(self, b):
-        self.sent += b
-
-    def read(self, n=1):
-        chunk = self.data[self.pos:self.pos + n]
-        self.pos += len(chunk)
-        return chunk
-
-    def readinto(self, buf):
-        chunk = self.read(len(buf))
-        buf[:len(chunk)] = chunk
-        return len(chunk)
-
-    def close(self):
-        self.closed = True
-
-
-class _SockNet:
-    AF_INET, SOCK_STREAM, IPPROTO_TCP = 2, 1, 6
-
-    def __init__(self, *responses):
-        self.responses = list(responses)
-        self.made = []
-
-    def getaddrinfo(self, host, port):
-        return [(2, 1, 6, "", (host, port))]
-
-    def socket(self, *a):
-        s = _Sock(self.responses.pop(0))
-        self.made.append(s)
-        return s
-
-    def wrap_socket(self, sock, server_hostname=None):
-        return sock
-
-
-def test_the_board_transport_rides_the_ota_client(monkeypatch):
-    import moy_ota
+def _board_net(wifi=None, dial=None):
+    """The board's transport (device/wire_links.CartNet) over the kernel's
+    client, the C run by runtime/net_binding.py."""
+    from runtime import net_binding
+    net_binding.install()
     sys.path.insert(0, str(ROOT / "device"))
-    import cart_net
-    body = b"x" * 5000
-    net = _SockNet(b"HTTP/1.1 302 Found\r\nLocation: https://cdn.example/a\r\n\r\n",
-                   b"HTTP/1.1 200 OK\r\nContent-Length: 5000\r\n\r\n" + body)
-    monkeypatch.setitem(sys.modules, "socket", net)
-    monkeypatch.setitem(sys.modules, "ssl", net)
-    resp = cart_net.CartNet(wifi=None).open("https://github.com/o/r/releases/a")
-    assert (resp.status, resp.length) == (200, 5000)
-    got = bytearray()
-    buf = bytearray(1024)
-    while True:
-        n = resp.readinto(memoryview(buf))
-        if not n:
-            break
-        got += buf[:n]
-    assert bytes(got) == body
-    assert b"User-Agent: moybyte-carts" in net.made[1].sent
-    resp.close()
-    assert net.made[0].closed and net.made[1].closed
-    assert moy_ota.http_open is not None
+    import wire_links
+    return wire_links, wire_links.CartNet(wifi, dial)
+
+
+def test_the_board_transport_follows_a_redirect_to_the_release(tmp_path, server):
+    root = _store(tmp_path)
+    repo = Repo(server.base + "/repo")
+    repo.add("jet")
+    server.serve(repo, "/repo")
+    cart = _cart(repo, "jet")
+    real = cart["assets"][0]["url"][len(server.base):]
+    server.routes["/dl/jet.zip"] = ("redirect", real)
+    cart["assets"][0]["url"] = server.base + "/dl/jet.zip"
+    job = _install(cart, root, _board_net()[1])
+    assert job.error is None, job.detail
+
+
+def test_the_board_transport_reports_a_missing_file_and_a_cut_body(tmp_path, server):
+    root = _store(tmp_path)
+    repo = Repo(server.base + "/repo")
+    repo.add("jet")
+    server.serve(repo, "/repo")
+    cart = _cart(repo, "jet")
+    path = cart["assets"][0]["url"][len(server.base):]
+    data = server.routes.pop(path)
+    net = _board_net()[1]
+    assert _install(cart, root, net).error == ci.UNREACHABLE
+    server.routes[path] = ("cut", data, len(data) // 3)
+    assert _install(cart, root, net).error == ci.STOPPED
+    _untouched(root, "jet.moy")
 
 
 def test_the_board_transport_waits_for_a_late_link(monkeypatch):
-    sys.path.insert(0, str(ROOT / "device"))
-    import cart_net
+    wire_links, _net = _board_net()
     import moy_ota
     state = {"up": False, "dials": 0}
 
@@ -916,9 +882,9 @@ def test_the_board_transport_waits_for_a_late_link(monkeypatch):
         state["up"] = True
         return online()
     monkeypatch.setattr(moy_ota, "wait_online", fake_wait)
-    assert cart_net.CartNet(Wifi(), dial).online() is True
+    assert wire_links.CartNet(Wifi(), dial).online() is True
     assert state["dials"] == 1
-    assert cart_net.CartNet(None).online() is False
+    assert wire_links.CartNet(None).online() is False
 
 
 def test_the_board_transport_says_when_its_internal_ram_is_spent(monkeypatch):
@@ -926,8 +892,7 @@ def test_the_board_transport_says_when_its_internal_ram_is_spent(monkeypatch):
     crypto's DMA and the radio's buffers come from -- against TLS_SRAM_MIN;
     a console that cannot report its heap is never called out of memory."""
     import types
-    sys.path.insert(0, str(ROOT / "device"))
-    import cart_net
+    cart_net, _net = _board_net()
     asked = []
     regions = []
 
@@ -961,6 +926,9 @@ class _In:
         self.names = set(names)
         self.last_key = 0
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, name):
         return name in self.names
 
@@ -981,7 +949,8 @@ def _shelves(tmp_path):
 def _app_ws(tmp_path, net, indexes=None):
     from runtime import host_app
     carts = tmp_path / "carts"
-    ws = host_app.build_workstation(str(carts))
+    from ws_helpers import no_unlock_banner
+    ws = no_unlock_banner(host_app.build_workstation(str(carts)))
     if indexes is not None:
         (tmp_path / ci.INDEXES_NAME).write_text(json.dumps({"indexes": indexes}))
     ws.cart_net = net
@@ -992,23 +961,47 @@ def _frames(ws, app, n=40):
     for _ in range(n):
         ws._dirty = True
         ws.frame(1 / 30)
-        if app.phase not in ("checking", "licence_fetch", "connecting", "getting"):
+        # ...and the covers the shelf fetches once it shows.
+        if app.phase not in ("checking", "licence_fetch", "connecting", "getting") \
+                and not app._covers:
             ws._dirty = True
             ws.frame(1 / 30)
             return
     raise AssertionError("the app is still busy: %s" % app.phase)
 
 
+def _box(app, verb, arg=None):
+    """Where the last frame drew the button for verb `arg` ("btn"), or the
+    desk's Check ("check"); None where it drew none (or a disabled one)."""
+    from runtime.getcarts_app import vid
+    return app._ui.box(vid(arg) if verb == "btn" else "Check")
+
+
+def _tap_at(ws, app, x, y):
+    app.handle_pointer(x, y, True)
+    for _ in range(3):
+        ws._dirty = True
+        ws.frame(1 / 30)
+
+
 def _tap(ws, app, verb, arg=None):
-    """Tap the rect the last draw registered for (verb, arg): draw == tap."""
-    for rect, v, a in app.hits._items:
-        if v == verb and a == arg:
-            app.handle_pointer(rect[0] + rect[2] // 2, rect[1] + rect[3] // 2, True)
-            ws._dirty = True
-            ws.frame(1 / 30)
-            return
-    raise AssertionError("nothing drawn for %r %r: %r"
-                         % (verb, arg, [(v, a) for _r, v, a in app.hits._items]))
+    """Tap the button the last draw drew for (verb, arg): draw == tap. The
+    handheld's Check is its R key."""
+    if verb == "check" and _box(app, verb) is None:
+        _key(ws, app, ord("r"))
+        return
+    b = _box(app, verb, arg)
+    assert b is not None, "nothing drawn for %r %r (focus %r)" % (verb, arg, app._focused)
+    _tap_at(ws, app, b[0] + b[2] // 2, b[1] + b[3] // 2)
+
+
+def _key(ws, app, k):
+    i = _In()
+    i.last_key = k
+    app.handle_input(i)
+    ws._dirty = True
+    ws.frame(1 / 30)
+    app.handle_input(_In())
 
 
 def _open(ws, app):
@@ -1020,7 +1013,7 @@ def test_with_no_way_to_fetch_the_app_says_so(tmp_path):
     ws, app = _app_ws(tmp_path, None)
     _open(ws, app)
     assert app.phase == "nonet"
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
 
 
 def test_the_app_lists_every_shelf_and_lets_the_radio_go(tmp_path):
@@ -1030,7 +1023,7 @@ def test_the_app_lists_every_shelf_and_lets_the_radio_go(tmp_path):
     assert app.phase == "list"
     assert [r["cart"]["name"] for r in app.rows] == ["Dungeon", "Jet Pot", "Rock Run"]
     assert [r["state"] for r in app.rows] == ["get", "get", "get"]
-    assert "carts" not in ws._wifi_holders and ws.wifi.radio is False
+    assert "carts" not in ws.leases.holders() and ws.wifi.radio is False
     assert net.opened == [gpl.url("index.json"), mit.url("index.json")]
 
 
@@ -1046,14 +1039,14 @@ def test_get_installs_a_cart_onto_the_shelf(tmp_path):
     held = []
     for _ in range(40):
         if app.phase == "getting":
-            held.append("carts" in ws._wifi_holders)
+            held.append("carts" in ws.leases.holders())
         ws._dirty = True
         ws.frame(1 / 30)
         if app.phase == "done":
             break
     assert app.phase == "done", app.why
     assert held and all(held), "the radio was not held for the download"
-    assert "carts" not in ws._wifi_holders and ws.wifi.radio is False
+    assert "carts" not in ws.leases.holders() and ws.wifi.radio is False
     assert any(str(c.get("path", "")).endswith("/jet.moy") for c in ws.carts.all)
     assert app.cur["state"] == "installed"
     _tap(ws, app, "btn", "PLAY")
@@ -1069,12 +1062,16 @@ def test_a_cart_with_an_external_file_asks_first_and_no_is_no(tmp_path):
     _tap(ws, app, "btn", "GET")
     _frames(ws, app)
     assert app.phase == "licence"
-    assert app.focus == 1, "NO must have the focus on a licence"
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert app._focused == "verb No", "No must have the focus on a licence"
     assert any("fun" in ln for ln in app.lic[1])
-    assert "carts" in ws._wifi_holders            # held through the reading
-    app.handle_input(_In("a"))                    # A on the focused NO
-    assert app.phase == "cart" and app.status == "NOT FETCHED"
-    assert "carts" not in ws._wifi_holders
+    assert "carts" in ws.leases.holders()            # held through the reading
+    app.handle_input(_In("a"))                    # A on the focused No
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert app.phase == "cart" and app.toast[0] == "Not fetched"
+    assert "carts" not in ws.leases.holders()
     assert not [u for u in net.opened if u.endswith(".zip") or u.endswith(".tar.gz")]
     assert not (tmp_path / "carts" / "dm.moy").exists()
 
@@ -1119,20 +1116,29 @@ def _lic_open(ws, app):
     assert app.phase == "licence"
 
 
-def _lic_drag(app, x, y0, dy, steps=8, dt_ms=16.0):
-    """Press at (x, y0) over the licence box, drag by `dy` over `steps`
-    samples `dt_ms` apart (so the release carries a real velocity), release
-    at the end -- `ui.DragTap`'s press/move/release shape, fed the way `_tap`
-    already drives this app's buttons (straight into `handle_pointer`, the
-    pointer's own `.down` set alongside it)."""
-    app._lic_frame_dt_ms = dt_ms
-    ptr = app._surf.pointer()
+def _well(ws, app):
+    """The licence's well as the last frame drew it: (x, y, w, h)."""
+    ws._dirty = True
+    ws.frame(1 / 30)
+    b = app._ui.box("Licence")
+    assert b is not None, "no licence well drawn"
+    return b
+
+
+def _lic_drag(ws, app, x, y0, dy, steps=8):
+    """Press at (x, y0) over the well, drag by `dy` over `steps` samples, a
+    frame each, and release at the end."""
+    ptr = ws.pointer
     ptr.down = True
     app.handle_pointer(x, y0, True)                # press edge
     for i in range(1, steps + 1):
         app.handle_pointer(x, y0 + dy * i // steps, False)
+        ws._dirty = True
+        ws.frame(1 / 30)
     ptr.down = False
     app.handle_pointer(x, y0 + dy, False)           # release
+    ws._dirty = True
+    ws.frame(1 / 30)
 
 
 def test_a_drag_scrolls_the_licence_text(tmp_path):
@@ -1142,10 +1148,9 @@ def test_a_drag_scrolls_the_licence_text(tmp_path):
     _open(ws, app)
     _lic_open(ws, app)
     assert app.lic[2] == 0
-    area = app.layout.lic_area()
-    x, y0 = area[0] + area[2] // 2, area[1] + area[3] // 2
-    _lic_drag(app, x, y0, -3 * app.layout.line_h * 4)   # finger moves UP
-    assert app.lic[2] > 0, "a drag must move the pixel offset, not a page"
+    x, y, w, h = _well(ws, app)
+    _lic_drag(ws, app, x + w // 2, y + h // 2, -h // 2)   # finger moves UP
+    assert app.lic[2] > 0, "a drag must move the text"
     assert app.phase == "licence"                       # still on the screen
 
 
@@ -1155,29 +1160,27 @@ def test_a_tap_on_the_licence_text_does_nothing(tmp_path):
     ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
     _open(ws, app)
     _lic_open(ws, app)
-    area = app.layout.lic_area()
-    x, y = area[0] + area[2] // 2, area[1] + area[3] // 2
-    ptr = app._surf.pointer()
-    ptr.down = True
-    app.handle_pointer(x, y, True)      # press
-    ptr.down = False
-    app.handle_pointer(x, y, False)     # clean release, no movement
+    x, y, w, h = _well(ws, app)
+    _tap_at(ws, app, x + w // 2, y + h // 2)
     assert app.lic[2] == 0
-    assert app.phase == "licence", "a tap on the text must not act like NO"
+    assert app.phase == "licence", "a tap on the text must not act like No"
+    assert app._focused == "Licence", "a tap on the text holds the keys there"
 
 
-def test_keys_still_scroll_the_licence(tmp_path):
+def test_keys_scroll_the_licence_while_it_has_focus(tmp_path):
     gpl, mit, net = _shelves(tmp_path)
     _long_licence(gpl, net, "dm", "game.wad")
     ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
     _open(ws, app)
     _lic_open(ws, app)
+    app._ui.focus("Licence")
+    _well(ws, app)
     app.handle_input(_In("down"))
-    assert app.lic[2] == app.layout.line_h
+    assert app.lic[2] == 1
     app.handle_input(_In("down"))
-    assert app.lic[2] == 2 * app.layout.line_h
+    assert app.lic[2] == 2
     app.handle_input(_In("up"))
-    assert app.lic[2] == app.layout.line_h
+    assert app.lic[2] == 1
 
 
 def test_the_licence_scroll_clamps_at_both_ends(tmp_path):
@@ -1186,12 +1189,10 @@ def test_the_licence_scroll_clamps_at_both_ends(tmp_path):
     ws, app = _app_ws(tmp_path, net, [gpl.url("index.json"), mit.url("index.json")])
     _open(ws, app)
     _lic_open(ws, app)
-    area = app.layout.lic_area()
-    x, y0 = area[0] + area[2] // 2, area[1] + area[3] // 2
-    _lic_drag(app, x, y0, -100000)                  # way past the last line
-    max_off = len(app.lic[1]) * app.layout.line_h - area[3]
-    assert app.lic[2] == max_off
-    _lic_drag(app, x, y0, 100000)                   # way past the top
+    x, y, w, h = _well(ws, app)
+    _lic_drag(ws, app, x + w // 2, y + h // 2, -100000)    # way past the last line
+    assert app.lic[2] == len(app.lic[1]) - app._well_rows()
+    _lic_drag(ws, app, x + w // 2, y + h // 2, 100000)     # way past the top
     assert app.lic[2] == 0
 
 
@@ -1204,7 +1205,7 @@ def test_a_cart_that_will_not_fit_offers_no_get(tmp_path):
     ws._dirty = True
     ws.frame(1 / 30)
     assert "Not enough room" in app.blocker(app.cur)
-    assert ("btn", "GET") not in [(v, a) for _r, v, a in app.hits._items]
+    assert _box(app, "btn", "GET") is None
     app.handle_input(_In("a"))
     assert app.phase == "cart" and app.job is None
 
@@ -1223,15 +1224,15 @@ def test_closing_mid_download_cancels_it_and_lets_the_radio_go(tmp_path):
     ws.frame(1 / 30)                              # CONNECTING shows
     ws._dirty = True
     ws.frame(1 / 30)                              # the job starts
-    assert app.phase == "getting" and "carts" in ws._wifi_holders
+    assert app.phase == "getting" and "carts" in ws.leases.holders()
     app.job.step_ms = 0
     app.close()
     assert app.job.finished and app.job.path is None
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
     assert not (tmp_path / "carts" / "jet.moy").exists()
 
 
-def test_remove_needs_two_taps(tmp_path):
+def test_remove_asks_first(tmp_path):
     gpl, mit, net = _shelves(tmp_path)
     ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
     _open(ws, app)
@@ -1239,13 +1240,20 @@ def test_remove_needs_two_taps(tmp_path):
     ws.frame(1 / 30)
     app._press("GET")
     _frames(ws, app)
-    app._press("OK")
+    app.back()
     app._tap_row(0)
     ws._dirty = True
     ws.frame(1 / 30)
     _tap(ws, app, "btn", "REMOVE")
-    assert app.arm_remove and (tmp_path / "carts" / "jet.moy").exists()
+    assert app.asking and (tmp_path / "carts" / "jet.moy").exists()
+    assert app._focused == "Cancel", "the dialog opens on its safe button"
+    app.handle_input(_In("b"))                    # Esc: the dialog closes
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert not app.asking and app.phase == "cart"
     _tap(ws, app, "btn", "REMOVE")
+    b = app._ui.box("Remove")                     # the dialog's
+    _tap_at(ws, app, b[0] + b[2] // 2, b[1] + b[3] // 2)
     assert app.phase == "list" and not (tmp_path / "carts" / "jet.moy").exists()
     assert app.rows[0]["state"] == "get"
     assert not any(str(c.get("path", "")).endswith("/jet.moy") for c in ws.carts.all)
@@ -1275,7 +1283,7 @@ def test_a_cart_too_big_to_run_is_refused_before_its_download(tmp_path):
     ws._dirty = True
     ws.frame(1 / 30)
     assert app.blocker(app.cur) == row["fit"]
-    assert ("btn", "GET") not in [(v, a) for _r, v, a in app.hits._items]
+    assert _box(app, "btn", "GET") is None
     app.handle_input(_In("a"))
     assert app.phase == "cart" and app.job is None
     assert not [u for u in net.opened if u.endswith(".zip")]
@@ -1329,27 +1337,39 @@ def test_the_archive_goes_to_a_file_where_memory_is_short(tmp_path):
     assert os.listdir(tmp_path / ci.STAGE_DIR) == []
 
 
+def _press_key(ws, app, name):
+    app.handle_input(_In(name))
+    for _ in range(2):
+        ws._dirty = True
+        ws.frame(1 / 30)
+
+
 def test_buttons_walk_the_screens_without_a_finger(tmp_path):
     gpl, mit, net = _shelves(tmp_path)
     ws, app = _app_ws(tmp_path, net, [mit.url("index.json")])
     _open(ws, app)
-    app.handle_input(_In("down"))
-    assert app.sel == 1
-    app.handle_input(_In("a"))
+    assert app._focused == app._card_id(app.rows[0])     # the shelf opens on its first card
+    _press_key(ws, app, "right")
+    assert app._focused == app._card_id(app.rows[1])
+    _press_key(ws, app, "a")
     assert app.phase == "cart" and app.cur["cart"]["name"] == "Rock Run"
     app.handle_input(_In("b"))
-    assert app.phase == "list"
-    app.handle_input(_In("up"))
-    app.handle_input(_In("a"))                    # Jet Pot
-    app.handle_input(_In("a"))                    # GET (focus 0)
     ws._dirty = True
     ws.frame(1 / 30)
-    app.handle_input(_In("a"))                    # A never cancels a download
+    assert app.phase == "list"
+    assert app._focused == app._card_id(app.rows[1]), "back lands on the card it left"
+    _press_key(ws, app, "left")
+    _press_key(ws, app, "a")                      # Jet Pot
+    assert app._focused == "verb Get", "the page opens on the verb that goes on"
+    _press_key(ws, app, "a")                      # Get
     assert app.phase in ("connecting", "getting")
     _frames(ws, app)
     assert app.phase == "done"
-    app.handle_input(_In("right"))
-    app.handle_input(_In("a"))                    # OK
+    ws._dirty = True
+    ws.frame(1 / 30)
+    assert app.toast[0] == "Jet Pot is on your shelf"
+    assert app._focused == "verb Play", "a cart on the shelf opens on Play"
+    app.handle_input(_In("b"))
     assert app.phase == "list"
 
 
@@ -1360,10 +1380,10 @@ def test_b_stops_a_check_and_lets_the_radio_go(tmp_path):
     for _ in range(3):
         ws._dirty = True
         ws.frame(1 / 30)
-    assert app.phase == "checking" and "carts" in ws._wifi_holders
+    assert app.phase == "checking" and "carts" in ws.leases.holders()
     app.handle_input(_In("b"))
-    assert app.phase == "list" and app.status == "STOPPED"
-    assert "carts" not in ws._wifi_holders
+    assert app.phase == "list" and app.toast[0] == "Stopped"
+    assert "carts" not in ws.leases.holders()
 
 
 def test_an_unreachable_shelf_offers_to_try_again(tmp_path):
@@ -1371,12 +1391,12 @@ def test_an_unreachable_shelf_offers_to_try_again(tmp_path):
     ws, app = _app_ws(tmp_path, net, ["https://nowhere.example/index.json"])
     _open(ws, app)
     assert app.phase == "unreached"
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
     net.up = False
     _tap(ws, app, "btn", "TRY AGAIN")
     _frames(ws, app)
     assert app.phase == "nowifi"
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
 
 
 def test_a_shelf_out_of_reach_for_memory_says_to_restart(tmp_path):
@@ -1387,10 +1407,10 @@ def test_a_shelf_out_of_reach_for_memory_says_to_restart(tmp_path):
     ws, app = _app_ws(tmp_path, net, [gpl.url("index.json")])
     _open(ws, app)
     assert app.phase == "nomemory"
-    title, lines = app._message()
-    assert title == "MEMORY FULL" and lines == [ci.NET_MEMORY]
+    icon, title, lines = app._empty_words()
+    assert title == "Memory full" and " ".join(lines) == ci.NET_MEMORY
     assert "Restart the console" in ci.NET_MEMORY
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
     net.starved = False
     _tap(ws, app, "btn", "TRY AGAIN")
     _frames(ws, app)
@@ -1419,7 +1439,7 @@ def test_a_radio_that_cannot_come_up_for_memory_says_to_restart(tmp_path, starve
     ws, app = _app_ws(tmp_path, _NoRadio(starved), ["https://x.example/i.json"])
     _open(ws, app)
     assert app.phase == phase
-    assert "carts" not in ws._wifi_holders
+    assert "carts" not in ws.leases.holders()
 
 
 def test_an_install_out_of_memory_says_to_restart(tmp_path):
@@ -1434,9 +1454,10 @@ def test_an_install_out_of_memory_says_to_restart(tmp_path):
     app._press("GET")
     _frames(ws, app, n=400)
     assert app.phase == "failed"
-    title, lines = app._message()
-    assert title == "NOT INSTALLED" and lines[0] == ci.NET_MEMORY
-    assert "carts" not in ws._wifi_holders
+    icon, title, lines = app._empty_words()
+    assert title == "Not installed" and " ".join(lines[:-1]) == ci.NET_MEMORY
+    assert lines[-1] == "Nothing changed."
+    assert "carts" not in ws.leases.holders()
 
 
 def test_the_app_draws_at_every_shell_size(tmp_path):
@@ -1459,7 +1480,11 @@ def test_the_app_draws_at_every_shell_size(tmp_path):
         _tap(ws, app, "btn", "GET")
         _frames(ws, app)
         assert app.phase == "licence"
-        for rect, _v, _a in app.hits._items:
+        ws._dirty = True
+        ws.frame(1 / 30)
+        for name in ("Licence", "verb No", "verb I agree"):
+            rect = app._ui.box(name)
+            assert rect is not None, name
             assert rect[0] >= 0 and rect[1] >= 0
             assert rect[0] + rect[2] <= ws.sys_canvas.w
             assert rect[1] + rect[3] <= ws.sys_canvas.h
@@ -1497,40 +1522,40 @@ def _canvas_rows(cv, rect):
     return out
 
 
-def test_the_rows_show_the_covers_the_indexes_name(tmp_path):
+# style.json's value_row card_pad and card_top on the handheld at fs 1
+_CARD_PAD, _CARD_TOP = 5, 4
+
+
+def test_the_cards_show_the_covers_the_indexes_name(tmp_path):
     """CHECKING fetches each cover an index names while it holds the radio,
-    checks it, and keeps it decoded at the row's size -- the reduction
-    nearest the row's height, in the canvas's own byte order -- and the
-    row draws it at its left, centred and cropped to the row."""
+    checks it, and keeps it decoded at the card's side in the canvas's own
+    byte order, and the card draws it whole as its picture."""
     from runtime import cover_png
     repo, jet, net = _covered_shelf()
     ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
     _open(ws, app)
     assert app.phase == "list"
     assert repo.url("carts/jet/cover.png") in net.opened
-    assert "carts" not in ws._wifi_holders and ws.wifi.radio is False
+    assert "carts" not in ws.leases.holders() and ws.wifi.radio is False
     cv = ws.sys_canvas
-    side = app.layout.thumb
-    rh = app.layout.row_h - 2 * app.layout.fs
-    assert side in (16, 32, 64, 128) and abs(side - rh) <= min(
-        abs(s - rh) for s in (16, 32, 64, 128))
+    side = app.layout.side
+    assert side == 64
     fmt = cover_png.RGB565_SW if cv.swapped565 else cover_png.RGB565
     want = cover_png.decode(jet, 128 // side, fmt)
     assert app.thumbs[sha(jet)] == (side, want)
-    r = [row["cart"]["name"] for row in app.rows].index("Jet Pot") - app.top
-    x, y, w, h = app.layout.row_rect(r)
-    shown = min(side, h)
-    top = (side - shown) // 2
-    got = _canvas_rows(cv, (x, y + (h - shown) // 2, side, shown))
-    assert got == [want[2 * side * (top + i):2 * side * (top + i + 1)]
-                   for i in range(shown)]
+    row = [r for r in app.rows if r["cart"]["name"] == "Jet Pot"][0]
+    assert app._focused != app._card_id(row)      # not lifted: drawn at its side
+    x, y, _w, _h = app._ui.box(app._card_id(row))
+    mid = side // 2                               # a row clear of the cut corners
+    got = _canvas_rows(cv, (x + _CARD_PAD + 8, y + _CARD_TOP + mid, side - 16, 1))
+    assert got == [want[2 * (side * mid + 8):2 * (side * mid + side - 8)]]
 
 
 @pytest.mark.parametrize("fault", ["wrong bytes", "missing", "not a cover"])
-def test_a_cover_that_does_not_come_leaves_the_row_as_it_is(tmp_path, fault):
+def test_a_cover_that_does_not_come_leaves_the_card_as_it_is(tmp_path, fault):
     """A cover whose file is missing, comes back other than its index says,
-    or is not a cover (SPEC.md 3.6) draws the row exactly as a cart whose
-    index names no cover (the same release, so the same size on the row)."""
+    or is not a cover (SPEC.md 3.6) draws the card exactly as a cart whose
+    index names no cover: its genre's icon on a tinted tile."""
     good = (_VECTORS / "rgb_filter2.png").read_bytes()
     big = (_VECTORS / "size_512x512.png").read_bytes()
     rock = {"wrong bytes": (good, good[:-1] + b"\0"), "missing": (good, None),
@@ -1543,11 +1568,31 @@ def test_a_cover_that_does_not_come_leaves_the_row_as_it_is(tmp_path, fault):
         ws, app = _app_ws(d, net, [repo.url("index.json")])
         _open(ws, app)
         assert app.phase == "list"
-        assert "carts" not in ws._wifi_holders
+        assert "carts" not in ws.leases.holders()
         i = [row["cart"]["name"] for row in app.rows].index("Rock Run")
         assert ("cover" in app.rows[i]["cart"]) == (cover is not None)
-        views.append(_canvas_rows(ws.sys_canvas, app.layout.row_rect(i - app.top)))
+        views.append(_canvas_rows(ws.sys_canvas, app._ui.box(app._card_id(app.rows[i]))))
     assert views[0] == views[1]
+
+
+def test_the_shelf_shows_before_its_covers_come(tmp_path):
+    """The shelf is up the frame its index is read; the covers follow, one a
+    frame, under the radio's lease, which goes once the last has landed."""
+    rock = (_VECTORS / "rgb_filter2.png").read_bytes()
+    repo, _jet, net = _covered_shelf((rock, rock))
+    ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
+    ws.open_app(app)
+    for _ in range(40):
+        ws._dirty = True
+        ws.frame(1 / 30)
+        if app.phase != "checking":
+            break
+    assert app.phase == "list"
+    assert len(app._covers) == 2 and "carts" in ws.leases.holders()
+    assert not any(app.thumbs.values())
+    _frames(ws, app)
+    assert not app._covers and "carts" not in ws.leases.holders()
+    assert sum(1 for v in app.thumbs.values() if v) == 2
 
 
 def test_a_second_check_fetches_only_the_covers_it_has_not_drawn(tmp_path):
@@ -1657,3 +1702,50 @@ def test_the_installer_runs_under_micropython(tmp_path, archive):
     assert (Path(root) / "dm.moy" / "game.wad").read_bytes() == wad
     assert (Path(root) / "wm.moy" / "level.wad").read_bytes() == wad
     assert os.listdir(Path(root).parent / ci.STAGE_DIR) == []
+
+
+def _theme_shelf():
+    """A repository carrying the fixture theme package, `dusk.moy`."""
+    folder = ROOT / "tests" / "fixtures" / "themes" / "dusk.moy"
+    files = dict((p.name, p.read_bytes()) for p in sorted(folder.iterdir()))
+    repo = Repo("https://themes.example/carts", "Test themes")
+    repo.add("dusk", name="Dusk", runtime="theme", files=files)
+    return repo, MemNet(repo.routes())
+
+
+def test_a_theme_package_installs_as_a_cart_and_its_verb_is_use(tmp_path):
+    """docs/theming_2026-09.md §9 phase 6 step 2: GET, then USE and REMOVE;
+    removing the active theme falls back to the default seed."""
+    import moy_ui
+    from runtime import chrome
+    repo, net = _theme_shelf()
+    ws, app = _app_ws(tmp_path, net, [repo.url("index.json")])
+    try:
+        _open(ws, app)
+        assert [r["runs"] for r in app.rows] == [True]
+        app._tap_row(0)
+        ws.frame(1 / 30)
+        assert app._current_verbs() == ("GET",)
+        app._press("GET")
+        _frames(ws, app)
+        assert app.phase == "done" and app._current_verbs() == ("REMOVE", "USE")
+        assert "dusk" in ws.look.theme_names()
+        assert not [c for c in ws._launcher_items(ws.carts.all, "games")
+                    if c.get("type") == "theme"]
+        app.back()
+        app._tap_row(0)
+        ws._dirty = True
+        ws.frame(1 / 30)
+        assert app._current_verbs() == ("REMOVE", "USE")
+        _tap(ws, app, "btn", "USE")
+        assert ws.look.theme_name == "dusk" and moy_ui.theme_installed() == "dusk"
+        _tap(ws, app, "btn", "REMOVE")
+        b = app._ui.box("Remove")                 # the dialog's
+        _tap_at(ws, app, b[0] + b[2] // 2, b[1] + b[3] // 2)
+        assert not (tmp_path / "carts" / "dusk.moy").exists()
+        assert ws.look.theme_name == chrome.DEFAULT_THEME
+        assert ws.system.get("theme") == chrome.DEFAULT_THEME
+        assert "dusk" not in ws.look.theme_names()
+    finally:
+        moy_ui.theme_uninstall()
+        chrome.adopt_packages((), None)

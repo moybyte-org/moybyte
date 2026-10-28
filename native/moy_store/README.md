@@ -1,0 +1,42 @@
+# moy_store — the store, native
+
+The store in C (`docs/kernel_store_2026-10.md`; #224), linked by every image:
+the boards, the browser and the desktop MicroPython. `runtime/moy_fs.py`,
+`runtime/moy_carts.py` and `runtime/moy_store_base.py` delegate to it wherever
+the module imports; CPython (the simulator, the tools, the tests) keeps the
+Python twins, the reference the C is held to.
+
+| file | what it is |
+|---|---|
+| `moy_vol.h`, `moy_vol.c` | the volume seam: oofatfs, littlefs2 and POSIX behind one interface, and a working folder (`moy_vol_enter`: FAT's own, restored whole on leave; a prefix elsewhere); a store call borrows the VM's own instance |
+| `moy_fs.h`, `moy_fs.c` | the crash-safe write (marker, stamped backup, file in place), its recovering reader, the claim, the plain file verbs, and the wire's skip rule (`moy_sync._skip` calls it) |
+| `moy_load.h` | loading a cart whole (`moy_cat_load`, in `moy_cat.c`, the same reader as the entry): its scripts, config, flags, sheet, sounds, map, blocks, images and scenes into one PSRAM arena, freed once the binding has built `load`'s dict |
+| `moy_journal.h`, `moy_journal.c` | the journal: `journal.jsonl` appended one json.dumps line a commit, the snapshot first (a claimed publish backup where the stamp matches), the cursor map last; undo and redo by file scope; compaction to 64 entries and 512 KiB; #136's list, snapshot and restore; the graduation rider's manifest write |
+| `moy_pack.h`, `moy_pack.c` | a cart as it travels: the `.moy` archive (the browser's `zipStore`/`unzip` codec; stored entries written, stored and deflated read), and adopt, a staged cart moved into place by one rename (Get Carts installs through it) |
+| `moy_files.h`, `moy_files.c` | a compiled cart's written files (SPEC.md 16.12), `runtime/cart_files.py` in C rule for rule over `moy_vol`: the key a path is kept under and back, the cart's folder beside the store, the write whole or not at all (`~part`, `~done`), the recovery at open, erase and the listing; the held file a read streams through; `tests/test_moy_files.py` holds it to the Python. A compiled cart's run calls it (moycore's files, `native/moycore/README.md`) |
+| `moy_ufiles.h`, `moy_ufiles.c` | the #108 user-files layer (`files/<kind>/` beside the carts folder, a project's folder as a kind, the vault's whole-name rule, naming, the restorable trash, the #111 op-history sidecars, provenance) and its codecs (a picture's moyimg-v1 written through its own hash-chain deflate at a 4 KiB window, `moy_uf_deflate`, which a board's Python codecs reach as `moy_ufiles.deflate`, a cover written indexed and read through `native/moy_png`, and a picture read from its file a row at a time and cover-sampled into a screen-sized buffer, `moy_uf_cover_image` over `moy_img.h`'s streamed reader, which `tests/test_picture_stream.py` holds to `runtime/moyimg.py`'s `cover_stream`), with the wallpaper's backing copy; the reference was `runtime/moy_files.py` and `runtime/moy_file_ops.py`, and `tests/test_userfiles_parity.py` holds both bindings to the bytes they wrote. Built with `native/moy_app` (its module `moy_ufiles` is `modmoy_ufiles.c`), whose files rows reach it through its verb table, so the Zero, which denies moy_app, carries none of it |
+| `moy_card.c` | the card volume, owned: the store's FATFS (a VfsFat object in PSRAM) over a NATIVE block device with the read cache (`moy_cache.c`), mounted for Python at `/sd` (`moy_store.card`), its sectors from `moy_sd_card_io` on a board (SPI on the S3s, SDMMC on the P4s) or a Python driver on the host; `card_stats` is the tests' check and fault switch |
+| `moy_cache.h`, `moy_cache.c` | the card's 32-sector read cache with no VM on either side: one-sector reads from the last 32 (clock eviction), every write dropping what it covers before it is issued; under `moy_card.c` on every board and under `fuzz_fs.c`'s RAM card at every cut |
+| `moy_arena.h` | a store call's scratch, freed at once |
+| `moy_seed.h`, `moy_seed.c` | the seed: a packed roster blob inflated (the image's uzlib) into PSRAM and written as `moybyte.<slug>.moy`; a re-seed keeps the kid's saves and config in place and publishes the manifest last, so a cut seed reads as the older version, or as none |
+| `moy_cat.h`, `moy_cat.c` | the catalogue: the shelf's scan of a root (one listing, then per cart folder one enter, one listing and the files it shows), one cart's entry, and the whole-folder verbs (remove, copy) |
+| `modmoy_store.c` | the MicroPython binding, module `moy_store`: the mount-table resolve (the kernel's own `lfs2_t` under a `KVfs`, VfsFat's `FATFS`, VfsLfs2's `lfs2_t` behind a layout check, VfsPosix at `/`), every call under `nlr_push`, scratch and the marker cache in PSRAM on a board |
+| `moy_kvfs.c` | the internal flash volume, the kernel's: its `lfs2_t` over the "vfs" partition (a RAM medium on the unix port, for the host's tests) and `KVfs`, the VFS type each VM's start mounts at `/` |
+| `moy_store_host.c` | the host's imports over malloc and POSIX, for the ctypes binding |
+| `fuzz_fs.c` | the power-cut matrix (`--matrix`) and the seeded fuzz over oofatfs on a RAM card behind the read cache (every hit compared with the card) and littlefs2 on a RAM flash, under ASan and UBSan |
+| `host/py/mpconfig.h` | the FAT settings oofatfs reads, for the host builds |
+| `micropython.cmake`, `micropython.mk` | the boards', and the desktop's and browser's, builds |
+
+Two rules the matrix found and the store keeps: an EMPTY unstamped backup is
+refused (FAT lands a new file's entry before its bytes), and on littlefs a
+claim across folders declines, so the journal writes its own copy (littlefs
+2.11 cut between the two commits of a cross-folder rename drops the source
+folder's other entries).
+
+The nets: `tests/test_moy_store.py` (the matrix and the fuzz, the user-files layer's writes among the cut ones, the C over POSIX
+against the twin through ctypes, the desktop MicroPython against CPython),
+`tests/test_store_native.py` (the shelf and moy_json on the desktop MicroPython
+against CPython over every cart and generated ones) and
+`tests/test_store_on_vfs.py` (the store on FAT and littlefs volumes under the
+desktop MicroPython, every write the C store's). The harness is
+`tools/moy_index_spike.py --component fs sanitize`.

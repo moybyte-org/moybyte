@@ -41,10 +41,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from runtime import host_app            # noqa: E402
 from runtime import host_canvas         # noqa: E402  (the 565 -> index readout)
-from runtime import bar_layer as BAR    # noqa: E402  (the bar's lent-zone rect)
 from runtime import editor_app as EDA   # noqa: E402  (the Editor's tab ladder)
 from runtime import palette             # noqa: E402  (MOY64 -> the exact GIF palette)
-from runtime import ui as UI            # noqa: E402  (labeled tab-row geometry)
+from runtime import ui_draw as UI       # noqa: E402  (labeled tab-row geometry)
 from runtime import widgets as WID      # noqa: E402  (the achievement catalog)
 
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
@@ -54,7 +53,7 @@ BACKSPACE = 0x08
 # The WINDOWED desktop tier (--windowed): where the Editor window is parked so the
 # desk's icon column, the wallpaper and the taskbar all stay in frame -- the whole
 # point of recording this tier is the desktop AROUND the app, so the default
-# near-fullscreen "Make" window is nudged in. And where the playtest window lands
+# near-fullscreen Editor window is nudged in. And where the playtest window lands
 # on PLAY, so the Editor stays readable beside it (spec Section 3's canonical
 # picture) instead of the cascade burying it.
 # The size is chosen, not arbitrary: below ~660px of window width the Editor's
@@ -97,7 +96,7 @@ class Recorder:
         # fresh store unlocks "First Steps" on the very first open and the toast
         # would then sit across the top of every recording's opening seconds.
         for entry in WID.ACHIEVEMENTS:
-            self.ws.ach.unlocked[entry[0]] = True
+            self.ws.ach.unlocked[entry[0]] = 0
         self.ws.pointer.idle_ms = 10 ** 9        # never auto-hide the cursor
         self.ws.pointer.visible = True
         self.ws.show_fps = False                 # no dev chip over the payoff shot
@@ -190,27 +189,25 @@ class Recorder:
             base.update(cfg)
             with open(os.path.join(dst, "config.json"), "w", encoding="utf-8") as f:
                 json.dump(base, f)
-        items = host_app.moy_carts.scan(self.ws.carts_root)
+        cat = host_app.moy_catalogue
+        items = [c for c in (cat.load(e["h"])
+                             for e in cat.catalogue(self.ws.carts_root)) if c]
         self.ws.carts.apply(items)
         cart = next(c for c in self.ws.carts.all
                     if os.path.basename(c["path"]) == name)
-        for i, it in enumerate(self.ws.launcher.items):
-            if it.get("path") == cart.get("path"):
-                self.ws.launcher.sel = i
-                break
+        self.ws.select_cart(cart)
         return cart
 
     def open_editor(self, cart):
-        """The Make tile -> project-picker -> pick destination, without the two
-        grid screens: land the Editor on the cart's Config tab (spec Section 6).
-        On the windowed tier this also parks the "Make" window off the desk's
+        """The Make tab -> pick destination, without the home: land the Editor on the cart's Config tab (spec Section 6).
+        On the windowed tier this also parks the Editor's window off the desk's
         icon column so the desktop stays in frame."""
         self.ws.open_in_editor(cart)
         if not self.windowed:
             return
         wm = self.ws.wm
         wm._sync_windows()
-        win = wm._wins["make"]
+        win = wm._wins["menu"]
         x, y, w, h = _EDITOR_WIN
         win.x, win.y = x, y
         wm._resize_window(win, w, h)     # rebuilds the buffer + layout context
@@ -226,7 +223,7 @@ class Recorder:
     # place that seam lives -- every helper goes through it, so the scenes below
     # are written once and run on both tiers.
 
-    def local(self, fn, key="make"):
+    def local(self, fn, key="menu"):
         """Resolve `fn()` -> (x, y) (or a rect) in the active window's layout
         context and translate it to desktop coordinates. A pass-through on the
         fullscreen tier."""
@@ -247,23 +244,19 @@ class Recorder:
 
     def _zone_rect_local(self, tab):
         """The Editor's lent top-bar zone resolves two ways: the frozen 320x240
-        icon LADDER (PROJECTS / the seven tabs / UNDO / REDO / PLAY), or -- on any
+        icon LADDER (the seven tabs / UNDO / REDO / PLAY), or -- on any
         roomier surface, which is every window on the desktop tier -- the labeled
         CHIP row (`ui.tab_row`). Ask the same geometry the tap dispatch uses."""
         ws = self.ws
         rect = ws.bar_layer._zone_rect("menu")
         if getattr(ws.layout, "_base", True):
-            x0, y0, _w, h = rect
-            ic = h if h > 0 else BAR._BAR_ICON
-            for i, (name, _glyph) in enumerate(EDA._ZONE_TABS):
+            for name, _glyph, r in ws.editor_app._ladder_rects(rect):
                 if name == tab:
-                    return (x0 + i * ic, y0, ic, ic)
+                    return r
             raise KeyError(tab)
-        proj, tabs_area, play_r = ws.editor_app._zone_parts(rect)
+        tabs_area, play_r = ws.editor_app._zone_parts(rect)
         if tab is None:
             return play_r
-        if tab == EDA._ZONE_PROJECTS:
-            return proj
         fs = max(1, rect[3] // 16)
         slim = [(tid, label) for tid, label, _ic in EDA._TAB_CHIPS]
         for tid, r, _labels_on in UI.tab_row_rects(tabs_area, slim, fs):
@@ -359,19 +352,6 @@ class Recorder:
                     lay.y0 + (row - ed.top + 0.5) * lay.lh)
         return self.local(_r)
 
-    def code_rows(self):
-        """How many code lines the editor shows (differs per tier/window size)."""
-        return self.local(lambda: (self.ws.code_layout.rows, 0))[0] \
-            if not self.windowed else self._win_code_rows()
-
-    def _win_code_rows(self):
-        wm = self.ws.wm
-        wm._install(wm._wins["make"].ctx)
-        try:
-            return self.ws.code_layout.rows
-        finally:
-            wm._install(wm._root_ctx)
-
     # -- PLAY (windowed): park the playtest window beside the Editor ----------
     def park_player(self):
         """On the desktop tier a PLAY spawns a player WINDOW on the cascade, which
@@ -395,7 +375,7 @@ def scene_paint(r):
     corners up turns it into a smile, and the pet is drawn from that same tile at
     4x, so PLAY shows it immediately.
     """
-    cart = r.reset_cart("pet.moy", cfg={"autoplay": 1})
+    cart = r.reset_cart("moybyte.pixel_pet.moy", cfg={"autoplay": 1})
     r.desk(16)                               # (windowed tier only) the desktop
     r.open_editor(cart)                      # lands on Config ("Make it mine")
     r.settle(14)
@@ -412,7 +392,7 @@ def scene_paint(r):
 
 def scene_code(r):
     """The code editor is a tab in the same console: retype a constant, PLAY."""
-    cart = r.reset_cart("star_catcher.moy", cfg={"autoplay": 1})
+    cart = r.reset_cart("moybyte.star_catcher.moy", cfg={"autoplay": 1})
     r.desk(16)
     r.open_editor(cart)
     r.settle(12)
@@ -437,7 +417,7 @@ def scene_blocks(r):
     # is a touch-only cart with no scene, so on the desktop tier that half of the
     # window would sit empty; Coin Quest is the same kind of block program WITH a
     # stage (a player + coins), which is what that view was built to show.
-    cart = r.reset_cart("coin_quest.moy" if r.windowed else "tap_game.moy")
+    cart = r.reset_cart("moybyte.coin_quest.moy" if r.windowed else "moybyte.tap_game.moy")
     r.desk(16)
     r.open_editor(cart)
     r.ws.editor_app.open_blocks()             # open ON the Blocks tab (a block cart
@@ -459,7 +439,7 @@ def scene_blocks(r):
 
 def scene_tap(r):
     """The "Make it mine" cards: pick another pet on the Config tab, then PLAY."""
-    cart = r.reset_cart("pet.moy", cfg={"autoplay": 1})
+    cart = r.reset_cart("moybyte.pixel_pet.moy", cfg={"autoplay": 1})
     r.desk(16)
     r.open_editor(cart)
     r.settle(20)
@@ -532,8 +512,8 @@ def main():
     ap.add_argument("--font-scale", type=int, default=1, dest="font_scale")
     ap.add_argument("--wallpaper", default=None, metavar="SLUG",
                     help="desktop backdrop: a wallpaper cart's slug (its folder name "
-                         "without .moy, e.g. open_machine / moy_night) or a "
-                         "\"fill:<color>\" built-in; default = the store's first")
+                         "without .moy, e.g. open_machine / moy_night); default = "
+                         "the store's first")
     args = ap.parse_args()
     size = None
     if args.size:

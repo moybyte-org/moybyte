@@ -1,3 +1,10 @@
+# Map (grep -n a name to jump there):
+#   _MusicOps                     the op codec: a before/after snapshot pair per edit
+#   MusicEditor                   the tracker core over a cart's AudioBank: views and cursor
+#   MusicEditor.set_name          a sound's optional name (SPEC.md 8.1), an undo step
+#   MusicEditor.copy              copy and paste a step or a slot
+#   MusicEditor.duplicate_sfx     a whole sound or track appended as a copy
+#   MusicEditor._snapshot         what one undo step records
 """MusicEditor (#50/#92) -- the tracker-style step editor over a cart's
 AudioBank. Split out of editors.py (which re-exports it); undo/redo rides the
 shared #111 op-history core (runtime/op_history.py)."""
@@ -51,7 +58,7 @@ class _MusicOps(OpCodec):
     """OpCodec for MusicEditor (#111 phase 4): each op is `[old_snap, new_snap]`
     -- a full before/after pair of the ACTIVE object's editable fields, exactly
     the tuple MusicEditor._snapshot() already produces (kind, bank idx, steps/
-    pattern, speed, loop, cursor). A mutation touches at most one bank object,
+    pattern, speed, loop, cursor, then an SFX's name or a track's row_secs). A mutation touches at most one bank object,
     so a whole-object snapshot pair stays small (a handful of ints + one short
     list) and is trivially invertible: apply() replays doc._restore(new),
     invert() replays doc._restore(old). Both halves are captured AT RECORD
@@ -73,7 +80,7 @@ class MusicEditor(OpHistoryMixin):
     """Tracker/step-editor state over a cart's AudioBank (#50) -- the sound analogue
     of MapEditor/PaintEditor. Pure logic: no canvas, no synth, no I/O, so the *same*
     file backs the host console and the frozen device console. The console wraps it
-    with rendering + input + live preview (it drives the injected AudioEngine; this
+    with rendering + input + live preview (it plays on the cart's audio session; this
     core never makes sound itself).
 
     It edits the bank IN PLACE through two views the kid flips between:
@@ -390,6 +397,20 @@ class MusicEditor(OpHistoryMixin):
         obj.speed = _me_clamp(obj.speed + d, _ME_SPEED_MIN, _ME_SPEED_MAX)
         self._commit_op()
 
+    def set_name(self, name):
+        """Name the current SFX (SPEC.md 8.1's optional label, cut to
+        `audio.SFX_NAME_MAX`); an empty or blank name takes it off."""
+        s = self.cur_sfx()
+        if s is None:
+            return
+        name = str(name).strip()[:24] if name is not None else ""
+        name = name or None
+        if getattr(s, "name", None) == name:
+            return
+        self._push_undo()
+        s.name = name
+        self._commit_op()
+
     def toggle_loop(self):
         """Flip the loop flag of the active object (SFX in sfx view, track in song)."""
         obj = self.cur_sfx() if self.view == self.SFX_VIEW else self.cur_track()
@@ -543,6 +564,7 @@ class MusicEditor(OpHistoryMixin):
         dup.speed = s.speed
         dup.loop = s.loop
         dup.loop_start = getattr(s, "loop_start", 0)
+        dup.name = getattr(s, "name", None)
         self.bank.sfx.append(dup)
         self.sfx_idx = len(self.bank.sfx) - 1
         self.step = 0
@@ -572,7 +594,7 @@ class MusicEditor(OpHistoryMixin):
 
     # -- bounded in-editor undo/redo (#92, on the #111 op-history core) --------
     # Scoped to the ACTIVE object's own editable fields (steps/pattern + speed +
-    # loop) -- a snapshot pair per content edit, depth _ME_UNDO_MAX. Navigation
+    # loop, and an SFX's name) -- a snapshot pair per content edit, depth _ME_UNDO_MAX. Navigation
     # (which SFX/track is selected) and whole-object duplicate are NOT tracked;
     # only what was actually done to an object is undoable, and undoing restores
     # the view + object + cursor the edit happened in.
@@ -584,7 +606,7 @@ class MusicEditor(OpHistoryMixin):
             if obj is None:
                 return None
             return ("sfx", self.sfx_idx, [list(st) for st in obj.steps],
-                    obj.speed, obj.loop, self.step)
+                    obj.speed, obj.loop, self.step, getattr(obj, "name", None))
         obj = self.cur_track()
         if obj is None:
             return None
@@ -608,7 +630,7 @@ class MusicEditor(OpHistoryMixin):
             if self.view == self.SFX_VIEW and self.sfx_idx == idx:
                 cursor = self.step
             return ("sfx", idx, [list(st) for st in obj.steps],
-                    obj.speed, obj.loop, cursor)
+                    obj.speed, obj.loop, cursor, getattr(obj, "name", None))
         if not (0 <= idx < len(self.bank.music)):
             return None
         obj = self.bank.music[idx]
@@ -628,6 +650,8 @@ class MusicEditor(OpHistoryMixin):
             obj.steps = [list(st) for st in data]
             obj.speed = speed
             obj.loop = loop
+            if len(snap) > 6:
+                obj.name = snap[6]
             self.view = self.SFX_VIEW
             self.sfx_idx = idx
             self.step = cursor

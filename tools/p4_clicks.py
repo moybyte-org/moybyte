@@ -12,7 +12,7 @@ code a tap runs, minus the touch plumbing), records every painted frame with
 p4_alloc's zero-retention CADENCE hook, and reports the transition's cost as the
 frames it took and the worst one.
 
-  python tools/p4_clicks.py --board p4 [--only tab_map,open_picker]
+  python tools/p4_clicks.py --board p4 [--only tab_map,open_projects]
 
 READ THE COLUMNS AS: `frames` is how many painted frames the transition spanned
 (the settle), `worst` the single most expensive one, `sum` the total wall the kid
@@ -21,6 +21,15 @@ its `worst` is lower -- `sum` is the honest latency number.
 
 Each scenario resets the board so it cannot inherit another's warm caches, then
 runs its `pre` verbs, arms the recorder, and runs the `click` verb.
+
+The Editor rows drive the desk Editor (`runtime/editor_desk.py`): a project
+opens in its window through `ws.open_in_editor`, and `ws.editor_app.set_tab`
+is what a tap on the app's row or a pane's tab does -- it shows the workspace
+holding that tab (`ws_*`) or, inside the one on show, focuses its pane
+(`pane_*`). Coin Quest is a blocks cart, so its Code workspace is the Blocks
+one (`ws_blocks`); `ws_code` opens Star Catcher, which has none, for the text
+Code pane. A row whose cart is not on the shelf fails rather than measuring
+another.
 
 MEASURED 2026-07-27, P4 on glass @ 1024x600 (60fps = 16.7ms). Sum ms across
 four states: the cold pipeline, after arming the prefetch from boot, after
@@ -99,61 +108,42 @@ from p4_autotest import add_board_args, board_from_args  # noqa: E402
 from p4_alloc import PROBE, CADENCE        # noqa: E402
 
 HELPER = """
-def _pick(want=''):
-    items = ws.picker.items
-    pick = -1
-    for i in range(len(items)):
-        if items[i].get('type') == 'new':
-            continue
-        t = str(items[i].get('title') or '')
-        if want and want.lower() not in t.lower():
-            continue
-        pick = i
-        break
-    if pick < 0:
-        for i in range(len(items)):
-            if items[i].get('type') != 'new':
-                pick = i
-                break
-    ws.picker.sel = pick
-    return str(items[pick].get('title'))
-def _launch(want=''):
-    items = ws.launcher.items
-    for i in range(len(items)):
-        t = str(items[i].get('title') or '')
-        if want and want.lower() in t.lower():
-            ws.launcher.sel = i
-            break
-    return ws.launch_selected() if hasattr(ws, 'launch_selected') else None
-ws._g['_pick'] = _pick
-ws._g['_launch'] = _launch
+def _edit(title):
+    for c in ws.carts.all:
+        if c.get('title') == title:
+            ws.open_in_editor(c)
+            return title
+    raise ValueError('no cart on the shelf is titled ' + repr(title))
+ws._g['_edit'] = _edit
 """
+
+COIN = "ws._g['_edit']('Coin Quest')"       # a blocks cart
+TEXT = "ws._g['_edit']('Star Catcher')"     # a cart with no blocks
+
+
+def _tab(t):
+    return "ws.editor_app.set_tab(%r)" % t
+
 
 # name -> (setup verbs run BEFORE recording, the click verb itself)
 SCENARIOS = {
-    "open_picker":   ([], "ws.open_picker()"),
+    "open_projects": ([], "ws.open_projects()"),
     "open_settings": ([], "ws.open_settings()"),
-    "open_project":  (["ws.open_picker()", "ws._g['_pick']('coin')"],
-                      "ws.pick_selected()"),
-    "tab_map":       (["ws.open_picker()", "ws._g['_pick']('coin')",
-                       "ws.pick_selected()"],
-                      "ws.editor_app.set_tab('map')"),
-    "tab_sprites":   (["ws.open_picker()", "ws._g['_pick']('coin')",
-                       "ws.pick_selected()"],
-                      "ws.editor_app.set_tab('paint')"),
-    "tab_blocks":    (["ws.open_picker()", "ws._g['_pick']('coin')",
-                       "ws.pick_selected()"],
-                      "ws.editor_app.set_tab('blocks')"),
-    "tab_code":      (["ws.open_picker()", "ws._g['_pick']('coin')",
-                       "ws.pick_selected()", "ws.editor_app.set_tab('map')"],
-                      "ws.editor_app.set_tab('code')"),
+    "open_project":  (["ws.open_projects()"], COIN),
+    "ws_art":        ([COIN], _tab("paint")),
+    "pane_map":      ([COIN, _tab("paint")], _tab("map")),
+    "ws_blocks":     ([COIN, _tab("paint")], _tab("blocks")),
+    "ws_code":       ([TEXT, _tab("paint")], _tab("code")),
+    "ws_world":      ([COIN], _tab("scene")),
+    "ws_sound":      ([COIN], _tab("music")),
+    "ws_settings":   ([COIN], _tab("cards")),
     "back_to_desk":  (["ws.open_settings()"], "ws.go_home()"),
     # The SECOND home visit (2026-07-27): the first visit paints live and the
     # retained-frame cache captures it (launcher_layer._capture_retained); the
     # revisit must present as ONE stamp. This is the common kid loop (play ->
     # home -> pick next), which the reset-per-scenario harness otherwise
     # never measures.
-    "home_revisit":  (["ws.go_home()", "ws.open_settings()"], "ws.go_home()"),
+    "home_revisit":  (["ws.open_library()", "ws.open_settings()"], "ws.go_home()"),
 }
 
 rows = []
@@ -163,14 +153,14 @@ def run(b, name, pre, click, settle=4.0):
     b.reset()
     b.pyexec(PROBE)
     b.pyexec(CADENCE)
-    b.pyexec(HELPER)
+    b.pyexec(HELPER, strict=True)
     for verb in pre:
-        b.pyval("bool(%s) or True" % verb, 90)
+        b.pyval("bool(%s) or True" % verb, 90, strict=True)
         b.drain(3.0)
     b.drain(3.0)                       # let the precondition settle fully
     b.pyexec("ws._g['_creset']()")
     b.pyexec("ws._crec = True")
-    b.pyval("bool(%s) or True" % click, 90)
+    b.pyval("bool(%s) or True" % click, 90, strict=True)
     b.drain(settle)
     b.pyexec("ws._crec = False")
     r = b.pyval("ws._g['_cagg']()") or (0,) * 9

@@ -17,7 +17,8 @@ StoreHandle guard the walk re-derived by hand until this landing.
 import ast
 from pathlib import Path
 
-from ws_helpers import build_ws, quiesce
+from ws_helpers import build_ws, quiesce, select_on_home
+from runtime import history_router
 
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "runtime" / "console.py"
@@ -31,10 +32,7 @@ def _cart_ws(tmp_path, src=SRC, title="Router", **kw):
     host_app.moy_carts.ensure_dirs(carts_dir)
     host_app.moy_carts.create(title, carts_dir, src=src, **kw)
     ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, title)
     ws.open_in_editor()
     return ws
 
@@ -136,9 +134,9 @@ def test_the_walk_is_handed_the_active_tabs_file_set(tmp_path, monkeypatch):
     ws = _cart_ws(tmp_path)
     _open_code(ws)
     seen = []
-    real = ws.carts_store.journal_undo
-    monkeypatch.setattr(ws.carts_store, "journal_undo",
-                        lambda p, f=None: (seen.append(f), real(p, f))[1])
+    real = history_router.moy_catalogue.journal_undo
+    monkeypatch.setattr(history_router.moy_catalogue, "journal_undo",
+                        lambda h, f=None: (seen.append(f), real(h, f))[1])
     ws.history._journal_walk(False)
     assert seen == [("main.py",)]
 
@@ -168,15 +166,37 @@ def test_bar_undo_bits_never_reads_the_journal(tmp_path, monkeypatch):
     reads = []
     for name in ("journal_can_undo", "journal_can_redo", "journal_undo",
                  "journal_redo"):
-        real = getattr(ws.carts_store, name)
+        real = getattr(history_router.moy_catalogue, name)
         monkeypatch.setattr(
-            ws.carts_store, name,
+            history_router.moy_catalogue, name,
             (lambda n, r: lambda *a, **k: (reads.append(n), r(*a, **k))[1])(name, real))
-    assert ws.history.bar_undo_bits() == (False, False)
+    assert ws.history.bar_undo_bits() == 0
     assert reads == [], "the bar cache key reached the journal: " + repr(reads)
     # ...while the REPAINT-time query does read it, which is the contrast.
     assert ws.history.can_undo() is True
     assert reads == ["journal_can_undo"]
+
+
+def test_can_both_answers_the_two_checks_of_one_journal_read(tmp_path, monkeypatch):
+    """The desk Editor's row repaints its UNDO and REDO dims with can_both:
+    the pair can_undo and can_redo answer, through the journal's two-way read
+    once rather than a read each -- before an undo, after one, and once the
+    in-RAM history answers alone."""
+    ws = _cart_ws(tmp_path)
+    ed = _open_code(ws, SRC + "# c1\n")
+    assert ws.save_code() is True
+    ed.set_text(SRC + "# c2\n"); ed.dirty = True
+    assert ws.save_code() is True
+    reads = []
+    real = history_router.moy_catalogue.journal_can_both
+    monkeypatch.setattr(history_router.moy_catalogue, "journal_can_both",
+                        lambda *a, **k: (reads.append(1), real(*a, **k))[1])
+    for step in range(3):
+        del reads[:]
+        assert ws.history.can_both() == (ws.history.can_undo(), ws.history.can_redo())
+        assert len(reads) <= 1
+        if step == 0:
+            ws.history.undo()
 
 
 def test_bar_undo_bits_reports_an_unrecorded_typing_burst(tmp_path):
@@ -184,10 +204,10 @@ def test_bar_undo_bits_reports_an_unrecorded_typing_burst(tmp_path):
     UNDO icon stays dim until the debounce closes the burst ~1.5s later."""
     ws = _cart_ws(tmp_path)
     ed = _open_code(ws)
-    assert ws.history.bar_undo_bits() == (False, False)
+    assert ws.history.bar_undo_bits() == 0
     ws.history.code_burst_open()
     ed.set_text(SRC + "# typed\n")
-    assert ws.history.bar_undo_bits()[0] is True
+    assert ws.history.bar_undo_bits() & 1
 
 
 def test_reading_the_bits_does_not_seal_the_burst(tmp_path):
@@ -248,7 +268,7 @@ def test_a_rebuilt_editor_drops_the_stale_pre_image(tmp_path):
     _open_code(ws)                        # a fresh CodeEditor over the same cart
     assert ws.history.code_op_history() is not None
     assert ws.history._code_burst_before is None
-    assert ws.history.bar_undo_bits() == (False, False)
+    assert ws.history.bar_undo_bits() == 0
 
 
 def test_undo_seals_a_live_burst_before_it_looks_for_a_step(tmp_path):
@@ -362,16 +382,12 @@ def test_writes_disabled_means_no_walk_and_no_check(tmp_path):
     assert ws.history.can_undo() is False
 
 
-def test_a_store_without_the_journal_verbs_is_a_safe_no_op(tmp_path):
-    """An older/embedded store simply has no journal API. Probing it must be a
-    dark icon, not an AttributeError inside a bar repaint."""
+def test_a_cart_with_no_handle_is_a_safe_no_op(tmp_path):
+    """A cart the store does not name (an embedded one) has no journal.
+    Probing it must be a dark icon, not a StaleHandle inside a bar repaint."""
     ws = _cart_ws(tmp_path)
     _open_code(ws)
-
-    class _Bare:
-        def load(self, path):
-            return None
-    ws.carts_store = _Bare()
+    del ws.cart["h"]
     assert ws.history.can_undo() is False
     assert ws.history.can_redo() is False
     assert ws.history.undo() is False
@@ -390,8 +406,8 @@ def test_a_failing_store_is_reported_and_never_crashes_the_shell(tmp_path,
 
     def _boom(*a, **k):
         raise OSError("card gone")
-    monkeypatch.setattr(ws.carts_store, "journal_undo", _boom)
-    monkeypatch.setattr(ws.carts_store, "journal_can_undo", _boom)
+    monkeypatch.setattr(history_router.moy_catalogue, "journal_undo", _boom)
+    monkeypatch.setattr(history_router.moy_catalogue, "journal_can_undo", _boom)
     assert ws.history.undo() is False
     assert ws.history.can_undo() is False
 
@@ -462,3 +478,14 @@ def test_the_keypress_site_stores_the_tick_it_does_not_call(tmp_path):
              and isinstance(n.func.value, ast.Attribute)
              and n.func.value.attr == "history"]
     assert calls == []
+
+
+def test_a_commit_with_no_editor_open_still_journals(tmp_path):
+    """A commit from the dev channel or a hard-exit path can run with no Code
+    tab open: the write and its journal line must not hang on the editor."""
+    ws = _cart_ws(tmp_path)
+    cart_dir = ws.project.cart["path"]
+    before = len(history_router.moy_catalogue.moy_journal.journal_list(cart_dir))
+    ws.editor = None
+    assert ws.project.commit_code(SRC + "# headless\n") is True
+    assert len(history_router.moy_catalogue.moy_journal.journal_list(cart_dir)) == before + 1

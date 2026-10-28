@@ -403,4 +403,9 @@ def test_editor_inserts_list_blocks_then_compiles_and_runs():
 def test_lists_category_and_color_present():
     assert blocks.CAT_LISTS in blocks.categories()
     assert blocks.blocks_in_category(blocks.CAT_LISTS)   # has blocks
-    assert blocks.CAT_LISTS in blocks.CATEGORY_COLOR
+    assert "block_" + blocks.CAT_LISTS in _content_roles()
+
+
+def _content_roles():
+    from runtime import chrome
+    return chrome.theme_content("night")

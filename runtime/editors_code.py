@@ -1,3 +1,8 @@
+# Map (grep -n a name to jump there):
+#   _is_word_char                what a word is made of
+#   _def_kw_name                 the symbol a def/class line names
+#   CodeEditor                   the text buffer, its caret, selection and view
+#   TextMouse                    a mouse over a text editor: clicks, selection, autoscroll
 """CodeEditor -- editable text buffer + cursor (the on-device code editor, #3).
 Split out of editors.py (which re-exports it); pure logic, dependency-free."""
 
@@ -41,7 +46,7 @@ class CodeEditor:
     def __init__(self, src="", cols=None, rows=None, clip=None):
         # COLS/ROWS default to the 320x240 baseline class attrs; a responsive shell
         # (#39 step 2) passes the layout-derived window so a bigger system canvas
-        # shows more lines + wider columns. set_view_size() re-clamps on a resize.
+        # shows more lines + wider columns. set_view_size() adopts a resize.
         if cols is not None:
             self.COLS = int(cols)
         if rows is not None:
@@ -49,21 +54,29 @@ class CodeEditor:
         # The internal clipboard (#89): a plain string, NOT the OS clipboard, so
         # copy/cut/paste behave identically on the host and the device. Kept across
         # set_text() (a reload) so a copy survives switching what you view.
-        # `clip` (#132) is the OPTIONAL system clipboard (widgets.Clipboard):
-        # copy/cut write THROUGH it and paste prefers it, so a copy here lands
-        # in a cart's editor handle and vice versa. None (unit tests,
-        # embedding) keeps
-        # the local-only behavior exactly.
+        # `clip` (#132) is the OPTIONAL system clipboard (the clipboard role,
+        # native/moy_app): copy/cut write THROUGH it and paste prefers it, so
+        # a copy here lands in a cart's editor handle and vice versa. A copy
+        # longer than the role holds stays here alone, and paste prefers it
+        # until another copy lands there (`_clip_lost`, the role's seq at the
+        # refusal). None (unit tests, embedding) keeps the local-only
+        # behavior exactly.
         self.clipboard = ""
         self.clip = clip
+        self._clip_lost = None
         self.set_text(src)
 
     def set_view_size(self, cols, rows):
-        """Adopt a new visible window (size/font-scale change) and re-clamp scroll
-        so the caret stays in view. Instance COLS/ROWS shadow the class baseline."""
+        """Adopt a new visible window (size/font-scale change). The view keeps
+        its place, clamped to the document's end; it does not chase the caret,
+        which a key brings back into view (`_scroll`). Instance COLS/ROWS
+        shadow the class baseline."""
         self.COLS = max(1, int(cols))
         self.ROWS = max(1, int(rows))
-        self._scroll()
+        maxtop = len(self.lines) - self.ROWS
+        self.top = max(0, min(maxtop, self.top)) if maxtop > 0 else 0
+        if self.left < 0:
+            self.left = 0
 
     def set_text(self, src):
         self.lines = str(src).split("\n")
@@ -212,14 +225,34 @@ class CodeEditor:
             self.dirty = True
             self._scroll()
 
+    def delete(self):
+        """Forward delete: the character after the caret, or the next line
+        joined onto this one at its end; a selection is deleted."""
+        if self.has_selection():
+            self.delete_selection()
+            return
+        self.sel = None
+        ln = self.lines[self.row]
+        if self.col < len(ln):
+            self.lines[self.row] = ln[:self.col] + ln[self.col + 1:]
+        elif self.row < len(self.lines) - 1:
+            self.lines[self.row] = ln + self.lines[self.row + 1]
+            del self.lines[self.row + 1]
+        else:
+            return
+        self.dirty = True
+        self._scroll()
+
     def key(self, code):
         """Feed one keyboard ASCII byte. Returns True if it changed the text."""
         if not code:
             return False
         if code in (0x0D, 0x0A):             # enter / return
             self.newline()
-        elif code in (0x08, 0x7F):           # backspace / delete
+        elif code == 0x08:
             self.backspace()
+        elif code == 0x7F:                   # Delete: forward
+            self.delete()
         elif code == 0x09:                   # tab: indent the selection, else 2 spaces
             if self.has_selection():
                 self.indent_selection()
@@ -260,6 +293,34 @@ class CodeEditor:
 
     def clear_select(self):
         self.sel = None
+
+    def select_word(self, row, col):
+        """Select the word at (row, col) -- an identifier's run, or the one
+        other character there -- the caret at its end."""
+        self.row = max(0, min(len(self.lines) - 1, int(row)))
+        ln = self.lines[self.row]
+        c = max(0, min(len(ln), int(col)))
+        if c == len(ln) and c > 0:
+            c -= 1
+        c0 = c1 = c
+        if c < len(ln) and _is_word_char(ln[c]):
+            while c0 > 0 and _is_word_char(ln[c0 - 1]):
+                c0 -= 1
+            while c1 < len(ln) and _is_word_char(ln[c1]):
+                c1 += 1
+        elif c < len(ln):
+            c1 = c + 1
+        self.sel = (self.row, c0)
+        self.col = c1
+
+    def select_line(self, row):
+        """Select line `row` whole, through its end of line where one follows."""
+        r = max(0, min(len(self.lines) - 1, int(row)))
+        self.sel = (r, 0)
+        if r + 1 < len(self.lines):
+            self.row, self.col = r + 1, 0
+        else:
+            self.row, self.col = r, len(self.lines[r])
 
     def has_selection(self):
         return self.sel is not None and self.sel != (self.row, self.col)
@@ -310,8 +371,7 @@ class CodeEditor:
         if not self.has_selection():
             return False
         self.clipboard = self.selected_text()
-        if self.clip is not None:
-            self.clip.put_text(self.clipboard)   # the system lane (#132)
+        self._write_through()
         return True
 
     def cut(self):
@@ -319,9 +379,15 @@ class CodeEditor:
         if not self.has_selection():
             return False
         self.clipboard = self.selected_text()
-        if self.clip is not None:
-            self.clip.put_text(self.clipboard)   # the system lane (#132)
+        self._write_through()
         return self.delete_selection()
+
+    def _write_through(self):
+        """The copy into the system lane (#132), or, refused as too long,
+        the lane's seq at the refusal."""
+        if self.clip is not None:
+            ok = self.clip.put_text(self.clipboard)
+            self._clip_lost = None if ok else self.clip.seq()
 
     def select_all(self):
         """Select the whole buffer: anchor at the start, caret at the end
@@ -336,8 +402,12 @@ class CodeEditor:
         """What paste() would insert: the system clipboard's text when one is
         attached and holds any (every local copy wrote through, so it is
         always the newest), else the internal string."""
-        if self.clip is not None and self.clip.text():
-            return self.clip.text()
+        clip = self.clip
+        if clip is not None and (self._clip_lost is None
+                                 or clip.seq() != self._clip_lost):
+            t = clip.text()
+            if t:
+                return t
         return self.clipboard
 
     def paste(self):
@@ -589,3 +659,129 @@ class CodeEditor:
         self.col = max(0, min(len(self.lines[self.row]), int(col)))
         self.sel = None
         self._scroll()
+
+
+class TextMouse:
+    """A mouse over a text editor: the Code tab's and an editor handle's
+    (Notes'), so both answer it alike. The left button's press places the
+    caret, a drag selects, Shift+press extends the selection, and a second and
+    a third press on the same cell within CLICK_MS select its word and its
+    line. The middle button autoscrolls: pressed over the text it drops an
+    anchor, and the pointer above or below it scrolls up or down at a speed
+    that grows with the distance past a dead zone of a line, up to MAX rows a
+    second; a click (press and release without moving) latches it until the
+    next click or any key, a press and drag runs it while held.
+
+    Positions arrive as document cells (row, col) from the surface's own hit
+    test, and the anchor and the pointer in its pixels; `now` (ms) and `dt`
+    (s) are the caller's, so a trajectory is exact. A frame allocates nothing:
+    the speed is integer milli-rows."""
+
+    CLICK_MS = 400
+    SLOP = 4            # px the middle button may travel and still be a click
+    SPEED = 8           # rows a second for each line height past the dead zone
+    MAX = 60            # rows a second at most
+
+    def __init__(self):
+        self.clicks = 0
+        self._at_r = self._at_c = -1
+        self._t = 0
+        self.dragging = False
+        self.anchor_x = self.anchor_y = 0
+        self.armed = False          # an autoscroll runs (its anchor shows)
+        self.latched = False
+        self._moved = False
+        self._acc = 0               # milli-rows not yet scrolled
+
+    # -- the left button -------------------------------------------------------
+
+    def press(self, ed, row, col, shift, now):
+        """The left button went down on document cell (row, col); a click
+        ends a latched autoscroll too."""
+        if self.latched:
+            self.stop()
+        row = max(0, min(len(ed.lines) - 1, int(row)))
+        col = max(0, min(len(ed.lines[row]), int(col)))
+        same = row == self._at_r and col == self._at_c
+        dt = (now - self._t) & 0x3FFFFFFF
+        self.clicks = self.clicks % 3 + 1 if same and dt <= self.CLICK_MS else 1
+        self._at_r, self._at_c, self._t = row, col, now
+        self.dragging = True
+        if shift and self.clicks == 1:
+            ed.begin_select()
+            ed.row, ed.col = row, col
+        elif self.clicks == 2:
+            ed.select_word(row, col)
+        elif self.clicks == 3:
+            ed.select_line(row)
+        else:
+            ed.row, ed.col = row, col
+            ed.sel = (row, col)         # the drag's anchor; nothing selected yet
+
+    def drag(self, ed, row, col):
+        """The left button held over cell (row, col): the selection follows.
+        True when it moved."""
+        if not self.dragging:
+            return False
+        row = max(0, min(len(ed.lines) - 1, int(row)))
+        col = max(0, min(len(ed.lines[row]), int(col)))
+        if self.clicks > 1 or (row, col) == (ed.row, ed.col):
+            return False
+        ed.begin_select()
+        ed.row, ed.col = row, col
+        return True
+
+    def release(self, ed=None):
+        self.dragging = False
+        if ed is not None and ed.sel is not None and not ed.has_selection():
+            ed.sel = None
+
+    # -- the middle button -----------------------------------------------------
+
+    def middle(self, x, y, down):
+        """The middle button went down (`down`) or up at (x, y) over the text."""
+        if down:
+            if self.latched:
+                self.stop()             # the next click ends a latched run
+                return
+            self.armed = True
+            self.anchor_x, self.anchor_y = int(x), int(y)
+            self._moved = False
+            self._acc = 0
+        elif self.armed:
+            if self._moved:
+                self.stop()             # a press and drag runs only while held
+            else:
+                self.latched = True     # a click latches it
+
+    def stop(self):
+        """End an autoscroll (a key does, and the next click)."""
+        self.armed = False
+        self.latched = False
+        self._acc = 0
+
+    def autoscroll(self, ed, x, y, dt, lh):
+        """One frame of an autoscroll with the pointer at (x, y), lines `lh`
+        pixels tall: the rows it scrolled, negative up."""
+        if not self.armed:
+            return 0
+        d = int(y) - self.anchor_y
+        if not self._moved and (abs(d) > self.SLOP or abs(int(x) - self.anchor_x) > self.SLOP):
+            self._moved = True
+        lh = max(1, int(lh))
+        past = abs(d) - lh
+        if past <= 0:
+            self._acc = 0
+            return 0
+        v = past * self.SPEED * 1000 // lh
+        if v > self.MAX * 1000:
+            v = self.MAX * 1000
+        self._acc += v * int(dt * 1000) // 1000
+        rows = self._acc // 1000
+        if not rows:
+            return 0
+        self._acc -= rows * 1000
+        rows = rows if d > 0 else -rows
+        top = ed.top
+        ed.scroll(rows, 0)
+        return ed.top - top

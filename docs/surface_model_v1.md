@@ -1,8 +1,12 @@
 # Surface model v1 — the presentation contract for every backend
 
-**Status: v1.2 LOCKED (2026-08-12) — v1.1 plus the STAGE-4 AMENDMENT (§13),
-which retires the web annex, and the 2026-08-27 FOLD (§14), which absorbs the
-archived predecessor and changes no part of the model.** Written, then put
+**Status: v1.3 LOCKED (2026-10-07) — v1.1 plus the STAGE-4 AMENDMENT (§13),
+which retires the web annex, the 2026-08-27 FOLD (§14), which absorbs the
+archived predecessor and changes no part of the model, and the 2026-10-07
+KERNEL AMENDMENT (§15), which moves the Surface's home and its mint into the
+native kernel and changes no law, the 2026-10-27 REMOVAL (§16) of the
+surface table that nothing read, and the 2026-10-27 SHIFT FRAME (§14.7), the
+change record a content's frame may be, which adds no invalidation mechanism.** Written, then put
 through the parallel adversarial architecture + perf review passes
 (verdicts: **LOCK AFTER FIXES** / **PERF CASE STANDS WITH FIXES**); all twenty
 findings are folded into this revision — **§12 is the finding-by-finding
@@ -54,22 +58,20 @@ The verdict, from the evidence accumulated across every target:
 
 ## 2. The Surface object
 
-Lives in a **new leaf module** (`runtime/surface.py`), imported by
-`wm_windowed.py` and the web serve glue only — **never by `wm.py` or
-`console.py`**, which the S3 build freezes verbatim (`build.sh` stages
-`runtime/` wholesale; the only denylisted shell file is `wm_windowed.py`).
-This is what makes §5.1's "the S3 executes no new code" true by construction.
+**Removed (§16, 2026-10-27).** No code holds this object: the Python leaf
+(`runtime/surface.py`) went with the kernel's glass pass and the kernel's SURF
+table with §16, because nothing ever read a gen. The record below is the
+model's vocabulary, which §14's mechanisms and the backends' per-buffer state
+still follow in spirit.
 
-```python
-class Surface:
-    sid          # stable identity, minted from the WM REGISTRY key
-    domain       # "system" | "game" (the existing begin_surface domain)
+    sid          # stable identity, minted from the WM REGISTRY key; the row's key
+    domain       # "system" | "game"
     w, h         # CONTENT size — the surface's local coordinate space
     x, y, scale, z   # PLACEMENT — WM-owned; content code never reads or writes it
-    content_gen  # stamped from the WM's ONE monotonic counter when content changes
+    content_gen  # stamped from ONE monotonic counter when content changes
     place_gen    # stamped from the same counter on move/resize/restack/show/hide
     animating    # this surface repaints without any bump while true (§3 class B)
-```
+
 
 **sid rules (the make-group lesson).** sids are minted from the WM's registry
 keys, **never from content kinds** — the shipped `key == win.kind` comparison
@@ -78,27 +80,19 @@ content kind `"picker"`), which disabled its drag content-freeze everywhere
 (`wm_windowed.py`, the identity-resolution fix). sids are world-qualified: the
 fullscreen Library layer and the windowed desk backdrop both carry the layer
 id `"launcher"` today (`launcher_layer.py` vs `wm_windowed.py`) — one sid,
-two contents across a world flip is exactly the aliasing §3 forbids.
+two contents across a mode switch is exactly the aliasing §3 forbids.
 
 **Gen minting (no per-object counters, ever).** Both gens are stamped from
-**one monotonic per-WM counter** — the `atlas_gen` pattern (from the since-deleted `web_view.py`:
+**one monotonic counter** — the `atlas_gen` pattern (from the since-deleted `web_view.py`:
 increments, never restarts), which §2's L3 cites as prior art and which this
-rule generalizes. Rationale: surfaces are destroyed wholesale in the real code
-(`on_relayout` does `_wins.clear()`; every world flip rebuilds all windows)
+rule generalizes; one counter per console, whichever WM is up. Rationale: surfaces are destroyed wholesale in the real code
+(`on_relayout` does `_wins.clear()`; console mode drops every window's surface while the windows wait parked)
 while per-client caches (`SurfaceDelta._last`) persist per connection. A
 per-object counter restarting at 0 can collide with a client's stored gen and
 alias into a wrong `{"same":1}` — the browser would replay a **dead window's**
 content. A monotonic mint makes recreation safe for free: a reborn surface
 carries a fresh, higher gen, so every consumer sees it as changed. Comparisons
 are always `!=`, never `>`.
-
-**This is a re-partition, not a promotion.** Today's Stage 9 marks are
-draw-stack **layer** ids: ONE `"windows"` surface covers all windows + chips,
-one `"launcher"` the whole desk (`console.py` `_surf` forwarding;
-`wm_windowed.py` `_WindowStackLayer`). Per-window sids mean new
-`begin_surface` call sites inside the window draw path, and the web payload
-*shape* changes. Phase A's golden gate is therefore scoped to **pixels**;
-payload-shape tests are re-baselined knowingly (§9).
 
 ### The laws
 
@@ -110,12 +104,12 @@ payload-shape tests are re-baselined knowingly (§9).
 - **L2 — dirty is explicit, in three producer classes (§3).** Only producers
   signal change: gen bumps, the declared `animating` class, and the pointer
   leg. Inferring "static" from draw streams is FORBIDDEN (§8: Fold-2, web
-  scroll-as-blit).
-- **L3 — gens come from one monotonic per-WM mint** (§2 above), compared `!=`
-  per consumer against its own last-seen. Never a boolean a consumer clears:
-  N consumers (P4 compositor, each web client's `WsClientState`, the L8
-  harness) must not coordinate. Prior art: `atlas_gen`, `ws._cover_gen`,
-  `sheet.gen`.
+  scroll-as-blit). A draw-stream comparison may ASSERT, never license: the
+  shift frame's record audit (§14.7) is a test's net, not the frame's rule.
+- **L3 — gens come from one monotonic mint** (§2 above),
+  compared `!=` per consumer against its own last-seen. Never a boolean a
+  consumer clears: N consumers (the kernel's compositors, the L8 harness) must
+  not coordinate. Prior art: `atlas_gen`, `ws._cover_gen`, `sheet.gen`.
 - **L4 — surfaces record and draw in LOCAL space.** The WM owns the transform
   to the root canvas / the wire (#175's `view` bracket, generalized). Content
   code positioned in desktop coordinates is a bug. The wire-compat
@@ -124,12 +118,9 @@ payload-shape tests are re-baselined knowingly (§9).
 - **L5 — compositing strategy is backend-owned.** The shared layer decides
   *whether* a surface changed; the backend decides *how* the glass catches up.
 - **L6 — the degenerate tier pays ~nothing, and here is the arithmetic.** On
-  the S3: no Surface objects exist (§2 leaf module is not staged there); the
-  only executed shape is the already-shipped no-op probe pattern
-  (`begin_surface` is a `getattr(..., None)` probe per stack layer, live
-  since Stage 9), and producer signals ride the **existing** `ws._dirty`
-  writes unmodified (§3). ESTIMATED added cost: zero new per-draw work; ≤10
-  event-driven probe/no-op calls per frame ≈ single-digit µs.
+  the S3 the **existing** `ws._dirty` writes stay as they are (§3), and the
+  frame gate reads the kernel's own epoch once a frame (§15's leg): one C
+  call per frame, ≈ single-digit µs, and no new per-draw work.
 - **L7 — no retained widget tree, no per-widget damage.** Litigated; §8.
 - **L8 — staleness AND silent disablement must both be testable.** Two
   directions, per tier:
@@ -159,21 +150,22 @@ payload-shape tests are re-baselined knowingly (§9).
 
 ## 3. The dirty protocol — three producer classes, all owned
 
-**Today's #44 gate has three legs**, and the model absorbs all three —
+**The #44 gate has three legs**, and the model absorbs all three —
 `_needs_redraw` is `_dirty OR _animating(dt) OR ptr_state != _last_ptr`
-(`console.py`), and the windowed content-freeze (`_content_static`,
-`wm_windowed.py`) re-derives the same three conditions per window. A model
+(`console.py`) plus the kernel-frame epoch (§15) and the WM's owed-repaint
+legs, and the windowed content-freeze (`_content_static`, `wm_windowed.py`)
+re-derives the three conditions per window. A model
 that absorbed only the `_dirty` leg would freeze live wallpapers, the music
 playhead, OTA progress, and every paint stroke — the review's top finding.
 
 **Class A — explicit gen bumps.** The signal rides the **existing**
-`ws._dirty = True` writes, *observed by the surface layer, not rewritten*: an
-un-attributed dirty is a **global epoch bump** (all visible surfaces count as
-changed — safe, never wrong, merely unprofitable). Per-surface attribution is
-**opt-in per site**, added only where audited, via a no-op-probed verb (the
-`begin_surface` pattern) so shared `*_layer.py` code stays S3-safe. The audit
-is a named Phase A deliverable — there are **~179 raw `_dirty = True` sites
-across 22 files** (grep-verified; ui_damage §0.2.7 counted the same), several
+`ws._dirty = True` writes, *observed, not rewritten*: an un-attributed dirty
+is a **global** change — the whole frame repaints — safe, never wrong, merely
+unprofitable. Per-surface attribution is **opt-in
+per site**, added only where audited, so shared `*_layer.py` code stays S3-safe. The audit
+is a named Phase A deliverable — there are **about 135 raw `_dirty = True`
+sites across 31 files** (2026-10-07; the 2026-07 review counted ~179 across
+22, as ui_damage §0.2.7 had), several
 firing from async contexts (wifi scan, bluetooth, OTA `download_step`) where
 "the active surface" would mis-attribute. "Mechanical migration" is hereby
 retracted; un-audited sites stay global-epoch forever and are still correct.
@@ -185,7 +177,9 @@ preview's playhead, the bluetooth panel's async scan/pair states, the update
 screen's progress, splash/confetti/toast/egg overlays, and the running cart.
 Each declares `Surface.animating = True` while its animation is live — the
 by-name lists become the seed of the registration and are then **deleted**
-(§7). An animating surface needs no bumps and is never skipped.
+(§7). An animating surface needs no bumps and is never skipped. A verbs page
+moving on its own -- a fling's coast, a glide to a step's target -- declares
+itself through the engine (`moy_ui_api_moving`, `ws.ui_moving` for the gate).
 
 **Class C — pointer-armed mutators (the pre-#44 debt).** Paint strokes, map
 pans, block drags and kinetic scrolls mutate content **without marking
@@ -205,7 +199,7 @@ advertisement.
 | running game (Player) | Class B while running; gen moves on frames it renders (L9) |
 | app windows (Editor tabs, Settings, Desk-Lab apps) | Class A via the existing `_dirty` writes (global epoch until attributed); Class C during gestures |
 | self-animating panels (music preview, bluetooth, OTA, live wallpaper, overlays) | Class B declaration |
-| wallpaper (static, e.g. `moy_night.moy`) | nothing — idles free *by construction* |
+| wallpaper (static, e.g. `moybyte.moy_night.moy`) | nothing — idles free *by construction* |
 | bar | Class A: clock tick (1/s), status change, lent-zone redraw request from the app |
 | desk icon column | Class A on selection/label change (own surface — not the wallpaper's, §11) |
 | window chrome | its own WM-owned chrome band per window (§5 preamble), bumped by the WM on focus/title change |
@@ -268,15 +262,22 @@ remain opaque rects; chrome bands may exceed them.
 
 `FullscreenStackWM` only. Surfaces degenerate to: one app surface + bar + the
 game composite (`composite_game`/`viewport`). Strategy: memoized stack (#66)
-+ full repaint under the gate. **No Surface objects exist here** (§2 leaf
-module is not staged); producer signals ride the unmodified `_dirty` writes;
-L6 shows the ≤single-digit-µs arithmetic. Hardware constraints bounding any
-future change: single `tx_color` full-screen flush; SD/display shared SPI
-host; the I2C poller thread (#69). This annex exists mostly to say: **do
-nothing here.** Phase A's gate for this tier is "the per-frame executed path
-is provably unchanged" — grep-tests pin the no-op shapes; note the frozen
++ full repaint under the gate. **No Python Surface object exists here**: the
+rows are the kernel's (§15), producer signals ride the unmodified `_dirty`
+writes folded once per painted frame, and L6 shows the ≤single-digit-µs
+arithmetic. Hardware constraints bounding any future change: the banded
+flush fed from core 0 (`native/moy_flush/moy_flush.h`); the SD/display shared
+SPI host on the T-Deck; the I2C poller (#69). This annex exists mostly to
+say: **do nothing here.** The per-frame executed path gains the kernel's
+epoch read (L6) and nothing else, and the gate for this tier is each S3's
+on-glass suite and the perf roster within noise, not file bytes — the frozen
 *source* of shared files may still drift textually (comments, unrelated
-edits), so the gate is on executed shape, not file bytes.
+edits). This contract is the presentation's, not the shell's pixels: the
+shell's own draws on this tier change when a restyle changes them, once and
+named, gated by the suite, the roster and `tools/p4_bench.py --board tdeck
+--repaint` within its thresholds (amended 2026-10-11 for theming's phase 2b,
+which moved the T-Deck editors' frozen dark literals onto the theme's tokens;
+`docs/theming_2026-09.md` §9).
 
 **A compiled cart's frame reaches the flush from the cart's own memory and
 adds nothing to the contract.** The game composite on a banded board is a
@@ -301,12 +302,12 @@ machinery: `_BackdropLayer` retained cache, dirty-union restore
 (`blit_strip_rect`), body-subtract, and the async-PPA stamp-defer expressed
 through §4's `end_frame()`. Its last-seen state is per-buffer N-deep (§4) —
 the streak/sig fields are absorbed and deleted (§7). **Buffer ownership:**
-`moy_alloc` has no `free()`, and resize/world-flip/relayout rebuild window
+`moy_alloc` has no `free()`, and resize/relayout rebuild window
 buffers today — Surface buffers are minted with an owner, reused per slot,
 never evict-and-reallocate. Phase C claims **no perf change** — the gate is
 "drag fps not regressed" on the #156 on-glass suite, **naming the make-group
 window's drag explicitly** (the last silent-disable bug lived exactly there).
-Games: fullscreen in the play world; windowed via the PPA upscale composite
+Games: fullscreen in console mode; windowed via the PPA upscale composite
 (PPA is upscale-only — §8).
 
 **The rotated P4 (Guition 10.1″, 2026-09-08) adds nothing to the contract
@@ -316,17 +317,20 @@ placement-changed cell above is *the same* backdrop restore followed by a
 rect rotate instead of a full one — provided the compositor knows the rect.
 `WindowedWM._hand_damage` hands it the gesture union and the extents of the
 windows it rendered live (`note_damage` on the root canvas, absent on every
-other backend), the same set the union restore already trusts; a frame it
-cannot describe is a full rotate. This is not a second invalidation
-mechanism: no new dirty state, no new producer class — the backdrop layer
-and the window loop say what they painted, once, on the frame they painted
-it. `end_frame()`'s ordering rule holds there too: the quiet game frame's
+other backend), the same set the union restore already trusts; the
+fullscreen home's shelf drag hands its band the same way
+(`hand_content_damage`), and the bar says when it painted new pixels into
+one of the compositor's strips (`strip_moved`), so a still bar is not
+rotated; a frame nobody describes is a full rotate. This is not a second
+invalidation mechanism: no new dirty state, no new producer class — the
+backdrop layer, the window loop, the shelf and the bar say what they
+painted, once, on the frame they painted it. `end_frame()`'s ordering rule holds there too: the quiet game frame's
 rotate is queued at flush and fenced at the next present, before the cart's
 tick can write the canvas it was copied from.
 
 **A compiled cart's direct-colour frame adds nothing here either**
 (`device/p4_canvas.py`'s `present_frame`): the composite at the game
-boundary -- the play world's and the player window's -- hands the PPA the
+boundary -- console mode's and the player window's -- hands the PPA the
 cart's frame, or the DMA snapshot of it, where it would have handed it the
 game canvas, and the opaque rects the shell draws over it are declared as in
 §5.1. Nothing decides what changed.
@@ -335,7 +339,7 @@ game canvas, and the opaque rects the shell draws over it are declared as in
 
 pygame; buffers are cheap, so this backend implements the contract in its
 plainest form and serves as the test bed: golden pixel-parity before/after
-Phase A **including windowed-size goldens** (the 320×240 `_base` goldens
+Phase A **including windowed-size goldens** (the 320×240 goldens
 structurally cannot catch windowed-tier staleness — ui_damage §0.2.4), and
 both L8 directions live here (pixel-hash harness mode; the
 placement-only-frame zero-ship assertion).
@@ -503,7 +507,7 @@ pinning the field's absence.
 | `WsClientState` SURF cache + keyframe latch | **kept**; latch generalized into §5.4's keyframe-production verb | never |
 | `RecordingLayer.RECORD_ONLY` (#175 follow-on) | **kept, orthogonal** — raster-half elision, not invalidation | never |
 | `ViewCanvas` + `view` bracket (#175) | **generalized** into L4; wire op converges in B+ | B+ |
-| scroll-as-blit `RETAINED_FRAMES` (#113) | **per-backend**: device root path unchanged; web root stays 0; per-surface in D under §6's invariants | — |
+| scroll-as-blit `RETAINED_FRAMES` (#113) | **per-backend**, and its ring is one body (§14.7): a content's frames are vouched for by ONE ring per region -- a window's by the windowed WM's shown ring (`_shown`, §14.3), a full-screen content's by its own `PaintRing` (`ui_draw`) -- never both | — |
 | `_cover_runs` / `_cover_gen`, `atlas_gen`, `sheet.gen` | **unchanged** — the L3 prior art | never |
 | `assets_json` memo key (wasm) | **unchanged** — serialization concern | never |
 
@@ -551,8 +555,9 @@ pinning the field's absence.
 
 ## 9. Phasing and gates
 
-- **Phase A — name it (refactor + audit).** `runtime/surface.py` (leaf, not
-  staged to S3); gens from the per-WM mint; Class A = observed `_dirty`
+- **Phase A — name it (refactor + audit).** The surface registry (built as
+  the Python leaf `runtime/surface.py`, the kernel's table since §15); gens
+  from the one mint; Class A = observed `_dirty`
   epoch + opt-in attribution; Class B registration seeded from the
   `_animating`/`_content_static` lists; the **producer audit** (the ~179-site
   list + the Class C handler inventory) is a named deliverable. Gates: host
@@ -660,16 +665,17 @@ discipline. A backend still implements §4 and invents no new invalidation
 mechanism; the wasm head complies as an ordinary raster tier, which is the
 point — it stopped being a special case.
 
-**One thing this amendment deliberately does NOT do: delete `runtime/surface.py`.**
+**This amendment kept `runtime/surface.py` (2026-08-12), and §15 moves it.**
 The registry (`Surface`/`SurfaceSet`, the monotonic mint, the epoch, the
 prefix-scoped sync) was reached only through `wm_windowed`'s
 `if not self._recording: return` guards, and nothing sets `_recording` any
-more — so on every shipping tier that code is now inert. It stays because it is
-Phase A/C groundwork for the raster tiers, which this stage does not touch;
-what died is its recording DRIVER, not the model. Stated here so the next
-reader finds the answer instead of discovering an unreachable branch and having
-to guess whether it was an oversight. Wiring it on raster, or deleting it, is
-Phase C's call to make with evidence.
+more — so on every shipping tier that code is inert from this stage on. It
+stayed because it was Phase A/C groundwork for the raster tiers, which this
+stage did not touch; what died was its recording DRIVER, not the model. The
+evidence Phase C wanted arrived as the kernel: the raster tiers' compositors
+cross to C and consume the gens there, so §15 gives the registry to the
+kernel and the glass pass of `docs/kernel_survival_2026-10.md` deletes the
+Python leaf.
 
 **What replaced the L8 stream-hash gate.** §5.4's accounting proved "every
 surface stream that changed was covered by a moved gen" — a pixel-less
@@ -694,16 +700,24 @@ primitives) stays there and is not carried forward; §8 keeps the verdicts.
 `wm_windowed._content_static` is §4's skip-draw generalization as built: on a
 PAINTED frame that provably did not change the focused window's content, the
 content draw is skipped and the retained `win.buf` stamp presents it instead.
-"Provably" is four checkable facts, all of them required.
+"Provably" is five checkable facts, all of them required.
 
-- **`ws._dirty` is false.** It is still readable during the draw — `frame()`
-  clears it after — so false means no input or state handler reported a visible
-  change this frame.
-- **No pointer DOWN or CLICK, this frame or last.** Class C (§3) mutates
-  content without marking dirty, so any button activity renders live. The check
-  reads BOTH frames because handlers consume `p.click` in place — a tap that
-  opens a prompt zeroes it before the draw sees it, and the previous frame's
-  edge is still in `ws._last_ptr`. A position/visibility-only change is inert:
+- **`ws._dirty` is false, or the WM's own mode-switch mark.** It is still
+  readable during the draw — `frame()` clears it after — so false means no
+  input or state handler reported a visible change this frame. The home's X
+  bringing the desk back marks `MODE_MARK`, which no window's content moved
+  with; any handler's mark after it is `True`.
+- **The buffer holds the focus mark this frame draws** (`win._marked`, set
+  where the buffer is drawn, against `_marks_for`): one a screen, so a
+  window under a menu that holds the keys draws without it.
+- **No pointer DOWN or CLICK, this frame or last — unless the press is the
+  WM's.** Class C (§3) mutates content without marking dirty, so any button
+  activity renders live. The check reads BOTH frames because handlers consume
+  `p.click` in place — a tap that opens a prompt zeroes it before the draw sees
+  it, and the previous frame's edge is still in `ws._last_ptr`. A press that
+  lands on chrome — a strip, its buttons, a resize zone, a full-screen
+  window's row head — is the WM's (`_grab`): no content is handed it, its
+  drag or its release, so it waives the check. A position/visibility-only change is inert:
   no content surface draws hover feedback (audited 2026-07-27), and anything
   that appears without input is a Class B source or it could never paint under
   the #44 gate at all.
@@ -712,9 +726,14 @@ content draw is skipped and the retained `win.buf` stamp presents it instead.
   panel's async scan/pair, the update screen's progress — are excluded by name
   until §3's registration replaces the list. Sources outside app windows draw
   on other layers and need no exclusion.
-- **`win.buf` is not stale.** A rebuilt buffer, or a gesture's `_direct_render`
-  painting past the buffer straight into the framebuffer, leaves it behind the
-  truth: the next paint renders live to refill it before the freeze resumes.
+- **`win.buf` is not stale.** A rebuilt buffer, or `_direct_render` painting
+  past the buffer straight into the framebuffer, leaves it behind the truth.
+  Where the shown ring (§14.3) says the last frame's buffer held the window's
+  page where it lies now, it is refilled from that buffer
+  (`copy_last_into`, §14.7: `WindowedWM._refill`), on a frame with nothing
+  to paint and before any other reader stamps it (a focus loss, a move, a
+  resize, this freeze); else the next paint renders live to refill it (only
+  its lag, where the content speaks §14.3's protocol).
 
 Pinned by `tests/test_wm_content_freeze.py` — a frozen-vs-live pixel-equality
 check plus a case per leg of the gate.
@@ -747,9 +766,11 @@ unchanged within noise, all dirty-armed by design. The 70ms class is real on
 tap-settle frames on the P4 and on every cursor-move frame on the HOST tier,
 where a visible cursor defeats the quiet paths.
 
-**The widening still unbuilt:** waive the DOWN-guard when a WM drag or resize
-of a DIFFERENT window has captured the pointer. Widen one trigger source at a
-time, each behind the two gates this slice used — `tools/p4_clicks.py`
+**The WM's press waives the DOWN-guard (2026-10-22).** It is the widening
+this slice named: a press the WM captured — a drag or resize of any window, a
+strip button, a full-screen row's head — reaches no content, so the focused
+content stays frozen under it. A further widening goes one trigger source at
+a time, behind the two gates this slice used — `tools/p4_clicks.py`
 transitions must not regress, `tools/p4_surface_sweep.py` drag medians must
 move.
 
@@ -777,3 +798,443 @@ defect of this architecture, not an accident — which is why L3 forbids
 consumer-cleared booleans, L8 demands the silent-disable direction be
 testable, and §7 deletes each absorbed field with a grep-test instead of
 leaving it beside the model as a seventh mechanism.
+
+### 14.3 The shown ring: what each buffer holds of the focused window (2026-10-23)
+
+§14.1 skips a window's content draw when nothing changed; it says nothing
+about a content that changes a small part of itself every frame. Paint's
+stroke is that content, and on a desk it paid twice: a held-key stroke
+stamped the whole window buffer every frame, and a pointer stroke, which
+direct render draws into the root, began and ended on whole frames — the
+content's own record of its buffers saw a new canvas at the press, and the
+window buffer it went back to at the release was the stroke's whole length
+behind. #66 has the numbers.
+
+**The WM keeps §4's per-buffer last-seen for the focused window's content
+rect** (`WindowedWM._shown`, one entry a painted frame). An entry says the
+frame left that buffer's content rect holding the window's page with
+nothing over it — the window focused and on top, the chrome quiet, no
+overlay, popover, scrim or cursor, no window under it drawing into it — and
+the part of the page the frame changed: what the content says its draw
+changed, nothing on a frozen frame, unknown otherwise. When the
+RETAINED_FRAMES frames before this one all have entries, the buffer this
+frame paints holds the page but for the changes of all but the oldest, and:
+
+- **the stamp copies only those and this frame's**, nothing on a frame that
+  changed nothing;
+- **a direct render tells the content what lags** before it draws, and the
+  content repaints that and its own change. A buffer the ring cannot vouch
+  for is seeded by stamping the window buffer into it, when that buffer's
+  own lag is known. A content that speaks the protocol renders straight
+  into the root on every frame that changes its page (a key's, a press's,
+  not only a gesture's) where the chrome is quiet, its window on top and
+  the ring vouches for that buffer; a full-screen row over it is painted
+  again only where the lag or the draw reached the row;
+- **the window buffer direct render left behind keeps the content's
+  changes as its lag**, which the first frame after the release repaints
+  instead of the whole page;
+- **a frame whose next buffer the ring cannot vouch for asks for it** while
+  the board is idle, as Paint's own `settle` does for its canvas, so the
+  next press finds every buffer known. A frame asked for that changed
+  nothing known stops asking.
+
+**The protocol is three names on the content's Layer**: `HELD = True`;
+`retained(known, x0, y0, x1, y1)`, before each draw the WM makes of it in
+its window — whether the target holds its page as of its last draw, and the
+part that lags; `changed()`, after it — the part of the page the draw
+changed, or None. Two more are optional: `vouched(v)`, before the draw, the
+WM's word for the buffer `shift_last` reads (2: it holds the page as the
+last draw left it; 3: and the ring vouches for the buffer this frame
+paints, so a text view moves out of the last buffer only the bands its rows
+frames since drew); and `takes_lag(lag)`, whether this frame's draw
+repaints `lag`, what a direct render's target lags -- where it answers
+False the frame is not rendered straight into the root (the desk Editor's
+prompts draw their rows only into a buffer that lags nothing, and its Code,
+Blocks, Settings, Map and Sound panes repaint a lag inside the focused pane
+alone: a lag beyond it would draw the desk whole and leave the next buffer
+as far behind). The WM asks `HELD` and `takes_lag` before it installs the
+window's layout; a content whose answer depends on its layout answers in
+the one it drew in last (`EditorDesk._drew_in`). A content counts the
+WM's word only when its previous draw was one the WM spoke of too. A
+content without the names draws whole, as every content did before, and its
+stamps stay whole. Paint is the first to speak it.
+
+**This is not a second invalidation mechanism.** Nothing here decides
+whether a surface draws: the gate, the gens and §14.1's freeze still do. It
+is §4's last-seen per physical buffer, kept below surface granularity for
+one rect, from what the content says it painted on the frame it painted it —
+the trust `note_damage` already places in the WM (§5.2). On the rotated
+compositor the window's damage is that change rect, not the window.
+
+**An app on the verbs draws every frame it draws straight into the glass**
+(`WindowedWM._speaks`: its pages' frames say what they change, docs/scroll_and_text_2026-10.md §8)
+when its window is focused and on top with nothing over it: its press,
+drag, coast, key and glide frames, each with no desk restore and no
+chrome, since a page moving on its own (`ws.ui_moving`) changes its
+window's content alone (`_frame_is_quiet`). Its entry in the ring is its
+page's rect, changed or not (`_still_shown`: a frame whose page did not
+change and whose buffer holds it draws nothing), and the ring is the
+voucher its pages shift by (§14.7). Each entry also says where the page
+lay and whether the frame changed anything on the glass outside it (no
+other window, clock, tile or chip drew), which is what a buffer's debt is
+made of (§14.6).
+
+Pinned by `tests/test_wm_shown.py`: pointer and held-key strokes on one, two
+and three buffers presented in turn, every presented frame byte-equal to
+full repaints, every frame from the press through the release a stroke
+frame, and the stamps' bytes bounded; and by `tests/test_wm_records.py`
+for the apps on the verbs (below and §14.7).
+
+### 14.4 The desk home's still backdrop (2026-10-26)
+
+The desk's console home is a still backdrop under three parts that change:
+the hero with its details pane (the selection), the shelf's band and the
+bar. A full paint draws the backdrop whole; on the P4 that is a third of the
+frame, and a key press on the shelf, a tab switch or a fling's last frame
+paid it because the selection or the tab sat in the statics key the drag
+partial gates on. #66 has the numbers.
+
+**The home keeps §4's per-buffer last-seen for its parts**
+(`LauncherHomeLayer._still_ring`, a `PaintRing` slot a painted frame): the backdrop's
+key, the selection's and the band's, recorded only for a frame whose pixels
+were the home's alone (`content_alone`: no overlay, splash, cursor or owed
+pill over it, the home on top, nothing animating). When the RETAINED_FRAMES
+painted frames before this one all have entries under this frame's backdrop
+key, every buffer holds the backdrop, and a part whose key differs from any
+of theirs lags in the buffer this frame paints: it alone is put back over the
+backdrop and drawn; the bar's strip, outside every such rect, is drawn
+where the buffer's was drawn under another key (the ring keeps the bar's
+`shown_key` beside the parts) or a part put back meets it.
+Where it can be had, the backdrop's pixels come from the wallpaper itself
+(`Wallpaper.restore_key`: the picture, the theme's baked backdrop or the
+plain fill); a cart wallpaper keeps the drag partial and its band copy.
+
+**A change leaves the other buffers lagging, and the home asks for the frames
+that bring them to it** while nothing moves and no press waits (as the
+windowed WM's `debt_owed` does). The retained re-entry frame is captured once
+every buffer holds the frame, and copies only the parts that moved since the
+frame it holds (`_moved_rects`).
+
+**This is not a second invalidation mechanism.** Whether the home paints is
+still the gate's; the ring only says which of its parts the buffer lacks.
+Pinned by `tests/test_home_still.py`: a session of key presses, tab switches,
+a drag and a fling, and the buttons' focus, on one, two and three buffers
+presented in turn, the glass's every picture byte-equal to full repaints'.
+
+### 14.5 The page held under a dialog (2026-10-26)
+
+A dialog takes the keys and the pointer, so the page under it does not
+change while it stays up; a frame that types into it or moves its focus
+paid the page and its wash anyway, and on the T-Deck the two were most of
+the frame. #66 has the numbers.
+
+**A modal keeps the page under it washed** (`ui_draw.HeldPage`): the first
+frame draws the page and washes it (`HeldPage.wash` over
+`ui_draw.wash_page`, the toolkit's own rule: the surface less the page's
+hint band at its foot), the wash storing each pixel to the held layer as
+it lands (`moy_shape_shadow_io`) and the rest of the page's rect copied
+there after it; each frame after puts the copy back and draws the dialog
+over it with `{"wash": False}`, the override that tells a dialog its page
+is washed already. The copy is held under a key of what the page is a
+function of while the dialog is up — the dialog itself, the canvas, the
+page's rect, the font scale and the look — and only from a frame whose page
+was still (its context owed no frame), with nothing animating, on a canvas
+that retains its pixels and draws into its whole buffer: a pane's viewport
+(the desk Editor's) draws the page every frame. One modal is up at a time,
+so the holds share one layer of the canvas's size, kept across dialogs
+and freed by the Player's fit check after the home's retained frame
+(`docs/shell_layout_2026-10.md` §3). The Editor's Cart info
+dialog and Blocks' entry prompts hold their page; the pause and stop cards
+hold the run's frame washed beside the frame `_keep_under` keeps for the
+resumed game, whose layer is kept across cards and freed by the fit check
+the same way; where the game's frame is the system canvas (the handheld)
+an idle frame mints both, so no card's first frame does.
+
+**A dialog's first frame takes the page from the last frame where it can**
+(`HeldPage.shown`, `opened`, `last`): where the frame before drew the page
+with no dialog up, still and alone on the glass (no banner, overlay,
+cursor or pill over it, nothing animating), and the input that opened the
+dialog changed nothing else in the page -- A on a Blocks slot with no move
+among its keys, A on Cart info's door -- with no change reported since
+that frame (the console's `_dirty_in`, taken before the input's own), the
+first frame washes that page out of the buffer the frame drew into
+(`last_buffer`, the compositor's face of §14.6's buffer; `copy_last` where
+a compositor names no such buffer; one persistent buffer holds it already)
+instead of drawing it, and holds it as above. A dialog a page's own draw
+opens (a tap on its link) draws the page, which drew this frame anyway. The system menu
+holds the handheld home the same way (`SystemMenuUI.put_home`): where the
+fullscreen WM draws the home and the menu's card alone, the whole frame
+under the card -- the bars, the washed content and the hint strip naming
+the menu's keys -- is held under the home's retained key and the scrim's
+rects, the scrim storing to the held layer as it lands, and kept across
+opens while that key holds. The home captures no retained frame under the
+hold, so the menu's close stamps the one from before it.
+
+**A frame that only types into the dialog or moves its focus puts nothing
+back** (a dialog's rows frame, §14.7): the Editor's dialogs begin their
+frame ahead of the page (`ui_draw.DialogRows`), and where the engine
+licenses one and every buffer holds the page as the frames before left
+it -- each of the RETAINED_FRAMES painted frames before drew the same
+dialog over the hold, alone on the glass (`HeldPage.note`, `rows`) -- the
+dialog draws its changed rows and the page stays as it is. On the desk the
+window's buffer is the hold: while a pane's tab has a prompt up the desk
+Editor speaks §14.3's protocol (`EditorDesk.HELD`, `retained`, `changed`),
+and a frame whose buffer holds the desk as its last draw left it, with no
+input the desk took itself (a press, a chord) and no look, size, layout or
+bar key moved, draws the prompt's rows alone; the stamp copies them, and
+the full-screen row over the band stays as the buffer holds it
+(`WindowedWM._row_over`).
+
+**This is not a second invalidation mechanism.** Whether a frame paints is
+still the gate's; the copy only says what the page already is. Pinned by
+`tests/test_held_page.py`: the dialogs typed into and moved, on the handheld
+and the desk, the dialogs the keys open (after a move no frame painted, with
+a move among their keys, under the trackball's cursor), and the cards over
+a run, on one and two buffers presented in turn, every presented frame
+byte-equal to frames that draw the page and let the dialog wash it, the
+hold put back on most of them and the last frame's page taken on the first
+frames that may.
+
+### 14.6 A frame the last one painted: the copy out of its buffer (2026-10-26)
+
+§14.3, §14.4 and the windowed WM's debts (`_full_debt`, the popover's and
+the scrim's owed paints) bring a lagging buffer to the glass by drawing
+again what it lacks: a change is painted once per buffer. Where nothing
+changed since the last painted frame, the buffer that frame presented holds
+this frame's picture, and copying it out is cheaper than drawing it again.
+#66 has the numbers.
+
+**The backend verb is `copy_last(x, y, w, h)` on the root canvas**, bound
+from its compositor where that compositor names the buffer the last
+presented frame drew into (the P4s' DSI and rotated compositors, the S3s'
+banded one), absent elsewhere (the web's canvas, one persistent buffer,
+has none). It copies the rect, in buffer coordinates, from that buffer
+into the one this frame draws into: on a P4 after fencing any queued op
+still writing it (`moy_dsi_last`), whole rows through the AXI GDMA
+(`moy_ppa.copy`) and any other rect a row copy on the CPU; on an S3 a row
+copy on the CPU, the panel's feeder reading the same buffer alongside
+(`moy_banded_last`). One persistent buffer copies nothing; no frame yet
+answers False and the caller draws. `last_buffer()`, bound the same way where the
+compositor has it (the S3s' banded one, the host's), answers that buffer
+itself where it is not the drawn-into one, None otherwise: for a pass that
+reads it instead of copying it out (a wash over the last frame, §14.5). It is the frame's first
+write to what it copies. The host compositor's `last` is a test's ring of
+buffers presented in turn.
+
+**A ring that knows the last frame held this one copies instead of
+drawing**, the lag it copies being the ring's own:
+
+- **the windowed WM's debt frame of a still desk** with no popover and no
+  playtest (`_RepeatLayer`): the rows the frames since its buffer was
+  painted changed, where each changed nothing outside the focused window's
+  page (`_debt_rows`, from the shown ring's entries, §14.3), else the whole
+  glass. It copies whatever the focused window's buffer holds, so a buffer
+  direct render left behind never holds a debt up (`debt_owed`). Its shown
+  ring entry is the last frame's, the page unchanged;
+- **a playtest's debt frame** -- the quiet one after a whole frame, and
+  the frame the system menu's scrim comes over the game on, which washes
+  the copy once: the whole glass
+  (whole rows are the GDMA's; round the game's rect they would not be), then
+  the quiet stack over it (`_lead_quiet_stack`,
+  `_lead_pop_stack`), the game's fresh frame composited (and washed) and the
+  popover's debts paid out of the copy;
+- **a popover's ride** while the popover is as the last frame left it
+  (`_pop_seq` counts its changes, `_repeating` is the frame's verdict): the
+  scrim's rect, the card's, the pause menu's over its paused playtest
+  and a stopped run's card over its stopped one;
+- **the desk home's still frame** whose ring's last entry holds this
+  frame's parts and bar: the rows its lagging parts span, whole. Its
+  retained re-entry frame, which every buffer then holds, is captured on
+  the next idle frame or before the next painted one draws
+  (`capture_due`), so a held key's glide does not pay it.
+
+"The last frame held this one" is checkable: the last painted frame is the
+one before (`_painted_f`, the ring's entry for it), and nothing reported a
+change since -- the desk settled and calm (§14.1's terms), no popover
+change, no playtest window but a held one (paused, or stopped under its
+card), nothing animating; or, beside a running playtest, nothing changed
+but its game (the quiet frame's terms).
+
+**This is not a second invalidation mechanism.** Whether a surface paints
+and what a buffer lacks are still the gate's and the rings'; the copy only
+replaces the drawing of what they name. Pinned by
+`tests/test_p4_display.py` (the verb: the buffer it names, its fence, the
+GDMA and CPU halves), `tests/test_wm_windowed.py` (debt frames and the
+scrim's ride copying, every buffer then byte-equal to whole repaints) and
+`tests/test_home_still.py`.
+
+### 14.7 A frame that moves the last one: the shift frame (2026-10-27)
+
+§14.3 to §14.6 bring a lagging buffer to the glass by drawing what it lacks
+or copying what the last frame painted. A scrolling page moves: frame n
+draws the same rows as frame n-1, moved, plus a band. The shift frame is that
+change spoken as a record (`docs/scroll_and_text_2026-10.md` §3 is the
+design; this is the contract): what a frame changed is ROWS (rects the draw
+repainted), or one region R TRANSLATED by Δ -- the pixels moved, the |Δ|
+rows the move uncovered drawn, and rows beside them.
+
+**The two Δ rules.** Inside R a shift is always n-1 → n by this frame's Δ,
+out of the buffer frame n-1 drew, licensed only when frame n-1 painted R
+whole with nothing over it, whatever the ring's depth: translations never
+compose. Outside R, what a buffer lacks is every frame's rows since that
+buffer last took a paint, and those are drawn. Where a canvas has a single
+persistent buffer (the host's and the browser's root, window buffers,
+layers), that buffer held the frame before, and the move happens in place.
+
+**The backend verbs.** A canvas's `shift_last` moves the rect of the buffer the last presented frame drew into, by (dx, dy), into
+the buffer this frame draws into, and answers False where it cannot (the
+caller draws); `shift_fence()` makes the rows it wrote the CPU's to draw
+over. `copy_last_into(layer, ...)` copies a rect of that buffer into a
+layer. Per canvas: the P4s' 2D-DMA, the S3s' row copy beside the feeder, in
+place on one buffer (`device/device_canvas.py`, the compositors in
+`native/moy_glass`). A canvas whose copy costs about what the raster it
+saves does declares it (`SHIFT_COST`, per mille of a row's raster a row it
+copies costs: the T-Deck's root), and a frame whose floor leaves too
+little of R undrawn to pay for the copy draws whole (`ui_draw._pays`);
+None, unmeasured, shifts.
+
+**One voucher per region.** Who says frame n-1 painted R whole: under the
+windowed WM the shown ring (`_shown`) for a window's content, never the
+content (`WindowedWM._vouches`, handed to the page's host for the draw:
+`ui_draw.window_frame`); on the full-screen tier the content's own `PaintRing`
+(`ui_draw.PaintRing`, the slots `ScrollRegion`'s #113 ring also keeps),
+because the stack draws everything around R every frame. The WM says which
+(`CONTENT_RING`), and the console tells each painted frame whether the
+content is alone on the glass (`ui_draw.paint_frame`: no overlay, splash,
+cursor or owed pill over it, `content_alone`).
+
+**The verbs engine's floor.** What licenses a shift frame of a verbs page is
+known at the engine's begin: the input it applied (a drag, a coast's or a
+glide's step, a focus move, a key typed into a field, a placed table's row
+step) and the generation every page, placed table and picture inside R
+carries (`gen` in the override block, the app's word that what it draws
+there is a function of it). A page with no gen, a stop `ui.at` placed
+inside R, a picture with no gen, a press, an activation, a stepped value, a
+hover, a dialog, a popover, a tooltip: the frame draws whole; so does the
+frame after a pass whose answer changed what it had already drawn
+(`AppHost.again`), whose page is not the app's. The pass then draws the FLOOR -- the band, the fades,
+the rows whose marks moved -- and every draw goes once through each piece
+of the frame's region it reaches (outside R, and the floor's rects), so a
+floor pixel takes every draw over it in a whole frame's order; the floor only
+widens during the pass (a stop unlike the last frame's takes R from its top
+down, but for a placed stop that moved where the floor holds both its
+boxes; a picture whose gen moved, its box). What a stop outside R draws
+into R -- a box reaching in, a mark's reach -- is floor where R moved or
+its marks changed, and a stop drawn before R opens makes the floor the
+pass's from its start, so its part of R draws through it (Get Carts' Check
+on the desk reaches four rows into its shelf). A key typed into a field joins
+the floor as the field's row, and a field whose text changed with no key
+typed (the app's own) takes its row during the pass: its stop keeps its
+text's hash. A dialog over a held page (`wash` false) whose app gives it a
+`gen` has rows frames of its own: R is its card and the drop under it as
+the last frame drew them, the floor the rows of the stops whose marks move
+and of the field typed into, all inside the card's rows its rounded
+corners leave whole (a corner drawn again would blend over itself), and
+the dialog draws through its floor alone -- what lies outside R is the
+page under it, its host's to keep. A dialog that comes up otherwise than
+planned (its card, title, buttons or gen) draws nothing that frame and
+owes the next. `moy_ui_api.h` is the authority.
+
+**This is not a second invalidation mechanism.** Whether a surface paints is
+still the gate's, the gens', §14.1's freeze's and the Class B declaration's
+(a moving page is `api_moving`); the record only says, for a frame that IS
+painting, what its buffer lacks, and `shift_last` replaces the drawing of
+what it moved, as `copy_last` does a whole frame. The one ring body is a
+grep. Pinned by `tests/test_shift_frames.py` (the engine: drags, flings,
+glides, every move size, the clamps, a gen moving mid-fling, a cover landing,
+overlays, a theme change, a gap, a deferred copy landing at the fence),
+`tests/test_shift_apps.py` (Settings and its pages, My Art, Get Carts,
+Files, Storybook and Appearance on the full-screen console, a declared copy
+cost, and a change to what a page shows made with no mark of the app's),
+`tests/test_wm_records.py` (every app on the verbs in a desk window, the
+Waveshare P4's desk, windows overlapping, a focus change and a move
+mid-coast, a popover and the system menu's scrim over a glide, and each
+change Files, Storybook and Appearance must move their gens for),
+`tests/test_home_band.py` (the home's band: grid, icons and carousel,
+handheld and desk, on plain, backdrop and picture themes) and
+`tests/test_dialog_rows.py` (the Editor's dialogs typed into and moved
+through, on the handheld and the desk, and Settings' Name field), each
+presented frame, with up to three buffers taking
+turns, byte-equal to whole repaints, the share of shift frames held above a floor,
+and the engine's record audit failing any shift frame whose stops moved
+outside its floor or reached into R outside it.
+
+## 15. Amendment: the Surface's home is the kernel (2026-10-07)
+
+§16 removes the table this amendment moved; the kernel epoch it adds stays.
+
+`docs/native_kernel_2026-09.md` §8 asked for this before its sprint 3, and
+`docs/kernel_survival_2026-10.md` §3.3 is the crossing that executes it. The
+model does not change; what moves is where the §2 object lives and through
+what a producer signals.
+
+**What moves.** The surface record, the registry, the one monotonic mint, the
+set-level epoch and the prefix-scoped sync are the kernel's: a handle table of
+kind SURF (the kernel doc's §4.3), rows allocated in PSRAM, reached from
+Python, Lua and wasm through the kernel's bindings. A producer signals through
+the row's handle — `touch` for an attributed Class A change, `move` for
+placement, `animating` for Class B, `epoch` for the un-attributed case — and a
+consumer reads `content_gen` folded with the epoch and compares it `!=`
+against its own last-seen. The Python leaf `runtime/surface.py` is deleted by
+the glass pass; the WM mints sids from its registry keys as before and holds
+handles instead of objects.
+
+**Why now, and at what scope.** The registry is inert on every shipping tier
+today: no canvas defines `begin_surface`, `wm_windowed`'s `_recording` is
+never set, and nothing reads a gen — the P4 desk's retained caches and streaks
+and the launcher's are the Python window managers' and stay theirs: §9's
+Phase C was the kernel plan's sprint 7 (the window managers), which does not
+run (`docs/native_kernel_2026-09.md` §10 question 8).
+So the glass pass ports the registry as it is, inert, plus the epoch fold, and
+no kernel compositor reads a gen in sprint 3; §7's ledger rows that fold
+fields "in C" mean Phase C, as they always did, and with it the per-buffer
+N-deep last-seen and the frame gate's predicate stay Python. Two things make the move worth doing now rather than then. From
+sprint 4 a Lua or wasm cart runs with no VM on the S3 boards: L9 still holds
+for it — content-dirty exactly on the frames it renders — and there is no
+Python left to say so, so the producer signal has to be a kernel call. And
+from sprint 3 the kernel draws frames of its own under a Python window
+manager (the idle wake, the screensaver, the parked screen, the floor's
+text), which needs a signal in the other direction:
+
+    uint32_t moy_glass_kernel_epoch(void);   // moved by every frame the kernel drew itself
+
+The frame gate reads it as one more leg — the kernel epoch moved since this
+console's last painted frame counts as dirty for `RETAINED_FRAMES` frames, so
+every retained buffer is repainted — which keeps the idle wake's rule (the
+panel never holds a stale frame after a wake) with no change to the WMs'
+caches.
+
+**What does not change.** §1's model and §2's laws, L1 to L10; the three
+producer classes of §3; the compositor contract of §4, `end_frame` included;
+the annexes; and §8's graveyard, LVGL included — the kernel is code of our
+own, built for the host as much as for the boards, and carries no widget tree
+(L7); a backend still implements §4 and invents no invalidation mechanism
+(L10). The §8 ruling against per-object
+generation counters stands and is not touched by handles: a handle's
+generation is the table slot's and refuses a stale handle; a content gen is the
+mint's and is compared, never validated. L6's arithmetic holds on the S3
+because the `_dirty` writes are untouched and the frame gate folds them into
+one kernel call per painted frame. L8's two directions read the kernel's gens
+and counters on every tier.
+
+`runtime/console.py`'s frame gate and `wm_windowed`'s content freeze (§14.1)
+are Python over the kernel's table: the window managers stay Python (sprint 7
+does not run, `docs/kernel_toolkit_2026-10.md`), so the predicate in C, the
+row §7 reserved for it, waits for whatever moves the window managers.
+
+## 16. Amendment: the surface table is removed (2026-10-27)
+
+§13 kept the registry for groundwork and §15 moved it into the kernel, and in
+both states nothing read a gen: no canvas defined `begin_surface` or
+`skip_surface`, `WindowedWM._recording` was never set, and the retained
+caches, streaks, §14's freeze and ring are the window manager's own
+per-buffer state. The registry is deleted with everything that fed or probed
+it: the WM's gesture and window signals, the console's and the launcher's
+`begin_surface` probes, the kernel's SURF table (`moy_surface_*`; the id
+`MOY_KIND_SURF` stays reserved) and the glass bindings that reached it. The
+sid, gen and skip-draw vocabulary of §2 to §4 names a model with no code
+behind it; a backend that wants one needs the evidence L10 asks for.
+
+What stays is the KERNEL EPOCH (`moy_glass_kernel_epoch` / `_bump`, the
+bindings' `kernel_epoch` / `kernel_bump`): the frame gate's leg for the
+kernel's own draws (§15).

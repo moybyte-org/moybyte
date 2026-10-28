@@ -23,8 +23,8 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
 # THE PARTITION TABLE, and the reason this board needed a new one rather than
-# the siblings' (2026-08-29). The console S3 layout is two 5MB app slots plus a
-# 6MB vfs in 16MB of flash; on 8MB it does not fit, and the failure is not a
+# the siblings' (2026-08-29). The console S3 layout is two 6-7 MiB app slots
+# plus a vfs in 16MB of flash; on 8MB it does not fit, and the failure is not a
 # build error -- the bootloader REJECTS the table at runtime and the board boot
 # loops with no console (learned on this board, README's hardware facts).
 # What makes two slots fit here at all is that this image is headless: no
@@ -116,3 +116,36 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 # boards first. The one behaviour lost is machine.freq(x) as a SETTER, which
 # starts raising ValueError; the getter is unaffected.
 CONFIG_PM_ENABLE=
+
+# --- TLS in PSRAM -----------------------------------------------------------
+# mbedtls allocates through the IDF's own hook: with the default, every block
+# under SPIRAM_MALLOC_ALWAYSINTERNAL is internal SRAM. External puts all of
+# mbedtls's state in PSRAM, as on every console (the kernel's updater over
+# HTTPS, native/moy_net/moy_ota.c); what stays internal is the hardware
+# AES/SHA's DMA bounce.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# --- Code this headless board never runs ------------------------------------
+# Every line is flash spent TWICE, once per OTA slot, on the one board whose
+# slot is 3 MB because the browser console it serves rides the image (the
+# 2026-10 look grew that bundle by 71 KB and took the headroom floor with it).
+# Each is a driver or a protocol half with no caller here; the sizes are the
+# archives' contributions in the linked ELF.
+#
+# Wired and SPI Ethernet (~43 KB, libesp_eth): the board's only link is its
+# WiFi radio, and no pad carries a PHY or a MAC. Off, MicroPython's
+# `MICROPY_PY_NETWORK_LAN` defaults to 0 for an S3 and `network.LAN` is gone.
+CONFIG_ETH_USE_SPI_ETHERNET=
+# WPA2/3-Enterprise (EAP-TLS/PEAP/TTLS) in the supplicant: the board joins the
+# home network a kid's browser is on, by passphrase, and raises its own setup
+# access point.
+CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=
+
+# --- Compiled for size -------------------------------------------------------
+# MicroPython's sdkconfig.base compiles every esp32 board for speed (-O2), and
+# the console boards keep it: their frame is the CPU's. This board runs no
+# frame. Its work is a socket serving the baked bundle out of flash and a sync
+# batch applied in C, both bounded by the WiFi link, and -Os takes ~150 KB off
+# an image that pays for every byte twice, once per OTA slot.
+CONFIG_COMPILER_OPTIMIZATION_PERF=
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

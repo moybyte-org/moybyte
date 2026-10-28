@@ -1,0 +1,19 @@
+{"query": "?dev=1", "boot_ms": 30000, "steps": [
+  {"note": "the desk; Settings from the system menu, then its APPEARANCE row", "wait": 3000},
+  {"click": [16, 14]}, {"wait": 600},
+  {"click": [77, 104]}, {"wait": 1200},
+  {"click": [443, 273]}, {"wait": 1500},
+  {"note": "ACCENT's second swatch (coral): the look is custom, NAME... appears below the fold; the page scrolls to it and a tap on it opens the field"},
+  {"click": [845, 359]}, {"wait": 1200},
+  {"drag": [500, 520, 500, 320, 10]}, {"wait": 1000},
+  {"click": [575, 500]}, {"wait": 1000},
+  {"shot": "name_open"},
+  {"note": "a phone's keyboard: the typed text arrives as #kbin's input event, ENTER as its keydown"},
+  {"js": "(function(){var k=document.getElementById('kbin');k.focus();k.value=' nikola';k.dispatchEvent(new Event('input'));return k.value;})()"},
+  {"wait": 800},
+  {"js": "(function(){var k=document.getElementById('kbin');k.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return 'enter';})()"},
+  {"wait": 2500},
+  {"shot": "named"},
+  {"js": "document.getElementById('s').textContent"},
+  {"js": "window.__moyState().then(s => 'THEME ' + JSON.stringify(s.theme))"}
+]}

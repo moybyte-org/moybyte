@@ -85,6 +85,10 @@ class _Gate:
 
 
 def _host(ws, tmp_path, pin="1234", gate=None):
+    # The kernel's webhost is one per process: a host another test on this
+    # worker left serving would keep this one from configuring its own store
+    # and pin, so each test starts from a stopped one.
+    moy_webhost.moy_net.web_stop()
     h = moy_webhost.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
                             pin=pin, with_sd=gate,
                             update=moy_webhost.ConsoleUpdate(ws))
@@ -176,7 +180,7 @@ def test_a_board_that_cannot_update_says_so_differently_from_one_that_cannot_hea
     code, payload = _reply(h.handle_http("GET", "/update?pin=1234", None))
     assert code == 503
     assert json.loads(payload) == {"error": "no updater"}
-    assert h.handle_http("GET", "/updates?pin=1234", None) is None
+    assert _reply(h.handle_http("GET", "/updates?pin=1234", None))[0] == 404
 
 
 def test_the_update_route_does_not_shadow_the_store(tmp_path):
@@ -214,7 +218,19 @@ def _parked(ws, host):
     screen -- the state every request in this section arrives in, and the one
     that made a browser-driven install impossible: the update screen is not up,
     so nothing would have advanced it."""
-    host.serving = True
+    import socket
+    for attempt in range(5):            # a free port can be taken before the bind
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        host.port = s.getsockname()[1]
+        s.close()
+        try:
+            host.start(ip="127.0.0.1")
+            break
+        except OSError:
+            if attempt == 4:
+                raise
+    assert host.serving
     ws.webhost = host
     ws.web.park()
     assert ws.web.parked
@@ -334,7 +350,7 @@ def test_the_hand_off_keeps_the_radio_for_the_update_screen(tmp_path):
     h.handle_http("POST", "/update?pin=1234", '{"action":"check"}')
     h.update.step()
     assert ws.wm.top_kind() == "update"
-    assert ws._wifi_holders == {"update"}
+    assert ws.leases.holders() == ["update"]
     assert ws.wifi.radio is True
     assert ws.wifi.radio_offs == 0, "the radio was cycled inside the hand-off"
 
@@ -344,10 +360,10 @@ def test_the_update_screen_lets_the_radio_go_on_exit(tmp_path):
     ws.open_settings()
     ws.update_ui.open_update_online()
     assert ws.update_ui._upd_phase == "checking"
-    assert "update" in ws._wifi_holders and ws.wifi.radio is True
+    assert "update" in ws.leases.holders() and ws.wifi.radio is True
     ws.update_ui._exit_update()
     assert ws.wm.top_kind() == "settings"
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 def test_a_failed_hand_off_holds_no_radio(tmp_path):
@@ -362,7 +378,7 @@ def test_a_failed_hand_off_holds_no_radio(tmp_path):
     h.update.request("check")
     h.update.step()
     assert h.update.state == "error"
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 # -- the two guards on the asymmetry -----------------------------------------
@@ -380,14 +396,16 @@ def test_the_console_path_never_takes_the_storage_gate(tmp_path):
     gate = _Gate()
     h = _host(ws, tmp_path, gate=gate)
     _parked(ws, h)
+    gate.entries = 0                        # the start's own look at the volume
     h.handle_http("GET", "/update?pin=1234", None)
     h.handle_http("POST", "/update?pin=1234", '{"action":"install"}')
     h.update.step()
     assert gate.entries == 0, "the update endpoint reached storage"
-    # ...and the counter is LIVE, so the zero above is a fact about /update and
-    # not about a gate nothing was ever going to call.
-    h.handle_http("GET", "/carts.json?pin=1234", None)
-    assert gate.entries == 1
+    # ...and nothing under it touched the store by the kernel's route either.
+    from runtime import net_binding as nb
+    before = nb._drains()
+    h.handle_http("GET", "/update?pin=1234", None)
+    assert nb._drains() == before
 
 
 def test_the_backend_is_pumped_by_the_host_and_not_by_a_board(tmp_path):

@@ -16,7 +16,7 @@ from pathlib import Path
 GOLDEN = Path(__file__).resolve().parent / "shell_goldens" / "wasm_tier.json"
 ROW = "rgb565_320x240_fps_corner_zeroed"
 W, H = 320, 240
-CORNER = (W - 40, H - 14)      # perf_hud.PerfHud._fps_tap_rect on 320 x 240
+CORNER = (W - 60, H - 24)      # perf_hud.PerfHud._fps_tap_rect on 320 x 240
 
 
 def digest(words):

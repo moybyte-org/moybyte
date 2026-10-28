@@ -18,13 +18,16 @@
 html,body{margin:0;height:100%;background:#0b0f1a;color:#c2c3c7;
 font:14px ui-monospace,Menlo,Consolas,monospace;display:flex;flex-direction:column;
 align-items:center}
-h1{font-size:14px;color:#fff1e8;margin:8px;max-width:96vw;white-space:nowrap;
+/* html is a centring flex column, which would size body to its widest child's
+   min-content (the nowrap title) and push the document wider than the viewport. */
+body{width:100%}
+h1{font-size:14px;color:#fff1e8;margin:8px;max-width:calc(100% - 16px);white-space:nowrap;
 overflow:hidden;text-overflow:ellipsis}#s{color:#ffec27}
 /* Small phones (e.g. iPhone 13 mini): the full title used to wrap to two rows and
    steal canvas height -- drop the "device" suffix + the backtick hint (meaningless
    without a physical keyboard) on coarse pointers; nowrap+ellipsis backstops the rest. */
 @media (pointer:coarse){h1 .dv,h1 small{display:none}}
-/* Long-press guard: HOLDING a control (the hold-to-exit burger, a d-pad direction, A/B)
+/* Long-press guard: HOLDING a control (a d-pad direction, A/B)
    used to start the OS text-selection -- iOS magnifier/blue highlight, Android context
    menu -- because plain user-select isn't enough there: iOS wants the -webkit- prefix +
    -webkit-touch-callout, and the page text (title/status) had no guard at all for a hold
@@ -33,7 +36,7 @@ overflow:hidden;text-overflow:ellipsis}#s{color:#ffec27}
    and must not inherit the guard. */
 @media (pointer:coarse){body{-webkit-user-select:none;user-select:none;
 -webkit-touch-callout:none}
-#kbin{-webkit-user-select:text;user-select:text}}
+#kbin,#crash{-webkit-user-select:text;user-select:text}}
 /* Presentation scale: the OS renders at its DESIGN resolution (320x240 /
    1024x600); fit() uses the whole available viewport while the browser keeps
    nearest-neighbour sampling. Desktop users have real keyboard/pointer input,
@@ -87,6 +90,12 @@ color:#c2c3c7;background:#1d2b53;border:1px solid #29366f;border-radius:4px;padd
 #pz button,#pz .fb{cursor:pointer}
 #pz .fb:hover,#pz button:hover{border-color:#5f6f9f}
 #pzs.warn{color:#ffa300}
+/* The crash itself, ON the page: a phone has no devtools to "see". Above the
+   play splash (z-index 20), which a console that crashed while booting has
+   left standing. */
+#crash{display:none;position:relative;z-index:21;max-width:96vw;margin:0 auto 6px;
+white-space:pre-wrap;word-break:break-word;text-align:left;font-size:11px;
+color:#ff004d;background:#0b0f1a}
 /* THE LINK SURFACE, and there is exactly one of it. A board stops answering
    for two very different reasons -- an update or a wasm-mode hand-back (which
    the person just asked for, and which comes back) versus vanishing (which in
@@ -160,6 +169,7 @@ background:rgba(11,15,26,.82);border:1px solid #1d2b53;color:#00e436;font:12px u
 white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}</style></head><body>
 <div id=hud></div>
 <h1>Moybyte <span id=s>starting...</span> <small style="color:#5f6f9f">(press ` for stats)</small> <a id=tier href="?handheld=1" style="color:#5f6f9f;font-size:11px;text-decoration:none;border-bottom:1px dotted #5f6f9f">small screen?</a> <a id=pod href="#" style="display:none;color:#00e436;font-size:11px;text-decoration:none;border-bottom:1px dotted #00e436">play on device</a></h1>
+<pre id=crash></pre>
 <div id=pz><span id=pzs></span>
 <select id=pzc title="cart to export"></select>
 <button id=pze>export .moy</button>
@@ -266,23 +276,49 @@ if(awOn){awDepth+=n;awNode.port.postMessage({p:f},[f.buffer]);return;}
 var buf=actx.createBuffer(1,n,AUDIO_RATE);buf.getChannelData(0).set(f);
 var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
 var t=Math.max(actx.currentTime+0.02,audioNext);src.start(t);audioNext=t+buf.duration;}
+var fitSent=-1;
 function fit(){/* Fill the available viewport without the old integer-scale
 cliff (e.g. 1.95x used to collapse all the way to 1x on an ultrawide). Sized off
 the VISUAL viewport when the browser has one: iOS collapses it for the soft
 keyboard WITHOUT firing window.resize on close, which is how the canvas used to
 stick tiny after typing + PLAY (owner report 2026-07-23). */
-var hh=document.querySelector("h1"),ct=document.getElementById("ctl");
+/* The height left for the canvas is the viewport minus everything else the page
+lays out above and below it -- title, persistence row, link/import/pick cards,
+control bar, with their margins -- measured, so a row that wraps or a card that
+appears is accounted for and the document never outgrows the viewport (the
+embedded Try-it stage showed a scrollbar and a cut-off console). */
 var vv=window.visualViewport;
 var iw=vv?vv.width:window.innerWidth,ih=vv?vv.height:window.innerHeight;
-var rw=Math.max(64,iw-16);
-var rh=Math.max(64,ih-((hh?hh.offsetHeight:0)+(ct?ct.offsetHeight:0)+28));
+var used=2;/* the canvas's own 1px borders */
+for(var k=document.body.firstElementChild;k;k=k.nextElementSibling){
+if(k===cv||k.tagName==="SCRIPT"||k.tagName==="INPUT")continue;
+var cs=getComputedStyle(k);
+if(cs.display==="none"||cs.position==="fixed"||cs.position==="absolute")continue;
+used+=k.offsetHeight+(parseFloat(cs.marginTop)||0)+(parseFloat(cs.marginBottom)||0);}
+/* Framed (the project site's Try-it stage), the host page is told how much
+height the page needs besides the canvas, so it can size the frame to hold the
+console at its full width. */
+if(window.parent!==window&&used!==fitSent){fitSent=used;
+try{window.parent.postMessage({moyChrome:used+1},"*");}catch(e){}}
+var rw=Math.max(32,iw-16);
+var rh=Math.max(32,ih-used-1);
 // While the soft keyboard is up (#42) the viewport HEIGHT collapses (and the
 // gamepad block still counts against it), which used to shrink the canvas to a
 // stamp -- so size by width alone then; a phone is width-limited anyway.
 var ae=document.activeElement;if(ae&&ae.id==="kbin")rh=1e9;
 var s=Math.min(rw/W,rh/H);
-cv.style.width=Math.round(W*s)+"px";cv.style.height=Math.round(H*s)+"px";}
+cv.style.width=Math.round(W*s)+"px";cv.style.height=Math.round(H*s)+"px";
+// Below one device pixel a canvas pixel, nearest-neighbour sampling DROPS
+// whole columns and rows: a glyph loses its strokes ("Storybook" read
+// "Storybool", owner report 2026-10-18). Shrunk, the canvas is filtered;
+// shown at its size or larger, it stays pixelated.
+cv.style.imageRendering=s*(window.devicePixelRatio||1)<1?"auto":"";}
 window.addEventListener("resize",fit);
+/* A row or card appearing, wrapping or going away changes what the canvas has
+left, with no window event to say so. */
+if(window.ResizeObserver){var fitRO=new ResizeObserver(fit);
+for(var fk=document.body.firstElementChild;fk;fk=fk.nextElementSibling)
+if(fk!==cv&&fk.tagName!=="SCRIPT"&&fk.tagName!=="INPUT")fitRO.observe(fk);}
 // The visual viewport is what actually changes when the soft keyboard opens/
 // closes -- listen permanently (kbScroll's focus-scoped listener is separate).
 if(window.visualViewport)window.visualViewport.addEventListener("resize",fit);
@@ -319,19 +355,36 @@ for(var v=0;v<65536;v++){var p=swap?(((v&255)<<8)|(v>>8)):v;
 var r=(p>>11)&31,g=(p>>5)&63,b=p&31;
 L[v]=(255<<24)|(((b<<3)|(b>>2))<<16)|(((g<<2)|(g>>4))<<8)|((r<<3)|(r>>2));}
 LUT565=L;LUT_SWAP=swap;}
+/* Framed, the host page is told when the first frame is on the canvas (the
+project site swaps its still for the live console on it). */
+var firstBlit=true;
 function blit(fb){if(!fb||!rgba32||!LUT565)return;var t0=PT();
 var src=new Uint16Array(fb),n=rgba32.length,L=LUT565;
 if(src.length<n)n=src.length;
 for(var i=0;i<n;i++)rgba32[i]=L[src[i]];
 var t1=PT();cx.putImageData(img,0,0);var t2=PT();
 if(t1-t0>PERF.mb)PERF.mb=t1-t0;if(t2-t1>PERF.mu)PERF.mu=t2-t1;
-PERF.sb+=t1-t0;PERF.su+=t2-t1;PERF.sn++;}
+PERF.sb+=t1-t0;PERF.su+=t2-t1;PERF.sn++;
+if(firstBlit){firstBlit=false;if(window.parent!==window)
+try{window.parent.postMessage({moyLive:true},"*");}catch(e){}}}
 var q=[];function send(e){q.push(e);}
 function xy(cX,cY){var r=cv.getBoundingClientRect();var x=Math.floor((cX-r.left)/r.width*W),
 y=Math.floor((cY-r.top)/r.height*H);return{x:Math.max(0,Math.min(W-1,x)),y:Math.max(0,Math.min(H-1,y))};}
-var drag=false;
-cv.addEventListener("pointerdown",function(e){cv.focus();cv.setPointerCapture(e.pointerId);drag=true;
-var p=xy(e.clientX,e.clientY);send({type:"down",x:p.x,y:p.y});e.preventDefault();});
+var drag=false,mid=false;
+// The middle button is its own (mdown/mup; moving it is a hover), the
+// others the finger, with the modifiers held as it went down (Shift+click).
+cv.addEventListener("pointerdown",function(e){cv.focus();var p=xy(e.clientX,e.clientY);
+if(e.button===1){mid=true;cv.setPointerCapture(e.pointerId);send({type:"mdown",x:p.x,y:p.y});e.preventDefault();return;}
+cv.setPointerCapture(e.pointerId);drag=true;
+send({type:"down",x:p.x,y:p.y,mods:kmods(e)});e.preventDefault();});
+// The wheel, in notches (a line-mode notch is three lines, a pixel-mode one
+// 100 px, a trackpad's fractions carried to the next event), on the canvas
+// only, with the modifiers held as it turned.
+var wA=[0,0];
+cv.addEventListener("wheel",function(e){var u=e.deltaMode===1?3:(e.deltaMode===2?0.34:100);
+wA[0]+=e.deltaX/u;wA[1]+=e.deltaY/u;var dx=Math.trunc(wA[0]),dy=Math.trunc(wA[1]);
+wA[0]-=dx;wA[1]-=dy;if(dx||dy)send({type:"wheel",dx:dx,dy:dy,mods:kmods(e)});
+e.preventDefault();},{passive:false});
 cv.addEventListener("pointermove",function(e){var p=xy(e.clientX,e.clientY);
 if(!drag){
 // HOVER (2026-07-31): report the idle pointer too, or the shell's hover
@@ -344,12 +397,18 @@ if(q.length&&q[q.length-1].type==="hover")q[q.length-1]={type:"hover",x:p.x,y:p.
 else send({type:"hover",x:p.x,y:p.y});
 return;}
 send({type:"move",x:p.x,y:p.y});e.preventDefault();});
-function up(e){if(!drag)return;drag=false;send({type:"up"});if(e)e.preventDefault();}
+cv.addEventListener("mousedown",function(e){if(e.button===1)e.preventDefault();});
+function up(e){if(mid&&e&&(e.button===1||e.type==="pointercancel")){mid=false;var p=xy(e.clientX,e.clientY);
+send({type:"mup",x:p.x,y:p.y});e.preventDefault();return;}
+if(!drag)return;drag=false;send({type:"up"});if(e)e.preventDefault();}
 cv.addEventListener("pointerup",up);cv.addEventListener("pointercancel",up);
 var jE=document.getElementById("joy"),tE=document.getElementById("th"),jA=false,jP=null,
 jH={left:false,right:false,up:false,down:false};
+// The joystick and A/B are the page's gamepad: their holds name the `pad`
+// source (web_boot's WEB_INPUTS), so a tap on them makes the pad the input in
+// use and the hints draw its buttons, never the desk keyboard's.
 function jAp(d){["left","right","up","down"].forEach(function(n){var w=!!d[n];if(w!=jH[n]){jH[n]=w;
-send({type:"hold",name:n,down:w});}});}
+send({type:"hold",name:n,down:w,src:"pad"});}});}
 function jT(e){var r=jE.getBoundingClientRect(),cX=r.left+r.width/2,cY=r.top+r.height/2,
 dx=e.clientX-cX,dy=e.clientY-cY,rad=r.width/2,d=Math.sqrt(dx*dx+dy*dy);
 if(d>rad&&d>0){var s=rad/d;dx*=s;dy*=s;}tE.style.transform="translate("+dx+"px,"+dy+"px)";
@@ -361,80 +420,52 @@ function jEnd(e){if(!jA||(e&&e.pointerId!=jP))return;jA=false;jP=null;jAp({});
 tE.style.transform="translate(0,0)";if(e)e.preventDefault();}
 jE.addEventListener("pointerup",jEnd);jE.addEventListener("pointercancel",jEnd);
 function wb(id,nm){var el=document.getElementById(id),dn=false;
-function pr(e){if(dn)return;dn=true;el.classList.add("pr");send({type:"hold",name:nm,down:true});if(e)e.preventDefault();}
-function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold",name:nm,down:false});if(e)e.preventDefault();}
+function pr(e){if(dn)return;dn=true;el.classList.add("pr");send({type:"hold",name:nm,down:true,src:"pad"});if(e)e.preventDefault();}
+function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold",name:nm,down:false,src:"pad"});if(e)e.preventDefault();}
 el.addEventListener("pointerdown",function(e){el.setPointerCapture(e.pointerId);pr(e);});
 el.addEventListener("pointerup",rl);el.addEventListener("pointercancel",rl);el.addEventListener("pointerleave",rl);}
-wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME (Stage 5 EXIT key): a HELD wb button streams "home" down, so holding it ~700ms is the hold-to-exit gesture (server-side synthesized hold)
+wb("ba","a");wb("bb","b");
+// &#9776; is the console's key on a touch page: a tap is the Super tap (the system
+// menu, or the pause menu over a game), the same event a Meta tap sends.
+document.getElementById("bh").addEventListener("pointerdown",function(e){send({type:"super"});e.preventDefault();});
 // Android long-press fires contextmenu even with pointerdown preventDefault'd -- swallow it
 // on the play surfaces (canvas + control bar) only, so desktop right-click elsewhere is normal.
 document.addEventListener("contextmenu",function(e){var t=e.target;
 if(t===cv||(t.closest&&t.closest("#ctl")))e.preventDefault();});
-var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
-NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"," ":"a"},pH={},nH={};
-// SPACE = jump, everywhere (owner call 2026-08-14): a kid already has that habit
-// from every other game, and a scheme they must unlearn is the worse scheme. The
-// one alias in the whole map; the boards carry it too (moybyte/input.py).
-// No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
-// suppression, so h-as-HOME stole the letter h from typing carts (Letter
-// Blitz). EXIT from the page (Stage 5) = HOLD the burger button ~700ms for a
-// game (it streams a held "home" -> the hold-to-exit gesture), or tap the tool
-// bar's X for a tool. A single Backspace outside text mode is sent as typed cd=8
-// and the SERVER also maps it to a HOME press (a plain key edge the cart reads,
-// mirroring the physical key). In text mode Backspace stays a typed 0x08 (DELETE
-// for a tool -- never an exit).
-function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
-var AN={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"};
-cv.addEventListener("keydown",function(e){if(e.key in PAN){
-// Arrows are CONTEXTUAL: while a cart owns the keyboard (INPUT = the effective
-// input hint, non-null only during play) they are the D-PAD (PICO-8 muscle
-// memory: arrows + Z/X). On SYSTEM surfaces they NAVIGATE -- the same
-// left/right/up/down buttons w/a/s/d send -- because in a browser the MOUSE is
-// the cursor (owner call 2026-07-31): steering a virtual cursor with the arrow
-// keys made the desktop feel like neither a console nor a PC, and it painted
-// cursor trails. The trackball-pan mapping stays alive in the code (pv/pump)
-// for backends that really have a trackball; nothing on this transport arms it.
-var an=AN[e.key];
-if(!nH[an]){nH[an]=true;send({type:"hold",name:an,down:true});}
-e.preventDefault();return;}
+var pH={};
+// The desk keyboard: each key goes to the console as its code and the
+// modifiers held with it (runtime/moy_input.py's key events), and what a key
+// presses beside what it types is the console's, one table for this page and
+// the simulator (runtime/host_api.py's DESK_KEYS): the arrows and Enter on
+// every surface, the letters only while a game owns the keys. The modifiers
+// go as a level too, so Super acts on its release when nothing came between
+// (the console's tap). On a Mac Cmd is Ctrl.
+// Kept for the browser: what it never delivers (Ctrl+W/T/N, Ctrl+Tab and
+// their Shift twins), and what this page leaves to it (reload, the address
+// bar, the developer tools). The console's key from the page is also a tap on
+// the burger button and Esc during play (the `super` event).
+var MAC=/Mac|iP(hone|ad|od)/.test(navigator.platform||""),MODK={Control:1,Shift:2,Alt:4,Meta:8,OS:8};
+var KC={Enter:13,Backspace:8,Tab:9,Delete:127,ArrowLeft:272,ArrowRight:273,ArrowUp:274,ArrowDown:275};
+// AltGr (a layout's third level: @ on a German Q) is Ctrl+Alt to a browser,
+// and what it types is the key, not a chord.
+function kmods(e){if(e.getModifierState&&e.getModifierState("AltGraph"))return e.shiftKey?2:0;
+return(e.ctrlKey||(MAC&&e.metaKey)?1:0)|(e.shiftKey?2:0)|(e.altKey?4:0)|(e.metaKey&&!MAC?8:0);}
+function kcode(e){var k=e.key;if(k.length==1){var c=k.charCodeAt(0);return c>=32&&c<=126?c:null;}
+if(k in KC)return KC[k];var f=/^F([1-9]|1[0-2])$/.exec(k);return f?256+(+f[1]):null;}
+function kept(e,c){var l=e.key.toLowerCase();if(c==261||c==268)return true;
+return (e.ctrlKey||e.metaKey)&&(l=="r"||l=="l"||(e.shiftKey&&(l=="i"||l=="j")));}
+cv.addEventListener("keydown",function(e){
 if(e.key=="Escape"){
-// In play (INPUT set), Esc is RESET -- the p8-web-player expectation (their pause
-// menu's reset). Transports without a reset handler ignore the event safely.
-send(INPUT?{type:"reset"}:{type:"esc"});e.preventDefault();return;}
-// Ctrl/Cmd chords (#132): the console's control-byte shortcuts -- select-all/
-// copy/cut/paste (a/c/x/v), undo/redo (z/y), find/autocomplete/jump (f/e/g).
-// Mapped EXPLICITLY, never every letter (Ctrl+R/T/W stay the browser's), and
-// prevented so the browser's own copy/select-all never fights the console's.
-if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.length==1){
-var cc={a:1,c:3,e:5,f:6,g:7,v:22,x:24,y:25,z:26}[e.key.toLowerCase()];
-if(cc){send({type:"key",code:cc});e.preventDefault();}return;}var cd=null;
-if(e.key=="Enter")cd=13;
-// A physically HELD Backspace also streams a sustained "home" (bshold down/up on the
-// press/release edges) -- the desktop-keyboard twin of the burger button's hold, so
-// hold-Backspace-to-exit works from a desktop browser. Text-mode gating is server-side.
-else if(e.key=="Backspace"){cd=8;if(!e.repeat)send({type:"bshold",down:true});}
-else if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)cd=e.key.charCodeAt(0);
-if(cd!==null)send({type:"key",code:cd});
-// A held printable key must STREAM in game mode (the device's raw matrix
-// reports a held key every frame; browser autorepeat is ~30Hz and gappy --
-// key() read per frame flapped code/0/code). khold latches the physical hold;
-// the server feeds it every frame outside text mode.
-if(cd!==null&&cd>=32&&!e.repeat)send({type:"khold",code:cd,down:true});
-// Enter/Z/X are BUTTONS (run/a/b): hold semantics, not one-frame press edges --
-// a p8 cart holding jump reads btn() the whole hold; btnp() is the edge anyway.
-var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
-if(s&&!nH[s]){nH[s]=true;send({type:"hold",name:s,down:true});}
-var n=nv(e);if(n&&!nH[n]){nH[n]=true;send({type:"hold",name:n,down:true});}
-if(s||n||cd!==null)e.preventDefault();});
-cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];
-var an=AN[e.key];if(nH[an]){delete nH[an];send({type:"hold",name:an,down:false});}
-e.preventDefault();return;}
-if(e.key=="Backspace")send({type:"bshold",down:false});
-if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)
-send({type:"khold",code:e.key.charCodeAt(0),down:false});
-var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
-if(s&&nH[s]){delete nH[s];send({type:"hold",name:s,down:false});}
-var n=nv(e);if(n&&nH[n]){delete nH[n];send({type:"hold",name:n,down:false});}});
+// In play (INPUT set), Esc is the system key -- the pause menu, the
+// p8-web-player expectation -- since a page rarely sees the Super key; on a
+// system surface it closes and steps back.
+send(INPUT?{type:"super"}:{type:"esc"});e.preventDefault();return;}
+if(e.key in MODK){send({type:"mods",mods:kmods(e)});return;}
+var c=kcode(e);if(c===null||kept(e,c))return;
+if(!e.repeat)send({type:"kd",code:c,mods:kmods(e)});e.preventDefault();});
+cv.addEventListener("keyup",function(e){
+if(e.key in MODK){send({type:"mods",mods:kmods(e)});return;}
+var c=kcode(e);if(c!==null)send({type:"ku",code:c,mods:kmods(e)});});
 // Soft keyboard (#42 Thread 2): #kb (in the bottom bar's middle cluster, beside the burger)
 // focuses the hidden #kbin so a touch device's on-screen keyboard opens; it never appears on
 // desktop (#ctl is media-query hidden there) and #kbin's events are entirely separate from

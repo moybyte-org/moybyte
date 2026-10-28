@@ -1,17 +1,18 @@
 """The tick model (#217): one scheduler in the Player for a cart's logic and
 its draw. Logic at the cart's declared rate, never reduced; draw on an integer
 divisor chosen from what draw frames cost; STEADY / FREE is how long the
-divisor remembers. `runtime/tick_model.py` is pure arithmetic on an injected
-dt, so the first half walks exact trajectories; the second half drives the
+divisor remembers. The model (`native/moy_play/moy_tick.c`, `moy_play.Tick`)
+is pure arithmetic on an injected dt, so the first half walks exact
+trajectories; the second half drives the
 real Player through `ws.frame`."""
 
 import time
 
 import pytest
 
-from runtime import tick_model
-from runtime.tick_model import TickScheduler, MAX_CATCHUP, MAX_DIV
-from ws_helpers import build_ws as _ws
+from runtime import moy_play as tick_model
+from runtime.moy_play import Tick as TickScheduler, MAX_CATCHUP, MAX_DIV
+from ws_helpers import build_ws as _ws, select_on_home
 
 
 # -- the scheduler, as arithmetic ---------------------------------------------
@@ -335,7 +336,11 @@ def test_a_step_up_needs_two_late_windows_in_a_row():
     runs two ticks every other cycle -- half a tick late) is not yet a scene,
     and the second one in a row is."""
     s = _sched(60)
-    _loop(s, 2 * W, D=0.010, T=0.002)         # warm-up + one clean window
+    # Warm-up + one clean window, and a frame or two into the next, so each
+    # late window below closes inside its own late stretch: the model sums
+    # its window in single precision, and a stretch that ends exactly on a
+    # window's edge leaves which frame closes it to rounding.
+    _loop(s, 2 * W + 0.05, D=0.010, T=0.002)
     assert s.div == 1
     _loop(s, W, D=0.025, T=0.0075, tick_cost=0.001)
     assert s.div == 1, "one late window is not yet a scene"
@@ -412,7 +417,7 @@ def test_the_first_window_teaches_nothing_and_the_costs_are_slow_averages():
         s.plan(0.002)
     d1 = s.draw_frame
     s.plan(0.700)                            # a stall is one sample in eight too
-    assert abs(s.draw_frame - (d1 + (0.7 - d1) * tick_model.ALPHA)) < 1e-9
+    assert abs(s.draw_frame - (d1 + (0.7 - d1) * tick_model.ALPHA)) < 1e-6
 
 
 def test_switching_steady_live_keeps_n_and_the_costs():
@@ -429,12 +434,10 @@ def test_switching_steady_live_keeps_n_and_the_costs():
 # -- the Player, through ws.frame ---------------------------------------------
 
 def _open(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            ws.open()
-            assert ws.player.cart_error is None, ws.player.cart_error
-            return
+    if select_on_home(ws, title) is not None:
+        ws.open()
+        assert ws.player.cart_error is None, ws.player.cart_error
+        return
     raise AssertionError("no seed cart titled " + title)
 
 
@@ -504,6 +507,7 @@ def test_a_tool_ticks_with_the_loop_it_serves(tmp_path):
     ws = _ws(tmp_path)
     # A tool/app cart the PLAYER runs -- one a registered system app claims
     # opens that app's layer instead, and ticks nothing here.
+    ws.set_home_tab("apps")
     tool = next(c["title"] for c in ws.launcher.items
                 if c.get("type") in ("tool", "app")
                 and not ws.is_system_app(c))
@@ -527,7 +531,7 @@ def test_a_crash_disarms_the_pacing_and_the_panel_paints_every_frame(tmp_path):
     ws.player._update = boom
     _frames(ws, 4, 1 / 60)
     assert ws.cart_error is not None
-    assert ws.player.tick_ms == 0 and not ws.input._kept
+    assert ws.player.tick_ms == 0 and not ws.input.kept_names()
     drawn0 = ws._frames_drawn
     ws._dirty = True
     ws.frame(1 / 60)
@@ -539,7 +543,7 @@ def test_exit_disarms_the_pacing_and_the_launcher_paces_to_the_loop(tmp_path):
     _open(ws, PACED_GAME)
     assert ws.player.tick_ms == 33
     ws.go_home()
-    assert ws.player.tick_ms == 0 and not ws.input._kept
+    assert ws.player.tick_ms == 0 and not ws.input.kept_names()
     ws._dirty = True
     drawn0 = ws._frames_drawn
     ws.frame(1 / 60)
@@ -591,13 +595,13 @@ def test_a_game_parked_under_a_menu_keeps_no_edges_for_later(tmp_path):
     ws.input.set_held("a", True)
     ws.input.begin_frame()
     ws.frame(1 / 60)                              # no tick: the edge is kept
-    assert "a" in ws.input._kept
+    assert "a" in ws.input.kept_names()
     ws.input.set_held("a", False)
-    ws.open_picker()                              # a shell surface over the game
+    ws.open_settings()                            # a shell surface over the game
     assert not ws.wm.top_is_player()
     ws.input.begin_frame()
     ws.frame(1 / 60)
-    assert not ws.input._kept and ws.player._keyp_latch == 0
+    assert not ws.input.kept_names() and ws.player._keyp_latch == 0
     ws.input.begin_frame()
     assert not ws.input.pressed("a"), "the shell reads this frame's edges only"
 
@@ -639,10 +643,9 @@ def test_steady_persists_and_reaches_the_running_cart(tmp_path):
 
 def test_a_stored_frameskip_key_is_dropped_on_load(tmp_path):
     ws = _ws(tmp_path)
-    ws.system["frameskip"] = True
-    ws.prefs.persist()
+    ws.system.set("frameskip", True)
     ws.load_system()
-    assert "frameskip" not in ws.system
+    assert ws.system.text("frameskip") is None
     assert ws.steady is True
 
 
@@ -695,21 +698,17 @@ def test_lockstep_owns_the_tick_and_pins_the_divisor(tmp_path):
 
 # -- the loop and the wire ----------------------------------------------------
 
-def test_frame_slot_ms_is_the_carts_tick_and_a_paced_game_never_sleeps():
-    from runtime import device_boot
-
-    class Paced:
-        def __init__(self, tick_ms):
-            self.player = type("P", (), {"tick_ms": tick_ms})()
-
-    assert device_boot.frame_slot_ms(Paced(33), 16) == 33
-    assert device_boot.frame_slot_ms(Paced(16), 16) == 16
-    assert device_boot.frame_slot_ms(Paced(0), 16) == 16
-    assert device_boot.frame_slot_ms(object(), 16) == 16
-    pump = device_boot.FramePump(boot=None, fps_cap=60)
-    assert pump.pace(Paced(33), 4) == 0 and pump.slot == 33
-    assert pump.pace(Paced(33), 50) == 0 and pump.debt == 0
-    assert pump.pace(Paced(0), 4) == 12
+def test_the_carts_tick_is_the_slot_and_a_paced_game_never_sleeps():
+    """The Player tells the kernel's loop the cadence a paced game runs at
+    (moy_loop.tick); the loop measures a frame against it and never sleeps a
+    paced frame (tests/test_moy_loop.py has the pump's whole arithmetic)."""
+    from runtime import moy_loop
+    moy_loop.trace_init(60, True, 1000)
+    moy_loop.tick(33)
+    assert moy_loop.pace(4) == 0 and moy_loop.pump()[1] == 33
+    assert moy_loop.pace(50) == 0 and moy_loop.pump()[2] == 0
+    moy_loop.tick(0)
+    assert moy_loop.pace(4) == 12
 
 
 def test_the_state_snapshot_carries_the_tick_model(tmp_path):
@@ -732,11 +731,12 @@ def test_skip_and_gov_decline_and_name_the_knob(tmp_path, capsys):
         assert "retired" in out and "steady" in out
     ch.run(ws, "steady 0")
     assert capsys.readouterr().out.strip() == "REMOTE steady off"
-    assert ws.steady is False and "steady" not in ws.system
+    assert ws.steady is False and ws.system.text("steady") is None
 
 
 def test_the_perf_line_carries_the_tick_and_the_misses():
-    from runtime.perf_line import format_perf, parse_perf
+    from runtime.moy_loop import perf_format as format_perf
+    from runtime.perf_line import parse_perf
     line = format_perf({"tick": (60, 2), "miss": 3})
     assert " tick=60/2 miss=3 " in line
     assert " tick=- miss=- " in format_perf({})

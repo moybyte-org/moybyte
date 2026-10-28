@@ -79,19 +79,30 @@ def test_bluetooth_row_is_capability_gated(tmp_path):
     assert rows[1][1:] == ("BLUETOOTH KEYBOARD", "bluetooth")
 
 
-def test_panel_uses_draw_registered_device_and_semantic_action_hits(tmp_path):
+def test_the_picker_is_a_page_the_keys_walk(tmp_path):
+    """The picker's page: the keyboard input switch first, then each keyboard
+    found, then Scan and Forget; the keys walk it and A uses the focused
+    keyboard."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     sl = ws.settings_layer
+    svc = ws.keyboard
     sl.open_bluetooth()
     drv.frame(1 / 30)
-
-    hits = [(verb, arg) for _rect, verb, arg in sl._bt_hits._items]
-    assert [verb for verb, _arg in hits[:2]] == ["device", "device"]
-    assert [verb for verb, _arg in hits[-5:]] == [
-        "toggle", "connect", "scan", "forget", "back"]
-    assert sl.bt_msg == "PICK A KEYBOARD"
+    drv.frame(1 / 30)
+    assert sl.bt_msg == "Pick a keyboard."
+    for _ in range(2):
+        drv.press("down")
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+    assert sl.bt_sel == 1, "the second keyboard holds focus"
+    drv.press("a")
+    drv.frame(1 / 30)
+    assert svc.calls[-1] == ("connect", svc.rows[1][0])
+    drv.press("b")
+    drv.frame(1 / 30)
+    assert not sl.bt_view, "B backs out to the rows"
 
 
 def test_picker_actions_toggle_scan_select_save_and_forget(tmp_path):
@@ -110,7 +121,7 @@ def test_picker_actions_toggle_scan_select_save_and_forget(tmp_path):
     sl._bt_action("connect")
     assert svc.calls[-1] == ("connect", svc.rows[1][0])
     assert svc.preferred == svc.rows[1][0]
-    assert sl.bt_msg == "CONNECTING + SAVING..."
+    assert sl.bt_msg == "Connecting and saving..."
     sl._bt_action("forget")
     assert svc.calls[-1] == ("forget",)
     assert sl.bt_devices == []

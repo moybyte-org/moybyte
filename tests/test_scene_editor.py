@@ -12,6 +12,7 @@ workspace, the Editor tab-ladder wiring, and the firmware staging pins."""
 import json
 import os
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -140,37 +141,24 @@ def test_world_size_covers_viewport_map_and_actors():
     assert empty.world_size(None) == (640, 480)      # viewport + one-viewport margin
 
 
-# -- SceneLayout: the #39 frozen-baseline contract ----------------------------
-
-def test_scene_layout_base_reproduces_frozen_constants():
-    lay = SU.SceneLayout(320, 240, 1)
-    assert lay._base
-    assert (lay.sv_x0, lay.sv_y0) == (SU._SV_X0, SU._SV_Y0)
-    assert (lay.sv_avail_w, lay.sv_avail_h) == (SU._SV_AVAIL_W, SU._SV_AVAIL_H)
-    assert lay.tp_area == SU._TP_AREA
-    assert lay.tp_prev == SU._TP_PREV and lay.tp_next == SU._TP_NEXT
-    assert lay.zoom_btn == SU._SC_ZOOM and lay.flip_btn == SU._SC_FLIP
-    assert (lay.pan_up, lay.pan_lf, lay.pan_rt, lay.pan_dn) == \
-        (SU._PAN_UP, SU._PAN_LF, SU._PAN_RT, SU._PAN_DN)
-    assert (lay.tag_btn, lay.del_btn, lay.snap_btn) == \
-        (SU._SC_TAG, SU._SC_DEL, SU._SC_SNAP)
-    assert (lay.undo_btn, lay.redo_btn, lay.front_btn, lay.back_btn) == \
-        (SU._SC_UNDO, SU._SC_REDO, SU._SC_FRONT, SU._SC_BACK)
-    assert lay.pan_thresh == SU._SC_PAN_THRESH
-    assert lay.zooms == SU._SV_ZOOMS
-
+# -- SceneLayout ----------------------------------------------------------------
 
 def test_scene_layout_reflows_bigger_panel():
+    # The world view grows to fill the page: a big surface shows the whole
+    # 320x240 game viewport at 1x with no panning, clear of the page's column;
+    # in a desk Editor's Scene pane the view fills the pane.
+    from runtime import layout_base
     lay = SU.SceneLayout(1024, 600, 1)
-    assert not lay._base
-    # The world view grows to fill the panel: a desk-size panel shows the whole
-    # 320x240 game viewport at 1x with no panning.
+    assert lay.verbs and not lay.pane
     assert lay.sv_avail_w >= 320 and lay.sv_avail_h >= 240
-    # The view never overlaps the palette column, the palette gains rows.
     assert lay.sv_x0 + lay.sv_avail_w <= lay.tp_x0 - 4
-    assert lay.tp_rows > SU._TP_ROWS
-    # The props row sits below the view.
-    assert lay.tag_btn[1] >= lay.sv_y0 + lay.sv_avail_h
+    layout_base.in_pane(True)
+    try:
+        lay = SU.SceneLayout(442, 384, 1)
+    finally:
+        layout_base.in_pane(False)
+    assert lay.pane and not lay.verbs
+    assert (lay.sv_avail_w, lay.sv_avail_h) == (lay.cw - 4, lay.ch - 4)
 
 
 # -- the tab through the real Workstation (headless, host == device code) -----
@@ -182,10 +170,7 @@ def _open_ws(tmp_path, scenes=None, src="def _draw():\n    cls(0)\n"):
     host_app.moy_carts.create("Scene Cart", carts_dir, src=src, type="game",
                               scenes=scenes, scene_order=list(scenes) if scenes else None)
     ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == "Scene Cart":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Scene Cart")
     ws.open()
     return ws
 
@@ -217,6 +202,7 @@ def test_tab_ladder_and_router_carry_the_scene_tab(tmp_path):
 def test_tap_places_selects_and_drag_moves(tmp_path):
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE})
     ws._open_scene()
+    ws.scene_ui.page().set_tool("stamp")
     se = ws.scene_ui.sceneedit
     x0, y0, scale, vw, vh = ws.scene_ui._sv_metrics()
     # Tap empty world at view (100, 100) -> place a snapped actor there.
@@ -271,6 +257,7 @@ def test_committed_gestures_reach_the_next_play_and_persist(tmp_path):
         "def _draw():\n    cls(0)\n"))
     assert ws.ns["n"] == 2
     ws._open_scene()
+    ws.scene_ui.page().set_tool("stamp")
     x0, y0, scale, vw, vh = ws.scene_ui._sv_metrics()
     _tap(ws, x0 + 120, y0 + 40)                       # place actor #3
     ws._leave_menu()                                  # PLAY re-runs _init AND commits
@@ -286,7 +273,7 @@ def test_save_persists_and_journal_undo_reaches_live_workspace(tmp_path):
     se = ws.scene_ui.sceneedit
     se.place(80, 80)
     ws.save_scene()
-    assert ws.save_status is None and not se.dirty   # invisible save: no failure text
+    assert ws.cart_error is None and not se.dirty    # invisible save: no failure text
     live = Path(ws.cart["path"]) / "scenes" / "main.moyscene"
     assert len(json.loads(live.read_text())) == 3
     ws.scene_ui.sceneedit.place(120, 80)
@@ -306,32 +293,25 @@ def test_props_row_tag_typing_and_flip(tmp_path):
     ws._open_scene()
     ui = ws.scene_ui
     se = ui.sceneedit
-    lay = ui.layout
+    page = ui.page()
     x0, y0, scale, vw, vh = ui._sv_metrics()
     _tap(ws, x0 + 44, y0 + 60)                        # select the coin
-    # Tap the TAG field -> capture, pre-filled with the current tag; erase it
-    # and type "gem" + ENTER -> committed, one undo step. Keys are edge-fired
-    # (the wifi-password pattern), so distinct bytes need a 0 between repeats.
-    _tap(ws, lay.tag_btn[0] + 2, lay.tag_btn[1] + 2)
-    assert ui.tag_edit and ws.input.text_mode
-    assert ui.tag_buf.text == "coin"
-    for k in (8, 0, 8, 0, 8, 0, 8):                   # four BACKSPACEs
-        ws.input.last_key = k
-        ui._scene_input()
-    for ch in "gem":
-        ws.input.last_key = ord(ch)
-        ui._scene_input()
-    ws.input.last_key = 13
-    ui._scene_input()
-    ws.input.last_key = 0
-    assert not ui.tag_edit and not ws.input.text_mode
+    # Tag opens its popover in text mode, pre-filled with the current tag; the
+    # typed "gem" is committed as one undo step (the typing itself is
+    # tests/test_editor_hh_tabs.py's).
+    page.act("Tag")
+    assert page.pop == "tag" and ws.input.text_mode
+    assert page.text == "coin"
+    page.text = "gem"
+    page.commit()
+    assert page.pop is None and not ws.input.text_mode
     assert se.selected()["tag"] == "gem"
     assert se.undo() and se.selected()["tag"] == "coin"
-    # FLIP via its button; DEL removes the actor.
-    _tap(ws, lay.flip_btn[0] + 2, lay.flip_btn[1] + 2)
+    # Flip, then Remove takes the actor away.
+    page.act("Flip")
     assert se.selected().get("flip") == 1
     count = len(se.rows)
-    _tap(ws, lay.del_btn[0] + 2, lay.del_btn[1] + 2)
+    page.act("Remove")
     assert len(se.rows) == count - 1 and se.sel is None
 
 
@@ -344,7 +324,7 @@ def test_sceneless_cart_editor_creates_main_on_save(tmp_path):
     ui._sync_live()
     ws.save_scene()
     man = json.loads((Path(ws.cart["path"]) / "manifest.json").read_text())
-    assert man["assets"]["scenes"] == ["main"]
+    assert man["moybyte"]["assets"]["scenes"] == ["main"]
     assert len(ws.scenes.scene("main")) == 1          # live object gained it too
 
 
@@ -374,10 +354,10 @@ def test_editor_resets_between_carts(tmp_path):
 
 
 def test_icon_and_glyph_vocabulary_carry_scene():
-    from runtime.chrome import _GLYPHS, _ICON, _ICON_ART, _ICON_VERSION
-    assert "scene" in _GLYPHS                          # the 12x12 fallback
-    assert "scene" in _ICON and "scene" in _ICON_ART   # the themeable 16x16 slot
-    assert _ICON_VERSION >= 4                          # stale saved themes re-seed
+    from runtime import ui_draw
+    from runtime.chrome import _ICON, _ICON_ART
+    assert ui_draw.glyph_id("scene") >= 0                   # the 12x12 fallback
+    assert "scene" in _ICON and "scene" in _ICON_ART   # the shell's 16x16 slot
 
 
 def test_build_scripts_stage_the_new_modules():

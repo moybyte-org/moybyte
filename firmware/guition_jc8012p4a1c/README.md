@@ -11,10 +11,11 @@ variant baked into `boards/MOYBYTE_GUITION_P4`) + our native modules via
 **This port is a VARIANT of the Waveshare P4's**, and what it added to the tree
 is mostly what it took OUT of that board's directory: the P4-silicon C modules
 became the shared `native/p4/` tier (`moy_dsi` parameterized by a panel
-define, `moy_ppa`, `moy_ble_hid`, `moy_c6`), the DSI compositor became
-`device/dsi_panel.py`, the PPA system canvas `device/p4_canvas.py`, and the
-two P4 patches moved to `patches/p4_*.patch` behind two shared build-lib
-functions. This directory owns what this glass decides: the panel define, the
+define, `moy_ppa`, `moy_c6`), the DSI compositor became shared
+(the kernel's `native/moy_glass` since sprint 3's glass pass), the PPA system
+canvas `device/p4_canvas.py`, and the
+P4 silicon patch moved to `patches/p4_*.patch` behind a shared build-lib
+function. This directory owns what this glass decides: the panel define, the
 backlight, the touch driver + its firmware, and the rotated (landscape) desk.
 `docs/board_ports_2026-08.md` carries the checklist this port walked.
 
@@ -23,8 +24,8 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
 - **The console runs LANDSCAPE, 1280×800, on glass that scans PORTRAIT** (owner
   call 2026-09-06: "we want it landscape"). The P4's DSI scans the PSRAM
   framebuffer continuously — there is no per-frame flush to fold a rotation
-  into — so the rotation is the compositor's: `device/dsi_panel.py`'s
-  `RotatedCompositor` paints a persistent 1280×800 landscape buffer and
+  into — so the rotation is the compositor's: the kernel's
+  `moy_glass.RotatedCompositor` (`native/moy_glass/moy_present_rot.c`) paints a persistent 1280×800 landscape buffer and
   rotates it onto the panel with the PPA. Two costs, and the design is about
   paying the small one as often as possible:
   - a FULL frame (any chrome paint) is a whole-buffer rotate, 2MB in and 2MB
@@ -34,8 +35,12 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
     the canvas's draw gates can tell (rect/rectb/print/pix are gated; a play
     frame moves none of them — measured over 34 frames) — is ONE PPA op: the
     320×240 game canvas scaled AND rotated straight into the scan buffer,
-    plus the top bar's strip (an ungated blit every play frame) rotated from
-    the paint buffer. Both the windowed player and fullscreen play take it,
+    plus any bar strip whose pixels moved since it was last presented,
+    rotated from the paint buffer. The strips are a rect list the shell
+    publishes on relayout (`BarLayer.publish_strips`), and every repaint
+    that changes one says so (`strip_moved`: a bar re-render, a chip, the
+    clock); a still strip is not rotated, so a play frame under still bars
+    rotates the game alone. Both the windowed player and fullscreen play take it,
     and a compiled cart's direct-colour frame takes it from the GDMA
     snapshot of the cart's memory (`P4SystemCanvas.present_frame`); crisp
     pixels, which apply to the palette-based frames alone (bilinear PPA
@@ -44,8 +49,9 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   - a DAMAGE frame (2026-09-08) — the WM painted and DESCRIBED what: a
     drag's gesture union, the window a scroll or a keystroke re-rendered
     (`WindowedWM._hand_damage` → the root canvas's `note_damage`, which only
-    this compositor exposes) — rotates those landscape rects from the paint
-    buffer plus the bar strip. The paint buffer is one persistent picture,
+    this compositor exposes), or the fullscreen home's shelf drag (its band,
+    `FullscreenStackWM.hand_content_damage`) — rotates those landscape rects
+    from the paint buffer plus the moved bar strips. The paint buffer is one persistent picture,
     so what the frame changed is exactly what the WM wrote, the same trust
     the WM's own backdrop restore places in its union. A frame the WM cannot
     describe (a window opening, a theme change, a toast in the stack, a
@@ -109,13 +115,24 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   over the dev channel — the panel is driven UNMIRRORED
   (`MOY_DSI_MIRROR_XY=0`) so that knob is the only one. **270 is up on the
   desk** (owner, 2026-09-06: the first build's 90 came up flipped).
-- **The GSL3680 is RAM-LOADED**: it has no flash, so `device/gsl3680.py`
-  streams the vendor firmware (`modules/gsl_fw_jc8012.py`, 4587 records
-  transcribed by `tools/gen_gsl_fw.py`) into it over I2C after every reset —
-  1.34s from MicroPython at 400kHz, measured — before it reports anything.
+- **The GSL3680 is RAM-LOADED**: it has no flash, so the kernel's driver
+  (`native/moy_input/moy_touchdev.c`) streams the vendor firmware
+  (`boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c`, 4587 records transcribed by
+  `tools/gen_gsl_fw.py`) into it over I2C after every reset, before it
+  reports anything; the upload's time is in #224.
   The bring-up sequence is the vendor's factory driver's, cross-checked
   against Linux's `silead.c`; the chip answers `0x5A5A5A5A` at register 0xB0
-  once its firmware runs (glass-confirmed). Silead's GPL finger-id algorithm
+  once its firmware runs (glass-confirmed). **The shutdown line (RST, GPIO22)
+  is pulsed before the first write**, as `silead.c`'s power toggle and the
+  Android driver's `init_chip` do, and the clear writes the touch-count
+  register 0x80: from 2026-10-05 to 10-20 the chip sat WEDGED across every
+  warm restart — every write acknowledged, the whole firmware uploaded, 0xB0
+  answering 0 — under a sequence that spoke to it before resetting it and
+  cleared 0x88 instead; the first bring-up that pulsed first brought it back.
+  A bring-up whose signature is wrong runs once more (`MOY_GSL_TRIES`), and
+  what each saw is on the driver: `py (touch.gsl_sig, touch.gsl_tries,
+  touch.gsl_werr, touch.gsl_ms)` over the dev channel, the smoke's first
+  line, and `test_the_pointer_is_the_gsl3680`'s failure. Silead's GPL finger-id algorithm
   (`gsl_point_id.c`) is deliberately NOT carried: raw register 0x80 gives one
   finger's position, which is all a console pointer needs.
 - **Touch is CALIBRATED (2026-09-06, twice).** Three corner holds with the
@@ -124,18 +141,20 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   swap, no flips — in the firmware's own space, not the glass's. The
   five-target tool (`run_touch_calibrate()`) then gave the fit: the raw
   origin sits (10, 21) counts in and the spans are 1640×865 over the
-  1280×800 glass (`RAW_X0/RAW_Y0/RAW_W/RAW_H` in `guition_p4_input.py`,
-  `raw_x0`…`raw_h` on the shared driver); the firmware's nominal 1664×896
+  1280×800 glass (`MOY_INPUT_TOUCH_RAW_X0`…`_RAW_H` in `mpconfigboard.h`,
+  `raw_x0`…`raw_h` on the kernel's driver); the firmware's nominal 1664×896
   was ~10px off at the edges. **The same session found the bug behind "the
   touch feels inaccurate": the chip raises bit 14 of the raw Y on some
   packets, the vendor's decoder never masked it (Linux's does), and every
-  such packet threw the pointer to the bottom edge.** `device/gsl3680.py`
-  masks both axes to 12 bits now; `tests/test_gsl3680.py` pins the flagged
+  such packet threw the pointer to the bottom edge.** The driver masks both
+  axes to 12 bits; `tests/test_gsl3680.py` pins the flagged
   packet and the five-target fit. The knobs stay live (`py touch.raw_x0 = 12`
   over the dev channel); turning the desk the other way up (ROTATION 90)
   means both flips go True.
 - **Backlight is GPIO23, ACTIVE-HIGH** (the Waveshare's is GPIO32 active-low —
-  the one fact the two boards' display modules differ on). The vendor BSP
+  the one fact the two boards' display modules differ on), the
+  `MOY_DSI_BL_*` defines in `mpconfigboard.cmake` that `moy_dsi.backlight`
+  and the kernel's recovery floor drive. The vendor BSP
   drives it as an LEDC PWM channel, so a duty is one line away the day
   something wants dimming; today every caller asks for on/off.
 - **Serial is the P4's own USB-Serial/JTAG** (`303a:1001`, no CH343): the
@@ -145,11 +164,11 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   the harness settles identity by asking `_ota_build.BOARD`. Flashing needs
   no BOOT button: esptool's default reset drove `chip_id`, a full 16MB
   `read_flash` and every `write_flash` first try.
-- **16MB flash, not 32**: the same OTA-shaped table (2×4MB app slots, otadata
-  at 0xd000) leaves ~7.9MB for the auto-built VFS, which the 36-cart seed
-  roster fits; a WiFi update streams into the inactive slot, so no image
-  stages there. The build prints the app slot
-  headroom; nothing else about it is current.
+- **16MB flash, not 32**: the Waveshare's OTA-shaped table head (otadata
+  at 0xd000) with 2×7.5 MiB app slots leaves the tail from 0xF10000 (960 KiB)
+  for the auto-built VFS, the store's fallback without a card; a WiFi
+  update streams into the inactive slot, so no image stages there. The build
+  prints the app slot headroom; nothing else about it is current.
 
 ## Build / flash
 
@@ -162,7 +181,7 @@ MOYBYTE_GUITION_P4_PORT=/dev/ttyACM4 .venv/bin/python -m pytest tests/test_guiti
 
 `build.sh` clones its own MicroPython v1.28.0 into `.build/`, reuses the
 Waveshare's ESP-IDF v5.5.1 checkout when present (its own clone otherwise —
-CI), applies the same patch ladder (the two `p4_*` patches through the shared
+CI), applies the same patch ladder (the `p4_*` patch through the shared
 lib, the ESP-Hosted 2.12.12 bump, REPR_C, native-code-free, the GC split
 reserve), stages the shared modules + the `native/p4` tier per `board.toml`,
 and builds `BOARD_DIR=boards/MOYBYTE_GUITION_P4`. The factory image (Guition's
@@ -188,19 +207,18 @@ plus the P4 extras `bt`/`union`/`cache`.
 
 - `board.toml` — the declaration: `[native.shared]` + **`[native.p4]`** (the
   silicon tier, a second native source — `tools/board_config.py
-  native_sources`), the device allowlist (adds `dsi_panel`, `p4_canvas`,
-  `gsl3680`; `gt911` crosses for its HeldPoint only), `[flash]`/`[serial]`
+  native_sources`), the device allowlist (adds `p4_canvas`), `[flash]`/`[serial]`
   with the USB-Serial/JTAG facts.
 - `boards/MOYBYTE_GUITION_P4/` — `mpconfigboard.cmake` (the C6_WIFI fragments,
-  `MOY_DSI_PANEL_JD9365=1`, `MOY_DSI_MIRROR_XY=1`), `mpconfigboard.h`,
+  `MOY_DSI_PANEL_JD9365=1`, `MOY_DSI_MIRROR_XY=1`, the touch firmware as a
+  board source), `mpconfigboard.h` (the touch's pins and knobs,
+  `MOY_INPUT_TOUCH_*`), `gsl_fw_jc8012.c` (the touch firmware — generated,
+  but checked in: it is a panel fact),
   `sdkconfig.board` (the Waveshare's levers carried over: PSRAM 200MHz, L2
   256KB, DSI ISR in IRAM, hosted mempool in PSRAM, the WIFI_RMT set, rollback;
   16MB flash + this board's partition CSV), `partitions-moybyte-guition-p4.csv`.
 - `modules/` (tracked): `boot.py`/`main.py`/`moybyte_shell.py` (the Guition
-  S3's MODE-string shell), `guition_p4_display.py` (backlight + the shared
-  compositor), `guition_p4_input.py` (pins, knobs, the shared GSL3680 driver),
-  `gsl_fw_jc8012.py` (the touch firmware — generated, but checked in: it is a
-  panel fact), `guition_p4_smoke.py`, `moy_runtime.py` (`run_desktop` — this
+  S3's MODE-string shell), `guition_p4_smoke.py`, `moy_runtime.py` (`ROTATION` and the compositor it builds; `run_desktop` — this
   glass's arguments to `device/p4_desktop.py`, the P4 tier's body over the
   shared boot spine `device/desktop_spine.py`). Everything else in `modules/` is
   staged at build and gitignored.
@@ -216,7 +234,7 @@ plus the P4 extras `bt`/`union`/`cache`.
 | Touch | GSL3680 @ **0x40** on I2C0 **SDA=7 / SCL=8** (400kHz), **RST=22, INT=21** (INT held low through reset selects the address) |
 | C6 (WiFi/BLE) | ESP-Hosted SDIO: CLK18 CMD19 D0–D3 = 14–17, reset **GPIO54** — the Waveshare's wiring pin for pin |
 | Audio | ES8311 codec + ES7210 mics on the touch I2C bus; I2S MCLK13 BCLK12 LRCLK10 DOUT9 DIN11; PA enable **GPIO20** (Waveshare: 53). Unwired, like the Waveshare's (#82) |
-| TF card | SDMMC slot 0: CLK43 CMD44 D0–D3 = 39–42, powered from **LDO channel 4** (the vendor BSP) — the Waveshare's arrangement; unused by the console |
+| TF card | SDMMC slot 0: CLK43 CMD44 D0–D3 = 39–42, powered from **LDO channel 4** (the vendor BSP) — the Waveshare's arrangement. **A card that mounts is the console's cart store** (FAT32 or exFAT; the Waveshare README's SD bullets are the authority: LDO4 poke, `/sd/moybyte/`, the fallback) |
 | Camera | MIPI-CSI socket (OV02C10 in the vendor kit); not populated on the owner's unit as far as the port knows |
 | USB | USB-C straight to the P4's USB-Serial/JTAG (`303a:1001`) |
 | Factory firmware | `JC8012P4A1C_I_W_Y_xiaozhi2.0.4.bin` (P4) + `JC-C6-slave_v2.3.2.bin` (C6) in the vendor's demo repo |
@@ -285,13 +303,12 @@ for the C6/audio pins, which agree with the BSP.
 
 1. ~~Touch calibration~~ — done on glass, 2026-09-06 (above).
 2. ~~Orientation~~ — landscape, 270 up, owner-verified on the desk.
-3. **The C6 runs Guition's factory slave** (no ESP-NOW shim): `moy_espnow`
-   fails into an inactive link by design. The Waveshare's `c6_slave/` image is
+3. **The C6 runs Guition's factory slave** (no ESP-NOW shim): the radio link
+   (`runtime/players.py`'s `EspNowLink`) fails into an inactive link by design. The Waveshare's `c6_slave/` image is
    the same chip and the same SDIO; flashing it here is Phase D of
    `docs/history/espnow_p4_2026-08.md` on this board, and the publisher does
    not stage a `c6` block in this board's manifest yet.
 4. The factory slave's two 5s RPC timeouts per boot (the section above); the
    shimmed slave image is the fix for 3 and 4 at once.
 5. BLE keyboard (unverified: nothing paired), audio (#82, same codec as the
-   Waveshare), the TF slot (LDO4, a future removable-cart workflow),
-   backlight PWM (one line in `guition_p4_display.py` when wanted).
+   Waveshare), backlight PWM (`moy_dsi`'s backlight entry, when wanted).

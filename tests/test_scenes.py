@@ -10,6 +10,7 @@ editor) is out of scope here.
 
 import json
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -107,7 +108,7 @@ def test_save_scene_roundtrip_and_manifest_assets(tmp_path):
     assert c["scenes"]["main"] == MAIN_SCENE
     assert c["scene_names"] == ["main"]
     man = json.loads((Path(c["path"]) / "manifest.json").read_text())
-    assert man["assets"]["scenes"] == ["main"]
+    assert man["moybyte"]["assets"]["scenes"] == ["main"]
     # a second named scene appends to the manifest order
     mc.save_scene(c, "level2", LEVEL2_SCENE)
     assert c["scene_names"] == ["main", "level2"]
@@ -152,7 +153,7 @@ def test_duplicate_copies_scenes_and_order(tmp_path):
     assert dup["scenes"] == {"main": MAIN_SCENE, "level2": LEVEL2_SCENE}
     assert dup["scene_names"] == ["main", "level2"]
     man = json.loads((Path(dup["path"]) / "manifest.json").read_text())
-    assert man["assets"]["scenes"] == ["main", "level2"]
+    assert man["moybyte"]["assets"]["scenes"] == ["main", "level2"]
 
 
 def test_seed_builtins_writes_scenes_and_manifest_assets(tmp_path):
@@ -166,9 +167,9 @@ def test_seed_builtins_writes_scenes_and_manifest_assets(tmp_path):
         "scene_order": ["main", "level2"],
     }
     moy_carts.seed_builtins([seed], root)
-    path = root + "/seeded_scenes.moy"
+    path = root + "/moybyte.seeded_scenes.moy"
     man = json.loads((Path(path) / "manifest.json").read_text())
-    assert man["assets"]["scenes"] == ["main", "level2"]
+    assert man["moybyte"]["assets"]["scenes"] == ["main", "level2"]
     loaded = moy_carts.load(path)
     assert loaded["scenes"]["main"] == MAIN_SCENE
     assert loaded["scene_names"] == ["main", "level2"]
@@ -184,7 +185,7 @@ def test_seed_preserves_scenes_are_replaced_but_pmem_kept(tmp_path):
           "src": "def _draw():\n    cls(0)\n", "cfg": {},
           "scenes": {"main": MAIN_SCENE}, "scene_order": ["main"]}
     moy_carts.seed_builtins([v1], root)
-    path = root + "/reseed.moy"
+    path = root + "/moybyte.reseed.moy"
     (Path(path) / "pmem.json").write_text(json.dumps([42] + [0] * 255))  # a "save"
 
     v2 = dict(v1, version=2, scenes={"main": LEVEL2_SCENE})              # scene changed
@@ -203,10 +204,7 @@ def _open_scene_cart(tmp_path, scenes=None, src="def _draw():\n    cls(0)\n"):
     host_app.moy_carts.create("Journaled Scene", carts_dir, src=src, type="game",
                               scenes=scenes, scene_order=list(scenes) if scenes else None)
     ws = host_app.build_workstation(carts_dir)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == "Journaled Scene":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Journaled Scene")
     ws.open()                                    # runs _init -> ws.ns is populated
     return ws
 
@@ -265,7 +263,8 @@ def test_running_cart_reads_scene_into_init(tmp_path):
     assert ns["ppos"] == (5, 6, 1, 3)                    # x/y/flip/flags read through
     assert ns["named2"] == 1                             # scene('level2') peeked
     assert ns["switched"] == 1                           # load_scene switched + returned
-    assert ws.scenes.active == "level2"                  # the switch stuck for this run
+    assert ws.project.play_scenes.active == "level2"     # the switch stuck for this run
+    assert ws.scenes.active == "main"                    # the Editor's are not the run's
 
 
 # A cart that does NOT switch -- it just records how many actors the ACTIVE scene has.
@@ -279,16 +278,14 @@ COUNT_SRC = (
 
 def test_active_scene_resets_on_rerun(tmp_path):
     # load_scene() must not leak across a RE-RUN of the same project: Player.start
-    # resets the active scene to the default before _init runs ("resets on next
-    # _init", #85 Section 6). _start() re-runs without rebuilding the Scenes object,
-    # so this exercises the Player reset (not the fresh-workspace rebuild).
+    # gives the run a fresh copy of the scenes, at the default, before _init runs
+    # ("resets on next _init", #85 Section 6; `ProjectStore.play_world`).
     ws = _open_scene_cart(tmp_path, src=COUNT_SRC,
                           scenes={"main": MAIN_SCENE, "level2": LEVEL2_SCENE})
     assert ws.ns["n"] == 3                               # active == main (3 actors)
-    ws.scenes.load_scene("level2")                       # a leftover switch (1 actor)
-    assert ws.scenes.active == "level2"
+    ws.project.play_scenes.load_scene("level2")          # a leftover switch (1 actor)
     ws._start()                                          # re-run the SAME project
-    assert ws.scenes.active == "main"                    # reset to default first...
+    assert ws.project.play_scenes.active == "main"       # a fresh copy, at its default...
     assert ws.ns["n"] == 3                               # ...so _init saw main again
 
 

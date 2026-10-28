@@ -13,7 +13,7 @@ MEASURED, on the two things a change like this can get wrong:
     the packed one -- about the blob's own 201,716 B, so the bytes land in ROM
     and cost their size and an index. The plain form was BUILT TOO, and the
     interesting answer is that it fits: 2,830,672 B of the 2,883,584 B slot,
-    51 KB left, under the #168 warning floor and one cart from a build failure
+    51 KB left, under the board's headroom floor and so a failed build
     -- in a slot the board pays for twice. So this is not "it would not fit"
     but "it fit with 1.8% to spare", which is not a margin.
   * RAM. `test_the_inflate_runs_on_micropython` seeds the whole roster under a
@@ -86,6 +86,24 @@ def test_the_packed_roster_is_much_smaller_than_the_plain_one():
         "plain one (%d B)" % (comp, plain))
 
 
+def test_the_zero_build_leaves_the_speed_tests_out():
+    """The Zero's store is 352 littlefs blocks and the roster fills it, so its
+    build skips the two perf-ledger fixtures; every other cart still ships."""
+    with open(os.path.join(ZERO, "build.sh")) as f:
+        build = f.read()
+    assert "--skip moybyte.bench,moybyte.bench_lua" in build
+    skip = ("moybyte.bench", "moybyte.bench_lua")
+    full = gen.build_packed(SYSTEM_CARTS)
+    zero = gen.build_packed(SYSTEM_CARTS, skip)
+    assert [t for t, _v, _b in full if (t, _v, _b) not in zero] == ["Bench", "Bench Lua"]
+    assert len(zero) == len(full) - 2
+
+
+def test_a_skip_that_names_no_cart_is_refused():
+    with pytest.raises(ValueError):
+        gen.build_packed(SYSTEM_CARTS, ("moybyte.no_such_cart",))
+
+
 # -- the store the two forms produce ---------------------------------------
 
 def _tree(root):
@@ -148,11 +166,11 @@ def test_a_newer_baked_version_still_reseeds(tmp_path):
     cart = {"title": "Hop", "type": "game", "version": 1, "src": "OLD",
             "cfg": {}, "edit": []}
     moy_carts.seed_packed([("Hop", 1, gen.pack_cart(cart))], root)
-    assert moy_carts._read(root + "/hop.moy/main.py") == "OLD"
+    assert moy_carts._read(root + "/moybyte.hop.moy/main.py") == "OLD"
 
     cart2 = dict(cart, version=2, src="NEW")
     assert moy_carts.seed_packed([("Hop", 2, gen.pack_cart(cart2))], root) == 1
-    assert moy_carts._read(root + "/hop.moy/main.py") == "NEW"
+    assert moy_carts._read(root + "/moybyte.hop.moy/main.py") == "NEW"
 
 
 # -- the Zero's own gate ---------------------------------------------------
@@ -180,7 +198,7 @@ def test_an_empty_store_is_one_with_no_cart_in_it(tmp_path, monkeypatch):
     os.makedirs(root + "/journal")
     assert zero_host.store_is_empty(root) is True
 
-    os.makedirs(root + "/hop_quest.moy")
+    os.makedirs(root + "/moybyte.hop_quest.moy")
     assert zero_host.store_is_empty(root) is False
 
 
@@ -210,13 +228,13 @@ def test_the_zeros_seed_never_rewrites_a_cart_that_is_there(tmp_path, monkeypatc
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
-    os.makedirs(root + "/hop_quest.moy")
-    with open(root + "/hop_quest.moy/main.py", "w") as f:
+    os.makedirs(root + "/moybyte.hop_quest.moy")
+    with open(root + "/moybyte.hop_quest.moy/main.py", "w") as f:
         f.write("the kid's own")
 
     written = zero_host.seed_carts(root)
 
-    with open(root + "/hop_quest.moy/main.py") as f:
+    with open(root + "/moybyte.hop_quest.moy/main.py") as f:
         assert f.read() == "the kid's own", \
             "a baked version bump overwrote a cart the kid edited"
     # ...and everything the store did NOT have arrived, which is the half the
@@ -245,7 +263,7 @@ def test_a_zero_that_has_been_used_still_receives_a_new_builtin(tmp_path, monkey
 
     assert zero_host.seed_carts(root) == 1, \
         "a used Zero must still receive a built-in it has never had"
-    assert os.path.isdir(root + "/brand_new.moy")
+    assert os.path.isdir(root + "/moybyte.brand_new.moy")
 
 
 def test_the_zeros_seed_fills_an_empty_store(tmp_path, monkeypatch):
@@ -260,6 +278,44 @@ def test_the_zeros_seed_fills_an_empty_store(tmp_path, monkeypatch):
     seeded = sorted(n for n in os.listdir(root) if n.endswith(".moy"))
     assert len(seeded) == len(mod.CARTS_Z)
     assert zero_host.seed_carts(root) == 0          # ...and nothing on a warm boot
+
+
+def test_a_warm_boot_says_nothing_about_inflating(tmp_path, monkeypatch, capsys):
+    """The "inflating N carts" line counts what is MISSING, under the folder
+    names the seed really writes (`moybyte.<slug>.moy`). Counted under the bare
+    slug it read every cart as missing on every boot of a fully seeded store."""
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    mod = _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    assert zero_host.seed_carts(root) == len(mod.CARTS_Z)
+    assert "inflating %d carts" % len(mod.CARTS_Z) in capsys.readouterr().out
+
+    assert zero_host.seed_carts(root) == 0
+    assert "ZERO seed" not in capsys.readouterr().out
+
+
+def test_a_seed_into_a_full_store_names_the_store_as_full(tmp_path, monkeypatch, capsys):
+    """A full littlefs refuses mkdir, the shared `_mkdir` swallows it, and the
+    first write raises a bare ENOENT. The board's only display is serial, so the
+    failure line carries the free-block count that explains it."""
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+
+    def refuse(*_a, **_k):
+        raise OSError(2, "ENOENT")
+
+    monkeypatch.setattr(moy_carts, "seed_packed", refuse)
+    monkeypatch.setattr(os, "statvfs",
+                        lambda _p: (4096, 4096, 352, 0, 0, 0, 0, 0, 0, 255),
+                        raising=False)
+
+    assert zero_host.seed_carts(root) == 0
+    out = capsys.readouterr().out
+    assert "ZERO seed: FAILED" in out
+    assert "FULL (0 of 352 blocks free)" in out
 
 
 def test_a_half_seeded_store_is_finished_on_the_next_boot(tmp_path, monkeypatch):
@@ -392,8 +448,8 @@ def _stage_for_micropython(tmp_path):
     fails if these names stop being the ones the board freezes.
     """
     for name in ("moy_carts.py", "moy_store_base.py", "moy_seed.py",
-                 "moy_files.py", "moy_file_ops.py", "moy_image.py", "moy_fs.py",
-                 "moy_journal.py", "ticks.py"):
+                 "moyimg.py", "moy_fs.py", "moy_journal.py", "ticks.py",
+                 "cart_listing.py"):
         with open(os.path.join(ROOT, "runtime", name), encoding="utf-8") as f:
             body = f.read()
         with open(os.path.join(str(tmp_path), name), "w", encoding="utf-8") as f:

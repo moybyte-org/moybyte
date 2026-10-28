@@ -2,7 +2,7 @@
 paths:
   - "runtime/*canvas*.py"
   - "runtime/ui.py"
-  - "runtime/skin.py"
+  - "runtime/ui_draw.py"
   - "runtime/chrome.py"
   - "runtime/*_layer.py"
   - "runtime/*_ui.py"
@@ -17,6 +17,8 @@ paths:
 ### The indexed-canvas portability contract (why the canvas is "indexed")
 
 The `.moy` canvas works in **palette indices** (the `MOY64` palette) with a plain-function drawing API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`) — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` runs on the host, on every board and in the browser. **There is now ONE canvas class on every tier** — `device_canvas.DeviceCanvas`, RGB565 with the palette resolved at draw time; the host builds it on CPython through `runtime/host_canvas.py` (the host's own indexed raster, runtime/canvas.py, was deleted 2026-08-15 — git history has it). So a drawing feature is added ONCE, in that class + the `moy_gfx`/libmoy kernel under it. The SYSTEM-surface contract (#39: font_scale text, font-scale layers, `blit_cover`) is one body too since 2026-08-18 — `device_canvas.SystemCanvas`, which the host/web/P4 classes subclass for only their per-tier pieces; two of the three hand-copies it replaced had silently drifted (the P4's print stride, its lost cart-palette layer rider).
+
+**The native rect/rectb gates fill SOLID.** Every canvas with a native `moy_gfx` (the boards, the wasm head) swaps them in over the Python verbs, and the host's ctypes kernel has none, so a host test cannot see a draw state the gates do not know. The fill pattern is one: the row's `ST_FILLP` flag (the draw-state array's last entry, `device_canvas._ST_FILLP`, in step with `moy_canvas.h` and `modmoy_gfx.c`) makes the gates decline while one is set, and `tests/test_web_fillp.py` draws a patterned rect and rectb in the wasm VM. `ST_DMA_MIN` is the other decline: on a canvas with a DMA fill (the P4s' `ppa_fill`) a rect of that many pixels or more goes back to `rect` → `_fill`, which hands it to the engine (`tests/test_dma_fill.py`). State a gate reads is a new `ST_*` entry, never a Python-only attribute.
 
 
 ### Graphics is conformance-checked, and the indexed canvas was MEASURED AND DECLINED
@@ -46,9 +48,10 @@ stale (they predated `moy_print`'s off-clip early-out and `moy_spr`'s scale-1 fa
 path), and re-measuring on 2026-08-07 reversed two of the three; adopting `spr`
 also deleted the RGB565 tile atlas, which handed back 64 KB of S3 internal SRAM
 and removed a ~100ms first-use bake nobody had attributed. What `moy_gfx` still
-owns is its COMPOSITOR — viewport-aware `fill`/`fill_rect`, `blit565_scale`,
-`copy_async`, `scroll_rect`, `blit_window`, `blit_indices`, `fill_spans`,
-`draw_ctx` — which the spec's raster has no counterpart for.
+owns is its COMPOSITOR — viewport-aware `fill`/`fill_rect`, `blit565_scale`, `blit565_resize`,
+the layer restore (`layer_*`), `scroll_rect` and `shift_rect` (a canvas's `shift_last`), `copy_block` (its `copy_last_into`), `blit_window`, `blit_indices`, `blit_indices_scale`, `fill_spans`,
+`draw_ctx`, and the one-byte-a-pixel marks Paint's drawings take (`ifill`/`iline`/`icopy`/`iflood`,
+called from `runtime/artwork.py`) — which the spec's raster has no counterpart for.
 **`native/moy_gfx/libmoy/UPSTREAM.md` is the authority on which verbs cross and
 why** (it carries the before/after table, the dates, and the warning about which
 of the bench's verbs are too cheap to quote); fixes belong upstream (`moy_circ`
@@ -73,8 +76,8 @@ the spec said. The device inherits it through `test_device_canvas_parity.py`
 reaches the real C kernel on real glass — run it when the raster changes.
 
 **The compiled-vs-compiled check is a `make` target now (2026-08-15).**
-`tests/test_gfx_binding.py::test_matches_the_native_moy_gfx` drives **131 ops
-across 16 verbs** through the host's ctypes binding AND through the real native
+`tests/test_gfx_binding.py::test_matches_the_native_moy_gfx` drives **an op
+script across every compositor verb** through the host's ctypes binding AND through the real native
 `moy_gfx` under a desktop MicroPython — the only lane in `make test` where two
 independently COMPILED rasters meet. It used to point at a hand-built binary
 nothing produced, so it passed on one machine and silently SKIPPED in CI.
@@ -84,8 +87,9 @@ missing binary WARNS locally and FAILS under `CI`/`MOYBYTE_REQUIRE_UNIX_MP`.
 The same binary carries `moycore` and `moy_audio`. On the strength of it,
 `tests/test_device_canvas_parity.py` shed its ~400-line Python transcription of
 libmoy's nine verbs — `_FakeGfx` forwards them to the binding and transcribes
-only `moy_gfx`'s OWN compositor; its `gfx=False` arm STAYS, because it is the
-only thing anywhere that runs `device_canvas`'s no-kernel Python lanes. Two
+only `moy_gfx`'s OWN compositor. Its `gfx=False` arm went with the no-kernel
+Python lanes it ran (sprint 3's glass pass, 2026-10-07): every tier carries the
+kernel, so `device_canvas` has no draw lane without it. Two
 things not to undo in that op script: its framebuffer is a `memoryview` into a
 larger **patterned** arena (without it a capacity guard that fails to clamp
 writes past the end on BOTH sides and reads as agreement), and its clamp ops aim
@@ -110,11 +114,12 @@ and `shell_decoupling_2026-08.md`, and CUT about half the combined program on
 evidence — read its Section 1 before proposing any cut part again). The rules it
 left:
 
-- **The 320×240/1× baseline does NOT exercise the toolkit.** `editor_app._draw_zone`
-  and siblings are guarded `if not ws.layout._base`, so perturbing a widget turns
-  the Guition/fs3/windowed configs red and leaves BOTH T-Deck rows green.
-  **Verify a widget change on the non-`_base` configs; a green T-Deck row proves
-  nothing.** The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`.
+- **Every golden row draws through the toolkit, the T-Deck's 320×240 included.**
+  The frozen 320×240 branches (`_base`) retired with theming phase 3 step 4
+  (`docs/theming_2026-09.md` §9): each `*Layout` derives the T-Deck's geometry
+  from the formulas every tier runs, so a widget or a layout formula change
+  moves the T-Deck rows too, and `tests/test_layout_base.py` fails a `_base`
+  coming back. The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`.
 - **Adding a system app is TWO files** (`docs/app_api_v1.md` has the checklist):
   an `"app"` block in the identity cart's manifest, and `runtime/app_decls.py`, its
   generated frozen copy. The five hand-lists it replaced failed silently and on
@@ -127,13 +132,19 @@ left:
   self-escalation. **No `property` forwards** (a plain hop is +0.5µs, a property
   +5.1µs) — live state reads through a method. `prefs_ns` exists because
   `paint_doc` is the real key in kids' `system.json` since #108.
-- **Style is data** — `runtime/skin.py`, NOT `chrome.py`, which would close
-  `ui → chrome → settings_layer → ui`. `tests/test_skin.py` pins skin knowledge to
-  its two owner modules in both directions.
+- **Style is data** — `native/moy_ui/style.json`, resolved by `native/moy_ui`'s
+  C, with `runtime/ui_draw.py` its face (sprint 6, `docs/kernel_toolkit_2026-10.md`);
+  `runtime/ui.py` is the public UI API over it (`docs/ui_api_2026-10.md`), and
+  an app on the verbs passes no colour (`tests/test_ui_public.py`).
+  A data edit is the JSON plus `tools/gen_ui_tables.py`'s committed output
+  (`tests/test_ui_tables.py` fails a stale one). There is no skin: what a look
+  changes beyond colours is its theme's shape (surfaces, frame, metrics, text
+  effects), installed with the theme, and `tests/test_style.py` holds the style
+  tables and the `colors=` hatch.
 - **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
   roles as an ALLOWLIST; never grantable: `shell`, `carts`, `wallpaper`, `artwork`,
   `damage`, `surface`, `clipboard`, `notify`. **An ungranted verb is ABSENT, not
-  stubbed** (`system_carts/notes.moy` is the proof). Storybook/Files/Paint
+  stubbed** (`system_carts/moybyte.notes.moy` is the proof). Storybook/Files/Paint
   STAY shell code; Calc is portable today.
 - **The windowed DESK world must NOT bind the system canvas** — a cart there lives
   in a window whose blit source IS `ws.canvas`, so binding makes the desktop blit

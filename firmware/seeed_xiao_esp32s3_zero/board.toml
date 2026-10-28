@@ -95,19 +95,20 @@ files = ["moy_sync.py", "moy_fs.py"]
 why = """
 The 3.4 sync RPC itself: the batch format, the per-file last-writer-wins apply,
 the two roots (carts and the #108 files layer), and the small filesystem
-helpers every one of them writes through. This is the board's reason to exist
+helpers every one of them writes through; the batch codec and the HTTP
+parser and response writer under them are the native `moy_net`. This is the board's reason to exist
 -- `moy_webhost` is a transport in front of these two files."""
 
 [[modules.shared.group]]
-files = ["moy_carts.py", "moy_store_base.py", "moy_seed.py", "moy_files.py",
-         "moy_file_ops.py", "moy_image.py"]
+files = ["moy_carts.py", "moy_store_base.py", "moy_seed.py", "moyimg.py", "cart_listing.py"]
 why = """
 THE ZERO SUPPORTS ALL FEATURES (owner call 2026-08-25), and this pair is what
-that call bought. `moy_sync.file_kinds()` asks the store module for FILE_KINDS
-and files_root before it will serve GET /files.json or apply a v2 files batch;
-with no store module it answers None, which every caller reads as REFUSE -- so
-without these the kid's drawings simply do not travel, silently. `moy_image` is
-`moy_carts`' own import (thumbnails / the .moyimg codec).
+that call bought. `moy_sync.file_kinds()` asks the store module for the
+user-files kinds and files_root (the on-card layout's, `moy_store_base`)
+before it will serve GET /files.json or apply a v2 files batch; with no store
+module it answers None, which every caller reads as REFUSE -- so without these
+the kid's drawings simply do not travel, silently. `moyimg` is `moy_carts`' own
+import (the .moyimg codec).
 
 `moy_carts` earned a second job here on 2026-08-30: `seed_packed()`, which
 inflates the PACKED roster this board's build bakes into `carts_data.py` (see
@@ -115,10 +116,13 @@ inflates the PACKED roster this board's build bakes into `carts_data.py` (see
 with, one cart at a time behind a decoder, so this board gained a first-boot
 store without gaining a second copy of the seed rules.
 
-`moy_carts` is an umbrella over four modules of its own -- `moy_store_base`
-(the on-card layout), `moy_seed` (the seeders), `moy_files` (the #108 layer
-the sync serves) and `moy_file_ops` (history sidecars, trash, provenance) --
-imported and re-exported, so the umbrella cannot load without them."""
+`moy_carts` is an umbrella over modules of its own -- `moy_store_base`
+(the on-card layout), `moy_seed` (the seeders) and the leaf `cart_listing`
+(how a manifest's description, genre and tags read, SPEC.md 3.7) -- imported
+and re-exported, so the umbrella cannot load without them. The user-files layer behind its
+other names (list, save, the trash, the sidecars) is native/moy_store's, built
+with `moy_app`, which this board denies: it syncs `files/<kind>/` by path and
+runs no app that edits one."""
 
 [[modules.shared.group]]
 files = ["moy_journal.py"]
@@ -175,10 +179,10 @@ every piece of it. This board drives four files of it, which is the smallest
 device set in the fleet and is the honest measure of what a headless board is:
 a socket, an HTTP/WS transport, a store host and an updater.
 
-The absences are the whole console: no `device_canvas`/`banded_panel` (nothing
+The absences are the whole console: no `device_canvas` (nothing
 to draw on), no `device_boot`/`device_api` (no FrameLoop, no cart namespace),
 no touch or input driver (no touch, no keyboard, no trackball), no
-`device_audio`, no `moy_espnow` (no second console to pair with), no
+audio, no radio link (no second console to pair with), no
 `moybyte_sd` (no card slot). None of those is a deferral: this board's
 hardware does not have the parts."""
 packages = []
@@ -189,17 +193,16 @@ freeze it whole because they all construct an InputState. This board never
 does -- its inputs arrive as HTTP requests."""
 
 [[modules.device.group]]
-files = ["moy_webserver.py", "moy_webhost.py"]
+files = ["moy_webhost.py"]
 why = """
-The socket/HTTP/WebSocket transport core plus the "serve the wasm console from
-this board" handler. On the console boards these are one Settings row; here
-they ARE the board. `moy_webhost`'s SECURITY docstring is the authority on the
-pin gate, and `zero_host.ZeroHost` subclasses WebHost to add /gpio -- a
-subclass rather than an edit, because the other boards spend their GPIOs on a
-panel and would be handing out the pins their own screen is drawn through."""
+The Settings contract over the kernel's webhost (native/moy_net): the store,
+the sync apply, /gpio over this board's pin table and the setup form's
+transport are C. On the console boards it is one Settings row; here it IS the
+board. native/moy_net/moy_webhost.c's header is the authority on the pin
+gate."""
 
 [[modules.device.group]]
-files = ["moy_ota.py"]
+files = ["moy_ota.py", "moy_ota_health.py"]
 why = """
 The OTA updater (#53), wired for this board 2026-08-29. Board-agnostic by
 construction: the staging directory is a constructor argument (the internal
@@ -207,7 +210,11 @@ VFS here -- there is no SD slot) and the identity comes from the generated
 `_ota_build.py`. What is NOT board-agnostic is the rollback confirm, and this
 board is why `confirm_when_serving` exists beside `confirm_when_healthy`:
 every other board certifies a new image by counting frames it painted, and
-this one paints none. See zero_host.serve()."""
+this one paints none. See zero_host.serve().
+The updater itself is the kernel's (native/moy_net/moy_ota.c: the streaming
+HTTP(S) client the updater and Get Carts fetch through, the signature, the
+slot); moy_ota.py is its Settings face and the identity, moy_ota_health.py the
+boot verdict and the rollback confirm the frame loop drives."""
 
 # ---------------------------------------------------------------------------
 
@@ -236,6 +243,12 @@ after          = "watchdog_reset"
 baud           = 460800
 otadata_offset = "0x1d000"
 otadata_size   = "0x2000"
+
+[image]
+# The OTA-slot headroom this board's app image keeps, browser console baked in.
+# The build FAILS under it (moybyte_app_size_guard, tools/esp32_build_lib.sh);
+# why the value is this one: docs/native_kernel_2026-09.md §6.1.
+headroom_floor_kib = 200
 
 [serial]
 # USB-Serial/JTAG since 2026-08-30, like the console S3 boards -- so this board
@@ -291,8 +304,9 @@ siblings' DENYLIST shape -- because `native/` really does default to yes: a new
 shared C module is a capability every board that has the hardware should get,
 and every denial below is the same sentence with different nouns.
 
-What crosses is exactly ONE module, `moy_web`, and it is the module that
-justifies this board having an image at all: the browser console rides the
+What crosses is the store (`moy_store`, `moy_index`), the kernel's entry
+(`moy_kernel`), the links (`moy_net`) and `moy_web`, the module that justifies
+this board having an image at all: the browser console rides the
 firmware (a 627,373 B .incbin of the gzipped bundle) so the page a board serves
 cannot drift behind the board serving it. Until 2026-08-29 this board had no
 image, so `moy_webhost`'s baked half was structurally unreachable here and the
@@ -300,8 +314,33 @@ bundle was only ever a copy somebody pushed -- exactly the drift that baking it
 was introduced to end, one board late. A pushed copy still WINS at serve time;
 the image is the guarantee, not the ceiling (.claude/rules/web.md).
 
+`moy_index`, the store's native index, compiles here as on every image (its
+hook, MOY_INDEX_IMPL in tools/moy_index_spike.py, is `c` unless a build says
+`py`), and `moy_spine`, the kernel's spine, is native here as on every image;
+this board is one of the five targets both must link into.
+
 Every module below is flash spent TWICE, once per OTA slot, which on 8MB is the
 difference between a table that fits and one that does not."""
+
+[[native.shared.deny]]
+module = "moy_play"
+why = """
+The kernel's Player (docs/kernel_cartpath_2026-10.md). This board runs no
+carts: the browser it serves plays them."""
+
+[[native.shared.deny]]
+module = "moy_app"
+why = """
+The app ABI's kernel half (docs/kernel_appabi_2026-10.md) and the user-files
+layer it builds (native/moy_store/moy_ufiles.h, the module `moy_ufiles`). This
+board runs no apps: the browser it serves runs them, and its sync moves the
+files by path."""
+
+[[native.shared.deny]]
+module = "moy_ui"
+why = """
+The widget toolkit (docs/kernel_toolkit_2026-10.md). This board runs no apps:
+the browser it serves draws them."""
 
 [[native.shared.deny]]
 module = "moy_gfx"
@@ -380,6 +419,37 @@ in the browser console it serves, whose compiled tier is the browser's own
 WebAssembly engine running a cart's main.wasm (native/moy_wasm_web) -- so the
 runtime would be flash spent in both OTA slots for code nothing calls."""
 
+[[native.shared.take]]
+module = "moy_kernel"
+why = """
+The kernel's entry, crash record and recovery floor (docs/kernel_spine_2026-10.md
+§6-§8): the kernel is the entry on every target (docs/kernel_survival_2026-10.md
+section 6.5). This board has no panel, so its floor is serial only -- `retry`,
+`safe`, `repl`, `state` -- and with nobody at the serial it takes SAFE after
+MOY_KERNEL_IDLE_SAFE_MS (mpconfigboard.h). main.py proves the boot as soon as the
+VM reaches it, so a Ctrl-C at any point lands at the REPL, as before."""
+
+[[native.shared.deny]]
+module = "moy_glass"
+why = """
+The glass's canvas rows, buffer table and present (docs/kernel_survival_2026-10.md
+section 3): this board has no panel to present to."""
+
+[[native.shared.deny]]
+module = "moy_input"
+why = """
+The merged input table and its drivers (docs/kernel_survival_2026-10.md section
+4): this board has no keyboard, touch or pointer of its own; the input a paired
+browser takes is the browser's."""
+
+[[native.shared.take]]
+module = "moy_net"
+why = """
+The links (docs/kernel_survival_2026-10.md section 6): the webhost and the sync
+RPC this board serves are what the module is for. It is the batch codec and
+the HTTP parser and response writer the webserver, the sync stack and the GPIO
+routes import; its JSON scanner is moy_store's, which this board takes."""
+
 [[native.shared.deny]]
 module = "moy_png"
 why = """
@@ -388,6 +458,17 @@ pixels. This board draws no shelf -- the browser console paired with it reads
 a cart's covers itself, with the reader its own build carries -- and it serves
 the files as they are, so a decoder here would be flash in both OTA slots for a
 picture nothing shows."""
+
+[[native.shared.deny]]
+module = "moy_index"
+why = """
+The store's native index (moy_index.h): the slot table a console's shelf, the
+launcher and the Settings lists query by title and kind. This board draws no
+shelf and answers no query -- its store is read by the browser console, which
+keeps its own index, and served as files -- and nothing it freezes imports the
+module (`moy_carts` reaches the store through `moy_store`, which this board
+takes). The handle table the index shares is `moy_spine`'s and stays, because
+the kernel's route tables and string table are built on it."""
 
 [[native.shared.deny]]
 module = "moy_serial"

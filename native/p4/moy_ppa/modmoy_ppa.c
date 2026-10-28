@@ -26,6 +26,7 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_async_memcpy.h"
+#include "esp_async_fbcpy.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -219,29 +220,10 @@ static void srm_block(size_t n_args, const mp_obj_t *args, size_t i,
 //   scaled block must land inside it (no clip). The source is the whole
 //   picture, or its (bx, by, bw, bh) block: a compiled cart's view of its
 //   frame, or a rect the console painted over one, read where it sits.
-static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t mode) {
-    if (s_srm == NULL) {
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
-    }
-    mp_buffer_info_t dst, src;
-    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
-    mp_int_t dw = mp_obj_get_int(args[1]);
-    mp_int_t dh = mp_obj_get_int(args[2]);
-    mp_int_t dx = mp_obj_get_int(args[3]);
-    mp_int_t dy = mp_obj_get_int(args[4]);
-    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
-    mp_int_t sw = mp_obj_get_int(args[6]);
-    mp_int_t sh = mp_obj_get_int(args[7]);
-    mp_int_t scale = mp_obj_get_int(args[8]);
-    if (scale < 1) {
-        scale = 1;
-    }
-    mp_int_t blk[4];
-    srm_block(n_args, args, 9, sw, sh, blk);
-    if ((mp_int_t)src.len < sw * sh * 2) {
-        mp_raise_ValueError(MP_ERROR_TEXT("source picture"));
-    }
-
+// The scale itself, shared by the binding and the kernel's C callers.
+static esp_err_t srm_do(void *dbuf, size_t dlen, mp_int_t dw, mp_int_t dh, mp_int_t dx,
+                        mp_int_t dy, const void *sbuf, mp_int_t sw, mp_int_t sh,
+                        mp_int_t scale, const mp_int_t blk[4], ppa_trans_mode_t mode) {
     // The out picture is the ROWS the scaled block lands on, not the whole
     // framebuffer -- the same scoping rotate()/rotate_scale() do. The driver's
     // own invalidate is ALREADY row-scoped (ppa_srm.c syncs an "out_buffer
@@ -256,14 +238,14 @@ static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t m
     // number of lines (an RGB565 width that is a multiple of 32px), so a
     // picture that does not qualify keeps the whole buffer.
     mp_int_t ow = blk[2] * scale, oh = blk[3] * scale;
-    uint8_t *out = (uint8_t *)dst.buf;
-    size_t out_len = dst.len;
+    uint8_t *out = (uint8_t *)dbuf;
+    size_t out_len = dlen;
     mp_int_t out_h = dh, out_y = dy;
     if (dw > 0 && dh > 0 && dx >= 0 && dy >= 0
             && dx + ow <= dw && dy + oh <= dh
-            && (mp_int_t)dst.len >= dw * dh * 2
-            && ((uintptr_t)dst.buf & 63u) == 0 && (((size_t)dw * 2u) & 63u) == 0) {
-        out = (uint8_t *)dst.buf + (size_t)dy * (size_t)dw * 2u;
+            && (mp_int_t)dlen >= dw * dh * 2
+            && ((uintptr_t)dbuf & 63u) == 0 && (((size_t)dw * 2u) & 63u) == 0) {
+        out = (uint8_t *)dbuf + (size_t)dy * (size_t)dw * 2u;
         out_len = (size_t)oh * (size_t)dw * 2u;
         out_h = oh;
         out_y = 0;
@@ -271,7 +253,7 @@ static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t m
 
     ppa_srm_oper_config_t op = {
         .in = {
-            .buffer = src.buf,
+            .buffer = sbuf,
             .pic_w = (uint32_t)sw,
             .pic_h = (uint32_t)sh,
             .block_w = (uint32_t)blk[2],
@@ -316,6 +298,49 @@ static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t m
     esp_err_t err = ppa_submit_srm(&op);
     if (err != ESP_OK) {
         s_submitted--;   // no transaction queued -> no done callback will fire
+    }
+    return err;
+}
+
+// The kernel's scale (a run in the loop's foreground, native/moy_play): the
+// whole `src` picture, `scale` times, into `dst` at (dx, dy), blocking and
+// bilinear (the PPA's scaler). 0, or the driver's error; -1 before init.
+int moy_ppa_k_scale(uint16_t *dst, int dw, int dh, int dx, int dy, const uint16_t *src,
+                    int sw, int sh, int scale) {
+    if (s_srm == NULL) {
+        return -1;
+    }
+    mp_int_t blk[4] = {0, 0, sw, sh};
+    return (int)srm_do(dst, (size_t)dw * (size_t)dh * 2u, dw, dh, dx, dy, src, sw, sh,
+                       scale < 1 ? 1 : scale, blk, PPA_TRANS_MODE_BLOCKING);
+}
+
+static mp_obj_t srm_blit(size_t n_args, const mp_obj_t *args, ppa_trans_mode_t mode) {
+    if (s_srm == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
+    }
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_int_t dw = mp_obj_get_int(args[1]);
+    mp_int_t dh = mp_obj_get_int(args[2]);
+    mp_int_t dx = mp_obj_get_int(args[3]);
+    mp_int_t dy = mp_obj_get_int(args[4]);
+    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
+    mp_int_t sw = mp_obj_get_int(args[6]);
+    mp_int_t sh = mp_obj_get_int(args[7]);
+    mp_int_t scale = mp_obj_get_int(args[8]);
+    if (scale < 1) {
+        scale = 1;
+    }
+    mp_int_t blk[4];
+    srm_block(n_args, args, 9, sw, sh, blk);
+    if ((mp_int_t)src.len < sw * sh * 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("source picture"));
+    }
+
+    esp_err_t err = srm_do(dst.buf, dst.len, dw, dh, dx, dy, src.buf, sw, sh, scale, blk,
+                           mode);
+    if (err != ESP_OK) {
         mp_raise_msg_varg(&mp_type_OSError,
                           MP_ERROR_TEXT("ppa srm failed: %d"), (int)err);
     }
@@ -910,6 +935,267 @@ static mp_obj_t moy_ppa_dma_copy(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_dma_copy_obj, 5, 5, moy_ppa_dma_copy);
 
+// copy(dst, src, off, n[, src_off]) -> True once the n bytes at `src_off`
+//   (`off` where not given) of `src` are at `off` of `dst`, moved by the AXI
+//   GDMA (blocking, the GIL released): a scan buffer's whole rows out of
+//   another's (moy_glass.DsiCompositor.copy_last), a band of the glass into a
+//   layer as wide,
+//   at about twice the CPU's memcpy between the two on glass. The CPU's view
+//   of both stays true: the source's lines are written back first, the
+//   destination's written back and dropped before and dropped again after,
+//   so no line this core painted outlives the copy and none from before it
+//   is read. False when the engine is not to be had, the span is not 64-byte
+//   aligned at both ends, the engine refuses it or it does not land in time:
+//   the caller copies on the CPU.
+//
+//   The copy has an engine of its own for the call, installed and removed
+//   around it: the driver builds each transfer's descriptor lists in internal
+//   DMA memory and keeps them until that transaction slot is used again, and
+//   a whole scan buffer's lists are ~40 KB of it, which the idle desk would
+//   otherwise hold for good (the shared engine's slots keep theirs).
+static volatile bool s_copy_busy;
+static bool s_copy_dead;
+static uint32_t s_copies, s_copy_refused;
+
+static bool copy_done_cb(async_memcpy_handle_t h, async_memcpy_event_t *e, void *arg) {
+    (void)h; (void)e; (void)arg;
+    s_copy_busy = false;
+    return false;
+}
+
+static mp_obj_t moy_ppa_copy(size_t n_args, const mp_obj_t *args) {
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(args[1], &src, MP_BUFFER_READ);
+    mp_int_t off = mp_obj_get_int(args[2]);
+    mp_int_t n = mp_obj_get_int(args[3]);
+    mp_int_t soff = n_args > 4 ? mp_obj_get_int(args[4]) : off;
+    if (n <= 0 || off < 0 || soff < 0 || off + n > (mp_int_t)dst.len
+            || soff + n > (mp_int_t)src.len) {
+        mp_raise_ValueError(MP_ERROR_TEXT("copy span"));
+    }
+    uint8_t *d = (uint8_t *)dst.buf + off;
+    uint8_t *sp = (uint8_t *)src.buf + soff;
+    async_memcpy_handle_t mcp = NULL;
+    async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
+    cfg.backlog = 1;
+    cfg.dma_burst_size = 64;
+    if ((((uintptr_t)d | (uintptr_t)sp | (uintptr_t)n) & 63u) != 0 || s_copy_dead
+            || esp_async_memcpy_install_gdma_axi(&cfg, &mcp) != ESP_OK) {
+        s_copy_refused++;
+        return mp_const_false;
+    }
+    esp_cache_msync(sp, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    esp_cache_msync(d, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    s_copy_busy = true;
+    if (esp_async_memcpy(mcp, d, sp, (size_t)n, copy_done_cb, NULL) != ESP_OK) {
+        s_copy_busy = false;
+        esp_async_memcpy_uninstall(mcp);
+        s_copy_refused++;
+        return mp_const_false;
+    }
+    int64_t deadline = esp_timer_get_time() + PPA_FENCE_TIMEOUT_US;
+    MP_THREAD_GIL_EXIT();
+    while (s_copy_busy && esp_timer_get_time() < deadline) {
+    }
+    MP_THREAD_GIL_ENTER();
+    if (s_copy_busy) {
+        // It may still land: the engine stays installed for it, and the
+        // copy is the CPU's from now on. What it writes late is what the
+        // caller's CPU copy writes.
+        s_copy_busy = false;
+        s_copy_dead = true;
+        s_timeouts++;
+        s_copy_refused++;
+        return mp_const_false;
+    }
+    esp_async_memcpy_uninstall(mcp);
+    esp_cache_msync(d, (size_t)n, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    s_copies++;
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_copy_obj, 4, 5, moy_ppa_copy);
+
+// -- THE BLOCK COPY: a canvas's shift_last on the 2D-DMA -----------------------
+//
+// fbcpy moves a w x h block of one RGB565 picture into another on the DMA2D's
+// M2M channels (ESP-IDF's esp_async_fbcpy, the engine esp_lcd's DPI panel
+// copies a draw buffer with): a stride on either side, so a block inside a
+// 1024- or 1280-px framebuffer is one transfer, where the AXI GDMA moves one
+// contiguous span and a per-row transfer costs ~80 us of setup. It lands a
+// window-sized block in a few ms against the CPU's 15-30 (#113's 2026-10-23
+// comment has the per-board table), and its submit costs the CPU the cache
+// work and an enqueue. Across buffers only: in place it copies forward and is
+// exact only for a destination above its source.
+//
+// The cache rules are the PPA's, scoped to the ROWS the block spans: the
+// source rows written back before the submit; the destination rows written
+// back and dropped before it, so no line this core painted is evicted over
+// the copy, and dropped again at the fence, so none pulled in during the
+// flight is read. Between submit and fence the CPU writes no line of the
+// destination rows -- its pixels beside the block share their lines. The
+// destination rows must be whole cache lines (a framebuffer's are): a block
+// whose rows are not, or a picture the engine refuses, answers False and the
+// caller copies on the CPU.
+//
+// One copy flies at most: a submit fences the last one first. A copy that
+// never lands trips the deadline once and retires the engine for the session.
+
+static esp_async_fbcpy_handle_t s_fb = NULL;
+static bool s_fb_dead;
+static volatile bool s_fb_busy;
+static uint8_t *s_fb_dst;               // the destination rows the fence drops
+static size_t s_fb_dst_n;
+static uint32_t s_fb_copies, s_fb_refused, s_fb_timeouts;
+static uint32_t s_fb_submit_us, s_fb_wb_us, s_fb_wait_us, s_fb_inval_us;
+static int64_t s_fb_t0;
+static volatile int64_t s_fb_t_landed;  // the completion's time, taken in its ISR
+static uint32_t s_fb_flight_us;         // the last copy's submit to landing
+
+static bool fb_done_cb(esp_async_fbcpy_handle_t h, esp_async_fbcpy_event_data_t *e, void *arg) {
+    (void)h; (void)e; (void)arg;
+    s_fb_t_landed = esp_timer_get_time();
+    s_fb_busy = false;
+    return false;
+}
+
+static void fb_wait_inner(void) {
+    if (s_fb_dst == NULL) {
+        return;
+    }
+    int64_t t0 = esp_timer_get_time();
+    if (s_fb_busy) {
+        int64_t deadline = t0 + PPA_FENCE_TIMEOUT_US;
+        MP_THREAD_GIL_EXIT();
+        while (s_fb_busy && esp_timer_get_time() < deadline) {
+        }
+        MP_THREAD_GIL_ENTER();
+        if (s_fb_busy) {
+            // It may still land; the engine is the CPU's from now on.
+            s_fb_busy = false;
+            s_fb_dead = true;
+            s_fb_timeouts++;
+            s_timeouts++;
+        }
+    }
+    int64_t t1 = esp_timer_get_time();
+    s_fb_flight_us = s_fb_t_landed >= s_fb_t0 ? (uint32_t)(s_fb_t_landed - s_fb_t0) : 0;
+    esp_cache_msync(s_fb_dst, s_fb_dst_n, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    s_fb_dst = NULL;
+    s_fb_wait_us = (uint32_t)(t1 - t0);
+    s_fb_inval_us = (uint32_t)(esp_timer_get_time() - t1);
+}
+
+// fbcpy(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h[, nb]) -> True once
+//   the w x h block at (sx, sy) of the sw x sh RGB565 picture `src` is copied
+//   (blocking) or queued (`nb`; fence with fbcpy_wait()) to (dx, dy) of the
+//   dw x dh picture `dst`. The block lies inside both. False: the engine is
+//   not to be had, refused the block or its destination rows are not whole
+//   cache lines -- the caller copies on the CPU.
+static mp_obj_t moy_ppa_fbcpy(size_t n_args, const mp_obj_t *args) {
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
+    mp_int_t dw = mp_obj_get_int(args[1]), dh = mp_obj_get_int(args[2]);
+    mp_int_t dx = mp_obj_get_int(args[3]), dy = mp_obj_get_int(args[4]);
+    mp_int_t sw = mp_obj_get_int(args[6]), sh = mp_obj_get_int(args[7]);
+    mp_int_t sx = mp_obj_get_int(args[8]), sy = mp_obj_get_int(args[9]);
+    mp_int_t w = mp_obj_get_int(args[10]), h = mp_obj_get_int(args[11]);
+    bool nb = n_args > 12 && mp_obj_is_true(args[12]);
+    if (w <= 0 || h <= 0 || dx < 0 || dy < 0 || sx < 0 || sy < 0
+            || dx + w > dw || dy + h > dh || sx + w > sw || sy + h > sh
+            || (size_t)(dw * dh * 2) > dst.len || (size_t)(sw * sh * 2) > src.len) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fbcpy block"));
+    }
+    fb_wait_inner();
+    uint8_t *drow = (uint8_t *)dst.buf + (size_t)dy * (size_t)dw * 2u;
+    size_t dn = (size_t)h * (size_t)dw * 2u;
+    if (s_fb_dead || (((uintptr_t)drow | dn) & 63u) != 0) {
+        s_fb_refused++;
+        return mp_const_false;
+    }
+    if (s_fb == NULL) {
+        esp_async_fbcpy_config_t cfg = {};
+        if (esp_async_fbcpy_install(&cfg, &s_fb) != ESP_OK) {
+            s_fb = NULL;
+            s_fb_dead = true;
+            s_fb_refused++;
+            return mp_const_false;
+        }
+    }
+    int64_t t0 = esp_timer_get_time();
+    esp_cache_msync((uint8_t *)src.buf + (size_t)sy * (size_t)sw * 2u,
+                    (size_t)h * (size_t)sw * 2u,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    esp_cache_msync(drow, dn, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    int64_t t1 = esp_timer_get_time();
+    esp_async_fbcpy_trans_desc_t tr = {
+        .src_buffer = src.buf,
+        .dst_buffer = dst.buf,
+        .src_buffer_size_x = (size_t)sw,
+        .src_buffer_size_y = (size_t)sh,
+        .dst_buffer_size_x = (size_t)dw,
+        .dst_buffer_size_y = (size_t)dh,
+        .src_offset_x = (size_t)sx,
+        .src_offset_y = (size_t)sy,
+        .dst_offset_x = (size_t)dx,
+        .dst_offset_y = (size_t)dy,
+        .copy_size_x = (size_t)w,
+        .copy_size_y = (size_t)h,
+        .pixel_format_unique_id = {
+            .color_type_id = COLOR_TYPE_ID(COLOR_SPACE_RGB, COLOR_PIXEL_RGB565),
+        },
+    };
+    s_fb_busy = true;
+    s_fb_dst = drow;
+    s_fb_dst_n = dn;
+    s_fb_t0 = t0;
+    s_fb_t_landed = 0;
+    if (esp_async_fbcpy(s_fb, &tr, fb_done_cb, NULL) != ESP_OK) {
+        s_fb_busy = false;
+        s_fb_dst = NULL;
+        s_fb_refused++;
+        return mp_const_false;
+    }
+    int64_t t2 = esp_timer_get_time();
+    s_fb_wb_us = (uint32_t)(t1 - t0);
+    s_fb_submit_us = (uint32_t)(t2 - t0);
+    s_fb_copies++;
+    if (!nb) {
+        fb_wait_inner();
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_fbcpy_obj, 12, 13, moy_ppa_fbcpy);
+
+// fbcpy_wait(): the copy in flight has landed and its destination rows are
+//   out of the cache (GIL released, bounded); one compare when none is.
+static mp_obj_t moy_ppa_fbcpy_wait(void) {
+    fb_wait_inner();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_fbcpy_wait_obj, moy_ppa_fbcpy_wait);
+
+// fbcpy_busy() -> True while a copy flies (fbcpy_wait has not fenced it).
+static mp_obj_t moy_ppa_fbcpy_busy(void) {
+    return mp_obj_new_bool(s_fb_dst != NULL);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_fbcpy_busy_obj, moy_ppa_fbcpy_busy);
+
+// fbcpy_stats() -> (copies, refused, timeouts, the last submit's us, of
+//   which its cache writeback, the last fence's wait, its invalidate, and
+//   the last copy's submit to landing in us, 0 where it never landed).
+static mp_obj_t moy_ppa_fbcpy_stats(void) {
+    const uint32_t v[8] = { s_fb_copies, s_fb_refused, s_fb_timeouts, s_fb_submit_us,
+                            s_fb_wb_us, s_fb_wait_us, s_fb_inval_us, s_fb_flight_us };
+    mp_obj_t t[8];
+    for (int i = 0; i < 8; i++) {
+        t[i] = mp_obj_new_int_from_uint(v[i]);
+    }
+    return mp_obj_new_tuple(8, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_fbcpy_stats_obj, moy_ppa_fbcpy_stats);
+
 // -- THE FRAME SNAPSHOT: a compiled cart's frame, out of its memory ----------
 //
 // A compiled cart hands the console its frame where it made it, in its own
@@ -1139,6 +1425,14 @@ static mp_obj_t moy_ppa_sync(void) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_sync_obj, moy_ppa_sync);
+
+// The kernel's teardown (native/moy_glass): no snapshot and no transaction
+// still reads or writes a buffer the VM is about to free.
+void moy_ppa_k_sync(void) {
+    snap_wait_inner();
+    fb_wait_inner();
+    ppa_wait(0);
+}
 
 // stats() -> (submitted, done, timeouts). timeouts must stay 0.
 static mp_obj_t moy_ppa_stats(void) {
@@ -1431,6 +1725,11 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rotate_scale), MP_ROM_PTR(&moy_ppa_rotate_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_rotate_bounce), MP_ROM_PTR(&moy_ppa_rotate_bounce_obj) },
     { MP_ROM_QSTR(MP_QSTR_dma_copy), MP_ROM_PTR(&moy_ppa_dma_copy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy), MP_ROM_PTR(&moy_ppa_copy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fbcpy), MP_ROM_PTR(&moy_ppa_fbcpy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fbcpy_wait), MP_ROM_PTR(&moy_ppa_fbcpy_wait_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fbcpy_busy), MP_ROM_PTR(&moy_ppa_fbcpy_busy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fbcpy_stats), MP_ROM_PTR(&moy_ppa_fbcpy_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap), MP_ROM_PTR(&moy_ppa_snap_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap_wait), MP_ROM_PTR(&moy_ppa_snap_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_snap_stats), MP_ROM_PTR(&moy_ppa_snap_stats_obj) },

@@ -1,0 +1,8 @@
+{
+  "format": "moy-1",
+  "title": "Stuck Wasm",
+  "type": "game",
+  "runtime": "wasm",
+  "main": "main.wasm",
+  "memory": 1
+}

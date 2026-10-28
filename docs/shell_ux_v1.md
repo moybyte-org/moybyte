@@ -79,19 +79,18 @@ never special-cases "was I launched from the editor?", the Editor never special-
 "how do I get back after a test run?", and adding a new caller (a debugger, a
 slideshow, the web view) costs nothing.
 
-*(2026-07-23: a CRASH is an exit too — the **crash-to-code throw**. A cart that
-fails to start or raises mid-frame no longer parks on an OOPS panel waiting for
-a manual TAP-CODE: the run exits straight into the Editor's Code tab with the
-caret on the crashing line, the inline marker set, and a tap/type-dismissible
-error popup over it (`ws._crash_to_code`). On a cart of several scripts
+*(2026-07-23: a CRASH is an exit too — the **crash-to-code throw**, a row of
+the stop card since docs/look_2026-10.md step 33. A cart that fails to start
+or raises mid-frame stops under the stop card, whose See why exits into the
+Editor's Code tab with the caret on the crashing line, the inline marker set,
+and a tap/type-dismissible popover hung under it (`ws._crash_to_code`). On a cart of several scripts
 (SPEC.md 4) it opens the FILE that raised, not whichever the tab was left on --
 on a PICO-8 port that is as often the generated half as the game, and a marker
 on somebody else's line N is worse than none (#89). The marker then RE-CHECKS on every
 edit/undo — it retires only when the source actually parses again, and follows
-the live syntax error while it doesn't. The old panel survives as the
-no-open-cart fallback, and for a compiled (`"runtime": "wasm"`) cart, whose
-trap has no source line behind it: the panel reports it, offers no EDIT, and
-points at HOME. This is still the caller model: the crash path is just one more
+the live syntax error while it doesn't. With no open cart, and for a
+compiled (`"runtime": "wasm"`) cart, whose trap has no source line behind
+it, the card offers no See why: Restart and Home. This is still the caller model: the crash path is just one more
 pop, into the one place the fix can happen.)*
 
 ---
@@ -120,44 +119,44 @@ sibling app stealing milliseconds. "One fullscreen app + a back-stack" is not a
 compromise UI; it is the mechanism by which games hit their #66 numbers.
 
 *(Status 2026-07-08: the windowed tier is IMPLEMENTED host-side —
-`runtime/wm_windowed.py`, also served over the web transport — with three
-owner-directed refinements to this section's sketch: the picker + Editor share
-ONE "Make" window; INPUT FOCUS is decoupled from the back-stack (clicking a
+`runtime/wm_windowed.py`, also served over the web transport — with two
+owner-directed refinements to this section's sketch: INPUT FOCUS is decoupled
+from the back-stack (clicking a
 window never pops anything — a playtest keeps running beside a focused editor,
 and only an explicit exit ends a run); and closes are surgical (closing one
 window never closes another). One cart still runs at a time (#73's multi-cart
 boundary). The P4 device port of this tier rides #58.)*
 
-*(Status 2026-07-20 — TWO WORLDS, #105: the windowed tier now splits play from
-make. It BOOTS onto the **desktop** — wallpaper + a static icon column (PLAY,
-PROJECTS, and the system apps) + the one OS bar with taskbar chips — which is
-the make world's floor: everything opened there is a window, and the desk bar
-draws no X (nothing is beneath it). The **PLAY icon** drops to the fullscreen
-**Library**, purely the game launcher: system-app carts leave its shelf on
-this tier (they are desk icons instead — "apps are windows, games are
-fullscreen"), a tap runs the game FULLSCREEN exactly like the small tiers
-(hold-BACKSPACE exits back to the Library), and the Make tile / a card's
-CHANGE drop back to the desk (CHANGE with that project's Editor open).
-Leaving the desk closes its windows — autosave (§7) makes that free. The
-fullscreen tiers are untouched: the Player tier only ever gets the
-launcher; its desktop story is the web view.)*
+*(Status 2026-07-20 — TWO WORLDS, #105; two MODES since 2026-10-13,
+`docs/shell_layout_2026-10.md` §3: the windowed tier BOOTS onto the
+**desktop** — wallpaper + a static icon column (PLAY, PROJECTS — the home in
+a window, on Make — then every app on the home's Apps tab, Notes and any
+installed app cart among them) + the one OS bar with taskbar chips — desktop mode's floor:
+everything opened there is a window, and the desk bar draws no X (nothing is
+beneath it). The **PLAY icon** enters console mode: the desk's windows wait
+parked, off the back-stack, and the fullscreen **home** shows — the same
+home every board has (`docs/shell_layout_2026-10.md` §12: its Games / Mine /
+Apps / Make tabs, the Games tab holding no app): a tap runs a game
+FULLSCREEN exactly like the small tiers (the pause menu's Quit exits back to the
+home), and a tap on the Make tab and a card's CHANGE open the Editor
+fullscreen, as there. The home's X — B from a keyboard — is the way back to
+the desk, its windows where they were. The Player tier only ever gets the
+home; its desktop story is the web view.)*
 
 *(Status 2026-07-31 — PLAY INTENT, #178: `run(cart)` stays one verb, but the
 windowed tier reads WHY it was called to pick the playtest window's default
-size. A **PLAY from the Editor is a dev action** — the window opens at **1× of
-the cart canvas on every desktop**, parked in the bottom-right corner, so the
-code it came from stays readable ("editor beside a running playtest",
-owner-directed); a **run from the desk is a play action** and opens as big as
-the desktop fits. The dev size is deliberately NOT screen-relative — one rule
-you learn once beats a different window on every machine, and the grip is
-already there. The size is read ONCE, at window creation, so a window the kid
+size. A **PLAY from the Editor is a dev action** — the window opens at **2× of
+the cart canvas, centred over the Editor**, where the desk holds it, else at
+1× at the Editor's top right, clear of its symbol keys (owner, 2026-10-19:
+the game is the point of the window); a **run from the desk is a play
+action** and opens as big as the desktop fits. The size is read ONCE, at window creation, so a window the kid
 resizes is never re-sized under them. No new UI and no setting — the two entry
 points already carry the meaning. An explicit scale chooser and per-project
 memory remain open on #178.)*
 
 ---
 
-## 4. Two personas — making is an app, a tap always plays
+## 4. Two personas — making is an app, a tap on a played tab plays
 
 *(As originally locked, this section was a per-device "tap-mode" setting — maker vs
 player. That was built, then RETIRED during implementation: a modal tap is invisible
@@ -168,73 +167,81 @@ The console serves two kids (often the same kid at different hours): the one who
 to **play** and the one who wants to **make**. Both get a first-class, always-visible
 door — no setting, no mode:
 
-- **A launcher tap always RUNS the cart.** Every cart type, no per-device default,
-  no type dispatch. The launcher home is for playing.
-- **The Library shelf scrolls continuously LEFT-RIGHT** (2026-07-13 — paging
-  retired; a shelf slides sideways): the ONE tall pinned MAKE card heads the list
-  and scrolls away with it; every other card stacks the columns marching right.
-  Touch drag scrolls the grid — a card tap activates on RELEASE (tap-vs-drag slop,
-  the shared `ui.DragTap` machine the Settings rows ride too), so a scroll can
-  never launch a cart — with footer left/right arrows (one column per tap), a slim
-  scrollbar along the grid's bottom edge, and keyboard nav pulling the view along.
-  The SAME shelf renders on every tier, the 320×240 T-Deck included (its frozen
-  icon-tile grid is retired).
-- **Scrolling is KINETIC** (#113, 2026-07-22): a fast release FLINGS the shelf,
+- **A tap on the home's Games, Mine and Apps tabs RUNS the cart** (an app's
+  cart opens the app). Every cart type, no per-device default, no type
+  dispatch. The fourth tab, **Make**, is the one list of projects (owner,
+  2026-10-14) and a tap there EDITS (owner, 2026-10-13) — the one tab whose
+  tap makes rather than plays (`docs/shell_layout_2026-10.md` §12).
+- **The home is a carousel** (2026-10, `docs/shell_layout_2026-10.md` §12):
+  one row of cover cards slides sideways under the tab row, the centre card
+  larger; a card tap activates on RELEASE (tap-vs-drag slop, the shared
+  `ui.DragTap` machine the Settings rows ride too), so a scroll can never
+  launch a cart. The SAME home renders on every tier, the 320×240 T-Deck
+  included. A layout may pick another arrangement (`home`): the **grid**, a
+  shelf of cards in the rows the glass holds that scrolls LEFT-RIGHT, or the
+  **icons**, tiles that scroll down (`docs/look_2026-10.md` step 33).
+- **Scrolling is KINETIC** (#113, 2026-07-22): a fast release FLINGS the row,
   which coasts with friction and hard-stops at the ends; a slow or held release
   is a plain stop, and a touch mid-coast CATCHES it (that catching tap never
   activates a card). The physics lives in the shared `ui.ScrollRegion`, so the
-  Editor project-picker grid flings identically; scroll/fling frames repaint via
-  the scroll-as-blit band path (shift the retained pixels, redraw only the
-  exposed strip), which is what makes a 60Hz coast affordable on every backend.
+  grid and the icons fling identically; a scroll, fling or step frame is the
+  band's alone (`launcher_layer._drag_partial`): on the plain ground the
+  band shifts and repaints the strip it exposed, a step repaints the two
+  cards whose focus moved and the hint strip, and over a baked backdrop or a
+  picture a moved band repaints whole over the backdrop's own pixels, each
+  card that wears no focus copied out of its kept face (drawn once, the
+  pixels its corners blend drawn over the backdrop).
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
-  v1 §1.2, the Library contract): PLAY runs it (same as the tap), CHANGE opens the
-  SAME project in the Editor landing on Config — the bridge from playing to making,
-  in place, never a surprise duplicate. On the 320×240 tier the verbs ride the
-  lent bar zone as chips; on the desktop-density tiers they draw on the selected
-  card itself (`Launcher.action_rects`). The `C` (code) key is the keyboard route.
-- **Making is an app you launch:** the launcher's first tile is a pinned
-  **"Make ✏️" tile** → the Editor's **project-picker** — the same launcher-grid look
-  over EVERY editable cart (wallpapers and built-ins included) plus a pinned **＋New**
-  tile. Picking a project opens it in the Editor, **landing on Config first** — the
+  v1 §1.2): PLAY runs it (same as the tap), CHANGE opens the SAME project in the
+  Editor landing on Config — the bridge from playing to making, in place, never a
+  surprise duplicate. The verbs ride the home's hint strip on every tier (on
+  the desk also the details pane's buttons), the active tab's set. The `C`
+  (code) key is the keyboard route.
+- **Making is an app you launch:** the home's **Make** tab — fullscreen, or on
+  the desk in the PROJECTS window — lists EVERY editable cart (wallpapers and
+  built-ins included) after a **＋New** card. Picking a project opens it in the
+  Editor, **landing on Config first** — the
   "Make it mine" cards, intrigue-first: a kid customizes a game before ever seeing a
   line of code, and the path from "I changed the color" to "what else can I change?"
   runs straight through the Editor's tab ladder (§6).
-- **The picker manages projects:** ＋New (create a game and open it), Copy, and
-  Delete (a two-tap confirm) live in the picker — cart management moved OFF the
-  launcher home, which no longer has new/dup/del.
-- **Wallpapers are backdrop-only:** they are not run-grid tiles at all. The backdrop
+- **Make manages projects:** ＋New (create a game and open it), COPY, and DEL
+  (which asks first: a deleted cart is gone for good) are Make's verbs; the tabs
+  that play carry none of them but an empty Mine's ＋New.
+- **Wallpapers are backdrop-only:** they are on none of the tabs that run. The backdrop
   (and the panel theme) is chosen in the **Appearance app** — the ONE appearance
   surface, reachable from Settings' APPEARANCE row; wallpaper carts stay editable
-  through the picker.
-- **The picker sits on a static black backdrop** (2026-07-08): the launcher home is
-  the kid's decorated desk (live wallpaper), the Make space is the workbench —
-  "it's software". Side effect: with no animated backdrop forcing repaints, an idle
-  picker costs zero under the redraw-on-change gate.
+  on Make.
+- **The PROJECTS window sits on a static backdrop** (the panel field): the
+  desk is the kid's decorated wallpaper, a window is software. With no
+  animated backdrop forcing repaints, an idle window costs zero under the
+  redraw-on-change gate.
 
-Nothing is ever locked away: Play is a tap, Make is a tile, and both are visible from
+Nothing is ever locked away: Play is a tap, Make is a tab, and both are visible from
 every screen a kid starts on.
 
 ---
 
 ## 5. The zoned top bar — the macOS menu-bar model
 
-There is a single OS-owned 18px bar with two zones. This is the current #46 unified
-bar, re-framed: it stops being a hardcoded strip of mode buttons and becomes an OS
-shell with an app-populated region.
+The default layout is a single OS-owned 18px top bar with two zones; a theme's
+layout places the same widgets in bars on any edge (`docs/shell_layout_2026-10.md`
+§4). This is the #46 bar, re-framed: it stopped being a hardcoded strip of mode
+buttons and became an OS shell with an app-populated region.
 
 - **LEFT zone = the active app's toolbar.** The OS *lends* the app this region. The
-  Editor loads PROJECTS + its tab ladder + PLAY here (§6, no SAVE -- #111); the launcher shows
-  the selected cart's name (its management verbs live in the picker, §4); Settings
+  Editor loads its tab ladder + PLAY here (§6, no SAVE -- #111); the home puts
+  the active tab's chips there for its selected card (§4); Settings
   fills it with its sections. The app owns the pixels and the taps inside the zone;
   the OS owns the zone's existence and bounds.
-- **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable as a
-  shortcut into the matching Settings page — **plus a context X** that exits the
-  current app (§9). Apps cannot draw here; the right zone is how the OS stays present
+- **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable,
+  opening its component (the WIFI panel, the calendar, the power rows) as a popover
+  in desktop mode and fullscreen in console mode (`docs/shell_layout_2026-10.md`
+  §8). Apps cannot draw here; the right zone is how the OS stays present
   and trustworthy no matter which app is active.
 - **The bar HIDES entirely while a fullscreen game plays.** The game owns all of
-  320×240 and every input. The bar is authoring/system chrome; play is sacred.
-  (A running *tool/app* cart is the exception: it keeps a minimal bar — title +
-  status + the context X — so it is always exitable by tap, §9.)
+  320×240 and every input but Super, which pauses it (§9). The bar is authoring/system chrome; play is sacred.
+  (A running *tool/app* cart is the exception: it keeps a minimal bar — the
+  back chevron, its title and the status — so it is always exitable by tap, §9.)
 
 This is exactly the macOS menu-bar deal: one bar, always in the same place, whose left
 half belongs to whoever is frontmost and whose right half is the system's — except
@@ -249,7 +256,7 @@ ladder**, ordered easy → deep, so the leftmost thing a kid sees is always the
 gentlest:
 
 ```
-[ PROJECTS ]  Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
+Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
 ```
 
 - **Config** — the default landing tab (§4) and the intrigue rung: the "Make it mine"
@@ -260,12 +267,14 @@ gentlest:
 - **Code** — the real Python source. The Blocks tab's output, and eventually the kid's
   own hands. Carries a full small-editor toolset behind an on-screen tool palette
   (#89): text selection with copy/cut/paste (an internal clipboard, identical on
-  device), incremental find, an optional line-number gutter, and block
+  device), incremental find, a line-number gutter (on by default), and block
   indent/outdent — every verb touch-reachable, with host Ctrl+C/X/V/F/Z/Y as
   conveniences on top.
 - **Sprites / Map / Scene / Music** — the asset editors, each with an icon-buttoned
-  tool row (#90/#91/#92): the sprite painter has stroke-level undo/redo, a bucket
-  fill, and whole-sprite transforms (flip/rotate/shift/clear); the map editor has
+  tool row (#90/#91/#92): the sprite painter has PICO-8's row (pen, fill, shape,
+  select, stamp) with stroke-level undo/redo, and its operations
+  (copy/flip/rotate/shift/mirror/clear, on the selection or the whole sprite)
+  under a more menu and PICO-8's keys (`docs/look_2026-10.md` step 24); the map editor has
   per-gesture undo/redo, rectangle + flood fills, map resize, and a zoom ladder
   whose last rung is an OVERVIEW -- each cell a solid block of its tile's dominant
   colour, because no tile can be drawn below 8px, at 4-7px per cell: the whole map
@@ -279,16 +288,26 @@ gentlest:
   `code_layer` / `paint_layer` / `map_editor_ui` / `scene_editor_ui` /
   `music_editor_ui` — owned as tabs by `runtime/editor_app.py`; see §13.) The Blocks tab likewise carries subtree copy/paste/duplicate, an
   explicit cross-parent MOVE flow, and outline undo/redo (#93). Tool buttons
-  draw from the shared 12×12 glyph vocabulary (`chrome._GLYPHS`), so every tool
+  draw from the shared 12×12 glyph vocabulary (`native/moy_ui/style.json`, drawn by `ui.glyph`), so every tool
   reads pre-literate.
-- **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen; exit
-  returns to the Editor **on the tab you were on**. Test-play is a round trip, not a
+- **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen (on a
+  desk, in the workspace's Run slot or Game tab); exit returns to the Editor **on
+  the tab you were on**. Test-play is a round trip, not a
   context switch.
-- **PROJECTS** — back to the project-picker (§4): switch projects without going home.
+- **B and Esc** back out one level: to wherever the Editor was opened
+  from, the home's tab and card included. The Editor's one bar draws no
+  chevron and no Wi-Fi, so the open tab is named
+  (`docs/media/look_2026-10/EDITOR_LAYOUT.md`'s handheld); Enter plays.
+  Another project is the home's Make tab (§4); the bar has no way there of
+  its own.
+- **On a desk** the Editor shows several of these at once, as five
+  workspaces (Settings, Code, Art, World, Sound) whose dividers move, one
+  pane at a time where the glass holds none of them
+  (`runtime/editor_desk.py`, `docs/look_2026-10.md` step 30).
 
 There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
-stood for. Every hard exit (PLAY, PROJECTS, a window/context-X close, a workspace
+stood for. Every hard exit (PLAY, a window close or the bar's back, a workspace
 swap, going home) hard-commits whichever tab was showing, on top of the idle
 debounce -- exactly what SAVE used to do, just automatic. Switching tabs OWES the
 commit rather than taking it inside the tap (#154): the frame that paints the
@@ -308,7 +327,7 @@ Two guarantees, stated as UX law:
 - **Save is never required — there is no SAVE.** No "unsaved changes" state, no save
   prompt on exit, no SAVE button anywhere (#111): edits persist continuously — a
   an idle autosave debounce on every tab -- armed by typing on the code tab and by
-  touch on the drawn ones -- plus hard commits on every hard exit (PLAY, PROJECTS,
+  touch on the drawn ones -- plus hard commits on every hard exit (PLAY,
   a window/context-X close, a workspace swap, going home, and the reboot into a new
   firmware image), and a tab switch's commit paid by the frame that paints the
   destination. A
@@ -362,41 +381,72 @@ either restricts the code editor or corrupts kid code — both worse.
 
 ## 9. The exit model — taskbar-context-dependent
 
-The rule in one line: **taskbar shown → an X in the OS right zone exits (a tap);
-fullscreen game → hold-BACKSPACE exits.**
+The rule in one line: **back goes one level, a window's X closes it
+(owner, 2026-10-18); taskbar shown → the back on its bar exits (a tap);
+fullscreen game → the console's key opens the pause menu, whose Quit exits.** On a console
+bar (one screen stack, no windows) the way back is the **back chevron** at
+the head of the bar's zone, after the Moy button: the bar draws it wherever
+there is somewhere to go back to and its layout places no `close` widget
+(`BarLayer.draws_back`; the shipped themes place none, a theme without a
+look keeps the X, `docs/shell_layout_2026-10.md` §9). The chevron, Esc and B
+do the same thing, and on an app's first page they leave it
+(`Workstation.app_back`; docs/look_2026-10.md step 27a). On the desk the X
+lives only in a window's title strip and closes the window.
 
 | App | Presentation | Exit affordance | BACKSPACE is… |
 |---|---|---|---|
-| Launcher (back-stack root) | taskbar | **no X** — it's home; nothing beneath it | a plain key |
-| Desk (windowed tier's make-world floor, #105) | taskbar + windows | **no X** — the PLAY icon drops to the Library | a plain key |
-| Editor | taskbar | X → pop back (picker → launcher) | a plain key |
-| Settings (incl. wifi setup) | taskbar | X → back | a plain key — **delete in the password field just works** |
-| Running game | fullscreen | **hold**-BACKSPACE (~700ms) → return to caller (§2) | a game key on a quick tap |
-| Running tool/app cart | minimal bar (title + status + X) | X → return to caller | a plain key — delete in text fields |
+| Launcher (back-stack root) | taskbar | **no back** where it is its mode's floor (nothing beneath it); on the windowed tier's console mode, back → the desk beneath | a plain key |
+| Desk (the windowed tier's desktop-mode floor) | taskbar + windows | **none** — the PLAY icon enters console mode; a window's X closes it | a plain key |
+| Editor | taskbar | back → pop back, to where it was opened from | a plain key |
+| Settings (incl. wifi setup) | taskbar | back, Esc or B → a page of it, else out of it | a plain key — **delete in the password field just works** |
+| Running game | fullscreen | the console's key (§9a) → the pause menu's Quit → return to caller (§2) | a plain key the game reads |
+| Registered app (Calc, Files, …) | the bar: Moy, back, title, status | back, Esc or B → a page of it, else return to caller | a plain key — delete in text fields |
+| Running tool/app cart | minimal bar (back + title + status) | back → return to caller | a plain key — delete in text fields |
 
 Why this kills the keyboard special cases: because taskbar apps exit via a **tap**,
 BACKSPACE is never reserved in them — it stays an ordinary key everywhere a taskbar
 exists. The wifi password field gets BACKSPACE=delete **for free**, with zero
 special-casing. This retires the #71 "text-mode TOOL keeps backspace as delete" hack,
-and the whole pause-screen / double-tap-to-exit lineage that #71 iterated through —
+and the whole BACKSPACE pause-screen / double-tap-to-exit lineage that #71 iterated through —
 the interlock that made BACKSPACE precious was the bar being one global mode-machine;
 zone the bar (§5) and the preciousness dissolves.
 
-For a fullscreen game, a quick BACKSPACE tap still reaches the game (carts may use it
-as a key); only a sustained HOLD (~700ms, with a transient on-screen progress toast)
-exits, returning control to whoever called `run` — launcher or Editor. One niche edge,
-on the record: a game that wants *autorepeat* backspace-delete (hold to erase)
-collides with hold-to-exit. Accepted; it is rarer and cheaper than every alternative
-tried (see #71's history of what "clever" cost).
+For a fullscreen game BACKSPACE reaches the game like any other key, in every input
+mode (a text game's delete included, autorepeat or none). The way out is the
+console's key (§9a): its pause menu's Quit returns control to whoever called `run` —
+launcher or Editor.
 
-The second edge is resolved by an additive cart verb: a **`textmode(True)` game**
-receives BACKSPACE as a typed delete (and the T-Deck keyboard has no autorepeat), so
-the console's hold gesture can never fire there — such a cart provides its **own**
-exit by calling **`quit()`** (the one post-freeze addition to `docs/moy_cart_api.md`),
-bound to a spare key or an on-screen affordance; Letter Blitz models it with a
-tap-anytime ✕. (The plan's firmware-independent triple-tap alias was dropped after
-on-device testing — tools/apps keep their bar X, so no cart is ever
-strandable-but-for-reboot.)
+### 9a. The console key (owner call, 2026-10-18)
+
+Every device has one key the console keeps for itself, in every input mode, and no
+cart ever reads it. It is the `start` button (`Workstation.system_key`,
+`docs/look_2026-10.md` step 25a), and each input spells it once:
+
+| input | the console key |
+|---|---|
+| a BLE or USB keyboard | its GUI key tapped (the simulator's Super, Cmd or Meta): it acts on its release, and only when no other key went down while it was held, so Super leads chords (`native/moy_input/moy_input.h`'s key events, 2026-10-21) |
+| the T-Deck's keyboard | **Mic**: d0 bit 6 of the raw matrix, and in the C3's ASCII mode (which sends no byte for a bare Mic) Shift+Mic (`firmware/lilygo_t_deck_plus_mainline/README.md`); inside a text field being typed into, Mic is the field's Cancel instead (owner call 2026-10-18: K types a letter there, and Mic never types) |
+| a gamepad | Start |
+| the browser page | a Meta tap (on a Mac Cmd is Ctrl, so there it is the page's ☰ and Esc), the page's ☰, and Esc during play (a page rarely sees Super) |
+| touch | the bar's Moy button, where a bar shows |
+
+A tap over a fullscreen game opens the **pause menu**; anywhere else it opens the
+**system menu** (the Moy button's, which takes no focus). Pressed again it closes
+the one it opened, and **Esc** closes either and steps back (Options to the pause
+menu, the pause menu to the game). The pause menu holds the run — no tick, no draw,
+its `time()` and its music stopped where they are — and offers Resume, Restart (the
+same cart from the top, the same caller), Options (the console's Volume) and Quit
+(return to caller); Resume gives the cart its next frame as if no time passed.
+
+Nothing reads a hold of BACKSPACE, an ordinary key on every device and in every
+mode. A **`textmode(True)` game** reaches its pause menu through the console key
+like any other, so it builds no way out for itself; `quit()` stays a cart verb
+(`docs/moy_cart_api.md`), for a cart that ends itself.
+
+A fullscreen game hides the bar and with it the Moy button, so a board whose only
+input is touch has no console key during play. A touch-only exit gesture was
+DECLINED by the owner (`firmware/guition_jc3248w535/README.md`): the way out there is
+a paired keyboard's GUI key; tools and apps keep the bar's back.
 
 ---
 
@@ -409,28 +459,31 @@ privileged verbs: wifi, brightness, time, OTA — the `make_system_api` surface 
 `shell_architecture_v1.md` §2.2.
 
 Wifi setup lives inside it, and here the exit model (§9) pays off directly: Settings
-is a taskbar app, so it exits via the X, so its password field's BACKSPACE=delete
+is a taskbar app, so it exits via the bar's back, so its password field's BACKSPACE=delete
 works with no carve-out. The wifi keyboard problem is not solved by Settings — it is
 *dissolved* by Settings being an ordinary taskbar app under §9's rule.
 
 *(Status 2026-07-08: implemented — Settings carries a WIFI row + panel
 (scan/pick/password/connect/forget over the injected wifi service), and because
-Settings is an app, wifi setup works while a game keeps running; the bar's wifi
-status icon deep-links here on the windowed tier, exactly this section's model.
-The standalone wifi.moy tool cart remains the launcher-grid path. Settings also
+Settings is an app, wifi setup works while a game keeps running. The panel is
+the one wifi implementation: the bar's wifi widget opens it as a popover in
+desktop mode and as the Settings page opened at it in console mode
+(`docs/shell_layout_2026-10.md` §8; the wifi tool cart was deleted for it on
+2026-10-14). Settings also
 gained a THEME row — selectable panel colorways, `chrome.THEMES`. 2026-07-11:
 the theme tokens grew the visual-identity-v1 §4.3 SEMANTIC roles — desktop /
 surface / ink / focus / play / author / danger etc., resolved for every theme
 with the frozen literals as fallbacks — and an opt-in **"machine"** theme ships
 the Open Machine colorway: dark-blue construction field, navy dot grid/chrome,
-grape identity, green PLAY / orange authoring / yellow focus. "night" stays the
-byte-identical default. 2026-07-23: every theme family ships a **dark AND a
+grape identity, green PLAY / orange authoring / yellow focus. The default is
+Moy's Day, the 2026-10 look, since `docs/look_2026-10.md` step 27 (2026-10-18),
+which deleted `night` and `machine` with the other old seeds. 2026-07-23: every theme family ships a **dark AND a
 light variant** (Appearance → THEMES → DARK/LIGHT chips, persisted
 `theme_variant`), and the tokens now reach the whole system: the OS bar,
 Settings rows + WiFi panel, the ≡ menu/About, achievements, the OTA screens,
-the windowed-WM strips/chips, and the editor tabs on every responsive tier —
-the frozen 320×240 `_base` branches keep their literals only in DARK chrome, so
-a light variant themes the small tier too. Bar icons derive plate-free
+the windowed-WM strips/chips, and the editor tabs on every tier, the 320×240
+one included (its frozen dark literals retired with theming's phase 2b,
+2026-10-11). Bar icons derive plate-free
 light-mode sprites at draw time (`Workstation._bar_image`), so wifi/battery
 read on a light band. See docs/visual_identity_v1.md §4.3 for the role
 contract.)*

@@ -12,10 +12,17 @@
 # firmware/web_runner/dist, so this workflow compiles MicroPython to
 # WebAssembly twice before assembling the pages. That is the slow part:
 # build.sh clones and installs emsdk (~1.7 GB) the first time. master's tree
-# caches its whole .build under the key firmware-build.yml and web-e2e.yml
-# share (same path, same key: one cache); dev's tree caches its own .build
-# under a key of its own, so dev never evicts master's, and borrows master's
-# emsdk through a symlink rather than caching a second copy.
+# caches its whole .build under a key only this workflow's master tree saves,
+# and dev's tree its own: firmware-build.yml and web-e2e.yml save dev's
+# objects under `web-runner-` on a dev push, and a restore of those into
+# master's tree linked dev's module table against master's modules (the
+# stable player broke so on 2026-10-22). Dev's tree borrows master's emsdk
+# through a symlink rather than caching a second copy.
+#
+# The hero's two stills of the console (Moy Night and Moy Day) are captured
+# on every build: site/build.py boots the bundle it just copied in headless
+# Chrome through firmware/web_runner/browsershot.mjs, so the picture is the
+# shipped console's and cannot go stale. That needs node 22 and Chrome below.
 #
 # Each page also FLASHES a board over USB, so this job carries the firmware too:
 # each tree's tools/fetch_ci_firmware.py pulls every board's image out of the
@@ -85,6 +92,11 @@ jobs:
     permissions:
       contents: read
       actions: read      # list + download the firmware build's artifacts
+    env:
+      # Ubuntu 24.04 restricts unprivileged user namespaces under AppArmor,
+      # which kills Chrome's zygote before it reports a debug port; the page
+      # captured is our own bundle over 127.0.0.1 (web-e2e.yml says the same).
+      MOY_CHROME_FLAGS: "--no-sandbox"
     outputs:
       player: ${{ steps.player.outcome }}
       player_dev: ${{ steps.player_dev.outcome }}
@@ -106,6 +118,23 @@ jobs:
         with:
           python-version: "3.11"
 
+      # browsershot.mjs uses node's own global WebSocket (node 22) and a
+      # Chrome on PATH; site/build.py runs it to capture the hero's stills.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Ensure Google Chrome
+        run: |
+          if ! command -v google-chrome >/dev/null 2>&1; then
+            curl -fsSL -o /tmp/google-chrome.deb \
+              https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get update -qq
+            sudo apt-get install -y /tmp/google-chrome.deb
+          fi
+          google-chrome --version
+
       # build.sh compresses the console's assets with zopfli (tools/zopfli_gz.py,
       # pinned in pyproject.toml's dev extra); it fails when the package is absent.
       - name: Install zopfli
@@ -114,13 +143,12 @@ jobs:
       # emsdk + the micropython clone, keyed on the build script that pins them.
       # ~1.8 GB, comfortably inside the 10 GB repo cache (unlike the board
       # builds, which need the whole ESP-IDF and cache only their toolchains).
-      # The key and path are firmware-build.yml's and web-e2e.yml's too.
       - name: Cache the wasm toolchain
         uses: actions/cache@v4
         with:
           path: firmware/web_runner/.build
-          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
-          restore-keys: web-runner-${{ runner.os }}-
+          key: web-runner-master-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          restore-keys: web-runner-master-${{ runner.os }}-
 
       # dev's micropython clone and objects, apart from master's. Its emsdk is
       # a symlink to master's (made below, kept in this cache as a link): one
@@ -222,9 +250,8 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-  # Publish first, THEN go red. The first deploy shipped a page whose "Try it,
-  # right here" section was an error box -- build.sh died on a cold clone -- and
-  # the run was green, because continue-on-error makes a step's *conclusion*
+  # Publish first, THEN go red. A deploy can ship a page whose live player is an
+  # error box (build.sh dies on a cold clone) and the run be green, because continue-on-error makes a step's *conclusion*
   # success even when its outcome is failure. Keeping the page publishable is
   # right (a stale player beats no site); reporting it as fine is not. This runs
   # after deploy so the site still goes out, and fails the run so the red X is

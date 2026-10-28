@@ -1,7 +1,11 @@
 # Map (grep -n a name to jump there):
-#   Wallpaper               the desktop backdrop: solid, image or live
-#   Wallpaper.is_animating  a live wallpaper is running
-#   Wallpaper.draw_preview  the Appearance monitor's screen
+#   Wallpaper                 the desktop backdrop: the desk's fill, the theme's picture or live
+#   Wallpaper.draw_picture    the theme's picture, one screen-sized bitmap
+#   Wallpaper._draw_backdrop  the theme's backdrop, rastered once into the bake
+#   Wallpaper.is_animating    a live wallpaper is running
+#   Wallpaper.bars            the bars' quiet rectangles, for a per-glass wallpaper
+#   Wallpaper._glass_paint    a per-glass wallpaper's frame: QUIET in, SUBJECT out
+#   Wallpaper.draw_preview    the Appearance monitor's screen
 """The desktop wallpaper backdrop (#28), extracted from Workstation
 (runtime/console.py) as a component -- docs/history/shell_layers_refactor_v1.md (Move 1a).
 
@@ -12,29 +16,151 @@ and both draw paths call ws.wallpaper.draw(dt).
 
 Boundary (single source of truth): this component owns only the RENDERING + the
 COMPILED cache -- a chosen wallpaper-type cart compiled into its OWN namespace and run
-(_draw, optionally _update) as the backdrop, or a solid MOY64 fill fallback. The CHOICE
-+ the picker/query API are the LOOK's (appearance.py, #209 landing D):
-ws.look.wallpaper_id, plus select_wallpaper / cycle_wallpaper / wallpaper_options /
-wallpaper_carts / wp_id_for / wp_cart_by_id. select_wallpaper drives this component
-via clear() + compile(cart); draw() reads ws.look.wallpaper_id for the fill
-fallback. It reaches the cart-run machinery (build sheet/tilemap, make_api) through
-its self.ws back-ref; the audio/pmem building blocks for the wallpaper's own namespace
-are imported (leaf modules; same bare-or-runtime fallback the other extracted modules
+(_draw, optionally _update) as the backdrop, the theme's picture (its `images`
+file, docs/theming_2026-09.md §4.9) or a picture cart's read to the glass's
+size and drawn 1:1, or the theme's `desktop` fill.
+The CHOICE + the picker/query API are the LOOK's (appearance.py, #209 landing
+D): ws.look.wallpaper_id (a cart's id, ws.look.PICTURE, or None for the fill),
+the theme's picture (`look.picture_ref()`, under `look.picture_gen`), plus
+select_wallpaper / cycle_wallpaper / wallpaper_options / wallpaper_carts /
+wp_id_for / wp_cart_by_id. The look drives this component via clear() +
+compile(cart); draw() reads ws.look.wallpaper_id for the picture and the fill. It reaches the cart-run machinery (build sheet/tilemap, make_api) through
+its self.ws back-ref; the pmem building block for the wallpaper's own namespace
+is imported (leaf modules; same bare-or-runtime fallback the other extracted modules
 use). `NAMES` is injected; `_err_text` is duplicated (tiny/pure).
+
+A wallpaper cart PER GLASS (`"moybyte": {"glass": true}`, docs/theming_2026-09.md
+§4.9) draws on the system canvas itself: W and H are the glass's, `QUIET` holds
+the shell's quiet rectangles for the surface it draws behind, and the
+`SUBJECT` it declares is `self.subject`, which the windowed WM's default
+placement keeps clear of. Any other wallpaper draws its 320x240 frame on the
+game canvas and is cover-cropped onto a bigger glass. A PICTURE cart
+(`"moybyte": {"pictures": {"WxH": image}}`) runs none of its code here: the
+desk draws the image listed for its glass's size, else the smallest larger
+one shrunk, else the largest, read and kept like the theme's picture.
+
+The compile is crash-guarded (#160): `ws.wallpaper_guard` arms before the cart's
+code runs and heals once the backdrop has painted, so a wallpaper that hangs or
+faults the board at every boot strikes out and the desk boots on the fill. A
+proven wallpaper (its source already healed on this firmware) arms for free --
+runtime/crash_guard.py, "What it costs".
 """
+import sys
 try:
-    from audio import AudioBank, AudioEngine
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.audio import AudioBank, AudioEngine
+    from binascii import crc32
+except ImportError:  # pragma: no cover - no proof: every compile arms
+    crc32 = None
 try:
-    from widgets import Pmem, _SilentAudio, _Blit, _err_text
+    from ui_draw import cart_text as _cart_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, _SilentAudio, _Blit, _err_text
+    from runtime.ui_draw import cart_text as _cart_text
 try:
-    from moy_image import text_sig, load_wallpaper_preview, save_wallpaper_preview
+    from widgets import Pmem, _Blit, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.moy_image import (text_sig, load_wallpaper_preview,
-                                   save_wallpaper_preview)
+    from runtime.widgets import Pmem, _Blit, _err_text
+try:
+    from file_widgets import Bitmap, cover_indices
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.file_widgets import Bitmap, cover_indices
+# #186: the picture's resampled indices. Off-heap for the same reason its
+# RGB565 bake is (device_canvas._paint_bake_buf) -- a screenful of indices is
+# 153,600 bytes on the Guition's 480x320 desk, and that board's largest
+# contiguous gc run after use is 126 KB. alloc() degrades to a plain
+# bytearray on the host and wherever PSRAM is out, so this stays one code path.
+try:
+    import moybuf as _moybuf
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    try:
+        from runtime import moybuf as _moybuf
+    except ImportError:
+        _moybuf = None
+try:
+    from moyimg import cover_stream, file_sig, text_sig
+    from moy_image import (load_picture_bake, load_wallpaper_preview,
+                           save_picture_bake, save_wallpaper_preview)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moyimg import cover_stream, file_sig, text_sig
+    from runtime.moy_image import (load_picture_bake, load_wallpaper_preview,
+                                   save_picture_bake, save_wallpaper_preview)
+
+
+def _rect(v):
+    """`v` as an (x, y, w, h) of ints with some area, else None: what a
+    wallpaper cart declares as its SUBJECT is arbitrary cart data."""
+    try:
+        x, y, w, h = (int(n) for n in v)
+    except (TypeError, ValueError):
+        return None
+    return (x, y, w, h) if w > 0 and h > 0 else None
+
+
+def _cover(sw, sh, gw, gh):
+    """(scale, ox, oy): a gw x gh frame placed cover-style on a sw x sh
+    canvas -- the smallest integer upscale that covers it, centred, so the
+    crop (ox, oy <= 0) is symmetric. device_canvas.blit_cover's geometry."""
+    s = max(1, (sw + gw - 1) // gw, (sh + gh - 1) // gh)
+    return s, (sw - gw * s) // 2, (sh - gh * s) // 2
+
+
+def picture_sizes(value):
+    """A wallpaper cart's `"moybyte": {"pictures": {"WxH": name}}` read
+    strictly: [(w, h, name)], each name an image of the cart's `images/`, or
+    None when it is absent or any entry does not read."""
+    if type(value) is not dict or not value:
+        return None
+    out = []
+    for k in value:
+        v = value[k]
+        if type(k) is not str or type(v) is not str or not v or "/" in v \
+                or "\\" in v or v[0] == ".":
+            return None
+        p = k.split("x")
+        if len(p) != 2 or not p[0].isdigit() or not p[1].isdigit():
+            return None
+        w, h = int(p[0]), int(p[1])
+        if w <= 0 or h <= 0:
+            return None
+        out.append((w, h, v))
+    return out
+
+
+def pick_picture(sizes, w, h):
+    """The name of the picture `sizes` lists for a w x h screen: the one made
+    for it, else the smallest that covers it (shrunk once and kept), else the
+    largest."""
+    best = None
+    for s in sizes:
+        if s[0] == w and s[1] == h:
+            return s[2]
+        if s[0] >= w and s[1] >= h and (best is None
+                                        or (s[0] * s[1], s[2]) < (best[0] * best[1], best[2])):
+            best = s
+    if best is None:
+        for s in sizes:
+            if best is None or (s[0] * s[1], s[2]) > (best[0] * best[1], best[2]):
+                best = s
+    return best[2]
+
+
+def _build_id():
+    """The firmware build, as the wallpaper guard's proof names it: the
+    interpreter's version line (a MicroPython build carries its date there)
+    and `moy_ota.FIRMWARE_VERSION` (a beta stamps its build epoch into it) on
+    the tiers that stage moy_ota."""
+    try:
+        import moy_ota
+        v = moy_ota.FIRMWARE_VERSION
+    except Exception:  # noqa: BLE001 -- the host and the web stage no OTA
+        v = None
+    return "%s|%s" % (sys.version, v)
+
+
+class _Strip:
+    """An RGB565 picture as `blit_strip_rect` reads a layer: its words and
+    its size."""
+    _buf = None
+    w = 0
+    h = 0
 
 
 class Wallpaper:
@@ -52,6 +178,21 @@ class Wallpaper:
         self._wp_draw = None
         self._wp_cart = None
         self._wp_live = True
+        # A picture cart: the sizes its `pictures` lists (picture_sizes); the
+        # desk draws the one for its glass and runs none of its code.
+        self._wp_pics = None
+        # A per-glass cart: it draws on the system canvas, reads QUIET and
+        # declares SUBJECT (see the module docstring).
+        self._wp_glass = False
+        # The quiet rectangles each surface last drew with ({home: rects}),
+        # and the desk's subject as the cart last declared it, or None.
+        self._quiet = {}
+        self.subject = None
+        self._bars_key = None         # what `bars` last computed from
+        self._bars = ()
+        # The title of a wallpaper the crash guard refused at this compile; the
+        # first fill paint turns it into a notice.
+        self._refused = None
         # The Appearance monitor's PREVIEW runner: the same cart compiled a
         # second time over an OFFSCREEN host canvas, so the little screen can
         # show the full frame without touching the game canvas (and without a
@@ -66,13 +207,38 @@ class Wallpaper:
         # Keyed by source stamp, so it survives selection changes and drops
         # stale entries on its own; bounded below.
         self._static_cache = {}
+        # The picture: what it is and the screen it was made for
+        # (`_pic_key`), the screen-sized indices read from it (off-heap), the
+        # bitmap over them and the canvas its bake is lent by, and the
+        # preview's thumbnail.
+        self._pic_data = None
+        self._pic_bitmap = None
+        self._pic_key = None
+        self._pic_pix = None
+        self._pic_canvas = None
+        self._pic_thumb = None
+        self._pic_thumb_key = None
+        # The theme's backdrop: the image its bake is lent to, the key it was
+        # rastered for, and how many rasters this component has made.
+        self._bd_img = None
+        self._bd_key = None
+        # What the last fill drew, for `restore_key`: (home, the bake's key)
+        # for the backdrop, (home, None) for the plain `desktop` fill; and
+        # the bake as a copy's source.
+        self._fill_did = None
+        self._bd_src = _Strip()
+        self.rasters = 0
 
     def clear(self):
-        """Drop the compiled wallpaper (back to a solid fill). Called by
-        ws.look.select_wallpaper before it (re)compiles the new choice."""
+        """Drop the compiled wallpaper (back to the fill). Called by the look
+        (`Appearance._show_wallpaper`) before it shows the next one."""
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
+        self._wp_pics = None
         self._wp_restore_bg = None
+        self._wp_glass = False
+        self.subject = None
+        self._refused = None
         self._pv_ns = self._pv_update = self._pv_draw = None
         self._pv_restore = None
         self._pv_for = None
@@ -80,14 +246,163 @@ class Wallpaper:
         rl = getattr(self.ws.canvas, "reclaim_layers", None)
         if rl is not None:
             rl("wallpaper")
-        # #186: and My Art's backdrop bake, which is a loan of the same kind on
+        # #186: and the picture's bake, which is a loan of the same kind on
         # the same event -- the desktop is about to stop drawing it. Its owner
-        # is the artwork service's, not "wallpaper": the compiled cart's images
-        # and the backdrop must not free each other. The resampled indices stay
-        # cached, so coming back to My Art is a re-bake, not a re-resample.
-        art = getattr(self.ws, "artwork", None)
-        if art is not None:
-            art.release_wall_bake()
+        # is PIC_OWNER, not "wallpaper": the compiled cart's images and the
+        # picture must not free each other. The resampled indices stay cached,
+        # so coming back to the same picture is a re-bake, not a re-resample.
+        self.release_picture_bake()
+
+    # -- the picture (docs/theming_2026-09.md §4.9, #186) ---------------------
+    #
+    # The theme's picture, or a picture cart's for this glass, read from its
+    # file a row at a time straight into ONE screen-sized buffer, resampled as
+    # it comes (`cover_image`, native/moy_store/moy_img.h): no source raster,
+    # no copy of the file, and nothing kept of either. The screen it made is
+    # kept beside the picture (`load_picture_bake`), so the next boot reads
+    # that instead of decoding.
+
+    # The off-heap loan key for the picture: its own, not PaintDocument's
+    # "artwork" and not the wallpaper cart's "wallpaper" -- release_bakes(owner)
+    # frees everything an owner holds, so a shared key would mean Paint's
+    # leaving hook drops the desktop's picture, and clear() drops a compiled
+    # cart's images.
+    PIC_OWNER = "wallpaper_bg"
+    # The largest picture drawn: the desk boards' drawings and wallpapers
+    # (owner, 2026-10-21). Read by rows, its cost is one source row of memory.
+    PIC_MAX_W = 1024
+    PIC_MAX_H = 600
+
+    def _pic_id(self):
+        """What the desk's picture is: a picture cart's, else the theme's as
+        of `look.picture_gen` (which a theme switch or a picture change
+        moves) -- so a frame costs one compare."""
+        if self._wp_pics is not None:
+            return ("cart", self._wp_cart.get("path"))
+        return ("theme", self.ws.look.picture_gen)
+
+    def _pic_ref(self, cw, ch):
+        """(folder, file, bytes or None) of the picture for a cw x ch
+        screen, or None."""
+        if self._wp_pics is not None:
+            folder = self._wp_cart.get("path")
+            if not folder:
+                return None
+            name = pick_picture(self._wp_pics, cw, ch)
+            return (folder, "images/" + name + ".moyimg", None)
+        return self.ws.look.picture_ref()
+
+    def _picture(self, cw, ch):
+        """The picture resampled to a cw x ch screen, (cw, ch, indices), or
+        None: made once per picture and screen size."""
+        key = (self._pic_id(), cw, ch)
+        if key != self._pic_key:
+            self.drop_picture()
+            try:
+                data = self._make_picture(cw, ch)
+            except Exception as exc:  # noqa: BLE001 -- a bad picture draws the fill
+                print("Moybyte picture error:", _err_text(exc))
+                self.drop_picture()
+                data = None
+            self._pic_key = key
+            self._pic_data = data
+        return self._pic_data
+
+    def _make_picture(self, cw, ch):
+        ref = self._pic_ref(cw, ch)
+        if ref is None:
+            return None
+        folder, file, blob = ref
+        if _moybuf is not None:
+            self._pic_pix = pix = _moybuf.alloc(cw * ch)
+        else:                  # pragma: no cover - every tier has moybuf
+            pix = bytearray(cw * ch)
+
+        def read():
+            if blob is not None:
+                try:
+                    import io as _io
+                except ImportError:  # pragma: no cover - every tier has io
+                    import uio as _io
+                return self._read_picture(_io.BytesIO(blob), pix, cw, ch, folder)
+            with open(folder + "/" + file, "rb") as f:
+                return self._read_picture(f, pix, cw, ch, folder)
+
+        store = getattr(self.ws, "store", None)
+        if not (store.call(read) if store is not None else read()):
+            self.drop_picture()
+            return None
+        self._pic_bitmap = Bitmap(cw, ch, pix, self.PIC_OWNER)
+        return (cw, ch, pix)
+
+    def _read_picture(self, f, pix, cw, ch, folder):
+        """`pix` from the picture open as `f`: the screen kept beside it when
+        it is this picture's, else the picture read, resampled and kept."""
+        sig = file_sig(f)
+        if folder and load_picture_bake(folder, cw, ch, sig, pix):
+            return True
+        cover = getattr(self.ws.carts_store, "cover_image", None)
+        got = None
+        try:
+            if cover is None:
+                raise ImportError("no cover_image")
+            got = cover(f, pix, cw, ch, self.PIC_MAX_W, self.PIC_MAX_H)
+        except ImportError:    # the host without its C library: the reference
+            f.seek(0)
+            got = cover_stream(f, pix, cw, ch, self.PIC_MAX_W, self.PIC_MAX_H)
+        if got is None:
+            return False
+        if folder:
+            save_picture_bake(folder, cw, ch, sig, pix)
+        return True
+
+    def drop_picture(self):
+        """Drop the picture's bitmap and give back BOTH of its off-heap loans:
+        the picture is genuinely gone (a new one, or a canvas size the cache
+        does not match). The canvas nulls the bake as it frees, so a draw that
+        raced this would re-bake rather than read returned RAM."""
+        self.release_picture_bake()
+        if self._pic_pix is not None and _moybuf is not None:
+            _moybuf.free(self._pic_pix)
+        self._pic_pix = None
+        self._pic_data = None
+        self._pic_bitmap = None
+        self._pic_key = None
+        self._pic_thumb = None
+        self._pic_thumb_key = None
+
+    def release_picture_bake(self):
+        """Give back the picture's RGB565 bake, keeping the resampled indices:
+        the re-bake is one native call (~8ms)."""
+        cv = self._pic_canvas
+        rel = getattr(cv, "release_bakes", None) if cv is not None else None
+        if rel is not None:
+            rel(self.PIC_OWNER)
+
+    def draw_picture(self, canvas):
+        """Draw the picture in the SYSTEM domain: ONE screen-sized bitmap
+        drawn 1:1, whatever the source size (#186). A source-sized bitmap at a
+        scale bakes a PRE-SCALED RGB565 copy -- a 320x240 picture on the
+        Guition's 480x320 desk asked the gc heap for 614,400 contiguous bytes
+        and got MemoryError at an untouched launcher -- while 1:1 is the only
+        placement that reaches the owner-lent bake. False when there is no
+        picture."""
+        if self._picture(canvas.w, canvas.h) is None:
+            return False
+        self._pic_canvas = canvas
+        canvas.spr(self._pic_bitmap, 0, 0)
+        return True
+
+    def _picture_thumb(self, w, h):
+        sc = self.ws.sys_canvas
+        data = self._picture(sc.w, sc.h)
+        if data is None:
+            return None
+        key = (w, h)
+        if self._pic_thumb_key != key:
+            self._pic_thumb = Bitmap(w, h, cover_indices(data[2], data[0], data[1], w, h))
+            self._pic_thumb_key = key
+        return self._pic_thumb
 
     def _stock_bracket(self):
         """The backdrop never follows a cart's private raster: while a per-run
@@ -118,13 +433,27 @@ class Wallpaper:
     def _compile(self, cart):
         """Compile a wallpaper cart into its own namespace + grab its _update/_draw,
         running its _init. Guarded: any failure leaves the backdrop on the solid
-        fill (a broken wallpaper must never take down the desktop)."""
+        fill (a broken wallpaper must never take down the desktop), and a
+        wallpaper the crash guard has struck out never runs at all."""
         ws = self.ws
+        pics = picture_sizes(cart.get("pictures"))
+        if pics is not None:        # a picture cart: nothing of it runs
+            self._wp_cart = cart
+            self._wp_pics = pics
+            return
+        guard = getattr(ws, "wallpaper_guard", None)
+        if guard is not None and not guard.arm(ws.look.wp_id_for(cart),
+                                               self._proof(cart)):
+            self._refused = cart.get("title") or "Wallpaper"
+            return
         try:
+            glass = bool(cart.get("glass"))
             sheet = ws._build_sheet(cart)
             tilemap = ws._build_tilemap(cart)
-            ns = ws.make_api(ws.canvas, ws.input, dict(cart.get("cfg", {})),
-                             sheet, _SilentAudio(AudioEngine(AudioBank.default())),
+            ns = ws.make_api(ws.sys_canvas if glass else ws.canvas, ws.input,
+                             dict(cart.get("cfg", {})),
+                             # A wallpaper is silent: it holds no audio session.
+                             sheet, None,
                              tilemap, Pmem(), None, cart.get("images") or {},
                              # A wallpaper is a cart, so it gets the fourth asset
                              # type too: sakura sheds its petals from a scene.
@@ -132,16 +461,47 @@ class Wallpaper:
                              flags=ws._build_flags(cart),   # SPEC.md 3.5 tile flags
                              owner="wallpaper")   # #63: layer loans reclaimed on clear()
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
+            if glass:               # after the module's own default, before _init
+                ns["QUIET"] = self._quiet.get(False) or self.bars()
             if ns.get("_init"):
                 ns["_init"]()
+            self._wp_glass = glass
+            if glass:
+                self.subject = _rect(ns.get("SUBJECT"))
             self._wp_ns = ns
             self._wp_cart = cart
             self._wp_update = ns.get("_update")
             self._wp_draw = ns.get("_draw")
             self._wp_restore_bg = ns.get("_moy_restore_bg")   # #63 declared background
+            if self._wp_draw is None and guard is not None:
+                guard.heal()    # nothing runs per frame: the compile was all of it
         except Exception as exc:  # noqa: BLE001
             print("Moybyte wallpaper error:", _err_text(exc))
             self._wp_ns = self._wp_update = self._wp_draw = None
+            if guard is not None:
+                guard.release()
+
+    def _proof(self, cart):
+        """What is about to run, for the crash guard: the source's length and a
+        crc32 over the firmware build and the source. A software crc, because
+        the first hardware hash of a boot holds ~240 B of internal SRAM (its DMA
+        channel) for the rest of it. None (always arm) without crc32."""
+        if crc32 is None:
+            return None
+        src = (cart.get("src") or "").encode()
+        crc = crc32(src, crc32(_build_id().encode())) & 0xFFFFFFFF
+        return "%x-%08x" % (len(src), crc)
+
+    def _painted(self, live):
+        """A backdrop frame painted without raising -- the crash guard's heal
+        clock. A live wallpaper heals after HEAL_FRAMES; a static one at its
+        first frame, because nothing may paint it again until a touch."""
+        guard = getattr(self.ws, "wallpaper_guard", None)
+        if guard is not None:
+            if live:
+                guard.frame()
+            else:
+                guard.heal()
 
     def is_animating(self, dt):
         """True when a LIVE wallpaper (its own _update advancing it) is loaded, so the
@@ -150,17 +510,213 @@ class Wallpaper:
         return (self._wp_live and self._wp_update is not None
                 and self._wp_draw is not None and dt > 0)
 
-    def draw(self, dt):
+    def draw(self, dt, home=False, quiet=None):
+        """Paint the backdrop of the desk, or with `home` of the home (the
+        handheld's every screen): the surface a theme's backdrop names.
+        `quiet` is that surface's quiet rectangles (its bars, the home's text,
+        the desk's icon column), which a per-glass wallpaper reads as QUIET;
+        None keeps the ones that surface last gave."""
+        if quiet is not None:
+            self._quiet[home] = quiet
         b = self._stock_bracket()       # a bound cart canvas never hosts the backdrop
         try:
-            self._paint(dt)
+            self._paint(dt, home)
         finally:
             self._stock_unbracket(b)
 
-    def _paint(self, dt):
+    def restore_key(self, home=False):
+        """What the backdrop's pixels are as `draw` last put them on the
+        system canvas, where they are one still image drawn whole -- the
+        picture, the theme's baked backdrop or the plain `desktop` fill --
+        so `restore` can put any rect of them back; None where a cart draws
+        the backdrop, or no such image is ready."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        look = ws.look
+        if look.wallpaper_id == look.PICTURE or self._wp_pics is not None:
+            k = self._pic_key
+            if (self._pic_data is not None and self._pic_bitmap is not None
+                    and k is not None and k[1] == cv.w and k[2] == cv.h
+                    and k[0] == self._pic_id()):
+                return ("pic", k)
+        if self._wp_draw is not None:
+            return None
+        did = self._fill_did
+        if did is None or did[0] != home:
+            return None
+        bg = ws.theme_colors["desktop"]
+        k = did[1]
+        if k is None:
+            return ("bg", bg)
+        img = self._bd_img
+        if (k is not self._bd_key or img is None or getattr(img, "_rgb_i", None) is None
+                or k[1] != bg or k[2] != cv.w or k[3] != cv.h or k[4] != self._bg_word(bg)):
+            return None
+        return ("bd", k)
+
+    def restorer(self, cv, key):
+        """fill(cv, rect): put back a rect of the backdrop `restore_key`
+        answered `key` for, on canvas `cv`."""
+        kind = key[0]
+        if kind == "bg":
+            c = key[1]
+            return lambda cv, r: cv.rect(r[0], r[1], r[2], r[3], c)
+        if kind == "bd":
+            src = self._bd_src
+            img = self._bd_img
+            if src._buf is not img._rgb_i:
+                src._buf = img._rgb_i
+                src.w = img.w
+                src.h = img.h
+            return lambda cv, r: cv.blit_strip_rect(src, 0, 0, r[0], r[1], r[2], r[3])
+        pic = self._pic_bitmap
+
+        def fill(cv, r):
+            cv.clip(r[0], r[1], r[2], r[3])
+            try:
+                cv.spr(pic, 0, 0)
+            finally:
+                cv.clip()
+        return fill
+
+    def put_baked(self, cv, rec, x, y):
+        """Copy the home backdrop of records `rec` from its bake onto `cv`
+        with the system canvas's (0, 0) at (x, y) of `cv`: the pixels
+        `cv.backdrop(rec, desktop, surface=(x, y, ...))` draws, since the
+        bake is that draw at the canvas's size. True when copied; False
+        where the bake holds anything else, or the system canvas retains
+        nothing, and the caller draws it."""
+        sc = self.ws.sys_canvas
+        if getattr(sc, "RETAINED_FRAMES", 0) < 1:
+            return False
+        k = self.restore_key(True)
+        if k is None or k[0] != "bd" or k[1][0] != rec:
+            return False
+        img = self._bd_img
+        src = self._bd_src
+        if src._buf is not img._rgb_i:
+            src._buf = img._rgb_i
+            src.w = img.w
+            src.h = img.h
+        cv.blit_strip_rect(src, x, y, 0, 0, cv.w, cv.h)
+        return True
+
+    def bars(self):
+        """The bars' quiet rectangles on the system canvas: every band of the
+        glass outside the layout's content rect (docs/shell_layout_2026-10.md
+        §7: a bar may sit on any edge)."""
+        ws = self.ws
+        sc = ws.sys_canvas
+        lay = getattr(ws, "layout", None)
+        if lay is None:
+            return ()
+        w, h = sc.w, sc.h
+        x0, y0 = lay.cx, lay.cy
+        x1, y1 = x0 + lay.cw, y0 + lay.ch
+        k = self._bars_key
+        if k is not None and k[0] is lay and k[1] == w and k[2] == h \
+                and k[3] == x0 and k[4] == y0 and k[5] == x1 and k[6] == y1:
+            return self._bars
+        self._bars_key = (lay, w, h, x0, y0, x1, y1)
+        out = []
+        if y0 > 0:
+            out.append((0, 0, w, y0))
+        if y1 < h:
+            out.append((0, y1, w, h - y1))
+        if x0 > 0:
+            out.append((0, y0, x0, y1 - y0))
+        if x1 < w:
+            out.append((x1, y0, w - x1, y1 - y0))
+        self._bars = tuple(out)
+        return self._bars
+
+    def _glass_paint(self, dt, home):
+        """A per-glass wallpaper's frame: its draw on the system canvas at the
+        glass's size, QUIET the surface's quiet rectangles, and the desk's
+        SUBJECT read back after it."""
+        ws = self.ws
+        ns = self._wp_ns
+        sc = ws.sys_canvas
+        ns["W"], ns["H"] = sc.w, sc.h
+        ns["QUIET"] = self._quiet.get(home) or self.bars()
+        gp = self._enter_pointer(ws, True, glass=True)
+        try:
+            if self._wp_live and self._wp_update is not None and dt > 0:
+                self._wp_update(dt)
+            self._wp_draw()
+        finally:
+            if gp is not False:
+                ws.input.game_pointer = gp
+            rs = getattr(sc, "reset_state", None)   # the cart's camera/clip/pal/fillp
+            if rs is not None:
+                rs()
+        if not home:
+            self.subject = _rect(ns.get("SUBJECT"))
+
+    # -- the theme's backdrop (docs/media/look_2026-10/GAPS.md gap 9) ----------
+
+    def _fill(self, home):
+        """The fill a wallpaper of None draws: the theme's backdrop for the
+        surface over `desktop`, or `desktop` alone."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        bg = ws.theme_colors["desktop"]
+        rec = ws.look.backdrop("home" if home else "desk")
+        self._fill_did = None
+        if rec:
+            try:
+                if self._draw_backdrop(cv, rec, bg):
+                    self._fill_did = (home, self._bd_key)
+                return
+            except Exception as exc:  # noqa: BLE001 -- a bad backdrop draws the fill
+                print("Moybyte backdrop error:", _err_text(exc))
+        cv.cls(bg)
+        self._fill_did = (home, None)
+
+    def _draw_backdrop(self, cv, rec, bg):
+        """Rasterise the backdrop once per (records, fill, size, the fill's
+        RGB `_bg_word`) into the one wallpaper bake -- the picture's slot,
+        PIC_OWNER (D6) -- and blit it 1:1 after. Where the bake cannot be had it is drawn onto the
+        canvas inside its clip, each paint."""
+        img = self._bd_img
+        key = (rec, bg, cv.w, cv.h, self._bg_word(bg))
+        if img is None:
+            img = self._bd_img = Bitmap(cv.w, cv.h, None, self.PIC_OWNER)
+        if key != self._bd_key or getattr(img, "_rgb_i", None) is None:
+            img.w = cv.w
+            img.h = cv.h
+            self._bd_key = None
+            self._pic_canvas = cv
+            self.rasters += 1
+            try:
+                cv.backdrop(rec, bg, img)
+            except MemoryError:
+                img._rgb_i = None
+                cv.backdrop(rec, bg)
+                return False
+            self._bd_key = key
+        cv.blit565(img._rgb_i, img.w, img.h, 0, 0)
+        return True
+
+    def _bg_word(self, bg):
+        """What the fill `bg` paints: an index into the live theme's block
+        (64..) as the RGB565 word it names now, a MOY64 index as itself. The
+        bake is keyed on it and the records, so a look change that moves
+        neither (an accent) keeps the bake."""
+        if bg >= 64:
+            live = getattr(self.ws.look, "live", None)
+            blk = live.block if live is not None else ()
+            if bg - 64 < len(blk):
+                return 0x10000 | blk[bg - 64]
+            return (bg, self.ws.look.look_gen)
+        return bg
+
+    def _paint(self, dt, home=False):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
         fill. Always fully clears the canvas so the foreground draws over a clean
-        backdrop. Guarded so a misbehaving wallpaper degrades to a fill.
+        backdrop. Guarded so a misbehaving wallpaper degrades to a fill. A
+        per-glass cart draws the whole glass itself (`_glass_paint`); what
+        follows is the 320x240 cart frame's path.
 
         Status-strip safe area (#46): on the launcher/settings the strip sits along the
         top, so a wallpaper that draws art/text near y=0 (the shipped ones print their
@@ -170,42 +726,49 @@ class Wallpaper:
         strip and is never cut into. cls() ignores camera/clip (like TIC-80), so the
         backdrop FILL still covers the whole surface -- only the foreground art shifts,
         leaving a clean strip band of the wallpaper's own background colour."""
-        NAMES = self._NAMES
         ws = self.ws
-        # Paint's desktop document is a SYSTEM-domain wallpaper. In particular the
-        # 512x300 preset maps exactly 2x onto the P4's 1024x600 panel instead of being
-        # forced through the fixed 320x240 cart canvas and cover-cropped. My Art still
-        # has a wallpaper cartridge identity for discovery/settings; only its pixels
-        # take this direct, resolution-aware path.
-        art = getattr(ws, "artwork", None)
-        if art is not None and art.owns_wallpaper(ws.look.wallpaper_id):
+        # The picture (the theme's, or a picture cart's) is a SYSTEM-domain
+        # wallpaper: read to the glass's own size rather than forced through
+        # the fixed 320x240 cart canvas and cover-cropped.
+        if ws.look.wallpaper_id == ws.look.PICTURE or self._wp_pics is not None:
             try:
-                if art.draw_wallpaper(ws.sys_canvas):
+                if self.draw_picture(ws.sys_canvas):
                     ws._reset_canvas_state()
+                    self._painted(False)
                     return
-            except Exception as exc:  # noqa: BLE001 -- fall back to the wallpaper cart
-                print("Moybyte artwork wallpaper error:", _err_text(exc))
+            except Exception as exc:  # noqa: BLE001 -- fall back to the fill
+                print("Moybyte picture error:", _err_text(exc))
         if self._wp_draw is not None:
+            # A wallpaper is a cart: petme128 and its colours modulo 64 while its
+            # code runs (the app-cart boundary, docs/theming_2026-09.md §4.7); the
+            # fill below is the shell's.
+            was = _cart_text(True)
             try:
                 rb = getattr(self, "_wp_restore_bg", None)
                 if rb is not None:
                     rb()            # #63: restore the wallpaper's declared backdrop
+                if self._wp_glass:
+                    self._glass_paint(dt, home)
+                    self._painted(self._wp_live and self._wp_update is not None)
+                    return
                 if self._wp_live and self._wp_update is not None and dt > 0:
                     self._wp_update(dt)
-                sh = ws.layout.status_h
-                safe = sh if ws.screen in ("launcher", "settings") else 0
+                # The safe area is the layout's content rect: the wallpaper
+                # cart draws its world there, clear of the bar.
+                lay = ws.layout
+                safe = ws.screen in ("launcher", "settings")
                 # Two-domain tiers (#39/#58): the wallpaper cart draws on the 320x240
-                # GAME canvas but status_h is SYSTEM-layout units (36px at font 2) --
-                # shifting 240 game rows by that cut the scene's bottom clean off
-                # (glass-found on the P4). The cover-crop composite + the bar drawn
-                # OVER the backdrop make the safe area moot there anyway.
+                # GAME canvas but the content rect is SYSTEM-layout units (36px bar
+                # at font 2) -- shifting 240 game rows by that cut the scene's bottom
+                # clean off (glass-found on the P4). The cover-crop composite + the
+                # bar drawn OVER the backdrop make the safe area moot there anyway.
                 if ws.sys_canvas is not ws.canvas:
-                    safe = 0
+                    safe = False
                 if safe:
-                    # camera(0, -sh): a draw at world y lands at screen y + sh (below
-                    # the strip); clip keeps the art inside the safe rows.
-                    ws.canvas.camera(0, -safe)
-                    ws.canvas.clip(0, safe, ws.canvas.w, ws.canvas.h - safe)
+                    # camera(-cx, -cy): a draw at world (x, y) lands at screen
+                    # (x + cx, y + cy); clip keeps the art inside the content rect.
+                    ws.canvas.camera(-lay.cx, -lay.cy)
+                    ws.canvas.clip(lay.cx, lay.cy, lay.cw, lay.ch)
                 # COMMAND-ONLY GAME CANVAS (#175, web/wasm): there are no pixels to
                 # composite afterwards -- _backdrop_blit needs gc.buf and returns
                 # early -- so the cart's commands ARE the backdrop and must be
@@ -236,19 +799,32 @@ class Wallpaper:
                 sc = ws.sys_canvas
                 if sc is not ws.canvas:
                     self._backdrop_blit(sc, ws.canvas)
+                self._painted(self._wp_live and self._wp_update is not None)
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
                 print("Moybyte wallpaper draw error:", _err_text(exc))
                 ws._reset_canvas_state()
                 self._wp_ns = self._wp_update = self._wp_draw = None
-        # Solid fill fallback (also the "fill:<color>" built-ins). Fill the SYSTEM
-        # canvas -- the surface the desktop actually shows (#39; the same object as
-        # the game canvas on the 320x240 tiers, so byte-identical there).
-        wp = ws.look.wallpaper_id or "fill:dark_blue"
-        name = wp[5:] if isinstance(wp, str) and wp.startswith("fill:") else "dark_blue"
-        ws.sys_canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
+                guard = getattr(ws, "wallpaper_guard", None)
+                if guard is not None:
+                    guard.release()     # its strike stands
+            finally:
+                _cart_text(was)
+        # A struck-out wallpaper says so once, as a notice: the machine turned
+        # it off, so the machine says it (console_notices.notice).
+        if self._refused is not None:
+            title = self._refused
+            self._refused = None
+            note = getattr(ws, "notice", None)
+            if note is not None:
+                note("WALLPAPER OFF", "%s couldn't start" % title, "warn")
+        # The desk's fill: the theme's backdrop over its `desktop` (NONE, a
+        # picture or cart that draws nothing, a struck-out wallpaper), on the
+        # SYSTEM canvas -- the surface the desktop actually shows (#39; the
+        # same object as the game canvas on the 320x240 tiers).
+        self._fill(home)
 
-    def _enter_pointer(self, ws, bracketed):
+    def _enter_pointer(self, ws, bracketed, glass=False):
         """Re-map the pointer into the WALLPAPER's own space for the duration of
         its draw, returning the value to restore (or False when untouched).
 
@@ -266,10 +842,13 @@ class Wallpaper:
         if p is None:
             return False
         sc, gc = ws.sys_canvas, ws.canvas
-        gw, gh = gc.w, gc.h
-        scale = max(1, (sc.w + gw - 1) // gw, (sc.h + gh - 1) // gh)
-        ox = (sc.w - gw * scale) // 2
-        oy = (sc.h - gh * scale) // 2
+        if glass:                   # a per-glass wallpaper: the glass's own pixels
+            gw, gh, scale, ox, oy = sc.w, sc.h, 1, 0, 0
+        else:
+            gw, gh = gc.w, gc.h
+            scale = max(1, (sc.w + gw - 1) // gw, (sc.h + gh - 1) // gh)
+            ox = (sc.w - gw * scale) // 2
+            oy = (sc.h - gh * scale) // 2
         gx = (int(getattr(p, "x", 0)) - ox) // scale
         gy = (int(getattr(p, "y", 0)) - oy) // scale
         # Out-of-frame reads as "no pointer" rather than a clamped edge value,
@@ -314,7 +893,8 @@ class Wallpaper:
         an offscreen canvas at all.
 
         What a board pays, once per cart and preview size: a 320x240 RGB565
-        scratch surface, the wallpaper's own _init/_update/_draw in interpreted
+        scratch surface (the glass's size for a per-glass wallpaper, given
+        back after the render), the wallpaper's own _init/_update/_draw in interpreted
         Python, and the reduction in _preview_indices. The .mct sidecar is what
         holds it to once -- every later open reads the file and never builds a
         runner at all."""
@@ -334,27 +914,26 @@ class Wallpaper:
         NAMES = self._NAMES
         ws = self.ws
         x, y, w, h = rect
-        wp = ws.look.wallpaper_id or ""
-        if isinstance(wp, str) and wp.startswith("fill:"):
-            cv.rect(x, y, w, h, NAMES.get(wp[5:], NAMES["dark_blue"]))
-            return
-        art = getattr(ws, "artwork", None)
-        if art is not None and art.owns_wallpaper(wp):
+        wp = ws.look.wallpaper_id
+        if wp == ws.look.PICTURE or self._wp_pics is not None:
             try:
-                size = art.wall_size()
-                if size:
-                    aw, ah = size
+                sc = ws.sys_canvas
+                data = self._picture(sc.w, sc.h)
+                if data:
+                    aw, ah = data[0], data[1]
                     if aw * h >= ah * w:            # aspect-fit inside rect
                         fw, fh = w, max(1, ah * w // aw)
                     else:
                         fw, fh = max(1, aw * h // ah), h
-                    img = art.thumbnail(fw, fh)
-                    if img is not None:
-                        cv.rect(x, y, w, h, NAMES["black"])
-                        cv.spr(img, x + (w - fw) // 2, y + (h - fh) // 2)
-                        return
-            except Exception as exc:  # noqa: BLE001 -- fall through to the cart/fill
-                print("Moybyte artwork preview error:", _err_text(exc))
+                    img = self._picture_thumb(fw, fh)
+                    cv.rect(x, y, w, h, NAMES["black"])
+                    cv.spr(img, x + (w - fw) // 2, y + (h - fh) // 2)
+                    return
+            except Exception as exc:  # noqa: BLE001 -- fall through to the fill
+                print("Moybyte picture preview error:", _err_text(exc))
+        if wp is None or wp == ws.look.PICTURE:
+            cv.rect(x, y, w, h, ws.theme_colors["desktop"])
+            return
         cv.rect(x, y, w, h, NAMES["black"])
         # A stable _Blit identity per cart+size lets a device canvas keep its
         # sprite cache warm across frames.
@@ -407,9 +986,11 @@ class Wallpaper:
         if make_canvas is None:
             return False            # a backend with no offscreen canvas factory
         try:
+            pw, ph = self._frame_size(cart)
             pv = self._pv_canvas
-            if pv is None:
-                pv = make_canvas(ws.canvas.w, ws.canvas.h)
+            if pv is None or (pv.w, pv.h) != (pw, ph):
+                self._pv_canvas = None
+                pv = make_canvas(pw, ph)
                 if pv is None:      # a build with no native kernel to draw with
                     return False
                 self._pv_canvas = pv
@@ -419,18 +1000,20 @@ class Wallpaper:
                     rl("wallpaper_pv")
             # #66 live-set diet: the slimmed cart rehydrates for this compile
             # (src/sheet bake into the preview ns), then re-slims -- the same
-            # dance look.select_wallpaper does for the backdrop compile.
+            # dance the look's `_show_wallpaper` does for the backdrop compile.
             ws.carts.rehydrate(cart)
             try:
                 sheet = ws._build_sheet(cart)
                 tilemap = ws._build_tilemap(cart)
                 ns = ws.make_api(pv, ws.input, dict(cart.get("cfg", {})),
-                                 sheet, _SilentAudio(AudioEngine(AudioBank.default())),
+                                 sheet, None,
                                  tilemap, Pmem(), None, cart.get("images") or {},
                                  ws._build_scenes(cart),
                                  flags=ws._build_flags(cart),
                                  owner="wallpaper_pv")
                 exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)
+                if cart.get("glass"):
+                    ns["QUIET"] = self._preview_quiet()
             finally:
                 if cart is not getattr(ws, "_fat_cart", None):
                     ws.carts.reslim(cart)
@@ -448,9 +1031,24 @@ class Wallpaper:
             self._pv_for = None
             return False
 
+    def _frame_size(self, cart):
+        """(w, h) of the frame `cart` draws: the glass's for a per-glass
+        wallpaper, else the game canvas's."""
+        ws = self.ws
+        cv = ws.sys_canvas if cart.get("glass") else ws.canvas
+        return cv.w, cv.h
+
+    def _preview_quiet(self):
+        """The quiet rectangles a per-glass wallpaper's preview lays out
+        around: the desk's where it has drawn, else the home's, else the
+        bars."""
+        return self._quiet.get(False) or self._quiet.get(True) or self.bars()
+
     def _src_sig(self, cart):
         """text_sig of the cart's SOURCE -- the staleness stamp for computed
-        previews. Rehydrates a slimmed cart (#66) just long enough to read it."""
+        previews -- and, for a per-glass wallpaper, of the quiet rectangles
+        its preview lays out around. Rehydrates a slimmed cart (#66) just
+        long enough to read it."""
         src = cart.get("src")
         if src is None:
             ws = self.ws
@@ -460,6 +1058,8 @@ class Wallpaper:
             finally:
                 if cart is not getattr(ws, "_fat_cart", None):
                     ws.carts.reslim(cart)
+        if src and cart.get("glass"):
+            src = src + repr(self._preview_quiet())
         return text_sig(src) if src else None
 
     def _static_preview(self, w, h):
@@ -472,7 +1072,7 @@ class Wallpaper:
         cart = self._wp_cart
         if cart is None:
             return None
-        gw, gh = self.ws.canvas.w, self.ws.canvas.h
+        gw, gh = self._frame_size(cart)
         if gw * h >= gh * w:                    # aspect-fit target, capped at
             vw, vh = w, max(1, gh * w // gw)    # native (draw upscales cleanly)
         else:
@@ -516,7 +1116,9 @@ class Wallpaper:
         """Render ONE representative frame of the current wallpaper cart on
         the offscreen runner canvas (live scenes warmed a few seconds so the
         still looks alive) and resample it to (vw, vh). The one-time cost the
-        sidecar amortizes away; None when the runner is unavailable."""
+        sidecar amortizes away; None when the runner is unavailable. A
+        per-glass wallpaper's runner is a glass-sized canvas, given back once
+        its frame is read (`_drop_glass_runner`)."""
         if not self._ensure_preview():
             return None
         try:
@@ -539,6 +1141,27 @@ class Wallpaper:
             self._pv_ns = self._pv_update = self._pv_draw = None
             self._pv_for = None
             return None
+        finally:
+            self._drop_glass_runner()
+
+    def _drop_glass_runner(self):
+        """Give back a per-glass preview runner: its canvas is the glass's
+        size (1.2 MB on a 1024x600 desk), and the preview is a still the
+        memo and the sidecar keep, so nothing draws on it again."""
+        cart = self._pv_for
+        pv = self._pv_canvas
+        if cart is None or pv is None or not cart.get("glass"):
+            return
+        rl = getattr(pv, "reclaim_layers", None)
+        if rl is not None:
+            rl("wallpaper_pv")
+        rel = getattr(pv, "release", None)
+        if rel is not None:
+            rel()
+        self._pv_canvas = None
+        self._pv_ns = self._pv_update = self._pv_draw = None
+        self._pv_restore = None
+        self._pv_for = None
 
     @classmethod
     def _preview_indices(cls, pv, vw, vh):
@@ -655,8 +1278,8 @@ class Wallpaper:
         gw, gh = gc.w, gc.h
         if gw <= 0 or gh <= 0:
             return False
-        scale = max(1, (sc.w + gw - 1) // gw, (sc.h + gh - 1) // gh)
-        view((sc.w - gw * scale) // 2, (sc.h - gh * scale) // 2, scale, gw, gh)
+        scale, ox, oy = _cover(sc.w, sc.h, gw, gh)
+        view(ox, oy, scale, gw, gh)
         return True
 
     def _backdrop_blit(self, sc, gc):
@@ -684,9 +1307,7 @@ class Wallpaper:
             return
         gw, gh = gc.w, gc.h
         sw, sh = sc.w, sc.h
-        scale = max(1, (sw + gw - 1) // gw, (sh + gh - 1) // gh)   # cover, not fit
-        ox = (sw - gw * scale) // 2                                # <= 0 (crop)
-        oy = (sh - gh * scale) // 2
+        scale, ox, oy = _cover(sw, sh, gw, gh)                     # ox, oy <= 0
         if sbuf is None:
             img = _Blit(gw, gh, bytes(gbuf), -1)
             img._paint = True              # -> the native blit_indices bake

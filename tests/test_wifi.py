@@ -1,11 +1,12 @@
-"""WiFi manager (#38): the capability-permission-gated `wifi` API, the host fake
-backend, the credential store, and the WiFi-manager system cart running headlessly
-through the shared console -- the same console the device runs.
+"""WiFi (#38): the capability-permission-gated `wifi` API, the host fake
+backend, the credential store, and the radio lease -- the same console the
+device runs.
 
 The injection is permission-gated: a cart whose manifest grants "network" gets a
 `wifi` name in its namespace; a normal cart does NOT (sandbox preserved). These
-tests pin that gate, the FakeWifi behavior, persistence + reload, and that the
-manager cart loads + runs a few frames without error.
+tests pin that gate, the FakeWifi behavior, persistence + reload, and who holds
+the radio. Setting a network up is Settings' WIFI panel, the one wifi
+implementation (docs/shell_layout_2026-10.md §8).
 """
 
 import sys
@@ -163,7 +164,7 @@ def test_network_cart_gets_wifi_non_network_cart_does_not(tmp_path):
     import json
     man_path = priv["path"] + "/manifest.json"
     man = json.loads(Path(man_path).read_text())
-    man["permissions"] = ["graphics", "input", "network"]
+    man["moybyte"]["permissions"] = ["graphics", "input", "network"]
     Path(man_path).write_text(json.dumps(man))
 
     ws = host_app.build_workstation(carts_dir)
@@ -176,92 +177,6 @@ def test_network_cart_gets_wifi_non_network_cart_does_not(tmp_path):
     assert ws.cart_error is None
     assert "wifi" in ws.ns                          # capability granted
     assert ws.ns["wifi"] is ws.wifi                 # the shared system service
-
-
-# -- the WiFi-manager system cart loads + runs headlessly ----------------------
-
-def test_wifi_manager_cart_loads_and_runs(tmp_path):
-    from runtime import host_app
-
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "WiFi")
-    assert ws.screen == "desktop" and ws.cart_error is None
-    assert "wifi" in ws.ns                          # it got the gated API
-
-    # It scanned on _init -> the cart sees networks in its module namespace.
-    assert ws.ns.get("nets")                        # non-empty scan list
-    # Run a handful of frames; a crash would set cart_error.
-    for _ in range(5):
-        ws.frame(1.0 / 30)
-    assert ws.cart_error is None
-
-
-def test_wifi_manager_cart_connects_via_touch_and_persists(tmp_path):
-    from runtime import host_app
-    from runtime import moy_carts
-
-    carts_dir = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts_dir)
-    _open_cart(ws, "WiFi")
-    assert ws.cart_error is None
-
-    # Pick the first OPEN network (no password screen) and tap CONNECT.
-    nets = ws.ns["nets"]
-    open_idx = next(i for i, n in enumerate(nets) if not n[2])
-    ws.ns["sel"] = open_idx
-    ssid = nets[open_idx][0]
-
-    # Drive a tap on the CONNECT button through the pointer (mouse == touch).
-    bx, by, bw, bh = ws.ns["CONNECT_BTN"]
-    ws.pointer.place(bx + bw // 2, by + bh // 2)
-    ws.pointer.click = True
-    ws.frame(1.0 / 30)
-    ws.pointer.click = False
-
-    # The shared system service now reports connected to that SSID + an IP.
-    connected, got_ssid, ip = ws.wifi.status()
-    assert connected and got_ssid == ssid and ip
-
-    # Persisted: a reload of the store sees the joined network.
-    assert ssid in [n["ssid"] for n in moy_carts.load_wifi(carts_dir)]
-
-
-def test_wifi_manager_cart_password_entry_for_locked_net(tmp_path):
-    from runtime import host_app
-    from runtime import moy_carts
-
-    carts_dir = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts_dir)
-    _open_cart(ws, "WiFi")
-
-    # Pick a LOCKED network and tap CONNECT -> the cart switches to the password
-    # screen (it does NOT connect yet, since it needs a password).
-    nets = ws.ns["nets"]
-    locked_idx = next(i for i, n in enumerate(nets) if n[2])
-    ws.ns["sel"] = locked_idx
-    ssid = nets[locked_idx][0]
-    bx, by, bw, bh = ws.ns["CONNECT_BTN"]
-    ws.pointer.place(bx + bw // 2, by + bh // 2)
-    ws.pointer.click = True
-    ws.frame(1.0 / 30)
-    ws.pointer.click = False
-    assert ws.ns["mode"] == "pass" and ws.ns["pick"] == ssid
-    assert ws.wifi.status() == (False, None, None)   # not connected on the password screen
-
-    # Type a password byte-by-byte via the keyboard (key()), then ENTER to connect.
-    for ch in "wonderland":
-        ws.input.last_key = ord(ch)
-        ws.frame(1.0 / 30)
-        ws.input.last_key = 0
-        ws.frame(1.0 / 30)                  # release edge so the next char registers
-    ws.input.last_key = 10                  # ENTER
-    ws.frame(1.0 / 30)
-    ws.input.last_key = 0
-
-    connected, got_ssid, _ip = ws.wifi.status()
-    assert connected and got_ssid == ssid
-    nets_saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts_dir)}
-    assert nets_saved.get(ssid) == "wonderland"
 
 
 # -- reconnect to a SAVED network (the on-glass P4 bug, 2026-07-25) -----------
@@ -568,18 +483,19 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
 
     carts = str(tmp_path / "carts")
     moy_carts.ensure_dirs(carts)
-    moy_carts.save_system({"wallpaper": "moy_night"}, carts)
-    moy_carts.save_system({"wallpaper": "moy_night", "theme": "outline"}, carts)
-    moy_carts.save_achievements(["first_cart"], carts)
-    moy_carts.save_achievements(["first_cart", "first_edit"], carts)
+    moy_carts.save_system({"wallpaper": "moybyte.moy_night"}, carts)
+    moy_carts.save_system({"wallpaper": "moybyte.moy_night", "theme": "outline"}, carts)
+    moy_carts.save_achievements({"found": {"first_open": 0}, "count": {}}, carts)
+    moy_carts.save_achievements({"found": {"first_open": 0, "first_run": 1}, "count": {}}, carts)
 
     for path in (moy_carts.system_store_path(carts),
                  moy_carts.achievements_store_path(carts)):
         os.remove(path)                  # the crash window, again
 
-    assert moy_carts.load_system(carts) == {"wallpaper": "moy_night",
+    assert moy_carts.load_system(carts) == {"wallpaper": "moybyte.moy_night",
                                             "theme": "outline"}
-    assert moy_carts.load_achievements(carts) == ["first_cart", "first_edit"]
+    assert moy_carts.load_achievements(carts) == {"found": {"first_open": 0, "first_run": 1},
+                                                  "count": {}}
 
 
 # -- the radio is a LEASE (2026-09-07) ----------------------------------------
@@ -602,27 +518,27 @@ def test_the_radio_is_off_unless_something_holds_it(tmp_path):
     assert w.radio is False, "a fresh console has its radio off"
 
     # A hold powers it up at once, and a second holder shares it.
-    assert ws.wifi_hold("a") is True
+    assert ws.wifi_hold("update") is True
     assert w.radio is True
-    ws.wifi_hold("b")
-    ws.wifi_hold("b")                       # idempotent per tag
-    ws.wifi_release("a")
+    ws.wifi_hold("settings")
+    ws.wifi_hold("settings")                # idempotent per tag
+    ws.wifi_release("update")
     assert w.radio is True, "one holder left: the radio stays"
     w.connect("Home WiFi", "hunter2")
     assert w.status()[0] is True
 
     # The last one out powers it down, link and all.
-    ws.wifi_release("b")
+    ws.wifi_release("settings")
     assert w.radio is False
     assert w.status() == (False, None, None)
-    assert ws._wifi_holders == set()
+    assert ws.leases.holders() == []
 
     # Releasing what was never held is fine -- every exit path releases
     # without asking -- and it still powers down whatever came up outside a
     # lease: "off in general" is the rule.
     w.scan()
     assert w.radio is True
-    ws.wifi_release("nobody")
+    ws.wifi_release("link")
     assert w.radio is False
 
 
@@ -635,20 +551,34 @@ def test_a_console_with_no_wifi_service_takes_no_lease(tmp_path):
     ws.wifi_release("web")                  # and never raises
 
 
+def _network_cart(carts_dir):
+    """A cart that declares the "network" permission."""
+    import json
+    from runtime import moy_carts
+    moy_carts.ensure_dirs(carts_dir)
+    c = moy_carts.create("Net Cart", carts_dir,
+                         src="def _init():\n    wifi.scan()\ndef _draw():\n    cls(0)\n")
+    man_path = c["path"] + "/manifest.json"
+    man = json.loads(Path(man_path).read_text())
+    man["moybyte"]["permissions"] = ["graphics", "input", "network"]
+    Path(man_path).write_text(json.dumps(man))
+
+
 def test_a_network_cart_holds_the_radio_for_its_run_and_no_longer(tmp_path):
-    """The WiFi tool is the one cart with the "network" permission: its scan
-    needs the radio, and leaving it is the moment the console goes back to
-    radio-off. The credential it saved is what the next holder replays."""
+    """A cart with the "network" permission holds the radio for its run, and
+    leaving it is the moment the console goes back to radio-off."""
     from runtime import host_app
 
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "WiFi")
+    carts_dir = str(tmp_path / "carts")
+    _network_cart(carts_dir)
+    ws = host_app.build_workstation(carts_dir)
+    _open_cart(ws, "Net Cart")
     assert ws.cart_error is None
-    assert "cart" in ws._wifi_holders
+    assert "cart" in ws.leases.holders()
     assert ws.wifi.radio is True
 
     ws.go_home()
-    assert ws._wifi_holders == set()
+    assert ws.leases.holders() == []
     assert ws.wifi.radio is False
     assert ws.wifi.status() == (False, None, None)
 
@@ -659,7 +589,7 @@ def test_a_plain_cart_never_touches_the_radio(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Star Catcher")
     assert ws.cart_error is None
-    assert ws._wifi_holders == set()
+    assert ws.leases.holders() == []
     assert ws.wifi.radio is False
     ws.go_home()
     assert ws.wifi.radio is False
@@ -672,10 +602,10 @@ def test_the_settings_wifi_panel_holds_the_radio_while_it_is_open(tmp_path):
     ws.open_settings()
     sl = ws.settings_layer
     sl.open_wifi()
-    assert sl.wifi_view and "settings" in ws._wifi_holders
+    assert sl.wifi_view and "settings" in ws.leases.holders()
     assert ws.wifi.radio is True
     sl.close_wifi()
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
     # Leaving Settings with the panel still open -- the HOME key, or the X --
     # ends the lease too: the panel is closed on the way out, not on the next
@@ -684,13 +614,13 @@ def test_the_settings_wifi_panel_holds_the_radio_while_it_is_open(tmp_path):
     assert ws.wifi.radio is True
     ws.go_home()
     assert not sl.wifi_view
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
     ws.open_settings()
     sl.open_wifi()
     ws._exit_settings()
     assert not sl.wifi_view
-    assert ws._wifi_holders == set() and ws.wifi.radio is False
+    assert ws.leases.holders() == [] and ws.wifi.radio is False
 
 
 class _FakeNetwork:

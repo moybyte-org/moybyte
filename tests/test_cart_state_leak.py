@@ -98,7 +98,7 @@ def test_a_python_carts_draw_state_does_not_outlive_it(tmp_path):
 
 
 @pytest.mark.skipif(
-    not __import__("runtime.lua_host", fromlist=["x"]).moycore_supports(""),
+    not __import__("runtime.lua_binding", fromlist=["x"]).HostLuaRun.available(),
     reason="host lua binding not built")
 def test_a_lua_carts_draw_state_does_not_outlive_it(tmp_path):
     """The one the ledger was actually worried about: here the state lived in

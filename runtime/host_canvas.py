@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import os
 import sys
-from array import array
 
 from . import gfx_binding
 
@@ -110,13 +109,16 @@ class _FramebufModule:
 
 
 def install():
-    """Put `moy_gfx` and `framebuf` where an `import` will find them.
+    """Put `moy_gfx`, `moy_glass` and `framebuf` where an `import` will find them.
 
     Idempotent, and it never displaces a real module: on a tier that HAS these
     (a board, the browser) the setdefault does nothing, which is what keeps this
     file from being a second implementation of anything.
     """
     sys.modules.setdefault("moy_gfx", gfx_binding)
+    # The glass: canvas and buffer rows, over the same C the boards build.
+    from . import glass_binding
+    sys.modules.setdefault("moy_glass", glass_binding)
     sys.modules.setdefault("framebuf", _FramebufModule)
     # `moy_font` is what build.sh stages runtime/font.py AS, and device_canvas
     # gates its native text op on being able to import it. That file is a
@@ -163,15 +165,62 @@ class HostCompositor:
     def gfx(self):
         return gfx_binding
 
+    # The picture the last frame presented, where it is not this buffer: a
+    # test's ring of buffers presented in turn sets it, as a board's
+    # rotation would hold it. None: the one buffer is the last frame's.
+    last = None
 
-def make_canvas(w, h):
+    def last_buffer(self):
+        """The buffer the last frame drew into where it is not this one
+        (a test's ring), else None."""
+        return self.last
+
+    def copy_last(self, x, y, w, h):
+        """The rect of the buffer the last frame drew into, into the one
+        this frame draws into (docs/surface_model_v1.md §14.5)."""
+        src = self.last
+        if src is None:
+            return True
+        W, H = self._w, self._h
+        x0, y0 = max(0, x), max(0, y)
+        x1, y1 = min(W, x + w), min(H, y + h)
+        buf = self._buf
+        for r in range(y0, y1):
+            a = (r * W + x0) * 2
+            b = (r * W + x1) * 2
+            buf[a:b] = src[a:b]
+        return True
+
+    def shift_last(self, x, y, w, h, dx, dy):
+        """The rect of the buffer the last frame drew into, moved by (dx, dy)
+        inside it, into the one this frame draws into (moy_gfx's shift_rect);
+        in place on the one buffer (docs/scroll_and_text_2026-10.md §3.2)."""
+        src = self.last
+        gfx_binding.shift_rect(self._buf, self._buf if src is None else src, self._w,
+                               x, y, w, h, dx, dy)
+        return True
+
+    def copy_last_into(self, buf, stride, x, y, w, h, lx=0, ly=0):
+        """The rect of the buffer the last frame drew into, at (lx, ly) of
+        `buf` (a layer `stride` px a row), clipped to both."""
+        src = self._buf if self.last is None else self.last
+        gfx_binding.copy_block(buf, stride, src, self._w, lx, ly, x, y, w, h)
+        return True
+
+
+def make_canvas(w, h, owner=None):
     """A DeviceCanvas over a HostCompositor -- the boards' raster, on CPython.
 
     The GAME tier: a cart's fixed 320x240 surface, whose text is always 8px
-    (SPEC.md 6). Chrome wants `make_system_canvas` instead.
+    (SPEC.md 6). Chrome wants `make_system_canvas` instead. With an `owner`
+    it is a run's canvas, as a board makes one: its pixels a glass row on
+    loan to that lifetime, returned at its end.
     """
     install()
     from device_canvas import DeviceCanvas          # noqa: E402 -- after install
+    if owner is not None:
+        from device_canvas import _LayerComp, _owner_h
+        return DeviceCanvas(_LayerComp(int(w), int(h), gfx_binding, _owner_h(owner)))
     return DeviceCanvas(HostCompositor(w, h))
 
 
@@ -231,7 +280,6 @@ def _system_canvas_class():
     install()
     from device_canvas import (                     # noqa: E402 -- after install
         SystemCanvas, _PAL565_INDEX, _PAL565_WIRE_BUF, PAL565, PAL565_WIRE)
-    from . import font as _font
 
     _SWAPPED = PAL565_WIRE is not PAL565
 
@@ -258,44 +306,6 @@ def _system_canvas_class():
             self._rgb888_cache = None     # (wire table, _Rgb888Lut) -- see to_rgb888
             SystemCanvas.__init__(self, comp, font_scale=font_scale)
 
-        def _print_fallback(self, s, x, y, c):
-            # NO KERNEL TEXT OP. `runtime/moyhost_gfx.c` HAS one now, so the
-            # kernel path in SystemCanvas.print is live -- but `_gfx_text` also
-            # needs the petme128 blob `moy_font`, which is a gitignored
-            # artefact a firmware build stages, so a clean checkout still
-            # arrives here. The two lanes are pixel-identical where they
-            # overlap (libmoy's compiled-in font and runtime/font.py agree byte
-            # for byte over printable ASCII, at fs 1 and scaled); what the
-            # kernel adds is the clip rect below.
-            #
-            # So this rasterizes petme128 itself, for TWO reasons, and the
-            # second is not optional. (1) Delegating at fs > 1 would render
-            # scaled chrome at 1x -- silently, and only on the host. (2)
-            # DeviceCanvas's own no-kernel fallback is `framebuf.text`, which
-            # has NO CLIP RECT (its docstring says so: "same glyphs, no clip
-            # rect"), and the console clips text to panels everywhere -- an
-            # editor's code column, a window's title strip. Going through
-            # _put/_fill instead carries camera, clip and pal exactly as
-            # DeviceCanvas.print does, which is what keeps the tiers
-            # byte-identical.
-            self.flush_batch()
-            col = self._col(c)
-            fs = self.font_scale
-            if fs <= 1:
-                put = self._put
-
-                def emit(px, py):
-                    put(px, py, col)
-
-                _font.draw(emit, s, int(x), int(y))
-                return
-            fill = self._fill
-
-            def block(bx, by, n):
-                fill(bx, by, n, n, col)
-
-            _font.draw_scaled(block, s, int(x), int(y), fs)
-
         # NO `blit_game` OVERRIDE, and no `letterbox_composite` of its own.
         #
         # The host wants the windowed meaning of that verb and the T-Deck wants
@@ -306,48 +316,6 @@ def _system_canvas_class():
         # flag and the guard live on `DeviceCanvas` itself now; see the note
         # above its `blit_game`. `build_workstation` clears it where it installs
         # WindowedWM, which is the one place the host chooses a tier.
-
-        def _cover_fallback(self, gc, ox, oy, scale):
-            # The same loop shape as wallpaper._backdrop_blit's index path, in
-            # 565: expand each source row ONCE, then slice the visible crop into
-            # every destination row it covers -- row-level copies, no per-pixel
-            # inner loop. Deliberately a twin of that code rather than a new
-            # idea, so the two stay readable against each other.
-            #
-            # The INDEXED branch resolves through THIS canvas's table, which is
-            # what the index path it mirrors does -- there the indices are copied
-            # raw and the destination's palette resolves them later. No canvas in
-            # the tree publishes `.buf` any more, so it is a contract, not a lane
-            # anything currently takes.
-            words = getattr(gc, "_buf", None)
-            src = memoryview(words).cast("H") if words is not None else None
-            idx = None if src is not None else gc.buf
-            wire = self._wire
-            dst = self._buf
-            gw, gh = gc.w, gc.h
-            sw, sh = self.w, self.h
-            stride, bx, by = self._stride, self._ox, self._oy
-            crop_x = -ox if ox < 0 else 0
-            dst_x = ox if ox > 0 else 0
-            span = min(sw - dst_x, gw * scale - crop_x)
-            if span <= 0:
-                return
-            for gy in range(gh):
-                if src is not None:
-                    row = src[gy * gw:gy * gw + gw]
-                else:
-                    row = [wire[v & 63] for v in idx[gy * gw:gy * gw + gw]]
-                if scale == 1 and src is not None:
-                    er = row
-                else:
-                    er = array("H", [v for v in row for _ in range(scale)])
-                seg = memoryview(er).cast("B")[crop_x * 2:(crop_x + span) * 2]
-                for s in range(scale):
-                    dy = oy + gy * scale + s
-                    if dy < 0 or dy >= sh:
-                        continue
-                    base = ((by + dy) * stride + bx + dst_x) * 2
-                    dst[base:base + span * 2] = seg
 
         # -- output ----------------------------------------------------------
 

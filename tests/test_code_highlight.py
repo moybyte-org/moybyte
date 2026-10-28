@@ -174,38 +174,31 @@ def test_clean_cart_has_no_crash_line(tmp_path):
     assert ws.code_err_row is None
 
 
-def test_highlight_cache_reuses_result(tmp_path):
-    ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
-    a = ws.code_layer._hl("cls(7)")
-    b = ws.code_layer._hl("cls(7)")
-    assert a is b                          # same line -> cached object
+def _colour_at(runs, i):
+    """The class of character `i` in the TextView's runs of a line."""
+    for a, b, cl in runs:
+        if a <= i < b:
+            return cl
+    return None
 
 
-def test_crossing_the_memo_bound_keeps_the_lines_still_on_screen(tmp_path):
-    """Dragging through a long file walks past the bound. Emptying the memo
-    there re-highlights the visible window inside one frame -- a hitch on the
-    very gesture the memo is for -- so the older generation is retired instead
-    and the lines just scrolled past are still one lookup away."""
-    from runtime.code_layer import _HL_MEMO
-    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
-    onscreen = ["cls(%d)" % i for i in range(20)]
-    kept = [cl._hl(ln) for ln in onscreen]
-    for i in range(_HL_MEMO * 2):          # scroll far enough to rotate twice
-        cl._hl("x%d = %d" % (i, i))
-    assert len(cl._hl_cache) <= _HL_MEMO
-    assert len(cl._hl_old) <= _HL_MEMO
-    # The window is re-highlighted, not returned stale, once BOTH generations
-    # have rolled past it -- correctness never depends on the memo.
-    assert [cl._hl(ln) for ln in onscreen] == kept
+def _runs(line, lang):
+    """The TextView's colour runs of `line` (native/moy_ui/moy_ui_text.c),
+    as (first column, column after, class)."""
+    from runtime import ui_draw
+    from runtime.code_layer import _HL_CLASSES
+    w = ui_draw._C.text_runs(line, ui_draw.SYNTAX[lang])
+    b = line.encode()
+    return [(w[k + 2], w[k + 2] + len(b[w[k]:w[k + 1]].decode()), _HL_CLASSES[w[k + 3]])
+            for k in range(0, len(w), 4)]
 
 
-def test_a_rotation_does_not_lose_the_line_it_just_cached(tmp_path):
-    from runtime.code_layer import _HL_MEMO
-    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
-    for i in range(_HL_MEMO - 1):
-        cl._hl("a%d = 1" % i)
-    first = cl._hl("cls(1)")               # the entry that trips the rotation
-    assert cl._hl("cls(1)") is first
+def test_the_runs_are_the_highlight_in_stretches():
+    line = 'x = "hi" + 12  # note'
+    cols = _highlight(line)
+    runs = _runs(line, "python")
+    assert [_colour_at(runs, i) for i in range(len(line))] == cols
+    assert all(runs[k][2] != runs[k + 1][2] for k in range(len(runs) - 1))
 
 
 def test_lua_project_switches_palette_and_highlighting(tmp_path):
@@ -222,11 +215,33 @@ def test_lua_project_switches_palette_and_highlighting(tmp_path):
     ws.screen = "menu"
     assert ws.code_layer._symbols() == _CODE_SYMBOLS
     line = "n = #petals  -- count"
-    py_cols = ws.code_layer._hl(line)
+    assert ws.code_layer._lang() == "python"
+    py_cols = _runs(line, "python")
     ws.project.cart["runtime"] = "lua"     # what a picker-opened lua cart carries
     assert ws.code_layer._symbols() == _LUA_SYMBOLS
-    lua_cols = ws.code_layer._hl(line)
-    assert lua_cols != py_cols             # memo keyed by language, not just text
-    assert lua_cols[line.index("--")] == _HL_COMMENT
-    assert lua_cols[line.index("#")] != _HL_COMMENT
+    assert ws.code_layer._lang() == "lua"
+    lua_cols = _runs(line, "lua")
+    assert lua_cols != py_cols
+    assert _colour_at(lua_cols, line.index("--")) == _HL_COMMENT
+    assert _colour_at(lua_cols, line.index("#")) != _HL_COMMENT
     ws.frame(1 / 30)                       # the palette draw must not raise
+
+
+def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
+    """Code syntax colours are theme roles (docs/look_2026-10.md, the
+    decisions): Moy's Day draws the targets' set, each placed in the live
+    block the canvas draws through."""
+    from runtime import chrome
+    ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
+    ws.look.set_theme("moy", persist=False, variant="light")
+    ws.set_menu_view("code")
+    ws.screen = "menu"
+    want = {_HL_TEXT: 0x15161d, _HL_KEYWORD: 0x6a35c4, _HL_STRING: 0x1b6e34,
+            _HL_NUMBER: 0x9a4a09, _HL_COMMENT: 0x5f6478, _HL_BUILTIN: 0x1662a8}
+    hl = ws.code_layer._hl_map()
+    for cls, rgb in want.items():
+        r, g, b = rgb >> 16, (rgb >> 8) & 255, rgb & 255
+        assert chrome.rgb565_of(hl[cls]) == ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3), cls
+    ws.frame(1 / 30)
+
+

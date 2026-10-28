@@ -48,7 +48,7 @@ def run(body):
     back as a STRING (that is what crash-to-code is built on), and at level 0
     it is the message and nothing else -- which is the only channel out of a
     run that does not exist to carry values."""
-    buf = bytearray(32 * 32)
+    buf = bytearray(32 * 32 * 2)
     r = lb.HostLuaRun(buf, 32, 32)
     try:
         cart = ("local out = {}\n"

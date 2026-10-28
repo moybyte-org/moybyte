@@ -380,9 +380,17 @@ game-shaped one.
 What the P4 profiles show now: with `gc_alloc` gone,
 `vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` hold 19% of
 the Waveshare's samples and 17% of the Guition P4's, FreeRTOS SMP critical
-sections that the S3 profiles do not show at all. The P4 records no caller
-(`mepc` is one frame deep), so who takes them is unproven; the GIL
-round-robin was the candidate and is DECLINED below.
+sections that the S3 profiles do not show at all. The GIL round-robin was
+the candidate and is DECLINED below. Since 2026-10-27 a P4 sample carries
+the interruptee's `ra` (`moy_prof`'s slot 1, `--frame 1`), and the caller is
+in hand: the samples at the `FromISR` exit came from
+`xTaskGetCurrentTaskHandle`, which masks interrupts to read the core's
+current task, called by `pvTaskGetThreadLocalStoragePointer` for the VM's
+`mp_thread_get_state` -- every `MP_STATE_THREAD` access (each call's globals
+swap, `mp_load_global`, the stack check, nlr, `gc_alloc`). Both P4s keep the
+state pointer in a `__thread` variable now (`tools/patch_thread_state_tls.py`;
+its measurement is #66's). What exits critical sections after it is
+`esp_cache_msync` around the PPA and GDMA ops, and IDF's queues.
 
 A false reading, recorded so it is not re-investigated: the Guition S3's
 first two Bench runs after the flash read every compute phase 1.4–1.7x slow
@@ -464,7 +472,7 @@ never crashes, verified on glass at every threshold.
 |---|---|---|---|---|
 | **dual-core: audio (+input) on core 1** | frees core 0 for logic+render | P4 (unwired), T-Deck (tried, reverted) | real parallelism | med |
 | **FPS chip off by default** | overhead | both | ~1ms + cleaner kid UX | trivial |
-| **P4 critical sections** — `vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` are 17–19% of a Brick Siege profile on both P4s once `gc_alloc` is gone (§6, 2026-09-23), FreeRTOS SMP spinlock pairs the S3 profiles never show. Caller unproven (the P4 records one frame). The GIL round-robin divisor was the candidate and measured NULL on every meter (§6, DECLINED 2026-09-23); the `FromISR` exit names interrupt handlers (DSI vsync, PPA/GDMA completions, I2S audio DMA, the profiler's own timer), so the next step is to count interrupts per frame by source | dispatch | both P4s | up to ~3ms of a 16ms frame if a source is found | interrupt accounting first; no knob until a caller is in hand |
+| **P4 critical sections** — `vPortClearInterruptMaskFromISR` + `vPortExitCriticalMultiCore` were 17–19% of a Brick Siege profile on both P4s once `gc_alloc` was gone (§6, 2026-09-23), FreeRTOS SMP spinlock pairs the S3 profiles never show. The GIL round-robin divisor measured NULL on every meter (§6, DECLINED 2026-09-23). The caller, found 2026-10-27 with `moy_prof`'s `ra` slot: `xTaskGetCurrentTaskHandle` under the VM's `mp_thread_get_state`, SHIPPED as `tools/patch_thread_state_tls.py` on both P4s (§6 above). The S3 profiles never showed the pairs, and their ladders decline the patch in writing | dispatch | both P4s | #66 | done |
 
 **Render-overlap is CLOSED, not open** (it sat in the table above until
 2026-08-15, which is how a 2026-08-09 perf hunt came to spend its last lead

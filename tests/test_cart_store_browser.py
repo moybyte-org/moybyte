@@ -652,6 +652,9 @@ class _In:
         self.names = set(names)
         self.last_key = 0
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, name):
         return name in self.names
 
@@ -728,14 +731,14 @@ def _shelf(tmp_path):
 
 
 def test_a_page_a_board_serves_says_where_carts_come_from(tmp_path):
-    for home, words in (("board", "turn WEB CONSOLE off"), ("headless", "no screen")):
+    for home, words in (("board", "turn Web console off"), ("headless", "no screen")):
         ws, app = _app_ws(tmp_path / home, None, [], home=home)
         ws.open_app(app)
         _frame(ws)
         assert app.phase == "board"
-        title, lines = app._message()
-        assert title == "ON THE CONSOLE" and words in " ".join(lines)
-        assert app._current_verbs() == () and "carts" not in ws._wifi_holders
+        _icon, title, lines = app._empty_words()
+        assert title == "On the console" and words in " ".join(lines)
+        assert app._current_verbs() == () and "carts" not in ws.leases.holders()
 
 
 def test_the_browser_lists_and_installs_through_a_non_blocking_net(tmp_path):
@@ -769,8 +772,9 @@ def test_a_file_the_page_cannot_fetch_is_the_players_own_copy(tmp_path):
     app._press("I AGREE")
     _until(ws, app, net, lambda: app.phase == "pick")
     assert pick.asked == [("game.wad", len(wad), "pages.example")]
-    title, lines = app._message()
-    assert title == "YOUR COPY" and "can't fetch game.wad" in " ".join(lines)
+    title, lines = app._copy_words()
+    assert title == "Your copy of game.wad"
+    assert "can't fetch game.wad" in " ".join(t for t, _tone in lines)
     assert app._current_verbs() == ("CANCEL",)
     # A file that is not the one: the console says so and asks again.
     wrong = tmp_path / "wrong.wad"
@@ -872,7 +876,7 @@ def test_cancelling_the_question_fetches_nothing(tmp_path):
     _until(ws, app, net, lambda: app.phase == "pick")
     pick.open.answer = ("cancel",)
     _until(ws, app, net, lambda: app.phase == "cart")
-    assert app.status == "NOT FETCHED"
+    assert app.toast[0] == "Not fetched"
     assert not (tmp_path / "carts" / "dm.moy").exists()
 
 
@@ -887,7 +891,7 @@ def test_while_the_keeper_has_it_there_is_no_cancel(tmp_path):
     app._press("GET")
     _until(ws, app, net, lambda: app.job is not None and app.job.keeping)
     assert app._current_verbs() == ()
-    assert "Putting it on the shelf..." in app._message()[1]
+    assert app._progress_of()[1] == "Putting it on the shelf…"
     app.handle_input(_In("b"))
     assert app.phase == "getting" and app.job.keeping
     app.close()                                    # leaving does not undo it
@@ -906,11 +910,12 @@ def test_remove_in_the_browser_sends_the_record_to_the_keeper(tmp_path):
     _frame(ws, net)
     app._press("GET")
     _until(ws, app, net, lambda: app.phase == "done")
-    app._press("OK")
+    app.back()
     app._tap_row(1)
     _frame(ws, net)
-    app._press("REMOVE")
-    app._press("REMOVE")
+    app._press("REMOVE")                          # asks
+    assert app.asking
+    app._remove()                                 # the dialog's Remove
     assert keep.records and keep.records[-1]["carts"] == {}
     assert not (tmp_path / "carts" / "rock.moy").exists()
 

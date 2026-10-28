@@ -16,20 +16,30 @@ Two layers, the same split as the console's other sub-UIs:
 Dependency profile (the facade lens, shell_architecture_v1.md §2) -- PerfHud is
 the console's *cleanest* seam: it touches NO privileged verbs at all, only
 read-only frame-timing state through its `self.ws` back-reference:
-  * shared (non-privileged):   ws.canvas, ws.screen, ws.cart, ws.cart_error,
-                               ws._fps, ws._flush_ms, ws._draw_ms
+  * shared (non-privileged):   ws.canvas, ws.theme_colors, ws.perf_hud,
+                               ws._fps, ws._flush_ms, ws._draw_ms, ws._upd_ms
 `NAMES` is injected at construction (same reason as BlockEditorUI: importing it
 back from console.py would be a circular import, since console.py builds the one
-PerfHud a Workstation holds). Method bodies are kept byte-for-byte identical to
-the pre-extraction Workstation versions -- each aliases `NAMES = self._NAMES`
-and reads `cv = self.ws.canvas`, so the drawing is unchanged (host == device).
+PerfHud a Workstation holds). It draws through native/moy_ui's `moy_ui_perf`
+(the one body every tier draws), host == device.
 """
 
 
-# The FPS chip's glyphs: its number is drawn a digit at a time from these, so a
-# chip that paints on every game frame, with an fps that moves every few frames,
-# never formats a string.
-_DIGITS = ("0", "1", "2", "3", "4", "5", "6", "7", "8", "9")
+try:
+    from array import array as _array
+    import ui_draw as _ui_draw
+except ImportError:  # pragma: no cover - host fallback
+    from array import array as _array
+    from runtime import ui_draw as _ui_draw
+
+_RIGHT, _BOTTOM, _FPS, _FRAME, _DETAIL, _FS, _DRAW = (
+    _ui_draw.PERF_RIGHT, _ui_draw.PERF_BOTTOM, _ui_draw.PERF_FPS, _ui_draw.PERF_FRAME,
+    _ui_draw.PERF_DETAIL, _ui_draw.PERF_FS, _ui_draw.PERF_DRAW)
+_PARTS = _ui_draw.PERF_PARTS
+
+# The HUD's words, NUL-separated (moy_ui_perf's order), made once: a frame
+# that paints the HUD formats no string.
+_WORDS = "Frame\0Draw\0Flush\0Logic\0Idle\0fps\0ms"
 
 
 class PerfHud:
@@ -37,64 +47,59 @@ class PerfHud:
         self.ws = ws
         # Injected instead of imported back from console.py (see module docstring).
         self._NAMES = names
+        self._args = _array("h", [0] * 16)        # ui_draw.perf's slots
+        self._box = _array("i", [0, 0, 0, 0])
 
-    def _draw_fps(self):
-        # Tiny FPS readout in the bottom-right, over a dark chip so it stays legible
-        # on any cart. The desktop overlay buttons all sit along the top, so this
-        # corner is free. Drawn with the indexed API only (host == device).
-        NAMES = self._NAMES
-        cv = self.ws.canvas
-        n = int(self.ws._fps + 0.5)
-        if n < 0:
-            n = 0
-        nd = 1
-        m = n
-        while m >= 10:
-            m //= 10
-            nd += 1
-        tw = nd * 8
-        x = cv.w - tw - 3
-        y = cv.h - 10
-        self.ws.patch_cart_frame(x - 2, y - 1, tw + 4, 10)
-        cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
-        c = NAMES["yellow"]
-        dx = x + tw - 8                  # right to left, one 8px glyph a digit
-        m = n
-        while True:
-            cv.print(_DIGITS[m % 10], dx, y, c, 1)
-            m //= 10
-            if not m:
-                break
-            dx -= 8
+    def draw(self):
+        """The FPS chip at the canvas's bottom right (GAPS 54) -- a flat pill
+        in the surface's polarity, its number in the code face's digits -- and
+        with the breakdown on (`ws.perf_hud`) its card over it: the frame
+        against 33 ms, Draw, Flush and Logic each a hue of its own and their
+        rows in ms. Drawn on the game canvas every game frame, in flat fills
+        and allocating nothing; its rect is patched under it first."""
+        ws = self.ws
+        cv = ws.canvas
+        a = self._args
+        fps = int(ws._fps + 0.5)
+        fps = fps if fps > 0 else 0
+        logic = int(ws._upd_ms * 10 + 0.5)
+        flush = int(ws._flush_ms * 10 + 0.5)
+        draw = int(ws._draw_ms * 10 + 0.5) - logic
+        draw = draw if draw > 0 else 0
+        frame = (10000 + fps // 2) // fps if fps else draw + flush + logic
+        idle = frame - draw - flush - logic
+        a[_RIGHT] = cv.w - 4
+        a[_BOTTOM] = cv.h - 4
+        a[_FPS] = fps
+        a[_FRAME] = frame
+        a[_DETAIL] = 1 if ws.perf_hud else 0
+        a[_FS] = 1
+        a[_DRAW] = 0
+        a[_PARTS] = draw
+        a[_PARTS + 1] = flush
+        a[_PARTS + 2] = logic
+        a[_PARTS + 3] = idle if idle > 0 else 0
+        th = ws.theme_colors
+        b = self._box
+        _ui_draw.perf(cv, th, a, _WORDS, b)
+        ws.patch_cart_frame(b[0], b[1], b[2], b[3])
+        a[_DRAW] = 1
+        was = _ui_draw.cart_text(False)
+        try:
+            _ui_draw.perf(cv, th, a, _WORDS, b)
+        finally:
+            _ui_draw.cart_text(was)
+        pl = ws.player
+        if pl is not None:
+            pl.overdrew(cv, b[0], b[1], b[2], b[3])
 
     def _fps_tap_rect(self):
         """The bottom-right corner the FPS readout lives in, used as the tap target
         that toggles the perf HUD (#43/#44). Generous (a fixed corner box, not just
-        the few-pixel digit chip) so a finger on the device touchscreen lands it; it
-        sits over the FPS chip in GAME-canvas coords (the desktop hit-tests in game
-        space). Kept off the cart's own top-bar tools, so a kid never trips it by
-        accident -- they'd have to deliberately poke the FPS number."""
+        the chip) so a finger on the device touchscreen lands it; it sits over the
+        FPS chip in GAME-canvas coords (the desktop hit-tests in game space). Kept
+        off the cart's own top-bar tools, so a kid never trips it by accident --
+        they'd have to deliberately poke the FPS number."""
         cv = self.ws.canvas
-        w, h = 40, 14
+        w, h = 60, 24
         return (cv.w - w, cv.h - h, w, h)
-
-    def _draw_perf_hud(self):
-        """Frame-time breakdown (#43/#44 perf), drawn just above the FPS chip when
-        perf_hud is on: "f<flush> d<draw> t<total>" in ms (total = flush + draw).
-        flush is the panel DMA flush (comp.flush(); ~0 on the host's _NullComp, real
-        only on device); draw is everything else (cart _update/_draw + console draw).
-        Indexed API only (host == device); compact so it doesn't overlap the cart's
-        HUD where avoidable."""
-        NAMES = self._NAMES
-        cv = self.ws.canvas
-        f = int(self.ws._flush_ms + 0.5)
-        d = int(self.ws._draw_ms + 0.5)
-        s = "f%d d%d t%d" % (f, d, f + d)
-        tw = len(s) * 8
-        x = cv.w - tw - 3
-        if x < 1:
-            x = 1
-        y = cv.h - 20            # one 8px row above the FPS chip (which sits at h-10)
-        self.ws.patch_cart_frame(x - 2, y - 1, tw + 4, 10)
-        cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
-        cv.print(s, x, y, NAMES["white"], 1)

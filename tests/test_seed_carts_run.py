@@ -28,7 +28,7 @@ import shutil
 import pytest
 
 import host_app
-import moy_carts
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
@@ -55,7 +55,7 @@ def console(tmp_path_factory):
                             os.path.join(str(store), name))
     ws = host_app.build_workstation(str(store))
     driver = host_app.ConsoleDriver(ws)
-    ws.launcher.items = moy_carts.scan(ws.carts_root)
+    ws.launcher.items = shelf(ws.carts_root)
     assert ws.launcher.items, "no carts in the store -- this would pass vacuously"
     return ws, driver
 

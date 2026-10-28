@@ -1,0 +1,90 @@
+{
+  "format": "moy-1",
+  "version": 13,
+  "title": "Tiny Runner",
+  "id": "moybyte.tiny_runner",
+  "fps": "free",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "description": "An endless runner. The hero runs by itself and you only jump over the cacti. It speeds up, and your best is kept.",
+  "genre": "arcade",
+  "moybyte": {
+    "type": "game",
+    "system": true,
+    "order": 90,
+    "permissions": [
+      "graphics",
+      "input"
+    ],
+    "config": {
+      "speed": 130,
+      "jump": 220,
+      "hero": 0,
+      "sky": "dark_blue",
+      "autoplay": 0
+    },
+    "edit": [
+      {
+        "key": "speed",
+        "label": "SPEED",
+        "type": "int",
+        "min": 60,
+        "max": 260,
+        "step": 10,
+        "card": "RUN AT {value}"
+      },
+      {
+        "key": "jump",
+        "label": "JUMP",
+        "type": "int",
+        "min": 140,
+        "max": 340,
+        "step": 10,
+        "card": "JUMP POWER {value}"
+      },
+      {
+        "key": "hero",
+        "label": "HERO",
+        "type": "choice",
+        "choices": [
+          0,
+          1
+        ],
+        "tiles": [
+          0,
+          1
+        ],
+        "display": "sprite-tiles",
+        "card": "HERO IS {value}"
+      },
+      {
+        "key": "sky",
+        "label": "SKY",
+        "type": "choice",
+        "choices": [
+          "dark_blue",
+          "indigo",
+          "dark_purple",
+          "black"
+        ],
+        "card": "SKY IS {value}"
+      },
+      {
+        "key": "autoplay",
+        "label": "AUTOPLAY",
+        "type": "choice",
+        "choices": [
+          0,
+          1
+        ],
+        "icons": [
+          "close",
+          "run"
+        ],
+        "display": "choice-icons",
+        "card": "AUTOPLAY {value}"
+      }
+    ]
+  }
+}

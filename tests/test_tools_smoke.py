@@ -25,6 +25,7 @@ This suite never opens a serial port and never needs a board or a display.
 """
 
 import ast
+import re
 import os
 import subprocess
 import sys
@@ -139,6 +140,25 @@ def _dev_channel_commands():
                 if fields[5].value:
                     cmds.add(fields[5].value)
 
+    # The words each subsystem registers (runtime/devch_*.py's WORDS).
+    for words in sorted(ROOT.glob("runtime/devch_*.py")):
+        for node in ast.walk(_tree(words)):
+            if (isinstance(node, ast.Assign)
+                    and any(getattr(t, "id", "") == "WORDS"
+                            for t in node.targets)
+                    and isinstance(node.value, ast.Dict)):
+                cmds.update(k.value for k in node.value.keys
+                            if isinstance(k, ast.Constant))
+
+    # The kernel's own words (native/moy_kernel/moy_devch.c's KERNEL_WORDS,
+    # and the `quit` its reader answers before any table).
+    devch = (ROOT / "native" / "moy_kernel" / "moy_devch.c").read_text(encoding="utf-8")
+    table = devch[devch.index("KERNEL_WORDS[] = {"):]
+    table = table[:table.index("};")]
+    cmds.update(re.findall(r'\{"([a-z][a-z0-9_-]*)", w_', table))
+    if 'strcmp(argv[0], "quit") == 0' in devch:
+        cmds.add("quit")
+
     # Board-only handlers, from the `extra=` each board's runtime passes.
     for runtime in sorted(ROOT.glob("firmware/*/modules/moy_runtime.py")):
         for node in ast.walk(_tree(runtime)):
@@ -228,7 +248,7 @@ def test_the_dev_channel_vocabulary_parsed():
     anchors = {"py", "state", "diag", "run", "tap", "swipe", "drag", "recv",
                "open", "mem", "power", "steady"}
     missing = sorted(anchors - DEV_COMMANDS)
-    assert not missing, ("DevChannel.run no longer dispatches %s -- if that is "
+    assert not missing, ("the dev channel no longer dispatches %s -- if that is "
                          "the change, the tools speaking it need the same edit"
                          % ", ".join(missing))
 

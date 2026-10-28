@@ -21,8 +21,15 @@ the PC sim runs -- and input replays through the shared `web_input.apply_events`
 decode, so host == device == browser stays one code path.
 
 Scope: the FULL console, both presentation tiers -- `can_manage=True`, so the
-Make tile and the editors are reachable in the browser. pmem/journal writes land
-in the browser's MEMFS, so they are ephemeral: a reload resets the machine.
+Make tile and the editors are reachable in the browser. Every write lands in the
+browser's MEMFS first, and the sweep (`_build_watchers`) carries it to where the
+page's store of record is: a site-mode page's OPFS -- the carts with their
+journals and pmem, the drawings, and the console's own documents (system.json,
+achievements.json, the shared sheet), so a reload comes back on the same shelf,
+theme, Settings and badges -- or the serving board for its carts, files,
+portable Settings and badges (`moy_sync.SYSTEM_KEYS`; a board answering no
+/console.json leaves them in the tab). A page with no OPFS keeps everything in
+the tab and says so.
 
 JS contract (see worker.js):
     boot(carts_root, cart=None, ...) -> build the Workstation
@@ -45,12 +52,15 @@ import json
 import console
 import host_api
 import moy_carts
+import moy_catalogue
 import web_canvas
 import web_input
 from input import InputState
+from audio_session import PcmPump
 
 _S = {}          # the runner singletons: ws / canvas / driver / sink
-_AUDIO_RATE = [0]
+# The rate the page's worklet resamples from: the mix is made at it.
+_AUDIO_RATE_HZ = 11025
 
 
 # The page keeps ~this many seconds of PCM scheduled ahead of the audio clock.
@@ -61,133 +71,39 @@ _AUDIO_TARGET = 0.12
 _AUDIO_MAX_STEP = 0.20      # bound one frame's top-up render (seconds)
 
 
-class _RunnerAudio(host_api.FakeAudio):
-    """FakeAudio with the calls list capped, plus two web-runner twists
-    (#170 round 3 -- the owner's "crackle and slowdown" report):
+class _RunnerPump(PcmPump):
+    """The page's pull of the kernel's mix (#170 round 3 -- the owner's
+    "crackle and slowdown" report): the page reports how many seconds of PCM
+    it still has scheduled (step_frame_json's audio_ahead), and tick() renders
+    whatever refills that to _AUDIO_TARGET instead of exactly rate*dt, so one
+    late frame eats cushion, not the stream. Without the report (ahead < 0)
+    it renders rate*dt. Nothing is rendered while nothing sounds, so a silent
+    frame ships no audio. step_frame_json drains take_pcm() into the frame
+    payload and the page's playPCM plays the finished samples."""
 
-    * TOP-UP rendering (the crackle fix): the page reports how many seconds
-      of PCM it still has scheduled (step_frame_json's audio_ahead); tick()
-      renders whatever refills that to _AUDIO_TARGET instead of exactly
-      rate*dt. One late frame now eats cushion, not the stream -- the browser
-      twin of the device feed's ring top-up (device_audio.py). Without the
-      report (ahead < 0: a transport that never sends it) the per-dt render
-      stays, unchanged.
-    * The synth is the NATIVE moy_audio module when the wasm was built with the
-      usermod -- i.e. libmoy, moy-spec's own SPEC.md 8 implementation, compiled
-      in (#97). It owns the bank, both sequencers and the mixer; this class only
-      forwards the 8.2 verbs and pulls finished blocks. That is also the
-      slowdown fix: the Python per-sample loop cost whole milliseconds per frame
-      under wasm. Without the usermod it falls back to the shared Python engine,
-      which is a twin of the same libmoy source, so browser == device == host
-      stays one audible behaviour either way.
-
-    step_frame_json drains take_pcm() into the frame payload and the page's
-    playPCM plays the FINISHED samples (no JS synth), as before."""
-
-    def __init__(self, engine):
-        host_api.FakeAudio.__init__(self, engine)
-        self.ahead = -1.0           # page-reported queue depth; <0 = no report
-        try:
-            import moy_audio
-            self._ka = moy_audio
-        except ImportError:
-            self._ka = None
-        self._bank_rev = None
-        self._buf = bytearray(int(engine.rate * _AUDIO_MAX_STEP) * 2 + 64)
-        if self._ka is not None:
-            self._ka.set_rate(engine.rate)
-            self._push_bank()
-            self._ka.volume(engine.master)
-
-    # -- the bank: one crossing per cart, re-pushed when the editor moves it --
-
-    def _push_bank(self):
-        import json
-        bank = self.engine.bank
-        self._ka.bank_load(json.dumps(bank.to_dict()))
-        self._bank_rev = bank.rev
-
-    def _sync_bank(self):
-        if self._ka is not None and self.engine.bank.rev != self._bank_rev:
-            self._push_bank()
-
-    # -- SPEC.md 8.2, forwarded (FakeAudio still records every call) ----------
-
-    def sfx(self, n, chan=None):
-        self.calls.append(("sfx", int(n), chan))
-        if self._ka is not None:
-            self._sync_bank()
-            self._ka.sfx(int(n), -1 if chan is None else int(chan))
-        else:
-            self.engine.play_sfx(n, chan)
-
-    def beep(self, freq, dur=0.15):
-        self.calls.append(("beep", freq, dur))
-        if self._ka is not None:
-            self._ka.beep(float(freq), float(dur))
-        else:
-            self.engine.play_beep(freq, dur)
-
-    def music(self, track, loop=True):
-        self.calls.append(("music", int(track), bool(loop)))
-        if self._ka is not None:
-            self._sync_bank()
-            self._ka.music(int(track), 1 if loop else 0)
-        else:
-            self.engine.play_music(track, loop)
-
-    def music_stop(self):
-        self.calls.append(("music_stop",))
-        if self._ka is not None:
-            self._ka.music_stop()
-        else:
-            self.engine.stop_music()
-
-    def sound_stop(self, chan=None):
-        self.calls.append(("sound_stop", chan))
-        if self._ka is not None:
-            self._ka.sound_stop(-1 if chan is None else int(chan))
-        else:
-            self.engine.stop(chan)
-
-    def volume(self, level):
-        self.calls.append(("volume", level))
-        self.engine.set_volume(level)      # keep the model in step
-        if self._ka is not None:
-            self._ka.volume(self.engine.master)
-
-    def is_active(self):
-        if self._ka is not None:
-            return bool(self._ka.active())
-        return self.engine.is_active()
+    def __init__(self):
+        PcmPump.__init__(self, _AUDIO_RATE_HZ)
+        self.ahead = -1.0
+        self._buf = bytearray(int(self.rate * _AUDIO_MAX_STEP) * 2 + 64)
 
     def tick(self, dt):
-        if len(self.calls) > 64:
-            del self.calls[:]
-        eng = self.engine
         if self.ahead >= 0.0:
             want = _AUDIO_TARGET - self.ahead
             if want > _AUDIO_MAX_STEP:
                 want = _AUDIO_MAX_STEP
-            n = int(eng.rate * want) if want > 0 else 0
+            n = int(self.rate * want) if want > 0 else 0
         else:
-            n = int(eng.rate * dt) if dt > 0 else 0
+            n = int(self.rate * dt) if dt > 0 else 0
         cap = len(self._buf) // 2
         if n > cap:
             n = cap
-        if n <= 0 or not self.is_active():
+        na = self._na
+        if n <= 0 or na is None or not na.active():
             return
-        if self._ka is not None:
-            buf = memoryview(self._buf)[:n * 2]
-            self._ka.render(buf, n)
-            self.last_pcm = bytes(buf)
-        else:
-            self.last_pcm = eng.render(n)
+        buf = memoryview(self._buf)[:n * 2]
+        na.render(buf, n)
+        self.last_pcm = bytes(buf)
         self.rendered += n
-
-
-def _make_audio(engine):
-    return _RunnerAudio(engine)
 
 
 class _PointerSink:
@@ -199,7 +115,10 @@ class _PointerSink:
         self._d = driver
 
     def place(self, x, y):
-        self._d.pointer.place(int(x), int(y))
+        if self._d._click:
+            self._d._after = (int(x), int(y))   # a press's frame keeps the press's place
+        else:
+            self._d.pointer.place(int(x), int(y))
 
     @property
     def down(self):
@@ -207,7 +126,18 @@ class _PointerSink:
 
     @down.setter
     def down(self, v):
+        if v and not self._d._down:
+            self._d.ws.input_used("touch")      # a press: the input in use
         self._d._down = bool(v)
+        self._d._buttons(1, bool(v))           # moy_input's PB_PRIMARY
+
+    @property
+    def hovers(self):
+        return self._d.pointer.hovers
+
+    @hovers.setter
+    def hovers(self, v):
+        self._d.pointer.hovers = bool(v)        # a mouse: it has a place with nothing held
 
     @property
     def click(self):
@@ -217,6 +147,7 @@ class _PointerSink:
     def click(self, v):
         if v:
             self._d._click = True
+            self._d.ws.input_used("touch")
 
 
 def _make_api(*a, **kw):
@@ -234,13 +165,34 @@ def _make_api(*a, **kw):
     return host_api.make_api(*a, **kw)
 
 
+# The inputs a page declares (Workstation.use_inputs): its keyboard, the
+# driver's "local" source; its on-screen gamepad, the "pad" source its holds
+# name (web_input.PAD_SOURCE); and on a coarse-pointer page (a phone, a tablet)
+# touch first, in use from boot, since a finger is what such a page is used
+# with; a fine pointer is a mouse, no finger, as on the host.
+WEB_INPUTS = (("local", "keys"), ("pad", "pad"))
+WEB_TOUCH_INPUTS = (("touch", "touch"), ("local", "keys"), ("pad", "pad"))
+
+# The glass the desktop arrangement is: the Waveshare P4's 7-inch 1024x600
+# panel (firmware/esp32_p4_wifi6_touch_lcd_7b/board.toml [panel]), the board
+# whose arrangement it runs, so the desk lays out on the desk's metrics, faces
+# and icon sizes as that board's does (`layout_base.class_of`). The handheld
+# arrangement declares none, as the T-Deck declares none.
+# tests/test_web_look_parity.py holds the number to the board's.
+DESK_DIAGONAL_IN = 7.0
+
+
 def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
-         windowed=False, font_scale=0, hud=True):
+         windowed=False, font_scale=0, hud=True, coarse=False, scheme=None):
     """Build the shared Workstation over the RGB565 canvas + the VFS store.
     The page/harness wrote the cart bundle into `carts_root` before calling.
 
     `hud=False` suppresses the perf HUD -- see the note at the ws.show_fps
-    assignment below for why a bundle would want that.
+    assignment below for why a bundle would want that. `coarse` is the
+    page's `(pointer: coarse)`: touch is then its input in use until a key
+    is pressed (WEB_TOUCH_INPUTS). `scheme` is the page's colour scheme ("dark"
+    or "light"): the theme variant of a first run, before the visitor has saved
+    one (`console.wire_workstation_core`'s `first_variant`).
 
     Two presentation TIERS out of one wasm binary (the page picks per tab), and
     both are now the SAME arrangement their hardware twin uses:
@@ -272,7 +224,9 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # worker's idle collect still lands them on quiet frames.
     import gc
     gc.threshold(4 * 1024 * 1024)
-    carts = moy_carts.scan(carts_root)
+    if _S.get("store_mode") == "board" and "system" in (_S.get("seeded") or ()):
+        _rebase_system(carts_root)
+    carts = moy_catalogue.catalogue(carts_root)
     if windowed:
         # The system canvas is never smaller than the 320x240 game canvas it
         # composites in as a viewport (host_app.build_workstation clamps the
@@ -295,14 +249,15 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         sysc = web_canvas.make_canvas(width, height, font_scale=font_scale)
         game = web_canvas.WebSystemCanvas(web_canvas.WebCompositor(320, 240))
         ws = console.Workstation(host_api._NullComp(), game, inp, carts,
-                                 sys_canvas=sysc, font_scale=font_scale)
+                                 sys_canvas=sysc, font_scale=font_scale,
+                                 panel_diagonal_in=DESK_DIAGONAL_IN)
     else:
         sysc = game = web_canvas.make_canvas(320, 240, font_scale=font_scale)
         ws = console.Workstation(host_api._NullComp(), game, inp, carts)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster (celeste's view(128, 120)) plays on its own off-screen canvas and
     # blit_game upscales it, same as both boards.
-    ws.make_game_canvas = lambda w, h: web_canvas.WebSystemCanvas(
+    ws.make_game_canvas = lambda w, h, owner=None: web_canvas.WebSystemCanvas(
         web_canvas.WebCompositor(int(w), int(h)))
     # Cart runtimes: moycore, the SAME native module and glue the boards run --
     # third architecture, one engine. A build without the usermod still boots
@@ -334,15 +289,16 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     console.wire_workstation_core(
         ws, moy_carts, carts_root, _make_api,
         None,
-        make_audio=_make_audio, runtimes=runtimes, can_manage=True,
-        pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
+        audio_out=_RunnerPump(), runtimes=runtimes, can_manage=True,
+        pointer=console.Pointer(sysc.w, sysc.h), inp=inp, first_variant=scheme)
     # AUTHORING IS ON, BOTH TIERS (owner call): the browser build is the whole
     # console, not the player-only runner #151 originally scoped -- the Make tile
     # and the editors are the point. This used to add "and nothing persists
     # across a reload", which #193 made false: a static-host page keeps carts in
-    # OPFS and a board-served one writes them home, so the only in-memory case
-    # left is a browser with no usable OPFS -- and the page still says THAT out
-    # loud.
+    # OPFS and a board-served one writes them home. What stays in the tab is
+    # everything in a browser with no usable OPFS -- and the page says THAT out
+    # loud -- and the Settings a board keeps for itself (moy_sync.SYSTEM_KEYS),
+    # or all of them and the badges where the board serves no /console.json.
     # can_manage is wired AFTER the launcher was built, so rebuild the shelf for it
     # to appear.
     ws.launcher.items = ws._launcher_items(ws.carts.all)
@@ -353,14 +309,16 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     ws.cart_pick = seams[2]
     ws.cart_home = seams[3]
     # The Moybyte shell's achievements are gamification for the kid console,
-    # not part of a cart player (and doubly not of the brand-neutral spec
-    # bundle). The REAL trigger is the Achievements core's note() (e.g.
-    # ach.note("open", ...) -> toast "First Steps" -- console.py's own
-    # _draw_toast renders it, so stubbing achievements_ui alone was not
-    # enough, as the first owner session proved). Kill the core's verbs.
-    ws.ach.note = lambda *a, **k: None
-    ws.ach.toast = None
-    ws._achievement_unlocked = lambda *a, **k: None
+    # which the console page is, as on a board; they are no part of the
+    # one-cart player (`cart`: an export, the gallery, a kiosk bundle), whose
+    # frames are the cart's. The trigger is the Achievements core's note()
+    # (ach.note("open", ...) -> toast "First Steps", which console.py's own
+    # _draw_toast renders, so stubbing achievements_ui alone is not enough):
+    # the player kills the core's verbs.
+    if cart:
+        ws.ach.note = lambda *a, **k: None
+        ws.ach.toast = None
+        ws._achievement_unlocked = lambda *a, **k: None
     # The Pointer boots visible (a device shows the trackball cursor until its
     # idle timeout) -- in the browser that composited an arrow over the first
     # game frames (owner report: "a cursor flashes at open"). Start hidden; a
@@ -398,12 +356,15 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # the suite and got exactly 200 differing pixels on every scene -- a 20x10
     # box at (299, 229), which is the chip.
     #
-    # Default stays True, so the device, the dev page and the desktop tier are
-    # unchanged. A caller that wants clean frames passes hud=False.
-    ws.show_fps = bool(hud)
+    # A caller that wants clean frames passes hud=False. Otherwise the chip is
+    # the Settings SHOW FPS row's, as on a board: the boot's settings apply
+    # (wire_workstation_core) already set it from the stored system.json.
     if not hud:
+        ws.show_fps = False
         ws.perf_hud = False
     driver = host_api.ConsoleDriver(ws)
+    ws.use_inputs(WEB_TOUCH_INPUTS if coarse else WEB_INPUTS)
+    ws.soft_keyboard = True     # the page's ⌨ summons the browser's keyboard
     _S["ws"] = ws
     # The pin backend, if the worker's probe found one. Stashed by gpio_enable
     # (which runs BEFORE this, since the probe is answered while the console is
@@ -423,8 +384,11 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # mode for the root that is of record there (carts), and keeps the wire's own
     # rule everywhere else -- so a board-mode sweep is byte-identical to what it
     # always was. A root whose store is not present in the VFS (a sibling root
-    # the served host has no layer for) simply gets no watcher.
-    _S["watchers"] = _build_watchers(carts_root, _S.get("store_mode") == "site")
+    # the served host has no layer for) simply gets no watcher, and neither does
+    # a root the worker did not seed (the console's own documents, where the
+    # board serves no /console.json).
+    _S["watchers"] = _build_watchers(carts_root, _S.get("store_mode") == "site",
+                                     _S.get("seeded"))
     # The canvas the PAGE presents: the system canvas on the desktop tier, the
     # one shared canvas on the handheld tier. Its buffer is what fb_addr()
     # publishes, so this is the single place the two tiers differ downstream.
@@ -494,19 +458,44 @@ def carts_event_json(text):
     return ""
 
 
-def _build_watchers(carts_root, site):
+def _rebase_system(carts_root):
+    """The pulled system.json's cart folders under this VFS's `carts_root`
+    (they cross as folder names, `moy_sync.CART_PATH_KEYS`), before the
+    Workstation reads it."""
+    import moy_sync
+    path = moy_sync.system_root(carts_root) + "/system.json"
+    try:
+        with open(path) as f:
+            text = moy_sync.rebase_system(f.read(), carts_root)
+        if text is not None:
+            with open(path, "w") as f:
+                f.write(text)
+    except OSError:
+        pass                             # nothing pulled: the defaults
+
+
+def _build_watchers(carts_root, site, seeded=None):
     """`{root_id: StoreWatcher}` for every registered sync root whose store is
     PRESENT in the VFS. A missing store means no watcher -- and that is a
     CAPABILITY signal, not a bug: worker.js seeds a sibling root's directory only
     when its source exists (a board-served `files.json`, or the browser's own
     OPFS in site mode), so a host that has no files layer leaves no directory,
     gets no files watcher, and never aims a files batch at a receiver that could
-    only refuse it. Never blocks a boot -- any failure leaves an empty dict."""
+    only refuse it. `seeded` is the worker's list of the roots it seeded: the
+    system root's directory is the carts folder's parent, present whatever the
+    host serves, so a board-served page watches it only when the board answered
+    /console.json and the worker said so -- firmware without it refuses the
+    batch. Never blocks a boot -- any failure leaves an empty dict."""
     import os
     out = {}
     try:
         import moy_sync
         for root in moy_sync.SYNC_ROOTS:
+            if seeded is not None:
+                if root.id not in seeded:
+                    continue             # the host does not serve it
+            elif root.top is not None and not site:
+                continue                 # its directory proves nothing
             path = root.path(carts_root)
             if path is None:
                 continue                 # no such layer on this host at all
@@ -515,7 +504,8 @@ def _build_watchers(carts_root, site):
             except OSError:
                 continue                 # not seeded -> not watched
             out[root.id] = moy_sync.StoreWatcher(
-                path, root_id=root.id, skip=root.watch_skip(site))
+                path, root_id=root.id, skip=root.watch_skip(site),
+                top=root.watch_top(site))
     except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
         print("sync watcher unavailable:", exc)
         return {}
@@ -568,7 +558,7 @@ def _rescan():
     `apply` also keeps the old shelf when a scan comes back empty rather than
     blanking it, which is its deliberate failure direction and now this one's."""
     ws = _S["ws"]
-    ws.carts.apply(moy_carts.scan(_S["root"]))
+    ws.carts.apply(moy_catalogue.catalogue(_S["root"]))
     ws._dirty = True
 
 
@@ -604,25 +594,24 @@ def reload_cart(name=None):
 
 
 def _select_cart(name):
-    """Point the launcher at the cart `name` names (folder name with or without
-    `.moy`, or manifest title). True when it landed on one."""
+    """Bring the cart `name` names (folder name with or without `.moy`, or
+    manifest title) up on the home -- the tab that holds it, then its card.
+    True when it landed on one."""
     ws = _S["ws"]
     want = str(name).lower()
     if want.endswith(".moy"):
         want = want[:-4]
-    for i, c in enumerate(ws.launcher.items):
-        path = c.get("path") or ""       # synthetic tiles (Make) carry no path
-        folder = path.rsplit("/", 1)[-1].lower()
+    for c in ws._runnable_items():
+        folder = c.get("path", "").rsplit("/", 1)[-1].lower()
         if folder.endswith(".moy"):
             folder = folder[:-4]
         if want in (folder, c.get("title", "").lower()):
-            ws.launcher.sel = i
-            return True
+            return ws.select_cart(c)
     return False
 
 
 def open_cart(name):
-    """Select + run a cart by folder name ('star_catcher.moy', extension
+    """Select + run a cart by folder name ('moybyte.star_catcher.moy', extension
     optional) or manifest title, skipping the launcher -- the single-cart-embed
     path (?cart=...). Unknown name -> False (the shelf stays up)."""
     if not _select_cart(name):
@@ -640,8 +629,8 @@ def edit_cart(name, tab=None):
     the "open in editor" half of the p8 drop (#194).
 
     The tap that RUNS a cart and the one that EDITS it are different verbs in
-    the shell (shell_ux_v1.md: a launcher tap always runs), and this is the
-    edit one -- the same entry the Editor's project picker uses, so an imported
+    the shell (shell_ux_v1.md §4: a tap on Make edits, on the other tabs it
+    runs), and this is the edit one -- the same entry Make uses, so an imported
     cart arrives in the Sprites / Map / Music tabs exactly like an authored one.
     `tab` lands on one of them ("paint"/"map"/"music"/...) instead of the
     default Config landing.
@@ -663,12 +652,28 @@ def edit_cart(name, tab=None):
         opener = _EDIT_TABS.get(tab)
         if opener is not None:
             getattr(ws.editor_app, opener)()
+        elif tab:
+            ws.set_menu_view(tab)         # a tab with no opener of its own (code)
     return json.dumps({
         "ok": ok,
         "screen": getattr(ws, "screen", None),
         "tab": getattr(ws, "menu_view", None),
         "title": _cart_title(),
     })
+
+
+def start_edit(name, tab=None):
+    """The start option (`?edit=<cart>&tab=<tab>`): boot into the Editor on
+    `name`'s `tab` where a plain visit boots to the home. It is `edit_cart`
+    without the First Steps badge -- opening the editor was the page's doing,
+    not a thing the visitor did, and a banner over the first frame would hide
+    the code the start option is there to show. Returns edit_cart's JSON."""
+    ws = _S["ws"]
+    note, ws.ach.note = ws.ach.note, lambda *a, **k: None
+    try:
+        return edit_cart(name, tab)
+    finally:
+        ws.ach.note = note
 
 
 def import_p8_json(path, name, out_dir):
@@ -686,10 +691,7 @@ def _cart_title():
 
 
 def _audio_rate():
-    if not _AUDIO_RATE[0]:
-        from audio import AudioEngine
-        _AUDIO_RATE[0] = AudioEngine().rate
-    return _AUDIO_RATE[0]
+    return _AUDIO_RATE_HZ
 
 
 def assets_json():
@@ -766,20 +768,20 @@ def step_frame_json(dt, audio_ahead=-1.0):
     pixels it already has. Otherwise a small JSON string carrying what does not
     live in the framebuffer: whether it painted, the cart title, the input hint,
     and this frame's finished PCM. `audio_ahead` is the page's scheduled-ahead
-    audio depth in seconds (-1 = not reported): _RunnerAudio tops the cushion
+    audio depth in seconds (-1 = not reported): _RunnerPump tops the cushion
     back up to target each frame (the crackle fix, #170).
 
     The PIXELS are not in here. The worker reads them from fb_addr()/fb_len()
     when `paint` is set.
     """
     ws = _S["ws"]
-    au = getattr(ws, "audio", None)
+    au = getattr(ws, "audio_out", None)
     if au is not None and hasattr(au, "ahead"):
         au.ahead = float(audio_ahead)
     painted_before = ws._frames_drawn
     _S["driver"].frame(dt)
     painted = ws._frames_drawn != painted_before
-    # Drain the engine's FINISHED PCM (rendered by _RunnerAudio.tick during the
+    # Drain the engine's FINISHED PCM (rendered by _RunnerPump.tick during the
     # frame) -- the page plays it through its AudioWorklet ring.
     pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
     audio_b64 = ""
@@ -796,15 +798,47 @@ def step_frame_json(dt, audio_ahead=-1.0):
     })
 
 
+def _edit_state(ws):
+    """What a key in the Editor changed, for a harness that types into it:
+    the open tab, the sprite's pixels as hex, the code's first lines and
+    whether it holds a selection, and whether the system menu shows."""
+    out = {"tab": getattr(ws, "menu_view", None),
+           "sysmenu": bool(getattr(ws.sysmenu, "open", False))}
+    pe, sheet = getattr(ws, "paint", None), getattr(ws, "sheet", None)
+    if pe is not None and sheet is not None:
+        ox, oy = sheet.tile_origin(pe.n)
+        out["sprite"] = "".join("%x" % sheet.pget(ox + x, oy + y)
+                                for y in range(pe.dim) for x in range(pe.dim))
+        out["tool"] = pe.tool
+    ed = getattr(ws, "editor", None)
+    if ed is not None:
+        out["code"] = ed.lines[:4]
+        out["sel"] = bool(ed.has_selection())
+        out["selected"] = ed.selected_text()[:60] if ed.has_selection() else ""
+        out["top"] = ed.top
+        out["caret"] = [ed.row, ed.col]
+        lay = getattr(ws, "code_layout", None)
+        if lay is not None and out["tab"] == "code":
+            out["autoscroll"] = ws.code_layer.autoscrolling()
+            # where the text lies on the glass: x of column 0, y of the top row
+            out["grid"] = [ws.code_layer._text_x0(lay, ed), lay.y0, lay.cell, lay.lh]
+    return out
+
+
 def state_json():
     """The console's `state`: the dev channel's one-line snapshot -- the keys
     every on-glass suite reads -- plus this page's sample stream
     (`moy_audio.snd_counts()`: frames a compiled cart queued, frames the page's
     audio pull mixed, frames it found none, the room, whether it is open) and
-    the running cart's first eight pmem slots, for a harness driving the page
-    (`window.__moyState()`)."""
+    the running cart's first eight pmem slots, the earned badges' ids, the
+    Settings rows as the console holds them and whether the FPS chip shows,
+    for a harness driving the page (`window.__moyState()`)."""
     import dev_channel
     st = dev_channel._remote_state(_S["ws"])
+    st["ach"] = sorted(_S["ws"].ach.unlocked)
+    st["system"] = json.loads(_S["ws"].system.dump() or "{}")
+    st["show_fps"] = bool(_S["ws"].show_fps)
+    st["edit"] = _edit_state(_S["ws"])
     try:
         import moy_audio
         sc = moy_audio.snd_counts()
@@ -825,22 +859,15 @@ def state_json():
 
 def _apply(events):
     d = _S["driver"]
-    rest = []
-    for e in events:
-        if e.get("type") == "reset":
-            # Esc during play: restart the cart (kiosk wraps the exit into a
-            # relaunch; the multi-cart runner pops to the shelf).
-            if getattr(_S["ws"], "cart", None) is not None:
-                _S["ws"]._exit_to_caller()
-        else:
-            rest.append(e)
     web_input.apply_events(
-        rest, d.input, _S["sink"],
+        events, d.input, _S["sink"],
         on_press=d.press, on_pan=d.pan, on_key=d.type_char,
-        on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold)
+        on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold,
+        on_super=d.system_key, on_full=d.full_key, on_key_down=d.key_down,
+        on_key_up=d.key_up, on_mods=d.set_mods, on_wheel=d.wheel, on_middle=d.middle)
 
 
-def store_mode(mode=None):
+def store_mode(mode=None, seeded=None):
     """Which world this page is in, told to us by the worker BEFORE boot().
 
     The worker decides it (moy_store.probeMode) before anything is written,
@@ -855,8 +882,12 @@ def store_mode(mode=None):
     the wire's own predicate in place. That default matters more than the
     setting: a mode that fails to arrive must not start shipping journals at a
     board.
+
+    `seeded` is the ids of the roots the worker seeded (None: unknown, every
+    present root): a board-mode page watches only what its board served.
     """
     _S["store_mode"] = mode or None
+    _S["seeded"] = None if seeded is None else tuple(seeded)
     return ""
 
 
@@ -910,7 +941,7 @@ def sync_off():
     stop sweeping for good. One failed probe, then silence -- the standalone
     browser console must not retry-log forever.
 
-    BOTH roots, because this is the "there is no push half here" answer. A board
+    EVERY root, because this is the "there is no push half here" answer. A board
     that has /sync but no files layer is a different case entirely, and it is
     settled at boot: no files store in the VFS means no files watcher, so
     nothing ever probes for a files endpoint that would 404."""

@@ -53,14 +53,10 @@ FORWARDS = {
         "webhost_label": "label",            # settings_layer, tools/push_cart_wifi
         "toggle_webhost": "toggle",          # settings_layer, dev_channel, push_cart_wifi
     },
-    # Landing B. The dict itself needed no forward at all -- `ws.system` is a
-    # plain alias of `prefs.settings` and SystemStore loads it IN PLACE, so
-    # every raw reader and writer (settings_layer, the dev channel, the
-    # launcher's favorites, app_context's Prefs role) kept working untouched.
-    # Only the WRITE verb has callers left outside the kernel.
-    "prefs": {
-        "_persist_system": "persist",        # app_context's Prefs, dev_channel's `vol`
-    },
+    # Landing B. ZERO forwards: `ws.system` is a plain alias of the rows
+    # `prefs.rows` and SystemStore loads them IN PLACE, every reader calls
+    # `ws.system.get` and every writer `ws.system.set`, which persists, so the
+    # write verb that used to be forwarded (`_persist_system`) has no callers.
     # Landing C. ZERO forwards, and that is the finding rather than an
     # omission: every cover verb was kernel-INTERNAL. The three consumer
     # classes 3d names were all swept before the move -- the dev channel and
@@ -115,10 +111,11 @@ FORWARDS = {
 # Each must STAY absent -- an entry whose name has appeared is a stale
 # exemption, so the test refuses that too.
 GETATTR_ABSENT = {
+    "idle_ladder": "the kernel idle ladder's Settings rows (idle_ladder.py), "
+                   "set only where the kernel's loop drives the frames; "
+                   "settings_layer gates the rows on the probe",
     "ble_keyboard": "the BLE keyboard driver, injected only on a board that has "
                     "one; settings_layer gates its whole panel on the probe",
-    "_psave_asleep": "device_boot's idle-blank state, written only on glass",
-    "_psave_ms": "the idle-blank timeout the dev channel's `psave` reports",
     # The PERF line's wm columns (#206 item 2). ABSENCE IS THE ANSWER here, not
     # a defaulted probe: wm_windowed stamps these under perf_capture, so a board
     # that does not stage it never has them and a board with the deep meters off

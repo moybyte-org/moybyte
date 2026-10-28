@@ -1,0 +1,27 @@
+{
+  "format": "moy-1",
+  "version": 5,
+  "title": "My Art",
+  "id": "moybyte.my_art",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 275,
+    "app": {
+      "id": "myart",
+      "entry": "myart_app:MyArtAppLayer",
+      "text_mode": false,
+      "order": 15
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "myart"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

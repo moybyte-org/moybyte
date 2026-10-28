@@ -83,18 +83,34 @@ def test_fps_tap_toggles_the_hud_through_the_driver(tmp_path):
     assert ws.perf_hud is False, "tapping it again should turn the HUD off"
 
 
-def test_a_top_bar_tap_does_not_toggle_the_hud(tmp_path):
-    """A tap on the cart's top-bar tool row (HOME etc.) must not be mistaken for an
-    FPS tap -- the tap target is the bottom-right corner only."""
-    import runtime.console as C
+def test_a_tap_away_from_the_corner_does_not_toggle_the_hud(tmp_path):
+    """A tap anywhere but the bottom-right corner is the cart's, never an
+    FPS tap -- the tap target is that corner only."""
     ws, drv = _running_cart(tmp_path)
     for _ in range(3):
         drv.frame(DT)
-    x, y, w, h = C._HOME_BTN
-    # Tapping HOME leaves the desktop; assert it didn't flip perf_hud on the way.
-    drv.click(x + w // 2, y + h // 2)
+    drv.click(10, 10)
     drv.frame(DT)
     assert ws.perf_hud is False
+
+
+def test_the_chip_paints_its_own_rect_a_frame_and_allocates_its_parts_once(tmp_path):
+    """GAPS 54: the chip and its card are one native draw over arrays made
+    once, the rect they cover patched under them every frame."""
+    ws, drv = _running_cart(tmp_path)
+    ws.perf_hud = True
+    hud = ws.perf_ui
+    args, box = hud._args, hud._box
+    patched = []
+    real = ws.patch_cart_frame
+    ws.patch_cart_frame = lambda *r: (patched.append(r), real(*r))
+    for _ in range(3):
+        drv.frame(DT)
+    assert hud._args is args and hud._box is box
+    assert patched and patched[-1] == tuple(box)
+    cv = ws.canvas
+    x, y, w, h = patched[-1]
+    assert x + w <= cv.w and y + h <= cv.h and w > 0 and h > 0
 
 
 def test_hud_does_not_force_an_idle_redraw(tmp_path):

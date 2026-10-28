@@ -104,6 +104,8 @@ def _px(buf):
 # The script both sides run. Kept as data so the CPython side and the
 # MicroPython side cannot drift into testing different things.
 OPS = """
+fill_spans(buf, 16, 8, spans, -1, 0, 0, -1, pal565, 0, 0, 0, 0, 16, 8)
+fill_spans(buf, 16, 8, spans, 2, 3, -1, 0x2468, None, 1, 2, 1, 1, 15, 7)
 fill_rect(buf, 16, 2, 1, 5, 3, 0xABCD)
 fill_rect(buf, 16, -3, 0, 6, 1, 0x1234)
 fill_rect(buf, 16, 13, 5, 9, 2, 0x00F0)
@@ -131,6 +133,9 @@ blit565_scale(buf, 16, 8, -4, -2, src, 4, 4, 3)
 blit565_scale(buf, 16, 8, 11, 5, src, 4, 4, 2)
 blit565_scale(buf, 16, 8, 3, 1, src, 4, 4, 1)
 blit565_scale(buf, 16, 8, 1, 2, src, 4, 4, 0)
+blit565_resize(buf, 16, 8, 1, 1, 6, 6, src, 4, 4, 0, 0, 16, 8)
+blit565_resize(buf, 16, 8, 2, 0, 5, 3, src, 4, 4, 0, 0, 16, 8)
+blit565_resize(buf, 16, 8, 9, 2, 7, 5, src, 4, 4, 1, 1, 15, 7)
 text(buf, 16, 8, msg, 0, 0, 0xf81f, font, 65, 1, 0, 0, 0, 0, 16, 8)
 text(buf, 16, 8, msg, -3, 1, 0x07e0, font, 65, 1, 0, 0, 0, 0, 16, 8)
 text(buf, 16, 8, msg, 4, 1, 0x8f1f, font, 65, 1, 2, 1, 3, 2, 12, 6)
@@ -159,6 +164,11 @@ text(buf, 16, 8, msg, 2, 1, 0x9cd3, font, 65, 3, 0, 0, 1, 1, 15, 7)
 #
 # Comments are allowed from here on; both sides skip them (`_op_lines`).
 CLAMP_OPS = """
+# -- backdrop: the whole surface, an origin with a clip, a refusal, an overhang
+backdrop(buf, 16, 0, 0, 16, 8, bdrec, 0x1234, 0, 0, 0, 16, 8)
+backdrop(buf, 16, 3, 2, 10, 5, bdrec, 0x4321, 1, 2, 1, 15, 7)
+backdrop(buf, 16, 0, 0, 16, 8, bdbad, 0x1111, 0, 0, 0, 16, 8)
+backdrop(buf, 16, -4, -3, 24, 12, bdrec, 0x2222, 0, 0, 0, 17, 9)
 # -- fill: the whole point of its `cap` argument -----------------------------
 fill(buf, 999, 0x0777)
 fill(buf, -5, 0x1111)
@@ -188,6 +198,16 @@ scroll_rect(buf, 16, 0, 0, 16, 8, 0, 0)
 scroll_rect(buf, 16, 10, 4, 20, 20, -3, 2)
 scroll_rect(buf, 16, 0, 1, 16, 8, 1, 0)
 scroll_rect(buf, 16, 2, 2, 4, 4, 4, 0)
+# -- shift_rect: across buffers (the cap is the smaller picture's) and in place
+shift_rect(buf, src, 4, -1, 0, 5, 4, 1, -1)
+shift_rect(buf, src, 4, 0, 0, 4, 4, 0, 0)
+shift_rect(buf, buf, 16, 1, 1, 14, 7, -2, 1)
+shift_rect(buf, buf, 16, 0, 0, 16, 8, 0, 7)
+# -- copy_block: clamped to both pictures, one past each edge
+copy_block(buf, 16, src, 4, 13, 5, 0, 0, 4, 4)
+copy_block(buf, 16, src, 4, -1, -1, 0, 0, 4, 4)
+copy_block(buf, 16, src, 4, 2, 2, 1, 1, 4, 4)
+copy_block(buf, 16, src, 4, 0, 7, 0, 3, 4, 2)
 # -- blit565: the dcap/scap row clamps and the opaque lane's clipped span ----
 blit565(buf, 16, 99, 2, 2, src, 4, 4, -1, 0, 0, 16, 99)
 blit565(buf, 16, 8, 1, 1, src, 4, 99, -1, 0, 0, 16, 8)
@@ -203,6 +223,16 @@ blit565_scale(buf, 16, 8, 20, 2, src, 4, 4, 2)
 blit565_scale(buf, 16, 8, 1, 1, src, 4, 4, -3)
 blit565_scale(buf, 16, 8, -1, 6, src, 4, 4, 4)
 blit565_scale(buf, 16, 8, 1, 0, src, 4, 4, 4)
+# -- blit565_resize: odd alignment, the capacity guards, a short source ----
+blit565_resize(buf, 16, 8, -3, -2, 9, 9, src, 4, 4, 0, 0, 16, 8)
+blit565_resize(buf, 16, 99, 0, 0, 16, 99, src, 4, 4, 0, 0, 16, 99)
+blit565_resize(buf, 16, 8, 0, 0, 16, 8, src, 4, 99)
+blit565_resize(buf, 16, 8, 2, 2, 3, 3, src, 4, 4, -5, -5, 20, 20)
+blit565_resize(buf, 16, 8, 20, 2, 4, 4, src, 4, 4)
+blit565_resize(buf, 16, 8, 1, 1, 0, 4, src, 4, 4)
+blit565_resize(buf, 16, 8, 15, 7, 2, 2, src, 4, 4)
+blit565_resize(buf, 16, 8, 1, 1, 14, 6, src, 4, 4, 5, 2, 6, 7)
+blit565_resize(buf, 16, 8, 0, 0, 16, 8, src, 0, 4)
 # -- blit_window: the window clamped to BOTH buffers ------------------------
 blit_window(buf, 16, 8, big, 32, 4, 2)
 blit_window(buf, 16, 8, big, 32, -3, -3)
@@ -214,6 +244,18 @@ blit_window(buf, 16, 8, big, 0, 0, 0)
 blit_window(buf, 16, 8, big, 32, 17, 2)
 blit_window(buf, 16, 8, big, 32, 4, 9)
 blit_window(buf, 16, 8, big, 32, 2, -1)
+# -- the layer restore: its clamp and its copy (both engines refuse here) ----
+layer_init(lr, True)
+layer_blit(lr, buf, 16, 8, big, 32, 16, 4, 2, False)
+layer_blit(lr, buf, 16, 8, big, 32, 16, -5, 30, False)
+layer_blit(lr, buf, 16, 8, big, 32, 16, 40, 3, False)
+layer_blit(lr, buf, 16, 8, big, 16, 32, 0, 3, True)
+layer_kick(lr, buf)
+layer_blit(lr, buf, 16, 8, big, 16, 32, 0, 3, False)
+layer_blit(lr, buf, 16, 8, big, 16, 32, 0, 99, False)
+layer_drain(lr, False)
+layer_drain(lr, True)
+layer_meter(lr, False)
 # -- blit_indices: the icap row guard, and an index past the palette --------
 blit_indices(buf, 16, 8, 1, 0, idx, 5, 9, pal565)
 blit_indices(buf, 16, 8, 0, 0, idx, 5, 4, pal8)
@@ -222,6 +264,15 @@ blit_indices(buf, 16, 8, 14, 7, idx, 5, 4, pal565)
 blit_indices(buf, 16, 99, 2, 2, idx, 5, 4, pal565)
 blit_indices(buf, 16, 10, 1, 8, idx, 5, 4, pal565)
 blit_indices(buf, 16, 8, 3, 1, idx8, 4, 4, pal8)
+# -- blit_indices_scale: scales, source rects, the clip, the clamps ---------
+blit_indices_scale(buf, 16, 8, idx, 5, 4, 0, 0, 5, 4, 1, 1, 2, pal565, None, -1, 0, 0, 16, 8)
+blit_indices_scale(buf, 16, 8, idx, 5, 4, 1, 1, 3, 2, -1, 0, 3, pal565, palt, 7, 2, 1, 15, 7)
+blit_indices_scale(buf, 16, 8, idx, 5, 4, -2, -1, 9, 9, 3, 2, 2, pal565, None, 0, 0, 0, 16, 8)
+blit_indices_scale(buf, 16, 8, idx, 5, 4, 0, 0, 5, 4, -1, -1, 4, pal565, None, -1, -1, -1, 17, 9)
+blit_indices_scale(buf, 16, 99, idx, 5, 4, 0, 0, 5, 4, 0, 5, 1, pal565, None, -1, 0, 0, 16, 99)
+blit_indices_scale(buf, 16, 8, idx, 5, 9, 0, 2, 5, 9, 2, 0, 1, pal8, palt, -1, 0, 0, 16, 8)
+blit_indices_scale(buf, 16, 8, idx, 5, 4, 0, 0, 5, 4, 15, 7, 3, pal565, None, -1, 0, 0, 16, 8)
+blit_indices_scale(buf, 16, 8, idx, 5, 4, 0, 0, 5, 4, 2, 2, 0, pal565, None, -1, 0, 0, 16, 8)
 # -- blit_batch: a sheet that is not SPEC 3.2's, and the cursor/scale clamps -
 blit_batch(buf, 16, 8, quads, sheet, 64, 256, lut, palt, -1, 1, 0, 0, 0, 0, 16, 8)
 blit_batch(buf, 16, 8, quads, sheet, 128, 256, lut, palt, -1, 0, 0, 0, -4, -4, 99, 99)
@@ -324,7 +375,82 @@ shape(buf, 16, 8, 99, 0, 0, 4, 4, 0, 0, 0x0f0f, 0, -1, 0, 0, 0, 0, 16, 8)
 
 """
 
-OPS = OPS + CLAMP_OPS
+# The 2026-10 look's shapes (native/moy_gfx/moy_shape.c): both corner kinds,
+# rings and bevels, the masks, the three paints, clipping and the camera, and
+# shadows soft and hard with and without a hole. Each blends over what the
+# ops before it drew, so the two sides must agree on every read.
+SHAPE_OPS = """
+rrect(buf, 16, 1, 1, 14, 6, 3, 15, 0, -1, 0x7bef, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 0, 0, 16, 8, 4, 31, 0, -1, 0x18e3, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 2, 0, 12, 8, 3, 271, 0xf800, -1, 0x07e0, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 1, 1, 14, 6, 2, 517, 0xffff, 0x0000, None, 1, 1, 1, 1, 15, 7)
+rrect(buf, 16, 0, 0, 16, 8, 3, 47, 0, -1, 0x4a69, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 0, 0, 16, 8, 3, 79, 0, -1, 0x9cd3, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, -3, -2, 20, 12, 6, 15, 0, -1, (0, 0, -2, 12, 0, 0xf800, 1000, 0x001f), 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 0, 0, 16, 8, 2, 15, 0, -1, (1, 3, 0, 8, 0, 0x0000, 1000, 0xffff), 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 0, 0, 16, 8, 2, 15, 0, -1, (2, 0, 0, 8, 0, 0x1234, 500, 0x4321, 1000, 0x7777), 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 4, 4, 0, 5, 3, 15, 0, -1, 0x0f0f, 0, 0, 0, 0, 16, 8)
+rrect(buf, 16, 0, 0, 16, 8, 2, 271, 0xf800, -1, 0x07e0, 0, 0, 0, 0, 16, 8, (3, 2, 10, 4, 0))
+rrect(buf, 16, 1, 0, 14, 8, 3, 15, 0, -1, 0x1234, 1, -1, 0, 0, 16, 8, (4, 2, 8, 3, 2))
+shadow(buf, 16, 3, 2, 8, 4, 2, 3, 1, 1, 0x0000, 128, 0, None, 0, 0, 0, 0, 16, 8)
+shadow(buf, 16, 3, 2, 8, 4, 2, 3, 1, 1, 0x0000, 200, 0, (3, 2, 8, 4, 2), 0, 0, 0, 0, 16, 8)
+shadow(buf, 16, 2, 1, 10, 5, 3, 0, 2, 1, 0xf800, 255, 1, None, 1, 0, 1, 1, 15, 7)
+shadow(buf, 16, 0, 0, 16, 8, 0, 64, 0, 0, 0x001f, 255, 0, None, 0, 0, 0, 0, 16, 8)
+cover(buf, 16, 1, 1, 12, 6, src, 4, 0, 0, 4, 4, 3, 0, 0, 0, 0, 0, 16, 8)
+cover(buf, 16, -2, -1, 9, 9, src, 4, 1, 1, 3, 3, 4, 0, 0, 0, 0, 0, 16, 8)
+cover(buf, 16, 6, 2, 8, 5, src, 4, 1, 0, 2, 4, 2, 1, 1, 1, 2, 1, 15, 7)
+cover(buf, 16, 0, 0, 16, 8, src, 4, 2, 2, 3, 3, 0, 0, 0, 0, 0, 0, 16, 8)
+cover(buf, 16, 0, 0, 8, 8, src, 4, 2, 0, 4, 4, 3, 0, 0, 0, 0, 0, 16, 8)
+face(buf, 16, 1, 0, 12, 8, fface, 12, 4, src, 4, 4, 4, 0, None, 3, 0, 0x7bef, 0, 0, 0, 0, 16, 8)
+face(buf, 16, 2, 1, 10, 6, fface, 12, 0, None, 0, 0, 0, 0xf800, None, 3, 0, -1, 0, 0, 0, 0, 16, 8)
+face(buf, 16, -2, -1, 12, 9, fface, 12, 10, src, 4, 3, 3, 0, None, 4, 1, 0x1234, 1, 1, 1, 2, 15, 7)
+face(buf, 16, 0, 0, 8, 8, fface, 12, 16, None, 0, 0, 0, 0x07e0, fquads, 2, 0, 0xffff, 0, 0, 0, 0, 16, 8)
+tint(buf, src, 4, 0, 0, 4, 4, 0x1234, 77)
+tint(buf, src, 4, 1, 1, 3, 2, 0xffff, 255)
+tint(buf, src, 4, 2, 2, 3, 3, 0x0000, 128)
+tint(buf, src, 4, 1, 0, 3, 4, 0x4321, 200, 16, 5, 2)
+tint(buf, src, 4, 0, 0, 4, 4, 0x1111, 90, 16, 13, 0)
+"""
+
+# Paths and the outline faces (native/moy_gfx/moy_path.c): a triangle off
+# the pixel grid, a ring whose inner contour turns the other way (a hole),
+# the camera and a clip cutting through both, text in each face at sizes
+# off the pixel grid, and a face and a size the kernel refuses.
+PATH_OPS = """
+path_fill(buf, 16, ptri, ptri_ends, 0xf81f, 0, 0, 0, 0, 16, 8)
+path_fill(buf, 16, ring, ring_ends, 0x07e0, 0, 0, 0, 0, 16, 8)
+path_fill(buf, 16, ring, ring_ends, 0x001f, 2, 1, 3, 1, 12, 6)
+path_fill(buf, 16, ptri, bad_ends, 0xffff, 0, 0, 0, 0, 16, 8)
+path_text(buf, 16, 1, 600, 32, 448, word, 0x1234, 0, 0, 0, 0, 16, 8)
+path_text(buf, 16, 0, 450, -100, 400, word, 0xffff, 0, 0, 0, 0, 16, 8)
+path_text(buf, 16, 2, 520, 64, 300, word, 0x0000, 1, -1, 2, 1, 14, 7)
+path_text(buf, 16, 3, 520, 64, 300, word, 0x0000, 0, 0, 0, 0, 16, 8)
+path_text(buf, 16, 0, 0, 64, 300, word, 0x0000, 0, 0, 0, 0, 16, 8)
+splash(buf, 16, 0, 0, 16, 8, 0, spal, -1, nostack)
+splash(buf, 16, 2, 1, 12, 6, 1, spal, 500, word)
+splash(buf, 16, 0, 0, 16, 9, 0, spal, 0, word)
+"""
+
+# One byte a pixel (Paint's marks, moy_gfx_kernels.h): the arena read as a
+# 32 x 8 drawing. The capacity cases claim more rows than the arena holds; the
+# flood's second case has no stack, so it is the sweep alone.
+I8_OPS = """
+ifill(buf, 32, 8, 3, 1, 9, 4, 17)
+ifill(buf, 32, 8, -2, -1, 5, 3, 18)
+ifill(buf, 32, 12, 29, 6, 9, 9, 19)
+iline(buf, 32, 8, 2, 1, 27, 6, 1, 1, 20)
+iline(buf, 32, 8, 30, 0, 4, 7, 4, 1, 21)
+iline(buf, 32, 8, 5, 3, 5, 3, 7, 1, 22)
+iline(buf, 32, 8, -3, 7, 34, 2, 3, 0, 23)
+iline(buf, 32, 12, 16, 7, 16, 11, 5, 1, 26)
+icopy(buf, 32, 8, 20, 2, idx, 5, 4, 0, 0, 5, 4, -1, 0)
+icopy(buf, 32, 8, -1, 5, idx, 5, 4, 1, 1, 9, 9, 7, 60)
+icopy(buf, 32, 8, 0, 0, buf, 32, 8, 0, 0, 32, 8, 17, 24)
+iflood(buf, 32, 8, 0, 0, 255, marks, 8, 4, stack)
+iflood(buf, 32, 8, 12, 4, 254, marks, 8, 4, nostack)
+iflood(buf, 32, 12, 31, 7, 253, marks, 8, 4, stack)
+"""
+OPS = OPS + CLAMP_OPS + SHAPE_OPS + PATH_OPS + I8_OPS
 
 
 def _op_lines(text):
@@ -341,6 +467,14 @@ def _op_lines(text):
 # SPEC convention in a map and a fixture made only of it would compare two
 # empty framebuffers and call that agreement.
 FIXTURES = """
+# A backdrop (moy_backdrop.h): a dithered fill, a translucent circle, a
+# stepped wave and a wide pie; then the same with a kind the kernel refuses.
+bdrec = bytes([0, 2, 0, 255, 2, 0, 0, 0, 29, 43, 83, 232, 3, 126, 37, 83,
+               2, 0, 0, 128, 1, 0, 0, 255, 224, 102, 244, 1, 244, 1, 144, 1,
+               6, 1, 4, 255, 2, 6, 0, 0, 143, 208, 78, 232, 3, 90, 161, 42,
+               0, 0, 88, 2, 48, 2, 98, 2, 232, 3, 68, 2,
+               5, 0, 0, 255, 1, 5, 0, 0, 124, 200, 255, 244, 1, 244, 1, 44, 1, 30, 0, 44, 1])
+bdbad = bytes([9]) + bdrec[1:]
 sheet = bytearray(128 * 256)
 for _y in range(8):
     for _x in range(8):
@@ -354,6 +488,10 @@ for _y in range(8):
         sheet[_y * 128 + 8 + _x] = 7 if _x < 4 else 3           # tile 1
         sheet[_y * 128 + 16 + _x] = 9 if _y < 3 else 11         # tile 2
 lut = array.array("H", [(i * 0x0101) & 0xFFFF for i in range(64)])
+# A card's kept face, 12 words a row: a patterned picture, so a copied pixel
+# from the wrong row or column shows.
+fface = bytearray(array.array("H", [(i * 7919) & 0xFFFF for i in range(12 * 24)]))
+fquads = array.array("h", [0, 0, 2, 1, 5, 6, 6, 2, 2, 5])   # a letter in two corners
 palt = bytearray(64)
 palt[9] = 1                     # index 9 transparent: exercises the palt path
 quads = array.array("h", [0] * 12)
@@ -363,6 +501,7 @@ quads[0] = 12
 cells = bytearray([0, 1, 2, 1, 1, 0, 1, 2, 2, 1, 0, 1, 1, 2, 1, 0])
 idx = bytearray([(_i * 7) % 64 for _i in range(5 * 4)])
 pal565 = array.array("H", [(0xF000 - i * 0x0123) & 0xFFFF for i in range(64)])
+spans = array.array("h", [2, 1, 5, 2, 3,  -3, 4, 6, 3, 9,  12, 6, 9, 4, 17])
 # A synthetic petme128-LAYOUT font (8 bytes per glyph, column-major, LSB = top
 # row), not the real one: moy_font.py is a build artefact, and a fixture both
 # sides can BUILD cannot drift the way two staged copies of a blob can. Every
@@ -398,16 +537,31 @@ idx8 = bytearray([6, 7, 8, 9, 8, 0, 8, 63, 7, 8, 5, 8, 8, 8, 1, 8])
 # as many as the buffer actually holds (one here, not the 249 it claims).
 no_quads = array.array("h", [0, 0, 0, 0])
 over_quads = array.array("h", [999, 0, 0, 0, 5, 1, 1, 0])
+# The layer restore's state: room for either side's struct.
+lr = bytearray(64)
+ptri = array.array("i", [70, 60, 900, 140, 330, 450])
+ptri_ends = array.array("i", [3])
+bad_ends = array.array("i", [4])
+ring = array.array("i", [128, 64, 832, 64, 832, 448, 128, 448,
+                         256, 192, 256, 320, 704, 320, 704, 192])
+ring_ends = array.array("i", [4, 8])
+word = bytes([65, 98, 0xC3, 0xA9, 63])
+spal = bytes(array.array("H", [0xEF7E, 0x10A3, 0x5B2F, 0x49FA, 0xEF7E, 0x5B2F]))
+marks = bytearray(4)
+stack = bytearray(64)
+nostack = bytearray(0)
 """
 
-_FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565",
+_FIXTURE_NAMES = ("sheet", "lut", "palt", "quads", "cells", "idx", "pal565", "spans",
                   "font", "msg", "empty", "long", "big", "pal8", "idx8",
-                  "no_quads", "over_quads")
+                  "no_quads", "over_quads", "lr", "bdrec", "bdbad", "ptri", "ptri_ends",
+                  "bad_ends", "ring", "ring_ends", "word", "spal", "marks", "stack", "nostack",
+                  "fface", "fquads")
 
 
 def _fixtures():
     ns = {"array": __import__("array"), "bytearray": bytearray, "range": range,
-          "len": len}
+          "len": len, "bytes": bytes}
     exec(FIXTURES, ns)                         # noqa: S102 -- fixed text
     return {k: ns[k] for k in _FIXTURE_NAMES}
 
@@ -470,10 +624,12 @@ def _canvas_verbs():
 
 def test_the_binding_carries_every_verb_device_canvas_calls_outright():
     probed, required = _canvas_verbs()
-    # A floor on both, so a refactor that changes how the canvas names its
-    # kernel cannot turn this into a test of an empty set that still passes.
-    assert len(required) >= 12, sorted(required)
-    assert len(probed) >= 4, sorted(probed)
+    # A floor on the required set, so a refactor that changes how the canvas
+    # names its kernel cannot turn this into a test of an empty set that still
+    # passes. The one verb it may probe for is the gates' context, which the
+    # host's kernel does not have.
+    assert len(required) >= 16, sorted(required)
+    assert probed == {"make_draw_ctx"}, sorted(probed)
     missing = sorted(n for n in required if not callable(getattr(g, n, None)))
     assert not missing, (
         "device_canvas calls these on the kernel with no fallback, and the host "
@@ -482,25 +638,22 @@ def test_the_binding_carries_every_verb_device_canvas_calls_outright():
 
 
 def test_the_optional_libmoy_verbs_are_implemented_here_anyway():
-    """tri/sspr/tline/text/shape are PROBED by device_canvas, and here
-    regardless.
+    """tri/sspr/tline/text/shape were once PROBED by device_canvas, with a
+    Python lane behind each; since the glass pass every tier carries the
+    kernel, so device_canvas calls them outright and they are here.
 
-    Pinning the decision _SIGS records: "optional" on a board means "the board
-    would be slower", not "the host may diverge". If one of these were dropped
-    here the canvas would quietly take its Python fallback and the host would
-    stop exercising the same raster the glass runs -- green, and no longer
-    testing anything.
+    Pinning the decision _SIGS records: the host may not diverge. If one of
+    these were dropped here the first draw would raise.
     """
-    probed, _ = _canvas_verbs()
-    for name in ("tri", "sspr", "tline", "text", "shape"):
-        assert name in probed, "%s is no longer probed by device_canvas" % name
+    _, required = _canvas_verbs()
+    for name in ("tri", "sspr", "tline", "shape", "fill_spans"):
+        assert name in required, "%s is no longer called by device_canvas" % name
         assert callable(getattr(g, name, None)), name
 
 
-# copy_async/copy_wait are the refusal pair -- they move no pixels, so an op
-# script entry for them would compare two unchanged framebuffers. They have
-# test_the_async_pair_refuses_so_callers_take_the_sync_path instead.
-_NO_PIXELS = frozenset(("copy_async", "copy_wait"))
+# Every verb the canvas calls is in the op script.
+# Called by the canvas and drawing nothing: the word order the shapes blend in.
+_NO_PIXELS = frozenset({"shape_order", "path_width", "path_metrics"})
 
 
 def test_the_op_script_exercises_every_verb_the_canvas_depends_on():
@@ -517,6 +670,26 @@ def test_the_op_script_exercises_every_verb_the_canvas_depends_on():
     assert not uncovered, (
         "device_canvas depends on these and the host/device op script never "
         "runs them, so nothing compares the two compilations: %s" % uncovered)
+
+
+def test_the_faces_measure_alike_in_both_compilations(tmp_path):
+    """path_width and path_metrics draw nothing, so the op script cannot
+    compare them: the same words in each face, at sizes off the pixel grid,
+    measured by both kernels."""
+    exe = _require_unix_mp()
+    cases = [(f, size, w) for f in (0, 1, 2) for size in (450, 3072, 4608, 6144)
+             for w in (b"Once upon a time...", b"AVATAR Wq", b"caf\xc3\xa9 \xe2\x80\xa6")]
+    script = tmp_path / "faces.py"
+    script.write_text("import moy_gfx\n"
+                      "for f, size, w in %r:\n"
+                      "    print(moy_gfx.path_width(f, size, w))\n"
+                      "for f in (0, 1, 2, 3):\n"
+                      "    print(tuple(moy_gfx.path_metrics(f)))\n" % (cases,))
+    out = subprocess.run([exe, str(script)], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stdout + out.stderr
+    host = [str(g.path_width(f, size, w)) for f, size, w in cases]
+    host += [str(tuple(g.path_metrics(f))) for f in (0, 1, 2, 3)]
+    assert out.stdout.split("\n")[:len(host)] == host
 
 
 def test_fill_respects_the_buffer_capacity():
@@ -562,6 +735,67 @@ def test_blit565_colorkey_skips_only_the_keyed_pixel():
     assert _px(buf)[:4] == (1, 0, 3, 4)
 
 
+def _resize_ref(px, dw, dh, dx, dy, tw, th, src, sw, sh, cx0, cy0, cx1, cy1):
+    """blit565_resize stated in Python: each target pixel inside the rect,
+    the clip and the buffer takes the source pixel under its centre, in the
+    kernel's 16.16 steps (moy_gfx_kernels.h)."""
+    px = list(px)
+    if tw <= 0 or th <= 0 or sw <= 0 or sh <= 0:
+        return px
+    sx = (sw << 16) // tw
+    sy = (sh << 16) // th
+    for ty in range(max(dy, cy0, 0), min(dy + th, cy1, dh)):
+        row = ((ty - dy) * sy + (sy >> 1)) >> 16
+        if row * sw + sw > len(src):
+            continue
+        for tx in range(max(dx, cx0, 0), min(dx + tw, cx1, dw)):
+            col = ((tx - dx) * sx + (sx >> 1)) >> 16
+            px[ty * dw + tx] = src[row * sw + col]
+    return px
+
+
+# (dx, dy, tw, th, sw, sh, clip): up, down, odd and even starts, a clip that
+# cuts each side, origins off every edge -- what a card in the focus band
+# meets as it slides through the band's clip.
+_RESIZE_CASES = [
+    (0, 0, 40, 24, 13, 9, None),
+    (3, 1, 33, 31, 16, 16, None),
+    (-7, -5, 50, 40, 16, 16, None),
+    (1, 2, 12, 7, 31, 23, None),
+    (2, 3, 20, 20, 20, 20, None),
+    (5, 4, 25, 25, 20, 20, (6, 5, 27, 19)),
+    (30, 20, 50, 50, 7, 5, None),
+    (-60, 0, 61, 40, 9, 9, None),
+    (0, -39, 64, 40, 9, 9, (1, 0, 63, 40)),
+    (11, 0, 1, 40, 4, 4, None),
+]
+
+
+@pytest.mark.parametrize("case", _RESIZE_CASES)
+def test_blit565_resize_matches_its_python_statement(case):
+    dx, dy, tw, th, sw, sh, clip = case
+    dw, dh = 64, 40
+    cx0, cy0, cx1, cy1 = clip or (0, 0, dw, dh)
+    src = [(i * 2654435761) & 0xFFFF for i in range(sw * sh)]
+    before = [0x5A5A] * (dw * dh)
+    buf = bytearray(struct.pack("<%dH" % len(before), *before))
+    g.blit565_resize(buf, dw, dh, dx, dy, tw, th,
+                     bytearray(struct.pack("<%dH" % len(src), *src)), sw, sh,
+                     cx0, cy0, cx1, cy1)
+    expect = _resize_ref(before, dw, dh, dx, dy, tw, th, src, sw, sh,
+                         cx0, cy0, cx1, cy1)
+    assert list(_px(buf)) == expect
+
+
+def test_blit565_resize_at_one_to_one_is_a_copy():
+    src = bytearray(struct.pack("<16H", *range(1, 17)))
+    buf = _blank()
+    g.blit565_resize(buf, W, H, 3, 2, 4, 4, src, 4, 4)
+    ref = _blank()
+    g.blit565(ref, W, H, 3, 2, src, 4, 4, -1)
+    assert bytes(buf) == bytes(ref)
+
+
 def test_scroll_rect_moves_pixels_and_leaves_the_vacated_span():
     buf = bytearray(struct.pack("<%dH" % (W * H), *range(W * H)))
     g.scroll_rect(buf, W, 0, 0, W, H, 2, 0)
@@ -605,13 +839,53 @@ def test_blit_window_keeps_the_screen_stride_when_the_source_runs_out():
             (src_w, src_h, sx, sy)
 
 
-def test_the_async_pair_refuses_so_callers_take_the_sync_path():
-    """Not a stub for its own sake: returning False puts device_canvas on the
-    same branch a board takes when its DMA driver declines the copy, so the
-    host exercises a path the device also has."""
-    buf = _blank()
-    assert g.copy_async(buf, 0, buf, 0, 4) is False
-    assert g.copy_wait() is True
+def test_the_layer_restore_takes_a_predicted_copy_only_when_nothing_moved():
+    """The kernels' mg_lr_* (#54 Stage 2), driven with the NOW engine, whose
+    copy lands as it starts: a kick paints the predicted window, a draw of the
+    same layer at the same cam_y takes it, and an edited layer, a moved camera
+    or a forgotten prediction copies again. The default engine refuses, which
+    latches the restore synchronous: the branch a board takes when its DMA
+    driver declines the copy."""
+    W2, H2 = 4, 2
+    layer = bytearray(W2 * 6 * 2)
+    for i in range(len(layer)):
+        layer[i] = (i * 13 + 1) & 0xFF
+    row = W2 * 2
+
+    def window(y):
+        return bytes(layer[y * row:(y + H2) * row])
+
+    lr = bytearray(g.LR_SIZE)
+    screen = bytearray(W2 * H2 * 2)
+    g.layer_engine(True)
+    try:
+        g.layer_init(lr, True)
+        g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 1, False)
+        assert bytes(screen) == window(1)
+        assert g.layer_kick(lr, screen) is True       # predicted, and in flight
+        screen[:] = b"\xee" * len(screen)            # poisoned after the kick
+        g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 1, False)
+        assert bytes(screen) == b"\xee" * len(screen), "the hit copied again"
+        # Edited since the kick: copied.
+        g.layer_kick(lr, screen)
+        screen[:] = b"\xee" * len(screen)
+        g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 1, True)
+        assert bytes(screen) == window(1)
+        # The camera moved: copied, from the new row.
+        g.layer_kick(lr, screen)
+        g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 3, False)
+        assert bytes(screen) == window(3)
+        # Forgotten: nothing in flight, nothing predicted.
+        g.layer_drain(lr, True)
+        assert g.layer_kick(lr, screen) is False
+        assert g.layer_meter(lr)[1:] == (0, True)
+    finally:
+        g.layer_engine(False)
+    # The refusing engine latches the restore synchronous at its first kick.
+    g.layer_init(lr, True)
+    g.layer_blit(lr, screen, W2, H2, layer, W2, 6, 0, 1, False)
+    assert g.layer_kick(lr, screen) is False
+    assert g.layer_meter(lr)[2] is False
 
 
 DRIVER = r'''
@@ -637,21 +911,44 @@ def _shot():
 
 def fill(*a): moy_gfx.fill(*a); _shot()
 def fill_rect(*a): moy_gfx.fill_rect(*a); _shot()
+def backdrop(*a): moy_gfx.backdrop(*a); _shot()
+def fill_spans(*a): moy_gfx.fill_spans(*a); _shot()
 def scroll_rect(*a): moy_gfx.scroll_rect(*a); _shot()
+def shift_rect(*a): moy_gfx.shift_rect(*a); _shot()
+def copy_block(*a): moy_gfx.copy_block(*a); _shot()
 def blit_window(*a): moy_gfx.blit_window(*a); _shot()
+def layer_init(*a): moy_gfx.layer_init(*a); _shot()
+def layer_blit(*a): moy_gfx.layer_blit(*a); _shot()
+def layer_kick(*a): moy_gfx.layer_kick(*a); _shot()
+def layer_drain(*a): moy_gfx.layer_drain(*a); _shot()
+def layer_meter(*a): moy_gfx.layer_meter(*a); _shot()
 def blit565(*a): moy_gfx.blit565(*a); _shot()
 def blit565_scale(*a): moy_gfx.blit565_scale(*a); _shot()
+def blit565_resize(*a): moy_gfx.blit565_resize(*a); _shot()
 def text(*a): moy_gfx.text(*a); _shot()
+def ifill(*a): moy_gfx.ifill(*a); _shot()
+def iline(*a): moy_gfx.iline(*a); _shot()
+def icopy(*a): moy_gfx.icopy(*a); _shot()
+def iflood(*a): moy_gfx.iflood(*a); _shot()
 def blit_batch(*a): moy_gfx.blit_batch(*a); _shot()
 def blit_map(*a): moy_gfx.blit_map(*a); _shot()
+def path_fill(*a): moy_gfx.path_fill(*a); _shot()
+def path_text(*a): moy_gfx.path_text(*a); _shot()
+def splash(*a): moy_gfx.splash(*a); _shot()
 def line(*a): moy_gfx.line(*a); _shot()
 def circ(*a): moy_gfx.circ(*a); _shot()
 def circb(*a): moy_gfx.circb(*a); _shot()
 def tri(*a): moy_gfx.tri(*a); _shot()
 def blit_indices(*a): moy_gfx.blit_indices(*a); _shot()
+def blit_indices_scale(*a): moy_gfx.blit_indices_scale(*a); _shot()
 def sspr(*a): moy_gfx.sspr(*a); _shot()
 def tline(*a): moy_gfx.tline(*a); _shot()
 def shape(*a): moy_gfx.shape(*a); _shot()
+def rrect(*a): moy_gfx.rrect(*a); _shot()
+def shadow(*a): moy_gfx.shadow(*a); _shot()
+def cover(*a): moy_gfx.cover(*a); _shot()
+def face(*a): moy_gfx.face(*a); _shot()
+def tint(*a): moy_gfx.tint(*a); _shot()
 
 @OPS@
 '''

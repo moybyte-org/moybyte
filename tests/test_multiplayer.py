@@ -13,6 +13,7 @@ in-process LoopbackNet + a fake extra-controller source.
 import json
 import sys
 from pathlib import Path
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -31,6 +32,9 @@ class _StubInput:
 
     def held(self, n):
         return n in self._held
+
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
 
     def pressed(self, n):
         return n in self._pressed
@@ -223,14 +227,13 @@ def _mp_cart(carts_dir, title, src):
                             edit=[])
     man_path = Path(cart["path"]) / "manifest.json"
     man = json.loads(man_path.read_text())
-    man["permissions"] = ["multiplayer"]
+    man["moybyte"]["permissions"] = ["multiplayer"]
     man_path.write_text(json.dumps(man))
     return moy_carts.scan(carts_dir)
 
 
 def _run_cart(ws, title):
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it["title"] == title)
+    select_on_home(ws, title)
     ws.open()
 
 
@@ -282,7 +285,7 @@ def test_normal_cart_has_no_net_names(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     moy_carts.create("Plain", carts_dir, type="game",
                      src="def _update(dt):\n    pass\ndef _draw():\n    cls(0)\n")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.set_items(shelf(carts_dir))
     _run_cart(ws, "Plain")
     assert ws.screen == "desktop"
     assert "net" not in ws.ns and "on_net" not in ws.ns

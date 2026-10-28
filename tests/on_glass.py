@@ -106,6 +106,50 @@ def wifi_status_is_readable(board):
     assert st.get("wifi") is None or isinstance(st["wifi"], list)
 
 
+def the_kernel_verifies_a_signed_manifest(board):
+    """The updater's verifier, the image's own build of native/moy_net/
+    moy_ota.c: a manifest signed with the test key is accepted, one whose
+    signed field was changed is refused, and an unsigned one is refused where
+    a signature is required. The version is a beta's build epoch, the width a
+    board's printf once lost (2026-10-07): the canonical text is built by hand."""
+    import json as _json
+    import sys as _sys
+
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from test_ota_signing import TEST_KEYS, sign_with_test_key
+
+    m = {"board": "x", "channel": "unstable", "version": 1785665581,
+         "size": 4292512, "url": "https://example/app.bin",
+         "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"}
+    m["sig"] = sign_with_test_key(m)
+
+    def judge(man):
+        return board.pyval("__import__('moy_net').ota_judge(%r, None, True, %r)"
+                           % (_json.dumps(man), TEST_KEYS), strict=True)
+
+    assert judge(m) is None
+    assert judge(dict(m, version=1785665582)) == "bad signature"
+    assert judge(dict(m, sig="ff" * 256)) == "bad signature"
+    assert judge({k: v for k, v in m.items() if k != "sig"}) == "unsigned update"
+
+
+def the_internal_volume_is_the_kernels(board):
+    """The internal flash is the kernel's littlefs instance
+    (native/moy_store/moy_kvfs.c), mounted at "/" by the VM's start as a KVfs
+    -- not a VfsLfs2 the port's _boot.py made -- and the store's C resolves it
+    there: a file the C writes reads back through Python."""
+    mounts = board.pyval("[(type(m[0]).__name__, m[1]) "
+                         "for m in __import__('vfs').mount()]", strict=True)
+    assert ("KVfs", "/") in [tuple(m) for m in mounts], mounts
+    mounted, err, blocks, bsize = board.pyval("__import__('moy_store').kvol()",
+                                              strict=True)
+    assert mounted and err == 0 and bsize == 4096 and blocks > 0
+    assert board.pyval("(__import__('moy_store').write('/.kvol_probe', 'k'), "
+                       "open('/.kvol_probe').read(), "
+                       "__import__('os').remove('/.kvol_probe'))[1]",
+                       strict=True) == "k"
+
+
 def wifi_is_off_at_rest(board):
     """The radio is a LEASE (2026-09-07): a console that is not serving the
     web, updating, in the WIFI panel, running a network cart or in a match
@@ -118,6 +162,34 @@ def wifi_is_off_at_rest(board):
     assert st.get("wifi") is None or st["wifi"][0] is False, st.get("wifi")
 
 
+def the_bar_wifi_widget_opens_the_wifi_panel(board):
+    """A tap on the bar's wifi widget opens Settings' WIFI panel -- the one
+    wifi implementation -- as a popover hung from the widget, in console mode
+    and desktop mode alike (docs/shell_layout_2026-10.md §8, look step 33),
+    holding the radio; closing the popover lets the radio go."""
+    _home_desk(board)
+    cells = board.pyval("[(b[1], [(c[0], c[1]) for c in b[3]]) for b in ws.layout.bars]",
+                        strict=True)
+    xy = None
+    for rect, cs in cells:
+        for name, (x, y, w, h) in cs:
+            if name == "wifi" and xy is None:
+                xy = (rect[0] + x + w // 2, rect[1] + y + h // 2)
+    assert xy is not None, "no wifi widget on the bar: %r" % (cells,)
+    board.tap(*xy, settle=0.6)
+    board.drain(1.5)
+    try:
+        got = board.pyval("(ws.sysmenu.open, ws.sysmenu.widget)", strict=True)
+        assert tuple(got) == (True, "wifi"), got
+        assert "settings" in (board.state().get("wifi_held") or []), \
+            "the panel does not hold the radio"
+    finally:
+        board.pyexec("ws.sysmenu.close()\nws.popover_touch()", strict=True)
+        board.drain(1.0)
+    assert board.state().get("wifi_held") == [], "the radio outlived the panel"
+    _home_desk(board)
+
+
 def every_app_claims_one_cart(board):
     """Every registered system app claims exactly one cart. Naming the wrong
     ones is the point: the failure this catches is seed/title drift in ONE
@@ -128,6 +200,971 @@ def every_app_claims_one_cart(board):
     assert not wrong, "app cart claims off (seed/title drift?): %r" % wrong
 
 
+def paint_saves_a_stroke_on_leaving(board, budget_ms=3000):
+    """One stroke on a blank page, then home: Paint saves it, in time, and the
+    console that drew it is the one still running. A blank page is the
+    picture encoder's worst case -- every window position matches to the end
+    -- and a matcher that walked its whole window per position held the VM
+    past the task watchdog there and restarted the console. Every save the
+    drawing takes (the leave's, or the idle autosave's if it came first) is
+    timed on the board, and the file must read back as the page."""
+    _home_desk(board)
+    assert board.pyval("ws.open_app(ws._apps_by_id['artwork'])", strict=True)
+    board.drain(2.5)
+    try:
+        board.pyexec(
+            "import time\n"
+            "a = ws.artwork_app\n"
+            "a._fresh_doc(a.doc.W, a.doc.H)\n"
+            "ws._paint_probe = 1\n"
+            "ws._paint_saves = []\n"
+            "def _paint_timed(*args, _save=a._art.save):\n"
+            "    t = time.ticks_ms()\n"
+            "    ok = _save(*args)\n"
+            "    ws._paint_saves.append((ok, time.ticks_diff(time.ticks_ms(), t)))\n"
+            "    return ok\n"
+            "a._art.save = _paint_timed\n"
+            "def _paint_leave():\n"
+            "    ws._paint_pix = bytes(ws.artwork_app.doc.pix)\n"
+            "    ws.go_home()\n"
+            "    return 1\n"
+            "def _paint_glass(px, py):\n"
+            "    w = getattr(ws.wm, '_wins', {}).get('artwork')\n"
+            "    if w is None or w.ctx is None:\n"
+            "        return a._to_glass((px, py))\n"
+            "    was = a.layout\n"
+            "    a.layout = w.ctx.artwork_layout\n"
+            "    try:\n"
+            "        gx, gy = a._to_glass((px, py))\n"
+            "    finally:\n"
+            "        a.layout = was\n"
+            "    cx, cy, _cw, _ch = w.content_rect()\n"
+            "    return (cx + gx, cy + gy)\n"
+            "ws.mark_dirty()", strict=True)
+        board.drain(1.0)
+        assert board.pyval("bytes(ws.artwork_app.doc.pix) == bytes((ws.artwork_app.doc.pix[0],))"
+                           " * len(ws.artwork_app.doc.pix)", strict=True), "the page is not blank"
+        # Where the drawing stands on the glass: a window's layout is
+        # installed only around its dispatch, so a probe between frames reads
+        # the root's and must put the window's in for the question.
+        (x0, y0), (x1, y1) = board.pyval(
+            "(lambda a, g: (g(a.doc.W // 3, a.doc.H // 2), g(2 * a.doc.W // 3, a.doc.H // 2)))"
+            "(ws.artwork_app, ws._g['_paint_glass'])", strict=True)
+        board.swipe(x0, y0, x1, y1, frames=20)
+        board.pyval("ws._g['_paint_leave']()", timeout=60)
+        board.drain(1.0)
+        assert board.pyval("getattr(ws, '_paint_probe', 0)") == 1, (
+            "the console restarted while Paint saved")
+        saves = board.pyval("ws._paint_saves", strict=True)
+        assert saves and all(ok for ok, _ms in saves), "Paint did not save: %r" % (saves,)
+        worst = max(ms for _ok, ms in saves)
+        assert worst < budget_ms, "a save held the console %d ms" % worst
+        kind, name = board.pyval("(ws.artwork_app._art.doc_kind(), "
+                                 "ws.artwork_app._art.doc_name())", strict=True)
+        assert name, "the stroke was not saved under a name"
+        assert board.pyval("ws._paint_pix != bytes((ws._paint_pix[0],)) * len(ws._paint_pix)",
+                           strict=True), "the swipe drew nothing"
+        same = board.pyval(
+            "(lambda f: (lambda d: d is not None and bytes(d[2]) == ws._paint_pix)"
+            "(f.decode_image(f.load(%r, %r)[0])))(ws.artwork_app._art._files)" % (kind, name),
+            strict=True)
+        assert same, "the saved drawing does not read back as the page"
+        board.pyval("ws.artwork_app._art._files.delete(%r, %r) and None" % (kind, name),
+                    strict=True)
+        return worst
+    finally:
+        board.pyval("[delattr(o, k) for o, k in ((ws.artwork_app._art, 'save'), "
+                    "(ws, '_paint_pix'), (ws, '_paint_probe'), (ws, '_paint_saves')) "
+                    "if k in o.__dict__] and None")
+        _home_desk(board)
+
+
+def _home_desk(board):
+    """Home, and on a windowed tier the desk again: there home is the
+    fullscreen Library, and the next test expects the desk it booted to."""
+    board.pyexec("ws.go_home()", strict=True)
+    board.drain(1.5)
+    if board.state().get("desk") is False:
+        board.pyexec("ws.open_desk()", strict=True)
+        board.drain(1.0)
+
+
+# The painter (docs/theming_2026-09.md §4.4): tests/test_ui_painter.py's
+# scenes without text, each (surface, metrics, rect) on a 16x12 canvas
+# cleared to 9, as one installed package's `desk` surface.
+PAINTER_SCENES = (
+    ("raised, fill 7", {}, (2, 2, 6, 5)),
+    ("sunken, fill 7", {}, (2, 2, 6, 5)),
+    ("etched, fill 7", {}, (2, 2, 6, 5)),
+    ("bevel2, fill 7", {}, (2, 2, 6, 5)),
+    ("raised, fill 7, border 12", {}, (2, 2, 6, 5)),
+    ("fill 7, shadow", {}, (2, 2, 6, 5)),
+    ("fill 7, border 12", {"radius": 1}, (2, 2, 8, 6)),
+    ("fill 7, border 12", {"radius": 2}, (2, 2, 8, 6)),
+    ("raised, fill 7, border 12", {"radius": 3}, (2, 2, 8, 8)),
+    ("dither 7/0", {}, (2, 2, 4, 4)),
+    ("dither 7/0", {}, (3, 2, 9, 4)),
+    ("pinstripe 7/0", {}, (2, 1, 11, 7)),
+    ("gradient 7/0", {}, (0, 0, 16, 12)),
+)
+
+
+def _painter_src(text, metrics):
+    import json
+    return json.dumps({"format": 2, "name": "painted", "metrics": metrics,
+                       "surfaces": {"desk": {"rest": text}}}).encode()
+
+
+def painter_host_frames():
+    """The host's index frame of each PAINTER_SCENES scene."""
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    from runtime import ui_draw
+    from runtime.chrome import theme_colors
+    from runtime.host_canvas import indices_of, make_system_canvas
+    th = theme_colors("night")
+    out = []
+    try:
+        for text, metrics, rect in PAINTER_SCENES:
+            assert moy_ui.theme_install(_painter_src(text, metrics))[0] == 0
+            ui_draw.use_shape("painted")
+            cv = make_system_canvas(16, 12)
+            cv.cls(9)
+            assert ui_draw.paint(cv, th, rect, "desk")
+            out.append(bytes(indices_of(cv)))
+    finally:
+        ui_draw.use_shape(None)
+    return out
+
+
+_PAINTER_HELPER = """
+import ui_draw, chrome, moy_ui, device_canvas, binascii
+def _paint_scene(src, rect):
+    cv = (ws.sys_canvas or ws.canvas).new_layer(16, 12)
+    try:
+        assert moy_ui.theme_install(src)[0] == 0
+        ui_draw.use_shape('painted')
+        cv.cls(9)
+        assert ui_draw.paint(cv, chrome.theme_colors('night'), rect, 'desk')
+        px = device_canvas.to_indices(cv._buf, cv._wire)
+        return binascii.hexlify(bytes(px)).decode()
+    finally:
+        cv.release()
+        ui_draw.use_shape(ws.look.theme_name)
+"""
+
+
+def painter_matches_host(board):
+    """Every painter scene, painted by this board's moy_ui into a scratch
+    layer and read back as palette indices, is the host's frame byte for
+    byte: the painter, its corner masks and the pattern lane are one C body
+    on every tier. The live theme's shape is put back after each scene."""
+    want = painter_host_frames()
+    board.pyexec(_PAINTER_HELPER, strict=True)
+    for (text, metrics, rect), frame in zip(PAINTER_SCENES, want):
+        got = board.pyval("ws._g['_paint_scene'](%r, %r)" % (_painter_src(text, metrics), rect),
+                          strict=True)
+        assert bytes.fromhex(got) == frame, (text, metrics, rect)
+    import moy_ui
+    name = board.pyval("ws.look.theme_name", strict=True)
+    assert board.pyval("__import__('moy_ui').theme_shape(%r)[2]" % name,
+                       strict=True) == moy_ui.theme_shape(name)[2]
+
+
+# -- the sprite lane (docs/theming_2026-09.md §4.6) -------------------------------
+
+SPRITE_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "fixtures", "themes", "sprig.moy", "parts.moygfx")
+# (what, args, font scale) into a 48x40 frame over index 9: `paint` a part in
+# a state into a rect, `frame` a window (rect, title_h, active), its title "".
+SPRITE_SCENES = (
+    ("paint", ("button", "rest", (2, 3, 40, 30)), 1),
+    ("paint", ("button", "pressed", (5, 5, 12, 9)), 1),
+    ("paint", ("button", "on", (-6, -4, 30, 20)), 2),
+    ("paint", ("desk.icon", "rest", (4, 2, 36, 36)), 1),
+    ("paint", ("desk.icon", "rest", (1, 1, 46, 38)), 2),
+    ("frame", ((2, 2, 42, 30), 14, True), 1),
+    ("frame", ((0, 1, 44, 34), 12, False), 1),
+)
+_SPRITE_THEME = b'{"format":2,"name":"spr","colors":{"dark":{"accent":12,"title":3}}}'
+
+
+def sprite_host_frames():
+    """The host's index frame of each SPRITE_SCENES scene, drawn from the
+    fixture sheet under a theme that names no font, surface or depth."""
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    from runtime import ui
+    from runtime import ui_draw
+    from runtime.chrome import theme_colors
+    from runtime.host_canvas import indices_of, make_system_canvas
+    with open(SPRITE_FIXTURE, "rb") as f:
+        sheet = f.read()
+    out = []
+    try:
+        assert moy_ui.theme_install(_SPRITE_THEME)[0] == 0
+        ui_draw.use_shape("spr")
+        ui_draw.use_depth("spr", False)
+        assert ui_draw.sheet_load(sheet) == 0
+        th = theme_colors("spr")
+        for what, args, fs in SPRITE_SCENES:
+            cv = make_system_canvas(48, 40, font_scale=fs)
+            cv.cls(9)
+            if what == "paint":
+                assert ui_draw.paint(cv, th, args[2], args[0], args[1])
+            else:
+                ui_draw.frame(cv, th, args[0], args[1], "", args[2], True, fs)
+            out.append(bytes(indices_of(cv)))
+    finally:
+        ui_draw.sheet_clear()
+        ui_draw.use_shape(None)
+        ui_draw.use_depth(None, False)
+        moy_ui.theme_uninstall()
+    return out
+
+
+_SPRITE_HELPER = """
+import ui_draw, chrome, moy_ui, device_canvas, binascii
+def _scale(cv, fs):
+    cv.font_scale = fs
+    cv._gate_state[device_canvas._ST_FONT_SCALE] = fs
+def _sprite_scene(src, what, args, fs):
+    sheet = _SPRITE_SHEET
+    cv = (ws.sys_canvas or ws.canvas).new_layer(48, 40)
+    was = getattr(cv, 'font_scale', 1)
+    try:
+        assert moy_ui.theme_install(src)[0] == 0
+        ui_draw.use_shape('spr')
+        ui_draw.use_depth('spr', False)
+        assert ui_draw.sheet_load(sheet) == 0
+        _scale(cv, fs)
+        th = chrome.theme_colors('spr')
+        cv.cls(9)
+        if what == 'paint':
+            assert ui_draw.paint(cv, th, args[2], args[0], args[1])
+        else:
+            ui_draw.frame(cv, th, args[0], args[1], '', args[2], True, fs)
+        px = device_canvas.to_indices(cv._buf, cv._wire)
+        return binascii.hexlify(bytes(px)).decode()
+    finally:
+        _scale(cv, was)
+        cv.release()
+        chrome.forget_themes()
+        ws.look._sheet_key = None
+        ws.look.set_theme(ws.look.theme_name, persist=False)
+"""
+
+
+def sprites_match_host(board):
+    """Every sprite scene, drawn by this board's moy_ui from the fixture
+    sheet into a scratch layer and read back as palette indices, is the
+    host's frame byte for byte: the sheet reader, the slot table and the
+    blit are one C body on every tier. Each scene draws in the fixture
+    theme's shape and depth (none), whatever the live theme's are; the live
+    theme, its shape, depth and sheet are put back after each scene."""
+    want = sprite_host_frames()
+    with open(SPRITE_FIXTURE, "rb") as f:
+        sheet = f.read()
+    board.pyexec("_SPRITE_SHEET = %r\n" % sheet + _SPRITE_HELPER, strict=True)
+    for (what, args, fs), frame in zip(SPRITE_SCENES, want):
+        got = board.pyval("ws._g['_sprite_scene'](%r, %r, %r, %r)"
+                          % (_SPRITE_THEME, what, args, fs), strict=True)
+        assert bytes.fromhex(got) == frame, (what, args, fs)
+
+
+# The picker kernel's cases, run as this text on the host and on a board: a
+# sheet from an LCG both tiers compute, then per case the same ground, state
+# and call drawn through sspr into one layer and blit_indices_scale into
+# another. A case answers whether the two layers are byte-equal on that tier,
+# and the crc32 of the scaled one's palette indices, which the host's must
+# equal.
+_PICKER_CASES = """
+import binascii, device_canvas
+class _PkSheet:
+    pass
+def _pk_sheet():
+    s = _PkSheet()
+    s.w, s.h = 128, 256
+    pix = bytearray(128 * 256)
+    v = 7
+    for i in range(len(pix)):
+        v = (v * 1103515245 + 12345) & 0x7FFFFFFF
+        r = v >> 16
+        pix[i] = 0 if r % 10 < 3 else r % 64
+    s.pix = pix
+    return s
+def _pk_state(cv, st):
+    cv.pal()
+    cv.palt()
+    cv.clip()
+    cv.camera()
+    for y in range(0, 72, 5):
+        for x in range(0, 96, 7):
+            cv.rect(x, y, 7, 5, (x // 7 + y // 5) % 64)
+    if st == 1:
+        cv.clip(9, 7, 70, 51)
+        cv.camera(-5, 3)
+    elif st == 2:
+        for i in range(0, 64, 3):
+            cv.pal(i, (i * 5 + 1) % 64)
+        cv.palt(17, True)
+def _pk_cases(make, scales=(1, 2, 3, 5)):
+    sheet = _pk_sheet()
+    out = []
+    for scale in scales:
+        for st in (0, 1, 2):
+            for ck in (-1, 0):
+                for sx, sy, sw, sh, dx, dy in ((0, 0, 8, 8, 3, 2),
+                                               (5, 40, 21, 13, -7, 9),
+                                               (100, 230, 28, 26, 60, 40)):
+                    a = make(96, 72)
+                    b = make(96, 72)
+                    try:
+                        _pk_state(a, st)
+                        _pk_state(b, st)
+                        a.sspr(sheet, sx, sy, sw, sh, dx, dy, sw * scale, sh * scale, ck)
+                        b.blit_indices_scale(sheet, sx, sy, sw, sh, dx, dy, scale, ck)
+                        same = bytes(a._buf) == bytes(b._buf)
+                        px = device_canvas.to_indices(b._buf, b._wire)
+                        out.append((same, binascii.crc32(bytes(px)) & 0xFFFFFFFF))
+                    finally:
+                        for c in (a, b):
+                            if hasattr(c, 'release'):
+                                c.release()
+    return out
+"""
+
+
+def picker_kernel_matches_sspr(board):
+    """The picker kernel (moy_gfx.blit_indices_scale, this board's C) draws
+    sspr's pixels on glass at every scale, state and colorkey of the cases,
+    and its frames are the host's: the scaled lane is one body on every tier
+    (docs/scroll_and_text_2026-10.md §13)."""
+    from runtime import host_canvas
+    host_canvas.install()
+    env = {}
+    exec(_PICKER_CASES, env)                       # noqa: S102 -- fixed text
+    want = env["_pk_cases"](host_canvas.make_system_canvas)
+    assert all(same for same, _ in want)
+    board.pyexec(_PICKER_CASES, strict=True)
+    got = []
+    for scale in (1, 2, 3, 5):      # one scale a command: all 72 trip an S3's task watchdog late in a suite
+        got += board.pyval("ws._g['_pk_cases'](lambda w, h: "
+                           "(ws.sys_canvas or ws.canvas).new_layer(w, h), (%d,))" % scale,
+                           timeout=60.0, strict=True)
+    assert [same for same, _ in got] == [True] * len(want)
+    assert [crc for _, crc in got] == [crc for _, crc in want]
+
+
+# shift_last and copy_last_into on the live root (docs/scroll_and_text_2026-10.md
+# §3.2, §13): a pattern frame presented, then the verb into the next one,
+# held to a reference the snippet builds from row slices. Everything runs
+# inside one `py` exchange, between two of the console's frames; the desk is
+# repainted after.
+_SHIFT_CASES = r"""
+def _sl_rows(W, k):
+    base = bytearray(4 * W)
+    for i in range(2 * W):
+        v = (i * 2654435761 + k * 40503) & 0xFFFF
+        base[2 * i] = v & 255
+        base[2 * i + 1] = v >> 8
+    return memoryview(base)
+
+def _sl_paint(buf, W, H, k):
+    rows = _sl_rows(W, k)
+    n = 2 * W
+    for y in range(H):
+        o = ((y * 7 + k * 5) % W) * 2
+        buf[y * n:(y + 1) * n] = rows[o:o + n]
+
+def _sl_block(W, H, x, y, w, h, dx, dy):
+    x0, y0, x1, y1 = max(0, x), max(0, y), min(W, x + w), min(H, y + h)
+    tx0, tx1 = x0 + max(dx, 0), x1 + min(dx, 0)
+    ty0, ty1 = y0 + max(dy, 0), y1 + min(dy, 0)
+    if tx0 >= tx1 or ty0 >= ty1:
+        return None
+    return (tx0, ty0, tx0 - dx, ty0 - dy, tx1 - tx0, ty1 - ty0)
+
+def _sl_present(comp):
+    comp.flush()
+    pp = getattr(comp, 'present_pending', None)
+    if pp is not None:
+        pp()
+
+def _sl_engine():
+    try:
+        import moy_ppa
+        return moy_ppa
+    except ImportError:
+        return None
+
+def _sl_check(back, W, H, kd, prev, b, extra=None):
+    # Each row of `back` against the pattern painted into it, with the block
+    # taken from `prev` (the last frame's buffer, unwritten since): no
+    # picture-sized copy, which the S3s' heaps cannot spare.
+    rows = _sl_rows(W, kd)
+    n = 2 * W
+    for y in range(H):
+        o = ((y * 7 + kd * 5) % W) * 2
+        want = bytearray(rows[o:o + n])
+        if b is not None and b[1] <= y < b[1] + b[5]:
+            s0 = ((y - b[1] + b[3]) * W + b[2]) * 2
+            want[b[0] * 2:(b[0] + b[4]) * 2] = bytes(prev[s0:s0 + 2 * b[4]])
+        if extra is not None and y == 0:
+            want[0:2] = bytes(prev[0:2])
+        if bytes(back[y * n:(y + 1) * n]) != want:
+            return False
+    return True
+
+def _sl_cases(cases, k=0):
+    cv = ws.sys_canvas or ws.canvas
+    comp = cv._comp
+    W, H = comp.size()
+    ppa = _sl_engine()
+    rot = getattr(comp, 'rotated', False)
+    stats = ppa is not None and hasattr(ppa, 'fbcpy_stats')
+    out = []
+    for (x, y, w, h, dx, dy) in cases:
+        k += 1
+        prev = comp.framebuffer()
+        _sl_paint(prev, W, H, k)
+        _sl_present(comp)
+        refused = None
+        if rot:
+            refused = comp.shift_last(x, y, w, h, dx, dy) is False
+            ppa.sync()
+        back = comp.framebuffer()
+        _sl_paint(back, W, H, k + 500)      # the destination's lines dirty in the cache
+        n0 = ppa.fbcpy_stats()[0] if stats else None
+        ok = cv.shift_last(x, y, w, h, dx, dy)
+        flying = ppa.fbcpy_busy() if stats else None
+        if k % 2:
+            cv.shift_fence()
+        else:
+            comp.copy_last(0, 0, 1, 1)      # a verb that reads the buffer fences it
+        b = _sl_block(W, H, x, y, w, h, dx, dy)
+        same = _sl_check(back, W, H, k + 500, prev, b, k % 2 == 0 or None)
+        dma = ppa.fbcpy_stats()[0] - n0 if stats else None
+        out.append((bool(ok), same, refused, flying, dma))
+    return out
+
+def _sl_into():
+    cv = ws.sys_canvas or ws.canvas
+    comp = cv._comp
+    W, H = comp.size()
+    ppa = _sl_engine()
+    rot = getattr(comp, 'rotated', False)
+    out = []
+    prev = comp.framebuffer()
+    _sl_paint(prev, W, H, 77)
+    _sl_present(comp)
+    if rot:
+        ppa.sync()
+    for lw in (96, 97):                     # whole cache-line rows, and not
+        lay = cv.new_layer(lw, 61)
+        try:
+            for (x, y, lx, ly) in ((10, 20, 0, 0), (W - 50, H - 30, 3, 4), (-8, -5, 0, 0)):
+                lay._buf[:] = bytes(len(lay._buf))
+                ok = cv.copy_last_into(lay, x, y, lw, 61, lx, ly)
+                want = bytearray(len(lay._buf))
+                c0, c1 = max(lx, lx - x), min(lw, lx + W - x)
+                for r in range(ly, 61):
+                    sy = y + r - ly
+                    if 0 <= sy < H and c1 > c0:
+                        a = (r * lw + c0) * 2
+                        s0 = (sy * W + x + c0 - lx) * 2
+                        want[a:a + 2 * (c1 - c0)] = bytes(prev[s0:s0 + 2 * (c1 - c0)])
+                out.append((bool(ok), bytes(lay._buf) == want, None, None, None))
+        finally:
+            lay.release()
+    comp.flush()                            # the rotated one's noted damage goes
+    return out
+"""
+
+
+def shift_last_matches_the_reference(board, p4=False, rotated=False):
+    """shift_last on the root, every sign and an edge clip, against the
+    reference; copy_last_into into a layer, clipped. On a P4 each shift is
+    the 2D-DMA's, queued (flying after the call) and fenced by shift_fence or
+    by the next verb that reads the buffer, read back through destination
+    lines the CPU had cached; on the rotated compositor a shift answers False
+    while the frame's rotate flies. On an S3 the copy runs while the feeder
+    ships its source."""
+    w, h = board.pyval("(ws.sys_canvas or ws.canvas)._comp.size()", strict=True)
+    rw, rh = min(400, w - 80), min(220, h - 60)
+    cases = [(40, 30, rw, rh, 0, 8), (40, 30, rw, rh, 0, -8), (40, 30, rw, rh, 0, 1),
+             (40, 30, rw, rh, 0, -1), (40, 30, rw, rh, 6, 0), (40, 30, rw, rh, -6, 0),
+             (40, 30, rw, rh, 5, -37), (40, 30, rw, rh, 0, rh - 1), (40, 30, rw, rh, 0, 0),
+             (-12, -9, rw, rh, 0, 13), (w - rw + 30, h - rh + 20, rw, rh, -3, -11),
+             (0, 0, w, h, 0, 24)]
+    board.pyexec(_SHIFT_CASES, strict=True)
+    got = []
+    try:
+        for i, case in enumerate(cases):     # one a command: the loop runs between
+            got += board.pyval("ws._g['_sl_cases'](%r, %d)" % ([case], i), timeout=60.0,
+                               strict=True)
+        got += board.pyval("ws._g['_sl_into']()", timeout=60.0, strict=True)
+    finally:
+        board.pyexec("ws._dirty = True", strict=True)
+        _home_desk(board)
+    shifts, into = got[:len(cases)], got[len(cases):]
+    assert [ok for ok, *_ in shifts] == [True] * len(cases), shifts
+    assert [same for _, same, *_ in shifts] == [True] * len(cases), shifts
+    assert into and all(ok and same for ok, same, *_ in into), into
+    if p4:
+        assert all(fly and dma == 1 for *_, fly, dma in shifts[:9]), shifts
+    if rotated:
+        assert all(refused for _, _, refused, *_ in shifts), shifts
+
+
+def sheet_corpus(n, seed=11):
+    """The fixture sheet, its cuts and a mutant per draw: a nibble or a
+    byte flipped anywhere, a line break dropped or doubled, bytes inserted
+    (a space, a CR, a letter past f) or cut; and the caps' edges."""
+    import random
+    with open(SPRITE_FIXTURE, "rb") as f:
+        good = f.read()
+    rng = random.Random(seed)
+    w = 128
+    out = [good, b"", b"\n", good[:w], good[:w + 1], good.upper(), good.replace(b"\n", b"\r\n"),
+           b"0" * w + b"\n", b"0" * (w + 1), b"1\n" * 256, b"1\n" * 257,
+           b" " * (256 * (w + 2)), b" " * (256 * (w + 2) + 1)]
+    alphabet = b"0123456789abcdefABCDEFgz \r\n\t\x00\xff"
+    while len(out) < n:
+        b = bytearray(good)
+        for _m in range(rng.randint(1, 4)):
+            op = rng.randrange(5)
+            i = rng.randrange(len(b))
+            if op == 0:
+                b[i] = rng.choice(alphabet)
+            elif op == 1:
+                b[i] = rng.randrange(256)
+            elif op == 2:
+                del b[i]
+            elif op == 3:
+                b[i:i] = bytes([rng.choice(alphabet)])
+            else:
+                b = b[:i]
+        out.append(bytes(b))
+    return out
+
+
+# -- the font lane (docs/theming_2026-09.md §4.7) ---------------------------------
+
+FONT_FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "fixtures", "fonts", "sample6x9.fnt")
+# Version 2 cuts of tests/fixtures/fonts/inter_subset.ttf at 13 px, 1, 2 and 4
+# bpp (tools/make_font.py face; tests/test_make_font.py rebuilds them).
+FONT_FIXTURES_V2 = tuple(os.path.join(os.path.dirname(FONT_FIXTURE), "sample_v2_%d.fnt" % b)
+                         for b in (1, 2, 4))
+FONT_PROBE = "Hi, there! 0123 ~{|} AVTa \u00e9\u2212\u2026"
+
+
+def font_corpus(n, seed=7):
+    """The sample fonts (version 1 and 2), their cuts and a mutant per draw:
+    truncations, a byte flipped anywhere (header, tables, glyphs) or in the
+    header, the index and the records, bytes inserted or dropped (every
+    table then lands off its offset)."""
+    import random
+    goods = []
+    for p in (FONT_FIXTURE,) + FONT_FIXTURES_V2:
+        with open(p, "rb") as f:
+            goods.append(f.read())
+    rng = random.Random(seed)
+    out = [goods[0], goods[0][:15], goods[0][:16], goods[0][:-1], b"", b"MFNT",
+           goods[0] + b"\0"] + goods[1:] + [g[:-1] for g in goods[1:]]
+    while len(out) < n:
+        b = bytearray(goods[len(out) % len(goods)])
+        for _m in range(rng.randint(1, 3)):
+            if len(b) < 16:
+                break
+            op = rng.randrange(6)
+            i = rng.randrange(len(b))
+            if op == 0:
+                b[i] = rng.randrange(256)
+            elif op == 1:
+                b[rng.randrange(16)] = rng.randrange(256)
+            elif op == 2:
+                del b[i]
+            elif op == 3:
+                b[i:i] = bytes([rng.randrange(256)])
+            elif op == 4:
+                b[rng.randrange(min(len(b), 16 + 256 + 8 * 32))] = rng.randrange(256)
+            else:
+                b = b[:i]
+        out.append(bytes(b))
+    return out
+
+
+def font_answer(mod, src):
+    """What a moy_ui answers for one font file: the load's code, then for a
+    loaded font its metrics and the probe's width at scales 1 and 2, the
+    font freed again. The id is left out: a slot's generation is history."""
+    rc, fid = mod.font_load(src)
+    if rc != 0:
+        return (rc, None, None)
+    try:
+        return (rc, mod.font_info(fid),
+                (mod.text_width(FONT_PROBE, 1, fid), mod.text_width(FONT_PROBE, 2, fid)))
+    finally:
+        mod.font_free(fid)
+
+
+_FONT_HELPER = """
+import moy_ui, binascii
+def _font_probe(hx, off):
+    b = bytearray(off) + binascii.unhexlify(hx)
+    rc, fid = moy_ui.font_load(memoryview(b)[off:])
+    if rc != 0:
+        return (rc, None, None)
+    try:
+        return (rc, moy_ui.font_info(fid), (moy_ui.text_width(%r, 1, fid),
+                                            moy_ui.text_width(%r, 2, fid)))
+    finally:
+        moy_ui.font_free(fid)
+""" % (FONT_PROBE, FONT_PROBE)
+
+
+def fonts_match_host(board, n=48):
+    """A fuzzed font corpus loaded by this board's moy_ui answers as the
+    host's does: every malformed, truncated or misaligned file refused with
+    the host's code and no fault, every good one measured alike. Each file
+    is handed over at an odd offset as well, so the reader meets a source
+    that is not word-aligned (an S3 faults on an unaligned 16- or 32-bit
+    load; the host and wasm do not)."""
+    import binascii
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    board.pyexec(_FONT_HELPER, strict=True)
+    for src in font_corpus(n):
+        want = font_answer(moy_ui, src)
+        hx = binascii.hexlify(src).decode()
+        for off in (0, 1):
+            got = board.pyval("ws._g['_font_probe'](%r, %d)" % (hx, off), strict=True)
+            assert got == want, (off, len(src), got, want)
+    assert board.pyval("__import__('moy_ui').font_info(0)", strict=True) == moy_ui.font_info(0)
+
+
+# -- the glyph lane (docs/look_2026-10.md step 4) ---------------------------------
+
+# A fuzzed run of prints and labels in version 2 fonts, `glyph_cases(make, out,
+# sources)`: `make(w, h, fs)` a system canvas, `out(i, bytes)` each case's
+# buffer, `sources` the font files' bytes. Python both interpreters run alike
+# (its generator is its own), so the host and a board draw the same cases.
+GLYPH_CASES = r'''
+class _GlyphLcg:
+    """One generator both interpreters step alike."""
+
+    def __init__(self, seed):
+        self.s = seed
+
+    def getrandbits(self, n):
+        self.s = (self.s * 1103515245 + 12345) & 0x7FFFFFFF
+        return (self.s >> 8) & ((1 << n) - 1)
+
+
+_grng = _GlyphLcg(@SEED@)
+GLYPH_TEXTS = ("AVTa yo., 0123", "Hi \u00e9\u2212\u2026", "Wi-Fi  Tray", "x")
+
+
+def glyph_cases(make, out, sources):
+    was_ui, was_print = moy_ui.font("ui")[0], moy_ui.print_font()
+    fids = [moy_ui.font_load(src)[1] for src in sources]
+    for i in range(@N@):
+        fs = 1 + _grng.getrandbits(1)
+        cv = make(96, 32, fs)
+        cv.cls(_grng.getrandbits(6))
+        for _k in range(3):
+            cv.rect(_grng.getrandbits(6), _grng.getrandbits(5), 30, 12, _grng.getrandbits(6))
+        fid = fids[_grng.getrandbits(8) % len(fids)]
+        moy_ui.use_font("ui", fid)
+        moy_ui.print_font(fid)
+        s = GLYPH_TEXTS[_grng.getrandbits(8) % len(GLYPH_TEXTS)]
+        cv.camera(_grng.getrandbits(4) - 8, _grng.getrandbits(3) - 4)
+        if _grng.getrandbits(1):
+            cv.clip(_grng.getrandbits(4), _grng.getrandbits(3), 70, 24)
+        cv.print(s, _grng.getrandbits(5) - 8, _grng.getrandbits(4) - 4, _grng.getrandbits(6))
+        cv.camera()
+        cv.clip()
+        bg = _grng.getrandbits(6)
+        cv.rect(2, 10, 90, 20, bg)
+        shadow = None
+        if _grng.getrandbits(1):
+            shadow = (_grng.getrandbits(6), 1 + _grng.getrandbits(8) % 255, 1, 1)
+        moy_ui.label(cv, (2, 10, 90, 20), s, _grng.getrandbits(6), 0,
+                     bg if _grng.getrandbits(1) else None, shadow)
+        cv.flush_batch()
+        out(i, bytes(cv._buf))
+    moy_ui.print_font(was_print)
+    moy_ui.use_font("ui", was_ui)
+    for f in fids:
+        moy_ui.font_free(f)
+'''
+
+
+def glyph_lane_matches_host(board, tier, n=24):
+    """The board's glyph lane draws the host's bytes: GLYPH_CASES over three
+    faces of the tier's set, each case's buffer by CRC, the host's words
+    byte-swapped where the board's wire order is canonical (the P4's DPI)."""
+    import json
+    import zlib
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    from runtime import appearance
+    from runtime.host_canvas import make_system_canvas
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "native", "moy_ui", "fonts", "set.json")) as f:
+        names = [n + ".fnt" for n in json.load(f)["tiers"][tier][:3]]
+    cases = GLYPH_CASES.replace("@SEED@", "11").replace("@N@", str(n))
+    swapped = board.pyval("__import__('device_canvas').WIRE_SWAPPED", strict=True)
+    board.pyexec(cases + """
+import device_canvas as _dc, appearance as _ap, binascii as _ba
+
+
+class _GlyphComp:
+    def __init__(self, w, h):
+        self._w, self._h = w, h
+        self._buf = bytearray(w * h * 2)
+
+    def size(self):
+        return (self._w, self._h)
+
+    def framebuffer(self):
+        return self._buf
+
+    def gfx(self):
+        import moy_gfx
+        return moy_gfx
+
+
+def _glyph_run():
+    got = []
+    glyph_cases(lambda w, h, fs: _dc.SystemCanvas(_GlyphComp(w, h), font_scale=fs),
+        lambda i, b: got.append(_ba.crc32(b)), [_ap.font_file(n) for n in %r])
+    return got
+""" % (names,), strict=True)
+    got = board.pyval("ws._g['_glyph_run']()", strict=True, timeout=120)
+    want = []
+
+    def crc(i, b):
+        if not swapped:
+            w = bytearray(b)
+            w[0::2], w[1::2] = b[1::2], b[0::2]
+            b = bytes(w)
+        want.append(zlib.crc32(b))
+
+    g = {"moy_ui": moy_ui}
+    exec(cases, g)
+    g["glyph_cases"](lambda w, h, fs: make_system_canvas(w, h, font_scale=fs), crc,
+             [appearance.font_file(n) for n in names])
+    assert list(got) == want
+
+
+# -- the theme layout (docs/shell_layout_2026-10.md §5) ---------------------------
+
+def layout_corpus(n, seed=5):
+    """Theme packages around `layout`: §5's fuzz cases (a string for bars,
+    five bars, two on one edge, a size of 0 and of 10000, an unknown widget,
+    a 200-character text, no `menu`, `zone` in a vertical bar only), a full
+    two-bar layout, and byte mutants of them."""
+    import json
+    import random
+    req = ["menu", "zone", "close"]
+    cases = ["top",
+             [{"edge": e, "left": req} for e in ("top", "bottom", "left", "right", "top")],
+             [{"edge": "top", "left": req}, {"edge": "top", "right": ["clock"]}],
+             [{"edge": "bottom", "size": 0, "left": req}],
+             [{"edge": "right", "size": 10000, "left": ["clock"] + req}],
+             [{"edge": "top", "left": req + ["teapot", "text"], "text": ["x" * 200]}],
+             [{"edge": "top", "left": ["zone", "close"]}],
+             [{"edge": "top", "left": ["menu", "close"]}, {"edge": "left", "left": ["zone"]}],
+             [{"edge": "top", "size": 20, "left": ["title", "text"], "right": req,
+               "text": ["moy"]},
+              {"edge": "bottom", "size": 22,
+               "left": ["menu", "separator", "chips", "zone", "spacer", "text"],
+               "right": ["close", "wifi", "battery", "clock"], "text": ["a!"]}]]
+    good = [json.dumps({"format": 2, "name": "fz", "inherits": "berry",
+                        "layout": {"bars": c}}).encode() for c in cases]
+    rng = random.Random(seed)
+    out = list(good)
+    while len(out) < n:
+        b = bytearray(rng.choice(good))
+        for _m in range(rng.randint(1, 3)):
+            if not b:
+                break                  # truncated to nothing: nothing to mutate
+            i = rng.randrange(len(b))
+            op = rng.randrange(3)
+            if op == 0:
+                b[i] = rng.choice(b'{}[]":,0123456789-x ')
+            elif op == 1:
+                del b[i]
+            else:
+                b = b[:i]
+        out.append(bytes(b))
+    return out
+
+
+_LAYOUT_HELPER = """
+import moy_ui, binascii
+def _layout_probe(hx):
+    rc, notes = moy_ui.theme_install(binascii.unhexlify(hx))
+    return (rc, notes, moy_ui.theme_layout(moy_ui.theme_installed()) if rc == 0 else None)
+"""
+
+
+def layouts_match_host(board, n=40):
+    """A fuzzed corpus of theme layouts installed by this board's moy_ui
+    answers as the host's does: the same refusal or the same notes, and the
+    same bars after the loader's caps, clamps and required-set rule."""
+    import binascii
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    board.pyexec(_LAYOUT_HELPER, strict=True)
+    for src in layout_corpus(n):
+        rc, notes = moy_ui.theme_install(src)
+        want = (rc, notes, moy_ui.theme_layout(moy_ui.theme_installed()) if rc == 0 else None)
+        got = board.pyval("ws._g['_layout_probe'](%r)" % binascii.hexlify(src).decode(),
+                          strict=True)
+        assert got == want, (src, got, want)
+    for name in moy_ui.themes():
+        assert board.pyval("__import__('moy_ui').theme_layout(%r)" % name,
+                           strict=True) == moy_ui.theme_layout(name), name
+
+
+_CUSTOM_HELPER = """
+import moy_ui
+def _custom_digest(src, accents, tints):
+    try:
+        from binascii import crc32
+        h, kind = 0, 'crc'
+    except ImportError:
+        import hashlib
+        h, kind = hashlib.sha256(), 'sha'
+    n = 0
+    for a in accents:
+        for t in tints:
+            rc, b = moy_ui.theme_custom(src, a, t)
+            chunk = bytes([rc]) + (b or b'')
+            n += len(chunk)
+            if kind == 'crc':
+                h = crc32(chunk, h)
+            else:
+                h.update(chunk)
+    return (kind, n, h & 0xffffffff if kind == 'crc' else __import__('binascii').hexlify(h.digest()).decode())
+"""
+
+
+def theme_custom_matches_host(board):
+    """Every seed x accent (presets too) x tint (docs/theming_2026-09.md §4.10): this
+    board's moy_ui writes `custom`'s theme.json byte for byte as the host's
+    does, each seed's answers digested on the board."""
+    import binascii
+    import hashlib
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    for verb in ("theme_accents", "theme_presets", "theme_tints"):
+        assert board.pyval("__import__('moy_ui').%s()" % verb, strict=True) == \
+            getattr(moy_ui, verb)(), verb
+    board.pyexec(_CUSTOM_HELPER, strict=True)
+    accents = [None] + [a for _n, a, _d in moy_ui.theme_accents() + moy_ui.theme_presets()]
+    tints = [None] + [n for n, _r in moy_ui.theme_tints()]
+    for name in moy_ui.themes():
+        kind, n, got = board.pyval("ws._g['_custom_digest'](%r, %r, %r)" % (name, accents, tints),
+                                   strict=True, timeout=120)
+        chunks = [bytes([rc]) + (b or b"") for rc, b in
+                  (moy_ui.theme_custom(name, a, t) for a in accents for t in tints)]
+        if kind == "crc":
+            want = 0
+            for ch in chunks:
+                want = binascii.crc32(ch, want)
+        else:
+            want = hashlib.sha256(b"".join(chunks)).hexdigest()
+        assert (n, got) == (sum(map(len, chunks)), want), name
+
+
+@contextlib.contextmanager
+def known_look(board, theme="moy", variant="dark"):
+    """The console in a look the HOST can reproduce, and back the way it was
+    found after: a check that holds the board's theme to the host's computes
+    the host's side from a seeded theme, and a board's saved `custom` is its
+    owner's own (its font family, tints and accent live in the board's
+    store), which no fresh host store holds -- the font roles and the pixels
+    of a page differ for that reason alone. Nothing is saved: the pin and the
+    restore both go through `set_theme(persist=False)`, so the board's saved
+    theme and variant are what they were and `custom` comes back from its
+    stored file."""
+    was = board.pyval("(ws.look.theme_name, ws.look.theme_variant)", strict=True)
+    board.pyexec("ws.look.set_theme(%r, persist=False, variant=%r)" % (theme, variant),
+                 strict=True)
+    try:
+        yield
+    finally:
+        board.pyexec("ws.look.set_theme(%r, persist=False, variant=%r)" % tuple(was),
+                     strict=True)
+
+
+def the_theme_font_is_installed(board):
+    """The live theme's faces (docs/theming_2026-09.md §4.7) are what this
+    board's shell draws in: each role holds the face `appearance.role_fonts`
+    names on the host for the same theme, variant and metric class, loaded
+    once, and the print font is `ui`'s. Read under `known_look`: a saved
+    `custom` names faces of its own. The bytes and metrics of each face
+    are `the_font_set_is_the_tiers`'."""
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    from runtime import appearance
+    roles = ("ui", "title", "mono")
+    with known_look(board):
+        name, variant, desk, ids, pf, loaded = board.pyval(
+            "(lambda a, u: (ws.look.theme_name, ws.look.theme_variant,"
+            " ws.metric_class == __import__('layout_base').DESK,"
+            " [u.font(r)[0] for r in %r], u.print_font(),"
+            " sorted((v, k[0], k[1]) for k, v in a._FONTS.items())))"
+            "(__import__('appearance'), __import__('moy_ui'))" % (roles,), strict=True)
+    want = appearance.role_fonts(name, variant, desk)
+    on = {fid: (pkg, f) for fid, pkg, f in loaded}
+    assert len(on) == len(loaded), loaded
+    got = {r: on.get(fid) for r, fid in zip(roles, ids) if fid}
+    assert got == {r: want[r] for r in roles if r in want}, (name, variant, desk)
+    assert ids[0] != 0 and pf == ids[0], (ids, pf)
+
+
+def the_font_set_is_the_tiers(board, tier):
+    """The image carries its tier's font set (docs/look_2026-10.md step 3):
+    the faces set.json names for `tier`, each byte for byte the host's, with
+    its family's licence, and each one loads and measures as on the host."""
+    import binascii
+    import json
+    import runtime  # noqa: F401  (registers the host's moy_ui)
+    import moy_ui
+    from runtime import appearance
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "native", "moy_ui", "fonts", "set.json")) as f:
+        want = json.load(f)["tiers"][tier]
+    got = board.pyval("list(__import__('fontset').names())", strict=True)
+    assert list(got) == want
+    for n in want:
+        host = appearance.font_file(n + ".fnt")
+        crc = board.pyval("__import__('binascii').crc32(__import__('appearance').font_file(%r))"
+                          % (n + ".fnt"), strict=True)
+        assert crc == binascii.crc32(host), n
+    lic = board.pyval("len(__import__('appearance').font_file(%r))" % (want[0] + ".txt"),
+                      strict=True)
+    assert lic == len(appearance.font_file(want[0] + ".txt"))
+    probe = FONT_PROBE
+    got = board.pyval(
+        "[(lambda r: (r[0], __import__('moy_ui').font_info(r[1]), __import__('moy_ui')"
+        ".text_width(%r, 1, r[1]), __import__('moy_ui').font_free(r[1])))"
+        "(__import__('moy_ui').font_load(__import__('appearance').font_file(n + '.fnt')))"
+        " for n in %r]" % (probe, want[:3]), strict=True, timeout=60)
+    for n, (rc, info, w, _freed) in zip(want, got):
+        rc2, fid = moy_ui.font_load(appearance.font_file(n + ".fnt"))
+        try:
+            assert (rc, tuple(info), w) == (rc2, moy_ui.font_info(fid),
+                                            moy_ui.text_width(probe, 1, fid)), n
+        finally:
+            moy_ui.font_free(fid)
+
+
 def py_probe_reaches_the_console(board):
     line = board.cmd("py ws._frames_drawn", wait_for="PY ")
     assert line is not None and line.startswith("PY "), line
@@ -135,6 +1172,76 @@ def py_probe_reaches_the_console(board):
     # The loop objects are in the py scope (comp/boot/pump).
     line = board.cmd("py boot.done", wait_for="PY ")
     assert line == "PY True", line
+
+
+def a_quiet_console_collects_its_garbage(board):
+    """The quiet collect (native/moy_kernel/moy_loop_board.c): a heap left
+    more than 3/4 allocated is collected in a frame that drew nothing, a
+    second after the last line and the last drawn frame, with nothing of the
+    console's asking for it. The fill is measured against the heap it ends
+    in: a fragmented heap grows an area under it, and a fill sized from the
+    heap before then leaves it half allocated, which is no premise at all.
+    The fill is 512-byte objects (a 496-byte buffer and its header), sizes
+    the allocator's run hints serve: a bigger one walks the table from the
+    first long free run, every allocation over the ones before it, and after
+    the suite's 19 MB heap 1000-byte pieces held the frame past the task
+    watchdog."""
+    import time
+    board.pyexec("import gc\n"
+                 "gc.collect()\n"
+                 "ws._qg = []\n"
+                 "for _ in range(8):\n"
+                 "    n = (gc.areas()[1] * 7 // 8 - gc.mem_alloc()) // 512\n"
+                 "    if n <= 0:\n"
+                 "        break\n"
+                 "    ws._qg.extend(bytearray(496) for _ in range(n))\n"
+                 "ws._qr = (gc.areas()[1], gc.mem_alloc())\n"
+                 "ws._qg = None", strict=True)
+    held, used = board.pyval("ws._qr", strict=True)
+    assert used * 4 > held * 3, "the fill left the heap %d of %d bytes" % (used, held)
+    c0 = board.pyval("__import__('gc').pauses()[0]", strict=True)
+    time.sleep(3.0)
+    c1 = board.pyval("__import__('gc').pauses()[0]", strict=True)
+    assert c1 > c0, "no collection in a quiet pause over a heap %d of %d bytes" % (used, held)
+
+
+def a_leaked_session_leaves_the_panel_flushing(board):
+    """The bus rule of the app ABI's sessions (docs/kernel_appabi_2026-10.md
+    section 2.6): on the T-Deck the card shares the panel's SPI host, and the
+    gate that drains the flush is held only around one store op, never by a
+    session. A files session begun and never ended, with a store op inside it,
+    must leave the panel presenting every repaint, and the next frame ends it."""
+    import time
+    files = "ws.files_app.ctx.files"
+    assert board.pyval(files + ".begin()", strict=True) == (True, None)
+    n, err = board.pyval(files + ".count('drawings')", strict=True)
+    assert err is None and isinstance(n, int), (n, err)
+    d0 = board.pyval("ws._frames_drawn", strict=True)
+    for _ in range(4):
+        board.pyval("setattr(ws, '_dirty', True)", strict=True)
+        time.sleep(0.25)
+    d1 = board.pyval("ws._frames_drawn", strict=True)
+    assert d1 >= d0 + 3, "the panel stopped presenting: %d -> %d" % (d0, d1)
+    assert board.pyval("ws.store.open", strict=True) == 0, "a frame left the session open"
+
+
+def stale_handle_is_refused_loudly(board):
+    """Sprint 2's gate (#224): the spine refuses a dead handle out loud, on this
+    board, and the board runs the native spine. `kstale` hands it a released, a
+    forged, a wrong-kind and a zero handle; the same refusal is then asked for
+    through a plain `py` call on the live app registry, whose answer is the
+    StaleHandle itself."""
+    line = board.cmd("kstale", wait_for="REMOTE kstale", timeout=15.0)
+    assert line is not None and "REMOTE kstale ok" in line, line
+    assert "impl=native" in line, "the console is not on the native spine: " + line
+    for name in ("released", "forged", "kind", "zero"):
+        assert "%s=stale app handle " % name in line, line
+    live = board.pyval("ws.apps.handles()[0]", strict=True)
+    forged = live ^ (1 << 12)                    # the generation moved on
+    assert board.pyval("ws.apps.title(%d)" % forged) is None
+    assert "StaleHandle" in board.last_error, board.last_error
+    assert "stale app handle %d" % forged in board.last_error, board.last_error
+    assert board.pyval("ws.apps.title(%d)" % live, strict=True)
 
 
 @contextlib.contextmanager
@@ -198,6 +1305,25 @@ def home_shelf_fling(board, x0, x1, y):
     board.drain(0.8)                       # let the fling settle
 
 
+def home_long_press_opens_card_verbs(board):
+    """A long press on the home's centre card, through the real pointer
+    feed, opens the card's verbs (design review R3-01): under touch alone
+    it is the route to Change and Duplicate. The release launches nothing, and
+    the menu is closed again after."""
+    r = board.pyval("ws.launcher.tile_rect(ws.launcher.sel)")
+    x, y = r[0] + r[2] // 2, r[1] + r[3] // 2
+    board.swipe(x, y, x, y, frames=40)
+    board.drain(0.5)
+    try:
+        st = board.state()
+        assert st["stack"][-1] == "launcher", st["stack"]
+        assert board.pyval("ws.sysmenu.open and ws.sysmenu.widget") == "card"
+        rows = board.pyval("[r[4] for r in ws.sysmenu.items if r[0] == 'item']")
+        assert "Change" in rows and "Duplicate" in rows, rows
+    finally:
+        board.pyexec("ws.sysmenu.close(); ws.popover_touch()", strict=True)
+
+
 def draw_gates_are_installed(board, windowed=False):
     """(#155) rect/rectb/print/pix must be the NATIVE moy_gfx callables on the
     root system canvas -- and, on the windowed tier, on every window content
@@ -217,7 +1343,7 @@ def draw_gates_are_installed(board, windowed=False):
         assert ungated == [], ungated
 
 
-def draw_gates_take_the_traffic(board):
+def draw_gates_take_the_traffic(board, windowed=False):
     """The gates must actually be drawing -- a fallback that quietly swallowed
     every call would look installed and measure fast.
 
@@ -227,13 +1353,21 @@ def draw_gates_take_the_traffic(board):
     there legitimately moves no gated verb at all. The first draft asked on the
     home screen, which is a desk board's shape, and read (0, 0) on the Guition
     S3 -- a green light on the P4s for a check that could not fail on the S3s.
-    Settings draws real chrome on every tier. Restored before the assert, so a
-    failure does not leave the next test on the wrong screen."""
+    Settings draws real chrome on every tier. On the windowed tier its page
+    draws into its window's buffer, whose gates are its own, while a theme
+    with depth draws the window's frame in C: the root alone may read no
+    fill there, so the count is the root's and every window buffer's.
+    Restored before the assert, so a failure does not leave the next test on
+    the wrong screen."""
+    bufs = "[ws.sys_canvas]" + (
+        " + [w.buf for w in ws.wm._wins.values()]" if windowed else "")
+    # Counted from before the open: a page's first frame draws whole, while a
+    # repaint of an unchanged verbs page is a rows frame that may draw nothing.
+    board.pyexec("for _c in [ws.sys_canvas]: _c.gate_counts_reset()")
     board.open("settings")
-    board.drain(1.0)
-    board.pyexec("ws.sys_canvas.gate_counts_reset()\nws.mark_dirty()")
     board.drain(1.5)
-    fills, texts, _fu, _tu = board.pyval("ws.sys_canvas.gate_counts()")
+    fills, texts = board.pyval(
+        "[sum(c.gate_counts()[i] for c in %s) for i in (0, 1)]" % bufs)
     board.cmd("py ws.exit()", wait_for="PY")
     board.drain(0.5)
     assert fills > 0 and texts > 0, (fills, texts)
@@ -249,6 +1383,59 @@ def display_underruns_are_zero(board):
     assert n == 0, n
 
 
+def internal_flash_commits_under_a_cart(board, title="Star Catcher", n=10):
+    """Ten commits to the kernel's internal volume under a running cart
+    (docs/kernel_survival_2026-10.md section 6.9): a flash write turns the
+    cache off on both cores, so the panel feeder pauses for it (moy_kvfs.c
+    waits the frame in flight out first) -- on a banded panel the feeder's
+    timeouts and errors stay where they were; on a DSI panel the scan-out
+    never underruns. Returns the longest commit, ms."""
+    import time
+    st0 = board.state()
+    pump0 = st0.get("pump")
+    board.cmd("run %s" % title, wait_for="REMOTE run")
+    board.drain(3.0)
+    longest = 0
+    try:
+        for i in range(n):
+            t = board.pyval(
+                "(lambda t0: (open('/kv_commit.bin','wb').write(bytes(4096)), "
+                "__import__('time').ticks_diff(__import__('time').ticks_ms(), t0))[1])"
+                "(__import__('time').ticks_ms())", strict=True)
+            longest = max(longest, t)
+            board.drain(0.2)
+        assert board.state()["cart"] is not None, "the cart did not survive the commits"
+        pump1 = board.state().get("pump")
+        if pump0 is not None:
+            # (pump, idle, idle_n, feed, bands, blocked, timeouts, errs, stopfails)
+            assert pump1[6] == pump0[6] and pump1[7] == pump0[7], (pump0, pump1)
+        else:
+            display_underruns_are_zero(board)
+    finally:
+        board.pyval("__import__('os').remove('/kv_commit.bin')")
+        board.leave_cart()
+        time.sleep(0.5)
+    return longest
+
+
+def cart_store_follows_the_card(board):
+    """One store per boot, and it is the card's when the card mounted: a board
+    that says `mounted` keeps its carts and the system documents beside them on
+    the card, and one that does not (no card, or a filesystem its build cannot
+    read) runs on its internal flash -- never a mix, never the read-only floor.
+    The update directory is the device's own and stays internal either way.
+    Which of the two this run is depends on what is in the slot, so the test
+    pins the pairing, and the board's `card_store.STATUS` names the verdict."""
+    status = board.pyval("__import__('card_store').STATUS")
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True))
+    if status == "mounted":
+        assert root == "/sd/moybyte/carts", (status, root)
+    else:
+        assert root == "/moy/carts", (status, root)
+    assert board.pyval("ws.updater.update_dir") == "/moy/update"
+    assert board.pyval("len(ws.carts.all)") > 0, "the store shows no carts"
+
+
 def web_console_is_baked_into_the_image(board):
     """The wasm console this board hands a browser lives in its OWN image, and
     reads back correctly from flash -- the one part no host test can reach,
@@ -257,17 +1444,20 @@ def web_console_is_baked_into_the_image(board):
     EVERY board asks, because the failure is silent on every board: a build
     made without `firmware/web_runner/dist` produces an image that compiles,
     boots and runs, and is about 700KB short -- two of them shipped on
-    2026-09-08 before anyone noticed. Self-consistent on purpose (the board's
-    own `moy_webhost.ASSETS`, not this checkout's `dist/`): a board may
+    2026-09-08 before anyone noticed. Self-consistent on purpose (the names
+    the webhost's table serves, not this checkout's `dist/`): a board may
     legitimately run an older build, and the question is whether ITS console
-    is whole.
+    is whole -- and whether the kernel's webhost hands it out.
     """
+    import sys
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import gen_web_blob
     stamp = board.pyval("__import__('moy_web').stamp()")
     assert stamp and stamp != "0 0 none", (
         "this image has NO baked web console (stamp %r) -- it was built with "
         "no firmware/web_runner/dist" % (stamp,))
     count, total = int(stamp.split()[0]), int(stamp.split()[1])
-    declared = board.pyval("sorted(__import__('moy_webhost').ASSETS)")
+    declared = sorted(gen_web_blob.asset_names())
     assert count == len(declared), (stamp, declared)
     assert total > 400000, "a bundle this small is not the wasm console"
     names = board.pyval("__import__('moy_web').assets()")
@@ -280,6 +1470,25 @@ def web_console_is_baked_into_the_image(board):
     for name, size, magic in got:
         assert magic == b"\x1f\x8b\x08", (name, magic)
         assert size > 0, name
+    head = board.pyval(
+        "bytes(ws.webhost.handle_http('GET', '/', b'')[:160]) "
+        "if not ws.webhost.serving else b'serving'")
+    if head != b"serving":
+        assert head.startswith(b"HTTP/1.1 200 OK"), head
+        assert b"Content-Encoding: gzip" in head, head
+
+
+def _clear_to_console(board, clear):
+    """`clear` ws.exit()s to shut what the tour left open, then -- on the
+    windowed tier, the only one that clears -- the desk's PLAY: a launcher
+    run goes fullscreen from console mode's home and exits back to it
+    (docs/shell_layout_2026-10.md §3), whatever windows are left parked."""
+    for _ in range(clear):
+        board.cmd("py ws.exit()", wait_for="PY")
+        board.drain(0.5)
+    if clear:
+        board.cmd("py ws.open_library()", wait_for="PY")
+        board.drain(0.5)
 
 
 def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
@@ -294,14 +1503,16 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     cart API's quit() verb sets), and on a fullscreen tier it pops all the way
     to the launcher, which is what those boards pin. "shell" is `ws.exit()`,
     the desk's own close: on the windowed tier a run started from a
-    picker/Settings arrangement does not pop through the flag, so those boards
+    projects/Settings arrangement does not pop through the flag, so those boards
     pin the launch and the close instead. `clear` ws.exit()s that many times
-    first, to shut whatever windows the tour above left open -- a `run` from a
-    picker arrangement opens the cart under it.
+    first, to shut whatever windows the tour above left open, and then enters
+    console mode (`_clear_to_console`), so the run is the fullscreen one a
+    kid starts from the home.
     """
-    for _ in range(clear):
-        board.cmd("py ws.exit()", wait_for="PY")
-        board.drain(0.5)
+    _clear_to_console(board, clear)
+    # SERVICE and REFUSED from before the launch: a cart's load -- a compiled
+    # cart's _init reading its own files -- is in them too.
+    before = board.state()["upcall_totals"][3:]
     line = board.cmd("run %s" % spec, wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
     board.drain(2.5 if clear else 2.0)
@@ -313,7 +1524,11 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     f0 = st["frames"]
     board.drain(1.0)
     assert board.state()["frames"] > f0, "the cart is not ticking"
-    if door == "quit":
+    if st.get("front"):
+        # The kernel drives the run (moy_play's front): the console's frame is
+        # not running to read a flag, and the kernel's `end` is the door.
+        board.cmd("end", wait_for="REMOTE end")
+    elif door == "quit":
         board.cmd("py ws.input.cart_quit = True", wait_for="PY")
     else:
         board.cmd("py ws.exit()", wait_for="PY")
@@ -322,6 +1537,197 @@ def cart_runs_and_exits(board, spec, title=None, door="quit", clear=0):
     assert not st.get("cart"), "%s did not end the run: %r" % (door, st)
     if door == "quit":
         assert st["stack"][-1] == "launcher", st["stack"]
+
+
+# The VM-free seed games the zero-crossing check runs -- every seed the
+# census gives that verdict: Bullet Storm asks for a colour by name and
+# composites a layer every frame (col, draw_layer), Sakura Lua composites the
+# static layer whose restore rides the DMA engine, Brick Siege Lua arms the
+# radio link (multiplayer), Bench Lua draws every verb family.
+VM_FREE_SEEDS = (("bullet", "Bullet Storm"), ("sakura lua", "Sakura Lua"),
+                 ("brick siege lua", "Brick Siege Lua"), ("bench lua", "Bench Lua"))
+
+
+def a_front_run_makes_no_crossing(board, spec, title, clear=0, front=True):
+    """The cart path's second checkpoint (docs/kernel_cartpath_2026-10.md §6):
+    a VM-free seed game is the kernel loop's foreground -- its input, ticks,
+    chrome and present in C -- so from its launch to its exit the run's own
+    books hold NO upcall of any class (CONSOLE, APP, DRIVER, SERVICE,
+    REFUSED), with the VM up. `state` and `end` are the kernel's words while
+    it runs, so reading it and leaving it cross nothing either; the books
+    frozen at the end are read back once the console has the frame again.
+    `clear` is cart_runs_and_exits's. `front` False: a board whose
+    compositor gives the kernel no front (the Guition P4's rotated one), where
+    the console's frame drives the same Player -- its CONSOLE crossing a
+    frame is the only one, and the run is left by the shell."""
+    import time
+    _clear_to_console(board, clear)
+    line = board.cmd("run %s" % spec, wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    board.drain(2.0)
+    ended = False
+    try:
+        st = board.state()
+        assert st.get("cart") == title, st.get("cart")
+        assert bool(st.get("front")) is front, "%s: front %r, expected %r: %r" % (
+            title, st.get("front"), front,
+            {k: st.get(k) for k in ("screen", "cart", "run", "play")})
+        # VM-free, and it keeps the VM: under the `need` policy a Lua cart has
+        # no footprint whose fit could fail, and a P4 has no stop at all
+        # (docs/kernel_cartpath_2026-10.md section 5).
+        run = dict(st["run"])
+        assert run.pop("fit", None) is None, st["run"]
+        assert run == {"runtime": "lua", "vm_free": True, "why": "free",
+                       "stop": KEEPS if front else NO_FRONT, "vm_down": False}, st["run"]
+        f0, t0 = st["play"]["frames"], st["play"]["ticks"]
+        for _ in range(5):
+            time.sleep(0.2)
+            st = board.state()
+            frame_up = st["upcalls"] if front else [0] + list(st["upcalls"][1:])
+            assert frame_up == [0, 0, 0, 0, 0, 0], \
+                "a frame of %s crossed into Python: %r" % (title, st["upcalls"])
+            run_up = st["play"]["upcalls"] if front else [0] + list(st["play"]["upcalls"][1:])
+            assert run_up == [0, 0, 0, 0, 0, 0], st["play"]
+        assert st["play"]["frames"] > f0, "%s is not drawing" % title
+        assert st["play"]["ticks"] > t0, "%s draws but never ticks" % title
+        if front:
+            board.cmd("end", wait_for="REMOTE end")
+        else:
+            board.leave_cart()
+        ended = True
+        board.drain(1.5)
+        info = board.pyval("__import__('moy_play').info()")
+        assert info[6] is True, "the run did not end: %r" % (info,)
+        books = list(info[5]) if front else [0] + list(info[5][1:])
+        assert books == [0, 0, 0, 0, 0, 0], \
+            "%s crossed into Python from launch to exit: %r" % (title, info[5])
+        st = board.state()
+        assert not st.get("cart") and not st.get("front"), st.get("screen")
+    finally:
+        if not ended:
+            board.cmd("end", wait_for="REMOTE")
+            board.drain(1.5)
+
+
+def a_ctrl_c_ends_a_front_run(board, spec="bullet", title="Bullet Storm", clear=0,
+                              front=True):
+    """A Ctrl-C reaches the VM past a run in the kernel's front
+    (docs/kernel_cartpath_2026-10.md §9 decision 4): the run ends with why
+    SERIAL and the console's next upcall raises the interrupt, so the REPL
+    comes up as it does with no run in front -- which is what `board.py
+    reboot --soft` and every interrupting tool rely on. The soft reset after it
+    closes the run the console never closed, so the next VM runs the cart
+    again. `front` False: a board with no kernel front, where the console's
+    frame is the one the Ctrl-C interrupts; the same REPL, and the cart runs
+    again after the soft reset."""
+    import time
+    _clear_to_console(board, clear)
+    line = board.cmd("run %s" % spec, wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    board.drain(2.0)
+    st = board.state()
+    assert bool(st.get("front")) is front and st.get("cart") == title, st.get("screen")
+    board.ser.write(b"\r\x03")
+    # (The prompt itself ends no line: the loop's own last words are the tell.)
+    assert board.wait_line("interrupted -> REPL", timeout=5.0) is not None, \
+        "a Ctrl-C did not reach the REPL past %s in the kernel's front" % title
+    board.drain(0.5)
+    board.ser.write(b"import moy_play; print('END', 'WHY', moy_play.info()[10])\r\n")
+    why = board.wait_line("END WHY ", timeout=5.0)
+    board.ser.write(b"\x04")
+    end = time.time() + 120.0
+    while True:                            # the soft reset's VM up to its desk
+        try:
+            if board.state()["stack"]:
+                break
+        except RuntimeError:
+            pass
+        assert time.time() < end, "the console never came back after the Ctrl-C"
+    if front:
+        assert why is not None and why.split("END WHY ", 1)[1].strip() == "5", \
+            "the run did not end with why SERIAL: %r" % (why,)
+    # The soft reset closed the run the console never closed: the next VM's
+    # first Lua run opens (it was refused as "a run is already open").
+    _clear_to_console(board, clear)
+    board.cmd("run %s" % spec, wait_for="REMOTE run")
+    board.drain(2.0)
+    st = board.state()
+    try:
+        assert bool(st.get("front")) is front and not st.get("cart_error"), \
+            "%s did not run again after the soft reset: %r" % (title, st.get("cart_error"))
+    finally:
+        board.cmd("end" if st.get("front") else "py ws.exit()", wait_for="REMOTE")
+        board.drain(1.5)
+
+
+def a_vm_free_frame_makes_no_crossing(board, spec, title, door="quit", clear=0,
+                                      runtime="lua"):
+    """The cart path's first checkpoint (docs/kernel_cartpath_2026-10.md §6):
+    a seed game the kernel's rule runs with no VM reads that verdict from
+    `state`, its frames run in the kernel's Player, and they make no APP,
+    SERVICE or REFUSED upcall (DRIVER is a harness's, zero on a board) with
+    the VM still up and the console's frame upcall still driving the Player:
+    neither in a frame nor in the run's own books since its launch. `runtime`
+    is the cart's: "lua" for the seeds, "wasm" for a compiled cart, whose
+    frames run on its engine's thread and whose file requests are C on the
+    VM's task (moycore's files): no SERVICE or REFUSED crossing from before
+    the launch, its load included, to the end of the check; and for both, no
+    APP crossing either, since the Player launches the run before its
+    runtime loads. `state` reads the last finished frame, so
+    each read is a different frame of the run. `door` and `clear` are
+    cart_runs_and_exits's."""
+    import time
+    _clear_to_console(board, clear)
+    # APP, SERVICE and REFUSED from before the launch: a cart's load -- a
+    # Lua cart's _init reading its scene, a compiled cart's reading its own
+    # files -- is in them too, and in the run's own books.
+    def crossings():
+        t = board.state()["upcall_totals"]
+        return [t[1]] + t[3:]
+    before = crossings()
+    line = board.cmd("run %s" % spec, wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    board.drain(2.0)
+    try:
+        st = board.state()
+        assert st.get("cart") == title, st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        # `fit`: the verdict's fit check with the VM up, a compiled cart's on
+        # a board with the stop (it fits here), None everywhere else.
+        run = dict(st["run"])
+        fit = run.pop("fit", None)
+        assert run == {"runtime": runtime, "vm_free": True, "why": "free",
+                       "stop": KEEPS, "vm_down": False}, st["run"]
+        assert fit is None or (len(fit) == 5 and fit[0] <= fit[2]
+                               and fit[1] <= fit[3]), st["run"]
+        for _ in range(5):
+            time.sleep(0.2)
+            ups = board.state()["upcalls"]
+            assert ups[1:] == [0, 0, 0, 0, 0], \
+                "a frame of %s crossed into Python: %r" % (title, ups)
+        if st.get("front"):
+            # The kernel's front: a crossing of any class, the console's frame
+            # included, is a failure (a_front_run_makes_no_crossing pins it).
+            st = board.state()
+            assert st["play"]["upcalls"] == [0, 0, 0, 0, 0, 0], st["play"]
+            return
+        # The run's frame is the kernel's Player's (native/moy_play), and its
+        # books from launch to now hold no crossing but the console's own.
+        play = board.state()["play"]
+        assert play is not None, "%s ticks through Python, not moy_play" % title
+        assert play["frames"] > 0 and play["upcalls"][1:] == [0, 0, 0, 0, 0], play
+        after = crossings()
+        assert after == before, \
+            "%s's launch or load crossed into Python: APP, SERVICE, REFUSED %r -> %r" % (
+                title, before, after)
+    finally:
+        if board.state().get("front"):
+            board.cmd("end", wait_for="REMOTE end")
+        elif door == "quit":
+            board.cmd("py ws.input.cart_quit = True", wait_for="PY")
+        else:
+            board.cmd("py ws.exit()", wait_for="PY")
+        board.drain(1.5)
 
 
 def idle_blank_and_wake(board):
@@ -348,6 +1754,33 @@ def idle_blank_and_wake(board):
     assert board.state()["psave"][0] is True, "`power off` did not blank"
 
 
+def idle_saver_and_wake(board):
+    """The ladder's SAVER rung (the kernel's, native/moy_kernel/moy_idle.c):
+    after its seconds of silence the console shows the saver -- a cover cycle
+    fullscreen, the desk's wallpaper on a desk -- and the input that wakes it
+    is swallowed and moves the kernel epoch, so the console repaints every
+    buffer the saver held (`_frames_drawn` advances by at least the backend's
+    RETAINED_FRAMES) and comes back on the stack it left."""
+    stack = board.state()["stack"]
+    board.cmd("power blank 0", wait_for="REMOTE power")
+    board.cmd("power saver 2", wait_for="REMOTE power")
+    board.drain(4.0)                       # say nothing: silence is the stimulus
+    st = board.state()                     # read before this line's wake
+    try:
+        assert st["idle"]["state"] == 2, st["idle"]
+        board.drain(1.0)
+        after = board.state()
+        assert after["idle"]["state"] == 0, after["idle"]
+        assert after["stack"] == stack
+        retained = board.pyval("getattr(ws.sys_canvas or ws.canvas, "
+                               "'RETAINED_FRAMES', 1)", strict=True)
+        assert board.pyval("ws._saver is None", strict=True) is True
+        assert after["frames"] >= st["frames"] + retained, (st["frames"], after["frames"])
+    finally:
+        board.cmd("power saver 0", wait_for="REMOTE power")
+        board.cmd("power blank 300", wait_for="REMOTE power")
+
+
 def idle_timeout_restored(board):
     """Put the shipped default back, and prove it took."""
     board.cmd("power 300", wait_for="REMOTE power")
@@ -356,9 +1789,440 @@ def idle_timeout_restored(board):
     assert board.state()["psave"][1] == 300
 
 
+def the_kernel_lit_the_logo(board):
+    """First light (native/moy_kernel/moy_boot.h): before any VM, the kernel
+    brought the panel up, drew the boot logo and lit the glass, and says when
+    (ms after power-on). The picture is held to the Python boot screen's on
+    the host (tests/test_moy_kernel.py)."""
+    ms = board.pyval("__import__('moy_kernel').lit()", strict=True)
+    print("\nfirst light at %s ms" % ms)
+    assert isinstance(ms, int) and ms > 0, ms
+    return ms
+
+
+def board_words_are_the_kernels(board):
+    """`heapcaps`, `mem` and `hush` are the kernel's words (moy_loop_board.c):
+    with every console word but `py` answering `REMOTE console <line>` for the
+    call, they still answer themselves."""
+    stub = ("chan._run0 = chan.run; chan.run = lambda ws, line: chan._run0(ws, line) "
+            "if line.startswith('py ') else print('REMOTE console ' + line)")
+    assert board.pyexec(stub, strict=True)
+    try:
+        hc = board.cmd("heapcaps", wait_for="HEAPCAPS", retry=False)
+        assert hc is not None and " gc=" in hc and "gc=-/-/-" not in hc, hc
+        mem = board.cmd("mem", wait_for="REMOTE mem", retry=False)
+        assert mem is not None and "live=" in mem, mem
+        hush = board.cmd("hush", wait_for="REMOTE hush", retry=False)
+        assert hush is not None, hush
+    finally:
+        board.pyexec("chan.run = chan._run0", strict=True)
+
+
+LOOP_STAGES = ["inputs", "dev", "idle", "pointer", "present", "frame",
+               "backlight", "pump_tail", "tail"]
+
+
+def loop_line_is_the_kernels(board):
+    """Under PERF DIAG the kernel says LOOP every PERF period
+    (native/moy_kernel/moy_loop.c): the average frame by stage, every stage
+    this board runs in C with a number -- never -1, never absent."""
+    was = board.state()["diag"]
+    board.cmd("diag 1", wait_for="REMOTE diag")
+    try:
+        line = board.wait_line("LOOP n=", 12.0)
+    finally:
+        if not was:
+            board.cmd("diag 0", wait_for="REMOTE diag")
+    assert line is not None, "no LOOP line under PERF DIAG"
+    f = dict(t.split("=", 1) for t in line.split("LOOP ", 1)[1].split())
+    assert [k for k in f if k in LOOP_STAGES] == LOOP_STAGES, line
+    missing = [s for s in LOOP_STAGES if f[s] == "-" or float(f[s]) < 0]
+    assert not missing, (missing, line)
+    return line
+
+
+KSTOP_JITTER = 64
+
+
+class _Keeps(str):
+    """The stop verdict of a run that keeps the VM on a console: it fits with
+    the VM up (the S3s' `need` policy), the board has no stop (a P4's lever
+    is ABSENT), or the board's kernel present cannot show its canvas (a
+    320x240 cart on the Guition S3's 480x320 panel)."""
+
+    def __eq__(self, other):
+        return other in self.split("|")
+
+    __hash__ = str.__hash__
+
+
+KEEPS = _Keeps("fits|lever|front")
+# A board with no kernel front for the run: no stop lever (the P4s), or a
+# present that cannot show the canvas.
+NO_FRONT = _Keeps("front|lever")
+
+
+def _kstop_after(line):
+    """`KSTOP i/n after psram=FREE/LARGEST int=... dma=...` -> (i, free, largest)."""
+    head, rest = line.split("KSTOP ", 1)[1].split(" ", 1)
+    free, largest = rest.split("psram=", 1)[1].split(" ", 1)[0].split("/")
+    return int(head.split("/")[0]), int(free), int(largest)
+
+
+def soft_resets_leave_psram_flat(board, n=20, per_cycle=60.0):
+    """`kstop N`: N soft resets of the VM with the kernel's drivers alive
+    (docs/kernel_survival_2026-10.md section 7.5). With the VM down, PSRAM free
+    and its largest block hold flat across the cycles: whatever a VM left
+    behind would compound into a boot that runs out (the Guition S3 stranded
+    a cover's bytes and its decode scratch, 46,456 B a cycle, until the
+    teardown gave moy_alloc's registry back). The baseline is the SECOND
+    cycle: the first one's teardown still holds a 153,600 B buffer the
+    session before it left (every console, 2026-10-08), which the next VM
+    gives back. From there the largest block is the
+    same to the byte and free never falls more than KSTOP_JITTER below it (the
+    Guition S3 reads 8 B higher every fourth cycle)."""
+    import time
+    board.cmd("kstop %d" % n, wait_for="REMOTE kstop")
+    after = []
+    end = time.time() + n * per_cycle
+    while len(after) < n and time.time() < end:
+        line = board.wait_line("KSTOP ", max(0.1, end - time.time()))
+        if line is not None and " after " in line:
+            after.append(_kstop_after(line))
+    assert len(after) == n, "only %d of %d soft resets came back" % (len(after), n)
+    free0, largest0 = after[1][1:]
+    drift = [a for a in after[1:]
+             if a[2] != largest0 or a[1] < free0 - KSTOP_JITTER]
+    assert not drift, "PSRAM (free, largest) after cycle 2 %s, then %s" % (
+        (free0, largest0), drift)
+    end = time.time() + 120.0
+    while True:                            # the last VM up to its desk
+        try:
+            if board.state()["stack"]:
+                break
+        except RuntimeError:
+            pass
+        assert time.time() < end, "the console never came back after kstop"
+
+
+def _desk_back(board, timeout=120.0):
+    """Wait until the console answers `state` at its launcher again."""
+    import time
+    end = time.time() + timeout
+    while True:
+        try:
+            st = board.state()
+            if st.get("stack") == ["launcher"]:
+                return st
+        except RuntimeError:
+            pass
+        assert time.time() < end, "the console never came back"
+
+
+def vm_stops_leave_psram_flat(board, n=20, per_cycle=60.0):
+    """`kstop N stop`: N real stops and starts of the VM with no cart
+    (docs/kernel_cartpath_2026-10.md section 5). Each cycle sets a route and a
+    lease on the kernel's tables before the stop and reads them back with the
+    VM down (`route=kstop lease=dev` on the KSTOP down line); the heaps read
+    then -- the first heap area freed with the VM -- hold flat from the second
+    cycle, the largest block to the byte and free within KSTOP_JITTER. The
+    app ABI's grants (`grants=N`, native/moy_app) read the same every cycle:
+    each start re-registers the shipped apps onto the rows they had; and the
+    clipboard, a kernel row, holds what was put before the first stop."""
+    import time
+    # The clipboard is the app ABI's kernel row (native/moy_app): text put
+    # before the stops reads back after them.
+    assert board.pyexec("ws.clipboard.put_text('kept across stops')"), board.last_error
+    board.cmd("kstop %d stop" % n, wait_for="REMOTE kstop")
+    down, grants = [], []
+    end = time.time() + n * per_cycle
+    while len(down) < n and time.time() < end:
+        line = board.wait_line("KSTOP ", max(0.1, end - time.time()))
+        if line is not None and " down " in line:
+            assert "route=kstop lease=dev" in line, line
+            grants.append(line.split("grants=", 1)[1].split()[0])
+            down.append(_kstop_after(line.replace(" down ", " after ")))
+    assert len(down) == n, "only %d of %d stops came back" % (len(down), n)
+    assert grants[0] not in ("-", "0") and len(set(grants)) == 1, (
+        "the grant count moved across stops: %s" % grants)
+    free0, largest0 = down[min(1, n - 1)][1:]
+    drift = [a for a in down[1:]
+             if a[2] != largest0 or a[1] < free0 - KSTOP_JITTER]
+    assert not drift, "PSRAM (free, largest) down after cycle 2 %s, then %s" % (
+        (free0, largest0), drift)
+    _desk_back(board)
+    assert board.pyval("ws.clipboard.text()") == "kept across stops", board.last_error
+    return down
+
+
+def _stop_psram(line):
+    """`STOP 1/1 down psram=FREE/LARGEST ...` -> (free, largest)."""
+    free, largest = line.split("psram=", 1)[1].split(" ", 1)[0].split("/")
+    return int(free), int(largest)
+
+
+def doom_runs_with_the_vm_down(board, title="Doom", cycles=1, ctrl_c=False,
+                               hold_link=False):
+    """The kernel stops the VM for a cart whose fit check fails with the VM up
+    (the `need` policy), runs it with no VM -- `state` is the kernel's and says
+    so -- and starts the VM again when it ends: the dev channel's `end`, or a
+    Ctrl-C. `vmstop force` makes the fit read as failing where the cart fits
+    (it fits a fresh T-Deck). The return start reads its kind and every part
+    of its time from the kernel's stamps. `hold_link`: the link's radio lease
+    is held at the launch, as a match's run holds it, and the return start
+    lets it go. Returns each cycle's PSRAM (free, largest) after the stop and
+    before the load."""
+    import time
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
+    if title not in titles:
+        pytest.skip("%s is not in this board's store" % title)
+    line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+    assert line is not None and "force" in line, line
+    psram = []
+    try:
+        for _ in range(cycles):
+            if hold_link:
+                assert board.pyexec("ws.wifi_hold('link')"), board.last_error
+            # Written raw and waited for by the stop's own line: the stop can
+            # print in the same burst as the run's echo, which `cmd` reads
+            # past.
+            board.ser.write(("run %s\r\n" % title.lower()).encode())
+            board.ser.flush()
+            line = board.wait_line("STOP 1/1 down", 60)
+            assert line is not None, "the VM never stopped"
+            psram.append(_stop_psram(line))
+            assert board.wait_line("STOP running", 60) is not None, "the run never started"
+            st = board.state()
+            assert st.get("front") is True and st.get("vm") is False, st
+            assert st["run"]["vm_down"] is True and st["run"]["stop"] == "stops", st
+            f0 = st["frames"]
+            time.sleep(2.0)
+            st = board.state()
+            assert st["frames"] > f0 and st["vm"] is False, st
+            assert st["play"]["upcalls"] == [0, 0, 0, 0, 0, 0], st
+            if ctrl_c:
+                board.ser.write(b"\x03")
+                board.ser.flush()
+            else:
+                board.cmd("end", wait_for="REMOTE end")
+            assert board.wait_line("STOP 1/1 ended", 30) is not None, "the run never ended"
+            back = _desk_back(board)
+            info = board.pyval("__import__('moy_play').info()", strict=True)
+            assert info[12] is True and info[10] == (5 if ctrl_c else 2), info
+            # The first frame's stamp lands with boot_ok, a frame or two after
+            # the console first answers.
+            start = back.get("start")
+            for _ in range(10):
+                if start and start.get("first_frame") is not None:
+                    break
+                time.sleep(0.5)
+                start = board.state().get("start")
+            assert start["kind"] == "return", start
+            assert all(start[k] is not None and start[k] >= 0 for k in
+                       ("total", "vm", "imports", "workstation", "wiring",
+                        "first_frame")), start
+            assert back.get("wifi_held") == [], back.get("wifi_held")
+    finally:
+        board.cmd("vmstop need", wait_for="REMOTE vmstop")
+    return psram
+
+
+def a_run_off_the_shelf_keeps_the_vm_for_its_place(board, title="Doom"):
+    """Only the launcher comes back after a stop (docs/kernel_appabi_2026-10.md
+    section 5): the same cart `vmstop force` stops the VM for from the shelf,
+    started the way Storybook's and Get Carts' PLAY start it (a workspace and
+    a run whose caller is a live Python surface), keeps the VM, and the run
+    names the reason "place"."""
+    import time
+    titles = board.pyval("[c['title'] for c in ws.carts.all]", strict=True)
+    if title not in titles:
+        pytest.skip("%s is not in this board's store" % title)
+    line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+    assert line is not None and "force" in line, line
+    try:
+        assert board.pyexec(
+            "c = [c for c in ws.carts.all if c['title'] == %r][0]\n"
+            "ws._open_workspace(c)\n"
+            "ws.run(ws.project, ws.launcher_layer)" % title), board.last_error
+        st = None
+        for _ in range(20):
+            time.sleep(0.5)
+            st = board.state()
+            if st.get("run"):
+                break
+        assert st["run"]["stop"] == "place" and st["run"]["vm_down"] is False, st
+        assert st.get("vm") is not False, st
+        # A run with the VM up is the console's to end (the kernel's `end`
+        # answers only a run in its front with the VM down).
+        assert board.pyexec("ws.exit()"), board.last_error
+        for _ in range(30):
+            time.sleep(0.5)
+            st = board.state()
+            if st.get("stack") == ["launcher"]:
+                break
+        assert st.get("stack") == ["launcher"], st
+    finally:
+        board.cmd("vmstop need", wait_for="REMOTE vmstop")
+
+
+def a_stuck_run_with_the_vm_down_is_ended(board):
+    """The stuck compiled fixture with the VM stopped (`vmstop force`): the
+    runaway watch ends its frame on the VM service task's run, the board says
+    so, the panel waits, and a Ctrl-C reaches a VM whose Player reads the run
+    as stuck with the VM down. Returns the board's stuck line."""
+    title = STUCK["wasm"][0]
+    line = board.cmd("vmstop force", wait_for="REMOTE vmstop")
+    assert line is not None and "force" in line, line
+    board.pyval("__import__('moy_play').watch(%d)" % STUCK_BUDGET_MS, strict=True)
+    try:
+        line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=30)
+        assert line is not None and title in line, line
+        assert board.wait_line("STOP running", 60) is not None, "the run never started"
+        said = board.wait_line("PLAY stuck:", STUCK_BUDGET_MS / 1000.0 + 10.0)
+        assert said is not None and "stuck: one frame ran over 2 s" in said, said
+        assert board.wait_line("STOP refused or raised", 10) is not None
+        board.ser.write(b"\x03")
+        board.ser.flush()
+        assert board.wait_line("STOP 1/1 ended", 30) is not None, "the run never ended"
+        _desk_back(board)
+        info = board.pyval("__import__('moy_play').info()", strict=True)
+        assert info[12] is True and info[14] is True, info
+        print("\nSTUCK down: %s" % said.strip())
+        return said
+    finally:
+        board.pyval("__import__('moy_play').watch(0)", strict=True)
+        board.cmd("vmstop need", wait_for="REMOTE vmstop")
+
+
 def mem_reports_the_heap(board):
     line = board.cmd("mem", wait_for="REMOTE mem")
     assert line is not None and "live=" in line and "free=" in line, line
+
+
+def _psram_heap(board):
+    regs = board.pyval("__import__('esp32').idf_heap_info(0x400)", strict=True)
+    return sum(r[1] for r in regs), max(r[2] for r in regs)
+
+
+def _free_heaps(board):
+    """(internal SRAM free, PSRAM free) after a collection, so garbage a frame
+    grab left on the Python heap is not read as a cost of what is measured."""
+    board.pyval("(__import__('gc').collect(), 1)[1]", strict=True)
+    return _internal_heap(board)[0], _psram_heap(board)[0]
+
+
+# The pause menu keeps the paused frame whole in PSRAM (a 320x240 RGB565
+# layer, 153,600 bytes) so the scrim can dim it under the card, and its
+# washed copy in another; both are minted on an idle frame and kept
+# (`PauseMenu.prealloc`). What it may take: a layer an idle frame had not
+# minted yet, and the card's own widgets.
+PAUSE_PSRAM_MAX = 160 * 1024
+# What a resume may leave behind in PSRAM, against the run before the menu.
+PAUSE_PSRAM_LEAK_MAX = 4096
+
+
+def _strip_light(px, w, h, margin):
+    """(brightest, mean) luma of the pixels in the `margin` columns at both
+    ends of a frame -- the part a centred card never covers."""
+    seen = []
+    for y in range(h):
+        row = y * w
+        for x in tuple(range(margin)) + tuple(range(w - margin, w)):
+            v = px[row + x]
+            seen.append(((v >> 11) & 31) * 240 + ((v >> 5) & 63) * 118
+                        + (v & 31) * 88)
+    return max(seen) // 100, sum(seen) // len(seen) // 100
+
+
+def pause_menu_dims_and_holds_the_heap(board, spec="star", margin=60):
+    """A running game's pause menu opens, dims the game and closes back to
+    it, on the heap the suite already guards: internal SRAM stays at or above
+    moycore's floor and within WASM_RUN_SRAM_MAX of the run before the menu,
+    and PSRAM gives back what the card took (its layers are kept from
+    before the run). Opened and closed
+    by the console's one key (`ws.system_key`, the T-Deck's Mic).
+
+    The dim is read off the glass, in the columns beside the card: the
+    brightest pixel there falls under the running game's while the menu is
+    open, and comes back when it closes. Returns the heap numbers,
+    {"sram": (before, during, after), "psram": (before, during, after)}."""
+    from tools import board as board_tool
+    line = board.cmd("run %s" % spec, wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    paused = False
+    try:
+        board.drain(2.5)
+        st = board.state()
+        assert st.get("cart") and not st.get("cart_error"), st
+        title = st["cart"]
+        floor = board.pyval("__import__('moycore').sram_report()[2]", strict=True)
+        # The first grab of a session grows the Python heap by what its frame
+        # copies need, and keeps it grown: take that before the baseline.
+        board_tool.grab(board, "screen")
+        sram0, psram0 = _free_heaps(board)
+        px, w, h = board_tool.grab(board, "screen")
+        lit0 = _strip_light(px, w, h, margin)
+        assert lit0[0] > 120, "the game shows nothing bright to dim: %r" % (lit0,)
+
+        board.pyexec("ws.system_key()", strict=True)
+        paused = True
+        board.drain(1.0)
+        assert board.pyval("ws.pause.open", strict=True) is True
+        assert board.pyval("ws.player.paused", strict=True) is True
+        sram1, psram1 = _free_heaps(board)
+        px, w, h = board_tool.grab(board, "screen")
+        lit1 = _strip_light(px, w, h, margin)
+
+        board.pyexec("ws.system_key()", strict=True)
+        paused = False
+        board.drain(1.0)
+        assert board.pyval("ws.pause.open", strict=True) is False
+        assert board.pyval("ws.player.paused", strict=True) is False
+        st = board.state()
+        assert st.get("cart") == title and not st.get("cart_error"), st
+        f0 = st["frames"]
+        board.drain(1.0)
+        assert board.state()["frames"] > f0, "the game is not ticking after resume"
+        sram2, psram2 = _free_heaps(board)
+        px, w, h = board_tool.grab(board, "screen")
+        lit2 = _strip_light(px, w, h, margin)
+    finally:
+        if paused:
+            board.pyexec("ws.pause.close()")
+        board.leave_cart()
+        board.drain(1.0)
+    print("\nPAUSE internal SRAM free %d -> %d (open) -> %d, floor %d; "
+          "PSRAM free %d -> %d (open) -> %d; beside the card brightest %d "
+          "-> %d (open) -> %d, mean %d -> %d -> %d"
+          % (sram0, sram1, sram2, floor, psram0, psram1, psram2,
+             lit0[0], lit1[0], lit2[0], lit0[1], lit1[1], lit2[1]))
+    assert lit1[0] < lit0[0] * 0.85 and lit1[1] < lit0[1], (lit0, lit1)
+    assert lit2[0] > lit0[0] * 0.85 and lit2[0] > lit1[0], (lit0, lit1, lit2)
+    assert min(sram0, sram1, sram2) >= floor, (sram0, sram1, sram2, floor)
+    assert sram0 - sram1 <= WASM_RUN_SRAM_MAX, (sram0, sram1)
+    assert psram0 - psram1 <= PAUSE_PSRAM_MAX, (psram0, psram1)
+    assert psram0 - psram2 <= PAUSE_PSRAM_LEAK_MAX, (psram0, psram2)
+    return {"sram": (sram0, sram1, sram2), "psram": (psram0, psram1, psram2)}
+
+
+KERNEL_STAGES = ["inputs", "dev", "idle", "pointer", "present", "frame",
+                 "backlight", "pump_tail", "tail", "pace", "account"]
+
+
+def the_frame_is_the_kernels(board):
+    """The frame is native/moy_kernel/moy_loop.c's and Python is what it calls
+    up into: a quiet frame makes exactly the three console upcalls
+    (handle_input, handle_pointer, frame) and no service upcall. `state` reads
+    the last FINISHED frame's count -- the frame before the one whose dev
+    stage runs the word -- so the first `state` is only there to make the
+    frame before the second one quiet."""
+    import time
+    board.state()
+    time.sleep(0.5)
+    st = board.state()
+    assert st["upcalls"] == [3, 0, 0, 0, 0, 0], st["upcalls"]
+    assert sorted(st["stages"]) == sorted(KERNEL_STAGES), st["stages"]
+    assert board.pyval("__import__('moy_loop').frames() > 0", strict=True)
 
 
 def perf_line_is_the_one_format(board):
@@ -460,7 +2324,7 @@ def _wm_meters_measured(board, win):
     # TOP window's title strip and oscillates it "so the PERF sampler reports
     # DRAG-time fps". Hand-aiming a swipe at a window by NAME is what a tour
     # cannot do -- the P4 suite leaves one window up and the Guition P4 suite
-    # leaves the picker stacked over it, so the swipe landed on the picker and
+    # leaves the projects window stacked over it, so the swipe landed on it and
     # settings never moved. Oscillating also returns the window to where it
     # started, so nothing has to be put back.
     n0 = len(board.lines)
@@ -819,7 +2683,7 @@ def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
     over, while a cart animates every frame and the WiFi radio is up -- the
     cache sync at each load runs with the other core busy. Every pass must
     return the same cycle count (a stale instruction cache would not)."""
-    board.cmd("py ws.wifi_hold('wasm')", wait_for="PY", timeout=20)
+    board.cmd("py ws.wifi_hold('dev')", wait_for="PY", timeout=20)
     try:
         board.cmd("run star", wait_for="REMOTE run")
         board.drain(2.5)
@@ -842,7 +2706,7 @@ def wasm_load_unload_under_flush_and_wifi(board, paths, loops=200):
         assert drew > 0, "no frame drew while the loop ran"
         return r, drew
     finally:
-        board.cmd("py ws.wifi_release('wasm')", wait_for="PY", timeout=20)
+        board.cmd("py ws.wifi_release('dev')", wait_for="PY", timeout=20)
 
 
 def wasm_low_water_with_radios_up(board, paths):
@@ -860,14 +2724,14 @@ def wasm_low_water_with_radios_up(board, paths):
     with BLE as it found it."""
     ble_was_up = board.pyval("bool(getattr(%s, 'available', False))" % _ble(board),
                              strict=True)
-    board.cmd("py ws.wifi_hold('wasm')", wait_for="PY", timeout=20)
+    board.cmd("py ws.wifi_hold('dev')", wait_for="PY", timeout=20)
     try:
         assert board.pyval("%s.start()" % _ble(board), timeout=30) is True
         board.drain(3.0)
         r = wasm_run(board, paths["hello"], "step", (20000,), loops=20)
         floor = board.pyval("__import__('moycore').sram_report()[2]", strict=True)
     finally:
-        board.cmd("py ws.wifi_release('wasm')", wait_for="PY", timeout=20)
+        board.cmd("py ws.wifi_release('dev')", wait_for="PY", timeout=20)
         if not ble_was_up:
             # The radio holds about 45 KB of internal RAM while it is up, and
             # left up it cost the next TLS download its memory (2026-10-02).
@@ -930,6 +2794,173 @@ def wasm_carts_push(board, board_dir):
     for title in WASM_CARTS.values():
         assert title in titles, "%s is not on the shelf after the push" % title
     return dict(WASM_CARTS)
+
+
+APP_ROLES = ("app_roles", "App Roles Wasm")
+APP_SHORT = ("app_short", "App Short Wasm")
+APP_SHELL = ("app_shell", "App Shell Wasm")
+APP_UI = ("app_ui", "App UI Wasm")
+
+
+def wasm_app_push(board, board_dir):
+    """The compiled app fixtures (docs/kernel_appabi_2026-10.md section 4),
+    built for this board's chip and pushed as wasm_<name>.moy: App Roles Wasm,
+    the same module with no permission (App Short Wasm), and App Shell Wasm,
+    which imports a shell-served row, and App UI Wasm, which draws the
+    toolkit's widgets through the `ui` rows. Returns the carts root."""
+    import json
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_wasm_app_")
+    fixtures = ROOT / "tests" / "fixtures" / "wasm"
+    for name, src in (("app_roles", "app_roles"), ("app_short", "app_roles"),
+                      ("app_shell", "app_shell"), ("app_ui", "app_ui")):
+        out = os.path.join(tmp, name + ".moy")
+        wasm_cart.build(str(fixtures / (src + ".moy")), out, chips=(chip,))
+        if name == "app_short":
+            p = os.path.join(out, "manifest.json")
+            with open(p) as f:
+                man = json.load(f)
+            man["title"] = APP_SHORT[1]
+            man["moybyte"]["permissions"] = []
+            with open(p, "w") as f:
+                json.dump(man, f)
+        _push_folder(board, board_dir, out, root + "/wasm_" + name + ".moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+    # Pushed code is fixed code: the strikes an earlier run of these left
+    # (the crash guard, #160) are forgiven, as a commit forgives them.
+    for title in (APP_ROLES[1], APP_SHORT[1], APP_SHELL[1], APP_UI[1]):
+        board.pyval("ws.app_guard.forgive(ws.app_cart_id(next(c for c in "
+                    "ws.carts.all if c['title'] == %r))) or 1" % title, strict=True)
+    return root
+
+
+def wasm_app_reaches_its_roles(board, root):
+    """App Roles Wasm runs with its prefs and theme imports and no crossing of
+    any class but the console's frame, each prefs row hopped to the VM's task (moy_app.wasm_hops: the
+    hop's price per call, printed); the module one permission short is refused
+    at load naming prefs_get; App Shell Wasm's verdict keeps the VM, naming its
+    shell-served import. Leaves the desk as it found it."""
+    hops0 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
+    line = board.cmd("run %s" % APP_ROLES[1].lower(), wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.5)
+        st = board.state()
+        assert st.get("cart") == APP_ROLES[1], st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        assert not st.get("notice"), st["notice"]
+        # The run's books hold no crossing but the console's own frame.
+        play = st.get("play")
+        assert play is not None and play["upcalls"][1:] == [0, 0, 0, 0, 0], play
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    # The run's frames were the kernel's: its end healed the crash guard.
+    strikes = board.pyval("ws.app_guard.strikes(ws.app_cart_id(next(c for c in ws.carts.all "
+                          "if c['title'] == %r)))" % APP_ROLES[1], strict=True)
+    assert strikes == 0, "the run's end left %r strikes" % strikes
+    hops1 = board.pyval("__import__('moy_app').wasm_hops()", strict=True)
+    n, us, work = [b - a for a, b in zip(hops0, hops1)]
+    assert n >= 2, "prefs.get and prefs.set did not hop: %r -> %r" % (hops0, hops1)
+    print("\nWASM APP: %d hops, %d us end to end, %d us the rows' own: %.1f us "
+          "per hop" % (n, us, work, (us - work) / n))
+    line = board.cmd("run %s" % APP_SHORT[1].lower(), wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.5)
+        err = board.state().get("cart_error") or ""
+        assert "moybyte.app.prefs_get" in err, err
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    census = board.pyval("__import__('moy_play').census(%r)"
+                         % (root + "/wasm_app_shell.moy"), strict=True)
+    assert list(census) == ["wasm", False, "import moybyte.app.theme_set_variant"], census
+    census = board.pyval("__import__('moy_play').census(%r)"
+                         % (root + "/wasm_app_roles.moy"), strict=True)
+    assert list(census) == ["wasm", True, "free"], census
+    return (us - work) / n
+
+
+# App UI Wasm's pmem slots (tests/fixtures/wasm/app_ui.moy/src/main.wat).
+_UI_FRAMES, _UI_FAIL, _UI_HASH = 0, 8, 9
+
+
+def _app_ui_host_pmem(look):
+    """The fixture's pmem after its first frames on the host's WAMR in the
+    board's look (theme, variant) and its input in use (moy_ui.input(): the
+    hints draw that input's keys): the page's pixel hash the board's must
+    equal."""
+    import tempfile
+    from runtime import host_app, wasm_host
+    from tools import wasm_cart
+    from ws_helpers import make_drv, open_cart, quiesce
+    if not wasm_host.available():
+        pytest.skip("no host wasm binding to hold the board's page to")
+    root = os.path.join(tempfile.mkdtemp(prefix="moy_app_ui_"), "carts")
+    host_app.moy_carts.ensure_dirs(root)
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "app_ui.moy"),
+                    os.path.join(root, "app_ui.moy"))
+    ws = host_app.build_workstation(root)
+    ws.pointer.visible = False
+    ws.look.set_theme(look[0], persist=False, variant=look[1])
+    from runtime import ui_draw
+    ws.use_inputs((("local", ui_draw.INPUTS[look[2]]),))
+    open_cart(ws, APP_UI[1])
+    drv = make_drv(ws)              # each frame's input edges begin and end, as on a board
+    ws.pointer.place(319, 239)      # the host's mouse rests on no stop: no hover
+    for _ in range(9):
+        quiesce(ws)
+        ws._dirty = True
+        drv.frame(1.0 / 30.0)
+    pm = list(ws.player._lua._run.pmem()[1])
+    ws.exit()
+    ui_draw.input_kind("keys")      # the host's own again
+    return pm
+
+
+def wasm_app_draws_the_toolkit(board, root):
+    """App UI Wasm draws the public UI API's fixture page through the `ui`
+    rows (docs/ui_api_2026-10.md): no row fails, the page's pixel hash is the
+    host's run's, the run crosses into Python for nothing but the console's
+    frame and the census keeps it VM-free. Leaves the desk and the look as it
+    found them: the page runs under `known_look`, since the host's side is a
+    seeded theme's and a saved `custom` is the board's own."""
+    with known_look(board):
+        _wasm_app_draws_the_toolkit(board, root)
+
+
+def _wasm_app_draws_the_toolkit(board, root):
+    host = _app_ui_host_pmem(board.pyval(
+        "(ws.look.theme_name, ws.look.theme_variant, __import__('moy_ui').input())",
+        strict=True))
+    pm_expr = ("(lambda a: (__import__('moycore').pmem_image(a), list(a))[1])"
+               "(__import__('array').array('i', bytearray(1024)))")
+    line = board.cmd("run %s" % APP_UI[1].lower(), wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    try:
+        board.drain(2.5)
+        st = board.state()
+        assert st.get("cart") == APP_UI[1], st.get("cart")
+        assert not st.get("cart_error"), st["cart_error"]
+        play = st.get("play")
+        assert play is not None and play["upcalls"][1:] == [0, 0, 0, 0, 0], play
+        pm = board.pyval(pm_expr, timeout=30, strict=True)
+        assert pm[_UI_FAIL] == 0, "a ui row answered -%d" % pm[_UI_FAIL]
+        assert pm[_UI_FRAMES] > 0, pm
+        assert pm[_UI_HASH] == host[_UI_HASH], (
+            "the page's hash %r, the host's %r" % (pm[_UI_HASH], host[_UI_HASH]))
+        assert not board.state().get("cart_error")
+    finally:
+        board.leave_cart()
+        board.drain(1.0)
+    census = board.pyval("__import__('moy_play').census(%r)" % (root + "/wasm_app_ui.moy"),
+                         strict=True)
+    assert list(census) == ["wasm", True, "free"], census
 
 
 def wasm_cart_fps(board, title, seconds=10.0, check=None):
@@ -1311,6 +3342,66 @@ def _runs_clean(board, title, check=None):
         board.drain(1.0)
 
 
+# -- the runaway watch (native/moy_play/moy_play.h, #212's rider) ----------------
+#
+# A cart whose frame never comes back is ended by the kernel's watch on
+# another task, with the stuck words on its panel, and the board runs on.
+# The fixtures' third frame loops forever: the Lua one on its line, the
+# compiled one round an import call, which is where a terminated instance
+# stops. The watch's budget is shortened for the check and put back after.
+
+STUCK_BUDGET_MS = 1500
+STUCK = {"lua": ("Stuck Lua", "stuck_lua.moy"), "wasm": ("Stuck Wasm", "wasm/stuck.moy")}
+
+
+def stuck_carts_push(board, board_dir):
+    """Both stuck fixtures into the store (the compiled one built for this
+    board's chip), rescanned."""
+    import tempfile
+    from tools import wasm_cart
+    wasm_signing_key()
+    chip = _wasm_chip(board_dir)
+    root = str(board.pyval("str(ws.carts_root)", timeout=20, strict=True)).rstrip("/")
+    tmp = tempfile.mkdtemp(prefix="moy_stuck_")
+    out = os.path.join(tmp, "stuck.moy")
+    wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "stuck.moy"), out,
+                    chips=(chip,))
+    _push_folder(board, board_dir, out, root + "/wasm_stuck.moy")
+    _push_folder(board, board_dir, str(ROOT / "tests" / "fixtures" / "stuck_lua.moy"),
+                 root + "/stuck_lua.moy")
+    board.pyval("len(ws.rescan_carts() or ())", timeout=60)
+
+
+def a_stuck_run_is_ended(board, runtime):
+    """`runtime`'s stuck fixture, run from the launcher: within the budget
+    and a poll its frame is ended, the run reads as raised with the stuck
+    words -- a Lua run's on the line it was on -- and the board answers and
+    runs a cart after it. Returns the error text."""
+    title = STUCK[runtime][0]
+    board.pyval("__import__('moy_play').watch(%d)" % STUCK_BUDGET_MS, strict=True)
+    try:
+        line = board.cmd("run %s" % title.lower(), wait_for="REMOTE run", timeout=60)
+        assert line is not None and "no cart match" not in line, line
+        try:
+            board.drain(STUCK_BUDGET_MS / 1000.0 + 3.0)
+            st = board.state()
+            err = st.get("cart_error") or ""
+            assert st.get("cart") == title, st.get("cart")
+            assert "stuck: one frame ran over 2 s" in err, st
+            if runtime == "lua":
+                assert "cart:7:" in err or "cart:8:" in err, err
+            info = board.pyval("__import__('moy_play').info()", strict=True)
+            assert info[14] is True, info
+            print("\nSTUCK %s: %r" % (runtime, err))
+        finally:
+            board.leave_cart()
+            board.drain(1.0)
+    finally:
+        board.pyval("__import__('moy_play').watch(0)", strict=True)
+    _runs_clean(board, "Sakura Lua")
+    return err
+
+
 INTERP_NOTICE_TITLE = "RUNNING SLOWLY"
 # The sub-line by cause (runtime/player.py's INTERP_NOTICE_SUB, duplicated
 # here because this file drives a real board over serial rather than
@@ -1416,8 +3507,7 @@ def wasm_too_big_cart_opens_the_notice(board, board_dir):
 # engine's table (`moycore.wasm_table`) before anything loads.
 
 NEWER_TITLE = "Newer Wasm"
-NEWER_NOTICE = ("Newer Wasm needs a newer console (missing: later). "
-                "Update the firmware.")
+NEWER_NOTICE = "It uses later. Update in Settings, then try again."
 
 
 def wasm_newer_cart_opens_the_notice(board, board_dir):

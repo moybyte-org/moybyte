@@ -50,7 +50,6 @@ class _FakeOta:
         self.manifest = manifest
         self.absent = absent
         self.error = None
-        self.to_slot = False        # set by begin_download; the Zero always asks
         self.boot_verdict = None
         self.confirmed = False
         self.dl_total = 0
@@ -93,9 +92,8 @@ class _FakeOta:
         self.checked_channel = channel
         return self.manifest
 
-    def begin_download(self, manifest, to_slot=False):
+    def begin_download(self, manifest):
         self.calls.append("begin_download")
-        self.to_slot = to_slot
         if self.error:
             raise ValueError(self.error)
         self.dl_total = int(manifest.get("size", 0) or 0)
@@ -111,10 +109,10 @@ class _FakeOta:
         self.calls.append("download_finish")
         if self.error:
             return None
-        return "<slot>" if self.to_slot else "/moy/update/firmware.bin"
+        return "<slot>"
 
     def staged_in_slot(self):
-        return bool(self.to_slot)
+        return True
 
     def begin(self, path):
         self.calls.append("begin")
@@ -444,7 +442,8 @@ def host(tmp_path):
     carts.mkdir()
     web = tmp_path / "web"
     web.mkdir()
-    h = zero_host.zero_host_class()(str(carts), str(web), pin="1234")
+    from moy_webhost import WebHost
+    h = WebHost(str(carts), pin="1234")
     h.update = zero_host.ZeroUpdate(_FakeOta(MANIFEST))
     return h
 
@@ -517,28 +516,10 @@ def test_the_update_route_does_not_shadow_the_store(host):
     """`/update` is a fourth arm on a subclass, and the three it sits beside
     have to keep working: an override that swallowed everything would be a
     board that serves no carts and passes every test in this file."""
-    assert host.handle_http("GET", "/updates?pin=1234", None) is None
+    assert host.handle_http("GET", "/updates?pin=1234", None).startswith(
+        b"HTTP/1.1 404")
     code, _ = _status(host.handle_http("GET", "/carts.json", None))
     assert code == 403, "the store's own gate still applies"
-
-
-def test_this_board_downloads_STRAIGHT_INTO_THE_SLOT():
-    """Not a preference on the Zero -- the difference between working and not.
-
-    Its whole filesystem is 2.38MB with ~180KB free and the image is 2.27MB, so
-    a staged copy could not fit on an EMPTY volume. The measured symptom was
-    `OSError 28` (ENOSPC) 184KB into the transfer, on the first OTA anyone ever
-    asked this board for. The inactive slot is 2.75MB and empty.
-    """
-    ota = _FakeOta(MANIFEST)
-    task = zero_host.ZeroUpdate(ota)
-    _to_offer(task)
-    task.request("download")
-    _drive(task)
-
-    assert ota.to_slot is True, (
-        "the download staged to a file -- on this board that is ENOSPC, not a "
-        "slower path")
 
 
 def test_an_image_already_in_the_slot_installs_without_a_second_pass():

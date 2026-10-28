@@ -4,7 +4,9 @@ The console moved off the browser's main thread into worker.js: it owns the VM,
 self-paces the frame loop and PUSHES frames, while the page only blits them.
 Nothing else in the suite executes that JS, so this fakes the Web Worker globals
 (`self` + `fetch`) in node and drives boot -> assets -> run -> frames -> input ->
-reload, for both presentation tiers plus the idle case.
+reload, for both presentation tiers plus the idle case. Once booted the worker
+runs on the harness's virtual clock, so the frame counts and the sim/wall ratio
+measure the worker's pacing and not how busy the machine is.
 
 Needs a built dist/ (firmware/web_runner/build.sh [--stage-only]); skipped when
 that or node is absent, so a fresh checkout still runs the suite green.
@@ -29,8 +31,8 @@ def _have_dist():
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 @pytest.mark.skipif(not _have_dist(), reason="web_runner dist/ not built")
 @pytest.mark.parametrize("search", [
-    "?desktop=1&cart=brick_siege.moy",     # windowed desktop, cart running
-    "?cart=star_catcher.moy",              # handheld tier, cart running
+    "?desktop=1&cart=moybyte.brick_siege.moy",     # windowed desktop, cart running
+    "?cart=moybyte.star_catcher.moy",              # handheld tier, cart running
     "?desktop=1",                          # idle desk: the redraw gate must hold
 ])
 def test_worker_protocol(search):
@@ -84,22 +86,25 @@ _BUILD_SH = os.path.join(_RUNNER, "build.sh")
 
 
 def test_the_build_strips_the_worker_modules_comments_and_nothing_else():
-    """build.sh re-prints the two worker modules with emsdk's terser,
-    comments off -- never compressed or renamed, so dist/ runs the tree's
-    code and a stack trace names its function. They ride every board image,
-    and their comments are most of their bytes."""
+    """build.sh re-prints the two worker modules and the VM's loader with
+    emsdk's terser, comments off -- never compressed or renamed, so dist/ runs
+    the tree's code and a stack trace names its function. They ride every
+    board image, and their comments are most of their bytes."""
     import re
     sh = open(_BUILD_SH).read()
-    call = re.search(r'"\$\{TERSER\}"[^\n]*\\\n[^\n]*', sh)
-    assert call, "build.sh no longer strips the worker modules"
-    assert "--format comments=false,beautify=true" in call.group(0)
-    for flag in ("--compress", "--mangle", " -c", " -m"):
-        assert flag not in call.group(0), flag
+    calls = re.findall(r'"\$\{TERSER\}"[^\n]*\\\n[^\n]*', sh)
+    assert len(calls) == 2, "build.sh no longer strips the worker modules and the loader"
+    assert "--format comments=false,beautify=true,indent_level=0" in calls[0]
+    assert "build-moybyte/micropython.mjs" in calls[1]
+    assert "--format comments=false " in calls[1]
+    for call in calls:
+        for flag in ("--compress", "--mangle", " -c", " -m"):
+            assert flag not in call, flag
     assert "for f in worker.js moy_store.mjs; do" in sh
 
 
 @pytest.mark.skipif(not _have_dist(), reason="web_runner dist/ not built")
-@pytest.mark.parametrize("name", ["worker.js", "moy_store.mjs"])
+@pytest.mark.parametrize("name", ["worker.js", "moy_store.mjs", "micropython.mjs"])
 def test_the_shipped_worker_modules_carry_no_comments(name):
     import re
     with open(os.path.join(_RUNNER, "dist", name)) as f:

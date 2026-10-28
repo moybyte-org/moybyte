@@ -8,13 +8,19 @@ console ended up, not which method was called."""
 
 from runtime import (files_app, host_app, moy_carts, system_api,
                      text_modes)
+from ws_helpers import select_on_home  # noqa: E402
+import pytest
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
 
 
 def _open_files(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Files":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Files")
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)
@@ -35,11 +41,10 @@ def _seed_drawing(carts, name):
 def test_the_shelf_carries_the_three_roots_a_person_touches(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
-    shown = [kind for kind, _label in app._shown_kinds()]
-    assert shown[:3] == [files_app.PROJECTS, "docs", "drawings"]
-    labels = dict(files_app.KIND_LABELS)
-    assert labels[files_app.PROJECTS] == "PROJECTS"
-    assert labels["docs"] == "NOTES"
+    shown = app.shown_places()
+    assert [p[0] for p in shown[:3]] == [files_app.PROJECTS, "docs", files_app.ART]
+    assert [p[1] for p in shown[:3]] == ["Projects", "Notes", "Art"]
+    assert dict((p[0], p[3]) for p in shown)[files_app.ART] == ("drawings", "sprites")
     # the carts root is NOT a files kind and is never asked of the files store
     assert files_app.PROJECTS not in moy_carts.FILE_KINDS
 
@@ -47,14 +52,15 @@ def test_the_shelf_carries_the_three_roots_a_person_touches(tmp_path):
 def test_the_projects_root_lists_one_row_per_moy_folder(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
-    assert app._rows, "the seeded store has projects"
-    assert len(app._rows) == len(app.project_carts) == app.counts[files_app.PROJECTS]
-    for row in app._rows:
-        assert row.endswith(".moy")           # a folder, shown as ONE item
-        assert "/" not in row                 # never expanded into its files
+    app.open_place(files_app.PROJECTS)
+    carts = app._nav.projects()
+    assert app.rows, "the seeded store has projects"
+    assert len(app.rows) == len(carts) == app.counts[files_app.PROJECTS]
+    for name, kind, _label, _icon, cart in app.rows:
+        assert kind == files_app.PROJECTS and cart in carts   # a folder, ONE item
+        assert "/" not in name and not name.endswith(".moy")  # shown, not its path
     # and the roster is the pickers' -- system apps are not projects
-    titles = {c.get("title") for c in app.project_carts}
+    titles = {c.get("title") for c in carts}
     assert "Files" not in titles and "Paint" not in titles
 
 
@@ -63,15 +69,15 @@ def test_the_projects_root_lists_one_row_per_moy_folder(tmp_path):
 def test_a_moy_folder_opens_the_project_editor_and_never_a_listing(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
-    cart = app.project_carts[0]
+    app.open_place(files_app.PROJECTS)
+    cart = app.rows[0][4]
 
-    assert app.door(app._rows[0], kind=files_app.PROJECTS)[0] == "editor"
-    app._tap_row(0)
+    assert app.door(app.rows[0][0], kind=files_app.PROJECTS) == ("editor", cart)
+    app._open_row(0)
 
-    assert ws.wm.top_kind() == "menu"          # the Editor, not the Files grid
+    assert ws.wm.top_kind() == "menu"          # the Editor, not a Files listing
     assert ws.cart is cart
-    assert app.mode == files_app.PROJECTS       # Files did not become a browser
+    assert app.place == files_app.PROJECTS      # Files did not become a browser
 
 
 def test_a_cart_main_lands_on_the_code_tab(tmp_path):
@@ -102,10 +108,10 @@ def test_an_image_lands_in_paint(tmp_path):
     _seed_drawing(carts, "dragon")
     ws = host_app.build_workstation(carts)
     app = _open_files(ws)
-    app._enter_kind("drawings")
+    app.open_place(files_app.ART)
 
     assert app.door("dragon", kind="drawings") == ("paint", "dragon")
-    app._pick("dragon")
+    app._act("OPEN", "dragon")
 
     assert ws.wm.top_kind() == "artwork"
     assert ws.artwork.doc_name() == "dragon"
@@ -119,7 +125,7 @@ def test_a_note_opens_the_text_page_in_markdown_mode(tmp_path):
     moy_carts.save_file("docs", "story", "once upon a time", carts)
     ws = host_app.build_workstation(carts)
     app = _open_files(ws)
-    app._enter_kind("docs")
+    app.open_place("docs")
 
     assert app.door("story", kind="docs") == (text_modes.MD, "story")
     assert app.route("story", kind="docs") == text_modes.MD
@@ -171,12 +177,12 @@ def test_a_missing_app_degrades_to_the_status_line(tmp_path):
     ws.carts.apply([c for c in ws.carts.all
                     if not system_api.is_text_app(c)])
     assert app.route("story", kind="docs") is None
-    assert app.status == "NO TEXT APP"
+    assert app.status == "No text app"
     ws._apps_by_id.pop("artwork")
     assert app.route("dragon", kind="drawings") is None
-    assert app.status == "NO PAINT APP"
+    assert app.status == "No Paint app"
     assert app.route("gone.moy", kind=files_app.PROJECTS) is None
-    assert app.status == "CAN'T OPEN"
+    assert app.status == "Can't open"
 
 
 # -- the return: what Files opens comes back to Files -------------------------
@@ -187,7 +193,14 @@ def test_a_missing_app_degrades_to_the_status_line(tmp_path):
 # shelf the person left, never on the app's root and never at home.
 
 def _tap_x(ws):
-    """The OS bar's context-X, through the ROUTER (where the bar contract is)."""
+    """The OS bar's context-X, through the ROUTER (where the bar contract is);
+    in the Editor, whose one bar has no way back (look step 30), B."""
+    if ws.wm.top_kind() == "menu":
+        drv = host_app.ConsoleDriver(ws)
+        drv.press("b")
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+        return
     x, y, w, h = ws.layout.context_x_btn
     ws.pointer.place(x + w // 2, y + h // 2)
     ws.pointer.click = True
@@ -204,15 +217,19 @@ def test_a_note_comes_back_to_files_and_files_still_exits(tmp_path):
     moy_carts.save_file("docs", "story", "once upon a time", carts)
     ws = host_app.build_workstation(carts)
     app = _open_files(ws)
-    app._enter_kind("docs")
-    app._pick("story")
+    _key(ws, app, "down")
+    ws.frame(1 / 30)
+    _key(ws, app, "a")                         # Notes
+    ws.frame(1 / 30)
+    assert (app.place, app.level) == ("docs", "files")
+    app._act("OPEN", "story")
     ws.input.begin_frame()
     ws.frame(1 / 30)
     assert ws.cart.get("title") == "Notes"
 
     _tap_x(ws)
     assert ws.wm.top_kind() == "files"
-    assert (app.mode, app.grid.kind) == ("grid", "docs")   # the shelf it left
+    assert (app.place, app.level, app.sel_name()) == ("docs", "files", "story")
 
     _tap_x(ws)
     assert ws.wm.top_kind() == "launcher"
@@ -223,28 +240,30 @@ def test_a_drawing_comes_back_from_paint_to_the_same_shelf(tmp_path):
     _seed_drawing(carts, "dragon")
     ws = host_app.build_workstation(carts)
     app = _open_files(ws)
-    app._enter_kind("drawings")
-    app._pick("dragon")
+    app.open_place(files_app.ART)
+    app.level = "files"
+    app._act("OPEN", "dragon")
     ws.input.begin_frame()
     ws.frame(1 / 30)
     assert ws.wm.top_kind() == "artwork"
 
     _tap_x(ws)
     assert ws.wm.top_kind() == "files"
-    assert (app.mode, app.grid.kind) == ("grid", "drawings")
+    assert (app.place, app.level) == (files_app.ART, "files")
 
 
 def test_a_project_comes_back_from_the_editor_to_the_projects_root(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
-    app.sel = 1
-    app._tap_row(1)
+    app.open_place(files_app.PROJECTS)
+    app.level = "files"
+    app.cur = 1
+    app._open_row(1)
     assert ws.wm.top_kind() == "menu"
 
     _tap_x(ws)
     assert ws.wm.top_kind() == "files"
-    assert (app.mode, app.sel) == (files_app.PROJECTS, 1)
+    assert (app.place, app.level, app.cur) == (files_app.PROJECTS, "files", 1)
 
 
 def test_a_project_file_returns_through_the_editor_and_on_to_files(tmp_path):
@@ -252,8 +271,8 @@ def test_a_project_file_returns_through_the_editor_and_on_to_files(tmp_path):
     Config tab THROUGH the loader, and leaving that Editor comes back here."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
-    cart = app.project_carts[0]
+    app.open_place(files_app.PROJECTS)
+    cart = app.rows[0][4]
     app.route("manifest.json", cart=cart)
     ws.input.begin_frame()
     ws.frame(1 / 30)
@@ -264,7 +283,7 @@ def test_a_project_file_returns_through_the_editor_and_on_to_files(tmp_path):
 
     _tap_x(ws)
     assert ws.wm.top_kind() == "files"
-    assert app.mode == files_app.PROJECTS
+    assert app.place == files_app.PROJECTS
 
 
 def test_files_itself_exits_to_the_launcher(tmp_path):
@@ -281,131 +300,164 @@ def test_going_home_from_inside_ends_the_return(tmp_path):
     _seed_drawing(carts, "dragon")
     ws = host_app.build_workstation(carts)
     app = _open_files(ws)
-    app._enter_kind("drawings")
-    app._pick("dragon")
+    app.open_place(files_app.ART)
+    app._act("OPEN", "dragon")
     ws.input.begin_frame()
     ws.frame(1 / 30)
 
     ws.go_home()
     assert ws.wm.top_kind() == "launcher"
-    assert ws._app_return is None
+    assert ws.returns.back() is None
     ws.open_settings()
     ws.exit()
     assert ws.wm.top_kind() == "launcher"
 
 
-# -- scrolling the roots ------------------------------------------------------
+# -- scrolling a place's list -------------------------------------------------
+#
+# The list is a `ui.table` placed in the page's list rect: the engine keeps
+# its offset by the table's id, scrolls it by a drag over its rows and keeps
+# the current row in view under the keys. What a test can see of the offset
+# is which row a tap lands on.
 
-def _drag(app, x, y0, y1, steps=6):
-    """A finger drag over the app, sample by sample -- a scroll is made of
-    samples that are not clicks, so it can only be driven this way."""
-    app._surf.pointer().down = True
-    app.handle_pointer(x, y0, True)
-    for k in range(1, steps + 1):
-        app.handle_pointer(x, y0 + (y1 - y0) * k // steps, False)
-    app._surf.pointer().down = False
-    app.handle_pointer(x, y1, False)
+CAPTION, HEAD, ROW = 19, 18, 20     # the handheld's, at fs 1
+
+
+def _drv(ws):
+    return host_app.ConsoleDriver(ws)
+
+
+def _frames(drv, n=3):
+    for _ in range(n):
+        drv.ws.mark_dirty()
+        drv.frame(1 / 30)
 
 
 def _key(ws, app, name):
-    """One press edge, with the key-up frame the device always produces."""
-    ws.input.set_held(name, True)
-    ws.input.begin_frame()
-    app.handle_input(ws.input)
-    ws.input.set_held(name, False)
-    ws.input.begin_frame()
+    """One press edge, and the frames that answer it."""
+    drv = _drv(ws)
+    drv.press(name)
+    _frames(drv)
 
 
-def _tap_row_rect(app, row):
-    r = app.layout.row_rect(row)
-    x, y = r[0] + r[2] // 2, r[1] + r[3] // 2
-    app._surf.pointer().down = True
-    app.handle_pointer(x, y, True)
-    app._surf.pointer().down = False
-    app.handle_pointer(x, y, False)
+def _page(ws, place=files_app.PROJECTS):
+    """The handheld's page of `place`'s files, focus on its rows."""
+    app = ws.files_app
+    app.open_place(place)
+    app.level = "files"
+    app._focus = "files"
+    _frames(_drv(ws))
+    return app
 
 
-def test_the_projects_root_scrolls_by_drag_and_clamps(tmp_path):
+def _view(app):
+    """The rows' viewport: the table's box under its caption and header."""
+    x, y, w, h = app._ui.box("files")
+    return x, y + CAPTION + HEAD, w, h - CAPTION - HEAD
+
+
+def _drag(ws, x, y0, y1, steps=6, still=4):
+    """A finger drag, sample by sample -- a scroll is made of samples that are
+    not clicks, so it can only be driven this way -- held still `still`
+    frames before it lets go, so the page rests where the finger left it
+    (a release at speed flings it on)."""
+    drv = _drv(ws)
+    drv.touch(x, y0)
+    drv.frame(1 / 30)
+    for k in range(1, steps + 1):
+        drv.touch_drag(x, y0 + (y1 - y0) * k // steps)
+        drv.frame(1 / 30)
+    for _ in range(still):
+        drv.touch_drag(x, y1)
+        drv.frame(1 / 30)
+    drv.touch_up()
+    _frames(drv)
+
+
+def _tap_at(ws, x, y):
+    drv = _drv(ws)
+    drv.click(x, y)
+    _frames(drv)
+
+
+def test_the_projects_list_scrolls_by_drag_and_clamps(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
-    lay = app.layout
-    assert len(app._rows) > lay.list_rows, "the seeded store overflows one screen"
-    last = len(app._rows) - lay.list_rows
+    _open_files(ws)
+    app = _page(ws)
+    x, vy, w, vh = _view(app)
+    n = len(app.rows)
+    assert n * ROW > vh, "the seeded store overflows one screen"
+    cx = x + w // 2
 
-    _drag(app, 160, lay.list_y + 150, lay.list_y + 10)
-    assert app.top == 7                       # 140px / a 20px row
-    assert app.top <= app.sel < app.top + lay.list_rows   # dragged along
+    _drag(ws, cx, vy + vh - 5, vy + vh - 145)   # 140 px: seven rows, from inside the view
+    _tap_at(ws, cx, vy + ROW // 2)
+    assert app.cur == 7, "the first row in view is the eighth"
+    assert ws.wm.top_kind() == "files"
 
-    for _ in range(9):                        # past the end
-        _drag(app, 160, lay.list_y + 170, lay.list_y + 10)
-    assert app.top == last
+    for _ in range(9):                          # past the end
+        _drag(ws, cx, vy + vh - 10, vy + 10)
+    _tap_at(ws, cx, vy + vh - ROW // 2)
+    assert app.cur == n - 1, "the last row in view is the last"
 
-    for _ in range(9):                        # and back past the start
-        _drag(app, 160, lay.list_y + 10, lay.list_y + 170)
-    assert app.top == 0
+    for _ in range(9):                          # and back past the start
+        _drag(ws, cx, vy + 10, vy + vh - 10)
+    _tap_at(ws, cx, vy + ROW // 2)
+    assert app.cur == 0
 
 
 def test_a_drag_never_opens_the_row_it_let_go_of(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
-    lay = app.layout
-    _drag(app, 160, lay.list_y + 150, lay.list_y + 10)
-    assert ws.wm.top_kind() == "files"         # scrolled, not opened
-    _tap_row_rect(app, 1)                      # a clean tap still does open
-    assert ws.wm.top_kind() == "menu"
+    _open_files(ws)
+    app = _page(ws)
+    x, vy, w, _vh = _view(app)
+    _drag(ws, x + w // 2, vy + ROW // 2, vy + ROW // 2 + 60)   # down from the top
+    assert ws.wm.top_kind() == "files"          # scrolled (nowhere), not opened
+    assert app.cur == 0
+    _tap_at(ws, x + w // 2, vy + ROW + ROW // 2)
+    assert app.cur == 1 and ws.wm.top_kind() == "files"   # the first tap picks it
+    _tap_at(ws, x + w // 2, vy + ROW + ROW // 2)
+    assert ws.wm.top_kind() == "menu"           # a second, clean tap opens it
 
 
-def test_the_projects_root_scrolls_by_key_with_the_selection(tmp_path):
+def test_the_keys_reach_every_row_and_the_view_follows(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
-    vis = app.layout.list_rows
+    _open_files(ws)
+    app = _page(ws)
+    x, vy, w, vh = _view(app)
+    vis = vh // ROW
     for _ in range(vis + 2):
         _key(ws, app, "down")
-    assert app.sel == vis + 2
-    assert app.top == app.sel - vis + 1        # the window followed it
+    assert app.cur == vis + 2
     _key(ws, app, "up")
-    assert app.sel == vis + 1
+    assert app.cur == vis + 1
+    _key(ws, app, "down")
+    cart = app.rows[vis + 2][4]
+    _tap_at(ws, x + w // 2, vy + vh - ROW // 2)  # the current row, at the view's foot
+    assert ws.wm.top_kind() == "menu" and ws.cart is cart, "the view followed it"
 
 
-def test_a_shrinking_list_never_strands_the_window(tmp_path):
+def test_the_arrows_reach_every_row(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
-    app.top = len(app._rows)                   # as if the list had shrunk under it
-    app._clamp_list(len(app._rows))
-    assert app.top == len(app._rows) - app.layout.list_rows
+    _open_files(ws)
+    app = _page(ws)
+    for _ in range(len(app.rows) + 2):
+        _key(ws, app, "down")
+    assert app.cur == len(app.rows) - 1
+    assert app._focused.startswith("verb "), "past the last row, down reaches the verbs"
 
 
-def test_the_notes_and_drawings_grids_page_through_everything(tmp_path):
-    """NOTES and DRAWINGS are the shared thumbnail GRID, which pages rather
-    than scrolls -- so what has to hold there is that every item is reachable:
-    the page chips and the arrow keys both walk the whole kind."""
-    carts = str(tmp_path / "carts")
-    for i in range(8):
-        moy_carts.save_file("docs", "note_%d" % i, "hi", carts)
-    ws = host_app.build_workstation(carts)
-    app = _open_files(ws)
-    app._enter_kind("docs")
-    grid = app.grid
-    assert grid._pages() > 1, "8 notes overflow one page at 320x240"
-
-    seen = set()
-    for _ in range(len(grid.names)):
-        ws.input.set_held("right", True)
-        ws.input.begin_frame()
-        seen.add(grid.nav(ws.input)[1])
-        ws.input.set_held("right", False)
-        ws.input.begin_frame()
-    assert seen == set(grid.names)             # the arrows reach every item
-
-    prev_r, next_r = grid._page_rects()
-    pages = grid._pages()
-    for _ in range(pages):
-        assert grid.tap(next_r[0] + 2, next_r[1] + 2)[0] == "page"
-    assert grid.page == grid.sel // grid._per_page()
+def test_a_shrinking_list_never_strands_the_view(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_files(ws)
+    app = _page(ws)
+    x, vy, w, vh = _view(app)
+    for _ in range(9):
+        _drag(ws, x + w // 2, vy + vh - 10, vy + 10)
+    app.rows = app.rows[:3]                    # as if the list had shrunk under it
+    app.cur = 2
+    _frames(_drv(ws))
+    _tap_at(ws, x + w // 2, vy + ROW // 2)
+    assert app.cur == 0, "the view came back to the rows there are"
 
 
 # -- a cart's own image is a PICTURE ------------------------------------------
@@ -464,8 +516,8 @@ def test_a_gallery_drawing_still_opens_on_the_drawings_kind(tmp_path):
 
     ws.artwork.new_doc(320, 240)
     assert ws.artwork.doc_kind() == "drawings"
-    app._enter_kind("drawings")
-    app._pick("dragon")
+    app.open_place(files_app.ART)
+    app._act("OPEN", "dragon")
     assert ws.artwork.doc_kind() == "drawings"
 
 
@@ -490,8 +542,8 @@ def test_the_deep_chain_still_finds_its_way_back_to_files(tmp_path):
     The app return has to survive the two hops that are not apps."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
-    app._tap_row(0)
+    app.open_place(files_app.PROJECTS)
+    app._open_row(0)
     cart = ws.project.cart
     assert ws.wm.top_kind() == "menu"
 
@@ -505,16 +557,17 @@ def test_the_deep_chain_still_finds_its_way_back_to_files(tmp_path):
     assert ws.wm.top_kind() == "menu"          # back into the project
     _tap_x(ws)
     assert ws.wm.top_kind() == "files"         # ...and on to the shelf
-    assert app.mode == files_app.PROJECTS
+    assert app.place == files_app.PROJECTS
     _tap_x(ws)
     assert ws.wm.top_kind() == "launcher"
 
 
-def test_b_leaves_a_row_list_instead_of_being_swallowed(tmp_path):
-    """A row list that eats B is a room with no door on a keyboard board: the
-    `<` chip was the only way back to the shelf."""
+def test_b_leaves_a_places_list_instead_of_being_swallowed(tmp_path):
+    """A list that eats B is a room with no door on a keyboard board: on the
+    handheld, B goes back from a place's files to the places."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    app = _open_files(ws)
-    app._enter_rows(files_app.PROJECTS)
+    _open_files(ws)
+    app = _page(ws)
     _key(ws, app, "b")
-    assert app.mode == "kinds"
+    assert app.level == "places" and app._focused == "Places"
+    assert ws.wm.top_kind() == "files"

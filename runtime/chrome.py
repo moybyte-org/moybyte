@@ -1,25 +1,23 @@
 # Map (grep -n a name to jump there):
 #   color                             a colour name or palette index -> index
 #   -- Pointer UI layout              the 320x240 pointer-UI constants
-#   -- Desktop shell                  chrome_scale_floor, Layout, CodeLayout
+#   -- Desktop shell                  chrome_scale_floor, text_scale_floor, Layout, CodeLayout
 #   Layout                            responsive desktop-shell geometry
 #   CodeLayout                        responsive code-editor geometry
-#   -- Button icon glyphs             the pre-literate icon vocabulary
 #   -- the unified top bar's icon theme  the bar's icon sheet
-#   -- Panel THEMES                   the theme token tables
-#   -- Light variants                 theme_colors
+#   -- Panel THEMES                   THEME_NAMES, the seed packages' names
 #   theme_colors                      the full token dict for a theme and variant
+#   Live                              the live theme's colours, RGB placed in the block (live_colors)
 """The console's stateless base layer -- the chrome + geometry the shared Moybyte
 console draws with, extracted from console.py so the Workstation kernel is alone in
 that file.
 
 Everything here is PURE: the MOY64 palette (NAMES/color), the responsive Layout /
-CodeLayout geometry (#39), the pre-literate icon-glyph vocabulary (_GLYPHS /
-_blit_glyph), the themeable top-bar IconSheet defaults (_ICON / _ICON_ART /
+CodeLayout geometry (#39), the themeable top-bar IconSheet defaults (_ICON / _ICON_ART /
 _default_icon_sheet), and the small helpers (_in / _clamp_scroll / _cursor_delta /
 _ticks_* / _err_text / _from_ascii). Nothing touches a Workstation -- these are the
 functions/constants shared by console.py AND the surface modules (launcher_layer
-imports Layout; every surface gets NAMES/_blit_glyph injected). console.py imports it
+imports Layout; every surface gets NAMES and `ui.glyph` injected). console.py imports it
 all back and re-exports under the pre-extraction `console.X` names, so every caller +
 test is unchanged.
 
@@ -30,57 +28,59 @@ code_layer, none of which import console/chrome -- so there is no cycle. Same
 bare-or-package fallback as those modules.
 """
 
-from array import array
-
 try:
-    from editors import CodeEditor, IconSheet
+    from editors_sheet import IconSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import CodeEditor, IconSheet
+    from runtime.editors_sheet import IconSheet
 
 try:
     from widgets import _Blit, _in, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import _Blit, _in, _err_text
 
-# The shared petme128 glyph source (#62) -- the Library shelf's display type
-# (_print_scaled) rasterizes it through plain rect blocks so it renders identically
-# on every canvas (host SystemCanvas, device, web recording). Staged as `moy_font`
-# on the device builds, `font`/`runtime.font` on host trees.
+# The toolkit's face: the display type's widths go through its text path.
 try:
-    import moy_font as _font
-except ImportError:  # pragma: no cover - host fallback
-    try:
-        import font as _font
-    except ImportError:
-        from runtime import font as _font
+    import ui_draw as _ui_draw
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui_draw as _ui_draw
 
 # Surface geometry constants the Layout classes derive their responsive rects from.
 # bar_layer/settings_layer/code_layer OWN these (see their modules); imported here the
 # same way console.py imports them, so Layout/CodeLayout reflow off the same numbers.
 try:
-    from bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y
+    from bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y, _bar_text_w
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y
+    from runtime.bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y, _bar_text_w
 
 try:
-    from settings_layer import (_SET_ROW_H, _SET_X, _SET_W, _SET_ROW_Y0,
-                                 _SET_BACK, _SET_ACH, _SET_TITLE_HIT)
+    from settings_layer import _SET_ROW_H
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.settings_layer import (_SET_ROW_H, _SET_X, _SET_W, _SET_ROW_Y0,
-                                         _SET_BACK, _SET_ACH, _SET_TITLE_HIT)
+    from runtime.settings_layer import _SET_ROW_H
 
 try:
-    from code_layer import (_CODE_LH, _CODE_X0, _CODE_Y0,
-                            _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
+    from code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_H,
+                            _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS, _CODE_INSET,
+                            _CODE_MARK)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.code_layer import (_CODE_LH, _CODE_X0, _CODE_Y0,
-                                    _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
+    from runtime.code_layer import (_CODE_LEAD, _CODE_STATUS_H, _SYM_H,
+                                    _SYM_MIN, _SYM_MARGIN, _CODE_SYMBOLS, _CODE_INSET,
+                                    _CODE_MARK)
+
+try:
+    import shell_layout as _shell_layout
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import shell_layout as _shell_layout
 
 try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    from layout_base import CLASSES as _LB_CLASSES, class_of as _lb_class_of, bar_rows as _bar_rows
+    from layout_base import sys_tile as _sys_tile, metric as _lb_metric, bars as _lb_bars
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
+    from runtime.layout_base import (CLASSES as _LB_CLASSES, class_of as _lb_class_of,
+                                     bar_rows as _bar_rows, sys_tile as _sys_tile,
+                                     metric as _lb_metric, bars as _lb_bars)
 
 
 try:                                    # device: ticks is frozen flat
@@ -107,6 +107,47 @@ CURSOR = _from_ascii([
     "OFFFFFO.", "OFFFFFFO", "OFFFOOO.", "OFOOFO..", "OO..OFO.", "O...OFO.", "....OO..",
 ], {"O": 0, "F": 7}, ".")
 
+
+
+def _arrow_sprite(cells, w, h):
+    """A double-headed arrow from its fill cells: white, outlined black on
+    every side and corner, so it reads on a pixel of any colour."""
+    fill = set(cells)
+    pix = []
+    for y in range(h):
+        for x in range(w):
+            if (x, y) in fill:
+                pix.append(7)
+            elif any((x + i, y + j) in fill for i in (-1, 0, 1) for j in (-1, 0, 1)):
+                pix.append(0)
+            else:
+                pix.append(-1)
+    return _Blit(w, h, pix, -1)
+
+
+def _resize_cursors():
+    n = 13
+    m = n // 2
+    e = n - 2                        # the far tip's row and column
+    ew = [(x, m) for x in range(1, n - 1)]
+    for d in range(4):               # a solid head at each end
+        for j in range(-d, d + 1):
+            ew += [(1 + d, m + j), (e - d, m + j)]
+    ns = [(y, x) for x, y in ew]
+    nwse = [(i, i) for i in range(1, n - 1)]
+    for x in range(1, n - 1):
+        for y in range(1, n - 1):
+            if x + y <= 6 or x + y >= 2 * e - 4:
+                nwse.append((x, y))
+    nesw = [(n - 1 - x, y) for x, y in nwse]
+    return {k: _arrow_sprite(c, n, n)
+            for k, c in (("ew", ew), ("ns", ns), ("nwse", nwse), ("nesw", nesw))}
+
+
+# The pointer over a window's resize zone (WindowedWM.cursor_shape), hotspot at
+# its centre.
+RESIZE_CURSORS = _resize_cursors()
+
 NAMES = {
     "black": 0, "dark_blue": 1, "dark_purple": 2, "dark_green": 3, "brown": 4,
     "dark_grey": 5, "light_grey": 6, "white": 7, "red": 8, "orange": 9,
@@ -126,7 +167,7 @@ def color(name_or_index):
 # this file so console._X still resolves for Layout + the golden harness/tests.
 # --- Desktop shell (#28): home = wallpaper + cart icon grid -----------------
 # The home screen is now a Picotron/TIC-80-style desktop: a wallpaper backdrop, a
-# grid of tappable cart icons and the unified 18px top bar (clock + wifi/batt/gear
+# grid of tappable cart icons and the theme layout's bars (clock + wifi/batt/≡
 # + NEW/DUP/DEL management icons). The top bar's icons are 16x16 sprites from the
 # editable IconSheet (Stage 1); the rest of the chrome uses the indexed API +
 # petme128 font + the _glyph vocabulary, so host == device. (_STATUS_H lives in
@@ -136,9 +177,7 @@ _ICON_COLS = 4
 _ICON_ROWS = 2
 _ICON_W = 70            # tile footprint (icon box + label)
 _ICON_H = 84
-_ICON_GAP_X = 6
 _ICON_GAP_Y = 6
-_ICON_X0 = 8            # left margin so the COLS tiles + gaps center in 320px
 _ICON_Y0 = _STATUS_H + 8
 _ICON_BOX = 40          # the inner art box of a tile (the tappable icon proper)
 # Page chevrons (when more carts than one page): tap to flip pages.
@@ -150,10 +189,8 @@ _PAGE_NEXT = (304, 110, 14, 24)
 # reclaiming it, deliberately, for two reasons. (1) Settings is an inset DIALOG
 # over the wallpaper, so 24*fs at the bottom simply reads against the 20*fs at the
 # top -- removing the dock moved only the dock's own pixels, and not one row of the
-# panel. (2) The `_base` branch below is frozen VERBATIM at 320x240/fs1 by
-# contract, so it could not follow a reclaim; growing the panel on the responsive
-# tiers alone would leave the T-Deck's Settings proportioned differently from every
-# other tier's for no reason but that one branch is a literal. (The launcher grid
+# panel. (2) Every tier's Settings keeps one proportion, the T-Deck's included.
+# (The launcher grid
 # is the other half of the story: it reclaimed its share back in #46, when the
 # launcher stopped drawing the dock, and still runs to grid_bottom.)
 _PANEL_FLOOR = 24       # Settings panel bottom inset, in fs-scaled px
@@ -166,10 +203,8 @@ _PANEL_FLOOR = 24       # Settings panel bottom inset, in fs-scaled px
 _CURSOR_BASE = 7
 _CURSOR_ACCEL = 2
 
-# (_BASE_W/_BASE_H -- the baseline the responsive layout reproduces EXACTLY, #39
-# graceful degradation -- come from the layout_base leaf above; console.py still
-# imports them back from here.)
-_FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
+# (_BASE_W/_BASE_H -- the T-Deck's canvas, every layout's default size -- come
+# from the layout_base leaf above; console.py still imports them back from here.)
 # (The letterbox/bezel fill _VIEWPORT_BEZEL (#39) moved to wm.py with the viewport
 # composite it belongs to -- FullscreenStackWM.composite_game is its only user.)
 
@@ -183,8 +218,10 @@ MIN_TAP_MM = 4.5
 
 
 def chrome_scale_floor(w, h, diagonal_in=None):
-    """The smallest chrome scale that keeps a `_BAR_ICON`-px icon at least
-    MIN_TAP_MM wide on a `diagonal_in`-inch panel of `w` x `h` pixels.
+    """The smallest chrome SIZE that keeps a bar icon at least MIN_TAP_MM wide
+    on a `diagonal_in`-inch panel of `w` x `h` pixels: a `_BAR_ICON`-px icon
+    times the unit of the panel's metric class (`layout_base.class_of`), so
+    the desk's 32-pixel icons are what is measured there.
 
     1 when no diagonal is declared, which is the OPT-IN: a panel's physical size
     is a board fact that nothing else in the tree knows, so a board that does not
@@ -193,17 +230,22 @@ def chrome_scale_floor(w, h, diagonal_in=None):
 
       Guition S3   3.5" 480x320, DECLARED -- the board the floor exists for.
                    FONT_SCALE 2 was built, shipped and reverted first (#202).
+                   A handheld: its floor is 2.
       Guition P4  10.1" 1280x800, DECLARED 2026-09-06 from the desk: 2.7mm icons
-                   on touch-only glass, "too tiny", never "hard to read".
-      P4           7.0" 1024x600, DECLARED 2026-09-06. This one is NOT free --
-                   its FONT_SCALE ships at 1, so the floor really doubles its
-                   chrome -- but 1024px of width absorbs a 36px bar without
-                   dropping a control, and its symbol keys are its keyboard.
+                   on touch-only glass, "too tiny", never "hard to read". A
+                   desk: its 32-pixel icons clear the floor at 1.
+      P4           7.0" 1024x600, DECLARED 2026-09-06. A desk, floor 1, as the
+                   Guition P4: the desk metrics are what lifted it from the
+                   2 it answered on the handheld's 16-pixel icons (the 2026-10
+                   look, step 9).
       T-Deck       2.8" 320x240, DECLINED 2026-09-06 -- built, rendered, declined
                    on the pictures. Its floor is 2 as well, and at 320px wide
                    that leaves the bar's lent zone too narrow for the Editor's
                    tab ladder or the launcher's verbs. The board.toml says what
                    would have to change before it is worth re-proposing.
+      Browser      its two arrangements are those boards': the desk declares
+                   the P4's 7.0" (`web_boot.DESK_DIAGONAL_IN`), the 320x240
+                   handheld declares none, as the T-Deck.
 
     A floor of 3 is not reachable by any panel in the lineup; a board that
     started answering 3 is a red test in tests/test_board_toml.py."""
@@ -212,10 +254,55 @@ def chrome_scale_floor(w, h, diagonal_in=None):
     diag_px = (float(w) * float(w) + float(h) * float(h)) ** 0.5
     if diag_px <= 0:
         return 1
-    icon_mm = _BAR_ICON * 25.4 * float(diagonal_in) / diag_px
+    icon = _BAR_ICON * _LB_CLASSES[_lb_class_of(diagonal_in)]["unit"]
+    icon_mm = icon * 25.4 * float(diagonal_in) / diag_px
     if icon_mm <= 0:
         return 1
     need = MIN_TAP_MM / icon_mm
+    n = int(need)
+    if need > n:
+        n += 1
+    return max(1, n)
+
+
+# The chrome scales a user may pick in Appearance (CHROME SIZE), and the narrowest
+# logical shell a scale may leave: 240px is the Guition S3's 480px at 2x, the
+# narrowest chrome-2 shell in the lineup. The T-Deck's 320px at 2x (160) is the
+# arrangement its board.toml declined.
+CHROME_SCALES = (1, 2)
+MIN_CHROME_W = 240
+
+
+def chrome_scale_choices(w, floor):
+    """The chrome scales a `w`-pixel-wide panel whose tap floor is `floor` can
+    take: never under the floor, never leaving the shell narrower than
+    MIN_CHROME_W. Fewer than two means there is nothing to choose and Appearance
+    shows no CHROME SIZE row."""
+    return tuple(s for s in CHROME_SCALES
+                 if s >= floor and int(w) // s >= MIN_CHROME_W)
+
+
+# The text-size floor (docs/theming_2026-09.md §4.7), #203's twin for text: the
+# smallest a theme font's ascent may be ON GLASS. A CONFIGURATION number, read
+# off the same declared diagonal as the tap floor and with the same opt-in. It
+# is the smallest text the owner has kept at 1x: Tiny5's six rows on the 7"
+# 1024x600 P4 (font scale 1, owner call 2026-07-12), under its six rows on the
+# 3.5" Guition S3 (whose 1x text "reads fine", #203). It lifts nothing in the
+# lineup and guards denser glass; petme128 clears it on every panel.
+MIN_TEXT_MM = 0.89
+
+
+def text_scale_floor(w, h, diagonal_in, ascent):
+    """The smallest font scale at which a font whose ascent is `ascent` rows
+    reaches MIN_TEXT_MM on a `diagonal_in`-inch panel of `w` x `h` pixels.
+    1 when no diagonal is declared (the T-Deck, a host window)."""
+    if not diagonal_in or ascent <= 0:
+        return 1
+    diag_px = (float(w) * float(w) + float(h) * float(h)) ** 0.5
+    if diag_px <= 0:
+        return 1
+    mm = ascent * 25.4 * float(diagonal_in) / diag_px
+    need = MIN_TEXT_MM / mm
     n = int(need)
     if need > n:
         n += 1
@@ -229,15 +316,11 @@ class Layout(LayoutBase):
     hand-placed 320x240 constants. The desktop reflows to fill a larger panel and
     the chrome scales with the font.
 
-    The single hard contract: at (w, h, fs) == (320, 240, 1) every field equals the
-    frozen module constant, byte-for-byte -- the T-Deck path is unchanged. The exact
-    baseline is reproduced VERBATIM (the `_base` branch) rather than re-derived, so
-    no reflow formula's integer-floor can drift a pixel at the default size; the
-    responsive formulas only run on a larger canvas / bigger font. The editors stay
-    a fixed 320x240 viewport in step 1, so their constants are NOT routed here.
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas. The editors' geometry is their own `*Layout`'s.
 
-    `font_w` is the on-screen char-cell width (8 * fs) so callers center/space text
-    that the SystemCanvas renders at `fs`.
+    `font_w` and `line_h` are the `ui` font's glyph-box width and line advance
+    at `fs` (docs/theming_2026-09.md §4.7: 8 and 8 for petme128), so callers
+    center and space text that the SystemCanvas renders at `fs`.
 
     TWO scales, since #203: `fs` sizes TEXT and `cs` (>= fs, equal by default)
     sizes what a finger lands on -- the bar and its buttons, the Settings rows,
@@ -250,10 +333,15 @@ class Layout(LayoutBase):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         cs = self.cs
-        self.font_w = _FONT_W * fs
+        _fid, fw, line, _asc = _ui_draw.font("ui")
+        self.font_w = fw * fs
+        self.line_h = line * fs
 
-        # -- status strip (height/position scales with the CHROME scale) --------
-        self.status_h = _STATUS_H * cs
+        # -- status strip (its rows scale with the CHROME scale; where it sits
+        # is the content rect's business: everything below lays out in
+        # cx/cy/cw/ch, never under the bar) ------------------------------------
+        self.status_h = _bar_rows(cs)
+        bottom = self.cy + self.ch
         # The bar's clock/title print at a hand-tuned y=3 inside an fs-tall bar;
         # this re-centers that band when the bar is taller than the font asked for.
         self.bar_text_dy = (self.status_h - _STATUS_H * fs) // 2
@@ -265,18 +353,16 @@ class Layout(LayoutBase):
         # the Settings panel keeps its _PANEL_FLOOR inset -- see above.)
         self.icon_w = _ICON_W * fs
         self.icon_h = _ICON_H * fs
-        self.icon_gap_x = _ICON_GAP_X * fs
         self.icon_gap_y = _ICON_GAP_Y * fs
         self.icon_box = _ICON_BOX * fs
-        self.icon_y0 = self.status_h + 8 * fs
-        self.grid_bottom = self.h - 4 * fs           # launcher grid floor
-        self.icon_x0 = _ICON_X0 if self._base else _ICON_X0 * fs   # legacy attr
-        # The Library SHELF (visual identity v1's library concept mockup) on EVERY
-        # tier -- the T-Deck's 320x240 baseline included (owner call, 2026-07-13:
-        # one launcher look everywhere). A framed panel (header "LIBRARY" + footer
-        # count) whose card grid SCROLLS continuously LEFT-RIGHT (owner call,
-        # 2026-07-13: a shelf slides sideways; no pages): slot 0 is the ONE tall
-        # FEATURED card (the pinned MAKE/+New, column 0 spanning both visible
+        self.icon_y0 = self.cy + 8 * fs
+        self.grid_bottom = bottom - 4 * fs           # launcher grid floor
+        # The library SHELF's geometry (visual identity v1's library concept
+        # mockup). No home draws it: every arrangement lays itself out in
+        # launcher_layer (`Carousel`, `Launcher._lay_cells`); the on-glass
+        # tools read `lib_grid` as a drag rect. A card grid that SCROLLS
+        # continuously LEFT-RIGHT: slot 0 is the ONE tall
+        # FEATURED card (the pinned "+ New", column 0 spanning both visible
         # rows at the head of the list); every other cartridge card stacks the
         # columns marching right, `rows` per column.
         # RESOLUTION-driven, not font-scale-driven (owner call, 2026-07-12:
@@ -285,43 +371,34 @@ class Layout(LayoutBase):
         # with fs-multiples only as floors so a kid who picks a bigger
         # Settings font never gets clipped chrome. At 1024x600 the geometry
         # is near-identical at fs 1 and 2; fs 1 just fits crisper text.
-        mx = max(16 * fs, self.w // 20)
-        pt = self.status_h + max(8 * fs, self.h // 24)
+        cx, cw = self.cx, self.cw
+        mx = max(16 * fs, cw // 20)
+        pt = self.cy + max(8 * fs, self.h // 24)
         pb = max(16 * fs, self.h // 14)
-        self.lib_panel = (mx, pt, self.w - 2 * mx, self.h - pt - pb)
+        self.lib_panel = (cx + mx, pt, cw - 2 * mx, bottom - pt - pb)
         self.lib_header_h = max(26 * fs, self.h // 12)
         self.lib_footer_h = max(20 * fs, self.h // 15)
-        self.lib_gap = max(6 * fs, self.w // 64)
+        self.lib_gap = max(6 * fs, cw // 64)
         # Display-type multiplier: the shelf's headings hold ~32px at desktop
         # widths regardless of the body font scale (petme128 x4 at fs1, x2 at
         # fs2), and never wider than the tier can hold -- the 320-wide baseline
         # renders them at body size.
-        self.lib_mult = max(1, min(4 // fs, self.w // 256))
-        inset = max(10 * fs, self.w // 42)
+        self.lib_mult = max(1, min(4 // fs, cw // 256))
+        inset = max(10 * fs, cw // 42)
         px_, py_, pw_, ph_ = self.lib_panel
         gx = px_ + inset
         gy = py_ + self.lib_header_h
         gw = pw_ - 2 * inset
         gh = ph_ - self.lib_header_h - self.lib_footer_h - 4 * fs
         self.cols = max(3, min(6, (gw + self.lib_gap) //
-                               (self.w // 5 + self.lib_gap)))
+                               (cw // 5 + self.lib_gap)))
         self.rows = 2                                # VISIBLE rows (grid look)
         self.lib_card_w = (gw - (self.cols - 1) * self.lib_gap) // self.cols
         self.lib_card_h = (gh - self.lib_gap) // 2
         self.lib_step = self.lib_card_w + self.lib_gap   # one-column scroll step
         self.lib_grid = (gx, gy, gw, gh)
-        # Whether a card is big enough to carry its own PLAY/CHANGE button row
-        # (visual identity v1 Section 1.2): the row + title band (the exact
-        # heights the card draw uses) must leave the cover art at least half the
-        # card. Small-card tiers (the 320x240 baseline's ~69px-tall cards) keep
-        # the verbs as lent-bar-zone chips instead (Section 7: on the small tier
-        # selected actions use the zoned bar).
-        band_h = max(14 * fs, 20)
-        btn_area = max(13 * fs, 22) + 2 * max(2 * fs, 3)
-        self.lib_card_actions = (
-            self.lib_card_h - band_h - btn_area >= self.lib_card_h // 2)
 
-        # -- unified top bar: icon size + clusters (Stage 1) -------------------
+        # -- the bars: icon size + stride (Stage 1) ----------------------------
         # Every bar control is a 16x16 IconSheet sprite (16px icons, 1px margin in the
         # 18px bar -> y = _BAR_Y). Icons scale with the CHROME scale (#203) -- with the
         # font by default, and past it on a panel dense enough that 16px is under
@@ -332,91 +409,55 @@ class Layout(LayoutBase):
         self.bar_stride = stride
         edge = 2 * cs                                 # margin from the canvas edges
 
-        # -- right zone (OS-owned, Stage 4 #46 zoned bar -- the macOS-menu-bar
-        # model): batt hard against the right edge, then wifi, then the ≡ system-
-        # menu toggle (moved off the left edge so every OS control lives on ONE
-        # side), then a slot RESERVED for the Stage-5 context X (not drawn/tapped
-        # yet -- carved out now so its arrival doesn't reflow the rest of this
-        # cluster again), then the clock text filling the remaining space to
-        # their left.
-        self.batt_btn = (self.w - edge - ic, _BAR_Y, ic, ic)
-        self.wifi_btn = (self.batt_btn[0] - stride, _BAR_Y, ic, ic)
-        self.sysmenu_btn = (self.wifi_btn[0] - stride, _BAR_Y, ic, ic)
-        self.context_x_btn = (self.sysmenu_btn[0] - stride, _BAR_Y, ic, ic)  # reserved
-        self.clock_w = 5 * self.font_w                # "HH:MM" (5 chars)
-        self.clock_x = max(edge, self.context_x_btn[0] - edge - self.clock_w)
-
-        # -- left zone (Stage 4: fully LENT to the active app's draw_zone/zone_tap
-        # -- launcher/Settings/the Editor): a row of icon slots starting right at the
-        # left edge now that ≡ isn't there any more. Cart management (create/copy/
-        # delete) now lives in the Editor picker's zone, not the launcher's -- DUP/DEL
-        # are drawn at dup_btn/del_btn there (new_btn's slot is unused: "+ New" is a
-        # pinned grid tile, not a bar icon).
-        self.new_btn = (edge, _BAR_Y, ic, ic)
-        self.dup_btn = (self.new_btn[0] + stride, _BAR_Y, ic, ic)
-        self.del_btn = (self.dup_btn[0] + stride, _BAR_Y, ic, ic)
-
-        # -- title/selected-name slot: between the (picker's) DUP/DEL cluster and the
-        # clock. Used by EditorPickerLayer's zone title ("PICK A PROJECT"); the
-        # launcher's zone (just the selected cart's name, no icons) starts at
-        # zone_left's own edge instead (see LauncherHomeLayer.draw_zone).
-        self.status_name_x = self.del_btn[0] + self.del_btn[2] + edge
-        self.status_name_maxc = max(
-            4, (self.clock_x - edge - self.status_name_x) // self.font_w)
-        # The full lent left zone (Stage 4): from the left edge to just before the
-        # right zone's clock text -- the rect BarLayer hands to draw_zone/zone_tap.
-        self.zone_left = (edge, _BAR_Y, max(0, self.clock_x - 2 * edge), ic)
-
-        # -- scroll nudge arrows (the pager's successors) ----------------------
-        # Boxed left/right arrow buttons in the Library panel footer's corners:
-        # each tap slides the card grid by one column (drag + scrollbar +
-        # keyboard nav are the primary scroll affordances; these are the big
-        # tap targets).
-        px_, py_, pw_, ph_ = self.lib_panel
-        ah = max(16 * fs, self.lib_footer_h * 2 // 3)   # touch-target floor at fs1
-        aw = max(22 * fs, 30)
-        am = max(10 * fs, 20)
-        ay = py_ + ph_ - self.lib_footer_h + (self.lib_footer_h - ah) // 2
-        self.scroll_lt = (px_ + am, ay, aw, ah)
-        self.scroll_rt = (px_ + pw_ - am - aw, ay, aw, ah)
+        # -- the bars (docs/shell_layout_2026-10.md §4): every bar this surface
+        # takes, packed into cells once here (shell_layout.pack) -- the rects
+        # the bar layer draws and hit-tests, each in its own bar's coordinates.
+        # The named rects below are views of the first bar that places each
+        # widget (None where none does): batt hard right, then wifi, the ≡,
+        # the context X and the clock in today's bar; its lent left zone runs
+        # from the left edge to just before the clock.
+        # "HH:MM": five cells, or a version 2 face's measure of it no
+        # narrower than its metric class's clock (`layout_base.CLASSES`), so
+        # a theme whose modes set different faces keeps one bar
+        self.clock_w = (max(_ui_draw.print_width("00:00", fs), _lb_metric("clock", fs))
+                        if _ui_draw.font_v2(_ui_draw.font()[0]) else 5 * self.font_w)
+        sys_len = _sys_tile(self.status_h)[2]
+        of = _lb_bars()
+        self.bars = _shell_layout.pack(self.w, self.h, self.status_h, cs, fs,
+                                       self.clock_w, _bar_text_w, of=of, sys_len=sys_len)
+        self._pack_of = (of, cs, fs, sys_len)
+        # {where: the packing its bar takes}, the bar layer's to fill
+        # (`BarLayer._make_room`): a surface's bars less the status widgets
+        # its zone owner took the room of.
+        self.room = {}
+        self.batt_btn = self._cell("battery")
+        self.wifi_btn = self._cell("wifi")
+        self.sysmenu_btn = self._cell("menu")
+        self.context_x_btn = self._cell("close")
+        zone = self._cell("zone") or (edge, _BAR_Y, 0, ic)
+        self.zone_left = zone
 
         # -- Settings rows + panel (a row is a TAP TARGET -> the chrome scale) ---
         # The row list already scrolls (_settings_visible derives its window from
         # the panel height), so a taller row costs rows on SCREEN, never rows.
         self.set_row_h = _SET_ROW_H * cs
         self.row_text_dy = (self.set_row_h - _SET_ROW_H * fs) // 2
-        if self._base:
-            self.set_x = _SET_X
-            self.set_w = _SET_W
-            self.set_row_y0 = _SET_ROW_Y0
-            self.settings_panel = (8, 16, 304, 198)         # frozen baseline
-            self.set_back = _SET_BACK
-            self.set_ach = _SET_ACH
-            self.set_title_hit = _SET_TITLE_HIT
-            self.set_head_dy = 0
-        else:
-            # The Settings panel fills the band between the status strip and the
-            # bottom inset (_PANEL_FLOOR -- the retired dock's band, kept).
-            py0 = self.status_h + 2 * fs
-            ph = self.h - _PANEL_FLOOR * fs - py0
-            self.settings_panel = (8 * fs, py0, self.w - 16 * fs, ph)
-            self.set_x = self.settings_panel[0] + 10 * fs
-            self.set_w = self.settings_panel[2] - 20 * fs
-            # The title band holds the X / trophy buttons, so it takes the chrome
-            # scale with them; its gear + "SETTINGS" text re-center via set_head_dy.
-            self.set_row_y0 = py0 + 24 * cs
-            self.set_head_dy = 12 * (cs - fs)
-            pr = self.settings_panel[0] + self.settings_panel[2]   # panel right edge
-            self.set_back = (pr - 20 * cs, py0 + 2 * cs, 18 * cs, 14 * cs)
-            self.set_ach = (pr - 46 * cs, py0 + 2 * cs, 22 * cs, 14 * cs)
-            self.set_title_hit = (self.settings_panel[0] + 14 * fs, py0 + 2 * cs,
-                                  10 * self.font_w, 16 * cs)
+        # The Settings panel fills the band between the status strip and the
+        # bottom inset (_PANEL_FLOOR -- the retired dock's band, kept).
+        py0 = self.cy + 2 * fs
+        ph = bottom - _PANEL_FLOOR * fs - py0
+        self.settings_panel = (cx + 8 * fs, py0, cw - 16 * fs, ph)
+        self.set_x = self.settings_panel[0] + 10 * fs
+        self.set_w = self.settings_panel[2] - 20 * fs
+        # The title band holds the X / trophy buttons, so it takes the chrome
+        # scale with them; its gear + "SETTINGS" text re-center via set_head_dy.
+        self.set_row_y0 = py0 + 24 * cs
+        self.set_head_dy = 12 * (cs - fs)
+        pr = self.settings_panel[0] + self.settings_panel[2]   # panel right edge
+        self.set_back = (pr - 20 * cs, py0 + 2 * cs, 18 * cs, 14 * cs)
+        self.set_ach = (pr - 46 * cs, py0 + 2 * cs, 22 * cs, 14 * cs)
 
     # -- derived rects (mirror the old module-constant arithmetic) ----------
-    def settings_row_rect(self, i):
-        return (self.set_x, self.set_row_y0 + i * self.set_row_h,
-                self.set_w, self.set_row_h - 2)
-
     def row_band(self, rect):
         """The fs-tall band inside a chrome-scaled row (#203) -- where the row's
         own hand-tuned content sits, so a bottom-anchored mark (the wifi list's
@@ -438,49 +479,59 @@ class Layout(LayoutBase):
         return (rect[0] + (rect[2] - bw) // 2, rect[1] + (rect[3] - bh) // 2,
                 bw, bh)
 
-    def tile_cell(self, i):
-        """(row, col) of grid slot `i` in the shelf packing. Slot 0 is the ONE
-        tall featured card -- column 0 spanning BOTH visible rows (its row
-        reads 0); slots 1.. stack the columns marching right, `rows` cards per
-        column, top to bottom."""
+    def tile_cell(self, i, featured=True):
+        """(row, col) of grid slot `i` in the shelf packing. With `featured`,
+        slot 0 is the ONE tall featured card -- column 0 spanning BOTH visible
+        rows (its row reads 0) -- and slots 1.. stack the columns marching
+        right; without it every slot stacks, `rows` cards per column, top to
+        bottom."""
+        if not featured:
+            return (i % self.rows, i // self.rows)
         if i <= 0:
             return (0, 0)
         j = i - 1
         return (j % self.rows, 1 + j // self.rows)
 
-    def tile_index(self, row, col):
-        """Inverse of tile_cell: the grid slot at (row, col) -- column 0 is
-        the tall slot 0 at any row. No bounds check (callers clamp to n)."""
-        if col <= 0:
-            return 0
-        return 1 + (col - 1) * self.rows + row
-
-    def tile_rect(self, i, scroll=0):
+    def tile_rect(self, i, scroll=0, featured=True):
         """Grid-cell rect for cart index `i` at pixel scroll offset `scroll`, or
         None when the cell lies fully outside the grid viewport (the card list
         SCROLLS continuously left-right -- there are no pages). Partially
         visible cells DO return their rect; the draw clips them."""
         gx, gy, gw, gh = self.lib_grid
         cw, ch, gap = self.lib_card_w, self.lib_card_h, self.lib_gap
-        row, col = self.tile_cell(i)
-        hh = 2 * ch + gap if i == 0 else ch
+        row, col = self.tile_cell(i, featured)
+        hh = 2 * ch + gap if featured and i == 0 else ch
         x = gx + col * (cw + gap) - scroll
         if x + cw <= gx or x >= gx + gw:
             return None
         return (x, gy + row * (ch + gap), cw, hh)
 
-    def grid_content_w(self, n):
+    def grid_content_w(self, n, featured=True):
         """Total scrollable content width for n grid items (at least the tall
         slot 0's own column)."""
         if n <= 0:
             return 0
         cw, gap = self.lib_card_w, self.lib_gap
-        _row, last_col = self.tile_cell(n - 1)
+        _row, last_col = self.tile_cell(n - 1, featured)
         return last_col * (cw + gap) + cw
 
+    def _cell(self, name):
+        got = _shell_layout.cell_of(self.bars, name)
+        return got[1] if got is not None else None
+
+    def bars_without(self, names):
+        """`bars` packed again with the widgets `names` left out, their room
+        the flex widgets' (`BarLayer._make_room`): the same bars in force,
+        glass and scales, so every other cell is where `bars` has it."""
+        of, cs, fs, sys_len = self._pack_of
+        return _shell_layout.pack(self.w, self.h, self.status_h, cs, fs, self.clock_w,
+                                  _bar_text_w, of=_shell_layout.without(of, names),
+                                  sys_len=sys_len)
+
     def clock_hit(self):
-        # The clock-text region in the top bar's right cluster (Time Traveler egg #21).
-        return (self.clock_x, 0, self.clock_w, self.status_h)
+        # The clock's cell (Time Traveler egg #21), in its bar's coordinates
+        # like every bar rect here; None where no bar places a clock.
+        return self._cell("clock")
 
 
 class CodeLayout(LayoutBase):
@@ -491,55 +542,98 @@ class CodeLayout(LayoutBase):
     visible lines + WIDER columns; at a bigger font everything (cell, bar, palette)
     grows with the text.
 
-    The single hard contract (mirrors `Layout`): at (w, h, fs) == (320, 240, 1)
-    every field equals the frozen `_CODE_*`/`_SYM_*`/`_ED_*` module constant, byte
-    for byte -- so the degradation path is exactly today. That baseline is
-    reproduced VERBATIM (the `_base` branch); the responsive formulas only run on a
-    larger canvas / bigger font.
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas: the text grid, the status band and the symbol palette.
 
-    `cell` is the on-screen char-cell width (8 * fs); `lh` the line height. `cols` /
+    `cell` is the `mono` font's glyph-box width at fs; `lh` its line advance and
+    `_CODE_LEAD` rows (10 at fs 1 with petme128), or a version 2 face's glyph
+    box (14 with JetBrains Mono 11). `cols` /
     `rows` are how many fit -- the CodeEditor's view window adopts them so it scrolls
     the right span."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, chrome_scale=None):
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, chrome_scale=None,
+                 symbols=True):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         cs = self.cs
-        self.cell = _FONT_W * fs                  # char-cell width (8*fs)
-        self.lh = _CODE_LH * fs                   # line height
+        # The symbol keys show where the last input was touch, and a keyboard
+        # hides them (the owner's D-17, 2026-10-19): their rows go to the code.
+        self.symbols = bool(symbols)
+        fid, fw, line, _asc = _ui_draw.font("mono")
+        self.cell = fw * fs
+        # A row: petme128's 8-pixel line and the code lead; a version 2
+        # face's glyph box, which holds its ascenders and descenders (14 for
+        # the Code tab's JetBrains Mono 11). `text_h` is the box the caret
+        # and a selection span.
+        info = _ui_draw.font_info(fid) if fid else None
+        if info is not None and info[4] == 0:
+            self.text_h = info[1] * fs
+            self.lh = self.text_h
+        else:
+            self.text_h = 8 * fs
+            self.lh = (line + _CODE_LEAD) * fs
+        # One content inset (design review R3-10): the code, the status line
+        # and the symbol keys all start `inset` in from the content's left
+        # edge, and the current line's mark stands `mark_x`, inside it.
+        ins = self.inset = _CODE_INSET * fs
+        self.mark_x = self.cx + _CODE_MARK * fs
         # -- symbol palette (bottom strip): one cell per coding symbol -----------
         # A key is TAPPED (on a board with no keyboard this strip IS the keyboard),
-        # so it takes the chrome scale and the symbol re-centers inside it. WIDTH is
-        # capped at what the canvas can hold, because a key that grew off the right
-        # edge is a key that cannot be pressed at all -- never below the fs width,
-        # which is what keeps the existing tiers (fs 3 already overflows) unmoved.
-        self.sym_cell = max(_SYM_CELL * fs,
-                            min(_SYM_CELL * cs, self.w // len(_CODE_SYMBOLS)))
-        self.sym_h = _SYM_H * cs
-        self.sym_text_dx = (self.sym_cell - _SYM_CELL * fs) // 2
-        self.sym_text_dy = (self.sym_h - _SYM_H * fs) // 2
-        self.sym_y = self.h - self.sym_h
-        self.sym_area = (0, self.sym_y, self.sym_cell * len(_CODE_SYMBOLS), self.sym_h)
-        # -- code area origin (below the unified 18px bar) -----------------------
-        # The old RUN/SAVE/CLOSE top-band icons are gone (Stage-4 bar rollout): the
-        # unified zoned bar owns the top 18px, so CodeLayout no longer carries their
-        # rects. y0 is the BAR's height (_CODE_Y0 == _STATUS_H), so the body is
-        # fullscreen text + the symbol palette with no chrome of its own.
-        self.x0 = _CODE_X0 * fs
-        self.y0 = _CODE_Y0 * cs
-        # -- the COLS x ROWS text grid (fills between the bar + palette) ---------
-        if self._base:
-            self.cols = CodeEditor.COLS          # 38
-            self.rows = CodeEditor.ROWS          # 20
-            self.status_band = None              # no room on the 320x240 baseline
+        # so it is as tall as the chrome scale makes a tap target, and the keys
+        # share out the content width less the inset each side -- a key is never
+        # narrower than _SYM_MIN at the font scale (font scale 3 overflows 800px
+        # either way). Each key draws fs inside its cell (`draw_symbol_keys`),
+        # so keys stand 2fs apart, the first one's edge on the inset, and the
+        # strip sits a margin above the content's bottom edge. The cells share
+        # the span out whole (`sym_key_x`), so its two ends are the inset.
+        n = len(_CODE_SYMBOLS)
+        m = _SYM_MARGIN * fs
+        span = self.cw - 2 * (ins - fs)
+        self.sym_cell = max(_SYM_MIN * fs, span // n)
+        self.sym_h = _SYM_H * cs if self.symbols else 0
+        if self.symbols:
+            self.sym_y = self.cy + self.ch - self.sym_h - (m - fs)
+            self.sym_area = (self.cx + ins - fs, self.sym_y,
+                             max(span, self.sym_cell * n), self.sym_h)
         else:
-            avail_w = self.w - self.x0
-            self.cols = max(8, avail_w // self.cell)
-            # Status band (visual identity v1 Phase 3, the Studio mockup's
-            # "Ln 13, Col 1" strip) between the text grid and the symbol palette.
-            self.status_band = (0, self.sym_y - 12 * fs, self.w, 12 * fs)
-            avail_h = self.status_band[1] - self.y0
-            self.rows = max(4, avail_h // self.lh)
+            self.sym_y = self.cy + self.ch
+            self.sym_area = (self.cx + ins - fs, self.sym_y, 0, 0)
+        # -- code area origin (the content rect's top) --------------------------
+        # The zoned bar carries the editor's controls, so CodeLayout has no
+        # chrome of its own: the body is text + the symbol palette, filling the
+        # content rect.
+        self.x0 = self.cx + ins
+        self.y0 = self.cy
+        # -- the COLS x ROWS text grid (fills between the bar + palette) ---------
+        avail_w = self.cx + self.cw - self.x0
+        self.cols = max(8, avail_w // self.cell)
+        # Status band (visual identity v1 Phase 3, the Studio mockup's
+        # "Ln 13, Col 1" strip) between the text grid and the symbol palette.
+        # Its height is _CODE_STATUS_H under a theme's own `ui` face (a
+        # version 2 face), one height in every theme and mode, and 12 under
+        # petme128; never under the face's line and 1px above and below. The
+        # band spans the content; its text (`status_text`, the band less the
+        # status pad before the inset) starts on the code's column.
+        ufid, _uw, uline, _ua = _ui_draw.font("ui")
+        band = max(_CODE_STATUS_H if _ui_draw.font_v2(ufid) else 12, uline + 2) * fs
+        self.status_band = (self.cx, self.sym_y - band, self.cw, band)
+        tx = self.x0 - _ui_draw.metrics("status")[_ui_draw.ST_PAD] * fs
+        self.status_text = (tx, self.sym_y - band, self.cx + self.cw - tx, band)
+        avail_h = self.status_band[1] - self.y0
+        self.rows = max(4, avail_h // self.lh)
+
+    def sym_key_x(self, i):
+        """Where symbol key cell `i` starts: the strip's width shared out
+        whole, so the cells differ by at most a pixel."""
+        x, _y, w, _h = self.sym_area
+        return x + i * w // len(_CODE_SYMBOLS)
+
+    def sym_key_at(self, px):
+        """The symbol key cell under x `px` (sym_key_x's inverse), or -1."""
+        x, _y, w, _h = self.sym_area
+        n = len(_CODE_SYMBOLS)
+        if not x <= px < x + w:
+            return -1
+        return ((px - x + 1) * n - 1) // w
 
     def code_area(self):
         return (self.x0, self.y0, self.cols * self.cell, self.rows * self.lh)
@@ -548,258 +642,13 @@ class CodeLayout(LayoutBase):
 # BlockLayout (#39 step 2) now lives in block_editor_ui.py (imported above).
 
 
-# --- Button icon glyphs (the pre-literate icon vocabulary) ------------------
-# 1-bit, recolorable pixel bitmaps designed on a 12x12 grid at the native button
-# size (boxes are 14-16px), then centered in each button's rect and blitted in
-# the requested palette color via the indexed primitives only -- so they render
-# identically on the host canvas and the frozen device console. Each
-# glyph is a tuple of 12 ints: row r, bit (11 - col) set => pixel on. Constant
-# (no per-frame allocation; freezes into firmware at ~15*12 ints).
-#
-# Hand-authored at this grid, adapted from the Pixelarticons set
-# (https://pixelarticons.com, MIT License (c) Gerrit Halfmann) -- a purpose-built
-# pixel-icon vocabulary; shapes traced down to 12x12 and hand-cleaned for
-# legibility at button size. MIT permits this use; this comment is the notice.
-_GLYPH_SIZE = 12
-_GLYPHS = {
-    "run":    (0x000, 0x180, 0x1C0, 0x1E0, 0x1F0, 0x1F8, 0x1F8, 0x1F0, 0x1E0, 0x1C0, 0x180, 0x000),
-    "save":   (0x000, 0x7FE, 0x402, 0x5FA, 0x402, 0x402, 0x4F2, 0x492, 0x492, 0x492, 0x7FE, 0x000),
-    "close":  (0x000, 0x204, 0x30C, 0x198, 0x0F0, 0x060, 0x060, 0x0F0, 0x198, 0x30C, 0x204, 0x000),
-    "edit":   (0x01E, 0x03E, 0x07C, 0x0F8, 0x0F0, 0x1E0, 0x3C0, 0x780, 0x700, 0x600, 0x400, 0x000),
-    "paint":  (0x006, 0x00C, 0x018, 0x030, 0x060, 0x0E0, 0x1F0, 0x1F0, 0x1F0, 0x0E0, 0x000, 0x000),
-    "home":   (0x000, 0x060, 0x0F0, 0x1F8, 0x3FC, 0x7FE, 0x204, 0x264, 0x264, 0x264, 0x3FC, 0x000),
-    "minus":  (0x000, 0x000, 0x000, 0x000, 0x000, 0x7FE, 0x7FE, 0x000, 0x000, 0x000, 0x000, 0x000),
-    "plus":   (0x000, 0x000, 0x060, 0x060, 0x060, 0x7FE, 0x7FE, 0x060, 0x060, 0x060, 0x000, 0x000),
-    "turtle": (0x000, 0x0F8, 0x1FC, 0x3FE, 0x3FE, 0x3FE, 0x3FE, 0x2ED, 0x653, 0x000, 0x000, 0x000),
-    "rabbit": (0x220, 0x220, 0x220, 0x360, 0x1C0, 0x3E0, 0x7F4, 0x7F0, 0x3E0, 0x000, 0x000, 0x000),
-    "star":   (0x000, 0x060, 0x060, 0x0F0, 0xFFC, 0x7F8, 0x3F0, 0x3F0, 0x618, 0x618, 0x000, 0x000),
-    "dot":    (0x000, 0x000, 0x000, 0x0F0, 0x1F8, 0x1F8, 0x1F8, 0x0F0, 0x000, 0x000, 0x000, 0x000),
-    "get":    (0x000, 0x060, 0x060, 0x060, 0x264, 0x1F0, 0x0E0, 0x040, 0x7FE, 0x402, 0x7FE, 0x000),
-    "put":    (0x000, 0x040, 0x0E0, 0x1F0, 0x264, 0x060, 0x060, 0x060, 0x7FE, 0x402, 0x7FE, 0x000),
-    "heart":  (0x000, 0x30C, 0x79E, 0x7FE, 0x7FE, 0x7FE, 0x3FC, 0x1F8, 0x0F0, 0x060, 0x000, 0x000),
-    # "map": a 3x3 tile grid (the tilemap editor's nav/open icon, #32) -- full
-    # h-lines at rows 1/5/9, v-lines at cols 1/5/9, so it reads as a placed grid.
-    "map":    (0x000, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x000, 0x000),
-    # "blocks": two stacked Scratch-style notched bricks (the #29 block-editor icon).
-    "blocks": (0x000, 0x3F8, 0x7FC, 0x7FC, 0x3F8, 0x000, 0x1FC, 0x3FE, 0x3FE, 0x1FC, 0x000, 0x000),
-    # "scene": the placement editor (#85 Stage 2) -- a viewport frame with two
-    # placed actors inside (one low-left, one high-right): things ON a stage.
-    "scene":  (0x000, 0x7FE, 0x402, 0x40E, 0x40E, 0x402, 0x582, 0x582, 0x402, 0x7FE, 0x000, 0x000),
-    # Desktop-shell icons (#28). "code" = angle brackets </>; "gear" = a
-    # settings cog; "note" = a music note (the #16 music slot, greyed until it
-    # lands); "app" = a generic window (default cart icon).
-    "code":   (0x000, 0x048, 0x08C, 0x118, 0x230, 0x230, 0x118, 0x08C, 0x048, 0x000, 0x000, 0x000),
-    "gear":   (0x000, 0x060, 0x276, 0x3FC, 0x1F8, 0x18C, 0x18C, 0x1F8, 0x3FC, 0x276, 0x060, 0x000),
-    "note":   (0x000, 0x07E, 0x042, 0x042, 0x042, 0x042, 0x0C6, 0x1CE, 0x1CE, 0x0C4, 0x000, 0x000),
-    # "music": a beamed pair of eighth notes -- the #50 sound-editor switcher's
-    # fallback glyph (the bar normally blits the 16x16 IconSheet "music" sprite).
-    "music":  (0x000, 0x07E, 0x042, 0x042, 0x042, 0x0C2, 0x1C2, 0x1CE, 0x00E, 0x00C, 0x000, 0x000),
-    "app":    (0x000, 0x7FE, 0x402, 0x7FE, 0x402, 0x402, 0x402, 0x402, 0x402, 0x402, 0x7FE, 0x000),
-    "wifi":   (0x000, 0x000, 0x1F8, 0x204, 0x0F0, 0x108, 0x060, 0x000, 0x060, 0x000, 0x000, 0x000),
-    "batt":   (0x000, 0x000, 0x180, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x000, 0x000, 0x000),
-    # Achievements (#21): "trophy" (the unlocked-badge cue), "lock" (a locked/secret
-    # entry), "smile" (the "Oh! You found me!" Easter-egg character), "key" (the
-    # explorer reward), and "spark" (the celebratory confetti pip).
-    "trophy": (0x000, 0x7FE, 0x7FE, 0x3FC, 0x3FC, 0x1F8, 0x0F0, 0x060, 0x060, 0x1F8, 0x1F8, 0x000),
-    "lock":   (0x000, 0x0F0, 0x108, 0x108, 0x108, 0x7FE, 0x7FE, 0x792, 0x792, 0x7FE, 0x7FE, 0x000),
-    "smile":  (0x0F0, 0x308, 0x404, 0x492, 0x492, 0x404, 0x444, 0x438, 0x404, 0x308, 0x0F0, 0x000),
-    "key":    (0x000, 0x1C0, 0x220, 0x220, 0x1C0, 0x080, 0x080, 0x0E0, 0x080, 0x0E0, 0x000, 0x000),
-    "spark":  (0x000, 0x060, 0x060, 0x060, 0x366, 0x1FC, 0x060, 0x1FC, 0x366, 0x060, 0x060, 0x000),
-    # "menu": the hamburger (≡) -- three full-width bars. The system-menu (#52) toggle;
-    # always a _glyph bitmap (NOT a themeable IconSheet slot) so it can't go blank on a
-    # device whose saved theme predates this icon.
-    "menu":   (0x000, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x000),
-    # "projects": a 2x2 grid of tiles -- the Editor's "back to the project-picker"
-    # affordance (spec shell_ux_v1.md). Not an IconSheet slot, so it renders via the
-    # _glyph fallback (ws._icon falls back to this 12x12 bitmap for kinds not in _ICON).
-    "projects": (0x000, 0x7BC, 0x7BC, 0x7BC, 0x7BC, 0x000, 0x000, 0x7BC, 0x7BC, 0x7BC, 0x7BC, 0x000),
-    # --- editor tool-row glyphs (#89-#93) -----------------------------------
-    # The pre-literate icons for the six editors' new tool buttons -- the paint
-    # transforms (#90), the map tools (#91), the code range ops (#89), the music
-    # copy/reorder pads (#92) and the block undo/redo (#93) -- so those rows read
-    # as pictures, not one-letter labels, on the small tiers a kid can't yet read.
-    # Same authoring provenance as the set above (traced/hand-cleaned in the
-    # Pixelarticons style; MIT (c) Gerrit Halfmann -- see the note over _GLYPHS).
-    # "undo"/"redo": a bent arrow curling back (undo left, redo its mirror).
-    "undo":      (0x000, 0x000, 0x100, 0x300, 0x7C0, 0xFC0, 0x7C8, 0x318, 0x038, 0x0F0, 0x000, 0x000),
-    "redo":      (0x000, 0x000, 0x008, 0x00C, 0x03E, 0x03F, 0x13E, 0x18C, 0x1C0, 0x0F0, 0x000, 0x000),
-    # "copy": two overlapping pages; "duplicate": one page with a + (a distinct
-    # "make another" -- both appear on the music pad, so they must not collide).
-    "copy":      (0x000, 0x0FC, 0x084, 0x3F4, 0x294, 0x294, 0x2FC, 0x210, 0x210, 0x3F0, 0x000, 0x000),
-    "duplicate": (0x000, 0x3F8, 0x208, 0x248, 0x2E8, 0x248, 0x208, 0x208, 0x208, 0x3F8, 0x000, 0x000),
-    # "cut": open scissors; "paste": a clipboard with lines.
-    "cut":       (0x000, 0x606, 0x606, 0x30C, 0x198, 0x0F0, 0x060, 0x0F0, 0x198, 0x39C, 0x39C, 0x000),
-    "paste":     (0x0E0, 0x110, 0x7FC, 0x404, 0x5F4, 0x404, 0x5F4, 0x404, 0x5F4, 0x404, 0x7FC, 0x000),
-    # "select": a dashed selection marquee; "find": a magnifying glass.
-    "select":    (0x000, 0x6DA, 0x402, 0x402, 0x000, 0x402, 0x402, 0x000, 0x402, 0x402, 0x6DA, 0x000),
-    "find":      (0x000, 0x1E0, 0x210, 0x408, 0x408, 0x408, 0x210, 0x1E0, 0x038, 0x01C, 0x008, 0x000),
-    # "indent"/"outdent": stacked text lines nudged right / left by a margin bar;
-    # "linenums": two lines with leading digits (the code gutter toggle).
-    "indent":    (0x000, 0x7F8, 0x000, 0x1FC, 0x000, 0xC00, 0xDE0, 0xDF8, 0xDE0, 0xC00, 0x000, 0x000),
-    "outdent":   (0x000, 0x1FE, 0x000, 0x3F8, 0x000, 0x003, 0x07B, 0x1FB, 0x07B, 0x003, 0x000, 0x000),
-    "linenums":  (0x000, 0x4FC, 0xCFC, 0x400, 0x4FC, 0x000, 0x4FC, 0xCFC, 0x400, 0x4FC, 0x000, 0x000),
-    # "tools": a wrench (the code editor's TLS tool-palette toggle).
-    "tools":     (0x000, 0x01C, 0x02E, 0x024, 0x018, 0x030, 0x060, 0x0C0, 0x180, 0x300, 0x200, 0x000),
-    # "fill": a handled paint pail over a paint splash (the bucket/flood tool; the
-    # map's FLOOD tool reuses it -- one bucket idiom). The handle arc is what keeps
-    # it reading as a pail, not a wine glass, at 12px.
-    "fill":      (0x000, 0x0E0, 0x110, 0x3F0, 0x210, 0x210, 0x210, 0x210, 0x1E0, 0x0C0, 0x1E0, 0x0C0),
-    # "flip_h"/"flip_v": two solid triangles mirrored about the vertical / horizontal
-    # axis; "rotate": a broken circle with an arrowhead (turn 90).
-    "flip_h":    (0x000, 0x404, 0x60C, 0x71C, 0x7BC, 0x7BC, 0x71C, 0x60C, 0x404, 0x000, 0x000, 0x000),
-    "flip_v":    (0x000, 0x3F8, 0x3F8, 0x1F0, 0x0E0, 0x000, 0x0E0, 0x1F0, 0x3F8, 0x3F8, 0x000, 0x000),
-    "rotate":    (0x000, 0x0E4, 0x316, 0x40E, 0x41E, 0x800, 0x800, 0x400, 0x410, 0x318, 0x0E0, 0x000),
-    # "arr_l/r/u/d": solid directional arrows (the paint pixel-shift + music reorder).
-    "arr_l":     (0x000, 0x000, 0x040, 0x0C0, 0x1C0, 0x3F8, 0x1C0, 0x0C0, 0x040, 0x000, 0x000, 0x000),
-    "arr_r":     (0x000, 0x000, 0x020, 0x030, 0x038, 0x1FC, 0x038, 0x030, 0x020, 0x000, 0x000, 0x000),
-    "arr_u":     (0x000, 0x020, 0x070, 0x0F8, 0x1FC, 0x070, 0x070, 0x070, 0x070, 0x000, 0x000, 0x000),
-    "arr_d":     (0x000, 0x000, 0x070, 0x070, 0x070, 0x070, 0x1FC, 0x0F8, 0x070, 0x020, 0x000, 0x000),
-    # "clear": a trash can (empties the sprite); "rect_tool": a hollow rectangle
-    # (the map's box tool); "resize": a diagonal double-arrow (the map WH resize).
-    "clear":     (0x000, 0x1F8, 0x7FE, 0x204, 0x2A4, 0x2A4, 0x2A4, 0x2A4, 0x2A4, 0x3FC, 0x1F8, 0x000),
-    "rect_tool": (0x000, 0x000, 0x7FC, 0x404, 0x404, 0x404, 0x404, 0x404, 0x7FC, 0x000, 0x000, 0x000),
-    "resize":    (0x000, 0x3C0, 0x300, 0x280, 0x040, 0x020, 0x010, 0x014, 0x00C, 0x03C, 0x000, 0x000),
-    # The standalone Paint app's tool vocabulary (artwork.py): "eraser" a tilted
-    # eraser block over its smear; "picker" the eyedropper; "line" a bare diagonal
-    # stroke; "circle" the hollow shape tool; "spray" a can puffing dots; "move"
-    # the four-way pan cross. Same Pixelarticons-style provenance as the set above.
-    "eraser":    (0x000, 0x078, 0x0FC, 0x1FC, 0x3F8, 0x3F0, 0x7E0, 0x7C0, 0x7C0, 0x380, 0x7E0, 0x000),
-    "picker":    (0x01C, 0x03E, 0x03E, 0x07C, 0x0F0, 0x1E0, 0x3C0, 0x380, 0x700, 0x600, 0x400, 0x000),
-    "line":      (0x000, 0x006, 0x00E, 0x01C, 0x038, 0x070, 0x0E0, 0x1C0, 0x380, 0x700, 0x600, 0x000),
-    "circle":    (0x0F0, 0x30C, 0x204, 0x402, 0x402, 0x402, 0x402, 0x402, 0x402, 0x204, 0x30C, 0x0F0),
-    "spray":     (0x314, 0x32A, 0x794, 0x7AA, 0x794, 0x780, 0x780, 0x780, 0x780, 0x780, 0x780, 0x000),
-    "move":      (0x060, 0x0F0, 0x1F8, 0x060, 0x462, 0xE67, 0xE67, 0x462, 0x060, 0x1F8, 0x0F0, 0x060),
-}
-
-
-_GLYPH_RUNS = {}
-
-
-def _glyph_runs(kind, fs):
-    """The flat (dx, dy, width) span list for glyph `kind` at pixel scale `fs`,
-    memoised per (kind, fs).
-
-    The mask walk itself was the cost, not the drawing: on glass (p4_attrib, #58)
-    a _blit_glyph call ran 48us and issued ~14 native rects whose kernel time was
-    0.4ms/267 calls -- i.e. ~1.5us of pixels behind ~35us of Python bit-testing
-    144 cells. The Sprites tab draws 19 glyphs a frame, so that walk alone was
-    13ms of an 52ms tab. _GLYPHS is a module constant (never themed -- the
-    themeable 16x16 bar icons are the separate IconSheet), so the spans can be
-    computed once per scale and kept for the life of the process; ~30 kinds x a
-    handful of scales x ~30 spans is a few KB frozen into firmware-sized terms.
-
-    Flat rather than a list of tuples: MicroPython pays per object, and the draw
-    loop reads three ints by index instead of unpacking a tuple per span."""
-    key = (kind, fs)
-    runs = _GLYPH_RUNS.get(key)
-    if runs is not None:
-        return runs
-    bits = _GLYPHS.get(kind)
-    n = _GLYPH_SIZE
-    runs = []
-    if bits is not None:
-        for r in range(n):
-            row = bits[r]
-            if not row:
-                continue
-            yy = r * fs
-            run = 0                                 # length of the current on-run
-            for col in range(n):                    # walk L->R, coalescing runs
-                if row & (1 << (n - 1 - col)):
-                    run += 1
-                elif run:
-                    runs.append((col - run) * fs)
-                    runs.append(yy)
-                    runs.append(run * fs)
-                    run = 0
-            if run:
-                runs.append((n - run) * fs)
-                runs.append(yy)
-                runs.append(run * fs)
-    _GLYPH_RUNS[key] = runs
-    return runs
-
-
-_GLYPH_PACKS = {}
-
-
-def _glyph_pack(kind, fs):
-    """The (kind, fs) span list as a packed int16 quad array for `fill_rects`
-    (#163): (dx, dy, w, fs, 0) per run, drawn in ONE native call with the color
-    passed as the call-level override -- so one pack serves every theme ink.
-    Cached forever like _GLYPH_RUNS (a few KB across all kinds x scales)."""
-    key = (kind, fs)
-    pack = _GLYPH_PACKS.get(key)
-    if pack is None:
-        runs = _glyph_runs(kind, fs)
-        lst = []
-        for i in range(0, len(runs), 3):
-            lst.append(runs[i])
-            lst.append(runs[i + 1])
-            lst.append(runs[i + 2])
-            lst.append(fs)
-            lst.append(0)
-        pack = array("h", lst)
-        _GLYPH_PACKS[key] = pack
-    return pack
-
-
-def _blit_glyph(cv, kind, rect, c, scale=None):
-    """Draw an icon glyph (no background) centered in `rect`, in color `c`, onto
-    canvas `cv`. The shared pre-literate icon vocabulary -- a 12x12 1-bit pixel
-    bitmap (see _GLYPHS) blitted via the indexed primitives only (rect spans), so
-    it renders identically on host and device. Unknown kinds draw NOTHING, so
-    every caller can keep a text label as the guaranteed fallback. Module-level so
-    both Workstation._glyph and Launcher (which only holds a canvas) share one
-    implementation -- the glyph encoding lives in exactly one loop.
-
-    `scale` (visual identity v1): an explicit pixel scale overriding the canvas
-    font scale -- the Library's cover-art-sized type glyphs. Default None keeps
-    every existing call byte-identical."""
-    x, y, w, h = rect
-    n = _GLYPH_SIZE
-    # Scale the icon mask with the canvas's system font scale (#39) so glyphs grow
-    # alongside text on a larger system canvas. A plain (game) Canvas has font_scale
-    # 1, so this is byte-identical to the original 1x path everywhere else.
-    fs = int(scale) if scale else getattr(cv, "font_scale", 1)
-    if fs < 1:
-        fs = 1
-    runs = _glyph_runs(kind, fs)
-    if not runs:                                    # unknown -> nothing (fallback contract)
-        return
-    span = n * fs
-    ox = x + (w - span) // 2                          # center the (scaled) mask in the rect
-    oy = y + (h - span) // 2
-    fr = getattr(cv, "fill_rects", None)              # probe: minimal canvases
-    if fr is not None:                                # (#163) one native call
-        fr(_glyph_pack(kind, fs), -1, ox, oy, c)
-        return
-    i = 0
-    while i < len(runs):
-        cv.rect(ox + runs[i], oy + runs[i + 1], runs[i + 2], fs, c)
-        i += 3
-
-
-def _gbtn(ws, names, kind, label, rect, fill, cv):
-    """A button carrying a centered 12x12 chrome glyph (the #91/#92/#93 icon
-    passes): the colored `ws._btn` chip, then the glyph (black, matching the
-    button's label ink) over it. Falls back to the word `label` when the glyph
-    kind is missing (or None), so the row is never blank. The ONE body behind
-    the map/music/block editor surfaces' `_gbtn` delegates."""
-    if kind is not None and kind in _GLYPHS:
-        ws._btn("", rect, fill, cv)
-        ws._glyph(kind, rect, names["black"], cv)
-    else:
-        ws._btn(label, rect, fill, cv)
-
-
 def _print_scaled(cv, s, x, y, c, mult=2):
     """System DISPLAY type (visual identity v1): print `s` at `mult` x the canvas's
-    system font scale, each glyph pixel a filled block via cv.rect -- so the Library
-    shelf's headings ("LIBRARY", the MAKE card) render identically on the host
-    SystemCanvas, a recording canvas, and the device. cv.print ignores its legacy
-    per-call scale arg (one system size), which is why this helper exists; at an
-    effective scale of 1 it defers to cv.print (byte-identical petme128)."""
+    system font scale -- the Library shelf's headings ("LIBRARY", the MAKE card).
+    cv.print ignores its legacy per-call scale arg (one system size), which is why
+    this helper exists: above an effective scale of 1 it is one `print_scaled`, the
+    one UI text path at that scale (native/moy_gfx/moy_text.h); at 1 it is
+    cv.print."""
     fs = getattr(cv, "font_scale", 1)
     if fs < 1:
         fs = 1
@@ -807,27 +656,26 @@ def _print_scaled(cv, s, x, y, c, mult=2):
     if sc <= 1:
         cv.print(s, x, y, c, 1)
         return
-    ci = c & 63
-    _font.draw_scaled(lambda bx, by, n: cv.rect(bx, by, n, n, ci), s, x, y, sc)
+    cv.print_scaled(s, x, y, c, sc)
 
 
 def _text_w(cv, s, mult=1):
-    """The on-screen width of `s` printed at `mult` x the canvas font scale."""
+    """The on-screen width of `s` printed at `mult` x the canvas font scale, as
+    the text path measures it in the print font (`ui.print_width`)."""
     fs = getattr(cv, "font_scale", 1)
     if fs < 1:
         fs = 1
-    return len(str(s)) * 8 * fs * max(1, int(mult))
+    return _ui_draw.print_width(s, fs * max(1, int(mult)))
 
 
 # --- the unified top bar's icon theme (Stage 1) -----------------------------
 #
-# The top bar's chrome controls are 16x16 sprites drawn from an EDITABLE IconSheet
-# (so the bar is themeable), not the hardcoded _GLYPHS bitmaps -- which collapses the
+# Under a theme that names no icon set the top bar's chrome controls are 16x16
+# sprites of the shell's IconSheet, not the fixed 12x12 glyphs -- which collapses the
 # ~120 glyph rect-spans/frame the labeled button rows cost into ~12 cached sprite
 # blits (a measured ~15ms/frame device win). `_ICON` is the slot map: a chrome kind ->
-# its sprite id in the 8x4 IconSheet (row-major). The IconSheet is loaded from
-# system_icons.moygfx when present, else baked from `_ICON_ART` below. The _glyph
-# vocabulary stays for NON-chrome uses (the cards/paint/blocks editors).
+# its sprite id in the 8x4 IconSheet (row-major), baked from `_ICON_ART` below. The
+# _glyph vocabulary stays for NON-chrome uses (the cards/paint/blocks editors).
 _ICON = {
     "home": 0, "edit": 1, "code": 2, "paint": 3, "map": 4, "blocks": 5,
     "gear": 6, "wifi": 7, "batt": 8, "new": 9, "dup": 10, "del": 11,
@@ -958,7 +806,7 @@ _ICON_ART = {
         ".7...bbb......7.", ".7...bbb......7.", ".7............7.", ".77777777777777.",
         "................", "................", "................", "................",
     ),
-    # "undo"/"redo" (#88): the SAME curl the 12x12 _GLYPHS vocabulary already draws
+    # "undo"/"redo" (#88): the SAME curl the 12x12 glyph vocabulary already draws
     # (undo left, redo its horizontal mirror -- kept pixel-consistent with the
     # code editor's existing tool-palette icon so the two affordances read as one
     # visual language), just re-authored at 16x16 for the themeable IconSheet.
@@ -977,8 +825,9 @@ _ICON_ART = {
     # "Moy", the moybyte mascot: one big pixel (a byte) with a square bite chomped
     # from the top-right corner, two eyes + a smile + stubby feet. "Grape" skin --
     # body = indigo (d/13), shadow = dark-purple (2), sheen = light-grey (6), eyes
-    # white (7), outlined in black (0). The boot logo (see _draw_splash); not a bar
-    # control, so it has no _glyph fallback (the splash simply omits it if absent).
+    # white (7), outlined in black (0). The boot splash draws it from its own C
+    # copy (native/moy_gfx/moy_scr.c, held to this one by test_moy_kernel); not
+    # a bar control, so it has no _glyph fallback.
     "moy": (
         "................", "...0000000......", "..0ddddddd0.....", ".0d66ddddd0.....",
         ".0dddddddd0.....", ".0dddddddd0000..", ".0dd77d77ddddd0.", ".0dd70d70ddddd0.",
@@ -987,191 +836,377 @@ _ICON_ART = {
     ),
 }
 
-# Bump whenever the baked _ICON_ART above changes: a saved system_icons.moygfx theme
-# written at an OLDER version is treated as stale and re-seeded to these new defaults
-# at load (mirrors cart versioning, #47), so an already-themed device/desktop picks up
-# new icons without a manual wipe. A bump discards a user's custom icon edits, exactly
-# like a built-in cart re-seed. (v1 = the first full restyle; v2 = added the "moy"
-# mascot slot for the boot logo; v3 = added the "wifi_off" no-connection status slot;
-# v4 = added the "scene" placement-editor tab slot, #85 Stage 2; v5 = added the
-# "undo"/"redo" bar-icon slots, #88.)
-_ICON_VERSION = 5
 
-
-# --- Panel THEMES (owner ask, 2026-07-08) -----------------------------------
-# Named token sets for the console's PANEL chrome -- the Settings panel, the Make
-# picker backdrop, the windowed WM's title strips / borders / taskbar chips, and
-# the launcher's selection accents. Selectable in Settings -> THEME, persisted in
-# system.json. Color tokens are MOY64 indices; presentation flags are booleans:
-#   panel     -- panel / window-strip background (the dark field)
-#   edge      -- panel border + secondary chrome ink (the theme's tint family)
-#   title     -- the FOCUSED window title strip (windowed WM)
-#   title_ink -- ink on that strip
-#   accent    -- the CTA: focused taskbar chip, selected tile ring/pill, rubber band
-#   hilite    -- row/tile selection background
-#   dim       -- faint texture (picker dots, unfocused window borders)
-# "night" is the moybyte brand colorway (the site palette) and MUST keep today's
-# exact values -- it's the default, and the golden/parity nets pin its pixels.
-#
-# Visual identity v1 (docs/visual_identity_v1.md Section 4.3) adds SEMANTIC roles on
-# top of the original seven: a theme dict may also carry any of the keys below, and
-# theme_colors() fills every missing role from the base tokens / the frozen literals
-# (see _SEMANTIC_ALIAS / _SEMANTIC_STATIC / _SEMANTIC_FLAGS), so legacy themes
-# resolve them without repeating themselves and "night" stays byte-identical.
-# Surfaces migrating off scattered literal indices read the roles; the defaults
-# ARE today's literals.
-#   desktop / desktop_pattern -- the construction field + its sparse dot grid
-#   surface / surface_alt / ink / ink_dim -- tool surface + text (Phase 3 Studio)
-#   surface_light -- boolean presentation class; never inferred from a color index
-#   border    -- 1px panel/window border
-#   selection -- selected row/tile background
-#   focus     -- keyboard/pointer focus (yellow in every shipped theme)
-#   play      -- the PLAY verb / success / healthy state (signal green)
-#   author    -- the MAKE/CHANGE authoring accent
-#   danger    -- destructive confirm / errors only (red)
-THEMES = (
-    ("night",  {"panel": 60, "edge": 13, "title": 13, "title_ink": 0,
-                "accent": 10, "hilite": 13, "dim": 1}),
-    ("indigo", {"panel": 61, "edge": 13, "title": 13, "title_ink": 0,
-                "accent": 10, "hilite": 13, "dim": 1}),
-    ("berry",  {"panel": 62, "edge": 14, "title": 14, "title_ink": 0,
-                "accent": 10, "hilite": 2, "dim": 63}),
-    ("forest", {"panel": 58, "edge": 11, "title": 11, "title_ink": 0,
-                "accent": 10, "hilite": 3, "dim": 59}),
-    ("slate",  {"panel": 54, "edge": 6, "title": 6, "title_ink": 0,
-                "accent": 9, "hilite": 5, "dim": 55}),
-    # Open Machine (docs/visual_identity_v1.md, the chosen direction): the dark-blue
-    # construction field with a navy dot grid + raised chrome (Section 4.2's strict
-    # jobs: 1 = field, 60 = raised dark panel/inactive chrome), grape for identity/
-    # selection (Moy, focused titles, selected tabs), and the signal verbs -- yellow
-    # focus, green PLAY, orange authoring. Opt-in (Settings -> THEME), never a
-    # mutation of the "night" default.
-    # (title = cool paper 48: the mockup's warm-LIGHT window strips/toolbars with
-    # dark ink; grape stays the SELECTION color -- tabs read "selection", not
-    # "title", so the two roles diverge cleanly.)
-    ("machine", {"panel": 1, "edge": 60, "title": 48, "title_ink": 0,
-                 "accent": 10, "hilite": 60, "dim": 60,
-                 "desktop": 1, "desktop_pattern": 60, "surface": 7,
-                 "surface_alt": 52, "ink": 0, "ink_dim": 53, "border": 1,
-                 "selection": 13, "focus": 10, "play": 11, "author": 9,
-                 "danger": 8, "surface_light": True}),
-)
-DEFAULT_THEME = "night"
-
-# --- Light variants (owner ask, 2026-07-23) ---------------------------------
-# Every theme family now ships a DARK and a LIGHT presentation of the same hue
-# identity (visual identity v1 Section 4.3's `surface_light` class, generalized
-# from the one "machine" theme to the whole catalog). THEMES above stays the
-# DARK set -- byte-identical, it is what every existing caller/golden pins.
-# The light sets below are FULL token dicts (base + semantic roles): light
-# papers/pastels for fields, dark ink, the family's tint kept for titles/
-# selection so switching variant never changes a theme's identity. Palette
-# jobs (Section 4.2 discipline): 48 cool paper / 52 warm paper / 7 cream for
-# surfaces, 49/6 for quiet texture, 53 dim warm ink, pastels 19/22/24/25 for
-# the per-family selection wash; signal verbs stay yellow/green/orange/red.
+# --- Panel THEMES ----------------------------------------------------------
+# A theme is a data package (docs/theming_2026-09.md): the seeds are
+# native/moy_ui/themes/*.json, embedded in the image and read by the C loader
+# (native/moy_ui/moy_theme.c), which validates them, walks `inherits` and
+# fills every role a package leaves unset from style.json's derivation rules.
+# The roles are style.json's `tokens`; their jobs are
+# docs/visual_identity_v1.md Section 4.3's. A colour role is a MOY64 index or
+# RGB (`RGB | 0xrrggbb`, docs/look_2026-10.md step 5): `theme_colors` answers
+# the theme's own values, and `live_colors` the live theme's as the shell
+# draws them, each RGB role placed in the block at indices 64..127;
+# `surface_light`, `bar_light` and `band_light` are presentation flags
+# (booleans here).
+# The default is the first seed, Moy, in its light mode (Day). The
+# store's theme packages are themes too (`adopt_packages`, which the look
+# calls at every store change), each resolved from its bytes without
+# installing it (`moy_ui.theme_resolve`), as is the one installed package
+# beside the seeds (`theme_known`); a name no package provides resolves as the
+# default.
+THEME_NAMES = _ui_draw._C.themes()
+DEFAULT_THEME = THEME_NAMES[0]
 THEME_VARIANTS = ("dark", "light")
-DEFAULT_VARIANT = "dark"
-_LIGHT_COMMON = {"surface": 7, "surface_alt": 52, "ink": 0, "ink_dim": 53,
-                 "chrome_ink": 0, "chrome_ink_dim": 53, "selection_ink": 0,
-                 "focus": 10, "play": 11, "author": 9, "danger": 8,
-                 "surface_light": True, "bar_light": True}
-THEME_LIGHT = {
-    "night":  {"panel": 48, "edge": 60, "title": 13, "title_ink": 0,
-               "accent": 10, "hilite": 22, "dim": 49,
-               "desktop": 22, "desktop_pattern": 48, "border": 60},
-    "indigo": {"panel": 48, "edge": 61, "title": 13, "title_ink": 0,
-               "accent": 10, "hilite": 24, "dim": 49,
-               "desktop": 24, "desktop_pattern": 48, "border": 61},
-    "berry":  {"panel": 7, "edge": 62, "title": 14, "title_ink": 0,
-               "accent": 10, "hilite": 25, "dim": 6,
-               "desktop": 25, "desktop_pattern": 7, "border": 62},
-    "forest": {"panel": 52, "edge": 58, "title": 11, "title_ink": 0,
-               "accent": 10, "hilite": 19, "dim": 6,
-               "desktop": 19, "desktop_pattern": 52, "border": 58,
-               "surface": 52, "surface_alt": 31},
-    "slate":  {"panel": 6, "edge": 54, "title": 50, "title_ink": 7,
-               "accent": 9, "hilite": 48, "dim": 49,
-               "desktop": 49, "desktop_pattern": 6, "border": 54,
-               "surface": 6, "surface_alt": 48},
-    # Open Machine by day: the construction field itself turns to cool paper
-    # with a quiet grey dot grid; tool surfaces stay cream, grape stays the
-    # selection identity (Section 4.2's jobs, light-inverted).
-    "machine": {"panel": 48, "edge": 60, "title": 48, "title_ink": 0,
-                "accent": 10, "hilite": 22, "dim": 49,
-                "desktop": 48, "desktop_pattern": 49, "border": 1,
-                "selection": 13},
-}
-
-# Semantic-role fallbacks (visual identity v1 Section 4.3). Aliases resolve a missing
-# role from the theme's own base tokens; statics are the frozen literals the surfaces
-# hardcode today, so a legacy theme keeps its exact pixels when a surface switches
-# from the literal to the role.
-_SEMANTIC_ALIAS = (("desktop", "panel"), ("desktop_pattern", "dim"),
-                   ("surface", "panel"), ("surface_alt", "panel"),
-                   ("border", "edge"), ("selection", "hilite"),
-                   ("focus", "accent"),
-                   # Section 4.3's window-strip roles: default to the base
-                   # title/panel tokens the WM reads today.
-                   ("title_active", "title"), ("title_inactive", "panel"))
-_SEMANTIC_STATIC = (("ink", 7), ("ink_dim", 6),      # white / light-grey text
-                    # Ink on the OS chrome itself (bar/taskbar/window strips/
-                    # focused ring) as opposed to `ink` on tool SURFACES -- the
-                    # two diverge in "machine" (dark chrome, light surfaces).
-                    ("chrome_ink", 7), ("chrome_ink_dim", 6),
-                    # Ink on a selection/hilite fill (every dark theme's hilite
-                    # is a dark tint -- white ink; light pastel fills flip it).
-                    ("selection_ink", 7),
-                    # The OS bar band: frozen black + dark-grey shelf edge
-                    # on every dark theme.
-                    ("bar", 0), ("bar_edge", 5),
-                    ("play", 11),                    # signal green: PLAY/healthy
-                    ("author", 10),                  # today's Make-tile yellow
-                    ("danger", 8))                   # red: errors/destructive only
-_SEMANTIC_FLAGS = (("surface_light", False), ("bar_light", False))
+DEFAULT_VARIANT = "light"
+_THEME_FLAGS = ("surface_light", "bar_light", "band_light")
 _THEME_CACHE = {}
+_CONTENT_CACHE = {}
+_LIVE_CACHE = {}
+_LOOK_CACHE = {}
+_MODES_CACHE = {}
+RGB = 0x1000000             # a colour value at or above: RGB | 0xrrggbb
+PAINT = 0x2000000           # a look colour at or above is a paint, no colour
+LOOK_NONE = -2147483648     # a look leaf the theme leaves unset
+# The store's packages: name -> theme_resolve's answer, None until first read.
+_PACKAGES = {}
+_PKG_READ = [None]          # name -> its theme.json's bytes, or None
+_RESOLVES = set()           # packages known to resolve, their answer unread
+
+
+def adopt_packages(names, read):
+    """The store's theme packages are `names` now, each read through
+    `read(name)` (its theme.json's bytes, or None) the first time it is
+    asked for: the look calls this at every store change."""
+    _PACKAGES.clear()
+    _RESOLVES.clear()
+    for n in names:
+        _PACKAGES[n] = None
+    _PKG_READ[0] = read
+    forget_themes()
+
+
+def package(name):
+    """`moy_ui.theme_resolve`'s answer for store package `name`, read once
+    per store change: (rc, notes, name, dark, light, fonts, layout, sheets,
+    looks, backdrops, modes). None
+    when `name` is no store package. A package whose `name` is not its
+    folder's is refused (rc 4, the loader's NAME)."""
+    if name not in _PACKAGES:
+        return None
+    got = _PACKAGES[name]
+    if got is None:
+        read = _PKG_READ[0]
+        src = read(name) if read is not None else None
+        if src is None:
+            got = (_ui_draw._C.theme_resolve(b"")[0], 0) + (None,) * 9
+        else:
+            got = _ui_draw._C.theme_resolve(src)
+            if got[0] == 0 and got[2] != name:
+                got = (4, got[1]) + (None,) * 9
+        _PACKAGES[name] = got
+    return got
+
+
+def package_ok(name):
+    """True for a store package that resolves."""
+    if name in _RESOLVES and _PACKAGES.get(name, 0) is None:
+        return True
+    got = package(name)
+    return got is not None and got[0] == 0
+
+
+def theme_names():
+    """The seeds, then the store's packages that resolve: every list of
+    themes reads this (THEME_NAMES stays the seeds)."""
+    return THEME_NAMES + tuple(n for n in sorted(_PACKAGES) if package_ok(n))
+
+
+def theme_known(name):
+    """True for a seed's name, a store package that resolves, or the
+    installed package's."""
+    return (name in THEME_NAMES or name == _ui_draw._C.theme_installed()
+            or package_ok(name))
+
+
+def _row(name, light):
+    """`name`'s role row: the installed slot's or a seed's from the loader,
+    a store package's from its resolved bytes."""
+    if name not in THEME_NAMES and name != _ui_draw._C.theme_installed():
+        got = package(name)
+        if got is not None and got[0] == 0:
+            return got[4 if light else 3][0]
+    return _ui_draw._C.theme(name, light)[0]
+
+
+def theme_modes(name):
+    """The modes theme `name` has, of THEME_VARIANTS: the ones its package
+    declares (`"modes"`, docs/theming_2026-09.md §3), both where it is
+    silent."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
+    got = _MODES_CACHE.get(name)
+    if got is not None:
+        return got
+    bits = None
+    if name not in THEME_NAMES and name != _ui_draw._C.theme_installed():
+        pkg = package(name)
+        if pkg is not None and pkg[0] == 0:
+            bits = pkg[10]
+    if bits is None:
+        bits = _ui_draw._C.theme_modes(name)
+    got = _MODES_CACHE[name] = tuple(v for v in THEME_VARIANTS
+                                     if bits & (1 << (v == "light")))
+    return got
 
 
 def theme_colors(name, variant=DEFAULT_VARIANT):
-    """The full token dict for theme `name` in `variant` ("dark"/"light"): base
-    tokens + every semantic role, missing roles resolved per _SEMANTIC_ALIAS/
-    _SEMANTIC_STATIC, falling back to the default theme (and to the dark set
-    when a theme has no light tokens). Returns a shared cached dict (treat as
-    read-only). The one-arg call keeps its exact pre-variant behavior."""
-    resolved = DEFAULT_THEME
-    for n, _tokens in THEMES:
-        if n == name:
-            resolved = name
-            break
+    """The full token dict for theme `name` in `variant` ("dark"/"light"),
+    flattened by the C loader: every role set, an unknown name or variant
+    resolving as the default's. Returns a shared cached dict (treat as
+    read-only)."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
     if variant not in THEME_VARIANTS:
         variant = DEFAULT_VARIANT
-    if variant == "light" and resolved not in THEME_LIGHT:
-        variant = "dark"
-    key = (resolved, variant)
+    key = (name, variant)
     cached = _THEME_CACHE.get(key)
     if cached is None:
-        tokens = None
-        for n, t in THEMES:
-            if n == resolved:
-                tokens = t
-                break
-        if variant == "light":
-            tokens = dict(_LIGHT_COMMON)
-            tokens.update(THEME_LIGHT[resolved])
-            # The OS bar band follows the light panel tone unless a theme
-            # says otherwise (dark themes keep the frozen black band, below).
-            tokens.setdefault("bar", tokens["panel"])
-            tokens.setdefault("bar_edge", tokens["dim"])
-        cached = dict(tokens)
-        for role, base in _SEMANTIC_ALIAS:
-            if role not in cached:
-                cached[role] = cached[base]
-        for role, idx in _SEMANTIC_STATIC:
-            if role not in cached:
-                cached[role] = idx
-        for role, value in _SEMANTIC_FLAGS:
-            if role not in cached:
-                cached[role] = value
+        row = _row(name, variant == "light")
+        cached = {}
+        for role, v in zip(_ui_draw._C.tokens(), row):
+            cached[role] = bool(v) if role in _THEME_FLAGS else v
         _THEME_CACHE[key] = cached
+    return cached
+
+
+def forget_package(name, resolves=False):
+    """Store package `name`'s bytes moved (a change to `custom`): its answer
+    is read again at the next ask, and its own shared dicts go. No other
+    theme's go: a package inherits nothing (the loader refuses `inherits` in
+    one, CHAIN), so its bytes move no other theme's tokens, look or modes.
+    `resolves`: the caller has just installed those bytes under `name`, so
+    whether it resolves is known without reading its answer."""
+    if resolves:
+        _RESOLVES.add(name)
+    else:
+        _RESOLVES.discard(name)
+    if name in _PACKAGES:
+        _PACKAGES[name] = None
+    for cache in (_THEME_CACHE, _CONTENT_CACHE, _LIVE_CACHE, _LOOK_CACHE):
+        for key in [k for k in cache if k[0] == name]:
+            del cache[key]
+    _MODES_CACHE.pop(name, None)
+
+
+def forget_themes():
+    """Drop every shared token and content dict: an install or uninstall
+    moved what the names resolve to."""
+    _THEME_CACHE.clear()
+    _CONTENT_CACHE.clear()
+    _LIVE_CACHE.clear()
+    _LOOK_CACHE.clear()
+    _MODES_CACHE.clear()
+
+
+def _look_raw(name, light):
+    if name not in THEME_NAMES and name != _ui_draw._C.theme_installed():
+        got = package(name)
+        if got is not None and got[0] == 0:
+            return got[8][1 if light else 0]
+    return _ui_draw._C.theme_look(name, light)
+
+
+def theme_look(name, variant=DEFAULT_VARIANT):
+    """Theme `name`'s look leaves in `variant` as {leaf name: value}, a
+    colour a palette index or RGB | 0xrrggbb, a width or alpha in
+    hundredths, an unset leaf `LOOK_NONE`: what a picture of another theme
+    (Appearance's cards) reads its ground, bar and frame from. Returns a
+    shared cached dict (treat as read-only)."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
+    key = (name, variant == "light")
+    got = _LOOK_CACHE.get(key)
+    if got is None:
+        got = _LOOK_CACHE[key] = dict(zip(look_fields()[0], _look_raw(name, key[1])[0]))
+    return got
+
+
+def backdrop(name, variant, surface):
+    """Theme `name`'s backdrop for `surface` ("home" or "desk") in `variant`:
+    the records `moy_gfx.backdrop` draws (`moy_ui.theme_backdrop`), b"" where
+    the surface has none and is its `desktop` fill."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
+    light = variant == "light"
+    if name not in THEME_NAMES and name != _ui_draw._C.theme_installed():
+        got = package(name)
+        if got is not None and got[0] == 0:
+            return got[9][1 if light else 0][0 if surface == "home" else 1]
+    return _ui_draw._C.theme_backdrop(name, light, surface)
+
+
+_LOOK_FIELDS = []
+
+
+def look_fields():
+    """The look's leaves (`moy_ui.theme_look_fields`): (names, kinds, a
+    button's leaf names)."""
+    if not _LOOK_FIELDS:
+        _LOOK_FIELDS.append(_ui_draw._C.theme_look_fields())
+    return _LOOK_FIELDS[0]
+
+
+class Live:
+    """The live theme's colours as the shell draws them (docs/look_2026-10.md
+    step 5): `tokens` and `content` with each RGB role placed in the block
+    (`block`, `used` of its 64 RGB565 words, indices 64..), `near` each
+    token's nearest MOY64 index (what theme(), a compiled app and a cart
+    canvas are given), `look` the look's leaves with its colours placed in
+    the same block, and `buttons` its button leaves as `ui.use_buttons`
+    installs them: (app or None, kind, leaves), a paint fill its first stop's
+    colour, every colour placed; `fixed` the colours no theme changes
+    (FIXED), placed in the block too."""
+
+    __slots__ = ("tokens", "content", "near", "block", "used", "look", "buttons", "fixed")
+
+
+# The colours no theme changes (docs/media/look_2026-10/DESIGN.md, Components:
+# Editors): transparency's grey checker, dark then light, under the sprite
+# editor's clear pixels and its colour 0; the black keyline its cursor's ring
+# goes round; the white that strokes colour 0 and rings the colour in use.
+# The black and the white are also a desk label's over a wallpaper, its
+# shadow and its ink (docs/look_2026-10.md step 25).
+FIXED = (RGB | 0x6e6e78, RGB | 0x9a9aa4, RGB | 0x000000, RGB | 0xffffff)
+
+
+_PAINT, _VIBRANCY = PAINT, 0x3000000
+_NONE = LOOK_NONE
+
+
+def _button_rows(look, names, kinds, btn):
+    """The look's button leaves, (app or None, kind, [leaves]), and the
+    (row, leaf) of each colour among them: the theme's kinds, then its
+    app_buttons."""
+    leaves, paints = look[0], look[1]
+    at = {n: i for i, n in enumerate(names)}
+    order = []
+    for n in names:
+        if n.startswith("buttons.") and n.split(".")[1] not in order:
+            order.append(n.split(".")[1])
+    rows = [(None, k, [leaves[at["buttons.%s.%s" % (k, f)]] for f in btn]) for k in order]
+    rows += [(app, k, list(vals)) for app, k, vals in look[3]]
+    colourish = [j for j, f in enumerate(btn)
+                 if kinds[at["buttons.normal." + f]] in ("colour", "paint")]
+    spots = []
+    for r, (_app, _k, vals) in enumerate(rows):
+        for j in colourish:
+            v = vals[j]
+            if _PAINT <= v < _VIBRANCY:
+                p = paints[v - _PAINT] if v - _PAINT < len(paints) else None
+                v = vals[j] = p[2][0][1] if p and p[2] else _NONE
+            elif v >= _VIBRANCY:
+                v = vals[j] = _NONE
+            if v >= 0:
+                spots.append((r, j))
+    return rows, spots
+
+
+def live_colors(name, variant=DEFAULT_VARIANT):
+    """The `Live` record of theme `name` in `variant`, cached as
+    `theme_colors` is."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
+    if variant not in THEME_VARIANTS:
+        variant = DEFAULT_VARIANT
+    key = (name, variant)
+    got = _LIVE_CACHE.get(key)
+    if got is not None:
+        return got
+    light = variant == "light"
+    row = _row(name, light)
+    look = _look_raw(name, light)
+    names, kinds, btn = look_fields()
+    leaves = look[0]
+    at = [i for i in range(len(leaves)) if kinds[i] == "colour"]
+    rows, spots = _button_rows(look, names, kinds, btn)
+    placed, near, block, used = _ui_draw._C.theme_place(
+        list(row) + [leaves[i] for i in at] + [rows[r][2][j] for r, j in spots]
+        + list(FIXED))
+    toks = _ui_draw._C.tokens()
+    roles = _ui_draw._C.theme_roles()
+    rec = Live()
+    rec.tokens, rec.content, near_tok = {}, {}, {}
+    for i in range(len(roles)):
+        v = placed[i]
+        if i < len(toks):
+            flag = roles[i] in _THEME_FLAGS
+            rec.tokens[roles[i]] = bool(v) if flag else v
+            near_tok[roles[i]] = bool(v) if flag else near[i]
+        else:
+            rec.content[roles[i]] = v
+    rec.near = near_tok
+    lv = list(leaves)
+    for k, i in enumerate(at):
+        lv[i] = placed[len(row) + k]
+    rec.look = (dict(zip(names, lv)),) + tuple(look[1:5])
+    base = len(row) + len(at)
+    for k, (r, j) in enumerate(spots):
+        rows[r][2][j] = placed[base + k]
+    rec.buttons = rows
+    at = base + len(spots)
+    rec.fixed = tuple(placed[at:at + len(FIXED)])
+    rec.block, rec.used = block, used
+    _LIVE_CACHE[key] = rec
+    return rec
+
+
+def rgb565_of(v):
+    """A colour value's RGB565 word: an index's, a block slot's or RGB's."""
+    return _ui_draw._C.theme_rgb(v)[0]
+
+
+def nearest_of(v):
+    """A colour value's nearest MOY64 index."""
+    return _ui_draw._C.theme_rgb(v)[2]
+
+
+def theme_accents():
+    """((name, A, deep), ...): the sixteen accents a theme change takes
+    (style.json's), for a picker."""
+    return _ui_draw.theme_accents()
+
+
+def theme_presets():
+    """((name, dark, light), ...): the accent presets a theme change takes,
+    an accent in each mode's value (style.json's), for a picker."""
+    return _ui_draw.theme_presets()
+
+
+def theme_tints():
+    """((name, ramp), ...): the eight tints a theme change takes
+    (style.json's), for a picker."""
+    return _ui_draw.theme_tints()
+
+
+def theme_content(name, variant=DEFAULT_VARIANT):
+    """The CONTENT roles of theme `name` in `variant` -- code syntax and block
+    colours (style.json's `theme.content`), which are not in the live token
+    row apps read. A shared cached dict, resolved as `theme_colors` is."""
+    if not theme_known(name):
+        name = DEFAULT_THEME
+    if variant not in THEME_VARIANTS:
+        variant = DEFAULT_VARIANT
+    key = (name, variant)
+    cached = _CONTENT_CACHE.get(key)
+    if cached is None:
+        row = _row(name, variant == "light")
+        roles = _ui_draw._C.theme_roles()
+        n = len(_ui_draw._C.tokens())
+        cached = {}
+        for i in range(n, len(roles)):
+            cached[roles[i]] = row[i]
+        _CONTENT_CACHE[key] = cached
     return cached
 
 
@@ -1186,8 +1221,8 @@ def _nibble(ch):
 
 
 def _default_icon_sheet():
-    """Bake `_ICON_ART` into a fresh IconSheet at the `_ICON` slots -- the theme used
-    when no system_icons.moygfx exists. Each art entry is painted into its 16x16 tile
+    """Bake `_ICON_ART` into a fresh IconSheet at the `_ICON` slots -- the bar's
+    icons under a theme that names no icon set. Each art entry is painted into its 16x16 tile
     via tset, so the result serializes/loads through the same .moygfx hex as any sheet.
     Unmapped/short rows just leave that tile blank (transparent)."""
     sheet = IconSheet()
@@ -1222,9 +1257,7 @@ def _clamp_scroll(top, cur, visible, count):
     """Nudge a persistent scroll offset `top` the minimum amount needed so `cur`
     stays inside a window of `visible` rows out of `count` total -- move only when
     the cursor exits the current window (a stable scrolloff, not a re-center), then
-    clamp to the valid range. Shared by the settings list (_settings_scroll) and
-    the block-editor outline (_blk_reveal) -- verified identical clamp math at both
-    call sites. NOT used by the music editor's _mu_visible_top, which re-centers the
+    clamp to the valid range. The block-editor outline's (_blk_reveal). NOT used by the music editor's _mu_visible_top, which re-centers the
     window on the cursor every call instead of nudging a persistent offset -- a
     different (and intentionally different) scrolling feel, not a third copy of
     this."""
@@ -1239,7 +1272,7 @@ def _clamp_scroll(top, cur, visible, count):
 # imported above and re-exported so console.py's `from chrome import _in` holds.)
 
 
-# (Extracted helpers -- ACHIEVEMENTS, Popup, Pmem, _SilentAudio -- live in
+# (Extracted helpers -- ACHIEVEMENTS, Popup, Pmem -- live in
 # widgets.py/launcher_layer.py/paint_layer.py and are imported back at the top
 # of this file where console._X must still resolve for tests.)
 

@@ -140,24 +140,11 @@ CATEGORY_ORDER = [
     CAT_VARIABLES, CAT_LISTS, CAT_OPERATORS, CAT_SOUND, CAT_PROCS,
 ]
 
-# Color name (MOY64) per category -- the Scratch *look* (Part 2 paints blocks
-# with these; here so host and device agree on the palette).
-# Scratch-aligned category colours (#85/#93 restyle): Motion=blue, Events=yellow,
-# Control=orange, Looks/Draw=purple, Sensing/Input=indigo, Operators=green,
-# Sound=pink, Data=red/peach. Mapped onto the MOY64 (PICO-8 base) named colours.
-CATEGORY_COLOR = {
-    CAT_EVENTS: "yellow",       # Scratch events = gold/yellow
-    CAT_CONTROL: "orange",      # Scratch control = orange
-    CAT_ACTORS: "blue",         # the SPRITE category = Scratch Motion (blue)
-    CAT_LOOKS: "dark_purple",   # Scratch Looks (purple)
-    CAT_DRAW: "dark_green",     # drawing primitives ~ Scratch Pen
-    CAT_INPUT: "indigo",        # ~ Scratch Sensing
-    CAT_VARIABLES: "red",       # Scratch data/variables
-    CAT_LISTS: "peach",
-    CAT_OPERATORS: "green",     # Scratch operators = green
-    CAT_SOUND: "pink",          # Scratch sound = pink/magenta
-    CAT_PROCS: "brown",         # My Blocks (kept distinct from Looks-purple)
-}
+# A category's colour is the theme's `block_<category>` content role
+# (native/moy_ui/style.json's theme section): the Scratch look by default --
+# Motion=blue, Events=yellow, Control=orange, Looks=purple, Pen/Draw=dark
+# green, Sensing/Input=indigo, Operators=green, Sound=pink, Data=red/peach,
+# My Blocks=brown.
 
 
 # ============================================================================

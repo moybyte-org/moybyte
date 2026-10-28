@@ -23,8 +23,8 @@ The split follows the same discipline as the console's other sub-UIs:
 Dependency profile (the facade lens, shell_architecture_v1.md §2) -- through its
 `self.ws` back-reference:
   * shared (non-privileged): ws.screen, ws.layout, ws.sys_canvas, ws._dirty,
-                             ws._set_text_mode, ws.show_achievements, ws.go_home,
-                             ws._glyph, ws._mini_btn, ws._ota_channel
+                             ws._set_text_mode, ws.go_home,
+                             ws._mini_btn, ws._ota_channel
   * privileged (draft make_system_api): ws.updater -- the OtaUpdater handle
                              (find_bin/begin/step/finish/check_online/
                              begin_download/download_step/reset). This is the one
@@ -42,8 +42,10 @@ method bodies stay byte-for-byte identical to the pre-extraction versions.
 
 try:
     import ui as _ui
+    from ui_draw import AppHost
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime.ui_draw import AppHost
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 try:                                    # device: ticks is frozen flat
@@ -55,6 +57,7 @@ except ImportError:                     # host: the runtime package
 class UpdateUI:
     def __init__(self, ws, names, err_text):
         self.ws = ws
+        self._host = AppHost()        # the page's context; it takes no input
         # Injected instead of imported back from console.py (see module docstring).
         self._NAMES = names
         self._err_text = err_text
@@ -65,6 +68,9 @@ class UpdateUI:
         self._upd_bin = None          # update screen: (path, size) of the found/downloaded image
         self._upd_at = 0              # update screen: timestamp the install finished
         self._online_manifest = None  # the fetched update manifest dict
+        # The version the last online check offered ("0.9"), which About's
+        # Updates row says is ready; None after one found nothing newer.
+        self.offered = None
         self._check_armed = False     # one-frame gate so CHECKING... draws before the blocking fetch
 
     def open_update(self):
@@ -72,7 +78,6 @@ class UpdateUI:
         the "confirm" phase when one is found, else "error" with a friendly reason."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
-        self.ws.show_achievements = False
         self.ws._set_text_mode(False)             # button-driven, not typing
         self._upd_bin = None
         self._upd_msg = ""
@@ -97,7 +102,6 @@ class UpdateUI:
         runs in _pump_update one frame later so a CHECKING... screen shows first."""
         self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
-        self.ws.show_achievements = False
         self.ws._set_text_mode(False)
         self._upd_bin = None
         self._upd_msg = ""
@@ -119,7 +123,6 @@ class UpdateUI:
         over SDIO -> reboot; the backend module's header carries the design."""
         self.ws.wm.goto("update")
         self.ws._dirty = True
-        self.ws.show_achievements = False
         self.ws._set_text_mode(False)
         self._upd_bin = None
         self._upd_msg = ""
@@ -158,7 +161,7 @@ class UpdateUI:
             return
         self.ws._dirty = True
         try:
-            u.begin_download(self._online_manifest, to_slot=True)
+            u.begin_download(self._online_manifest)
             self._upd_phase = "downloading"
         except Exception as exc:               # noqa: BLE001 -- shown to the kid
             self._upd_phase = "error"
@@ -221,7 +224,7 @@ class UpdateUI:
         if i.pressed("home") or i.pressed("stop"):
             if ph != "done":                   # "done" is past the point of no return
                 self._exit_update()
-                self.ws.go_home()
+                self.ws.home_key()
             return
         if ph == "confirm":
             if i.pressed("a") or i.pressed("run"):
@@ -398,8 +401,10 @@ class UpdateUI:
             # stable) or a newer version within the selected channel (#53).
             if not u.offers(manifest, ch):
                 self._upd_phase = "uptodate"
+                self.offered = None
                 return
             self._online_manifest = manifest
+            self.offered = str(manifest.get("label") or manifest.get("version") or "")
             self._upd_phase = "confirm_online"
         elif ph == "downloading":
             if u is None:
@@ -461,94 +466,58 @@ class UpdateUI:
         except Exception as exc:  # noqa: BLE001
             print("Moybyte pre-reboot commit failed:", exc)
 
-    def _line(self, x, y, text, col):
-        """One status line on the update screen, through the toolkit's `row`.
-
-        Every line here is the same shape -- a coloured string at the panel's
-        left margin, stepping down -- so it goes through ONE kind instead of
-        forty hand-rolled prints. `row` with no field and no edge IS that shape
-        (its docstring: "a row that paints NO field ... is the common case"),
-        and it brings the clip this screen never had: the rect runs to the
-        panel's inner margin, so a long error string stops at the edge instead
-        of escaping the panel (#174).
-
-        NOT used by the two headline lines ("UPDATED!" / "IT WORKED!"): those
-        print at text scale 2 and `row` always prints at scale 1 -- the one gap
-        this conversion could not close from the caller side.
-        """
-        ws = self.ws
-        lay = ws.layout
-        fs = lay.fs
-        px, _py, pw, _ph = lay.settings_panel
-        _ui.row(ws.sys_canvas, ws.theme_colors,
-                (x, y, px + pw - 12 * fs - x, 8 * fs), text,
-                colors=(None, col, None), edge=False, pad=0, text_dy=0, fs=fs)
-
     def _draw_update(self, dt):
-        """The firmware-update screen: confirm / progress / done / error. On the
-        SYSTEM canvas, same panel chrome as Settings (host == device)."""
+        """The firmware-update screen: confirm / progress / done / error, a
+        page of the public UI API's rows (runtime/ui.py) filling the content
+        rect: what the phase says, a download's or a flash's progress as a
+        `ui.progress` row, and its keys as hints. Its keys and taps are
+        `_update_input` / `_update_pointer`'s, so the page takes no input."""
         NAMES = self._NAMES
-        cv = self.ws.sys_canvas
-        th = self.ws.theme_colors
-        lay = self.ws.layout
-        fs = lay.fs
-        cv.rect(0, 0, lay.w, lay.h, th["bar"])
-        px, py, pw, ph = lay.settings_panel
-        _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["surface"])
-        # The same title band Settings draws, so it takes the same #203 re-centring:
-        # the gear + word ride set_head_dy, the X's letter the middle of its chip.
-        hd = lay.set_head_dy
-        self.ws._glyph("gear", (px + 6, py + 2 + hd, 14 * fs, 14 * fs),
-                       th["accent"], cv)
-        cv.print("UPDATE", px + 24, py + 4 + hd, th["ink"], 2)
-        self.ws._mini_btn("X", lay.set_back, th["danger"], cv,
-                          lay.tap_box(lay.set_back, 18, 14))
-        u = self.ws.updater
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        lay = ws.layout
+        out = []
+        keys = []
+
+        def say(text, _col=None):
+            if text[1:4] == " = " and text[0] in "AB":     # a key: a hint
+                keys.extend(("confirm" if text[0] == "A" else "back", text[4:5] + text[5:].lower()))
+            else:
+                out.append(text)
+
+        u = ws.updater
         slot = u.slot() if u is not None else "?"
         vlabel = u.version_label() if u is not None else "v0"
-        x = px + 12 * fs
-        y = py + 28 * fs
         phase = self._upd_phase
         if phase == "checking":
-            self._line(x, y, "CHECKING ONLINE...", th["accent"])
-            y += 16 * fs
+            say("CHECKING ONLINE...", th["accent"])
             beta = self.ws._ota_channel() == "unstable"
-            self._line(x, y, "channel: %s" % ("BETA" if beta else "STABLE"),
+            say("channel: %s" % ("BETA" if beta else "STABLE"),
                        NAMES["orange"] if beta else th["play"])
-            y += 14 * fs
-            self._line(x, y, "running: %s %s" % (slot, vlabel), th["ink_dim"])
+            say("running: %s %s" % (slot, vlabel), th["ink_dim"])
         elif phase == "nopublish":
             beta = self.ws._ota_channel() == "unstable"
-            self._line(x, y, "NOTHING NEW YET", th["play"])
-            y += 14 * fs
-            self._line(x, y, "no %s build for" % ("BETA" if beta else "STABLE"),
+            say("NOTHING NEW YET", th["play"])
+            say("no %s build for" % ("BETA" if beta else "STABLE"),
                        th["ink"])
-            y += 12 * fs
-            self._line(x, y, "this console yet.", th["ink"])
-            y += 14 * fs
-            self._line(x, y, "running %s" % vlabel, th["ink_dim"])
-            y += 16 * fs
-            self._line(x, y, "B = BACK", th["accent"])
+            say("this console yet.", th["ink"])
+            say("running %s" % vlabel, th["ink_dim"])
+            say("B = BACK", th["accent"])
         elif phase == "handed":
             # The browser asked a console WITH GLASS to update. It gave the
             # glass back and opened this same screen THERE, so the only useful
             # thing to say here is where to look -- and that this page has
             # stopped being that console's screen.
-            self._line(x, y, "ON THE CONSOLE NOW", th["play"])
-            y += 14 * fs
-            self._line(x, y, "It took the update", th["ink"])
-            y += 12 * fs
-            self._line(x, y, "onto its own screen.", th["ink"])
-            y += 14 * fs
-            self._line(x, y, "Finish it there.", th["ink_dim"])
-            y += 16 * fs
-            self._line(x, y, "B = BACK", th["accent"])
+            say("ON THE CONSOLE NOW", th["play"])
+            say("It took the update", th["ink"])
+            say("onto its own screen.", th["ink"])
+            say("Finish it there.", th["ink_dim"])
+            say("B = BACK", th["accent"])
         elif phase == "uptodate":
-            self._line(x, y, "UP TO DATE", th["play"])
-            y += 14 * fs
-            self._line(x, y, "firmware %s" % vlabel, th["ink"])
-            y += 18 * fs
-            self._line(x, y, "B = BACK", th["accent"])
+            say("UP TO DATE", th["play"])
+            say("firmware %s" % vlabel, th["ink"])
+            say("B = BACK", th["accent"])
         elif phase == "confirm_online" and self._online_manifest:
             m = self._online_manifest
             newv = int(m.get("version", 0) or 0)
@@ -562,41 +531,31 @@ class UpdateUI:
             # Leading with the switch is deliberate: a kid who flipped the
             # channel by accident should meet that fact here, on the screen that
             # asks them to commit, rather than discover it after a reboot.
-            self._line(x, y,
+            say(
                        "SWITCH TO %s" % tgt_name if switch else "UPDATE AVAILABLE",
                        th["ink_dim"])
-            y += 12 * fs
             # Always from -> to. The switch case used to show only the target, so
             # the one screen where the move matters most was the one that never
             # said what you were leaving -- which is what an accidental flip
             # needs to see.
-            self._line(x, y, "%s ->" % vlabel[:20], th["ink_dim"])
-            y += 11 * fs
-            self._line(x, y, label[:22], NAMES["orange"] if beta else th["play"])
-            y += 13 * fs
+            say("%s ->" % vlabel[:20], th["ink_dim"])
+            say(label[:22], NAMES["orange"] if beta else th["play"])
             if kb:
-                self._line(x, y, "%d KB download" % kb, th["ink"])
-                y += 14 * fs
-            else:
-                y += 2 * fs
-            self._line(x, y, "A = DOWNLOAD", th["accent"])
-            y += 12 * fs
-            self._line(x, y, "B = CANCEL", th["ink_dim"])
+                say("%d KB download" % kb, th["ink"])
+            say("A = DOWNLOAD", th["accent"])
+            say("B = CANCEL", th["ink_dim"])
         elif phase == "downloading":
             done = u.dl_done if u is not None else 0
             total = u.dl_total if (u is not None and u.dl_total) else 0
-            self._line(x, y, "DOWNLOADING...", th["accent"])
-            y += 16 * fs
+            say("DOWNLOADING...", th["accent"])
             frac = (done / total) if total else 0.0
-            self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, frac)
-            y += 16 * fs
+            out.append(("bar", frac))
             if total:
-                self._line(x, y, "%d / %d KB" % (done // 1024, total // 1024),
+                say("%d / %d KB" % (done // 1024, total // 1024),
                            th["ink"])
             else:
-                self._line(x, y, "%d KB" % (done // 1024), th["ink"])
-            y += 16 * fs
-            self._line(x, y, "B = CANCEL", th["ink_dim"])
+                say("%d KB" % (done // 1024), th["ink"])
+            say("B = CANCEL", th["ink_dim"])
         elif phase == "confirm" and self._upd_bin:
             path, size = self._upd_bin
             if self._in_slot():
@@ -604,139 +563,107 @@ class UpdateUI:
                 name = str((self._online_manifest or {}).get("label") or "firmware")
             else:
                 head, name = "FOUND ON SD:", path.rsplit("/", 1)[-1]
-            self._line(x, y, head, th["ink_dim"])
-            y += 12 * fs
-            self._line(x, y, name[:24], th["play"])
-            y += 12 * fs
-            self._line(x, y, "%d KB" % (size // 1024), th["ink"])
-            y += 14 * fs
-            self._line(x, y, "running: %s" % slot, th["ink_dim"])
-            y += 18 * fs
-            self._line(x, y, "A = INSTALL", th["accent"])
-            y += 12 * fs
-            self._line(x, y, "B = CANCEL", th["ink_dim"])
+            say(head, th["ink_dim"])
+            say(name[:24], th["play"])
+            say("%d KB" % (size // 1024), th["ink"])
+            say("running: %s" % slot, th["ink_dim"])
+            say("A = INSTALL", th["accent"])
+            say("B = CANCEL", th["ink_dim"])
         elif phase == "install":
             done = u.done if u is not None else 0
             total = u.total if (u is not None and u.total) else 1
-            self._line(x, y, "FLASHING...", th["accent"])
-            y += 16 * fs
-            self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, done / total)
-            y += 16 * fs
-            self._line(x, y, "%d / %d KB" % (done // 1024,
+            say("FLASHING...", th["accent"])
+            out.append(("bar", done / total))
+            say("%d / %d KB" % (done // 1024,
                                              (u.total // 1024) if u else 0), th["ink"])
-            y += 16 * fs
-            self._line(x, y, "DO NOT POWER OFF", th["danger"])
+            say("DO NOT POWER OFF", th["danger"])
         elif phase == "done":
-            cv.print("UPDATED!", x, y, th["play"], 2)     # scale 2: see _line
-            y += 20 * fs
-            self._line(x, y, "rebooting...", th["ink"])
+            out.append("UPDATED!")
+            say("rebooting...", th["ink"])
         elif phase == "c6_checking":
-            self._line(x, y, "CHECKING C6 RADIO...", th["accent"])
-            y += 16 * fs
+            say("CHECKING C6 RADIO...", th["accent"])
             cu = getattr(self.ws, "c6_updater", None)
             iv = cu.installed if cu is not None else None
-            self._line(x, y, "radio: %s" % (
+            say("radio: %s" % (
                 ("shim v%d" % iv) if iv else "no espnow shim"), th["ink_dim"])
         elif phase == "c6_confirm":
             cu = getattr(self.ws, "c6_updater", None)
             c6 = (cu.offer or {}) if cu is not None else {}
             iv = cu.installed if cu is not None else None
-            self._line(x, y, "UPGRADE C6 RADIO", th["ink_dim"])
-            y += 12 * fs
-            self._line(x, y, "%s ->" % (("shim v%d" % iv) if iv else "no espnow"),
+            say("UPGRADE C6 RADIO", th["ink_dim"])
+            say("%s ->" % (("shim v%d" % iv) if iv else "no espnow"),
                        th["ink_dim"])
-            y += 11 * fs
-            self._line(x, y, "shim v%d (%s)" % (
+            say("shim v%d (%s)" % (
                 int(c6.get("version") or 0),
                 str(c6.get("hosted") or "?")[:12]), th["play"])
-            y += 13 * fs
             kb = int(c6.get("size") or 0) // 1024
             if kb:
-                self._line(x, y, "%d KB download" % kb, th["ink"])
-                y += 14 * fs
-            self._line(x, y, "A = UPGRADE", th["accent"])
-            y += 12 * fs
-            self._line(x, y, "B = CANCEL", th["ink_dim"])
+                say("%d KB download" % kb, th["ink"])
+            say("A = UPGRADE", th["accent"])
+            say("B = CANCEL", th["ink_dim"])
         elif phase == "c6_uptodate":
             cu = getattr(self.ws, "c6_updater", None)
             iv = cu.installed if cu is not None else None
-            self._line(x, y, "C6 RADIO UP TO DATE", th["play"])
-            y += 14 * fs
-            self._line(x, y, ("shim v%d" % iv) if iv else "?", th["ink"])
-            y += 18 * fs
-            self._line(x, y, "B = BACK", th["accent"])
+            say("C6 RADIO UP TO DATE", th["play"])
+            say(("shim v%d" % iv) if iv else "?", th["ink"])
+            say("B = BACK", th["accent"])
         elif phase == "c6_downloading":
             cu = getattr(self.ws, "c6_updater", None)
             done = cu.dl_done if cu is not None else 0
             total = cu.dl_total if (cu is not None and cu.dl_total) else 0
-            self._line(x, y, "DOWNLOADING C6...", th["accent"])
-            y += 16 * fs
+            say("DOWNLOADING C6...", th["accent"])
             frac = (done / total) if total else 0.0
-            self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, frac)
-            y += 16 * fs
-            self._line(x, y, "%d / %d KB" % (done // 1024, total // 1024), th["ink"])
-            y += 16 * fs
-            self._line(x, y, "B = CANCEL", th["ink_dim"])
+            out.append(("bar", frac))
+            say("%d / %d KB" % (done // 1024, total // 1024), th["ink"])
+            say("B = CANCEL", th["ink_dim"])
         elif phase == "c6_flashing":
             cu = getattr(self.ws, "c6_updater", None)
             done = cu.fl_done if cu is not None else 0
             total = cu.fl_total if (cu is not None and cu.fl_total) else 1
-            self._line(x, y, "FLASHING C6 RADIO...", th["accent"])
-            y += 16 * fs
-            self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, done / total)
-            y += 16 * fs
-            self._line(x, y, "%d / %d KB" % (done // 1024, total // 1024), th["ink"])
-            y += 16 * fs
-            self._line(x, y, "DO NOT POWER OFF", th["danger"])
+            say("FLASHING C6 RADIO...", th["accent"])
+            out.append(("bar", done / total))
+            say("%d / %d KB" % (done // 1024, total // 1024), th["ink"])
+            say("DO NOT POWER OFF", th["danger"])
         elif phase == "c6_done":
-            cv.print("C6 UPDATED!", x, y, th["play"], 2)  # scale 2: see _line
-            y += 20 * fs
-            self._line(x, y, "restarting...", th["ink"])
+            out.append("C6 UPDATED!")
+            say("restarting...", th["ink"])
         elif phase == "updated":
             # The verdict from the PREVIOUS boot: the slot we were pointed at is
             # the one now running. This is the only place the machine ever says
             # the update truly took -- "done" above is a hope, this is a fact.
-            cv.print("IT WORKED!", x, y, th["play"], 2)   # scale 2: see _line
-            y += 20 * fs
-            self._line(x, y, "new firmware:", th["ink_dim"])
-            y += 12 * fs
-            self._line(x, y, (self._upd_msg or "?")[:26], th["ink"])
-            y += 18 * fs
-            self._line(x, y, "B = BACK", th["accent"])
+            out.append("IT WORKED!")
+            say("new firmware:", th["ink_dim"])
+            say((self._upd_msg or "?")[:26], th["ink"])
+            say("B = BACK", th["accent"])
         elif phase == "rolledback":
             # Voice: the machine did the right thing and should say so plainly.
             # Nothing was lost, the kid did nothing wrong, and the old firmware
             # is exactly the one they had -- so the tone is reassurance, not alarm.
-            self._line(x, y, "The new one didn't", th["danger"])
-            y += 12 * fs
-            self._line(x, y, "start up.", th["danger"])
-            y += 14 * fs
-            self._line(x, y, "I put your old one", th["ink"])
-            y += 12 * fs
-            self._line(x, y, "back. Nothing lost.", th["ink"])
-            y += 14 * fs
-            self._line(x, y, (self._upd_msg or "?")[:26], th["ink_dim"])
-            y += 16 * fs
-            self._line(x, y, "B = BACK", th["accent"])
+            say("The new one didn't", th["danger"])
+            say("start up.", th["danger"])
+            say("I put your old one", th["ink"])
+            say("back. Nothing lost.", th["ink"])
+            say((self._upd_msg or "?")[:26], th["ink_dim"])
+            say("B = BACK", th["accent"])
         else:  # error
             # Voice: the rollback design means a failed update truly leaves the
             # running firmware untouched -- "Nothing changed." states that trust.
-            self._line(x, y, "Update didn't finish.", th["danger"])
-            y += 12 * fs
-            self._line(x, y, "Nothing changed.", th["ink"])
-            y += 12 * fs
-            self._line(x, y, (self._upd_msg or "?")[:26], th["ink_dim"])
-            y += 18 * fs
-            self._line(x, y, "B = BACK", th["accent"])
+            say("Update didn't finish.", th["danger"])
+            say("Nothing changed.", th["ink"])
+            say((self._upd_msg or "?")[:26], th["ink_dim"])
+            say("B = BACK", th["accent"])
+        cv.rect(0, 0, lay.w, lay.h, th["bar"])      # the screen has no bar of its own
+        self._host.begin(cv, th, (lay.cx, lay.cy, lay.cw, lay.ch))
+        _ui.page("")
+        if keys:
+            _ui.hints(keys)
+        _ui.group("C6 radio" if phase.startswith("c6_") else "Firmware update")
+        for item in out:
+            if type(item) is tuple:
+                _ui.progress("Done", int(max(0.0, min(1.0, item[1])) * 1000), 1000)
+            else:
+                _ui.label(item)
+        _ui.group()
+        if not ws.draw_icon("close", lay.set_back, th["ink"], cv):    # the theme's set, else
+            ws._mini_btn("X", lay.set_back, th["danger"], cv, lay.tap_box(lay.set_back, 18, 14))
 
-    def _draw_progress_bar(self, x, y, w, h, frac):
-        th = self.ws.theme_colors
-        cv = self.ws.sys_canvas
-        if frac < 0:
-            frac = 0.0
-        elif frac > 1:
-            frac = 1.0
-        cv.rectb(x, y, w, h, th["ink_dim"])
-        fill = int((w - 2) * frac)
-        if fill > 0:
-            cv.rect(x + 1, y + 1, fill, h - 2, th["play"])

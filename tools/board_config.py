@@ -1,3 +1,14 @@
+# Map (grep -n a name to jump there):
+#   load                a board's board.toml, parsed
+#   staged_modules      the shared Python modules a board freezes
+#   native_modules      the shared native modules a board compiles in
+#   impls               the native twins a board's decision takes
+#   stage_native        stage the native modules and write their cmake list
+#   sdkconfig_required  the stale-sdkconfig guard's list
+#   headroom_floor      the OTA-slot headroom the build's size guard demands
+#   stage               stage the Python modules
+#   Setting             one sdkconfig.board assignment and its prose
+#   TomlError           a board.toml the parser refuses
 """Read a board's `board.toml` and stage its modules (#161 Phase 3).
 
 WHY THIS EXISTS. A board's definition used to live in six places in three
@@ -35,6 +46,7 @@ Usage from a test:
     staged_modules(TDECK)      # {"console.py": Path(".../runtime/console.py")}
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -261,6 +273,21 @@ def load(board_dir):
     return loads(path.read_text(encoding="utf-8"))
 
 
+def headroom_floor(board_dir):
+    """`(ota id, floor in bytes)`: the OTA-slot headroom the board's app image
+    must keep, `[image] headroom_floor_kib`. The build's size guard fails
+    under it; a board with an OTA id and no floor is an error, not a pass."""
+    cfg = load(board_dir)
+    ota = cfg.get("board", {}).get("ota")
+    kib = cfg.get("image", {}).get("headroom_floor_kib")
+    if not ota:
+        raise ValueError("%s/board.toml: [board] has no ota id" % board_dir)
+    if not isinstance(kib, int) or isinstance(kib, bool) or kib <= 0:
+        raise ValueError("%s/board.toml: [image] headroom_floor_kib must be a "
+                         "positive integer, got %r" % (board_dir, kib))
+    return ota, kib * 1024
+
+
 def _shared(cfg):
     return cfg.get("modules", {}).get("shared", {})
 
@@ -345,6 +372,11 @@ def staged_modules(board_dir, root=ROOT):
         for group in device.get("group", []):
             for name in group["files"]:
                 out[name] = dev_dir / name
+    # The store index is native (native/moy_index) unless a build sets
+    # MOY_INDEX_IMPL=py (tools/moy_index_spike.py): no Python one is frozen, so
+    # `import moy_index` reaches the extensible builtin the module registers.
+    if os.environ.get("MOY_INDEX_IMPL", "c") == "c":
+        out.pop("moy_index.py", None)
     return out
 
 
@@ -430,6 +462,26 @@ def native_modules(board_dir, root=ROOT):
     return sorted(out)
 
 
+def impls(board_dir):
+    """{MOY_<NAME>_IMPL: value} -- the native twins this board's decision takes,
+    from board.toml's `[native.impl]` (a name and `py` or `c`, with a `why`).
+
+    The build exports each unless the environment already sets it, so a build
+    can still ask for the other twin; tools/esp32_build_lib.sh does the
+    exporting and the readers of the hook (the module fragments, `stage`) see
+    one variable, whoever set it."""
+    cfg = load(Path(board_dir).resolve()).get("native", {}).get("impl", {})
+    out = {}
+    for name, value in cfg.items():
+        if name == "why":
+            continue
+        if value not in ("py", "c"):
+            raise ValueError("board.toml [native.impl] %s is py or c, not %r"
+                             % (name, value))
+        out["MOY_%s_IMPL" % name.upper()] = value
+    return out
+
+
 def native_dest(board_dir):
     """Where `stage_native` puts the shared native modules, relative to the
     board dir -- board.toml `[native] dest`, or the default.
@@ -440,6 +492,46 @@ def native_dest(board_dir):
     have gone unnoticed until the image shipped with no console."""
     cfg = load(Path(board_dir).resolve())
     return cfg.get("native", {}).get("dest", "native/.staged")
+
+
+# What a native source dir may hold that was GENERATED for another build (the
+# desktop binary's `moy_web_blob.gen.c`, written there by `make
+# unix-micropython`). Never staged: the copy keeps the source's mtime, so a
+# generated file would arrive carrying the time it was last written for someone
+# else -- older than the object a previous board build compiled from different
+# text -- and the generator, finding the text already right, leaves it. ninja
+# then keeps that object, and a removed web bundle ships as the old blob. The
+# board's build generates these into the staged copy, new every build.
+GENERATED = "*.gen.*"
+
+
+# board.toml [input]: the input table's parameters a board overrides, each a
+# compile definition every native module sees (moy_input.h has the defaults).
+INPUT_PARAMS = {
+    "repeat_delay_ms": "MOY_INPUT_REPEAT_DELAY_MS",
+    "repeat_rate_ms": "MOY_INPUT_REPEAT_RATE_MS",
+    "ball_coast": "MOY_INPUT_BALL_COAST",
+    "ball_coast_rate": "MOY_INPUT_BALL_COAST_RATE",
+}
+
+
+def input_defines(board_dir):
+    """board.toml [input] as (DEFINE, value) pairs, in INPUT_PARAMS order;
+    an unknown key or a value that is not a whole number >= 0 is refused."""
+    got = load(board_dir).get("input", {})
+    out = []
+    for key in got:
+        if key not in INPUT_PARAMS:
+            raise ValueError("%s/board.toml [input] has no %r (it takes %s)"
+                             % (board_dir, key, ", ".join(INPUT_PARAMS)))
+    for key, define in INPUT_PARAMS.items():
+        if key in got:
+            v = got[key]
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                raise ValueError("%s/board.toml [input] %s must be a whole number >= 0"
+                                 % (board_dir, key))
+            out.append((define, v))
+    return out
 
 
 def stage_native(board_dir, root=ROOT, quiet=False):
@@ -472,9 +564,12 @@ def stage_native(board_dir, root=ROOT, quiet=False):
              # are already built with NDEBUG. The .mk twins need no equivalent:
              # the unix and wasm ports put -DNDEBUG in their own CFLAGS.
              "target_compile_definitions(usermod INTERFACE NDEBUG)"]
+    for define, v in input_defines(board_dir):
+        lines.append("target_compile_definitions(usermod INTERFACE %s=%d)" % (define, v))
     for m, src in mods:
         shutil.copytree(src, dest / m,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc",
+                                                      GENERATED))
         lines.append("include(${CMAKE_CURRENT_LIST_DIR}/%s/micropython.cmake)"
                      % m)
     mods = [m for m, _src in mods]
@@ -692,6 +787,10 @@ def main(argv):
     if len(argv) >= 3 and argv[1] == "stage-native":
         stage_native(argv[2])
         return 0
+    if len(argv) >= 3 and argv[1] == "impls":
+        for name, value in sorted(impls(argv[2]).items()):
+            print("%s=%s" % (name, value))
+        return 0
     if len(argv) >= 3 and argv[1] == "native-dest":
         print(native_dest(argv[2]))
         return 0
@@ -708,6 +807,10 @@ def main(argv):
         for s in sdkconfig_required(argv[2]):
             print(s.assignment)
         return 0
+    if len(argv) >= 3 and argv[1] == "headroom-floor":
+        ota, floor = headroom_floor(argv[2])
+        print("%d %s" % (floor, ota))
+        return 0
     if len(argv) >= 4 and argv[1] == "sdkconfig-get":
         print(sdkconfig_get(argv[2], argv[3]))
         return 0
@@ -722,7 +825,8 @@ def main(argv):
     print(__doc__.strip().splitlines()[0], file=sys.stderr)
     print("usage: board_config.py stage|stage-native|list|list-native "
           "<board_dir>", file=sys.stderr)
-    print("       board_config.py native-dest <board_dir>", file=sys.stderr)
+    print("       board_config.py native-dest|impls|headroom-floor <board_dir>",
+          file=sys.stderr)
     print("       board_config.py sdkconfig-required|sdkconfig-get|"
           "sdkconfig-why <board_dir> [OPTION]", file=sys.stderr)
     return 2

@@ -145,8 +145,8 @@ def test_the_arm_is_consumed_with_the_feeder_idle():
     for path in (GUITION / "native" / "moy_axs" / "modmoy_axs.c",
                  TDECK / "native" / "moy_lcd" / "modmoy_lcd.c"):
         src = path.read_text(encoding="utf-8")
-        for verb in ("kick", "show"):
-            head = src.index("static mp_obj_t moy_%s_%s("
+        for verb in ("kkick", "kship"):
+            head = src.index("int moy_%s_%s(int n) {"
                              % ("axs" if "axs" in path.name else "lcd", verb))
             body = src[head:src.index("\n}\n", head)]
             assert "moy_flush_drain()" in body, (path.name, verb)
@@ -181,7 +181,7 @@ def test_blit_game_fences_before_it_overwrites_the_scratch():
 
     THE SECOND RULE (2026-09-08): the snapshot is a DMA still reading the LIVE
     canvas after blit_game returns, so the sys canvas must `snap_fence` before
-    the cart's next write -- in `sync_back`, which both boards' present()
+    the cart's next write -- in `sync_back`, which both boards' first upcall
     hooks run before every Player tick, and BEFORE it re-points the draw
     target. The lever is probed by the snapshot verb's absence, never by a
     flag a base class could inherit."""
@@ -190,37 +190,20 @@ def test_blit_game_fences_before_it_overwrites_the_scratch():
     assert body.index("comp.fold_fence()") < body.index("if snap(")
     assert '"snap_scale_fold", None' in body
     assert "_snap_live = True" in body
-    sync = dc[dc.index("def sync_back"):dc.index("def _drain_lcopy")]
+    sync = dc[dc.index("def sync_back"):dc.index("def _t_layer_us")]
     assert sync.index("_snap_live") < sync.index("snap_fence()") \
         < sync.index("back_buffer()")
     from board_source import runtime_text
     for path in (GUITION / "modules" / "moy_runtime.py",
                  TDECK / "modules" / "moy_runtime.py"):
-        # The board's own present hook where it has one (the T-Deck times
-        # its sync_back); the spine's `present` method where it does not.
+        # The canvases re-point in the console's first upcall of every
+        # frame (the spine's handle_input), after the kernel's present stage
+        # and before the Player's tick.
         src = runtime_text(path)
-        at = src.find("def _present(")
-        if at < 0:
-            at = src.index("def present(")
+        at = src.index("        def handle_input():")
         present = src[at:]
-        present = present[:present.index("\n\n")]
-        assert "sync_back()" in present, path
-
-
-def test_a_banded_board_without_the_lever_carries_no_fold_attribute():
-    """`FoldingCompositor` is a SUBCLASS and not four methods on the shared
-    base, because `blit_game`, `_diag_pump` and the dev channel's `state` all
-    probe these names with getattr: a board that cannot synthesize bands must
-    have NO fold attribute, since a `fold_count` of 0 inherited from a base is
-    indistinguishable from a fold that never fires."""
-    base = (DEVICE / "banded_panel.py").read_text(encoding="utf-8")
-    _prose, _, body = base.partition("class BandedCompositor")
-    head, _, folding = body.partition("class FoldingCompositor")
-    assert folding, "FoldingCompositor is where the fold lives"
-    for name in ("fold_supported", "fold_count", "arm_scale_fold",
-                 "disarm_scale_fold", "fold_fence"):
-        assert name not in head, "%s leaked onto BandedCompositor" % name
-        assert name in folding, name
+        present = present[:present.index("ws.handle_input()")]
+        assert "sys_canvas.sync_back()" in present, path
 
 
 # -- the twin verbs: two panel modules, one body ------------------------------

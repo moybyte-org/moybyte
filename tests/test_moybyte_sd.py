@@ -174,7 +174,7 @@ class World:
     leaked one would make the second test in a file silently exercise nothing.
     """
 
-    NAMES = ("machine", "os", "vfs", "moy_sd")
+    NAMES = ("machine", "os", "vfs", "moy_sd", "moy_store")
 
     def __init__(self):
         self.log = []
@@ -186,6 +186,21 @@ class World:
         self.os()
         self.vfs()
         self.moy_sd()
+        self.moy_store()
+
+    def moy_store(self):
+        m = types.ModuleType("moy_store")
+        log = self.log
+
+        class Card:
+            def __init__(self, sectors):
+                self.sectors = sectors
+
+        def card(sectors, driver=None):
+            log.append(("moy_store.card", sectors))
+            return Card(sectors)
+        m.card = card
+        sys.modules["moy_store"] = m
 
     def machine(self, **kw):
         sys.modules["machine"] = _machine(self.log, **kw)
@@ -354,41 +369,6 @@ def test_the_live_mount_publishes_the_card_at_slash_sd(w):
     bd = w.mod.mount_sd_live()
     assert ("vfs.mount", "/sd", bd) in w.log
     assert bd.sectors == 15_523_840
-
-
-# -- the block device ---------------------------------------------------------
-
-
-def test_readblocks_asks_for_as_many_sectors_as_the_buffer_holds(w):
-    bd = w.mod._NativeSDBlockDev(64)
-    assert bd.readblocks(7, bytearray(2048)) == 0
-    assert ("moy_sd.read", 7, 2048, 4) in w.log
-
-
-def test_writeblocks_asks_for_as_many_sectors_as_the_buffer_holds(w):
-    bd = w.mod._NativeSDBlockDev(64)
-    assert bd.writeblocks(9, bytearray(1536)) == 0
-    assert ("moy_sd.write", 9, 1536, 3) in w.log
-
-
-def test_byte_offset_addressing_is_refused_without_touching_the_card(w):
-    """FAT addresses whole 512-blocks here. Passing a byte offset through as if
-    it were a block index would write the wrong sectors, so it must raise --
-    and must not have issued the transfer first."""
-    bd = w.mod._NativeSDBlockDev(64)
-    for verb in (bd.readblocks, bd.writeblocks):
-        with pytest.raises(OSError) as e:
-            verb(0, bytearray(512), 16)
-        assert e.value.args[0] == 22
-    assert w.log == []
-
-
-def test_the_ioctl_answers_the_two_questions_fat_asks(w):
-    bd = w.mod._NativeSDBlockDev(4096)
-    assert bd.ioctl(4, 0) == 4096          # BLOCK_COUNT
-    assert bd.ioctl(5, 0) == 512           # BLOCK_SIZE
-    for op in (1, 2, 3, 6):                # INIT / DEINIT / SYNC / BLOCK_ERASE
-        assert bd.ioctl(op, 0) == 0
 
 
 # -- the helpers ---------------------------------------------------------------

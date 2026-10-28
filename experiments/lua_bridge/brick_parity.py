@@ -1,8 +1,8 @@
 """Brick Siege Python-vs-Lua parity harness (#67, host edition).
 
 The sibling of host_parity.py (sakura), for the console's heaviest seed cart:
-runs the REAL system_carts/brick_siege.moy/main.py and its line-faithful Lua port
-brick_siege_lua.moy/main.lua side by side for N deterministic frames -- same
+runs the REAL system_carts/moybyte.brick_siege.moy/main.py and its line-faithful Lua port
+moybyte.brick_siege_lua.moy/main.lua side by side for N deterministic frames -- same
 seeded PRNG, same scripted buttons, same manifest config, same tilemap -- and
 after EVERY frame compares
 
@@ -15,8 +15,8 @@ after EVERY frame compares
     the map is game state and a one-cell divergence in what a bullet crumbled
     would otherwise hide until it changed a collision.
 
-THE LUA SIDE IS THE SHIPPED VM. main.lua runs under runtime/lua_host's
-MoycoreHostRun -- libmoy's binding over the vendored Lua 5.4 both boards
+THE LUA SIDE IS THE SHIPPED VM. main.lua runs under device/moycore_glue.py's
+MoycoreRun -- libmoy's binding over the vendored Lua 5.4 both boards
 compile, LUA_32BITS and all -- and the fake API reaches it the way the console's
 does: the namespace is registered on top of libmoy's table, and this harness's
 prelude rides the namespace's `_moy_prelude` hook. mget/mset and btn/btnp are
@@ -83,13 +83,13 @@ if _ROOT not in sys.path:
 
 from runtime import palette                      # noqa: E402
 from runtime.editors_sheet import TileMap         # noqa: E402
-from runtime.lua_host import MoycoreHostRun       # noqa: E402
+from parity_wire import lua_run       # noqa: E402
 from parity_wire import (decode, same, FloatStats, Lcg, PRNG_LUA,   # noqa: E402
                          check_prng_twins, ENC_LUA, FakeWs, FLOAT_TOL)
 
 _CARTS = os.path.join(_ROOT, "system_carts")
-PY_CART_DIR = os.path.join(_CARTS, "brick_siege.moy")        # the Python original
-LUA_CART_DIR = os.path.join(_CARTS, "brick_siege_lua.moy")   # the #67 A/B twin
+PY_CART_DIR = os.path.join(_CARTS, "moybyte.brick_siege.moy")        # the Python original
+LUA_CART_DIR = os.path.join(_CARTS, "moybyte.brick_siege_lua.moy")   # the #67 A/B twin
 DT = 1.0 / 32.0
 SEED = 0xC0FFEE % 2147483648
 
@@ -136,11 +136,11 @@ def _load_config():
     """Both carts' manifest configs, drift-guarded: the twins must tune alike or
     the A/B (and this parity run) compares different waves."""
     with open(os.path.join(PY_CART_DIR, "manifest.json")) as fh:
-        py_cfg = json.load(fh)["config"]
+        py_cfg = json.load(fh)["moybyte"]["config"]
     with open(os.path.join(LUA_CART_DIR, "manifest.json")) as fh:
-        lua_cfg = json.load(fh)["config"]
+        lua_cfg = json.load(fh)["moybyte"]["config"]
     if py_cfg != lua_cfg:
-        raise AssertionError("brick_siege.moy and brick_siege_lua.moy configs "
+        raise AssertionError("moybyte.brick_siege.moy and moybyte.brick_siege_lua.moy configs "
                              "drifted: %r != %r" % (py_cfg, lua_cfg))
     return py_cfg
 
@@ -162,7 +162,7 @@ def _check_maps():
     with open(os.path.join(LUA_CART_DIR, "map.moymap")) as fh:
         b = fh.read()
     if a != b:
-        raise AssertionError("brick_siege.moy and brick_siege_lua.moy "
+        raise AssertionError("moybyte.brick_siege.moy and moybyte.brick_siege_lua.moy "
                              "map.moymap drifted")
 
 
@@ -314,7 +314,7 @@ class PyCart:
 
 # --- Lua side ------------------------------------------------------------------
 
-# The harness prelude, run by MoycoreHostRun AFTER libmoy's table and the
+# The harness prelude, run by the glue's MoycoreRun AFTER libmoy's table and the
 # shared handle prelude, BEFORE the cart: the recording shadows of the draw
 # verbs (each with the defaults the Python fake applies, so a call the cart
 # makes with fewer arguments records the same tuple on both sides), the PRNG,
@@ -366,7 +366,7 @@ def _cfg_lua(config):
 
 
 class LuaCart:
-    """Run main.lua under MoycoreHostRun with the same fake API."""
+    """Run main.lua under the glue's MoycoreRun with the same fake API."""
 
     def __init__(self, console):
         self.console = console
@@ -385,7 +385,7 @@ class LuaCart:
                               + "__SEED = %d\n" % SEED + PRELUDE)
         with open(os.path.join(LUA_CART_DIR, "main.lua")) as fh:
             src = fh.read()
-        self.run = MoycoreHostRun(FakeWs(self.console, self.console.tilemap),
+        self.run = lua_run(FakeWs(self.console, self.console.tilemap),
                                   ns, src)
 
     def tick(self, dt):

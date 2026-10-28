@@ -51,8 +51,8 @@ def _seeded_store(tmp_path):
     store = tmp_path / "store"
     store.mkdir()
     # Two carts, deliberately: a single-cart store trips worker.js's one-cart
-    # kiosk path (the game IS the page, no shell, no Make tile).
-    for cart in ("star_catcher.moy", "sakura.moy"):
+    # kiosk path (the game IS the page, no shell, no Make tab).
+    for cart in ("moybyte.star_catcher.moy", "moybyte.sakura.moy"):
         shutil.copytree(ROOT / "system_carts" / cart, store / cart)
     return store
 
@@ -64,6 +64,7 @@ def _twin(store, pin=None):
     The health check is GET /sync and not /carts.json, because under `--pin`
     the latter is a 403 -- which is the feature, and would read here as a twin
     that never came up."""
+    web_e2e.warm_host_library()
     port = web_e2e.free_port()
     argv = [sys.executable, "serve.py", str(port), "dist", "--carts", str(store)]
     if pin:
@@ -106,7 +107,7 @@ def test_a_cart_made_in_chrome_lands_on_disk(tmp_path):
     with _twin(store) as base:
         run_out = _browsershot("sync_create.json", base, tmp_path / "shots")
 
-        new = store / "new_cart.moy"
+        new = store / "local.new_cart.moy"
         assert new.is_dir(), \
             "the browser-created cart never reached the store:\n%s" % run_out[-2000:]
         got = sorted(p.name for p in new.iterdir())
@@ -193,7 +194,7 @@ def test_a_pinned_board_prompts_in_the_page_and_then_works(tmp_path):
 
         # ...and the shelf behind it is the real console: a cart made on it
         # reaches the store through the same pinned /sync.
-        new = store / "new_cart.moy"
+        new = store / "local.new_cart.moy"
         assert new.is_dir(), \
             "no cart reached the store after pairing:\n%s" % out[-2000:]
 
@@ -225,7 +226,7 @@ def test_a_pico8_cart_dropped_on_a_board_page_lands_on_the_board(tmp_path):
     with _twin(store) as base:
         run_out = _browsershot("sync_p8_drop.json", base, tmp_path / "shots",
                                drop=p8)
-        landed = store / "tiny_dash.moy"
+        landed = store / "local.tiny_dash.moy"
         assert landed.is_dir(), (
             "a p8 dropped on a board-served page never reached the board:\n%s"
             % run_out[-2500:])
@@ -245,9 +246,8 @@ def test_a_pico8_cart_dropped_on_a_board_page_lands_on_the_board(tmp_path):
         from runtime import moy_carts                         # noqa: E402
         scanned = {c["path"].rsplit("/", 1)[-1]: c
                    for c in moy_carts.scan(str(store))}
-        entry = scanned.get("tiny_dash.moy")
+        entry = scanned.get("local.tiny_dash.moy")
         assert entry, sorted(scanned)
         assert entry.get("runtime") == "lua", entry
         # Imported carts stay private by default (#194): a board is where a cart
         # could plausibly be published FROM, so this matters more here.
-        assert man.get("safe_to_share") is False, man

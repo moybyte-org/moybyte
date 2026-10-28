@@ -5,10 +5,11 @@ Why this file exists
 `test_shell_goldens.py` renders whole SCREENS through `ws.frame()`, and its
 `_quiesce` deliberately closes every overlay and modal first. That leaves the
 four modules of this file group almost uncovered: it hashes the Settings screen
-in exactly ONE state (row 0 selected, no OTA/webhost/bluetooth rows, wifi and
-bluetooth panels closed), and it hashes the system menu, the About modal, the
-achievements view, the Easter-egg banner and the whole firmware-update screen
-**not at all** -- its own docstring names the update screen as out of scope.
+in exactly ONE state (the first row focused, no OTA/webhost/bluetooth rows,
+wifi and bluetooth panels closed), and it hashes the system menu's rows, the
+Achievements page with a badge opened, the unlock banner and the notice, and
+the whole firmware-update screen **not at all** -- its own docstring names the
+update screen as out of scope.
 
 Those surfaces are precisely where Phase 3b transcribed hand-rolled row/dialog
 drawing onto `runtime/ui.py`'s kinds, so without this file the transcription had
@@ -24,10 +25,11 @@ matters most here is the same one that file discovered: at 320x240 / font
 scale 1 the shell takes frozen branches, so a widget change is only visible on
 the other rows.
 
-Deliberately NOT the whole Settings screen: `SettingsLayer.draw` composites the
-live wallpaper, which is a cart render and is not stable across processes here.
-The full screen is `test_shell_goldens.py`'s `settings` surface; this file takes
-its ROWS.
+Settings is a page of the public UI API's verbs (docs/look_2026-10.md step
+19), so its shots are the PAGE (`SettingsLayer._draw_page`, the bar left out)
+with focus on each row in turn -- the page scrolled to it -- and each panel's
+page; the full screen with its bar is `test_shell_goldens.py`'s `settings`
+surface.
 
 Re-baselining is a deliberate act, same switch as the shell goldens:
 
@@ -45,7 +47,12 @@ import pytest
 # The matrix lives in ONE place. pytest puts tests/ on sys.path, so this is a
 # plain module import; an ImportError here is a loud lockstep failure rather
 # than the silent divergence a copied dict would give.
-from test_shell_goldens import CONFIGS, REBASELINE_CMD, UPDATE_ENV, _axes
+from test_shell_goldens import CONFIGS as _ALL, REBASELINE_CMD, UPDATE_ENV, _axes, pick_layout
+
+# The sub-surfaces are rendered on every config that renders the whole
+# surface list; a `plan` config holds a few named surfaces alone, and a
+# `render` config is its row's Settings doubled.
+CONFIGS = {k: v for k, v in _ALL.items() if "plan" not in v and "render" not in v}
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_FILE = Path(__file__).resolve().parent / "shell_goldens" / "subsurfaces.json"
@@ -97,6 +104,14 @@ class _Keyboard(object):
                 ("11:22:33:44:55:66", "Logi MX Keys", -77, False, False)]
 
 
+class _Keep(object):
+    """The store's keeper: a fixed free space, so About's Storage row is
+    the same on every host."""
+
+    def free(self):
+        return (1258291, 4096)
+
+
 class _Updater(object):
     error = ""
     dl_done = 512 * 1024
@@ -145,9 +160,9 @@ def blank_digest(ws):
     """The hash of the CLEARED canvas -- a shot that drew nothing at all.
 
     76 of the 300 stored digests were this, in every config, for three months
-    of nobody noticing: `capture` pinned `set_top = 0` and then drew row `idx`,
-    and a row below the scroll window gets an off-panel rect that `ui.row`
-    clips away entirely. The hash was stable, committed and green, and it
+    of nobody noticing: `capture` pinned the rows' scroll at the top and then
+    drew row `idx`, and a row below the scroll window got an off-panel rect
+    that `ui.row` clipped away entirely. The hash was stable, committed and green, and it
     pinned the colour of nothing. So the blank canvas gets a name here and
     `_no_blanks` refuses it, on the capture path AND against the stored file --
     a golden that can be produced by deleting the draw call is not a golden."""
@@ -173,11 +188,15 @@ def _build(cfg, carts_dir):
     ws = host_app.build_workstation(
         str(carts_dir), sys_size=cfg["sys_size"], font_scale=cfg["font_scale"],
         windowed=cfg["windowed"], panel_diagonal_in=cfg["diagonal_in"])
+    pick_layout(ws, cfg)
+    if "layout" in cfg:
+        ws.look.set_theme(ws.look.theme_name, persist=False)
     ws.look.set_theme_variant(cfg["variant"], persist=False)
     ws.wifi = _Wifi(True)
     ws.updater = _Updater()
     ws.webhost = _Webhost()
     ws.keyboard = _Keyboard()
+    ws.cart_keep = _Keep()
     ws._updater_ok = None          # the capability answers are cached per boot
     ws._online_ok = None
     return ws
@@ -186,108 +205,102 @@ def _build(cfg, carts_dir):
 def capture(cfg, carts_dir):
     """{sub_surface: sha256} for one configuration."""
     ws = _build(cfg, carts_dir)
+    if cfg.get("console"):
+        ws.open_library()          # the desk's PLAY: console mode
     blank = blank_digest(ws)
     ws.open_settings()
     sl = ws.settings_layer
     out = {}
 
-    # Every Settings row KIND, selected and unselected: the selection fill and
-    # the label ink are what `ui.row` took over, and each kind then draws its
-    # own trailing content (value column / icon / OPEN glyph / stepper).
-    #
-    # Each row is SCROLLED INTO VIEW first. `_draw_settings_row` places row i in
-    # on-screen slot `i - set_top`, and a slot past the panel is drawn off the
-    # canvas -- so the old `set_top = 0` silently hashed an empty canvas for
-    # every row below the fold (10-22 of them per config, the whole OTA/diag
-    # tail). The scroll is the MINIMUM that reveals the row -- rows already
-    # inside the first window keep slot `i`, so what moved here is exactly the
-    # set that was blank.
-    rows = sl._settings_rows()
-    vis = sl._settings_visible()
-    for idx in range(len(rows)):
-        key = rows[idx][0]
-        sl.set_top = max(0, idx - vis + 1)
-        sl.set_msel = idx
-        out["row_sel_" + key] = _shot(ws, lambda i=idx: sl._draw_settings_row(i))
-        sl.set_msel = -1
-        out["row_off_" + key] = _shot(ws, lambda i=idx: sl._draw_settings_row(i))
-    sl.set_msel = 0
+    # The page with focus on every row in turn: each kind's verb with the
+    # focus mark, and the page scrolled to it, so a row below the fold is
+    # drawn, never an empty canvas (`_no_blanks`).
+    def page(host=None, focus=None):
+        # Focus lands on the frame after it is asked for and the page scrolls
+        # to it on the next: two draws settle it, the third is the shot.
+        if focus is not None:
+            (host or sl._host).focus(focus)
+        sl._draw_page()
+        if focus is not None:
+            (host or sl._host).focus(focus)
+        sl._draw_page()
+        return _shot(ws, sl._draw_page)
 
-    keys = [r[0] for r in rows]
+    from runtime.settings_layer import say
+    sl._draw_page()
+    for _caption, rows in sl._grouped():
+        for key, label, _kind in rows:
+            out["row_" + key] = page(focus=say(label))
+    out["row_achievements"] = page(focus="Achievements")
     ws.wifi = _Wifi(False)
-    wi = keys.index("wifi")
-    sl.set_top = max(0, wi - vis + 1)
-    out["row_wifi_off"] = _shot(ws, lambda: sl._draw_settings_row(wi))
+    out["row_wifi_off"] = page(focus="Wi-Fi")
     ws.wifi = _Wifi(True)
-    sl.set_top = 0
 
-    # The WIFI panel: the scan list (a selection row per network), the password
-    # prompt, and the offline status line.
-    sl.wifi_view = True
+    sl.open_wifi()
     sl.wifi_nets = [("MoyNet-5G-Long-Name", 88, True), ("Guest", 40, False),
                     ("cafe wifi", 12, True)]
     sl.wifi_known = ["MoyNet-5G-Long-Name"]
     sl.wifi_msg = "scanning..."
-    # `_draw_wifi` has no scroll: it STOPS listing networks once the next row
-    # would collide with the button strip, so at 800x480/fs3 only the first one
-    # fits and selecting #1 or #2 changed no pixel -- two goldens that were
-    # byte-identical to each other and to selecting nothing. Rather than
-    # re-deriving that break condition here (a second copy to drift), probe it:
-    # shoot the no-selection list once, and store a selection only when it
-    # actually moved a pixel. A key that DISAPPEARS later is still a failure --
-    # the diff loop walks the union of stored and rendered names.
-    sl.wifi_sel = -1
-    unselected = _shot(ws, lambda: sl._draw_wifi())
     for sel in range(3):
-        sl.wifi_sel = sel
-        shot = _shot(ws, lambda: sl._draw_wifi())
-        if shot != unselected:
-            out["wifi_list_%d" % sel] = shot
+        out["wifi_list_%d" % sel] = page(sl._sub, "net%d" % sel)
     sl.wifi_pick = "MoyNet-5G-Long-Name"
     sl.wifi_pw.text = "hunter2hunter2"
-    out["wifi_password"] = _shot(ws, lambda: sl._draw_wifi())
+    out["wifi_password"] = page()
     sl.wifi_pick = None
     ws.wifi = _Wifi(False)
-    out["wifi_offline"] = _shot(ws, lambda: sl._draw_wifi())
+    out["wifi_offline"] = page()
     ws.wifi = _Wifi(True)
-    sl.wifi_view = False
+    sl.close_wifi()
 
-    # The BLUETOOTH panel (P4-capability gated; the injected keyboard above is
-    # what makes it reachable on the host at all).
     sl.open_bluetooth()
     for sel in range(2):
-        sl.bt_sel = sel
-        out["bt_%d" % sel] = _shot(ws, lambda: sl._draw_bluetooth())
-    sl.bt_view = False
+        out["bt_%d" % sel] = page(sl._sub, "bt%d" % sel)
+    sl.close_bluetooth()
 
-    # The warning before a toggle turns ON (UNKNOWN SOURCES), with the focus
-    # ring on each of its two buttons.
-    from runtime.settings_layer import TOGGLE_CONFIRMS
+    from runtime.settings_layer import KEEP_OFF, TOGGLE_CONFIRMS
     for key in sorted(TOGGLE_CONFIRMS):
         sl.open_confirm(key)
-        for sel in range(2):
-            sl.confirm_sel = sel
-            out["confirm_%s_%d" % (key, sel)] = _shot(ws, lambda: sl._draw_confirm())
+        for sel, label in enumerate((KEEP_OFF, TOGGLE_CONFIRMS[key][2])):
+            out["confirm_%s_%d" % (key, sel)] = page(sl._sub, say(label))
         sl.close_confirm()
+    sl._draw_page()
 
-    # The = dropdown, one shot per highlighted row (headers + separators move
-    # with it), and the ABOUT modal.
     ws.go_home()
+    if cfg["windowed"]:
+        ws.open_library()
     ws.toggle_sysmenu()
     m = ws.sysmenu
     for sel in range(len(m.items)):
         m.sel = sel
         out["sysmenu_%d" % sel] = _shot(ws, lambda: ws.menu_ui._draw_sysmenu())
     ws.sysmenu.open = False
+    ws.menu_ui._menu_about()
+    for _ in range(2):              # its first frame lays its body out
+        ws.menu_ui._draw_about()
     out["about"] = _shot(ws, lambda: ws.menu_ui._draw_about())
+    ws._about = False
 
-    # The achievements view (locked AND unlocked rows) + the egg banner.
-    out["ach_none"] = _shot(ws, lambda: ws.ach_ui._draw_achievements())
+    # The Achievements page (locked AND found cards) with a badge opened,
+    # the unlock banner (a secret's, its confetti out whole) and the notice.
+    from runtime import achievements_ui
+    ws.ach.unlocked = {"first_open": 20261012, "secret_door": 0}
+    ws.open_settings()
+    sl.open_page("achievements")
+    out["ach_page"] = page(sl._sub)
+    pg = sl.achievements
+    pg._open(pg._by_id["Badge first_open"])
+    out["ach_popover"] = page(sl._sub)
+    sl.close_page()
+    sl.open_page("licences")
+    out["licences"] = page(sl._sub)
+    sl.close_page()
+    ws.go_home()
     ws.ach.award("konami")
-    ws.ach.award("secret_door")
-    out["ach_some"] = _shot(ws, lambda: ws.ach_ui._draw_achievements())
-    ws.ach_ui.egg_msg = ("KNOCK KNOCK... OH! YOU FOUND ME!", "key")
-    out["egg"] = _shot(ws, lambda: ws.ach_ui._draw_egg())
+    ws._toast_at -= 10000
+    out["banner"] = _shot(ws, lambda: achievements_ui.unlock_banner(ws))
+    ws._notice = ("Moybyte updated", "Now 0.8", "ok")
+    out["notice"] = _shot(ws, lambda: ws._draw_notice())
+    ws._notice = None
 
     # The firmware-update screen: every phase it can be in.
     uu = ws.update_ui
@@ -423,7 +436,7 @@ def test_the_hand_rolled_row_idiom_is_gone(tmp_path):
     pixel hash cannot see, because a hand-rolled copy that happens to be
     byte-identical to `ui.row` is exactly what this phase exists to delete."""
     import re
-    group = ("settings_layer.py", "system_menu_ui.py", "achievements_ui.py",
+    group = ("settings_layer.py", "achievements_ui.py", "about_ui.py",
              "update_ui.py")
     pat = re.compile(
         r"cv\.rect\([^\n]*\bth\[[\"'](?:hilite|selection)[\"']\][^\n]*\)\s*\n"
@@ -433,3 +446,83 @@ def test_the_hand_rolled_row_idiom_is_gone(tmp_path):
         assert not pat.search(src), (
             "runtime/%s still hand-rolls a selection row (a `hilite` rect "
             "followed by a print). Use ui.row." % name)
+
+
+def test_a_settled_settings_page_paints_nothing(tmp_path):
+    """The page's settled answer (docs/ui_api_2026-10.md §2), end to end: with
+    no input the redraw gate draws no frame, a press that moves nothing draws
+    one frame of the same pixels, and no frame asks for another after it."""
+    from runtime import host_app
+    ws = _build(CONFIGS["tdeck_320x240_fs1_dark"], tmp_path / "carts")
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_settings()
+    for _ in range(4):
+        drv.frame(_DT)
+    drawn = ws._frames_drawn
+    for _ in range(10):
+        drv.frame(_DT)
+    assert ws._frames_drawn == drawn, "an idle Settings page painted"
+    before = bytes(ws.sys_canvas._buf)
+    drv.press("left")                   # on a row with nothing beside it
+    for _ in range(6):
+        drv.frame(_DT)
+    assert ws._frames_drawn == drawn + 1, "one frame for the press, then none"
+    assert bytes(ws.sys_canvas._buf) == before
+
+
+@pytest.mark.parametrize("variant", ["dark", "light"])
+def test_under_touch_the_name_row_reads_not_set_over_its_note(tmp_path, variant):
+    """Where nothing types (touch alone) the Name row is read-only: with no
+    name saved its value reads "Not set", and the note that a keyboard
+    changes it stands under the General group's card on the page's ground,
+    in the captions' dim ink, with no divider -- not a row of the group
+    (design review R5-11)."""
+    from runtime import host_app, settings_layer
+    cfg = dict(CONFIGS["tdeck_320x240_fs1_dark"], variant=variant)
+    ws = _build(cfg, tmp_path / "carts")
+    ws.system.set("name", "")
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_settings()
+    ws.use_inputs([("local", "touch")])
+    ws.settings_layer.show_row("name")
+    infos = []
+    ui = settings_layer._ui
+    real = ui.info
+    ui.info = lambda label, value, o=None: (infos.append((label, value)), real(label, value, o))
+    try:
+        for _ in range(3):
+            ws._dirty = True
+            drv.frame(_DT)
+    finally:
+        ui.info = real
+    assert ("Name", settings_layer.NAME_UNSET) in infos, infos
+    cv = ws.sys_canvas
+    buf = bytes(cv._buf)
+
+    def px(x, y):
+        # as the canvas stores it, the form `_col` answers
+        return buf[2 * (y * cv.w + x)] | buf[2 * (y * cv.w + x) + 1] << 8
+    dim = cv._col(ws.theme_colors["ink_dim"])
+    play = ws.settings_layer._host.box("Steady")       # the next group's first row
+    assert play is not None
+    mid = cv.w // 2
+    card = px(mid, play[1] + 2)
+    # the General card's last pixel row over the page's middle
+    y = play[1] - 1
+    while px(mid, y) == card:            # up out of the Play card
+        y -= 1
+    while px(mid, y) != card:            # over the gap its captions lie in
+        y -= 1
+    foot = y
+    rows = [y for y in range(foot + 1, play[1])
+            if any(px(x, y) == dim for x in range(0, mid))]
+    assert rows, "no note under the General card"
+    note = rows[0]
+    line = [px(x, note) for x in range(cv.w)]
+    ground = px(cv.w - 4, note)
+    assert ground != card, "the note lies on a card, not the page's ground"
+    run, longest = 0, 0
+    for k in range(1, len(line)):
+        run = run + 1 if line[k] == line[k - 1] and line[k] != ground else 0
+        longest = max(longest, run)
+    assert longest < cv.w // 3, "the note has a divider"

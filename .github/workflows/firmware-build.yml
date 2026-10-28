@@ -44,6 +44,7 @@ on:
       - "tools/esp32_build_lib.sh"   # the shared half of every board's build.sh
       - "tools/board_config.py"      # decides what each board stages
       - "tools/gen_web_blob.py"      # bakes the web console into the image
+      - "tools/zopfli_gz.py"         # compresses the assets it bakes
       # system_carts/** above covers the SHELF changing; these cover the code
       # that turns it into what an image carries. gen_device_carts bakes the
       # roster (every board's build.sh runs it), and the three p8 files are
@@ -174,6 +175,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # build.sh compresses the console's assets with zopfli (tools/zopfli_gz.py,
+      # pinned in pyproject.toml's dev extra); it fails when the package is absent.
+      - name: Install zopfli
+        if: steps.gate.outputs.run == 'true'
+        run: python3 -m pip install --quiet 'zopfli==0.4.3'
 
       # Cache the installed Xtensa/RISC-V toolchains (the expensive part); the
       # .build/ clone itself is too big for the 10 GB cache, so it is fetched fresh.
@@ -315,7 +322,7 @@ jobs:
       # SAME managed-component checkout the P4 image just built against, so
       # host and slave hosted versions cannot drift; the publisher stages it
       # into latest-p4.json's `c6` block and the console's Settings UPGRADE
-      # C6 flow streams it over SDIO (device/moy_c6_update.py). P4 job only.
+      # C6 flow streams it over SDIO (device/moy_ota.py's C6Updater). P4 job only.
       - name: Build the C6 co-processor image
         if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
         run: firmware/esp32_p4_wifi6_touch_lcd_7b/c6_slave/build.sh

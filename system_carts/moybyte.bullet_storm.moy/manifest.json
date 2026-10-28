@@ -1,0 +1,80 @@
+{
+  "format": "moy-1",
+  "version": 11,
+  "title": "Bullet Storm",
+  "id": "moybyte.bullet_storm",
+  "runtime": "lua",
+  "main": "main.lua",
+  "fps": "free",
+  "canvas": "320x240",
+  "description": "Dodge the storm core's bullet patterns for as long as you can. Hundreds of bullets, all at once.",
+  "genre": "shooter",
+  "moybyte": {
+    "type": "game",
+    "system": true,
+    "order": 170,
+    "targets": [
+      "host",
+      "device",
+      "web"
+    ],
+    "permissions": [
+      "graphics",
+      "input",
+      "audio"
+    ],
+    "age_mode": "cards",
+    "config": {
+      "storm": 5,
+      "ship_speed": 160,
+      "lives": 3,
+      "pattern": "cycle"
+    },
+    "edit": [
+      {
+        "key": "storm",
+        "label": "STORM",
+        "type": "int",
+        "min": 1,
+        "max": 10,
+        "step": 1,
+        "display": "gauge",
+        "gauge": {
+          "low": "turtle",
+          "high": "rabbit"
+        },
+        "card": "THE STORM RAGES AT {value}"
+      },
+      {
+        "key": "ship_speed",
+        "label": "SPEED",
+        "type": "int",
+        "min": 100,
+        "max": 240,
+        "step": 20,
+        "card": "YOUR SHIP FLIES AT {value}"
+      },
+      {
+        "key": "lives",
+        "label": "LIVES",
+        "type": "int",
+        "min": 1,
+        "max": 9,
+        "step": 1,
+        "card": "YOU GET {value} LIVES"
+      },
+      {
+        "key": "pattern",
+        "label": "PATTERN",
+        "type": "choice",
+        "choices": [
+          "cycle",
+          "spiral",
+          "rings",
+          "fans"
+        ],
+        "card": "THE STORM BLOWS IN {value}"
+      }
+    ]
+  }
+}

@@ -10,8 +10,10 @@
     entries are keyed by their inputs, so two trees cannot disagree in one):
     `.venv`; the wasm toolchain (`experiments/wasm_aot/toolchain/{dist,
     wasi-sdk}`) and the WAMR fork clone (`experiments/wasm_aot/wamr`); every
-    ESP-IDF and emsdk under `firmware/*/.build/`; the host caches in
-    `.build/` named in SHARED_CACHES; the perf carts in `ports/p8perf`.
+    ESP-IDF and emsdk under `firmware/*/.build/` (the web runner's build moves
+    a linked emsdk to its pinned version, for every tree that shares it); the
+    host caches in `.build/` named in SHARED_CACHES; the perf carts in
+    `ports/p8perf`.
   * ITS OWN: every MicroPython tree the main checkout has
     (`firmware/*/.build/micropython`, `.build/unix_micropython/micropython`),
     each a local clone of the main checkout's at the same commit -- hardlinked
@@ -54,8 +56,7 @@ TOOLCHAIN_GLOBS = ("firmware/*/.build/esp-idf", "firmware/*/.build/emsdk")
 # (native_build's content hash, the WAMR pin, jet_cart's key) and taken under
 # a lock, so a worktree with other sources adds entries instead of
 # overwriting the main checkout's.
-SHARED_CACHES = ("host_audio", "host_gfx", "host_lua", "host_wasm",
-                 "host_wamr", "jet", "jet_cart")
+SHARED_CACHES = ("host", "host_audio", "host_wamr", "jet", "jet_cart")
 # Every board image bakes the browser console from the tree's own bundle.
 WEB_BUILD = "firmware/web_runner/build.sh"
 MPY_GLOBS = ("firmware/*/.build/micropython", ".build/unix_micropython/micropython")

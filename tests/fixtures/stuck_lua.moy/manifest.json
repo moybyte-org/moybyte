@@ -1,0 +1,7 @@
+{
+  "format": "moy-1",
+  "title": "Stuck Lua",
+  "type": "game",
+  "runtime": "lua",
+  "main": "main.lua"
+}

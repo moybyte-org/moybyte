@@ -1,0 +1,27 @@
+{
+  "format": "moy-1",
+  "version": 5,
+  "title": "Storybook",
+  "id": "moybyte.storybook",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 310,
+    "app": {
+      "id": "storybook",
+      "entry": "storybook_app:StorybookAppLayer",
+      "text_mode": false,
+      "order": 40
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "storybook"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

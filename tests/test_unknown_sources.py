@@ -34,22 +34,27 @@ def _settings(tmp_path, **kw):
     return ws, drv
 
 
-def _row_center(ws):
-    """Scroll the UNKNOWN SOURCES row into view and return where to tap it."""
+def _row_center(ws, drv):
+    """Focus the UNKNOWN SOURCES row (the page scrolls it into view) and
+    return where to tap it."""
     sl = ws.settings_layer
     i = [r[0] for r in sl._settings_rows()].index(KEY)
     sl.set_msel = i
-    sl._settings_scroll()
-    x, y, w, h = sl._settings_row_rect(i)
+    drv.frame(DT)
+    drv.frame(DT)
+    x, y, w, h = sl._host.box("Unknown sources")
     return i, x + w // 2, y + h // 2
 
 
+_BUTTON = {"keep": "Keep off", "accept": "Turn on"}
+
+
 def _hit_center(ws, verb):
-    for rect, v, _arg in ws.settings_layer._confirm_hits._items:
-        if v == verb:
-            x, y, w, h = rect
-            return x + w // 2, y + h // 2
-    raise AssertionError("the warning drew no %r button" % verb)
+    got = ws.settings_layer._sub.box(_BUTTON[verb])
+    if got is None:
+        raise AssertionError("the warning drew no %r button" % verb)
+    x, y, w, h = got
+    return x + w // 2, y + h // 2
 
 
 def test_a_fresh_console_has_it_off_and_its_row_on_every_tier(tmp_path):
@@ -57,7 +62,7 @@ def test_a_fresh_console_has_it_off_and_its_row_on_every_tier(tmp_path):
                                      windowed=True))):
         ws = build_ws(tmp_path / str(n), **kw)
         assert ws.unknown_sources is False
-        assert KEY not in ws.system
+        assert ws.system.text(KEY) is None
         rows = ws.settings_layer._settings_rows()
         assert (KEY, "UNKNOWN SOURCES", "diag") in rows
 
@@ -66,7 +71,7 @@ def test_it_persists_under_its_own_key_and_comes_back_on(tmp_path):
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
     ws.set_unknown_sources(True)
-    assert ws.system[KEY] is True
+    assert ws.system.get(KEY) is True
     again = host_app.build_workstation(carts)
     assert again.unknown_sources is True
     again.set_unknown_sources(False)
@@ -75,21 +80,21 @@ def test_it_persists_under_its_own_key_and_comes_back_on(tmp_path):
 
 def test_tapping_the_row_opens_the_warning_and_changes_nothing(tmp_path):
     ws, drv = _settings(tmp_path)
-    _i, x, y = _row_center(ws)
-    drv.frame(DT)
+    _i, x, y = _row_center(ws, drv)
     drv.click(x, y)
     drv.frame(DT)
+    drv.frame(DT)                    # the release resolves on the next frame
     sl = ws.settings_layer
     assert sl.confirm_key == KEY
     assert sl.confirm_sel == 0, "KEEP OFF has the focus when it opens"
-    assert ws.unknown_sources is False and KEY not in ws.system
+    assert ws.unknown_sources is False and ws.system.text(KEY) is None
     title, text, yes = TOGGLE_CONFIRMS[KEY]
     assert title == "UNKNOWN SOURCES" and yes == "TURN ON"
     assert text == ("Unsigned carts can do anything on this console. "
                     "Only run ones you trust.")
     drv.frame(DT)
-    verbs = [v for _r, v, _a in sl._confirm_hits._items]
-    assert verbs == ["keep", "accept"]
+    assert sl._sub.box("Keep off") and sl._sub.box("Turn on"), "both buttons drew"
+    assert sl.confirm_sel == 0
 
 
 def test_keep_off_closes_the_warning_with_the_switch_off(tmp_path):
@@ -98,8 +103,9 @@ def test_keep_off_closes_the_warning_with_the_switch_off(tmp_path):
     drv.frame(DT)
     drv.click(*_hit_center(ws, "keep"))
     drv.frame(DT)
+    drv.frame(DT)                    # the release resolves on the next frame
     assert ws.settings_layer.confirm_key is None
-    assert ws.unknown_sources is False and KEY not in ws.system
+    assert ws.unknown_sources is False and ws.system.text(KEY) is None
 
 
 def test_a_tap_elsewhere_on_the_warning_does_nothing(tmp_path):
@@ -119,14 +125,15 @@ def test_turn_on_turns_it_on_and_persists_it(tmp_path):
     drv.frame(DT)
     drv.click(*_hit_center(ws, "accept"))
     drv.frame(DT)
+    drv.frame(DT)                    # the release resolves on the next frame
     assert ws.settings_layer.confirm_key is None
-    assert ws.unknown_sources is True and ws.system[KEY] is True
+    assert ws.unknown_sources is True and ws.system.get(KEY) is True
 
 
 def test_on_the_keyboard_turning_it_on_takes_a_move_and_a_press(tmp_path):
     ws, drv = _settings(tmp_path)
     sl = ws.settings_layer
-    i, _x, _y = _row_center(ws)
+    i, _x, _y = _row_center(ws, drv)
 
     def key(name):
         drv.press(name)
@@ -138,32 +145,31 @@ def test_on_the_keyboard_turning_it_on_takes_a_move_and_a_press(tmp_path):
     assert sl.confirm_key == KEY and ws.unknown_sources is False
     key("a")                             # ...and A again presses KEEP OFF
     assert sl.confirm_key is None and ws.unknown_sources is False
-    sl.set_msel = i
-    key("right")                         # a step on the row is the same door
+    assert sl._focused == "Unknown sources", "back on the row it opened from"
+    key("a")
     assert sl.confirm_key == KEY
     key("b")                             # B backs out with nothing changed
     assert sl.confirm_key is None and ws.unknown_sources is False
-    sl.set_msel = i
     key("a")
-    key("right")
+    key("down")
     assert sl.confirm_sel == 1
-    key("left")
+    key("up")
     assert sl.confirm_sel == 0
-    key("right")
+    key("down")
     key("a")
     assert sl.confirm_key is None
-    assert ws.unknown_sources is True and ws.system[KEY] is True
+    assert ws.unknown_sources is True and ws.system.get(KEY) is True
 
 
 def test_turning_it_off_is_immediate(tmp_path):
     ws, drv = _settings(tmp_path)
     ws.set_unknown_sources(True)
-    _i, x, y = _row_center(ws)
-    drv.frame(DT)
+    _i, x, y = _row_center(ws, drv)
     drv.click(x, y)
     drv.frame(DT)
+    drv.frame(DT)                    # the release resolves on the next frame
     assert ws.settings_layer.confirm_key is None
-    assert ws.unknown_sources is False and ws.system[KEY] is False
+    assert ws.unknown_sources is False and ws.system.get(KEY) is False
 
 
 def test_the_other_toggles_flip_without_a_warning(tmp_path):
@@ -196,6 +202,7 @@ def test_the_warning_in_the_windowed_settings(tmp_path):
     x, y = _hit_center(ws, "accept")
     drv.click(win.x + 1 + x, win.y + 1 + win.title_h + y)
     drv.frame(DT)
+    drv.frame(DT)                    # the release resolves on the next frame
     assert ws.unknown_sources is True
 
 
@@ -208,7 +215,7 @@ def test_the_dev_channel_sets_it_without_the_warning_or_persisting(tmp_path, cap
     assert _remote_state(ws)["unknown_sources"] is False
     ch.run(ws, "unknown_sources 1")
     assert capsys.readouterr().out.strip() == "REMOTE unknown_sources on"
-    assert ws.unknown_sources is True and KEY not in ws.system
+    assert ws.unknown_sources is True and ws.system.text(KEY) is None
     assert ws.settings_layer.confirm_key is None
     st = _remote_state(ws)
     assert st["unknown_sources"] is True
@@ -281,7 +288,7 @@ def test_an_unsigned_cart_plays_on_the_interpreter_with_a_notice(tmp_path):
     already retried it on the interpreter before the Player ever saw an
     error, so the cart plays -- no notice panel, no error -- and the Player
     arms the short system notice that says the cart isn't signed."""
-    from runtime import bar_layer, player
+    from runtime import player
     from runtime.dev_channel import _remote_state
     ws = _open_interp_hello(tmp_path, "unsigned")
     p = ws.player
@@ -290,7 +297,6 @@ def test_an_unsigned_cart_plays_on_the_interpreter_with_a_notice(tmp_path):
     assert not ws.wm.top_is("menu")
     st = _remote_state(ws)
     assert st["notice"] is None and st["cart_error"] is None
-    assert bar_layer._edit_kind(ws.cart) is None
     assert ws._notice == (player.INTERP_NOTICE_TITLE,
                           player.INTERP_NOTICE_SUB["unsigned"], "warn")
     assert ws.notice_active()
@@ -317,13 +323,16 @@ def test_a_module_this_firmware_cannot_link_blames_the_console(tmp_path):
     sub = player.INTERP_NOTICE_SUB["firmware"]
     assert ws._notice == (player.INTERP_NOTICE_TITLE, sub, "warn")
     assert sub != player.INTERP_NOTICE_SUB["missing"]
-    printed = []
-    ws.sys_canvas.print = lambda text, *a, **k: printed.append(text)
+    from runtime import ui
+    cv = ws.sys_canvas
     for text in player.INTERP_NOTICE_SUB.values():
         ws._notice = (player.INTERP_NOTICE_TITLE, text, "warn")
-        del printed[:]
-        ws._draw_notice()
-        assert text in printed, (text, printed)
+        x, _y, w, _h = ws._draw_notice()
+        assert x >= 0 and x + w <= cv.w, (text, x, w)
+        ui.face("title")
+        tw = ui.text_size(text)[0]
+        ui.face()
+        assert tw + (32 + 3 * 6 + 10) * ws.layout.fs <= w, (text, tw, w)   # whole on its card
 
 
 def test_a_module_whose_signature_fails_keeps_the_error_panel(tmp_path):

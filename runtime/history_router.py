@@ -1,3 +1,13 @@
+# Map (grep -n a name to jump there):
+#   HistoryRouter                     the Editor's one UNDO/REDO pair over every tab
+#   HistoryRouter.active_history      the active tab's in-RAM op history
+#   HistoryRouter.code_burst_open     the Code tab's typing burst
+#   HistoryRouter.bar_undo_bits       the bar cache key's RAM-only dims
+#   HistoryRouter.undo                undo: the tab's op, else the journal
+#   HistoryRouter.can_both            the two dims of one journal read
+#   HistoryRouter.active_tab_files    the journal files a tab walks
+#   HistoryRouter._journal_walk       a journal undo or redo, reloaded
+#   HistoryRouter.idle_tick           the typing-idle autosave
 """The #111 UNDO ROUTER (#209 landing E) -- `Workstation.history`.
 
 One bar pair -- UNDO and REDO in the Editor's lent top-bar zone -- has to mean
@@ -60,7 +70,8 @@ goes through a forward).
 
 `bar_undo_bits()` runs once per bar-strip cache key, i.e. per painted bar frame.
 It reads RAM ONLY, on purpose -- see its docstring; keying the strip cache on
-the journal would put an SD read in the paint path.
+the journal would put an SD read in the paint path. It allocates nothing
+either: an int of two bits, and an open burst compared by its lines.
 
 ## Reading late-injected things through `ws`, per call
 
@@ -77,6 +88,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.op_history import History, TextEditCodec, text_diff_op
 
 try:
+    import moy_catalogue
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import moy_catalogue
+
+try:
     from chrome import _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import _err_text
@@ -89,7 +105,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The Editor tabs a kid DRAWS on rather than types on: they take the long quiet
 # window in `idle_tick`. Code/blocks/config are typed or tapped a field at a time,
 # so a short gap there really is the end of an edit.
-DRAW_TABS = ("paint", "map", "scene", "music")
+DRAW_TABS = ("paint", "map", "scene", "music", "theme_sprites")
 
 
 class HistoryRouter:
@@ -109,7 +125,9 @@ class HistoryRouter:
         # codec over the live CodeEditor) + the open burst's pre-image text.
         # Created/rebound lazily by code_op_history() over whatever editor is
         # live, so a rebuilt editor (fresh cart / reopen) starts a fresh, empty
-        # History.
+        # History. The pre-image is the buffer's LINES (a shallow copy: the
+        # lines are immutable strings the buffer replaces, never edits), so the
+        # bar's per-frame dim read compares lists instead of joining the text.
         self._code_hist = None
         self._code_burst_before = None
         # The idle-typing debounce (Stage 7 of
@@ -143,6 +161,17 @@ class HistoryRouter:
 
     # -- which History is in front of the kid --------------------------------
 
+    def _theme(self):
+        """The theme open in the Editor's theme mode (runtime/theme_editor.py),
+        or None: its tabs keep their own undo, and no journal."""
+        app = getattr(self.ws, "editor_app", None)
+        return getattr(app, "theme", None) if app is not None else None
+
+    def drop_code_history(self):
+        """The code buffer was read afresh: its History starts empty."""
+        self._code_hist = None
+        self._code_burst_before = None
+
     def active_history(self):
         """The FINE-GRAINED op-history (#111) of the active Editor tab --
         paint/map (phase 2) + code/blocks/scene/music/config (phase 4): every tab
@@ -153,6 +182,9 @@ class HistoryRouter:
         Editor) guarantees the Editor is the focused surface, so no back-stack
         check is needed."""
         ws = self.ws
+        doc = self._theme()
+        if doc is not None:
+            return doc.history(ws.menu_view, self)
         return ws.project.history_for(ws.menu_view)
 
     # -- code editor op-history + typing burst (#111 phase 4) ----------------
@@ -172,7 +204,7 @@ class HistoryRouter:
         return self._code_hist
 
     def code_burst_open(self):
-        """Mark a code typing/delete burst's start: snapshot the buffer text ONCE
+        """Mark a code typing/delete burst's start: snapshot the buffer's lines ONCE
         (idempotent while a burst is open), so the net change since it began
         becomes one undo op when it closes. No-op with no code editor."""
         ed = self.ws.editor
@@ -180,7 +212,7 @@ class HistoryRouter:
             return
         self.code_op_history()          # ensure the History is bound to this editor
         if self._code_burst_before is None:
-            self._code_burst_before = ed.text()
+            self._code_burst_before = list(ed.lines)
 
     def close_code_burst(self):
         """Close the live code burst into ONE op = the net text diff since it
@@ -194,20 +226,21 @@ class HistoryRouter:
         ed = self.ws.editor
         if before is None or hist is None or ed is None:
             return
-        after = ed.text()
-        if before == after:
+        if before == ed.lines:
             return
-        op = text_diff_op(before, after)
+        op = text_diff_op("\n".join(before), ed.text())
         if op is not None:
             hist.record(op)
 
     def _code_burst_pending(self):
         """True iff a live code burst holds an un-recorded net change -- so
         can_undo() reports it WITHOUT the side effect of closing the burst (the
-        dim-state read)."""
+        dim-state read). The bar asks on every painted frame, so it compares
+        the lines, never the joined text: a join is the whole source in garbage
+        a frame."""
         ed = self.ws.editor
         return (self._code_burst_before is not None and ed is not None
-                and ed.text() != self._code_burst_before)
+                and ed.lines != self._code_burst_before)
 
     def _seal_active_local(self):
         """Close any in-progress edit on the active tab BEFORE an undo/redo, so a
@@ -216,7 +249,7 @@ class HistoryRouter:
         (paint/map seal their own stroke/batch on release)."""
         ws = self.ws
         v = ws.menu_view
-        if v == "code":
+        if v == "code" or v == "theme_config":
             self.close_code_burst()
         elif v == "blocks":
             be = getattr(ws.block_ui, "blocks_ed", None)
@@ -229,7 +262,7 @@ class HistoryRouter:
         correctly without sealing it."""
         ws = self.ws
         v = ws.menu_view
-        if v == "code":
+        if v == "code" or v == "theme_config":
             return self._code_burst_pending()
         if v == "blocks":
             be = getattr(ws.block_ui, "blocks_ed", None)
@@ -245,10 +278,14 @@ class HistoryRouter:
         SD-backed journal check (`_journal_check` reads the journal log -- keying
         the per-frame cache on it would cost a disk read per frame); journal-level
         dim flips already invalidate the bar explicitly (`Project._journal`,
-        `_journal_walk`)."""
+        `_journal_walk`). 1 is undo, 2 is redo."""
         hist = self.active_history()
-        local_undo = (hist is not None and hist.can_undo()) or self._active_local_pending()
-        return (local_undo, hist is not None and hist.can_redo())
+        bits = 0
+        if (hist is not None and hist.can_undo()) or self._active_local_pending():
+            bits = 1
+        if hist is not None and hist.can_redo():
+            bits |= 2
+        return bits
 
     def _after_local_history(self):
         """After a fine-grained (paint/map/code/blocks) undo/redo: the editor
@@ -286,6 +323,9 @@ class HistoryRouter:
         editor with a fresh (empty) History, so continued presses walk whole
         commits until new fine-grained edits are made (the seed-from-journal
         option was deferred)."""
+        doc = self._theme()
+        if doc is not None:
+            return doc.step(self, self.ws.menu_view, False)
         self._seal_active_local()         # a live burst/edit is undo's first target
         hist = self.active_history()
         if hist is not None and hist.can_undo() and hist.undo() is not None:
@@ -296,6 +336,9 @@ class HistoryRouter:
     def redo(self):
         """Re-apply one step (the inverse of undo): local op-history redo first,
         then the durable journal redo. Returns True iff a step was taken."""
+        doc = self._theme()
+        if doc is not None:
+            return doc.step(self, self.ws.menu_view, True)
         self._seal_active_local()         # close a stray open edit before walking redo
         hist = self.active_history()
         if hist is not None and hist.can_redo() and hist.redo() is not None:
@@ -309,6 +352,9 @@ class HistoryRouter:
         in-RAM check, no I/O) -- including a live-but-unrecorded code burst / block
         edit -- then the journal (a journal.jsonl parse -- an SD read, so only ask
         when about to REPAINT, never on a per-frame hot path)."""
+        doc = self._theme()
+        if doc is not None:
+            return doc.can(self, self.ws.menu_view, False)
         hist = self.active_history()
         if hist is not None and (hist.can_undo() or self._active_local_pending()):
             return True
@@ -316,10 +362,28 @@ class HistoryRouter:
 
     def can_redo(self):
         """Read-only counterpart to can_undo() for redo()."""
+        doc = self._theme()
+        if doc is not None:
+            return doc.can(self, self.ws.menu_view, True)
         hist = self.active_history()
         if hist is not None and hist.can_redo():
             return True
         return self._journal_check(True)
+
+    def can_both(self):
+        """(can_undo(), can_redo()) with the journal read once at most: what
+        a repaint of the bar's two icons asks."""
+        doc = self._theme()
+        if doc is not None:
+            v = self.ws.menu_view
+            return (doc.can(self, v, False), doc.can(self, v, True))
+        hist = self.active_history()
+        u = hist is not None and (hist.can_undo() or self._active_local_pending())
+        r = hist is not None and hist.can_redo()
+        if u and r:
+            return (True, True)
+        ju, jr = self._journal_both()
+        return (u or ju, r or jr)
 
     # -- the durable journal walk --------------------------------------------
 
@@ -373,31 +437,44 @@ class HistoryRouter:
         ws = self.ws
         if not self.store.writable() or not ws.cart:
             return False
-        store = ws.carts_store
-        path = ws.cart.get("path")
-        name = "journal_can_redo" if redo else "journal_can_undo"
-        if not (path and hasattr(store, name)):
+        h = ws.cart.get("h")
+        if not h:
             return False
-        fn = getattr(store, name)
+        fn = (moy_catalogue.journal_can_redo if redo
+              else moy_catalogue.journal_can_undo)
         files = self.active_tab_files()
         try:
-            return bool(self.store.call(lambda: fn(path, files)))
+            return bool(self.store.call(lambda: fn(h, files)))
         except Exception as exc:  # noqa: BLE001 -- a check failure must never crash the shell
             print("Moybyte journal check failed:", _err_text(exc))
             return False
+
+    def _journal_both(self):
+        """`_journal_check` for both directions, of one read."""
+        ws = self.ws
+        if not self.store.writable() or not ws.cart:
+            return (False, False)
+        h = ws.cart.get("h")
+        if not h:
+            return (False, False)
+        files = self.active_tab_files()
+        try:
+            return self.store.call(lambda: moy_catalogue.journal_can_both(h, files))
+        except Exception as exc:  # noqa: BLE001 -- a check failure must never crash the shell
+            print("Moybyte journal check failed:", _err_text(exc))
+            return (False, False)
 
     def _journal_walk(self, redo):
         ws = self.ws
         if not self.store.writable() or not ws.cart:
             return False
-        store = ws.carts_store
-        path = ws.cart.get("path")
-        if not (path and hasattr(store, "journal_undo")):
+        h = ws.cart.get("h")
+        if not h:
             return False
-        fn = store.journal_redo if redo else store.journal_undo
+        fn = moy_catalogue.journal_redo if redo else moy_catalogue.journal_undo
         files = self.active_tab_files()
         try:
-            changed = self.store.call(lambda: fn(path, files))
+            changed = self.store.call(lambda: fn(h, files))
         except Exception as exc:  # noqa: BLE001 -- a walk failure must never crash the shell
             print("Moybyte journal walk failed:", _err_text(exc))
             return False
@@ -420,10 +497,9 @@ class HistoryRouter:
         restored code. `file` is which live file the walk touched (informational --
         the reload is wholesale)."""
         ws = self.ws
-        store = ws.carts_store
-        path = ws.cart["path"]
+        h = ws.cart["h"]
         try:
-            fresh = self.store.call(lambda: store.load(path))
+            fresh = self.store.call(lambda: moy_catalogue.load(h))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte reload after undo failed:", _err_text(exc))
             return
@@ -490,10 +566,8 @@ class HistoryRouter:
         if not ok:
             return                        # don't autosave/journal un-parseable source
         # quiet=True keeps the autosave invisible (spec Section 7): it suppresses
-        # the "Code Wizard" achievement toast, and commit_* no longer writes a
-        # "SAVED" status at all (save_status carries FAILURES only) -- so the old
-        # save/restore dance around this call is gone. A failed store write still
-        # surfaces via save_status/cart_error, as it must.
+        # the "Code Wizard" achievement toast. A failed store write still
+        # surfaces via cart_error, as it must.
         ws.project.commit_code(src, quiet=True)   # persists + journals; clears ed.dirty
 
     def _autosave_tab(self):
@@ -535,7 +609,10 @@ class HistoryRouter:
         self.edit_ms = None
         if not self.ws.wm.top_is("menu"):
             return                        # the Editor is no longer the surface
-        if view == "code":
+        doc = self._theme()
+        if doc is not None:
+            doc.save_tab(view, soft=True)  # a theme's: the look's gate refuses
+        elif view == "code":
             self._autosave_code()         # the compile gate is code's alone
         else:
             self._autosave_tab()

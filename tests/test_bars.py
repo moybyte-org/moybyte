@@ -1,0 +1,421 @@
+"""Bars on any edge (docs/shell_layout_2026-10.md §4, §7, §13 step 5).
+
+Every resolved bar is drawn as its own cached strip at its rect, its cells
+packed once per relayout (`shell_layout.pack`), its taps routed by the bar
+they land on, and the content rect is what all of them leave. Today's one top
+bar packs to exactly the geometry it had (the shell goldens hold that byte for
+byte); these tests take the layouts the goldens do not: side bars, two bars,
+flex widgets sharing a bar, the desk's chips and windows against them.
+"""
+
+import json
+
+import pytest
+
+import runtime  # noqa: F401  (registers the host's moy_ui)
+import moy_ui
+from runtime import bar_layer as BL
+from runtime import layout_base, shell_layout
+from runtime.layout_base import DEFAULT_BARS, LayoutBase
+from test_content_rect import _inside, _layouts, _open_every_surface, _rect_map, _settle, _tap
+from ws_helpers import build_desktop_ws, build_ws
+from ws_helpers import boot_on_fixture, fixture_theme, use_theme
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
+
+DT = 1.0 / 30.0
+
+
+@pytest.fixture(autouse=True)
+def _top_again():
+    yield
+    layout_base.place_bars(DEFAULT_BARS)
+
+
+def _bar(edge, size=18, left=(), center=(), right=(), text=()):
+    return (edge, size, tuple(left), tuple(center), tuple(right), tuple(text))
+
+
+def _pick(ws, bars):
+    """Install `bars` as a package's layout and pick it, as Settings does:
+    the package is the `night` fixture's (the one install slot holds it)
+    with that layout."""
+    pkg = json.loads(fixture_theme("night"))
+    pkg["name"] = "bars"
+    pkg["layout"] = {"bars": [
+        {"edge": b[0], "size": b[1], "left": list(b[2]), "center": list(b[3]),
+         "right": list(b[4]), "text": list(b[5])} for b in bars]}
+    rc, _notes = moy_ui.theme_install(json.dumps(pkg).encode())
+    assert rc == 0
+    ws.look.set_theme("bars", persist=False)
+    ws.system.set("layout_theme", "bars")
+    ws.look.apply_layout()
+
+
+def _cells(packed, i):
+    return {c[0]: c[1] for c in packed[i][3]}
+
+
+# -- packing -------------------------------------------------------------------
+
+def test_todays_bar_packs_to_the_fixed_game_cluster():
+    """The game canvas's strip: the packing of today's bar at 320 wide is the
+    fixed cluster the crash-era constants name."""
+    got = _cells(shell_layout.pack(320, 240, 18, 1, 1, 40, of=DEFAULT_BARS), 0)
+    assert got["battery"] == BL._ZONE_BATT
+    assert got["wifi"] == BL._ZONE_WIFI
+    assert got["menu"] == BL._ZONE_GEAR
+    assert got["close"] == BL._ZONE_CONTEXT_X
+    assert got["clock"] == BL._ZONE_CLOCK
+    assert got["zone"] == BL._ZONE_LEFT_GAME
+    # the taskbar's chips float over the middle from a quarter of the bar to
+    # the right cluster, and bound nothing
+    assert got["chips"] == (80, 0, BL._ZONE_CLOCK[0] - 80, 18)
+
+
+def test_a_fixed_centre_cell_bounds_the_flex_zone():
+    lay = (_bar("top", 18, ["zone"], ["clock"], ["wifi", "battery", "close", "menu"]),)
+    got = _cells(shell_layout.pack(1024, 600, 36, 2, 1, 30, of=lay), 0)
+    cx = got["clock"][0]
+    assert cx == (1024 - 30) // 2
+    assert got["zone"][0] + got["zone"][2] == cx - 4      # the gap before the clock
+    assert got["menu"][0] + got["menu"][2] == 1024 - 4    # the right slot from the end
+
+
+def test_flex_widgets_share_the_slack_of_their_run():
+    lay = (_bar("bottom", 22, ["menu", "separator", "chips", "zone"], [],
+                ["close", "wifi", "battery", "clock"]),)
+    (edge, rect, _dy, cells), = shell_layout.pack(1024, 600, 36, 2, 1, 30, of=lay)
+    assert rect == (0, 600 - 44, 1024, 44)
+    got = {c[0]: c[1] for c in cells}
+    chips, zone = got["chips"], got["zone"]
+    assert abs((chips[2] - 48) - (zone[2] - 128)) <= 1   # an even share past each minimum
+    assert zone[0] + zone[2] + 4 == got["close"][0]       # up to the right slot
+    # a 22-row bar keeps the 1-pixel icon inset centred
+    assert got["menu"][1] == 1 + (44 - 36) // 2
+
+
+def test_a_side_bar_stacks_its_cells_and_centres_them_across():
+    lay = (_bar("top", 18, ["zone"], [], ["close"]),
+           _bar("left", 24, ["menu", "separator"], [], ["clock", "battery"]))
+    packed = shell_layout.pack(1024, 600, 36, 2, 1, 30, of=lay)
+    assert packed[1][1] == (0, 36, 48, 600 - 36)          # between the top bar and the floor
+    got = _cells(packed, 1)
+    assert got["menu"] == ((48 - 32) // 2, 4, 32, 32)
+    assert got["separator"] == (0, 4 + 32 + 4, 48, 8)
+    assert got["battery"][1] + 32 == (600 - 36) - 4       # the right slot from the bottom
+    assert got["clock"] == (0, got["battery"][1] - 4 - 32, 48, 32)
+
+
+def test_the_content_rect_is_what_every_bar_leaves():
+    lay = (_bar("top", 18), _bar("bottom", 20), _bar("left", 30), _bar("right", 16))
+    assert layout_base.content_of(1024, 600, 36, lay) == (60, 36, 1024 - 60 - 32, 600 - 36 - 40)
+    assert layout_base.content_of(1024, 600, 0, lay) == (0, 0, 1024, 600)
+
+
+# -- the shell under side bars ---------------------------------------------------
+
+FOUR = (_bar("top", 18, ["zone"], [], ["clock"]),
+        _bar("bottom", 18, ["title"]),
+        _bar("left", 20, ["menu"]),
+        _bar("right", 20, [], [], ["close", "wifi", "battery"]))
+
+
+def test_every_layout_lays_out_inside_what_four_bars_leave(tmp_path):
+    ws = build_ws(tmp_path, sys_size=(480, 320))
+    _open_every_surface(ws)
+    top = _rect_map(ws)
+    _pick(ws, FOUR)
+    assert [b[0] for b in ws.look.bars] == ["top", "bottom", "left", "right"]
+    bar = ws.bar_layer
+    for name, lay in _layouts(ws):
+        where = "app" if not isinstance(lay, LayoutBase) else "menu"
+        assert (lay.cx, lay.cy, lay.cw, lay.ch) == bar.content_rect(where), name
+    # the look's bar heights size the four (Moy's flat look, the night
+    # fixture's): the content rect is what their rects leave
+    (t, b, lf, rt) = bar.bar_rects("menu")
+    assert t[1] == 0 and b[1] + b[3] == 320 and lf[0] == 0 and rt[0] + rt[2] == 480
+    assert bar.content_rect("menu") == (lf[2], t[3], 480 - lf[2] - rt[2], 320 - t[3] - b[3])
+    four = _rect_map(ws)
+    bad, checked = [], 0
+    for key, (r, content) in sorted(top.items()):
+        if not _inside(r, content):
+            continue
+        checked += 1
+        rb, cb = four[key]
+        if not _inside(rb, cb):
+            bad.append("%s.%s[%d] %r in %r" % (key + (rb, cb)))
+    assert checked > 80
+    assert not bad, "outside the content rect under four bars: %s" % bad
+
+
+@pytest.mark.parametrize("where", ("home", "settings", "menu", "app"))
+def test_each_bar_draws_its_strip_at_its_rect(tmp_path, where):
+    from test_content_rect import SURFACES
+    ws = build_ws(tmp_path)
+    _pick(ws, FOUR)
+    SURFACES[where](ws)
+    frame = _settle(ws)
+    stride = ws.sys_canvas.w * 2
+    strips = ws.bar_layer._bar_strips[where]
+    for i, (x, y, w, h) in enumerate(ws.bar_layer.bar_rects(where)):
+        strip = strips[i][0][0]
+        assert (strip.w, strip.h) == (w, h)
+        band = b"".join(frame[stride * (y + r) + 2 * x:stride * (y + r) + 2 * (x + w)]
+                        for r in range(h))
+        assert band == bytes(strip._buf), "%s bar %d" % (where, i)
+
+
+def test_taps_route_by_the_bar_they_land_on(tmp_path):
+    ws = build_ws(tmp_path)
+    _pick(ws, FOUR)
+    ws.open_app(ws._apps_by_id["files"])
+    _settle(ws)
+    bar = ws.bar_layer
+    lb, menu = bar.cell("app", "menu")
+    _tap(ws, lb[1][0] + menu[0] + 2, lb[1][1] + menu[1] + 2)
+    assert ws.sysmenu.open
+    # the menu opens inward, from the left bar's inner edge at the cell
+    assert ws.sysmenu.anchor_x == lb[1][0] + lb[1][2] and not ws.sysmenu.up
+    ws.toggle_sysmenu()
+    rb, close = bar.cell("app", "close")
+    _tap(ws, rb[1][0] + close[0] + 2, rb[1][1] + close[1] + 2)
+    assert ws.wm.top_kind() == "launcher"
+
+
+def test_a_bar_without_the_clock_keeps_its_strip_on_the_tick(tmp_path):
+    ws = build_ws(tmp_path)
+    _pick(ws, FOUR)
+    ws.open_settings()
+    clock = ["12:34"]
+    ws.bar_layer._clock_text = lambda: clock[0]
+    for _ in range(3):
+        ws._dirty = True
+        ws.frame(DT)
+    drawn = []
+    orig = ws.bar_layer._render_cart_bar
+    ws.bar_layer._render_cart_bar = lambda cv, key, i=0: (drawn.append(i), orig(cv, key, i))
+    clock[0] = "12:35"
+    ws._dirty = True
+    ws.frame(DT)
+    assert drawn == [0]                     # the top bar holds the clock; nothing else
+
+
+def test_every_bar_is_a_strip_the_rotated_compositor_presents(tmp_path):
+    ws = build_desktop_ws(tmp_path)
+    got = []
+
+    class Root:
+        w, h = 1280, 800
+
+        def set_strips(self, rects):
+            got.append(rects)
+    ws.bar_layer.publish_strips(Root())
+    top = got[-1]
+    assert len(top) == 1 and top[0][:3] == (0, 0, 1280)
+    _pick(ws, (_bar("top", 18, ["zone"], ["chips"], ["clock", "close", "menu"]),
+               _bar("left", 24, ["wifi", "battery"])))
+    h = got[-1][0][3]
+    assert got[-1][0] == (0, 0, 1280, h) and got[-1][1][:2] == (0, h)
+    assert got[-1][1][3] == 800 - h and got[-1][1][2] > 0
+
+
+# -- the desk ------------------------------------------------------------------
+
+def test_the_desk_keeps_icons_windows_and_chips_off_a_side_bar(tmp_path):
+    ws = build_desktop_ws(tmp_path)
+    _pick(ws, (_bar("top", 18, ["zone"], [], ["clock", "close", "menu"]),
+               _bar("left", 24, ["chips"], [], ["wifi", "battery"])))
+    ws.open_desk()
+    wm = ws.wm
+    dx, dy, dw, dh = wm._desk_rect()
+    (top, left), = [ws.bar_layer.bar_rects("desk")]
+    assert (dx, dy) == (left[2], top[3])
+    for _key, box, pill, _label, _cart in wm._backdrop_layer._icon_rects():
+        assert _inside(box, (dx, dy, dw, dh)) and _inside(pill, (dx, dy, dw, dh))
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(DT)
+    win = wm._wins[wm._order[-1]]
+    wm._move_window(win, -10_000, win.y)
+    assert win.x == dx                                    # a side bar is a wall
+    (lb, _cell) = ws.bar_layer.cell("desk", "chips")
+    chips = wm._chip_rects()
+    assert chips and all(_inside(r, lb[1]) and r[2] == r[3] for _k, r, _l in chips)
+    key, r, label = chips[0]
+    assert len(label) == 1
+    wm._focus = None
+    _tap(ws, r[0] + 2, r[1] + 2)
+    assert wm._focus == key
+
+
+def test_a_taskbar_packs_its_chips_from_the_cell_start(tmp_path):
+    ws = build_desktop_ws(tmp_path)
+    _pick(ws, (_bar("bottom", 22, ["menu", "separator", "chips", "zone"], [],
+                    ["close", "wifi", "battery", "clock"]),))
+    ws.open_desk()
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(DT)
+    bar, cell = ws.bar_layer.cell("desk", "chips")
+    (_k, r, _l), = ws.wm._chip_rects()
+    assert r[0] == bar[1][0] + cell[0] and _inside(r, bar[1])
+
+
+def test_a_window_keeps_its_band_on_top_under_a_bottom_bar(tmp_path):
+    ws = build_desktop_ws(tmp_path)
+    _pick(ws, (_bar("bottom", 18, ["zone"], [], ["clock", "close", "menu"]),))
+    ws.open_desk()
+    ws.open_settings()
+    ws.frame(DT)
+    win = ws.wm._wins[ws.wm._order[-1]]
+    lay = win.ctx.layout
+    assert lay.cy == lay.status_h and lay.bars[0][0] == "top"
+    assert lay.bars[0][1] == (0, 0, lay.w, lay.status_h)
+
+
+# -- the 2026-10 look's bar (docs/look_2026-10.md step 14) --------------------
+
+def _looked_ws(tmp_path, variant="light", desk=False):
+    if desk:
+        ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    else:
+        ws = build_ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant=variant)
+    return ws
+
+
+def _names_of(packed):
+    return [[c[0] for c in b[3]] for b in packed]
+
+
+@pytest.mark.parametrize("desk", [False, True])
+def test_moys_bar_is_the_moy_button_then_status(tmp_path, desk):
+    """Moy's layout: the Moy button first, its tile's cell, then the chips
+    (desk) and the zone; Wi-Fi, battery and the clock at the right, no X
+    (docs/look_2026-10.md step 27a);
+    the handheld bar 28 rows (`hhbar.h`), the desk's 40, and the same on a
+    theme with no look, which takes Moy's flat."""
+    ws = _looked_ws(tmp_path, desk=desk)
+    L = ws.layout
+    assert L.status_h == (40 if desk else 28)
+    names = _names_of(L.bars)[0]
+    assert names[0] == "menu" and names[-4:] == ["zone", "wifi", "battery", "clock"]
+    assert ("chips" in names) == desk
+    menu = L.bars[0][3][0][1]
+    assert menu[0] == 2 * L.cs and menu[2] == layout_base.sys_tile(L.status_h)[2]
+    tile = ws.bar_layer.sys_tile(menu, L.bars[0][1], False)
+    assert tile[2:] == ((36, 34) if desk else (22, 20))
+    use_theme(ws, "mint", "light")
+    assert ws.layout.status_h == (40 if desk else 28)
+    assert _names_of(ws.layout.bars)[0][0] == "menu"
+
+
+def _px(cv, x, y):
+    i = (y * cv.w + x) * 2
+    return cv._buf[i] << 8 | cv._buf[i + 1]
+
+
+def _word(v):
+    from runtime import ui_draw
+    return ui_draw._C.theme_rgb(v)[0]
+
+
+@pytest.mark.parametrize("variant,fill", [("light", 0xffff), ("dark", None)])
+def test_the_desk_bar_is_solid_over_the_backdrop(tmp_path, variant, fill):
+    """The band is `bar.fill` at full strength wherever it lies, its line
+    under it: the backdrop's discs never show through it."""
+    ws = _looked_ws(tmp_path, variant, desk=True)
+    _settle(ws)
+    cv = ws.wm._root_canvas
+    row = [_px(cv, x, 20) for x in range(400, 900, 7)]
+    want = fill if fill is not None else _px(cv, 400, 20)
+    assert set(row) == {want}
+    if variant == "light":
+        assert _px(cv, 600, 39) != want                  # bar.line, one row
+        assert _px(cv, 600, 38) == want
+
+
+def test_a_handheld_bar_with_no_band_shows_the_homes_own_ground(tmp_path):
+    """Blocks draws its handheld bar with no band (`hhbar.style` none) over a
+    home whose ground is a backdrop of its own, not `desktop` (step 26b): the
+    bar's rows are the backdrop's, after a clock tick too."""
+    ws = build_ws(tmp_path)
+    ws.look.set_theme("blocks", persist=False, variant="light")
+    _settle(ws)
+    cv = ws.sys_canvas
+    sunflower = _word(0x1000000 | 0xffd23f)
+    assert ws.screen == "launcher"
+    assert _px(cv, 0, 1) == _px(cv, 0, ws.layout.status_h + 2) == sunflower
+    got = ws.bar_layer.cell("home", "clock")
+    assert got is not None
+    _bar, (x, y, w, h) = got
+    ws.bar_layer.redraw_clock("home")
+    assert _px(cv, x + w - 1, y + 1) != _word(0x1000000 | 0xfff3dc)      # not the band
+    assert _px(cv, 0, 1) == sunflower
+
+
+def test_the_moy_button_takes_the_current_plate_while_its_menu_shows(tmp_path):
+    """The Moy button is the pixel Moy on its tile; while the system menu
+    it opens shows, the tile takes the current plate."""
+    ws = _looked_ws(tmp_path)
+    _settle(ws)
+    cv = ws.sys_canvas
+    L = ws.layout
+    tx, ty, tw, tht = ws.bar_layer.sys_tile(L.bars[0][3][0][1], L.bars[0][1], False)
+    at = (tx + 1, ty + tht // 2)                          # the tile's edge, past Moy
+    rest = _px(cv, *at)
+    ws.toggle_sysmenu()
+    _settle(ws)
+    assert ws.sysmenu.open and _px(cv, *at) != rest
+    ws.toggle_sysmenu()
+    _settle(ws)
+    assert _px(cv, *at) == rest
+
+
+def test_the_focused_windows_chip_is_raised_under_the_current_mark(tmp_path):
+    ws = _looked_ws(tmp_path, desk=True)
+    ws.open_settings()
+    _settle(ws)
+    cv = ws.wm._root_canvas
+    chips = ws.wm._chip_rects()
+    assert chips and all(r[3] == 28 for _k, r, _l in chips)
+    bar = _px(cv, 600, 20)
+    for key, (x, y, w, h), _label in chips:
+        inside = _px(cv, x + w - 4, y + h // 2)
+        assert (inside != bar) == (key == ws.wm._focus)
+
+
+# -- the status cluster's gaps -------------------------------------------------
+
+@pytest.mark.parametrize("config,lo,hi", [("tdeck_320x240_fs1_dark", 4, 6),
+                                          ("p4_1024x600_cs2_fs1_windowed", 10, 13)])
+@pytest.mark.parametrize("mode", ["dark", "light"])
+def test_the_status_clusters_ink_is_one_gap_apart(tmp_path, config, lo, hi, mode):
+    """Wi-Fi, the battery and the clock stand one gap apart by their ink,
+    whatever room each icon's art leaves in its cell (review B-35)."""
+    import test_shell_goldens as g
+    moy_ui.theme_uninstall()
+    try:
+        ws = g._build(dict(g.CONFIGS[config], variant=mode, theme="moy"),
+                      str(tmp_path / "carts"))
+        ws.go_home()
+        ws.frame(1 / 30)
+        bl = ws.bar_layer
+        for _edge, _rect, _dy, cells in ws.layout.bars:
+            run = [c for c in cells if c[0] in ("wifi", "battery", "clock")]
+            if len(run) < 3:
+                continue
+            dx = bl._status_dx(cells) or {}
+            inks = [bl._ink(n, r) for n, r, _t, _s in run]
+            inks = [(a + dx.get(n, 0), b + dx.get(n, 0))
+                    for (a, b), (n, _r, _t, _s) in zip(inks, run)]
+            gaps = [inks[i + 1][0] - inks[i][1] - 1 for i in range(len(inks) - 1)]
+            assert max(gaps) - min(gaps) <= 1, gaps
+            assert lo <= min(gaps) and max(gaps) <= hi, gaps
+            return
+        raise AssertionError("no status cluster on %s" % config)
+    finally:
+        moy_ui.theme_uninstall()

@@ -27,9 +27,9 @@ GAP = 3          # a fresh hardware sample every GAP-th frame (the device's rate
 
 
 def _region(extent=100, content=800):
-    from runtime import ui
+    from runtime import ui_draw
 
-    r = ui.ScrollRegion()
+    r = ui_draw.ScrollRegion()
     r.set((0, 0, 50, extent), content)
     return r
 
@@ -75,7 +75,7 @@ def test_charging_stale_samples_a_zero_delta_kills_the_fling():
 
 
 def test_banked_time_measures_the_true_finger_speed():
-    from runtime import ui
+    from runtime import ui_draw
 
     smooth = _region()          # a backend that samples every frame
     smooth.drag_start(500)
@@ -93,7 +93,7 @@ def test_banked_time_measures_the_true_finger_speed():
     # charging one frame's dt to a GAP-frame delta would do.
     assert gappy._vel < smooth._vel * 1.05
     assert gappy._vel > smooth._vel * 0.75
-    assert gappy._vel >= ui.ScrollRegion.MIN_FLING
+    assert gappy._vel >= ui_draw.ScrollRegion.MIN_FLING
 
 
 def test_a_finger_that_really_stops_still_reads_as_a_stop():
@@ -193,41 +193,3 @@ def test_a_gappy_swipe_ends_in_a_fling(tmp_path):
             break
     assert not ws.launcher.flinging
     assert ws.launcher.scroll > off
-
-
-def test_heldpoint_extrapolates_through_a_gap_and_respects_the_bound():
-    """The shared HeldPoint's opt-in glide (gt911.py, born on the Guition,
-    promoted for the T-Deck): a held pass returns the last point advanced
-    along the measured velocity, clamped to the glass, stale-flagged; past
-    the bound it releases; with the flag off the point stays frozen (the
-    original contract, byte for byte)."""
-    from device import gt911
-
-    clock = [0]
-    orig = gt911._ticks_ms
-    gt911._ticks_ms = lambda: clock[0]
-    try:
-        hp = gt911.HeldPoint(extrapolate=True, w=480, h=320)
-        hp.sample(100, 100)
-        clock[0] = 20
-        hp.sample(120, 100)          # 1 px/ms rightward
-        clock[0] = 40
-        x, y, edge = hp.hold()       # 20ms of no news
-        assert not edge and not hp.fresh
-        assert 128 <= x <= 132 and y == 100   # ~EMA/2 of the raw speed, gliding
-        clock[0] = 60
-        x2, _, _ = hp.hold()
-        assert x2 > x                # still gliding, anchored to the last sample
-        clock[0] = 40 + hp.HOLD_SAMPLE_MS
-        assert hp.hold() is None     # the bound still frees a missed release
-        assert hp.fresh
-
-        frozen = gt911.HeldPoint()   # the default contract is unchanged
-        clock[0] = 0
-        frozen.sample(10, 10)
-        clock[0] = 20
-        frozen.sample(30, 10)
-        clock[0] = 50
-        assert frozen.hold() == (30, 10, False)
-    finally:
-        gt911._ticks_ms = orig

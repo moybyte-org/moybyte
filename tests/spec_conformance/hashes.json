@@ -5,7 +5,7 @@
     "w": 320,
     "h": 240
   },
-  "generated_by": "moycore 0.3.0",
+  "generated_by": "moycore 0.4.0",
   "provenance": "Rendered by moycore. Confirmed pixel-identical on all core scenes by libmoy and the WebAssembly player built from it (the tiebreaker SPEC.md 11 names). The reference console's own rasterizer (conformance/parity.py) and an ESP32-P4 over serial matched every scene the suite held before the layer_* scenes. Note that ALL of them now share moycore's lineage -- the board ran a hand transcription until 2026-08-07 and now calls libmoy too. See conformance/README.md, 'The independent check, and its loss'.",
   "scenes": [
     {
@@ -74,8 +74,8 @@
     {
       "name": "fillp",
       "core": true,
-      "calls": 48,
-      "frame_sha256": "a2ac89ec6d266e7efab1df172384ec5393f1bb5b0919647eb904b823b5bbe605",
+      "calls": 75,
+      "frame_sha256": "090420e92d86b6e87a47253bcf6b9475728cb060ee5268afb378318f88e9cf1b",
       "note": "The fill pattern (SPEC.md 6): a set bit is a hole, a hole takes\nthe second colour or nothing, the pattern is anchored to the\nSCREEN through camera and clip, every shape verb honours it and\npix, print, sprites and the map do not."
     },
     {

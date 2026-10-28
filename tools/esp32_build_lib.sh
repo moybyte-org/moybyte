@@ -33,13 +33,12 @@ moybyte_resolve_build_python() {
   fi
 }
 
-# Clone mainline MicroPython at the pinned tag into MPY_DIR (idempotent).
+# Mainline MicroPython at MPY_TAG in MPY_DIR: cloned when absent, and a warm
+# tree whose commit is not the tag's is reset to stock MPY_TAG (the patchers
+# below are idempotent from stock) or the build fails -- tools/mpy_tree.sh says
+# how and why. A no-op, and silent, when the tree is already at the tag.
 moybyte_clone_micropython() {
-  if [ ! -d "${MPY_DIR}" ]; then
-    echo "== cloning micropython ${MPY_TAG}"
-    git clone --depth 1 -b "${MPY_TAG}" \
-      https://github.com/micropython/micropython "${MPY_DIR}"
-  fi
+  bash "${REPO_ROOT}/tools/mpy_tree.sh" "${MPY_DIR}" "${MPY_TAG}"
 }
 
 # Resolve + activate ESP-IDF v5.5.1 for $1 (the idf.py target, e.g. esp32s3).
@@ -131,23 +130,6 @@ moybyte_patch_native_code_free() {
   fi
 }
 
-# ESP-NOW ring torn-read race (#7, measured 2026-08-24). modespnow's recv_cb
-# (WiFi task) writes header/peer/msg as three separate ringbuf puts while
-# recvinto waits only for the HEADER -- a reader that catches a record
-# mid-write raises "ESPNow.recv(): buffer error" on a healthy ring and leaves
-# it genuinely desynced (header consumed, body not). A busy irecv(0) drain
-# hits the window about once a second on glass; every hit forces the link's
-# _recover() active-cycle, which costs a packet burst mid-match. The patch
-# waits (bounded, 10ms) for the body the writer commits microseconds later.
-# All three radio boards call this; the wasm build compiles no modespnow.
-# Reads MPY_DIR, REPO_ROOT.
-moybyte_patch_espnow_ring_race() {
-  if ! grep -q "Moybyte espnow_ring_race" "${MPY_DIR}/ports/esp32/modespnow.c"; then
-    echo "== applying espnow ring torn-read patch (#7)"
-    patch -d "${MPY_DIR}" -p1 < "${REPO_ROOT}/patches/esp32_espnow_ring_race.patch"
-  fi
-}
-
 # REPR_C unboxed floats (#66). REPR_A boxes every float RESULT in 16 bytes of
 # heap (~73KB/frame measured in sakura), and the heap-wrap gc collect that
 # follows is a 130-175ms visible hitch. A GUARDED SED rather than a context
@@ -215,6 +197,50 @@ moybyte_patch_gc_run_hints() {
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_run_hints.py" "${MPY_DIR}" || exit 1
 }
 
+# The gc meters: gc.pauses() (collections and their pause, for the PERF line)
+# and gc.areas() (the split heap's areas and bytes held, for `heapcaps`); and
+# the census's three reads, gc.area_map() (each area's range, held, used,
+# largest free run), gc.growths() (every area added or freed, with the
+# request that grew it) and gc.refs() (the heap blocks holding an address). tools/patch_gc_meters.py and tools/patch_gc_census.py
+# are the patches and their own documentation: all-or-nothing, idempotent,
+# independent of each other and of the run hints.
+moybyte_patch_gc_meters() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_meters.py" "${MPY_DIR}" || exit 1
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_gc_census.py" "${MPY_DIR}" || exit 1
+}
+
+# An equal-length slice store (`buf[a:b] = row`) moves the slice and nothing
+# else: the stock no-grow path also memmoves the whole tail onto itself, a
+# pass over the rest of the buffer per store -- ~2.2 ms a row into a 153 KB
+# PSRAM bytearray on the P4. tools/patch_slice_store.py is the patch and the
+# measurement: all-or-nothing, idempotent, and every other store unchanged.
+moybyte_patch_slice_store() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_slice_store.py" "${MPY_DIR}" || exit 1
+}
+
+# An extensible built-in (`json`, `array`, `time`, ...) is entered in
+# sys.modules once an import has found it: stock searches every sys.path entry
+# for the name on EVERY import of it, 24 ms a miss on a T-Deck.
+# tools/patch_import_cache.py is the patch and the measurement: all-or-nothing,
+# idempotent, and the first import of a name still searches the path.
+moybyte_patch_import_cache() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_import_cache.py" "${MPY_DIR}" || exit 1
+}
+
+# The VM's per-thread state in a `__thread` variable: every MP_STATE_THREAD
+# access (each call's globals swap, the stack check, nlr, gc_alloc) otherwise
+# asks FreeRTOS for a TLS slot through xTaskGetCurrentTaskHandle, which masks
+# interrupts each time -- ~5% of a P4 Editor frame. tools/patch_thread_state_tls.py
+# is the patch and the measurement: all-or-nothing, idempotent, the TLS slot
+# still written.
+moybyte_patch_thread_state_tls() {
+  [ -n "${BUILD_PYTHON:-}" ] || moybyte_resolve_build_python
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/patch_thread_state_tls.py" "${MPY_DIR}" || exit 1
+}
+
 # A 4 KB stdin ring, in the ESP32-P4's TCM, for a board whose serial is a
 # UART, and an RX ISR that wakes the reader. The port's stock ring is 260 bytes
 # and the UART has no flow control, so a heap collection landing while a long
@@ -261,7 +287,8 @@ moybyte_patch_sdcard_runs() {
 
 # Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
 # on demand by DOUBLING it, from the same ESP heap the Lua VM, the panel DMA
-# and the layer pool allocate from, and never gives an area back. On an 8MB
+# and the layer pool allocate from, and gives an area back only when a sweep
+# finds it wholly empty. On an 8MB
 # S3 board one fragmented Python allocation took every remaining byte of
 # PSRAM and every big cart then failed at load with Lua's "not enough
 # memory" until a hard reset (2026-09-02, #66). The patch caps what a growth
@@ -281,16 +308,10 @@ moybyte_patch_gc_split_reserve() {
   fi
 }
 
-# The two ESP32-P4 SILICON patches, one-shot marker-guarded like the rest --
-# shared by every P4 board since 2026-09-06 (they were the Waveshare's own
-# `patches/` until the Guition P4 became their second consumer):
+# The ESP32-P4 SILICON patch, one-shot marker-guarded like the rest -- shared
+# by every P4 board since 2026-09-06 (it was the Waveshare's own `patches/`
+# until the Guition P4 became its second consumer):
 #
-#   ble_hid_fastpath  Steady-state BLE keyboard notifications must not wait
-#                     behind MicroPython's synchronous NimBLE IRQ/GIL path.
-#                     native/p4/moy_ble_hid's queue consumes registered HID
-#                     handles before Python dispatch; pairing/bonding/
-#                     discovery stay on the supported synchronous path.
-#                     Patches THIS board's MicroPython checkout.
 #   dsi_underrun      #106: backport current ESP-IDF's dedicated DSI
 #                     bridge-underrun ISR and keep the frame-restart DW-GDMA
 #                     interrupt above ESP-Hosted's SDIO interrupt. IDF v5.5
@@ -298,14 +319,6 @@ moybyte_patch_gc_split_reserve() {
 #                     delays that callback the panel has already gone blue.
 #                     Patches the (possibly shared) ESP-IDF checkout, so the
 #                     marker is what makes two P4 builds over one IDF safe.
-moybyte_patch_p4_ble_hid_fastpath() {
-  local f="${MPY_DIR}/extmod/modbluetooth.c"
-  if [ -f "${f}" ] && ! grep -q "moy_ble_hid_queue_on_notify" "${f}"; then
-    echo "== applying P4 BLE-HID native notification fast-path patch"
-    patch -d "${MPY_DIR}" -p1 < "${REPO_ROOT}/patches/p4_modbluetooth_ble_hid_fastpath.patch"
-  fi
-}
-
 moybyte_patch_p4_dsi_underrun() {
   local f="${IDF_DIR}/components/esp_lcd/dsi/esp_lcd_panel_dpi.c"
   if [ -f "${f}" ] && \
@@ -336,12 +349,28 @@ moybyte_patch_psram_retune() {
   fi
 }
 
+# The native twins this board takes (board.toml [native.impl]), exported as the
+# MOY_*_IMPL hooks the module fragments and `board_config.py stage` read -- the
+# build's environment wins, so `MOY_INDEX_IMPL=py` still builds the other twin.
+# Called first by moybyte_stage_native, ahead of everything that reads a hook.
+# Reads BUILD_PYTHON SCRIPT_DIR.
+moybyte_board_impls() {
+  local line name
+  while IFS= read -r line; do
+    name="${line%%=*}"
+    if [ -z "${!name:-}" ]; then
+      export "${line}"
+    fi
+  done < <("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" impls "${SCRIPT_DIR}")
+}
+
 # Stage the shared native modules per board.toml [native.shared] and generate
 # the web-console blob INTO THE STAGED COPY (never into the shared native/
 # tree two builds read). Reads SCRIPT_DIR, REPO_ROOT, BUILD_PYTHON. A missing
 # web bundle only WARNS locally and FAILS under CI/MOYBYTE_REQUIRE_WEB_BUNDLE,
 # because a PUBLISHED image with no console is the whole bug the baking fixes.
 moybyte_stage_native() {
+  moybyte_board_impls
   "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage-native "${SCRIPT_DIR}"
   # WHERE it staged them is the board's to say ([native] dest). Asked rather
   # than restated: a board moving its dest would otherwise leave the blob
@@ -523,33 +552,49 @@ moybyte_sdkconfig_report_inert() {
 
 # The #168 size guard: the app image ($2) must fit the ota_0 slot read from
 # the board's OWN partition table ($1) -- read, not restated, so the check
-# cannot drift from the layout it is checking. An overflow FAILS: an image
-# that does not fit cannot be cable-flashed and cannot be installed over OTA,
-# so the alternatives to stopping here are esptool refusing it later or a
-# published payload no board can take. MOYBYTE_APP_SLOT_BYTES overrides for a
-# what-if; MOYBYTE_APP_HEADROOM_WARN_BYTES tunes the warning (default 200KB).
+# cannot drift from the layout it is checking -- and leave the board ($4) at
+# least its headroom floor ($3 bytes, `[image] headroom_floor_kib` in its
+# board.toml). Both FAIL the build. An image that does not fit cannot be
+# cable-flashed and cannot be installed over OTA, so the alternatives to
+# stopping here are esptool refusing it later or a published payload no board
+# can take; an image under its floor is the growth the floor exists to stop
+# before the next partition-table change. MOYBYTE_APP_SLOT_BYTES overrides the
+# slot for a what-if; MOYBYTE_ALLOW_UNDER_FLOOR=1 builds an under-floor image
+# anyway (an experiment, never a release).
 moybyte_app_size_guard() {
-  local csv="$1" app_bin="$2"
-  local slot_hex slot_bytes warn_bytes size_bytes headroom
+  local csv="$1" app_bin="$2" floor_bytes="$3" board="$4"
+  local slot_hex slot_bytes size_bytes headroom
   slot_hex="$(awk -F',' '/^[[:space:]]*ota_0[[:space:]]*,/ { gsub(/[[:space:]]/, "", $5); print $5; exit }' "${csv}")"
   slot_bytes="${MOYBYTE_APP_SLOT_BYTES:-$(( ${slot_hex:-0x400000} ))}"
-  warn_bytes="${MOYBYTE_APP_HEADROOM_WARN_BYTES:-204800}"
   size_bytes="$(wc -c < "${app_bin}" | tr -d '[:space:]')"
   headroom=$(( slot_bytes - size_bytes ))
-  printf 'App image: %s bytes of a %s-byte ota_0 slot -- %s bytes headroom (%s KB)\n' \
-    "${size_bytes}" "${slot_bytes}" "${headroom}" "$(( headroom / 1024 ))"
+  printf 'App image: %s bytes of a %s-byte ota_0 slot -- %s bytes headroom (%s KB), floor %s KB (%s)\n' \
+    "${size_bytes}" "${slot_bytes}" "${headroom}" "$(( headroom / 1024 ))" \
+    "$(( floor_bytes / 1024 ))" "${board}"
   if [ "${headroom}" -lt 0 ]; then
     echo "" >&2
     echo "!! Moybyte BUILD FAILED (#168): the app image does not fit its OTA slot" >&2
+    echo "!!   board:    ${board}" >&2
     echo "!!   slot:     ${slot_bytes} bytes (ota_0/ota_1, $(basename "${csv}"))" >&2
     echo "!!   image:    ${size_bytes} bytes" >&2
     echo "!!   OVERFLOW: $(( -headroom )) bytes ($(( (-headroom) / 1024 )) KB)" >&2
-    echo "!! Trim it (the baked web console is ~573KB -- see tools/gen_web_blob.py)" >&2
+    echo "!! Trim it (the baked web console -- see tools/gen_web_blob.py)" >&2
     echo "!! or change the partition table, which costs every deployed device a" >&2
     echo "!! full-erase USB flash." >&2
     exit 1
-  elif [ "${headroom}" -lt "${warn_bytes}" ]; then
-    echo "Moybyte WARNING (#168): under $(( warn_bytes / 1024 ))KB of OTA-slot headroom left -- trim the image or plan the next table change" >&2
+  elif [ "${headroom}" -lt "${floor_bytes}" ]; then
+    echo "" >&2
+    echo "!! Moybyte BUILD FAILED: ${board}'s image is under its headroom floor" >&2
+    echo "!!   headroom: ${headroom} bytes ($(( headroom / 1024 )) KB)" >&2
+    echo "!!   floor:    ${floor_bytes} bytes ($(( floor_bytes / 1024 )) KB, [image] headroom_floor_kib in its board.toml)" >&2
+    echo "!!   short by: $(( floor_bytes - headroom )) bytes" >&2
+    echo "!! Trim the image, or change the floor with its reason" >&2
+    echo "!! (docs/native_kernel_2026-09.md section 6.1). MOYBYTE_ALLOW_UNDER_FLOOR=1" >&2
+    echo "!! builds it anyway, for an experiment." >&2
+    if [ "${MOYBYTE_ALLOW_UNDER_FLOOR:-0}" != "1" ]; then
+      exit 1
+    fi
+    echo "!! MOYBYTE_ALLOW_UNDER_FLOOR=1: continuing" >&2
   fi
 }
 
@@ -562,20 +607,85 @@ moybyte_app_size_guard() {
 #                               into the inactive slot. Handing the merged
 #                               image to esp32.Partition would write a
 #                               bootloader into an app slot.
-# Reads: MPY_DIR BOARD BOARD_DIR SCRIPT_DIR MANIFEST DIST_DIR BUILD_JOBS.
+# Reads: MPY_DIR BOARD BOARD_DIR SCRIPT_DIR MANIFEST DIST_DIR BUILD_JOBS
+# BUILD_PYTHON REPO_ROOT.
 # Leaves the cwd in ports/esp32 (both scripts end here).
+# The kernel's entry (native/moy_kernel), on a board that takes it: its VM
+# service is mp_task copied, so the pinned tag's mp_task must be the one the
+# copy was reviewed against (tools/mp_task_calls.py, before anything compiles),
+# and its recovery floor names this build's OTA label, board and channel (its
+# `update` word fetches that release). Reads SCRIPT_DIR MPY_DIR MODULES_DIR.
+moybyte_kernel_entry() {
+  local dest staged label
+  dest="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" native-dest "${SCRIPT_DIR}")"
+  staged="${SCRIPT_DIR}/${dest}/moy_kernel"
+  [ -d "${staged}" ] || return 0
+  "${BUILD_PYTHON}" "${REPO_ROOT}/tools/mp_task_calls.py" check \
+    "${MPY_DIR}" "${REPO_ROOT}/native/moy_kernel/mp_task_calls.txt" || exit 1
+  local board channel
+  label="$(sed -n 's/^LABEL = "\(.*\)"$/\1/p' "${MODULES_DIR}/_ota_build.py" 2>/dev/null)"
+  board="$(sed -n 's/^BOARD = "\(.*\)"$/\1/p' "${MODULES_DIR}/_ota_build.py" 2>/dev/null)"
+  channel="$(sed -n 's/^CHANNEL = "\(.*\)"$/\1/p' "${MODULES_DIR}/_ota_build.py" 2>/dev/null)"
+  printf '#define MOY_FW_LABEL "%s"\n#define MOY_FW_BOARD "%s"\n#define MOY_FW_CHANNEL "%s"\n' \
+    "${label:-unlabelled}" "${board:-unknown}" "${channel:-stable}" > "${staged}/moy_fw_label.gen.h"
+}
+
+# The build's native configuration, as one line: the native modules this board
+# stages (board.toml's takes and denials) and every MOY_*_IMPL hook in the
+# environment (tools/moy_index_spike.py names them, MOY_INDEX_BENCH included).
+# Reads BUILD_PYTHON SCRIPT_DIR.
+moybyte_native_config() {
+  {
+    "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" list-native "${SCRIPT_DIR}"
+    env | { grep -E '^MOY_([A-Z]+_IMPL|INDEX_BENCH)=' || true; } | sort
+    # The board's own switches (MICROPY_PY_BLUETOOTH, MOY_NET_*) decide which
+    # modules a source registers, as surely as a take or a deny does.
+    if [ -n "${BOARD_DIR:-}" ] && [ -f "${BOARD_DIR}/mpconfigboard.h" ]; then
+      cksum < "${BOARD_DIR}/mpconfigboard.h" | cut -d' ' -f1
+    fi
+  } | tr '\n' ' '
+}
+
+# MicroPython keeps a source's generated qstr and module entries (genhdr) until
+# that source is preprocessed again, so a build that drops a source -- a hook
+# back to py, a module the board file now denies -- links a module table that
+# names code it no longer has (`undefined reference to moy_kernel_module`).
+# $1 is the build dir: when the native configuration is not the one it was last
+# built with, its genhdr starts afresh. The record is written here, before the
+# build, so a build that fails half-way still leaves genhdr and the record
+# naming the same configuration. A build dir with no record has none to trust.
+# Reads BUILD_PYTHON SCRIPT_DIR.
+moybyte_native_config_guard() {
+  local bout="$1" want
+  want="$(moybyte_native_config)"
+  if [ "$(cat "${bout}/moy_native_config" 2>/dev/null)" != "${want}" ]; then
+    echo "== native configuration changed: starting ${bout}/genhdr afresh"
+    rm -rf "${bout}/genhdr"
+  fi
+  mkdir -p "${bout}"
+  printf '%s\n' "${want}" > "${bout}/moy_native_config"
+}
+
 moybyte_build_and_collect() {
   local csv="$1" stem="$2" flash_note="$3"
+  moybyte_kernel_entry
   make -C "${MPY_DIR}/mpy-cross" -j"${BUILD_JOBS}"
   cd "${MPY_DIR}/ports/esp32"
   make submodules BOARD_DIR="${BOARD_DIR}"
+  local bout="build-${BOARD}"
+  moybyte_native_config_guard "${bout}"
   make -j"${BUILD_JOBS}" BOARD_DIR="${BOARD_DIR}" \
     USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
     FROZEN_MANIFEST="${MANIFEST}"
-  local bout="build-${BOARD}"
   cp "${bout}/firmware.bin" "${DIST_DIR}/${stem}.bin"
   cp "${bout}/micropython.bin" "${DIST_DIR}/${stem}_app.bin"
-  moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin"
+  local floor board_id
+  floor="$("${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" \
+           headroom-floor "${SCRIPT_DIR}")"
+  board_id="${floor#* }"
+  floor="${floor%% *}"
+  moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin" \
+    "${floor}" "${board_id}"
   echo "OK -> ${DIST_DIR}/${stem}.bin (${flash_note})"
   echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
 }

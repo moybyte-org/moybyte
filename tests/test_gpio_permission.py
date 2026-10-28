@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from ws_helpers import select_on_home
+
 
 class _FakeGpio:
     """Stands in for whichever backend the tier supplied. Two exist by design:
@@ -47,14 +49,13 @@ def _cart(carts_dir, title, perms):
                             src="def _update(dt):\n    pass\ndef _draw():\n    cls(0)\n")
     man_path = Path(cart["path"]) / "manifest.json"
     man = json.loads(man_path.read_text())
-    man["permissions"] = perms
+    man["moybyte"]["permissions"] = perms
     man_path.write_text(json.dumps(man))
     return moy_carts.scan(carts_dir)
 
 
 def _run(ws, title):
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it["title"] == title)
+    select_on_home(ws, title)
     ws.open()
 
 

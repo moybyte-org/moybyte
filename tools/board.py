@@ -629,7 +629,7 @@ def words(raw, little_endian):
 
 def unrotate(px, pw, ph, angle):
     """A portrait scan buffer (pw x ph) back to the landscape picture the
-    console painted, inverting `device/dsi_panel.rotate_rect` pixel by pixel.
+    console painted, inverting the rotated compositor's `moy_rot_rect` (native/moy_glass) pixel by pixel.
     Returns (words, w, h)."""
     lw, lh = ph, pw
     out = array("H", bytes(2 * lw * lh))
@@ -964,7 +964,7 @@ def parser(dirs):
     for k in ("x0", "y0", "x1", "y1"):
         p.add_argument(k, type=int)
     p.add_argument("frames", type=int, nargs="?", default=20)
-    p = verb("open", help="open settings|picker|appearance|wifi")
+    p = verb("open", help="open settings|projects|appearance|wifi")
     p.add_argument("what")
     p = verb("tail", help="print what the board says")
     p.add_argument("secs", type=float)

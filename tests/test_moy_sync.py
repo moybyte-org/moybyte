@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from runtime import moy_sync                                    # noqa: E402
 from runtime.moy_sync import (StoreWatcher, apply_ops, parse_batch,  # noqa: E402
-                              safe_segments, PART_MAX, BATCH_BUDGET,
+                              PART_MAX, BATCH_BUDGET,
                               FILES_ROOT_ID)
 
 
@@ -145,80 +145,7 @@ def test_a_transient_card_read_is_retried_not_dropped(tmp_path):
         builtins.open = orig
 
 
-def test_a_pull_reads_a_file_in_bounded_pieces(tmp_path):
-    """The PULL never holds a file, whatever size it is.
 
-    This is the whole of the 2026-09-09 Guition fix: a 142KB PICO-8 `main.lua`
-    used to cross as six 150KB-class copies and every pull died with a
-    MemoryError on a heap reporting megabytes free, because none of its free
-    RUNS was that long. Assert the bound, not the symptom -- a reader that goes
-    back to `read()` passes every content test and brings the defect back.
-    """
-    p = tmp_path / "big.lua"
-    p.write_text("-- a line of a cart\n" * 9000)                # ~180KB
-    pieces = list(moy_sync.read_text_chunks(str(p)))
-    assert "".join(pieces) == p.read_text()
-    assert len(pieces) > 1, "the whole file arrived as one piece"
-    assert max(len(x) for x in pieces) <= moy_sync.STORE_READ_CHUNK
-
-
-def test_a_pull_reads_the_edge_shapes_the_way_read_text_does(tmp_path):
-    """Empty is a VALUE and binary is an ABSENCE, exactly as `_read_text`'s
-    "" and None are -- a binary file must not arrive as an empty string, which
-    is what deciding it after the first piece would produce."""
-    empty = tmp_path / "empty.txt"
-    empty.write_text("")
-    assert list(moy_sync.read_text_chunks(str(empty))) == []
-    assert moy_sync._read_text(str(empty)) == ""
-
-    blob = tmp_path / "blob.bin"
-    blob.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\xff\xfe\x00\x01" * 4000)
-    assert moy_sync.read_text_chunks(str(blob)) is None
-    assert moy_sync._read_text(str(blob)) is None
-
-
-def test_a_card_that_eios_mid_file_is_re_opened_where_it_left_off(tmp_path):
-    """The retry has to RE-OPEN, not re-read: a FatFS handle latches its disk
-    error, so the handle that saw the EIO answers FR_INVALID_OBJECT forever
-    after. Losing this would turn the Guition's documented transient-card EIO
-    from a hiccup into a silently short file."""
-    import builtins
-
-    p = tmp_path / "flaky.lua"
-    p.write_text("".join("line %04d\n" % i for i in range(2000)))   # ~20KB
-    state = {"reads": 0, "opens": 0}
-    orig = builtins.open
-
-    class _Latching:
-        def __init__(self, f):
-            self._f = f
-            self._dead = False
-
-        def read(self, n=-1):
-            if self._dead:
-                raise OSError(5, "EIO")      # the latch: this handle is done
-            state["reads"] += 1
-            if state["reads"] == 2:
-                self._dead = True
-                raise OSError(5, "EIO")
-            return self._f.read(n)
-
-        def __getattr__(self, name):
-            return getattr(self._f, name)
-
-    def flaky(path, *a, **k):
-        if str(path).endswith("flaky.lua"):
-            state["opens"] += 1
-            return _Latching(orig(path, *a, **k))
-        return orig(path, *a, **k)
-
-    builtins.open = flaky
-    try:
-        got = "".join(moy_sync.read_text_chunks(str(p), chunk=4096))
-    finally:
-        builtins.open = orig
-    assert got == p.read_text(), "the retry lost or duplicated a piece"
-    assert state["opens"] > 1, "the retry re-read the handle that had failed"
 
 
 # ---------------------------------------------------------------------------
@@ -226,22 +153,30 @@ def test_a_card_that_eios_mid_file_is_re_opened_where_it_left_off(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_paths_from_the_network_are_shape_checked():
-    assert safe_segments("hop.moy/main.py") == ["hop.moy", "main.py"]
-    assert safe_segments("hop.moy/scenes/a.moyscene") is not None
+def _refused(tmp_path, path):
+    root = tmp_path / "refusals"
+    root.mkdir(exist_ok=True)
+    applied, errors, _ = apply_ops(str(root), [{"p": path, "t": "x"}])
+    return applied == 0 and errors == [(0, "bad path")]
+
+
+def test_paths_from_the_network_are_shape_checked(tmp_path):
+    root = _store(tmp_path)
+    assert apply_ops(str(root), [{"p": "hop.moy/scenes/b.moyscene", "t": "{}"}])[0] == 1
     for bad in ("", "/abs/path", "a//b", "a/../b", "..", ".", "a/.", "a/",
-                "a\\b/c", "a/b\0c", "a/b\nc", None, 3, "x" * 300):
-        assert safe_segments(bad) is None, bad
+                "a\\b/c", "a/b\0c", "a/b\nc", None, 3, "x" * 300,
+                "a.moy/" + "é" * 255):
+        assert _refused(tmp_path, bad), bad
 
 
-def test_the_skip_set_is_refused_as_a_path_too():
+def test_the_skip_set_is_refused_as_a_path_too(tmp_path):
     """A client asking to write journal/, a .bak or a .tmp is malformed by
     definition -- those never cross the wire in either direction, and .tmp is
     also the receiver's own chunk staging."""
     for bad in ("hop.moy/journal/journal.jsonl", "hop.moy/journal.jsonl",
                 "hop.moy/main.py.bak", "hop.moy/main.py.tmp",
                 "hop.moy/thumbs/wp.mct"):
-        assert safe_segments(bad) is None, bad
+        assert _refused(tmp_path, bad), bad
 
 
 # ---------------------------------------------------------------------------
@@ -499,21 +434,9 @@ def test_a_journal_that_cannot_be_written_never_costs_the_write(tmp_path):
     """The file has already landed by the time the journal is touched, so a
     journal failure is a missing history entry and must never be a lost edit."""
     root = _store(tmp_path)
-    real = moy_sync._moy_journal()
-    assert real is not None
-
-    class Broken:
-        @staticmethod
-        def journal_append(*a, **kw):
-            raise OSError("no space left on device")
-
-    moy_sync._JOURNAL[:] = [Broken]
-    try:
-        applied, errors, _ = apply_ops(
-            str(root), [{"p": "hop.moy/main.py", "t": "cls(5)\n"}],
-            journal=True)
-    finally:
-        moy_sync._JOURNAL[:] = [real]
+    (root / "hop.moy" / "journal").write_text("a file where the folder goes")
+    applied, errors, _ = apply_ops(
+        str(root), [{"p": "hop.moy/main.py", "t": "cls(5)\n"}], journal=True)
     assert (applied, errors) == (1, [])
     assert (root / "hop.moy" / "main.py").read_text() == "cls(5)\n"
 
@@ -868,6 +791,155 @@ def test_sync_off_stops_both_roots(tmp_path):
     assert wb.sync_poll_json() == ""
 
 
+# ---------------------------------------------------------------------------
+# The console's own documents (moy_sync.SYSTEM_ROOT): a site-mode browser keeps
+# system.json, the badges and the edited icons in its OPFS. The JS half (the
+# OPFS apply and its crash-safety) is firmware/web_runner/store_test.mjs; the
+# reload itself is tests/test_web_system_persist.py. Their board half -- the
+# per-key merge, the pull, the parked batch -- is tests/test_system_sync.py.
+# ---------------------------------------------------------------------------
+
+
+def _console_dir(tmp_path):
+    """The directory a console keeps beside its carts: the carts and files
+    folders, the console's own documents, and the siblings that stay home."""
+    top = tmp_path / "moy"
+    (top / "carts" / "hop.moy").mkdir(parents=True)
+    (top / "carts" / "hop.moy" / "main.py").write_text("x = 1\n")
+    (top / "files" / "drawings").mkdir(parents=True)
+    (top / "system.json").write_text('{"theme": "dusk", "show_fps": false}')
+    (top / "achievements.json").write_text('{"unlocked": ["first_open"]}')
+    (top / "shared.moygfx").write_bytes(bytes(range(40)))
+    (top / "wifi.json").write_text('[{"ssid": "Home", "pw": "secret"}]')
+    (top / "installed.json").write_text("{}")
+    (top / "system.json.bak").write_text("{}")
+    return top
+
+
+def _system_watcher(top):
+    r = moy_sync.SYSTEM_ROOT
+    return StoreWatcher(r.path(str(top / "carts")), root_id=r.id, top=r.top)
+
+
+def test_the_system_root_is_the_carts_folders_parent():
+    assert moy_sync.SYSTEM_ROOT.path("/moy/carts") == "/moy"
+    assert moy_sync.SYSTEM_ROOT.path("/sd/moybyte/carts") == "/sd/moybyte"
+    assert moy_sync.SYSTEM_ROOT.endpoint == moy_sync.SYSTEM_PULL
+    assert moy_sync.SYSTEM_ROOT.wire_top == ("system.json", "achievements.json")
+
+
+def test_the_system_files_are_the_stores_own_names():
+    """The list names moy_carts' sibling stores, so a renamed store cannot
+    leave the browser keeping a file nothing writes."""
+    from runtime import moy_carts
+    assert moy_sync.SYSTEM_FILES == (
+        moy_carts.SYSTEM_STORE_NAME, moy_carts.ACHIEVEMENTS_STORE_NAME,
+        moy_carts.SHARED_SHEET_NAME)
+    assert moy_carts.WIFI_STORE_NAME not in moy_sync.SYSTEM_FILES
+
+
+def test_the_system_watcher_carries_its_named_files_and_nothing_else(tmp_path):
+    top = _console_dir(tmp_path)
+    w = _system_watcher(top)
+    assert set(w._snap) == {"system.json", "achievements.json", "shared.moygfx"}
+    assert not w.sweep(), "the store as seeded has nothing to tell"
+    for name in ("wifi.json", "installed.json", "system.json.bak"):
+        p = top / name
+        p.write_text('{"changed": true}')
+        _bump_mtime(p)
+    c = top / "carts" / "hop.moy" / "main.py"
+    c.write_text("x = 2\n")
+    _bump_mtime(c)
+    assert not w.sweep(), "a cart or a secret is not the console's own document"
+    p = top / "system.json"
+    p.write_text('{"theme": "night", "show_fps": false}')
+    _bump_mtime(p)
+    assert w.sweep()
+    doc = json.loads(w.take_json())
+    assert doc["v"] == moy_sync.PROTOCOL_V_ROOTED and doc["root"] == "system"
+    assert doc["ops"] == [{"p": "system.json",
+                           "t": '{"theme": "night", "show_fps": false}'}]
+
+
+def test_the_shared_sheet_crosses_as_its_bytes(tmp_path):
+    top = _console_dir(tmp_path)
+    w = _system_watcher(top)
+    p = top / "shared.moygfx"
+    p.write_bytes(bytes(range(50)))
+    _bump_mtime(p)
+    w.sweep()
+    import base64
+    assert w.take() == [{"p": "shared.moygfx",
+                         "b": base64.b64encode(bytes(range(50))).decode()}]
+
+
+def test_a_vanished_system_file_is_a_plain_delete_never_a_folder_one(tmp_path):
+    """Each file is its own unit: `dc system.json` would ask a store to remove
+    a folder by that name."""
+    top = _console_dir(tmp_path)
+    w = _system_watcher(top)
+    (top / "achievements.json").unlink()
+    assert w.sweep()
+    assert w.take() == [{"p": "achievements.json", "d": 1}]
+
+
+def test_the_c_apply_refuses_every_op_of_a_system_batch(tmp_path):
+    """A system batch parses as its own root and is never read as a carts
+    batch with `system.json` for a cart path: the C apply has no store for it,
+    so nothing lands even where a caller hands it one (the VM merges it)."""
+    body = json.dumps({"v": moy_sync.PROTOCOL_V_ROOTED, "root": "system",
+                       "ops": [{"p": "system.json", "t": "{}"}]})
+    ops, _pin, root_id = parse_batch(body)
+    assert root_id == "system" and ops == [{"p": "system.json", "t": "{}"}]
+    root = _store(tmp_path)
+    applied, errors, _shelf = apply_ops(str(root), ops, root_id)
+    assert applied == 0 and errors == [(0, "no such store")]
+    assert not (root / "system.json").exists()
+    assert not (tmp_path / "system.json").exists()
+
+
+def test_a_board_page_watches_its_documents_only_when_the_board_served_them(
+        tmp_path):
+    """The system root's directory is there whatever the host serves, so the
+    capability is the worker's word: a board that answered /console.json gets
+    a watcher over the two documents it takes, one that did not (firmware
+    before the root, which refuses the batch) gets none, and a page that never
+    said gets none either."""
+    wb = _web_boot()
+    top = _console_dir(tmp_path)
+    carts = str(top / "carts")
+    assert "system" not in wb._build_watchers(carts, False)
+    assert "system" not in wb._build_watchers(carts, False, ("carts", "files"))
+    board = wb._build_watchers(carts, False, ("carts", "files", "system"))
+    assert set(board) == {"carts", "files", "system"}
+    assert board["system"].top == moy_sync.SYSTEM_WIRE_FILES
+    site = wb._build_watchers(carts, True)
+    assert set(site) == {"carts", "files", "system"}
+    assert site["system"].top == moy_sync.SYSTEM_FILES
+
+
+def test_a_site_mode_pump_drains_the_system_root_last(tmp_path):
+    wb = _web_boot()
+    top = _console_dir(tmp_path)
+    wb._S["store_mode"] = "site"
+    wb._S["watchers"] = wb._build_watchers(str(top / "carts"), True)
+    wb._S.pop("sync_took", None)
+    wb._S.pop("sync_pin", None)
+    for p, text in ((top / "system.json", '{"theme": "night"}'),
+                    (top / "carts" / "hop.moy" / "main.py", "x = 3\n")):
+        p.write_text(text)
+        _bump_mtime(p)
+    first = json.loads(wb.sync_poll_json())
+    assert "root" not in first, "a cart edit goes first"
+    wb.sync_ack(True)
+    second = json.loads(wb.sync_poll_json())
+    assert second["root"] == "system"
+    assert second["ops"] == [{"p": "system.json", "t": '{"theme": "night"}'}]
+    wb.sync_ack(True)
+    assert wb.sync_poll_json() == ""
+    wb._S["store_mode"] = None
+
+
 def test_same_second_second_write_is_caught_by_the_hot_set(tmp_path):
     """size+mtime alone cannot see a same-second same-size rewrite on a
     second-granularity VFS; files at the sweep's newest second re-read."""
@@ -920,6 +992,32 @@ def test_a_cover_crosses_the_wire_as_its_bytes(tmp_path):
     if journal.exists():
         assert "cover.png" not in " ".join(
             p.read_text(errors="replace") for p in journal.rglob("*") if p.is_file())
+
+
+_THEME = Path(__file__).resolve().parent / "fixtures" / "themes" / "dusk.moy"
+
+
+def test_a_theme_packages_fonts_and_sheets_cross_as_their_bytes(tmp_path):
+    """A theme package crosses as a cart does (docs/theming_2026-09.md §9
+    phase 6 step 2): its theme.json and manifest as text, a font and a sheet
+    as bytes (BINARY_SUFFIXES, the rule's four copies), byte-equal."""
+    import shutil
+    root = _store(tmp_path)
+    shutil.copytree(_THEME, root / "dusk.moy")
+    sheet = bytes((i * 29 + 3) & 255 for i in range(3000))
+    (root / "dusk.moy" / "parts.moygfx").write_bytes(sheet)
+    dst = tmp_path / "board"
+    dst.mkdir()
+    ops, _dirty = _push_all(root, dst)
+    for name in ("tiny5.fnt", "parts.moygfx"):
+        got = [o for o in ops if o["p"] == "dusk.moy/" + name]
+        assert got and "b" in got[0] and "t" not in got[0], name
+    assert [o for o in ops if o["p"] == "dusk.moy/theme.json"][0].get("t")
+    for f in (root / "dusk.moy").iterdir():
+        assert (dst / "dusk.moy" / f.name).read_bytes() == f.read_bytes(), f.name
+    assert moy_sync.is_binary("dusk.moy/ui.fnt") and moy_sync.is_binary("a.moygfx")
+    assert not moy_sync.is_binary(".fnt") and not moy_sync.is_binary("fnt")
+    assert not moy_sync.is_binary("dusk.moy/theme.json")
 
 
 def test_a_big_cover_crosses_in_parts_each_its_own_base64(tmp_path):

@@ -20,16 +20,17 @@ cart normally, 1 jumps straight into the measured scene. A kid never sees it; a
 measurement session flips it in the Editor's Config tab with no re-push, and
 `host_app._SEED_PRESERVE` keeps the value across a re-seed. 0/1 rather than
 true/false because that is what the shipped carts already use
-(`brick_siege_lua.moy/config.json`) and what `cfg` types cleanly -- moy_lua.c's
+(`moybyte.brick_siege_lua.moy/config.json`) and what `cfg` types cleanly -- moy_lua.c's
 `l_cfg` converts a whole-string number to a Lua number, so `cfg("perf", 0) ~= 0`
 is the guard on every tier.
 
 THE CARTS ARE NOT IN THIS REPO and must not be: they are their authors' work,
 several under licences that forbid redistribution (ports/README.md). What IS
 committed is the recipe -- `ports/p8/perf/<lid>.lua`, our own ~10 lines per cart
-naming the scene to start in and why. The cart bytes come from moy-spec's
-`conformance/p8_corpus.json` links, cached by its `fetch_p8_corpus.py` in
-~/.cache/moy/p8, which is what moy-spec CI already does.
+naming the scene to start in and why. The cart bytes are downloaded BY HAND
+from moy-spec's `conformance/p8_corpus.json` links into ~/.cache/moy/p8 --
+the BBS's terms ask that no script fetch from it, and its
+`conformance/p8_corpus.py` lists the links a directory still lacks.
 """
 
 import json
@@ -127,8 +128,9 @@ def build(lid, corpus=CORPUS_DIR, dest=DEST):
     src = os.path.join(corpus, lid + ".p8.png")
     if not os.path.isfile(src):
         raise SystemExit(
-            "no cached cart for %s at %s -- fetch the corpus first:\n"
-            "  python3 ../moy-spec/conformance/fetch_p8_corpus.py" % (lid, src))
+            "no cart for %s at %s -- download the corpus by hand first;"
+            " this lists the links:\n"
+            "  python3 ../moy-spec/conformance/p8_corpus.py" % (lid, src))
     out_dir = os.path.join(dest, lid + ".moy")
     summary = import_p8(src, out_dir)
     # The importer already writes the two scripts and lists them: p8.lua (data

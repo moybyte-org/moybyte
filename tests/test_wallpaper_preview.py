@@ -26,7 +26,7 @@ PREVIEW_RECT = (10, 10, 152, 114)
 
 def _ws(tmp_path, **kw):
     ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
-    ws.look.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
     return ws
 
 
@@ -62,7 +62,8 @@ def test_preview_reaches_the_monitor_panel(tmp_path):
     ws.sys_canvas.cls(0)
     ws.wallpaper.draw_preview(ws.sys_canvas, (10, 20, 500, 380), 1 / 30)
     assert probe.distinct_pixels(ws.sys_canvas) > 2   # black bezel + real art
-    assert probe.painted_pixels_rect(ws.sys_canvas, 10, 20, 500, 380) > 10000
+    # Moy's night is a black sky: what paints is its ground, moon, stars and Moy
+    assert probe.painted_pixels_rect(ws.sys_canvas, 10, 20, 500, 380) > 5000
 
 
 def test_the_boards_own_canvas_factory_renders_the_same_frame(tmp_path):
@@ -73,7 +74,7 @@ def test_the_boards_own_canvas_factory_renders_the_same_frame(tmp_path):
     host's, or "it renders on the device" would only mean "it renders
     something".
     """
-    ws = _ws(tmp_path)
+    ws = _ws(tmp_path, sys_size=(1024, 600))
     host_pix = ws.wallpaper._render_static(152, 114)
 
     ws2 = _ws(tmp_path, sys_size=(1024, 600))
@@ -195,7 +196,7 @@ def test_the_rendered_frame_persists_as_a_valid_mct_sidecar(tmp_path):
 
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    ws.look.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
     ws.wallpaper.draw_preview(ws.sys_canvas, PREVIEW_RECT, 1 / 30)
 
     cart = ws.wallpaper._wp_cart
@@ -218,15 +219,18 @@ def test_a_sidecar_written_by_one_tier_is_read_by_a_tier_that_cannot_render(
     makes the sidecar worth writing at all."""
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    ws.look.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
+    ws.sys_canvas.cls(0)
     ws.wallpaper.draw_preview(ws.sys_canvas, PREVIEW_RECT, 1 / 30)
+    drawn = probe.painted_pixels_rect(ws.sys_canvas, *PREVIEW_RECT)
 
     ws2 = host_app.build_workstation(carts)
     ws2.make_game_canvas = None                    # cannot render anything
-    ws2.look.select_wallpaper("moy_night", persist=False)
+    ws2.look.select_wallpaper("moybyte.moy_night", persist=False)
     ws2.sys_canvas.cls(0)
     ws2.wallpaper.draw_preview(ws2.sys_canvas, PREVIEW_RECT, 1 / 30)
-    assert probe.painted_pixels_rect(ws2.sys_canvas, *PREVIEW_RECT) > 1000
+    assert drawn > 300                             # its stars, moon, ground, Moy
+    assert probe.painted_pixels_rect(ws2.sys_canvas, *PREVIEW_RECT) == drawn
 
 
 # -- the offscreen surface stays offscreen -----------------------------------
@@ -244,6 +248,64 @@ def test_a_bound_run_canvas_never_becomes_the_preview_surface(tmp_path):
     ws.wallpaper.draw_preview(ws.sys_canvas, PREVIEW_RECT, 1 / 30)
 
     assert bytes(ws.canvas._buf) == before         # the run's frame is untouched
+    # the preview is the glass's frame (Moy's night draws per glass), fit
+    _x, _y, w, _h = PREVIEW_RECT
+    assert (ws.wallpaper._wp_cart["path"], w, 600 * w // 1024) \
+        in ws.wallpaper._static_cache
+    assert ws.canvas is ws._run_canvas             # ...and the bind survived
+
+
+# -- a wallpaper per glass (docs/look_2026-10.md step 28) ---------------------
+
+def test_a_per_glass_preview_is_the_glass_frame_and_gives_its_canvas_back(
+        tmp_path):
+    """A per-glass wallpaper lays out for the glass's W and H, so its preview
+    is rendered at the glass's size -- the desk's own composition, Moy where
+    the desk puts it -- and fit to the card; the glass-sized runner canvas
+    goes back once its frame is read, since the memo and the sidecar keep
+    the still."""
+    ws = _ws(tmp_path, sys_size=(1024, 600))
+    assert ws.wallpaper._wp_cart.get("glass") is True
+    seen = []
+    real = ws.make_game_canvas
+    ws.make_game_canvas = lambda w, h: seen.append((w, h)) or real(w, h)
+    pix = ws.wallpaper._render_static(152, 89)
+    assert seen == [(1024, 600)]
+    assert pix is not None and len(pix) == 152 * 89
+    assert probe.distinct_pixels_in(pix, 1) > 3
+    assert ws.wallpaper._pv_canvas is None
+
+
+def test_a_cover_cropped_wallpaper_still_previews_its_cart_frame(tmp_path):
+    """A wallpaper that does not draw per glass keeps the 320x240 frame and
+    the runner it renders on."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
+    ws.look.select_wallpaper("moybyte.open_machine", persist=False)
+    assert not ws.wallpaper._wp_cart.get("glass")
+    assert ws.wallpaper._render_static(152, 114) is not None
     pv = ws.wallpaper._pv_canvas
     assert pv is not None and (pv.w, pv.h) == (320, 240)
-    assert ws.canvas is ws._run_canvas             # ...and the bind survived
+
+
+def test_a_per_glass_wallpaper_draws_the_glass_around_the_quiet(tmp_path):
+    """W and H are the glass's, QUIET the surface's quiet rectangles (its
+    bars first), and the SUBJECT it declares keeps out of them: Moy sleeps
+    bottom left on an empty desk, bottom right once the left is quiet."""
+    ws = _ws(tmp_path, sys_size=(1024, 600))
+    wp = ws.wallpaper
+    bars = wp.bars()
+    assert bars and bars[0][:3] == (0, 0, 1024)        # the top bar
+    wp.draw(0, quiet=bars)
+    ns = wp._wp_ns
+    assert (ns["W"], ns["H"]) == (1024, 600) and ns["QUIET"] == bars
+    sx, sy, sw, sh = wp.subject
+    assert sx < 512 and sy + sh <= 600
+    assert probe.painted_pixels_rect(ws.sys_canvas, sx, sy, sw, sh) > sw * sh // 4
+
+    column = (0, bars[0][3], 120, 600 - bars[0][3])
+    wp.draw(0, quiet=bars + (column,))
+    sx, sy, sw, sh = wp.subject
+    assert sx >= 512 and sx + sw <= 1024
+    # the home's surface keeps its own rectangles, and the desk's subject
+    wp.draw(0, home=True, quiet=bars)
+    assert wp.subject[0] >= 512

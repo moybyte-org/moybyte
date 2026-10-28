@@ -12,6 +12,7 @@ the wm viewport/composite, and the touch mapping through view()."""
 
 import json
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -59,7 +60,7 @@ def _draw():
 def _write_cart(carts_dir, name, src, canvas="128x128", extra=None):
     d = Path(carts_dir) / (name + ".moy")
     d.mkdir(parents=True, exist_ok=True)
-    man = {"title": name, "type": "game", "canvas": canvas}
+    man = {"title": name, "canvas": canvas, "moybyte": {"type": "game"}}
     if extra:
         man.update(extra)
     (d / "manifest.json").write_text(json.dumps(man))
@@ -72,8 +73,7 @@ def _open(tmp_path, name, src, canvas="128x128"):
     _write_cart(carts_dir, name, src, canvas)
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == name)
+    select_on_home(ws, name)
     ws.open()
     return ws, drv
 
@@ -182,12 +182,18 @@ def test_crash_on_small_canvas_survives(tmp_path):
     assert (ws.canvas.w, ws.canvas.h) == (320, 240)
 
 
-def test_rerun_reuses_the_cached_canvas(tmp_path):
+def test_the_run_canvas_goes_with_its_run(tmp_path):
+    """The small canvas's pixels are on loan to the run: its end returns them
+    with the run's layers (a 128x128 buffer back to the pool), and the next
+    run gets a canvas of its own."""
     ws, drv = _open(tmp_path, "tiny", PLAIN_SRC)
     small = ws.canvas
+    buf = small._comp._b
+    assert buf.live and buf.nbytes == 128 * 128 * 2
     ws.player.release_world()
+    assert not buf.live
     ws.open()
-    assert ws.canvas is small        # one 128x128 buffer per session, not per run
+    assert ws.canvas is not small and ws.canvas._comp._b.live
 
 BAD_SRC = "def _draw(:\n    pass\n"     # a cart that never loads
 
@@ -204,15 +210,12 @@ def test_failed_load_restores_the_palette_on_the_swapped_canvas(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
     default = list(ws.canvas.palette)
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "badpal")
+    select_on_home(ws, "badpal")
     ws.open()
     for _ in range(2):
         drv.frame(DT)
     assert ws.cart_error is not None
     ws.player.release_world()
     assert list(ws.canvas.palette) == default
-    small = ws._run_canvas_cache.get((128, 128))
-    assert small is None or list(small.palette) == default
     assert ws.player._cart_palette is None
 

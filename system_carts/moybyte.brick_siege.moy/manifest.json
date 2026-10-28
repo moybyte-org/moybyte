@@ -1,0 +1,58 @@
+{
+  "format": "moy-1",
+  "version": 20,
+  "title": "Brick Siege",
+  "id": "moybyte.brick_siege",
+  "fps": "free",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "input": [
+    "buttons"
+  ],
+  "description": "A top-down tank battle. Blast the enemy tanks through crumbling brick walls before they wreck your base.",
+  "genre": "action",
+  "moybyte": {
+    "type": "game",
+    "system": true,
+    "order": 180,
+    "permissions": [
+      "graphics",
+      "input",
+      "audio",
+      "multiplayer"
+    ],
+    "config": {
+      "enemies": 6,
+      "autoplay": 0
+    },
+    "edit": [
+      {
+        "key": "enemies",
+        "label": "ENEMIES",
+        "type": "int",
+        "min": 1,
+        "max": 16,
+        "step": 1,
+        "display": "count",
+        "icon": "dot",
+        "card": "FIGHT {value} TANKS"
+      },
+      {
+        "key": "autoplay",
+        "label": "AUTOPLAY",
+        "type": "choice",
+        "choices": [
+          0,
+          1
+        ],
+        "icons": [
+          "close",
+          "run"
+        ],
+        "display": "choice-icons",
+        "card": "AUTOPLAY {value}"
+      }
+    ]
+  }
+}

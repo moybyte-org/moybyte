@@ -186,7 +186,6 @@ def test_the_whole_import_runs_on_micropython(tmp_path, form):
     assert got["manifest"]["canvas"] == "128x128"
     assert got["manifest"]["main"] == "main.lua"
     assert got["manifest"]["sources"] == ["p8.lua", "main.lua"]
-    assert got["manifest"]["safe_to_share"] is False
     # The whole POINT, on the tier that nearly could not do it: the shim, the
     # zoom hint, the renamed lifecycle, the flag table and the localization
     # block -- the last of which is `localization_lua`, the function whose two

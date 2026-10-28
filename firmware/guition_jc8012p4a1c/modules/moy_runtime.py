@@ -3,26 +3,32 @@ JC8012P4A1C (ESP32-P4 + C6, 10.1" 800x1280 MIPI-DSI, GSL3680 touch).
 
 The Waveshare 7B's backend (#58) on the second ESP32-P4 board, and the port
 that moved the P4 silicon tier out of that board's tree (2026-09-06): the DSI
-compositor (`device/dsi_panel.py`), the SYSTEM canvas with its PPA composite
-hooks (`device/p4_canvas.py`) and the four C modules (`native/p4/`) are TAKEN,
+compositor (the kernel's, `native/moy_glass`), the SYSTEM canvas with its PPA
+composite hooks (`device/p4_canvas.py`) and the four C modules (`native/p4/`)
+are TAKEN,
 so what this file owns is exactly what this glass decides --
 
   * the SYSTEM canvas is 1280x800 LANDSCAPE on portrait-native glass (owner
     call 2026-09-06). The P4's DSI scans the framebuffer continuously, so the
-    rotation is the compositor's: `device/dsi_panel.RotatedCompositor` paints
-    a persistent landscape buffer and rotates it onto the panel with the PPA
-    -- the whole frame when chrome painted, one rect on a quiet game frame.
-    Its header carries the design; the README the measured costs.
-  * the touch driver is the GSL3680 (`guition_p4_input.py` over the shared
-    `device/gsl3680.py`, firmware upload at boot) instead of a GT911.
-  * the backlight is GPIO23 active-high (`guition_p4_display.py`).
+    rotation is the compositor's: the kernel's `moy_glass.RotatedCompositor`
+    (`native/moy_glass/moy_present_rot.c`, whose header carries the design;
+    the README the measured costs) paints a persistent landscape buffer and
+    rotates it onto the panel with the PPA -- the whole frame when chrome
+    painted, one rect on a quiet game frame.
+  * the touch driver is the GSL3680 (the kernel's, native/moy_input, its
+    firmware uploaded at boot from `boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c`)
+    instead of a GT911.
+  * the backlight is GPIO23 active-high (the `MOY_DSI_BL_*` defines
+    `moy_glass.backlight` drives), and up is ROTATION below.
 
 Everything else -- the 320x240 GAME canvas, the windowed WM, the BLE keyboard
 over the C6, OTA on the internal VFS, the dev channel, the frame loop -- is the
 Waveshare's, by import.
 
-Carts live on the INTERNAL flash VFS (~7.9MB of the 16MB chip); the TF slot is
-wired like the Waveshare's (SDMMC slot 0 on LDO4) and equally unused.
+Carts live on the TF card when one is in the slot and mounts (FAT32 or exFAT),
+and on the INTERNAL flash VFS (the tail of the 16MB chip after the app slots)
+when not. The slot is wired like the Waveshare's (SDMMC slot 0 on LDO4);
+`device/p4_desktop.py` owns the mount and `device/card_store.py` the choice.
 """
 
 # The seed roster, generated from system_carts/ at build time and PACKED: one
@@ -41,15 +47,31 @@ PANEL_DIAGONAL_IN = 10.1       # the glass, in inches -- board.toml [panel] is t
                                # interactive geometry lays out at scale 2 while
                                # every glyph stays at FONT_SCALE (owner, from the
                                # desk, 2026-09-06: "too tiny", not "too small to read").
-# Internal-flash store root. NOT "/moybyte/..." -- a root-level dir named like an
-# importable module SHADOWS the frozen module of that name (the Waveshare's
-# hardware-learned rule, 2026-07-08; same MicroPython, same rule).
+# Internal-flash store root, the one a card-less boot uses. NOT "/moybyte/..." --
+# a root-level dir named like an importable module SHADOWS the frozen module of
+# that name (the Waveshare's hardware-learned rule, 2026-07-08; same MicroPython,
+# same rule).
 CARTS_ROOT = "/moy/carts"
 # The OTA directory (#53) -- a copied image, the pending marker, the C6's
-# image: the internal VFS, NOT under /moy/carts (the store scans that
-# directory). A WiFi firmware update streams into the inactive slot and
-# stages nothing here.
+# image: the internal VFS whether or not a card holds the carts, NOT under
+# /moy/carts (the store scans that directory). A WiFi firmware update streams
+# into the inactive slot and stages nothing here.
 OTA_UPDATE_DIR = "/moy/update"
+
+
+# Which way is up: 270 counter-clockwise (the PPA's convention); 90 turns the
+# desk the other way, live as `py comp.set_angle(90)`.
+ROTATION = 270
+
+
+def P4Compositor():
+    """The kernel's rotated DSI compositor over this glass: the landscape desk
+    rotated onto the portrait panel on the PPA, dark until the first composed
+    frame."""
+    import moy_dsi
+    import moy_glass
+    import moy_ppa
+    return moy_glass.RotatedCompositor(moy_dsi, moy_ppa, angle=ROTATION)
 
 
 def run_touch_calibrate():
@@ -60,13 +82,13 @@ def run_touch_calibrate():
         import moy_runtime; moy_runtime.run_touch_calibrate()
 
     Tap each numbered box; read which box the MAPPED coords land in. The knobs
-    are guition_p4_input's module globals, read when Touch() is constructed --
-    Ctrl-C, `import guition_p4_input as k; k.FLIP_X = True` (etc.), re-run, and
-    once mapped == tapped everywhere, bake the winners into that file. The
+    are live attributes on the kernel's touch driver -- `py touch.raw_x0 = 12`
+    over the dev channel, or on the REPL's driver -- and once mapped == tapped
+    everywhere, bake the winners into mpconfigboard.h's MOY_INPUT_TOUCH_*. The
     body is `device/p4_desktop.run_touch_calibrate`, shared with the
     Waveshare."""
-    from guition_p4_display import P4Compositor, set_backlight
-    from guition_p4_input import Touch
+    from moy_glass import backlight as set_backlight
+    from moy_input import touch as Touch
     from p4_desktop import run_touch_calibrate as _calibrate
 
     _calibrate("Moybyte Guition P4", P4Compositor, set_backlight, Touch,
@@ -81,7 +103,7 @@ def run_ppa_smoke(scale=2, iters=60):
 
         import moy_runtime; moy_runtime.run_ppa_smoke()
     """
-    from guition_p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
     from p4_canvas import run_ppa_smoke as _smoke
     _smoke(P4Compositor(), set_backlight, scale=scale, iters=iters,
            game_w=GAME_W, game_h=GAME_H)
@@ -103,16 +125,16 @@ def run_desktop(fps_cap=60):
     """Boot the shared console on the Guition P4: launcher-as-desktop under
     WindowedWM, 1280x800 landscape rotated onto the portrait glass, GSL3680
     touch as the pointer, a BLE HID keyboard over the companion C6, and carts
-    on internal flash. Ctrl-C over the USB-Serial/JTAG REPL interrupts the
-    loop.
+    on the TF card when one mounts, internal flash when not. Ctrl-C over the
+    USB-Serial/JTAG REPL interrupts the loop.
 
     The BODY is `device/p4_desktop.py`, shared with the Waveshare (2026-09-09):
     two P4 boards running the same console over the same silicon tier had two
     copies of it, differing in fifty lines of which all but five were this
     board's name in a print string. What is left here is what this glass
     decides -- its compositor, its touch, its constants."""
-    from guition_p4_display import P4Compositor, set_backlight
-    from guition_p4_input import Touch
+    from moy_glass import backlight as set_backlight
+    from moy_input import touch as Touch
     from p4_desktop import run_desktop as _run_desktop
 
     return _run_desktop(

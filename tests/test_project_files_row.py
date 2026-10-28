@@ -47,11 +47,13 @@ def _frame(ws):
     ws.frame(1 / 30)
 
 
-def _row_named(cl, name):
-    for rect, got, k in cl._files_rects():
-        if got == name:
-            return rect, k
-    raise AssertionError("%r not listed: %r" % (name, cl.files["rows"]))
+def _row_named(cl, ws, name):
+    """The Files page's row for file `name`, as its last frame drew it."""
+    _frame(ws)
+    rect = cl._files_host.box(name)
+    if rect is None:
+        raise AssertionError("%r not listed: %r" % (name, cl.files["rows"]))
+    return rect
 
 
 # -- the row --------------------------------------------------------------
@@ -83,21 +85,34 @@ def test_a_cart_with_no_edit_schema_still_has_the_row(tmp_path):
 
 
 def test_the_row_opens_on_a_tap_and_on_A_and_backs_out(tmp_path):
+    """Files, the Settings page's door (look step 30), opens the list on a
+    tap and on A, and BACK and B return to the page."""
+    from ws_helpers import settings_box
     ws = build_ws(tmp_path)
     cl = _on_config(ws, _project(ws))
-    row = cl._card_layout()[-1]
-    cl.handle_pointer(row["x"] + 4, row["y"] + 2, True)
+    x, y, w, h = settings_box(ws, "Files")
+    cl.handle_pointer(x + 4, y + 2, True)
+    ws.pointer.down = False
+    for _ in range(2):
+        cl.handle_pointer(x + 4, y + 2, False)
+        _frame(ws)
     assert cl.files is not None and cl.files["rows"]
 
-    # BACK returns to the cards, and B does the same from the keyboard
-    cl._files_pointer(cl.layout.info_btn[0] + 2, cl.layout.info_btn[1] + 2, True)
+    # back returns to the cards
+    ws.input.begin_frame()
+    ws.input.set_held("b", True)
+    ws.input.begin_frame()
+    cl.handle_input(ws.input)
+    ws.input.set_held("b", False)
     assert cl.files is None
 
-    cl.msel = row["i"]
+    cl.page().host.focus("Files")
+    _frame(ws)
     ws.input.begin_frame()
     ws.input.set_held("a", True)
     ws.input.begin_frame()
     cl.handle_input(ws.input)
+    _frame(ws)
     assert cl.files is not None
     assert ws.wm.top_kind() == "menu"             # A opened the list, it did not PLAY
 
@@ -169,7 +184,7 @@ def test_an_asset_routes_to_its_own_tab(tmp_path):
     cl = _on_config(ws, ws.carts.reload(cart))
     cl._open_files()
     cl._files_open("extras/notes.bin")
-    assert cl.files["msg"] == "NO EDITOR FOR THIS"
+    assert cl.files["msg"] == "Nothing on this console opens that file."
     assert ws.wm.top_kind() == "menu"
 
 
@@ -214,7 +229,7 @@ def test_a_picture_paint_cannot_read_opens_read_only(tmp_path):
 
     assert ws.wm.top_kind() == "artwork"
     assert not ws.artwork.editable()
-    assert ws.artwork.why_read_only() == "CAN'T READ THIS PICTURE"
+    assert ws.artwork.why_read_only() == "Can't read this picture"
     assert ws.artwork.save(bytes((9,)) * 16, 4, 4) is False
     assert (path / "images" / "sky.moyimg").read_text() \
         == '{"format":"moyimg-v1","w":8}'
@@ -228,8 +243,11 @@ def test_a_text_file_opens_in_the_handle_in_its_mode(tmp_path):
     cl = _on_config(ws, cart)
     cl._open_files()
 
-    rect, _k = _row_named(cl, "config.json")
+    rect = _row_named(cl, ws, "config.json")
     cl._files_pointer(rect[0] + 2, rect[1] + 2, True)
+    _frame(ws)
+    cl._files_pointer(rect[0] + 2, rect[1] + 2, False)
+    _frame(ws)
     _frame(ws)
     assert ws.wm.top_is_player() and ws.cart.get("title") == "Notes"
     ed = ws.player.ns["ed"]
@@ -333,12 +351,12 @@ def test_a_broken_manifest_keeps_the_project_openable_with_a_way_back(tmp_path):
 
     cart = next(c for c in ws.carts.all if c["path"].endswith("fixme.moy"))
     assert cart["broken"].startswith("manifest.json: ")
-    assert cart["title"] == "fixme"                  # its folder, since nothing else
+    assert cart["title"] == "local.fixme"            # its folder, since nothing else
     assert cart in ws.files_app._nav.projects()      # still an editable project
 
     # a launcher TAP does not run it (there is no manifest to run it BY) -- it
     # opens where it can be fixed.
-    ws.launcher.sel = ws.launcher.items.index(cart)
+    assert ws.select_cart(cart)
     ws.open()
     assert ws.wm.top_kind() == "menu"
     assert ws.editor_app.tab == "cards"              # Config, whatever the schema
@@ -361,8 +379,8 @@ def test_the_project_kind_is_root_relative_and_refuses_a_climbing_name(tmp_path)
     ws = build_ws(tmp_path)
     cart = _project(ws)
     kind = moy_carts.project_kind(cart["path"])
-    assert kind == "project:testbed.moy"
-    assert moy_carts.project_folder(kind) == "testbed.moy"
+    assert kind == "project:local.testbed.moy"
+    assert moy_carts.project_folder(kind) == "local.testbed.moy"
     assert moy_carts.project_folder("docs") == ""      # a user-files kind
     for bad in ("../secret", "/etc/passwd", "a/b/c", ""):
         try:

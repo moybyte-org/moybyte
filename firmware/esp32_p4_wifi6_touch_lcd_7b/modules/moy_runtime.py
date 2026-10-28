@@ -22,8 +22,10 @@ The two-domain seam (#39) runs for real here for the first time on hardware:
     installs `WindowedWM` -- the launcher is the desktop, every app a floating
     window (#73's presentation tier, finally on its intended hardware).
 
-Carts live on the INTERNAL flash VFS (31.5MB -- SD is optional on this board;
-the SDIO slot + LDO4 power fix are a follow-up for removable-cart workflows).
+Carts live on the TF card when one is in the slot and mounts (FAT32 or exFAT),
+and on the INTERNAL flash VFS (the tail of the 32MB chip after the app slots)
+when not -- the card is optional, never a requirement. `device/p4_desktop.py`
+owns the mount (LDO4, SDMMC slot 0), `device/card_store.py` the choice.
 """
 
 # The seed roster, generated from system_carts/ at build time and PACKED
@@ -50,20 +52,20 @@ PANEL_DIAGONAL_IN = 7.0            # the glass, in inches -- board.toml [panel] 
 # `from moybyte.input import ...` (hardware-learned 2026-07-08).
 CARTS_ROOT = "/moy/carts"
 # The OTA directory (#53) -- a copied image, the pending marker, the C6's
-# image. This board has no SD -- the T-Deck's /sd/update has no meaning
-# here -- so it is on the internal VFS. NOT under /moy/carts: the store
-# scans that directory. A WiFi firmware update streams into the inactive
+# image. It is on the internal VFS whether or not a card holds the carts: it
+# is the device's own, and a card can be pulled out. NOT under /moy/carts: the
+# store scans that directory. A WiFi firmware update streams into the inactive
 # slot and stages nothing here.
 OTA_UPDATE_DIR = "/moy/update"
 
 
 # Loading the carts is DeviceBoot.load_carts (#161 Phase 4): the seed + scan +
 # built-in fallback is the same on every board, and what differs here is
-# arguments -- the internal-flash root above, no storage SESSION at all (this
-# console has no SD card and the store races nobody), and the word "flash" in
-# the serial lines. On a full-erase boot that call is 17.5 of the 25 seconds
-# before anything composes, and every second of it is seeding -- which is what
-# the splash's progress bar is for.
+# arguments -- the card's root when one mounts, else the internal-flash root
+# above (`store_root` to run_desktop), and no storage SESSION at all (the card's
+# SDMMC slot is shared with nobody). On a full-erase boot that call is 17.5 of
+# the 25 seconds before anything composes, and every second of it is seeding --
+# which is what the splash's progress bar is for.
 
 
 def run_touch_calibrate():
@@ -75,18 +77,28 @@ def run_touch_calibrate():
         import moy_runtime; moy_runtime.run_touch_calibrate()
 
     Tap each numbered box; read which box the MAPPED coords land in. The knobs
-    are live module globals -- Ctrl-C, `import p4_input; p4_input.FLIP_X = True`
-    (etc.), re-run, and once mapped == tapped everywhere, bake the winners into
-    p4_input.py. The body is `device/p4_desktop.run_touch_calibrate`, shared
-    with the Guition P4."""
-    from p4_display import P4Compositor, set_backlight
-    from p4_input import Touch
+    are live attributes on the kernel's touch driver -- `py touch.flip_x = 1`
+    over the dev channel, or on the REPL's driver -- and once mapped == tapped
+    everywhere, bake the winners into mpconfigboard.h's MOY_INPUT_TOUCH_*. The
+    body is `device/p4_desktop.run_touch_calibrate`, shared with the Guition
+    P4."""
+    from moy_glass import backlight as set_backlight
+    from moy_input import touch as Touch
     from p4_desktop import run_touch_calibrate as _calibrate
-    import p4_input
 
     _calibrate("Moybyte P4", P4Compositor, set_backlight, Touch,
                lambda touch: "swap=%s flip_x=%s flip_y=%s"
-               % (p4_input.SWAP_XY, p4_input.FLIP_X, p4_input.FLIP_Y))
+               % (touch.swap_xy, touch.flip_x, touch.flip_y))
+
+
+def P4Compositor():
+    """The kernel's DSI compositor over this glass: moy_dsi's three scan
+    buffers and the PPA's fences (native/moy_glass/moy_present.h), dark until
+    the first composed frame."""
+    import moy_dsi
+    import moy_glass
+    import moy_ppa
+    return moy_glass.DsiCompositor(moy_dsi, moy_ppa)
 
 
 def run_ppa_smoke(scale=2, iters=60):
@@ -96,7 +108,7 @@ def run_ppa_smoke(scale=2, iters=60):
 
         import moy_runtime; moy_runtime.run_ppa_smoke()
     """
-    from p4_display import P4Compositor, set_backlight
+    from moy_glass import backlight as set_backlight
     from p4_canvas import run_ppa_smoke as _smoke
     _smoke(P4Compositor(), set_backlight, scale=scale, iters=iters,
            game_w=GAME_W, game_h=GAME_H)
@@ -127,8 +139,8 @@ def run_desktop(fps_cap=60):
     tier had two copies of it, differing in fifty lines of which all but five
     were the board's own name in a print string. What is left here is what
     this glass decides -- its compositor, its touch, its constants."""
-    from p4_display import P4Compositor, set_backlight
-    from p4_input import Touch
+    from moy_glass import backlight as set_backlight
+    from moy_input import touch as Touch
     from p4_desktop import run_desktop as _run_desktop
 
     return _run_desktop(

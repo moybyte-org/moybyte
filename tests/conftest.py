@@ -3,7 +3,7 @@ resolve to the canonical runtime/ source, never a build-staged copy.
 
 Several test files put the firmware staging tree
 (device) on sys.path to import the
-AUTHORED device modules (moy_webserver, device canvas parity, diag, ...). That
+AUTHORED device modules (moy_webhost, device canvas parity, diag, ...). That
 same directory also holds BUILD-STAGED copies of the shared runtime/ sources
 (console.py, editors.py, web_view.py, web_view_page.py, ... -- gitignored,
 re-staged by every firmware build), and both the device modules and the shared
@@ -15,7 +15,7 @@ decided by pytest's collection order.
 
 This bit for real (2026-07-10): a runtime/web_view_page.py fix made its
 page-source guard (test_browser_page_sends_neutral_pan_on_arrow_release) pass
-alone but fail in every full-suite run, because test_moy_webserver.py's
+alone but fail in every full-suite run, because a since-deleted suite's
 collection had already cached the pre-fix staged page under the bare
 `web_view_page` name, and runtime/web_view.py's bare-first import picked it up.
 
@@ -50,8 +50,9 @@ _SHARED = {
     f[:-3] for f in os.listdir(_RUNTIME_DIR)
     if f.endswith(".py") and f != "__init__.py"
 }
-# Shared modules the build stages under a DIFFERENT bare name.
-_RENAMED = {"moy_font": "font"}
+# Shared modules the build stages under a DIFFERENT bare name, and native
+# modules whose host face is a ctypes binding under runtime/.
+_RENAMED = {"moy_font": "font", "moy_net": "net_binding"}
 
 
 class _AliasLoader(importlib.abc.Loader):
@@ -128,7 +129,7 @@ def _no_local_build_stamp(monkeypatch):
 
     THIRD door (2026-08-03): the finder exclusion above only stops THIS conftest
     from resolving `_ota_build` -- a test file that puts the firmware modules/
-    dir on sys.path itself (test_moy_webserver does, at import time, for the
+    dir on sys.path itself (a suite that does so at import time, for the
     whole process) re-opens it, and under xdist whichever test execs moy_ota.py
     on that worker afterwards reads the machine's last build stamp again
     (spotted as version_label()=='v2' from a stale bisect build). sys.modules
@@ -169,3 +170,109 @@ def pytest_addoption(parser):
     parser.addoption("--update-goldens", action="store_true", default=False,
                      help="rewrite tests/shell_goldens/hashes.json from this "
                           "run (shell pixel goldens; run with -p no:xdist)")
+
+
+@pytest.fixture(autouse=True)
+def _audio_console_level_back():
+    """The kernel's audio is one per process (native/moy_audio's session table,
+    the console's level, the mix's rate), as it is one per board. A test that
+    turns the console down would silence every later test on the worker, so
+    the level goes back to full after each."""
+    yield
+    try:
+        from runtime import audio_session
+    except ImportError:
+        return
+    na = audio_session._NA[0]
+    if na:
+        na.volume(7)
+
+
+def _theme_reset():
+    try:
+        from runtime import ui_draw
+    except ImportError:
+        return
+    ui_draw.use_shape(None)
+    ui_draw.use_depth(None, False)
+    ui_draw.theme_uninstall()
+    ui_draw.cart_text(False)
+    for role in ("ui", "title", "mono", "caption", "key", "op", "result"):
+        ui_draw.use_font(role, 0)
+    ui_draw.use_hero(0)
+    ui_draw.print_font(0)
+    # ...and the bars a look placed (its layout, its bar heights) are the
+    # default's again, as the depth is
+    from runtime import layout_base
+    layout_base.place_bar_h()
+    layout_base.place_bars(layout_base.DEFAULT_BARS)
+    layout_base.place_class(layout_base.HANDHELD)
+    layout_base.in_window(False)
+    layout_base.in_pane(False)
+    ui_draw.input_kind("keys")
+    ui_draw.marks(True, True)
+    # the frames' clock is the console's, set each loop pass: a test that
+    # begins frames itself starts with none (every glide lands at once)
+    ui_draw.frame_dt(0)
+    ui_draw.moving_take()
+
+
+@pytest.fixture(autouse=True)
+def _theme_shape_back():
+    """The toolkit's installed shape is one per process (native/moy_ui), as it
+    is one per board, and a workstation installs its theme's at boot. A test
+    that built one would restyle every widget a later test on the worker
+    draws, so before and after each test the empty shape is in force, the
+    depth and the marks are the default theme's in its dark mode (the shape
+    does not carry them; a workstation's `_go_live` installs its own), no
+    theme package is installed (a later test's Settings would list its
+    layout), every font role and the print font are petme128, the bars are
+    the default's, and the input in use, the marks' focus switch and the
+    metric class are a fresh process's (keys, on, the handheld's): a
+    workstation places its class as it boots, and a test that left the
+    desk's or touch in force would lay out and mark every later test's parts
+    as that one's."""
+    _theme_reset()
+    yield
+    _theme_reset()
+
+
+# What `_cover_budget_unbounded` raises the cover slice to: every cover builds
+# inside the frame that asks for it.
+COVER_SLICE_UNBOUNDED = 10 ** 9
+
+
+@pytest.fixture(autouse=True)
+def _cover_budget_unbounded(monkeypatch):
+    """A cover build spends a per-frame TIME slice (`cover_cache._COVER_SLICE_MS`),
+    so on a loaded machine a cover lands a frame or three later than on an idle
+    one, and two renders a test compares (a live edit and a cold boot, a window
+    and its fresh render, an idle frame count) differ by how busy the machine
+    was. Every test builds each cover in its own frame; a test of the budget
+    sets the slice itself."""
+    try:
+        from runtime import cover_cache
+    except ImportError:
+        return
+    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", COVER_SLICE_UNBOUNDED)
+
+
+@pytest.fixture(autouse=True)
+def _webhost_switched_off():
+    """The kernel's webhost and its switch are one per process (native/moy_net),
+    as they are one per board, and a host's `handle_http` keeps whatever store,
+    pin and routes a switch still on its port was configured with ("never
+    re-point a kernel host that serves"). A test that left the switch joining,
+    serving or in its goodbye window handed a later test on the worker another
+    host's pin and routes (a 403 for a pinless /gpio batch, a 404 for
+    /console.json), or a 503 `closing`. After each test the switch is off and
+    the host stopped now, as a fresh process has them; a process that never
+    loaded the library has neither."""
+    yield
+    nb = sys.modules.get("runtime.net_binding")
+    if nb is None or nb._LIB[0] is None:
+        return
+    nb.wc_off()
+    nb.web_stop()
+    nb.web_events()
+    nb.wc_poll()                 # a switch in its goodbye sees the host stopped

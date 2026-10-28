@@ -69,14 +69,18 @@ static int jp_bool(jp_t *j)
     return 0;
 }
 
-/* A key string; returns its start and length without copying. */
+/* A string; returns its start and length without copying. Keys never carry
+ * escapes, but a value does (an sfx `name`), and its \" must not end it. */
 static const char *jp_key(jp_t *j, int *len)
 {
     const char *s;
     jp_ws(j);
     if (*j->p != '"') { j->err = 1; return NULL; }
     s = ++j->p;
-    while (*j->p && *j->p != '"') j->p++;
+    while (*j->p && *j->p != '"') {
+        if (*j->p == '\\' && j->p[1]) j->p++;     /* an escaped quote is text */
+        j->p++;
+    }
     if (!*j->p) { j->err = 1; return NULL; }
     *len = (int)(j->p - s);
     j->p++;
@@ -170,6 +174,8 @@ static void jp_sfx(jp_t *j, moy_sfx_def *s)
             s->filters = (uint8_t)jp_num(j);
         } else if (jp_key_is(k, klen, "loop_start")) {
             s->loop_start = (uint8_t)jp_num(j);
+        } else if (jp_key_is(k, klen, "name")) {
+            jp_skip(j);                 /* SPEC.md 8.1: a label, never playback */
         } else if (jp_key_is(k, klen, "steps")) {
             if (!jp_lit(j, '[')) { j->err = 1; return; }
             jp_ws(j);

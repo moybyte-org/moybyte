@@ -2,12 +2,16 @@
 
 Two mechanisms, and they interlock:
 
-  * `confirm_when_healthy` -- the rollback confirm, deferred until the console
-    has really PAINTED. The bootloader can only revert an image that never said
-    it was fine, so the entire value of the safety net is decided by where that
-    claim is made. Made at "the desktop object exists", it confirms firmware
-    that has never drawn a pixel -- which is precisely the failure this project
-    shipped once already (#56: every boot print appeared, the panel stayed dark).
+  * the rollback confirm, deferred until the console has really PAINTED. The
+    bootloader can only revert an image that never said it was fine, so the
+    entire value of the safety net is decided by where that claim is made.
+    Made at "the desktop object exists", it confirms firmware that has never
+    drawn a pixel -- which is precisely the failure this project shipped once
+    already (#56: every boot print appeared, the panel stayed dark). On a
+    console it is the kernel loop's (native/moy_kernel/moy_loop.c, its
+    thresholds pinned in tests/test_moy_loop.py), which marks the slot valid
+    and then calls `confirmed_by_kernel` here to retire the marker; the Zero,
+    which takes no loop, confirms here (`confirm_when_serving`).
 
   * the pending marker -- written at finish() with the slot we pointed the
     bootloader at, read on the next boot to say whether that slot is the one
@@ -23,6 +27,7 @@ into the boot after the rollback, so that second failure gets reported too.
 import json
 from pathlib import Path
 
+import moy_ota_health  # the health half: its thresholds and marker
 from board_source import runtime_text
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,19 +46,17 @@ def _load_moy_ota():
     return moy_ota
 
 
-class _FakePart:
-    """The inactive slot. info() is (type, subtype, addr, size, label, encrypted)."""
+def _stage():
+    """A verified image in the host's slot (native/moy_net/moy_ota.c over
+    runtime/net_binding.py), what a download or a copied image leaves for
+    finish() to activate."""
+    from runtime import net_binding as nb
 
-    def __init__(self, label="ota_1", size=4 * 1024 * 1024):
-        self.label = label
-        self.size = size
-        self.booted = False
-
-    def info(self):
-        return (0, 0x10, 0x20000, self.size, self.label, False)
-
-    def set_boot(self):
-        self.booted = True
+    nb.ota_cancel()
+    nb._slot_reset()
+    nb.ota_slot_begin(64)
+    assert nb.ota_slot_write(b"\xe9" + b"\x00" * 63)
+    assert nb.ota_slot_close()
 
 
 def _updater(tmp_path, running="ota_0"):
@@ -80,73 +83,19 @@ def _updater(tmp_path, running="ota_0"):
 
 # -- the deferred confirm ----------------------------------------------------
 
-def test_a_freshly_built_desktop_is_not_yet_proof_of_a_good_image(tmp_path):
-    # The whole point: zero frames is not health. This is the state the old call
-    # site confirmed in, and a board that boots to a black screen sits here.
+def test_the_kernels_confirm_is_said_once_and_marks_nothing_itself(tmp_path):
+    # The slot was marked valid in C before this ran; what is left here is
+    # the boot's own record, once -- a second call is a frame later's no-op.
     mod, u = _updater(tmp_path)
-    assert u.confirm_when_healthy(0) is False
-    assert u.confirmed is False
-    assert u.marked == 0
-
-
-def test_an_image_that_never_paints_is_never_confirmed(tmp_path):
-    """The #56 failure: the board boots, prints everything, and stays dark.
-
-    Loop iterations alone must not be enough, or the safety net would confirm
-    exactly the image it exists to catch.
-    """
-    mod, u = _updater(tmp_path)
-    for _ in range(mod.HEALTHY_LOOPS * 10):
-        assert u.confirm_when_healthy(0) is False
-    assert u.marked == 0
-
-
-def test_the_confirm_waits_for_the_loop_to_keep_running(tmp_path):
-    # One painted frame is not enough on its own either: an image that draws
-    # once and dies is still a broken image.
-    mod, u = _updater(tmp_path)
-    for i in range(mod.HEALTHY_LOOPS - 1):
-        assert u.confirm_when_healthy(mod.HEALTHY_PAINTS) is False, "at loop %d" % i
-    assert u.marked == 0
-    assert u.confirm_when_healthy(mod.HEALTHY_PAINTS) is True
-    assert u.marked == 1
+    assert u.confirmed_by_kernel() is True
     assert u.confirmed is True
-
-
-def test_a_quiet_desktop_still_confirms(tmp_path):
-    """The bug the P4 caught: the console repaints only when something changes.
-
-    MEASURED on glass -- an idle desktop had drawn exactly ONE frame six seconds
-    after boot. Any paint threshold above 1 leaves every untouched board
-    unconfirmed, which rolls back every update that nobody happens to be poking
-    at when it lands.
-    """
-    mod, u = _updater(tmp_path)
-    assert mod.HEALTHY_PAINTS == 1
-    fired = [u.confirm_when_healthy(1) for _ in range(mod.HEALTHY_LOOPS)]
-    assert fired[-1] is True
-
-
-def test_the_confirm_fires_exactly_once(tmp_path):
-    # It runs every frame forever after, so a second mark_app_valid (or a second
-    # SD touch to clear the marker) would be a permanent per-frame cost.
-    mod, u = _updater(tmp_path)
-    fired = [u.confirm_when_healthy(9999) for _ in range(mod.HEALTHY_LOOPS + 200)]
-    assert fired.count(True) == 1
-    assert u.marked == 1
-
-
-def test_a_board_that_boots_slowly_still_confirms(tmp_path):
-    # The counters are monotonic loop iterations, not wall clock, so a slow board
-    # simply takes longer to get there -- it is never disqualified for being slow.
-    mod, u = _updater(tmp_path)
-    fired = [u.confirm_when_healthy(1) for _ in range(mod.HEALTHY_LOOPS)]
-    assert fired.count(True) == 1
+    assert u.confirmed_by_kernel() is False
+    assert u.marked == 0
 
 
 # -- the same confirm on a board with no glass (the Zero, 2026-08-29) --------
 #
-# `confirm_when_healthy` asks two questions and on a headless board the first
+# The console's confirm asks two questions and on a headless board the first
 # one -- did anything reach the display -- has no answer at all. Both wrong ways
 # to force one are catastrophic in opposite directions: answering it with a
 # constant certifies every image unconditionally, and leaving it at zero rolls
@@ -162,14 +111,14 @@ def test_a_headless_board_that_never_serves_is_never_confirmed(tmp_path):
     exactly the image the bootloader should take back.
     """
     mod, u = _updater(tmp_path)
-    for _ in range(mod.HEALTHY_SERVES * 10):
+    for _ in range(moy_ota_health.HEALTHY_SERVES * 10):
         assert u.confirm_when_serving(False) is False
     assert u.marked == 0
 
 
 def test_the_headless_confirm_waits_for_the_loop_to_keep_running(tmp_path):
     mod, u = _updater(tmp_path)
-    for i in range(mod.HEALTHY_SERVES - 1):
+    for i in range(moy_ota_health.HEALTHY_SERVES - 1):
         assert u.confirm_when_serving(True) is False, "at loop %d" % i
     assert u.marked == 0
     assert u.confirm_when_serving(True) is True
@@ -181,10 +130,10 @@ def test_a_host_that_comes_up_and_falls_over_starts_the_count_again(tmp_path):
     window has not demonstrated the thing being certified, and letting it resume
     its count would confirm an image that serves in bursts."""
     mod, u = _updater(tmp_path)
-    for _ in range(mod.HEALTHY_SERVES - 1):
+    for _ in range(moy_ota_health.HEALTHY_SERVES - 1):
         u.confirm_when_serving(True)
     assert u.confirm_when_serving(False) is False
-    for i in range(mod.HEALTHY_SERVES - 1):
+    for i in range(moy_ota_health.HEALTHY_SERVES - 1):
         assert u.confirm_when_serving(True) is False, "at loop %d" % i
     assert u.confirm_when_serving(True) is True
 
@@ -194,110 +143,82 @@ def test_the_headless_confirm_fires_once_and_retires_the_marker(tmp_path):
     `_confirm()`, so the marker's lifetime -- read at boot, cleared at the
     CONFIRM -- is identical on a board with no screen."""
     mod, u = _updater(tmp_path)
-    (tmp_path / "update" / mod.PENDING_NAME).write_text(
+    (tmp_path / "update" / moy_ota_health.PENDING_NAME).write_text(
         json.dumps({"slot": "ota_0", "version": 4, "label": "0.7"}),
         encoding="utf-8")
     assert u.boot_check()[0] == "ok"
-    assert (tmp_path / "update" / mod.PENDING_NAME).exists()
+    assert (tmp_path / "update" / moy_ota_health.PENDING_NAME).exists()
     fired = [u.confirm_when_serving(True)
-             for _ in range(mod.HEALTHY_SERVES * 2)]
+             for _ in range(moy_ota_health.HEALTHY_SERVES * 2)]
     assert fired.count(True) == 1
     assert u.marked == 1
-    assert not (tmp_path / "update" / mod.PENDING_NAME).exists()
+    assert not (tmp_path / "update" / moy_ota_health.PENDING_NAME).exists()
 
 
 def test_the_two_confirm_gates_are_not_the_same_gate(tmp_path):
-    """A headless board must not be able to reach the painted-frame gate by
-    passing it a made-up frame count, and a console board must not reach the
-    serving gate at all -- they are different claims about different hardware.
-    The one thing they DO share is what confirming does."""
+    """A console's confirm is the kernel's (it counts painted frames); a
+    headless board's is the serving gate here. A board with glass reaching
+    the serving gate would certify an image whose panel stays dark."""
     mod, u = _updater(tmp_path)
-    # The frame gate still refuses a board that paints nothing, however long it
-    # runs -- adding the second gate must not have widened the first.
-    for _ in range(mod.HEALTHY_LOOPS * 2):
-        assert u.confirm_when_healthy(0) is False
+    assert not hasattr(u, "confirm_when_healthy"), (
+        "the painted-frame gate is the kernel loop's, not a Python twin")
+    for _ in range(moy_ota_health.HEALTHY_SERVES - 1):
+        assert u.confirm_when_serving(True) is False
     assert u.marked == 0
 
 
-# -- the pending marker ------------------------------------------------------
+# -- the boot's record -----------------------------------------------------------
 
 def test_finish_records_the_slot_it_pointed_the_bootloader_at(tmp_path):
+    from runtime import net_binding as nb
+
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     assert u.finish() is True
-    assert u._part.booted is True
+    assert nb._slot()[1] == "ota_1"
     rec = json.loads(Path(u._pending_path()).read_text(encoding="utf-8"))
     assert rec["slot"] == "ota_1"          # where we are going
     assert rec["version"] == mod.FIRMWARE_VERSION   # what we are leaving
     assert rec["channel"] == mod.FIRMWARE_CHANNEL
 
 
-def test_finish_discards_the_payload_it_downloaded(tmp_path):
-    """A consumed download is deleted, or a board that stages on internal flash
-    can only ever update once.
+def test_the_marker_lands_on_a_freshly_formatted_volume(tmp_path):
+    """The P4s keep the store on the card, so the internal volume a cable flash
+    formats has no /moy: the marker makes every level of update_dir."""
+    from runtime import net_binding as nb
 
-    Measured on the Guition's first OTA (2026-08-20): its vfs is 6.2MB, the
-    payload 3.5MB, and with the console's own ~2MB of files the NEXT download
-    had 0.6MB to land in. That board stages internally on purpose (a card pulled
-    mid-stream must not kill an update), so the payload has to go, not move."""
-    mod, u = _updater(tmp_path)
-    payload = Path(u.update_dir) / mod.DOWNLOAD_NAME
-    payload.write_bytes(b"\xe9" + b"\x00" * 64)
-    u.path = str(payload)                  # what begin_download/begin() leave behind
-    u._part = _FakePart("ota_1")
-
+    mod = _load_moy_ota()
+    d = tmp_path / "moy" / "update"
+    u = mod.OtaUpdater(lambda fn: fn(), update_dir=str(d))
+    u._running_label = lambda: "ota_0"
+    _stage()
     assert u.finish() is True
-    assert not payload.exists(), "the consumed download was hoarded"
-    # the marker is NOT collateral: it has to survive into the next boot
-    assert Path(u._pending_path()).exists()
+    assert nb._slot()[1] == "ota_1"
+    assert json.loads(Path(u._pending_path()).read_text(encoding="utf-8"))["slot"] == "ota_1"
 
 
 def test_finish_never_deletes_an_image_the_owner_supplied(tmp_path):
-    """The Phase-2 path installs whatever .bin is on the card. That file is the
-    owner's -- possibly the only copy, possibly meant for the other board -- so
-    only DOWNLOAD_NAME is ever removed."""
+    """The copied-image path installs whatever .bin is in the update directory.
+    That file is the owner's -- possibly the only copy, possibly meant for the
+    other board -- so finish() never removes it."""
     mod, u = _updater(tmp_path)
     theirs = Path(u.update_dir) / "moybyte_tdeck_app.bin"
     theirs.write_bytes(b"\xe9" + b"\x00" * 64)
     u.path = str(theirs)
-    u._part = _FakePart("ota_1")
+    _stage()
 
     assert u.finish() is True
     assert theirs.exists(), "an owner-supplied image was deleted"
 
 
-def test_a_failed_discard_still_boots_the_new_image(tmp_path):
-    """Cleanup is housekeeping. The image is already in the slot and the
-    bootloader already points at it, so an unlink that cannot happen must not
-    turn a good install into a failure.
-
-    The unremovable payload here is a DIRECTORY under the name (os.remove
-    raises EISDIR): a real card can refuse for its own reasons, and this
-    reproduces the refusal through the public API rather than by stubbing
-    _with_sd, which _arm_pending also rides -- stubbing it tests the marker,
-    not the cleanup."""
-    mod, u = _updater(tmp_path)
-    stuck = Path(u.update_dir) / mod.DOWNLOAD_NAME
-    stuck.mkdir()
-    u.path = str(stuck)
-    u._part = _FakePart("ota_1")
-
-    assert u.finish() is True
-    assert Path(u._pending_path()).exists()
-    assert stuck.exists()
-
-
 def test_a_refused_set_boot_records_nothing(tmp_path):
-    # ESP_ERR_OTA_VALIDATE_FAILED on a truncated image: the bootloader was never
-    # repointed, so there is no pending update and the next boot must say nothing.
+    # Nothing verified to activate (a truncated image the slot refused): the
+    # bootloader was never repointed, so there is no pending update and the
+    # next boot must say nothing.
+    from runtime import net_binding as nb
+
+    nb.ota_cancel()
     mod, u = _updater(tmp_path)
-    part = _FakePart("ota_1")
-
-    def _boom():
-        raise OSError("ESP_ERR_OTA_VALIDATE_FAILED")
-
-    part.set_boot = _boom
-    u._part = part
     assert u.finish() is False
     assert not Path(u._pending_path()).exists()
     assert u.boot_check() is None
@@ -305,7 +226,7 @@ def test_a_refused_set_boot_records_nothing(tmp_path):
 
 def test_the_new_image_running_reads_as_success(tmp_path):
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     u.finish()
     # ...reboot: the board comes up on the slot we asked for.
     u._running_label = lambda: "ota_1"
@@ -316,7 +237,7 @@ def test_the_new_image_running_reads_as_success(tmp_path):
 
 def test_the_old_image_running_reads_as_a_rollback(tmp_path):
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     u.finish()
     # ...reboot: the bootloader gave up on ota_1 and put ota_0 back.
     kind, _text = u.boot_check()
@@ -346,7 +267,7 @@ def test_the_marker_survives_the_report_and_dies_at_the_confirm(tmp_path):
     worse failure would be the silent one.
     """
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     u.finish()
     u._running_label = lambda: "ota_1"
     assert u.boot_check()[0] == "ok"
@@ -359,8 +280,7 @@ def test_the_marker_survives_the_report_and_dies_at_the_confirm(tmp_path):
     # A run that DOES reach the confirm clears it, so the next ordinary boot
     # reports nothing.
     u2._running_label = lambda: "ota_1"
-    for _ in range(mod.HEALTHY_LOOPS):
-        u2.confirm_when_healthy(mod.HEALTHY_PAINTS)
+    u2.confirmed_by_kernel()
     assert not Path(u2._pending_path()).exists()
     assert u2.boot_check() is None
 
@@ -377,19 +297,17 @@ def test_an_ordinary_boot_never_touches_the_card(tmp_path):
     u._with_sd = lambda fn: (touched.append(1), fn())[1]
     assert u.boot_check() is None
     touched.clear()
-    for _ in range(mod.HEALTHY_LOOPS):
-        u.confirm_when_healthy(1)
+    u.confirmed_by_kernel()
     assert u.confirmed is True
     assert touched == [], "the confirm opened an SD session for nothing"
 
 
 def test_a_boot_that_did_see_a_marker_clears_it(tmp_path):
     mod, u = _updater(tmp_path, running="ota_0")
-    u._part = _FakePart("ota_1")
+    _stage()
     u.finish()
     assert u.boot_check()[0] == "rolled_back"
-    for _ in range(mod.HEALTHY_LOOPS):
-        u.confirm_when_healthy(1)
+    u.confirmed_by_kernel()
     assert not Path(u._pending_path()).exists()
 
 
@@ -397,7 +315,7 @@ def test_a_marker_write_failure_never_costs_the_update(tmp_path):
     # Best-effort by design: losing the verdict is a missing message; failing the
     # install because the message could not be written would be a real regression.
     mod, u = _updater(tmp_path)
-    u._part = _FakePart("ota_1")
+    _stage()
     u.update_dir = "/nonexistent-device-path/update"
     assert u.finish() is True
 
@@ -495,7 +413,7 @@ def test_the_desktop_says_the_update_landed(tmp_path):
     assert ws.announce_update() is True
     assert ws.notice_active() is True
     title, sub, kind = ws._notice
-    assert "UPDATED" in title
+    assert "updated" in title
     assert "v2" in sub                    # the stub's version_label
     assert kind == "ok"
 
@@ -568,6 +486,16 @@ def test_dismissing_the_verdict_leaves_the_screen(tmp_path):
 
 # -- a channel with nothing on it yet ----------------------------------------
 
+def _check_against(u, status):
+    from ota_http import Server
+
+    u._wifi = object()
+    u.wifi_online = lambda: True
+    with Server({"/latest-p4.json": (status, {}, b"")}) as srv:
+        u._manifest_source = lambda ch=None: (srv.url("/latest-p4.json"), False)
+        return u.check_online("stable")
+
+
 def test_a_missing_manifest_is_not_a_failed_update(tmp_path):
     """404 on the manifest means the channel has nothing for this board yet.
 
@@ -577,16 +505,7 @@ def test_a_missing_manifest_is_not_a_failed_update(tmp_path):
     blames the kid's console for a file missing from a server.
     """
     mod, u = _updater(tmp_path)
-    u._wifi = object()
-    u.wifi_online = lambda: True
-    u._manifest_source = lambda ch=None: ("https://h/latest-p4.json", False)
-
-    def _get(url, limit=8192):
-        u.error = "http 404"
-        return None
-
-    u._http_get_text = _get
-    assert u.check_online("stable") is None
+    assert _check_against(u, 404) is None
     assert u.absent is True
     assert u.error is None, "a missing manifest is not an error"
 
@@ -595,16 +514,7 @@ def test_a_real_http_failure_stays_an_error(tmp_path):
     # 500/403 are not "nothing published" -- something is actually wrong, and
     # silently calling that "nothing new" would hide a broken release.
     mod, u = _updater(tmp_path)
-    u._wifi = object()
-    u.wifi_online = lambda: True
-    u._manifest_source = lambda ch=None: ("https://h/latest-p4.json", False)
-
-    def _get(url, limit=8192):
-        u.error = "http 500"
-        return None
-
-    u._http_get_text = _get
-    assert u.check_online("stable") is None
+    assert _check_against(u, 500) is None
     assert u.absent is False
     assert u.error == "http 500"
 
@@ -673,7 +583,7 @@ def test_a_deliberate_choice_beats_the_running_channel(tmp_path):
             return "unstable"
 
     ws.updater = _Beta()
-    ws.system["ota_channel"] = "stable"
+    ws.system.set("ota_channel", "stable")
     assert ws._ota_channel() == "stable"
 
 
@@ -687,84 +597,29 @@ def test_no_updater_at_all_defaults_to_stable(tmp_path):
 # -- both boards are wired to it ---------------------------------------------
 
 def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
-    """WHERE each half runs, asserted structurally rather than by grep.
-
-    Both boards drive one shared implementation now (`runtime/device_boot.py`'s
-    OtaHealth + FramePump, #161 Phase 4/5), which makes the old string match
-    both weaker and misleading: a literal that lives in a third file says
-    nothing about whether a board reached it, and the whole claim here is about
-    PLACEMENT. So this walks each `run_desktop` and asserts the boot verdict is
-    read OUTSIDE the frame loop while the confirm is pumped INSIDE it -- the
-    distinction #56 was: made where the desktop is merely CONSTRUCTED, the
-    confirm certifies an image that has never drawn a pixel.
-
-    These two files are never imported by the host (they import esp32/machine),
-    so the source is all CI can reach -- same house rule as the rest of the
-    frozen-module suite.
-    """
+    """WHERE each half runs, asserted structurally: the boot verdict is read
+    on the boot path (`build_desktop`), before anything can overwrite it, and
+    the confirm is the kernel loop's -- armed when the console is handed
+    over (`Desktop.run`'s `moy_loop.health`), fired in C after painted
+    frames, its marker retired by the service upcall
+    (`confirmed_by_kernel`). Made where the desktop is merely CONSTRUCTED, the
+    confirm would certify an image that has never drawn a pixel (#56)."""
     import ast
-    from board_source import wiring_chain
-
-    for mod_path in (TDECK / "moy_runtime.py", P4 / "moy_runtime.py"):
-        src = runtime_text(mod_path)
-        # A board's boot is its delegation chain: its own run_desktop, then
-        # every spine's wiring function, plus the spine's `Desktop.run`, which
-        # is where the loop is built. Walked together, so the placement claim
-        # is made about what the board actually runs.
-        fns = []
-        for path, fname in wiring_chain(mod_path):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            fns += [n for n in ast.walk(tree)
-                    if isinstance(n, ast.FunctionDef) and n.name in (fname, "run")]
-        assert fns, mod_path
-
-        seen = {}
-        pump_verbs = set()
-
-        def walk(node, in_loop):
-            for child in ast.iter_child_nodes(node):
-                loop = in_loop or isinstance(node, (ast.While, ast.For))
-                if isinstance(child, ast.Call):
-                    name = (child.func.attr
-                            if isinstance(child.func, ast.Attribute)
-                            else getattr(child.func, "id", None))
-                    if name:
-                        seen.setdefault(name, set()).add(loop)
-                    if (isinstance(child.func, ast.Attribute)
-                            and isinstance(child.func.value, ast.Name)
-                            and child.func.value.id == "pump"):
-                        pump_verbs.add(child.func.attr)
-                walk(child, loop)
-
-        for fn in fns:
-            walk(fn, False)
-        assert seen.get("OtaHealth") == {False}, (
-            "%s: the OTA health reporter must be built on the boot path" % mod_path)
-        assert seen.get("boot_check") == {False}, (
-            "%s: the boot verdict is read once, before the loop" % mod_path)
-        # #202 Phase B: the frame loop itself is SHARED (device_boot.FrameLoop
-        # calls pump.tail every frame -- asserted against the spine below), so
-        # the per-board placement claim becomes: the boot hands the pump to a
-        # FrameLoop and runs it, and nothing drives pump.tail beside it.
-        assert "FrameLoop" in seen, (
-            "%s: the boot no longer constructs the shared frame loop"
-            % mod_path)
-        assert seen.get("run") is not None, mod_path
-        assert not pump_verbs, (
-            "%s: the pump is driven beside the shared loop (%s) -- two cadences"
-            % (mod_path, sorted(pump_verbs)))
-        # The old unconditional confirm at desktop-construction time is gone.
-        assert "ws.updater.mark_valid()" not in src, mod_path
-
-    # And the shared half really does confirm on painted frames, not on boot.
-    spine = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
-    assert 'confirm_when_healthy(getattr(self.ws, "_frames_drawn", 0))' in spine
-    # ...and the shared FrameLoop is what pumps it, after the ws phase.
-    step = spine[spine.index("def step(self):"):]
-    assert step.index("ws.frame(dt)") < step.index("self.pump.tail(ws)")
+    spine = (ROOT / "device" / "desktop_spine.py").read_text(encoding="utf-8")
     tree = ast.parse(spine)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "boot_check":
-            assert "confirm_when_healthy" not in ast.dump(node), (
-                "device_boot.OtaHealth.boot_check must NOT confirm -- reaching "
-                "the boot path proves only that the desktop was constructed")
+    fns = {n.name: ast.dump(n) for n in ast.walk(tree)
+           if isinstance(n, ast.FunctionDef)}
+    assert "report_update" in fns["build_desktop"]
+    assert "confirmed_by_kernel" not in fns["build_desktop"]
+    boot = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
+    report = boot[boot.index("def report_update("):boot.index("def boot_ok(")]
+    assert "boot_check()" in report and "confirm" not in report.replace(
+        "CONFIRM", "").replace("confirm", "", 0).split('"""')[2]
+    assert "health" in fns["run"]
+    assert "confirmed_by_kernel" in fns["make_service"]
+    loop = (ROOT / "native" / "moy_kernel" / "moy_loop.c").read_text(encoding="utf-8")
+    step = loop[loop.index("int moy_loop_step(void) {"):]
+    assert step.index("MOY_UP_FRAME") < step.index("ops->healthy()")
+    for mod_path in (TDECK / "moy_runtime.py", P4 / "moy_runtime.py"):
+        assert "mark_valid" not in runtime_text(mod_path), mod_path
+

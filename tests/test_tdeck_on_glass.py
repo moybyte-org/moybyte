@@ -44,8 +44,86 @@ def board():
 # image of the same tree, at the launcher right after boot: (free, largest)
 # internal SRAM. That image is board.toml's moy_wasm `take` turned to `deny`,
 # built from an EMPTY build dir: a configured one keeps the engine in its
-# module table and fails to link.
-WASM_IDLE_BASELINE = (122343, 81920)
+# module table and fails to link. The baseline is less EXFAT_SRAM, what FatFS's
+# exFAT build holds in internal SRAM at the idle desk (2026-10-05, the
+# same image and a fresh boot: 119955 free with it, 120523 without), so the
+# guard keeps measuring the engine's own cost.
+EXFAT_SRAM = 568
+# And less KERNEL_SRAM, the kernel's static share (native/moy_kernel: its
+# panic wrapper in IRAM and its statics), which every console image carries
+# and docs/native_kernel_2026-09.md section 6.1 bounds on its own: measured
+# 2026-10-06 on this board, the internal heap an image that takes
+# the module has against the same tree denying it.
+# Plus the glass's statics (native/moy_glass: its tables' roots and the
+# present engine), 56 bytes of .dram0.bss by the link map against dev
+# 82144715, 2026-10-07.
+# And the links' statics (native/moy_net/moy_link.c: the link's ring header,
+# its latch and its flag), 40 bytes of .bss and .data by the objects' sizes,
+# 2026-10-07; the port's espnow module they replace held its ring in the heap.
+# And the WiFi driver's (native/moy_net/moy_wifi.c: its state, latch and
+# connect flag), 56 bytes of .bss and .data by the object's sizes, 2026-10-07.
+# Less what the kernel's audio gave back: the synth's
+# state moved from a static to its session's PSRAM (native/moy_audio), 9,824
+# bytes of .dram0.data and .bss by the link map against dev cafae3a2,
+# 2026-10-07.
+# Plus input's statics (native/moy_input: the kernel table's latches, the
+# drivers' state, the kernel's I2C bus, which the carve compiled as a stub, and
+# NimBLE's bond cache, ble_store_config, in place of MicroPython's bluetooth),
+# 1180 bytes of .dram0 and .iram0 by the link map against dev 8ecf490a (the input task's
+# stack, 2560 bytes, replaces the poller thread's 5 KiB and NimBLE's host stack
+# is 2 KiB smaller: both are heap, which the guard measures), 2026-10-07.
+# And the webhost's (native/moy_net/moy_webhost.c: the pointer to its state,
+# which with its buffers is PSRAM), 4 bytes of .bss by the link map, 2026-10-07.
+# And the WiFi driver's reconnect timer handle and backoff, 5 bytes of .bss by
+# the link map, 2026-10-07 (the esp_timer it creates is the heap's).
+# And the updater's (native/moy_net/moy_ota.c: the pointers to its state, its
+# clients, its keys and the trusted set, which are PSRAM), its slot's position
+# (moy_net_port.c) and the WiFi driver's kept-network flag, 38 bytes of .bss by
+# the objects' sizes, 2026-10-07.
+# And the web-console switch's (native/moy_net/moy_webconsole.c: the pointer
+# to its state, which is PSRAM), 4 bytes of .bss by the object's size,
+# 2026-10-07.
+# And the setup portal's responder (native/moy_net/moy_dns.c: the pointer to
+# its state, PSRAM) and the WiFi driver's access-point interface, 8 bytes of
+# .bss by the objects' sizes, 2026-10-08.
+# And the internal flash volume's (native/moy_store/moy_kvfs.c: the pointer to
+# the kernel's littlefs instance, whose config and caches are PSRAM), 4 bytes
+# of .bss by the object's size, 2026-10-08.
+# And the frame's (native/moy_kernel: the loop's, the reader's and the
+# ladder's statics and the VM-side stage table; the meters, the PERF window
+# and the line buffer are PSRAM), 392 bytes of idle internal heap measured
+# 2026-10-08 against the same tree's dev image on a fresh boot.
+# Less what moy_alloc's registry gave back: its nodes moved to PSRAM beside
+# their buffers (native/moy_alloc), 352 bytes of idle internal heap measured
+# 2026-10-08 against the same tree's image before the move, fresh boots.
+# And first light's (native/moy_kernel/moy_kernel.c: whether the kernel lit
+# the logo and when), the board's dev-channel words and the kernel's HITCH and
+# LOOP lines (their window is PSRAM), 260 bytes of idle internal heap measured
+# 2026-10-08 against the same tree before them, fresh boots.
+# And the cart path's statics (native/moy_play: the run's pointer, whose state
+# is PSRAM, and the binding's two root pointers; native/moycore: the frame's
+# split, which replaced the binding's own), 8 bytes of internal heap by the
+# heap's total against dev 502be7fd, fresh boots, 2026-10-08.
+# And the kernel's screens in the look (native/moy_kernel, native/moy_gfx/
+# moy_path.c: the floor's view at 64 columns and its geometry's band and
+# scratch, the splash palette, the faces' lent scratch and the screens'
+# PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
+# 2026-10-26; the scratch and the band themselves are PSRAM.
+KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 352 + 260 + 8 + 270
+# And less LOOK_SRAM, the 2026-10 look's statics in the UI and text kernels
+# (native/moy_gfx/moy_text.c's sixteen font slots, native/moy_ui's depth
+# paints and marks, the theme's block-nearest tables, the RUN face's shape,
+# native/moy_app's theme row): 1272 bytes of .dram0 by the heap's start on the
+# Guition S3 against dev 64572552, 2026-10-18, whose objects this board's link
+# map holds at the same sizes. The look's corner and shadow caches and the UI
+# API's run context are PSRAM.
+LOOK_SRAM = 1272
+# And less TEXT_SRAM, the text view's statics (native/moy_ui/moy_ui_text.c,
+# moy_ui_api.c, moy_ui_wasm.c, modmoy_ui.c: the code tones, the compiled
+# face's line cursor and the pointers to the block the views share, which
+# is PSRAM): 44 bytes of .bss and .data by the objects' sizes, 2026-10-28.
+TEXT_SRAM = 44
+WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM - LOOK_SRAM - TEXT_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 
@@ -107,6 +185,16 @@ WASM_BLIT_FPS_FLOOR = 49
 @pytest.fixture(scope="module")
 def wasm_carts(board):
     return on_glass.wasm_carts_push(board, WASM_BOARD_DIR)
+
+
+def test_a_compiled_app_reaches_its_roles_through_imports(board):
+    root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
+    on_glass.wasm_app_reaches_its_roles(board, root)
+
+
+def test_a_compiled_app_draws_the_toolkits_widgets(board):
+    root = on_glass.wasm_app_push(board, WASM_BOARD_DIR)
+    on_glass.wasm_app_draws_the_toolkit(board, root)
 
 
 def test_the_hello_wasm_cart_holds_its_floor(board, wasm_carts):
@@ -227,16 +315,80 @@ def test_wifi_status_is_readable(board):
     on_glass.wifi_status_is_readable(board)
 
 
+def test_the_kernel_verifies_a_signed_manifest(board):
+    on_glass.the_kernel_verifies_a_signed_manifest(board)
+
+
+def test_the_internal_volume_is_the_kernels(board):
+    on_glass.the_internal_volume_is_the_kernels(board)
+
+
 def test_wifi_is_off_at_rest(board):
     on_glass.wifi_is_off_at_rest(board)
+
+
+def test_the_bar_wifi_widget_opens_the_wifi_panel(board):
+    on_glass.the_bar_wifi_widget_opens_the_wifi_panel(board)
 
 
 def test_every_system_app_claims_exactly_one_cart(board):
     on_glass.every_app_claims_one_cart(board)
 
 
+def test_leaving_paint_saves_a_stroke(board):
+    on_glass.paint_saves_a_stroke_on_leaving(board)
+
+
 def test_py_probe_reaches_the_live_console(board):
     on_glass.py_probe_reaches_the_console(board)
+
+
+def test_the_painter_matches_the_host(board):
+    on_glass.painter_matches_host(board)
+
+
+def test_the_sprites_match_the_host(board):
+    on_glass.sprites_match_host(board)
+
+
+def test_the_picker_kernel_matches_sspr(board):
+    on_glass.picker_kernel_matches_sspr(board)
+
+
+def test_shift_last_and_copy_last_into_match_the_reference(board):
+    on_glass.shift_last_matches_the_reference(board)
+
+
+def test_a_fuzzed_font_corpus_loads_as_on_the_host(board):
+    on_glass.fonts_match_host(board)
+
+
+def test_a_fuzzed_layout_corpus_reads_as_on_the_host(board):
+    on_glass.layouts_match_host(board)
+
+
+def test_custom_themes_derive_as_on_the_host(board):
+    on_glass.theme_custom_matches_host(board)
+
+
+def test_the_theme_font_is_installed(board):
+    on_glass.the_theme_font_is_installed(board)
+
+
+def test_the_font_set_is_the_tiers(board):
+    on_glass.the_font_set_is_the_tiers(board, 'handheld')
+
+
+def test_the_glyph_lane_draws_the_hosts_bytes(board):
+    on_glass.glyph_lane_matches_host(board, 'handheld')
+
+
+def test_a_leaked_session_leaves_the_panel_flushing(board):
+    on_glass.a_leaked_session_leaves_the_panel_flushing(board)
+
+
+def test_a_stale_handle_is_refused_loudly(board):
+    on_glass.stale_handle_is_refused_loudly(board)
 
 
 def test_diag_toggle_roundtrips(board):
@@ -247,14 +399,134 @@ def test_swipe_rides_the_real_pointer_feed(board):
     on_glass.home_shelf_fling(board, 260, 60, 140)
 
 
+def test_a_long_press_opens_the_cards_verbs(board):
+    on_glass.home_long_press_opens_card_verbs(board)
+
+
+# Matrix frames (d0..d4) of the keys the home's strip names, and what this
+# image's own decoder must type for each: C N Y X F, and Sym+G for Search's /.
+HOME_KEYS = (([0, 0, 0x20, 0, 0], "c"), ([0, 0, 0, 0x20, 0], "n"),
+             ([0, 0, 0, 0x04, 0], "y"), ([0, 0x10, 0, 0, 0], "x"),
+             ([0, 0, 0x40, 0, 0], "f"), ([0x04, 0, 0x02, 0, 0], "/"))
+_DECODE = "__import__('moy_input').keyboard().decode(bytes(%r))[1]"
+
+
+def test_the_homes_letter_keys_arrive_from_the_matrix(board):
+    """Design review R3-02: the home keeps the keyboard on the raw matrix
+    (Mic and a held direction read there), so its verb letters must be keys
+    the matrix decode types. This image's decoder answers each; then the C it
+    types, queued as a typed key, does Change on a Games card (the Editor).
+    A person pressing the key is the one step no suite takes."""
+    assert board.pyval("ws.screen", strict=True) == "launcher"
+    assert board.pyval("ws.input.text_mode", strict=True) is False
+    assert board.pyval("ws.keyboard.raw_mode", strict=True) is True, \
+        "the home is not on the matrix (keyboard firmware older than 2025-06-12?)"
+    for data, ch in HOME_KEYS:
+        assert board.pyval(_DECODE % data, strict=True) == ord(ch), ch
+    try:
+        board.pyexec("ws.set_home_tab('games'); ws.launcher.sel = [i for i, it in "
+                     "enumerate(ws.launcher.items) if it.get('path')][0]", strict=True)
+        board.pyexec("ws.input.source('local').key(%s)" % (_DECODE % HOME_KEYS[0][0]),
+                     strict=True)
+        board.drain(0.8)
+        assert board.pyval("ws.screen", strict=True) == "menu", "C did not open the Editor"
+    finally:
+        board.pyexec("ws.go_home()", strict=True)
+        board.drain(0.5)
+
+
+def _glass_key(board, k):
+    board.pyexec("ws.input.source('local').key(%d)" % k, strict=True)
+    board.drain(0.4)
+
+
+def _glass_start(board):
+    """One press of `start` with the T-Deck's keys the input in use."""
+    board.pyexec("import ui_draw; ui_draw.input_kind('tdeck'); "
+                 "ws.input.source('local').set_button('start', True)", strict=True)
+    board.drain(0.3)
+    board.pyexec("ws.input.source('local').set_button('start', False)", strict=True)
+    board.drain(0.3)
+
+
+def test_a_field_reads_the_matrix_and_mic_cancels_it(board):
+    """Owner call 2026-10-18: in a field Enter is Done and Mic is Cancel.
+    The Name field keeps the keyboard on the matrix (where Mic shows; the
+    C3's ASCII mode sends nothing for it), a Mic press puts the typed text
+    back, Enter keeps it, and Mic outside the field opens the system menu.
+    The keys are queued into the console's table, Mic as `start`: a person
+    pressing them is the one step no suite takes."""
+    was = board.pyval("ws.system.get('name', '')", strict=True)
+    try:
+        board.pyexec("ws.open_settings(); ws.settings_layer.show_row('name')", strict=True)
+        board.drain(0.8)
+        assert board.pyval("ws.settings_layer.editing_field()", strict=True) is True
+        assert board.pyval("ws.input.text_mode", strict=True) is True
+        assert board.pyval("ws.keyboard.raw_mode", strict=True) is True, \
+            "a text surface reads the matrix"
+        _glass_key(board, ord("q"))
+        _glass_start(board)
+        assert board.pyval("ws.system.get('name', '')", strict=True) == was
+        assert board.pyval("ws.settings_layer.editing_field()", strict=True) is False
+        assert board.pyval("ws.sysmenu.open", strict=True) is False
+        board.pyexec("ws.settings_layer.show_row('name')", strict=True)
+        board.drain(0.5)
+        _glass_key(board, ord("z"))
+        _glass_key(board, 13)
+        assert board.pyval("ws.system.get('name', '')", strict=True) == (was or "") + "z"
+        _glass_start(board)                       # outside the field: the console's key
+        assert board.pyval("ws.sysmenu.open", strict=True) is True
+    finally:
+        board.pyexec("ws.sysmenu.close(); ws.popover_touch(); ws.go_home()", strict=True)
+        board.pyval("ws.system.set('name', %r)" % (was,))   # a flash write: its own line
+        board.drain(0.5)
+
+
 def test_a_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "star")
+
+
+def test_the_pause_menu_dims_the_game_and_holds_the_heap(board):
+    on_glass.pause_menu_dims_and_holds_the_heap(board, "star")
 
 
 def test_a_lua_cart_runs_and_exits(board):
     """The Lua tier is supposed to reach EVERY board by default (the point of
     the shared native staging), so pin it with a real run, not an import."""
     on_glass.cart_runs_and_exits(board, "sakura lua", title="Sakura Lua")
+
+
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_vm_free_frame_makes_no_crossing(board, spec, title):
+    on_glass.a_vm_free_frame_makes_no_crossing(board, spec, title)
+
+
+@pytest.mark.parametrize("spec,title", on_glass.VM_FREE_SEEDS)
+def test_a_front_run_makes_no_crossing(board, spec, title):
+    on_glass.a_front_run_makes_no_crossing(board, spec, title)
+
+
+# The compiled half of the same check: the blit fixture's frames run in the
+# kernel's Player on the engine's thread, and neither its frames nor its run's
+# books since launch hold an APP, SERVICE or REFUSED crossing; the hello
+# fixture reads its greeting from its own folder at _init, in C.
+@pytest.mark.parametrize("which", ("blit", "hello"))
+def test_a_compiled_frame_makes_no_crossing(board, wasm_carts, which):
+    title = wasm_carts[which]
+    on_glass.a_vm_free_frame_makes_no_crossing(board, title.lower(), title,
+                                               runtime="wasm")
+
+
+# The runaway watch (native/moy_play/moy_play.h): a frame that never comes
+# back is ended, Lua on its line and a compiled cart at its next import call.
+@pytest.fixture(scope="module")
+def stuck_carts(board):
+    on_glass.stuck_carts_push(board, WASM_BOARD_DIR)
+
+
+@pytest.mark.parametrize("runtime", ("lua", "wasm"))
+def test_a_frame_that_never_ends_is_ended(board, stuck_carts, runtime):
+    on_glass.a_stuck_run_is_ended(board, runtime)
 
 
 def test_draw_gates_are_installed(board):
@@ -278,6 +550,23 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
+def test_a_quiet_console_collects_its_garbage(board):
+    on_glass.a_quiet_console_collects_its_garbage(board)
+
+
+def test_the_saver_comes_and_its_wake_repaints(board):
+    on_glass.idle_saver_and_wake(board)
+
+
+def test_internal_flash_commits_under_a_running_cart(board):
+    ms = on_glass.internal_flash_commits_under_a_cart(board)
+    print("\nlongest internal-flash commit under a cart: %d ms" % ms)
+
+
+def test_the_frame_is_the_kernels(board):
+    on_glass.the_frame_is_the_kernels(board)
+
+
 def test_perf_line_is_the_one_format(board):
     """#206 item 2. This board has no windowed WM and no PPA, so those columns
     must read `-`: absence, never a 0 that a dead meter would also print."""
@@ -297,3 +586,50 @@ def test_load_unload_loop_under_a_live_cart_and_wifi(board, wasm):
 
 def test_a_run_with_wifi_and_ble_up_costs_at_most_a_constant(board, wasm):
     on_glass.wasm_low_water_with_radios_up(board, wasm)
+
+
+def test_the_kernel_lit_the_logo_before_any_vm(board):
+    on_glass.the_kernel_lit_the_logo(board)
+
+
+def test_heapcaps_mem_and_hush_are_the_kernels_words(board):
+    on_glass.board_words_are_the_kernels(board)
+
+
+def test_loop_is_the_kernels_line_with_every_stage(board):
+    on_glass.loop_line_is_the_kernels(board)
+
+
+def test_a_ctrl_c_ends_a_run_in_front_and_reaches_the_repl(board):
+    on_glass.a_ctrl_c_ends_a_front_run(board)
+
+
+# The VM stop (docs/kernel_cartpath_2026-10.md section 5): the kernel stops the
+# VM and starts it again with no cart, the route and the lease set before each
+# stop read back after it, PSRAM flat while it is down; Doom runs with no VM
+# (its fit forced to fail: it fits a fresh T-Deck), `state` says so, and its
+# end -- the dev channel's `end`, or a Ctrl-C -- brings a VM back. Each ends on
+# a freshly started VM, as the soft resets below do.
+def test_vm_stops_leave_psram_flat_and_the_routes_read_back(board):
+    on_glass.vm_stops_leave_psram_flat(board, n=5)
+
+
+def test_doom_runs_with_the_vm_down(board):
+    on_glass.doom_runs_with_the_vm_down(board, hold_link=True)
+
+
+def test_a_ctrl_c_during_a_stopped_run_reaches_a_vm(board):
+    on_glass.doom_runs_with_the_vm_down(board, ctrl_c=True)
+
+
+def test_a_run_off_the_shelf_keeps_the_vm_for_its_place(board):
+    on_glass.a_run_off_the_shelf_keeps_the_vm_for_its_place(board)
+
+
+def test_a_stuck_run_with_the_vm_down_is_ended(board, stuck_carts):
+    on_glass.a_stuck_run_with_the_vm_down_is_ended(board)
+
+
+# LAST in the file: twenty soft resets end on a freshly started VM.
+def test_twenty_soft_resets_leave_psram_flat(board):
+    on_glass.soft_resets_leave_psram_flat(board, n=20)

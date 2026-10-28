@@ -6,6 +6,7 @@ editor UI is exercised here (that's Part 2)."""
 
 import ast
 from pathlib import Path
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -392,11 +393,8 @@ def test_block_cart_runs_through_workstation(tmp_path):
     cart = moy_carts.create("My Block Game", str(tmp_path / "carts"), type="game")
     status, msg = moy_carts.save_blocks(cart, _the_little_game())
     assert status == moy_carts.SAVE_OK, msg
-    ws.launcher.items = moy_carts.scan(str(tmp_path / "carts"))
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == "My Block Game":
-            ws.launcher.sel = i
-            break
+    ws.launcher.items = shelf(str(tmp_path / "carts"))
+    select_on_home(ws, "My Block Game")
     ws.open()
     assert ws.cart_error is None and ws.ns is not None  # compiled cleanly + started
     for _ in range(10):
@@ -488,12 +486,12 @@ def test_tap_position_readers_compile_and_hit_test():
 
 
 # ----------------------------------------------------------------------------
-# The shipped tap_game.moy: its blocks.json is the source of truth, compiles to
+# The shipped moybyte.tap_game.moy: its blocks.json is the source of truth, compiles to
 # the shipped main.py, and the cart plays (tap the target -> score).
 # ----------------------------------------------------------------------------
 
 def _tap_game_dir():
-    return str(ROOT / "system_carts" / "tap_game.moy")
+    return str(ROOT / "system_carts" / "moybyte.tap_game.moy")
 
 
 def test_tap_game_blocks_json_compiles_to_shipped_main():
@@ -531,6 +529,7 @@ def test_tap_game_scores_on_a_tap_on_the_target(tmp_path):
         ws.frame(1 / 30)
     tx, ty = ws.ns["tx"], ws.ns["ty"]
     before = ws.ns["score"]
+    ws.input.pointer.place(int(tx) + 14, int(ty) + 14)           # a tap touches the pointer
     ws.input.game_pointer = (int(tx) + 14, int(ty) + 14, True)   # tap the target center
     ws.frame(1 / 30)
     assert ws.ns["score"] == before + 1                 # scored

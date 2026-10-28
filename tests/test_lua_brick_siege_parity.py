@@ -1,7 +1,7 @@
 """Parity: the Brick Siege Lua port against main.py, on the shipped VM (#67).
 
 Runs experiments/lua_bridge/brick_parity.py's harness: the real
-system_carts/brick_siege.moy/main.py and system_carts/brick_siege_lua.moy/main.lua
+system_carts/moybyte.brick_siege.moy/main.py and system_carts/moybyte.brick_siege_lua.moy/main.lua
 under one deterministic fake API (shared PRNG, shared tilemap, scripted
 buttons), the Lua side under runtime/lua_host's MoycoreHostRun -- libmoy's
 binding over the vendored Lua 5.4 the boards compile, LUA_32BITS and all --
@@ -32,8 +32,8 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 
 
 def _need_lua():
-    from runtime import lua_host
-    if lua_host.moycore_supports("") is not True:
+    from runtime import lua_binding
+    if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built (needs a C compiler)")
 
 
@@ -65,4 +65,9 @@ def test_brick_siege_lua_runs_under_the_real_player(tmp_path):
     for _ in range(240):                               # 8s: spawns, shots, booms
         ws.frame(1 / 30)
     assert ws.player.cart_error is None
-    assert float(run.get_global("t")) > 0.0            # the cart kept ticking
+    # The cart kept ticking. A game over restarts the field and zeroes `t` on
+    # the frame it does so (the AI-less tanks die at a random moment), so read
+    # the clock after one more frame: a restart is 1.6s away from the next.
+    ws.frame(1 / 30)
+    assert ws.player.cart_error is None
+    assert float(run.get_global("t")) > 0.0

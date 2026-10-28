@@ -37,9 +37,9 @@
 // That index is EXPORTED as moy_prof.SELF (2 on Xtensa, 0 on RISC-V) and is
 // hist()'s default, so no caller has to know which machine it is talking to --
 // `SELF + 1` is "the caller" on any board that has one, which is how you tell
-// "all the time is in memcpy" from "who keeps calling memcpy". RISC-V has no
-// caller frame yet: there, sample slot 1 is deliberately left 0 rather than
-// filled with something that would symbolize plausibly and mean nothing.
+// "all the time is in memcpy" from "who keeps calling memcpy". On RISC-V
+// slot 1 is the interruptee's saved `ra` (the handler below says when that is
+// the caller).
 //
 // dump() stays raw so that layout remains checkable: an aggregate cannot tell
 // you what you got wrong, and this index is a property of IDF's dispatch path
@@ -65,8 +65,11 @@
 #define MOY_PROF_SELF 2   // [0]=ISR [1]=_xt_lowint1 [2]=interruptee
 #else
 #include "riscv/csr.h"
+#include "riscv/rvruntime-frames.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #define MOY_PROF_FRAMES 2
-#define MOY_PROF_SELF 0   // mepc IS the interruptee
+#define MOY_PROF_SELF 0   // mepc IS the interruptee, [1] its ra
 #endif
 
 typedef struct {
@@ -108,15 +111,17 @@ static bool moy_prof_on_alarm(gptimer_handle_t timer,
     }
 #else
     // mepc is the interruptee's PC, held for the duration of the handler.
-    //
-    // There is no second frame here yet, and slot 1 stays 0 rather than
-    // carrying something that merely looks like one: the interruptee's `ra`
-    // lives in the saved interrupt frame, not in a register this C handler can
-    // read, and `mscratch` is a scratch CSR that would symbolize to a
-    // plausible-looking address while meaning nothing. Caller attribution on
-    // this arch needs the frame pointer walk, which is not built.
+    // Slot 1 is the interruptee's `ra`, out of the frame IDF's interrupt
+    // entry saved: rtos_int_enter stores that frame's address as the first
+    // word of the running task's TCB (pxTopOfStack) before it moves to the
+    // ISR stack. For a leaf (memcpy, a fill kernel) that IS its caller; for
+    // anything that has called since it was entered, it is the last return
+    // address it took, which names a callee rather than the caller. An
+    // interrupt that nests inside another reads the outer one's frame.
     slot->pc[0] = (uint32_t)RV_READ_CSR(mepc);
-    slot->pc[1] = 0;
+    TaskHandle_t tcb = xTaskGetCurrentTaskHandle();
+    const RvExcFrame *f = tcb != NULL ? *(RvExcFrame *const *)tcb : NULL;
+    slot->pc[1] = f != NULL ? (uint32_t)f->ra : 0;
 #endif
 
     s_head = (s_head + 1) % s_cap;

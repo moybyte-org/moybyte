@@ -76,7 +76,7 @@ Tap a tile to read about it.
 <tr>
 <td width="33%" valign="top"><details><summary><img src="docs/media/features/compiled.gif" width="192" height="144" alt="A spinning wireframe cube"><br><b>Compiled carts</b></summary>C, C++ or Rust compiled to WebAssembly instead of Python or Lua. A board runs it natively for its own chip; the browser console runs it on the browser's own engine. Doom and Jet Teapot are compiled carts (moy-spec's <a href="https://github.com/moybyte-org/moy-spec">COMPILED.md</a>).</details></td>
 <td width="33%" valign="top"><details><summary><img src="docs/media/features/getcarts.gif" width="192" height="144" alt="A cartridge dropping from a cloud onto a shelf as a progress bar fills"><br><b>Get Carts</b></summary>The console's store installs carts other people publish, over WiFi on a board or in the browser, showing each cart's licence before it fetches. The catalogue is <a href="https://github.com/moybyte-org/carts">moybyte-org/carts</a>.</details></td>
-<td width="33%" valign="top"><details><summary><img src="docs/media/features/yours.gif" width="192" height="144" alt="A window's wallpaper cycling through patterns while an icon is repainted"><br><b>Make it yours</b></summary>Wallpapers — a cart can be one, running live — window themes and the system's icons are all editable on the console, from the Appearance app and Settings → EDIT ICONS.</details></td>
+<td width="33%" valign="top"><details><summary><img src="docs/media/features/yours.gif" width="192" height="144" alt="A window's wallpaper cycling through patterns while an icon is repainted"><br><b>Make it yours</b></summary>Wallpapers — a cart can be one, running live — window themes and the system's icons are all editable on the console, from the Appearance app and its Edit theme….</details></td>
 </tr>
 </table>
 
@@ -93,16 +93,16 @@ simulator draws, plays audio and runs Lua through the same C library as the
 boards. Debian/Ubuntu `sudo apt install build-essential`, Fedora
 `sudo dnf install gcc`, macOS `xcode-select --install`.
 
-Arrows or WASD move, Z or Space is A, X is B, Enter runs, hold H or Backspace to
-go home, Esc quits. The mouse is the touchscreen. Pick **Make** on the launcher
-to open the editor on any cart.
+Arrows or WASD move, Z or Space is A, X is B, Enter runs, Super (Cmd, the
+Windows key) opens the menu, Esc quits the simulator. The mouse is the
+touchscreen. Pick **Make** on the launcher to open the editor on any cart.
 
 ```bash
 # the 1024x600 desktop
 .venv/bin/python tools/simulate_desktop.py --size 1024x600 --windowed
 
 # run one cart
-.venv/bin/python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
+.venv/bin/python tools/simulate_desktop.py --cart system_carts/moybyte.star_catcher.moy
 
 # a headless tour, recorded to a GIF (how the GIFs above are made)
 .venv/bin/python tools/simulate_desktop.py --demo --gif demo.gif
@@ -150,7 +150,7 @@ def _draw():
 ```
 
 For Lua, set `"runtime": "lua"` in the manifest and write `main.lua`.
-`system_carts/sakura_lua.moy` is a Lua copy of `system_carts/sakura.moy`, and a
+`system_carts/moybyte.sakura_lua.moy` is a Lua copy of `system_carts/moybyte.sakura.moy`, and a
 test checks that they draw the same pixels.
 
 A cart can also be compiled, from C, C++ or Rust (see "Compiled carts" above).
@@ -161,7 +161,7 @@ Doom and Jet Teapot.
 - [`docs/moy_cart_api.md`](docs/moy_cart_api.md) — the verb table.
 - `system_carts/` — the 30 built-in carts, from a 70-line tap game to Brick Siege.
 - [`docs/blocks_tap_game.md`](docs/blocks_tap_game.md) — building
-  `system_carts/tap_game.moy` in the block editor, step by step.
+  `system_carts/moybyte.tap_game.moy` in the block editor, step by step.
 
 ## The spec
 

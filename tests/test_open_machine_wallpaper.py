@@ -12,8 +12,13 @@ def test_open_machine_wallpaper_is_static_moy64_cart(tmp_path):
     ws = build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                            font_scale=2, windowed=True)
 
-    assert "open_machine" in ws.look.wallpaper_options()
-    ws.look.select_wallpaper("open_machine", persist=False)
+    assert "moybyte.open_machine" in ws.look.wallpaper_options()
+    # A pick is a change to the theme (docs/theming_2026-09.md D6): `custom`
+    # names the cart, and the desk shows it from the next frame.
+    assert ws.look.select_wallpaper("moybyte.open_machine") == 0
+    ws.look.tick(0.0)
+    assert ws.look.theme_name == "custom"
+    assert ws.look.wallpaper_id == "moybyte.open_machine"
     assert ws.wallpaper._wp_draw is not None
     assert ws.wallpaper._wp_update is None
     assert not ws.wallpaper.is_animating(1 / 60)

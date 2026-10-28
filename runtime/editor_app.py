@@ -5,6 +5,7 @@
 #   EditorApp.draw_zone  the tab ladder, UNDO/REDO and PLAY
 #   EditorApp.zone_tap   hit-test the ladder and dispatch
 #   EditorApp.save_tab   route one tab's commit to its owner
+#   EditorApp.open_theme  the theme mode: a theme package's Config and Sprites
 """The EDITOR app (Stage 3 of docs/history/shell_ux_technical_plan_v1.md).
 
 `EditorApp` is the console's authoring app: ONE app, opened on a `Project`, whose
@@ -42,32 +43,40 @@ so the device freezes it (same pattern as project.py/player.py). It stays a leaf
 NAMES/_in aren't needed (it reaches the toolkit through `ws`), and CodeEditor/
 PaintEditor are imported from the shared editor cores (the same bare-or-package
 fallback console.py uses: bare names on the device / once host_app has aliased them,
-`runtime.X` when a test loads this module directly).
+`runtime.X` when a test loads this module directly) -- PaintEditor at the paint
+tab's first build, so the shell's start does not load the paint/map cores.
 """
 
 try:
-    from editors import CodeEditor, PaintEditor
+    from editors_code import CodeEditor
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import CodeEditor, PaintEditor
+    from runtime.editors_code import CodeEditor
 
 try:
-    from bar_layer import _BAR_ICON, _ZONE_LEFT_GAME
+    from bar_layer import _BAR_ICON
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import _BAR_ICON, _ZONE_LEFT_GAME
+    from runtime.bar_layer import _BAR_ICON
+
+try:
+    from code_layer import _CODE_INSET
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.code_layer import _CODE_INSET
 
 
 # The Editor's lent left zone (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46
-# zoned bar): PROJECTS (back to the picker) + the tab ladder + UNDO/REDO + PLAY, in
-# the spec Section 6 order (Projects -> Config -> Blocks -> Code -> Sprites -> Map
-# -> Music -> UNDO -> REDO -> PLAY), rendered as icons inside the rect the bar lends
-# it. Each entry is (tab_name_or_None_or_ACTION, icon_kind); `tab_name` is what
-# EditorApp.tab equals when that icon's destination is showing (so draw_zone can
-# highlight it). PROJECTS (_ZONE_PROJECTS -> open_picker, edit another project) and
+# zoned bar): the tab ladder + UNDO/REDO + PLAY, in the spec Section 6 order
+# (Config -> Blocks -> Code -> Sprites -> Map -> Scene -> Music -> UNDO -> REDO ->
+# PLAY), rendered as icons inside the rect the bar lends it. Each entry is
+# (tab_name_or_None_or_ACTION, icon_kind); `tab_name` is what EditorApp.tab equals
+# when that icon's destination is showing (so draw_zone can highlight it).
 # UNDO/REDO (_ZONE_UNDO/_ZONE_REDO -> ws.history.undo()/redo(), #88) are ACTIONS, not
-# destinations, so they're never highlighted; so is PLAY (None).
+# destinations, so they're never highlighted; so is PLAY (None). There is no way to
+# another project on the bar: the Editor's X backs out one level, to wherever it
+# was opened from -- the home's Make tab is the one projects list
+# (docs/shell_layout_2026-10.md §12).
 #
 # SAVE is GONE (#111, owner decision 2026-07-21): autosave is the only model now --
-# an idle-typing debounce commits mid-edit, and every hard exit (PLAY, PROJECTS, a
+# an idle-typing debounce commits mid-edit, and every hard exit (PLAY, a
 # window/context-X, a workspace swap, going home) hard-commits whichever tab was
 # showing via save_current() -- the exact verb the SAVE icon used to dispatch, now
 # called automatically instead of from a tap. A TAB SWITCH owes its commit instead
@@ -75,14 +84,26 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # that paints the destination pays, and every hard exit pays the debt first. See
 # set_tab/leave below and the exit-path call sites in console.py/wm_windowed.py.
 #
-# Fits 320px: 11 icons * 16px = 176px inside the ~202px lent zone -- UNDO/REDO (#88)
-# pushed the ladder to 11, well inside budget; _ZONE_STRIDE keeps the 0-gap stride
-# (icons flush) that #88 settled on for the (then 12-icon) ladder.
-_ZONE_PROJECTS = "\x00projects"  # sentinel: back to the project-picker (never a real tab)
+# The narrow bar's rule, one for every theme and mode: two groups, the tabs
+# (where am I) and the actions (undo, redo, Play), parted by a group gap of at
+# least _GROUP_GAP with a hairline in it (owner, 2026-10-19, D-02). The icons
+# in a group share what the zone has left out as gaps of up to _LADDER_GAP
+# each, so they never abut; the group gap takes the rest, up to _GROUP_MAX.
+# The open tab carries its name only where the whole ladder holds it at the
+# full gap -- the name goes before the icons squeeze. On the T-Deck's 320px
+# (10 icons, the open one widened by the tab's pad, in a ~191px zone) that
+# is icon-only with 2px gaps and a 9px group gap. Each icon is the font
+# scale's, centred in a square as tall as the band: under the tap floor
+# (#203) that square is the tap target, and no shipped bar drops an item --
+# where the zone is narrower than the whole ladder at its least gaps
+# (`zone_need`), the bar gives it its status widgets' room
+# (`BarLayer._make_room`; owner, 2026-10-20: the Guition S3's Editor shows
+# every item).
 _ZONE_UNDO = "\x00undo"          # sentinel: UNDO icon -> ws.history.undo() (#88)
 _ZONE_REDO = "\x00redo"          # sentinel: REDO icon -> ws.history.redo() (#88)
+_ZONE_STOP = "\x00stop"          # sentinel: Stop, while a playtest runs (D-23)
+_ZONE_RESTART = "\x00restart"    # sentinel: Restart, beside it
 _ZONE_TABS = (
-    (_ZONE_PROJECTS, "projects"),  # <- back to the PROJECT-PICKER (edit another project)
     ("cards", "edit"),
     ("blocks", "blocks"),
     ("code", "code"),
@@ -94,29 +115,43 @@ _ZONE_TABS = (
     (_ZONE_REDO, "redo"),   # -> ws.history.redo() (#88), dimmed with nothing to redo
     (None, "run"),          # PLAY
 )
-_ZONE_STRIDE = _BAR_ICON        # 0-gap ladder (#88) -- see the block comment above
+_OPENS = ("cards", "blocks", "code", "paint", "map", "scene", "music")   # the tabs
+_LADDER_GAP = 4                 # the narrow bar's widest gap between icons, at fs 1
+_GROUP_GAP = 8                  # ...the least gap between the tabs and the actions
+_GROUP_MAX = 12                 # ...and the most
+_ZONE_TAIL = 6                  # ...and its room after Play: with the bar's gap, Play's
+                                # ink stands 10 px clear of the status icons (R4-26)
+_PILL_CLEAR = 8                 # the labelled ladder: open pill to the next tab's icon, at fs 1
+_PILL_PAD = 9                   # ...the most each pill grows on either side, room given
+_HIST_LEAD = 12                 # ...the last tab to undo
+_HIST_GAP = 8                   # ...undo to redo
+_PLAY_SLOT = 170                # the desk Editor's Play slot, Play or Restart and Stop
 
 # The tabs save_tab() can route a commit to -- and the only ones commit_later
 # will owe -- derived from the ladder rather than listed a second time. The
-# sentinels (PROJECTS/UNDO/REDO) and PLAY (None) are actions; "theme" is the
-# EDIT-ICONS reuse of the paint renderer and commits through its own leave, so
-# it is not a tab here either.
+# sentinels (UNDO/REDO) and PLAY (None) are actions; the theme mode's two tabs
+# commit through their ThemeDoc (runtime/theme_editor.py), so they are not
+# tabs here either.
 COMMIT_TABS = tuple(t for t, _g in _ZONE_TABS
                     if isinstance(t, str) and not t.startswith("\x00"))
 
-# The SHELF-density zone (visual identity v1 Phase 3, the Studio mockup): the six
-# tabs as LABELED chips (icon + name) via ui.tab_row, PROJECTS as an icon chip on
-# the left, PLAY a labeled button on the right (SAVE dropped, #111). The 320x240
-# baseline keeps the frozen 9-icon ladder above, byte-identical.
+# The SHELF-density zone (visual identity v1 Phase 3, the Studio mockup): the seven
+# tabs as LABELED chips (icon + name) via ui.tab_row, PLAY a labeled button on the
+# right (SAVE dropped, #111). The 320x240 baseline keeps the icon ladder above.
 _TAB_CHIPS = (
-    ("cards", "CONFIG", "edit"),
-    ("blocks", "BLOCKS", "blocks"),
-    ("code", "CODE", "code"),
-    ("paint", "SPRITES", "paint"),
-    ("map", "MAP", "map"),
-    ("scene", "SCENE", "scene"),
-    ("music", "MUSIC", "music"),
+    ("cards", "Config", "edit"),
+    ("blocks", "Blocks", "blocks"),
+    ("code", "Code", "code"),
+    ("paint", "Sprites", "paint"),
+    ("map", "Map", "map"),
+    ("scene", "Scene", "scene"),
+    ("music", "Music", "music"),
 )
+
+# The slot of a theme's icon set (runtime/iconsets.py) a ladder icon draws
+# where it differs from the IconSheet's kind: the sliders for Config (the gear
+# is Settings', owner 2026-10-19) and the face for Sprites.
+_SET_KIND = {"edit": "sliders", "paint": "sprite", "run": "play"}
 
 # The `ws` attribute holding each tab's layout owner -- the object whose
 # `relayout(w, h, fs, cs)` rebuilds that tab's geometry from the live canvas
@@ -130,12 +165,34 @@ _TAB_LAYOUT_UI = {
     "map": "map_ui",
     "scene": "scene_ui",
     "music": "music_ui",
+    "theme_config": "theme_config_layer",
+    "theme_sprites": "theme_sprites_layer",
 }
+# The theme mode's tabs (runtime/theme_editor.py's TAB_CONFIG, TAB_SPRITES).
+THEME_TABS = ("theme_config", "theme_sprites")
+
+
+def _te():
+    """runtime/theme_editor.py, imported at the theme mode's first use."""
+    try:
+        import theme_editor
+    except ImportError:  # pragma: no cover - host fallback when not yet aliased
+        from runtime import theme_editor
+    return theme_editor
 
 try:
-    import ui as _ui
+    from editor_panes import WORKSPACES as _WORKSPACES
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editor_panes import WORKSPACES as _WORKSPACES
+
+try:
+    import iconsets as _iconsets
+    import ui as _ui
+    import ui_draw as _ui_draw
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import iconsets as _iconsets
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
@@ -149,6 +206,7 @@ class EditorApp:
     def __init__(self, ws, names=None):
         self.ws = ws
         self._NAMES = names
+        self._row_memo = None         # (inputs, the desk row's layout)
         self.project = None           # the open cart's workspace (set by open())
         # Stage 4 (#46 zoned bar): bumped whenever the active tab ACTUALLY changes --
         # the ONLY thing that varies in the Editor's lent left zone (which icon is
@@ -164,16 +222,30 @@ class EditorApp:
         # interaction and on every hard exit -- and the same exposure: one
         # frame, since `ws.defer` drains at that frame's own tail.
         self._pending = []
+        # E-02: a map, scene or code edit waits for the next Play (the run
+        # reads its own map and scenes, `ProjectStore.play_world`); Restart
+        # wears a dot while one made during the playtest waits. A scene or
+        # code edit made in a desk pane other than the one Play leaves owes
+        # the next Play a fresh start (`start_owed`, its tabs).
+        self.restart_owed = False
+        self.start_owed = ()
+        # The theme mode (runtime/theme_editor.py): the theme package open in
+        # place of a cart (a ThemeDoc, else None), where Done returns to, and
+        # the tab the Editor held before it.
+        self.theme = None
+        self._theme_back = None
+        self._theme_was = None
+        # A tab the last zone tap opened (the ladder's or the theme mode's):
+        # the bar's keys then go down into it (`BarLayer.focus_keys`).
+        self.zone_opened = False
         self.tab = "cards"            # active view -- ws.menu_view projects onto this:
                                       # "cards" | "code" | "paint" | "map" | "blocks"
-                                      # | "music" | "theme" (theme = the EDIT-ICONS
-                                      # reuse of the paint renderer, set via the
-                                      # menu_view setter, not a cart-editor tab)
+                                      # | "music" | "theme_config" | "theme_sprites"
 
     # -- the active tab (a self-defending property, Stage 4 review fix) -----------
     #
     # `tab` bumps zone_gen on every ACTUAL change, regardless of the write site --
-    # set_tab, the ws.menu_view setter (ThemeLayer sets "theme"), _open_workspace all
+    # set_tab, the ws.menu_view setter, _open_workspace all
     # assign `.tab`/`ws.menu_view` DIRECTLY -- so BarLayer's strip-cache key can trust
     # zone_gen instead of any writer remembering to bump it (mirrors Launcher.sel).
     # Idempotent writes (set_tab called with the current tab) don't bump, so the zoned
@@ -205,7 +277,8 @@ class EditorApp:
         break is reported and where the file that caused it is offered."""
         self.project = project
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        self._drop_theme()
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         # Another cart may ladder differently (a compiled cart without `src/`
         # has no Code tab), so the lent zone repaints whatever tab it lands on.
         self.zone_gen += 1
@@ -214,15 +287,13 @@ class EditorApp:
 
     def open_paint(self):
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
-        ws._editing_icons = False        # a CART sheet, not the system theme
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.paint_status = None
         ws.set_menu_view("paint")
 
     def open_map(self):
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
-        ws.save_status = None
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.map_ui.on_open()          # fresh gesture/zoom state (#37)
         ws.set_menu_view("map")
         # Open with the camera at the top-left so the whole map shows at the default
@@ -233,7 +304,7 @@ class EditorApp:
 
     def open_blocks(self):
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         # NB: don't pre-clear blk_status here -- set_menu_view("blocks") sets the
         # "CODE LOCKED" notice when it builds the editor in protected mode, and
         # clearing it after would hide the data-loss guard's message.
@@ -244,8 +315,7 @@ class EditorApp:
         actor view over the cart's default scene. Mirrors open_map -- reset
         gesture/zoom state, then build via set_menu_view("scene")."""
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
-        ws.save_status = None
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.scene_ui.on_open()        # fresh gesture/zoom/props state
         ws.set_menu_view("scene")
         # Open with the camera at the world origin so the game viewport's frame
@@ -259,10 +329,89 @@ class EditorApp:
         cart's AudioBank. Mirrors open_map -- reset preview state, then build the
         editor via set_menu_view("music")."""
         ws = self.ws
-        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
-        ws.save_status = None
+        ws.wm.activate("menu")   # Stage 6e: spawn/return the Editor on the back-stack
         ws.music_ui._stop_music_preview()
         ws.set_menu_view("music")
+
+    # -- the theme mode (runtime/theme_editor.py) ----------------------------------
+
+    def open_theme(self, doc, back):
+        """Open the Editor on a theme package (`doc`, a ThemeDoc) in place of
+        a cart: its Config tab, then Sprites, nothing a cart has. A cart's tab
+        the Editor held is written first. Done returns to `back`, the
+        back-stack kind Edit theme… was opened from."""
+        ws = self.ws
+        if self.theme is None:
+            if self.project is not None and self.project is ws.project:
+                self.save_current()
+            self._theme_was = self.tab
+        else:
+            self.theme.commit()
+        self.theme = doc
+        self._theme_back = back
+        ws.editor = doc.ed
+        ws.history.drop_code_history()
+        ws.wm.activate("menu")
+        desk = getattr(ws, "_editor_desk", None)
+        if desk is not None:
+            desk.theme_shown(True)
+        self.zone_gen += 1
+        self.theme_tab("theme_config")
+
+    def theme_tab(self, tab):
+        """The theme mode's tab `tab` shown: the one left saves softly (a
+        switch is no exit), the keyboard in text mode for Config."""
+        ws = self.ws
+        doc = self.theme
+        if doc is None:
+            return
+        ws._dirty = True
+        if tab != self.tab and self.tab in THEME_TABS:
+            doc.save_tab(self.tab, soft=True)
+        self.tab = tab
+        self.build_tab(tab)
+        desk = self._desk()
+        if desk is not None:
+            desk.follow()
+        else:
+            self._relayout_tab(tab)
+        ws._set_text_mode(tab == "theme_config")
+        ws.bar_layer.invalidate()
+
+    def close_theme(self):
+        """Done (the bar's ‹, K, Esc, B): the theme's tabs written, the Editor
+        back to where Edit theme… was opened from."""
+        if self.theme is None:
+            return
+        back = self._theme_back
+        self._drop_theme()
+        ws = self.ws
+        ws._dirty = True
+        if back is not None and back != "menu":
+            ws.wm.goto(back)
+        else:
+            ws.wm.goto(ws.wm.root_kind())
+
+    def _drop_theme(self):
+        """Leave the theme mode where it is open: its tabs hard-committed, the
+        Editor's buffer and tab its own again."""
+        doc = self.theme
+        if doc is None:
+            return
+        ws = self.ws
+        doc.commit()
+        self.theme = None
+        if ws.editor is doc.ed:
+            ws.editor = None
+        ws.history.drop_code_history()
+        ws._set_text_mode(False)
+        desk = getattr(ws, "_editor_desk", None)
+        if desk is not None:
+            desk.theme_shown(False)
+        self.tab = self._theme_was if self._theme_was not in (None,) + THEME_TABS else "cards"
+        self._theme_was = None
+        self.zone_gen += 1
+        ws.bar_layer.invalidate()
 
     # -- tab builders (the old set_menu_view body, moved verbatim) -----------------
 
@@ -272,6 +421,10 @@ class EditorApp:
         source of truth; ws.menu_view projects onto it."""
         ws = self.ws
         ws._dirty = True             # sub-view change always repaints (#44)
+        if view in THEME_TABS:
+            self.theme_tab(view)
+            return
+        self._drop_theme()
         if view == "code" and ws.cart is not None and not ws.code_sources():
             # A compiled cart that ships no `src/` has no Code tab: there is no
             # text behind its main.wasm to show (docs/wasm_tier_plan_2026-09.md).
@@ -299,6 +452,40 @@ class EditorApp:
             self.commit_later(self.tab)
         self.tab = view              # the `tab` setter bumps zone_gen on a real change
                                      # (Stage 4, #46: the lent zone's highlight moved)
+        self.build_tab(view)
+        desk = self._desk()
+        if desk is None:
+            self._relayout_tab(view)
+        ws._set_text_mode(view == "code")
+        # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
+        # Master". "cards" isn't an editor, so it's ignored by note().
+        ws.ach.note("editor", view)
+
+    def focus_tab(self, view):
+        """The desk Editor moved the keys to the pane showing tab `view`
+        (runtime/editor_desk.py): the Editor's tab is it, built, with the
+        keyboard's text mode -- and nothing is committed: moving focus
+        between panes is no boundary (EDITOR_LAYOUT.md's frame)."""
+        ws = self.ws
+        self.tab = view
+        self.build_tab(view)
+        ws._set_text_mode(view == "code" or view == "theme_config")
+        ws.ach.note("editor", view)
+
+    def _desk(self):
+        """The desk Editor where it shows workspaces, else None."""
+        desk = getattr(self.ws, "editor_desk", None)
+        return desk if desk is not None and desk.active() else None
+
+    def build_tab(self, view):
+        """Build tab `view`'s editor over the open cart where it has none:
+        what entering the tab needs before it draws (a desk workspace builds
+        every pane it shows)."""
+        ws = self.ws
+        if view in THEME_TABS:
+            if self.theme is not None and view == "theme_config":
+                ws.editor = self.theme.ed
+            return
         if view == "code":
             if ws.editor is None and ws.cart is not None:
                 # WHICH script (SPEC.md 4, #89): `ws.code_file` is the Code tab's
@@ -325,11 +512,15 @@ class EditorApp:
                     ws.code_err_row = None
         elif view == "paint":
             if ws.paint is None and ws.sheet is not None:
+                try:
+                    from editors_paint_map import PaintEditor
+                except ImportError:  # pragma: no cover - host fallback
+                    from runtime.editors_paint_map import PaintEditor
                 ws.paint = PaintEditor(ws.sheet)
         elif view == "map":
             # Mirror the paint branch: build the MapEditor over the cart's TileMap
-            # + sheet (both always exist after open()). Edits go straight into the
-            # live tilemap, so a running cart picks them up via tilemap.gen (#32).
+            # + sheet (both always exist after open()). Edits go into the Editor's
+            # tilemap; a run takes them at the next Play (`play_world`, E-02).
             ws.map_ui.build()
         elif view == "scene":
             # Mirror the map branch: build the SceneEditor over the cart's
@@ -348,24 +539,15 @@ class EditorApp:
             # bank; the tab-leave debt / a PLAY hard-commit persists it to
             # sounds.json (#111).
             ws.music_ui.build()
-        self._relayout_tab(view)
-        ws._set_text_mode(view == "code")
-        # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
-        # Master". "cards" isn't an editor, so it's ignored by note().
-        ws.ach.note("editor", view)
 
     def _relayout_tab(self, view):
         """Re-derive the entered tab's geometry from the live canvas.
 
         Every tab layout is a pure function of (canvas size, effective font scale),
-        but the objects are shared singletons on `ws`, so ANOTHER tab can overwrite
-        one and leave it there. The Blocks+Scene workspace binds `ws.scene_ui.layout`
-        to its right pane (block_editor_ui._layout_workspace) and nothing unbound it,
-        so the Scene tab opened afterwards drew into that pane -- at 800x480/3x a rect
-        of NEGATIVE width, off the right edge (#216). Rebuilding the ENTERED tab's own
-        layout is what makes that whole class impossible instead of fixing one pair:
-        whatever a tab inherits, it re-derives before it draws. It runs after the tab's
-        editor is built, so the clamps inside each `relayout` see the live editor."""
+        but the objects are shared singletons on `ws` that another path can leave
+        bound to other geometry (#216), so whatever a tab inherits, it re-derives
+        before it draws. It runs after the tab's editor is built, so the clamps
+        inside each `relayout` see the live editor."""
         ws = self.ws
         if view == "code":
             ws._relayout_code()              # ws owns the CodeLayout handle
@@ -382,21 +564,21 @@ class EditorApp:
 
     # -- PLAY: commit the tab, then run the cart (spec Section 2/Section 6) ---------
 
-    def leave(self):
+    def leave(self, restart=False):
         """PLAY (spec Section 6): leave the current tab by RUNNING the cart. Commits/
         applies the tab's freshest edit, (re)starts the cart, and hands it to the
         Player -- recording SELF (the Editor) as the run caller (Stage 3b), so the
-        cart's exit (pause QUIT here, hold-BACKSPACE from Stage 5) returns to the
+        cart's exit (the pause menu's Quit, quit()) returns to the
         Editor on THIS tab (spec Section 2's launch-and-return), not to the home root.
         This is the deliberate navigation-semantics change: today's implicit run-on-
         close returned to the launcher; PLAY returns to the Editor."""
+        if self.theme is not None:
+            return                   # the theme mode runs nothing
         ws = self.ws
         ws._dirty = True             # back to the desktop repaints (#44)
         ws._set_text_mode(False)
         if self.tab == "music":
             ws.music_ui._stop_music_preview()   # don't let a preview leak into the cart resume
-        if self.tab == "scene" and ws.scene_ui.tag_edit:
-            ws.scene_ui._tag_commit()   # PLAY mid-typing keeps the typed tag (#85)
         # (#111) PLAY is a hard-commit trigger too -- autosave is the only model now
         # (no SAVE tap exists to rely on), so persist whatever the active tab holds
         # BEFORE running. Config is the one exception: it keeps its OWN commit below,
@@ -404,6 +586,11 @@ class EditorApp:
         # half-applied edit) -- every other tab commits unconditionally, here.
         if self.tab != "cards":
             self.save_current()
+        owed = self.start_owed
+        self.start_owed = ()
+        for t in owed:
+            if t != self.tab:
+                self.save_tab(t)
         # Returning to the desktop from the code editor must run whatever source is
         # in the editor now (the kid may have fixed a crash and kept typing, or just
         # edited and left). Re-_start() with the editor text so the FIXED cart
@@ -424,8 +611,8 @@ class EditorApp:
             # Scenes are consumed ONCE at _init (#85 Variant A) -- a resumed cart
             # would never re-read scene(), so PLAY from the scene tab re-starts:
             # the fresh _init spawns the placement the kid just made (the editor
-            # live-syncs each gesture into ws.scenes; Player.start resets the
-            # parse cache). Mirrors the blocks tab's re-run-on-leave.
+            # live-syncs each gesture into ws.scenes; Player.start copies them
+            # for the run). Mirrors the blocks tab's re-run-on-leave.
             if ws.cart is not None:
                 ws._start()
         elif self.tab == "cards":
@@ -436,6 +623,15 @@ class EditorApp:
             # start so a crash doesn't overwrite config with a half-applied edit.
             if ws.cart is not None and ws._start():
                 ws._save_config()
+        project = ws.project
+        if ws.cart is not None and self.tab not in ("code", "blocks", "scene", "cards") \
+                and (restart or owed or project.play_world()):
+            ws._start()              # Restart: from the start, whatever the tab
+        else:
+            project.play_world()     # E-02: the Editor's map and scenes, where edited
+        if self.restart_owed:
+            self.restart_owed = False
+            self.zone_gen += 1
         ws.run(ws.project, self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
@@ -463,41 +659,424 @@ class EditorApp:
         query ws.history.can_undo()/can_redo() -- an SD-backed journal read, but one
         that only runs HERE, inside a cache-miss re-render (never per-frame)."""
         ws = self.ws
-        NAMES = self._NAMES
-        if not ws.layout._base:
+        th = ws.theme_colors
+        sets = ws.icon_spec() is not None
+        desk = self._desk()
+        if self.theme is not None:
+            if desk is not None:
+                _te().draw_row(self, cv, rect)
+            else:
+                _te().draw_zone(self, cv, rect)
+            return
+        if desk is not None:
+            self._draw_row(cv, th, rect, desk, sets)
+            return
+        if not self._compact(rect):
             # SHELF density (visual identity v1 Phase 3): labeled tabs + a labeled
             # PLAY button -- the Studio mockup's tab row, on the zoned bar (SAVE
-            # dropped, #111).
-            th = ws.theme_colors
-            proj, tabs_area, play_r = self._zone_parts(rect)
+            # dropped, #111). Under a theme's icon set the tabs take its icons
+            # and Play is its bare glyph and label in `value`.
+            tabs_area, play_r = self._zone_parts(rect)
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
-            _ui.button(cv, th, proj, "", glyph="projects", kind="normal",
-                       glyph_draw=ws._glyph)
-            _ui.tab_row(cv, th, tabs_area, self._chips(), self.tab,
-                        icon_for=getattr(ws, "_icon_image_keyed", None),
-                        ink=band_ink)
-            _ui.button(cv, th, play_r, "PLAY", kind="play", glyph="run",
-                       glyph_draw=ws._glyph)
-            return
-        x0, y0, w, h = rect
-        ic = h if h > 0 else _BAR_ICON      # icon side (16*fs)
-        stride = ic                         # 0-gap ladder (#88) -- see _ZONE_STRIDE
-        for i, (tab, glyph) in enumerate(self._ladder()):
-            x = x0 + i * stride
-            if x + ic > x0 + w:
-                break                       # ran out of lent width -- draw what fits
-            if tab is not None and tab == self.tab:
-                # Frozen indigo on the dark bar; the theme hilite on a light band
-                # (the base ladder under a light variant, owner 2026-07-23).
-                cv.rect(x, y0, ic, ic,
-                        ws.theme_colors["hilite"]
-                        if ws.theme_colors.get("bar_light") else NAMES["indigo"])
-            if tab == _ZONE_UNDO:
-                self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_undo())
-            elif tab == _ZONE_REDO:
-                self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_redo())
+            chips = self._chips()
+            draw = None
+            rects = self._shelf_rects(tabs_area)
+            if sets:
+                # The open tab's icon takes the ink its name takes on the
+                # current mark (Moy's `current.ink`), the rest the chrome's.
+                open_kind = next((k for t, _l, k in chips if t == self.tab), None)
+                draw = self._set_icon(cv, open_kind=open_kind,
+                                      open_ink=_ui_draw.current_ink(cv, th),
+                                      lead=bool(rects) and rects[0][2])
+            icon_for = getattr(ws, "_icon_image_keyed", None)
+            extra = self._shelf_layout(tabs_area)[1]
+            for (tid, label, kind), (_t, r, labels_on) in zip(chips, rects):
+                _ui_draw.tab(cv, th, r, tid == self.tab, label, labels_on, band_ink,
+                             icon_for(kind) if icon_for is not None else None,
+                             icon_draw=draw, kind=kind, pad=extra)
+            hist = self._history_rects(rects)
+            if hist is not None:
+                (ux, uy, ic, _h), (rx, ry, _w, _h2) = hist
+                self._draw_history_icon(cv, "undo", ux, uy, ic, ws.history.can_undo())
+                self._draw_history_icon(cv, "redo", rx, ry, ic, ws.history.can_redo())
+            if self.playing():
+                restart_r, stop_r = self._run_rects(play_r)
+                self._bare_action(cv, restart_r, "Restart", "rotate")
+                self._bare_action(cv, stop_r, "Stop", None)
+            elif sets:
+                self._bare_play(cv, play_r)
             else:
-                ws._icon(glyph, x, y0, cv)
+                _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
+                           glyph_draw=ws._glyph)
+            return
+        # The narrow bar (the Studio's T-Deck mockup): one icon a tab, the open
+        # one on the bar's current mark with its name where the bar has the
+        # room, then UNDO, REDO and PLAY.
+        label = self._open_label(rect)
+        rects = self._ladder_rects(rect)
+        cut = self._group_cut(rects)
+        if cut:
+            # The hairline between the groups, in the middle of their gap.
+            a, b = rects[cut - 1][2], rects[cut][2]
+            fs = self._zone_scale()
+            cv.rect((a[0] + a[2] + b[0]) // 2, b[1] + 3 * fs, fs, b[3] - 6 * fs,
+                    th["border"])
+        box = _BAR_ICON * self._zone_scale()
+        for tab, glyph, r in rects:
+            x, y0, w, ic = r
+            ink = None
+            if tab is not None and tab == self.tab:
+                ink = self._open_mark(cv, r)
+                if label:
+                    _ui_draw.tab(cv, th, r, False, label, True,
+                                 th["chrome_ink"] if ink is None else ink,
+                                 ws._icon_image_keyed(glyph),
+                                 icon_draw=self._set_icon(cv, ink) if sets else None,
+                                 kind=glyph)
+                    continue
+            # the icon centred in its cell, which is the tap target's square
+            x += (w - box) // 2
+            y = y0 + (ic - box) // 2
+            if tab == _ZONE_UNDO:
+                self._draw_history_icon(cv, glyph, x, y, box, ws.history.can_undo())
+            elif tab == _ZONE_REDO:
+                self._draw_history_icon(cv, glyph, x, y, box, ws.history.can_redo())
+            elif tab is None and sets:
+                # Play: the set's bare glyph in `value` (DESIGN.md, Play)
+                self._draw_play(cv, (x, y, box, box), th["value"])
+            else:
+                ws._icon(_SET_KIND.get(glyph, glyph) if sets else glyph, x, y, cv,
+                         ink=ink)
+
+    # -- the desk Editor's row (EDITOR_LAYOUT.md's frame) ---------------------
+
+    def _row_layout(self, rect, desk):
+        """The app's row while the desk Editor shows workspaces: the five
+        workspaces from the left, labelled, or icons with the current one
+        labelled where the row is short; undo and redo at a fixed place, a
+        hairline, then the Play slot, which never changes width.
+        ([(id, label, kind, rect, labelled)], undo rect, redo rect,
+        hairline x, Play slot). Kept for its inputs: the rect, the scale, the
+        workspace shown and the look (its fonts and metrics measure the
+        labels)."""
+        fs = self._zone_scale()
+        key = (tuple(rect), fs, desk.key, self.ws.look.look_gen)
+        got = self._row_memo
+        if got is not None and got[0] == key:
+            return got[1]
+        out = self._row_layout_of(rect, desk, fs)
+        self._row_memo = (key, out)
+        return out
+
+    def _row_layout_of(self, rect, desk, fs):
+        x, y, w, h = rect
+        play_r = (x + w - _PLAY_SLOT * fs, y, _PLAY_SLOT * fs, h)
+        ic = _BAR_ICON * fs
+        cell = max(ic, min(h, 32 * fs))
+        line = play_r[0] - 6 * fs
+        redo_r = (line - 6 * fs - cell, y + (h - cell) // 2, cell, cell)
+        undo_r = (redo_r[0] - cell, redo_r[1], cell, cell)
+        area = (x, y, max(0, undo_r[0] - 12 * fs - x), h)
+        cur = "ws:" + desk.key
+        items = [("ws:" + k, label, kind) for k, label, kind in _WORKSPACES]
+        got = _ui_draw.tab_row_rects(area, [(t, l) for t, l, _k in items], fs, 8 * fs)
+        out = []
+        if len(got) == len(items) and got[0][2]:
+            for (t, label, kind), (_t, r, _on) in zip(items, got):
+                out.append((t, label, kind, r, True))
+            return out, undo_r, redo_r, line, play_r
+        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
+        xx = x
+        for t, label, kind in items:
+            lw = 0
+            if t == cur:
+                one = _ui_draw.tab_row_rects(area, [(t, label)], fs)
+                if one and one[0][2]:
+                    lw = one[0][1][2]
+            cw = lw or ic + 2 * pad
+            if xx + cw > area[0] + area[2]:
+                break
+            out.append((t, label, kind, (xx, y, cw, h), bool(lw)))
+            xx += cw + 4 * fs
+        return out, undo_r, redo_r, line, play_r
+
+    def _draw_row(self, cv, th, rect, desk, sets):
+        ws = self.ws
+        tabs, undo_r, redo_r, line, play_r = self._row_layout(rect, desk)
+        cur = "ws:" + desk.key
+        band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
+        draw = None
+        if sets:
+            kind = next((k for t, _l, k, _r, _o in tabs if t == cur), None)
+            draw = self._set_icon(cv, open_kind=kind,
+                                  open_ink=_ui_draw.current_ink(cv, th), lead=True)
+        icon_for = getattr(ws, "_icon_image_keyed", None)
+        for t, label, kind, r, on in tabs:
+            _ui_draw.tab(cv, th, r, t == cur, label, on, band_ink,
+                         icon_for(kind) if icon_for is not None else None,
+                         icon_draw=draw, kind=kind)
+        ic = _BAR_ICON * self._zone_scale()
+        can_u, can_r = ws.history.can_both()
+        for glyph, r, can in (("undo", undo_r, can_u), ("redo", redo_r, can_r)):
+            self._draw_history_icon(cv, glyph, r[0] + (r[2] - ic) // 2,
+                                    r[1] + (r[3] - ic) // 2, ic, can)
+        fs = self._zone_scale()
+        cv.rect(line, rect[1] + 8 * fs, fs, rect[3] - 16 * fs, th["border"])
+        if self.playing():
+            restart_r, stop_r = self._run_rects(play_r)
+            self._bare_action(cv, restart_r, "Restart", "rotate")
+            if self.restart_owed:
+                d = 6 * fs
+                cv.rrect(restart_r[0] + 10 * fs, restart_r[1] + 8 * fs, d, d, d // 2,
+                         th["value"])
+            self._bare_action(cv, stop_r, "Stop", None)
+        elif sets:
+            self._bare_play(cv, play_r)
+        else:
+            _ui_draw.button(cv, th, play_r, "PLAY", kind="primary", glyph="run",
+                            glyph_draw=ws._glyph)
+
+    def _row_tap(self, px, py, rect, desk):
+        tabs, undo_r, redo_r, _line, play_r = self._row_layout(rect, desk)
+        if _in(px, py, play_r):
+            if self.playing():
+                restart_r, _stop = self._run_rects(play_r)
+                return self._activate_zone_tab(
+                    _ZONE_RESTART if _in(px, py, restart_r) else _ZONE_STOP)
+            return self._activate_zone_tab(None)
+        for t, _l, _k, r, _on in tabs:
+            if _in(px, py, r):
+                return self._activate_zone_tab(t)
+        if _in(px, py, undo_r):
+            return self._activate_zone_tab(_ZONE_UNDO)
+        if _in(px, py, redo_r):
+            return self._activate_zone_tab(_ZONE_REDO)
+        return False
+
+    def _open_mark(self, cv, r):
+        """The open tab's mark on the narrow bar, the home's bar tabs' own: the
+        theme's current mark as a pill. The ink its icon and name take, None
+        for the chrome ink."""
+        fs = self._zone_scale()
+        return _ui_draw.current(cv, self.ws.theme_colors, r, r=5 * fs, fs=fs)
+
+    def _set_icon(self, cv, ink=None, open_kind=None, open_ink=None, lead=False):
+        """A tab's icon_draw: the theme's icon set's slot for a ladder kind,
+        in `ink` (default the chrome ink), and the open tab's kind
+        `open_kind` in `open_ink` where the current mark gives one. `lead`
+        (a labelled chip, whose icon leads its name) moves the icon left by
+        the blank columns before its ink, so the ink starts at the chip's
+        pad as the name ends at it, and the pill's two pads match."""
+        ws = self.ws
+        if ink is None:
+            ink = ws.theme_colors["chrome_ink"]
+        spec = ws.icon_spec() if lead else None
+
+        def draw(kind, r):
+            c = open_ink if open_ink is not None and kind == open_kind else ink
+            slot = _SET_KIND.get(kind, kind)
+            span = _iconsets.ink_span(slot, r[2], r[3], spec) if spec is not None else None
+            if span is not None:
+                r = (r[0] - span[0], r[1], r[2], r[3])
+            return ws.draw_icon(slot, r, c, cv)
+        return draw
+
+    def _draw_play(self, cv, rect, ink):
+        """Play, the set's bare glyph, in a stroke as heavy as the tab
+        icons': a smooth set's 16 px mask draws the triangle's 2-unit stroke
+        1.33 px wide, whose diagonals antialias to a grey the tab icons'
+        verticals do not (Contrast's disabled ink is a grey), so below the
+        20 px mask it draws twice, a column apart -- a 2 px stroke (design
+        review R3-26)."""
+        ws = self.ws
+        if not ws.draw_icon("play", rect, ink, cv):
+            return False
+        spec = ws.icon_spec()
+        if spec is not None and spec[0] == "smooth" \
+                and min(rect[2], rect[3]) < _iconsets.SIZES[1]:
+            ws.draw_icon("play", (rect[0] + 1, rect[1], rect[2], rect[3]), ink, cv)
+        return True
+
+    def _bare_play(self, cv, r):
+        """The shelf's Play under a theme's icon set: the set's glyph and the
+        word, in `value`, on the band with no plate, at the right of `r`
+        (the zone's right end, D-03.3)."""
+        ws = self.ws
+        ink = ws.theme_colors["value"]
+        fs = self._zone_scale()
+        box = _BAR_ICON * fs
+        gap = 4 * fs
+        tw = _ui_draw.print_width("Play", fs)
+        x = r[0] + r[2] - box - gap - tw - 4 * fs
+        self._draw_play(cv, (x, r[1] + (r[3] - box) // 2, box, box), ink)
+        line = _ui_draw.font("ui")[2] * fs
+        cv.print("Play", x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
+
+    def _run_rects(self, play_r):
+        """Restart's and Stop's rects in Play's place while a playtest runs,
+        Stop at the zone's right end."""
+        w = play_r[2] // 2
+        return ((play_r[0], play_r[1], w, play_r[3]),
+                (play_r[0] + w, play_r[1], play_r[2] - w, play_r[3]))
+
+    def _bare_action(self, cv, r, word, slot):
+        """Restart or Stop on the shelf, as Play is drawn: the glyph and the
+        word in `value` with no plate, at the right of `r`. Stop's glyph is a
+        square, ■ (no set draws one)."""
+        ws = self.ws
+        ink = ws.theme_colors["value"]
+        fs = self._zone_scale()
+        box = _BAR_ICON * fs
+        gap = 4 * fs
+        tw = _ui_draw.print_width(word, fs)
+        x = r[0] + r[2] - box - gap - tw - 4 * fs
+        y = r[1] + (r[3] - box) // 2
+        if slot is None:
+            m = 4 * fs
+            cv.rect(x + m, y + m, box - 2 * m, box - 2 * m, ink)
+        elif not ws.draw_icon(slot, (x, y, box, box), ink, cv):
+            ws._glyph(slot, (x, y, box, box), ink, cv)
+        line = _ui_draw.font("ui")[2] * fs
+        cv.print(word, x + box + gap, r[1] + (r[3] - line) // 2, ink, 1)
+
+    def _compact(self, rect):
+        """Whether the zone takes the narrow bar: the labeled row drops a tab,
+        or holds one in a chip narrower than the band is tall -- the square
+        the bar's chrome scale makes every tap target (#203), which the
+        narrow bar's cells are."""
+        tabs_area, _play = self._zone_parts(rect)
+        rects = self._shelf_rects(tabs_area)
+        if len(rects) < len(self._chips()):
+            return True
+        return any(r[2] < rect[3] for _t, r, _on in rects)
+
+    def zone_need(self, h):
+        """The narrowest zone, at band height `h`, whose narrow bar holds
+        the whole ladder (`_ZONE_TABS`, a cart's Code tab included) at the
+        least gaps: each icon in its band-high square, the open one widened
+        by the tab's pad, the least group gap and the tail. The bar gives a
+        zone this narrower than its status widgets' room
+        (`BarLayer._make_room`), so no shipped bar drops undo, redo or Play."""
+        if self.theme is not None:
+            return _te().zone_need(self, h)
+        ic = h if h > 0 else _BAR_ICON
+        fs = self._zone_scale()
+        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
+        return len(_ZONE_TABS) * ic + 2 * pad + (_GROUP_GAP + _ZONE_TAIL) * fs
+
+    def _shelf_rects(self, tabs_area):
+        """The labelled ladder's chips, [(tab, rect, labels_on)]
+        (`_shelf_layout`; the draw and the hit test share it)."""
+        return self._shelf_layout(tabs_area)[0]
+
+    def _shelf_layout(self, tabs_area):
+        """The labelled ladder's chips and the pad each pill grew by:
+        `ui_draw.tab_row_rects` over `_chips`, spaced so the open tab's pill
+        ends _PILL_CLEAR before the next tab's icon, then each pill grown
+        alike on both sides by the room the row leaves, up to _PILL_PAD (the
+        mockup's padded tabs, D-03.3), the gaps kept."""
+        fs = self._zone_scale()
+        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD]
+        slim = [(tid, label) for tid, label, _ic in self._chips()]
+        gap = max(0, _PILL_CLEAR - pad) * fs
+        rects = _ui_draw.tab_row_rects(tabs_area, slim, fs, gap)
+        if len(rects) < len(slim) or not rects or not rects[0][2]:
+            return rects, 0
+        last = rects[-1][1]
+        spare = tabs_area[0] + tabs_area[2] - (last[0] + last[2])
+        extra = max(0, min(_PILL_PAD * fs, spare // (2 * len(rects))))
+        if not extra:
+            return rects, 0
+        out = []
+        x = rects[0][1][0]
+        for tid, (_x, y, w, h), on in rects:
+            out.append((tid, (x, y, w + 2 * extra, h), on))
+            x += w + 2 * extra + gap
+        return out, extra
+
+    def _history_rects(self, rects):
+        """Undo's and redo's icon rects on the labelled ladder, after its
+        last tab (the mockup's, D-03.3), or None with no tab."""
+        if not rects:
+            return None
+        fs = self._zone_scale()
+        ic = _BAR_ICON * fs
+        x, y, w, h = rects[-1][1]
+        ux = x + w + _HIST_LEAD * fs
+        uy = y + (h - ic) // 2
+        return (ux, uy, ic, ic), (ux + ic + _HIST_GAP * fs, uy, ic, ic)
+
+    def _open_label(self, rect):
+        """The open tab's name for the narrow bar, or "" when the whole ladder
+        with that tab labeled does not fit `rect` at the full gap."""
+        label = ""
+        for tid, name, _ic in self._chips():
+            if tid == self.tab:
+                label = name
+        if not label:
+            return ""
+        x, y0, w, h = rect
+        ic = h if h > 0 else _BAR_ICON
+        chip = _ui_draw.tab_row_rects((x, y0, w, ic), [(self.tab, label)],
+                                 self._zone_scale())
+        if not chip or not chip[0][2]:
+            return ""
+        n = len(self._ladder())
+        fs = self._zone_scale()
+        if _GROUP_GAP * fs + _ZONE_TAIL * fs + (n - 1) * ic + chip[0][1][2] > w:
+            return ""
+        return label
+
+    def _ladder_rects(self, rect):
+        """The narrow bar's icons, [(tab, glyph, rect)] (`_ladder_layout`)."""
+        return self._ladder_layout(rect)[0]
+
+    def _ladder_layout(self, rect):
+        """The narrow bar's icons, ([(tab, glyph, rect)], gap), as many as
+        `rect` less _ZONE_TAIL at its end holds: square, as tall as the lent
+        band, `gap` apart within a group -- the zone's spare width, less the
+        least group gap, shared out up to _LADDER_GAP each, the full gap where
+        the open tab is labeled --
+        and the group gap before the first action the rest, from _GROUP_GAP
+        up to _GROUP_MAX. The open tab's is widened by the tab's pad each
+        side, or to a labeled chip with its name (`_open_label`)."""
+        x, y0, w, h = rect
+        ic = h if h > 0 else _BAR_ICON
+        fs = self._zone_scale()
+        w -= _ZONE_TAIL * fs
+        pad = _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
+        label = self._open_label(rect)
+        ladder = self._ladder()
+        n = len(ladder)
+        full = _LADDER_GAP * fs
+        least = _GROUP_GAP * fs
+        if label:
+            wide = _ui_draw.tab_row_rects((x, y0, w, ic), [(self.tab, label)], fs)[0][1][2]
+        else:
+            wide = ic + 2 * pad
+        opened = self.tab in [t for t, _g in ladder]
+        spare = w - (n - 1) * ic - (wide if opened else ic)
+        gap = max(0, min(full, (spare - least) // (n - 2))) if n > 2 else 0
+        group = max(gap, min(spare - (n - 2) * gap, _GROUP_MAX * fs))
+        out = []
+        for tab, glyph in ladder:
+            if tab == _ZONE_UNDO and out:
+                x += group - gap
+            cw = wide if tab is not None and tab == self.tab else ic
+            if x + cw > rect[0] + w:
+                break
+            out.append((tab, glyph, (x, y0, cw, ic)))
+            x += cw + gap
+        return out, gap
+
+    @staticmethod
+    def _group_cut(rects):
+        """The index of the first action in the ladder's `rects` (undo), the
+        group gap's right side, or 0 where the ladder holds no tab before it."""
+        for i, (tab, _g, _r) in enumerate(rects):
+            if tab == _ZONE_UNDO:
+                return i
+        return 0
 
     def _has_code(self):
         """Whether the open cart has a Code tab: every cart whose main is text
@@ -518,19 +1097,19 @@ class EditorApp:
         return tuple(t for t in _TAB_CHIPS if t[0] != "code")
 
     def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
-        """Draw the UNDO/REDO bar icon (#88), dimmed when the journal has nothing to
-        walk. `enabled` reads the themeable 16x16 IconSheet sprite like any other bar
-        icon; disabled falls back to the plain _glyph bitmap tinted dim -- there's no
-        separate 'dimmed' sprite variant, so the fallback vocabulary carries the
-        color instead."""
+        """Draw the UNDO/REDO bar icon (#88), in the theme's `disabled` ink when
+        the journal has nothing to walk. `enabled` draws it like any other bar
+        icon; disabled draws the theme's icon set's in `ui_draw.disabled_ink`,
+        or, where the theme names no set, the plain _glyph bitmap in that ink --
+        an IconSheet has no 'dimmed' sprite variant, so the fallback vocabulary
+        carries the color instead."""
         ws = self.ws
         if enabled:
             ws._icon(glyph, x, y, cv)
-        else:
-            th = ws.theme_colors
-            ws._glyph(glyph, (x, y, ic, ic),
-                      th["chrome_ink_dim"] if th.get("bar_light")
-                      else self._NAMES["dark_blue"], cv)
+            return
+        ink = _ui_draw.disabled_ink(ws.theme_colors)
+        if not ws.draw_icon(glyph, (x, y, ic, ic), ink, cv):
+            ws._glyph(glyph, (x, y, ic, ic), ink, cv)
 
     def _zone_scale(self):
         """The scale the shelf zone is laid out on: the FONT scale, which is also
@@ -549,54 +1128,141 @@ class EditorApp:
 
     def _zone_parts(self, rect):
         """PURE shelf-zone geometry (shared by draw_zone and zone_tap so a strip-
-        cached draw and a later tap can't desync): PROJECTS chip | labeled tab row
-        | PLAY, the button right-aligned (SAVE dropped, #111). Widths scale with
-        the font (`_zone_scale`); every part is as tall as the lent band."""
+        cached draw and a later tap can't desync): the labeled tab row | PLAY,
+        the button right-aligned (SAVE dropped, #111). Widths scale with the
+        font (`_zone_scale`); every part is as tall as the lent band. A zone
+        that opens its bar (a window's strip) puts its first tab's icon on the
+        Code tab's content inset, the column the code starts on (design review
+        R3-10); one after the bar's own widgets stands a gap past them."""
         fs = self._zone_scale()
         gap = 4 * fs
-        proj, rest = _ui.cut_left(rect, 22 * fs)
-        play_r, rest = _ui.cut_right(rest, 54 * fs)
+        play_r, rest = _ui.cut_right(rect, (150 if self.playing() else 54) * fs)
         _pad, rest = _ui.cut_right(rest, gap)
-        tabs_area = (rest[0] + gap, rest[1], max(0, rest[2] - 2 * gap), rest[3])
-        return proj, tabs_area, play_r
+        left = rest[0] + gap
+        ins = _CODE_INSET * fs
+        if rest[0] < ins:
+            left = ins - _ui_draw.metrics("tab")[_ui_draw.TAB_PAD] * fs
+        # undo and redo follow the tabs: the row leaves them their room
+        hist = (_HIST_LEAD + _HIST_GAP + 2 * _BAR_ICON) * fs
+        tabs_area = (left, rest[1], max(0, rest[0] + rest[2] - gap - left - hist), rest[3])
+        return tabs_area, play_r
 
-    def zone_tap(self, px, py, rect=None):
+    def tab_box(self, tab):
+        """Where tab `tab`'s chip is on the bar, (x, y, w, h) on the system
+        canvas -- what the Code tab's scripts menu hangs from -- or None
+        where the bar shows no chip for it (the desk's workspaces)."""
+        if self._desk() is not None or self.theme is not None:
+            return None
+        bl = self.ws.bar_layer
+        got = bl.cell("menu", "zone")
+        if got is None:
+            return None
+        bar = got[0]
+        zone = bl.lent_zone("menu", bar)
+        if zone is None:
+            return None
+        bx, by = bar[1][0], bar[1][1]
+        if not self._compact(zone):
+            for tid, r, _labels_on in self._shelf_rects(self._zone_parts(zone)[0]):
+                if tid == tab:
+                    return (bx + r[0], by + r[1], r[2], r[3])
+            return None
+        for tid, _glyph, r in self._ladder_layout(zone)[0]:
+            if tid == tab:
+                return (bx + r[0], by + r[1], r[2], r[3])
+        return None
+
+    def zone_targets(self, rect):
+        """The zone's targets the keys walk on the bar
+        (`BarLayer.focus_items`), in the bar coordinates of `rect`: the tabs,
+        undo and redo, and Play (Restart and Stop while a playtest runs);
+        the narrow bar's icons. Nothing on the desk, whose rows are the
+        workspaces' own."""
+        if self._desk() is not None:
+            return []
+        if self.theme is not None:
+            return _te().zone_targets(self, rect)
+        if not self._compact(rect):
+            tabs_area, play_r = self._zone_parts(rect)
+            rects = self._shelf_rects(tabs_area)
+            out = [r for _t, r, _on in rects]
+            hist = self._history_rects(rects)
+            if hist is not None:
+                out.extend(hist)
+            if self.playing():
+                out.extend(self._run_rects(play_r))
+            else:
+                out.append(play_r)
+            return out
+        return [r for _t, _g, r in self._ladder_layout(rect)[0]]
+
+    def zone_tap(self, px, py, rect):
         """Hit-test the tab ladder + PLAY and dispatch. `rect` is the lent
-        left-zone rect BarLayer drew into -- the fixed game-canvas _ZONE_LEFT_GAME
-        for a game-canvas tab, or the responsive layout.zone_left for the
-        system-canvas tabs (both hit-test in the same coord space the bar drew
-        in). Defaults to _ZONE_LEFT_GAME so a bare call is unchanged. The icon
+        left-zone rect BarLayer drew into, and (px, py) are in the same bar
+        coordinates (`BarLayer.handle_bar_tap` translates them). The icon
         side + stride derive from the rect height, matching draw_zone; the shelf
         tiers resolve against the SAME _zone_parts geometry the draw used."""
-        if rect is not None and not self.ws.layout._base:
-            proj, tabs_area, play_r = self._zone_parts(rect)
-            if _in(px, py, proj):
-                return self._activate_zone_tab(_ZONE_PROJECTS)
+        desk = self._desk()
+        if self.theme is not None:
+            if desk is not None:
+                return _te().row_tap(self, px, py, rect)
+            return _te().zone_tap(self, px, py, rect)
+        if desk is not None:
+            return self._row_tap(px, py, rect, desk)
+        if not self._compact(rect):
+            tabs_area, play_r = self._zone_parts(rect)
             if _in(px, py, play_r):
+                if self.playing():
+                    restart_r, _stop = self._run_rects(play_r)
+                    return self._activate_zone_tab(
+                        _ZONE_RESTART if _in(px, py, restart_r) else _ZONE_STOP)
                 return self._activate_zone_tab(None)
-            slim = [(tid, label) for tid, label, _ic in self._chips()]
-            for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim,
-                                                        self._zone_scale()):
+            rects = self._shelf_rects(tabs_area)
+            for tid, r, _labels_on in rects:
                 if _in(px, py, r):
                     return self._activate_zone_tab(tid)
+            hist = self._history_rects(rects)
+            if hist is not None and rect[1] <= py < rect[1] + rect[3]:
+                # The band's full height. Undo reaches back across its lead to
+                # the last tab, the two share the gap between them, and redo
+                # reaches on as far as undo's lead, short of Play.
+                (ux, _uy, uw, _uh), (rx, _ry, rw, _rh) = hist
+                fs = self._zone_scale()
+                mid = (ux + uw + rx) // 2
+                if ux - _HIST_LEAD * fs <= px < mid:
+                    return self._activate_zone_tab(_ZONE_UNDO)
+                if mid <= px < min(rx + rw + _HIST_LEAD * fs, play_r[0]):
+                    return self._activate_zone_tab(_ZONE_REDO)
             return False
-        x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
-        ic = h if h > 0 else _BAR_ICON
-        stride = ic                         # 0-gap ladder (#88) -- matches draw_zone
-        for i, (tab, _glyph) in enumerate(self._ladder()):
-            x = x0 + i * stride
-            if x + ic > x0 + w:
-                break
-            if _in(px, py, (x, y0, ic, ic)):
+        rects, _gap = self._ladder_layout(rect)
+        last = len(rects) - 1
+        for i, (tab, _glyph, r) in enumerate(rects):
+            # A tap in a gap between two icons belongs to the nearer one;
+            # the ladder's two ends stay where they are drawn.
+            lo = r[0]
+            if i:
+                a = rects[i - 1][2]
+                lo = (a[0] + a[2] + r[0] + 1) // 2
+            hi = r[0] + r[2]
+            if i < last:
+                hi = (hi + rects[i + 1][2][0] + 1) // 2
+            if _in(px, py, (lo, r[1], hi - lo, r[3])):
                 return self._activate_zone_tab(tab)
         return False
 
     def _activate_zone_tab(self, tab):
         ws = self.ws
-        if tab == _ZONE_PROJECTS:   # <- back to the PROJECT-PICKER (edit another project)
-            ws.open_picker()
-        elif tab == "cards":
+        if tab is not None and tab.startswith("ws:"):
+            desk = self._desk()
+            if desk is not None:
+                desk.switch(tab[3:])
+                self.zone_gen += 1
+            return True
+        self.zone_opened = tab in _OPENS
+        if tab == "cards":
             ws._open_menu()
+        elif tab == "code" and self.tab == "code" and ws.menu_view == "code":
+            ws.code_layer.open_scripts()   # the tab tapped again: the cart's scripts
         elif tab == "code":
             ws.set_menu_view("code")
         elif tab == "paint":
@@ -611,8 +1277,14 @@ class EditorApp:
             ws._open_music()
         elif tab == _ZONE_UNDO:   # UNDO (#88): the shared journal walk, any tab
             ws.history.undo()
+            self.owe_restart(self.tab)
         elif tab == _ZONE_REDO:   # REDO (#88)
             ws.history.redo()
+            self.owe_restart(self.tab)
+        elif tab == _ZONE_STOP:   # Stop: the playtest's window closes (D-23)
+            ws.wm.close_player()
+        elif tab == _ZONE_RESTART:
+            ws.defer(self.restart)
         else:                     # PLAY (tab is None)
             # #184: deferred -- the hard-commit (#154, seconds on a dirty
             # asset tab) + compile + exec + first-world build run behind the
@@ -620,6 +1292,33 @@ class EditorApp:
             # that asked for them.
             ws.defer(ws._leave_menu)
         return True
+
+    def playing(self):
+        """Whether a playtest runs in its own window beside the Editor (the
+        desk): Play then reads Stop, with Restart beside it (D-23)."""
+        wm = self.ws.wm
+        return bool(getattr(wm, "desk_open", lambda: False)()
+                    and "desktop" in getattr(wm, "_wins", {}))
+
+    def owe_restart(self, tab):
+        """E-02: a map, scene or code edit (`tab`) waits for the next Play;
+        while the playtest runs, Restart wears the dot until then."""
+        if tab not in ("map", "scene", "code"):
+            return
+        if tab != "map" and tab not in self.start_owed:
+            self.start_owed = self.start_owed + (tab,)
+        if self.playing() and not self.restart_owed:
+            self.restart_owed = True
+            self.zone_gen += 1
+
+    def restart(self):
+        """Restart: the playtest runs again from its start, with the tab's
+        freshest edit (`leave`, which re-starts the cart); a paused Run
+        slot goes on with it."""
+        desk = self.ws._editor_desk
+        if desk is not None and desk.paused:
+            desk.pause(False)
+        self.leave(restart=True)
 
     def _tab_is_clean(self, tab):
         """True when `tab` PROVABLY has nothing to persist, so save_tab can
@@ -651,6 +1350,8 @@ class EditorApp:
         clean. Code therefore compares content against the last persisted source
         (moy_carts.save_code keeps cart["src"] in step) -- an O(n) compare of a
         few KB, nothing next to the flash write it guards (#154)."""
+        if tab in THEME_TABS:
+            return self.theme is None or self.theme.clean(tab)
         ws = self.ws
 
         def _quiet(hist):
@@ -722,20 +1423,24 @@ class EditorApp:
         if defer is None:              # no frame loop to drain it -- pay now
             self.flush_pending()
         else:
-            defer(self.flush_pending, toast=False)
+            defer(self.flush_pending, toast=False, paints=False)
 
     def flush_pending(self):
         """Pay every commit `commit_later` owes, oldest first. Idempotent and
         cheap when nothing is owed, which is every frame but the one after a
         tab switch. Named for the DEFER diag line, which prints it by name."""
+        wrote = False
         while self._pending:
-            self.save_tab(self._pending.pop(0))
+            if self.save_tab(self._pending.pop(0)):
+                wrote = True
+        if wrote:
+            self.ws._dirty = True      # a commit may move what the Editor shows
 
     def save_current(self):
         """Hard-commit the ACTIVE tab (#111: the autosave-only model's persist verb --
         SAVE was a tap dispatching here; now every exit path calls this directly:
         PLAY (leave), a workspace swap (console.py's _open_workspace, reached from
-        PROJECTS -> pick a project) and going home (console.py's go_home), a
+        another project's CHANGE) and going home (console.py's go_home), a
         window/context-X close (wm_windowed.py's close_window_kind), the OTA reboot
         (update_ui) and the idle debounce (history_router). A TAB SWITCH owes its
         commit instead -- see commit_later -- and this pays that debt first, so a
@@ -745,20 +1450,24 @@ class EditorApp:
         FORCED here: half-typed Python is written rather than lost (#154). Config
         persists via commit_config (no re-run -- PLAY
         runs, handled separately in leave() so a crash can't overwrite good config).
-        The theme (EDIT ICONS) tab has no bar zone, so it's never routed here -- its
-        own CLOSE/leave hard-commits via ws.look.save_icons()
-        (paint_layer.ThemeLayer.leave)."""
+        In the theme mode it is the ThemeDoc's commit, both tabs'."""
         self.flush_pending()
+        if self.theme is not None:
+            self.theme.commit()
+            return
         self.save_tab(self.tab)
 
     def save_tab(self, tab):
         """Route ONE tab's commit to that tab's own persist verb, skipping a tab
         the clean guard can prove has nothing to write. The body `save_current`
         has always had, taking the tab as an argument so a debt `commit_later`
-        recorded can still be paid once the ladder has moved on."""
+        recorded can still be paid once the ladder has moved on. True when
+        it committed."""
         ws = self.ws
+        if tab in THEME_TABS:
+            return self.theme is not None and self.theme.save_tab(tab)
         if self._tab_is_clean(tab):
-            return                   # nothing changed -> nothing to persist
+            return False             # nothing changed -> nothing to persist
         if tab == "code":
             # force: this verb IS the hard-exit path (#154). A kid who goes home or
             # switches tab mid-line keeps the line even though it does not parse
@@ -777,3 +1486,4 @@ class EditorApp:
             ws.block_ui.commit_workspace_scene()   # persist the side-by-side scene pane (#93/#85)
         elif tab == "cards":
             ws._save_config()
+        return True

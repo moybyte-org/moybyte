@@ -30,23 +30,26 @@ CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
 # Custom partition table: the default 4MiBplus table caps the app at ~1.94MB
-# and the frozen console overflows it. OTA-shaped 2x4MB app slots + auto-vfs
-# tail (~7.9MB here); the CSV lives in boards/MOYBYTE_GUITION_P4/ and build.sh
+# and the frozen console overflows it. OTA-shaped 2x7.5 MiB app slots + auto-vfs
+# tail; the CSV lives in boards/MOYBYTE_GUITION_P4/ and build.sh
 # copies it into ports/esp32/ (the filename resolves project-relative).
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-guition-p4.csv"
 
-# BLE notifications arrive from the C6 over ESP-Hosted while MicroPython's
-# synchronous Bluetooth IRQ may be waiting for the VM/GIL during a long display
-# draw.  The upstream 24-buffer pool exhausts under keyboard autorepeat and the
-# hosted VHCI driver then drops reports ("alloc_acl_from_ll failed").  Keep enough
-# host-bound ACL buffers to absorb those render bursts.
+# BLE notifications arrive from the C6 over ESP-Hosted in bursts, and the
+# upstream 24-buffer pool exhausted under keyboard autorepeat ("alloc_acl_from_ll
+# failed", measured while MicroPython's IRQ held them behind a long draw). Keep
+# enough host-bound ACL buffers to absorb a burst.
 CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64
 
-# MicroPython's ESP32 binding executes synchronous BLE callbacks as Python on
-# the NimBLE host task.  The upstream 6144-byte stack is marginal for the P4's
-# HID discovery/subscription state machine (hardware panics symbolized inside
-# mp_execute_bytecode/mp_obj_print_helper during connect).  Keep ample headroom.
-CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288
+# NimBLE's host task runs the kernel's C callbacks (native/moy_input): the
+# 12288 bytes it once had were for MicroPython's BLE handlers running Python
+# on this task.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+# The kernel's BLE keyboard keeps its bonds in NimBLE's own NVS store
+# (native/moy_input/moy_ble_task.c): the pairing survives a reboot with no file
+# on any volume.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
 
 # OTA rollback (#53). An app that does not call
 # esp32.Partition.mark_app_valid_cancel_rollback() on its first boot is REVERTED
@@ -167,3 +170,24 @@ CONFIG_BT_HCI_LOG_DEBUG_EN=n
 # boards first. The one behaviour lost is machine.freq(x) as a SETTER, which
 # starts raising ValueError; the getter is unaffected.
 CONFIG_PM_ENABLE=
+
+# The task watchdog (#160, docs/kernel_spine_2026-10.md section 6). The stock
+# build leaves it on, watching no idle task and only logging a timeout; the
+# kernel subscribes the VM task (native/moy_kernel: the console's frame feeds it
+# once per frame, and the loop leaving it unsubscribes) and a timeout PANICS, so
+# a frame that never ends is a crash record naming what ran. The timeout is
+# above the worst frame this board legitimately takes (the gate reads it with
+# `moy_kernel.watchdog()`).
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
+
+# --- TLS in PSRAM -----------------------------------------------------------
+# mbedtls allocates through the IDF's own hook: with the default, every block
+# under SPIRAM_MALLOC_ALWAYSINTERNAL -- the handshake's bignums, the peer
+# certificate chain, the 4 KB out record -- is internal SRAM, and an HTTPS
+# download (the kernel's updater and Get Carts, native/moy_net/moy_ota.c) took
+# about 22 KB of it at its peak on the Guition S3. External puts all of
+# mbedtls's state in PSRAM; what stays internal is the hardware AES/SHA's DMA
+# bounce, a record at a time. docs/kernel_survival_2026-10.md section 8; the
+# figures are #224's.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

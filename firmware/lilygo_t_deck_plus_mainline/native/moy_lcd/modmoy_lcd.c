@@ -83,9 +83,7 @@
 //               arm, band copy+queue, tail wait. Returns in us.
 //     pump()    a kept no-op since the feeder (2026-08-21) -- the band feed no
 //               longer needs the VM core at all. The verb survives for
-//               verb-set parity with moy_axs; nothing in the tree calls it
-//               (tdeck_panel no longer sets pump_if_pending, so DeviceCanvas's
-//               probe finds nothing and moy_gfx's set_pump is never armed).
+//               verb-set parity with moy_axs; nothing in the tree calls it.
 //     drain()   wait the feeder's frame out (GIL released); the fence verb.
 //               Called at the top of the next flush (where most of it has
 //               already happened behind the render) and before any SD op --
@@ -157,6 +155,7 @@
 // It brings the FreeRTOS headers, the traceISR_EXIT_TO_SCHEDULER guard the
 // yield needs, and the state this file's verbs report on.
 #include "moy_flush.h"
+#include "moy_vol.h"      // the store's bus gate, which this panel's rule is
 #include "moy_fold.h"     // the GAME FOLD: the latch, the fence, the gather
 
 // ---- board facts (device/tdeck_*.py)
@@ -273,6 +272,7 @@ static uint8_t s_madctl;
 // session running unserialized against the feeder -- the panic above, with
 // nothing to point at it.
 static volatile int s_sd_guard;
+static void moy_lcd_sd_gate(int on);
 
 // THE BOARD'S HALF of the engine (moy_flush.h): the ST7789/esp_lcd transport,
 // which is the one thing Phase C said the two S3 panels can never share. All
@@ -372,32 +372,13 @@ static void moy_lcd_free_all(void) {
     moy_flush.frame_clean = true;
 }
 
-// init(nfbs=2, pclk_hz=80000000) -> None
-static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
-    static const mp_arg_t allowed[] = {
-        { MP_QSTR_nfbs,    MP_ARG_INT, { .u_int = 2 } },
-        { MP_QSTR_pclk_hz, MP_ARG_INT, { .u_int = MOY_LCD_PCLK_HZ } },
-    };
-    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
-    mp_arg_parse_all(n_args, pos, kw, MP_ARRAY_SIZE(allowed), allowed, args);
+// ---- the panel brought up: the binding's init() and the kernel's ----------
+// No raise and no VM in here: the kernel's recovery floor (native/moy_kernel)
+// calls it on a boot no VM has run in. `what` names the step that failed.
 
-    if (s_panel != NULL) {
-        // Already up -- a second compositor, or a SOFT RESET, which wipes the
-        // Python side but not these statics (nor the FEEDER task and its
-        // bounce slots, which survive a soft reset by design). Wait any
-        // in-flight FEEDER frame out, then clear the band bookkeeping: a
-        // leftover bnc_total would make the next frame re-feed a dead frame's
-        // bands into a window that no longer describes them.
-        moy_flush_drain();
-        moy_flush_reset();
-        moy_fold_reset();
-        return mp_const_none;
-    }
-    int nfbs = args[0].u_int;
-    if (nfbs < 1 || nfbs > MOY_LCD_MAX_FBS) {
-        mp_raise_ValueError(MP_ERROR_TEXT("nfbs 1..3"));
-    }
+#define MOY_LCD_TRY(call, name) do { esp_err_t e_ = (call); if (e_ != ESP_OK) { *what = (name); return e_; } } while (0)
 
+static esp_err_t moy_lcd_bringup(int nfbs, int pclk_hz, const char **what) {
     // Board rail + every OTHER chip select on this bus parked inactive-high
     // BEFORE the bus exists. TFT_CS is parked too and then handed to esp_lcd,
     // which is what the fork's tdeck_board.init_board_pins does; what the hard
@@ -418,7 +399,8 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         s_fbs[i] = heap_caps_malloc(MOY_LCD_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (s_fbs[i] == NULL) {
             moy_lcd_free_all();
-            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_lcd: no PSRAM framebuffer"));
+            *what = "no PSRAM framebuffer";
+            return ESP_ERR_NO_MEM;
         }
         memset(s_fbs[i], 0, MOY_LCD_FB_BYTES);
     }
@@ -432,8 +414,8 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     // flush path to fall back to.
     if (!moy_flush_start(&MOY_LCD_FLUSH_OPS)) {
         moy_lcd_free_all();
-        mp_raise_msg(&mp_type_MemoryError,
-                     MP_ERROR_TEXT("moy_lcd: no internal DMA bounce / feeder"));
+        *what = "no internal DMA bounce / feeder";
+        return ESP_ERR_NO_MEM;
     }
 
     spi_bus_config_t bus_cfg = {
@@ -454,7 +436,8 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     esp_err_t err = spi_bus_initialize(MOY_LCD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
     if (err != ESP_OK) {
         moy_lcd_free_all();
-        moy_lcd_check(err, "spi_bus_initialize");
+        *what = "spi_bus_initialize";
+        return err;
     }
     s_bus_up = true;
 
@@ -462,13 +445,13 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         .cs_gpio_num = MOY_LCD_PIN_CS,
         .dc_gpio_num = MOY_LCD_PIN_DC,
         .spi_mode = 0,
-        .pclk_hz = args[1].u_int,
+        .pclk_hz = pclk_hz,
         .trans_queue_depth = 10,
         .on_color_trans_done = moy_lcd_trans_done,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
     };
-    moy_lcd_check(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)MOY_LCD_SPI_HOST,
+    MOY_LCD_TRY(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)MOY_LCD_SPI_HOST,
                                            &io_cfg, &s_io), "panel_io_spi");
 
     esp_lcd_panel_dev_config_t panel_cfg = {
@@ -478,30 +461,100 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
         .bits_per_pixel = 16,
     };
-    moy_lcd_check(esp_lcd_new_panel_st7789(s_io, &panel_cfg, &s_panel), "panel_st7789");
+    MOY_LCD_TRY(esp_lcd_new_panel_st7789(s_io, &panel_cfg, &s_panel), "panel_st7789");
 
-    moy_lcd_check(esp_lcd_panel_reset(s_panel), "reset");
-    mp_hal_delay_ms(120);                 // the fork waits 120ms; esp_lcd waits 20
-    moy_lcd_check(esp_lcd_panel_init(s_panel), "init");   // SLPOUT + MADCTL + COLMOD
-    mp_hal_delay_ms(10);
+    MOY_LCD_TRY(esp_lcd_panel_reset(s_panel), "reset");
+    vTaskDelay(pdMS_TO_TICKS(120));                 // the fork waits 120ms; esp_lcd waits 20
+    MOY_LCD_TRY(esp_lcd_panel_init(s_panel), "init");   // SLPOUT + MADCTL + COLMOD
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     // Landscape: MV|MX (+ the BGR bit the panel config already carries) == 0x68.
-    moy_lcd_check(esp_lcd_panel_swap_xy(s_panel, true), "swap_xy");
-    moy_lcd_check(esp_lcd_panel_mirror(s_panel, true, false), "mirror");
+    MOY_LCD_TRY(esp_lcd_panel_swap_xy(s_panel, true), "swap_xy");
+    MOY_LCD_TRY(esp_lcd_panel_mirror(s_panel, true, false), "mirror");
     s_madctl = 0x68;
 
     for (size_t i = 0; i < MP_ARRAY_SIZE(MOY_LCD_INIT); i++) {
         const moy_lcd_cmd_t *c = &MOY_LCD_INIT[i];
-        moy_lcd_check(esp_lcd_panel_io_tx_param(s_io, c->cmd,
+        MOY_LCD_TRY(esp_lcd_panel_io_tx_param(s_io, c->cmd,
                                                 c->len ? c->data : NULL, c->len), "init cmd");
         if (c->delay_ms) {
-            mp_hal_delay_ms(c->delay_ms);
+            vTaskDelay(pdMS_TO_TICKS(c->delay_ms));
         }
     }
 
-    moy_lcd_check(esp_lcd_panel_invert_color(s_panel, true), "invert");   // INVON
-    moy_lcd_check(esp_lcd_panel_disp_on_off(s_panel, true), "disp_on");
-    mp_hal_delay_ms(120);
+    MOY_LCD_TRY(esp_lcd_panel_invert_color(s_panel, true), "invert");   // INVON
+    MOY_LCD_TRY(esp_lcd_panel_disp_on_off(s_panel, true), "disp_on");
+    vTaskDelay(pdMS_TO_TICKS(120));
+    return ESP_OK;
+}
+
+// The kernel brings the panel up with the console compositor's framebuffer
+// count (BandedCompositor's nfbs=2): at first light, before any VM, the
+// console's init then takes the panel as it is, the logo still showing.
+#define MOY_LCD_KERNEL_FBS 2
+
+int moy_lcd_kinit(void) {
+    const char *what = "";
+    return s_panel != NULL ? ESP_OK : moy_lcd_bringup(MOY_LCD_KERNEL_FBS, MOY_LCD_PCLK_HZ, &what);
+}
+
+uint16_t *moy_lcd_kfb(void) {
+    return (uint16_t *)s_fbs[0];
+}
+
+// show(0) without the GIL: kick framebuffer 0 and wait it out.
+int moy_lcd_kpresent(void) {
+    if (s_panel == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    moy_flush_kdrain();
+    (void)moy_flush_take_err();
+    moy_fold_consume();
+    moy_flush_kick(s_fbs[0], MOY_LCD_H);
+    bool ok = moy_flush_kdrain();
+    esp_err_t e = moy_flush_take_err();
+    return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
+}
+
+// Active HIGH on GPIO42. Plain on/off; the fork drove PWM duty through LVGL's
+// driver, which nothing in the console ever used for dimming.
+void moy_lcd_kbacklight(int on) {
+    gpio_set_level(MOY_LCD_PIN_BL, on ? 1 : 0);
+}
+
+// init(nfbs=2, pclk_hz=80000000) -> None
+static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_nfbs,    MP_ARG_INT, { .u_int = 2 } },
+        { MP_QSTR_pclk_hz, MP_ARG_INT, { .u_int = MOY_LCD_PCLK_HZ } },
+    };
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, pos, kw, MP_ARRAY_SIZE(allowed), allowed, args);
+    moy_vol_set_gate(moy_lcd_sd_gate);
+
+    if (s_panel != NULL) {
+        // Already up -- a second compositor, or a SOFT RESET, which wipes the
+        // Python side but not these statics (nor the FEEDER task and its
+        // bounce slots, which survive a soft reset by design). Wait any
+        // in-flight FEEDER frame out, then clear the band bookkeeping: a
+        // leftover bnc_total would make the next frame re-feed a dead frame's
+        // bands into a window that no longer describes them.
+        moy_flush_drain();
+        moy_flush_reset();
+        moy_fold_reset();
+        return mp_const_none;
+    }
+    int nfbs = args[0].u_int;
+    if (nfbs < 1 || nfbs > MOY_LCD_MAX_FBS) {
+        mp_raise_ValueError(MP_ERROR_TEXT("nfbs 1..3"));
+    }
+
+    const char *what = "";
+    esp_err_t err = moy_lcd_bringup(nfbs, args[1].u_int, &what);
+    if (err == ESP_ERR_NO_MEM) {
+        mp_raise_msg_varg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_lcd: %s"), what);
+    }
+    moy_lcd_check(err, what);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(moy_lcd_init_obj, 0, moy_lcd_init);
@@ -621,15 +674,38 @@ static int moy_lcd_fb_index(size_t n_args, const mp_obj_t *a) {
     return (int)n;
 }
 
-// kick(n=0): begin shipping framebuffer n; returns immediately. The caller owns
-// the ping-pong -- n must be the buffer it has STOPPED drawing into.
-static mp_obj_t moy_lcd_kick(size_t n_args, const mp_obj_t *a) {
-    moy_lcd_require();
-    int n = moy_lcd_fb_index(n_args, a);
+// ---- the transport the kernel's banded present drives (native/moy_glass) ---
+// MOY_KERNEL_PANEL(kwait/kkick/kship/knfbs): the verbs below with no raise, an
+// error returned instead, called from the VM's task (the drain releases the
+// GIL). kick/show/drain are the MP face of the same three.
+
+int moy_lcd_knfbs(void) {
+    return s_nfbs;
+}
+
+uint8_t *moy_lcd_kfbn(int n) {
+    return (n >= 0 && n < s_nfbs) ? s_fbs[n] : NULL;
+}
+
+bool moy_lcd_kwait(void) {
+    return s_panel == NULL ? true : moy_flush_drain();
+}
+
+// Begin shipping framebuffer n and return: the buffer the caller has STOPPED
+// drawing into. The FEEDER runs the SPI, so an error surfaces one frame late:
+// the finished frame's is returned before this one is handed over.
+int moy_lcd_kkick(int n) {
+    if (s_panel == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (n < 0 || n >= s_nfbs) {
+        return ESP_ERR_INVALID_ARG;
+    }
     moy_flush_drain();              // defensive: kick without a flush() before it
-    // The FEEDER runs the SPI, so an error surfaces one frame late: raise the
-    // finished frame's before handing this one over.
-    moy_lcd_check(moy_flush_take_err(), "tx_color");
+    esp_err_t e = moy_flush_take_err();
+    if (e != ESP_OK) {
+        return e;
+    }
     // The fold's one-shot latch, consumed with the feeder IDLE (the drain above
     // is what makes that true) so a band can never read a half-set arm.
     moy_fold_consume();
@@ -637,6 +713,32 @@ static mp_obj_t moy_lcd_kick(size_t n_args, const mp_obj_t *a) {
     if (s_sd_guard) {
         moy_flush_drain();          // SD session live: no overlap (see the guard)
     }
+    return ESP_OK;
+}
+
+// Ship framebuffer n and wait it out: this frame's own error, or a timeout.
+int moy_lcd_kship(int n) {
+    if (s_panel == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (n < 0 || n >= s_nfbs) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    moy_flush_drain();
+    (void)moy_flush_take_err();     // show reports its OWN frame's errors
+    moy_fold_consume();
+    moy_flush_kick(s_fbs[n], MOY_LCD_H);
+    bool ok = moy_flush_drain();
+    esp_err_t e = moy_flush_take_err();
+    return e != ESP_OK ? e : (ok ? ESP_OK : ESP_ERR_TIMEOUT);
+}
+
+// kick(n=0): begin shipping framebuffer n; returns immediately. The caller owns
+// the ping-pong -- n must be the buffer it has STOPPED drawing into.
+static mp_obj_t moy_lcd_kick(size_t n_args, const mp_obj_t *a) {
+    moy_lcd_require();
+    int n = moy_lcd_fb_index(n_args, a);
+    moy_lcd_check(moy_lcd_kkick(n), "tx_color");
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_kick_obj, 0, 1, moy_lcd_kick);
@@ -645,8 +747,10 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_kick_obj, 0, 1, moy_lcd_kick)
 // Nesting-safe: the bracket lifts on the OUTERMOST close. Turning it on also
 // drains, so a frame already in the feeder's hands cannot straddle the session
 // start.
-static mp_obj_t moy_lcd_sd_guard(mp_obj_t on_in) {
-    if (mp_obj_is_true(on_in)) {
+// The same body is the store's bus gate (moy_vol_set_gate), which a store
+// op made in C -- a compiled cart's files -- takes around its card access.
+static void moy_lcd_sd_gate(int on) {
+    if (on) {
         s_sd_guard++;
         if (s_panel != NULL) {
             moy_flush_drain();
@@ -654,6 +758,10 @@ static mp_obj_t moy_lcd_sd_guard(mp_obj_t on_in) {
     } else if (s_sd_guard > 0) {
         s_sd_guard--;
     }
+}
+
+static mp_obj_t moy_lcd_sd_guard(mp_obj_t on_in) {
+    moy_lcd_sd_gate(mp_obj_is_true(on_in));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_sd_guard_obj, moy_lcd_sd_guard);
@@ -694,15 +802,11 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_pending_obj, moy_lcd_pending);
 static mp_obj_t moy_lcd_show(size_t n_args, const mp_obj_t *a) {
     moy_lcd_require();
     int n = moy_lcd_fb_index(n_args, a);
-    moy_flush_drain();
-    (void)moy_flush_take_err();     // show reports its OWN frame's errors
-    moy_fold_consume();
-    moy_flush_kick(s_fbs[n], MOY_LCD_H);
-    bool ok = moy_flush_drain();
-    moy_lcd_check(moy_flush_take_err(), "tx_color");
-    if (!ok) {
+    int e = moy_lcd_kship(n);
+    if (e == ESP_ERR_TIMEOUT) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_lcd: flush timed out"));
     }
+    moy_lcd_check(e, "tx_color");
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_show_obj, 0, 1, moy_lcd_show);
@@ -931,10 +1035,9 @@ static mp_obj_t moy_lcd_fold_test(mp_obj_t back_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_fold_test_obj, moy_lcd_fold_test);
 
-// backlight(on) -- active HIGH on GPIO42. Plain on/off; the fork drove PWM duty
-// through LVGL's driver, which nothing in the console ever used for dimming.
+// backlight(on) -- the kernel's body (moy_lcd_kbacklight).
 static mp_obj_t moy_lcd_backlight(mp_obj_t on_in) {
-    gpio_set_level(MOY_LCD_PIN_BL, mp_obj_is_true(on_in) ? 1 : 0);
+    moy_lcd_kbacklight(mp_obj_is_true(on_in));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_backlight_obj, moy_lcd_backlight);

@@ -1,0 +1,674 @@
+{
+ "about": "The font set tools/make_font.py builds (docs/look_2026-10.md step 3). A board takes its tier's faces; FAMILY.txt is each family's licence.",
+ "built_with": {
+  "freetype2": "2.14.3",
+  "raqm": "0.10.5"
+ },
+ "faces": {
+  "atkinson-11-700-2": {
+   "bpp": 2,
+   "bytes": 4671,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 11,
+   "weight": 700
+  },
+  "atkinson-12-400-2": {
+   "bpp": 2,
+   "bytes": 4509,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 12,
+   "weight": 400
+  },
+  "atkinson-12-500-2": {
+   "bpp": 2,
+   "bytes": 4856,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 12,
+   "weight": 500
+  },
+  "atkinson-12-600-2": {
+   "bpp": 2,
+   "bytes": 4850,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 12,
+   "weight": 600
+  },
+  "atkinson-12-700-4": {
+   "bpp": 4,
+   "bytes": 7370,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 12,
+   "weight": 700
+  },
+  "atkinson-13-400-2": {
+   "bpp": 2,
+   "bytes": 5450,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 13,
+   "weight": 400
+  },
+  "atkinson-13-500-4": {
+   "bpp": 4,
+   "bytes": 9020,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 13,
+   "weight": 500
+  },
+  "atkinson-13-600-4": {
+   "bpp": 4,
+   "bytes": 8767,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 13,
+   "weight": 600
+  },
+  "atkinson-13-700-2": {
+   "bpp": 2,
+   "bytes": 5817,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 13,
+   "weight": 700
+  },
+  "atkinson-14-400-4": {
+   "bpp": 4,
+   "bytes": 8947,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 14,
+   "weight": 400
+  },
+  "atkinson-14-700-4": {
+   "bpp": 4,
+   "bytes": 9404,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 14,
+   "weight": 700
+  },
+  "atkinson-15-400-4": {
+   "bpp": 4,
+   "bytes": 10720,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 15,
+   "weight": 400
+  },
+  "atkinson-15-500-4": {
+   "bpp": 4,
+   "bytes": 10475,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 15,
+   "weight": 500
+  },
+  "atkinson-15-600-4": {
+   "bpp": 4,
+   "bytes": 10753,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 15,
+   "weight": 600
+  },
+  "atkinson-15-700-4": {
+   "bpp": 4,
+   "bytes": 10924,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 15,
+   "weight": 700
+  },
+  "atkinson-16-500-4": {
+   "bpp": 4,
+   "bytes": 1194,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 16,
+   "weight": 500
+  },
+  "atkinson-17-400-4": {
+   "bpp": 4,
+   "bytes": 12663,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 17,
+   "weight": 400
+  },
+  "atkinson-17-500-4": {
+   "bpp": 4,
+   "bytes": 1317,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 17,
+   "weight": 500
+  },
+  "atkinson-17-700-4": {
+   "bpp": 4,
+   "bytes": 13589,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 17,
+   "weight": 700
+  },
+  "atkinson-18-600-4": {
+   "bpp": 4,
+   "bytes": 1408,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 18,
+   "weight": 600
+  },
+  "atkinson-19-600-4": {
+   "bpp": 4,
+   "bytes": 1543,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 19,
+   "weight": 600
+  },
+  "atkinson-19-800-4": {
+   "bpp": 4,
+   "bytes": 16681,
+   "chars": "full",
+   "family": "atkinson",
+   "size": 19,
+   "weight": 800
+  },
+  "atkinson-22-500-4": {
+   "bpp": 4,
+   "bytes": 1872,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 22,
+   "weight": 500
+  },
+  "atkinson-24-500-4": {
+   "bpp": 4,
+   "bytes": 2082,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 24,
+   "weight": 500
+  },
+  "atkinson-26-600-4": {
+   "bpp": 4,
+   "bytes": 2401,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 26,
+   "weight": 600
+  },
+  "atkinson-28-600-4": {
+   "bpp": 4,
+   "bytes": 2672,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 28,
+   "weight": 600
+  },
+  "atkinson-28-700-4": {
+   "bpp": 4,
+   "bytes": 2691,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 28,
+   "weight": 700
+  },
+  "atkinson-30-700-4": {
+   "bpp": 4,
+   "bytes": 3112,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 30,
+   "weight": 700
+  },
+  "atkinson-44-700-4": {
+   "bpp": 4,
+   "bytes": 6422,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 44,
+   "weight": 700
+  },
+  "atkinson-50-700-4": {
+   "bpp": 4,
+   "bytes": 8081,
+   "chars": "calc",
+   "family": "atkinson",
+   "size": 50,
+   "weight": 700
+  },
+  "daysans-11-600-2": {
+   "bpp": 2,
+   "bytes": 4959,
+   "chars": "full",
+   "family": "daysans",
+   "size": 11,
+   "weight": 600
+  },
+  "daysans-12-400-2": {
+   "bpp": 2,
+   "bytes": 5009,
+   "chars": "full",
+   "family": "daysans",
+   "size": 12,
+   "weight": 400
+  },
+  "daysans-12-500-2": {
+   "bpp": 2,
+   "bytes": 5271,
+   "chars": "full",
+   "family": "daysans",
+   "size": 12,
+   "weight": 500
+  },
+  "daysans-12-600-4": {
+   "bpp": 4,
+   "bytes": 8142,
+   "chars": "full",
+   "family": "daysans",
+   "size": 12,
+   "weight": 600
+  },
+  "daysans-13-500-4": {
+   "bpp": 4,
+   "bytes": 9081,
+   "chars": "full",
+   "family": "daysans",
+   "size": 13,
+   "weight": 500
+  },
+  "daysans-13-600-2": {
+   "bpp": 2,
+   "bytes": 5978,
+   "chars": "full",
+   "family": "daysans",
+   "size": 13,
+   "weight": 600
+  },
+  "daysans-14-400-4": {
+   "bpp": 4,
+   "bytes": 9701,
+   "chars": "full",
+   "family": "daysans",
+   "size": 14,
+   "weight": 400
+  },
+  "daysans-14-600-4": {
+   "bpp": 4,
+   "bytes": 10290,
+   "chars": "full",
+   "family": "daysans",
+   "size": 14,
+   "weight": 600
+  },
+  "daysans-15-400-4": {
+   "bpp": 4,
+   "bytes": 10443,
+   "chars": "full",
+   "family": "daysans",
+   "size": 15,
+   "weight": 400
+  },
+  "daysans-15-500-4": {
+   "bpp": 4,
+   "bytes": 11051,
+   "chars": "full",
+   "family": "daysans",
+   "size": 15,
+   "weight": 500
+  },
+  "daysans-15-600-4": {
+   "bpp": 4,
+   "bytes": 11270,
+   "chars": "full",
+   "family": "daysans",
+   "size": 15,
+   "weight": 600
+  },
+  "daysans-16-500-4": {
+   "bpp": 4,
+   "bytes": 1246,
+   "chars": "calc",
+   "family": "daysans",
+   "size": 16,
+   "weight": 500
+  },
+  "daysans-17-500-4": {
+   "bpp": 4,
+   "bytes": 1391,
+   "chars": "calc",
+   "family": "daysans",
+   "size": 17,
+   "weight": 500
+  },
+  "daysans-19-700-4": {
+   "bpp": 4,
+   "bytes": 16924,
+   "chars": "full",
+   "family": "daysans",
+   "size": 19,
+   "weight": 700
+  },
+  "daysans-22-500-4": {
+   "bpp": 4,
+   "bytes": 1897,
+   "chars": "calc",
+   "family": "daysans",
+   "size": 22,
+   "weight": 500
+  },
+  "daysans-24-500-4": {
+   "bpp": 4,
+   "bytes": 2233,
+   "chars": "calc",
+   "family": "daysans",
+   "size": 24,
+   "weight": 500
+  },
+  "daysans-28-600-4": {
+   "bpp": 4,
+   "bytes": 2934,
+   "chars": "calc",
+   "family": "daysans",
+   "size": 28,
+   "weight": 600
+  },
+  "daysans-44-600-4": {
+   "bpp": 4,
+   "bytes": 6583,
+   "chars": "calc",
+   "family": "daysans",
+   "size": 44,
+   "weight": 600
+  },
+  "inter-11-600-2": {
+   "bpp": 2,
+   "bytes": 5591,
+   "chars": "full",
+   "family": "inter",
+   "size": 11,
+   "weight": 600
+  },
+  "inter-12-400-2": {
+   "bpp": 2,
+   "bytes": 6158,
+   "chars": "full",
+   "family": "inter",
+   "size": 12,
+   "weight": 400
+  },
+  "inter-12-500-2": {
+   "bpp": 2,
+   "bytes": 6465,
+   "chars": "full",
+   "family": "inter",
+   "size": 12,
+   "weight": 500
+  },
+  "inter-12-600-4": {
+   "bpp": 4,
+   "bytes": 9338,
+   "chars": "full",
+   "family": "inter",
+   "size": 12,
+   "weight": 600
+  },
+  "inter-13-500-4": {
+   "bpp": 4,
+   "bytes": 10454,
+   "chars": "full",
+   "family": "inter",
+   "size": 13,
+   "weight": 500
+  },
+  "inter-13-600-2": {
+   "bpp": 2,
+   "bytes": 6897,
+   "chars": "full",
+   "family": "inter",
+   "size": 13,
+   "weight": 600
+  },
+  "inter-14-400-4": {
+   "bpp": 4,
+   "bytes": 11543,
+   "chars": "full",
+   "family": "inter",
+   "size": 14,
+   "weight": 400
+  },
+  "inter-14-600-4": {
+   "bpp": 4,
+   "bytes": 11812,
+   "chars": "full",
+   "family": "inter",
+   "size": 14,
+   "weight": 600
+  },
+  "inter-15-400-4": {
+   "bpp": 4,
+   "bytes": 12421,
+   "chars": "full",
+   "family": "inter",
+   "size": 15,
+   "weight": 400
+  },
+  "inter-15-500-4": {
+   "bpp": 4,
+   "bytes": 12244,
+   "chars": "full",
+   "family": "inter",
+   "size": 15,
+   "weight": 500
+  },
+  "inter-15-600-4": {
+   "bpp": 4,
+   "bytes": 12261,
+   "chars": "full",
+   "family": "inter",
+   "size": 15,
+   "weight": 600
+  },
+  "inter-16-500-4": {
+   "bpp": 4,
+   "bytes": 1289,
+   "chars": "calc",
+   "family": "inter",
+   "size": 16,
+   "weight": 500
+  },
+  "inter-17-500-4": {
+   "bpp": 4,
+   "bytes": 1349,
+   "chars": "calc",
+   "family": "inter",
+   "size": 17,
+   "weight": 500
+  },
+  "inter-19-700-4": {
+   "bpp": 4,
+   "bytes": 18894,
+   "chars": "full",
+   "family": "inter",
+   "size": 19,
+   "weight": 700
+  },
+  "inter-22-500-4": {
+   "bpp": 4,
+   "bytes": 1997,
+   "chars": "calc",
+   "family": "inter",
+   "size": 22,
+   "weight": 500
+  },
+  "inter-24-500-4": {
+   "bpp": 4,
+   "bytes": 2348,
+   "chars": "calc",
+   "family": "inter",
+   "size": 24,
+   "weight": 500
+  },
+  "inter-28-600-4": {
+   "bpp": 4,
+   "bytes": 2936,
+   "chars": "calc",
+   "family": "inter",
+   "size": 28,
+   "weight": 600
+  },
+  "inter-44-600-4": {
+   "bpp": 4,
+   "bytes": 6718,
+   "chars": "calc",
+   "family": "inter",
+   "size": 44,
+   "weight": 600
+  },
+  "jbmono-11-400-2": {
+   "bpp": 2,
+   "bytes": 3899,
+   "chars": "full",
+   "family": "jbmono",
+   "size": 11,
+   "weight": 400
+  },
+  "jbmono-11-700-2": {
+   "bpp": 2,
+   "bytes": 4083,
+   "chars": "full",
+   "family": "jbmono",
+   "size": 11,
+   "weight": 700
+  },
+  "jbmono-15-400-4": {
+   "bpp": 4,
+   "bytes": 10623,
+   "chars": "full",
+   "family": "jbmono",
+   "size": 15,
+   "weight": 400
+  },
+  "jbmono-15-700-4": {
+   "bpp": 4,
+   "bytes": 9880,
+   "chars": "full",
+   "family": "jbmono",
+   "size": 15,
+   "weight": 700
+  }
+ },
+ "families": {
+  "atkinson": {
+   "licence": "atkinson.txt",
+   "sha256": "5a455d1cfa099b601ab70751bb9673e8fe1854dc4500c80e1a220d0d75e31745",
+   "source": "Atkinson Hyperlegible Next",
+   "ttf": "https://raw.githubusercontent.com/google/fonts/954e256c4277419b5e48bffa51be069b2bd01bde/ofl/atkinsonhyperlegiblenext/AtkinsonHyperlegibleNext%5Bwght%5D.ttf"
+  },
+  "daysans": {
+   "licence": "daysans.txt",
+   "sha256": "3b031aa4216174205bd8471f88a49b91f093169e9e87bd5262242bc5967fe2e3",
+   "source": "IBM Plex Sans",
+   "ttf": "https://raw.githubusercontent.com/google/fonts/954e256c4277419b5e48bffa51be069b2bd01bde/ofl/ibmplexsans/IBMPlexSans%5Bwdth,wght%5D.ttf"
+  },
+  "inter": {
+   "licence": "inter.txt",
+   "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+   "source": "Inter",
+   "ttf": "https://raw.githubusercontent.com/google/fonts/954e256c4277419b5e48bffa51be069b2bd01bde/ofl/inter/Inter%5Bopsz,wght%5D.ttf"
+  },
+  "jbmono": {
+   "licence": "jbmono.txt",
+   "sha256": "48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda",
+   "source": "JetBrains Mono",
+   "ttf": "https://raw.githubusercontent.com/google/fonts/954e256c4277419b5e48bffa51be069b2bd01bde/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf"
+  }
+ },
+ "tiers": {
+  "desktop": [
+   "atkinson-12-700-4",
+   "atkinson-13-500-4",
+   "atkinson-13-600-4",
+   "atkinson-14-400-4",
+   "atkinson-15-400-4",
+   "atkinson-15-500-4",
+   "atkinson-15-600-4",
+   "atkinson-15-700-4",
+   "atkinson-17-400-4",
+   "atkinson-17-700-4",
+   "atkinson-22-500-4",
+   "atkinson-24-500-4",
+   "atkinson-26-600-4",
+   "atkinson-28-600-4",
+   "atkinson-44-700-4",
+   "atkinson-50-700-4",
+   "daysans-12-600-4",
+   "daysans-13-500-4",
+   "daysans-14-400-4",
+   "daysans-15-400-4",
+   "daysans-15-500-4",
+   "daysans-15-600-4",
+   "daysans-22-500-4",
+   "daysans-24-500-4",
+   "daysans-44-600-4",
+   "inter-12-600-4",
+   "inter-13-500-4",
+   "inter-14-400-4",
+   "inter-15-400-4",
+   "inter-15-500-4",
+   "inter-15-600-4",
+   "inter-22-500-4",
+   "inter-24-500-4",
+   "inter-44-600-4",
+   "jbmono-11-400-2",
+   "jbmono-11-700-2",
+   "jbmono-15-400-4",
+   "jbmono-15-700-4"
+  ],
+  "handheld": [
+   "atkinson-11-700-2",
+   "atkinson-12-400-2",
+   "atkinson-12-500-2",
+   "atkinson-12-600-2",
+   "atkinson-13-400-2",
+   "atkinson-13-700-2",
+   "atkinson-14-700-4",
+   "atkinson-15-700-4",
+   "atkinson-16-500-4",
+   "atkinson-17-500-4",
+   "atkinson-18-600-4",
+   "atkinson-19-600-4",
+   "atkinson-19-800-4",
+   "atkinson-28-700-4",
+   "atkinson-30-700-4",
+   "daysans-11-600-2",
+   "daysans-12-400-2",
+   "daysans-12-500-2",
+   "daysans-13-600-2",
+   "daysans-14-600-4",
+   "daysans-16-500-4",
+   "daysans-17-500-4",
+   "daysans-19-700-4",
+   "daysans-28-600-4",
+   "inter-11-600-2",
+   "inter-12-400-2",
+   "inter-12-500-2",
+   "inter-13-600-2",
+   "inter-14-600-4",
+   "inter-16-500-4",
+   "inter-17-500-4",
+   "inter-19-700-4",
+   "inter-28-600-4",
+   "jbmono-11-400-2",
+   "jbmono-11-700-2"
+  ]
+ }
+}

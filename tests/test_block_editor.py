@@ -13,6 +13,7 @@ colored blocks, cursor nav, press A to insert from a category menu, no dragging.
 """
 
 from pathlib import Path
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -183,11 +184,8 @@ def _ws_with_block_cart(tmp_path, title="UI Block Cart"):
     root = str(tmp_path / "carts")
     ws = host_app.build_workstation(root)
     cart = moy_carts.create(title, root, type="game")
-    ws.launcher.items = moy_carts.scan(root)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
+    ws.launcher.items = shelf(root)
+    select_on_home(ws, title)
     ws.open()
     return ws, cart, root
 
@@ -207,17 +205,26 @@ def test_blocks_view_opens_and_renders(tmp_path):
     assert ws.cart_error is None
 
 
-def test_desktop_blocks_button_opens_editor(tmp_path):
-    import runtime.console as C
-    ws, _, _ = _ws_with_block_cart(tmp_path)
-    drv = _driver(ws)
-    drv.frame(1 / 30)                                  # on the desktop (cart running)
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
+def _menu_word(ws, item):
+    """The handheld menu's row for `item`, as the page names it."""
+    bu = ws.block_ui
+    return bu.page().menu_word(bu.blk_menu["items"].index(item))
+
+
+def _menu_focus(ws, item):
+    """Focus the handheld menu's row for `item`, as the keys would."""
+    ws.block_ui.page().host.focus(_menu_word(ws, item))
+
+
+def _tap_stop(ws, drv, stop):
+    """Tap stop `stop` of the handheld Blocks page where it drew last."""
     ws._dirty = True
-    bx, by = C._BLOCKS_BTN[0] + 2, C._BLOCKS_BTN[1] + 2
-    drv.click(bx, by)
     drv.frame(1 / 30)
-    assert ws.menu_view == "blocks"
+    drv.frame(1 / 30)
+    x, y, w, h = ws.block_ui.page().host.box(stop)
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
 
 
 def test_insert_flow_through_the_menu_then_runs(tmp_path):
@@ -234,13 +241,13 @@ def test_insert_flow_through_the_menu_then_runs(tmp_path):
     drv.frame(1 / 30)
     drv.frame(1 / 30)                                  # release
     assert ws.block_ui.blk_menu is not None and ws.block_ui.blk_menu["mode"] == "cat"
-    # navigate to DRAW and select
-    ws.block_ui.blk_menu["sel"] = ws.block_ui.blk_menu["items"].index(blocks.CAT_DRAW)
+    # navigate to DRAW and select (the menu's keys are the UI engine's)
+    _menu_focus(ws, blocks.CAT_DRAW)
     drv.press("a")
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_menu["mode"] == "blk"
-    ws.block_ui.blk_menu["sel"] = ws.block_ui.blk_menu["items"].index("cls")
+    _menu_focus(ws, "cls")
     drv.press("a")
     drv.frame(1 / 30)
     drv.frame(1 / 30)
@@ -342,10 +349,8 @@ def test_block_authored_cart_runs_normally(tmp_path):
     be.insert_block("set_var", {"var": "x", "value": 100})
     ws.block_ui.save_blocks()
     # reopen the cart fresh from disk and run it
-    ws.launcher.items = moy_carts.scan(root)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == cart["title"]:
-            ws.launcher.sel = i
+    ws.launcher.items = shelf(root)
+    select_on_home(ws, cart["title"])
     ws.open()
     assert ws.cart_error is None and ws.ns is not None
     for _ in range(5):
@@ -357,21 +362,15 @@ def test_block_authored_cart_runs_normally(tmp_path):
 def test_pointer_taps_insert_and_action_bar(tmp_path):
     """The outline is fully pointer/touch-drivable (no dragging): a tap selects a
     row, a second tap on an insert opens the menu, and the action-bar buttons fire."""
-    import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     drv = _driver(ws)
     drv.frame(1 / 30)
-    # tap ADD -> the category menu opens
-    drv.click(C._BLK_ADD[0] + 2, C._BLK_ADD[1] + 2)
-    drv.frame(1 / 30)
+    # tap Add -> the category menu opens
+    _tap_stop(ws, drv, "Tool Add")
     assert ws.block_ui.blk_menu is not None
-    # tap a menu row (DRAW) then dismiss back out
-    # (drill: pick category by tapping its row)
-    my = C._BLK_MENU[1] + 16
-    draw_i = ws.block_ui.blk_menu["items"].index(blocks.CAT_DRAW)
-    drv.click(C._BLK_MENU[0] + 20, my + draw_i * C._BLK_MENU_ROW_H + 2)
-    drv.frame(1 / 30)
+    # tap a menu row (Draw) -> its blocks
+    _tap_stop(ws, drv, _menu_word(ws, blocks.CAT_DRAW))
     assert ws.block_ui.blk_menu["mode"] == "blk"
 
 
@@ -379,19 +378,14 @@ def test_pointer_taps_insert_and_action_bar(tmp_path):
 # Kid-facing copy: forever-is-bounded + wait hints surface in the editor
 # ----------------------------------------------------------------------------
 
-def test_forever_and_wait_have_kidfacing_hints(tmp_path):
+def test_forever_compiles_to_the_bounded_loop(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
     go_to_insert(be, 1)
     be.insert_block("forever")
     assert _select_type(be, "forever")
-    assert "every frame" in ws.block_ui._blk_hint()             # forever is bounded
-    go_to_insert(be, 1)
-    be.insert_block("wait", {"secs": 1})
-    assert _select_type(be, "wait")
-    assert "pause" in ws.block_ui._blk_hint()
-    # and the compiled forever is the bounded loop (Part-1 contract)
+    # the compiled forever is the bounded loop (Part-1 contract)
     src = blocks.compile_blocks(be.program)
     assert "while True" not in src and "range(100000)" in src
 
@@ -418,11 +412,8 @@ def _ws_with_code_cart(tmp_path, src, title="Code Cart"):
     root = str(tmp_path / "carts")
     ws = host_app.build_workstation(root)
     cart = moy_carts.create(title, root, src=src, type="game")
-    ws.launcher.items = moy_carts.scan(root)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
+    ws.launcher.items = shelf(root)
+    select_on_home(ws, title)
     ws.open()
     return ws, cart, root
 
@@ -476,10 +467,8 @@ def test_block_authored_cart_is_not_protected(tmp_path):
     assert ws.block_ui.save_blocks() is True
     # reopen fresh from disk: it loads its blocks.json, so it's NOT protected and
     # saving works again (round-trip unchanged).
-    ws.launcher.items = moy_carts.scan(root)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == cart["title"]:
-            ws.launcher.sel = i
+    ws.launcher.items = shelf(root)
+    select_on_home(ws, cart["title"])
     ws.open()
     ws._open_blocks()
     assert ws.block_ui.blk_protect is False
@@ -570,7 +559,7 @@ def test_name_prompt_keyboard_flow_through_the_driver(tmp_path):
         drv.type_char(ord(ch))
         drv.frame(1 / 30)
         drv.frame(1 / 30)                                # release so the next edge fires
-    drv.press("a")
+    drv.type_char(0x0D)                                  # Enter: the dialog's OK
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_kbd is None
@@ -620,7 +609,7 @@ def test_new_variable_prompt_survives_the_opening_keypress(tmp_path):
         drv.type_char(ord(ch))
         drv.frame(1 / 30)
         drv.frame(1 / 30)                               # release so each edge fires
-    drv.press("a")                                      # confirm
+    drv.type_char(0x0D)                                 # confirm: Enter, OK's
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_kbd is None
@@ -638,7 +627,6 @@ def test_new_variable_prompt_survives_the_opening_tap(tmp_path):
     """Regression (#29), touch path: the TAP that selects '+ new variable' must not
     carry into the new prompt and hit OK. Open the prompt by tapping its menu row,
     then assert it stays open across the next frame (the opening click is cleared)."""
-    import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.block_ui.blocks_ed
@@ -649,10 +637,13 @@ def test_new_variable_prompt_survives_the_opening_tap(tmp_path):
     ws.block_ui._blk_menu_select()
     assert ws.block_ui.blk_menu["mode"] == "blk"
     # tap the "+ new variable" row (index 0) to select it -> opens the name prompt
-    mx, my = C._BLK_MENU[0], C._BLK_MENU[1]
-    row0_y = (my + 16) + 0 * C._BLK_MENU_ROW_H + 2
-    drv.click(mx + 20, row0_y)
+    ws._dirty = True
     drv.frame(1 / 30)
+    drv.frame(1 / 30)                                  # the popover settles in place
+    x, y, w, h = ws.block_ui.page().host.box(ws.block_ui.page().menu_word(0))
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)                                  # the release activates the row
     assert ws.block_ui.blk_kbd is not None, "tapping '+ new variable' should open the prompt"
     # an immediate next frame (the tap is gone) -- the prompt must still be open,
     # not closed by the opening tap leaking onto OK/X.
@@ -835,7 +826,7 @@ def test_number_prompt_typing_through_the_driver(tmp_path):
         drv.type_char(ord(ch))
         drv.frame(1 / 30)
         drv.frame(1 / 30)                         # release so each edge fires
-    drv.press("a")                               # confirm
+    drv.type_char(0x0D)                          # confirm: Enter, OK's
     drv.frame(1 / 30)
     drv.frame(1 / 30)
     assert ws.block_ui.blk_kbd is None

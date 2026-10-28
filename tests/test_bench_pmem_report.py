@@ -1,7 +1,7 @@
 """The Bench pmem report (2026-08-17): the Lua twin's sandbox has no serial
 print, so both Bench carts write their numbers into a fixed pmem layout that
 tools/p4_cart_bench.py reads live through moycore.pmem_image. The layout lives
-in THREE hand-copies (bench.moy/main.py, bench_lua.moy/main.lua, the tool) --
+in THREE hand-copies (moybyte.bench.moy/main.py, moybyte.bench_lua.moy/main.lua, the tool) --
 these tests are the lock-step guard the comments in all three promise, plus a
 real writer->reader roundtrip through the Python cart's own namespace."""
 
@@ -9,14 +9,15 @@ import ast
 import re
 import sys
 from pathlib import Path
+from ws_helpers import select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
 import p4_cart_bench as bench_tool                     # noqa: E402
 
-PY_CART = (ROOT / "system_carts" / "bench.moy" / "main.py").read_text()
-LUA_CART = (ROOT / "system_carts" / "bench_lua.moy" / "main.lua").read_text()
+PY_CART = (ROOT / "system_carts" / "moybyte.bench.moy" / "main.py").read_text()
+LUA_CART = (ROOT / "system_carts" / "moybyte.bench_lua.moy" / "main.lua").read_text()
 
 
 def _lua_verb_ids():
@@ -98,11 +99,7 @@ def test_python_cart_writes_what_the_tool_reads(tmp_path):
     # own pmem verb -- byte-for-byte what the synthetic block above encodes.
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("title") == "Bench":
-            ws.launcher.sel = i
-            break
-    else:
+    if select_on_home(ws, "Bench") is None:
         raise AssertionError("Bench not seeded")
     ws.open()
     assert ws.cart_error is None, ws.cart_error

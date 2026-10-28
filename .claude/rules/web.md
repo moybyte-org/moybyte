@@ -27,13 +27,46 @@ nor those docs will warn you about:
   serves without reflashing it, so "which console is this board serving?" is
   answered by its firmware version alone. Changing a web build means
   `firmware/web_runner/build.sh`, then rebuild and reflash. An oversized image is
-  a BUILD FAILURE on every board. For that reason the two worker modules ship
-  without their comments (build.sh re-prints them with emsdk's terser, nothing
-  else changed): read `worker.js` and `moy_store.mjs` in the tree, not in
-  `dist/`.
+  a BUILD FAILURE on every board. For that reason the page, the two worker
+  modules and the VM's loader ship without their comments (build.sh re-prints
+  their scripts with emsdk's terser, nothing renamed or compressed): read
+  `page_core.html`, `page_tail.js`, `worker.js` and `moy_store.mjs` in the
+  tree, not in `dist/`. The wasm's C is -Os, -O3 on the VM's loop and its
+  collector as upstream sets them, and -Oz on the files no frame runs (the
+  store, the theme parser, the two compilers; `variant/mpconfigvariant.mk`):
+  -Oz over the rest is smaller still and could not be shown free of frame
+  cost (2026-10-28). The C no browser reaches is not built at all, and its
+  names are ABSENT from the modules, never stubs: `moy_glass`'s compositors
+  and `front` (`MOY_GLASS_PRESENT=0`) and `moy_net`'s webhost, web console,
+  DNS, GPIO route, updater and HTTP client (`MOY_NET_SERVE=0`), both set in
+  `variant/mpconfigvariant.mk`; Python probes for them (`getattr`).
+- **The browser draws what its boards draw: each arrangement on its board's
+  metric class, in the theme's fonts and icon set** (owner, 2026-10-20: the
+  browser and the boards never diverge). The handheld 320x240 declares no
+  glass, as the T-Deck declares none; the 1024x600 desk declares the P4's
+  (`web_boot.DESK_DIAGONAL_IN`), so it lays out on the desk's metrics as that
+  board does. `build.sh` generates `fonts_data` (`tools/make_font.py module`)
+  for board.toml's `font_tier` -- both tiers -- and freezes it into the wasm,
+  faces and icon masks together, so they ride the baked, compressed
+  `micropython.wasm` (Zero image headroom pays for them: the build prints it).
+  **A class the image lacks the tier of falls back to petme128 and the
+  shell's own icons with nothing failing**: `tests/test_web_look_parity.py`
+  holds the image's sets and the desk's glass to the boards' and, under
+  `MOYBYTE_WEB_E2E`, the wasm's frames to the host's in each arrangement,
+  pixel for pixel; `tests/test_web_fonts.py` names the face a seed theme lost.
+  A web-only tweak to what the console draws (web_boot) is a divergence that
+  test reports: the page's own chrome is the only look the browser owns.
+- **The emscripten is PINNED: `EMSDK_VERSION` in build.sh, held by
+  `tools/emsdk_tree.sh` on every full build** (a tree at the pin is a silent
+  no-op, another version is moved to it, one that cannot be had fails the
+  build). emcc's output is not byte-reproducible across versions and this
+  bundle rides every board image, so an emsdk cloned under `latest` made two
+  machines' bundles differ. The pin is the version moy-spec's preflight builds
+  its player in; bump the two together. A move shares its emsdk with every
+  worktree (`tools/worktree.py` links it).
 - **`worker.js` STATICALLY imports `moy_store.mjs`**, so it must be in
-  `moy_webhost.ASSETS`: a board that does not serve it serves a console that
-  cannot boot.
+  the webhost's ASSETS table (`native/moy_net/moy_webhost.c`): a board that
+  does not serve it serves a console that cannot boot.
 - **TWO WEB MODES, TOTAL, NO CROSSOVER.** Where a page is SERVED from decides
   where its carts live — a board-served page edits the BOARD's store, a page on
   a static host keeps them in the browser. **The mode is decided ONCE at boot,
@@ -50,6 +83,29 @@ nor those docs will warn you about:
   (a new app, a new seed game), which is seeded into it the way a board seeds a
   built-in it lacks (`moy_store.missingSystemCarts`). Without that, nobody who
   had visited before a system cart shipped would ever see it.
+- **A channel's site keeps its own storage.** The stable site (`/moybyte/`)
+  and the dev site (`/moybyte/dev/`, both from `.github/workflows/pages.yml`)
+  share the origin moybyte-org.github.io, so they share its OPFS.
+  `site/build.py --channel dev` stamps page_tail.js's `MOY_CHANNEL` into the
+  dev player, and the worker opens every store through `moy_store.channelNav`,
+  which roots it under `channel-dev/`, so a dev store format never touches the
+  stable site's carts. A new store opens through the worker's `opfsNav`, never
+  `navigator` (`tests/test_site_channel.py` holds the call sites), and a player
+  the build cannot stamp is not published at all.
+- **What an embedding page can ask of the console, all read at boot and absent
+  from a plain visit** (the project site's hero passes the first three):
+  `?scheme=dark|light` (else the browser's `prefers-color-scheme`) is the
+  theme VARIANT of a first run, handed to `console.wire_workstation_core(
+  first_variant=)` -- the absent-row default of `load_system`, so a saved
+  Settings choice always wins and booting on the scheme saves nothing; `?start=1`
+  skips the play button; `?edit=<cart>&tab=code` opens that cart in the Editor
+  (`web_boot.start_edit`, without the First Steps badge) from whatever the
+  browser's store holds, so a visitor's edits are kept. The framed player posts
+  `{moyChrome}` and, at its first painted frame, `{moyLive}`.
+  `tests/test_web_first_run_e2e.py` drives them. The hero's two stills (Night,
+  Day) are CAPTURED by `site/build.py` from the player it ships, through
+  `browsershot.mjs` (node 22 + Chrome, which pages.yml installs): a capture that
+  fails fails the build.
 - **The journal lives with the STORE OF RECORD** (owner call) — there is one
   durable journal per cart, where the cart durably lives, so a kid gets undo on
   both ends without a byte of history on the wire. **The wire predicate itself
@@ -58,14 +114,31 @@ nor those docs will warn you about:
 - **THE PIN GATES EVERYTHING** (owner call), reversing the earlier read-half-open
   design: handing any device on the WiFi a child's whole cart store for the asking
   was the thing being fixed. Only the boot assets and `GET /sync` are open, by
-  necessity. **A GET carries its pin the only place a GET can**, so
-  `moy_webserver.parse_request` stopped stripping query strings — it was spending
-  the credential before any handler saw it.
+  necessity. **A GET carries its pin the only place a GET can**, so the request
+  parser (`moy_http_parse`) keeps the query string — stripping it once spent the
+  credential before any handler saw it.
 - **The #108 user files ride the same protocol as a SECOND root**, stamped
   `{"v": 2, "root": "files"}` — the bump is what makes a board flashed before it
   REFUSE the batch instead of writing `drawings/…` into its carts store. A files
   path must start with a `FILE_KINDS` kind, which is the one rule keeping
   `.history/` and `trash/` home in both directions.
+- **The console's own documents are a THIRD root** (`moy_sync.SYSTEM_ROOT`,
+  owner 2026-10-20): `system.json` (the theme and every Setting),
+  `achievements.json`, the edited bar icons and the shared sheet ride the
+  same sweep into a site-mode page's OPFS, so a reload comes back on the same
+  theme, Settings and badges. Each lands old-or-new (`moy_store.commitFile`),
+  because a torn `system.json` boots the console on its defaults. **On a
+  board the root is the VM's, never the C's**: the page seeds from `GET
+  /console.json` and pushes `{"v": 2, "root": "system"}` batches, which the C
+  parks (pin checked) for `moy_webhost.ConsoleSystem`; the board is of record
+  and takes a page's change KEY BY KEY (`moy_sync.SYSTEM_KEYS`: an unknown key
+  is LOCAL, the pin, the update channel and UNKNOWN SOURCES are never sent and
+  never taken, the badges are a union). Its directory is the carts folder's
+  parent and proves nothing, so the page watches it only when the pull
+  answered (the worker's `seeded` list); firmware without it 404s the pull and
+  400s the batch, and that page keeps them in the tab. Cart paths in
+  `favorites`/`plays`/`desk_mru` cross as folder names and land under each
+  side's own carts root.
 - **Get Carts runs in a page that keeps its own carts (#124), and in no other.**
   In site mode `carts_link.py` gives the console the page's fetch
   (`ws.cart_net`), an OPFS keeper (`ws.cart_keep`) and the page's file picker
@@ -133,9 +206,14 @@ nor those docs will warn you about:
   the unsynced-work warning, because board mode keeps no local store. First
   reason wins, so an update nobody needs warning about cannot later be
   re-reported as a loss.
-- **`device/moy_webserver.py` is the bare HTTP transport** `moy_webhost`
-  overrides: a non-blocking listener, `parse_request`/`http_response`, one-shot
-  serving, and a `WebServer` whose one seam is `handle_http`. The streaming web
+- **The console's HTTP server is the kernel's** (`native/moy_net/moy_webhost.c`
+  over `moy_http.c` and `moy_net_port.c`): a non-blocking listener polled at the
+  frame tail with no Python, one-shot serving, the bundle, the pulls and the
+  sync apply in C, and a soft reset leaves it serving. `device/moy_webhost.py`
+  is its Settings contract and answers the routes the VM owns (`/run`,
+  `/update`), which the C parks for the poll to take; the Zero's `/gpio` is
+  the C's own route over its pin table, and its setup form rides the same
+  webhost with every path parked. The streaming web
   view — the frame push, `device_webview.py`, the recording `TeeCanvas`, stream
   mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py`
   and its VM recipe — was DELETED in the 2026-08 sunset (owner decision,
@@ -146,13 +224,17 @@ nor those docs will warn you about:
   (owner, 2026-08-25) — the browser IS the console. The WebSocket half went in
   2026-09, because the §3.4 sync RPC shipped as plain HTTP and nothing else
   used it. What survives of the old view is `runtime/web_input.py` (browser
-  events → InputState/Pointer, which the sync RPC speaks); `runtime/surface.py`
-  and `wm_windowed`'s `if not self._recording` guards deliberately STAY,
-  unreachable — `docs/surface_model_v1.md` §13 records why.
+  events → InputState/Pointer, which the sync RPC speaks). The recording-tier
+  surface machinery in `wm_windowed` and the kernel's surface table were
+  deleted on 2026-10-27 (`docs/surface_model_v1.md` §16).
 - **WASM MODE IS A SWITCH, NOT A SESSION** (owner call): no heartbeat, no presence
   detection, no timeout. While WEB CONSOLE is ON the glass PARKS on a connection
   screen — which is how the two-writer collision is **designed out rather than
-  detected**. The QR encoder is ours because there is no library on a board and
+  detected**. The switch is the kernel's (`native/moy_net/moy_webconsole.c`)
+  and **a start never waits**: it returns JOINING, the frame's poll binds once
+  the WiFi driver's link has an address (the kernel dials the network it kept)
+  and parks the glass then, and a join that outlives `MOY_WC_JOIN_MS` fails
+  into the row's label. Only the dev word `web` waits for the outcome. The QR encoder is ours because there is no library on a board and
   the pin is not a constant anything could be baked with. **The pin is read at
   `start()`, never at construction** — boards build the webhost before
   system.json is loaded, so a pin captured then is one minted against an empty

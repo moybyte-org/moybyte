@@ -19,6 +19,16 @@ from . import audio as _audio
 from . import blocks as _blocks
 from . import editors as _editors
 sys.modules.setdefault("editors", _editors)
+# ...and the cores the shell imports from their own modules (console.py,
+# chrome.py, code_layer.py: the umbrella stays out of the shell's start).
+from . import editors_base as _editors_base
+from . import editors_code as _editors_code
+from . import editors_sheet as _editors_sheet
+from . import editors_paint_map as _editors_paint_map
+sys.modules.setdefault("editors_base", _editors_base)
+sys.modules.setdefault("editors_code", _editors_code)
+sys.modules.setdefault("editors_sheet", _editors_sheet)
+sys.modules.setdefault("editors_paint_map", _editors_paint_map)
 sys.modules.setdefault("audio", _audio)
 sys.modules.setdefault("blocks", _blocks)   # moy_carts.save_blocks does `import blocks`
 # block_editor_ui.py / map_editor_ui.py / music_editor_ui.py are the block/map/
@@ -76,6 +86,8 @@ sys.modules.setdefault("players", _players)   # console.py does `from players im
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
+from . import moy_catalogue  # noqa: E402  (the store's carts-by-handle interface)
+sys.modules.setdefault("moy_catalogue", moy_catalogue)   # ONE index per process
 # The RASTER is the boards' (`device_canvas.DeviceCanvas`, RGB565), reached
 # through the two factories in host_canvas.py. There is no host-only canvas
 # class any more -- runtime/canvas.py, the second raster, is deleted.
@@ -85,60 +97,52 @@ from .moy_image import Image  # noqa: E402,F401  (re-exported: host_app.Image)
 # extracted to host_api.py so non-CPython targets can freeze it (#151 web runner);
 # re-exported here so host_app.make_api / .ConsoleDriver / ... are unchanged for
 # the sim, the web console, and the tests.
-from .host_api import (PAN_SPEED, ConsoleDriver, FakeAudio, FakeWifi,  # noqa: E402,F401
-                       _Layer, _NullComp, _decode_moyimg, make_api, make_audio,
-                       make_wifi)
+from .host_api import (ConsoleDriver, FakeWifi,  # noqa: E402,F401
+                       _Layer, _NullComp, _decode_moyimg, make_api, make_wifi)
+from .audio_session import PcmPump  # noqa: E402
 from .input import InputState  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 WIDTH, HEIGHT = 320, 240        # the fixed GAME canvas (the console spec)
+HOST_INPUTS = (("local", "keys"),)   # the inputs it declares (Workstation.use_inputs)
 
 
-class SdlAudio(FakeAudio):
-    """Real desktop playback backend (#16): like FakeAudio (records calls + drives
-    the engine) but ALSO streams the rendered PCM to the speakers via pygame.mixer,
-    so audio can be evaluated on the PC before the device's I2S path. Each frame it
-    renders one block (signed-16-bit mono LE, the engine's native format) and queues
-    it on a channel so blocks play back-to-back. Falls back to silent (plain
-    FakeAudio behavior) if no audio device is available, so headless runs never
-    crash."""
+class SdlPump(PcmPump):
+    """The host's speaker (#16): the kernel's mix pulled once a frame and queued
+    on a pygame.mixer channel so blocks play back to back. Without an audio
+    device (headless, CI) it pulls and discards, so the sequencers still
+    advance exactly as they do with one."""
 
-    def __init__(self, engine):
-        FakeAudio.__init__(self, engine)
+    def __init__(self, rate=11025):
+        PcmPump.__init__(self, rate)
         self._ok = False
         self._pygame = None
         self._chan = None
-        self._keep = None        # hold a ref to the in-flight Sound so it isn't GC'd
+        self._keep = None        # the in-flight Sound, kept alive
         try:
             import pygame
             pygame.mixer.quit()  # reset any default (44.1k stereo) init to our format
-            pygame.mixer.init(frequency=engine.rate, size=-16, channels=1, buffer=512)
+            pygame.mixer.init(frequency=self.rate, size=-16, channels=1, buffer=512)
             self._pygame = pygame
             self._chan = pygame.mixer.Channel(0)
             self._ok = True
-        except Exception:        # no audio device (headless/CI) -> silent fallback
+        except Exception:        # no audio device (headless/CI)
             self._ok = False
 
     def tick(self, dt):
-        pcm = self.block(dt)          # advance the mixer; bytes of LE int16 mono
+        pcm = self.block(self.frames(dt))
         if not self._ok or not pcm:
             return
         try:
             snd = self._pygame.mixer.Sound(buffer=pcm)
             if self._chan.get_busy():
-                self._chan.queue(snd)     # play right after the current block
+                self._chan.queue(snd)
             else:
                 self._chan.play(snd)
             self._keep = snd
         except Exception:
-            self._ok = False              # stop trying if the device drops out
-
-
-def make_sdl_audio(engine):
-    """Factory for the real desktop-playback backend (simulate_desktop wires this
-    for live windowed runs; tests/headless keep make_audio's FakeAudio)."""
-    return SdlAudio(engine)
+            self._ok = False              # the device dropped out
 
 
 def _real_local_ip():
@@ -205,7 +209,7 @@ class HostCartNet:
     """The network Get Carts fetches through on the host (#124):
     `runtime/cart_index.py`'s transport over urllib, which follows redirects
     and checks certificates.
-    The board's twin is device/cart_net.py; both answer `online()` and
+    The board's twin is device/wire_links.CartNet; both answer `online()` and
     `open(url)` -> status / length / readinto / close. The PC is already on a
     network, so `online()` has nothing to dial."""
 
@@ -248,6 +252,11 @@ def _manifest_version(cart_dir):
         return 0
 
 
+def _manifest_title(cart_dir):
+    with open(os.path.join(cart_dir, "manifest.json"), encoding="utf-8") as f:
+        return json.load(f)["title"]
+
+
 def _seed_system_carts(carts_dir):
     """Copy the read-only system .moy folders into the user store so the launcher shows
     them (and the child duplicates/edits copies). Version-aware (#47): a built-in whose
@@ -256,13 +265,13 @@ def _seed_system_carts(carts_dir):
     matching the device's seed_builtins, so a bumped cart actually propagates on the host
     (it used to seed once and ignore version bumps)."""
     os.makedirs(carts_dir, exist_ok=True)
-    moy_carts.sweep_store(carts_dir)     # a retired seed leaves the store, once
-    if not os.path.isdir(SYSTEM_CARTS):
-        return
-    names = [n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
+    names = ([n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
+             if os.path.isdir(SYSTEM_CARTS) else [])
+    moy_carts.sweep_store(carts_dir, [{"title": _manifest_title(
+        os.path.join(SYSTEM_CARTS, n))} for n in names])
     for name in names:
         src = os.path.join(SYSTEM_CARTS, name)
-        dst = os.path.join(carts_dir, name)
+        dst = moy_carts.cart_path(carts_dir, name)
         if not os.path.exists(dst):
             shutil.copytree(src, dst)
         elif _manifest_version(src) > _manifest_version(dst):
@@ -280,8 +289,10 @@ def _seed_system_carts(carts_dir):
 
 
 def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
-                      windowed=False, panel_diagonal_in=None):
+                      windowed=False, panel_diagonal_in=None, first_variant=None):
     """Build the shared console.Workstation wired to host backends.
+    `first_variant` ("dark"/"light") is the theme variant of a first run, as
+    `console.wire_workstation_core` takes it.
 
     The two-domain seam (#39): `sys_size` is the SYSTEM canvas size (w, h) -- the
     panel/window the desktop renders on, responsive. The GAME canvas is always the
@@ -301,7 +312,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     the font scale."""
     carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
-    carts = moy_carts.scan(carts_dir)
+    carts = moy_catalogue.catalogue(carts_dir)
     sw, sh = sys_size if sys_size else (WIDTH, HEIGHT)
     # The system canvas must be at least the game size -- the game is composited into
     # it as a viewport, so a smaller panel makes no sense (and would letterbox into
@@ -325,42 +336,30 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
                              sys_canvas=sys_canvas, font_scale=font_scale,
                              panel_diagonal_in=panel_diagonal_in)
+    # The host's inputs: its keyboard, on the table's own source. Its mouse is
+    # a mouse, not a finger, so a click leaves the keys showing.
+    ws.use_inputs(HOST_INPUTS)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
-    ws.make_game_canvas = lambda w, h: host_canvas.make_canvas(w, h)
-    # ONE Lua runtime on the host, and it is the boards' (#67 rung 4 / plan 6.9):
-    # runtime/lua_binding -- libmoy's own binding over the same vendored 5.4 the
-    # firmware compiles, LUA_32BITS and all. A "lua" cart with no native module
-    # available opens the Player's runtime-missing panel, exactly as a device
-    # build without it does. The same rule for "wasm": runtime/wasm_binding is
-    # libmoy's import table over WAMR built for Linux at the boards' pin, and
-    # no compiler (or no WAMR) is an absent key.
-    #
-    # lupa is GONE (2026-08-14). It survived as the fallback for carts using
-    # moybyte's superset, and then as the fallback for a host with no C
-    # compiler; the first reason died when lua_ext's handle glue put the
-    # superset ON moycore, and the second is not a reason this project accepts
-    # -- the host already REQUIRES a compiler for audio, where "no compiler"
-    # means silence rather than a second synth (§3.1). Two Lua engines to spare
-    # a compiler is the same trade, and it was refused there.
+    ws.make_game_canvas = host_canvas.make_canvas
+    # ONE Lua runtime on the host, and it is the boards': device/moycore_glue.py
+    # over runtime/moycore.py, the C a board runs (moycore_lua.c) and the
+    # kernel's Player (moy_play.c) by ctypes. A "lua" cart with no binding opens
+    # the Player's runtime-missing panel, exactly as a device build without the
+    # module does. A "wasm" cart runs on runtime/wasm_binding: libmoy's import
+    # table over WAMR built for Linux at the boards' pin; no compiler (or no
+    # WAMR) is an absent key.
+    host_canvas.install()
+    import moycore_glue                 # device/, on the path host_canvas puts it
     try:
-        from runtime.lua_host import MoycoreHostRun, moycore_supports
         from runtime import wasm_host
     except ImportError:  # pragma: no cover
-        from lua_host import MoycoreHostRun, moycore_supports
         import wasm_host
 
-    def _make_lua(ns, src, _ws=ws):
-        # No fallback and no silent decline. A decline used to be swallowed, and
-        # that is how moycore came to run none of the seed carts while every
-        # test stayed green: make_layer's Layer would not marshal, the load
-        # raised, lupa quietly took the cart, and the only observable difference
-        # was a cart running on the runtime we were trying to retire.
-        return MoycoreHostRun(_ws, ns, src)
-
     runtimes = {}
-    if moycore_supports(""):
-        runtimes["lua"] = _make_lua
+    lua = moycore_glue.make_moycore_runtime(ws)
+    if lua is not None:
+        runtimes["lua"] = lua
     if wasm_host.available():
         runtimes["wasm"] = wasm_host.WasmHostRuntime(ws)
     # The shared service wiring (console.wire_workstation_core -- one canonical
@@ -369,8 +368,9 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     # SYSTEM canvas (the surface the cursor moves on), so it's sized to that.
     console.wire_workstation_core(
         ws, moy_carts, carts_dir, make_api, make_wifi(moy_carts, carts_dir),
-        make_audio=make_audio, runtimes=runtimes, can_manage=True,
-        pointer=console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h), inp=inp)
+        audio_out=PcmPump(), runtimes=runtimes, can_manage=True,
+        pointer=console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h), inp=inp,
+        first_variant=first_variant)
     # Multiplayer (#65): a host-side fake net transport (the sim's fake radio, for
     # net.*), so a "multiplayer"-permission cart runs in the sim. Unlinked here (a
     # solo desktop has no second console) -> send() drops; a test link()s two. The
@@ -390,5 +390,5 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         # which meaning it serves.
         ws._sys_canvas.letterbox_composite = False
         ws.wm = WindowedWM(ws)
-        ws.open_desk()                 # two worlds (#105): boot onto the DESK
+        ws.open_desk()                 # boot onto the DESK (desktop mode)
     return ws

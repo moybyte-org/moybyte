@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-hero site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-p8-import vendor-wamr
+.PHONY: board-modules check-venv device-port firmware-build-guition-s3 firmware-build-guition-p4 firmware-flash-guition-p4 firmware-monitor-guition-p4 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install preflight preflight-web release setup site site-firmware site-gifs site-tiles sync-issues test vendor-jet vendor-jet-carts vendor-libmoy vendor-p8-import vendor-wamr
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -60,8 +60,8 @@ setup:
 	  echo "  ^^ make setup FINISHED, but the host console will not run until"; \
 	  echo "     a C compiler is installed. Re-run 'make setup' after that."; \
 	  echo ""; }
-# Host audio binding (#97 stage 0): compile vendored libmoy into the cached
-# .so the sim's AudioEngine loads. Never fails setup -- with no C compiler it
+# Host audio binding (#97 stage 0): compile the kernel's audio and vendored
+# libmoy into the cached .so the sim's `moy_audio` loads. Never fails setup -- with no C compiler it
 # prints a note and the host runs silent (which, since the check above, is the
 # smaller half of what a missing compiler costs).
 	$(PYTHON) -m runtime.audio_binding
@@ -72,7 +72,7 @@ check-venv:
 	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
 
 VENV_TARGETS := test preflight preflight-web board-modules \
-                site-gifs site-hero site-tiles sync-issues release ota-keygen \
+                site-gifs site-tiles sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3 \
@@ -205,14 +205,36 @@ UNIX_MP_DIR ?= .build/unix_micropython
 UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
 UNIX_MP_USERMODS := $(UNIX_MP_DIR)/usermods
 UNIX_MP := $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython
-# The same tree built a second time the way the BOARDS build MicroPython's
-# object model: 32-bit words, REPR_C (a float result is not a heap object) and
+# The same tree built a second time the way the BOARDS build MicroPython:
+# 32-bit words, REPR_C (a float result is not a heap object) and
 # single-precision floats, so one GC block is 16 bytes and a float costs what it
 # costs on glass. The 64-bit build boxes every float, which buries what a frame
 # really allocates; tests/test_frame_alloc.py measures on this one. It needs a
 # 32-bit C toolchain (gcc-multilib) and is skipped, out loud, without one.
-UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-r32/micropython
-UNIX_MP_R32_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off \
+#
+# It also runs its threads under ONE GIL, as every board does (the T-Deck's
+# input poller is a thread whose staging, attribute stores and queue are atomic
+# only because of it). The unix port's own default is true parallel threads
+# with no GIL (ports/unix/mpconfigport.mk), under which the poller and the
+# frame loop mutate one keyboard object at the same time: a map rehash read
+# mid-write and a collection that frees what the other thread is holding, which
+# surfaces as a segfault or a lost attribute. The build
+# directory carries the model in its name because MicroPython's objects do not
+# track their flags: a tree built without the GIL would be linked into this one.
+# tests/unix_mp.py probes the binary for the GIL, so the model cannot drift.
+UNIX_MP_R32 := $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/micropython
+# What both builds add to the port's flags. -ffp-contract=off compiles every
+# multiply-add UNFUSED, the rounding every other host compile of the same C
+# uses: the audio parity reference and the host binding pass it explicitly,
+# runtime/native_build.py's -std=c99 implies it. The unix port's own
+# -std=gnu99 implies -ffp-contract=fast, which changes nothing where the
+# compiler's default target has no FMA instruction to fuse into (baseline
+# x86-64) and changes libmoy's samples by one LSB where it has one: the
+# ubuntu-26.04 runner installs from Ubuntu's amd64v3 variant, whose gcc
+# defaults to -march=x86-64-v3, and tests/test_audio_parity.py diverged there.
+# Pinned, the result no longer depends on the compiler's default target.
+UNIX_MP_CFLAGS := -DMICROPY_PY_DEFLATE_COMPRESS=1 -ffp-contract=off
+UNIX_MP_R32_CFLAGS := $(UNIX_MP_CFLAGS) \
 	-DMICROPY_OBJ_REPR=MICROPY_OBJ_REPR_C \
 	-DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT
 UNIX_MP_NATIVE := native
@@ -223,8 +245,22 @@ UNIX_MP_NATIVE := native
 # must stay read-only, which is the kind of thing that otherwise fails first on
 # glass. Its blob table is generated (see the recipe below). moy_png is the
 # cover reader, here so tests/test_cover_png.py holds the boards' C to the
-# host's Python reader and to moy-spec's vectors.
-UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png
+# host's Python reader and to moy-spec's vectors. moy_index is the store's
+# native index, built as the twin UNIX_MP_INDEX names (tools/moy_index_spike.py
+# has the hook): it registers extensible, so a run with runtime/ on its path
+# still imports runtime/moy_index.py, and tests/test_moy_index_twins.py and the
+# store trace reach the native one with the path emptied. moy_spine is the
+# kernel's spine, native as on every image (its Python oracle is
+# tests/spine_twin.py); it holds the handle table moy_index shares, so the two
+# are built together. moy_glass, moy_input
+# and moy_net are sprint 3's kernel modules, listed before they compile anything
+# (docs/kernel_survival_2026-10.md section 2). moy_play is sprint 4's Player
+# (docs/kernel_cartpath_2026-10.md), moy_app sprint 5's app ABI
+# (docs/kernel_appabi_2026-10.md), moy_ui sprint 6's toolkit
+# (docs/kernel_toolkit_2026-10.md).
+UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web moy_png moy_index moy_spine moy_store \
+    moy_glass moy_input moy_net moy_kernel moy_play moy_app moy_ui
+UNIX_MP_INDEX ?= c
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 
 .PHONY: unix-micropython
@@ -237,11 +273,11 @@ unix-micropython:
 # where no wasm bundle exists -- and "this image has no browser console" is not
 # news about a test binary that is not an image.
 	@MOYBYTE_REQUIRE_WEB_BUNDLE=0 $(PYTHON) tools/gen_web_blob.py --quiet >/dev/null
-	@test -d $(UNIX_MP_SRC)/.git || git clone --depth 1 --branch $(UNIX_MP_TAG) \
-	    --quiet https://github.com/micropython/micropython $(UNIX_MP_SRC)
-# Outside the clone guard on purpose (the web runner's build.sh learned the
+	@bash tools/mpy_tree.sh $(UNIX_MP_SRC) $(UNIX_MP_TAG)
+# Separate from the clone on purpose (the web runner's build.sh learned the
 # same lesson): a checkout can exist WITHOUT its submodules if a previous run
-# died between the two, and a guarded init could never repair that.
+# died between the two, and a guarded init could never repair that. It is also
+# what moves them to the pins of a tag the tree was just reset to.
 	@cd $(UNIX_MP_SRC) && git submodule update --init --depth 1 --quiet \
 	    lib/micropython-lib lib/berkeley-db-1.xx
 # Symlinks, not copies: the modules under test must be the working tree's, or
@@ -256,25 +292,30 @@ unix-micropython:
 # (or the reverse once it is gone), and re-running make does NOT converge. It
 # cost a confused half hour when moy_web landed with a `names()` verb.
 # Regenerating is ~5s and only happens when a usermod source actually changed.
-	@for b in build-moybyte build-moybyte-r32; do \
+	@for b in build-moybyte build-moybyte-board; do \
+	  s=$(UNIX_MP_SRC)/ports/unix/$$b/moy_index_impl; \
+	  if [ -d "$$(dirname $$s)" ] && [ "$$(cat $$s 2>/dev/null || echo c)" != "$(UNIX_MP_INDEX)" ]; then \
+	    rm -rf $(UNIX_MP_SRC)/ports/unix/$$b/genhdr; fi; \
 	  f=$(UNIX_MP_SRC)/ports/unix/$$b/frozen_content.c; \
 	  if [ -f "$$f" ] && [ -n "$$(find -L $(UNIX_MP_USERMODS)/ -name '*.[ch]' \
 	      -newer "$$f" -print -quit 2>/dev/null)" ]; then rm -f "$$f"; fi; done
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
-	@# -ffp-contract=off: multiply-adds unfused, the rounding the audio parity
-	@# reference uses, whatever the compiler's default target (an FMA one fuses them).
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
-	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1\ -ffp-contract=off \
+	    CFLAGS_EXTRA="$(UNIX_MP_CFLAGS)" \
+	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
+	@echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte/moy_index_impl
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 	@if echo 'int main(void){return 0;}' | cc -m32 -x c - -o /dev/null 2>/dev/null; then \
 	  $(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 MICROPY_PY_BTREE=0 \
-	    MICROPY_FORCE_32BIT=1 BUILD=build-moybyte-r32 \
+	    MICROPY_FORCE_32BIT=1 MICROPY_PY_THREAD_GIL=1 BUILD=build-moybyte-board \
 	    CFLAGS_EXTRA="$(UNIX_MP_R32_CFLAGS)" \
+	    MOY_INDEX_IMPL=$(UNIX_MP_INDEX) \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS) && \
-	  echo "...and in the boards' object model (32-bit, REPR_C): $(UNIX_MP_R32)"; \
+	  echo "$(UNIX_MP_INDEX)" > $(UNIX_MP_SRC)/ports/unix/build-moybyte-board/moy_index_impl && \
+	  echo "...and in the boards' object model (32-bit, REPR_C, one GIL): $(UNIX_MP_R32)"; \
 	else \
 	  echo "no 32-bit C toolchain (gcc-multilib): the boards' object-model build is skipped"; \
 	fi
@@ -283,7 +324,8 @@ unix-micropython:
 # runner's dist/ as the playable player, so build that first for a live page:
 #   firmware/web_runner/build.sh && make site
 # It also embeds whatever `make site-firmware` last pulled down, which is what
-# the page's board flasher writes; without it the flash section says so.
+# the page's board flasher writes; without it the flash section says so. The
+# hero's stills of the console are captured on every build (node 22 + Chrome).
 site:
 	$(PYTHON) site/build.py
 
@@ -296,13 +338,6 @@ site-firmware:
 # Regenerate the teaser-site demo GIFs from the real console (headless).
 site-gifs:
 	$(PYTHON) tools/make_site_gifs.py
-
-# Re-record the site's hero shot (site/hero.gif, committed -- the Pages job has
-# no Pillow). moy_night is deliberate: the site's colours ARE that wallpaper's.
-site-hero:
-	$(PYTHON) tools/make_site_gifs.py --windowed --scene code \
-		--wallpaper moy_night --out $(CURDIR)/site
-	mv $(CURDIR)/site/code.gif $(CURDIR)/site/hero.gif
 
 # Redraw the "What's in it" tiles (docs/media/features, committed for the same
 # reason as the hero).
@@ -572,10 +607,10 @@ firmware-monitor-guition-p4:
 # so there is nothing to look at after a flash: `make firmware-monitor-zero` is
 # how you read the boot line, the paired url and every `ZERO ota:` transition.
 #
-# THE MIGRATION FLASH IS A STORE WIPE. This board's new table puts vfs at
-# 0x5A0000; the stock MicroPython table it is replacing put it far lower, so the
-# old filesystem is not where the new image looks and comes up freshly
-# formatted. Re-run provision.sh afterwards -- see the board README.
+# A TABLE-CHANGING FLASH IS A STORE WIPE. This board's table puts vfs at
+# 0x6A0000 (since 2026-10-18); a board flashed under an older table has its
+# filesystem elsewhere, so the new image comes up on a freshly formatted store.
+# Re-run provision.sh afterwards -- see the board README.
 
 firmware-build-zero:
 	firmware/seeed_xiao_esp32s3_zero/build.sh

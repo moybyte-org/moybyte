@@ -1,7 +1,7 @@
 ---
 paths:
-  - "runtime/netplay.py"
-  - "device/moy_espnow.py"
+  - "native/moy_play/moy_match*"
+  - "runtime/players.py"
   - "native/moy_c6/**"
   - "docs/netplay_v1.md"
 ---
@@ -19,11 +19,14 @@ four on-glass bugs no host test caught) and
 `docs/history/espnow_p4_2026-08.md` (the C6-shim track, phases A-G). What
 belongs here is only what a coder must not undo:
 
-- **`runtime/netplay.py`** is the deterministic core and an import-free leaf like
-  `players.py` (the button order arrives as a constructor argument, so `cart_api`
-  stays its one author). **`device/moy_espnow.py`** owns ESP-NOW's single global
-  recv slot for the whole firmware and dispatches by frame type; anything else
-  that ever wants the radio registers there rather than opening its own.
+- **`native/moy_play/moy_match.c`** is the deterministic core and the link's
+  protocol in C -- the session, the tape, the handshake -- and the kernel's one
+  instance owns the radio's receive ring (`native/moy_net/moy_link.c` holds
+  ESP-NOW's single recv slot), polled from the loop's tail with no crossing;
+  anything else that ever wants the radio goes through it rather than opening
+  its own. `runtime/players.py` is the console's view: the radio's bring-up,
+  the session's player slots, a Python cart's random stream, the actions the
+  link leaves (the button order arrives from `cart_api`, its one author).
 - **The payload is INPUTS, never state**, and that is a measurement rather than a
   taste. **A missing input STALLS the sim; it never extrapolates** -- a guessed
   frame desyncs the two sims for good, and silently. Do not "improve" either one.
@@ -43,12 +46,10 @@ belongs here is only what a coder must not undo:
   bench (a stalled frame loop stops re-arming the scan). Background rescans
   are 10% duty + passive now; only the user-facing picker scans continuously.
   If a radio symptom appears only while the loop RUNS, suspect the scan first
-  (`device/ble_keyboard.py` has the numbers).
-- **modespnow's ring race is patched in every board build**
-  (`patches/esp32_espnow_ring_race.patch`): the upstream reader raises
-  `buffer error` on a healthy ring when it catches a record mid-write, and
-  the ring then really is desynced. `_recover()` re-applies the PHY rate (an
-  active() cycle silently resets it to 1M) and counts itself in stats().
+  (`native/moy_input/moy_ble_task.c` has the numbers).
+- **The link's receive ring is the kernel's** (`native/moy_net/moy_link.c`,
+  `moy_net.Link`); the port's espnow module is out of the console images.
+  `docs/netplay_v1.md` has why and what `_recover()` still does.
 - **The tuning recipe is ORDER-SENSITIVE and the ack LIES.** `rxbuf` before
   `active(True)`, the rate after. Both facts cost a session to learn; the module
   header carries each one beside the number that taught it.
@@ -77,8 +78,8 @@ belongs here is only what a coder must not undo:
   rate and the per-send cost are in that campaign record. Phase G (same day): the C6
   image SHIPS -- CI builds and publishes it, `latest-p4.json` carries a `c6`
   block under its own signature, and Settings -> UPGRADE C6 RADIO
-  (`device/moy_c6_update.py`, P4-gated) downloads and flashes the slave over
-  SDIO with the slave self-reporting its version (MOYC6_V_VERSION). On-glass
+  (`moy_ota.C6Updater` over the kernel's updater, P4-gated) streams the image
+  into the slave over SDIO as it downloads with the slave self-reporting its version (MOYC6_V_VERSION). On-glass
   end to end, including the second-run UP TO DATE.
   **FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT** (found by the owner's
   hands, first cross-arch match): two consoles in a match run the same sim,
@@ -105,7 +106,7 @@ belongs here is only what a coder must not undo:
   kids was built and REVERTED the same day (owner call, 2026-08-22): that thumb
   keyboard is far too small for two people, and the second keyboard is the
   answer.**
-- **`system_carts/brick_siege.moy` and `harpoon_pop.moy` are two-player**, and
+- **`system_carts/moybyte.brick_siege.moy` and `moybyte.harpoon_pop.moy` are two-player**, and
   read `btn(name, i)` without learning where the second pad came from -- the
   point of one API. The Lua twin is ported in step (its parity test compares
   every draw call for 3000 frames). Brick Siege's roster global had to be renamed
@@ -115,7 +116,7 @@ belongs here is only what a coder must not undo:
   snapshot has slots for player two and nothing filled them, so libmoy's
   `players()` answered 1 forever and the line-faithful Lua twin of a 2P cart
   fielded one tank where the Python original fielded two. Both tiers feed it now.
-- **The master audio level persists across a cart start** (`ws.system["volume"]`,
+- **The master audio level persists across a cart start** (`ws.system.get("volume")`,
   applied in `project._build_audio`). The backend is rebuilt per run, so `vol 0`
   at the launcher used to print "no audio backend" and change nothing -- a mute
   that looked like it worked until the next game played at full volume.

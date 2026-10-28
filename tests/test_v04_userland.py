@@ -9,6 +9,7 @@ index -- `cv.pix(x, y)` reads an index back, and `canvas_probe` reads the buffer
 at the canvas's real pixel width."""
 
 from pathlib import Path
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -23,7 +24,15 @@ import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" prob
 SYSTEM_CARTS = ROOT / "system_carts"
 
 
-from ws_helpers import StubInput, open_cart as _open_cart
+from ws_helpers import StubInput, open_cart as _open_cart, select_first_game
+import pytest
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
 
 
 # -- palette ---------------------------------------------------------------
@@ -527,10 +536,8 @@ def test_console_runs_game_cart_and_scores(tmp_path):
 
 
 def _select_by_title(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            return
+    if select_on_home(ws, title) is not None:
+        return
     raise AssertionError("no seed cart titled " + title)
 
 
@@ -586,9 +593,8 @@ def test_paint_and_map_editors_fully_cover_the_running_cart(tmp_path):
     moy_carts.create("Flood", carts_dir, src="def _draw():\n    cls(%d)\n" % FLOOD,
                      type="game", edit=[{"key": "c", "type": "int", "min": 0, "max": 9,
                                          "card": "C {value}"}])
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it["title"] == "Flood")
+    ws.launcher.set_items(shelf(carts_dir))
+    select_on_home(ws, "Flood")
     ws.open_in_editor()                        # starts the cart, lands on the cards tab
     # The leak zones: 8px left/right strips (in the content area) + the 20px bottom strip.
     strips = [(3, 100), (316, 100), (3, 230), (160, 235)]
@@ -660,17 +666,18 @@ def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
 def test_brick_siege_brick_crumbles_steel_stops(tmp_path):
     # Bullet vs walls: a player bullet into a BRICK cell clears it (mset -> empty),
     # while a STEEL cell is never destroyed. Drive a couple of shots straight into
-    # each wall kind and check the tilemap before/after.
+    # each wall kind and check the run's map before/after; the Editor's never sees it.
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Brick Siege")
     ns = ws.ns
     TS = ns["TS"]
+    tm = ws.project.play_map                # the run's own map (E-02)
     # find a brick and a steel cell in the loaded field
     brick = steel = None
-    for y in range(ws.tilemap.h):
-        for x in range(ws.tilemap.w):
-            v = ws.tilemap.mget(x, y)
+    for y in range(tm.h):
+        for x in range(tm.w):
+            v = tm.mget(x, y)
             if v == 8 and brick is None:
                 brick = (x, y)
             elif v == 9 and steel is None:
@@ -681,15 +688,15 @@ def test_brick_siege_brick_crumbles_steel_stops(tmp_path):
     ns["bullets"].append([bx * TS + TS // 2, by * TS + TS // 2 - TS, 1, 0])  # heading down
     for _ in range(20):
         ws.frame(1 / 30)
-        if ws.tilemap.mget(bx, by) < 0:
+        if tm.mget(bx, by) < 0:
             break
-    assert ws.tilemap.mget(bx, by) < 0           # brick crumbled to empty
+    assert tm.mget(bx, by) < 0           # brick crumbled to empty
     # a bullet into steel leaves it intact
     sx, sy = steel
     ns["bullets"].append([sx * TS + TS // 2, sy * TS + TS // 2 - TS, 1, 0])
     for _ in range(20):
         ws.frame(1 / 30)
-    assert ws.tilemap.mget(sx, sy) == 9          # steel never destroyed
+    assert tm.mget(sx, sy) == 9          # steel never destroyed
 
 
 def test_console_cards_make_it_mine_edit_and_run(tmp_path):
@@ -716,13 +723,14 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     assert ws.launcher.items                            # seeded system carts
     drv.frame(1 / 30)
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                   # launcher renders
+    select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
     assert ws.screen == "desktop"                       # opened a cart (plays)
     drv.press("b")                                      # B belongs to the GAME while it
     drv.frame(1 / 30)                                   # plays -- no chrome, stays playing
     assert ws.screen == "desktop"
-    # Stage 5 exit model: a running game exits via hold-BACKSPACE (covered in
+    # Stage 5 exit model: a running game exits via the pause menu (covered in
     # test_desktop_shell); here we just leave to the launcher via go_home() (the ≡ HOME
     # action) -- robust regardless of the seed cart's type -- then open it in the Editor.
     ws.go_home()
@@ -744,6 +752,7 @@ def test_code_view_arrows_move_caret_and_scroll(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
     ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
@@ -774,6 +783,7 @@ def test_code_editor_drag_scrolls_without_crashing(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
     ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
@@ -793,11 +803,15 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     assert ws.screen == "desktop"            # launcher RUN plays the cart
     ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
     if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
         ws.set_menu_view("code")
+    from runtime import ui_draw
+    ui_draw.input_kind("touch")              # the palette shows after touch (D-17)
+    drv.frame(1 / 30)
     ed = ws.editor
     ed.set_text("")
     ed.row = ed.col = 0
@@ -805,39 +819,37 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     drv.frame(1 / 30)
     for sym in "=[]":                       # ... + palette symbols the keyboard lacks
         i = C._CODE_SYMBOLS.index(sym)
-        drv.click(C._SYM_AREA[0] + i * C._SYM_CELL + 4, C._SYM_Y + 6)
+        lay = ws.code_layout
+        drv.click(lay.sym_area[0] + i * lay.sym_cell + 4, lay.sym_y + 6)
         drv.frame(1 / 30)
     assert ed.text() == "x=[]"
     # RUN dissolved into the unified bar (Stage-4 rollout): the code tab shows the SAME
     # zoned bar as every editor, so PLAY (in the bar's lent left zone) runs the cart.
     # The code tab is system-canvas, so the bar uses the responsive layout.zone_left.
-    from runtime import editor_app as EA, bar_layer as BL
-    play_i = [t for t, _g in EA._ZONE_TABS].index(None)     # PLAY entry (tab is None)
-    zx, zy, _zw, _zh = ws.layout.zone_left
-    drv.click(zx + play_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2, zy + BL._BAR_ICON // 2)
+    play = [r for t, _g, r in ws.editor_app._ladder_rects(ws.bar_layer._zone_rect("menu"))
+            if t is None][0]                                 # PLAY entry (tab is None)
+    drv.click(play[0] + play[2] // 2, play[1] + play[3] // 2)
     drv.frame(1 / 30)
     assert ws.screen == "desktop"
 
 
 def test_host_console_paint_via_mouse(tmp_path):
-    from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    bx, by = C._PAINT_BTN[0], C._PAINT_BTN[1]            # click the PAINT overlay button
-    drv.click(bx + 2, by + 2)
+    ws._open_paint()                                     # the Editor's PAINT, over the run
     drv.frame(1 / 30)
     assert ws.menu_view == "paint" and ws.paint is not None
-    sx = C._SW_X0 + (12 % C._SW_COLS) * C._SW            # palette swatch for color 12
-    sy = C._SW_Y0 + (12 // C._SW_COLS) * C._SW
+    lay = ws.paint_layer.layout
+    sx = lay.sw_x0 + (12 % lay.sw_cols) * lay.sw        # palette swatch for color 12
+    sy = lay.sw_y0 + (12 // lay.sw_cols) * lay.sw
     drv.click(sx + 2, sy + 2)
     drv.frame(1 / 30)
     assert ws.paint.color == 12
-    drv.click(C._PG_X0 + 2, C._PG_Y0 + 2)               # paint sprite 0, pixel (0,0)
+    drv.click(lay.pg_x0 + 2, lay.pg_y0 + 2)             # paint sprite 0, pixel (0,0)
     drv.frame(1 / 30)
     assert ws.sheet.tget(0, 0, 0) == 12
 
@@ -1310,10 +1322,24 @@ def test_tilemap_resize_preserves_content_and_roundtrips():
     assert (tm.w, tm.h) == (1, 1)
 
 
+def _map_tap(ws, drv, stop):
+    """Tap stop `stop` of the handheld Map page where it drew last."""
+    ws._dirty = True
+    drv.frame(1 / 30)
+    x, y, w, h = ws.map_ui.page().host.box(stop)
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+
+
+def _mv0(ws):
+    """The handheld Map view's top left."""
+    return ws.map_ui._mv_metrics()[:2]
+
+
 def test_host_console_map_size_brush_stamps_block_via_taps(tmp_path):
     # #57 in the shell: the SIZE button cycles the stamp size, one tap with
     # SIZE=2 places the sprite's 4 tiles, and an ERASE tap clears the block.
-    from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.sel = 0
@@ -1322,20 +1348,19 @@ def test_host_console_map_size_brush_stamps_block_via_taps(tmp_path):
     assert ws.menu_view == "map"
     drv = host_app.ConsoleDriver(ws)
     me = ws.map_ui.mapedit
-    drv.click(C._MAP_SIZE[0] + 2, C._MAP_SIZE[1] + 2)
-    drv.frame(1 / 30)
+    _map_tap(ws, drv, "Brush size")
     assert me.size == 2
+    mx, my = _mv0(ws)
     me.n = 5
     cols = ws.project.sheet.cols
     cx, cy = me.cam_x, me.cam_y
-    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2)    # tap the top-left visible cell
+    drv.click(mx + 2, my + 2)                # tap the top-left visible cell
     drv.frame(1 / 30)
     assert ws.tilemap.mget(cx, cy) == 5 and ws.tilemap.mget(cx + 1, cy) == 6
     assert ws.tilemap.mget(cx, cy + 1) == 5 + cols
     assert ws.tilemap.mget(cx + 1, cy + 1) == 6 + cols
-    drv.click(C._MAP_ERASE[0] + 2, C._MAP_ERASE[1] + 2)
-    drv.frame(1 / 30)
-    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2)    # the eraser clears the whole block
+    _map_tap(ws, drv, "Tool Erase")
+    drv.click(mx + 2, my + 2)                # the eraser clears the whole block
     drv.frame(1 / 30)
     for dy in range(2):
         for dx in range(2):
@@ -1347,21 +1372,23 @@ def test_host_console_map_open_place_and_render(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2)      # open the MAP overlay button
+    ws._open_map()                                       # the Editor's MAP, over the run
     drv.frame(1 / 30)
     assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     # pick the 2nd palette tile (id == map_page + 1) ...
-    px = C._TP_X0 + 1 * C._TP_CELL
-    py = C._TP_Y0
+    lay = ws.map_ui.layout
+    from runtime import editor_map
+    px = lay.tp_x0 + 1 * editor_map.CELL
+    py = lay.tp_y0
     drv.click(px + 2, py + 2)
     drv.frame(1 / 30)
     assert ws.map_ui.mapedit.n == ws.map_ui.map_page + 1
     # ... then stamp it onto the top-left visible map cell and confirm mget reflects it
-    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2)
+    mx, my = _mv0(ws)
+    drv.click(mx + 2, my + 2)
     drv.frame(1 / 30)
     cx = ws.map_ui.mapedit.cam_x
     cy = ws.map_ui.mapedit.cam_y
@@ -1374,23 +1401,23 @@ def test_host_console_map_erase_and_pan(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    ws._open_map()                                       # the Editor's MAP, over the run
     ws.map_ui.mapedit.n = 3
-    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 3 at (0,0)
+    mx, my = _mv0(ws)
+    drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp tile 3 at (0,0)
     assert ws.tilemap.mget(0, 0) == 3
-    drv.click(C._MAP_ERASE[0] + 2, C._MAP_ERASE[1] + 2); drv.frame(1 / 30)  # ERASE on
+    _map_tap(ws, drv, "Tool Erase")                            # ERASE on
     assert ws.map_ui.map_erase
-    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # now a tap erases
+    drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # now a tap erases
     assert ws.tilemap.mget(0, 0) == TileMap.EMPTY
     # Zoom IN so the map is bigger than the view, then pan right (the fit-both default
     # shows the whole map -> the camera is pinned at 0 with nothing to scroll).
     ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1
     x0m, y0m, cell, cols, rows = ws.map_ui._mv_metrics()
     assert ws.tilemap.w > cols                                 # room to pan at this zoom
-    drv.click(C._PAN_RT[0] + 2, C._PAN_RT[1] + 2); drv.frame(1 / 30)        # pan right
+    drv.press("right"); drv.frame(1 / 30)                      # the d-pad pans right
     assert ws.map_ui.mapedit.cam_x == 1
 
 
@@ -1400,17 +1427,16 @@ def test_host_console_map_save_roundtrips(tmp_path):
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     cart_path = ws.cart["path"]
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    ws._open_map()                                       # the Editor's MAP, over the run
     ws.map_ui.mapedit.n = 6
-    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 6 at (0,0)
+    mx, my = _mv0(ws)
+    drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp tile 6 at (0,0)
     # No SAVE button (#111) -- ws.save_map is the hard-commit verb every exit path
     # (tab switch/PLAY/CLOSE/...) now dispatches automatically.
     ws.save_map()
-    assert ws.save_status is None      # invisible save: no failure, no "SAVED"
     reloaded = moy_carts.load(cart_path)                  # map.moymap persisted on disk
     assert reloaded["map"] is not None
     assert TileMap.from_hex(reloaded["map"]).mget(0, 0) == 6
@@ -1424,13 +1450,13 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
+    select_first_game(ws)
     drv.press("run"); drv.frame(1 / 30)
     tm = ws.tilemap
     before = tm.gen
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
-    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp a cell
+    ws._open_map()                                       # the Editor's MAP, over the run
+    mx, my = _mv0(ws)
+    drv.click(mx + 2, my + 2); drv.frame(1 / 30)               # stamp a cell
     assert tm.gen > before                                # mset bumped gen (live pickup)
     assert tm is ws.tilemap                               # same object the cart's api holds
 
@@ -1438,7 +1464,7 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
 # -- map editor zoom levels (#37 follow-up) --------------------------------
 
 def _open_cart_map(tmp_path, cart_name):
-    """Build a workstation, open the `<cart_name>.moy` seed cart, then enter the
+    """Build a workstation, open the `moybyte.<cart_name>.moy` seed cart, then enter the
     map editor. Returns (C, ws, drv)."""
     import os
     from runtime import console as C
@@ -1448,7 +1474,7 @@ def _open_cart_map(tmp_path, cart_name):
     sel = None
     for i in range(len(ws.launcher.items)):
         path = ws.launcher.items[i].get("path") or ""
-        if os.path.basename(path) == want:
+        if os.path.basename(path) == "moybyte." + want:
             sel = i
             break
     assert sel is not None, "cart %r not seeded" % cart_name
@@ -1473,7 +1499,7 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     from runtime.map_editor_ui import _MV_ZOOMS
 
     fitted = 0
-    for name in ("brick_siege", "bench", "letter_blitz", "platformer", "scroll_demo"):
+    for name in ("brick_siege", "bench", "letter_blitz", "hop_quest", "sky_run"):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
         w, h = ws.tilemap.w, ws.tilemap.h
         assert ws.map_ui.map_zoom == 0                          # opens at the fit default
@@ -1499,7 +1525,6 @@ def test_map_cycle_zoom_increases_cell_then_lands_on_overview(tmp_path):
     # Cycling the zoom steps IN through the detail rungs -- the cell size strictly
     # grows and the visible cell count strictly shrinks -- then lands on OVERVIEW,
     # which is BELOW every detail rung, and wraps back to the 8px field size.
-    from runtime import console as C
     from runtime import map_editor_ui as M
     _C, ws, drv = _open_cart_map(tmp_path, "brick_siege")
     rungs = ws.map_ui.layout.zooms
@@ -1509,8 +1534,7 @@ def test_map_cycle_zoom_increases_cell_then_lands_on_overview(tmp_path):
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
         seen.append((ws.map_ui.map_zoom, cell, cols * rows,
                      ws.map_ui._mv_overview()))
-        drv.click(C._MAP_ZOOM[0] + 2, C._MAP_ZOOM[1] + 2)   # tap ZOOM -> next rung
-        drv.frame(1 / 30)
+        _map_tap(ws, drv, "Zoom")                        # tap ZOOM -> next rung
     # Back to the default after a full cycle.
     assert ws.map_ui.map_zoom == 0
     detail = [s for s in seen if not s[3]]
@@ -1530,7 +1554,6 @@ def test_map_cycle_zoom_increases_cell_then_lands_on_overview(tmp_path):
 def test_map_tap_and_sky_hit_right_cell_after_zoom(tmp_path):
     # After a zoom change tap-paint and the SKY (empty) brush still land on the cell
     # under the pointer -- hit-testing follows the live cell size.
-    from runtime import console as C
     _C, ws, drv = _open_cart_map(tmp_path, "brick_siege")
     ws.map_ui.map_zoom = 2                                       # a zoomed-IN level
     ws.map_ui.mapedit.cam_x = ws.map_ui.mapedit.cam_y = 0
@@ -1541,9 +1564,10 @@ def test_map_tap_and_sky_hit_right_cell_after_zoom(tmp_path):
     py = y0 + 1 * cell + cell // 2
     drv.touch(px, py); drv.frame(1 / 30); drv.touch_up(); drv.frame(1 / 30)
     assert ws.tilemap.mget(2, 1) == 5
-    # Pick SKY then tap the same cell -> it clears to EMPTY (the right cell, at zoom).
-    drv.click(C._TP_SKY[0] + 2, C._TP_SKY[1] + 2); drv.frame(1 / 30)
-    assert ws.map_ui.mapedit.n < 0
+    # The eraser, then a tap on the same cell -> it clears to EMPTY (the right cell,
+    # at zoom).
+    _map_tap(ws, drv, "Tool Erase")
+    assert ws.map_ui.map_erase
     drv.touch(px, py); drv.frame(1 / 30); drv.touch_up(); drv.frame(1 / 30)
     assert ws.tilemap.mget(2, 1) == ws.tilemap.EMPTY
 
@@ -1556,13 +1580,13 @@ def test_map_pan_works_zoomed_in_and_clamps(tmp_path):
     ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1                   # most zoomed-in
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     assert ws.tilemap.w > cols and ws.tilemap.h > rows   # room to pan
-    drv.click(C._PAN_RT[0] + 2, C._PAN_RT[1] + 2); drv.frame(1 / 30)
+    drv.press("right"); drv.frame(1 / 30)
     assert ws.map_ui.mapedit.cam_x == 1
-    drv.click(C._PAN_DN[0] + 2, C._PAN_DN[1] + 2); drv.frame(1 / 30)
+    drv.press("down"); drv.frame(1 / 30)
     assert ws.map_ui.mapedit.cam_y == 1
     # Pan hard right past the edge: clamps so the last column stays visible.
     for _ in range(40):
-        drv.click(C._PAN_RT[0] + 2, C._PAN_RT[1] + 2); drv.frame(1 / 30)
+        drv.press("right"); drv.frame(1 / 30); drv.frame(1 / 30)
     assert ws.map_ui.mapedit.cam_x == ws.tilemap.w - cols       # clamped to the right edge
     assert ws.map_ui.mapedit.cam_x + cols == ws.tilemap.w
 

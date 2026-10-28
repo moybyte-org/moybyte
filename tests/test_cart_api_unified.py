@@ -63,6 +63,9 @@ def test_the_base_namespace_keyset_is_pinned():
         def held(self, name):
             return False
 
+        def steps(self, n):
+            return int(bool(self.pressed(n)))
+
         def pressed(self, name):
             return False
 
@@ -84,7 +87,7 @@ def test_the_base_namespace_keyset_is_pinned():
         "textmode", "quit", "view", "cfg", "col",
         "sfx", "beep", "music", "music_stop", "sound_stop", "volume",
         "rnd", "flr", "Image", "image",
-        "_moy_cfg",
+        "_moy_cfg", "_moy_images",
     }
 
 
@@ -152,7 +155,7 @@ def test_a_cart_may_be_several_scripts_and_each_one_is_its_own_chunk(tmp_path):
     (cart / "manifest.json").write_text(json.dumps(
         {"format": "moy-1", "title": "Port", "main": "main.lua",
          "sources": ["p8.lua", "main.lua", "perf.lua"],
-         "runtime": "lua", "ported_from": "pico-8"}), encoding="utf-8")
+         "runtime": "lua", "tags": ["pico8"]}), encoding="utf-8")
     (cart / "main.lua").write_text("function _update() end\n", encoding="utf-8")
     (cart / "p8.lua").write_text("-- the generated half\n", encoding="utf-8")
     (cart / "perf.lua").write_text("-- the wrapper\n", encoding="utf-8")
@@ -194,7 +197,7 @@ def test_a_cart_may_be_several_scripts_and_each_one_is_its_own_chunk(tmp_path):
     # arms and where the host tier opens the PICO-8 machine, so a chunk run
     # outside it lands on the wrong side of both.
     root_dir = pathlib.Path(__file__).resolve().parent.parent
-    for rel in ("device/moycore_glue.py", "runtime/lua_host.py"):
+    for rel in ("device/moycore_glue.py",):
         body = (root_dir / rel).read_text(encoding="utf-8")
         assert "cart_chunks(ns, src)" in body, rel
         assert 'load(src, "@cart")' not in body, \
@@ -206,11 +209,11 @@ def test_a_cart_may_be_several_scripts_and_each_one_is_its_own_chunk(tmp_path):
     assert cart_chunks({}, "C") == [("C", "@cart")], \
         "a one-script cart must reach load() as the list it always was"
 
-    # ...and the diet drops them: 62KB of shim resident per cart is the largest
-    # single payload on a ported shelf and the least useful (#66).
-    from runtime import cart_manager
-    assert "src_before" in cart_manager._HEAVY_CART_KEYS
-    assert "src_after" in cart_manager._HEAVY_CART_KEYS
+    # ...and the shelf never holds them: 62KB of shim resident per cart is the
+    # largest single payload on a ported shelf and the least useful (#66).
+    from runtime import moy_carts
+    assert "src_before" in moy_carts.PAYLOADS
+    assert "src_after" in moy_carts.PAYLOADS
 
 
 def test_a_several_script_cart_survives_the_bake_and_the_seed(tmp_path):
@@ -230,12 +233,14 @@ def test_a_several_script_cart_survives_the_bake_and_the_seed(tmp_path):
     from runtime import moy_carts
 
     src = tmp_path / "system_carts"
-    cart = src / "port.moy"
+    cart = src / "moybyte.port.moy"
     cart.mkdir(parents=True)
     (cart / "manifest.json").write_text(json.dumps(
-        {"format": "moy-1", "title": "Port", "type": "game", "version": 3,
-         "system": True, "order": 1, "runtime": "lua", "main": "main.lua",
-         "sources": ["p8.lua", "main.lua", "perf.lua"]}), encoding="utf-8")
+        {"format": "moy-1", "title": "Port", "id": "moybyte.port", "version": 3,
+         "runtime": "lua", "main": "main.lua",
+         "sources": ["p8.lua", "main.lua", "perf.lua"],
+         "moybyte": {"type": "game", "system": True, "order": 1}}),
+        encoding="utf-8")
     (cart / "main.lua").write_text("function _update() end\n", encoding="utf-8")
     (cart / "p8.lua").write_text("-- prologue\n", encoding="utf-8")
     (cart / "perf.lua").write_text("-- epilogue\n", encoding="utf-8")
@@ -248,11 +253,11 @@ def test_a_several_script_cart_survives_the_bake_and_the_seed(tmp_path):
     root = str(tmp_path / "carts")
     (tmp_path / "carts").mkdir()
     moy_carts.seed_builtins(baked, root=root)
-    seeded = json.loads((tmp_path / "carts" / "port.moy" / "manifest.json")
+    seeded = json.loads((tmp_path / "carts" / "moybyte.port.moy" / "manifest.json")
                         .read_text(encoding="utf-8"))
     assert seeded["sources"] == ["p8.lua", "main.lua", "perf.lua"], \
         "the regenerated manifest must name the order it was written with"
 
-    got = moy_carts.load(root + "/port.moy")
+    got = moy_carts.load(root + "/moybyte.port.moy")
     assert got["src_before"] == [("p8.lua", "-- prologue\n")]
     assert got["src_after"] == [("perf.lua", "-- epilogue\n")]

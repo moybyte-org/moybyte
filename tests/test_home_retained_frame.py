@@ -125,14 +125,18 @@ def test_selection_change_invalidates(tmp_path):
 
 def test_title_change_invalidates(tmp_path):
     """A rename with an unchanged item COUNT must still repaint -- the key
-    carries per-item titles precisely because len() alone cannot see it."""
+    carries per-item titles precisely because len() alone cannot see it.
+    (The band frame repaints the carousel's band, its title with it.)"""
     ws, drv = _settle_home(tmp_path)
     it = next(x for x in ws.launcher.items if x.get("path"))
     it["title"] = "RENAMED"
     calls = _count_grid(ws)
+    band = [0]
+    real = ws.launcher.repaint_band
+    ws.launcher.repaint_band = lambda *a: (band.__setitem__(0, band[0] + 1), real(*a))[1]
     ws._dirty = True
     drv.frame(0.0)
-    assert calls[0] == 1
+    assert calls[0] + band[0] == 1
 
 
 def test_foreign_paints_reset_the_partial_streak(tmp_path):

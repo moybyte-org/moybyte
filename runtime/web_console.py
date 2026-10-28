@@ -15,8 +15,9 @@ The webhost is read THROUGH `ws` on every call and never captured here: it is
 settings load later still (the same ordering `make_webhost` respects by reading
 the pin at `start()` rather than at construction). The pin's own persistence
 goes to the sibling collaborator that owns system.json (`ws.prefs`, #209
-landing B); `ws.system` stays a plain alias of the dict it holds, so reading and
-writing a key through it needs nothing from this object.
+landing B); `ws.system` stays a plain alias of the rows it holds, so reading and
+writing a key through it (`get`, and `set`, which persists) needs nothing from
+this object.
 """
 
 try:
@@ -28,6 +29,14 @@ try:
     from chrome import _ticks_us
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import _ticks_us
+
+
+def _moy_net():
+    try:
+        import moy_net
+        return moy_net
+    except ImportError:
+        return None
 
 
 class WebConsole:
@@ -51,7 +60,20 @@ class WebConsole:
         # back HERE rather than dropping a kid onto a shelf the browser is
         # concurrently rewriting.
         self.ui = WebConsoleUI(ws, names)
-        self.parked = False
+        self._parked = False
+
+    @property
+    def parked(self):
+        """The glass given to the connection screen: the kernel's flag where
+        the switch is (moy_net.wc_park, a surface epoch), else this object's."""
+        return self._parked
+
+    @parked.setter
+    def parked(self, on):
+        self._parked = bool(on)
+        wc_park = getattr(_moy_net(), "wc_park", None)
+        if wc_park is not None and getattr(self.ws.webhost, "joining", None) is not None:
+            wc_park(self._parked)
 
     def pin(self):
         """The pairing pin the browser must carry (`?pin=NNNN`), as a string.
@@ -73,8 +95,7 @@ class WebConsole:
         if pin:
             return str(pin)
         pin = self._mint_pin()
-        ws.system["web_pin"] = pin
-        ws.prefs.persist()
+        ws.system.set("web_pin", pin)
         return pin
 
     def _mint_pin(self):
@@ -123,11 +144,12 @@ class WebConsole:
         cleared) is reset here too -- nothing in the router calls a Layer's
         `on_enter`.
 
-        On the windowed tier `go_home` also leaves the desk, which is what makes
-        this fullscreen there: windows exist only above the desk (#105), so the
-        play world presents every kind full-screen with no special case."""
+        On the windowed tier it enters console mode first, which is what makes
+        this fullscreen there: the desk's windows wait parked, and console mode
+        presents every kind full-screen with no special case."""
         self.parked = True
         self.ui.on_enter()
+        self.ws.wm.enter_console()
         self.ws.go_home()
 
     @staticmethod
@@ -170,25 +192,43 @@ class WebConsole:
         pressing TURN OFF; `ConsoleUpdate` passes "update", because a console
         board handing its glass back to run its own update screen is not the
         same event to whoever is watching in a tab."""
-        if self.serving():
+        if self.serving() or self.joining():
             self.toggle(why=why)
         else:
             self.unpark()
 
     def unpark(self):
-        """Give the console back. The desk is home on the windowed tier; the
-        launcher root everywhere else."""
+        """Give the console back. The desk is home on the windowed tier, with
+        the windows parked when the console was taken; the launcher root
+        everywhere else."""
         ws = self.ws
         self.parked = False
         ws._dirty = True
+        ws.wm.goto("launcher")          # out of the screen, not over it
         if getattr(ws.wm, "has_desk", False):
             ws.open_desk()
-        else:
-            ws.wm.goto("launcher")
 
     def serving(self):
         wh = self.ws.webhost
         return bool(wh is not None and getattr(wh, "serving", False))
+
+    def joining(self):
+        wh = self.ws.webhost
+        return bool(wh is not None and getattr(wh, "joining", False))
+
+    def on_serving(self):
+        """The switch came up after a join: the glass goes to the screen."""
+        self.ws._dirty = True
+        if not self.parked:
+            self.park()
+
+    def on_failed(self):
+        """The join ran out or the bind was refused: the row says why, the
+        radio goes, and the glass (never parked by a join) stays where it is."""
+        self.ws.wifi_release("web")
+        self.ws._dirty = True
+        if self.parked:
+            self.unpark()
 
     def label(self):
         """What the Settings row shows: the ADDRESS while serving, else OFF.
@@ -203,6 +243,8 @@ class WebConsole:
             return "OFF"
         if getattr(wh, "error", None):
             return str(wh.error)[:22]
+        if getattr(wh, "joining", False):
+            return "JOINING..."
         if not getattr(wh, "serving", False):
             return "OFF"
         url = ""
@@ -239,7 +281,9 @@ class WebConsole:
             return
         try:
             wh.error = None
-            if getattr(wh, "serving", False):
+            if getattr(wh, "joining", False):
+                wh.stop()                    # a join nobody waits for any more
+            elif getattr(wh, "serving", False):
                 self._stop_saying_why(wh, why)
                 # The radio lease outlives `serving` by the goodbye window: the
                 # page's last round trip rides the link, so a host that is

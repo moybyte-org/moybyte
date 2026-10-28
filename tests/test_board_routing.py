@@ -40,23 +40,30 @@ def _staged():
 def _device_backend_src():
     """The device backend's source, as the greps below mean it: the board's
     `moy_runtime` and every spine it delegates to, `device_api` (the device
-    re-export home of make_api), the one `cart_api` body, and `device_boot`
+    re-export home of make_api), the one `cart_api` body and `device_boot`
     -- read through `_staged()` on purpose, which asserts the spine really is
-    staged onto this board."""
+    staged onto this board -- and the kernel's frame (native/moy_kernel's
+    loop and its VM-side stages, moy_input's input stage)."""
     return "\n".join((
         runtime_text(ROOT / "modules" / "moy_runtime.py"),
         (DEVICE / "device_api.py").read_text(encoding="utf-8"),
         Path("runtime/cart_api.py").read_text(encoding="utf-8"),
         _staged()["device_boot.py"].read_text(encoding="utf-8"),
-    ))
+    ) + _kernel_frame())
+
+
+def _kernel_frame():
+    return tuple((NATIVE / rel).read_text(encoding="utf-8") for rel in (
+        "moy_kernel/moy_loop.c", "moy_kernel/moy_loop_board.c",
+        "moy_input/modmoy_input.c"))
 
 
 def _panel_src():
-    """This board's panel backend: its compositor SUBCLASS plus its native
-    driver. The shared body is `device/banded_panel.py`, executed by
-    tests/test_banded_panel.py."""
+    """This board's panel backend: the boot that builds the kernel's banded
+    compositor over it, and its native driver. The compositor's frame state
+    machine is executed by tests/test_banded_panel.py."""
     return (
-        (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8"),
+        (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8"),
         (ROOT / "native" / "moy_lcd" / "modmoy_lcd.c").read_text(encoding="utf-8"),
     )
 
@@ -72,8 +79,9 @@ def _flush_src():
 
 def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
     """The updater is CONSTRUCTED by this board (its SD gate is this board's
-    alone); the boot verdict and the rollback confirm are the spine's OtaHealth,
-    executed in tests/test_ota_health.py and tests/test_device_boot.py."""
+    alone); the boot verdict is the spine's (`report_update`) and the rollback
+    confirm the kernel loop's, executed in tests/test_ota_health.py,
+    tests/test_device_boot.py and tests/test_moy_loop.py."""
     runtime = _device_backend_src()
 
     assert "import moy_ota" in runtime
@@ -122,19 +130,22 @@ def test_micropython_native_sd_shares_display_spi_host():
 
 
 def test_micropython_touch_and_idle_cursor():
-    """The GT911 driver is constructed by run_desktop and fed into the shared
-    pointer through the spine's `apply_touch`, and the pointer ticks in the
-    SHARED FrameLoop. The driver is executed in tests/test_device_input.py,
-    apply_touch in tests/test_device_boot.py, the Pointer's auto-hide in
-    tests/test_desktop_shell.py."""
+    """The kernel's GT911 driver is constructed by run_desktop's input module,
+    its sample written before the merge and the frame's sample applied to the
+    shared pointer after it, and the pointer ticks in the kernel's loop. The
+    driver is executed in tests/test_tdeck_input.py, the merge and
+    apply_pointer in tests/test_device_boot.py, the Pointer's auto-hide in
+    tests/test_desktop_shell.py, the stage order in tests/test_moy_loop.py."""
     runtime = _device_backend_src()
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
-    boot_spine = Path("runtime/device_boot.py").read_text(encoding="utf-8")
+    stage = (NATIVE / "moy_input" / "modmoy_input.c").read_text(encoding="utf-8")
+    stage = stage[stage.index("void moy_input_loop_inputs("):]
 
-    assert "touch = Touch(canvas.w, canvas.h" in runtime
-    assert "apply_touch(touch, pointer)" in runtime
-    assert "pointer.tick(now)" in boot_spine
-    assert "loop = FrameLoop(" in runtime
+    assert "self.touch = moy_input.touch(w, h)" in runtime
+    assert stage.index("moy_touchdev_poll(") < stage.index("moy_input_begin_frame(") \
+        < stage.index("moy_input_ptr_apply(")
+    assert "moy_input_ptr_tick(p, now_ms())" in stage
+    assert "return d.run(ball=tdin.ball, kick_at_tail=True" in runtime
     # Touch calibration bring-up mode (serial-only, flush-once): a rung of the
     # board's MODES ladder, reached as `s.MODE = "touch"; s.main()`.
     assert '"touch"' in shell and "MODES = (" in shell
@@ -160,45 +171,33 @@ def test_kid_mode_gates_diag_frame_eaters():
     assert 'getattr(ws, "diag_sd", False)' in runtime      # timer flush gated
 
 
-def test_input_poller_wired_with_gil_release_patch():
-    """The poller only isolates a stall when machine.I2C frees the GIL across
-    its blocking legacy-driver transaction wait: run_desktop prefers the poller
-    and keeps the synchronous path as a live fallback, and the build applies
-    the GIL patch. The poller's body is executed in tests/test_tdeck_input.py.
-
-    The patch itself is an INLINE sed in this board's build.sh rather than a
-    `moybyte_patch_*` of the shared lib, so it has no patch-harness twin; its
-    guard stays a grep until it moves into the lib."""
+def test_the_input_task_is_kicked_once_a_frame_and_the_gil_patch_is_gone():
+    """The keyboard and the GT911 are passed on the kernel's input task (#69),
+    kicked once a frame after present, so a C3 stall blocks that task and
+    never the loop -- which is why the build no longer patches machine.I2C to
+    release the GIL: nothing on this board opens a machine.I2C. The drivers
+    are executed in tests/test_tdeck_input.py."""
     runtime = _device_backend_src()
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-
-    assert "MOY_INPUT_POLLER = True" in runtime      # default ON, revert w/o rebuild
-    assert "poller.consume()" in runtime
-    assert "keyboard.poll()" in runtime              # the synchronous path stays live
-    assert "poller thread died -> synchronous fallback" in runtime
-    assert "touch._source = poller.consume_touch" in runtime
-    assert "keyboard._poller_owned = True" in runtime
-    # the GIL-release patch: applied by default, revertable, wraps cmd_begin
-    assert "Moybyte #69 GIL" in build, "the GIL-release patch is not applied"
-    assert "MP_THREAD_GIL_EXIT();" in build
-    assert "i2c_master_cmd_begin(" in build
-    assert "MP_THREAD_GIL_ENTER();" in build
+    header = (ROOT / "boards" / "MOYBYTE_TDECK" / "mpconfigboard.h").read_text()
+    assert "kick_at_tail=True" in runtime
+    tail = runtime[runtime.index("void moy_input_loop_tail(void) {"):]
+    assert "if (s_kick_tail) {\n        moy_input_board_kick();" in tail[:200]
+    assert "inp = moy_input.kernel()" in runtime
+    assert "#define MOY_INPUT_TASK " in header
+    assert "Moybyte #69 GIL" not in build and "MP_THREAD_GIL_EXIT" not in build
 
 
-def test_touch_holds_a_held_finger_between_gt911_samples():
-    """The hold/stale/bound contract is ONE copy in the shared gt911 core
-    (executed in tests/test_gt911_core.py); the driver must still ROUTE its
-    no-news pass through it."""
-    inp = (DEVICE / "device_input.py").read_text(encoding="utf-8")
-    assert "return self._hp.hold()" in inp
-
-
-def test_hitch_logger_wired():
-    """The HITCH line's format is executed in tests/test_device_diag.py; this
-    board's loop must still CALL it with every stage, and must not write the
-    diag ring to SD at 5s during play."""
+def test_hitch_and_loop_are_the_kernels():
+    """HITCH and LOOP are formatted in C from the stage meters
+    (native/moy_kernel/moy_loop.c, executed in tests/test_moy_loop.py); this
+    board rings the kernel's lines, keeps no Python copy, and must not write
+    the diag ring to SD at 5s during play."""
     runtime = _device_backend_src()
-    assert '_diag_hitch(diag, ws, comp, elapsed, _t["kbd"], _t["inp"], _t["sb"],' in runtime
+    device_diag = (DEVICE / "device_diag.py").read_text(encoding="utf-8")
+    assert "moy_loop.diag_take()" in runtime and "diag.ring_only(" in runtime
+    assert "_diag_hitch" not in runtime and "_diag_loop" not in runtime
+    assert "def _diag_hitch(" not in device_diag and "def _diag_loop(" not in device_diag
     # the diag->SD write (measured 80-120ms) must NOT run at 5s during play
     assert "20000 if ws.cart is not None else 5000" in runtime
 
@@ -216,14 +215,12 @@ def test_micropython_offline_diag_wiring():
     assert "_diag_flush(diag, ws)" in runtime
     assert "_diag_perf_sample(" not in runtime
     assert "def _diag_perf_sample(" not in device_diag
-    assert 'diag.ring("PERF", line[5:])' in runtime
     assert "_diag_drawbrk(diag, ws)" in runtime
     assert "_diag_draw2(diag, ws)" in runtime
     assert "_diag_pump(diag, comp)" in runtime
-    assert "_diag_i2cstat(diag, keyboard, touch)" in runtime
+    assert "_diag_i2cstat(diag, keyboard, tdin.touch)" in runtime
     # Existing diagnostics routed through diag (printed AND persisted): the
-    # frame-error trace and the in-cart crash.
-    assert '_diag_log("frame error", exc, diag)' in runtime
+    # in-cart crash.
     assert '_diag_log("cart error", _ce, diag)' in runtime
 
 
@@ -244,7 +241,8 @@ def test_code_editor_wired_into_device_shell():
     save chain is executed in tests/test_code_multifile.py,
     tests/test_safe_edit.py and tests/test_journal_wiring.py."""
     runtime = _device_backend_src()
-    assert "from console import Pointer, Workstation" in runtime
+    assert "from console import Workstation" in runtime
+    assert "from console import Pointer" in runtime    # via wire_input
     assert "keyboard=keyboard" in runtime      # via wire_workstation_core
 
 
@@ -266,17 +264,25 @@ def test_both_boards_service_the_web_console_every_frame():
     that board served and this one never did -- so this asserts it for BOTH,
     not for whichever one someone remembers.
     """
-    # The drain is ONE helper (device_boot.poll_webhost); each board's frame
-    # tail must still CALL it -- the failure this pins was exactly a tail that
-    # stopped calling. That the helper actually polls, only while the host is
-    # SERVING, and never breaks the frame when the transfer dies, is executed
-    # in test_device_boot.py.
+    # The drain is the kernel loop's service upcall: the board's stages say
+    # the webhost is live whenever the web console is not OFF or its socket
+    # is still listening (moy_loop_board.c), and the spine's service polls
+    # it. That a live service is called up every frame and none otherwise is
+    # executed in tests/test_moy_loop.py.
+    board = (NATIVE / "moy_kernel" / "moy_loop_board.c").read_text(encoding="utf-8")
+    svc = board[board.index("static uint32_t b_services(void) {"):]
+    assert "wc.state != MOY_WC_OFF || web.listening" in svc
+    assert "s_ops.services = b_services;" in board
+    spine = (DEVICE / "desktop_spine.py").read_text(encoding="utf-8")
+    service = spine[spine.index("def make_service("):]
+    assert "wh.poll()" in service.split("return service")[0]
     for rel in ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
                 "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"):
         src = runtime_text(_REPO / rel)
-        assert "poll_webhost(ws)" in src, (
-            "%s never polls ws.webhost -- a bound listener with no accept() "
-            "times out instead of refusing, which reads as a dead server" % rel)
+        assert "make_service(ws, moy_loop)" in src, (
+            "%s never registers the services' Python half -- a bound listener "
+            "with no accept() times out instead of refusing, which reads as a "
+            "dead server" % rel)
 
 
 # -- the panel and the flush engine ---------------------------------------------
@@ -325,8 +331,8 @@ def test_the_band_feed_runs_on_the_core0_feeder_task():
     assert "moy_flush_band_done_from_isr" in c, (
         "the done-ISR's counting/wake half is the engine's, static inline so "
         "the callback keeps its own IRAM placement")
-    # The Python compositor no longer feeds anything: no timer, no poke export.
-    assert "self.pump_if_pending" not in py
+    # Nothing on the VM side feeds the flush: no timer, no poke export.
+    assert "pump_if_pending" not in py
     assert "machine import Timer" not in py
 
 
@@ -403,9 +409,14 @@ def test_the_guition_transport_cannot_leak_a_queue_slot_or_leave_cs_low():
         < end.index("spi_device_release_bus("), "close CS before the bus goes"
     qb = body("esp_err_t moy_axs_queue_band")
     assert "err == ESP_OK && last" in qb and "s_cs_open = false" in qb
-    for verb in ("kick", "show", "set_madctl", "set_rot", "cmd_py", "fold_test"):
+    for verb in ("set_madctl", "set_rot", "cmd_py", "fold_test"):
         vb = body("mp_obj_t moy_axs_" + verb)
         assert vb.index("moy_flush_drain()") < vb.index("moy_axs_require_idle()"), verb
+    # The kernel transport the banded compositor drives: the same idle rule.
+    for entry in ("kkick", "kship"):
+        head = src.index("int moy_axs_%s(int n) {" % entry)
+        kb = src[head:src.index("\n}\n", head)]
+        assert kb.index("moy_flush_drain()") < kb.index("moy_flush.frame_busy"), entry
     # The proof hook the on-glass suite drives, one constant per failure path.
     for k in ("FAULT_DROP", "FAULT_QERR", "FAULT_HDR", "FAULT_LATE"):
         assert "MP_QSTR_" + k in src, k
@@ -435,41 +446,31 @@ def test_async_layer_copy_wired():
 def test_the_mainline_tdeck_arms_the_async_layer_copy_before_its_canvas():
     """#54 St.2 on the mainline port, where the flag has to come from elsewhere.
 
-    `device_canvas.py` reads `LAYER_COPY_ASYNC` from `moy_compositor`, which the
-    mainline build does not stage (its compositor is `tdeck_panel` over the C
-    `moy_lcd`), so the import guard resolves it False. That file is STAGED from
-    the shared `device/` tree and is not this board's to edit, so the flag is declared in
-    `tdeck_panel` -- the module that plays `moy_compositor`'s part there, and the
-    module that owns the fact the lever rests on -- and `run_desktop` assigns it
-    across.
+    `device_canvas.py` is STAGED from the shared `device/` tree and is not this
+    board's to edit, so the flag is declared in the board's runtime beside
+    ASYNC_FLUSH and `run_desktop` assigns it across.
 
-    The thing worth pinning is the ORDER. `DeviceCanvas.__init__` latches
+    The thing worth pinning is the ORDER. `DeviceCanvas.__init__` (the base of
+    the board's SystemCanvas) latches
     `_async_ok` from the module global, so an assignment that drifts BELOW the
     construction reaches nothing at all: the lever would be off, the flag would
-    read True, and no diag line would contradict either. That is a silent
-    failure with a green grep, which is exactly the shape a test is for.
-
-    Only the two TRACKED board files are read -- the mainline's `modules/` is
-    gitignored apart from its board-authored files, so a fresh checkout has no
-    staged `device_canvas.py` to look at.
+    read True, and no diag line would contradict either.
     """
     mainline = _REPO / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
-    panel = (mainline / "tdeck_panel.py").read_text(encoding="utf-8")
     runtime = (mainline / "moy_runtime.py").read_text(encoding="utf-8")
 
-    # Declared in the compositor module, as a plain module constant, so the
-    # revert is one flag exactly like ASYNC_FLUSH beside it.
-    assert "\nLAYER_COPY_ASYNC = True\n" in panel
-    assert "\nASYNC_FLUSH = True\n" in panel
+    # Plain module constants, so each revert is one flag.
+    assert "\nLAYER_COPY_ASYNC = True\n" in runtime
+    assert "\nASYNC_FLUSH = True\n" in runtime
 
-    # ... and applied onto the staged module, never edited into it.
-    assign = "device_canvas.LAYER_COPY_ASYNC = tdeck_panel.LAYER_COPY_ASYNC"
+    # ... applied onto the staged module, never edited into it.
+    assign = "device_canvas.LAYER_COPY_ASYNC = LAYER_COPY_ASYNC"
     assert assign in runtime
     assert "import device_canvas" in runtime
 
     # THE ORDER. Both live in run_desktop, and the assignment must precede the
-    # first DeviceCanvas.
-    build = "canvas = DeviceCanvas(comp)"
+    # first canvas (a SystemCanvas, whose base __init__ does the latching).
+    build = "canvas = SystemCanvas(comp)"
     assert build in runtime
     assert runtime.index("def run_desktop") < runtime.index(assign) < runtime.index(build)
 
@@ -549,12 +550,12 @@ def test_there_is_one_new_layer_factory_and_it_pins_retained_frames():
 
 def test_paint_image_assets_wired_device_and_carts():
     """ONE codec for a paint image: `cart_api._decode_moyimg` is a FORWARD to
-    moy_image, never a second inflater. The drawing tiers used to inflate the
+    moyimg, never a second inflater. The drawing tiers used to inflate the
     envelope themselves while the store read Paint's second codec, which is how
     a picture came back blank on whichever tier held the other half. The codec
-    is executed in tests/test_moy_image.py."""
+    is executed in tests/test_moyimg.py."""
     cart_api_src = Path("runtime/cart_api.py").read_text(encoding="utf-8")
-    assert "return moy_image.decode_moyimg(text)" in cart_api_src
+    assert "return moyimg.decode_moyimg(text)" in cart_api_src
     assert "deflate" not in cart_api_src and "zlib" not in cart_api_src
 
 
@@ -580,12 +581,12 @@ def test_seed_carts_model_the_fast_draw_habits():
     headless in tests/test_seed_carts.py, but that suite watches pixels, and
     telling a `cls()` from a declared backdrop there would take a recording
     canvas the console does not carry -- out of proportion for two idioms."""
-    battle = (Path("system_carts") / "brick_siege.moy" / "main.py").read_text(encoding="utf-8")
+    battle = (Path("system_carts") / "moybyte.brick_siege.moy" / "main.py").read_text(encoding="utf-8")
     assert 'background(col("dark_blue"))' in battle     # the backdrop is DECLARED
     assert 'cls(' not in battle.split("def _draw()")[1].split("def ")[0], (
         "the play frame must not clear -- the engine restores the declared backdrop")
     assert 'rect(0, 0, FIELD, FIELD' not in battle      # no double-paint backdrop
-    hop = (Path("system_carts") / "platformer.moy" / "main.py").read_text(encoding="utf-8")
+    hop = (Path("system_carts") / "moybyte.hop_quest.moy" / "main.py").read_text(encoding="utf-8")
     assert "def _build_layer():" in hop
     assert "lay.map(0, 0, MW, MH" in hop                # terrain rendered once
     assert "draw_layer(lay, 0, 0)" in hop               # stamped per frame
@@ -769,121 +770,101 @@ def test_native_moy_audio_is_vendored_libmoy():
     """The device synth is not ours: libmoy is vendored into
     native/moy_audio/libmoy/ and COMPILED IN, so the boards are conformant by
     construction. The vendoring is checked by hash in
-    tests/test_libmoy_vendor.py; what this pins is that the module is a
-    BINDING -- every verb forwarded, no synth of its own -- and that both
-    build systems compile the vendored source."""
+    tests/test_libmoy_vendor.py; what this pins is that the kernel's audio
+    (moy_aud.c) drives libmoy's verbs and carries no synth of its own, that the
+    binding is a binding, and that both build systems compile the vendored
+    source."""
+    aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
     c = (NATIVE / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
     cmake = (NATIVE / "moy_audio" / "micropython.cmake").read_text(encoding="utf-8")
     mk = (NATIVE / "moy_audio" / "micropython.mk").read_text(encoding="utf-8")
 
     assert "MP_REGISTER_MODULE(MP_QSTR_moy_audio" in c
-    assert '#include "moy_audio.h"' in c
+    assert '#include "moy_audio.h"' in aud
     for fn in ("moy_bank_parse(", "moy_audio_init(", "moy_audio_render(",
                "moy_audio_sfx(", "moy_audio_beep(", "moy_audio_music(",
-               "moy_audio_music_stop(", "moy_audio_sound_stop(",
-               "moy_audio_volume("):
-        assert fn in c, fn
-    # ...and it does NOT carry a synth of its own. These are the giveaways of the
-    # reimplementation this replaced; if one comes back, the boards have two
-    # synths again and only one of them is the spec. Checked against the CODE
-    # only -- the header comment names them all, explaining what went away.
-    code = "\n".join(ln for ln in c.splitlines()
-                     if not ln.lstrip().startswith("//"))
-    for gone in ("moy_sample_wave", "moy_mix_block", "moy_advance_step",
-                 "voice_set", "voice_read", "active_mask", "set_master"):
-        assert gone not in code, gone
+               "moy_audio_music_stop(", "moy_audio_sound_stop("):
+        assert fn in aud, fn
+    # ...and no synth of its own: the giveaways of the reimplementation this
+    # replaced. If one comes back, the boards have two synths again and only
+    # one of them is the spec.
+    for src in (aud, c):
+        code = "\n".join(ln for ln in src.splitlines()
+                         if not ln.lstrip().startswith("//"))
+        for gone in ("moy_sample_wave", "moy_mix_block", "moy_advance_step",
+                     "voice_set", "voice_read", "active_mask", "set_master"):
+            assert gone not in code, gone
+    # The binding converts arguments; the libmoy calls are moy_aud.c's.
+    assert "moy_audio_render(" not in c and "moy_bank_parse(" not in c
 
-    # Both build systems compile the vendored source alongside the binding:
-    # cmake for the boards, the .mk for ports/unix (how the binding is tested off
-    # hardware) and the wasm runner.
-    assert "libmoy/moy_audio.c" in cmake
+    assert "libmoy/moy_audio.c" in cmake and "moy_aud.c" in cmake
     assert "target_link_libraries(usermod INTERFACE usermod_moy_audio)" in cmake
-    assert "libmoy/moy_audio.c" in mk
+    assert "libmoy/moy_audio.c" in mk and "moy_aud.c" in mk
     assert "SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/modmoy_audio.c" in mk
 
 
-def test_web_runner_audio_forwards_to_libmoy():
-    """The wasm runner loads the SAME native module (its build.sh stages
-    native/moy_audio and the module ships its own micropython.mk), so the
-    browser's synth is libmoy too -- one audible behaviour across every target.
-    Pin the forwarding, and that no per-frame marshalling came back."""
+def test_web_runner_audio_pulls_the_kernels_mix():
+    """The wasm runner builds the SAME module (its build.sh stages
+    native/moy_audio, which ships its own micropython.mk), so the browser's
+    synth is libmoy too -- one audible behaviour across every target. The page
+    pulls the kernel's mix once a frame; no per-frame marshalling came back."""
     web = Path("firmware/web_runner")
     boot = (web / "web_boot.py").read_text(encoding="utf-8")
     build = (web / "build.sh").read_text(encoding="utf-8")
     assert "native/moy_audio" in build
-    # The module carries its own Makefile fragment; the runner must not be
-    # copying a second, drifting copy over it.
     assert not (web / "moy_audio_micropython.mk").exists()
     assert "moy_audio_micropython.mk" not in build
-    assert "self._ka.bank_load(" in boot
-    assert "self._ka.render(buf, n)" in boot
-    assert "def is_active(self):" in boot
-    for gone in (".voice_set(", ".voice_read(", "._advance_music("):
+    assert "class _RunnerPump(PcmPump):" in boot
+    assert "na.render(buf, n)" in boot
+    assert "audio_out=_RunnerPump()" in boot
+    for gone in (".voice_set(", ".voice_read(", "._advance_music(", "bank_load("):
         assert gone not in boot, gone
 
 
-def test_native_moy_audio_core1_task_wired():
-    """The I2S feed is a dedicated native C task PINNED TO CORE 1 that owns the
-    IDF i2s_std channel and feeds it continuously, decoupled from rendering:
-    core 0 (the MicroPython VM) cannot run Python on core 1, only a pure-C task
-    can. C-side facts no host test reaches; the Python DeviceAudio half is
-    executed in tests/test_device_audio.py."""
-    c = (NATIVE / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
+def test_the_feeder_task_is_pinned_lazy_and_chunked():
+    """The I2S feed is a native C task PINNED TO CORE 1 that owns the IDF
+    i2s_std channel and feeds it continuously, decoupled from the frame: the VM
+    cannot run Python there, only a pure-C task can. It is created at the
+    first focus of a session (moy_aud_focus -> moy_aud_out_start), never at
+    boot, and renders in chunks, so a verb waits tens of microseconds, not a
+    block. C-side facts no host test reaches; the mix itself is executed by
+    tests/test_audio_session.py."""
+    out = (NATIVE / "moy_audio" / "moy_aud_out.c").read_text(encoding="utf-8")
+    aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
 
-    assert "xTaskCreatePinnedToCore(" in c
-    assert "moy_audio_task" in c            # the core-1 feeder task body
-    assert "1 /* core 1 */" in c            # pinned to core 1 (the last argument)
-    # The task owns the IDF i2s_std channel (separate from machine.I2S) + writes it.
-    assert "i2s_new_channel(" in c
-    assert "i2s_channel_init_std_mode(" in c
-    assert "i2s_channel_write(" in c
-    # The one engine struct is mutex-protected (core 0 calls verbs, core 1
-    # renders): a torn read is NOT acceptable (a momentary glitch is).
-    assert "xSemaphoreCreateMutex(" in c
-    assert "xSemaphoreTake(" in c
-    assert "xSemaphoreGive(" in c
-    # The task renders in CHUNKS, dropping the lock between them, so a verb call
-    # from core 0 waits tens of microseconds rather than a whole 32 ms block.
-    assert "MOY_MIX_CHUNK" in c
-    assert "off += MOY_MIX_CHUNK" in c
-    # The core-1 task must NEVER call into the MicroPython runtime (no MP heap or
-    # GIL from core 1) -- it only touches libmoy's plain-C state.
-    assert "moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK)" in c
-    # MP control surface for the task: start (returns False -> fallback) and stop.
-    for fn in ("mod_audio_start", "mod_audio_stop", "mod_running"):
-        assert fn in c, fn
-    for name in ("MP_QSTR_audio_start", "MP_QSTR_audio_stop", "MP_QSTR_running",
-                 "MP_QSTR_bank_load", "MP_QSTR_active", "MP_QSTR_volume"):
-        assert name in c, name
+    assert "xTaskCreatePinnedToCore(feeder" in out
+    assert "&s_task, 1)" in out                 # core 1, the last argument
+    for fn in ("i2s_new_channel(", "i2s_channel_init_std_mode(",
+               "i2s_channel_write(", "xSemaphoreCreateMutex(",
+               "xSemaphoreTake(", "xSemaphoreGive("):
+        assert fn in out, fn
+    assert "off += MIX_CHUNK" in out
+    assert "moy_aud_render(block + off, MIX_CHUNK)" in out
+    # The lazy start: only the first focus of a live session reaches it.
+    focus = aud[aud.index("int moy_aud_focus("):]
+    focus = focus[:focus.index("\n}\n")]
+    assert "moy_aud_out_start()" in focus
+    assert "moy_aud_out_start" not in aud.replace(focus, "")
+    # No fallback feed: a board whose output cannot start has no audio.
+    for gone in ("machine.I2S", "i2s.irq", "legacy"):
+        assert gone not in out, gone
 
 
-def test_core1_writeback_cannot_clobber_a_fresh_trigger():
+def test_the_mix_reads_one_copy_of_each_sessions_state():
     """THE OVERLAPPING-SFX DROP, and why it cannot recur (#41 -> #97).
 
-    The core-1 task used to mix from a SNAPSHOT of a shared voice array and
-    fold its advanced cursor back afterwards, which meant deciding whose copy
-    was authoritative. The first attempt used a content proxy (same nsteps +
-    first step + step_dur) that a same-SFX retrigger satisfies exactly, so
-    "sound 1 ends inside the block, sound 2 starts on the reused channel"
-    folded active=0 back over the fresh trigger: sound 2 never played and the
-    channel leaked as busy. That was fixed with an exact per-voice commit
-    counter.
-
-    The counter is gone now, because the thing it arbitrated is gone: libmoy
-    owns the state and there is exactly ONE copy of it, so there is no
-    snapshot, no fold-back and nothing to reconcile. This pins the structural
-    property rather than the fix -- if a second copy of the voice state ever
-    reappears, so does the bug, and this is where it should be argued out."""
-    c = (NATIVE / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
-    code = "\n".join(ln for ln in c.splitlines()
+    The feeder used to mix from a SNAPSHOT of a shared voice array and fold
+    its advanced cursor back afterwards, which meant deciding whose copy was
+    authoritative; a same-SFX retrigger fooled the first arbiter and sound 2
+    never played. libmoy owns the state and each session holds exactly ONE
+    copy of it, so there is no snapshot and no fold-back. If a second copy of
+    the voice state ever reappears, so does the bug."""
+    aud = (NATIVE / "moy_audio" / "moy_aud.c").read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in aud.splitlines()
                      if not ln.lstrip().startswith("//"))
-
-    # No second copy of the engine state, so no reconciliation machinery.
     for gone in ("moy_voice_t", "snap[", "memcpy(snap", "->seq", "shared->"):
         assert gone not in code, gone
-    # The task renders straight out of the one engine struct, under the lock.
-    assert "moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK)" in code
-    assert code.count("static moy_audio  s_audio;") == 1
+    assert "moy_audio_render(r->a, out, n)" in code
 
 
 # -- one Lua runtime ---------------------------------------------------------------------
@@ -904,9 +885,11 @@ def test_one_lua_runtime_wired():
         cmake.split("# ")[-1], "the VM target must export no module"
 
     mod = (NATIVE / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
+    vm = (NATIVE / "moycore" / "moycore_lua.c").read_text(encoding="utf-8")
     assert "MP_REGISTER_MODULE(MP_QSTR_moycore" in mod
     assert "MP_REGISTER_ROOT_POINTER" in mod       # gc-rooted callables list
-    assert "moy_lua_open" in mod and "moy_lua_update" in mod   # libmoy's loop
+    assert "moy_lua_open" in vm and "moy_lua_update" in vm     # libmoy's loop
+    assert "py/" not in vm, "the VM half includes nothing of MicroPython"
 
     # No chooser on any tier: one import, one factory, an ImportError floor.
     # The BOARDS reach it through the shared boot spine -- runtime/device_boot.py
@@ -939,7 +922,10 @@ def test_moycore_hardware_learned_constraints_pinned():
     nlr guard, a build-time VM option -- so they are greps, and they moved with
     the code rather than being retired with it.
     """
-    mod = (NATIVE / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
+    # The binding and the VM it binds (moycore_lua.c: the allocator, the
+    # open, the p8 helpers), read as one source.
+    mod = "\n".join((NATIVE / "moycore" / name).read_text(encoding="utf-8")
+                     for name in ("moycore_lua.c", "modmoycore.c"))
     lua_dir = NATIVE / "moy_lua" / "lua"
     # 1) lua_Alloc is internal-SRAM-first with a headroom floor and a PSRAM
     #    fallback (all-PSRAM measured ~2x slower on the S3's 120MHz-OCT bus),
@@ -985,7 +971,7 @@ def test_moycore_hardware_learned_constraints_pinned():
     #    fixed constant, so leaving it zero gave every run of every cart the
     #    same sequence -- invisible under the old runtime, whose prelude
     #    shadowed rnd with Lua's per-state math.random.
-    assert "RUN.con.rng    = (uint32_t)mp_hal_ticks_us()" in mod
+    assert "RUN.c.con.rng    = (uint32_t)mp_hal_ticks_us()" in mod
     # 7) the p8 shim's masked map walk came across with the cart (#66 M0):
     #    4.5ms of celeste's S3 render, and the shim nil-guards the names, so
     #    losing them costs performance silently.

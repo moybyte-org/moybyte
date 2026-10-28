@@ -1,14 +1,14 @@
 """Sakura Python-vs-Lua parity harness (#67 Phase 4, host edition).
 
-Runs the REAL system_carts/sakura.moy/main.py and its line-faithful Lua port
+Runs the REAL system_carts/moybyte.sakura.moy/main.py and its line-faithful Lua port
 main.lua side by side for N deterministic frames -- same seeded PRNG, same
 scripted touch, same manifest config, and the shed scene both carts ship,
 parsed by the shared `widgets.Scenes` -- recording every draw call each side
 makes (spr / make_layer / layer spr / draw_layer) through a minimal fake API,
 then compares the two streams and the final petal state.
 
-THE LUA SIDE IS THE SHIPPED VM: main.lua runs under runtime/lua_host's
-MoycoreHostRun (libmoy's binding over the vendored Lua 5.4 both boards
+THE LUA SIDE IS THE SHIPPED VM: main.lua runs under device/moycore_glue.py's
+MoycoreRun (libmoy's binding over the vendored Lua 5.4 both boards
 compile, LUA_32BITS and all), with the fake API registered the way the
 console's is. The object-valued verbs -- make_layer, image, scene -- reach the
 cart through the SAME int-handle glue and Lua prelude the boards run
@@ -59,13 +59,13 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from runtime.widgets import Scenes                             # noqa: E402
-from runtime.lua_host import MoycoreHostRun                     # noqa: E402
+from parity_wire import lua_run                     # noqa: E402
 from parity_wire import (decode, same, FloatStats, Lcg, PRNG_LUA,   # noqa: E402
                          check_prng_twins, ENC_LUA, FakeWs, FLOAT_TOL)
 
 _CARTS = os.path.join(_ROOT, "system_carts")
-PY_CART_DIR = os.path.join(_CARTS, "sakura.moy")        # the Python original
-LUA_CART_DIR = os.path.join(_CARTS, "sakura_lua.moy")   # the #67 A/B twin
+PY_CART_DIR = os.path.join(_CARTS, "moybyte.sakura.moy")        # the Python original
+LUA_CART_DIR = os.path.join(_CARTS, "moybyte.sakura_lua.moy")   # the #67 A/B twin
 DT = 1.0 / 32.0
 SEED = 0xC0FFEE % 2147483648
 PIXEL_TOL = 1          # a truncated float32 position may land one pixel over
@@ -86,11 +86,11 @@ def _load_config():
     """Both carts' manifest configs, drift-guarded: the twins must tune alike or
     the A/B (and this parity run) compares different scenes."""
     with open(os.path.join(PY_CART_DIR, "manifest.json")) as fh:
-        py_cfg = json.load(fh)["config"]
+        py_cfg = json.load(fh)["moybyte"]["config"]
     with open(os.path.join(LUA_CART_DIR, "manifest.json")) as fh:
-        lua_cfg = json.load(fh)["config"]
+        lua_cfg = json.load(fh)["moybyte"]["config"]
     if py_cfg != lua_cfg:
-        raise AssertionError("sakura.moy and sakura_lua.moy configs drifted: "
+        raise AssertionError("moybyte.sakura.moy and moybyte.sakura_lua.moy configs drifted: "
                              "%r != %r" % (py_cfg, lua_cfg))
     return py_cfg
 
@@ -105,7 +105,7 @@ def _load_scene():
         with open(os.path.join(d, "scenes", "blossoms.moyscene")) as fh:
             blobs.append(fh.read())
     if blobs[0] != blobs[1]:
-        raise AssertionError("sakura.moy and sakura_lua.moy scenes drifted")
+        raise AssertionError("moybyte.sakura.moy and moybyte.sakura_lua.moy scenes drifted")
     return Scenes({"blossoms": blobs[0]}, ["blossoms"])
 
 
@@ -120,10 +120,19 @@ class _Pt:
         self.x, self.y = x, y
 
 
+class _PyLayerCanvas:
+    """The pixels a Lua run's own layer verbs draw into (lua_ext's bind)."""
+
+    def __init__(self, w, h):
+        self.w, self.h = w, h
+        self._buf = bytearray(w * h * 2)
+
+
 class _PyLayer:
-    def __init__(self, events, lid):
+    def __init__(self, events, lid, w, h):
         self._events = events
         self._id = lid
+        self._canvas = _PyLayerCanvas(w, h)
 
     def spr(self, img, x, y, ck=-1, *a):
         self._events.append(("layer_spr", self._id, img, x, y))
@@ -160,7 +169,7 @@ class FakeConsole:
     # -- the verbs -----------------------------------------------------------
     def make_layer(self, w, h):
         self.events.append(("make_layer", w, h))
-        lay = _PyLayer(self.events, self._layers)
+        lay = _PyLayer(self.events, self._layers, w, h)
         self._layers += 1
         return lay
 
@@ -175,6 +184,7 @@ class FakeConsole:
 
         return {
             "scene": self.scenes.scene,
+            "_moy_scenes": self.scenes,
             "W": 320, "H": 240,
             "cfg": lambda k, d=None: self.config.get(k, d),
             "rnd": self.lcg.rnd,
@@ -238,6 +248,37 @@ do
     rec("spr|" .. enc(tile) .. "|" .. enc(x) .. "|" .. enc(y) .. "|"
         .. enc(ck or -1))
   end
+  -- make_layer, image and a layer's image placement are the run's own C
+  -- (moycore_lua.c), so they are recorded here, in front of the C, in the
+  -- Python fake's words: a layer by its order, an image as "img:<name>".
+  local make_layer0, image0 = make_layer, image
+  local nlay = 0
+  function make_layer(w, h)
+    local l = make_layer0(w, h)
+    rec("make_layer|" .. enc(w) .. "|" .. enc(h))
+    local id, spr0 = nlay, l.spr
+    nlay = nlay + 1
+    l.spr = function(self, img, x, y, ...)
+      if type(img) == "table" then
+        rec("layer_spr|" .. enc(id) .. "|" .. enc(img.__rec) .. "|" .. enc(x)
+            .. "|" .. enc(y))
+      end
+      return spr0(self, img, x, y, ...)
+    end
+    return l
+  end
+  function image(name)
+    local t = image0(name)
+    if t ~= nil then t.__rec = "img:" .. name end
+    return t
+  end
+  -- draw_layer is the run's own C (the prelude's, over __layer_blit), so it
+  -- is recorded here, in front of the composite it still makes.
+  local draw_layer0 = draw_layer
+  function draw_layer(l, cx, cy)
+    rec("draw_layer|" .. enc(l.__id) .. "|" .. enc(cx or 0) .. "|" .. enc(cy or 0))
+    return draw_layer0(l, cx, cy)
+  end
   local CFG = __CFG
   function cfg(k, d)
     local v = CFG[k]
@@ -267,7 +308,7 @@ def _cfg_lua(config):
 
 
 class LuaCart:
-    """Run main.lua under MoycoreHostRun with the same fake API."""
+    """Run main.lua under the glue's MoycoreRun with the same fake API."""
 
     def __init__(self, console):
         self.console = console
@@ -278,11 +319,14 @@ class LuaCart:
 
     def init(self):
         ns = self.console.ns()
+        # The cart's own paint image, which the run decodes in C.
+        with open(os.path.join(LUA_CART_DIR, "images", "bg.moyimg")) as fh:
+            ns["_moy_images"] = {"bg": fh.read()}
         ns["_moy_prelude"] = (_cfg_lua(self.console.config)
                               + "__SEED = %d\n" % SEED + PRELUDE)
         with open(os.path.join(LUA_CART_DIR, "main.lua")) as fh:
             src = fh.read()
-        self.run = MoycoreHostRun(FakeWs(self.console), ns, src)
+        self.run = lua_run(FakeWs(self.console), ns, src)
 
     def tick(self, dt):
         self.run.update(dt)            # _update then _draw, in the C loop

@@ -2,7 +2,9 @@
 
 **Status:** DRAFT / CHOSEN DESIGN DIRECTION — this document turns the July 2026
 concept exploration into a product and implementation contract. It is not yet the
-shipped shell reference. Where it changes behavior described by
+shipped shell reference. Its colours are not the default look: that is the 2026-10
+look's Moy in its Day mode (`docs/look_2026-10.md`, step 27 of which deleted the
+`machine` seed this document's Open Machine colourway shipped as, with `night`). Where it changes behavior described by
 `docs/shell_ux_v1.md`, the change must land in code and tests before that reference is
 updated.
 
@@ -26,12 +28,18 @@ disambiguated on release via the shared `ui.DragTap`, so a scroll never
 launches a cart), the footer's left/right column-nudge arrows, the slim
 scrollbar along the grid's bottom edge, and keyboard nav (the view follows
 the selection). The selected card
-carries the focus ring and — where the card is tall enough — its in-card
+carries the theme's focus mark and — where the card is tall enough — its in-card
 PLAY/CHANGE row; small-card tiers (320×240) keep the verbs as bar-zone chips
 and the home bar's lent zone shows the selected cart's name (wide-card tiers
 show the moybyte wordmark). Phase 3's shared `ui` toolkit, warm-light Studio
 surfaces, responsive app seam, and reference Calc app are also implemented.
 Phases 4-5 and on-glass validation on the P4 panel remain open.
+The home is no longer this shelf: it is the tabbed carousel of
+`docs/shell_layout_2026-10.md` §12, with no MAKE card and the verbs as bar-zone
+chips on every tier; the shelf above is the home's `grid` arrangement and the
+desk's PROJECTS window. There is no project picker (owner, 2026-10-14): the
+home's Make tab is the one projects list, and where this doc says "MAKE" or
+"the project picker" below, read the Make tab.
 
 **Scope:** the Moybyte OS shell, Library, Studio/system apps, Player boundary, and
 website expression. Kid cartridges keep their own visual identities and the frozen
@@ -84,7 +92,7 @@ the shared Open Machine chrome. It predates several decisions in this document:
 - Library is Home, so the bottom Home/Library navigation is removed;
 - Settings exists once in the upper-right OS system area;
 - the generated `OPTIONS`, `FAVORITES`, and `NEW` toolbar actions are not approved;
-  MAKE and the project picker own creation and management.
+  the Make tab owns creation and management.
 
 ### Studio concept
 
@@ -121,7 +129,7 @@ navigation and keeps the model shallow:
 Library
   |-- cartridge / PLAY --> Player --> exit --> Library
   |-- cartridge / CHANGE --> Studio, project open on Config
-  `-- MAKE --> Studio, project picker
+  `-- Make tab / tap --> Studio, project open
 
 Studio
   |-- PLAY --> playtest --> exit --> same Studio project and tab
@@ -140,8 +148,8 @@ returns to its caller. Library is not renamed to Player.
   - **CHANGE** — secondary action; opens the project in Studio on Config.
 - Use **CHANGE**, not Customize or Edit. It is short, kid-readable, broad enough for
   logic as well as cosmetics, and matches the product promise.
-- The pinned **MAKE** tile opens the Studio project picker. New, Copy, and Delete stay
-  with project management there; they do not become competing Library actions.
+- The **Make** tab is project management: New, Copy, and Delete are its verbs;
+  they do not become competing actions on the tabs that play.
 - **Settings has one global home:** the OS-owned upper-right system area, in the same
   position in Library and Studio. Do not duplicate it as a bottom navigation item or
   add a page-local `OPTIONS` button that leads to the same place.
@@ -178,7 +186,7 @@ tab. That fallback must be deterministic per project rather than inferred from a
   picture is **one Make/Editor window plus one playtest window**.
 - The Editor remains one tabbed app. Concept art that shows separate Code, Map, and
   Sprites windows is visual exploration, not the v1 process model.
-- The project picker and Editor continue to share one Make window/group.
+- The Editor is a window of its own, above the home window it was opened from.
 - A playtest launched from Studio returns to the same project and tab.
 - Library remains the explicit route back to the play shelf.
 
@@ -231,7 +239,7 @@ Keep:
 - visible sprite/tile grids where they express real editable data;
 - flat fills, thin outlines, and deterministic geometry.
 
-Avoid:
+Avoid, in the default theme (a theme may choose otherwise, `docs/theming_2026-09.md`):
 
 - bevels and fake plastic controls;
 - CRT scanlines over ordinary system UI;
@@ -314,9 +322,9 @@ danger
 The exact storage shape is an implementation decision. The behavioral rule is not:
 system surfaces consume semantic roles rather than scattering literal indices.
 
-The shipped `night` theme must remain byte-identical until golden/parity tests are
-deliberately migrated. Open Machine should begin as an additional theme or an opt-in
-prototype, not an in-place mutation of the default.
+The default theme is `moy` in its Day mode, the 2026-10 look
+(`docs/look_2026-10.md` step 27); a change to it is a named re-baseline of the
+goldens.
 
 *Status (2026-07-23): SHIPPED, extended.* Every theme family now carries a **dark
 and a light variant** (`chrome.THEME_VARIANTS`, picked in Appearance → THEMES →
@@ -338,12 +346,11 @@ title_active / title_inactive (the WM strip pair, aliased to title/panel)
 The Phase 5 system-app pass landed with it: the zoned bar, Settings (rows +
 Wi-Fi panel), the ≡ system menu, About, achievements, the OTA update screens, and
 the editor tab surfaces (block/map/paint/scene/music/code/cards) read tokens on
-every responsive tier — the token gate is no longer machine-only. Each surface's
-frozen 320×240 `_base` branch keeps its literal indices **only in dark chrome**
-(the device parity contract holds at the default theme): under a light variant
-the base tier takes the token path too, so the small tier gets exactly a dark and
-a light presentation of every editor (code included — its `_HL_LIGHT` syntax set
-is the light half of the pair). Bar **icons get derived light variants** at draw
+every tier — the token gate is no longer machine-only. The 320×240 tier's
+editors read the same tokens (their frozen dark literals retired with theming's
+phase 2b, 2026-10-11; `docs/theming_2026-09.md` §9), so the small tier gets a
+dark and a light presentation of every editor in every theme (code included —
+the theme's `code_*` content roles, §4.1 there). Bar **icons get derived light variants** at draw
 time (`Workstation._bar_image`): the IconSheet's untouched index-0 plate — invisible
 on the frozen black bar — is keyed transparent and white strokes remap to ink-black
 on a `bar_light` theme, so wifi/battery/close never draw a black plate on a light
@@ -389,8 +396,9 @@ color.
 
 ### 5.4 Typography
 
-- Petme128 remains the canonical runtime glyph source for v1 until a second bitmap UI
-  face is explicitly approved and implemented identically on host and device.
+- The shell draws in its theme's font (Tiny5 in the default theme, D1 of
+  `docs/theming_2026-09.md`, §4.7 there) and carts in petme128, every glyph from
+  one font file read by the same C on host and device.
 - Do not base layouts on antialiased mockup type or fractional metrics.
 - Prefer short verbs and concrete nouns: PLAY, CHANGE, MAKE, SAVE, PROJECTS,
   LIBRARY.
@@ -442,7 +450,7 @@ Rules:
 ### 6.4 Desktop field and taskbar
 
 - Dark blue/navy field with an optional sparse dot/construction grid.
-- The selectable `system_carts/open_machine.moy` cart is the coded reference for this
+- The selectable `system_carts/moybyte.open_machine.moy` cart is the coded reference for this
   backdrop. It remains static and MOY64-only; Moy Night remains available.
 - Static by default so idle frames remain free.
 - Taskbar chips represent real open processes only.
@@ -574,7 +582,7 @@ Do not restyle every system app at once. Build one vertical slice:
 ```text
 Library -> PLAY Brick Siege -> Player -> exit -> Library
 Library -> CHANGE Brick Siege -> Studio/Config
-Library -> MAKE -> Studio/project picker
+Library -> Make tab -> Studio
 Studio -> PLAY -> playtest -> exit -> same Studio tab
 ```
 
@@ -593,7 +601,7 @@ This is the acceptance journey. It must work before broader surface restyling.
 
 1. Reflow Library to 320x240 without removing actions.
 2. Route CHANGE to fullscreen Config.
-3. Verify PLAY/exit/return and hold-to-exit behavior.
+3. Verify PLAY/exit/return and the pause menu's Quit.
 4. Keep Player performance unchanged: no shell compositing during fullscreen play.
 
 ### Phase 5 — system apps and website
@@ -631,7 +639,7 @@ unchanged.
 
 **Decision: edit in place.** This preserves the current action and mental model:
 CHANGE opens the existing cart's `Project`, and normal commit/undo persistence applies
-there. It never creates a surprise duplicate. Copy remains an explicit project-picker
+there. It never creates a surprise duplicate. COPY remains an explicit Make-tab
 verb. The vertical slice must regression-test how built-in re-seeding interacts with
 authored code, but changing the copy model is not part of this visual redesign.
 
@@ -651,7 +659,9 @@ cart's own §3.4 icon when it names one, else the cover's 64x64 half; carts with
 cover keep the sprite/glyph fallback deterministically. `tools/gen_covers.py`
 captures a gameplay frame for each seed game and squares it to 128x128 in the
 console palette (committed artifacts, hand-replaceable in Paint; manifest versions
-bumped for the #47 re-seed). It replaced `images/cover.moyimg` (2026-07-12), which
+bumped for the #47 re-seed). *Decided 2026-10-17 (owner):* a cover is the scene
+without the game's HUD -- the capture silences the cart's `print` verb, and the
+tool's docstring says how a HUD drawn with more than text is left out. It replaced `images/cover.moyimg` (2026-07-12), which
 is no longer read.
 
 ### 11.5 A second system UI font?

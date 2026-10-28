@@ -55,12 +55,16 @@ class KeyEdge:
 
     def undo_redo(self, k, on_undo, on_redo):
         """The Ctrl+Z/Y shortcut: on a fresh edge fire on_undo (0x1A) / on_redo
-        (0x19). Records the edge like hit(), so a held key fires once."""
+        (0x19), and answer whether one fired. Records the edge like hit(), so a
+        held key fires once."""
         if self.hit(k):
             if k == 0x1A:
                 on_undo()
-            elif k == 0x19:
+                return True
+            if k == 0x19:
                 on_redo()
+                return True
+        return False
 
 
 # The events one typed byte can mean to a text field.
@@ -68,13 +72,13 @@ TE_EDIT, TE_COMMIT, TE_CANCEL = 1, 2, 3
 
 
 def text_key(text, ch, cap, allow=None):
-    """The console's ONE on-screen text-entry key ladder: Backspace/Delete
-    trim, Enter commits, Esc cancels, and printable ASCII appends while the
+    """The console's ONE on-screen text-entry key ladder: Backspace trims
+    (the caret is the text's end, so Delete has nothing after it), Enter commits, Esc cancels, and printable ASCII appends while the
     buffer is under `cap` (and passes `allow(ch, text)` when a filter is
     given). Returns (text, event) -- the event is TE_EDIT / TE_COMMIT /
     TE_CANCEL, or None for a byte the field ignores. What commit and cancel
     MEAN is the caller's."""
-    if ch in (8, 127):
+    if ch == 8:
         return text[:-1], TE_EDIT
     if ch in (13, 10):
         return text, TE_COMMIT

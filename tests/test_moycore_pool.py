@@ -11,7 +11,7 @@ the S3 owes a frame every 33ms. The allocator and `%d` WERE the frame.
 So:
 
   * `l_alloc` carves 1..256-byte requests out of PSRAM chunks through eight
-    size-class free lists (`native/moycore/modmoycore.c`), and
+    size-class free lists (`native/moycore/moycore_lua.c`), and
   * `tostringbuff` converts integers -- and integral floats, which this VM
     already prints without a fraction -- by hand
     (`native/moy_lua/lua/lobject.c`, MODIFICATIONS.md item 3).
@@ -97,7 +97,7 @@ from array import array
 W, H = 64, 48
 fb = bytearray(W * H * 2)
 snap = array("i", bytearray(4 * moycore.SNAP_LEN))
-aq = array("h", bytearray(2 * (1 + 4 * 32)))
+aq = array("i", bytearray(4 * (1 + 4 * 32)))
 
 
 def begin():

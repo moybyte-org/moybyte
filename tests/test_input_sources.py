@@ -10,12 +10,11 @@ poll erased every BLE keypress within a frame: held buttons died immediately,
 `last_key` survived only as a race, and the BLE keyboard did nothing at all on
 that board.
 
-Every behavioural test below runs against BOTH InputState classes, because
-there are two and they diverge on purpose (different button vocabularies, in
-different orders, with a different primary verb -- runtime/input.py's
-`set_held` vs device/moybyte/input.py's `set_button`). A model that landed on
-one tier and not the other would be exactly the shape of failure
-`button_masks`'s docstring records: no crash, no failing test, no frame hash.
+Every behavioural test below runs against BOTH tiers' InputState. They are
+one table now (runtime/moy_input.py's InputTable) over two vocabularies -- the
+boards' sixteen names and the host's first eight -- and a tier that stopped
+being that table would be exactly the shape of failure `button_masks`'s
+docstring records: no crash, no failing test, no frame hash.
 
 The second thing pinned here: `begin_frame` is the union's SOLE author and
 consumers read after it. The tests below make both halves of that a failure
@@ -39,8 +38,13 @@ def _load(path, name):
     return mod
 
 
-device_input = _load(ROOT / "device" / "moybyte" / "input.py", "moy_device_input")
-blekbd = _load(ROOT / "device" / "ble_keyboard.py", "moy_ble_under_test")
+from runtime import moy_input as _mi  # noqa: E402
+
+
+class device_input:
+    """The boards' input: the kernel's table (all fifteen names) and the T-Deck
+    keyboard's driver, native/moy_input, over the host's binding."""
+    InputState = _mi.InputTable
 from runtime.input import InputState as HostInputState        # noqa: E402
 
 
@@ -182,7 +186,7 @@ def test_a_source_write_does_not_move_the_union_until_begin_frame(tier):
 
     _set(kbd, "up")
     assert not inp.held("up")               # the source has it; this frame does not
-    assert "up" in kbd._held
+    assert "up" in kbd.held_names()
     assert inp.button_masks(("up",)) == (0, 0)
     inp.begin_frame()
     assert inp.held("up") and inp.pressed("up")
@@ -200,7 +204,7 @@ def test_a_source_write_does_not_move_the_union_until_begin_frame(tier):
     assert inp.held("a")
     kbd.release_all()
     assert inp.held("a")
-    assert not kbd._held
+    assert not kbd.held_names()
     inp.begin_frame()
     assert not inp.held("a")
 
@@ -219,9 +223,8 @@ def test_the_shared_release_all_stays_immediate_and_stays_consistent(tier):
 
     inp.release_all()
     assert not inp.held("up")               # immediately
-    before = set(inp._held)
-    inp._merge()                            # ...and the merge agrees
-    assert inp._held == before
+    inp.begin_frame()                       # ...and the merge agrees
+    assert not inp.any_held()
 
 
 @pytest.mark.parametrize("tier", TIERS)
@@ -229,10 +232,10 @@ def test_no_source_mutator_writes_the_shared_union(tier):
     """The ratchet: a mirror into the shared union is two lines, and exactly
     the sort of line that comes back the next time someone wants a mid-frame
     read to be live."""
-    path = (ROOT / "runtime" / "input.py") if tier == "host" \
-        else (ROOT / "device" / "moybyte" / "input.py")
+    # One table for both tiers since sprint 3's carve: runtime/moy_input.py.
+    path = ROOT / "runtime" / "moy_input.py"
     src = path.read_text()
-    body = src[src.index("class InputSource"):src.index("class InputState")]
+    body = src[src.index("class InputSource"):src.index("class InputTable")]
     assert "state._held" not in body, "the union mirror is back in InputSource"
     assert "_drop" not in body, "the incremental union drop is back"
     # ...and its helpers stayed deleted rather than lingering unused.
@@ -240,51 +243,29 @@ def test_no_source_mutator_writes_the_shared_union(tier):
         assert gone not in src, gone
 
 
-@pytest.mark.parametrize("tier", TIERS)
-def test_the_merge_is_reached_only_through_begin_frame(tier):
-    """One caller, so `begin_frame` is a real frame boundary and not just the
-    usual one."""
-    path = (ROOT / "runtime" / "input.py") if tier == "host" \
-        else (ROOT / "device" / "moybyte" / "input.py")
-    src = path.read_text()
-    lines = [ln.split("#", 1)[0] for ln in src.splitlines()]
-    calls = [i for i, ln in enumerate(lines)
-             if "_merge()" in ln and "def _merge" not in ln]
-    assert len(calls) == 1, [lines[i] for i in calls]
-    at = calls[0]
-    assert lines[at].strip() == "self._merge()"
-    # ...and the enclosing def is begin_frame: walk back to the nearest one.
-    owner = next(ln for ln in reversed(lines[:at]) if ln.lstrip().startswith("def "))
-    assert owner.strip() == "def begin_frame(self):", owner
+def test_the_merge_is_reached_only_through_begin_frame():
+    """One author of the union, so `begin_frame` is a real frame boundary:
+    the merged set is written in native/moy_input/moy_input.c's begin_frame
+    and emptied by release_all, and nowhere else."""
+    src = (ROOT / "native" / "moy_input" / "moy_input.c").read_text()
+    owners = []
+    fn = None
+    for ln in src.splitlines():
+        if ln and not ln[0].isspace() and "(" in ln and ln.rstrip().endswith("{"):
+            fn = ln.split("(")[0].split()[-1]
+        if "t->held = " in ln:
+            owners.append(fn)
+    assert owners == ["moy_input_begin_frame", "moy_input_release_all"], owners
 
 
 # -- the frame loops read AFTER the merge -----------------------------------
 
-BOARD_RUNTIMES = {
-    "guition": "firmware/guition_jc3248w535/modules/moy_runtime.py",
-    "p4": "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py",
-    "tdeck": "firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
-    "guition_p4": "firmware/guition_jc8012p4a1c/modules/moy_runtime.py",
-}
-
-# Everything that WRITES an InputSource inside a board's _poll_inputs. The
-# trackball's `ball.poll()` is deliberately absent: it feeds the pointer and
-# ws.nav, never a button, so it legitimately runs after the merge.
-SOURCE_WRITERS = ("poller.consume()", "keyboard.poll()", "_ble.poll()")
-
-
 def _code_lines(src, start_at, stop_at):
     """The CODE of one block: docstrings and comments stripped, because the
-    thing being measured is what runs, and both boards' `_poll_inputs`
-    docstrings say the words `inp.begin_frame()` before the call does.
-
-    A board with its own input hardware writes `_poll_inputs` in its module;
-    the touch-only tier's body is the spine's `poll_inputs` method, and a
-    board that has no closure of its own is read there."""
-    if start_at == "def _poll_inputs(" and start_at not in src:
-        start_at = "def poll_inputs("
+    thing being measured is what runs."""
     body = src[src.index(start_at):]
-    body = body[:body.index(stop_at, len(start_at))]
+    end = body.find(stop_at, len(start_at))
+    body = body if end < 0 else body[:end]
     out = []
     quoted = False
     for ln in body.splitlines():
@@ -297,47 +278,38 @@ def _code_lines(src, start_at, stop_at):
     return out
 
 
-def _line_of(lines, needle, board):
+def _line_of(lines, needle, where):
     hits = [i for i, ln in enumerate(lines) if needle in ln]
-    assert hits, (board, needle)
+    assert hits, (where, needle)
     return hits[0]
 
 
-@pytest.mark.parametrize("board", sorted(BOARD_RUNTIMES))
-def test_every_board_writes_every_source_before_begin_frame(board):
+def _input_stage():
+    """The kernel loop's input stage (native/moy_input/modmoy_input.c's
+    moy_input_loop_inputs): ONE body every console board runs, its sources
+    the ones the board bound (moy_input.loop_bind)."""
+    src = (ROOT / "native" / "moy_input" / "modmoy_input.c").read_text(encoding="utf-8")
+    body = src[src.index("void moy_input_loop_inputs("):]
+    return body[:body.index("\n}\n")]
+
+
+def test_every_source_is_written_before_begin_frame():
     """The consumer half of the contract: with the union derived once per
-    frame, a source written AFTER the merge is read one frame late -- silently,
-    and only on that board."""
-    src = runtime_text(BOARD_RUNTIMES[board])
-    lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
-    merge = _line_of(lines, "inp.begin_frame()", board)
-    seen = 0
-    for writer in SOURCE_WRITERS:
-        if any(writer in ln for ln in lines):
-            seen += 1
-            assert _line_of(lines, writer, board) < merge, (board, writer)
-    assert seen, board
+    frame, a source written AFTER the merge is read one frame late --
+    silently. Every console board runs this one stage."""
+    body = _input_stage()
+    merge = body.index("moy_input_begin_frame(t, now);")
+    for writer in ("moy_hid_frame(", "moy_touchdev_poll(", "moy_input_point("):
+        assert body.index(writer) < merge, writer
 
 
-# The one shipped consumer that reads the union as a bare attribute. `active`
-# holds the backlight on (device_boot.IdleBlank), so a stale read here blanks
-# the screen under a held button -- on glass, with no host test failing. It is
-# safe only because it runs AFTER inp.begin_frame().
-ACTIVE_READ = "bool(inp._held)"
-
-
-@pytest.mark.parametrize("board", sorted(BOARD_RUNTIMES))
-def test_a_board_that_reads_the_union_for_its_idle_check_reads_it_after_the_merge(board):
-    src = runtime_text(BOARD_RUNTIMES[board])
-    lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
-    if not any(ACTIVE_READ in ln for ln in lines):
-        # The T-Deck spells its `active` differently (trackball counts + the
-        # streamed last_key, which a held raw-matrix key sets every frame), so
-        # it reads no union at all. Recorded, not required.
-        assert board == "tdeck", board
-        return
-    merge = _line_of(lines, "inp.begin_frame()", board)
-    assert _line_of(lines, ACTIVE_READ, board) > merge, board
+def test_the_idle_check_reads_the_union_after_the_merge():
+    # `active` holds the backlight on (the kernel's idle ladder), so a stale
+    # read here blanks the screen under a held button.
+    body = _input_stage()
+    merge = body.index("moy_input_begin_frame(t, now);")
+    assert body.index("moy_input_masks(t, MOY_INPUT_UNION") > merge
+    assert body.index("moy_input_last_key(t)") > merge
 
 
 def test_the_boards_idle_check_still_sees_a_held_button_after_the_merge():
@@ -350,23 +322,22 @@ def test_the_boards_idle_check_still_sees_a_held_button_after_the_merge():
     kbd._i2c.frame = bytes([0x00, 0x04, 0, 0, 0])     # 'd' -> the `right` button
     kbd.poll()
     inp.begin_frame()
-    assert bool(inp._held) and bool(inp.last_key)     # active -> backlight stays on
+    assert inp.any_held()                            # active -> backlight stays on
 
     kbd._i2c.frame = b"\x00\x00\x00\x00\x00"
     kbd.poll()
     inp.begin_frame()
-    assert not inp._held and not inp.last_key         # idle -> the blank may arm
+    assert not inp.any_held() and not inp.last_key         # idle -> the blank may arm
 
 
-def test_the_tdeck_keyboard_smoke_stage_polls_before_it_merges():
-    """A merge taken before the poll makes the button row lag the key by a
-    frame."""
+def test_the_tdeck_keyboard_smoke_stage_kicks_before_it_merges():
+    """A merge taken before the pass makes the button row lag the key by a
+    frame: the smoke's loop merges what the last kick's pass wrote."""
     src = (ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
            / "tdeck_smoke.py").read_text()
     lines = _code_lines(src, "def _run_phase(", "\ndef ")
-    merge = _line_of(lines, "inp.begin_frame()", "tdeck_smoke")
-    assert _line_of(lines, "kbd.poll()", "tdeck_smoke") < merge
-    assert _line_of(lines, "poller.consume()", "tdeck_smoke") < merge
+    assert _line_of(lines, "moy_input.kick()", "tdeck_smoke") \
+        < _line_of(lines, "inp.begin_frame()", "tdeck_smoke")
 
 
 # -- last_key ---------------------------------------------------------------
@@ -528,13 +499,56 @@ class _FakeI2C:
         buf[:] = self.frame
 
 
+class _Kbd:
+    """The T-Deck keyboard's C driver in raw mode over a fake matrix; poll() is
+    one input-task pass."""
+
+    def __init__(self, inp):
+        self._i2c = _FakeI2C()
+        self.drv = _mi.KbdDriver(inp, self._i2c)
+        self.drv.raw_mode = True
+
+    def poll(self):
+        self.drv.pass_()
+
+
 def _tdeck_keyboard(inp):
-    kbd = device_input.TDeckKeyboard.__new__(device_input.TDeckKeyboard)
-    kbd.input = inp
-    kbd.available = True
-    kbd.raw_mode = True
-    kbd._i2c = _FakeI2C()
-    return kbd
+    return _Kbd(inp)
+
+
+class _AnyStack:
+    def __getattr__(self, name):
+        return lambda *a: 0
+
+    def ms(self):
+        return 1000
+
+
+class _Ble:
+    """The kernel's BLE keyboard machine, connected, its input report on handle
+    7; `press(usages)` is a report and poll() the frame's half."""
+
+    def __init__(self, inp):
+        m = self.m = _mi.HidMachine(inp, _AnyStack())
+        self.src = m.src
+        addr = (0, b"\x01\x02\x03\x04\x05\x06")
+        m.started(True)
+        m.scan_result(addr, -40, bytes((3, 0x03, 0x12, 0x18)))
+        m.on_scan_done()
+        m.connected(3, addr)
+        m.on_svc(3, 1, 12, _mi.HID_SERVICE)
+        m.on_svc_done(3, 0)
+        m.on_chr(3, 2, 7, _mi.HID_NOTIFY, _mi.HID_REPORT)
+        m.on_chr_done(3, 0)
+        m.on_dsc(3, 8, _mi.HID_CCCD)
+        m.on_dsc_done(3, 0)
+        m.on_write_done(3, 8, 0)
+
+    def press(self, *usages):
+        self.m.notify(3, 7, bytes((0, 0) + usages + (0,) * (6 - len(usages))))
+
+    def poll(self):
+        self.m.frame()
 
 
 def test_the_physical_keyboards_poll_no_longer_erases_the_ble_keyboard():
@@ -547,11 +561,12 @@ def test_the_physical_keyboards_poll_no_longer_erases_the_ble_keyboard():
     """
     inp = device_input.InputState()
     inp.text_mode = False
+    inp.cart_keys = True        # a game owns the keys: W is its `up`
     kbd = _tdeck_keyboard(inp)
-    ble = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
+    ble = _Ble(inp)
 
     # A BLE report lands (usage 0x1A = W -> the `up` button, key 'w').
-    ble._reports[7] = (0, (0x1A,))
+    ble.press(0x1A)
     ble.poll()
 
     # ...and the physical keyboard polls an EMPTY matrix, over and over.
@@ -569,7 +584,7 @@ def test_the_physical_keyboards_poll_no_longer_erases_the_ble_keyboard():
     assert inp.held("up") and inp.held("right")
 
     # The BLE keyboard lets go; the physical one keeps what it holds.
-    ble._reports[7] = (0, ())
+    ble.press()
     ble.poll()
     kbd.poll()
     inp.begin_frame()
@@ -578,7 +593,7 @@ def test_the_physical_keyboards_poll_no_longer_erases_the_ble_keyboard():
 
     # ...and the other way round.
     kbd._i2c.frame = b"\x00\x00\x00\x00\x00"
-    ble._reports[7] = (0, (0x1A,))
+    ble.press(0x1A)
     ble.poll()
     kbd.poll()
     inp.begin_frame()
@@ -591,13 +606,13 @@ def test_the_two_keyboards_can_be_two_players():
     player 2 is one attribute -- no transport, no _Slot, no netcode."""
     inp = device_input.InputState()
     inp.text_mode = False
+    inp.cart_keys = True        # a game owns the keys: W is its `up`
     kbd = _tdeck_keyboard(inp)
-    ble = blekbd.BleHidKeyboard(inp, store_path=None, auto_start=False)
-    ble.poll()                                   # binds its source
+    ble = _Ble(inp)
     ble.src.player = 1
 
     kbd._i2c.frame = bytes([0x00, 0x04, 0, 0, 0])    # 'd' -> `right`
-    ble._reports[7] = (0, (0x1A,))                   # 'w' -> `up`
+    ble.press(0x1A)                                  # 'w' -> `up`
     kbd.poll()
     ble.poll()
     inp.begin_frame()
@@ -658,3 +673,33 @@ def test_a_one_player_cart_responds_to_any_controller():
     assert ns["btn"]("a", 1) is True         # ...and it is addressable as P2
     assert ns["btn"]("a", 0) is False        # ...and it has left slot 0
     assert ns["players"]() == 2
+
+
+def test_one_table_two_vocabularies():
+    """Both tiers' InputState are moy_input's InputTable (sprint 3's carve):
+    the boards accept all sixteen names, the host its eight, which are the
+    first eight of the same order -- libmoy's moy_button enum, then `home` --
+    and a name outside a table's vocabulary is refused."""
+    from runtime import moy_input
+    from runtime.input import InputState as Host
+    from runtime.lua_ext import MOY_BUTTONS
+    Board = device_input.InputState
+    assert issubclass(Host, moy_input.InputTable)
+    assert issubclass(Board, moy_input.InputTable)
+    assert moy_input.NAMES[:len(MOY_BUTTONS)] == MOY_BUTTONS
+    assert Host.BUTTONS == moy_input.NAMES[:8] and len(Board.BUTTONS) == 16
+    host, board = Host(), Board()
+    board.source("kbd").set_held("start", True)
+    with pytest.raises(ValueError):
+        host.source("kbd").set_held("start", True)
+
+
+def test_a_source_is_a_row_of_kind_src():
+    from runtime import moy_spine
+    from runtime.input import InputState
+    inp = InputState()
+    a, b = inp.source("kbd"), inp.source("net0", player=1)
+    for s in (a, b):
+        assert (s.h >> moy_spine.KIND_SHIFT) & 0xF == moy_spine.KIND_SRC
+        assert inp.source(s.name) is s
+    assert inp.source("kbd").h == a.h

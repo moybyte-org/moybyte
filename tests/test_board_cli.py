@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.join(ROOT, "device"))
 import board                                                    # noqa: E402
 import p4_autotest                                              # noqa: E402
 from runtime.dev_channel import DevChannel                      # noqa: E402
-from runtime.perf_line import format_perf                       # noqa: E402
+from runtime.moy_loop import perf_format as format_perf          # noqa: E402
 
 DIRS = board.boards()
 TDECK = DIRS["tdeck"]
@@ -253,6 +253,10 @@ class WM:
     def desk_open(self):
         return self.desk
 
+    @property
+    def stack(self):
+        return types.SimpleNamespace(kinds=lambda: list(self._stack))
+
 
 class WS:
     """The workstation surface the channel and the tool reach, behaving the
@@ -265,7 +269,7 @@ class WS:
         self.cart_error = None
         self.diag_live = False
         self._uncap = False
-        self._wifi_holders = set()
+        self.leases = types.SimpleNamespace(holders=lambda: [])
         self.wifi = None
         self._psave_ms = 300000
         self._psave_asleep = False
@@ -316,15 +320,21 @@ class WS:
 
 
 class Pump:
-    """FramePump.last: the board's ticks_ms at the top of the current frame,
-    which is where a dev command runs."""
+    """The board's `pump`: `last`, its ticks_ms at the top of the current
+    frame, which is where a dev command runs, and `drawn`, the frames drawn
+    (here the console's own)."""
 
-    def __init__(self, clock):
+    def __init__(self, clock, ws):
         self.clock = clock
+        self.ws = ws
 
     @property
     def last(self):
         return int(self.clock.now * 1000)
+
+    @property
+    def drawn(self):
+        return self.ws._frames_drawn
 
 
 class Wire:
@@ -339,7 +349,7 @@ class Wire:
         self.ws, self.clock = ws, clock
         self.ch = DevChannel(ws, types.SimpleNamespace(
             place=lambda x, y: None, down=False),
-            env={"comp": comp, "pump": Pump(clock)})
+            env={"comp": comp, "pump": Pump(clock, ws)})
         self.to_host = b""
         self.pending = b""
         self.sent = []
@@ -549,32 +559,42 @@ def test_the_counter_refuses_a_run_of_another_cart(clock):
 
 def _perf_run(tmp_path, monkeypatch, uncap):
     """Coin Quest -- the paced fixture, 30 by default -- on the REAL host
-    console for 7 s of 60 Hz loop, under the real PerfSampler with PERF DIAG
-    on: each PERF line's drawn fps, beside the drawn-frame counter read the way
-    tools/p4_perf.py reads it, at the same instants."""
+    console for 7 s of 60 Hz loop, under the kernel's loop and its PERF
+    sampler (the trace tier's clock) with PERF DIAG on: each PERF line's
+    drawn fps, beside the drawn-frame counter read the way tools/p4_perf.py
+    reads it, at the same instants."""
     import p4_perf
-    from runtime import device_boot
+    from runtime import moy_loop
     from runtime.perf_line import parse_perf
     from ws_helpers import build_ws, open_cart
-    ms = [0]
-    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: ms[0])
-    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
     ws = build_ws(tmp_path)
     ws._uncap = uncap
     open_cart(ws, "Coin Quest")
     assert ws.cart_error is None, ws.cart_error
     ws.diag_live = True
-    out = []
-    sampler = device_boot.PerfSampler(ws, emit=out.append)
-    reads = []
-    for f in range(7 * 60):
-        ws.input.begin_frame()
+    moy_loop.trace_init(60, True, 0)
+
+    def frame(dt):
         ws.frame(1 / 60.0)
-        ms[0] = (f + 1) * 1000 // 60
-        n = len(out)
-        sampler.account(0, 1, 0)
-        if len(out) != n:
-            reads.append((ms[0], ws._frames_drawn))
+        if moy_loop.perf_due():
+            ws.perf_push(moy_loop)
+        return ws._frames_drawn
+
+    moy_loop.register(ws.input.begin_frame, lambda: None, frame)
+    moy_loop.capture(True)
+    moy_loop.tick(ws.player.tick_ms)
+    reads = []
+    out = []
+    for f in range(7 * 60):
+        moy_loop.trace_clock(f * 1000 // 60)
+        moy_loop.step()
+        lines = [t[4:-1].replace("_", " ").replace("cart=Coin Quest", "cart=x")
+                 .replace("fence ms", "fence_ms")
+                 for t in moy_loop.trace_log().split() if t.startswith("say[PERF")]
+        if lines:
+            out += lines
+            reads.append((f * 1000 // 60, moy_loop.drawn()))
+    moy_loop.unregister()
     perf = [parse_perf(l)["fps"][0] for l in out]
     counter = [p4_perf.window_fps(a, b) for a, b in zip(reads, reads[1:])]
     return perf[1:], counter
@@ -741,10 +761,10 @@ def test_shot_of_the_game_canvas_crops_its_view(clock, device_modules, tmp_path)
 
 @pytest.mark.parametrize("angle", [90, 270])
 def test_a_portrait_scan_buffer_turns_back_to_landscape(angle):
-    """The inverse of `device/dsi_panel.rotate_rect`, pixel by pixel: rotate
+    """The inverse of the rotated compositor's rect rotation, pixel by pixel: rotate
     a landscape picture onto portrait glass the way the PPA does, and the
     shot's unrotate hands back the landscape."""
-    from device.dsi_panel import rotate_rect
+    from runtime.glass_binding import rotate_rect
     lw, lh = 7, 5
     land = array("H", range(1, lw * lh + 1))
     pw, ph = lh, lw

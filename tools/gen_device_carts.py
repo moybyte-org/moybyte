@@ -15,7 +15,8 @@ to emit `modules/carts_data.py` (gitignored, frozen into the firmware), and
 the device follows automatically.
 
 **It is also the ONE reader of the manifests' declarations** (the UI refactor's
-Phase 5, 2026-08-19). A system cart declares, in its own `manifest.json`:
+Phase 5, 2026-08-19). A system cart declares, in its own `manifest.json`'s
+`"moybyte"` object (Moybyte's own fields, moy_store_base.VENDOR_KEY):
 
     "system": true          -- this folder IS a seed cart (required; a folder
                                that forgets it is an ERROR here, never a
@@ -53,7 +54,7 @@ form is 3.6x smaller (201,716 B against 731,592 B, measured on the 35-cart
 roster) and it is what let the Zero carry a roster at all. BOTH FORMS WERE
 BUILT rather than inferred from the source, and the interesting answer is that
 the plain one fits: 2,830,672 B of that board's 2,883,584 B OTA slot, 51 KB
-left -- under the #168 warning floor, one cart from a build failure, in a slot
+left -- under the board's headroom floor, a failed build, in a slot
 paid for twice. The packed image is 2,399,232 B and leaves 473 KB.
 
 Why a Python bytes literal and not a second `.incbin` beside the web bundle's:
@@ -86,6 +87,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from runtime.moy_store_base import BUILTIN_NS, cart_folder, vendor  # noqa: E402
+
 DEFAULT_FORMAT = "moybyte-cart-v1"
 
 # Every consumer of system_carts/ reads its declarations through the four
@@ -105,7 +109,7 @@ def read_manifests(system_carts_dir=None):
     """Every system cart as `(folder, manifest)`, in SEED order.
 
     Strict on purpose. A `.moy` folder here that does not declare
-    `"system": true` and a unique integer `"order"` raises, because the failure
+    `"moybyte": {"system": true}` and a unique integer `"order"` there raises, because the failure
     it replaces was invisible: a cart missing from the old hand-written
     CART_ORDER simply never reached the device, and the host kept working."""
     root = system_carts_dir or _default_system_carts()
@@ -119,21 +123,30 @@ def read_manifests(system_carts_dir=None):
             continue
         folder = name[:-len(CART_SUFFIX)]
         man = json.loads(_read(os.path.join(base, "manifest.json")))
-        if man.get("system") is not True:
+        if vendor(man).get("system") is not True:
             raise ValueError(
-                "%s/manifest.json must declare \"system\": true (it lives in "
+                "%s/manifest.json must declare \"moybyte\": {\"system\": true} (it lives in "
                 "system_carts/, so it IS a seed cart)" % name)
-        order = man.get("order")
+        order = vendor(man).get("order")
         if not isinstance(order, int):
             raise ValueError(
-                "%s/manifest.json must declare an integer \"order\" (its place "
+                "%s/manifest.json must declare an integer \"moybyte\".\"order\" (its place "
                 "in the device seed list)" % name)
         if order in seen:
             raise ValueError("duplicate \"order\" %d: %s and %s"
                              % (order, seen[order], folder))
+        if name != cart_folder(man.get("title", ""), BUILTIN_NS):
+            raise ValueError(
+                "%s must be named %s: a built-in ships under the id every "
+                "store seeds it as, `%s.<title slug>`"
+                % (name, cart_folder(man.get("title", ""), BUILTIN_NS),
+                   BUILTIN_NS))
+        if man.get("id") != folder:
+            raise ValueError("%s/manifest.json must declare \"id\": %r"
+                             % (name, folder))
         seen[order] = folder
         out.append((folder, man))
-    out.sort(key=lambda fm: (fm[1]["order"], fm[0]))
+    out.sort(key=lambda fm: (vendor(fm[1])["order"], fm[0]))
     return out
 
 
@@ -143,10 +156,7 @@ def cart_order(system_carts_dir=None):
 
 
 def title_to_folder(system_carts_dir=None):
-    """`{manifest title: folder}`. The device names a seeded folder from the
-    TITLE slug while the host copies the SOURCE folder, so the two names differ
-    (theme_picker.moy vs appearance.moy) and something has to relate them --
-    tests/test_device_seed_parity.py used to do it with a hand-written map."""
+    """`{manifest title: folder}`."""
     return {man["title"]: folder
             for folder, man in read_manifests(system_carts_dir)}
 
@@ -156,7 +166,7 @@ def roster(target, system_carts_dir=None):
     order. A manifest with no `"targets"` ships everywhere."""
     out = []
     for folder, man in read_manifests(system_carts_dir):
-        targets = man.get("targets")
+        targets = vendor(man).get("targets")
         if targets is None or "*" in targets or target in targets:
             out.append(folder)
     return out
@@ -172,7 +182,7 @@ def app_decls(system_carts_dir=None):
     rides on, so a consumer never has to re-open the manifest."""
     out = []
     for folder, man in read_manifests(system_carts_dir):
-        app = man.get("app")
+        app = vendor(man).get("app")
         if not app:
             continue
         for key in ("id", "entry"):
@@ -206,7 +216,7 @@ def build_carts(system_carts_dir):
         base = os.path.join(system_carts_dir, folder + CART_SUFFIX)
         cart = {
             "title": man["title"],
-            "type": man.get("type", "app"),
+            "type": vendor(man).get("type", "app"),
             # cart content version (#47): seed_builtins overwrites a stale on-SD copy
             # when this is newer. Pre-versioning carts default to 0.
             "version": int(man.get("version", 0)),
@@ -251,6 +261,9 @@ def build_carts(system_carts_dir):
             cart["fps"] = fps if fps == "free" else int(fps)   # the loop, SPEC 5)
         if man.get("icon"):                # launcher icon tiles (SPEC.md 3.4)
             cart["icon"] = man["icon"]
+        for _k in ("description", "genre", "tags"):    # SPEC.md 3.7 list fields
+            if man.get(_k):
+                cart[_k] = man[_k]
         sheet = os.path.join(base, "sprites.moygfx")
         if os.path.exists(sheet):
             cart["sprites"] = _read(sheet)
@@ -287,7 +300,7 @@ def build_carts(system_carts_dir):
                 cart["scenes"] = scenes
                 # seed_builtins writes manifest assets.scenes from scene_order
                 # (element 0 = the default active scene); carry the manifest order.
-                order = (man.get("assets") or {}).get("scenes") or []
+                order = (vendor(man).get("assets") or {}).get("scenes") or []
                 keep = [n for n in order if n in scenes]
                 if keep:
                     cart["scene_order"] = keep
@@ -298,12 +311,16 @@ def build_carts(system_carts_dir):
             cart["blocks"] = json.loads(_read(blocks))
         if "canvas" in man:
             cart["canvas"] = man["canvas"]
-        if "permissions" in man:
-            cart["permissions"] = man["permissions"]
+        if "permissions" in vendor(man):
+            cart["permissions"] = vendor(man)["permissions"]
+        if vendor(man).get("glass") is True:   # a per-glass wallpaper
+            cart["glass"] = True
+        if "pictures" in vendor(man):           # a picture wallpaper
+            cart["pictures"] = vendor(man)["pictures"]
         if "input" in man:                # #42 Thread 3 input-kind hint, optional
             cart["input"] = man["input"]
-        cart["cfg"] = man.get("config", {})
-        cart["edit"] = man.get("edit", [])
+        cart["cfg"] = vendor(man).get("config", {})
+        cart["edit"] = vendor(man).get("edit", [])
         carts.append(cart)
     return carts
 
@@ -371,10 +388,15 @@ def pack_cart(cart):
     return comp.compress(body) + comp.flush()
 
 
-def build_packed(system_carts_dir):
-    """The packed roster: [(title, version, blob)], in seed order."""
+def build_packed(system_carts_dir, skip=()):
+    """The packed roster: [(title, version, blob)], in seed order, less the
+    cart folders named in `skip`."""
+    folders = [f for f, _m in read_manifests(system_carts_dir)]
+    unknown = set(skip) - set(folders)
+    if unknown:
+        raise ValueError("--skip names no system cart: %s" % ", ".join(sorted(unknown)))
     return [(c["title"], int(c.get("version", 0)), pack_cart(c))
-            for c in build_carts(system_carts_dir)]
+            for f, c in zip(folders, build_carts(system_carts_dir)) if f not in skip]
 
 
 def render_packed_module(packed):
@@ -414,7 +436,7 @@ APP_DECLS_HEADER = (
     "  text_mode  True = a TYPING app (the clean ASCII keyboard)\n"
     "  order      registration precedence (NOT the cart's shelf order)\n"
     "  folder     the identity cart it rides on, in system_carts/\n"
-    "  title      that cart's title (what the device names its seeded folder from)\n"
+    "  title      that cart's title\n"
     "  min_size   optional (w, h) windowed resize floor; omitted means the app's\n"
     "             layout MIN_W/MIN_H are adopted at registration\n"
     '"""\n'
@@ -465,7 +487,9 @@ def main(argv):
     """CLI.
 
       gen_device_carts.py [OUT [SYSTEM_CARTS]]   the frozen carts_data.py
-      gen_device_carts.py --packed OUT [SRC]     the same, PACKED (the Zero)
+      gen_device_carts.py --packed OUT [SRC] [--skip F,F]
+                                                 the same, PACKED (the Zero),
+                                                 less the named cart folders
       gen_device_carts.py --app-decls [OUT]      regenerate runtime/app_decls.py
       gen_device_carts.py --roster TARGET        the cart folders for a target,
                                                  one `<folder>.moy` per line
@@ -479,6 +503,11 @@ def main(argv):
         sys.stdout.write(main.__doc__.split("\n", 1)[1].rstrip() + "\n")
         return 0
     src = _default_system_carts()
+    skip = ()
+    if "--skip" in argv:
+        i = argv.index("--skip")
+        skip = tuple(x for x in argv[i + 1].split(",") if x)
+        del argv[i:i + 2]
     packed = False
     if argv and argv[0] == "--packed":
         packed = True
@@ -504,7 +533,7 @@ def main(argv):
     if len(argv) > 1:
         src = argv[1]
     if packed:
-        blobs = build_packed(src)
+        blobs = build_packed(src, skip)
         text = render_packed_module(blobs)
         sys.stderr.write(
             "seed roster packed: %d carts, %d B compressed (%d KB), %d B plain\n"

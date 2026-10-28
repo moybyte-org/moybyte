@@ -7,6 +7,8 @@ it, wait for the fresh boot, run its on-glass suite, print one table.
     tools/board.py pass tdeck --skip-build  flash the image already in dist/
     tools/board.py pass tdeck --no-flash    the suite only, on the image the board has
     tools/board.py pass --all --shot        ...and a screenshot of each at the end
+    tools/board.py pass --all --build-only  every board's image, the Zero's too;
+                                            no board attached (preflight's lane)
 
 It is ONE job however many boards it covers: start it in the background and
 take its one completion notice. It prints a line naming the log directory,
@@ -68,9 +70,11 @@ WEB_BUILD = os.path.join(ROOT, "firmware", "web_runner", "build.sh")
 QUIET = ("tdeck",)
 # Chips whose builds race each other on a shared cache: one build at a time.
 ONE_AT_A_TIME = ("esp32p4",)
-# What a build that lost the component cache's index.lock prints; such a
-# build runs again after a pause drawn from RETRY_PAUSE_S.
-LOST_RACE = "index.lock': File exists"
+# What a build that lost the component cache's index.lock prints, CMake's
+# wrap between the two halves included; such a build runs again after a pause
+# drawn from RETRY_PAUSE_S.
+LOST_RACE = "index.lock':\n  File exists"
+LOST_RACE_RE = re.compile(r"index\.lock':\s+File exists")
 RETRIES = 2
 RETRY_PAUSE_S = (5.0, 20.0)
 HEADROOM_RE = re.compile(r"App image: \d+ bytes of a \d+-byte \S+ slot -- "
@@ -97,7 +101,7 @@ class Row:
 
     @property
     def ok(self):
-        return not self.note and self.failed == 0
+        return not self.note and self.failed in (0, None)
 
     def cells(self):
         def n(v):
@@ -147,6 +151,10 @@ def plan(a, dirs, main_checkout):
     consoles = [n for n in sorted(dirs) if board.is_console(dirs[n])]
     if a.all and a.boards:
         raise PassError("name boards or pass --all, not both")
+    if a.build_only and (a.skip_build or a.no_flash or a.shot or a.k):
+        raise PassError("--build-only builds, and nothing else")
+    if a.build_only:
+        consoles = sorted(dirs)
     names = consoles if a.all else a.boards
     if not names:
         raise PassError("which boards? name them (%s) or pass --all"
@@ -210,7 +218,7 @@ def build(run, board_dir, log):
             return rc
         with open(log, errors="replace") as f:
             f.seek(start)
-            if LOST_RACE not in f.read():
+            if not LOST_RACE_RE.search(f.read()):
                 return rc
         with open(log, "a") as f:
             f.write("board pass: lost the component cache's lock; again\n")
@@ -300,6 +308,9 @@ def _run_board(name, a, ctx):
         row.headroom = headroom_of(path)
         if rc != 0:
             return stop("build failed", path)
+        if a.build_only:
+            row.image = image_stamp(d)
+            return row
     if not a.no_flash:
         path = log("flash")
         if not os.path.isfile(image_path(d)):
@@ -372,6 +383,9 @@ def parser():
     ap.add_argument("--shot", action="store_true",
                     help="a screenshot of each board at the end")
     ap.add_argument("-k", help="passed to pytest: only the tests it selects")
+    ap.add_argument("--build-only", action="store_true",
+                    help="build each image and stop: no port, no flash, no "
+                         "suite; with --all, every board the tree builds")
     ap.add_argument("--main", action="store_true",
                     help="build in the main checkout anyway")
     ap.add_argument("--logs", help="the log directory (default: one under "
@@ -416,7 +430,10 @@ def main(argv=None, run=run_logged, dirs=None, main_checkout=None):
     except PassError as exc:
         print(exc, file=sys.stderr)
         return 2
-    ports, stopped = resolve_ports(names, dirs)
+    if a.build_only:
+        ports, stopped = {n: None for n in names}, []
+    else:
+        ports, stopped = resolve_ports(names, dirs)
     logdir = a.logs or default_logdir()
     os.makedirs(logdir, exist_ok=True)
     print("board pass: %s  (logs: %s)" % (", ".join(names), logdir), flush=True)

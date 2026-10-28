@@ -43,22 +43,22 @@ def test_toggle_flips_persists_and_drives_the_canvas_hook(tmp_path):
 
     ws.settings_layer._toggle_diag_row("crisp_pixels")
     assert ws.crisp_pixels is True
-    assert ws.system["crisp_pixels"] is True
+    assert ws.system.get("crisp_pixels") is True
     assert calls == [True]
 
     ws.settings_layer._toggle_diag_row("crisp_pixels")
     assert ws.crisp_pixels is False
-    assert ws.system["crisp_pixels"] is False
+    assert ws.system.get("crisp_pixels") is False
     assert calls == [True, False]
 
 
 def test_boot_apply_does_not_persist_but_reaches_the_canvas(tmp_path):
     ws = build_ws(tmp_path)
     calls = _grant_hook(ws)
-    ws.system.pop("crisp_pixels", None)
+    ws.system.delete("crisp_pixels")
     ws.set_crisp_pixels(True, persist=False)
     assert ws.crisp_pixels is True
-    assert "crisp_pixels" not in ws.system
+    assert ws.system.text("crisp_pixels") is None
     assert calls == [True]
 
 

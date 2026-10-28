@@ -171,7 +171,8 @@ ws._g['_countverbs'] = _countverbs
 
 HELPER = """
 def _edit(tab, want=''):
-    items = ws.picker.items
+    ws.open_projects()
+    items = ws.projects_grid.items
     pick = -1
     for i in range(len(items)):
         if items[i].get('type') == 'new':
@@ -186,9 +187,8 @@ def _edit(tab, want=''):
             if items[i].get('type') != 'new':
                 pick = i
                 break
-    ws.picker.sel = pick
-    ws.open_picker()
-    ws.pick_selected()
+    ws.projects_grid.sel = pick
+    ws.launch_selected(ws.projects_grid)
     ws.editor_app.set_tab(tab)
     return str(items[pick].get('title'))
 def _litpx(sh, n):
@@ -242,8 +242,6 @@ BAR = ("ws.bar_layer", "_draw_status_strip", "bar.strip")
 SURFACES = {
     "map": ("ws._g['_edit']('map', %r)", [
         ("ws.map_ui", "_draw_map", "map._draw_map"),
-        ("ws.map_ui", "_draw_sel_actions", "map.sel_actions"),
-        ("ws.map_ui", "_draw_dims", "map.dims"),
         BAR,
     ]),
     "paint": ("ws._g['_edit']('paint', %r)", [
@@ -255,14 +253,6 @@ SURFACES = {
     ]),
     "blocks": ("ws._g['_edit']('blocks', %r)", [
         ("ws.block_ui", "_draw_blocks", "blocks._draw_blocks"),
-        ("ws.block_ui", "_draw_blk_row", "blocks.row"),
-        ("ws.block_ui", "_draw_sprite_list", "blocks.sprite_list"),
-        ("ws.block_ui", "_draw_scene_pane", "blocks.scene_pane"),
-        ("ws.block_ui", "_layout_workspace", "blocks.layout_ws"),
-        # The blocks tab's dominant phase is the SCENE pane it hosts on a wide
-        # canvas (#93/#85), so its renderer is wrapped here too.
-        ("ws.scene_ui", "_draw_scene", "scene._draw_scene"),
-        ("ws.scene_ui", "_frame_world", "scene.frame_world"),
         BAR,
     ]),
     "scene": ("ws._g['_edit']('scene', %r)", [
@@ -298,7 +288,7 @@ def run(b, name, verb, wraps, verbs=False, reps=2, frames=30, cart=""):
     st = b.state()
     wins = st.get("wins") or {}
     if wins:
-        k = "make" if "make" in wins else list(wins)[0]
+        k = "menu" if "menu" in wins else list(wins)[0]
         w = wins[k]
         cx = w[0] + 1 + w[2] // 2
         ct = w[1] + 1 + w[4]

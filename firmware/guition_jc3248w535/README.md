@@ -16,11 +16,11 @@ board; tuning deliberately not copied, see `boards/.../sdkconfig.board`)
 | subsystem | facts |
 |---|---|
 | panel | AXS15231B, 320x480 portrait-native, QSPI @ 40MHz: CLK 47, D0 21, D1 48, D2 40, D3 39, CS 45. No reset GPIO. MADCTL MV is DEAD on this glass (tested 0x60 + 0x20 live, both scramble; Arduino_GFX writes the bit, the LVGL-forum reports match ours) -- the console runs LANDSCAPE 480x320 via the rotate in moy_axs's band copy (owner call 2026-08-18). |
-| touch | AXS15231 (same bridge), I2C0 SDA 4 / SCL 8, addr 0x3B. Raw coords are portrait panel coords (driver: `device/axs_touch.py`). |
+| touch | AXS15231 (same bridge), I2C0 SDA 4 / SCL 8, addr 0x3B. Raw coords are portrait panel coords (driver: the kernel's `native/moy_input/moy_touchdev.c`, knobs in `mpconfigboard.h`). |
 | backlight | GPIO1, active high, PWM-capable (binary on/off for now -- owner call). |
 | battery | ADC GPIO5, divider ~1.72x (unwired here yet). |
 | flash/PSRAM | 16MB DIO; octal PSRAM. BOTH at 120MHz since 2026-08-19 (the T-Deck's experimental MSPI profile, A/B'd on this glass: carts +25-29%, pump -23%, SPI starvation -77%; needs the #169 retune patch, applied by build.sh). |
-| SD | TF slot VERIFIED on glass (2026-08-20): SPI3, CS 10 / MOSI 11 / SCLK 12 / MISO 13 (f1atb's field guide, confirmed by mount). **A card, when present, IS the cart store** (`/sd/carts`, T-Deck model, seeds on first boot); no card degrades to the internal VFS (`/moy/carts`). THE TRAP: `machine.SDCard`'s SPI slot numbers map INVERTED to host numbers -- **slot=2 is SPI3, slot=3 is SPI2 (the panel's bus)**; slot=3 dies with ESP_ERR_INVALID_STATE before touching the card, and the failed constructor leaks the sdspi singleton so every later probe fails the same way until a reboot. `moy_runtime.SD_STATUS` carries the mount verdict for the dev channel (boot output is DROPPED until a serial host attaches, #201). The OTA directory (a copied image, the pending marker) stays on the internal VFS; a WiFi update streams into the inactive slot and stages nothing, since this VFS cannot hold the image. |
+| SD | TF slot VERIFIED on glass (2026-08-20): SPI3, CS 10 / MOSI 11 / SCLK 12 / MISO 13 (f1atb's field guide, confirmed by mount); the panel is QSPI on SPI2, so **nothing shares the card's host**. **A card that mounts IS the cart store**: `moy_runtime.tf_card` opens it (`moy_sd.open` on SPI3, the bus initialised once and never torn down, and the store's card volume over it, `moy_store.card`, with the T-Deck's sector cache) and `device/card_store.py` mounts it once at boot, as on the P4s, whose README carries the rest of that arrangement (the fallback, the verdict in `card_store.STATUS`, the exFAT build flag, what stays internal). The store is `/sd/moybyte/carts` and the documents beside it (`system.json`, `wifi.json` with the WiFi passwords, `shared.moygfx`) are `/sd/moybyte/*`; the card's root, and the `/sd/carts` of builds before 2026-10-05, are not read. FAT12/16/32 and exFAT mount. THE TRAP: SPI slot numbers (`machine.SDCard`'s) map INVERTED to host numbers -- **slot=2 is SPI3 = host 2, slot=3 is SPI2 (the panel's bus)**; `moy_sd.open` takes the HOST, 2. A card that will not mount leaves the bus up for the next try; nothing tears it down. Boot output is DROPPED until a serial host attaches (#201), hence the verdict. A WiFi update streams into the inactive slot and stages nothing, since the internal VFS cannot hold the image. |
 | audio | speaker header exists; amp/pins UNVERIFIED -- stage 5 is open. |
 | USB | the S3's native USB-Serial/JTAG (303a:1001). Console primary per #201, so serial RX works under the desktop. |
 
@@ -97,15 +97,14 @@ ISR, whose body is the engine's `moy_flush_band_done_from_isr` -- static
 inline, so the callback keeps its IRAM placement. The device runs
 `SPI_DEVICE_NO_RETURN_RESULT`: a band's queue slot frees as the ISR starts
 it and no result is ever filed, so a band that completes late cannot leave
-anything behind. `modules/guition_panel.py` is the
-compositor over it -- since 2026-08-21 a thin SUBCLASS of the shared
-`device/banded_panel.py` (`FoldingCompositor` over `BandedCompositor`, #206
-item 1), the Python twin of the `moy_flush` split above. What is left in this
-file is the `moy_axs` import, WIDTH/HEIGHT, the `ASYNC_FLUSH` revert flag and
-the module-level `set_backlight()` -- the `*_fold` verbs sit on the shared
-folding rung, which both S3 boards take, and what is this board's alone is the
-game WINDOW; there is no `sd_bracket` here, because nothing else is known
-to share this QSPI host. Init sequence provenance: ESPHome's AXS15231 model plus
+anything behind. The compositor over it is the kernel's
+`moy_glass.BandedCompositor` (`native/moy_glass/moy_present.h`, sprint 3's
+glass pass), the frame state machine in C over this module's transport entries
+(`moy_axs_kwait`/`kkick`/`kship`, named through `MOY_KERNEL_PANEL`); the
+T-Deck runs the same one over `moy_lcd`. The `*_fold` verbs are this module's
+and the compositor forwards them; what is this board's alone is the game
+WINDOW, and there is no `sd_bracket` here, because nothing else is known to
+share this QSPI host. Init sequence provenance: ESPHome's AXS15231 model plus
 its generated DCS tail -- the exact sequence the owner's ESPHome build runs on
 this exact glass.
 
@@ -178,19 +177,20 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
   "already has an SD inside, so you can do that now"; the exit-gesture DECLINE
   and the #202 close are the same session -- see the hardware table's SD row
   for the slot-numbering trap that cost the evening's plumbing). 34 carts
-  seed to `/sd/carts` on first boot with a card, on-glass suite 10/10 running
-  carts from the card, no card = the internal store this board shipped with.
+  seed to the card on first boot (`/sd/carts` then, `/sd/moybyte/carts` since
+  2026-10-05), on-glass suite 10/10 running carts from the card, no card = the
+  internal store this board shipped with.
   Also decided: **no touch-only game-exit gesture -- DECLINED** (owner: "we
-  don't support that"; a paired BLE keyboard's hold-BACKSPACE is the exit
-  path on this board), and **audio stays untracked** (the board HAS an audio
+  don't support that"; a paired BLE keyboard's GUI key, the pause menu's Quit, is the
+  exit path on this board), and **audio stays untracked** (the board HAS an audio
   out -- a 2-pin JST1.25 speaker connector, I2S per the field guides -- amp
   pins unverified; revisit if a speaker ever gets plugged in).
 * 2026-08-19 (evening) -- **the owner calls the board PORTED.** Also the
   wedge arc's closing field data: **the cable-flash replug rule is RETIRED**
   (owner observation, after many flashes since bring-up: touch answered
   immediately after every one -- the single dead-touch episode never
-  recurred, consistent with the boot-race + idle-filler story in
-  device/axs_touch.py's docstring). Flash normally; a dead touch after boot
+  recurred, consistent with the boot-race + idle-filler story in the AXS
+  driver's header, `native/moy_input/moy_touchdev.c`). Flash normally; a dead touch after boot
   would be a boot-race recurrence worth a serial trace, not routine. (The
   rule lives on only in this issue thread's OLDER comments -- an agent
   following #202 chronologically re-instructed replugs twice on 2026-08-19;
@@ -219,7 +219,7 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
     #202; cross-session diffs need a fresh-boot same-shape session (the
     ledger's rule).
 * 2026-08-18 -- port authored (stage 0 skeleton through stage 6 code):
-  moy_axs + guition_panel + axs_touch + run_desktop; `make test` green with
+  moy_axs + its compositor + axs_touch + run_desktop; `make test` green with
   the board in the staging-closure/board-toml suites.
 * 2026-08-19 (the morning after, owner's eyes on the glass) -- three hardware
   verdicts and the LANDSCAPE flip:
@@ -231,8 +231,8 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
     (rotate-gather: sequential PSRAM reads, scattered writes into the
     uncached SRAM bounce -- same read traffic as the memcpy it replaced), with
     `moy_axs.set_rot(0|1)` as the direction knob; rot 0 confirmed upright.
-  * **touch has two failure modes that present identically** (both in
-    `device/axs_touch.py`'s docstring): a SECOND machine.I2C(0) instance
+  * **touch has two failure modes that present identically**: a SECOND
+    machine.I2C(0) instance
     reads constant bytes while the driver's first instance works -- so never
     diagnose touch with a side probe, go through the live console -- and a
     BOOT RACE where the constructor's single probe read loses and
@@ -253,12 +253,12 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
     480x320. The lever is the launcher first-paint diet, not the driver.
   * lived pain: entering a game with no way out (the touch-only exit
     gesture, already on #202) -- the owner had to power cycle to leave a
-    cart. Rising priority (a paired BLE keyboard's hold-BACKSPACE now
-    also serves).
+    cart. Rising priority (a paired BLE keyboard's GUI key and the pause
+    menu's Quit now also serve).
   * **the scroll feel, closed the same evening** (owner verdict: "perfect,
     looks better than tdeck"): the drag-hang-then-phantom-fling was the
     driver waiting the GT911's 400ms no-news bound to believe a lift on a
-    controller whose only silence IS the lift. Fixed in device/axs_touch.py
+    controller whose only silence IS the lift. Fixed in the AXS driver
     with measured constants: a 90ms per-controller bound (2x the worst
     touched gap) plus hold-window EXTRAPOLATION (the pointer glides on its
     measured velocity through the <=90ms release window instead of
@@ -277,7 +277,8 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
   * stage 2 (half): the AXS15231 touch controller answers at 0x3B and
     reports no-touch correctly. The MAPPING knobs were the ESPHome-derived
     guess that night; `guition_smoke.touch()` with a finger settled them the
-    next day and `device/axs_touch.py` carries the winners (see above).
+    next day, and `mpconfigboard.h`'s `MOY_INPUT_TOUCH_*` carry the winners
+    (see above).
   * stage 6: boots to the desktop (first frame 270ms after a seeded boot;
     34 carts seeded to `/moy/carts` on the first boot), OTA confirm fired
     (`marked app valid (slot ota_0)`), and
@@ -294,6 +295,7 @@ lead, not a finding (`docs/perf_native_gap_v1.md` §6).
   * open stages/decisions: SD (stage 4 -- pins unverified), audio (stage 5 --
     amp/pins unverified), backlight PWM dimming (owner call), and a
     **touch-only exit gesture for fullscreen games** -- this board has no
-    BACKSPACE to hold, so a running game currently has no on-glass exit path
-    (tools/apps keep the bar's context-X; games hide the bar). #202 carries
+    console key of its own, so a running game with no keyboard paired has no
+    on-glass exit path (tools/apps keep the bar's back; games hide the bar).
+    #202 carries
     it.

@@ -67,9 +67,10 @@ each):
 
   * doc:   save_file('docs', name, "<text>") -- a document is plain Markdown
            (files/docs/<name>.md), so the file's text IS the page's text.
-  * cart:  carts_store.create(title, root, src=...) then
-           ws.carts.apply(store.scan(root)).
-  * There is no load_code(path); reading a cart's source goes through load(path).
+  * cart:  moy_catalogue.create(title, root, src=...) then
+           ws.carts.apply(moy_catalogue.catalogue(root)).
+  * There is no load_code(path); reading a cart's source goes through
+    moy_catalogue.load(h), `h` being the cart's "h".
 
 STRUCTURAL NOTE (content-independent): the Editor tabs and the Desk Lab apps share
 NO scroll machinery -- not ui.ScrollRegion, not the #113 blit path. Only the
@@ -88,7 +89,7 @@ from p4_alloc import PROBE, CADENCE        # noqa: E402
 
 OPEN = {
     "settings":  "ws.open_settings()",
-    "picker":    "ws.open_picker()",
+    "projects":  "ws.open_projects()",
     "code":      "ws._g['_edit']('code')",
     "blocks":    "ws._g['_edit']('blocks')",
     "sprites":   "ws._g['_edit']('paint')",
@@ -98,13 +99,13 @@ OPEN = {
 }
 HELPER = """
 def _edit(tab):
-    items = ws.picker.items
-    for i in range(len(items)):
-        if items[i].get('type') != 'new':
-            ws.picker.sel = i
+    ws.open_projects()
+    g = ws.projects_grid
+    for i in range(len(g.items)):
+        if g.items[i].get('type') != 'new':
+            g.sel = i
             break
-    ws.open_picker()
-    ws.pick_selected()
+    ws.launch_selected(g)
     ws.editor_app.set_tab(tab)
     return True
 ws._g['_edit'] = _edit
@@ -123,13 +124,17 @@ def run(b, name, verb):
     top = b.pyval("ws.wm.top_kind()")
     if wins:
         k = list(wins.keys())[0]
-        for cand in ("make", name):
+        for cand in ("menu", name):
             if cand in wins:
                 k = cand
         w = wins[k]
         cx = w[0] + 1 + w[2] // 2
         ct = w[1] + 1 + w[4]
         y0, y1 = ct + (w[3] - w[4]) - 40, ct + 40
+        if name == "code":
+            # Above the touch symbol keys: they type on press, and the
+            # autosave would keep what the sweep typed into the cart.
+            y0 = ct + (w[3] - w[4]) * 3 // 5
         where = "win:" + k
     else:
         cx, y0, y1 = 512, 540, 80

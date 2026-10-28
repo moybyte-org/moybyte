@@ -36,6 +36,14 @@ from ws_helpers import make_drv as _drv
 
 
 from ws_helpers import quiesce as _quiesce
+import pytest
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
 
 
 def _count_draws(ws, kind):
@@ -111,7 +119,15 @@ def test_pointer_down_and_release_edge_rerender(tmp_path):
     assert calls[0] > down_calls
     _quiesce(ws)
     ws._dirty = True
-    drv.frame(0.0)                         # settle whatever the tap changed
+    drv.frame(0.0)                         # settle whatever the tap changed:
+    for _ in range(8):                     # a tapped stop's page may owe frames
+        if not ws.settings_layer._host.owed:
+            break
+        drv.frame(0.0)
+    assert not ws.settings_layer._host.owed
+    drv.frame(0.0)                         # a frame with nothing to paint: the window's
+    assert not win._buf_stale              # buffer, which its frames left behind the
+                                           # glass, is refilled from it
     after_settle = calls[0]
     drv.pan(1, 0)
     drv.frame(0.0)                         # position-only: freeze resumes
@@ -152,18 +168,18 @@ def test_music_preview_excluded_from_freeze(tmp_path):
     PLAY/STOP) without marking dirty -- _content_static must exclude it."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
+    ws.open_projects()
     drv.frame(0.0)
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("type") != "new")
-    ws.pick_selected()
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("type") != "new")
+    ws.launch_selected(g)
     drv.frame(0.0)
     ws.editor_app.set_tab("music")
     drv.frame(0.0)
     _quiesce(ws)
     ws._dirty = True
     drv.frame(0.0)                         # settle
-    win = ws.wm._wins["make"]
+    win = ws.wm._wins["menu"]
     assert win.kind == "menu"
     assert ws.wm._content_static(win) is True
     ws.music_ui.music_preview = object()
@@ -213,3 +229,51 @@ def test_drag_release_restarts_the_backdrop_restore(tmp_path):
     assert wm._desk_streak == 0, (
         "release left the restore skipped (streak %d): the buffers the drag "
         "never reached keep the old window" % wm._desk_streak)
+
+
+def test_a_held_press_on_a_full_windows_row_head_keeps_the_freeze(tmp_path):
+    """A full-screen window's row head (its icon and title, which the WM
+    draws) is chrome, as a strip is: a press held there (short of the drag
+    that restores the window) reaches no content, so the focused content
+    stays frozen while it is held and on its release (its press edge marks
+    the frame, as every press does). A press in the content renders live
+    again."""
+    from runtime import moy_input as _mi
+    ws, drv, win = _settled_settings(tmp_path)
+    wm = ws.wm
+    wm._toggle_max(win)
+    ws.input_used("touch")                       # the input a finger's press is
+    ws._dirty = True
+    drv.frame(0.0)
+    drv.frame(0.0)
+    assert win.saved is not None and win._buf_stale is False
+    content = ws._content_layers["settings"]
+    fed = [0]
+    orig = content.handle_pointer
+
+    def spy(px, py, click):              # a press or its drag; hovers are inert
+        if click or ws.pointer.down:
+            fed[0] += 1
+        return orig(px, py, click)
+
+    content.handle_pointer = spy
+    calls = _count_draws(ws, "settings")
+    x, y = win.x + 30, win.y + win.title_h // 2
+    assert wm._on_row_head(win, x, y)
+    drv.touch(x, y)
+    drv._buttons(_mi.PB_PRIMARY, False)          # a finger: no mouse button held
+    drv.frame(0.0)                               # the press edge: a dirty frame
+    calls[0] = 0
+    for dx in (1, 2, 3, 2):                      # held, short of a drag
+        drv.touch_drag(x + dx, y)
+        drv.frame(0.0)
+    drv.touch_up()
+    drv.frame(0.0)
+    drv.frame(0.0)
+    assert fed[0] == 0, "the row head's press reached the content"
+    assert calls[0] == 0, "the content re-rendered under a press on chrome"
+    cx, cy, cw, ch = win.content_rect()
+    drv.touch(cx + cw // 2, cy + ch // 2)
+    drv._buttons(_mi.PB_PRIMARY, False)
+    drv.frame(0.0)
+    assert fed[0] > 0 and calls[0] > 0, "a press in the content renders live"

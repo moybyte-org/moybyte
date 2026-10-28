@@ -21,9 +21,12 @@ refuses BEFORE `ws.cart` is assigned: the kid gets the error panel a crashing
 cart gets, and the launcher stays usable.
 """
 
+import shutil
+
 from runtime import moy_carts
 
 from ws_helpers import build_ws as _ws, open_cart
+from ws_helpers import shelf  # noqa: E402
 
 
 GOOD_SRC = "def _draw():\n    cls(1)\n"
@@ -33,7 +36,7 @@ def _mk(ws, title):
     """Create a cart in the live store and re-adopt the roster (which re-slims
     it, so opening it is a real rehydrate -- the path that fails)."""
     moy_carts.create(title, str(ws.carts_root), src=GOOD_SRC)
-    ws.carts.apply(moy_carts.scan(str(ws.carts_root)))
+    ws.carts.apply(shelf(str(ws.carts_root)))
     cart = next(c for c in ws.carts.all if c["title"] == title)
     assert cart.get("lazy") is True, "the cart must be slim for this to test anything"
     return cart
@@ -46,22 +49,19 @@ def _deny_source(monkeypatch, cart, times):
     target = cart["path"] + "/main.py"
     left = [times]
 
-    def fake(path):
+    def fake(path, at=None):
         if path == target and left[0] > 0:
             left[0] -= 1
             raise MemoryError("memory allocation failed, allocating 77824 bytes")
-        return real(path)
+        return real(path, at)
 
     monkeypatch.setattr(moy_carts, "_read_recover", fake)
     return left
 
 
 def _select(ws, cart):
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("path") == cart.get("path"):
-            ws.launcher.sel = i
-            return
-    raise AssertionError("cart not on the shelf: " + cart["title"])
+    if not ws.select_cart(cart):
+        raise AssertionError("cart not on the shelf: " + cart["title"])
 
 
 def test_run_refuses_a_cart_whose_source_will_not_read(tmp_path, monkeypatch):
@@ -156,7 +156,7 @@ def test_a_cart_with_no_folder_at_all_is_refused(tmp_path):
     """The other way a rehydrate comes back empty -- the card was pulled."""
     ws = _ws(tmp_path)
     cart = _mk(ws, "Mossmoss")
-    cart["path"] = str(tmp_path / "gone.moy")
+    shutil.rmtree(cart["path"])         # its handle still names the folder
     ws.open_in_editor(cart)
     assert ws.cart is None
     assert "Couldn't open" in (ws.player.cart_error or "")

@@ -1,12 +1,11 @@
 """runtime/ui.py -- the shared immediate-mode widget toolkit (visual identity
-v1 Phase 3): rect algebra, the draw==tap Hits registry, themed widgets, and the
-one ScrollRegion model. Pixel checks run on a real SystemCanvas so the drawing
+v1 Phase 3): rect algebra, themed widgets, and the one ScrollRegion model. Pixel checks run on a real SystemCanvas so the drawing
 path is the one every tier shares.
 
 The 2026-08 UI refactor's Phase 3a additions -- the six-state interaction
-model, the `Hits` pointer pump, and the `row`/`cell` kinds -- are in
-`tests/test_ui_states.py`, which also pins every SHIPPED widget's pixels across
-all 12 theme sets so a later phase cannot re-baseline them by accident.
+model and the `row`/`cell` kinds -- are in
+`tests/test_ui_states.py`. The palette themes these draw with are the fixture packages
+(tests/fixtures/themes/, `ws_helpers.fixture_colors`).
 """
 
 from pathlib import Path
@@ -14,11 +13,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import ui
+from runtime import ui_draw
 from runtime.host_canvas import make_system_canvas as SystemCanvas
-from runtime.chrome import theme_colors
+from ws_helpers import fixture_colors, use_theme
 
 
-TH = theme_colors("machine")
+TH = fixture_colors("machine")
 
 
 # -- rect algebra -------------------------------------------------------------
@@ -51,19 +51,6 @@ def test_splits_cover_without_overlap():
     assert rows[-1][1] + rows[-1][3] == 91
 
 
-# -- Hits ----------------------------------------------------------------------
-
-def test_hits_topmost_wins_and_clear():
-    h = ui.Hits()
-    h.add((0, 0, 100, 100), "under", 1)
-    h.add((10, 10, 20, 20), "over", 2)
-    assert h.at(15, 15) == ("over", 2)                 # drawn later = on top
-    assert h.at(50, 50) == ("under", 1)
-    assert h.at(200, 200) is None
-    h.clear()
-    assert h.at(15, 15) is None
-
-
 # -- widgets --------------------------------------------------------------------
 
 def _cv(w=320, h=120, fs=1):
@@ -71,46 +58,42 @@ def _cv(w=320, h=120, fs=1):
 
 
 def test_button_kinds_paint_their_tokens():
+    """Each kind's field inside the look's rounded key (`key_r`)."""
     cv = _cv()
-    ui.button(cv, TH, (10, 10, 80, 20), "PLAY", kind="play")
-    assert cv.pix(12, 12) == TH["play"]
-    assert cv.pix(10, 10) == 0                         # dark edge
-    ui.button(cv, TH, (10, 50, 80, 20), "CHANGE", kind="normal")
-    assert cv.pix(12, 52) == TH["surface"]
-    ui.button(cv, TH, (10, 80, 80, 20), "DEL", kind="danger")
-    assert cv.pix(12, 82) == TH["danger"]
-    ui.button(cv, TH, (110, 10, 80, 20), "ON", on=True)
-    assert cv.pix(112, 12) == TH["accent"]
+    ui_draw.button(cv, TH, (10, 10, 80, 20), "PLAY", kind="primary")
+    assert cv.pix(14, 20) == TH["value"]
+    ui_draw.button(cv, TH, (10, 50, 80, 20), "CHANGE", kind="normal")
+    assert cv.pix(14, 60) == TH["surface"]
+    ui_draw.button(cv, TH, (10, 80, 80, 20), "DEL", kind="danger")
+    assert cv.pix(14, 90) == TH["surface"]
+    assert TH["danger"] in [cv.pix(x, y) for x in range(10, 90) for y in range(80, 100)]
 
 
 def test_chip_states_match_the_legacy_button_pixels():
-    """ui.chip replaced the four per-app `_button` copies -- pin the three
+    """ui_draw.chip replaced the four per-app `_button` copies -- pin the
     states to the exact colors those drew (panel/title_ink/dim quiet chip,
-    accent/black/edge toggle, danger/white armed action)."""
+    danger/white armed action); `on` is the theme's current mark."""
     cv = _cv()
-    ui.chip(cv, TH, (10, 10, 80, 20), "SAVE")
+    ui_draw.chip(cv, TH, (10, 10, 80, 20), "SAVE")
     assert cv.pix(12, 12) == TH["panel"]
     assert cv.pix(10, 10) == TH["dim"]                 # quiet border
-    ui.chip(cv, TH, (10, 40, 80, 20), "IMAGES", on=True)
-    assert cv.pix(12, 42) == TH["accent"]
-    assert cv.pix(10, 40) == TH["edge"]                # toggle border
-    ui.chip(cv, TH, (10, 70, 80, 20), "DELETE?", hot=True)
+    ui_draw.chip(cv, TH, (10, 70, 80, 20), "DELETE?", hot=True)
     assert cv.pix(12, 72) == TH["danger"]
 
 
 def test_chip_clips_an_overlong_label_inside_its_rect():
     """#174: a label wider than its chip must clip (draw-what-fits), never
-    escape -- the desk pill overflow landed title_ink on the wallpaper
+    escape -- the desk pill overflow landed its ink on the wallpaper
     (invisible black-on-black on Open Machine's field)."""
     cv = _cv()
     cv.rect(0, 0, 320, 120, 7)                     # a field escaped ink shows on
     r = (10, 10, 40, 20)
-    ui.chip(cv, TH, r, "STORYBOOK")
+    ui_draw.chip(cv, TH, r, "STORYBOOK")
     for x in range(r[0] + r[2], 320):
         for y in range(120):
             assert cv.pix(x, y) == 7               # nothing escapes the rect
     # The truncated label still draws inside the chip.
-    assert any(cv.pix(x, y) == TH["title_ink"]
+    assert any(cv.pix(x, y) == TH["chrome_ink"]
                for y in range(r[1], r[1] + r[3])
                for x in range(r[0], r[0] + r[2]))
 
@@ -123,86 +106,79 @@ def test_chip_clip_follows_the_system_font_scale():
         cv = _cv(320, 120, fs)
         cv.rect(0, 0, 320, 120, 7)
         r = (10, 10, 40 * fs, 20 * fs)
-        ui.chip(cv, TH, r, "STORYBOOK")
+        ui_draw.chip(cv, TH, r, "STORYBOOK")
         for y in range(120):
             for x in range(320):
                 if r[0] <= x < r[0] + r[2] and r[1] <= y < r[1] + r[3]:
                     continue
                 assert cv.pix(x, y) == 7, (fs, x, y)
-        assert any(cv.pix(x, y) == TH["title_ink"]
+        assert any(cv.pix(x, y) == TH["chrome_ink"]
                    for y in range(r[1], r[1] + r[3])
                    for x in range(r[0], r[0] + r[2]))
 
 
-def test_apps_button_delegates_to_chip(tmp_path):
-    """The Appearance app's toolbar button (one of the four migrated copies)
-    still paints its exact legacy pixels through the delegate."""
+def test_a_chip_paints_the_themes_chip_surface(tmp_path):
+    """A chip paints in its theme's chip surface (the night fixture's): the
+    chip's field, ringed in shade_dark."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    use_theme(ws, "night", "dark")
     cv = ws.sys_canvas
-    ws.appearance_app._button(cv, "CARTS", (10, 100, 60, 16), on=True)
     th = ws.theme_colors
-    assert cv.pix(12, 102) == th["accent"]
-    assert cv.pix(10, 100) == th["edge"]
-    ws.appearance_app._button(cv, "CARTS", (10, 120, 60, 16), on=False)
+    ui_draw.chip(cv, th, (10, 120, 60, 16), "CARTS", on=False, fs=1)
     assert cv.pix(12, 122) == th["panel"]
-    assert cv.pix(10, 120) == th["dim"]
+    assert cv.pix(10, 120) == th["shade_dark"]
 
 
 def test_tab_row_geometry_and_overflow():
     tabs = [("cards", "CONFIG"), ("code", "CODE"), ("map", "MAP")]
-    wide = ui.tab_row_rects((0, 0, 400, 18), tabs, 1)
+    wide = ui_draw.tab_row_rects((0, 0, 400, 18), tabs, 1)
     assert [t[0] for t in wide] == ["cards", "code", "map"]
     assert all(labels_on for _t, _r, labels_on in wide)
     # Too narrow for labels -> icon-only chips for EVERY tab (uniform collapse).
-    slim = ui.tab_row_rects((0, 0, 90, 18), tabs, 1)
+    slim = ui_draw.tab_row_rects((0, 0, 90, 18), tabs, 1)
     assert slim and not any(labels_on for _t, _r, labels_on in slim)
     # Rects never leave the row.
     for _t, (x, y, w, h), _l in slim:
         assert x + w <= 90
     # Narrower still -> trailing chips drop (draw-what-fits), never overlap.
-    tiny = ui.tab_row_rects((0, 0, 40, 18), tabs, 1)
+    tiny = ui_draw.tab_row_rects((0, 0, 40, 18), tabs, 1)
     assert len(tiny) < len(tabs)
 
 
-def test_tab_row_draws_active_selection_and_hits():
+def test_tab_row_draws_active_selection():
     cv = _cv(w=420)
-    hits = ui.Hits()
     tabs = [("cards", "CONFIG", "edit"), ("code", "CODE", "code")]
-    rects = ui.tab_row(cv, TH, (0, 0, 420, 18), tabs, "code", hits=hits)
+    rects = ui_draw.tab_row(cv, TH, (0, 0, 420, 18), tabs, "code")
     assert [r[0] for r in rects] == ["cards", "code"]
+    other = _cv(w=420)
+    ui_draw.tab_row(other, TH, (0, 0, 420, 18), tabs, "cards")
     _tid, (x, y, w, h), _l = rects[1]
-    assert cv.pix(x + 1, y + 1) == TH["selection"]     # active tab field
-    assert hits.at(x + 2, y + 2) == ("tab", "code")
-    assert hits.at(rects[0][1][0] + 2, 2) == ("tab", "cards")
+    tab = [cv.pix(i, j) for j in range(y, y + h) for i in range(x, x + w)]
+    assert tab != [other.pix(i, j) for j in range(y, y + h) for i in range(x, x + w)], \
+        "the active tab wears the current mark"
 
 
 def test_panel_and_status_row_paint():
     cv = _cv()
-    content = ui.panel(cv, TH, (20, 20, 200, 80), title="INSPECTOR")
+    content = ui_draw.panel(cv, TH, (20, 20, 200, 80), title="INSPECTOR")
     assert cv.pix(22, 40) in (TH["surface"], TH["title"])
     assert content[1] > 21 and content[3] < 80         # title strip consumed
-    ui.status_row(cv, TH, (0, 100, 320, 14), ("Ln 3, Col 7", "SAVED"))
+    ui_draw.status_row(cv, TH, (0, 100, 320, 14), ("Ln 3, Col 7", "SAVED"))
     assert cv.pix(2, 108) == TH["surface_alt"]
-
-
-def test_focus_ring_paints_focus_token():
-    cv = _cv()
-    ui.focus_ring(cv, TH, (50, 50, 40, 30))
-    assert cv.pix(50 - 2, 50 - 2) == TH["focus"]
 
 
 def test_is_light_gate():
     """The presentation class is explicit, independent of palette choices."""
-    assert ui.is_light(theme_colors("machine"))
-    assert not ui.is_light(theme_colors("night"))
-    assert ui.is_light({"surface_light": True, "ink": 1})
-    assert not ui.is_light({"surface_light": False, "ink": 0})
+    assert ui_draw.is_light(fixture_colors("machine"))
+    assert not ui_draw.is_light(fixture_colors("night"))
+    assert ui_draw.is_light({"surface_light": True, "ink": 1})
+    assert not ui_draw.is_light({"surface_light": False, "ink": 0})
 
 
 def test_scroll_cues_draw_what_can_move():
     cv = _cv()
-    ui.scroll_cues(cv, (10, 10), (10, 100), True, False, 7)
+    ui_draw.scroll_cues(cv, (10, 10), (10, 100), True, False, 7)
     # '^' drew at (10,10); 'v' suppressed at (10,100).
     assert any(cv.pix(10 + dx, 10 + dy) == 7
                for dx in range(8) for dy in range(8))
@@ -218,32 +194,6 @@ def _drag(ws, layer_pointer, x, y0, y1, steps=6):
         layer_pointer(x, y0 + (y1 - y0) * i // steps, False)
     ws.pointer.down = False
     layer_pointer(x, y1, False)
-
-
-def test_cards_drag_scrolls(tmp_path):
-    """A held drag on the Config card column scrolls mtop (one card per base
-    card height of travel)."""
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    target = None
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("path") and it.get("edit"):
-            ws.launcher.sel = i
-            target = it
-            break
-    assert target is not None
-    ws.change_selected()
-    # Guarantee overflow: a long edit schema on the OPEN cart (the workspace
-    # rehydrates from the store on open, so mutate after) -- the list scrolls.
-    ws.cart["edit"] = [{"key": "k%d" % i, "label": "KNOB %d" % i,
-                       "min": 0, "max": 9, "default": 1} for i in range(14)]
-    cl = ws.cards_layer
-    assert cl._cards_scrollable()
-    lay = cl.layout
-    x = lay.card_x + 10
-    y0 = lay.view_bottom - 6
-    _drag(ws, cl.handle_pointer, x, y0, y0 - 4 * (lay.card_h + lay.gap))
-    assert cl.mtop > 0
 
 
 def test_blocks_outline_drag_scrolls(tmp_path):
@@ -271,93 +221,8 @@ def test_blocks_outline_drag_scrolls(tmp_path):
     assert bu.blk_top > 0
 
 
-def test_settings_rows_drag_scrolls(tmp_path):
-    """The Settings list rides the shared DragTap machine: a held drag on the
-    rows moves the scroll window (set_top stays the row-slot state of record).
-    Drags anchor on the press EDGE, exactly as the hardware delivers them."""
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.open_settings()
-    sl = ws.settings_layer
-    rows = len(sl._settings_rows())
-    vis = sl._settings_visible()
-    assert rows > vis                      # the #53 OTA rows overflow one screen
-    view = sl._scroll_region().view
-    cx = view[0] + view[2] // 2
-    cy = view[1] + view[3] - 4
-    ws.pointer.down = True
-    sl.handle_pointer(cx, cy, True)                        # press edge anchors
-    sl.handle_pointer(cx, cy - 3 * ws.layout.set_row_h, False)   # pull up 3 rows
-    assert sl.set_top > 0
-    ws.pointer.down = False
-    sl.handle_pointer(cx, cy, False)                       # release after a drag
-    top = sl.set_top
-    ws.pointer.down = True
-    sl.handle_pointer(cx, view[1] + 4, True)               # new press anchor
-    sl.handle_pointer(cx, view[1] + 4 + 10 * ws.layout.set_row_h, False)
-    assert sl.set_top < top                                # drag down -> back up
-
-
-def test_settings_rows_drag_accumulates_small_pointer_moves(tmp_path):
-    """Real touch samples arrive a few pixels apart; their remainder must survive
-    between events until it crosses a row boundary."""
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.open_settings()
-    sl = ws.settings_layer
-    view = sl._scroll_region().view
-    cx = view[0] + view[2] // 2
-    cy = view[1] + view[3] - 4
-    ws.pointer.down = True
-    sl.handle_pointer(cx, cy, True)                        # press edge anchors
-    step = 5
-    moves = ws.layout.set_row_h // step + 2
-    for i in range(moves):
-        sl.handle_pointer(cx, cy - (i + 1) * step, False)
-    assert sl.set_top > 0
-
-
-def test_settings_drag_release_never_clicks_a_row(tmp_path):
-    """The bug the shared machine retires: scrolling the Settings rows and
-    letting go must NOT activate the row under the finger (WIFI used to open,
-    steppers used to step). A clean tap (press + release, no travel) still
-    activates the row it landed on."""
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.open_settings()
-    sl = ws.settings_layer
-    view = sl._scroll_region().view
-    cx = view[0] + view[2] // 2
-    cy = view[1] + view[3] - 4
-    ws.pointer.down = True
-    sl.handle_pointer(cx, cy, True)                        # press on a row
-    sl.handle_pointer(cx, cy - 3 * ws.layout.set_row_h, False)  # drag = scroll
-    assert sl.set_top > 0
-    ws.pointer.down = False
-    sl.handle_pointer(cx, cy - 3 * ws.layout.set_row_h, False)  # let go
-    assert not sl.wifi_view                # no row fired on the release
-    assert ws.screen == "settings"
-    # A clean tap (press + release, no travel) still selects the row it landed
-    # on -- activation just moved from the press edge to the release.
-    # Reset through the real path: since #113 Phase 5 the region owns the pixel
-    # offset, so the row slot alone is no longer the whole scroll state -- and
-    # the drag above left a fling coasting, which the next press would CATCH
-    # (stopping it instead of activating a row, exactly as intended).
-    sl.reset()
-    idx = 1                                # WALLPAPER (row 0 is WIFI -- avoid it)
-    assert sl._settings_row_visible(idx)
-    x, y, w, h = sl._settings_row_rect(idx)
-    ws.pointer.down = True
-    sl.handle_pointer(x + w // 2, y + h // 2, True)        # press...
-    ws.pointer.down = False
-    sl.handle_pointer(x + w // 2, y + h // 2, False)       # ...clean release
-    assert sl.set_msel == idx              # the tap landed (release-fired)
-
-
-# -- ScrollRegion ------------------------------------------------------------------
-
 def test_scroll_region_clamps_and_shows():
-    sr = ui.ScrollRegion()
+    sr = ui_draw.ScrollRegion()
     sr.set((0, 0, 100, 50), 200)
     sr.scroll_by(-10)
     assert sr.offset == 0                              # clamped at the top
@@ -373,7 +238,7 @@ def test_scroll_region_clamps_and_shows():
 
 
 def test_scroll_region_drag_and_bar():
-    sr = ui.ScrollRegion()
+    sr = ui_draw.ScrollRegion()
     sr.set((0, 0, 100, 50), 200)
     sr.drag_start(40)
     assert sr.drag_move(30)                            # finger up -> content down
@@ -391,7 +256,7 @@ def test_scroll_region_drag_and_bar():
 def test_scroll_region_horizontal_axis():
     """The Library shelf's axis: offsets clamp against the view WIDTH, drags
     track x, and the bar lies along the bottom edge."""
-    sr = ui.ScrollRegion(horizontal=True)
+    sr = ui_draw.ScrollRegion(horizontal=True)
     sr.set((10, 20, 100, 50), 300)
     sr.scroll_by(999)
     assert sr.offset == 200                            # content - view width
@@ -407,15 +272,15 @@ def test_scroll_region_horizontal_axis():
     assert bar is not None
     x, y, w, h = bar
     assert y + h == 20 + 50                            # bottom edge
-    assert w >= 8 and h == ui.ScrollRegion.BAR_W
+    assert w >= 8 and h == ui_draw.ScrollRegion.BAR_W
 
 
 def test_drag_tap_disambiguates():
-    """ui.DragTap: a clean press+release fires the tap; travel past the slop
+    """ui_draw.DragTap: a clean press+release fires the tap; travel past the slop
     scrolls the region instead and the release is inert."""
-    sr = ui.ScrollRegion()
+    sr = ui_draw.ScrollRegion()
     sr.set((0, 0, 100, 100), 400)
-    dt = ui.DragTap(sr)
+    dt = ui_draw.DragTap(sr)
     # Clean tap: press, hold without travel, release -> the press point.
     assert dt.frame(50, 50, True, True) is None
     assert dt.frame(51, 50, False, True) is None
@@ -446,13 +311,13 @@ def _glyphd(kind, rect, color, cv):
 
 
 def test_every_new_parameter_defaults_to_the_frozen_rendering():
-    for th in (theme_colors("night"), theme_colors("machine", "light")):
+    for th in (fixture_colors("night"), fixture_colors("machine", "light")):
         for fs in (1, 2, 3):
             pairs = (
-                (ui.chip, (), {"label": "HI"}, {"colors": None}),
-                (ui.cell, (), {"label": "C"},
+                (ui_draw.chip, (), {"label": "HI"}, {"colors": None}),
+                (ui_draw.cell, (), {"label": "C"},
                  {"text_dx": None, "text_dy": None, "edge_last": False}),
-                (ui.row, (), {"label": "R", "value": "v"},
+                (ui_draw.row, (), {"label": "R", "value": "v"},
                  {"pad_right": None, "scale": 1, "glyph_ink": None,
                   "glyph_size": None}),
             )
@@ -466,46 +331,45 @@ def test_every_new_parameter_defaults_to_the_frozen_rendering():
                 assert bytes(a._buf) == bytes(b._buf), (fn.__name__, fs)
             a = SystemCanvas(120, 60, font_scale=fs)
             b = SystemCanvas(120, 60, font_scale=fs)
-            ui.text_field(a, (4, 4, 100, 16), "hi", "ph")
-            ui.text_field(b, (4, 4, 100, 16), "hi", "ph", colors=None, fs=None)
+            ui_draw.text_field(a, (4, 4, 100, 16), "hi", "ph")
+            ui_draw.text_field(b, (4, 4, 100, 16), "hi", "ph", colors=None, fs=None)
             assert bytes(a._buf) == bytes(b._buf), ("text_field", fs)
 
 
 def test_cell_text_offsets_place_a_frozen_caption_baseline():
-    """`appearance_app._draw_wall_card`'s blocker: its caption baseline is the
-    frozen literal `y + h - 13*fs`, and the band centre agrees with it only at
-    font scale 1 (fs=2: 8 vs 9). `text_dy` is what lets a site say so."""
+    """A caption whose baseline is the frozen literal `y + h - 13*fs`: the band
+    centre agrees with it only at font scale 1 (fs=2: 8 vs 9). `text_dy` is
+    what lets a site say so."""
     for fs in (1, 2, 3):
         h = 40 * fs
         want_dy = h - 13 * fs
         a = SystemCanvas(120 * fs, 80 * fs, font_scale=fs)
-        ui.cell(a, TH, (0, 0, 100 * fs, h), "T", band=True,
+        ui_draw.cell(a, TH, (0, 0, 100 * fs, h), "T", band=True,
                 caption_h=17 * fs, pad=3 * fs, text_dy=want_dy,
                 text_dx=5 * fs)
         b = SystemCanvas(120 * fs, 80 * fs, font_scale=fs)
         cap_y = h - 17 * fs
-        ui.cell(b, TH, (0, 0, 100 * fs, h), None, caption_h=17 * fs,
+        ui_draw.cell(b, TH, (0, 0, 100 * fs, h), None, caption_h=17 * fs,
                 pad=3 * fs)
         b.rect(0, cap_y, 100 * fs, 17 * fs, TH["title"])
         b.print("T", 5 * fs, want_dy, TH["title_ink"], 1)
-        b.rectb(0, 0, 100 * fs, h, ui.state_colors(TH, "cell", ui.REST)[2])
+        b.rectb(0, 0, 100 * fs, h, ui_draw.state_colors(TH, "cell", ui_draw.REST)[2])
         assert bytes(a._buf) == bytes(b._buf), fs
 
 
 def test_cell_edge_last_paints_the_frame_over_the_content():
-    """`appearance_app._draw_theme_card`'s blocker in miniature: a glyph that
-    reaches the cell's border must be clipped by it, which needs the border
-    painted after the picture rather than before."""
-    edge = ui.state_colors(TH, "cell", ui.REST)[2]
-    ink = ui.state_colors(TH, "cell", ui.REST)[1]
+    """A glyph that reaches the cell's border must be clipped by it, which
+    needs the border painted after the picture rather than before."""
+    edge = ui_draw.state_colors(TH, "cell", ui_draw.REST)[2]
+    ink = ui_draw.state_colors(TH, "cell", ui_draw.REST)[1]
     # A cell exactly as big as the skin's 14px glyph box, pad 0: the glyph
     # covers every pixel including the frame, so the draw ORDER is the whole
     # difference between the two renderings.
     r = (0, 0, 14, 14)
     before = SystemCanvas(30, 30)
-    ui.cell(before, TH, r, None, glyph="g", glyph_draw=_glyphd, pad=0)
+    ui_draw.cell(before, TH, r, None, glyph="g", glyph_draw=_glyphd, pad=0)
     after = SystemCanvas(30, 30)
-    ui.cell(after, TH, r, None, glyph="g", glyph_draw=_glyphd, pad=0,
+    ui_draw.cell(after, TH, r, None, glyph="g", glyph_draw=_glyphd, pad=0,
             edge_last=True)
     assert before.pix(0, 0) == ink                 # the glyph won
     assert after.pix(0, 0) == edge                 # the frame won
@@ -517,12 +381,12 @@ def test_chip_colors_bypasses_the_skin_like_row_and_cell():
     """Parity: absorbing a private button (the notebook app's history pair)
     must be able to keep that site's exact palette."""
     cv = SystemCanvas(80, 40)
-    ui.chip(cv, TH, (0, 0, 60, 20), "X", colors=(19, 0, 22))
+    ui_draw.chip(cv, TH, (0, 0, 60, 20), "X", colors=(19, 0, 22))
     assert cv.pix(1, 1) == 19
     assert cv.pix(0, 0) == 22
     flat = SystemCanvas(80, 40)
     flat.rect(0, 0, 80, 40, 7)
-    ui.chip(flat, TH, (0, 0, 60, 20), "X", colors=(None, 0, None))
+    ui_draw.chip(flat, TH, (0, 0, 60, 20), "X", colors=(None, 0, None))
     assert flat.pix(1, 1) == 7                     # no field, no border
 
 
@@ -530,11 +394,11 @@ def test_row_pad_right_frees_a_narrow_rows_value_column():
     """The achievements badge: one number did both insets, so a deep LEFT pad
     inside a narrow rect truncated the text to nothing."""
     both = SystemCanvas(120, 30)
-    ui.row(both, TH, (0, 0, 60, 16), "NAME", pad=24, value="9")
+    ui_draw.row(both, TH, (0, 0, 60, 16), "NAME", pad=24, value="9")
     split = SystemCanvas(120, 30)
-    ui.row(split, TH, (0, 0, 60, 16), "NAME", pad=24, pad_right=2, value="9")
+    ui_draw.row(split, TH, (0, 0, 60, 16), "NAME", pad=24, pad_right=2, value="9")
     assert bytes(both._buf) != bytes(split._buf)
-    ink = ui.state_colors(TH, "row", ui.REST)[1]
+    ink = ui_draw.state_colors(TH, "row", ui_draw.REST)[1]
     painted = sum(1 for x in range(60) for y in range(16)
                   if split.pix(x, y) == ink)
     assert painted > 0
@@ -547,14 +411,14 @@ def test_row_scale_prints_bigger_and_still_clips_inside_the_rect():
     long label truncates at the right column instead of escaping (#174)."""
     cv = SystemCanvas(200, 40)
     cv.rect(0, 0, 200, 40, 7)
-    ui.row(cv, TH, (0, 0, 80, 24), "ABCDEFGHIJ", scale=2)
+    ui_draw.row(cv, TH, (0, 0, 80, 24), "ABCDEFGHIJ", scale=2)
     for x in range(80, 200):
         for y in range(40):
             assert cv.pix(x, y) == 7, (x, y)
     one = SystemCanvas(200, 40)
-    ui.row(one, TH, (0, 0, 80, 24), "AB", scale=1)
+    ui_draw.row(one, TH, (0, 0, 80, 24), "AB", scale=1)
     two = SystemCanvas(200, 40)
-    ui.row(two, TH, (0, 0, 80, 24), "AB", scale=2)
+    ui_draw.row(two, TH, (0, 0, 80, 24), "AB", scale=2)
     assert bytes(one._buf) != bytes(two._buf)
 
 
@@ -562,9 +426,9 @@ def test_row_glyph_ink_and_size_are_independent_of_the_label():
     """Achievements (bright badge, quiet text) and the egg banner (a 16x16
     glyph where the skin says 14) both had to draw their own art."""
     a = SystemCanvas(120, 30)
-    ui.row(a, TH, (0, 0, 100, 20), "X", glyph="g", glyph_draw=_glyphd)
+    ui_draw.row(a, TH, (0, 0, 100, 20), "X", glyph="g", glyph_draw=_glyphd)
     b = SystemCanvas(120, 30)
-    ui.row(b, TH, (0, 0, 100, 20), "X", glyph="g", glyph_draw=_glyphd,
+    ui_draw.row(b, TH, (0, 0, 100, 20), "X", glyph="g", glyph_draw=_glyphd,
            glyph_ink=TH["accent"], glyph_size=16)
     assert bytes(a._buf) != bytes(b._buf)
     assert b.pix(5, 5) == TH["accent"]
@@ -582,10 +446,10 @@ def test_row_content_rect_is_where_row_actually_draws():
             cv = SystemCanvas(200, 40, font_scale=fs)
             rect = (0, 0, 160, 16 * fs)
             # glyph_ink keeps the leading art out of the ink scan below.
-            ui.row(cv, TH, rect, "MMMMMMMMMMMMMMMMMMMM",
+            ui_draw.row(cv, TH, rect, "MMMMMMMMMMMMMMMMMMMM",
                    glyph_ink=TH["accent"], **kwargs)
-            band = ui.row_content_rect(rect, fs, **geo)
-            ink = ui.state_colors(TH, "row", ui.REST)[1]
+            band = ui_draw.row_content_rect(rect, fs, **geo)
+            ink = ui_draw.state_colors(TH, "row", ui_draw.REST)[1]
             cols = [x for x in range(160)
                     if any(cv.pix(x, y) == ink for y in range(16 * fs))]
             assert cols, (fs, kwargs)
@@ -597,17 +461,17 @@ def test_text_field_can_be_themed_and_scaled_without_moving_the_default():
     """The WiFi password field: it needs the theme's ring, its own ink and an
     fs-wide caret; the block prompts need the frozen 1x rendering. Both."""
     frozen = SystemCanvas(140, 30)
-    ui.text_field(frozen, (0, 0, 120, 14), "ab")
+    ui_draw.text_field(frozen, (0, 0, 120, 14), "ab")
     assert frozen.pix(1, 1) == 0                       # black field
     assert frozen.pix(0, 0) == 6                       # light-grey ring
     themed = SystemCanvas(140, 30)
-    ui.text_field(themed, (0, 0, 120, 14), "ab",
+    ui_draw.text_field(themed, (0, 0, 120, 14), "ab",
                   colors=(TH["surface"], TH["edge"], TH["ink"], 5,
                           TH["accent"]))
     assert themed.pix(1, 1) == TH["surface"]
     assert themed.pix(0, 0) == TH["edge"]
     scaled = SystemCanvas(200, 60, font_scale=2)
-    ui.text_field(scaled, (0, 0, 160, 28), "ab", fs=2)
+    ui_draw.text_field(scaled, (0, 0, 160, 28), "ab", fs=2)
     plain = SystemCanvas(200, 60, font_scale=2)
-    ui.text_field(plain, (0, 0, 160, 28), "ab")
+    ui_draw.text_field(plain, (0, 0, 160, 28), "ab")
     assert bytes(scaled._buf) != bytes(plain._buf)

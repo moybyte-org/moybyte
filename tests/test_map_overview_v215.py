@@ -136,8 +136,8 @@ def test_the_seed_store_still_ships_a_map_bigger_than_the_view():
 # complement of "everything else fits". Sky Run's 100 columns need 400px and
 # the bench twins' 64 need 256; the 320x240 view has 192, the 480x320 one 352.
 PANS_AT_THE_FLOOR = {
-    (320, 240, 1): {"bench.moy", "bench_lua.moy", "scroll_demo.moy"},
-    (480, 320, 1): {"scroll_demo.moy"},
+    (320, 240, 1): {"moybyte.bench.moy", "moybyte.bench_lua.moy", "moybyte.sky_run.moy"},
+    (480, 320, 1): {"moybyte.sky_run.moy"},
     (800, 480, 3): set(),
     (1024, 600, 2): set(),
 }
@@ -566,7 +566,7 @@ def test_the_map_editor_renders_at_overview_on_every_tier(tmp_path):
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
         where = "%dx%d fs%d" % (w, h, fs)
         assert M._MV_FIT_MIN <= cell <= M._MV_FIT_MAX, where
-        whole = "scroll_demo.moy" not in PANS_AT_THE_FLOOR[(w, h, fs)]
+        whole = "moybyte.sky_run.moy" not in PANS_AT_THE_FLOOR[(w, h, fs)]
         assert (cols >= tm.w and rows >= tm.h) == whole, where
         _paint(ws, drv)
         assert ws.sys_canvas.pix(x0 + cell // 2, y0 + cell // 2) >= 0
@@ -575,8 +575,8 @@ def test_the_map_editor_renders_at_overview_on_every_tier(tmp_path):
 def test_the_issue_numbers_still_describe_the_shipped_maps():
     # #215 measured four maps that no longer fit; if a seed cart's map is retitled
     # or resized, this names it rather than letting a fit test quietly widen.
-    want = {"platformer.moy": (40, 26), "harpoon_pop.moy": (40, 30),
-            "bench.moy": (64, 30), "scroll_demo.moy": (100, 30)}
+    want = {"moybyte.hop_quest.moy": (40, 26), "moybyte.harpoon_pop.moy": (40, 30),
+            "moybyte.bench.moy": (64, 30), "moybyte.sky_run.moy": (100, 30)}
     got = {n: (w, h) for n, w, h in _shipped_maps() if n in want}
     assert got == want
 

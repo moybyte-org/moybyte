@@ -116,7 +116,7 @@ def test_the_drawing_tabs_wait_longer_than_the_typed_ones(tmp_path):
     cannot be mistaken for a typing gap."""
     ws = _ws(tmp_path)
     assert ws.history.draw_debounce_ms > ws.history.edit_debounce_ms
-    assert DRAW_TABS == ("paint", "map", "scene", "music")
+    assert DRAW_TABS == ("paint", "map", "scene", "music", "theme_sprites")
 
 
 def test_the_long_quiet_period_commits_once(tmp_path):
@@ -291,7 +291,7 @@ def test_a_lua_code_edit_commits_on_the_debounce(tmp_path):
     assert ws.editor.dirty is False
     assert ws.menu_view == "code"                 # ...and nobody left the tab
     assert "cls(9)" in moy_carts.load(path)["src"]
-    assert ws.save_status is None                 # no Python syntax error shown
+    assert ws.cart_error is None                  # no Python syntax error shown
 
 
 def test_a_broken_lua_chunk_commits_and_hard_commits(tmp_path):

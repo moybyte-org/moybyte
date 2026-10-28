@@ -1,0 +1,27 @@
+{
+  "format": "moy-1",
+  "version": 5,
+  "title": "Calc",
+  "id": "moybyte.calc",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 300,
+    "app": {
+      "id": "calc",
+      "entry": "calc_app:CalcAppLayer",
+      "text_mode": false,
+      "order": 70
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "calc"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

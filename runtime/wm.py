@@ -35,8 +35,12 @@ into console (no circular import).
 
 try:
     from widgets import _Blit, _ticks_ms, _ticks_diff
+    from moy_spine import BackStack, STAYED
+    from shell_layout import WIDGETS as _LAYOUT_WIDGETS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import _Blit, _ticks_ms, _ticks_diff
+    from runtime.moy_spine import BackStack, STAYED
+    from runtime.shell_layout import WIDGETS as _LAYOUT_WIDGETS
 
 
 _VIEWPORT_BEZEL = 0         # black -- the letterbox fill around a scaled game viewport
@@ -45,20 +49,43 @@ _VIEWPORT_IDENTITY = (0, 0, 1)   # the degradation viewport: one canvas IS the g
 
 class FullscreenStackWM:
     """The fullscreen back-stack window manager (S3 + host). Holds a `ws` back-ref to
-    the console it composites for; owns the game<->system viewport composite (#39) and
-    -- from Stage 6b/6c -- the process back-stack `screen` projects onto + the memoized
-    layer stack. One instance per Workstation, built in `Workstation.__init__`."""
+    the console it composites for; owns the game<->system viewport composite (#39), the
+    memoized layer stack (Stage 6c), and the navigation verbs over the spine's process
+    back-stack `screen` projects onto (`self.stack`, moy_spine.BackStack). One instance
+    per Workstation, built in `Workstation.__init__`."""
+
+    # The home carousel's motion verdict (docs/shell_layout_2026-10.md §12),
+    # a per-board constant: a board whose drag frames do not fit its budget
+    # degrades down this order, only as far as its measurement says (#66) --
+    # "full" (the centre card scales with its distance from the centre, in
+    # motion and at rest; HOME_SCALE lowered is the order's "reduced scale"),
+    # "rest" (every card at 1.0 while the row moves, the centre scaled once
+    # settled), "one" (one card size). Every board runs "full" at 2: the
+    # handheld's 2x hero (launcher_layer.HOME_SCALE_HH). The desk's shelf
+    # cards keep one size, so the verdict moves only the handheld's.
+    HOME_MOTION = "full"
+    HOME_SCALE = 2.0
+    # Registered apps the home's Apps tab and the desk leave out: reached
+    # through Settings instead.
+    HIDDEN_APPS = ("appearance", "myart")
+    # A content's own paint ring vouches for what the buffers hold of it
+    # (docs/scroll_and_text_2026-10.md §3.4): the full-screen stack repaints
+    # everything around it, so a frame that moves its pixels shifts out of
+    # the frame before. The windowed WM's shown ring is its windows' voucher.
+    CONTENT_RING = True
 
     def __init__(self, ws):
         self.ws = ws
-        # The process back-stack (Stage 6b): launcher root -> spawned app -> Player/tool.
-        # A list of "kind" strings (the same vocabulary the flat `screen` attribute used:
-        # "launcher" | "menu" | "settings" | "update" | "desktop"); the TOP is what
-        # `Workstation.screen` now projects onto (`top_kind`). It is a DATA STRUCTURE the
+        # The process back-stack (Stage 6b): launcher root -> spawned app -> Player/tool,
+        # as kinds (the vocabulary the flat `screen` attribute used: "launcher" | "menu" |
+        # "settings" | "update" | "desktop" | an app id); the TOP is what
+        # `Workstation.screen` projects onto (`top_kind`). It is a DATA STRUCTURE the
         # string-keyed router READS (via ws._content_layer), NOT a second dispatcher --
         # source-of-truth != dispatch, so "one router at all times" holds (plan Section 6).
-        # The launcher is the permanent root (index 0, never popped).
-        self._stack = ["launcher"]
+        # The spine owns it; every navigation goes through `goto` here, so the WM sees
+        # each change it has to rebuild for.
+        kt = getattr(ws, "_kernel_tables", None)
+        self.stack = kt[1] if kt is not None else BackStack()
         # Content-change generation (Stage 6c): bumped whenever the top-of-stack kind
         # actually changes, so the memoized layer stack knows to rebuild. (menu_view tab
         # switches bump it via EditorApp.tab; overlay-gate changes are caught separately
@@ -114,28 +141,141 @@ class FullscreenStackWM:
         """The kind of the top-of-stack process -- what `Workstation.screen` projects
         onto (a read-only projection of the back-stack top, exactly as `menu_view`
         projects `EditorApp.tab`)."""
-        return self._stack[-1]
+        return self.stack.top()
 
     def top_is(self, kind):
         """True iff the top-of-stack process is `kind`. The stack query the production
         readers use in place of `screen == kind` (Stage 6d) -- same answer, phrased as a
         question to the stack (the source of truth) rather than the projection string."""
-        return self._stack[-1] == kind
+        return self.stack.top() == kind
+
+    def input_holder(self):
+        """The process the keyboard reaches: here the stack top. The windowed
+        WM answers the focused window on its desk (None: the desk itself)."""
+        return self.stack.top()
 
     def top_is_player(self):
         """True iff a cart Player is on top (screen "desktop") -- the running-cart test
         the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""
-        return self._stack[-1] == "desktop"
+        return self.stack.top() == "desktop"
 
-    # -- the two worlds (#105): play (fullscreen) vs make (the windowed desk) --
+    # -- the two modes (docs/shell_layout_2026-10.md §3) ----------------------
 
     has_desk = False                   # capability probe: only WindowedWM has a desk
+    mode = "console"                   # this WM has console mode alone
+
+    # What a theme's bars may place here (docs/shell_layout_2026-10.md §10):
+    # per mode, the widgets this WM has a value for, and the edges a bar may
+    # take. The composer (shell_layout.resolve) drops the rest. `chips` (the
+    # taskbar's window chips) has no value in console mode.
+    LAYOUT_CATALOGUE = {"console": tuple(w for w in _LAYOUT_WIDGETS
+                                         if w != "chips")}
+    LAYOUT_EDGES = ("top", "bottom", "left", "right")
+
+    def popover_changed(self):
+        """The popover opened, moved or closed: here the frame repaints."""
+        self.ws._dirty = True
+
+    def pause_changed(self):
+        """The pause menu opened, moved or closed: here the frame repaints."""
+        self.ws._dirty = True
+
+    def popover_owed(self):
+        """True while the popover still owes a frame; never here."""
+        return False
+
+    def debt_owed(self):
+        """True while a retained buffer still owes the last change and a
+        frame now would pay it; never here."""
+        return False
+
+    def refill_step(self):
+        """A frame with nothing to paint brings a window's buffer up to the
+        glass (the windowed WM); nothing here, no windows."""
+        return False
+
+    def popover_takes_keys(self):
+        """True when the open popover paints its own key presses (the
+        windowed WM in desktop mode); never here."""
+        return False
+
+    def layout_catalogue(self):
+        """The widgets a bar places in the current mode."""
+        return self.LAYOUT_CATALOGUE[self.mode]
 
     def desk_open(self):
-        """True while the MAKE world (the windowed tier's desk) is open --
-        `ws.windowed_chrome` projects this. Always False on this fullscreen
-        tier: there is one world here and it is the fullscreen stack."""
+        """True in DESKTOP mode -- `ws.windowed_chrome` projects this. Always
+        False here: this WM is console mode only."""
         return False
+
+    def full_key(self):
+        """F11: a desk window full screen (`WindowedWM.full_key`); this WM
+        presents everything full screen already."""
+        return False
+
+    def band_span(self):
+        """Where a full-screen window's band lends its zone; this WM has no
+        windows (`WindowedWM.band_span`)."""
+        return None
+
+    def cursor_shape(self):
+        """The pointer's shape where it is not the arrow; this WM resizes
+        nothing (`WindowedWM.cursor_shape`)."""
+        return None
+
+    def floor(self):
+        """The back-stack depth of this mode's root when nothing is beneath
+        it. The home's X shows when the stack is deeper; here the home is
+        the root and the floor, so it never does."""
+        return 1
+
+    def root_kind(self):
+        """The kind `go_home` lands on: this mode's root."""
+        return "launcher"
+
+    def enter_console(self):
+        """The desk's PLAY. Already in console mode here."""
+
+    def leave_console(self):
+        """The home's X. Nothing is beneath the home here."""
+
+    def is_parked(self, kind):
+        """True when `kind`'s window waits outside the stack for desktop
+        mode; nothing does on this WM."""
+        return False
+
+    def release_cache(self):
+        """The fit check's release (shell_layout §3): free one retained
+        cache a failed fit check can have back -- here the home's retained
+        frame, then the layer a dialog's page is held in. True when
+        something was freed."""
+        return self.ws.launcher_layer.release_retained() or self.ws.release_held()
+
+    def prealloc(self):
+        """An idle frame's mint of what a WM's first modal frame would
+        otherwise mint: nothing on the fullscreen stack."""
+
+    def hand_content_damage(self, cv, x, y, w, h):
+        """The fullscreen content layer painted only (x, y, w, h) of the root
+        this frame (the shelf's drag partial): hand it to a root that presents
+        described frames (`note_damage`, the rotated compositor's). Nothing is
+        handed when anything else drew -- an overlay, the splash, the perf HUD,
+        the visible cursor, an owed LOADING pill -- and the whole frame is
+        presented."""
+        nd = getattr(cv, "note_damage", None)
+        if nd is not None and self.content_alone():
+            nd(x, y, w, h)
+
+    def content_alone(self, besides=0):
+        """Whether the fullscreen content layer is all this frame draws: no
+        overlay, splash, perf HUD, visible cursor or owed LOADING pill over
+        it -- but the overlays of the sig bits `besides`, which the caller
+        accounts for itself."""
+        if self._cache_sig & ~besides:
+            return False
+        ws = self.ws
+        return not (getattr(ws.pointer, "visible", False)
+                    or (ws._deferred and ws._toast_owed()))
 
     def keys_to_cart(self):
         """Console hook (#44 redraw gate): this frame's keys are consumed by a
@@ -145,7 +285,7 @@ class FullscreenStackWM:
         fullscreen tier a running cart on top owns ALL input; the crash panel
         (cart_error) hands keys back to the system chrome."""
         ws = self.ws
-        return (self._stack[-1] == "desktop" and ws.cart_error is None
+        return (self.stack.top() == "desktop" and ws.cart_error is None
                 and (ws._update is not None or ws._draw is not None))
 
     def goto(self, kind):
@@ -155,19 +295,20 @@ class FullscreenStackWM:
         everything above); a new `kind` is a PUSH. This reproduces the old flat-string
         `screen` transitions exactly at the top (golden-identical) while giving the
         stack an honest launcher-root -> ... -> top shape."""
-        st = self._stack
-        if st and st[-1] == kind:
-            return                      # already on top -- no navigation, no gen bump
-        idx = None
-        for i in range(len(st) - 1, -1, -1):
-            if st[i] == kind:
-                idx = i
-                break
-        if idx is not None:
-            del st[idx + 1:]            # RETURN: pop back to the already-open screen
-        else:
-            st.append(kind)             # PUSH: a newly-spawned screen
-        self._on_nav()
+        if self.stack.goto(kind) != STAYED:   # STAYED: no navigation, no gen bump
+            self._on_nav()
+
+    def bring_forward(self, kind):
+        """Show the window process `kind` already has, in front, with no
+        navigation: True when this WM did (a desk's window), False when it
+        has none to show (every fullscreen tier)."""
+        return False
+
+    def activate(self, kind):
+        """Open process `kind` the way a launcher does: its window brought
+        forward where it has one, else `goto`."""
+        if not self.bring_forward(kind):
+            self.goto(kind)
 
     def _on_nav(self):
         """A real top-of-stack change happened: bump the content generation so the
@@ -205,22 +346,20 @@ class FullscreenStackWM:
         sig = 0
         if ws._splash_until is not None:
             sig |= 1
-        if ws.show_fps and self._stack[-1] == "desktop":
+        if ws.show_fps and self.stack.top() == "desktop":
             sig |= 2
-        # The three achievement overlays are flat kernel deadlines the objects
-        # push at event time (#209 landing B) -- plain int reads, no call into
-        # ach/ach_ui from the hot path, one clock read for all three.
+        # The unlock banner is a flat kernel deadline the unlock pushes at
+        # event time (#209 landing B) -- a plain int read, no call into ach
+        # from the hot path.
         now = _ticks_ms()
-        if ws._confetti_until and _ticks_diff(ws._confetti_until, now) > 0:
-            sig |= 4
-        if ws.show_achievements:
-            sig |= 8
-        if ws._egg_until and _ticks_diff(ws._egg_until, now) > 0:
-            sig |= 16
         if ws._toast_until and _ticks_diff(ws._toast_until, now) > 0:
             sig |= 32
         if ws.sysmenu.open:
             sig |= 64
+        if ws.pause.open:
+            sig |= 512
+        if ws.confirm.open:
+            sig |= 1024
         if ws._about:
             sig |= 128
         if ws.notice_active():
@@ -249,7 +388,7 @@ class FullscreenStackWM:
         self._rebuild(self.ws._content_layer(), sig)
 
     def _overlay_layers(self, sig):
-        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 4..256,
+        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 32..1024,
         cursor appended last so it sits above everything). One copy: a new
         overlay layer (like #53's notice banner) registers here ONCE and
         reaches the windowed WM's stack too -- the two _rebuild bodies used to
@@ -257,18 +396,16 @@ class FullscreenStackWM:
         the caller may extend. The GAME-domain perf HUD (bit 2) is per-tier."""
         ws = self.ws
         overlays = []
-        if sig & 4:
-            overlays.append(ws._confetti_layer)
-        if sig & 8:
-            overlays.append(ws._ach_layer)
-        if sig & 16:
-            overlays.append(ws._egg_layer)
         if sig & 32:
             overlays.append(ws._toast_layer)
         if sig & 64:
             overlays.append(ws._sysmenu_layer)
+        if sig & 512:
+            overlays.append(ws._pause_layer)
         if sig & 128:
             overlays.append(ws._about_layer)
+        if sig & 1024:
+            overlays.append(ws._confirm_layer)
         if sig & 256:
             overlays.append(ws._notice_layer)
         overlays.append(ws._cursor_layer)

@@ -10,8 +10,9 @@
    "js": "JSON.stringify({at:'live',fn:typeof window.__moyStart,link:window.__moyLink||null})"
   },
   {
-   "note": "Nothing is touched. The idle heartbeat is what finds the goodbye, which is also the case the reader was in. The wait is long because the twin's --close-after counts from when IT started, which is before the browser has even booted -- so the window has to open between the two probes, not before the first.",
-   "wait": 26000
+   "note": "Nothing is touched. The idle heartbeat is what finds the goodbye, which is also the case the reader was in. The twin's --close-after counts from when IT started, before the browser even booted, so this polls for the link status to change rather than guessing how long that leaves -- a guess races whatever boot takes.",
+   "waitFor": "window.__moyLink || null",
+   "timeout": 40000
   },
   {
    "js": "JSON.stringify({at:'bye',shown:getComputedStyle(document.getElementById('lnk')).display,cls:document.getElementById('lnk').className,head:document.getElementById('lnkh').textContent,body:document.getElementById('lnkb').textContent,link:window.__moyLink||null})"

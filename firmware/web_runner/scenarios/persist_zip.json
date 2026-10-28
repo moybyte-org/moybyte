@@ -2,7 +2,7 @@
   {"note": "export the cart, then feed the very bytes back -- the round trip", "wait": 2500},
   {"note": "catch the zip instead of downloading it (a headless download proves nothing)"},
   {"js": "window.__zip=null,pzDownload=function(n,b){window.__zip={n:n,b:b};},'patched'"},
-  {"js": "document.getElementById('pzc').value='new_cart.moy',document.getElementById('pze').click(),'clicked'"},
+  {"js": "document.getElementById('pzc').value='local.new_cart.moy',document.getElementById('pze').click(),'clicked'"},
   {"wait": 1500},
   {"js": "window.__zip ? window.__zip.n+' '+window.__zip.b.byteLength : 'NO ZIP'"},
   {"note": "the zip's own bytes back in: a real unzip, a real collision-safe name"},

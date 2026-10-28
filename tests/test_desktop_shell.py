@@ -1,12 +1,13 @@
 """Tests for the Picotron/TIC-80-style desktop shell (#28): a wallpaper backdrop,
 a cart icon grid, a top status strip, and a Settings app with
-FUNCTIONAL, persisted wallpaper switching.
+FUNCTIONAL wallpaper switching that lands in the theme.
 
 All driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver: mouse == touch, arrows == trackball), so these assert host==device
 behavior, not a host-only path."""
 
 from pathlib import Path
+from ws_helpers import shelf, select_on_home, settings_back  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -14,13 +15,21 @@ import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" prob
 
 
 from ws_helpers import build_ws as _ws
+import pytest
+from ws_helpers import boot_on_fixture, use_theme
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch, store=True)
 
 
 def _open_game(ws):
     """Select a seeded GAME cart and run it.
 
-    A game is fullscreen and exits on hold-BACKSPACE; an app runs WITH the bar and
-    exits via its X. So a test about the game exit contract has to say "a game" --
+    A game is fullscreen and is left through the pause menu's Quit; an app runs WITH
+    the bar and exits via its X. So a test about the game exit contract has to say "a game" --
     `sel = 0` resolves to whichever cart sorts FIRST, which is alphabetical and
     changes whenever a cart is added or renamed."""
     for i, it in enumerate(ws.launcher.items):
@@ -40,7 +49,6 @@ def test_tap_schedules_the_run_behind_a_loading_paint(tmp_path):
     So after one frame() the STATE has transitioned but the CANVAS still
     holds the acknowledgment frame -- exactly what the panel retains on
     glass during the 1-2s device stall."""
-    from runtime.chrome import NAMES
     ws = _ws(tmp_path)
     for i, it in enumerate(ws.launcher.items):
         if it.get("path") and it.get("type") == "game":
@@ -55,14 +63,14 @@ def test_tap_schedules_the_run_behind_a_loading_paint(tmp_path):
     ws.frame(1 / 30)
     assert ws.screen == "desktop"        # the frame tail ran it
     assert not ws._deferred
-    # The canvas still shows the acknowledgment frame: the toast's border.
-    fs = ws.look.effective_font_scale()
-    tw = (len("LOADING...") * 8 + 16) * fs
-    tx = (ws.sys_canvas.w - tw) // 2
-    assert ws.sys_canvas.pix(tx, 24 * fs) == NAMES["light_grey"]
-    # The NEXT frame paints the transitioned world (no toast left).
+    # The canvas still shows the acknowledgment frame: the pill, flat, over
+    # the card being opened (GAPS 51), saying what opens.
+    x, y, w, h = ws._loading_rect
+    assert w > 0 and h > 0
+    pill = [ws.sys_canvas.pix(x + w // 2, y + h // 2 + dy) for dy in (-1, 0, 1)]
+    # The NEXT frame paints the transitioned world (no pill left).
     ws.frame(1 / 30)
-    assert ws.sys_canvas.pix(tx, 24 * fs) != NAMES["light_grey"]
+    assert [ws.sys_canvas.pix(x + w // 2, y + h // 2 + dy) for dy in (-1, 0, 1)] != pill
 
 
 # -- the desktop renders without error -------------------------------------
@@ -90,8 +98,8 @@ def test_wallpaper_backdrop_is_drawn_behind_icons(tmp_path):
 
 
 def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
-    """With zero wallpaper carts installed, the built-in solid fills are still
-    selectable so there is always a valid backdrop (zero-cart fallback)."""
+    """With zero wallpaper carts installed the desk is the theme's `desktop`
+    fill, so there is always a backdrop (zero-cart fallback)."""
     from runtime import console, moy_carts, host_app, host_canvas
     # A store with only a non-wallpaper cart.
     carts_dir = str(tmp_path / "carts")
@@ -104,11 +112,16 @@ def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
     ws.make_api = host_app.make_api
     ws.carts_store = moy_carts
     ws.carts_root = carts_dir
-    ws.pointer = console.Pointer(320, 240)
+    ws.set_pointer(console.Pointer(320, 240))
     ws.load_system()
+    use_theme(ws, "night", "dark")
     assert ws.look.wallpaper_carts() == []                     # none installed
-    assert ws.look.wallpaper_id.startswith("fill:")            # fell back to a solid fill
+    assert ws.look.wallpaper_id is None                        # the theme's fill
     ws.frame(1 / 30)                                       # renders without error
+    cv = ws.sys_canvas                    # the keycaps blend: read the word
+    o = 2 * (175 * cv._stride + 4)
+    word = cv._buf[o] | (cv._buf[o + 1] << 8)
+    assert word == cv._wire[ws.theme_colors["desktop"]]
 
 
 # -- wallpaper switching is functional + persists --------------------------
@@ -119,6 +132,7 @@ def test_wallpaper_switch_changes_backdrop(tmp_path):
     assert len(opts) >= 2
     before = ws.look.wallpaper_id
     ws.look.cycle_wallpaper(1)
+    ws.look.tick(0.0)                          # a change shows at the next frame
     assert ws.look.wallpaper_id != before
     assert ws.look.wallpaper_id in opts
 
@@ -128,9 +142,13 @@ def test_wallpaper_choice_persists_across_reboot(tmp_path):
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     ws.look.cycle_wallpaper(1)
+    ws.look.tick(0.0)
+    ws.look.commit()
     chosen = ws.look.wallpaper_id
-    # It lands in system.json beside the carts dir.
-    assert moy_carts.load_system(carts_dir).get("wallpaper") == chosen
+    # It lands in the theme, `custom` (docs/theming_2026-09.md D6), and the
+    # theme row names it; there is no wallpaper row.
+    stored = moy_carts.load_system(carts_dir)
+    assert stored.get("theme") == "custom" and "wallpaper" not in stored
     # A fresh boot restores it.
     ws2 = host_app.build_workstation(carts_dir)
     assert ws2.look.wallpaper_id == chosen
@@ -157,7 +175,10 @@ def test_status_strip_menu_opens_settings_from_home(tmp_path):
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     assert ws.sysmenu.open
-    drv.press("down"); drv.frame(1 / 30)                    # SEARCH -> SETTINGS
+    for _ in range(len(ws.sysmenu.items)):                  # past the card's group
+        if ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS":
+            break
+        drv.press("down"); drv.frame(1 / 30); drv.frame(1 / 30)
     drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)    # activate SETTINGS
     assert ws.screen == "settings"
 
@@ -174,65 +195,239 @@ def test_settings_appearance_row_opens_the_one_picker(tmp_path):
     rows = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
     assert "wallpaper" not in rows and "theme" not in rows   # the old steppers are gone
     ws.settings_layer.set_msel = rows.index("appearance")
-    drv.press("right")                                    # any step activates an action row
+    drv.frame(1 / 30)
+    drv.press("a")                                        # A opens the link
     drv.frame(1 / 30)
     assert ws.wm.top_kind() == "appearance"
     before = ws.look.wallpaper_id
-    drv.press("down")          # the catalog column: down applies the next item
+    drv.frame(1 / 30)          # its first frame: focus opens on the theme in use
+    ws.appearance_app._ui.focus("Wallpaper")
     drv.frame(1 / 30)
+    for key in ("a", "right", "a"):   # WALLPAPER's page, the next card, use it
+        drv.press(key)
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)      # released: the next press is an edge of its own
+    drv.frame(1 / 30)          # the change shows at the frame after the pick
     assert ws.look.wallpaper_id != before
-    assert moy_carts.load_system(carts_dir).get("wallpaper") == ws.look.wallpaper_id
+    ws.look.commit()
+    assert moy_carts.load_system(carts_dir).get("theme") == "custom"
 
 
 def test_settings_back_returns_home(tmp_path):
-    from runtime import console as C
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    drv.click(C._SET_BACK[0] + 2, C._SET_BACK[1] + 2)
+    drv.frame(1 / 30)
+    settings_back(ws, drv)
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
 
-def test_in_cart_menu_opens_settings_and_back_resumes_cart(tmp_path):
-    """Settings must be reachable from inside a running cart via the in-cart bar's ≡
-    system menu (#52), and Back must RESUME the cart, not strand you at the launcher
-    (#46). The in-cart menu prepends a CART group, so SETTINGS is two rows down."""
-    from runtime import console as C
+def _settings_page(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    assert ws.screen == "desktop"
-    ws.cart_error = "boom"         # Stage 5 retired pause: the in-cart bar is CRASH chrome
-    ws._dirty = True
-    drv.click(C._SYSMENU_BTN[0] + 2, C._SYSMENU_BTN[1] + 2)   # ≡ on the in-cart bar
-    drv.frame(1 / 30)
-    assert ws.sysmenu.open
-    for _ in range(2):                                       # RESTART -> DELETE -> SETTINGS
-        drv.press("down"); drv.frame(1 / 30); drv.frame(1 / 30)
-    drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)     # activate SETTINGS
-    assert ws.screen == "settings"
-    drv.click(C._SET_BACK[0] + 2, C._SET_BACK[1] + 2)        # Back resumes the cart...
-    drv.frame(1 / 30)
-    assert ws.screen == "desktop"                             # ...not the launcher
-
-
-def test_settings_mock_rows_do_not_touch_carts(tmp_path):
-    """The mocked rows (volume/brightness/name) step cosmetic values in the system
-    dict but are clearly not wired to a backend yet. (The old "theme" mock-choice is
-    now the functional EDIT ICONS action -- see test_icon_theme.)"""
-    ws = _ws(tmp_path)
     ws.open_settings()
-    rows = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
-    ws.settings_layer.set_msel = rows.index("volume")
-    ws.settings_layer.settings_adjust(1)
-    assert 0 <= ws.system.get("volume") <= 5
-    ws.settings_layer.set_msel = rows.index("name")
-    ws.settings_layer.settings_adjust(1)
-    assert ws.system.get("name") in ws.settings_layer._MOCK_NAMES
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    return ws, drv
+
+
+def _focus_row(ws, drv, key):
+    sl = ws.settings_layer
+    sl.set_msel = sl.row_index(key)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+
+
+def test_settings_shows_volume_brightness_and_name(tmp_path):
+    """Volume and Brightness are sliders and Name a text field, in General
+    after Text size (owner call 2026-10-17: the rows stay on the page)."""
+    ws, drv = _settings_page(tmp_path)
+    sl = ws.settings_layer
+    general = dict(sl._grouped())["General"]
+    keys = [r[0] for r in general]
+    assert keys.index("font_scale") < keys.index("volume") < keys.index("brightness") \
+        < keys.index("name")
+    assert sl._kinds["Volume"] == sl._kinds["Brightness"] == "slider"
+    assert sl._kinds["Name"] == "field"
+
+
+def test_the_volume_row_sets_the_console_level(tmp_path):
+    """Volume is the console's level: a step on its slider stores it in
+    system.json and reaches the audio kernel's level, the one every session
+    mixes at (`audio_session.console_volume`)."""
+    from runtime import audio_session
+    if audio_session.native() is None:
+        import pytest
+        pytest.skip("no native audio module on this host")
+    was = audio_session.console_volume()
+    try:
+        ws, drv = _settings_page(tmp_path)
+        _focus_row(ws, drv, "volume")
+        assert ws.settings_layer._focused == "Volume"
+        start = ws.settings_layer.level("volume")[0]
+        drv.press("left")
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+        assert ws.system.get("volume") == start - 1
+        assert audio_session.console_volume() == start - 1
+        ws.settings_layer.step_row("volume", -99)      # held in its range
+        assert ws.system.get("volume") == 0 == audio_session.console_volume()
+        ws.settings_layer.step_row("volume", 99)
+        assert ws.system.get("volume") == 7 == audio_session.console_volume()
+    finally:
+        audio_session.console_volume(was)
+
+
+def test_volume_is_a_stepped_bar_with_the_muted_icon_at_zero(tmp_path, monkeypatch):
+    """Volume and Brightness draw as the power popover's seven-step gauge (a
+    `steps` slider: no number), the theme's muted-speaker icon before Volume
+    at 0 (owner, 2026-10-19: Brightness is Volume's bar)."""
+    from runtime import settings_layer as S
+    ws, drv = _settings_page(tmp_path)
+    icons, sliders = [], {}
+    real_icon, real_slider = S._ui.icon, S._ui.slider
+
+    def icon(name, o=None):
+        icons.append((name, real_icon(name, o)))
+        return icons[-1][1]
+
+    def slider(label, v, lo, hi, o=None):
+        sliders[label] = (lo, hi, o)
+        return real_slider(label, v, lo, hi, o)
+    monkeypatch.setattr(S._ui, "icon", icon)
+    monkeypatch.setattr(S._ui, "slider", slider)
+    ws.settings_layer.set_level("volume", 0)
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert ("mute", True) in icons, "the theme's set draws the muted speaker"
+    assert sliders["Volume"] == (0, 7, {"steps": True})
+    assert sliders["Brightness"] == (0, 7, {"steps": True})
+    ws.settings_layer.set_level("volume", 4)
+    icons.clear()
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert not any(n == "mute" for n, _ok in icons)
+
+
+def test_brightness_and_name_are_stored(tmp_path):
+    """Brightness and Name apply nothing yet, but what they are set to is in
+    system.json: a fresh session reads it back. Name is typed (the keyboard
+    in text mode while it holds focus), Brightness stepped in 0..7."""
+    from runtime import host_app
+    ws, drv = _settings_page(tmp_path)
+    sl = ws.settings_layer
+    sl.step_row("brightness", 1)
+    assert ws.system.get("brightness") == 5
+    sl.step_row("brightness", 9)
+    assert ws.system.get("brightness") == 7
+    _type_name(ws, drv, "Kit")
+    _focus_row(ws, drv, "volume")
+    assert not ws.input.text_mode
+    again = host_app.build_workstation(str(tmp_path / "carts"))
+    assert again.system.get("brightness") == 7
+    assert again.system.get("name") == "Kit"
+
+
+def _type_name(ws, drv, text):
+    """Focus the Name row and type `text` into it, a frame pair a key."""
+    _focus_row(ws, drv, "name")
+    assert ws.settings_layer._focused == "Name" and ws.input.text_mode
+    for ch in text:
+        drv.type_char(ord(ch))
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)
+
+
+def _stored_name(tmp_path):
+    from runtime import moy_carts
+    return moy_carts.load_system(str(tmp_path / "carts")).get("name")
+
+
+def test_the_name_is_stored_on_enter_not_a_keystroke_at_a_time(tmp_path):
+    """Typing the Name writes nothing (each key was an SD write on the
+    T-Deck); Enter stores it, once."""
+    ws, drv = _settings_page(tmp_path)
+    writes = []
+    real = ws.system.set
+    ws.system.set = lambda k, v: (writes.append(k), real(k, v))
+    _type_name(ws, drv, "Kit")
+    assert "name" not in writes and _stored_name(tmp_path) is None
+    drv.type_char(13)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert writes.count("name") == 1
+    assert _stored_name(tmp_path) == "Kit"
+    assert ws.settings_layer._focused != "Name", "Enter is Done: focus leaves the field"
+
+
+def test_focus_leaving_the_name_field_stores_it(tmp_path):
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Rae")
+    assert _stored_name(tmp_path) is None
+    drv.press("up")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.settings_layer._focused != "Name"
+    assert _stored_name(tmp_path) == "Rae"
+    assert not ws.input.text_mode
+
+
+def test_back_stores_a_name_being_typed(tmp_path):
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Sam")
+    settings_back(ws, drv)
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"
+    assert _stored_name(tmp_path) == "Sam"
+    assert not ws.input.text_mode
+
+
+def test_back_into_a_cart_stores_the_name_and_hands_back_button_mode(tmp_path):
+    """Settings opened over a running cart returns to it: the Name typed is
+    stored and the keyboard is back in button mode for the game."""
+    ws, drv = _settings_page(tmp_path)
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    ws.open()
+    drv.frame(1 / 30)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    _type_name(ws, drv, "Kit")
+    ws._exit_settings()
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"
+    assert _stored_name(tmp_path) == "Kit"
+    assert not ws.input.text_mode
+
+
+def test_an_app_switch_stores_a_name_being_typed(tmp_path):
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Kit")
+    assert ws.open_app(ws._apps_by_id["appearance"])
+    assert _stored_name(tmp_path) == "Kit"
+    drv.frame(1 / 30)
+    assert not ws.input.text_mode
+
+
+def test_going_home_stores_a_name_being_typed(tmp_path):
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Kit")
+    ws.go_home()
+    assert _stored_name(tmp_path) == "Kit"
+
+
+def test_a_reboot_stores_a_name_being_typed_first(tmp_path):
+    """The system menu's Reboot resets the board through its hook: the Name
+    being typed is in system.json before it runs."""
+    ws, drv = _settings_page(tmp_path)
+    _type_name(ws, drv, "Kit")
+    seen = []
+    ws.reboot_hook = lambda: seen.append(_stored_name(tmp_path))
+    ws.menu_ui._menu_reboot()
+    assert seen == ["Kit"]
 
 
 # -- the pre-2026-07 bottom dock is gone -----------------------------------
@@ -241,7 +436,7 @@ def test_the_pre_2026_07_bottom_dock_is_gone(tmp_path):
     """The six-slot HOME/CODE/DRAW/MAP/RUN/SET bottom dock was DELETED on
     2026-08-21. It was the pre-2026-07 tool-switcher shell's navigation, and its
     slots still routed into that shell's entry points (ws._open_menu /
-    ws._open_paint); the 2026-07 shell navigates by the zoned bar, the Make tile
+    ws._open_paint); the 2026-07 shell navigates by the zoned bar, the Make tab
     and the context-X. The launcher had dropped it in #46, the windowed WM
     suppressed it, so `settings_layer` was its last caller -- which is why it was
     still visible on the fullscreen tiers (T-Deck/Guition) and nowhere else.
@@ -284,39 +479,34 @@ def test_settings_panel_keeps_the_freed_dock_band_as_its_bottom_inset(tmp_path):
         ws = host_app.build_workstation(str(tmp_path / ("c%dx%d" % size)),
                                         sys_size=size, font_scale=fs)
         lay = ws.layout
-        assert not lay._base
         px, py, pw, ph = lay.settings_panel
         assert py == lay.status_h + 2 * fs                 # top inset, unchanged
         assert py + ph == lay.h - 24 * fs                  # the KEPT dock band
 
 
-def test_launcher_home_no_longer_manages_carts(tmp_path):
-    """Cart management (create/copy/delete) moved off the launcher home into the
-    Editor picker's zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the
-    picker is for MANAGING projects) -- a tap at the old NEW/DUP/DEL bar positions
-    on the launcher screen is now a no-op (see tests/test_top_bar.py for the
-    picker's DUP/DEL coverage)."""
-    from runtime import host_app
+def test_only_make_manages_carts(tmp_path):
+    """Cart management (create/copy/delete) is the Make tab's
+    (docs/shell_layout_2026-10.md §12); the tabs that play carry none of it
+    but an empty Mine's "+ New"."""
     ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    n0 = len(ws.launcher.items)
-    for rect in (ws.layout.new_btn, ws.layout.dup_btn, ws.layout.del_btn):
-        x, y, w, h = rect
-        drv.click(x + w // 2, y + h // 2)
-        drv.frame(1 / 30)
-    assert len(ws.launcher.items) == n0
+    for tab in ("games", "mine", "apps"):
+        ws.set_home_tab(tab)
+        real = [i for i, it in enumerate(ws.launcher.items) if it.get("path")]
+        ws.launcher.sel = real[0] if real else 0
+        verbs = ws.launcher_layer.zone_verbs()
+        assert not {"copy", "delete"} & set(verbs), tab
 
 
 def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):
     """The launcher's LOCKED primary action (spec shell_ux_v1.md): tapping ANY cart's
     icon tile RUNS it (screen == "desktop"), caller = the launcher home (so its QUIT pops
     home). There is no maker/player tap_mode: authoring is a separate Editor app reached
-    via the Make tile -> project-picker, never a tap on the launcher grid."""
+    via the Make tab, never a tap on the launcher grid."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    # Slot 0 is the pinned Make tile; the first real cart is slot 1.
-    real = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    real = next(i for i, it in enumerate(ws.launcher.items)
+                if it.get("path") and it.get("type") == "game")
     x, y, w, h = ws.launcher.tile_rect(real)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
@@ -324,19 +514,41 @@ def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):
     assert ws.cart is not None and ws.cart.get("path")  # ...a real cart loaded
 
 
-def test_tapping_the_make_tile_opens_the_project_picker(tmp_path):
-    """The pinned "Make" tile (launcher slot 0, distinctive) opens the Editor's
-    PROJECT-PICKER (screen == "picker"), NOT a running cart (spec shell_ux_v1.md)."""
+def test_the_make_tabs_new_card_starts_a_project(tmp_path):
+    """The home's Make tab (a tap on its chip) puts "+ New" at the centre; a
+    tap on it makes a game and opens it in the Editor, NOT a running cart."""
     from runtime import host_app
-    from runtime.launcher_layer import MAKE_TILE_TYPE
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    assert ws.launcher.items[0].get("type") == MAKE_TILE_TYPE   # pinned first, a pseudo tile
-    assert ws.launcher.items[0].get("path") is None             # not a real cart
+    r = next(r for tid, r, _on in ws.launcher_layer.tab_rects() if tid == "make")
+    drv.click(r[0] + r[2] // 2, r[1] + r[3] // 2)
+    drv.frame(1 / 30)
+    assert ws.launcher.tab == "make"
+    assert ws.launcher.selected().get("type") == "new"
     x, y, w, h = ws.launcher.tile_rect(0)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
-    assert ws.screen == "picker"                # opened the project-picker, did NOT run
+    assert ws.screen == "menu"                  # a new project, in the Editor
+
+
+def test_play_reaches_the_tabbed_home_in_console_mode(tmp_path):
+    """The desk's PLAY enters console mode, whose root is the home with its
+    four tabs (docs/shell_layout_2026-10.md §3, §12)."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
+                                    windowed=True, panel_diagonal_in=7.0)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    assert ws.screen == "desk"
+    ws.open_library()                           # the desk's PLAY
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.screen == "launcher"
+    assert [tid for tid, _r, _on in ws.launcher_layer.tab_rects()] == [
+        "games", "mine", "apps", "make"]
+    assert ws.launcher.tab == "games"
+    assert all(c.get("type") != "app" for c in ws.launcher.items)
+    ws.set_home_tab("apps")
+    assert "Calc" in [c.get("title") for c in ws.launcher.items]
 
 
 _ONE_CARD = [{"key": "c", "type": "choice", "choices": ["red", "blue"], "card": "C IS {value}"}]
@@ -346,7 +558,7 @@ def test_launcher_tap_runs_every_cart_type(tmp_path):
     """The locked model: a launcher tap RUNS the cart regardless of manifest TYPE -- a
     tool, an app, AND a game all land on the running cart (screen == "desktop"), never the
     Editor. The retired interim `tap_mode` used to send a game to the Editor on a maker tap;
-    that type-dispatch is gone -- tap always runs, edit is the Make tile's job."""
+    that type-dispatch is gone -- tap always runs, edit is the Make tab's job."""
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
@@ -357,9 +569,8 @@ def test_launcher_tap_runs_every_cart_type(tmp_path):
         moy_carts.create(title, carts_dir, src="def _draw():\n    cls(1)\n",
                          type=ctype, edit=edit)
         ws.go_home()
-        ws.launcher.set_items(moy_carts.scan(carts_dir))
-        ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                               if it.get("title") == title)
+        ws.launcher.set_items(shelf(carts_dir))
+        select_on_home(ws, title)
         ws.launch_selected()                        # the launcher tap
         assert ws.screen == "desktop", title        # RAN, never the Editor
         assert ws.cart is not None and ws.cart.get("type") == ctype
@@ -369,7 +580,7 @@ def test_new_template_is_an_editable_game(tmp_path):
     """A kid's brand-new cart (moy_carts.NEW_TEMPLATE) is `type=="game"` WITH "Make it
     mine" cards -- the project the "+ New" picker tile creates + opens in the Editor (spec
     shell_ux_v1.md). It's a real game project, not a wallpaper. (Tapping it in the launcher
-    RUNS it like any cart; editing is reached via the Make tile -> picker.)"""
+    RUNS it like any cart; editing is reached via the Make tab.)"""
     import os
     from runtime import moy_carts
     carts_dir = str(tmp_path / "carts")
@@ -450,11 +661,11 @@ def test_launcher_draws_the_strip_and_no_in_cart_bar(tmp_path):
     assert seen["strip"] >= 1         # the status strip IS drawn (still present)
 
 
-def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
+def test_a_game_shows_no_bar_playing_or_stopped(tmp_path):
     """Stage 5 retired the #71 pause frame: while a cart PLAYS the game owns the full
-    canvas with NO chrome at all -- the in-cart tool bar (EDIT/PAINT/MAP/HOME) appears
-    ONLY on a CRASH, so the fix-it tools stay reachable. (Exit while playing a game is the
-    hold-BACKSPACE gesture, not a bar tap.)"""
+    canvas with NO chrome at all, and a run that stops shows the stop card, the
+    pause card's sibling (docs/look_2026-10.md step 33), never a bar. (Exit while
+    playing a game is the pause menu's Quit, not a bar tap.)"""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -464,70 +675,70 @@ def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
     seen = _spy_draw(ws)
     drv.frame(1 / 30)
     assert seen["incart"] == 0        # playing: NO bar over the game
-    ws.cart_error = "boom"            # a crash brings up the in-cart tool buttons
+    ws.cart_error = "boom"            # a crash brings up the stop card
     ws._dirty = True
     drv.frame(1 / 30)
-    assert seen["incart"] >= 1        # crashed: the in-cart tool buttons ARE drawn
+    drv.frame(1 / 30)
+    assert seen["incart"] == 0
+    assert ws.pause.open and ws.pause.stopped
 
 
-def test_single_backspace_tap_reaches_the_cart_never_exits(tmp_path):
-    """Stage 5 exit model (spec Section 9): the #71 pause frame is GONE -- a running cart
-    owns the full 320x240 and BACKSPACE ("home") is a plain key/button the cart reads. A
-    single quick tap keeps playing (it is not the hold-to-exit gesture); the cart keeps
-    ticking (no freeze), proving there is no pause state left."""
+def test_backspace_reaches_the_cart_as_a_plain_key_and_never_exits(tmp_path):
+    """BACKSPACE is no console key (owner call 2026-10-18): a running game owns it as a
+    typed 0x08 its key() reads, a tap or a long run of them keeps it playing, and no
+    button (`home` included, held for seconds) ends the run -- there is no hold gesture
+    and no pause state."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
+    _open_game(ws)
     assert ws.screen == "desktop"
     calls = [0]
+    keys = []
     orig_upd = ws._update
 
     def counting(dt):
         calls[0] += 1
+        keys.append(ws.input.last_key)
         if orig_upd:
             orig_upd(dt)
     ws._update = counting
 
     drv.frame(1 / 30)
     assert calls[0] == 1               # playing: the cart ticks
-    drv.press("home")                  # ONE quick BACKSPACE tap...
+    drv.type_char(0x08)                # a BACKSPACE...
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"      # ...does NOT exit (no pause, no quit)
-    drv.frame(1 / 30)
-    assert calls[0] > 1                # ...and the cart keeps ticking (never froze)
+    assert 0x08 in keys                # ...reaches the cart as a key
+    assert ws.screen == "desktop"
+    drv.hold("home", True)             # even a button held far past the old 700 ms
+    for _ in range(90):
+        drv.frame(1 / 30)
+    drv.hold("home", False)
+    assert ws.screen == "desktop" and calls[0] > 60   # ...ends nothing; the cart never froze
 
 
-def test_hold_backspace_exits_to_caller(tmp_path, monkeypatch):
-    """Stage 5: a sustained BACKSPACE hold (~700ms) pops the running cart back to its
-    caller -- the launcher root here. Wired to input.held("home") + a threshold on the
-    raw-matrix held-key stream; the host maps a held BACKSPACE to a held "home". Drive
-    the module clock (monkeypatch auto-restores) so the 700ms elapses deterministically."""
+def test_the_pause_menus_quit_exits_a_game_to_the_caller(tmp_path):
+    """The way out of a fullscreen game is the console's key: it opens the pause menu
+    (`Workstation.system_key`, tests/test_system_key.py) and Quit pops to the caller --
+    the launcher root here."""
     from runtime import host_app
-    from runtime import player as P
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    _open_game(ws)                     # the exit gesture under test is the GAME one
+    _open_game(ws)
     assert ws.screen == "desktop"
-    clock = [10_000]
-    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])   # deterministic hold timer
-    drv.hold("home", True)             # begin holding BACKSPACE ...
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"      # ... not yet (no time elapsed)
-    clock[0] += P._HOLD_EXIT_MS - 1
+    drv.system_key()
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"      # ... still short of the threshold
-    clock[0] += 2                      # now past _HOLD_EXIT_MS since the first held frame
+    assert ws.pause.open and ws.screen == "desktop"
+    ws.pause.choose(3)                 # Quit
     drv.frame(1 / 30)
-    assert ws.screen == "launcher"     # hold complete -> popped to the caller
-    drv.hold("home", False)
+    assert ws.screen == "launcher"
 
 
 def test_triple_backspace_tap_does_not_exit_reaches_the_cart(tmp_path):
     """The triple-tap BACKSPACE exit alias was DROPPED (owner tested on device): quick
     BACKSPACE taps are plain 'home' key edges the running GAME reads -- even three of them
-    in a row do NOT exit. Hold-BACKSPACE (test above) is the only game exit now; tools/apps
+    in a row do NOT exit. The pause menu's Quit (test above) is the game exit; tools/apps
     exit via their bar X (Part 4). Each drv.press is a one-frame 'home' edge the cart sees;
     the cart keeps ticking and stays on the desktop."""
     from runtime import host_app
@@ -550,41 +761,6 @@ def test_triple_backspace_tap_does_not_exit_reaches_the_cart(tmp_path):
     assert calls[0] > 0                # ...and the cart kept ticking (never froze/popped)
 
 
-def test_hold_progress_toast_is_transient(tmp_path, monkeypatch):
-    """The hold-to-exit affordance is TRANSIENT (spec Section 12): _draw_hold_progress
-    fires ONLY on frames where BACKSPACE is being held, NEVER on a plain play frame --
-    so no chrome is re-added to the sacred play path. Spy the toast draw across a
-    playing frame, held frames, and the released frame."""
-    from runtime import host_app
-    from runtime import player as P
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    _open_game(ws)                     # the hold toast is the GAME exit affordance
-    assert ws.screen == "desktop"
-    calls = [0]
-    orig = ws.player._draw_hold_progress
-
-    def counting():
-        calls[0] += 1
-        return orig()
-    ws.player._draw_hold_progress = counting
-    clock = [1000]
-    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])
-    drv.frame(1 / 30)                      # playing, no hold
-    assert calls[0] == 0                   # NO toast on a plain play frame
-    drv.hold("home", True)
-    drv.frame(1 / 30)                      # holding -> toast drawn
-    clock[0] += 100                        # still short of _HOLD_EXIT_MS
-    drv.frame(1 / 30)                      # still holding -> toast again
-    assert calls[0] >= 2
-    held_calls = calls[0]
-    assert ws.screen == "desktop"          # short hold: has NOT exited yet
-    drv.hold("home", False)
-    drv.frame(1 / 30)                      # released -> toast gone
-    drv.frame(1 / 30)
-    assert calls[0] == held_calls          # no more toast draws once the hold ends
-
-
 # -- Part 4: a TOOL/APP runs WITH a minimal bar so it's EXITABLE ------------
 
 def _make_tool_ws(tmp_path):
@@ -594,22 +770,19 @@ def _make_tool_ws(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
     moy_carts.create("MyTool", carts_dir, src="def _draw():\n    cls(1)\n", type="tool")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "MyTool")
+    ws.launcher.set_items(shelf(carts_dir))
+    select_on_home(ws, "MyTool")
     ws.launch_selected()                             # a tool always LAUNCHES (Part 2)
     assert ws.screen == "desktop"
     return ws, drv
 
 
-def test_tool_cart_runs_with_a_bar_x_exits_and_backspace_is_not_stolen(tmp_path, monkeypatch):
+def test_tool_cart_runs_with_a_bar_x_exits_and_backspace_is_not_stolen(tmp_path):
     """Part 4 (the one architectural call to confirm on device): a launched TOOL/APP runs
-    WITH a minimal bar so it is EXITABLE -- the right-zone context-X exits it, while
-    BACKSPACE stays a FREE key (never a hold-to-exit) so a text tool's password field keeps
-    its DELETE. (A GAME by contrast stays fullscreen-bar-hidden and exits via
-    hold-BACKSPACE -- the bar-visibility-by-type rule keys on the cart's manifest type.)"""
-    from runtime import player as P
-    from runtime import bar_layer as BL
+    WITH a minimal bar so it is EXITABLE -- the bar's X exits it, while
+    BACKSPACE stays a FREE key so a text tool's password field keeps its DELETE. (A GAME
+    by contrast stays fullscreen-bar-hidden and is left through the pause menu -- the
+    bar-visibility-by-type rule keys on the cart's manifest type.)"""
     ws, drv = _make_tool_ws(tmp_path)
 
     # 1) The minimal bar IS drawn while the tool plays (a game draws NO bar). Spy the
@@ -625,18 +798,16 @@ def test_tool_cart_runs_with_a_bar_x_exits_and_backspace_is_not_stolen(tmp_path,
     assert "tool" in where_seen                       # the tool bar shows during play
 
     # 2) BACKSPACE is NOT stolen as an exit: a sustained hold-"home" does NOT pop the tool
-    #    (for a game this would exit; a tool keeps BACKSPACE free for its text fields).
-    clock = [10_000]
-    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])
+    #    (a tool keeps BACKSPACE free for its text fields).
     drv.hold("home", True)
-    drv.frame(1 / 30)
-    clock[0] += P._HOLD_EXIT_MS + 100                  # well past a game's hold threshold
-    drv.frame(1 / 30)
+    for _ in range(60):
+        drv.frame(1 / 30)
     drv.hold("home", False)
     assert ws.screen == "desktop"                      # the tool did NOT exit on BACKSPACE
 
-    # 3) The context-X EXITS the tool (tap the right-zone X on the 320x240 game canvas).
-    x, y, w, h = BL._ZONE_CONTEXT_X
+    # 3) The X EXITS the tool (the `close` cell the night fixture's layout places).
+    bar, (x, y, w, h) = ws.bar_layer.cell("tool", "close")
+    x, y = x + bar[1][0], y + bar[1][1]
     drv.touch(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     drv.touch_up()
@@ -664,12 +835,11 @@ def test_tool_bar_does_not_lend_a_zone_during_play(tmp_path):
     assert calls == [], "the tool bar must not lend an editor zone during play: %r" % calls
 
 
-# -- a cart can end ITSELF via the quit() verb (the exit a text-mode cart must provide) --
+# -- a cart can end ITSELF via the quit() verb --
 
 def test_cart_quit_verb_pops_to_the_launcher(tmp_path):
     """A cart calls quit() (make_api) to END itself and return to the launcher -- the
-    self-exit a text-mode cart MUST provide (once it textmode(True)s, hold-BACKSPACE can't
-    reach it: BACKSPACE is a typed delete, no keyboard autorepeat). The verb is ADDITIVE to
+    self-exit a cart may offer (the console's own is the pause menu). The verb is ADDITIVE to
     the frozen kid API and works for ANY cart type; the Player honors the flag AFTER the
     cart's _update runs (player.tick) and pops to the run caller (ws._exit_to_caller)."""
     from runtime import host_app, moy_carts
@@ -686,9 +856,8 @@ def test_cart_quit_verb_pops_to_the_launcher(tmp_path):
            "        quit()\n"
            "def _draw():\n    cls(1)\n")
     moy_carts.create("Quitter", carts_dir, src=src, type="game")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "Quitter")
+    ws.launcher.set_items(shelf(carts_dir))
+    select_on_home(ws, "Quitter")
     ws.open()                                # PLAY it
     assert ws.screen == "desktop"
     drv.frame(1 / 30)                        # frame 1: _n -> 1, quit() not yet called
@@ -708,9 +877,8 @@ def test_cart_quit_flag_is_cleared_for_the_next_cart(tmp_path):
     moy_carts.create("Plain", carts_dir,
                      src="def _update(dt):\n    pass\ndef _draw():\n    cls(2)\n",
                      type="game")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "Plain")
+    ws.launcher.set_items(shelf(carts_dir))
+    select_on_home(ws, "Plain")
     ws.input.cart_quit = True                # a leftover flag from some prior run
     ws.open()                                # opening must clear it
     assert getattr(ws.input, "cart_quit", False) is False
@@ -721,7 +889,7 @@ def test_cart_quit_flag_is_cleared_for_the_next_cart(tmp_path):
 def test_tap_mode_is_retired_from_settings(tmp_path):
     """The maker/player `tap_mode` is GONE (spec shell_ux_v1.md, the locked model): no
     Settings row, no ws.tap_mode/cycle_tap_mode verbs. A launcher tap always RUNS; the
-    only authoring path is the Make tile -> Editor project-picker."""
+    only authoring path is the Make tab and CHANGE."""
     from runtime import host_app
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
@@ -731,15 +899,14 @@ def test_tap_mode_is_retired_from_settings(tmp_path):
     assert not hasattr(ws, "cycle_tap_mode")
 
 
-def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path, monkeypatch):
+def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path):
     """Stage 3b + Stage 5: PLAY runs the cart recording the EDITOR as the run caller, so
-    the cart's EXIT gesture (hold-BACKSPACE here) returns to the Editor on the tab it left
+    the cart's exit (the pause menu's Quit here) returns to the Editor on the tab it left
     (spec Section 2/Section 6's launch-and-return) -- NOT the launcher home. The launcher
     stays the caller only when IT launched the cart (test above), while the Editor's PLAY
     makes the Editor the second caller, proving the Player is caller-agnostic and the exit
     gesture pops to whoever launched it."""
     from runtime import host_app
-    from runtime import player as P
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     _open_game(ws)                     # launcher launch: caller = the home root
@@ -749,20 +916,18 @@ def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path, monkeypatc
     tab = ws.menu_view
     ws._leave_menu()                   # PLAY: run the cart, caller = the Editor now
     assert ws.screen == "desktop"      # ...still runs fullscreen (transition preserved)
-    clock = [10_000]
-    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])   # deterministic hold timer
-    drv.hold("home", True)             # hold-BACKSPACE = the game exit gesture
-    drv.frame(1 / 30)                  # first held frame (timer starts)
-    clock[0] += P._HOLD_EXIT_MS + 1    # elapse past the hold threshold
     drv.frame(1 / 30)
-    drv.hold("home", False)
+    drv.system_key()                   # the console's key: the pause menu
+    drv.frame(1 / 30)
+    ws.pause.choose(3)                 # Quit
+    drv.frame(1 / 30)
     assert ws.screen == "menu"         # exit returned to the EDITOR...
     assert ws.menu_view == tab         # ...on the very tab it left (not the launcher)
 
 
 def test_settings_opened_during_play_preserves_the_run_caller(tmp_path):
     """Stage-3 review fix, re-checked under the Stage-5 exit model: opening Settings over
-    a cart the EDITOR launched (via PLAY) must NOT clobber _run_caller. _exit_settings
+    a cart the EDITOR launched (via PLAY) must NOT clobber the run's caller. _exit_settings
     now resumes the cart with a bare screen flip (not run(), which would reset the caller
     to the launcher), so a later exit still lands back on the Editor tab, not home."""
     from runtime import host_app
@@ -771,12 +936,12 @@ def test_settings_opened_during_play_preserves_the_run_caller(tmp_path):
     ws.open()                          # launcher launch
     ws._open_menu()                    # into the Editor
     ws._leave_menu()                   # PLAY: caller = the Editor
-    assert ws._run_caller is ws.editor_app
+    assert ws.returns.caller() == "menu"
     ws.open_settings()                 # Settings over the running cart (crash-bar gear)
     assert ws.screen == "settings"
     ws._exit_settings()                # Back resumes the cart...
     assert ws.screen == "desktop"
-    assert ws._run_caller is ws.editor_app   # ...and the caller is PRESERVED (the fix)
+    assert ws.returns.caller() == "menu"   # ...and the caller is PRESERVED (the fix)
     ws._exit_to_caller()               # so the cart's exit still returns to the Editor
     assert ws.screen == "menu"
 
@@ -800,36 +965,6 @@ def test_launcher_grid_runs_to_the_canvas_floor(tmp_path):
     rows_now = (band_now + lay.icon_gap_y) // (lay.icon_h + lay.icon_gap_y)
     rows_old = (band_old + lay.icon_gap_y) // (lay.icon_h + lay.icon_gap_y)
     assert rows_now >= rows_old
-
-
-def test_status_strip_stays_legible_over_an_animated_wallpaper(tmp_path):
-    """#46: the status strip must stay readable on the home screen even with a live
-    animated wallpaper behind it. The strip's backing band fills its rows, so the
-    clock text region is the strip's dark backing, not wallpaper noise, and the
-    wallpaper's own content is pushed below the strip (its safe area)."""
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    # Pick a real animated wallpaper cart (the shipped ones print a title at y=10,
-    # which is inside the strip band -- the bug #46 fixes).
-    cart_wp = [o for o in ws.look.wallpaper_options() if not str(o).startswith("fill:")]
-    assert cart_wp, "expected at least one wallpaper cart seeded"
-    ws.look.select_wallpaper(cart_wp[0], persist=False)
-    drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)
-    sc = ws.sys_canvas
-    lay = ws.layout
-    # The strip backing band is solid black across its rows (legible scrim), so the
-    # top-left clock region is not overwritten by wallpaper art.
-    black = C.NAMES["black"]
-    # Sample a column at the far right of the strip, above the pips' glyph rows but
-    # within the band: the backing fill must be present (not raw wallpaper).
-    assert sc.pix(1, 0) == black
-    # The wallpaper's safe area (just below the strip) is NOT plain black -- the
-    # animated backdrop visibly occupies the rows beneath the strip.
-    below = lay.status_h + 2
-    band = {sc.pix(xx, below) for xx in range(sc.w)}
-    assert len(band) >= 1   # rendered without error; backdrop occupies below-strip rows
 
 
 def test_ota_channel_toggle_persists(tmp_path):
@@ -915,78 +1050,37 @@ def test_splash_draws_without_a_workstation_and_takes_a_progress_bar():
     A P4 spends 17 of the 25 seconds of a full-erase boot seeding cartridges --
     long before a Workstation exists -- and that loading screen has to BE the
     boot logo, or the machine appears to start twice. So draw_splash() takes a
-    canvas, and optionally a bar + status to extend it downward."""
-    from runtime import console
+    canvas, and optionally a track and a status line under the wordmark."""
+    from runtime import console, host_canvas
 
-    class Cv:                       # the drawing surface, recorded
-        w, h = 1024, 600
+    def shot(w, h, **kw):
+        cv = host_canvas.make_system_canvas(w, h)
+        console.draw_splash(cv, **kw)
+        return list(memoryview(cv._buf).cast("H"))
 
-        def __init__(self):
-            self.ops = []
+    def rows(px, w):
+        """The rows Moy's black outline reaches, and the last row drawn."""
+        ground = px[0]
+        black = [i // w for i, v in enumerate(px) if v == 0]
+        inked = [i // w for i, v in enumerate(px) if v != ground]
+        return black[0], inked[-1]
 
-        def cls(self, c):
-            self.ops.append(("cls",))
-
-        def spr(self, img, x, y, s):
-            self.ops.append(("spr", x, y, s))
-
-        def print(self, s, x, y, c, sc=1):
-            self.ops.append(("print", s, x, y))
-
-        def rect(self, x, y, w, h, c):
-            self.ops.append(("rect", x, y, w, h))
-
-        def rectb(self, x, y, w, h, c):
-            self.ops.append(("rectb", x, y, w, h))
-
-    plain = Cv()
-    console.draw_splash(plain)                       # no Workstation anywhere
-    kinds = [o[0] for o in plain.ops]
-    assert kinds.count("spr") == 1                   # Moy
-    assert [o[1] for o in plain.ops if o[0] == "print"] == ["moy", "byte"]
-    assert "rect" not in kinds and "rectb" not in kinds   # no bar when not asked
-
-    loading = Cv()
-    console.draw_splash(loading, frac=0.5, status="loading cartridges 16/32")
-    bar = [o for o in loading.ops if o[0] == "rect"]
-    trough = [o for o in loading.ops if o[0] == "rectb"]
-    assert len(bar) == 1 and len(trough) == 1
-    assert bar[0][3] == trough[0][3] // 2 or bar[0][3] < trough[0][3]  # half-filled
-    assert "loading cartridges 16/32" in [o[1] for o in loading.ops if o[0] == "print"]
-    # The logo stays centred: the bar extends the block DOWNWARD, so Moy sits
-    # higher than it does on the bare splash rather than the bar overlapping it.
-    moy_plain = [o for o in plain.ops if o[0] == "spr"][0]
-    moy_loading = [o for o in loading.ops if o[0] == "spr"][0]
-    assert moy_loading[2] < moy_plain[2]
-
-    full = Cv()
-    console.draw_splash(full, frac=1.0, status="done")
-    # frac=1 fills the trough exactly (its outline is drawn 2px outside), and
-    # anything over 1 is clamped rather than overrunning it.
-    inner = trough[0][3] - 4
-    assert [o for o in full.ops if o[0] == "rect"][0][3] == inner
-    over = Cv()
-    console.draw_splash(over, frac=1.4, status="done")
-    assert [o for o in over.ops if o[0] == "rect"][0][3] == inner
-
-    # The T-Deck's panel is 320x240 and runs the same loading screen, so the
-    # whole block (logo + wordmark + bar + status) has to fit on it, with the
-    # longest status the seeder produces.
-    class Small(Cv):
-        w, h = 320, 240
-
-    tiny = Small()
-    console.draw_splash(tiny, frac=0.5, status="loading cartridges  32/32")
-    for op in tiny.ops:
-        if op[0] == "spr":
-            assert op[2] >= 0
-        elif op[0] in ("rect", "rectb"):
-            assert op[1] >= 0 and op[2] >= 0
-            assert op[1] + op[3] <= tiny.w and op[2] + op[4] <= tiny.h
-        elif op[0] == "print":
-            assert op[2] >= 0 and op[3] >= 0
-            assert op[2] + len(op[1]) * 8 <= tiny.w and op[3] + 8 <= tiny.h
-
+    w, h = 1024, 600
+    plain = shot(w, h)
+    loading = shot(w, h, frac=0.5, status="Setting up carts \u00b7 16 of 32")
+    # The track and the line extend the block DOWNWARD: Moy rises, the
+    # picture reaches lower, and nothing else moves the logo.
+    (top_plain, end_plain), (top_loading, end_loading) = rows(plain, w), rows(loading, w)
+    assert top_loading < top_plain and end_loading > end_plain
+    # frac clamps to the track: over 1 is 1, under 0 is an empty track.
+    assert shot(w, h, frac=1.4, status="Done") == shot(w, h, frac=1.0, status="Done")
+    assert shot(w, h, frac=-1, status="Done") == shot(w, h, frac=0.0, status="Done")
+    assert shot(w, h, frac=0.5, status="Done") != shot(w, h, frac=0.0, status="Done")
+    # The T-Deck's 320x240 runs the same screen: the whole block fits it,
+    # the longest status the seeder produces included.
+    small = shot(320, 240, frac=0.5, status="Setting up carts \u00b7 32 of 32")
+    top, end = rows(small, 320)
+    assert top > 0 and end < 240 - 8
 
 def test_moy_mascot_baked_into_default_icon_sheet():
     """The 'moy' slot is a real, non-blank 16x16 sprite in the baked theme, so the
@@ -1030,19 +1124,19 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
     # cached icon (the heavy payloads are ~0.2ms/KB of GC mark cost EVERY collect);
     # opening rehydrates from the store in place, switching re-slims the previous.
     from runtime import host_app
-    from runtime.cart_manager import _HEAVY_CART_KEYS
+    from runtime.moy_carts import PAYLOADS
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     sd = [c for c in ws.carts.all if c.get("path")]
     assert sd, "seeded carts expected"
     for c in sd:
         assert c.get("lazy") is True
-        for k in _HEAVY_CART_KEYS:
+        for k in PAYLOADS + ("icon_rows",):
             assert k not in c, "%s survived slimming on %s" % (k, c["title"])
     # icons were baked BEFORE slimming, so the grid never needs the sheet back
     assert any(ws.covers.icons.values()), "icon cache should be populated"
     # RUN rehydrates in place and the cart actually plays
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("path"))
+                           if it.get("path") and it.get("type") == "game")
     ws.open()
     a = ws.cart
     assert a.get("lazy") is False and "src" in a
@@ -1075,7 +1169,7 @@ def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):
     assert ws.screen == "desktop"
     assert ws.wm.keys_to_cart()
     ws._dirty = False
-    ws.input._pressed = set()
+    ws.input.clear_edges()
     ws.input.last_key = ord("q")
     ws.handle_input()
     assert not ws._dirty, "cart-bound key dirtied the shell"
@@ -1084,7 +1178,8 @@ def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):
     assert ws.screen == "launcher"
     assert not ws.wm.keys_to_cart()
     ws._dirty = False
-    ws.input._pressed = {"right"}
+    ws.input.set_held("right", True)
+    ws.input.begin_frame()
     ws.handle_input()
     assert ws._dirty, "launcher nav key must repaint"
 
@@ -1152,7 +1247,7 @@ def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path)
         _open_game(ws)
         for _ in range(3):
             drv.frame(1 / 30)
-        ws._exit_to_caller()                      # the hold-BACKSPACE exit
+        ws._exit_to_caller()                      # the pause menu's Quit
         for _ in range(8):
             drv.frame(1 / 30)                     # ...and the repaint burst
     finally:
@@ -1175,7 +1270,7 @@ def test_the_cursor_hides_after_the_idle_window_and_a_move_wakes_it():
     """The trackball cursor auto-hides after `idle_ms` without movement; a
     move wakes it, and a touch placement keeps it hidden (the finger already
     shows where you are). All on an injected clock."""
-    from runtime.widgets import Pointer
+    from runtime.moy_input import Pointer
 
     p = Pointer(320, 240, idle_ms=100)
     p.move(1, 0)
@@ -1188,3 +1283,118 @@ def test_the_cursor_hides_after_the_idle_window_and_a_move_wakes_it():
     assert p.visible
     p.place(5, 5)
     assert not p.visible and (p.x, p.y) == (5, 5)
+
+
+def test_a_pointer_nothing_has_touched_is_dead_until_a_real_event(monkeypatch):
+    """A fresh console parks its pointer at the centre; that is no event, so no
+    hover is owed the row under it. Only a move, a place, a press or a mouse
+    makes it live, and a touched one lingers POINTER_LINGER_MS."""
+    from runtime import moy_input
+    from runtime.moy_input import Pointer, POINTER_LINGER_MS
+
+    now = [1000]
+    monkeypatch.setattr(moy_input, "_ticks_ms", lambda: now[0])
+    p = Pointer(320, 240)
+    assert not p.live() and (p.x, p.y) == (160, 120)
+    now[0] += 10
+    assert not p.live()
+    p.place(5, 5)
+    assert p.live()
+    now[0] += POINTER_LINGER_MS - 1
+    assert p.live()
+    now[0] += 1
+    assert not p.live()
+    q = Pointer(320, 240)
+    q.move(1, 0)
+    assert q.live()
+    r = Pointer(320, 240)
+    r.hovers = True
+    assert r.live()
+    d = Pointer(320, 240)
+    d.down = True
+    assert d.live()
+
+
+# -- the bar widgets' popovers in console mode (docs/shell_layout_2026-10.md §8) --
+
+def test_console_mode_hangs_each_widgets_popover_from_it(tmp_path):
+    """The clock, wifi and battery hang their popover from their widget in
+    console mode too (docs/look_2026-10.md step 33): nothing is pushed, the
+    widget tapped again, B or HOME closes it, the calendar pages by left and
+    right and opens on today, Wi-Fi's lease goes with its card, and the
+    system menu stays the popup it is."""
+    from ws_helpers import build_ws
+    from runtime import host_app
+    ws = build_ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.screen == "launcher"
+    m = ws.sysmenu
+    layer = ws._sysmenu_layer
+
+    class _K:
+        last_key = 0
+
+        def __init__(self, n):
+            self.n = n
+
+        def steps(self, n):
+            return int(bool(self.pressed(n)))
+
+        def pressed(self, n):
+            return n == self.n
+
+    for close in (lambda: ws.widget_tap("clock"), lambda: layer.handle_input(_K("b")),
+                  lambda: layer.handle_input(_K("home"))):
+        ws.widget_tap("clock")
+        drv.frame(1 / 30)
+        assert m.open and m.widget == "clock" and ws.wm.stack.kinds() == ["launcher"]
+        close()
+        drv.frame(1 / 30)
+        assert not m.open
+    ws.widget_tap("clock")
+    cal = m.comp
+    layer.handle_input(_K("right"))
+    assert cal.off == 1
+    layer.handle_input(_K("b"))
+    ws.widget_tap("clock")
+    assert m.comp.off == 0                         # a fresh visit opens on today
+    layer.handle_input(_K("b"))
+
+    ws.widget_tap("wifi")
+    drv.frame(1 / 30)
+    assert m.open and m.widget == "wifi" and ws.screen == "launcher"
+    layer.handle_input(_K("b"))
+    assert ws.leases.holders() == []
+    ws.widget_tap("battery")
+    drv.frame(1 / 30)
+    assert m.open and m.widget == "battery"
+    layer.handle_input(_K("b"))
+    ws.widget_tap("menu")
+    assert ws.sysmenu.open and ws.sysmenu.comp is None
+    ws.widget_tap("menu")
+    assert not ws.sysmenu.open
+
+
+def test_a_surface_switch_closes_the_popover_and_its_lease(tmp_path):
+    """go_home and open_app close an open bar popover, so the surface they
+    switch to is not drawn under it, and the Wi-Fi card's radio lease goes
+    with it -- in both modes."""
+    from ws_helpers import build_desktop_ws, build_ws
+    from runtime import host_app
+    for mode, build in (("console", build_ws), ("desktop", build_desktop_ws)):
+        ws = build(tmp_path / mode)
+        drv = host_app.ConsoleDriver(ws)
+        drv.frame(1 / 30)
+        assert ws.wm.mode == mode
+        m = ws.sysmenu
+        for switch in (ws.go_home,
+                       lambda: ws.open_app(ws._apps_by_id["calc"])):
+            ws.widget_tap("wifi")
+            drv.frame(1 / 30)
+            assert m.open and m.widget == "wifi"
+            assert ws.leases.holders() != []
+            switch()
+            drv.frame(1 / 30)
+            assert not m.open and m.comp is None
+            assert ws.leases.holders() == []

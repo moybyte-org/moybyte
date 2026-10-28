@@ -16,11 +16,10 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
-# The dual-OTA partition table (#53). IDENTICAL to what the fork build's
-# --ota --flash-size=16 --partition-size=5242880 generates, offset for offset:
-# both boards in the field are on this table and a change costs every deployed
-# device a full-erase USB flash. CONFIG_PARTITION_TABLE_CUSTOM_FILENAME
-# resolves relative to ports/esp32, so build.sh stages the CSV there.
+# The dual-OTA partition table (#53): two 7 MiB app slots and the vfs; the
+# CSV carries the arithmetic and what a change to it costs a deployed board.
+# CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves relative to ports/esp32, so
+# build.sh stages the CSV there.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-tdeck.csv"
 
@@ -234,8 +233,7 @@ CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
 # was the difference between "WiFi cannot initialise" and a working web host.
 #
 # Roles are deliberately NOT trimmed: dropping PERIPHERAL/BROADCASTER is likely
-# the biggest remaining win, but MicroPython's modbluetooth compiles its gatts_*
-# half unconditionally, so that is a build risk to test on its own.
+# the biggest remaining win, and a build risk to test on its own.
 #
 # ADV_REPORT_FLOW_CTRL_NUM is 50 because IDF ranges it 50..1000 (default 100):
 # an out-of-range value is REFUSED SILENTLY and the build keeps the default, so
@@ -251,6 +249,16 @@ CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
 CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=8
 CONFIG_BT_CTRL_BLE_MAX_ACT=3
 CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=50
+
+# The kernel's BLE keyboard keeps its bonds in NimBLE's own NVS store
+# (native/moy_input/moy_ble_task.c): the pairing survives a reboot with no file
+# on any volume.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# NimBLE's host task runs the kernel's C callbacks (native/moy_input), not
+# Python: sdkconfig.ble's 6144 was sized for MicroPython's BLE IRQ handlers,
+# and the 2 KB it carries above IDF's default is internal SRAM.
+CONFIG_BT_NIMBLE_TASK_STACK_SIZE=4096
 
 # --- The panel flush done-ISR runs from IRAM, not flash ---------------------
 # IDF's own default is y; MicroPython's boards/sdkconfig.base turns it off in a
@@ -302,3 +310,24 @@ CONFIG_PM_ENABLE=
 # asymmetry being closed, not a new risk appetite. The cost is losing an
 # automatic bad-PSRAM detector at boot.
 CONFIG_SPIRAM_MEMTEST=
+
+# The task watchdog (#160, docs/kernel_spine_2026-10.md section 6). The stock
+# build leaves it on, watching no idle task and only logging a timeout; the
+# kernel subscribes the VM task (native/moy_kernel: the console's frame feeds it
+# once per frame, and the loop leaving it unsubscribes) and a timeout PANICS, so
+# a frame that never ends is a crash record naming what ran. The timeout is
+# above the worst frame this board legitimately takes (the gate reads it with
+# `moy_kernel.watchdog()`).
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
+
+# --- TLS in PSRAM -----------------------------------------------------------
+# mbedtls allocates through the IDF's own hook: with the default, every block
+# under SPIRAM_MALLOC_ALWAYSINTERNAL -- the handshake's bignums, the peer
+# certificate chain, the 4 KB out record -- is internal SRAM, and an HTTPS
+# download (the kernel's updater and Get Carts, native/moy_net/moy_ota.c) took
+# about 22 KB of it at its peak on the Guition S3. External puts all of
+# mbedtls's state in PSRAM; what stays internal is the hardware AES/SHA's DMA
+# bounce, a record at a time. docs/kernel_survival_2026-10.md section 8; the
+# figures are #224's.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

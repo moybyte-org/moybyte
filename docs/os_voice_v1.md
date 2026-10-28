@@ -141,7 +141,7 @@ ALL-CAPS, **three words or fewer**, no terminal punctuation. This is text stampe
 on the machine: verbs, labels, settings rows, tab names, status pills.
 
 ```text
-PLAY   CHANGE   MAKE   SAVED   HOLD TO EXIT   TAP AGAIN TO DELETE   WIFI
+PLAY   CHANGE   MAKE   SAVED   TAP AGAIN TO DELETE   WIFI
 ```
 
 ENGRAVED text never forms a sentence. The moment a string needs a verb *and* an
@@ -267,8 +267,9 @@ Celebration is real but scarce, and it marks *capability*, not compliance:
 
 - **Graduation** (`YOU LEVELED UP TO CODE!`) is the ceiling — full banner, Moy
   delighted, exclamation point. It celebrates becoming *more* of a maker.
-- **Achievements** keep their Title-Case whimsy (`Lift Off!`) and the one-line
-  `ACHIEVEMENT UNLOCKED!` banner. Never for showing up — only for doing.
+- **Achievements** keep their Title-Case whimsy (`Lift Off!`) under the one-line
+  `You found a badge!` banner (a secret's `You found a secret!`). Never for
+  showing up — only for doing, and once: a badge found again says nothing.
 - Ordinary success is calm: `SAVED`, not `SAVED!` — a workshop where every glue
   joint gets applause is exhausting. Confetti-tier moments per Playdate: rare,
   physical, earned.
@@ -280,15 +281,15 @@ word — it's a deliberate mapping that mirrors the product journey:
 
 | Word | When | Example surfaces |
 |---|---|---|
-| **cartridge / cart** | The object on the shelf — the thing you play and own. The universal noun; "everything is a cartridge" is the product | Library, `CART INFO`, `RESTART CART`, crash panel |
-| **project** | The *same* cartridge while open in the Studio — yours, in progress | Picker (`PICK A PROJECT`), `YOUR PROJECTS`, MAKE captions |
+| **cartridge / cart** | The object on the shelf — the thing you play and own. The universal noun; "everything is a cartridge" is the product | Library, Cart info, the system menu's Delete cart, the stop card |
+| **project** | The *same* cartridge while open in the Studio — yours, in progress | the home's Make tab (`N PROJECTS`), `YOUR PROJECTS`, MAKE captions |
 | **game** | Only cartridges that are actually games (attach-to-game flows, `NO GAMES YET`) | Files app verbs |
 | **app** | System tools (Files, Paint, Settings) | Docs, taskbar |
 
 A cartridge *becomes* a project when you open it and goes back to being a
 cartridge on the shelf — that's the See→Play→Open→Change story told through
-nouns. What's forbidden is crossing the map (a picker that says "DELETE CART"
-next to "PICK A PROJECT").
+nouns. What's forbidden is crossing the map (a Make tab that says "DELETE CART"
+next to "N PROJECTS").
 
 Auto-names stay boring on purpose (`New Cart`, `drawings_2`) — boring defaults
 invite renaming; a cute auto-name colonizes the kid's naming moment.
@@ -318,7 +319,7 @@ All rows below are SHIPPED (2026-07-23) unless noted:
 | OTA failure | `UPDATE FAILED` | `Update didn't finish.` / `Nothing changed.` + `B = BACK` (back *is* the retry path — the UPDATE row re-arms the check; no separate retry action exists to promise) |
 | Block editor mixed casing | `MOVED` vs `can't move there` | one register: the whole lowercase status set unified into ENGRAVED (`CAN'T MOVE THERE`, `COPY A BLOCK FIRST`, `TAP A + SPOT`, `BLOCK DELETED`, …); `CODE LOCKED -- can't blockify` → `CODE LOCKED` |
 | Undo split | `NOTHING TO UNDO` vs `nothing to undo` | `NOTHING TO UNDO` everywhere |
-| Delete confirm | `DELETE? TAP AGAIN` | kept — the two-tap *is* our "are you sure" |
+| Delete confirm | `DELETE? TAP AGAIN` | kept where a button arms (Storybook TEAR OUT, Paint's NEW, Get Carts' REMOVE) — the two-tap *is* our "are you sure"; deleting a cart, from every route, asks in a dialog instead: "Delete <title>?", "This can't be undone.", Cancel and Delete (owner, 2026-10-20) |
 | Empty grid | `NOTHING HERE YET` | kept — the "yet" doctrine's model string (block menus' `(nothing here)` joined it) |
 | About panel | `MOYBYTE CONSOLE` | `moybyte` (lowercase wordmark law) |
 | Launcher captions | `Open or create a project` | kept — already correct Spoken register |

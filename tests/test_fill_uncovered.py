@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from runtime import ui as _ui                     # noqa: E402
+from runtime import ui_draw as _ui_draw           # noqa: E402
 from runtime.host_canvas import make_canvas as Canvas   # noqa: E402
 
 
@@ -27,7 +27,7 @@ def _both(inner, outer, w=200, h=120, col=7):
     b = Canvas(w, h)
     b.cls(0)
     b.rect(*(tuple(outer) + (col,)))
-    _ui.fill_uncovered(b, inner, outer, col)
+    _ui_draw.fill_uncovered(b, inner, outer, col)
     return bytes(a._buf), bytes(b._buf)
 
 
@@ -52,10 +52,10 @@ def test_inner_fully_inside_outer_emits_nothing():
     panel = (12, 12, 146, 86)
     old, new = _both(panel, body)
     assert old == new
-    calls = []
-    _ui.fill_uncovered(type("C", (), {"rect": lambda s, *a: calls.append(a)})(),
-                       panel, body, 7)
-    assert calls == [], "a fully covered rect must not draw at all"
+    cv = Canvas(200, 120)
+    cv.gate_counts_reset()
+    _ui_draw.fill_uncovered(cv, panel, body, 7)
+    assert cv.gate_counts()[0] == 0, "a fully covered rect must not draw at all"
 
 
 def test_every_overhang_direction_and_the_disjoint_case():

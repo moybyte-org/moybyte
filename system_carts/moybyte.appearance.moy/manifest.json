@@ -1,0 +1,27 @@
+{
+  "format": "moy-1",
+  "version": 8,
+  "title": "Appearance",
+  "id": "moybyte.appearance",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 280,
+    "app": {
+      "id": "appearance",
+      "entry": "appearance_app:AppearanceAppLayer",
+      "text_mode": false,
+      "order": 20
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "appearance"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

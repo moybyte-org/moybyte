@@ -3,18 +3,22 @@
 Three mechanisms this landing introduced, each of which fails SILENTLY when it
 breaks -- which is why they are pinned directly rather than left to the goldens:
 
-  1. THE DICT IS NEVER REBOUND. `ws.system` is a plain alias of the store's own
-     dict and `load()` mutates it in place. A landing that re-assigned either
-     name would leave every alias in the shell (settings_layer's raw writes, the
+  1. THE STORE IS NEVER REBOUND. `ws.system` is a plain alias of the store's own
+     rows and `load()` replaces them in place. A landing that re-assigned either
+     name would leave every alias in the shell (the settings writers, the
      launcher's favorites read, `app_context.Prefs`, the crash guard) writing
-     into an orphan nobody persists -- and nothing would raise.
+     into an orphan nobody persists -- and nothing would raise. Its one way in
+     is `set`, which persists; a write that fails stays dirty for the next.
   2. THE GUARD IS ONE OBJECT. `StoreHandle` reads the store, the root,
      `can_manage` and the SD session wrapper THROUGH `ws` per call, because none
      of them exists when the collaborator is built.
-  3. THE OVERLAYS ARE PUSHED, NOT POLLED. The achievement objects write their
-     deadlines into flat kernel fields at event time; the per-frame gates read
-     those ints and must not call into `ach` / `ach_ui` at all.
+  3. THE BANNER IS PUSHED, NOT POLLED. An unlock writes its deadline into a
+     flat kernel field at event time; the per-frame gates read that int and
+     must not call into `ach` / `ach_ui` at all.
 """
+
+import sys
+import types
 
 import pytest
 
@@ -28,10 +32,8 @@ def _ws(tmp_path):
     """A console with every self-animating source stilled, so `_animating` is
     answering about the overlays and nothing else."""
     ws = build_ws(tmp_path)
-    ws.look.select_wallpaper("fill:dark_blue", persist=False)
+    ws.look.select_wallpaper(None, persist=False)
     ws._toast_until = 0
-    ws._egg_until = 0
-    ws._confetti_until = 0
     ws._splash_until = None
     return ws
 
@@ -61,60 +63,82 @@ class _AngryStore:
     def load_achievements(self, root):
         raise OSError("card gone")
 
-    def save_achievements(self, ids, root):
+    def save_achievements(self, doc, root):
         raise OSError("card gone")
 
 
 # ---------------------------------------------------------------------------
-# 1. the dict identity
+# 1. the store identity
 # ---------------------------------------------------------------------------
 
-def test_ws_system_is_the_stores_own_dict(tmp_path):
+def test_ws_system_is_the_stores_own_rows(tmp_path):
     ws = _ws(tmp_path)
-    assert ws.system is ws.prefs.settings
+    assert ws.system is ws.prefs.rows
 
 
-def test_a_load_mutates_that_dict_in_place(tmp_path):
+def test_a_load_replaces_the_rows_in_place(tmp_path):
     """The mechanism the whole landing rests on: `load_system()` must not rebind
     either name, or every alias in the shell goes stale at boot."""
     ws = _ws(tmp_path)
-    alias = ws.system                       # what settings_layer/Prefs/the guard hold
+    alias = ws.system                       # what the writers/Prefs/the guard hold
     moy_carts.save_system({"font_scale": 1, "marker": "from-the-card"},
                           ws.carts_root)
     ws.load_system()
     assert ws.system is alias
-    assert ws.prefs.settings is alias
-    assert alias["marker"] == "from-the-card"
+    assert ws.prefs.rows is alias
+    assert alias.get("marker") == "from-the-card"
 
 
 def test_a_load_replaces_what_was_there(tmp_path):
     """Not a merge: a key the card does not carry is GONE after the load, which
     is what "the file is the state" means."""
     ws = _ws(tmp_path)
-    ws.system["stale"] = 1
+    ws.system.set("stale", 1)
     moy_carts.save_system({"marker": 2}, ws.carts_root)
     ws.load_system()
-    assert "stale" not in ws.system
-    assert ws.system["marker"] == 2
+    assert ws.system.text("stale") is None
+    assert ws.system.get("marker") == 2
+    assert not ws.system.dirty()            # what was read is what is on the card
 
 
 def test_a_load_with_no_store_keeps_what_is_there(tmp_path):
     """An embedded boot has no card to read: the in-RAM settings survive rather
     than being wiped by a load that could not happen."""
     ws = _ws(tmp_path)
-    ws.system["chosen"] = "here"
+    ws.system.set("chosen", "here")
     ws.carts_store = None
     ws.prefs.load()
-    assert ws.system["chosen"] == "here"
+    assert ws.system.get("chosen") == "here"
 
 
 def test_a_store_that_raises_leaves_the_settings_empty_and_boots(tmp_path):
     ws = _ws(tmp_path)
-    ws.system["stale"] = 1
+    ws.system.set("stale", 1)
     ws.carts_store = _AngryStore()
     ws.prefs.load()                         # must not raise
-    assert ws.system == {}
-    assert ws.system is ws.prefs.settings
+    assert ws.system.keys() == []
+    assert ws.system is ws.prefs.rows
+
+
+def test_a_safe_start_ignores_the_file_and_leaves_it_alone(tmp_path, monkeypatch):
+    """SAFE on the kernel's recovery screen (native/moy_kernel): the console
+    starts on the defaults -- no wallpaper, nothing the settings would run --
+    and writes nothing back, so the next ordinary boot reads the owner's file
+    as it was."""
+    kernel = types.ModuleType("moy_kernel")
+    kernel.mode = lambda: "safe"
+    monkeypatch.setitem(sys.modules, "moy_kernel", kernel)
+    assert system_store.safe_mode()
+    ws = _ws(tmp_path)
+    ws.prefs.safe = system_store.safe_mode()
+    moy_carts.save_system({"wallpaper": "aurora", "marker": 1}, ws.carts_root)
+    ws.load_system()
+    assert ws.system.get("marker") is None and ws.system.get("wallpaper") is None
+    assert ws.look.wallpaper_id is None            # no wallpaper cart runs
+    ws.system.set("theme", "berry")
+    assert moy_carts.load_system(ws.carts_root) == {"wallpaper": "aurora", "marker": 1}
+    kernel.mode = lambda: "start"
+    assert not system_store.safe_mode()
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +154,7 @@ def test_the_crash_guard_sees_a_reload(tmp_path):
     ws = _ws(tmp_path)
     assert ws.app_guard.arm("some_app") is True
     assert ws.app_guard.strikes("some_app") == 1
+    ws.app_guard.release()                          # that run ended unhealed
     # What a board that died twice holding this app comes back to.
     moy_carts.save_system(
         {crash_guard.KEY: {"strikes": {"some_app": 2}, "open": None}},
@@ -141,7 +166,7 @@ def test_the_crash_guard_sees_a_reload(tmp_path):
 
 
 def test_the_crash_guard_persists_through_the_store(tmp_path):
-    """`arm` writes a strike to system.json through `prefs.persist` -- so a
+    """`arm` writes a strike to system.json through the rows' save hook -- so a
     board that DIED holding one still knows on the next boot."""
     ws = _ws(tmp_path)
     ws.app_guard.arm("some_app")
@@ -185,10 +210,10 @@ def test_every_store_touch_runs_inside_one_sd_session(tmp_path):
         return inner(fn)
 
     ws._with_sd = counting
-    ws.prefs.persist()
+    ws.system.set("k", 1)
     ws.prefs.load()
     ws.prefs.load_achievements()
-    ws.prefs.save_achievements(["first_open"])
+    ws.prefs.save_achievements(ws.ach.doc())
     assert len(sessions) == 4
 
 
@@ -199,25 +224,32 @@ def test_a_read_only_console_attempts_no_write(tmp_path):
     attempts = []
     ws._with_sd = lambda fn: attempts.append(1)
     ws.can_manage = False
-    ws.prefs.persist()
-    ws.prefs.save_achievements(["first_open"])
+    ws.system.set("k", 1)
+    ws.prefs.save_achievements(ws.ach.doc())
     assert attempts == []
+    assert ws.system.get("k") == 1 and not ws.system.dirty()   # not a failure
 
 
 def test_a_failing_write_is_not_fatal(tmp_path):
     ws = _ws(tmp_path)
+    good = ws.carts_store
     ws.carts_store = _AngryStore()
-    ws.system["theme"] = "berry"
-    ws.prefs.persist()                      # must not raise
-    assert ws.system["theme"] == "berry"    # and the choice still holds in RAM
+    ws.system.set("theme", "berry")         # must not raise
+    assert ws.system.get("theme") == "berry"    # and the choice still holds in RAM
+    assert ws.system.dirty()                # ...as a write that has not landed
+    ws.carts_store = good
+    ws.system.set("name", "Zed")            # the next write carries it
+    assert not ws.system.dirty()
+    assert moy_carts.load_system(ws.carts_root)["theme"] == "berry"
 
 
 def test_achievements_round_trip_through_the_handle(tmp_path):
     ws = _ws(tmp_path)
-    ws.prefs.save_achievements(["first_open", "konami"])
-    assert ws.prefs.load_achievements() == ["first_open", "konami"]
+    doc = {"found": {"first_open": 20261012, "konami": 0}, "count": {}}
+    ws.prefs.save_achievements(doc)
+    assert ws.prefs.load_achievements() == doc
     ws.carts_store = _AngryStore()
-    assert ws.prefs.load_achievements() == []      # a bad card is [], never a raise
+    assert ws.prefs.load_achievements() is None    # a bad card is none, never a raise
 
 
 # ---------------------------------------------------------------------------
@@ -246,74 +278,66 @@ def test_a_second_unlock_replaces_the_banner_and_extends_it(tmp_path):
     assert ws._toast_until >= first
 
 
-def test_the_three_eggs_arm_the_popup_deadline(tmp_path):
+def test_the_three_eggs_arm_the_banner_once(tmp_path):
+    """An egg's first find is its secret's unlock banner; a second shows
+    nothing."""
     for trigger in ("clock", "secret", "konami"):
         ws = _ws(tmp_path)
         au = ws.ach_ui
-        if trigger == "clock":
-            for _ in range(au._CLOCK_TAP_GOAL):
-                au._tap_clock()
-        elif trigger == "secret":
-            for _ in range(au._SECRET_TAP_GOAL):
-                au._tap_secret_door()
-        else:
-            for name in au._KONAMI:
-                au._konami_step(name)
-        assert au.egg_msg is not None, trigger
-        assert ws._egg_until, trigger
+
+        def run():
+            if trigger == "clock":
+                for _ in range(au._CLOCK_TAP_GOAL):
+                    au._tap_clock()
+            elif trigger == "secret":
+                for _ in range(au._SECRET_TAP_GOAL):
+                    au._tap_secret_door()
+            else:
+                for name in au._KONAMI:
+                    au._konami_step(name)
+        run()
+        assert ws._toast_until and ws.ach.toast[3], trigger     # a secret's banner
         assert ws._animating(DT) is True, trigger
+        ws._toast_until = 0
+        run()
+        assert ws._toast_until == 0, trigger
 
 
-def test_the_konami_code_arms_the_confetti(tmp_path):
+def test_the_banner_animates_until_its_deadline_and_then_stops(tmp_path):
     ws = _ws(tmp_path)
-    for name in ws.ach_ui._KONAMI:
-        ws.ach_ui._konami_step(name)
-    assert ws._confetti_until
-    assert ws.ach.has("konami")
-
-
-@pytest.mark.parametrize("field", ("_toast_until", "_egg_until", "_confetti_until"))
-def test_each_overlay_animates_until_its_deadline_and_then_stops(tmp_path, field):
-    ws = _ws(tmp_path)
-    setattr(ws, field, host_app.console._ticks_ms() + 5000)
+    ws._toast_until = host_app.console._ticks_ms() + 5000
     assert ws._animating(DT) is True
-    setattr(ws, field, host_app.console._ticks_ms() - 1)
+    ws._toast_until = host_app.console._ticks_ms() - 1
     assert ws._animating(DT) is False
 
 
-@pytest.mark.parametrize("field,bit", (("_confetti_until", 4),
-                                       ("_egg_until", 16),
-                                       ("_toast_until", 32)))
-def test_the_wm_gates_each_overlay_layer_on_its_deadline(tmp_path, field, bit):
+def test_the_wm_gates_the_banner_on_its_deadline(tmp_path):
     """The other per-frame reader: the memoized stack's signature. Same field,
     same expiry -- an overlay that animates but never composites (or the
     reverse) is the failure mode of two independent predicates."""
     ws = _ws(tmp_path)
-    layer = {4: ws._confetti_layer, 16: ws._egg_layer, 32: ws._toast_layer}[bit]
-    assert ws.wm._overlay_sig() & bit == 0
+    layer = ws._toast_layer
+    assert ws.wm._overlay_sig() & 32 == 0
     assert layer not in ws.wm.overlay_stack()
-    setattr(ws, field, host_app.console._ticks_ms() + 5000)
-    assert ws.wm._overlay_sig() & bit == bit
+    ws._toast_until = host_app.console._ticks_ms() + 5000
+    assert ws.wm._overlay_sig() & 32 == 32
     assert layer in ws.wm.overlay_stack()
-    setattr(ws, field, host_app.console._ticks_ms() - 1)
-    assert ws.wm._overlay_sig() & bit == 0
+    ws._toast_until = host_app.console._ticks_ms() - 1
+    assert ws.wm._overlay_sig() & 32 == 0
     assert layer not in ws.wm.overlay_stack()
 
 
 def test_the_frame_gates_never_call_into_the_achievement_objects(tmp_path):
     """The point of the flip. Both gates run on EVERY loop iteration of the
-    console's life; before this they asked three objects, across two modules,
-    whether anything was up -- and were told no."""
+    console's life, and must not ask an object whether a banner is up."""
     ws = _ws(tmp_path)
     ws.ach = _Tripwire("ach")
     ws.ach_ui = _Tripwire("ach_ui")
     assert ws._animating(DT) is False
     assert ws.wm._overlay_sig() >= 0
     ws._toast_until = host_app.console._ticks_ms() + 5000
-    ws._egg_until = ws._toast_until
-    ws._confetti_until = ws._toast_until
     assert ws._animating(DT) is True
-    assert ws.wm._overlay_sig() & (4 | 16 | 32) == (4 | 16 | 32)
+    assert ws.wm._overlay_sig() & 32 == 32
 
 
 def test_the_toast_still_draws_while_its_deadline_is_up(tmp_path):

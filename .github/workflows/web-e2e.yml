@@ -14,6 +14,11 @@ name: Web console E2E
 #                                  in one pinned Chrome profile, the .moy zip
 #                                  round trip, and the negative case -- a
 #                                  BOARD-served page must keep nothing locally.
+#   tests/test_web_board_system_e2e.py  a board-served page's theme and badges
+#                                  land in the board twin's system.json and
+#                                  achievements.json, key by key, and a fresh
+#                                  browser comes back on them; a twin without
+#                                  the system root is sent no system batch.
 #   tests/test_web_p8_e2e.py       #194: a .p8 and a .p8.png dropped on the page
 #                                  convert in the wasm VM, RUN, and open in the
 #                                  editor -- plus the refusal case, because an
@@ -32,6 +37,9 @@ name: Web console E2E
 #                                  error panel; Jet Teapot and ESP 88 play; Get
 #                                  Carts installs one by range, no module
 #                                  fetched, and it plays.
+#   tests/test_web_look_parity.py  the console's frames in both arrangements
+#                                  are the host's in the board's, pixel for
+#                                  pixel, under every seed theme.
 #
 # All are gated on MOYBYTE_WEB_E2E, and until this workflow existed nothing set
 # it: the whole browser tier -- the thing a visitor actually touches -- had no
@@ -51,8 +59,9 @@ name: Web console E2E
 # always-on gate and must run on everything), so a filtered job could not live
 # there without either dropping the filter -- a wasm build on every docs push --
 # or re-deriving the changed paths by hand. pages.yml already expresses exactly
-# this shape, and this workflow shares its wasm cache key on purpose: one cache,
-# two consumers, and a warm hit either way.
+# this shape. Its wasm cache is firmware-build.yml's, not pages.yml's master
+# tree's: a dev push saves dev's objects here, which master's tree must not
+# restore.
 on:
   push:
     branches: [master, dev]
@@ -69,6 +78,7 @@ on:
       - "native/**"                 # the C the browser build compiles, its engine included
       - "ports/jet/**"              # the Jet carts the wasm suite builds
       - "tools/jet_cart.py"
+      - "tools/zopfli_gz.py"
       - "tools/wasm_cart.py"
       - "tools/p8_import.py"        # the vendored converter the wasm freezes
       - "tools/p8_lua_port.py"      # ...the vendored PORTER, frozen beside it
@@ -89,6 +99,7 @@ on:
       - "native/**"
       - "ports/jet/**"
       - "tools/jet_cart.py"
+      - "tools/zopfli_gz.py"
       - "tools/wasm_cart.py"
       - "tools/p8_import.py"
       - "tools/p8_lua_port.py"
@@ -160,9 +171,8 @@ jobs:
       - name: Install package
         run: make setup
 
-      # Same path, same key shape as pages.yml -- deliberately THE SAME cache.
-      # emsdk + the micropython clone are ~1.8 GB and keyed on the build script
-      # that pins them, so a run here warms the site build and vice versa.
+      # firmware-build.yml's cache: emsdk + the micropython clone, ~1.8 GB,
+      # keyed on the build script that pins them.
       - name: Cache the wasm toolchain
         uses: actions/cache@v4
         with:
@@ -193,12 +203,22 @@ jobs:
       - name: wasi-sdk for the Jet carts
         run: .venv/bin/python tools/jet_cart.py --toolchain
 
+      # The hosted console's Python side reads user files through moy_ufiles,
+      # whose host library compiles the MicroPython tree's inflater and
+      # compressor; this is the target that fetches that tree (and ci.yml's
+      # step of the same name). Without it the store suites fail on import.
+      - name: Build the desktop MicroPython with the native usermods
+        run: make unix-micropython
+
       - name: Drive the hosted console in real Chrome
         run: |
-          .venv/bin/python -m pytest -rs --junitxml=web-e2e.xml \
+          .venv/bin/python -m pytest -p xdist -n 4 -rs --junitxml=web-e2e.xml \
             tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
+            tests/test_web_board_system_e2e.py \
             tests/test_web_p8_e2e.py tests/test_web_update_e2e.py \
-            tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py
+            tests/test_web_store_e2e.py tests/test_web_wasm_e2e.py \
+            tests/test_web_fonts.py tests/test_web_look_parity.py \
+            tests/test_editor_ladder_icons.py
 
       # pytest was green -- but was it green over anything? The prerequisite
       # skips fail hard above, so this catches the other way of proving nothing:

@@ -51,11 +51,28 @@ moybyte_setup_idf esp32s3 \
   "${REPO_ROOT}/firmware/esp32_p4_wifi6_touch_lcd_7b/.build/esp-idf"
 
 # ---------------------------------------------------------------------------
-# 2) The patch ladder -- EMPTY, and that is this board's shortest description.
-#    Every shared patch is per-board and OPT-IN, and a board that does not call
-#    one declines it HERE IN WRITING (`# DECLINED <fn> <reason>` -- board.toml's
-#    `[[deny]] why=` in the one file that is not board.toml). Silence is neither,
-#    and `tests/test_board_routing.py` fails a build.sh that is silent.
+# 2) The patch ladder -- ONE patch, and that is this board's shortest
+#    description. Every shared patch is per-board and OPT-IN, and a board that
+#    does not call one declines it HERE IN WRITING (`# DECLINED <fn> <reason>`
+#    -- board.toml's `[[deny]] why=` in the one file that is not board.toml).
+#    Silence is neither, and `tests/test_board_routing.py` fails a build.sh
+#    that is silent.
+#
+# Un-static esp_native_code_free_all: the kernel's VM service (native/
+# moy_kernel, the entry here as on every board) frees the native-code arena in
+# its teardown, which links against the port's function.
+moybyte_patch_native_code_free
+#
+# An equal-length slice store moves no tail: every board takes it, and
+# tools/patch_slice_store.py carries the measurement.
+moybyte_patch_slice_store
+# A found extensible built-in enters sys.modules: every board takes it,
+# and tools/patch_import_cache.py carries the measurement.
+moybyte_patch_import_cache
+# DECLINED moybyte_patch_thread_state_tls -- the VM's thread state as a
+# `__thread` variable. Measured on the P4s (RISC-V), where the TLS slot's
+# lookup was ~5% of an Editor frame; on this Xtensa board it is unmeasured,
+# and a board takes it when a profile here shows the same path.
 #
 # DECLINED moybyte_patch_repr_c -- unboxed 30-bit floats (#66). The lever is a
 #    CART INTERPRETER tax: REPR_A boxes every float RESULT in 16 bytes of heap,
@@ -79,6 +96,9 @@ moybyte_setup_idf esp32s3 \
 #    request. Taken the day something here allocates at a rate, with the
 #    rebuild and the boot check that costs.
 #
+# DECLINED moybyte_patch_gc_meters -- gc.pauses() feeds the PERF line and
+#    gc.areas() the dev channel's `heapcaps`; this board runs neither.
+#
 # DECLINED moybyte_patch_psram_retune -- the #169 vendor-gate patch. This is
 #    NOT a "no carts" argument, because the PSRAM is real (8MB octal, and the
 #    heap and the lwIP buffers both live in it). It is a dependency argument:
@@ -94,20 +114,9 @@ moybyte_setup_idf esp32s3 \
 #    2026-08-25 on stock MicroPython, which carries no such patch at all.
 #    These two move together: take the 120MHz profile and take this with it.
 #
-# DECLINED moybyte_patch_native_code_free -- reclaims the @micropython.native
-#    exec arena after a cart compile misses. Nothing here compiles a cart.
-#
-# DECLINED moybyte_patch_espnow_ring_race -- a torn-read race in modespnow's
-#    recv ring (#7). modespnow is not in this image: no netplay, no cart net.*
-#    inbox, and no second console to pair with.
-#
 # DECLINED moybyte_patch_gc_split_reserve -- caps split-heap growth so PSRAM
 #    stays available to the C side (#66). What needs that PSRAM on a console is
 #    the canvas and the layer pool; this board is headless and has neither.
-#
-# DECLINED moybyte_patch_p4_ble_hid_fastpath -- an ESP32-P4 silicon patch: it
-#    edits modbluetooth.c for native/p4/moy_ble_hid, which this ESP32-S3 image
-#    does not compile.
 #
 # DECLINED moybyte_patch_p4_dsi_underrun -- an ESP32-P4 silicon patch (#106):
 #    the MIPI-DSI bridge-underrun ISR. No DSI peripheral, no panel.
@@ -147,7 +156,7 @@ moybyte_setup_idf esp32s3 \
 #    roster arrived over a USB cable, or never -- and the arithmetic is why.
 #    BOTH FORMS WERE BUILT: with the plain `CARTS = [...]` the console boards
 #    freeze, this image is 2,830,672 B of the 2,883,584 B slot and leaves
-#    51 KB -- under the #168 warning floor, one cart from a build failure, in a
+#    51 KB -- under the board's headroom floor, a failed build, in a
 #    slot this board pays for twice. With the same 35 carts as one raw deflate
 #    stream each it is 2,399,232 B and leaves 473 KB, and
 #    `zero_host.seed_carts()` inflates them into an EMPTY store on first boot.
@@ -157,8 +166,11 @@ moybyte_setup_idf esp32s3 \
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
+#    The two speed-test carts stay off: they are the perf ledger's fixtures,
+#    and a store of 352 littlefs blocks has no room for carts a headless
+#    board never runs (owner, 2026-10-23).
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed \
-  "${MODULES_DIR}/carts_data.py"
+  "${MODULES_DIR}/carts_data.py" --skip moybyte.bench,moybyte.bench_lua
 
 #    The OTA identity stamp (#53). `xiao_zero` is the board id inside the signed
 #    manifest -- reserved in board.toml since this board's rebuild and wired for

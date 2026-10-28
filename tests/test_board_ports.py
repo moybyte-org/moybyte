@@ -326,6 +326,41 @@ def test_a_rejected_chunk_names_the_chunk():
     assert "chunk 0" in board.last_error and "SyntaxError" in board.last_error
 
 
+def test_a_rejected_upload_setup_is_sent_again():
+    """A dropped byte turns `setattr(ws, '_up', {})` into a line the board
+    rejects; uploading on would fail every chunk store with `no attribute
+    '_up'`, the false failure two Waveshare P4 passes showed on 2026-10-26."""
+    board, fake = _driver(["PY ERR SyntaxError: invalid syntax", "PY 1", "PY ok",
+                           "PY 1", "PY None"])
+    assert board.pyexec("a = 1\nb = a + 1\n") is True
+    assert sum(1 for s in fake.sent if "setattr(ws, '_up'" in s) == 2
+
+
+def test_a_setup_the_board_never_takes_fails_and_says_so():
+    board, _ = _driver(["PY ERR SyntaxError: invalid syntax"] * 3)
+    assert board.pyexec("a = 1\nb = a + 1\n") is False
+    assert "upload setup failed" in board.last_error
+
+
+def test_a_corrupted_chunk_is_stored_again():
+    board, fake = _driver(["PY 1", "PY ok", "PY ERR SyntaxError: invalid syntax",
+                           "PY 1", "PY None"])
+    assert board.pyexec("a = 1\nb = a + 1\n") is True
+    assert sum(1 for s in fake.sent if "ws._up.__setitem__" in s) == 2
+
+
+def test_an_exec_the_board_resets_under_is_not_resent():
+    """A snippet that trips the task watchdog resets the board; resent, the
+    exec reached the fresh console, which has no `_up`, and the suite read
+    "no attribute '_up'" (the quiet-collect test's fill, 2026-10-27)."""
+    crash = ("E (486556) task_wdt: Task watchdog got triggered.\n"
+             "Rebooting...\nESP-ROM:esp32p4-eco2-20240710\nMoybyte P4 boot")
+    board, fake = _driver(["PY 1", "PY ok", "PY 1", crash, "PY ERR AttributeError"])
+    assert board.pyexec("a = 1\nb = a + 1\n", timeout=0.3) is False
+    assert sum(1 for s in fake.sent if s.startswith("py exec(")) == 1
+    assert board.last_error.startswith("the board reset: E (486556) task_wdt")
+
+
 # -- every tool that drives a board asks WHICH board ---------------------------
 #
 # Ten of them defaulted --port to /dev/ttyACM0 and built the driver with no

@@ -14,6 +14,14 @@ ROOT = Path(__file__).resolve().parent.parent
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 from ws_helpers import device_frames as _dframe  # noqa: E402
+import pytest
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
 
 DT = 1 / 30
 
@@ -289,6 +297,9 @@ def _ws(tmp_path, **kw):
     ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
     ws.launcher.sel = 0
     ws.open()
+    # the opening's "First Steps" banner stays up, so every frame draws, but
+    # draws nothing over the lines these tests read
+    ws.ach.toast = None
     return ws
 
 
@@ -304,9 +315,37 @@ def _tap(drv, x, y):
     drv.frame(DT)
 
 
+@pytest.fixture(autouse=True)
+def _keys_after():
+    """Every test starts and ends on a keyboard's input."""
+    from runtime import ui_draw
+    ui_draw.input_kind("keys")
+    yield
+    ui_draw.input_kind("keys")
+
+
+def _touch(drv):
+    """The last input a touch, which shows the tools toggle and row (D-17)."""
+    from runtime import ui_draw
+    if ui_draw.input_kind() != "touch":
+        ui_draw.input_kind("touch")
+        drv.frame(DT)
+
+
+def _row_tap(ws, drv, id):
+    """Tap the overlay row (or field) whose id is `id`, where it last drew."""
+    b = ws.code_layer._ov_host.box(id)
+    assert b is not None, id
+    _tap(drv, b[0] + b[2] // 2, b[1] + b[3] // 2)
+    drv.touch_up()
+    drv.frame(DT)
+    drv.frame(DT)
+
+
 def _tap_tool(ws, drv, name):
     """Open the tool palette (if needed) and tap a named tool button."""
     cl = ws.code_layer
+    _touch(drv)
     lay = ws.code_layout
     if not cl._tools_open:
         b = cl._tls_btn(lay)
@@ -332,20 +371,23 @@ def test_tools_toggle_and_gutter_button(tmp_path):
     ws = _ws(tmp_path)
     drv = _enter_code(ws)
     cl = ws.code_layer
+    _touch(drv)
     lay = ws.code_layout
     assert not cl._tools_open
-    b = cl._tls_btn(lay)                           # the always-visible TLS toggle
+    b = cl._tls_btn(lay)                           # a touch glass's TLS toggle
     _tap(drv, b[0] + b[2] // 2, b[1] + b[3] // 2)
     assert cl._tools_open
     ws.editor.set_text("\n".join("row %d" % i for i in range(30)))
-    assert cl._gutter_cols(ws.editor) == 0
-    base_cols = ws.editor.COLS
-    _tap_tool(ws, drv, "gutter")
-    assert cl._gutter
+    assert cl._gutter                              # on by default (D-03.1)
     drv.frame(DT)                                  # a draw applies the gutter reflow
     assert cl._gutter_cols(ws.editor) == 3         # 30 lines -> 2 digits + 1 margin
     assert cl._text_x0(lay, ws.editor) > lay.x0    # text shifted right of the gutter
-    assert ws.editor.COLS == base_cols - 3         # visible columns narrowed to fit
+    with_cols = ws.editor.COLS
+    _tap_tool(ws, drv, "gutter")                   # the tools row's toggle hides it
+    assert not cl._gutter
+    drv.frame(DT)
+    assert cl._gutter_cols(ws.editor) == 0
+    assert ws.editor.COLS == with_cols + 3         # the columns come back
 
 
 def test_select_mode_drag_then_copy(tmp_path):
@@ -380,15 +422,18 @@ def test_find_bar_type_and_navigate(tmp_path):
     assert cl._find_q == "alpha"
     assert ws.editor.selected_text() == "alpha"    # incremental match landed
     r0 = (ws.editor.row, ws.editor.col)
-    lay = ws.code_layout
-    nxt = cl._find_btns(lay)["next"]
-    _tap(drv, nxt[0] + nxt[2] // 2, nxt[1] + nxt[3] // 2)   # next match
+    assert cl.find_count() == (1, 3)
+    drv.type_char(0x0D)                            # Enter: the next match
+    drv.frame(DT)
     assert (ws.editor.row, ws.editor.col) != r0
-    prv = cl._find_btns(lay)["prev"]
-    _tap(drv, prv[0] + prv[2] // 2, prv[1] + prv[3] // 2)   # prev goes back
+    assert cl.find_count() == (2, 3)
+    drv.frame(DT)                                  # the key comes up
+    drv.set_mods(2)                                # Shift+Enter goes back
+    drv.type_char(0x0D)
+    drv.frame(DT)
+    drv.set_mods(0)
     assert (ws.editor.row, ws.editor.col) == r0
-    cls_ = cl._find_btns(lay)["close"]
-    _tap(drv, cls_[0] + cls_[2] // 2, cls_[1] + cls_[3] // 2)
+    assert ws.cancel_field()                       # Mic (the T-Deck's cancel) closes it
     assert not cl._find_open
 
 
@@ -420,7 +465,7 @@ def test_sel_mode_then_typing_keeps_first_char(tmp_path):
 def test_find_survives_buffer_shrink_via_cut(tmp_path):
     # Regression (layer repro, used to IndexError in the frame loop): open find on
     # a deep caret, CUT a large span behind the still-open find bar (the tool
-    # palette stays tappable -- _find_tap only consumes taps on the bar's rect),
+    # palette stays tappable -- the find strip only takes taps on itself),
     # then type another query char. The incremental reset used to restore the
     # UNCLAMPED anchor row into the shrunken buffer.
     ws = _ws(tmp_path)
@@ -583,10 +628,8 @@ def test_autocomplete_popup_pick(tmp_path):
     cl = ws.code_layer
     _tap_tool(ws, drv, "auto")                     # open the completion popup
     assert cl._cmp_open and cl._cmp_items[0] == "circ"
-    lay = ws.code_layout
-    _panel, rects = cl._cmp_geom(lay, ws.editor)
-    r = rects[0]
-    _tap(drv, r[0] + r[2] // 2, r[1] + r[3] // 2)  # tap the first candidate
+    drv.frame(DT)
+    _row_tap(ws, drv, "circ\tverb")               # tap the first candidate
     assert not cl._cmp_open
     assert ws.editor.lines == ["circ"]
 
@@ -623,10 +666,8 @@ def test_jump_to_symbol_pick(tmp_path):
     _tap_tool(ws, drv, "goto")
     assert cl._jump_open
     assert [n for n, _ in cl._jump_items] == ["a", "b", "c"]
-    lay = ws.code_layout
-    _panel, rects = cl._jump_geom(lay)
-    r = rects[2]                                   # tap "c" (row 4)
-    _tap(drv, r[0] + r[2] // 2, r[1] + r[3] // 2)
+    drv.frame(DT)
+    _row_tap(ws, drv, "c\tline 5")                # tap "c" (row 4)
     assert not cl._jump_open
     assert ws.editor.row == 4
 
@@ -668,7 +709,7 @@ def _device_ws(tmp_path):
     import sys
     sys.path.insert(0, str(ROOT))
     from runtime import host_app
-    from device.moybyte.input import InputState as DeviceInputState
+    from runtime.moy_input import InputTable as DeviceInputState
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     inp = DeviceInputState()
@@ -734,3 +775,247 @@ def test_the_swallowed_key_still_types_when_it_is_pressed_again(tmp_path):
     src.last_key = 0
     _dframe(ws)
     assert ws.editor.text() == "mz" + before
+
+
+# ---------------------------------------------------------------------------
+# The 2026-10 look (docs/look_2026-10.md step 23): the current line and the fade
+# ---------------------------------------------------------------------------
+
+def _w(cv, x, y):
+    """The RGB565 word at (x, y): a theme's colours are block slots that
+    `pix` does not read back."""
+    i = (y * cv._stride + x) * 2
+    return cv._buf[i] | (cv._buf[i + 1] << 8)
+
+
+def _look_ws(tmp_path, theme, variant="light"):
+    ws = _ws(tmp_path)
+    ws.look.set_theme(theme, persist=False, variant=variant)
+    drv = _enter_code(ws)
+    lay = ws.code_layout
+    ed = ws.editor
+    for _ in range(2):          # the second pass: COLS beside this text's gutter
+        ed.set_text("\n".join(["x = 1", "y" * (ed.COLS + 9), "z" * ed.COLS, "w = 2"]))
+        ed.row, ed.col, ed.top, ed.left = 0, 2, 0, 0
+        drv.frame(DT)
+    return ws, drv, lay, ed
+
+
+def test_the_current_line_wears_the_current_mark_and_the_value_bar(tmp_path):
+    ws, drv, lay, ed = _look_ws(tmp_path, "moy")
+    cv, th = ws.sys_canvas, ws.theme_colors
+    value, surface = cv._col(th["value"]), cv._col(th["surface"])
+    mid = lay.y0 + lay.lh // 2
+    mx = lay.mark_x                              # inside the content inset
+    assert _w(cv, mx, mid) == value and _w(cv, mx + lay.fs, mid) == value
+    assert _w(cv, lay.cx, mid) == surface, "the frame side stays bare"
+    far = lay.x0 + 10 * lay.cell                 # past the short line's text
+    assert _w(cv, far, mid) not in (value, surface), "the current plate"
+    assert _w(cv, far, mid + 3 * lay.lh) == surface, "another line is bare"
+    assert _w(cv, mx, mid + 3 * lay.lh) == surface
+    ed.row = 3
+    drv.frame(DT)
+    assert _w(cv, mx, mid) == surface and _w(cv, mx, mid + 3 * lay.lh) == value
+
+
+def _band(cv, x0, x1, y, h):
+    return [_w(cv, x, yy) for yy in range(y, y + h) for x in range(x0, x1)]
+
+
+def test_a_line_longer_than_the_view_fades_over_its_last_12_pixels(tmp_path):
+    _FADE = 12                                   # the fade's width at the scale (moy_ui_text.c)
+    ws, _drv, lay, ed = _look_ws(tmp_path, "moy")
+    cv = ws.sys_canvas
+    tx0 = ws.code_layer._text_x0(lay, ed)        # past the line-number gutter
+    x1 = tx0 + ed.COLS * lay.cell
+    x0 = x1 - _FADE * lay.fs
+    long_y, fits_y = lay.y0 + lay.lh, lay.y0 + 2 * lay.lh
+    # the same glyphs ("y" and "z" differ, so compare each line with its own
+    # left: the fitting line's band holds its ink, the long line's has none)
+    ink = cv._col(ws.look.content_colors()["code_text"])
+    assert ink in _band(cv, x0, x1, fits_y, lay.lh)
+    assert ink in _band(cv, tx0, tx0 + _FADE, long_y, lay.lh)
+    assert ink not in _band(cv, x0 + _FADE * lay.fs // 3, x1, long_y, lay.lh)
+
+
+def _edges(cv, lay, y, c):
+    """The columns of the line at y whose every row is colour c: a mark's
+    vertical edges (no glyph fills a line's whole height)."""
+    return [x for x in range(lay.cx, lay.cx + lay.cw)
+            if all(_w(cv, x, yy) == c for yy in range(y, y + lay.lh))]
+
+
+def test_a_faded_current_line_wears_one_outline(tmp_path):
+    """Contrast's current line is an outline: a line longer than the view,
+    drawn in two parts around its fade, is still ONE box -- no second edge
+    where the fade starts (design review R2-14)."""
+    for variant in ("dark", "light"):
+        ws, drv, lay, ed = _look_ws(tmp_path / variant, "contrast", variant)
+        ed.row = 1                                   # the line longer than the view
+        drv.frame(DT)
+        cv = ws.sys_canvas
+        y = lay.y0 + lay.lh
+        x = lay.cx + lay.cw - 20                     # inside the fade
+        ring = _w(cv, x, y)                          # the outline's top edge
+        assert ring == _w(cv, x, y + lay.lh - 1), variant
+        assert ring != cv._col(ws.code_layer._t["bg"]), variant
+        caret = (ws.code_layer._text_x0(lay, ed) + (ed.col - ed.left) * lay.cell
+                 - lay.fs)                           # fs wide
+        inner = [x for x in _edges(cv, lay, y, ring)
+                 if lay.mark_x + 2 * lay.fs < x < lay.cx + lay.cw - 4 * lay.fs
+                 and not caret <= x < caret + lay.fs]
+        assert inner == [], (variant, inner)
+
+
+def test_a_disabled_undo_draws_in_the_themes_disabled_ink(tmp_path):
+    """Undo/Redo with nothing to walk take the look's `disabled` role (about
+    3:1), not the bar's dim ink -- which in Contrast is near full ink (design
+    review R2-09)."""
+    from runtime import ui_draw
+    for theme, variant in (("contrast", "dark"), ("contrast", "light"),
+                           ("moy", "dark")):
+        ws, _drv, _lay, _ed = _look_ws(tmp_path / (theme + variant), theme, variant)
+        cv, th = ws.sys_canvas, ws.theme_colors
+        cv.rect(0, 0, 24, 24, th["surface"])
+        ws.editor_app._draw_history_icon(cv, "undo", 4, 4, 16, False)
+        box = set(_band(cv, 0, 24, 0, 24))
+        off = cv._col(ui_draw.disabled_ink(th))
+        assert off != cv._col(th["chrome_ink_dim"]), (theme, variant)
+        assert off in box, (theme, variant)
+        assert cv._col(th["chrome_ink_dim"]) not in box, (theme, variant)
+
+
+def test_the_status_band_is_one_height_and_starts_on_the_code_column(tmp_path):
+    """Under every theme's own `ui` face the status band is one height, in
+    both modes, and its text starts on the code's column, the content inset
+    (design review R2-22, R3-10)."""
+    from runtime import ui_draw
+    bands = set()
+    for theme, variant in (("moy", "light"), ("moy", "dark"), ("blocks", "light"),
+                           ("contrast", "light"), ("contrast", "dark")):
+        ws, _drv, _lay, _ed = _look_ws(tmp_path / (theme + variant), theme, variant)
+        lay = ws.code_layout
+        bx, by, bw, bh = lay.status_band
+        bands.add(bh)
+        pad = ui_draw.metrics("status")[ui_draw.ST_PAD] * lay.fs
+        assert lay.x0 == lay.status_text[0] + pad, (theme, variant)
+        assert bx == lay.cx and lay.x0 - lay.cx >= 8 * lay.fs, (theme, variant)
+        assert by + bh <= lay.sym_y and lay.y0 + lay.rows * lay.lh <= by, (theme, variant)
+    assert len(bands) == 1, bands
+
+
+@pytest.mark.parametrize("variant", ("light", "dark"))
+@pytest.mark.parametrize("seed", ("moy", "blocks", "contrast"))
+def test_the_caret_and_a_find_match_read_on_the_code_surface(tmp_path, seed, variant):
+    """The caret is the accent as an ink, and the current find match's bar
+    the theme's value, each at least 3:1 on the code surface under every
+    seed theme; Contrast Light's own accent is its yellow, 1.27:1 on white
+    (design review R2-02)."""
+    from runtime import ui_draw
+
+    def lum(v):
+        c = ui_draw._C.theme_rgb(v)[0]
+        rgb = ((c >> 11) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31)
+        lin = [x / 255 / 12.92 if x / 255 <= 0.03928 else ((x / 255 + 0.055) / 1.055) ** 2.4
+               for x in rgb]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    _ws, _drv, _lay, _ed = _look_ws(tmp_path, seed, variant)
+    t = _ws.code_layer._tones()
+    bg = lum(t["bg"])
+    for role, v in (("caret", t["caret"]), ("value", _ws.theme_colors["value"])):
+        fg = lum(v)
+        ratio = (max(fg, bg) + 0.05) / (min(fg, bg) + 0.05)
+        assert ratio >= 3.0, (seed, variant, role, round(ratio, 2))
+
+
+def test_the_open_tabs_icon_takes_the_current_marks_ink(tmp_path):
+    """On the labelled ladder the open tab's icon takes the ink its name takes
+    on the current mark (Moy's `current.ink`), the other tabs the chrome's."""
+    from runtime import ui_draw
+    ws, _drv, _lay, _ed = _look_ws(tmp_path, "moy", "light")
+    cv, th = ws.sys_canvas, ws.theme_colors
+    app = ws.editor_app
+    rect = (0, 0, cv.w, 20)
+    assert not app._compact(rect), "the labelled ladder fits the strip"
+    cur = ui_draw.current_ink(cv, th)
+    assert cur is not None and cur != th["chrome_ink"]
+    seen = {}
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, r, ink, c=None: (seen.setdefault(kind, ink),
+                                                 real(kind, r, ink, c))[1]
+    try:
+        app.draw_zone(cv, rect)
+    finally:
+        ws.draw_icon = real
+    assert seen["code"] == cur, seen
+    assert seen["blocks"] == th["chrome_ink"], seen
+
+
+def test_the_labelled_ladder_keeps_8px_from_a_pill_to_the_next_icon(tmp_path):
+    """Each labelled chip ends at least 8px (at the zone's scale) before the
+    next chip's icon, so the open tab's pill never crowds its neighbour; the
+    draw and the tap share the rects (design review R2-08)."""
+    from runtime import ui_draw
+    ws, _drv, _lay, _ed = _look_ws(tmp_path, "moy", "light")
+    app = ws.editor_app
+    rect = (0, 0, 700, 20)                       # a desk window's lent zone
+    tabs_area, _play = app._zone_parts(rect)
+    rects = app._shelf_rects(tabs_area)
+    fs = app._zone_scale()
+    pad = ui_draw.metrics("tab")[ui_draw.TAB_PAD] * fs
+    assert len(rects) == len(app._chips()) and rects[0][2], "the whole ladder, labelled"
+    for (_a, r, _on), (_b, nxt, _on2) in zip(rects, rects[1:]):
+        assert nxt[0] + pad - (r[0] + r[2]) >= 8 * fs, (r, nxt)
+    for tid, r, _on in rects:
+        assert app.zone_tap(r[0] + r[2] // 2, r[1] + r[3] // 2, rect) is not False, tid
+
+
+def test_a_labelled_chips_icon_ink_starts_at_its_pad(tmp_path):
+    """On the labelled ladder each icon's ink starts at its chip's pad, as
+    the name's ends at it, so the open tab's pill is padded alike both
+    sides (the review kit's pill-pad check)."""
+    from runtime import iconsets, ui_draw
+    ws, _drv, _lay, _ed = _look_ws(tmp_path, "moy", "light")
+    app = ws.editor_app
+    rect = (0, 0, 700, 20)
+    tabs_area, _play = app._zone_parts(rect)
+    chips = dict((tid, r) for tid, r, _on in app._shelf_rects(tabs_area))
+    pad = (ui_draw.metrics("tab")[ui_draw.TAB_PAD] * app._zone_scale()
+           + app._shelf_layout(tabs_area)[1])     # the pill's grown pad (D-03.3)
+    drawn = []
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, r, ink, c=None: (drawn.append((kind, r)),
+                                                 real(kind, r, ink, c))[1]
+    try:
+        app.draw_zone(ws.sys_canvas, rect)
+    finally:
+        ws.draw_icon = real
+    spec = ws.icon_spec()
+    got = dict(drawn)
+    for tid, kind in (("code", "code"), ("blocks", "blocks")):
+        r = got[kind]
+        a = iconsets.ink_span(kind, r[2], r[3], spec)[0]
+        assert r[0] + a == chips[tid][0] + pad, (tid, r, a, chips[tid])
+
+
+def test_the_symbol_keys_follow_the_last_input(tmp_path):
+    """D-17 (2026-10-19): a keyboard hides the symbol keys and the code takes
+    their rows; touch brings them back. The tools toggle stands on the status
+    line, never over the code."""
+    from runtime import ui_draw
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ui_draw.input_kind("keys")
+    drv.frame(DT)
+    lay = ws.code_layout
+    assert not lay.symbols and lay.sym_h == 0
+    keys_rows = lay.rows
+    t = ws.code_layer._tls_btn(lay)
+    assert t[1] >= lay.status_band[1] and t[1] + t[3] <= lay.status_band[1] + lay.status_band[3]
+    ui_draw.input_kind("touch")
+    drv.frame(DT)
+    lay = ws.code_layout
+    assert lay.symbols and lay.sym_h > 0 and lay.rows < keys_rows
+    assert ws.editor.ROWS == lay.rows
+    ui_draw.input_kind("keys")

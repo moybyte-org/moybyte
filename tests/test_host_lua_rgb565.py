@@ -20,7 +20,7 @@ Skipped without a C compiler, like the other host bindings.
 
 import pytest
 
-from runtime import host_canvas, lua_binding as lb, lua_host
+from runtime import host_canvas, lua_binding as lb
 from runtime.editors_sheet import SpriteSheet
 
 host_canvas.install()
@@ -52,9 +52,9 @@ class _Tilemap:
 
 def _run(canvas, lua, sheet=None, tilemap=None, flags=None, globals_=()):
     """Draw `lua` into `canvas` through the binding, as the console would."""
-    buf, wire, indexed = lua_host.canvas_target(canvas)
+    buf = canvas._buf
     r = lb.HostLuaRun(buf, canvas.w, canvas.h, sheet, tilemap,
-                      wire=wire, indexed=indexed, flags=flags)
+                      wire=canvas._wire, flags=flags)
     try:
         assert r.load([("function _draw() %s end" % lua, "@cart")]) is None
         assert r.tick(1 / 30.0) is None
@@ -230,56 +230,15 @@ def test_the_canvas_wire_table_is_what_a_draw_resolves_through():
     assert bytes(c._buf) != bytes(bytearray(8 * 4 * 2))
 
 
-# -- the indexed lane, which no tier ships any more ---------------------------
-#
-# `HostLuaRun(indexed=True)` keeps a 565 SHADOW with an identity wire table and
-# narrows the frame back out on each tick. It existed for `runtime/canvas.py`,
-# the host's deleted indexed raster; the binding still offers it, so it is still
-# driven -- DIRECTLY, over a bare bytearray, rather than through a canvas class,
-# because there is no longer a canvas class that speaks it. Retiring the lane is
-# a separate call (it lives in moyhost_lua.c too); until then this is what keeps
-# it from rotting.
-
-class _IndexCanvas:
-    """The minimum `lua_host.canvas_target` calls indexed: `.buf`, `w`, `h`."""
-
-    def __init__(self, w, h):
-        self.w, self.h = w, h
-        self.buf = bytearray(w * h)
-
-
-def test_an_indexed_canvas_draws_the_same_picture_one_byte_wide():
-    """The bridge is a widen and a narrow, so the two lanes are the same frame
-    at two widths: map the indices through the wire table and the buffers must
-    be equal, pixel for pixel, for every verb above."""
-    for name, lua, _py in CASES:
-        idx = _run(_IndexCanvas(W, H), lua, SHEET, TILEMAP)
-        wide = _run(host_canvas.make_canvas(W, H), lua, SHEET, TILEMAP)
-        expect = bytearray()
-        for i in idx:
-            word = dc.PAL565_WIRE[i]
-            expect += bytes((word & 0xFF, word >> 8))
-        assert bytes(expect) == wide, name
-
-
-def test_lua_host_reads_the_format_off_the_canvas_it_was_handed():
-    """The one decision this file exists to pin: the runtime asks the canvas
-    rather than assuming what it was handed."""
-    buf, wire, indexed = lua_host.canvas_target(host_canvas.make_canvas(8, 4))
-    assert indexed is False and wire is not None and len(buf) == 8 * 4 * 2
-    buf, wire, indexed = lua_host.canvas_target(_IndexCanvas(8, 4))
-    assert indexed is True and wire is None and len(buf) == 8 * 4
-
-
 # -- the bounds ctypes cannot check -------------------------------------------
 
 def test_an_undersized_canvas_is_refused_rather_than_overrun():
     """ctypes hands C a bare pointer, so a w*h past the end of the buffer is a
     heap overwrite with no Python-side trace. The C checks and returns NULL."""
     with pytest.raises(RuntimeError):
-        lb.HostLuaRun(bytearray(64 * 32 * 2), 64, 64, indexed=False)
-    with pytest.raises(RuntimeError):
-        lb.HostLuaRun(bytearray(64 * 32), 64, 64, indexed=True)
+        lb.HostLuaRun(bytearray(64 * 32 * 2), 64, 64)
+    with pytest.raises(ValueError):
+        lb.HostLuaRun(bytearray(64 * 64), 64, 64, indexed=True)
 
 
 def test_a_sheet_that_is_not_the_spec_geometry_is_declined():

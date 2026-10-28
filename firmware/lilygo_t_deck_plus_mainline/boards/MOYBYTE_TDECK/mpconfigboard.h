@@ -46,8 +46,8 @@
 #define MICROPY_HW_ENABLE_UART_REPL         (0)
 
 // I2C0 is the T-Deck's peripheral bus: the ESP32-C3 keyboard (0x55) and the
-// GT911 touch controller (0x5D/0x14) share it. device_input.py passes these
-// pins explicitly; setting them here means a bare machine.I2C(0) is also right.
+// GT911 touch controller (0x5D/0x14) share it, the kernel's bus (MOY_BUS_I2C_*
+// below): nothing opens a machine.I2C on port 0.
 #define MICROPY_HW_I2C0_SCL                 (8)
 #define MICROPY_HW_I2C0_SDA                 (18)
 
@@ -55,6 +55,14 @@
 // moy_sd attach (never machine.SDCard -- see .claude/rules/boards.md), so
 // the port's own SD support is deliberately NOT enabled.
 #define MICROPY_HW_ENABLE_SDCARD            (0)
+
+// exFAT in FatFS (lib/oofatfs, whose ffconf.h reads this define; ESP32 ports
+// leave it off). It is the filesystem's, not the driver's: the card behind
+// moy_sd is a block device `vfs.mount` hands to FatFS like any other, and a
+// card over 32 GB ships exFAT, which without this define is refused with
+// ENODEV and leaves the console on its flash store. FAT12/16/32 cards mount as
+// before. LFN is already on, which exFAT needs.
+#define MICROPY_FATFS_EXFAT                 (1)
 
 // Audio is a MAX98357 mono I2S amp (BCK 7 / WS 5 / DOUT 6), driven by the
 // `moy_audio` usermod's core-1 feeder task. `machine.I2S` is on because
@@ -117,3 +125,86 @@
 // lands while the store writes the last one instead of stalling the USB
 // endpoint at the port's 260 bytes. The module's header says which boards may.
 #define MOY_SERIAL_RING_BYTES               (32768)
+
+// The kernel's recovery floor (native/moy_kernel): moy_lcd's entry points, the
+// landscape 320x240 framebuffer it already scans in wire order, and the
+// trackball click (GPIO0, active low) as its one button.
+#define MOY_KERNEL_PANEL(fn)                moy_lcd_k##fn
+#define MOY_KERNEL_PANEL_W                  (320)
+#define MOY_KERNEL_PANEL_H                  (240)
+#define MOY_KERNEL_PANEL_ROT                (0)
+#define MOY_KERNEL_PANEL_SWAP               (1)
+#define MOY_KERNEL_BUTTON_GPIO              (0)
+#define MOY_KERNEL_BUTTON_NAME              "the trackball"
+
+// The VM stop (docs/kernel_cartpath_2026-10.md section 5): this board's lever.
+// The kernel stops the VM for a VM-free game whose fit check fails with the VM
+// up (the `need` policy: a Doom-sized compiled cart), runs it with no VM over
+// the panel's own framebuffers (moy_lcd's kernel entry points above), and
+// starts the VM again after it (native/moy_play/moy_play_stop.c). A board
+// without it keeps the VM for every run.
+#define MOY_VM_STOP                         (1)
+
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the keyboard (0x55)
+// and the GT911 touch.
+#define MOY_BUS_I2C_PORT                    (0)
+#define MOY_BUS_I2C_SDA                     MICROPY_HW_I2C0_SDA
+#define MOY_BUS_I2C_SCL                     MICROPY_HW_I2C0_SCL
+#define MOY_BUS_I2C_HZ                      (400000)
+// The C3 keyboard clock-stretches for tens of milliseconds (#69): a stretch
+// past this many microseconds fails the read, which the keyboard's driver holds
+// over as one stale frame.
+#define MOY_BUS_I2C_STRETCH_US              (5000)
+
+// Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
+// central over NimBLE, its bonds in NVS. There is no `bluetooth` module.
+#define MOY_INPUT_BLE                       (1)
+#define MICROPY_PY_BLUETOOTH                (0)
+
+// Input's drivers (native/moy_input/moy_input_task.c): the C3 keyboard, the
+// trackball's four pulse pins and its click, and the GT911 (y then x, its INT
+// line gating the reads, #74), all passed on the input task (#69), whose
+// stack is the measured high water plus a margin.
+#define MOY_INPUT_KBD_TDECK                 (1)
+#define MOY_INPUT_TASK                      (1)
+#define MOY_INPUT_TASK_STACK                (2560)
+#define MOY_INPUT_BALL_UP                   (3)
+#define MOY_INPUT_BALL_DOWN                 (15)
+#define MOY_INPUT_BALL_LEFT                 (1)
+#define MOY_INPUT_BALL_RIGHT                (2)
+#define MOY_INPUT_BALL_CLICK                (0)
+#define MOY_INPUT_TOUCH_KIND                (1)     // MOY_TOUCH_GT911
+#define MOY_INPUT_TOUCH_YX                  (1)
+#define MOY_INPUT_TOUCH_INT                 (16)
+#define MOY_INPUT_TOUCH_SWAP                (0)
+#define MOY_INPUT_TOUCH_FLIP_X              (0)
+#define MOY_INPUT_TOUCH_FLIP_Y              (1)     // the GT911's Y runs opposite the screen
+#define MOY_INPUT_TOUCH_RAW_W               (320)
+#define MOY_INPUT_TOUCH_RAW_H               (240)
+
+// The speaker (native/moy_audio/moy_aud_out.c): the MAX98357 amp on its own
+// I2S pins, behind the board power gate (GPIO 10, driven at boot).
+#define MOY_AUDIO_I2S_BCK                   (7)
+#define MOY_AUDIO_I2S_WS                    (5)
+#define MOY_AUDIO_I2S_DOUT                  (6)
+
+// The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
+// released layer buffers it keeps for the next run, inside the kernel's 1 MiB
+// PSRAM share (docs/native_kernel_2026-09.md §6.1). One 320x240 layer: a
+// scroll cart's 384,000-byte world is freed at exit and allocated again.
+#define MOY_GLASS_POOL_BYTES                (160 * 1024)
+
+// The banded present (native/moy_glass/moy_present.h): this panel module's
+// kernel transport (kwait/kkick/kship) under the kernel's frame state machine.
+#define MOY_GLASS_BANDED                    (1)
+
+// The radio link is the kernel's (native/moy_net/moy_link.c, moy_net.Link): it
+// holds esp_now's one receive callback, so the port's espnow module is out of
+// the image and Python cannot take the callback from it, and a soft reset
+// (which would deinit the port's) leaves the link and its ring up.
+#define MICROPY_PY_ESPNOW                   (0)
+#define MOY_NET_LINK                        (1)
+// The WiFi driver is the kernel's too (native/moy_net/moy_wifi.c): the station
+// starts and stops as the spine's lease asks, and Python never constructs the
+// port's network.WLAN on this board.
+#define MOY_NET_WIFI                        (1)

@@ -7,14 +7,23 @@ frame instead of hundreds.
 **The engine is not written here.** `libmoy/moy_lua.c` is moy-spec's own Lua
 binding — all 38 SPEC.md verbs as C functions against a `moy_console` — and
 `moy.h` exports `moy_lua_open`/`init`/`update`/`draw`. This module is the HOST
-half: what a *moybyte* console is made of.
+half: what a *moybyte* console is made of. The console itself -- the pieces
+below but the canvas, with libmoy's host callbacks -- is `moycore_run.c`,
+and the cart's Lua VM -- its allocator and pool, open, load, frame and close
+-- is `moycore_lua.c`; neither includes anything of MicroPython.
+`modmoycore.c` binds them to buffers Python owns, and the host's two ctypes
+shims (`runtime/moyhost_lua.c`, `runtime/moyhost_wasm.c`) run the console's
+file. On a VM tier a run's frame is the kernel's Player's
+(`native/moy_play/moy_play.c`): it fills the snapshot, runs the frame and
+plays the queue.
 
 | piece | how |
 |---|---|
 | canvas | the DeviceCanvas framebuffer itself (libmoy takes a caller-owned `pix` and a caller-supplied wire table, so the panel's byte order stays out of the cart contract) |
-| input, time, pointer | a SNAPSHOT array the frame loop refreshes before the tick — `btn()` sixty times a frame costs zero crossings |
-| audio | a command QUEUE the host drains after the tick, order preserved |
+| input, time, pointer | a SNAPSHOT array filled before each tick -- by the Player from the input table and the pointer the console publishes, by the host's shim from its own input -- so `btn()` sixty times a frame costs zero crossings |
+| audio | a command QUEUE (int32) played after each tick in its order -- by the Player straight into the run's audio session |
 | pmem | a C array with a dirty flag, the shape the device already defers it to (#66) |
+| config | a C table of `key\0value\0` pairs COPIED in at `run_begin` (`lua_ext.cfg_blob`), so a compiled cart's session reads it on its own thread with no VM asked |
 | tile flags | 512 bytes COPIED in at `run_begin` (SPEC.md 3.5) -- the one buffer here that is not the caller's, because C writes it (`fset`, a poke to `0x3000`, the p8 shim's `__moy_map_flags`) and the caller may hand over a plain `bytes` |
 
 ## The compiled cart (`run_begin(..., vm=False)` + `wasm_open`)
@@ -37,12 +46,14 @@ there and times the halves for `tick_split`. `wasm_table()` is the table's
 names, which the Player holds a module's imports to before it opens one
 (`device/moycore_glue.missing_imports`).
 
-Every host callback the table reaches from that thread is a C read or write
-against the console except the ones that need the VM -- `read`, the cart's own
-folder through the VFS; `cfg`, the config dict; and the cart's written files
-(moy-spec SPEC.md §16.12: `write`, `erase`, `list` and `read`'s written copy),
-which `wasm_open` hands it as `runtime/cart_files.py`'s store -- and those run
-on the MicroPython task through `moy_wasm_on_vm` while it waits on the call.
+Every host callback the table reaches from that thread is C, and none calls
+Python. The cart's files -- `read` on its own folder and its written files
+(moy-spec SPEC.md §16.12: `write`, `erase`, `list` and `read`'s written copy)
+-- are `native/moy_store/moy_files.h` over the kernel's volume, run on the
+MicroPython task through `moy_wasm_on_vm` while it waits on the call, each op
+inside the board's bus gate (`moy_vol_gate_enter`; on the T-Deck the panel's
+`sd_guard`). In the browser a write and an erase are logged for the page's
+keeper, which `files_kept` drains into the worker's OPFS commits.
 
 A cart's `par` items run on the engine's lanes: moycore hands the binding
 `moy_wasm_session_lanes()` of them and their `lane_go`/`lane_wait`, and the
@@ -58,14 +69,14 @@ mono, a queue of 2,048 frames; moy-spec SPEC.md §16.9) is libmoy's
 into every chunk after the synth, under the same master level, so the cart's
 §8 verbs, the console's sounds and Settings' volume all still apply and the
 I2S channel never changes hands. While the stream plays the feeder runs a
-shallow pipeline, 128-frame blocks into a 4 x 128 ring (`modmoy_audio.c`'s
+shallow pipeline, 128-frame blocks into a 4 x 128 ring (`moy_aud_out.c`'s
 header), so a cart's samples reach the speaker about 29 ms after it takes
 them. `close()` drops what is queued. A board
 without a speaker leaves `snd` to the binding, which drains the queue by the
 console's clock and drops the samples, so the cart meets the same
 backpressure. `moy_audio.snd_counts()` is the stream from both ends -- frames
 the cart queued, frames the feeder played, frames it found none -- and the
-`SNDSTREAM` diag line prints it beside `AUDIORATE`. Each
+AUDIORATE line's `snd=` field prints it. Each
 `read` runs inside `gate(fn)`, the store's own gate (`ws._with_sd`), as every
 other store access does: on the T-Deck that drains the panel's flush before
 the card, which shares its SPI bus, is touched. The run's own state (libmoy's
@@ -391,13 +402,30 @@ Two verbs serve the pool and nothing else:
 internal SRAM and a different allocator profile, and per-board verdicts do not
 transfer.
 
-## Superset verbs are not bound here
+## Superset verbs, and which of them are C
 
-`make_layer`/`draw_layer`/`image`, scenes and `view()` are
-moybyte's, not the spec's. The cart census that decided to leave them
-Python-side is in the plan: one Lua cart in the tree uses layers, at one blit
-per frame rather than one per sprite, so a second console in C would trade the
-duplication this module deletes for a smaller one.
+`make_layer`/`image` and scenes are moybyte's, not the spec's. On the boards
+and in the browser a layer's pixels and a paint image are the run's own C
+(`moycore_lua.c`); the host still makes them through registered trampolines
+and the int-handle prelude in `runtime/lua_ext.py`. Scenes are C on both Lua
+hosts (`moycore_scene.h`): the cart's `.moyscene` texts go to the run before
+the load (`scene_put`), are parsed there into Lua row tables, and
+`draw_scene` draws the live rows, so no scene verb crosses.
+
+What a frame calls is C (docs/kernel_cartpath_2026-10.md §2), so a frame makes
+no crossing: `col` and `mouse` (`moycore_superset.h`, which the registration
+loops skip by `lua_ext.NATIVE_NAMES`), and `draw_layer`, the prelude's wrapper
+over `__layer_blit`, which copies through the screen canvas's layer restore
+(`moycore.layer_restore`, moy_gfx's `mg_lr_*`, whose predicted copy rides the
+GDMA engine) or through libmoy's `moy_blit_window` where a host has none.
+
+What a cart draws INTO a layer is the exception, and it is libmoy's verb table
+again rather than a copy of it (#225): `moycore_layers.h` gives the prelude
+`__layer_canvas`, a `moy_canvas` over the layer's buffer (which `layer_bind`
+hands over from the `__layer_new` trampoline), and `__layer_verb`, which wraps
+a screen verb into a layer method that points `con->canvas` at that canvas for
+one protected call. The host's Lua shim (`runtime/moyhost_lua.c`) includes the
+same header, so both Lua hosts draw into a layer through one body.
 
 ## Testing
 

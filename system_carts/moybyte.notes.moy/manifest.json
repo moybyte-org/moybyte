@@ -1,0 +1,29 @@
+{
+  "format": "moy-1",
+  "version": 9,
+  "title": "Notes",
+  "id": "moybyte.notes",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 350,
+    "targets": [
+      "host",
+      "device",
+      "web"
+    ],
+    "permissions": [
+      "graphics",
+      "input",
+      "files:docs",
+      "clipboard",
+      "prefs",
+      "editor"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

@@ -6,12 +6,12 @@ permissions its manifest declares (#181, ui_refactor_2026-08 Phase 7).
 A SHIPPED system app (Calc, Files, Paint ...) is shell code: a Layer class in
 `runtime/` that declares a `NEEDS` tuple and is handed an `AppContext`
 (`runtime/app_context.py`) carrying exactly those roles. A USER APP is a
-`.moy` CART -- editable in the project picker like any other cart, written by
+`.moy` CART -- editable on the home's Make tab like any other cart, written by
 whoever owns the console -- that asks for shell capabilities in its
-`manifest.json`:
+`manifest.json`, in its `"moybyte"` object (Moybyte's own fields):
 
-    "type": "app",
-    "permissions": ["graphics", "input", "files:docs", "prefs"]
+    "moybyte": {"type": "app",
+                "permissions": ["graphics", "input", "files:docs", "prefs"]}
 
 `make_system_api` is the FILTER between the two. It is not a second interface:
 it maps each declared permission to a role on the SAME `AppContext`, builds one
@@ -30,16 +30,12 @@ mentions a capability provably cannot use it.
 
 A cart runs `exec` in a plain namespace with the real builtins: it can
 `import`, walk `gc.get_objects()`, or reach an attribute on anything it was
-handed. The role objects hold their `Workstation` in a name-mangled slot
-(`self.__ws` -> `_Theme__ws`), and `ScopedFiles` holds its unscoped role the
-same way, so the obvious reach-through -- `files._files.save("drawings", ...)`,
-`prefs._ws.carts_store` -- fails. That is a SPEED BUMP: it turns an accident
-into a deliberate act, and it makes the honest API the easy one. It is not
-containment, and two things say so plainly. A cart that goes looking will find
-a path, and **on the boards it does not even bump**: MicroPython implements no
-name mangling (measured on this repo's unix build -- `self.__x` stays the
-literal attribute `__x`, readable from outside), so the mangling is a host-side
-speed bump on device-side code.
+handed. The role objects are native/moy_app's, which hold a grant and the
+console's app ABI state, and a grant made with a files kind reaches that kind
+alone: the C answers any other DENIED, so `files._files.save("drawings", ...)`
+from an app granted `files:docs` is refused wherever the role object is
+reached from. That is the files role, not containment: a cart that goes
+looking through `gc` or its imports will find the console's own objects.
 
 What the permission filter actually buys, then, is not confinement but
 LEGIBILITY: a manifest states what an app is for, the shell hands it exactly
@@ -50,6 +46,11 @@ escapes. A cart you would not run is a cart you should not install; nothing
 here changes that, and no amount of wrapper would.
 
 ## The map
+
+The policy is C's (native/moy_app, `moy_app.policy`): the permission each
+role is granted by, the files kinds, the manifest refusal
+(`moy_app.manifest_error`) and the key a cart's grant is made under
+(`moy_app.id_for`: the cart's `id`, #162, else its title's slug).
 
     permission        cart globals                    AppContext role
     ---------------   -----------------------------   ---------------
@@ -66,68 +67,71 @@ the cart can never NAME a kind -- it gets the one it was granted, or the one
 the console was already asked to open (the Files router's door). The engine
 behind it stays in the shell; `runtime/editor_handle.py` is the whole of it.
 
-Every `type: "app"` cart also gets `ui`, `theme()`, `screen()` and `bar_h()` --
-see UNGATED below. Everything else a manifest lists (`"graphics"`, `"input"`,
-`"audio"`, an app's own marker permission like `"calc"`) is not a grant here and
-is silently ignored, which is correct: the kid API is already the ungated floor.
+Every `type: "app"` cart also gets `ui`, `theme()`, `screen()`,
+`content_rect()` and `bar_h()` -- see UNGATED below. Everything else a
+manifest lists (`"graphics"`, `"input"`, `"audio"`, an app's own marker
+permission like `"calc"`) is not a grant here and is silently ignored, which
+is correct: the kid API is already the ungated floor.
 
 ## What is NEVER grantable, and why the list is a positive one
 
-`NEVER_GRANTED` names the roles a cart cannot have under any manifest. It is
-documentation and a test target -- the ENFORCEMENT is that `_ROLE_FOR` is an
-ALLOWLIST, so a role absent from it is ungrantable by construction and a new
-role added to `app_context.ROLES` is ungrantable until someone deliberately
-maps a permission onto it. (An allowlist is the direction that fails safe. The
+The policy's permission table (`moy_app.perms()`) is an ALLOWLIST, so a role
+absent from it is ungrantable by construction and a new role added to the role
+table is ungrantable until someone deliberately maps a permission onto it;
+`tests/test_user_apps.py` names the roles it leaves out. (An allowlist is the direction that fails safe. The
 same choice went the other way for moycore's verb table, for the opposite
 reason: there, what is enumerable is what libmoy OWNS, and a missed name is a
 lost feature rather than a granted capability.)
 
-  * `shell` -- the un-narrowed `Workstation`. It exists for four shipped apps
-    that construct `file_widgets.FileGridView`, its consumer list can only
-    shrink, and handing it to a cart would make every other line of this module
-    decoration.
   * `carts` -- the CART store. A cart that can author carts can write
     executable content, i.e. escalate itself; this is the single most important
     entry in the list and it is why `ctx.files` and `ctx.carts` were split into
     two roles in the first place.
   * `install` -- carts from the internet, written into the store. It is
     `carts`' reason twice over: executable content, and somebody else's.
-  * `wallpaper` / `artwork` -- capability handles held by exactly one shipped
-    app each. `artwork` stays IDENTITY-gated in the Player (Paint's own cart,
-    by title+permission+slug), which a renamed copy cannot inherit.
+  * `wallpaper` / `artwork` -- the desktop backdrop and Paint's open picture,
+    held by the shipped apps that choose or copy into them. Paint's own model
+    stays IDENTITY-gated in the Player (Paint's own cart, by
+    title+permission+slug), which a renamed copy cannot inherit.
   * `damage` / `surface` -- the shell's invalidation epoch and its live canvas
     plumbing. A cart repaints because the Player ticked it; a cart that could
     dirty the shell every frame would defeat the redraw gate on every tier.
+    A cart's context holds `surface` for the ungated `content_rect()` and
+    `bar_h()` alone, and no other surface verb has a name in its namespace.
   * `notify` -- not refused on principle, just not mapped yet. A grant with no
     consumer is a capability granted for nothing. `clipboard` sat here for the
     same reason until the editor handle became its consumer; it is mapped now,
     and a cart still never touches the buffer -- the handle's `cut`/`copy`/
     `paste` are the only things that read it.
   * Firmware update and reboot are not roles at all -- they live on
-    `ws.updater` / `machine`, reachable only through `shell`.
+    `ws.updater` / `machine`, and no role hands out the console.
 
-## UNGATED: `ui`, `theme()`, `screen()`, `bar_h()`
+## UNGATED: `ui`, `theme()`, `screen()`, `content_rect()`, `bar_h()`
 
-These four are published to every `type: "app"` cart with no permission,
+These five are published to every `type: "app"` cart with no permission,
 because they are not capabilities -- they are how an app draws.
 
-  * `ui` is the REAL `runtime/ui.py`, the same leaf the shipped apps use: the
-    rect algebra, the six-state widgets (`button`/`chip`/`row`/`cell`/
-    `tab_row`/`status_row`/`panel`/`dialog`/`text_field`), `ScrollRegion` and
-    `Hits`. It takes `(cv, th, rect)` and imports nothing from the shell, so it
-    needed no port to cross this boundary.
-  * `screen()` returns the canvas the cart is drawing on -- what `ui`'s `cv`
-    argument wants. It is the SAME surface the kid API's `rect`/`print` already
-    write to, so it grants no new reach; it just names the object.
+  * `ui` is `runtime/ui.py`, the public UI API (docs/ui_api_2026-10.md): its
+    verbs and rect algebra, the calls a Lua cart and a compiled app make. The
+    Player begins each frame of them (`Player._ui_begin`). It imports
+    nothing from the shell.
+  * `screen()` returns the canvas the cart is drawing on. It is the SAME
+    surface the kid API's `rect`/`print` already write to, so it grants no
+    new reach; it just names the object.
   * `theme()` returns the live panel-theme token dict, so an app looks like the
     rest of the console and follows a theme change without knowing one
     happened. READING the theme is not a privilege; CHANGING it is
     (`"appearance"`).
-  * `bar_h()` is the height of the exitable strip the HOST paints over the top
-    of the app's surface (`docs/app_api_v1.md` "the bar contract"). An app draws
-    below it. This is published because the alternative is what the seed carts
-    actually did: hardcode 18 and get it wrong at font scale 2, which is a
-    documented defect in several of them.
+  * `content_rect()` is `(x, y, w, h)`, the part of the app's surface the
+    HOST neither paints its exitable strip over nor swallows taps in
+    (`docs/app_api_v1.md` "the bar contract"): the grant's surface row's
+    content rect. An app lays out inside it, wherever the strip is.
+  * `bar_h()` is `content_rect()[1]`, the rows above the content: what an app
+    that only knows a top strip draws below. Under a strip at the bottom it is
+    0 and the strip covers the app's last rows, so new apps read
+    `content_rect()`. Both are published because the alternative is what the
+    seed carts actually did: hardcode 18 and get it wrong at font scale 2,
+    which is a documented defect in several of them.
 
 ## Storage returns `(value, err)` and never raises
 
@@ -140,29 +144,21 @@ save is not a thing to teach.
 try:
     import ui
     from app_context import NO_STORE
+    from moy_store_base import builtin_name as _builtin_name
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui
     from runtime.app_context import NO_STORE
+    from runtime.moy_store_base import builtin_name as _builtin_name
 
 
-# -- the permission -> role allowlist ----------------------------------------
-#
-# A permission name (or its `name:arg` form) maps to ONE AppContext role. Order
-# is irrelevant; membership is everything.
-
-_ROLE_FOR = {
-    "files": "files",
-    "prefs": "prefs",
-    "appearance": "theme",
-    "launch": "nav",
-    "clipboard": "clipboard",
-}
+import moy_app as _moy_app
 
 
 # The marker permission the console's TEXT APP claims its cart with -- the
 # `.md`/`.json`/`.txt` door the Files router opens (docs/text_editing_2026-09).
-# NOT in `_ROLE_FOR`, so it grants nothing; it only says which cart this is,
-# the way a shipped app claims its cart by title + `APP_PERM`.
+# Not a permission the grant policy maps, so it grants nothing; it only says
+# which cart this is, the way a shipped app claims its cart by title +
+# `APP_PERM`.
 TEXT_APP_PERM = "editor"
 
 
@@ -172,132 +168,15 @@ def is_text_app(cart):
     return TEXT_APP_PERM in perms
 
 
-# Roles a cart is never handed, whatever its manifest says. Enforced by
-# `_ROLE_FOR` being an allowlist; named here so the refusal is READABLE and so
-# `tests/test_user_apps.py` can pin it against `app_context.ROLES`.
-NEVER_GRANTED = ("shell", "carts", "install", "wallpaper", "artwork",
-                 "damage", "surface", "notify")
-
-
-# The user-files kinds a `"files:<kind>"` permission may name. A closed set, and
-# `recordings` is deliberately outside it: it is the one FOLDER-valued kind
-# (moy_carts.FILE_KINDS), so `save(name, blob)` does not mean anything there.
-FILE_KINDS = ("docs", "drawings", "sprites", "music")
-
-# `"files"` with no kind means the kid's DOCUMENTS -- the same `docs` kind
-# Notes authors and Files browses, so an app's notes show up where a kid would
-# look for them.
-DEFAULT_FILE_KIND = "docs"
-
-
-def slug(title):
-    """`moy_carts.slug` without the import.
-
-    Duplicated on purpose, and it is three lines: this module must stay a leaf
-    (it is reached from `player.py`, which imports nothing back into the store),
-    and the value is only ever a PREFS NAMESPACE -- if the two ever disagreed
-    the cost would be an app reading an empty settings dict, not a corrupted
-    one. `tests/test_user_apps.py` pins them equal anyway."""
-    out = ""
-    for ch in str(title).lower():
-        if ch.isalpha() or ch.isdigit():
-            out += ch
-        elif ch in " -_":
-            out += "_"
-    return out or "cart"
-
-
-def app_id_for(cart):
-    """The identity a user app's prefs namespace and crash-guard strikes are
-    keyed by: the manifest TITLE's slug.
-
-    The title and not the folder, because the two differ by tier -- the device
-    seeds a folder from the title slug while the host copies the SOURCE folder
-    (`theme_picker.moy` vs `appearance.moy`, the mismatch that broke
-    `AppearanceAppLayer.is_app` on device and is now pinned by
-    `tests/test_device_seed_parity.py`). Keying on the title makes an app's
-    saved settings survive the crossing."""
-    if not cart:
-        return "app"
-    return slug(cart.get("title") or "app")
-
-
-def _file_kinds(cart):
-    """Every user-files kind `cart`'s manifest asks for, in declaration order
-    and de-duplicated. Unknown kinds are dropped here (a typo narrows), so what
-    comes back is what could actually be granted."""
-    out = []
-    for perm in (cart.get("permissions") or ()) if cart else ():
-        perm = str(perm)
-        colon = perm.find(":")
-        arg = perm[colon + 1:] if colon >= 0 else None
-        if (perm[:colon] if colon >= 0 else perm) != "files":
-            continue
-        # A scoped grant names its kind; an unscoped one takes the default. An
-        # unknown kind is NOT a fallback to the default -- a typo must narrow
-        # to nothing, never widen to the kid's documents.
-        if arg is None:
-            arg = DEFAULT_FILE_KIND
-        elif arg not in FILE_KINDS:
-            continue
-        if arg not in out:
-            out.append(arg)
-    return out
-
-
-def manifest_error(cart):
-    """A refusal string when the manifest cannot be honoured as written, else
-    None. `Player.start` shows it on the ordinary cart-error panel and does not
-    run the cart.
-
-    ONE rule today: **a cart gets at most one user-files kind.** `files` is
-    published as a single kind-bound handle (`ScopedFiles`, whose verbs take a
-    name and never a kind), so there is nowhere for a second kind to go. Until
-    this check existed, `["files:docs", "files:drawings"]` silently kept the LAST
-    one -- an order-dependent grant, with the cart's docs quietly landing in
-    drawings and no diagnostic anywhere. Refusing beats guessing: a manifest that
-    asks for two kinds is asking for something this build does not have, and
-    the author is the only one who can say which kind they meant.
-
-    (If multi-kind is ever wanted, it is an API change -- `files.docs.save()`
-    style namespacing -- not a widening of this function.)"""
-    kinds = _file_kinds(cart)
-    if len(kinds) > 1:
-        return ("manifest asks for %d file kinds (%s) - pick one"
-                % (len(kinds), ", ".join(kinds)))
-    return None
-
-
-def granted_roles(cart):
-    """`(roles, file_kind)` for `cart`'s manifest permissions.
-
-    `roles` is the de-duplicated tuple of `AppContext` role names this cart has
-    earned; `file_kind` is the user-files kind its `files` grant is scoped to
-    (None when it has none). An unknown permission, an unknown file kind and a
-    permission naming an ungrantable role all resolve to "no grant" -- a
-    manifest can ask for anything and get only what this table says.
-
-    TWO or more file kinds is a manifest ERROR (`manifest_error`), which the
-    Player refuses before it ever reaches this function. If some other caller
-    skips that check, the files grant is dropped entirely rather than resolved
-    to one of them: the residual behaviour of a rule this function cannot
-    express has to fail closed, not pick a winner by declaration order."""
-    kinds = _file_kinds(cart)
-    file_kind = kinds[0] if len(kinds) == 1 else None
-    roles = []
-    for perm in (cart.get("permissions") or ()) if cart else ():
-        perm = str(perm)
-        colon = perm.find(":")
-        if colon >= 0:
-            perm = perm[:colon]
-        role = _ROLE_FOR.get(perm)
-        if role is None:
-            continue
-        if role == "files" and file_kind is None:
-            continue                  # unknown kind, or the multi-kind refusal
-        if role not in roles:
-            roles.append(role)
-    return (tuple(roles), file_kind)
+def draws_in_look(cart):
+    """True for a built-in app cart (system_carts/, its folder `moybyte.*`):
+    its code runs outside the app-cart boundary (docs/theming_2026-09.md
+    §4.7), so its `ui` page and its editor handle draw in the theme's
+    colours and faces as the shell's own apps do. A copy is a kid's cart,
+    inside the boundary like any other."""
+    if not cart or cart.get("type") != "app":
+        return False
+    return _builtin_name(cart.get("path") or "") is not None
 
 
 # -- the kind-scoped user-files handle ---------------------------------------
@@ -308,13 +187,9 @@ class ScopedFiles:
     The role itself takes `(kind, name)` on every verb, which would let an app
     granted `"files:docs"` read the kid's drawings by passing another kind.
     This binds the kind at construction and never takes it as an argument, so
-    no ARGUMENT reaches another kind: every published verb spells one kind, the
-    granted one.
-
-    The unscoped role is held name-mangled (`self.__files`) so the one-hop
-    reach-through does not work by accident -- but see the module docstring:
-    that is a speed bump on the host and nothing at all on MicroPython, which
-    does not mangle. The scope is honest, not enforced.
+    every published verb spells one kind, the granted one; the grant itself
+    reaches no other (native/moy_app checks the kind on every row), so the
+    role it holds refuses another kind however it is reached.
 
     Same `(value, err)` contract as the role -- nothing here raises."""
 
@@ -397,8 +272,13 @@ class ScopedFiles:
 
 # -- the factory -------------------------------------------------------------
 
-def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
-                    editor=None, request=None):
+# The id of the grant a run reaches the document the console was asked to
+# open through, when that document is not of the run's own kind.
+_DOC_GRANT = "moybyte.document"
+
+
+def make_system_api(ctx_factory, cart, canvas=None,
+                    editor=None, request=None, keep=None):
     """The extra globals `cart` (a `type: "app"` cart) gets, or `{}`.
 
     `ctx_factory(app_id, needs, prefs_ns)` is `Workstation.app_context` -- the
@@ -410,21 +290,28 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
     `canvas` is the surface the cart draws on -- the fixed game canvas by
     default, the system canvas for a responsive app (see `Player.start`). It is
     passed rather than read off `ctx.surface`, because `ctx.surface.canvas()` is
-    always the SYSTEM canvas and a fixed app draws on the game one. `bar_h` is a
-    zero-argument callable for the host strip's height, for the same reason: it
-    is chrome geometry, not a shell role.
+    always the SYSTEM canvas and a fixed app draws on the game one.
 
     `editor` is the shell's editor-handle factory (`Player._open_cart_editor`)
     and `request` is the `(kind, name, mode)` the console was asked to open --
     both passed the same way and for the same reason: they are the running
-    shell, not a role. Without them `open_editor` simply has no name."""
-    roles, kind = granted_roles(cart)
-    # `theme` is always needed: `theme()` is ungated. Requesting it twice is
+    shell, not a role. Without them `open_editor` simply has no name.
+
+    The context is a RUN grant (native/moy_app), keyed by the cart's id and
+    made from its permissions by the C policy (`moy_app.policy`); `keep` is
+    handed the context so the run can end its grant when it ends."""
+    perms = cart.get("permissions") if cart else None
+    roles, kind = _moy_app.policy(perms)
+    # `theme` and `surface` are always held: `theme()`, `content_rect()` and
+    # `bar_h()` are ungated reads of their rows. Requesting one twice is
     # harmless (AppContext just attaches the role), but keep the tuple clean so
     # a test can read the grant back off it.
-    needs = roles if "theme" in roles else roles + ("theme",)
-    app_id = app_id_for(cart)
-    ctx = ctx_factory(app_id, needs, app_id)
+    needs = roles + tuple(r for r in ("surface", "theme") if r not in roles)
+    app_id = _moy_app.id_for(cart.get("id") if cart else None,
+                             cart.get("title") if cart else None)
+    ctx = ctx_factory(app_id, needs, app_id, run=True, kind=kind)
+    if keep is not None:
+        keep(ctx)
 
     ns = {"ui": ui}
 
@@ -432,24 +319,20 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
     theme = ctx.theme
 
     def _theme():
-        """The live panel-theme tokens (`ui`'s `th` argument). HOIST IT once per
+        """The live panel-theme tokens. HOIST IT once per
         frame like every shipped app does, never per widget."""
         return theme.colors()
 
     ns["theme"] = _theme
 
     def _screen():
-        """The canvas this app draws on (`ui`'s `cv` argument)."""
+        """The canvas this app draws on."""
         return canvas
 
     ns["screen"] = _screen
 
-    def _bar_h():
-        """Rows at the top of the surface the HOST's exitable strip owns. Draw
-        below it; taps inside it never reach `handle_pointer`."""
-        return bar_h() if bar_h is not None else 0
-
-    ns["bar_h"] = _bar_h
+    ns["content_rect"] = ctx.surface.content_rect   # lay out inside it
+    ns["bar_h"] = ctx.surface.bar_h     # content_rect()[1]
 
     # -- GATED ----------------------------------------------------------------
     if "files" in roles:
@@ -460,7 +343,16 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
             # kind it was granted; with none it picks up whatever document the
             # console was already asked to open, which may be another kind
             # because a PERSON chose that file in Files.
+            # The grant reaches its own kind alone (native/moy_app checks it on
+            # every row), so the document a person chose elsewhere is reached
+            # through a grant of its own, made for that one request and ended
+            # with the run's.
             files = ctx.files
+            doc_files = files
+            if request and request[0] != kind:
+                doc = ctx_factory(_DOC_GRANT, ("files",), app_id, run=True)
+                ctx.adopt(doc)
+                doc_files = doc.files
             clip = getattr(ctx, "clipboard", None)
 
             def _open_editor(name=None, mode=None):
@@ -469,7 +361,7 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
                     if not request:
                         return None
                     r_kind, r_name, r_mode = request
-                    return editor(files, r_kind, r_name, mode or r_mode,
+                    return editor(doc_files, r_kind, r_name, mode or r_mode,
                                   canvas, clip)
                 return editor(files, kind, str(name), mode, canvas, clip)
 
@@ -492,11 +384,9 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
                 import chrome
             except ImportError:  # pragma: no cover - host fallback
                 from runtime import chrome
-            # NAMES, not the (name, tokens) pairs: `set_theme` beside this takes
-            # a name and silently falls back to DEFAULT_THEME on anything else,
-            # so returning pairs made the documented `set_theme(themes()[0])`
-            # always select "night", with nothing reporting it.
-            return [n for n, _tokens in chrome.THEMES]
+            # NAMES: `set_theme` beside this takes a name and falls back to
+            # DEFAULT_THEME on anything else.
+            return list(chrome.theme_names())
 
         ns["themes"] = _themes
     if "nav" in roles:

@@ -362,6 +362,22 @@ class DeviceError(RuntimeError):
     the board's words rather than by the absence of a value."""
 
 
+# What an ESP32 prints when it resets: the IDF's restart line and the ROM's
+# banner, either of which a reset that cut a line short still leaves whole.
+RESET_MARKS = ("Rebooting...", "ESP-ROM:", "rst:0x")
+# The lines that name why, ahead of them.
+CRASH_MARKS = ("task_wdt: Task watchdog got triggered", "Guru Meditation",
+               "abort() was called", "panic", "Brownout")
+
+
+def reset_in(lines):
+    """The reset among `lines` as one phrase naming its cause, or None."""
+    if not any(m in ln for ln in lines for m in RESET_MARKS):
+        return None
+    why = next((ln.strip() for ln in lines if any(m in ln for m in CRASH_MARKS)), None)
+    return "the board reset" + (": " + why if why else "")
+
+
 class P4Board:
     """Serial driver for the P4 desktop's dev commands."""
 
@@ -379,6 +395,7 @@ class P4Board:
         self.attach_only = bool(decl["attach_only"])
         self.expect_board = declared_board_id(board_dir or P4_BOARD_DIR)
         self.last_error = None    # why the last `py` round trip yielded nothing
+        self.reset_seen = None    # the reset the last `cmd` saw instead of a reply
         if ser is not None:
             self.ser = ser
             self._init_reader(chunk or decl["chunk"])
@@ -502,12 +519,22 @@ class P4Board:
         does not mean the command did not run. Every caller here is a probe, an
         assignment or an exec of an already-uploaded buffer; the one place that
         was not -- pyexec's `ws._up += part` -- is now an indexed store for
-        exactly this reason. Pass retry=False for anything that accumulates."""
+        exactly this reason. Pass retry=False for anything that accumulates.
+
+        A board that RESET while the command ran is not resent to: the console
+        that would answer is a fresh one, without whatever the command's
+        predecessors set up, so its answer would name the wrong failure (a
+        task-watchdog reset under an upload's exec once read as "no attribute
+        '_up'"). `reset_seen` then names the reset, and the reply is None."""
+        n0 = len(self.lines)
+        self.reset_seen = None
         self._write_line(text)
         if wait_for is None:
             wait_for = "REMOTE"
         line = self.wait_line(wait_for, timeout)
-        if line is None and retry:
+        if line is None:
+            self.reset_seen = reset_in(self.lines[n0:])
+        if line is None and retry and self.reset_seen is None:
             self.log("no reply; resending: " + text[:60])
             self._write_line(text)
             line = self.wait_line(wait_for, timeout)
@@ -602,16 +629,27 @@ class P4Board:
 
     def leave_cart(self, settle=0.8):
         """End a running cart and leave the board where it was found. On the
-        windowed tier `ws.exit()` from a cart pops through to the bare
-        launcher and the DESK goes with it (measured on the Guition P4,
-        2026-09-22: `['launcher', 'desk', 'desktop']` -> `['launcher']`), so an
-        attach-only board -- nothing resets it at open -- then reads `desk`
-        False on every test of its suite, six failures from one leftover. So:
-        exit only when a cart is up, and reopen the desk if there was one.
+        windowed tier `ws.exit()` from a cart goes home, which in console mode
+        is the bare launcher with the desk parked beneath it, so an attach-only
+        board -- nothing resets it at open -- would read `desk` False on every
+        test of its suite (six failures from one leftover on the Guition P4,
+        2026-09-22). So: exit only when a cart is up, and reopen the desk if
+        there was one.
         `desk` is None on a fullscreen tier, which is the "no desk to put
         back" answer and never a 0."""
         st = self.state()
         if not st.get("cart"):
+            return
+        if st.get("front"):
+            # A run the kernel drives (native/moy_play's front): its `state`
+            # is the kernel's, which knows no desk, and the console's frame is
+            # not running to take `ws.exit()`. The kernel's `end` closes it
+            # the way the hold does; a windowed tier gets its desk back.
+            self.cmd("end", wait_for="REMOTE")
+            st = self._settle(lambda s: not s.get("cart"), settle)
+            if st.get("desk") is False:
+                self.pyexec("ws.open_desk()")
+                self._settle(lambda s: s.get("desk"), settle)
             return
         had_desk = st.get("desk")
         self.pyexec("ws.exit()")
@@ -658,7 +696,7 @@ class P4Board:
         self.ser.flush()
 
     def open(self, what, timeout=8.0):
-        """`open settings|picker|appearance|wifi`; returns the echo line."""
+        """`open settings|projects|appearance|wifi`; returns the echo line."""
         return self.cmd("open %s" % what, timeout=timeout)
 
     # -- the `py` probe hook ----------------------------------------------
@@ -706,7 +744,7 @@ class P4Board:
         self.last_error = None
         line = self.cmd("py " + expr, wait_for="PY", timeout=timeout)
         if line is None:
-            return self._fail("no reply to `py %s` within %gs"
+            return self._fail(self.reset_seen or "no reply to `py %s` within %gs"
                               % (expr[:120], timeout), strict)
         if "PY ERR" in line:
             return self._fail(line.strip(), strict)
@@ -715,6 +753,18 @@ class P4Board:
         except Exception as exc:  # noqa: BLE001
             return self._fail("unparseable reply %r (%s)"
                               % (line[:120], exc), strict)
+
+    def _idempotent(self, text, timeout, tries=3):
+        """`cmd` for a `py` line that is safe to run twice, sent again while
+        the board answers nothing or PY ERR: on the Waveshare P4's UART a
+        dropped byte turns the line into one the board rejects. The last
+        answer, or None."""
+        line = None
+        for _ in range(tries):
+            line = self.cmd(text, wait_for="PY", timeout=timeout)
+            if (line is not None and "PY ERR" not in line) or self.reset_seen:
+                return line
+        return line
 
     def pyexec(self, code, timeout=30.0, strict=False):
         """Run a multi-line snippet on the device (`ws`/`wm`/`pointer` in scope),
@@ -737,24 +787,38 @@ class P4Board:
                 self._fail(line.strip(), strict)
                 return False
             return True
-        self.cmd("py setattr(ws, '_up', {}) or 1", wait_for="PY")
         # NB: plain getattr-or, not ws.__dict__.setdefault -- a MicroPython
         # instance __dict__ is not a full dict (no setdefault; raises TypeError).
-        self.cmd("py ws._g = getattr(ws, '_g', None) or {'ws': ws, 'wm': ws.wm}",
-                 wait_for="PY")
+        for setup in ("py setattr(ws, '_up', {}) or 1",
+                      "py ws._g = getattr(ws, '_g', None) or {'ws': ws, 'wm': ws.wm}"):
+            line = self._idempotent(setup, timeout)
+            if line is None or "PY ERR" in line:
+                self._fail("upload setup failed: %s"
+                           % (line or self.reset_seen or "no reply").strip(), strict)
+                return False
         # A DICT keyed by chunk index, not a string being appended to: `+=` is
         # not idempotent, so a resend after a lost reply would double a chunk
         # and exec a corrupted snippet. Indexed stores make the resend a no-op.
         for k, i in enumerate(range(0, len(code), self.CHUNK)):
             part = code[i:i + self.CHUNK]
-            line = self.cmd("py ws._up.__setitem__(%d, %r) or 1" % (k, part),
-                            wait_for="PY", timeout=timeout) or ""
+            store = "py ws._up.__setitem__(%d, %r) or 1" % (k, part)
+            line = self.cmd(store, wait_for="PY", timeout=timeout)
+            if line is None:
+                self._fail("chunk %d: %s" % (k, self.reset_seen or "no reply"), strict)
+                return False
             if "PY ERR" in line:
+                again = self.cmd(store, wait_for="PY", timeout=timeout) or ""
+                if again.startswith("PY") and "PY ERR" not in again:
+                    continue
                 self._fail("chunk %d rejected: %s" % (k, line.strip()), strict)
                 return False
         line = self.cmd(
             "py exec(''.join(ws._up[k] for k in sorted(ws._up)), ws._g)",
-            wait_for="PY", timeout=timeout) or ""
+            wait_for="PY", timeout=timeout)
+        if line is None:
+            self._fail(self.reset_seen or "no reply to the upload's exec within %gs"
+                       % timeout, strict)
+            return False
         if "PY ERR" in line:
             self._fail(line.strip(), strict)
             return False
@@ -772,29 +836,34 @@ class P4Board:
     # -- geometry helpers -------------------------------------------------
 
     def settings_geometry(self, st=None):
-        """Screen-space geometry of the Settings rows from a state snapshot:
-        (center_x, row_y(i) fn, row_h). Needs the settings window open."""
+        """Screen-space geometry of the Settings page from a state snapshot:
+        (center_x, y_at(f) -- the screen y a fraction f down the content --,
+        the content's height). Needs the settings window open."""
         st = st or self.state()
         win = st["wins"]["settings"]
-        lay = st["settings"]["lay"]          # window-local [x, y0, w, row_h]
+        c = st["settings"]["content"]        # window-local [x, y, w, h]
         ox, oy = win[0] + 1, win[1] + 1 + win[4]   # content origin on screen
-        cx = ox + lay[0] + lay[2] // 2
+        cx = ox + c[0] + c[2] // 2
 
-        def row_y(i):
-            return oy + lay[1] + i * lay[3] + lay[3] // 2
+        def y_at(f):
+            return oy + c[1] + int(f * c[3])
 
-        return cx, row_y, lay[3]
+        return cx, y_at, c[3]
 
-    def swipe_settings(self, st=None, rows=2.5, frames=25):
-        """Drag the Settings list up by `rows` rows, starting from the last
-        row INSIDE the view. The row height follows the chrome scale (52px on
-        a board that declares its glass, 26 without), so a fixed start row can
-        sit below the view and move nothing."""
+    @staticmethod
+    def settings_scrolled(st):
+        """How far the Settings page has scrolled since it opened: how far
+        its focused row (Wi-Fi, which a drag leaves focused) moved up."""
+        s = st.get("settings") or {}
+        box = s.get("focus_box")
+        return None if box is None else box[1]
+
+    def swipe_settings(self, st=None, frames=25):
+        """Drag the Settings page up by half its content's height, from two
+        thirds of the way down it."""
         st = st or self.state()
-        cx, row_y, row_h = self.settings_geometry(st)
-        start = max(1, st["settings"]["view"][3] // row_h - 1)
-        y0 = row_y(start)
-        self.swipe(cx, y0, cx, y0 - int(rows * row_h), frames=frames)
+        cx, y_at, _h = self.settings_geometry(st)
+        self.swipe(cx, y_at(2 / 3), cx, y_at(1 / 6), frames=frames)
 
 
 # ---------------------------------------------------------------------------
@@ -825,20 +894,18 @@ def _tour(board):
     check("open settings -> window", "settings" in st.get("order", ()),
           str(st.get("order")))
 
-    # Scroll the rows: swipe up by ~2.5 rows, expect set_top to advance and
-    # SURVIVE the release (the on-glass "thrown back to the start" bug).
-    cx, row_y, row_h = board.settings_geometry(st)
-    board.swipe(cx, row_y(4), cx, row_y(4) - int(2.5 * row_h), frames=25)
+    # Scroll the page: swipe it up, expect its rows to move up and STAY
+    # there after the release (the on-glass "thrown back to the start" bug).
+    y0 = board.settings_scrolled(st)
+    board.swipe_settings(st)
     st = board.state()
-    top_after = (st.get("settings") or {}).get("set_top")
-    check("settings rows scroll on swipe", (top_after or 0) > 0,
-          "set_top=%s" % top_after)
+    y1 = board.settings_scrolled(st)
+    check("settings rows scroll on swipe", y0 is not None and y1 is not None and y1 < y0,
+          "focus y %s -> %s" % (y0, y1))
     board.drain(1.0)
     st2 = board.state()
-    check("scroll position survives release",
-          (st2.get("settings") or {}).get("set_top") == top_after,
-          "set_top=%s (was %s)" % (
-              (st2.get("settings") or {}).get("set_top"), top_after))
+    check("scroll position survives release", board.settings_scrolled(st2) == y1,
+          "focus y=%s (was %s)" % (board.settings_scrolled(st2), y1))
 
     line = board.open("appearance")
     board.drain(0.5)
@@ -846,10 +913,10 @@ def _tour(board):
     check("appearance opens", "appearance" in st.get("order", ()),
           "%s | cart=%s" % (line, st.get("appearance_cart")))
 
-    board.open("picker")
+    board.open("projects")
     board.drain(6.0)              # cover pop-in settles
     st = board.state()
-    check("picker opens", "make" in st.get("order", ()), str(st.get("order")))
+    check("projects opens", "projects" in st.get("order", ()), str(st.get("order")))
 
     n0 = len(board.lines)
     board.drain(4.0)

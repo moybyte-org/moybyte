@@ -20,7 +20,7 @@ paths:
   The `tests/test_web_*_e2e.py` suites (sync, persist, p8, update, store, wasm) are
   the only checks that drive the wasm head in real headless Chrome; all are
   gated on `MOYBYTE_WEB_E2E` and are run by `.github/workflows/web-e2e.yml` (path-filtered,
-  sharing pages.yml's wasm cache key). Prerequisites resolve through
+  sharing firmware-build.yml's wasm cache). Prerequisites resolve through
   `tests/web_e2e.py`, which warns and skips on a bench but FAILS under
   `CI`/`MOYBYTE_REQUIRE_WEB_E2E` — same doctrine as `MOYBYTE_REQUIRE_UNIX_MP`.
   A skip is the right answer to a missing emsdk build on a laptop and the wrong
@@ -30,9 +30,11 @@ paths:
 - **The p8 importer is tested UPSTREAM, and this repo does not download carts.**
   `make -C libmoy p8-carts` in moy-spec imports a corpus of real BBS carts and
   runs each through `run_cart` — the real C console — ratcheted against
-  `conformance/p8_carts_expected.json`, fetched from links in
-  `conformance/p8_corpus.json` and cached by CI. That is where the porter lives
-  and where a porter bug should turn red.
+  `conformance/p8_carts_expected.json`, downloaded by hand from the links in
+  `conformance/p8_corpus.json`. The BBS's terms ask that no script fetch from
+  it, so CI does not run that gate; moy-spec's `make test` does, on the carts a
+  person has downloaded. That is where the porter lives and where a porter bug
+  should turn red.
   - **Owner call 2026-09-01: moybyte owns none of that.** Real PICO-8 carts are
     other people's work, and a suite here that downloads twelve of them to test
     a VENDORED converter is coverage in the wrong repository. What stays here is
@@ -45,7 +47,7 @@ paths:
     them; the inline tests hold them.
   - **What the Player still adds over `run_cart` is TIME**: run_cart calls
     update once per frame at a fixed 1/30, while the Player's scheduler
-    (`runtime/tick_model.py`, #217) places a cart's declared rate on the host's
+    (`native/moy_play/moy_tick.c`, #217) places a cart's declared rate on the host's
     clock, with catch-up, a draw divisor and a press-edge latch per logic tick.
     That is why the pacing tests live here (`tests/test_tick_model.py` and the
     btnp pins in `tests/test_import_p8.py`) and are worth keeping.
@@ -100,7 +102,7 @@ paths:
     the others. A tier difference is an ARGUMENT to the shared body, never a
     second copy: `cart_runs_and_exits(door=…)` names the door a tier leaves by
     (the fullscreen boards pin the kid-facing `cart_quit` flag; the desk boards
-    pin `ws.exit()`, because a run started from a picker arrangement does not
+    pin `ws.exit()`, because a run started from a desk window does not
     pop through the flag), and `draw_gates_are_installed(windowed=…)` adds the
     window-buffer half only where windows exist.
   - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
@@ -149,7 +151,7 @@ paths:
   - Waits and staleness: **wait for `REMOTE drag done`/`swipe done`** before the
     next command; PERF's `wmr/wmw/wms` are TAKEN per sample, `-` when their pass
     did not run in it; allow ~10s
-    after a first `open picker` (cover pop-in, #155). `state`'s
+    after a first `open projects` (cover pop-in, #155). `state`'s
     `uncap` is the RUNNING cart's; the switch the next run takes is `ws._uncap`.
   - **Look system-app carts up by TITLE, never folder name** — the device seeds
     from the title slug, the host copies the source folder, and that mismatch is

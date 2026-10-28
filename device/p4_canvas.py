@@ -36,11 +36,11 @@ The two-domain seam (#39) as it runs on both P4 boards:
 
 try:
     from device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp,
-                               _ST_N_FILL, _ST_N_TEXT)
+                               _ST_N_FILL, _ST_N_TEXT, _room)
     from device_util import _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host package lane
     from device.device_canvas import (DeviceCanvas, SystemCanvas, _LayerComp,
-                                      _ST_N_FILL, _ST_N_TEXT)
+                                      _ST_N_FILL, _ST_N_TEXT, _room)
     from device.device_util import _ticks_ms, _ticks_diff
 
 
@@ -100,6 +100,12 @@ class P4SystemCanvas(SystemCanvas):
         nd = getattr(comp, "note_damage", None)
         if nd is not None:
             self.note_damage = nd
+        # ...and the bar strips it presents as rects of their own: set on
+        # relayout, each rotated when the shell says its pixels moved.
+        ss = getattr(comp, "set_strips", None)
+        if ss is not None:
+            self.set_strips = ss
+            self.strip_moved = comp.strip_moved
         # The quiet-frame snapshot (sync_back / _gates_unchanged): the two
         # native gate counters and this surface's clears, as three ints so a
         # play frame builds no tuple. -1 = no frame yet, never "unchanged".
@@ -122,6 +128,7 @@ class P4SystemCanvas(SystemCanvas):
         self._fr = None
         self._fr_patches = [0] * 24       # six numbers a patch, four at most
         self._paint_frame_fn = self._paint_frame
+        _room(self)                       # device_canvas._MAP_SIZES says why
 
     def cls(self, c=0):
         # Counted, because a clear is the one whole-surface write the native
@@ -181,6 +188,77 @@ class P4SystemCanvas(SystemCanvas):
             P4SystemCanvas._ppa = None
             return False
 
+    # The least copy the AXI GDMA takes in blit_strip: below it the engine's
+    # install round trip is a large share of the copy.
+    GDMA_COPY_MIN = 65536
+
+    def blit_strip(self, layer, dst_x=0, dst_y=0):
+        """SystemCanvas.blit_strip, with a picture as wide as this surface at
+        its left edge, moved by the AXI GDMA (`moy_ppa.copy`): the rows they
+        share are one contiguous span in both buffers -- a full-screen
+        window's stamp, and a band of the glass taken into a layer as wide
+        (a scrim's snapshot, `dst_y` negative). On the Waveshare's 1024x600
+        glass a whole screen is ~12 ms against the CPU's ~26 (the copy_last
+        measurements, docs/surface_model_v1.md §14.5). Any other placement,
+        an engine-less build or a span the engine refuses is the CPU's copy."""
+        ppa = self._ppa
+        w = self.w
+        if (ppa is not None and dst_x == 0 and layer.w == w and self._ox == 0
+                and self._oy == 0 and self._stride == w
+                and getattr(layer, "_stride", w) == w
+                and getattr(layer, "_ox", 0) == 0 and getattr(layer, "_oy", 0) == 0):
+            r0 = -dst_y if dst_y < 0 else 0     # the picture's first row shown
+            d0 = dst_y if dst_y > 0 else 0
+            rows = min(layer.h - r0, self.h - d0)
+            n = 2 * w * rows
+            cp = getattr(ppa, "copy", None)
+            if cp is not None and n >= self.GDMA_COPY_MIN:
+                self.flush_batch()
+                if hasattr(layer, "flush_batch"):
+                    layer.flush_batch()
+                try:
+                    if cp(self._buf, layer._buf, 2 * w * d0, n, 2 * w * r0):
+                        return
+                except Exception:  # noqa: BLE001 -- a short buffer: the CPU's copy
+                    pass
+        SystemCanvas.blit_strip(self, layer, dst_x, dst_y)
+
+    # The least block blit_strip_rect hands the 2D-DMA (`moy_ppa.fbcpy`):
+    # below it the cache work on the destination's whole rows and the submit
+    # cost more than the CPU's copy. None: every block is the CPU's.
+    FBCPY_MIN_PX = 65536
+
+    def blit_strip_rect(self, layer, dst_x, dst_y, rx, ry, rw, rh):
+        """SystemCanvas.blit_strip_rect, a block of FBCPY_MIN_PX or more moved
+        by the 2D-DMA (`moy_ppa.fbcpy`, blocking): a backdrop's band put back
+        under the home's cards. Any other block, an engine-less build or a
+        block the engine refuses is the CPU's copy."""
+        ppa = self._ppa
+        mn = self.FBCPY_MIN_PX
+        if (ppa is not None and mn is not None and rw * rh >= mn and self._ox == 0
+                and self._oy == 0 and getattr(layer, "_stride", layer.w) == layer.w):
+            x0 = rx if rx > dst_x else dst_x
+            y0 = ry if ry > dst_y else dst_y
+            x1 = min(rx + rw, dst_x + layer.w, self.w)
+            y1 = min(ry + rh, dst_y + layer.h, self.h)
+            if x0 < 0:
+                x0 = 0
+            if y0 < 0:
+                y0 = 0
+            fb = getattr(ppa, "fbcpy", None)
+            if fb is not None and x1 > x0 and y1 > y0 and (x1 - x0) * (y1 - y0) >= mn:
+                self.flush_batch()
+                ba = getattr(layer, "_batch_arr", None)
+                if ba is not None and ba[0] > 4:
+                    layer.flush_batch()
+                try:
+                    if fb(self._buf, self._stride, self._bh, x0, y0, layer._buf, layer.w,
+                          layer.h, x0 - dst_x, y0 - dst_y, x1 - x0, y1 - y0):
+                        return
+                except Exception:  # noqa: BLE001 -- a short buffer: the CPU's copy
+                    pass
+        SystemCanvas.blit_strip_rect(self, layer, dst_x, dst_y, rx, ry, rw, rh)
+
     # new_layer is DeviceCanvas.new_layer's one body (the SystemCanvas
     # _make_layer hook constructs this class); its COMPACT-FIRST pre-collect
     # matters MORE here -- a collect on the P4 desk is ~55ms and the bar's
@@ -204,6 +282,12 @@ class P4SystemCanvas(SystemCanvas):
             sx, sy, vw, vh = src
             scr = self._view_crop
             if scr is None or scr.w != vw or scr.h != vh:
+                if scr is not None:
+                    # Off-heap, no collector: give it back once no PPA op of
+                    # the last frame still reads it.
+                    if self._ppa is not None:
+                        self._ppa.sync()
+                    scr.release()
                 scr = self._view_crop = self.new_layer(vw, vh)
             self._gfx.blit565(scr._buf, vw, vh, -sx, -sy,
                               gc._buf, gc.w, gc.h, -1)
@@ -520,19 +604,30 @@ class P4SystemCanvas(SystemCanvas):
         the CPU (PSRAM-bound both ways) -- but async it runs on the DMA engine
         while the loop does input/logic, hiding the drag frame's dominant cost
         (the ~24ms window-content stamp, measured 2026-07-10). Returns False (no
-        PPA / non-fit / hardware refusal) so the caller falls back to the sync
-        CPU stamp. MUST be the frame's LAST framebuffer write (the caller draws
+        PPA / nothing on the glass / hardware refusal) so the caller falls back
+        to the sync CPU stamp. MUST be the frame's LAST framebuffer write (the caller draws
         the chrome FIRST; regions are disjoint, and the PPA driver's dest cache
         writeback at submit covers the shared edge cache lines)."""
         ppa = self._ppa
         x = int(x)
         y = int(y)
         comp = self._comp
-        if (ppa is None or x < 0 or y < 0
-                or x + layer.w > self.w or y + layer.h > self.h
-                or (getattr(comp, "rotated", False)
-                    and not getattr(comp, "_async", False))):
+        rotated = getattr(comp, "rotated", False)
+        if ppa is None or (rotated and not getattr(comp, "_async", False)):
             return False              # no queue to ride: the sync CPU stamp
+        # A window hanging off the glass stamps the block of it that is on
+        # it (the Waveshare's kick takes a source block; the rotated engine
+        # stamps whole layers, so there it stays on the CPU).
+        x0 = x if x > 0 else 0
+        y0 = y if y > 0 else 0
+        x1 = min(x + layer.w, self.w)
+        y1 = min(y + layer.h, self.h)
+        if x0 >= x1 or y0 >= y1:
+            return False
+        whole = (x0 == x and y0 == y
+                 and x1 == x + layer.w and y1 == y + layer.h)
+        if not whole and rotated:
+            return False
         fb = getattr(layer, "flush_batch", None)
         if fb is not None:
             fb()
@@ -543,13 +638,18 @@ class P4SystemCanvas(SystemCanvas):
         # 2026-07-10: persistent desktop droppings during drags, cleaned by the
         # release repaint). REGISTER the stamp instead; P4Compositor.flush()
         # kicks it after the WHOLE frame has drawn -- the true last write.
-        self._comp._stamp_pending = (self._buf, self.w, self.h, x, y,
-                                     layer._buf, layer.w, layer.h)
+        st = (self._buf, self.w, self.h, x, y, layer._buf, layer.w, layer.h)
+        if not whole:
+            st += (x0 - x, y0 - y, x1 - x0, y1 - y0)
+        self._comp._stamp_pending = st
         return True
 
     # blit_cover is SystemCanvas's shared body -- CPU kernel by design: the
     # cover-crop overflows the picture, which the PPA can't do (no clip), and
     # it's a launcher-only backdrop, not a per-frame hot path.
+
+
+_room(P4SystemCanvas)
 
 
 def run_ppa_smoke(comp, set_backlight, scale=2, iters=60, game_w=320, game_h=240):

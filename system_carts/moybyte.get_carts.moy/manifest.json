@@ -1,0 +1,32 @@
+{
+  "format": "moy-1",
+  "version": 3,
+  "title": "Get Carts",
+  "id": "moybyte.get_carts",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "app",
+    "system": true,
+    "order": 320,
+    "targets": [
+      "host",
+      "device",
+      "web"
+    ],
+    "app": {
+      "id": "getcarts",
+      "entry": "getcarts_app:GetCartsAppLayer",
+      "text_mode": false,
+      "order": 80
+    },
+    "permissions": [
+      "graphics",
+      "input",
+      "getcarts"
+    ],
+    "config": {},
+    "edit": []
+  }
+}

@@ -1,112 +1,108 @@
-"""The chrome glyph vocabulary renders from a memoised span list (#58 perf).
+"""The glyph vocabulary is data and its raster is one C body
+(docs/kernel_toolkit_2026-10.md §5).
 
-_blit_glyph used to walk the 12x12 mask bit by bit on every call: 144 iterations
-of Python to emit ~14 native rects whose kernel time was ~1.5us. On glass that
-made one glyph cost ~48us, and the Sprites tab draws 19 of them a frame -- 13ms
-of a 52ms tab (tools/p4_attrib.py). The spans are now computed once per
-(kind, scale).
-
-These tests pin the thing that matters: the cached path must emit the EXACT same
-rect sequence as the bit walk, for every glyph and every scale, because the
-320x240 baselines are byte-identical contracts (#39).
+native/moy_ui/style.json's "glyphs" are the bitmaps runtime/chrome.py held,
+and native/moy_ui's raster derives each glyph's spans from its rows at draw
+time, at any scale. These pin that the C draws EXACTLY what the Python span
+walk drew (`tests/ui_twin.py`'s `blit_glyph`, the old `_blit_glyph`): every
+glyph, every scale, rects smaller than the glyph, a camera and a clip -- the
+baselines are byte-identical contracts (#39). moy_chrome's GLYPH op draws
+through the same raster; tests/test_moy_chrome.py holds its raster to the
+canvas replay, which draws with `ui_draw.glyph`.
 """
 
-from pathlib import Path
+import json
+import os
 
-ROOT = Path(__file__).resolve().parent.parent
+import ui_twin as twin
+from runtime import ui_draw
+from runtime.host_canvas import indices_of
+from runtime.host_canvas import make_system_canvas as SystemCanvas
 
-from runtime import chrome                        # noqa: E402
-
-
-class RecCanvas:
-    """Records rect() calls; font_scale drives the glyph scale. Implements
-    fill_rects (#163) by expanding quads to rect tuples, so the oracle compares
-    the packed-quad path _blit_glyph now takes against the bit walk."""
-
-    def __init__(self, font_scale=1):
-        self.font_scale = font_scale
-        self.rects = []
-
-    def rect(self, x, y, w, h, c):
-        self.rects.append((x, y, w, h, c))
-
-    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
-        if n is None or n < 0:
-            n = len(arr) // 5
-        for i in range(0, n * 5, 5):
-            self.rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
-                      c if c >= 0 else arr[i + 4])
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RECTS = ((4, 4, 40, 30), (10, 3, 12, 12), (20, 20, 5, 7), (-6, -3, 30, 9),
+         (50, 40, 17, 23))
 
 
-def _reference(cv, kind, rect, c, scale=None):
-    """The pre-cache implementation, verbatim, as the oracle."""
-    bits = chrome._GLYPHS.get(kind)
-    if bits is None:
-        return
-    x, y, w, h = rect
-    n = chrome._GLYPH_SIZE
-    fs = int(scale) if scale else getattr(cv, "font_scale", 1)
-    if fs < 1:
-        fs = 1
-    span = n * fs
-    ox = x + (w - span) // 2
-    oy = y + (h - span) // 2
-    for r in range(n):
-        row = bits[r]
-        if not row:
-            continue
-        yy = oy + r * fs
-        run = 0
-        for col in range(n):
-            if row & (1 << (n - 1 - col)):
-                run += 1
-            elif run:
-                cv.rect(ox + (col - run) * fs, yy, run * fs, fs, c)
-                run = 0
-        if run:
-            cv.rect(ox + (n - run) * fs, yy, run * fs, fs, c)
+def test_the_style_file_holds_the_vocabulary():
+    with open(os.path.join(ROOT, "native", "moy_ui", "style.json")) as f:
+        glyphs = json.load(f)["glyphs"]
+    assert list(glyphs) == list(twin._GLYPHS)
+    for kind, rows in glyphs.items():
+        bits = tuple(int(r.replace("#", "1").replace(".", "0"), 2) for r in rows)
+        assert bits == twin._GLYPHS[kind], kind
 
 
-def test_every_glyph_at_every_scale_matches_the_bit_walk():
-    for kind in sorted(chrome._GLYPHS):
+def _both(kind, rect, fs, scale=None, camera=(0, 0), clip=None):
+    out = []
+    for draw in (lambda cv: twin.blit_glyph(cv, kind, rect, 9, scale),
+                 lambda cv: ui_draw.glyph(cv, kind, rect, 9, scale)):
+        cv = SystemCanvas(96, 72, font_scale=fs)
+        cv.camera(*camera)
+        if clip:
+            cv.clip(*clip)
+        draw(cv)
+        out.append(indices_of(cv))
+    return out
+
+
+def test_every_glyph_at_every_scale_matches_the_span_walk():
+    for kind in twin._GLYPHS:
         for fs in (1, 2, 3):
-            for rect in ((0, 0, 12, 12), (7, 31, 40, 24), (100, 5, 13, 12)):
-                got = RecCanvas(fs)
-                want = RecCanvas(fs)
-                chrome._blit_glyph(got, kind, rect, 7)
-                _reference(want, kind, rect, 7)
-                assert got.rects == want.rects, (kind, fs, rect)
+            for rect in RECTS:
+                py, c = _both(kind, rect, fs)
+                assert py == c, (kind, fs, rect)
+
+
+def test_the_camera_and_the_clip_apply():
+    for kind in ("run", "gear", "move", "circle"):
+        py, c = _both(kind, (10, 10, 30, 30), 2, camera=(3, -4),
+                      clip=(12, 8, 20, 17))
+        assert py == c, kind
+        assert any(c), kind
 
 
 def test_explicit_scale_overrides_the_canvas_font_scale():
-    got, want = RecCanvas(1), RecCanvas(1)
-    chrome._blit_glyph(got, "run", (0, 0, 60, 60), 7, scale=4)
-    _reference(want, "run", (0, 0, 60, 60), 7, scale=4)
-    assert got.rects == want.rects
-    assert got.rects and max(r[3] for r in got.rects) == 4
+    py, c = _both("star", (0, 0, 60, 60), 1, scale=4)
+    assert py == c and any(c)
+    big, _ = _both("star", (0, 0, 60, 60), 4)
+    assert c == big
 
 
 def test_unknown_kind_draws_nothing():
-    # The fallback contract: every caller keeps a text label for this case.
-    cv = RecCanvas(1)
-    chrome._blit_glyph(cv, "no_such_glyph", (0, 0, 12, 12), 7)
-    assert cv.rects == []
+    for kind in ("no-such-glyph", None, ""):
+        cv = SystemCanvas(32, 32)
+        before = indices_of(cv)
+        ui_draw.glyph(cv, kind, (0, 0, 32, 32), 9)
+        assert indices_of(cv) == before
+        assert ui_draw.glyph_id(kind) == -1
 
 
-def test_spans_are_cached_per_kind_and_scale():
-    chrome._GLYPH_RUNS.clear()
-    cv = RecCanvas(2)
-    chrome._blit_glyph(cv, "run", (0, 0, 24, 24), 7)
-    first = chrome._GLYPH_RUNS[("run", 2)]
-    chrome._blit_glyph(cv, "run", (40, 0, 24, 24), 7)
-    assert chrome._GLYPH_RUNS[("run", 2)] is first     # reused, not rebuilt
-    chrome._blit_glyph(cv, "run", (0, 0, 12, 12), 7, scale=1)
-    assert ("run", 1) in chrome._GLYPH_RUNS            # a scale is its own entry
+def test_a_glyph_is_one_fill_per_span():
+    """The row's counter: a span is a fill, as the gate's fill_rects counts."""
+    for kind in ("run", "map", "blocks"):
+        cv = SystemCanvas(64, 64, font_scale=2)
+        cv.gate_counts_reset()
+        ui_draw.glyph(cv, kind, (0, 0, 40, 40), 7)
+        assert cv.gate_counts()[:2] == (len(twin.glyph_runs(kind, 2)), 0), kind
 
 
-def test_a_blank_glyph_row_emits_no_span():
-    # Several glyphs have empty top/bottom rows; they must not cost a rect.
-    runs = chrome._glyph_runs("run", 1)
-    assert len(runs) % 3 == 0
-    ys = {runs[i + 1] for i in range(0, len(runs), 3)}
-    assert 0 not in ys                     # "run" row 0 is 0x000
+def test_one_raster_and_no_pushed_copy():
+    """The glyphs live in style.json alone: no Python table in runtime/, no
+    push into moy_chrome, no surface role row."""
+    for d in ("runtime", "native", "device"):
+        for base, _sub, files in os.walk(os.path.join(ROOT, d)):
+            for f in files:
+                if not f.endswith((".py", ".c", ".h")):
+                    continue
+                with open(os.path.join(base, f), encoding="utf-8",
+                          errors="replace") as fh:
+                    src = fh.read()
+                rel = os.path.relpath(os.path.join(base, f), ROOT)
+                assert "_GLYPHS" not in src.replace("ICON_GLYPHS", "").replace(
+                    "P8_GLYPHS", "").replace("MOY_UI_GLYPHS", "").replace(
+                    "FONT_GLYPHS", ""), rel
+                assert "chrome_glyph" not in src and "glyph_put" not in src, rel
+    with open(os.path.join(ROOT, "native", "moy_app", "roles.json")) as f:
+        rows = json.load(f)["rows"]
+    assert not [r for r in rows if r["verb"] == "glyph"]

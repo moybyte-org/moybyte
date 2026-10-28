@@ -120,20 +120,6 @@ def _console(tmp_path, index_url):
     return site
 
 
-def _layout():
-    """Where the app draws on the 320x240 handheld tier -- its own layout
-    class, so a tap lands where the console drew."""
-    sys.path.insert(0, str(ROOT))
-    from runtime.getcarts_app import GetCartsLayout
-    lay = GetCartsLayout(320, 240, 1, False, 1)
-
-    def centre(r):
-        return [r[0] + r[2] // 2, r[1] + r[3] // 2]
-    return {"row": [centre(lay.row_rect(i)) for i in range(3)],
-            "one": centre(lay.buttons(1)[0]),
-            "two": [centre(r) for r in lay.buttons(2)]}
-
-
 # What the browser's store of record holds, read straight out of OPFS.
 _OPFS = """(async () => {
   const root = await navigator.storage.getDirectory();
@@ -160,7 +146,7 @@ _FOLDERS = '["rock.moy", "dm.moy", "zap.moy"]'
 
 _FORGET_APP = """(async () => {
   const carts = await (await navigator.storage.getDirectory()).getDirectoryHandle('carts');
-  await carts.removeEntry('get_carts.moy', {recursive: true});
+  await carts.removeEntry('moybyte.get_carts.moy', {recursive: true});
   return 'gone';
 })()"""
 
@@ -173,23 +159,23 @@ def test_a_hosted_console_installs_carts_into_its_own_store(tmp_path):
     site = _console(tmp_path, pages.base + "/index.json")
     server, base = web_e2e.serve(site, web_e2e.free_port())
     profile = tmp_path / "chrome"
-    at = _layout()
+    at = web_e2e.get_carts_taps()
     try:
-        out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "install", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"note": "Get Carts opened at boot; the index came from PAGES", "wait": 4000},
             {"shot": "list"},
             {"js": "window.__moyPersist ? window.__moyPersist.mode : 'none'"},
-            {"note": "Rock Run: the plain cart", "click": at["row"][1]},
+            {"note": "Rock Run: the plain cart", "click": at["cards"][1]},
             {"wait": 800}, {"shot": "rock"},
-            {"click": at["one"]},
+            {"click": at["verb"]},
             {"wait": 5000}, {"shot": "rock_ready"},
             {"js": "window.__moyInstalled || ''"},
             {"js": _OPFS % _FOLDERS},
-            {"note": "OK, back to the list, then Dungeon", "click": at["two"][1]},
-            {"wait": 800}, {"click": at["row"][0]},
-            {"wait": 800}, {"click": at["one"]},
+            {"note": "Back to the shelf, then Dungeon", "key": "Escape"},
+            {"wait": 800}, {"click": at["cards"][0]},
+            {"wait": 800}, {"click": at["verb"]},
             {"note": "its licence first", "wait": 3000}, {"shot": "licence"},
-            {"click": at["two"][0]},
+            {"click": at["agree"]},
             {"note": "the archive's host cannot be read: the page asks", "wait": 4000},
             {"shot": "your_copy"},
             {"js": "JSON.stringify(window.__moyPick || null)"},
@@ -199,9 +185,9 @@ def test_a_hosted_console_installs_carts_into_its_own_store(tmp_path):
             {"wait": 6000}, {"shot": "dm_ready"},
             {"js": "getComputedStyle(document.getElementById('pk')).display"},
             {"js": _OPFS % _FOLDERS},
-            {"note": "Zap: its mirror's bytes are wrong", "click": at["two"][1]},
-            {"wait": 800}, {"click": at["row"][2]},
-            {"wait": 800}, {"click": at["one"]},
+            {"note": "Zap: its mirror's bytes are wrong", "key": "Escape"},
+            {"wait": 800}, {"click": at["cards"][2]},
+            {"wait": 800}, {"click": at["verb"]},
             {"wait": 5000}, {"shot": "zap_failed"},
             {"js": _OPFS % _FOLDERS},
             {"note": "a store from before Get Carts shipped: it is not in OPFS",
@@ -247,7 +233,7 @@ def test_a_hosted_console_installs_carts_into_its_own_store(tmp_path):
         shelf = js2[1]
         assert "rock.moy" in shelf and "dm.moy" in shelf and "zap.moy" not in shelf, \
             "the installs did not survive a reload:\n%s" % out2[-3000:]
-        assert "get_carts.moy" in shelf, \
+        assert "moybyte.get_carts.moy" in shelf, \
             "a system cart the store never had did not come from the bundle"
         assert js2[2].startswith("loaded "), js2[2]
 
@@ -300,14 +286,14 @@ def test_a_hosted_console_takes_an_external_file_from_its_mirror(tmp_path):
                         "member": "pkg/level.wad"}}]}]}).encode()
     site = _console(tmp_path, pages.base + "/index.json")
     server, base = web_e2e.serve(site, web_e2e.free_port())
-    at = _layout()
+    at = web_e2e.get_carts_taps()
     try:
-        out, js = web_e2e.run(tmp_path, "mirror", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "mirror", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"note": "Get Carts opened at boot", "wait": 4000},
-            {"click": at["row"][0]},
-            {"wait": 800}, {"click": at["one"]},
+            {"click": at["cards"][0]},
+            {"wait": 800}, {"click": at["verb"]},
             {"note": "its licence first", "wait": 3000},
-            {"click": at["two"][0]},
+            {"click": at["agree"]},
             {"note": "from the mirror, asking nothing", "wait": 6000}, {"shot": "wm_ready"},
             {"js": "JSON.stringify(window.__moyPick || null)"},
             {"js": "getComputedStyle(document.getElementById('pk')).display"},
@@ -340,7 +326,7 @@ def test_a_board_served_page_gets_no_carts_of_its_own(tmp_path, board, home):
     pages.files["/index.json"] = b'{"version": 1, "carts": []}'
     store = tmp_path / "store"
     store.mkdir()
-    shutil.copytree(ROOT / "system_carts" / "get_carts.moy", store / "get_carts.moy")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.get_carts.moy", store / "moybyte.get_carts.moy")
     site = _console(tmp_path, pages.base + "/index.json")
     port = web_e2e.free_port()
     p = subprocess.Popen([sys.executable, "serve.py", str(port), str(site),
@@ -354,7 +340,7 @@ def test_a_board_served_page_gets_no_carts_of_its_own(tmp_path, board, home):
                 break
             except OSError:
                 time.sleep(0.1)
-        out, js = web_e2e.run(tmp_path, "board", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "board", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"wait": 2500},
             {"js": "window.__moyPersist ? window.__moyPersist.mode : 'none'"},
             {"js": "JSON.stringify((window.__moyUpdate || {}).services || null)"},
@@ -384,7 +370,7 @@ def test_a_board_with_a_big_store_serves_a_page_that_boots(tmp_path):
     web_e2e.require("store", "carts")
     store = tmp_path / "store"
     store.mkdir()
-    shutil.copytree(ROOT / "system_carts" / "get_carts.moy", store / "get_carts.moy")
+    shutil.copytree(ROOT / "system_carts" / "moybyte.get_carts.moy", store / "moybyte.get_carts.moy")
     sys.path.insert(0, str(ROOT))
     from tools import wasm_cart
     wasm_cart.build(str(ROOT / "tests" / "fixtures" / "wasm" / "tier.moy"),
@@ -414,7 +400,7 @@ def test_a_board_with_a_big_store_serves_a_page_that_boots(tmp_path):
                 break
             except OSError:
                 time.sleep(0.1)
-        out, js = web_e2e.run(tmp_path, "big_board", "?handheld=1&dev=1&cart=get_carts.moy", [
+        out, js = web_e2e.run(tmp_path, "big_board", "?handheld=1&dev=1&cart=moybyte.get_carts.moy", [
             {"wait": 2500},
             {"js": "window.__moyPersist ? window.__moyPersist.mode : 'none'"},
             {"js": "JSON.stringify((window.__moyUpdate || {}).services || null)"},

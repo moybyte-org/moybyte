@@ -7,6 +7,11 @@ persists through `prefs`. What the settings MEAN at boot (`load_system`'s
 apply cascade) stays on the kernel.
 """
 
+try:                        # a VM: the kernel's frame loop (native/moy_kernel)
+    import moy_loop as _loop
+except ImportError:         # host CPython: the host drives its own frames
+    _loop = None
+
 
 class SettingsToggles:
 
@@ -23,14 +28,16 @@ class SettingsToggles:
         setattr(self, key, on)
         self._dirty = True
         if persist:
-            self.system[key] = on
-            self.prefs.persist()
+            self.system.set(key, on)
 
     def set_diag_live(self, on, persist=True):
         """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
-        The device loop (moy_runtime.run_desktop) reads self.diag_live each cycle,
-        so the change takes effect within a frame -- no reboot."""
+        On a tier whose frames are the kernel's, the capture meters and the
+        PERF line follow it at the next frame -- no reboot."""
         self._set_toggle("diag_live", bool(on), persist)
+        if _loop is not None:
+            self.perf_capture = bool(on)
+            _loop.capture(bool(on))
 
     def set_diag_sd(self, on, persist=True):
         """Flip the periodic diag->SD write gate (Settings -> DIAG SD LOG) and
@@ -156,6 +163,6 @@ class SettingsToggles:
         step flips. This only changes what UPDATE ONLINE checks -- the running firmware
         is unchanged until a manifest is actually installed (and the bootloader's
         rollback still guards a bad beta image)."""
-        self.system["ota_channel"] = (
+        self.system.set(
+            "ota_channel",
             "stable" if self._ota_channel() == "unstable" else "unstable")
-        self.prefs.persist()

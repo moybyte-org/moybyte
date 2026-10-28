@@ -19,17 +19,24 @@ presentation's contracts:
 """
 
 import os
+
+import pytest
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_desktop_ws
+from ws_helpers import build_desktop_ws, select_on_home, use_theme
 
 
 def _ws(tmp_path, **kw):
+    """The desk on the `night` fixture (tests/fixtures/themes/), in its dark
+    mode: the WM's mechanics are pinned on a palette theme with no look (the
+    default's, flat, under its classic frame); a test of a look sets its
+    theme."""
     ws = build_desktop_ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark")
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))
     return ws
@@ -38,6 +45,15 @@ def _ws(tmp_path, **kw):
 def _drv(ws):
     from runtime import host_app
     return host_app.ConsoleDriver(ws)
+
+
+def _open_editor(ws):
+    """The desk's PROJECTS, then its first project: the Editor in a window of
+    its own above the home window."""
+    ws.open_projects()
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("path"))
+    ws.launch_selected(g)
 
 
 def _quiesce(ws):
@@ -71,6 +87,8 @@ def test_a_game_window_does_not_black_out_the_desk(tmp_path):
     _quiesce(ws)
     ws.open_desk()
     drv.frame(1 / 30)
+    sc = ws.sys_canvas
+    desk = bytes(sc._buf)
     ws.open()                                    # a cart, in a player WINDOW
     for _ in range(3):
         drv.frame(1 / 30)
@@ -78,15 +96,23 @@ def test_a_game_window_does_not_black_out_the_desk(tmp_path):
     win = ws.wm._wins["desktop"]
     assert win is not None and win.w < ws.sys_canvas.w
 
-    sc = ws.sys_canvas
-    # Sample the desk WELL clear of the window: bands span the full width and
-    # the full height, so any of these catches them.
-    outside = [(2, sc.h - 3), (sc.w - 3, sc.h - 3), (2, win.y + win.h // 2),
-               (sc.w - 3, win.y + win.h // 2)]
-    for x, y in outside:
-        assert ws.wm._win_at(x, y) is None, (x, y)   # really outside every window
-    assert any(sc.pix(x, y) != 0 for x, y in outside), \
-        "the game composite letterboxed the whole desktop black"
+    # Sample the desk WELL clear of the window, along a row and a column the
+    # bands would cross whole: the wallpaper and the icon column there are as
+    # the desk drew them before the game opened (Moy's night is a black sky,
+    # so a lone pixel's colour would not tell a band from the night).
+    outside = [(x, win.y + win.h // 2) for x in range(0, sc.w, 3)] + \
+              [(x, sc.h - 3) for x in range(0, sc.w, 3)] + \
+              [(48, y) for y in range(0, sc.h, 3)]       # down the icon column
+    outside = [p for p in outside if ws.wm._win_at(*p) is None]
+    assert len(outside) > sc.w // 3
+
+    def px(buf, x, y):
+        i = (y * sc.w + x) * 2
+        return buf[i] << 8 | buf[i + 1]
+
+    assert any(px(desk, x, y) != px(desk, 0, sc.h - 3) for x, y in outside)
+    assert all(px(sc._buf, x, y) == px(desk, x, y) for x, y in outside), \
+        "the game composite letterboxed the desktop"
 
 
 def test_the_fullscreen_tier_still_gets_its_letterbox(tmp_path):
@@ -292,16 +318,16 @@ def test_windowed_ignored_at_320x240(tmp_path):
 
 
 def test_root_only_defers_to_fullscreen_shape(tmp_path):
-    """The PLAY world (#105): with no desk on the stack there are no windows --
-    the visible stack is [launcher] + overlays, exactly the fullscreen tier's
-    shape. Boot lands on the DESK, so drop to the Library first."""
+    """Console mode: no windows -- the visible stack is [launcher] +
+    overlays, exactly the fullscreen tier's shape. Boot lands on the DESK, so
+    the desk's PLAY enters console mode first."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "desk"]      # boot = the desk
+    assert ws.wm.stack.kinds() == ["launcher", "desk"]      # boot = the desk
     ws.open_library()
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher"]
+    assert ws.wm.stack.kinds() == ["launcher"]
     assert ws.wm._order == []
     assert ws.wm.visible_stack()[0] is ws.launcher_layer
 
@@ -323,30 +349,26 @@ def test_push_opens_window_pop_closes_it(tmp_path):
     assert ws.wm._wins == {}
 
 
-def test_picker_and_editor_share_one_make_window(tmp_path):
-    """The project picker and the Editor are ONE window (the Make flow, owner
-    call): picking a project swaps the window's CONTENT to the Editor -- no
-    second window spawns -- and PROJECTS swaps it back. The back-stack still
-    holds both kinds (exit pops one level at a time)."""
+def test_the_editor_opens_in_its_own_window_above_projects(tmp_path):
+    """The desk's PROJECTS is the home in a window; a Make pick opens the
+    Editor in a window of its own above it, laid out at the window's size."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
+    ws.open_projects()
     drv.frame(1 / 30)
-    assert ws.wm._order == ["make"]
-    win = ws.wm._wins["make"]
-    assert win.kind == "picker"
-    ws.pick_selected()
+    assert ws.wm._order == ["projects"]
+    home = ws.wm._wins["projects"]
+    g = ws.projects_grid
+    g.sel = next(i for i, it in enumerate(g.items) if it.get("path"))
+    ws.launch_selected(g)
     drv.frame(1 / 30)
-    assert ws.wm._order == ["make"]              # STILL one window
-    assert ws.wm._wins["make"] is win            # the same record
-    assert win.kind == "menu"                    # showing the Editor now
-    assert ws.wm._stack == ["launcher", "desk", "picker", "menu"]   # stack unchanged
+    assert ws.wm._order == ["projects", "menu"]
+    assert ws.wm._wins["projects"] is home
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu"]
+    win = ws.wm._wins["menu"]
     assert win.buf is not None and win.ctx is not None
     # The window's layout context is sized to the window, not the desktop.
     assert win.ctx.layout.w == win.buf.w and win.ctx.layout.w < 1024
-    ws.open_picker()                             # PROJECTS: back in the same window
-    drv.frame(1 / 30)
-    assert ws.wm._order == ["make"] and win.kind == "picker"
 
 
 def test_change_leaves_library_for_desktop_backdrop(tmp_path):
@@ -366,7 +388,7 @@ def test_change_leaves_library_for_desktop_backdrop(tmp_path):
     _quiesce(ws)
     drv.frame(1 / 30)
     assert ws.screen == "menu"
-    assert ws.wm._order == ["make"]
+    assert ws.wm._order == ["menu"]
     assert launcher_draws == []       # wallpaper + OS bar, no hidden Library grid
     assert ws.layout.w == 1024      # ambient (root) layout after the frame
     assert ws.launcher.layout.w == 1024
@@ -382,7 +404,7 @@ def test_change_leaves_library_for_desktop_backdrop(tmp_path):
     tile = ws.launcher.tile_rect(ws.launcher.sel)
     ws.wm._backdrop_layer.handle_pointer(tile[0] + 2, tile[1] + 2, True)
     assert launched == []
-    assert ws.screen != "launcher" and "desk" in ws.wm._stack
+    assert ws.screen != "launcher" and ws.wm.stack.has("desk")
 
 
 # ---------------------------------------------------------------------------
@@ -392,28 +414,27 @@ def test_change_leaves_library_for_desktop_backdrop(tmp_path):
 def test_play_opens_playtest_window_and_exit_returns(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     ws.set_menu_view("code")
     drv.frame(1 / 30)
     ws._leave_menu()                # PLAY: run the cart, caller = the Editor
     drv.frame(1 / 30)
     assert ws.wm._order[-1] == "desktop"
-    assert "make" in ws.wm._order   # the editor window is still open beneath
+    assert "menu" in ws.wm._order   # the editor window is still open beneath
     win = ws.wm._wins["desktop"]
     assert win.buf is None                       # the game canvas IS its content
     assert ws.wm._player_view(win)[2] >= 1       # integer viewport scale
     ws._exit_to_caller()
     drv.frame(1 / 30)
-    assert ws.wm._order[-1] == "make"
+    assert ws.wm._order[-1] == "menu"
     assert ws.menu_view == "code"   # back on the tab PLAY left
 
 
-def test_editor_playtest_opens_smaller_than_a_desk_run(tmp_path):
-    """#178: one run() verb, two jobs. A PLAY from the Editor is a dev action --
-    the playtest window opens small so the code beside it stays workable -- while
-    running a cart from the desk opens it as big as the desktop fits. The entry
-    point carries that meaning (run()'s caller), so nobody picks a scale."""
+def test_editor_playtest_opens_at_2x_over_the_editor(tmp_path):
+    """#178: one run() verb, two jobs, read from run()'s caller. A PLAY from
+    the Editor opens at 2x centred over the Editor where the desk holds it
+    (the owner's D-03.4, 2026-10-19); a desk run opens as big as the desk
+    fits."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open()                       # desk run: play-sized
@@ -423,20 +444,18 @@ def test_editor_playtest_opens_smaller_than_a_desk_run(tmp_path):
     ws._exit_to_caller()
     drv.frame(1 / 30)
 
-    ws.open_picker()                # Editor PLAY: dev-sized
-    ws.pick_selected()
+    _open_editor(ws)                # Editor PLAY: the dev size
     drv.frame(1 / 30)
     ws._leave_menu()
     drv.frame(1 / 30)
     dev = ws.wm._wins["desktop"]
-    assert dev.w < play.w and dev.h < play.h
-    assert ws.wm._player_view(dev)[2] == 1        # native cart pixels
-    assert play_scale > 1                         # ... vs as-big-as-fits
-    # Small enough to leave the editor beneath it usable: under half the desktop,
-    # and parked in the corner rather than centered on the code column.
-    assert dev.w * 2 < ws.sys_canvas.w
-    assert dev.x + dev.w <= ws.sys_canvas.w and dev.x > play.x
-    assert dev.y + dev.h <= ws.sys_canvas.h and dev.y > play.y
+    ed = ws.wm._wins["menu"]
+    assert ws.wm._player_view(dev)[2] == min(2, play_scale) == 2
+    assert abs((dev.x + dev.w // 2) - (ed.x + ed.w // 2)) <= 1 or dev.x in (
+        ws.wm._desk_rect()[0], ws.wm._desk_rect()[0] + ws.wm._desk_rect()[2] - dev.w)
+    dx, dy, dw, dh = ws.wm._desk_rect()
+    assert dx <= dev.x and dev.x + dev.w <= dx + dw
+    assert dy <= dev.y and dev.y + dev.h <= dy + dh
     # A window the kid has since resized is never re-sized under them: the
     # intent is read ONCE, when the window is created.
     ws.wm._resize_window(dev, play.w, play.h)
@@ -444,19 +463,169 @@ def test_editor_playtest_opens_smaller_than_a_desk_run(tmp_path):
     assert ws.wm._wins["desktop"].w == play.w
 
 
-def test_dev_playtest_is_native_size_on_every_desktop(tmp_path):
-    """The dev playtest is ONE size everywhere: native cart pixels, not a
-    fraction of the screen. A play run still grows with the desktop."""
-    sizes = []
+def test_dev_playtest_is_2x_where_it_fits_else_native(tmp_path):
+    """The dev playtest is 2x where the desk holds it and native cart pixels
+    where it does not; a play run still grows with the desktop."""
+    from runtime import wm_windowed
     for i, sys_size in enumerate(((640, 480), (1024, 600), (1440, 900))):
         ws = _ws(tmp_path / str(i), sys_size=sys_size, font_scale=1)
         full = ws.wm._root_canvas
         ws.wm.set_play_intent("dev")
-        sizes.append(ws.wm._win_size("desktop", full, 1))
+        dev = ws.wm._win_size("desktop", full, 1)
         ws.wm.set_play_intent("play")
-        play_w = ws.wm._win_size("desktop", full, 1)[0]
-        assert play_w >= sizes[-1][0]
-    assert sizes[0] == sizes[1] == sizes[2] == (ws.canvas.w + 2, ws.canvas.h + 2 + 18)
+        play = ws.wm._win_size("desktop", full, 1)
+        assert play[0] >= dev[0]
+        s = (dev[0] - 2) // ws.canvas.w
+        assert s == (wm_windowed._DEV_SCALE if sys_size != (640, 480) else 1), sys_size
+        assert dev == (ws.canvas.w * s + 2, ws.canvas.h * s + 2 + 18)
+
+
+def test_a_native_playtest_opens_clear_of_the_editors_symbol_keys(tmp_path):
+    """Where 2x does not fit, the playtest opens at native size at the
+    Editor's top right, clear of the symbol keys along its foot (D-03.4)."""
+    ws = _ws(tmp_path, sys_size=(640, 480), font_scale=1)
+    drv = _drv(ws)
+    _open_editor(ws)
+    drv.frame(1 / 30)
+    ws._leave_menu()
+    drv.frame(1 / 30)
+    dev = ws.wm._wins["desktop"]
+    ed = ws.wm._wins["menu"]
+    assert ws.wm._player_view(dev)[2] == 1
+    assert dev.y < ed.y + ed.h // 2
+
+
+@pytest.mark.parametrize("dev", [True, False], ids=["playtest", "desk-run"])
+def test_a_game_window_holds_its_game_whole_over_rounded_corners(tmp_path, dev):
+    """Under a depth with rounded corners the frame takes rows under the
+    content (the foot): the game window is sized to the game PLUS them, so
+    the game's rows are all inside its content rect -- none under the title
+    strip, none under the foot -- at its scale."""
+    ws = _moy_desk(tmp_path)
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path"))
+    drv = _drv(ws)
+    if dev:
+        _open_editor(ws)
+        drv.frame(1 / 30)
+        ws._leave_menu()                          # PLAY from the Editor
+    else:
+        ws.open()
+    drv.frame(1 / 30)
+    wm = ws.wm
+    win = wm._wins["desktop"]
+    assert win.foot > 0
+    cx, cy, cw, ch = win.content_rect()
+    ox, oy, s = wm._player_view(win)
+    assert s >= 1
+    assert (ox, oy) == (cx, cy)
+    assert (cw, ch) == (ws.canvas.w * s, ws.canvas.h * s)
+
+
+_TRIM_CART = {
+    "manifest.json": ('{"format": "moy-1", "title": "Trim Fill", "version": 1,'
+                      ' "main": "main.lua", "runtime": "lua", "fps": 30,'
+                      ' "canvas": "128x128", "input": ["buttons"]}'),
+    # the p8 importer's 128x120 trim (p8_writer.P8_CROP), every pixel drawn
+    "main.lua": "view(128, 120)\nfunction _draw() cls(8) end\n",
+}
+
+
+def _trim_desk(tmp_path):
+    ws = _moy_desk(tmp_path)
+    root = Path(ws.carts_root) / "trim_fill.moy"
+    root.mkdir()
+    for name, text in _TRIM_CART.items():
+        (root / name).write_text(text)
+    ws.carts.rescan()
+    assert select_on_home(ws, "Trim Fill") is not None
+    return ws
+
+
+def _settle(ws, n=4):
+    """`n` frames with no overlay over the game: no FPS chip, no toast (the
+    first open's achievement)."""
+    ws.show_fps = False
+    for _ in range(n):
+        ws._toast_until = 0
+        ws.frame(1 / 30)
+
+
+def _nothing_beneath_shows(ws, win):
+    """Every pixel inside the player window's ring, from the title strip's
+    foot to the frame's foot, is the window's own: the game, the bezel a
+    content rect larger than the game takes, or the window's body (the
+    matte at the sides, the colour its foot is painted)."""
+    wm = ws.wm
+    sc = wm._root_canvas
+    cx, cy, cw, ch = win.content_rect()
+    ox, oy, s = wm._player_view(win)
+    view = wm._view_src() or (0, 0, ws.canvas.w, ws.canvas.h)
+    game = _px(ws.canvas, view[0] + view[2] // 2, view[1] + view[3] // 2)
+    body = _px(sc, win.x + win.w // 2, cy + ch + max(1, win.foot // 2))
+    bezel = _px(sc, cx, cy) if (ox, oy) != (cx, cy) else game
+    e = wm._frame_edge()
+    x0, x1 = win.x + 1 + e, win.x + win.w - 1 - e
+    bad = []
+    for y in range(cy, cy + ch):
+        for x in range(x0, x1):
+            p = _px(sc, x, y)
+            if ox <= x < ox + view[2] * s and oy <= y < oy + view[3] * s:
+                want = (game,)
+            elif cx <= x < cx + cw:
+                want = (bezel,)
+            else:
+                want = (body,)
+            if p not in want:
+                bad.append((x, y, hex(p)))
+    return bad
+
+
+@pytest.mark.parametrize("size", ["play", "dev", "resized"])
+def test_a_trimmed_game_window_shows_nothing_beneath(tmp_path, size):
+    """celeste's 128x120 trim in a game window at every size the WM gives
+    one: the game covers its content rect and the matte round it is the
+    window's body, so no pixel of the desk shows through at its sides (the
+    owner's "celeste is transparent on the borders", 2026-10-20)."""
+    ws = _trim_desk(tmp_path)
+    ws.open()
+    _settle(ws)
+    wm = ws.wm
+    win = wm._wins["desktop"]
+    assert ws.cart.get("title") == "Trim Fill"
+    if size == "dev":
+        wm.set_play_intent("dev")
+        wm._resize_window(win, *wm._win_size("desktop", wm._root_canvas, wm._fs()))
+    elif size == "resized":
+        wm._resize_window(win, win.w + 37, win.h - 23)
+    _settle(ws)
+    assert win.foot > 0 and win.edge >= win.foot     # the matte this pins
+    bad = _nothing_beneath_shows(ws, win)
+    assert not bad, "%d pixels of what is beneath show, first %r" % (len(bad), bad[:4])
+
+
+def test_a_trimmed_game_fullscreen_covers_its_rect(tmp_path):
+    """The same cart in console mode: the scaled game covers its rect, and
+    every pixel round it is the letterbox bezel."""
+    ws = _trim_desk(tmp_path)
+    ws.wm.enter_console()
+    _settle(ws, 2)
+    assert select_on_home(ws, "Trim Fill") is not None
+    ws.open()
+    _settle(ws)
+    wm = ws.wm
+    assert wm.mode == "console" and not wm._wins
+    sc = wm._root_canvas
+    ox, oy, s = wm.viewport()
+    view = wm._view_src() or (0, 0, ws.canvas.w, ws.canvas.h)
+    game = _px(ws.canvas, view[0] + view[2] // 2, view[1] + view[3] // 2)
+    bezel = _px(sc, 0, 0)
+    assert bezel != game
+    gw, gh = view[2] * s, view[3] * s
+    bad = [(x, y) for y in range(sc.h) for x in range(sc.w)
+           if _px(sc, x, y) != (game if ox <= x < ox + gw and oy <= y < oy + gh
+                                 else bezel)]
+    assert not bad, "%d pixels off, first %r" % (len(bad), bad[:4])
 
 
 def test_game_viewport_is_the_player_window(tmp_path):
@@ -481,8 +650,7 @@ def test_game_viewport_is_the_player_window(tmp_path):
 def test_player_window_x_exits_to_caller(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()
     drv.frame(1 / 30)
@@ -490,8 +658,8 @@ def test_player_window_x_exits_to_caller(tmp_path):
     xr = dict(ws.wm._strip_buttons(win))["close"]
     drv.touch(xr[0] + 2, xr[1] + 2)
     drv.frame(1 / 30)
-    assert ws.wm._order[-1] == "make"     # back to the editor window
-    assert ws.wm._wins["make"].kind == "menu"
+    assert ws.wm._order[-1] == "menu"     # back to the editor window
+    assert ws.wm._wins["menu"].kind == "menu"
 
 
 # ---------------------------------------------------------------------------
@@ -503,23 +671,18 @@ def test_window_local_tap_hits_the_apps_bar(tmp_path):
     app's zone -- switching tabs via the ladder works at the WINDOW's position."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     assert ws.menu_view == "cards"        # Config-first landing
-    win = ws.wm._wins["make"]
+    win = ws.wm._wins["menu"]
     # The Editor's lent zone at shelf density: the labeled CODE tab chip (visual
     # identity v1 Phase 3) -- resolve its rect through the SAME geometry the
-    # draw/tap path uses (editor_app._zone_parts + ui.tab_row_rects), so this
+    # draw/tap path uses (editor_app._zone_parts + _shelf_rects), so this
     # test tracks the layout instead of a hardcoded stride. The app's bar row
     # sits below the WM title strip.
-    from runtime import ui as _ui
-    from runtime import editor_app as _ea
     zone = win.ctx.layout.zone_left
-    _proj, tabs_area, _play = ws.editor_app._zone_parts(zone)
-    slim = [(tid, label) for tid, label, _ic in _ea._TAB_CHIPS]
-    rects = dict((tid, r) for tid, r, _l in
-                 _ui.tab_row_rects(tabs_area, slim, max(1, zone[3] // 16)))
+    tabs_area, _play = ws.editor_app._zone_parts(zone)
+    rects = dict((tid, r) for tid, r, _l in ws.editor_app._shelf_rects(tabs_area))
     cx, cy = rects["code"][0] + 2, rects["code"][1] + 2
     drv.touch(win.x + 1 + cx, win.y + 1 + win.title_h + cy)
     drv.frame(1 / 30)
@@ -633,27 +796,26 @@ def test_click_moves_focus_without_popping_the_playtest(tmp_path):
     an explicit exit ends the run. Typing then lands in the editor."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     ws.set_menu_view("code")
     drv.frame(1 / 30)
     ws._leave_menu()                       # PLAY
     drv.frame(1 / 30)
     assert ws.wm._focus == "desktop"
-    make = ws.wm._wins["make"]
+    make = ws.wm._wins["menu"]
     # Drag the playtest window aside so a corner of the editor is exposed, then
     # click that corner.
     player = ws.wm._wins["desktop"]
     ws.wm._move_window(player, 600, 300)
     drv.frame(1 / 30)
     px, py = make.x + 4, make.y + 4
-    assert ws.wm._win_at(px, py) == "make"
+    assert ws.wm._win_at(px, py) == "menu"
     drv.touch(px, py)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.wm._focus == "make"
-    assert ws.wm._stack[-1] == "desktop"   # the playtest was NOT popped
+    assert ws.wm._focus == "menu"
+    assert ws.wm.stack.top() == "desktop"   # the playtest was NOT popped
     assert "desktop" in ws.wm._order       # its window is still up
     # The game-pointer gate: a background cart must not see live taps.
     assert not ws.wm.player_has_pointer()
@@ -662,11 +824,17 @@ def test_click_moves_focus_without_popping_the_playtest(tmp_path):
     drv.type_char(ord("q"))
     drv.frame(1 / 30)
     assert ws.editor.text() == "q"
-    # Refocusing the playtest restores its pointer.
-    drv.touch(player.x + 40, player.y + 4)
+    # The click raised the editor over the playtest, which it now covers;
+    # refocusing the playtest from its chip raises it back and restores its
+    # pointer.
+    assert ws.wm._order[-1] == "menu"
+    assert ws.wm._win_at(player.x + 40, player.y + 4) == "menu"
+    x, y, w, h = next(r for k, r, _ in ws.wm._chip_rects() if k == "desktop")
+    drv.touch(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
+    assert ws.wm._order[-1] == "desktop"
     assert ws.wm._focus == "desktop" and ws.wm.player_has_pointer()
 
 
@@ -675,12 +843,11 @@ def test_player_keeps_ticking_while_editor_is_focused(tmp_path):
     the running cart's frame counter keeps advancing."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                       # PLAY
     drv.frame(1 / 30)
-    ws.wm._focus = "make"                  # focus the editor beside it
+    ws.wm._focus = "menu"                  # focus the editor beside it
     ws._dirty = True
     before = ws.player.frames if hasattr(ws.player, "frames") else None
     ticks = [0]
@@ -694,36 +861,6 @@ def test_player_keeps_ticking_while_editor_is_focused(tmp_path):
     assert ticks[0] >= 3, "the playtest froze when it lost focus"
 
 
-def test_desktop_click_launches_a_cart_with_a_window_open(tmp_path):
-    """The desktop stays interactive beneath windows: tapping a cart tile on the
-    home grid (outside every window) runs it."""
-    ws = _ws(tmp_path)
-    drv = _drv(ws)
-    ws.open_settings()
-    drv.frame(1 / 30)
-    win = ws.wm._wins["settings"]
-    # Find a cart tile whose rect is fully outside the settings window.
-    tile = None
-    for i, it in enumerate(ws.launcher.items):
-        if not it.get("path"):
-            continue
-        r = ws.launcher.tile_rect(i)
-        if r is None:
-            continue
-        tx, ty = r[0] + r[2] // 2, r[1] + r[3] // 2
-        if not (win.x <= tx < win.x + win.w and win.y <= ty < win.y + win.h):
-            tile = (i, tx, ty)
-            break
-    if tile is None:
-        return                             # window covers the whole grid -- skip
-    i, tx, ty = tile
-    drv.click(tx, ty)                      # select (focus hops to the desktop)
-    drv.frame(1 / 30)
-    drv.click(tx, ty)                      # confirm-tap runs it (launcher rule)
-    drv.frame(1 / 30)
-    assert ws.wm._order[-1] == "desktop"   # a playtest window opened
-
-
 # ---------------------------------------------------------------------------
 # Keyboard focus
 # ---------------------------------------------------------------------------
@@ -733,12 +870,12 @@ def test_keyboard_goes_to_focused_window(tmp_path):
     WINDOW's layout (not the desktop's)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     ws.set_menu_view("code")
     drv.frame(1 / 30)
-    win = ws.wm._wins["make"]
-    assert ws.editor.COLS == win.ctx.code_layout.cols
+    win = ws.wm._wins["menu"]
+    lay = win.ctx.code_layout                     # less the line-number gutter
+    assert ws.editor.COLS == lay.cols - ws.code_layer._gutter_cols(ws.editor)
     ws.editor.set_text("")
     for ch in "ok":
         drv.type_char(ord(ch))
@@ -762,8 +899,8 @@ def test_window_bars_suppress_os_chrome(tmp_path):
 
 
 def test_title_strip_buttons_min_max_close(tmp_path):
-    """Every app window carries minimize + maximize + close; the player window
-    has no minimize (hiding a running game would silently pause it)."""
+    """Every window carries minimize + maximize + close, the player window's
+    too (one control set on every frame, as every desktop has it)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_settings()
@@ -775,10 +912,93 @@ def test_title_strip_buttons_min_max_close(tmp_path):
     ws.open()                                   # run a cart
     drv.frame(1 / 30)
     names = [n for n, _r in ws.wm._strip_buttons(ws.wm._wins["desktop"])]
-    assert names == ["close", "max"]
+    assert names == ["close", "max", "min"]
 
 
-def test_maximize_toggle_fills_desktop_and_restores(tmp_path):
+def test_a_minimised_game_is_held_and_its_chip_gives_it_back(tmp_path):
+    """Minimising the player window holds the run (no tick while hidden, as
+    the pause menu holds it); a restore lands on the pause menu (D-25), whose
+    Resume gives the run back, and the held chip's icon is the pause glyph."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_desk()
+    ws.open()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["desktop"]
+    mn = dict(ws.wm._strip_buttons(win))["min"]
+    drv.touch(mn[0] + 2, mn[1] + 2)
+    drv.frame(1 / 30)
+    assert win.minimized and ws.player.paused and win.held
+    ws.wm._minimize(win, False)
+    assert not win.minimized and ws.player.paused and ws.pause.open
+    ws.pause.close()
+    assert not ws.player.paused
+    # A run the pause menu holds stays held through a minimise and restore.
+    ws.player.pause()
+    ws.wm._minimize(win, True)
+    ws.wm._minimize(win, False)
+    assert ws.player.paused
+    ws.player.resume()
+
+
+@pytest.mark.parametrize("intent", ["dev", "play"])
+def test_the_game_window_fits_the_game_and_its_pause_card_centres_on_it(tmp_path, intent):
+    """The player window's content is the game, inset from its frame as far
+    at the sides as above the rounded foot (design review R4-25), and the
+    pause card over a restored game centres on it (R4-06)."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="dark")
+    drv = _drv(ws)
+    ws.open_desk()
+    ws.wm.set_play_intent(intent)
+    ws.open()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["desktop"]
+    cx, cy, cw, ch = win.content_rect()
+    ox, oy, scale = ws.wm._player_view(win)
+    gw, gh = ws.canvas.w * scale, ws.canvas.h * scale
+    assert (cx, cy, cw, ch) == (ox, oy, gw, gh), "the content rect is the game's"
+    left = cx - win.x
+    right = win.x + win.w - (cx + cw)
+    foot = win.y + win.h - (cy + ch)
+    assert left == right == foot, (left, right, foot)
+    ws.wm._minimize(win, True)
+    ws.wm._minimize(win, False)
+    assert ws.pause.open
+    for _ in range(3):
+        drv.frame(1 / 30)
+    bx, by, bw, bh = ws.pause._host.box("Pause")
+    assert abs((bx + bw / 2) - (ox + gw / 2)) <= 1
+    assert abs((by + bh / 2) - (oy + gh / 2)) <= 1
+    ws.pause.close()
+
+
+def test_a_held_games_chip_icon_is_the_pause_glyph(tmp_path, monkeypatch):
+    """The state is the icon (design review R4-12): a held game's chip
+    draws the pause glyph in its icon's place, and no badge over an icon."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="light")
+    drv = _drv(ws)
+    ws.open_desk()
+    ws.open()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["desktop"]
+    ws.wm._minimize(win, True)
+    assert win.held
+    glyphs, icons = [], []
+    monkeypatch.setattr(type(ws.wm), "_pause_glyph",
+                        staticmethod(lambda sc, slot, ink: glyphs.append(slot)))
+    draw_icon = ws.draw_icon
+    monkeypatch.setattr(ws, "draw_icon",
+                        lambda kind, *a, **k: icons.append(kind) or draw_icon(kind, *a, **k))
+    ws.wm._draw_look_chips(ws.sys_canvas, ws.theme_colors, ws.layout.fs, 8)
+    assert len(glyphs) == 1
+    assert "run" not in icons, "the held chip also drew the game's icon"
+    ws.wm._minimize(win, False)
+    ws.pause.close()
+
+
+def test_maximize_toggle_fills_the_glass_and_restores(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open_settings()
@@ -788,9 +1008,7 @@ def test_maximize_toggle_fills_desktop_and_restores(tmp_path):
     mx = dict(ws.wm._strip_buttons(win))["max"]
     drv.touch(mx[0] + 2, mx[1] + 2)
     drv.frame(1 / 30)
-    bar_h = ws.wm._bar_h()
-    assert (win.x, win.y) == (0, bar_h)         # fills below the OS bar
-    assert win.w == 1024 and win.h == 600 - bar_h
+    assert (win.x, win.y, win.w, win.h) == (0, 0, 1024, 600)   # full screen
     assert win.ctx.layout.w == win.buf.w        # content relaid out to the new size
     mx = dict(ws.wm._strip_buttons(win))["max"]
     drv.touch(mx[0] + 2, mx[1] + 2)             # toggle back
@@ -823,6 +1041,152 @@ def test_resize_grip_reflows_content(tmp_path):
     assert win.ctx.layout.w == win.buf.w == win.w - 2
 
 
+# -- the z-order: a window behind comes to the front -----------------------------
+
+def _two_apps(tmp_path):
+    """Files, then Calc opened above it and lying over its right half."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    ws.open_app(ws._apps_by_id["files"])
+    drv.frame(1 / 30)
+    ws.open_app(ws._apps_by_id["calc"])
+    drv.frame(1 / 30)
+    files, calc = ws.wm._wins["files"], ws.wm._wins["calc"]
+    ws.wm._move_window(calc, files.x + files.w // 2, files.y + 60)
+    _quiesce(ws)
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert ws.wm._order == ["files", "calc"]
+    return ws, drv, files, calc
+
+
+def _open_point(ws, win, key, strip=False):
+    """A point of `win` (of its title strip, with `strip`) no window covers
+    and no window's resize zone holds."""
+    ys = [win.y + 3] if strip else range(win.y + 2, win.y + win.h - 2, 6)
+    return next((x, y) for y in ys for x in range(win.x + 2, win.x + win.w - 2, 6)
+                if ws.wm._win_at(x, y) == key and ws.wm._resize_zone_at(x, y) is None)
+
+
+def _shows_content(ws, win, rect):
+    """Whether the glass shows `win`'s content buffer 1:1 over `rect`."""
+    root = ws.sys_canvas
+    rb, wb = bytes(root._buf), bytes(win.buf._buf)
+    cx, cy, cw, _ch = win.content_rect()
+    x, y, w, h = rect
+    for Y in range(y, y + h):
+        a = (Y * root.w + x) * 2
+        b = ((Y - cy) * cw + x - cx) * 2
+        if rb[a:a + 2 * w] != wb[b:b + 2 * w]:
+            return False
+    return True
+
+
+def test_a_click_on_a_window_behind_brings_it_to_the_front(tmp_path):
+    """Clicking a window behind another focuses it AND raises it, as on
+    every desktop: it paints over the window that covered it, and nothing
+    closes."""
+    ws, drv, files, calc = _two_apps(tmp_path)
+    cx, cy, cw, ch = files.content_rect()
+    band = (calc.x + 8, cy + 80, cx + cw - calc.x - 16, 60)   # Files' content, under Calc
+    assert ws.wm._win_at(band[0], band[1]) == "calc"
+    assert not _shows_content(ws, files, band)
+    kinds = ws.wm.stack.kinds()
+    x, y = _open_point(ws, files, "files")
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["calc", "files"] and ws.wm._focus == "files"
+    assert ws.wm.stack.kinds() == kinds                # nothing closed
+    assert ws.wm._win_at(band[0], band[1]) == "files"
+    assert _shows_content(ws, files, band)             # painted on top
+    x, y = _open_point(ws, calc, "calc")               # and back again
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["files", "calc"] and ws.wm._focus == "calc"
+    assert ws.wm._win_at(band[0], band[1]) == "calc"
+
+
+def test_a_drag_of_a_window_behind_raises_it_and_moves_it(tmp_path):
+    ws, drv, files, calc = _two_apps(tmp_path)
+    x0, y0 = files.x, files.y
+    x, y = _open_point(ws, files, "files", strip=True)
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    assert ws.wm._order[-1] == "files"
+    drv.touch_drag(x + 60, y + 30)
+    drv.frame(1 / 30)
+    drv.touch_drag(x + 61, y + 31)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert (files.x, files.y) == (x0 + 61, y0 + 31)
+    assert ws.wm._order == ["calc", "files"] and ws.wm._focus == "files"
+
+
+def test_the_chips_keep_the_order_the_windows_opened(tmp_path):
+    ws, drv, files, calc = _two_apps(tmp_path)
+    ws.wm._chip_tap("files")                           # a chip raises too
+    drv.frame(1 / 30)
+    assert ws.wm._order[-1] == "files"
+    assert [k for k, _r, _l in ws.wm._chip_rects()] == ["files", "calc"]
+
+
+def test_opening_an_open_app_brings_its_window_forward_as_it_was(tmp_path):
+    """The desk's launcher opens an app that has a window by bringing that
+    window forward: the windows above it stay open (a goto would have
+    returned to it, closing them) and the app keeps what it showed."""
+    ws, drv, files, calc = _two_apps(tmp_path)
+    app = ws._apps_by_id["calc"]
+    app = getattr(app, "_inst", app)
+    for k in "12+3":
+        app._key(k)
+    entry = app.entry
+    ws.wm._chip_tap("files")
+    drv.frame(1 / 30)
+    kinds = ws.wm.stack.kinds()
+    ws.open_app(ws._apps_by_id["calc"])
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == kinds
+    assert ws.wm._order == ["files", "calc"] and ws.wm._focus == "calc"
+    assert app.entry == entry
+    calc.minimized = True                              # a minimized one is shown
+    ws.wm._move_focus("files")
+    ws.open_app(ws._apps_by_id["calc"])
+    drv.frame(1 / 30)
+    assert not calc.minimized and ws.wm._order[-1] == "calc"
+
+
+def test_a_window_over_the_game_takes_the_game_off_the_quiet_stack(tmp_path):
+    """The quiet stack repaints the game window alone; a window over it (its
+    shadow included) would be painted over, so while one is, every frame is
+    a full paint."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open()
+    drv.frame(1 / 30)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    _quiesce(ws)
+    wm = ws.wm
+    game, st = wm._wins["desktop"], wm._wins["settings"]
+    ring = _Ring(ws, 1)
+    wm._move_window(st, game.x + 40, game.y + 40)
+    ws._dirty = True
+    assert "quiet" not in ring.settle(drv, 6)
+    wm._move_window(st, game.x + game.w + 60, st.y)
+    ws._dirty = True
+    if wm._covers_player():
+        pytest.skip("no room on this desk beside the game window")
+    assert ring.settle(drv, 6)[-1] == "quiet"
+
+
 def test_minimize_hides_window_and_chip_restores(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
@@ -845,51 +1209,69 @@ def test_minimize_hides_window_and_chip_restores(tmp_path):
     assert not win.minimized
 
 
+def test_a_chip_names_its_window_whole_while_the_bar_has_room(tmp_path):
+    """A taskbar chip carried its title's first eight letters ("Appearan")
+    with the bar half empty. It carries the whole title, and only a bar out
+    of room shortens the longest first, every chip inside the cell."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_desk()
+    for app in ("files", "appearance", "calc"):
+        ws.open_app(ws._apps_by_id[app])
+        drv.frame(1 / 30)
+    labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
+    assert labels["appearance"] == "Appearance" and labels["files"] == "Files"
+    (_e, (bx, _by, _bw, _bh), _dy, _c), (_n, (cx, _cy, cw, _ch), _t, _s) = \
+        ws.wm._chips_cell()
+    ws.wm._win_title = lambda win: "A VERY LONG WINDOW TITLE INDEED " * 2
+    chips = ws.wm._chip_rects()
+    assert len(chips) == 3
+    assert all(len(lb) < 64 for _k, _r, lb in chips)
+    assert all(bx + cx <= r[0] and r[0] + r[2] <= bx + cx + cw for _k, r, _l in chips)
+
+
 def test_chip_click_is_focus_only_never_a_pop(tmp_path):
     """Taskbar chips: click the focused window's chip to minimize, again to
     restore, and an unfocused window's chip to FOCUS it -- the back-stack never
     changes from the taskbar (nothing closes by looking at it)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                             # PLAY: playtest above the editor
     drv.frame(1 / 30)
     chips = {k: r for k, r, _l in ws.wm._chip_rects()}
-    assert set(chips) == {"make", "desktop"}
-    stack_before = list(ws.wm._stack)
+    assert set(chips) == {"projects", "menu", "desktop"}
+    stack_before = ws.wm.stack.kinds()
     # Clicking the editor's chip FOCUSES it -- no pop, the playtest stays up.
-    r = chips["make"]
+    r = chips["menu"]
     drv.touch(r[0] + 2, r[1] + 2)
     drv.frame(1 / 30)
-    assert ws.wm._focus == "make"
-    assert ws.wm._stack == stack_before
+    assert ws.wm._focus == "menu"
+    assert ws.wm.stack.kinds() == stack_before
     # Clicking the (now focused) editor chip minimizes it; again restores+focuses.
     drv.touch(r[0] + 2, r[1] + 2)
     drv.frame(1 / 30)
-    assert ws.wm._wins["make"].minimized
+    assert ws.wm._wins["menu"].minimized
     drv.touch(r[0] + 2, r[1] + 2)
     drv.frame(1 / 30)
-    assert not ws.wm._wins["make"].minimized and ws.wm._focus == "make"
-    assert ws.wm._stack == stack_before         # still nothing popped
+    assert not ws.wm._wins["menu"].minimized and ws.wm._focus == "menu"
+    assert ws.wm.stack.kinds() == stack_before         # still nothing popped
 
 
-def test_editor_close_pops_one_level_to_picker(tmp_path):
-    """The Make window's X on the EDITOR pops one level -- the SAME window flips
-    back to the picker (not a jump all the way home, not a second window)."""
+def test_editor_close_returns_to_the_projects_window(tmp_path):
+    """The Editor window's X closes it alone -- back to the home window it was
+    opened from (not a jump all the way to the desk)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
-    win = ws.wm._wins["make"]
+    win = ws.wm._wins["menu"]
     assert win.kind == "menu"
     xr = dict(ws.wm._strip_buttons(win))["close"]
     drv.touch(xr[0] + 2, xr[1] + 2)
     drv.frame(1 / 30)
-    assert ws.wm._order == ["make"]
-    assert ws.wm._wins["make"].kind == "picker"
+    assert ws.wm._order == ["projects"]
 
 
 def test_font_scale_change_rebuilds_windows(tmp_path):
@@ -922,7 +1304,7 @@ def test_game_keeps_running_under_settings_window(tmp_path):
     drv.frame(1 / 30)
     ws.open_settings()
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "desk", "desktop", "settings"]
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "desktop", "settings"]
     assert ws.wm.keeps_animating(1 / 30)       # the redraw gate stays live
     ticks = [0]
     real_tick = ws.player.tick
@@ -930,6 +1312,103 @@ def test_game_keeps_running_under_settings_window(tmp_path):
     for _ in range(3):
         drv.frame(1 / 30)
     assert ticks[0] >= 3, "the game paused under the Settings window"
+
+
+def _game_and_settings(tmp_path):
+    """A desk with a running game's window and Settings' beside it, Settings
+    focused on its Name field with one letter typed."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open()
+    drv.frame(1 / 30)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    sl = ws.settings_layer
+    sl.set_msel = sl.row_index("name")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.wm._focus == "settings" and sl._focused == "Name"
+    assert ws.input.text_mode
+    drv.type_char(ord("K"))
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    return ws, drv
+
+
+def _click_window(ws, drv, key):
+    """Click a point of window `key`'s title strip that no other window covers."""
+    win = ws.wm._wins[key]
+    for x in range(win.x + 2, win.x + win.w - 2, 4):
+        y = win.y + 3
+        if ws.wm._win_at(x, y) == key:
+            drv.touch(x, y)
+            drv.frame(1 / 30)
+            drv.touch_up()
+            drv.frame(1 / 30)
+            return
+    raise AssertionError("no uncovered point on %s's strip" % key)
+
+
+def _stored_name(tmp_path):
+    from runtime import moy_carts
+    return moy_carts.load_system(str(tmp_path / "carts")).get("name")
+
+
+def test_text_mode_follows_the_focused_window(tmp_path):
+    """The keyboard is in text mode only while the focused window's focused
+    stop is a text field: Settings' Name field keeps it only while Settings'
+    window has focus. Focus moving to the game's window puts the keyboard
+    back in button mode (and stores the Name typed); focus coming back to
+    Settings, still on the field, puts it in text mode again."""
+    ws, drv = _game_and_settings(tmp_path)
+    ws.wm._move_window(ws.wm._wins["settings"], 300, 200)
+    drv.frame(1 / 30)
+    _click_window(ws, drv, "desktop")
+    assert ws.wm._focus == "desktop"
+    assert not ws.input.text_mode, "the game's window has focus: button mode"
+    assert _stored_name(tmp_path) == "K", "focus leaving Settings stores the Name"
+    assert ws.wm.stack.top() == "settings", "a click pops nothing"
+    _click_window(ws, drv, "settings")
+    assert ws.wm._focus == "settings"
+    assert ws.settings_layer._focused == "Name"
+    assert ws.input.text_mode, "Settings' field has focus again: text mode"
+    ws.wm._chip_tap("desktop")                 # a chip moves focus the same way
+    assert ws.wm._focus == "desktop" and not ws.input.text_mode
+    ws.wm._chip_tap("settings")
+    assert ws.wm._focus == "settings" and ws.input.text_mode
+
+
+def test_a_cart_keeps_its_own_text_mode_across_focus(tmp_path):
+    """A running cart's own textmode(True) is its window's: focus going to
+    Settings (no field focused) is button mode, and back to the cart is its
+    text mode again."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open()
+    drv.frame(1 / 30)
+    ws.input.text_mode = True                  # what the cart's textmode(True) writes
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert not ws.input.text_mode
+    ws.wm._move_window(ws.wm._wins["settings"], 300, 200)
+    drv.frame(1 / 30)
+    _click_window(ws, drv, "desktop")
+    assert ws.input.text_mode
+    _click_window(ws, drv, "settings")
+    assert not ws.input.text_mode
+
+
+def test_closing_the_settings_window_stores_a_name_being_typed(tmp_path):
+    """The strip's X is a way out like any other: the Name typed is stored,
+    and the window it reveals gets its own button mode back."""
+    ws, drv = _game_and_settings(tmp_path)
+    ws.wm.close_window_kind("settings")
+    assert _stored_name(tmp_path) == "K"
+    drv.frame(1 / 30)
+    assert ws.wm._focus == "desktop"
+    assert not ws.input.text_mode
 
 
 def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
@@ -960,12 +1439,13 @@ def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
     assert "Home WiFi" in sl.wifi_known        # credentials remembered
     # The game never left the cart slot.
     assert ws.cart.get("title") == cart_title
-    assert ws.wm._stack[2] == "desktop"   # above the desk (#105)
+    assert ws.wm.stack.kinds()[2] == "desktop"   # above the desk (#105)
 
 
-def test_bar_wifi_icon_deep_links_to_settings_wifi(tmp_path):
-    """On the windowed desktop the bar's wifi icon opens Settings -> WIFI (a
-    window over whatever runs) instead of launching the wifi.moy tool cart."""
+def test_bar_wifi_icon_opens_the_wifi_panel_as_a_popover(tmp_path):
+    """On the desk the bar's wifi widget opens the Settings WIFI panel as a
+    popover over whatever runs (docs/shell_layout_2026-10.md §8): the game
+    keeps its slot, no Settings window opens."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.open()                                  # a game is running
@@ -976,8 +1456,9 @@ def test_bar_wifi_icon_deep_links_to_settings_wifi(tmp_path):
                                           lay.wifi_btn[1] + 1)
     drv.frame(1 / 30)
     assert handled
-    assert ws.wm.top_is("settings")
-    assert ws.settings_layer.wifi_view
+    assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
+    assert not ws.wm.stack.has("settings")
+    assert ws.settings_layer.wifi_nets         # the panel scanned
     assert ws.cart.get("title") == cart_title  # the game was NOT replaced
 
 
@@ -987,40 +1468,38 @@ def test_closing_make_never_takes_settings_with_it(tmp_path):
     surgical now: only the closed process leaves the stack."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     ws.open_settings()                          # Settings ABOVE the Make flow
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "desk", "picker", "menu", "settings"]
-    make = ws.wm._wins["make"]
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu", "settings"]
+    make = ws.wm._wins["menu"]
     xr = dict(ws.wm._strip_buttons(make))["close"]
     drv.touch(xr[0] + 2, xr[1] + 2)             # X on the Make window (the EDITOR)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
     assert "settings" in ws.wm._order           # Settings SURVIVED
-    assert ws.wm._wins["make"].kind == "picker"  # make popped one level only
-    assert ws.wm._stack == ["launcher", "desk", "picker", "settings"]
+    assert "menu" not in ws.wm._order           # the Editor alone closed
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "settings"]
 
 
 def test_closing_playtest_keeps_settings_and_refocuses_editor(tmp_path):
-    """Closing the playtest (X / hold-BACKSPACE -> _exit_to_caller) removes ONLY
+    """Closing the playtest (X / the pause menu's Quit -> _exit_to_caller) removes ONLY
     the player: Settings floating above stays open, and focus returns to the run
     caller's window (the Editor)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                            # PLAY (caller = the Editor)
     ws.open_settings()                          # Settings over the running game
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "desk", "picker", "menu", "desktop", "settings"]
-    ws._exit_to_caller()                        # the hold-BACKSPACE exit path
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu", "desktop", "settings"]
+    ws._exit_to_caller()                        # the pause menu's Quit path
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "desk", "picker", "menu", "settings"]
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "projects", "menu", "settings"]
     assert "settings" in ws.wm._order           # Settings SURVIVED
-    assert ws.wm._focus == "make"               # back to the Editor's window
+    assert ws.wm._focus == "menu"               # back to the Editor's window
 
 
 def test_settings_keyboard_close_is_surgical_too(tmp_path):
@@ -1033,22 +1512,22 @@ def test_settings_keyboard_close_is_surgical_too(tmp_path):
     drv.frame(1 / 30)
     ws._exit_settings()
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "desk", "desktop"]
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "desktop"]
     assert "desktop" in ws.wm._order            # the game window survived
 
 
 def test_theme_setting_cycles_and_persists(tmp_path):
-    """Settings -> THEME cycles chrome.THEMES, retints the panel chrome
+    """Settings -> THEME cycles chrome.THEME_NAMES, retints the panel chrome
     everywhere (settings panel, window strips, chips, selection accents), and
-    persists to system.json; the default "night" keeps today's exact colors."""
-    ws = _ws(tmp_path)                             # aliases the bare-name modules
-    from runtime.chrome import THEMES, theme_colors
+    persists to system.json; the default is Moy in its Day mode."""
+    ws = build_desktop_ws(tmp_path)               # aliases the bare-name modules
+    from runtime.chrome import THEME_NAMES, live_colors
     drv = _drv(ws)
-    assert ws.look.theme_name == "night"
-    assert ws.theme_colors == theme_colors("night")
+    assert (ws.look.theme_name, ws.look.theme_variant) == ("moy", "light")
+    assert ws.theme_colors == live_colors("moy", "light").tokens
     ws.look.cycle_theme(1)
-    assert ws.look.theme_name == THEMES[1][0]           # "indigo"
-    assert ws.theme_colors is not theme_colors("night")
+    assert ws.look.theme_name == THEME_NAMES[1]           # "blocks"
+    assert ws.theme_colors != live_colors("moy", "light").tokens
     assert ws.launcher.theme is ws.theme_colors    # accents follow
     assert ws.system.get("theme") == ws.look.theme_name  # persisted
     # A themed frame renders (window strip uses the new title token).
@@ -1056,7 +1535,7 @@ def test_theme_setting_cycles_and_persists(tmp_path):
     drv.frame(1 / 30)
     # And an unknown persisted name falls back to the default.
     ws.look.set_theme("nonsense", persist=False)
-    assert ws.look.theme_name == "night"
+    assert ws.look.theme_name == "moy"
 
 
 def _engage_resize(ws, drv, dx=60, dy=-40):
@@ -1152,7 +1631,7 @@ def test_live_resize_body_follows_grip(tmp_path):
     feel, #58): the focused border lands at the rubber corner, grown area shows
     the panel field, the real relayout still only happens on release."""
     ws = _ws(tmp_path)
-    _BORDER_TOP = ws.theme_colors["chrome_ink"]   # focused border role
+    _BORDER_TOP = ws.theme_colors["shade_dark"]   # classic's ring
     drv = _drv(ws)
     win, cw, ch = _engage_resize(ws, drv)
     ow, oh = win.w, win.h
@@ -1180,10 +1659,12 @@ def test_resize_outline_fallback_without_rect_stamp(tmp_path):
     """A canvas without blit_strip_rect (the web RecordingLayer) keeps the old
     rubber-band OUTLINE preview and the full-screen backdrop restore."""
     ws = _ws(tmp_path)
-    _BORDER_TOP = ws.theme_colors["chrome_ink"]   # focused border role
+    _BORDER_TOP = ws.theme_colors["shade_dark"]   # classic's ring
     drv = _drv(ws)
     ws.sys_canvas.blit_strip_rect = None     # instance attr shadows the method
-    win, cw, ch = _engage_resize(ws, drv)
+    # Shrunk, so the rubber rect stays on the glass: the window opens in
+    # the work area right of the icon column, near the desk's right edge.
+    win, cw, ch = _engage_resize(ws, drv, dx=-60)
     sc = ws.sys_canvas
     # The accent outline is drawn at the rubber rect...
     accent = ws.theme_colors["accent"]
@@ -1218,15 +1699,14 @@ def test_held_key_to_focused_playtest_stays_quiet(tmp_path):
     the playtest must keep repainting as before."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()                        # PLAY: playtest window, focused
     drv.frame(1 / 30)
     assert ws.wm._focus == "desktop"
     assert ws.wm.keys_to_cart()
     assert not _held_key_frame(ws), "cart-bound key repainted the desktop"
-    ws.wm._focus = "make"                   # the editor beside it takes keys
+    ws.wm._focus = "menu"                   # the editor beside it takes keys
     assert not ws.wm.keys_to_cart()
     assert _held_key_frame(ws), "editor typing must still repaint"
 
@@ -1236,8 +1716,7 @@ def test_crash_panel_keys_repaint_again(tmp_path):
     dirty mark must return on the crash panel."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
+    _open_editor(ws)
     drv.frame(1 / 30)
     ws._leave_menu()
     drv.frame(1 / 30)
@@ -1246,31 +1725,27 @@ def test_crash_panel_keys_repaint_again(tmp_path):
     assert _held_key_frame(ws)
 
 
-def test_group_window_drag_freezes_its_content(tmp_path):
-    """#113: gesture tuples carry the window REGISTRY key ("make" for the
-    shared picker/Editor group window) while win.kind is the CONTENT kind
-    ("picker") -- the old `key == win.kind` freeze test never matched the
-    group, so a make-window drag re-rendered the picker/Editor content every
-    frame (pure waste on the P4; on the web transport it also re-shipped the
-    window's whole recorded stream per frame -- the payload autopsy that
-    found this). The freeze must resolve gestures through _wins identity."""
+def test_window_drag_freezes_its_content(tmp_path):
+    """#113: gesture tuples carry the window REGISTRY key; the freeze resolves
+    gestures through _wins identity, so a window dragged by its strip renders
+    no content mid-drag (on the web transport a re-render also re-shipped the
+    window's whole recorded stream per frame -- the payload autopsy)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     drv.frame(1 / 30)
     _quiesce(ws)
-    ws.open_picker()
+    ws.open_projects()
     for _ in range(4):
         drv.frame(1 / 30)
-    win = ws.wm._wins["make"]
-    assert win.kind == "picker"            # the content kind, NOT the key
+    win = ws.wm._wins["projects"]
     calls = [0]
-    orig = ws.editor_picker.draw
+    orig = ws.projects_layer.draw
 
     def spy(dt):
         calls[0] += 1
         return orig(dt)
 
-    ws.editor_picker.draw = spy
+    ws.projects_layer.draw = spy
     sx, sy = win.x + win.w // 2, win.y + win.title_h // 2
     drv.touch(sx, sy)
     drv.frame(1 / 30)
@@ -1279,14 +1754,18 @@ def test_group_window_drag_freezes_its_content(tmp_path):
         x += 8
         drv.touch_drag(x, sy)
         drv.frame(1 / 30)
-    assert ws.wm._drag is not None and ws.wm._drag[0] == "make"
+    assert ws.wm._drag is not None and ws.wm._drag[0] == "projects"
     calls[0] = 0
     drv.touch_drag(x + 8, sy)
     drv.frame(1 / 30)
     assert calls[0] == 0                   # frozen: no content render mid-drag
     drv.touch_up()
     drv.frame(1 / 30)
-    assert calls[0] > 0                    # release: live rendering resumes
+    assert calls[0] == 0                   # the release is the WM's too
+    cx, cy, cw, ch = win.content_rect()
+    drv.touch(cx + cw // 2, cy + ch // 2)
+    drv.frame(1 / 30)
+    assert calls[0] > 0                    # a press in it renders live again
 
 
 # -- settled windows are not re-stamped every frame (#155) -------------------
@@ -1294,7 +1773,7 @@ def test_group_window_drag_freezes_its_content(tmp_path):
 def _open_two_windows(ws, drv):
     ws.open_settings()
     drv.frame(1 / 30)
-    ws.open_picker()
+    ws.open_projects()
     for _ in range(40):            # settle covers + the stamp streaks
         drv.frame(1 / 30)
     assert len(ws.wm._order) >= 2
@@ -1595,7 +2074,7 @@ def test_new_window_buffers_adopt_the_changed_font_scale(tmp_path):
         ws.look.set_font_scale(1, persist=False)
     finally:
         ws.wm._install(ws.wm._root_ctx)
-    ws.open_picker()
+    ws.open_projects()
     for _ in range(20):
         ws.mark_dirty()
         drv.frame(1 / 30)
@@ -1704,21 +2183,21 @@ def test_a_clock_tick_does_not_re_render_the_desk(tmp_path):
     ws.bar_layer.redraw_clock = lambda where: (
         clocks.__setitem__(0, clocks[0] + 1), real_clock(where))[1]
     try:
-        # Force the clock string to change, as a minute boundary would.
-        ws.bar_layer._clock_at = -1
-        ws.bar_layer._clock_cache = "00:00"
+        # The clock string changes, as at a minute boundary.
+        ws.bar_layer._clock_text = lambda: "12:34"
         for _ in range(4):
             ws.mark_dirty()
             drv.frame(1 / 30)
     finally:
         backdrop._draw_desktop = real
         ws.bar_layer.redraw_clock = real_clock
+        del ws.bar_layer._clock_text
     assert renders[0] == 0, "a clock tick re-rendered the whole desk"
     assert clocks[0] > 0, "the clock was never repainted over the cache"
 
 
 def test_the_desk_sig_excludes_the_cover_generation(tmp_path):
-    """Covers landing in the picker must not invalidate the desk: those are
+    """Covers landing in the home window must not invalidate the desk: those are
     exactly the frames a scroll is trying to keep cheap."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
@@ -1881,32 +2360,34 @@ def test_view_scales_the_windowed_player_too(tmp_path):
     assert scale == max(1, min(cw // 128, ch // 128))
     assert scale > max(1, min(cw // 320, ch // 240))   # bigger than full-canvas
     assert ws.wm.game_xy(ox, oy) == (96, 56)
-def test_picker_hover_select_marks_dirty_inside_the_window(tmp_path):
-    """#177: the picker's hover-preview predates the content freeze -- it moved
-    sel WITHOUT marking dirty, so inside the make window the retained buffer
-    never repainted (state moved, pixels didn't: dead on desktop + web)."""
+def test_a_shelf_tap_marks_dirty_inside_the_projects_window(tmp_path):
+    """#177: a selection that moves WITHOUT marking dirty never repaints
+    inside a window -- the content freeze reuses the retained buffer (state
+    moved, pixels didn't: dead on desktop + web). A tap on a shelf card of
+    the PROJECTS window marks the frame dirty and lands on that card."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
+    ws.open_projects()
     drv.frame(1 / 30)
-    win = ws.wm._wins["make"]
+    win = ws.wm._wins["projects"]
     p = ws.pointer
     p.visible = True
-    p.down = False
     ws.wm._install(win.ctx)
     try:
-        t2 = ws.picker.tile_rect(2)
+        t2 = ws.projects_grid.tile_rect(2)
     finally:
         ws.wm._install(ws.wm._root_ctx)
     cx, cy, _cw, _ch = win.content_rect()
-    p.x, p.y = 900, 560
-    ws.wm._route_pointer(900, 560, False)          # seed the hover tracker
-    ws._dirty = False
     tx, ty = cx + t2[0] + 8, cy + t2[1] + 8
-    p.x, p.y = tx, ty
+    p.x, p.y, p.down = tx, ty, True
+    ws.wm._route_pointer(tx, ty, True)
+    ws._dirty = False
+    p.down = False
     ws.wm._route_pointer(tx, ty, False)
-    assert ws.picker.sel == 2
-    assert ws._dirty, "hover-select must mark dirty or the window never repaints"
+    assert ws._dirty, "a shelf tap must mark dirty or the window never repaints"
+    for _ in range(30):                            # the glide settles on it
+        drv.frame(1 / 30)
+    assert ws.projects_grid.sel == 2
 
 
 def test_moving_cursor_leaves_no_trail_on_the_desk(tmp_path):
@@ -1937,11 +2418,11 @@ def test_moving_cursor_leaves_no_trail_on_the_desk(tmp_path):
     assert stale == 0, "stale cursor pixels remained on skipped desk frames"
 
 
-def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_world_flip(tmp_path):
+def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_relayout(tmp_path):
     """Window buffers are off-heap layers on a board and nothing collects
     them: the WM releases one when its window dies, when a resize rebuilds
     it, and when a relayout drops every window. The drag backdrop is kept
-    across a world flip (same root size) instead of being re-minted at 2MB
+    across a relayout (same root size) instead of being re-minted at 2MB
     a round. Measured leak this closes: ~3.6MB of PSRAM per Library ->
     CHANGE -> home round on the Guition P4 (2026-09-09)."""
     ws = _ws(tmp_path)
@@ -1961,16 +2442,2101 @@ def test_a_dead_window_releases_its_buffer_and_the_backdrop_survives_a_world_fli
     drv.frame(1 / 30)
     assert ws.wm._wins == {}
     assert comp2._buf is None
-    # The drag backdrop: minted once, invalidated (not dropped) by a world flip.
+    # The drag backdrop: minted once, invalidated (not dropped) by a relayout.
     ws.open_settings()
     drv.frame(1 / 30)
     cache = ws.wm._ensure_backdrop()
     assert ws.wm._backdrop is cache
     comp3 = ws.wm._wins["settings"].buf._comp
-    ws._relayout()                                  # the world-flip hook
+    ws._relayout()                                  # the relayout hook
     assert ws.wm._wins == {} and comp3._buf is None
     assert ws.wm._backdrop is cache and not ws.wm._backdrop_valid
     assert cache._comp._buf is not None
     # A root that changed size re-mints it and releases the old one.
     ws.wm._root_canvas.w -= 0                       # unchanged: the same layer
     assert ws.wm._ensure_backdrop() is cache
+
+
+# -- two app windows of different sizes (#224, sprint 5) ------------------------
+
+# The desk with Calc and Files open as windows of two sizes, each frame hashed
+# the way tests/test_shell_goldens.py hashes a surface, once with Files on top
+# and once after Calc is reopened: its window comes forward, Files open
+# behind it. Each app lays itself out and draws
+# from its OWN grant's surface row (native/moy_app), which the WM writes as it
+# installs each window's layout context: a row the console shared, or one read
+# from the last window installed, lays an app out at the other window's size.
+TWO_WINDOWS = (
+    "971104d7fe543fcfb19aa684cacec9fece63959979ac9d0727d4d228af5145d7",
+    "b98866d823781cc12ea989aadfd727446edfdf581e95e5fafd1b241a41c95faa",
+)
+
+
+def test_two_app_windows_of_different_sizes_match_their_golden(tmp_path):
+    from test_shell_goldens import _quiesce as _still, _render
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _still(ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    ws.open_app(ws._apps_by_id["calc"])
+    for _ in range(5):
+        drv.frame(1 / 30)
+    calc = ws.wm._wins["calc"]
+    calc.x, calc.y = 24, 48
+    ws.wm._resize_window(calc, 360, 300)
+    ws.open_app(ws._apps_by_id["files"])
+    for _ in range(5):
+        drv.frame(1 / 30)
+    files = ws.wm._wins["files"]
+    assert (calc.w, calc.h) != (files.w, files.h)
+    got = [_render(ws, "two windows", "desk")]
+    ws.open_app(ws._apps_by_id["calc"])
+    for _ in range(5):
+        drv.frame(1 / 30)
+    assert ws.wm._order[-1] == "calc"
+    got.append(_render(ws, "two windows, calc on top", "desk"))
+    assert tuple(got) == TWO_WINDOWS
+
+
+# -- console mode as WM state (docs/shell_layout_2026-10.md §3, step 1) ---------
+#
+# The desk's PLAY enters console mode: the windows park outside the back-stack,
+# the route truncates to its root and the home presents fullscreen; the home's X
+# leaves it, and the route's restore op puts the parked kinds back. Every branch
+# §3 names reads the mode, and each is pinned here by name.
+
+def _center(r):
+    return r[0] + r[2] // 2, r[1] + r[3] // 2
+
+
+def _desk_with_three(ws, drv):
+    """The desk with Settings, Calc and the Editor (CHANGE on the home's
+    selected cart), the Editor on top and focused."""
+    ws.open_settings()
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.change_selected()
+    drv.frame(1 / 30)
+    assert ws.wm._order == ["settings", "calc", "menu"]
+    return {k: ws.wm._wins[k] for k in ws.wm._order}
+
+
+def _content_draws(ws, monkeypatch):
+    """Count each content layer's draws by window kind."""
+    seen = []
+    for kind in ("settings", "calc"):
+        layer = ws.wm._content_for(kind)
+        orig = layer.draw
+        monkeypatch.setattr(layer, "draw",
+                            lambda dt, _k=kind, _o=orig: (seen.append(_k), _o(dt))[1])
+    menu = ws.wm._content_for("menu")
+    orig_menu = menu.draw
+    monkeypatch.setattr(menu, "draw",
+                        lambda dt: (seen.append("menu"), orig_menu(dt))[1])
+    return seen
+
+
+def test_play_enters_console_mode_and_parks_the_windows(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    bufs = {k: w.buf._comp for k, w in wins.items()}
+    rects = {k: (w.x, w.y, w.w, w.h) for k, w in wins.items()}
+    ws.open_library()                            # the desk's PLAY
+    drv.frame(1 / 30)
+    wm = ws.wm
+    assert wm.mode == "console"
+    assert wm.stack.kinds() == ["launcher"]      # the route at its root
+    assert wm._order == [] and wm._wins == {}
+    assert wm.visible_stack()[0] is ws.launcher_layer
+    p = wm._parked
+    assert p.kinds == ["settings", "calc", "menu"]
+    assert p.order == ["settings", "calc", "menu"] and p.focus == "menu"
+    for k, w in wins.items():                    # the records, stamps and all
+        assert p.wins[k] is w
+        assert (w.x, w.y, w.w, w.h) == rects[k]
+        assert w.buf._comp is bufs[k] and bufs[k]._buf is not None
+    assert wm.is_parked("menu") and not wm.is_parked("desk")
+
+
+def test_the_x_leaves_console_mode_with_the_windows_unrendered(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    bufs = {k: w.buf for k, w in wins.items()}
+    ws.open_library()
+    drv.frame(1 / 30)
+    assert ws.bar_layer._show_x("home")          # the desk is beneath the home
+    seen = _content_draws(ws, monkeypatch)
+    x, y = _center(ws.layout.context_x_btn)
+    assert ws.bar_layer.handle_bar_tap("home", x, y)   # the home's X
+    wm = ws.wm
+    assert wm.mode == "desktop"
+    assert wm.stack.kinds() == ["launcher", "desk", "settings", "calc",
+                                "menu"]
+    assert seen == [], "a restored window re-rendered on the way back"
+    assert wm._order == ["settings", "calc", "menu"] and wm._focus == "menu"
+    for k, w in wins.items():
+        assert wm._wins[k] is w and w.buf is bufs[k]
+    assert wm._parked is None
+    drv.frame(1 / 30)
+    assert seen == [], "the focused window too is stamped, not drawn"
+    drv.press("down")                            # a key it takes: it renders
+    drv.frame(1 / 30)
+    assert seen == ["menu"]
+
+
+def test_the_x_back_is_a_full_repaint_in_every_buffer(tmp_path):
+    """The home's X on a triple-buffered root: the windows come back
+    stamped, the focused one's content held (§14.1), and every buffer
+    equals a full repaint of the desk they make."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ws.open_library()
+    ring.settle(drv, 4)
+    ws.open_desk()
+    ring.settle(drv, 4)
+    seen = list(ring.bufs)
+    assert seen == ring.full(drv)
+
+
+def test_a_released_stamp_re_renders_once_on_return(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    ws.open_library()
+    drv.frame(1 / 30)
+    old = wins["settings"].buf._comp
+    assert ws.wm.release_cache()                  # the oldest parked stamp
+    assert wins["settings"].buf is None and old._buf is None
+    assert wins["calc"].buf is not None
+    seen = _content_draws(ws, monkeypatch)
+    ws.open_desk()                               # the X's verb
+    assert seen == ["settings"]                  # once, the path a resize takes
+    w = wins["settings"]
+    assert w.buf is not None and w.ctx is not None and not w._buf_stale
+    assert ws.wm._wins["settings"] is w
+
+
+def test_the_fit_release_goes_oldest_first_then_the_home_frame(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    ws.open_library()
+    drv.frame(1 / 30)
+    ws.launcher_layer.prealloc_retained()
+    assert ws.launcher_layer._lib_cache is not None
+    freed = []
+    while ws.wm.release_cache():
+        freed.append([k for k in ("settings", "calc", "menu")
+                      if wins[k].buf is None])
+    assert freed[:3] == [["settings"], ["settings", "calc"],
+                         ["settings", "calc", "menu"]]
+    assert len(freed) == 4 and ws.launcher_layer._lib_cache is None
+    assert not ws.wm.release_cache()
+    ws.open_desk()
+    assert all(w.buf is not None for w in wins.values())
+
+
+def test_a_parked_kind_reopened_fullscreen_is_found_in_place(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    rect = (wins["settings"].x, wins["settings"].y)
+    ws.open_library()
+    ws.open_settings()                           # the one Settings process
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.wm._order == []
+    assert ws.wm.stack.kinds() == ["launcher", "settings"]
+    assert ws.wm._parked.wins["settings"] is wins["settings"]
+    ws.exit()                                    # its X: back to the home
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == ["launcher"] and ws.wm.mode == "console"
+    seen = _content_draws(ws, monkeypatch)
+    ws.open_desk()
+    assert seen == ["settings"]                  # shows what the process holds now
+    w = ws.wm._wins["settings"]
+    assert w is wins["settings"] and (w.x, w.y) == rect
+
+
+def test_play_ends_a_running_playtest(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _open_editor(ws)
+    drv.frame(1 / 30)
+    ws._leave_menu()                             # the Editor's PLAY
+    drv.frame(1 / 30)
+    assert "desktop" in ws.wm._wins
+    released = []
+    orig = ws.player.release_world
+    ws.player.release_world = lambda: (released.append(1), orig())[1]
+    ws.open_library()
+    assert not ws.wm.stack.has("desktop") and released
+    assert "desktop" not in ws.wm._parked.kinds
+    assert "desktop" not in ws.wm._parked.wins
+    assert ws.wm._parked.kinds == ["projects", "menu"]
+
+
+def test_branch_slots_reads_the_mode(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    assert ws.wm._slots() == ["settings", "calc", "menu"]
+    ws.open_library()
+    ws.wm.stack.goto("desk")                     # a stack shape no longer asks
+    assert ws.wm._slots() == []
+    ws.wm.stack.goto("launcher")
+
+
+def test_branch_keeps_animating_reads_the_mode(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    monkeypatch.setattr(ws.wallpaper, "is_animating", lambda dt: True)
+    assert ws.wm.keeps_animating(1 / 30)
+    ws.open_library()
+    assert not ws.wm.keeps_animating(1 / 30)     # a parked desk is not drawn
+
+
+def test_branch_desk_open_and_windowed_chrome_read_the_mode(tmp_path):
+    ws = _ws(tmp_path)
+    assert ws.wm.desk_open() and ws.windowed_chrome
+    ws.open_library()
+    assert not ws.wm.desk_open() and not ws.windowed_chrome
+    ws.open_desk()
+    assert ws.wm.desk_open() and ws.windowed_chrome
+
+
+def test_branch_the_mode_switch_relayouts_and_never_drops_a_window(tmp_path, monkeypatch):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    drops = []
+    relayouts = []
+    monkeypatch.setattr(ws.wm, "_drop_wins", lambda: drops.append(1))
+    orig = ws._relayout
+    monkeypatch.setattr(ws, "_relayout", lambda: (relayouts.append(1), orig())[1])
+    ws.open_library()
+    assert relayouts == [1]
+    ws.open_desk()
+    assert relayouts == [1, 1]
+    assert drops == []
+    assert ws.wm._root_ctx.layout is ws.layout
+
+
+def test_branch_focus_and_sync_windows_come_back_as_parked(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    ws.wm._focus = "calc"                        # a lower window held focus
+    ws.open_library()
+    ws.open_desk()
+    ws.wm._sync_windows()
+    assert ws.wm._focus == "calc"
+    assert ws.wm._order == ["settings", "calc", "menu"]
+    assert ws.wm._wins["menu"] is wins["menu"] and wins["menu"].kind == "menu"
+
+
+def test_branch_a_relayout_in_console_mode_releases_the_parked_stamps(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    ws.open_library()
+    ws._relayout()                               # a font-scale or theme relayout
+    assert all(w.buf is None for w in wins.values())
+    assert ws.wm._parked.order == ["settings", "calc", "menu"]
+    ws.open_desk()
+    for w in wins.values():                      # rebuilt at the new layout
+        assert w.buf is not None and w.ctx.layout.w == w.buf.w
+
+
+def test_branch_go_home_in_console_mode_touches_no_parked_window(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    project, cart = ws.project, ws.cart
+    assert ws.editor_app.project is project
+    ws.open_library()
+    ws.open_settings()
+    ws.go_home()                                 # HOME from a console surface
+    assert ws.wm.stack.kinds() == ["launcher"] and ws.wm.mode == "console"
+    assert ws.project is project and ws.cart is cart
+    assert ws.editor_app.project is project
+    ws.open_desk()
+    assert ws.wm._wins["menu"].kind == "menu"
+
+
+def test_branch_go_home_in_desktop_mode_lands_on_the_desk(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    ws.go_home()
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop"
+    assert ws.wm.stack.kinds() == ["launcher", "desk"]
+    assert ws.wm._order == [] and ws.cart is None
+
+
+def test_branch_a_console_run_closes_the_parked_editors_project(tmp_path):
+    """A cart run from the home swaps the workspace -- the Editor's exit path
+    (#111) -- so its parked window does not come back; the others do, in
+    their places."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    rect = (wins["calc"].x, wins["calc"].y)
+    ws.open_library()
+    ws.open()                                    # a game, fullscreen
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.wm._order == []
+    ws._exit_to_caller()
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == ["launcher"]
+    ws.open_desk()
+    assert ws.wm.stack.kinds() == ["launcher", "desk", "settings", "calc"]
+    assert ws.wm._order == ["settings", "calc"]
+    assert "menu" not in ws.wm._wins and wins["menu"].buf is None
+    w = ws.wm._wins["calc"]
+    assert w is wins["calc"] and (w.x, w.y) == rect
+
+
+def test_branch_exit_doors_in_console_mode(tmp_path):
+    """The Make tab and CHANGE open the Editor in a desk window, console
+    mode giving way to the desk; B on the home leaves; a game's tap stays
+    in console mode."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_library()
+    ws.set_home_tab("make")
+    ws.launcher.sel = 1                          # a project: Make's tap edits
+    ws.launch_selected()
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm.top_is("menu")
+    assert ws.wm._order == ["menu"]
+    ws.wm.close_window_kind("menu")
+    ws.open_library()
+    ws.set_home_tab("games")
+    ws.launcher.sel = 1
+    ws.change_selected()
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm._order == ["menu"]
+    ws.wm.close_window_kind("menu")
+    ws.open_library()
+    drv.frame(1 / 30)
+    drv.press("b")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and ws.wm.top_is("desk")
+
+
+def test_branch_presentation_reads_the_mode(tmp_path):
+    ws = _ws(tmp_path)
+    wm = ws.wm
+    assert not wm.game_is_fullscreen() and not wm.player_has_pointer()
+    ws.open_library()
+    assert wm.game_is_fullscreen() and wm.player_has_pointer()
+
+
+def test_the_home_x_follows_the_floor(tmp_path):
+    """Console mode's home has an X on a P4 (the desk is beneath it) and none
+    on the fullscreen tier, where the home is the floor."""
+    from ws_helpers import build_ws
+    ws = _ws(tmp_path / "p4")
+    assert not ws.bar_layer._show_x("desk")
+    ws.open_library()
+    assert ws.bar_layer._show_x("home")
+    drv = _drv(ws)
+    drv.frame(1 / 30)
+    drv.click(*_center(ws.layout.context_x_btn))
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop" and not ws.bar_layer._show_x("desk")
+    small = build_ws(tmp_path / "tdeck")
+    assert small.wm.mode == "console" and small.wm.floor() == 1
+    assert not small.bar_layer._show_x("home")
+    small.open_library()
+    assert small.wm.stack.kinds() == ["launcher"]
+
+
+# -- the HOME key: back out one level, everywhere (owner, 2026-10-13) -----------
+
+def test_home_on_the_desk_minimises_every_window_and_home_again_restores(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    wins = _desk_with_three(ws, drv)
+    bufs = {k: w.buf for k, w in wins.items()}
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    wm = ws.wm
+    assert wm.mode == "desktop" and wm._order == ["settings", "calc", "menu"]
+    assert all(w.minimized for w in wins.values())       # kept, as chips
+    assert wm._focus is None
+    assert wm.stack.kinds()[-1] == "menu"                # nothing closed
+    assert all(w.buf is bufs[k] for k, w in wins.items())
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    assert not any(w.minimized for w in wins.values())
+    assert wm._focus == "menu"
+
+
+def test_home_never_minimises_a_running_game(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _open_editor(ws)
+    drv.frame(1 / 30)
+    ws._leave_menu()                             # a playtest window
+    drv.frame(1 / 30)
+    ws.home_key()
+    assert ws.wm._wins["menu"].minimized
+    assert not ws.wm._wins["desktop"].minimized
+    assert ws.wm._focus == "desktop" and ws.wm.stack.has("desktop")
+
+
+def test_home_in_console_mode_backs_out_one_level(tmp_path):
+    """From a console-mode surface HOME goes home; from the home on a P4 it
+    goes to the desktop, its windows where they were."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _desk_with_three(ws, drv)
+    ws.open_library()
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "console" and ws.wm.stack.kinds() == ["launcher"]
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    assert ws.wm.mode == "desktop"
+    assert ws.wm._order == ["settings", "calc", "menu"]
+    assert not any(w.minimized for w in ws.wm._wins.values())
+
+
+def test_home_on_the_fullscreen_tier_is_unchanged(tmp_path):
+    from ws_helpers import build_ws
+    ws = build_ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)                            # a key's press is an edge
+    drv.press("home")
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == ["launcher"]
+    drv.press("home")                            # the home is the floor
+    drv.frame(1 / 30)
+    assert ws.wm.stack.kinds() == ["launcher"]
+
+
+# -- the popover (docs/shell_layout_2026-10.md §8, step 6) ----------------------
+#
+# One popover at a time, anchored at the widget's cell, closed by a tap outside,
+# B, ESC or HOME. A change that stays inside it -- open, a row moved, close --
+# rides the quiet stack: the frame draws the popover's rect alone over the
+# retained one (the pixels under it put back from a snapshot on close) and hands
+# that rect as its damage.
+
+class _Key:
+    """One frame's key press, as the popover layer reads it."""
+
+    last_key = 0
+
+    def __init__(self, name):
+        self.name = name
+
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
+    def pressed(self, n):
+        return n == self.name
+
+    def held(self, n):
+        return n == self.name
+
+    def any_pressed(self):
+        return True
+
+
+class _Ring:
+    """N physical buffers behind the root canvas: each drawn frame lands in the
+    next one, which still holds what was drawn N frames before -- the Waveshare
+    P4's triple buffer, on the host's one."""
+
+    def __init__(self, ws, n):
+        self.ws, self.cv, self.n = ws, ws.sys_canvas, n
+        self.cv.RETAINED_FRAMES = n
+        self.bufs = [bytes(self.cv._buf)] * n
+        self.k = 0
+        self.stacks = []
+
+    def frame(self, drv):
+        ws, wm = self.ws, self.ws.wm
+        before = ws._frames_drawn
+        got = []
+        real = wm.draw_stack
+        wm.draw_stack = lambda: got.append(real()) or got[-1]
+        try:
+            drv.frame(1 / 30)
+        finally:
+            del wm.draw_stack
+        if ws._frames_drawn == before:
+            return None
+        st = got[-1]
+        self.stacks.append("pop" if st is wm._pop_stack else
+                           "qpop" if st is wm._quiet_pop_stack else
+                           "quiet" if st is wm._quiet_stack else
+                           "repeat" if st is wm._repeat_stack else
+                           "lpop" if st is getattr(wm, "_lead_pop_stack", 0) else
+                           "lquiet" if st is getattr(wm, "_lead_quiet_stack", 0) else "full")
+        self.bufs[self.k] = bytes(self.cv._buf)
+        self.cv._comp.last = self.bufs[self.k] if self.n > 1 else None
+        self.k = (self.k + 1) % self.n
+        self.cv._buf[:] = self.bufs[self.k]
+        return self.stacks[-1]
+
+    def settle(self, drv, n=10):
+        self.stacks = []
+        for _ in range(n):
+            self.frame(drv)
+        return self.stacks
+
+    def full(self, drv):
+        """Every buffer after N forced full repaints of the state as it is."""
+        wm = self.ws.wm
+        for _ in range(self.n):
+            wm._win_sig = None
+            wm._desk_painted = True
+            wm._backdrop_valid = False
+            self.ws._dirty = True
+            self.frame(drv)
+        return list(self.bufs)
+
+
+def _popover_desk(tmp_path, game=False):
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    use_theme(ws, "night", "dark")
+    drv = _drv(ws)
+    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.open_desk()
+    ws.open_app(ws._apps_by_id["calc"])
+    if game:
+        select_on_home(ws, "Star Catcher")
+        ws.open()
+    for _ in range(20):
+        _quiesce(ws)
+        ws._confetti_until = ws._egg_until = 0
+        drv.frame(1 / 30)
+    ws.show_fps = False
+    return ws, drv
+
+
+def _tap_widget(ws, drv, name):
+    from runtime import shell_layout
+    lay = ws.wm._root_ctx.layout
+    i, (x, y, w, h) = shell_layout.cell_of(lay.bars, name)
+    bx, by = lay.bars[i][1][:2]
+    drv.click(bx + x + w // 2, by + y + h // 2)
+
+
+def test_a_widget_tap_opens_its_popover_at_its_cell(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    for name in ("clock", "wifi", "battery", "menu"):
+        _tap_widget(ws, drv, name)
+        drv.frame(1 / 30)
+        m = ws.sysmenu
+        assert m.open and m.widget == name
+        x, y, w, h = m.panel_rect()
+        # hangs from the top bar, a component's card the popover's gap below it
+        assert y == ws.layout.bars[0][1][3] + (0 if name == "menu" else 8)
+        assert 0 <= x and x + w <= ws.sys_canvas.w
+        assert (m.comp is None) == (name == "menu")
+        _tap_widget(ws, drv, name)                    # the anchor again closes it
+        drv.frame(1 / 30)
+        assert not m.open
+
+
+def test_a_tap_outside_closes_the_popover_and_reaches_nothing(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    _tap_widget(ws, drv, "clock")
+    drv.frame(1 / 30)
+    calc = ws.wm._wins["calc"]
+    focus = ws.wm._focus
+    drv.click(calc.x + calc.w // 2, calc.y + calc.h // 2)
+    drv.frame(1 / 30)
+    assert not ws.sysmenu.open
+    assert ws.wm._focus == focus                      # the tap was the popover's
+
+
+def test_b_esc_and_home_close_the_popover(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    for key in ("b", "stop", "home"):
+        ws.widget_tap("battery")
+        assert ws.sysmenu.open
+        ws._sysmenu_layer.handle_input(_Key(key))
+        assert not ws.sysmenu.open, key
+    ws.widget_tap("battery")
+    esc = _Key(None)
+    esc.last_key = 27
+    ws._sysmenu_layer.handle_input(esc)
+    assert not ws.sysmenu.open
+    assert ws.wm.mode == "desktop"                    # HOME did not show the desk
+
+
+def test_one_popover_at_a_time(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    ws.widget_tap("clock")
+    ws.widget_tap("wifi")                             # another widget replaces it
+    assert ws.sysmenu.widget == "wifi"
+    assert "settings" in ws.leases.holders()
+    ws.widget_tap("menu")
+    assert ws.sysmenu.widget == "menu" and ws.sysmenu.comp is None
+    assert ws.leases.holders() == []                  # the wifi panel let go
+
+
+def test_the_wifi_popover_releases_the_radio_on_every_close(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    closes = (
+        lambda: _tap_widget(ws, drv, "wifi"),                         # the anchor
+        lambda: drv.click(5, ws.sys_canvas.h - 5),                    # outside
+        lambda: ws._sysmenu_layer.handle_input(_Key("b")),            # B
+        lambda: ws._sysmenu_layer.handle_input(_Key("home")),         # HOME
+    )
+    for close in closes:
+        _tap_widget(ws, drv, "wifi")
+        drv.frame(1 / 30)
+        assert ws.sysmenu.widget == "wifi"
+        assert ws.leases.holders() == ["settings"] and ws.wifi.radio is True
+        close()
+        drv.frame(1 / 30)
+        assert not ws.sysmenu.open
+        assert ws.leases.holders() == [] and ws.wifi.radio is False
+
+
+def test_the_wifi_popover_runs_the_password_step_in_place(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    ws.widget_tap("wifi")
+    drv.frame(1 / 30)
+    sl = ws.settings_layer
+    k = next(i for i, n in enumerate(sl.wifi_nets) if n[2])            # locked
+    ws.sysmenu.comp.host.focus("net%d" % k)
+    drv.press("a")
+    drv.frame(1 / 30)
+    assert sl.wifi_pick is not None and ws.sysmenu.comp.typing()
+    for ch in "hunter2":
+        drv.type_char(ord(ch))
+        drv.frame(1 / 30)
+    assert ws.sysmenu.open                          # "b" was typed, not B
+    drv.type_char(13)
+    drv.frame(1 / 30)
+    assert ws.wifi.status()[0]
+    assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
+
+
+def test_a_popover_change_paints_its_rect_alone(tmp_path):
+    """Open, a row moved, close: on a persistent root each is ONE frame of the
+    popover layers alone, its rect the frame's damage -- never the desk. The
+    open and the close stamp the focused window first, its focus mark let go
+    and taken back."""
+    ws, drv = _popover_desk(tmp_path)
+    damage = []
+    ws.sys_canvas.note_damage = lambda *r: damage.append(r)
+    ring = _Ring(ws, 1)
+    ring.settle(drv)
+    win = ws.wm._wins["calc"].content_rect()
+    for step, marks in ((lambda: ws.widget_tap("battery"), [win]),
+                        (lambda: ws._sysmenu_layer.handle_input(_Key("down")), []),
+                        (lambda: ws.widget_tap("battery"), [win])):
+        rect = ws.sysmenu.panel_rect() if ws.sysmenu.open else None
+        damage.clear()
+        step()
+        rect = rect or ws.sysmenu.panel_rect()
+        assert ring.settle(drv) == ["pop"]
+        assert sorted(damage) == sorted(marks + [rect])
+    assert ring.settle(drv) == []                     # idle: no frame at all
+
+
+def test_a_component_popovers_card_repaints_over_what_it_covers(tmp_path):
+    """A bar widget's popover (a component card under the look) that
+    changes while it rides repaints over the snapshot of what it covers,
+    never over its own last paint, whose corners and shadow it would blend
+    again: after a move every buffer's card is a full repaint's."""
+    ws, drv = _popover_desk(tmp_path)
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv)
+    ws.widget_tap("clock")
+    ring.settle(drv)
+    ws._sysmenu_layer.handle_input(_Key("right"))
+    assert ring.settle(drv) == ["pop"] * 3
+    x, y, w, h = ws.sysmenu.panel_rect()
+    W = ws.sys_canvas.w
+
+    def card(buf):
+        return [buf[2 * (r * W + x):2 * (r * W + x + w)] for r in range(y, y + h)]
+    seen = [card(b) for b in ring.bufs]
+    assert seen == [card(b) for b in ring.full(drv)]
+
+
+def test_a_popover_is_pixel_identical_in_every_buffer(tmp_path):
+    """On a triple-buffered root, after the popover opens, moves and closes,
+    every buffer equals a full repaint of the same state: the focused window
+    under it shown without its focus mark while the popover holds the keys
+    (one a screen), with it again once it closes."""
+    for name in ("clock", "wifi", "menu"):
+        ws, drv = _popover_desk(tmp_path / name)
+        ring = _Ring(ws, 3)
+        for _ in range(3):
+            ws._dirty = True
+            ring.frame(drv)
+        ring.settle(drv)
+        ws.widget_tap(name)
+        ring.settle(drv)
+        ws._sysmenu_layer.handle_input(_Key("right" if name == "clock" else "down"))
+        assert ring.settle(drv) == ["pop"] * 3
+        assert ring.bufs[(ring.k - 1) % 3] == ring.full(drv)[(ring.k - 1) % 3]
+        ring.settle(drv)
+        ws.widget_tap(name)
+        ring.settle(drv)
+        seen = list(ring.bufs)
+        assert seen == ring.full(drv), name
+
+
+def test_the_wifi_card_that_grows_is_a_full_repaint_in_every_buffer(tmp_path):
+    """The Wi-Fi card sized to what its scan finds: opened, then grown by a
+    rescan that finds more networks, every buffer is a full repaint's -- no
+    part of its larger card left over what its first rect kept."""
+    ws, drv = _popover_desk(tmp_path)
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv)
+    ws.widget_tap("wifi")
+    ring.settle(drv)
+    assert ws.sysmenu.panel_rect()[3] > 200        # its four networks counted
+    nets = list(ws.wifi.scan())
+    ws.wifi.scan = lambda: nets + [("Attic", 20, False), ("Porch", 10, True)]
+    h = ws.sysmenu.panel_rect()[3]
+    ws.sysmenu.comp.host.focus("Scan again")
+    drv.press("a")
+    ring.settle(drv)
+    assert ws.sysmenu.panel_rect()[3] > h
+    assert list(ring.bufs) == ring.full(drv)
+    ws.widget_tap("wifi")
+    ring.settle(drv)
+    assert list(ring.bufs) == ring.full(drv)
+
+
+def test_a_popover_keeps_the_focused_windows_buffer_for_its_close(tmp_path, monkeypatch):
+    """Its open draws the focused window once without its mark; its close
+    puts the buffer it kept back rather than drawing it again."""
+    ws, drv = _popover_desk(tmp_path)
+    ring = _Ring(ws, 3)
+    ring.settle(drv)
+    calc = ws.wm._content_for("calc")
+    seen = []
+    orig = calc.draw
+    monkeypatch.setattr(calc, "draw", lambda dt: (seen.append(dt), orig(dt))[1])
+    ws.widget_tap("clock")
+    assert ring.settle(drv) == ["pop"] * 3
+    assert len(seen) == 1 and not ws.wm._wins["calc"]._marked
+    ws.widget_tap("clock")
+    assert ring.settle(drv) == ["pop"] * 3
+    assert len(seen) == 1 and ws.wm._wins["calc"]._marked
+
+
+def test_under_touch_a_menu_leaves_the_focused_window_as_it_is(tmp_path, monkeypatch):
+    """Touch shows no focus mark, so a popover or the system menu taking
+    the keys changes nothing in the focused window: neither draws it, and
+    every buffer is still a full repaint's."""
+    from runtime import ui_draw
+    ws, drv = _popover_desk(tmp_path)
+    was = ui_draw.input_kind()
+    ui_draw.input_kind("touch")
+    try:
+        ring = _Ring(ws, 3)
+        for _ in range(3):
+            ws._dirty = True
+            ring.frame(drv)
+        ring.settle(drv)
+        calc = ws.wm._content_for("calc")
+        seen = []
+        orig = calc.draw
+        monkeypatch.setattr(calc, "draw", lambda dt: (seen.append(dt), orig(dt))[1])
+        for name in ("clock", "menu"):
+            ws.widget_tap(name)
+            ring.settle(drv)
+            assert seen == [], name
+            assert list(ring.bufs) == ring.full(drv), name
+            seen.clear()
+            ws.widget_tap(name)
+            ring.settle(drv)
+            seen.clear()
+    finally:
+        ui_draw.input_kind(was)
+
+
+def test_a_popover_over_a_playtest_keeps_the_quiet_stack(tmp_path):
+    ws, drv = _popover_desk(tmp_path, game=True)
+    ring = _Ring(ws, 1)
+    assert set(ring.settle(drv, 4)) == {"quiet"}
+    ws.widget_tap("clock")
+    assert set(ring.settle(drv, 4)) == {"qpop"}
+    assert ws.wm._pop_over_game and ws.wm._pop_face_ok   # its face rides the game
+    _game_only_moved(ws, drv, ring, ws.sysmenu.panel_rect())
+    assert ring.settle(drv, 4)[1:] == ["qpop"] * 3    # the repaint's debt paid
+    ws.widget_tap("clock")
+    assert ring.settle(drv, 4) == ["qpop", "quiet", "quiet", "quiet"]
+    _game_only_moved(ws, drv, ring)
+
+
+def _differ(a, b):
+    """The pixels (as 16-bit offsets) where two buffers differ."""
+    return {i for i in range(0, len(a), 2) if a[i:i + 2] != b[i:i + 2]}
+
+
+def test_the_system_menu_over_a_playtest_keeps_the_quiet_stack(tmp_path):
+    """The system menu's scrim (D-01) over a running game: every frame is
+    a quiet one -- the game's own pixels composited and washed, the menu's
+    card painted while it opens, its face put back over them once it has
+    settled. The frame the scrim comes on copies the last painted frame and
+    washes it whole, and the two that bring the other buffers to it go over
+    a copy of the last painted frame too. Every buffer equals a full
+    repaint of the same state, as a quiet frame without the menu does."""
+    ws, drv = _popover_desk(tmp_path, game=True)
+    player = ws._content_layers["desktop"]
+    ticks = [0]
+
+    def still_game(dt):                  # the same frame every tick
+        ticks[0] += 1
+        ws.canvas.cls(8)
+        ws.canvas.rect(10, 10, 40, 30, 12)
+
+    player.draw = still_game
+    ring = _Ring(ws, 3)
+    assert set(ring.settle(drv, 4)) == {"quiet"}
+    # what a quiet frame leaves unlike a full one without the menu: the
+    # window's corner over the game's last row
+    owed = _differ(ring.bufs[0], ring.full(drv)[0])
+    ring.settle(drv, 4)
+    ws.widget_tap("menu")
+    assert ws.menu_ui.scrims()
+    assert ring.settle(drv, 6) == ["lpop"] * 3 + ["qpop"] * 3
+    assert ws.wm._pop_over_game, "the menu's card is not over the game"
+    n = ticks[0]
+    seen = list(ring.bufs)
+    full = ring.full(drv)
+    assert ticks[0] > n
+    for a, b in zip(seen, full):
+        assert _differ(a, b) == owed, "the quiet frames wash the game once"
+    ws.widget_tap("menu")
+    assert not ws.menu_ui.scrims()
+    ring.settle(drv, 4)
+    assert ring.settle(drv, 3) == ["quiet"] * 3
+
+
+def test_a_playtests_debt_frames_copy_the_last_frame(tmp_path):
+    """A whole frame beside a running game (a dirty desk): the frames that
+    bring the other buffers to it copy the last painted frame and draw the
+    quiet stack over it, and every buffer is then a full repaint's."""
+    ws, drv = _popover_desk(tmp_path, game=True)
+    player = ws._content_layers["desktop"]
+
+    def still_game(dt):
+        ws.canvas.cls(8)
+        ws.canvas.rect(10, 10, 40, 30, 12)
+
+    player.draw = still_game
+    ring = _Ring(ws, 3)
+    assert set(ring.settle(drv, 4)) == {"quiet"}
+    owed = _differ(ring.bufs[0], ring.full(drv)[0])
+    ring.settle(drv, 4)
+    ws._dirty = True
+    assert ring.settle(drv, 4) == ["full", "lquiet", "lquiet", "quiet"]
+    seen = list(ring.bufs)
+    for a, b in zip(seen, ring.full(drv)):
+        assert _differ(a, b) == owed
+
+
+def _game_only_moved(ws, drv, ring, over=None):
+    """The retained frame equals a full repaint everywhere but the game's
+    own pixels (it moved between the two); `over`, a rect drawn above it,
+    must match too."""
+    win = ws.wm._wins["desktop"]
+    seen = ring.bufs[0]
+    full = ring.full(drv)[0]
+    w = ws.sys_canvas.w
+    cx, cy, cw, ch = win.content_rect()
+    ox, oy, ow, oh = over or (0, 0, 0, 0)
+    for i in range(0, len(seen), 2):
+        if seen[i:i + 2] != full[i:i + 2]:
+            x, y = (i // 2) % w, (i // 2) // w
+            assert not (ox <= x < ox + ow and oy <= y < oy + oh), (x, y)
+            assert cx <= x < cx + cw and cy <= y < cy + ch, (x, y)
+
+
+def test_the_fit_check_releases_a_closed_popovers_snapshots(tmp_path):
+    ws, drv = _popover_desk(tmp_path)
+    ws.widget_tap("battery")
+    for _ in range(3):
+        drv.frame(1 / 30)
+    wm = ws.wm
+    snap = wm._pop_slots[wm._pop_cur][0]
+    assert snap is not None and snap._comp._buf is not None
+    while wm.release_cache():
+        pass
+    assert wm._pop_slots[wm._pop_cur][0] is snap         # live: kept
+    ws.widget_tap("battery")
+    for _ in range(3):
+        drv.frame(1 / 30)
+    while wm.release_cache():
+        pass
+    assert all(s[0] is None for s in wm._pop_slots)
+    assert snap._comp._buf is None
+
+
+def test_the_editor_and_its_playtest_are_titled_by_app_and_cart(tmp_path):
+    """docs/look_2026-10.md step 23: "Editor \u00b7 Star Catcher" over "Play \u00b7
+    Star Catcher" (a hyphen where the title face has no dot), and under the
+    look's depth a chip names the app alone."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _open_editor(ws)
+    drv.frame(1 / 30)
+    ws._leave_menu()
+    drv.frame(1 / 30)
+    cart = ws.cart.get("title")
+    wins = ws.wm._wins
+    assert ws.wm._win_title(wins["menu"]) == "Editor - " + cart
+    assert ws.wm._win_title(wins["desktop"]) == "Play - " + cart
+    labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
+    assert labels["menu"] == "Editor"                # the chip names the app alone
+    # Day: on this undeclared glass (the handheld class at font scale 2) the
+    # chips' Day Sans cuts a name to what fits; the chip's label is pinned
+    ws.look.set_theme("moy", persist=False, variant="light")
+    drv.frame(1 / 30)
+    labels = {k: lb for k, _r, lb in ws.wm._chip_rects()}
+    assert "Editor".startswith(labels["menu"])
+    assert cart.startswith(labels["desktop"])      # the playtest's chip names the cart (D-23)
+
+
+def test_while_a_playtest_runs_play_reads_stop_and_restart(tmp_path):
+    """D-23 (2026-10-19): with the playtest's window open, the Editor's Play
+    is Restart and Stop; Stop closes the window, and Play is back."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _open_editor(ws)
+    drv.frame(1 / 30)
+    app = ws.editor_app
+    assert not app.playing()
+    ws._leave_menu()
+    drv.frame(1 / 30)
+    assert app.playing()
+    zone = ws.bar_layer._zone_rect("menu")
+    tabs_area, play_r = app._zone_parts(zone)
+    restart_r, stop_r = app._run_rects(play_r)
+    assert app.zone_tap(stop_r[0] + stop_r[2] // 2, stop_r[1] + stop_r[3] // 2, zone)
+    drv.frame(1 / 30)
+    assert "desktop" not in ws.wm._wins and not app.playing()
+
+
+# -- the desk and windows (docs/look_2026-10.md step 25) ----------------------
+
+def _moy_desk(tmp_path, variant="light"):
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    ws.look.set_theme("moy", persist=False, variant=variant)
+    ws.open_desk()
+    _quiesce(ws)
+    ws.frame(1 / 30)
+    return ws
+
+
+def _px(cv, x, y):
+    i = (y * cv.w + x) * 2
+    return cv._buf[i] << 8 | cv._buf[i + 1]
+
+
+def test_the_desk_column_is_tiles_with_their_labels_over_the_backdrop(tmp_path):
+    """Under the look the column is 44-pixel tiles on the 74-row pitch, the
+    first 18 under the bar, centred 54 in from the desk's edge, wrapping into
+    a further column to its right; each label is the title its app names, 2
+    under its tile (nearer it than the next tile), on the backdrop with no
+    plate."""
+    ws = _moy_desk(tmp_path)
+    rects = ws.wm._backdrop_layer._icon_rects()
+    labels = [r[3] for r in rects]
+    assert labels[:2] == ["Play", "Projects"]
+    assert {"Paint", "Storybook", "Files", "Calc", "Get carts", "Notes"} <= set(labels)
+    dx, dy, _dw, _dh = ws.wm._desk_rect()
+    cv = ws.sys_canvas
+    x, row = dx + 32, 0
+    for i, (_key, box, band, _label, _cart) in enumerate(rects):
+        if i and box[1] == dy + 18:
+            assert box[0] > x
+            x, row = box[0], 0
+        assert box == (x, dy + 18 + 74 * row, 44, 44)
+        row += 1
+        assert band[1] == box[1] + 46 and band[0] + band[2] // 2 == box[0] + 22
+        # no plate: the band's edge is the backdrop either side of it
+        assert _px(cv, band[0] + 1, band[1] + 1) == _px(cv, band[0] - 1, band[1] + 1)
+        assert _px(cv, box[0] + 2, box[1] + 22) == 0xFFFF       # the tile's fill
+
+
+def test_the_desk_column_holds_every_app_the_home_apps_tab_does(tmp_path):
+    """The desk is the windowed tier's launch surface for apps, so its column
+    holds the Apps tab's carts: the registered apps' and the app carts no
+    app claims, Notes among them, whose tile is its icon set slot and whose
+    tap runs the cart in a window."""
+    ws = _moy_desk(tmp_path)
+    desk = ws.wm._backdrop_layer
+    rows = desk._icon_catalog()
+    shown = {id(c) for _k, _l, c in rows if c is not None}
+    apps = ws._launcher_items(ws.carts.all, "apps")
+    assert apps and all(id(c) in shown for c in apps), \
+        [c.get("title") for c in apps if id(c) not in shown]
+    notes = [r for r in rows if r[1] == "Notes"]
+    assert len(notes) == 1 and notes[0][0] == "notes"
+    opened = []
+    ws.open = lambda cart=None: opened.append(cart)
+    desk._open_icon("notes", notes[0][2])
+    assert opened == [notes[0][2]]
+
+
+def test_a_desk_tile_draws_its_apps_icon_from_the_set(tmp_path):
+    """Every tile's icon is its app's slot of the theme's set (Paint's by
+    its alias), at the 24-pixel size in the ink."""
+    ws = _moy_desk(tmp_path)
+    drawn = []
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, rect, ink, cv=None: (
+        drawn.append((kind, rect[2], real(kind, rect, ink, cv))), drawn[-1][2])[1]
+    ws.wm._backdrop_layer._draw_desk_icons()
+    keys = [r[0] for r in ws.wm._backdrop_layer._icon_rects()]
+    assert [d[0] for d in drawn] == keys
+    assert all(size == 24 and ok for _k, size, ok in drawn)
+    from runtime import iconsets
+    assert iconsets._pick("default", 24)[1] == 24
+
+
+def test_a_desk_label_over_a_wallpaper_is_white_over_a_shadow(tmp_path, monkeypatch):
+    """Over the theme's backdrop a label takes the ink; over a wallpaper,
+    whose pixels the theme does not know, white over a black shadow."""
+    from runtime import ui_draw
+    ws = _moy_desk(tmp_path)
+    got = []
+    real = ui_draw.label
+    monkeypatch.setattr(ui_draw, "label", lambda cv, r, t, ink, align=0, bg=None,
+                        shadow=None: (got.append((t, ink, shadow)),
+                                      real(cv, r, t, ink, align, bg, shadow))[1])
+    ws.wm._backdrop_layer._draw_desk_icons()
+    assert got and all(ink == ws.theme_colors["ink"] and sh is None for _t, ink, sh in got)
+    got.clear()
+    monkeypatch.setattr(ws.look, "wallpaper_id", ws.look.PICTURE)
+    ws.wm._backdrop_layer._draw_desk_icons()
+    black, white = ws.look.live.fixed[2:]
+    assert got and all(ink == white and sh[0] == black for _t, ink, sh in got)
+
+
+def test_blocks_tiles_are_each_apps_colour_and_their_icons_the_tile_ink(tmp_path):
+    """Blocks' `tiles` (docs/look_2026-10.md step 26b) name an app by its
+    icon slot, Paint's `artwork` by `paint`; each tile is that colour inside
+    the ink outline, its icon in `tile_ink`, and an app the map leaves out
+    keeps the raised fill."""
+    from runtime import ui_draw
+    from runtime.wm_desk import _tile_fill
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    ws.look.set_theme("blocks", persist=False, variant="light")
+    ws.open_desk()
+    _quiesce(ws)
+    ws.frame(1 / 30)
+    tiles = dict(ws.look.live.look[2])
+    assert _tile_fill(tiles, "artwork") == tiles["paint"]
+    assert _tile_fill(tiles, "appearance") is None
+    word = {k: ui_draw._C.theme_rgb(0x1000000 | int(v, 16))[0] for k, v in (
+        ("play", "ff6b4a"), ("artwork", "ffd23f"), ("files", "7cc8ff"), ("calc", "ff9a62"),
+        ("getcarts", "9be36b"), ("ink", "1a1530"))}
+    cv = ws.sys_canvas
+    seen = set()
+    for key, box, _band, _label, _cart in ws.wm._backdrop_layer._icon_rects():
+        if key in word:
+            assert _px(cv, box[0] + 4, box[1] + 22) == word[key], key
+            assert _px(cv, box[0], box[1] + 22) == word["ink"], key
+            seen.add(key)
+    assert seen == {"play", "artwork", "files", "calc", "getcarts"}
+    inks = []
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, rect, ink, c=None: (inks.append(ink), real(kind, rect, ink, c))[1]
+    ws.wm._backdrop_layer._draw_desk_icons()
+    assert inks and set(inks) == {ws.look.live.look[0]["tile_ink"]}
+
+
+def test_a_looks_label_ink_and_shadow_draw_the_desk_labels(tmp_path, monkeypatch):
+    """`label.ink` and `label.shadow` (THEMES.md's launcher group) are the
+    labels' over the theme's backdrop; a look that sets neither keeps the
+    ink and no shadow."""
+    from test_ui_style_data import _install, _uninstall
+    from runtime import ui_draw
+    _install({"format": 2, "name": "lb", "inherits": "moy", "look": {
+        "label": {"ink": "#ff0000", "shadow": ["#000000", 0.5, 2, 1]}}})
+    try:
+        ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+        ws.look.set_theme("lb", persist=False, variant="light")
+        ws.open_desk()
+        _quiesce(ws)
+        got = []
+        real = ui_draw.label
+        monkeypatch.setattr(ui_draw, "label", lambda cv, r, t, ink, align=0, bg=None,
+                            shadow=None: (got.append((ink, shadow)),
+                                          real(cv, r, t, ink, align, bg, shadow))[1])
+        ws.wm._backdrop_layer._draw_desk_icons()
+        leaves = ws.look.live.look[0]
+        assert got and set(got) == {(leaves["label.ink"],
+                                     (leaves["label.shadow.c"], 128, 2, 1))}
+    finally:
+        _uninstall()
+
+
+def test_a_window_under_the_look_is_titled_and_drawn_whole(tmp_path):
+    """The title is the app's as it names it, the line icon and the chip's
+    are the set's slot for the app, and the rounded frame draws no grip
+    (its corner still resizes)."""
+    ws = _moy_desk(tmp_path)
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    wm = ws.wm
+    win = wm._wins["calc"]
+    assert wm._win_title(win) == "Calc"
+    drawn = []
+    real = ws.draw_icon
+    ws.draw_icon = lambda kind, rect, ink, cv=None: (
+        drawn.append(kind), real(kind, rect, ink, cv))[1]
+    grips = []
+    real_fill = wm._root_canvas.rect
+    wm._win_chrome(win, True)
+    wm._draw_look_chips(wm._root_canvas, ws.theme_colors, 1, wm._root_ctx.layout.line_h)
+    assert drawn == ["calc", "calc"]
+    gx, gy, gw, gh = wm._grip_rect(win)
+    wm._root_canvas.rect = lambda *a: (grips.append(a), real_fill(*a))[1]
+    try:
+        wm._win_grip(win, True)
+    finally:
+        wm._root_canvas.rect = real_fill
+    assert grips == []
+    hx, hy, _hw, _hh = wm._grip_hit_rect(win)
+    assert hx <= gx and hy <= gy
+
+
+def test_a_chip_that_minimizes_its_window_takes_the_focus_with_it(tmp_path):
+    """The chip's minimize leaves no window focused, as the title strip's
+    does, so no window behind draws as the focused one and no key reaches a
+    hidden window; the chip again restores and focuses it."""
+    ws = _moy_desk(tmp_path)
+    for app in ("files", "calc"):
+        ws.open_app(ws._apps_by_id[app])
+        ws.frame(1 / 30)
+    wm = ws.wm
+    assert wm._focus == "calc"
+    wm._chip_tap("calc")
+    assert wm._wins["calc"].minimized and wm._focus is None
+    wm._chip_tap("calc")
+    assert not wm._wins["calc"].minimized and wm._focus == "calc"
+
+
+@pytest.mark.parametrize("held", [True, False], ids=["under-a-menu", "free"])
+def test_the_root_takes_back_its_marks_after_the_windows_draw(tmp_path, held):
+    """The console turns the focus marks off under a menu that holds the
+    keys; a window's install sets them for its own content, and the root's
+    reinstall after the windows gives back what the root had, so desk
+    content drawn after them marks no second focus under the menu."""
+    from runtime import ui_draw
+    ws = _moy_desk(tmp_path)
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    wm = ws.wm
+    win = wm._wins["calc"]
+    try:
+        ui_draw.marks(not held)
+        wm._install(win.ctx, win)
+        assert ui_draw.marks()[0] == (not wm.popover_takes_keys())
+        wm._install(wm._root_ctx)
+        assert ui_draw.marks()[0] == (not held)
+    finally:
+        ui_draw.marks(True)
+
+
+@pytest.mark.parametrize("theme", ["moy", "blocks", "contrast"])
+def test_calcs_keys_stand_as_far_from_the_frames_bottom_as_its_sides(tmp_path, theme):
+    """A rounded frame's foot is part of the window's bottom inset, not an
+    addition to the app's: Calc's keypad ends as far above the frame's
+    outer bottom edge as it starts in from the frame's outer left edge, in
+    every look, whatever its corner radius."""
+    ws = _moy_desk(tmp_path)
+    if theme != "moy":
+        ws.look.set_theme(theme, persist=False, variant="light")
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    wm = ws.wm
+    win = wm._wins["calc"]
+    assert win.foot > 0
+    cx, cy, _cw, _ch = win.content_rect()
+    keys = win.ctx.app_layouts["calc"].keys
+    left = cx + min(k[0] for k in keys) - win.x
+    right = win.x + win.w - (cx + max(k[0] + k[2] for k in keys))
+    bottom = win.y + win.h - (cy + max(k[1] + k[3] for k in keys))
+    assert left == right == bottom
+
+
+@pytest.mark.parametrize("theme", ["moy", "contrast"])
+def test_the_focused_chip_prints_in_the_current_ink(tmp_path, theme):
+    """The focused window's chip is current content: its icon and title take
+    the ink the look gives that (Moy's accent, beside the raised plate;
+    Contrast's `value_ink`, on its solid ink plate, D-14); the others the
+    dim ink."""
+    ws = _moy_desk(tmp_path)
+    if theme != "moy":
+        ws.look.set_theme(theme, persist=False, variant="light")
+    for app in ("files", "calc"):
+        ws.open_app(ws._apps_by_id[app])
+        ws.frame(1 / 30)
+    wm = ws.wm
+    sc, th = wm._root_canvas, ws.theme_colors
+    inks = {}
+    real = sc.print
+    sc.print = lambda text, x, y, c=None, *a: (inks.__setitem__(text, c),
+                                               real(text, x, y, c, *a))[1]
+    try:
+        wm._draw_look_chips(sc, th, 1, wm._root_ctx.layout.line_h)
+    finally:
+        sc.print = real
+    want = th["ink_accent"] if theme == "moy" else th["value_ink"]
+    assert inks["Calc"] == want
+    assert inks["Files"] == th["chrome_ink_dim"]
+
+
+# -- the wallpaper's subject (docs/look_2026-10.md step 28) -------------------
+
+def _overlaps(a, b):
+    return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2]
+            and a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
+
+
+def test_moys_night_sleeps_clear_of_the_icon_column(tmp_path):
+    """The desk hands its wallpaper the bars and the icon column as quiet
+    rectangles; Moy's night, drawing per glass, puts Moy where neither is,
+    and its subject is where Moy sleeps."""
+    ws = _moy_desk(tmp_path)
+    ws.look.select_wallpaper("moybyte.moy_night", persist=False)
+    ws.wm._backdrop_layer._draw_desktop(1 / 30)
+    quiet = ws.wm._backdrop_layer.quiet()
+    assert quiet[:len(ws.wallpaper.bars())] == ws.wallpaper.bars()
+    col = quiet[len(ws.wallpaper.bars()):]
+    assert col and col[0][0] < 100                      # the column, at the left
+    s = ws.wallpaper.subject
+    assert s is not None and not any(_overlaps(s, q) for q in quiet)
+    assert s[0] > ws.sys_canvas.w // 2                  # so Moy sleeps bottom right
+
+
+def test_a_new_window_keeps_clear_of_the_wallpapers_subject(tmp_path):
+    """The WM's default placement moves a window that would cover the
+    subject to the nearest place beside it that holds the whole window, and
+    leaves one that does not cover it, or that nothing holds, where the
+    cascade put it."""
+    ws = _moy_desk(tmp_path)
+    wm = ws.wm
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    win = wm._wins["calc"]
+    plain = (win.x, win.y, win.w, win.h)
+    ws.exit()
+    ws.frame(1 / 30)
+    assert "calc" not in wm._wins
+
+    # a subject square in the middle of where Calc opens
+    sub = (plain[0] + plain[2] // 2 - 20, plain[1] + plain[3] // 2 - 20, 40, 40)
+    ws.wallpaper.subject = sub
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    win = wm._wins["calc"]
+    got = (win.x, win.y, win.w, win.h)
+    dx, dy, dw, dh = wm._desk_rect()
+    assert got[2:] == plain[2:]
+    assert not _overlaps(got, sub)
+    assert dx <= got[0] and got[0] + got[2] <= dx + dw
+    assert dy <= got[1] and got[1] + got[3] <= dy + dh
+    ws.exit()
+    ws.frame(1 / 30)
+
+    # a subject Calc does not cover moves nothing
+    ws.wallpaper.subject = (dx + dw - 30, dy + dh - 30, 20, 20)
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    win = wm._wins["calc"]
+    assert (win.x, win.y) == plain[:2]
+    ws.exit()
+    ws.frame(1 / 30)
+
+    # a subject no place on the desk avoids leaves the cascade's place
+    ws.wallpaper.subject = (dx, dy, dw, dh)
+    ws.open_app(ws._apps_by_id["calc"])
+    ws.frame(1 / 30)
+    win = wm._wins["calc"]
+    assert (win.x, win.y) == plain[:2]
+
+
+@pytest.mark.parametrize("key", ["menu", "files", "calc", "appearance"])
+def test_a_new_window_opens_clear_of_the_icon_column(tmp_path, key):
+    """A new window opens in the work area right of the launchers (macOS and
+    GNOME place one in the free area), never over their labels; one wider
+    than that area (the column wraps into a second at 1024x600) opens as far
+    right as the desk allows, clear of the first column."""
+    ws = _moy_desk(tmp_path)
+    if key == "menu":
+        ws.system.set("win_full", {"menu": False})     # restored (E-04 opens it full)
+        ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Star Catcher"))
+    elif key == "appearance":
+        ws.open_app(ws.appearance_app)
+    else:
+        ws.open_app(ws._apps_by_id[key])
+    ws.frame(1 / 30)
+    win = ws.wm._wins[key]
+    rects = ws.wm._backdrop_layer._icon_rects()
+    right = max(max(b[0] + b[2], l[0] + l[2]) for _k, b, l, _t, _c in rects)
+    dx, _dy, dw, _dh = ws.wm._desk_rect()
+    if win.w <= dx + dw - right:
+        assert win.x >= right, (key, win.x, right)
+    else:
+        first = max(max(b[0] + b[2], l[0] + l[2])
+                    for _k, b, l, _t, _c in rects if b[0] == rects[0][1][0])
+        assert win.x == dx + dw - win.w and win.x >= first, (key, win.x, first)
+
+
+# -- every edge and corner resizes; a full-screen row's drag restores --------
+# (docs/shell_layout_2026-10.md §3, owner 2026-10-23)
+
+from runtime.wm_chrome import RZ_L, RZ_R, RZ_T, RZ_B   # noqa: E402
+
+_MASKS = (RZ_L, RZ_R, RZ_T, RZ_B, RZ_L | RZ_T, RZ_R | RZ_T,
+          RZ_L | RZ_B, RZ_R | RZ_B)
+
+
+def _desk(tmp_path):
+    """A 7-inch desk: the touch-sized zones and full screen's first open."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    use_theme(ws, "night", "dark")
+    return ws, _drv(ws)
+
+
+def _settled(tmp_path, kind="settings"):
+    ws, drv = _desk(tmp_path)
+    drv.frame(1 / 30)
+    ws.open_settings()
+    for _ in range(4):
+        drv.frame(1 / 30)
+    _quiesce(ws)
+    return ws, drv, ws.wm._wins[kind]
+
+
+def _zone_point(ws, win, mask):
+    """A point in the middle of `win`'s outside band on the edges `mask` names."""
+    o, _i, _c = ws.wm._rz_band()
+    x = (win.x - o // 2 if mask & RZ_L else win.x + win.w + o // 2 if mask & RZ_R
+         else win.x + win.w // 2)
+    y = (win.y - o // 2 if mask & RZ_T else win.y + win.h + o // 2 if mask & RZ_B
+         else win.y + win.h // 2)
+    return x, y
+
+
+def _resize_by(drv, x, y, dx, dy, steps=4):
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    for k in range(1, steps + 1):
+        drv.touch_drag(x + dx * k // steps, y + dy * k // steps)
+        drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+
+@pytest.mark.parametrize("mask", _MASKS)
+def test_every_edge_and_corner_resizes(tmp_path, mask):
+    ws, drv, win = _settled(tmp_path)
+    x0, y0, w0, h0 = win.x, win.y, win.w, win.h
+    px, py = _zone_point(ws, win, mask)
+    assert ws.wm._resize_zone_at(px, py) == ("settings", mask)
+    dx = 20 if mask & RZ_L else -20 if mask & RZ_R else 0     # inward: no clamp
+    dy = 20 if mask & RZ_T else -20 if mask & RZ_B else 0
+    _resize_by(drv, px, py, dx, dy)
+    assert ws.wm._resize is None
+    want = (x0 + (dx if mask & RZ_L else 0), y0 + (dy if mask & RZ_T else 0),
+            w0 - abs(dx), h0 - abs(dy))
+    assert (win.x, win.y, win.w, win.h) == want
+    assert (win.buf.w, win.buf.h) == win.content_rect()[2:]   # relaid out
+
+
+def test_the_strip_drags_and_the_band_above_it_resizes(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    assert ws.wm._resize_zone_at(win.x + win.w // 2, win.y + 2) is None
+    assert ws.wm._resize_zone_at(win.x + win.w // 2, win.y - 2) == ("settings", RZ_T)
+
+
+def test_a_resize_stops_at_the_minimum_and_at_the_desk(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    dx, dy, dw, dh = wm._desk_rect()
+    min_w, min_h = wm._min_size(win, dw, dh)
+    right, bottom = win.x + win.w, win.y + win.h
+    _resize_by(drv, *_zone_point(ws, win, RZ_L), 2000, 0)
+    assert (win.w, win.x + win.w) == (min_w, right)       # the right edge stays
+    _resize_by(drv, *_zone_point(ws, win, RZ_T), 0, 2000)
+    assert (win.h, win.y + win.h) == (min_h, bottom)
+    # pressed just inside the frame, so the edge would pass the glass's
+    _resize_by(drv, win.x + 1, win.y - 1, -2000, -2000)
+    assert (win.x, win.y) == (dx, dy)                     # the desk's edges
+    assert (win.x + win.w, win.y + win.h) == (right, bottom)
+    _resize_by(drv, win.x + win.w - 1, win.y + win.h - 1, 2000, 2000)
+    assert (win.x + win.w, win.y + win.h) == (dx + dw, dy + dh)
+
+
+def test_a_resize_keeps_the_content_frozen_and_relays_it_out_once(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    calls = [0]
+    layer = ws.wm._content_for("settings")
+    orig = layer.draw
+    layer.draw = lambda dt: (calls.__setitem__(0, calls[0] + 1), orig(dt))[1]
+    px, py = _zone_point(ws, win, RZ_L | RZ_B)
+    drv.touch(px, py)
+    drv.frame(1 / 30)
+    calls[0] = 0
+    for k in range(1, 5):
+        drv.touch_drag(px + 8 * k, py - 8 * k)
+        drv.frame(1 / 30)
+    assert calls[0] == 0, "the content re-rendered mid-resize"
+    drv.touch_up()
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert calls[0] == 1, "the release relays the content out once"
+
+
+def test_the_pointer_shows_the_resize_it_would_start(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    p = ws.pointer
+    for mask, shape in ((RZ_R, "ew"), (RZ_B, "ns"), (RZ_L | RZ_T, "nwse"),
+                        (RZ_R | RZ_T, "nesw")):
+        p.x, p.y = _zone_point(ws, win, mask)
+        assert ws.wm.cursor_shape() == shape
+    p.x, p.y = win.x + win.w // 2, win.y + win.h // 2
+    assert ws.wm.cursor_shape() is None
+
+
+def _drag_row(drv, x, y, tx, ty, steps=4):
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    for k in range(1, steps + 1):
+        drv.touch_drag(x + (tx - x) * k // steps, y + (ty - y) * k // steps)
+        drv.frame(1 / 30)
+
+
+def test_a_drag_from_a_full_windows_row_restores_it_under_the_finger(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    w0, h0 = win.w, win.h
+    wm._toggle_max(win)
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert win.saved is not None
+    fw, row = win.w, wm._row_h()
+    x, y = 40, row // 2
+    assert wm._on_row_head(win, x, y)
+    _drag_row(drv, x, y, 300, 200)
+    assert win.saved is None and (win.w, win.h) == (w0, h0)
+    assert wm._drag is not None and wm._drag[0] == "settings"
+    # the finger holds the same point across the title, as far down the strip
+    assert 300 - win.x == x * w0 // fw
+    assert 200 - win.y == y * win.title_h // row
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert wm._drag is None and win.saved is None
+    assert ws.system.get("win_full", {}).get("settings") is False
+
+
+def test_a_window_that_opened_full_restores_at_its_designed_size(tmp_path):
+    ws, drv = _desk(tmp_path)
+    drv.frame(1 / 30)
+    ws.system.set("win_full", {"settings": True})
+    ws.open_settings()
+    for _ in range(4):
+        drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    assert win.saved is not None
+    _sx, _sy, w, h = win.saved                          # the size it opened at
+    _drag_row(drv, 40, ws.wm._row_h() // 2, 400, 300)
+    assert win.saved is None and (win.w, win.h) == (w, h)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+
+def test_a_bar_is_never_a_resize_zone(tmp_path):
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    dx, dy, _dw, _dh = wm._desk_rect()
+    wm._move_window(win, win.x, dy)                    # right under the top bar
+    assert wm._resize_zone_at(win.x + win.w // 2, dy - 2) is None
+
+
+@pytest.mark.parametrize("how", ["restore", "left", "top_right"])
+def test_after_a_restore_or_a_resize_the_glass_is_a_full_repaint(tmp_path, how):
+    ws, drv, win = _settled(tmp_path)
+    if how == "restore":
+        ws.wm._toggle_max(win)
+        for _ in range(3):
+            drv.frame(1 / 30)
+        _drag_row(drv, 40, ws.wm._row_h() // 2, 300, 200)
+        drv.touch_up()
+        drv.frame(1 / 30)
+    else:
+        mask = RZ_L if how == "left" else RZ_R | RZ_T
+        _resize_by(drv, *_zone_point(ws, win, mask), 30 if how == "left" else -40,
+                   0 if how == "left" else 40)
+    _quiesce(ws)
+    for _ in range(3):
+        drv.frame(1 / 30)
+    ring = _Ring(ws, 1)
+    seen = bytes(ws.sys_canvas._buf)
+    assert seen == ring.full(drv)[0]
+
+
+def test_a_restoring_drag_clears_what_the_full_screen_window_covered(tmp_path):
+    """Mid-drag, each frame shows the desk wherever the restored window is
+    not, in every buffer it lands in: the full-screen window's pixels go
+    (glass, P4 2026-10-23: they stayed behind the window as it was
+    dragged)."""
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    ring = _Ring(ws, 3)
+    wm._toggle_max(win)
+    ring.settle(drv, 4)
+    drv.touch(40, wm._row_h() // 2)
+    ring.frame(drv)
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    _dx, dy, _dw, _dh = wm._desk_rect()
+    for k in range(1, 8):
+        drv.touch_drag(40 + 40 * k, wm._row_h() // 2 + 25 * k)
+        assert ring.frame(drv) is not None
+        assert wm._drag is not None and win.saved is None
+        b = ring.bufs[(ring.k - 1) % ring.n]
+        cache = bytes(wm._backdrop._buf)
+        x0, y0, w, h = wm._pad_extent(win, win.x, win.y, win.w, win.h)
+        for y in range(dy, H, 7):
+            for x in range(0, W, 7):
+                if x0 <= x < x0 + w and y0 <= y < y0 + h:
+                    continue
+                o = 2 * (y * W + x)
+                assert b[o:o + 2] == cache[o:o + 2], (k, x, y)
+
+
+def test_a_drag_right_after_a_close_leaves_no_ghost(tmp_path):
+    """A window closed, then a drag begun before the close reached every
+    buffer: each drag frame shows the desk wherever the dragged window is
+    not, the closed window in none of them."""
+    ws, drv, win = _settled(tmp_path)
+    wm = ws.wm
+    ring = _Ring(ws, 3)
+    ws.open_app(ws._apps_by_id["calc"])
+    _quiesce(ws)
+    ring.settle(drv, 6)
+    wm.close_window_kind("calc")
+    ring.frame(drv)
+    x, y = win.x + win.w // 2, win.y + win.title_h // 2
+    drv.touch(x, y)
+    ring.frame(drv)
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    _dx, dy, _dw, _dh = wm._desk_rect()
+    for k in range(1, 7):
+        drv.touch_drag(x + 30 * k, y + 20 * k)
+        assert ring.frame(drv) is not None
+        b = ring.bufs[(ring.k - 1) % ring.n]
+        cache = bytes(wm._backdrop._buf)
+        x0, y0, w, h = wm._pad_extent(win, win.x, win.y, win.w, win.h)
+        for yy in range(dy, H, 7):
+            for xx in range(0, W, 7):
+                if x0 <= xx < x0 + w and y0 <= yy < y0 + h:
+                    continue
+                o = 2 * (yy * W + xx)
+                assert b[o:o + 2] == cache[o:o + 2], (k, xx, yy)
+
+
+def test_a_resizing_window_casts_its_shadow_where_it_stands(tmp_path):
+    """Mid-resize, the glass outside the rubber window is what it is once
+    the window settles there: no shadow or fringe stays at the rect it
+    started from (glass, P4 2026-10-23: its old bottom corners' fringes
+    did)."""
+    from runtime import ui_draw
+    ws, drv, _win = _settled(tmp_path)
+    ws.look.set_theme("blocks", persist=False, variant="light")
+    drv.frame(1 / 30)
+    _quiesce(ws)
+    assert ui_draw.depth()[12], "a theme whose frame is the depth's draws the shadows"
+    wm = ws.wm
+    win = wm._wins["settings"]
+    ring = _Ring(ws, 3)
+    ring.settle(drv, 6)
+    x, y = _zone_point(ws, win, RZ_L | RZ_B)
+    drv.touch(x, y)
+    ring.frame(drv)
+    for k in range(1, 6):
+        drv.touch_drag(x + 15 * k, y - 15 * k)
+        assert ring.frame(drv) is not None
+    seen = ring.bufs[(ring.k - 1) % ring.n]
+    rx, ry, rw, rh = wm._shown_rect(win)
+    drv.touch_up()
+    ring.frame(drv)
+    _quiesce(ws)
+    assert (win.x, win.y, win.w, win.h) == (rx, ry, rw, rh)
+    full = ring.full(drv)[0]
+    W, H = ws.sys_canvas.w, ws.sys_canvas.h
+    for yy in range(H):
+        for xx in range(0, W, 2):
+            if rx <= xx < rx + rw and ry <= yy < ry + rh:
+                continue
+            o = 2 * (yy * W + xx)
+            assert seen[o:o + 2] == full[o:o + 2], (xx, yy)
+
+
+def test_a_press_in_a_resize_zone_is_never_a_content_capture(tmp_path):
+    """A resize zone's press is the WM's: the window's content does not
+    capture it (`_held_in`), and is handed none of the gesture."""
+    ws, drv, win = _settled(tmp_path)
+    fed = [0]
+    layer = ws.wm._content_for("settings")
+    orig = layer.handle_pointer
+
+    def spy(px, py, click):
+        if click or ws.pointer.down:
+            fed[0] += 1
+        return orig(px, py, click)
+
+    layer.handle_pointer = spy
+    x, y = win.x + 1, win.y + win.h // 2           # just inside the left edge
+    assert ws.wm._resize_zone_at(x, y) == ("settings", RZ_L)
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    for k in range(1, 4):
+        drv.touch_drag(x + 10 * k, y)
+        drv.frame(1 / 30)
+        assert ws.wm._held_in is None and ws.wm._resize is not None
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert fed[0] == 0
+
+
+# -- the system menu's scrim rides on a still desk -----------------------------
+
+def _scrim_desk(tmp_path, ride=True, windows=False):
+    """The desk under the default look (its card and its scrim) -- bare, or
+    with three windows, the last focused -- on a triple-buffered root, every
+    buffer current. `ride` False is the reference: the scrim's changes
+    repaint whole, as they did."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    drv = _drv(ws)
+    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.open_desk()
+    if windows:
+        ws.open_settings()
+        for app in ("calc", "files"):
+            ws.open_app(ws._apps_by_id[app])
+    for _ in range(20):
+        _quiesce(ws)
+        ws._confetti_until = ws._egg_until = 0
+        drv.frame(1 / 30)
+    ws.show_fps = False
+    if not ride:
+        ws.wm._wash_rides = lambda: False
+        del ws.sys_canvas.copy_last       # the reference paints every frame
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv)
+    assert ws.wm._full_debt <= 0
+    return ws, drv, ring
+
+
+def _touch_widget(ws, drv, ring, name):
+    """A finger on bar widget `name`, lifted on the next frame (a board's
+    tap: `click` marks its release pass dirty, as a script's verb)."""
+    from runtime import shell_layout
+    lay = ws.wm._root_ctx.layout
+    i, (x, y, w, h) = shell_layout.cell_of(lay.bars, name)
+    bx, by = lay.bars[i][1][:2]
+    drv.touch(bx + x + w // 2, by + y + h // 2)
+    ring.frame(drv)
+    drv.touch_up()
+
+
+def _menu_steps(ws, drv, ring):
+    """The system button tapped, two rows down, the button tapped again."""
+    return (lambda: _touch_widget(ws, drv, ring, "menu"),
+            lambda: ws._sysmenu_layer.handle_input(_Key("down")),
+            lambda: ws._sysmenu_layer.handle_input(_Key("down")),
+            lambda: _touch_widget(ws, drv, ring, "menu"))
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_the_system_menus_scrim_rides_with_it_on_a_still_desk(tmp_path, windows):
+    """Open, two moves, close: every frame is the popover's alone -- the
+    wash painted into each buffer once (the focused window rendered as it
+    shows without the keys first), its snapshot put back once it closes --
+    and after each step every buffer holds the bytes the whole-repaint
+    path leaves, the focused window's own buffer too."""
+    ws, drv, ring = _scrim_desk(tmp_path / "ride", windows=windows)
+    ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False, windows=windows)
+    copies = []
+    real = ws.sys_canvas.copy_last
+    ws.sys_canvas.copy_last = lambda *r: copies.append(r) or real(*r)
+    for i, (step, rstep) in enumerate(zip(_menu_steps(ws, drv, ring), _menu_steps(ref, rdrv, rring))):
+        ring.stacks = []
+        step()
+        rstep()
+        stacks = ring.stacks + ring.settle(drv)
+        rring.settle(rdrv)
+        assert stacks and set(stacks) == {"pop"}, (i, stacks)
+        for a, b in zip(ring.bufs, rring.bufs):
+            assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+    # the open's and each move's later frames copy the last one's buffer
+    assert len(copies) >= 3 * 2, copies
+    assert not ws.wm._pop_live() and ring.settle(drv) == []
+    for key, win in ws.wm._wins.items():    # what a drag of each would stamp
+        assert bytes(win.buf._buf) == bytes(ref.wm._wins[key].buf._buf), key
+
+
+def _bbox(px, w):
+    """The (x0, y0, x1, y1) the 16-bit offsets `px` span, for a message."""
+    xs = [i // 2 % w for i in px]
+    ys = [i // 2 // w for i in px]
+    return (min(xs), min(ys), max(xs), max(ys)) if px else None
+
+
+
+def test_a_card_still_settling_over_a_still_scrim_copies_the_scrim(tmp_path):
+    """The menu's card asks for frames as it settles (its focus moving):
+    each of those frames copies the scrim out of the last frame's buffer
+    and paints the card again over it (§14.6), and every buffer ends as
+    whole repaints leave it."""
+    ws, drv, ring = _scrim_desk(tmp_path / "ride", windows=True)
+    ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False, windows=True)
+    for w in (ws, ref):
+        real = w.menu_ui._draw_sysmenu
+        n = [0]
+
+        def draw(real=real, n=n, w=w):
+            real()
+            n[0] += 1
+            if n[0] <= 2:
+                w.request_frame()
+        w.menu_ui._draw_sysmenu = draw
+    washes = []
+    real_copy = ws.sys_canvas.copy_last
+    ws.sys_canvas.copy_last = lambda *r: washes.append(r) or real_copy(*r)
+    ws.widget_tap("menu")
+    ref.widget_tap("menu")
+    assert set(ring.settle(drv)) == {"pop"}
+    rring.settle(rdrv)
+    wash = ws.wm._pop_wash[1]
+    assert sum(1 for r in washes if tuple(r) == tuple(wash)) >= 2, washes
+    assert list(ring.bufs) == rring.full(rdrv)
+
+
+def test_a_full_frame_under_the_menu_makes_its_close_repaint_whole(tmp_path):
+    """A frame that repaints whole while the menu is up washes what it
+    painted and keeps no snapshot: the close repaints whole too, and every
+    buffer ends as the reference's."""
+    ws, drv, ring = _scrim_desk(tmp_path / "ride")
+    ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False)
+    for w, d, r in ((ws, drv, ring), (ref, rdrv, rring)):
+        w.widget_tap("menu")
+        r.settle(d)
+        w._dirty = True
+        r.settle(d)
+        w.widget_tap("menu")
+    assert "full" in ring.settle(drv)
+    rring.settle(rdrv)
+    assert ring.bufs == rring.bufs
+
+
+def test_a_menu_opened_while_its_restore_is_owed_repaints_whole(tmp_path):
+    ws, drv, ring = _scrim_desk(tmp_path / "ride")
+    ref, rdrv, rring = _scrim_desk(tmp_path / "ref", ride=False)
+    for w, d, r in ((ws, drv, ring), (ref, rdrv, rring)):
+        w.widget_tap("menu")
+        r.settle(d)
+        w.widget_tap("menu")
+        r.frame(d)                        # one buffer of three restored
+        w.widget_tap("menu")
+        r.settle(d)
+    assert ring.bufs == rring.bufs
+    ws.widget_tap("menu")
+    ref.widget_tap("menu")
+    ring.settle(drv)
+    rring.settle(rdrv)
+    assert ring.bufs == rring.bufs
+
+
+def test_a_debt_frame_repeats_the_last_painted_one(tmp_path):
+    """X back to three windows: the frame that comes back paints the desk
+    whole, and the frames that bring the other buffers to it each copy the
+    last painted frame's buffer (§14.6) -- every buffer then holds what
+    whole repaints leave."""
+    ws, drv, ring = _scrim_desk(tmp_path, windows=True)
+    ws.open_library()
+    ring.settle(drv)
+    ws.open_desk()
+    stacks = ring.settle(drv)
+    assert stacks[-2:] == ["repeat", "repeat"], stacks
+    seen = list(ring.bufs)
+    assert len(set(seen)) == 1
+    assert seen == ring.full(drv)
+
+
+def test_a_repeated_frame_counts_for_the_desk_and_window_streaks(tmp_path):
+    """A repeat holds what the frame it copied held, so it counts as that
+    frame painted once more: after a change and its repeats, the next dirty
+    frame skips the desk's restore and the settled windows' stamps as it
+    would after whole repaints, and every buffer ends as whole repaints
+    leave it."""
+    ws, drv, ring = _scrim_desk(tmp_path, windows=True)
+    wm = ws.wm
+    wm.close_window_kind("calc")              # a shape change: the desk anew
+    assert ring.settle(drv) == ["full", "repeat", "repeat"]
+    ws._dirty = True
+    assert ring.settle(drv) == ["full", "repeat", "repeat"]
+    ws._dirty = True
+    assert ring.frame(drv) == "full"
+    assert wm._desk_painted is False
+    seen = list(ring.bufs)
+    assert seen == ring.full(drv)
+
+
+def test_a_calm_desk_pays_its_buffers_debt_and_then_rests(tmp_path):
+    """After a change every other buffer is owed it: a calm desk pays them
+    at once, each the last painted frame repeated (its buffer copied, §14.6),
+    so the next popover finds them current -- then no frame at all. A
+    visible cursor is never calm: it asks for nothing."""
+    ws, drv, ring = _scrim_desk(tmp_path)
+    ws._dirty = True
+    assert ring.settle(drv) == ["full", "repeat", "repeat"]
+    assert ring.settle(drv) == []
+    assert len(set(ring.bufs)) == 1
+    ws.widget_tap("battery")
+    assert ring.settle(drv) == ["pop"] * 3
+    ws.widget_tap("battery")
+    ring.settle(drv)
+    ws.pointer.visible = True
+    ws._dirty = True
+    assert len(ring.settle(drv)) <= 2
+
+
+def _pause_desk(tmp_path, ride=True):
+    """A playtest of Star Catcher in its window on the desk, drawing the same
+    frame every tick, under the default look; triple-buffered, current."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    drv = _drv(ws)
+    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.open_desk()
+    select_on_home(ws, "Star Catcher")
+    ws.open()
+    player = ws._content_layers["desktop"]
+
+    def still_game(dt):
+        ws.canvas.cls(8)
+        ws.canvas.rect(10, 10, 40, 30, 12)
+    player.draw = still_game
+    for _ in range(20):
+        _quiesce(ws)
+        ws._confetti_until = ws._egg_until = 0
+        drv.frame(1 / 30)
+    ws.show_fps = False
+    if not ride:
+        ws.wm._wash_rides = lambda: False
+        del ws.sys_canvas.copy_last       # the reference paints every frame
+    ring = _Ring(ws, 3)
+    for _ in range(3):
+        ws._dirty = True
+        ring.frame(drv)
+    ring.settle(drv, 4)
+    return ws, drv, ring
+
+
+def _pause_key(ws, name):
+    """A key handed to the pause menu as the router does: the frame is
+    marked only where the menu does not paint its own change."""
+    ws._pause_layer.handle_input(_Key(name))
+    if not ws.wm.popover_takes_keys():
+        ws.mark_dirty()
+
+
+def test_the_pause_menu_rides_over_its_paused_playtest(tmp_path):
+    """Over a playtest paused in its window: the open, each move and the
+    Options page are the popover's frames alone, the close puts the
+    snapshot back under the resumed game's quiet frames, and after each
+    step every buffer holds the bytes the whole-repaint path leaves."""
+    ws, drv, ring = _pause_desk(tmp_path / "ride")
+    ref, rdrv, rring = _pause_desk(tmp_path / "ref", ride=False)
+    copies = []
+    real = ws.sys_canvas.copy_last
+    ws.sys_canvas.copy_last = lambda *r: copies.append(r) or real(*r)
+    steps = (lambda w: w.pause.show(),
+             lambda w: _pause_key(w, "down"),
+             lambda w: _pause_key(w, "down"),
+             lambda w: _pause_key(w, "a"),          # Options: a card of its own size
+             lambda w: _pause_key(w, "b"),          # back to the menu
+             lambda w: _pause_key(w, "up"),
+             lambda w: setattr(w, "_dirty", True),  # a whole frame under it...
+             lambda w: _pause_key(w, "down"))       # ...and the next move still rides
+    for i, step in enumerate(steps):
+        step(ws)
+        step(ref)
+        stacks = ring.settle(drv, 12)
+        rring.settle(rdrv, 12)
+        assert stacks and set(stacks) == ({"full"} if i == 6 else {"pop"}), (i, stacks)
+        for a, b in zip(ring.bufs, rring.full(rdrv)):
+            assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+    # each riding step's later frames copy the last one's buffer (§14.6)
+    assert len(copies) >= 2 * (len(steps) - 1), len(copies)
+    ws.pause.close()
+    ref.pause.close()
+    stacks = ring.settle(drv, 4)
+    rring.settle(rdrv, 4)
+    assert stacks[:3] == ["qpop"] * 3, stacks
+    for a, b in zip(ring.bufs, rring.full(rdrv)):
+        assert a == b, _bbox(_differ(a, b), ws.sys_canvas.w)
+
+
+def test_a_running_playtest_leaves_the_desk_to_its_cache(tmp_path):
+    """A game running in its window animates inside its window: a whole
+    frame beside it (a mark, the system menu's open and close) lays the
+    desk from its cache instead of rendering it, and every frame's buffer
+    holds the bytes the desk rendered live leaves."""
+    ws, drv, ring = _pause_desk(tmp_path / "cache")
+    ref, rdrv, rring = _pause_desk(tmp_path / "ref")
+    ref.wm.desk_moves = lambda dt: True               # the desk rendered live
+    assert ws._animating(1 / 30) and not ws.wm.desk_moves(1 / 30)
+    desk = ws.wm._backdrop_layer
+    renders = []
+    draw = desk._draw_desktop
+    desk._draw_desktop = lambda dt: renders.append(1) or draw(dt)
+    steps = (lambda w: setattr(w, "_dirty", True),
+             lambda w: w.widget_tap("menu"),
+             lambda w: w.widget_tap("menu"))
+    for i, step in enumerate(steps):
+        step(ws)
+        step(ref)
+        for k in range(6):
+            got = ring.frame(drv)
+            assert got == rring.frame(rdrv), (i, k)
+            assert ring.bufs == rring.bufs, (i, k)
+    assert ring.stacks.count("full") >= 2
+    assert renders == []
+
+
+def test_a_stopped_runs_card_rides_over_its_playtest(tmp_path):
+    """A run stopped in its window (a crash): the stop card's open and each
+    move are the popover's frames alone, as the pause menu's are, and every
+    buffer holds the bytes the whole-repaint path leaves."""
+    ws, drv, ring = _pause_desk(tmp_path / "ride")
+    ref, rdrv, rring = _pause_desk(tmp_path / "ref", ride=False)
+
+    def crash(w):
+        w.cart_error = "TypeError: a bench stop"
+        w.pause.stop()
+    steps = (crash,
+             lambda w: _pause_key(w, "down"),
+             lambda w: _pause_key(w, "down"),
+             lambda w: _pause_key(w, "up"))
+    for i, step in enumerate(steps):
+        step(ws)
+        step(ref)
+        stacks = ring.settle(drv, 12)
+        rring.settle(rdrv, 12)
+        assert ws.pause.open and ws.pause.stopped
+        assert stacks and set(stacks) == {"pop"}, (i, stacks)
+        for a, b in zip(ring.bufs, rring.full(rdrv)):
+            assert a == b, (i, _bbox(_differ(a, b), ws.sys_canvas.w))
+
+
+# -- a drag over other windows draws them only where the desk was laid -------
+
+def _drag_over(tmp_path, theme, under):
+    """Three windows on the desk, the last of them dragged over the other two
+    on a triple-buffered root: every presented buffer. `under` False is the
+    reference: every window under the gesture draws whole, as it did."""
+    ws = build_desktop_ws(tmp_path, font_scale=1, panel_diagonal_in=7.0)
+    drv = _drv(ws)
+    ws.bar_layer._clock_text = lambda: "00:00"
+    ws.bar_layer._today = lambda: (2026, 10, 14)
+    ws.open_desk()
+    if theme is not None:
+        ws.look.set_theme(theme, persist=False, variant="light")
+    ws.open_settings()
+    for app in ("calc", "files"):
+        ws.open_app(ws._apps_by_id[app])
+    for _ in range(20):
+        _quiesce(ws)
+        ws._confetti_until = ws._egg_until = 0
+        drv.frame(1 / 30)
+    ws.show_fps = False
+    wm = ws.wm
+    drew = {"skipped": 0}
+    if not under:
+        wm._under_gesture = lambda win, focused, top: None
+    else:
+        real = wm._under_gesture
+
+        def counted(win, focused, top):
+            u = real(win, focused, top)
+            drew["skipped"] += u is not None
+            return u
+        wm._under_gesture = counted
+    ring = _Ring(ws, 3)
+    ring.settle(drv)
+    win = wm._wins[wm._order[-1]]
+    x, y = win.x + 40, win.y + win.title_h // 2
+    drv.touch(x, y)
+    shots = []
+    ring.frame(drv)
+    for k in range(1, 10):
+        drv.touch_drag(x - 25 * k, y + 9 * k)
+        ring.frame(drv)
+        shots.append(ring.bufs[(ring.k - 1) % ring.n])
+    drv.touch_up()
+    held = drew["skipped"]
+    shots += [b for _ in ring.settle(drv) for b in [ring.bufs[(ring.k - 1) % ring.n]]]
+    drew["after"] = drew["skipped"] - held
+    drew["stacks"] = list(ring.stacks)
+    if under:
+        assert list(ring.bufs) == list(ring.full(drv)), "the release's buffers"
+    return shots, drew
+
+
+@pytest.mark.parametrize("theme", [None, "blocks"], ids=["shipped", "blocks"])
+def test_a_drag_over_windows_draws_them_only_where_the_desk_was_laid(tmp_path, theme):
+    """Each drag frame's buffer is the one drawing every window under the
+    gesture whole leaves -- shadows, fringes and casts included -- while the
+    windows under it draw only where the restore laid the desk."""
+    ref, _ = _drag_over(tmp_path / "ref", theme, False)
+    got, drew = _drag_over(tmp_path / "got", theme, True)
+    assert len(ref) == len(got)
+    for i, (a, b) in enumerate(zip(ref, got)):
+        assert a == b, (i, _bbox(_differ(a, b), 1024))
+    assert drew["skipped"] >= 10
+    # the release's frame is a drag frame that does not move: the windows
+    # under it draw where the restore laid the desk; the frames after it
+    # repeat that one (§14.6)
+    assert drew["after"] >= 2
+    assert drew["stacks"][1:] == ["repeat"] * 2, drew["stacks"]

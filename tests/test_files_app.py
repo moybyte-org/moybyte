@@ -1,26 +1,29 @@
-"""The Files system app (#108): the user-files gallery, its verbs (rename /
-copy / trash / restore), the copy-on-use reuse actions, and Paint's shared
-OPEN picker + autosave riding the same layer."""
+"""The Files system app (#108, docs/look_2026-10.md step 21): the places and
+a place's files in columns, drawn with the public UI API's verbs; its verbs
+(rename in a dialog, copy, trash, restore, and emptying the Trash, which asks
+first), the copy-on-use reuse actions, and Paint's shared OPEN picker and
+autosave riding the same layer."""
 
 from pathlib import Path
 
-from runtime import moy_carts
+import pytest
 
+from runtime import files_app, host_app, moy_carts
+from ws_helpers import quiesce, shelf, select_on_home  # noqa: E402
+from ws_helpers import build_ws as _ws
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-from ws_helpers import build_ws as _ws
+_DT = 1 / 30
+# The handheld's table geometry at fs 1 (style.json's `group` caption, the
+# `value_row` header and the `row` stack).
+CAPTION, HEAD, ROW = 19, 18, 20
 
 
 def _open_app(ws, title):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == title:
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, title)
     ws.open()
     ws.input.begin_frame()
-    ws.frame(1 / 30)
+    ws.frame(_DT)
 
 
 def _seed_drawing(carts, name, w=320, h=240, color=14):
@@ -28,85 +31,262 @@ def _seed_drawing(carts, name, w=320, h=240, color=14):
     return moy_carts.save_file("drawings", name, blob, carts)
 
 
-class _FakeInp:
-    def __init__(self, key=0):
-        self.last_key = key
+def _files(ws):
+    """Files opened on the home, its first frames drawn: (app, driver)."""
+    _open_app(ws, "Files")
+    drv = host_app.ConsoleDriver(ws)
+    _frames(drv)
+    return ws.files_app, drv
 
-    def pressed(self, _name):
-        return False
 
+def _frames(drv, n=3):
+    for _ in range(n):
+        drv.ws.mark_dirty()
+        drv.frame(_DT)
+
+
+def _press(drv, *keys):
+    for k in keys:
+        drv.press(k)
+        _frames(drv)
+
+
+def _type(drv, text):
+    """Typed keys, each its own press: a frame with no key between two."""
+    for ch in text:
+        drv.type_char(ord(ch) if isinstance(ch, str) else ch)
+        _frames(drv, 2)
+
+
+def _row_xy(app, i, id="files", top=CAPTION + HEAD):
+    """The middle of row `i` of a table the app drew last frame, its rows
+    `top` under the table's box (a caption and a header row)."""
+    x, y, w, _h = app._ui.box(id)
+    return x + w // 2, y + top + i * ROW + ROW // 2
+
+
+def _tap(drv, x, y):
+    drv.click(x, y)
+    _frames(drv)
+
+
+def _art(ws, drv):
+    """The Art place's page, reached as a person does: down twice, Enter."""
+    app = ws.files_app
+    _press(drv, "down", "down", "a")
+    assert (app.place, app.level) == (files_app.ART, "files")
+    return app
+
+
+# -- the app and its pages ---------------------------------------------------------
 
 def test_files_cart_is_well_formed_and_the_app_opens(tmp_path):
     import json
-    man = json.loads((ROOT / "system_carts" / "files.moy" / "manifest.json")
+    man = json.loads((ROOT / "system_carts" / "moybyte.files.moy" / "manifest.json")
                      .read_text(encoding="utf-8"))
-    assert man["type"] == "app" and man["version"] >= 1
-    assert "files" in man["permissions"]
-    compile((ROOT / "system_carts" / "files.moy" / "main.py").read_text(),
+    assert man["moybyte"]["type"] == "app" and man["version"] >= 1
+    assert "files" in man["moybyte"]["permissions"]
+    compile((ROOT / "system_carts" / "moybyte.files.moy" / "main.py").read_text(),
             "main.py", "exec")
 
     ws = _ws(tmp_path)
-    _open_app(ws, "Files")
+    app, _drv = _files(ws)
     assert ws.cart_error is None
     assert ws.wm.top_kind() == "files"
-    assert ws.files_app.mode == "kinds"
+    assert (app.place, app.level) == (files_app.PROJECTS, "places")
+    assert app._focused == "Places"
 
+
+def test_the_handheld_walks_places_then_files_and_b_comes_back(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "dragon")
+    app, drv = _files(ws)
+    _art(ws, drv)
+    assert app.names_shown() == ["dragon"]
+    assert app._focused == "files"
+    _press(drv, "b")
+    assert app.level == "places" and app.place == files_app.ART
+    assert ws.wm.top_kind() == "files", "b left the page, not the app"
+
+
+def test_a_tap_on_a_place_opens_it(tmp_path):
+    ws = _ws(tmp_path)
+    app, drv = _files(ws)
+    keys = [p[0] for p in app.shown_places()]
+    _tap(drv, *_row_xy(app, keys.index(files_app.TRASH), "Places", 0))
+    assert (app.place, app.level) == (files_app.TRASH, "files")
+
+
+def test_the_places_count_their_files_and_themes_show_once_there_are_any(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "one")
+    _seed_drawing(carts, "two")
+    app, _drv = _files(ws)
+    assert app._count(files_app.ART) == 2
+    assert app._count(files_app.PROJECTS) == len(app._nav.projects())
+    assert files_app.THEMES not in [p[0] for p in app.shown_places()]
+
+
+def test_a_tap_on_the_current_row_opens_it_and_on_another_makes_it_current(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "one")
+    _seed_drawing(carts, "two")
+    app, drv = _files(ws)
+    _art(ws, drv)
+    assert app.cur == 0
+    _tap(drv, *_row_xy(app, 1))
+    assert app.sel_name() == app.names_shown()[1]
+    assert ws.wm.top_kind() == "files", "the first tap only made it current"
+    _tap(drv, *_row_xy(app, 1))
+    assert ws.wm.top_kind() == "artwork"
+    assert ws.artwork.doc_name() == app.names_shown()[1]
+
+
+def test_the_verbs_are_the_current_rows(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "dragon")
+    moy_carts.save_file("docs", "note", "hi", carts)
+    moy_carts.save_file("docs", "tool.py", "print(1)", carts)
+    app, _drv = _files(ws)
+    app.open_place(files_app.ART)
+    assert app._action_labels() == app.PICTURE_ACTIONS
+    app.open_place("docs", keep="note")
+    assert app._action_labels() == app.DOC_ACTIONS
+    app.select("tool.py")
+    assert app._action_labels()[0] == "RUN"
+    app.open_place(files_app.PROJECTS)
+    assert app._action_labels() == app.PROJECT_ACTIONS
+    app.open_place(files_app.TRASH)
+    assert app._action_labels() == app.TRASH_ACTIONS
+
+
+# -- the verbs ---------------------------------------------------------------------
 
 def test_gallery_lists_rename_copy_trash_restore(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
     _seed_drawing(carts, "dragon")
-    app = ws.files_app
-    _open_app(ws, "Files")
-    app._enter_kind("drawings")
-    assert "dragon" in app.grid.names
+    app, drv = _files(ws)
+    _art(ws, drv)
+    assert "dragon" in app.names_shown()
 
-    # COPY numbers upward
-    app.grid.select("dragon")
+    # COPY numbers upward, and the copy is current
     app._act("COPY", "dragon")
-    assert "dragon_2" in app.grid.names
+    assert "dragon_2" in app.names_shown() and app.sel_name() == "dragon_2"
+    assert app.status == "Duplicated", "the verb's word, Duplicate, in its report (R4-24)"
 
-    # RENAME through the typed-key flow (edge idiom: one insert per press)
-    app.grid.select("dragon_2")
-    app._act("NAME", "dragon_2")
-    assert app.mode == "rename"
-    app.rename.text = ""
-    for ch in "castle":
-        app._typed_rename(_FakeInp(ord(ch)))
-        app._typed_rename(_FakeInp(0))
-    app._typed_rename(_FakeInp(0x0D))
-    assert app.mode == "grid"
-    assert "castle" in app.grid.names
-    assert "dragon_2" not in app.grid.names
+    # RENAME in a dialog: focus opens in its field, the keys type, Enter commits
+    app._act("NAME")
+    _frames(drv)
+    assert app.dialog == "rename" and app.rename_text == "dragon_2"
+    assert app._focused == "Name"
+    _type(drv, "\b\b")
+    assert app.rename_text == "dragon"
+    _type(drv, "_tower")
+    _type(drv, "\r")
+    assert app.dialog is None
+    assert "dragon_tower" in app.names_shown() and "dragon_2" not in app.names_shown()
+    assert app.sel_name() == "dragon_tower"
 
-    # DELETE -> restorable trash -> RESTORE
-    app.grid.select("castle")
-    app._act("DEL", "castle")
-    assert "castle" not in app.grid.names
-    app._refresh_counts()
-    assert ("drawings", "castle") in app.trash
-    app.mode = "trash"
-    app._restore(app.trash.index(("drawings", "castle")))
-    assert moy_carts.load_file("drawings", "castle", carts) is not None
-    assert ("drawings", "castle") not in app.trash
+    # DELETE -> the restorable Trash -> RESTORE
+    app._act("DEL", "dragon_tower")
+    assert "dragon_tower" not in app.names_shown()
+    assert ("drawings", "dragon_tower") in app.trash
+    app.open_place(files_app.TRASH)
+    assert app.names_shown() == ["dragon_tower"]
+    app._act("RESTORE", "dragon_tower")
+    assert moy_carts.load_file("drawings", "dragon_tower", carts) is not None
+    assert ("drawings", "dragon_tower") not in app.trash
+
+
+def test_rename_cancels_by_its_button_and_by_b(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "dragon")
+    app, drv = _files(ws)
+    _art(ws, drv)
+    app._act("NAME")
+    _frames(drv)
+    _type(drv, "xyz")
+    _press(drv, "down")                    # the field to the buttons: Cancel first
+    assert app._focused == "Cancel"
+    _press(drv, "a")
+    assert app.dialog is None and app.names_shown() == ["dragon"]
+    assert app._focused == "files", "focus went back to the list"
+    app._act("NAME")
+    _frames(drv)
+    _press(drv, "b")
+    assert app.dialog is None and app.names_shown() == ["dragon"]
+
+
+def test_nothing_under_a_dialog_takes_input(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "one")
+    _seed_drawing(carts, "two")
+    app, drv = _files(ws)
+    _art(ws, drv)
+    row = _row_xy(app, 1)
+    app._act("NAME")
+    _frames(drv)
+    _tap(drv, *row)
+    assert app.cur == 0 and app.dialog == "rename", "the list under it took the tap"
+
+
+def test_backspace_on_the_list_moves_the_current_file_to_the_trash(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "dragon")
+    app, drv = _files(ws)
+    _art(ws, drv)
+    _type(drv, "\b")
+    assert app.names_shown() == []
+    assert ("drawings", "dragon") in app.trash
+    assert app.status == "Moved to the Trash"
+
+
+def test_emptying_the_trash_asks_first_and_cancel_is_where_focus_opens(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "dragon")
+    app, drv = _files(ws)
+    _art(ws, drv)
+    app._act("DEL", "dragon")
+    app.open_place(files_app.TRASH)
+    app._act("EMPTY")
+    _frames(drv)
+    assert app.dialog == "empty" and app._focused == "Cancel"
+    assert app.trash, "nothing goes before the answer"
+    _press(drv, "a")
+    assert app.dialog is None and app.trash
+    app._act("EMPTY")
+    _frames(drv)
+    _press(drv, "right", "a")
+    assert app.dialog is None and not app.trash
+    assert moy_carts.load_file("drawings", "dragon", carts) is None
 
 
 def test_reuse_actions_are_copies(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
     _seed_drawing(carts, "dragon", color=20)
-    app = ws.files_app
-    _open_app(ws, "Files")
-    app._enter_kind("drawings")
-    app.grid.select("dragon")
+    app, drv = _files(ws)
+    app.open_place(files_app.ART, keep="dragon")
 
     # WALL: copy-on-set -- the wallpaper copy + My Art bg hold the pixels
     # (plus a #108 phase-2 provenance stamp, so compare decoded pixels).
     app._act("WALL", "dragon")
-    assert ws.look.wallpaper_id == "my_art"
+    ws.look.tick(0.0)                      # the change shows at the next frame
+    assert ws.look.wallpaper_id == "moybyte.wallpaper" == ws.look.PICTURE
     px = moy_carts.decode_moyimg(moy_carts.load_file("drawings", "dragon", carts))
+    # ...and the theme carries it: My Art's copy is custom's picture.
+    assert moy_carts.decode_moyimg(ws.look.picture().decode()) == px
     assert moy_carts.decode_moyimg(moy_carts.load_artwork(carts)) == px
-    wall = next(c for c in moy_carts.scan(carts) if c["title"] == "My Art")
+    wall = next(c for c in moy_carts.scan(carts) if c["title"] == "Wallpaper")
     assert moy_carts.decode_moyimg(wall["images"]["bg"]) == px
     assert moy_carts.read_provenance(moy_carts.load_artwork(carts))[0] == \
         "drawings/dragon"
@@ -115,18 +295,20 @@ def test_reuse_actions_are_copies(tmp_path):
     _seed_drawing(carts, "dragon", color=33)
     assert moy_carts.decode_moyimg(moy_carts.load_artwork(carts)) == px
 
-    # GAME: a 320x240 copy lands in the picked project.
-    app.grid.select("dragon")
+    # GAME: a 320x240 copy lands in the project picked in the dialog.
     app._act("GAME", "dragon")
-    assert app.mode == "game"
-    target_i = app.project_names.index("Star Catcher")
-    app._game_pick(target_i)
-    target = next(c for c in moy_carts.scan(carts) if c["title"] == "Star Catcher")
-    assert "bg" in target["images"]
+    assert app.dialog == "game"
     # System-app identities are never offered as projects.
     assert "Files" not in app.project_names
     assert "Paint" not in app.project_names
     assert "Calc" not in app.project_names
+    app.target = app.project_names.index("Star Catcher")
+    _frames(drv)
+    _press(drv, "a")                       # Enter on the focused target adds it
+    assert app.dialog is None
+    target = next(c for c in moy_carts.scan(carts) if c["title"] == "Star Catcher")
+    assert "bg" in target["images"]
+    assert app.status == "Added to Star Catcher"
 
 
 def test_delete_of_the_open_drawing_cannot_break_paint(tmp_path):
@@ -134,10 +316,8 @@ def test_delete_of_the_open_drawing_cannot_break_paint(tmp_path):
     ws = _ws(tmp_path)
     name = _seed_drawing(carts, "doomed")
     ws.artwork.open_named(name)
-    app = ws.files_app
-    _open_app(ws, "Files")
-    app._enter_kind("drawings")
-    app.grid.select(name)
+    app, _drv = _files(ws)
+    app.open_place(files_app.ART)
     app._act("DEL", name)
     # Paint now opens a fresh canvas under the stale pointer -- no crash.
     _open_app(ws, "Paint")
@@ -145,22 +325,23 @@ def test_delete_of_the_open_drawing_cannot_break_paint(tmp_path):
     assert ws.wm.top_kind() == "artwork"
 
 
-def test_paint_open_picker_switches_documents(tmp_path):
+def test_paints_open_is_my_art_and_its_pick_switches_documents(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
     _seed_drawing(carts, "one", color=11)
     _seed_drawing(carts, "two", color=12)
     _open_app(ws, "Paint")
     app = ws.artwork_app
-    app._action(3)                       # OPEN
-    assert app.mode == "open"
-    assert set(app.grid.names) >= {"one", "two"}
-    ws.frame(1 / 30)                     # a draw pass lays the grid out
-    gx, gy, _gw, _gh = app.grid._rect
-    cell = app.grid._cell_rect(0)
-    app._open_tap(cell[0] + 2, cell[1] + 2)
-    assert app.mode == "paint"
-    assert ws.artwork.doc_name() == app.grid.names[0]
+    app._verb("open")                    # More's Open...: the drawings' page
+    ws.frame(_DT)
+    assert ws.wm.top_kind() == "myart"
+    art = ws._apps_by_id["myart"]
+    assert set(art.drawings) >= {"one", "two"}
+    art._verb("open", "two")
+    ws.frame(_DT)
+    assert ws.wm.top_kind() == "artwork"
+    assert ws.artwork.doc_name() == "two"
+    assert app.doc.pix[0] == 12
 
 
 def test_paint_autosaves_on_the_idle_debounce(tmp_path):
@@ -189,9 +370,7 @@ def test_new_drawing_keeps_the_old_file(tmp_path):
     app.doc.put(1, 1, 22)
     app.doc.finish()
     app._mark_changed()
-    app._action(0)
-    app._action(0)                             # armed double-tap = NEW
-    assert app.status == "NEW DRAWING"
+    app._verb("new")                           # New drawing asks nothing
     names = moy_carts.list_files("drawings", carts)
     assert len(names) == 1                     # the old drawing kept its file
     old = moy_carts.decode_moyimg(moy_carts.load_file("drawings", names[0], carts))
@@ -218,24 +397,25 @@ def test_usage_tracks_stale_copies_and_update_clears_them(tmp_path):
     ws = _ws(tmp_path)
     _seed_drawing(carts, "dragon", color=20)
     # Copy it into a project (with a provenance stamp) + set as wallpaper.
-    ti = ws.artwork.targets().index("Star Catcher")
-    assert ws.artwork.attach(ti, "dragon")
-    assert ws.artwork.set_wallpaper("dragon")
+    copies = ws.files_app._copies
+    ti = copies.targets().index("Star Catcher")
+    assert copies.attach(ti, "dragon")
+    assert copies.set_wallpaper("dragon")
 
-    rows = ws.artwork.usage("dragon")
+    rows = copies.usage("dragon")
     labels = {r["label"] for r in rows}
     assert "Star Catcher" in labels and "WALLPAPER" in labels
     assert all(not r["stale"] for r in rows)          # fresh copies
 
     # Edit the source drawing: every copy is now stale (pull-based detection).
     _seed_drawing(carts, "dragon", color=33)
-    rows = ws.artwork.usage("dragon")
+    rows = copies.usage("dragon")
     assert all(r["stale"] for r in rows)
 
     # UPDATE (send again) the project copy -> only it clears.
     game_row = next(r for r in rows if r["label"] == "Star Catcher")
-    assert ws.artwork.resend(game_row, "dragon")
-    rows = {r["label"]: r["stale"] for r in ws.artwork.usage("dragon")}
+    assert copies.resend(game_row, "dragon")
+    rows = {r["label"]: r["stale"] for r in copies.usage("dragon")}
     assert rows["Star Catcher"] is False
     assert rows["WALLPAPER"] is True                   # not re-sent yet
 
@@ -246,14 +426,12 @@ def test_files_app_use_action_lists_and_resends(tmp_path):
     _seed_drawing(carts, "dragon", color=20)
     ti = ws.artwork.targets().index("Star Catcher")
     ws.artwork.attach(ti, "dragon")
-    app = ws.files_app
-    _open_app(ws, "Files")
-    app._enter_kind("drawings")
-    app.grid.select("dragon")
+    app, drv = _files(ws)
+    app.open_place(files_app.ART, keep="dragon")
     app._act("USE", "dragon")
-    assert app.mode == "used"
+    assert app.dialog == "used"
     assert any(r["label"] == "Star Catcher" for r in app.used_rows)
-    # Make it stale, then tap the row -> re-sends (UPDATE).
+    # Make it stale, then send it again from the dialog.
     _seed_drawing(carts, "dragon", color=33)
     app._act("USE", "dragon")
     idx = next(i for i, r in enumerate(app.used_rows)
@@ -261,15 +439,17 @@ def test_files_app_use_action_lists_and_resends(tmp_path):
     assert app.used_rows[idx]["stale"] is True
     app._resend(idx)
     assert app.used_rows[idx]["stale"] is False
+    _frames(drv)
+    _press(drv, "b")
+    assert app.dialog is None
 
 
 def test_docs_and_tables_kinds_get_the_open_action(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
     moy_carts.save_file("docs", "note", "hi", carts)
-    app = ws.files_app
-    _open_app(ws, "Files")
-    app._enter_kind("docs")
+    app, _drv = _files(ws)
+    app.open_place("docs")
     assert "OPEN" in app._action_labels()
 
 
@@ -277,10 +457,174 @@ def test_send_sprites_to_files_producer(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
     # Open a project so ws.project.sheet is a real sprite sheet.
-    cart = ws.carts_store.create("Doodle", carts, type="game")
-    ws.carts.apply(ws.carts_store.scan(carts))
+    ws.carts_store.create("Doodle", carts, type="game")
+    ws.carts.apply(shelf(carts))
     ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Doodle"))
     ws.project.sheet.pset(0, 0, 9)
     name = ws.send_sprites_to_files()
     assert name in moy_carts.list_files("sprites", carts)
     assert moy_carts.load_file("sprites", name, carts) == ws.project.sheet.to_hex()
+
+
+# -- painting ----------------------------------------------------------------------
+
+def test_a_settled_files_page_paints_nothing(tmp_path):
+    """The verbs' settled answer, end to end: with no input the redraw gate
+    draws no frame, and a press that moves nothing draws one frame of the
+    same pixels and asks for none after it."""
+    ws = _ws(tmp_path)
+    _open_app(ws, "Files")
+    quiesce(ws)
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(4):
+        drv.frame(_DT)
+    drawn = ws._frames_drawn
+    for _ in range(10):
+        drv.frame(_DT)
+    assert ws._frames_drawn == drawn, "an idle Files page painted"
+    before = bytes(ws.sys_canvas._buf)
+    drv.press("left")                   # on a place with nothing beside it
+    for _ in range(6):
+        drv.frame(_DT)
+    assert ws._frames_drawn == drawn + 1, "one frame for the press, then none"
+    assert bytes(ws.sys_canvas._buf) == before
+
+
+# -- the desk ----------------------------------------------------------------------
+
+def test_the_desk_shows_the_places_beside_the_files(tmp_path):
+    carts = str(tmp_path / "carts")
+    _seed_drawing(carts, "dragon")
+    ws = host_app.build_workstation(carts, sys_size=(1024, 600), panel_diagonal_in=7.0,
+                                    font_scale=1, windowed=True)
+    ws.open_desk()
+    ws.open_app(ws._apps_by_id["files"])
+    drv = host_app.ConsoleDriver(ws)
+    _frames(drv, 4)
+    app = ws.files_app
+    assert app.layout.two and app.layout.row_h == 28
+    assert app._focused == "files", "the desk opens on the projects' rows"
+    assert app._ui.box("Places") is not None and app._ui.box("files") is not None
+    app._focus = "Places"
+    _frames(drv)
+    _press(drv, "down", "down")
+    assert app.place == files_app.ART and app.names_shown() == ["dragon"]
+    assert app._focused == "Places", "a place opens beside the list, focus stays"
+
+
+def test_the_list_meets_the_verbs_and_peeks_half_a_row(tmp_path):
+    """The list runs down to the verbs' rule, and its rows' view ends well
+    inside a row at every size (a quarter row clear of each edge), so where
+    rows run on the last one shows in part under the fade, never a blank
+    band above the rule (design review R5-13); the heights it reckons with
+    are the engine's."""
+    import json
+    style = json.loads((Path(__file__).resolve().parent.parent / "native" / "moy_ui"
+                        / "style.json").read_text())["metrics"]
+    vr, grp, row = style["value_row"], style["group"], style["row"]
+    assert files_app.HEAD == (vr["head"], vr["head_desk"])
+    assert files_app.CAPTION == (grp["caption"], grp["caption_desk"])
+    ws = host_app.build_workstation(str(Path(tmp_path) / "carts"), sys_size=(1024, 600),
+                                    panel_diagonal_in=7.0, font_scale=1, windowed=True)
+    assert ws is not None
+    for w in (360, 520):
+        for h in range(300, 600, 7):
+            lay = files_app.FilesLayout(w, h, 1, windowed=True)
+            assert lay.desk
+            top = files_app.HEAD[1] + (0 if lay.two else files_app.CAPTION[1])
+            cut, q = (lay.list[3] - top) % lay.row_h, lay.row_h // 4
+            assert q < cut < lay.row_h - q, (w, h, cut)
+            assert lay.list[1] + lay.list[3] == lay.foot[1], "the rule meets the list"
+            assert lay.row_h == row["stack_desk"]
+
+
+@pytest.mark.parametrize("theme,mode", [("moy", "light"), ("moy", "dark"), ("blocks", "light"),
+                                        ("contrast", "light"), ("contrast", "dark")])
+def test_the_desks_cut_row_shows_under_the_fade(tmp_path, theme, mode):
+    """Files on the desk, on Projects, its window shorter than its rows (the
+    kit's scene): the half row above the view's foot holds the cut row's
+    ink, and the verbs' rule lies right under it."""
+    import test_shell_goldens as g
+    import test_editor_look as el
+    cfg = dict(g.CONFIGS["p4_1024x600_cs2_fs1_windowed"], variant=mode)
+    cfg["theme"] = theme
+    ws = g._build(cfg, Path(tmp_path) / "carts")
+    ws.open_desk()
+    ws.open_app(ws._apps_by_id["files"])
+    el._frame(ws, 2)
+    win = el._place(ws, "files", (112, 54, 548, 380))
+    ws.files_app.open_place("projects", keep="Harpoon Pop")
+    el._frame(ws, 6)
+    cx, cy, _cw, _ch = win.content_rect()
+    lay = win.ctx.app_layouts["files"]
+    x, y, w, h = lay.list
+    x, foot = cx + x, cy + y + h
+    cv = ws.glass_canvas
+    buf = bytes(cv._buf)
+
+    def word(xx, yy):
+        o = 2 * (yy * cv.w + xx)
+        return buf[o] << 8 | buf[o + 1]
+
+    def lum(v):
+        out = 0.0
+        for c, k in zip((((v >> 11) & 31) / 31, ((v >> 5) & 63) / 63, (v & 31) / 31),
+                        (0.2126, 0.7152, 0.0722)):
+            out += k * (c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+        return out
+
+    def contrast(a, b):
+        la, lb = sorted((lum(a), lum(b)))
+        return (lb + 0.05) / (la + 0.05)
+    ground = word(x + w - 2, foot - 1)
+    ink = sum(1 for yy in range(foot - lay.row_h // 2, foot) for xx in range(x, x + w)
+              if contrast(word(xx, yy), ground) >= 1.5)
+    assert ink >= 20, "%s %s: %d pixels of the cut row show" % (theme, mode, ink)
+    assert contrast(word(x + w // 2, foot), ground) >= 1.5, "the verbs' rule lies under it"
+
+
+# -- the projects' rows and the foot (design review D-11, m02, m10) ---------------------
+
+def test_a_projects_row_is_the_carts_title_with_its_cover(tmp_path):
+    """A project's row names the cart by its title, as the home does, and its
+    picture is its cover (`nav.cover`: False while the decode lands, None
+    for a cart with none, which draws its generated one); the row opens the
+    cart it names."""
+    from runtime import cover_cache, shell_servers
+    assert shell_servers._COVER_HALF == cover_cache.HALF
+    ws = _ws(tmp_path)
+    app, drv = _files(ws)
+    _press(drv, "a")
+    assert (app.place, app.level) == (files_app.PROJECTS, "files")
+    titles = {c.get("title") for c in app._nav.projects()}
+    assert set(app.names_shown()) == titles
+    assert all(r[3] == "" for r in app.rows), "the picture is the cover, not a kind's icon"
+    i = app.names_shown().index("Harpoon Pop")
+    assert app.door("Harpoon Pop", kind=files_app.PROJECTS) == ("editor", app.rows[i][4])
+    got = None
+    for _ in range(40):                       # the covers land over frames
+        _frames(drv)
+        got = app._nav.cover(app.rows[i][4])
+        if got:
+            break
+    assert got and got.w == 64, "Harpoon Pop's cover at its half"
+    coverless = [r[4] for r in app.rows if r[0] == "Coin Quest"]
+    for _ in range(40):
+        if app._nav.cover(coverless[0]) is not False:
+            break
+        _frames(drv)
+    assert app._nav.cover(coverless[0]) is None
+
+
+def test_the_foot_is_a_bar_with_the_primary_verb_at_its_right(tmp_path):
+    """The current row's verbs sit at the foot's right, the one Enter does
+    (Open) last, and no mouse button wears a key's sign."""
+    ws = _ws(tmp_path)
+    app, drv = _files(ws)
+    _press(drv, "a")
+    play, opn = app._ui.box("verb PLAY"), app._ui.box("verb OPEN")
+    assert play is not None and opn is not None
+    assert play[0] < opn[0], "Open, the primary, is right of Play"
+    fx, _fy, fw, _fh = app.layout.foot
+    assert opn[0] + opn[2] >= fx + fw - app.layout.pad - 1, "the verbs end at the foot's right"
+    assert files_app.VERB["OPEN"][1] != "enter"

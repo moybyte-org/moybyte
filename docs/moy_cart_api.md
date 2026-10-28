@@ -14,6 +14,11 @@ it through `runtime/host_canvas.py`); the palette in
 `runtime/palette.py`; buttons in `runtime/input.py`. A cart runs **identically** on the
 PC simulator and on the device — same names, same pixels.
 
+**moy-spec is the game console spec** (owner, 2026-10-21): Moybyte's app
+features (a story document, a wallpaper's sizes, an app's permissions) go in
+Moybyte-side fields, such as the manifest's `moybyte` object, never in
+moy-spec.
+
 ---
 
 ## The shape of a cart
@@ -37,6 +42,14 @@ A `cover.png` beside the manifest is the cart's picture on the shelf: a 128x128
 PNG, indexed or RGB, at most 64 KB (SPEC.md §3.6 has the profile). Paint opens it,
 a cart without one shows its icon instead, and a file outside the profile is
 ignored, never refused.
+
+Three more manifest fields say what the cart is in a list (SPEC.md §3.7), and
+none of them is ever a reason to refuse it: `description` (plain text, at most
+240 bytes), `genre` (one of twelve words; any other is no genre) and `tags` (at
+most eight short lowercase words; `pico8` is reserved for a converted cart, which
+is how the importer records a conversion). The home's metadata line says the
+genre, the desk's details pane the description, and Get Carts both for an index
+entry that has them; `runtime/cart_listing.py` is the one reader.
 
 ```python
 # a tiny cart: move a ball with the D-pad
@@ -66,6 +79,11 @@ def _draw():                 # every frame; render here
 | `_init()` | once at cart start (and on restart) | optional; reset your state here |
 | `_update(dt)` | once per frame, before draw | optional; `dt` is **seconds** (float). Put game logic here |
 | `_draw()` | once per frame | render the frame; called every frame even if `_update` isn't defined |
+
+An app cart (`"type": "app"`) is the exception: it is drawn on change, its
+`_update` and `_draw` running while input or its page moves and not while it
+sits still (`docs/ui_api_2026-10.md`, "Drawn on change"), unless its
+manifest says `"animates": true` ("Turning a cart into an APP", below).
 
 ## Writing a cart in Lua (#67)
 
@@ -103,8 +121,8 @@ end
 **Why pick Lua:** speed. Logic-heavy carts run flat frame times with no
 garbage-collector pauses (the measured verdicts live in issue #67 — e.g. Sakura's
 logic at a flat 3–4ms where the Python twin spikes to 19–24ms).
-`system_carts/sakura_lua.moy` is the living example — a line-by-line twin of
-`sakura.moy`, pixel-identical by test.
+`system_carts/moybyte.sakura_lua.moy` is the living example — a line-by-line twin of
+`moybyte.sakura.moy`, pixel-identical by test.
 
 The few Lua-specific notes:
 
@@ -115,7 +133,11 @@ The few Lua-specific notes:
   the Python twin of the same cart had one.
 - `print(...)` is the **draw-text verb** (as in this doc), not Lua's console print.
 - Layer methods are **colon calls**: `lay = make_layer(w, h)`, then `lay:cls(0)`,
-  `lay:map(...)`, `lay:spr(...)`; stamp with `draw_layer(lay, cam_x, cam_y)`.
+  `lay:map(...)`, `lay:rect(...)`; stamp with `draw_layer(lay, cam_x, cam_y)`.
+  A layer answers every drawing verb with the screen verb's arguments — `cls`
+  `pix` `line` `rect` `rectb` `circ` `circb` `oval` `ovalb` `tri` `trib`
+  `print` `spr` `sspr` `map` `tline` — and has its own `camera`, `clip`, `pal`,
+  `palt` and `fillp`, which keep their values across frames.
 - `spr(n, x, y, colorkey, scale, flip)` takes **sheet-tile numbers** (the fast
   path). Paint images (`image("name")`) are placed via a layer —
   `lay:spr(image("bg"), x, y)` — not passed to `spr()` directly; multi-tile
@@ -128,7 +150,12 @@ The few Lua-specific notes:
   `a.flags["size"]`.
 - No imports, same as Python. The **safe Lua stdlib** is available: `math.*`,
   `string.*`, `table.*` (no `io`/`os`/`load`/`require`).
-- A crash opens the same error panel, and EDIT drops on the offending
+- A Lua cart's files are **source text**. A precompiled chunk (`luac` output,
+  or anything opening with Lua's binary signature, `ESC "Lua"`) is refused at
+  load with Lua's own "attempt to load a binary chunk" error, on every tier:
+  Lua does not verify bytecode, and a crafted chunk can write outside the VM.
+  It is the same door SPEC.md 4.1 shuts by removing `load`.
+- A crash opens the same stop card, and its See why drops on the offending
   `main.lua` line. The code editor's tap-palette offers `~` (for `~=`) in a
   Lua project.
 - The blocks editor stays Python-only for now (compiles to Python by design).
@@ -173,24 +200,24 @@ an imported PICO-8 cart always carries its own 30 or 60.
 
 - **320×240**, indexed. `W` = 320, `H` = 240 are globals (read them; don't assume).
 - **A running GAME owns the FULL canvas** — the console's top bar hides during play
-  (it reappears only on the crash panel). There is no pause screen and no reserved
-  letter: **every key belongs to your cart**. To exit, the player **holds BACKSPACE
-  (~700ms)** — a quick tap reaches your cart as a plain key; a sustained hold shows a
-  small progress toast and returns to whoever launched the cart (the launcher, or
-  the editor's PLAY). A `"tool"`/`"app"` cart runs WITH a minimal console bar
-  (title + status + ✕) instead, and exits via that ✕.
+  (it reappears only on the crash panel). There is no reserved letter: **every key
+  belongs to your cart** but Super, the console's system key, which opens its pause
+  menu and holds your cart there (no tick, `time()` and the music stopped) until
+  the player resumes it. A cart can never read the device's console key (a keyboard's
+  Super, a gamepad's Start, the Moy button, the T-Deck's Mic), in any input mode;
+  tapping it opens the pause menu, whose **Quit** hands control back to whoever
+  launched the cart (the launcher, or the editor's PLAY). BACKSPACE is an ordinary
+  key. A `"tool"`/`"app"` cart runs WITH a minimal console bar (the back chevron, its
+  title and the status) instead, and exits via that back.
 - **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
-  keyboard only produces 9 letters (the button-mapped `a d w s z x r` plus plain
-  `q e`); text mode delivers EVERY letter to `key()`/`keyp()`.
-- **A `textmode(True)` game MUST provide its own exit** — the console can't reach it.
-  In text mode BACKSPACE is a plain typed key your cart reads (a delete), so the
-  console's standard BACKSPACE exit never reaches the cart, and the T-Deck keyboard
-  has no autorepeat so a *held* BACKSPACE doesn't register either. So bind **`quit()`**
-  (see [State & utility](#state--utility)) to a spare key or a small on-screen
-  affordance you draw. Letter Blitz models this with a tap-anytime ✕ in the top-right
-  corner (above its HUD, clear of the play area) — a touch exit never depends on the
-  keyboard. (A `"tool"`/`"app"` cart already runs with the console's own context-✕
-  bar, so it's exitable without this; but `quit()` works for any cart.)
+  keyboard types every key to `key()`, but a held key reads every frame it is down
+  and `w a s d l k` also move and fire; text mode delivers each typed key once, with
+  no button behind it.
+- **A `textmode(True)` game needs no exit of its own**: the console's key opens the
+  pause menu in text mode too, and BACKSPACE is a typed delete your cart reads. A
+  cart may still bind **`quit()`** (see [State & utility](#state--utility)) to a key
+  or an on-screen affordance it draws; Letter Blitz keeps a tap-anytime ✕ in the
+  top-right corner.
 - Every color is a **MOY64 palette index 0–63**, or a name via `col("red")` (see
   [Palette](#palette)). The canvas stores indices; the host resolves them to RGB for
   the window, the device maps them into the RGB565 framebuffer.
@@ -336,7 +363,7 @@ re-drawing the background every frame.
 A **scene** is a saved table of placed actors — a sprite + a world position + a tag —
 that your cart reads once in `_init` and spawns however it likes. Scenes live in the
 cart's `scenes/<name>.moyscene` files (tiny JSON, one row per actor, list order =
-spawn order = draw order); the manifest's `assets.scenes` lists them, and the first
+spawn order = draw order); the manifest's `moybyte.assets.scenes` lists them, and the first
 entry is the default active scene. Pure data: `scene()` never draws anything, and a
 cart with no scenes just gets an empty list. Author them WYSIWYG in the Editor's
 **Scene** tab: pick a sprite, tap the world to place an actor, tap one to select it,
@@ -448,7 +475,7 @@ The **Actors** block category gives you the no-loop version of the same thing:
 *for each `player` actor → move actor with the buttons*, *for each `coin` actor → if
 actor touching `player`? → remove actor, change score by 1*, then *clear*, *draw
 scene*, *write score*. Inside a *for each … actor* block, "actor" always means the
-one it's currently looping over. (`system_carts/coin_quest.moy` is the built-in demo.)
+one it's currently looping over. (`system_carts/moybyte.coin_quest.moy` is the built-in demo.)
 
 ## Make it fast (five habits)
 
@@ -492,7 +519,7 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
 
 ## Input
 
-Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`.
+Buttons are named. The canonical set a cart reads is `left, right, up, down, a, b, run`.
 
 **Which key is which.** The buttons are the same everywhere; the *keys* differ, because
 a thumb keyboard and a desktop keyboard are not the same instrument:
@@ -503,7 +530,6 @@ a thumb keyboard and a desktop keyboard are not the same instrument:
 | `a` | **L** or **SPACE** | **Z** or **SPACE** |
 | `b` | **K** | **X** |
 | `run` | **ENTER** | **ENTER** |
-| `home` | **BACKSPACE** | **BACKSPACE** |
 | `stop` | — | **ESC** |
 
 On the T-Deck the left thumb steers and the right thumb fires, both on the home row.
@@ -513,7 +539,13 @@ and comfortable `Z`/`X`, which is PICO-8's layout and every emulator's, so it ge
 those. `SPACE` is jump and `ENTER` is `run` on both.
 
 `run` is also the launcher's **open this cart**, so Enter confirms in menus.
-`home` is the **exit**: hold it ~700ms while a game is running.
+On a desktop keyboard (the simulator's, the browser's, a BLE one) the letters
+and `SPACE` are buttons only while a game owns the keys; in the shell, the
+Editor and the apps they are keys and nothing else, and the arrows, `ENTER` and
+`ESC` navigate. The T-Deck, with no arrows, keeps `WASD` everywhere: on every
+surface where letters do not type they are its directions and no letter, a
+text surface (`textmode(True)`) types them, and a game reads both.
+The console's key is no button a cart can read (see [The canvas](#the-canvas)).
 
 **Every other key is a plain character** a cart reads with `key()` / `keyp()`, firing
 no button — including `R`, `H`, `J`, `Q`, `E` and (on the T-Deck) `Z`/`X`, all of which
@@ -522,6 +554,7 @@ moving the player; a stolen letter is a bug you only find by playing.
 
 In **text mode** (`textmode(True)`, the code editor, a wifi password) no key fires a
 button at all — even Backspace, Enter and space arrive as plain characters to type.
+The console's key still works there.
 
 | call | returns |
 |---|---|
@@ -550,8 +583,8 @@ also the single biggest speed lever a port has.
 (`btn`/`btnp`), `"touch"` (`touch()`), `"keyboard"` (`key`/`keyp`/`textmode`), e.g.
 `"input": ["touch"]` for a touch-only game. It's purely a hint for surfaces that draw
 optional controls (today: the web view's virtual gamepad + soft-keyboard summon —
-`"buttons"` shows the d-pad + A/B, `"keyboard"` shows the ⌨ toggle; the HOME/exit
-button always shows, so even a `["touch"]` cart stays exitable); it changes nothing about
+`"buttons"` shows the d-pad + A/B, `"keyboard"` shows the ⌨ toggle; the ☰ console-key
+button always shows, so even a `["touch"]` cart can reach the pause menu); it changes nothing about
 which calls actually work. **Omit it and every control shows** (today's behavior,
 zero regression) — only declare it once a cart's input is settled.
 
@@ -619,7 +652,7 @@ other console, and handle what arrives:
 | `on_net(fn)` | register `fn(msg)` — it's called once for **each** message that arrives, right before your `_update` runs |
 
 ```python
-# manifest.json: "permissions": ["multiplayer"]
+# manifest.json: "moybyte": {"permissions": ["multiplayer"]}
 def _catch(msg):
     other.x, other.y = msg          # the friend's position arrived
 on_net(_catch)
@@ -658,7 +691,7 @@ def _update(dt):
         pin_write(LED, 1)
 ```
 
-**Your cart must ASK, in its manifest.** `"permissions": ["pins"]` -- the same
+**Your cart must ASK, in its manifest.** `"moybyte": {"permissions": ["pins"]}` -- the same
 declaration `network` and `multiplayer` need, and for the same reason: a cart
 that can move the wiring in somebody's room should have said so where a person
 can read it before running it. Without it the names are absent even on a console
@@ -700,14 +733,19 @@ built-in LED.
 
 ## Turning a cart into an APP (`#181`)
 
-A cart whose manifest says `"type": "app"` is a tool rather than a game. The
+A cart whose manifest says `"moybyte": {"type": "app"}` is a tool rather than a game. The
 console runs it **with its own top bar** — a title and an X — so it can never trap
 you, and it can ask for a few of the console's own powers by naming them in
-`permissions`, exactly like `"multiplayer"` above:
+`permissions`, exactly like `"multiplayer"` above. Both are Moybyte's own
+fields, so they live in the manifest's `"moybyte"` object (SPEC.md §3.1: an
+implementation's fields go under one key named after it; loose at the top
+level, a console reads them as absent):
 
 ```json
-"type": "app",
-"permissions": ["graphics", "input", "files:docs", "prefs"]
+"moybyte": {
+  "type": "app",
+  "permissions": ["graphics", "input", "files:docs", "prefs"]
+}
 ```
 
 | permission | what the cart gets |
@@ -717,19 +755,31 @@ you, and it can ask for a few of the console's own powers by naming them in
 | `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
 | `appearance` | `set_theme(name)` / `themes()` |
 | `launch` | `open_app(id)` |
-| `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/notes.moy` is that cart |
+| `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/moybyte.notes.moy` is that cart |
 
-Every app cart also gets four names with no permission needed, because they are
+Every app cart also gets five names with no permission needed, because they are
 how an app draws rather than what it may touch: **`screen()`** (the canvas),
-**`theme()`** (the console's live colors), **`bar_h()`** (how many rows the top
-bar owns — draw below them) and **`ui`**, the console's own widget toolkit
-(buttons, rows, panels, rect maths, `ui.Hits`). Storage answers `(value, error)`
+**`theme()`** (the console's live colors), **`content_rect()`** (`x, y, w, h`:
+the part of the screen the console's bar leaves you, wherever the bar sits —
+lay out inside it; in Lua it answers four values), **`bar_h()`** (its `y`, the
+rows above it) and **`ui`**, the console's own widget toolkit
+(buttons, rows, panels, rect maths). Storage answers `(value, error)`
 and never crashes, so there is no `try` to write.
 
 Anything you did not ask for **is not there** — no `carts`, no shell. Writing
 that name is an ordinary "name is not defined" error, like a typo.
 
-`system_carts/notes.moy` is the worked example: it lists your notes, opens one
+An app is drawn on change (the frame loop, above), so an idle one costs the
+console nothing. An app that moves on its own — a clock, a meter, an
+animation — says `"animates": true` beside its `type` and runs every frame
+like a game. One that lists `audio` in its permissions does too, since its
+sound is pulled in the frame:
+
+```json
+"moybyte": {"type": "app", "animates": true, "permissions": ["graphics", "input"]}
+```
+
+`system_carts/moybyte.notes.moy` is the worked example: it lists your notes, opens one
 through the editor handle below, and holds no text of its own. The full rules
 (what is never grantable, and how to make an app reflow to a big screen with
 `_layout(w, h, fs)` instead of drawing at a fixed 320×240) are in
@@ -759,7 +809,7 @@ Everything else is on the handle you get back:
 
 | call | does |
 |---|---|
-| `ed.draw(x, y, w, h)` | render the document into that rect of your canvas, this frame. Add a `scale` for a big screen |
+| `ed.draw(x, y, w, h)` | render the document into that rect of your canvas, this frame. Add a `scale` for a big screen. On a `ui.page` given a `gen` it draws only the rows that changed (docs/ui_api_2026-10.md) |
 | `ed.tap(x, y, click)` | forward a pointer PRESS. Answers what the tap MEANT: `("link", name)` a tapped `[[note]]` — open it — `("check", row)` a checkbox it just ticked, `("caret", None)` a plain place, `None` outside |
 | `ed.drag(x, y, down)` | forward what follows the press. It PANS — down the page, and sideways too in a mode that does not wrap — or, in SELECT mode, grows the selection to the finger |
 | `ed.nav(dx, dy)` | move the caret by cells. The console already feeds this from the T-Deck trackball and the host arrow keys while your handle has focus; call it yourself for an on-screen d-pad |
@@ -794,7 +844,8 @@ def _init():
 
 def _draw():
     cls(0)
-    ed.draw(4, bar_h() + 4, W - 8, H - bar_h() - 8)
+    x, y, w, h = content_rect()
+    ed.draw(x + 4, y + 4, w - 8, h - 8)
 
 def _update(dt):
     t = touch()
@@ -811,7 +862,8 @@ end
 
 function _draw()
   cls(0)
-  ed:draw(4, bar_h() + 4, W - 8, H - bar_h() - 8)
+  local x, y, w, h = content_rect()
+  ed:draw(x + 4, y + 4, w - 8, h - 8)
 end
 
 function _update(dt)
@@ -836,7 +888,7 @@ shows a **RUN** button beside it, and the console wraps it in a manifest on the
 spot and runs it like any other cart.
 
 Its screen is the **text console**: a scrollback, a prompt line and the same
-symbol palette the Code tab has, with the top bar's X to leave.
+symbol palette the Code tab has, with the top bar's back to leave.
 
 ```python
 # hello.py, in NOTES
@@ -938,6 +990,10 @@ Since #170 the model is PICO-8-parity:
   there — p8's loop range), and a track may carry `row_secs`, per-row
   durations in seconds (`0` = hold the row forever) — how a p8 song's
   changing pattern lengths survive the import.
+- An SFX may carry a `name`, a string of at most 24 characters (SPEC.md 8.1).
+  It labels the sound for a person and never changes how it plays. The bank
+  (`runtime/audio.py`) keeps it through a load and a save, so the Music tab
+  writes back the name it read, though it has no field to edit one yet.
 
 - A note with `vol` `0` but a real pitch is a **keyed rest**: silent, but still
   the note a following slide glides *from*. Only pitch `−1` leaves that origin
@@ -946,9 +1002,9 @@ Since #170 the model is PICO-8-parity:
 Imported PICO-8 carts (`tools/import_p8.py` / `moy port`) carry all of this
 over verbatim — waves, effects, keyed rests and all four music channels. The
 two tools land on the *same* `sounds.json` because they are the same converter:
-moy-spec's `p8_import.py`, vendored here as `tools/p8_import.py`. They differ
-only in what they do with the cart's *code* — `moy port` writes Lua plus a p8
-compat shim, `tools/import_p8.py` writes a Python stub for you to port into.
+moy-spec's `p8_import.py`, vendored here as `tools/p8_import.py`. Both write
+the cart's *code* as Lua under a generated p8 compat shim — moy-spec's porter,
+vendored here as `tools/p8_lua_port.py`.
 
 **One number worth knowing if you read a `.p8` by hand:** PICO-8's tracker
 labels its pitch `0` as "C0", but its synth tunes pitch `33` to 440 Hz, so its
@@ -968,15 +1024,15 @@ same here as on any other console that implements the spec.
 | call | does |
 |---|---|
 | `time()` | milliseconds since the cart started |
-| `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. **Required** for a `textmode(True)` game — the console's BACKSPACE exit can't reach text mode. (It was a no-op for **Lua** carts until 2026-09-12: libmoy set a snapshot flag that nothing on either tier read back) |
+| `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. Optional: the console's key opens a pause menu with Quit in every mode. (It was a no-op for **Lua** carts until 2026-09-12: libmoy set a snapshot flag that nothing on either tier read back) |
 | `pmem(index, value=None)` | persistent memory: `pmem(i)` reads an int, `pmem(i, v)` writes+persists (high scores, saves) |
 | `cfg(key, default=None)` | read a value from the cart's `config.json` — the **"Make it mine"** tuning a kid edits (speed, counts, colors…) |
 | `col(name_or_index)` | resolve a color **name** (0–15) or int to a `0–63` palette index |
 | `rnd(n=1.0)` | random float in `[0, n)` |
 | `flr(x)` | floor to int |
 | `W`, `H` | canvas size (320, 240) |
-| `wifi` | **only present** if the cart's manifest permissions include `"network"` (capability-gated, `#38`). A normal cart has no `wifi` name at all |
-| `net` / `on_net` | **only present** if the cart's manifest permissions include `"multiplayer"` (capability-gated, `#65`). See **Multiplayer** above |
+| `wifi` | **only present** if the cart's manifest `moybyte.permissions` include `"network"` (capability-gated, `#38`). A normal cart has no `wifi` name at all |
+| `net` / `on_net` | **only present** if the cart's manifest `moybyte.permissions` include `"multiplayer"` (capability-gated, `#65`). See **Multiplayer** above |
 
 ---
 
@@ -1009,5 +1065,5 @@ Player / One). When you add a drawing
 feature, add it to the ONE canvas class (`device_canvas.DeviceCanvas`) and keep the name
 identical.
 
-**Fuller example:** `system_carts/star_catcher.moy/main.py` (a complete game — sprites,
+**Fuller example:** `system_carts/moybyte.star_catcher.moy/main.py` (a complete game — sprites,
 particles, `cfg` tuning, `pmem`, hearts/score UI).

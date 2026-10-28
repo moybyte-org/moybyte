@@ -853,15 +853,15 @@ def test_the_store_path_comes_from_the_console_not_from_the_tool(
     """`ws.carts_root` is asked, never declared: the Guition's store is a TF
     card when one is in the slot and the internal VFS when it is not, so a
     hardcoded path would be wrong on that board half the time."""
-    dev = _FakeConsole(board="guition_s3", carts_root="/sd/carts")
+    dev = _FakeConsole(board="guition_s3", carts_root="/sd/moybyte/carts")
     monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
     cart = _cart(tmp_path, {"main.py": b"print('hi')\n",
                             "manifest.json": b'{"title": "Demo"}\n'})
     assert push_cart.main([cart, "--board", "guition_s3"]) == 0
     assert dev.fs.files == {
-        "/sd/carts/demo.moy/main.py": b"print('hi')\n",
-        "/sd/carts/demo.moy/manifest.json": b'{"title": "Demo"}\n'}
-    assert "/sd/carts/demo.moy" in dev.fs.dirs
+        "/sd/moybyte/carts/demo.moy/main.py": b"print('hi')\n",
+        "/sd/moybyte/carts/demo.moy/manifest.json": b'{"title": "Demo"}\n'}
+    assert "/sd/moybyte/carts/demo.moy" in dev.fs.dirs
     assert dev.closed == 1
 
 

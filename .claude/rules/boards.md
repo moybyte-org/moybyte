@@ -25,7 +25,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   CI, the one ccache every checkout and worktree shares (`moybyte_ccache`). What stays per
   board is its patch ladder and its sdkconfig facts. Builds clone mainline
   MicroPython v1.28 and ESP-IDF v5.5.1 into the board's `.build/`, and an
-  oversized image is a build FAILURE on every board.
+  oversized image, or one under its board's headroom floor (`[image]
+  headroom_floor_kib` in board.toml), is a build FAILURE on every board.
 - **What crosses into an image is board.toml DATA** (#161), staged by
   `tools/board_config.py`: a denylist over `runtime/*.py` (each `[[deny]]` names
   a kind and a `why`), an allowlist over `device/*.py`, and a
@@ -60,18 +61,25 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   Waveshare P4, the `recv_baud` its payload crosses at) for `P4Board` and
   `tools/push_cart.py`. No tool restates them, and the CI matrix is one row a
   board.
-- **The frame loop is shared** (`device_boot.FrameLoop`, #202 Phase B): inputs
-  → dev channel → idle tick → pointer → present → frame → backlight gate →
-  pump.tail → tail → pace, once, pinned by order tests in
-  `tests/test_device_boot.py`. A board's `run_desktop` supplies hooks and its
-  hardware. The GT911's no-news contract (hold / stale-mark / bound) is one copy
-  in `device/gt911.py`.
+- **The frame loop is the kernel's** (`native/moy_kernel/moy_loop.c`,
+  #224): inputs → dev channel → idle ladder → pointer → present → the three
+  console upcalls → backlight gate → pump tail → tail → pace → account, once,
+  pinned by `tests/test_moy_loop.py` and the loop trace. A board's
+  `run_desktop` builds its hardware and hands the console over
+  (`Desktop.run` registers the upcalls and returns); the VM service runs the
+  loop as its task's outermost frame. Every touch driver's no-news contract (hold / stale-mark / bound)
+  and mapping is one copy in `native/moy_input/moy_touch.c`.
 - **Never reset ONE patched file in a board's `.build/micropython` by hand.**
   `moybyte_patch_native_code_free` patches the esp32 port's `main.c` and
   `mpconfigport.h` as one unit and keys "already applied" on the header; a
   `git checkout` of the header alone (2026-09-23) left `main.c` patched, a
   `.rej` behind, and the build stopped before REPR_C re-applied. Reset the two
   together, delete any `.rej`, rebuild: every patcher is idempotent from stock.
+- **`MPY_TAG` is a property of the tree, checked every build.** Each `build.sh`
+  (and `make unix-micropython`) runs `tools/mpy_tree.sh`: a tree at another
+  commit than the tag's is reset to stock at the tag (patches gone, the
+  patchers re-apply them) and a tag it cannot get fails the build. Same tag: a
+  silent no-op, patches and objects kept.
 - **A build runs in a worktree, never the main checkout.** The main
   checkout's `dist/` and board `.build/` trees are the images every other
   session flashes, and a build there overwrites them (it happened twice before
@@ -95,8 +103,8 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   raster (numbers in #66) — and is the only build whose serial dev channel
   works; the fork's `MOYBYTE_REPL=jtag` mode, with its three bugs fixed, printed
   but never took input on identical config and symbols. A recorded verdict, not
-  a TODO. LVGL went with it: `native/moy_lcd` + `modules/tdeck_panel.py` is the
-  only panel driver, and what was never board-specific lives at the root
+  a TODO. LVGL went with it: `native/moy_lcd` under the kernel's banded compositor
+  (`native/moy_glass`) is the only panel driver, and what was never board-specific lives at the root
   (`native/`, `patches/`, `device/`). The MicroPython console is the only
   firmware; the Arduino smoke firmware and the LVGL `.moyproj` boot path are in
   git history.
@@ -105,7 +113,13 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   `303a:4001` is the one without input. The board's README tells the
   three-part fix.
 - The P4's PPA verdicts: it only helps UPSCALE composites (a 1:1 full-screen
-  copy is the same CPU or PPA, PSRAM-bound against the scan-out); sprite
+  copy is the same CPU or PPA, PSRAM-bound against the scan-out; the AXI
+  GDMA, `moy_ppa.copy`, moves whole rows at about twice either, which is what
+  `copy_last` and a full-screen window's stamp take; the 2D-DMA,
+  `moy_ppa.fbcpy` (esp_lcd's `esp_async_fbcpy`), moves a block inside a
+  framebuffer's stride as one transfer, which is what `shift_last` takes,
+  queued, its destination rows the CPU's again only after its fence), and FILLS, which skip
+  the write-allocate read (cls, a big rect, an rrect's middle rows); sprite
   BATCHING on it is a dead end (~10× worse than `spr_batch`: per-op submit
   dwarfs a tiny blit); its scaler is fixed BILINEAR in silicon, so pixel art
   goes through Settings → CRISP PIXELS (`moy_ppa.blit_crisp`, a banded SRAM
@@ -131,7 +145,9 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   forever. The console boards among them are `attach_only`: never pulsed,
   reset through esptool.
 - **On the S3 boards the Python heap and the C side share one 8 MB PSRAM**, and
-  the Python heap grows by doubling and never shrinks.
+  the Python heap grows by doubling and gives an area back only when a sweep
+  finds it wholly empty, which one surviving object prevents
+  (`docs/native_kernel_2026-09.md` §1.3).
   `MOYBYTE_GC_SPLIT_RESERVE` (each board's `mpconfigboard.h`, applied by
   `moybyte_patch_gc_split_reserve`) keeps 3 MB outside it; without it one
   fragmented allocation takes every byte and every big cart fails to load until
@@ -146,11 +162,19 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   and `carts` (the Get Carts app while it fetches an index or a cart).
   A new network consumer takes a tag and releases it on every way out, or the
   radio never goes off again — `tests/test_wifi.py`'s lease section is the
-  guard and `state`'s `wifi_held` names the holders. Constructing `network.WLAN`
-  initialises the driver, so `radio_off` never constructs one. The Zero is
-  outside this: WiFi is its only I/O.
-- **SD shares the SPI host with the display, and getting it wrong HANGS the
-  board** — gray screen, dead USB, no panic:
+  guard and `state`'s `wifi_held` names the holders. On the consoles the
+  station is the kernel's driver (`native/moy_net/moy_wifi.c`, reached through
+  `device_wifi.kernel_wlan`; Python never constructs the port's `network.WLAN`),
+  it outlives a soft reset, and a new VM puts it down unless the kernel's
+  ESP-NOW link rides it. The Zero is outside this: WiFi is its only I/O, and
+  it keeps the port's station for its setup access point.
+- **On the T-Deck SD shares the SPI host with the display, and getting it wrong
+  HANGS the board** — gray screen, dead USB, no panic (the P4 boards' and the
+  Guition S3's cards have a host of their own, mounted by
+  `device/card_store.py`, whose failed-mount `deinit()` is the teardown this
+  board must never do, so it stays off the T-Deck). Every S3 card is the
+  store's own volume (`native/moy_store/moy_card.c`: a FATFS over a C block
+  device with the sector cache, `moy_store.card`), read through `moy_sd`:
   - nothing touches SD before the panel is up (#56): a pre-display mount
     re-runs `spi_bus_initialize()` and leaves the host claimed on a populated
     card (`PREFETCH_SD_BEFORE_DISPLAY=False`; carts load after init and fall
@@ -164,6 +188,18 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
     `TFT_CS`/`SD_CS` (driver-owned; park only the LoRa `RADIO_CS`), never flush
     the panel inside a session. `tests/test_moybyte_sd.py` pins which lifecycle
     touches which pin.
+- **The Guition S3's TF card is on SPI3, the panel's QSPI on SPI2**, so
+  `moy_runtime.tf_card` opens it with `moy_sd.open(2, ...)` (the bus
+  initialised once, never torn down) and mounts the store's card volume over
+  it under `device/card_store.py`, once at boot. Host 2 is SPI3; host 1 is the
+  PANEL's SPI2 (as `machine.SDCard` slots, the numbers run opposite: slot 3 is
+  the panel's and dies with `ESP_ERR_INVALID_STATE`). The store
+  is `/sd/moybyte/carts` and its sibling documents `/sd/moybyte/*`; no card, a
+  dead one or a filesystem the build cannot read all boot on the internal store
+  (`/moy/carts`) with one line, and `card_store.STATUS` is the verdict. FAT12/16/32
+  and exFAT both mount (`MICROPY_FATFS_EXFAT` in `mpconfigboard.h`, the T-Deck's
+  too). The OTA directory and the BLE bond store stay internal. Never format or
+  erase a card from the console.
 - **On the S3 boards a play frame can skip the root canvas.** The #190 fold
   (`native/moy_flush/moy_fold`, shared C: the latch, the fence and both boards'
   gathers) scales a small game canvas into the panel bands on the feeder,
@@ -171,25 +207,27 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   into Python. A compiled cart's frame folds straight from the cart's memory
   (blit's palette or blit565's byte swap resolved per band), so no canvas holds
   it. The game WINDOW is the Guition S3's alone — it needs a panel whose GRAM
-  keeps the bezels. `tdeck_panel.py`'s header and `moy_fold.h` are the
-  authority.
+  keeps the bezels. `moy_fold.h` is the authority.
 - **The panel rules live in `native/moy_lcd`'s C**: DMA only from internal
   SRAM, only the first band carries a command (what "a full-screen flush must
   be a single `tx_color`" meant), and a band fits one SPI DMA transaction — a
   compile-time assert.
-- **The T-Deck's input poller is paced by the FRAME, never a timer.**
-  `moybyte.input.InputPoller` owns every I2C0 transaction off the frame loop
-  (#69; needs build.sh's `machine_i2c.c` GIL-release patch, and falls back to
-  synchronous polling without `_thread`). It blocks on a lock `_poll_inputs`
-  releases once a frame (`poller.kick()`), then yields with `_sleep_ms(0)`. A
-  thread that sleeps re-takes the GIL every tick and starves under a
-  free-running cart: on 2026-09-23 a key was read twice a second under Brick
-  Siege, and lockstep netplay shipped that stale mask. Both halves of the
-  handoff are load-bearing.
-- **The T-Deck keyboard (a separate ESP32-C3) switches mode per screen**:
-  ASCII for text, raw matrix for games.
-  `_disable_raw_mode` drains after the `0x04` revert and a text surface seeds
-  its edges with the byte already held — the README has the mechanism.
+- **The T-Deck's input task is paced by the FRAME, never a timer.** The
+  kernel's input task (`native/moy_input/moy_input_task.c`, core 0) owns every
+  I2C0 transaction -- keyboard, GT911, the mode writes -- and runs one pass per
+  `moy_input.kick()`, which the frame's tail calls after present, so a C3
+  clock-stretch blocks that task and never the loop (#69). A pass on a timer
+  would read keys the frame never merges; under Brick Siege on 2026-09-23 the
+  thread this replaced read a key twice a second, and lockstep netplay shipped
+  that stale mask.
+- **The T-Deck keyboard (a separate ESP32-C3) is read as its raw matrix on
+  every surface**: a game reads the held key and its buttons, a text surface
+  the press edges as typed bytes. Its ASCII mode is only for firmware that
+  ignores `0x03` (or raw turned off), where the `0x04` revert drains — the
+  README has the mechanism. **Mic is the console's key** (`start`,
+  2026-10-18), seen only in the matrix (ASCII sends the idle byte for a bare
+  Mic), and a text field's Cancel while one is typed into. Backspace is a
+  plain key.
 - **Serial reads are unreliable ACROSS a reset** on the SoC-USB boards: a reset
   removes the device node from under an open handle, and a reader that opens
   early sees nothing, which reads as a dead board. Attach after the boot
@@ -207,17 +245,30 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
 
 - **`native/p4/` is the shared P4 silicon tier (2026-09-06)**: `moy_dsi`
   (parameterized by the board's `MOY_DSI_PANEL_*` define), `moy_ppa`,
-  `moy_ble_hid`, `moy_c6`, declared by a P4 board as a second `[native.p4]`
-  source — never seen by the S3 scan — plus `device/dsi_panel.py` (the
-  compositor; the board injects its backlight), `device/p4_canvas.py` and
-  `device/p4_desktop.py` over `device/desktop_spine.py`. The two P4 patches
-  are `patches/p4_*.patch` behind `moybyte_patch_p4_ble_hid_fastpath` /
+  `moy_c6`, declared by a P4 board as a second `[native.p4]`
+  source — never seen by the S3 scan — plus the kernel's DSI compositors
+  (`native/moy_glass/moy_present.h`: `moy_glass.DsiCompositor` and
+  `RotatedCompositor`, over the modules each board passes in), `device/p4_canvas.py` and
+  `device/p4_desktop.py` over `device/desktop_spine.py`. The P4's one silicon
+  patch is `patches/p4_esp_lcd_dsi_underrun_hook.patch` behind
   `moybyte_patch_p4_dsi_underrun`. Status and numbers: #58, #202.
 - **`moy_dsi` scans, it does not push**: DPI mode reads a PSRAM framebuffer
   continuously, so there is no per-frame flush (the P4 boards deny
   `moy_flush`). SD power, the C6's SDMMC slot, the 200 MHz PSRAM floor and the
-  VFS shadowing rule (the store root is `/moy/carts`) are the Waveshare
-  README's.
+  VFS shadowing rule (the internal store root is `/moy/carts`) are the
+  Waveshare README's.
+- **A TF card is the P4 boards' cart store when one mounts**
+  (`device/card_store.py` over `p4_desktop.p4_card`: LDO4 poke, then
+  `moy_sd.mmc` bringing SDMMC slot 0 up once, never torn down (slot 1 is
+  ESP-Hosted's), then the store's card volume `moy_store.card` with its read
+  cache; FAT32 and exFAT, the latter being `MICROPY_FATFS_EXFAT` in each
+  `mpconfigboard.h`). The store is
+  `/sd/moybyte/carts` and its sibling documents `/sd/moybyte/*`; no card, a dead
+  one or a filesystem the build cannot read all boot on the internal store with
+  one line, and `card_store.STATUS` is the verdict. An EMPTY slot surfaces as
+  `moy_sd.mmc`'s `card_init` error, named the way a failed mount is.
+  The OTA directory and the BLE bond store stay internal. Never format or erase
+  a card from the console.
 - **A compiled cart's blit565 frame skips the game canvas**
   (`p4_canvas.present_frame`): the PPA scales it from the cart's memory, or
   from the GDMA snapshot every frame takes into the run's scratch where the
@@ -235,12 +286,12 @@ ports, flash, push, reboot, screenshots — are the `on-glass` skill
   on; a destination the CPU never writes skips the writeback (`rotate`'s `wb`
   flag). Full paints stay blocking so chrome never races the DMA.
 - **The Guition P4's desk is LANDSCAPE on PORTRAIT glass**
-  (`device/dsi_panel.RotatedCompositor`, owner call 2026-09-06, pinned by
-  `tests/test_p4_display.py`): one persistent landscape buffer the PPA rotates
+  (`moy_glass.RotatedCompositor`, `native/moy_glass/moy_present_rot.c`, owner
+  call 2026-09-06, pinned by `tests/test_p4_display.py`): one persistent landscape buffer the PPA rotates
   onto the panel, with per-buffer stale rects so a ping-pong buffer is never
-  shown behind. Up is `guition_p4_display.ROTATION` (90/270), live as
-  `py comp.set_angle(270)`. Its GSL3680 touch is RAM-loaded
-  (`device/gsl3680.py` uploads `modules/gsl_fw_jc8012.py` after every reset);
+  shown behind. Up is the board runtime's `ROTATION` (90/270), live as
+  `py comp.set_angle(270)`. Its GSL3680 touch is RAM-loaded (the kernel's
+  driver uploads `boards/MOYBYTE_GUITION_P4/gsl_fw_jc8012.c` after every reset);
   its serial is the P4's own USB-Serial/JTAG (the S3 rules, and esptool needs
   no BOOT button); its backlight GPIO23 is active-HIGH where the Waveshare's is
   active-low; its C6 runs Guition's factory slave, so BLE works and ESP-NOW
@@ -258,7 +309,9 @@ stages 1–6 all absent. Its README is the authority; what bites:
   `CARTS_Z`), inflated one cart at a time into an EMPTY store on first boot —
   gated on emptiness, not #47's version compare, because its store is the
   record (the only copy of a browser-made cart), where a console's is a cache.
-- Its patch ladder is empty and says so (`# DECLINED <fn>`). Do not give it the
+- Its patch ladder is two patches, the kernel entry's `moybyte_patch_native_code_free`
+  and the VM's `moybyte_patch_slice_store` that every board takes, and every
+  other one says why not (`# DECLINED <fn>`). Do not give it the
   #169 retune without the 120 MHz profile; the spike suite refuses the pairing.
 - USB-Serial/JTAG since 2026-08-30: opens like the console S3s, reaches the ROM
   loader through esptool's default reset and leaves it with `--after

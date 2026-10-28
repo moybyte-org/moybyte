@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from runtime.player import Player, FREE_DT_MAX
-from runtime.tick_model import TickScheduler
+from runtime.moy_play import Tick as TickScheduler
 from tools import gen_device_carts
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -101,5 +101,5 @@ def test_only_audited_seed_games_declare_free():
         m = json.loads(man.read_text(encoding="utf-8"))
         if m.get("fps") == "free":
             declared.add(m["title"])
-            assert m.get("type") == "game", m["title"]
+            assert m["moybyte"].get("type") == "game", m["title"]
     assert declared == FREE_SEEDS, sorted(declared ^ FREE_SEEDS)

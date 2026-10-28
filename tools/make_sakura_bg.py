@@ -2,7 +2,7 @@
 """A procedurally drawn cherry-blossom backdrop -- NOT the one the carts ship.
 
 READ THIS FIRST: this script is not the source of
-`system_carts/sakura*.moy/images/bg.moyimg`. It generated a *candidate*
+`system_carts/moybyte.sakura*.moy/images/bg.moyimg`. It generated a *candidate*
 backdrop, which the project owner then replaced with a supplied image; the
 shipped bitmap and the carts' shed-point scene now come from
 `tools/import_sakura_bg.py`. Running this script OVERWRITES both carts' bg with
@@ -47,7 +47,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from runtime import moy_image  # noqa: E402
+from runtime import moyimg  # noqa: E402
 from runtime.palette import MOY64  # noqa: E402  (preview colours only)
 from tools import pngwrite  # noqa: E402
 
@@ -525,11 +525,11 @@ def write_png(path, buf):
 def encode_bg(buf):
     """The `.moyimg` envelope, through the codec every writer shares.
 
-    Not a local `zlib.compress`: the window is PINNED (moy_image.MOYIMG_WBITS)
+    Not a local `zlib.compress`: the window is PINNED (moyimg.MOYIMG_WBITS)
     so a picture written here and one written by Paint on a board are the same
     stream, and a tool with its own copy of that number is how they stop being.
     """
-    return moy_image.encode_moyimg(W, H, bytes(buf))
+    return moyimg.encode_moyimg(W, H, bytes(buf))
 
 
 def render():
@@ -560,7 +560,7 @@ def main(argv=None):
         write_png(args.png, sc.buf)
         print("preview ->", args.png)
     if not args.dry_run:
-        for slug in ("sakura", "sakura_lua"):
+        for slug in ("moybyte.sakura", "moybyte.sakura_lua"):
             d = os.path.join(ROOT, "system_carts", slug + ".moy", "images")
             os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "bg.moyimg"), "w") as f:
@@ -568,7 +568,7 @@ def main(argv=None):
             print("wrote", os.path.join(d, "bg.moyimg"), len(blob), "bytes")
     if args.emit:
         scene = emit_scene(_emit_points(clumps, random.Random(SEED + 1)))
-        for slug in ("sakura", "sakura_lua"):
+        for slug in ("moybyte.sakura", "moybyte.sakura_lua"):
             d = os.path.join(ROOT, "system_carts", slug + ".moy", "scenes")
             os.makedirs(d, exist_ok=True)
             path = os.path.join(d, "blossoms.moyscene")

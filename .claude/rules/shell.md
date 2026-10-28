@@ -18,8 +18,10 @@ to whoever called it.
 
 - `runtime/console.py` — the shell **kernel**: `Workstation`, shrunk by the 2026-07
   refactor to a compositor/router — the Layer-stack frame/input/pointer loop, the
-  shared draw toolkit (`_glyph`/`_icon`/`_btn`), store/service attach points
-  (`carts_store`/`wifi`/`updater`) and the spawn/exit verbs; everything
+  shared draw toolkit (`_glyph`/`_icon`/`_btn`) and store/service attach points
+  (`carts_store`/`wifi`/`updater`); the spawn/exit verbs, app registration and
+  the WiFi lease are `runtime/console_spine.py`'s, over the spine's components
+  in `native/moy_spine` (ids and kinds, never objects); everything
   the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
   store. (frozen as `console`)
 - **The 2026-07 shell split** — `project.py` / `player.py` / `editor_app.py` /
@@ -27,77 +29,116 @@ to whoever called it.
   `docs/shell_ux_v1.md` is the UX authority; what neither can tell you:
   - **`Player` has zero knowledge of who launched it.** `run(cart)` plays until
     exit and returns to the CALLER — launcher→launcher, Editor-PLAY→the same tab.
-    A crash becomes the **crash-to-code throw**: the run exits into the Editor's
-    Code tab with the caret on the crashing line. The parked OOPS panel survives
-    as the no-open-cart fallback, and as the whole answer to a compiled
-    (`"runtime": "wasm"`) cart's trap, which has no source line to throw to and
-    offers no EDIT.
+    A run that stops opens the **stop card**, the pause card's sibling
+    (docs/look_2026-10.md step 33): its See why is the crash-to-code throw,
+    and with no open cart, or for a compiled (`"runtime": "wasm"`) cart's
+    trap, which has no source line, it offers Restart and Home alone.
   - **There is NO SAVE and no dirty star** (#111). Commits ride a typing-idle
     debounce plus every exit path; a commit also appends the undo journal and runs
     graduation detection.
-  - **All seven Editor tabs are `_base`-verbatim byte-identical at 320×240/1×**, so
-    the Editor reflows to any panel or window size — **only a RUNNING CART is
-    fixed at 320×240**.
+  - **All seven Editor tabs lay out through their `*Layout` formulas on every
+    canvas, the T-Deck's 320×240 included**, so the Editor reflows to any panel
+    or window size — **only a RUNNING CART is fixed at 320×240**.
   - **`ws.screen` is a read-only PROJECTION of the WM back-stack top**, not state.
     The visible/draw stack is memoized (zero per-frame list churn, #66).
   - **`WindowedWM` is host/P4 only and deliberately NOT staged to the S3.**
-    Windows exist ONLY above the `"desk"` stack kind, so every `not _order`
-    deferral presents fullscreen.
+    Windows exist only in DESKTOP mode (`wm.mode`,
+    `docs/shell_layout_2026-10.md` §3); console mode parks them outside the
+    back-stack and presents every kind fullscreen, and every tier-sensitive
+    branch reads the mode, never the stack shape.
   - **Input focus is decoupled from the back-stack**: clicking a window or its chip
     moves keyboard focus WITHOUT popping, so a playtest keeps ticking while the
     Editor beside it is typed in — its pointer feed click-stripped so the
     background cart never eats editor taps. Only an explicit exit ends a run.
-- **Editor-as-an-app UX (this replaced the maker/player tap-mode):** a launcher tap
-  **always RUNS the cart** — no mode, no type dispatch. The pinned **"Make ✏️"
-  tile** opens the Editor **project-picker** (the same grid over every editable cart
-  + a ＋New tile), which owns project management (＋New / Copy / Delete — delete is
-  a two-tap confirm); the launcher home has no new/dup/del. **Wallpapers are
-  backdrop-only**: excluded from the run-grid, chosen in the **Appearance app**
+    The keyboard's text mode follows focus (`WindowedWM._move_focus`): each
+    window gets back the mode it had, so a field in one never leaves a game
+    beside it in text mode.
+- **Editor-as-an-app UX (this replaced the maker/player tap-mode):** the home
+  (`docs/shell_layout_2026-10.md` §12) has four tabs, and a tap on Games, Mine or
+  Apps **always RUNS the cart** (an app's opens the app) — no mode, no type
+  dispatch; a tap on **Make** EDITS. **Make is the ONE projects list** (owner,
+  2026-10-14): there is no project picker on any tier and no PROJECTS button
+  on the Editor's bar (its X pops back to where it was opened from); Make's
+  verbs are ＋New / CHANGE / COPY / DEL (DEL, like every Delete of a cart, asks first:
+  `console_notices.DeleteConfirm`). The desk's
+  PROJECTS is the same home in a window (`HomeWindowLayer`): the console
+  home's design (hero, details, shelf) in the window's content rect whatever
+  the theme's home arrangement, on Make; a pick there opens its window above
+  it. On a board with a desk the Editor is always a window: a Make pick,
+  CHANGE or NEW from the console-mode home goes back to the desk first
+  (owner, 2026-10-20), and its X comes back (`Workstation.editor_closed`).
+  **Wallpapers are backdrop-only**: on none of the tabs that run, chosen in the **Appearance app**
   (wallpaper + panel theme — the ONE appearance surface; Settings' APPEARANCE
   action row deep-links to it, the old WALLPAPER/THEME stepper rows are gone),
-  still editable via the picker.
-- **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned bar, 18px ×
-  the CHROME scale — `chrome.Layout`'s `cs` (#203), which equals the font scale
-  unless a board declared a panel diagonal small enough that a 16px icon falls
-  under `chrome.MIN_TAP_MM` (which boards do is pinned in
-  `tests/test_board_toml.py`). RIGHT
-  zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;
-  the launcher root draws no X). LEFT zone = LENT to the active app (`draw_zone`):
-  the launcher shows the selected cart's name, the Editor its PROJECTS/tab-ladder/
-  UNDO/REDO/PLAY icons. Icons stay 16×16 sprites from the editable `IconSheet`
-  (Settings → EDIT ICONS). **The bar hides entirely while a GAME plays** (the cart
-  owns all 320×240); tools/apps run WITH a minimal bar (title + status + X) so
+  still editable on Make.
+- **Lay out in the content rect, never under a bar's rows.** A surface under
+  the host's bar takes its geometry from its layout's `cx`/`cy`/`cw`/`ch`
+  (`layout_base.content_of`, the function the bar itself is placed by), never
+  `18 * cs` as its top or `h` as its floor; the bar's own rects (right zone,
+  lent zone, the fixed game-canvas cluster) are BAR coordinates, which
+  `BarLayer.handle_bar_tap` translates a tap into. Bars are global
+  (docs/shell_layout_2026-10.md §7): `tests/test_content_rect.py` moves the bar
+  to the bottom and fails a surface that stayed behind.
+- **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned bar, its
+  metric class's bar (`layout_base.bar_rows`): 18px × the CHROME scale on a
+  handheld — `chrome.Layout`'s `cs` (#203), which equals the font scale unless
+  a board declared a panel diagonal small enough that a 16px icon falls under
+  `chrome.MIN_TAP_MM` (which boards do is pinned in `tests/test_board_toml.py`)
+  — and 40px on a desk (a declared glass of 5" or more, the P4s), whose `cs` is
+  its unit of 2 at chrome size 1 (docs/look_2026-10.md step 9). RIGHT
+  zone = OS status (clock/wifi/batt). The LEFT zone opens with the **back
+  chevron** (`BarLayer.draws_back`; a layout that places the `close` widget
+  gets its X instead): one level back, as Esc and B (`ws.app_back` for a
+  registered app, whose `back()` steps its own pages); the launcher root draws
+  one only above its mode's floor -- console mode over a P4's parked desk --
+  and the Editor's one bar none (its B and Esc step back, and it shows no
+  Wi-Fi). LEFT zone = LENT to the active app (`draw_zone`):
+  the home shows the active tab's verbs on the selected card, the Editor its
+  tab ladder, UNDO, REDO and PLAY (on a desk its workspaces instead,
+  `runtime/editor_desk.py`). Icons are the theme's icon set where its look names
+  one and the image carries it (`runtime/iconsets.py`: a smooth set's masks or the pixel
+  set, a tile a slot of its `SLOTS`), else 16×16 sprites from the shell's baked `IconSheet`; the slots a
+  theme's `icons.pixel_slots` names draw from its own tiles, painted in the Editor's theme mode
+  (`runtime/theme_editor.py`). **The bar hides entirely while a GAME plays** (the cart
+  owns all 320×240); tools/apps run WITH the bar (Moy, back, title, status) so
   they're always exitable.
-- **Exit model (#71's pause machinery is retired):** a fullscreen GAME exits on a
-  sustained **hold-BACKSPACE (~700ms)** — raw-matrix mode streams the held key, a
-  transient progress toast fills, the pop returns to the caller; a quick tap is a
-  plain cart key. Taskbar tools/apps exit via the context-X, so BACKSPACE stays an
-  ordinary key there (the wifi password field's delete works with zero
-  special-casing). A `textmode(True)` game provides its OWN exit via the additive
-  cart verb **`quit()`** (in text mode BACKSPACE arrives as a typed delete and the
-  keyboard has no autorepeat, so the console's gesture can't reach it) — Letter
-  Blitz models it with a tap-✕. (The plan's triple-tap alias was dropped after
-  on-device testing.)
+- **Exit model (#71's BACKSPACE pause machinery is retired).** A game is left
+  through the pause menu, which the console's one key opens (`start`:
+  `Workstation.system_key`; the T-Deck's is Mic); BACKSPACE is a plain key with
+  no hold gesture, so a `textmode(True)` game needs no exit of its own. Tools
+  and apps leave by the bar's back. `docs/shell_ux_v1.md` §9 and §9a.
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
-  `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
-- **`runtime/moy_carts.py` is the `.moy` store** (and the #108 user-files layer
-  beside it, and the per-project undo journal). The file lists its verbs; the
-  decisions behind it:
+  `IconSheet` (16×16 icon tiles: the shell's baked bar icons and a theme's own pixel tiles). (frozen as `editors`)
+- **`runtime/moy_carts.py` is the `.moy` store** (and the per-project undo
+  journal; the #108 user-files layer beside it is native/moy_store's
+  `moy_ufiles`, which `moy_carts` names reach and the files role's C rows
+  serve). The file lists its verbs; the decisions behind it:
+  - **A CART is reached by handle, through `runtime/moy_catalogue.py`** -- the
+    shelf's scan, a whole-cart load, create, duplicate and delete -- and every
+    cart dict it returns carries its index handle as `"h"`. A path names a FILE
+    (the save_* verbs, the journal, the sync wire). Calling moy_carts' own
+    catalogue/load/create/duplicate/delete from outside the store is the line
+    the native kernel's sprint 1b crosses on, and a test fails it.
   - **No SAVE button, no dirty star, ever** (#111). Commits fire on a typing-idle
     debounce and on EVERY exit path.
   - **Undo is scoped to the active tab's file(s), never another tab's.** The one
     bar UNDO/REDO pair walks fine-grained in-RAM ops first, then whole commits.
   - **Blocks↔code graduation is one-way and reversible only by undo**: a diverging
-    code commit stores `"graduated": true`, the Blocks tab goes read-only, and
+    code commit stores `"moybyte": {"graduated": true}`, the Blocks tab goes read-only, and
     undoing past that commit un-graduates.
   - **Wallpaper previews keep a sidecar; covers DO NOT** (#155) — and the
     contrast is the point. A computed preview FRAME is far dearer to rebuild than
     to read, so it caches to disk; a cover (`cover.png`, SPEC.md 3.6) is a few KB
     of file and a native decode, so `runtime/cover_cache.py` keeps the FILE and
-    ONE decoded 128x128 base in RAM and draws it at a whole-number scale (no
-    per-size variants, docs/theming_2026-09.md P8). **Do not re-add cover
+    ONE decoded 128x128 base in RAM (and its 64x64 half) and draws it scaled --
+    the shelf at a whole-number scale, the carousel's cards at any ratio through
+    `blit565_resize`, one call a card -- with no per-size variants
+    (docs/theming_2026-09.md P8). **Do not re-add cover
     sidecars.**
-  - **`files/trash/` is restorable and never confirms**, and WALL/GAME/wallpaper
+  - **A FILE's DELETE moves it to `files/trash/`, restorable, and never confirms**; emptying
+    the Trash is Files' one verb that asks first (a `ui.dialog`). A CART has no
+    Trash: its delete removes the folder, so every route asks first in the
+    same `ui.dialog`. WALL/GAME/wallpaper
     are **copy-on-use** — a kid's drawing is never mutated by being used
     (#108's comments hold that design discussion).
 - **Cart runtimes (#67): a manifest `"runtime"` other than python routes
@@ -127,8 +168,8 @@ to whoever called it.
     silently drops any moybyte verb nobody remembered to add — and it did.
     Object-valued verbs (`make_layer`/`draw_layer`/`image`, and the #85/#109
     placement family since #214) can never be registry entries: a trampoline
-    marshals scalars and a Layer comes back nil, so they ride int handles plus a
-    Lua prelude. **If you add a runtime, import that module; if
+    marshals scalars and a Layer comes back nil, so they ride a Lua prelude over
+    int handles or the run's own C (the scenes, `moycore_scene.h`). **If you add a runtime, import that module; if
     you add an object-valued verb, it goes there, not in a verb list.** It was two
     copies once, which is why layer carts crashed on the host and merely fell back
     on device.
@@ -168,8 +209,8 @@ to whoever called it.
   (`player.PMEM_FLUSH_MS`, 60s). The old per-write SD save was Letter Blitz's per-pop "word-event logic spike"
   (probe-attributed on glass; #66). The
   perf_capture-gated `PMEM save=<ms>` diag line shows the deferred cadence.
-- `runtime/font.py` — petme128 8×8 font, the ONE glyph source both backends rasterize (#62): the host draws it per-pixel, the device passes its blob to the native `moy_gfx.text` kernel (staged as `moy_font` at build; framebuf.text — same glyphs, no clip rect — is the no-gfx fallback).
-- **UI scrolling is kinetic + scroll-as-blit (#113, 2026-07-22 — the living plan/status issue):** `ui.ScrollRegion` owns the fling physics (all dt INJECTED from the loop — never a clock — so tests are exact-trajectory deterministic) plus a painted-frame ring; an eligible drag/fling frame SHIFTS the retained pixels via the `scroll_rect` system verb (ONE implementation on every tier since the canvas flip — `DeviceCanvas.scroll_rect` over `moy_gfx.scroll_rect`, which the host reaches through `runtime/gfx_binding.py`; the old host `canvas.py` lane is deleted) and repaints only the exposed band (`Launcher.draw_shift` — the home shelf + Editor picker pilots). **The row slot is never the whole scroll state**: Settings' rows travel by PIXELS (#113 Phase 5) — `set_top` stays the row-slot state of record that the cues and the keyboard clamp read, while the region underneath carries what the finger moved, and `_scroll_px()` is the sub-row remainder the rows draw at. The pushes go ONE way each: a finger pulls `set_top` from the region, and only the row-minded movers (a d-pad step, a reset, the range clamp) push back via `_sync_scroll_from_top`, which also kills a live fling. A per-sample re-snap is what ate the remainder before. The shared list shell (`app_shell.py`, Files/Storybook) still row-snaps and feeds its `DragTap` no dt, so it has no fling — that is the remaining Phase 5 rollout. The learned rule: **everything inside a scrolled band must be a pure function of the offset** (the picker's dots now ride the scroll in-band). The ring pins sel/statics/`ws.covers.gen` and measures against `RETAINED_FRAMES` paints back (host/layers 1, device root ping-pong 2). The windowed WM's gesture-vs-window checks resolve by IDENTITY (`_wins.get(key) is win` — the shared "make" group's `win.kind` is the CONTENT kind, so `key == win.kind` never matched and silently disabled the drag content-freeze/stamp-defer everywhere).
+- `runtime/font.py` — petme128 8×8 font, byte-identical to libmoy's compiled-in copy (#62): every canvas passes its blob to the native `moy_gfx.text` kernel (staged as `moy_font` at build), and UI text above scale 1 goes through the one UI text path, `native/moy_gfx/moy_text.h` (sprint 6).
+- **UI scrolling is kinetic + scroll-as-blit (#113, 2026-07-22 — the living plan/status issue):** `ui.ScrollRegion` owns the fling physics (all dt INJECTED from the loop — never a clock — so tests are exact-trajectory deterministic) plus a painted-frame ring; an eligible drag/fling frame SHIFTS the retained pixels via the `scroll_rect` system verb (ONE implementation on every tier since the canvas flip — `DeviceCanvas.scroll_rect` over `moy_gfx.scroll_rect`, which the host reaches through `runtime/gfx_binding.py`; the old host `canvas.py` lane is deleted) and repaints only the exposed band (the home's grid and icons, `Launcher.draw_shift`: on the plain `bg` ground the band shifts by the offset the buffer holds it at and a key, repeat or trackball step repaints the two cells whose focus moved, `tests/test_home_band.py`; over a baked backdrop or a picture, which stay at glass coordinates, a moved band repaints whole; the carousel's cards change size with the offset, so `Carousel.draw_shift` restores the ground around them -- from the wallpaper's own still image where it has one, else the band's capture -- and repaints them; on the desk each buffer gets only the parts it lacks, `docs/surface_model_v1.md` §14.4). A band paint draws a grid, icons or desk-shelf card that wears no focus out of its KEPT FACE (`launcher_layer._Faces`: its picture and rim drawn once, on an idle frame, into a slot of one owned layer, keyed on the item, its title, the cover object and the look's gen, copied in one `moy_gfx.face` call, which over anything but the plain ground draws the pixels a corner covers in part as the card draws them, because they blend over what lies there); the layer goes back with `release_retained` and when the arrangement is left. Settings' page scrolls in the public UI API's engine (`native/moy_ui/moy_ui_api.c`): a mostly vertical drag past 4 px moves it by pixels from any row, a slider's included, and is no tap, a release flings it, and the keys glide focus into view. A verbs page whose app gives its pages and pictures a `gen` draws its scroll as SHIFT FRAMES (the last frame's pixels moved, the floor drawn; `docs/surface_model_v1.md` §14.7) on the full-screen tier and in a desk window, where the app draws every frame straight into the glass and the WM's shown ring vouches (§14.3): an app that changes what such a page shows without moving its gen leaves stale rows on glass, which `tests/test_shift_apps.py` and `tests/test_wm_records.py` catch only for the sessions they play. A held key's steps that moved nothing last frame (a list's end) paint no frame (`ui_draw.steps_dead`). Files' lists scroll in the same engine (a placed `ui.table`, a `ui.scroll` region). The learned rule: **everything inside a scrolled band must be a pure function of the offset** (the picker's dots now ride the scroll in-band). The ring (`ui_draw.PaintRing`) keeps each paint's offset, focused cell, statics, `ws.covers.gen` and stamp, and vouches for the paint `RETAINED_FRAMES` back (host/layers 1, the S3 roots 2, the Waveshare's 3). The windowed WM's gesture-vs-window checks resolve by IDENTITY (`_wins.get(key) is win` — the shared "make" group's `win.kind` is the CONTENT kind, so `key == win.kind` never matched and silently disabled the drag content-freeze/stamp-defer everywhere).
 - `runtime/host_app.py` — host glue: host `make_api`, `build_workstation()` (maps `ws.runtimes` -- "lua" and "wasm" -- for each native binding that builds, #67), `ConsoleDriver` (mouse=touch, arrows=trackball). Not on device.
 
 (The pre-unification host UI — `shell.py`/`workstation.py`/`engine.py`/`api.py`/
@@ -184,20 +225,25 @@ from behind the façade in five gated landings. `tests/test_console_facade.py`
 pins every surviving forward with its caller, the 17 legacy property forwards,
 and every `getattr(ws, "…")` name in runtime/device/tools. Facts not to undo:
 
-- **`ws.system` is an ALIAS of the SystemStore dict and is never rebound** —
-  `SystemStore.load()` mutates it in place. That identity is why settings_layer's
-  and dev_channel's raw writes never had to migrate.
+- **`ws.system` is an ALIAS of the SystemStore rows (the spine's `Settings`) and
+  is never rebound** — `SystemStore.load()` replaces its rows in place. Reads are
+  `ws.system.get(key, default)`, a value decoded afresh; the ONE write is
+  `ws.system.set(key, value)`, which marks the store dirty and persists it, so
+  there is no `persist()` to forget and no dict beside the rows to write to. A
+  write that fails stays dirty and rides on the next.
 - **The achievement overlays are EVENT-PUSH**: an unlock writes the flat kernel
   deadlines from the arm site; `_animating` and both WMs read plain ints and never
   call into `ach`/`ach_ui`.
-- **`theme_colors` stays a flat kernel REBIND on purpose** — the launcher's cache
-  keys fold `id(ws.theme_colors)`, so the rebind IS the shelf invalidation. An
-  in-place alias there would be a live bug.
+- **A look change is `ws.look.look_gen`, never an identity** — every cache whose
+  pixels read the look folds that one int (`docs/theming_2026-09.md` §6), set by
+  `Appearance.publish()`; a new cache that reads a role and keys on a dict's or
+  a sheet's `id()` goes stale on an in-place edit. `ws.theme_colors` is the flat
+  kernel attribute `set_theme` assigns; the token dicts are shared, read-only.
 - **The frame loop reaches collaborators directly, never through a forward**;
   per-card grid paths use injected BOUND methods.
 - **`_icon_cache` is CoverCache's and invalidates on a rescan**, BEFORE
-  `slim_carts` re-bakes — slimming is the last moment a cart's sprite art exists
-  in RAM.
+  `slim_carts` re-bakes — slimming is the last moment a cart's icon art (the
+  `icon_rows` a catalogue entry carries) exists in RAM.
 - **Serial vocabulary moved with the code**: `p4_conformance` speaks `ws.carts.all`,
   `p4_hitch` wraps `ws.history.idle_tick`, `p4_chrome_freeze`/`p4_scroll_ab` speak
   `ws.look`.
@@ -222,12 +268,14 @@ body and nothing executable guarded it.**
   value carries its own per-board argument.
 - **A wired service must be STARTED and POLLED, not merely built**, and `poll` must
   be per-frame: on the boot path it runs once and reads statically identical.
-- **Derived values get one author.** The two InputStates stay separate at 94%
-  identical — `BUTTONS` is 8 names vs 15, in different orders, and a test says
-  asserting them equal would be wrong.
-- **Storage READS take the SD gate too, not just writes.** `poll_webhost` runs at
-  the frame tail after `kick()`, so a frame that painted leaves the feeder shipping
-  bands, and an sdspi transaction there is the documented panic.
+- **Derived values get one author.** Both tiers' InputState are one table
+  (`runtime/moy_input.py`'s `InputTable`) over two vocabularies — the boards'
+  sixteen names, the host's first eight of the same order — and a mask's bit
+  order is the caller's (`button_masks(order, player)`), never the vocabulary's.
+- **Storage READS take the SD gate too, not just writes.** The webhost's poll
+  runs at the frame tail after `kick()` (the kernel loop's service upcall), so
+  a frame that painted leaves the feeder shipping bands, and an sdspi
+  transaction there is the documented panic.
 - **The browser gets carts, not their history** — the undo journal crosses the wire
   in neither direction; the receiving side writes its own (`pmem` does cross).
 
@@ -236,10 +284,13 @@ body and nothing executable guarded it.**
 
 Record and gates: #206, #207, #208.
 
-- **ONE `PERF` line, one producer, every board.** `runtime/perf_line.py` holds
-  the field table, the formatter AND the parser, measured by
-  `device_boot.PerfSampler` on `FrameLoop.account` and written only under PERF
-  DIAG, like every periodic line (kid mode writes none). **A field a board cannot
+- **ONE `PERF` line, one producer, every board.** The kernel writes it
+  (`native/moy_kernel/moy_perf.c`, from its loop's account stage, the
+  console pushing its half with `ws.perf_push` when a sample is due, and once
+  when a kernel run takes the frame, whose PERF names the cart and leaves the
+  console's meters `-`) and
+  `runtime/perf_line.py` holds the field table and the parser; it is written
+  only under PERF DIAG, like every periodic line (kid mode writes none). **A field a board cannot
   measure prints `-`, never `0`.** Cart titles are slugged and compounds join with
   `/`, because both readers split on whitespace and an inner `=` reads as a field.
   `tools/p4_perf.py` requires `--board`: it used to default to the P4's dtr/rts
@@ -251,9 +302,9 @@ Record and gates: #206, #207, #208.
 - **Adding a settings toggle is one entry in `SETTINGS_TOGGLES`**, not six sites.
   The capability gates stay expressed, and the flat mirrors stay flat attributes —
   both WMs read `ws.show_fps` on every painted game frame on every board.
-- **The `colors=` hatch is 14 sites and each has a written reason** (`ui.row`/
+- **The `colors=` hatch is 8 sites and each has a written reason** (`ui.row`/
   `ui.cell` take `kind=`, like `ui.button`). `row_menu` and `row_list` are
-  deliberately two skin entries: `ink_dim` and `chrome_ink_dim` resolve differently
+  deliberately two style entries: `ink_dim` and `chrome_ink_dim` resolve differently
   on machine/dark, so collapsing them passes every golden and moves a pixel.
 - **The on-glass suites share one fixture** (`tests/on_glass.py`), and
   reset-vs-attach is read from `board.toml`, never chosen in a suite.

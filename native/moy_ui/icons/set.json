@@ -1,0 +1,276 @@
+{
+ "about": "The icon sets tools/make_icons.py builds (docs/look_2026-10.md step 16): a smooth set's masks, a font file per layer and size, slot n at byte `first` + n; a board takes its tier's files and the pixel set.",
+ "built_with": {
+  "resvg-py": "0.5.0"
+ },
+ "fill_default": "#7da7ea",
+ "fills": {
+  "luna": {
+   "art": "#ffffff",
+   "battery": "#46b843",
+   "brush": "#e2582e",
+   "calc": "#c9d3e6",
+   "copy": "#ffffff",
+   "del": "#c9d3e6",
+   "doc": "#ffffff",
+   "export": "#f5c542",
+   "files": "#f5c542",
+   "folder": "#f5c542",
+   "game": "#c9d3e6",
+   "getcarts": "#46b843",
+   "grid": "#9fd0ff",
+   "heart": "#e2582e",
+   "home": "#f2a65a",
+   "key": "#f5c542",
+   "lock": "#f5c542",
+   "map": "#9fd0ff",
+   "moy": "#c9b8ff",
+   "music": "#46b843",
+   "mute": "#c9d3e6",
+   "notes": "#ffffff",
+   "paint": "#e2582e",
+   "palette": "#f2c38a",
+   "play": "#46b843",
+   "pointer": "#ffffff",
+   "projects": "#f5c542",
+   "run": "#46b843",
+   "save": "#7da7ea",
+   "settings": "#b8c0cc",
+   "smile": "#f5c542",
+   "spark": "#f5c542",
+   "sprite": "#9be36b",
+   "star_on": "#f5c542",
+   "storybook": "#e2582e",
+   "trash": "#c9d3e6",
+   "trophy": "#f5c542",
+   "volume": "#c9d3e6",
+   "wallpaper": "#9fd0ff",
+   "warn": "#f5c542"
+  }
+ },
+ "first": 33,
+ "masks": {
+  "coast-16": {
+   "bpp": 2,
+   "bytes": 3960,
+   "layer": "ink",
+   "set": "coast",
+   "size": 16
+  },
+  "coast-20": {
+   "bpp": 4,
+   "bytes": 10275,
+   "layer": "ink",
+   "set": "coast",
+   "size": 20
+  },
+  "coast-24": {
+   "bpp": 4,
+   "bytes": 14557,
+   "layer": "ink",
+   "set": "coast",
+   "size": 24
+  },
+  "default-16": {
+   "bpp": 2,
+   "bytes": 5092,
+   "layer": "ink",
+   "set": "default",
+   "size": 16
+  },
+  "default-20": {
+   "bpp": 4,
+   "bytes": 12979,
+   "layer": "ink",
+   "set": "default",
+   "size": 20
+  },
+  "default-24": {
+   "bpp": 4,
+   "bytes": 17934,
+   "layer": "ink",
+   "set": "default",
+   "size": 24
+  },
+  "luna-16": {
+   "bpp": 2,
+   "bytes": 4072,
+   "layer": "ink",
+   "set": "luna",
+   "size": 16
+  },
+  "luna-20": {
+   "bpp": 4,
+   "bytes": 10526,
+   "layer": "ink",
+   "set": "luna",
+   "size": 20
+  },
+  "luna-24": {
+   "bpp": 4,
+   "bytes": 14585,
+   "layer": "ink",
+   "set": "luna",
+   "size": 24
+  },
+  "luna.fill-16": {
+   "bpp": 2,
+   "bytes": 2157,
+   "layer": "fill",
+   "set": "luna",
+   "size": 16
+  },
+  "luna.fill-20": {
+   "bpp": 4,
+   "bytes": 5100,
+   "layer": "fill",
+   "set": "luna",
+   "size": 20
+  },
+  "luna.fill-24": {
+   "bpp": 4,
+   "bytes": 6929,
+   "layer": "fill",
+   "set": "luna",
+   "size": 24
+  }
+ },
+ "mirrored": {
+  "redo": "undo"
+ },
+ "pixel_only": [
+  "moy"
+ ],
+ "sets": {
+  "coast": [
+   "ink"
+  ],
+  "default": [
+   "ink"
+  ],
+  "luna": [
+   "ink",
+   "fill"
+  ]
+ },
+ "slots": [
+  "moy",
+  "home",
+  "wifi",
+  "wifi_off",
+  "battery",
+  "search",
+  "play",
+  "projects",
+  "paint",
+  "storybook",
+  "files",
+  "calc",
+  "getcarts",
+  "settings",
+  "music",
+  "notes",
+  "code",
+  "sprite",
+  "map",
+  "blocks",
+  "scene",
+  "undo",
+  "redo",
+  "run",
+  "save",
+  "pencil",
+  "bucket",
+  "line",
+  "rect",
+  "oval",
+  "select",
+  "flip",
+  "rotate",
+  "game",
+  "app",
+  "art",
+  "wallpaper",
+  "doc",
+  "folder",
+  "trash",
+  "close",
+  "minimize",
+  "maximize",
+  "back",
+  "forward",
+  "down",
+  "new",
+  "dup",
+  "del",
+  "enter",
+  "backspace",
+  "cart_py",
+  "cart_lua",
+  "cart_wasm",
+  "cart_p8",
+  "mute",
+  "arrow_left",
+  "arrow_right",
+  "arrow_up",
+  "arrow_down",
+  "star",
+  "star_on",
+  "eraser",
+  "mirror",
+  "flip_v",
+  "folder_open",
+  "more",
+  "stamp",
+  "power",
+  "sleep",
+  "sliders",
+  "copy",
+  "palette",
+  "export",
+  "check",
+  "warn",
+  "text",
+  "shapes",
+  "to_front",
+  "to_back",
+  "spray",
+  "picker",
+  "pan",
+  "cut",
+  "paste",
+  "layout",
+  "slides",
+  "background",
+  "bubble",
+  "align_l",
+  "align_c",
+  "align_r",
+  "trans_none",
+  "trans_fade",
+  "trans_swipe",
+  "brush",
+  "resize",
+  "pointer",
+  "grid",
+  "volume",
+  "loop",
+  "trophy",
+  "lock",
+  "heart",
+  "spark",
+  "smile",
+  "key",
+  "secret"
+ ],
+ "tiers": {
+  "desktop": [
+   "default-16",
+   "default-20",
+   "default-24"
+  ],
+  "handheld": [
+   "default-16"
+  ]
+ }
+}

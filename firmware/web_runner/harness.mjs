@@ -4,7 +4,7 @@
 // staged-module import error, cart crash, or protocol break surfaces here.
 //
 //   node harness.mjs             # full sweep
-//   node harness.mjs star_catcher.moy   # one cart
+//   node harness.mjs moybyte.star_catcher.moy   # one cart
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -97,7 +97,7 @@ step(1 / 60);
 const roster = process.argv[2] ? [process.argv[2]]
     : [...new Set(Object.keys(carts).map((k) => k.split("/")[0]))]
         .filter((c) => {   // wallpapers are backdrop-only (excluded from the run grid)
-            try { return JSON.parse(carts[c + "/manifest.json"]).type !== "wallpaper"; }
+            try { return (JSON.parse(carts[c + "/manifest.json"]).moybyte || {}).type !== "wallpaper"; }
             catch (e) { return true; }
         });
 let failed = 0;

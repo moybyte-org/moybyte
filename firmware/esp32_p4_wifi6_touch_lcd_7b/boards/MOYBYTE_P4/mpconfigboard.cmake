@@ -15,10 +15,15 @@ set(SDKCONFIG_DEFAULTS
 list(APPEND MICROPY_DEF_BOARD
     MICROPY_HW_BOARD_NAME="Moybyte P4 (Waveshare 7B, C6 WiFi)"
     MICROPY_PY_NETWORK_WLAN=1
-    MICROPY_PY_BLUETOOTH=1
-    MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE=1
+    # No `bluetooth` module: the BLE keyboard is the kernel's central over
+    # NimBLE (native/moy_input, MOY_INPUT_BLE in mpconfigboard.h).
+    MICROPY_PY_BLUETOOTH=0
     # The PANEL the shared native/p4/moy_dsi drives: the 7B's EK79007
     # (1024x600, reset GPIO33). The panel facts live behind this one name in
     # modmoy_dsi.c; the Guition P4 names MOY_DSI_PANEL_JD9365 instead.
     MOY_DSI_PANEL_EK79007=1
+    # Its backlight, which moy_dsi drives (backlight(), and the kernel's
+    # recovery floor): GPIO32, active LOW.
+    MOY_DSI_BL_GPIO=32
+    MOY_DSI_BL_ACTIVE_LOW=1
 )

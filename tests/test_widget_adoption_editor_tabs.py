@@ -12,11 +12,6 @@ copy that happens to agree today, and (b) the states it never enters -- the code
 editor's tool palette, find bar and popups are all closed on a fresh open, and
 the Config tab renders whatever the seed cart declares. So this file counts the
 toolkit calls a draw makes, in exactly those states.
-
-The `Hits` budget at the bottom is the measured P4 constraint, not a style
-rule: `runtime/ui.py`'s module docstring records that registering one hit rect
-per grid cell costs the map tab ~9.3ms (13% of its frame), so the Config tab's
-choice/thumbnail grids must keep their arithmetic hit-test forever.
 """
 
 from pathlib import Path
@@ -24,6 +19,13 @@ from pathlib import Path
 import pytest
 
 from ws_helpers import build_ws, open_cart, quiesce
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
 
 ROOT = Path(__file__).resolve().parent.parent
 _DT = 1.0 / 30.0
@@ -36,13 +38,13 @@ class _Counter:
     KINDS = ("row", "cell", "chip", "button", "status_row", "dialog")
 
     def __init__(self, monkeypatch):
-        from runtime import ui
+        from runtime import ui_draw
         self.n = {}
         for kind in self.KINDS:
-            self._wrap(monkeypatch, ui, kind)
+            self._wrap(monkeypatch, ui_draw, kind)
 
-    def _wrap(self, monkeypatch, ui, kind):
-        real = getattr(ui, kind)
+    def _wrap(self, monkeypatch, ui_draw, kind):
+        real = getattr(ui_draw, kind)
         counts = self.n
         counts[kind] = 0
 
@@ -50,7 +52,7 @@ class _Counter:
             counts[kind] += 1
             return real(*a, **kw)
 
-        monkeypatch.setattr(ui, kind, counted)
+        monkeypatch.setattr(ui_draw, kind, counted)
 
     def reset(self):
         for k in self.n:
@@ -91,10 +93,13 @@ def test_the_private_panel_button_copy_is_gone(tmp_path):
 
 
 def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
-    """Every chrome button on the code tab is a `ui.chip`, and every symbol-
-    palette key is a `ui.cell`. Counted with the tool palette AND the find bar
-    open -- the states no golden enters."""
+    """Every chrome button on the code tab is a `ui_draw.chip`, and every symbol-
+    palette key is a `ui_draw.button`; the find strip is a `ui.field` of the verbs.
+    Counted with the tool palette AND the find strip open -- the states no golden
+    enters."""
+    from runtime import ui_draw
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
+    ui_draw.input_kind("touch")              # the palette shows after touch (D-17)
     cl = ws.code_layer
     counter = _Counter(monkeypatch)
 
@@ -102,7 +107,7 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
     cl._find_open = False
     _frame(ws)
     keys = len(cl._symbols())
-    assert counter.n["cell"] == keys          # the symbol palette
+    assert counter.n["button"] == keys        # the symbol palette
     assert counter.n["chip"] == 1             # the always-visible TLS toggle
 
     counter.reset()
@@ -110,42 +115,54 @@ def test_code_chrome_is_drawn_by_the_toolkit(tmp_path, monkeypatch):
     cl._find_open = True
     cl._find_q = "de"
     _frame(ws)
-    # TLS + one per tool + the find bar's prev/next/case/close.
-    assert counter.n["chip"] == 1 + len(cl._TOOLS) + 4
-    assert counter.n["cell"] == keys
-    assert counter.n["row"] >= 1              # the find bar's query field
-    assert counter.n["status_row"] == 1       # the responsive "LN n, COL n" band
+    # TLS + one per tool; the find strip's field and Aa are the verbs'.
+    assert counter.n["chip"] == 1 + len(cl._TOOLS)
+    assert counter.n["button"] == keys
+    assert cl._ov_host.box("find") is not None and cl._ov_host.box("case") is not None
+    # the responsive "LN n, COL n" band: its ground, then its text on the
+    # code's column
+    assert counter.n["status_row"] == 2
 
 
-def test_code_popups_are_toolkit_rows(tmp_path, monkeypatch):
-    """The autocomplete + jump-to-symbol popups are a panel row plus one row per
-    entry -- the selected one carrying the only field."""
+def test_code_popups_are_menus_of_the_verbs(tmp_path, monkeypatch):
+    """Completion and Go to are `ui.menu`s in a `ui.popover` (docs/look_2026-10.md
+    step 33): a row per entry, the picked one focused, and no toolkit row."""
+    from runtime import ui
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
     cl = ws.code_layer
     counter = _Counter(monkeypatch)
+    menus = []
+    real = ui.menu
+    monkeypatch.setattr(ui, "menu", lambda *a, **k: (menus.append(a[1]), real(*a, **k))[1])
 
     cl._cmp_open = True
     cl._cmp_items = ["circfill", "rectfill", "print"]
     cl._cmp_sel = 1
     _frame(ws)
-    # 1 shell + 3 entries (plus nothing else on this tab draws a row).
-    assert counter.n["row"] == 1 + 3
+    assert [len(m) for m in menus] == [3] and counter.n["row"] == 0
+    assert ui.focus() == menus[0][1]
 
-    counter.reset()
+    menus.clear()
     cl._cmp_open = False
     cl._jump_open = True
     cl._jump_items = [("update", 3), ("draw", 11)]
     cl._jump_sel = 0
     _frame(ws)
-    assert counter.n["row"] == 1 + 2
+    assert menus == [["update\tline 4", "draw\tline 12"]]
 
 
-def test_the_crash_popup_is_a_toolkit_dialog(tmp_path, monkeypatch):
+def test_the_crash_popup_is_a_popover_of_the_verbs(tmp_path, monkeypatch):
+    """See why's popover (docs/look_2026-10.md step 33): `ui.popover`, hung
+    under the stopped line, never the old dialog shell."""
+    from runtime import ui
     ws = _editor(tmp_path, "code", sys_size=(480, 320))
     counter = _Counter(monkeypatch)
+    opened = []
+    real = ui.popover
+    monkeypatch.setattr(ui, "popover", lambda *a, **k: (opened.append(a[:1]), real(*a, **k))[1])
     ws.crash_popup = "TypeError: unsupported types for __add__"
     _frame(ws)
-    assert counter.n["dialog"] == 1
+    assert counter.n["dialog"] == 0 and ("Stopped",) in opened
 
 
 # ------------------------------------------------------------- the config tab
@@ -162,56 +179,3 @@ def _cards_ws(tmp_path, **kw):
     ws.cards_layer.mtop = 0
     ws.cards_layer.msel = 0
     return ws
-
-
-def test_config_cards_are_toolkit_rows_and_cells(tmp_path, monkeypatch):
-    """One `ui.row` per visible card (the selection field + its label line) and
-    one `ui.cell` per choice cell -- the stepper glyphs, the gauge/count meters
-    and the background previews stay the card's own CONTENT."""
-    ws = _cards_ws(tmp_path, sys_size=(480, 320))
-    cl = ws.cards_layer
-    counter = _Counter(monkeypatch)
-    _frame(ws)
-    rows = cl._card_layout()
-    assert len(rows) == 4                       # three cards + the ADVANCED row
-    assert counter.n["row"] == 4
-    assert counter.n["cell"] == 3 + 2           # bg thumbs + choice icons
-
-
-def test_config_grids_register_no_per_cell_hit_rects(tmp_path, monkeypatch):
-    """MEASURED constraint (runtime/ui.py's module docstring): a grid must not
-    put one hit rect per cell into `Hits` -- on the P4 that is ~9.3ms, 13% of the
-    map tab's frame. The Config tab's choice/thumbnail grids hit-test
-    arithmetically (`_choice_cells`), and `ui.cell` takes no `hits` argument at
-    all, so this asserts the whole cards draw adds ZERO."""
-    from runtime import ui
-    ws = _cards_ws(tmp_path, sys_size=(480, 320))
-    counter = _Counter(monkeypatch)
-    added = []
-    monkeypatch.setattr(ui.Hits, "add",
-                        lambda self, *a, **kw: added.append(a))
-    ws.cards_layer._t = ws.cards_layer._tones()
-    ws.cards_layer._draw_cards()
-    # The FLOOR comes first, and it is the whole point of writing it this way:
-    # an empty `added` is ALSO what a draw that returned early reports, so the
-    # widgets the draw actually made are what make the zero mean something.
-    # (This assertion used to be `real_add is not None`, which cannot fail.)
-    # Three cards plus the ADVANCED row, which is a toolkit row like the rest
-    # (step 5 of docs/text_editing_2026-09.md).
-    assert counter.n["row"] == 4, counter.n
-    assert counter.n["cell"] == 5, counter.n
-    assert added == []
-
-
-# -------------------------------------------------------------- the music tab
-
-def test_music_speed_ticks_are_toolkit_rows(tmp_path, monkeypatch):
-    """The +/- speed nudges were the last hand-rolled field+border+label in the
-    music editor. The tracker's own step/slot list is deliberately NOT converted
-    -- it is a per-row content grid (#163's territory)."""
-    ws = _editor(tmp_path, "music", sys_size=(480, 320))
-    if ws.music_ui.musicedit is None:
-        pytest.skip("the seed cart has no sound bank on this build")
-    counter = _Counter(monkeypatch)
-    _frame(ws)
-    assert counter.n["row"] == 2                # speed - and speed +

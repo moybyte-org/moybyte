@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bake `firmware/web_runner/dist` INTO the firmware image.
 
-The board serves a browser console (`moy_webhost`), and until now it served it
+The board serves a browser console (the webhost), and until now it served it
 from a copy of the web build somebody had put on the board's storage by hand.
 That copy drifts silently: on 2026-08-15 a board served a bundle old enough to
 still carry a desktop-blackout bug that had been fixed in `dist/` hours before,
@@ -11,10 +11,11 @@ input under the desktop until #201 -- so its bundle went on by card reader or
 not at all.
 
 So the image carries one. This emits a C translation unit that `.incbin`s the
-PRE-GZIPPED assets (every one in `moy_webhost.ASSETS` -- 609,268 B against
-1,230,814 B raw; raw does not fit the T-Deck's slot at all) and exposes them
-as a table the `moy_web` native module hands out as memoryviews. Storage still
-WINS at serve time; see `moy_webhost._asset`.
+PRE-GZIPPED assets (every one in the ASSETS table of
+native/moy_net/moy_webhost.c -- 609,268 B against 1,230,814 B raw; raw does
+not fit the T-Deck's slot at all) and exposes them as a table the webhost
+serves from flash and the `moy_web` module hands out as memoryviews. There is
+no copy on storage; the gzipped asset wins over a raw one of the same name.
 
 WHY .incbin AND NOT ESP-IDF's EMBED_FILES: `EMBED_FILES` is an argument to
 `idf_component_register`, and a MicroPython usermod is not a component -- it is
@@ -29,9 +30,15 @@ Usage (both boards' build.sh call this before staging the module):
 
     tools/gen_web_blob.py --out <native>/moy_web/moy_web_blob.gen.c [--require]
 
-With no bundle built it emits an EMPTY table and says so loudly; `--require`
-(set by CI and by `MOYBYTE_REQUIRE_WEB_BUNDLE=1`) makes that a hard failure
-instead. The default is soft because building the bundle needs emsdk (~1.7 GB)
+With no usable bundle it emits an EMPTY table and says so loudly -- that is
+the stated meaning of a missing bundle, the same image a `--no-web` worktree
+builds -- and `--require` (set by CI and by `MOYBYTE_REQUIRE_WEB_BUNDLE=1`)
+makes it a hard failure instead. "Usable" is decided by the bytes: every asset's
+raw file is present, and a `.gz` beside it inflates to exactly that file (a `.gz`
+left behind by a removed bundle, or one a half-finished build did not refresh,
+is not a bundle). The output file is rewritten whenever its text differs, and
+its text carries each asset's digest, so what is baked never depends on a file's
+timestamp. The default is soft because building the bundle needs emsdk (~1.7 GB)
 and a firmware flash is the daily loop -- but an image published to a device
 must never be the one that quietly has no console, which is what --require is
 for. Same doctrine as `MOYBYTE_REQUIRE_UNIX_MP` (.claude/rules/testing.md).
@@ -40,18 +47,19 @@ for. Same doctrine as `MOYBYTE_REQUIRE_UNIX_MP` (.claude/rules/testing.md).
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
-import importlib.util
+import re
 import os
 import sys
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import board_config                                              # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_RUNNER = os.path.join(ROOT, "firmware", "web_runner")
-TDECK_MODULES = os.path.join(
-    ROOT, "device")
+WEBHOST_C = os.path.join(ROOT, "native", "moy_net", "moy_webhost.c")
 DEFAULT_DIST = os.path.join(ROOT, "firmware", "web_runner", "dist")
 DEFAULT_OUT = os.path.join(
     ROOT, "native", "moy_web",
@@ -59,42 +67,66 @@ DEFAULT_OUT = os.path.join(
 
 
 def asset_names():
-    """The files a browser needs, read from `moy_webhost.ASSETS` itself.
+    """The files a browser needs, read from the webhost's own ASSETS table
+    (native/moy_net/moy_webhost.c).
 
     Not a second list. The allowlist the server serves from and the set the
     image bakes have to be the same set -- an asset in one and not the other is
-    either a 404 on a board that has the bytes, or dead weight in a 5 MB slot.
+    either a 404 on a board that has the bytes, or dead weight in an app slot.
     """
-    path = os.path.join(TDECK_MODULES, "moy_webhost.py")
-    # The modules dir on sys.path, because moy_webhost imports its sibling
-    # transport by plain name the way the device does -- and this tree's root,
-    # so its `from runtime import moy_sync` reads THIS tree's runtime and not
-    # whichever checkout an installed package points at.
-    if TDECK_MODULES not in sys.path:
-        sys.path.insert(0, TDECK_MODULES)
-    if ROOT not in sys.path:
-        sys.path.insert(0, ROOT)
-    spec = importlib.util.spec_from_file_location("_moy_webhost_for_blob", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return list(mod.ASSETS)
+    with open(WEBHOST_C) as f:
+        text = f.read()
+    table = text[text.index("} ASSETS[] = {"):]
+    table = table[:table.index("};")]
+    return re.findall(r'\{"([^"]+)", "[^"]+"\}', table)
+
+
+def _read(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _gz_matches(gz, raw):
+    """True when `gz` inflates to exactly the bytes of `raw`."""
+    try:
+        return gzip.decompress(_read(gz)) == _read(raw)
+    except (OSError, EOFError, zlib.error):
+        return False
 
 
 def pick(dist, name):
-    """(path, served_name) for one asset -- the .gz if there is one.
+    """(path, served_name) for one asset, or (None, None) when the bundle has
+    no usable copy of it.
 
-    The board serves `<name>.gz` with `Content-Encoding: gzip` and the browser
-    inflates it, so the gz is what gets baked; the served name keeps the `.gz`
-    suffix exactly as the on-storage lookup does, which is what lets
-    `_asset()` use one rule for both sources.
+    The RAW file is the bundle -- it is what the web build copies into `dist/`
+    -- and the `.gz` beside it is derived from it. The board serves
+    `<name>.gz` with `Content-Encoding: gzip` and the browser inflates it, so
+    the gz is what gets baked when it IS that file's gzip, and the served name
+    keeps the `.gz` suffix exactly as the on-storage lookup does, which is what
+    lets `_asset()` use one rule for both sources.
+
+    Decided by CONTENT, never by which file exists or is newer: a `.gz` whose
+    raw file is gone is the leftover of a bundle that was removed (baking it
+    ships a console nobody has built in a while), and a `.gz` that does not
+    inflate to the raw file beside it is a build that stopped between the two.
+    Neither is a bundle. A raw file with no `.gz` bakes as it is.
     """
     gz = os.path.join(dist, name + ".gz")
-    if os.path.exists(gz):
-        return gz, name + ".gz"
     raw = os.path.join(dist, name)
-    if os.path.exists(raw):
-        return raw, name
-    return None, None
+    if not os.path.exists(raw):
+        return None, None
+    if os.path.exists(gz):
+        return (gz, name + ".gz") if _gz_matches(gz, raw) else (None, None)
+    return raw, name
+
+
+def diagnose(dist, name):
+    """Why `pick` found nothing for `name`, as a phrase for the build log."""
+    if not os.path.exists(os.path.join(dist, name)):
+        if os.path.exists(os.path.join(dist, name + ".gz")):
+            return "%s (only its .gz is there; the file it came from is gone)" % name
+        return name
+    return "%s (its .gz is not the gzip of the file beside it)" % name
 
 
 def collect(dist):
@@ -109,7 +141,7 @@ def collect(dist):
         if path is None:
             missing.append(name)
             continue
-        data = open(path, "rb").read()
+        data = _read(path)
         out.append((served, path, len(data), hashlib.sha256(data).hexdigest()))
     if missing:
         return [], missing
@@ -282,8 +314,8 @@ def main(argv=None):
 
     assets, missing = collect(args.dist)
     if missing:
-        msg = ("no web console to bake into this image: %s missing from %s"
-               % (", ".join(missing), args.dist))
+        msg = ("no web console to bake into this image: %s unusable in %s"
+               % (", ".join(diagnose(args.dist, n) for n in missing), args.dist))
         # Strict under CI unless explicitly opted out: an image PUBLISHED to a
         # device must never be the one that quietly has no console, which is
         # the whole failure this feature exists to end. A local flash is the

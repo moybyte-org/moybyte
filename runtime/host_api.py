@@ -5,7 +5,7 @@ make_api itself moved to `runtime/cart_api.py` on 2026-08-17 -- it existed here
 and in device/device_api.py as ~80% line-identical twins, and the twin killed
 that day had already drifted (the device's layer verbs lost `tline`, the host's
 multi-tile spr had lost the #63 cache). What REMAINS here is what is genuinely
-the host's: FakeAudio/FakeWifi (the recordable service fakes), ConsoleDriver
+the host's: FakeWifi (the recordable service fake), ConsoleDriver
 (the sim/web per-frame driver), _NullComp. host_app.py imports this back and
 re-exports every name, so `host_app.make_api` / `.ConsoleDriver` / ... are
 unchanged for the sim, the web console, and the tests. Everything stays
@@ -13,6 +13,10 @@ portable Python: no pygame, no sockets, no threading (#151: the web runner
 freezes this module under MicroPython-WASM).
 """
 
+try:                                    # a VM: the kernel's frame loop
+    import moy_loop as _loop
+except ImportError:                     # CPython: its ctypes binding
+    from runtime import moy_loop as _loop
 try:                                    # staged/frozen flat namespace (web runner)
     from cart_api import (CART_BUTTONS, _Layer,  # noqa: F401 -- re-exports
                           _decode_moyimg, make_api)
@@ -20,109 +24,41 @@ except ImportError:                     # host: the runtime package
     from runtime.cart_api import (CART_BUTTONS, _Layer,  # noqa: F401
                                   _decode_moyimg, make_api)
 
+try:                                    # a VM: the native module
+    import moy_input as _mi
+except ImportError:
+    from runtime import moy_input as _mi
+
+# A desk keyboard's keys on a host (the simulator's and the browser page's),
+# in one place: the button each presses beside what it types. The arrows and
+# Enter press theirs on every surface; the letters and Space only while a cart
+# owns the keys (`input.cart_keys`) and is not taking text, so S in the
+# sprite tab selects and never shifts. A BLE keyboard's twin is moy_hid.c's
+# moy_hid_buttons_for_key; tests/test_tdeck_keymap.py holds the two equal.
+DESK_KEYS = {_mi.KEY_LEFT: "left", _mi.KEY_RIGHT: "right", _mi.KEY_UP: "up",
+             _mi.KEY_DOWN: "down", 0x0D: "run"}
+CART_KEYS = {0x77: "up", 0x61: "left", 0x73: "down", 0x64: "right",
+             0x7A: "a", 0x20: "a", 0x78: "b"}
+_CHORD = _mi.CTRL | _mi.ALT | _mi.SUPER
+_KEY_F11 = _mi.KEY_F1 + 10
+
+
+def _fold(code):
+    """A letter's key whichever case it typed: Shift may change between its
+    down and its up."""
+    return code | 0x20 if 0x41 <= code <= 0x5A else code
+
+
 PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
-
-
-class FakeAudio:
-    """Host audio backend (#16) that records every call AND drives the shared
-    AudioEngine, so behavior is fully assertable headlessly -- no sound hardware
-    needed. Mirrors the existing sim fakes (moybyte_sim fake audio,
-    moybyte/audio.py AudioService.calls). The optional real-playback backend
-    (SdlAudio, see docs/audio_design_v04.md) is a thin follow-on that pulls
-    engine.render() from an SDL stream instead of just recording.
-
-    `tick(dt)` renders a block each frame so render() is exercised on the same
-    schedule the device's per-frame I2S feeder would use. The fraction of a
-    frame `dt` leaves over is carried to the next tick, so the blocks add up
-    to the engine's rate exactly.
-
-    `stream` is a compiled cart's `snd` queue while one runs (the host run,
-    `wasm_binding.HostWasmRun`); each block mixes it in after the synth, under
-    the master level, as the boards' speaker mixer does."""
-
-    def __init__(self, engine):
-        self.engine = engine
-        self.calls = []           # [("sfx", n, chan), ("beep", f, d), ...]
-        self.rendered = 0         # total PCM frames pulled via tick()
-        self.last_pcm = b""       # most recent tick()'s PCM block (drained by the web console)
-        self.stream = None
-        self._carry = 0.0
-
-    def sfx(self, n, chan=None):
-        self.calls.append(("sfx", int(n), chan))
-        self.engine.play_sfx(n, chan)
-
-    def beep(self, freq, dur=0.15):
-        self.calls.append(("beep", freq, dur))
-        self.engine.play_beep(freq, dur)
-
-    def music(self, track, loop=True):
-        self.calls.append(("music", int(track), bool(loop)))
-        self.engine.play_music(track, loop)
-
-    def music_stop(self):
-        self.calls.append(("music_stop",))
-        self.engine.stop_music()
-
-    def sound_stop(self, chan=None):
-        self.calls.append(("sound_stop", chan))
-        self.engine.stop(chan)
-
-    def volume(self, level):
-        self.calls.append(("volume", level))
-        self.engine.set_volume(level)
-
-    def is_active(self):
-        """True while anything is audible. The backend-level hook the Music
-        editor asks (#97) -- on the host that is just the engine, but the device
-        and web backends answer from libmoy, which owns the sequencers there."""
-        return self.engine.is_active()
-
-    def block(self, dt):
-        """The PCM `dt` stands for, as bytes of signed 16-bit mono: the synth,
-        then the cart's stream mixed in. b"" when `dt` covers no whole frame."""
-        want = self.engine.rate * max(0.0, dt) + self._carry
-        n = int(want)
-        self._carry = want - n
-        if n <= 0:
-            return b""
-        pcm = self.engine.render(n)
-        if self.stream is not None:
-            buf = bytearray(pcm)
-            self.stream.snd_mix(buf, n, self.engine.rate, self.engine.master)
-            pcm = bytes(buf)
-        self.rendered += n
-        return pcm
-
-    def tick(self, dt):
-        pcm = self.block(dt)
-        if pcm:
-            # Keep the rendered block (was discarded) so the web console can stream the
-            # FINISHED PCM to the browser -- no second synth in JS (audio.py stays the
-            # single source of truth). The device/headless paths just ignore last_pcm.
-            self.last_pcm = pcm
-
-    def take_pcm(self):
-        """Hand off the last tick()'s PCM (signed-16 LE mono bytes) and clear it. The
-        web console drains this each frame to stream finished audio; empty between
-        renders or when nothing is playing."""
-        pcm = self.last_pcm
-        self.last_pcm = b""
-        return pcm
-
-
-def make_audio(engine):
-    """Injected backend factory: wrap an AudioEngine in the host FakeAudio backend.
-    build_workstation hands this to the Workstation; the device injects its own."""
-    return FakeAudio(engine)
 
 
 # --- WiFi (#38): host fake backend ------------------------------------------
 # The device wraps network.WLAN; on the PC there is no radio, so this fake gives
-# the WiFi-manager cart something to drive in the simulator. It mirrors the
-# device backend's interface exactly -- scan/connect/status/forget/known -- with
-# canned scan results, a fake connect (records creds + reports connected), and a
-# fake IP, so the manager cart is fully assertable headlessly (like FakeAudio).
+# the Settings WIFI panel and a "network" cart something to drive in the
+# simulator. It mirrors the device backend's interface exactly --
+# scan/connect/status/forget/known -- with canned scan results, a fake connect
+# (records creds + reports connected), and a fake IP, so both are fully
+# assertable headlessly.
 #
 # Credentials persist through the SAME store the device uses (moy_carts
 # load_wifi/remember_wifi/forget_wifi over wifi.json), so a connect() the kid
@@ -273,9 +209,7 @@ class ConsoleDriver:
         self.pointer = ws.pointer
         self._pending = []      # one-frame button presses
         self._held_ext = set()  # buttons held via hold() -- press cleanup must not
-                                # release them (a browser Backspace key-repeat maps to
-                                # HOME presses that used to clobber bshold's sustained
-                                # hold, resetting the hold-to-exit toast every repeat)
+                                # release them
         self._typed = []        # queued typed chars; frame() feeds ONE per frame
         self._key_held = 0      # physically held printable key (khold latch): in
                                 # game mode it streams as last_key every frame,
@@ -285,17 +219,30 @@ class ConsoleDriver:
         self._down = False      # touch/button currently held (for drag-scroll)
         self._tap = False       # click(): auto-release at the end of the frame
         self._pan = (0, 0)      # held-arrow trackball velocity (dx, dy in [-1,1])
+        self._ball_click = False  # ball_click(): the trackball's click, next frame
+        self._src = ws.input.source("local")    # the keys this driver types
+        self._key_btn = {}      # a key held down -> the button it holds
+        self._super = False     # Super is held...
+        self._chord = False     # ...and another key went down meanwhile
+        self._pb = 0            # the mouse's buttons held (moy_input PB_*)
+        self._after = None      # where the pointer went after this frame's press
+        self._clock = 1.0       # the table's clock, ms: the frames' dt summed
 
     # -- input the sim feeds in ---------------------------------------------
     def press(self, name):
         self._pending.append(name)
 
-    def hold(self, name, down):
+    def hold(self, name, down, source=None):
+        """Button `name` held or let go; `source` names the input source
+        that holds it (the page's gamepad is "pad"), else the table's own."""
         if down:
             self._held_ext.add(name)
         else:
             self._held_ext.discard(name)
-        self.input.set_held(name, down)
+        if source is None:
+            self.input.set_held(name, down)
+        else:
+            self.input.source(source).set_button(name, down)
 
     def type_char(self, code):
         # QUEUE, not last-wins (#42 Thread 2): the console consumes ONE last_key per
@@ -304,6 +251,78 @@ class ConsoleDriver:
         # `self._typed = code` kept only the final char ("hello" typed only "o").
         # frame() drains one char per frame, preserving order.
         self._typed.append(code)
+
+    def key_down(self, code, mods=0):
+        """A desk keyboard's key went down: `code` the byte it types with
+        Shift applied and Ctrl not, or a moy_input KEY_* for a key that types
+        none; `mods` the modifiers held with it. It presses its DESK_KEYS or
+        CART_KEYS button, types its key event, and a printable one held
+        streams to a cart (`key_hold`). F11 is `full_key`."""
+        self.set_mods(mods)
+        if self._super:
+            self._chord = True
+        ev = code | (mods << _mi.MODS_AT)
+        typed = _mi.typed(ev)
+        button = DESK_KEYS.get(code) if not mods & _CHORD else None
+        if (button is None and typed and self.input.cart_keys
+                and not getattr(self.input, "text_mode", False)):
+            button = CART_KEYS.get(_fold(typed))
+        if button is not None and self._key_btn.get(_fold(code)) != button:
+            self._key_btn[_fold(code)] = button
+            self.hold(button, True)
+            self._pending.append(button)    # a tap shorter than a frame still presses
+        if _mi.KEY_LEFT <= code <= _mi.KEY_DOWN and not mods & _CHORD:
+            return                      # an arrow alone is the d-pad; a chord's an event
+        if code == _KEY_F11 and not mods:
+            self.full_key()
+            return
+        self.type_char(ev)
+        self._src.typing = ev           # held, it repeats (the table's, every tier's)
+        if 0x20 <= typed <= 0x7E:
+            self.key_hold(typed, True)
+
+    def key_up(self, code, mods=0):
+        """A desk keyboard's key came up: what it held lets go, and no key
+        repeats until one goes down again."""
+        self.set_mods(mods)
+        self._src.typing = 0
+        button = self._key_btn.pop(_fold(code), None)
+        if button is not None and button not in self._key_btn.values():
+            self.hold(button, False)
+        if 0x20 <= code <= 0x7E:
+            self.key_hold(code, False)
+
+    def set_mods(self, mods):
+        """The modifiers a desk keyboard holds now. Super acts on its
+        release, and only when no other key went down while it was held, so
+        it leads chords: its tap is `system_key`."""
+        self._src.mods = mods
+        if mods & _mi.SUPER:
+            if not self._super:
+                self._super, self._chord = True, False
+        elif self._super:
+            self._super = False
+            if not self._chord:
+                self.system_key()
+
+    def wheel(self, dx, dy, mods=0):
+        """A mouse wheel's (or a trackpad's) notches, across and down,
+        positive right and down, with the modifiers held as it turned."""
+        self.set_mods(mods)
+        if self._super:
+            self._chord = True
+        self._src.scroll(dx, dy)
+
+    def middle(self, x, y, down):
+        """The middle button down or up at (x, y); moving it between is
+        `hover`."""
+        self.pointer.place(int(x), int(y))
+        self.pointer.hovers = True
+        self._buttons(_mi.PB_MIDDLE, down)
+
+    def _buttons(self, bit, down):
+        self._pb = (self._pb | bit) if down else (self._pb & ~bit)
+        self._src.pointer_buttons = self._pb
 
     def key_hold(self, code, down):
         # The khold latch (web_view.apply_events routes {type:"khold"} here).
@@ -316,15 +335,23 @@ class ConsoleDriver:
             self._key_held = 0
 
     def pan(self, dx, dy):
-        # Arrow keys = the trackball: a relative, *visible*-cursor nudge each frame.
+        # Arrow keys = the trackball, held: `frame` spends it each frame.
         self._pan = (dx, dy)
+
+    def ball_click(self):
+        """The trackball's click, spent by the next frame: Enter where a
+        surface takes the keys, else a click where the cursor is."""
+        self._ball_click = True
 
     def touch(self, x, y):
         # Mouse = the touchscreen: place the pointer absolutely (cursor hidden, like
-        # a finger) and register a tap.
+        # a finger) and register a tap. It is the input "touch" where the console
+        # declares one (Workstation.use_inputs); the sim's declares none.
         self.pointer.place(int(x), int(y))
         self._click = True
         self._down = True
+        self._buttons(_mi.PB_PRIMARY, True)
+        self.ws.input_used("touch")
 
     def touch_drag(self, x, y):
         self.pointer.place(int(x), int(y))   # drag with the button down (no tap)
@@ -350,6 +377,7 @@ class ConsoleDriver:
 
     def touch_up(self):
         self._down = False
+        self._buttons(_mi.PB_PRIMARY, False)
 
     def click(self, x, y):
         """A full TAP for tests/scripts: the press edge this frame PLUS a release
@@ -367,13 +395,6 @@ class ConsoleDriver:
     def in_code_editor(self):
         return self.ws.screen == "menu" and self.ws.menu_view == "code"
 
-    def in_caret_surface(self):
-        """A surface where a DIRECTION means the caret, not the cursor: the
-        Editor's Code tab, and a cart's focused editor handle (#181). The one
-        gate, so the host arrows and the T-Deck trackball answer alike."""
-        return (self.in_code_editor()
-                or self.ws.focused_cart_editor() is not None)
-
     def in_text_mode(self):
         # A RUNNING cart that opted into text input via textmode(True) (#38/#42).
         # The pygame loop routes typed unicode to the cart's key() when this is true
@@ -381,41 +402,77 @@ class ConsoleDriver:
         return (self.ws.screen == "desktop"
                 and bool(getattr(self.ws.input, "text_mode", False)))
 
+    def system_key(self):
+        """Super: the system menu, or the pause menu over a fullscreen game
+        (`Workstation.system_key`). The host's keyboard reaches it here, as a
+        board's reaches it through its `start` button."""
+        self.ws.system_key()
+
+    def full_key(self):
+        """F11: the focused desk window full screen, and back
+        (`Workstation.full_key`)."""
+        self.ws.full_key()
+
+    def menu_open(self):
+        """The pause menu, the delete confirm or the system menu shows: Esc
+        is theirs."""
+        return self.ws.pause.open or self.ws.confirm.open or self.ws.sysmenu.open
+
+    def takes_escape(self):
+        """Esc is the console's: a menu shows, Settings or a registered app is
+        the fullscreen surface (its Esc is the bar's back), or the focused
+        desk window shows its back chevron."""
+        ws = self.ws
+        return (self.menu_open() or ws.screen == "settings"
+                or (not ws.windowed_chrome and ws.screen in ws._apps_by_id)
+                or (ws.windowed_chrome and ws.wm.focus_has_back()))
+
     def escape(self):
-        """Leave an open menu/editor panel back to the desktop."""
-        if self.ws.screen == "menu":
-            self.ws._leave_menu()
+        """Esc: the pause menu steps back (Options to its menu, the menu to
+        the game), the system menu closes; Settings and a registered app go
+        back one level, as the bar's chevron and B do, and so does a desk
+        window's app with a page open (its title strip's chevron); the
+        Editor steps back (its one bar has no chevron), and on a desk a
+        grown pane goes back instead."""
+        ws = self.ws
+        if ws.pause.open:
+            ws.pause.back()
+        elif ws.confirm.open:
+            ws.confirm.cancel()
+        elif ws.sysmenu.open:
+            ws.sysmenu.close()
+            ws.popover_touch()
+        elif ws.screen == "settings":
+            ws.settings_layer.back()
+        elif not ws.windowed_chrome and ws.screen in ws._apps_by_id:
+            ws.app_back()
+        elif ws.windowed_chrome and ws.wm.focus_back():
+            pass
+        elif ws.screen == "menu" and ws.editor_layer() is not ws.layer_of(ws.menu_view):
+            ws.editor_layer().escape()  # the desk Editor: a grown pane back
+        elif ws.screen == "menu":
+            ws.exit()                   # the Editor's one bar: Esc steps back
 
     # -- per-frame tick ------------------------------------------------------
     def frame(self, dt):
-        dx, dy = self._pan
-        # ARROWS ON A MOUSE TIER (owner call 2026-07-31): the browser/sim page no
-        # longer steers a virtual cursor with the arrow keys -- the MOUSE is the
-        # cursor there -- so arrows arrive as held left/right/up/down (the same
-        # buttons w/a/s/d send) and drive menu navigation. The one surface that
-        # still wants them as a DIRECTION is the code editor's caret, which used
-        # to ride the pan path: translate the held nav buttons back into a nav
-        # step here, and swallow them so the shell does not ALSO act on them.
-        # (`_pan` stays wired for real trackball backends; the T-Deck's own
-        # driver is untouched by this file.)
-        if not (dx or dy) and self._held_ext and self.in_caret_surface():
-            ndx = (1 if "right" in self._held_ext else 0) \
-                - (1 if "left" in self._held_ext else 0)
-            ndy = (1 if "down" in self._held_ext else 0) \
-                - (1 if "up" in self._held_ext else 0)
-            if ndx or ndy:
-                self.ws.nav(ndx, ndy)
-                for _n in ("left", "right", "up", "down"):
-                    self._held_ext.discard(_n)
-                    self.input.set_held(_n, False)
-        if dx or dy:
-            if self.in_caret_surface():
-                self.ws.nav(dx, dy)          # arrows move the caret in the editor
-            else:
-                self.pointer.move(dx * PAN_SPEED, dy * PAN_SPEED)   # trackball nudge
         for name in self._pending:
             self.input.set_held(name, True)
-        self.input.begin_frame()
+        # The table's clock is the frames' injected one, so a held key
+        # repeats on the same frames on every run.
+        self._clock += max(0.0, dt) * 1000.0
+        self.input.begin_frame(int(self._clock))
+        # The trackball (`pan`, `ball_click`), spent after the merge as the
+        # T-Deck's is (`Workstation.ball`): a surface's steps and Enter, a
+        # caret's arrows, else the cursor's nudge and the pointer's click.
+        dx, dy = self._pan
+        bc = self._ball_click
+        self._ball_click = False
+        if dx or dy or bc or self.ws.ball_owed:
+            took = self.ws.ball(dx, dy, bc)
+            if (dx or dy) and not took & 1:
+                self.pointer.move(dx * PAN_SPEED, dy * PAN_SPEED)
+            if bc and not took & 2:
+                self._click = True
         # One queued byte per frame -- and in TEXT MODE, never the same byte in
         # two ADJACENT frames: the editors' KeyEdge dedups identical consecutive
         # bytes (it models the T-Deck's discrete press edges + the P4 BLE
@@ -433,28 +490,36 @@ class ConsoleDriver:
         if (nxt == 0 and self._key_held
                 and not getattr(self.input, "text_mode", False)):
             nxt = self._key_held     # game mode: a held key streams every frame
-        self.input.last_key = nxt
+        self._src.last_key = nxt
         self._key_prev = nxt
         self.pointer.down = self._down
         self.pointer.click = self._click
-        self.ws.handle_input()
-        self.ws.handle_pointer()
-        self.ws.frame(dt)
+        # The frame is the kernel's (native/moy_kernel/moy_loop.c) on this
+        # tier too: one loop step over no stages but the clock, calling up
+        # into the console's three entries in its order. This harness owns the
+        # input (above) and the clock, so the frame keeps the dt it was given.
+        ws = self.ws
+        _loop.drive(ws.handle_input, ws.handle_pointer,
+                    lambda _dt: (ws.frame(dt), ws._frames_drawn)[1], dt)
         for name in self._pending:
             if name not in self._held_ext:     # never release an explicit hold()
                 self.input.set_held(name, False)
         self._pending = []
         self._click = False
-        self.input.last_key = 0
+        self._src.last_key = 0
+        if self._after is not None:
+            self.pointer.place(*self._after)
+            self._after = None
         if self._tap:
             # click()'s release pass: lift the synthetic finger and route one
-            # more pointer pass so release-activated surfaces (the launcher/
-            # picker card grids) complete the tap within this frame() call.
+            # more pointer pass so release-activated surfaces (the home's
+            # card grids) complete the tap within this frame() call.
             # The #44 gate's pointer snapshot never samples this intermediate
             # state (the next click restores it exactly), so mark the repaint
             # explicitly -- whatever the release changed must reach the pixels.
             self._tap = False
             self._down = False
+            self._buttons(_mi.PB_PRIMARY, False)
             self.pointer.down = False
             self.pointer.click = False
             self.ws.handle_pointer()
@@ -472,7 +537,7 @@ class ConsoleDriver:
         # The SYSTEM canvas is what the panel/window shows (the composited viewport +
         # responsive desktop chrome). When it's the same object as the game canvas
         # (320x240 degradation) this is exactly today's output (#39).
-        return self.ws.sys_canvas.to_rgb888()
+        return self.ws.glass_canvas.to_rgb888()
 
     def current_canvas(self):
         return self.ws.sys_canvas

@@ -88,6 +88,18 @@ MICROPYTHON_BUILTINS = {
 
 # Native usermods compiled into a given target (USER_C_MODULES / ext_mod).
 NATIVE = {
+    # moy_index, the store's native index, and moy_spine, the kernel's spine
+    # (the handle table moy_index shares), stage on every target but the
+    # Zero, which denies the index (its board.toml says why): the index
+    # compiles unless MOY_INDEX_IMPL=py (tools/moy_index_spike.py), the spine
+    # everywhere. moy_kernel, the
+    # kernel's entry, crash record and recovery floor, is TAKEN by every
+    # board, the Zero's floor serial only (each board.toml says why). moy_glass,
+    # moy_input and moy_net, sprint 3's kernel modules, stage on every console
+    # (moy_input compiles to nothing until its pass fills it); the Zero takes
+    # moy_net alone. moy_ui, the toolkit, stages on every console and in the
+    # browser.
+    #
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
     # moy_flush is the odd member: it registers no MicroPython module at all
@@ -95,38 +107,62 @@ NATIVE = {
     # STAGED like one, so it is declared like one.
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
                        "moycore", "moy_web", "moy_flush", "moy_lcd", "moy_prof",
-                       "moy_wasm", "moy_serial", "moy_png"},
+                       "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
+                       "moy_spine", "moy_kernel", "moy_play", "moy_glass", "moy_input",
+                       "moy_net", "moy_app", "moy_ui"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
-    # it denies moy_flush along with moy_sd and moy_audio.
+    # it denies moy_flush; moy_audio drives its ES8311 (#82). moy_sd brings its TF card up on
+    # SDMMC slot 0 under the store's card volume.
     # moy_c6 is the ESP-NOW-over-hosted shim + C6 plumbing (#7, the espnow
     # track -- docs/history/espnow_p4_2026-08.md).
-    "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
-           "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof", "moy_wasm",
-           "moy_serial", "moy_png"},
+    "p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web", "moy_dsi",
+           "moy_ppa", "moy_c6", "moy_prof", "moy_wasm",
+           "moy_serial", "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
+           "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui"},
     # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
     # four P4 modules are the SILICON tier (native/p4, a second board.toml
     # source) since the day this board became their second consumer -- it
     # authors no native module of its own, and moy_dsi drives its JD9365
     # through a board define rather than a second panel module.
-    "guition-p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
-                   "moy_dsi", "moy_ppa", "moy_ble_hid", "moy_c6", "moy_prof",
-                   "moy_wasm", "moy_serial", "moy_png"},
-    # The Guition denies moy_sd + moy_audio for now (stage 4/5 of its bring-up,
-    # see its board.toml); moy_axs is its board-authored QSPI panel backend,
+    "guition-p4": {"moy_gfx", "moy_alloc", "moy_audio", "moy_lua", "moycore", "moy_web",
+                   "moy_dsi", "moy_ppa", "moy_c6", "moy_prof",
+                   "moy_wasm", "moy_serial", "moy_png", "moy_index", "moy_store",
+                   "moy_spine", "moy_kernel", "moy_play", "moy_sd", "moy_glass", "moy_input",
+                   "moy_net", "moy_app", "moy_ui"},
+    # The Guition denies moy_audio for now (stage 5 of its bring-up, see its
+    # board.toml); moy_sd opens its TF card on SPI3; moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_flush", "moy_axs", "moy_prof", "moy_wasm", "moy_serial",
-                   "moy_png"},
+                   "moy_png", "moy_index", "moy_store", "moy_spine", "moy_kernel", "moy_play",
+                   "moy_sd", "moy_glass", "moy_input", "moy_net", "moy_app", "moy_ui"},
     # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
-    # running on it. `moy_web` is the only shared C module it compiles in, and
+    # running on it. Besides the store, the kernel's entry (a serial-only
+    # floor) and moy_net, the links its webhost serves, `moy_web` is the
+    # shared C module it compiles in, and
     # it is the module that justifies the board having an image at all -- the
     # browser console rides the firmware so the page a board serves cannot
     # drift behind the board serving it. Every other one is denied in its
     # board.toml, each with the hardware or the workload that is missing.
-    "zero": {"moy_web"},
+    "zero": {"moy_web", "moy_store", "moy_spine", "moy_net", "moy_kernel"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "moy_png", "js",
-            "jsffi"},
+            "jsffi", "moy_index", "moy_store", "moy_spine", "moy_glass",
+            "moy_input", "moy_net", "moy_kernel", "moy_play", "moy_app", "moy_ui"},
 }
+
+# A usermod that registers more than its own name: moy_kernel is the kernel's
+# entry and its frame loop, the module `moy_loop`; moy_app builds the
+# user-files layer it serves the files role over, the module `moy_ufiles`.
+USERMOD_MODULES = {"moy_kernel": {"moy_kernel", "moy_loop"},
+                   "moy_app": {"moy_app", "moy_ufiles"}}
+
+
+def _native_modules(target):
+    out = set()
+    for usermod in NATIVE[target]:
+        out |= USERMOD_MODULES.get(usermod, {usermod})
+    return out
+
 
 # Host-only modules that must NEVER reach a given target: staging one is the
 # mirror-image bug, a module that imports fine and then cannot work. Per target
@@ -146,36 +182,36 @@ WEB_HOST_ONLY = frozenset({"serve", "moy"})
 # for: two statements of one truth are only worth having if something compares
 # them.
 HOST_ONLY = {
-    "tdeck-mainline": {"host_app", "host_api", "host_canvas", "lua_host",
-                       "input", "audio_binding", "lua_binding", "gfx_binding",
-                       "native_build", "simulate_desktop", "wasm_host",
+    "tdeck-mainline": {"host_app", "host_api", "host_canvas", "moycore",
+                       "input", "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
+                       "native_build", "host_native", "simulate_desktop", "wasm_host",
                        "wasm_binding"},
-    "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-           "audio_binding", "lua_binding", "gfx_binding", "native_build",
+    "p4": {"host_app", "host_api", "host_canvas", "moycore", "input",
+           "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build", "host_native",
            "simulate_desktop", "wasm_host", "wasm_binding"},
-    "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding",
-                   "native_build", "simulate_desktop", "wasm_host",
+    "guition-s3": {"host_app", "host_api", "host_canvas", "moycore", "input",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
+                   "native_build", "host_native", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
-    "guition-p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-                   "audio_binding", "lua_binding", "gfx_binding",
-                   "native_build", "simulate_desktop", "wasm_host",
+    "guition-p4": {"host_app", "host_api", "host_canvas", "moycore", "input",
+                   "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
+                   "native_build", "host_native", "simulate_desktop", "wasm_host",
                    "wasm_binding"},
     # Same list as the console boards, and it is worth having even though the
     # Zero ALLOWLISTS `runtime/` and could not stage one of these by omission:
     # the failure this catches is somebody adding a name to a group, and a
     # tripwire that only works on boards with denylists is a tripwire that
     # stops working the moment a second allowlist board appears.
-    "zero": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-             "audio_binding", "lua_binding", "gfx_binding",
-             "native_build", "simulate_desktop", "wasm_host", "wasm_binding"},
+    "zero": {"host_app", "host_api", "host_canvas", "moycore", "input",
+             "audio_binding", "lua_binding", "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play",
+             "native_build", "host_native", "simulate_desktop", "wasm_host", "wasm_binding"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
     # the one that would look most plausible to stage, because it is the host's
     # half of the very module device_canvas imports.
-    "web": {"host_app", "lua_host", "simulate_desktop",
+    "web": {"host_app", "moycore", "simulate_desktop",
             "audio_binding", "lua_binding",
-            "gfx_binding", "native_build", "host_canvas", "wasm_host",
+            "gfx_binding", "glass_binding", "net_binding", "moy_input", "moy_loop", "moy_play", "native_build", "host_native", "host_canvas", "wasm_host",
             "wasm_binding"},
 }
 
@@ -183,22 +219,24 @@ HOST_ONLY = {
 # staged by a `cp`, so the extraction cannot see them -- but they are real, and
 # leaving them out would report every importer of them as broken.
 GENERATED = {
-    "tdeck-mainline": {"carts_data", "_ota_build"},
-    "p4": {"carts_data", "_ota_build"},
-    "guition-s3": {"carts_data", "_ota_build"},
-    "guition-p4": {"carts_data", "_ota_build"},
+    "tdeck-mainline": {"carts_data", "_ota_build", "fonts_data"},
+    "p4": {"carts_data", "_ota_build", "fonts_data"},
+    "guition-s3": {"carts_data", "_ota_build", "fonts_data"},
+    "guition-p4": {"carts_data", "_ota_build", "fonts_data"},
     # `carts_data` too since 2026-08-30, and it is a DIFFERENT file here: the
     # console boards freeze the plain `CARTS = [...]` (732 KB of source, the
     # fallback for a missing card), and this board freezes the PACKED form
     # (`CARTS_Z`, 202 KB of raw-deflate blobs) that `zero_host.seed_carts`
     # inflates into an empty store on first boot. It did not carry one at all
     # until that day -- the plain roster left 51 KB of a 2.8 MB slot, under the
-    # #168 warning floor -- so a flashed Zero came up an empty console and its
+    # board's headroom floor -- so a flashed Zero came up an empty console and its
     # carts arrived over a USB cable, or never.
     "zero": {"carts_data", "_ota_build"},
     # The web GENERATES its palette (a literal twin of runtime/palette.py, which
     # needs CPython colorsys) -- which is exactly the fix the boards lack below.
-    "web": {"palette"},
+    # And the font set, the module every console board generates too
+    # (tools/make_font.py module, the board's `font_tier`).
+    "web": {"palette", "fonts_data"},
 }
 
 # Directory-shaped modules: a package staged wholesale rather than file by file.
@@ -434,7 +472,7 @@ DEFAULT_MIN_MODULES = 40
 def _unresolved(target):
     """[(module, path, missing-alternatives)] for `target`, gaps included."""
     mods = frozen_set(target)
-    available = set(mods) | MICROPYTHON_BUILTINS | NATIVE[target]
+    available = set(mods) | MICROPYTHON_BUILTINS | _native_modules(target)
     # Imports the board has DECLARED unreachable (board.toml's
     # [[modules.shared.lazy]]), all of them the Zero's: `moy_carts.save_blocks`
     # reaches the block compiler, and `moy_carts.decode_cover`/`encode_cover`
@@ -659,16 +697,18 @@ def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
     """
     staged = set(board_config.staged_modules(ZERO, ROOT))
     for name in ("moy_sync.py", "moy_fs.py",          # the 3.4 RPC
-                 "moy_carts.py", "moy_image.py",      # #108 files sync
+                 "moy_carts.py", "moyimg.py",         # #108 files sync
                  "moy_store_base.py", "moy_seed.py",  # ...and the store's own
-                 "moy_files.py", "moy_file_ops.py",   # split-off modules
                  "moy_journal.py",                    # the store of record
                  "ticks.py",                          # the transport's clock leaf
-                 "moy_webserver.py", "moy_webhost.py",
+                 "moy_webhost.py",
                  "moy_ota.py"):                       # #53, wired 2026-08-29
         assert name in staged, "the Zero no longer stages %s" % name
+    # The transport is the kernel's (native/moy_net): the setup form, the
+    # store host and /gpio over its webhost.
+    assert "moy_webserver.py" not in staged
     for name in ("console.py", "wm.py", "wm_windowed.py", "device_canvas.py",
-                 "banded_panel.py", "launcher_layer.py", "editors.py",
+                 "launcher_layer.py", "editors.py",
                  "cart_api.py", "device_boot.py", "blocks.py"):
         assert name not in staged, (
             "the Zero stages %s -- it has no glass and runs no carts; if that "
@@ -688,7 +728,7 @@ def test_the_two_boards_differ_by_exactly_the_presentation_tier():
     tdeck = set(board_config.denials(TDECK))
     p4 = set(board_config.denials(P4))
     assert tdeck - p4 == {"wm_windowed.py", "wm_desk.py", "wm_chrome.py",
-                          "surface.py"}, (
+                         "editor_desk.py"}, (
         "the S3 denies these and the P4 does not: %s" % sorted(tdeck - p4))
     assert p4 - tdeck == set(), (
         "the P4 denies modules the S3 stages: %s" % sorted(p4 - tdeck))
@@ -835,3 +875,69 @@ def test_every_authored_web_module_reaches_the_bundle():
         if (WEB / (name + ".py")).exists():
             assert name not in sh, (
                 "%s.py is a host dev tool and must not enter the image" % name)
+
+
+# The C the browser's build leaves out (variant/mpconfigvariant.mk), by the
+# flag that gates it in each module's C: the names those `#if` blocks hold in
+# the module table are ABSENT from the wasm's module.
+WEB_ABSENT_FLAGS = {
+    "moy_glass": ("MOY_GLASS_PRESENT", ROOT / "native" / "moy_glass" / "modmoy_glass.c"),
+    "moy_net": ("MOY_NET_SERVE", ROOT / "native" / "moy_net" / "modmoy_net.c"),
+}
+
+
+def _gated_table_names(src, flag):
+    """The module-table names between `#if FLAG` and its `#endif`."""
+    names, depth = set(), 0
+    for line in src.splitlines():
+        s = line.strip()
+        if depth:
+            if s.startswith("#if"):
+                depth += 1
+            elif s.startswith("#endif"):
+                depth -= 1
+            else:
+                names.update(re.findall(r"MP_ROM_QSTR\(MP_QSTR_(\w+)\)", s))
+        elif s == "#if " + flag:
+            depth = 1
+    return names
+
+
+def test_the_web_build_reaches_no_board_only_name_unprobed():
+    """The browser's build leaves `moy_glass`'s compositors and `moy_net`'s
+    serving half out, and their names are ABSENT from its modules, never
+    stubs. A web module that names one outright (`moy_net.web_start`, `from
+    moy_net import ota_verify`) raises where every board passes; it asks with
+    getattr/hasattr instead, which this does not see as a use."""
+    mk = (WEB / "variant" / "mpconfigvariant.mk").read_text(encoding="utf-8")
+    absent = {}
+    for mod, (flag, path) in WEB_ABSENT_FLAGS.items():
+        assert re.search(r"^%s\s*:?=\s*0\s*$" % flag, mk, re.M), (
+            "the web variant no longer sets %s=0" % flag)
+        assert flag in (path.parent / "micropython.mk").read_text(encoding="utf-8")
+        absent[mod] = _gated_table_names(path.read_text(encoding="utf-8"), flag)
+    assert {"DsiCompositor", "RotatedCompositor", "front"} <= absent["moy_glass"]
+    assert {"web_start", "wc_park", "ota_verify", "dns_start"} <= absent["moy_net"]
+    assert not absent["moy_net"] & {"encode_batch", "sync_batch", "sync_apply"}
+
+    bad = []
+    for name, path in sorted(frozen_set("web").items()):
+        if path is None or path.suffix != ".py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        alias = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.name in absent:
+                        alias[a.asname or a.name] = a.name
+            elif isinstance(node, ast.ImportFrom) and node.module in absent:
+                bad += ["%s: from %s import %s" % (name, node.module, a.name)
+                        for a in node.names if a.name in absent[node.module]]
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id in alias
+                    and node.attr in absent[alias[node.value.id]]):
+                bad.append("%s:%d: %s.%s" % (name, node.lineno, alias[node.value.id],
+                                             node.attr))
+    assert not bad, bad

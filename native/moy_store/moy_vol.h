@@ -1,0 +1,172 @@
+// The volume seam (docs/kernel_store_2026-10.md section 3): one interface over
+// the file-system libraries an image already links -- oofatfs on a card,
+// littlefs2 on internal flash, POSIX on the host and in the browser.
+//
+// A volume is a library and the one instance of it that owns a path. Until a
+// volume is the kernel's, the store BORROWS the VM's instance for the length of
+// a call: the host's moy_vol_at resolves a path through MicroPython's mount
+// table to a VfsFat's FATFS or a VfsLfs2's lfs2_t, and the pointer never
+// outlives the call.
+//
+// Every call returns 0 or an errno value (MicroPython's numbering, which is
+// Linux's; a POSIX volume hands back its C library's own, as VfsPosix does).
+// Paths are NUL-terminated and relative to the volume: what moy_vol_at hands
+// back as `rest`. A file is allocated from moy_store_alloc and freed by
+// moy_vol_close; nothing is open when a store call returns, and
+// moy_vol_unwind closes whatever a raised call left open.
+
+#ifndef MOY_VOL_H
+#define MOY_VOL_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef MOY_STORE_MICROPYTHON
+#include "py/mpconfig.h"
+#ifndef MOY_VOL_FAT
+#define MOY_VOL_FAT MICROPY_VFS_FAT
+#endif
+#ifndef MOY_VOL_LFS2
+#define MOY_VOL_LFS2 MICROPY_VFS_LFS2
+#endif
+#ifndef MOY_VOL_POSIX
+#define MOY_VOL_POSIX MICROPY_VFS_POSIX
+#endif
+#endif
+#ifndef MOY_VOL_FAT
+#define MOY_VOL_FAT 0
+#endif
+#ifndef MOY_VOL_LFS2
+#define MOY_VOL_LFS2 0
+#endif
+#ifndef MOY_VOL_POSIX
+#define MOY_VOL_POSIX 1
+#endif
+
+// The errno values the store returns itself.
+#define MOY_EIO 5
+#define MOY_EBADF 9
+#define MOY_ENOMEM 12
+#define MOY_EACCES 13
+#define MOY_EBUSY 16
+#define MOY_EEXIST 17
+#define MOY_EXDEV 18
+#define MOY_ENODEV 19
+#define MOY_EISDIR 21
+#define MOY_EINVAL 22
+#define MOY_EMFILE 24
+#define MOY_EFBIG 27
+#define MOY_ENOSPC 28
+#define MOY_EROFS 30
+
+enum {
+    MOY_VOL_KIND_POSIX = 1,
+    MOY_VOL_KIND_FAT = 2,       // fs is a FATFS *
+    MOY_VOL_KIND_LFS2 = 3,      // fs is an lfs2_t *
+};
+
+typedef struct {
+    uint8_t kind;
+    void *fs;
+} moy_vol_t;
+
+enum {
+    MOY_VOL_READ = 1,
+    MOY_VOL_WRITE = 2,          // created, or truncated
+    MOY_VOL_APPEND = 3,         // created, or written at its end
+    MOY_VOL_HELD = 0x10,        // or'd in: the file outlives the call (below)
+};
+
+typedef struct moy_vol_file moy_vol_file_t;
+
+// `mtime` is seconds since 1970 where the medium keeps one (FAT's stamp,
+// littlefs's attribute 1 in nanoseconds, POSIX's st_mtime), else 0: what
+// os.stat()[8] reads, for ordering a listing newest first.
+typedef struct {
+    uint8_t is_dir;
+    uint32_t size;
+    int64_t mtime;
+} moy_vol_stat_t;
+
+// One entry of a listing: its name (`len` bytes, NUL-terminated), whether it
+// is a folder, and its size. A nonzero return stops the walk and is returned.
+typedef int (*moy_vol_ent_fn)(void *ctx, const char *name, size_t len,
+                              int is_dir, uint32_t size);
+
+int moy_vol_open(const moy_vol_t *v, const char *path, int mode,
+                 moy_vol_file_t **out);
+int moy_vol_read(moy_vol_file_t *f, void *buf, size_t n, size_t *got);
+int moy_vol_write(moy_vol_file_t *f, const void *buf, size_t n);
+int moy_vol_size(moy_vol_file_t *f, uint32_t *n);
+int moy_vol_seek(moy_vol_file_t *f, uint32_t at);   // the next read's offset
+int moy_vol_close(moy_vol_file_t *f);           // frees f; the first error wins
+void moy_vol_unwind(void);                      // close every file still open
+// A file opened with MOY_VOL_HELD is its opener's: made from moy_store_keep and
+// off the list moy_vol_unwind walks, so a raised call elsewhere leaves it, and
+// only its own moy_vol_close closes it. A compiled cart's session holds the
+// file it streams this way (moy_files.h).
+
+// The board's bus rule around an op on a card: on the T-Deck the card shares
+// the panel's SPI host, and the panel's driver registers a gate that drains
+// the flush and holds the next one off while `on` (moy_lcd's sd_guard, which
+// nests). NULL, the default, where a card has a bus of its own.
+// moy_vol_gate_enter takes the gate when `path` is on a FAT volume and a gate
+// is registered, and answers whether it did; moy_vol_gate_leave takes that
+// answer. A caller that touches the card from C brackets every op with the
+// two, as the Python store's session does.
+typedef void (*moy_vol_gate_fn)(int on);
+void moy_vol_set_gate(moy_vol_gate_fn fn);
+int moy_vol_gate_enter(const char *path);
+void moy_vol_gate_leave(int entered);
+
+int moy_vol_stat(const moy_vol_t *v, const char *path, moy_vol_stat_t *st);
+int moy_vol_list(const moy_vol_t *v, const char *dir, moy_vol_ent_fn fn,
+                 void *ctx);
+int moy_vol_mkdir(const moy_vol_t *v, const char *path);
+int moy_vol_remove(const moy_vol_t *v, const char *path);
+// `dst` must not exist, on every backend, as FAT has it: EEXIST.
+int moy_vol_rename(const moy_vol_t *v, const char *src, const char *dst);
+// `src` over `dst`: the medium's own atomic rename where it has one (littlefs,
+// POSIX), and on FAT the rename after `dst` is removed.
+int moy_vol_replace(const moy_vol_t *v, const char *src, const char *dst);
+
+// A working folder. moy_vol_enter makes `dir` the place a relative name
+// starts; moy_vol_here_name gives the name to open a file of it by, and
+// moy_vol_leave puts the volume's working folder back as it was. On FAT it is
+// the volume's own: f_chdir on the FATFS, which then looks a relative name up
+// in that folder alone, where a full path walks every folder above it again;
+// leave restores every working-folder field (cdir, and exFAT's cdc_*) as one,
+// so the VM's working folder is untouched. On littlefs and POSIX it is a path
+// prefix. A raised call leaves through moy_vol_unwind, which leaves too.
+typedef struct moy_vol_here {
+    struct moy_vol_here *next;      // what moy_vol_unwind leaves
+    moy_vol_t v;
+    char *dir;                      // the folder, NUL-terminated
+    size_t dir_n;
+    uint32_t cdir, cdc_scl, cdc_size, cdc_ofs;
+    char *name;                     // moy_vol_here_name's scratch
+    size_t name_cap;
+} moy_vol_here_t;
+
+int moy_vol_enter(const moy_vol_t *v, const char *dir, moy_vol_here_t *h);
+// The name of `name` in the working folder: `name` itself where the volume
+// keeps the folder (FAT), else the folder joined with it. NULL with no memory.
+// The pointer is good until the next call on `h`.
+const char *moy_vol_here_name(moy_vol_here_t *h, const char *name);
+void moy_vol_leave(moy_vol_here_t *h);
+
+// Imported from the host. moy_vol_at resolves `path` to the volume that owns
+// it and the path within it; moy_store_alloc is a call's scratch (zeroed),
+// moy_store_keep what outlives the call (the marker cache); both are freed by
+// moy_store_free with the size they were made with.
+int moy_vol_at(const char *path, moy_vol_t *v, const char **rest);
+//
+// moy_store_tick is called at every open and every listing: on a board it
+// feeds the kernel's task watchdog when the frame loop has armed it, so a
+// long store call (a seed, a scan, a pack, a big load) is never a hang.
+void moy_store_tick(void);
+void *moy_store_alloc(size_t n);
+void *moy_store_keep(size_t n);
+void moy_store_free(void *p, size_t n);
+
+#endif // MOY_VOL_H

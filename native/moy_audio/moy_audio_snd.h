@@ -21,6 +21,10 @@
 // and will play it; 0 when nothing would (no stream is opened).
 int moy_audio_snd_open(void);
 
+// Make the stream's ring ahead of the first open (the board's kernel, before
+// the VM's first area); the first open makes it otherwise.
+void moy_aud_reserve(void);
+
 // Queue up to `n` frames of little-endian signed 16-bit mono and return how
 // many fitted; with `n` 0, the room. Any thread.
 uint32_t moy_audio_snd(const uint8_t *pcm, uint32_t n);

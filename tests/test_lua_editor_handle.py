@@ -261,7 +261,7 @@ def _tap_at(r, buffer_row, col, tail):
     layout the draw actually produced -- a wrapped line is several rows, so a
     hardcoded row number would be a guess about the wrap, not about the tap."""
     x0, y0, cell, lh, _scale = r.ed._geom
-    y = next(y for brow, _si, y in r.ed._vis if brow == buffer_row)
+    y = next(y for brow, _si, y in r.ed._visible() if brow == buffer_row)
     return r.run.exec(
         "do local verb, arg = ED:tap(%d, %d)\n%s\nend"
         % (x0 + col * cell + 2, y + 2, tail), "tap")
@@ -279,7 +279,7 @@ def test_draw_and_tap_reach_the_canvas_and_name_the_tapped_link():
 
 def test_a_checkbox_tap_answers_its_row_as_a_number():
     with run_cart(DRAWN) as r:
-        assert _tap_at(r, 2, 3,
+        assert _tap_at(r, 2, 1,                 # the box, its first cells
                        'VERBOK = (verb == "check") and 1 or 0\nROW = arg'
                        ) is None
         assert r.get("VERBOK") == 1

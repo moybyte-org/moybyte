@@ -38,8 +38,15 @@ ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the card/button hit-tests
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
+
+try:
+    import layout_base as _layout_base
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import layout_base as _layout_base
 
 try:
     import text_modes as _modes
@@ -52,10 +59,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
                                      BASE_H as _BASE_H)
 
-try:
-    from editors import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL
 
 try:
     from widgets import arm_prompt as _arm_prompt
@@ -66,44 +69,63 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 class _Prompt:
-    """One open dialog: `kind` names what OK does, `fields` are its TextEntry
-    buffers over ONE shared key edge (so Tab does not re-fire the byte that
-    switched fields), `field` the focused one, `msg` the inline status line.
-    `fields` is built from (label, placeholder, cap) triples."""
+    """One open dialog (`ui.dialog` with captioned `ui.field`s, GAPS 52):
+    `kind` names what its last button does, `texts` are its fields' text,
+    `field` the focused one (the tests' typing door), `msg` the line under
+    them that says why it stayed open. `fields` is built from (label,
+    placeholder, cap) triples; `sub` is the line under its title, `ok` its
+    last button's word."""
 
-    def __init__(self, kind, title, fields):
+    def __init__(self, kind, title, fields, sub, ok):
         self.kind = kind
         self.title = title
+        self.sub = sub
+        self.ok = ok
         self.labels = tuple(f[0] for f in fields)
         self.hints = tuple(f[1] for f in fields)
-        self.edge = KeyEdge()
-        self.fields = tuple(TextEntry(f[2], edge=self.edge) for f in fields)
+        self.caps = tuple(f[2] for f in fields)
+        self.texts = ["" for _f in fields]
         self.field = 0
         self.msg = None
+        self.host = _ui_draw.AppHost()
+        # the page under it washed already (held), and what it draws besides
+        # its fields' text a function of `gen` (its line, `say`)
+        self.o = {"wash": False, "gen": 0}
+
+    def types(self, ch):
+        """Whether typed byte `ch` changes the focused field's text."""
+        t = self.texts[self.field]
+        return (ch == 8 and t != "") or (32 <= ch < 127 and len(t) < self.caps[self.field])
+
+    def say(self, msg):
+        """Set the line under the fields that says why it stayed open."""
+        if msg != self.msg:
+            self.msg = msg
+            self.o["gen"] += 1
 
     def open(self, texts, seed):
-        for i, entry in enumerate(self.fields):
-            entry.open(texts[i], seed)
-        self.edge.seed(seed, guard=True)
+        for i in range(len(self.texts)):
+            self.texts[i] = str(texts[i])[:self.caps[i]]
+        self.host.key = seed           # the byte that opened it types nothing
 
     def key(self, ch):
-        """One typed byte: Tab moves the focus, anything else goes to the
-        focused field; returns the field's event (editors_base.text_key)."""
+        """One typed byte: Tab moves the focus, Enter commits, Esc cancels,
+        anything else goes to the focused field. "commit", "cancel" or None."""
         if ch == 9:
-            self.field = (self.field + 1) % len(self.fields)
+            self.field = (self.field + 1) % len(self.texts)
+            self.host.focus(self.labels[self.field])
             return None
-        ev = self.fields[self.field].key(ch)
-        if ev is not None:
-            self.msg = None
-        return ev
-
-    def feed(self, inp):
-        """One input frame: the event of a fresh byte, else None (the guarded
-        opening pass included)."""
-        k = inp.last_key
-        if self.edge.arming(k) or not self.edge.hit(k):
-            return None
-        return self.key(k)
+        if ch in (10, 13):
+            return "commit"
+        if ch == 27:
+            return "cancel"
+        t = self.texts[self.field]
+        if ch == 8:                 # Delete: nothing lies after the caret
+            self.texts[self.field] = t[:-1]
+        elif 32 <= ch < 127 and len(t) < self.caps[self.field]:
+            self.texts[self.field] = t + chr(ch)
+        self.say(None)
+        return None
 
 
 
@@ -151,7 +173,19 @@ _ASSET_SUBDIR_TABS = {"scenes": "scene"}
 # the ONE door that adds a file to a cart (#89). A sentinel rather than a real
 # name, because the list's rows come from the store and a real file could be
 # called anything -- including this.
-_NEW_ROW = "+ NEW SCRIPT"
+_NEW_ROW = "New script"
+
+# The Files page's words for what a file is and the tab it opens in.
+_FILE_WORDS = {"sprites.moygfx": "Sprites", "map.moymap": "Map", "sounds.json": "Sounds",
+               "blocks.json": "Blocks"}
+_TAB_WORDS = {"code": "Code", "paint": "Art", "map": "World", "music": "Sound",
+              "blocks": "Blocks", "scene": "World"}
+_TAB_ICONS = {"code": "code", "paint": "sprite", "map": "map", "music": "music",
+              "blocks": "blocks", "scene": "scene"}
+_FILES_HINTS = ("confirm", "Open", "back", "Back")
+# The dialogs' lines: the one under the title, and why one stayed open.
+_PROMPT_SUB = {"tone": "dim", "wrap": True, "lines": 2}
+_PROMPT_MSG = {"tone": "danger", "wrap": True, "lines": 2}
 
 
 # The Config tab draws in its OWN palette (`_tones`), not the theme's, so the
@@ -159,7 +193,7 @@ _NEW_ROW = "+ NEW SCRIPT"
 # `code_layer._as_theme`: carry the role names the toolkit looks up, each
 # pointing at a role this surface already had. A card row is then an ordinary
 # "row_chrome" -- bright label at rest, the selection wash when it is the one
-# being stepped -- and a skin reaches it (#207).
+# being stepped -- and a theme reaches it (#207).
 def _as_theme(t):
     """Add the ui-toolkit token aliases to a tone map, in place."""
     t["chrome_ink"] = t["text"]         # row_chrome REST ink
@@ -173,45 +207,39 @@ class CardsLayout(LayoutBase):
     card column + scroll chevrons, the per-display card heights and the picture-cell
     sizes, derived from the SYSTEM canvas size (w, h) + font scale.
 
-    The single hard contract (mirrors Layout/CodeLayout/PaintLayout/...): at
-    (w, h, fs) == (320, 240, 1) every field equals the frozen `_CARD_*` module
-    constant, byte for byte (the `_base` branch); the responsive formulas only run
-    on a larger canvas / bigger font. A bigger panel shows MORE cards at once (the
+    The T-Deck's 320x240 is laid out by the same formulas as every canvas. A bigger panel shows MORE cards at once (the
     view band grows) and the cards span its full width."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
                  chrome_scale=None):
         LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
-        if self._base:
-            self.body = (0, 18, _BASE_W, _BASE_H - 18)
-            self.head_glyph = (8, 22, 14, 14)
-            self.head_xy = (26, 22)
-            self.card_x, self.card_w = _CARD_X, _CARD_W
-            self.card_y0, self.card_h = _CARD_Y0, _CARD_H
-            self.view_bottom = _CARD_VIEW_BOTTOM
-            self.scroll_up, self.scroll_dn = _CARD_SCROLL_UP, _CARD_SCROLL_DN
-            self.info_btn = _CARD_INFO_BTN
-            self.gap = 2
-            self.h_cells, self.h_icons, self.h_meter = 44, 36, 32
-            return
-        bar_h = 18 * self.cs          # the OS bar's own height (#203)
-        self.body = (0, bar_h, self.w, self.h - bar_h)
-        self.head_glyph = (8 * fs, bar_h + 4 * fs, 14 * fs, 14 * fs)
-        self.head_xy = (26 * fs, bar_h + 4 * fs)
-        self.card_x = _CARD_X * fs
-        self.card_w = self.w - 34 * fs
-        self.card_y0 = bar_h + 26 * fs
+        top = self.cy                 # the content rect, under any bar
+        self.body = (self.cx, top, self.cw, self.ch)
+        x0, r = self.cx, self.cx + self.cw
+        self.head_glyph = (x0 + 8 * fs, top + 4 * fs, 14 * fs, 14 * fs)
+        self.head_xy = (x0 + 26 * fs, top + 4 * fs)
+        self.card_x = x0 + _CARD_X * fs
+        self.card_w = self.cw - 34 * fs
+        self.card_y0 = top + 26 * fs
         self.card_h = _CARD_H * fs
-        self.view_bottom = self.h - 8 * fs
-        self.scroll_up = (self.w - 20 * fs, self.card_y0, 16 * fs, 14 * fs)
-        self.scroll_dn = (self.w - 20 * fs, self.view_bottom - 18 * fs,
+        self.view_bottom = self.cy + self.ch - 8 * fs
+        self.scroll_up = (r - 20 * fs, self.card_y0, 16 * fs, 14 * fs)
+        self.scroll_dn = (r - 20 * fs, self.view_bottom - 18 * fs,
                           16 * fs, 14 * fs)
-        self.info_btn = (self.w - 44 * fs, bar_h + 3 * fs, 40 * fs, 14 * fs)
+        # The INFO chip's label sits at its corner's pads (`ui_draw.mini_btn`,
+        # 2 px each side): the chip holds the `ui` face's line between them.
+        line = _ui_draw.font()[2] * fs
+        self.info_btn = (r - 44 * fs, top + 3 * fs, 40 * fs, max(14 * fs, line + 4))
+        # `lead` is what that line takes past an 8-row cell (0 for a pixel
+        # face): a card's pictures, under its label, move down by it.
+        self.lead = max(0, line - 8 * fs)
+        lead = self.lead
         self.gap = 2 * fs
         # Per-display card heights (#15): sprite/bg picker cells, icon choices,
         # gauge/count meters -- all scale with the font so the pictures stay tappable.
-        self.h_cells, self.h_icons, self.h_meter = 44 * fs, 36 * fs, 32 * fs
+        self.h_cells, self.h_icons, self.h_meter = (44 * fs + lead, 36 * fs + lead,
+                                                    32 * fs + lead)
 
 
 class CardsLayer:
@@ -237,13 +265,22 @@ class CardsLayer:
         self._err_text = err_text
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
+        # a desk pane's word for its page (EditorDesk._tab_pane): 2 where the
+        # buffer `shift_last` reads holds it as the last draw left it, 1 a
+        # window's frame drawn whole, 0 none (the handheld)
+        self.vouch = 0
         self._t = None                # per-draw tone map (set by _draw_cards)
+        self._broken_host = None      # the UI context of a card that failed to draw
+        self._files_host = _ui_draw.AppHost()   # the Files page's
         self._dragv = None            # drag-to-scroll anchor (held vertical drag)
         # The open dialog (CART INFO or NEW SCRIPT), a `_Prompt`, or None.
         self.prompt = None
+        self._held = _ui_draw.HeldPage()   # the page under it (`_draw_prompt`)
+        self._rows = _ui_draw.DialogRows(self._held)   # ...and its rows frames (`prompt_rows`)
         # The ADVANCED row's file list: None when closed, else
         # {"rows", "sel", "top", "msg"} -- see _open_files.
         self.files = None
+        self._page = None             # the cards on the verbs (editor_settings.py)
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -267,17 +304,30 @@ class CardsLayer:
     def draw(self, dt):
         ws = self.ws
         ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
-        try:
-            self._draw_cards()
-        except Exception as exc:  # noqa: BLE001
-            # A malformed card (e.g. a bad tiles/choices entry) must NOT escape the
-            # frame loop -- the device would hang silently with no error surface. Fall
-            # back to a readable panel (on the SYSTEM canvas, where this layer lives);
-            # the unified bar (drawn below) keeps the context X reachable so the kid
-            # can exit.
-            ws.cart_error = self._err_text(exc)
-            print("Moybyte cards error:", exc)
-            ws.player._draw_error_panel(ws.sys_canvas)
+        p = self.prompt
+        held = self._held
+        if p is None:
+            if held.key is not None:
+                held.drop()
+        elif self.prompt_rows(dt):
+            return
+        elif held.put(ws, ws.sys_canvas, self._page_rect(), self._held_key(p), dt):
+            ws.bar_layer._draw_status_strip("menu")
+            self._draw_prompt(True, dt)
+            held.note()
+            return
+        if p is None or not held.last(ws, ws.sys_canvas, self._page_rect(), dt):
+            try:
+                self._draw_cards()
+            except Exception as exc:  # noqa: BLE001
+                # A malformed card (e.g. a bad tiles/choices entry) must NOT escape the
+                # frame loop -- the device would hang silently with no error surface.
+                # Fall back to a readable page (on the SYSTEM canvas, where this layer
+                # lives); the unified bar (drawn below) keeps the context X reachable
+                # so the kid can exit.
+                ws.cart_error = self._err_text(exc)
+                print("Moybyte cards error:", exc)
+                self._draw_broken(ws.cart_error)
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
@@ -285,7 +335,68 @@ class CardsLayer:
         # An open dialog draws OVER the bar too -- same order as the block
         # editor's blk_kbd prompt (chrome, then any modal on top).
         if self.prompt is not None:
-            self._draw_prompt()
+            self._draw_prompt(False, dt)
+            held.note()
+        else:
+            held.shown(ws, ws.sys_canvas, self._page_still(), dt)
+
+    def prompt_host(self):
+        """The open dialog's host (`ui_draw.AppHost`), None where none is up."""
+        return None if self.prompt is None else self.prompt.host
+
+    def prompt_rows(self, dt=0):
+        """Begin the open dialog's frame ahead of the page under it, once a
+        painted frame: where it is a dialog's rows frame (a field typed
+        into, its focus moved, the page held as the frames before left it:
+        `ui_draw.DialogRows`), draw its changed rows alone and answer True;
+        else the frame draws the page and the dialog as ever."""
+        p = self.prompt
+        if p is None:
+            return False
+        ws = self.ws
+        rows = self._rows
+        if rows.begun == _ui_draw.painted():
+            return False
+        self._held.ask(ws, ws.sys_canvas, self._held_key(p), dt)
+        lay = self.layout
+        rows.gen(p.o["gen"])
+        if not rows.begin(p.host, ws.sys_canvas, ws.theme_colors,
+                          (lay.cx, lay.cy, lay.cw, lay.ch),
+                          _layout_base.metric_class() == _layout_base.DESK):
+            return False
+        ws.bar_layer._draw_status_strip("menu")
+        self._draw_prompt(True, dt)
+        self._held.note()
+        return True
+
+    def _page_rect(self):
+        lay = self.layout
+        return (lay.cx, lay.cy, lay.cw, lay.ch)
+
+    def _held_key(self, p):
+        """What the page under dialog `p` is a function of while it is up."""
+        ws = self.ws
+        return (p, ws.sys_canvas, self._page_rect(), ws.layout.fs, ws.look.look_gen)
+
+    def _page_still(self):
+        """Whether the page drawn last draws the same next frame."""
+        if self.files is not None:
+            return self._files_host.still()
+        if self._on_verbs():
+            return self._page is None or self._page.host.still()
+        return True
+
+    def _draw_broken(self, text):
+        """What a card that failed to draw leaves: the error, exact, under
+        the bar."""
+        ws = self.ws
+        host = self._broken_host
+        if host is None:
+            host = self._broken_host = _ui_draw.AppHost()
+        lay = self.layout
+        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch))
+        _ui.page("")
+        _ui.empty("warn", "This page didn't draw", (str(text or ""),))
 
     def handle_input(self, i):
         ws = self.ws
@@ -293,18 +404,31 @@ class CardsLayer:
             return self._prompt_input(i)
         if self.files is not None:
             return self._files_input(i)
+        if self._on_verbs():
+            page = self.page()
+            if (i.pressed("run") or i.pressed("a")) and not page.on_door():
+                ws.defer(ws._leave_menu)   # Enter PLAYs (a device's Enter is "a")
+                return True
+            if page.open_door(i):
+                if self.prompt is not None:
+                    self._held.opened(ws)  # Cart info over the page as it was
+                return True
+            if page.keys(i):
+                ws._dirty = True
+            ws._leave_or_home(ws.exit)
+            return True
         n = self._card_count()
         if not n:
             return True
-        if i.pressed("up"):
+        if i.steps("up"):
             self.msel = (self.msel - 1) % n
             self._reveal_card(self.msel)
-        if i.pressed("down"):
+        if i.steps("down"):
             self.msel = (self.msel + 1) % n
             self._reveal_card(self.msel)
-        if i.pressed("left"):
+        if i.steps("left"):
             ws.adjust(-1)
-        if i.pressed("right"):
+        if i.steps("right"):
             ws.adjust(1)
         if self._is_advanced(self.msel):
             # The last row is a DOOR, not a stepper: A opens it rather than
@@ -312,7 +436,7 @@ class CardsLayer:
             if i.pressed("a") or i.pressed("run"):
                 self._open_files()
             else:
-                ws._leave_or_home(ws._leave_menu)
+                ws._leave_or_home(ws.exit)
             return True
         # Enter / RUN in Config = PLAY the cart (the bar's PLAY path). The device keyboard
         # maps Enter (0x0D) to the "a" button and the host maps it to "run", so BOTH must
@@ -324,7 +448,7 @@ class CardsLayer:
         if i.pressed("a") or i.pressed("run"):
             ws.defer(ws._leave_menu)   # #184: PLAY runs behind the next paint
         else:
-            ws._leave_or_home(ws._leave_menu)
+            ws._leave_or_home(ws.exit)
         return True
 
     def _cards_drag(self, px, py):
@@ -346,7 +470,7 @@ class CardsLayer:
             self._dragv = py
             return
         was = self.mtop
-        self._dragv, self.mtop = _ui.row_drag(self._dragv, py,
+        self._dragv, self.mtop = _ui_draw.row_drag(self._dragv, py,
                                               max(1, lay.card_h + lay.gap),
                                               self.mtop, self._max_mtop())
         if self.mtop != was:
@@ -360,6 +484,12 @@ class CardsLayer:
             if click and ws.bar_layer.handle_bar_tap("menu", px, py):
                 return True
             return self._files_pointer(px, py, click)
+        if self._on_verbs():
+            if click and ws.bar_layer.handle_bar_tap("menu", px, py):
+                return True
+            if self.page().point(px, py, click, ws.pointer.down):
+                ws._dirty = True
+            return True
         # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
         self._cards_drag(px, py)           # held drag scrolls the card column
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
@@ -620,7 +750,7 @@ class CardsLayer:
             cw = ch = 22 * fs
         gap = 4 * fs
         x0 = row["x"] + 4 * fs
-        top = row["y"] + 12 * fs
+        top = row["y"] + 12 * fs + self.layout.lead
         cells = []
         for k in range(n):
             cells.append((k, (x0 + k * (cw + gap), top, cw, ch)))
@@ -663,21 +793,9 @@ class CardsLayer:
     # -- draw ----------------------------------------------------------------
 
     def _tones(self):
-        """Per-draw color roles: the frozen literals on the 320x240 baseline
-        (byte-identical), the semantic theme tokens on the shelf tiers -- the
-        Phase 3 warm tool surface (visual identity v1 Section 10): cream body,
-        dark ink, the orange authoring accent on the value controls."""
-        NAMES = self._NAMES
-        # The frozen 320x240 literals hold only in DARK chrome; a light theme
-        # variant themes the base tier too (owner ask 2026-07-23).
-        if self.layout._base and not self.ws.look.light_chrome():
-            return _as_theme(
-                   {"body": NAMES["dark_purple"], "edge": NAMES["pink"],
-                    "head": NAMES["white"], "text": NAMES["light_grey"],
-                    "sel_text": NAMES["white"], "row": NAMES["indigo"],
-                    "accent": NAMES["yellow"], "track": NAMES["dark_grey"],
-                    "knob": NAMES["white"], "cell": NAMES["dark_purple"],
-                    "cell_edge": NAMES["dark_grey"]})
+        """Per-draw color roles: the semantic theme tokens on every tier --
+        the Phase 3 tool surface (visual identity v1 Section 10): the surface
+        body, its ink, the authoring accent on the value controls."""
         th = self.ws.theme_colors
         return _as_theme(
                {"body": th["surface"], "edge": th["border"],
@@ -687,6 +805,22 @@ class CardsLayer:
                 "knob": th["ink"], "cell": th["dim"],
                 "cell_edge": th["ink_dim"]})
 
+    def page(self):
+        """The Settings page on the verbs, built at its first draw."""
+        if self._page is None:
+            try:
+                from editor_settings import SettingsPage
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime.editor_settings import SettingsPage
+            self._page = SettingsPage(self.ws, _ui_draw.AppHost("editor_settings"),
+                                      (self._open_meta, self._open_files))
+        return self._page
+
+    def _on_verbs(self):
+        """Whether the cards draw on the verbs: everywhere but a cart whose
+        manifest is broken and the file list, which keep this layer's own."""
+        return self.files is None and not self._broken()
+
     def _draw_cards(self):
         ws = self.ws
         cv = ws.sys_canvas
@@ -694,6 +828,16 @@ class CardsLayer:
         t = self._t = self._tones()
         if self.files is not None:
             self._draw_files()          # the ADVANCED row's list, same panel
+            return
+        if self._on_verbs():
+            desk = _layout_base.metric_class() == _layout_base.DESK
+            if self.vouch:
+                _ui_draw.window_frame(self.vouch)
+            try:
+                self.page().draw(cv, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+            finally:
+                if self.vouch:
+                    _ui_draw.window_frame(0)
             return
         # Fullscreen "Make it mine" panel below the unified bar (fix B/C): edge to
         # edge, no centered mini-card. GO/CODE/CLOSE are gone -- PLAY/Code-tab/X are all
@@ -707,15 +851,15 @@ class CardsLayer:
             # Say why, and leave the ADVANCED row below as the way to the file.
             cv.print("MANIFEST BROKEN", lay.head_xy[0], lay.head_xy[1],
                      self._NAMES["red"], 2)
-            cv.print(broken[:(lay.card_w // (8 * lay.fs))],
+            cv.print(_ui_draw.print_cut(broken, lay.card_w, lay.fs),
                      lay.card_x, lay.card_y0, t["text"], 1)
         else:
             cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
-        _ui.mini_btn(cv, lay.info_btn, "INFO", t["accent"])   # #94: CART INFO modal
+        _ui_draw.mini_btn(cv, lay.info_btn, "INFO", t["accent"])   # #94: CART INFO modal
         for row in self._card_layout():
             self._draw_card(row)
         if self._cards_scrollable():           # up/down chevrons when cards overflow
-            _ui.scroll_cues(
+            _ui_draw.scroll_cues(
                 cv, (lay.scroll_up[0], lay.scroll_up[1]),
                 (lay.scroll_dn[0], lay.scroll_dn[1]),
                 self.mtop > 0, self.mtop < self._max_mtop(), t["accent"], 2)
@@ -740,7 +884,7 @@ class CardsLayer:
         # a stepper card (clear of the -/+ glyphs) and 2px in on a visual one.
         # The stepper glyphs and the picture displays below are this card's own
         # CONTENT -- `row` draws the row, not the card.
-        _ui.row(cv, t, (x, y - 1 * fs, w, h), self.card_text(i),
+        _ui_draw.row(cv, t, (x, y - 1 * fs, w, h), self.card_text(i),
                 kind="row_chrome", on=sel, edge=False,
                 pad=(18 if disp is None else 2) * fs, text_dy=1 * fs, fs=fs)
         if disp is None:                                # today's plain text card
@@ -763,7 +907,7 @@ class CardsLayer:
         fs = self.layout.fs
         t = self._t
         x, y, w, h = row["x"], row["y"], row["w"], row["h"]
-        _ui.row(cv, t, (x, y - 1 * fs, w, h), _ADVANCED_ROW,
+        _ui_draw.row(cv, t, (x, y - 1 * fs, w, h), _ADVANCED_ROW,
                 kind="row_chrome", on=(row["i"] == self.msel), edge=False,
                 pad=6 * fs, text_dy=1 * fs, fs=fs)
         cv.print(">", x + w - 10 * fs, y + 1 * fs, t["accent"], fs)
@@ -786,12 +930,13 @@ class CardsLayer:
         # The row FRAME only: the "!" and the reason are content with their own
         # budget (the message is already clipped to 32 chars, which `row`'s
         # symmetric pad would re-clip to 30).
-        _ui.row(cv, self._t, (x, y, w, h), None,
+        _ui_draw.row(cv, self._t, (x, y, w, h), None,
                 colors=(NAMES["dark_grey"], NAMES["light_grey"], NAMES["red"]),
                 fs=fs)
         cv.print("!", x + 4 * fs, y + max(0, (h - 8 * fs) // 2), NAMES["red"], 2)
-        msg = ("%s: %s" % (label, row["error"]))[:32]
-        cv.print(msg, x + 20 * fs, y + max(0, (h - 8) // 2), NAMES["light_grey"], 1)
+        msg = _ui_draw.print_cut("%s: %s" % (label, row["error"]), w - 24 * fs, fs)
+        cv.print(msg, x + 20 * fs, y + max(0, (h - _ui_draw.font("ui")[2]) // 2),
+                 NAMES["light_grey"], 1)
 
     def _draw_gauge(self, row):
         # A slow->fast slider: a turtle at the low end, a rabbit at the high end,
@@ -812,7 +957,7 @@ class CardsLayer:
             frac = 0.0
         frac = max(0.0, min(1.0, frac))
         ends = f.get("gauge", {}) if isinstance(f.get("gauge"), dict) else {}
-        ty = y + 18 * fs
+        ty = y + 18 * fs + self.layout.lead
         tx0 = x + 18 * fs
         tx1 = x + w - 18 * fs
         tw = tx1 - tx0
@@ -847,7 +992,7 @@ class CardsLayer:
         shown = max(0, min(n, cap, per_row))    # clamp to a single row
         for k in range(shown):
             gx = x + 2 * fs + k * step
-            ws._glyph(glyph, (gx, y + 14 * fs, 14 * fs, 14 * fs),
+            ws._glyph(glyph, (gx, y + 14 * fs + self.layout.lead, 14 * fs, 14 * fs),
                       self._t["accent"], ws.sys_canvas)
 
     def _draw_choice_icons(self, row):
@@ -877,14 +1022,43 @@ class CardsLayer:
                 img = ws.project.sheet.tile_image(tiles[k] if k < len(tiles) else 0, -1)
             else:
                 glyph = icons[k] if k < len(icons) else "dot"
-            art = _ui.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
+            art = _ui_draw.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
                            colors=(NAMES["black"] if chosen else t["cell"],
-                                   NAMES["white"],
+                                   NAMES["white"] if chosen else t["text"],
                                    NAMES["yellow"] if chosen else t["cell_edge"]),
                            glyph=glyph, glyph_draw=ws._glyph)
             if img is not None:
                 cv.spr(img, art[0] + (art[2] - 16 * fs) // 2,
                        art[1] + (art[3] - 16 * fs) // 2, 2 * fs)
+
+    def draw_choice(self, f, k, rect):
+        """Choice `k`'s picture of a cell card `f` in `rect` on the system
+        canvas, for the Settings page on the verbs (editor_settings.py): its
+        sprite at the largest whole zoom the rect holds, its glyph, or its
+        background's preview."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        x, y, w, h = rect
+        disp = f.get("display")
+        if disp == "sprite-tiles":
+            tiles = self._resolve_tiles(f)
+            sheet = ws.project.sheet
+            if sheet is None:
+                return
+            img = sheet.tile_image(tiles[k] if k < len(tiles) else 0, 0)
+            z = max(1, min(w, h) * 3 // 4 // 8)
+            cv.spr(img, x + (w - 8 * z) // 2, y + (h - 8 * z) // 2, z)
+        elif disp == "bg-thumbs":
+            ch = f.get("choices") or []
+            m = max(2, min(w, h) // 8)
+            self._draw_bg_thumb(str(ch[k]) if k < len(ch) else "", (x + m, y + m, w - 2 * m,
+                                                                    h - 2 * m))
+        else:
+            icons = f.get("icons") or []
+            side = max(12, min(w, h) // 2)
+            ws._glyph(icons[k] if k < len(icons) else "dot",
+                      (x + (w - side) // 2, y + (h - side) // 2, side, side),
+                      ws.theme_colors["ink"], cv)
 
     # Each bg-thumbs choice is drawn as a tiny "what the screen will look like"
     # preview. A cart reads the chosen name in cfg("bg") and paints to match.
@@ -928,7 +1102,7 @@ class CardsLayer:
             # inset rect and the cell puts the selection border around it.
             self._draw_bg_thumb(f["choices"][k],
                                 (cx + 1 * fs, cy + 1 * fs, cw - 2 * fs, ch - 2 * fs))
-            _ui.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
+            _ui_draw.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
                      colors=(None, t["cell_edge"],
                              NAMES["yellow"] if k == sel_k else t["cell_edge"]))
 
@@ -956,7 +1130,8 @@ class CardsLayer:
             msg = self._err_text(exc)
         if self._can_add_source(cart):
             rows = tuple(rows) + (_NEW_ROW,)
-        self.files = {"rows": rows, "sel": 0, "top": 0, "msg": msg}
+        self.files = {"rows": rows, "msg": msg}
+        self._files_host.reset()
         ws._dirty = True
 
     def _can_add_source(self, cart):
@@ -969,13 +1144,9 @@ class CardsLayer:
 
     def _close_files(self):
         self.files = None
+        if self._page is not None:
+            self._page.recount()
         self.ws._dirty = True
-
-    def _files_visible(self):
-        """How many rows the list band fits."""
-        lay = self.layout
-        return max(1, (lay.view_bottom - lay.card_y0)
-                   // (lay.card_h + lay.gap))
 
     def _files_open(self, name):
         """Route one project file. The main file is the Code tab (that is where
@@ -1012,100 +1183,93 @@ class CardsLayer:
             # shape: one Paint cannot edit opens read-only.
             self._close_files()
             if not ws.open_image(name, cart=cart):
-                self.files = {"rows": (), "sel": 0, "top": 0,
-                              "msg": "NO PAINT APP"}
+                self.files = {"rows": (), "msg": "There's no Paint app to open it in."}
             return
         if "/" in name:
             # Anything else in a subfolder no tab claims. Saying so beats
             # opening a blob as text.
-            self.files["msg"] = "NO EDITOR FOR THIS"
+            self.files["msg"] = "Nothing on this console opens that file."
             ws._dirty = True
             return
         mode = _modes.mode_for(name)
         self._close_files()
         if not ws.open_project_file(cart, name, mode):
-            self.files = {"rows": (), "sel": 0, "top": 0, "msg": "CAN'T OPEN"}
-
-    def _files_rects(self):
-        """(row rect, name) for each VISIBLE list row, plus the BACK button --
-        the draw pass and the hit-test read the same geometry."""
-        lay = self.layout
-        f = self.files
-        step = lay.card_h + lay.gap
-        out = []
-        y = lay.card_y0
-        for k in range(f["top"], min(len(f["rows"]),
-                                     f["top"] + self._files_visible())):
-            out.append(((lay.card_x, y, lay.card_w, lay.card_h), f["rows"][k], k))
-            y += step
-        return out
-
-    def _files_reveal(self):
-        f = self.files
-        vis = self._files_visible()
-        if f["sel"] < f["top"]:
-            f["top"] = f["sel"]
-        elif f["sel"] >= f["top"] + vis:
-            f["top"] = f["sel"] - vis + 1
+            self.files = {"rows": (), "msg": "That file didn't open."}
 
     def _files_input(self, i):
         ws = self.ws
-        f = self.files
-        n = len(f["rows"])
         if i.pressed("b") or i.pressed("home"):
             self._close_files()
             if i.pressed("home"):
-                ws.go_home()
+                ws.home_key()
             return True
-        if not n:
-            return True
-        if i.pressed("up"):
-            f["sel"] = (f["sel"] - 1) % n
-            self._files_reveal()
+        if self._files_host.keys(i):
             ws._dirty = True
-        if i.pressed("down"):
-            f["sel"] = (f["sel"] + 1) % n
-            self._files_reveal()
-            ws._dirty = True
-        if i.pressed("a") or i.pressed("run"):
-            self._files_open(f["rows"][f["sel"]])
         return True
 
     def _files_pointer(self, px, py, click):
-        if not click:
-            return True
-        if _in(px, py, self.layout.info_btn):
-            self._close_files()
-            return True
-        for rect, name, k in self._files_rects():
-            if _in(px, py, rect):
-                self.files["sel"] = k
-                self._files_open(name)
-                return True
+        if self._files_host.point(px, py, click, self.ws.pointer.down):
+            self.ws._dirty = True
         return True
 
+    def _file_row(self, name, tab):
+        """A file's row: its icon, its name, and the tab it opens in; True
+        the frame it is chosen."""
+        if tab is not None:
+            _ui.icon(_TAB_ICONS.get(tab, "doc"))
+            word = _TAB_WORDS.get(tab, "")
+        elif _modes.is_image(name):
+            _ui.icon("art")
+            word = "Paint"
+        else:
+            _ui.icon("doc")
+            word = "Text"
+        return _ui.link(_FILE_WORDS.get(name, name), word, {"id": name})
+
     def _draw_files(self):
+        """The project's files as a page of Make it mine (GAPS 52): Code (its
+        scripts, New script last) and Art and sound as groups, each file's
+        icon, its name and the tab it opens in."""
         ws = self.ws
-        cv = ws.sys_canvas
-        lay = self.layout
-        t = self._t
         f = self.files
-        cv.rect(*(lay.body + (t["body"],)))
-        cv.rectb(*(lay.body + (t["edge"],)))
-        ws._glyph("code", lay.head_glyph, t["accent"], cv)
-        cv.print("PROJECT FILES", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
-        _ui.mini_btn(cv, lay.info_btn, "BACK", t["accent"])
-        rows = self._files_rects()
+        lay = self.layout
+        host = self._files_host
+        desk = _layout_base.metric_class() == _layout_base.DESK
+        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        _ui.page("Files")
+        _ui.hints(_FILES_HINTS)
+        cart = ws.project.cart if ws.project is not None else None
+        sources = ws.carts_store.cart_sources(cart) if cart and ws.carts_store else ()
+        rows = f["rows"]
+        pick = None
         if not rows:
-            cv.print(f["msg"] or "NO FILES", lay.card_x, lay.card_y0,
-                     t["text"], lay.fs)
-            return
-        for rect, name, k in rows:
-            _ui.row(cv, t, rect, name, kind="row_chrome", on=(k == f["sel"]),
-                    edge=False, pad=6 * lay.fs, text_dy=1 * lay.fs, fs=lay.fs)
-        if f["msg"]:
-            cv.print(f["msg"][:34], lay.card_x, lay.view_bottom - 8 * lay.fs,
-                     self._NAMES["red"], lay.fs)
+            _ui.label(f["msg"] or "No files.")
+        code = [r for r in rows if r in sources or r == _NEW_ROW]
+        rest = [r for r in rows if r not in code]
+        if code:
+            _ui.group("Code")
+            for name in code:
+                if name == _NEW_ROW:
+                    _ui.icon("new")
+                    if _ui.link(_NEW_ROW, "", {"id": _NEW_ROW}):
+                        pick = name
+                elif self._file_row(name, "code"):
+                    pick = name
+        if rest:
+            _ui.group("Art and sound")
+            for name in rest:
+                tab = _ASSET_TABS.get(name)
+                if tab is None and "/" in name:
+                    tab = _ASSET_SUBDIR_TABS.get(name.split("/")[0])
+                if self._file_row(name, tab):
+                    pick = name
+        _ui.group()
+        if f["msg"] and rows:
+            _ui.label(f["msg"], {"tone": "danger"})
+        if pick is not None:
+            self._files_open(pick)
+        if host.owed or host.tap == 2:
+            ws.request_frame()
 
     # -- the two dialogs: CART INFO (#94) and NEW SCRIPT (#89) ---------------
     #
@@ -1118,34 +1282,37 @@ class CardsLayer:
     # cart, and a cart that is one file should stay one file unless somebody
     # went looking.
     #
-    # Typing is driven PURELY off `i.last_key` (never i.pressed("a")/("b")/
-    # nav): _set_text_mode(True) does not stop the T-Deck's ASCII-mode keyboard
-    # from ALSO firing a typed key's game-button alias (w/a/s/d/z/x), so a typed
-    # letter that collided with a checked button would fire it. Field switch is
-    # Tab (ASCII 9) or a tap, never up/down, for the same reason. The prompt
-    # opens through widgets.arm_prompt and its key edge opens GUARDED
-    # (editors_base.KeyEdge.seed): the tap/key that opened it can still be
-    # latched on its first input pass, and that pass only arms it.
+    # Both are `ui.dialog` with captioned `ui.field`s (GAPS 52) over the page
+    # dimmed (D-01), on their own UI context: the keys type (text mode, which
+    # `widgets.arm_prompt` takes), up/down, Tab or the trackball move between
+    # fields, Enter is the last button and Esc or the T-Deck's Mic (a
+    # field's cancel, `Workstation.cancel_field`) closes it. The T-Deck's
+    # dialog has no row of Cancel and OK -- its keys are the hint strip's --
+    # where a touch glass and the desk add them.
 
-    def _open_prompt(self, kind, title, fields, texts):
+    def _open_prompt(self, kind, title, fields, texts, sub, ok):
         ws = self.ws
         _arm_prompt(ws)
-        self.prompt = _Prompt(kind, title, fields)
+        self.prompt = _Prompt(kind, title, fields, sub, ok)
         self.prompt.open(texts, getattr(ws.input, "last_key", 0) or 0)
+        self.prompt.host.held = self._rows.ok
         ws._dirty = True
 
     def _open_meta(self):
         cart = self.ws.project.cart
         if not cart:
             return
-        self._open_prompt("meta", "CART INFO",
-                          (("TITLE", "", 24), ("AUTHOR", "(optional)", 24)),
+        self._open_prompt("meta", "Cart info",
+                          (("Title", "", 24), ("Made by", "Your name (you can leave it)", 24)),
                           (str(cart.get("title") or ""),
-                           str(cart.get("author") or "")))
+                           str(cart.get("author") or "")), None, "Save")
 
     def _open_newf(self):
-        self._open_prompt("newf", "NEW SCRIPT", (("NAME", "helpers", 24),),
-                          ("",))
+        cart = self.ws.project.cart or {}
+        main = cart.get("main", "main.py")
+        lang = "Lua" if main.endswith(".lua") else "Python"
+        self._open_prompt("newf", "New script", (("Name", "helpers", 24),), ("",),
+                          "A %s file beside %s" % (lang, main), "Add")
 
     def _close_prompt(self):
         self.prompt = None
@@ -1163,14 +1330,14 @@ class CardsLayer:
 
     def _commit_meta(self, p):
         ws = self.ws
-        title = p.fields[0].text.strip()
-        author = p.fields[1].text.strip()
+        title = p.texts[0].strip()
+        author = p.texts[1].strip()
         if not title:
-            p.msg = "TITLE CAN'T BE BLANK"
+            p.say("Give it a title.")
             ws._dirty = True
             return                          # stay open: never persist a blank title
         if not ws.project.commit_manifest(title=title, author=author):
-            p.msg = "COULD NOT SAVE"
+            p.say("It didn't save. Try again.")
             ws._dirty = True
             return
         self._close_prompt()
@@ -1204,15 +1371,15 @@ class CardsLayer:
     def _commit_newf(self, p):
         ws = self.ws
         cart = ws.project.cart
-        name = self._newf_filename(p.fields[0].text)
+        name = self._newf_filename(p.texts[0])
         if name is None:
-            p.msg = "NAME IT WITH LETTERS"
+            p.say("Start its name with a letter.")
             ws._dirty = True
             return
         made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
                                                              "-- " + name + "\n"))
         if made is None:
-            p.msg = "THAT NAME IS TAKEN"
+            p.say("There's a file with that name.")
             ws._dirty = True
             return
         self._close_prompt()
@@ -1221,9 +1388,9 @@ class CardsLayer:
         ws.open_code_file(made)
 
     def _prompt_event(self, ev):
-        if ev == TE_COMMIT:
+        if ev == "commit":
             self._commit_prompt()
-        elif ev == TE_CANCEL:
+        elif ev == "cancel":
             self._close_prompt()
 
     def _prompt_key(self, ch):
@@ -1231,53 +1398,70 @@ class CardsLayer:
         self._prompt_event(self.prompt.key(ch))
 
     def _prompt_input(self, i):
-        self._prompt_event(self.prompt.feed(i))
+        p = self.prompt
+        if p.host.keys(i):
+            self.ws._dirty = True
+        ch = p.host.inp[5]
+        if ch == 27 or i.pressed("stop"):
+            p.host.inp[5] = 0
+            self._close_prompt()
+        elif p.msg is not None and p.types(ch or (p.host.inp[_ui_draw.UI_IN_LEN - 1] & 0xFFFF)):
+            p.say(None)                 # the text it will change clears the line, before the frame
         return True
-
-    def _prompt_rects(self):
-        """Dialog geometry: a centered panel, one 14px field per entry under
-        its label, a status line and OK/X, scaled by the system font like
-        every other responsive Cards element."""
-        lay = self.layout
-        fs = lay.fs
-        n = len(self.prompt.fields)
-        w, h = 240 * fs, (52 + 28 * n) * fs
-        x = (lay.w - w) // 2
-        y = (lay.h - h) // 2
-        fields = tuple((x + 12 * fs, y + (26 + 28 * i) * fs, w - 24 * fs, 14 * fs)
-                       for i in range(n))
-        ok_r = (x + w - 96 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
-        cancel_r = (x + w - 50 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
-        return (x, y, w, h), fields, ok_r, cancel_r
 
     def _prompt_pointer(self, px, py, click):
-        if not click:
-            return True
-        _, fields, ok_r, cancel_r = self._prompt_rects()
-        for i, r in enumerate(fields):
-            if _in(px, py, r):
-                self.prompt.field = i
-        if _in(px, py, ok_r):
-            self._commit_prompt()
-        elif _in(px, py, cancel_r):
-            self._close_prompt()
-        self.ws._dirty = True
+        if self.prompt.host.point(px, py, click, self.ws.pointer.down):
+            self.ws._dirty = True
         return True
 
-    def _draw_prompt(self):
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas
-        fs = self.layout.fs
+    def _draw_prompt(self, held, dt):
+        """The open dialog over the page, dimmed: its title, the line under
+        it, a captioned field each, why it stayed open, and on a touch glass
+        or the desk Cancel and its last button. `held`: the page under it
+        was put back washed (`HeldPage`), else it was drawn this frame and
+        is washed and held here."""
+        ws = self.ws
         p = self.prompt
-        (x, y, w, h), fields, ok_r, cancel_r = self._prompt_rects()
-        _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
-        cv.print(p.title, x + 10 * fs, y + 8 * fs, NAMES["white"], 1)
-        for i, r in enumerate(fields):
-            cv.print(p.labels[i], x + 12 * fs, r[1] - 9 * fs, NAMES["light_grey"], 1)
-            _ui.text_field(cv, r, p.fields[i].text, p.hints[i])
-            if i == p.field:
-                cv.rectb(r[0], r[1], r[2], r[3], NAMES["yellow"])
+        lay = self.layout
+        host = p.host
+        desk = _layout_base.metric_class() == _layout_base.DESK
+        if self._rows.take():
+            host.resume(ws.sys_canvas, ws.theme_colors)   # begun ahead of the page
+        else:
+            host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        tdeck = _ui.input_kind() == "tdeck"
+        keys = (("scroll", "Field") if len(p.texts) > 1 else ()) + (
+            "confirm", p.ok, "cancel", "Cancel")
+        if _ui_draw.hint_kind() != "touch":
+            b = _ui_draw.metrics("value_row")[17 if desk else 16] * lay.fs
+            ws.sys_canvas.rect(lay.cx, lay.cy + lay.ch - b, lay.cw, b, ws.theme_colors["panel"])
+            _ui.at(lay.cx, lay.cy + lay.ch - b, lay.cw, b)
+            _ui.hints(keys)
+        if not held:
+            self._held.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(p),
+                            self._page_still(), dt)
+        pick = _ui.dialog(p.title, () if tdeck else ("Cancel", p.ok), "primary", p.o)
+        if p.sub:
+            _ui.label(p.sub, _PROMPT_SUB)
+        done = False
+        for i in range(len(p.texts)):
+            o = {"id": p.labels[i]}
+            if p.hints[i]:
+                o["hint"] = p.hints[i]
+            got, enter = _ui.field(p.labels[i], p.texts[i], p.caps[i], o)
+            if got != p.texts[i]:
+                p.texts[i] = got
+                p.say(None)
+            done = done or enter
         if p.msg:
-            cv.print(p.msg[:34], x + 12 * fs, y + h - 38 * fs, NAMES["red"], 1)
-        _ui.game_btn(cv, ok_r, "OK", NAMES["green"])
-        _ui.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])
+            _ui.label(p.msg, _PROMPT_MSG)
+        _ui.dialog()
+        f = _ui.focus()
+        if f in p.labels:
+            p.field = p.labels.index(f)
+        if pick == 1 or done:
+            self._commit_prompt()
+        elif pick == 0:
+            self._close_prompt()
+        if host.owed or host.tap == 2:
+            ws.request_frame()

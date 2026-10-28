@@ -20,18 +20,39 @@ module only in the boot that runs one.
 """
 
 
+def _kernel():
+    """The kernel's binding (native/moy_kernel), or None on a board without it.
+
+    The kernel restarts into its recovery screen when the console's boot ends
+    before the first frame proved it (`device_boot.boot_ok`), so every way out
+    of here that MEANS the REPL says so first: a developer's Ctrl-C, and every
+    self-terminating mode."""
+    try:
+        import moy_kernel
+    except ImportError:
+        return None
+    return moy_kernel
+
+
 def main(board, mode, modes, smoke):
     """Run `mode` for `board`. Called by each board's `moybyte_shell.main()`."""
     print("Moybyte %s shell starting -- mode=%s" % (board, mode))
+    kernel = _kernel()
     if mode == "desktop":
         try:
             from moy_runtime import run_desktop
             run_desktop()
         except KeyboardInterrupt:
             print("Moybyte desktop interrupted -> REPL")
+            if kernel is not None:
+                kernel.boot_ok()
         except Exception as exc:        # noqa: BLE001 -- say what broke, keep the REPL
             print("Moybyte desktop FAILED:", exc)
+            if kernel is not None:
+                kernel.boot_failed("%s: %s" % (type(exc).__name__, exc))
         return
+    if kernel is not None:
+        kernel.boot_ok()
     if mode not in modes:
         print("Moybyte: unknown MODE %r (expected one of %s) -> REPL"
               % (mode, ", ".join(modes)))
@@ -41,6 +62,6 @@ def main(board, mode, modes, smoke):
     except Exception as exc:            # noqa: BLE001 -- a failed smoke is a RESULT
         # Printed, never re-raised: the traceback would land on the same serial
         # line either way, and returning cleanly leaves the REPL usable for the
-        # follow-up question ("moy_lcd.set_madctl(0x28)", "device_input.TOUCH_FLIP_X
-        # = True; tdeck_smoke.touch()") which is the whole point of a smoke.
+        # follow-up question ("moy_lcd.set_madctl(0x28)", "flip the touch's
+        # flip_x, re-run tdeck_smoke.touch()") which is the whole point of a smoke.
         print("Moybyte %s smoke FAILED: %s: %s" % (mode, type(exc).__name__, exc))

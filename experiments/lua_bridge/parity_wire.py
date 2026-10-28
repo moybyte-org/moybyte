@@ -217,12 +217,28 @@ def same(a, b, tol, stats=None):
     return type(a) is type(b) and a == b
 
 
-# --- the console a MoycoreHostRun is opened over -----------------------------
+# --- the console a Lua run is opened over -------------------------------------
+
+def lua_run(ws, ns, src):
+    """The cart's Lua run as a board makes it: device/moycore_glue.py's
+    MoycoreRun over the host's moycore (runtime/moycore.py), the C a board
+    runs."""
+    import os
+    import sys
+    from runtime import host_canvas
+    host_canvas.install()
+    dev = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "device")
+    if dev not in sys.path:
+        sys.path.append(dev)
+    import moycore_glue
+    return moycore_glue.MoycoreRun(ws, ns, src)
+
 
 class _Canvas:
     def __init__(self, w=320, h=240):
         self.w, self.h = w, h
-        self._buf = bytearray(w * h * 2)   # RGB565, what canvas_target reads
+        self._buf = bytearray(w * h * 2)   # RGB565, the run's framebuffer
         self._wire = None
 
 

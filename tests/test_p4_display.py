@@ -1,17 +1,13 @@
-"""`P4Compositor`, EXECUTED (`device/dsi_panel.py`, bound through
-`firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_display.py`).
+"""The P4s' compositors, EXECUTED: the Waveshare's -- the kernel's DSI
+engine (`native/moy_glass/moy_present.h`) through the host binding
+(`runtime/glass_binding.py`) -- and the Guition's rotated one
+(`moy_glass.RotatedCompositor`, the same host binding).
 
-The P4's compositor is the async-overlap lever (#58) -- the deferred composite,
+The Waveshare's is the async-overlap lever (#58) -- the deferred composite,
 the drag stamp-defer, the triple-framebuffer rotation and the fences that hold
 them together. `tests/test_banded_panel.py` is the sibling for the two S3
-boards; this is the same argument for the board whose panel SCANS.
-
-`p4_display` is ordinary Python with every hardware module imported lazily, so
-it loads from its path against the stubs below and runs exactly as it does on
-glass. It is loaded BY PATH rather than through the board's `modules/`
-directory: that directory is gitignored staging, so a fresh checkout has only
-the six tracked files in it and the `from ticks import ...` ladder's second rung
-(`runtime.ticks`) is what resolves here.
+boards; this is the same argument for the boards whose panel SCANS. Both run
+against the stubbed `moy_dsi`/`moy_ppa` below exactly as they do on glass.
 """
 
 import contextlib
@@ -27,6 +23,15 @@ P4_MODULES = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
 DEVICE = ROOT / "device"
 
 from runtime import device_boot                                    # noqa: E402
+from runtime import glass_binding                                  # noqa: E402
+
+# The Guition P4's compositor -- the kernel's rotated engine through the host
+# binding -- and the names the tests below read beside it.
+ROTATED = types.SimpleNamespace(
+    RotatedCompositor=glass_binding.RotatedCompositor,
+    rotate_rect=glass_binding.rotate_rect,
+    unrotate_rect=glass_binding.unrotate_rect,
+    OVERLAP_FIELDS=glass_binding.OVERLAP_FIELDS)
 from runtime.dev_channel import _remote_state                      # noqa: E402
 
 
@@ -52,9 +57,13 @@ class FakeDsi:
         self._fbs = [FB(i) for i in range(n)]
         self.shown = []
         self.flushes = 0
+        self.lit = None
 
     def init(self):
         pass
+
+    def backlight(self, on):
+        self.lit = bool(on)
 
     def nfbs(self):
         return self._n
@@ -90,6 +99,7 @@ class FakePpa:
 
     def blit_async(self, *a):
         self.kicks += 1
+        self.last = a
 
     def stats(self):
         # (submitted, done, timeouts) -- modmoy_ppa.c
@@ -113,19 +123,7 @@ class FakeCanvas:
     def sync_back(self):
         self.syncs += 1
 
-    def cls(self, c=0):
-        pass
-
-    def spr(self, *a, **k):
-        pass
-
-    def print(self, *a, **k):
-        pass
-
-    def rect(self, *a, **k):
-        pass
-
-    def rectb(self, *a, **k):
+    def splash(self, pal, permille=-1, status=""):
         pass
 
 
@@ -157,55 +155,23 @@ class FakeWS:
 
 @contextlib.contextmanager
 def p4_display(dsi, ppa, gfx=None):
-    """Load `p4_display` fresh against stubbed native modules.
-
-    Fresh every time on purpose: `set_backlight` caches its Pin in a module
-    global, so a shared import would carry one test's pin into the next.
-    """
-    keys = ("p4_display", "dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx", "machine")
-    saved = {k: sys.modules.get(k) for k in keys}
-    machine = types.ModuleType("machine")
-    machine.Pin = _FakePin
-    sys.modules["moy_dsi"] = dsi
-    sys.modules["moy_ppa"] = ppa
-    sys.modules["machine"] = machine
+    """The Waveshare's compositor -- the kernel's DSI engine through the host
+    binding (`runtime/glass_binding.py`) -- over stubbed native modules, as a
+    module with the board runtime's one name, `P4Compositor()`."""
+    saved = sys.modules.get("moy_gfx")
     if gfx is None:
         sys.modules.pop("moy_gfx", None)
     else:
         sys.modules["moy_gfx"] = gfx
-    # The compositor BODY is device/dsi_panel.py (one copy for both P4 boards
-    # since 2026-09-06); the board file binds its backlight to it. Load the
-    # body first under the flat device name the board file imports, then the
-    # board file, so `mod.P4Compositor()` is exactly what the board constructs.
-    dspec = importlib.util.spec_from_file_location(
-        "dsi_panel", DEVICE / "dsi_panel.py")
-    dmod = importlib.util.module_from_spec(dspec)
-    sys.modules["dsi_panel"] = dmod
-    spec = importlib.util.spec_from_file_location(
-        "p4_display", P4_MODULES / "p4_display.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["p4_display"] = mod
     try:
-        dspec.loader.exec_module(dmod)
-        spec.loader.exec_module(mod)
-        yield mod
+        yield types.SimpleNamespace(
+            P4Compositor=lambda: glass_binding.DsiCompositor(dsi, ppa),
+            set_backlight=dsi.backlight)
     finally:
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-
-
-class _FakePin:
-    OUT = 1
-
-    def __init__(self, gpio, mode=None, value=None):
-        self.gpio = gpio
-        self.level = value
-
-    def value(self, v):
-        self.level = v
+        if saved is None:
+            sys.modules.pop("moy_gfx", None)
+        else:
+            sys.modules["moy_gfx"] = saved
 
 
 class StepTicks:
@@ -233,11 +199,8 @@ class StepTicks:
 def stepped(monkeypatch):
     def install(mod, step=1000):
         clock = StepTicks(step)
-        # The fences read the clock through dsi_panel's globals (the body),
-        # whichever board file `mod` is.
-        target = sys.modules.get("dsi_panel", mod)
-        monkeypatch.setattr(target, "_ticks_us", clock.us)
-        monkeypatch.setattr(target, "_ticks_diff", StepTicks.diff)
+        # Both engines read the clock through the host binding.
+        monkeypatch.setattr(glass_binding, "_ticks_us", clock.us)
         return clock
     return install
 
@@ -446,6 +409,95 @@ def test_a_stamp_pending_never_blocks_and_is_no_game_fence(stepped):
             "the ~free done()-gated drain was billed as a blocking fence")
 
 
+def test_a_stamp_off_the_glass_kicks_the_block_on_it(stepped):
+    """A window hanging off the glass hands the kick the block of it that
+    lies on the glass, landing where that block sits; a whole one, the
+    layer as it is."""
+    _dsi, ppa, ctx = build()
+    with ctx as mod:
+        stepped(mod)
+        comp = mod.P4Compositor()
+        dst, src = FB(9), FB(8)
+        comp._stamp_pending = (dst, 8, 8, 0, 0, src, 8, 8)
+        comp.flush()
+        assert ppa.last == (dst, 8, 8, 0, 0, src, 8, 8, 1)
+        comp.present_pending()
+        comp._stamp_pending = (dst, 8, 8, 5, -2, src, 8, 8, 0, 2, 3, 6)
+        comp.flush()
+        assert ppa.last == (dst, 8, 8, 5, 0, src, 8, 8, 1, 0, 2, 3, 6)
+
+
+class PixDsi(FakeDsi):
+    """Scan buffers with pixels, small enough to compare whole."""
+
+    WIDTH, HEIGHT = 8, 4
+
+    def __init__(self, n=3):
+        FakeDsi.__init__(self, n)
+        self._fbs = [bytearray(8 * 4 * 2) for _ in range(n)]
+
+
+class CopyPpa(FakePpa):
+    """moy_ppa with the GDMA row copy, refusing it on demand."""
+
+    def __init__(self, done=True, takes=True):
+        FakePpa.__init__(self, done)
+        self.takes = takes
+        self.copies = []
+
+    def copy(self, dst, src, off, n):
+        self.copies.append((off, n))
+        if self.takes:
+            dst[off:off + n] = src[off:off + n]
+        return self.takes
+
+
+def test_copy_last_copies_out_of_the_buffer_the_last_frame_drew():
+    """copy_last (surface model §14.5): the rect of the buffer the last
+    presented frame drew into lands in the one this frame draws into --
+    whole rows through moy_ppa.copy, any other rect (or a refused span) a
+    row copy on the CPU; nothing before a frame was drawn."""
+    for takes in (True, False):
+        dsi, ppa = PixDsi(), CopyPpa(takes=takes)
+        with p4_display(dsi, ppa) as mod:
+            comp = mod.P4Compositor()
+            assert comp._last is None and not comp.copy_last(0, 0, 8, 4)
+            comp.framebuffer()[:] = bytes(range(64))
+            comp.flush()
+            assert comp._last == 1 and comp._back == 2
+            assert comp.copy_last(0, 1, 8, 2)
+            assert comp.framebuffer() == bytes(16) + bytes(range(16, 48)) + bytes(16)
+            assert ppa.copies == [(16, 32)]
+            assert comp.copy_last(2, -1, 3, 9)          # clipped to the glass
+            fb = comp.framebuffer()
+            assert all(fb[(y * 8 + x) * 2] == (y * 8 + x) * 2
+                       for y in range(4) for x in range(2, 5))
+            assert fb[:4] == bytes(4) and ppa.copies == [(16, 32)]
+
+
+def test_copy_last_fences_a_queued_op_still_writing_that_buffer():
+    """A deferred stamp still flying into the last frame's buffer has landed
+    before a copy reads it: the queue is fenced and shown, and counted."""
+    dsi, ppa = PixDsi(), CopyPpa(done=False)
+    with p4_display(dsi, ppa) as mod:
+        comp = mod.P4Compositor()
+        comp._stamp_pending = (comp.framebuffer(), 8, 4, 0, 0, bytearray(64), 8, 4)
+        comp.flush()
+        assert comp._busy3 == [1] and comp._last == 1
+        fences = comp.overlap_stats()[2]
+        assert comp.copy_last(0, 0, 8, 4)
+        assert ppa.syncs == 1 and comp._busy3 == [] and dsi.shown[-1] == 1
+        assert comp.overlap_stats()[2] == fences + 1
+
+
+def test_copy_last_on_one_buffer_copies_nothing():
+    dsi, ppa = PixDsi(1), CopyPpa()
+    with p4_display(dsi, ppa) as mod:
+        comp = mod.P4Compositor()
+        comp.flush()
+        assert comp.copy_last(0, 0, 8, 4) and ppa.copies == []
+
+
 def test_a_frame_with_both_a_stamp_and_a_game_composite_fences_blocking(stepped):
     """The kind is decided by the frame's WEAKEST guarantee. The stamp kick
     sets the same `_composite_pending` the game composite does, so filing the
@@ -487,17 +539,106 @@ def test_a_game_queued_BEHIND_a_stamp_still_fences_blocking(stepped):
 
 def test_a_stamp_only_queue_keeps_its_free_gate(stepped):
     """The upgrade is one-way: a frame with no game composite must not start
-    paying the blocking fence."""
+    paying the blocking GAME fence. A queue that fills every other buffer is
+    fenced all the same -- the next frame's buffer is the one on glass -- and
+    that is the reuse fence, never the game's."""
     _dsi, ppa, ctx = build(done=False)
     with ctx as mod:
         stepped(mod)
         comp = mod.P4Compositor()
-        for _ in range(2):                 # two entries queued, both "stamp"
-            comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
-            comp.flush()
-            comp.present_pending()
-        assert [k for _fb, k in comp._pend3] == ["stamp", "stamp"]
+        comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
+        comp.flush()
+        comp.present_pending()
+        assert [k for _fb, k in comp._pend3] == ["stamp"]
         assert (ppa.syncs, comp.overlap_stats()[4]) == (0, 0)
+        comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
+        comp.flush()                       # both other buffers queued
+        comp.present_pending()
+        assert comp._pend3 == []
+        fences, _us, game_n = comp.overlap_stats()[2:5]
+        assert (ppa.syncs, fences, game_n) == (1, 1, 0)
+
+
+# -- the buffer drawn into is never the one on glass ---------------------------
+
+
+class ScanDsi(FakeDsi):
+    """`moy_dsi` with a panel that SCANS: a show takes effect at the next
+    refresh, so `scan` -- the buffer on glass -- is the last one shown before
+    the latest refresh. Time passes only where the test says (`vsync`) or
+    while the engine polls the refresh count (every `poll`-th read is a
+    refresh): frames as fast as the loop can make them."""
+
+    def __init__(self, n=3, poll=3):
+        super().__init__(n)
+        self.count = 0
+        self.reads = 0
+        self.poll = poll
+        self.scan = 0
+
+    def refreshes(self):
+        self.reads += 1
+        if self.reads % self.poll == 0:
+            self.vsync()
+        return self.count
+
+    def vsync(self):
+        self.count += 1
+        if self.shown:
+            self.scan = self.shown[-1]
+
+
+def _drag_frames(comp, dsi, ppa, frames, rng):
+    """A window drag's frames on the Waveshare: every frame defers its window
+    stamp to the PPA, whose DMA outlasts the loop's gap at random, and the
+    panel refreshes between frames at random. Answers the frames that drew
+    into the buffer on glass, by index."""
+    bad = []
+    for i in range(frames):
+        ppa.done_flag = rng.random() < 0.3
+        comp.present_pending()
+        if rng.random() < 0.4:
+            dsi.vsync()
+        if comp._back == dsi.scan:
+            bad.append(i)
+        comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
+        comp.flush()
+    return bad
+
+
+def test_a_drag_never_draws_into_the_buffer_on_glass():
+    """The flicker the owner saw on the Waveshare (2026-10-20): a window
+    dragged across the desk vanished for a frame, the desk under it showing
+    through. A drag frame defers its window stamp, so with the PPA still busy
+    at the next pre-frame hook its show stays queued; two such frames queue
+    both other buffers, and the round robin handed the third frame the buffer
+    being SCANNED -- its backdrop restore and chrome reached glass before its
+    stamp did. Drags at many speeds and timings, none drawn on glass."""
+    import random
+    for seed in range(40):
+        rng = random.Random(seed)
+        dsi, ppa = ScanDsi(), FakePpa(done=False)
+        with p4_display(dsi, ppa, FakeGfx()) as mod:
+            comp = mod.P4Compositor()
+            bad = _drag_frames(comp, dsi, ppa, 60, rng)
+            assert not bad, "seed %d: frames %s drew into the buffer on glass" % (seed, bad)
+
+
+def test_the_wait_shows_every_drag_frame_in_order():
+    """What the wait must not cost: every frame the drag drew reaches glass,
+    in the order it was drawn -- the round robin, no frame dropped, none
+    shown twice."""
+    import random
+    rng = random.Random(7)
+    dsi, ppa = ScanDsi(), FakePpa(done=False)
+    with p4_display(dsi, ppa, FakeGfx()) as mod:
+        comp = mod.P4Compositor()
+        _drag_frames(comp, dsi, ppa, 60, rng)
+        ppa.done_flag = True
+        comp.present_pending()
+        drawn = dsi.shown[1:]
+        assert len(drawn) == 60
+        assert all((drawn[k] + 1) % 3 == drawn[k + 1] for k in range(len(drawn) - 1))
 
 
 # -- where the numbers are readable --------------------------------------------
@@ -526,7 +667,7 @@ def test_state_reports_ppa_as_None_on_a_board_with_no_overlap():
 
 # The PERF line's format, its %-count and its `-`-never-0 marker moved to
 # tests/test_device_boot.py with the sampler itself (#206 item 2): the line is
-# device_boot.PerfSampler now, so those assertions can EXECUTE the emitter
+# frame_loop.PerfSampler now, so those assertions can EXECUTE the emitter
 # instead of parsing a print out of this board's source. What stays a P4
 # question -- that the overlap tuple this file exercises is what the line's
 # ppa=/fence_ms= fields carry -- is pinned there against this board's own
@@ -535,7 +676,7 @@ def test_state_reports_ppa_as_None_on_a_board_with_no_overlap():
 
 # -- the ROTATED compositor: a landscape desk on portrait glass -----------------
 #
-# device/dsi_panel.RotatedCompositor (the Guition P4, 2026-09-06). Executed
+# The rotated compositor (the Guition P4, 2026-09-06). Executed
 # against the same doubles: a portrait FakeDsi, a FakePpa that RECORDS every
 # rotate so the tests can say which buffer got which rect, at what angle.
 
@@ -556,14 +697,26 @@ class RotatingPpa(FakePpa):
     def init(self):
         return True
 
+    @staticmethod
+    def _out_rows(dw, dy, oh):
+        """ESP-IDF's rule for the engine's output (modmoy_ppa.c scopes it to
+        the rows the block lands on): they start and end on the P4's 64-byte
+        cache line, or the submit fails."""
+        if (dy * dw * 2) % 64 or (oh * dw * 2) % 64:
+            raise OSError("ppa out rows not cache-line aligned: dw=%d dy=%d oh=%d"
+                          % (dw, dy, oh))
+
     def rotate(self, dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle,
                nb=False, wb=True):
+        self._out_rows(dw, dy, w if angle in (90, 270) else h)
         self.rotates.append((dst, dx, dy, src, sx, sy, w, h, angle))
         self.nbs.append(nb)
         self.wbs.append((dst, wb))
 
     def rotate_scale(self, dst, dw, dh, dx, dy, src, sw, sh, scale, angle,
                      nb=False, wb=True, *block):
+        bw, bh = (block[2], block[3]) if block else (sw, sh)
+        self._out_rows(dw, dy, (bw if angle in (90, 270) else bh) * scale)
         self.direct.append((dst, dx, dy, src, sw, sh, scale, angle) + block)
         self.nbs.append(nb)
         self.wbs.append((dst, wb))
@@ -599,20 +752,18 @@ class RotatingPpa(FakePpa):
 @contextlib.contextmanager
 def rotated(angle=90):
     dsi, ppa = PortraitDsi(3), RotatingPpa()
-    keys = ("dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
+    keys = ("moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
     saved = {k: sys.modules.get(k) for k in keys}
     sys.modules["moy_dsi"] = dsi
     sys.modules["moy_ppa"] = ppa
     sys.modules["moy_gfx"] = FakeGfx()
     sys.modules.pop("moy_alloc", None)          # -> the bytearray fallback
-    spec = importlib.util.spec_from_file_location("dsi_panel", DEVICE / "dsi_panel.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["dsi_panel"] = mod
+    mod = ROTATED
     try:
-        spec.loader.exec_module(mod)
         lit = []
-        comp = mod.RotatedCompositor(lit.append, angle=angle)
-        comp.strip_h = 0                          # the strip has its own test
+        light = dsi.backlight
+        dsi.backlight = lambda on: (lit.append(bool(on)), light(on))
+        comp = mod.RotatedCompositor(dsi, ppa, angle=angle)
         yield mod, comp, dsi, ppa, lit
     finally:
         for k, v in saved.items():
@@ -641,7 +792,7 @@ def game(comp, ox=100, oy=50, quiet=True, direct=True, painted=None):
 
 
 def test_rotate_rect_maps_the_landscape_corners_onto_portrait_glass():
-    from device.dsi_panel import rotate_rect
+    from runtime.glass_binding import rotate_rect
     lw, lh = 1280, 800
     # 90 CCW: landscape top-left -> portrait bottom-left, top-right -> top-left.
     assert rotate_rect(0, 0, 1, 1, 90, lw, lh) == (0, 1279, 1, 1)
@@ -723,6 +874,24 @@ def test_a_quiet_game_after_a_change_is_full_once_then_direct():
         assert comp.async_stats()[:3] == (4, 4, 0), "every frame defers its show now"
 
 
+def test_a_quiet_game_of_any_width_writes_whole_cache_lines():
+    """A window-bound app's view is its window's content, any width (868 on
+    the Guition's desk): the queued copy of it lands in a scratch whose rows
+    are a whole number of cache lines, and the rotate reads the game's block
+    of it. A copy as wide as the game failed every submit, every frame."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        step(comp)
+        for _ in range(3):
+            comp.mark_game(GAME, 868, 475, 100, 60, 1, lambda: None, lambda: True, True)
+            step(comp)
+        gcopy = ppa.rotates[-1]
+        assert gcopy[0] is comp._scratch and gcopy[3] is GAME
+        assert gcopy[6:8] == (868, 475)
+        dst, dx, dy, src, sw, sh, scale, angle, bx, by, bw, bh = ppa.direct[-1]
+        assert src is comp._scratch and sw == 896 and sh == 475
+        assert (bx, by, bw, bh) == (0, 0, 868, 475)
+
+
 def test_a_frame_that_drew_anything_else_paints_and_rotates_whole():
     with rotated() as (mod, comp, dsi, ppa, lit):
         step(comp)
@@ -754,17 +923,114 @@ def test_crisp_mode_composites_into_the_paint_buffer_then_rotates_the_rect():
         assert comp.rotate_stats()[2] == 1
 
 
-def test_the_chrome_strip_rides_every_quiet_frame():
+BAR = (0, 0, 1280, 18)
+
+
+def _strip_rotates(ppa):
+    return [r for r in ppa.rotates if r[4:] == BAR + (90,)]
+
+
+def test_a_still_strip_rides_no_quiet_frame_and_a_moved_one_rides_the_next():
+    """The bar strip is presented when its pixels move, never per frame: a
+    full rotate carries it, quiet game frames after it rotate the game alone,
+    and a strip_moved puts it on the next frame, once."""
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.strip_h = 18
-        step(comp)
-        game(comp)
-        step(comp)
+        comp.set_strips([BAR])
+        assert comp._strip_moved == 1, "a strip set on relayout starts moved"
+        step(comp)                                     # full: carries the strip
+        assert comp._strip_moved == 0
+        for _ in range(4):
+            game(comp)
+            step(comp)
+        assert _strip_rotates(ppa) == [], "a still strip is never rotated"
+        comp.strip_moved(1200, 2, 40, 10)              # the clock cell
         game(comp)
         comp.flush()                                   # direct + the strip
-        strip = [r for r in ppa.rotates if r[4:] == (0, 0, 1280, 18, 90)]
-        assert len(strip) == 1 and strip[0][0] is dsi.fb(1)
+        strip = _strip_rotates(ppa)
+        assert len(strip) == 1
         assert strip[0][1:3] == (0, 0)                 # 90 CCW: the top bar lands at the panel's left
+        comp.present_pending()
+        game(comp)
+        step(comp)
+        assert len(_strip_rotates(ppa)) == 1, "presented once, then still again"
+        assert comp.strip_stats() == (1, 0)
+
+
+def test_a_moved_strip_a_damage_rect_covers_is_not_rotated_twice():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.set_strips([BAR])
+        step(comp)
+        comp.note_damage(0, 0, 1, 1)
+        step(comp)                                     # both buffers current
+        comp.strip_moved(0, 0, 1280, 18)
+        comp.note_damage(0, 0, 1280, 100)
+        step(comp)
+        assert _strip_rotates(ppa) == []
+        assert comp.strip_stats() == (0, 1)
+
+
+def test_strip_moved_marks_only_the_strips_it_touches():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.set_strips([BAR, (0, 782, 1280, 18)])     # a top and a bottom bar
+        step(comp)
+        assert comp._strip_moved == 0
+        comp.strip_moved(600, 790, 10, 4)
+        assert comp._strip_moved == 2
+        comp.strip_moved(-50, -50, 10, 10)             # off the frame: nothing
+        assert comp._strip_moved == 2
+        comp.strip_moved(0, 0, 1280, 800)
+        assert comp._strip_moved == 3
+
+
+def test_set_strips_clips_drops_the_covered_and_the_empty():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.set_strips([(-10, -4, 1300, 22), (100, 0, 50, 10), (0, 900, 10, 10),
+                         (0, 400, 0, 50)])
+        assert comp.strips() == [(0, 0, 1280, 18)]
+
+
+def test_five_bars_coalesce_into_the_strip_budget_and_a_frame_fits_its_rects():
+    """MOY_ROT_RECTS is the game, the coalesced damage and every strip: four
+    edge bars and a fifth coalesce into MOY_ROT_STRIPS (4) by the cheapest
+    merge, and a frame carrying the game, three damage rects and every strip
+    moved stays inside the budget -- each rect presented, none dropped."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        top, bottom = (0, 0, 1280, 18), (0, 782, 1280, 18)
+        left, right = (0, 18, 24, 764), (1256, 18, 24, 764)
+        second_top = (0, 18, 1280, 18)                 # a second bar under the first
+        comp.set_strips([top, bottom, left, right, second_top])
+        strips = comp.strips()
+        assert len(strips) == 4
+        assert (0, 0, 1280, 36) in strips, "the two top bars merged: the cheapest pair"
+        assert bottom in strips and left in strips and right in strips
+        assert comp._strip_moved == 0b1111
+        step(comp)
+        game(comp)
+        step(comp)
+        game(comp)
+        step(comp)                                     # converged: direct
+        n = len(ppa.rotates)
+        game(comp, quiet=False)
+        comp.note_damage(300, 300, 50, 50)
+        comp.note_damage(500, 500, 50, 50)
+        comp.note_damage(700, 600, 50, 50)
+        comp.strip_moved(0, 0, 1280, 800)              # every strip
+        comp.flush()
+        rects = sorted(r[4:8] for r in ppa.rotates[n:] if r[8] == 90)
+        want = sorted([(100, 50, 640, 480), (300, 300, 50, 50), (500, 500, 50, 50),
+                       (700, 600, 50, 50)] + strips)
+        assert rects == want, "eight rects: game + three damage + four strips"
+        assert comp.strip_stats() == (4, 0)
+
+
+def test_many_strips_never_overflow_the_list():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.set_strips([(i * 40, 0, 20, 18) for i in range(30)])
+        strips = comp.strips()
+        assert len(strips) == 4
+        x0 = min(s[0] for s in strips)
+        x1 = max(s[0] + s[2] for s in strips)
+        assert (x0, x1) == (0, 29 * 40 + 20), "every bar is inside some strip"
 
 
 def test_a_stale_rect_the_new_frame_does_not_cover_is_copied_from_the_front():
@@ -843,12 +1109,13 @@ def test_a_described_frame_rotates_its_rects_not_the_whole_buffer():
     that rect (and the bar strip) from the paint buffer instead of 4MB."""
     with rotated() as (mod, comp, dsi, ppa, lit):
         comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
-        comp.strip_h = 18
+        comp.set_strips([BAR])
         step(comp)                                     # full -> fb1
         comp.note_damage(200, 100, 700, 500)
         step(comp)                                     # fb0 missed a full: full
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
         comp.note_damage(210, 100, 700, 500)
+        comp.strip_moved(*BAR)                         # the bar re-rendered too
         comp.flush()                                   # fb1: rect frame
         assert comp._pending == 1 and comp._keep == 2, "two ops may fly: the rect and the strip"
         rot = [r for r in ppa.rotates if r[0] is dsi.fb(1) and r[8] == 90]
@@ -958,11 +1225,12 @@ def test_an_undescribed_frame_after_damage_frames_is_full_and_resets_the_other()
 
 def test_a_quiet_frame_queues_strip_then_copy_then_rotate_and_presents_later():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.strip_h = 18
+        comp.set_strips([BAR])
         step(comp)
         game(comp)
         step(comp)
         game(comp)
+        comp.strip_moved(*BAR)
         n = len(ppa.rotates)
         comp.flush()                                   # the async direct frame
         tail = ppa.rotates[n:]
@@ -1038,7 +1306,7 @@ def test_a_ppa_without_wait_keeps_the_blocking_direct_frame():
 
 
 def test_unrotate_rect_inverts_rotate_rect():
-    from device.dsi_panel import rotate_rect, unrotate_rect
+    from runtime.glass_binding import rotate_rect, unrotate_rect
     lw, lh = 1280, 800
     for angle in (90, 270):
         for r in ((0, 0, 1, 1), (100, 50, 640, 480), (1279, 799, 1, 1), (0, 0, lw, lh)):
@@ -1097,9 +1365,9 @@ def test_a_frame_is_painted_into_the_other_buffer_while_the_last_one_flies():
         b = comp.framebuffer()
         assert b is not a
         comp.note_damage(10, 10, 100, 100)
-        comp.flush()                                   # frame 2 from B, two ops (rect... no strip: 0)
+        comp.flush()                                   # frame 2 from B: the rect alone
         assert comp.framebuffer() is a
-        assert comp._keep == 1, "one op this frame (strip_h is 0 in the fixture)"
+        assert comp._keep == 1, "one op this frame (the fixture sets no strips)"
         comp.present_pending()
         assert ppa.waits[-1] == 1, "wait until at most this frame's ops fly"
         assert dsi.shown[-1] == 0
@@ -1112,10 +1380,11 @@ def test_a_frame_is_painted_into_the_other_buffer_while_the_last_one_flies():
 def test_the_deferred_window_stamp_is_the_frames_first_op_into_the_paint_buffer():
     with rotated() as (mod, comp, dsi, ppa, lit):
         comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
-        comp.strip_h = 18
+        comp.set_strips([BAR])
         step(comp)
         comp.note_damage(0, 0, 1, 1)
         step(comp)                                     # both scan buffers current
+        comp.strip_moved(*BAR)
         paint = comp.framebuffer()
         comp._stamp_pending = (paint, 1280, 800, 300, 200, WIN, 512, 480)
         comp.note_damage(298, 198, 519, 487)
@@ -1183,6 +1452,14 @@ def test_the_canvas_hands_the_rotated_compositor_its_stamp():
     cv3 = types.SimpleNamespace(_ppa=object(), _comp=Comp(), w=1280, h=800,
                                 _buf=buf, flush_batch=lambda: None)
     assert verb(cv3, Layer(), 900, 200) is False, "a stamp off the edge stays on the CPU"
+    flat = Comp()
+    flat.rotated = False
+    cv4 = types.SimpleNamespace(_ppa=object(), _comp=flat, w=1280, h=800,
+                                _buf=buf, flush_batch=lambda: None)
+    assert verb(cv4, Layer(), 900, -30) is True, "the Waveshare stamps the block on the glass"
+    assert flat._stamp_pending == (buf, 1280, 800, 900, -30, WIN, 512, 480,
+                                   0, 30, 380, 450)
+    assert verb(cv4, Layer(), 1280, 0) is False, "nothing of it on the glass"
 
 
 def test_only_the_cpu_painted_destination_gets_the_cache_writeback():
@@ -1267,8 +1544,8 @@ def test_a_clear_is_never_a_quiet_frame():
     comp.rotated = True
     cv = mod.P4SystemCanvas(comp, font_scale=1)
     assert cv._ppa is None, "the host has no PPA: cls takes the CPU fill"
-    # The host kernel installs no gates; stand the state array in so the
-    # snapshot has counters to compare (the device's gates write these).
+    # A fresh state array, so the snapshot's counters start at zero (the
+    # canvas row's own counters carry every op the canvas drew so far).
     cv._gate_state = array("i", bytearray(4 * _ST_LEN))
     assert not cv._gates_unchanged(), "no frame yet: never quiet"
     cv.sync_back()
@@ -1290,84 +1567,72 @@ def test_a_clear_is_never_a_quiet_frame():
 
 def test_a_layer_gives_its_off_heap_buffer_back_on_release():
     """A layer's pixel buffer lives outside the gc heap on a board, so nothing
-    collects it: release() is the owner's word. Where the buffer came from
-    decides what that means -- an alloc() buffer is freed through the
-    registry (and the view neutered), a pool buffer goes back to the pool, a
-    gc-heap bytearray is simply dropped. Before this the windowed WM leaked
-    ~3.6MB of PSRAM per Library -> CHANGE -> home round on the Guition P4."""
-    import sys
-    import types
+    collects it: release() is the owner's word. It is a BUF row of the glass,
+    and the row decides what release means -- a layer lent to a program goes
+    back to the pool, anything else is freed, and the view is let go either
+    way. Before this the windowed WM leaked ~3.6MB of PSRAM per Library ->
+    CHANGE -> home round on the Guition P4."""
     from device import device_canvas as dc
+    g = dc._glass_mod
 
-    class FakeAlloc:
-        MEMORY_SPIRAM = 1
-        MEMORY_DMA = 2
+    comp = dc._LayerComp(64, 32, None)
+    b = comp._b
+    assert b.live and b.origin in (g.ORIGIN_ALLOC, g.ORIGIN_POOL)
+    comp.release()
+    assert not b.live and comp._buf is None
+    comp.release()                                # idempotent
 
-        def __init__(self):
-            self.allocs = []
-            self.frees = []
+    lent = dc._LayerComp(64, 32, None, dc._owner_h("p4_release"))
+    pooled = len(g.rows(-1))
+    lent.release()
+    assert len(g.rows(-1)) == pooled + 1, "a lent layer waits in the pool"
+    dc._owner_done("p4_release")
 
-        def alloc(self, n, caps=1):
-            buf = memoryview(bytearray(n))
-            self.allocs.append((n, caps))
-            return buf
+    # The canvas-level verb reaches the comp; a root (host compositor) ignores it.
+    from runtime import host_canvas
+    host_canvas.install()
+    root = host_canvas.make_canvas(64, 32)
+    root.release()                                # no release on HostCompositor
+    lay = root.new_layer(64, 32)
+    b = lay._comp._b
+    lay.release()
+    assert lay._comp._buf is None and not b.live
 
-        def free(self, view):
-            self.frees.append(view)
 
-        def malloc_dma(self, n, caps=1):
-            raise AssertionError("alloc() is preferred when the firmware has it")
+def test_the_view_crop_a_new_view_replaces_is_given_back(monkeypatch):
+    """The P4's cart-view crop is an off-heap layer, so the canvas that
+    replaces it for a new view gives it back, once no PPA op of the last frame
+    still reads it. Dropped instead, every change of view lost the old crop
+    for good -- the S3 fold's scratch leak (#224) in the P4's own spelling."""
+    import importlib.util as ilu
+    from runtime import host_canvas
+    log = []
 
-    fake = FakeAlloc()
-    saved = sys.modules.get("moy_alloc")
-    saved_bus = sys.modules.get("lcd_bus")
-    sys.modules["moy_alloc"] = fake
-    sys.modules["lcd_bus"] = None                 # -> ImportError: caps from moy_alloc
-    pool = dc._LAYER_POOL
-    n = 64 * 32 * 2
-    pool.pop(n, None)
-    try:
-        comp = dc._LayerComp(64, 32, None)
-        assert fake.allocs == [(n, 3)], "SPIRAM|DMA, through the registry alloc"
-        assert comp.pooled and comp._origin == dc._ORIGIN_ALLOC
-        buf = comp._buf
-        comp.release()
-        assert fake.frees == [buf] and comp._buf is None
-        comp.release()                            # idempotent
-        assert len(fake.frees) == 1
-        # A pool buffer is returned to the pool, never freed.
-        pooled = memoryview(bytearray(n))
-        pool[n] = [pooled]
-        comp2 = dc._LayerComp(64, 32, None)
-        assert comp2._buf is pooled and comp2._origin == dc._ORIGIN_POOL
-        assert pool[n] == []
-        comp2.release()
-        assert pool[n] == [pooled] and len(fake.frees) == 1
-        pool.pop(n, None)
-        # The canvas-level verb reaches the comp; a root (host compositor) ignores it.
-        from runtime import host_canvas
-        host_canvas.install()
-        root = host_canvas.make_canvas(64, 32)
-        root.release()                            # no release on HostCompositor
-        lay = root.new_layer(64, 32)
-        assert lay._comp._origin == dc._ORIGIN_ALLOC
-        lay.release()
-        assert lay._comp._buf is None and len(fake.frees) == 2
-    finally:
-        pool.pop(n, None)
-        if saved is None:
-            sys.modules.pop("moy_alloc", None)
-        else:
-            sys.modules["moy_alloc"] = saved
-        if saved_bus is None:
-            sys.modules.pop("lcd_bus", None)
-        else:
-            sys.modules["lcd_bus"] = saved_bus
-    # No allocator at all (the host): a gc-heap bytearray, dropped on release.
-    comp3 = dc._LayerComp(64, 32, None)
-    assert comp3._origin == dc._ORIGIN_HEAP and not comp3.pooled
-    comp3.release()
-    assert comp3._buf is None
+    class FakePPA:
+        def sync(self):
+            log.append(("sync",))
+
+    host_canvas.install()
+    spec = ilu.spec_from_file_location("p4_canvas_under_test", DEVICE / "p4_canvas.py")
+    mod = ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cv = mod.P4SystemCanvas(host_canvas.HostCompositor(320, 200), font_scale=1)
+    cv._ppa = FakePPA()
+    cv._blit_game_full = lambda *a, **k: None   # the crop's lifecycle only
+    gc = cv.new_layer(128, 128)
+    cv.blit_game(gc, 0, 0, 1, src=(0, 4, 128, 120))
+    assert cv._view_crop._comp._b.nbytes == 128 * 120 * 2
+    for crop in ((16, 14, 96, 100), (0, 4, 128, 120)) * 5:
+        old = cv._view_crop._comp._b
+        log.clear()
+        cv.blit_game(gc, 0, 0, 1, src=crop)
+        assert log == [("sync",)], "the fence comes before the give-back"
+        assert not old.live
+        assert cv._view_crop._comp._b.nbytes == crop[2] * crop[3] * 2
+    kept = cv._view_crop._comp._b
+    log.clear()
+    cv.blit_game(gc, 0, 0, 1, src=(0, 4, 128, 120))   # same view: reused
+    assert log == [] and cv._view_crop._comp._b is kept and kept.live
 
 
 def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
@@ -1377,7 +1642,7 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
     (0) is never asked again."""
     with rotated() as (mod, comp, dsi, ppa, lit):
         comp.BOUNCE_MIN_PX = 64 * 1024      # the mechanism, on a block this size
-        comp.strip_h = 18
+        comp.set_strips([BAR])
         ppa.bands = 5
         step(comp)                                  # full rotate: 5 bands
         assert comp._keep == 5 and comp._bounced == 5
@@ -1386,11 +1651,12 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
         assert comp._bounced == 10
         n = len(ppa.rotates)
         comp.note_damage(10, 20, 400, 300)          # 120K px: bounced
+        comp.strip_moved(*BAR)
         step(comp)                                  # a damage frame
         new = ppa.rotates[n:]
         big = [r for r in new if r[6] * r[7] >= comp.BOUNCE_MIN_PX]
         assert big, "the damage rect went through the bounce"
-        strip = [r for r in new if r[7] == comp.strip_h and r[6] == comp._w]
+        strip = [r for r in new if r[4:8] == BAR]
         assert strip, "the strip is a plain rotate"
         assert comp.async_stats()[6] == 15
         # five bands plus the strip: the 1px stale rect was grown over, not copied
@@ -1414,7 +1680,7 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
 #
 # `runtime/perf_line.py` labels the ppa= slots ONCE for every board and
 # `tools/p4_perf.py` parses every board with one table, so the two compositors
-# in `device/dsi_panel.py` must answer the same question in each slot. The
+# must answer the same question in each slot. The
 # rotated one used to answer with its rotate meters -- rect frames under
 # `deferred`, copies under `obsolete`, full frames under `fences` -- so the
 # Guition P4 printed one counter under two labels and its rect-frame count
@@ -1423,12 +1689,12 @@ def test_a_big_block_rotates_through_the_bounce_and_counts_its_bands():
 
 
 def _slot(comp, name):
-    from device.dsi_panel import OVERLAP_FIELDS
+    from runtime.glass_binding import OVERLAP_FIELDS
     return comp.overlap_stats()[OVERLAP_FIELDS.index(name)]
 
 
 def test_both_compositors_report_the_same_overlap_field_set():
-    from device.dsi_panel import OVERLAP_FIELDS
+    from runtime.glass_binding import OVERLAP_FIELDS
     assert OVERLAP_FIELDS == ("deferred", "obsolete", "fences", "fence_us",
                               "game_n", "game_us", "timeouts")
     _dsi, _ppa, ctx = build()
@@ -1519,19 +1785,15 @@ class RefreshingDsi(PortraitDsi):
 @contextlib.contextmanager
 def refreshing_rotated(angle=90):
     dsi, ppa = RefreshingDsi(3), RotatingPpa()
-    keys = ("dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
+    keys = ("moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
     saved = {k: sys.modules.get(k) for k in keys}
     sys.modules["moy_dsi"] = dsi
     sys.modules["moy_ppa"] = ppa
     sys.modules["moy_gfx"] = FakeGfx()
     sys.modules.pop("moy_alloc", None)
-    spec = importlib.util.spec_from_file_location("dsi_panel", DEVICE / "dsi_panel.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["dsi_panel"] = mod
+    mod = ROTATED
     try:
-        spec.loader.exec_module(mod)
-        comp = mod.RotatedCompositor(lambda on: None, angle=angle)
-        comp.strip_h = 0
+        comp = mod.RotatedCompositor(dsi, ppa, angle=angle)
         yield mod, comp, dsi, ppa
     finally:
         for k, v in saved.items():
@@ -1881,3 +2143,36 @@ def test_a_frames_view_and_patches_are_source_blocks_on_both_scalers():
     for body in (_ppa_verb_body("rotate_scale"),
                  src[src.index("static mp_obj_t srm_blit("):]):
         assert ".block_offset_x = (uint32_t)blk[0]" in body
+
+
+def test_the_rotated_compositor_hands_the_screenshot_its_scan_buffer():
+    """tools/board.py's shot reads `_fbs[_front]` at the panel's portrait
+    geometry (`_pw`×`_ph`) and turns it back by `angle`: those are the face's."""
+    with rotated() as (_mod, comp, dsi, _ppa, _lit):
+        step(comp)
+        assert len(comp._fbs) == 3 and 0 <= comp._front < 3
+        assert (comp._pw, comp._ph) == (dsi.WIDTH, dsi.HEIGHT)
+        assert (comp._w, comp._h) == (comp._ph, comp._pw) == comp.size()
+
+
+def test_the_rotated_copy_last_copies_the_other_paint_buffer():
+    """The rotated compositor's copy_last: the landscape paint buffer the
+    last frame drew into, into the one this frame paints; a deferred stamp
+    that frame queued into it has landed first."""
+    with rotated() as (_mod, comp, _dsi, ppa, _lit):
+        assert not comp.copy_last(0, 0, 1280, 800)
+        fb = comp.framebuffer()
+        fb[:] = bytes(range(256)) * (len(fb) // 256)
+        step(comp)
+        assert comp.framebuffer() is not fb
+        assert comp.copy_last(10, 20, 30, 40)
+        now = comp.framebuffer()
+        row = 1280 * 2
+        for y in (20, 59):
+            assert now[y * row + 20:y * row + 80] == fb[y * row + 20:y * row + 80]
+        assert now[19 * row + 20:19 * row + 80] == bytes(60)
+        comp._stamp_pending = (bytearray(128), 32, 2, 0, 0, bytearray(128), 32, 2)
+        comp.flush()                     # the stamp into `now`, deferred
+        syncs = ppa.syncs
+        assert comp.copy_last(0, 0, 1280, 1)
+        assert ppa.syncs == syncs + 1

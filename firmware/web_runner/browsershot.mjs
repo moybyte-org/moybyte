@@ -11,14 +11,20 @@
 //
 // Same scenario vocabulary as pageshot.mjs where it makes sense --
 //   {"wait":ms} {"shot":"name"} {"click":[x,y]} {"move":[x,y]}
-//   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"js":"..."} {"note":"..."}
+//   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"key":"z","mods":["ctrl"]}
+//   {"key":"Meta"} (a modifier alone) {"click":[x,y],"mods":["shift"]}
+//   {"wheel":[x,y,dx,dy]} {"middle":[x0,y0,x1,y1,steps]} {"js":"..."} {"note":"..."}
 //   {"file":"path|$ENVVAR","as":"__name"}   local bytes -> window.__name
 //                                           (an ArrayBuffer, for the drop paths)
+//   {"waitFor":"<js expression>","timeout":ms}   poll the expression (as
+//                                           truthy) instead of guessing how
+//                                           long it takes; `timeout` is the
+//                                           ceiling, not the wait
 // -- with coordinates in CANVAS pixels (the page's own 1024x600-style space);
 // they are mapped through the canvas's on-screen rect for you.
 //
 // It serves dist/ itself and launches headless Chrome, so it is one command.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -158,8 +164,51 @@ if (scenario.device) {
     await cdp("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     await cdp("Emulation.setEmitTouchEventsForMouse", { enabled: true, configuration: "mobile" });
 }
+// {"scheme":"dark"|"light"}: the browser's prefers-color-scheme, which a console
+// with no saved theme boots in (page_tail.js moyScheme).
+if (scenario.scheme) {
+    await cdp("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-color-scheme", value: scenario.scheme }] });
+}
+// READY, not a guess: `#s` is the page's own status line, mirroring every
+// {t:"status"} the worker posts (worker.js's say()) -- "live" once boot()
+// has run and the first assets landed, or the terminal "needs a pin"/crash
+// text when boot stops short of that. boot_ms stays only as the ceiling for
+// a console that never answers (or, for a pin-gated page with no ?pin=, the
+// ceiling IS the wait -- "needs a pin" already ends it well under that).
+async function waitLive(timeoutMs) {
+    const terminal = new Set(["live", "console crash (see devtools)", "this console needs a pin"]);
+    const deadline = Date.now() + timeoutMs;
+    let status = "";
+    while (Date.now() < deadline) {
+        try {
+            status = (await evaluate(`(function(){var e=document.getElementById("s");
+                return e?e.textContent:"";})()`)) || "";
+        } catch (e) { status = ""; }           // mid-navigation: the DOM is not there yet
+        if (terminal.has(status)) return status;
+        await sleep(100);
+    }
+    return status;
+}
 await cdp("Page.navigate", { url: `${ORIGIN}/${scenario.query || ""}` });
-await sleep(scenario.boot_ms || 6000);
+const bootMs = scenario.boot_ms || 6000;
+const bootStatus = await waitLive(bootMs);
+console.log("boot -> " + (bootStatus || "(still booting after " + bootMs + "ms)"));
+
+// A {"waitFor": expr} step's general form: poll until truthy, `timeout` the
+// ceiling rather than the wait, same shape as waitLive above but over any
+// expression a scenario needs -- a wall-clock guess races whatever it was
+// covering for the moment something upstream (boot, here) gets faster.
+async function waitForExpr(expr, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let last;
+    while (Date.now() < deadline) {
+        try { last = await evaluate(expr); } catch (e) { last = undefined; }
+        if (last) return last;
+        await sleep(100);
+    }
+    return last;
+}
 
 // Canvas rect, so scenario coordinates are CANVAS pixels like every other probe.
 async function canvasRect() {
@@ -171,9 +220,10 @@ async function toPage(x, y) {
     if (!r) throw new Error("no canvas element");
     return { x: r.x + (x / r.cw) * r.w, y: r.y + (y / r.ch) * r.h };
 }
-async function mouse(type, x, y, button = "left", clickCount = 1) {
+async function mouse(type, x, y, button = "left", clickCount = 1, modifiers = 0) {
     const p = await toPage(x, y);
-    await cdp("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button, clickCount, buttons: type === "mouseMoved" ? 0 : 1 });
+    const buttons = type === "mouseMoved" ? 0 : (button === "middle" ? 4 : 1);
+    await cdp("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button, clickCount, buttons, modifiers });
 }
 async function shot(name) {
     // The CANVAS pixels, not the page: element.toDataURL is exactly what the
@@ -189,17 +239,53 @@ async function shot(name) {
     console.log(`shot ${name}: -> ${path}  ${st}`);
 }
 
+// CDP's modifier bits, and each modifier's own key.
+const VK = { Enter: 13, Backspace: 8, Escape: 27, Tab: 9, Delete: 46,
+             ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+             F6: 117, F11: 122 };
+const MODKEY = { alt: ["Alt", "AltLeft", 18, 1], ctrl: ["Control", "ControlLeft", 17, 2],
+                 meta: ["Meta", "MetaLeft", 91, 4], shift: ["Shift", "ShiftLeft", 16, 8] };
+
 let failed = 0;
 for (const step of scenario.steps || []) {
     try {
         if (step.note != null) console.log("--", step.note);
         if (step.wait != null) await sleep(step.wait);
+        if (step.waitFor != null) {
+            const got = await waitForExpr(step.waitFor, step.timeout || 10000);
+            console.log("   waitFor ->", JSON.stringify(got));
+        }
         if (step.move) { await mouse("mouseMoved", step.move[0], step.move[1]); await sleep(60); }
         if (step.click) {
-            await mouse("mousePressed", step.click[0], step.click[1]);
+            const m = (step.mods || []).reduce((a, k) => a | MODKEY[k][3], 0);
+            await mouse("mousePressed", step.click[0], step.click[1], "left", 1, m);
             await sleep(80);
-            await mouse("mouseReleased", step.click[0], step.click[1]);
+            await mouse("mouseReleased", step.click[0], step.click[1], "left", 1, m);
             await sleep(step.settle ?? 400);
+        }
+        if (step.wheel) {
+            // {"wheel":[x,y,dx,dy]}: one wheel event, its deltas in pixels
+            // (Chrome's 100 a notch), over a canvas point.
+            const [x, y, dx, dy] = step.wheel;
+            const p = await toPage(x, y);
+            const m = (step.mods || []).reduce((a, k) => a | MODKEY[k][3], 0);
+            await cdp("Input.dispatchMouseEvent", { type: "mouseWheel", x: p.x, y: p.y,
+                deltaX: dx, deltaY: dy, modifiers: m });
+            await sleep(step.settle ?? 300);
+        }
+        if (step.middle) {
+            // {"middle":[x0,y0,x1,y1,steps]}: the middle button pressed at the
+            // first point, moved to the second and released there (a click
+            // when they are the same).
+            const [x0, y0, x1, y1, n = 6] = step.middle;
+            await mouse("mousePressed", x0, y0, "middle");
+            for (let i = 1; i <= n && (x1 !== x0 || y1 !== y0); i++) {
+                const p = await toPage(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n));
+                await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", buttons: 4, ...p });
+                await sleep(40);
+            }
+            await mouse("mouseReleased", x1, y1, "middle");
+            await sleep(step.settle ?? 300);
         }
         if (step.drag) {
             const [x0, y0, x1, y1, n = 8] = step.drag;
@@ -215,19 +301,38 @@ for (const step of scenario.steps || []) {
             await sleep(step.settle ?? 300);
         }
         if (step.key != null) {
-            // CDP takes `text` only for printable chars; a NAMED key (Enter,
-            // ArrowDown, ...) must go as rawKeyDown with its virtual keycode
-            // or the call is refused with "Invalid 'text' parameter".
+            // CDP takes `text` only for printable chars typed alone; a NAMED
+            // key (Enter, ArrowDown, ...) or a chord goes as rawKeyDown with
+            // its virtual keycode. `mods` (["ctrl", "shift", "alt", "meta"])
+            // are pressed first and released after, as a hand does.
             const k = String(step.key);
-            const VK = { Enter: 13, Backspace: 8, Escape: 27, Tab: 9,
-                         ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
-            if (k.length === 1) {
-                await cdp("Input.dispatchKeyEvent", { type: "keyDown", text: k, key: k });
-                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k });
+            const alone = Object.keys(MODKEY).find((m) => MODKEY[m][0] === k);
+            const mods = alone ? [alone] : (step.mods || []);
+            let held = 0;
+            for (const m of mods) {
+                const [key, code, vk, bit] = MODKEY[m];
+                held |= bit;
+                await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code,
+                    windowsVirtualKeyCode: vk, modifiers: held });
+            }
+            const chord = held & (1 | 2 | 4);
+            if (alone) {
+                // the modifier's own down and up are all there is
+            } else if (k.length === 1 && !chord) {
+                await cdp("Input.dispatchKeyEvent", { type: "keyDown", text: k, key: k, modifiers: held });
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, modifiers: held });
             } else {
-                const vk = VK[k] || 0;
-                await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", key: k, code: k, windowsVirtualKeyCode: vk });
-                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: vk });
+                const up = k.length === 1 ? k.toUpperCase() : k;
+                const code = k.length === 1 ? (/[A-Z]/.test(up) ? "Key" + up : "Digit" + up) : k;
+                const vk = k.length === 1 ? up.charCodeAt(0) : (VK[k] || 0);
+                await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", key: k, code, windowsVirtualKeyCode: vk, modifiers: held });
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk, modifiers: held });
+            }
+            for (const m of mods.slice().reverse()) {
+                const [key, code, vk, bit] = MODKEY[m];
+                held &= ~bit;
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key, code,
+                    windowsVirtualKeyCode: vk, modifiers: held });
             }
             await sleep(150);
         }
@@ -262,6 +367,19 @@ for (const step of scenario.steps || []) {
     }
 }
 if (logs.length) { console.log("-- page console --"); for (const l of logs.slice(-25)) console.log("  " + l); }
+// The default profile is this run's own and goes with it; a pinned one
+// (MOY_PROFILE) is the caller's to keep.
+const chromeGone = new Promise((r) => chrome.once("exit", r));
 chrome.kill();
+await Promise.race([chromeGone, new Promise((r) => setTimeout(r, 5000))]);
 server.close();
-process.exit(failed ? 1 : 0);
+// Chrome's helpers can still be writing into it for a moment after the main
+// process exits; a profile that will not go is left, never a failed run.
+if (!process.env.MOY_PROFILE) {
+    try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+    catch (e) { console.log("profile left behind:", profile, e && e.code); }
+}
+// Exit only once stdout has drained: process.exit() with a large write still
+// pending on a pipe drops its tail, and a `js ->` line holding a framebuffer
+// then reaches the reader cut off mid-string.
+process.stdout.write("", () => process.exit(failed ? 1 : 0));

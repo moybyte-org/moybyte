@@ -14,6 +14,7 @@ this only covers the unambiguous title/author half of the gap.
 """
 
 from pathlib import Path
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -95,9 +96,8 @@ def test_project_commit_manifest_persists_and_syncs_ram(tmp_path):
     moy_carts.ensure_dirs(root)
     _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
-    ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
-                           if c["title"] == "Tune Me")
+    ws.launcher.set_items(shelf(root))
+    select_on_home(ws, "Tune Me")
     ws.open_in_editor()
     assert ws.menu_view == "cards"
 
@@ -120,9 +120,8 @@ def test_project_commit_manifest_rejects_blank_title(tmp_path):
     moy_carts.ensure_dirs(root)
     cart = _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
-    ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
-                           if c["title"] == "Tune Me")
+    ws.launcher.set_items(shelf(root))
+    select_on_home(ws, "Tune Me")
     ws.open_in_editor()
 
     assert ws.project.commit_manifest(title="   ", author="Someone") is True
@@ -147,8 +146,7 @@ def test_project_commit_manifest_noop_without_a_real_cart():
 # ----------------------------------------------------------------------------
 
 def _open_cards_for(ws, title):
-    ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
-                           if c["title"] == title)
+    select_on_home(ws, title)
     ws.open_in_editor()
     assert ws.menu_view == "cards"
 
@@ -158,15 +156,21 @@ def test_info_button_tap_opens_the_modal(tmp_path):
     moy_carts.ensure_dirs(root)
     _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
     ws.input.begin_frame()
     ws.frame(1 / 30)                                    # draw once (lays out layout)
     assert ws.cards_layer.prompt is None
 
-    rect = ws.cards_layer.layout.info_btn
+    # Cart info, the Settings page's door (look step 30), taps open the dialog
+    rect = ws.cards_layer.page().host.box("Cart info")
     cx, cy = rect[0] + rect[2] // 2, rect[1] + rect[3] // 2
     assert ws.cards_layer.handle_pointer(cx, cy, True) is True
+    for _ in range(3):
+        ws.pointer.down = False
+        ws.cards_layer.handle_pointer(cx, cy, False)
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
     assert ws.cards_layer.prompt is not None
     assert ws.input.text_mode is True                   # typing mode armed
 
@@ -181,13 +185,13 @@ def test_meta_modal_edits_title_and_author_and_commits(tmp_path):
     moy_carts.ensure_dirs(root)
     cart = _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
 
     cl = ws.cards_layer
     cl._open_meta()
     assert cl.prompt.field == 0                          # starts on TITLE
-    assert cl.prompt.fields[0].text == "Tune Me"           # pre-filled from the cart
+    assert cl.prompt.texts[0] == "Tune Me"           # pre-filled from the cart
     # clear the pre-filled title, type a new one
     for _ in range(len("Tune Me")):
         cl._prompt_key(8)
@@ -211,18 +215,18 @@ def test_meta_modal_blank_title_stays_open_with_message(tmp_path):
     moy_carts.ensure_dirs(root)
     _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
 
     cl = ws.cards_layer
     cl._open_meta()
-    for _ in range(len(cl.prompt.fields[0].text)):
+    for _ in range(len(cl.prompt.texts[0])):
         cl._prompt_key(8)                                   # backspace to empty
-    assert cl.prompt.fields[0].text == ""
+    assert cl.prompt.texts[0] == ""
     cl._prompt_key(13)                                      # Enter -> try to commit
 
     assert cl.prompt is not None                            # stayed open
-    assert cl.prompt.msg == "TITLE CAN'T BE BLANK"
+    assert cl.prompt.msg == "Give it a title."
     assert ws.project.cart["title"] == "Tune Me"             # unchanged
 
 
@@ -231,7 +235,7 @@ def test_meta_modal_cancel_discards_edits(tmp_path):
     moy_carts.ensure_dirs(root)
     cart = _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
 
     cl = ws.cards_layer
@@ -251,7 +255,7 @@ def test_meta_modal_draws_without_crashing_and_reset_closes_it(tmp_path):
     moy_carts.ensure_dirs(root)
     _cart_with_edit_schema(root)
     ws = host_app.build_workstation(root)
-    ws.launcher.set_items(moy_carts.scan(root))
+    ws.launcher.set_items(shelf(root))
     _open_cards_for(ws, "Tune Me")
 
     ws.cards_layer._open_meta()

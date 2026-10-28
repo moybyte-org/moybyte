@@ -37,7 +37,7 @@ import types
 
 import pytest
 
-from runtime import host_app
+from runtime import audio_session, host_app
 from tools import wasm_cart, wat
 from ws_helpers import open_cart
 
@@ -258,20 +258,25 @@ CLOCK = """
 
 
 def test_a_compiled_carts_time_is_the_players_cart_clock(tmp_path):
-    """time() through the Player is milliseconds since the Player stamped the
-    run, as on a board (lua_ext.snap_shared fills the snapshot's clock on
-    both). It read 0 plus the tick's own milliseconds until the host filled
-    it, and Doom's game clock never left its first tic."""
+    """time() through the Player is milliseconds since the kernel's Player
+    launched the run (moy_play.c fills the snapshot's clock), as on a board:
+    it moves with the wall clock between frames. It read 0 plus the tick's
+    own milliseconds until the host filled it, and Doom's game clock never
+    left its first tic."""
+    import time as _time
     _binding_or_skip()
-    from runtime.ticks import _ticks_diff
     ws = host_app.build_workstation(_store(
         tmp_path, _wat_cart("Clock", CLOCK, 1)))
     open_cart(ws, "Clock")
     assert ws.player.cart_error is None, ws.player.cart_error
-    ws.input.cart_start_ms = _ticks_diff(ws.input.cart_start_ms, 5000)
+    assert ws.player._play is not None, "the run's frame is not the kernel's Player's"
+    ws.frame(_DT)
+    t0 = _pmem(ws)[0]
+    _time.sleep(0.2)
     ws.frame(_DT)
     assert ws.player.cart_error is None, ws.player.cart_error
-    assert 5000 <= _pmem(ws)[0] < 6000, _pmem(ws)[0]
+    t1 = _pmem(ws)[0]
+    assert 150 <= t1 - t0 < 2000, (t0, t1)
 
 
 TRAP_IN_DRAW = """
@@ -311,12 +316,9 @@ def test_a_trap_ends_the_run_with_no_partial_frame_and_no_edit(tmp_path):
     corner = (ws.canvas.h - 1) * w
     px = ws.canvas._buf[2 * corner] | ws.canvas._buf[2 * corner + 1] << 8
     assert px == ws.canvas._wire[0], hex(px)
-    # The crash bar offers no EDIT/CODE for a compiled cart, and its slot
-    # does nothing when tapped.
-    from runtime import bar_layer
-    assert bar_layer._edit_kind(ws.cart) is None
-    x, y, bw, bh = bar_layer._MENU_BTN
-    assert ws.bar_layer.handle_cart_tap(x + 1, y + 1) is False
+    # The stop card offers no See why for a compiled cart: Restart and Home.
+    assert ws.pause.open and ws.pause.stopped
+    assert ws.pause.rows == (ws.pause.RESTART, ws.pause.HOME)
 
 
 # A cart that keeps the console's sample queue full: every _update asks for
@@ -347,7 +349,7 @@ TONE = """
 
 def test_a_carts_samples_reach_the_audio_output_at_the_rate(tmp_path):
     """snd on the host: the cart fills the room each tick, the console's audio
-    backend mixes the stream into every block it renders, and over ten seconds
+    pull mixes the stream into every block it renders, and over ten seconds
     of frames the output takes 22050 frames a second of it -- what the
     cart queued is what played plus what is still queued, nothing starved
     once the stream began, and the blocks carry the tone."""
@@ -357,7 +359,7 @@ def test_a_carts_samples_reach_the_audio_output_at_the_rate(tmp_path):
     open_cart(ws, "Tone")
     assert ws.player.cart_error is None, ws.player.cart_error
     run = ws.player._lua
-    assert ws.audio.stream is run._run
+    assert ws.audio_out.stream is run._run
     _frames(ws, 300)
     queued, played, starved, room = run.snd_counts()
     assert _pmem(ws)[0] == queued
@@ -366,10 +368,10 @@ def test_a_carts_samples_reach_the_audio_output_at_the_rate(tmp_path):
     # The host renders at the engine's own rate, so the stream is resampled,
     # and the resampler holds the stream's next frame in hand.
     assert 22050 * 10 - 2 <= played <= 22050 * 10, played
-    pcm = ws.audio.last_pcm
+    pcm = ws.audio_out.last_pcm
     peak = max(abs(int.from_bytes(pcm[i:i + 2], "little", signed=True))
                for i in range(0, len(pcm), 2))
-    assert peak == 8000 * ws.audio.engine.master // 7, peak
+    assert peak == 8000 * audio_session.console_volume() // 7, peak
 
 
 QUITTER = """
@@ -536,9 +538,9 @@ def test_the_store_never_reads_the_module_as_text(tmp_path):
     # its source is src/, and that is its code
     assert host_app.moy_carts.cart_sources(cart) == ["src/main.wat"]
     assert "(module" in host_app.moy_carts.source_text(cart)
-    # a slim scan still requires the module to exist
+    # a catalogue entry still requires the module to exist
     os.remove(os.path.join(root, "hello.moy", "main.wasm"))
-    assert host_app.moy_carts.load(os.path.join(root, "hello.moy"), src=False) is None
+    assert host_app.moy_carts.entry(os.path.join(root, "hello.moy")) is None
 
 
 def test_no_text_write_reaches_the_module(tmp_path):
@@ -596,12 +598,10 @@ def test_a_copy_the_store_has_no_room_for_leaves_no_half_cart(tmp_path, monkeypa
             f.write(b"\0" * 100)
         raise OSError(28, "No space left on device")
     monkeypatch.setattr(host_app.moy_carts, "_copy_bytes", _full)
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items)
-                         if it.get("title") == "Hello Wasm")
-    ws.carts.dup()
+    ws.carts.dup(next(c for c in ws.carts.all if c.get("title") == "Hello Wasm"))
     assert sorted(os.listdir(root)) == before
     assert not any(c["title"] == "Hello Wasm copy" for c in ws.carts.all)
-    assert ws._notice == ("CAN'T COPY", "the store is full", "warn")
+    assert ws._notice == ("CAN'T COPY", "The store is full", "warn")
 
 
 def test_the_sync_walk_leaves_the_module_home(tmp_path):
@@ -686,7 +686,7 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     free, on the Player's panel drawn as a notice -- no error title, no EDIT,
     the same way out -- and the console runs the next cart as before."""
     _binding_or_skip()
-    from runtime import bar_layer, player
+    from runtime import player
     from runtime.dev_channel import _remote_state
     ws = host_app.build_workstation(_store(tmp_path, _huge, _hello))
     open_cart(ws, "Huge Wasm")
@@ -695,19 +695,17 @@ def test_a_cart_bigger_than_the_console_opens_the_notice_not_an_error(tmp_path):
     # The host always interprets (there is no AOT tier on it), so this is the
     # interpreted rule's number: the module file is never reused for the
     # linear memory, so a 40 MB declaration holds two ~41 MB blocks at once.
-    assert p.notice == ("Huge Wasm needs 82.6 MB of memory to run. This "
-                        "console has 32.0 MB free."), p.notice
+    assert p.notice == ("Huge Wasm needs 82.6 MB of memory to run. This console has "
+                        "32.0 MB free. Restarting the console might free "
+                        "enough."), p.notice
     assert p._lua is None and p._update is None and p._draw is None
     assert not ws.wm.top_is("menu"), "a notice threw into the Editor"
     _frames(ws, 3)
-    cv = ws.canvas
-    x, y = (cv.w - min(292, cv.w - 12)) // 2, min(40, (cv.h - min(132, cv.h - 16)) // 2)
-    assert _px(cv, x + 1, y + 1) == cv._wire[ws.player.NAMES["orange"]]
-    assert _px(cv, x + 1, y + 1) != cv._wire[ws.player.NAMES["red"]]
-    assert player.NOTICE_TITLE == "Too big for this console."
+    # the stop card says so over the screen it was asked from, Home its one row
+    assert ws.pause.open and ws.pause.stopped and ws.pause.rows == (ws.pause.HOME,)
+    assert p._notice_title == "Too big for this console."
     st = _remote_state(ws)
     assert st["notice"] == p.notice and st["cart_error"] is None
-    assert bar_layer._edit_kind(ws.cart) is None
     ws._exit_to_caller()
     open_cart(ws, "Hello Wasm")
     assert ws.player.cart_error is None and ws.player.notice is None
@@ -723,8 +721,9 @@ def test_the_hosts_configured_limit_is_what_it_refuses_by(tmp_path, monkeypatch)
     ws = host_app.build_workstation(_store(tmp_path, _hello))
     monkeypatch.setattr(wasm_host, "MEMORY_LIMIT", 300 * 1024)
     open_cart(ws, "Hello Wasm")
-    assert ws.player.notice == ("Hello Wasm needs 0.5 MB of memory to run. "
-                                "This console has 0.2 MB free."), ws.player.notice
+    assert ws.player.notice == ("Hello Wasm needs 0.5 MB of memory to run. This "
+                                "console has 0.2 MB free. Restarting the console "
+                                "might free enough."), ws.player.notice
     ws._exit_to_caller()
     monkeypatch.undo()
     open_cart(ws, "Hello Wasm")
@@ -758,8 +757,9 @@ def test_a_load_that_still_runs_out_of_memory_gets_the_same_notice(tmp_path):
     _binding_or_skip()
     ws = host_app.build_workstation(_store(tmp_path, _hello))
     real = ws.runtimes["wasm"]
-    want = ("Hello Wasm needs 0.5 MB of memory to run. This console has "
-            "32.0 MB free, but not in pieces it can use.")
+    want = ("Hello Wasm needs 0.5 MB of memory to run. This console has 32.0 MB "
+            "free, but not in pieces it can use. Restarting the console might free "
+            "enough.")
     for exc in (RuntimeError("out of memory: AOT module instantiate failed: "
                              "allocate linear memory failed"),
                 MemoryError("no PSRAM for the module file")):
@@ -781,8 +781,64 @@ def test_a_console_whose_largest_block_is_too_small_says_so(tmp_path):
                                    memory=(32 * 1024 * 1024, 100 * 1024))
     open_cart(ws, "Hello Wasm")
     assert ws.player.notice == ("Hello Wasm needs 0.3 MB of memory in one "
-                                "piece. The biggest piece this console has "
-                                "free is 0.0 MB."), ws.player.notice
+                                "piece. The biggest piece this console has free "
+                                "is 0.0 MB. Restarting the console might free "
+                                "enough."), ws.player.notice
+
+
+def _parked_desk(tmp_path):
+    """A P4-shaped console in console mode over three parked windows."""
+    ws = host_app.build_workstation(_store(tmp_path, _hello), sys_size=(1024, 600),
+                                    font_scale=2, windowed=True)
+    for app in ("settings", "calc", "files"):
+        if app == "settings":
+            ws.open_settings()
+        else:
+            ws.open_app(ws._apps_by_id[app])
+    ws.wm._sync_windows()
+    wins = dict(ws.wm._wins)
+    ws.open_library()                            # the desk's PLAY
+    ws.launcher_layer.prealloc_retained()
+    return ws, wins
+
+
+def test_a_failed_fit_releases_parked_stamps_until_it_passes(tmp_path):
+    """A compiled cart that does not fit gets back the parked window stamps,
+    oldest first and one at a time, and stops releasing once it fits
+    (docs/shell_layout_2026-10.md §3); the released window re-renders once
+    when the desk comes back."""
+    _binding_or_skip()
+    ws, wins = _parked_desk(tmp_path)
+    rt = ws.runtimes["wasm"]
+
+    def freed():
+        return sum(1 for w in wins.values() if w.buf is None)
+
+    class Growing(_Runtime):
+        def memory(self):
+            need = self.real.footprint(ws.cart)
+            n = freed()
+            return (need[0], need[1]) if n >= 2 else (n, n)
+
+    ws.runtimes["wasm"] = Growing(rt)
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.notice is None and ws.player.cart_error is None
+    assert [k for k, w in wins.items() if w.buf is None] == ["settings", "calc"]
+    assert wins["files"].buf is not None
+    assert ws.launcher_layer._lib_cache is not None
+    ws._exit_to_caller()
+    ws.open_desk()
+    assert all(w.buf is not None for w in wins.values())
+
+
+def test_a_fit_that_never_passes_releases_everything_then_says_so(tmp_path):
+    _binding_or_skip()
+    ws, wins = _parked_desk(tmp_path)
+    ws.runtimes["wasm"] = _Runtime(ws.runtimes["wasm"], memory=(1, 1))
+    open_cart(ws, "Hello Wasm")
+    assert ws.player.notice is not None
+    assert all(w.buf is None for w in wins.values())
+    assert ws.launcher_layer._lib_cache is None
 
 
 def test_the_notice_never_reads_as_a_fit():
@@ -791,16 +847,17 @@ def test_the_notice_never_reads_as_a_fit():
     from runtime.player import fit_notice
     mb = 1024 * 1024
     text = fit_notice("Doom", (int(2.95 * mb), mb), (int(2.94 * mb), 2 * mb))
-    assert text == "Doom needs 3.0 MB of memory to run. This console has 2.9 MB free."
+    assert text == ("Doom needs 3.0 MB of memory to run. This console has 2.9 MB "
+                    "free. Restarting the console might free enough.")
     assert fit_notice("Doom", None, None) == (
-        "Doom needs more memory than this console has free.")
+        "Doom needs more memory than this console has free. Restarting the console "
+        "might free enough.")
 
 
 # -- a cart built for a newer console ----------------------------------------------
 
 NEWER = os.path.join(FIXTURES, "newer.moy")
-NEWER_NOTICE = ("Newer Wasm needs a newer console (missing: later). "
-                "Update the firmware.")
+NEWER_NOTICE = "It uses later. Update in Settings, then try again."
 
 
 def _newer(root):
@@ -820,7 +877,7 @@ def test_a_cart_built_for_a_newer_console_opens_the_notice_not_an_error(tmp_path
     open_cart(ws, "Newer Wasm")
     p = ws.player
     assert p.notice == NEWER_NOTICE, p.cart_error
-    assert p._notice_title == player.NEWER_TITLE == "Needs a newer console."
+    assert p._notice_title == "Needs a newer console."
     assert p._lua is None and p._update is None and p._draw is None
     assert not ws.wm.top_is("menu"), "a notice threw into the Editor"
     _frames(ws, 3)
@@ -844,8 +901,8 @@ def test_a_console_without_write_erase_and_list_refuses_a_cart_that_keeps_files(
     monkeypatch.setattr(wasm_binding, "table", lambda: older)
     ws = host_app.build_workstation(_store(tmp_path, _files))
     open_cart(ws, "Files Wasm")
-    assert ws.player.notice == ("Files Wasm needs a newer console (missing: "
-                                "write, erase, list). Update the firmware."), \
+    assert ws.player.notice == ("It uses write, erase, list. Update in Settings, "
+                                "then try again."), \
         ws.player.cart_error
     ws._exit_to_caller()
     monkeypatch.undo()

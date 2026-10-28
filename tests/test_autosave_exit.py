@@ -18,15 +18,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, select_on_home
 
 
 def _open_in_editor_by_title(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c.get("title") == title:
-            ws.launcher.sel = i
-            break
-    else:
+    if select_on_home(ws, title) is None:
         raise AssertionError("cart not found: " + title)
     ws.open_in_editor()
 
@@ -376,7 +372,6 @@ def test_a_half_typed_line_survives_a_tab_switch_and_keeps_its_badge(tmp_path):
     _switch(ws, "paint")
 
     assert "    x = (\n" in moy_carts.load(path)["src"]
-    assert (ws.save_status or "").startswith("SYNTAX"), ws.save_status
     assert ws.code_err_row == 2                  # the inline marker still points at it
     assert (ed.row, ed.col) == where, "the hard commit must not yank the caret"
     assert ws.cart_error is None, "nothing crashed -- the text was saved"

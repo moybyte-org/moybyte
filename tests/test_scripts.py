@@ -13,7 +13,7 @@ and the prompt is fed by whichever one the tier has.
 
 from pathlib import Path
 
-from ws_helpers import build_ws as _ws
+from ws_helpers import build_ws as _ws, select_on_home
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -28,7 +28,7 @@ def _device_ws(tmp_path):
     """The console with the BOARDS' InputState under it; `(ws, keyboard)`."""
     import sys
     sys.path.insert(0, str(ROOT))
-    from device.moybyte.input import InputState as DeviceInputState
+    from runtime.moy_input import InputTable as DeviceInputState
 
     ws = _ws(tmp_path)
     inp = DeviceInputState()
@@ -108,11 +108,17 @@ def test_backspace_edits_the_prompt_line_and_never_exits(tmp_path):
 
 def test_the_symbol_palette_types_the_keys_the_keyboard_lacks(tmp_path):
     """The T-Deck has no `=`/`[`/`{`/`<`/`%` keys, so the Code tab shows a
-    tappable palette -- and the prompt shows the same one, because it is the
-    same keyboard."""
+    tappable palette -- and under touch the prompt shows the same one, because
+    it is the same keyboard (with keys, the console's band and hint strip
+    are the mockup's, no palette)."""
+    from runtime import ui_draw
     ws = _ws(tmp_path)
     con = _run(ws, "ask.py", "def _update(dt):\n    input('> ')\n")
-    _frame(ws)
+    ui_draw.input_kind("touch")
+    try:
+        _frame(ws)
+    finally:
+        ui_draw.input_kind("keys")
     assert con._sym_rects, "the palette is drawn while the console reads"
     r = con._sym_rects[0]
     con._pointer(r[0] + 1, r[1] + 1, True, True)
@@ -252,10 +258,7 @@ def test_run_script_refuses_what_is_not_a_script(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _files_app(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Files":
-            ws.launcher.sel = i
-            break
+    select_on_home(ws, "Files")
     ws.open()
     _frame(ws)
     return ws.files_app
@@ -266,10 +269,9 @@ def test_files_offers_RUN_on_a_script_and_not_on_a_note(tmp_path):
     _seed(ws, "hi.py", "print('hi')\n")
     _seed(ws, "shopping", "milk\n")
     app = _files_app(ws)
-    app._enter_kind("docs")
-    app.grid.select("hi.py")
+    app.open_place("docs", keep="hi.py")
     assert app._action_labels()[0] == "RUN"
-    app.grid.select("shopping")
+    app.select("shopping")
     assert "RUN" not in app._action_labels()
 
 
@@ -277,8 +279,7 @@ def test_the_files_RUN_action_starts_the_script(tmp_path):
     ws = _ws(tmp_path)
     _seed(ws, "hi.py", "print('from files')\n")
     app = _files_app(ws)
-    app._enter_kind("docs")
-    app.grid.select("hi.py")
+    app.open_place("docs")
     app._act("RUN", "hi.py")
     _frame(ws)
     assert ws.wm.top_is_player()
@@ -292,7 +293,7 @@ def test_the_router_sends_a_script_to_the_text_page_not_the_editor(tmp_path):
     ws = _ws(tmp_path)
     _seed(ws, "hi.py", "print('hi')\n")
     app = _files_app(ws)
-    app._enter_kind("docs")
+    app.open_place("docs")
     assert app.door("hi.py", "docs") == (text_modes.CODE, "hi.py")
     assert app.route("hi.py", kind="docs") == text_modes.CODE
     # OPEN edits the script: the Player is running Notes' editor skin over it

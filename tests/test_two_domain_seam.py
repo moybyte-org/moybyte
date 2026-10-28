@@ -49,7 +49,7 @@ def _ws_distinct_320(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws._sys_canvas = make_system_canvas(320, 240, font_scale=1)
     ws._relayout()
-    ws.pointer = host_app.console.Pointer(320, 240)
+    ws.set_pointer(host_app.console.Pointer(320, 240))
     ws.input.pointer = ws.pointer
     return ws
 
@@ -100,7 +100,7 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     # head of a continuously left-right SCROLLING card list). Columns are
     # RESOLUTION-driven (cards target ~w/5, the mockup's proportions) -- a
     # bigger canvas buys bigger cards and crisper 1x text, not magnification.
-    assert ws.launcher.COLS >= 4 and ws.launcher.ROWS >= 2
+    assert ws.layout.cols >= 4 and ws.layout.rows >= 2
     assert ws.layout.grid_content_w(len(ws.launcher.items)) > 0
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
@@ -244,13 +244,13 @@ def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
     assert ws.look.font_scale == 3                            # remembered
     assert ws.look.effective_font_scale() == 1              # but not applied (can't scale)
     assert ws.layout.fs == 1                             # layout stays the baseline
-    assert ws.layout._base                               # i.e. exactly today's geometry
+    assert (ws.layout.w, ws.layout.h) == (320, 240)      # the T-Deck's geometry
     assert moy_carts.load_system(carts_dir).get("font_scale") == 3   # persisted
     # It renders without error and the desktop is still the 320x240 baseline
     # shelf (3 columns at the small tier's card proportions).
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
-    assert ws.launcher.COLS == 3 and ws.launcher.ROWS == 2
+    assert ws.layout.cols == 3 and ws.layout.rows == 2
 
 
 def test_composite_safe_when_system_canvas_smaller_than_game(tmp_path):

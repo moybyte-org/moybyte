@@ -26,7 +26,7 @@ each resolved here on its merits:
     `runtime/ticks.py` now, like everything else.
 
 `host_api` and `device_api` still exist -- as the HOMES of what genuinely
-differs per side (host: FakeAudio/FakeWifi/ConsoleDriver; device: nothing but
+differs per side (host: FakeWifi/ConsoleDriver; device: nothing but
 the re-export) -- and both re-export this make_api, so every import site and
 frozen name is unchanged. tests/test_cart_api_unified.py pins the identity:
 one function OBJECT, not three agreeing copies.
@@ -43,9 +43,9 @@ try:
 except ImportError:
     from runtime.ticks import _since_ms
 try:
-    from widgets import pointer_state, P_NONE, P_HELD, P_CLICK
+    from moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
 except ImportError:
-    from runtime.widgets import pointer_state, P_NONE, P_HELD, P_CLICK
+    from runtime.moy_input import pointer_state, P_NONE, P_HELD, P_CLICK
 
 
 # owner -> the Image subclass a cart of that owner constructs (below).
@@ -57,7 +57,7 @@ def _owned_image_cls(owner):
 
     image() stamps `_owner` on what the ENGINE loads, and that is only half the
     verb table: `Image` is exposed too, and a cart that constructs its own
-    320x240 picture -- `system_carts/paint.moy`'s body is the one in the tree --
+    320x240 picture -- `system_carts/moybyte.paint.moy`'s body is the one in the tree --
     got an untagged one, so its 153,600-byte RGB565 bake stayed on the gc heap,
     which is the heap that has no run that size once a console has been up a
     while (#186, device_canvas._paint_bake_buf). Same verb table, same size,
@@ -130,10 +130,10 @@ def _decode_moyimg(text):
     a silently blank image on whichever tier held the other half."""
     try:
         try:
-            import moy_image
+            import moyimg
         except ImportError:
-            from runtime import moy_image
-        return moy_image.decode_moyimg(text)
+            from runtime import moyimg
+        return moyimg.decode_moyimg(text)
     except Exception:  # noqa: BLE001 -- bad/absent image -> caller gets None
         return None
 
@@ -196,7 +196,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                            # edit), so a live sprite edit shows fresh art.
     _cache_gen = [None]
     # SPEC.md 3.5's tile flags, always a table so fget/fset/map(..., layers) are
-    # callable for every cart. `flags` is the project's live 512-byte one; a run
+    # callable for every cart. `flags` is the run's own 512-byte one
+    # (`ProjectStore.play_flags`, which an Editor flag edit reaches each frame); a run
     # without a project (a bare namespace, a test) gets a private zero table,
     # which reads exactly as the spec's "an absent file is all zero".
     tile_flags = flags if flags is not None else bytearray(512)
@@ -204,9 +205,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     def cfg(key, default=None):
         return config.get(key, default)
 
-    # Audio (#16): bound to the injected backend (FakeAudio on the host,
-    # DeviceAudio on a board); no-op if absent so a cart's sfx()/beep()/music()
-    # never crash when audio isn't wired.
+    # Audio (#16): bound to the run's audio session (runtime/audio_session.py);
+    # no-op if absent (a wallpaper), so a cart's sfx()/beep()/music() never
+    # crash when no session is wired.
     def _sfx(n, chan=None):
         if audio is not None:
             audio.sfx(n, chan)
@@ -337,7 +338,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             tilemap.mset(x, y, tile)
 
     # SPEC.md 3.5/7.1: one flag byte per tile, 512 of them. The table is the
-    # PROJECT's (moy_carts loads flags.moyflags into it) and it is shared with
+    # RUN's (a copy of flags.moyflags as the Editor holds it) and it is shared with
     # every layer namespace below, so `fset` from inside a layer's pre-render is
     # the same write the screen's next map(..., layers) reads. A run with no
     # project gets a private zero table rather than a None to guard at each verb.
@@ -361,7 +362,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         bit = 1 << (int(b) & 7)
         tile_flags[n] = (tile_flags[n] | bit) if on else (tile_flags[n] & ~bit & 0xFF)
 
-    _touch_scratch = [0, 0, 0, 0]        # reused; see widgets.pointer_state
+    _touch_scratch = [0, 0, 0, 0]        # reused; see moy_input.pointer_state
+    _touch_last = [None]                 # touch()'s last answer
 
     def touch():
         # Pointer (touch glass on a board, mouse on the host) exposed to
@@ -372,13 +374,20 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         #
         # Where the pointer COMES from -- the netplay refusal, the two-domain
         # seam, the linger that outlives a released finger -- is
-        # widgets.pointer_state, because the Lua tier resolves the same
+        # moy_input.pointer_state, because the Lua tier resolves the same
         # question through the same function. This used to be its own copy,
         # and the Lua tier had no copy at all.
         st = pointer_state(input, _touch_scratch)
         if st[2] == P_NONE:
             return None
-        return (st[0], st[1], bool(st[2] & P_CLICK), bool(st[2] & P_HELD))
+        x = st[0]
+        y = st[1]
+        click = bool(st[2] & P_CLICK)
+        held = bool(st[2] & P_HELD)
+        t = _touch_last[0]
+        if t is None or t[0] != x or t[1] != y or t[2] is not click or t[3] is not held:
+            t = _touch_last[0] = (x, y, click, held)
+        return t        # the last answer while it holds: a still pointer allocates none
 
     def mouse():
         # TIC-80-shaped 7-tuple (x, y, left, middle, right, scrollx, scrolly)
@@ -438,11 +447,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     def _quit():
         # quit() -> END this cart and return to whoever launched it (the launcher, or
         # the Editor). A cart calls it from a key or an on-screen affordance it draws.
-        # This is how a TEXT-mode cart exits: once it calls textmode(True), the console's
-        # hold-BACKSPACE game-exit can't reach it (BACKSPACE is a typed 0x08 the cart
-        # reads as delete, and the T-Deck keyboard has no autorepeat, so the ~700ms hold
-        # never accumulates) -- so a textmode(True) cart MUST provide its own exit via
-        # quit(). ADDITIVE to the frozen kid API, works for ANY cart type. Sets a flag
+        # The console's own exit is the pause menu (`start`); quit() is the cart's.
+        # ADDITIVE to the frozen kid API, works for ANY cart type. Sets a flag
         # the Player honors AFTER this frame's _update runs (player.tick), popping to
         # the run caller via ws._exit_to_caller(). `quit` shadows the site builtin
         # inside the cart's exec namespace, resolving to this closure.
@@ -614,6 +620,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # feature was dead. Not registered as a verb -- the glue registers only
         # callables, and a dict is not one.
         "_moy_cfg": config,
+        # The cart's paint images as their .moyimg texts, for a C tier that
+        # decodes them itself (moycore's image_put; not a verb, like _moy_cfg).
+        "_moy_images": images,
         "sfx": _sfx, "beep": _beep, "music": _music,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
         "rnd": lambda n=1.0: random.random() * n,
@@ -671,6 +680,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # through the native spr entry when the canvas has one. The world resets
         # per run via scenes.reset() (Player.start).
         _world = scenes.world()
+        # The scene texts themselves, for a Lua run that parses and draws
+        # them in C (lua_ext.put_scenes; not a verb, like _moy_cfg).
+        ns["_moy_scenes"] = scenes
         ns["actors"] = _world.actors
         ns["touching"] = _world.touching
         ns["move_actor"] = _world.move

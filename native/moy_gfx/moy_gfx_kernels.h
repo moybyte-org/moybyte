@@ -6,9 +6,11 @@
  * sides CALL them -- see libmoy/UPSTREAM.md. What libmoy has no counterpart for
  * is this console's compositor: a viewport-aware fill and fill_rect, the RGB565
  * blit with its opaque memcpy lane, the integer-upscale blit the windowed WM
- * composites through, blit_window, scroll_rect, blit_indices, and the
- * system-font (scale > 1) text rasterizer. These loops were once written
- * twice (moyhost_gfx.c + modmoy_gfx.c) and had already drifted; this file is
+ * composites through, the any-ratio resize the home's cards scale by,
+ * blit_window, scroll_rect and shift_rect, copy_block, blit_indices and its scaled source-rect form
+ * (the sprite pickers'), the system-font (scale > 1) text rasterizer, and
+ * the one-byte-a-pixel ops Paint's drawings are marked with (ifill, iline,
+ * icopy, iflood). These loops were once written twice (moyhost_gfx.c + modmoy_gfx.c) and had already drifted; this file is
  * the one copy.
  *
  * WHY IT MATTERS MORE THAN A TIDY-UP. The goldens
@@ -40,6 +42,7 @@
 #ifndef MOY_GFX_KERNELS_H
 #define MOY_GFX_KERNELS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -261,11 +264,36 @@ void mg_shape(uint16_t *dst, size_t cap, int dw, int kind,
               int col, int pat, int hole,
               int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 
-/* Shift the pixels inside (rx, ry, rw, rh) by (dx, dy) IN PLACE: the #113
- * scroll-as-blit primitive. Pixels that would leave the rect are dropped; the
- * strip shifted in from outside keeps its stale content. */
+/* fill_spans' walk: n packed (x, y, w, h, ci) int16 quads, offset, clipped,
+ * filled with `cov` (an RGB565 word, >= 0) or pal[ci & 63]. */
+void mg_fill_spans(uint16_t *dst, size_t cap, int dw, const int16_t *q, int n,
+                   int ox, int oy, int cov, const uint16_t *pal,
+                   int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+
+/* The pixels inside (rx, ry, rw, rh) of `src` moved by (dx, dy) into the
+ * same rect of `dst`, both `stride` px a row and `cap` px: the scroll-as-blit
+ * primitive (#113), across buffers (a canvas's `shift_last`) or IN PLACE when
+ * dst is src. The rect is clipped to the buffer; pixels that would leave it
+ * are dropped, and the band the move exposes keeps what `dst` held there. */
+void mg_shift_rect(uint16_t *dst, const uint16_t *src, size_t cap, int stride,
+                   int rx, int ry, int rw, int rh, int dx, int dy);
+/* mg_shift_rect in place. */
 void mg_scroll_rect(uint16_t *px, size_t cap, int stride,
                     int rx, int ry, int rw, int rh, int dx, int dy);
+/* mg_shift_rect's block, for an engine that copies it: b = {x, y, sx, sy, w,
+ * h}, the destination block and its source's top-left, in a buffer of
+ * stride x rows. 0: nothing moves. */
+int mg_shift_clip(int stride, int rows, int rx, int ry, int rw, int rh,
+                  int dx, int dy, int *b);
+/* A w x h block at (sx, sy) of `src` (sstride px a row) to (dx, dy) of `dst`
+ * (dstride px a row), clipped to both buffers: what a canvas's
+ * `copy_last_into` copies into a layer. */
+void mg_copy_block(uint16_t *dst, size_t dcap, int dstride,
+                   const uint16_t *src, size_t scap, int sstride,
+                   int dx, int dy, int sx, int sy, int w, int h);
+/* mg_copy_block's clip: b = {dx, dy, sx, sy, w, h} in, the block inside a
+ * dw x dh destination and an sw x sh source out. 0: empty. */
+int mg_block_clip(int dw, int dh, int sw, int sh, int *b);
 
 /* key < 0 opaque (memcpy lane), else source pixels equal to `key` are skipped.
  * The clip rect [cx0,cy0)..[cx1,cy1) is intersected with the destination. */
@@ -281,6 +309,20 @@ void mg_blit565_scale(uint16_t *dst, size_t dcap, int dw, int dh,
                       const uint16_t *src, size_t scap, int sw, int sh,
                       int scale);
 
+/* Scale an RGB565 sw x sh source to a tw x th rect at (dx, dy), nearest-
+ * neighbour at any ratio, up or down, in one call: a home card's cover at its
+ * distance-from-centre scale (docs/shell_layout_2026-10.md section 12). Opaque.
+ * The target column i samples source column (i * sx + sx / 2) >> 16 with
+ * sx = (sw << 16) / tw, rows alike -- tests/test_gfx_binding.py holds the
+ * Python statement of it. The clip rect is intersected with the buffer; a
+ * source shorter than `scap` holds leaves the rows that would sample past it
+ * as they were; a side over MG_RESIZE_MAX draws nothing. */
+#define MG_RESIZE_MAX 32767
+void mg_blit565_resize(uint16_t *dst, size_t dcap, int dw, int dh,
+                       int dx, int dy, int tw, int th,
+                       const uint16_t *src, size_t scap, int sw, int sh,
+                       int cx0, int cy0, int cx1, int cy1);
+
 /* Copy a dw x dh window from an RGB565 source into dst (dw px/row): the
  * scroll engine's core op (#43), clamped to BOTH buffers. A source narrower
  * or shorter than the window past (sx, sy) copies what it has into the
@@ -294,6 +336,56 @@ void mg_blit_indices(uint16_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
                      const uint8_t *idx, size_t icap, int iw, int ih,
                      const uint16_t *pal, size_t pcap);
 
+/* The sw x sh rect at (sx, sy) of an iw x ih palette-INDEX bitmap, each pixel
+ * a `scale` x `scale` block at (dx, dy), inside the clip [cx0, cx1) x
+ * [cy0, cy1): exactly sspr's pixels for a destination of sw*scale x sh*scale
+ * (nearest-neighbour, texel i / scale), resolved per source pixel rather than
+ * per destination pixel. A pixel whose index equals `colorkey`, is flagged in
+ * `palt` (64 bytes, or NULL) or lies past the palette is left as it was; the
+ * part of the rect outside the bitmap draws nothing. */
+void mg_blit_indices_scale(uint16_t *dst, size_t dcap, int dw, int dh,
+                           const uint8_t *idx, size_t icap, int iw, int ih,
+                           int sx, int sy, int sw, int sh, int dx, int dy, int scale,
+                           const uint16_t *pal, size_t pcap, const uint8_t *palt,
+                           int colorkey, int cx0, int cy0, int cx1, int cy1);
+
+/* ---- one byte a pixel: a drawing's palette indices (runtime/artwork.py) --
+ * A bw x bh buffer of `cap` bytes; every op clips to it (a cap short of
+ * bw * bh shortens bh). Paint's marks are these calls, and the canvas bakes
+ * what they changed (`blit_indices`). */
+
+/* Fill the w x h rect at (x, y) with `v`. */
+void mg_ifill(uint8_t *buf, size_t cap, int bw, int bh, int x, int y, int w, int h,
+              uint8_t v);
+
+/* A dot `d` pixels across at every point of the line from (x0, y0) to
+ * (x1, y1), stepped as Bresenham steps it: a square, or a disc where `round`
+ * and d > 2 (each row's half-width the floor of (d - 1 + isqrt(d^2 - R^2)) / 2,
+ * R the row's centre offset doubled). A dot's top left is (x - d/2, y - d/2).
+ * `d` is clamped to 1..MG_IDOT_MAX. */
+#define MG_IDOT_MAX 512
+void mg_iline(uint8_t *buf, size_t cap, int bw, int bh, int x0, int y0, int x1, int y1,
+              int d, int round, uint8_t v);
+
+/* Copy the w x h rect at (sx, sy) of `src` (sw x sh, `scap` bytes) to (dx, dy)
+ * of `dst` (dw x dh), clipped to both. A pixel of value `from` (0..255) lands
+ * as `to`; a negative `from` copies every value as it is. On one buffer at one
+ * place it is a replace. */
+void mg_icopy(uint8_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
+              const uint8_t *src, size_t scap, int sw, int sh, int sx, int sy,
+              int w, int h, int from, int to);
+
+/* Fill the 4-connected region of (x, y)'s value with `v`, a value no pixel
+ * holds (the caller's marker), marking in `marks` (`mcap` bytes, one a `t` x
+ * `t` tile, `tx` tiles a row) each tile a filled run crosses. `stack` is the
+ * fill's scratch, `n` (x, y) pairs; a fill that outgrows it finishes by
+ * sweeping the buffer until no pixel joins. out[] = the filled region's
+ * bounds (x0, y0, x1, y1), exclusive; the pixels filled, 0 when (x, y) is off
+ * the buffer or already `v`. */
+int mg_iflood(uint8_t *buf, size_t cap, int bw, int bh, int x, int y, uint8_t v,
+              uint8_t *marks, size_t mcap, int t, int tx, int16_t *stack, int n,
+              int out[4]);
+
 /* The petme128 rasterizer behind the scale > 1 lane of `text` and behind the
  * print draw gate. The clip rect is intersected with the buffer here, so every
  * caller is bounds-safe. */
@@ -301,6 +393,71 @@ void mg_text_raw(uint16_t *dst, size_t dcap, int dw,
                  const uint8_t *s, size_t slen, int x, int y, uint16_t col,
                  const uint8_t *font, int nglyphs, int first, int scale,
                  int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+
+/* A loaded bitmap font as mg_text_font reads it: `count` glyphs from byte
+ * `first`, each `w` columns of `bpc` bytes, bit 0 of a column's first byte its
+ * top row; `adv` each glyph's advance in pixels. A byte outside the range
+ * draws glyph 0. moy_text.c holds the rows and checks a loaded one. */
+typedef struct {
+    const uint8_t *glyphs;
+    const uint8_t *adv;
+    uint8_t w, h, bpc, first, count;
+} mg_font_t;
+
+/* mg_text_raw for a loaded font: every set pixel a scale x scale block, each
+ * glyph advancing its own width. Bounds-safe as mg_text_raw is. */
+void mg_text_font(uint16_t *dst, size_t dcap, int dw,
+                  const uint8_t *s, size_t slen, int x, int y, uint16_t col,
+                  const mg_font_t *f, int scale,
+                  int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+
+/* The glyph lane's ink (docs/look_2026-10.md step 4): `col` at a weight for
+ * each coverage value of a `bpp`-bit glyph, 0 (none) to 256 (all of it), and
+ * `col` over a known solid background at each of those weights, the ramp.
+ * mg_ink builds both: `alpha` (0..256, 256 opaque) scales every weight, and
+ * a `bg` below 0 builds no ramp. `col`, `bg`, the ramp and the target are in
+ * the buffer's wire order, byte-swapped RGB565 when `swap` is set (the S3
+ * panels, the host and the browser; the P4's DPI scans canonical words);
+ * every blend runs on the canonical channels. */
+typedef struct {
+    uint16_t col, colc;         // the ink in wire order, and canonical
+    uint8_t swap;
+    uint16_t wt[16];
+    uint16_t ramp[16];
+} mg_ink_t;
+
+void mg_ink(mg_ink_t *k, uint16_t col, int bpp, int alpha, int32_t bg, int swap);
+
+static inline uint16_t mg_bswap16(uint16_t v)
+{
+    return (uint16_t)((v << 8) | (v >> 8));
+}
+
+/* f over b at weight wt (0..256), each RGB565 channel apart:
+ * (f * wt + b * (256 - wt) + 128) >> 8, computed as b + (((f - b) * wt +
+ * 128) >> 8), one multiply a channel (the shift is arithmetic on every
+ * compiler the tiers use). */
+static inline uint16_t mg_blend565(uint16_t f, uint16_t b, int wt)
+{
+    int br = (b >> 11) & 31, bg = (b >> 5) & 63, bb = b & 31;
+    int r = br + (((((f >> 11) & 31) - br) * wt + 128) >> 8);
+    int g = bg + (((((f >> 5) & 63) - bg) * wt + 128) >> 8);
+    int bl = bb + ((((f & 31) - bb) * wt + 128) >> 8);
+    return (uint16_t)((r << 11) | (g << 5) | bl);
+}
+
+/* One glyph of a version 2 font (moy_text.c walks the string): a w x h box
+ * of `bpp`-bit coverage, row-major, the first pixel in the high bits of its
+ * byte, its top left at (x, y) in buffer space, every pixel a scale x scale
+ * block. A pixel of weight 0 keeps what is under it. With `known` every
+ * other pixel stores its ramp entry and the target is never read (the
+ * caller holds that every pixel the glyph reaches is the ramp's
+ * background); without it a pixel of weight 256 stores `col` and the rest
+ * read the target and store `col` blended over it. Bounds-safe as
+ * mg_text_raw is. */
+void mg_glyph_cov(uint16_t *dst, size_t dcap, int dw, const uint8_t *cov, int w, int h,
+                  int bpp, int x, int y, const mg_ink_t *k, int known, int scale,
+                  int cx0, int cy0, int cx1, int cy1);
 
 /* text (#62): a whole string in ONE call, camera and clip honoured per pixel.
  * Scale 1 is a CART's text, which SPEC.md 6 fixes at 8px, so it goes through
@@ -312,5 +469,71 @@ void mg_text(uint16_t *dst, size_t dcap, int dw,
              const uint8_t *s, size_t slen, int x, int y, int col,
              const uint8_t *font, int nglyphs, int first, int scale,
              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
+
+/* THE LAYER RESTORE (#54 Stage 2): draw_layer's per-frame window copy, with
+ * the predicted copy that rides a DMA engine while the cart's update runs.
+ * One body for every caller: a canvas's blit_window_from and sync_back
+ * (device_canvas.py, through the usermod or the host's ctypes) and a Lua
+ * run's native draw_layer (native/moycore), so the two cannot disagree about
+ * when a predicted copy is a hit.
+ *
+ * The state is PER DESTINATION CANVAS and the caller's to place
+ * (MG_LR_SIZE bytes, zeroed; a canvas keeps it in a bytearray): the
+ * prediction of next frame's restore, the copy in flight, whether the engine
+ * may be used at all, and the meters. The engine is the caller's too: a board
+ * hands its GDMA pair, the host one that refuses, which puts it on the
+ * synchronous path a board takes when its driver declines.
+ *
+ * A prediction is armed only when the copy is ONE contiguous run covering the
+ * whole destination (cam_x 0, the layer exactly as wide, the window inside
+ * it), and kicked by mg_lr_kick at the frame's start into the new back
+ * buffer. The next mg_lr_blit waits it out and takes it as the restore when
+ * nothing moved -- same layer, same cam_y, not edited since -- and otherwise
+ * copies synchronously over whatever the predicted copy painted. A layer the
+ * prediction names must outlive it: mg_lr_forget before it is freed. */
+typedef struct {
+    bool (*start)(uint16_t *dst, const uint16_t *src, size_t npix);  /* started? */
+    bool (*wait)(void);          /* false: the bounded wait tripped */
+    uint32_t (*now_us)(void);    /* the meter's clock, or NULL */
+} mg_copy_engine_t;
+
+typedef struct {
+    const uint16_t *src;         /* the prediction: the layer, NULL when none */
+    int sw;
+    int cam_y;
+    int npix;
+    const uint16_t *fl_src;      /* the copy in flight, NULL when none */
+    int fl_cam_y;
+    uint8_t async_ok;            /* the engine may be used; latches off on a refusal */
+    uint32_t trips;              /* waits that tripped (#66 diagnostics) */
+    uint32_t us;                 /* time inside mg_lr_blit since the meter was zeroed */
+} mg_lrestore_t;
+
+#define MG_LR_SIZE sizeof(mg_lrestore_t)
+
+/* Two engines every tier has: NONE refuses every copy (an image with no DMA,
+ * the host), so the restore latches synchronous at its first kick; NOW copies
+ * at once on the calling thread, which the host's tests drive the predicted
+ * path with. */
+extern const mg_copy_engine_t mg_copy_none;
+extern const mg_copy_engine_t mg_copy_now;
+
+/* A zeroed state, with the engine allowed or not. */
+void mg_lr_init(mg_lrestore_t *s, bool async_ok);
+/* The frame's start, `dst` the back buffer it will draw into: a copy still in
+ * flight is waited out, and the prediction, if any, is started. True when a
+ * copy is now in flight (its layer must live until it is taken or drained). */
+bool mg_lr_kick(mg_lrestore_t *s, const mg_copy_engine_t *e, uint16_t *dst, size_t dcap);
+/* A copy in flight is waited out (a frame that does not draw the layer). */
+void mg_lr_drain(mg_lrestore_t *s, const mg_copy_engine_t *e);
+/* ...and the prediction dropped: its layer is about to go. */
+void mg_lr_forget(mg_lrestore_t *s, const mg_copy_engine_t *e);
+/* draw_layer: the dw x dh window of the sw x sh layer at (cam_x, cam_y), each
+ * axis clamped into [0, max(0, layer - screen)] (SPEC.md 6), into dst.
+ * `edited`: the layer's pixels moved since it was last drawn. */
+void mg_lr_blit(mg_lrestore_t *s, const mg_copy_engine_t *e,
+                uint16_t *dst, size_t dcap, int dw, int dh,
+                const uint16_t *src, size_t scap, int sw, int sh,
+                int cam_x, int cam_y, bool edited);
 
 #endif /* MOY_GFX_KERNELS_H */

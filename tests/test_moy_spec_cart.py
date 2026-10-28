@@ -12,20 +12,20 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 RED64 = ["FF0000"] * 64
 
 
-from ws_helpers import StubInput, build_ws as _ws
+from ws_helpers import StubInput, build_ws as _ws, select_on_home
 
 
 def _open(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            ws.open()
-            return
+    if select_on_home(ws, title) is not None:
+        ws.open()
+        return
     raise AssertionError("no cart titled " + title)
 
 
@@ -438,7 +438,7 @@ def test_the_flags_blob_round_trips_through_a_seed(tmp_path):
         "src": "def _draw():\n    pass\n",
         "flags": moy_carts.flags_to_hex(table),
     }], root)
-    cart = moy_carts.load(root + "/tagged.moy")
+    cart = moy_carts.load(root + "/moybyte.tagged.moy")
     assert moy_carts.parse_flags(cart["flags"]) == table
 
 
@@ -507,27 +507,30 @@ def test_icon_survives_duplicate(tmp_path):
 
 def test_launcher_draws_the_declared_icon_tiles(tmp_path):
     """A 2x2 icon must resolve to a 16x16 blittable, and an absent one to tile 0
-    -- the host's free choice when the cart declines to name tiles."""
+    -- the host's free choice when the cart declines to name tiles -- which,
+    blank here, is no art: the card draws the type glyph."""
     from runtime import moy_carts, host_app
     root = str(tmp_path / "carts")
     Path(root).mkdir(parents=True)
     # tile 0 blank, tiles 16..17/32..33 (a 2x2 block at tile 16) painted
-    rows = ["0" * 128] * 16 + ["0" * 16 + "8" * 16 + "0" * 96] * 16
+    rows = ["0" * 128] * 8 + ["8" * 16 + "0" * 112] * 16
     for name, icon in (("Big", [16, 2, 2]), ("Plain", None)):
         c = moy_carts.create(name, root, src="def _draw():\n    pass\n",
                              type="game", icon=icon)
         Path(c["path"], "sprites.moygfx").write_text("\n".join(rows))
     ws = host_app.build_workstation(root)
+    ws.set_home_tab("mine")                     # made here: the kid's own
     by_title = {c["title"]: c for c in ws.launcher.items if c.get("path")}
     big = ws.covers.icon_sheet_for(by_title["Big"])
     assert big is not None and (big.w, big.h) == (16, 16)
-    plain = ws.covers.icon_sheet_for(by_title["Plain"])
-    assert plain is not None and (plain.w, plain.h) == (8, 8)
+    assert ws.covers.icon_sheet_for(by_title["Plain"]) is None
 
 
 def test_icon_past_the_sheet_falls_back(tmp_path):
     """SPEC.md 3.4: an icon naming tiles this cart doesn't have is IGNORED --
-    the host picks instead. A cosmetic field must never blank the tile."""
+    the host picks instead. A cosmetic field must never blank the tile: the
+    tiles past the blob are blank, and a blank tile is no art, so the card
+    draws the type glyph."""
     from runtime import moy_carts, host_app
     root = str(tmp_path / "carts")
     Path(root).mkdir(parents=True)
@@ -535,9 +538,10 @@ def test_icon_past_the_sheet_falls_back(tmp_path):
                          type="game", icon=[500, 1, 1])
     Path(c["path"], "sprites.moygfx").write_text("\n".join(["8" * 128] * 8))
     ws = host_app.build_workstation(root)
+    ws.set_home_tab("mine")
     cart = next(x for x in ws.launcher.items if x["title"] == "Missing")
     assert cart["icon"] == (500, 1, 1)          # carried verbatim...
-    assert ws.covers.icon_sheet_for(cart) is not None  # ...but never a blank tile
+    assert ws.covers.icon_sheet_for(cart) is None  # ...but never a blank tile
 
 
 # -- pmem slots are signed 32-bit (SPEC.md 9, matching 4.2) --------------------
@@ -580,3 +584,63 @@ def test_scan_ignores_a_moy_archive_file(tmp_path):
     (Path(root) / "downloaded.moy").write_bytes(b"PK\x03\x04not-a-folder")
     found = moy_carts.scan(root)
     assert [c["title"] for c in found] == ["Real"]
+
+
+# -- E-02: the run's own flags, which an Editor flag edit reaches each frame ----------
+
+_FLAGS_PY = """
+F = -1
+def _init():
+    fset(2, 0x80)
+def _draw():
+    global F
+    F = fget(1)
+"""
+
+_FLAGS_LUA = """
+F = -1
+function _init()
+  fset(2, 0x80)
+end
+function _draw()
+  F = fget(1)
+end
+"""
+
+
+@pytest.mark.parametrize("lua", (False, True), ids=("python", "lua"))
+def test_a_flag_edit_reaches_the_running_cart_and_its_fset_stays_the_runs(tmp_path, lua):
+    """An Editor flag toggle during a playtest reaches the cart at its next
+    frame on both tiers, over what the cart's own fset wrote; the cart's
+    fset never reaches the Editor's table (EDITOR_LAYOUT.md E-02)."""
+    if lua:
+        pytest.importorskip("runtime.moycore")
+    man = {"format": "moy-1", "title": "Flags", "runtime": "lua" if lua else "python",
+           "main": "main.lua" if lua else "main.py"}
+    _write_moy1(tmp_path / "carts", "flags", man, _FLAGS_LUA if lua else _FLAGS_PY)
+    ws = _ws(tmp_path)
+    _open(ws, "Flags")
+    dt = 1 / 30
+
+    def frame():
+        ws.input.begin_frame()
+        ws.frame(dt)
+
+    def got():
+        if lua:
+            return int(float(ws.player._lua.get_global("F")))
+        return ws.player.ns["F"]
+
+    for _ in range(2):
+        frame()
+    assert ws.player.cart_error is None, ws.player.cart_error
+    assert got() == 0
+    flags = ws.project.flags
+    assert flags[2] == 0, "the cart's fset is the run's, not the Editor's"
+    flags[1] ^= 1 << 3                      # the Sprite tab's toggle (paint_layer)
+    frame()
+    assert got() == 8
+    flags[1] ^= 1 << 3 | 1                  # bit 3 off, bit 0 on
+    frame()
+    assert got() == 1
+    assert flags[2] == 0

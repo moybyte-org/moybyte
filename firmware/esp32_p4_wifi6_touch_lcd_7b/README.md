@@ -10,37 +10,26 @@ Status (2026-07-09): REPL / WiFi-via-C6 / GT911 touch / SD / DSI panel / **the
 console on glass** all hardware-confirmed. Launcher runs under `WindowedWM`;
 colors (canonical RGB565 vs the T-Deck's byte-swapped wire order → `PAL565_WIRE`),
 flicker (DPI `num_fbs=2` ping-pong scan-out), touch (180° panel mount →
-`p4_input.FLIP_X/Y`), popup/wallpaper geometry all fixed on-glass. Play perf
+both touch flips, `MOY_INPUT_TOUCH_FLIP_X/Y` in `mpconfigboard.h`), popup/wallpaper geometry all fixed on-glass. Play perf
 comes from three levers: the quiet-frame partial repaint
 (`WindowedWM.draw_stack`), the hardware-PPA game composite, and the
 async-composite overlap. Brick Siege 35→51→56; most carts ~60fps. The
 `_BackdropLayer` retained backdrop cache gives ~15fps app-window drags. See #58
 for the living status.
 
-**BLE-HID keyboard support is hardware-paired (2026-07-13; latency fast path
-2026-07-14).** `device/ble_keyboard.py` (this board's `p4_ble_keyboard.py`
-until it was promoted to the shared device tree on 2026-08-19, when the
-Guition became its second consumer) uses the C6_WIFI build's existing
-MicroPython NimBLE central/GATT-client path over ESP-Hosted SDIO: it discovers
-HOGP service `0x1812`, bonds, prefers the profile's deterministic Boot Host path
-(writes Protocol Mode `0x00`, then subscribes only to Boot Keyboard Input), and
-feeds real make/break state + ASCII into the shared `InputState`. Put a **BLE**
-keyboard in pairing mode before boot; serial shows `scanning → connected → boot
-protocol → native input queue → ready`. Steady-state notifications bypass the
-ESP32 port's synchronous Python BLE IRQ/GIL path: the P4-only `moy_ble_hid`
-module copies registered HID reports immediately on the NimBLE host task into a
-64-entry native queue, then `keyboard.poll()` drains it before the frame's input
-edge snapshot. `bt status` reports `(received, dropped, queued, max_depth,
-enabled)` for that queue; `bt trace 1` adds host-queue age in microseconds to
-each decoded report. Fast make+break pairs are preserved across the frame
-boundary instead of losing the tap. **Settings → BLUETOOTH KEYBOARD** exposes
-the normal user path: input ON/OFF, a full nearby-HOGP scan, explicit device
-selection, and forget. The chosen address, enabled gate and display name persist
-beside the NimBLE bond keys in `/moy/ble_keyboard.json`; boot reconnects only to
-that saved keyboard (v1 name+bond stores migrate without re-pairing). Report-only keyboards remain on a traced
-standard-report fallback; arbitrary/NKRO Report Maps, Classic-Bluetooth-only
-keyboards, mouse, media keys and gamepads are not supported. USB-HID remains
-#83's wired/multi-device path.
+**BLE-HID keyboard support is hardware-paired (2026-07-13).** The central is
+the kernel's (`native/moy_input/moy_hid.c` on NimBLE's host task,
+`moy_ble_task.c`, since 2026-10-07): over the C6 on ESP-Hosted it discovers
+HOGP service `0x1812`, bonds (Just Works, the bonds in NimBLE's NVS store),
+prefers the Boot Host path (Protocol Mode `0x00`, then Boot Keyboard Input
+only), and writes make/break state and the typed byte into the kernel table's
+`ble` source, which the frame takes before its edge snapshot. There is no
+`bluetooth` module and nothing of it runs Python, so a soft reset leaves the
+link up. `bt status` names the machine's state. Settings' picker lists every
+nearby HOGP keyboard and reconnects only the one picked. Report-only keyboards
+are decoded as the standard eight-byte report; arbitrary/NKRO Report Maps,
+Classic-Bluetooth-only keyboards, media keys and gamepads are not supported.
+USB-HID is #83's, out of sprint 3.
 
 **The hardware PPA (Pixel-Processing Accelerator) is wired for the game
 composite** (`moy_ppa`, ESP-IDF `esp_driver_ppa` SRM client, patched into
@@ -84,7 +73,7 @@ starves under the desktop, unlike the T-Deck), so a host script can drive the
 UI while watching the glass:
 
 - `tap <x> <y>` / `tap sysmenu` — synthetic tap at system coords / a named bar button
-- `open settings|picker` — pop an app window deterministically
+- `open settings|projects` — pop an app window deterministically
 - `run <name>` — select the first cart whose title matches and RUN it
 - `drag [frames] [step]` — grab the top window's title strip and oscillate it (step = px/frame amplitude scale, default 6; 30 ≈ a violent finger drag)
 - `cache 0|1` — A/B the drag backdrop cache
@@ -127,9 +116,10 @@ the command answers `REMOTE ? recv` and the tool stops with one line saying to
 flash the board.
 
 `moy_runtime.run_touch_calibrate()` (REPL-invokable) draws corner targets and
-dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs; the
-body is `device/p4_desktop.run_touch_calibrate`, shared with the Guition P4,
-and this board hands it the knobs' home (the `p4_input` module globals).
+dumps raw/mapped GT911 samples for re-calibrating the touch knobs; the
+body is `device/p4_desktop.run_touch_calibrate`, shared with the Guition P4.
+The knobs are live attributes on the kernel's driver (`py touch.flip_x = 0`)
+and baked into `mpconfigboard.h`'s `MOY_INPUT_TOUCH_*`.
 
 ## Build / flash
 
@@ -154,10 +144,11 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 
 - `boards/MOYBYTE_P4/` — out-of-tree board def: the `C6_WIFI` variant's
   sdkconfig fragments + `sdkconfig.board` (PSRAM @ 200MHz, 32MB flash, the
-  custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×4MB app
+  custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×8 MiB app
   slots — the default 4MiBplus table's ~1.94MB app can't hold the frozen
-  console — with the ~24MB tail left unlisted so mainline auto-builds the vfs
-  over it).
+  console — with the tail from 0x1010000 left unlisted so mainline auto-builds
+  the vfs over it; a cable flash that moves it erases the new store's first
+  blocks and the store re-seeds, see the CSV).
 - `native/p4/moy_dsi/` (repo root — the P4 SILICON tier since 2026-09-06, shared
   with the Guition JC8012P4A1C and staged here by `board.toml` `[native.p4]`;
   this board names `MOY_DSI_PANEL_EK79007` in its `mpconfigboard.cmake`) — the
@@ -189,21 +180,20 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     `device/boot_shell.py`. `s.MODE = "panel"` flips to the DSI hardware test
     pattern. Ctrl-C in the desktop loop drops to the REPL (no native-takeover
     USB starvation on this board).
-  - `p4_display.py` — this board's backlight (GPIO32 active-low) bound to the
-    shared `device/dsi_panel.py` `P4Compositor` (promoted 2026-09-06): the compositor shim over `moy_dsi`
-    (size/framebuffer/back_buffer/gfx/flush/sync; single-buffered, flush =
-    cache msync) + the active-low GPIO32 backlight (held dark until the first
-    composed frame).
-  - `p4_input.py` — GT911 polling driver (I2C0 SDA7/SCL8 @ 0x5D, native
-    1024×600 coords; `FLIP_X`/`FLIP_Y` knobs for the 180° panel mount if touch
-    lands mirrored).
-  - `device/ble_keyboard.py` (SHARED, staged — it was this board's
-    `p4_ble_keyboard.py` until the Guition became its second consumer on
-    2026-08-19) — pure-MicroPython BLE HID central, here over the hosted C6:
-    scan/pair/bond/discover/subscribe plus standard keyboard-report →
-    `InputState`/`last_key` mapping. Settings can enable/disable, scan/pick and
-    forget; the preferred address + gate + bond keys persist in
-    `/moy/ble_keyboard.json`. Radio or protocol failures degrade to touch-only.
+  - `moy_runtime.py` builds the compositor: the kernel's
+    `moy_glass.DsiCompositor` over `moy_dsi` and `moy_ppa`
+    (`native/moy_glass/moy_present.h`: the triple-buffer rotation, the
+    deferred present and its fences), held dark until the first composed
+    frame; the backlight (GPIO32 active-low, the `MOY_DSI_BL_*` defines) is
+    `moy_glass.backlight`, the panel entry the recovery floor lights it with.
+  - the GT911 is the kernel's driver (`native/moy_input`, I2C0 SDA7/SCL8 @
+    0x5D on the kernel's bus, native 1024×600 coords), named in
+    `mpconfigboard.h` (`MOY_INPUT_TOUCH_*`, both flips for the 180° panel
+    mount), and polled once a frame by the input stage's `moy_input.kick()`.
+  - the BLE HID keyboard is the kernel's central (`moy_input.ble()`, above),
+    here over the hosted C6. Settings can enable/disable, scan/pick and
+    forget; the picked address and the enable gate persist in NVS beside
+    NimBLE's bonds. Radio or protocol failures degrade to touch-only.
   - `moy_runtime.py` — the P4 backend: `P4SystemCanvas` (`device/p4_canvas.py`
     since 2026-09-06, shared with the Guition P4; a `DeviceCanvas` over
     the DSI framebuffer + the system-surface contract: `font_scale` text via
@@ -214,16 +204,17 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     Guition P4, which constructs the 1024×600 system canvas + the fixed
     320×240 off-screen game canvas and hands **`WindowedWM`** (#73's tier, on
     its intended hardware) to the shared boot spine `device/desktop_spine.py`.
-    Carts live on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
-    `/moybyte/...`, which shadows the frozen `moybyte.input` module and killed a
-    boot; see the constraint below. SD is optional here.
+    Carts live on the TF card when one mounts (the SD bullet below) and
+    otherwise on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
+    `/moybyte/...`, which shadowed the then-frozen `moybyte` package and killed a
+    boot; see the constraint below. A card is optional here.
   - Staged at build (canonical sources elsewhere), and **declared in
     `board.toml`** since #161 Phase 3 rather than listed in `build.sh`: the
     whole shared console from `runtime/` as a **denylist** — everything crosses
     except the files that board file names, each with its reason, which is how
-    `wm_windowed.py` and its `surface.py` leaf come across here and are denied
+    `wm_windowed.py` and its halves come across here and are denied
     on the S3 — plus `device_canvas`/`device_api`/`device_wifi`/`device_util`/
-    `moycore_glue`/`moy_ota`/`moy_webserver`/`moy_webhost` and the `moybyte`
+    `moycore_glue`/`moy_ota`/`moy_webhost` and the `moybyte`
     input package from the T-Deck modules tree (an **allowlist**, and it stays
     one: that is a board tree whose default answer is "no"), and the generated
     `carts_data.py`. The stager prunes untracked strays it did not stage — the
@@ -249,11 +240,30 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   step — and it also reports a setting ESP-IDF's Kconfig REFUSED, which is
   how the S3 boards' out-of-range BLE knob was found.
 - **The SD slot is powered from the P4's internal LDO channel 4** — stock
-  MicroPython never enables it, so `machine.SDCard` times out card-or-no-card.
-  Until the board-init owns this, the pure-Python poke (verified):
-  `mem32[0x501151D8] |= (1<<7)|(1<<14)` then `|= (1<<8)` (PMU_EXT_LDO_P1_0P2A:
-  SW-own, tie to 3.3V rail, power on). SD then works:
-  `SDCard(slot=0, width=4, sck=43, cmd=44, data=(39,40,41,42))`.
+  MicroPython never enables it, so without it the card times out
+  card-or-no-card. `device/p4_desktop.py` (`p4_card`, shared with the Guition
+  P4) does the pure-Python poke at boot: `mem32[0x501151D8] |= (1<<7)|(1<<14)`
+  then `|= (1<<8)` (PMU_EXT_LDO_P1_0P2A: SW-own, tie to 3.3V rail, power on),
+  then `moy_sd.mmc(0, 43, 44, (39, 40, 41, 42))` brings slot 0 up once (4-bit,
+  20 MHz; never torn down) and `moy_store.card` mounts the store's own volume
+  over it — the kernel's FATFS with the card's read cache
+  (`native/moy_store/moy_card.c`), each transfer's bounce in PSRAM, which this
+  host's DMA reaches.
+- **A card that mounts IS the cart store** (`device/card_store.py`; the T-Deck's
+  and the Guition S3's model, minus their bus-sharing machinery — this slot
+  shares nothing). Mounted once at `/sd`; the carts and the system documents
+  beside them (`system.json`, `wifi.json`, `shared.moygfx`) live under
+  **`/sd/moybyte/`** — the T-Deck's layout, so nothing lands at the card's root.
+  FAT32 and **exFAT** both mount: the esp32 port leaves FatFS's exFAT off
+  (`MICROPY_FATFS_EXFAT`, set in `mpconfigboard.h`), and a card over 32GB ships
+  exFAT. No card, a card that will not construct, a filesystem the build cannot
+  read, or a card whose store cannot be made all boot on the internal store with
+  one `SD: ...` line; `card_store.STATUS` carries the verdict for the dev channel
+  (`py __import__("card_store").STATUS`), since a boot line printed before a
+  serial host attaches can be dropped. ONE store per boot, chosen before anything
+  is written: a card put in later is picked up at the next boot, and the internal
+  store stays as it was. The OTA directory (`/moy/update`) and the BLE bond store
+  stay on the internal VFS — they are the device's, not the card's.
 - **SDMMC slot 1 belongs to the C6** (ESP-Hosted WiFi transport, pins
   CLK18/CMD19/D0-3=14-17/reset 54). Constructing `machine.SDCard(slot=1)`
   panics the board. SD card = slot 0, C6 = slot 1, panel = DSI — three
@@ -278,21 +288,19 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   at zero. Keep
   `CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64` in `sdkconfig.board`: the
   upstream 24-packet host pool was hardware-confirmed to exhaust during keyboard
-  autorepeat while a synchronous MicroPython BLE IRQ waited behind a long render
-  (`vhci_drv: Rx: alloc_acl_from_ll failed`), dropping HID input reports. The
-  larger ACL pool is burst protection, not the latency solution: registered HID
-  notifications are intercepted by `moy_ble_hid_queue_on_notify` before Python
-  IRQ dispatch and drained by the frame loop. Pairing/bonding/discovery still use
-  the normal synchronous MicroPython path.
+  autorepeat (`vhci_drv: Rx: alloc_acl_from_ll failed`), dropping HID input
+  reports; the larger pool is burst protection.
 - **USER_C_MODULES cannot add IDF components** — the usermod cmake is skipped
   during idf.py's early-expansion phase, which is when component `REQUIRES`
   are collected. `build.sh` patches `esp32_common.cmake`'s `IDF_COMPONENTS`
   list instead (idempotent sed).
-- **A root-level VFS dir named like a frozen module SHADOWS it** (`''` precedes
-  `.frozen` on `sys.path`): the first console boot seeded `/moybyte/carts` and
-  the next boot died with `ImportError: no module named 'moybyte.input'`. The
-  flash store root is therefore **`/moy/carts`** — never name a VFS root dir
-  after an importable module.
+- **A root-level VFS dir named like a frozen module shadowed it** while `''`
+  preceded `.frozen` on `sys.path`: the first console boot seeded
+  `/moybyte/carts` and the next boot died with `ImportError: no module named
+  'moybyte.input'`. The flash store root is therefore **`/moy/carts`**. Every
+  console board's `boot.py` puts `.frozen` first (2026-10-05, #224), so a
+  frozen module now wins over a flash file or dir of its name; still never
+  name a VFS root dir after an importable module.
 - **The PPA driver INVALIDATES the whole out-picture buffer at submit** — any
   CPU frame writes not yet flushed from cache are silently DISCARDED (pixels
   revert to stale PSRAM content; glass-confirmed as speed-scaled desktop

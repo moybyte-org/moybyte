@@ -31,7 +31,7 @@ def main():
 def panel():
     import time
     import moy_dsi
-    from p4_display import set_backlight
+    from moy_glass import backlight as set_backlight
 
     moy_dsi.init()
     set_backlight(True)

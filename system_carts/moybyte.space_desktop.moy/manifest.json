@@ -1,0 +1,78 @@
+{
+  "format": "moy-1",
+  "version": 5,
+  "title": "Space Desktop",
+  "id": "moybyte.space_desktop",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "moybyte": {
+    "type": "wallpaper",
+    "system": true,
+    "order": 40,
+    "permissions": [
+      "graphics",
+      "input"
+    ],
+    "age_mode": "cards",
+    "config": {
+      "star_count": 80,
+      "star_speed": 30,
+      "bg": "dark_blue",
+      "pet": 0
+    },
+    "edit": [
+      {
+        "key": "star_count",
+        "label": "STARS",
+        "type": "int",
+        "min": 10,
+        "max": 300,
+        "step": 10,
+        "card": "ADD {value} STARS"
+      },
+      {
+        "key": "star_speed",
+        "label": "SPEED",
+        "type": "int",
+        "min": 5,
+        "max": 90,
+        "step": 5,
+        "display": "gauge",
+        "gauge": {
+          "low": "turtle",
+          "high": "rabbit"
+        },
+        "card": "SKY MOVES AT {value}"
+      },
+      {
+        "key": "pet",
+        "label": "PET",
+        "type": "choice",
+        "choices": [
+          0,
+          1
+        ],
+        "tiles": [
+          0,
+          1
+        ],
+        "display": "sprite-tiles",
+        "card": "PET IS A {value}"
+      },
+      {
+        "key": "bg",
+        "label": "BG",
+        "type": "choice",
+        "choices": [
+          "dark_blue",
+          "night",
+          "stripes",
+          "indigo"
+        ],
+        "display": "bg-thumbs",
+        "card": "SKY IS {value}"
+      }
+    ]
+  }
+}

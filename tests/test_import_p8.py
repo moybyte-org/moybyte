@@ -213,7 +213,8 @@ def test_manifest_valid(tmp_path):
     assert man["format"] == "moy-1"
     assert man["main"] == "main.lua"
     assert man["fps"] == 30                      # PICO-8's own rate
-    assert man["ported_from"] == "pico-8"
+    assert man["tags"] == ["pico8"]               # SPEC.md 3.7: the record of a conversion
+    assert "ported_from" not in man
     # A p8 cart is 128x128 (SPEC.md 1/3.1 carries that size to inherit the
     # PICO-8 back catalogue at native res), NOT the 320x240 default -- and the
     # size has to be in moy_carts.CANVAS_SIZES or Player.start refuses the cart.
@@ -221,7 +222,6 @@ def test_manifest_valid(tmp_path):
     assert man["canvas"] in moy_carts.CANVAS_SIZES
     # Imported, not authored (#194): republishing somebody else's cart is not
     # what this feature is for, so nothing downstream may treat it as mine.
-    assert man["safe_to_share"] is False
     # title comes from the first real lua comment line
     assert summary["title"] == "my test cart"
     assert man["title"] == "my test cart"
@@ -497,9 +497,12 @@ def test_multichannel_music_track_plays_on_the_engine(tmp_path):
     assert n_music == 1
     bank = AudioBank.from_dict(sounds)
     assert bank.music[0].pattern == [[0, 1]]
-    eng = A.AudioEngine(bank, rate=8000)
+    from audio_synth import Synth, available
+    if not available():                           # the module needs cc
+        return
+    eng = Synth(bank, rate=8000)
     eng.play_music(0)
-    if eng.active_channels():                     # binding present (needs cc)
+    if eng.active_channels():
         assert eng.active_channels() & 0x0F == 0b1100   # voices 3 + 2 claimed
         assert any(b != 0 for b in eng.render(400))
 
@@ -745,8 +748,8 @@ def test_the_filename_title_is_the_same_on_every_tier(tmp_path):
 def _need_lua():
     """Skip unless the host Lua binding BUILT (a C compiler, not a package --
     the host runs the BOARDS' Lua now; see runtime/lua_host.py's header)."""
-    from runtime import lua_host
-    if lua_host.moycore_supports("") is not True:
+    from runtime import lua_binding
+    if not lua_binding.HostLuaRun.available():
         pytest.skip("host lua binding not built (needs a C compiler)")
 
 

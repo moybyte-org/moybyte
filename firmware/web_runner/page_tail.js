@@ -76,7 +76,14 @@ else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
 else if(m.t==="lost"){linkLost(m.kind||"lost",m.head||"the console is not answering",
 m.body||"",m.risk!==false);}
 else if(m.t==="error"){console.error("[moy]",m.s);
-sEl.textContent="console crash (see devtools)";sEl.style.color="#ff004d";}}
+sEl.textContent="console crash (see devtools)";sEl.style.color="#ff004d";
+// Under the title: the message's tail (an abort's reason; a traceback's
+// raising line and exception), then the first frames that threw it.
+var ce=document.getElementById("crash");var cs=String(m.s);window.__moyCrash=cs;
+var cm=m.msg==null?"":String(m.msg);var cl=(cm||cs).split("\n").slice(-12);
+if(cm&&cs.indexOf(cm)===0)cl=cl.concat(cs.slice(cm.length).split("\n")
+.filter(function(x){return x.trim();}).slice(0,4));
+ce.textContent=cl.join("\n");ce.style.display="block";}}
 // ---- the pin prompt (2026-08-25) --------------------------------------------
 // A board serves its console to anyone and its CARTS to nobody without the
 // pairing pin, so a page opened by hand -- typing the address instead of
@@ -383,6 +390,19 @@ try {
   // any token makes the url differ from the bare "worker.js" a browser may have
   // cached -- it just stops changing between builds.
   const MOY_BUILD = "@MOY_BUILD@";
+  // The channel this page was published as: empty but on a channel's site,
+  // whose build (site/build.py --channel) rewrites this one line. The worker
+  // keeps that page's stores apart from the stable site's (moy_store.channelNav).
+  const MOY_CHANNEL = "";
+  // The colour scheme a first-run console takes its theme variant from: the
+  // url's ?scheme=dark|light (the project site passes its visitor's), else the
+  // browser's own prefers-color-scheme.
+  function moyScheme() {
+    const q = new URLSearchParams(location.search).get("scheme");
+    if (q === "dark" || q === "light") return q;
+    return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark" : "light";
+  }
   // The worker url carries a CACHE BUSTER, and it is not superstition: browsers
   // cache worker scripts stubbornly, and a hard reload that refreshes the
   // document will happily keep an old worker.js. That is not hypothetical --
@@ -397,12 +417,26 @@ try {
   window.__moyPinRestore();
   const w = new Worker("worker.js?v=" + MOY_BUILD, { type: "module" });
   window.__moyAttach(w);
-  w.postMessage({ t: "init", search: location.search });
+  // A coarse pointer is a finger: the console's hints start on touch.
+  w.postMessage({ t: "init", search: location.search, channel: MOY_CHANNEL,
+                  coarse: !!(window.matchMedia && matchMedia("(pointer: coarse)").matches),
+                  scheme: moyScheme() });
+  // Leaving the page ends the VM with it. A page the back-forward cache keeps
+  // keeps its worker too -- and on iOS that worker's wasm memory, so the next
+  // console in the same tab (the desk's "small screen?" link) instantiates
+  // beside it and can be refused memory. A page brought back from that cache
+  // has no VM any more, so it boots again.
+  addEventListener("pagehide", function () { if (WORKER) WORKER.terminate(); });
+  addEventListener("pageshow", function (e) { if (e.persisted) location.reload(); });
   // ---- play-button splash ----------------------------------------------------
   // The p8-web-player pattern: the game starts on a CLICK, which is also the user
   // gesture that unlocks WebAudio, so sound works from frame one.
-  // ?dev=1 (the CLI hot-reload loop) skips it -- devs restart constantly.
-  if (new URLSearchParams(location.search).get("dev")) {
+  // ?dev=1 (the CLI hot-reload loop) skips it -- devs restart constantly. So
+  // does ?start=1, which an embedding page passes when its visitor's click
+  // already started this console (the project site's hero): the click that
+  // unlocks audio is then the page's, and the frame inherits it.
+  const qStart = new URLSearchParams(location.search);
+  if (qStart.get("dev") || qStart.get("start")) {
     window.__moyStart();
   } else {
     const ov = document.createElement("div");

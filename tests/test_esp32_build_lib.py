@@ -15,8 +15,9 @@ here, in bash, against temp trees -- nothing is transcribed into Python.
 
 WHAT CANNOT RUN HERE, said out loud rather than left as a gap:
 
-  * `moybyte_clone_micropython` / `moybyte_setup_idf` / `moybyte_build_and_collect`
-    clone ~500MB and invoke a cross toolchain.
+  * `moybyte_setup_idf` / `moybyte_build_and_collect` clone ~500MB and invoke a
+    cross toolchain. (`moybyte_clone_micropython` runs in `test_mpy_tree.py`,
+    against a local repository standing in for upstream.)
   * the APPLY half of the three `patch` helpers needs the real upstream tree the
     diffs were cut against; their GUARD half (the idempotence that makes a warm
     rebuild a no-op) is what runs below.
@@ -371,6 +372,183 @@ def test_a_half_applied_run_hints_tree_is_REFUSED(tmp_path):
     assert r.returncode != 0 and "half-applied" in r.stderr
 
 
+# -- the gc meters: gc.pauses() and gc.areas() --------------------------------
+#
+# The stock lines tools/patch_gc_meters.py and tools/patch_gc_census.py
+# anchor on, in stock order: moybyte_patch_gc_meters applies both.
+
+_GC_C_METERS_STOCK = """\
+#include "py/gc.h"
+#include "py/runtime.h"
+
+#if MICROPY_GC_SPLIT_HEAP
+void gc_add(void *start, void *end) {
+}
+
+static bool gc_try_add_heap(size_t failed_alloc) {
+    gc_add(new_heap, (void *)new_heap + to_alloc);
+
+    return true;
+}
+#endif
+
+void gc_collect_start(void) {
+    gc_collect_start_common();
+}
+
+void gc_collect_end(void) {
+    MP_STATE_THREAD(gc_lock_depth) &= ~GC_COLLECT_FLAG;
+    GC_EXIT();
+    #if MICROPY_PY_WEAKREF
+    gc_weakref_sweep();
+    #endif
+}
+
+static void gc_sweep_free_blocks(void) {
+        if (last_used_block == 0 && prev_area != NULL) {
+            DEBUG_printf("gc_sweep_free_blocks free empty area %p\\n", area);
+            NEXT_AREA(prev_area) = NEXT_AREA(area);
+            MP_PLAT_FREE_HEAP(area);
+        }
+}
+"""
+
+_MODGC_C_STOCK = """\
+#if MICROPY_GC_ALLOC_THRESHOLD
+static mp_obj_t gc_threshold(size_t n_args, const mp_obj_t *args) {
+}
+#endif
+
+static const mp_rom_map_elem_t mp_module_gc_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_mem_free), MP_ROM_PTR(&gc_mem_free_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mem_alloc), MP_ROM_PTR(&gc_mem_alloc_obj) },
+};
+"""
+
+
+def _meters_tree(tmp_path, gc_c=_GC_C_METERS_STOCK, modgc_c=_MODGC_C_STOCK):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "gc.c").write_text(gc_c, encoding="utf-8")
+    (p / "modgc.c").write_text(modgc_c, encoding="utf-8")
+    return p / "gc.c", p / "modgc.c"
+
+
+def _meters(tmp_path):
+    return sh("moybyte_patch_gc_meters", MPY_DIR=str(tmp_path),
+              REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_gc_meters_patch_times_every_collect_and_registers_both_reads(
+        tmp_path):
+    """The clock at the top of gc_collect_start and the bottom of
+    gc_collect_end, both behind MICROPY_PY_GC (mpy-cross compiles gc.c with no
+    clock to link), and both functions in the gc module's table."""
+    gc_c, modgc_c = _meters_tree(tmp_path)
+    r = _meters(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c, m = _both(gc_c, modgc_c)
+    assert '#if MICROPY_PY_GC // Moybyte: gc meters\n#include "py/mphal.h"' in c
+    assert ("void gc_collect_start(void) {\n    MOYBYTE_GC_PAUSE_START();"
+            in c)
+    assert "    MOYBYTE_GC_PAUSE_END(); // Moybyte: gc meters\n}\n" in c
+    assert c.index("#define MOYBYTE_GC_PAUSE_END()") < c.index(
+        "void gc_collect_start(void)")
+    assert "extern uint32_t moybyte_gc_pause[3];" in m
+    assert "MP_ROM_QSTR(MP_QSTR_pauses), MP_ROM_PTR(&gc_pauses_obj)" in m
+    assert "MP_ROM_QSTR(MP_QSTR_areas), MP_ROM_PTR(&gc_areas_obj)" in m
+    assert m.index("gc_areas_obj, gc_areas)") < m.index("mp_module_gc_globals_table[]")
+
+
+def test_the_gc_meters_patch_is_idempotent_and_independent_of_the_run_hints(
+        tmp_path):
+    """Neither patch touches the other's lines, so a tree takes both in either
+    order and comes out the same."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    for d in (a, b):
+        _meters_tree(d, gc_c=_GC_C_METERS_STOCK + _GC_C_STOCK)
+        (d / "py" / "mpstate.h").write_text(_MPSTATE_H_STOCK, encoding="utf-8")
+    assert _meters(a).returncode == 0 and _run_hints(a).returncode == 0
+    assert _run_hints(b).returncode == 0 and _meters(b).returncode == 0
+    texts = [(d / "py" / f).read_text(encoding="utf-8")
+             for d in (a, b) for f in ("gc.c", "modgc.c", "mpstate.h")]
+    assert texts[:3] == texts[3:]
+    assert _meters(a).returncode == 0
+    assert [(a / "py" / f).read_text(encoding="utf-8")
+            for f in ("gc.c", "modgc.c", "mpstate.h")] == texts[:3]
+
+
+def test_the_gc_census_patch_records_every_area_and_registers_both_reads(
+        tmp_path):
+    """An area added notes the request that grew the heap, an area a sweep
+    frees notes itself, and area_map/growths sit in the gc module's table
+    between entries the meters patch does not anchor on."""
+    gc_c, modgc_c = _meters_tree(tmp_path)
+    r = _meters(tmp_path)
+    assert r.returncode == 0, r.stderr
+    c, m = _both(gc_c, modgc_c)
+    assert ("    gc_add(new_heap, (void *)new_heap + to_alloc);\n"
+            "    MOYBYTE_GC_NOTE(failed_alloc, to_alloc);") in c
+    assert ("    MOYBYTE_GC_NOTE(0, area->gc_pool_end - (byte *)area);"
+            in c)
+    assert c.index("size_t moybyte_gc_area_map(") < c.index("void gc_add(")
+    assert c.index("#define MOYBYTE_GC_NOTE(") < c.index("gc_try_add_heap(")
+    assert ("MP_QSTR_mem_free), MP_ROM_PTR(&gc_mem_free_obj) },\n"
+            "    { MP_ROM_QSTR(MP_QSTR_area_map), MP_ROM_PTR(&gc_area_map_obj) }"
+            in m)
+    assert "MP_ROM_QSTR(MP_QSTR_growths), MP_ROM_PTR(&gc_growths_obj)" in m
+    assert "MP_ROM_QSTR(MP_QSTR_refs), MP_ROM_PTR(&gc_refs_obj)" in m
+    assert c.index("size_t moybyte_gc_refs(") < c.index("void gc_add(")
+    assert m.index("gc_growths_obj, gc_growths)") < m.index("gc_threshold(")
+
+
+def test_the_gc_census_and_meters_patches_land_the_same_in_either_order(
+        tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    for d in (a, b):
+        _meters_tree(d)
+    run = [sys.executable, str(ROOT / "tools" / "patch_gc_census.py")]
+    meters = [sys.executable, str(ROOT / "tools" / "patch_gc_meters.py")]
+    for d, order in ((a, (run, meters)), (b, (meters, run))):
+        for cmd in order:
+            assert subprocess.run(cmd + [str(d)]).returncode == 0
+    assert _both(*_meters_tree_paths(a)) == _both(*_meters_tree_paths(b))
+
+
+def _meters_tree_paths(d):
+    return d / "py" / "gc.c", d / "py" / "modgc.c"
+
+
+def test_a_gc_census_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    gc_c, modgc_c = _meters_tree(tmp_path, gc_c=_GC_C_METERS_STOCK.replace(
+        "            NEXT_AREA(prev_area) = NEXT_AREA(area);\n",
+        "            prev_area->next = area->next;\n"))
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "patch_gc_census.py"),
+                        str(tmp_path)], capture_output=True, text=True)
+    assert r.returncode != 0
+    assert "did not apply" in r.stderr and "area freed" in r.stderr
+    assert "gc census" not in gc_c.read_text(encoding="utf-8")
+    assert "gc census" not in modgc_c.read_text(encoding="utf-8")
+
+
+def test_a_gc_meters_line_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
+    gc_c, modgc_c = _meters_tree(tmp_path, gc_c=_GC_C_METERS_STOCK.replace(
+        "    gc_weakref_sweep();\n", "    gc_weakref_sweep_all();\n"))
+    before = _both(gc_c, modgc_c)
+    r = _meters(tmp_path)
+    assert r.returncode != 0
+    assert "did not apply" in r.stderr and "collect end" in r.stderr
+    assert _both(gc_c, modgc_c) == before
+
+
+def test_a_half_applied_gc_meters_tree_is_REFUSED(tmp_path):
+    gc_c, modgc_c = _meters_tree(tmp_path)
+    assert _meters(tmp_path).returncode == 0
+    _meters_tree(tmp_path, gc_c=gc_c.read_text(encoding="utf-8"))
+    r = _meters(tmp_path)
+    assert r.returncode != 0 and "half-applied" in r.stderr
+
+
 # -- the stdin ring for a UART console -----------------------------------------
 
 _MPHALPORT_STOCK = """\
@@ -602,6 +780,171 @@ def test_the_lfs_patch_is_idempotent_and_refuses_a_changed_line(tmp_path):
     assert g.read_text(encoding="utf-8") == changed
 
 
+# -- an equal-length slice store ------------------------------------------------
+
+def _slice_store_stock():
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import patch_slice_store
+    finally:
+        sys.path.pop(0)
+    return patch_slice_store
+
+
+def _obj_h(tmp_path, macro):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "obj.h"
+    f.write_text("// Note: dest and slice regions may overlap\n" + macro + "\n", encoding="utf-8")
+    return f, sh("moybyte_patch_slice_store", MPY_DIR=str(tmp_path),
+                 REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_slice_store_patch_is_idempotent_and_refuses_a_changed_macro(tmp_path):
+    pss = _slice_store_stock()
+    f, r = _obj_h(tmp_path, pss.STOCK)
+    assert r.returncode == 0, r.stderr
+    once = f.read_text(encoding="utf-8")
+    assert pss.MARKER in once and pss.STOCK not in once
+    r = sh("moybyte_patch_slice_store", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    changed = pss.STOCK.replace("(dest_len - end)", "((dest_len) - (end))")
+    g, r = _obj_h(tmp_path / "b", changed)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert pss.MARKER not in g.read_text(encoding="utf-8")
+
+
+_SLICE_HARNESS = r"""
+#include <stdio.h>
+#include <string.h>
+%s
+%s
+int main(void) {
+    int bad = 0;
+    for (size_t isz = 1; isz <= 4; isz *= 2) {
+        for (size_t len = 0; len <= 9; len++) {
+            for (long beg = 0; beg <= (long)len; beg++) {
+                for (long end = beg; end <= (long)len; end++) {
+                    for (size_t sl = 0; sl <= (size_t)(end - beg); sl++) {
+                        for (int alias = 0; alias < 2; alias++) {
+                            unsigned char a[64], b[64], src[64];
+                            for (int i = 0; i < 64; i++) { a[i] = b[i] = (unsigned char)(i * 7 + 1); src[i] = (unsigned char)(200 - i); }
+                            unsigned char *sa = alias ? a + (beg * isz) : src;
+                            unsigned char *sb = alias ? b + (beg * isz) : src;
+                            STOCK_no_grow(a, len, beg, end, sa, sl, isz);
+                            mp_seq_replace_slice_no_grow(b, len, beg, end, sb, sl, isz);
+                            if (memcmp(a, b, sizeof a)) { bad++; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    printf("%%d\n", bad);
+    return bad != 0;
+}
+"""
+
+
+def test_the_patched_slice_store_writes_what_the_stock_one_does(tmp_path):
+    """Every no-grow store of every length, slice and item size, the slice from
+    another buffer and from inside the destination: the patched macro leaves the
+    buffer byte for byte as the stock one does. The bounds are signed, as a
+    list's are (mp_bound_slice_t), and -Wextra holds the macro to the
+    sign-compare warning mpy-cross builds under."""
+    import shutil
+    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+    if cc is None:
+        pytest.skip("no C compiler")
+    pss = _slice_store_stock()
+    src = tmp_path / "h.c"
+    stock = pss.STOCK.replace("mp_seq_replace_slice_no_grow", "STOCK_no_grow")
+    src.write_text(_SLICE_HARNESS % (stock, pss.PATCHED), encoding="utf-8")
+    exe = tmp_path / "h"
+    c = subprocess.run([cc, "-std=c99", "-Wall", "-Wextra", "-Werror", "-o", str(exe), str(src)],
+                       capture_output=True, text=True)
+    assert c.returncode == 0, c.stderr
+    r = subprocess.run([str(exe)], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.strip() == "0", r.stdout
+
+
+# -- a found extensible built-in enters sys.modules ------------------------------
+
+def _import_cache():
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import patch_import_cache
+    finally:
+        sys.path.pop(0)
+    return patch_import_cache
+
+
+def _builtinimport(tmp_path, body):
+    p = tmp_path / "py"
+    p.mkdir(parents=True, exist_ok=True)
+    f = p / "builtinimport.c"
+    f.write_text("        #if MICROPY_HAVE_REGISTERED_EXTENSIBLE_MODULES\n" + body
+                 + "        #endif\n", encoding="utf-8")
+    return f, sh("moybyte_patch_import_cache", MPY_DIR=str(tmp_path),
+                 REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+
+def test_the_import_cache_patch_is_idempotent_and_refuses_a_changed_fallback(tmp_path):
+    """The fallback gains the one store into the loaded-modules dict and keeps
+    its return; a warm tree is left as it is, and a stock fallback that changed
+    shape stops the build with nothing written."""
+    pic = _import_cache()
+    f, r = _builtinimport(tmp_path, pic.STOCK)
+    assert r.returncode == 0, r.stderr
+    once = f.read_text(encoding="utf-8")
+    assert pic.MARKER in once and pic.STOCK not in once
+    assert "MP_MAP_LOOKUP_ADD_IF_NOT_FOUND)->value = module_obj;" in once
+    assert once.count("return module_obj;") == 1
+    r = sh("moybyte_patch_import_cache", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    changed = pic.STOCK.replace("level_mod_name, true", "full_mod_name, true")
+    g, r = _builtinimport(tmp_path / "b", changed)
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert pic.MARKER not in g.read_text(encoding="utf-8")
+
+
+# -- the VM's thread state in a __thread variable ---------------------------------
+
+def test_the_thread_state_patch_is_idempotent_and_refuses_a_changed_pair(tmp_path):
+    """mp_thread_get_state reads the __thread variable and set_state writes it
+    and still the TLS slot; a warm tree is left as it is, and a stock pair that
+    changed shape stops the build with nothing written."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import patch_thread_state_tls as pts
+    finally:
+        sys.path.pop(0)
+
+    def port(root, body):
+        d = root / "ports" / "esp32"
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / "mpthreadport.c"
+        f.write_text("#include \"py/mpthread.h\"\n\n" + body + "\nint x;\n",
+                     encoding="utf-8")
+        return f, sh("moybyte_patch_thread_state_tls", MPY_DIR=str(root),
+                     REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+
+    f, r = port(tmp_path, pts.STOCK)
+    assert r.returncode == 0, r.stderr
+    once = f.read_text(encoding="utf-8")
+    assert pts.MARKER in once and pts.STOCK not in once
+    assert "    return moy_thread_state;\n" in once
+    assert "vTaskSetThreadLocalStoragePointer(NULL, 1, state);" in once
+    r = sh("moybyte_patch_thread_state_tls", MPY_DIR=str(tmp_path),
+           REPO_ROOT=str(ROOT), BUILD_PYTHON=sys.executable)
+    assert r.returncode == 0 and f.read_text(encoding="utf-8") == once
+    g, r = port(tmp_path / "b", pts.STOCK.replace("(NULL, 1)", "(NULL, 2)"))
+    assert r.returncode != 0 and "did not apply" in r.stderr
+    assert pts.MARKER not in g.read_text(encoding="utf-8")
+
+
 def test_a_repr_line_that_changed_shape_FAILS_rather_than_no_ops(tmp_path):
     """The guard is the point: a silent no-op is a board quietly running boxed
     floats again, which costs a 130-175ms GC hitch -- and, since the ESP-NOW
@@ -629,16 +972,6 @@ def test_the_native_code_free_patch_skips_an_already_patched_tree(tmp_path):
            MPY_DIR=str(tmp_path), REPO_ROOT=str(ROOT))
     assert r.returncode == 0 and r.stdout.strip() == ""
     assert "moybyte_native_code_free" in f.read_text(encoding="utf-8")
-
-
-def test_the_espnow_ring_patch_skips_an_already_patched_tree(tmp_path):
-    p = tmp_path / "ports" / "esp32"
-    p.mkdir(parents=True)
-    (p / "modespnow.c").write_text("/* Moybyte espnow_ring_race */\n",
-                                   encoding="utf-8")
-    r = sh("moybyte_patch_espnow_ring_race",
-           MPY_DIR=str(tmp_path), REPO_ROOT=str(ROOT))
-    assert r.returncode == 0 and r.stdout.strip() == ""
 
 
 # -- the OTA identity stamp -----------------------------------------------------
@@ -1036,12 +1369,13 @@ def test_the_value_is_matched_literally_not_as_a_pattern(board):
 # -- the #168 size guard --------------------------------------------------------
 
 
-def _size_guard(tmp_path, nbytes, **env):
+def _size_guard(tmp_path, nbytes, floor=512 * 1024, **env):
     csv = tmp_path / "partitions.csv"
     csv.write_text(CSV, encoding="utf-8")
     app = tmp_path / "app.bin"
     app.write_bytes(b"\0" * nbytes)
-    return sh("moybyte_app_size_guard '%s' '%s'" % (csv, app), **env)
+    return sh("moybyte_app_size_guard '%s' '%s' %d testboard"
+              % (csv, app, floor), **env)
 
 
 def test_the_slot_size_is_read_out_of_the_boards_own_table(tmp_path):
@@ -1061,26 +1395,46 @@ def test_an_image_that_does_not_fit_FAILS_the_build(tmp_path):
     assert "BUILD FAILED" in r.stderr
 
 
-def test_a_tight_fit_warns_without_failing(tmp_path):
-    r = _size_guard(tmp_path, 4 * 1024 * 1024 - 1024)
+def test_an_image_under_its_floor_FAILS_naming_board_headroom_and_floor(tmp_path):
+    r = _size_guard(tmp_path, 4 * 1024 * 1024 - 511 * 1024)
+    assert r.returncode != 0
+    assert "BUILD FAILED: testboard's image is under its headroom floor" in r.stderr
+    assert "headroom: 523264 bytes (511 KB)" in r.stderr
+    assert "floor:    524288 bytes (512 KB" in r.stderr
+    assert "short by: 1024 bytes" in r.stderr
+    assert "MOYBYTE_ALLOW_UNDER_FLOOR=1" in r.stderr
+
+
+def test_the_floor_itself_passes(tmp_path):
+    r = _size_guard(tmp_path, 4 * 1024 * 1024 - 512 * 1024)
+    assert r.returncode == 0 and r.stderr.strip() == ""
+
+
+def test_an_experiment_can_build_under_its_floor(tmp_path):
+    r = _size_guard(tmp_path, 4 * 1024 * 1024 - 1024,
+                    MOYBYTE_ALLOW_UNDER_FLOOR="1")
     assert r.returncode == 0
-    assert "under 200KB of OTA-slot headroom" in r.stderr
+    assert "under its headroom floor" in r.stderr and "continuing" in r.stderr
 
 
-def test_a_comfortable_image_says_nothing_alarming(tmp_path):
+def test_the_override_does_not_reach_an_overflow(tmp_path):
+    r = _size_guard(tmp_path, 4 * 1024 * 1024 + 1,
+                    MOYBYTE_ALLOW_UNDER_FLOOR="1")
+    assert r.returncode != 0 and "OVERFLOW" in r.stderr
+
+
+def test_a_comfortable_image_prints_its_headroom_and_floor(tmp_path):
     r = _size_guard(tmp_path, 3 * 1024 * 1024)
     assert r.returncode == 0 and r.stderr.strip() == ""
-    assert "1048576 bytes headroom (1024 KB)" in r.stdout
+    assert ("1048576 bytes headroom (1024 KB), floor 512 KB (testboard)"
+            in r.stdout)
 
 
-def test_the_slot_and_the_warning_threshold_are_both_overridable(tmp_path):
+def test_the_slot_is_overridable_for_a_what_if(tmp_path):
     """A what-if against a table change, without editing the table."""
     r = _size_guard(tmp_path, 3 * 1024 * 1024,
                     MOYBYTE_APP_SLOT_BYTES=str(2 * 1024 * 1024))
     assert r.returncode != 0
-    r = _size_guard(tmp_path, 3 * 1024 * 1024,
-                    MOYBYTE_APP_HEADROOM_WARN_BYTES=str(4 * 1024 * 1024))
-    assert r.returncode == 0 and "headroom left" in r.stderr
 
 
 # -- the greps and the executable lane must point at the same file --------------
@@ -1188,3 +1542,74 @@ def test_a_usj_init_that_changed_shape_FAILS_and_writes_nothing(tmp_path):
     f, r = _usj(tmp_path, text)
     assert r.returncode != 0 and "did not apply" in r.stderr
     assert f.read_text(encoding="utf-8") == text
+
+
+# -- the native configuration guard ---------------------------------------------
+
+
+def _config_board(tmp_path):
+    """A board dir whose board.toml is the Guition P4's, a build dir with a
+    genhdr beside it, and the shell that runs the guard over both."""
+    bd = tmp_path / "board"
+    bd.mkdir()
+    src = ROOT / "firmware" / "guition_jc8012p4a1c" / "board.toml"
+    (bd / "board.toml").write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    out = tmp_path / "build-X"
+    (out / "genhdr").mkdir(parents=True)
+    return bd, out
+
+
+def _config_guard(bd, out, **env):
+    env.setdefault("BOARD_DIR", str(bd))
+    r = sh("moybyte_native_config_guard '%s'" % out, REPO_ROOT=str(ROOT),
+           SCRIPT_DIR=str(bd), BUILD_PYTHON=sys.executable, **env)
+    assert r.returncode == 0, r.stderr
+    return (out / "genhdr").is_dir()
+
+
+def test_a_flipped_take_or_denial_starts_genhdr_afresh(tmp_path):
+    """A build that drops a source links a module table naming code it no
+    longer has: `undefined reference to moy_kernel_module` after a board.toml
+    flip, until genhdr was deleted by hand."""
+    bd, out = _config_board(tmp_path)
+    assert _config_guard(bd, out) is False          # no record: nothing to trust
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out) is True           # the same configuration
+
+    toml = (bd / "board.toml").read_text(encoding="utf-8")
+    take = '[[native.shared.take]]\nmodule = "moy_kernel"'
+    assert take in toml
+    (bd / "board.toml").write_text(
+        toml.replace(take, '[[native.shared.deny]]\nmodule = "moy_kernel"'),
+        encoding="utf-8")
+    assert _config_guard(bd, out) is False          # take -> deny
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out) is True
+    (bd / "board.toml").write_text(toml, encoding="utf-8")
+    assert _config_guard(bd, out) is False          # deny -> take
+
+
+def test_a_changed_impl_hook_starts_genhdr_afresh(tmp_path):
+    bd, out = _config_board(tmp_path)
+    _config_guard(bd, out)
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out) is True
+    assert _config_guard(bd, out, MOY_INDEX_IMPL="c") is False
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out, MOY_INDEX_IMPL="c") is True
+    assert _config_guard(bd, out, MOY_INDEX_IMPL="py") is False
+    (out / "genhdr").mkdir()
+    assert _config_guard(bd, out, MOY_INDEX_IMPL="py", CI="1") is True  # not a hook
+
+
+def test_a_changed_board_header_starts_genhdr_afresh(tmp_path):
+    """mpconfigboard.h turning a port module off (MICROPY_PY_BLUETOOTH 0) left
+    `undefined reference to mp_module_bluetooth` until genhdr was deleted."""
+    bd, out = _config_board(tmp_path)
+    hdr = bd / "mpconfigboard.h"
+    hdr.write_text("#define MICROPY_PY_BLUETOOTH (1)\n", encoding="utf-8")
+    _config_guard(bd, out)
+    (out / "genhdr").mkdir(exist_ok=True)
+    assert _config_guard(bd, out) is True
+    hdr.write_text("#define MICROPY_PY_BLUETOOTH (0)\n", encoding="utf-8")
+    assert _config_guard(bd, out) is False

@@ -9,6 +9,7 @@
 // the sync access handle, a browser without one falls back to createWritable.
 import { deflateRawSync } from "node:zlib";
 import * as store from "./moy_store.mjs";
+import { crash, fakeNav } from "./fake_opfs.mjs";
 
 let fail = 0;
 function ok(name, cond, extra = "") {
@@ -17,99 +18,6 @@ function ok(name, cond, extra = "") {
 }
 
 const enc = new TextEncoder(), dec = new TextDecoder();
-
-// ---- a fake OPFS ------------------------------------------------------------
-// CRASH, when set, counts every change the fake makes to its contents and
-// throws once it has allowed `left` of them -- a reload at that exact point,
-// with the store left as far as it got (truncate and write are two changes,
-// as they are on a real sync access handle).
-let CRASH = null;
-function change() {
-    if (CRASH && CRASH.left-- <= 0) throw new Error("the page went away here");
-}
-
-function makeDir(sync) {
-    const children = new Map();
-    const dir = {
-        kind: "directory",
-        async getDirectoryHandle(name, opts) {
-            let c = children.get(name);
-            if (!c) {
-                if (!opts || !opts.create) throw new Error("NotFoundError: " + name);
-                change();
-                c = makeDir(sync);
-                children.set(name, c);
-            }
-            if (c.kind !== "directory") throw new Error("TypeMismatchError: " + name);
-            return c;
-        },
-        async getFileHandle(name, opts) {
-            let c = children.get(name);
-            if (!c) {
-                if (!opts || !opts.create) throw new Error("NotFoundError: " + name);
-                change();
-                c = makeFile(sync);
-                children.set(name, c);
-            }
-            if (c.kind !== "file") throw new Error("TypeMismatchError: " + name);
-            return c;
-        },
-        async removeEntry(name, opts) {
-            const c = children.get(name);
-            if (!c) throw new Error("NotFoundError: " + name);
-            if (c.kind === "directory" && !(opts && opts.recursive) && c._size())
-                throw new Error("InvalidModificationError");
-            // A recursive removal is not atomic on a real filesystem: entry by
-            // entry, so a reload can land half way through one.
-            if (c.kind === "directory") {
-                const inner = [];
-                for await (const [k] of c.entries()) inner.push(k);
-                for (const k of inner) await c.removeEntry(k, { recursive: true });
-            }
-            change();
-            children.delete(name);
-        },
-        async *entries() { for (const [k, v] of children) yield [k, v]; },
-        _size() { return children.size; },
-    };
-    return dir;
-}
-
-function makeFile(sync) {
-    const fh = {
-        kind: "file",
-        data: new Uint8Array(0),
-        async getFile() {
-            return { text: async () => dec.decode(fh.data),
-                     arrayBuffer: async () => fh.data.slice().buffer };
-        },
-    };
-    if (sync) {
-        fh.createSyncAccessHandle = async () => ({
-            truncate(n) { change(); fh.data = fh.data.slice(0, n); },
-            write(bytes, o) {
-                change();
-                const at = (o && o.at) || 0;
-                const out = new Uint8Array(Math.max(fh.data.length, at + bytes.length));
-                out.set(fh.data, 0);
-                out.set(bytes, at);
-                fh.data = out;
-            },
-            flush() { }, close() { },
-        });
-    } else {
-        fh.createWritable = async () => ({
-            async write(bytes) { change(); fh.data = bytes; },
-            async close() { },
-        });
-    }
-    return fh;
-}
-
-const fakeNav = (sync) => {
-    const root = makeDir(sync);
-    return { storage: { getDirectory: async () => root } };
-};
 
 // ---- mode detection ---------------------------------------------------------
 const reply = (status) => async () => ({ ok: status >= 200 && status < 300, status });
@@ -190,7 +98,8 @@ for (const sync of [true, false]) {
         "a.moy/manifest.json": '{"title":"A"}',
         "a.moy/main.py": "print(1)",
         "b.moy/manifest.json": '{"title":"B"}',
-        // Never seeded: a top-level file is system state, not the kid's work.
+        // Never seeded here: a top-level file is the console's own, and the
+        // console's own store keeps it (the system root, below).
         "system.json": "{}",
     });
     ok("seeded store is not empty (" + label + ")", !(await store.isEmpty(s)));
@@ -245,6 +154,161 @@ for (const sync of [true, false]) {
        && back["a.moy/journal/journal.jsonl"] === '{"seq": 1}\n'
        && back["a.moy/journal/s/0001-main.py"] === "print(1)\n",
        JSON.stringify(jr.errors) + " " + JSON.stringify(Object.keys(back)));
+}
+
+// ---- the console's own documents: system.json and its siblings ---------------
+// A site-mode browser is its own console, so it keeps what a board keeps
+// beside its carts -- the Settings rows, the badges, the shared sheet -- in an
+// OPFS store of its own, and takes nothing else into it.
+const dirNames = async (d) => {
+    const out = [];
+    for await (const [n] of d.entries()) out.push(n);
+    return out.sort();
+};
+for (const sync of [true, false]) {
+    const label = sync ? "sync handle" : "createWritable";
+    const nav = fakeNav(sync);
+    const carts = await store.openStore(nav);
+    const s = await store.openStore(nav, "system");
+    ok("the console's store opens beside the carts (" + label + ")",
+       !!s && s.root.id === "system" && s.root.endpoint === "console.json");
+    ok("a fresh console store is empty (" + label + ")", await store.isEmpty(s));
+    const sheet = new Uint8Array(300).map((_, i) => (i * 7) & 255);
+    const SYS = '{"theme": "dusk", "show_fps": false, "volume": 3}';
+    const ACH = '{"unlocked": ["first_open", "first_run"]}';
+    const r = await store.applyOps(s, [
+        { p: "system.json", t: SYS },
+        { p: "achievements.json", t: ACH },
+        { p: "shared.moygfx", b: store.toBase64(sheet) },
+    ]);
+    ok("its documents land (" + label + ")", r.applied === 3 && !r.errors.length,
+       JSON.stringify(r.errors));
+    let all = await store.readAll(s);
+    ok("...and read back, the sheet as bytes (" + label + ")",
+       all["system.json"] === SYS && all["achievements.json"] === ACH
+       && store.fileData(all["shared.moygfx"]).every((x, i) => x === sheet[i]),
+       JSON.stringify(Object.keys(all)));
+    ok("a committed write leaves nothing beside the file (" + label + ")",
+       (await dirNames(s.carts)).join() ===
+       "achievements.json,shared.moygfx,system.json",
+       (await dirNames(s.carts)).join());
+    ok("the console store is not empty now (" + label + ")", !(await store.isEmpty(s)));
+    ok("...and the carts store never saw any of it (" + label + ")",
+       !Object.keys(await store.readAll(carts)).length && await store.isEmpty(carts));
+
+    const big = "{\"name\": \"" + "z".repeat(40) + "\"}";
+    const chunked = await store.applyOps(s, [
+        { p: "system.json", t: big.slice(0, 20), part: 0 },
+        { p: "system.json", t: big.slice(20), part: 1 },
+        { p: "system.json", pub: 1 },
+        { p: "achievements.json", d: 1 },
+    ]);
+    all = await store.readAll(s);
+    ok("chunks publish whole and a delete lands (" + label + ")",
+       chunked.applied === 4 && all["system.json"] === big && !("achievements.json" in all),
+       JSON.stringify(chunked.errors) + " " + JSON.stringify(Object.keys(all)));
+
+    const bad = await store.applyOps(s, [
+        { p: "wifi.json", t: "[]" },
+        { p: "installed.json", t: "{}" },
+        { p: "indexes.json", t: "{}" },
+        { p: "a.moy/main.py", t: "x" },
+        { p: "system.json.bak", t: "x" },
+        { p: "system.json~part", t: "x" },
+        { p: "../system.json", t: "x" },
+        { p: "system.json", dc: 1 },
+        { p: "carts/a.moy", dc: 1 },
+        { p: "system.json", b: store.toBase64(sheet) },
+    ]);
+    ok("a secret, another sibling, a cart path, a folder delete and bytes for a"
+       + " text file are all refused (" + label + ")",
+       bad.applied === 0 && bad.errors.length === 10, JSON.stringify(bad.errors));
+    ok("...and nothing they named was written (" + label + ")",
+       (await dirNames(s.carts)).join() ===
+       "shared.moygfx,system.json",
+       (await dirNames(s.carts)).join());
+}
+
+// ---- an interrupted write never corrupts system.json -------------------------
+// A reload can land between any two changes the store makes. Whatever it
+// interrupted, the next boot reads the old document or the new one, whole,
+// and finds nothing else beside them.
+{
+    const OLD = '{"theme": "dusk", "show_fps": false}';
+    const NEW = '{"theme": "night", "show_fps": true, "name": "nikola", "volume": 5}';
+    const fresh = async () => {
+        const s = await store.openStore(fakeNav(true), "system");
+        await store.applyOps(s, [{ p: "system.json", t: OLD }]);
+        return s;
+    };
+    const probe = await fresh();
+    crash.at = { left: 1e9 };
+    await store.applyOps(probe, [{ p: "system.json", t: NEW }]);
+    const total = 1e9 - crash.at.left;
+    crash.at = null;
+    let olds = 0, news = 0, bad = [];
+    for (let k = 0; k < total; k++) {
+        const s = await fresh();
+        crash.at = { left: k };
+        const r = await store.applyOps(s, [{ p: "system.json", t: NEW }]);
+        crash.at = null;
+        if (!r.errors.length) { bad.push(k + ": no crash"); continue; }
+        const all = await store.readAll(s);           // the next boot
+        if (all["system.json"] === OLD) olds++;
+        else if (all["system.json"] === NEW) news++;
+        else bad.push(k + ": " + JSON.stringify(all["system.json"]));
+        const left = await dirNames(s.carts);
+        if (left.join() !== "system.json") bad.push(k + ": left " + left.join());
+    }
+    ok("a reload at any of a Settings write's " + total + " changes leaves the old"
+       + " system.json or the new", !bad.length && olds > 0 && news > 0,
+       bad.slice(0, 4).join(" | ") + " old=" + olds + " new=" + news);
+
+    // A boot whose own settle is interrupted is finished by the boot after it.
+    let twice = [];
+    for (let k = 0; k < total; k++) {
+        const s = await fresh();
+        crash.at = { left: k };
+        await store.applyOps(s, [{ p: "system.json", t: NEW }]);
+        for (let j = 0; j < 12; j++) {
+            crash.at = { left: j };
+            try { await store.readAll(s); crash.at = null; break; } catch (e) { }
+        }
+        crash.at = null;
+        const v = (await store.readAll(s))["system.json"];
+        if (v !== OLD && v !== NEW) twice.push(k + ":" + v);
+    }
+    ok("an interrupted settle is finished by the next one", !twice.length, twice.join(","));
+
+    // No reload at all: a write that failed part way (a quota error) and the
+    // next write after it, in the same session.
+    let next = [];
+    const NEWER = '{"theme": "sakura"}';
+    for (let k = 0; k < total; k++) {
+        const s = await fresh();
+        crash.at = { left: k };
+        await store.applyOps(s, [{ p: "system.json", t: NEW }]);
+        crash.at = null;
+        const r = await store.applyOps(s, [{ p: "system.json", t: NEWER }]);
+        const v = (await store.readAll(s))["system.json"];
+        if (r.errors.length || v !== NEWER) next.push(k + ":" + v);
+    }
+    ok("the write after a failed one lands whole", !next.length, next.join(","));
+}
+
+// ---- a theme package's fonts and sheets cross as BYTES -----------------------
+{
+    ok("a theme package's font and sheet are binary, its theme.json is not",
+       store.isBinary("dusk.moy/ui.fnt") && store.isBinary("dusk.moy/parts.moygfx")
+       && !store.isBinary("dusk.moy/theme.json") && !store.isBinary(".fnt"));
+    const s = await store.openStore(fakeNav(true));
+    const fnt = new Uint8Array(700);
+    for (let i = 0; i < fnt.length; i++) fnt[i] = (i * 29 + 3) & 255;
+    await store.seed(s, { "dusk.moy/theme.json": "{}", "dusk.moy/ui.fnt": { b: store.toBase64(fnt) } });
+    const all = await store.readAll(s);
+    ok("a seeded font reads back byte-equal",
+       store.fileData(all["dusk.moy/ui.fnt"]).every((v, i) => v === fnt[i])
+       && all["dusk.moy/theme.json"] === "{}");
 }
 
 // ---- a cart's cover crosses as BYTES (SPEC.md 3.6) ---------------------------
@@ -319,18 +383,18 @@ for (const sync of [true, false]) {
 
     // How many changes a whole update makes, then a reload after each one.
     const probe = await fresh();
-    CRASH = { left: 1e9 };
+    crash.at = { left: 1e9 };
     await store.commitInstall(probe, "jet.moy", asFiles(NEW), NEW_REC);
-    const total = 1e9 - CRASH.left;
-    CRASH = null;
+    const total = 1e9 - crash.at.left;
+    crash.at = null;
     let olds = 0, news = 0, bad = [];
     for (let k = 0; k < total; k++) {
         const s = await fresh();
-        CRASH = { left: k };
+        crash.at = { left: k };
         let threw = false;
         try { await store.commitInstall(s, "jet.moy", asFiles(NEW), NEW_REC); }
         catch (e) { threw = true; }
-        CRASH = null;
+        crash.at = null;
         if (!threw) { bad.push(k + ": no crash"); continue; }
         await store.recoverInstalls(s);
         all = await store.readAll(s);
@@ -352,13 +416,13 @@ for (const sync of [true, false]) {
     let twice = [];
     for (let k = 0; k < total; k++) {
         const s = await fresh();
-        CRASH = { left: k };
+        crash.at = { left: k };
         try { await store.commitInstall(s, "jet.moy", asFiles(NEW), NEW_REC); } catch (e) { }
         for (let j = 0; j < 40; j++) {
-            CRASH = { left: j };
-            try { await store.recoverInstalls(s); CRASH = null; break; } catch (e) { }
+            crash.at = { left: j };
+            try { await store.recoverInstalls(s); crash.at = null; break; } catch (e) { }
         }
-        CRASH = null;
+        crash.at = null;
         await store.recoverInstalls(s);
         all = await store.readAll(s);
         const rec = await store.readRecord(s);
@@ -380,24 +444,28 @@ for (const sync of [true, false]) {
 
 // ---- a returning browser still gets a system cart it never had ---------------
 {
-    const local = { "star.moy/manifest.json": '{"title":"Star","system":true}',
+    const local = { "star.moy/manifest.json": '{"title":"Star","moybyte":{"system":true}}',
                     "mine.moy/manifest.json": '{"title":"Mine"}' };
     const bundle = {
-        "star.moy/manifest.json": '{"title":"Star","system":true,"version":9}',
+        "star.moy/manifest.json": '{"title":"Star","moybyte":{"system":true},"version":9}',
         "star.moy/main.py": "new code",
-        "get_carts.moy/manifest.json": '{"title":"Get Carts","system":true}',
-        "get_carts.moy/main.py": "pass",
-        "get_carts.moy/cover.png": { b: "AAAA" },
+        "moybyte.get_carts.moy/manifest.json": '{"title":"Get Carts","moybyte":{"system":true}}',
+        "moybyte.get_carts.moy/main.py": "pass",
+        "moybyte.get_carts.moy/cover.png": { b: "AAAA" },
         "demo.moy/manifest.json": '{"title":"Demo"}',
         "demo.moy/main.py": "x",
+        "loose.moy/manifest.json": '{"title":"Loose","system":true}',
+        "loose.moy/main.py": "x",
     };
     const got = store.missingSystemCarts(local, bundle);
     ok("a system cart the store lacks comes from the bundle, whole",
        Object.keys(got).sort().join() ===
-       "get_carts.moy/cover.png,get_carts.moy/main.py,get_carts.moy/manifest.json",
+       "moybyte.get_carts.moy/cover.png,moybyte.get_carts.moy/main.py,moybyte.get_carts.moy/manifest.json",
        JSON.stringify(Object.keys(got)));
     ok("one the store has is never touched, and a non-system cart never added",
        !("star.moy/main.py" in got) && !("demo.moy/main.py" in got));
+    ok("a top-level \"system\" is not Moybyte's field and reads as absent",
+       !("loose.moy/main.py" in got));
 }
 
 // The two predicates are two QUESTIONS, and the answers differ on exactly one
@@ -476,17 +544,17 @@ ok("a DEFLATED zip reads too", defl.length === 1 && dec.decode(defl[0].data) ===
     // the new one, whole, and nothing of the attempt is left behind.
     let probe = await store.openWritten(fakeNav(true));
     await store.commitWritten(probe, "doom", "doomsav0.dsg", OLD);
-    CRASH = { left: 1e9 };
+    crash.at = { left: 1e9 };
     await store.commitWritten(probe, "doom", "doomsav0.dsg", NEW);
-    const steps = 1e9 - CRASH.left;
-    CRASH = null;
+    const steps = 1e9 - crash.at.left;
+    crash.at = null;
     let torn = 0, newer = 0;
     for (let k = 0; k < steps; k++) {
         const s = await store.openWritten(fakeNav(true));
         await store.commitWritten(s, "doom", "doomsav0.dsg", OLD);
-        CRASH = { left: k };
+        crash.at = { left: k };
         try { await store.commitWritten(s, "doom", "doomsav0.dsg", NEW); } catch (e) { }
-        CRASH = null;
+        crash.at = null;
         const after = await store.readWritten(s);
         const text = after["doom/doomsav0.dsg"] ? dec.decode(after["doom/doomsav0.dsg"]) : null;
         if (text !== "old save" && text !== "the new, longer save") torn++;
@@ -517,8 +585,91 @@ ok("an imported cart takes the store's duplicate-naming rule",
    store.uniqueCartDir((n) => n in have, "star") === "star_3.moy",
    store.uniqueCartDir((n) => n in have, "star"));
 ok("a free name is taken as is", store.uniqueCartDir(() => false, "star") === "star.moy");
-ok("a zip file name becomes a legal folder base",
-   store.cartBase("My Game!.moy.zip") === "My_Game");
+ok("a zip file name becomes a legal folder base, under the local author",
+   store.cartBase("My Game!.moy.zip") === "local.my_game", store.cartBase("My Game!.moy.zip"));
+ok("a zip named for a cart's id keeps it",
+   store.cartBase("kenny.Star Catcher.moy.zip") === "kenny.star_catcher",
+   store.cartBase("kenny.Star Catcher.moy.zip"));
+
+// ---- a theme lands under its own name (theming phase 6 step 8) --------------
+{
+    const enc = (o) => new TextEncoder().encode(JSON.stringify(o));
+    const pkg = (top, name) => [
+        { name: top + "/manifest.json", data: enc({ format: "moy-1", title: "Sunset",
+            runtime: "theme", main: "theme.json", moybyte: { type: "theme" } }) },
+        { name: top + "/theme.json", data: enc({ format: 1, name }) }];
+    const t = store.themeOf(pkg("sunset.moy", "sunset"), "sunset.moy");
+    ok("a theme archive is read as a theme", t && t.name === "sunset" && t.file === "theme.json",
+       JSON.stringify(t));
+    ok("a cart archive is no theme", store.themeOf([{ name: "x.moy/manifest.json",
+        data: enc({ moybyte: { type: "game" } }) }], "x.moy") === null);
+    ok("a theme whose name is not the grammar takes its folder's",
+       store.themeOf(pkg("Night Owl.moy", "Bad Name"), "Night Owl.moy").name === "night_owl");
+    ok("a free theme name is its folder",
+       store.uniqueThemeDir(() => false, "sunset").dir === "sunset.moy");
+    const taken = { "sunset.moy": 1 };
+    const u = store.uniqueThemeDir((n) => n in taken, "sunset");
+    ok("a taken theme name takes the next _2 stem", u.dir === "sunset_2.moy" && u.name === "sunset_2",
+       JSON.stringify(u));
+    const long = "a".repeat(24);
+    const l = store.uniqueThemeDir((n) => n === long + ".moy", long);
+    ok("the _2 stem stays inside the name's 24", l.name.length === 24 && store.themeName(l.name),
+       l.name);
+    const back = JSON.parse(new TextDecoder().decode(
+        store.renamedTheme(enc({ format: 1, name: "sunset", colors: {} }), "sunset_2")));
+    ok("theme.json's name is rewritten to the folder's", back.name === "sunset_2" && back.format === 1);
+    const pretty = new TextEncoder().encode(
+        JSON.stringify({ format: 1, name: "dusk", colors: {} }, null, 2) + "\n");
+    const dusk = store.themeOf([pkg("dusk.moy", "dusk")[0],
+        { name: "dusk.moy/theme.json", data: pretty }], "dusk.moy");
+    ok("a theme landing under its own name keeps theme.json byte for byte",
+       store.landedTheme(pretty, dusk, "dusk") === pretty && !dusk.renamed, JSON.stringify(dusk));
+    ok("a theme landing under a _2 stem has theme.json rewritten",
+       JSON.parse(new TextDecoder().decode(store.landedTheme(pretty, dusk, "dusk_2"))).name
+           === "dusk_2");
+    const owl = store.themeOf(pkg("night_owl.moy", "Bad Name"), "night_owl.moy");
+    ok("a theme named for its folder has theme.json rewritten, even unmoved",
+       owl.renamed && JSON.parse(new TextDecoder().decode(
+           store.landedTheme(pkg("x", "Bad Name")[1].data, owl, "night_owl"))).name === "night_owl");
+}
+
+// ---- a channel's site keeps its own storage ---------------------------------
+// The stable site and the dev site share an origin, so they share its OPFS. A
+// page published for a channel opens every store through channelNav, and what
+// one site writes the other never reads.
+{
+    const nav = fakeNav(true);
+    ok("the stable site opens the origin's own storage", store.channelNav(nav, "") === nav);
+    const devNav = store.channelNav(nav, "dev");
+    const stable = await store.openStore(nav, "carts");
+    const dev = await store.openStore(devNav, "carts");
+    await store.seed(stable, { "a.moy/main.py": "print('stable')" });
+    await store.seed(dev, { "a.moy/main.py": "print('dev')", "d.moy/main.py": "x" });
+    const sAll = await store.readAll(await store.openStore(nav, "carts"));
+    const dAll = await store.readAll(await store.openStore(devNav, "carts"));
+    ok("a dev write never reaches the stable carts",
+       sAll["a.moy/main.py"] === "print('stable')" && !("d.moy/main.py" in sAll),
+       JSON.stringify(sAll));
+    ok("the dev site reads its own carts back",
+       dAll["a.moy/main.py"] === "print('dev')" && "d.moy/main.py" in dAll, JSON.stringify(dAll));
+    await store.writeRecord(dev, '{"dev":1}');
+    ok("the install record is the channel's too", (await store.readRecord(stable)) === null
+       && (await store.readRecord(dev)) === '{"dev":1}');
+    await store.commitWritten(await store.openWritten(devNav), "c", "k", new Uint8Array([1]));
+    ok("a compiled cart's written files are the channel's too",
+       !Object.keys(await store.readWritten(await store.openWritten(nav))).length &&
+       Object.keys(await store.readWritten(await store.openWritten(devNav))).length === 1);
+    const root = await nav.storage.getDirectory();
+    const top = [];
+    for await (const [name] of root.entries()) top.push(name);
+    ok("the channel lives in one directory of the origin root",
+       top.includes(store.CHANNEL_DIR_PREFIX + "dev") && top.includes("carts")
+       && !top.includes("dev"), JSON.stringify(top));
+    ok("a channel name that is not a word gets no storage, never the origin's",
+       (await store.openStore(store.channelNav(nav, "../carts"), "carts")) === null);
+    ok("no OPFS stays no OPFS under a channel",
+       (await store.openStore(store.channelNav({ storage: null }, "dev"), "carts")) === null);
+}
 
 console.log("\n" + (fail ? fail + " FAILED" : "all store checks passed"));
 process.exit(fail ? 1 : 0);

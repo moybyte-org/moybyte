@@ -1,49 +1,41 @@
 # Map (grep -n a name to jump there):
-#   -- Layout geometry              baseline 320x240 constants and BlockLayout
-#   BlockLayout                     responsive block-editor geometry
+#   BlockLayout                     the page's geometry: the outline's rows and the foot
 #   BlockEditorUI                   the structured-outline UI over a cart's block program
 #   BlockEditorUI.build             build the BlockEditor over the cart's program
 #   BlockEditorUI.save_blocks       compile-on-save to the cart's source
 #   BlockEditorUI.graduate_to_code  the one-way graduation to code
-"""The block editor's UI layer (issue #29 Part 2): the structured-outline
-screen, its modal insert menu, and the inline number/name/text prompts drawn
-over a cart's block program.
+"""The block editor's UI layer (issue #29 Part 2): the structured outline of a
+cart's block program, its insert menu, and the number/name/text prompts.
 
 Two layers, the same split as the console's other sub-editors:
   * BlockEditor (runtime/editors.py) -- the pure tree-edit core: flattens the
     program into cursor-addressable rows, inserts/deletes/moves blocks, sets
     slot values. No canvas, no input.
-  * BlockEditorUI (here) -- the UI: draws the outline/menu/prompts on the
-    shared canvas and drives them from button/pointer input. Everything
-    button-driven or drawn lives here; everything about *what the program
-    means* stays in the core.
+  * BlockEditorUI (here) -- the UI: the outline's taps, drags and keys, the
+    menus' and the prompts' state, save and graduation. The page on the
+    verbs, `runtime/editor_blocks.py`, draws the outline and the menus, on
+    the handheld and in a desk Editor's Blocks pane alike; the prompts are
+    drawn here over it.
 
-Extracted from Workstation (runtime/console.py), which used to hold these
-~45 methods + their state directly as part of a much larger class. This class
-holds a back-reference to the owning Workstation (`self.ws`) for the handful
-of primitives it shares with the rest of the console (canvas, input, cart,
-carts_store, _with_sd, ach, set_menu_view, _set_text_mode, _leave_menu,
-_leave_or_home, _btn/_icon_btn, editor, cart_error, can_manage, pointer,
-sys_canvas). `NAMES` / `_err_text` are injected at construction instead of
-imported back from console.py, which would be a genuine circular import:
-console.py imports BlockEditorUI to build the one instance it holds. The rect
-hit-test is `ui.rect_in`, imported directly.
-
-Kept name-for-name with the pre-extraction Workstation methods/fields (no
-renaming): Workstation.set_menu_view/_relayout/_leave_menu/go_home/open all
-just gained one level of indirection (`self.block_ui.X` instead of `self.X`),
-and so did the handful of tests that poke the block editor's internals
-directly, and tools/make_site_gifs.py's demo-recording script.
+One instance lives on Workstation (`ws.block_ui`), with a back-reference to
+it for the primitives it shares with the rest of the console (canvas, input,
+cart, carts_store, _with_sd, set_menu_view, _set_text_mode, _leave_or_home,
+_btn, editor, pointer, sys_canvas). `NAMES` / `_err_text` are injected at
+construction instead of imported back from console.py, which would be a
+circular import.
 """
 
 try:
     import ui as _ui
+    import ui_draw as _ui_draw
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
+    from runtime import ui_draw as _ui_draw
 _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
-from editors import BlockEditor, KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL, _clone_tree
+from editors import (BlockEditor, KeyEdge, TextEntry, TE_COMMIT, TE_CANCEL, _clone_tree,
+                     text_key as _text_key)
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
 # host_app has aliased it on the host, or `runtime.blocks` when a test loads
@@ -53,108 +45,51 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import blocks as _blocks_mod
 
-# The shared pre-literate glyph vocabulary (#93 icon pass): the action bar's UNDO/REDO
-# draw glyph-only ("..." IS its own icon and stays text). Imported for the membership
-# check that keeps the word label as a fallback (chrome._gbtn owns it now).
 try:
     from widgets import arm_prompt as _arm_prompt
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import arm_prompt as _arm_prompt
 
 try:
-    from chrome import _gbtn as _chrome_gbtn
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _gbtn as _chrome_gbtn
-
-try:
     from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    import layout_base as _layout_base
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
-                                     BASE_H as _BASE_H)
+    from runtime.layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+    from runtime import layout_base as _layout_base
+
+# The page (editor_blocks.py): the objects' tab row over the outline, a row's
+# pitch and a depth's indent, and the foot under it.
+HAND_HEAD = 28
+HAND_ROW = 22
+HAND_INDENT = 14
+HAND_FOOT = 34
 
 
-# --- Layout geometry (baseline 320x240 constants + BlockLayout) -------------
-#
-# Mirrors CodeLayout in console.py (same responsive-reflow contract, #39 step
-# 2): at (320, 240, 1) every field below equals the frozen `_BLK_*` constant
-# verbatim (the `_base` branch), so the reflow is pixel-identical to the
-# pre-#39 fixed layout. _BASE_W/_BASE_H come from the layout_base leaf above;
-# _FONT_W is duplicated (not imported) from console.py's own copy -- a
-# foundational, unchanging screen constant, and importing it back would be the
-# same circular import BlockEditorUI's __init__ comment explains below.
-_FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
+# A block's label cells are the print font's glyph box, never under this.
+_FONT_W = 8
 
-# Blocks + Scene side-by-side workspace (#93 blocks / #85 scene): on a wide enough
-# canvas the Blocks tab grows an INTERACTIVE scene pane on the right -- Scratch-
-# style, "objects on the right, their programming on the left". Below these
-# thresholds (notably the 320x240 T-Deck) the tab renders exactly as before
-# (blocks-only): the split can't fit a small screen, and the T-Deck stays a player
-# that keeps its existing single-tab editors. Big-screen (P4 7"/console/host) only.
-_WORKSPACE_MIN_W = 640      # min system-canvas width to show the scene pane
-_WORKSPACE_MIN_H = 360      # min height (a full scene panel + block outline)
-_WORKSPACE_SCENE_PCT = 58   # the scene (stage) pane gets the larger share of the width
-_WORKSPACE_MIN_BLOCK_W = 320  # ...but the block pane never shrinks below this (its
-                              # action bar -- ADD/DEL/^/v/CODE/.../UNDO/REDO -- needs
-                              # ~306px; the scene takes whatever's left over)
-_ADD_SPRITE = "\x00add_sprite"  # the sprite-list "+" chip sentinel (never a real tag)
+# The insert menu (category list, then the block list for the chosen category,
+# then for some slots a small option picker), the page's popover; up/down + A
+# walk it, B backs out one level, scrolling by this many rows.
+_BLK_MENU_ROWS = 10
+def _strip(ws, lay, keys, desk):
+    """`keys` on a band of their own at the foot of layout `lay`'s content,
+    over the page's foot (a dialog's keys; touch alone shows none)."""
+    if _ui_draw.hint_kind() == "touch":
+        return
+    b = _ui_draw.metrics("value_row")[17 if desk else 16] * lay.fs
+    ws.sys_canvas.rect(lay.cx, lay.cy + lay.ch - b, lay.cw, b, ws.theme_colors["panel"])
+    _ui.at(lay.cx, lay.cy + lay.ch - b, lay.cw, b)
+    _ui.hints(keys)
 
-# Block editor (#29 Part 2): the structured outline. A vertical scrolling list of
-# Scratch-style colored block rows (the flattened script) under the unified zoned bar
-# (Stage-4 rollout: the old title bar was dissolved into it) and over a bottom action
-# bar. Built 320x240-first (the responsive pass is #39 step 2), drawn on the SYSTEM
-# canvas through the same primitives as the other editors so host == device. Pressing
-# A on an insert `+` row opens the category->block insert menu.
-_BLK_HINT_Y = 20         # hint/status strip, just below the 18px unified bar
-_BLK_X0 = 6                # left edge of the outline
-_BLK_W = 308              # outline width
-_BLK_Y0 = 30             # first row's top (below the bar + the hint/status strip)
-_BLK_ROW_H = 16          # one block row's height (8px text + padding)
-_BLK_INDENT = 12         # px of indent per nesting depth
-_BLK_ROWS = 10           # visible rows (Y0 .. just above the action bar)
-_BLK_AREA = (_BLK_X0, _BLK_Y0, _BLK_W, _BLK_ROWS * _BLK_ROW_H)
-# Bottom action bar: ADD / DEL / up / down on the left, then CODE (graduate). SAVE and
-# CLOSE dissolved into the unified bar (Stage-4 rollout): SAVE -> the bar's SAVE icon
-# (save_current -> save_blocks), CLOSE -> the bar's context X. CODE stays -- it's the
-# one-way #29 GRADUATION action, not navigation.
-_BLK_ADD = (6, 196, 40, 22)
-_BLK_DEL = (48, 196, 34, 22)
-_BLK_UP = (84, 196, 22, 22)
-_BLK_DN = (108, 196, 22, 22)
-_BLK_CODE = (138, 196, 56, 22)   # graduate to code
-# The #93 edit cluster on the free right end of the action bar: "..." opens the
-# BLOCK ACTIONS menu (copy / duplicate / paste / move to...), UNDO / REDO walk the
-# in-session outline history. Touch-first (a tap fires each); host also binds
-# Ctrl+Z / Ctrl+Y to undo/redo.
-_BLK_ACT = (198, 196, 30, 22)    # "..." -> the block-actions menu
-_BLK_UNDO = (230, 196, 42, 22)
-_BLK_REDO = (274, 196, 40, 22)
-# The insert menu: a modal list overlay (category list, then the block list for the
-# chosen category, then for some slots a small option picker). Drawn over a frozen
-# outline; navigated with up/down + A, B backs out one level.
-_BLK_MENU = (40, 24, 240, 192)        # the modal panel
-_BLK_MENU_ROW_H = 16
-_BLK_MENU_ROWS = 10                   # visible menu rows (scrolls if more)
-# The variable name-entry prompt: a small modal with the live name + touch buttons
-# (the kid types on the keyboard; OK/DEL/X are for touch). #29 Bug 2.
-_BLK_KBD = (40, 78, 240, 84)          # the prompt panel
-_BLK_KBD_DEL = (52, 124, 50, 24)      # backspace
-_BLK_KBD_OK = (188, 124, 40, 24)      # confirm
-_BLK_KBD_X = (232, 124, 36, 24)       # cancel
-# The number-entry prompt (#29): a taller modal with an on-screen DIGIT GRID so a
-# kid can TAP a literal in (touch-only / device sym-key-free), plus type it on the
-# keyboard. The grid is 0-9 . - laid out 6-per-row; OK/DEL/X/BLOCK along the bottom.
-_BLK_NUM = (24, 36, 272, 168)         # the prompt panel
-_BLK_NUM_GX = 34                      # digit grid left
-_BLK_NUM_GY = 78                      # digit grid top
-_BLK_NUM_BW = 40                      # one key's width
-_BLK_NUM_BH = 26                      # one key's height
-_BLK_NUM_BPR = 6                      # keys per row
-_BLK_NUM_KEYS = ["1", "2", "3", "4", "5", "6",
-                 "7", "8", "9", "0", ".", "-"]
-_BLK_NUM_DEL = (34, 168, 56, 26)      # backspace
-_BLK_NUM_BLOCK = (96, 168, 60, 26)    # swap to a reporter block (expr slots only)
-_BLK_NUM_OK = (200, 168, 40, 26)      # confirm
-_BLK_NUM_X = (244, 168, 40, 26)       # cancel
+
+# The entry prompts (`_draw_blk_kbd`): their titles by kind, the line under a
+# name's, and the field's caption by kind (a number's is its slot's).
+_KBD_TITLES = {"num": "Type a number", "text": "Type some text", "proc": "Name your block",
+               "param": "Name an input"}
+_KBD_NAME_RULE = "Use letters, numbers and underscores."
+_KBD_CAPTIONS = {"text": "Text"}
+_KBD_SUB = {"tone": "dim", "wrap": True, "lines": 2}
 # In-row slot editing: tapping/right-step on a selected block cycles to its NEXT
 # editable slot; that slot is highlighted, and A opens its editor (number bump,
 # variable/dropdown picker, expr -> a nested expression insert).
@@ -231,21 +166,6 @@ def _blk_plain_label(label):
     return out
 
 
-# Kid-facing one-line hints for the surprising blocks (shown under the title).
-_BLK_HINTS = {
-    "forever": "forever = repeats fast every frame (not endless)",
-    "wait": "wait = a friendly pause (each frame keeps drawing)",
-    "repeat_until": "repeat until = loops fast until true (not endless)",
-    "wait_until": "wait until = each frame keeps drawing till it's true",
-    "stop": "stop = end this script now (this frame)",
-    "break_loop": "break = jump out of the loop around it",
-    "for_each": "for each = run the body once per item in the list",
-    "proc_def": "define = your own block; press A to add inputs",
-    "call": "call = run your custom block right here",
-}
-
-
-
 def _blk_num_allow(c, text):
     """A number literal: digits, one leading '-' and at most one '.'
     (parse_number_literal tolerates more; the filter keeps the buffer honest)."""
@@ -261,115 +181,28 @@ def _blk_name_allow(c, text):
 _BLK_KBD_ALLOW = {"num": _blk_num_allow, "text": None}
 
 class BlockLayout(LayoutBase):
-    """Responsive block-editor geometry (#39 step 2): the scrolling outline (X0/W/
-    Y0, row height + indent, visible ROWS), the bottom action bar, and the modal
-    insert menu -- derived from the SYSTEM canvas size (w, h) + font scale instead of
-    the 320x240 `_BLK_*` constants. A larger panel shows MORE rows + WIDER blocks; a
-    bigger font scales the rows/text/buttons.
+    """The block editor's geometry, from the SYSTEM canvas size (w, h) and
+    font scale: the page `editor_blocks.BlocksPage` draws, on the handheld
+    and in a desk Editor's Blocks pane alike -- the objects' tabs, the
+    outline under them (a row's pitch, a depth's indent, the visible rows)
+    and the foot under it. A block's label cells are the print font's glyph
+    box (a tap on a row finds its slot by them)."""
 
-    Same hard contract as `Layout`: at (320, 240, 1) every field equals the frozen
-    `_BLK_*` constant verbatim (the `_base` branch), so the degradation path is
-    pixel-identical to today."""
-
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None,
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
                  chrome_scale=None):
-        # `bounds` (bx, by, bw, bh) confines the OUTLINE + action bar to a sub-rect
-        # -- the left pane of the combined Blocks+Scene workspace (blocks-left /
-        # objects-right). The modal overlays (insert menu / prompts) stay centered
-        # on the full canvas. A bounded layout never takes the frozen 320x240 branch
-        # (big-screen feature), so `_base` excludes it and the T-Deck is unchanged.
-        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None,
+        LayoutBase.__init__(self, w, h, font_scale,
                             chrome_scale=chrome_scale)
-        fs = self.fs
-        self.cell = _FONT_W * fs
-        # The hint + SAVE-status strip sits just below the 18px unified bar (the old
-        # title row was dissolved into the bar, Stage-4 rollout).
-        self.hint_y = _BLK_HINT_Y * fs
-        self.status_x = 198 * fs                  # the SAVE-status text x (right side)
-        self.row_h = _BLK_ROW_H * fs
-        self.indent = _BLK_INDENT * fs
-        self.x0 = _BLK_X0 * fs
-        self.y0 = _BLK_Y0 * fs
-        # -- action bar: a row of buttons anchored to the bottom -----------------
-        # SAVE/CLOSE moved to the unified bar (Stage-4 rollout); only ADD / DEL / up /
-        # dn + CODE (the #29 graduation action) stay in the body.
-        if self._base:
-            self.bar_y = 196
-            self.bar_h = 22
-            self.add_btn, self.del_btn = _BLK_ADD, _BLK_DEL
-            self.up_btn, self.dn_btn = _BLK_UP, _BLK_DN
-            self.code_btn = _BLK_CODE
-            # #93 edit cluster (frozen constants at base).
-            self.act_btn = _BLK_ACT
-            self.undo_btn = _BLK_UNDO
-            self.redo_btn = _BLK_REDO
-        else:
-            self.bar_h = 22 * fs
-            self.bar_y = self.h - self.bar_h - 2 * fs
-            by, bh = self.bar_y, self.bar_h
-            # left cluster: ADD / DEL / up / dn ; CODE (graduate) after them; then the
-            # #93 edit cluster ("..." / UNDO / REDO) packed after CODE.
-            x = self.x0
-            self.add_btn = (x, by, 40 * fs, bh); x += 42 * fs
-            self.del_btn = (x, by, 34 * fs, bh); x += 36 * fs
-            self.up_btn = (x, by, 22 * fs, bh); x += 24 * fs
-            self.dn_btn = (x, by, 22 * fs, bh); x += 24 * fs
-            self.code_btn = (x, by, 56 * fs, bh); x += 58 * fs
-            self.act_btn = (x, by, 30 * fs, bh); x += 32 * fs
-            self.undo_btn = (x, by, 42 * fs, bh); x += 44 * fs
-            self.redo_btn = (x, by, 40 * fs, bh)
-        # -- outline width + visible rows ----------------------------------------
-        if self._base:
-            self.outline_w = _BLK_W              # 308
-            self.rows = _BLK_ROWS                # 11
-        else:
-            self.outline_w = self.w - 2 * self.x0
-            avail_h = self.bar_y - self.y0
-            self.rows = max(3, avail_h // self.row_h)
-        # -- modal insert menu (centered, scales with the canvas/font) -----------
-        self.menu_row_h = _BLK_MENU_ROW_H * fs
-        if self._base:
-            self.menu = _BLK_MENU                # (40, 24, 240, 192)
-            self.menu_rows = _BLK_MENU_ROWS      # 10
-        else:
-            mw = min(self.w - 16 * fs, 240 * fs)
-            mh = min(self.h - 24 * fs, self.bar_y - 24 * fs)
-            mx = (self.w - mw) // 2
-            my = 24 * fs
-            self.menu = (mx, my, mw, mh)
-            self.menu_rows = max(3, (mh - 16 * fs) // self.menu_row_h)
-        # Confine the outline + action bar to the workspace's left pane (the modals
-        # above keep full-canvas centering, so they float over both panes).
-        if bounds is not None and not self._base:
-            self._apply_bounds(bounds)
-
-    def _apply_bounds(self, bounds):
-        """Relocate the outline + action bar into `bounds` (bx, by, bw, bh) -- the
-        left pane of the combined Blocks+Scene workspace. Overrides the fields the
-        draw/hit-test read (x0/y0/hint_y/status_x/bar/outline_w/rows); the modal
-        insert-menu/prompt geometry stays centered on the full canvas."""
-        bx, by, bw, bh = bounds
-        fs = self.fs
-        pad = _BLK_X0 * fs
-        self.hint_y = by + 2 * fs
-        self.status_x = bx + bw - 56 * fs      # SAVE-status/dirty-* on the pane's right
-        self.x0 = bx + pad
-        self.y0 = by + 12 * fs                  # below the hint/status line
-        self.bar_h = 22 * fs
-        self.bar_y = by + bh - self.bar_h - 2 * fs
-        by2, bhh = self.bar_y, self.bar_h
-        x = self.x0
-        self.add_btn = (x, by2, 40 * fs, bhh); x += 42 * fs
-        self.del_btn = (x, by2, 34 * fs, bhh); x += 36 * fs
-        self.up_btn = (x, by2, 22 * fs, bhh); x += 24 * fs
-        self.dn_btn = (x, by2, 22 * fs, bhh); x += 24 * fs
-        self.code_btn = (x, by2, 56 * fs, bhh); x += 58 * fs
-        self.act_btn = (x, by2, 30 * fs, bhh); x += 32 * fs
-        self.undo_btn = (x, by2, 42 * fs, bhh); x += 44 * fs
-        self.redo_btn = (x, by2, 40 * fs, bhh)
-        self.outline_w = bw - 2 * pad
-        avail_h = self.bar_y - self.y0
-        self.rows = max(3, avail_h // self.row_h)
+        cx, cy, cw, ch = self.cx, self.cy, self.cw, self.ch
+        self.cell = max(_FONT_W, _ui_draw.font("ui")[1]) * self.fs
+        self.x0 = cx + 8
+        self.y0 = cy + HAND_HEAD
+        self.row_h = HAND_ROW
+        self.indent = HAND_INDENT
+        self.outline_w = cw - 16
+        self.bar_h = HAND_FOOT
+        self.bar_y = cy + ch - HAND_FOOT
+        self.rows = max(3, (self.bar_y - 2 - self.y0) // self.row_h)
+        self.menu_rows = _BLK_MENU_ROWS
 
     def area(self):
         return (self.x0, self.y0, self.outline_w, self.rows * self.row_h)
@@ -387,9 +220,8 @@ class BlockEditorUI:
         # Injected instead of imported back from console.py (see module docstring):
         # console.py builds this instance, so `import console` here would be a real
         # circular import at BlockEditorUI's own module-load time. `clamp_scroll` is
-        # the tiny shared scrolloff helper (#dedup, stage 1) also used by
-        # Workstation._settings_scroll -- injecting it here (instead of duplicating
-        # it) keeps that dedup meaningful.
+        # the tiny shared scrolloff helper (#dedup, stage 1) chrome holds --
+        # injected here instead of duplicated.
         self._NAMES = names
         self._err_text = err_text
         self._clamp_scroll = clamp_scroll
@@ -406,18 +238,24 @@ class BlockEditorUI:
         self.blk_kbd = None           # inline name-entry prompt state dict, or None
         self._blk_ekey = KeyEdge()    # #93: Ctrl+Z/Y edge tracker
         self.block_layout = BlockLayout()
-        # Blocks+Scene workspace: which pane owns the keyboard ("blocks"|"scene"),
-        # and whether a pointer gesture in flight belongs to the scene pane (so a
-        # drag that started there keeps routing to it until release).
-        self._ws_focus = "blocks"
-        self._ws_scene_drag = False
-        # Per-object scripts (#85/#93): the SPRITE LIST -- [(rect, tag_or_None), ...]
-        # for STAGE + every sprite chip drawn atop the block pane in the workspace
-        # (rebuilt each draw, hit-tested in _blocks_pointer). Scratch's sprite pane.
-        self._blk_roster_btns = []
-        # (geometry key, block_layout, scene layout) of the last workspace split --
-        # see _layout_workspace.
-        self._ws_memo = None
+        self._page = None             # the page on the verbs (editor_blocks.py)
+        # a desk pane's word for its page (EditorDesk._tab_pane): 2 where the
+        # buffer `shift_last` reads holds it as the last draw left it, 1 a
+        # window's frame drawn whole, 0 none (the handheld)
+        self.vouch = 0
+        self._held = _ui_draw.HeldPage()   # the page under blk_kbd (`_draw_blk_kbd`)
+        self._rows = _ui_draw.DialogRows(self._held)   # ...and its rows frames (`prompt_rows`)
+        self._kbd_gen = 0             # what the prompt draws besides its field's text
+
+    def page(self):
+        """The Blocks page on the verbs, built at its first use."""
+        if self._page is None:
+            try:
+                from editor_blocks import BlocksPage
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime.editor_blocks import BlocksPage
+            self._page = BlocksPage(self, _ui_draw.AppHost("editor_blocks"))
+        return self._page
 
     def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive layout from the live system-canvas size + the
@@ -428,102 +266,6 @@ class BlockEditorUI:
             self._blk_reveal()
 
     # -- Blocks + Scene side-by-side workspace (#93/#85) ----------------------
-
-    def _workspace_active(self):
-        """True when the canvas is big enough (and the cart has a sheet + scenes)
-        to show the interactive scene pane beside the blocks. Big-screen only --
-        the 320x240 T-Deck and any narrow window fall through to blocks-only."""
-        ws = self.ws
-        sc = ws.sys_canvas
-        proj = ws.project
-        if sc is None or proj is None or getattr(proj, "cart", None) is None:
-            return False
-        if getattr(proj, "sheet", None) is None or getattr(proj, "scenes", None) is None:
-            return False
-        return sc.w >= _WORKSPACE_MIN_W and sc.h >= _WORKSPACE_MIN_H
-
-    def _workspace_panes(self):
-        """The (left, right) pane rects: blocks-left / scene-right, both below the
-        18px OS bar. The scene (stage) takes the larger share (~_WORKSPACE_SCENE_PCT
-        of the width), but the block pane is floored at _WORKSPACE_MIN_BLOCK_W so its
-        action bar always fits -- the scene gets whatever's left over."""
-        sc = self.ws.sys_canvas
-        fs = max(1, getattr(sc, "font_scale", 1))
-        top = 18 * self.block_layout.cs        # the OS bar's own height (#203)
-        body_h = sc.h - top
-        gap = 3 * fs
-        scene_w = (sc.w * _WORKSPACE_SCENE_PCT) // 100
-        scene_w = min(scene_w, sc.w - _WORKSPACE_MIN_BLOCK_W * fs - gap)
-        scene_w = max(scene_w, 1)
-        left_w = sc.w - scene_w - gap
-        left = (0, top, left_w, body_h)
-        right = (left_w + gap, top, scene_w, body_h)
-        return left, right
-
-    def _layout_workspace(self):
-        """If the workspace is active, split the canvas and BOUND both editors'
-        layouts to their panes; return (left, right) or None. Called at the top of
-        draw AND pointer/input so the geometry is consistent within a frame (input
-        runs before draw) and re-derives on a window resize.
-
-        Both layouts are pure functions of (canvas size, font scale, pane rect), so
-        a repeat call REINSTALLS the cached pair instead of rebuilding it: on glass
-        this ran 4.2 times per PAINTED frame -- the draw plus every pointer event
-        in the gesture -- for 5.5ms of the tab's 87 (p4_attrib, #58).
-
-        Re-assigning rather than checking identity is the point. wm_windowed's
-        _LayoutCtx.install restores the layouts it CAPTURED around every dispatch,
-        so the objects built here never survive to the next call and an
-        identity-guarded memo misses 100% of the time (measured -- the first cut
-        of this cache bought exactly nothing). Keying on geometry alone is also
-        what makes the memo correct rather than merely fast: whatever stale layout
-        a context (or ws._relayout) put back, a hit overwrites it with the one
-        this pane's geometry implies. The scroll/camera clamps still run every
-        call -- they depend on the cursor and cam, not the geometry."""
-        if not self._workspace_active():
-            self._ws_memo = None
-            return None
-        left, right = self._workspace_panes()
-        sc = self.ws.sys_canvas
-        fs = max(1, getattr(sc, "font_scale", 1))
-        su = self.ws.scene_ui
-        memo = self._ws_memo
-        if (memo is not None and su.sceneedit is not None
-                and memo[0] == (sc.w, sc.h, fs, left, right)):
-            self.block_layout = memo[1]
-            su.layout = memo[2]
-            if self.blocks_ed is not None:
-                self._blk_reveal()
-            su._clamp_cam()
-            return left, right
-        self.block_layout = BlockLayout(sc.w, sc.h, fs, bounds=left)
-        if self.blocks_ed is not None:
-            self._blk_reveal()               # re-clamp scroll to the pane's row count
-        # Lazily build the scene editor the first time the workspace opens, then
-        # bound it to the right pane (mirrors EditorApp.set_tab's "scene" arm).
-        if su.sceneedit is None:
-            su.build()
-            su.on_open()
-        su.relayout_bounded(right)
-        self._ws_memo = ((sc.w, sc.h, fs, left, right), self.block_layout, su.layout)
-        return left, right
-
-    def _scene_pane_pointer(self, px, py, click):
-        """Route a pointer event into the scene pane, mirroring _SceneLayer.
-        handle_pointer (tap = place/select, drag = move/pan, else release). After the
-        gesture, point the block outline at the selected object's scripts (Scratch:
-        pick a sprite -> see its code)."""
-        ws = self.ws
-        self._ws_focus = "scene"
-        if click:
-            ws.scene_ui._scene_click(px, py)
-        elif ws.pointer.down:
-            ws.scene_ui._scene_drag(px, py)
-        else:
-            ws.scene_ui._scene_release(px, py)
-        # Sync after EVERY gesture edge: selecting an existing actor lands on press,
-        # but PLACING a new one completes on release -- both must focus its scripts.
-        self._sync_target_from_scene()
 
     def _selected_scene_tag(self):
         """The tag of the currently-selected scene actor, or None (Stage)."""
@@ -547,17 +289,6 @@ class BlockEditorUI:
         if tag is not None:
             be.set_target(tag)
 
-    def _draw_scene_pane(self, right):
-        """Draw the interactive scene into the right pane: a thin divider, then the
-        SceneEditorUI panel (it clears only its own body_fill = the pane)."""
-        ws = self.ws
-        cv = ws.sys_canvas
-        fs = self.block_layout.fs
-        th = ws.theme_colors
-        cv.rect(right[0] - 2 * fs, right[1], fs, right[3],
-                th.get("edge", self._NAMES["dark_grey"]))
-        ws.scene_ui._draw_scene()
-
     def _roster_tags(self):
         """The ordered, distinct list of sprite tags -- every object placed in the
         scene PLUS any object that has scripts (so a sprite shows in the list whether
@@ -580,61 +311,6 @@ class BlockEditorUI:
                     tags.append(t)
         return tags
 
-    def _draw_sprite_list(self, lay):
-        """The SPRITE LIST atop the block pane (#85/#93) -- Scratch's sprite pane: a
-        STAGE chip (the global program) then one chip per sprite in the game. Tapping a
-        chip edits that sprite's scripts; the active target is highlighted. Chips that
-        run past the pane width are dropped (the list clips, like the tab ladder)."""
-        ws = self.ws
-        cv = ws.sys_canvas
-        NAMES = self._NAMES
-        fs = lay.fs
-        be = self.blocks_ed
-        tgt = be.target if be is not None else None
-        y = lay.hint_y - 2 * fs
-        h = 11 * fs
-        gap = 3 * fs
-        right = lay.x0 + lay.outline_w
-        self._blk_roster_btns = []
-        x = [lay.x0]
-
-        def chip(label, active, tag, base_col):
-            w = (len(label) + 1) * lay.cell + 4 * fs
-            if x[0] + w > right:
-                return False
-            cv.rect(x[0], y, w, h, NAMES["yellow"] if active else base_col)
-            cv.print(label, x[0] + 3 * fs, lay.hint_y,
-                     NAMES["black"] if active else NAMES["white"], 1)
-            self._blk_roster_btns.append(((x[0], y, w, h), tag))
-            x[0] += w + gap
-            return True
-
-        chip("STAGE", tgt is None, None, NAMES["indigo"])
-        for t in self._roster_tags():
-            if not chip(t[:10], tgt == t, t, NAMES["green"]):
-                break
-        chip("+", False, _ADD_SPRITE, NAMES["dark_grey"])   # add a new sprite
-
-    def _new_sprite_tag(self):
-        """A fresh, unique sprite tag ('sprite1', 'sprite2', ...) for + Add sprite."""
-        existing = set(self._roster_tags())
-        i = 1
-        while ("sprite" + str(i)) in existing:
-            i += 1
-        return "sprite" + str(i)
-
-    def _add_sprite(self):
-        """+ Add sprite (Scratch's sprite-pane +): drop a new sprite (fresh tag, the
-        current brush costume) near the middle of the stage, select it, and open its
-        scripts. The kid names/repositions/re-costumes it from there."""
-        se = self.ws.scene_ui.sceneedit
-        if se is None:
-            return
-        se.stamp_tag = self._new_sprite_tag()
-        se.place(152, 112)               # ~centre of the 320x240 stage, grid-snapped
-        self.ws.scene_ui._sync_live()
-        self._sync_target_from_scene()   # the placed actor is selected -> target its blocks
-
     def _select_sprite(self, tag):
         """Edit a sprite's scripts (tag) or the global Stage (tag None), and mirror the
         pick onto the stage -- selecting the first actor of that tag, like Scratch
@@ -643,7 +319,6 @@ class BlockEditorUI:
         if be is None:
             return
         be.set_target(tag)
-        self._ws_focus = "blocks"
         se = self.ws.scene_ui.sceneedit
         if tag is not None and se is not None:
             for i, r in enumerate(se.rows):
@@ -711,16 +386,11 @@ class BlockEditorUI:
         self.blk_kbd = None
         self.blk_protect = False
         self.blk_graduated = False
-        self._ws_focus = "blocks"
-        self._ws_scene_drag = False
-        self._ws_memo = None       # the next cart re-splits from scratch
 
     def on_leave(self):
         """Called from Workstation._leave_menu() when menu_view == "blocks"."""
         self.blk_menu = None
         self.blk_kbd = None
-        self._ws_focus = "blocks"
-        self._ws_scene_drag = False
         # #93: don't leave a half-started MOVE armed when the kid steps away.
         if self.blocks_ed is not None:
             self.blocks_ed.cancel_move()
@@ -1118,10 +788,25 @@ class BlockEditorUI:
         edge (#29): the tap/key that opened it is never its first keystroke."""
         entry = TextEntry(16, _BLK_KBD_ALLOW.get(kind, _blk_name_allow))
         _arm_prompt(self.ws)
-        entry.open(text, getattr(self.ws.input, "last_key", 0) or 0, guard=True)
+        seed = getattr(self.ws.input, "last_key", 0) or 0
+        entry.open(text, seed, guard=True)
+        host = _ui_draw.AppHost()
+        host.key = seed                # the byte that opened it types nothing
+        host.held = self._rows.ok
+        self._kbd_gen += 1
+        fields["gen"] = self._kbd_gen
         fields["kind"] = kind
         fields["entry"] = entry
+        fields["host"] = host
         self.blk_kbd = fields
+
+    def cancel_prompt(self):
+        """Close the open entry prompt as its Cancel does (the T-Deck's Mic,
+        `Workstation.cancel_field`); False where none is open."""
+        if self.blk_kbd is None:
+            return False
+        self._blk_kbd_cancel()
+        return True
 
     def _blk_open_number_prompt(self, block, name, slot):
         """Open the on-screen number pad to TYPE a literal into a number / expr slot
@@ -1407,36 +1092,33 @@ class BlockEditorUI:
         editors' edge-driven nav. The menu, when open, captures nav + A/B."""
         ws = self.ws
         i = ws.input
-        # Blocks+Scene workspace (#93/#85): route the keyboard to the focused pane. A
-        # block modal (name/number entry, insert menu) always keeps it on blocks;
-        # otherwise the scene owns it while focused (e.g. typing an actor's TAG).
-        if (self.blk_kbd is None and self.blk_menu is None
-                and (self._ws_focus == "scene" or ws.scene_ui.tag_edit)
-                and self._workspace_active()):
-            ws.scene_ui._scene_input()
-            return
-        if self.blk_kbd is not None:
-            # The entry prompt owns input: typed bytes go through its TextEntry
-            # (one insert per physical press), Enter/A confirm, B cancels. The
-            # FIRST input pass after it opens only arms the guarded edge (#29),
-            # so the A/Enter/tap that opened it cannot carry in and close it.
-            entry = self.blk_kbd["entry"]
-            if entry.edge.arming(i.last_key):
+        page = self._page
+        if page is not None:
+            if page.owed():
+                ws._dirty = True
+            if self.blk_kbd is None and self.blk_menu is not None:
+                if page.keys(i):
+                    ws._dirty = True
+                if i.pressed("b"):
+                    self._blk_menu_back()
+                    ws._dirty = True
                 return
-            ev = entry.feed(i)
-            if ev == TE_COMMIT:
-                self._blk_kbd_commit()
-            elif ev == TE_CANCEL:
-                self._blk_kbd_cancel()
-            if i.pressed("a") or i.pressed("run"):
-                self._blk_kbd_commit()
-            elif i.pressed("b"):
+        if self.blk_kbd is not None:
+            # The entry prompt owns input: its dialog's engine takes the typed
+            # bytes, the moves between its stops and Enter; Esc cancels (the
+            # T-Deck's Mic does through Workstation.cancel_field). The key that
+            # opened it types nothing (its host's seed, #29).
+            host = self.blk_kbd["host"]
+            if host.keys(i):
+                ws._dirty = True
+            if host.inp[5] == 27 or i.pressed("stop"):
+                host.inp[5] = 0
                 self._blk_kbd_cancel()
             return
         if self.blk_menu is not None:
-            if i.pressed("up"):
+            if i.steps("up"):
                 self._blk_menu_move(-1)
-            if i.pressed("down"):
+            if i.steps("down"):
                 self._blk_menu_move(1)
             if i.pressed("a") or i.pressed("run"):
                 self._blk_menu_select()
@@ -1448,9 +1130,9 @@ class BlockEditorUI:
             # MOVE mode (#93) is modal: nav to a destination, A drops it at an insert
             # point, B cancels. (A/complete + the cancel are the only exits, so
             # BACKSPACE/B doesn't leave the editor mid-move.)
-            if i.pressed("up"):
+            if i.steps("up"):
                 self._blk_move_cursor(-1)
-            if i.pressed("down"):
+            if i.steps("down"):
                 self._blk_move_cursor(1)
             if i.pressed("a"):
                 self._blk_a()
@@ -1462,22 +1144,28 @@ class BlockEditorUI:
         # mirroring the code editor's shortcut (0x1A / 0x19 arrive via last_key). The
         # on-screen UNDO/REDO buttons are the touch/device affordance.
         k = getattr(i, "last_key", 0) or 0
-        self._blk_ekey.undo_redo(k, self._blk_undo, self._blk_redo)
-        if i.pressed("up"):
+        moved = self._blk_ekey.undo_redo(k, self._blk_undo, self._blk_redo)
+        if i.steps("up"):
             self._blk_move_cursor(-1)
-        if i.pressed("down"):
+            moved = True
+        if i.steps("down"):
             self._blk_move_cursor(1)
-        if i.pressed("right"):
+            moved = True
+        if i.steps("right"):
             self._blk_next_slot()                # step the highlighted slot
-        if i.pressed("left"):
+            moved = True
+        if i.steps("left"):
             # left on a number slot decrements it (a quick tweak without the menu)
             self._blk_left()
+            moved = True
         if i.pressed("a"):
             self._blk_a()
+            if self.blk_kbd is not None and not moved:
+                self._held.opened(ws)            # a slot's prompt over the page as it was
         elif i.pressed("run"):
             self.save_blocks()
         else:
-            ws._leave_or_home(ws._leave_menu)
+            ws._leave_or_home(ws.exit)
 
     def _blk_left(self):
         be = self.blocks_ed
@@ -1519,76 +1207,42 @@ class BlockEditorUI:
             self._dragv = py
             return
         was = self.blk_top
-        self._dragv, self.blk_top = _ui.row_drag(
+        self._dragv, self.blk_top = _ui_draw.row_drag(
             self._dragv, py, max(1, lay.row_h), self.blk_top,
             max(0, len(be.rows) - lay.rows))
         if self.blk_top != was:
             ws._dirty = True
 
     def _blocks_pointer(self, px, py, click):
-        # SYSTEM coords + the responsive BlockLayout (#39 step 2).
-        panes = self._layout_workspace()   # None unless the wide workspace is active
-        # Modal overlays (full-canvas insert menu / entry prompt) own a click first.
-        if click and self.blk_kbd is not None:
-            self._blk_kbd_click(px, py)
-            return
-        if click and self.blk_menu is not None:
-            self._blk_menu_click(px, py)
-            return
-        # Scene pane (#93/#85): a gesture that STARTS in the right pane routes into
-        # the scene and keeps routing until release (a drag/pan can leave the pane).
-        # Runs BEFORE the outline drag so a scene pan/move isn't also read as an
-        # outline scroll. Suppressed while a block modal is open.
-        if panes is not None and self.blk_kbd is None and self.blk_menu is None:
-            if click:
-                self._ws_scene_drag = _in(px, py, panes[1])
-            if self._ws_scene_drag:
-                self._scene_pane_pointer(px, py, click)
-                if not click and not self.ws.pointer.down:
-                    self._ws_scene_drag = False
+        """A pointer sample on the tab, in SYSTEM coords: the outline's taps
+        and drags are this method's and a prompt's taps its own; the rest
+        are the page's verbs (the bar's first)."""
+        ws = self.ws
+        lay = self.block_layout
+        # A press the page took stays the page's until its release, wherever
+        # the finger goes: a release it never saw would hold its tap for good.
+        page = self._page
+        held = page is not None and page.host.hold
+        if (self.blk_kbd is None
+                and (self.blk_menu is not None or held
+                     or not _in(px, py, lay.area()) and self._dragv is None)):
+            if click and ws.bar_layer.handle_bar_tap("menu", px, py):
                 return
+            if self.page().point(px, py, click, ws.pointer.down):
+                ws._dirty = True
+            return
+        if self.blk_kbd is not None:
+            if self.blk_kbd["host"].point(px, py, click, ws.pointer.down):
+                ws._dirty = True
+            return
         self._outline_drag(px, py)         # held drag scrolls the outline
         if not click:
             return
-        # No modal up: the unified bar (tab ladder + PLAY + SAVE + X) claims its slice
-        # FIRST (Stage-4 rollout), before any outline/action-bar tap -- SAVE here
-        # dispatches to save_blocks, X exits, PLAY runs. System coords (blocks is a
-        # system-canvas tab), same space the bar drew in.
-        if self.ws.bar_layer.handle_bar_tap("menu", px, py):
+        if ws.bar_layer.handle_bar_tap("menu", px, py):
             return
-        if panes is not None:
-            self._ws_focus = "blocks"      # a tap that reached the outline focuses blocks
-            # Sprite list (#85/#93): tapping a chip edits that sprite's scripts (STAGE =
-            # the global program); the "+" chip adds a new sprite. Scratch's sprite pane.
-            for rect, tag in self._blk_roster_btns:
-                if _in(px, py, rect):
-                    if tag == _ADD_SPRITE:
-                        self._add_sprite()
-                    else:
-                        self._select_sprite(tag)
-                    return
         be = self.blocks_ed
         if be is None:
             return
-        lay = self.block_layout
-        # Action bar: editing controls + CODE (graduate) only (SAVE/CLOSE in the bar).
-        if _in(px, py, lay.add_btn):
-            self._blk_open_categories(); return
-        if _in(px, py, lay.del_btn):
-            be.delete(); self.blk_slot = 0; self._blk_reveal(); return
-        if _in(px, py, lay.up_btn):
-            be.move_block(-1); self._blk_reveal(); return
-        if _in(px, py, lay.dn_btn):
-            be.move_block(1); self._blk_reveal(); return
-        if _in(px, py, lay.code_btn):
-            self.graduate_to_code(); return
-        # #93 edit cluster: "..." opens the block-actions menu, UNDO/REDO walk history.
-        if _in(px, py, lay.act_btn):
-            self._blk_open_actions(); return
-        if _in(px, py, lay.undo_btn):
-            self._blk_undo(); return
-        if _in(px, py, lay.redo_btn):
-            self._blk_redo(); return
         # Tap a row in the outline: select it (and on a block, advance the slot
         # highlight / open the insert menu on a `+` row -- a tap == the A action).
         if _in(px, py, lay.area()):
@@ -1626,63 +1280,6 @@ class BlockEditorUI:
                             self.blk_slot = si
                     self._blk_reveal()
 
-    def _blk_menu_click(self, px, py):
-        m = self.blk_menu
-        if not m:
-            return
-        lay = self.block_layout
-        mx, my, mw, mh = lay.menu
-        if not _in(px, py, lay.menu):
-            self.blk_menu = None                 # tap outside dismisses
-            return
-        ridx = m["top"] + (py - (my + 16 * lay.fs)) // lay.menu_row_h
-        if 0 <= ridx < len(m["items"]):
-            m["sel"] = ridx
-            self._blk_menu_select()
-
-    def _blk_kbd_click(self, px, py):
-        """Touch handling for the entry prompts. One-frame guard (#29): the tap that
-        OPENED the prompt must not carry into this first pass and immediately commit."""
-        if self.blk_kbd is not None and \
-                self.blk_kbd["entry"].edge.arming(self.ws.input.last_key):
-            return
-        if self.blk_kbd is not None and self.blk_kbd.get("kind") == "num":
-            self._blk_num_click(px, py)
-            return
-        # var / text prompt: DEL backspaces, OK confirms, X cancels (typing is the
-        # on-screen / T-Deck keyboard).
-        if _in(px, py, _BLK_KBD_DEL):
-            self._blk_kbd_key(8); return
-        if _in(px, py, _BLK_KBD_OK):
-            self._blk_kbd_commit(); return
-        if _in(px, py, _BLK_KBD_X):
-            self._blk_kbd_cancel(); return
-        # taps inside the panel are ignored (no dismiss-on-tap-outside: a stray tap
-        # shouldn't discard a half-typed name).
-
-    def _blk_num_click(self, px, py):
-        """Touch handling for the number pad: the on-screen digit grid types a literal
-        (so it works touch-only / without sym keys), DEL backspaces, OK/X confirm/cancel,
-        and BLOCK (expr slots) swaps in a reporter block instead."""
-        k = self.blk_kbd
-        # the digit grid
-        for idx in range(len(_BLK_NUM_KEYS)):
-            r = idx // _BLK_NUM_BPR
-            c = idx % _BLK_NUM_BPR
-            rx = _BLK_NUM_GX + c * _BLK_NUM_BW
-            ry = _BLK_NUM_GY + r * _BLK_NUM_BH
-            if _in(px, py, (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3)):
-                self._blk_kbd_key(ord(_BLK_NUM_KEYS[idx]))
-                return
-        if _in(px, py, _BLK_NUM_DEL):
-            self._blk_kbd_key(8); return
-        if k is not None and k.get("allow_block") and _in(px, py, _BLK_NUM_BLOCK):
-            self._blk_num_to_block(); return
-        if _in(px, py, _BLK_NUM_OK):
-            self._blk_kbd_commit(); return
-        if _in(px, py, _BLK_NUM_X):
-            self._blk_kbd_cancel(); return
-
     def _blk_num_to_block(self):
         """From the number pad, switch to dropping a reporter BLOCK into the slot
         (the Scratch white-oval -> drop-a-block move). Discards the typed number and
@@ -1697,195 +1294,146 @@ class BlockEditorUI:
 
     # -- block editor drawing (#29 Part 2) -----------------------------------
 
-    def _gbtn(self, kind, label, rect, fill, cv):
-        # #93 icon pass -- one shared body, chrome._gbtn.
-        _chrome_gbtn(self.ws, self._NAMES, kind, label, rect, fill, cv)
-
     def _draw_blocks(self, dt=0):
-        """The structured outline: a title bar, a scrolling list of Scratch-style
-        colored block rows (the flattened script with the cursor highlighted and the
-        insert points shown as `+`), and a bottom action bar. Drawn with the indexed
-        API + petme128 font only, so host == device. Responsive (#39 step 2): on the
-        SYSTEM canvas at native size, geometry from BlockLayout (verbatim at 320x240/
-        1x) -- a bigger panel shows MORE rows + WIDER blocks, a bigger font scales it.
-
-        On a wide canvas (#93/#85) the outline is BOUND to the left pane and an
-        interactive scene pane is drawn on the right (Scratch-style objects-right);
-        below the gate it's blocks-only, byte-identical to before (T-Deck path)."""
+        """The Blocks tab: the page (`editor_blocks.BlocksPage`) in the content
+        rect, the bar's strip, and an entry prompt over them."""
         ws = self.ws
-        NAMES = self._NAMES
-        cv = ws.sys_canvas
-        panes = self._layout_workspace()     # split + bound both layouts, or None
-        lay = self.block_layout
-        fs = lay.fs
-        be = self.blocks_ed
-        # Phase 3 (visual identity v1): the warm tool surface + dark ink on the
-        # shelf tiers; the frozen dark-blue body at 320x240, byte-identical. The
-        # block PIECES keep their own colorful language (self-backed rows).
-        th = ws.theme_colors
-        light = (not lay._base) or ws.look.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
-        cv.cls(th["surface"] if light else NAMES["dark_blue"])
-        # The old "BLOCKS <title>" row was dissolved into the unified bar (Stage-4
-        # rollout). Just below the bar sits a thin hint/status strip: the kid-facing
-        # hint for surprising blocks on the left, the SAVE-status / "CODE LOCKED"
-        # notice on the right (a dirty * rides the status). A GRADUATED cart (Stage 8)
-        # replaces that whole strip with a celebration banner -- it's a read-only
-        # render now, so there's no edit hint/status to show, just the good news.
-        if self.blk_graduated:
-            self._draw_grad_banner()
-        else:
-            if self.blk_status:
-                cv.print(self.blk_status[:14], lay.status_x, lay.hint_y,
-                         th["author"] if light else NAMES["yellow"], 1)
-            elif be is not None and be.dirty:
-                cv.print("*", lay.status_x, lay.hint_y,
-                         th["author"] if light else NAMES["yellow"], 1)
-        if be is None:
-            return
-        # A kid-facing hint for the surprising blocks (forever-is-bounded / wait).
-        # Suppressed on a graduated cart -- the banner owns that row.
-        # In the workspace the hint row becomes the SPRITE LIST (#85/#93) -- which
-        # sprite you're editing matters more there than a block hint. Below the gate
-        # (blocks-only) the kid hint shows as before.
-        if panes is not None and not self.blk_graduated:
-            self._draw_sprite_list(lay)
-        else:
-            self._blk_roster_btns = []
-            hint = None if self.blk_graduated else self._blk_hint()
-            if hint:
-                # truncate to leave the right end for the status slot
-                hmax = max(8, (lay.status_x - lay.x0) // lay.cell - 1)
-                cv.print(hint[:hmax], lay.x0, lay.hint_y,
-                         th["ink_dim"] if light else NAMES["light_grey"], 1)
-        rows = be.rows
-        for vi in range(lay.rows):
-            ridx = self.blk_top + vi
-            if ridx >= len(rows):
-                break
-            self._draw_blk_row(rows[ridx], vi, ridx == be.cur)
-        # scroll cue
-        _ui.scroll_cues(
-            cv, (lay.x0 + lay.outline_w - 8 * fs, lay.y0),
-            (lay.x0 + lay.outline_w - 8 * fs, lay.y0 + (lay.rows - 1) * lay.row_h),
-            self.blk_top > 0, self.blk_top + lay.rows < len(rows),
-            th["ink"] if light else NAMES["white"])
-        # action bar: editing controls + the #29 graduation action only (SAVE/CLOSE
-        # moved to the unified bar).
-        ws._icon_btn("plus", "ADD", lay.add_btn, NAMES["green"], cv)
-        ws._btn("DEL", lay.del_btn, NAMES["red"], cv)
-        ws._btn("^", lay.up_btn, NAMES["indigo"], cv)
-        ws._btn("v", lay.dn_btn, NAMES["indigo"], cv)
-        ws._icon_btn("code", "CODE", lay.code_btn, NAMES["dark_purple"], cv)
-        # #93 edit cluster: "..." (block-actions menu) + UNDO/REDO. Undo/redo dim to
-        # dark_grey when the stack is empty so their availability reads at a glance;
-        # "..." glows yellow while a MOVE is armed (the "TAP A + SPOT" state).
-        act_col = NAMES["yellow"] if be.moving() else NAMES["blue"]
-        ws._btn("...", lay.act_btn, act_col, cv)
-        self._gbtn("undo", "UNDO", lay.undo_btn,
-                   NAMES["indigo"] if be.can_undo() else NAMES["dark_grey"], cv)
-        self._gbtn("redo", "REDO", lay.redo_btn,
-                   NAMES["indigo"] if be.can_redo() else NAMES["dark_grey"], cv)
-        # The interactive SCENE pane (#93/#85): objects on the right, their
-        # programming on the left. Only on a wide canvas -- below the gate the tab
-        # is blocks-only (unchanged, T-Deck included).
-        if panes is not None:
-            self._draw_scene_pane(panes[1])
-        # The unified zoned bar (tab ladder + PLAY + SAVE + X), drawn BEFORE the modal
-        # insert menu / entry prompt so those still sit on top (Stage-4 rollout).
-        ws.bar_layer._draw_status_strip("menu")
-        if self.blk_menu is not None:
-            self._draw_blk_menu()
-        if self.blk_kbd is not None:
-            self._draw_blk_kbd()
-
-    def _draw_grad_banner(self):
-        """The celebration banner for a GRADUATED cart (Stage 8, spec Section 8):
-        'YOU LEVELED UP TO CODE!' in place of the edit hint/status strip. Graduation
-        is a one-way door the Editor CELEBRATES rather than apologizes for; the
-        blocks below render read-only. Drawn ONLY when blk_graduated, so a
-        non-graduated blocks screen is pixel-identical (the golden star_catcher
-        blocks screen -- code-only, never graduated -- is untouched). Indexed API +
-        petme128 only (host == device), responsive via BlockLayout."""
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas
-        lay = self.block_layout
-        fs = lay.fs
-        x = lay.x0
-        y = lay.hint_y - 2 * fs
-        w = lay.outline_w
-        h = 11 * fs
-        _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
-        msg = "YOU LEVELED UP TO CODE!"
-        mmax = max(8, w // lay.cell - 1)
-        cv.print(msg[:mmax], x + 2 * fs, lay.hint_y, NAMES["yellow"], 1)
-
-    def _draw_blk_kbd(self):
-        """Render whichever entry prompt is up: the number pad (kind == 'num') or the
-        variable-name / text prompt. Indexed API + petme128 only (host == device)."""
-        if self.blk_kbd.get("kind") == "num":
-            self._draw_blk_num()
-            return
-        NAMES = self._NAMES
-        # The prompt is part of the EDITOR, so it draws on the SYSTEM canvas -- NOT
-        # ws.canvas (the 320x240 game canvas). They're the same object at 320x240 (so
-        # the device/small tier was fine), but on a bigger canvas (the Blocks+Scene
-        # workspace, P4, windowed web) the game canvas is a hidden 320x240 buffer, so
-        # drawing here left the modal INVISIBLE -- the editor looked frozen (#85/#93).
-        cv = self.ws.sys_canvas
-        x, y, w, h = _BLK_KBD
-        _ui.dialog(cv, (x, y, w, h))
-        kind = self.blk_kbd.get("kind")
-        is_text = kind == "text"
-        title = {"text": "TYPE SOME TEXT", "proc": "NAME YOUR BLOCK",
-                 "param": "NAME AN INPUT"}.get(kind, "NAME YOUR VARIABLE")
-        cv.print(title, x + 10, y + 8, NAMES["white"], 1)
-        cv.print("type, then OK", x + 10, y + 18, NAMES["light_grey"], 1)
-        # the live edit buffer in a field with a blinking-ish caret bar
-        fx, fy, fw = x + 10, y + 30, w - 20
-        txt = self.blk_kbd["entry"].text[:24]
-        # empty buffer: the default name shows as a dim placeholder (OK keeps it)
-        ph = "" if is_text else str(self.blk_kbd.get("var", ""))[:24]
-        _ui.text_field(cv, (fx, fy, fw, 14), txt, ph)
-        self.ws._btn("DEL", _BLK_KBD_DEL, NAMES["red"], cv)
-        self.ws._btn("OK", _BLK_KBD_OK, NAMES["green"], cv)
-        self.ws._btn("X", _BLK_KBD_X, NAMES["dark_grey"], cv)
-
-    def _draw_blk_num(self):
-        """The number-entry pad: a live value field + an on-screen digit grid (tap a
-        number in, or type it) + DEL/OK/X and a BLOCK swap for expr slots (#29)."""
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas    # the EDITOR's canvas, not the 320x240 game canvas
-                                   # (see _draw_blk_kbd -- same invisible-modal bug, #85/#93)
         k = self.blk_kbd
-        x, y, w, h = _BLK_NUM
-        _ui.dialog(cv, (x, y, w, h))
-        cv.print("TYPE A NUMBER", x + 10, y + 6, NAMES["white"], 1)
-        # live value field; an empty buffer shows the slot's current value, dim (OK keeps it)
-        fx, fy, fw = x + 10, y + 18, w - 20
-        txt = k["entry"].text[:30]
-        cur = k.get("cur")
-        ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
-        _ui.text_field(cv, (fx, fy, fw, 14), txt, ph[:30])
-        # the digit grid (0-9 . -)
-        for idx in range(len(_BLK_NUM_KEYS)):
-            r = idx // _BLK_NUM_BPR
-            c = idx % _BLK_NUM_BPR
-            rx = _BLK_NUM_GX + c * _BLK_NUM_BW
-            ry = _BLK_NUM_GY + r * _BLK_NUM_BH
-            self.ws._btn(_BLK_NUM_KEYS[idx],
-                      (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3), NAMES["indigo"], cv)
-        self.ws._btn("DEL", _BLK_NUM_DEL, NAMES["red"], cv)
-        if k.get("allow_block"):
-            self.ws._btn("BLOCK", _BLK_NUM_BLOCK, NAMES["green"], cv)
-        self.ws._btn("OK", _BLK_NUM_OK, NAMES["green"], cv)
-        self.ws._btn("X", _BLK_NUM_X, NAMES["dark_grey"], cv)
+        held = self._held
+        if k is not None and self._page is not None:
+            self._page.forget()             # a prompt over the page: the next frame draws it whole
+        if k is None:
+            if held.key is not None:
+                held.drop()
+        elif self.prompt_rows(dt):
+            return
+        elif held.put(ws, ws.sys_canvas, self._page_rect(), self._held_key(k), dt):
+            ws.bar_layer._draw_status_strip("menu")
+            self._draw_blk_kbd(True, dt)
+            held.note()
+            return
+        if k is None or not held.last(ws, ws.sys_canvas, self._page_rect(), dt):
+            if self.vouch:
+                _ui_draw.window_frame(self.vouch)
+            try:
+                self.page().draw(ws.sys_canvas, ws.theme_colors, self._page_rect(), False)
+            finally:
+                if self.vouch:
+                    _ui_draw.window_frame(0)
+        ws.bar_layer._draw_status_strip("menu")
+        if self.blk_kbd is not None:
+            self._draw_blk_kbd(False, dt)
+            held.note()
+        else:
+            held.shown(ws, ws.sys_canvas, self._page is None or self._page.host.still(), dt)
 
-    def _blk_hint(self):
-        be = self.blocks_ed
-        b = be.selected_block() if be is not None else None
-        if b is not None:
-            return _BLK_HINTS.get(b.get("t"))
-        return None
+    def prompt_host(self):
+        """The open prompt's host (`ui_draw.AppHost`), None where none is up."""
+        k = self.blk_kbd
+        return None if k is None else k["host"]
+
+    def prompt_rows(self, dt=0):
+        """Begin the open prompt's frame ahead of the page under it, once a
+        painted frame: where it is a dialog's rows frame (its field typed
+        into, its focus moved, the page held as the frames before left it:
+        `ui_draw.DialogRows`), draw the prompt's changed rows alone and
+        answer True; else the frame draws the page and the prompt as ever."""
+        k = self.blk_kbd
+        if k is None:
+            return False
+        ws = self.ws
+        rows = self._rows
+        if rows.begun == _ui_draw.painted():
+            return False
+        self._held.ask(ws, ws.sys_canvas, self._held_key(k), dt)
+        lay = self.block_layout
+        rows.gen(k["gen"])
+        if not rows.begin(k["host"], ws.sys_canvas, ws.theme_colors,
+                          (lay.cx, lay.cy, lay.cw, lay.ch),
+                          _layout_base.metric_class() == _layout_base.DESK):
+            return False
+        ws.bar_layer._draw_status_strip("menu")
+        self._draw_blk_kbd(True, dt)
+        self._held.note()
+        return True
+
+    def _page_rect(self):
+        lay = self.block_layout
+        return (lay.cx, lay.cy, lay.cw, lay.ch)
+
+    def _held_key(self, k):
+        """What the page under prompt `k` is a function of while it is up."""
+        ws = self.ws
+        return (k, ws.sys_canvas, self._page_rect(), ws.layout.fs, ws.look.look_gen)
+
+    def _draw_blk_kbd(self, held=False, dt=0):
+        """The entry prompt up (GAPS 52): `ui.dialog` with a captioned
+        `ui.field`, over the Blocks page dimmed -- "Name your variable" (a
+        block's, an input's) with the rule for a name, "Type some text", or
+        "Type a number" with the slot's value as its placeholder and Use a
+        block where the slot takes one. The keys type, so it has no DEL or
+        digit pad; the T-Deck's keys are its hint strip's, where a touch
+        glass and the desk add Cancel and OK. On the SYSTEM canvas: the
+        game canvas is a hidden buffer on a bigger glass (#85/#93). `held`:
+        the page under it was put back washed (`HeldPage`), else it was
+        drawn this frame and is washed and held here."""
+        ws = self.ws
+        k = self.blk_kbd
+        kind = k.get("kind")
+        entry = k["entry"]
+        host = k["host"]
+        desk = _layout_base.metric_class() == _layout_base.DESK
+        lay = self.block_layout
+        if self._rows.take():
+            host.resume(ws.sys_canvas, ws.theme_colors)   # begun ahead of the page
+        else:
+            host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        num = kind == "num"
+        to_block = num and k.get("allow_block")
+        keys = (("confirm", "OK") + (("scroll", "Use a block") if to_block else ())
+                + ("cancel", "Cancel"))
+        _strip(ws, lay, keys, desk)
+        if not held:
+            self._held.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(k),
+                            self._page is None or self._page.host.still(), dt)
+        tdeck = _ui.input_kind() == "tdeck"
+        o = k.get("o")
+        if o is None:
+            # the page under it washed already (held), and what it draws
+            # besides its field's text a function of the prompt alone
+            o = k["o"] = {"wash": False, "gen": k["gen"]}
+        pick = _ui.dialog(_KBD_TITLES.get(kind, "Name your variable"),
+                          () if tdeck else ("Cancel", "OK"), "primary", o)
+        if not num and kind != "text":
+            _ui.label(_KBD_NAME_RULE, _KBD_SUB)
+        if num:
+            cur = k.get("cur")
+            hint = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
+            cap = str(k.get("slot") or "Number").replace("_", " ")
+            cap = cap[:1].upper() + cap[1:]
+        else:
+            hint = "" if kind == "text" else str(k.get("var", ""))
+            cap = _KBD_CAPTIONS.get(kind, "Name")
+        got, done = _ui.field(cap, entry.text, 24, {"id": "entry", "hint": hint[:24]})
+        if got != entry.text:
+            # what the kind takes of what was typed (a number's digits, a name's letters)
+            t = ""
+            for ch in got:
+                t, _ev = _text_key(t, ord(ch), entry.cap, entry.allow)
+            entry.text = t
+        used = False
+        if to_block:
+            _ui.icon("blocks")
+            used = _ui.button("Use a block")
+        _ui.dialog()
+        if used:
+            self._blk_num_to_block()
+        elif pick == 1 or done:
+            self._blk_kbd_commit()
+        elif pick == 0:
+            self._blk_kbd_cancel()
+        if host.owed or host.tap == 2:
+            ws.request_frame()
 
     def _blk_ink(self, fill_idx):
         """Black or white text, whichever reads on the fill colour (luminance)."""
@@ -1900,97 +1448,11 @@ class BlockEditorUI:
         d = _blocks_mod.block_def(b.get("t"))
         return bool(d) and d.get("shape") == _blocks_mod.SHAPE_HAT
 
-    def _is_body_block(self, b):
-        """A block that WRAPS children (hat / c-block / proc def) -- gets a Scratch mouth."""
-        tid = b.get("t")
-        return (_blocks_mod.is_cblock(tid) or _blocks_mod.is_def(tid)
-                or self._is_hat_block(b))
-
-    def _blk_body_span(self, ridx, depth):
-        """How many rows after `ridx` belong to its body (depth deeper than `depth`)."""
-        rows = self.blocks_ed.rows
-        j = ridx + 1
-        while j < len(rows) and rows[j].depth > depth:
-            j += 1
-        return j - ridx - 1
-
-    def _draw_blk_row(self, row, vi, is_cursor):
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas
-        lay = self.block_layout
-        fs = lay.fs
-        cell = lay.cell
-        rh = lay.row_h
-        th = self.ws.theme_colors
-        light = (not lay._base) or self.ws.look.light_chrome()
-        bg = th["surface"] if light else NAMES["dark_blue"]
-        y = lay.y0 + vi * rh
-        x = lay.x0 + row.depth * lay.indent
-        w = lay.outline_w - row.depth * lay.indent
-        if row.kind == "insert":
-            # a slim Scratch-style drop slot (a notch between stacked blocks).
-            c = NAMES["yellow"] if is_cursor else NAMES["dark_grey"]
-            cv.rect(x + 2 * fs, y + rh // 2 - fs, 12 * fs, 2 * fs, c)
-            if is_cursor:
-                cv.print("+ add a block", x + 16 * fs, y + 3 * fs, NAMES["light_grey"], 1)
-            else:
-                cv.print("+", x + 4 * fs, y + 3 * fs, c, 1)
-            return
-        b = row.block
-        cat = self._blk_block_cat(b)
-        fill = NAMES[_blocks_mod.CATEGORY_COLOR.get(cat, "dark_grey")]
-        if row.is_else:
-            fill = NAMES["orange"]
-        label = self._blk_row_text(b, row.is_else)
-        is_body = (not row.is_else) and self._is_body_block(b)
-        # tile width: fit the content (a discrete Scratch block, not a full-width bar).
-        tw = min(w - 2 * fs, (len(label) + 2) * cell + 2 * fs)
-        ty, tht = y + fs, rh - 2 * fs
-        # C-block/hat MOUTH: a coloured spine down the visible body + a bottom lip,
-        # so the nested blocks read as sitting INSIDE the wrapper (Scratch's C-shape).
-        if is_body:
-            span = self._blk_body_span(self.blk_top + vi, row.depth)
-            vis = min(span, lay.rows - vi - 1)
-            if vis > 0:
-                sy = y + rh
-                sh = vis * rh
-                cv.rect(x, sy, 3 * fs, sh, fill)                        # left spine
-                cv.rect(x, sy + sh - fs, min(w - 2 * fs, 14 * fs), fs, fill)  # bottom lip
-        # the block tile + a 1px bevel (white top highlight / black bottom shadow).
-        cv.rect(x, ty, tw, tht, fill)
-        cv.rect(x, ty, tw, fs, NAMES["white"] if not is_cursor else NAMES["yellow"])
-        cv.rect(x, ty + tht - fs, tw, fs, NAMES["black"])
-        cv.print(label[:(tw - 4 * fs) // cell], x + 3 * fs, y + 4 * fs,
-                 self._blk_ink(fill), 1)
-        # rounded corners: knock the 4 corner pixels back to the background.
-        for cx, cy in ((x, ty), (x + tw - fs, ty),
-                       (x, ty + tht - fs), (x + tw - fs, ty + tht - fs)):
-            cv.rect(cx, cy, fs, fs, bg)
-        # a cursor ring around the whole tile.
-        if is_cursor:
-            cv.rectb(x, ty, tw, tht, NAMES["yellow"])
-        # highlight the selected block's active slot with a small caret under it
-        if is_cursor and not row.is_else:
-            self._draw_blk_slot_caret(b, x, y)
-
-    def _draw_blk_slot_caret(self, b, x, y):
-        slots = self.blocks_ed.slots(b)
-        if not slots:
-            return
-        # underline the active slot's value within the rendered label so the kid
-        # sees which one A/left/right will edit.
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas
-        lay = self.block_layout
-        fs = lay.fs
-        cell = lay.cell
-        si = self.blk_slot % len(slots)
-        col0 = self._blk_slot_text_col(b, si)
-        if col0 is None:
-            return
-        sval = self._blk_slot_display(b, slots[si])
-        cv.rect(x + 4 * fs + col0 * cell, y + 12 * fs,
-                max(cell, len(sval) * cell), fs, NAMES["yellow"])
+    def _cat_color(self, cat):
+        """A block category's colour: the theme's `block_<category>` content
+        role (the Scratch look by default), dark grey for no category."""
+        c = self.ws.look.content_colors().get("block_" + str(cat))
+        return self._NAMES["dark_grey"] if c is None else c
 
     def _blk_block_cat(self, b):
         d = _blocks_mod.block_def(b.get("t"))
@@ -2117,68 +1579,3 @@ class BlockEditorUI:
         if isinstance(val, str):
             return '"' + val + '"'
         return str(val)
-
-    def _draw_blk_menu(self):
-        """The modal insert/picker menu over the frozen outline: a titled panel with
-        a scrolling list of choices (categories, blocks, dropdown options, or
-        variables). Navigated up/down + A; B backs out. On the SYSTEM canvas; panel +
-        rows scale with the layout/font (#39 step 2)."""
-        NAMES = self._NAMES
-        cv = self.ws.sys_canvas
-        lay = self.block_layout
-        fs = lay.fs
-        mrh = lay.menu_row_h
-        m = self.blk_menu
-        mx, my, mw, mh = lay.menu
-        _ui.dialog(cv, (mx, my, mw, mh), ring=NAMES["yellow"], fill=NAMES["black"])
-        titles = {"cat": "PICK A KIND", "blk": "PICK A BLOCK",
-                  "dropdown": "PICK ONE", "variable": "PICK A VARIABLE",
-                  "expr": "PICK A VALUE", "actions": "BLOCK ACTIONS",
-                  "proc": "EDIT THIS BLOCK"}
-        cv.print(titles.get(m["mode"], "PICK"), mx + 6 * fs, my + 4 * fs, NAMES["yellow"], 1)
-        items = m["items"]
-        if not items:
-            cv.print("NOTHING HERE YET", mx + 8 * fs, my + 22 * fs, NAMES["light_grey"], 1)
-            cv.print("B = BACK", mx + 8 * fs, my + mh - 12 * fs, NAMES["light_grey"], 1)
-            return
-        for vi in range(lay.menu_rows):
-            ridx = m["top"] + vi
-            if ridx >= len(items):
-                break
-            y = my + 16 * fs + vi * mrh
-            sel = ridx == m["sel"]
-            # A row over the black dialog: the selection fill, the label ink
-            # and the chip gutter are the frozen indigo/white/grey trio, so
-            # the row takes them as `colors=` (test_skin pins the site).
-            _ui.row(cv, None, (mx + 3 * fs, y, mw - 6 * fs, mrh - fs),
-                    self._blk_menu_label(ridx),
-                    colors=(NAMES["indigo"] if sel else None,
-                            NAMES["white"] if sel else NAMES["light_grey"], None),
-                    edge=False, pad=13 * fs, pad_right=5 * fs, text_dy=3 * fs,
-                    fs=fs)
-            # color the category/block swatch chips so the look matches the outline
-            chip = self._blk_menu_chip(ridx)
-            if chip is not None:
-                cv.rect(mx + 5 * fs, y + 2 * fs, 8 * fs, mrh - 5 * fs, chip)
-        cv.print("B = BACK", mx + 6 * fs, my + mh - 12 * fs, NAMES["light_grey"], 1)
-
-    def _blk_menu_chip(self, ridx):
-        """The category-color chip for menu row `ridx` (categories + block lists);
-        None for plain pickers (dropdown/variable rows have no category color)."""
-        NAMES = self._NAMES
-        m = self.blk_menu
-        item = m["items"][ridx]
-        if item == _NUM_LITERAL_ITEM:
-            return NAMES["white"]      # the white editable-oval look (Scratch)
-        # My Blocks rows (#48): "+ new block" and every "call NAME" carry the category
-        # color so the palette reads consistently.
-        if item == _NEW_PROC_ITEM or item[:len(_CALL_PREFIX)] == _CALL_PREFIX:
-            return NAMES[_blocks_mod.CATEGORY_COLOR.get(_blocks_mod.CAT_PROCS,
-                                                        "dark_grey")]
-        if m["mode"] == "cat":
-            return NAMES[_blocks_mod.CATEGORY_COLOR.get(item, "dark_grey")]
-        if m["mode"] in ("blk", "expr"):
-            d = _blocks_mod.block_def(item)
-            if d:
-                return NAMES[_blocks_mod.CATEGORY_COLOR.get(d["category"], "dark_grey")]
-        return None

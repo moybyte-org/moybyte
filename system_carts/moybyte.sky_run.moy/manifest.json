@@ -1,0 +1,73 @@
+{
+  "format": "moy-1",
+  "version": 14,
+  "title": "Sky Run",
+  "id": "moybyte.sky_run",
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "fps": 60,
+  "description": "A side-scroller across a world wider than the screen. Grab the coins and reach the checkered flag.",
+  "genre": "platformer",
+  "moybyte": {
+    "type": "game",
+    "system": true,
+    "order": 120,
+    "permissions": [
+      "graphics",
+      "input",
+      "audio"
+    ],
+    "config": {
+      "speed": 130,
+      "hero": 0,
+      "autorun": 0
+    },
+    "edit": [
+      {
+        "key": "speed",
+        "label": "SPEED",
+        "type": "int",
+        "min": 60,
+        "max": 220,
+        "step": 10,
+        "card": "RUN AT {value}"
+      },
+      {
+        "key": "hero",
+        "label": "HERO",
+        "type": "choice",
+        "choices": [
+          0,
+          1
+        ],
+        "tiles": [
+          0,
+          3
+        ],
+        "display": "sprite-tiles",
+        "card": "HERO IS {value}"
+      },
+      {
+        "key": "autorun",
+        "label": "AUTORUN",
+        "type": "choice",
+        "choices": [
+          0,
+          1
+        ],
+        "icons": [
+          "close",
+          "run"
+        ],
+        "display": "choice-icons",
+        "card": "AUTORUN {value}"
+      }
+    ],
+    "assets": {
+      "scenes": [
+        "main"
+      ]
+    }
+  }
+}

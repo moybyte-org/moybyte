@@ -12,8 +12,9 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   #            click/drag taps and drags. Nothing steers a cursor with the keys.
   #   ARROWS = the d-pad (WASD also works). Z = A, X = B, SPACE = A too.
   #            Enter = run, which is also "open this cart" in the launcher.
-  #            BACKSPACE = home, the EXIT key: HOLD ~700ms to leave a running
-  #            cart (a plain key while playing otherwise). Esc quits the sim.
+  #            BACKSPACE is a plain key. SUPER (Cmd, the Windows key) is the
+  #            console's key: the system menu, or the pause menu over a game
+  #            (Quit leaves it). Esc closes a menu, or quits the sim.
   #   The T-Deck's own keys differ ON PURPOSE (it has no arrows, and its Z/X sit
   #   under the WASD thumb): there it is WASD + L/K. Same buttons, two keyboards.
   #   The code editor is FULL-SCREEN: letters type, the bottom symbol palette
@@ -25,10 +26,10 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   python tools/simulate_desktop.py --demo --gif demo.gif
 
   # headless custom script
-  python tools/simulate_desktop.py --gif out.gif --script "wait:20 right run wait:40 home"
+  python tools/simulate_desktop.py --gif out.gif --script "wait:20 right run wait:40 super"
 
   # launch a single cartridge directly (skip the launcher)
-  python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
+  python tools/simulate_desktop.py --cart system_carts/moybyte.star_catcher.moy
 
   # a roomy responsive desktop at a larger SYSTEM canvas (#39): the desktop reflows
   # to fill it; the game stays a fixed 320x240, composited as a centered viewport.
@@ -53,11 +54,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 DEFAULT_SAVE_DIR = os.path.expanduser("~/.moybyte/projects")
 # Tour (shared-console buttons): open a cart, play it, EXIT, move, open another, play,
-# exit. Stage 5 retired pause -- a running cart is exited by the fw-independent triple-
-# tap "home" (three consecutive home tokens = three BACKSPACE edges within the window).
+# exit. The `super` token is the console's key; over a game it opens the pause
+# menu, whose rows are Resume, Restart, Options, Quit (a press needs a gap
+# frame to be a second edge).
+_EXIT = "super wait:4 down:2 down:2 down:2 run wait:8"
 DEMO_SCRIPT = (
-    "wait:18 run wait:40 home home home wait:8 down run wait:50 home home home wait:8 "
-    "down down run wait:40 home home home wait:20"
+    "wait:18 run wait:40 " + _EXIT + " down run wait:50 " + _EXIT +
+    " down down run wait:40 " + _EXIT + " wait:20"
 )
 
 
@@ -74,15 +77,6 @@ def _require(module, package, what, extra, hint=""):
         sys.exit("error: %s needs %s, which is not installed.\n"
                  "  install it:  %s -m pip install -e '.[%s]'   (or: make setup)%s"
                  % (what, package, sys.executable, extra, hint))
-
-
-def _coerce(value):
-    for cast in (int, float):
-        try:
-            return cast(value)
-        except ValueError:
-            pass
-    return value
 
 
 def parse_size(text):
@@ -123,7 +117,9 @@ def run_script(driver, actions, dt):
     seen = set()
     ws = getattr(driver, "ws", None)
     for press in actions:
-        if press:
+        if press == "super":
+            driver.system_key()
+        elif press:
             driver.press(press)
         driver.frame(dt)
         err = getattr(ws, "cart_error", None) if ws is not None else None
@@ -156,7 +152,9 @@ def _open_named_cart(ws, cart_path, carts_dir):
     if os.path.abspath(cart_path) != os.path.abspath(dst) and not os.path.exists(dst):
         import shutil
         shutil.copytree(cart_path, dst)
-    ws.launcher.items = host_app.moy_carts.scan(ws.carts_root)
+    cat = host_app.moy_catalogue
+    ws.launcher.items = [c for c in (cat.load(e["h"])
+                                     for e in cat.catalogue(ws.carts_root)) if c]
     for i, c in enumerate(ws.launcher.items):
         if os.path.abspath(c["path"]) == os.path.abspath(dst):
             ws.launcher.sel = i
@@ -179,40 +177,73 @@ def run_live(driver, dt, scale):
     # T-Deck's (whose cursor really is a trackball). An idle move hovers, a drag
     # drags; the keyboard steers nothing but the game.
     #
-    # ON A HOST WITH ARROW KEYS THE SCHEME IS ARROWS + Z/X (owner call
-    # 2026-08-14), which is PICO-8's and every emulator's. It is deliberately
-    # NOT the T-Deck's WASD + L/K: that board has no arrow keys at all, and Z/X
-    # sit on its bottom row under the same thumb WASD needs. Same console, two
-    # keyboards, two ergonomics -- the shared part is what the BUTTONS are.
-    #
-    # The browser page has done this since 2026-07-31 (page_core.html's AN/SC);
-    # this file did not, and steered the trackball with the arrows instead. That
-    # is the split being closed here: two hosts, one scheme.
-    arrow_keys = {pygame.K_LEFT: "left", pygame.K_RIGHT: "right",
-                  pygame.K_UP: "up", pygame.K_DOWN: "down"}
-    # WASD steers too, so a kid who learned on the T-Deck is not lost here.
-    # Aliasing a DIRECTION is cheap -- unlike a letter that also jumps, it
-    # steals nothing from a typing cart, and in the editor the arrows and the
-    # letters part ways (see the branch below).
-    nav_keys = dict(arrow_keys)
-    nav_keys.update({pygame.K_a: "left", pygame.K_d: "right",
-                     pygame.K_w: "up", pygame.K_s: "down"})
-    # BACKSPACE = the device's one console key, now the Stage-5 EXIT key. It is mapped
-    # as a HELD "home" button (below, like the WASD nav keys) -- NOT a one-shot press --
-    # so a sustained hold reaches the Player's hold-to-exit (~700ms) for a game and a quick
-    # tap is a single edge the cart reads. In text mode the branch above routes it as typed
-    # 0x08 instead (DELETE for a tool). K_h is a host-only convenience alias for held "home".
-    exit_keys = (pygame.K_BACKSPACE, pygame.K_h)
-    shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a",
-                 pygame.K_SPACE: "a", pygame.K_x: "b"}
+    # THE KEYBOARD is the browser page's: every key goes to the driver as its
+    # code and the modifiers held with it (ConsoleDriver.key_down), which
+    # presses what it presses beside typing it -- arrows + Z/X, PICO-8's and
+    # every emulator's (owner call 2026-08-14), the letters only while a cart
+    # owns the keys (runtime/host_api.py's DESK_KEYS and CART_KEYS). The
+    # modifiers go as a level too, so Super acts on its release (the tap).
+    from runtime import moy_input as mi
+    mod_keys = {}
+    for names, bit in ((("K_LCTRL", "K_RCTRL"), mi.CTRL), (("K_LSHIFT", "K_RSHIFT"), mi.SHIFT),
+                       (("K_LALT", "K_RALT"), mi.ALT),
+                       (("K_LSUPER", "K_RSUPER", "K_LGUI", "K_RGUI", "K_LMETA", "K_RMETA"),
+                        mi.SUPER)):
+        for n in names:
+            if hasattr(pygame, n):
+                mod_keys[getattr(pygame, n)] = bit
+    named = {pygame.K_RETURN: 0x0D, pygame.K_KP_ENTER: 0x0D, pygame.K_BACKSPACE: 0x08,
+             pygame.K_TAB: 0x09, pygame.K_DELETE: 0x7F, pygame.K_LEFT: mi.KEY_LEFT,
+             pygame.K_RIGHT: mi.KEY_RIGHT, pygame.K_UP: mi.KEY_UP, pygame.K_DOWN: mi.KEY_DOWN,
+             pygame.K_PAGEUP: mi.KEY_PGUP, pygame.K_PAGEDOWN: mi.KEY_PGDN}
+    for n in range(12):
+        named[getattr(pygame, "K_F%d" % (n + 1))] = mi.KEY_F1 + n
+    held_mods = set()
+
+    def mods_now():
+        m = 0
+        for k in held_mods:
+            m |= mod_keys[k]
+        return m
+
+    def code_of(ev, mods):
+        """The byte a key types with Shift applied and Ctrl not, or a KEY_*."""
+        if ev.key in named:
+            return named[ev.key]
+        if mods & (mi.CTRL | mi.ALT | mi.SUPER) and 0x20 <= ev.key <= 0x7E:
+            c = ev.key
+            if mods & mi.SHIFT and 0x61 <= c <= 0x7A:
+                c -= 32
+            return c
+        if ev.unicode and 0x20 <= ord(ev.unicode) <= 0x7E:
+            return ord(ev.unicode)
+        return None
+
     mouse_down = False
     running = True
     while running:
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
+            elif ev.type in (pygame.KEYDOWN, pygame.KEYUP) and ev.key in mod_keys:
+                (held_mods.add if ev.type == pygame.KEYDOWN else held_mods.discard)(ev.key)
+                driver.set_mods(mods_now())
+            elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
+                if driver.takes_escape() or driver.in_code_editor():
+                    driver.escape()       # a menu closes, Settings or an app steps back
+                elif driver.in_text_mode():
+                    driver.type_char(0x1B)   # a cart taking text owns its Esc
+                else:
+                    running = False       # with no menu open, Esc quits the simulator
+            elif ev.type == pygame.MOUSEWHEEL:
+                # notches, positive right and down (SDL's y is positive up)
+                driver.wheel(ev.x, -ev.y, mods_now())
+            elif ev.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP) and ev.button == 2:
+                driver.middle(ev.pos[0] // scale, ev.pos[1] // scale,
+                              ev.type == pygame.MOUSEBUTTONDOWN)
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 mouse_down = True
+                driver.set_mods(mods_now())   # Shift+click extends a selection
                 driver.touch(ev.pos[0] // scale, ev.pos[1] // scale)   # tap
             elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
                 mouse_down = False
@@ -223,57 +254,13 @@ def run_live(driver, dt, scale):
                 else:
                     # THE MOUSE IS THE CURSOR here, exactly as in the browser
                     # (owner call): an idle move is a hover, so the desk icons
-                    # and card grids light up under it. Nothing steers a virtual
-                    # cursor with the keyboard on this tier any more.
+                    # and card grids light up under it.
                     driver.hover(ev.pos[0] // scale, ev.pos[1] // scale)
-            elif ev.type == pygame.KEYDOWN and ev.key in arrow_keys \
-                    and driver.in_code_editor():
-                # ARROWS IN THE EDITOR still move the caret: they arrive as held
-                # direction buttons now, and ConsoleDriver.frame translates those
-                # back into a nav step while the code editor is open (host_api's
-                # "ARROWS ON A MOUSE TIER" block). ARROWS ONLY -- W/A/S/D must
-                # fall through to the typing branch below, or you cannot write
-                # `draw` in the editor without the caret running away.
-                driver.hold(arrow_keys[ev.key], True)
-            elif ev.type == pygame.KEYDOWN and driver.in_code_editor():
-                # Code editor: letters type; Esc closes.
-                if ev.key == pygame.K_ESCAPE:
-                    driver.escape()
-                elif ev.key == pygame.K_RETURN:
-                    driver.type_char(0x0D)
-                elif ev.key == pygame.K_BACKSPACE:
-                    driver.type_char(0x08)
-                elif ev.key == pygame.K_TAB:
-                    driver.type_char(0x09)
-                elif ev.unicode and 0x20 <= ord(ev.unicode) <= 0x7E:
-                    driver.type_char(ord(ev.unicode))
-            elif ev.type == pygame.KEYDOWN and driver.in_text_mode():
-                # A running cart that asked for text input via textmode(True) (#38/#42):
-                # route typed unicode + Enter/Backspace/Esc to the cart's key() exactly
-                # as the code editor does. The cart owns the meaning of those keys (e.g.
-                # the wifi cart: Enter=connect, Backspace=delete, Esc=back to the list),
-                # so Esc does NOT quit the simulator here -- the cart handles it.
-                if ev.key == pygame.K_RETURN:
-                    driver.type_char(0x0D)
-                elif ev.key == pygame.K_BACKSPACE:
-                    driver.type_char(0x08)
-                elif ev.key == pygame.K_ESCAPE:
-                    driver.type_char(0x1B)
-                elif ev.unicode and 0x20 <= ord(ev.unicode) <= 0x7E:
-                    driver.type_char(ord(ev.unicode))
-            elif ev.type == pygame.KEYDOWN:
-                if ev.key == pygame.K_ESCAPE:
-                    running = False
-                elif ev.key in exit_keys:
-                    driver.hold("home", True)        # held so a sustained hold = the exit gesture
-                elif ev.key in shortcuts:
-                    driver.press(shortcuts[ev.key])
-                elif ev.key in nav_keys:
-                    driver.hold(nav_keys[ev.key], True)
-            elif ev.type == pygame.KEYUP and ev.key in nav_keys:
-                driver.hold(nav_keys[ev.key], False)
-            elif ev.type == pygame.KEYUP and ev.key in exit_keys:
-                driver.hold("home", False)
+            elif ev.type in (pygame.KEYDOWN, pygame.KEYUP):
+                mods = mods_now()
+                code = code_of(ev, mods)
+                if code is not None:
+                    (driver.key_down if ev.type == pygame.KEYDOWN else driver.key_up)(code, mods)
         # (No trackball nudge: this tier's cursor IS the mouse. ConsoleDriver.pan
         # stays for backends that really have a trackball -- the T-Deck's own.)
         driver.frame(dt)
@@ -293,8 +280,8 @@ def _force_autoplay_on_open(ws):
     re-start it so the GIF/tour stays lively."""
     _orig_open = ws.open
 
-    def _open():
-        _orig_open()
+    def _open(cart=None):
+        _orig_open(cart)
         if ws.cart and isinstance(ws.config, dict) and "autoplay" in ws.config:
             ws.config["autoplay"] = 1
             ws._start()
@@ -338,10 +325,10 @@ def main():
     ws = host_app.build_workstation(args.save_dir, sys_size=sys_size,
                                     font_scale=args.font_scale,
                                     windowed=args.windowed)
-    # Live windowed run -> stream real audio to the speakers (#16). Headless /
-    # scripted runs keep the silent FakeAudio so they stay deterministic + device-free.
+    # Live windowed run -> the mix to the speakers (#16). Headless / scripted
+    # runs pull it and discard it, so they stay deterministic + device-free.
     if not args.demo and args.script is None:
-        ws.make_audio = host_app.make_sdl_audio
+        ws.audio_out = host_app.SdlPump()
         # Live run -> report the desktop's REAL WiFi connection/IP (your PC is online),
         # so network features test against real Python sockets. Headless keeps FakeWifi.
         ws.wifi = host_app.make_host_wifi(host_app.moy_carts, ws.carts_root)

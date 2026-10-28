@@ -56,6 +56,9 @@ from tools.wasm_module import format_version
 ROOT = Path(__file__).resolve().parent.parent
 GLUE_SRC = ROOT / "device" / "moycore_glue.py"
 C_SRC = ROOT / "native" / "moycore" / "modmoycore.c"
+# The console half's ABI -- the snapshot's slots and the audio queue's ops --
+# lives in moycore_run.h, the one copy every tier compiles.
+RUN_H = ROOT / "native" / "moycore" / "moycore_run.h"
 # The second ABI this file's parser is pointed at: the native draw gates and
 # the shape kernel, whose enums device/device_canvas.py mirrors by hand.
 GFX_SRC = ROOT / "native" / "moy_gfx" / "modmoy_gfx.c"
@@ -93,9 +96,9 @@ def _c_enum(first, path=None):
     raise AssertionError("no enum containing %s in %s" % (first, path or C_SRC))
 
 
-def _c_define(name):
-    m = re.search(r"^#define\s+%s\s+(\d+)" % name, _c_text(), flags=re.M)
-    assert m, "%s is not #defined in %s" % (name, C_SRC)
+def _c_define(name, path=None):
+    m = re.search(r"^#define\s+%s\s+(\d+)" % name, _c_text(path), flags=re.M)
+    assert m, "%s is not #defined in %s" % (name, path or C_SRC)
     return int(m.group(1))
 
 
@@ -124,10 +127,10 @@ def _c_run_begin_fields():
     return tuple(p.strip() for p in m.group(1).replace("//", " ").split(","))
 
 
-C_CONSTS = dict(_c_enum("SNAP_BTN"))
-C_CONSTS.update(_c_enum("AQ_SFX"))
-C_CONSTS["AQ_SLOTS"] = _c_define("AQ_SLOTS")
-C_CONSTS["AQ_MAX"] = _c_define("AQ_MAX")
+C_CONSTS = dict(_c_enum("SNAP_BTN", RUN_H))
+C_CONSTS.update(_c_enum("AQ_SFX", RUN_H))
+C_CONSTS["AQ_SLOTS"] = _c_define("AQ_SLOTS", RUN_H)
+C_CONSTS["AQ_MAX"] = _c_define("AQ_MAX", RUN_H)
 C_NAMES = _c_module_names()
 RB_ARITY = _c_run_begin_arity()
 RB_FIELDS = _c_run_begin_fields()
@@ -175,9 +178,16 @@ class FakeMoycore(types.ModuleType):
                      "tick_split", "pmem_image", "retarget", "close",
                      "active", "view", "set_sram_floor", "alloc_stats",
                      "get_global", "wasm_open", "take_frames", "frame",
-                     "frame_settle", "frame_presented", "frame_kept"):
+                     "frame_settle", "frame_presented", "frame_kept",
+                     "layer_bind", "scene_put", "image_put"):
             assert verb in C_NAMES, verb
             setattr(self, verb, getattr(self, "_" + verb))
+
+    def _image_put(self, name, text):
+        self._log("image_put", name, text)
+
+    def _scene_put(self, name, text):
+        self._log("scene_put", name, text)
 
     def _log(self, verb, *args):
         self.calls.append((verb,) + args)
@@ -201,6 +211,9 @@ class FakeMoycore(types.ModuleType):
             raise self.register_error[1]
         self.registered[name] = fn
         self._log("register", name)
+
+    def _layer_bind(self, buf, w, h):
+        self._log("layer_bind", w, h)
 
     def _exec(self, src, chunk):
         self._log("exec", src, chunk)
@@ -384,6 +397,9 @@ class FakeInput:
     def held(self, name):
         return name in self._held
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, name):
         return name in self._pressed
 
@@ -408,7 +424,7 @@ class _FakePointer:
     """x/y/state/ms as `pointer_state` wants to read them off a Pointer."""
 
     def __init__(self, x, y, state, ms):
-        from runtime.widgets import P_CLICK, P_HELD, P_LIVE
+        from runtime.moy_input import P_CLICK, P_HELD, P_LIVE
 
         self.x, self.y, self.ms = x, y, ms
         self._state = state
@@ -438,6 +454,9 @@ class MinimalInput:
     def held(self, name):
         return name in self._held
 
+    def steps(self, n):
+        return int(bool(self.pressed(n)))
+
     def pressed(self, name):
         return name in self._pressed
 
@@ -460,6 +479,18 @@ class FakeWs:
             self.project = project
         if pmem is not None:
             self.pmem = pmem
+
+
+class NsSession:
+    """The run's audio session as the drain sees it: each verb is the
+    namespace's recorder of that name, looked up per call so a test can swap
+    one."""
+
+    def __init__(self, ns):
+        self._ns = ns
+
+    def __getattr__(self, verb):
+        return lambda *a: self._ns[verb](*a)
 
 
 def make_ns(**extra):
@@ -491,17 +522,25 @@ def make_ns(**extra):
     return ns
 
 
+class FakeLayerCanvas:
+    def __init__(self, w, h):
+        self.w = w
+        self.h = h
+        self._buf = bytearray(w * h * 2)
+
+
 class FakeLayer:
+    """A layer as the glue sees it: the canvas whose pixels it binds, and the
+    one Python-side draw a Lua layer still makes (a paint image)."""
+
     def __init__(self, w, h, log=None):
         self.w = w
         self.h = h
+        self._canvas = FakeLayerCanvas(w, h)
         self.log = [] if log is None else log
 
     def spr(self, *a):
         self.log.append(("layer.spr", self) + a)
-
-    def cls(self, c):
-        self.log.append(("layer.cls", self, c))
 
 
 LUA_SRC = "function _update() end"
@@ -515,7 +554,8 @@ class World:
     exercise the first one's board.
     """
 
-    NAMES = ("moycore", "ticks", "device_canvas", "lua_ext", "moy_wasm")
+    NAMES = ("moycore", "runtime.moycore", "ticks", "device_canvas", "lua_ext",
+             "moy_wasm")
 
     def __init__(self, moycore=True, flat_ticks=True, flat_lua_ext=True,
                  wire_fallback=b"\1" * 128, wasm_chip=None):
@@ -535,6 +575,7 @@ class World:
             sys.modules["moycore"] = self.core
         else:
             sys.modules["moycore"] = None      # PEP 328: raises ImportError
+            sys.modules["runtime.moycore"] = None   # ...and the host's binding
         if flat_ticks:
             tk = types.ModuleType("ticks")
             tk._since_ms = self.clock.since_ms
@@ -557,6 +598,8 @@ class World:
     def run(self, ws=None, ns=None, src=LUA_SRC):
         self.ws = FakeWs() if ws is None else ws
         self.ns = make_ns() if ns is None else ns
+        if getattr(self.ws, "audio", None) is None:
+            self.ws.audio = NsSession(self.ns)
         return self.mod.MoycoreRun(self.ws, self.ns, src)
 
     def close(self):
@@ -695,9 +738,12 @@ def test_a_workstation_with_no_project_at_all_still_starts(w):
 
 
 def test_the_cart_config_crosses_from_the_namespace(w):
+    """As the C table the cart's cfg() reads: copied in, so nothing of the
+    VM's is held by the run."""
+    from runtime.lua_ext import cfg_blob
     ns = make_ns()
     w.run(ns=ns)
-    assert w.core.rb("cfg") is ns["_moy_cfg"]
+    assert w.core.rb("cfg") == (cfg_blob(ns["_moy_cfg"]) or None)
 
 
 def test_the_snapshot_array_is_sized_from_the_c_layout(w):
@@ -710,10 +756,10 @@ def test_the_snapshot_array_is_sized_from_the_c_layout(w):
 
 def test_the_audio_queue_mirrors_the_c_cap_rather_than_merely_being_big(w):
     """`AUDIO_MAX` is a copy of the C's `AQ_MAX`; the queue is one header slot
-    plus `AQ_SLOTS` int16 per command."""
+    plus `AQ_SLOTS` int32 per command."""
     run = w.run()
     assert run.AUDIO_MAX == C_CONSTS["AQ_MAX"]
-    assert run.aq.typecode == "h"
+    assert run.aq.typecode == "i"
     assert len(run.aq) == 1 + C_CONSTS["AQ_SLOTS"] * C_CONSTS["AQ_MAX"]
     assert len(run.aq) >= 1 + C_CONSTS["AQ_SLOTS"]     # the C's own floor
     assert w.core.rb("audio_q") is run.aq
@@ -797,11 +843,11 @@ def test_a_moybyte_verb_nobody_remembered_is_registered_anyway(w):
     w.run(ns=ns)
     assert "brand_new_verb_2026" in w.core.registered
     assert w.core.registered["brand_new_verb_2026"] is ns["brand_new_verb_2026"]
-    for shared in ("draw_scene", "text"):
-        assert shared in w.core.registered
-    # ...and scene() is not one of them: it answers with a LIST of rows, so it
-    # rides the handle glue instead (#214).
+    assert "text" in w.core.registered
+    # ...and the placement verbs are not among them: they are the prelude's
+    # Lua over the run's C (#214, moycore_scene.h).
     assert "scene" not in w.core.registered
+    assert "draw_scene" not in w.core.registered
 
 
 def test_libmoys_own_verbs_are_never_shadowed_by_a_trampoline(w):
@@ -821,6 +867,17 @@ def test_the_object_valued_verbs_are_never_registry_entries(w):
 
     w.run()
     assert not (set(w.core.registered) & NOT_REGISTRABLE)
+
+
+def test_the_native_superset_names_are_never_trampolines(w):
+    """col and mouse are the run's C (moycore_superset.h): a trampoline
+    registered over them would put a crossing back into every frame that
+    calls them, which is what the cart path's zero-upcall gate counts."""
+    from runtime.lua_ext import NATIVE_NAMES
+
+    w.run()
+    assert NATIVE_NAMES >= {"col", "mouse"}
+    assert not (set(w.core.registered) & NATIVE_NAMES)
 
 
 def test_non_callable_namespace_entries_are_skipped(w):
@@ -901,11 +958,39 @@ def test_every_handle_the_prelude_consumes_is_registered(w):
     from runtime.lua_ext import PRELUDE_HANDLES
 
     w.run()
-    wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - {"__id", "__img"}
+    # Fields and a metamethod, not handles: a layer's id, canvas and edited
+    # mark, an image's id. And the layer and scene natives are the RUNTIME's
+    # own C (moycore_layers.h, moycore_scene.h), installed by run_begin and
+    # hl_new, never registered.
+    fields = {"__id", "__img", "__c", "__e", "__index"}
+    natives = {"__layer_canvas", "__layer_verb", "__layer_blit",
+               "__layer_new", "__layer_spr_img", "__image_handle",
+               "__scene_names", "__scene_rows", "__draw_scene"}
+    wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - fields - natives
     gated = {n for n in wanted if n.startswith("__ed_")}
     assert gated, "the editor handles vanished from the prelude"
     got = {n for n in w.core.registered if n.startswith("__")}
     assert wanted - gated == got, "an UNGATED handle is missing"
+
+
+def test_the_scene_texts_go_to_the_run_in_order_before_the_prelude(w):
+    """The run parses and draws the scenes in C (moycore_scene.h), so the
+    texts -- the live Scenes object's, unsaved Editor placement included --
+    go over once, in the cart's order (the first is the default active one),
+    and the placement verbs are never trampolines."""
+    from runtime.widgets import Scenes
+
+    sc = Scenes({"one": "[]", "two": "[{}]"}, ["two", "one"])
+    sc.put("one", '[{"tag": "live"}]')
+    w.run(ns=make_ns(_moy_scenes=sc))
+    puts = [c for c in w.core.calls if c[0] == "scene_put"]
+    assert puts == [("scene_put", "two", "[{}]"),
+                    ("scene_put", "one", '[{"tag": "live"}]')]
+    verbs = w.core.verbs()
+    assert verbs.index("scene_put") < verbs.index("exec")
+    for name in ("scene", "load_scene", "actors", "touching", "move_actor",
+                 "move_actor_to", "remove_actor", "draw_scene"):
+        assert name not in w.core.registered, name
 
 
 def test_the_editor_handles_are_registered_for_a_cart_that_earned_them(w):
@@ -916,41 +1001,16 @@ def test_the_editor_handles_are_registered_for_a_cart_that_earned_them(w):
     assert wanted <= {n for n in w.core.registered if n.startswith("__")}
 
 
-def test_a_layer_made_through_a_handle_is_pinned_by_the_run(w):
-    run = w.run()
-    reg = w.core.registered
-    # Every argument arrives as a Lua NUMBER -- the boards build LUA_32BITS and
-    # a tile index reaching the sheet as 7.0 is a TypeError, so the handle half
-    # is where the coercion has to happen.
-    lid = reg["__layer_new"](64.0, 32.0)
-    assert lid == 0
-    lay = run._layers[0]
-    assert (lay.w, lay.h) == (64, 32)
-    reg["__layer_cls"](0.0, 3.0)
-    reg["__layer_spr"](0.0, 7.0, 1.0, 2.0, -1.0, 1.0, 0.0)
-    reg["__draw_layer"](lid, 8, 9)
-    assert ("layer.cls", lay, 3) in w.ns["_log"]
-    assert ("layer.spr", lay, 7, 1, 2, -1, 1, 0) in w.ns["_log"]
-    assert ("draw_layer", lay, 8, 9) in w.ns["_log"]
-    # By TYPE, not by value: `7.0 == 7`, so a comparison alone cannot see the
-    # coercion being dropped.
-    spr = [c for c in w.ns["_log"] if c[0] == "layer.spr"][0]
-    assert all(isinstance(v, int) for v in spr[2:]), spr
-
-
-def test_an_image_handle_indexes_the_runs_own_registry(w):
-    run = w.run()
-    h = w.core.registered["__image_handle"]("bg")
-    assert h == 0 and run._images[0] == ("img", "bg")
-    lid = w.core.registered["__layer_new"](8, 8)
-    w.core.registered["__layer_spr_img"](float(lid), float(h), 1.0, 2.0)
-    assert ("layer.spr", run._layers[0], ("img", "bg"), 1, 2) in w.ns["_log"]
-
-
-def test_a_missing_image_answers_a_negative_handle_and_pins_nothing(w):
-    run = w.run()
-    assert w.core.registered["__image_handle"]("missing") == -1
-    assert run._images == []
+def test_the_paint_images_go_to_the_run_before_the_prelude(w):
+    """A layer's pixels and a paint image are the run's C (moycore_lua.c):
+    the .moyimg texts go over once, and no layer or image handle is a
+    trampoline."""
+    w.run(ns=make_ns(_moy_images={"bg": "text-of-bg"}))
+    assert ("image_put", "bg", "text-of-bg") in w.core.calls
+    verbs = w.core.verbs()
+    assert verbs.index("image_put") < verbs.index("exec")
+    for name in ("__layer_new", "__layer_spr_img", "__image_handle"):
+        assert name not in w.core.registered, name
 
 
 # -- a bad verb must not strand the VM -----------------------------------------
@@ -1069,16 +1129,13 @@ def test_an_input_without_button_masks_falls_back_and_agrees_bit_for_bit(w):
 
 
 def test_both_real_input_states_drive_the_snapshot_the_same_way(w):
-    """`runtime/input.py` and the boards' `device/moybyte/input.py` differ in
-    BUTTONS length AND order; the snapshot must not."""
+    """`runtime/input.py` and the boards' table differ in BUTTONS length; the
+    snapshot must not."""
     from runtime.input import InputState as HostInput
+    from runtime.moy_input import InputTable as BoardInput
 
-    spec = importlib.util.spec_from_file_location(
-        "_dev_input_for_glue_test", ROOT / "device" / "moybyte" / "input.py")
-    device_input = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(device_input)
     snaps = []
-    for cls in (HostInput, device_input.InputState):
+    for cls in (HostInput, BoardInput):
         inp = cls()
         inp.set_button("up", True)
         inp.set_button("b", True)
@@ -1174,13 +1231,13 @@ def test_the_import_of_the_clock_is_hoisted_out_of_the_frame(w):
 def test_the_pointer_crosses_in_the_carts_own_coordinates(w):
     """...FLAGS INTACT, which is the part a boolean fake cannot see.
 
-    The slot carries widgets.py's P_LIVE/P_HELD/P_CLICK together, because
+    The slot carries moy_input.py's P_LIVE/P_HELD/P_CLICK together, because
     h_touch has one slot and touch() has three questions to answer out of it.
     This test used to hand the glue a BOOLEAN and assert the slot was 1 -- true
     of `int(True)` as well, so it went on passing when the contract underneath
     it changed and pinned nothing at all.
     """
-    from runtime.widgets import P_LIVE, P_HELD, P_CLICK
+    from runtime.moy_input import P_LIVE, P_HELD, P_CLICK
 
     inp = FakeInput(touch=(11, 22, P_LIVE | P_HELD | P_CLICK, 300))
     run = w.run(ws=FakeWs(inp=inp))
@@ -1368,10 +1425,9 @@ def test_an_empty_queue_costs_one_read(w):
     assert w.ns["_log"] == []
 
 
-def test_every_op_reaches_the_same_make_api_closure_a_python_cart_uses(w):
-    """Deliberate: bank sync, the volume model the Settings surface reads and
-    the diag triggers stay in one place. What the crossing deleted is the
-    per-CALL trip, not the behaviour."""
+def test_every_op_is_one_call_on_the_runs_audio_session(w):
+    """One kernel call per queued command, on the run's session (ws.audio),
+    in the queue's order."""
     run = w.run()
     _queue(run,
            (C_CONSTS["AQ_SFX"], 3, 5),
@@ -1547,15 +1603,13 @@ def test_closing_persists_pmem_and_then_closes_the_vm(w):
     assert len(pmem.written) == 256
 
 
-def test_closing_drops_the_handle_registries_that_pin_the_layers(w):
-    """They are what PIN the run's layers and images, and a layer is a
-    full-canvas allocation."""
-    run = w.run()
-    w.core.registered["__layer_new"](320, 240)
-    w.core.registered["__image_handle"]("bg")
-    assert run._layers and run._images
+def test_closing_drops_the_registry_that_pins_the_editors(w):
+    run = w.run(ns=make_ns(open_editor=lambda name=None, mode=None: object()))
+    assert run._pins == []
+    w.core.registered["__ed_open"]("notes", "")
+    assert len(run._pins) == 1
     run.close()
-    assert run._layers is None and run._images is None
+    assert run._pins is None
 
 
 def test_closing_a_run_whose_module_went_away_is_still_a_clean_exit(w):
@@ -1568,7 +1622,7 @@ def test_closing_a_run_whose_module_went_away_is_still_a_clean_exit(w):
     assert run.flush_pmem() is False
     run.close()
     assert w.core.closes == 0
-    assert run._layers is None
+    assert run._pins is None
 
 
 def test_a_failing_pmem_write_still_closes_the_vm(w):
@@ -1630,7 +1684,7 @@ def test_a_dead_pointer_is_dead_even_when_a_game_pointer_still_stands(w):
     cart held a cursor over `dungeons & diagrams`' board forever and its d-pad
     was stamped over every frame by the cart's own mouse handler.
     """
-    from runtime.widgets import P_LIVE, P_NONE
+    from runtime.moy_input import P_LIVE, P_NONE
 
     inp = FakeInput(touch=(11, 22, P_LIVE, 0))
     inp.game_pointer = (5, 6, False, False)       # a stale mapping, still there
@@ -1775,23 +1829,17 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert world.core.verbs()[:2] == ["run_begin", "wasm_open"]
         assert world.core.rb("vm") is False
-        (_v, module, head, pages, sha, cdir, swapped, gate,
-         allow_unsigned, interp, writable, files) = world.core.calls[1]
+        (_v, module, head, pages, sha, cdir, swapped,
+         allow_unsigned, interp, writable) = world.core.calls[1]
         assert module == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
         blob = open(main, "rb").read()
         assert blob.startswith(head) and len(head) < len(blob)
         assert pages == 3 and cdir == cart["path"] and swapped is True
-        # the cart's reads take the store's gate, as every store access does
-        assert gate is ws._with_sd
         # a console that never turned Unknown sources on loads signed modules only
         assert allow_unsigned is False
         assert interp is False         # a module by this console's own name -- AOT
-        # the cart declares no writable paths; its files are kept beside the
-        # store, under the same gate
+        # the cart declares no writable paths; its files are moycore's C
         assert writable is None
-        assert files.dir == os.path.dirname(cart["path"]).rsplit("/", 1)[0] \
-            + "/written/" + os.path.basename(cart["path"])[:-4]
-        assert files.gate is ws._with_sd
         assert not run.interp
         assert run.interp_cause is None
         assert sha == hashlib.sha256(blob).hexdigest()
@@ -1805,21 +1853,17 @@ def test_a_compiled_cart_opens_on_a_console_with_no_vm(tmp_path):
 
 def test_the_cart_s_writable_paths_reach_the_binding_joined(tmp_path):
     """The manifest's "writable" entries go to wasm_open as one string, NUL
-    between them, which moycore hands libmoy's binding as its list; the
-    store is the cart's, beside the carts store, with the page's keeper when
-    the console has one (moy-spec SPEC.md 16.12)."""
+    between them, which moycore hands libmoy's binding as its list (moy-spec
+    SPEC.md 16.12); the store is moycore's C, so nothing of it crosses."""
     cart, _main = _compiled(tmp_path)
     cart["writable"] = ["saves/", "options.cfg"]
     world = _wasm_world()
     try:
         ws = FakeWs(project=_CartProject(cart), pmem=FakePmem())
-        keep = object()
-        ws.cart_keep = keep
         world.mod.WasmRun(ws, make_ns(), None)
         call = world.core.calls[1]
         assert call[0] == "wasm_open"
-        assert call[10] == "saves/\0options.cfg"
-        assert call[11].keep is keep and call[11].id == "hello"
+        assert len(call) == 10 and call[9] == "saves/\0options.cfg"
     finally:
         world.close()
 
@@ -1836,7 +1880,7 @@ def test_the_load_asks_the_engine_what_unknown_sources_says_now(tmp_path):
             ws.unknown_sources = on
             world.mod.WasmRun(ws, make_ns(), None)
             assert world.core.calls[1][0] == "wasm_open"
-            assert world.core.calls[1][8] is on
+            assert world.core.calls[1][7] is on
         finally:
             world.close()
 
@@ -1860,9 +1904,9 @@ def test_an_unsigned_refusal_retries_on_the_interpreter(tmp_path):
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 2
         assert opens[0][1] == cart["path"] + "/main.esp32s3.f%s.aot" % format_version()
-        assert opens[0][9] is False            # AOT, tried first
+        assert opens[0][8] is False            # AOT, tried first
         assert opens[1][1] == main             # the retry is main.wasm itself
-        assert opens[1][9] is True              # on the interpreter
+        assert opens[1][8] is True              # on the interpreter
         assert world.core.closes == 0
     finally:
         world.close()
@@ -1883,7 +1927,7 @@ def test_a_cart_with_no_module_for_this_chip_runs_on_the_interpreter(tmp_path):
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
         assert opens[0][1] == main
-        assert opens[0][9] is True
+        assert opens[0][8] is True
         assert "run_begin" in world.core.verbs()
     finally:
         world.close()
@@ -1911,8 +1955,8 @@ def test_an_engine_with_no_compiled_tier_runs_main_wasm_at_its_full_speed(tmp_pa
         assert not run.interp and run.interp_cause is None
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
         assert len(opens) == 1
-        (_v, module, head, pages, sha, _cdir, _sw, _gate, _unknown, interp,
-         _writable, _files) = opens[0]
+        (_v, module, head, pages, sha, _cdir, _sw, _unknown, interp,
+         _writable) = opens[0]
         assert module == main and sha is None and interp is True
         assert open(main, "rb").read().startswith(head) and pages == 3
     finally:
@@ -1964,7 +2008,7 @@ def test_a_module_this_firmware_cannot_link_reads_as_the_firmware(tmp_path):
         run = world.mod.WasmRun(ws, make_ns(), None)
         assert run.interp and run.interp_cause == "firmware"
         opens = [c for c in world.core.calls if c[0] == "wasm_open"]
-        assert [o[9] for o in opens] == [False, True]
+        assert [o[8] for o in opens] == [False, True]
         assert opens[1][1] == main
     finally:
         world.close()
@@ -2180,25 +2224,6 @@ class DirectColourCanvas:
     presents_palette_frames = False
 
 
-class FakeAlloc(types.ModuleType):
-    MEMORY_SPIRAM = 1
-    MEMORY_DMA = 2
-
-    def __init__(self, room=True):
-        super().__init__("moy_alloc")
-        self.room = room
-        self.log = []
-
-    def alloc(self, n, caps):
-        self.log.append(("alloc", n, caps))
-        if not self.room:
-            raise MemoryError("no PSRAM")
-        return bytearray(n)
-
-    def free(self, buf):
-        self.log.append(("free", len(buf)))
-
-
 class FenceComp:
     def __init__(self, log):
         self.log = log
@@ -2278,36 +2303,40 @@ def test_the_cart_frame_forwards_to_the_binding(tmp_path):
 
 
 def test_the_scratch_is_the_runs_and_freed_once_nothing_reads_it(tmp_path):
+    """The frame fold's scratch is a BUF row of the glass (a SCRATCH, the
+    kernel's): grown by replacing it, given back at the run's close only
+    after every fence that could still be reading it."""
+    import types
     world = _wasm_world()
-    alloc = FakeAlloc()
-    saved = sys.modules.get("moy_alloc", KeyError)
-    sys.modules["moy_alloc"] = alloc
     try:
+        g = world.mod._glass
         cf = world.mod.CartFrame(320, 240)
-        log = alloc.log
+        log = []
         cf.close(FenceComp(log))
         assert log == []                    # nothing taken: nothing to wait on
         a = cf.scratch(77440)
-        assert log == [("alloc", 77440, 3)]
+        ba = cf._scratch_b
+        assert len(a) == 77440 and ba.live and ba.role == g.ROLE_SCRATCH
         assert cf.scratch(1000) is a        # big enough: the same buffer
         b = cf.scratch(154240)              # a blit565 frame wants more
-        assert b is not a and len(b) == 154240
-        assert log[1:] == [("free", 77440), ("alloc", 154240, 3)]
-        del log[:]
+        assert b is not a and len(b) == 154240 and not ba.live
+        bb = cf._scratch_b
         del world.core.calls[:]
         cf.close(FenceComp(log))
-        assert log == [("fold_fence",), ("snap_fence",), ("disarm",),
-                       ("free", 154240)]
+        assert log == [("fold_fence",), ("snap_fence",), ("disarm",)]
+        assert not bb.live
         # ...and the last frame shown went into the canvas before its copy
         # was let go: from here on the canvas is all that holds the game.
         assert world.core.calls == [("frame_settle",)]
-        alloc.room = False
+
+        def refuse(n, role, owner=0):
+            raise MemoryError
+        world.mod._glass = types.SimpleNamespace(buf=refuse,
+                                                 ROLE_SCRATCH=g.ROLE_SCRATCH,
+                                                 ORIGIN_HEAP=g.ORIGIN_HEAP)
         assert cf.scratch(10) is None       # no PSRAM: the caller settles
+        world.mod._glass = g
     finally:
-        if saved is KeyError:
-            del sys.modules["moy_alloc"]
-        else:
-            sys.modules["moy_alloc"] = saved
         world.close()
 
 
@@ -2378,9 +2407,6 @@ def test_a_frame_the_cart_did_not_replace_is_shown_again_from_the_scratch(tmp_pa
     take() hands back that frame's copy in the scratch, so the flush shows it
     again rather than a canvas nothing wrote."""
     world = _wasm_world()
-    alloc = FakeAlloc()
-    saved = sys.modules.get("moy_alloc", KeyError)
-    sys.modules["moy_alloc"] = alloc
     try:
         cf = world.mod.CartFrame(4, 2)
         assert cf.take() is None                     # nothing owed, nothing shown
@@ -2396,8 +2422,4 @@ def test_a_frame_the_cart_did_not_replace_is_shown_again_from_the_scratch(tmp_pa
         world.core.kept = False                      # a verb wrote the canvas
         assert cf.take() is None
     finally:
-        if saved is KeyError:
-            del sys.modules["moy_alloc"]
-        else:
-            sys.modules["moy_alloc"] = saved
         world.close()

@@ -26,7 +26,7 @@ from runtime.host_canvas import make_canvas                      # noqa: E402
 TIERS = ((320, 240, 1), (480, 320, 1), (800, 480, 3), (1024, 600, 2))
 
 
-def _cart(name="brick_siege"):
+def _cart(name="moybyte.brick_siege"):
     """A real seed cart's sheet + tilemap: drawn art and a drawn level, which
     is what a parity claim about tile pixels needs."""
     from runtime.editors import SpriteSheet, TileMap
@@ -63,7 +63,7 @@ def _both(w, h, draw_ref, draw_new):
 
 
 def _pair(cell, cam_x=0, cam_y=0, nx=None, ny=None, x0=14, y0=32,
-          clip=None, cart="brick_siege"):
+          clip=None, cart="moybyte.brick_siege"):
     sheet, tm = _cart(cart)
     nx = tm.w - cam_x if nx is None else nx
     ny = tm.h - cam_y if ny is None else ny
@@ -123,5 +123,5 @@ def test_the_clip_rect_cuts_both_the_same_way():
 
 
 def test_a_second_cart_with_different_art_agrees_too():
-    ref, new = _pair(8, cart="platformer")
+    ref, new = _pair(8, cart="moybyte.hop_quest")
     assert ref == new

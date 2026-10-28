@@ -21,6 +21,7 @@ A kid defines a reusable block ("define NAME p1 p2 ..." with a body) and calls i
 
 import ast
 from pathlib import Path
+from ws_helpers import shelf, select_on_home  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -270,7 +271,7 @@ def test_bad_custom_block_names_raise_blockerror():
 
 def test_myblocks_category_present_and_colored():
     assert blocks.CAT_PROCS in blocks.categories()
-    assert blocks.CAT_PROCS in blocks.CATEGORY_COLOR
+    assert "block_" + blocks.CAT_PROCS in _content_roles()
     # proc_def + call live in the My Blocks category
     assert set(blocks.blocks_in_category(blocks.CAT_PROCS)) == {"proc_def", "call"}
 
@@ -415,11 +416,8 @@ def _ws_with_block_cart(tmp_path, title="Custom Block Cart"):
     root = str(tmp_path / "carts")
     ws = host_app.build_workstation(root)
     moy_carts.create(title, root, type="game")
-    ws.launcher.items = moy_carts.scan(root)
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
+    ws.launcher.items = shelf(root)
+    select_on_home(ws, title)
     ws.open()
     return ws
 
@@ -483,3 +481,8 @@ def test_ui_proc_menu_adds_an_input(tmp_path):
     bui.blk_kbd["entry"].text = "size"
     bui._blk_kbd_commit()
     assert blocks.proc_params(pd) == ["size"]
+
+
+def _content_roles():
+    from runtime import chrome
+    return chrome.theme_content("night")

@@ -2,7 +2,8 @@
 
 The Waveshare 7B (#58) and the Guition 10.1" (#220) run the same console on
 the same silicon over the same shared tier -- `native/p4/` (moy_dsi, moy_ppa,
-moy_ble_hid, moy_c6), `device/dsi_panel.py`, `device/p4_canvas.py` -- and the
+moy_c6), the kernel's DSI compositors (`native/moy_glass`),
+`device/p4_canvas.py` -- and the
 boot itself is every console board's (`device/desktop_spine.py`). What is the
 P4 tier's, and lives here once for both boards:
 
@@ -13,8 +14,11 @@ P4 tier's, and lives here once for both boards:
     Library;
   * a BLE HID keyboard over the companion C6 is the console's keyboard, and
     the C6 has an updater of its own (Settings -> UPGRADE C6 RADIO);
-  * the deferred present (#58 composite-overlap) runs before the canvases
-    re-point, and the PPA's overlap counters ride the PERF line;
+  * the cart store is the TF card when one mounts and the board's internal
+    flash when not (`device/card_store.py`), the slot being SDMMC slot 0 on
+    LDO channel 4 on both boards;
+  * the deferred present (#58 composite-overlap) is the kernel loop's present
+    stage, and the PPA's overlap counters ride its PERF line;
   * three dev-channel extras: `bt` (the keyboard), `union` and `cache` (the
     windowed WM's two A/B levers).
 
@@ -22,11 +26,47 @@ A board passes what its own glass decides -- its name, its compositor, its
 touch driver, its constants -- and takes the rest.
 """
 
+from card_store import carts_loader
 from desktop_spine import build_desktop, bt_command
 from device_util import _ticks_ms, _ticks_diff
+from moy_input import kick
 from p4_canvas import P4SystemCanvas
+import wire_input
+import wire_links
 
-BLE_STORE = "/moy/ble_keyboard.json"   # the bond store lives beside the carts
+
+# The TF slot, wired the same on both boards: SDMMC slot 0 on GPIO39-44. (Slot 1
+# is the C6's transport; constructing it panics the board.) A card's store is
+# `moy_carts.CARTS_DIR`, the T-Deck's, so the system documents beside the carts
+# (system.json, wifi.json, shared.moygfx) land in /sd/moybyte and not at the
+# card's root.
+SD_SLOT = 0
+SD_CLK = 43
+SD_CMD = 44
+SD_DATA = (39, 40, 41, 42)
+SD_FREQ_KHZ = 20000
+SD_CARTS_ROOT = "/sd/moybyte/carts"
+# PMU_EXT_LDO_P1_0P2A: the register that owns LDO channel 4, which powers the
+# slot. Stock MicroPython never enables it, and without it the card times out
+# whether one is there or not.
+LDO4_REG = 0x501151D8
+
+
+def p4_card():
+    """The TF card as the store's own volume (native/moy_store's card over
+    moy_sd's SDMMC slot): LDO4 switched on (software-owned, tied to the 3.3V
+    rail, then powered), then the slot brought up once and never torn down,
+    so the store's FATFS outlives anything the VM frees. Raises when there is
+    no card."""
+    import time
+    import moy_sd
+    import moy_store
+    from machine import mem32
+    mem32[LDO4_REG] |= (1 << 7) | (1 << 14)
+    mem32[LDO4_REG] |= (1 << 8)
+    time.sleep_ms(10)               # the card's supply settling before CMD0
+    sectors = moy_sd.mmc(SD_SLOT, SD_CLK, SD_CMD, SD_DATA, SD_FREQ_KHZ)
+    return moy_store.card(sectors)
 
 
 def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
@@ -34,15 +74,10 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
                 power_save_ms, game_wh=(320, 240), fps_cap=60):
     """Boot the shared console on a P4 board: launcher-as-desktop under
     WindowedWM, this board's glass, its touch as the pointer, a BLE HID
-    keyboard over the companion C6, and carts on internal flash. Ctrl-C over
-    the board's REPL interrupts the loop."""
-    from ble_keyboard import BleHidKeyboard
-    from moybyte.input import InputState
+    keyboard over the companion C6, and carts on the TF card when one mounts
+    (`store_root`, on the board's internal flash, when not). Ctrl-C over the
+    board's REPL interrupts the loop."""
     from wm_windowed import WindowedWM
-    try:
-        from moy_c6_update import C6Updater
-    except ImportError:            # a build without the C6 updater: no Settings row
-        C6Updater = None
 
     comp = compositor()
     gfx = comp.gfx()
@@ -54,8 +89,7 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
     # register.
     print("%s PPA:" % name,
           "enabled" if P4SystemCanvas.enable_ppa() else "CPU-only")
-    inp = InputState()
-    keyboard = BleHidKeyboard(inp, store_path=BLE_STORE, auto_start=False)
+    inp, keyboard = wire_input.ble_keyboard_input()
 
     def _union_cmd(ws, parts, line):
         on = not (len(parts) == 2 and parts[1] == "0")
@@ -71,26 +105,19 @@ def run_desktop(name, link_id, compositor, set_backlight, touch_cls,
                       inputs=lambda: touch_cls(sys_canvas.w, sys_canvas.h),
                       keyboard=keyboard, seed_carts=seed_carts,
                       power_save_ms=power_save_ms, game_wh=game_wh,
+                      input_kinds=wire_input.TOUCH_BLE_INPUTS,
                       font_scale=font_scale,
                       panel_diagonal_in=panel_diagonal_in,
-                      store_root=store_root, ota_dir=ota_dir,
-                      wm=WindowedWM, c6_updater=C6Updater,
+                      load_carts=carts_loader(p4_card, seed_carts, SD_CARTS_ROOT,
+                                              store_root, ota_dir),
+                      wm=WindowedWM,
+                      c6_updater=wire_links.c6_updater_class(),
                       extras={"bt": bt_command(keyboard, comp),
                               "union": _union_cmd, "cache": _cache_cmd},
-                      overlap=comp.overlap_stats, fps_cap=fps_cap)
-    game = d.game
-    sys_canvas = d.sys_canvas
-
-    def _present():
-        # Present the PREVIOUS quiet game frame now (its async composite has
-        # been DMAing through the input poll): wait the DMA, switch scan-out
-        # to it, free the other buffer. No-op unless the last frame deferred.
-        # Must precede sync_back, which re-points at the freed buffer.
-        comp.present_pending()
-        game.sync_back()           # off-screen: contract no-op
-        sys_canvas.sync_back()     # double-buffer: re-point at the new BACK fb
-
-    return d.run(present=_present)
+                      fps_cap=fps_cap)
+    # The deferred present (#58 composite-overlap) is the kernel's stage
+    # (moy_glass's present_pending, before the canvases re-point).
+    return d.run()
 
 
 def run_touch_calibrate(name, compositor, set_backlight, touch_cls, knobs):
@@ -134,6 +161,7 @@ def run_touch_calibrate(name, compositor, set_backlight, touch_cls, knobs):
           % (name, touch.available, knobs(touch)))
     last_print = 0
     while True:
+        kick()
         tp = touch.poll()
         now = _ticks_ms()
         if tp is not None and (tp[2] or _ticks_diff(now, last_print) > 250):

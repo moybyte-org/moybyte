@@ -1,0 +1,1095 @@
+// moy_ui: the widget toolkit's bodies in C, with style and strings as data
+// (docs/kernel_toolkit_2026-10.md). This file is the style resolution: the
+// kinds, the states, each kind's (field, ink, edge) in each state resolved
+// against a theme's token row, and each kind's metric slots.
+// The data is style.json's, generated into moy_ui_tables.c
+// (tools/gen_ui_tables.py); nothing here holds a colour or a pad.
+//
+// A LOOK is the style resolved against one token row: per kind and state,
+// three palette indices, -1 for "paint nothing". A look flattens lazily, one
+// kind at a time, and again when its row is set. There are MOY_UI_LOOKS of
+// them, allocated once in PSRAM where a board has it: four for the Python
+// face's ring of theme dicts (the live theme, and the throwaway or preview
+// dicts a surface passes beside it), one for a compiled run, so no flatten
+// is shared between the VM's task and a run's session thread, and one for the
+// chrome the kernel draws over a run it drives (moy_chrome), which the shell
+// keeps on the theme it hands that chrome its inks from: a ring slot is
+// whichever theme was bound there last.
+//
+// The fallbacks are the Python toolkit's, never errors: an unknown kind
+// resolves as `row`, a state the kind does not name as its REST, a token the
+// theme does not hold through its alias chain to its fallback, or to -1.
+
+#ifndef MOY_UI_H
+#define MOY_UI_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "moy_text.h"
+#include "moy_ui_tables.h"
+
+enum { MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3, MOY_UI_FULL = 4 };
+
+typedef struct { int16_t x, y, w, h; } moy_ui_box_t;
+
+#define MOY_UI_ABSENT INT32_MIN     // a token the theme does not hold
+#define MOY_UI_LOOKS 6
+#define MOY_UI_LOOK_RUN 4           // the compiled run's look
+#define MOY_UI_LOOK_KERNEL 5        // the kernel's chrome's (ui_draw.kernel_look)
+
+// A kind's id by name: an unknown name is row's. kind_known: -1 instead.
+int moy_ui_kind(const char *name, size_t n);
+int moy_ui_kind_known(const char *name, size_t n);
+// `button(kind=...)`'s names -> the kind it draws as; an unknown one is "button".
+int moy_ui_button_kind(const char *name, size_t n);
+// A state's id by name, or -1.
+int moy_ui_state(const char *name, size_t n);
+
+// Point `look` at a token row (MOY_UI_TOKENS values, MOY_UI_ABSENT where the
+// theme is silent): its flatten starts over.
+int moy_ui_look_set(int look, const int32_t tokens[MOY_UI_TOKENS]);
+// (field, ink, edge) of `kind` in `state` under `look`, -1 for nothing. A
+// disabled state inks in the live theme's disabled ink where it names one.
+int moy_ui_colors(int look, int kind, int state, int16_t out[3]);
+// The live theme's disabled ink: its look's `disabled` leaf as placed (a
+// colour index; none, absent or off: -1), which every disabled part's ink is
+// -- below the ink and its dim, about 3:1 on the surface. Set with the theme.
+void moy_ui_set_disabled(int32_t v);
+int moy_ui_disabled(void);
+// The live theme's menu danger ink: its look's `danger_ink` leaf as placed (a
+// colour index; none, absent or off: -1), the ink a menu's danger row draws
+// its label and icon in -- held to text's contrast on the card. Where it
+// names none, a danger row takes the danger buttons' ink. Set with the theme.
+void moy_ui_set_danger_ink(int32_t v);
+int moy_ui_danger_ink(void);
+// A kind's own states (rest, hover, hot) whose (field, ink) misses the
+// contrast floor take its floor forms (style.json's "floors"), in order.
+
+// -- button kinds (docs/look_2026-10.md step 10) -------------------------------------
+//
+// `button(kind=...)`'s names are style.json's button_kinds, each drawn as a
+// style kind. The live theme's `buttons[kind]` and `app_buttons[app][kind]`
+// (MOY_THEME_BTN_LEAVES each, a colour placed in the live block, MOY_THEME_NONE
+// where silent) restyle them: an app's leaf, then the theme's, then, for a
+// leaf the kind takes from `normal` (DESIGN.md), normal's the same way, then
+// the style's. `app` NULL sets the theme's row.
+void moy_ui_buttons_clear(void);
+int moy_ui_buttons_set(const char *app, size_t n, int bkind,
+                       const int32_t leaves[MOY_THEME_BTN_LEAVES]);
+// The row of app `name`'s overrides, or -1 where the theme has none for it.
+int moy_ui_buttons_app(const char *name, size_t n);
+// The button kind (an index of moy_ui_button_kinds) style kind `kind` is, or -1.
+int moy_ui_button_of(int kind);
+// A button's resolved style in `state` for app row `app` (-1 none): its
+// (field, ink, edge), -1 for nothing; the ring width in pixels, the shape (an
+// index of the field's enum), the radius, the font (key, op) and the bevel,
+// -1 where silent (the style's).
+typedef struct {
+    int16_t c[3];
+    int8_t edge_w, shape, r, font, bevel;
+} moy_ui_btn_style_t;
+int moy_ui_button_style(int look, int kind, int state, int app, moy_ui_btn_style_t *out);
+
+// The metric slots of `kind` (its count in *n, 0: none).
+const int16_t *moy_ui_metrics(int kind, int *n);
+
+// A token of `look`'s row: its palette index, or -1 where the theme is silent.
+int moy_ui_token(int look, int token);
+// The sprite sheet's slots under `look` (style.json's theme.sprite_slots
+// resolved against its row when the row is set): MOY_THEME_SPRITE_SLOTS
+// palette indices, -1 for transparent. NULL for no look.
+const int16_t *moy_ui_sprite_slots(int look);
+
+// -- the theme's shape: surfaces, metrics, text effects ----------------------------
+//
+// A SURFACE (docs/theming_2026-09.md §4.4) is one line of text in a theme,
+// compiled once by the loader (moy_theme.c) into a record: an edge, a fill and
+// its two colours, an optional border and an optional shadow. A colour is a
+// TERM: a palette index (0-63), a token of the look's row
+// (MOY_UI_TERM_TOKEN), or MOY_UI_TERM_STYLE, the part's own field (a fill) or
+// edge (a border) as the style resolves it.
+enum {
+    MOY_UI_EDGE_FLAT = 0, MOY_UI_EDGE_RAISED = 1, MOY_UI_EDGE_SUNKEN = 2,
+    MOY_UI_EDGE_ETCHED = 3, MOY_UI_EDGE_BEVEL2 = 4,
+};
+// MOY_UI_FILL_STYLE: no fill clause, the part's own field.
+enum {
+    MOY_UI_FILL_STYLE = 0, MOY_UI_FILL_SOLID = 1, MOY_UI_FILL_DITHER = 2,
+    MOY_UI_FILL_PINSTRIPE = 3, MOY_UI_FILL_GRADIENT = 4,
+};
+enum { MOY_UI_SURF_BORDER = 1, MOY_UI_SURF_SHADOW = 2 };
+#define MOY_UI_SHADOW 2             // a surface's shadow depth in pixels (D1's hard shadow)
+#define MOY_UI_TERM_STYLE INT8_MIN
+#define MOY_UI_TERM_TOKEN(t) ((int8_t)(-1 - (t)))
+typedef struct {
+    uint8_t edge, fill, flags;
+    int8_t a, b, line;              // the fill's colours (b: a pattern's second); the border's
+} moy_ui_surface_t;
+
+// A theme's shape, resolved once (moy_theme_shape): its metrics, each part's
+// text effect and surface per state ({effect, role} with {0, 0xff} for none,
+// {0, MOY_UI_FX_NAMED_NONE} for a `none` the theme names, which a chain stops at;
+// a stid, 0 for none, else 1 + its record in `surf`), parts and states as
+// the theme names them (MOY_THEME_PARTS: the kinds, then the chrome's parts).
+#define MOY_UI_STIDS 64
+#define MOY_UI_FRAME_FIELDS 6
+#define MOY_UI_FX_NAMED_NONE 0xfd
+#define MOY_UI_SHAPE_NAME 25        // a theme's name, NUL-terminated (moy_theme.h's max + 1)
+typedef struct {
+    int8_t metric[MOY_THEME_METRICS];
+    uint8_t n_surf, n_fx;
+    uint8_t effect[MOY_THEME_PARTS][MOY_THEME_STATES][2];
+    uint8_t stid[MOY_THEME_PARTS][MOY_THEME_STATES];
+    moy_ui_surface_t surf[MOY_UI_STIDS];
+    // The window frame (moy_ui_frame): [0] the style + 1, [1] the title's
+    // alignment + 1, [2..5] the buttons' letters in order; 0 where the theme
+    // is silent, which draws the style's own (a silent style is classic).
+    uint8_t frame[MOY_UI_FRAME_FIELDS];
+    // The theme the shape is of ("" for the empty one): what a library of its
+    // own (the host's compiled-app library) compares to install the same.
+    char name[MOY_UI_SHAPE_NAME];
+} moy_ui_shape_t;
+extern const int moy_ui_shape_size;     // sizeof, for the bindings' layout check
+// The shape of a theme that names nothing: metrics 0, no effect, no surface.
+void moy_ui_shape_clear(moy_ui_shape_t *sh);
+// Install the shape every primitive draws with (NULL: the empty one), one
+// for the process. Each state a part leaves unnamed takes what its chain
+// (style.json's theme.chain) reaches, here, once.
+int moy_ui_shape_use(const moy_ui_shape_t *sh);
+const moy_ui_shape_t *moy_ui_shape(void);
+// The font each role's text draws in (docs/theming_2026-09.md §4.7), the
+// roles in style.json's theme.font_roles order: `key` and `op` are the
+// faces a button kind's `font` leaf names (a theme's buttons[kind].font),
+// `result` a display's large figure. A role draws in petme128 until a font
+// is installed for it, and again once that font is freed.
+enum {
+    MOY_UI_FONT_UI = 0, MOY_UI_FONT_TITLE = 1, MOY_UI_FONT_MONO = 2, MOY_UI_FONT_CAPTION = 3,
+    MOY_UI_FONT_KEY = 4, MOY_UI_FONT_OP = 5, MOY_UI_FONT_RESULT = 6
+};
+// Install `font` (an id moy_font_load gave, or 0 for petme128) for `role`:
+// 1, or 0 for an unknown role or font, which installs nothing.
+int moy_ui_font_use(int role, uint32_t font);
+// The font `role` draws in, its metrics into *out.
+uint32_t moy_ui_font(int role, moy_font_info_t *out);
+// The app-cart boundary (§4.7): while a cart's code runs, every role draws in
+// petme128 and so does the print font (moy_text.h), which comes back when the
+// cart's code returns, and a colour index is masked to 0..63 (a cart's
+// colour is its index modulo 64) where the shell's reaches the theme's block
+// at 64..127 (moy_canvas.h). Answers whether it was on.
+int moy_ui_cart_text(int on);
+// What a colour index is masked with now: 127, or 63 inside the boundary.
+int moy_ui_cmask(void);
+// The index a palette row is read at for a colour `ci`: 127-masked, and inside
+// the boundary a block colour (64..127, the theme's own) is its nearest MOY64,
+// where the mask alone read it as index 0..63 (black for the page's ground).
+int moy_ui_pidx(int ci);
+// The shell's print font (moy_text_print_font_use), the one put aside while a
+// cart's code runs: the font it replaced, or -1 for one not loaded.
+int64_t moy_ui_print_font(uint32_t font);
+// The record and the effect `part` paints in `state` under an installed
+// shape: NULL / 0 where it names none.
+const moy_ui_surface_t *moy_ui_shape_surface(const moy_ui_shape_t *sh, int part, int state);
+int moy_ui_shape_effect(const moy_ui_shape_t *sh, int part, int state, int *role);
+// The readability check of a pattern fill (docs/theming_2026-09.md §7): each
+// part and state of `sh` whose surface is a dither or a pinstripe, its label's
+// ink in `look` against both of the pattern's colours on theme.contrast. The
+// first `cap` (part, state) pairs that miss go to `out`; answers how many miss.
+int moy_ui_pattern_unreadable(int look, const moy_ui_shape_t *sh, uint8_t (*out)[2], int cap);
+
+// The painter (moy_ui_paint.c): surface `sf` into box `b` of a target, its
+// terms resolved through `look` (`field` and `edge` stand for
+// MOY_UI_TERM_STYLE; -1 paints nothing), its outline cut by the corner mask
+// of `radius` (0-3). Never draws outside the box. Answers the fills it made.
+int moy_ui_paint_surface(const moy_text_target_t *t, const uint16_t pal[128], int look,
+                         moy_ui_box_t b, const moy_ui_surface_t *sf, int field, int edge,
+                         int radius);
+
+// -- glyphs (moy_ui_glyph.c) ----------------------------------------------------
+
+// A glyph's id by name, or -1 (draws nothing: the caller's label stays).
+int moy_ui_glyph_id(const char *name, size_t n);
+// Draw glyph `g` centred in the rect (x, y, w, h), each glyph pixel a
+// `scale` square, into a target. Returns the spans filled (a span is one
+// fill, as the canvas counts them).
+int moy_ui_glyph_draw(const moy_text_target_t *t, int g, int x, int y, int w, int h,
+                      uint16_t col, int scale);
+
+// -- the primitives (moy_ui_draw.c) ----------------------------------------------
+//
+// Each takes a sink, a box, a kind id and the widget's state flags, then its
+// content, and draws what the Python body it replaced drew, op for op
+// (tests/ui_twin.py is that body). Text is a UTF-8 span; a glyph is a glyph id
+// or -1; a colour override is an index, -1 for "paint nothing", or
+// MOY_UI_FROM_STYLE; a geometry knob left to the style is MOY_UI_DEFAULT.
+
+typedef struct { const uint8_t *p; uint16_t n; } moy_ui_span_t;
+
+// A sink: where a primitive draws, always through a canvas row (`dst`). ROW:
+// a canvas row of the glass, named by its CANVAS handle (moy_ui_sink_row
+// checks it). RUN: a compiled run's libmoy canvas lent as a row of its own,
+// its draw state saved, reset and restored around the call (moy_ui_wasm.h).
+// `fs` is the scale text draws at; `look` the look its colours resolve in.
+enum { MOY_UI_SINK_ROW = 1, MOY_UI_SINK_RUN = 2 };
+typedef struct {
+    uint8_t kind;
+    uint8_t fs;
+    uint8_t look;
+    void *dst;
+} moy_ui_sink_t;
+int moy_ui_sink_row(moy_ui_sink_t *s, uint32_t canvas, int look);
+// A glyph through a sink (moy_ui_glyph_draw's raster, a fill per span).
+int moy_ui_sink_glyph(const moy_ui_sink_t *s, int g, int x, int y, int w, int h, int ci,
+                      int scale);
+// The live theme's icon set for the parts the C draws (docs/look_2026-10.md
+// step 16): its mask files at 16 and 24 px (0 where it has none, the whole
+// set off when both are) and the glyph codes of close, maximize and
+// minimize, by MOY_UI_FB_*. runtime/iconsets.py installs it at a look change.
+void moy_ui_icons_use(uint32_t f16, uint32_t f24, const uint8_t codes[3]);
+// Moy's tile (slot 0, MOY_UI_ICON_MOY), which is pixel art in every theme: 16x16
+// palette indices, `clear` the one that draws nothing; NULL takes it away.
+// runtime/iconsets.py installs the pixel set's with the set. moy_ui_moy answers
+// it (NULL: none) and its clear index.
+#define MOY_UI_ICON_MOY 0
+void moy_ui_moy_use(const uint8_t px[256], int clear);
+const uint8_t *moy_ui_moy(int *clear);
+// Title button `id`'s icon, the set's largest mask that box `b` holds,
+// centred, in RGB565 `col`: 1 when drawn, 0 where no set is installed or
+// its font is gone (the caller draws its glyph).
+int moy_ui_icon_button(const moy_text_target_t *t, int id, moy_ui_box_t b, uint16_t col);
+#define MOY_UI_ICON_FIRST 0x21          // slot 0's byte in a mask file; slot n's is FIRST + n
+// The icon set's slot named `name` (tools/make_icons.py's order; `gear`,
+// `batt` and `edit` are aliases of settings, battery and pencil), -1 none.
+int moy_ui_icon_slot(const uint8_t *name, size_t n);
+// Icon slot `slot`'s name, NULL past the last.
+const char *moy_ui_icon_name(int slot);
+// The glyph table's glyph named `name` or by an icon slot's alias, -1 none.
+int moy_ui_icon_glyph(const uint8_t *name, size_t n);
+// The live set's mask file at 24 px (`size24`) or 16 px, 0 where it has none.
+uint32_t moy_ui_icon_font(int size24);
+// An icon in square box `b` in colour index `ci`: the live set's mask of
+// `slot`, the largest that `b` holds, centred, else glyph `glyph` at the
+// font scale `fs`. 1 when drawn.
+int moy_ui_icon_in(const moy_ui_sink_t *s, int slot, int glyph, moy_ui_box_t b, int ci, int fs);
+// An icon mask through a sink (docs/look_2026-10.md step 16): the glyph at
+// index byte `code` of font `font` (an icon set's file, tools/make_icons.py;
+// moy_text_glyph, never decoded as text) at (x, y), the top left of its
+// square, blended in colour index `ci` at scale 1. MOY_UI_BAD for a font that
+// is not loaded or not version 2.
+int moy_ui_sink_mask(const moy_ui_sink_t *s, uint32_t font, int code, int x, int y, int ci);
+// Every primitive counts its entry: the gate's "one crossing per widget".
+void moy_ui_count_call(void);
+uint32_t moy_ui_calls(void);
+
+// -- depth (moy_ui_depth.c, docs/look_2026-10.md step 6) -------------------------
+//
+// The theme's look as the shapes draw it: radii, the shadow and the edges,
+// resolved once per theme and mode (moy_ui_depth_use) and read by the window
+// frame and the casts. A theme with no `look` takes the default's, flat
+// (moy_theme_look). Colours are look values (moy_theme.h): an index, a slot,
+// or RGB.
+typedef struct {
+    uint8_t win_r, card_r, key_r, corners, stepped, shadow, edges;
+    uint8_t frames;                 // the window frame is the depth's
+                                    // (moy_theme_look_frames)
+    uint16_t shadow_565;            // canonical RGB565
+    int16_t alpha, blur, dx, dy, back;  // alpha 0..255; back: a back window's share, %
+    int16_t line, line_back;        // win.frame's and win.frame_back's widths
+    int32_t line_c, line_back_c, body;
+    // The window's parts (step 13): win.header, .align, .controls, .icon,
+    // .rule, and its paints (a colour, or MOY_THEME_PAINT | a slot of the depth's
+    // own copy of the look's paints, moy_ui_depth.c).
+    uint8_t header, align, controls, icon, rule;
+    int32_t fill, fill_back, grad, grad_back;
+    // The bars' parts (step 14): the desk bar's and the handheld bar's style,
+    // height, paint, line and ink, the system button's tile, the current chip.
+    uint8_t bar_style, hh_style, bar_h, hh_h;
+    int16_t bar_line_w, hh_line_w;
+    int32_t bar_fill, bar_line_c, hh_fill, hh_line_c, bar_ink, bar_dim, hh_ink, hh_dim;
+    int32_t sys_fill, hh_sys_fill, chip_cur;
+    // The desk's icon tiles (step 25): `tile_r`, `tile_fill` (a paint),
+    // `tile_outline`.
+    uint8_t tile_r;
+    int16_t tile_line_w;
+    int32_t tile_fill, tile_line_c;
+    // A group card's frame (`card.frame`): its width (0: the depth's own
+    // rule) and look colour.
+    int16_t card_line;
+    int32_t card_line_c;
+    // The system button's frame (`bar.sys_line`, both bars): width (0: none)
+    // and look colour.
+    int16_t sys_line_w;
+    int32_t sys_line_c;
+} moy_ui_depth_t;
+// win.header's, win.controls' and the bars' styles, in style.json's order
+enum { MOY_UI_HEAD_PLAIN = 0, MOY_UI_HEAD_FILL = 1, MOY_UI_HEAD_BAR = 2, MOY_UI_HEAD_GRAD = 3 };
+enum {
+    MOY_UI_CTL_THREE = 0, MOY_UI_CTL_CLOSE = 1, MOY_UI_CTL_LIGHTS = 2, MOY_UI_CTL_XP = 3,
+    MOY_UI_CTL_AMIGA = 4, MOY_UI_CTL_ADW = 5,
+};
+enum { MOY_UI_HH_NONE = 0, MOY_UI_HH_FLAT = 1, MOY_UI_HH_GRAD = 2, MOY_UI_HH_GLASS = 3 };
+// The value bar across a focused window's top under `win.header: bar`, in pixels.
+#define MOY_UI_HEAD_BAR_H 4
+// A desk tile's soft shadow, in percent of the theme's strength.
+#define MOY_UI_TILE_SHADOW 35
+// The bars' parts under the depth (step 14): a desk bar's band and a
+// handheld bar's (`on` the band's edge-line side, a MOY_UI_BAND_*), the
+// system button's tile on each (`on`: its menu is open, the current mark
+// over the tile), a desk chip's field (`on`: the focused window's, the
+// raised chip under the current mark; else nothing), and a desk icon's tile
+// (step 25: `tile_fill`, else the raised surface, at `tile_r` on a 44-pixel
+// tile and in proportion on another, ringed by `tile_outline`, and without
+// one over the theme's soft shadow at MOY_UI_TILE_SHADOW percent). Answers
+// 0, drawing nothing, for an unknown part.
+enum {
+    MOY_UI_BARP_BAND = 0, MOY_UI_BARP_HH_BAND = 1, MOY_UI_BARP_SYS = 2, MOY_UI_BARP_HH_SYS = 3,
+    MOY_UI_BARP_CHIP = 4, MOY_UI_BARP_TILE = 5,
+};
+// Install theme `name`'s depth in a mode (light 1: its `light` look); NULL
+// installs the default's.
+void moy_ui_depth_use(const char *name, size_t n, int light);
+const moy_ui_depth_t *moy_ui_depth(void);
+// A shadow's size: the theme's, a smaller one (a quarter of the blur, half the
+// offset: a window being dragged), or none.
+enum { MOY_UI_UNDER_FULL = 0, MOY_UI_UNDER_SMALL = 1, MOY_UI_UNDER_NONE = 2 };
+enum { MOY_UI_CAST_WINDOW = 0, MOY_UI_CAST_CARD = 1, MOY_UI_CAST_KEY = 2 };
+// A w x h window's frame geometry under the depth: [0] its corners' radius,
+// [1] its foot (the rows under the content its bottom corners need), [2..5]
+// how far its shadow at `mode`'s size reaches left, up, right and down. All
+// zero unless the depth draws the frame (`frames`).
+#define MOY_UI_GEOM 6
+void moy_ui_frame_geom(int w, int h, int th, int active, int mode, int out[MOY_UI_GEOM]);
+// The frame's own pixels under the depth (moy_ui_frame draws it): the strip,
+// the sides and the foot inside the rounded outline, the ring, the rule; with
+// `matte`, the columns as wide as the foot inside each side as well.
+void moy_ui_depth_frame(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int matte);
+// The token a title draws in under the depth's header: the value ink on a
+// focused `fill` header, the chrome ink, the dim chrome ink behind.
+int moy_ui_depth_title_ink(int active);
+// The slot the window's line icon takes left of its title (win.icon), a
+// square `th` * 20 / 44 on a side, past the back chevron where `btns` has
+// one; 0 where the frame draws no icon.
+int moy_ui_frame_icon(moy_ui_box_t w, int th, int btns, moy_ui_box_t *slot);
+// What a window leaves to the layer under it: its shadow at `mode`'s size and
+// its outline's partly covered pixels, blended over what that layer just
+// painted (runtime/wm_desk.py draws it, clipped to what it repainted).
+int moy_ui_frame_under(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active, int mode);
+// The same, onto the pixels window `o` (title strip `oth`, focused `oactive`)
+// paints opaque -- its frame and content, never its outline's fringe or the
+// corners its arcs leave -- within the clip: what a window above casts over a
+// window under it that has just repainted.
+int moy_ui_frame_under_onto(const moy_ui_sink_t *s, moy_ui_box_t w, int th, int active,
+                            int mode, moy_ui_box_t o, int oth, int oactive);
+// The shadow box `b` casts as a part (MOY_UI_CAST_*), its own pixels left
+// alone. Answers whether the theme casts one.
+int moy_ui_cast(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int mode);
+// The theme's soft shadow under box b at radius r, `k` (0..255) of its
+// alpha, its own pixels left alone: a badge's or a toast's. Answers whether
+// the theme casts one.
+int moy_ui_soft(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int k);
+
+// -- the marks (moy_ui_depth.c; docs/media/look_2026-10/DESIGN.md, the marks) ----
+//
+// Focus and current are theme properties the engine draws: `focus` by the
+// part's size class (a CARD 48 px and up, a SMALL part under 28 px both ways,
+// any other a PART), `current` as a plate, a fill or a bar. They resolve with
+// the depth (moy_ui_depth_use) from the look's focus.*, current.* and
+// sel_back. Focus is drawn only while the marks are ACTIVE: the shell clears that while
+// a window behind draws, so a screen shows one focus mark, in the focused
+// window. `drawn` counts the focus marks drawn, for the nets.
+enum { MOY_UI_MARK_PART = 0, MOY_UI_MARK_CARD = 1, MOY_UI_MARK_SMALL = 2, MOY_UI_MARK_AUTO = 3 };
+// A mark's flags: AFTER the part's content (a lifted card's rim), BACK in a
+// window behind, a current bar at the SIDE of a row rather than under it.
+// INK draws nothing and answers only the ink (a part's CONTENT phase); AGAIN
+// draws a focus mark once more under a clip and counts no mark; RING draws
+// the theme's `focus.ring` whatever its focus style, and counts no mark (a
+// cursor: the sprite editor's) unless COUNT says it is the focus mark (a part
+// whose fill would hide the theme's own mark). TOP and FOOT: the box is a
+// card's first or last row, and a mark that fills it rounds those corners as
+// the card's, by the radius given. KEEP: the current content keeps its own
+// colours (a code line's), so an opaque current plate beside a row is the
+// row's outline instead. SELECTED: the card the screen describes while focus
+// is elsewhere or does not draw (touch): its card mark draws whatever the
+// shell says of focus, as a current mark -- no rim, and no focus mark counted.
+// PILL: the pill, whatever the theme's focus style -- a plate of the mark's
+// colour under the part's content, and AFTER it a ring two units wide on the
+// box's edge and the theme's `focus.outline` round it -- the mark of a part
+// on a bar (an OS widget, a tab of the home's), whose own ink stays.
+enum {
+    MOY_UI_MARK_AFTER = 1, MOY_UI_MARK_BACK = 2, MOY_UI_MARK_SIDE = 4, MOY_UI_MARK_INK = 8,
+    MOY_UI_MARK_AGAIN = 16, MOY_UI_MARK_RING = 32, MOY_UI_MARK_COUNT = 64,
+    MOY_UI_MARK_TOP = 128, MOY_UI_MARK_FOOT = 256, MOY_UI_MARK_KEEP = 512,
+    MOY_UI_MARK_SELECTED = 1024, MOY_UI_MARK_PILL = 2048,
+};
+// focus.style's and current.style's values, in style.json's order
+enum {
+    MOY_UI_FOCUS_RING = 0, MOY_UI_FOCUS_PLATE = 1, MOY_UI_FOCUS_LIFT = 2, MOY_UI_FOCUS_EDGE = 3,
+    MOY_UI_FOCUS_UNDERLINE = 4, MOY_UI_FOCUS_INVERT = 5,
+};
+enum { MOY_UI_CUR_BAR = 0, MOY_UI_CUR_PLATE = 1, MOY_UI_CUR_FILL = 2 };
+// current.row's: how a row's current mark draws -- the style's own (under the
+// plate style the plate), the row's outline, which leaves the row's ground
+// (and every code colour on it) as it is, or an underline under the row's
+// label (moy_ui_current_under), the mark a theme's parts wear as current
+enum { MOY_UI_CUR_ROW_PLATE = 0, MOY_UI_CUR_ROW_OUTLINE = 1, MOY_UI_CUR_ROW_UNDERLINE = 2 };
+typedef struct {
+    uint8_t active, dark, ink_accent;
+    uint8_t style[3];               // per class: PART, CARD, SMALL
+    uint8_t ring_alpha, plate_alpha, rim_alpha, cur_alpha, cur_style, outline_w, cur_row;
+    int16_t color, cur_color;       // tokens
+    int16_t cur_ink;                // the token the current content takes (-1: its own)
+    int16_t ring_w, ring_gap, grow, rise, edge_w, underline_w;
+    int32_t outline_c, rim_c, sel_back;     // look colours
+    uint32_t drawn;
+} moy_ui_marks_t;
+const moy_ui_marks_t *moy_ui_marks(void);
+// Whether focus draws: the shell's word (it clears it while a window behind
+// draws, or a menu holds the keys), and never while the input in use is
+// touch, as on a phone -- the marks' `active` is the two together, and
+// moy_ui_marks_shown the shell's word alone. moy_ui_set_input refreshes it.
+void moy_ui_marks_active(int active);
+int moy_ui_marks_shown(void);
+void moy_ui_marks_refresh(void);
+// The focus marks drawn since the last reset.
+uint32_t moy_ui_marks_drawn(int reset);
+// How far class `cls`'s focus mark reaches past its box's top edge (0: inside it).
+int moy_ui_mark_reach(int cls);
+// The size class of box `b` at scale fs, or `cls` where it names one.
+int moy_ui_mark_class(moy_ui_box_t b, int cls, int fs);
+// The focus mark on box `b` (corner radius r), drawn after the part's fill
+// and before its content; a lifted card's rim is a second call, AFTER its
+// content. *content gets the box the content draws in (a lifted card's,
+// grown and raised), *ink the colour index the content takes (-1: its own).
+int moy_ui_focus(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int flags, int fs,
+                 moy_ui_box_t *content, int *ink);
+// The current mark under box `b`'s content; *ink as moy_ui_focus's.
+int moy_ui_current(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int fs, int *ink);
+// Whether a row's current mark is an underline under its label
+// (current.row `underline`): the row draws it with moy_ui_current_under,
+// across the label's columns `b.x`..`b.x + b.w`, at the foot of the row `b`.
+int moy_ui_current_rows_under(void);
+int moy_ui_current_under(const moy_ui_sink_t *s, moy_ui_box_t b, int fs);
+// The two as a primitive draws them, inside its own crossing.
+int moy_ui_focus_in(const moy_ui_sink_t *s, moy_ui_box_t b, int cls, int r, int flags, int fs,
+                    moy_ui_box_t *content, int *ink, int crossing);
+int moy_ui_current_in(const moy_ui_sink_t *s, moy_ui_box_t b, int r, int flags, int fs, int *ink,
+                      int crossing);
+
+#define MOY_UI_DEFAULT INT16_MIN
+#define MOY_UI_FROM_STYLE (-2)
+
+enum {
+    MOY_UI_F_ON = 1, MOY_UI_F_HOT = 2, MOY_UI_F_DISABLED = 4, MOY_UI_F_EDGE = 8,
+    MOY_UI_F_BAND = 16, MOY_UI_F_EDGE_LAST = 32, MOY_UI_F_LABEL = 64, MOY_UI_F_ICON = 128,
+    MOY_UI_F_GLYPH = 256, MOY_UI_F_FOCUS = 512, MOY_UI_F_LEAD = 1024, MOY_UI_F_WRAP = 2048,
+};
+// A widget whose caller draws an icon image (or its own glyph) between the
+// frame and the content draws in two calls, FRAME then CONTENT; every other
+// call is ALL.
+enum { MOY_UI_PHASE_FRAME = 1, MOY_UI_PHASE_CONTENT = 2, MOY_UI_PHASE_ALL = 3 };
+
+// The six-state ladder: flags' on/hot/disabled, and `interact` (PRESSED,
+// HOVER or -1) from the pointer pump.
+int moy_ui_state_of(int flags, int interact);
+// Floor division, as Python's `//` (C's `/` truncates).
+int moy_ui_fdiv(int a, int b);
+
+typedef struct {
+    moy_ui_span_t label, value;     // value.p NULL: no value column
+    int16_t glyph;                  // its id, or -1 (with F_GLYPH: a slot the caller fills)
+    int16_t glyph_size, glyph_ink, value_ink;
+    int16_t pad, pad_right, text_dy;
+    int16_t scale, fs;              // the label's width scale; the geometry's font scale
+    int16_t colors[3];
+} moy_ui_row_t;
+int moy_ui_row(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
+               const moy_ui_row_t *r, int phase);
+
+typedef struct {
+    moy_ui_span_t label;            // drawn when F_LABEL
+    int16_t glyph;
+    int16_t pad, caption_h, band_fill, band_ink, text_dx, text_dy, fs;
+    int16_t colors[3];
+} moy_ui_cell_t;
+// Also answers the art box, the caller's picture's place.
+int moy_ui_cell(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
+                const moy_ui_cell_t *k, int phase, moy_ui_box_t *art);
+
+// Text in a box: truncated to fit at a codepoint, placed by `align`,
+// centred vertically. Answers the drawn width.
+int moy_ui_label(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int ink, int align);
+
+// What a label meets (moy_text.h's paint, docs/look_2026-10.md step 4): `bg`
+// the colour index the caller has filled the whole box with (-1: not known,
+// the glyph lane reads), and a shadow in colour index `shadow` (-1: none) at
+// `shadow_a` (1..255) of the coverage, (dx, dy) pixels at the font scale
+// from the text. moy_ui_label is this with neither.
+typedef struct { int16_t bg, shadow, shadow_a, dx, dy; } moy_ui_label_paint_t;
+int moy_ui_label_paint(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int ink,
+                       int align, const moy_ui_label_paint_t *lp);
+
+// The scrollbar's thumb over a scroll state (0: everything fits), and the bar.
+int moy_ui_bar_rect(moy_ui_box_t view, int content, int offset, int horizontal, int fs,
+                    int bar_w, moy_ui_box_t *out);
+int moy_ui_scrollbar(const moy_ui_sink_t *s, moy_ui_box_t view, int content, int offset,
+                     int horizontal, int fs, int bar_w);
+// The overflow chevrons, '^' above and 'v' below.
+int moy_ui_scroll_cues(const moy_ui_sink_t *s, int ux, int uy, int dx, int dy, int can_up,
+                       int can_dn, int ci);
+// Fill the parts of `in` that `out` does not cover.
+int moy_ui_fill_uncovered(const moy_ui_sink_t *s, moy_ui_box_t in, moy_ui_box_t out, int ci);
+// A scrolling list: `count` rows of `items` (NUL-separated UTF-8 in `len`
+// bytes), `row_h` apart, scrolled by `offset`, `sel` the selected row, each a
+// `kind` row clipped to the box, and the bar.
+int moy_ui_list(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const uint8_t *items,
+                size_t len, int count, int row_h, int offset, int sel, int fs, int bar_w);
+
+// -- buttons and frames ---------------------------------------------------------------
+
+typedef struct {
+    moy_ui_span_t label;
+    int16_t glyph;                  // its id, or -1 (with F_GLYPH: a slot the caller fills)
+    int16_t fs;
+    int16_t colors[3];              // an override of the kind's, MOY_UI_FROM_STYLE each where none
+    int16_t app;                    // button: its app's row of overrides, or -1
+    int16_t icon;                   // button, with F_ICON: an icon set's slot it draws (its
+                                    // glyph where the set has none), or -1: the caller's
+} moy_ui_button_t;
+// A button: the field, its rings, the icon or glyph, the label (centred by
+// the style; in the `key` or `op` role's face where the kind's font leaf
+// names it, a face is installed for it and it covers the label, else the
+// ui role's). button_x: where its icon or glyph lands beside a ui-face
+// label, for a caller's own.
+int moy_ui_button(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
+                  const moy_ui_button_t *k, int phase);
+int moy_ui_button_x(moy_ui_box_t b, int flags, moy_ui_span_t label, int fs);
+// A chip: a glyph, when it has one, REPLACES its label.
+int moy_ui_chip(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags, int interact,
+                const moy_ui_button_t *k, int phase);
+// The tab ladder's chips (`labels` NUL-separated), every tab icon-only when the
+// labelled row would not fit; the count placed. One tab, `ink` its inactive ink.
+int moy_ui_tab_rects(moy_ui_box_t r, const uint8_t *labels, size_t len, int count, int fs,
+                     int gap, moy_ui_box_t *out, int *labels_on);
+int moy_ui_tab(const moy_ui_sink_t *s, moy_ui_box_t r, int active, int labels_on,
+               moy_ui_span_t label, int ink, int fs, int phase);
+// The status band: its items (NUL-separated) left to right while they fit.
+int moy_ui_status(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                  int count, int fs);
+// The game-canvas family: caller-coloured, theme-free.
+int moy_ui_game_btn(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, int fill_c,
+                    int fs);
+int moy_ui_game_icon_btn(const moy_ui_sink_t *s, moy_ui_box_t b, int g, moy_ui_span_t label,
+                         int fill_c, int fs, int phase);
+int moy_ui_mini_btn(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, int fill_c,
+                    int lx, int ly);
+// A toolbar band; `*ink` is the label ink that reads on what it painted.
+int moy_ui_toolbar(const moy_ui_sink_t *s, moy_ui_box_t b, int *ink);
+int moy_ui_dialog(const moy_ui_sink_t *s, moy_ui_box_t b, int ring, int fill_c);
+// `colors` NULL: the style's (field, ring, ink, placeholder ink, caret).
+int moy_ui_text_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t,
+                      moy_ui_span_t hint, const int16_t colors[5], int fs);
+moy_ui_box_t moy_ui_inset(moy_ui_box_t r, int dx, int dy);
+// A panel; answers its content box (inside the border, below a title strip).
+int moy_ui_panel(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
+                 moy_ui_box_t *content);
+// Paint `part`'s sprite in `state` (theme part and state ids) into the box
+// when the role sheet sets its cell, else its surface, as a primitive paints
+// its frame. *painted: 0 when the part has neither there (nothing drawn).
+int moy_ui_paint(const moy_ui_sink_t *s, moy_ui_box_t b, int part, int state, int *painted);
+// A theme part's id by name, or -1.
+int moy_ui_part(const char *name, size_t n);
+
+// -- window frames (docs/theming_2026-09.md §4.5) ---------------------------------------
+//
+// A window's decoration in the built-in style the installed shape chooses
+// (style.json's theme.frames), with its title alignment and button order.
+// Every style draws inside one footprint, the one the WMs' damage, hit-tests
+// and content rects are built on: the window box's one-pixel ring, the
+// `title_h` strip under its top edge, and the three-pixel drop shadow right
+// of and below the box. The `window.title` and `window.button` surfaces a
+// theme names are painted in place of the style's own; the title takes
+// `window.title`'s text effect. The role sheet's `window` 9-slice replaces
+// the ring's top row and the strip, and a title button's sprite its surface
+// and glyph (docs/theming_2026-09.md §4.6). States are MOY_THEME_S_ACTIVE /
+// _INACTIVE.
+enum { MOY_UI_FB_CLOSE = 0, MOY_UI_FB_MAX = 1, MOY_UI_FB_MIN = 2, MOY_UI_FB_BACK = 3 };
+// What a full-screen row draws in maximise's place (moy_ui_icon_button's id;
+// never a layout's).
+#define MOY_UI_FB_RESTORE 4
+// A frame's optional buttons (`btns`): a minimise, and the back chevron at
+// the head of the strip, before the icon and the title, that a window whose
+// app has opened a page of it shows (docs/look_2026-10.md step 27a).
+// MOY_UI_FRAME_MATTE rides the same word and is no button: the window's
+// content stands in from its sides by the foot (the game window's matte,
+// WindowChrome._win_edge), so the body paints those columns too, as it
+// paints the foot. MOY_UI_FRAME_FULL is a full-screen window's
+// row (docs/media/look_2026-10/MAXIMISE_VARIANTS.md, V2): the strip's title
+// and buttons alone, on the ground already under them -- no ring, strip,
+// line or shadow -- and maximise drawn as restore.
+#define MOY_UI_FRAME_MIN 1
+#define MOY_UI_FRAME_BACK 2
+#define MOY_UI_FRAME_MATTE 8
+#define MOY_UI_FRAME_FULL 16
+#define MOY_UI_FRAME_BUTTONS 4
+typedef struct {
+    moy_ui_box_t box;
+    uint8_t id;                     // MOY_UI_FB_*
+    uint8_t right;                  // 1: in the group right of the title
+} moy_ui_frame_button_t;
+// The strip's buttons as the frame draws them, left to right; the count.
+int moy_ui_frame_buttons(moy_ui_box_t win, int title_h, moy_ui_span_t title, int btns, int fs,
+                         moy_ui_frame_button_t out[MOY_UI_FRAME_BUTTONS]);
+int moy_ui_frame(const moy_ui_sink_t *s, moy_ui_box_t win, int title_h, moy_ui_span_t title,
+                 int active, int btns, int fs);
+// The bar's band in the frame's style (`bar`'s surface where the theme names
+// one): `light` is a window's light toolbar; `side` the band's edge line, on
+// the side that faces the content (a top bar's bottom row, a left bar's
+// right column); a Win9x frame shades both long sides instead.
+enum { MOY_UI_BAND_BOTTOM = 0, MOY_UI_BAND_TOP = 1, MOY_UI_BAND_RIGHT = 2, MOY_UI_BAND_LEFT = 3 };
+int moy_ui_frame_band(const moy_ui_sink_t *s, moy_ui_box_t b, int light, int side);
+// A bar part under the depth (MOY_UI_BARP_*); 0 for an unknown part.
+int moy_ui_bar_part(const moy_ui_sink_t *s, int part, moy_ui_box_t b, int on);
+// A desk icon's tile (MOY_UI_BARP_TILE) filled with look colour `fill`, an
+// app's colour of the look's `tiles` (step 26b), or with MOY_THEME_NONE the
+// tile's own fill.
+int moy_ui_bar_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int32_t fill);
+// What a modal dims under it (docs/look_2026-10.md, D-01): box `b` washed in
+// the look's `scrim` colour at its alpha (black at 40% where it is silent).
+int moy_ui_scrim(const moy_ui_sink_t *s, moy_ui_box_t b);
+// The scrim over the pixels of `src` instead of the sink's, each result
+// stored to `also` as well (moy_shape_shadow_io); either NULL: the sink's
+// own pixels, no second store. Both are `len` bytes laid out as the sink's
+// canvas: MOY_UI_BAD where one is shorter than it.
+int moy_ui_scrim_io(const moy_ui_sink_t *s, moy_ui_box_t b, const void *src, void *also,
+                    size_t len);
+
+// -- rect algebra (int32: a scrolled content can outgrow a box) ---------------------------
+
+void moy_ui_inset32(const int32_t r[4], int32_t dx, int32_t dy, int32_t out[4]);
+enum { MOY_UI_CUT_TOP = 0, MOY_UI_CUT_BOTTOM = 1, MOY_UI_CUT_LEFT = 2, MOY_UI_CUT_RIGHT = 3 };
+void moy_ui_cut(const int32_t r[4], int side, int32_t n, int32_t band[4], int32_t rest[4]);
+// n equal spans across (horizontal) or down r, the slack to the last; the count.
+int moy_ui_split(const int32_t r[4], int n, int32_t gap, int horizontal, int32_t (*out)[4],
+                 int cap);
+void moy_ui_row_content(const int32_t r[4], int fs, int32_t pad, int32_t pad_right, int icon,
+                        int glyph, int32_t glyph_size, int32_t out[4]);
+void moy_ui_cell_art(const int32_t r[4], int fs, int32_t pad, int32_t caption_h,
+                     int32_t out[4]);
+
+// -- interaction over caller-owned state (moy_ui_interact.c) ------------------------------
+//
+// ScrollRegion and DragTap's rules as pure functions over buffers the
+// CALLER owns (a bytearray inside the Python object, a span of a compiled
+// app's memory); the kernel holds nothing between calls.
+
+// A scroll state's motion; the offset, the content extent and the view are
+// the caller's, passed in. Single-precision, as the boards' MicroPython
+// computes; every dt is injected, never read from a clock. One `tick`
+// advances whichever motion is live:
+//
+// - a FLING coasts from a drag's release velocity, decaying by FRICTION a
+//   ms, and comes to rest below STOP_VEL or dead at either clamp;
+// - a GLIDE eases the offset to a target in time -- half the distance left
+//   every GLIDE_HALF_MS, at least GLIDE_MIN px a frame, so it lands on the
+//   target exactly -- and a new target while gliding re-aims from where the
+//   offset is; a SLIDE is a glide over a fixed SLIDE_MS, eased out (the
+//   handheld home's carousel). A frame advances a glide by 1 to
+//   FRAME_MS_MAX ms of its dt, so a stall is never a jump;
+// - a DRAG catches either.
+//
+// A step moves the target by whole steps from the target while a glide is
+// live, else from the offset: the view is never more than one glide behind.
+#define MOY_UI_FRICTION 0.995f      // per-ms decay: a fling coasts ~1 s
+#define MOY_UI_MIN_FLING 0.15f      // px/ms: a release slower than this is a stop
+#define MOY_UI_STOP_VEL 0.02f       // px/ms: coasting below this comes to rest
+#define MOY_UI_VEL_EMA 0.5f         // the release velocity's EMA weight
+#define MOY_UI_GLIDE_HALF_MS 45.0f  // a glide halves the distance left in this long
+#define MOY_UI_GLIDE_MIN 2          // ...by at least this many px a frame
+#define MOY_UI_SLIDE_MS 200.0f      // a slide reaches its target in this long
+#define MOY_UI_FRAME_MS_MAX 200     // the most of one frame's dt a glide takes
+enum {
+    MOY_UI_SCROLL_DRAG = 1, MOY_UI_SCROLL_FLING = 2, MOY_UI_SCROLL_GLIDE = 4,
+    MOY_UI_SCROLL_SLIDE = 8
+};
+typedef struct {
+    float vel, foff;
+    int32_t drag;
+    int32_t flags;
+    int32_t target;                 // a glide's target offset
+    int32_t from;                   // a slide's start
+    float ms;                       // a slide's time so far
+} moy_ui_scroll_t;
+void moy_ui_scroll_stop(moy_ui_scroll_t *s);
+void moy_ui_scroll_drag_start(moy_ui_scroll_t *s, int32_t p);
+int moy_ui_scroll_drag_move(moy_ui_scroll_t *s, int32_t p, float dt_ms, int32_t *offset,
+                            int32_t content, int32_t extent);
+void moy_ui_scroll_drag_end(moy_ui_scroll_t *s, int32_t offset, int32_t content,
+                            int32_t extent);
+// Aim a glide (a slide where `slide`) from `offset` at `target`, clamped to
+// the content; a target where the offset is ends any glide. Stops a fling.
+void moy_ui_scroll_glide_to(moy_ui_scroll_t *s, int32_t offset, int32_t target, int slide,
+                            int32_t content, int32_t extent);
+// Move the glide's target `n` steps of `size` (from the target while a glide
+// is live, else from `offset`); answers the target.
+int32_t moy_ui_scroll_step(moy_ui_scroll_t *s, int32_t offset, int32_t n, int32_t size,
+                           int32_t content, int32_t extent);
+// 1 while a fling coasts or a glide eases (the surface moves on its own).
+int moy_ui_scroll_moving(const moy_ui_scroll_t *s);
+// Advance the live motion by dt_ms: 1 when one was live (the offset in
+// *offset), 0 when nothing moves.
+int moy_ui_scroll_tick(moy_ui_scroll_t *s, float dt_ms, int32_t *offset, int32_t content,
+                       int32_t extent);
+// End the live motion where it was going: a glide's offset is its target, a
+// fling stops where it is. 1 when one was live.
+int moy_ui_scroll_land(moy_ui_scroll_t *s, int32_t *offset);
+
+// Press/drag/release over a region: a press in the view arms a tap; travel
+// past `slop` turns it into a scroll; a clean release fires it; a press that
+// caught a fling never taps.
+enum { MOY_UI_TAP_PRESS = 1, MOY_UI_TAP_DRAGGING = 2, MOY_UI_TAP_CAUGHT = 4 };
+typedef struct {
+    int32_t px, py;
+    int32_t flags;
+} moy_ui_dragtap_t;
+int moy_ui_dragtap_frame(moy_ui_dragtap_t *t, moy_ui_scroll_t *s, const int32_t view[4],
+                         int horizontal, int32_t px, int32_t py, int click, int down,
+                         int32_t slop, float dt_ms, int32_t *offset, int32_t content,
+                         int32_t *tx, int32_t *ty);
+
+// -- the parts (moy_ui_parts.c; docs/look_2026-10.md step 12) --------------------------
+//
+// The rows the public UI API's verbs draw (docs/ui_api_2026-10.md): a label
+// and, at the right, a value of one KIND -- an info's text, a link's text and
+// chevron, a cycle's text between chevrons, a segmented control's options, a
+// swatch picker's dots, a toggle's On/Off word and switch, a slider's number
+// and track -- or a tab row's tabs from the left, on the page's ground or on
+// a group's card; the group's caption
+// and card; and a strip of keycap hints. A row's FOCUS is the theme's focus
+// mark; a seg's and a tab row's current option wear the current mark, a
+// swatch picker's current dot a ring in the row's ink
+// off a gap of its ground; a tab row's are in the label's face. Geometry is
+// style.json's `group` and `value_row` metrics at font scale `fs`, a `_desk`
+// slot where `desk` is set; colours are tokens of the sink's look; text is
+// the `ui` role's (the label, an info's, a link's and a cycle's value, what a
+// hint does) and the `caption` role's (a seg's options, captions, key
+// legends), petme128 on a run. A progress row a row and its bar tall or
+// taller sets its label and percent on a line, the bar across under them.
+// The page's ground and the hints take MOY_UI_WINDOW in `desk` beside the
+// size class (MOY_UI_DESK): the page lies in a window's body.
+enum { MOY_UI_DESK = 1, MOY_UI_WINDOW = 2 };
+// moy_ui_api_begin's: the keys are another surface's this frame (a cart's
+// editor handle holds them), so no stop holds focus.
+#define MOY_UI_ELSEWHERE 4
+// moy_ui_api_begin's flags: the key word is a press edge already -- the host
+// hands each typed key over once, on its press, and begins no frame for its
+// release -- so a key equal to the last one is a new press.
+#define MOY_UI_KEY_EDGE 16
+enum {
+    MOY_UI_V_LABEL = 0, MOY_UI_V_INFO = 1, MOY_UI_V_LINK = 2, MOY_UI_V_CYCLE = 3,
+    MOY_UI_V_SEG = 4, MOY_UI_V_SWATCH = 5, MOY_UI_V_TOGGLE = 6, MOY_UI_V_SLIDER = 7,
+    MOY_UI_V_PROGRESS = 8, MOY_UI_V_TABS = 9,
+};
+typedef struct {
+    moy_ui_span_t label, value;     // seg: value holds the options, NUL-separated
+    const uint8_t *colours;         // swatch: `n` colours, 0xRRGGBB as little-endian words
+    int16_t n, cur;                 // seg, swatch: the count and the current (-1 none);
+                                    // toggle: cur is on
+    int32_t v, lo, hi;              // slider; progress: v of hi done (lo 0)
+    int16_t fs, desk, card;         // card: on a group's card
+    int16_t icon_slot, icon_glyph;  // the icon before the label (-1 none)
+    int16_t steps;                  // slider: a segment per step, no number;
+                                    // progress: a count, its label alone (no percent)
+    int16_t kind;                   // MOY_UI_VROW_*: a danger row inks its label and icon
+                                    // in the menu danger ink
+    int16_t first;                  // the first row on its card (under the card's top frame)
+    int16_t keys;                   // info: the value is the keys the row answers to, and
+                                    // one the hints draw as a sign (`left`, `right`, `up`,
+                                    // `down`, `enter`) draws as that sign
+} moy_ui_vrow_t;
+enum { MOY_UI_VROW_PLAIN = 0, MOY_UI_VROW_DANGER = 1 };
+int moy_ui_vrow(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, int flags,
+                const moy_ui_vrow_t *r);
+// What x on row box b picks: a seg's, a swatch picker's or a tab row's option (-1 none),
+// a slider's value (lo..hi), -1 for another kind.
+int32_t moy_ui_vrow_at(const moy_ui_sink_t *s, moy_ui_box_t b, int kind, const moy_ui_vrow_t *r,
+                       int x);
+// A table (ui.table): its columns' x and width over box b, the picture
+// column first where its header is empty, a column the first text column's
+// room drops 0 wide; `head` 1 where any header is named.
+#define MOY_UI_TABLE_COLS 8
+typedef struct {
+    int16_t n, pic, head;
+    int16_t x[MOY_UI_TABLE_COLS], w[MOY_UI_TABLE_COLS];
+} moy_ui_tgeo_t;
+// The NUL-separated fields of `p` in n bytes (a trailing NUL ends the last).
+int moy_ui_fields(const uint8_t *p, size_t n);
+// The geometry of a table of columns `cols` over every row's `cells` (both
+// NUL-separated, the cells row by row): the columns after the first text
+// column take their widest cell, right-aligned; it takes the rest, and where
+// that shows fewer than eleven characters the columns between it and the
+// last drop, the nearest the last first, then the last. Answers the dropped.
+int moy_ui_table_geo(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *cols, size_t cols_n,
+                     const uint8_t *cells, size_t cells_n, int fs, int desk, moy_ui_tgeo_t *g);
+// The header row in box b, and one row of `cells` (that row's alone): its
+// marks by flags' F_ON (current), F_FOCUS and F_DISABLED, the picture column's
+// icon by name (moy_ui_icon_slot, else the glyph table's), the first text
+// column cut with an ellipsis where the font has one.
+int moy_ui_table_head(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t *g,
+                      const uint8_t *cols, size_t cols_n, int fs, int desk);
+int moy_ui_table_row(const moy_ui_sink_t *s, moy_ui_box_t b, const moy_ui_tgeo_t *g,
+                     const uint8_t *cells, size_t cells_n, int flags, int fs, int desk);
+// A card of a card grid (ui.card): `b` the card, `pic` its picture's box.
+// Its current mark (F_ON) over the card, its focus mark (F_FOCUS) on the
+// picture -- a lifted card's grown and raised, *content where the app draws
+// it -- and its title and `sub` centred under the picture. *gnd is the
+// colour around the picture, which moy_ui_card_end cuts its corners to;
+// `desk` takes MOY_UI_WINDOW as the page's ground does.
+// `tone` (MOY_UI_TONE_*) is the sub line's ink: the dim ink, else `value`
+// or the danger ink. With F_WRAP a title wider than the card breaks at its
+// last word that fits onto a second line, where the card's foot holds it.
+int moy_ui_card(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_box_t pic, moy_ui_span_t title,
+                moy_ui_span_t sub, int flags, int fs, int desk, int tone, moy_ui_box_t *content,
+                uint16_t *gnd);
+// After the app drew into `content`: its corners cut to the card radius over
+// `gnd` and its ring, then a lifted picture's rim (F_FOCUS) round `pic`.
+int moy_ui_card_end(const moy_ui_sink_t *s, moy_ui_box_t pic, moy_ui_box_t content, int flags,
+                    uint16_t gnd, int fs, int desk);
+// A card's state over its picture `content` after the app drew it, before
+// moy_ui_card_end (ui.card's `badge` and `tone`): a picture whose cart the
+// console cannot take (MOY_UI_TONE_DANGER) veiled toward the ground `gnd`,
+// then icon `slot` (else glyph table `glyph`; both -1 none) on a `surface`
+// disc at its top right, in `value` or the danger ink. A locked card's
+// (MOY_UI_TONE_LOCKED) disc reads on the veiled tile: `surface` in a light
+// mode, `surface_alt` ringed in a dark one, the ground ringed under Contrast.
+int moy_ui_card_badge(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph,
+                      int tone, uint16_t gnd, int fs, int desk);
+
+// A card with no picture of its own (ui.card's `icon`): its picture box
+// `content` a tile tinted from `value`, icon `slot` (else `glyph`) on it in
+// `value`, its largest mask at the largest whole scale that fits half the tile;
+// under Contrast the tile is `value` and the icon `value_ink`. A locked card
+// (`tone` MOY_UI_TONE_LOCKED) is veiled: the tile `sunk` (a dark mode's
+// `surface_alt` half way to the ground; Contrast's the ground, ringed in the
+// dim ink) and the icon in the disabled ink.
+int moy_ui_card_blank(const moy_ui_sink_t *s, moy_ui_box_t content, int slot, int glyph,
+                      int tone, int fs, int desk);
+// A badge's tile on a card's surface (an unlock banner's, a popover's): the
+// blank card's tile in box b, its corners cut to radius `r` (at the scale)
+// toward `surface`, and a locked one's lock badge.
+int moy_ui_tile(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, int tone, int r,
+                int fs, int desk);
+// The unlock banner (docs/media/look_2026-10/GAPS.md 47): a card centred on
+// `cx` with its top at `y`, the badge's tile (icon `slot`, else `glyph`), the
+// line `head` in `value` and the badge's `name` in the title face; a secret's
+// with confetti bursting from its edges, `burst` (1..255) of the way out (0
+// none). *out is the card.
+int moy_ui_unlock(const moy_ui_sink_t *s, int cx, int y, moy_ui_span_t head, moy_ui_span_t name,
+                  int slot, int glyph, int burst, int fs, int desk, moy_ui_box_t *out);
+
+// The tones a line of text takes (ui.label's and ui.card's `tone`): the
+// part's ink, the dim ink, `value`, the danger ink (the look's `danger_ink`,
+// else the danger buttons' ink).
+enum { MOY_UI_TONE_INK = 0, MOY_UI_TONE_DIM = 1, MOY_UI_TONE_VALUE = 2, MOY_UI_TONE_DANGER = 3,
+       MOY_UI_TONE_LOCKED = 4 };
+// Text in box b from its top (ui.label's `wrap`, `lines`, `align`, `tone`
+// and `face`): in font `role`, broken at word breaks in b.w into at most
+// `lines` lines (0: one), an ellipsis after the last where the text runs on;
+// each line centred where `centre`; icon `slot` (else `glyph`; both -1 none)
+// before the first line in the text's ink, the lines beside it. A handheld's
+// lines stand a line less two pixels apart, a desk's a line. The height it
+// takes, drawn where `draw`.
+int moy_ui_text_block(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int role,
+                      int tone, int lines, int centre, int slot, int glyph, int fs, int desk,
+                      int draw);
+// An empty page's head (ui.empty), centred across b from its top: icon `slot`
+// (else `glyph`) on a disc of `value` mixed into the ground (`surface_alt` in
+// a dark look), `title` in the title role, then `lines` (NUL-separated, `n`
+// bytes) in the caption role's dim ink, each centred. The height it takes,
+// to a line's pitch under the last, drawn where `draw`.
+int moy_ui_empty(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph, moy_ui_span_t title,
+                 const uint8_t *lines, size_t n, int fs, int desk, int draw);
+// A toast (ui.toast): a pill in the ink's colour holding icon `slot` (else
+// `glyph`) and `text` in the ground's colour, centred across b with its
+// foot on b's foot; `flat` draws no soft shadow under it (a pill painted
+// once, or over a running game). Its box in *out.
+int moy_ui_toast(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t text, int slot, int glyph,
+                 int fs, int desk, int flat, moy_ui_box_t *out);
+// The perf HUD (GAPS 54), flat: the fps chip, a pill in the surface's
+// polarity with `fps` in the code face's digits and `words`' sixth ("fps"),
+// its bottom right at (right, bottom); with `detail` the breakdown's card
+// over it -- `words`' first ("Frame") and `frame` (tenths of a ms) over a
+// bar of the parts against a 33.3 ms frame, then a row a part, `parts`
+// (draw, flush, logic, idle in tenths of a ms) named by `words`' second to
+// fifth, the first three each a hue (Contrast's the ink solid, hatched and
+// an outline). `words` is NUL-separated, its seventh "ms". The box both
+// cover in *out; nothing drawn unless `draw`.
+int moy_ui_perf(const moy_ui_sink_t *s, int right, int bottom, int fps, const int16_t *parts,
+                int frame, int detail, moy_ui_span_t words, int fs, int desk, int draw,
+                moy_ui_box_t *out);
+// A month (ui.month) from box b's top: `title` in the title role, the
+// weekdays' initials `days` (seven letters) in the caption role's dim ink,
+// then the `n` days in seven columns from column `first` (0 Monday), the
+// weekend's in the dim ink and day `today` (0 none) bold on a disc of
+// `value`. With `chevrons` the head's right holds the previous and the next
+// month's chevrons, their boxes in chev[2]. moy_ui_month_h is its height
+// for `weeks` rows.
+int moy_ui_month_h(int weeks, int fs, int desk);
+int moy_ui_month(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title,
+                 moy_ui_span_t days, int first, int n, int today, int chevrons, int fs, int desk,
+                 moy_ui_box_t chev[2]);
+// A text field row (ui.field): its label, then the field to the row's right
+// showing the text's tail and, focused (F_FOCUS), the caret. On a group's
+// card (`card`) the label sits where a value row's does and the field is the
+// row's value, a slider's track wide at its right; elsewhere the field takes
+// the row from the label to its right. Focused, the row wears the focus mark
+// a value row does (`first`: the card's first row) and the field the focus
+// colour's ring. An empty field shows `hint` (n 0: none) in the disabled ink.
+int moy_ui_field(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t label, moy_ui_span_t text,
+                 moy_ui_span_t hint, int flags, int fs, int desk, int card, int first);
+// The height a field row takes outside a group (at least the stacked row's):
+// the field's box, its letters' ink with 3 pixels at the scale above and
+// below inside its ring, and room round it for its focus ring. In a group
+// the field fits the stacked row instead, two pixels at the scale clear of
+// the rules over and under it.
+int moy_ui_field_h(const moy_ui_sink_t *s, int fs, int desk);
+// A modal card (ui.dialog, ui.popover, the system's cards) in box b, flat:
+// a hard drop MOY_UI_DROP pixels at the scale under it in an opaque shade of
+// the ground (no soft shadow, no alpha), the surface and its edge
+// (Contrast's: the ink's ring two pixels at the scale, no drop); then its
+// title in the `title_h` rows under the card's padding.
+#define MOY_UI_DROP 2
+int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs, int desk,
+                 int title_h);
+int moy_ui_modal_band(int fs, int desk);
+// The radius of a modal card's corners at the scale: the rows it leaves at
+// the card's top and foot are the ones its rounding blends over what is under.
+int moy_ui_modal_round(int fs, int desk);
+// The width of text `t` in type role `role`'s font on the sink.
+int moy_ui_role_w(const moy_ui_sink_t *s, int role, moy_ui_span_t t);
+// A tool's part (ui.tool) in box b: flat but for its marks (`flags`
+// MOY_UI_F_ON, _FOCUS, _DISABLED; `interact` the pointer's state, -1 none),
+// its icon, and on the handheld its `word` under it in the caption face.
+int moy_ui_tool_draw(const moy_ui_sink_t *s, moy_ui_box_t b, int slot, int glyph,
+                     moy_ui_span_t word, int flags, int interact, int fs, int desk);
+// A line in the structure colour filling box b (ui.rule's, at ui.at's rect).
+int moy_ui_line(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk);
+// A tooltip: `t` on a plate in the ink, under box `at` (over it where `in`,
+// the surface, has no room under it), inside `in`.
+int moy_ui_tip_draw(const moy_ui_sink_t *s, moy_ui_box_t at, moy_ui_span_t t, moy_ui_box_t in,
+                    int fs, int desk);
+// A group's card (handheld) behind row box `row`: `card` is its x, width and
+// top; `first` rounds the card's top corners, else a rule heads the row. On
+// the desk (`desk`) the card is plain rules between rows.
+int moy_ui_group_band(const moy_ui_sink_t *s, moy_ui_box_t card, moy_ui_box_t row, int first,
+                      int fs, int desk);
+// The card's foot: its bottom corners rounded under the last row (`last`),
+// whose marks (`flags`' F_FOCUS and F_ON) draw again in them.
+int moy_ui_group_end(const moy_ui_sink_t *s, moy_ui_box_t card, moy_ui_box_t last, int flags,
+                     int fs, int desk);
+// The card's corner radius: the group metric, under the depth's card radius.
+int moy_ui_group_r(int fs);
+// A page's ground in box b: the `panel` colour, or in a window (`desk`'s
+// MOY_UI_WINDOW) the window's body as the frame paints it (the look's
+// `win.body`, else `surface`), its title (if any) a heading in the title
+// role over a panel strip's height. *content: where its rows go.
+int moy_ui_page_ground(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs,
+                       int desk, moy_ui_box_t *content);
+// A fade over box b, `b.h` rows from nothing to nearly colour `ci` (a look
+// colour), toward its bottom edge or, with `up`, its top: what says a list
+// goes on past that edge. MOY_UI_DEFAULT is the page's ground
+// (moy_ui_page_ground's colour, `desk` as there), MOY_UI_FADE_WELL a part's
+// well (moy_ui_well's fill), MOY_UI_FADE_CARD a modal's card (moy_ui_modal's).
+#define MOY_UI_FADE_WELL (-3)
+#define MOY_UI_FADE_CARD (-4)
+int moy_ui_fade(const moy_ui_sink_t *s, moy_ui_box_t b, int ci, int up, int fs, int desk);
+// A group's caption in band `b`.
+int moy_ui_caption(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t t, int fs, int desk);
+// A rule across band `b` (inside the group pad), one unit thick, centred in
+// its height: what parts a menu from the rows above it in a card.
+int moy_ui_rule(const moy_ui_sink_t *s, moy_ui_box_t b, int fs, int desk);
+// The input in use (docs/ui_api_2026-10.md, "Hints"): a desk keyboard, the
+// T-Deck's keyboard, a gamepad, or touch. The console sets it from the last
+// input used, among the inputs its board declares; it starts at the desk
+// keyboard. The hints draw the keys of the hint input: the input set, until a
+// touch is used, which leaves them on the keys before it
+// (moy_ui_set_hint_input), so a strip stays up under a finger on a board with
+// keys; touch alone (the hint input touch: no keys used yet) shows none.
+enum { MOY_UI_INPUT_KEYS = 0, MOY_UI_INPUT_TDECK, MOY_UI_INPUT_PAD, MOY_UI_INPUT_TOUCH,
+       MOY_UI_INPUTS };
+void moy_ui_set_input(int input);
+int moy_ui_input(void);
+// The input whose keys the hints draw; moy_ui_set_input sets it too.
+void moy_ui_set_hint_input(int input);
+int moy_ui_hint_input(void);
+// The hints' actions, which a pair names in place of its keys: confirm, back,
+// change (left and right), tabs (the previous and the next), menu (the
+// console's key), cancel (a field being edited: its text put back), the
+// sprite tab's operations: flip, rotate, shift, clear, copy and more (its
+// more menu), the home's search, move (the four directions: a cursor, a pan)
+// and scroll (up and down).
+// Answers the action `k` names, else -1: a key spelled out (`enter`, `Esc`)
+// names none and draws as written.
+enum { MOY_UI_ACT_CONFIRM = 0, MOY_UI_ACT_BACK, MOY_UI_ACT_CHANGE, MOY_UI_ACT_TABS,
+       MOY_UI_ACT_MENU, MOY_UI_ACT_CANCEL, MOY_UI_ACT_FLIP, MOY_UI_ACT_ROTATE,
+       MOY_UI_ACT_SHIFT, MOY_UI_ACT_CLEAR, MOY_UI_ACT_COPY, MOY_UI_ACT_MORE,
+       MOY_UI_ACT_SEARCH, MOY_UI_ACT_MOVE, MOY_UI_ACT_SCROLL, MOY_UI_ACTS };
+int moy_ui_hint_action(moy_ui_span_t k);
+// The keys input `input` does action `act` with (the hints' key spelling), or
+// "" where it has none.
+const char *moy_ui_hint_keys(int input, int act);
+// Whether key `k` spelled out is one input `input` moves with and so answers
+// no verb: W, A, S or D on the T-Deck (native/moy_input/moy_kbd.c, THE MOVE
+// KEYS). A hint pair or a menu row's key spelled so draws nothing there.
+int moy_ui_key_moves(int input, moy_ui_span_t k);
+// Keycap hints in band `b`, from its left: `items` NUL-separated pairs of the
+// keys and what they do. A pair's keys are an action (moy_ui_hint_action),
+// drawn as the keys of the input in use, or keys spelled out (space-separated;
+// `enter`, `left`, `right`, `up` and `down` draw as signs, any other as its
+// legend). An action the input has no key for draws nothing, and the input
+// touch draws no hints at all. The theme's `keycap` look styles the caps
+// (moy_ui_keycap); a one-glyph legend's cap is square. They lead in by
+// MOY_UI_HINT_LEAD at the scale, the handheld's the top bar's own margin (its
+// system button's and its clock's ink, 5 at the T-Deck's scale), so the bar
+// and the strip share one side margin.
+#define MOY_UI_HINT_LEAD(desk) ((desk) ? 8 : 5)
+int moy_ui_hints(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                 int fs, int desk);
+// The same hints, drawn when `draw`, with each pair's span across the band
+// (its first cap's left, its action's right) in `spans`, two a pair, up to
+// `cap` pairs: what a caller hit-tests and lays out by. A pair that draws
+// nothing spans nothing (x0 == x1). Answers the pairs: 0 under touch.
+int moy_ui_hints_at(const moy_ui_sink_t *s, moy_ui_box_t b, const uint8_t *items, size_t len,
+                    int fs, int desk, int draw, int16_t *spans, int cap);
+// Text in font `font` (a run's: petme128) at (x, y), its line's top, in
+// colour `col` (the buffer's word), inside a part's crossing: `table` text
+// is the string table's (moy_str.h), else a caller's. Answers its width.
+int moy_ui_text_in(const moy_ui_sink_t *s, uint32_t font, int table, moy_ui_span_t t, int x,
+                   int y, uint16_t col);
+// The look's `keycap` fields (moy_ui_depth_use reads them): look colours,
+// MOY_THEME_NONE where silent; alpha 0..255.
+typedef struct {
+    int32_t fill, border_c, ink;
+    int16_t alpha, border_w, r;
+} moy_ui_keycap_t;
+const moy_ui_keycap_t *moy_ui_keycap(void);
+// The look's display fields (moy_ui_depth_use reads them): `lcd_border`'s
+// width and look colour (MOY_THEME_NONE where silent), `lcd_bevel`
+// (MOY_UI_BEVEL_*) and `field.border`, a text field's outline at rest (a look
+// colour; MOY_THEME_NONE: the `border` role's).
+enum { MOY_UI_BEVEL_NONE = 0, MOY_UI_BEVEL_IN = 1, MOY_UI_BEVEL_OUT = 2 };
+typedef struct {
+    int32_t border_c;
+    int16_t border_w, bevel;
+    int32_t field_c;
+} moy_ui_display_t;
+const moy_ui_display_t *moy_ui_display(void);
+// A part's ground (ui.part): the display inset, the `lcd` role's fill
+// (`fill` in its place unless MOY_UI_FROM_STYLE), ringed by `lcd_border` or
+// bevelled by `lcd_bevel`, its corners the depth's key radius up to 8
+// pixels on the handheld and 10 on the desk, then
+// the marks `flags` holds: the current mark (MOY_UI_F_ON) and the focus mark
+// (MOY_UI_F_FOCUS), the theme's by size class.
+int moy_ui_well(const moy_ui_sink_t *s, moy_ui_box_t b, int flags, int fill, int fs,
+                int desk);
+
+#endif // MOY_UI_H

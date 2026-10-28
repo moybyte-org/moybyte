@@ -174,15 +174,16 @@ def test_the_p4_stages_the_windowed_tier_and_the_s3_does_not():
 
     Stated here as well as in `test_staging_closure.py` because this is the
     claim `docs/surface_model_v1.md` L6 rests on: `wm.py` and `console.py` are
-    frozen verbatim on the S3, so the windowed WM and its `surface` leaf must
-    not be reachable there at all.
+    frozen verbatim on the S3, so the windowed WM must not be reachable there
+    at all. (The surface table it signals is the kernel's, native/moy_glass,
+    since §15.)
     """
     tdeck = set(board_config.staged_modules(TDECK, ROOT))
     p4 = set(board_config.staged_modules(P4, ROOT))
     guition = set(board_config.staged_modules(GUITION, ROOT))
-    assert {"wm_windowed.py", "surface.py"} <= p4
-    assert not {"wm_windowed.py", "surface.py"} & tdeck
-    assert not {"wm_windowed.py", "surface.py"} & guition
+    assert "wm_windowed.py" in p4
+    assert "wm_windowed.py" not in tdeck | guition
+    assert "surface.py" not in tdeck | guition | p4
 
 
 def test_the_board_identity_matches_the_ota_stamp():
@@ -242,17 +243,19 @@ def test_the_panel_diagonal_is_declared_once_and_reaches_the_console():
         "%s. Read chrome_scale_floor's docstring before updating this."
         % sorted(b for b, v in declared.items() if v))
 
-    # ...and each number does the job it was declared for: the landscape glass
-    # the board composites onto floors the chrome a scale above its font.
-    for name, board_dir, glass in (("guition-s3", GUITION, (480, 320)),
-                                   ("guition-p4", GUITION_P4, (1280, 800)),
-                                   ("p4", P4, (1024, 600))):
+    # ...and each number does the job it was declared for: the handheld's
+    # glass floors its chrome a size above its font; the desks' glass makes
+    # them desks, whose 32px icons need no floor (layout_base.class_of).
+    for name, board_dir, glass, floor in (
+            ("guition-s3", GUITION, (480, 320), 2),
+            ("guition-p4", GUITION_P4, (1280, 800), 1),
+            ("p4", P4, (1024, 600), 1)):
         diag = declared[name]
         runtime_py = (board_dir / "modules" / "moy_runtime.py").read_text(
             encoding="utf-8")
         assert "PANEL_DIAGONAL_IN = %s" % diag in runtime_py, name
         assert "panel_diagonal_in=PANEL_DIAGONAL_IN" in runtime_py, name
-        assert chrome_scale_floor(glass[0], glass[1], diag) == 2, name
+        assert chrome_scale_floor(glass[0], glass[1], diag) == floor, name
 
     # The T-Deck's silence is the one that was ARGUED (2026-09-06): the owner
     # asked for the floor there, it was built and rendered, and it was declined
@@ -354,6 +357,50 @@ def test_every_native_take_names_a_module_and_says_why(board):
 CONSOLE_BOARDS = ("tdeck", "p4", "guition-s3", "guition-p4")
 
 
+def test_every_board_with_an_ota_slot_carries_its_headroom_floor():
+    """Globbed, not BOARDS: a board added without a floor would otherwise
+    build with no floor at all. The size guard is handed the value through
+    `board_config.py headroom-floor`, which refuses a missing one."""
+    found = {}
+    for toml in sorted((ROOT / "firmware").glob("*/board.toml")):
+        if not board_config.load(toml.parent).get("board", {}).get("ota"):
+            continue
+        ota, floor = board_config.headroom_floor(toml.parent)
+        assert floor >= 64 * 1024, "%s: a floor of %d bytes guards nothing" % (
+            ota, floor)
+        found[ota] = floor
+    assert set(found) >= {"tdeck", "p4", "guition_s3", "guition_p4",
+                          "xiao_zero"}, sorted(found)
+
+
+def test_a_board_without_a_floor_is_refused(tmp_path):
+    (tmp_path / "board.toml").write_text(
+        '[board]\nname = "x"\nota = "x"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="headroom_floor_kib"):
+        board_config.headroom_floor(tmp_path)
+    (tmp_path / "board.toml").write_text(
+        '[board]\nota = "x"\n[image]\nheadroom_floor_kib = "512"\n',
+        encoding="utf-8")
+    with pytest.raises(ValueError, match="positive integer"):
+        board_config.headroom_floor(tmp_path)
+    (tmp_path / "board.toml").write_text(
+        '[board]\nota = "x"\n[image]\nheadroom_floor_kib = 512\n',
+        encoding="utf-8")
+    assert board_config.headroom_floor(tmp_path) == ("x", 512 * 1024)
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "board_config.py"),
+                        "headroom-floor", str(tmp_path)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.split() == ["524288", "x"]
+
+
+def test_the_build_hands_the_size_guard_the_boards_floor():
+    lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text(encoding="utf-8")
+    collect = lib.partition("moybyte_build_and_collect() {")[2].partition("\n}")[0]
+    assert "headroom-floor" in collect
+    call = collect.partition("moybyte_app_size_guard")[2]
+    assert '"${floor}" "${board_id}"' in call.split("echo", 1)[0]
+
+
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_every_board_decides_the_wasm_engine(board):
     takes = board_config.native_takes(BOARDS[board])
@@ -363,6 +410,106 @@ def test_every_board_decides_the_wasm_engine(board):
     staged = "moy_wasm" in board_config.native_modules(BOARDS[board], ROOT)
     assert staged == (board in CONSOLE_BOARDS), (
         "%s: the wasm tier is on every console board or on none" % board)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_board_decides_the_kernel_entry(board):
+    """Taking native/moy_kernel hands app_main to the kernel
+    (docs/kernel_spine_2026-10.md §8): every ESP32 board takes it, the Zero
+    with a serial-only floor (docs/kernel_survival_2026-10.md section 6.5)."""
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert "moy_kernel" in takes or "moy_kernel" in denies, (
+        "%s/board.toml neither takes nor denies moy_kernel" % board)
+    staged = "moy_kernel" in board_config.native_modules(BOARDS[board], ROOT)
+    assert staged == (board in CONSOLE_BOARDS or "zero" in board), (
+        "%s: the kernel is the entry on every ESP32 board" % board)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_console_takes_the_player_and_the_zero_denies_it(board):
+    """native/moy_play is the kernel's Player (docs/kernel_cartpath_2026-10.md
+    §3): every console takes it; the Zero, which runs no carts, denies it."""
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert "moy_play" in takes or "moy_play" in denies, (
+        "%s/board.toml neither takes nor denies moy_play" % board)
+    staged = "moy_play" in board_config.native_modules(BOARDS[board], ROOT)
+    assert staged == (board in CONSOLE_BOARDS), (
+        "%s: the Player is on every console and only there" % board)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_console_takes_the_app_abi_and_the_zero_denies_it(board):
+    """native/moy_app is the app ABI's kernel half
+    (docs/kernel_appabi_2026-10.md): every console takes it; the Zero, which
+    runs no apps, denies it."""
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert "moy_app" in takes or "moy_app" in denies, (
+        "%s/board.toml neither takes nor denies moy_app" % board)
+    staged = "moy_app" in board_config.native_modules(BOARDS[board], ROOT)
+    assert staged == (board in CONSOLE_BOARDS), (
+        "%s: the app ABI is on every console and only there" % board)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_console_takes_the_toolkit_and_the_zero_denies_it(board):
+    """native/moy_ui is the widget toolkit (docs/kernel_toolkit_2026-10.md):
+    every console takes it; the Zero, which runs no apps, denies it."""
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert "moy_ui" in takes or "moy_ui" in denies, (
+        "%s/board.toml neither takes nor denies moy_ui" % board)
+    staged = "moy_ui" in board_config.native_modules(BOARDS[board], ROOT)
+    assert staged == (board in CONSOLE_BOARDS), (
+        "%s: the toolkit is on every console and only there" % board)
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_image_links_the_native_spine_and_no_board_names_a_twin(board):
+    """The spine is native on every image (docs/kernel_spine_2026-10.md): no
+    board declares a twin hook for it, and no image freezes a Python spine
+    (the twin is the suites' oracle, tests/spine_twin.py)."""
+    assert "MOY_SPINE_IMPL" not in board_config.impls(BOARDS[board])
+    assert "moy_spine.py" not in board_config.staged_modules(BOARDS[board], root=ROOT)
+    assert not (ROOT / "runtime" / "moy_spine.py").exists()
+
+
+def test_a_native_twin_the_board_names_is_py_or_c(tmp_path):
+    (tmp_path / "board.toml").write_text(
+        '[native]\n[native.impl]\nindex = "rust"\nwhy = "no"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="py or c"):
+        board_config.impls(tmp_path)
+
+
+def test_a_build_exports_a_boards_twin_and_the_environment_wins(tmp_path):
+    """The lib exports the board's [native.impl] hooks before anything reads
+    them, and a build that sets a hook itself keeps its own: a board naming
+    the index's Python twin freezes runtime/moy_index.py, and the
+    environment's `c` takes it out again."""
+    bd = tmp_path / "board"
+    bd.mkdir()
+    toml = (TDECK / "board.toml").read_text(encoding="utf-8")
+    (bd / "board.toml").write_text(
+        toml + '\n[native.impl]\nindex = "py"\nwhy = "the twin, for the test"\n',
+        encoding="utf-8")
+
+    def frozen(**env):
+        script = (
+            "set -euo pipefail\nsource tools/esp32_build_lib.sh\n"
+            "BUILD_PYTHON='%s' REPO_ROOT='%s' SCRIPT_DIR='%s'\n"
+            "moybyte_board_impls\n"
+            "echo \"hook=${MOY_INDEX_IMPL:-}\"\n"
+            "'%s' tools/board_config.py list '%s' | grep -c '^moy_index.py$' || true\n"
+            % (sys.executable, ROOT, bd, sys.executable, bd))
+        e = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), **env}
+        out = subprocess.run(["bash", "-c", script], cwd=str(ROOT), env=e,
+                             capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
+        return out.stdout.split()
+    assert frozen() == ["hook=py", "1"]                 # the board's twin, frozen
+    assert frozen(MOY_INDEX_IMPL="c") == ["hook=c", "0"]
 
 
 def test_a_module_both_taken_and_denied_is_refused(tmp_path):
@@ -417,20 +564,62 @@ def test_stage_native_produces_the_declared_tree(tmp_path, board):
     assert not (staged / "moy_stray").exists()
 
 
+def test_a_generated_file_is_not_staged_with_its_old_timestamp(
+        tmp_path, monkeypatch):
+    """A removed web bundle shipped as the old blob. The desktop build leaves
+    `moy_web_blob.gen.c` in `native/moy_web/` (here the empty table, written
+    long ago); the stager copied it with its mtime, the generator found its text
+    already right and left it, and ninja -- seeing a source older than the
+    object a previous board build made from the full blob -- kept that object.
+    The staged tree carries no generated file, so the generator writes a new
+    one and it is newer than any object built before it."""
+    import os
+    import time
+    from tools import gen_web_blob
+
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("MOYBYTE_REQUIRE_WEB_BUNDLE", "0")
+    root = tmp_path / "root"
+    shutil.copytree(ROOT / "native" / "moy_web", root / "native" / "moy_web")
+    empty = tmp_path / "no_dist"
+    empty.mkdir()
+    source = root / "native" / "moy_web" / "moy_web_blob.gen.c"
+    assert gen_web_blob.main(["--dist", str(empty), "--out", str(source),
+                              "--quiet"]) == 0
+    os.utime(source, (1, 1))
+
+    work = tmp_path / "board"
+    work.mkdir()
+    (work / "board.toml").write_text('[native.shared]\nsource = "native"\n',
+                                     encoding="utf-8")
+    assert board_config.stage_native(work, root, quiet=True) == ["moy_web"]
+    staged = work / "native" / ".staged" / "moy_web"
+    assert (staged / "modmoy_web.c").exists()
+    assert not (staged / "moy_web_blob.gen.c").exists(), \
+        "a generated file was staged with the mtime it was last written at"
+
+    object_built_at = time.time() - 100
+    out = staged / "moy_web_blob.gen.c"
+    assert gen_web_blob.main(["--dist", str(empty), "--out", str(out),
+                              "--quiet"]) == 0
+    assert out.stat().st_mtime > object_built_at, \
+        "the generated file is older than the object built before it"
+
+
 def test_the_p4_denies_exactly_its_missing_hardware():
-    """The P4's denials are the hand-cp list build.sh used to encode silently:
-    no SD in play, ES8311 audio still open (#82), and no banded flush at all --
-    its MIPI-DSI panel scans a PSRAM framebuffer continuously, so moy_flush's
-    feeder + bounce slots would be dead code and dead SRAM. The T-Deck denies
+    """The P4's one denial: no banded flush at all -- its MIPI-DSI panel scans
+    a PSRAM framebuffer continuously, so moy_flush's feeder + bounce slots
+    would be dead code and dead SRAM. Its ES8311 audio is moy_audio's (#82). Its card takes
+    moy_sd (SDMMC slot 0 under the store's card volume). The T-Deck denies
     nothing. If this changes, it should be because a board's hardware story
     changed -- update board.toml first, this pin second."""
-    assert sorted(board_config.native_denials(P4)) == [
-        "moy_audio", "moy_flush", "moy_sd"]
+    assert sorted(board_config.native_denials(P4)) == ["moy_flush"]
     assert board_config.native_denials(TDECK) == {}
-    # The Guition's two denials are bring-up staging decisions (SD is stage 4,
-    # audio stage 5 -- docs/board_ports_2026-08.md); each names its stage in
-    # board.toml. Update there first, this pin second.
-    assert sorted(board_config.native_denials(GUITION)) == ["moy_audio", "moy_sd"]
+    # The Guition's denial is a bring-up staging decision (audio is stage 5 --
+    # docs/board_ports_2026-08.md), named with its stage in board.toml; its
+    # card opens through moy_sd (the store's card volume). Update there first,
+    # this pin second.
+    assert sorted(board_config.native_denials(GUITION)) == ["moy_audio"]
 
 
 # -- the [flash]/[monitor] declaration (#202 Phase A) -------------------------
@@ -778,3 +967,43 @@ def test_the_partition_table_is_named_once(board):
         "%s/build.sh restates the partition table filename %r, which "
         "sdkconfig.board already has to name" % (board, csv))
     assert "${BOARD_PARTITION_CSV}" in sh
+
+
+def test_every_console_board_imports_its_frozen_modules_first():
+    """Each import walks `sys.path` in order, and MicroPython's default puts the
+    flash root ('') ahead of '.frozen': every frozen module paid a failed stat
+    of the flash per name first. The console boards' boot.py reorders it, and
+    this runs each one against the default path. The headless Zero keeps the
+    default."""
+    import types
+    consoles = [t.parent for t in ALL_DECLS
+                if board_config.load(t.parent)["board"]["tier"]
+                in ("handheld", "desktop")]
+    assert len(consoles) >= 4, consoles
+    for d in consoles:
+        fake_sys = types.SimpleNamespace(path=["", ".frozen", "/lib"])
+        mods = {"sys": fake_sys, "gc": types.SimpleNamespace(collect=lambda: 0)}
+        real_import = __import__
+
+        def _import(name, *a, **kw):
+            return mods[name] if name in mods else real_import(name, *a, **kw)
+
+        src = (d / "modules" / "boot.py").read_text(encoding="utf-8")
+        exec(compile(src, str(d / "boot.py"), "exec"),
+             {"__builtins__": dict(__builtins__ if isinstance(__builtins__, dict)
+                                   else vars(__builtins__),
+                                   __import__=_import, print=lambda *a: None)})
+        assert fake_sys.path == [".frozen", "", "/lib"], (d.name, fake_sys.path)
+
+
+# Sprint 3's kernel modules (docs/kernel_survival_2026-10.md section 2 item 6):
+# every board decides each in writing, and every console takes all three.
+@pytest.mark.parametrize("board", sorted(BOARDS))
+@pytest.mark.parametrize("module", ("moy_glass", "moy_input", "moy_net"))
+def test_every_board_decides_the_survival_modules(board, module):
+    takes = board_config.native_takes(BOARDS[board])
+    denies = board_config.native_denials(BOARDS[board])
+    assert module in takes or module in denies, (
+        "%s/board.toml neither takes nor denies %s" % (board, module))
+    if board in CONSOLE_BOARDS:
+        assert module in takes, "%s does not take %s" % (board, module)

@@ -45,8 +45,8 @@ def repo(tmp_path, monkeypatch):
     commit(main, "README", "hi\n", "first")
     (main / ".venv" / "bin").mkdir(parents=True)
     (main / ".venv" / "bin" / "python").write_text("venv")
-    (main / ".build" / "host_gfx").mkdir(parents=True)
-    (main / ".build" / "host_gfx" / "x.so").write_text("so")
+    (main / ".build" / "host").mkdir(parents=True)
+    (main / ".build" / "host" / "x.so").write_text("so")
     (main / "firmware" / "a" / ".build" / "esp-idf").mkdir(parents=True)
     (main / "firmware" / "a" / ".build" / "esp-idf" / "export.sh").write_text("")
     sub = tmp_path / "sublib"
@@ -78,7 +78,7 @@ def wt_path(main, name="wt"):
 def test_new_links_the_toolchains_and_caches(repo):
     assert new(repo) == 0
     wt = wt_path(repo)
-    for rel in (".venv", ".build/host_gfx", "firmware/a/.build/esp-idf"):
+    for rel in (".venv", ".build/host", "firmware/a/.build/esp-idf"):
         assert os.path.islink(wt / rel)
         assert os.path.realpath(wt / rel) == os.path.realpath(repo / rel)
     assert git(wt, "rev-parse", "--abbrev-ref", "HEAD") == "wt"
@@ -138,7 +138,7 @@ def test_rm_leaves_what_the_links_point_at(repo):
     os.makedirs(wt_path(repo) / MPY / "ports" / "build-X")
     assert rm(repo) == 0
     assert (repo / ".venv" / "bin" / "python").read_text() == "venv"
-    assert (repo / ".build" / "host_gfx" / "x.so").read_text() == "so"
+    assert (repo / ".build" / "host" / "x.so").read_text() == "so"
     assert (repo / "firmware" / "a" / ".build" / "esp-idf" / "export.sh").exists()
     assert (repo / MPY / "py" / "main.c").read_text() == "patched\n"
 

@@ -1,7 +1,7 @@
 # Map (grep -n a name to jump there):
 #   InstallError                a failure: the kid's text and serial's detail
 #   -- references               is_url, resolve, plain_name, mirror_ok
-#   -- the index                check_cart, cover_ref, parse_index, load_indexes
+#   -- the index                check_cart, cover_ref, parse_index (_read_listing), load_indexes
 #   -- what this console takes  plan, need_bytes
 #   -- the record               load_record, save_record, record_entry
 #   -- fetching                 Fetch, Reach, FileCheck, index_fetch, cover_fetch
@@ -52,10 +52,13 @@ What it does differently, because a console is not a PC:
     the files a compiled cart wrote live beside the store
     (runtime/cart_files.py), so an update never touches them, and REMOVE
     takes them with the cart.
-  * it installs only what a sandbox runs (RUNTIMES): a compiled cart, whose
-    native module a board loads only by its signature, or a Lua cart. A board
-    fetches over TLS without checking certificates (the OTA's arrangement),
-    so an index is not proof of anything; what lands is sandboxed or signed.
+  * it installs only what a sandbox runs or the loader validates (RUNTIMES):
+    a compiled cart, whose native module a board loads only by its
+    signature, a Lua cart, or a theme package ("runtime": "theme"), data
+    the theme loader parses, validates and clamps (docs/theming_2026-09.md
+    §7) and nothing runs. A board fetches over TLS without checking
+    certificates (the OTA's arrangement), so an index is not proof of
+    anything; what lands is sandboxed, signed or validated data.
 
 The store layout sits BESIDE the carts folder (moy_store_base._sibling_path):
 `installed.json`, the record of what this store installed (index, id, version,
@@ -70,7 +73,7 @@ puts back an old copy whose replacement never moved in.
 
 Host == device == browser: MicroPython-safe (`deflate` inflates there, `zlib`
 on CPython), and the network is injected -- urllib on the host
-(runtime/host_app.py), the board's TLS client on a board (device/cart_net.py),
+(runtime/host_app.py), the kernel's client on a board (device/wire_links.CartNet),
 the page's fetch in the browser (firmware/web_runner/carts_link.py). A
 transport's `open(url)` answers an object with `status`, `length` (None when
 unknown), `readinto(buf)` and `close()`.
@@ -130,17 +133,20 @@ except ImportError:  # pragma: no cover
 
 try:
     from ticks import _ticks_ms, _ticks_diff
-    from moy_store_base import _sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES
+    from moy_store_base import (_sibling_path, _rmtree, _is_dir, COVER_MAX_BYTES,
+                                cart_path)
     from moy_fs import _exists, _mkdir
     import moy_carts as _store
     import cart_files as _cart_files
+    import cart_listing as _cl
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
     from runtime.moy_store_base import (_sibling_path, _rmtree, _is_dir,
-                                        COVER_MAX_BYTES)
+                                        COVER_MAX_BYTES, cart_path)
     from runtime.moy_fs import _exists, _mkdir
     from runtime import moy_carts as _store
     from runtime import cart_files as _cart_files
+    from runtime import cart_listing as _cl
 
 
 INDEX_VERSION = 1
@@ -150,7 +156,7 @@ DEFAULT_INDEXES = (
 INDEXES_NAME = "indexes.json"
 RECORD_NAME = "installed.json"
 STAGE_DIR = "install"
-RUNTIMES = ("wasm", "lua")
+RUNTIMES = ("wasm", "lua", "theme")
 
 INDEX_LIMIT = 262144          # an index read whole into RAM
 TEXT_LIMIT = 65536            # a licence text, likewise
@@ -383,6 +389,19 @@ def cover_ref(c):
     return None
 
 
+def _read_listing(c):
+    """The description, genre and tags of an entry (SPEC.md 3.7) as a host
+    reads them, in place: each stays when it reads and is dropped when it does
+    not, so the three keys are either what the row shows or absent."""
+    for key, val in (("description", _cl.description(c.get("description"))),
+                     ("genre", _cl.genre(c.get("genre"))),
+                     ("tags", _cl.tags(c.get("tags")))):
+        if val:
+            c[key] = val
+        elif key in c:
+            del c[key]
+
+
 def parse_index(data, url):
     """The carts in an index document, each stamped with the index it came
     from (`index`) and that index's name (`shelf`). An entry this console
@@ -403,6 +422,7 @@ def parse_index(data, url):
                                            else c, why))
             continue
         c = dict(c)
+        _read_listing(c)
         if "cover" in c and cover_ref(c) is None:
             _log("%s: %r's cover left out" % (url, c["id"]))
             del c["cover"]
@@ -605,6 +625,14 @@ def cart_state(cart, p, entry, present, manifest=None):
     return "taken"
 
 
+def _moy_carts():
+    try:
+        import moy_carts
+    except ImportError:  # pragma: no cover - host fallback when not yet aliased
+        from runtime import moy_carts
+    return moy_carts
+
+
 def stage_root(root):
     return _sibling_path(root, STAGE_DIR)
 
@@ -621,8 +649,8 @@ def recover(root):
         return 0
     for n in names:
         p = base + "/" + n
-        if n.endswith(".old") and not _exists(root + "/" + n[:-4]):
-            os.rename(p, root + "/" + n[:-4])
+        if n.endswith(".old") and not _exists(cart_path(root, n[:-4])):
+            os.rename(p, cart_path(root, n[:-4]))
             _log("put back %s" % n[:-4])
         elif _is_dir(p):
             _rmtree(p)
@@ -650,7 +678,7 @@ def remove(root, folder, keep=None):
     gone = base + "/" + folder + ".gone"
     if _exists(gone):
         _rmtree(gone)
-    os.rename(root + "/" + folder, gone)
+    os.rename(cart_path(root, folder), gone)
     _rmtree(gone)
     if had:
         save_record(root, rec)
@@ -1683,7 +1711,7 @@ class Install:
         self._in_session = False
         self.folder = cart["folder"]
         self.stage = stage_root(root) + "/" + self.folder
-        self.target = root + "/" + self.folder
+        self.target = cart_path(root, self.folder)
         self.ranges = bool(getattr(net, "ranges", False))
         self.whole = []                   # assets a ranged read handed back
         self.total = 0
@@ -1963,17 +1991,9 @@ class Install:
         first), and the record. Inside one store session."""
         rec = load_record(self.root)
         old = rec.get(self.folder)
-        if _exists(self.target):
-            if carry:
-                self._carry(old)
-            aside = self.stage + ".old"
-            if _exists(aside):
-                _rmtree(aside)
-            os.rename(self.target, aside)
-            os.rename(self.stage, self.target)
-            _rmtree(aside)
-        else:
-            os.rename(self.stage, self.target)
+        if carry and _exists(self.target):
+            self._carry(old)
+        _moy_carts().adopt(self.stage, self.target)
         rec[self.folder] = entry
         save_record(self.root, rec)
 

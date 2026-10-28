@@ -7,11 +7,25 @@ ConsoleDriver: mouse == touch, arrows == trackball), so these assert host==devic
 behavior. The IconSheet/storage tests poke the cores directly."""
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
-from ws_helpers import build_ws as _ws  # noqa: E402
+from ws_helpers import build_ws as _build_ws, use_theme  # noqa: E402
+
+
+def _ws(tmp_path, **kw):
+    """A workstation on the `night` fixture (tests/fixtures/themes/) in its
+    dark mode: a palette theme with no look, so the default's, flat; a test
+    of a look sets its theme. Its bar's HH:MM is
+    pinned (`_pin_clock`): a test that counts strip renders across frames
+    counts a real minute rollover too, and a loaded machine stretches the
+    frames across one; a test of the clock sets `_clock_text` itself."""
+    ws = _build_ws(tmp_path, **kw)
+    use_theme(ws, "night", "dark")
+    ws.bar_layer._clock_text = lambda: "12:00"
+    return ws
 
 
 def _pin_clock(ws, drv):
@@ -76,41 +90,27 @@ def test_default_icon_theme_paints_every_chrome_icon():
         assert any(p for p in img.pix), "%s should not be a blank tile" % kind
 
 
-def test_default_theme_loads_when_system_icons_absent(tmp_path):
-    """No system_icons.moygfx on disk => the workstation falls back to the baked default
-    IconSheet (a 16x16 themeable sheet, not None)."""
-    from runtime import moy_carts
-    carts_dir = str(tmp_path / "carts")
-    moy_carts.ensure_dirs(carts_dir)
-    assert moy_carts.load_system_icons(carts_dir) is None     # nothing saved
+def test_the_shells_icon_sheet_is_baked(tmp_path):
+    """The workstation's IconSheet is the baked default (a 16x16 sheet, not
+    None), whatever the store holds: a theme's own icons are its pixel
+    tiles, never a file beside the carts."""
+    from runtime import chrome as _chrome
     ws = _ws(tmp_path)
     assert ws.look.icon_sheet is not None
     assert ws.look.icon_sheet.TILE == 16
     assert ws.look.icon_sheet.count == 32
+    assert ws.look.icon_sheet.to_hex() == _chrome._default_icon_sheet().to_hex()
 
 
-def test_system_icons_load_save_round_trip(tmp_path):
-    """load/save_system_icons round-trip the theme hex through a file beside the carts
-    dir (mirrors shared.moygfx)."""
-    from runtime import moy_carts
-    from runtime import chrome as _chrome
-    carts_dir = str(tmp_path / "carts")
-    moy_carts.ensure_dirs(carts_dir)
-    hexs = _chrome._default_icon_sheet().to_hex()
-    moy_carts.save_system_icons(hexs, carts_dir)
-    assert moy_carts.load_system_icons(carts_dir) == hexs
-    # And a workstation built over that store loads the saved theme (not the default).
-    ws = _ws(tmp_path)
-    assert ws.look.icon_sheet.to_hex() == hexs
+# -- the bar renders without error on both screens ----------------------------
 
-
-# -- the bar renders without error on both screens at 18px ------------------
-
-def test_bar_is_18px_on_both_screens(tmp_path):
+def test_the_bar_renders_on_both_screens(tmp_path):
+    """The handheld bar is the look's, `hhbar.h` rows (28: the default's,
+    which a theme with no look takes); the game canvas's strip keeps 18."""
     from runtime import console as C
     assert C._STATUS_H == 18
     ws = _ws(tmp_path)
-    assert ws.layout.status_h == 18
+    assert ws.layout.status_h == 28
     from runtime import host_app
     drv = host_app.ConsoleDriver(ws)
     # Launcher bar renders.
@@ -139,10 +139,11 @@ def test_bar_falls_back_to_glyphs_without_an_icon_sheet(tmp_path):
     ws.make_api = host_app.make_api
     ws.carts_store = moy_carts
     ws.carts_root = carts_dir
-    ws.pointer = console.Pointer(320, 240)
+    ws.set_pointer(console.Pointer(320, 240))
     ws.load_system()
     assert ws.look.icon_sheet is None              # never wired
     ws.frame(1 / 30)                          # launcher bar renders (glyph fallback)
+    ws.set_home_tab("mine")                   # Plain is the kid's own
     ws.launcher.sel = 0
     ws.open()
     ws.frame(1 / 30)                          # running-cart bar renders too
@@ -155,79 +156,6 @@ def _center(rect):
     return x + w // 2, y + h // 2
 
 
-def test_cart_bar_home_icon_goes_home(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    assert ws.screen == "desktop"
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._HOME_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "launcher"
-
-
-def test_cart_bar_edit_icon_opens_editor(tmp_path):
-    """The EDIT/CODE icon opens the cards menu (edit-schema cart) or the code editor
-    (no schema) -- either way leaves the running-cart screen for the menu."""
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._MENU_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "menu"
-
-
-def test_cart_bar_paint_icon_opens_paint(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._PAINT_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "menu" and ws.menu_view == "paint"
-
-
-def test_cart_bar_map_icon_opens_map(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._MAP_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "menu" and ws.menu_view == "map"
-
-
-def test_cart_bar_blocks_icon_opens_blocks(tmp_path):
-    from runtime import console as C
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
-    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
-    ws._dirty = True
-    drv.click(*_center(C._BLOCKS_BTN))
-    drv.frame(1 / 30)
-    assert ws.screen == "menu" and ws.menu_view == "blocks"
-
-
 def test_launcher_bar_menu_opens_settings(tmp_path):
     """Settings moved off the bar into the ≡ system menu (#52). Tapping ≡ on the home
     bar opens the dropdown; SETTINGS (#105: the second selectable row now, after the
@@ -238,58 +166,59 @@ def test_launcher_bar_menu_opens_settings(tmp_path):
     drv.click(*_center(ws.layout.sysmenu_btn))
     drv.frame(1 / 30)
     assert ws.sysmenu.open
-    drv.press("down"); drv.frame(1 / 30)                    # SEARCH -> SETTINGS
+    for _ in range(len(ws.sysmenu.items)):                  # past the card's group
+        if ws.sysmenu.items[ws.sysmenu.sel][1] == "SETTINGS":
+            break
+        drv.press("down"); drv.frame(1 / 30); drv.frame(1 / 30)
     drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)    # activate SETTINGS
     assert ws.screen == "settings"
 
 
-# NEW/DUP/DEL moved off the launcher bar into the Editor picker's zone
-# (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker is for MANAGING
-# projects) -- see tests/test_desktop_shell.py::test_launcher_home_no_longer_manages_carts
-# for the launcher-side regression guard.
+# NEW/CHANGE/COPY/DEL are the home's Make-tab verbs (docs/shell_layout_2026-10.md
+# §12: Make is the one projects list) -- chips in the lent zone, tapped
+# through the bar.
 
-def test_picker_bar_dup_del_when_manageable(tmp_path):
-    """Cart management moved off the launcher home into the Editor picker's lent
-    zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker is for
-    MANAGING projects). DUP/DEL icons fire there when can_manage: DUP duplicates
-    the picker's SELECTED cart immediately (a copy only ADDS, so it needs no
-    guard); DEL is two-tap guarded -- the first tap arms, only the second deletes
-    (see test_editor_picker.py for the "DELETE? TAP AGAIN" prompt + disarm rules)."""
+def _make_chip(ws, verb):
+    return _center(ws.launcher_layer._zone_action_rects(ws.layout.zone_left)[verb])
+
+
+def test_make_tab_copy_and_delete_through_the_bar(tmp_path):
+    """COPY duplicates the selected project at once (a copy only ADDS); DEL asks
+    first (a cart's delete is permanent), and the dialog's Delete deletes it."""
     from runtime import host_app
     ws = _ws(tmp_path)
     assert ws.can_manage
     drv = host_app.ConsoleDriver(ws)
-    ws.open_picker()
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items) if it.get("path"))
-    n0 = len(ws.picker.items)
-    drv.click(*_center(ws.layout.dup_btn))           # DUP
+    ws.set_home_tab("make")
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
     drv.frame(1 / 30)
-    assert len(ws.picker.items) == n0 + 1
-    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items) if it.get("path"))
-    drv.click(*_center(ws.layout.del_btn))           # DEL tap 1: arms, does NOT delete
+    n0 = len(ws.launcher.items)
+    drv.click(*_make_chip(ws, "copy"))
     drv.frame(1 / 30)
-    assert len(ws.picker.items) == n0 + 1
-    drv.click(*_center(ws.layout.del_btn))           # DEL tap 2: confirms
+    assert len(ws.launcher.items) == n0 + 1
+    drv.click(*_make_chip(ws, "delete"))
     drv.frame(1 / 30)
-    assert len(ws.picker.items) == n0
+    assert ws.confirm.open and len(ws.launcher.items) == n0 + 1
+    x, y, w, h = ws.confirm._host.box("Delete")
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)                 # the release taps it; the tail deletes
+    drv.frame(1 / 30)
+    assert not ws.confirm.open and len(ws.launcher.items) == n0
 
 
-def test_picker_bar_management_hidden_when_read_only(tmp_path):
-    """With writes disabled (can_manage False), a tap on the picker's DUP icon
-    position does nothing -- the management cluster isn't active (it's not drawn
-    either)."""
-    from runtime import host_app
+def test_make_tab_management_hidden_when_read_only(tmp_path):
+    """With writes disabled (can_manage False) Make carries no verb: nothing
+    to make, copy or delete, and no "+ New" card."""
     ws = _ws(tmp_path)
     ws.can_manage = False
-    drv = host_app.ConsoleDriver(ws)
-    ws.open_picker()
-    n0 = len(ws.picker.items)
-    drv.click(*_center(ws.layout.dup_btn))
-    drv.frame(1 / 30)
-    assert len(ws.picker.items) == n0
+    ws.set_home_tab("make")
+    assert all(it.get("path") for it in ws.launcher.items)
+    for i in range(min(3, len(ws.launcher.items))):
+        ws.launcher.sel = i
+        assert ws.launcher_layer.zone_verbs() == ()
 
 
-# -- Part 3: the wifi icon is a STATUS glyph + a shortcut to the wifi tool ----
+# -- Part 3: the wifi icon is a STATUS glyph + a shortcut to the WIFI panel ----
 
 def test_wifi_off_glyph_is_a_distinct_nonblank_tile():
     """The new "wifi_off" (wifi-with-a-red-slash) icon is a real, non-blank 16x16 tile
@@ -328,43 +257,53 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     drv.frame(1 / 30)
     assert calls[0] == 0                        # unchanged state -> cache reused
     ws.wifi.connect("Home WiFi", "pw")          # link comes up -> the wifi glyph changes
-    ws._dirty = True                            # crashed frames are static: force a repaint
+    ws._dirty = True
     drv.frame(1 / 30)
     assert calls[0] == 1, "a wifi status change must re-render the bar once"
 
 
-def test_tapping_the_wifi_icon_launches_the_wifi_tool(tmp_path):
-    """Part 3: the right-zone wifi icon is a shortcut -- tapping it LAUNCHES the wifi.moy
-    tool (runs it; never the editor). From the launcher home the tap lands on the running
-    tool (screen "desktop", cart type "tool")."""
+def test_tapping_the_wifi_icon_opens_the_settings_wifi_panel(tmp_path):
+    """The wifi widget's target is the Settings WIFI panel, the one wifi
+    implementation (docs/shell_layout_2026-10.md §8): in console mode too
+    its popover hung from the widget (docs/look_2026-10.md step 33), over
+    whatever ran; never a cart."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
     drv.click(*_center(ws.layout.wifi_btn))     # tap the wifi status icon
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"               # launched the wifi tool (ran it)
-    assert ws.cart is not None and ws.cart.get("type") == "tool"
-    assert (ws.cart.get("path") or "").endswith("wifi.moy")
+    assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
+    assert ws.screen == "launcher" and ws.cart is None   # nothing was launched
+    assert "settings" in ws.leases.holders()    # the panel holds the radio
+    drv.click(*_center(ws.layout.wifi_btn))     # the widget again closes it
+    drv.frame(1 / 30)
+    assert not ws.sysmenu.open
+    assert ws.leases.holders() == []            # ...and lets the radio go
 
 
-def test_launch_wifi_tool_is_a_noop_when_absent(tmp_path):
-    """launch_wifi_tool() degrades cleanly (returns False, no crash, no screen change)
-    when no wifi tool is installed -- so the shortcut is safe on a stripped device."""
+def test_tapping_the_wifi_icon_on_the_desk_opens_the_panel_as_a_popover(tmp_path):
+    """The same tap in desktop mode: the panel in a popover anchored at the
+    widget, no Settings window, the lease held while it is open."""
+    from ws_helpers import build_desktop_ws
     from runtime import host_app
-    ws = _ws(tmp_path)
-    # Drop every wifi tool from the launcher store view.
-    ws.launcher.set_items([it for it in ws.launcher.items
-                           if not (it.get("path") or "").endswith("wifi.moy")])
-    assert ws.launch_wifi_tool() is False
-    assert ws.screen == "launcher"
+    ws = build_desktop_ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    lay = ws.wm._root_ctx.layout
+    drv.click(*_center(lay.wifi_btn))
+    drv.frame(1 / 30)
+    assert ws.sysmenu.open and ws.sysmenu.widget == "wifi"
+    assert not ws.wm.top_is("settings")
+    assert "settings" in ws.leases.holders()
+    assert not any(c.get("path", "").endswith("wifi.moy") for c in ws.carts.all)
 
 
 # -- cached running-cart top bar (#43): render once, blit each frame ---------
@@ -377,18 +316,19 @@ def _bar_rows(canvas):
 
 
 def _run_a_cart(tmp_path):
-    """A workstation with a cart open and CRASHED, one frame drawn. Stage 5 retired the
-    #71 pause frame -- the bar auto-hides while a cart PLAYS and shows only on a CRASH
-    (the surviving in-cart chrome), so the running-cart bar tests drive the crashed
-    state. A crashed frame is static, like the old paused one, so the tests force
-    repaints with ws._dirty."""
-    from runtime import host_app
-    ws = _ws(tmp_path)
+    """A workstation running a TOOL, one frame drawn: the running-cart bar a
+    game never shows (it owns the glass, and a run that stopped shows the
+    stop card) -- the tool's minimal bar on the game canvas."""
+    from runtime import host_app, moy_carts
+    from ws_helpers import no_unlock_banner
+    ws = no_unlock_banner(_ws(tmp_path))
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
+    made = moy_carts.create("Tooly", ws.carts_root, src="def _draw():\n    cls(1)\n",
+                            type="tool")
+    ws.carts.rescan()
+    ws._open_workspace(next(c for c in ws.carts.all if c["path"] == made["path"]))
+    ws.run(ws.project, ws.launcher_layer)
     assert ws.screen == "desktop"
-    ws.cart_error = "boom"
     ws._dirty = True
     drv.frame(1 / 30)
     return ws, drv
@@ -405,7 +345,7 @@ def test_cached_cart_bar_is_pixel_identical_to_direct_render(tmp_path):
     # Direct render of the identical state onto a clean canvas.
     direct = make_system_canvas(ws.canvas.w, ws.canvas.h)
     direct.palette = ws.canvas.palette
-    ws.bar_layer._render_cart_bar(direct, ws.bar_layer._cart_bar_key())
+    ws.bar_layer._render_cart_bar(direct, ws.bar_layer._cart_bar_key("tool"))
     assert _bar_rows(direct) == cached
     # And it's a REAL picture (icons + glyph + text), not a blank band.
     assert len(set(cached)) > 2
@@ -419,9 +359,9 @@ def test_cart_bar_reuses_cache_when_state_unchanged(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     # Several more frames at the same state -> the strip is already built + clean.
     for _ in range(5):
@@ -436,11 +376,11 @@ def test_cart_bar_invalidates_on_theme_change(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
-    ws.look.set_icon_sheet(ws.look.icon_sheet)              # bumps _bar_cache_gen -> key changes
+    ws.look.set_icon_sheet(ws.look.icon_sheet)              # moves look_gen -> key changes
     drv.frame(1 / 30)
     assert calls[0] == 1, "a theme change must re-render the bar once"
     for _ in range(3):
@@ -457,9 +397,9 @@ def test_cart_bar_invalidates_on_clock_change(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     drv.frame(1 / 30)
     assert calls[0] == 0                          # clock unchanged -> reused
@@ -486,31 +426,6 @@ def test_cart_bar_blit_strip_used_each_frame(tmp_path):
     assert calls[0] == 4, "the bar should blit its cached strip once per frame"
 
 
-def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
-    """A saved icon theme older than _ICON_VERSION is re-seeded to the baked default at
-    load (so shipped icon changes land on an already-themed device/desktop without a
-    manual wipe, #47-style); a theme stamped at the current version is kept (a user's
-    EDIT ICONS edit survives until the next bump)."""
-    from runtime import chrome as _chrome
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    store, root = ws.carts_store, ws.carts_root
-    default_hex = _chrome._default_icon_sheet().to_hex()
-    other = ("f" if default_hex[0] != "f" else "0") + default_hex[1:]   # valid but different
-    assert other != default_hex
-
-    # STALE (version 0 < _ICON_VERSION): re-seeded to the baked default, version stamped.
-    store.save_system_icons(other, root, 0)
-    ws.look.load_icon_sheet()
-    assert ws.look.icon_sheet.to_hex() == default_hex
-    assert store.load_system_icons_version(root) == _chrome._ICON_VERSION
-
-    # CURRENT (>= _ICON_VERSION): the saved theme is kept untouched.
-    store.save_system_icons(other, root, _chrome._ICON_VERSION)
-    ws.look.load_icon_sheet()
-    assert ws.look.icon_sheet.to_hex() == other
-
-
 # -- the zoned bar (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46): the
 # right zone (clock/wifi/batt/gear) is OS-owned, the left zone is LENT to the
 # active app (launcher_layer/settings_layer/editor_app). The #43 strip cache is
@@ -529,15 +444,40 @@ def test_zoned_bar_reuses_cache_when_state_unchanged(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     for _ in range(5):
         ws._dirty = True            # force a screen repaint (#44's own gate is not
                                      # what we're testing -- the BAR's cache is)
         drv.frame(1 / 30)
     assert calls[0] == 0, "an unchanged zoned bar should reuse its cached strip"
+
+
+def test_a_warm_bar_frame_fills_one_key_with_only_what_it_shows(tmp_path):
+    """A painted frame's bar key is `where`'s one list, refilled in place (no
+    key tuple a frame), and reads only the fields its bars draw: the home's
+    zone is the launcher's, so the Editor's undo/redo dim state is never
+    asked for there."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    _pin_clock(ws, drv)
+    bl = ws.bar_layer
+    key = bl._keys["home"]
+    asked = [0]
+
+    def undo_bits():
+        asked[0] += 1
+        return 0
+    ws.history.bar_undo_bits = undo_bits
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert bl._keys["home"] is key
+    assert asked[0] == 0
+    assert bl._cart_bar_key("home")[9] == 0 and asked[0] == 1
 
 
 def test_zoned_bar_rerenders_on_app_switch(tmp_path):
@@ -550,9 +490,9 @@ def test_zoned_bar_rerenders_on_app_switch(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     ws.launcher.sel = 0
     ws.open_in_editor()              # maker landing -> screen "menu"
@@ -578,9 +518,9 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
     ws._open_paint()                 # EditorApp.set_tab bumps zone_gen
     ws._dirty = True
@@ -592,11 +532,10 @@ def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
     assert calls[0] == 1, "after the re-render the new strip is reused"
 
 
-def test_zoned_bar_rerenders_on_launcher_selection_change(tmp_path):
-    """Moving the launcher selection bumps Launcher.zone_gen (via the `sel`
-    property), so the cached strip picks up the new cart name -- proving the
-    zone_gen wiring covers a raw `.sel = i` assignment (nav/tap/hover), not just a
-    dedicated setter method."""
+def test_zoned_bar_follows_the_home_tabs_not_its_selection(tmp_path):
+    """The home's zone draws its tabs alone: moving the selection along the
+    row (a held key's glide) reuses the cached strip, whose pixels are the
+    ones a fresh render paints, and a tab switch renders it once."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -604,18 +543,33 @@ def test_zoned_bar_rerenders_on_launcher_selection_change(tmp_path):
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
-    def counting(cv, key):
+    def counting(cv, key, i=0):
         calls[0] += 1
-        return orig(cv, key)
+        return orig(cv, key, i)
     ws.bar_layer._render_cart_bar = counting
-    ws.launcher.nav2d(1, 0)           # move the selection -> zone_gen bumps
+    ws.launcher.nav2d(1, 0)
+    ws._dirty = True
+    for _ in range(60):
+        drv.frame(1 / 30)
+    assert not ws.launcher.moving and ws.launcher.sel == 1
+    assert calls[0] == 0, "a selection the zone does not show re-rendered the bar"
+    bar = ws.layout.bars[0][1]
+    w = ws.sys_canvas.w
+
+    def strip():
+        return [drv.rgb888()[(y * w + bar[0]) * 3:(y * w + bar[0] + bar[2]) * 3]
+                for y in range(bar[1], bar[1] + bar[3])]
+    kept = strip()
+    ws.bar_layer.invalidate()
     ws._dirty = True
     drv.frame(1 / 30)
-    assert calls[0] == 1, "a selection change must re-render the zoned bar once"
+    assert strip() == kept
+    calls[0] = 0
+    ws.set_home_tab("apps")
     for _ in range(3):
         ws._dirty = True
         drv.frame(1 / 30)
-    assert calls[0] == 1
+    assert calls[0] == 1, "a tab switch must re-render the zoned bar once"
 
 
 def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
@@ -629,15 +583,10 @@ def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
     ws.launcher.sel = 0
     ws.open_in_editor()
     drv.frame(1 / 30)
-    paint_i = [t for t, _g in EA._ZONE_TABS].index("paint")
-    x = BL._ZONE_LEFT_GAME[0] + paint_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2
-    y = BL._ZONE_LEFT_GAME[1] + BL._BAR_ICON // 2
-    drv.click(x, y)
+    drv.click(*_game_zone_center("paint", ws))
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "paint"
-    play_i = [t for t, _g in EA._ZONE_TABS].index(None)   # PLAY (the ladder's last icon)
-    x = BL._ZONE_LEFT_GAME[0] + play_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2
-    drv.click(x, y)
+    drv.click(*_game_zone_center(None, ws))   # PLAY (the ladder's last icon)
     drv.frame(1 / 30)
     assert ws.screen == "desktop", "PLAY must run the cart"
 
@@ -648,13 +597,19 @@ def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
 # layout.zone_left), so the tab-ladder icons hit-test in system coords (no
 # _game_xy translation).
 
+def _ladder_center(ws, rect, target):
+    """Center of the ladder icon `target` in the lent `rect`, through the
+    geometry the draw and the tap share (the open tab's chip is wider)."""
+    for tab, _g, (x, y, w, h) in ws.editor_app._ladder_rects(rect):
+        if tab == target:
+            return (x + w // 2, y + h // 2)
+    raise AssertionError("not on the ladder: %r" % (target,))
+
+
 def _sys_zone_center(ws, target):
     """Center of the tab-ladder / PLAY icon `target` on the SYSTEM-canvas bar
     (the code + blocks tabs). `target` is a tab name or None (PLAY)."""
-    from runtime import editor_app as EA, bar_layer as BL
-    i = [t for t, _g in EA._ZONE_TABS].index(target)
-    zx, zy, _zw, _zh = ws.layout.zone_left
-    return (zx + i * EA._ZONE_STRIDE + BL._BAR_ICON // 2, zy + BL._BAR_ICON // 2)
+    return _ladder_center(ws, ws.bar_layer._zone_rect("menu"), target)
 
 
 def test_code_tab_shows_unified_bar_ladder_switches(tmp_path):
@@ -694,7 +649,7 @@ def test_code_tab_context_x_exits_to_home(tmp_path):
     ws.open_in_editor()
     ws.set_menu_view("code")
     drv.frame(1 / 30)
-    drv.click(*_center(ws.layout.context_x_btn))  # the right-zone X (system canvas)
+    drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))  # the right-zone X
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
@@ -838,13 +793,11 @@ def test_blocks_tab_play_hard_commits_via_save_blocks(tmp_path):
     assert calls == [1], "PLAY on the blocks tab must reach save_blocks"
 
 
-def _game_zone_center(target):
+def _game_zone_center(target, ws):
     """Center of the ladder/PLAY icon `target` on the GAME-canvas bar
     (cards/paint/map/music). `target` is a tab name or None (PLAY)."""
-    from runtime import editor_app as EA, bar_layer as BL
-    i = [t for t, _g in EA._ZONE_TABS].index(target)
-    return (BL._ZONE_LEFT_GAME[0] + i * EA._ZONE_STRIDE + BL._BAR_ICON // 2,
-            BL._ZONE_LEFT_GAME[1] + BL._BAR_ICON // 2)
+    from runtime import bar_layer as BL
+    return _ladder_center(ws, ws.bar_layer._zone_rect("menu"), target)
 
 
 def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
@@ -858,12 +811,12 @@ def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
     ws._open_music()
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "music"
-    drv.click(*_game_zone_center("paint"))       # ladder: music -> paint
+    drv.click(*_game_zone_center("paint", ws))       # ladder: music -> paint
     drv.frame(1 / 30)
     assert ws.menu_view == "paint"
     ws._open_music()
     drv.frame(1 / 30)
-    drv.click(*_game_zone_center(None))          # PLAY
+    drv.click(*_game_zone_center(None, ws))          # PLAY
     drv.frame(1 / 30)
     assert ws.screen == "desktop"
 
@@ -884,7 +837,7 @@ def test_music_tab_play_hard_commits_via_save_sounds(tmp_path):
     calls = []
     orig = ws.save_sounds
     ws.save_sounds = lambda: (calls.append(1), orig())[-1]
-    drv.click(*_game_zone_center(None))          # PLAY
+    drv.click(*_game_zone_center(None, ws))          # PLAY
     drv.frame(1 / 30)
     assert calls == [1], "PLAY on the music tab must reach save_sounds"
 
@@ -898,7 +851,7 @@ def test_music_tab_context_x_exits_to_home(tmp_path):
     ws.open_in_editor()
     ws._open_music()
     drv.frame(1 / 30)
-    drv.click(*_center(BL._ZONE_CONTEXT_X))       # game-canvas right-zone X
+    drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))  # the right-zone X
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
@@ -909,14 +862,14 @@ def _open_edit_cart(ws):
     import os
     import shutil
     from runtime import host_app
-    src = os.path.join(str(ROOT), "system_carts", "star_catcher.moy")
-    dst = os.path.join(ws.carts_root, "star_catcher.moy")
+    src = os.path.join(str(ROOT), "system_carts", "moybyte.star_catcher.moy")
+    dst = os.path.join(ws.carts_root, "moybyte.star_catcher.moy")
     if os.path.exists(dst):
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
-    ws.launcher.items = host_app.moy_carts.scan(ws.carts_root)
+    ws.launcher.items = shelf(ws.carts_root)
     ws.launcher.sel = [i for i, c in enumerate(ws.launcher.items)
-                       if "star_catcher" in c["path"]][0]
+                       if "moybyte.star_catcher" in c["path"]][0]
 
 
 def test_config_tab_play_runs_and_persists_config(tmp_path):
@@ -932,7 +885,7 @@ def test_config_tab_play_runs_and_persists_config(tmp_path):
     saved = []
     orig = ws._save_config
     ws._save_config = lambda: (saved.append(1), orig())[-1]
-    drv.click(*_game_zone_center(None))          # PLAY (game-canvas bar)
+    drv.click(*_game_zone_center(None, ws))          # PLAY (game-canvas bar)
     drv.frame(1 / 30)
     assert ws.screen == "desktop", "PLAY must run the cart"
     assert saved == [1], "PLAY on Config must persist config (the old GO)"
@@ -978,7 +931,7 @@ def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
     ws.open_in_editor()
     ws._open_paint()
     drv.frame(1 / 30)
-    drv.click(*_center(BL._ZONE_GEAR))             # Editor, game-domain tab
+    drv.click(*_center(ws.bar_layer.cell("menu", "menu")[1]))  # the Editor's ≡
     drv.frame(1 / 30)
     assert ws.sysmenu.open
 
@@ -999,7 +952,7 @@ def test_context_x_exits_the_editor_to_home(tmp_path):
     ws._open_paint()                 # a game-domain tab -> the game-canvas zoned bar
     drv.frame(1 / 30)
     assert ws.screen == "menu"
-    drv.click(*_center(BL._ZONE_CONTEXT_X))
+    drv.click(*_center(ws.bar_layer.cell("menu", "close")[1]))
     drv.frame(1 / 30)
     assert ws.screen == "launcher"   # the context X exited the Editor to home
 
@@ -1119,7 +1072,7 @@ def test_bar_strip_slots_stay_bounded(tmp_path):
     for _ in range(6):                          # six distinct destinations
         ws._sys_canvas = root.new_layer(root.w, root.h)
         ws.bar_layer._draw_status_strip("settings")
-    slots = ws.bar_layer._bar_strips["settings"]
+    slots = ws.bar_layer._bar_strips["settings"][0]
     assert len(slots) <= _bl._BAR_STRIP_SLOTS
 
 
@@ -1152,3 +1105,66 @@ def test_bar_strip_rebuild_budget(tmp_path):
     # One per distinct destination is right; one per SWITCH is the bug (would be 12).
     assert allocs <= 2, "strip layer reallocated %d times in 24 frames" % allocs
     assert renders <= 2, "strip re-rendered %d times in 24 frames" % renders
+
+
+# -- the 2026-10 look's bar (docs/look_2026-10.md step 14) --------------------
+
+def test_a_looked_clock_tick_repaints_its_cell_as_the_strip_draws_it(tmp_path):
+    """Under Moy's look the clock's own repaint (`redraw_clock`) lays the
+    solid band and the chrome-ink clock exactly where a whole strip would."""
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="light")
+    cv = ws.sys_canvas
+    bh = ws.layout.status_h
+    assert bh == 28
+
+    def frame(text):
+        ws.bar_layer._clock_text = lambda: text
+        ws.bar_layer.invalidate()
+        ws._dirty = True
+        ws.frame(1 / 30)
+        return bytes(cv._buf[:cv.w * bh * 2])
+
+    frame("12:34")
+    whole = frame("12:35")
+    frame("12:34")
+    ws.bar_layer._clock_text = lambda: "12:35"
+    ws.bar_layer.redraw_clock("home")
+    assert bytes(cv._buf[:cv.w * bh * 2]) == whole
+
+
+def test_the_editor_ladder_under_an_icon_set_is_the_looks(tmp_path, monkeypatch):
+    """docs/look_2026-10.md step 23: under a theme's icon set the ladder
+    draws the set's gear for Config and face for Sprites, the open tab its
+    name in sentence case, and Play bare in `value`."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    ws.look.set_theme("moy", persist=False, variant="light")
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws.set_menu_view("code")
+    import sys
+    sets = sys.modules.get("iconsets") or sys.modules["runtime.iconsets"]
+    drew = []
+    real = sets.draw
+
+    def spy(cv, kind, rect, ink, spec):
+        drew.append((kind, ink))
+        return real(cv, kind, rect, ink, spec)
+    monkeypatch.setattr(sets, "draw", spy)
+    ws.bar_layer.invalidate()
+    drv.frame(1 / 30)
+    kinds = [k for k, _i in drew]
+    assert "sliders" in kinds and "sprite" in kinds and "code" in kinds
+    assert "settings" not in kinds, "the gear is Settings', never the Config tab's"
+    assert "edit" not in kinds and "paint" not in kinds
+    assert ("play", ws.theme_colors["value"]) in drew
+    # Day and Night take one rule: the T-Deck's one bar (no chevron, no
+    # Wi-Fi, look step 30) names the open tab in either mode.
+    zone = ws.bar_layer._zone_rect("menu")
+    day = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
+    ws.look.set_theme("moy", persist=False, variant="dark")
+    zone = ws.bar_layer._zone_rect("menu")
+    night = (ws.editor_app._open_label(zone), ws.editor_app._ladder_layout(zone)[1])
+    assert day[0] == night[0] == "Code" and day[1] >= 0 and night[1] >= 0

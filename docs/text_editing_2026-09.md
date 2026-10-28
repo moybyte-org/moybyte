@@ -24,7 +24,7 @@ drawings the Files app owns.
 | door | path | what opens |
 |---|---|---|
 | make a game | Launcher → cart → EDIT → tab ladder | the Code tab is one of the cart's scripts — its main file unless another is picked (#89): highlight by runtime, parse gate on the debounce, hard exits always write (SYNTAX badge), PLAY, crash-to-code |
-| write | Launcher → Notes | the vault list (whole names, mode badges), NEW → a name prompt, one file open with the SELECT/COPY/CUT/PASTE/UNDO/REDO toolbar over it |
+| write | Launcher → Notes | the vault as a table (New note first, then each file's kind icon and its name: a note's bare, another file's with its extension), New note → a name in a dialog, one file open with Select, Copy, Cut and Paste at its foot and undo and redo in the bar (docs/media/look_2026-10/APPS_RESTYLE.md's Notes) |
 | any file | Launcher → Files → a root | routed by what it is (below) |
 
 **The Files router**, in order: a `.moy` folder opens the project Editor, never a
@@ -40,11 +40,11 @@ tab's ADVANCED row, so the loader stays in the loop.
 
 **Everything the router opens comes BACK to Files**, on the shelf it was left
 on. Files is a cart app, so a note/project/drawing REPLACES it, and the console
-records who it is returning to: `_run_caller` for a run (the Notes cart),
-`_project_return` for a project file (which returns through the loader), and
-`_app_return` for a jump into another app's own surface (Paint, a project's
-Editor) -- popped by `Workstation._go_home_or_back`, which is what every exit
-gesture ends in. HOME is still home, and going home clears the return.
+records who it is returning to: the run's caller kind (`ws.returns`) for a run
+(the Notes cart), `_project_return` for a project file (which returns through
+the loader), and the app-return (`ws.returns.back()`) for a jump into another
+app's own surface (Paint, a project's Editor) -- popped by
+`Workstation._go_home_or_back`, which is what every exit gesture ends in. HOME is still home, and going home clears the return.
 
 **Modes** are the only thing that differs per file: Markdown (wrap, headings and
 checkboxes rendered, `[[note]]` tappable, `![[drawing]]` inline), code (the
@@ -128,9 +128,9 @@ QWERTY is planned.
    file that broke it. **A cart's own SCRIPT does not take this door** (#89):
    the Code tab holds a *file* (SPEC.md §4's `sources`), so every entry in the
    cart's load order routes there, where PLAY, the journal and crash-to-code
-   are. This row is also where the one **NEW SCRIPT** verb lives, offered only
-   on a cart whose runtime loads more than `main`; the Code tab's file chip is
-   a switcher and has no create.
+   are. This row is also where the one **New script** verb lives, offered only
+   on a cart whose runtime loads more than `main`; the Code tab's scripts
+   menu (its tab tapped again) switches files and offers the same verb last.
 6. The script runner with the text console surface.
 
 Related: #108 (user files), #181 (apps are carts), #112 (cart-facing undo —

@@ -31,11 +31,20 @@ order assertion itself, not a proxy for one.
 """
 
 from pathlib import Path
+from ws_helpers import shelf  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
 from runtime import cover_cache, cover_png, moy_carts  # noqa: E402
 from ws_helpers import build_ws, cover_bytes  # noqa: E402
+import pytest
+from ws_helpers import boot_on_fixture
+
+@pytest.fixture(autouse=True)
+def _on_the_night_fixture(monkeypatch):
+    """Every workstation here boots on the `night` fixture (ws_helpers): a
+    palette theme with no look, drawn in the default's look flat."""
+    boot_on_fixture(monkeypatch)
 
 
 class _Tracker:
@@ -233,7 +242,7 @@ def test_a_rescan_rebuilds_the_icon_from_the_new_art(tmp_path):
 
     stored = next(c for c in moy_carts.scan(root) if c["title"] == "Iconic")
     moy_carts.save_sprites(stored, _tile0("e"))      # repaint the icon's tile
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
 
     fresh = next(c for c in ws.carts.all if c["title"] == "Iconic")
     after = _icon_pixels(ws.covers.icon_sheet_for(fresh))
@@ -256,7 +265,7 @@ def test_a_deleted_carts_icon_does_not_outlive_it(tmp_path):
     assert key in ws.covers.icons
 
     moy_carts.delete(cart)
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
 
     assert key not in ws.covers.icons
 
@@ -291,7 +300,7 @@ def test_gen_bumps_on_a_build_a_diet_release_and_a_rescan(tmp_path):
     after_diet = covers.gen
     assert after_diet > after_build
 
-    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))   # invalidate_all
+    ws.carts.apply(shelf(str(tmp_path / "carts")))   # invalidate_all
     assert covers.gen > after_diet
 
 
@@ -317,8 +326,10 @@ def test_gen_has_no_ws_mirror(tmp_path):
     launcher = (ROOT / "runtime" / "launcher_layer.py").read_text(encoding="utf-8")
     windowed = (ROOT / "runtime" / "wm_windowed.py").read_text(encoding="utf-8")
     assert "_cover_gen" not in launcher and "_cover_gen" not in windowed
-    # Six reads: the shared drag-partial body (`_drag_partial`, two), the
-    # home frame (three) and the picker frame (one).
+    # Six reads: the band frame's check of its ring, of the last frame it
+    # shifts from and of the one it copies from (`_drag_partial`, three), the
+    # one body every painted frame records its band through (`_note_band`),
+    # the retained frame's key and the desk home's still parts.
     assert launcher.count("ws.covers.gen") == 6
 
 
@@ -328,7 +339,7 @@ def test_both_grids_are_wired_to_the_collaborators_bound_method(tmp_path):
     """A card's paint costs ONE call, exactly what it cost with the method on
     the kernel -- no forward, no lookup chain (architecture doc 3e)."""
     ws = build_ws(tmp_path)
-    for grid in (ws.launcher, ws.picker):
+    for grid in (ws.launcher, ws._home_grid("grid", [])):
         assert grid.cover_for.__self__ is ws.covers
         assert grid.cover_for.__func__ is type(ws.covers).cover_for
 
@@ -418,7 +429,7 @@ def test_the_diet_release_keeps_the_newest_entries_of_both_lrus(tmp_path):
     covers = ws.covers
     keep = cover_cache._COVER_DIET_KEEP
     carts = [_mk_cart(tmp_path, "Cover%d" % i, i + 1) for i in range(keep + 3)]
-    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))
+    ws.carts.apply(shelf(str(tmp_path / "carts")))
     live = {c["path"]: c for c in ws.carts.all}
     order = [live[c["path"]] for c in carts]
     for cart in order:
@@ -489,7 +500,7 @@ def test_a_rescan_forgets_that_a_cart_had_no_cover(tmp_path):
 
     stored = next(c for c in moy_carts.scan(root) if c["path"] == bare["path"])
     moy_carts.save_cover(stored, cover_bytes(7))
-    ws.carts.apply(moy_carts.scan(root))
+    ws.carts.apply(shelf(root))
     assert ws.covers._none == {}
 
     fresh = next(c for c in ws.carts.all if c["path"] == bare["path"])
@@ -519,6 +530,43 @@ def test_one_base_per_cover_and_two_reductions_beside_it(tmp_path):
     assert bytes(half.pix) == cover_png.decode(data, 2, order)
     assert (icon.w, icon.h) == (16, 16)
     assert set(bytes(icon.pix)) == {9}            # a palette cover maps exactly
+
+
+def test_a_tinted_cover_is_made_from_the_base_and_leaves_with_it(tmp_path, monkeypatch):
+    """`tinted` (docs/look_2026-10.md step 15): the whole BASE with a colour
+    over it, made by the canvas's tint and kept in the decodes' LRU -- asked
+    twice it is the same picture, and the diet that drops the decodes frees
+    it too. Before the BASE lands there is none."""
+    cart = _mk_cart(tmp_path, value=9)
+    ws, tr = _tracked_ws(tmp_path, monkeypatch)
+    c, alpha = 1, 77
+    base = _land(ws, cart)
+    got = ws.covers.tinted(cart, c, alpha)
+    assert (got.w, got.h) == (128, 128)
+    want = bytearray(2 * 128 * 128)
+    ws.sys_canvas.tint565(want, base.pix, base.w, 0, 0, 128, 128, c, alpha)
+    assert bytes(got.pix) == bytes(want)
+    assert ws.covers.tinted(cart, c, alpha) is got
+    assert (cart["path"], c, alpha) in ws.covers._cache
+    for _ in range(cover_cache._COVER_DIET_KEEP + 2):
+        other = _mk_cart(tmp_path, name="Other%d" % _, value=3)
+        _land(ws, other)
+    ws.covers.diet_release()
+    assert (cart["path"], c, alpha) not in ws.covers._cache
+    assert got.pix is None                         # freed, not merely dropped
+
+
+def test_no_tinted_cover_before_its_base_lands(tmp_path):
+    cart = _mk_cart(tmp_path, value=9)
+    ws = build_ws(tmp_path)
+    assert ws.covers.tinted({"path": None}, 1, 77) is None
+    got = None
+    for _ in range(300):
+        ws.covers.begin_frame()
+        got = ws.covers.tinted(cart, 1, 77)
+        if got is not None:
+            break
+    assert got is not None and (got.w, got.h) == (128, 128)
 
 
 def test_a_cart_naming_no_icon_draws_its_cover_as_its_desk_icon(tmp_path):
@@ -583,3 +631,35 @@ def test_a_file_that_does_not_decode_is_no_cover_at_any_size(tmp_path):
         ws.covers.cover_for(live)
     assert live["path"] in ws.covers._none
     assert ws.covers.cover_for(live, cover_cache.HALF) is None
+
+
+def test_a_blank_icon_tile_is_no_art():
+    """Tile 0 is blank by convention, and a cart whose sheet has art but no
+    icon there drew a black square as its card's art (Coin Quest)."""
+    from runtime.editors_sheet import SpriteSheet
+    assert SpriteSheet.icon_from_rows((8, 8, ["0" * 8] * 8)) is None
+    img = SpriteSheet.icon_from_rows((8, 8, ["0" * 8] * 7 + ["0000000a"]))
+    assert img is not None and img.w == 8
+
+
+def test_a_card_without_a_cover_wears_its_generated_cover(tmp_path):
+    """A coverless card on the handheld home wears a generated cover (design
+    review D-13, owner 2026-10-19): its title's colour block across the
+    card, the title's initial on it in the block's ink, inside the card."""
+    from runtime import ui_draw
+    from runtime.host_canvas import indices_of
+    from runtime.host_canvas import make_system_canvas as SystemCanvas
+    ws = build_ws(tmp_path)
+    lw = ws.launcher
+    assert lw.handheld()
+    th = lw.theme
+    it = {"title": "PIN", "type": "game", "path": None}
+    w = h = 120
+    cv = SystemCanvas(320, 240)
+    cv.cls(th["desktop"])
+    lw._draw_home_card(cv, it, (20, 20, w, h), False, None)
+    px = indices_of(cv, strict=False)            # the card's corners anti-alias
+    block, ink_i = ui_draw.initial_block("PIN")
+    assert px[(20 + h // 2) * 320 + 20 + 2] == block              # the block
+    ink = [(i % 320, i // 320) for i in range(len(px)) if px[i] == ink_i]
+    assert ink and all(20 < x < 20 + w and 20 < y < 20 + h for x, y in ink)

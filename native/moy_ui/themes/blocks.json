@@ -1,0 +1,75 @@
+{
+  "format": 2,
+  "name": "blocks",
+  "modes": ["light"],
+  "fonts": { "mono": "jbmono-11-400-2.fnt" },
+  "colors": {
+    "dark": {
+      "panel": "#fff3dc", "edge": "#eadcc0", "title": "#ffffff", "title_ink": "#1a1530",
+      "accent": "#1a1530", "hilite": "#6a2cff", "dim": "#f6ead2", "desktop": "#fff3dc",
+      "desktop_pattern": "#eadcc0", "surface": "#ffffff", "surface_alt": "#fff8ec",
+      "ink": "#1a1530", "ink_dim": "#5b5167", "border": "#ddcfb8", "selection": "#6a2cff",
+      "selection_ink": "#ffffff", "focus": "#1a1530", "bar": "#ffffff", "bar_edge": "#1a1530",
+      "chrome_ink": "#1a1530", "chrome_ink_dim": "#5b5167", "title_active": "#ffffff",
+      "title_inactive": "#fff8ec", "shade_hi": "#ffffff", "shade_lo": "#f6ead2",
+      "shade_dark": "#eadcc0", "ink_accent": "#6a2cff", "value_ink": "#ffffff",
+      "sunk": "#f6ead2", "lcd": "#c9f2dd", "lcd_ink": "#1a1530",
+      "surface_light": true, "bar_light": true, "band_light": true,
+      "code_text": "#1a1530", "code_keyword": "#6a2cff", "code_string": "#1f7a3a",
+      "code_number": "#a8510a", "code_comment": "#5b5167", "code_builtin": "#1662a8"
+    },
+    "light": {
+      "panel": "#fff3dc", "edge": "#eadcc0", "title": "#ffffff", "title_ink": "#1a1530",
+      "accent": "#1a1530", "hilite": "#6a2cff", "dim": "#f6ead2", "desktop": "#fff3dc",
+      "desktop_pattern": "#eadcc0", "surface": "#ffffff", "surface_alt": "#fff8ec",
+      "ink": "#1a1530", "ink_dim": "#5b5167", "border": "#ddcfb8", "selection": "#6a2cff",
+      "selection_ink": "#ffffff", "focus": "#1a1530", "bar": "#ffffff", "bar_edge": "#1a1530",
+      "chrome_ink": "#1a1530", "chrome_ink_dim": "#5b5167", "title_active": "#ffffff",
+      "title_inactive": "#fff8ec", "shade_hi": "#ffffff", "shade_lo": "#f6ead2",
+      "shade_dark": "#eadcc0", "ink_accent": "#6a2cff", "value_ink": "#ffffff",
+      "sunk": "#f6ead2", "lcd": "#c9f2dd", "lcd_ink": "#1a1530",
+      "code_text": "#1a1530", "code_keyword": "#6a2cff", "code_string": "#1f7a3a",
+      "code_number": "#a8510a", "code_comment": "#5b5167", "code_builtin": "#1662a8"
+    }
+  },
+  "layout": {
+    "bars": [{ "edge": "top", "size": 18, "left": ["menu", "chips", "zone"],
+               "right": ["wifi", "battery", "clock"] }]
+  },
+  "look": {
+    "fam": "atkinson", "w_semi": 700, "w_bold": 800,
+    "focus": { "style": "invert", "card": "ring", "small": "invert", "ring": { "w": 3 },
+               "outline": [1, "#ffffff"] },
+    "current": { "row": "underline" },
+    "icons": { "kind": "smooth", "set": "default" },
+    "app_buttons": { "calc": { "normal": { "font": "key" }, "tonal": { "font": "op" },
+                               "primary": { "font": "op" } } },
+    "win_r": 16, "card_r": 14, "key_r": 12,
+    "home_bg": "#ffd23f",
+    "win": { "header": "fill", "frame": [2, "#1a1530"], "frame_back": [2, "#5b5167"], "rule": 2 },
+    "bar": { "fill": "#ffffff", "line": [2, "#1a1530"], "sys": ["#6a2cff", "#ffffff", "#6a2cff"],
+             "chip_cur": "#f6ead2" },
+    "tiles": { "play": "#ff6b4a", "projects": "#b79cff", "paint": "#ffd23f",
+               "storybook": "#7be0b4", "files": "#7cc8ff", "calc": "#ff9a62",
+               "getcarts": "#9be36b", "game": "#ff6b4a", "notes": "#7be0b4",
+               "trash": "#e8dcc6" },
+    "tile_outline": [2, "#1a1530"], "tile_ink": "#1a1530", "tile_grad": false,
+    "disabled": "#9c95a4", "danger_ink": "#b3261e",
+    "buttons": { "normal": { "fill": "#f4ecdc", "border": [0, "#1a1530"] },
+                 "tonal": { "fill": "#ffd23f", "ink": "#1a1530", "border": [0, "#1a1530"] },
+                 "danger": { "ink": "#1a1530" } },
+    "lcd_border": [2, "#1a1530"],
+    "keycap": { "fill": "#ffffff", "border": [1.25, "#1a1530"] },
+    "backdrop": {
+      "home": [{ "k": "fill", "p": "#ffd23f" },
+               { "k": "circle", "at": [500, 470, 520], "p": "#ffe066" },
+               { "k": "circle", "at": [0, 470, 230], "p": "#7be0b4" },
+               { "k": "circle", "at": [1000, 470, 200], "p": "#ff8a6b" }],
+      "desk": [{ "k": "fill", "p": "#fff3dc" },
+               { "k": "rrect", "at": [586, 73, 234, 150, 75], "p": "#ffd23f" },
+               { "k": "pie", "at": [996, 433, 233, 180, 270], "p": "#7cc8ff" },
+               { "k": "circle", "at": [889, 900, 350], "p": "#ff8a6b" },
+               { "k": "circle", "at": [20, 1000, 283], "p": "#7be0b4" }]
+    }
+  }
+}

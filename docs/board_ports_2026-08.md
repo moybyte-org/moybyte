@@ -27,9 +27,9 @@ own board-dir README and in the sections below.
 | `board.toml` (modules + native, denials with whys) | copy + edit | solved (#161) |
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
 | panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
-| input drivers | one copy each | `device/gt911.py`, `device/banded_panel.py`, `native/moy_flush` |
-| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is `device_boot.FrameLoop`, and every console board rides it |
-| `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | rides `FrameLoop` |
+| input drivers | one copy each | `native/moy_input` (the touch controllers, the T-Deck keyboard and trackball, selected by a board's `MOY_INPUT_*` defines), `native/moy_flush`, `native/moy_glass`'s banded compositor |
+| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is the kernel's (`native/moy_kernel/moy_loop.c`, #224), and every console board hands its console to it |
+| `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | main.py returns; the kernel runs the loop |
 | Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
 | CI legs + cache keys | one include-row per board | derived from the board list |
 | test tables (NATIVE/HOST_ONLY/WIRING…) | one row per board | deliberate tripwires — keep |
@@ -45,7 +45,7 @@ so this pays twice on arrival. Safe, mechanical, testable
 (`tests/test_board_toml.py` grows the same both-halves checks the staging got).
 
 **Phase B — the frame-loop spine.** Extract the loop's INVARIANT ORDER into
-shared code (a `FrameLoop` beside `device_boot`'s `FramePump`): begin → input
+shared code (a `FrameLoop` beside `frame_loop`'s `FramePump`): begin → input
 sources → dev channel → idle tick (after EVERY input source — the wake-swallow
 rule) → pointer → present hooks → `ws.frame` → tail → pace. Boards supply
 `poll_input()` / `present()` / `tail()` hooks and keep their hardware.
@@ -70,16 +70,19 @@ were closed.
 The rule: a driver moves from a board tree to the shared `device/` (Python) or
 `native/` (C) the day a SECOND board carries the hardware, parameterized by
 `board.toml` data — and not one day earlier.
-  * **GT911**: the Guition P4 did NOT bring one (it is a GSL3680), so the
-    second consumer has not arrived; the HeldPoint core in `device/gt911.py`
-    is what the GSL3680 driver rides, which is the promotion that DID happen.
+  * **Touch (2026-10-07)**: every controller is the kernel's
+    (`native/moy_input/moy_touchdev.c`: the GT911, the GSL3680, the AXS15231)
+    over one mapping and no-news body (`moy_touch.c`); a board names its
+    controller, pins and knobs in `mpconfigboard.h` (`MOY_INPUT_TOUCH_*`).
   * **The P4 silicon (2026-09-06, the Guition P4 as second consumer)**: four C
     modules (`moy_dsi` parameterized by a `MOY_DSI_PANEL_*` board define,
-    `moy_ppa`, `moy_ble_hid`, `moy_c6`) moved to **`native/p4/`**, declared by
+    `moy_ppa`, `moy_ble_hid`, `moy_c6`; the BLE central has since moved into
+    `native/moy_input`) moved to **`native/p4/`**, declared by
     a P4 board as a SECOND native source (`[native.p4]`) rather than denied by
     every S3 board — `native/p4/` carries no `micropython.cmake` of its own,
     so the shared scan never sees it. Two Python halves followed:
-    `device/dsi_panel.py` (the compositor, backlight injected),
+    the compositor (shared Python then; the kernel's `native/moy_glass`
+    since sprint 3's glass pass),
     `device/p4_canvas.py` (the PPA system canvas + the PPA smoke) and
     `device/p4_desktop.py` (the P4 tier over the shared boot spine
     `device/desktop_spine.py`, which all four console boards take since
@@ -87,16 +90,12 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     passes its name, compositor, inputs, store and constants and takes the
     rest. The 2026-09-09 P4 promotion found the two boards' `run_desktop`s
     differing in fifty lines of which all but five were a print string).
-    The two P4
-    patches became `patches/p4_*.patch` behind two shared build-lib
-    functions. What stayed per board: the backlight (GPIO + polarity), the
+    The P4
+    silicon patch became `patches/p4_*.patch` behind a shared build-lib
+    function. What stayed per board: the backlight (GPIO + polarity), the
     touch driver, the canvas sizes, `run_desktop`.
-  * **GSL3680**: a NEW part, so it started in `device/gsl3680.py` with the
-    board's pins, firmware and flips passed in — the stage-2 rule, followed.
-    The firmware blob is the BOARD's (`gsl_fw_jc8012.py`): it carries one
-    glass's sensor geometry.
-  * **AXS15231 touch**: lands directly as a shared `device/` driver — it is
-    new code, so it starts in the right place.
+  * **GSL3680**: the firmware blob is the BOARD's (`gsl_fw_jc8012.c` beside
+    its `mpconfigboard.h`): it carries one glass's sensor geometry.
   * **The QSPI panel**: `moy_lcd`'s VALUE is not the ST7789 init table — it is
     the band/bounce/kick-pump-drain machinery and the hard-won DMA rules
     compiled into it. Whether the AXS15231B backend shares that C core
@@ -132,32 +131,19 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     consumer is what made it shareable, exactly as Phase C's rule says — the
     trigger was not a third board but the two boards CONVERGING.
 
-  * **The panel compositor (Python)**: `device/banded_panel.py`, promoted the
-    same day and for the same reason (#206 item 1). It is the twin of the C
-    split one tier up — the frame machine shared, the transport not. What #206
-    listed as the genuine per-board difference was "the T-Deck's soft pump
-    timer and draw-op pokes"; `d9aa73e` retired those, and the two files were
-    left with twelve identical methods and two constructors differing by an
-    import, so the extraction is a consequence of the feeder port rather than
-    a fresh judgement call. `BandedCompositor` owns the backend contract, the
-    drain-swap-kick overlap, the ping-pong and the meters; each board's
-    subclass imports its native module (**in its own `__init__`, so
-    `tests/test_staging_closure.py` can still see which board depends on which
-    C module**), passes it in, and adds only what is its own — geometry, the
-    `ASYNC_FLUSH` revert flag, the module-level `set_backlight()`, the
-    T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`, the Guition's game window.
-    Note what did NOT move: `set_backlight()` as a module function exists for
-    callers holding no compositor, so routing it through the class would undo
-    its reason to exist, and two two-line copies are cheaper than the
-    indirection. Nor did `fold_supported` become a base-class probe — a board
-    without the lever must carry no such attribute at all, which is how a board
-    says it lacks one. **2026-09 amendment:** the T-Deck took the fold too, so
-    the verbs sit on a `FoldingCompositor` rung BETWEEN the base and the two
-    boards — a subclass and not four more base methods, precisely so that
-    absence stays available to the next banded board that cannot synthesize.
-    Measured on glass: T-Deck 58.1 → 58.7 fps, Guition
-    44.7 → 44.8 (Brick Siege medians of three 6.6 s samples, fresh boot),
-    `idle=0 gaps=0` on both, suites 9/9 and 10/10.
+  * **The panel compositor**: promoted the same day and for the same reason
+    (#206 item 1) as a shared Python body, and since sprint 3's glass pass
+    (2026-10-07) the kernel's `moy_glass.BandedCompositor`, its frame state
+    machine in C (`native/moy_glass/moy_present.h`). It owns the backend
+    contract, the drain-swap-kick overlap, the ping-pong and the meters; each
+    board passes its native module in and keeps only what is its own --
+    geometry, the `ASYNC_FLUSH` revert flag, the T-Deck's `LAYER_COPY_ASYNC`,
+    the Guition's game window -- and the fold and SD-guard verbs are the panel
+    module's, which the compositor forwards only where the module has them: a
+    board without the lever carries no such attribute at all, which is how a
+    board says it lacks one. Measured on glass when the fold went shared:
+    T-Deck 58.1 → 58.7 fps, Guition 44.7 → 44.8 (Brick Siege medians of three
+    6.6 s samples, fresh boot), `idle=0 gaps=0` on both, suites 9/9 and 10/10.
 
 **Phase D — the port checklist** (below). A checklist, not a generator —
 three data points before any codegen. Drafted from the T-Deck mainline port
@@ -217,12 +203,13 @@ the next one:
 **Stage 1 — panel.** The board's compositor (implementing
 `docs/surface_model_v1.md` §4 — size/framebuffer/gfx/flush/sync) over its
 native panel module. A board that PUSHES frames writes neither half from
-scratch: **subclass `device/banded_panel.py`'s `BandedCompositor`** (allowlist
-it in `[modules.device]`) and give it a native module exporting the
-`init`/`fb`/`nfbs`/`kick`/`drain`/`show`/`stats`/`pump_stats`/`backlight` verb
-set, which is `native/moy_flush` plus three transport hooks. The subclass
-should be an import, a flag and this board's own levers; if it grows a second
-copy of the ping-pong or the meters, something is being re-discovered. Smoke: colour bars + checker, printed flush µs. The
+scratch: **build the kernel's `moy_glass.BandedCompositor`** over a native
+module exporting the `init`/`fb`/`nfbs`/`kick`/`drain`/`show`/`stats`/
+`pump_stats`/`backlight` verb set and the kernel entries `kwait`/`kkick`/
+`kship`/`kbacklight` (named by `MOY_KERNEL_PANEL`, with `MOY_GLASS_BANDED` in
+`mpconfigboard.h`), which is `native/moy_flush` plus three transport hooks. If
+the board grows a second copy of the ping-pong or the meters, something is
+being re-discovered. Smoke: colour bars + checker, printed flush µs. The
 MADCTL / byte-order / rotation table in the T-Deck README's stage-1 section is
 the debug map. Decide the panel driver's share-or-stand-alone question ON THIS
 GLASS (moy_lcd's band/bounce machinery vs. a new io layer) — and note the
@@ -232,10 +219,11 @@ write only its three transport hooks, so "stands alone" means the transport,
 not the concurrency. A board whose panel scans continuously (DPI) denies
 moy_flush in `board.toml` and has no stage-1 flush at all.
 
-**Stage 2 — touch.** Start from `device/gt911.py` if the part matches (the
-byte-order caveat: read the dump, never assume); calibrate with a
-corner-target smoke; bake the swap/flip knobs with the calibration date. A new
-part's driver starts IN `device/` (shared) with board params.
+**Stage 2 — touch.** Name the controller in `mpconfigboard.h`
+(`MOY_INPUT_TOUCH_KIND` and its pins, `native/moy_input/moy_input_task.c`) if
+the kernel drives the part (the byte-order caveat: read the dump, never
+assume); calibrate with a corner-target smoke; bake the swap/flip knobs with
+the calibration date. A new part's protocol joins `moy_touchdev.c`, shared.
 
 **Stage 3 — input beyond touch** (keyboard/trackball/BLE), if any. This is
 where the poller-thread question lives on a bus-contended board.
@@ -243,14 +231,15 @@ where the poller-thread question lives on a bus-contended board.
 **Stage 4 — storage.** SD or internal VFS; the store root must not shadow a
 frozen module name (`/moy/carts`, never `/moybyte/...`).
 
-**Stage 5 — audio**, if wired (the moy_audio usermod + a device_audio
-constructor carrying the board's pins).
+**Stage 5 — audio**, if wired: the moy_audio usermod taken in board.toml and
+the board's I2S pins (and a codec, `MOY_AUDIO_CODEC_*`) in `mpconfigboard.h`
+(`native/moy_audio/moy_aud_out.c` lists the defines).
 
 **Stage 6 — the console.** run_desktop = construct compositor/canvas/inputs,
 `DeviceBoot` → `wire_workstation_core` → services (`ws.updater`/`ws.webhost`)
-→ `IdleBlank` + `DevChannel` (+ board extras via its `extra`/`env` hooks) →
-the board's `poll_inputs`/`present`/`tail`/`account` hooks + the shared
-`device_boot.FrameLoop`. Exit criteria, all three: the desktop on glass;
+→ `DevChannel` (+ board extras via its `extra`/`env` hooks) → `Desktop.run`,
+which binds the board's input hardware into the kernel's input stage and
+hands the console to the kernel's loop (`native/moy_kernel/moy_loop.c`). Exit criteria, all three: the desktop on glass;
 `make test` green; **the board's on-glass suite exists and passes**. OTA
 needs no extra step: the board id is in board.toml and the manifest publisher
 follows the CI matrix row.
@@ -262,9 +251,9 @@ each of these by copying, and a fourth would pay again):
   subclasses it and adds only its own native module and levers. A lever the
   board lacks is expressed by the ATTRIBUTE'S ABSENCE (`fold_supported`), never
   by a zero.
-- **The PERF line** is `runtime/perf_line.py` (the field table, formatter and
-  parser in one module) measured by `device_boot.PerfSampler` on the
-  `FrameLoop.account` hook. A board emits the SAME field set as every other
+- **The PERF line** is the kernel's (`native/moy_kernel/moy_perf.c` writes
+  it from the loop's account stage; `runtime/perf_line.py` is its field table
+  and parser). A board emits the SAME field set as every other
   board and prints `-` for what it cannot measure. Do not add a board-shaped
   variant: three of them existed under one name, and the odd one out was
   silently unreadable by `tools/p4_perf.py` for as long as it existed.
@@ -280,9 +269,9 @@ each of these by copying, and a fourth would pay again):
 
 ## What the Guition S3 specifically stresses (and the P4 doesn't)
 
-* **Input without a keyboard.** `moybyte/input.py` is the T-Deck keyboard
-  matrix + InputState fused; a touch-only board needs the InputState core
-  separable from the keyboard driver. Do this split AS the port needs it.
+* **Input without a keyboard.** The input table and the T-Deck keyboard are
+  separate (`native/moy_input`: the table in `moy_input.c`, the keyboard in
+  `moy_kbd.c`), so a touch-only board takes the table and names no keyboard.
 * **A third system resolution on the fullscreen tier.** 480×320 landscape
   (owner call 2026-08-18, off the portrait-native 320×480 glass): system UI
   responsive at native res (#39 — closed, the machinery exists), the game a

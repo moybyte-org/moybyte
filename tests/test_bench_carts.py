@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from ws_helpers import select_on_home
+
 ROOT = Path(__file__).resolve().parent.parent
 SYSTEM_CARTS = ROOT / "system_carts"
 
@@ -27,11 +29,7 @@ def _run_bench(tmp_path, title, frames):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
-    for i, it in enumerate(ws.launcher.items):
-        if it.get("title") == title:
-            ws.launcher.sel = i
-            break
-    else:
+    if select_on_home(ws, title) is None:
         raise AssertionError(title + " not seeded")
     ws.open()
     assert ws.cart_error is None, ws.cart_error
@@ -102,7 +100,7 @@ def test_the_bench_carries_the_assets_its_folded_scenes_read():
     # layer's width). Both carts ship the same two files.
     from runtime.editors_sheet import TileMap
 
-    for folder in ("bench.moy", "bench_lua.moy"):
+    for folder in ("moybyte.bench.moy", "moybyte.bench_lua.moy"):
         d = SYSTEM_CARTS / folder
         tm = TileMap.from_hex((d / "map.moymap").read_text())
         assert (tm.w, tm.h) == (64, 30), folder

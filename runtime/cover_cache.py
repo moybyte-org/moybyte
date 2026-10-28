@@ -3,6 +3,7 @@
 #   _CoverJob                  a resumable decode of one cover
 #   CoverCache                 the cover and icon caches, budgets and warmers
 #   CoverCache.cover_for       a cart's cover at a reduction
+#   CoverCache.tinted          a cover dimmed, made from its BASE
 #   CoverCache.sheet_icon      the icon out of a cart's sprite sheet
 #   CoverCache.invalidate_all  drop everything a store rescan could change
 #   CoverCache.diet_release    drop the cover pipeline before a cart runs
@@ -12,15 +13,21 @@
 A cart's cover is its `cover.png` (SPEC.md 3.6), read by runtime/cover_png.py
 -- the native `moy_png` on a board and in the browser, its Python twin on the
 host. What is cached is ONE decoded picture per cover, the BASE: its 128 x 128
-pixels as RGB565 in the system canvas's byte order, which the shelf draws at a
-whole-number scale through `DeviceCanvas.blit565` (docs/theming_2026-09.md,
-P8: one cached base size per cover, an integer upscale at draw, no per-size
-variants). Two other decodes of the same file exist, each for one consumer:
+pixels as RGB565 in the system canvas's byte order, which the picker's shelf
+draws at a whole-number scale through `DeviceCanvas.blit565` and the home's
+carousel at any ratio through `DeviceCanvas.blit565_resize`
+(docs/theming_2026-09.md, P8: one cached base size per cover, scaled at draw,
+no per-size variants). Two other decodes of the same file exist, each for one
+consumer:
 
-  * HALF, 64 x 64, its box-filtered reduction: the Library GRID's interim need,
-    for a card whose art slot is under 128 and whose cart names no icon;
+  * HALF, 64 x 64, its box-filtered reduction: a card under 128 across
+    (the handheld shelf's cards and the icon home's tiles);
   * ICON, 16 x 16, a reduction in palette indices: the desktop icon of a cart
     that names no SPEC.md 3.4 icon (`icon_sheet_for`).
+
+One product is made from the BASE rather than decoded: the whole of it
+dimmed toward a colour (`tinted`), the home's neighbour card under a theme
+that dims them, kept in the same LRU so it leaves with the decodes.
 
 This is the FRAME-HOT collaborator: the grids call `cover_for` once per card
 per painted shelf frame through an injected bound method, and `frame()` touches
@@ -64,9 +71,9 @@ collaborators follow.
 """
 
 try:
-    from editors import SpriteSheet
+    from editors_sheet import SpriteSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
 
 try:
     from ticks import _ticks_ms, _ticks_diff
@@ -315,6 +322,52 @@ class CoverCache:
             self._jobs.pop(key, None)
             return self._finish(key, None)
 
+    def ready_for(self, cart, div=BASE):
+        """What `cover_for` would answer now without building or touching
+        anything: the decoded cover, None for a cart known to carry none,
+        and False while it is not decoded."""
+        path = cart.get("path")
+        if path is None or path in self._none:
+            return None
+        return self._cache.get((path, div), False)
+
+    def none_for(self, cart):
+        """Whether `cart` is known to carry no cover (its `cover_for` answers
+        None for good, not while a decode is in flight): one with no path
+        too, which no store holds."""
+        path = cart.get("path")
+        return path is None or path in self._none
+
+    def tinted(self, cart, c, alpha):
+        """The cart's BASE cover with colour `c` over it at `alpha` (0..255,
+        `DeviceCanvas.tint565`): a dimmed neighbour's card
+        (docs/look_2026-10.md step 15), made once from the BASE and kept in
+        the same LRU as the decodes, so every drop path (the diet, a re-scan,
+        eviction) frees it. None until the BASE has landed, or where the cart
+        has no cover."""
+        path = cart.get("path")
+        if path is None:
+            return None
+        key = (path, c, alpha)
+        cache = self._cache
+        if key in cache:
+            order = self._order
+            try:
+                order.remove(key)
+            except ValueError:
+                pass
+            order.append(key)
+            return cache[key]
+        base = self.cover_for(cart, BASE)
+        cv = getattr(self.ws, "sys_canvas", None)
+        if base is None or cv is None:
+            return None
+        w, h = base.w, base.h
+        out = bytearray(2 * w * h)
+        if not cv.tint565(out, base.pix, w, 0, 0, w, h, c, alpha):
+            return self._finish(key, None)
+        return self._finish(key, _CoverImage(w, h, _moybuf.take(out)))
+
     def _build(self, path, key, div, t0):
         """One step of a cover build, from `cover_for`'s budget gate. Split out
         so the fence above wraps the whole of it, allocations included.
@@ -397,7 +450,9 @@ class CoverCache:
     def sheet_icon(self, cart):
         """The icon out of the cart's SPRITE SHEET, cached per cart path so the
         grid doesn't rebuild a sheet every frame -- and baked by
-        `CartManager.slim` while the sheet is still in RAM.
+        `CartManager.slim` while the art is still in RAM: the `icon_rows` a
+        catalogue entry carries (`moy_carts.entry`), or the sheet of a cart
+        that arrived whole.
 
         The tiles come from the manifest's "icon" (SPEC.md 3.4) -- [tile, w, h],
         or a bare tile id for 1x1 -- falling back to tile 0. The field has to be
@@ -415,8 +470,11 @@ class CoverCache:
         # test and the SPEC 3.4 out-of-range fallback, so the picture is
         # unchanged -- the shell goldens pin it.
         try:
-            img = SpriteSheet.icon_from_hex(cart.get("sprites"), n, tw, th,
-                                            cols=16, rows=32)
+            if "icon_rows" in cart:
+                img = SpriteSheet.icon_from_rows(cart["icon_rows"])
+            else:
+                img = SpriteSheet.icon_from_hex(cart.get("sprites"), n, tw, th,
+                                                cols=16, rows=32)
         except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
             img = None
         cache[key] = img
@@ -448,14 +506,14 @@ class CoverCache:
         """Drop every desktop icon that CAN be rebuilt, and every icon whose
         cart has gone away. What survives is the one case a blanket clear would
         lose for the rest of the session: a cart still on the shelf that has
-        already been slimmed (#66), whose sprite art is no longer in RAM.
+        already been slimmed (#66), whose icon's art is no longer in RAM.
 
         The predicate is `lazy`, which is exactly the flag `CartManager.slim` sets
         after it bakes an icon and deletes the art -- so "will something re-bake
         this?" and "will this survive the prune?" are answers to the same
         question and cannot drift apart. A slimmed cart's icon also cannot have
-        gone stale: a real edit arrives as a fresh FAT scan, which is the branch
-        that drops."""
+        gone stale: a real edit arrives as a fresh scan, whose entries carry
+        their icon rows and are not yet lazy, which is the branch that drops."""
         keep = {}
         for cart in self.ws.carts.all:
             if not cart.get("lazy"):
@@ -609,7 +667,7 @@ class CoverCache:
         the picture LRU is capped, so a set larger than the cap evicts its own
         head and an uncached test never runs out of work."""
         ws = self.ws
-        grids = (ws.launcher, ws.picker)
+        grids = (ws.launcher, ws.projects_grid)
         cap = self._COVER_PREBUILD_PER_GRID
         at = self._pb_i
         pos = 0

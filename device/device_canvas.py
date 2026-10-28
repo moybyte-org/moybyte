@@ -1,29 +1,27 @@
 # Map (grep -n a name to jump there):
 #   to_indices                   an RGB565 framebuffer back to palette indices
-#   ellipse                      the ellipse inscribed in a box
-#   tri_spans                    a filled triangle's spans
-#   _MaskedRegion                a cell grid standing in for a tilemap
 #   DeviceCanvas                 the kid drawing API on the device, every board
 #   DeviceCanvas.sync_back       re-point the draw target at the back buffer
 #   DeviceCanvas.palette         swap the RGB table
 #   DeviceCanvas.blit_game       the fullscreen WM's game composite
 #   DeviceCanvas.present_frame   a compiled cart's frame to the flush
 #   DeviceCanvas.blit565         place an RGB565 picture
-#   DeviceCanvas.reclaim_layers  return a dead program's layer buffers
+#   DeviceCanvas.reclaim_layers  end a dead program's loans
 #   SystemCanvas                 DeviceCanvas plus the system-surface contract
-#   _LayerComp                   the compositor stand-in a layer canvas draws through
+#   _LayerComp                   a layer's pixels: one of the glass's BUF rows
 """The device DRAWING backend (extracted from moy_runtime.py) -- the single most
 performance-critical + native-coupled unit on the device.
 
 DeviceCanvas implements the indexed v0.4 canvas API (cls/pset/line/rect/circ/spr/
 map/print + the #54 scroll layers + the #63 sprite-batch/spr-gate) against the
 compositor's RGB565 framebuffer. The hot verbs go through the native moy_gfx kernel
-(fill/fill_rect/blit565/blit_map/blit_batch/blit_indices/circ/line/text/copy_async);
-framebuf is the text/line + no-moy_gfx fallback; moy_alloc gives _LayerComp its
-off-GC-heap DMA buffer. Also here: Image (indexed sprite, re-exported from
+(fill/fill_rect/blit565/blit_map/blit_batch/blit_indices/circ/line/text/layer_blit);
+framebuf is the text/line + no-moy_gfx fallback; the glass (moy_glass) gives
+_LayerComp its off-GC-heap DMA buffer as a BUF row and every canvas its CANVAS
+row. Also here: Image (indexed sprite, re-exported from
 moy_image), _LayerComp (the scroll-layer compositor), the MOY64 RGB565
 palette LUTs (PAL565 / PAL565_SW / PAL565_WIRE / _PAL565_WIRE_BUF), and the native-detection flags
-(_USE_GFX / LAYER_COPY_ASYNC / _RGB_KEY / _FONT8).
+(LAYER_COPY_ASYNC / _RGB_KEY / _FONT8).
 
 Imports: `array` + the leaf device_util tick helpers; the native modules
 (moy_gfx/moy_alloc/framebuf) are imported lazily inside methods, and the
@@ -62,24 +60,13 @@ def _text_bytes(s):
     "b'...'", so the conversion has to be this and not that. A str is
     UTF-8-encoded, which is the same buffer moy_gfx.text would have taken from
     it anyway."""
-    if isinstance(s, (bytes, bytearray)):
+    t = type(s)
+    if t is bytes or t is bytearray:
+        return s
+    if t is not str and isinstance(s, (bytes, bytearray)):
         return s
     return str(s).encode("utf-8")
 
-
-def _fb_text(s):
-    """The same bytes as a str framebuf.text can take -- the no-moy_gfx fallback.
-
-    framebuf.text needs a str, and no str holds byte 0xFF. Every byte outside
-    the font's 0x20-0x7F draws nothing in the native path and still advances a
-    cell, so mapping those to a SPACE gives the fallback identical pixels and
-    identical spacing rather than a hole where the cursor drifts."""
-    b = _text_bytes(s)
-    out = bytearray(len(b))
-    for i in range(len(b)):
-        ch = b[i]
-        out[i] = ch if 0x20 <= ch <= 0x7F else 0x20
-    return out.decode()
 
 # #186 moy_buf: an image whose .pix already lives OFF the gc heap (a cover --
 # memoryview pix) gets its RGB565 bakes off-heap too, so the whole cover stops
@@ -92,6 +79,39 @@ try:
     import moybuf as _moybuf
 except ImportError:
     _moybuf = None
+try:
+    import moy_glass as _glass_mod
+except ImportError:  # pragma: no cover - host tree: the ctypes binding
+    from runtime import glass_binding as _glass_mod
+
+# The glass (native/moy_glass): every canvas is a CANVAS row, every off-heap
+# buffer a canvas draws into or bakes -- a layer, a window, a run canvas, a
+# scratch, a paint image's bake -- a BUF row, on loan to an OWNER when a
+# lifetime holds it. An owner here is named by its tag ("cart", "wallpaper",
+# "paint"); _OWNERS maps a live tag to its OWNER handle, and ending the tag's
+# lifetime ends the handle, so the next run under the same tag is a new owner
+# and nothing it holds can be returned by a stale reference to the last.
+_ROLE_LAYER = _glass_mod.ROLE_LAYER
+_ROLE_BAKE = _glass_mod.ROLE_BAKE
+_ROLE_SCRATCH = _glass_mod.ROLE_SCRATCH
+_BAKE_MASK = 1 << _ROLE_BAKE
+_OWNERS = {}
+
+
+def _owner_h(tag):
+    """The OWNER handle of `tag`'s live lifetime, minted on its first loan."""
+    h = _OWNERS.get(tag)
+    if h is None:
+        h = _OWNERS[tag] = _glass_mod.owner(tag)
+    return h
+
+
+def _owner_done(tag):
+    """End `tag`'s lifetime: every loan it holds goes back, then its row."""
+    h = _OWNERS.pop(tag, None)
+    if h is not None:
+        _glass_mod.owner_end(h)
+        _sweep_bakes()
 
 # A bake at or above this many bytes is a full-surface buffer and never comes
 # off the gc heap while an allocator will serve it (_paint_bake_buf). The bar
@@ -100,12 +120,13 @@ except ImportError:
 # that has been up for a while, however much heap is free in total.
 _OFFHEAP_BAKE_BYTES = 64 * 1024
 
-# Off-heap paint bakes on loan to a running program (#186), owner -> [(img,
-# buf)]. Module-level for the reason _LAYER_POOL is: the canvas that BAKES an
-# image is often a layer's throwaway canvas, while the reclaim call arrives on
-# the root -- a per-canvas register would have leaked exactly the buffers a
-# scroll cart makes. Drained by release_bakes(owner) / reclaim_layers(owner).
-_LENT_BAKES = {}
+# Off-heap paint bakes on loan to a running program (#186): BUF rows of role
+# BAKE on loan to the image's owner, each held by its image (`_bake`) and
+# listed in _BAKED until its row goes. Owner-scoped, never canvas-scoped: the
+# canvas that BAKES an image is often a layer's throwaway canvas, while the
+# reclaim call arrives on the root. Returned by release_bakes(owner) /
+# reclaim_layers(owner).
+_BAKED = []
 
 # ...and the most one owner may hold at once. The cap is not tidiness, it is
 # the price of lending to memory a CART can mint: off-heap bytes have no
@@ -156,10 +177,10 @@ def _paint_bake_buf(img, nbytes):
     names an OWNER (`_owner`) and so has something that will hand the buffer
     back: a CART's images, whether the engine loaded them (cart_api's image())
     or the cart built them itself (its `Image`), reclaimed with the run; and
-    the Paint app's document, reclaimed when the app is left. _LENT_BAKES holds
-    the loan until release_bakes(owner) -- which reclaim_layers(owner) calls,
-    so a dead run's bakes go back through the same seam, and the same two call
-    sites, that already pool its layer buffers. An UNOWNED paint image (the
+    the Paint app's document, reclaimed when the app is left. The glass holds
+    the loan until release_bakes(owner) -- or reclaim_layers(owner), which
+    ends the owner and so returns every loan it holds, layers and bakes
+    alike. An UNOWNED paint image (the
     WM's window rasters, a wallpaper blit) keeps its gc bytearray, because
     nothing would ever free it.
 
@@ -169,38 +190,55 @@ def _paint_bake_buf(img, nbytes):
     an owner is capped at _MAX_LENT_BAKES and falls back to the gc heap past it.
     """
     owner = getattr(img, "_owner", None)
-    if _moybuf is None or owner is None or nbytes < _OFFHEAP_BAKE_BYTES:
+    if owner is None or nbytes < _OFFHEAP_BAKE_BYTES:
         return _bake_buf(img, nbytes)
-    lent = _LENT_BAKES.setdefault(owner, [])
-    for i in range(len(lent)):
-        if lent[i][0] is img:
-            buf = lent[i][1]
-            if len(buf) == nbytes:
-                return buf
-            _moybuf.free(buf)
-            lent.pop(i)
-            break
-    if len(lent) >= _MAX_LENT_BAKES:
+    b = getattr(img, "_bake", None)
+    if b is not None:
+        if b.live and b.nbytes == nbytes:
+            return b.view
+        b.release()
+        img._bake = None
+        _BAKED.remove(img)
+    oh = _owner_h(owner)
+    lent = 0
+    for h in _glass_mod.rows(oh):
+        if _glass_mod.row(h)[1] == _ROLE_BAKE:
+            lent += 1
+    if lent >= _MAX_LENT_BAKES:
         return bytearray(nbytes)       # the gc heap, flatly: _bake_buf's own
                                        # off-heap lane is tracked by a COVER's
                                        # owner, and past the cap this image has
                                        # none -- an untracked loan is the one
                                        # outcome worse than a refused bake
-    buf = _moybuf.alloc(nbytes)
-    if isinstance(buf, memoryview):     # a bytearray back means PSRAM said no
-        lent.append((img, buf))
-    return buf
+    b = _glass_mod.buf(nbytes, _ROLE_BAKE, oh)
+    img._bake = b
+    _BAKED.append(img)
+    return b.view
+
+
+def _sweep_bakes():
+    """Forget the bakes whose rows have gone (their owner reclaimed them): an
+    image that still points at one re-bakes on its next draw, never reads the
+    returned buffer."""
+    i = 0
+    while i < len(_BAKED):
+        img = _BAKED[i]
+        b = img._bake
+        if b is not None and b.live:
+            i += 1
+            continue
+        if b is not None and getattr(img, "_rgb_i", None) is b.view:
+            img._rgb_i = None     # a stale draw re-bakes, never reads freed RAM
+        img._bake = None
+        _BAKED.pop(i)
 
 
 def _release_bakes(owner):
-    """Free `owner`'s off-heap paint bakes (see _paint_bake_buf)."""
-    lent = _LENT_BAKES.pop(owner, None)
-    if not lent or _moybuf is None:
-        return
-    for img, buf in lent:
-        if getattr(img, "_rgb_i", None) is buf:
-            img._rgb_i = None     # a stale draw raises, never reads freed RAM
-        _moybuf.free(buf)
+    """Return `owner`'s off-heap paint bakes (see _paint_bake_buf)."""
+    h = _OWNERS.get(owner)
+    if h is not None:
+        _glass_mod.reclaim(h, _BAKE_MASK)
+        _sweep_bakes()
 
 # MOY64 palette as RGB565 (generated from runtime/palette.py; no colorsys here).
 PAL565 = (
@@ -243,6 +281,12 @@ except ImportError:
 # byte first -- the S3 boards, and the host and the browser, which keep that order
 # -- and False on the P4's DPI.
 WIRE_SWAPPED = PAL565_WIRE is PAL565_SW
+# The glyph lane blends in that order too (moy_text.h's moy_text_wire).
+try:
+    import moy_ui as _moy_ui_wire
+    _moy_ui_wire.text_wire(WIRE_SWAPPED)
+except (ImportError, AttributeError):
+    pass
 
 # Buffer form of PAL565_WIRE for the native blit_indices kernel (#63): the C reads the
 # palette via the BUFFER PROTOCOL (moy_gfx_buf_r), and a tuple has none ("object with
@@ -291,6 +335,9 @@ def to_indices(buf, wire=None, strict=True):
     at the boundary leaves all of them untouched; converting THEM to 565 would
     change a persisted format.
 
+    A word of the shell's block that MOY64 does not hold reads as its slot,
+    64..127 (`set_block`).
+
     `wire` defaults to the stock table. Pass a canvas's own `_wire` to read a
     frame drawn under a cart palette -- with a private table the words are
     different and the stock reverse map would not know them.
@@ -307,6 +354,17 @@ def to_indices(buf, wire=None, strict=True):
         rev = {}
         for _i in range(len(wire) - 1, -1, -1):
             rev[wire[_i]] = _i
+    # The shell's block (indices 64..127): a word MOY64 does not hold reads
+    # as its slot, so a frame of the shell's is index-native too.
+    blk = None
+    for _i in range(63, -1, -1):
+        w = _BLOCK[_i]
+        if w not in rev:
+            if blk is None:
+                blk = dict(rev)
+            blk[w] = 64 + _i
+    if blk is not None:
+        rev = blk
     # Byte pairs, NOT memoryview.cast("H"): MicroPython's memoryview has no
     # `cast`, and this function is meant to be callable on a board. Caught on P4
     # glass 2026-08-15 -- it worked in every host test and raised AttributeError
@@ -346,18 +404,6 @@ del _i
 # built (see DeviceCanvas._cache_rgb), so it can never read as transparent.
 _RGB_KEY = 0xF81F
 
-# new_layer pre-collects (defragment PSRAM) only for a layer at least this many
-# pixels -- a cart's scrolling world (~192K px), not a UI cache like the bar's
-# 1024x18 strip (~18K px), whose rebuild was paying a full mark-sweep. See
-# new_layer's COMPACT FIRST note.
-_COMPACT_MIN_PX = 64 * 1024
-
-# Flip to False to force the slow Python per-pixel drawing path (no native moy_gfx)
-# for an FPS A/B comparison against the native-blit build. NOT dead config: the
-# host parity suite (tests/test_device_canvas_parity.py) sets this module attribute
-# per-case to prove the Python fallbacks render byte-identical to the native kernel.
-_USE_GFX = True
-
 # GDMA async layer copy (#54 St.2 / #63 / #66): tied to the SRAM-bounce flush.
 # The copy is correct and fast (layer 7ms -> 0.04ms, plus it keeps the dcache
 # warm: Sakura logic 13-21ms vs 29-41ms with the CPU sync copy), but it is a
@@ -374,7 +420,65 @@ LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 
 # #75: immutable templates the per-frame reset_state restores the pal tables from
 # IN PLACE (no per-frame bytearray allocation; 0 == identity map / all-opaque).
+# MicroPython's map sizes (py/map.c's hash_allocation_sizes), the part a
+# canvas's attributes span. A map grows only once it is FULL, and a lookup
+# that misses it -- every method call, since a method lives on the class --
+# probes until it meets an empty slot: the whole map, when it is full. A
+# canvas holds some seventy attributes, so whether its verbs cost a few probes
+# or seventy depends on where that count sits against these sizes (measured on
+# the T-Deck's Bench: circ 82 -> 107 us/op at 71 of 73 slots).
+_MAP_SIZES = (17, 23, 29, 37, 47, 59, 73, 97, 127, 167, 223, 293)
+
+
+_HOST_ONLY_KEYS = ("__dict__", "__weakref__", "__qualname__", "__firstlineno__",
+                   "__static_attributes__", "__doc__")
+
+
+def _map_len(obj):
+    return len([k for k in obj.__dict__ if k not in _HOST_ONLY_KEYS])
+
+
+def _room(obj):
+    """Leave `obj`'s attribute map at most four-fifths full: past that, add
+    spare attributes until the map grows to its next size. An instance store
+    looks its name up through every class first, so a class's map counts as
+    much as the instance's. Counted as MicroPython counts it: CPython's own
+    class entries are not in a board's map."""
+    n = _map_len(obj)
+    for s in _MAP_SIZES:
+        if s >= n:
+            if n * 5 > s * 4:
+                for i in range(s + 1 - n):
+                    setattr(obj, "_room%d" % i, None)
+            return
+
+
 _PAL_IDENTITY = bytes(range(64))
+
+# THE SHELL'S BLOCK (docs/look_2026-10.md step 5): the live theme's RGB
+# colours, colour indices 64..127, in this build's wire order. A canvas row's
+# table is 128 entries: 0..63 are MOY64 through the canvas's palette and pal()
+# (this class writes them), 64..127 this block (native/moy_glass writes it into
+# every row; pal() never remaps it). `_CMASK[0]` is what a colour index is
+# masked with: 127, or 63 while a cart's code runs (`set_cart`), so a cart's
+# colour stays its index modulo 64.
+_BLOCK = _glass_mod.block_view()
+_CMASK = _glass_mod.cmask()
+
+
+def set_block(words):
+    """Make `words` (up to 64 canonical RGB565 words, the live theme's
+    block: `moy_ui.theme_place`) colour indices 64.. on every canvas."""
+    wire = array("H", bytes(128))
+    for i in range(min(64, len(words))):
+        w = int(words[i]) & 0xFFFF
+        wire[i] = w if PAL565_WIRE is PAL565 else (((w & 0xFF) << 8) | (w >> 8))
+    _glass_mod.block(wire)
+
+
+def set_cart(on):
+    """The cart boundary: while on, a colour index is masked to 0..63."""
+    _glass_mod.cart(on)
 _PALT_OPAQUE = bytes(64)
 
 
@@ -382,117 +486,6 @@ _PALT_OPAQUE = bytes(64)
 _MG_LINE, _MG_RECT, _MG_RECTB = 0, 1, 2
 _MG_CIRC, _MG_CIRCB, _MG_TRI, _MG_TRIB = 3, 4, 5, 6
 _MG_OVAL, _MG_OVALB = 7, 8
-
-
-def ellipse(x0, y0, x1, y1, put, span):
-    """The ellipse inscribed in the box (x0, y0)-(x1, y1), corners inclusive.
-
-    Zingl's integer midpoint walk, transcribed from libmoy's moy_oval so the
-    no-kernel lane draws the same pixels the C does: four quadrant points per
-    step, no division and no float, which is what makes the spec's `oval`
-    golden enforceable across hosts. `put` emits the OUTLINE; `span` emits one
-    inclusive row (xa, xb, y) the first time the walk reaches it -- x only moves
-    inward, so the first visit is the widest. The tail loop finishes the tips of
-    ellipses too flat for the main walk to reach."""
-    a = abs(x1 - x0)
-    b = abs(y1 - y0)
-    b1 = b & 1
-    dx = 4 * (1 - a) * b * b
-    dy = 4 * (b1 + 1) * a * a
-    err = dx + dy + b1 * a * a
-    if x0 > x1:
-        x0 = x1
-        x1 += a
-    if y0 > y1:
-        y0 = y1
-    y0 += (b + 1) // 2
-    y1 = y0 - b1
-    a = 8 * a * a
-    b1 = 8 * b * b
-    last = None
-    while True:
-        if span is not None:
-            if last != y0:
-                span(x0, x1, y0)
-                if y1 != y0:
-                    span(x0, x1, y1)
-                last = y0
-        else:
-            put(x1, y0)
-            put(x0, y0)
-            put(x0, y1)
-            put(x1, y1)
-        e2 = 2 * err
-        if e2 <= dy:
-            y0 += 1
-            y1 -= 1
-            dy += a
-            err += dy
-        if e2 >= dx or 2 * err > dy:
-            x0 += 1
-            x1 -= 1
-            dx += b1
-            err += dx
-        if x0 > x1:
-            break
-    while y0 - y1 <= b:
-        if span is not None:
-            span(x0 - 1, x1 + 1, y0)
-            span(x0 - 1, x1 + 1, y1)
-        else:
-            put(x0 - 1, y0)
-            put(x1 + 1, y0)
-            put(x0 - 1, y1)
-            put(x1 + 1, y1)
-        y0 += 1
-        y1 -= 1
-
-
-def tri_spans(x1, y1, x2, y2, x3, y3):
-    """The horizontal spans covering a filled triangle, packed flat as
-    (x, y, w, 1, 0) quints for fill_rects (#167). Pure integer scanline walk --
-    sort the vertices by y, then for each row take the long edge a->c against
-    whichever short edge (a->b above the middle vertex, b->c below) is active.
-
-    Byte-for-byte the host twin (runtime/canvas.py tri_spans); the colour slot is
-    left 0 because tri() passes the colour as fill_rects' `c` override."""
-    x1 = int(x1); y1 = int(y1)
-    x2 = int(x2); y2 = int(y2)
-    x3 = int(x3); y3 = int(y3)
-    if y1 > y2:
-        x1, y1, x2, y2 = x2, y2, x1, y1
-    if y1 > y3:
-        x1, y1, x3, y3 = x3, y3, x1, y1
-    if y2 > y3:
-        x2, y2, x3, y3 = x3, y3, x2, y2
-    if y3 == y1:                       # flat: one span through all three x
-        lo = x1 if x1 < x2 else x2
-        if x3 < lo:
-            lo = x3
-        hi = x1 if x1 > x2 else x2
-        if x3 > hi:
-            hi = x3
-        return [lo, y1, hi - lo + 1, 1, 0]
-    out = []
-    dy_long = y3 - y1
-    dy_top = y2 - y1
-    dy_bot = y3 - y2
-    for y in range(y1, y3 + 1):
-        xa = x1 + (x3 - x1) * (y - y1) // dy_long
-        if y < y2:                     # dy_top > 0 whenever this branch is taken
-            xb = x1 + (x2 - x1) * (y - y1) // dy_top
-        elif dy_bot:
-            xb = x2 + (x3 - x2) * (y - y2) // dy_bot
-        else:
-            xb = x3
-        if xa > xb:
-            xa, xb = xb, xa
-        out.append(xa)
-        out.append(y)
-        out.append(xb - xa + 1)
-        out.append(1)
-        out.append(0)
-    return out
 
 
 # Native draw gates (#155). The state-array indices and the gate kinds MUST match
@@ -505,33 +498,14 @@ _ST_FONT_SCALE = 8
 _ST_PROF = 9
 _ST_N_FILL, _ST_N_TEXT = 10, 11
 _ST_T_FILL, _ST_T_TEXT = 12, 13
-_ST_LEN = 14
+_ST_FILLP = 14
+_ST_DMA_MIN = 15
+_ST_LEN = 16
 _GATE_RECT, _GATE_RECTB, _GATE_PRINT, _GATE_PIX = 0, 1, 2, 3
 
-# Layer-buffer pool (#63 GC-wall follow-up): a layer buffer handed back by a
-# dead cart is returned HERE (keyed by byte size) and the next new_layer of the
-# same dims reuses it instead of going back to the allocator. Without it every
-# cart re-run leaked its world (~150-384KB) from the heap_caps PSRAM pool until
-# the allocator started failing (~20-30 opens) and silently degraded to gc-heap
-# buffers (the GC wall back again) -- and the malloc_dma lane, which is all a
-# board without moy_alloc.alloc has, cannot free at all. Only moy_alloc-backed
-# buffers are pooled (a gc-heap fallback bytearray is the collector's job);
-# nothing is ever dropped from the pool -- the set of distinct layer sizes
-# across carts is small and stable.
-_LAYER_POOL = {}
-
-
-# Fold 2 (#63) knob: the map() auto-cache trades the per-cell blit_map walk for a
-# blit565 composite of a cached raster. HARDWARE VERDICT (T-Deck, 2026-07-07 owner
-# flash): the composite LOSES -- Brick Siege map 4.3-5.7ms direct -> 13.4ms cached
-# steady state (the keyed blit reads every pixel of the 240x240 region; blit_map
-# skips empty cells and PSRAM magnifies that), 32-55ms on brick-destruction
-# re-rasters, fps 29-33 -> 24-25. Even the opaque row-memcpy lane only breaks even
-# (~5ms for 115KB PSRAM->PSRAM). So the cache ships DEFAULT OFF; the machinery +
-# counters stay for a future native keyed-blit kernel or the P4's 2D DMA (#58),
-# and the parity tests force it on to keep the logic pinned.
-MAP_AUTO_CACHE = False
-
+# The least block a backend's DMA fill takes (P4SystemCanvas.ppa_fill): below
+# it the engine's submit costs more than the CPU's fill (measured).
+_DMA_FILL_MIN = 16384
 
 # Image comes from moy_image now -- ONE definition, shared with the host canvas
 # that used to carry the other copy. Re-exported because device_api and the cart
@@ -552,26 +526,6 @@ except ImportError:  # pragma: no cover - host tree: the package-relative lane
 _GATE_SEQ = [0]     # spr_gate token counter (#63): unique per gate, int16-safe, never 0.
 
 
-class _MaskedRegion:
-    """A w x h cell grid standing in for a tilemap, for ONE map(..., layers)
-    call (SPEC.md 7.2). Enough of TileMap for both map lanes -- the native
-    blit_map reads cells/w/h, the no-kernel fallback calls mget -- and nothing
-    else: it is built and dropped inside the call, so it has no `gen` and never
-    reaches the Fold-2 cache (which keys on identity and would miss forever)."""
-
-    __slots__ = ("cells", "w", "h")
-
-    def __init__(self, cells, w, h):
-        self.cells = cells
-        self.w = w
-        self.h = h
-
-    def mget(self, x, y):
-        if 0 <= x < self.w and 0 <= y < self.h:
-            return self.cells[y * self.w + x] - 1
-        return -1
-
-
 class DeviceCanvas:
     """The kid drawing API. The hot ops (cls/rect/circ/spr) go through the native
     moy_gfx C kernel writing straight into the compositor's RGB565 framebuffer --
@@ -587,26 +541,33 @@ class DeviceCanvas:
     # holds the frame BEFORE last -> 2. (Single-buffer mode retains frame-1;
     # advertising 2 stays conservative-correct there too.)
     RETAINED_FRAMES = 2
+    # What `shift_last` costs against the raster it saves: per mille of a
+    # row's raster each row it copies costs, so a shift frame whose floor
+    # leaves less than that much of R undrawn draws whole instead
+    # (`ui_draw._pays`). None where nobody measured it: it shifts.
+    SHIFT_COST = None
+    # The clears this canvas took (`cls`): an editor handle's rows read it
+    # beside the gate counters, since a clear is no gated verb.
+    clears = 0
 
     def __init__(self, compositor):
-        import framebuf
-
         self._comp = compositor
         self.w, self.h = compositor.size()
         self._buf = compositor.framebuffer()          # raw RGB565 bytearray (for moy_gfx)
-        self._fb = framebuf.FrameBuffer(self._buf, self.w, self.h, framebuf.RGB565)
-        self._gfx = compositor.gfx() if _USE_GFX else None   # native kernel, or None
-        # Native petme128 text (#62): resolved once -- needs both the moy_gfx.text
-        # op (old firmware lacks it) and the staged moy_font glyph blob.
-        self._gfx_text = (getattr(self._gfx, "text", None)
-                          if (self._gfx is not None and _FONT8 is not None) else None)
-        # #66 pump poke: feed the in-flight SRAM-bounce flush between native draw
-        # ops. The 2ms pump "timer" is a soft timer (fires between bytecodes) --
-        # it CANNOT fire while the interpreter sits inside one long C op (a 15ms
-        # fill, a 10ms map), which measured as PUMP idle=2-6ms of starved SPI on
-        # virtually every frame. The big verbs call self._pump() right after
-        # their native call instead. None on layers / host fakes (no bounce).
-        self._pump = getattr(compositor, "pump_if_pending", None)
+        # This canvas's CANVAS row (native/moy_glass): where it draws, its draw
+        # state and its colour table, which the native draw gates read.
+        self._crow = _glass_mod.Canvas(self.w, self.h)
+        self._crow.point(self._buf, getattr(compositor, "buf_h", 0))
+        self._gfx = compositor.gfx()                  # the native kernel, every tier
+        # shift_last's engine where the compositor names a last frame's buffer;
+        # None: one persistent buffer, shifted in place.
+        self._comp_shift = getattr(compositor, "shift_last", None)
+        self._comp_shift_fence = getattr(compositor, "shift_fence", None)
+        # The shapes blend over the buffer, so they read its word order.
+        self._gfx.shape_order(WIRE_SWAPPED)
+        # Native petme128 text (#62): the kernel's text op over the staged
+        # moy_font glyph blob.
+        self._gfx_text = self._gfx.text
         # Cart-view crop scratch (SPEC.md 6, CORE since the layers promotion --
         # `view` stopped being a section 10 extension in the moy-spec bump that
         # made layers/view/background core; see blit_game): one pooled
@@ -628,22 +589,18 @@ class DeviceCanvas:
         # confirmed stable): the compositor's BACK buffer ping-pongs between two
         # physical buffers each flush, so this canvas must re-point its draw target
         # at it every frame (sync_back) -- a stale pointer would draw into the
-        # buffer that's being DMA'd (tear). framebuf can't retarget its backing
-        # store in place, so cache one framebuf per physical buffer and pick the
-        # matching one on each swap, by IDENTITY (`_fb_for`): no per-frame
-        # allocation. Not a dict keyed by id(buf) -- a P4's PSRAM sits above
-        # the 30-bit small int, so its id() is a new big int on every lookup.
+        # buffer that's being DMA'd (tear).
         # In single-buffer mode framebuffer() never moves, so sync_back is a
         # cheap no-op.
-        self._fb_pairs = [self._buf, self._fb]      # buf, its framebuf, ...
-        # Async layer copy (#54 Stage 2): prediction + in-flight state. Armed by
-        # blit_window_from when the copy shape is ONE contiguous memcpy (cam_x==0,
-        # layer exactly screen-wide, full-height coverage -- sakura's shape);
-        # kicked by sync_back at frame start; consumed (copy_wait) by the next
-        # blit_window_from. _async_ok latches False on the first driver refusal
-        # (old firmware / no gdma / bad alignment) so we never retry per frame.
+        # The layer restore (#54 Stage 2): draw_layer's window copy and the
+        # predicted copy that rides the GDMA engine while the cart's update
+        # runs -- the kernel's mg_lr_* (native/moy_gfx/moy_gfx_kernels.h), over
+        # this state, which a Lua run's native draw_layer shares (moycore's
+        # layer_restore). Armed by blit_window_from when the copy is ONE
+        # contiguous run (cam_x 0, the layer exactly screen-wide -- sakura's
+        # shape), kicked by sync_back, taken by the next blit_window_from.
         #
-        # LAYER_COPY_ASYNC is now DEFAULT ON (tied 1:1 to moy_compositor.SRAM_BOUNCE_
+        # LAYER_COPY_ASYNC is DEFAULT ON (tied 1:1 to moy_compositor.SRAM_BOUNCE_
         # FLUSH, see the module-level comment above): it was hardware-verdict FALSE
         # on 2026-07-03 because the copy is a second GDMA engine doing a full-
         # throttle PSRAM->PSRAM blit that, run against a panel DMA reading PSRAM
@@ -651,11 +608,10 @@ class DeviceCanvas:
         # one cart using layers). The #66 SRAM-bounce flush removed the contention
         # target -- the panel now only ever reads internal SRAM -- so the async copy
         # (layer= 7ms -> 0.04ms on Sakura) is safe again and shipped as the default.
-        self._lcopy_pred = None
-        self._lcopy = None
-        self._lcopy_trips = 0     # copy_wait timeouts (#66 HITCH v3 diagnostics)
-        self._async_ok = (LAYER_COPY_ASYNC and self._gfx is not None
-                          and hasattr(self._gfx, "copy_async"))
+        self._lrs = bytearray(self._gfx.LR_SIZE)
+        self._gfx.layer_init(self._lrs, LAYER_COPY_ASYNC)
+        self._lrs_layer = None     # the layer the prediction names: pinned while it does
+        self._lrs_run = None       # a Lua run whose native draw_layer shares the state
         # Pending sprite batch (Fold 1 -> #63 spr_gate): 1x1 sheet-tile blits queue
         # into ONE flat array('h') instead of a list of tuples -- layout
         # [next, colorkey, scale, token, (tile x y flip)*N], items from index 4.
@@ -691,23 +647,6 @@ class DeviceCanvas:
         self._palt_delta = 0
         self._pal_single = -1
         self._palt_single = -1
-        # Auto-cache for map() (Fold 2, #63): the rasterized tilemap region is cached in a
-        # hidden 565 layer so a camera-only change keyed-blits it (one blit565) instead of a
-        # full re-raster (blit_map over every cell) -- the make_layer/draw_layer win, made
-        # automatic for a naive camera()+map() cart. _mapcache is (key, layer, lw, lh); kept
-        # ACROSS frames (NOT cleared in reset_state, or it could never hit) and rebuilt when
-        # the key -- (tilemap.gen, sheet.gen, region, colorkey, scale) -- changes. Counters
-        # prove it: a re-raster bumps _map_raster_count, a re-use bumps _map_hits
-        # (map_cache_reset). Set BEFORE reset_state so it's live before the first draw.
-        self._mapcache = None
-        self._map_raster_count = 0
-        self._map_hits = 0
-        self._lent_layers = None      # owner -> [(buf, nbytes)] pooled loans (#63 leak fix)
-        # A hidden layer (new_layer) sets this True: a layer is a draw-ONCE scratch buffer
-        # (the escape hatch's make_layer, or this cache's own hidden layer), so its own map()
-        # rasters DIRECTLY -- never a nested cache (which would double the layer's PSRAM and
-        # add a redundant composite). The main canvas keeps it False and caches.
-        self._nocache = False
         # Initialised BEFORE reset_state so its flush no-ops.
         self._batch_sheet = None
         # #67 stage-1 (moycore): the C-stamp fallback. moy_lua's run breaks
@@ -772,13 +711,21 @@ class DeviceCanvas:
         self._pal_epoch = 0
         self._wire_pal_arr = None      # #167 fill_spans palette cache (see _wire_pal)
         self._wire_pal_gen = -1
-        self._gate_state = None
-        self._gate_pal = None
+        # The row's draw state and colour table, kept in step on EVERY canvas,
+        # gated or not: native/moy_ui's primitives draw into the row through
+        # them, so a host canvas (no draw gates) carries the same clip,
+        # palette and op counters a board's does.
+        st = self._gate_state = self._crow.state
+        self._gate_pal = self._crow.pal
+        st[_ST_W] = self.w             # the stride: a new canvas owns its buffer
+        st[_ST_H] = self.h
+        st[_ST_FONT_SCALE] = max(1, int(getattr(self, "font_scale", 1)))
         # SPEC.md 6's fill pattern: 0 is solid (the state every frame starts in)
         # and -1 leaves a hole pixel untouched. Read by the nine shape verbs and
         # by nothing else -- see fillp().
         self._fillp = 0
         self._fillp_col = -1
+        st[_ST_FILLP] = 0
         # SPEC.md 6 / 12.1's SCREEN palette: a second remap COMPOSED after the
         # draw palette into _wire, so every draw site resolves through it for
         # nothing. None while identity, which is every frame of most carts.
@@ -800,8 +747,16 @@ class DeviceCanvas:
         # read -- 4-5x a CPU fill above the crossover. None on backends without
         # one, so those keep the moy_gfx path untouched.
         self._ppa_fill = getattr(self, "ppa_fill", None)
+        if self._ppa_fill is not None:
+            # ...and the rect gate hands such a block back to rect -> _fill.
+            self._gate_state[_ST_DMA_MIN] = _DMA_FILL_MIN
+        # What native/moy_ui's primitives draw through: this canvas's CANVAS
+        # handle, and the sprite queue a primitive lands before it draws.
+        self._ui = (self._crow.h, self._batch_arr)
         self.reset_state()
+        self._sync_gate_pal()
         self._install_draw_gates()
+        _room(self)
 
     def sync_back(self):
         """Re-point the draw target at the compositor's current BACK buffer (#40
@@ -813,8 +768,10 @@ class DeviceCanvas:
         ALSO the async layer-copy kick point (#54 Stage 2): this runs BEFORE the
         cart's _update, so a predicted draw_layer background restore started here
         runs on the GDMA engine WHILE the kid's Python logic executes -- by the
-        time _draw calls draw_layer, the ~7ms copy is already done (copy_wait
-        returns immediately). Prediction armed by blit_window_from (below).
+        time _draw calls draw_layer, the ~7ms copy is already done (its wait
+        returns at once). The prediction is armed by the last draw_layer: this
+        canvas's blit_window_from, or a Lua run's native one over the same
+        state, whose glue sets `_lrs_layer` for the run.
 
         ALSO THE SNAPSHOT FENCE (moy_fold.h): a folded frame's copy of the game
         canvas rides the GDMA engine, and this canvas -- the one whose
@@ -829,52 +786,23 @@ class DeviceCanvas:
         buf = self._comp.back_buffer()
         if buf is not self._buf:
             self._buf = buf
-            fb = self._fb_for(buf)
-            if fb is None:
-                import framebuf
-                fb = framebuf.FrameBuffer(buf, self._stride, self._bh,
-                                          framebuf.RGB565)
-                self._fb_pairs.append(buf)
-                self._fb_pairs.append(fb)
-            self._fb = fb
-            if self._gate_ctx is not None:
-                self._gate_ctx.set_buf(buf)   # #155: gates draw into the NEW back
+            self._crow.point(buf)         # the row, and so the gates, draw into the NEW back
         if self._gate_state is not None:
             # DRAW2 timing gate, synced once per frame (console.py flips _prof by
             # direct attribute store, so there is no setter to hook).
             self._gate_state[_ST_PROF] = 1 if self._prof else 0
-        if self._lcopy is not None:
-            self._drain_lcopy()           # last frame's copy never consumed: drain
-        pred = self._lcopy_pred
-        if pred is not None:
-            self._lcopy_pred = None
-            layer, cam_y, npix = pred
-            try:
-                if self._gfx.copy_async(self._buf, 0, layer._buf,
-                                        cam_y * self.w, npix):
-                    self._lcopy = pred    # in flight; consumed by blit_window_from
-                else:
-                    self._async_ok = False    # driver refused -> stay sync from now on
-            except Exception:  # noqa: BLE001 -- any C-side surprise -> sync path
-                self._async_ok = False
+        if self._lrs_layer is not None or self._lrs_run is not None:
+            if not self._gfx.layer_kick(self._lrs, self._buf):
+                self._lrs_layer = None     # no copy in flight names it: unpinned
 
-    def _drain_lcopy(self):
-        # Complete an in-flight async layer restore that nothing consumed -- the
-        # frame changed shape (cart exit, screen switch). Cheap; never raises.
-        self._lcopy = None
-        try:
-            if self._gfx.copy_wait() is False:
-                self._lcopy_trips += 1    # tripped: count it (#66 diagnostics)
-        except Exception:  # noqa: BLE001
-            self._async_ok = False
+    @property
+    def _t_layer_us(self):
+        # #63 DRAW2: the restore's time since the meter was zeroed, both lanes'.
+        return self._gfx.layer_meter(self._lrs)[0]
 
-    # -- draw state (camera / clip / pal / palt, #11) ------------------------
-    # Mirror runtime/canvas.py exactly so a .moy draws the same pixels host-side
-    # and on-device: camera offsets all coords, clip bounds the write region (passed
-    # to the moy_gfx kernel for blits / intersected for fills), pal remaps draw
-    # indices (applied in _col, so every primitive inherits it), palt marks sprite
-    # indices transparent. _palgen bumps on a pal/palt change so the per-sprite RGB
-    # cache (which bakes pal+palt in) knows to re-bake.
+    @_t_layer_us.setter
+    def _t_layer_us(self, v):
+        self._gfx.layer_meter(self._lrs, True)
 
     def reset_state(self):
         # Draw any queued sprites FIRST: they were spr_tile()'d under the current
@@ -915,6 +843,8 @@ class DeviceCanvas:
                 gp[:] = self._wire  # C memcpy, not the 64-iteration rebuild
         self._fillp = 0                   # SPEC.md 6: a frame starts solid
         self._fillp_col = -1
+        if self._gate_state is not None:
+            self._gate_state[_ST_FILLP] = 0
         self._sync_gate_state()
 
     def camera(self, x=0, y=0):
@@ -1124,6 +1054,11 @@ class DeviceCanvas:
             st[_ST_H] = self._bh
         self.reset_state()
 
+    def viewport(self):
+        """(x, y, w, h): the sub-rect of the buffer this canvas draws into,
+        so a viewport set inside another can be put back."""
+        return (self._ox, self._oy, self.w, self.h)
+
     def clear_viewport(self):
         """Back to owning the whole buffer."""
         self._ox = 0
@@ -1137,20 +1072,7 @@ class DeviceCanvas:
         ping-pong swaps the framebuffer every frame, so a viewport canvas onto it
         must follow (the root canvas does this in sync_back)."""
         self._buf = buf
-        self._fb = self._fb_for(buf) or self._fb
-        if self._gate_ctx is not None:
-            self._gate_ctx.set_buf(buf)
-
-    def _fb_for(self, buf):
-        """The framebuf cached for `buf`, or None."""
-        pairs = self._fb_pairs
-        i = 0
-        n = len(pairs)
-        while i < n:
-            if pairs[i] is buf:
-                return pairs[i + 1]
-            i += 2
-        return None
+        self._crow.point(buf)
 
     def _install_draw_gates(self):
         """Swap in the native rect/rectb/print/pix. Returns True if gated."""
@@ -1159,43 +1081,25 @@ class DeviceCanvas:
             return False
         make_ctx = getattr(gfx, "make_draw_ctx", None)
         if make_ctx is None:
-            return False               # older firmware: keep the Python verbs
-        st = array("i", bytearray(4 * _ST_LEN))
-        pal = array("H", bytearray(2 * 64))
+            return False               # the host's kernel: the Python verbs draw
+        crow = self._crow
         try:
-            ctx = make_ctx(self, st, pal, self._batch_arr, _FONT8, _FONT8_FIRST)
+            ctx = make_ctx(self, crow, self._batch_arr, _FONT8, _FONT8_FIRST)
         except Exception:  # noqa: BLE001 -- never let a probe break a canvas
             return False
-        if self._pump is not None:
-            # T-Deck ROOT canvas (#163 door 1). The gates were REFUSED here for
-            # a year of lore: _fill pokes the SRAM-bounce flush pump between
-            # native ops (#66) and "a C gate has no cheap way back into Python
-            # to do that". The per-op poke was never load-bearing, though --
-            # the pump only FEEDS the in-flight partial flush, and a starved
-            # pump degrades to a longer synchronous tail in comp.flush(),
-            # never a glitch. So the ctx now upcalls the pump itself every
-            # GATE_PUMP_EVERY gated ops (~128us at gate speed -- DENSER than
-            # the old per-fill pokes whenever more than 2 fills run). An older
-            # moy_gfx without set_pump keeps the old refusal: ungated Python
-            # verbs, per-op pokes, exactly the pre-door-1 behavior.
-            sp = getattr(ctx, "set_pump", None)
-            if sp is None:
-                return False
-            sp(self._pump)
         # Grab the bound Python methods BEFORE shadowing them: they become the
         # gates' fallbacks (and on P4SystemCanvas that correctly picks up the
         # font_scale-aware print override).
         fb_rect, fb_rectb = self.rect, self.rectb
         fb_print, fb_pix = self.print, self.pix
-        self._gate_state = st
-        self._gate_pal = pal
+        st = self._gate_state = crow.state
+        self._gate_pal = crow.pal
         self._gate_ctx = ctx
         st[_ST_W] = self._stride
         st[_ST_H] = self._bh
         st[_ST_FONT_SCALE] = max(1, int(getattr(self, "font_scale", 1)))
         self._sync_gate_state()
         self._sync_gate_pal()
-        ctx.set_buf(self._buf)
         mk = gfx.make_draw_gate
         self.rect = mk(ctx, _GATE_RECT, fb_rect)
         self.rectb = mk(ctx, _GATE_RECTB, fb_rectb)
@@ -1301,10 +1205,24 @@ class DeviceCanvas:
         if getattr(self, "_gate_pal", None) is not None:
             self._sync_gate_pal()              # the C gate's table mirrors it
 
+    def theme_block(self, words):
+        """The live theme's block (`set_block`) onto every canvas."""
+        set_block(words)
+
+    def fill565(self, x, y, w, h, word):
+        """A rect in one canonical RGB565 word, through no palette: a colour
+        that holds no index (another theme's RGB, on its preview)."""
+        if WIRE_SWAPPED:
+            word = ((word & 0xFF) << 8) | (word >> 8)
+        self.blit565_resize(bytes((word & 0xFF, (word >> 8) & 0xFF)), 1, 1, x, y, w, h)
+
     def _col(self, c):
         # Resolve a draw index to RGB565 through the pal remap, so cls/pix/line/rect/
-        # circ/circb/rectb all honour pal() for free.
-        return self._wire[self._pal_map[c & 63]]
+        # circ/circb/rectb all honour pal() for free; 64.. is the shell's block.
+        c &= _CMASK[0]
+        if c < 64:
+            return self._wire[self._pal_map[c]]
+        return _BLOCK[c - 64]
 
     def _fill(self, x, y, w, h, col):
         # Filled rect of a pre-resolved RGB565 colour, camera-offset and intersected
@@ -1341,53 +1259,41 @@ class DeviceCanvas:
             y1 = cy1
         if x1 <= x0 or y1 <= y0:
             return
-        gfx = self._gfx
-        if gfx is not None:
-            if self._prof:
-                _t0 = _ticks_us()      # #66 DRAW2: fill bucket (rect/rectb/circ spans)
-                gfx.fill_rect(self._buf, self._stride, x0, y0, x1 - x0, y1 - y0, col)
-                self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
-            else:
-                gfx.fill_rect(self._buf, self._stride, x0, y0, x1 - x0, y1 - y0, col)
-            if self._pump is not None:
-                self._pump()           # #66: feed the bounce flush between native ops
+        if (x1 - x0) * (y1 - y0) >= _DMA_FILL_MIN:
+            # A big block goes to the DMA fill where the backend has one (cls's
+            # #155 hook): it skips the write-allocate read a CPU fill pays.
+            pf = self._ppa_fill
+            if pf is not None and pf(x0, y0, x1 - x0, y1 - y0, col):
+                return
+        if self._prof:
+            _t0 = _ticks_us()          # #66 DRAW2: fill bucket (rect/rectb/circ spans)
+            self._gfx.fill_rect(self._buf, self._stride, x0, y0, x1 - x0, y1 - y0, col)
+            self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
         else:
-            self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
-
-    def _put(self, x, y, col):
-        # Single clipped, camera-offset framebuf pixel write (pal already applied in
-        # the resolved `col`). Used by pix/line/circb so they honour camera+clip.
-        x -= self._cam_x
-        y -= self._cam_y
-        if self._clip_x0 <= x < self._clip_x1 and self._clip_y0 <= y < self._clip_y1:
-            self._fb.pixel(x, y, col)
+            self._gfx.fill_rect(self._buf, self._stride, x0, y0, x1 - x0, y1 - y0, col)
 
     def cls(self, c=0):
         # Full-surface reset: ignores camera/clip (like TIC-80) but honours pal.
+        self.clears += 1
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
-        if self._lcopy is not None:    # #54 St.2: a predicted layer restore is in
-            self._drain_lcopy()        # flight for a frame that ISN'T drawing the
-                                       # layer (screen switch) -- drain, don't race
+        self._gfx.layer_drain(self._lrs)   # #54 St.2: a predicted restore in flight
+                                          # for a frame that ISN'T drawing the layer
+                                          # (screen switch) -- drain, don't race
         col = self._col(c)
         # A whole-surface clear is the biggest single fill the console issues, so
         # it is the first thing to hand to the DMA engine (#155).
         pf = self._ppa_fill
         if pf is not None and pf(self._ox, self._oy, self.w, self.h, col):
             return
-        if self._gfx is not None:
-            _t0 = _ticks_us()          # #66 DRAW2: fill bucket (cls is its big half)
-            if self._ox == 0 and self._oy == 0 and self.w == self._stride:
-                self._gfx.fill(self._buf, self.w * self.h, col)
-            else:
-                # #155: "full-surface" means the VIEWPORT -- a windowed layer
-                # clearing itself must not wipe the desktop it draws on.
-                self._gfx.fill_rect(self._buf, self._stride,
-                                    self._ox, self._oy, self.w, self.h, col)
-            self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
-            if self._pump is not None:
-                self._pump()           # #66: feed the bounce flush between native ops
+        _t0 = _ticks_us()              # #66 DRAW2: fill bucket (cls is its big half)
+        if self._ox == 0 and self._oy == 0 and self.w == self._stride:
+            self._gfx.fill(self._buf, self.w * self.h, col)
         else:
-            self._fb.fill(col)
+            # #155: "full-surface" means the VIEWPORT -- a windowed layer
+            # clearing itself must not wipe the desktop it draws on.
+            self._gfx.fill_rect(self._buf, self._stride,
+                                self._ox, self._oy, self.w, self.h, col)
+        self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
 
     def pix(self, x, y, c=None):
         # TIC-80 pix: read the index with two args, set it with three. Reads are
@@ -1407,9 +1313,14 @@ class DeviceCanvas:
             # host's out-of-bounds answer. Under a screen palette this is the
             # index the pixel LANDED as -- spal[pal[c]] -- which is what libmoy's
             # pget answers too, since both palettes compose at draw time.
-            return _PAL565_INDEX.get(self._fb.pixel(x, y), 0)
+            if not (0 <= x < self._stride and 0 <= y < self._bh):
+                return 0
+            i = (y * self._stride + x) * 2
+            b = self._buf
+            return _PAL565_INDEX.get(b[i] | (b[i + 1] << 8), 0)
+        self._gate_state[_ST_N_FILL] += 1
         if self._clip_x0 <= x < self._clip_x1 and self._clip_y0 <= y < self._clip_y1:
-            self._fb.pixel(x, y, self._col(c))
+            self._gfx.fill_rect(self._buf, self._stride, x, y, 1, 1, self._col(c))
 
     def line(self, x1, y1, x2, y2, c):
         if self._fillp:
@@ -1419,25 +1330,10 @@ class DeviceCanvas:
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         x0 = int(x1); y0 = int(y1); xe = int(x2); ye = int(y2)
         col = self._col(c)
-        if self._gfx is not None:
-            self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye,
-                           col, self._cam_x, self._cam_y,
-                           self._clip_x0, self._clip_y0,
-                           self._clip_x1, self._clip_y1)
-            return
-        dx = abs(xe - x0); dy = -abs(ye - y0)
-        sx = 1 if x0 < xe else -1
-        sy = 1 if y0 < ye else -1
-        err = dx + dy
-        while True:
-            self._put(x0, y0, col)
-            if x0 == xe and y0 == ye:
-                break
-            e2 = 2 * err
-            if e2 >= dy:
-                err += dy; x0 += sx
-            if e2 <= dx:
-                err += dx; y0 += sy
+        self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye,
+                       col, self._cam_x, self._cam_y,
+                       self._clip_x0, self._clip_y0,
+                       self._clip_x1, self._clip_y1)
 
     def rect(self, x, y, w, h, c):
         if self._fillp:
@@ -1447,8 +1343,8 @@ class DeviceCanvas:
         # instead of a method call, and _col is inlined for the same reason.
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
-        self._fill(int(x), int(y), int(w), int(h),
-                   self._wire[self._pal_map[c & 63]])
+        self._gate_state[_ST_N_FILL] += 1   # the gate's count, on every tier
+        self._fill(int(x), int(y), int(w), int(h), self._col(c))
 
     def rectb(self, x, y, w, h, c):
         if self._fillp:
@@ -1456,8 +1352,9 @@ class DeviceCanvas:
         # TIC-80 rectb = rectangle outline (4 clipped fills, like the host).
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
+        self._gate_state[_ST_N_FILL] += 1   # one op, as the gate counts it
         x = int(x); y = int(y); w = int(w); h = int(h)
-        col = self._wire[self._pal_map[c & 63]]
+        col = self._col(c)
         self._fill(x, y, w, 1, col)
         self._fill(x, y + h - 1, w, 1, col)
         self._fill(x, y, 1, h, col)
@@ -1477,7 +1374,7 @@ class DeviceCanvas:
     #
     # The WINDOWED tier means the opposite by the same call.
     # `WindowedWM._blit_game` passes a WINDOW's content origin and paints the
-    # play world's own bezel itself; bands there cover the desk, its icon
+    # console mode's own bezel itself; bands there cover the desk, its icon
     # column, the OS bar and every other window. That is not hypothetical: the
     # host inherited this method when `runtime/canvas.py` was deleted
     # (2026-08-15) and its desktop went black behind the first game window, and
@@ -1556,7 +1453,13 @@ class DeviceCanvas:
             comp.fold_fence()
             scr = self._snap_scratch
             if scr is None or scr._w != gw or scr._h != vh:
-                scr = self._snap_scratch = _LayerComp(gw, vh, g)
+                # A new geometry: give the old scratch back (off-heap, no
+                # collector). The fence above means no feed reads it and its
+                # snapshot has landed, and every arm is consumed by the
+                # flush of the frame that made it, so no latch holds it.
+                if scr is not None:
+                    scr.release()
+                scr = self._snap_scratch = _LayerComp(gw, vh, g, 0, _ROLE_SCRATCH)
             try:
                 if snap(src_buf, sy * gw * 2, scr.framebuffer(), vw, vh, sx, gw,
                         ox, oy, scale):
@@ -1567,7 +1470,9 @@ class DeviceCanvas:
         if sx or sy or vw != gw or vh != gh:
             scr = self._view_scratch
             if scr is None or scr._w != vw or scr._h != vh:
-                scr = self._view_scratch = _LayerComp(vw, vh, g)
+                if scr is not None:
+                    scr.release()      # read only by the synchronous blit below
+                scr = self._view_scratch = _LayerComp(vw, vh, g, 0, _ROLE_SCRATCH)
             g.blit565(scr.framebuffer(), vw, vh, -sx, -sy,
                       src_buf, gw, gh, -1)
             src_buf = scr.framebuffer()
@@ -1586,8 +1491,6 @@ class DeviceCanvas:
                 self._fill(ox + rw, oy, self.w - (ox + rw), rh, 0)
         g.blit565_scale(self._buf, self.w, self.h, ox, oy,
                         src_buf, vw, vh, scale)
-        if self._pump is not None:
-            self._pump()               # feed the in-flight SRAM-bounce flush
 
     # -- a compiled cart's frame, from its own memory (moy_fold.h) ---------------
 
@@ -1656,30 +1559,15 @@ class DeviceCanvas:
         if ctx is not None:
             ctx.fill_rects(arr, -1 if n is None else n, ox, oy, c)
             return
-        # #167: this lane was built when the T-Deck ROOT canvas refused the
-        # gates (the pump handshake, since solved -- #163 door 1: the ctx
-        # upcalls the pump every N ops, see _install_draw_gates). It survives
-        # as the OLD-moy_gfx fallback: fill_spans takes buffer/camera/clip as
-        # plain args like circ/line, so it works with no gate at all.
-        gfx = self._gfx
-        fs = None if gfx is None else getattr(gfx, "fill_spans", None)
-        if fs is not None:
-            self.flush_batch()         # #63: a non-spr primitive breaks the batch
-            col = -1 if c < 0 else self._wire[self._pal_map[c & 63]]
-            fs(self._buf, self._stride, self._bh, arr,
-               -1 if n is None else n, ox, oy, col,
-               None if col >= 0 else self._wire_pal(),
-               self._cam_x, self._cam_y,
-               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-            if self._pump is not None:
-                self._pump()           # #66: feed the bounce flush between native ops
-            return
-        if n < 0 or n is None:
-            n = len(arr) // 5
-        rect = self.rect
-        for i in range(0, n * 5, 5):
-            rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
-                 c if c >= 0 else arr[i + 4])
+        # An ungated canvas (the host's kernel has no gates): fill_spans takes
+        # buffer/camera/clip as plain args like circ/line.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        col = -1 if c < 0 else self._col(c)
+        self._gfx.fill_spans(self._buf, self._stride, self._bh, arr,
+                             -1 if n is None else n, ox, oy, col,
+                             None if col >= 0 else self._wire_pal(),
+                             self._cam_x, self._cam_y,
+                             self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
     def _wire_pal(self):
         """A 64-entry RGB565 table for fill_spans' per-quad colour lookup, rebuilt
@@ -1704,21 +1592,10 @@ class DeviceCanvas:
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
-        if self._gfx is not None:
-            self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
-                           self._cam_x, self._cam_y,
-                           self._clip_x0, self._clip_y0,
-                           self._clip_x1, self._clip_y1)
-            return
-        # The no-moy_gfx fallback, walking span the way the kernel does (#97).
-        span = 0
-        for dy in range(-r, r + 1):
-            t = r * r - dy * dy
-            while (span + 1) * (span + 1) <= t:
-                span += 1
-            while span > 0 and span * span > t:
-                span -= 1
-            self._fill(cx - span, cy + dy, 2 * span + 1, 1, col)
+        self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
+                       self._cam_x, self._cam_y,
+                       self._clip_x0, self._clip_y0,
+                       self._clip_x1, self._clip_y1)
 
     def circb(self, cx, cy, r, c):
         if self._fillp:
@@ -1728,21 +1605,9 @@ class DeviceCanvas:
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
-        if self._gfx is not None:
-            self._gfx.circb(self._buf, self._stride, self._bh, cx, cy, r, col,
-                            self._cam_x, self._cam_y,
-                            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-            return
-        x = r; y = 0; err = 0
-        while x >= y:
-            for px, py in ((x, y), (y, x), (-y, x), (-x, y), (-x, -y), (-y, -x), (y, -x), (x, -y)):
-                self._put(cx + px, cy + py, col)
-            y += 1
-            if err <= 0:
-                err += 2 * y + 1
-            else:
-                x -= 1
-                err -= 2 * x + 1
+        self._gfx.circb(self._buf, self._stride, self._bh, cx, cy, r, col,
+                        self._cam_x, self._cam_y,
+                        self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
     def tri(self, x1, y1, x2, y2, x3, y3, c):
         if self._fillp:
@@ -1754,18 +1619,10 @@ class DeviceCanvas:
         # libmoy's, which is what the conformance golden pins. Fallback: the old
         # spans + fill_rects lane. Host twin: runtime/canvas.py Canvas.tri.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
-        gfx = self._gfx
-        tk = None if gfx is None else getattr(gfx, "tri", None)
-        if tk is not None:
-            col = self._col(c)
-            tk(self._buf, self._stride, self._bh,
-               int(x1), int(y1), int(x2), int(y2), int(x3), int(y3), col,
-               self._cam_x, self._cam_y,
-               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-            return
-        spans = tri_spans(x1, y1, x2, y2, x3, y3)
-        if spans:
-            self.fill_rects(array("h", spans), len(spans) // 5, 0, 0, int(c) & 63)
+        self._gfx.tri(self._buf, self._stride, self._bh,
+                      int(x1), int(y1), int(x2), int(y2), int(x3), int(y3),
+                      self._col(c), self._cam_x, self._cam_y,
+                      self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
     def trib(self, x1, y1, x2, y2, x3, y3, c):
         if self._fillp:
@@ -1786,6 +1643,144 @@ class DeviceCanvas:
         # walk produces both. That is why they are not a fill plus a stroke.
         self._shape(_MG_OVALB, x, y, w, h, 0, 0, c)
 
+    # -- the 2026-10 look's shapes (native/moy_gfx/moy_shape.h) -------------
+    #
+    # System-canvas verbs, not cart verbs: the shell draws its windows, cards
+    # and keys with them. Colours are indices (the theme's block included);
+    # every pixel they write is RGB565 between them, so a corner blends.
+
+    def _paint_arg(self, fill, y, h):
+        # None, a colour index, or a paint (mode, steps, stops): mode 0 smooth,
+        # 1 steps, 2 dither (moy_shape.h), stops ((t thousandths, colour), ...)
+        # down the rect's rows.
+        if fill is None:
+            return None
+        if isinstance(fill, int):
+            return self._col(fill)
+        mode, steps, stops = fill
+        out = [int(mode), int(steps), int(y), int(h)]
+        for t, c in stops:
+            out.append(int(t))
+            out.append(self._col(c))
+        return tuple(out)
+
+    def rrect(self, x, y, w, h, r, fill, ring=None, line=1, ring_lo=None,
+              corners=15, stepped=False, mask=0):
+        """A rect with corners of radius `r` (the `corners` bits: 1 top left,
+        2 top right, 4 bottom right, 8 bottom left), anti-aliased or
+        `stepped`: `fill` (a colour or a paint, above) and a `ring` of width
+        `line` in one composition; `ring_lo` makes the ring a bevel (`ring`
+        top and left). `mask` 1 draws only the fully covered pixels, 2 only
+        the partly covered ones."""
+        self.flush_batch()
+        line = int(line) if ring is not None else 0
+        opts = (int(corners) & 15) | (16 if stepped else 0) | ((int(mask) & 3) << 5) \
+            | ((line & 255) << 8)
+        hi = self._col(ring) if ring is not None else 0
+        lo = self._col(ring_lo) if ring_lo is not None else -1
+        if self._ppa_fill is not None and isinstance(fill, int) and mask != 2 \
+                and w * h >= _DMA_FILL_MIN:
+            n = self._rrect_dma(int(x), int(y), int(w), int(h), int(r), opts, hi, lo,
+                                self._col(fill), line)
+            if n is not None:
+                return n
+        return self._gfx.rrect(self._buf, self._stride, int(x), int(y), int(w), int(h),
+                               int(r), opts, hi, lo, self._paint_arg(fill, y, h),
+                               self._cam_x, self._cam_y, self._clip_x0, self._clip_y0,
+                               self._clip_x1, self._clip_y1)
+
+    def _rrect_dma(self, x, y, w, h, r, opts, hi, lo, col, line):
+        """rrect with a solid fill over a big middle. Its rows `r` (and the
+        ring's width) in from the top and the bottom are each the ring's
+        `line` pixels at either side and the fill between: the fill to the
+        backend's DMA fill, the ring's two strips filled solid, then the
+        kernel over the rest with those rows as its hole -- the same pixels
+        and the same count. None where the middle is small, the ring wider
+        than half the shape, or the fill refused it."""
+        if 2 * line > (w if w < h else h):
+            return None
+        k = r if r > line else line
+        cam_x = self._cam_x
+        cam_y = self._cam_y
+        bx = x - cam_x
+        by = y - cam_y
+        cx0, cy0, cx1, cy1 = self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1
+        y0 = by + k if by + k > cy0 else cy0
+        y1 = by + h - k if by + h - k < cy1 else cy1
+        fx0 = bx + line if bx + line > cx0 else cx0
+        fx1 = bx + w - line if bx + w - line < cx1 else cx1
+        if y1 <= y0 or fx1 <= fx0 or (fx1 - fx0) * (y1 - y0) < _DMA_FILL_MIN:
+            return None
+        if not self._ppa_fill(fx0, y0, fx1 - fx0, y1 - y0, col):
+            return None
+        n = (fx1 - fx0) * (y1 - y0)
+        if line:
+            for sx0, sx1, c in ((bx, bx + line, hi),
+                                (bx + w - line, bx + w, hi if lo < 0 else lo)):
+                if sx0 < cx0:
+                    sx0 = cx0
+                if sx1 > cx1:
+                    sx1 = cx1
+                if sx1 > sx0:
+                    self._gfx.fill_rect(self._buf, self._stride, sx0, y0, sx1 - sx0, y1 - y0, c)
+                    n += (sx1 - sx0) * (y1 - y0)
+        return n + self._gfx.rrect(
+            self._buf, self._stride, x, y, w, h, r, opts, hi, lo, col, cam_x, cam_y,
+            cx0, cy0, cx1, cy1, (x, y0 + cam_y, w, y1 - y0, 0))
+
+    def shadow(self, x, y, w, h, r, c, alpha, blur, dx=0, dy=0, hole=None,
+               stepped=False):
+        """The shadow the rect (x, y, w, h) with corners `r` casts: colour `c`
+        at `alpha` (0..255), blurred `blur` pixels either side of its edge
+        (0: a hard shadow), offset (dx, dy). `hole` (x, y, w, h, r) is left
+        alone: the caster's body, drawn over it."""
+        self.flush_batch()
+        return self._gfx.shadow(self._buf, self._stride, int(x), int(y), int(w), int(h),
+                                int(r), int(blur), int(dx), int(dy), self._col(c),
+                                int(alpha), stepped, hole, self._cam_x, self._cam_y,
+                                self._clip_x0, self._clip_y0, self._clip_x1,
+                                self._clip_y1)
+
+    # -- paths and the outline faces (native/moy_gfx/moy_path.h) -----------
+    #
+    # A story's slides (runtime/story_render.py): shapes as filled paths and
+    # text in the shell's faces at any size, anti-aliased, the same pixels on
+    # every tier. Coordinates and sizes are 26.6 (1/64 px); a face is 0 sans,
+    # 1 sans bold, 2 mono.
+
+    def fill_path(self, pts, ends, c):
+        """Fill the path whose points `pts` (an array('i') of x, y pairs)
+        make contours ending at `ends` (an array('i')) in colour `c`. The
+        pixels touched."""
+        self.flush_batch()
+        return self._gfx.path_fill(self._buf, self._stride, pts, ends, self._col(c),
+                                   self._cam_x, self._cam_y, self._clip_x0, self._clip_y0,
+                                   self._clip_x1, self._clip_y1)
+
+    def face_text(self, face, size, x, y, s, c):
+        """`s` in outline face `face` at em `size`, its baseline's left end at
+        (x, y). The advance."""
+        self.flush_batch()
+        return self._gfx.path_text(self._buf, self._stride, int(face), int(size), int(x),
+                                   int(y), s, self._col(c), self._cam_x, self._cam_y,
+                                   self._clip_x0, self._clip_y0, self._clip_x1,
+                                   self._clip_y1)
+
+    def face_width(self, face, size, s):
+        """The advance `s` takes in face `face` at em `size`."""
+        return self._gfx.path_width(int(face), int(size), s)
+
+    def splash(self, pal, permille=-1, status=""):
+        """The boot splash (native/moy_gfx/moy_scr.h) over the whole
+        viewport, camera and clip aside: `pal` its palette's six RGB565
+        words as bytes (console.splash_pal), `permille` the track's fill
+        (-1 none), `status` its line. The kernel's first light is the same
+        C. The draws that failed."""
+        self.flush_batch()
+        self._gfx.layer_drain(self._lrs)
+        return self._gfx.splash(self._buf, self._stride, self._ox, self._oy, self.w, self.h,
+                                PAL565_WIRE is not PAL565, pal, int(permille), status)
+
     def fillp(self, p=None, c=None):
         # SPEC.md 6: a 4x4 dither for the nine SHAPE verbs. `p` is sixteen bits
         # read row by row from the top-left, bit 15 first; a SET bit is a hole,
@@ -1802,9 +1797,15 @@ class DeviceCanvas:
         if p is None:
             self._fillp = 0
             self._fillp_col = -1
+            if self._gate_state is not None:
+                self._gate_state[_ST_FILLP] = 0
             return
         self._fillp = int(p) & 0xFFFF
         self._fillp_col = -1 if c is None or int(c) < 0 else int(c) & 63
+        # The native rect/rectb gates fill solid, so they read this flag and
+        # hand a patterned draw to the verbs above.
+        if self._gate_state is not None:
+            self._gate_state[_ST_FILLP] = 1 if self._fillp else 0
 
     def _shape(self, kind, a0, a1, a2, a3, a4, a5, c):
         # The nine shape verbs' patterned lane, plus oval/ovalb always: ONE
@@ -1813,131 +1814,13 @@ class DeviceCanvas:
         # was. getattr because a board on older firmware has moy_gfx without it.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         col = self._col(c)
-        gfx = self._gfx
-        sh = None if gfx is None else getattr(gfx, "shape", None)
-        if sh is None:
-            self._shape_py(kind, a0, a1, a2, a3, a4, a5, col)
-            return
         hole = self._fillp_col
-        sh(self._buf, self._stride, self._bh, kind,
+        self._gfx.shape(self._buf, self._stride, self._bh, kind,
            int(a0), int(a1), int(a2), int(a3), int(a4), int(a5),
            col, self._fillp,
            -1 if hole < 0 else self._wire[self._pal_map[hole]],
            self._cam_x, self._cam_y,
            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-
-    def _put_shape(self, x, y, col):
-        # _put under the fill pattern. The pattern is tested in BUFFER space,
-        # after the camera offset, which is what "anchored to the screen" means
-        # and is where libmoy's moy_ds_put_shape tests it too.
-        x -= self._cam_x
-        y -= self._cam_y
-        if not (self._clip_x0 <= x < self._clip_x1
-                and self._clip_y0 <= y < self._clip_y1):
-            return
-        if (self._fillp >> (15 - ((y & 3) << 2) - (x & 3))) & 1:
-            hole = self._fillp_col
-            if hole < 0:
-                return
-            col = self._wire[self._pal_map[hole]]
-        self._fb.pixel(x, y, col)
-
-    def _span_shape(self, xa, xb, y, col):
-        # One inclusive row, pattern-tested per pixel. The kernel walks a row of
-        # pattern bits instead; this lane exists for a board with no moy_gfx.
-        put = self._put_shape
-        for x in range(xa, xb + 1):
-            put(x, y, col)
-
-    def _shape_py(self, kind, a0, a1, a2, a3, a4, a5, col):
-        # mg_shape with no kernel under it. Geometry duplicated from the solid
-        # verbs above rather than shared with them, so their hot bodies keep no
-        # branch for a state this lane exists to handle.
-        put = self._put_shape
-        span = self._span_shape
-        if kind == _MG_OVAL or kind == _MG_OVALB:
-            x = int(a0); y = int(a1); w = int(a2); h = int(a3)
-            if w <= 0 or h <= 0:
-                return
-            if kind == _MG_OVAL:
-                ellipse(x, y, x + w - 1, y + h - 1, None,
-                        lambda xa, xb, yy: span(xa, xb, yy, col))
-                return
-            ellipse(x, y, x + w - 1, y + h - 1,
-                    lambda px, py: put(px, py, col), None)
-            return
-        if kind == _MG_RECT or kind == _MG_RECTB:
-            x = int(a0); y = int(a1); w = int(a2); h = int(a3)
-            if w <= 0 or h <= 0:
-                return
-            if kind == _MG_RECT:
-                for yy in range(y, y + h):
-                    span(x, x + w - 1, yy, col)
-                return
-            span(x, x + w - 1, y, col)              # four one-pixel rects, as
-            span(x, x + w - 1, y + h - 1, col)      # moy_rectb draws them
-            for yy in range(y, y + h):
-                put(x, yy, col)
-                put(x + w - 1, yy, col)
-            return
-        if kind == _MG_CIRC:
-            cx = int(a0); cy = int(a1); r = int(a2)
-            if r < 0:
-                return
-            sp = 0
-            for dy in range(-r, r + 1):
-                t = r * r - dy * dy
-                while (sp + 1) * (sp + 1) <= t:
-                    sp += 1
-                while sp > 0 and sp * sp > t:
-                    sp -= 1
-                span(cx - sp, cx + sp, cy + dy, col)
-            return
-        if kind == _MG_CIRCB:
-            cx = int(a0); cy = int(a1); r = int(a2)
-            if r < 0:
-                return
-            x = r; y = 0; err = 0
-            while x >= y:
-                for px, py in ((x, y), (y, x), (-y, x), (-x, y),
-                               (-x, -y), (-y, -x), (y, -x), (x, -y)):
-                    put(cx + px, cy + py, col)
-                y += 1
-                if err <= 0:
-                    err += 2 * y + 1
-                else:
-                    x -= 1
-                    err -= 2 * x + 1
-            return
-        if kind == _MG_TRI:
-            q = tri_spans(a0, a1, a2, a3, a4, a5)
-            for i in range(0, len(q), 5):
-                span(q[i], q[i] + q[i + 2] - 1, q[i + 1], col)
-            return
-        if kind == _MG_TRIB:
-            self._line_py(a0, a1, a2, a3, col)
-            self._line_py(a2, a3, a4, a5, col)
-            self._line_py(a4, a5, a0, a1, col)
-            return
-        self._line_py(a0, a1, a2, a3, col)          # _MG_LINE
-
-    def _line_py(self, x1, y1, x2, y2, col):
-        # Bresenham through _put_shape, the same walk line()'s own fallback runs.
-        x0 = int(x1); y0 = int(y1); xe = int(x2); ye = int(y2)
-        put = self._put_shape
-        dx = abs(xe - x0); dy = -abs(ye - y0)
-        sx = 1 if x0 < xe else -1
-        sy = 1 if y0 < ye else -1
-        err = dx + dy
-        while True:
-            put(x0, y0, col)
-            if x0 == xe and y0 == ye:
-                break
-            e2 = 2 * err
-            if e2 >= dy:
-                err += dy; x0 += sx
-            if e2 <= dx:
-                err += dx; y0 += sy
 
     def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
              colorkey=-1, flip=0):
@@ -1956,41 +1839,34 @@ class DeviceCanvas:
         dh = sh if dh is None else int(dh)
         if sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0:
             return
-        gfx = self._gfx
-        sk = None if gfx is None else getattr(gfx, "sspr", None)
-        if sk is not None:
-            sk(self._buf, self._stride, self._bh,
-               sheet.pix, sheet.w, sheet.h, sx, sy, sw, sh,
-               dx, dy, dw, dh, int(colorkey), int(flip),
-               self._wire_pal(), self._palt,
-               self._cam_x, self._cam_y,
-               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+        self._gfx.sspr(self._buf, self._stride, self._bh,
+                       sheet.pix, sheet.w, sheet.h, sx, sy, sw, sh,
+                       dx, dy, dw, dh, int(colorkey), int(flip),
+                       self._wire_pal(), self._palt,
+                       self._cam_x, self._cam_y,
+                       self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+
+    def blit_indices_scale(self, sheet, sx, sy, sw, sh, dx, dy, scale=1,
+                           colorkey=-1):
+        # The sw x sh rect at (sx, sy) of an index bitmap (sheet.pix, sheet.w x
+        # sheet.h), each pixel a scale x scale block at (dx, dy): the pixels of
+        # sspr(sheet, sx, sy, sw, sh, dx, dy, sw * scale, sh * scale, colorkey)
+        # for a source rect inside the bitmap, resolved once per source pixel
+        # rather than per destination pixel. Camera, clip, pal and palt apply as
+        # they do to sspr; a source rect past the bitmap draws nothing there.
+        self.flush_batch()
+        scale = int(scale)
+        sw = int(sw); sh = int(sh)
+        if sw <= 0 or sh <= 0 or scale <= 0:
             return
-        flip = int(flip)
-        fx = flip & 1
-        fy = (flip >> 1) & 1
-        ck = int(colorkey)
-        pt = self._palt
-        pget = sheet.pget
-        put = self._put
-        pal = self._pal_map
-        for j in range(dh):
-            v = (j * sh) // dh
-            if fy:
-                v = sh - 1 - v
-            row_y = sy + v
-            ty = dy + j
-            for i in range(dw):
-                u = (i * sw) // dw
-                if fx:
-                    u = sw - 1 - u
-                p = pget(sx + u, row_y)
-                if p == ck:
-                    continue
-                p &= 63
-                if pt is not None and pt[p]:
-                    continue
-                put(dx + i, ty, self._wire[pal[p]])
+        self._gfx.blit_indices_scale(self._buf, self._stride, self._bh,
+                                     sheet.pix, sheet.w, sheet.h,
+                                     int(sx), int(sy), sw, sh,
+                                     int(dx) - self._cam_x, int(dy) - self._cam_y,
+                                     scale, self._wire_pal(), self._palt,
+                                     int(colorkey),
+                                     self._clip_x0, self._clip_y0,
+                                     self._clip_x1, self._clip_y1)
 
     def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
         # SPEC.md 6.1 tline (#167 shape B): exactly line()'s Bresenham pixels,
@@ -2009,65 +1885,13 @@ class DeviceCanvas:
         th = tilemap.h * 8
         if tw <= 0 or th <= 0:
             return
-        gfx = self._gfx
-        tk = None if gfx is None else getattr(gfx, "tline", None)
-        if tk is not None:
-            tk(self._buf, self._stride, self._bh,
-               tilemap.cells, tilemap.w, tilemap.h,
-               sheet.pix, sheet.w, sheet.h,
-               x0, y0, x1, y1, u, v, du, dv, ck,
-               self._wire_pal(), self._palt,
-               self._cam_x, self._cam_y,
-               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-            return
-        # Python fallback -- the correctness lane, same arithmetic.
-        tu = tw << 16
-        tv = th << 16
-        uu = u % tu
-        vv = v % tv
-        du %= tu
-        dv %= tv
-        cells = tilemap.cells
-        mw = tilemap.w
-        scols = sheet.cols
-        pget = sheet.pget
-        pt = self._palt
-        pal = self._pal_map
-        put = self._put
-        dxx = x1 - x0 if x1 > x0 else x0 - x1
-        dyy = y0 - y1 if y1 > y0 else y1 - y0
-        stx = 1 if x0 < x1 else -1
-        sty = 1 if y0 < y1 else -1
-        err = dxx + dyy
-        while True:
-            px = uu >> 16
-            py = vv >> 16
-            cell = cells[(py >> 3) * mw + (px >> 3)]
-            if cell:                   # 0 = empty (id+1 storage)
-                tid = cell - 1
-                p = pget((tid % scols) * 8 + (px & 7),
-                         (tid // scols) * 8 + (py & 7))
-                if p != ck and (pt is None or not pt[p & 63]):
-                    put(x0, y0, self._wire[pal[p & 63]])
-            uu += du
-            if uu >= tu:
-                uu -= tu
-            elif uu < 0:
-                uu += tu
-            vv += dv
-            if vv >= tv:
-                vv -= tv
-            elif vv < 0:
-                vv += tv
-            if x0 == x1 and y0 == y1:
-                break
-            e2 = 2 * err
-            if e2 >= dyy:
-                err += dyy
-                x0 += stx
-            if e2 <= dxx:
-                err += dxx
-                y0 += sty
+        self._gfx.tline(self._buf, self._stride, self._bh,
+                        tilemap.cells, tilemap.w, tilemap.h,
+                        sheet.pix, sheet.w, sheet.h,
+                        x0, y0, x1, y1, u, v, du, dv, ck,
+                        self._wire_pal(), self._palt,
+                        self._cam_x, self._cam_y,
+                        self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
     def spr(self, img, x, y, scale=1, flip=0):
         # TIC-80 flip: 0=none, 1=h, 2=v, 3=both (#11). Camera offsets the dst; the
@@ -2082,9 +1906,6 @@ class DeviceCanvas:
         flip = int(flip)
         if scale < 1:
             scale = 1
-        if self._gfx is None:
-            self._spr_py(img, x, y, scale, flip)
-            return
         # Paint-image fast path (#63 Fold 3): a big MOY64 index bitmap (images/*.moyimg)
         # bakes to RGB565 ONCE via the native blit_indices kernel (one C call over the
         # whole bitmap, NOT the per-pixel _cache_rgb loop over ~77k px), cached on the
@@ -2208,37 +2029,6 @@ class DeviceCanvas:
         self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, self._wire)
         img._rgb_i = buf
 
-    def _spr_py(self, img, x, y, scale, flip=0):
-        # Per-pixel fallback when moy_gfx is absent (image built without it). Honours
-        # camera (applied by the caller into x,y), clip, pal, palt, and flip.
-        pal = self._wire
-        pmap = self._pal_map
-        palt = self._palt
-        t = img.transparent
-        iw = img.w
-        ih = img.h
-        pix = img.pix
-        fx = flip & 1
-        fy = (flip >> 1) & 1
-        for sy in range(ih):
-            ssy = (ih - 1 - sy) if fy else sy
-            base = ssy * iw
-            for sx in range(iw):
-                ssx = (iw - 1 - sx) if fx else sx
-                p = pix[base + ssx]
-                if p == t or p < 0 or palt[p & 63]:
-                    continue
-                col = pal[pmap[p & 63]]
-                # Clipped fill block (camera already applied into x,y).
-                bx = x + sx * scale
-                by = y + sy * scale
-                x0 = max(self._clip_x0, bx)
-                y0 = max(self._clip_y0, by)
-                x1 = min(self._clip_x1, bx + scale)
-                y1 = min(self._clip_y1, by + scale)
-                if x1 > x0 and y1 > y0:
-                    self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
-
     def _mask_region(self, tilemap, mx, my, w, h, layers, flags):
         # The (w x h) region at (mx, my) as a fresh cell grid with every cell the
         # layer mask rejects cleared to empty (SPEC.md 7.2). Cells store tile+1,
@@ -2273,37 +2063,10 @@ class DeviceCanvas:
                 out[orow + cx] = v
         return out
 
-    def _blit_map_into(self, dst, dw, dh, dsx, dsy, tilemap, sheet, mx, my, w, h,
-                       colorkey, tile, scale, cx0, cy0, cx1, cy1):
-        # One native moy_gfx.blit_map into `dst` -- the framebuffer (a direct draw) or a
-        # hidden cache layer (Fold 2 fill). Reads the INDEX sheet and resolves through
-        # the _wire_pal LUT, which is libmoy's moy_map_draw (#97): re-measured on glass
-        # it beats the pre-baked RGB565 atlas this used to walk, 0.78x on the S3 and
-        # 0.92x on the P4. colorkey is the cart's own index again rather than the
-        # _RGB_KEY sentinel the atlas baked it into.
-        self._gfx.blit_map(dst, dw, dh, dsx, dsy,
-                           tilemap.cells, tilemap.w, tilemap.h,
-                           mx, my, w, h,
-                           sheet.pix, sheet.w, sheet.h,
-                           self._wire_pal(), self._palt, int(colorkey), scale,
-                           cx0, cy0, cx1, cy1)
-
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1, layers=0, flags=None):
-        # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to screen
-        # (sx, sy). Fold 2 (#63): the rasterized region is CACHED in a hidden 565 layer so a
-        # subsequent camera-only call keyed-blits it (one blit565) instead of re-walking every
-        # cell (blit_map) -- the make_layer win, made automatic for a naive camera()+map()
-        # cart. The cache keys on (tilemap.gen, sheet.gen, region, colorkey, scale); an mset /
-        # sheet paint edit / scale change bumps the key and the region re-rasters.
-        # Camera/clip/sx/sy are COMPOSITE-time (not in the key), so a scroll is a cache HIT.
-        # Mirrors the host Canvas.map cache exactly (palette indices there, RGB565 here).
-        #
-        # pal/palt bake into the 565 layer via the sheet atlas under the parent's identity
-        # state, so caching is gated to identity pal/palt (_palgen == 0); under an active
-        # palette (and in the no-moy_gfx fallback) map() rasters directly to the framebuffer
-        # (correctness over cleverness -- an active palette on a scrolling map is rare). The
-        # sheet atlas is still baked once (cached on the sheet, keyed on gen/colorkey/palgen).
+        # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to
+        # screen (sx, sy), rastered by libmoy's moy_map_draw every call.
         self.flush_batch()             # #63: map() is a non-spr primitive -> break batch
         mx = int(mx); my = int(my); scale = int(scale)
         if scale < 1:
@@ -2313,114 +2076,25 @@ class DeviceCanvas:
         if h is None:
             h = tilemap.h - my
         w = int(w); h = int(h)
+        cells, mw, mh = tilemap.cells, tilemap.w, tilemap.h
         layers = int(layers) & 0xFF
         if layers:
             # SPEC.md 7.2's layer mask, resolved into a MASKED COPY of the region
             # rather than into the kernel: a cell whose tile carries none of the
-            # mask's bits becomes an empty cell, which every lane below already
-            # skips. That keeps blit_map's signature (and the boards' compiled
-            # moy_gfx) untouched, and it costs one w*h byte walk per call.
-            tilemap = _MaskedRegion(self._mask_region(tilemap, mx, my, w, h,
-                                                      layers, flags), w, h)
+            # mask's bits becomes an empty cell, which the raster skips. It
+            # costs one w*h byte walk per call.
+            cells = self._mask_region(tilemap, mx, my, w, h, layers, flags)
+            mw, mh = w, h
             mx = my = 0
         dsx = int(sx) - self._cam_x
         dsy = int(sy) - self._cam_y
-        tile = sheet.TILE
-        if self._gfx is None:
-            self._map_py(tilemap, sheet, mx, my, w, h, dsx, dsy, colorkey, scale)
-            return
-        _t0 = _ticks_us()              # #66 DRAW2: the whole map path (raster or composite)
-        if (self._nocache or self._palgen != 0     # layer / active palette / revert knob
-                or layers                          # a masked region: see below
-                or not MAP_AUTO_CACHE):            # -> direct raster
-            self._blit_map_into(self._buf, self._stride, self._bh, dsx, dsy,
-                                tilemap, sheet, mx, my, w, h, colorkey, tile, scale,
-                                self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-            self._t_map_us += _ticks_diff(_ticks_us(), _t0)
-            if self._pump is not None:
-                self._pump()           # #66: feed the bounce flush between native ops
-            return
-        step = tile * scale
-        lw = w * step
-        lh = h * step
-        if lw <= 0 or lh <= 0:
-            return
-        key = (id(tilemap), tilemap.gen, id(sheet), getattr(sheet, "gen", 0),
-               mx, my, w, h, int(colorkey), scale)
-        mc = self._mapcache
-        if mc is None or mc[0] != key:
-            # MISS -> (re)raster the region into a hidden layer at local (0,0): fill it with
-            # the transparent key so empty/colorkey cells stay transparent, then blit_map.
-            # Re-use the layer buffer when the pixel dims are unchanged (only the content/key
-            # changed) so a live-editing cart doesn't re-allocate (and re-gc.collect) each
-            # rebuild.
-            if mc is not None and mc[2] == lw and mc[3] == lh:
-                layer = mc[1]
-            else:
-                layer = self.new_layer(lw, lh, owner="_mapcache")
-            self._gfx.fill(layer._buf, lw * lh, _RGB_KEY)
-            self._blit_map_into(layer._buf, lw, lh, 0, 0,
-                                tilemap, sheet, mx, my, w, h, colorkey, tile, scale,
-                                0, 0, lw, lh)
-            # OPAQUE lane eligibility: with no colorkey and no empty cells the cached
-            # region has no transparent pixel (palt is identity under the _palgen == 0
-            # gate, and the atlas bake nudges accidental _RGB_KEY collisions off the
-            # key), so the composite can use blit565's opaque row-memcpy lane (key=-1,
-            # the #66 chrome-trim lane) instead of testing every pixel. Decided ONCE
-            # per raster with a cheap cell walk; sparse maps keep the keyed blit.
-            opaque = colorkey < 0
-            if opaque:
-                mg = tilemap.mget
-                for cy in range(h):
-                    for cx in range(w):
-                        if mg(mx + cx, my + cy) < 0:
-                            opaque = False
-                            break
-                    if not opaque:
-                        break
-            self._mapcache = mc = (key, layer, lw, lh, -1 if opaque else _RGB_KEY)
-            self._map_raster_count += 1
-        else:
-            self._map_hits += 1
-        # COMPOSITE: blit the cached region at the camera-offset (dsx, dsy), clipped --
-        # keyed (skips _RGB_KEY) for sparse regions, opaque row-memcpy for full-coverage
-        # ones. Overdrawing the region each frame still erases last frame's actors for
-        # free, exactly like a direct map().
-        layer = mc[1]
-        self._gfx.blit565(self._buf, self._stride, self._bh, dsx, dsy,
-                          layer._buf, lw, lh, mc[4],
-                          self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+        _t0 = _ticks_us()              # #66 DRAW2: the whole map path
+        self._gfx.blit_map(self._buf, self._stride, self._bh, dsx, dsy,
+                           cells, mw, mh, mx, my, w, h,
+                           sheet.pix, sheet.w, sheet.h,
+                           self._wire_pal(), self._palt, int(colorkey), scale,
+                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
         self._t_map_us += _ticks_diff(_ticks_us(), _t0)
-        if self._pump is not None:
-            self._pump()               # #66: feed the bounce flush between native ops
-
-    def map_cache_reset(self):
-        # Zero the Fold-2 map-cache profiling counters (#63): after a run of same-key map()
-        # calls _map_raster_count == 1 / _map_hits == (n-1) PROVES the region rasterized ONCE
-        # and every later frame re-used the cache. The map() analogue of batch_reset.
-        self._map_raster_count = 0
-        self._map_hits = 0
-
-    def _map_py(self, tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale):
-        # Per-tile fallback when moy_gfx is absent: draw each non-empty cell via the
-        # framebuf spr path. Tile images cached by id so a repeat tile builds once.
-        tile = sheet.TILE
-        step = tile * scale
-        cache = {}
-        for cy in range(h):
-            ty = my + cy
-            py = sy + cy * step
-            for cx in range(w):
-                tid = tilemap.mget(mx + cx, ty)
-                if tid < 0:
-                    continue
-                img = cache.get(tid)
-                if img is None:
-                    img = sheet.tile_image(tid, colorkey)
-                    cache[tid] = img if img is not None else False
-                if not img:
-                    continue
-                self._spr_py(img, sx + cx * step, py, scale)
 
     def begin_batch(self, sheet, colorkey=-1, scale=1, token=0):
         # Register a new batch run: flush whatever is pending, then stamp the run
@@ -2530,22 +2204,6 @@ class DeviceCanvas:
             if img is not None:
                 self.spr(img, x, y, scale, flip)
             return
-        if self._gfx is None:
-            # Fallback: per-item framebuf spr (camera+clip applied inside spr()).
-            # Tile images cached by id so a repeated tile builds once.
-            cache = {}
-            i = 4
-            while i < k:
-                tid = a[i]
-                if tid >= 0:
-                    img = cache.get(tid)
-                    if img is None:
-                        img = sheet.tile_image(tid, colorkey)
-                        cache[tid] = img if img is not None else False
-                    if img:
-                        self.spr(img, a[i + 1], a[i + 2], scale, a[i + 3])
-                i += 4
-            return
         a[0] = k                       # array mode: C reads the count from a[0]
         _t0 = _ticks_us()              # #63 DRAW2: time the native sprite batch
         self._gfx.blit_batch(self._buf, self._stride, self._bh, a,
@@ -2557,8 +2215,6 @@ class DeviceCanvas:
                              self._clip_x1, self._clip_y1)
         self._t_batch_us += _ticks_diff(_ticks_us(), _t0)
         a[0] = 4
-        if self._pump is not None:
-            self._pump()               # #66: feed the bounce flush between native ops
 
     def batch_reset(self):
         # Zero the auto-batch profiling counters (#63) at the top of a frame when perf
@@ -2589,24 +2245,6 @@ class DeviceCanvas:
         scale = int(scale)
         if scale < 1:
             scale = 1
-        tile = sheet.TILE
-        if self._gfx is None:
-            # Fallback: per-item framebuf spr (camera+clip applied inside spr()). Tile
-            # images cached by id so a repeated tile builds once, like _map_py.
-            cache = {}
-            for it in items:
-                tid = it[0]
-                if tid < 0:
-                    continue
-                flip = it[3] if len(it) > 3 else 0
-                img = cache.get(tid)
-                if img is None:
-                    img = sheet.tile_image(tid, colorkey)
-                    cache[tid] = img if img is not None else False
-                if not img:
-                    continue
-                self.spr(img, it[1], it[2], scale, flip)
-            return
         _t0 = _ticks_us()                           # #63 DRAW2: time the native sprite batch
         self._gfx.blit_batch(self._buf, self._stride, self._bh, items,
                              sheet.pix, sheet.w, sheet.h,
@@ -2617,39 +2255,37 @@ class DeviceCanvas:
         self._t_batch_us += _ticks_diff(_ticks_us(), _t0)
 
     def print(self, s, x, y, c, scale=2):
-        # Native petme128 text (#62): the whole string in ONE moy_gfx.text call,
+        # Native text (#62) in the print font (moy_text.h), petme128 unless the
+        # shell names one: the whole string in ONE moy_gfx.text call,
         # camera + clip + pal honoured in C -- and pixel parity with the host at
-        # last (same glyph bytes, staged from runtime/font.py). The legacy per-call
-        # `scale` arg stays IGNORED, exactly like the host Canvas.print (system-UI
-        # scaling is the #39 font_scale path, not this arg). framebuf.text (same
+        # last (same glyph bytes, staged from runtime/font.py). The per-call
+        # `scale` arg is IGNORED (system-UI scaling is the #39 font_scale path,
+        # not this arg). framebuf.text (same
         # glyphs, screen-bounds clip only) remains the no-gfx / old-build fallback.
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: print() is a non-spr primitive -> break batch
-        if self._gfx_text is not None:
-            # Chrome draws text by the dozen per frame, so the DRAW2 ticks pair
-            # is gated here like _fill's (see its note).
-            _prof = self._prof
-            _t0 = _ticks_us() if _prof else 0
-            self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s), int(x), int(y),
-                           self._wire[self._pal_map[c & 63]],
-                           _FONT8, _FONT8_FIRST, 1,
-                           self._cam_x, self._cam_y,
-                           self._clip_x0, self._clip_y0,
-                           self._clip_x1, self._clip_y1)
-            if _prof:
-                self._t_text_us += _ticks_diff(_ticks_us(), _t0)
-            if self._pump is not None:
-                self._pump()           # #66: feed the bounce flush between native ops
-            return
-        self._fb.text(_fb_text(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
+        # Chrome draws text by the dozen per frame, so the DRAW2 ticks pair
+        # is gated here like _fill's (see its note).
+        self._gate_state[_ST_N_TEXT] += 1
+        _prof = self._prof
+        _t0 = _ticks_us() if _prof else 0
+        self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s), int(x), int(y),
+                       self._col(c),
+                       _FONT8, _FONT8_FIRST, 1,
+                       self._cam_x, self._cam_y,
+                       self._clip_x0, self._clip_y0,
+                       self._clip_x1, self._clip_y1)
+        if _prof:
+            self._t_text_us += _ticks_diff(_ticks_us(), _t0)
+        return
 
-    def blit565(self, buf, w, h, x, y, scale=1):
+    def blit565(self, buf, w, h, x, y, scale=1, key=-1):
         """Place a w x h picture of RGB565 words -- already in this canvas's
         byte order, `swapped565` -- at (x, y), `scale` (a whole number) times
-        its size. Opaque; camera and clip honoured; pal() does not apply,
-        because direct colour has no index to remap. A cart's cover is drawn
-        this way (runtime/cover_cache.py): the console's one picture whose
-        pixels are colours, not palette indices."""
+        its size. Opaque, or at scale 1 with its words equal to `key` left
+        out (a story's picture with a clear background); camera and clip
+        honoured; pal() does not apply, because direct colour has no index to
+        remap. A cart's cover is drawn this way (runtime/cover_cache.py)."""
         self.flush_batch()
         w = int(w)
         h = int(h)
@@ -2664,7 +2300,7 @@ class DeviceCanvas:
         cy1 = self._clip_y1
         g = self._gfx
         if g is not None and scale == 1:
-            g.blit565(self._buf, self._stride, self._bh, x, y, buf, w, h, -1,
+            g.blit565(self._buf, self._stride, self._bh, x, y, buf, w, h, int(key),
                       cx0, cy0, cx1, cy1)
             return
         sw = w * scale
@@ -2721,6 +2357,152 @@ class DeviceCanvas:
                 o = 2 * (ty * stride + x0)
                 d[o:o + 2 * (x1 - x0)] = row[2 * (x0 - x):2 * (x1 - x)]
 
+    def backdrop(self, rec, c, img=None, surface=None):
+        """A theme's backdrop (`moy_gfx.backdrop`, native/moy_gfx/moy_backdrop.h):
+        the records `rec` over colour `c`, across the whole surface. Into
+        `img`'s one RGB565 bake (`_rgb_i`, img.w x img.h, lent to img's owner
+        as a picture's bake is: _paint_bake_buf), or, with no img, onto this
+        canvas inside its clip; `surface` (x, y, w, h) places the surface the
+        shapes are laid out on, in this canvas's pixels (a bar's strip takes
+        its rows of the screen's). The shapes drawn, or -1 where `rec` is
+        malformed and the fill alone is drawn."""
+        self.flush_batch()
+        col = self._col(c)
+        g = self._gfx
+        if img is not None:
+            w = img.w
+            h = img.h
+            buf = _paint_bake_buf(img, w * h * 2)
+            n = g.backdrop(buf, w, 0, 0, w, h, rec, col, WIRE_SWAPPED, 0, 0, w, h)
+            img._rgb_i = buf
+            return n
+        sx, sy, sw, sh = surface if surface is not None else (0, 0, self.w, self.h)
+        return g.backdrop(self._buf, self._stride, self._ox + sx, self._oy + sy, sw, sh,
+                          rec, col, WIRE_SWAPPED, self._clip_x0, self._clip_y0,
+                          self._clip_x1, self._clip_y1)
+
+    def blit565_resize(self, buf, w, h, x, y, tw, th):
+        """Place a w x h picture of RGB565 words (this canvas's byte order,
+        as `blit565`) scaled to tw x th at (x, y): nearest-neighbour at any
+        ratio, opaque, camera and clip honoured. One kernel call: the home's
+        cards at their scale (docs/shell_layout_2026-10.md §12)."""
+        self.flush_batch()
+        w = int(w)
+        h = int(h)
+        tw = int(tw)
+        th = int(th)
+        if w <= 0 or h <= 0 or tw <= 0 or th <= 0:
+            return
+        x = int(x) - self._cam_x
+        y = int(y) - self._cam_y
+        cx0 = self._clip_x0
+        cy0 = self._clip_y0
+        cx1 = self._clip_x1
+        cy1 = self._clip_y1
+        g = self._gfx
+        if g is not None and getattr(g, "blit565_resize", None) is not None:
+            g.blit565_resize(self._buf, self._stride, self._bh, x, y, tw, th,
+                             buf, w, h, cx0, cy0, cx1, cy1)
+            return
+        _blit565_resize_py(self._buf, self._stride, buf, w, h, x, y, tw, th,
+                           cx0, cy0, cx1, cy1)
+
+    def cover(self, buf, sw, sx, sy, cw, ch, x, y, w, h, r=0, stepped=False):
+        """A home card's cover: the (sx, sy, cw, ch) sub-rect of a picture of
+        RGB565 words `sw` a row (this canvas's byte order, as `blit565`),
+        scaled to w x h at (x, y) as `blit565_resize` samples, inside corners
+        of radius `r`, anti-aliased or `stepped`: a corner pixel the shape
+        covers in part is the picture over what is there, one it misses is
+        left. Camera and clip honoured; one kernel call (moy_shape.h). The
+        pixels written."""
+        self.flush_batch()
+        return self._gfx.cover(self._buf, self._stride, int(x), int(y), int(w), int(h),
+                               buf, int(sw), int(sx), int(sy), int(cw), int(ch), int(r),
+                               stepped, self._cam_x, self._cam_y, self._clip_x0,
+                               self._clip_y0, self._clip_x1, self._clip_y1)
+
+    def face(self, layer, fy, x, y, w, h, buf, sw, cw, ch, fill, quads, r, stepped, ring):
+        """A home card out of its kept face: rows fy.. of `layer` hold the
+        same w x h card drawn at its left edge, and the card at (x, y) is
+        copied out of it but for the pixels its corners blend over what lies
+        under them, which are drawn as the card draws them -- its `cover`
+        of the whole cw x ch picture `buf` (`sw` words a row), or with `buf`
+        None the colour `fill` in `rrect`'s corners, `stepped` or not, under
+        `quads` (`fill_rects`' rects at the card's corner: a title tile's
+        letter; None: none), then
+        the one-pixel edge ring `ring` `rrect` draws with no fill (None:
+        none). Camera and clip honoured; one kernel call (moy_shape.h's
+        mg_face). The pixels written."""
+        self.flush_batch()
+        return self._gfx.face(self._buf, self._stride, x, y, w, h, layer._buf, layer.w, fy,
+                              buf, sw, cw, ch, 0 if fill is None else self._col(fill), quads,
+                              r, stepped, -1 if ring is None else self._col(ring), self._cam_x,
+                              self._cam_y, self._clip_x0, self._clip_y0, self._clip_x1,
+                              self._clip_y1)
+
+    def picture(self, img, x, y, w, h, r=0, src=None):
+        """Drawing `img` (MOY64 indices) -- its (sx, sy, sw, sh) part `src`,
+        else the whole -- scaled to w x h at (x, y) inside corners of radius
+        `r`, as `cover` draws: its pixels baked to RGB565 once
+        (`_bake_indices`, kept on the image; `rebake` mends a part of it).
+        The pixels written."""
+        if getattr(img, "_rgb_i", None) is None:
+            self._bake_indices(img)
+        if src is None:
+            return self.cover(img._rgb_i, img.w, 0, 0, img.w, img.h, x, y, w, h, r)
+        return self.cover(img._rgb_i, img.w, src[0], src[1], src[2], src[3], x, y, w, h, r)
+
+    def rebake(self, img, x, y, w, h):
+        """Bake the rows of the (x, y, w, h) part of `img`'s indices into the
+        RGB565 bake `picture` keeps on it, whole and in one call: what a
+        stroke changed, where a whole re-bake would walk the picture. Nothing
+        while it has no bake."""
+        buf = getattr(img, "_rgb_i", None)
+        if buf is None:
+            return
+        y0 = max(0, int(y))
+        y1 = min(img.h, int(y) + int(h))
+        if int(w) <= 0 or y1 <= y0 or int(x) >= img.w or int(x) + int(w) <= 0:
+            return
+        iw = img.w
+        self._gfx.blit_indices(buf, iw, img.h, 0, y0,
+                               memoryview(img.pix)[y0 * iw:y1 * iw], iw, y1 - y0, self._wire)
+
+    def tint565(self, dst, buf, sw, sx, sy, w, h, c, alpha):
+        """Copy the (sx, sy, w, h) sub-rect of a picture of RGB565 words `sw`
+        a row into `dst` (w words a row), colour `c` over every pixel at
+        `alpha` (0..255), in this canvas's byte order: a dimmed cover, made
+        once and kept by its owner (runtime/cover_cache.py). Draws nothing.
+        The pixels written, 0 where either buffer is short."""
+        return self._gfx.tint(dst, buf, int(sw), int(sx), int(sy), int(w), int(h),
+                              self._col(c), int(alpha))
+
+    def tint565_at(self, buf, sw, sx, sy, w, h, x, y, c, alpha):
+        """tint565 drawn onto this canvas: the (sx, sy, w, h) sub-rect of a
+        picture of RGB565 words `sw` a row placed at (x, y), camera and clip
+        honoured, colour `c` over every pixel at `alpha` -- the pixels the
+        dimmed picture blitted 1:1 would leave, without the picture between.
+        The pixels written."""
+        self.flush_batch()
+        w = int(w)
+        h = int(h)
+        bx = int(x) - self._cam_x
+        by = int(y) - self._cam_y
+        x0 = bx if bx > self._clip_x0 else self._clip_x0
+        y0 = by if by > self._clip_y0 else self._clip_y0
+        x1 = bx + w if bx + w < self._clip_x1 else self._clip_x1
+        y1 = by + h if by + h < self._clip_y1 else self._clip_y1
+        if x1 <= x0 or y1 <= y0:
+            return 0
+        return self._gfx.tint(self._buf, buf, int(sw), int(sx) + x0 - bx, int(sy) + y0 - by,
+                              x1 - x0, y1 - y0, self._col(c), int(alpha),
+                              self._stride, x0, y0)
+
+    def bake565(self, indices, w, h, out):
+        """MOY64 indices (w x h) as this canvas's RGB565 words, into `out`
+        (2 * w * h bytes): a picture made once and placed with `blit565`."""
+        self._gfx.blit_indices(out, int(w), int(h), 0, 0, indices, int(w), int(h), self._wire)
+
     def blit_indices(self, indices, iw, ih, x, y):
         # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index
         # to RGB565 via the panel-wire-order PAL565_WIRE table. The "images are data, not draw calls"
@@ -2734,32 +2516,8 @@ class DeviceCanvas:
         ih = int(ih)
         if iw <= 0 or ih <= 0:
             return
-        if self._gfx is not None:
-            self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
-                                   indices, iw, ih, self._wire)
-            return
-        d = memoryview(self._buf).cast("H")
-        w = self.w
-        h = self.h
-        n = len(indices)
-        pn = len(self._wire)
-        for row in range(ih):
-            ty = y + row
-            if ty < 0 or ty >= h:
-                continue
-            srow = row * iw
-            drow = ty * w
-            for col in range(iw):
-                tx = x + col
-                if tx < 0 or tx >= w:
-                    continue
-                si = srow + col
-                if si >= n:
-                    continue
-                v = indices[si]
-                if v >= pn:
-                    continue
-                d[drow + tx] = self._wire[v]
+        self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
+                               indices, iw, ih, self._wire)
 
     # -- scroll layers (#54) -------------------------------------------------
 
@@ -2784,8 +2542,8 @@ class DeviceCanvas:
         #
         # The compact-first collect a big GC-heap layer needs lives in _LayerComp,
         # on the one path that allocates from the gc heap.
-        lay = self._make_layer(_LayerComp(int(w), int(h), self._gfx))
-        lay._nocache = True            # #63: a layer's own map() rasters directly (no nesting)
+        own = 0 if owner is None else _owner_h(owner)
+        lay = self._make_layer(_LayerComp(int(w), int(h), self._gfx, own))
         lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class
                                        # default 2 describes the ROOT ping-pong only) -- a
                                        # windowed surface blit-scrolling its win.buf must
@@ -2802,28 +2560,25 @@ class DeviceCanvas:
         # every stock layer off the shared module table for nothing.
         if self._wire is not _PAL565_WIRE_BUF:
             lay.palette = self._palette
-        # Layer lending (#63 leak fix): a pooled (moy_alloc-backed) buffer created for a
-        # program (`owner`: "cart" via make_api, "wallpaper" via the wallpaper runner,
-        # "_mapcache" for Fold 2's hidden cache) is recorded so reclaim_layers(owner)
-        # can return it to _LAYER_POOL when that program dies. owner=None (console
-        # chrome, tests) is never reclaimed.
-        comp = lay._comp
-        if owner is not None and comp.pooled:
-            lent = self._lent_layers
-            if lent is None:
-                lent = self._lent_layers = {}
-            lent.setdefault(owner, []).append((comp._buf, comp._nbytes))
+        # Layer lending (#63 leak fix): a layer made for a program (`owner`:
+        # "cart" via make_api, "wallpaper" via the wallpaper runner) is a BUF
+        # row on loan to that program's OWNER, so reclaim_layers(owner) returns
+        # it to the pool when the program dies. owner=None (console chrome,
+        # windows, tests) is the kernel's, freed by release().
         return lay
 
     def release(self):
         """Free this LAYER's pixel buffer now (see _LayerComp.release): the
-        windowed WM's verb for a window that died or is being rebuilt, and for
-        the drag backdrop it re-mints. Never for a cart's layers -- those are
-        lent and go back to the pool through reclaim_layers. A root canvas
-        (no releasable compositor) ignores it."""
+        windowed WM's verb for a window that died or is being rebuilt, the drag
+        backdrop it re-mints, and a run canvas at the run's end. A lent layer
+        goes back to the pool. The canvas then draws into nothing: a draw
+        after the release is clipped away, never written into the buffer's
+        next user. A root canvas (no releasable compositor) ignores it."""
         rel = getattr(self._comp, "release", None)
         if rel is not None:
             rel()
+            self._buf = _NO_PIXELS
+            self._crow.point(_NO_PIXELS)
 
     def release_bakes(self, owner):
         """Return `owner`'s off-heap full-surface paint bakes (#186) and NOTHING
@@ -2837,35 +2592,21 @@ class DeviceCanvas:
         _release_bakes(owner)
 
     def reclaim_layers(self, owner):
-        """Return a dead program's pooled layer buffers to _LAYER_POOL for reuse
-        (#63 leak fix: without this every cart re-run leaks its world from the
-        heap_caps pool). Also drops the Fold-2 map cache (its hidden layer is
-        program content) and any in-flight async layer copy. Callers probe via
-        getattr (the host Canvas has no pool -- gc reclaims)."""
-        if self._lcopy is not None:
-            self._drain_lcopy()
-        self._lcopy_pred = None
-        self._mapcache = None
-        # #186: and the run's off-heap paint bakes, which are loans of the same
-        # kind. BEFORE the _lent_layers guard below -- a cart that painted a
-        # backdrop without ever calling make_layer has bakes to give back and
-        # no layers, and returning early there leaked every one of them.
-        _release_bakes(owner)
-        lent = self._lent_layers
-        if not lent:
-            return
-        for own in (owner, "_mapcache"):
-            lst = lent.pop(own, None)
-            if lst:
-                for buf, n in lst:
-                    _LAYER_POOL.setdefault(n, []).append(buf)
+        """End a dead program's lifetime: every buffer on loan to `owner` --
+        its layers on whichever canvas made them, its run canvas, its paint
+        bakes -- goes back, a layer to the pool and the rest freed (#63 leak
+        fix), and any in-flight async layer copy is drained first. Callers
+        probe via getattr."""
+        self._gfx.layer_drain(self._lrs, True)
+        self._lrs_layer = None
+        _owner_done(owner)
 
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
         # Copy the visible self.w x self.h window of `layer` into the framebuffer at
-        # (cam_x, cam_y): native moy_gfx.blit_window (one flat per-row memcpy, ~7ms for
-        # a full frame) when present, else a memoryview row-copy fallback (no framebuf,
-        # so it also runs under the host parity test). Overwrites -- it's the background,
-        # drawn first each frame, erasing last frame's sprites for free.
+        # (cam_x, cam_y): the kernel's layer restore (one flat per-row memcpy, ~7ms
+        # for a full frame, or the copy predicted at sync_back). Overwrites --
+        # it's the background, drawn first each frame, erasing last frame's
+        # sprites for free.
         # SPEC.md 6: each axis of the camera clamps into [0, max(0, layer - screen)],
         # so the window never leaves the layer; on an axis where the layer is smaller
         # than the screen the camera is 0 and the screen past the layer keeps what it
@@ -2876,97 +2617,15 @@ class DeviceCanvas:
         self.flush_batch()
         _dirty = getattr(layer, "_batch_arr", None)
         _dirty = _dirty is not None and _dirty[0] > 4    # layer edited THIS frame
-        _fb = getattr(layer, "flush_batch", None)
-        if _fb is not None:
-            _fb()
-        cam_x = int(cam_x)
-        cam_y = int(cam_y)
-        mx = layer.w - self.w
-        my = layer.h - self.h
-        if cam_x > mx:
-            cam_x = mx
-        if cam_x < 0:
-            cam_x = 0
-        if cam_y > my:
-            cam_y = my
-        if cam_y < 0:
-            cam_y = 0
-        # Async layer copy (#54 Stage 2): if sync_back predicted THIS restore and
-        # kicked it on the GDMA engine at frame start, the ~7ms copy overlapped the
-        # cart's _update -- just wait out the tail (usually ~0) and we're done.
-        # A mispredicted in-flight copy is harmless: it painted a full-screen
-        # background that the sync path below fully overwrites. A layer that was
-        # EDITED this frame is a forced miss (the pre-kicked copy read stale
-        # pixels), so live layer edits stay exact at the cost of that frame's
-        # overlap.
-        pend = self._lcopy
-        if pend is not None:
-            self._lcopy = None
-            _t0 = _ticks_us()
-            _ok = True
-            try:
-                _ok = self._gfx.copy_wait()
-            except Exception:  # noqa: BLE001
-                self._async_ok = False
-            if _ok is False:
-                # copy_wait TRIPPED (#66): the GDMA copy hadn't finished within
-                # the bounded spin. Count it and force the miss path -- the sync
-                # blit below rewrites the same region, so pixels stay correct
-                # even if the late copy still lands (same source bytes).
-                self._lcopy_trips += 1
-                hit = False
-            else:
-                hit = (not _dirty and pend[0] is layer and pend[1] == cam_y
-                       and cam_x == 0 and layer.w == self.w)
-            self._t_layer_us += _ticks_diff(_ticks_us(), _t0)
-            if hit:
-                self._arm_layer_pred(layer, cam_x, cam_y)
-                return
-        if self._gfx is not None:
-            _t0 = _ticks_us()                       # #63 DRAW2: time the native window-copy
-            self._gfx.blit_window(self._buf, self.w, self.h,
-                                  layer._buf, layer.w, cam_x, cam_y)
-            self._t_layer_us += _ticks_diff(_ticks_us(), _t0)
-            self._arm_layer_pred(layer, cam_x, cam_y)
-            if self._pump is not None:
-                self._pump()           # #66: feed the bounce flush between native ops
-            return
-        d = memoryview(self._buf).cast("H")
-        s = memoryview(layer._buf).cast("H")
-        dw = self.w
-        dh = self.h
-        src_w = layer.w
-        if src_w <= 0 or dw <= 0 or dh <= 0:
-            return
-        if cam_x + dw > src_w:
-            dw = src_w - cam_x
-        if dw <= 0:
-            return
-        src_rows = len(s) // src_w
-        if cam_y + dh > src_rows:
-            dh = src_rows - cam_y
-        if dh <= 0:
-            return
-        for row in range(dh):
-            d0 = row * self.w
-            s0 = (cam_y + row) * src_w + cam_x
-            d[d0:d0 + dw] = s[s0:s0 + dw]
-
-    def _arm_layer_pred(self, layer, cam_x, cam_y):
-        # Arm next frame's async restore (#54 Stage 2) -- ONLY when the copy shape
-        # is a single contiguous memcpy covering the whole screen: cam_x==0, the
-        # layer exactly screen-wide, and cam_y + screen height inside the layer
-        # (a misprediction then just paints a background the sync path repaints).
-        # Scroll carts with WIDER layers (Sky Run) keep the sync blit_window; the
-        # static full-screen shape (sakura) is the one that wins the overlap.
-        if not self._async_ok or cam_x != 0 or layer.w != self.w:
-            return
-        lbuf = getattr(layer, "_buf", None)
-        if lbuf is None:
-            return
-        if (cam_y + self.h) * self.w * 2 > len(lbuf):
-            return
-        self._lcopy_pred = (layer, cam_y, self.w * self.h)
+        if _dirty:
+            layer.flush_batch()
+        # The restore (native/moy_gfx/moy_gfx_kernels.h, mg_lr_blit): the clamp,
+        # the predicted copy taken when nothing moved -- same layer, same cam_y,
+        # not edited this frame -- and the synchronous copy otherwise, which
+        # writes over whatever a mispredicted copy painted.
+        self._gfx.layer_blit(self._lrs, self._buf, self.w, self.h, layer._buf,
+                             layer.w, layer.h, int(cam_x), int(cam_y), _dirty)
+        self._lrs_layer = layer
 
     def blit_strip(self, layer, dst_x=0, dst_y=0):
         # Copy ALL of `layer` (its full layer.w x layer.h RGB565 buffer) into the
@@ -2978,44 +2637,17 @@ class DeviceCanvas:
         # framebuffer in C; else a memoryview row-copy fallback (mirrors the host index
         # copy + the parity stub). Ignores camera/clip (it's chrome over a finished frame).
         self.flush_batch()             # #63: emit this canvas's queued sprites first
-        _fb = getattr(layer, "flush_batch", None)
-        if _fb is not None:
-            _fb()                      # ... and complete the source strip's pixels
+        if hasattr(layer, "flush_batch"):   # (a getattr of a method allocates it)
+            layer.flush_batch()        # ... and complete the source strip's pixels
         dst_x = int(dst_x)
         dst_y = int(dst_y)
         sw = layer.w
         sh = layer.h
-        if self._gfx is not None:
-            self._gfx.blit565(self._buf, self._stride, self._bh,
-                              dst_x + self._ox, dst_y + self._oy,
-                              layer._buf, sw, sh, -1,
-                              self._ox, self._oy,
-                              self._ox + self.w, self._oy + self.h)
-            return
-        d = memoryview(self._buf).cast("H")
-        s = memoryview(layer._buf).cast("H")
-        dw = self.w
-        dh = self.h
-        if sw <= 0 or dw <= 0 or dh <= 0:
-            return
-        for row in range(sh):
-            ty = dst_y + row
-            if ty < 0 or ty >= dh:
-                continue
-            s0 = row * sw
-            cw = sw
-            sx0 = 0
-            tx0 = dst_x
-            if tx0 < 0:
-                sx0 = -tx0
-                cw += tx0
-                tx0 = 0
-            if tx0 + cw > dw:
-                cw = dw - tx0
-            if cw <= 0:
-                continue
-            d0 = ty * dw + tx0
-            d[d0:d0 + cw] = s[s0 + sx0:s0 + sx0 + cw]
+        self._gfx.blit565(self._buf, self._stride, self._bh,
+                          dst_x + self._ox, dst_y + self._oy,
+                          layer._buf, sw, sh, -1,
+                          self._ox, self._oy,
+                          self._ox + self.w, self._oy + self.h)
 
     def blit_strip_rect(self, layer, dst_x, dst_y, rx, ry, rw, rh):
         # blit_strip restricted to the destination rect (rx, ry, rw, rh) -- the
@@ -3025,9 +2657,9 @@ class DeviceCanvas:
         # span per row); rows outside the clip are one compare each. Fallback:
         # the blit_strip row loop with the extra bounds.
         self.flush_batch()             # #63: emit this canvas's queued sprites first
-        _fb = getattr(layer, "flush_batch", None)
-        if _fb is not None:
-            _fb()
+        ba = getattr(layer, "_batch_arr", None)    # a data read: no bound method made
+        if ba is not None and ba[0] > 4:
+            layer.flush_batch()
         dst_x = int(dst_x)
         dst_y = int(dst_y)
         rx = int(rx)
@@ -3036,44 +2668,51 @@ class DeviceCanvas:
             return
         sw = layer.w
         sh = layer.h
-        if self._gfx is not None:
-            cx0 = self._ox + rx
-            cy0 = self._oy + ry
-            if cx0 < self._ox:
-                cx0 = self._ox
-            if cy0 < self._oy:
-                cy0 = self._oy
-            cx1 = self._ox + rx + rw
-            cy1 = self._oy + ry + rh
-            if cx1 > self._ox + self.w:
-                cx1 = self._ox + self.w
-            if cy1 > self._oy + self.h:
-                cy1 = self._oy + self.h
-            self._gfx.blit565(self._buf, self._stride, self._bh,
-                              dst_x + self._ox, dst_y + self._oy,
-                              layer._buf, sw, sh, -1, cx0, cy0, cx1, cy1)
-            return
-        d = memoryview(self._buf).cast("H")
-        s = memoryview(layer._buf).cast("H")
-        dw = self.w
-        dh = self.h
-        if sw <= 0 or dw <= 0 or dh <= 0:
-            return
-        cx0 = max(0, rx)
-        cy0 = max(0, ry)
-        cx1 = min(dw, rx + rw)
-        cy1 = min(dh, ry + rh)
-        for row in range(sh):
-            ty = dst_y + row
-            if ty < cy0 or ty >= cy1:
-                continue
-            sx0 = max(0, cx0 - dst_x)
-            sx1 = min(sw, cx1 - dst_x)
-            if sx0 >= sx1:
-                continue
-            s0 = row * sw
-            d0 = ty * dw + (dst_x + sx0)
-            d[d0:d0 + (sx1 - sx0)] = s[s0 + sx0:s0 + sx1]
+        cx0 = self._ox + rx
+        cy0 = self._oy + ry
+        if cx0 < self._ox:
+            cx0 = self._ox
+        if cy0 < self._oy:
+            cy0 = self._oy
+        cx1 = self._ox + rx + rw
+        cy1 = self._oy + ry + rh
+        if cx1 > self._ox + self.w:
+            cx1 = self._ox + self.w
+        if cy1 > self._oy + self.h:
+            cy1 = self._oy + self.h
+        self._gfx.blit565(self._buf, self._stride, self._bh,
+                          dst_x + self._ox, dst_y + self._oy,
+                          layer._buf, sw, sh, -1, cx0, cy0, cx1, cy1)
+
+    def shift_last(self, x, y, w, h, dx, dy):
+        """The rect (x, y, w, h) of the buffer the last presented frame drew
+        into, moved by (dx, dy) inside it, into the buffer this frame draws
+        into; buffer coordinates, no camera or clip. Pixels that would leave
+        the rect are dropped and the band the move exposes keeps what this
+        buffer held: the caller draws it. True once done or queued; False
+        where it cannot (no last frame, an engine busy with what the shift
+        must not wait behind) and the caller draws the rect.
+
+        The compositor's where it names a last frame's buffer (the P4s' 2D-DMA,
+        the S3s' row copy); on one persistent buffer -- a layer, a window
+        buffer, a cart's canvas, the host's and the browser's root -- the last
+        frame's is this one and the shift is in place. A queued copy is
+        fenced by shift_fence(), and by anything that reads or presents this
+        buffer; until then the caller writes no row the shift writes
+        (docs/scroll_and_text_2026-10.md §3.2)."""
+        self.flush_batch()
+        cs = self._comp_shift
+        if cs is not None:
+            return cs(x, y, w, h, dx, dy)
+        self._gfx.scroll_rect(self._buf, self._stride, x, y, w, h, dx, dy)
+        return True
+
+    def shift_fence(self):
+        """A queued shift_last has landed and the rows it wrote are this
+        core's to draw into; nothing where the shift was synchronous."""
+        f = self._comp_shift_fence
+        if f is not None:
+            f()
 
     def scroll_rect(self, rx, ry, rw, rh, dx, dy):
         # Shift the pixels inside rect (rx, ry, rw, rh) by (dx, dy) IN PLACE --
@@ -3087,28 +2726,8 @@ class DeviceCanvas:
         dy = int(dy)
         if dx == 0 and dy == 0:
             return
-        if self._gfx is not None:
-            self._gfx.scroll_rect(self._buf, self._stride,
-                                  rx + self._ox, ry + self._oy, rw, rh, dx, dy)
-            return
-        buf = self._buf
-        w = self.w
-        x0 = max(0, int(rx))
-        y0 = max(0, int(ry))
-        x1 = min(w, int(rx) + int(rw))
-        y1 = min(self.h, int(ry) + int(rh))
-        tx0 = x0 + max(0, dx)
-        tx1 = x1 + min(0, dx)
-        ty0 = y0 + max(0, dy)
-        ty1 = y1 + min(0, dy)
-        if tx0 >= tx1 or ty0 >= ty1:
-            return
-        cw = (tx1 - tx0) * 2
-        rows = range(ty1 - 1, ty0 - 1, -1) if dy > 0 else range(ty0, ty1)
-        for ty in rows:
-            s0 = ((ty - dy) * w + (tx0 - dx)) * 2
-            d0 = (ty * w + tx0) * 2
-            buf[d0:d0 + cw] = buf[s0:s0 + cw]
+        self._gfx.scroll_rect(self._buf, self._stride,
+                              rx + self._ox, ry + self._oy, rw, rh, dx, dy)
 
 
 class SystemCanvas(DeviceCanvas):
@@ -3126,8 +2745,7 @@ class SystemCanvas(DeviceCanvas):
     diagonally out of its rect under a viewport) and its new_layer lost the
     cart-palette rider (the cart's colours on the surface, stock MOY64 in its
     layers). What stays per-tier is hardware and host I/O: the P4's PPA
-    composite hooks, the host's RGB888 readout and its no-kernel petme128
-    raster (the _print_fallback/_cover_fallback hooks below).
+    composite hooks and the host's RGB888 readout.
 
     RETAINED_FRAMES is deliberately NOT overridden here: the host and web
     compositors hold ONE persistent buffer and pin it to 1 themselves; the P4
@@ -3141,6 +2759,27 @@ class SystemCanvas(DeviceCanvas):
         # until the next set_font_scale.
         self.font_scale = max(1, int(font_scale))
         DeviceCanvas.__init__(self, comp)
+        # copy_last(x, y, w, h): the rect of the buffer the last frame drew
+        # into, into the one this frame draws into (surface model §14.5), for
+        # a part the last frame painted as this one would. Absent where the
+        # compositor names no such buffer.
+        cl = getattr(comp, "copy_last", None)
+        if cl is not None:
+            self.copy_last = cl
+        # last_buffer(): that buffer itself, where it is not the one this
+        # frame draws into (a wash over the last frame reads it), else None.
+        lb = getattr(comp, "last_buffer", None)
+        if lb is not None:
+            self.last_buffer = lb
+        # copy_last_into(layer, x, y, w, h[, lx, ly]): the same buffer's rect
+        # into a layer (a window buffer brought up from the glass). Absent
+        # where the compositor names no last frame's buffer.
+        if getattr(comp, "copy_last_into", None) is not None:
+            self.copy_last_into = self._copy_last_into
+
+    def _copy_last_into(self, layer, x, y, w, h, lx=0, ly=0):
+        layer.flush_batch()
+        return self._comp.copy_last_into(layer._buf, layer._stride, x, y, w, h, lx, ly)
 
     def set_font_scale(self, scale):
         # Called UNGUARDED from console.py (the settings row and the font-scale
@@ -3153,18 +2792,17 @@ class SystemCanvas(DeviceCanvas):
             st[_ST_FONT_SCALE] = self.font_scale
 
     def print(self, s, x, y, c, scale=1):
-        # petme128 at font_scale. The legacy per-call `scale` arg stays IGNORED
+        # The print font (moy_text.h; petme128 unless the shell names one) at
+        # font_scale. The per-call `scale` arg is IGNORED
         # on every tier (SPEC.md 6: cart text is always 8px; system-UI scaling
         # is the #39 font_scale path, not this argument).
         fs = self.font_scale
         gt = self._gfx_text
-        if gt is None:
-            self._print_fallback(s, x, y, c)
-            return
         if fs <= 1:
             DeviceCanvas.print(self, s, x, y, c)
             return
         self.flush_batch()             # a non-spr primitive breaks the batch
+        self._gate_state[_ST_N_TEXT] += 1
         # _stride/_bh, NOT w/h: the kernel wants the BUFFER geometry, and the
         # two diverge the moment a viewport is set (#155) -- which is exactly
         # what wm_windowed._direct_render does to paint a window's content in
@@ -3176,12 +2814,26 @@ class SystemCanvas(DeviceCanvas):
            self._cam_x, self._cam_y,
            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
-    def _print_fallback(self, s, x, y, c):
-        # No kernel text op at all. The host overrides this with its own
-        # clip-carrying petme128 raster (a clean checkout without a firmware
-        # build lands there, and framebuf.text has no clip rect); a board build
-        # always carries moy_gfx, so on device this only ever renders 1x.
-        DeviceCanvas.print(self, s, x, y, c)
+    def glyph_cols(self, ch):
+        """petme128's `ch` as its 8 column bytes, bit j of each lighting row
+        j of the 8x8 cell: what a generated cover's initial is drawn from
+        (`ui_draw.initial_cover`). None for a character the font lacks, or
+        where the font is not staged."""
+        n = ord(ch) - _FONT8_FIRST
+        if _FONT8 is None or not 0 <= n < len(_FONT8) // 8:
+            return None
+        return bytes(_FONT8[n * 8:n * 8 + 8])
+
+    def print_scaled(self, s, x, y, c, scale):
+        """The display type: `s` at `scale` (a whole number, NOT the font
+        scale), one op through the one UI text path -- what
+        chrome._print_scaled draws a heading with."""
+        self.flush_batch()             # a non-spr primitive breaks the batch
+        self._gate_state[_ST_N_TEXT] += 1
+        self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s),
+                       int(x), int(y), self._col(c), _FONT8, _FONT8_FIRST,
+                       max(1, int(scale)), self._cam_x, self._cam_y,
+                       self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
     def _make_layer(self, comp):
         # A system surface's layers are system surfaces too: bar_layer,
@@ -3214,131 +2866,76 @@ class SystemCanvas(DeviceCanvas):
         if fb is not None:
             fb()
         self.flush_batch()
-        g = self._gfx
-        words = getattr(gc, "_buf", None)
-        scaled = getattr(g, "blit565_scale", None) if g is not None else None
-        if scaled is not None and words is not None:
-            scaled(self._buf, sw, sh, int(ox), int(oy),
-                   words, gw, gh, int(scale))
-            return
-        self._cover_fallback(gc, ox, oy, scale)
+        self._gfx.blit565_scale(self._buf, sw, sh, int(ox), int(oy),
+                                gc._buf, gw, gh, int(scale))
 
-    def _cover_fallback(self, gc, ox, oy, scale):
-        # No blit565_scale (an older kernel), or a source publishing palette
-        # indices instead of 565 words. The host overrides this with a Python
-        # row-copy twin (see host_canvas); a board build always has the kernel,
-        # so on device an unreachable source draws nothing.
+
+# What a released canvas draws into: nothing at all.
+_NO_PIXELS = bytearray(2)
+
+
+def _blit565_resize_py(d, stride, buf, w, h, x, y, tw, th, cx0, cy0, cx1, cy1):
+    """`blit565_resize` with no kernel: the same sampling (each target
+    pixel's centre in the source), a target row at a time. Its own function:
+    the comprehension's cells would otherwise be made on every call of the
+    method, kernel or not."""
+    x0 = max(x, cx0)
+    x1 = min(x + tw, cx1)
+    if x1 <= x0:
         return
-
-
-_ORIGIN_HEAP, _ORIGIN_POOL, _ORIGIN_ALLOC, _ORIGIN_DMA = 0, 1, 2, 3
+    cols = [((2 * (tx - x) + 1) * w) // (2 * tw) for tx in range(x0, x1)]
+    row = bytearray(2 * (x1 - x0))
+    for ty in range(max(y, cy0), min(y + th, cy1)):
+        sy = ((2 * (ty - y) + 1) * h) // (2 * th)
+        base = 2 * w * sy
+        for k in range(len(cols)):
+            s = base + 2 * cols[k]
+            row[2 * k] = buf[s]
+            row[2 * k + 1] = buf[s + 1]
+        o = 2 * (ty * stride + x0)
+        d[o:o + len(row)] = row
 
 
 class _LayerComp:
     """Minimal compositor stand-in so DeviceCanvas can back a scroll layer (#54): a
     fresh RGB565 buffer of the requested size sharing the parent's moy_gfx kernel. No
     flush / double-buffer (a layer is a draw SOURCE, never flushed), so back_buffer()
-    just returns the one buffer -- a sync_back() on a layer is a harmless no-op."""
+    just returns the one buffer -- a sync_back() on a layer is a harmless no-op.
 
-    def __init__(self, w, h, gfx):
+    The buffer is a BUF row of the glass (#63 GC wall): off the gc heap in
+    DMA-reachable PSRAM, so a collect never marks it and the cart's live set --
+    its collect cost and its fragmentation -- stays small, and eligible for the
+    #54 GDMA async window-copy. A buffer of a dead program's size comes back out
+    of the pool; when PSRAM refuses even after the pool is evicted, the glass
+    falls back to the gc heap (compacting first for a big one) and counts it."""
+
+    def __init__(self, w, h, gfx, owner=0, role=_ROLE_LAYER):
         self._w = w
         self._h = h
-        # #63 (GC wall): the layer's RGB565 buffer is the single biggest object a
-        # scroll/paint cart keeps live (150KB for a full screen). A plain bytearray
-        # lands in the MicroPython gc heap, so every gc.collect() MARKS it -- and
-        # collect cost scales with the LIVE set (measured ~0.16ms/KB on device: launcher
-        # live=407k -> 71ms, sakura live=902k -> 143ms). So a layer cart pays ~24ms/collect
-        # for this buffer alone, and its bulk fragments the heap -- slowing every transient
-        # float box in the kid's per-frame physics loop (the sustained 29->12fps sag we
-        # measured). Allocate it OFF the gc heap in PSRAM via moy_alloc (the SAME allocator
-        # the compositor framebuffers already use -- so DeviceCanvas drawing into a memoryview
-        # is the proven main-framebuffer path, not a new one). gc then never scans it: the
-        # cart's live set -- and thus its collect cost AND heap fragmentation -- collapses,
-        # kid code untouched (fast by default). draw_layer today CPU-copies the layer into
-        # the framebuffer, so DMA isn't strictly needed -- but we tag the buffer SPIRAM|DMA
-        # anyway: on the S3 all PSRAM is DMA-reachable so it costs nothing, and it keeps the
-        # layer eligible for the #54 Stage-2 GDMA async window-copy (off-CPU draw_layer) --
-        # a SEPARATE draw-ceiling lever, orthogonal to this GC fix. Falls back to a gc-heap
-        # bytearray on the host / if the DMA allocator is unavailable, so this can only match
-        # or beat the old behaviour, never regress.
-        nbytes = w * h * 2
-        buf = None
-        pooled = False
-        # Where the buffer came from decides what release() does with it:
-        # a pool buffer goes back to the pool, an alloc() buffer is freed
-        # (the registry-backed allocator, #186), a malloc_dma one (older
-        # firmware: no free) and a gc-heap bytearray are simply dropped.
-        origin = _ORIGIN_HEAP
-        free = _LAYER_POOL.get(nbytes)
-        if free:
-            buf = free.pop()          # a dead cart's buffer of the same dims -> reuse
-            pooled = True
-            origin = _ORIGIN_POOL
-        else:
-            try:
-                import moy_alloc
-                caps = moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA
-                alloc = getattr(moy_alloc, "alloc", None)
-                if alloc is not None:
-                    buf = alloc(nbytes, caps)
-                    origin = _ORIGIN_ALLOC
-                else:
-                    buf = moy_alloc.malloc_dma(nbytes, caps)
-                    origin = _ORIGIN_DMA
-                pooled = buf is not None    # heap_caps memory: pool it on reclaim
-            except Exception:  # noqa: BLE001 -- host / no DMA allocator -> gc-heap bytearray
-                buf = None
-                origin = _ORIGIN_HEAP
-        if buf is None:
-            # COMPACT FIRST (#54/#41), for the gc-heap fallback ONLY: a scroll
-            # cart re-execs fresh on every entry and re-allocates its ~384KB
-            # world each time; the previous run's layer is unpinned but not yet
-            # collected, and under the web view's per-frame churn the gc heap
-            # fragments until a fresh contiguous 384KB fails. Collecting right
-            # before the alloc makes the region contiguous again. BIG layers
-            # only -- the bar's strip cache builds layers twice per gesture.
-            # A pooled / heap_caps buffer (every board) lives OUTSIDE the gc
-            # heap, so a collect buys it nothing: the collect used to run
-            # ahead of every big layer regardless and cost the Guition P4 a
-            # 430ms pause per window buffer, backdrop and retained frame
-            # (three of them on one CHANGE tap, 2026-09-09).
-            if w * h >= _COMPACT_MIN_PX:
-                try:
-                    import gc
-                    gc.collect()
-                except Exception:  # noqa: BLE001 -- never block a layer alloc
-                    pass
-            buf = bytearray(nbytes)
-        self._buf = buf
-        self._nbytes = nbytes
-        self.pooled = pooled
-        self._origin = origin
+        b = _glass_mod.buf(w * h * 2, role, owner)
+        self._b = b
+        self._buf = b.view
         self._gfx = gfx
+
+    @property
+    def buf_h(self):
+        b = self._b
+        return b.h if b is not None else 0
 
     def release(self):
         """Give the buffer back NOW -- the windowed WM's word that the window
         (or the drag backdrop) it backed is gone. Off-heap layer memory has
         no collector: before this, every window open leaked its buffer from
         heap_caps -- ~3.6MB per Library -> CHANGE -> home round on the
-        Guition P4, measured 2026-09-09, until the pool ran dry and every
-        later layer fell back onto the gc heap, where its pixels were scanned
-        by every collect (430ms a collect after an hour). A pool buffer goes
-        back to the pool; an alloc() one is freed and its view neutered (a
-        stale draw raises, never writes freed RAM); the rest is dropped.
-        Idempotent."""
-        buf = self._buf
-        if buf is None:
+        Guition P4. A lent layer goes back to the pool,
+        anything else is freed, and the view is neutered (a stale draw
+        raises, never writes freed RAM). Idempotent."""
+        b = self._b
+        if b is None:
             return
+        self._b = None
         self._buf = None
-        origin = self._origin
-        if origin == _ORIGIN_POOL:
-            _LAYER_POOL.setdefault(self._nbytes, []).append(buf)
-        elif origin == _ORIGIN_ALLOC:
-            try:
-                import moy_alloc
-                moy_alloc.free(buf)
-            except Exception:  # noqa: BLE001 -- a refused free is a leak, not a crash
-                pass
+        b.release()
 
     def size(self):
         return (self._w, self._h)
@@ -3352,6 +2949,10 @@ class _LayerComp:
     def gfx(self):
         return self._gfx
 
+
+for _k in (DeviceCanvas, SystemCanvas, _LayerComp):
+    _room(_k)
+del _k
 
 # class _Layer lived here until 2026-08-17 (end of file); THE copy is
 # runtime/cart_api.py -- whose verb list is the superset this one had

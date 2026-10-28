@@ -6,12 +6,12 @@ through a pair of in-process endpoints so both sides of a match run with no
 hardware, the way LoopbackNet does for net.*.
 
 The measurements these numbers come from (T-Deck <-> Guition, 2026-08-20) are in
-netplay.py's header; the tests below pin the BEHAVIOUR those numbers bought:
+native/moy_play/moy_match.h's header; the tests below pin the BEHAVIOUR those numbers bought:
 loss is healed by redundancy rather than retransmit, a missing input stalls
 instead of guessing, and the two consoles' player slots agree about who is who.
 """
 
-from runtime import netplay, players as players_mod
+from runtime import players as netplay, players as players_mod
 from ws_helpers import build_ws
 
 BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
@@ -86,18 +86,22 @@ def _step(a, b, wire, frames=1):
 
 # -- the tape ---------------------------------------------------------------
 
+def _input_packet(session, newest, waiting, masks):
+    return bytes([netplay.PROTO, netplay.T_INPUT, session, newest & 0xFF, newest >> 8,
+                  waiting & 0xFF, waiting >> 8] + list(masks))
+
+
 def test_the_tape_reads_a_stale_slot_as_absent_not_as_old_input():
-    """The single most important line in the module: a ring slot that has been
+    """The single most important line in the session: a ring slot that has been
     lapped must read ABSENT, so the session stalls. Returning the old mask would
     be a plausible input and a silent, permanent desync."""
-    t = netplay.InputTape()
-    t.put(5, 0x11)
-    assert t.get(5) == 0x11
-    assert t.get(6) is None
-    # Lap the ring: frame 5 + 256 lands in the same slot.
-    t.put(5 + netplay._TAPE, 0x22)
-    assert t.get(5 + netplay._TAPE) == 0x22
-    assert t.get(5) is None, "a lapped slot must not answer for the old frame"
+    s = netplay.LockstepSession(0, 1, lambda p: None, BUTTONS, None)
+    s.frame = 5
+    # The peer's input for frame 5 + 256 lands in frame 5's ring slot.
+    assert s.on_packet(_input_packet(0, 5 + 256, 5, [0x22]))
+    assert s.advance(0) is False, "a lapped slot must not answer for the old frame"
+    assert s.on_packet(_input_packet(0, 5, 5, [0x11]))
+    assert s.advance(0) is True
 
 
 def test_mask_round_trips_every_button():

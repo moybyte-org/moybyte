@@ -25,6 +25,10 @@
 // machinery they wrap, below.
 #include "moy_gfx_capi.h"
 
+// The draw gates read their canvas's row (native/moy_glass): its pixels, its
+// draw state and its colour table.
+#include "moy_canvas.h"
+
 // #77: build the pixel kernel at -O3 (the ports default to -O2). In-source
 // pragma, NOT cmake: source-file properties are directory-scoped and the linked
 // object is compiled by the micropython.elf target, which never sees them
@@ -44,19 +48,24 @@
 
 // The COMPOSITOR, which this file and runtime/moyhost_gfx.c both run and used
 // to both CONTAIN: fill/fill_rect/blit565/blit565_scale/blit_window/
-// scroll_rect/blit_indices/text plus the fill-run and libmoy-bridge helpers.
+// scroll_rect/blit_indices(_scale)/text plus the fill-run and libmoy-bridge helpers.
 // One copy now; that header says why, and why nothing may be forked back in
 // here. INCLUDED AFTER THE PRAGMA on purpose -- its mg_fill_run and canvas
 // helpers are `static inline` and are inlined into gate_fill/fill_spans below,
 // and GCC refuses to inline across a mismatch in optimization attributes, so a
 // header pulled in at -O2 would turn the per-row fill into a per-row call.
 #include "moy_gfx_kernels.h"
+#include "moy_text.h"
+#include "moy_backdrop.h"
+#include "moy_shape.h"
+#include "moy_path.h"
+#include "moy_scr.h"
 
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
 // WHILE the cart's _update executes. Guarded so this file stays VM-neutral: the
-// unix-port build (tools/bench_unix_mp.py) has no esp_async_memcpy.h and simply
-// doesn't export copy_async/copy_wait -- Python falls back to the sync path.
+// unix-port build (tools/bench_unix_mp.py) has no esp_async_memcpy.h, and its
+// layer restore refuses the engine and copies synchronously.
 #if defined(__has_include)
 #if __has_include("esp_async_memcpy.h")
 #include "esp_async_memcpy.h"
@@ -99,6 +108,24 @@ static mp_obj_t moy_gfx_fill_rect(size_t n_args, const mp_obj_t *a) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_fill_rect_obj, 7, 7, moy_gfx_fill_rect);
+
+// backdrop(buf, stride, ox, oy, w, h, rec, bg, swap, cx0, cy0, cx1, cy1) -> the
+// shapes drawn, or -1: a theme's backdrop records over the bg fill
+// (moy_backdrop.h).
+static mp_obj_t moy_gfx_backdrop(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *px = moy_gfx_buf_w(a[0], &cap);
+    mp_buffer_info_t rec;
+    mp_get_buffer_raise(a[6], &rec, MP_BUFFER_READ);
+    int got = mg_backdrop(px, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                          mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                          rec.buf, rec.len, (uint16_t)mp_obj_get_int(a[7]),
+                          mp_obj_is_true(a[8]), mp_obj_get_int(a[9]), mp_obj_get_int(a[10]),
+                          mp_obj_get_int(a[11]), mp_obj_get_int(a[12]));
+    return MP_OBJ_NEW_SMALL_INT(got);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_backdrop_obj, 13, 13, moy_gfx_backdrop);
 
 // blit565(dst, dw, dh, dx, dy, src, sw, sh, key[, cx0, cy0, cx1, cy1]) -- key=-1
 // opaque, else skip source pixels equal to `key` (transparent color). The optional
@@ -153,6 +180,28 @@ static mp_obj_t moy_gfx_blit565_scale(size_t n_args, const mp_obj_t *a) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit565_scale_obj, 9, 9, moy_gfx_blit565_scale);
+
+// blit565_resize(dst, dw, dh, dx, dy, tw, th, src, sw, sh[, cx0, cy0, cx1, cy1])
+// -- scale an RGB565 sw x sh source to a tw x th rect at (dx, dy), nearest-
+// neighbour at any ratio, opaque, clipped (moy_gfx_kernels.h). A home card's
+// cover at its scale, one call per card.
+static mp_obj_t moy_gfx_blit565_resize(size_t n_args, const mp_obj_t *a) {
+    size_t dcap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    const uint16_t *src = moy_gfx_buf_r(a[7], &scap);
+    mg_blit565_resize(dst, dcap, dw, dh,
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                      mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                      src, scap, mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                      (n_args > 10) ? mp_obj_get_int(a[10]) : 0,
+                      (n_args > 11) ? mp_obj_get_int(a[11]) : 0,
+                      (n_args > 12) ? mp_obj_get_int(a[12]) : dw,
+                      (n_args > 13) ? mp_obj_get_int(a[13]) : dh);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit565_resize_obj, 10, 14, moy_gfx_blit565_resize);
 
 // blit_map(dst, dw, dh, sx, sy, cells, map_w, map_h, mx, my, rw, rh,
 //          sheet, sheetw, sheeth, lut, palt, colorkey, scale, cx0, cy0, cx1, cy1)
@@ -441,10 +490,8 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_make_spr_gate_obj, 5, 5,
 
 #ifdef MOY_GFX_HAS_ASYNC_COPY
 // --- GDMA async copy (#54 Stage 2 / #63) -------------------------------------
-// copy_async(dst, dst_off_px, src, src_off_px, npix) -> True if the DMA copy
-// started (False -> caller must do the sync copy). copy_wait() blocks until the
-// in-flight copy completes. One copy in flight at a time (the layer restore);
-// the driver is installed lazily on first use and kept for the session.
+// The layer restore's engine (lr_start/lr_wait below): one copy in flight at a
+// time, the driver installed lazily on its first use and kept for the session.
 static async_memcpy_handle_t moy_gfx_mcp = NULL;
 static volatile int moy_gfx_copy_busy = 0;
 
@@ -471,49 +518,143 @@ static mp_obj_t moy_gfx_copy_wait(void) {
     }
     return mp_const_true;
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_copy_wait_obj, moy_gfx_copy_wait);
 
-static mp_obj_t moy_gfx_copy_async(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
+#endif // MOY_GFX_HAS_ASYNC_COPY
+
+// --- the layer restore's engine and verbs (moy_gfx_kernels.h, mg_lr_*) -------
+// The GDMA pair above as the restore's engine, and nothing where the image has
+// no GDMA: the restore then latches synchronous at its first kick.
+static bool lr_start(uint16_t *dst, const uint16_t *src, size_t npix) {
+    #ifdef MOY_GFX_HAS_ASYNC_COPY
     if (moy_gfx_mcp == NULL) {
         async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
         cfg.backlog = 4;
-        cfg.dma_burst_size = 64;        // widest AHB burst: best PSRAM throughput
+        cfg.dma_burst_size = 64;
         if (esp_async_memcpy_install(&cfg, &moy_gfx_mcp) != ESP_OK) {
             moy_gfx_mcp = NULL;
-            return mp_const_false;      // caller falls back to the sync copy
+            return false;
         }
     }
-    if (moy_gfx_copy_busy) {            // defensive: never queue a second copy
-        if (moy_gfx_copy_wait() == mp_const_false) {
-            return mp_const_false;      // prior copy stuck: refuse, caller goes sync
-        }
-    }
-    size_t dcap, scap;
-    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
-    mp_int_t dst_off = mp_obj_get_int(a[1]);
-    const uint16_t *src = moy_gfx_buf_r(a[2], &scap);
-    mp_int_t src_off = mp_obj_get_int(a[3]);
-    mp_int_t npix = mp_obj_get_int(a[4]);
-    if (dst_off < 0 || src_off < 0 || npix <= 0
-        || (size_t)(dst_off + npix) > dcap
-        || (size_t)(src_off + npix) > scap) {
-        return mp_const_false;
+    if (moy_gfx_copy_busy && moy_gfx_copy_wait() == mp_const_false) {
+        return false;
     }
     moy_gfx_copy_busy = 1;
-    esp_err_t err = esp_async_memcpy(moy_gfx_mcp, dst + dst_off,
-                                     (void *)(src + src_off),
-                                     (size_t)npix * 2u,
-                                     moy_gfx_copy_done_cb, NULL);
-    if (err != ESP_OK) {
+    if (esp_async_memcpy(moy_gfx_mcp, dst, (void *)src, npix * 2u,
+                         moy_gfx_copy_done_cb, NULL) != ESP_OK) {
         moy_gfx_copy_busy = 0;
-        return mp_const_false;          // e.g. alignment refusal -> sync fallback
+        return false;
     }
-    return mp_const_true;
+    return true;
+    #else
+    (void)dst; (void)src; (void)npix;
+    return false;
+    #endif
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_async_obj, 5, 5,
-                                           moy_gfx_copy_async);
-#endif // MOY_GFX_HAS_ASYNC_COPY
+
+static bool lr_wait(void) {
+    #ifdef MOY_GFX_HAS_ASYNC_COPY
+    return moy_gfx_copy_wait() == mp_const_true;
+    #else
+    return true;
+    #endif
+}
+
+static uint32_t lr_now(void) {
+    return (uint32_t)mp_hal_ticks_us();
+}
+
+static const mg_copy_engine_t LR_ENGINE = { lr_start, lr_wait, lr_now };
+
+static mg_lrestore_t *lr_of(mp_obj_t o) {
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(o, &bi, MP_BUFFER_RW);
+    if (bi.len < MG_LR_SIZE || ((uintptr_t)bi.buf & 3u) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("layer restore: short or unaligned state"));
+    }
+    return (mg_lrestore_t *)bi.buf;
+}
+
+// layer_init(state, async_ok): a canvas's restore state, zeroed.
+static mp_obj_t moy_gfx_layer_init(mp_obj_t st, mp_obj_t on) {
+    mg_lr_init(lr_of(st), mp_obj_is_true(on));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_layer_init_obj, moy_gfx_layer_init);
+
+// layer_kick(state, back) -> True while a predicted copy is in flight: the
+// frame's start (sync_back).
+static mp_obj_t moy_gfx_layer_kick(mp_obj_t st, mp_obj_t buf) {
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(buf, &cap);
+    return mp_obj_new_bool(mg_lr_kick(lr_of(st), &LR_ENGINE, dst, cap));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_layer_kick_obj, moy_gfx_layer_kick);
+
+// layer_drain(state[, forget]): a copy in flight waited out; `forget` also
+// drops the prediction, whose layer is going.
+static mp_obj_t moy_gfx_layer_drain(size_t n_args, const mp_obj_t *a) {
+    mg_lrestore_t *s = lr_of(a[0]);
+    if (n_args > 1 && mp_obj_is_true(a[1])) {
+        mg_lr_forget(s, &LR_ENGINE);
+    } else {
+        mg_lr_drain(s, &LR_ENGINE);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_layer_drain_obj, 1, 2, moy_gfx_layer_drain);
+
+// layer_blit(state, dst, dw, dh, src, src_w, src_h, cam_x, cam_y, edited):
+// draw_layer.
+static mp_obj_t moy_gfx_layer_blit(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, scap;
+    mg_lrestore_t *s = lr_of(a[0]);
+    uint16_t *dst = moy_gfx_buf_w(a[1], &dcap);
+    const uint16_t *src = moy_gfx_buf_r(a[4], &scap);
+    mg_lr_blit(s, &LR_ENGINE, dst, dcap, mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+               src, scap, mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+               mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_is_true(a[9]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_layer_blit_obj, 10, 10, moy_gfx_layer_blit);
+
+// layer_meter(state[, zero]) -> (us, trips, async_ok); `zero` zeroes the time.
+static mp_obj_t moy_gfx_layer_meter(size_t n_args, const mp_obj_t *a) {
+    mg_lrestore_t *s = lr_of(a[0]);
+    mp_obj_t t[3] = { mp_obj_new_int_from_uint(s->us), mp_obj_new_int_from_uint(s->trips),
+                      mp_obj_new_bool(s->async_ok) };
+    if (n_args > 1 && mp_obj_is_true(a[1])) {
+        s->us = 0;
+    }
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_layer_meter_obj, 1, 2, moy_gfx_layer_meter);
+
+// The C door a Lua run's native draw_layer takes (moy_gfx_capi.h).
+void moy_gfx_k_layer_blit(void *st, uint16_t *dst, size_t dcap, int dw, int dh,
+                          const uint16_t *src, size_t scap, int sw, int sh,
+                          int cam_x, int cam_y, bool edited) {
+    mg_lr_blit((mg_lrestore_t *)st, &LR_ENGINE, dst, dcap, dw, dh, src, scap, sw, sh,
+               cam_x, cam_y, edited);
+}
+
+size_t moy_gfx_k_layer_size(void) {
+    return MG_LR_SIZE;
+}
+
+void moy_gfx_k_layer_forget(void *st) {
+    mg_lr_forget((mg_lrestore_t *)st, &LR_ENGINE);
+}
+
+// The kernel's teardown (native/moy_glass): no async copy still writes a
+// buffer the VM is about to free. True when none is in flight.
+bool moy_gfx_k_copy_wait(void) {
+    #ifdef MOY_GFX_HAS_ASYNC_COPY
+    return moy_gfx_copy_wait() == mp_const_true;
+    #else
+    return true;
+    #endif
+}
 
 // Moybyte #66: synchronous byte copy between buffer-protocol objects at byte
 // offsets -- copy(dst, dst_off, src, src_off, nbytes). The SRAM-bounce flush
@@ -560,13 +701,12 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_obj, 5, 5, moy_gfx_copy)
 // fill_spans(dst, dw, dh, arr, n, ox, oy, col, pal, cam_x, cam_y, cx0, cy0, cx1, cy1)
 // -- the #163 span batch WITHOUT a DrawCtx (#167).
 //
-// Why this exists next to DrawCtx.fill_rects: the T-Deck ROOT canvas never
-// installs the draw gates (its _fill has to poke the SRAM-bounce flush pump
-// between native ops, #66, and a C gate has no cheap way back into Python), so
-// on that board DrawCtx.fill_rects is unreachable and DeviceCanvas.fill_rects
-// falls back to ONE INTERPRETER rect() PER SPAN -- precisely the dispatch cost
-// the batch exists to delete. Measured on glass: a 160-span software-3D frame
-// cost ~10ms of Python there while the gated P4 ran the same batch in ~1ms.
+// Why this exists next to DrawCtx.fill_rects: a canvas without a DrawCtx (one
+// whose _install_draw_gates probe failed) would otherwise fall back to ONE
+// INTERPRETER rect() PER SPAN -- precisely the dispatch cost the batch exists
+// to delete. Measured on glass when a board's root canvas had no gates: a
+// 160-span software-3D frame cost ~10ms of Python where the gated P4 ran the
+// same batch in ~1ms.
 //
 // So this takes the buffer, camera and clip as plain arguments exactly like
 // circ/line above, which makes it work on EVERY canvas, gated or not.
@@ -600,27 +740,8 @@ static mp_obj_t moy_gfx_fill_spans(size_t n_args, const mp_obj_t *a) {
     int cx1 = mp_obj_get_int(a[13]);
     int cy1 = mp_obj_get_int(a[14]);
     (void)dh;
-    if (dw <= 0 || (cov < 0 && pal == NULL)) return mp_const_none;
-    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
-    for (mp_int_t i = 0; i < n; i++) {
-        const int16_t *p = q + i * 5;
-        uint16_t col = (cov >= 0) ? (uint16_t)cov : pal[p[4] & 63];
-        mp_int_t x0 = (mp_int_t)p[0] + ox - cam_x;
-        mp_int_t y0 = (mp_int_t)p[1] + oy - cam_y;
-        mp_int_t x1 = x0 + (mp_int_t)p[2];
-        mp_int_t y1 = y0 + (mp_int_t)p[3];
-        if (x0 < cx0) x0 = cx0;
-        if (y0 < cy0) y0 = cy0;
-        if (x1 > cx1) x1 = cx1;
-        if (y1 > cy1) y1 = cy1;
-        if (x1 <= x0 || y1 <= y0) continue;
-        size_t run = (size_t)(x1 - x0);
-        uint16_t *row = dst + (size_t)y0 * (size_t)dw + (size_t)x0;
-        for (mp_int_t y = y0; y < y1; y++) {
-            mg_fill_run(row, run, col);
-            row += (size_t)dw;
-        }
-    }
+    mg_fill_spans(dst, cap, (int)dw, q, (int)n, (int)ox, (int)oy, (int)cov, pal,
+                  (int)cam_x, (int)cam_y, cx0, cy0, cx1, cy1);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_fill_spans_obj, 15, 15,
@@ -799,6 +920,267 @@ static mp_obj_t moy_gfx_shape(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_shape_obj, 19, 19, moy_gfx_shape);
 
+// -- the 2026-10 look's shapes (moy_shape.h) --------------------------------------
+//
+// rrect(dst, dw, x, y, w, h, r, opts, hi, lo, fill, cam_x, cam_y, cx0, cy0,
+// cx1, cy1[, hole]): `fill` is None, a wire colour, or a paint as a flat tuple
+// (mode, steps, y0, h, t0, c0, t1, c1, ...); `hole` None or (x, y, w, h, r),
+// left alone and not counted.
+static int shape_paint(mp_obj_t o, moy_shape_paint_t *p) {
+    if (o == mp_const_none) {
+        return 0;
+    }
+    memset(p, 0, sizeof(*p));
+    if (mp_obj_is_int(o)) {
+        p->n = 1;
+        p->c[0] = (uint16_t)mp_obj_get_int(o);
+        return 1;
+    }
+    size_t n;
+    mp_obj_t *it;
+    mp_obj_get_array(o, &n, &it);
+    if (n < 6) {
+        return 0;
+    }
+    p->mode = (uint8_t)mp_obj_get_int(it[0]);
+    p->steps = (uint8_t)mp_obj_get_int(it[1]);
+    p->y0 = mp_obj_get_int(it[2]);
+    p->h = mp_obj_get_int(it[3]);
+    size_t k = (n - 4) / 2;
+    k = k > MOY_SHAPE_STOPS ? MOY_SHAPE_STOPS : k;
+    for (size_t i = 0; i < k; i++) {
+        p->t[i] = (int16_t)mp_obj_get_int(it[4 + 2 * i]);
+        p->c[i] = (uint16_t)mp_obj_get_int(it[5 + 2 * i]);
+    }
+    p->n = (uint8_t)k;
+    return 1;
+}
+
+static mp_obj_t moy_gfx_rrect(size_t n_args, const mp_obj_t *a) {
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    moy_shape_paint_t p;
+    int has = shape_paint(a[10], &p);
+    moy_shape_hole_t hole = {0, 0, 0, 0, 0}, *hp = NULL;
+    if (n_args > 17 && a[17] != mp_const_none) {
+        mp_obj_t *it;
+        mp_obj_get_array_fixed_n(a[17], 5, &it);
+        hole.x = mp_obj_get_int(it[0]);
+        hole.y = mp_obj_get_int(it[1]);
+        hole.w = mp_obj_get_int(it[2]);
+        hole.h = mp_obj_get_int(it[3]);
+        hole.r = mp_obj_get_int(it[4]);
+        hp = &hole;
+    }
+    int n = mg_rrect(dst, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                     mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                     mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                     has ? &p : NULL, mp_obj_get_int(a[11]), mp_obj_get_int(a[12]),
+                     mp_obj_get_int(a[13]), mp_obj_get_int(a[14]), mp_obj_get_int(a[15]),
+                     mp_obj_get_int(a[16]), hp);
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_rrect_obj, 17, 18, moy_gfx_rrect);
+
+// shadow(dst, dw, x, y, w, h, r, blur, dx, dy, col, alpha, stepped, hole,
+// cam_x, cam_y, cx0, cy0, cx1, cy1): `hole` None or (x, y, w, h, r).
+static mp_obj_t moy_gfx_shadow(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    moy_shape_hole_t hole = {0, 0, 0, 0, 0}, *hp = NULL;
+    if (a[13] != mp_const_none) {
+        mp_obj_t *it;
+        mp_obj_get_array_fixed_n(a[13], 5, &it);
+        hole.x = mp_obj_get_int(it[0]);
+        hole.y = mp_obj_get_int(it[1]);
+        hole.w = mp_obj_get_int(it[2]);
+        hole.h = mp_obj_get_int(it[3]);
+        hole.r = mp_obj_get_int(it[4]);
+        hp = &hole;
+    }
+    int n = mg_shadow(dst, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                      mp_obj_get_int(a[6]), mp_obj_get_int(a[7]), mp_obj_get_int(a[8]),
+                      mp_obj_get_int(a[9]), mp_obj_get_int(a[10]), mp_obj_get_int(a[11]),
+                      mp_obj_get_int(a[12]), hp, mp_obj_get_int(a[14]), mp_obj_get_int(a[15]),
+                      mp_obj_get_int(a[16]), mp_obj_get_int(a[17]), mp_obj_get_int(a[18]),
+                      mp_obj_get_int(a[19]));
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_shadow_obj, 20, 20, moy_gfx_shadow);
+
+// cover(dst, dw, x, y, w, h, src, sw, sx, sy, cw, ch, r, stepped, cam_x, cam_y,
+// cx0, cy0, cx1, cy1): a picture's sub-rect scaled into a rect with rounded
+// corners (moy_shape.h). Answers the pixels written.
+static mp_obj_t moy_gfx_cover(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    const uint16_t *src = moy_gfx_buf_r(a[6], &scap);
+    int v[20];
+    for (int i = 1; i < 20; i++) {
+        v[i] = i == 6 ? 0 : (i == 13 ? mp_obj_is_true(a[i]) : mp_obj_get_int(a[i]));
+    }
+    int n = mg_cover(dst, cap, v[1], v[2], v[3], v[4], v[5], src, scap, v[7], v[8], v[9],
+                     v[10], v[11], v[12], v[13], v[14], v[15], v[16], v[17], v[18], v[19]);
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_cover_obj, 20, 20, moy_gfx_cover);
+
+// face(dst, dw, x, y, w, h, face, fw, fy0, src, sw, cw, ch, fill, quads, r,
+// stepped, ring, cam_x, cam_y, cx0, cy0, cx1, cy1): a home card out of its
+// kept face, the pixels its corners blend drawn over what is there
+// (moy_shape.h's mg_face); `src` None: the solid `fill`'s picture, under the
+// array('h') of (x, y, w, h, ink) `quads` (None: none). The pixels written.
+static mp_obj_t moy_gfx_face(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap, fcap, scap = 0;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    const uint16_t *face = moy_gfx_buf_r(a[6], &fcap);
+    const uint16_t *src = a[9] == mp_const_none ? NULL : moy_gfx_buf_r(a[9], &scap);
+    const int16_t *q = NULL;
+    int nq = 0;
+    if (a[14] != mp_const_none) {
+        mp_buffer_info_t qi;
+        mp_get_buffer_raise(a[14], &qi, MP_BUFFER_READ);
+        q = (const int16_t *)qi.buf;
+        nq = (int)(qi.len / (5 * sizeof(int16_t)));
+    }
+    int v[24];
+    for (int i = 1; i < 24; i++) {
+        v[i] = (i == 6 || i == 9 || i == 14) ? 0
+               : (i == 16 ? mp_obj_is_true(a[i]) : mp_obj_get_int(a[i]));
+    }
+    int n = mg_face(dst, cap, v[1], v[2], v[3], v[4], v[5], face, fcap, v[7], v[8], src, scap,
+                    v[10], v[11], v[12], v[13], q, nq, v[15], v[16], v[17], v[18], v[19],
+                    v[20], v[21], v[22], v[23]);
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_face_obj, 24, 24, moy_gfx_face);
+
+// tint(dst, src, sw, sx, sy, w, h, col, alpha[, dw, dx, dy]): a picture's
+// sub-rect copied into dst (at (dx, dy), dw words a row; else a picture of
+// its own) with `col` over it at `alpha` (moy_shape.h). Answers the pixels.
+static mp_obj_t moy_gfx_tint(size_t n_args, const mp_obj_t *a) {
+    size_t cap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    const uint16_t *src = moy_gfx_buf_r(a[1], &scap);
+    int dw = 0, dx = 0, dy = 0;
+    if (n_args >= 12) {
+        dw = mp_obj_get_int(a[9]);
+        dx = mp_obj_get_int(a[10]);
+        dy = mp_obj_get_int(a[11]);
+    }
+    int n = mg_tint(dst, cap, src, scap, mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                    mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                    (uint16_t)mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), dw, dx, dy);
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tint_obj, 9, 12, moy_gfx_tint);
+
+// shape_stats() -> moy_shape.h's counters; shape_reset(caches); shape_order(swapped).
+static mp_obj_t moy_gfx_shape_stats(void) {
+    uint32_t st[MOY_SHAPE_STATS];
+    moy_shape_stats(st);
+    mp_obj_t o[MOY_SHAPE_STATS];
+    for (int i = 0; i < MOY_SHAPE_STATS; i++) {
+        o[i] = mp_obj_new_int_from_uint(st[i]);
+    }
+    return mp_obj_new_tuple(MOY_SHAPE_STATS, o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_shape_stats_obj, moy_gfx_shape_stats);
+
+static mp_obj_t moy_gfx_shape_reset(mp_obj_t caches) {
+    moy_shape_reset(mp_obj_is_true(caches));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_reset_obj, moy_gfx_shape_reset);
+
+static mp_obj_t moy_gfx_shape_order(mp_obj_t swapped) {
+    moy_shape_wire_swapped(mp_obj_is_true(swapped));
+    moy_path_wire_swapped(mp_obj_is_true(swapped));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_shape_order_obj, moy_gfx_shape_order);
+
+// -- paths and the outline faces (moy_path.h) --------------------------------------
+//
+// path_fill(dst, dw, pts, ends, col, cam_x, cam_y, cx0, cy0, cx1, cy1): `pts`
+// and `ends` are int32 buffers (array('i')): x, y pairs in 26.6 and each
+// contour's end. path_text(dst, dw, face, size, x, y, s, col, cam_x, cam_y,
+// cx0, cy0, cx1, cy1) -> the advance; path_width(face, size, s);
+// path_metrics(face) -> (em, ascent, descent).
+static mp_obj_t moy_gfx_path_fill(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_buffer_info_t pb, eb;
+    mp_get_buffer_raise(a[2], &pb, MP_BUFFER_READ);
+    mp_get_buffer_raise(a[3], &eb, MP_BUFFER_READ);
+    int n = mg_path_fill(dst, cap, mp_obj_get_int(a[1]), (const int32_t *)pb.buf,
+                         (int)(pb.len / 8), (const int32_t *)eb.buf, (int)(eb.len / 4),
+                         mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                         mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                         mp_obj_get_int(a[10]));
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_path_fill_obj, 11, 11, moy_gfx_path_fill);
+
+static mp_obj_t moy_gfx_path_text(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_buffer_info_t sb;
+    mp_get_buffer_raise(a[6], &sb, MP_BUFFER_READ);
+    int n = mg_path_text(dst, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                         mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                         (const uint8_t *)sb.buf, sb.len, mp_obj_get_int(a[7]),
+                         mp_obj_get_int(a[8]), mp_obj_get_int(a[9]), mp_obj_get_int(a[10]),
+                         mp_obj_get_int(a[11]), mp_obj_get_int(a[12]), mp_obj_get_int(a[13]));
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_path_text_obj, 14, 14, moy_gfx_path_text);
+
+// splash(dst, stride, x0, y0, w, h, swap, pal, permille, status) -> the
+// draws that failed: the boot splash (moy_scr.h) into the w x h window at
+// (x0, y0); `pal` the palette's six words (bytes, native order), `permille`
+// -1 for no track, `status` bytes (empty for none).
+static mp_obj_t moy_gfx_splash(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_buffer_info_t pb, sb;
+    mp_get_buffer_raise(a[7], &pb, MP_BUFFER_READ);
+    mp_get_buffer_raise(a[9], &sb, MP_BUFFER_READ);
+    if (pb.len != MOY_SPLASH_PAL * sizeof(uint16_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("splash palette"));
+    }
+    int n = moy_splash_buf(dst, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                           mp_obj_get_int(a[3]), mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                           mp_obj_is_true(a[6]), (const uint16_t *)pb.buf, mp_obj_get_int(a[8]),
+                           (const char *)sb.buf, sb.len);
+    return MP_OBJ_NEW_SMALL_INT(n);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_splash_obj, 10, 10, moy_gfx_splash);
+
+static mp_obj_t moy_gfx_path_width(mp_obj_t face, mp_obj_t size, mp_obj_t s) {
+    mp_buffer_info_t sb;
+    mp_get_buffer_raise(s, &sb, MP_BUFFER_READ);
+    return MP_OBJ_NEW_SMALL_INT(moy_path_width(mp_obj_get_int(face), mp_obj_get_int(size),
+                                               (const uint8_t *)sb.buf, sb.len));
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_path_width_obj, moy_gfx_path_width);
+
+static mp_obj_t moy_gfx_path_metrics(mp_obj_t face) {
+    int m[3];
+    moy_path_metrics(mp_obj_get_int(face), m);
+    mp_obj_t o[3] = { MP_OBJ_NEW_SMALL_INT(m[0]), MP_OBJ_NEW_SMALL_INT(m[1]),
+                      MP_OBJ_NEW_SMALL_INT(m[2]) };
+    return mp_obj_new_tuple(3, o);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_path_metrics_obj, moy_gfx_path_metrics);
+
 // circ(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1) -- FILLED
 // circle: each scanline a clipped, camera-offset span (matches host canvas circ()).
 static mp_obj_t moy_gfx_circ(size_t n_args, const mp_obj_t *a) {
@@ -943,6 +1325,40 @@ static mp_obj_t moy_gfx_scroll_rect(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_scroll_rect_obj, 8, 8, moy_gfx_scroll_rect);
 
+// shift_rect(dst, src, stride_px, rx, ry, rw, rh, dx, dy) -- scroll_rect's
+// pixels out of `src` into `dst` (both stride_px a row): the CPU's shift_last
+// on a canvas whose last frame is another buffer, and scroll_rect itself when
+// dst is src. The band the move exposes keeps what `dst` held.
+static mp_obj_t moy_gfx_shift_rect(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    const uint16_t *src = moy_gfx_buf_r(a[1], &scap);
+    if (scap < cap) {
+        cap = scap;
+    }
+    mg_shift_rect(dst, src, cap, mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                  mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                  mp_obj_get_int(a[7]), mp_obj_get_int(a[8]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_shift_rect_obj, 9, 9, moy_gfx_shift_rect);
+
+// copy_block(dst, dstride, src, sstride, dx, dy, sx, sy, w, h) -- the w x h
+// block at (sx, sy) of `src` to (dx, dy) of `dst`, clipped to both: a rect of
+// the last frame's buffer into a layer (copy_last_into).
+static mp_obj_t moy_gfx_copy_block(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    const uint16_t *src = moy_gfx_buf_r(a[2], &scap);
+    mg_copy_block(dst, dcap, mp_obj_get_int(a[1]), src, scap, mp_obj_get_int(a[3]),
+                  mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                  mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_get_int(a[9]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_block_obj, 10, 10, moy_gfx_copy_block);
+
 // blit_indices(dst, dw, dh, dx, dy, indices, iw, ih, pal565) -- place an iw x ih palette-
 // INDEX bitmap (1 byte/pixel, like blit_map's cells) at (dx, dy) into the RGB565 `dst` (dw
 // px/row), converting each index through `pal565` (an index->RGB565 table, 1 uint16/entry).
@@ -970,13 +1386,117 @@ static mp_obj_t moy_gfx_blit_indices(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_obj, 9, 9, moy_gfx_blit_indices);
 
+// blit_indices_scale(dst, dw, dh, indices, iw, ih, sx, sy, sw, sh, dx, dy, scale,
+//                    pal565, palt, colorkey, cx0, cy0, cx1, cy1)
+// -- the sw x sh rect at (sx, sy) of an iw x ih index bitmap, each pixel a
+// scale x scale block at (dx, dy), clipped to [cx0, cx1) x [cy0, cy1): sspr's
+// pixels at an integer scale, one palette lookup per SOURCE pixel. `palt` is
+// the 64-byte transparency mask or None; colorkey compares the raw index (-1:
+// none); an index past pal565 is skipped. moy_gfx_kernels.h has the contract.
+static mp_obj_t moy_gfx_blit_indices_scale(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, pcap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    mp_buffer_info_t ibi;
+    mp_get_buffer_raise(a[3], &ibi, MP_BUFFER_READ);
+    const uint16_t *pal = moy_gfx_buf_r(a[13], &pcap);
+    const uint8_t *palt = NULL;
+    if (a[14] != mp_const_none) {
+        mp_buffer_info_t tb;
+        mp_get_buffer_raise(a[14], &tb, MP_BUFFER_READ);
+        if (tb.len >= 64) palt = (const uint8_t *)tb.buf;
+    }
+    mg_blit_indices_scale(dst, dcap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                          (const uint8_t *)ibi.buf, ibi.len,
+                          mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                          mp_obj_get_int(a[6]), mp_obj_get_int(a[7]),
+                          mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                          mp_obj_get_int(a[10]), mp_obj_get_int(a[11]),
+                          mp_obj_get_int(a[12]), pal, pcap, palt,
+                          mp_obj_get_int(a[15]),
+                          mp_obj_get_int(a[16]), mp_obj_get_int(a[17]),
+                          mp_obj_get_int(a[18]), mp_obj_get_int(a[19]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_scale_obj, 20, 20,
+                                           moy_gfx_blit_indices_scale);
+
+// One byte a pixel: a drawing's palette indices (moy_gfx_kernels.h has the
+// contracts). The marks Paint makes (runtime/artwork.py's PaintDocument).
+static uint8_t *moy_gfx_ibuf(mp_obj_t obj, size_t *cap, mp_uint_t flags) {
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(obj, &bi, flags);
+    *cap = bi.len;
+    return (uint8_t *)bi.buf;
+}
+
+// ifill(buf, bw, bh, x, y, w, h, v)
+static mp_obj_t moy_gfx_ifill(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint8_t *buf = moy_gfx_ibuf(a[0], &cap, MP_BUFFER_WRITE);
+    mg_ifill(buf, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+             mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+             (uint8_t)mp_obj_get_int(a[7]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_ifill_obj, 8, 8, moy_gfx_ifill);
+
+// iline(buf, bw, bh, x0, y0, x1, y1, d, round, v)
+static mp_obj_t moy_gfx_iline(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint8_t *buf = moy_gfx_ibuf(a[0], &cap, MP_BUFFER_WRITE);
+    mg_iline(buf, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+             mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+             mp_obj_get_int(a[7]), mp_obj_is_true(a[8]), (uint8_t)mp_obj_get_int(a[9]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_iline_obj, 10, 10, moy_gfx_iline);
+
+// icopy(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, frm, to)
+static mp_obj_t moy_gfx_icopy(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, scap;
+    uint8_t *dst = moy_gfx_ibuf(a[0], &dcap, MP_BUFFER_WRITE);
+    const uint8_t *src = moy_gfx_ibuf(a[5], &scap, MP_BUFFER_READ);
+    mg_icopy(dst, dcap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+             mp_obj_get_int(a[4]), src, scap, mp_obj_get_int(a[6]), mp_obj_get_int(a[7]),
+             mp_obj_get_int(a[8]), mp_obj_get_int(a[9]), mp_obj_get_int(a[10]),
+             mp_obj_get_int(a[11]), mp_obj_get_int(a[12]), mp_obj_get_int(a[13]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_icopy_obj, 14, 14, moy_gfx_icopy);
+
+// iflood(buf, bw, bh, x, y, v, marks, t, tx, stack) -> (n, x0, y0, x1, y1);
+// `stack` a buffer of int16 (x, y) pairs.
+static mp_obj_t moy_gfx_iflood(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap, mcap, scap;
+    uint8_t *buf = moy_gfx_ibuf(a[0], &cap, MP_BUFFER_WRITE);
+    uint8_t *marks = moy_gfx_ibuf(a[6], &mcap, MP_BUFFER_WRITE);
+    int16_t *stack = (int16_t *)moy_gfx_ibuf(a[9], &scap, MP_BUFFER_WRITE);
+    int out[4];
+    int n = mg_iflood(buf, cap, mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                      (uint8_t)mp_obj_get_int(a[5]), marks, mcap, mp_obj_get_int(a[7]),
+                      mp_obj_get_int(a[8]), stack, (int)(scap / 4u), out);
+    mp_obj_t items[5] = {
+        MP_OBJ_NEW_SMALL_INT(n), MP_OBJ_NEW_SMALL_INT(out[0]), MP_OBJ_NEW_SMALL_INT(out[1]),
+        MP_OBJ_NEW_SMALL_INT(out[2]), MP_OBJ_NEW_SMALL_INT(out[3]),
+    };
+    return mp_obj_new_tuple(5, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_iflood_obj, 10, 10, moy_gfx_iflood);
+
 // The petme128 rasterizer, shared by the `text` op and the print draw gate. The
 // clip rect is intersected with the buffer here, so every caller is bounds-safe.
 // The rasterizer itself is mg_text_raw in moy_gfx_kernels.c (the host draws the
 // same chrome glyphs through it); what stayed here are its MicroPython callers.
 
 // text(dst, dw, dh, s, x, y, color, font, first, scale, cam_x, cam_y,
-//      cx0, cy0, cx1, cy1) -- render a whole string in ONE C call (issue #62): the
+//      cx0, cy0, cx1, cy1) -- render a whole string in ONE C call (issue #62), in
+// the print font (moy_text.h) when the shell has named one, else as follows: the
 // text analogue of blit_batch. `font` is a petme128-layout glyph blob (8 bytes per
 // glyph, column-major, LSB = top row -- exactly runtime/font.py's _FONT, the SAME
 // bytes the host rasterizes), `first` its first codepoint. Each set glyph pixel
@@ -1030,11 +1550,14 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_text_obj, 16, 16, moy_gfx_tex
 // buffer). These gates therefore draw IMMEDIATELY: same pixels, same order, same
 // frame, just without the Python frame. Nothing else in the canvas changes.
 //
-// A gate reads live canvas state through a shared `DrawCtx`: an array('i') the
-// Python side updates whenever camera/clip/font-scale change (rare) and a 64-entry
-// uint16 palette already resolved through pal() -- so the hot path is pure C. The
-// destination buffer is pushed in by sync_back (the DPI ping-pong swaps it every
-// frame). Anything unusual -- kwargs, a wrong arg count, a non-numeric coord, a
+// A gate reads live canvas state through a shared `DrawCtx`, which holds the
+// canvas's ROW in the glass (moy_canvas.h): its slot and the generation word it
+// had when the ctx was made. Every op checks the two -- an index and a compare --
+// and then reads the row: the pixels the canvas was last pointed at (the DPI
+// ping-pong re-points it every frame), the draw state the Python side writes
+// when camera/clip/font-scale change (rare) and the 64-entry table already
+// resolved through pal(). A canvas released under a gate is refused, loudly.
+// Anything unusual -- kwargs, a wrong arg count, a non-numeric coord, a
 // non-string print -- delegates verbatim to `fallback`, the original bound Python
 // method, so semantics are IDENTICAL and this is purely a fast lane.
 
@@ -1046,6 +1569,9 @@ enum {
     ST_PROF,                 // 1 = accumulate the DRAW2 timers below
     ST_N_FILL, ST_N_TEXT,    // call counts (always) -- proof the gate is live
     ST_T_FILL, ST_T_TEXT,    // microseconds (only while ST_PROF)
+    ST_FILLP,                // 1 while a fill pattern is set (rect/rectb decline)
+    ST_DMA_MIN,              // a rect this many pixels or more declines: the
+                             // canvas's own verb hands it to a DMA fill (0: never)
     ST_LEN
 };
 
@@ -1054,17 +1580,16 @@ enum { GATE_RECT = 0, GATE_RECTB, GATE_PRINT, GATE_PIX };
 typedef struct _moy_gfx_draw_ctx_obj_t {
     mp_obj_base_t base;
     mp_obj_t canvas;         // for the rare flush_batch upcall
-    mp_obj_t buf_obj;        // held so gc keeps the destination alive
-    mp_obj_t state_obj;      // held: array('i')
-    mp_obj_t pal_obj;        // held: array('H')
+    mp_obj_t crow_obj;       // held: the moy_glass.Canvas the row is
     mp_obj_t batch_obj;      // held: the sprite queue array('h'), or None
     mp_obj_t font_obj;       // held: the petme128 blob
-    mp_obj_t pump;           // #163 door 1: bounce-pump upcall, or mp_const_none
-    int32_t pump_ctr;        // gated ops until the next pump upcall
-    uint16_t *px;            // destination (gc never moves objects)
-    size_t cap;              // destination capacity in pixels
-    int32_t *st;
-    uint16_t *pal;
+    const moy_htab_t *ctab;  // the canvas table, and the row's slot and word
+    uint32_t slot;
+    uint32_t word;
+    uint16_t *px;            // the row's pixels, as of the last ctx_live
+    size_t cap;              // ...their capacity in pixels
+    int32_t *st;             // the row's draw state and table (the canvas
+    uint16_t *pal;           // table is reserved whole: rows never move)
     size_t npal;
     int16_t *batch;          // sprite queue, or NULL
     size_t batch_len;        // queue capacity in int16 slots (clamps q[0])
@@ -1087,50 +1612,23 @@ typedef struct _moy_gfx_draw_ctx_obj_t {
     mp_int_t msrc_w, msrc_h;     // in TILES, like TileMap.w/h
 } moy_gfx_draw_ctx_obj_t;
 
-// #163 door 1: how many gated ops run between two bounce-pump upcalls on a
-// canvas that registered one (set_pump -- the T-Deck ROOT canvas). The
-// per-op Python poke was the reason the gates were refused there; the pump
-// only FEEDS the in-flight partial flush, so its cadence just has to beat
-// the SPI draining a bounce strip -- at ~8us/gated-op, 16 ops is ~128us
-// between pokes, denser than the per-fill pokes were at the old ~65us/call
-// whenever more than 2 fills run. A starved pump costs a longer synchronous
-// tail in comp.flush(), never a glitch.
-#define GATE_PUMP_EVERY 16
-
-static inline void gate_pump(moy_gfx_draw_ctx_obj_t *c, mp_int_t nops) {
-    if (c->pump == mp_const_none) return;
-    c->pump_ctr -= (int32_t)nops;
-    if (c->pump_ctr > 0) return;
-    c->pump_ctr = GATE_PUMP_EVERY;
-    mp_call_function_0(c->pump);
+// The row the ctx draws into, checked: false when the canvas has been released
+// (the ctx's view of it is then cleared) or never pointed at pixels.
+static inline bool ctx_live(moy_gfx_draw_ctx_obj_t *c) {
+    moy_canvas_row_t *r = moy_canvas_check(c->ctab, c->slot, c->word);
+    if (r == NULL) {
+        c->px = NULL;
+        c->cap = 0;
+        return false;
+    }
+    c->px = r->px;
+    c->cap = r->cap;
+    return c->px != NULL;
 }
 
-// set_buf(buf): re-point at the compositor's current back buffer. Called once
-// per frame from DeviceCanvas.sync_back -- the DPI double buffer ping-pongs, so
-// a cached pointer would otherwise draw into the buffer being scanned out.
-static mp_obj_t moy_gfx_draw_ctx_set_buf(mp_obj_t self_in, mp_obj_t buf_obj) {
-    moy_gfx_draw_ctx_obj_t *c = MP_OBJ_TO_PTR(self_in);
-    size_t cap;
-    c->px = moy_gfx_buf_w(buf_obj, &cap);
-    c->cap = cap;
-    c->buf_obj = buf_obj;
-    return mp_const_none;
+static MP_NORETURN void ctx_stale(void) {
+    mp_raise_ValueError(MP_ERROR_TEXT("draw into a released canvas"));
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_draw_ctx_set_buf_obj,
-                                 moy_gfx_draw_ctx_set_buf);
-
-// set_pump(fn): register the bounce-pump upcall (#163 door 1 -- the T-Deck
-// root canvas; every other canvas never calls this). fn is called every
-// GATE_PUMP_EVERY gated ops; None unregisters. Its PRESENCE is also the
-// version probe _install_draw_gates uses before gating a pumped canvas.
-static mp_obj_t moy_gfx_draw_ctx_set_pump(mp_obj_t self_in, mp_obj_t fn) {
-    moy_gfx_draw_ctx_obj_t *c = MP_OBJ_TO_PTR(self_in);
-    c->pump = fn;
-    c->pump_ctr = GATE_PUMP_EVERY;
-    return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_draw_ctx_set_pump_obj,
-                                 moy_gfx_draw_ctx_set_pump);
 
 static inline void gate_fill(moy_gfx_draw_ctx_obj_t *c, mp_int_t x, mp_int_t y,
                              mp_int_t w, mp_int_t h, uint16_t col);
@@ -1145,7 +1643,10 @@ static inline void gate_fill(moy_gfx_draw_ctx_obj_t *c, mp_int_t x, mp_int_t y,
 static mp_obj_t moy_gfx_draw_ctx_fill_rects(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     moy_gfx_draw_ctx_obj_t *c = MP_OBJ_TO_PTR(a[0]);
-    if (c->px == NULL) {
+    if (!ctx_live(c)) {
+        if (moy_canvas_check(c->ctab, c->slot, c->word) == NULL) {
+            ctx_stale();
+        }
         mp_raise_msg(&mp_type_RuntimeError,
                      MP_ERROR_TEXT("fill_rects: no destination buffer"));
     }
@@ -1169,19 +1670,18 @@ static mp_obj_t moy_gfx_draw_ctx_fill_rects(size_t n_args, const mp_obj_t *a) {
     uint16_t col = 0;
     bool have_col = false;
     if (cov >= 0) {
-        col = c->pal[(size_t)(cov & 63) % c->npal];
+        col = c->pal[(size_t)(cov & moy_canvas_cmask)];
         have_col = true;
     }
     for (mp_int_t i = 0; i < n; i++) {
         const int16_t *p = q + i * 5;
         uint16_t cc = have_col
-            ? col : c->pal[(size_t)(p[4] & 63) % c->npal];
+            ? col : c->pal[(size_t)(p[4] & moy_canvas_cmask)];
         gate_fill(c, (mp_int_t)p[0] + ox, (mp_int_t)p[1] + oy,
                   (mp_int_t)p[2], (mp_int_t)p[3], cc);
     }
     st[ST_N_FILL] += n;
     if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
-    gate_pump(c, n);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_draw_ctx_fill_rects_obj,
@@ -1267,8 +1767,6 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_draw_ctx_set_map_src_obj,
                                            2, 4, moy_gfx_draw_ctx_set_map_src);
 
 static const mp_rom_map_elem_t moy_gfx_draw_ctx_locals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR_set_buf), MP_ROM_PTR(&moy_gfx_draw_ctx_set_buf_obj) },
-    { MP_ROM_QSTR(MP_QSTR_set_pump), MP_ROM_PTR(&moy_gfx_draw_ctx_set_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_batch_src),
       MP_ROM_PTR(&moy_gfx_draw_ctx_set_batch_src_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_map_src),
@@ -1334,12 +1832,33 @@ static inline void gate_fill(moy_gfx_draw_ctx_obj_t *c, mp_int_t x, mp_int_t y,
     }
 }
 
+// The ctx's text target: its buffer, camera and clip (moy_text.h).
+static moy_text_target_t ctx_text_target(const moy_gfx_draw_ctx_obj_t *c) {
+    const int32_t *st = c->st;
+    moy_text_target_t t = {c->px, (size_t)c->cap, (int)st[ST_W], (int)st[ST_CAM_X],
+                           (int)st[ST_CAM_Y], (int)st[ST_CX0], (int)st[ST_CY0],
+                           (int)st[ST_CX1], (int)st[ST_CY1]};
+    return t;
+}
+
 static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
                                const mp_obj_t *args) {
     moy_gfx_draw_gate_obj_t *g = MP_OBJ_TO_PTR(self_in);
     moy_gfx_draw_ctx_obj_t *c = g->ctx;
     uint8_t kind = g->kind;
-    if (n_kw != 0 || c->px == NULL) {
+    if (!ctx_live(c)) {
+        if (moy_canvas_check(c->ctab, c->slot, c->word) == NULL) {
+            ctx_stale();
+        }
+        return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+    }
+    if (n_kw != 0) {
+        return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+    }
+    // A fill pattern (SPEC.md 6) is the shape verbs' two-colour lane, which
+    // the solid fills below do not draw: rect and rectb go to the canvas's
+    // own verbs while one is set. print and pix are not shape verbs.
+    if (c->st[ST_FILLP] && (g->kind == GATE_RECT || g->kind == GATE_RECTB)) {
         return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
     }
     // A pending sprite run must land before any other primitive (#63 order).
@@ -1354,7 +1873,9 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
     if (kind == GATE_PRINT) {
         // print(s, x, y, c[, scale]) -- the legacy per-call `scale` is IGNORED
         // (system-UI scaling is the #39 font_scale path), exactly like the
-        // Python DeviceCanvas.print / P4SystemCanvas.print it replaces.
+        // Python DeviceCanvas.print / P4SystemCanvas.print it replaces. It
+        // draws in the print font (moy_text.h): petme128 unless the shell
+        // named one, and petme128 while a cart's code runs.
         if (n_args < 4 || n_args > 5 || !mp_obj_is_str(args[0])) {
             return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
         }
@@ -1365,14 +1886,12 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
         }
         size_t slen;
         const char *s = mp_obj_str_get_data(args[0], &slen);
-        mg_text_raw(c->px, c->cap, st[ST_W], (const uint8_t *)s, slen,
-                         x, y, c->pal[(size_t)(ci & 63) % c->npal],
-                         c->font, c->nglyphs, c->first, st[ST_FONT_SCALE],
-                         st[ST_CAM_X], st[ST_CAM_Y],
-                         st[ST_CX0], st[ST_CY0], st[ST_CX1], st[ST_CY1]);
+        moy_text_target_t tt = ctx_text_target(c);
+        moy_text(&tt, moy_text_print_font(), MOY_TEXT_PY, (const uint8_t *)s, slen, x, y,
+                 c->pal[(size_t)(ci & moy_canvas_cmask)], st[ST_FONT_SCALE],
+                 MOY_TEXT_LEFT, -1);
         st[ST_N_TEXT]++;
         if (st[ST_PROF]) st[ST_T_TEXT] += (int32_t)(mp_hal_ticks_us() - t0);
-        gate_pump(c, 1);
         return mp_const_none;
     }
 
@@ -1383,10 +1902,9 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
             || !gate_num(args[2], &ci)) {
             return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
         }
-        gate_fill(c, x, y, 1, 1, c->pal[(size_t)(ci & 63) % c->npal]);
+        gate_fill(c, x, y, 1, 1, c->pal[(size_t)(ci & moy_canvas_cmask)]);
         st[ST_N_FILL]++;
         if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
-        gate_pump(c, 1);
         return mp_const_none;
     }
 
@@ -1400,7 +1918,11 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
             return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
         }
     }
-    uint16_t col = c->pal[(size_t)(v[4] & 63) % c->npal];
+    if (kind == GATE_RECT && st[ST_DMA_MIN] > 0 && v[2] > 0 && v[3] > 0
+        && v[2] * v[3] >= st[ST_DMA_MIN]) {
+        return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+    }
+    uint16_t col = c->pal[(size_t)(v[4] & moy_canvas_cmask)];
     if (kind == GATE_RECT) {
         gate_fill(c, v[0], v[1], v[2], v[3], col);
     } else {
@@ -1412,7 +1934,6 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
     }
     st[ST_N_FILL]++;
     if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
-    gate_pump(c, 1);
     return mp_const_none;
 }
 
@@ -1423,44 +1944,39 @@ static MP_DEFINE_CONST_OBJ_TYPE(
     call, draw_gate_call
 );
 
-// make_draw_ctx(canvas, state, pal, batch, font, first) -> DrawCtx.
-//   state -- array('i') of ST_LEN entries (see the enum above)
-//   pal   -- array('H'), index -> RGB565 with the pal() remap already applied
+// make_draw_ctx(canvas, crow, batch, font, first) -> DrawCtx.
+//   crow  -- the canvas's moy_glass.Canvas: its row holds the pixels, the draw
+//            state (ST_*) and the pal()-resolved colour table
 //   batch -- the canvas's sprite queue array('h'), or None
 //   font  -- the petme128 glyph blob; first -- its first codepoint
-// The destination buffer arrives separately via set_buf (it ping-pongs).
 static mp_obj_t moy_gfx_make_draw_ctx(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
-    mp_buffer_info_t sbi, pbi, fbi;
-    mp_get_buffer_raise(a[1], &sbi, MP_BUFFER_RW);
-    if (sbi.len < ST_LEN * (int)sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("state array too small"));
+    uint32_t ch = (uint32_t)mp_obj_get_int(mp_load_attr(a[1], MP_QSTR_h));
+    moy_canvas_row_t *r;
+    if (moy_canvas_get(ch, &r) != MOY_GLASS_OK) {
+        ctx_stale();
     }
-    mp_get_buffer_raise(a[2], &pbi, MP_BUFFER_READ);
-    if (pbi.len < 2) {
-        mp_raise_ValueError(MP_ERROR_TEXT("palette too small"));
-    }
-    mp_get_buffer_raise(a[4], &fbi, MP_BUFFER_READ);
+    mp_buffer_info_t fbi;
+    mp_get_buffer_raise(a[3], &fbi, MP_BUFFER_READ);
     moy_gfx_draw_ctx_obj_t *c = mp_obj_malloc(moy_gfx_draw_ctx_obj_t,
                                               &moy_gfx_draw_ctx_type);
     c->canvas = a[0];
-    c->buf_obj = mp_const_none;
-    c->state_obj = a[1];
-    c->pal_obj = a[2];
-    c->batch_obj = a[3];
-    c->font_obj = a[4];
-    c->pump = mp_const_none;   // #163 door 1: set_pump registers one (root canvas)
-    c->pump_ctr = GATE_PUMP_EVERY;
-    c->px = NULL;
-    c->cap = 0;
-    c->st = (int32_t *)sbi.buf;
-    c->pal = (uint16_t *)pbi.buf;
-    c->npal = pbi.len / 2u;
+    c->crow_obj = a[1];
+    c->batch_obj = a[2];
+    c->font_obj = a[3];
+    c->ctab = moy_canvas_table();
+    c->slot = ch & 0xffu;
+    c->word = moy_canvas_word(ch);
+    c->px = r->px;
+    c->cap = r->cap;
+    c->st = r->st;
+    c->pal = r->pal;
+    c->npal = MOY_CANVAS_PAL;
     c->batch = NULL;
     c->batch_len = 0;
-    if (a[3] != mp_const_none) {
+    if (a[2] != mp_const_none) {
         mp_buffer_info_t bbi;
-        if (mp_get_buffer(a[3], &bbi, MP_BUFFER_RW) && bbi.len >= 2 * 4) {
+        if (mp_get_buffer(a[2], &bbi, MP_BUFFER_RW) && bbi.len >= 2 * 4) {
             c->batch = (int16_t *)bbi.buf;
             c->batch_len = bbi.len / 2u;
         }
@@ -1475,10 +1991,10 @@ static mp_obj_t moy_gfx_make_draw_ctx(size_t n_args, const mp_obj_t *a) {
     c->msrc_h = 0;
     c->font = (const uint8_t *)fbi.buf;
     c->nglyphs = (mp_int_t)(fbi.len / 8u);
-    c->first = mp_obj_get_int(a[5]);
+    c->first = mp_obj_get_int(a[4]);
     return MP_OBJ_FROM_PTR(c);
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_make_draw_ctx_obj, 6, 6,
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_make_draw_ctx_obj, 5, 5,
                                            moy_gfx_make_draw_ctx);
 
 // make_draw_gate(ctx, kind, fallback) -> a callable replacing one canvas verb.
@@ -1518,8 +2034,8 @@ moy_gfx_draw_ctx_t *moy_gfx_capi_ctx(mp_obj_t obj) {
     return MP_OBJ_TO_PTR(obj);
 }
 
-bool moy_gfx_capi_ready(const moy_gfx_draw_ctx_t *c) {
-    return c->px != NULL && c->st[ST_W] > 0;
+bool moy_gfx_capi_ready(moy_gfx_draw_ctx_t *c) {
+    return ctx_live(c) && c->st[ST_W] > 0;
 }
 
 bool moy_gfx_capi_batch_pending(const moy_gfx_draw_ctx_t *c) {
@@ -1534,28 +2050,22 @@ bool moy_gfx_capi_prof(const moy_gfx_draw_ctx_t *c) {
     return c->st[ST_PROF] != 0;
 }
 
-mp_obj_t moy_gfx_capi_pump_due(moy_gfx_draw_ctx_t *c, int nops) {
-    if (c->pump == mp_const_none) {
-        return MP_OBJ_NULL;
-    }
-    c->pump_ctr -= (int32_t)nops;
-    if (c->pump_ctr > 0) {
-        return MP_OBJ_NULL;
-    }
-    c->pump_ctr = GATE_PUMP_EVERY;
-    return c->pump;
-}
-
 static inline uint16_t capi_col(const moy_gfx_draw_ctx_t *c, int ci) {
-    return c->pal[(size_t)(ci & 63) % c->npal];
+    return c->pal[(size_t)(ci & 63)];   // the C API draws carts' colours
 }
 
 void moy_gfx_capi_fill(moy_gfx_draw_ctx_t *c, int x, int y, int w, int h, int ci) {
+    if (!ctx_live(c)) {
+        return;
+    }
     gate_fill(c, x, y, w, h, capi_col(c, ci));
     c->st[ST_N_FILL]++;
 }
 
 void moy_gfx_capi_rectb(moy_gfx_draw_ctx_t *c, int x, int y, int w, int h, int ci) {
+    if (!ctx_live(c)) {
+        return;
+    }
     // The same four clipped fills the rect gate and the Python path issue.
     uint16_t col = capi_col(c, ci);
     gate_fill(c, x, y, w, 1, col);
@@ -1571,7 +2081,7 @@ void moy_gfx_capi_rectb(moy_gfx_draw_ctx_t *c, int x, int y, int w, int h, int c
 static bool capi_solid(moy_gfx_draw_ctx_t *c, moy_canvas *mc, int ci) {
     const int32_t *st = c->st;
     mp_int_t dw = st[ST_W];
-    if (dw <= 0 || c->px == NULL) {
+    if (dw <= 0 || !ctx_live(c)) {
         return false;
     }
     int cx0 = st[ST_CX0], cy0 = st[ST_CY0];
@@ -1613,11 +2123,12 @@ void moy_gfx_capi_tri(moy_gfx_draw_ctx_t *c, int x1, int y1, int x2, int y2,
 
 void moy_gfx_capi_print(moy_gfx_draw_ctx_t *c, const uint8_t *s, size_t slen,
                         int x, int y, int ci) {
-    const int32_t *st = c->st;
-    mg_text_raw(c->px, c->cap, st[ST_W], s, slen, x, y, capi_col(c, ci),
-                     c->font, c->nglyphs, c->first, st[ST_FONT_SCALE],
-                     st[ST_CAM_X], st[ST_CAM_Y],
-                     st[ST_CX0], st[ST_CY0], st[ST_CX1], st[ST_CY1]);
+    if (!ctx_live(c)) {
+        return;
+    }
+    moy_text_target_t tt = ctx_text_target(c);
+    moy_text(&tt, MOY_FONT_PETME128, MOY_TEXT_PY, s, slen, x, y, capi_col(c, ci),
+             c->st[ST_FONT_SCALE], MOY_TEXT_LEFT, -1);
     c->st[ST_N_TEXT]++;
 }
 
@@ -1640,7 +2151,7 @@ bool moy_gfx_capi_flush_batch(moy_gfx_draw_ctx_t *c, int token) {
     if (next <= 4) {
         return true;                   // empty: done trivially
     }
-    if (c->bsrc == NULL || c->px == NULL || q[3] != (int16_t)token) {
+    if (c->bsrc == NULL || !ctx_live(c) || q[3] != (int16_t)token) {
         return false;                  // caller must upcall canvas.flush_batch
     }
     mp_int_t dw = c->st[ST_W];
@@ -1691,7 +2202,7 @@ const uint8_t *moy_gfx_capi_map_cells(const moy_gfx_draw_ctx_t *c,
 static bool capi_texture_canvas(moy_gfx_draw_ctx_t *c, moy_canvas *mc) {
     const int32_t *st = c->st;
     mp_int_t dw = st[ST_W];
-    if (dw <= 0 || c->px == NULL) {
+    if (dw <= 0 || !ctx_live(c)) {
         return false;
     }
     int cx0 = st[ST_CX0], cy0 = st[ST_CY0];
@@ -1937,29 +2448,53 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_native_code_free_all), MP_ROM_PTR(&moy_gfx_native_code_free_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill),       MP_ROM_PTR(&moy_gfx_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rect),  MP_ROM_PTR(&moy_gfx_fill_rect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_backdrop),  MP_ROM_PTR(&moy_gfx_backdrop_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565),    MP_ROM_PTR(&moy_gfx_blit565_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565_scale), MP_ROM_PTR(&moy_gfx_blit565_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit565_resize), MP_ROM_PTR(&moy_gfx_blit565_resize_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_map),   MP_ROM_PTR(&moy_gfx_blit_map_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_batch), MP_ROM_PTR(&moy_gfx_blit_batch_obj) },
     { MP_ROM_QSTR(MP_QSTR_make_spr_gate), MP_ROM_PTR(&moy_gfx_make_spr_gate_obj) },
     { MP_ROM_QSTR(MP_QSTR_make_draw_ctx), MP_ROM_PTR(&moy_gfx_make_draw_ctx_obj) },
     { MP_ROM_QSTR(MP_QSTR_make_draw_gate), MP_ROM_PTR(&moy_gfx_make_draw_gate_obj) },
-    #ifdef MOY_GFX_HAS_ASYNC_COPY
-    { MP_ROM_QSTR(MP_QSTR_copy_async), MP_ROM_PTR(&moy_gfx_copy_async_obj) },
-    { MP_ROM_QSTR(MP_QSTR_copy_wait), MP_ROM_PTR(&moy_gfx_copy_wait_obj) },
-    #endif
     { MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_spans), MP_ROM_PTR(&moy_gfx_fill_spans_obj) },
     { MP_ROM_QSTR(MP_QSTR_tri),        MP_ROM_PTR(&moy_gfx_tri_obj) },
     { MP_ROM_QSTR(MP_QSTR_sspr),       MP_ROM_PTR(&moy_gfx_sspr_obj) },
     { MP_ROM_QSTR(MP_QSTR_tline),      MP_ROM_PTR(&moy_gfx_tline_obj) },
     { MP_ROM_QSTR(MP_QSTR_shape),      MP_ROM_PTR(&moy_gfx_shape_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rrect),      MP_ROM_PTR(&moy_gfx_rrect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shadow),     MP_ROM_PTR(&moy_gfx_shadow_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cover),      MP_ROM_PTR(&moy_gfx_cover_obj) },
+    { MP_ROM_QSTR(MP_QSTR_face),       MP_ROM_PTR(&moy_gfx_face_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tint),       MP_ROM_PTR(&moy_gfx_tint_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shape_stats), MP_ROM_PTR(&moy_gfx_shape_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shape_reset), MP_ROM_PTR(&moy_gfx_shape_reset_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shape_order), MP_ROM_PTR(&moy_gfx_shape_order_obj) },
+    { MP_ROM_QSTR(MP_QSTR_path_fill),  MP_ROM_PTR(&moy_gfx_path_fill_obj) },
+    { MP_ROM_QSTR(MP_QSTR_path_text),  MP_ROM_PTR(&moy_gfx_path_text_obj) },
+    { MP_ROM_QSTR(MP_QSTR_path_width), MP_ROM_PTR(&moy_gfx_path_width_obj) },
+    { MP_ROM_QSTR(MP_QSTR_splash),     MP_ROM_PTR(&moy_gfx_splash_obj) },
+    { MP_ROM_QSTR(MP_QSTR_path_metrics), MP_ROM_PTR(&moy_gfx_path_metrics_obj) },
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_window), MP_ROM_PTR(&moy_gfx_blit_window_obj) },
+    { MP_ROM_QSTR(MP_QSTR_LR_SIZE),    MP_ROM_INT(MG_LR_SIZE) },
+    { MP_ROM_QSTR(MP_QSTR_layer_init), MP_ROM_PTR(&moy_gfx_layer_init_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_kick), MP_ROM_PTR(&moy_gfx_layer_kick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_drain), MP_ROM_PTR(&moy_gfx_layer_drain_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_blit), MP_ROM_PTR(&moy_gfx_layer_blit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_layer_meter), MP_ROM_PTR(&moy_gfx_layer_meter_obj) },
     { MP_ROM_QSTR(MP_QSTR_scroll_rect), MP_ROM_PTR(&moy_gfx_scroll_rect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shift_rect), MP_ROM_PTR(&moy_gfx_shift_rect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_block), MP_ROM_PTR(&moy_gfx_copy_block_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit_indices_scale), MP_ROM_PTR(&moy_gfx_blit_indices_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_ifill), MP_ROM_PTR(&moy_gfx_ifill_obj) },
+    { MP_ROM_QSTR(MP_QSTR_iline), MP_ROM_PTR(&moy_gfx_iline_obj) },
+    { MP_ROM_QSTR(MP_QSTR_icopy), MP_ROM_PTR(&moy_gfx_icopy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_iflood), MP_ROM_PTR(&moy_gfx_iflood_obj) },
     { MP_ROM_QSTR(MP_QSTR_text),       MP_ROM_PTR(&moy_gfx_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },
     #ifdef MOY_GFX_HAS_MEMBENCH

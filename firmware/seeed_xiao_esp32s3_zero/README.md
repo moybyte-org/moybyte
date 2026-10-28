@@ -77,9 +77,13 @@ esptool-js does not implement. So the browser's gesture is a replug when the
 write finishes, and holding BOOT while plugging in is the escape hatch on the
 card.
 
-**The migration flash WIPES THE STORE.** The new partition table puts `vfs` at
-`0x5A0000`; the stock MicroPython table it replaces put it far lower, so the old
-filesystem is not where the new image looks and comes up freshly formatted. Run
+**A table-changing flash WIPES THE STORE.** The partition table puts `vfs` at
+`0x6A0000` (since 2026-10-18; `0x620000` from 2026-10-07); a board flashed under
+an older table, or the stock MicroPython one, has its filesystem elsewhere, so
+the new image comes up on a freshly formatted store (`tools/board_flash.py`
+erases the moved store's first blocks and says so). A table change needs a USB
+flash, and an OTA'd Zero keeps the table it was last cabled with: OTA writes
+the app slot, never the table. Run
 `./provision.sh` afterwards to put the credentials and the pin back; the seed
 roster the image carries seeds itself on the next boot. A kid's browser-made
 carts are not lost by this — the browser keeps its own copy in OPFS and syncs
@@ -95,14 +99,31 @@ them back on the next visit — but anything that existed *only* here is.
 - **What makes two slots fit** is that the image is headless: no console, no
   canvas, and only one shared native module. Measured on the first build,
   2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**, against
-  the Guition's 3,668,096 B the day before. The CSV carries the full arithmetic
-  and what would falsify it; the build prints the headroom on every run and
-  fails on an overflow (#168).
+  the Guition's 3,668,096 B the day before. The baked browser console grew
+  the image past its first headroom floor, 256 KiB (`docs/native_kernel_2026-09.md`
+  §6.1), so on 2026-10-07 the slots became **3 MiB** (`0x300000`) and the store
+  the 1.875 MiB `vfs` at `0x620000`, sized for the kernel's native modules to
+  cross onto this board. The console kept growing: at 2,913,328 B the image
+  had ~226 KB of headroom against the 200 KB floor, so on 2026-10-18 (owner)
+  the slots became **3.25 MiB** (`0x340000`, at `0x20000` and `0x360000`) and
+  the store the **1.375 MiB** `vfs` at `0x6A0000`: 494,544 B (483 KB) of
+  headroom. The byte arithmetic that sized the store (seed carts ~820 KB, so
+  ~600 KB left for a kid's own) is not its capacity: the store is littlefs on
+  4 KiB blocks, a file under ~128 B inlines and every other file costs a whole
+  block, a folder two, and each seeded cart keeps its `manifest.json.bak`. The
+  full roster's ~180 files and ~37 folders filled the 352 blocks of the
+  1.375 MiB `vfs` (measured on glass 2026-10-23: the 31st cart's `mkdir` got
+  ENOSPC and a kid's cart had no room), so this board's build leaves the two
+  speed-test carts out of its roster (`--skip` in `build.sh`; owner,
+  2026-10-23). The boot line says `the store is FULL` when a seed fails that
+  way. The CSV carries the byte arithmetic and what would falsify it; the build prints the headroom on every run beside the board's
+  floor (`[image] headroom_floor_kib` in `board.toml`) and fails under it or on
+  an overflow (#168).
 - **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
   carried no carts at all until then, and both forms were **built** to find out
   why. With the plain `carts_data.py` the console boards freeze, this image is
-  **2,830,672 B of the 2,883,584 B slot — 51 KB left**: it fits, under the #168
-  warning floor, one cart from a build failure, in a slot paid for twice. With
+  **2,830,672 B of the 2,883,584 B slot — 51 KB left**: it fits, under the
+  board's headroom floor and so a failed build, in a slot paid for twice. With
   the same 35 carts as one raw-deflate stream each it is **2,399,232 B — 473 KB
   left**, against **2,194,112 B / 673 KB** for the image that carried no roster
   at all. `tools/gen_device_carts.py --packed` emits it (201,716 B of blobs
@@ -113,8 +134,12 @@ them back on the next visit — but anything that existed *only* here is.
   `[modules.shared]` is an ALLOWLIST rather than a denylist, and its board file
   argues the case at length: a denylist is right when the source tree's default
   answer is yes, `runtime/` IS the console, and this board is not one.
-- **One shared C module, `moy_web`.** Every other one is denied with the
-  hardware or the workload that is missing.
+- **The shared C modules are the store, the kernel's floor, the links and
+  `moy_web`.** Every other one is denied with the hardware or the workload that
+  is missing. The driver halves with no caller here are off in the board's own
+  files: wired Ethernet, WPA-Enterprise, ESP-NOW and I2S (`sdkconfig.board`,
+  `mpconfigboard.h`), because the image's growth is the browser console it
+  bakes and the headroom floor is not the lever.
 
 ## Provisioning (the store, not the modules)
 
@@ -161,8 +186,8 @@ the push is a flag rather than the default, `--clean` removes exactly what
 `ZERO NOTE: pushed copies are SHADOWING the image for: …` line at boot.
 
 Neither list is written in the script. The module list comes from `board.toml`
-(the same call the build stages from) and the asset list from
-`moy_webhost.ASSETS`; a hand-list is what broke this board once already.
+(the same call the build stages from) and the asset list from the webhost's
+own table (`native/moy_net/moy_webhost.c`); a hand-list is what broke this board once already.
 
 ## Updates, on a board with no screen
 
@@ -246,6 +271,13 @@ repo's two: `dev` → beta/`unstable`, `master` → stable.
 
 ## First-run setup, with no cable (`zero_setup.py`, #41)
 
+The radio is the kernel's WiFi driver (`native/moy_net/moy_wifi.c`): the
+station, the access point beside it (its provisioning mode) and the mDNS name
+are C, and so are the setup form's HTTP transport (the kernel's webhost, every
+path parked for `zero_setup`'s `SetupServer`) and the portal's DNS responder.
+What stays Python is the form itself: the page, the parse, the validation and
+the two files it writes.
+
 A board that cannot join anything does **not** print and give up — it becomes
 its own network for as long as it takes to be told about a real one:
 
@@ -272,16 +304,14 @@ setup that needs no printed key and no instructions.
 
 **It is a captive portal since 2026-08-29, reversing this port's own recorded
 decline** (the argument, its price and what would reverse it back live in
-`zero_setup.py`'s docstring, which quotes the decline verbatim). `DnsRedirect`
-answers every name on :53 with the AP's address and every unserved `GET` is a
+`zero_setup.py`'s docstring, which quotes the decline verbatim). The kernel's
+responder (`native/moy_net/moy_dns.c`) answers every name on :53 with the AP's address and every unserved `GET` is a
 302 to `http://192.168.4.1/`, so a phone's connectivity probe reaches this board
 and gets an answer it did not expect — which is what makes both platforms open
 the form without anybody typing an address. It works because ESP-IDF's SoftAP
 DHCP already hands out the AP's own address as the DNS server
 (`CONFIG_LWIP_DHCPS_ADD_DNS`, `y` in this board's generated sdkconfig), so
-nothing has to be configured for the queries to arrive — which is fortunate,
-since MicroPython exposes no `esp_netif_dhcps_option` binding at all, RFC 8910's
-option 114 included. **The portal is optional at every step**: a responder that
+nothing has to be configured for the queries to arrive. **The portal is optional at every step**: a responder that
 cannot bind :53 prints one line and setup serves exactly as it did before, and
 answers carry TTL 0 so nothing this board says about a name outlives the phone's
 stay on the AP.
@@ -312,7 +342,7 @@ docstring, which this board's host is an instance of. What is true *here*:
   browser has to load the page before it can ask for anything, and the page has
   to know a board is here before it knows to ask.
 
-## Pins (`zero_gpio.py`, #9)
+## Pins (`native/moy_net/moy_gpio.c`, #9)
 
 The other half of "the browser is the console, this board is what a browser is
 not". A cart running in the browser calls `pin_write` / `pin_read`; the page
@@ -336,10 +366,10 @@ are the ones the board is running on: `26–37` (flash + octal PSRAM), `19/20`
 (the USB device this board is reached through), `43/44` (`D6`/`D7`, UART0,
 where MicroPython keeps the REPL that is the recovery path), `0/45/46`
 (boot-mode and VDD_SPI strapping) and `3` (`D2`, JTAG-source strapping — the
-one *exposed* pad held back, on the strict reading; `zero_gpio.PINS` carries
-the argument for re-admitting it).
+one *exposed* pad held back, on the strict reading; `MOY_NET_GPIO_PINS` in
+`boards/MOYBYTE_ZERO/mpconfigboard.h` carries the argument for re-admitting it).
 
-Two behaviours worth knowing, both in `pin_factory`'s docstring: **a read never
+Two behaviours worth knowing, both in `moy_gpio.c`'s header: **a read never
 reconfigures a pin** (so `pin_write(21, 0)` then `pin_read(21)` answers 0 and
 leaves the LED lit — the other way round, reading a light turns it off), which
 means a written pin stays an output until reboot; and **an input is pulled up**,
@@ -358,6 +388,7 @@ partition table, the console arrangement, WiFi with this sdkconfig, the OTA
 endpoints on real flash, and the rollback confirm.
 
 Host tests cover the rest: `tests/test_zero_setup.py`, `tests/test_zero_gpio.py`
+(the kernel's /gpio route and portal over `runtime/net_binding.py`)
 and `tests/test_zero_update.py` (140-odd cases over the parsing, the refusals,
 the persisted shapes, the captive portal's packets, the browser-side queue, the
 update state machine and one whole first run end to end), plus
@@ -452,7 +483,7 @@ below used to hold:
   has yet called `pin_write` from a running cart, so `gpio_link` + the worker's
   pump remain host-checked. The wire shape between the two ends is pinned by a
   test that runs a real batch out of the browser queue and into
-  `zero_gpio.handle`, and `Pin Light` (`system_carts/pin_light.moy`) is the cart
+  the kernel's /gpio route, and `Pin Light` (`system_carts/moybyte.pin_light.moy`) is the cart
   that closes it — step 5 below.
 
 **The reboot-into-STA leg LEFT this list on 2026-08-29**, and it is worth
@@ -560,7 +591,7 @@ curl -s -X POST http://<ip>/gpio \
 *Pass:* the on-board user LED **lights** on `v:0` and goes out on `v:1` —
 that is active-low, and it means a cart writing 1 to "turn it on" turns it off.
 *Fail:* the opposite, in which case this board differs from the one this was
-measured on and `zero_gpio.PINS`' note about pin 21 needs correcting. Note
+measured on and `MOY_NET_GPIO_PINS`' note about pin 21 needs correcting. Note
 `pin_write(21, 0)` then `pin_read(21)` answers 0 and leaves the LED as it is —
 a read never reconfigures a pin.
 
@@ -652,7 +683,7 @@ new image's host did not come up.
 
     ```bash
     curl -X POST http://<board>/sync -H "Content-Type: application/json" \
-         -d '{"v":1,"pin":"NNNN","ops":[{"p":"pin_light.moy","dc":1}]}'
+         -d '{"v":1,"pin":"NNNN","ops":[{"p":"moybyte.pin_light.moy","dc":1}]}'
     # -> {"err": [], "ok": 1}
     ```
 

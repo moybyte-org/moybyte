@@ -67,10 +67,11 @@ subsystem under test and not also by a megabyte of frozen bytecode.
 Same console, same baked browser bundle (572,693 B), same partition table —
 **1.42 MB less image, 29% smaller.** LVGL, `lcd_bus`, `st7789`, `task_handler`,
 `rgb_bus`, `spi3wire` and the fork's `i2c` are simply not in it; the panel is
-one 837-line C file. Both builds stamp OTA board id `tdeck` against a
-byte-identical partition table, so a payload from either installs into the
-other's inactive slot — which is what makes the migration an OTA rather than a
-cable flash.
+one 837-line C file. Both builds stamped OTA board id `tdeck` against a
+byte-identical partition table, so a payload from either installed into the
+other's inactive slot — which made the migration an OTA rather than a cable
+flash. The slots are 7 MiB since 2026-10-26 (the table's CSV,
+`boards/MOYBYTE_TDECK/partitions-moybyte-tdeck.csv`, carries why).
 
 ---
 
@@ -153,7 +154,7 @@ reading, because `flush()` now returns with the frame still going out.
 | bars appear with wrong colours | red/blue swapped = the BGR bit; washed out = a gamma command was rejected |
 | rows sheared diagonally | stride — a `WIDTH`/`row_bytes` mistake |
 | a seam every 48 rows | the flush banding — a continuation band sent a command |
-| flicker or tearing | the ping-pong, or the #66 flush overlap refilling a bounce slot under a live DMA. `ASYNC_FLUSH = False` in `tdeck_panel.py` is the one-flag revert that tells the two apart; `TDeckCompositor(nfbs=1)` disables both |
+| flicker or tearing | the ping-pong, or the #66 flush overlap refilling a bounce slot under a live DMA. `ASYNC_FLUSH = False` in `modules/moy_runtime.py` is the one-flag revert that tells the two apart; `BandedCompositor(moy_lcd, nfbs=1)` disables both |
 | `flush timed out` | `on_color_trans_done` never fired — the completion fence, not the panel |
 
 #### `MODE = "touch"` (stage 2)
@@ -177,50 +178,42 @@ petme128 text kernel as a side effect.
 | what you see | what it means |
 |---|---|
 | `available=0` / `GT911 not found on I2C0` | the controller did not answer at 0x5D or 0x14 on I2C0 (SCL 8 / SDA 18) — wiring or the I2C bus, not the mapping |
-| taps land in the WRONG box | the mapping. `raw=` climbing while `map=` falls names the flipped axis: set `device_input.TOUCH_FLIP_X` / `TOUCH_FLIP_Y` / `TOUCH_SWAP` from the REPL and re-run `tdeck_smoke.touch()` — module globals, no rebuild |
-| crosshair lags or sticks | `over20` on the I2CSTAT line. The GT911 clock-stretches 20-45ms on most finger-down reads (#74); this smoke is single-threaded, which is exactly the cost stage 3's poller thread removes |
+| taps land in the WRONG box | the mapping. `raw=` climbing while `map=` falls names the flipped axis: set the driver's `flip_x` / `flip_y` / `swap_xy` from the REPL (`moy_input.touch(320, 240).flip_x = 1`) and re-run `tdeck_smoke.touch()` — live attributes, no rebuild; bake the winners into `mpconfigboard.h`'s `MOY_INPUT_TOUCH_*` |
+| crosshair lags or sticks | `over20` on the I2CSTAT line. The GT911 clock-stretches 20-45ms on most finger-down reads (#74), which is why the kernel passes it on the input task, off the loop |
 | `gate=OFF (blind polling)` | the INT pin (GPIO16) could not be claimed. Touch still works; it just spends bus time on every pass |
 
 #### `MODE = "keyboard"` (stage 3)
 
-Three 15-second phases, then a verdict. A **moving green bar** runs across the
-top the whole time — a frozen bar is a frozen loop, which is the failure this
-smoke exists to make visible without a stopwatch. Under it: the last key byte,
-the raw five matrix bytes, the held buttons lit green, and everything typed so
-far.
+Two 15-second phases on the kernel's driver and its input task, one pass a
+frame. A **moving green bar** runs across the top the whole time — a frozen
+bar is a frozen loop, which is the failure this smoke exists to make visible
+without a stopwatch. Under it: the last key byte, the held buttons lit green,
+and everything typed so far.
 
 | phase | what it proves |
 |---|---|
-| 1 ASCII sync | the C3 answers at 0x55 and returns clean 1-byte ASCII — the mode the code editor runs in. **A held key does not repeat**; that is correct, not a fault |
-| 2 raw sync | `0x03` took, and reads return five bytes. **Hold W and the `up` chip stays lit** — that is the whole reason raw mode exists |
-| 3 raw poller | the same reads on `InputPoller`'s thread. Compare its `loop_max` with phase 2's |
+| 1 ascii | the C3 answers at 0x55 and returns clean 1-byte ASCII — the mode the code editor runs in. **A held key does not repeat**; that is correct, not a fault |
+| 2 raw | `0x03` took, and reads return five bytes. **Hold W and the `up` chip stays lit** — that is the whole reason raw mode exists. **Hold Mic and the `start` chip lights**; in phase 1 only Shift+Mic does (below) |
 
 ```
-Moybyte kbd: 2 raw sync         frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
-Moybyte kbd: poller thread up (12ms cadence)
-Moybyte kbd: 3 raw poller       frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
-Moybyte kbd: GIL VERDICT loop_max sync=NNms poller=NNms
-Moybyte kbd: reverted to ASCII -- raw_mode=False
+Moybyte kbd: available=1 raw_allowed=True task_stack_free=NNNN
+Moybyte kbd: 1 ascii    frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
+Moybyte kbd: 2 raw      frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
+Moybyte kbd: reverted to ASCII -- raw_mode=False task_stack_free=NNNN
 ```
 
-**Read the verdict like this.** The C3 clock-stretches; measured stalls on this
-board run 21–60ms. In phase 2 that stall lands inside the loop and *is* the
-frame. In phase 3 it lands on the poller thread — but only if `machine_i2c.c`
-released the GIL, because MicroPython threads share one, so without the patch
-the stall freezes the VM from whichever thread took it.
-
-* phase 3 `loop_max` collapses toward the flush cost while its `i2c max=` stays
-  bad → **the patch works**, which is the whole reason this port carries it.
-* both `loop_max` values bad → the patch is not in this image. `grep "Moybyte #69 GIL"
-  firmware/lilygo_t_deck_plus_mainline/.build/micropython/ports/esp32/machine_i2c.c`.
-* both `loop_max` values good *and* `i2c max=` small → the C3 simply was not
-  stalling this run. Hold several keys at once and re-run `tdeck_smoke.keyboard()`.
+**Read it like this.** The C3 clock-stretches; measured stalls on this board
+run 21–60ms. They land on the input task (#69), never in the loop, so
+`loop_max` stays near the flush cost while `i2c max=` is as bad as the bus
+makes it. A `loop_max` that tracks `i2c max=` means a read is back on the
+loop. Both small means the C3 was not stalling this run: hold several keys at
+once and re-run `tdeck_smoke.keyboard()`. `task_stack_free` is the input
+task's unused stack, the margin `MOY_INPUT_TASK_STACK` is sized from.
 
 | what you see | what it means |
 |---|---|
 | `RAW MODE UNSUPPORTED` | C3 firmware older than 2025-06-12 ignored `0x03`. The driver stuck the session back on ASCII + the hold latch, which is correct — but hold-to-move will stall. Flash `T-Keyboard_..._250620.bin` |
-| phase 2 lights no buttons | the matrix decode. `bytes=` on screen is the raw five; `moybyte/input.py`'s `RAW_KEYS` table maps (byte, bit) → key |
-| `poller thread FAILED to start` | no `_thread` or no RAM. The console degrades to synchronous polling, which *is* phase 2 — a real fallback, not a break |
+| phase 2 lights no buttons | the matrix decode: `native/moy_input/moy_kbd.c`'s `RAW_KEYS` table maps (byte, bit) → key |
 | the bar freezes and never resumes | not a stall — a hang. The last serial line names the phase |
 
 The last thing the smoke does is send `0x04`. Skipping that revert is what once
@@ -271,19 +264,31 @@ The card is left **mounted** at `/sd` when the smoke returns. That is
 deliberate: `with_sd_live` attaches once and keeps the device resident for the
 session, because tearing it down between ops is what corrupts the bus.
 
+**Card format.** FAT12/16/32 and exFAT both mount: a card over 32GB ships
+exFAT, which an esp32 build without `MICROPY_FATFS_EXFAT` (`mpconfigboard.h`)
+refuses with ENODEV. The card behind `moy_sd` is a block device `vfs.mount`
+hands to FatFS like any other, so the define is the whole of it. The volume
+is the store's own (`moy_store.card`, `native/moy_store/moy_card.c`): its
+FATFS over a C block device that keeps a cache of single-sector reads, the
+directory and FAT sectors every path lookup reads again, and a write drops
+the sectors it covers before it is issued. The mount is
+`moybyte_sd`'s and not `device/card_store.py`'s (the P4s' and the Guition S3's):
+`card_store.mount` calls `deinit()` on a card whose mount failed, which here
+would be a teardown after the attach.
+
 #### `MODE = "audio"` (stage 5)
 
 A rising four-note phrase, the three starter SFX (coin / jump / thud), five
-seconds of music 0, then the same SFX at master volume 0 and 7.
+seconds of music 0, then the first SFX at the console's level 0.
 
 **But the verdict is a number, not the sound.** "I hear nothing" has at least
 four causes — no native module, no I2S channel, a synth producing silence, or
 an amp that is not wired — and an ear cannot tell them apart. So every step
-reports `moy_audio.frames_out()`, the frames the I2S peripheral has actually
+reports `moy_audio.stats()[1]`, the frames the I2S peripheral has actually
 **accepted**, which is the last thing measurable on this side of the wire:
 
 ```
-Moybyte audio: feed=core-1 task rate=22050 bank sfx=3 music=1
+Moybyte audio: out=1 () rate=22050 bank sfx=3 music=1
 Moybyte audio: beep 262    350ms frames=7717 measured=22048Hz (nominal 22050)
 Moybyte audio: VERDICT the peripheral consumes at the nominal rate.
 ```
@@ -291,7 +296,7 @@ Moybyte audio: VERDICT the peripheral consumes at the nominal rate.
 | the number | what it means |
 |---|---|
 | ~22050 Hz | the synth renders and the peripheral consumes. Silence past this point is the **amp or its wiring**, not the firmware |
-| flat / `frames=0` | nothing is feeding I2S. The `feed=` line says which path was taken — `core-1 task`, `legacy I2S`, or `NONE` |
+| flat / `frames=0` | nothing is feeding I2S. The `out=` line says whether the kernel's output started and, if not, why |
 | a *wrong* rate | the clock. By ear this is just "sounds a bit off"; by number it is unambiguous |
 | `moy_audio ABSENT` | the usermod is not in this image. That is silence **by design** (#97) — the Python fallback synth died with moycore stage 0 |
 
@@ -319,8 +324,8 @@ code. What you should see:
 3. `Moybyte loaded N carts from SD`, then `lua runtime ON (moycore)`;
 4. the **launcher**, and `Moybyte first frame in NNNms`.
 
-Then it is the console: tap a cart to play it, hold BACKSPACE ~700ms to leave a
-game, the ≡ menu and Settings work, the Editor's seven tabs work.
+Then it is the console: tap a cart to play it, tap the Mic key for the pause menu
+and its Quit to leave a game, the ≡ menu and Settings work, the Editor's seven tabs work.
 
 | what you see | what it means |
 |---|---|
@@ -438,7 +443,7 @@ boards/MOYBYTE_TDECK/   out-of-tree board definition + the OTA partition table
 board.toml              WHICH modules cross, and why (tools/board_config.py)
 native/moy_lcd/         the ST7789 SPI panel backend (this board's moy_dsi)
 native/.staged/         shared native modules, copied from the repo-root native/ (gitignored)
-modules/                board-authored: boot/main/moybyte_shell/tdeck_panel/tdeck_smoke
+modules/                board-authored: boot/main/moybyte_shell/tdeck_smoke
                         + everything board.toml stages (gitignored)
 build.sh                clone -> patch -> stage -> freeze -> build -> collect
 ```
@@ -451,15 +456,16 @@ The board-authored modules, and what each is for:
   benchmark harness is the #63 `MOYBYTE_BENCH=1` build.
 - `moy_runtime.py` — this board's hardware half of `run_desktop()` and nothing
   else: the panel bring-up, the input trio, the SD/panel bus gate and the serial
-  channel, over the shared boot spine (`device_boot.DeviceBoot`/`FrameLoop`).
+  channel, over the shared boot spine (`device_boot.DeviceBoot`) and the kernel's frame loop.
   `DeviceCanvas`, `make_api`, `TrackBall`/`Touch` and the seed roster are
   imports from the shared device tier, and the console itself is staged from
   `runtime/` with the device `make_api` and store injected into
   `console.Workstation`.
-- `tdeck_panel.py` + `native/moy_lcd/` — the panel: `TDeckCompositor` is the
-  ping-pong with the `ASYNC_FLUSH`/`LAYER_COPY_ASYNC` levers and the
-  `bounce_stats`/`pump_last_us` meters, and `moy_lcd` owns the ST7789, the
-  banded flush and the `kick`/`pump`/`drain` protocol (below).
+- `native/moy_lcd/` under the kernel's `moy_glass.BandedCompositor` — the
+  panel: the compositor is the ping-pong in C (`native/moy_glass/moy_present.h`)
+  with the `bounce_stats`/`pump_last_us` meters, the `ASYNC_FLUSH`/
+  `LAYER_COPY_ASYNC` levers are `moy_runtime.py`'s, and `moy_lcd` owns the
+  ST7789, the banded flush and the `kick`/`drain` protocol (below).
 
 ### `board.toml` — where the module list lives
 
@@ -471,7 +477,7 @@ different strategies:
 | source | strategy | why |
 |---|---|---|
 | `runtime/` | **denylist** | a shared tree's default answer is "yes, this crosses", so what needs writing down is the exclusions, each with a reason. |
-| `device/` | **allowlist** | the shared device tier; each board names the pieces it actually drives (this board has no BLE, the P4 no SD/I2S), so the difference is written down instead of frozen by accident. |
+| `device/` | **allowlist** | the shared device tier; each board names the pieces it actually drives (this board has no BLE, the P4s no `moybyte_sd` -- their card is `card_store.py` -- and no I2S), so the difference is written down instead of frozen by accident. |
 
 The stager also prunes: the frozen manifest freezes the whole `modules/`
 directory, and that directory is gitignored, so an unstaged module would
@@ -615,28 +621,25 @@ The consequence that outlives the lever: any cart whose backdrop is a colour
 clock sets its price, and no amount of overlap machinery can hide it — the CPU
 is the thing waiting.
 
-### `modules/tdeck_panel.py` — the compositor
+### The compositor
 
-`TDeckCompositor` implements the same small interface `DeviceCanvas.__init__`
-and `moy_runtime.run_desktop` already call — `size` / `framebuffer` /
-`back_buffer` / `gfx` / `flush` / `sync` — the one `p4_display.P4Compositor`
-also implements, plus the one the diag layer probes for with `getattr`
-(`bounce_stats`). No new seam is invented (`docs/backend_contract_v1.md` L8:
-strategy stays the backend's).
-
-**Since 2026-08-21 it is a SUBCLASS** of `device/banded_panel.py`'s
-`BandedCompositor`, shared with the Guition (#206 item 1) — the Python twin of
-the `native/moy_flush` split one tier down, and promoted for the same reason:
-`d9aa73e` moved this board's band feed onto that board's core-0 feeder, which
-retired the soft pump timer and the draw-op pokes that were the last real
-difference between the two files. The base owns the ping-pong, the
-drain-swap-kick overlap and the meter forwarding; what is left in
-`tdeck_panel.py` is the `moy_lcd` import (kept here so the staging-closure
-check can see this board's C dependency), `WIDTH`/`HEIGHT`, the two revert
-flags, `sd_bracket` and the module-level `set_backlight()`. Where the deleted
-fork's compositor owned the bounce buffers, the completion counter and the
-pacing arithmetic in Python, all of that is C, so a band never crosses the
-boundary.
+The kernel's `moy_glass.BandedCompositor` (`native/moy_glass/moy_present.h`,
+sprint 3's glass pass) implements the small interface `DeviceCanvas.__init__`
+and `moy_runtime.run_desktop` call — `size` / `framebuffer` / `back_buffer` /
+`gfx` / `flush` / `sync` — plus the one the diag layer probes for with
+`getattr` (`bounce_stats`). No new seam is invented
+(`docs/backend_contract_v1.md` L8: strategy stays the backend's). Its frame
+state machine is C over `moy_lcd`'s kernel transport (`moy_lcd_kwait`/`kkick`/
+`kship`), the same one the Guition runs over `moy_axs`: the ping-pong, the
+drain-swap-kick overlap and the meter forwarding. What is this board's is in
+`moy_runtime.py` — the two revert flags — and in `moy_lcd`, whose `sd_guard`
+the compositor forwards as `sd_bracket`, and which `moy_lcd.init` also
+registers as the store's bus gate (`moy_vol_set_gate`,
+`native/moy_store/moy_vol.h`), so a card op made in C — a compiled cart's
+files — drains the flush and holds the next one off as the Python session
+does. Where the deleted fork's compositor
+owned the bounce buffers, the completion counter and the pacing arithmetic in
+Python, all of that is C, so a band never crosses the boundary.
 
 **`ASYNC_FLUSH = False` is the one-flag fallback.** It restores the blocking
 `moy_lcd.show()` path byte-for-byte, and it is how a tear, a glitch or a hang
@@ -667,17 +670,19 @@ off a board against `moy_fold_composite`.
 
 ---
 
-## The three fork patches, re-solved
+## The fork patches, re-solved
 
 `build.sh` applies them marker-guarded, so a warm `.build` re-patches nothing.
 
 | patch | how it is solved here | which stage needs it |
 |---|---|---|
 | **REPR_C unboxed floats** (#66) | guarded `sed` on MicroPython's own `mpconfigport.h` (in the cloned upstream under `.build/`, not a file of ours) — its `MICROPY_OBJ_REPR` line, and the build **fails loudly** if the line has changed shape. A sed rather than the fork's context diff, so it survives the line moving between MicroPython releases. Verified in the built tree. | None strictly — but it is free, it changes object layout so it must be settled early, and every image here was compiled and linked with it |
-| **I2C GIL release** (#69) | a small in-place Python edit that brackets `i2c_master_cmd_begin` with `MP_THREAD_GIL_EXIT/ENTER`. Result is byte-identical to the fork's patched file. Exits non-zero if the call site is not found. | **Stage 3.** It is what makes the poller THREAD worth having: without it a C3 clock-stretch stall holds the GIL and freezes the whole VM no matter which thread issued the read. Stage 2 reads I2C on the main thread and cannot tell the difference |
 | **esp_lcd `tx_color` no-acquire** (#66) | the fork's `.patch` file, applied to the ESP-IDF tree (idempotent; the shared checkout usually has it already from the fork build) | **The overlap.** Without it every continuation band calls `spi_device_acquire_bus`, which waits for the device's in-flight DMA — so `pump()` would block on the previous band and the flush would be serialized again, just spelled differently. Confirmed compiled in: `panel_io_spi_tx_color` branches on the sign of `lcd_cmd` around both the acquire and the release |
 
-A fourth rides along, the same one the P4 build reuses: **native-code-free**
+The fork's third, the #69 I2C GIL release, retired with the Python input
+poller it served (2026-10-07): the keyboard and the GT911 are the kernel's,
+passed on its input task, and nothing opens a `machine.I2C`. A third rides
+along, the same one the P4 build reuses: **native-code-free**
 (#66), which lets a cart-compile miss reclaim the `@micropython.native` exec
 arena instead of growing it until soft reset.
 
@@ -693,8 +698,8 @@ with an A/B rather than inherited.
 | cache geometry (#63) | 32KB icache / 64KB dcache / 32B line | **same** | pure win, already proven on this board; costs 48KB internal SRAM |
 | flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **on** (`bec713e`), with the temperature retune | it was the last cart-side gap — Brick Siege's whole `bg=` difference was a 153,600 B PSRAM fill at 2/3 the clock, measured to within 1.5% of the clock ratio (see "the render-side gap is the PSRAM clock" above). It is an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature, so it ships WITH `CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR` and the vendor-gate patch that keeps that option from aborting this board's boot; the five flags move together or not at all (`sdkconfig.board` says which) |
 | `-O3` on moy_gfx (#77) | on (Brick Siege 33→51 fps) | inherited | it is a pragma inside the shared `moy_gfx` source, so it comes with the staged module |
-| async flush + pump (#40/#43/#66) | on | **on** (2026-08-16) | ported — see the flush section above. Was the biggest single lever here; `ASYNC_FLUSH = False` in `tdeck_panel.py` reverts it |
-| GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `tdeck_panel.LAYER_COPY_ASYNC = True`, assigned onto `device_canvas` by `run_desktop` before the first canvas — the flag lives in the compositor module because that is where the fork keeps it (`moy_compositor.SRAM_BOUNCE_FLUSH`) and `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so Sky Run (800 px) and the Bench carts' scroll phase (512 px) keep the sync `blit_window`, and Brick Siege has no layer at all. It pays on sakura, letter_blitz and platformer — the whole list — where the fork measured 7 ms → 0.04 ms |
+| async flush + pump (#40/#43/#66) | on | **on** (2026-08-16) | ported — see the flush section above. Was the biggest single lever here; `ASYNC_FLUSH = False` in `moy_runtime.py` reverts it |
+| GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `LAYER_COPY_ASYNC = True` in `moy_runtime.py`, assigned onto `device_canvas` by `run_desktop` before the first canvas, because `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so Sky Run (800 px) and the Bench carts' scroll phase (512 px) keep the sync `blit_window`, and Brick Siege has no layer at all. It pays on sakura, letter_blitz and platformer — the whole list — where the fork measured 7 ms → 0.04 ms |
 | PSRAM-direct DMA (`spi_master` patch, #43) | on | **off** | the SRAM-bounce path makes it unnecessary and it is the riskier of the two |
 
 ---
@@ -749,33 +754,74 @@ Every one of these was learned by hanging or bricking a board.
 - **80 MHz SPI is requested, not delivered.** None of MOSI(41)/SCK(40)/MISO(38)
   are the S3's IOMUX-native FSPI pins, so everything routes through the GPIO
   matrix, which caps a write-only LCD at ~40 MHz. The board's wiring is the wall.
-- **The keyboard has two modes and the console flips between them per
-  screen.** It is a separate ESP32-C3 at I2C 0x55 (its firmware is in
+- **The keyboard has two modes, and every surface reads the matrix.** It is
+  a separate ESP32-C3 at I2C 0x55 (its firmware is in
   `firmware/lilygo_t_deck_plus_reference/examples/Keyboard_ESP32C3`, an
   UNTRACKED vendor tree a fresh checkout does not have; THIRD_PARTY.md's scope
-  note says why). In its default mode it returns
-  clean 1-byte ASCII (shift, sym and digits resolved on the keyboard) but
-  reports each key ONCE on the press edge with no autorepeat, so a held key can
-  only be faked for `KEY_HOLD_MS` by `TDeckKeyboard`'s latch. For true
-  hold-to-move a running cart switches it to raw-matrix mode (`0x03`,
-  `LILYGO_KB_MODE_RAW_CMD`), which streams the full key matrix every read.
-  `Workstation._set_text_mode` → `TDeckKeyboard.set_game_mode(on)` drives it:
-  ASCII for the code editor (so typing is clean, `last_key`), raw everywhere
-  else, and `0x04` (`..._MODE_KEY_CMD`) reverts — the step whose absence once
-  garbled the editor irreversibly. **A mode switch swallows its own byte, on
-  both sides of the seam**: what the C3 hands over at the revert was typed
-  while the matrix streamed, so `_disable_raw_mode` DRAINS the keyboard after
-  `0x04`, and `_set_text_mode(True)` seeds every typed-key edge with the byte
-  already in `last_key` — the matrix decodes only sixteen keys, so each half
-  covers a case the other cannot. `__init__` boots in ASCII and never enables
-  raw; raw needs keyboard firmware **≥ 2025-06-12**
-  (`T-Keyboard_..._250620.bin`), and on older firmware `_read_raw_buttons`
-  sees the stray ASCII byte and keeps the session on the 1-byte + latch path
-  (`_raw_unsupported`; class flag `RAW_GAME_MODE` force-disables raw). The
-  keyboard has no `=` `[ ] { } < > %` keys, so the code editor shows an
-  on-screen symbol palette; `0x01 <duty>` sets its backlight. `MODE =
-  "keyboard"` is the on-glass check (it dumps keys over serial), and the last
-  thing it does is send the `0x04` revert.
+  note says why). In its default mode it returns clean 1-byte ASCII (shift,
+  sym and digits resolved on the keyboard) but reports each key ONCE on the
+  press edge with no autorepeat, and it sends nothing for a bare Mic. In
+  raw-matrix mode (`0x03`, `LILYGO_KB_MODE_RAW_CMD`) it streams the full key
+  matrix every read, and the driver (`native/moy_input/moy_kbd.c`) decodes
+  it: `RAW_KEYS` carries the whole keyboard as the C3 types it, Sym giving a
+  key its symbol and Shift a letter its capital. A game reads the held key
+  and its buttons (true hold-to-move); a text surface (`input.text_mode`)
+  gets each key's press edge as one typed byte, as the ASCII mode types,
+  with no letter a button, and the key typed last, while it is down, as its
+  source's typing level, which the input table repeats for the console's
+  text surfaces (`moy_input.h` REPEAT; a cart's `key()` never sees a
+  repeat); and every surface sees Mic, the console's key,
+  which is why a text surface reads the matrix too (a field's Cancel is
+  Mic, owner call 2026-10-18, `docs/ui_api_2026-10.md`). The home takes its
+  verb letters (C, N, Y, X, F) and Search's `/` (Sym+G, the symbol printed
+  on that key) from it, and a game its `key()`. W A S D are the directions
+  beside the trackball wherever letters do not type — the home, lists,
+  grids, menus, popovers, dialog rows — and there they are no letter
+  (owner call 2026-10-23, `moy_kbd.c`'s THE MOVE KEYS): only a game
+  (`cart_keys`) reads them as both. A roll of the trackball is those
+  directions, and its click Enter, on every surface but a running cart, a
+  canvas and a caret (`Workstation.ball`, the "ball" input source;
+  `docs/ui_api_2026-10.md` says which); mid-roll a step across the roll's
+  axis takes a firmer turn, so a roll along the home's row (the system
+  button, the tabs, Wi-Fi, the battery and the clock) or the Editor's (the
+  system button, the seven tabs, undo, redo, Play, the battery and the
+  clock) stays on it (`Workstation.BALL_TURN`). The hint strips stay up under a tap: they name
+  the keyboard's keys until another keyboard is used
+  (`docs/ui_api_2026-10.md`, Hints). A menu over a text surface takes the
+  keys out of text mode while it shows (`Workstation._menu_keys`). A key already down when the
+  matrix starts, or when a surface turns to text, types nothing until it is
+  pressed again, and `_set_text_mode(True)` seeds every typed-key edge with
+  the byte already in `last_key`. `Workstation._set_text_mode` →
+  `ws.keyboard.set_game_mode(on)` queues a request the input task's next
+  pass applies; the driver boots in ASCII and never enables raw by itself,
+  and the console asks for it as it attaches the keyboard
+  (`Workstation.sync_keyboard_mode`). Raw needs keyboard firmware
+  **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`): on older firmware the raw
+  read sees the stray ASCII byte and keeps the session on the 1-byte + latch
+  path (`raw_unsupported`), as `RAW_GAME_MODE = False` on the driver does;
+  there a text surface's switch to ASCII is `0x04` (`..._MODE_KEY_CMD`), and
+  the driver DRAINS the keyboard after it, because what the C3 hands over at
+  the revert was typed while the matrix streamed. The keyboard has no `=`
+  `[ ] { } < > %` keys, so the code editor shows an on-screen symbol
+  palette; `0x01 <duty>` sets its backlight. `MODE = "keyboard"` is the
+  on-glass check (it dumps keys over serial), and the last thing it does is
+  send the `0x04` revert.
+- **The Mic key is the console's key (owner call, 2026-10-18).** It is the
+  `start` button — the pause menu over a fullscreen game, the system menu
+  anywhere else (`docs/shell_ux_v1.md` §9a), whose Home row off the home is
+  the way out of a surface where K types (the Editor's Code tab) — and
+  never reaches a cart;
+  inside a text field being typed into it is the field's Cancel, because K
+  types a letter there. BACKSPACE is a plain key (a typed 0x08 at a text
+  surface, `key()` 0x08 in a game), with no hold gesture. What the C3 says
+  for Mic, from the vendor firmware (`keyboard[0][6] = NULL`,
+  `keyboard_symbol[0][6] = '0'`):
+  - **raw matrix (every surface):** d0 bit 6, level state: `start` while
+    held, a text surface's included (`moy_kbd_decode_raw`).
+  - **ASCII (old keyboard firmware only):** a bare Mic press sets the byte
+    0x00, the very byte an idle read returns, so the driver cannot see it.
+    Shift+Mic is the byte 0xE0 (NULL − 32) and is `start` (it is never a
+    typed key); Sym+Mic is '0'.
 - **Serial works both ways during play** — "The serial dev channel" above has
   the three changes RX needed.
 
@@ -790,7 +836,7 @@ on glass, so a misbehaviour can be bisected by flashing the last good one.
 |---|---|---|---|---|
 | 1 | **Panel** — mainline boots, ST7789 comes up, a test pattern lands | `panel` | 1,704,976 B | **on glass 2026-08-16** |
 | 2 | **Touch** (GT911, I2C0 @ 0x5D/0x14) + `board.toml` + the whole shared module tree | `touch` | 2,207,232 B | **on glass 2026-08-16** |
-| 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 poller A/B | `keyboard` | 2,210,016 B | **on glass 2026-08-16** |
+| 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 A/B | `keyboard` | 2,210,016 B | **on glass 2026-08-16** |
 | 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | **on glass 2026-08-16** |
 | 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | **on glass 2026-08-16** |
 | 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,672 B | **on glass 2026-08-16** — worked, at ~half the fork's fps |
@@ -875,10 +921,11 @@ so flipping one at a time attributes any glass symptom.
 DRAW2 layer=N.NNms batch=N.NNms map=N.NNms text=N.NNms fill=N.NNms gated(fill=N text=N)
 ```
 
-Two readings say it has gone wrong rather than flat. **`lw=` in `HITCH`** counts
-`copy_wait` trips: the bounded spin in `moy_gfx_copy_wait` gave up before the
-GDMA said done; pixels stay correct (the sync `blit_window` rewrites the same
-bytes), so a climbing `lw=` is the copy finishing later than the cart's
+Two readings say it has gone wrong rather than flat. **The layer restore's
+trips** (`moy_gfx.layer_meter(canvas._lrs)[1]`) count the bounded spin in
+`moy_gfx_copy_wait` giving up before the GDMA said done; pixels stay correct
+(the sync copy rewrites the same bytes), so a climbing count is the copy
+finishing later than the cart's
 `_update`, i.e. the overlap paid for and not collected. **`PUMP idle=`/`gaps=`
 rising on a layer cart** is the other: the GDMA copy is a full-throttle
 PSRAM↔PSRAM blit in the same window as the pump's band memcpys, so if `idle`

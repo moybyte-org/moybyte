@@ -58,14 +58,18 @@ function skipIn(name, dirs, files) {
 
 export function skipName(name) { return skipIn(name, SKIP_DIRS, SKIP_FILES); }
 
-// The binary files that cross by name -- a cart's cover (SPEC.md 3.6) -- the
-// JS mirror of runtime/moy_sync's BINARY_FILES. They travel as base64: `b`
-// where text rides as `t` in a batch op, `{b: ...}` as a value in a served
-// bundle, and as BYTES once they are in the VFS or this store.
+// The binary files that cross -- a cart's cover (SPEC.md 3.6) by name, a theme
+// package's fonts and sheets by suffix -- the JS mirror of runtime/moy_sync's
+// BINARY_FILES and BINARY_SUFFIXES. They travel as base64: `b` where text
+// rides as `t` in a batch op, `{b: ...}` as a value in a served bundle, and as
+// BYTES once they are in the VFS or this store.
 const BINARY_FILES = ["cover.png"];
+const BINARY_SUFFIXES = [".fnt", ".moygfx"];
 
 export function isBinary(rel) {
-    return BINARY_FILES.indexOf(String(rel).slice(String(rel).lastIndexOf("/") + 1)) >= 0;
+    const name = String(rel).slice(String(rel).lastIndexOf("/") + 1);
+    return BINARY_FILES.indexOf(name) >= 0
+        || BINARY_SUFFIXES.some((s) => name.length > s.length && name.endsWith(s));
 }
 
 export function fromBase64(b) {
@@ -101,14 +105,19 @@ export function skipLocal(name) {
 // worker and this store iterate roots instead of naming carts/files. A static
 // host has no server to ask for this, so it is a constant, pinned against the
 // Python registry by tests/test_web_store.py (a drift there fails the build).
-// The only per-root behaviour the browser store needs is the whole-folder
-// delete ARITY: a cart is one segment, a files item is a kind/name or a folder
-// below it. Kinds are not validated here -- these ops are the browser's own
+// The per-root behaviour the browser store needs is the whole-folder delete
+// ARITY (a cart is one segment, a files item is a kind/name or a folder below
+// it; null: no folder delete at all), and for the console's own documents the
+// named top-level files the store IS (`top`, moy_sync.SYSTEM_FILES), which a
+// board serves through its VM (`console.json`) when its firmware has the root.
+// Kinds are not validated here -- these ops are the browser's own
 // sweep of its own store, and `.history`/`trash` persisting to a SITE-mode OPFS
 // is the kid's own undo/recovery surviving the tab, which is correct.
 export const ROOTS = [
     { id: "carts", vfs: "/moy/carts", endpoint: "carts.json", dcMin: 1, dcMax: 1 },
     { id: "files", vfs: "/moy/files", endpoint: "files.json", dcMin: 2, dcMax: null },
+    { id: "system", vfs: "/moy", endpoint: "console.json", dcMin: null, dcMax: null,
+      top: ["system.json", "achievements.json", "shared.moygfx"] },
 ];
 
 export function rootById(id) {
@@ -116,7 +125,8 @@ export function rootById(id) {
     return null;
 }
 
-// A path the local store will accept: the JS half of moy_sync.safe_segments.
+// A path the local store will accept: the JS half of the receiving C's path
+// rule (native/moy_net/moy_sync_apply.c).
 // An allowlist of shape, not a blocklist of tricks -- the store is a real
 // filesystem and `..` in a cart name must never resolve. `skip` defaults to the
 // WIRE's rule; every store-side caller here passes `skipLocal`, so a journal
@@ -130,6 +140,17 @@ export function safeSegments(rel, skip = skipName) {
         if (skip(seg)) return null;
     }
     return parts;
+}
+
+// The segments of a path THIS root's store holds, or null: a file inside a
+// folder for carts and files (a top-level file there is system state beside
+// the store, never the kid's work in it), one of the named files for a root
+// of top-level files.
+function localParts(root, rel) {
+    const parts = safeSegments(rel, skipLocal);
+    if (!parts) return null;
+    if (root.top) return parts.length === 1 && root.top.includes(parts[0]) ? parts : null;
+    return parts.length < 2 ? null : parts;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +274,28 @@ const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 export const RECORD_NAME = "installed.json";
 export const STAGE_DIR = "install";
 
+// THE CHANNEL'S STORAGE ROOT. Pages that share an origin share its OPFS: the
+// stable site (/moybyte/) and the dev site (/moybyte/dev/) both live on
+// moybyte-org.github.io. A page published for a channel (site/build.py
+// --channel, which stamps page_tail.js's MOY_CHANNEL) keeps every store under
+// its own top-level directory, so a dev store format never reads or writes the
+// stable site's carts. The worker opens every store through what this returns;
+// the empty channel is the origin root, which is where the stable site, a
+// board-served page and a local build keep theirs. A channel name that is not
+// a plain word gets no storage at all (the console runs in memory and says so)
+// rather than the origin root.
+export const CHANNEL_DIR_PREFIX = "channel-";
+
+export function channelNav(nav, channel) {
+    if (!channel) return nav;
+    if (!/^[a-z][a-z0-9-]{0,31}$/.test(channel)) return { storage: null };
+    const st = nav && nav.storage;
+    if (!st || typeof st.getDirectory !== "function") return { storage: null };
+    return { storage: { getDirectory: async () =>
+        (await st.getDirectory()).getDirectoryHandle(CHANNEL_DIR_PREFIX + channel,
+                                                     { create: true }) } };
+}
+
 // null when the browser has no OPFS (or refuses it -- a private window, a
 // file:// origin, site data blocked). The caller must treat null as "run in
 // memory and SAY so", never as an empty store.
@@ -340,20 +383,30 @@ async function applyOne(store, op) {
     // it -- silently, as "bad path" errors nobody reads.
     const parts = safeSegments(op.p || "", skipLocal);
     if (!parts) return "bad path";
+    const r = store.root;
     if (op.dc) {
         // Whole-folder delete arity from the root descriptor -- a cart is one
         // segment, a files item a kind/name or a recording folder below it.
-        const n = parts.length, r = store.root;
-        if (n < r.dcMin || (r.dcMax !== null && n > r.dcMax)) return "bad dc target";
+        const n = parts.length;
+        if (r.dcMin === null || n < r.dcMin || (r.dcMax !== null && n > r.dcMax))
+            return "bad dc target";
         try { await removeAt(store, parts, true); } catch (e) { /* already gone */ }
         return null;
     }
-    // Never a top-level file: system.json / wifi.json are system state beside
-    // the carts, not the kid's work (moy_sync draws the same line).
-    if (parts.length < 2) return "not a cart file";
+    // A cart store never takes a top-level file (system.json / wifi.json are
+    // system state beside the carts, not the kid's work: moy_sync draws the
+    // same line), and the console's own store takes its named files alone.
+    if (!localParts(r, op.p)) return r.top ? "not a system file" : "not a cart file";
     const key = parts.join("/");
+    // The console's own documents are written so a reload at any moment finds
+    // the old copy or the new one (`commitFile`): a torn system.json would boot
+    // the console on its defaults and lose every Setting. Cart files keep the
+    // plain write: a cart's undo journal is the record of its last commits.
+    const put = r.top ? (data) => commitFile(store.carts, key, data)
+                      : (data) => writeText(store, parts, data);
     if (op.d) {
-        try { await removeAt(store, parts, false); } catch (e) { /* already gone */ }
+        if (r.top) await dropFile(store.carts, key);
+        else try { await removeAt(store, parts, false); } catch (e) { /* already gone */ }
         store.parts.delete(key);
         return null;
     }
@@ -361,7 +414,7 @@ async function applyOne(store, op) {
         const buf = store.parts.get(key);
         if (buf === undefined) return "no staged parts";
         store.parts.delete(key);
-        await writeText(store, parts, buf);
+        await put(buf);
         return null;
     }
     if (op.b !== undefined) {
@@ -369,7 +422,7 @@ async function applyOne(store, op) {
         if (typeof op.b !== "string") return "no bytes";
         const bytes = fromBase64(op.b);
         if (op.part === undefined || op.part === null) {
-            await writeText(store, parts, bytes);
+            await put(bytes);
             return null;
         }
         const had = op.part === 0 ? new Uint8Array(0) : (store.parts.get(key) || new Uint8Array(0));
@@ -381,7 +434,7 @@ async function applyOne(store, op) {
     }
     if (typeof op.t !== "string") return "no text";
     if (op.part === undefined || op.part === null) {
-        await writeText(store, parts, op.t);
+        await put(op.t);
         return null;
     }
     // Chunks accumulate in RAM and land in ONE write at `pub`, so a batch that
@@ -397,8 +450,24 @@ async function applyOne(store, op) {
 // writes into the VFS INSTEAD of the served carts.json.
 export async function readAll(store) {
     const out = {};
+    if (store.root.top) {
+        // A write a reload interrupted is finished or discarded first.
+        const have = await settleFiles(store.carts);
+        for (const name of store.root.top) {
+            if (!have.includes(name)) continue;
+            const fh = await store.carts.getFileHandle(name);
+            out[name] = asValue(name, new Uint8Array(await (await fh.getFile()).arrayBuffer()));
+        }
+        return out;
+    }
     await walk(store.carts, "", out, 0);
     return out;
+}
+
+// A file's bytes as the bundle value readAll hands out.
+function asValue(rel, bytes) {
+    if (isBinary(rel)) return { b: toBase64(bytes) };
+    try { return strict.decode(bytes); } catch (e) { return bytes; }
 }
 
 async function walk(dir, prefix, out, depth) {
@@ -416,13 +485,12 @@ async function walk(dir, prefix, out, depth) {
         // Top-level files are not cart files; the sweep never ships them and
         // the VFS must not be seeded with them either.
         if (rel.indexOf("/") < 0) continue;
-        const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
-        if (isBinary(rel)) { out[rel] = { b: toBase64(bytes) }; continue; }
-        try { out[rel] = strict.decode(bytes); } catch (e) { out[rel] = bytes; }
+        out[rel] = asValue(rel, new Uint8Array(await (await handle.getFile()).arrayBuffer()));
     }
 }
 
 export async function isEmpty(store) {
+    if (store.root.top) return !Object.keys(await readAll(store)).length;
     for await (const [name, handle] of store.carts.entries()) {
         if (handle.kind === "directory" && !skipLocal(name)) return false;
     }
@@ -446,7 +514,7 @@ export function missingSystemCarts(local, bundle) {
         if (have.has(top) || typeof bundle[rel] !== "string") continue;
         try {
             const m = JSON.parse(bundle[rel]);
-            if (m && m.system === true) system.add(top);
+            if (m && m.moybyte && m.moybyte.system === true) system.add(top);
         } catch (e) { /* not a manifest anything reads: not a cart to add */ }
     }
     const out = {};
@@ -458,10 +526,11 @@ export function missingSystemCarts(local, bundle) {
 export async function seed(store, carts) {
     let n = 0;
     for (const rel in carts) {
-        const parts = safeSegments(rel, skipLocal);
+        const parts = localParts(store.root, rel);
         const data = fileData(carts[rel]);
-        if (!parts || parts.length < 2 || data === null) continue;
-        await writeText(store, parts, data);
+        if (!parts || data === null) continue;
+        if (store.root.top) await commitFile(store.carts, rel, data);
+        else await writeText(store, parts, data);
         n++;
     }
     return n;
@@ -581,18 +650,79 @@ export async function readRecord(store) {
 }
 
 // ---------------------------------------------------------------------------
+// One file, old or new: the bytes go to "<key>~part", an empty "<key>~done"
+// then says they are whole, and only then do they replace "<key>" -- so a
+// reload at any moment finds the old copy or the new one, and `settleFiles`
+// finishes or discards what one left. A compiled cart's written files and the
+// console's own documents (system.json and its siblings) are kept this way.
+// ---------------------------------------------------------------------------
+
+const PART = "~part", DONE = "~done";
+
+async function rollFile(dir, key) {
+    const part = await dir.getFileHandle(key + PART);
+    await writeIn(dir, key, new Uint8Array(await (await part.getFile()).arrayBuffer()));
+    await dir.removeEntry(key + DONE);
+    await dir.removeEntry(key + PART);
+}
+
+async function hasFile(dir, name) {
+    try { await dir.getFileHandle(name); return true; } catch (e) { return false; }
+}
+
+// Make `key` in `dir` hold `data`. Throws, with a whole copy in place (the old
+// one, or a committed one the next settle rolls forward), when it could not.
+async function commitFile(dir, key, data) {
+    // A commit that failed in this session after its marker landed (a quota
+    // error mid-roll, not a reload) finishes first: dropping its marker now
+    // would leave "<key>" as torn as that roll left it.
+    if (await hasFile(dir, key + DONE)) {
+        if (await hasFile(dir, key + PART)) await rollFile(dir, key);
+        else await dir.removeEntry(key + DONE);
+    }
+    await writeIn(dir, key + PART, data);
+    await writeIn(dir, key + DONE, new Uint8Array(0));
+    await rollFile(dir, key);
+}
+
+// `key` gone, with any commit of it a reload left.
+async function dropFile(dir, key) {
+    for (const n of [key + DONE, key, key + PART]) {
+        try { await dir.removeEntry(n); } catch (e) { /* none */ }
+    }
+}
+
+// Finish every commit in `dir` whose marker landed, discard every other
+// "~part"/"~done", and return the names of the files left.
+async function settleFiles(dir) {
+    const names = [];
+    for await (const [name, h] of dir.entries()) if (h.kind === "file") names.push(name);
+    for (const n of names)
+        if (n.endsWith(DONE) && names.includes(n.slice(0, -DONE.length) + PART))
+            await rollFile(dir, n.slice(0, -DONE.length));
+    const left = [];
+    for await (const [name, h] of dir.entries()) if (h.kind === "file") left.push(name);
+    const out = [];
+    for (const n of left) {
+        if (n.endsWith(PART) || n.endsWith(DONE)) {
+            try { await dir.removeEntry(n); } catch (e) { /* gone */ }
+            continue;
+        }
+        out.push(n);
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // A compiled cart's written files (moy-spec SPEC.md 16.12), in OPFS beside the
 // carts: written/<cart>/<key>, runtime/cart_files.py's layout, so the VFS the
 // console reads and this store of record hold the same names. The console
 // writes the VFS and queues the file here (carts_link's WebCartKeep), and a
-// write lands with an install's crash-safety: the bytes go to "<key>~part",
-// an empty "<key>~done" then says they are whole, and only then do they
-// replace "<key>" -- so a reload at any moment finds the old copy or the new
-// one, and readWritten finishes or discards what one left.
+// write lands with `commitFile`'s crash-safety, so readWritten finds the old
+// copy or the new one.
 // ---------------------------------------------------------------------------
 
 export const WRITTEN_ROOT = "written";
-const PART = "~part", DONE = "~done";
 
 // The written store, or null with no OPFS (the console then keeps written
 // files in this tab alone, like every other edit there).
@@ -613,23 +743,13 @@ function writtenName(n) {
     return typeof n === "string" && !!n && n !== "." && n !== ".." && !/[\/\\\0]/.test(n);
 }
 
-async function rollWritten(dir, key) {
-    const part = await dir.getFileHandle(key + PART);
-    await writeIn(dir, key, new Uint8Array(await (await part.getFile()).arrayBuffer()));
-    await dir.removeEntry(key + DONE);
-    await dir.removeEntry(key + PART);
-}
-
 // Make one written file durable. Throws, with the old copy in place, when it
 // could not be.
 export async function commitWritten(w, cart, key, bytes) {
     if (!writtenName(cart) || !writtenName(key) || key.includes("~"))
         throw new Error("bad written file " + cart + "/" + key);
     const dir = await w.dir.getDirectoryHandle(cart, { create: true });
-    try { await dir.removeEntry(key + DONE); } catch (e) { /* none */ }
-    await writeIn(dir, key + PART, bytes);
-    await writeIn(dir, key + DONE, new Uint8Array(0));
-    await rollWritten(dir, key);
+    await commitFile(dir, key, bytes);
 }
 
 // One written file gone, or with `key` null every file the cart wrote.
@@ -653,18 +773,7 @@ export async function readWritten(w) {
     for await (const [name, h] of w.dir.entries()) if (h.kind === "directory") carts.push(name);
     for (const cart of carts) {
         const dir = await w.dir.getDirectoryHandle(cart);
-        const names = [];
-        for await (const [name, h] of dir.entries()) if (h.kind === "file") names.push(name);
-        for (const n of names)
-            if (n.endsWith(DONE) && names.includes(n.slice(0, -DONE.length) + PART))
-                await rollWritten(dir, n.slice(0, -DONE.length));
-        const left = [];
-        for await (const [name] of dir.entries()) left.push(name);
-        for (const n of left) {
-            if (n.endsWith(PART) || n.endsWith(DONE)) {
-                try { await dir.removeEntry(n); } catch (e) { /* gone */ }
-                continue;
-            }
+        for (const n of await settleFiles(dir)) {
             const fh = await dir.getFileHandle(n);
             out[cart + "/" + n] = new Uint8Array(await (await fh.getFile()).arrayBuffer());
         }
@@ -826,13 +935,80 @@ export function zipTopDir(entries) {
     return top;
 }
 
-// A cart folder base from a zip's top directory or its file name -- the same
-// character class moy_carts.slug() lands on, so an imported folder is one a
-// board's store would have created itself.
-export function cartBase(name) {
+// A cart folder base from a zip's top directory or its file name: the cart's
+// id, `<author>.<name>`, each part in the id's characters (lowercase a-z, 0-9
+// and _, as moy_carts.slug() lands on), so an imported folder is one a board's
+// store would have created itself. A name with no author part is the local
+// author's (moy_store_base.USER_NS).
+export function cartBase(name, author = "local") {
     let n = String(name || "cart").replace(/\.zip$/i, "").replace(/\.moy$/i, "");
-    n = n.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-    return n || "cart";
+    const part = (s) => s.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+    const dot = n.indexOf(".");
+    const who = dot < 0 ? author : part(n.slice(0, dot)) || author;
+    return part(who) + "." + (part(dot < 0 ? n : n.slice(dot + 1)) || "cart");
+}
+
+// A theme package in an archive's entries (`top` its folder, or null), or
+// null: {name, file}, the name its folder must have and its theme.json's
+// entry name. The loader takes a theme only from `<name>.moy` whose
+// theme.json says `name` (docs/theming_2026-09.md §3), so a theme lands under
+// its own name, never under the author-part base a cart takes. `name` is
+// theme.json's when it is the grammar's, else the folder's stem in it.
+export function themeOf(entries, top) {
+    const rel = (e) => top ? e.name.slice(top.length + 1) : e.name;
+    const text = (n) => {
+        const e = entries.find((x) => rel(x) === n);
+        if (!e) return null;
+        try { return JSON.parse(new TextDecoder().decode(e.data)); } catch (_) { return null; }
+    };
+    const man = text("manifest.json");
+    if (!man || !man.moybyte || man.moybyte.type !== "theme") return null;
+    const file = typeof man.main === "string" && man.main ? man.main : "theme.json";
+    const theme = text(file);
+    let name = theme && typeof theme.name === "string" ? theme.name : "";
+    const renamed = !themeName(name);
+    if (renamed) {
+        name = String(top || "").replace(/\.moy$/i, "").toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, "_").replace(/^[_-]+/, "").slice(0, THEME_NAME_MAX);
+        if (!themeName(name)) name = "theme";
+    }
+    return { name, file, renamed };
+}
+
+// A theme's name by the loader's grammar: 1 to 24 of a-z, 0-9, `_` and `-`,
+// a letter or a digit first.
+export const THEME_NAME_MAX = 24;
+export function themeName(s) {
+    return typeof s === "string" && /^[a-z0-9][a-z0-9_-]*$/.test(s)
+        && s.length <= THEME_NAME_MAX;
+}
+
+// A theme's folder: `<name>.moy`, else the store's next `_2` stem, cut so the
+// name stays the grammar's -- {dir, name}, the theme.json `name` it must say.
+export function uniqueThemeDir(exists, name) {
+    if (!exists(name + ".moy")) return { dir: name + ".moy", name };
+    for (let i = 2; ; i++) {
+        const tail = "_" + i;
+        const n = name.slice(0, THEME_NAME_MAX - tail.length) + tail;
+        if (!exists(n + ".moy")) return { dir: n + ".moy", name: n };
+    }
+}
+
+// The theme.json bytes a theme `themeOf` read lands with under `name`: as
+// they came when theme.json already says `name` (moy_carts.import_archive's
+// rule), else `renamedTheme`'s.
+export function landedTheme(bytes, theme, name) {
+    return name === theme.name && !theme.renamed ? bytes : renamedTheme(bytes, name);
+}
+
+// theme.json bytes with `name` set to `name`; the bytes as they were when
+// they are not a JSON object.
+export function renamedTheme(bytes, name) {
+    let d;
+    try { d = JSON.parse(new TextDecoder().decode(bytes)); } catch (_) { return bytes; }
+    if (!d || typeof d !== "object" || Array.isArray(d)) return bytes;
+    d.name = name;
+    return new TextEncoder().encode(JSON.stringify(d));
 }
 
 // moy_carts._unique_dir's rule, so an imported cart is named the way a

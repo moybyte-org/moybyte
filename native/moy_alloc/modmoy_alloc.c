@@ -102,8 +102,12 @@ static mp_obj_t moy_alloc_alloc(size_t n_args, const mp_obj_t *args) {
     if (buf == NULL) {
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_alloc: out of memory"));
     }
-    moy_buf_node_t *node = heap_caps_malloc(sizeof(moy_buf_node_t),
-                                            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    // The node is PSRAM like its buffer: a desk holds dozens, and in internal
+    // SRAM each one's 16 B came off the front of the largest free block.
+    moy_buf_node_t *node = heap_caps_malloc(sizeof(moy_buf_node_t), MALLOC_CAP_SPIRAM);
+    if (node == NULL) {
+        node = heap_caps_malloc(sizeof(moy_buf_node_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
     if (node == NULL) {
         heap_caps_free(buf);
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_alloc: out of memory"));
@@ -159,6 +163,23 @@ static mp_obj_t moy_alloc_free(mp_obj_t view_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_alloc_free_obj, moy_alloc_free);
 
+// The VM's teardown, after its sweep (native/moy_kernel/moy_kernel.c): every
+// view that named a registry buffer died with the heap, so every buffer still
+// live is unreachable and goes back now. A cover's bytes and its decode scratch
+// are what a soft reset used to strand, 46,456 B of PSRAM a cycle.
+void moy_alloc_vm_swept(void) {
+#if MOY_HAVE_HEAP_CAPS
+    while (moy_buf_live != NULL) {
+        moy_buf_node_t *node = moy_buf_live;
+        moy_buf_live = node->next;
+        heap_caps_free(node->ptr);
+        heap_caps_free(node);
+    }
+    moy_buf_count = 0;
+    moy_buf_bytes = 0;
+#endif
+}
+
 // stats() -> (live_buffers, live_bytes) for the MEMX diag line.
 static mp_obj_t moy_alloc_stats(void) {
 #if MOY_HAVE_HEAP_CAPS
@@ -173,12 +194,31 @@ static mp_obj_t moy_alloc_stats(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_alloc_stats_obj, moy_alloc_stats);
 
+// live() -> [(address, size), ...] of every alloc() buffer not yet freed,
+// newest first: what the memory census (device/mem_census.py) names by owner,
+// matching each to the view that holds it by uctypes.addressof.
+static mp_obj_t moy_alloc_live(void) {
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+#if MOY_HAVE_HEAP_CAPS
+    for (moy_buf_node_t *node = moy_buf_live; node != NULL; node = node->next) {
+        mp_obj_t t[2] = {
+            mp_obj_new_int_from_uint((uintptr_t)node->ptr),
+            mp_obj_new_int_from_uint(node->size),
+        };
+        mp_obj_list_append(out, mp_obj_new_tuple(2, t));
+    }
+#endif
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_alloc_live_obj, moy_alloc_live);
+
 static const mp_rom_map_elem_t moy_alloc_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),        MP_OBJ_NEW_QSTR(MP_QSTR_moy_alloc) },
     { MP_ROM_QSTR(MP_QSTR_malloc_dma),      MP_ROM_PTR(&moy_alloc_malloc_dma_obj) },
     { MP_ROM_QSTR(MP_QSTR_alloc),           MP_ROM_PTR(&moy_alloc_alloc_obj) },
     { MP_ROM_QSTR(MP_QSTR_free),            MP_ROM_PTR(&moy_alloc_free_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats),           MP_ROM_PTR(&moy_alloc_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_live),            MP_ROM_PTR(&moy_alloc_live_obj) },
     { MP_ROM_QSTR(MP_QSTR_MEMORY_DMA),      MP_ROM_INT(MALLOC_CAP_DMA) },
     { MP_ROM_QSTR(MP_QSTR_MEMORY_INTERNAL), MP_ROM_INT(MALLOC_CAP_INTERNAL) },
     // MEMORY_SPIRAM mirrors lcd_bus's constant so a mainline build (P4 #58, no

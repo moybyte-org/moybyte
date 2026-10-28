@@ -77,11 +77,10 @@ def test_the_warning_goes_to_stderr_not_the_console(capsys):
 
 def _build_gfx(**kw):
     """Ask for the real host gfx build, whatever the environment allows."""
-    from runtime import gfx_binding
-    return native_build.build("moyhost_gfx", gfx_binding._SHIM,
-                              gfx_binding._LIBMOY, str(ROOT / ".build" / "t"),
-                              cflags=gfx_binding._CFLAGS,
-                              libmoy_dir=gfx_binding._SRC_DIRS, **kw)
+    from runtime import gfx_binding, host_native
+    return native_build.build_parts("moyhost_gfx", [gfx_binding.PART],
+                                    str(ROOT / ".build" / "t"),
+                                    cflags=host_native.CFLAGS, **kw)
 
 
 def test_nothing_on_path_returns_None_and_explains(monkeypatch, capsys):

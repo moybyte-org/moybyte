@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
                                 "experiments", "audio_parity"))
 import audio_parity  # noqa: E402
 
-from unix_mp import require_unix_mp  # noqa: E402
+from unix_mp import build_flags, require_unix_mp  # noqa: E402
 
 
 requires_cc = pytest.mark.skipif(
@@ -120,3 +120,15 @@ def test_native_module_matches_libmoy_when_a_unix_build_exists(work):
             same = sum(1 for a, b in zip(ref, got) if a == b)
             bad.append("%s (%d/%d exact)" % (name, same, len(ref)))
     assert not bad, "native module diverges from libmoy: " + ", ".join(bad)
+
+
+def test_the_unix_build_compiles_multiply_adds_unfused():
+    """The bit-equality above holds only while both sides round alike. The
+    reference passes -ffp-contract=off; the unix port's -std=gnu99 means
+    -ffp-contract=fast, which fuses libmoy's multiply-adds wherever the
+    compiler's default target has FMA (the ubuntu-26.04 runner's gcc defaults
+    to x86-64-v3) and moves a few samples per scenario by one LSB. On a
+    compiler without FMA the parity check above cannot see the pin go, so this
+    holds it."""
+    for build, flags in build_flags().items():
+        assert "-ffp-contract=off" in flags, build

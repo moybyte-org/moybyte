@@ -18,7 +18,9 @@
 // JS replayer, the wire protocol and the per-surface delta are gone.
 //
 // Protocol -- main -> worker:
-//   {t:"init", search}   boot the console; `search` is location.search (tier + cart)
+//   {t:"init", search, coarse, channel, scheme}  boot the console; `search` is
+//                        location.search (tier + cart), `coarse` the page's
+//                        (pointer: coarse), `channel` its MOY_CHANNEL
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
 //   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
 //   {t:"state"}          the console's `state` (web_boot.state_json), for a harness
@@ -39,7 +41,9 @@
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
 //   {t:"frame", s, fb}   frame metadata + the RGB565 framebuffer, TRANSFERRED
-//   {t:"error", s}       fatal: the page shows it and stops
+//   {t:"error", s, msg}  fatal: the page shows it and stops. msg is the
+//                        thrown value's String() (an abort's reason, a
+//                        traceback), s that plus the stack's frames
 //   {t:"persist", mode, s}   where carts are being kept, in the page's words
 //   {t:"keep"}           site mode: ask the browser to make this origin
 //                        durable. Sent to the PAGE because storage.persist()
@@ -272,7 +276,9 @@ function say(s) { self.postMessage({ t: "status", s: s }); }
 // from the table's own signature strings (moy_web_natives): every verb the
 // cart calls is the C function every host calls (moycore's libmoy/moy_wasm.c),
 // with the same marshalling, blit, read and traps. This is moy-spec's web
-// player's adapter (runner/cart.js) on this worker's VM. The two modules have
+// player's adapter (runner/cart.js) on this worker's VM. A compiled app's
+// "moybyte.app" imports are the same adapters over the app ABI's rows
+// (moy_web_app_natives, native/moy_app/moy_app_wasm.h). The two modules have
 // separate memories, so a pointer the cart hands over is an offset into ITS
 // memory: where a row says '*~' -- a pointer and the length it covers -- the
 // range is bounds-checked against the cart's memory, copied into the VM's,
@@ -360,10 +366,11 @@ export function installCartEngine(M) {
             return 1;
         },
     };
-    // One import per row of the table, each an adapter over the row's C.
-    function adapters() {
+    // One import per row of a table (`natives`: the "moy" table's, or the app
+    // extension's "moybyte.app" rows), each an adapter over the row's C.
+    function adapters(natives) {
         const cp = C.malloc(4);
-        const base = C.natives(cp);
+        const base = natives(cp);
         const n = u32()[cp >> 2];
         C.free(cp);
         const out = {};
@@ -422,8 +429,11 @@ export function installCartEngine(M) {
                 // cart_engine_test.mjs pins it with a VM that grows on its
                 // first malloc.
                 const module = new WebAssembly.Module(bytes);
-                if (!imports) imports = adapters();
-                instance = new WebAssembly.Instance(module, { moy: imports });
+                if (!imports) {
+                    imports = { moy: adapters(C.natives) };
+                    if (C.appNatives) imports["moybyte.app"] = adapters(C.appNatives);
+                }
+                instance = new WebAssembly.Instance(module, imports);
             } catch (e) {
                 instance = null;
                 const msg = String((e && e.message) || e);
@@ -493,6 +503,11 @@ const RECORD_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + stor
 // site mode only, where a page keeps its own carts.
 const WRITTEN_VFS = CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/" + store.WRITTEN_ROOT;
 let writtenStore = null;
+// The storage every store opens through: the origin's, or the page's channel's
+// (moy_store.channelNav), set by init before anything is seeded.
+let opfsNav = navigator;
+// The roots initStore seeded, which web_boot builds its watchers over.
+let seededRoots = null;
 
 function writeStore(root, files) {
     // mkdirs(root) even for an empty set: a root with no files YET (a board's
@@ -527,7 +542,7 @@ function persist(m, s, d) {
 // which one this is has to be readable BEFORE a cart goes missing, not after.
 function siteSaid() {
     const base = sitePartial ? "carts saved here (some kinds could not)"
-                             : "carts & drawings saved in this browser";
+                             : "carts, drawings & settings saved in this browser";
     if (keep && keep.state === "granted") return base;
     return base + " -- the browser may clear them if space runs short";
 }
@@ -566,7 +581,7 @@ async function seedRoot(root, data, site) {
         writeStore(root.vfs, data);
         return "board";
     }
-    const s = await store.openStore(navigator, root.id);
+    const s = await store.openStore(opfsNav, root.id);
     opfsStores[root.id] = s;
     if (!s) {                                // no OPFS for this root: in memory
         writeStore(root.vfs, data);
@@ -629,13 +644,17 @@ async function initStore(fetched) {
     keep = site ? await store.requestPersistence(navigator) : null;
     if (keep && keep.state !== "granted") self.postMessage({ t: "keep" });
     let anySite = false, anyNone = false, loaded = false;
+    seededRoots = [];
     for (const root of store.ROOTS) {
         const data = fetched[root.id];
-        // A sibling root the host does not serve (files.json 404 -> null): in
-        // BOARD mode skip it (no watcher, no empty dir, exactly today's
-        // capability rule); in SITE mode still give it an empty OPFS store, so a
+        // A sibling root the host does not serve (files.json or console.json
+        // 404 -> null): in BOARD mode skip it (no watcher, no empty dir: the
+        // capability rule, which for the console's own documents is what keeps
+        // a board flashed before their root from being sent a batch it
+        // refuses); in SITE mode still give it an empty OPFS store, so a
         // drawing the kid makes locally has somewhere to persist.
         if (!site && data == null && root.id !== "carts") continue;
+        seededRoots.push(root.id);
         const w = await seedRoot(root, data, site);
         if (w === "seed" || w === "load") anySite = true;
         if (w === "load") loaded = true;
@@ -663,7 +682,7 @@ async function initStore(fetched) {
 // The written files OPFS keeps, into the VFS before the console boots, with
 // every write a reload interrupted finished or discarded first.
 async function seedWritten() {
-    writtenStore = await store.openWritten(navigator);
+    writtenStore = await store.openWritten(opfsNav);
     if (!writtenStore) return;
     try {
         const files = await store.readWritten(writtenStore);
@@ -731,13 +750,24 @@ function walkVfs(path, prefix, out, depth) {
 
 // Unzip into the store under a collision-safe name, then re-scan the shelf
 // WITHOUT rebasing the watcher: the imported files must stay pending so the
-// very next sweep writes them to the local store like any other commit.
+// very next sweep writes them to the local store like any other commit. A
+// theme package lands under its own name (`store.themeOf`), its theme.json
+// byte for byte; a taken one under the next `_2` stem, its theme.json's
+// `name` rewritten to match.
 async function importZip(name, buf) {
     const entries = await store.unzip(new Uint8Array(buf));
     if (!entries.length) throw new Error("no files in that zip");
     const top = store.zipTopDir(entries);
-    const dir = store.uniqueCartDir((n) => vfsExists(CARTS_ROOT + "/" + n),
-                                    store.cartBase(top || name));
+    const exists = (n) => vfsExists(CARTS_ROOT + "/" + n);
+    const theme = store.themeOf(entries, top);
+    let dir, rename = null;
+    if (theme) {
+        const t = store.uniqueThemeDir(exists, theme.name);
+        dir = t.dir;
+        rename = t.name;
+    } else {
+        dir = store.uniqueCartDir(exists, store.cartBase(top || name));
+    }
     let n = 0;
     for (const e of entries) {
         const rel = top ? e.name.slice(top.length + 1) : e.name;
@@ -746,7 +776,8 @@ async function importZip(name, buf) {
         if (!parts) continue;                 // traversal, or a skip-listed name
         const full = CARTS_ROOT + "/" + parts.join("/");
         mkdirs(full.slice(0, full.lastIndexOf("/")));
-        mp.FS.writeFile(full, e.data);
+        mp.FS.writeFile(full, rel === (theme && theme.file)
+            ? store.landedTheme(e.data, theme, rename) : e.data);
         n++;
     }
     if (!n) throw new Error("nothing in that zip looked like a cart");
@@ -821,7 +852,19 @@ let pin = null;
 const withPin = (url) => (pin ? url + (url.indexOf("?") >= 0 ? "&" : "?")
                               + "pin=" + encodeURIComponent(pin) : url);
 
-async function init(search) {
+// A fatal error as {t:"error"}. V8's e.stack leads with String(e), JSC's
+// (Safari's) and SpiderMonkey's hold the frames alone -- so on an iPhone the
+// stack without the message is an abort with no reason. The message goes first
+// by hand when the stack does not already carry it.
+function crashMessage(e) {
+    const msg = String(e);
+    const stack = (e && typeof e.stack === "string") ? e.stack : "";
+    return { t: "error", msg,
+             s: !stack ? msg : stack.startsWith(msg) ? stack : msg + "\n" + stack };
+}
+
+async function init(search, coarse, channel, scheme) {
+    opfsNav = store.channelNav(navigator, channel);
     const qs = new URLSearchParams(search || "");
     // Read BEFORE the first fetch, not after: since 2026-08-25 the board's read
     // half is gated too, so carts.json is the first request that needs it.
@@ -843,18 +886,22 @@ async function init(search) {
     //
     // Every body is READ as soon as its head arrives, carts.json's included. A
     // board serves one connection at a time and cuts off a client that stops
-    // reading for its send budget (moy_webserver.WEB_SEND_TIMEOUT). A body
+    // reading for its send budget (native/moy_net, MOY_HTTP_SEND_MS). A body
     // left unread until the other answers are in -- and they queue behind it
     // -- stops draining once the browser's buffer is full, and the board cuts
     // it off: a board with more carts than that serves a console that cannot
     // boot. tests/test_web_store_e2e.py boots one over a board-shaped link.
-    const [mods, cartsRes, files, shelves] = await Promise.all([
+    const [mods, cartsRes, files, shelves, system] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
         fetch(withPin("carts.json")).then(async (r) => (
             { status: r.status, json: r.status === 403 ? null : await r.json() })),
         fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
             .catch(() => null),
-        fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null)]);
+        fetch("indexes.json").then((r) => r.ok ? r.json() : null).catch(() => null),
+        // The console's own documents, where the serving board keeps them
+        // (its portable Settings and its badges); firmware before them 404s.
+        fetch(withPin("console.json")).then((r) => r.ok ? r.json() : null)
+            .catch(() => null)]);
     if (cartsRes.status === 403) {
         // A PINNED BOARD, and this page cannot read it. Stop the boot here --
         // there is nothing to boot, and seeding the VFS from an error body
@@ -872,7 +919,7 @@ async function init(search) {
         for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
-    await initStore({ carts: carts, files: files });
+    await initStore({ carts: carts, files: files, system: system });
     if (mode !== "board" && shelves && Array.isArray(shelves.indexes)) {
         mp.FS.writeFile(CARTS_ROOT.slice(0, CARTS_ROOT.lastIndexOf("/")) + "/indexes.json",
                         JSON.stringify({ indexes: shelves.indexes }));
@@ -895,9 +942,14 @@ async function init(search) {
     let dw = 1024, dh = 600;
     const szm = /^(\d+)x(\d+)$/.exec(qs.get("size") || "");
     if (szm) { dw = +szm[1]; dh = +szm[2]; }
-    const bootArgs = desktop
+    const bootArgs = (desktop
         ? ", None, " + dw + ", " + dh + ", True"
-        : (cart ? ", cart=" + JSON.stringify(cart) : "");
+        : (cart ? ", cart=" + JSON.stringify(cart) : ""))
+        + (coarse ? ", coarse=True" : "")
+        // The page's colour scheme (page_tail.js: ?scheme= or prefers-color-scheme):
+        // the theme variant of a first run. Anything else leaves the default.
+        + (scheme === "dark" || scheme === "light"
+            ? ", scheme=" + JSON.stringify(scheme) : "");
     // #9: does whoever served this page have PINS? ONE probe, here, before the
     // console exists -- so `pin_write`/`pin_read` are decided once and a cart
     // either has the names or has never heard of them. An empty batch is the
@@ -911,13 +963,20 @@ async function init(search) {
         // sweeps the journal, and boot() is where that watcher is built.
         // `mode || ""` and not `mode`: JSON.stringify(null) is the token `null`,
         // which is a NameError in the Python this string becomes.
-        + "web_boot.store_mode(" + JSON.stringify(mode || "") + ")\n"
+        + "web_boot.store_mode(" + JSON.stringify(mode || "") + ", "
+        + JSON.stringify(seededRoots || []) + ")\n"
         + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
         + "web_boot.boot('/moy/carts'" + bootArgs + ")\n"
         // AFTER boot(), unlike gpio_enable: this one hangs the updater on the
         // live Workstation, which boot() is what creates.
         + (updateDoc ? "web_boot.update_enable("
             + JSON.stringify(JSON.stringify(updateDoc)) + ")\n" : "")
+        // START OPTION: ?edit=<cart>[&tab=code|paint|map|...] opens that cart in
+        // the Editor (the p8 drop's edit_cart: ws.open_in_editor and a tab, with
+        // no badge), where a plain visit lands on the home. The cart is whatever the
+        // store holds, edited or seeded; an unknown name leaves the home.
+        + (qs.get("edit") ? "web_boot.start_edit(" + JSON.stringify(qs.get("edit"))
+            + (qs.get("tab") ? ", " + JSON.stringify(qs.get("tab")) : "") + ")\n" : "")
         + (desktop && cart ? "web_boot.open_cart(" + JSON.stringify(cart) + ")\n" : "")
         // Single-cart bundle: kiosk mode -- the exit gesture restarts the game
         // instead of dropping into the shell (the game IS the page).
@@ -1532,7 +1591,7 @@ function loop() {
         updatePump();
         cartsPump();
     } catch (e) {
-        self.postMessage({ t: "error", s: String((e && e.message) || e) });
+        self.postMessage(crashMessage(e));
         running = false;
         return;
     }
@@ -1543,7 +1602,7 @@ self.onmessage = async (ev) => {
     const m = ev.data;
     try {
         if (m.t === "init") {
-            await init(m.search);
+            await init(m.search, !!m.coarse, m.channel || "", m.scheme);
         } else if (m.t === "input") {
             inbox.push(m.json);
         } else if (m.t === "ahead") {
@@ -1657,6 +1716,6 @@ self.onmessage = async (ev) => {
             }
         }
     } catch (e) {
-        self.postMessage({ t: "error", s: String((e && e.stack) || e) });
+        self.postMessage(crashMessage(e));
     }
 };

@@ -9,14 +9,27 @@
 #define MICROPY_HW_MCU_NAME "ESP32P4"
 #endif
 
-// ON since 2026-08-24 (the espnow-on-p4 track, docs/espnow_p4_2026-08.md):
-// the esp_now_* symbols modespnow.c needs come from native/moy_c6 -- thin
-// wrappers over ESP-Hosted's custom RPC to the C6, where the real radio is.
-// Against a slave with no shim, esp_now_init() times out and raises: the
-// module exists, the radio politely does not.
-#define MICROPY_PY_ESPNOW                (1)
+// The radio link is the kernel's (native/moy_net/moy_link.c, moy_net.Link):
+// it holds esp_now's one receive callback, so the port's espnow module is out
+// of the image and Python cannot take the callback from it. The esp_now_*
+// symbols it calls come from native/p4/moy_c6 -- thin wrappers over
+// ESP-Hosted's custom RPC to the C6, where the real radio is. Against a slave
+// with no shim, esp_now_init() times out and the link reports it down.
+#define MICROPY_PY_ESPNOW                (0)
+#define MOY_NET_LINK                     (1)
+// The WiFi driver is the kernel's too (native/moy_net/moy_wifi.c): the station
+// starts and stops as the spine's lease asks, and Python never constructs the
+// port's network.WLAN on this board.
+#define MOY_NET_WIFI                     (1)
 
 #define MICROPY_HW_ENABLE_SDCARD            (1)
+
+// exFAT in FatFS (lib/oofatfs, whose ffconf.h reads this define; ESP32 ports
+// leave it off). A card over 32 GB ships exFAT, and without it a read-only
+// vfs.mount of one fails with ENODEV: the TF slot is the console's cart store
+// when a card is in it (device/card_store.py), and a big card is the common one.
+// FAT12/16/32 cards mount as before. LFN is already on, which exFAT needs.
+#define MICROPY_FATFS_EXFAT                 (1)
 
 #ifndef USB_SERIAL_JTAG_PACKET_SZ_BYTES
 #define USB_SERIAL_JTAG_PACKET_SZ_BYTES (64)
@@ -75,3 +88,50 @@
 // second a load that fails). 320 KB holds it with 63 KB to spare and keeps
 // holding it as the text shrinks.
 #define MOY_WASM_POOL_BYTES                 (320 * 1024)
+
+// The kernel's recovery floor (native/moy_kernel): moy_dsi's entry points, the
+// 1024x600 DPI framebuffer, and the BOOT button (GPIO35, active low) as its one
+// button.
+#define MOY_KERNEL_PANEL(fn)                moy_dsi_k##fn
+#define MOY_KERNEL_PANEL_W                  (1024)
+#define MOY_KERNEL_PANEL_H                  (600)
+#define MOY_KERNEL_PANEL_ROT                (0)
+#define MOY_KERNEL_PANEL_SWAP               (0)
+#define MOY_KERNEL_BUTTON_GPIO              (35)
+#define MOY_KERNEL_BUTTON_NAME              "BOOT"
+
+// The kernel's I2C bus (native/moy_kernel/moy_bus.h): I2C0, the GT911 touch
+// and the ES8311/ES7210 codecs.
+#define MOY_BUS_I2C_PORT                    (0)
+#define MOY_BUS_I2C_SDA                     (7)
+#define MOY_BUS_I2C_SCL                     (8)
+#define MOY_BUS_I2C_HZ                      (400000)
+
+// The speaker (native/moy_audio/moy_aud_out.c, #82): the ES8311 codec on the
+// bus above, clocked from MCLK, and its power amplifier's enable.
+#define MOY_AUDIO_CODEC_ES8311              (1)
+#define MOY_AUDIO_I2S_MCLK                  (13)
+#define MOY_AUDIO_I2S_BCK                   (12)
+#define MOY_AUDIO_I2S_WS                    (10)
+#define MOY_AUDIO_I2S_DOUT                  (9)
+#define MOY_AUDIO_PA_GPIO                   (53)
+
+// Input's BLE HID keyboard (native/moy_input/moy_ble_task.c): the kernel's
+// central over NimBLE, its bonds in NVS. There is no `bluetooth` module.
+#define MOY_INPUT_BLE                       (1)
+#define MOY_INPUT_BLE_HOSTED                (1)     // the C6 over ESP-Hosted
+
+// Input's touch (native/moy_input/moy_input_task.c): the GT911 at 0x5D,
+// self-configured for the 1024x600 panel (INT and RST not wired), its status
+// cleared before the point is read; the panel is mounted 180 degrees.
+#define MOY_INPUT_TOUCH_KIND                (1)     // MOY_TOUCH_GT911
+#define MOY_INPUT_TOUCH_ADDR                (0x5D)
+#define MOY_INPUT_TOUCH_CLEAR_FIRST         (1)
+#define MOY_INPUT_TOUCH_SWAP                (0)
+#define MOY_INPUT_TOUCH_FLIP_X              (1)
+#define MOY_INPUT_TOUCH_FLIP_Y              (1)
+
+// The glass's layer pool (native/moy_glass/moy_buf.h): the most bytes of
+// released layer buffers it keeps for the next run. A window's buffer is
+// never pooled (the desk re-mints at every size); a cart's worlds are.
+#define MOY_GLASS_POOL_BYTES                (2 * 1024 * 1024)

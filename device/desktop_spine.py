@@ -4,8 +4,9 @@ Four boards boot the same console, and the ORDER they boot it in is the
 payload -- the boot splash before the store, the store before the Workstation,
 the service wiring in `wire_workstation_core`'s one order, the windowed WM
 after the boot loads, the OTA verdict before anything can overwrite it, the
-frame loop last. `build_desktop` is that order written once; `Desktop.run` is
-the frame loop constructed once. What a board supplies is its HARDWARE, as
+kernel's frame loop last. `build_desktop` is that order written once;
+`Desktop.run` hands the console to the kernel's loop
+(native/moy_kernel/moy_loop.c) and returns. What a board supplies is its HARDWARE, as
 arguments and hooks:
 
   name / link_id       the serial prefix on every line, the ESP-NOW board id
@@ -22,6 +23,9 @@ arguments and hooks:
                        the touch-only boards, the C3 matrix on the T-Deck. It
                        is started after the WM if it can be
   ble_keyboard         an OPTIONAL SECOND keyboard beside a physical one
+  input_kinds          the board's inputs as the hints know them: pairs of an
+                       input source's name and its kind, the first in use at
+                       boot (Workstation.use_inputs); None declares none
   seed_carts           the packed seed roster
   game_wh              the GAME canvas size, or None when the system canvas
                        IS the game canvas (the 320x240 tier)
@@ -32,100 +36,197 @@ arguments and hooks:
                        where the store shares a bus with the panel
   before_slim          board glue between the store hookup and the cart diet
   after_services       board glue once every shared service is wired
-  make_audio           the audio backend factory, where the board has one
   wm                   the presentation tier to install over the fullscreen
                        stack, where the glass has room for windows
   c6_updater           the companion radio's updater class, where there is one
   extras / serial      the dev channel's board-only commands, and whether the
                        channel is built at all
-  overlap / perf_emit  the PERF sampler's compositor counters and its sink
   log(tag, msg)        the boot's line sink; None prints with the board's name
 
-Every hook the loop runs each frame -- poll_inputs / present / tail /
-account / frame_error -- has a default here for the touch-only tier, and a
-board with more hardware passes its own closures to `run()`, reading what it
-needs off the returned `Desktop`.
+The frame's stages are the kernel's C; what a board passes to `run()` is
+which input hardware its stage reads (the T-Deck's trackball, its input task
+kicked at the frame's tail) and a per-frame Python hook of its own.
 """
 
-from console import Pointer, Workstation, wire_workstation_core
-from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
-                         OtaHealth, PerfSampler, apply_touch, poll_link,
-                         poll_webhost)
+from console import Workstation, wire_workstation_core
+from device_boot import DeviceBoot, report_update
+from chrome import _cursor_delta
+from idle_ladder import IdleLadder
 from device_api import make_api
-from device_canvas import DeviceCanvas, _LayerComp
-from device_wifi import autoconnect_wifi, make_wifi
+from device_canvas import DeviceCanvas, _LayerComp, _owner_h
+import moy_input
+import wire_input
+import wire_links
+from mem_census import mark as _census
 
 
 class Desktop:
-    """What `build_desktop` assembled. The board's frame hooks read it, and
-    `run()` is the shared frame loop over them."""
+    """What `build_desktop` assembled, and `run()`, which hands it to the
+    kernel's frame loop (native/moy_kernel/moy_loop.c)."""
 
     def __init__(self, name):
         self.name = name
-        self.loop = None          # the FrameLoop, set by run() before its first frame
-        self._click_active = [False, False]   # poll_inputs' answer, reused
 
-    # -- the touch-only tier's frame hooks --------------------------------
+    def run(self, ball=None, kick_at_tail=False, after_frame=None):
+        """Hand the console to the kernel's loop and return this Desktop: the loop's stages
+        are bound (the input stage over this console's pointer and drivers,
+        the glass over its compositor), and the three console upcalls, the
+        console's dev words and the services' Python half are registered as
+        root pointers. The VM service runs the loop once main.py returns, as
+        this task's outermost frame (docs/kernel_survival_2026-10.md 7.1).
 
-    def poll_inputs(self, now):
-        """The keyboard's async reports (before begin_frame, so InputState gets
-        clean edges), the merge, then the touch into the pointer. Returns
-        (click, active) for the loop's idle blank."""
-        keyboard = self.keyboard
-        if keyboard is not None:
-            try:
-                keyboard.poll()
-            except Exception as exc:  # noqa: BLE001 -- a keyboard must fail touch-only
-                print("%s keyboard poll failed:" % self.name, exc)
-        inp = self.inp
-        inp.begin_frame()
-        touched, click = apply_touch(self.touch, self.pointer)
-        out = self._click_active
-        out[0] = click
-        out[1] = touched or bool(inp._held) or bool(inp.last_key)
-        return out
-
-    def present(self):
-        """Re-point both canvases at the compositor's new BACK buffer."""
-        game = self.game
-        if game is not self.sys_canvas:
-            game.sync_back()       # off-screen: contract no-op
-        self.sys_canvas.sync_back()
-
-    def tail(self, now):
-        """The per-frame services, at the frame TAIL: the web console, then
-        the radio. Returns the webhost's elapsed ms."""
+        What each upcall carries beyond the console's own entry is the Python
+        half of a stage the kernel cannot do for a VM object: the canvases
+        re-pointed at the compositor's new back buffer (handle_input, after
+        the kernel's present_pending), the trackball's pulses and click spent
+        on a surface's keys, a caret or the cursor (handle_input, the
+        T-Deck, `Workstation.ball`), the boot's first-frame
+        report and the console's PERF half (frame). `after_frame(drew)` is a
+        board's per-frame Python inside the frame upcall (the T-Deck's offline
+        diag), never an upcall of its own."""
+        import moy_glass
+        import moy_loop
         ws = self.ws
-        web = poll_webhost(ws)
-        poll_link(ws)
-        return web
+        boot = self.boot
+        game = self.game
+        sys_canvas = self.sys_canvas
+        pointer = self.pointer
+        nav = moy_input.nav if ball is not None else None
+        ble = self.keyboard if self.keyboard is not None and hasattr(
+            self.keyboard, "apply_mouse") else getattr(ws, "ble_keyboard", None)
+        moy_input.loop_bind(pointer, touch=self.touch, ble=ble, ball=ball,
+                            kick_at_tail=kick_at_tail)
+        moy_glass.loop_bind(self.comp)
+        if hasattr(moy_glass, "front"):
+            ws.front_bind = _front_binder(ws, self.comp, game, sys_canvas, moy_glass,
+                                          moy_loop)
+        cursor = _cursor_delta
 
-    def frame_error(self, exc):
-        print("%s frame error:" % self.name, exc)
-        try:
-            import sys
-            sys.print_exception(exc)
-        except Exception:  # noqa: BLE001
-            pass
-        import gc
-        gc.collect()
+        def handle_input():
+            if game is not sys_canvas:
+                game.sync_back()        # off-screen: contract no-op
+            sys_canvas.sync_back()
+            if nav is not None:
+                n = nav()
+                if n or ws.ball_owed:
+                    dx = (n >> 12 & 4095) - 2048 if n else 0
+                    dy = (n & 4095) - 2048 if n else 0
+                    if not ws.ball(dx, dy, n >> 24) & 1 and (dx or dy):
+                        pointer.move(cursor(dx), cursor(dy))
+            ws.handle_input()
 
-    def run(self, poll_inputs=None, present=None, tail=None, account=None,
-            frame_error=None):
-        """The shared frame loop over this desktop, until Ctrl-C or `quit`."""
-        loop = FrameLoop(self.ws, self.pump, self.pointer,
-                         poll_inputs or self.poll_inputs,
-                         idle=self.idle, serial=self.serial,
-                         present=present or self.present,
-                         tail=tail or self.tail,
-                         account=account or self.perf.account,
-                         frame_error=frame_error or self.frame_error,
-                         set_backlight=self.set_backlight, lit=self.boot.lit)
-        self.loop = loop
-        if loop.run() == "quit":
-            print("%s desktop: serial quit -> REPL" % self.name)
-            return "quit"
-        return None
+        drawn = [0]
+        rung = [0]
+        idle_state = moy_loop.idle_state
+
+        def frame(dt):
+            st = idle_state()
+            if st != rung[0]:
+                rung[0] = st
+                ws.saver_state(st == moy_loop.SAVER)
+            ws.frame(dt)
+            n = ws._frames_drawn
+            if not boot.done:
+                boot.first_frame(ws)
+            if ws.perf_capture and moy_loop.perf_due():
+                ws.perf_push(moy_loop)
+            if after_frame is not None:
+                after_frame(n != drawn[0])
+            drawn[0] = n
+            return n
+
+        serial = self.serial
+        words = None
+        if serial is not None:
+            def words(line):
+                return serial.word(ws, line)
+
+        if serial is not None:
+            # `pump.last` in the `py` scope: the clock at the top of the frame a
+            # word runs in, which tools/p4_perf.py times the drawn-frame
+            # counter against (the kernel's loop keeps it now).
+            serial.env["pump"] = _FrameClock(moy_loop)
+        service = make_service(ws, moy_loop)
+        moy_loop.register(handle_input, ws.handle_pointer, frame, words, service)
+        moy_loop.fps(self.fps_cap)
+        moy_loop.lit(boot.lit)
+        moy_loop.capture(ws.perf_capture)
+        # The idle ladder's rungs: the system store's, the board's blank rung
+        # the default (Settings rows over the kernel's ladder, idle_ladder.py).
+        ws.idle_ladder = IdleLadder(ws, moy_loop, (self.power_save_ms or 0) // 1000)
+        upd = getattr(ws, "updater", None)
+        moy_loop.health(upd is not None and not getattr(upd, "confirmed", True))
+        return self
+
+
+def _front_binder(ws, comp, game, sys_canvas, glass, loop):
+    """`ws.front_bind`: give the kernel's Player this compositor as the ends
+    of a run in the loop's foreground (moy_glass.front), answering whether it
+    took. A banded board whose game canvas IS the panel presents it as is; a
+    DSI board scales the game canvas into console mode's rect, which the
+    desk world (a window's run) and a cart-declared view leave to the
+    console. A bind that took pushes the console's half of the PERF line
+    once for the run: the console's frame does not run while it is in front."""
+    def bind():
+        if game is sys_canvas:
+            took = glass.front(comp)
+        else:
+            vp = getattr(ws.wm, "play_viewport", None)
+            g = vp() if vp is not None else None
+            if g is None:
+                return False
+            r = getattr(ws, "render_scale", 1)
+            ox, oy, scale = g[0] * r, g[1] * r, g[2] * r
+            smooth = bool(getattr(type(sys_canvas), "_smooth", True))
+            took = glass.front(comp, (game._buf, game.w, game.h, ox, oy, scale, smooth))
+        if took:
+            ws.perf_push(loop, front=True)
+        return took
+    return bind
+
+
+class _FrameClock:
+    """`pump.last` and `pump.drawn` for the tools: the kernel loop's
+    frame-top clock, and its drawn frames -- the console's and a kernel run's
+    in front, the count PERF's `fps=` is taken from."""
+
+    def __init__(self, loop):
+        self._loop = loop
+
+    @property
+    def last(self):
+        return self._loop.frame_at()
+
+    @property
+    def drawn(self):
+        return self._loop.drawn()
+
+
+def make_service(ws, loop):
+    """The services' Python half, one upcall a frame while any is live (the
+    kernel's MOY_SVC_* bits): the webhost's routes while it joins, serves or
+    says goodbye, and the OTA confirm's pending marker, once. Answers the bits it still wants."""
+    def service(bits):
+        keep = 0
+        if bits & SVC_WEB:
+            wh = getattr(ws, "webhost", None)
+            if wh is not None:
+                try:
+                    wh.poll()
+                except Exception as exc:  # noqa: BLE001 -- never break a frame
+                    print("WEB ERR %s: %s" % (type(exc).__name__, exc))
+        if bits & SVC_HEALTHY:
+            upd = getattr(ws, "updater", None)
+            if upd is not None:
+                try:
+                    upd.confirmed_by_kernel()
+                except Exception as exc:  # noqa: BLE001
+                    print("Moybyte OTA: confirm failed: %s" % (exc,))
+        return keep
+    return service
+
+
+SVC_WEB, SVC_UPDATE, SVC_HEALTHY = 1, 4, 8
 
 
 def bt_command(keyboard, comp=None):
@@ -144,7 +245,7 @@ def bt_command(keyboard, comp=None):
             print("REMOTE bt status state=%s name=%s passkey=%s "
                   "protocol=%s interval_ms=%s notify=%s fast=%s%s error=%s"
                   % (st[0], st[1], st[2], keyboard.protocol,
-                     keyboard._conn_interval_ms, keyboard._notify_count,
+                     keyboard.conn_interval_ms, keyboard.notify_count,
                      keyboard.fast_status(),
                      "" if underruns is None
                      else " dsi_underruns=%s" % underruns(),
@@ -157,30 +258,57 @@ def bt_command(keyboard, comp=None):
     return _bt_cmd
 
 
+def _kernel():
+    """The kernel's binding (native/moy_kernel), or None off a board."""
+    try:
+        import moy_kernel
+    except ImportError:
+        return None
+    return moy_kernel
+
+
+def _stamp(kernel, part):
+    """One of the console's parts of the start, stamped by the kernel
+    (moy_kernel.h's MOY_STAMP_*); nothing on an image without the stamps."""
+    stamp = getattr(kernel, "stamp", None)
+    if stamp is not None:
+        stamp(part)
+
+
 def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
                   keyboard, seed_carts, power_save_ms,
                   game_wh=None, font_scale=1, panel_diagonal_in=None,
                   store_root=None, ota_dir=None, load_carts=None, with_sd=None,
-                  before_slim=None, after_services=None, make_audio=None,
+                  before_slim=None, after_services=None,
                   ble_keyboard=None, wm=None, c6_updater=None, extras=None,
-                  serial=True, overlap=None, perf_emit=print, log=None,
-                  fps_cap=60):
+                  serial=True, log=None, fps_cap=60, input_kinds=None):
     """Boot the shared console on a board (the module docstring is the
     contract). Returns the Desktop; the caller's `run()` is the loop."""
     board_log = log
     if log is None:
         def log(tag, msg):
             print("%s %s: %s" % (name, tag, msg))
+    _census("spine")
+    kernel = _kernel()
+    _stamp(kernel, 2)               # MOY_STAMP_IMPORTS: the console's build begins
     d = Desktop(name)
     gfx = comp.gfx()
     import moy_carts
+    import moy_catalogue
 
     # DeviceBoot owns the boot splash + its progress bar, the cart seed/scan,
     # the Lua runtime probe and the "first frame in Nms" report. The panel
     # stays dark until a frame has composed (#45), so the splash is what
     # makes a slow boot legible on the glass and on the wire.
     boot = DeviceBoot(sys_canvas, comp, set_backlight, name)
-    idle = IdleBlank(set_backlight, power_save_ms)
+    # A RETURN start (docs/kernel_cartpath_2026-10.md 5.4): the VM is back
+    # after the kernel stopped it for a run. No splash and no OTA verdict; the
+    # launcher lands where the resume record left it.
+    returning = kernel is not None and getattr(kernel, "start", None) is not None \
+        and kernel.start() == "return"
+    if returning:
+        boot.quiet = True
+        boot.lit = True
     boot.note("starting")
     if game_wh is None:
         game = sys_canvas
@@ -188,136 +316,92 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         # The fixed GAME canvas (#39): off-screen RGB565 over the same native
         # kernel; the WM composites it onto the system canvas.
         game = DeviceCanvas(_LayerComp(game_wh[0], game_wh[1], gfx))
-    touch = inputs()
-    pointer = Pointer(sys_canvas.w, sys_canvas.h)
-    inp.pointer = pointer          # touch-driven carts read it via the api touch()
+    _census("splash")
+    touch, pointer = wire_input.wire_pointer(inp, inputs, sys_canvas.w,
+                                             sys_canvas.h)
+    _census("inputs")
 
     boot.note("loading cartridges")
     if load_carts is None:
-        carts, carts_root = boot.load_carts(moy_carts, seed_carts,
+        carts, carts_root = boot.load_carts(moy_catalogue, seed_carts,
                                             root=store_root, media="flash")
         update_dir = ota_dir
     else:
-        carts, carts_root, update_dir = load_carts(boot, moy_carts)
+        carts, carts_root, update_dir = load_carts(boot, moy_catalogue)
 
+    _census("store")
     boot.note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=font_scale,
                      panel_diagonal_in=panel_diagonal_in)
-    # The chrome strip a quiet frame rotates beside the game rect on a
-    # rotated compositor: the TALLEST bar the layout can draw.
-    if getattr(comp, "rotated", False):
-        comp.strip_h = max(ws.layout.status_h, ws.bar_layer._bar_h("desktop"))
+    ws.use_inputs(input_kinds)
+    _census("workstation")
+    _stamp(kernel, 3)               # MOY_STAMP_WS
+    # The bar strips a rotated compositor presents as rects of their own,
+    # republished on every relayout.
+    ws.bar_layer.publish_strips(sys_canvas)
 
-    def _mk_game_canvas(w, h):
+    def _mk_game_canvas(w, h, owner=None):
         # Per-run cart canvas (SPEC.md 1/3.1): a cart declaring a smaller
-        # raster plays on its own off-screen canvas, which blit_game upscales.
+        # raster plays on its own off-screen canvas, which blit_game upscales;
+        # its pixels are on loan to `owner`, the run, and go back with it.
         # No native kernel -> None, so the Player refuses the cart cleanly
         # instead of crawling per-pixel.
         if gfx is None:
             return None
-        return DeviceCanvas(_LayerComp(int(w), int(h), gfx))
+        own = 0 if owner is None else _owner_h(owner)
+        return DeviceCanvas(_LayerComp(int(w), int(h), gfx, own))
 
     ws.make_game_canvas = _mk_game_canvas
     # The runtime probe's lines go to the boot's own sink unless the board has
     # a ring to route them through.
     rt_log = None if board_log is None else (lambda m: log("carts", m))
     runtimes = boot.runtimes(ws, log=rt_log)
+    _census("runtimes")
     # The shared service wiring: api/audio/runtimes + store/root/can_manage + WiFi
     # + the #66 slim_carts diet + pointer/keyboard + the boot loads, in the
     # ONE canonical order the host uses too.
     wire_workstation_core(ws, moy_carts, carts_root, make_api,
-                          make_wifi(moy_carts, carts_root),
-                          make_audio=make_audio, runtimes=runtimes,
+                          wire_links.make_wifi(moy_carts, carts_root),
+                          runtimes=runtimes,
                           before_slim=before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
-    if ble_keyboard is not None:
-        # A second keyboard beside the physical one (#26). Both write into the
-        # same InputState, so the console never asks which one a key came
-        # from; Settings finds it because _bt_service() checks ws.ble_keyboard
-        # before ws.keyboard.
-        ws.ble_keyboard = ble_keyboard
+    _census("wired")
 
-    # THE RADIO LINK (#7/#65): the console's one ESP-NOW owner. Built here,
-    # INERT until a cart with the "multiplayer" permission runs (ws.link_arm
-    # starts the radio; pm=PM_NONE costs power and a console on its shelf has
-    # nobody to talk to).
-    try:
-        from moy_espnow import make_link
-        ws.link = make_link(board=link_id,
-                            name=ws.system.get("name", link_id))
-        ws.net = ws.link.net
-    except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
-        log("boot", "link unavailable: %s" % exc)
-        ws.link = None
-    # OTA (#53): update_dir is where the board's store said (a copied image,
-    # the pending marker), and every write -- the slot's included -- goes
-    # through the console's store gate: the SD bracket where the card shares
-    # the panel's bus, a plain call-through elsewhere.
-    try:
-        import moy_ota
-        ws.updater = moy_ota.OtaUpdater(ws._with_sd, update_dir=update_dir)
-    except Exception as exc:  # noqa: BLE001
-        log("boot", "OTA updater unavailable: %s" % exc)
-    if ws.updater is not None:
-        try:
-            ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
-        except Exception as exc:  # noqa: BLE001
-            log("boot", "OTA wifi wiring failed: %s" % exc)
-    # The network Get Carts fetches indexes and carts through (#124), over the
-    # OTA's HTTP client; the app takes its own radio lease.
-    try:
-        from cart_net import make_cart_net
-        ws.cart_net = make_cart_net(ws.wifi, autoconnect_wifi)
-    except Exception as exc:  # noqa: BLE001 -- no store network is a notice in the app
-        log("boot", "Get Carts network unavailable: %s" % exc)
-    if c6_updater is not None and ws.updater is not None:
-        # The companion radio's own updater (#7/#58): Settings -> UPGRADE C6
-        # RADIO. Failure is a missing Settings row, never a boot failure.
-        try:
-            ws.c6_updater = c6_updater(ws.updater)
-        except Exception as exc:  # noqa: BLE001
-            log("boot", "C6 updater unavailable: %s" % exc)
-    try:
-        import machine
-        ws.reboot_hook = machine.reset
-    except Exception as exc:  # noqa: BLE001
-        log("boot", "reboot hook unavailable: %s" % exc)
-    # WEB CONSOLE (moycore plan 3.4 pull half): the wasm console baked into
-    # the image, served from the board. Constructed, NOT started -- __init__
-    # binds no socket, so injecting it only makes the Settings row appear.
-    try:
-        from moy_webhost import make_webhost
-        ws.webhost = make_webhost(ws, carts_root,
-                                  autoconnect=autoconnect_wifi,
-                                  with_sd=with_sd)
-    except Exception as exc:  # noqa: BLE001
-        log("boot", "web console unavailable: %s" % exc)
+    # The links: the radio, the updaters, Get Carts' network, the reboot
+    # hook and the web console, in that order (device/wire_links.py).
+    wire_links.wire_links(ws, link_id, update_dir, carts_root, with_sd,
+                          c6_updater, log, _census)
     if after_services is not None:
         after_services(ws)
+    _census("services")
     if wm is not None:
         # The windowed tier (#73): installed AFTER the boot loads (the same
         # order as host build_workstation) so the persisted font scale is
         # applied before the root layout context is captured.
         ws.wm = wm(ws)
         ws.open_desk()
-    if keyboard is not None and getattr(keyboard, "start", None) is not None:
-        # A BLE keyboard starts its radio only now, after the Workstation's
-        # boot allocations; a keyboard that answers from __init__ has no
-        # start(). Failure is touch-only, never a boot failure.
-        keyboard.start()
+        _census("wm")
+    wire_input.start_keyboards(ws, keyboard, ble_keyboard, _census)
+    # A soft reset under a serving web console leaves the kernel's webhost up
+    # (native/moy_net/moy_webhost.c): this VM takes its radio lease and parks
+    # the glass on it, as the switch that started it did.
+    wh = getattr(ws, "webhost", None)
+    try:
+        if wh is not None and wh.adopt(ws):
+            ws.park_web_console()
+            log("boot", "web console still serving: adopted")
+    except Exception as exc:  # noqa: BLE001 -- the console boots regardless
+        log("boot", "web console adopt failed: %s" % exc)
 
-    ws._psave_ms = power_save_ms   # `state` reports the LIVE timeout
     serial_ch = None
     if serial:
         try:
             from dev_channel import DevChannel
             # env: what the `py` probe reaches beyond ws/wm/pointer. `touch`
             # is the board's live driver, so a finger on the glass and
-            # `py touch.flip_x = True` calibrate without a REPL; `pump`
-            # joins right after it is created.
-            serial_ch = DevChannel(ws, pointer, set_backlight=set_backlight,
-                                   idle=idle, extra=extras,
+            # `py touch.flip_x = True` calibrate without a REPL.
+            serial_ch = DevChannel(ws, pointer, extra=extras,
                                    env={"comp": comp, "game": game,
                                         "boot": boot, "touch": touch})
             log("boot", "serial dev channel %s"
@@ -325,24 +409,31 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
         except Exception as exc:  # noqa: BLE001 -- remote input is optional sugar
             log("boot", "serial channel unavailable: %s" % exc)
             serial_ch = None
+    _census("dev channel")
 
     import gc
     gc.collect()
     # The OTA verdict before anything can overwrite the evidence (#53). The
     # rollback CONFIRM is not made here: reaching this line proves the desktop
-    # was CONSTRUCTED, not that a pixel reached the glass (#56). FramePump.tail
-    # fires it from the loop once frames are really going out.
-    ota = OtaHealth(ws, log=lambda m: log("OTA", m))
-    ota.boot_check()
+    # was CONSTRUCTED, not that a pixel reached the glass (#56). The kernel's
+    # loop fires it once frames are really going out.
+    if returning:
+        # The stopped run ended in the kernel: its radio leases, which the
+        # kernel's table kept through the stop, go as a plain exit's do.
+        ws.player.release_radio()
+        rec = kernel.resume()
+        if rec:
+            ws.resume_launcher(rec)
+        log("boot", "return start")
+    else:
+        report_update(ws, lambda m: log("OTA", m))
     print("%s desktop running (Ctrl-C for REPL)" % name)
+    _census("ota check")
     boot.start_frames(ws)
-    pump = FramePump(boot, ota, fps_cap)
-    if serial_ch is not None:
-        serial_ch.env["pump"] = pump
+    _census("frames")
     # The METERS and the PERF line both follow Settings -> PERF DIAG (#68 kid
-    # mode); the sampler re-syncs them live.
+    # mode).
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
-    perf = PerfSampler(ws, overlap=overlap, emit=perf_emit)
 
     d.comp = comp
     d.sys_canvas = sys_canvas
@@ -354,10 +445,11 @@ def build_desktop(name, link_id, comp, sys_canvas, set_backlight, inp, inputs,
     d.pointer = pointer
     d.set_backlight = set_backlight
     d.boot = boot
-    d.idle = idle
     d.ws = ws
     d.carts_root = carts_root
     d.serial = serial_ch
-    d.pump = pump
-    d.perf = perf
+    d.power_save_ms = power_save_ms
+    d.fps_cap = fps_cap
+    _census("spine done")
+    _stamp(kernel, 4)               # MOY_STAMP_WIRED
     return d

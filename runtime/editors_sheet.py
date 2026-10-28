@@ -2,10 +2,17 @@
 re-exports them): _SheetSprite (the blittable view), SpriteSheet (8x8 tile
 sheet + PICO-8 __gfx__-style hex, #4 storage), IconSheet (16x16 tiles -- the
 editable top-bar icon theme), TileMap (grid of tile ids + map.moymap hex,
-#32 storage). Pure logic, dependency-free (binascii aside -- every target
-ships it, and it is what keeps the hex codecs off the interpreter)."""
+#32 storage). Pure logic over two imports: binascii (every target ships it,
+and it is what keeps the hex codecs off the interpreter) and
+moy_store_base's `icon_rows` (the rows of a sheet an icon is cut from, which
+the shelf's scan reads straight off the card)."""
 
 from binascii import hexlify as _hexlify
+
+try:
+    from moy_store_base import icon_rows
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_store_base import icon_rows
 
 
 # moy SPEC.md 3.2 fixes a CART sheet at 128 x 256 pixels -- 16 cols x 32 rows of
@@ -34,22 +41,20 @@ SHEET_W = SHEET_COLS * 8          # 128 px
 SHEET_H = SHEET_ROWS * 8          # 256 px
 
 # A .moygfx blob is one hex NIBBLE per pixel, and the only hex primitive either
-# VM implements in C (`bytes.fromhex`) hands back a BYTE per pair -- so these two
-# tables are what let a sheet be decoded by C instead of by the interpreter.
-# _NIBBLES splits a packed byte back into its two pixels; _INK is the hex digits
-# meaning "this pixel has colour", so `set(line) & _INK` answers is_blank()'s
-# question about a whole line in one C-level pass, decoding nothing.
+# VM implements in C (`bytes.fromhex`) hands back a BYTE per pair -- so this
+# table is what lets a sheet be decoded by C instead of by the interpreter:
+# _NIBBLES splits a packed byte back into its two pixels.
 _NIBBLES = [bytes((_b >> 4, _b & 15)) for _b in range(256)]
-_INK = set("123456789abcdefABCDEF")
 # `_hexlify` (imported at the top) is the ENCODE half of the same bargain, and
 # `to_hex` below packs pixel pairs back into bytes so it can run: the blob's two
 # nibbles per byte are exactly what hex text is, on both sides.
 
 
-def _fill_hex_grid(pix, w, h, text):
+def _fill_hex_grid(pix, w, h, text, clear=0):
     """Decode a flat .moygfx hex grid into `pix` (a w*h bytearray of palette
     indices), for both from_hex classmethods -- a module-level function, not a
-    shared classmethod, because MicroPython has no __func__ rebinding.
+    shared classmethod, because MicroPython has no __func__ rebinding. A `.`
+    is the sheet's clear pixel, `clear`.
 
     A short blob lands in the TOP rows with tile ids unchanged and the rest
     stays blank, which is what every pre-512 cart and every PICO-8 import
@@ -61,6 +66,18 @@ def _fill_hex_grid(pix, w, h, text):
             continue
         if y >= h:
             break
+        if "." in line and len(line.split()) == 1:
+            n = min(w, len(line))
+            base = y * w
+            row = bytearray(n)
+            _fill_hex_grid(row, n, 1, line[:n].replace(".", "0"))
+            pix[base:base + n] = row
+            i = line.find(".")
+            while 0 <= i < n:
+                pix[base + i] = clear
+                i = line.find(".", i + 1)
+            y += 1
+            continue
         n = min(w, len(line))
         # Fast path: a whole line in one C call, declining anything the
         # per-pixel path below would read differently -- a line wider than the
@@ -341,50 +358,30 @@ class SpriteSheet:
         """The launcher's grid icon for sprite `n` out of a .moygfx blob: the
         same blittable `from_hex(text).tile_image(n)` returns (or
         `tile_span_image(n, tw, th)` for a multi-tile icon), and None when the
-        sheet carries no art at all -- but WITHOUT materialising the sheet, which
-        `CartManager.slim` would otherwise do once per cart at every boot.
+        sheet carries no art at all -- but WITHOUT materialising the sheet.
         Only the icon's own rows are decoded; every other line is read by one
-        `set` intersection, all `is_blank()` ever asked of it.
+        `set` intersection, all `is_blank()` ever asked of it
+        (`moy_store_base.icon_rows`, which says where the read stops).
 
         The `n` out of range -> tile 0 fallback is SPEC.md 3.4's: an icon naming
         tiles this cart's sheet lacks is the host's choice.
         """
         if not text:
             return None
-        tile = cls.TILE
-        w, h = cols * tile, rows * tile
-        if n < 0 or n >= cols * rows:
-            n, tw, th = 0, 1, 1
-        if tw < 1:
-            tw = 1
-        if th < 1:
-            th = 1
-        ox, oy = (n % cols) * tile, (n // cols) * tile
-        # Clamp the span to what fits to the right of / below the start tile,
-        # exactly as tile_span_image does.
-        tw = min(tw, (w - ox) // tile)
-        th = min(th, (h - oy) // tile)
-        pw, ph = tw * tile, th * tile
-        want = [None] * ph
-        ink = False
-        y = 0
-        for line in text.split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            if y >= h:
-                break
-            if not ink and (set(line[:w]) & _INK):
-                ink = True
-            if oy <= y < oy + ph:
-                want[y - oy] = line[ox:ox + pw]
-            y += 1
-            # Both questions answered -- art found, icon rows in hand -- so the
-            # rest of the blob is never touched.
-            if ink and y >= oy + ph:
-                break
-        if not ink:
+        return cls.icon_from_rows(
+            icon_rows(text.split("\n"), n, tw, th, cols, rows, cls.TILE),
+            transparent)
+
+    @staticmethod
+    def icon_from_rows(art, transparent=-1):
+        """The icon `icon_rows` cut out of a sheet -- `(pw, ph, want)`, or
+        None for a sheet with no art -- as a blittable, or None when the tile
+        itself is blank (every pixel 0). A catalogue entry
+        carries exactly this for its cart (`moy_carts.entry`), so the shelf
+        bakes its icons without the sheet ever being read whole."""
+        if art is None:
             return None            # no art anywhere: the card draws its glyph
+        pw, ph, want = art
         pix = []
         for row in want:
             if row:
@@ -398,6 +395,8 @@ class SpriteSheet:
                 pad = pw           # a short blob leaves its missing rows blank
             if pad > 0:
                 pix.extend([0] * pad)
+        if not any(pix):
+            return None            # a blank tile is no art either
         return _SheetSprite(pw, ph, pix, transparent)
 
 
@@ -417,19 +416,51 @@ class IconSheet(SpriteSheet):
 
     TILE = 16
 
-    def __init__(self, cols=8, rows=4, pix=None, spec=False):
+    def __init__(self, cols=8, rows=4, pix=None, spec=False, clear=0):
         # `spec` defaults FALSE here and is still forwarded: an icon sheet is never
         # a cart sheet, but a caller who insists on spec=True should hear the same
         # ValueError everyone else does rather than have it quietly swallowed.
         SpriteSheet.__init__(self, cols, rows, pix, spec)
+        # The clear pixel: 0 (every sheet without a header), or 16, past the
+        # palette, for a sheet whose art draws index 0 (the pixel set's Moy is
+        # outlined in it). Its file says so in a `clear 16` first line and
+        # writes the clear pixel as `.`.
+        self.clear = clear
+        if clear and pix is None:
+            self.pix = bytearray(bytes((clear,)) * (self.w * self.h))
+
+    def pset(self, x, y, c):
+        if c == self.clear and 0 <= x < self.w and 0 <= y < self.h:
+            self.pix[y * self.w + x] = c
+            self.dirty = True
+            self.gen += 1
+            return
+        SpriteSheet.pset(self, x, y, c)
+
+    def to_hex(self):
+        if not self.clear:
+            return SpriteSheet.to_hex(self)
+        w, clear = self.w, self.clear
+        rows = ["clear %d" % clear]
+        for y in range(self.h):
+            row = self.pix[y * w:y * w + w]
+            rows.append("".join("." if v == clear else "0123456789abcdef"[v & 15]
+                                for v in row))
+        return "\n".join(rows)
 
     @classmethod
     def from_hex(cls, text, cols=8, rows=4):
         # Same flat-grid parse as SpriteSheet -- _fill_hex_grid is dimensioned off
         # the sheet's own w/h, so 16px tiles need nothing of their own; only the
-        # default geometry differs.
-        sheet = cls(cols, rows)
-        _fill_hex_grid(sheet.pix, sheet.w, sheet.h, text)
+        # default geometry and the optional `clear N` header differ.
+        clear = 0
+        if text.startswith("clear "):
+            end = text.find("\n")
+            head = text[6:end if end >= 0 else len(text)].strip()
+            text = text[end + 1:] if end >= 0 else ""
+            clear = int(head) if head.isdigit() and int(head) <= 16 else 0
+        sheet = cls(cols, rows, clear=clear)
+        _fill_hex_grid(sheet.pix, sheet.w, sheet.h, text, clear)
         sheet.dirty = False
         return sheet
 

@@ -1,0 +1,9 @@
+{
+  "format": "moy-1",
+  "title": "Slate",
+  "runtime": "theme",
+  "main": "theme.json",
+  "moybyte": {
+    "type": "theme"
+  }
+}

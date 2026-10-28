@@ -78,8 +78,73 @@ static inline void moy_ds_put_shape(const moy_ds *d, int x, int y, moy_pixel v)
 
 static inline void moy_fill(moy_pixel *dst, moy_pixel v, size_t n);
 
+/* The opaque pattern lane: a span whose holes take a colour is periodic in 4
+ * pixels, so it is written as whole words exactly as moy_fill writes a solid
+ * run -- two alternating words on the 565 build, one on the index build. `p`
+ * is the colour of each screen column phase, so the screen anchoring costs
+ * four tests a span and every pixel after that is an index. */
+static inline void moy_pat_span(moy_pixel *dst, int x, unsigned rowbits,
+                                moy_pixel on, moy_pixel off, size_t n)
+{
+    moy_pixel p[4], q[4];
+    size_t i;
+    unsigned s = (unsigned)x & 3u;
+    p[0] = (rowbits & 8u) ? off : on;
+    p[1] = (rowbits & 4u) ? off : on;
+    p[2] = (rowbits & 2u) ? off : on;
+    p[3] = (rowbits & 1u) ? off : on;
+    if (n < 8) {
+        for (i = 0; i < n; i++) dst[i] = p[(s + (unsigned)i) & 3u];
+        return;
+    }
+#ifdef MOY_PIXEL_RGB565
+    if ((uintptr_t)(void *)dst & 3u) { *dst++ = p[s]; n--; s = (s + 1u) & 3u; }
+#else
+    while ((uintptr_t)(void *)dst & 3u) { *dst++ = p[s]; n--; s = (s + 1u) & 3u; }
+#endif
+    q[0] = p[s]; q[1] = p[(s + 1u) & 3u];
+    q[2] = p[(s + 2u) & 3u]; q[3] = p[(s + 3u) & 3u];
+#ifdef MOY_PIXEL_RGB565
+    {
+        uint32_t w0, w1;
+        memcpy(&w0, &q[0], 4);
+        memcpy(&w1, &q[2], 4);
+        while (n >= 8) {
+            uint32_t *w = (uint32_t *)(void *)dst;
+            w[0] = w0; w[1] = w1; w[2] = w0; w[3] = w1;
+            dst += 8;
+            n -= 8;
+        }
+        if (n >= 4) {
+            uint32_t *w = (uint32_t *)(void *)dst;
+            w[0] = w0; w[1] = w1;
+            dst += 4;
+            n -= 4;
+        }
+    }
+#else
+    {
+        uint32_t w0;
+        memcpy(&w0, &q[0], 4);
+        while (n >= 16) {
+            uint32_t *w = (uint32_t *)(void *)dst;
+            w[0] = w0; w[1] = w0; w[2] = w0; w[3] = w0;
+            dst += 16;
+            n -= 16;
+        }
+        while (n >= 4) {
+            *(uint32_t *)(void *)dst = w0;
+            dst += 4;
+            n -= 4;
+        }
+    }
+#endif
+    for (i = 0; i < n; i++) dst[i] = q[i];
+}
+
 /* An already-clipped SCREEN-space span for a shape verb: n pixels from
- * (px0, py). Solid is moy_fill; a pattern walks the row. */
+ * (px0, py). Solid is moy_fill; an opaque pattern is moy_pat_span; a pattern
+ * with untouched holes walks the row. */
 static inline void moy_ds_span(const moy_ds *d, int px0, int py, size_t n, moy_pixel v)
 {
     moy_pixel *row = d->pix + (size_t)py * (size_t)d->cw + (size_t)px0;
@@ -90,14 +155,12 @@ static inline void moy_ds_span(const moy_ds *d, int px0, int py, size_t n, moy_p
     {
         unsigned rowbits = (d->pat >> (12 - ((py & 3) << 2))) & 15u;
         size_t i;
-        for (i = 0; i < n; i++) {
-            int x = px0 + (int)i;
-            if ((rowbits >> (3 - (x & 3))) & 1u) {
-                if (d->hole_on) row[i] = d->hole;
-            } else {
-                row[i] = v;
-            }
+        if (d->hole_on) {
+            moy_pat_span(row, px0, rowbits, v, d->hole, n);
+            return;
         }
+        for (i = 0; i < n; i++)
+            if (!((rowbits >> (3 - ((px0 + (int)i) & 3))) & 1u)) row[i] = v;
     }
 }
 

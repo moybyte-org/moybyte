@@ -204,8 +204,9 @@ class PaintEditor(OpHistoryMixin):
     RECT = "rect"         # shape tool: drag two corners -> hollow rectangle (#90)
     LINE = "line"         # shape tool: drag endpoints -> straight line (#90)
     OVAL = "oval"         # shape tool: drag a bbox -> hollow ellipse/circle (#90)
-    SELECT = "select"     # region tool: drag a box -> selection; tap stamps the clip (#90)
-    TOOLS = (PEN, FILL, RECT, LINE, OVAL, SELECT)
+    SELECT = "select"     # region tool: drag a box -> selection; a tap drops it (#90)
+    STAMP = "stamp"       # stamp tool: a tap stamps the clipboard there (PICO-8's)
+    TOOLS = (PEN, FILL, RECT, LINE, OVAL, SELECT, STAMP)
 
     # In-editor undo depth (#90). An undo step snapshots ONLY the current editable
     # region (dim*dim palette bytes) -- 64B for an 8x8 sprite, 256B for a 16x16 icon,
@@ -220,6 +221,8 @@ class PaintEditor(OpHistoryMixin):
         self.size = 1         # sprite side length in tiles (1=8x8, 2=16x16, ...)
         self.tool = self.PEN  # active tool (PEN / FILL / RECT / LINE / OVAL / SELECT, #90)
         self.erase = False    # color-erase toggle (#90): paint/fill/shapes write index 0
+        self.mirror = False   # mirror-draw toggle (#90): PEN/erase strokes echo across
+                               # the editable region's vertical centre (shapes/fill don't)
         # Region select / copy / paste (#90). `sel` is the active grid-local selection
         # rectangle (x0,y0,x1,y1 inclusive) or None; `clip` is the copied region as
         # (w, h, bytes) or None. Both default off so a freshly-opened editor renders
@@ -237,6 +240,24 @@ class PaintEditor(OpHistoryMixin):
         self._stroke_pre = None   # pending pre-stroke snapshot (set on press, #90)
 
     @property
+    def size(self):
+        """Sprite side length in tiles (1=8x8, 2=16x16, ...)."""
+        return self._size
+
+    @size.setter
+    def size(self, v):
+        # A selection made on a bigger sprite would reach past the smaller
+        # one's region, and every transform reads the area it names.
+        self._size = v
+        sel = getattr(self, "sel", None)
+        if sel is not None:
+            d = v * self.sheet.TILE
+            if sel[0] > d - 1 or sel[1] > d - 1:
+                self.sel = None
+            else:
+                self.sel = (sel[0], sel[1], min(sel[2], d - 1), min(sel[3], d - 1))
+
+    @property
     def dim(self):
         """Editable region side length in pixels (size * 8)."""
         return self.size * self.sheet.TILE
@@ -250,10 +271,20 @@ class PaintEditor(OpHistoryMixin):
         return 0 if self.erase else (self.color & 15)
 
     def paint(self, lx, ly):
-        """Paint grid-local pixel (lx, ly) within the size*8 region at tile n."""
+        """Paint grid-local pixel (lx, ly) within the size*8 region at tile n. With
+        the mirror toggle on, also paints (dim-1-lx, ly) -- the SAME ink, across the
+        whole multi-tile region (not per-tile), so the reflection lands in whichever
+        constituent tile it falls in. Both pixels write before either's undo diff is
+        captured (begin_stroke/end_stroke bracket the call), so a mirrored stroke is
+        still one undo step (#90)."""
         if 0 <= lx < self.dim and 0 <= ly < self.dim:
             ox, oy = self._origin()
-            self.sheet.pset(ox + lx, oy + ly, self._ink())
+            ink = self._ink()
+            self.sheet.pset(ox + lx, oy + ly, ink)
+            if self.mirror:
+                mx = self.dim - 1 - lx
+                if mx != lx:
+                    self.sheet.pset(ox + mx, oy + ly, ink)
 
     def pick(self, lx, ly):
         if 0 <= lx < self.dim and 0 <= ly < self.dim:
@@ -294,6 +325,14 @@ class PaintEditor(OpHistoryMixin):
         transparent color) so a kid can carve holes in a sprite without hunting for the
         color-0 swatch (#90). A display flag only in spirit -- the pixels really change."""
         self.erase = not self.erase
+
+    def toggle_mirror(self):
+        """Flip the mirror-draw toggle (#90): while on, `paint()` echoes every PEN/
+        erase pixel across the editable region's vertical centre, so a kid can draw
+        a symmetric face/ship by drawing only its left half. FILL and the RECT/LINE/
+        OVAL shapes read this flag never -- a reflected flood or shape wasn't asked
+        for, and leaving them out keeps the toggle's effect legible."""
+        self.mirror = not self.mirror
 
     # -- region snapshot / restore (undo primitive, #90) ---------------------
 
@@ -416,63 +455,89 @@ class PaintEditor(OpHistoryMixin):
 
     # -- transforms (respect the multi-tile SIZE selection, #90) -------------
 
+    def _area(self):
+        """The rect an operation acts on, (x0, y0, w, h) grid-local: the active
+        selection, else the whole size*8 square (PICO-8's rule)."""
+        if self.sel is not None:
+            x0, y0, x1, y1 = self.sel
+            return x0, y0, x1 - x0 + 1, y1 - y0 + 1
+        d = self.dim
+        return 0, 0, d, d
+
     def _transform(self, fn):
-        """Transform the region in one undo step: `_record` reads it ONCE into
-        `buf`, we snapshot a stable `src` copy, then `fn(src, dst, dim)` writes the
-        transformed pixels back into `buf`. Operates on the size*8 square, so a
-        2x2/3x3 sprite transforms as a whole block."""
+        """Transform the area (`_area`: the selection, else the whole sprite)
+        in one undo step: `_record` reads the region ONCE into `buf`, the area
+        is gathered into a stable w*h `src`, `fn(src, dst, w, h)` writes the
+        transformed pixels into `dst`, and they go back into `buf`. A 2x2/3x3
+        sprite with no selection transforms as a whole block."""
+        x0, y0, w, h = self._area()
+
         def build(buf, dim):
-            src = bytes(buf)               # a stable read-only source snapshot
-            fn(src, buf, dim)
+            src = bytearray(w * h)
+            for y in range(h):
+                b = (y0 + y) * dim + x0
+                src[y * w:(y + 1) * w] = buf[b:b + w]
+            dst = bytearray(w * h)
+            fn(bytes(src), dst, w, h)
+            for y in range(h):
+                b = (y0 + y) * dim + x0
+                buf[b:b + w] = dst[y * w:(y + 1) * w]
         self._record(build)
 
     def flip_h(self):
-        """Mirror the sprite left<->right."""
-        def fn(s, d, n):
-            for y in range(n):
-                b = y * n
-                for x in range(n):
-                    d[b + x] = s[b + (n - 1 - x)]
+        """Mirror the area left<->right."""
+        def fn(s, d, w, h):
+            for y in range(h):
+                b = y * w
+                for x in range(w):
+                    d[b + x] = s[b + (w - 1 - x)]
         self._transform(fn)
 
     def flip_v(self):
-        """Mirror the sprite top<->bottom."""
-        def fn(s, d, n):
-            for y in range(n):
-                b = y * n
-                sb = (n - 1 - y) * n
-                for x in range(n):
-                    d[b + x] = s[sb + x]
+        """Mirror the area top<->bottom."""
+        def fn(s, d, w, h):
+            for y in range(h):
+                d[y * w:(y + 1) * w] = s[(h - 1 - y) * w:(h - y) * w]
         self._transform(fn)
 
     def rotate(self):
-        """Rotate the sprite 90 degrees clockwise (the square region maps onto
-        itself)."""
-        def fn(s, d, n):
+        """Rotate the area 90 degrees clockwise. A square maps onto itself; a
+        selection that is not square does not rotate (False)."""
+        _x0, _y0, w, h = self._area()
+        if w != h:
+            return False
+
+        def fn(s, d, w, h):
+            n = w
             for y in range(n):
                 for x in range(n):
                     d[y * n + x] = s[(n - 1 - x) * n + y]
         self._transform(fn)
+        return True
 
     def shift(self, dx, dy):
-        """Scroll the sprite by (dx, dy) pixels with WRAP (pixels off one edge
+        """Scroll the area by (dx, dy) pixels with WRAP (pixels off one edge
         reappear on the opposite one)."""
-        def fn(s, d, n):
-            dxm = dx % n
-            dym = dy % n
-            for y in range(n):
-                sy = (y - dym) % n
-                sb = sy * n
-                b = y * n
-                for x in range(n):
-                    d[b + x] = s[sb + ((x - dxm) % n)]
+        def fn(s, d, w, h):
+            dxm = dx % w
+            dym = dy % h
+            for y in range(h):
+                sb = ((y - dym) % h) * w
+                b = y * w
+                for x in range(w):
+                    d[b + x] = s[sb + ((x - dxm) % w)]
         self._transform(fn)
 
     def clear(self):
-        """Clear the whole editable region to color 0 (the transparent/erase index)."""
+        """Clear the area (the selection, else the whole sprite) to color 0, the
+        transparent/erase index."""
+        x0, y0, w, h = self._area()
+
         def build(buf, dim):
-            for i in range(len(buf)):
-                buf[i] = 0
+            for y in range(y0, y0 + h):
+                b = y * dim
+                for x in range(x0, x0 + w):
+                    buf[b + x] = 0
         self._record(build)
 
     # -- shape tools (RECT / LINE / OVAL, #90) -------------------------------
@@ -533,20 +598,16 @@ class PaintEditor(OpHistoryMixin):
         return self.clip is not None
 
     def copy_selection(self):
-        """Copy the selected region's pixels into the clipboard as (w, h, bytes).
-        No-op (returns False) with no active selection. Read-only -- records no undo
+        """Copy the area's pixels (`_area`: the selection, else the whole
+        sprite) into the clipboard as (w, h, bytes). Read-only -- records no undo
         step. Survives a sprite/size switch, so a kid can copy from one tile and paste
         onto another."""
-        if self.sel is None:
-            return False
-        x0, y0, x1, y1 = self.sel
-        w = x1 - x0 + 1
-        h = y1 - y0 + 1
+        x0, y0, w, h = self._area()
         ox, oy = self._origin()
         buf = bytearray(w * h)
         k = 0
-        for yy in range(y0, y1 + 1):
-            for xx in range(x0, x1 + 1):
+        for yy in range(y0, y0 + h):
+            for xx in range(x0, x0 + w):
                 buf[k] = self.sheet.pget(ox + xx, oy + yy)
                 k += 1
         self.clip = (w, h, bytes(buf))
@@ -578,17 +639,11 @@ class PaintEditor(OpHistoryMixin):
         return True
 
     def cut_selection(self):
-        """Copy the selection to the clipboard AND clear it to index 0 in one undo step
-        -- the move primitive (cut here, paste elsewhere). No-op with no selection."""
-        if not self.copy_selection():
-            return False
-        x0, y0, x1, y1 = self.sel
-
-        def build(buf, dim):
-            for yy in range(y0, y1 + 1):
-                for xx in range(x0, x1 + 1):
-                    buf[yy * dim + xx] = 0
-        self._record(build)
+        """Copy the area (the selection, else the whole sprite) to the clipboard
+        AND clear it to index 0 in one undo step -- the move primitive (cut here,
+        paste elsewhere)."""
+        self.copy_selection()
+        self.clear()
         return True
 
 

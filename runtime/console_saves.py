@@ -7,9 +7,9 @@ A mixin of `Workstation`.
 """
 
 try:
-    from editors import SpriteSheet
+    from editors_sheet import SpriteSheet
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import SpriteSheet
+    from runtime.editors_sheet import SpriteSheet
 
 
 class SaveVerbs:
@@ -20,7 +20,7 @@ class SaveVerbs:
         The gate is SPLIT (#154, owner 2026-09-06). A source that won't compile is
         REFUSED on the soft paths -- the idle debounce and PLAY's run gate -- so a
         half-typed line is never published mid-typing and a broken cart is never
-        RUN; the syntax error surfaces via save_status/cart_error and the caret
+        RUN; the syntax error surfaces via cart_error and the caret
         moves onto the bad line. `force` is what every HARD EXIT passes
         (EditorApp.save_current): going home, a tab switch, a window close, the OTA
         reboot. Those write anyway -- a kid who quits mid-line must not lose the
@@ -38,7 +38,6 @@ class SaveVerbs:
         # here, which refused every commit of its Code tab with a Python message.
         ok, msg = self.carts_store.runtime_compile_check(self.cart, src)
         if not ok:
-            self.save_status = "SYNTAX " + msg
             if not force:
                 self.cart_error = "Syntax error -- " + msg
                 self._set_code_error(msg)    # mark the bad line in the editor (#24)
@@ -50,7 +49,6 @@ class SaveVerbs:
             self.crash_line = None           # a re-run will re-detect any crash
         if not (self.cart.get("path") and self.can_manage):
             if ok:
-                self.save_status = None      # nothing to persist, but src is valid
                 self.ach.note("code_save")   # "Code Wizard": valid code saved (#21)
             return True
         # The store-write half moved to Project.commit_code (Stage 1b); the compile-
