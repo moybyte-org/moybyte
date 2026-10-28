@@ -1745,10 +1745,26 @@ static int r_foot(const moy_ui_ctx_t *c) {
     return c->sh_r.y + c->sh_r.h;
 }
 
+// A stop `ui.at` placed both frames that moved where the floor holds both
+// its boxes (the last frame's moved with R, and its mark's reach where it
+// carries one): it moves nothing else, and the floor already redraws it.
+static int placed_move(const moy_ui_ctx_t *c, const moy_ui_stop_t *q, const moy_ui_stop_t *s) {
+    if (q->id != s->id || !(q->flags & STOP_AT) || !(s->flags & STOP_AT)) {
+        return 0;
+    }
+    int m = ((q->st | s->st) & MARKS) ? mark_room(c) : 0;
+    moy_ui_box_t a = {(int16_t)(q->b.x - m), (int16_t)(q->b.y + c->sh_dy - m),
+                      (int16_t)(q->b.w + 2 * m), (int16_t)(q->b.h + 2 * m)};
+    moy_ui_box_t b = {(int16_t)(s->b.x - m), (int16_t)(s->b.y - m), (int16_t)(s->b.w + 2 * m),
+                      (int16_t)(s->b.h + 2 * m)};
+    return floor_holds(c, a) && floor_holds(c, b);
+}
+
 // Stop i was just recorded inside R on a shift frame: where it is not the
 // last frame's stop of that place (another id, another box once moved, a
 // mark of another state), the floor takes R from its top down -- the floor
-// only widens, and every stop after it draws whole.
+// only widens, and every stop after it draws whole -- but for a placed
+// stop that moved inside the floor (`placed_move`).
 static void floor_check(moy_ui_ctx_t *c, int i) {
     if (!armed(c) || c->fl_stage != 1 || c->fl_struct || i < c->fl_s0) {
         return;
@@ -1759,6 +1775,9 @@ static void floor_check(moy_ui_ctx_t *c, int i) {
     if (q == NULL || q->id != s->id || q->b.x != s->b.x || q->b.w != s->b.w
         || q->b.h != s->b.h || q->b.y + c->sh_dy != s->b.y
         || (((q->st ^ s->st) & MARKS) && !floor_holds(c, s->b))) {
+        if (q != NULL && placed_move(c, q, s)) {
+            return;
+        }
         c->fl_struct = 1;
         if (c->sh_dlg) {
             dlg_widen(c, s->b.y, c->dlg_foot);

@@ -1300,6 +1300,8 @@ class BlockEditorUI:
         ws = self.ws
         k = self.blk_kbd
         held = self._held
+        if k is not None and self._page is not None:
+            self._page.forget()             # a prompt over the page: the next frame draws it whole
         if k is None:
             if held.key is not None:
                 held.drop()

@@ -60,12 +60,16 @@ class BlocksPage:
         self._drawn = None              # (gen, cursor, top, slot) of the last frame drawn
         self._bands = array("i", [0] * 16)  # this frame's row bands (first, last) when its rows alone
         self._nb = 0
-        self._to_foot = False
         self._rects = array("i", [0] * 24)
         self._floor = array("i", [0] * 64)
         self._mark = bytearray(64)
 
     # -- drawing ------------------------------------------------------------------
+
+    def forget(self):
+        """The page as the last frame drew it is not what the glass holds
+        (a prompt drew over it): the next frame draws it whole."""
+        self._drawn = None
 
     def _gen(self, be, rect, desk):
         """The page's gen: it moves with everything the page shows but the
@@ -102,16 +106,12 @@ class BlocksPage:
             return
         for vi in range(n):
             mark[vi] = 0
-        self._to_foot = d[1] != cur or dt != 0
-        if self._to_foot:
-            # the cursor's stop moved: the engine's floor takes the page
-            # from its top down (every stop after a moved one draws whole)
-            a = min(cur - top, d[1] - top)
-            for vi in range(a if a > 0 else 0, n):
-                mark[vi] = 1
-        elif d[3] != slot:
-            if 0 <= cur - top < n:
-                mark[cur - top] = 1
+        if d[1] != cur or d[3] != slot or dt:
+            # the cursor's rows, then and now: its stop moves between them
+            # inside the floor
+            for vi in (cur - top, d[1] - top):
+                if 0 <= vi < n:
+                    mark[vi] = 1
         if dt > 0:
             for vi in range(n - dt, n):
                 mark[vi] = 1
@@ -149,15 +149,21 @@ class BlocksPage:
         rh = lay.row_h
         r = self._rects
         for i in range(nb):
+            # a run of rows and the gap pixel either side, where the
+            # cursor's plate reaches past its box
             r[4 * i] = x
-            r[4 * i + 1] = lay.y0 + b[2 * i] * rh - 1
+            r[4 * i + 1] = lay.y0 + b[2 * i] * rh - 2
             r[4 * i + 2] = w
-            r[4 * i + 3] = (b[2 * i + 1] - b[2 * i] + 1) * rh
-        if nb and self._to_foot and b[2 * nb - 1] == n - 1:
-            # ...and from there the page's foot
-            j = 4 * (nb - 1)
-            r[j + 3] = self._rect[1] + self._rect[3] - r[j + 1]
+            r[4 * i + 3] = (b[2 * i + 1] - b[2 * i] + 1) * rh + 2
         return nb
+
+    def _banded(self, vi, nb):
+        """Whether row `vi` lies in one of this frame's `nb` bands."""
+        b = self._bands
+        for i in range(nb):
+            if b[2 * i] <= vi <= b[2 * i + 1]:
+                return True
+        return False
 
     def _floor_rows(self, cv, n):
         """Every row the frame's floor reaches joins the marked rows, and
@@ -171,8 +177,10 @@ class BlocksPage:
         y0 = lay.y0 - 1
         mark = self._mark
         for i in range(0, 4 * k, 4):
-            a = (f[i + 1] - y0) // rh
-            e = (f[i + 1] + f[i + 3] - y0 + rh - 1) // rh
+            # a row's gap pixel either side is ground the floor may take
+            # alone (the bands' own reach past the rows they hold)
+            a = (f[i + 1] + 1 - y0) // rh
+            e = (f[i + 1] + f[i + 3] - 1 - y0 + rh - 1) // rh
             if a < 0:
                 a = 0
             if e > n:
@@ -217,6 +225,9 @@ class BlocksPage:
         if part and not broke:
             r = self._rects
             b = self._bands
+            vi = be.cur - bu.blk_top
+            if 0 <= vi < lay.rows and be.cur < len(rows) and not self._banded(vi, nb):
+                self._row(cv, th, lay, rows[be.cur], vi, True, False)
             for i in range(nb):
                 cv.clip(r[4 * i], r[4 * i + 1], r[4 * i + 2], r[4 * i + 3])
                 for vi in range(b[2 * i], b[2 * i + 1] + 1):
@@ -234,7 +245,8 @@ class BlocksPage:
         if bu.blk_menu is not None:
             self._menu(bu.blk_menu, w)
         ui.end()
-        self._drawn = None if broke else (gen, be.cur, bu.blk_top, bu.blk_slot)
+        self._drawn = (None if broke or bu.blk_kbd is not None
+                       else (gen, be.cur, bu.blk_top, bu.blk_slot))
 
     def _menu(self, m, w):
         """The insert menu, the block actions and the pickers: a popover
@@ -290,7 +302,10 @@ class BlocksPage:
             bu.blk_top = 0
             bu.blk_slot = 0
 
-    def _row(self, cv, th, lay, row, vi, cursor):
+    def _row(self, cv, th, lay, row, vi, cursor, raw=True):
+        """Outline row `row` in slot `vi`; `raw` False draws only its
+        verbs (the cursor's plate or its insert button), the stops a rows
+        frame records where it does not draw the row."""
         bu = self.bu
         rh = lay.row_h
         y = lay.y0 + vi * rh
@@ -301,8 +316,8 @@ class BlocksPage:
                 aw = min(w, _width("add block") + 40)
                 ui.at(x, y + 1, aw, rh - 2)
                 ui.icon("new")
-                ui.button("add block", "tonal", {"id": "Insert %d" % vi})
-            else:
+                ui.button("add block", "tonal", {"id": "Row"})
+            elif raw:
                 cv.rect(x + 2, y + rh // 2 - 1, 10, 2, th["border"])
             return
         b = row.block
@@ -314,6 +329,8 @@ class BlocksPage:
         if cursor:
             ui.at(x - 4, y - 1, tw + 8, rh)
             ui.tool("", "", {"id": "Row", "current": True})
+        if not raw:
+            return
         if hat:
             cv.rrect(x, y, tw, th_, 6, fill)
             ink = bu._blk_ink(fill)
