@@ -15,6 +15,18 @@
 #include "moy_net.h"
 #include "moy_ota.h"
 
+// The board's network halves: the HTTP server's parser and its responses, the
+// webhost, the web console, DNS, the GPIO route, the updater and its HTTP
+// client, the WiFi password rule. A build that only syncs -- the browser's,
+// whose wire is the page's fetch -- sets MOY_NET_SERVE=0 and carries the sync
+// codec and apply alone: every other name is ABSENT from the module, so a
+// caller probes it (`getattr(moy_net, "wc_park", None)`).
+#ifndef MOY_NET_SERVE
+#define MOY_NET_SERVE 1
+#endif
+
+#if MOY_NET_SERVE
+
 // A str of the bytes: as they stand when they are UTF-8, else each byte as
 // its Latin-1 character (a client's malformed head still names a route).
 static mp_obj_t text_of(const char *s, size_t n) {
@@ -118,6 +130,8 @@ static mp_obj_t mod_http_response(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_http_response_obj, 2, 3,
                                            mod_http_response);
 
+#endif // MOY_NET_SERVE
+
 // The JSON text json.dumps writes for `o`, into `v` (the port's own printer,
 // the one its json module uses).
 static void json_of(vstr_t *v, mp_obj_t o) {
@@ -199,6 +213,8 @@ static mp_obj_t mod_decode_batch(mp_obj_t body) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_decode_batch_obj, mod_decode_batch);
 
+#if MOY_NET_SERVE
+
 static size_t str_len_or_0(mp_obj_t o, const char **s) {
     *s = NULL;
     if (o == mp_const_none) {
@@ -225,6 +241,8 @@ static mp_obj_t mod_wifi_remember(mp_obj_t ok, mp_obj_t password,
     return mp_obj_new_bool(moy_wifi_remember(mp_obj_is_true(ok), p, pn, s, sn));
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(mod_wifi_remember_obj, mod_wifi_remember);
+
+#endif // MOY_NET_SERVE
 
 
 #if defined(MOY_NET_LINK) && MOY_NET_LINK
@@ -518,7 +536,12 @@ void moy_store_unwind(void);
 // VM's mount table): the connection it was serving is closed and the store's
 // open files and scratch freed before the exception goes on.
 #define WEB_GUARD_BEGIN { nlr_buf_t nlr_; if (nlr_push(&nlr_) == 0) {
-#define WEB_GUARD_END nlr_pop(); } else { moy_web_abort(); moy_store_unwind(); \
+#if MOY_NET_SERVE
+#define WEB_ABORT() moy_web_abort()
+#else
+#define WEB_ABORT() ((void)0)
+#endif
+#define WEB_GUARD_END nlr_pop(); } else { WEB_ABORT(); moy_store_unwind(); \
     nlr_jump(nlr_.ret_val); } }
 
 // A tuple of str (or None) as a NUL-separated list ending in "": in `buf`.
@@ -607,6 +630,8 @@ static mp_obj_t mod_sync_apply(size_t n_args, const mp_obj_t *args) {
     return mp_obj_new_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_sync_apply_obj, 6, 6, mod_sync_apply);
+
+#if MOY_NET_SERVE
 
 // web_start(port, carts, files, kinds, pin, defer): raises OSError on a bind.
 static mp_obj_t mod_web_start(size_t n_args, const mp_obj_t *args) {
@@ -1100,17 +1125,20 @@ static mp_obj_t mod_http_close(mp_obj_t h) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_http_close_obj, mod_http_close);
 
+#endif // MOY_NET_SERVE
+
 static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_net)},
+    {MP_ROM_QSTR(MP_QSTR_encode_batch), MP_ROM_PTR(&mod_encode_batch_obj)},
+    {MP_ROM_QSTR(MP_QSTR_decode_batch), MP_ROM_PTR(&mod_decode_batch_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sync_batch), MP_ROM_PTR(&mod_sync_batch_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sync_apply), MP_ROM_PTR(&mod_sync_apply_obj)},
+    #if MOY_NET_SERVE
     {MP_ROM_QSTR(MP_QSTR_parse_request), MP_ROM_PTR(&mod_parse_request_obj)},
     {MP_ROM_QSTR(MP_QSTR_query_param), MP_ROM_PTR(&mod_query_param_obj)},
     {MP_ROM_QSTR(MP_QSTR_http_response), MP_ROM_PTR(&mod_http_response_obj)},
-    {MP_ROM_QSTR(MP_QSTR_encode_batch), MP_ROM_PTR(&mod_encode_batch_obj)},
-    {MP_ROM_QSTR(MP_QSTR_decode_batch), MP_ROM_PTR(&mod_decode_batch_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_password), MP_ROM_PTR(&mod_wifi_password_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_remember), MP_ROM_PTR(&mod_wifi_remember_obj)},
-    {MP_ROM_QSTR(MP_QSTR_sync_batch), MP_ROM_PTR(&mod_sync_batch_obj)},
-    {MP_ROM_QSTR(MP_QSTR_sync_apply), MP_ROM_PTR(&mod_sync_apply_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_start), MP_ROM_PTR(&mod_web_start_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_stop), MP_ROM_PTR(&mod_web_stop_obj)},
     {MP_ROM_QSTR(MP_QSTR_web_set_pin), MP_ROM_PTR(&mod_web_set_pin_obj)},
@@ -1156,6 +1184,7 @@ static const mp_rom_map_elem_t moy_net_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_http_open), MP_ROM_PTR(&mod_http_open_obj)},
     {MP_ROM_QSTR(MP_QSTR_http_readinto), MP_ROM_PTR(&mod_http_readinto_obj)},
     {MP_ROM_QSTR(MP_QSTR_http_close), MP_ROM_PTR(&mod_http_close_obj)},
+    #endif
     #if defined(MOY_NET_WIFI) && MOY_NET_WIFI
     {MP_ROM_QSTR(MP_QSTR_wifi_on), MP_ROM_PTR(&mod_wifi_on_obj)},
     {MP_ROM_QSTR(MP_QSTR_wifi_off), MP_ROM_PTR(&mod_wifi_off_obj)},

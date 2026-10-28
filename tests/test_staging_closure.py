@@ -875,3 +875,69 @@ def test_every_authored_web_module_reaches_the_bundle():
         if (WEB / (name + ".py")).exists():
             assert name not in sh, (
                 "%s.py is a host dev tool and must not enter the image" % name)
+
+
+# The C the browser's build leaves out (variant/mpconfigvariant.mk), by the
+# flag that gates it in each module's C: the names those `#if` blocks hold in
+# the module table are ABSENT from the wasm's module.
+WEB_ABSENT_FLAGS = {
+    "moy_glass": ("MOY_GLASS_PRESENT", ROOT / "native" / "moy_glass" / "modmoy_glass.c"),
+    "moy_net": ("MOY_NET_SERVE", ROOT / "native" / "moy_net" / "modmoy_net.c"),
+}
+
+
+def _gated_table_names(src, flag):
+    """The module-table names between `#if FLAG` and its `#endif`."""
+    names, depth = set(), 0
+    for line in src.splitlines():
+        s = line.strip()
+        if depth:
+            if s.startswith("#if"):
+                depth += 1
+            elif s.startswith("#endif"):
+                depth -= 1
+            else:
+                names.update(re.findall(r"MP_ROM_QSTR\(MP_QSTR_(\w+)\)", s))
+        elif s == "#if " + flag:
+            depth = 1
+    return names
+
+
+def test_the_web_build_reaches_no_board_only_name_unprobed():
+    """The browser's build leaves `moy_glass`'s compositors and `moy_net`'s
+    serving half out, and their names are ABSENT from its modules, never
+    stubs. A web module that names one outright (`moy_net.web_start`, `from
+    moy_net import ota_verify`) raises where every board passes; it asks with
+    getattr/hasattr instead, which this does not see as a use."""
+    mk = (WEB / "variant" / "mpconfigvariant.mk").read_text(encoding="utf-8")
+    absent = {}
+    for mod, (flag, path) in WEB_ABSENT_FLAGS.items():
+        assert re.search(r"^%s\s*:?=\s*0\s*$" % flag, mk, re.M), (
+            "the web variant no longer sets %s=0" % flag)
+        assert flag in (path.parent / "micropython.mk").read_text(encoding="utf-8")
+        absent[mod] = _gated_table_names(path.read_text(encoding="utf-8"), flag)
+    assert {"DsiCompositor", "RotatedCompositor", "front"} <= absent["moy_glass"]
+    assert {"web_start", "wc_park", "ota_verify", "dns_start"} <= absent["moy_net"]
+    assert not absent["moy_net"] & {"encode_batch", "sync_batch", "sync_apply"}
+
+    bad = []
+    for name, path in sorted(frozen_set("web").items()):
+        if path is None or path.suffix != ".py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        alias = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.name in absent:
+                        alias[a.asname or a.name] = a.name
+            elif isinstance(node, ast.ImportFrom) and node.module in absent:
+                bad += ["%s: from %s import %s" % (name, node.module, a.name)
+                        for a in node.names if a.name in absent[node.module]]
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id in alias
+                    and node.attr in absent[alias[node.value.id]]):
+                bad.append("%s:%d: %s.%s" % (name, node.lineno, alias[node.value.id],
+                                             node.attr))
+    assert not bad, bad

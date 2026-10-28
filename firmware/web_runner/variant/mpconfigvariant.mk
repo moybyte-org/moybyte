@@ -21,3 +21,11 @@ $(BUILD)/moy_lua/lua/lparser.o $(BUILD)/moy_lua/lua/lcode.o $(BUILD)/moy_lua/lua
 $(BUILD)/moy_lua/lua/ldump.o $(BUILD)/moy_lua/lua/lundump.o: CFLAGS += -Oz
 $(BUILD)/py/compile.o $(BUILD)/py/emitbc.o $(BUILD)/py/parse.o $(BUILD)/py/lexer.o \
 $(BUILD)/py/scope.o $(BUILD)/py/persistentcode.o $(BUILD)/py/builtinimport.o: CFLAGS += -Oz
+
+# The board-only C stays out, absent rather than stubbed (each module's
+# micropython.mk): the browser presents through its worker's own framebuffer,
+# so it builds none of moy_glass's compositors, and its wire is the page's
+# fetch, so moy_net is the sync codec and apply alone -- no webhost, web
+# console, DNS, GPIO route, updater or HTTP client.
+MOY_GLASS_PRESENT = 0
+MOY_NET_SERVE = 0

@@ -745,7 +745,7 @@ and which caught a 37% loss once that every per-side clock had certified.
 `native/moy_net/moy_http.c` is the request parser and the response head;
 `native/moy_net/moy_net_port.c` is the platform under the links (the clock,
 kernel memory, and the non-blocking listener over lwip on a board and POSIX on
-the host, the unix port and the browser's build). `native/moy_net/moy_webhost.c`
+the host and the unix port; the browser's build has none of it). `native/moy_net/moy_webhost.c`
 is the routes: the baked bundle from `native/moy_web/` zero-copy, the store's
 two pulls streamed from a walk of the volume in 8 KB chunks, the PIN gate,
 `POST /sync`, the capability marker and the goodbye window, polled once per

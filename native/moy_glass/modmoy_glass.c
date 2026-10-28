@@ -42,6 +42,15 @@
 #include "moy_canvas.h"
 #include "moy_present.h"
 
+// The compositors (moy_present.h) and front(): every console's present. A
+// build that presents through something else -- the browser's worker blits
+// its own framebuffer -- sets MOY_GLASS_PRESENT=0 and has none of them: no
+// BandedCompositor, DsiCompositor, RotatedCompositor or front, absent, so
+// `hasattr(moy_glass, "front")` is the probe.
+#ifndef MOY_GLASS_PRESENT
+#define MOY_GLASS_PRESENT 1
+#endif
+
 #ifndef MOY_GLASS_POOL_BYTES
 #define MOY_GLASS_POOL_BYTES (4u * 1024u * 1024u)
 #endif
@@ -582,6 +591,8 @@ static mp_obj_t glass_backlight(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_backlight_obj, 0, 1, glass_backlight);
 #endif
+
+#if MOY_GLASS_PRESENT
 
 #ifndef MOY_GLASS_BANDED
 #define MOY_GLASS_BANDED 0
@@ -2255,6 +2266,8 @@ static MP_DEFINE_CONST_OBJ_TYPE(
 
 #undef I
 
+#endif // MOY_GLASS_PRESENT
+
 // -- the VM's teardown (moy_kernel.c's soft-reset exit) -----------------------------
 
 #ifdef MOY_GLASS_BOARD
@@ -2299,7 +2312,7 @@ void moy_glass_vm_swept(void) {
 
 MP_REGISTER_ROOT_POINTER(mp_obj_t moy_glass_loop_comp);
 
-#if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+#ifdef MOY_GLASS_BANDED_TYPE
 #define LOOP_BANDED(c) mp_obj_is_type((c), &glass_banded_type)
 #else
 #define LOOP_BANDED(c) false
@@ -2325,11 +2338,13 @@ void moy_glass_loop_present(void) {
     if (c == MP_OBJ_NULL) {
         return;
     }
+    #if MOY_GLASS_PRESENT
     if (mp_obj_is_type(c, &glass_dsi_type)) {
         moy_dsi_present_pending(&((glass_dsi_obj_t *)MP_OBJ_TO_PTR(c))->d);
     } else if (mp_obj_is_type(c, &glass_rot_type)) {
         moy_rot_present_pending(&((glass_rot_obj_t *)MP_OBJ_TO_PTR(c))->r);
     }
+    #endif
 }
 
 void moy_glass_loop_fence(void) {
@@ -2337,23 +2352,25 @@ void moy_glass_loop_fence(void) {
     if (c == MP_OBJ_NULL) {
         return;
     }
-    #if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+    #ifdef MOY_GLASS_BANDED_TYPE
     if (LOOP_BANDED(c)) {
         moy_banded_fence(&((glass_banded_obj_t *)MP_OBJ_TO_PTR(c))->b);
         return;
     }
     #endif
+    #if MOY_GLASS_PRESENT
     if (mp_obj_is_type(c, &glass_dsi_type)) {
         moy_dsi_fence(&((glass_dsi_obj_t *)MP_OBJ_TO_PTR(c))->d);
     } else if (mp_obj_is_type(c, &glass_rot_type)) {
         moy_rot_fence(&((glass_rot_obj_t *)MP_OBJ_TO_PTR(c))->r);
     }
+    #endif
 }
 
 // A frame that drew nothing: a banded panel's queued bands drained.
 void moy_glass_loop_idle(void) {
     mp_obj_t c = loop_comp();
-    #if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+    #ifdef MOY_GLASS_BANDED_TYPE
     if (c != MP_OBJ_NULL && LOOP_BANDED(c)) {
         moy_banded_fence(&((glass_banded_obj_t *)MP_OBJ_TO_PTR(c))->b);
     }
@@ -2370,7 +2387,7 @@ bool moy_glass_loop_light(int level) {
         return false;
     }
     bool on = level > 0;
-    #if MOY_GLASS_BANDED || !defined(MOY_GLASS_BOARD)
+    #ifdef MOY_GLASS_BANDED_TYPE
     if (LOOP_BANDED(c)) {
         banded_light(((glass_banded_obj_t *)MP_OBJ_TO_PTR(c))->panel, on);
         return false;
@@ -2388,11 +2405,14 @@ bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has) {
         return false;
     }
     mp_obj_t t;
+    #if MOY_GLASS_PRESENT
     if (mp_obj_is_type(c, &glass_dsi_type)) {
         t = dsi_overlap_stats(c);
     } else if (mp_obj_is_type(c, &glass_rot_type)) {
         t = rot_overlap_stats(c);
-    } else {
+    } else
+    #endif
+    {
         return false;
     }
     size_t n;
@@ -2411,6 +2431,8 @@ bool moy_glass_loop_overlap(uint32_t v[7], uint8_t *has) {
 // -- the module -----------------------------------------------------------------
 
 // -- the kernel run in front (native/moy_play's moy_play.h) ------------------------
+
+#if MOY_GLASS_PRESENT
 //
 // front(comp[, game]) gives the kernel's Player this compositor as the two
 // ends of a run in the loop's foreground: where the run's frame is drawn and
@@ -2566,8 +2588,12 @@ static mp_obj_t glass_front(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(glass_front_obj, 1, 2, glass_front);
 
+#endif // MOY_GLASS_PRESENT
+
 static const mp_rom_map_elem_t glass_globals_table[] = {
+    #if MOY_GLASS_PRESENT
     { MP_ROM_QSTR(MP_QSTR_front), MP_ROM_PTR(&glass_front_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_glass) },
     { MP_ROM_QSTR(MP_QSTR_buf), MP_ROM_PTR(&glass_buf_obj) },
     { MP_ROM_QSTR(MP_QSTR_loop_bind), MP_ROM_PTR(&glass_loop_bind_obj) },
@@ -2590,8 +2616,10 @@ static const mp_rom_map_elem_t glass_globals_table[] = {
     #ifdef MOY_KERNEL_PANEL
     { MP_ROM_QSTR(MP_QSTR_backlight), MP_ROM_PTR(&glass_backlight_obj) },
     #endif
+    #if MOY_GLASS_PRESENT
     { MP_ROM_QSTR(MP_QSTR_DsiCompositor), MP_ROM_PTR(&glass_dsi_type) },
     { MP_ROM_QSTR(MP_QSTR_RotatedCompositor), MP_ROM_PTR(&glass_rot_type) },
+    #endif
     #ifdef MOY_GLASS_BANDED_TYPE
     { MP_ROM_QSTR(MP_QSTR_BandedCompositor), MP_ROM_PTR(&glass_banded_type) },
     #endif
