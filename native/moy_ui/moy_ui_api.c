@@ -3000,6 +3000,10 @@ int moy_ui_api_edge(const moy_ui_ctx_t *c) {
     return c->edge;
 }
 
+int moy_ui_api_tap_armed(const moy_ui_ctx_t *c) {
+    return c->press != 0 && c->gesture != 2;
+}
+
 void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h) {
     c->at.x = (int16_t)x;
     c->at.y = (int16_t)y;

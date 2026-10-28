@@ -805,8 +805,9 @@ one key (the sprite, its size, the sheet's gen, the look, the input's kind,
 the card), with nothing over it; on the desk as the Sprite pane's own
 frame (§15 P5's `_OWN_FRAMES`, while the pickers are up), where the WM
 vouches for the buffer and the lag it names lies inside the band or each
-frame it holds since drew that page. A release the pickers may pick a
-sprite from draws whole: a pick changes the Sheet pane beside them. The
+frame it holds since drew that page. The release of a press the engine
+may still activate (`AppHost.tap_armed`: no page's drag) draws the desk
+whole, since a pick changes the Sheet pane beside the pickers. The
 popover's body is an overlay to the engine, drawn whole over the page, so
 its scroll moves no pixels (no shift frame); the two-axis region this
 section once named was not built, so a sheet wider than the body (a large

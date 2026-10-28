@@ -246,3 +246,22 @@ def test_the_sheet_draws_inside_the_pickers_body_alone(tmp_path, desk):
     for (x0, y0, x1, y1), b in clips:
         assert b[0] <= x0 < x1 <= b[0] + b[2] and b[1] <= y0 < y1 <= b[1] + b[3], (
             (x0, y0, x1, y1), b)
+
+
+@pytest.mark.parametrize("kind", ("touch", "keys"))
+def test_the_sprite_panes_layout_is_kept_whichever_input_is_in_use(tmp_path, monkeypatch, kind):
+    """The desk keeps one layout of the Sprite pane per hint kind (its hint
+    strip comes and goes with the keys): one built for the other kind would
+    be built again every frame, and no frame of the pickers could hold the
+    page under them."""
+    p = Pair(tmp_path, True, 2)
+    monkeypatch.setattr(ui_draw, "hint_kind", lambda: kind)
+    for _ in range(3):
+        p.frame()
+    del p.alone[:]
+    lays = []
+    for _ in range(4):
+        p.frame()
+        lays.append(p.a.paint_layer._pick_ring.key(0)[0])
+    assert all(lay is lays[0] for lay in lays)
+    assert all(p.alone), p.alone

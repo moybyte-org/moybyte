@@ -1335,7 +1335,7 @@ class PaintLayer:
         """Whether this frame's buffer holds the page under the pickers as
         the frames before left it, the pickers' card where they drew it:
         each frame the buffer holds since (RETAINED_FRAMES of them on the
-        fullscreen tier, the frame before in a desk pane the WM vouches
+        fullscreen tier, the pane's last draw in a desk pane the WM vouches
         for) drew the pickers under `key` with nothing over the page. Such
         a frame draws the pickers' body alone (`_draw_pickers`)."""
         ws = self.ws
@@ -1345,8 +1345,9 @@ class PaintLayer:
         ring = self._pick_ring
         f = _ui_draw.painted()
         if self.vouch:
-            if self.vouch < 2 or ring.frame(0) != f - 1 or not ring.whole(0) \
-                    or ring.key(0) != key:
+            # the WM's word is for the buffer as this content's last draw
+            # left it, the frames between being its copies to the others
+            if self.vouch < 2 or not ring.size or not ring.whole(0) or ring.key(0) != key:
                 return False
             g = self.lag
             if g[2] <= g[0] or g[3] <= g[1]:

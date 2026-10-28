@@ -2244,6 +2244,12 @@ class AppHost:
         self._again = True
         _AGAIN[0] = True
 
+    def tap_armed(self):
+        """Whether the pointer is down on a stop its release may activate
+        (no page's drag, no fling it caught): the release frame's pass may
+        act on it."""
+        return bool(_C.api_tap_armed(self.ctx))
+
     def owes(self):
         """Whether the pass begun last owes the frame after it (a popover
         laid out for another body, a focus it opened): that frame's layout

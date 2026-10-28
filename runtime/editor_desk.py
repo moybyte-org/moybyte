@@ -477,14 +477,16 @@ class EditorDesk(Layer):
     def _pane_layout(self, tab, r):
         """The layout tab `tab`'s surface takes in a pane `r` big: built by
         its own `relayout` at that size with no bar, once per size (and for
-        Code, per whether it shows its symbol keys, which the last input
-        decides: a layout that disagrees is one the tab rebuilds as it
-        draws, every frame)."""
+        Code, per whether it shows its symbol keys, and for Sprite, per
+        whether its hints have keys to name, which the last input decides:
+        a layout that disagrees is one the tab rebuilds as it draws, every
+        frame)."""
         ws = self.ws
         fs = ws.look.effective_font_scale()
         cs = ws.look.effective_chrome_scale()
         sym = tab == "code" and ws.code_layer.wants_symbols()
-        key = (tab, r[2], r[3], fs, cs, ws.look.look_gen, sym)
+        keys = tab == "paint" and ws.paint_layer._keys()
+        key = (tab, r[2], r[3], fs, cs, ws.look.look_gen, sym, keys)
         lay = self._lay.get(key)
         if lay is not None:
             return lay
@@ -826,7 +828,8 @@ class EditorDesk(Layer):
                 or ws._animating(dt, False)
                 or self._spills()):
             return False
-        if c == "paint" and ws.paint_layer._pop_tap is not None:
+        if c == "paint" and ws.paint_layer._pop_tap is not None \
+                and ws.paint_layer._host.tap_armed():
             return False                # a release the pickers' pass may pick a sprite from
         if c == "music" and not self._host.quiet():
             return False                # the desk's verbs take input: focus may move off the pane

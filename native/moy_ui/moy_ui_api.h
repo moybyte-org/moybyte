@@ -645,6 +645,9 @@ int moy_ui_api_keys_taken(const moy_ui_ctx_t *c);
 // Whether this frame's up press found no stop above the focused one, outside
 // a dialog: the keys went past the page's top.
 int moy_ui_api_edge(const moy_ui_ctx_t *c);
+// Whether the pointer is down on a stop its release may activate: a press
+// that has not become a page's drag (nor caught a fling, which taps nothing).
+int moy_ui_api_tap_armed(const moy_ui_ctx_t *c);
 void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h);
 // Where stop `id` drew in the frame drawn last (the host's: a popover beside
 // a row, a test's tap), or the card of the popover `id` drawn then, or of
