@@ -224,6 +224,11 @@ def run_desktop(fps_cap=60):
     # `set_font_scale`), and a shell change that calls one is green on the
     # host and on this glass alike.
     canvas = SystemCanvas(comp)
+    # Its shift_last is a CPU row copy out of the buffer the feeder ships,
+    # about half what drawing the rows it moves costs (#66, scroll-and-text
+    # P1d's A/B on one image): a shift frame pays where its floor leaves at
+    # least half of R undrawn.
+    canvas.SHIFT_COST = 500
     _census("panel")
     try:
         import moybyte_diag as diag

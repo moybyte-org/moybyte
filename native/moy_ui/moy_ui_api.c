@@ -428,6 +428,7 @@ static int same_box(moy_ui_box_t a, moy_ui_box_t b) {
 static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     c->sh_plan = MOY_UI_SHIFT_NONE;
     c->sh_id = 0;
+    c->sh_rows = c->sh_pics = 0;
     int p = c->in[MOY_UI_IN_PTR];
     int live = p & MOY_UI_P_LIVE, held = live && (p & MOY_UI_P_HELD);
     int same = c->was_flags == (uint16_t)(flags & ~MOY_UI_KEY_EDGE) && c->was_fs == c->fs
@@ -495,11 +496,32 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     for (int i = 0; i < c->fl_n; i++) {
         rows += c->fl[i].h;
     }
+    // the rows of R's pictures, where they lie this frame, the floor leaves
+    // undrawn: what the move saves beyond plain rows (moy_ui_api_shift_plan)
+    int32_t pics = 0;
+    int top = rp->b.y, foot = rp->b.y + rp->b.h;
+    for (int i = r->s0; i < r->s0 + r->sn; i++) {
+        if (!(v[i].flags & STOP_PIC)) {
+            continue;
+        }
+        int y0 = v[i].b.y + dy, y1 = y0 + v[i].b.h;
+        y0 = y0 < top ? top : y0;
+        y1 = y1 > foot ? foot : y1;
+        int out = y1 - y0;
+        for (int k = 0; k < c->fl_n && out > 0; k++) {
+            int a = c->fl[k].y > y0 ? c->fl[k].y : y0;
+            int b = c->fl[k].y + c->fl[k].h < y1 ? c->fl[k].y + c->fl[k].h : y1;
+            out -= b > a ? b - a : 0;
+        }
+        pics += out > 0 ? out : 0;
+    }
     c->fl_n = 0;
     c->fl_pend = 0;
     if (rows * 5 > (int32_t)rp->b.h * 3) {
         return;
     }
+    c->sh_rows = (int16_t)rows;
+    c->sh_pics = (int16_t)(pics > 32767 ? 32767 : pics);
     c->sh_plan = dy ? MOY_UI_SHIFT_MOVE : MOY_UI_SHIFT_ROWS;
 }
 
@@ -3931,12 +3953,14 @@ int32_t moy_ui_api_offset(moy_ui_ctx_t *c, int x, int y) {
 
 // -- shift frames (docs/scroll_and_text_2026-10.md §3.3) ---------------------------
 
-int moy_ui_api_shift_plan(const moy_ui_ctx_t *c, int32_t out[5]) {
+int moy_ui_api_shift_plan(const moy_ui_ctx_t *c, int32_t out[7]) {
     out[0] = c->sh_r.x;
     out[1] = c->sh_r.y;
     out[2] = c->sh_r.w;
     out[3] = c->sh_r.h;
     out[4] = c->sh_dy;
+    out[5] = c->sh_rows;
+    out[6] = c->sh_pics;
     return c->sh_plan;
 }
 

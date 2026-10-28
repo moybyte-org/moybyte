@@ -297,7 +297,7 @@ typedef struct {
     // was ui.at's.
     uint32_t sh_id;
     moy_ui_box_t sh_r;
-    int16_t sh_dy;
+    int16_t sh_dy, sh_rows, sh_pics;
     uint8_t sh_plan, sh_head;
     uint8_t fl_on, fl_stage, fl_n, fl_struct, fl_dirty, fl_susp, fl_lost, at_last;
     uint8_t fl_cast;                // the next draw casts a shadow past its box (a card's)
@@ -607,9 +607,11 @@ enum {
     MOY_UI_KD_PAGE = 8,             // a page (or a placed table's rows): its `a` is a scroll
 };
 // After begin: the frame the engine licenses (MOY_UI_SHIFT_*). out: R's x,
-// y, w, h on screen as the last frame drew it, and dy, the shift that brings
-// that frame's pixels to this one's scroll (0 on a rows frame).
-int moy_ui_api_shift_plan(const moy_ui_ctx_t *c, int32_t out[5]);
+// y, w, h on screen as the last frame drew it, dy, the shift that brings
+// that frame's pixels to this one's scroll (0 on a rows frame), the rows of
+// R its floor will draw as begin can know them (the floor only widens), and
+// the rows of R's pictures the floor leaves undrawn (summed per picture).
+int moy_ui_api_shift_plan(const moy_ui_ctx_t *c, int32_t out[7]);
 // The host moved R's pixels (or the frame is a rows frame, whose R holds the
 // last frame's as they are): this frame's pass draws R's floor alone.
 void moy_ui_api_shift_arm(moy_ui_ctx_t *c);

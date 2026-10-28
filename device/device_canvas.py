@@ -541,6 +541,11 @@ class DeviceCanvas:
     # holds the frame BEFORE last -> 2. (Single-buffer mode retains frame-1;
     # advertising 2 stays conservative-correct there too.)
     RETAINED_FRAMES = 2
+    # What `shift_last` costs against the raster it saves: per mille of a
+    # row's raster each row it copies costs, so a shift frame whose floor
+    # leaves less than that much of R undrawn draws whole instead
+    # (`ui_draw._pays`). None where nobody measured it: it shifts.
+    SHIFT_COST = None
 
     def __init__(self, compositor):
         self._comp = compositor

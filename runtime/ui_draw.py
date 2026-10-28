@@ -1817,6 +1817,17 @@ def _rep_dirs(rw):
     return m
 
 
+def _pays(cv, p):
+    """Whether moving region R (plan `p`: its height p[3], the floor's rows
+    p[5], the rows of R's pictures the floor leaves p[6]) out of the last
+    frame costs canvas `cv` less than drawing what of R the floor does not:
+    its `SHIFT_COST` per mille of a plain row's raster each row it copies
+    costs, None where unknown (then it moves). A picture's rows cost more to
+    draw than any copy, so a move that leaves one undrawn pays."""
+    c = getattr(cv, "SHIFT_COST", None)
+    return c is None or p[6] > 0 or p[5] * 1000 + c * p[3] < 1000 * p[3]
+
+
 def steps_dead(rw, console=None):
     """Whether a held key's (or the ball's) steps `rw`, with no press
     beside them, would move nothing on the page whose frame `console` drew
@@ -1893,7 +1904,7 @@ class AppHost:
         self.px = self.py = -1          # where the pointer was last seen, in the app's space
         self.mid = False                # the middle button is held
         self.ring = PaintRing(1)        # what the frame before left of the page in its buffer
-        self._plan = array("i", [0] * 5)
+        self._plan = array("i", [0] * 7)
         self.shifting = False           # the frame begun last draws its pages' floor alone
         self._dead = 0                  # the directions whose steps moved nothing last frame
         self._began = -1                # the painted frame it began last
@@ -2042,7 +2053,10 @@ class AppHost:
             ok = w == 2 and ring.vouch_key(key, th)     # the WM's shown ring vouches
         else:
             ok = _PAINT[1] and ring.vouch(cv, f, key, th)
-        if ok and _C.api_shift_plan(self.ctx, p):
+        # A canvas whose copy costs about what the raster it saves does
+        # (`SHIFT_COST`, per mille of a row's raster a row it copies costs;
+        # None where unknown) draws the frame whole instead.
+        if ok and _C.api_shift_plan(self.ctx, p) and _pays(cv, p):
             if cv.shift_last(p[0] + getattr(cv, "_ox", 0), p[1] + getattr(cv, "_oy", 0),
                              p[2], p[3], 0, p[4]):
                 cv.shift_fence()        # the floor draws over rows the move wrote

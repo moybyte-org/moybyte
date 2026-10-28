@@ -227,3 +227,45 @@ def test_drags_flings_and_key_steps_shift_byte_for_byte(tmp_path, app, bufs):
     assert p.share() > 0.5, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
         app, p.share(), p.kinds)
 
+
+def _settings_session(p):
+    lay = p.a.layout
+    x = lay.cx + lay.cw // 2
+    y = lay.cy + lay.ch * 3 // 4
+    del p.kinds[:]
+    p.drag(x, y, -lay.ch // 2)
+    p.settle()
+    p.keys("down", 6)
+    p.settle()
+    return p.share()
+
+
+@pytest.mark.parametrize("cost", (None, 700, 1000))
+def test_a_canvas_whose_copy_costs_the_raster_draws_whole(tmp_path, cost):
+    """A canvas declares what its `shift_last` costs against the raster it
+    saves (`SHIFT_COST`, the T-Deck's CPU copy beside the feeder): a frame
+    whose floor leaves too little of R undrawn to pay for the copy draws
+    whole, and every frame is still a whole repaint's bytes."""
+    p = Pair(tmp_path / str(cost), "settings", 2)
+    p.a.sys_canvas.SHIFT_COST = cost
+    share = _settings_session(p)
+    if cost == 1000:
+        assert share == 0
+    else:
+        assert share > 0
+    if cost == 700:
+        q = Pair(tmp_path / "free", "settings", 2)
+        assert share < _settings_session(q)
+
+
+def test_a_move_that_leaves_pictures_undrawn_pays_whatever_the_copy_costs(tmp_path):
+    """A picture's rows cost more to draw than any copy (`ui_draw._pays`):
+    My Art's drawings, dragged on a canvas whose copy costs a whole row's
+    raster, still shift where the floor leaves a picture undrawn."""
+    p = Pair(tmp_path, "myart", 2)
+    p.a.sys_canvas.SHIFT_COST = 1000
+    lay = p.a.layout
+    del p.kinds[:]
+    p.drag(lay.cx + lay.cw // 2, lay.cy + lay.ch * 3 // 4, -lay.ch // 2)
+    p.settle()
+    assert p.share() > 0

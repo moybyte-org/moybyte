@@ -3086,12 +3086,13 @@ static mp_obj_t ui_api_focus_ahead(mp_obj_t ctx, mp_obj_t id) {
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_focus_ahead_obj, ui_api_focus_ahead);
 
 // api_shift_plan(ctx, out) -> the shift frame begin licensed (moy_ui_api.h's
-// MOY_UI_SHIFT_*); `out`, five writable int32 words: R's x, y, w, h and dy
+// MOY_UI_SHIFT_*); `out`, seven writable int32 words: R's x, y, w, h, dy,
+// the floor's rows and the pictures' rows it leaves
 static mp_obj_t ui_api_shift_plan(mp_obj_t ctx, mp_obj_t out) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
-    if (b.len < 5 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("five words"));
+    if (b.len < 7 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("seven words"));
     }
     return MP_OBJ_NEW_SMALL_INT(moy_ui_api_shift_plan(ctx_of(ctx), (int32_t *)b.buf));
 }

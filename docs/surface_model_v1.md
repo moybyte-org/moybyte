@@ -1056,7 +1056,11 @@ caller draws); `shift_fence()` makes the rows it wrote the CPU's to draw
 over. `copy_last_into(layer, ...)` copies a rect of that buffer into a
 layer. Per canvas: the P4s' 2D-DMA, the S3s' row copy beside the feeder, in
 place on one buffer (`device/device_canvas.py`, the compositors in
-`native/moy_glass`).
+`native/moy_glass`). A canvas whose copy costs about what the raster it
+saves does declares it (`SHIFT_COST`, per mille of a row's raster a row it
+copies costs: the T-Deck's root), and a frame whose floor leaves too
+little of R undrawn to pay for the copy draws whole (`ui_draw._pays`);
+None, unmeasured, shifts.
 
 **One voucher per region.** Who says frame n-1 painted R whole: under the
 windowed WM the shown ring (`_shown`) for a window's content, never the
@@ -1091,7 +1095,7 @@ grep. Pinned by `tests/test_shift_frames.py` (the engine: drags, flings,
 glides, every move size, the clamps, a gen moving mid-fling, a cover landing,
 overlays, a theme change, a gap, a deferred copy landing at the fence),
 `tests/test_shift_apps.py` (Settings and its pages, My Art, Get Carts on the
-full-screen console) and `tests/test_wm_records.py`
+full-screen console, and a declared copy cost) and `tests/test_wm_records.py`
 (every app on the verbs in a desk window, windows overlapping, a focus
 change and a move mid-coast, a popover and the system menu's scrim over a
 glide), each presented frame, with up to three buffers taking
