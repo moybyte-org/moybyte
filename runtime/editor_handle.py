@@ -1007,7 +1007,7 @@ class EditorHandle:
         brow, col, laid, cell = got
         if not click:
             return ("caret", None)
-        self._drag = (int(px), int(py))   # a drag pans/selects from HERE
+        self._drag = (int(px), int(py), 0, 0)   # a drag pans/selects from HERE
         if self._mode == _modes.MD:
             if laid.check is not None and abs(cell - laid.check[0] - 1) <= 1:
                 self._toggle_check(brow, laid)
