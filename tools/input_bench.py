@@ -537,6 +537,13 @@ def _ib_editor(title, tab=None, ws_key=None):
             d().switch(ws_key)
     if tab is not None:
         ws.editor_app.set_tab(tab)
+        d = getattr(ws.editor_app, '_desk', None)
+        d = d() if d is not None else None
+        if d is not None and d.active():
+            for _n, _pane, _r in d._shown_panes():
+                if tab in _pane:
+                    d.focus_pane(_n)          # the keys on the pane that shows it
+                    break
     ws.mark_dirty()
 
 def _ib_full():

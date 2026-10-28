@@ -185,6 +185,9 @@ class EditorDesk(Layer):
         self._code_key = None
         self._own_key = None            # ...and at the last frame of a pane of its own
         self._clip = None               # the rect a frame of the Sound pane's own is clipped to
+        # the layout the desk drew in last: its window's, which the WM has
+        # not installed yet where it asks HELD and takes_lag
+        self._drew_in = None
         self._vouch = 0
 
     # -- where it applies -------------------------------------------------------
@@ -600,8 +603,15 @@ class EditorDesk(Layer):
 
     @property
     def HELD(self):
-        return (self._prompt() is not None or self._code_pane() is not None
-                or self._own_pane() is not None)
+        ws = self.ws
+        was = ws.layout
+        if self._drew_in is not None:
+            ws.layout = self._drew_in
+        try:
+            return (self._prompt() is not None or self._code_pane() is not None
+                    or self._own_pane() is not None)
+        finally:
+            ws.layout = was
 
     def retained(self, known, x0, y0, x1, y1):
         self._known = bool(known) and (x1 <= x0 or y1 <= y0)
@@ -623,6 +633,16 @@ class EditorDesk(Layer):
         and leave the next buffer as far behind."""
         if lag[2] <= lag[0] or lag[3] <= lag[1]:
             return True
+        ws = self.ws
+        was = ws.layout
+        if self._drew_in is not None:
+            ws.layout = self._drew_in
+        try:
+            return self._takes(lag)
+        finally:
+            ws.layout = was
+
+    def _takes(self, lag):
         if self._prompt() is not None:
             return False
         code = self._code_pane()
@@ -848,6 +868,7 @@ class EditorDesk(Layer):
 
     def draw(self, dt):
         ws = self.ws
+        self._drew_in = ws.layout
         self.dt = dt
         self.follow()
         self._play_tabs()

@@ -39,7 +39,7 @@ SURFACES = {"blocks": ("Coin Quest", "code", "blocks"),
             "map": ("Sky Run", "art", "map")}
 
 
-def _desk(path, cart, key, tab, ships):
+def _desk(path, cart, key, tab, ships, window=False):
     ws = host_app.build_workstation(str(path / "carts"), sys_size=(1024, 600),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
     ws.bar_layer._clock_text = lambda: "10:30"
@@ -50,6 +50,14 @@ def _desk(path, cart, key, tab, ships):
     drv = host_app.ConsoleDriver(ws)
     for _ in range(3):
         drv.frame(DT)
+    if window:
+        # a window short of the glass: the WM asks HELD in the root's layout,
+        # whose arrangement of the panes is not the window's
+        win = ws.wm._wins["menu"]
+        if win.saved is None:
+            win.saved = (120, 70, 892, 509)
+        ws.wm._toggle_max(win)
+        drv.frame(DT)
     d = ws.editor_desk
     d.switch(key)
     ws.editor_app.set_tab(tab)
@@ -59,23 +67,11 @@ def _desk(path, cart, key, tab, ships):
     return ws, drv
 
 
-def _dump(shot, want, w, h, path):
-    from PIL import Image
-    for name, b in (("got", shot), ("want", want)):
-        im = Image.new("RGB", (w, h))
-        px = im.load()
-        for y in range(h):
-            for x in range(w):
-                v = b[2 * (y * w + x)] | b[2 * (y * w + x) + 1] << 8
-                px[x, y] = ((v >> 11) << 3, ((v >> 5) & 63) << 2, (v & 31) << 3)
-        im.save(path + "_" + name + ".png")
-
-
 class Pair:
-    def __init__(self, tmp_path, surface, bufs):
+    def __init__(self, tmp_path, surface, bufs, window=False):
         cart, key, tab = SURFACES[surface]
-        self.a, self.da = _desk(tmp_path / "a", cart, key, tab, True)
-        self.b, self.db = _desk(tmp_path / "b", cart, key, tab, False)
+        self.a, self.da = _desk(tmp_path / "a", cart, key, tab, True, window)
+        self.b, self.db = _desk(tmp_path / "b", cart, key, tab, False, window)
         self.d = self.a.editor_desk
         self.bufs = bufs
         root = self.a.wm._root_canvas
@@ -108,9 +104,6 @@ class Pair:
                 px = [i // 2 for i in range(0, len(shot), 2) if shot[i:i + 2] != want[i:i + 2]]
                 xs = [q % w for q in px]
                 ys = [q // w for q in px]
-                import os
-                if os.environ.get("DESK_DUMP"):
-                    _dump(shot, want, root.w, root.h, os.environ["DESK_DUMP"])
                 raise AssertionError("frame %d (%d buffers) differs from a whole draw in "
                                      "x %d-%d, y %d-%d" % (a._frames_drawn, self.bufs, min(xs),
                                                            max(xs), min(ys), max(ys)))
@@ -165,6 +158,14 @@ def test_a_panes_key_frames_are_its_own_and_a_whole_draws(tmp_path, surface, buf
         p.key(mi.KEY_DOWN, 1, held=20)
     if surface == "map":
         p.key(mi.KEY_RIGHT, 6)
+    assert sum(p.own) >= len(p.own) // 2, p.own
+
+
+@pytest.mark.parametrize("surface", ("blocks", "cards", "music"))
+def test_a_window_short_of_the_glass_keeps_the_panes_frames_its_own(tmp_path, surface):
+    p = Pair(tmp_path, surface, 2, window=True)
+    assert p.a.wm._wins["menu"].content_rect()[2] < p.a.wm._root_canvas.w
+    p.key(mi.KEY_RIGHT if surface == "music" else mi.KEY_DOWN, 6)
     assert sum(p.own) >= len(p.own) // 2, p.own
 
 
