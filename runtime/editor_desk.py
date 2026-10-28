@@ -165,6 +165,7 @@ class EditorDesk(Layer):
         self._rows_key = None
         self._changed = None
         self._acts = 0                  # input the desk took itself (a press, a chord)
+        self._in_code = False           # this press went to the Code pane's text
         self._box = array("i", [0] * 4)
         # ...and while its focused pane is the Code tab (or theme Config), on
         # every frame: the WM's word for the buffer, the lag it named, what
@@ -1599,10 +1600,15 @@ class EditorDesk(Layer):
         return True
 
     def handle_pointer(self, px, py, click):
+        self._in_code = False
+        got = self._pointer(px, py, click)
+        if (click or self.ws.pointer.down) and not self._in_code:
+            self._acts += 1             # a press the Code pane's rows do not hold
+        return got
+
+    def _pointer(self, px, py, click):
         ws = self.ws
         down = ws.pointer.down
-        if click or down:
-            self._acts += 1
         if self._drag is not None:
             return self._divider_drag(px, py, down)
         lay = ws.layout
@@ -1666,6 +1672,7 @@ class EditorDesk(Layer):
                 return False
             got = bool(self._in_pane(tab, body, layer.handle_pointer,
                                      px - body[0], py - body[1], click))
+            self._in_code = tab in _CODE_TABS
             if click or tab != "code":
                 self._owe_restart(tab)         # Code's pointer edits are taps (its keys)
             if tab == "scene" and self._blocks():

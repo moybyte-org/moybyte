@@ -863,6 +863,36 @@ def test_a_settled_code_pane_paints_nothing_with_its_more_menu_open(desk):
     assert ws._frames_drawn == drawn
 
 
+def _code_ready(ws, drv):
+    _tap(drv, ord("2"), 1)                      # Code: the Code pane focused
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    for _ in range(4):
+        drv.frame(DT)
+    d = ws.editor_desk
+    _tab, _layer, _pane, b = d._code_pane()
+    return d, (b[0], b[1], b[0] + b[2], b[1] + b[3])
+
+
+def test_a_drag_in_the_code_pane_draws_the_pane_alone(desk):
+    """A press and its drag inside the focused Code pane reach its text
+    alone: every frame of the drag draws that pane and names it as what
+    changed, as a key's does."""
+    ws, drv = desk
+    d, pane = _code_ready(ws, drv)
+    x, y = (pane[0] + pane[2]) // 2, (pane[1] + pane[3]) // 2
+    drv.touch(x, y)
+    drv.frame(DT)
+    got = []
+    for i in range(1, 8):
+        drv.touch_drag(x, y - 12 * i)
+        drv.frame(DT)
+        got.append(d.changed())
+    drv.touch_up()
+    drv.frame(DT)
+    assert got == [list(pane)] * len(got)
+
+
 def test_at_800_the_sound_panes_menu_picks_a_sound(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(800, 480),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
