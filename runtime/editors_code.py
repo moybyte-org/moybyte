@@ -225,14 +225,34 @@ class CodeEditor:
             self.dirty = True
             self._scroll()
 
+    def delete(self):
+        """Forward delete: the character after the caret, or the next line
+        joined onto this one at its end; a selection is deleted."""
+        if self.has_selection():
+            self.delete_selection()
+            return
+        self.sel = None
+        ln = self.lines[self.row]
+        if self.col < len(ln):
+            self.lines[self.row] = ln[:self.col] + ln[self.col + 1:]
+        elif self.row < len(self.lines) - 1:
+            self.lines[self.row] = ln + self.lines[self.row + 1]
+            del self.lines[self.row + 1]
+        else:
+            return
+        self.dirty = True
+        self._scroll()
+
     def key(self, code):
         """Feed one keyboard ASCII byte. Returns True if it changed the text."""
         if not code:
             return False
         if code in (0x0D, 0x0A):             # enter / return
             self.newline()
-        elif code in (0x08, 0x7F):           # backspace / delete
+        elif code == 0x08:
             self.backspace()
+        elif code == 0x7F:                   # Delete: forward
+            self.delete()
         elif code == 0x09:                   # tab: indent the selection, else 2 spaces
             if self.has_selection():
                 self.indent_selection()

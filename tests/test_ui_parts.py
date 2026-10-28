@@ -1350,6 +1350,15 @@ def test_a_focused_field_types_each_key_once_and_backspace_takes_a_character():
     assert r.out["text"] == "ab"
 
 
+def test_delete_in_a_field_takes_nothing_the_caret_is_its_end():
+    r = _field_page("ab")
+    r.frame()
+    r.frame()
+    assert r.frame(typed=127)["text"] == "ab"
+    r.frame()
+    assert r.frame(typed=8)["text"] == "a"
+
+
 def test_a_field_backspaces_a_whole_utf8_character_and_keeps_to_its_max():
     r = _field_page("xé", mx=4)
     r.frame()

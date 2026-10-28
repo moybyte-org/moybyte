@@ -3676,7 +3676,7 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
         int k = c->typed;
         c->typed = 0;
         for (int i = c->typed_n > 0 ? c->typed_n : 1; i > 0; i--) {
-            if (k == 8 || k == 127) {
+            if (k == 8) {           // Delete: the caret is the end, nothing after it
                 while (len > 0) {
                     len--;
                     if ((buf[len] & 0xC0) != 0x80) {

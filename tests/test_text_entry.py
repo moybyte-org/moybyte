@@ -2,13 +2,12 @@
 through it.
 
 `editors_base.text_key` is the key ladder every typed field on the console
-shares (Backspace/Delete trim, Enter commits, Esc cancels, printable ASCII
-appends under a cap); `TextEntry` is a buffer over it that reads
-`inp.last_key` through a `KeyEdge`, so one physical press types one
-character. It used to be six hand-rolled copies with six edge trackers (the
+shares (Backspace trims, Delete finds nothing after the caret at the end,
+Enter commits, Esc cancels, printable ASCII appends under a cap);
+`TextEntry` is a buffer over it that reads `inp.last_key` through a
+`KeyEdge`, so one physical press types one character. It used to be six hand-rolled copies with six edge trackers (the
 block keypads, CART INFO, NEW SCRIPT, the wifi password, the scene TAG, the
-Files rename), two of which did not trim on Delete (127) and none of which
-agreed on where the edge was seeded.
+Files rename), none of which agreed on where the edge was seeded.
 
 The second thing pinned here is `widgets.arm_prompt` + the GUARDED edge: the
 tap/key that OPENS a modal prompt (a held A / Enter byte, the tap on the
@@ -32,7 +31,7 @@ class _Inp:
 
 def test_text_key_is_the_one_ladder():
     assert text_key("ab", 8, 24) == ("a", TE_EDIT)
-    assert text_key("ab", 127, 24) == ("a", TE_EDIT)        # Delete trims too
+    assert text_key("ab", 127, 24) == ("ab", None)          # Delete: nothing after the end
     assert text_key("", 8, 24) == ("", TE_EDIT)             # a trim on empty is quiet
     assert text_key("ab", 13, 24) == ("ab", TE_COMMIT)
     assert text_key("ab", 10, 24) == ("ab", TE_COMMIT)
@@ -261,7 +260,9 @@ def test_wifi_password_prompt_does_not_connect_on_the_enter_that_opened_it(tmp_p
     for ch in "pw":
         key(ord(ch))
     assert sl.wifi_pw.text == "pw"
-    key(127)                                      # Delete trims like Backspace now
+    key(127)                                      # Delete: the caret is the end
+    assert sl.wifi_pw.text == "pw"
+    key(8)
     assert sl.wifi_pw.text == "p"
     key(27)
     assert sl.wifi_pick is None and not ws.input.text_mode
@@ -347,3 +348,18 @@ def test_the_dialogs_are_captioned_fields_and_the_tdeck_has_no_button_row(tmp_pa
                 cl._close_prompt()
         finally:
             ui_draw.input_kind("keys")
+
+
+def test_a_cards_dialogs_field_takes_nothing_on_delete():
+    """A dialog's field (Cart info, New script) types at its end, so Delete
+    has nothing after the caret; Backspace trims."""
+    from runtime.cards_layer import _Prompt
+    p = _Prompt("newf", "New script", (("Name", "name", 16),), None, "Create")
+    for ch in "ab":
+        p.key(ord(ch))
+    assert not p.types(127)
+    p.key(127)
+    assert p.texts == ["ab"]
+    assert p.types(8)
+    p.key(8)
+    assert p.texts == ["a"]

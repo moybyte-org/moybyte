@@ -882,7 +882,7 @@ class CodeLayer:
         # Edit the find query (the find field has the keyboard while it's open).
         if code in (0x0D, 0x0A):               # Enter the next match, Shift+Enter the last
             self._find_run(not getattr(self.ws.input, "mods", 0) & _SHIFT)
-        elif code in (0x08, 0x7F):             # backspace -> trim + re-search
+        elif code == 0x08:                     # backspace -> trim + re-search
             self._find_q = self._find_q[:-1]
             self._find_run(True, reset=True)
             self.ws.mark_dirty()
@@ -987,9 +987,9 @@ class CodeLayer:
         return self._POPUP_MAX if _desk() else 6
 
     def _jump_type(self, k):
-        if k in (8, 127):
+        if k == 8:
             self._jump_q = self._jump_q[:-1]
-        else:
+        elif k != 127:
             self._jump_q += chr(k)
         self._jump_sel = 0
         self.ws.mark_dirty()

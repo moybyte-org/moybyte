@@ -262,6 +262,26 @@ def test_the_arrows_step_the_codes_caret_and_shift_selects(tmp_path, path):
     assert ed.row == 1 and not ed.has_selection()
 
 
+def test_delete_takes_the_character_after_the_caret_and_backspace_the_one_before(
+        tmp_path, path):
+    """Delete is forward delete in the Code tab on every keyboard path: the
+    character after the caret, the next line at a line's end; Backspace the
+    one before."""
+    ws, kb, ed = _code(tmp_path, path, "abcd\nef")
+    ed.row, ed.col = 0, 1
+    ed.sel = None
+    kb.tap(0x7F)
+    assert ed.lines == ["acd", "ef"] and (ed.row, ed.col) == (0, 1)
+    kb.tap(0x08)
+    assert ed.lines == ["cd", "ef"] and (ed.row, ed.col) == (0, 0)
+    ed.col = 2
+    kb.tap(0x7F)
+    assert ed.lines == ["cdef"] and (ed.row, ed.col) == (0, 2)
+    ed.col = 4
+    kb.tap(0x7F)
+    assert ed.lines == ["cdef"], "nothing after the last character"
+
+
 def test_a_held_arrow_waits_the_repeat_delay_then_steps_at_its_rate(tmp_path, path):
     """An arrow held over the Code tab's caret: one step as it goes down,
     none for REPEAT_DELAY_MS, then one every REPEAT_RATE_MS (the table's,

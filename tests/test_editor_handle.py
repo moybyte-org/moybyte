@@ -197,6 +197,18 @@ def test_a_blurred_handle_still_takes_a_key_the_skin_feeds_it(tmp_path):
     assert ed.text() == "ab"
 
 
+def test_delete_takes_the_character_after_the_caret(tmp_path):
+    """A handle's Delete (Notes) is forward delete; Backspace goes back."""
+    ws = build_ws(tmp_path)
+    ed = _handle(ws, "manual")
+    for ch in "abc":
+        ed.key(ord(ch))
+    ed.ed.col = 1
+    assert ed.key(0x7F) is not False and ed.text() == "ac"
+    ed.key(0x08)
+    assert ed.text() == "c"
+
+
 # ---------------------------------------------------------------------------
 # undo / clipboard
 # ---------------------------------------------------------------------------

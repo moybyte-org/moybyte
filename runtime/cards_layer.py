@@ -95,7 +95,7 @@ class _Prompt:
     def types(self, ch):
         """Whether typed byte `ch` changes the focused field's text."""
         t = self.texts[self.field]
-        return (ch in (8, 127) and t != "") or (32 <= ch < 127 and len(t) < self.caps[self.field])
+        return (ch == 8 and t != "") or (32 <= ch < 127 and len(t) < self.caps[self.field])
 
     def say(self, msg):
         """Set the line under the fields that says why it stayed open."""
@@ -120,7 +120,7 @@ class _Prompt:
         if ch == 27:
             return "cancel"
         t = self.texts[self.field]
-        if ch in (8, 127):
+        if ch == 8:                 # Delete: nothing lies after the caret
             self.texts[self.field] = t[:-1]
         elif 32 <= ch < 127 and len(t) < self.caps[self.field]:
             self.texts[self.field] = t + chr(ch)

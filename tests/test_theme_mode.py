@@ -63,6 +63,24 @@ def test_the_door_opens_a_copy_on_config_and_done_comes_back(tmp_path):
     assert ws.wm.top_kind() == "appearance"
 
 
+def test_delete_in_config_takes_the_character_after_the_caret(tmp_path):
+    from runtime import host_app
+    ws = build_ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_app(ws._apps_by_id["appearance"])
+    drv.frame(1 / 30)
+    doc = _open(ws)
+    ed = doc.ed
+    ed.row, ed.col, ed.sel = 0, 0, None
+    line = ed.lines[0]
+    for code in (0x7F, 0x08):
+        drv.key_down(code)
+        drv.frame(1 / 30)
+        drv.key_up(code)
+        drv.frame(1 / 30)
+    assert ed.lines[0] == line[1:] and (ed.row, ed.col) == (0, 0)
+
+
 def test_esc_and_the_bars_back_are_done(tmp_path):
     from runtime import host_app
     ws = build_ws(tmp_path)
