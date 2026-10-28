@@ -1,6 +1,7 @@
 """Shift frames in the shipped apps (docs/scroll_and_text_2026-10.md §3.3,
 §3.4, §13), on the full-screen console the T-Deck runs: Settings' rows, its
-Licences and Achievements pages, My Art's drawings and Get Carts' shelf,
+Licences and Achievements pages, My Art's drawings, Get Carts' shelf, Files'
+list of projects, Storybook's stories and Appearance's rows,
 dragged, flung and stepped through by keys, on one, two and three buffers
 presented in turn.
 
@@ -18,7 +19,7 @@ import pytest
 
 from cart_store_fixtures import MemNet, Repo
 from runtime import host_app, moy_carts, ui_draw
-from ws_helpers import no_unlock_banner, quiesce
+from ws_helpers import no_unlock_banner, quiesce, seed_stories
 
 _DT = 1 / 30
 _C = ui_draw._C
@@ -32,7 +33,7 @@ def clock(monkeypatch):
     """One clock for both consoles, a frame's worth a frame: what an app
     times (a cover's budget, a toast) times the same on each."""
     import sys
-    from runtime import getcarts_app, myart_app, ticks  # noqa: F401 -- loaded, then patched
+    from runtime import getcarts_app, myart_app, storybook_app, ticks  # noqa: F401 -- loaded, then patched
     for mod in list(sys.modules.values()):
         f = getattr(mod, "__file__", None) or ""
         if "/runtime/" in f.replace("\\", "/") and hasattr(mod, "_ticks_ms"):
@@ -110,6 +111,21 @@ def _console(tmp_path, app, ships):
         app_ = ws._apps_by_id["getcarts"]
         app_._inst = _SameFree(app_._inst)
         assert ws.open_app(app_) is not False
+    else:
+        if app == "storybook":
+            seed_stories(ws)
+        app_ = ws._apps_by_id[app]
+        assert ws.open_app(app_) is not False
+        if app == "files":
+            # the list of projects, every cover made: which rows a frame's
+            # floor reaches decides which covers are asked for first
+            f = getattr(app_, "_inst", app_)
+            f.level = "files"
+            f._focus = "files"
+            for _ in range(500):
+                ws.covers.begin_frame()
+                if all(f._nav.cover(r[4]) is not False for r in f.rows):
+                    break
     return ws
 
 
@@ -204,7 +220,8 @@ class Pair:
         return len(moved) / max(1, len(self.kinds))
 
 
-APPS = ("settings", "licences", "achievements", "myart", "getcarts")
+APPS = ("settings", "licences", "achievements", "myart", "getcarts", "files", "storybook",
+        "appearance")
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))
@@ -269,3 +286,116 @@ def test_a_move_that_leaves_pictures_undrawn_pays_whatever_the_copy_costs(tmp_pa
     p.drag(lay.cx + lay.cw // 2, lay.cy + lay.ch * 3 // 4, -lay.ch // 2)
     p.settle()
     assert p.share() > 0
+
+
+class _NoMark:
+    """An app's damage role that marks nothing: a change made under it
+    reaches the next frames by the page's gen alone, as one that came from
+    the store would."""
+
+    def __init__(self, d):
+        self._d = d
+
+    def __getattr__(self, name):
+        return getattr(self._d, name)
+
+    def all(self):
+        pass
+
+    def again(self):
+        pass
+
+
+def _app(ws, app):
+    a = ws._apps_by_id[app]
+    return getattr(a, "_inst", a)
+
+
+def _renamed(ws):
+    """Files: the list's last row renamed (the drag left the list's end in
+    view), a row no mark moves."""
+    f = _app(ws, "files")
+    keep = f.rows[f.cur][0] if f.cur >= 0 else None
+    name, kind = f.rows[-1][0], f.rows[-1][1]
+    res = f._store.rename(kind, name, name + " b")
+    assert res[1] is None
+    f._refresh(keep=keep)
+
+
+def _shown_story(sb):
+    """The story whose card shows most and holds no mark: the frames after
+    a change to it move its pixels unless its gen moves."""
+    g = sb.layout.stories_grid
+    best, most = None, 0
+    for r in sb._rows:
+        b = sb._ui.box(r.o["id"])
+        if b is None or r.o["id"] == sb._focused:
+            continue
+        shows = min(b[1] + b[3], g[1] + g[3]) - max(b[1], g[1])
+        if shows > most:
+            best, most = r.entry, shows
+    assert best is not None, "no story's card shows"
+    return best
+
+
+def _story_renamed(ws):
+    sb = _app(ws, "storybook")
+    sb._menu_story = _shown_story(sb)
+    sb.typed = "Renamed"
+    sb._rename_done()
+
+
+def _story_turned(ws):
+    """Storybook: a shown story's first page turned over, another slide
+    first."""
+    from runtime import story_doc as D
+    sb = _app(ws, "storybook")
+    e = _shown_story(sb)
+    doc = D.copy(e["doc"])
+    doc["slides"].insert(0, D.layout_slide("blank", 9))
+    e["doc"] = doc
+    if sb.cards is not None:
+        sb.cards.drop(e["name"])
+
+
+CHANGES = {"file renamed": ("files", _renamed), "story renamed": ("storybook", _story_renamed),
+           "story page turned": ("storybook", _story_turned)}
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+@pytest.mark.parametrize("change", sorted(CHANGES))
+def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
+    """What a page shows changed with no mark of the app's: the page's gen
+    moves, so the frames after it draw it again, not the last frame's pixels
+    moved."""
+    app, fn = CHANGES[change]
+    p = Pair(tmp_path, app, bufs)
+    if app == "files":
+        from runtime import files_app
+        for ws in (p.a, p.b):
+            for i in range(20):
+                moy_carts.save_file("drawings", "Drawing %02d" % i,
+                                    moy_carts.encode_moyimg(32, 24, bytes([8 + i % 8]) * 768),
+                                    ws.carts_root)
+            _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
+            f = _app(ws, "files")
+            f._refresh_counts()
+            f.open_place(files_app.ART)
+        p.settle()
+    lay = p.a.layout
+    p.drag(lay.cx + lay.cw // 2, lay.cy + lay.ch * 3 // 4, -lay.ch, steps=3)
+    p.settle()
+    for ws in (p.a, p.b):
+        a = _app(ws, app)
+        d = a._damage
+        a._damage = _NoMark(d)
+        try:
+            fn(ws)
+        finally:
+            a._damage = d
+    for _ in range(3):
+        p.frame()
+    p.settle()
+    p.keys("down", 2)
+    p.keys("up", 1)
+    p.settle()

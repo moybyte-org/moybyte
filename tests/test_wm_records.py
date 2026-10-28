@@ -19,7 +19,7 @@ import pytest
 
 from cart_store_fixtures import MemNet, Repo
 from runtime import ui_draw
-from ws_helpers import build_desktop_ws, make_drv, no_unlock_banner
+from ws_helpers import build_desktop_ws, make_drv, no_unlock_banner, seed_stories
 
 _DT = 1 / 30
 _C = ui_draw._C
@@ -30,7 +30,7 @@ _NOW = [100000]
 def clock(monkeypatch):
     """One clock for both desks, a frame's worth a frame."""
     import sys
-    from runtime import getcarts_app, myart_app, ticks  # noqa: F401 -- loaded, then patched
+    from runtime import getcarts_app, myart_app, storybook_app, ticks  # noqa: F401 -- loaded, then patched
     for mod in list(sys.modules.values()):
         f = getattr(mod, "__file__", None) or ""
         if "/runtime/" in f.replace("\\", "/") and hasattr(mod, "_ticks_ms"):
@@ -106,12 +106,19 @@ def _open(ws, root, app):
         a._inst = _SameFree(a._inst)
         assert ws.open_app(a) is not False
     else:
+        if app == "storybook":
+            seed_stories(ws)
         assert ws.open_app(ws._apps_by_id[app]) is not False
 
 
-def _desk(tmp_path, app, ships, apps=()):
+# The Waveshare P4's desk as it ships: the desk's size class at the scale 1
+# (the suite's other desk takes the handheld's class at 2).
+P4 = {"panel_diagonal_in": 7.0, "font_scale": 1}
+
+
+def _desk(tmp_path, app, ships, apps=(), board=None):
     root = tmp_path / ("ships" if ships else "whole")
-    ws = build_desktop_ws(root)
+    ws = build_desktop_ws(root, **(board or {}))
     no_unlock_banner(ws)
     ws.bar_layer._clock_text = lambda: "10:30"
     ws.wallpaper.is_animating = lambda dt: False
@@ -138,9 +145,9 @@ class Pair:
     """The session on both desks, loop pass by loop pass; each desk's
     root presents `bufs` buffers in turn."""
 
-    def __init__(self, tmp_path, app, bufs, apps=()):
-        self.a = _desk(tmp_path, app, True, apps)
-        self.b = _desk(tmp_path, app, False, apps)
+    def __init__(self, tmp_path, app, bufs, apps=(), board=None):
+        self.a = _desk(tmp_path, app, True, apps, board)
+        self.b = _desk(tmp_path, app, False, apps, board)
         self.da = make_drv(self.a)
         self.db = make_drv(self.b)
         self.bufs = bufs
@@ -272,13 +279,16 @@ class Pair:
 
 APPS = ("settings", "licences", "achievements", "myart", "getcarts", "files",
         "storybook", "appearance", "calc")
-SHIFTS = ("settings", "licences", "achievements", "myart", "getcarts")
+SHIFTS = ("settings", "licences", "achievements", "myart", "getcarts", "files",
+          "storybook", "appearance")
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))
 @pytest.mark.parametrize("app", APPS)
 def test_drags_flings_keys_and_held_keys_match_whole_repaints(tmp_path, app, bufs):
     p = Pair(tmp_path, app, bufs)
+    if app == "files":
+        _files_list(p)
     _, _, _, ch = p.win(p.a.wm._focus).content_rect()
     kind = p.a.wm._focus
     p.drag(kind, -ch // 2)
@@ -298,6 +308,244 @@ def test_drags_flings_keys_and_held_keys_match_whole_repaints(tmp_path, app, buf
     if app in SHIFTS:
         assert p.share() > 0.4, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
             app, p.share(), p.kinds)
+
+
+def _inst(ws, cls):
+    """The open app whose class is named `cls`."""
+    for app, _t in ws._apps:
+        a = getattr(app, "_inst", app)
+        if type(a).__name__ == cls:
+            return a
+    raise AssertionError("no %s open" % cls)
+
+
+def _files_list(p):
+    """Files' list of projects open on both desks (on a column of its own
+    the places come first) with every cover made: which rows a frame's
+    floor reaches decides which covers are asked for first, so the desks
+    would otherwise show a cover landing on different frames."""
+    for ws in (p.a, p.b):
+        f = _inst(ws, "FilesAppLayer")
+        if f.level != "files":
+            f.level = "files"
+            f._focus = "files"
+        for _ in range(500):
+            ws.covers.begin_frame()
+            if all(f._nav.cover(r[4]) is not False for r in f.rows):
+                break
+        ws._dirty = True
+    p.settle()
+
+
+# The Waveshare P4's desk: what each app's pages show on it, every frame's
+# change byte for byte against whole repaints. Licences' list is the desk's
+# scroll region beside the text (the handheld's is a page of its own).
+P4_APPS = ("licences", "files", "storybook", "appearance")
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+@pytest.mark.parametrize("app", P4_APPS)
+def test_the_p4_desk_shifts_its_apps_pages_byte_for_byte(tmp_path, app, bufs):
+    p = Pair(tmp_path, app, bufs, board=P4)
+    kind = p.a.wm._focus
+    if app == "files":
+        _files_list(p)
+        assert _inst(p.a, "FilesAppLayer").layout.two
+    _, _, _, ch = p.win(kind).content_rect()
+    del p.kinds[:]
+    p.drag(kind, -ch // 2)
+    p.settle()
+    p.drag(kind, ch // 3, steps=3, fy=0.25)
+    p.settle()
+    p.keys("down", 4)
+    p.keys("up", 2)
+    p.settle()
+    p.hold("down", 8)
+    p.settle()
+    assert p.share() > 0.5, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
+        app, p.share(), p.kinds)
+    if app != "appearance":           # its rows fit the desk's window: they never move
+        assert "shift" in p.kinds
+
+
+def _drawings(ws, n=20):
+    from runtime import moy_carts
+    for i in range(n):
+        moy_carts.save_file("drawings", "Drawing %02d" % i,
+                            moy_carts.encode_moyimg(32, 24, bytes([8 + i % 8]) * 768),
+                            ws.carts_root)
+    _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
+
+
+def _art(p):
+    """Files' Art place on both desks, its drawings listed."""
+    from runtime import files_app
+    for ws in (p.a, p.b):
+        _drawings(ws)
+        f = _inst(ws, "FilesAppLayer")
+        f._refresh_counts()
+        f.open_place(files_app.ART)
+        f._focus = "files"
+    p.settle()
+
+
+def _shown_row(f):
+    """The current row's name: one the list shows."""
+    return f.rows[f.cur][0]
+
+
+def _file_added(ws):
+    from runtime import moy_carts
+    f = _inst(ws, "FilesAppLayer")
+    moy_carts.save_file("drawings", "Drawing 99",
+                        moy_carts.encode_moyimg(32, 24, bytes([3]) * 768), ws.carts_root)
+    f._refresh(keep=_shown_row(f))
+
+
+def _file_renamed(ws):
+    """The last row renamed (the drag left the list's end in view): a row
+    no mark moves."""
+    f = _inst(ws, "FilesAppLayer")
+    keep = _shown_row(f)
+    name = f.rows[-1][0]
+    res = f._store.rename("drawings", name, name + "b")
+    assert res[1] is None
+    f._refresh(keep=keep)
+
+
+def _file_deleted(ws):
+    f = _inst(ws, "FilesAppLayer")
+    f._act("DEL")
+
+
+def _shown_story(sb):
+    """The story whose card shows most and holds no mark: the frames after
+    a change to it move its pixels unless its gen moves."""
+    g = sb.layout.stories_grid
+    best, most = None, 0
+    for r in sb._rows:
+        b = sb._ui.box(r.o["id"])
+        if b is None or r.o["id"] == sb._focused:
+            continue
+        shows = min(b[1] + b[3], g[1] + g[3]) - max(b[1], g[1])
+        if shows > most:
+            best, most = r.entry, shows
+    assert best is not None, "no story's card shows"
+    return best
+
+
+def _story(ws):
+    return _shown_story(_inst(ws, "StorybookAppLayer"))
+
+
+def _story_added(ws):
+    from runtime import story_doc as D, moy_carts
+    sb = _inst(ws, "StorybookAppLayer")
+    doc = D.new_doc("A new story")
+    moy_carts.save_file("stories", "zz/story.json", D.write(doc), ws.carts_root)
+    sb._scan()
+
+
+def _story_renamed(ws):
+    sb = _inst(ws, "StorybookAppLayer")
+    sb._menu_story = _story(ws)
+    sb.typed = "Renamed"
+    sb._rename_done()
+
+
+def _story_turned(ws):
+    """The focused story's first page turned over: another slide first."""
+    from runtime import story_doc as D
+    sb = _inst(ws, "StorybookAppLayer")
+    e = _story(ws)
+    doc = D.copy(e["doc"])
+    doc["slides"].insert(0, D.layout_slide("blank", 9))
+    e["doc"] = doc
+    if sb.cards is not None:
+        sb.cards.drop(e["name"])
+
+
+def _theme_changed(ws):
+    a = _inst(ws, "AppearanceAppLayer")
+    a._theme.set("machine" if a._ch["theme"] != "machine" else "moy")
+    a._acted()
+
+
+def _accent_changed(ws):
+    a = _inst(ws, "AppearanceAppLayer")
+    a._change("accent", a._accents[3][1])
+
+
+CHANGES = {"file added": ("files", _file_added), "file renamed": ("files", _file_renamed),
+           "file deleted": ("files", _file_deleted), "story added": ("storybook", _story_added),
+           "story renamed": ("storybook", _story_renamed),
+           "story page turned": ("storybook", _story_turned),
+           "theme changed": ("appearance", _theme_changed),
+           "accent changed": ("appearance", _accent_changed)}
+
+
+class _NoMark:
+    """An app's damage role that marks nothing: a change made under it
+    reaches the next frames by the page's gen alone, as one that came from
+    the store would."""
+
+    def __init__(self, d):
+        self._d = d
+
+    def __getattr__(self, name):
+        return getattr(self._d, name)
+
+    def all(self):
+        pass
+
+    def again(self):
+        pass
+
+
+_CLS = {"files": "FilesAppLayer", "storybook": "StorybookAppLayer",
+        "appearance": "AppearanceAppLayer"}
+
+
+def _gen(ws, app):
+    if app == "files":
+        return _inst(ws, "FilesAppLayer")._files_o["gen"]
+    if app == "storybook":
+        return _inst(ws, "StorybookAppLayer")._stories_o["gen"]
+    return _inst(ws, "AppearanceAppLayer")._page_o["gen"]
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+@pytest.mark.parametrize("change", sorted(CHANGES))
+def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
+    """What a page shows changed under a coast and between key steps: its
+    gen moves, so the frames after it draw the page again, not the last
+    frame's pixels moved."""
+    app, fn = CHANGES[change]
+    p = Pair(tmp_path, app, bufs, board=P4)
+    kind = p.a.wm._focus
+    if app == "files":
+        _art(p)
+    p.keys("down", 2)
+    p.settle()
+    _, _, _, ch = p.win(kind).content_rect()
+    p.drag(kind, -ch, steps=3)
+    p.frame()
+    was = _gen(p.a, app)
+    for ws in (p.a, p.b):
+        a = _inst(ws, _CLS[app])
+        d = a._damage
+        a._damage = _NoMark(d)
+        try:
+            fn(ws)
+        finally:
+            a._damage = d
+    p.frame()
+    p.frame()
+    assert _gen(p.a, app) != was, "%s left the page's gen as it was" % change
+    p.settle()
+    p.keys("down", 2)
+    p.keys("up", 1)
+    p.settle()
 
 
 def _tap_widget(p, name):

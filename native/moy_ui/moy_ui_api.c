@@ -311,7 +311,8 @@ static moy_ui_keep_t *keep(moy_ui_ctx_t *c, uint32_t id, int make) {
     }
     free_->id = id;
     free_->a = free_->b = 0;
-    free_->over = free_->foot = free_->peek = 0;
+    free_->over = free_->foot = free_->peek = free_->rh = 0;
+    free_->kd = 0;
     free_->seen = 1;
     memset(&free_->sc, 0, sizeof(free_->sc));
     return free_;
@@ -354,6 +355,53 @@ static const moy_ui_stop_t *page_of_keep(const moy_ui_stop_t *v, int n,
 }
 
 // Glide page `p`'s scroll to `to`: 1 where that moves it.
+static int aim(moy_ui_keep_t *k, const moy_ui_stop_t *p, int32_t to);
+
+// The row a placed table's key step lands on (`t` the table's stop as the
+// last frame drew it), its rows' scroll aimed there at begin as the table's
+// pass would aim it, so the frame's plan knows the move.
+static void table_reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *v, int n,
+                         const moy_ui_stop_t *t) {
+    moy_ui_keep_t *k = keep_of(c, t->id);
+    if (k == NULL || !(k->kd & MOY_UI_KD_TABLE) || k->rh <= 0) {
+        return;
+    }
+    const moy_ui_stop_t *p = page_of_keep(v, n, k);
+    if (p == NULL) {
+        return;
+    }
+    int rh = k->rh, count = k->b / rh;
+    int cur = t->row + c->step_y;
+    cur = cur >= count ? count - 1 : cur;
+    cur = cur < 0 ? 0 : cur;
+    int glide = (k->sc.flags & MOY_UI_SCROLL_GLIDE) != 0;
+    int to = glide ? k->sc.target : k->a;
+    int was = to;
+    if (cur * rh < to) {
+        to = cur * rh;
+    } else if ((cur + 1) * rh > to + p->b.h) {
+        to = (cur + 1) * rh - p->b.h;
+    }
+    if (to == was) {
+        return;                         // the motion under way, if any, steps with every page's
+    }
+    int32_t offset = k->a;
+    if (c->in[MOY_UI_IN_DT] <= 0) {
+        int most = k->b - p->b.h;
+        to = to > most ? most : to;
+        k->a = to < 0 ? 0 : to;
+        moy_ui_scroll_land(&k->sc, &offset);
+        return;
+    }
+    if (moy_ui_scroll_moving(&k->sc)) {
+        // the motion under way takes this frame's step first, as every
+        // page's does; the new glide takes its own with them
+        moy_ui_scroll_tick(&k->sc, (float)c->in[MOY_UI_IN_DT], &offset, k->b, p->b.h);
+        k->a = offset;
+    }
+    moy_ui_scroll_glide_to(&k->sc, offset, to, 0, k->b, p->b.h);
+}
+
 static int aim(moy_ui_keep_t *k, const moy_ui_stop_t *p, int32_t to) {
     int32_t content, extent;
     span_of(p, k, &content, &extent);
@@ -416,6 +464,18 @@ static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_
 // -- a frame -------------------------------------------------------------------------
 
 static void floor_build(moy_ui_ctx_t *c, int p0, int n, int of);
+static void table_floor(moy_ui_ctx_t *c, int base, int rh, int was, int was_mark, int now,
+                        int mark, int pic, int of);
+
+// A placed table's own stop (not its rows' view) among the frame's stops.
+static const moy_ui_stop_t *table_of(const moy_ui_stop_t *v, int n, uint32_t id) {
+    for (int i = 0; i < n; i++) {
+        if (v[i].id == id && !(v[i].flags & STOP_PAGE)) {
+            return &v[i];
+        }
+    }
+    return NULL;
+}
 
 static int same_box(moy_ui_box_t a, moy_ui_box_t b) {
     return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
@@ -436,7 +496,7 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
                && same_box(c->was_surface, c->surface);
     // a press, an activation, a stepped value, a hover, an overlay: whole
     if (!same || owed || over || c->modal || c->pop_prev.w > 0 || c->pop_gone || c->act
-        || c->step_x || c->step_y || (p & MOY_UI_P_EDGE) || (live && !held)
+        || c->step_x || (p & MOY_UI_P_EDGE) || (live && !held)
         || (held && c->gesture != 2) || (p & MOY_UI_P_MIDDLE)) {
         return;
     }
@@ -478,6 +538,10 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     if (held && c->drag_page != r->id) {
         return;                         // a drag of another page
     }
+    int table = (r->kd & MOY_UI_KD_TABLE) != 0;
+    if (c->step_y && !(table && c->focus == r->id)) {
+        return;                         // a row step but a placed table's on its own rows
+    }
     const moy_ui_stop_t *rp = page_of_keep(v, n, r);
     int dy = (int)(r->drawn - r->a);
     if (rp == NULL || rp->b.w <= 0 || rp->b.h <= 0 || (dy < 0 ? -dy : dy) >= rp->b.h
@@ -491,7 +555,25 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     // the floor this input asks for, as R's opening will build it: where it
     // is most of R, moving the rest costs more than it saves
     c->fl_n = 0;
-    floor_build(c, r->s0, r->sn, rp->b.y + rp->b.h);
+    const moy_ui_stop_t *tp = table ? table_of(v, n, r->id) : NULL;
+    if (table && (tp == NULL || r->rh <= 0)) {
+        return;
+    }
+    int pic = tp != NULL && (tp->flags & STOP_PIC);
+    if (tp != NULL) {
+        // the rows the step lands on, as the table's pass will find them
+        int count = r->b / r->rh, now = tp->row;
+        int mark = (tp->st & MOY_UI_ST_FOCUS) != 0, will = c->focus == r->id && !c->elsewhere;
+        if (c->step_y && now >= 0) {
+            now += c->step_y;
+            now = now >= count ? count - 1 : now;
+            now = now < 0 ? 0 : now;
+        }
+        table_floor(c, rp->b.y - r->a, r->rh, tp->row, mark, now, will, pic,
+                    rp->b.y + rp->b.h);
+    } else {
+        floor_build(c, r->s0, r->sn, rp->b.y + rp->b.h);
+    }
     int32_t rows = 0;
     for (int i = 0; i < c->fl_n; i++) {
         rows += c->fl[i].h;
@@ -500,6 +582,9 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     // undrawn: what the move saves beyond plain rows (moy_ui_api_shift_plan)
     int32_t pics = 0;
     int top = rp->b.y, foot = rp->b.y + rp->b.h;
+    if (pic) {
+        pics = rp->b.h - rows;      // a picture on every row
+    }
     for (int i = r->s0; i < r->s0 + r->sn; i++) {
         if (!(v[i].flags & STOP_PIC)) {
             continue;
@@ -598,6 +683,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->fl_on = c->fl_stage = c->fl_n = c->fl_struct = c->fl_dirty = c->fl_susp = 0;
     c->fl_lost = c->at_last = c->fl_cast = 0;
     c->pic_clip = (moy_ui_box_t){0, 0, 0, 0};
+    c->pic_tbl = 0;
     c->fl_pend = 0;
     c->step_rev = 0;
     uint32_t focus0 = c->focus;
@@ -780,6 +866,9 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
             c->focus_box = v[to].b;
             c->focus_name[0] = 0;
             c->reveal = 1;
+        }
+        if (c->step_y && !(f->flags & (STOP_ROWS | STOP_PAGE)) && f->row >= 0) {
+            table_reveal(c, v, n, f);
         }
         if (c->step_y && (f->flags & STOP_ROWS) && f->row >= 0) {
             // a row step on a list or a table on its page: the row's box is
@@ -1366,6 +1455,14 @@ static void clip_out(clip_t *k) {
     }
 }
 
+// Whether rows y..y+h on screen, with a mark's reach about them, meet the
+// clip a draw holds now.
+static int clip_meets(const moy_ui_sink_t *s, int y, int h, int m) {
+    const int32_t *st = ((const moy_canvas_row_t *)s->dst)->st;
+    int y0 = y - st[MOY_ST_CAM_Y];
+    return y0 + h + m > st[MOY_ST_CY0] && y0 - m < st[MOY_ST_CY1];
+}
+
 // The next piece the draw reaches, its clip set: 0 where none is left.
 static int clip_piece(clip_t *k) {
     const moy_ui_ctx_t *c = k->c;
@@ -1808,6 +1905,49 @@ static void floor_build(moy_ui_ctx_t *c, int p0, int n, int of) {
         }
         if (!grew) {
             break;
+        }
+    }
+}
+
+// Rows y0..y1 of a placed table's view join the floor; where the app draws
+// a picture on its rows, as whole rows (row 0's top at `base`), so a
+// picture lies in one rect of the floor or in none (ui.card_clip).
+static void table_strip(moy_ui_ctx_t *c, int y0, int y1, int base, int rh, int pic) {
+    if (pic) {
+        y0 = base + moy_ui_fdiv(y0 - base, rh) * rh;
+        y1 = base + moy_ui_fdiv(y1 - base + rh - 1, rh) * rh;
+    }
+    floor_strip(c, y0, y1);
+}
+
+// A placed table's view R opens on a shift frame: its floor -- the band
+// the move uncovered, the fades a row tall at either end (the last frame's
+// moved and this one's) and the outer page's foot fade (`of`, its bottom),
+// and where the focused row or its mark moved (`was`, `was_mark` the last
+// frame's; `now`, `mark` this one's), each row reached a mark's reach
+// about it. `base` is row 0's top on screen this frame.
+static void table_floor(moy_ui_ctx_t *c, int base, int rh, int was, int was_mark, int now,
+                        int mark, int pic, int of) {
+    moy_ui_box_t r = c->sh_r;
+    int top = r.y, foot = r.y + r.h, dy = c->sh_dy;
+    if (dy < 0) {
+        table_strip(c, foot + dy, foot, base, rh, pic);
+    } else if (dy > 0) {
+        table_strip(c, top, top + dy, base, rh, pic);
+    }
+    if (dy) {
+        int f = rh < r.h ? rh : r.h;
+        table_strip(c, top, top + f + (dy > 0 ? dy : 0), base, rh, pic);
+        table_strip(c, foot - f + (dy < 0 ? dy : 0), foot, base, rh, pic);
+        table_strip(c, of - FADE_H * c->fs, of, base, rh, pic);
+    }
+    if (was != now || was_mark != mark) {
+        int reach = mark_room(c);
+        if (was >= 0) {
+            table_strip(c, base + was * rh - reach, base + (was + 1) * rh + reach, base, rh, pic);
+        }
+        if (now >= 0) {
+            table_strip(c, base + now * rh - reach, base + (now + 1) * rh + reach, base, rh, pic);
         }
     }
 }
@@ -2548,6 +2688,7 @@ void moy_ui_api_part(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, 
     }
     int none = outside_floor(c, b);
     c->pic_clip = floor_of(c, b);
+    c->pic_tbl = 0;
     out[0] = none ? 0 : b.x;
     out[1] = none ? 0 : b.y;
     out[2] = none ? 0 : b.w;
@@ -2793,6 +2934,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     int head_h = named ? pmetric(c, MOY_UI_M_VALUE_ROW_HEAD) : 0;
     int placed = c->has_at;
     int stacked;
+    c->pic_tbl = 0;
     moy_ui_box_t b = place(c, cap_h + head_h + (count ? count : 1) * rh, &stacked);
     moy_ui_box_t view = {b.x, (int16_t)(b.y + cap_h + head_h), b.w,
                          (int16_t)(b.h - cap_h - head_h > 0 ? b.h - cap_h - head_h : 0)};
@@ -2816,6 +2958,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     if (placed && kp != NULL && c->n_cur < MOY_UI_API_STOPS) {
         // the rows' view: what a drag over them scrolls, by the table's kept offset
         moy_ui_stop_t *p = &c->cur[c->n_cur++];
+        memset(p, 0, sizeof(*p));
         p->id = id;
         p->b = view;
         p->flags = (uint16_t)(STOP_PAGE | (in_dialog(c) ? STOP_MODAL : 0));
@@ -2830,6 +2973,10 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         st = 0;
     }
     int offset = kp != NULL ? kp->a : 0;
+    // what the last frame drew, for a shift frame's floor
+    int32_t was_drawn = kp != NULL ? kp->drawn : 0, was_b = kp != NULL ? kp->b : 0;
+    int32_t was_gen = kp != NULL ? kp->gen : 0;
+    int was_kd = kp != NULL ? kp->kd : 0, was_rh = kp != NULL ? kp->rh : 0;
     int opened = 0;
     if ((st & MOY_UI_ST_ACTIVATED) && count) {
         if (c->tap_y != INT16_MIN) {
@@ -2875,7 +3022,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         }
         kp->a = offset;
         kp->drawn = offset;
-        kp->kd = MOY_UI_KD_PAGE;    // rows that scroll, which no shift frame moves
+        kp->gen = o->gen;
+        kp->rh = (int16_t)rh;
+        kp->s0 = kp->sn = 0;
     }
     rows_note(c, id, cur, view.y);
     if (!placed && focused && c->step_y && cur >= 0
@@ -2896,7 +3045,51 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
     moy_ui_tgeo_t g;
     moy_ui_table_geo(s, b, cols, cols_n, cells, cells_n, c->fs, c->cls, &g);
     if (g.pic && !disabled && c->n_cur > 0 && c->cur[c->n_cur - 1].id == id) {
-        c->cur[c->n_cur - 1].flags |= STOP_PIC;     // the app draws its pictures: no gen
+        // the app draws its pictures: with no gen, the view never shifts
+        c->cur[c->n_cur - 1].flags |= STOP_PIC | (o->has_gen ? STOP_GEN : 0);
+    }
+    int table_r = 0;
+    if (kp != NULL) {
+        kp->kd = (uint8_t)(MOY_UI_KD_PAGE | MOY_UI_KD_TABLE | MOY_UI_KD_DRAWN
+                           | (o->has_gen ? MOY_UI_KD_GEN : 0)
+                           | (g.pic && !o->has_gen ? MOY_UI_KD_BAD : 0));
+        if (s_audit_on) {
+            moy_ui_stop_t *vs = &c->cur[c->n_cur - 1];
+            for (int i = c->n_cur - 1; i >= 0; i--) {
+                if (c->cur[i].id == id && (c->cur[i].flags & STOP_PAGE)) {
+                    vs = &c->cur[i];
+                    break;
+                }
+            }
+            vs->sig = hash(cells, cells_n, (uint32_t)nc);
+        }
+        if (armed(c) && c->fl_stage == 0 && id == c->sh_id) {
+            // the view is R: its floor, from what the last frame drew
+            table_r = 1;
+            c->fl_stage = 1;
+            c->fl_n = 0;
+            c->fl_pend = 0;
+            c->fl_p0 = c->fl_pn = 0;
+            c->fl_s0 = (uint8_t)c->n_cur;
+            moy_ui_box_t r = c->sh_r;
+            const moy_ui_stop_t *q = table_of(c->prev, c->n_prev, id);
+            if (q == NULL || !o->has_gen || !(was_kd & MOY_UI_KD_GEN) || o->gen != was_gen
+                || !same_box(view, r) || offset - was_drawn != -c->sh_dy
+                || was_b != count * rh || was_rh != rh) {
+                c->fl_struct = 1;
+                floor_rows(c, r.y, r.y + r.h, 1);
+            } else {
+                table_floor(c, view.y - offset, rh, q->row, (q->st & MOY_UI_ST_FOCUS) != 0, cur,
+                            (st & MOY_UI_ST_FOCUS) != 0, g.pic, c->page.y + c->page.h);
+                if (s_audit_on) {
+                    const moy_ui_stop_t *pv = page_of_keep(c->prev, c->n_prev, kp);
+                    const moy_ui_stop_t *vs = page_of_keep(c->cur, c->n_cur, kp);
+                    if (pv == NULL || vs == NULL || pv->sig != vs->sig) {
+                        s_audit_fail++;     // rows unlike the last frame's under one gen
+                    }
+                }
+            }
+        }
     }
     clip_t k;
     band_mark(c, b, stacked, 0);
@@ -2919,6 +3112,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         clip_t kv;
         int any = clip_in(&kv, s, view);
         size_t at = 0;
+        int reach = table_r ? mark_room(c) : 0;
         for (int i = 0; any && i < count && at <= cells_n; i++) {
             size_t e = at;
             for (int j = 0; j < nc; j++) {
@@ -2930,7 +3124,7 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                 }
             }
             int ry = view.y + i * rh - offset;
-            if (ry + rh > view.y && ry < view.y + view.h) {
+            if (ry + rh > view.y && ry < view.y + view.h && (!table_r || clip_meets(s, ry, rh, reach))) {
                 int f = (i == cur ? MOY_UI_F_ON : 0) | (disabled ? MOY_UI_F_DISABLED : 0);
                 if ((st & MOY_UI_ST_FOCUS) && o->mark != 0 && i == cur) {
                     f |= MOY_UI_F_FOCUS;
@@ -2962,6 +3156,14 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         }
         clip_out(&kv);
         clip_out(&k);
+    }
+    if (table_r) {
+        ground_due(c, s);
+        if (c->fl_lost && s_audit_on) {
+            s_audit_fail++;
+        }
+        c->fl_stage = 2;
+        c->pic_tbl = 1;
     }
     out[0] = cur;
     out[1] = opened;
@@ -3668,6 +3870,7 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
     card_finish(c, s);
     memset(out, 0, 5 * sizeof(int32_t));
     c->pic_clip = (moy_ui_box_t){0, 0, 0, 0};
+    c->pic_tbl = 0;
     if (!c->grid_open) {
         return;
     }
@@ -3752,6 +3955,7 @@ void moy_ui_api_card(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t titl
         return;                     // a shift frame's: what the app drew there stands
     }
     c->pic_clip = floor_of(c, content);
+    c->pic_tbl = 0;
     out[0] = content.x;
     out[1] = content.y;
     out[2] = content.w;
@@ -3994,6 +4198,27 @@ int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap) {
 }
 
 int moy_ui_api_card_clip(const moy_ui_ctx_t *c, int32_t r[4]) {
+    if (c->pic_tbl) {
+        // a picture on a row of the table drawn last as R: the floor's rect
+        // its row lies in, else none of it
+        rc_t q = {r[0], r[1], r[0] + r[2], r[1] + r[3]};
+        if (!rc_meets(q, rc_of(c->sh_r))) {
+            return 1;
+        }
+        rc_t got = {q.x0, q.y0, q.x0, q.y0};
+        for (int i = 0; i < c->fl_n; i++) {
+            rc_t f = q;
+            if (rc_cut(&f, rc_of(c->fl[i]))) {
+                got = f;
+                break;
+            }
+        }
+        r[0] = got.x0;
+        r[1] = got.y0;
+        r[2] = got.x1 - got.x0;
+        r[3] = got.y1 - got.y0;
+        return 1;
+    }
     moy_ui_box_t f = c->pic_clip;
     if (f.w <= 0 && f.h >= 0) {
         return 0;

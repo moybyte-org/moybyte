@@ -1074,12 +1074,14 @@ cursor or owed pill over it, `content_alone`).
 
 **The verbs engine's floor.** What licenses a shift frame of a verbs page is
 known at the engine's begin: the input it applied (a drag, a coast's or a
-glide's step, a focus move, a key typed into a field) and the generation
-every page and picture inside R carries (`gen` in the override block, the
-app's word that what it draws there is a function of it). A page with no
-gen, a stop `ui.at` placed inside R, a picture with no gen, a press, an
-activation, a stepped value, a hover, a dialog, a popover, a tooltip: the
-frame draws whole. The pass then draws the FLOOR -- the band, the fades,
+glide's step, a focus move, a key typed into a field, a placed table's row
+step) and the generation every page, placed table and picture inside R
+carries (`gen` in the override block, the app's word that what it draws
+there is a function of it). A page with no gen, a stop `ui.at` placed
+inside R, a picture with no gen, a press, an activation, a stepped value, a
+hover, a dialog, a popover, a tooltip: the frame draws whole; so does the
+frame after a pass whose answer changed what it had already drawn
+(`AppHost.again`), whose page is not the app's. The pass then draws the FLOOR -- the band, the fades,
 the rows whose marks moved -- and every draw goes once through each piece
 of the frame's region it reaches (outside R, and the floor's rects), so a
 floor pixel takes every draw over it in a whole frame's order; the floor only
@@ -1094,13 +1096,16 @@ what it moved, as `copy_last` does a whole frame. The one ring body is a
 grep. Pinned by `tests/test_shift_frames.py` (the engine: drags, flings,
 glides, every move size, the clamps, a gen moving mid-fling, a cover landing,
 overlays, a theme change, a gap, a deferred copy landing at the fence),
-`tests/test_shift_apps.py` (Settings and its pages, My Art, Get Carts on the
-full-screen console, and a declared copy cost), `tests/test_wm_records.py`
-(every app on the verbs in a desk window, windows overlapping, a focus
-change and a move mid-coast, a popover and the system menu's scrim over a
-glide) and `tests/test_home_band.py` (the home's band: grid, icons and
-carousel, handheld and desk, on plain, backdrop and picture themes), each
-presented frame, with up to three buffers taking
+`tests/test_shift_apps.py` (Settings and its pages, My Art, Get Carts,
+Files, Storybook and Appearance on the full-screen console, a declared copy
+cost, and a change to what a page shows made with no mark of the app's),
+`tests/test_wm_records.py` (every app on the verbs in a desk window, the
+Waveshare P4's desk, windows overlapping, a focus change and a move
+mid-coast, a popover and the system menu's scrim over a glide, and each
+change Files, Storybook and Appearance must move their gens for) and
+`tests/test_home_band.py` (the home's band: grid, icons and carousel,
+handheld and desk, on plain, backdrop and picture themes), each presented
+frame, with up to three buffers taking
 turns, byte-equal to whole repaints, the share of shift frames held above a floor,
 and the engine's record audit failing any shift frame whose stops moved
 outside its floor.

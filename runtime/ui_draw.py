@@ -1905,6 +1905,7 @@ class AppHost:
         self.mid = False                # the middle button is held
         self.ring = PaintRing(1)        # what the frame before left of the page in its buffer
         self._plan = array("i", [0] * 7)
+        self._again = False           # `again` since the last begin: no shift frame
         self.shifting = False           # the frame begun last draws its pages' floor alone
         self._dead = 0                  # the directions whose steps moved nothing last frame
         self._began = -1                # the painted frame it began last
@@ -2048,6 +2049,8 @@ class AppHost:
         key = _GEN + _GEN + (1 if _MARKS_ON[0] else 0)
         p = self._plan
         self.shifting = False
+        again = self._again
+        self._again = False
         w = _WIN[0]
         if w:
             ok = w == 2 and ring.vouch_key(key, th)     # the WM's shown ring vouches
@@ -2056,7 +2059,9 @@ class AppHost:
         # A canvas whose copy costs about what the raster it saves does
         # (`SHIFT_COST`, per mille of a row's raster a row it copies costs;
         # None where unknown) draws the frame whole instead.
-        if ok and _C.api_shift_plan(self.ctx, p) and _pays(cv, p):
+        # A pass that changed what it drew before the change (`again`) left
+        # the last frame's page unlike the app's: this frame draws whole.
+        if ok and not again and _C.api_shift_plan(self.ctx, p) and _pays(cv, p):
             if cv.shift_last(p[0] + getattr(cv, "_ox", 0), p[1] + getattr(cv, "_oy", 0),
                              p[2], p[3], 0, p[4]):
                 cv.shift_fence()        # the floor draws over rows the move wrote
@@ -2081,6 +2086,7 @@ class AppHost:
         engine owes (`keys` answers it, and the console paints it with no
         input: `again_take`), never the page marked whole."""
         self.owed = True
+        self._again = True
         _AGAIN[0] = True
 
     def still(self):

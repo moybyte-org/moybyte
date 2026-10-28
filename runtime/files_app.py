@@ -30,6 +30,8 @@ thing you edit and not a directory you browse; Themes are the store's theme
 packages, whose rows open the Appearance app.
 """
 
+from array import array
+
 try:
     from layout_base import bar_rows, content_of, metric_class, DESK
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -271,6 +273,18 @@ class FilesAppLayer(ListShellApp):
         self._focus = None            # the id focus moves to on the next frame
         self._focused = None          # the focused id as the last frame left it
         self._key = 0
+        # The lists' override tables and what their gens were moved for
+        # (docs/scroll_and_text_2026-10.md §3.3): a gen moves exactly when
+        # what its list draws does, so a frame that only scrolls or steps
+        # moves the last frame's rows.
+        self._files_o = {"id": "files", "gen": 0}
+        self._files_k = None          # (rows, label, the covers' gen) the gen was moved for
+        self._cells = None            # (rows, the table's cells)
+        self._places_o = {"id": "Places", "gen": 0}
+        self._side_o = {"gen": 0}
+        self._places_k = None         # the places' cells (and current, in the side column)
+        self._clip = array("i", [0, 0, 0, 0])   # a cover's clip (`ui.card_clip`)
+        self._drawn = None            # the rows the list drew in the pass under way
 
     def relayout(self, w, h, fs, cs=None):
         self.layout = FilesLayout(w, h, fs, self._surf.windowed(), cs)
@@ -700,40 +714,62 @@ class FilesAppLayer(ListShellApp):
         lay = self.layout
         th = self._theme.colors()
         self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
+        level, dialog = self.level, self.dialog
+        self._drawn = None            # the rows the list drew this pass
         ui.page("")                   # the ground under the bar's band too
         if self._focus is not None:
             ui.focus(self._focus)
             self._focus = None
         if lay.two:
+            got = self._places_rows()
             ui.at(*lay.side_list)
-            ui.scroll("side")
-            self._places()
+            ui.scroll("side", self._side_o)
+            self._places(*got)
             ui.scroll()
             x, y, w, h = lay.side
             cv.rect(x + w, y, lay.fs, h, th["border"])
             self._files(cv, th)
         elif self.level == "places":
-            self._places()
+            self._places(*self._places_rows())
         else:
             self._files(cv, th)
         self._dialog()
         self._focused = ui.focus()
+        if (self.level != level or self.dialog != dialog
+                or (self._drawn is not None and self.rows is not self._drawn)):
+            self._ui.again()          # an answer changed what the page drew before it
 
-    def _places(self):
-        """The places: a column on the desk, a page of their own else."""
-        lay = self.layout
+    def _places_rows(self):
+        """The places as the frame shows them: their keys, the current
+        one's index and the table's cells; the places' gen moved where the
+        cells (and on the desk the current place) differ from the last
+        frame's."""
+        two = self.layout.two
         shown = self.shown_places()
         keys = [p[0] for p in shown]
         at = keys.index(self.place) if self.place in keys else 0
-        if lay.two:
+        if two:
             rows = [(p[2], p[1]) for p in shown]
+            k = (rows, at)
+        else:
+            rows = [(p[2], p[1], str(self._count(p[0]))) for p in shown]
+            k = rows
+        if k != self._places_k:
+            self._places_k = k
+            self._side_o["gen"] += 1
+            self._places_o["gen"] += 1
+        return keys, at, rows
+
+    def _places(self, keys, at, rows):
+        """The places: a column on the desk, a page of their own else."""
+        lay = self.layout
+        if lay.two:
             cur, opened = ui.table("Places", ("", ""), rows, at)
         else:
             ui.at(*lay.hints)
             ui.hints(("confirm", "Open"))
             ui.at(*lay.places)
-            rows = [(p[2], p[1], str(self._count(p[0]))) for p in shown]
-            cur, opened = ui.table("", ("", "", ""), rows, at, {"id": "Places"})
+            cur, opened = ui.table("", ("", "", ""), rows, at, self._places_o)
         if cur != at and 0 <= cur < len(keys):
             self.open_place(keys[cur])
             if not lay.two and not ui.keys_taken():
@@ -751,8 +787,19 @@ class FilesAppLayer(ListShellApp):
                     label = p[1]
         ui.at(*lay.list)
         cols = ("", "Name", "Kind")
-        rows = [(r[3], r[0], r[2]) for r in self.rows]
-        cur, opened = ui.table(label, cols, rows, self.cur, {"id": "files"})
+        c = self._cells
+        if c is None or c[0] is not self.rows:
+            c = self._cells = (self.rows, [(r[3], r[0], r[2]) for r in self.rows])
+        rows = c[1]
+        # the list's gen: its rows, its caption and, where rows draw covers,
+        # every cover the cache holds
+        cg = self._nav.cover_gen() if self.place == PROJECTS else 0
+        k = self._files_k
+        if k is None or k[0] is not self.rows or k[1] != label or k[2] != cg:
+            self._files_k = (self.rows, label, cg)
+            self._files_o["gen"] += 1
+        self._drawn = self.rows
+        cur, opened = ui.table(label, cols, rows, self.cur, self._files_o)
         self.cur = cur
         if self.place == PROJECTS:
             self._covers(cv)
@@ -775,11 +822,21 @@ class FilesAppLayer(ListShellApp):
         vx, vy, vw, vh = view
         r = side // 4
         due = False
-        cv.clip(vx, vy, vw, vh)                # a row half out of the view: cut
+        k = self._clip
         for i in range(len(self.rows)):
             y = y0 + i * rh + (rh - side) // 2
             if y + side <= vy or y >= vy + vh:
                 continue
+            # a row half out of the view is cut; on a shift frame a row the
+            # floor does not reach is drawn by the move
+            k[0] = px
+            k[1] = y if y > vy else vy
+            k[2] = side
+            k[3] = (y + side if y + side < vy + vh else vy + vh) - k[1]
+            ui.card_clip(k)
+            if k[2] <= 0 or k[3] <= 0:
+                continue
+            cv.clip(k[0], k[1], k[2], k[3])
             cart = self.rows[i][4]
             cover = self._nav.cover(cart)
             if cover:
@@ -788,7 +845,7 @@ class FilesAppLayer(ListShellApp):
             else:
                 due = due or cover is False    # its decode lands over the next frames
                 ui.initial((px, y, side, side), cart.get("title") or self.rows[i][0], r)
-        cv.clip()
+            cv.clip()
         ui.table_pictures()                    # the cut row's cover fades with it
         if due:
             self._damage.all()

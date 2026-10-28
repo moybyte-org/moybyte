@@ -334,6 +334,12 @@ class NavServer:
             return False
         return img
 
+    def cover_gen(self, g):
+        """A number that moves whenever what `cover` answers may have: a
+        cover landed, or the cache let one go."""
+        covers = getattr(self.__ws, "covers", None)
+        return 0 if covers is None else covers.gen
+
 
 # -- notifications ---------------------------------------------------------------
 

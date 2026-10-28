@@ -1511,6 +1511,7 @@ static const struct { const char *name; int8_t role, c_row; } TABLE[MOY_APP_TABL
     {"nav.run_script", MOY_ROLE_NAV, MOY_APP_SHELL},
     {"nav.text_mode", MOY_ROLE_NAV, MOY_APP_SHELL},
     {"nav.cover", MOY_ROLE_NAV, MOY_APP_SHELL},
+    {"nav.cover_gen", MOY_ROLE_NAV, MOY_APP_SHELL},
     {"prefs.get", MOY_ROLE_PREFS, MOY_ROW_PREFS_GET},
     {"prefs.set", MOY_ROLE_PREFS, MOY_ROW_PREFS_SET},
     {"prefs.clear", MOY_ROLE_PREFS, MOY_ROW_PREFS_CLEAR},

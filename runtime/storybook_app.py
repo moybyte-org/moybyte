@@ -30,6 +30,8 @@ the pictures it uses. A story whose document does not read (another format,
 an old story cart's deck) is not listed: it reads as absent.
 """
 
+from array import array
+
 try:
     import ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -70,7 +72,7 @@ def dot():
 
 
 _DIM_CAPTION = {"tone": "dim", "face": "caption"}
-_NEW_CARD = {"icon": "new", "tone": "value"}
+_NEW_CARD = {"icon": "new", "tone": "value", "gen": 0}
 _PRESENT = {"id": "Present"}
 _PRESENT_OFF = {"disabled": True, "id": "Present"}
 _OPEN = {"id": "Open"}
@@ -83,6 +85,8 @@ class _Card:
     """A story's card as the stories page draws it, made once per story
     (`StorybookApp._cards`): its words, override table and picture's key."""
 
+    _gen = 0                          # the last card's gen: each card made is another
+
     def __init__(self, entry):
         doc = entry["doc"]
         k = len(doc["slides"])
@@ -93,7 +97,10 @@ class _Card:
         self.title = doc["title"] or "Untitled"
         self.sub = "%d slide%s" % (k, "" if k == 1 else "s")
         self.status = None            # the desk foot's words, made when first focused
-        self.o = {"id": "Story " + entry["name"]}
+        # the card's gen (docs/scroll_and_text_2026-10.md §3.3): its picture
+        # is its story's first slide, made again with the card
+        _Card._gen += 1
+        self.o = {"id": "Story " + entry["name"], "gen": _Card._gen}
         self.doc_id = id(doc)
         self.key = None               # the picture's key in `cards`, at its size
         self.kw = self.kh = -1
@@ -324,6 +331,10 @@ class StorybookAppLayer(ListShellApp):
         self.layout = StorybookLayout(cv.w, cv.h, self._surf.font_scale(),
                                       self._surf.windowed(), self._surf.chrome_scale())
         self.page = "stories"
+        # the stories region's override table: its gen moves with the cards
+        # (docs/scroll_and_text_2026-10.md §3.3)
+        self._stories_o = {"gen": 0}
+        self._clip = array("i", [0, 0, 0, 0])   # a card's picture's clip (`ui.card_clip`)
         self.stories = []             # [{"name", "doc"}], newest first
         self.story = None             # the open story (story_doc.Story)
         self.cur = 0                  # the slide in view
@@ -693,6 +704,7 @@ class StorybookAppLayer(ListShellApp):
                     break
         if not same:
             rows = self._rows = [_Card(e) for e in st]
+            self._stories_o["gen"] += 1   # the page's cards are others
         return rows
 
     def _card_pic(self, cv, row, x, y, w, h, clip):
@@ -734,17 +746,26 @@ class StorybookAppLayer(ListShellApp):
         ui.at(r[0], r[1], r[2], r[3])
         ui.label(self._caption[1], _DIM_CAPTION)
         grid = lay.stories_grid
+        cards = self._cards()
         ui.at(grid[0], grid[1], grid[2], grid[3])
-        ui.scroll("stories")
+        ui.scroll("stories", self._stories_o)
         cw, ch = lay.card
         ui.grid("stories", cw, ch, lay.grid_o)
         if lay.desk:
             r = ui.card("New story", "", _NEW_CARD)
             if r[4] & ui.ACTIVATED:
                 self._new_story()
-        for row in self._cards():
+        k = self._clip
+        for row in cards:
             r = ui.card(row.title, row.sub, row.o)
-            self._card_pic(cv, row, r[0], r[1], r[2], r[3], grid)
+            if r[2]:
+                # a shift frame draws a picture where its floor reaches it
+                k[0] = grid[0]
+                k[1] = grid[1]
+                k[2] = grid[2]
+                k[3] = grid[3]
+                ui.card_clip(k)
+                self._card_pic(cv, row, r[0], r[1], r[2], r[3], k)
             if r[4] & ui.ACTIVATED:
                 self._open_story(row.entry, "deck" if lay.desk else "view")
                 if self.ed is not None:

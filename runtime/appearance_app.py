@@ -33,6 +33,8 @@ mode (`ctx.nav.text_mode`): Keep renames `custom` to the name typed
 installed theme has turns Keep into Replace, which replaces it; Cancel or B
 backs out.
 """
+from array import array
+
 
 try:
     from layout_base import bar_rows, content_of, metric_class, window_foot, DESK
@@ -200,7 +202,13 @@ class _Built:
     """What a frame of the page draws from one read of the choices
     (`AppearanceAppLayer._build`)."""
 
+    made = 0                       # the last one's gen: each made is another
+
     def __init__(self):
+        # its gen (docs/scroll_and_text_2026-10.md §3.3): what the rows, the
+        # cards and the wallpapers' cards show is a function of it
+        _Built.made += 1
+        self.gen = _Built.made
         self.cards = []            # (name, title, sub, override table, picture)
         self.kinds = {}            # a stop's id -> its kind, for the hints
         self.modes = ()
@@ -315,6 +323,10 @@ class AppearanceAppLayer:
         self._stale = 0
         self._dt = 0
         self._built = None          # what the frame draws from the choices (`_build`)
+        self._page_o = {"gen": 0}   # the rows region's override table
+        self._walls_o = {"gen": 0}  # the wallpapers region's
+        self._walls_k = None        # (built, tab) the wallpapers' gen was moved for
+        self._clip = array("i", [0, 0, 0, 0])   # a card's picture's clip (`ui.card_clip`)
         self._whole = (0, 0, 0, 0)  # the page's rect, the canvas's
         # (name, the change's value, its swatch in dark, in light): a
         # preset is picked by its dark value and shows each mode's.
@@ -585,16 +597,23 @@ class AppearanceAppLayer:
         r = lay.body if self._keys else lay.full
         ui.at(r[0], r[1], r[2], r[3])
         if view == "walls":
-            ui.scroll("walls")
+            wk = self._walls_k
+            if wk is None or wk[0] is not b or wk[1] != self.tab:
+                self._walls_k = (b, self.tab)
+                self._walls_o["gen"] += 1
+            ui.scroll("walls", self._walls_o)
             self._walls_page(cv, th, ch, b)
         else:
-            ui.scroll("page")
+            self._page_o["gen"] = b.gen
+            ui.scroll("page", self._page_o)
             self._kinds = b.kinds
             self._rows_page(cv, ch, b)
         ui.scroll()
         self._foot(cv, th, ch, b)
         self._name_dialog()
         self._focused = ui.focus()
+        if self.view != view or self._built is not b:
+            self._ui.again()          # an answer changed what the page drew before it
 
     def _foot(self, cv, th, ch, b):
         """The hints for the focused stop; on the desk under a rule, after
@@ -728,7 +747,8 @@ class AppearanceAppLayer:
             cid = self._card_id(n)
             kinds[cid] = "card"
             b.cards.append((n, _title(n), dot.join(self._modes(n)),
-                            {"id": cid, "current": n == name}, self._pic(n, variant)))
+                            {"id": cid, "current": n == name, "gen": b.gen},
+                            self._pic(n, variant)))
         b.modes = self._modes(name if name != "custom" else (ch["from"] or name))
         if len(b.modes) > 1:
             b.mode_cur = 0 if variant == "light" else 1
@@ -843,8 +863,8 @@ class AppearanceAppLayer:
         lay = self.layout
         desk = lay.desk
         k = 1 if desk else lay.fs
-        body = lay.body
-        cv.clip(body[0], body[1], body[2], body[3])
+        if not self._card_clip(cv):
+            return
         _fill(cv, x, y, w, h, p[0])
         bh = (14 if desk else 8) * k
         _fill(cv, x, y, w, bh, p[1])
@@ -871,6 +891,22 @@ class AppearanceAppLayer:
         else:
             _shape(cv, xr, py + (ph - d) // 2, d, d, d // 2, acc)
         cv.clip()
+
+    def _card_clip(self, cv):
+        """The canvas clipped to where the card just answered draws its
+        picture this frame: the body, cut on a shift frame to the floor's
+        rect it lies in (`ui.card_clip`). False where that is nothing."""
+        body = self.layout.body
+        k = self._clip
+        k[0] = body[0]
+        k[1] = body[1]
+        k[2] = body[2]
+        k[3] = body[3]
+        ui.card_clip(k)
+        if k[2] <= 0 or k[3] <= 0:
+            return False
+        cv.clip(k[0], k[1], k[2], k[3])
+        return True
 
     @staticmethod
     def _aa(cv, x, y, h, c, b):
@@ -913,17 +949,16 @@ class AppearanceAppLayer:
             for item in self._walls(self.tab):
                 cid = "Wallpaper " + item[1]
                 kinds[cid] = "card"
-                cards.append((item, {"id": cid, "current": self._wall_on(ch, item)}))
+                cards.append((item, {"id": cid, "current": self._wall_on(ch, item),
+                                     "gen": b.gen}))
         self._kinds = b.walls_kinds[self.tab]
         w, h = lay.card
-        body = lay.body
         ui.grid("walls", w, h)
         for c in cards:
             item = c[0]
             on = c[1]["current"]
             r = ui.card(item[1], "", c[1])
-            if r[2]:
-                cv.clip(body[0], body[1], body[2], body[3])
+            if r[2] and self._card_clip(cv):
                 if on:
                     # the wallpaper in force: the backdrop's own still
                     self._wall.preview(cv, r[:4], self._dt)

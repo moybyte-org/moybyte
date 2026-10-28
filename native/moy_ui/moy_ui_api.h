@@ -147,6 +147,7 @@ typedef struct {
     // the stops drawn inside it, from s0, sn of them.
     int32_t drawn, gen;
     uint8_t kd, s0, sn;
+    int16_t rh;                     // a placed table: its row height as it drew
 } moy_ui_keep_t;
 
 typedef struct {
@@ -302,6 +303,7 @@ typedef struct {
     uint8_t fl_on, fl_stage, fl_n, fl_struct, fl_dirty, fl_susp, fl_lost, at_last;
     uint8_t fl_cast;                // the next draw casts a shadow past its box (a card's)
     moy_ui_box_t pic_clip;          // the floor's rect the last card's picture draws through
+    uint8_t pic_tbl;                // ...or the floor of the placed table drawn last as R
     uint8_t fl_s0, fl_p0, fl_pn;
     uint32_t fl_pend;
     moy_ui_box_t fl[MOY_UI_API_FLOOR];
@@ -605,6 +607,7 @@ enum {
     MOY_UI_KD_GEN = 2,              // ...under a generation
     MOY_UI_KD_BAD = 4,              // ...holding what no shift may move (MOY_UI_SHIFT_NONE)
     MOY_UI_KD_PAGE = 8,             // a page (or a placed table's rows): its `a` is a scroll
+    MOY_UI_KD_TABLE = 16,           // ...a placed table's rows, R its view
 };
 // After begin: the frame the engine licenses (MOY_UI_SHIFT_*). out: R's x,
 // y, w, h on screen as the last frame drew it, dy, the shift that brings
@@ -626,7 +629,10 @@ int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap);
 // ui.card_clip(rect): `r` (x, y, w, h, in and out) cut to the floor's rect
 // the picture the last card or part answered lies in, which is where the
 // app draws it on a shift frame; 0, `r` as it was, where the frame draws
-// whole. An app that gives a picture a gen clips its picture to it.
+// whole. An app that gives a picture a gen clips its picture to it. After
+// a placed table that was R, `r` is a picture on its rows: cut to the rect
+// of the floor its row lies in (the floor is whole rows there), else to
+// nothing.
 int moy_ui_api_card_clip(const moy_ui_ctx_t *c, int32_t r[4]);
 // ui.band(): the rows of the page being laid out that this frame draws, as
 // x, y, w, h in the page's coordinates (y from its rows' top): the floor's

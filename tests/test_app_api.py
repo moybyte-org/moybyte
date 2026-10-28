@@ -442,6 +442,13 @@ def _settle(ws):
         # (the desk, the windows' stamps and chrome) is gone with it.
         wm._desk_streak = 0
         wm._win_sig = None
+    # ...and so is what a content's own ring vouches its last frame left there
+    # (a verbs page's next frame would move those pixels, docs/surface_model_v1.md
+    # §14.7)
+    for app, _t in ws._apps:
+        ring = getattr(getattr(getattr(app, "_inst", app), "_ui", None), "ring", None)
+        if ring is not None:
+            ring.clear()
     prev = None
     for _ in range(_MAX_FRAMES):
         _quiesce_frame(ws)

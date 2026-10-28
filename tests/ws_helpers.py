@@ -331,3 +331,27 @@ def settings_box(ws, label):
     ws.input.begin_frame()
     ws.frame(1 / 30)
     return ws.cards_layer.page().host.box(label)
+
+
+def seed_stories(ws, n=14):
+    """`n` stories in the console's user files, each its own first slide (a
+    caption naming it on a ground of its own colour), dated a second apart
+    in their names' order: Storybook lists them newest first, and two stores
+    written in the same second would order them as the clock fell."""
+    import os
+    from runtime import moy_carts, story_doc as D
+    for i in range(n):
+        doc = D.new_doc("Story %02d" % i)
+        s = doc["slides"][0]
+        s["objects"].append(D.text_obj("Story %02d" % i, 64, 416, 896, 72, 1 + i % 14))
+        if i % 3 == 0:
+            doc["slides"].append(D.layout_slide("blank", 1 + (i * 5) % 15))
+        moy_carts.save_file("stories", "story%02d/story.json" % i, D.write(doc), ws.carts_root)
+    root = os.path.dirname(str(ws.carts_root).rstrip("/"))
+    for dirpath, _dirs, files in os.walk(root):
+        base = os.path.basename(dirpath)
+        if base.startswith("story") and base[5:].isdigit():
+            t = 1700000000 + int(base[5:])
+            for f in files:
+                os.utime(os.path.join(dirpath, f), (t, t))
+            os.utime(dirpath, (t, t))
