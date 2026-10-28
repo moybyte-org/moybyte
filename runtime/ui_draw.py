@@ -1707,6 +1707,32 @@ def painted():
     return _PAINT[0]
 
 
+def painted_alone():
+    """Whether the frame the console paints shows its content alone on a
+    canvas whose content vouches for its own buffers (`paint_frame`): no
+    overlay, cursor or toast over it, on the fullscreen tier."""
+    return _PAINT[1]
+
+
+def rows_drawn():
+    """The frame painted drew its content's changed rows alone, as a
+    surface that keeps its own frames says (the sprite pickers over the
+    page they hold): what `change_take` answers next."""
+    _CHANGE[0] = _ROWS
+
+
+def popover_band(card, cv, desk):
+    """The rows of popover card `card` (x, y, w, h) its body lies in, as
+    (x, y, w, h): the card's width, inside its inset top and foot, clear of
+    its rounded corners and its drop (moy_ui_modal_band: the value row's
+    inset, MOY_UI_M_VALUE_ROW_INSET, at the scale)."""
+    pad = _METRICS["value_row"][_VALUE_ROW_INSET + (1 if desk else 0)] * _fs(cv)
+    return (card[0], card[1] + pad, card[2], card[3] - 2 * pad)
+
+
+_VALUE_ROW_INSET = 28
+
+
 def repeat_frame():
     """The painted frame repeats the one before it (the windowed WM's
     copy, surface model §14.6): a page that frame drew is as it left it."""
@@ -2217,6 +2243,12 @@ class AppHost:
         self.owed = True
         self._again = True
         _AGAIN[0] = True
+
+    def owes(self):
+        """Whether the pass begun last owes the frame after it (a popover
+        laid out for another body, a focus it opened): that frame's layout
+        is not the last one's."""
+        return bool(_C.api_owes(self.ctx))
 
     def quiet(self):
         """Whether no input waits for the next frame: no button, typed key,

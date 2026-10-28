@@ -789,17 +789,28 @@ both boards; it is a rows change (the pane's rect) under §14.4's restore,
 and §15 prices it as one. The tab switch by key is a page change and paints
 whole, under its own 100 ms target.
 
-**The sprite pickers** (`paint_layer.py`'s grid, the theme editor's) read
-the sheet pixel by pixel into quads (`sheet.pget`, `moy_sheet_pget` 15% of
-the T-Deck's busy samples). The picker is a scaled view of an indexed
-sheet; `moy_gfx.blit_indices` places an index bitmap 1:1 with no scale and
-no source rect, so the picker needs a canvas-tier kernel of its own:
-`blit_indices_scale(src, sx, sy, sw, sh, dx, dy, scale, pal)` in `moy_gfx`'s
-compositor, nearest-neighbour, bounds-clamped, one call per visible sheet
-rect, the grid lines and the selection over it; the picker scrolls as a
-`ScrollRegion` on two axes with the band contract. The grid's fills and the
-picker's own Python stay, so §15 prices it at a fraction of today, not at a
-blit's cost.
+**The sprite pickers** (`paint_layer.py`'s popover, 2026-10-28) are a
+popover whose body the engine scrolls: the Size seg and the sheet in a
+part taller than the body. The sheet is one `blit_indices_scale` (P7a's
+kernel in `moy_gfx`'s compositor, nearest-neighbour, one palette lookup a
+source pixel) of the source rect the body shows, clipped to the part inside
+the card's band (`ui_draw.popover_band`: the card less its inset, clear of
+its corners and drop), so what the body does not show of the sheet draws
+nowhere. While the pickers are up the page under them changes only by what
+their pass does to it (the size, a picked sprite), so a frame whose buffer
+holds that page draws the pickers' body alone, clipped to the band
+(`PaintLayer._pick_held`): on the full-screen tier where each of the
+RETAINED_FRAMES frames before drew the pickers over the same page under
+one key (the sprite, its size, the sheet's gen, the look, the input's kind,
+the card), with nothing over it; on the desk as the Sprite pane's own
+frame (§15 P5's `_OWN_FRAMES`, while the pickers are up), where the WM
+vouches for the buffer and the lag it names lies inside the band or each
+frame it holds since drew that page. A release the pickers may pick a
+sprite from draws whole: a pick changes the Sheet pane beside them. The
+popover's body is an overlay to the engine, drawn whole over the page, so
+its scroll moves no pixels (no shift frame); the two-axis region this
+section once named was not built, so a sheet wider than the body (a large
+font scale on a handheld) shows only the columns its row holds.
 
 **My Art's covers** are built inside its draw (a 0.6-2.5 s frame per
 gesture on the P4). They move off the paint path: built one per idle frame
@@ -1065,7 +1076,7 @@ provisional pass cost; P0's null-floor run re-prices every one before P1a.
 | **P5 the Editor's panes** | the desk's Blocks, Settings, Map and Sound panes draw their own frames; Config's cards a verbs page under a gen; the Blocks outline's and the handheld Music steps' rows as their pages' own rows frames (`AppHost.rows`) | P4, T-Deck | P6 | P4 Blocks outline 66-96 → ~20-30, Config 66-68 → ~20-30, Music steps 86 → ~20-30, Map 68-81 → ~22-30; T-Deck Blocks, Config, Music 22-28 → ~15-20 |
 | **P6 the home and PROJECTS** | steps on `_try_drag_partial`, two cells, the `bg` translation, `blit_batch` covers, the still ring as `PaintRing`, the settle frame as the pane's rows | P4, T-Deck | everything but P1d's WM edits (coordinate the `_shown` slot shape) | P4 grid and icons 97-123 → ~25-35 on `bg`, ~30-55 on `bd` and picture themes (over); carousel key rows 54-57 → ~35-45 (over: the settle frame's pane); T-Deck grid and icons 80-102 → ~25-30 on `bg`, ~30-50 on `bd`/picture (over), carousel settle 48-51 → ~35-45 (over) |
 | **P7a the picker kernel** | `blit_indices_scale` in `moy_gfx`, host and on-glass byte tests | host; one board | P1a onward | none directly (a kernel) |
-| **P7b the pickers** (Editor sequence) | the picker on the kernel, the two-axis region | T-Deck, P4 | -- | T-Deck sprite pickers 40 → ~18-22; P4 93-96 → ~22-30 |
+| **P7b the pickers** (Editor sequence) | the picker on the kernel; its body alone over the page it holds (§9) | T-Deck, P4 | -- | T-Deck sprite pickers 40 → ~18-22; P4 93-96 → ~22-30 |
 | **P8 Notes** | the handle's rows at begin, the cart's pass under the floor, the counters' licence, the Player's declared rect through the shown ring | P4, T-Deck | -- | P4 Notes 59-93 → ~22-28 with the cart floor (~35-45 without it: content 33 stays and only the composite shrinks); T-Deck 21-23 → ~15-19 |
 
 **Dependencies.** P0 first (the tool measures every later gate and the

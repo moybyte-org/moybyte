@@ -367,6 +367,17 @@ class PaintLayer:
         self._pop = False             # the popover open: "pickers", "more" or False
         self._host = None
         self._pop_tap = None
+        # The pickers' frames over the page they leave as it is
+        # (`_pick_held`): what each painted frame drew under; the desk's
+        # word for its pane's buffer and the rect it lags, x0, y0, x1, y1
+        # (`EditorDesk._tab_pane`); the rect a frame that drew the pickers
+        # alone drew in; where their body shows the sheet, x0, y0, x1, y1.
+        self._pick_ring = _ui_draw.PaintRing()
+        self.vouch = 0
+        self.lag = array("i", [0] * 4)
+        self.alone_rect = None
+        self.sheet_shown = None
+        self._dt = 0
         self._shape = PaintEditor.OVAL   # the shape button's shape when not in use
         self._shifts = False          # the more menu shows its shifts' page
         self._grid_q = None           # the grid's coloured and clear cells, as quads
@@ -402,6 +413,7 @@ class PaintLayer:
         # identical and the cart's _draw() no longer runs on editor frames. The game
         # canvas still gets its state reset (degradation shares one canvas).
         self.ws._reset_canvas_state()
+        self._dt = dt
         self._draw_paint()
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY.
@@ -821,11 +833,17 @@ class PaintLayer:
         pe = ws.paint
         # Edit the editor's OWN sheet (the cart's sprites).
         sheet = pe.sheet if pe is not None else ws.project.sheet
+        self.alone_rect = None
+        if self._pop == "pickers" and pe is not None:
+            key = self._pick_key(sheet)
+            held = self._pick_held(key)
+            if not held:
+                self._draw_look(sheet)
+            self._draw_pickers(key, held)
+            return
         self._draw_look(sheet)
         if self._pop == "more" and pe is not None:
             self._draw_more()
-        elif self._pop and pe is not None:
-            self._draw_pickers()
 
     # -- the 2026-10 look ---------------------------------------------------------
 
@@ -1299,10 +1317,66 @@ class PaintLayer:
         self._pop_tap = None
         self.ws.mark_dirty()
 
-    def _draw_pickers(self):
+    def _pick_key(self, sheet):
+        """What the page under the pickers is a function of while they are
+        up -- the sprite, its size, the sheet, the look, the input's kind --
+        and the card they drew in last. In a desk pane the canvas is the
+        window's buffer or the glass as the WM renders the frame, and the
+        WM's word says which holds what (`vouch`)."""
+        ws = self.ws
+        pe = ws.paint
+        cv = ws.sys_canvas
+        c = self._cur
+        return (self.layout, None if self.vouch else cv, cv.w, cv.h, ws.theme_colors,
+                ws.look.look_gen, sheet, sheet.gen, pe.n, pe.size, pe.color, pe.tool, pe.erase, pe.sel, c[0], c[1],
+                self._shape, self._keys(), _ui_draw.on_bar(), self._host.box("Sprites"))
+
+    def _pick_held(self, key):
+        """Whether this frame's buffer holds the page under the pickers as
+        the frames before left it, the pickers' card where they drew it:
+        each frame the buffer holds since (RETAINED_FRAMES of them on the
+        fullscreen tier, the frame before in a desk pane the WM vouches
+        for) drew the pickers under `key` with nothing over the page. Such
+        a frame draws the pickers' body alone (`_draw_pickers`)."""
+        ws = self.ws
+        host = self._host
+        if key[-1] is None or host.owes() or ws._animating(self._dt, False):
+            return False
+        ring = self._pick_ring
+        f = _ui_draw.painted()
+        if self.vouch:
+            if self.vouch < 2 or ring.frame(0) != f - 1 or not ring.whole(0) \
+                    or ring.key(0) != key:
+                return False
+            g = self.lag
+            if g[2] <= g[0] or g[3] <= g[1]:
+                return True
+            b = _ui_draw.popover_band(key[-1], ws.sys_canvas, self.layout.desk)
+            if (g[0] >= b[0] and g[1] >= b[1] and g[2] <= b[0] + b[2]
+                    and g[3] <= b[1] + b[3]):
+                return True
+            # 3: the buffer holds the page as the frames RETAINED_FRAMES back
+            # left it but for their changes, and each of them drew this page
+            return self.vouch == 3 and self._chain(ring, f, key)
+        return _ui_draw.painted_alone() and self._chain(ring, f, key)
+
+    def _chain(self, ring, f, key):
+        """Whether each of the RETAINED_FRAMES painted frames before frame
+        `f` drew the pickers whole under `key`, one after another."""
+        cv = self.ws.sys_canvas
+        if ring.held(cv, f) is None:
+            return False
+        for b in range(cv.RETAINED_FRAMES):
+            if not ring.whole(b) or ring.key(b) != key:
+                return False
+        return True
+
+    def _draw_pickers(self, key, held):
         """The pickers, a popover of the public UI API's hung from the
         preview: the size as a seg, and the sheet in a part, whose tapped
-        tile becomes the sprite. A press outside, or Esc, closes it."""
+        tile becomes the sprite. A press outside, or Esc, closes it. Where
+        the page under it is `held` (`_pick_held`) the frame draws the
+        card's body alone, clipped to its band (`ui_draw.popover_band`)."""
         ws = self.ws
         cv = ws.sys_canvas
         pe = ws.paint
@@ -1310,6 +1384,10 @@ class PaintLayer:
         th = ws.theme_colors
         fs = lay.fs
         sheet = pe.sheet
+        band = None
+        if held:
+            band = _ui_draw.popover_band(key[-1], cv, lay.desk)
+            cv.clip(*band)
         settled = self._host.begin(cv, th, lay.body_fill, lay.desk)
         k = 2 if lay.desk else fs
         m = 2 * fs
@@ -1326,10 +1404,14 @@ class PaintLayer:
         x, y, w, h, st = _ui.part("Sheet", pw, ph)
         if w > 0 and h > 0:
             x0, y0 = x + m, y + m
-            cv.sspr(sheet, 0, 0, sheet.w, sheet.h, x0, y0, sheet.w * k, sheet.h * k, 0)
+            self._draw_sheet(cv, sheet, x0, y0, k, x, y, w, h, band)
             tx, ty = sheet.tile_origin(pe.n)
             span = pe.size * tile
             cv.rectb(x0 + tx * k - 1, y0 + ty * k - 1, span + 2, span + 2, th["value"])
+            if band is None:
+                cv.clip()
+            else:
+                cv.clip(*band)
             tap = self._pop_tap
             if st & _ui.ACTIVATED and tap is not None:
                 col = (tap[0] - x0) // tile
@@ -1339,9 +1421,48 @@ class PaintLayer:
                     pe._clamp_size()
                     shown = False
         _ui.popover()
+        card = self._host.box("Sprites")
+        if held:
+            cv.clip()
+            self.alone_rect = band
+            if not self.vouch:
+                _ui_draw.rows_drawn()
+        if card != key[-1]:
+            key = key[:-1] + (card,)
+        self._pick_ring.note(_ui_draw.painted(), key, 0, None, cv, None,
+                             bool(self.vouch) or _ui_draw.painted_alone())
         self._pop_tap = None
         if not shown:
             self._pop = False
             ws.request_frame()
         elif not settled:
             ws.request_frame()
+
+    def _draw_sheet(self, cv, sheet, x0, y0, k, x, y, w, h, band):
+        """The sheet at `k` times, from (x0, y0), where the popover's body
+        shows the part (x, y, w, h) it lies in -- its rows inside the body's
+        band and the canvas: the source rect that reaches it, one
+        `blit_indices_scale` clipped to it, colour 0 clear."""
+        if band is None:
+            box = self._host.box("Sprites")
+            if box is None:
+                band = (x, y, w, h)
+            else:
+                band = _ui_draw.popover_band(box, cv, self.layout.desk)
+        cx0 = max(x, band[0], 0)
+        cy0 = max(y, band[1], 0)
+        cx1 = min(x + w, band[0] + band[2], cv.w)
+        cy1 = min(y + h, band[1] + band[3], cv.h)
+        if cx1 <= cx0 or cy1 <= cy0:
+            self.sheet_shown = None
+            cv.clip(0, 0, 0, 0)
+            return
+        self.sheet_shown = (cx0, cy0, cx1, cy1)
+        cv.clip(cx0, cy0, cx1 - cx0, cy1 - cy0)
+        sx0 = max(0, (cx0 - x0) // k)
+        sy0 = max(0, (cy0 - y0) // k)
+        sx1 = min(sheet.w, (cx1 - x0 + k - 1) // k)
+        sy1 = min(sheet.h, (cy1 - y0 + k - 1) // k)
+        if sx1 > sx0 and sy1 > sy0:
+            cv.blit_indices_scale(sheet, sx0, sy0, sx1 - sx0, sy1 - sy0,
+                                  x0 + sx0 * k, y0 + sy0 * k, k, 0)

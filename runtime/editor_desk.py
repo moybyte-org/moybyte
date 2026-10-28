@@ -74,8 +74,9 @@ _ON_VERBS = ("music",)
 _CODE_TABS = ("code", "theme_config")
 
 # The panes whose frames may be their own, as the Code pane's are: a frame
-# whose input reached that pane alone draws it alone (`_pane_rows`).
-_OWN_FRAMES = ("blocks", "cards", "map", "music")
+# whose input reached that pane alone draws it alone (`_pane_rows`); the
+# Sprite pane's while its pickers are up.
+_OWN_FRAMES = ("blocks", "cards", "map", "music", "paint")
 
 # The Editor tabs drawn as one verbs page whose gen says what it shows: a
 # frame of the page may move its pixels or draw its changed rows alone.
@@ -563,6 +564,22 @@ class EditorDesk(Layer):
             finally:
                 page.vouch = 0
             return
+        if tab == "paint":
+            # the pickers draw their body alone over the page the buffer
+            # holds where the WM says it holds it as the last draw left it,
+            # but for the lag it names (`retained`), in the pane's pixels
+            layer.vouch = self._vouch if own else 1
+            ret = self._ret
+            lag = layer.lag
+            lag[0] = ret[1] - r[0]
+            lag[1] = ret[2] - r[1]
+            lag[2] = ret[3] - r[0]
+            lag[3] = ret[4] - r[1]
+            try:
+                self._in_pane(tab, r, layer.draw, dt)
+            finally:
+                layer.vouch = 0
+            return
         if tab not in _CODE_TABS:
             self._in_pane(tab, r, layer.draw, dt)
             return
@@ -751,6 +768,8 @@ class EditorDesk(Layer):
         tab = P.CONTENTS[c][2]
         if c != "music" and self.ws.layer_of(tab) is None:
             return None
+        if c == "paint" and self.ws.layer_of(tab)._pop != "pickers":
+            return None
         return (c, tab, pane, r, self._body(r, self._unit(), pane),
                 self._focus.get(self.key, 0))
 
@@ -777,6 +796,11 @@ class EditorDesk(Layer):
         if c == "map":
             mu = ws.map_ui
             return (mu.map_tool, mu.map_erase)
+        if c == "paint":
+            pe = ws.paint
+            if pe is None:
+                return False
+            return (pe.n, pe.size, pe.sheet, pe.sheet.gen)
         return None
 
     def _pane_rows(self, own, dt):
@@ -802,6 +826,8 @@ class EditorDesk(Layer):
                 or ws._animating(dt, False)
                 or self._spills()):
             return False
+        if c == "paint" and ws.paint_layer._pop_tap is not None:
+            return False                # a release the pickers' pass may pick a sprite from
         if c == "music" and not self._host.quiet():
             return False                # the desk's verbs take input: focus may move off the pane
         b = r if c == "music" else body
@@ -826,6 +852,11 @@ class EditorDesk(Layer):
                 cv.clip()
         else:
             self._tab_pane(tab, body, dt, True)
+            a = ws.paint_layer.alone_rect if c == "paint" else None
+            if a is not None:
+                # the pickers' body alone, over the page the buffer holds
+                x0, y0 = body[0] + a[0], body[1] + a[1]
+                x1, y1 = x0 + a[2], y0 + a[3]
         self._changed = [x0, y0, x1, y1]
         return True
 
