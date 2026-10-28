@@ -3644,7 +3644,7 @@ class LauncherHomeLayer:
             return
         if bar is None:
             bar = self.ws.bar_layer.shown_key("home")
-        ring.note(f, parts[0], change=(parts[1], parts[2], bar))
+        ring.note(f, parts[0], change=(parts[1], parts[2], bar, self._outside_key()))
 
     def _try_still_frame(self, cv, dt):
         """The desk home's frame over its still backdrop: the parts this
@@ -3664,7 +3664,8 @@ class LauncherHomeLayer:
         f = ws._frames_drawn
         base, sel, band = parts
         bar = ws.bar_layer.shown_key("home")
-        sel_lag = band_lag = bar_lag = False
+        hint = self._outside_key()
+        sel_lag = band_lag = bar_lag = hint_lag = False
         for k in range(1, n + 1):
             if ring.frame(k - 1) != f - k or ring.key(k - 1) != base:
                 return False
@@ -3675,6 +3676,8 @@ class LauncherHomeLayer:
                 band_lag = True
             if c[2] != bar:
                 bar_lag = True
+            if c[3] != hint:
+                hint_lag = True
         g = self.grid
         wm = ws.wm
         # A part the last frame painted as this one would is copied out of
@@ -3691,7 +3694,11 @@ class LauncherHomeLayer:
                 bar_lag = False
         laid = self._lay_parts(cv, lay_sel, lay_band, sel_lag)
         h = g.foot()[5]
-        if h[2] > 0 and h[3] > 0:
+        # the hint strip, where the buffer shows another selection's verbs:
+        # copied where the last frame drew these, else drawn
+        if (h[2] > 0 and h[3] > 0 and (hint_lag or _overlaps_any(laid, (h,)))
+                and not (c[3] == hint and not _overlaps_any(laid, (h,))
+                         and self._copy_part(cv, h, rows))):
             laid.append(h)
             ws.wallpaper.restorer(cv, self._bd_now)(cv, h)
             self._draw_home_chrome(cv)
@@ -3773,11 +3780,14 @@ class LauncherHomeLayer:
         """Whether the ring's last `n` entries are `parts`: each retained
         buffer holds this frame."""
         ring = self._still_ring
+        if not ring.size:
+            return False
+        hint = ring.change(0)[3]
         for i in range(n):
             if i >= ring.size or ring.key(i) != parts[0]:
                 return False
             c = ring.change(i)
-            if c[0] != parts[1] or c[1] != parts[2]:
+            if c[0] != parts[1] or c[1] != parts[2] or c[3] != hint:
                 return False
         return True
 
