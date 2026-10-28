@@ -191,6 +191,7 @@ class Arrangement:
         self.root = tree(key, area[2], area[3], unit, blocks)
         self.sizes = {}
         self._start = {}
+        self._min = None
         self._fill(self.root, (), area[2], area[3])
 
     def _fill(self, node, path, w, h):
@@ -253,7 +254,10 @@ class Arrangement:
     def minimum(self):
         """The least panes area this workspace holds, (w, h): where a
         restored window stops shrinking."""
-        return node_min(self.root, self.unit)
+        m = self._min
+        if m is None:
+            m = self._min = node_min(self.root, self.unit)
+        return m
 
     # -- the dividers ---------------------------------------------------------
 
