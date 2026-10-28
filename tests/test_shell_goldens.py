@@ -508,7 +508,11 @@ def _quiesce(ws):
     surface that IS the banner or About sets `_golden_toast` or
     `_golden_about` to keep it."""
     if ws.pointer is not None:
+        # A mouse parked at the centre, hidden: live on every frame. A touch
+        # lingers only POINTER_LINGER_MS of wall clock after the pointer's
+        # init, so its hover would last as long as the machine is fast.
         ws.pointer.visible = False
+        ws.pointer.hovers = True
     if not getattr(ws, "_golden_toast", False):
         ws._toast_until = 0
     ws.show_fps = False
@@ -1144,6 +1148,27 @@ def test_shell_surfaces_match_goldens(config_name, tmp_path, request,
         "  Same pixels, different work. A cheaper draw is re-pinned; a dearer "
         "one needs a reason first. Re-pin with:\n    %s"
         % (config_name, "\n".join(off), REBASELINE_CMD))
+
+
+def test_goldens_do_not_read_the_wall_clock(tmp_path, request, monkeypatch):
+    """A slow machine renders the same goldens: with the input clock jumping
+    past the pointer's linger on every read, the config whose page lies under
+    the parked pointer still hashes to its golden. The pointer is pinned by
+    `_quiesce`, not by how soon a workstation reaches its settled frame."""
+    if _updating(request):
+        pytest.skip("re-baselining")
+    from runtime import moy_input
+    now = [0]
+
+    def jumping():
+        now[0] += 2 * moy_input.POINTER_LINGER_MS
+        return now[0]
+    monkeypatch.setattr(moy_input, "_ticks_ms", jumping)
+    name = "tdeck_320x240_fs1_ui_page"
+    got = capture(name, tmp_path / "carts")
+    golden = _load_goldens()[name]
+    moved = sorted(s for s in set(got) | set(golden) if got.get(s) != golden.get(s))
+    assert not moved, "%r moved under a slow clock" % moved
 
 
 def test_goldens_file_covers_exactly_the_matrix(request):
