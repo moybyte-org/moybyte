@@ -3330,8 +3330,8 @@ class LauncherHomeLayer:
         if getattr(cv, "RETAINED_FRAMES", 0) < 1:
             return
         g = self._grid_or_none()
-        if g is not None and not g.moving:
-            g.warm_faces()
+        if g is not None and not g.moving and ws.screen == self.id:
+            g.warm_faces()               # (only under the home: a face is the home's)
         cache = self._lib_cache
         try:
             if cache is None or cache.w != cv.w or cache.h != cv.h:

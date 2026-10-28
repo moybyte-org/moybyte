@@ -982,14 +982,17 @@ each.** On the P4: the Code tab's and theme Config's find past the view
 (~50-60; the next lever is the Code tab's per-row raster, its highlighter
 and glyph cost, a kernel question, not a scroll one); the home's grid and
 icons on `bd` and picture themes (~30-55) and the carousel's key rows
-(~35-45, the settle frame's hero and details pane; the next lever is a
-per-cell retained layer for the cards, keyed on the cover gen and the
-selection, stamped by blit -- §12 names it, this design does not build it);
+(~35-45, the settle frame's hero and details pane; the lever was the
+cards' kept faces, built 2026-10-28, §9, and what the carousel's step
+frame keeps over the target is its hero, its details pane and its band
+drawn in one frame -- #66 has the rows);
 Notes if the cart floor does not hold (~35-45; the lever is then the
 Player's composite of a declared rect alone, which P8 measures first); and
 Files' and Get Carts' key rows if their `damage.all()` is not moved
 (~38-45). On the T-Deck: the home's grid and icons on `bd` and picture
-themes (~30-50) and the carousel's settle (~35-45), the same lever; the
+themes (~30-50) and the carousel's settle (~35-45), the same lever (the
+icons' key rows stay over it: each step brings in a row of cards whose
+covers decode inside that frame, on the cover cache's budget); the
 Code tab's typing (~25-40) and find (~25-45) until P0's tool names the
 outliers' cause. Everything else lands under the target by the
 arithmetic, and the tool's column says where it did not.
