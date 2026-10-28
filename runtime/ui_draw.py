@@ -19,6 +19,7 @@
 #   ui_frame                          a host begins an app's frame of runtime/ui.py's verbs
 #   AppHost                           a shipped app's host side of the verbs (ctx.ui)
 #   HeldPage                          the page under a dialog, washed, held while it is up; release_held
+#   DialogRows                        a dialog's frame begun ahead of its page: its rows frame
 """The toolkit's engine layer: the rect-taking widgets under the public UI API.
 
 `runtime/ui.py` is the public UI API (docs/ui_api_2026-10.md), the verbs every
@@ -1681,6 +1682,11 @@ def paint_frame(n, alone, console=None):
     _CHANGE[0] = None
 
 
+def painted():
+    """The number of the frame the console paints (`paint_frame`)."""
+    return _PAINT[0]
+
+
 def window_frame(v):
     """The windowed WM draws a window's content now (`v` 1), its target
     holding the page as the last frame left it with nothing over it (`v`
@@ -1904,8 +1910,15 @@ class AppHost:
         self.px = self.py = -1          # where the pointer was last seen, in the app's space
         self.mid = False                # the middle button is held
         self.ring = PaintRing(1)        # what the frame before left of the page in its buffer
-        self._plan = array("i", [0] * 7)
+        self._plan = array("i", [0] * 8)
         self._again = False           # `again` since the last begin: no shift frame
+        # A dialog's rows frame is the host's to allow: `held(plan)` answers
+        # whether every buffer holds the page under the dialog the plan names
+        # (its card and drop, plan[0:4], standing plan[7] frames) as the
+        # frames before left it (`HeldPage.rows`); None, never.
+        self.held = None
+        self._t3 = 0
+        self._keys = False              # the frame begun last took the keys
         self.shifting = False           # the frame begun last draws its pages' floor alone
         self._dead = 0                  # the directions whose steps moved nothing last frame
         self._began = -1                # the painted frame it began last
@@ -1998,6 +2011,9 @@ class AppHost:
         t[0] = self.ctx
         t[1] = cv
         t[2] = _look(th)
+        t[3] = self._t3
+        if self._keys:
+            _KEYS_HOST[0] = self
 
     def begin(self, cv, th, rect, desk=False, window=False, elsewhere=False):
         """Begin the frame on `cv` under theme `th`, its page `rect` (in a
@@ -2017,6 +2033,7 @@ class AppHost:
         away = elsewhere or _ON_BAR[0]
         settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app,
                            elsewhere=away, edge=True)
+        self._t3 = UI_TARGET[3]
         self._shift(cv, th)
         if a[1] & _UP and _C.api_edge(self.ctx):
             _EDGE[0] = True
@@ -2029,6 +2046,7 @@ class AppHost:
                       and not _C.api_moving(self.ctx) else 0)
         self._began = _PAINT[0]
         self._console = _PAINT[2]
+        self._keys = not away
         if not away:
             _KEYS_HOST[0] = self
         self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
@@ -2058,10 +2076,13 @@ class AppHost:
             ok = _PAINT[1] and ring.vouch(cv, f, key, th)
         # A canvas whose copy costs about what the raster it saves does
         # (`SHIFT_COST`, per mille of a row's raster a row it copies costs;
-        # None where unknown) draws the frame whole instead.
+        # None where unknown) draws the frame whole instead. A dialog's rows
+        # frame is the host's to allow (`held`), and always pays: the frame
+        # it saves puts the page under the dialog back too.
         # A pass that changed what it drew before the change (`again`) left
         # the last frame's page unlike the app's: this frame draws whole.
-        if ok and not again and _C.api_shift_plan(self.ctx, p) and _pays(cv, p):
+        if ok and not again and _C.api_shift_plan(self.ctx, p) and (
+                _pays(cv, p) if not p[7] else self.held is not None and self.held(p)):
             if cv.shift_last(p[0] + getattr(cv, "_ox", 0), p[1] + getattr(cv, "_oy", 0),
                              p[2], p[3], 0, p[4]):
                 cv.shift_fence()        # the floor draws over rows the move wrote
@@ -2144,13 +2165,22 @@ class HeldPage:
     it where that frame drew it alone and still, with no dialog up
     (`shown`), and the input that opened the dialog changed nothing else
     in it with nothing reported before it (`opened`): `last` says so, and
-    the wash reads the page from the buffer that frame drew into."""
+    the wash reads the page from the buffer that frame drew into.
+
+    A frame whose input only typed into the dialog's field or moved its
+    focus skips the put back too (`rows`, a dialog's rows frame:
+    docs/scroll_and_text_2026-10.md §5): where every buffer holds the page
+    as the frames before left it (`note`, each a frame the dialog drew over
+    the hold alone on the glass), the dialog draws its changed rows alone."""
 
     def __init__(self):
         self.key = None
         self._shown = -1                # the frame that drew the page alone and still
         self._over = -1                 # the frame a dialog opened over it first draws
         self._src = None                # this frame's page: the last frame's buffer
+        self._at = array("i", [-1] * _MAX_RETAINED)   # the frames drawn over the hold
+        self._ati = 0
+        self._ask = [None, None, None, 0]   # this frame's console, canvas, key, dt (`ask`)
 
     def put(self, ws, cv, rect, key, dt=0):
         """Put the held page back into `rect`: whether it was held under
@@ -2213,6 +2243,54 @@ class HeldPage:
     def drop(self):
         """The dialog closed: the page is no longer held."""
         self.key = None
+        self._forget()
+
+    def _forget(self):
+        a = self._at
+        for i in range(len(a)):
+            a[i] = -1
+
+    def note(self):
+        """The frame drew the dialog over the page held (put back, washed
+        into the hold, or left as it was by a rows frame): counted where it
+        was alone on the glass."""
+        if self.key is None or not _PAINT[1]:
+            self._forget()
+            return
+        i = self._ati + 1
+        if i >= len(self._at):
+            i = 0
+        self._ati = i
+        self._at[i] = _PAINT[0]
+
+    def ask(self, ws, cv, key, dt=0):
+        """This frame's terms for `rows`, before the dialog's frame begins."""
+        a = self._ask
+        a[0] = ws
+        a[1] = cv
+        a[2] = key
+        a[3] = dt
+
+    def rows(self, plan):
+        """Whether the dialog's rows frame `plan` (`AppHost.held`) may leave
+        the page as it is: it is held under the key `ask` gave, nothing
+        animates, and each of the RETAINED_FRAMES painted frames before this
+        one drew the dialog the plan names (standing plan[7] frames) over
+        the hold, so every buffer holds the page outside the dialog's card."""
+        ws, cv, key, dt = self._ask
+        self._ask[0] = self._ask[1] = None
+        n = getattr(cv, "RETAINED_FRAMES", 0)
+        if (ws is None or self.key is None or ws.held_pages[1] is not self or self.key != key
+                or n < 1 or n > len(self._at) or plan[7] < n or ws._animating(dt)):
+            return False
+        f = _PAINT[0]
+        at = self._at
+        j = self._ati
+        for k in range(n):
+            if at[j] != f - 1 - k:
+                return False
+            j = j - 1 if j else len(at) - 1
+        return True
 
     def shown(self, ws, cv, still, dt=0):
         """This frame drew the page with no dialog up: noted where it was
@@ -2251,6 +2329,75 @@ class HeldPage:
             return True
         cl = getattr(cv, "copy_last", None)
         return cl is not None and bool(cl(rect[0], rect[1], rect[2], rect[3]))
+
+
+class DialogRows:
+    """A dialog over a held page whose frame begins before the page is drawn
+    (docs/scroll_and_text_2026-10.md §5): its host's begin says whether the
+    frame is a dialog's rows frame, which draws the dialog's changed rows
+    alone and leaves the page as it is, before anything is drawn. `ok` is
+    its host's `held` (`AppHost.held`): the desk Editor's word that its
+    window's buffer holds the page as the frame before left it
+    (`desk_frame`), else the held page's (`HeldPage.rows`), and only on a
+    frame whose app gave the gen it gave the last (`gen`). `begin` begins
+    the host ahead of the page this frame, and `take` answers it once, so
+    the dialog's draw resumes that frame instead of beginning another."""
+
+    def __init__(self, held):
+        self.held = held
+        self.desk = -1
+        self.on_desk = -1
+        self.begun = -1
+        self._gen = None
+        self._same = False
+
+    def desk_frame(self, holds):
+        """The desk Editor draws the dialog this frame, into its window's
+        buffer: a window frame (`window_frame`), whose buffer holds the page
+        as the frame before left it where `holds`."""
+        f = _PAINT[0]
+        self.on_desk = f
+        self.desk = f if holds else -1
+
+    def begin(self, host, cv, th, rect, desk=False):
+        """Begin the dialog's frame on its `host` ahead of the page (its
+        `begin`'s arguments): on the desk a window frame (`window_frame`),
+        one the desk vouches for where it said so. Whether it is a dialog's
+        rows frame."""
+        f = _PAINT[0]
+        w = 2 if self.desk == f else 1 if self.on_desk == f else 0
+        if w:
+            _WIN[0] = w
+        try:
+            host.begin(cv, th, rect, desk)
+        finally:
+            if w:
+                _WIN[0] = 0
+        self.begun = f
+        return host.shifting
+
+    def floor_box(self, host, out):
+        """The floor's bounding rect the dialog's last pass drew into
+        `out`, an array('i') of four: whether it drew one."""
+        return _C.api_floor_box(host.ctx, out)
+
+    def gen(self, g):
+        """The dialog's gen this frame, before its host begins: a frame
+        whose gen moved draws the dialog whole."""
+        self._same = g == self._gen
+        self._gen = g
+
+    def ok(self, plan):
+        if not self._same:
+            return False
+        if self.desk == _PAINT[0]:
+            return plan[7] >= 1
+        return self.held.rows(plan)
+
+    def take(self):
+        got = self.begun == _PAINT[0]
+        self.begun = -1
+        return got
 
 
 def _outside(r, hole):

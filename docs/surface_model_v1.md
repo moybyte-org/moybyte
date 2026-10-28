@@ -954,6 +954,21 @@ rects, the scrim storing to the held layer as it lands, and kept across
 opens while that key holds. The home captures no retained frame under the
 hold, so the menu's close stamps the one from before it.
 
+**A frame that only types into the dialog or moves its focus puts nothing
+back** (a dialog's rows frame, §14.7): the Editor's dialogs begin their
+frame ahead of the page (`ui_draw.DialogRows`), and where the engine
+licenses one and every buffer holds the page as the frames before left
+it -- each of the RETAINED_FRAMES painted frames before drew the same
+dialog over the hold, alone on the glass (`HeldPage.note`, `rows`) -- the
+dialog draws its changed rows and the page stays as it is. On the desk the
+window's buffer is the hold: while a pane's tab has a prompt up the desk
+Editor speaks §14.3's protocol (`EditorDesk.HELD`, `retained`, `changed`),
+and a frame whose buffer holds the desk as its last draw left it, with no
+input the desk took itself (a press, a chord) and no look, size, layout or
+bar key moved, draws the prompt's rows alone; the stamp copies them, and
+the full-screen row over the band stays as the buffer holds it
+(`WindowedWM._row_over`).
+
 **This is not a second invalidation mechanism.** Whether a frame paints is
 still the gate's; the copy only says what the page already is. Pinned by
 `tests/test_held_page.py`: the dialogs typed into and moved, on the handheld
@@ -1086,7 +1101,18 @@ the rows whose marks moved -- and every draw goes once through each piece
 of the frame's region it reaches (outside R, and the floor's rects), so a
 floor pixel takes every draw over it in a whole frame's order; the floor only
 widens during the pass (a stop unlike the last frame's takes R from its top
-down; a picture whose gen moved, its box). `moy_ui_api.h` is the authority.
+down; a picture whose gen moved, its box). A key typed into a field joins
+the floor as the field's row, and a field whose text changed with no key
+typed (the app's own) takes its row during the pass: its stop keeps its
+text's hash. A dialog over a held page (`wash` false) whose app gives it a
+`gen` has rows frames of its own: R is its card and the drop under it as
+the last frame drew them, the floor the rows of the stops whose marks move
+and of the field typed into, all inside the card's rows its rounded
+corners leave whole (a corner drawn again would blend over itself), and
+the dialog draws through its floor alone -- what lies outside R is the
+page under it, its host's to keep. A dialog that comes up otherwise than
+planned (its card, title, buttons or gen) draws nothing that frame and
+owes the next. `moy_ui_api.h` is the authority.
 
 **This is not a second invalidation mechanism.** Whether a surface paints is
 still the gate's, the gens', §14.1's freeze's and the Class B declaration's
@@ -1102,10 +1128,12 @@ cost, and a change to what a page shows made with no mark of the app's),
 `tests/test_wm_records.py` (every app on the verbs in a desk window, the
 Waveshare P4's desk, windows overlapping, a focus change and a move
 mid-coast, a popover and the system menu's scrim over a glide, and each
-change Files, Storybook and Appearance must move their gens for) and
+change Files, Storybook and Appearance must move their gens for),
 `tests/test_home_band.py` (the home's band: grid, icons and carousel,
-handheld and desk, on plain, backdrop and picture themes), each presented
-frame, with up to three buffers taking
+handheld and desk, on plain, backdrop and picture themes) and
+`tests/test_dialog_rows.py` (the Editor's dialogs typed into and moved
+through, on the handheld and the desk, and Settings' Name field), each
+presented frame, with up to three buffers taking
 turns, byte-equal to whole repaints, the share of shift frames held above a floor,
 and the engine's record audit failing any shift frame whose stops moved
 outside its floor.

@@ -193,7 +193,8 @@ def _over(o):
     gen = o.get("gen")
     flags = None
     if wash is not None or lead is not None or gen is not None:
-        flags = (1 if wash else 0) | (2 if lead else 0) | (4 if gen is not None else 0)
+        flags = ((1 if wash else 8 if wash is None else 0) | (2 if lead else 0)
+                 | (4 if gen is not None else 0))
     tail = b"" if hint is None and flags is None else _hint(
         None if hint is None else str(hint).encode("utf-8"))
     if flags is not None:

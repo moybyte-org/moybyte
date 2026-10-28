@@ -78,10 +78,11 @@ enum { MOY_UI_ST_FOCUS = 1, MOY_UI_ST_ACTIVATED = 2, MOY_UI_ST_PRESSED = 4, MOY_
 // the nine words; -1 absent), current, disabled, nav, mark, steps (0 or 1;
 // -1 absent); then, where the block goes on, the hint's length as a word and
 // its text (a field's placeholder), and then a word of flags (bit 0: wash, a
-// popover washing what it covers; bit 1: lead, a table whose first row is a
-// verb; bit 2: gen, a word follows: the stop's content generation, §3.3 of
-// docs/scroll_and_text_2026-10.md). A wasm app hands it over as a pointer and
-// its length.
+// popover washing what it covers, a dialog over a page washed already where
+// clear; bit 1: lead, a table whose first row is a verb; bit 2: gen, a word
+// follows: the stop's content generation, §3.3 of
+// docs/scroll_and_text_2026-10.md; bit 3: wash not given, bit 0 then
+// ignored). A wasm app hands it over as a pointer and its length.
 enum {
     MOY_UI_O_FILL = 0, MOY_UI_O_INK, MOY_UI_O_BORDER, MOY_UI_O_ID, MOY_UI_O_CURRENT,
     MOY_UI_O_DISABLED, MOY_UI_O_NAV, MOY_UI_O_MARK, MOY_UI_O_STEPS, MOY_UI_O_WORDS
@@ -103,6 +104,7 @@ typedef struct {
 #define MOY_UI_O_WASH 1             // the flags word's bits: `wash`
 #define MOY_UI_O_LEAD 2             // and `lead`
 #define MOY_UI_O_GEN 4              // and `gen`, whose word follows
+#define MOY_UI_O_NO_WASH 8          // and `wash` not given (it stays absent)
 
 // Every key absent.
 void moy_ui_over_none(moy_ui_over_t *o);
@@ -264,9 +266,25 @@ typedef struct {
     // none).
     int16_t tbl_y0, tbl_rh, tbl_n, tbl_px, tbl_pw;
     moy_ui_box_t tbl_view;
-    // The dialog drawn this frame: its id (0: none) and its card.
+    // The dialog drawn this frame: its id (0: none) and its card; whether
+    // it stands over a held page (`wash` false) under the app's gen
+    // (dlg_held), that gen, its buttons (a hash) and its body's foot on
+    // screen. dw_*: the last frame's, and the frames it has stood as it is
+    // (dw_n, a dialog's rows frame: moy_ui_api_shift_plan).
     uint32_t dlg_id;
     moy_ui_box_t dlg_card;
+    uint8_t dlg_held;
+    int32_t dlg_gen;
+    uint32_t dlg_btn;
+    int16_t dlg_foot;
+    uint32_t dw_id;
+    moy_ui_box_t dw_card;
+    int32_t dw_gen;
+    uint32_t dw_btn;
+    uint8_t dw_ok, dw_n;
+    // The focused field's box last frame where this frame types into it (w
+    // 0: none): its row joins a shift frame's floor.
+    moy_ui_box_t typed_box;
     // The page's hint band this frame (h 0: none), which a wash leaves clear.
     moy_ui_box_t hint_band;
     // ui.tool's tooltip: the tool a resting pointer is over (w 0: none) and
@@ -296,10 +314,18 @@ typedef struct {
     // page (fl_dirty), how deep in an overlay it is (fl_susp) and whether
     // the floor ran out of rects (fl_lost). at_last: the stop placed last
     // was ui.at's.
+    // A dialog's rows frame (sh_dlg) moves nothing: R is the last frame's
+    // card and its drop, the floor the rows of its card's safe band
+    // (dlg_s0..dlg_s1: the card's rows its rounded corners leave whole),
+    // and its draws go through the floor alone. fl_mute: the dialog drawn
+    // is not the one planned (its card, title, buttons or gen), so it draws
+    // nothing this frame and owes the next. fl_top: something drew over a
+    // dialog (a popover, a toast, a tooltip).
     uint32_t sh_id;
     moy_ui_box_t sh_r;
     int16_t sh_dy, sh_rows, sh_pics;
-    uint8_t sh_plan, sh_head;
+    uint8_t sh_plan, sh_head, sh_dlg, fl_mute, fl_top;
+    int16_t dlg_s0, dlg_s1;
     uint8_t fl_on, fl_stage, fl_n, fl_struct, fl_dirty, fl_susp, fl_lost, at_last;
     uint8_t fl_cast;                // the next draw casts a shadow past its box (a card's)
     moy_ui_box_t pic_clip;          // the floor's rect the last card's picture draws through
@@ -612,9 +638,18 @@ enum {
 // After begin: the frame the engine licenses (MOY_UI_SHIFT_*). out: R's x,
 // y, w, h on screen as the last frame drew it, dy, the shift that brings
 // that frame's pixels to this one's scroll (0 on a rows frame), the rows of
-// R its floor will draw as begin can know them (the floor only widens), and
-// the rows of R's pictures the floor leaves undrawn (summed per picture).
-int moy_ui_api_shift_plan(const moy_ui_ctx_t *c, int32_t out[7]);
+// R its floor will draw as begin can know them (the floor only widens), the
+// rows of R's pictures the floor leaves undrawn (summed per picture), and 0
+// for a page, else a dialog's rows frame: the frames its card has stood as it
+// is (at most 255). A dialog over a held page (`wash` false) whose app gives
+// it a gen draws its rows alone on a frame whose input only typed into its
+// field or moved its focus: R is its card and the drop under it as the last
+// frame drew them, the floor the rows that input changed, and nothing outside
+// R is the dialog's to draw -- the page under it is the host's, which puts it
+// back on any other frame. A dialog that comes up otherwise than planned (its
+// card, title, buttons, `wash` or gen) draws nothing that frame and owes the
+// next.
+int moy_ui_api_shift_plan(const moy_ui_ctx_t *c, int32_t out[8]);
 // The host moved R's pixels (or the frame is a rows frame, whose R holds the
 // last frame's as they are): this frame's pass draws R's floor alone.
 void moy_ui_api_shift_arm(moy_ui_ctx_t *c);
@@ -626,6 +661,9 @@ int moy_ui_api_shift_drawn(const moy_ui_ctx_t *c, int *clean);
 // The floor's rects as the pass has them, x, y, w, h each, `cap` at most:
 // their count, -1 where the pass draws whole (a test's probe).
 int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap);
+// The floor's bounding rect as the pass drew it, x, y, w, h on screen into
+// out: 1, or 0 where the pass drew whole (or drew no floor at all).
+int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]);
 // ui.card_clip(rect): `r` (x, y, w, h, in and out) cut to the floor's rect
 // the picture the last card or part answered lies in, which is where the
 // app draws it on a shift frame; 0, `r` as it was, where the frame draws

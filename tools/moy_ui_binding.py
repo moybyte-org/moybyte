@@ -323,6 +323,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_band", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_card_clip", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_floor", [c.c_void_p, c.c_void_p, _I], _I),
+    ("moy_ui_api_floor_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_keep", [c.c_void_p, c.POINTER(_Sink), _Span, _I], _I),
     ("moy_ui_api_audit", [_I], c.c_uint32),
     ("moy_ui_api_fades", [_I], c.c_uint32),
@@ -1279,7 +1280,7 @@ def binding():
 
     def api_shift_plan(ctx, out):
         p, _k = _ctx(ctx)
-        w = (c.c_int32 * 5).from_buffer(out)
+        w = (c.c_int32 * 8).from_buffer(out)
         return int(lib.moy_ui_api_shift_plan(p, c.addressof(w)))
 
     def api_shift_arm(ctx):
@@ -1306,6 +1307,10 @@ def binding():
         if n < 0:
             return None
         return tuple(tuple(v[4 * i:4 * i + 4]) for i in range(n))
+
+    def api_floor_box(ctx, out):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_floor_box(p, (c.c_int32 * 4).from_buffer(out)))
 
     def api_card_clip(ctx, r):
         p, _k = _ctx(ctx)
@@ -1408,7 +1413,8 @@ def binding():
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
               api_owes, api_moved, api_moving, api_offset, api_fades,
-              api_shift_plan, api_shift_arm, api_shift_drawn, api_band, api_floor, api_card_clip, api_keep, api_audit,
+              api_shift_plan, api_shift_arm, api_shift_drawn, api_band, api_floor, api_floor_box,
+              api_card_clip, api_keep, api_audit,
               api_end,
               api_table_rows, api_table_pics,
               api_grid,

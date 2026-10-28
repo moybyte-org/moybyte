@@ -15,7 +15,7 @@ buffer (`HeldPage.last`) where it may."""
 
 import pytest
 
-from runtime import block_editor_ui, host_app, ui_draw
+from runtime import block_editor_ui, host_app, ui, ui_draw
 from ws_helpers import no_unlock_banner, open_cart, quiesce
 
 # A game whose frames are a function of its frame count alone.
@@ -55,9 +55,10 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
     buffers presented in turn; `ref`: the page drawn on every frame and
     the dialog washing it. `force`: every frame paints (else only those
     the gate lets through, as on a board). `puts` counts the frames that
-    put the held page back, and the first frames that took the page from
-    the last frame (`HeldPage.last`)."""
-    puts = [0, 0]
+    put the held page back, the first frames that took the page from the
+    last frame (`HeldPage.last`), and the dialogs' rows frames, which left
+    the page as it was (`ui_draw.DialogRows`)."""
+    puts = [0, 0, 0]
     real = ui_draw.HeldPage.put
     real_last = ui_draw.HeldPage.last
 
@@ -77,9 +78,18 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
     monkeypatch.setattr(ui_draw.HeldPage, "put", put)
     monkeypatch.setattr(ui_draw.HeldPage, "last", last)
     if ref:
-        # the dialog washes the page itself, as one with no held page did
+        # the dialog washes the page itself, as one with no held page did,
+        # and draws whole on every frame
         monkeypatch.setattr(ui_draw, "wash_page", lambda *a: (0, 0, 0, 0))
         monkeypatch.setattr(ui_draw, "NO_WASH", None)
+        real_dialog = ui.dialog
+
+        def dialog(title=None, buttons=(), kind="primary", o=None):
+            if o is not None and o.get("wash") is False:
+                o = None
+            return real_dialog(title, buttons, kind, o)
+        monkeypatch.setattr(ui, "dialog", dialog)
+        monkeypatch.setattr(ui_draw.DialogRows, "ok", lambda self, plan: False)
     carts = str(tmp_path / "carts")
     host_app.moy_carts.ensure_dirs(carts)
     host_app.moy_carts.create("Stripes", carts, src=_GAME, type="game")
@@ -105,6 +115,8 @@ def _console(tmp_path, monkeypatch, bufs, ref, windowed, force=True):
             drv.frame(1 / 30)
             if ws._frames_drawn == k:
                 continue
+            if ws.frame_change == "rows":
+                puts[2] += 1
             held.append(bytes(root._buf))
             shots.append(held[-1])
             if bufs > 1:
@@ -280,17 +292,20 @@ def test_a_held_page_under_a_dialog_is_the_page_drawn(tmp_path, monkeypatch, buf
         ws, frame, shots, puts = _console(tmp_path / str(ref), monkeypatch, bufs, ref,
                                           windowed)
         _dialogs(ws, frame)
-        got.append((shots, puts[0]))
+        got.append((shots, puts))
     (shots, puts), (want, _none) = got
     assert len(shots) == len(want)
     for i, (a, b) in enumerate(zip(shots, want)):
         assert a == b, "frame %d of %d differs from the page drawn" % (i, len(shots))
+    rows = puts[2]
+    puts = puts[0]
     if windowed:
         # the desk's Editor draws its pages into a viewport of the window's
         # buffer, which the hold does not copy from
         assert puts == 0
     else:
-        assert puts >= 20, "the hold put the page back on %d frames" % puts
+        assert puts >= 3, "the hold put the page back on %d frames" % puts
+        assert rows >= 16, "the dialogs drew their rows alone on %d frames" % rows
 
 
 @pytest.mark.parametrize("bufs", (1, 2))

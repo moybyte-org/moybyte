@@ -1311,11 +1311,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._install(self._root_ctx)
         return True
 
-    def _row_over(self, win, cv, held=False):
+    def _row_over(self, win, cv, held=False, kept=False):
         """Where `win` is full screen and its app's band is its row: the
         row's head and controls over the band its content just drew on `cv`,
         so they ride the content's stamp and its freeze. For a content that
-        speaks the shown protocol (`held`), whether the row's pixels moved."""
+        speaks the shown protocol (`held`), whether the row's pixels moved;
+        `kept`: its draw went into the window's buffer as that content's
+        last draw left it, so where the row is as it was and the draw changed
+        none of the row's band (`changed`), the row is the buffer's already
+        (painted again, its controls would blend over themselves)."""
         if win.saved is not None and not win.row and win.kind != "desktop":
             if not held:
                 self._paint_row(win, cv)
@@ -1325,7 +1329,24 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if sig != win._row_sig:
                 win._row_sig = sig
                 win._row_moved = True     # the row's pixels are not the ones before
+            elif kept and self._row_clear(win):
+                return
             self._paint_row(win, cv, t)
+
+    def _row_clear(self, win):
+        """Whether what the focused content's last draw changed (`changed`)
+        is known and reaches none of `win`'s full-screen row."""
+        c = self._content_for(win.kind)
+        r = c.changed() if c is not None else None
+        if r is None:
+            return False
+        if r[2] <= r[0] or r[3] <= r[1]:
+            return True
+        cx, cy, _cw, _ch = win.content_rect()
+        rx, ry, rw, rh = self._row_rect(win)
+        rx -= cx
+        ry -= cy
+        return r[1] >= ry + rh or r[3] <= ry or r[0] >= rx + rw or r[2] <= rx
 
     def _build_content(self, win):
         """(Re)build a window's content backing for its CURRENT size: the buffer +
@@ -3966,10 +3987,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._install(win.ctx, win)
                 if speaks and not held:
                     _ui_draw.window_frame(1)
+                kept = held and not win._buf_stale
                 try:
                     if held:
                         lag = win._lag
-                        if not win._buf_stale:
+                        if kept:
                             content.retained(1, 0, 0, 0, 0)
                         else:
                             content.retained(lag[4], lag[0], lag[1], lag[2], lag[3])
@@ -3977,7 +3999,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 finally:
                     _ui_draw.window_frame(0)
                     self._install(self._root_ctx)
-                self._row_over(win, win.buf, held)
+                self._row_over(win, win.buf, held, kept)
                 win._buf_stale = False
                 if held:
                     self._own_of(win, content, held)

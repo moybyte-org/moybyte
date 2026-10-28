@@ -3086,13 +3086,14 @@ static mp_obj_t ui_api_focus_ahead(mp_obj_t ctx, mp_obj_t id) {
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_focus_ahead_obj, ui_api_focus_ahead);
 
 // api_shift_plan(ctx, out) -> the shift frame begin licensed (moy_ui_api.h's
-// MOY_UI_SHIFT_*); `out`, seven writable int32 words: R's x, y, w, h, dy,
-// the floor's rows and the pictures' rows it leaves
+// MOY_UI_SHIFT_*); `out`, eight writable int32 words: R's x, y, w, h, dy,
+// the floor's rows, the pictures' rows it leaves and, for a dialog's rows
+// frame, the frames its card has stood (0: a page's)
 static mp_obj_t ui_api_shift_plan(mp_obj_t ctx, mp_obj_t out) {
     mp_buffer_info_t b;
     mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
-    if (b.len < 7 * sizeof(int32_t)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("seven words"));
+    if (b.len < 8 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("eight words"));
     }
     return MP_OBJ_NEW_SMALL_INT(moy_ui_api_shift_plan(ctx_of(ctx), (int32_t *)b.buf));
 }
@@ -3151,6 +3152,18 @@ static mp_obj_t ui_api_band(size_t n_args, const mp_obj_t *a) {
     return ret_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_band_obj, 1, 2, ui_api_band);
+
+// api_floor_box(ctx, out) -> whether the pass drew a floor; `out`, four
+// writable int32 words, its bounding rect on screen (moy_ui_api_floor_box)
+static mp_obj_t ui_api_floor_box(mp_obj_t ctx, mp_obj_t out) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
+    if (b.len < 4 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
+    }
+    return mp_obj_new_bool(moy_ui_api_floor_box(ctx_of(ctx), (int32_t *)b.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_floor_box_obj, ui_api_floor_box);
 
 // api_keep(ctx, cv, look, id, h) -> the state bits of a stop carried forward
 // undrawn
@@ -3348,6 +3361,7 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_shift_arm), MP_ROM_PTR(&ui_api_shift_arm_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_shift_drawn), MP_ROM_PTR(&ui_api_shift_drawn_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_band), MP_ROM_PTR(&ui_api_band_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_floor_box), MP_ROM_PTR(&ui_api_floor_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card_clip), MP_ROM_PTR(&ui_api_card_clip_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keep), MP_ROM_PTR(&ui_api_keep_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_audit), MP_ROM_PTR(&ui_api_audit_obj) },

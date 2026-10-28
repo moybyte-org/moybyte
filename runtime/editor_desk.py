@@ -49,6 +49,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import Layer
     from runtime.ticks import _ticks_ms, _ticks_diff
 
+from array import array
+
 # The surface each Editor tab draws with and the attribute on it holding the
 # layout its `relayout` builds (the window's layout context captures the same).
 _OWNERS = {"cards": ("cards_layer", "layout"), "blocks": ("block_ui", "block_layout"),
@@ -154,6 +156,15 @@ class EditorDesk(Layer):
         self._warm_left = []            # ...and those still to warm
         self._warm_due = False          # a quiet frame has warming to do
         self.dt = 0
+        # The shown protocol (docs/surface_model_v1.md §14.3) while a prompt
+        # is up: whether the buffer this draw goes into holds the desk as the
+        # last draw left it (`retained`), what the desk was a function of then
+        # (`_rows_key`), and what the draw changed (`changed`).
+        self._known = False
+        self._rows_key = None
+        self._changed = None
+        self._acts = 0                  # input the desk took itself (a press, a chord)
+        self._box = array("i", [0] * 4)
 
     # -- where it applies -------------------------------------------------------
 
@@ -520,6 +531,80 @@ class EditorDesk(Layer):
 
     # -- drawing ------------------------------------------------------------------
 
+    # -- a prompt's rows (docs/scroll_and_text_2026-10.md §5) -----------------------
+    #
+    # While a pane's tab has a prompt up (the Blocks entry prompts, Cart info,
+    # New script) the desk under it does not change but by input that reaches
+    # it, and the window's content speaks the shown protocol: a frame whose
+    # input only typed into the prompt's field or moved its focus, into a
+    # buffer that holds the desk as the last draw left it, draws the prompt's
+    # changed rows alone and says so (`changed`), so the window's stamp copies
+    # those rows and nothing else.
+
+    def _prompt(self):
+        """(tab, its layer, pane, rect) of the pane on show whose tab has a
+        prompt up, else None."""
+        ws = self.ws
+        alone = self.alone()
+        for pane, r, _path in self.panes():
+            if alone is not None:
+                if pane != alone:
+                    continue
+                r = self._area()
+            tab = P.CONTENTS[self.tab_of(pane)][2]
+            layer = ws.block_ui if tab == "blocks" else ws.cards_layer if tab == "cards" else None
+            if layer is not None and layer.prompt_host() is not None:
+                return tab, layer, pane, r
+        return None
+
+    @property
+    def HELD(self):
+        return self._prompt() is not None
+
+    def retained(self, known, x0, y0, x1, y1):
+        self._known = bool(known) and (x1 <= x0 or y1 <= y0)
+
+    def changed(self):
+        return self._changed
+
+    def _prompt_rows(self, dt):
+        """The frame as a prompt's rows frame, where it may be one: True
+        where the prompt drew its changed rows alone."""
+        ws = self.ws
+        got = self._prompt()
+        known = self._known
+        self._known = False
+        if got is None:
+            self._rows_key = None
+            return False
+        tab, layer, pane, r = got
+        cv = ws.sys_canvas
+        look = ws.look
+        key = (layer.prompt_host(), self._acts, self.key, self._focus.get(self.key, 0),
+               self.grown, pane, r, self.placed()[0],
+               cv.w, cv.h, look.look_gen, look.effective_font_scale(),
+               look.effective_chrome_scale(), ws.bar_layer.shown_key("menu"))
+        same = key == self._rows_key
+        self._rows_key = key
+        rows = layer._rows
+        if not same or not known or ws._animating(dt):
+            rows.desk_frame(False)
+            return False
+        u = self._unit()
+        body = self._body(r, u, pane)
+        # the buffer holds the desk as the frame before left it: the
+        # prompt's frame may be its rows alone
+        rows.desk_frame(True)
+        if not self._in_pane(tab, body, layer.prompt_rows, dt):
+            return False
+        b = self._box
+        if rows.floor_box(layer.prompt_host(), b):
+            self._changed = [body[0] + b[0], body[1] + b[1], body[0] + b[0] + b[2],
+                             body[1] + b[1] + b[3]]
+        else:
+            self._changed = [0, 0, 0, 0]
+        return True
+
     def draw(self, dt):
         ws = self.ws
         self.dt = dt
@@ -528,6 +613,15 @@ class EditorDesk(Layer):
         if not self._warm_due and self.key in P.KEYS \
                 and self._warm_for != self._warm_mark(self._area(), self._unit()):
             self._warm_due = True
+        self._changed = None
+        try:
+            if not (self.HELD and self._prompt_rows(dt)):
+                self._draw(dt)
+        finally:
+            self._known = False
+
+    def _draw(self, dt):
+        ws = self.ws
         cv = ws.sys_canvas
         th = ws.theme_colors
         lay = ws.layout
@@ -1113,19 +1207,31 @@ class EditorDesk(Layer):
         self._fresh = ev if fresh else 0
         if fresh and self._chord(ev & 0xFFFF, ev >> _MODS_AT):
             i.clear_edges()
+            self._acts += 1
             return True
         if self._pad(i):
             i.clear_edges()
             ws._dirty = True
+            self._acts += 1
             return True
         if self.grown is not None and i.pressed("stop") and self.escape():
+            self._acts += 1
             return True
         if self._view_wheel(i):
+            self._acts += 1
             return True
         if self._menu_open():
             if self._host.keys(i):
                 ws._dirty = True
+            self._acts += 1
             return True
+        got = self._prompt()
+        if got is not None:
+            # a prompt up takes the keys, whichever pane holds them
+            tab, _layer, pane, r = got
+            layer = ws.layer_of(tab)
+            return layer is not None and bool(
+                self._in_pane(tab, self._body(r, self._unit(), pane), layer.handle_input, i))
         pane, r, _p = self.focused()
         c = self.tab_of(pane)
         tab = P.CONTENTS[c][2]
@@ -1395,6 +1501,8 @@ class EditorDesk(Layer):
     def handle_pointer(self, px, py, click):
         ws = self.ws
         down = ws.pointer.down
+        if click or down:
+            self._acts += 1
         if self._drag is not None:
             return self._divider_drag(px, py, down)
         lay = ws.layout

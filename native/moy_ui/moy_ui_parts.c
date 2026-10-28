@@ -2623,12 +2623,16 @@ int moy_ui_modal_band(int fs, int desk) {
     return (m != NULL && slot < n ? m[slot] : 0) * (fs < 1 ? 1 : fs);
 }
 
+int moy_ui_modal_round(int fs, int desk) {
+    const moy_ui_depth_t *dp = moy_ui_depth();
+    return (dp->card_r < (desk ? 12 : 8) ? dp->card_r : (desk ? 12 : 8)) * (fs < 1 ? 1 : fs);
+}
+
 int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs, int desk,
                  int title_h) {
     pd_t d;
     open_pd(s, &d, fs, desk);
-    const moy_ui_depth_t *dp = moy_ui_depth();
-    int r = (dp->card_r < (desk ? 12 : 8) ? dp->card_r : (desk ? 12 : 8)) * d.fs;
+    int r = moy_ui_modal_round(fs, desk);
     // flat: no soft shadow blended over what still reads under it, but a
     // hard drop MOY_UI_DROP pixels at the scale in an opaque shade of the
     // ground, then the surface and its edge (Contrast's: no drop, the ink's

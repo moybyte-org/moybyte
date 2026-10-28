@@ -957,6 +957,9 @@ int moy_ui_field_h(const moy_ui_sink_t *s, int fs, int desk);
 int moy_ui_modal(const moy_ui_sink_t *s, moy_ui_box_t b, moy_ui_span_t title, int fs, int desk,
                  int title_h);
 int moy_ui_modal_band(int fs, int desk);
+// The radius of a modal card's corners at the scale: the rows it leaves at
+// the card's top and foot are the ones its rounding blends over what is under.
+int moy_ui_modal_round(int fs, int desk);
 // The width of text `t` in type role `role`'s font on the sink.
 int moy_ui_role_w(const moy_ui_sink_t *s, int role, moy_ui_span_t t);
 // A tool's part (ui.tool) in box b: flat but for its marks (`flags`

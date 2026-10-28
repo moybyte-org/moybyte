@@ -88,6 +88,20 @@ class _Prompt:
         self.field = 0
         self.msg = None
         self.host = _ui_draw.AppHost()
+        # the page under it washed already (held), and what it draws besides
+        # its fields' text a function of `gen` (its line, `say`)
+        self.o = {"wash": False, "gen": 0}
+
+    def types(self, ch):
+        """Whether typed byte `ch` changes the focused field's text."""
+        t = self.texts[self.field]
+        return (ch in (8, 127) and t != "") or (32 <= ch < 127 and len(t) < self.caps[self.field])
+
+    def say(self, msg):
+        """Set the line under the fields that says why it stayed open."""
+        if msg != self.msg:
+            self.msg = msg
+            self.o["gen"] += 1
 
     def open(self, texts, seed):
         for i in range(len(self.texts)):
@@ -110,7 +124,7 @@ class _Prompt:
             self.texts[self.field] = t[:-1]
         elif 32 <= ch < 127 and len(t) < self.caps[self.field]:
             self.texts[self.field] = t + chr(ch)
-        self.msg = None
+        self.say(None)
         return None
 
 
@@ -258,6 +272,7 @@ class CardsLayer:
         # The open dialog (CART INFO or NEW SCRIPT), a `_Prompt`, or None.
         self.prompt = None
         self._held = _ui_draw.HeldPage()   # the page under it (`_draw_prompt`)
+        self._rows = _ui_draw.DialogRows(self._held)   # ...and its rows frames (`prompt_rows`)
         # The ADVANCED row's file list: None when closed, else
         # {"rows", "sel", "top", "msg"} -- see _open_files.
         self.files = None
@@ -290,9 +305,12 @@ class CardsLayer:
         if p is None:
             if held.key is not None:
                 held.drop()
+        elif self.prompt_rows(dt):
+            return
         elif held.put(ws, ws.sys_canvas, self._page_rect(), self._held_key(p), dt):
             ws.bar_layer._draw_status_strip("menu")
             self._draw_prompt(True, dt)
+            held.note()
             return
         if p is None or not held.last(ws, ws.sys_canvas, self._page_rect(), dt):
             try:
@@ -314,8 +332,38 @@ class CardsLayer:
         # editor's blk_kbd prompt (chrome, then any modal on top).
         if self.prompt is not None:
             self._draw_prompt(False, dt)
+            held.note()
         else:
             held.shown(ws, ws.sys_canvas, self._page_still(), dt)
+
+    def prompt_host(self):
+        """The open dialog's host (`ui_draw.AppHost`), None where none is up."""
+        return None if self.prompt is None else self.prompt.host
+
+    def prompt_rows(self, dt=0):
+        """Begin the open dialog's frame ahead of the page under it, once a
+        painted frame: where it is a dialog's rows frame (a field typed
+        into, its focus moved, the page held as the frames before left it:
+        `ui_draw.DialogRows`), draw its changed rows alone and answer True;
+        else the frame draws the page and the dialog as ever."""
+        p = self.prompt
+        if p is None:
+            return False
+        ws = self.ws
+        rows = self._rows
+        if rows.begun == _ui_draw.painted():
+            return False
+        self._held.ask(ws, ws.sys_canvas, self._held_key(p), dt)
+        lay = self.layout
+        rows.gen(p.o["gen"])
+        if not rows.begin(p.host, ws.sys_canvas, ws.theme_colors,
+                          (lay.cx, lay.cy, lay.cw, lay.ch),
+                          _layout_base.metric_class() == _layout_base.DESK):
+            return False
+        ws.bar_layer._draw_status_strip("menu")
+        self._draw_prompt(True, dt)
+        self._held.note()
+        return True
 
     def _page_rect(self):
         lay = self.layout
@@ -1237,6 +1285,7 @@ class CardsLayer:
         _arm_prompt(ws)
         self.prompt = _Prompt(kind, title, fields, sub, ok)
         self.prompt.open(texts, getattr(ws.input, "last_key", 0) or 0)
+        self.prompt.host.held = self._rows.ok
         ws._dirty = True
 
     def _open_meta(self):
@@ -1274,11 +1323,11 @@ class CardsLayer:
         title = p.texts[0].strip()
         author = p.texts[1].strip()
         if not title:
-            p.msg = "Give it a title."
+            p.say("Give it a title.")
             ws._dirty = True
             return                          # stay open: never persist a blank title
         if not ws.project.commit_manifest(title=title, author=author):
-            p.msg = "It didn't save. Try again."
+            p.say("It didn't save. Try again.")
             ws._dirty = True
             return
         self._close_prompt()
@@ -1314,13 +1363,13 @@ class CardsLayer:
         cart = ws.project.cart
         name = self._newf_filename(p.texts[0])
         if name is None:
-            p.msg = "Start its name with a letter."
+            p.say("Start its name with a letter.")
             ws._dirty = True
             return
         made = ws._with_sd(lambda: ws.carts_store.add_source(cart, name,
                                                              "-- " + name + "\n"))
         if made is None:
-            p.msg = "There's a file with that name."
+            p.say("There's a file with that name.")
             ws._dirty = True
             return
         self._close_prompt()
@@ -1342,9 +1391,12 @@ class CardsLayer:
         p = self.prompt
         if p.host.keys(i):
             self.ws._dirty = True
-        if p.host.inp[5] == 27 or i.pressed("stop"):
+        ch = p.host.inp[5]
+        if ch == 27 or i.pressed("stop"):
             p.host.inp[5] = 0
             self._close_prompt()
+        elif p.msg is not None and p.types(ch or (p.host.inp[_ui_draw.UI_IN_LEN - 1] & 0xFFFF)):
+            p.say(None)                 # the text it will change clears the line, before the frame
         return True
 
     def _prompt_pointer(self, px, py, click):
@@ -1363,7 +1415,10 @@ class CardsLayer:
         lay = self.layout
         host = p.host
         desk = _layout_base.metric_class() == _layout_base.DESK
-        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        if self._rows.take():
+            host.resume(ws.sys_canvas, ws.theme_colors)   # begun ahead of the page
+        else:
+            host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
         tdeck = _ui.input_kind() == "tdeck"
         keys = (("scroll", "Field") if len(p.texts) > 1 else ()) + (
             "confirm", p.ok, "cancel", "Cancel")
@@ -1375,8 +1430,7 @@ class CardsLayer:
         if not held:
             self._held.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(p),
                             self._page_still(), dt)
-        pick = _ui.dialog(p.title, () if tdeck else ("Cancel", p.ok), "primary",
-                          _ui_draw.NO_WASH)
+        pick = _ui.dialog(p.title, () if tdeck else ("Cancel", p.ok), "primary", p.o)
         if p.sub:
             _ui.label(p.sub, _PROMPT_SUB)
         done = False
@@ -1387,7 +1441,7 @@ class CardsLayer:
             got, enter = _ui.field(p.labels[i], p.texts[i], p.caps[i], o)
             if got != p.texts[i]:
                 p.texts[i] = got
-                p.msg = None
+                p.say(None)
             done = done or enter
         if p.msg:
             _ui.label(p.msg, _PROMPT_MSG)

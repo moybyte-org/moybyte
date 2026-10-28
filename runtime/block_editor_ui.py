@@ -240,6 +240,8 @@ class BlockEditorUI:
         self.block_layout = BlockLayout()
         self._page = None             # the page on the verbs (editor_blocks.py)
         self._held = _ui_draw.HeldPage()   # the page under blk_kbd (`_draw_blk_kbd`)
+        self._rows = _ui_draw.DialogRows(self._held)   # ...and its rows frames (`prompt_rows`)
+        self._kbd_gen = 0             # what the prompt draws besides its field's text
 
     def page(self):
         """The Blocks page on the verbs, built at its first use."""
@@ -786,6 +788,9 @@ class BlockEditorUI:
         entry.open(text, seed, guard=True)
         host = _ui_draw.AppHost()
         host.key = seed                # the byte that opened it types nothing
+        host.held = self._rows.ok
+        self._kbd_gen += 1
+        fields["gen"] = self._kbd_gen
         fields["kind"] = kind
         fields["entry"] = entry
         fields["host"] = host
@@ -1294,17 +1299,51 @@ class BlockEditorUI:
         if k is None:
             if held.key is not None:
                 held.drop()
+        elif self.prompt_rows(dt):
+            return
         elif held.put(ws, ws.sys_canvas, self._page_rect(), self._held_key(k), dt):
             ws.bar_layer._draw_status_strip("menu")
             self._draw_blk_kbd(True, dt)
+            held.note()
             return
         if k is None or not held.last(ws, ws.sys_canvas, self._page_rect(), dt):
             self.page().draw(ws.sys_canvas, ws.theme_colors, self._page_rect(), False)
         ws.bar_layer._draw_status_strip("menu")
         if self.blk_kbd is not None:
             self._draw_blk_kbd(False, dt)
+            held.note()
         else:
             held.shown(ws, ws.sys_canvas, self._page is None or self._page.host.still(), dt)
+
+    def prompt_host(self):
+        """The open prompt's host (`ui_draw.AppHost`), None where none is up."""
+        k = self.blk_kbd
+        return None if k is None else k["host"]
+
+    def prompt_rows(self, dt=0):
+        """Begin the open prompt's frame ahead of the page under it, once a
+        painted frame: where it is a dialog's rows frame (its field typed
+        into, its focus moved, the page held as the frames before left it:
+        `ui_draw.DialogRows`), draw the prompt's changed rows alone and
+        answer True; else the frame draws the page and the prompt as ever."""
+        k = self.blk_kbd
+        if k is None:
+            return False
+        ws = self.ws
+        rows = self._rows
+        if rows.begun == _ui_draw.painted():
+            return False
+        self._held.ask(ws, ws.sys_canvas, self._held_key(k), dt)
+        lay = self.block_layout
+        rows.gen(k["gen"])
+        if not rows.begin(k["host"], ws.sys_canvas, ws.theme_colors,
+                          (lay.cx, lay.cy, lay.cw, lay.ch),
+                          _layout_base.metric_class() == _layout_base.DESK):
+            return False
+        ws.bar_layer._draw_status_strip("menu")
+        self._draw_blk_kbd(True, dt)
+        self._held.note()
+        return True
 
     def _page_rect(self):
         lay = self.block_layout
@@ -1333,7 +1372,10 @@ class BlockEditorUI:
         host = k["host"]
         desk = _layout_base.metric_class() == _layout_base.DESK
         lay = self.block_layout
-        host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
+        if self._rows.take():
+            host.resume(ws.sys_canvas, ws.theme_colors)   # begun ahead of the page
+        else:
+            host.begin(ws.sys_canvas, ws.theme_colors, (lay.cx, lay.cy, lay.cw, lay.ch), desk)
         num = kind == "num"
         to_block = num and k.get("allow_block")
         keys = (("confirm", "OK") + (("scroll", "Use a block") if to_block else ())
@@ -1343,8 +1385,13 @@ class BlockEditorUI:
             self._held.wash(ws, ws.sys_canvas, self._page_rect(), self._held_key(k),
                             self._page is None or self._page.host.still(), dt)
         tdeck = _ui.input_kind() == "tdeck"
+        o = k.get("o")
+        if o is None:
+            # the page under it washed already (held), and what it draws
+            # besides its field's text a function of the prompt alone
+            o = k["o"] = {"wash": False, "gen": k["gen"]}
         pick = _ui.dialog(_KBD_TITLES.get(kind, "Name your variable"),
-                          () if tdeck else ("Cancel", "OK"), "primary", _ui_draw.NO_WASH)
+                          () if tdeck else ("Cancel", "OK"), "primary", o)
         if not num and kind != "text":
             _ui.label(_KBD_NAME_RULE, _KBD_SUB)
         if num:
