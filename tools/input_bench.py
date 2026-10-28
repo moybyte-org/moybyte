@@ -537,13 +537,24 @@ def _ib_editor(title, tab=None, ws_key=None):
             d().switch(ws_key)
     if tab is not None:
         ws.editor_app.set_tab(tab)
-        d = getattr(ws.editor_app, '_desk', None)
-        d = d() if d is not None else None
-        if d is not None and d.active():
-            for _n, _pane, _r in d._shown_panes():
-                if tab in _pane:
-                    d.focus_pane(_n)          # the keys on the pane that shows it
-                    break
+    ws.mark_dirty()
+
+def _ib_focus(tab):
+    # the keys on the desk pane that shows `tab`, found in the arrangement
+    # of the window the desk drew in
+    d = getattr(ws.editor_app, '_desk', None)
+    d = d() if d is not None else None
+    if d is None or not d.active() or d._drew_in is None:
+        return
+    _lay = ws.layout
+    ws.layout = d._drew_in
+    try:
+        for _n, _pane, _r in d._shown_panes():
+            if tab in _pane:
+                d.focus_pane(_n)
+                break
+    finally:
+        ws.layout = _lay
     ws.mark_dirty()
 
 def _ib_full():
@@ -1497,7 +1508,8 @@ def _app(app):
 
 
 def _ed(title, tab=None, key=None):
-    return [("_ib_editor(%r, %r, %r)" % (title, tab, key), 4.0)]
+    return [("_ib_editor(%r, %r, %r)" % (title, tab, key), 4.0),
+            ("_ib_focus(%r)" % tab, 1.0)]
 
 
 _CODE0 = ("ws.editor.row = 0\nws.editor.col = 0\nws.editor.top = 0\n"
