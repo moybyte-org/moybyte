@@ -175,7 +175,10 @@ two. The table exposes the count: `moy_input_repeats(button)` this frame
 repeats. `btnp` stays an edge (a cart's `btnp` is unchanged, L9; a game that
 wants repeat has `btn`), and `moy_input_clear_edges` (a modal opening on a
 key) zeroes the repeats with the edges and starts each held key's delay
-over.
+over. A surface that takes a frame's steps for itself (a caret) spends them
+with `moy_input_spend_edges`: no layer after it sees them, and the held key
+keeps its level and its schedule, so it neither presses again at the next
+merge nor waits out the delay again.
 
 Typed keys repeat from a level the table keeps for that purpose. A source's
 `key` is a level a BLE keyboard holds; the T-Deck in text mode types

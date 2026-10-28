@@ -1355,7 +1355,7 @@ class EditorDesk(Layer):
             return self._sheet_keys(i)
         if c in Parts.PARTS:
             if Parts.keys(self, c, i):
-                i.clear_edges()
+                i.spend_edges()
             elif self._host.keys(i):
                 ws._dirty = True
             if c == "actor":

@@ -110,6 +110,31 @@ def test_no_clock_repeats_nothing_and_clear_edges_starts_the_delay_over():
     assert t.repeats("right") == 1
 
 
+def test_a_spent_or_cleared_edge_never_presses_a_held_button_again():
+    """A surface that takes a frame's keys spends them: the held button stays
+    held, so the next merge sees no new press, and with `spend_edges` its
+    repeat keeps its schedule. A caret that took every frame's step through
+    `clear_edges` stepped once a frame, the button re-pressing at each merge."""
+    for spend in (True, False):
+        t, s = _table()
+        t.begin_frame(1000)
+        s.set_button("down", True)
+        now, steps = 1000, []
+        for _ in range(60):
+            now += 16
+            t.begin_frame(now)
+            steps.append((now - 1016, t.steps("down")))
+            (t.spend_edges if spend else t.clear_edges)()
+            assert t.steps("down") == 0 and not t.pressed("down") and t.held("down")
+        assert steps[0] == (0, 1), "the press is a step"
+        later = [at for at, n in steps[1:] if n]
+        if spend:
+            assert later and later[0] >= DELAY, "nothing before the delay"
+            assert all(b - a <= RATE + 16 for a, b in zip(later, later[1:])), later
+        else:
+            assert not later, "each clear starts the delay over"
+
+
 def test_repeats_enter_no_edge_no_key_and_no_mask():
     """Two tables fed the same holds, one repeating and one not: every
     read a cart makes -- the masks, the press edges, the key -- agrees."""
@@ -282,6 +307,39 @@ def test_the_browsers_keyboard_repeats_as_the_hosts(tmp_path):
     assert c == d
     assert sum(n for _s, n, _k in c) > 6 and {k for _s, n, k in c if n} == {ord("j")}
     assert not any(n for _s, n, _k in c[-8:]), "the key's release ends its repeat"
+
+
+@pytest.mark.parametrize("code", [mi.KEY_DOWN, mi.KEY_RIGHT])
+def test_a_held_arrow_steps_the_code_caret_at_the_tables_repeat(tmp_path, code):
+    """The browser's arrow, held over the Code tab's caret: one step at the
+    key's down, none until REPEAT_DELAY_MS, then one every REPEAT_RATE_MS --
+    the decode path the page's `kd` takes, on a 60 fps clock."""
+    ws, drv = _ws(tmp_path)
+    for c in ws._runnable_items():
+        if "star_catcher" in c.get("path", ""):
+            ws.select_cart(c)
+            break
+    ws.open_in_editor()
+    ws.set_menu_view("code")
+    for _ in range(5):
+        drv.frame(1 / 60)
+    ed = ws.editor
+    ed.row, ed.col = 0, 0
+    send = lambda t: web_input.apply_events(  # noqa: E731
+        [{"type": t, "code": code, "mods": 0}], drv.input, drv.pointer,
+        on_key_down=drv.key_down, on_key_up=drv.key_up)
+    send("kd")
+    moved, last = [], (ed.row, ed.col)
+    for f in range(60):                         # one second
+        drv.frame(1 / 60)
+        if (ed.row, ed.col) != last:
+            moved.append(round(f * 1000 / 60))
+            last = (ed.row, ed.col)
+    send("ku")
+    assert moved[0] == 0, moved
+    assert DELAY - 17 <= moved[1] <= DELAY + 17, moved
+    gaps = [b - a for a, b in zip(moved[1:], moved[2:])]
+    assert gaps and all(RATE - 17 <= g <= RATE + 17 for g in gaps), moved
 
 
 def test_the_page_forwards_no_os_autorepeat():

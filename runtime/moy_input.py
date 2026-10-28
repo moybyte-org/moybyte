@@ -150,6 +150,7 @@ _SIGS = (
     ("moy_input_set_typing", [_P, _U32, _I32], _I),
     ("moy_input_source_typing", [_P, _U32], _I32),
     ("moy_input_release_all", [_P], None),
+    ("moy_input_spend_edges", [_P], None),
     ("moy_input_clear_edges", [_P], None),
     ("moy_input_keep_edges", [_P], None),
     ("moy_input_tick_edges", [_P], None),
@@ -422,9 +423,14 @@ class InputTable:
     def drop_edges(self):
         _lib().moy_input_drop_edges(self._t)
 
+    def spend_edges(self):
+        """A surface took this frame's edges and steps: none after it sees
+        them, and a held button keeps repeating on its schedule."""
+        _lib().moy_input_spend_edges(self._t)
+
     def clear_edges(self):
-        """No edge this frame and none from the snapshot: the tap that opened a
-        modal must not also act inside it."""
+        """`spend_edges`, and every held repeat's delay starts over: the tap
+        that opened a modal must not also act inside it."""
         _lib().moy_input_clear_edges(self._t)
 
     def release_all(self):

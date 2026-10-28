@@ -695,23 +695,25 @@ void moy_input_release_all(moy_input_t *t) {
     memset(t->p_held, 0, sizeof(t->p_held));
 }
 
-void moy_input_clear_edges(moy_input_t *t) {
+void moy_input_spend_edges(moy_input_t *t) {
     memset(t->rep, 0, sizeof(t->rep));
     t->krep = 0;
     t->krep_ev = 0;
+    t->pb_pressed = 0;
+    t->wheel_x = t->wheel_y = 0;
+    t->pressed = 0;
+    t->released = 0;
+    memset(t->p_pressed, 0, sizeof(t->p_pressed));
+}
+
+void moy_input_clear_edges(moy_input_t *t) {
+    moy_input_spend_edges(t);
     for (uint8_t i = 0; i < t->nsrc; i++) {
         for (uint8_t b = 0; b < MOY_INPUT_BUTTONS; b++) {
             t->rep_due[i][b] = later(t, t->now);
         }
         t->krep_due[i] = later(t, t->now);
     }
-    t->pb_pressed = 0;
-    t->wheel_x = t->wheel_y = 0;
-    t->pressed = 0;
-    t->released = 0;
-    t->last = 0;
-    memset(t->p_pressed, 0, sizeof(t->p_pressed));
-    memset(t->p_last, 0, sizeof(t->p_last));
 }
 
 void moy_input_keep_edges(moy_input_t *t) {

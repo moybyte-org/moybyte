@@ -74,8 +74,10 @@
 // enter no pressed mask, no key event and no last_key, so a cart's btnp,
 // key() and keyp() read what they read without them. moy_input_add_steps adds
 // a producer's steps (the trackball's) to the frame's counts after the merge.
-// moy_input_clear_edges zeroes the counts and starts every held repeat's delay
-// over. A clock of 0 at every merge repeats nothing.
+// moy_input_spend_edges zeroes the frame's edges and counts, a held button
+// keeping its level and its schedule (a caret took the step);
+// moy_input_clear_edges also starts every held repeat's delay over. A clock
+// of 0 at every merge repeats nothing.
 //
 // PLAYERS. A source sits on a player slot (0 .. MOY_INPUT_PLAYERS-1). The
 // union (MOY_INPUT_UNION) is every source; a player's view is its sources'.
@@ -258,7 +260,12 @@ int moy_input_add_steps(moy_input_t *t, uint8_t button, uint32_t n);
 int32_t moy_input_ball_coast(int32_t *rate);
 // Everybody lets go: every source and the merged set; the edge snapshot stays.
 void moy_input_release_all(moy_input_t *t);
-// The edges this frame are none: a modal opening on a key must not act on it.
+// A surface took this frame's edges and counts: nothing after it sees them,
+// and a button still held stays held, so it neither presses again nor loses
+// its place in the repeat.
+void moy_input_spend_edges(moy_input_t *t);
+// The same, and every held repeat's delay starts over: a modal opening on a
+// key must not act on it.
 void moy_input_clear_edges(moy_input_t *t);
 // A paced cart's edges (#217): kept when no logic tick ran this frame, taken by
 // the first tick of a frame, none for a second tick in the same frame.

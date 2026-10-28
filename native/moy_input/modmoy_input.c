@@ -229,6 +229,7 @@ static mp_obj_t table_begin_frame(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(table_begin_frame_obj, 1, 2, table_begin_frame);
 
 TABLE_VERB(table_release_all, moy_input_release_all);
+TABLE_VERB(table_spend_edges, moy_input_spend_edges);
 TABLE_VERB(table_clear_edges, moy_input_clear_edges);
 TABLE_VERB(table_keep_edges, moy_input_keep_edges);
 TABLE_VERB(table_tick_edges, moy_input_tick_edges);
@@ -454,6 +455,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(table_apply_pointer_obj, table_apply_pointer);
     { MP_ROM_QSTR(MP_QSTR_source), MP_ROM_PTR(&table_source_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_begin_frame), MP_ROM_PTR(&table_begin_frame_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_release_all), MP_ROM_PTR(&table_release_all_obj) }, \
+    { MP_ROM_QSTR(MP_QSTR_spend_edges), MP_ROM_PTR(&table_spend_edges_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_clear_edges), MP_ROM_PTR(&table_clear_edges_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_keep_edges), MP_ROM_PTR(&table_keep_edges_obj) }, \
     { MP_ROM_QSTR(MP_QSTR_tick_edges), MP_ROM_PTR(&table_tick_edges_obj) }, \

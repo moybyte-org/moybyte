@@ -262,6 +262,27 @@ def test_the_arrows_step_the_codes_caret_and_shift_selects(tmp_path, path):
     assert ed.row == 1 and not ed.has_selection()
 
 
+def test_a_held_arrow_waits_the_repeat_delay_then_steps_at_its_rate(tmp_path, path):
+    """An arrow held over the Code tab's caret: one step as it goes down,
+    none for REPEAT_DELAY_MS, then one every REPEAT_RATE_MS (the table's,
+    on every keyboard path)."""
+    ws, kb, ed = _code(tmp_path, path, "x" * 80)
+    ed.row, ed.col = 0, 0
+    ed.sel = None
+    kb.down(mi.KEY_RIGHT)
+    cols = []
+    for _ in range(30):                         # one second at DT
+        kb.frame()
+        cols.append(ed.col)
+    kb.up(mi.KEY_RIGHT)
+    kb.frame()
+    delay, rate = mi.InputTable().repeat
+    assert cols[0] == 1
+    early = int(delay / (DT * 1000))            # frames inside the delay
+    assert cols[early - 1] == 1, cols
+    assert cols[-1] - 1 == pytest.approx((30 * DT * 1000 - delay) / rate, abs=2), cols
+
+
 def test_an_apps_letters_are_keys_too(tmp_path, path):
     """While an app (Notes, Files, Calc) runs, the letters are keys: only a
     game's are its buttons."""

@@ -4263,7 +4263,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
                 or self.focused_cart_editor() is not None):
             return False
         self.nav(dx, dy)
-        i.clear_edges()
+        i.spend_edges()
         return True
 
     def focused_cart_editor(self):
