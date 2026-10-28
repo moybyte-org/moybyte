@@ -328,6 +328,7 @@ typedef struct {
     int16_t dlg_s0, dlg_s1;
     uint8_t fl_on, fl_stage, fl_n, fl_struct, fl_dirty, fl_susp, fl_lost, at_last;
     uint8_t fl_cast;                // the next draw casts a shadow past its box (a card's)
+    uint8_t fl_early;               // the floor is the pass's from its start (floor_reach)
     moy_ui_box_t pic_clip;          // the floor's rect the last card's picture draws through
     uint8_t pic_tbl;                // ...or the floor of the placed table drawn last as R
     uint8_t fl_s0, fl_p0, fl_pn;
@@ -624,7 +625,9 @@ const char *moy_ui_api_dup(moy_ui_ctx_t *c);
 // frame draws whole. The floor only widens during the pass: a stop that
 // differs from the last frame's draws from its top to R's foot, a picture
 // whose gen moved draws its own box, a stop gone from R's tail leaves the
-// ground.
+// ground. What a stop outside R draws into it (a box reaching in, a mark's
+// reach) is floor where R moved or its marks changed, and where such a stop
+// draws before R opens the floor is the pass's from its start.
 enum { MOY_UI_SHIFT_NONE = 0, MOY_UI_SHIFT_MOVE = 1, MOY_UI_SHIFT_ROWS = 2 };
 #define MOY_UI_SHIFT_WIDE 8         // moy_ui_api_shift_drawn: the floor took R from a stop down
 // What a page holds, for its next frame's plan (moy_ui_keep_t's kd).
@@ -684,7 +687,8 @@ int moy_ui_api_band(const moy_ui_ctx_t *c, int32_t out[4]);
 int moy_ui_api_keep(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int h);
 // The L8 record assertion's net (tests only): with `on` 1 each stop's record
 // is kept, and a shift frame whose stops differ from the last frame's
-// outside the floor counts a failure; answers the failures since the last
+// outside the floor, or that draws a stop outside R reaching into it with
+// the part of R it reaches not the floor's, counts a failure; answers the failures since the last
 // call and zeroes them (`on` -1 reads, leaving the switch as it is).
 uint32_t moy_ui_api_audit(int on);
 

@@ -464,6 +464,8 @@ static int reveal(moy_ui_ctx_t *c, const moy_ui_stop_t *p, int page, moy_ui_box_
 // -- a frame -------------------------------------------------------------------------
 
 static void floor_build(moy_ui_ctx_t *c, int p0, int n, int of);
+static int floor_reach(moy_ui_ctx_t *c, int p0, int n, int base, int rh, int pic);
+static int mark_room(const moy_ui_ctx_t *c);
 static void table_floor(moy_ui_ctx_t *c, int base, int rh, int was, int was_mark, int now,
                         int mark, int pic, int of);
 
@@ -559,6 +561,7 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
     c->sh_r = rp->b;
     c->sh_dy = (int16_t)dy;
     c->sh_head = 0;
+    c->fl_early = 0;
     // the floor this input asks for, as R's opening will build it: where it
     // is most of R, moving the rest costs more than it saves
     c->fl_n = 0;
@@ -607,9 +610,16 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
         }
         pics += out > 0 ? out : 0;
     }
-    c->fl_n = 0;
-    c->fl_pend = 0;
+    // a stop drawn before R opens draws its part of R through the floor,
+    // which is then the pass's from its start (floor_reach)
+    if (!c->fl_early) {
+        c->fl_n = 0;
+        c->fl_pend = 0;
+    }
     if (rows * 5 > (int32_t)rp->b.h * 3) {
+        c->fl_n = 0;
+        c->fl_pend = 0;
+        c->fl_early = 0;
         return;
     }
     c->sh_rows = (int16_t)rows;
@@ -750,7 +760,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     int dt = in[MOY_UI_IN_DT];
     c->owe = 0;
     c->fl_on = c->fl_stage = c->fl_n = c->fl_struct = c->fl_dirty = c->fl_susp = 0;
-    c->fl_lost = c->at_last = c->fl_cast = 0;
+    c->fl_lost = c->at_last = c->fl_cast = c->fl_early = 0;
     c->pic_clip = (moy_ui_box_t){0, 0, 0, 0};
     c->pic_tbl = 0;
     c->fl_pend = 0;
@@ -1286,9 +1296,10 @@ static int armed(const moy_ui_ctx_t *c) {
     return c->fl_on && !c->fl_susp;
 }
 
-// The pieces there are: four about R, then the floor once R is open.
+// The pieces there are: four about R, then the floor once R is open (from
+// the pass's start where a stop drawn before R reaches into it).
 static int pieces(const moy_ui_ctx_t *c) {
-    return 4 + (c->fl_stage ? c->fl_n : 0);
+    return 4 + (c->fl_stage || c->fl_early ? c->fl_n : 0);
 }
 
 static rc_t piece(const moy_ui_ctx_t *c, int i) {
@@ -1742,6 +1753,39 @@ static void floor_check(moy_ui_ctx_t *c, int i) {
     }
 }
 
+// Stop i was just recorded outside R on a shift frame (before R opens or
+// after it closes), its marks set. The pieces clip its draw to what lies
+// outside R and the floor, so where its box or its mark's reach meets R the
+// floor must be a piece as it draws (floor_reach: from the pass's start for
+// a stop before R) and, where R moved or its marks changed, hold that part
+// of R. The audit (tests only) counts a failure otherwise.
+static void reach_check(const moy_ui_ctx_t *c, int i) {
+    const moy_ui_stop_t *s = &c->cur[i];
+    // a dialog's rows frame: what lies outside its card is the page under
+    // it, which the card covers where they meet
+    if (!s_audit_on || !armed(c) || c->fl_stage == 1 || (s->flags & STOP_PAGE)
+        || s->id == c->sh_id || c->sh_dlg) {
+        return;
+    }
+    int was = 0;
+    for (int j = 0; j < c->n_prev; j++) {
+        if (c->prev[j].id == s->id && !(c->prev[j].flags & STOP_PAGE)) {
+            was = c->prev[j].st & MARKS;
+            break;
+        }
+    }
+    int m = (s->st & MARKS) || was ? mark_room(c) : 0;
+    moy_ui_box_t b = {(int16_t)(s->b.x - m), (int16_t)(s->b.y - m), (int16_t)(s->b.w + 2 * m),
+                      (int16_t)(s->b.h + 2 * m)};
+    if (!rc_meets(rc_of(b), rc_of(c->sh_r))) {
+        return;
+    }
+    if ((c->fl_stage == 0 && !c->fl_early)
+        || ((c->sh_dy || (s->st & MARKS) != was) && !floor_holds(c, b))) {
+        s_audit_fail++;
+    }
+}
+
 // The L8 record (tests only): what the stop just recorded draws, mixed in.
 static void sig_mix(moy_ui_ctx_t *c, const void *p, size_t n) {
     if (s_audit_on && c->n_cur > 0) {
@@ -1779,6 +1823,7 @@ static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_
     s->gen = 0;
     s->sig = s_audit_on ? hash(name.p, name.n, (uint32_t)s->flags) : 0;
     if (c->modal && !dlg) {
+        reach_check(c, c->n_cur - 1);
         floor_check(c, c->n_cur - 1);
         return 0;                   // under a dialog: drawn, and no input reaches it
     }
@@ -1811,6 +1856,7 @@ static int stop(moy_ui_ctx_t *c, uint32_t id, moy_ui_box_t b, int flags, moy_ui_
     }
     s->st = (uint8_t)st;
     sig_int(c, st);
+    reach_check(c, c->n_cur - 1);
     floor_check(c, c->n_cur - 1);
     return st;
 }
@@ -2000,6 +2046,7 @@ static void floor_build(moy_ui_ctx_t *c, int p0, int n, int of) {
         // the field typed into: its text and its caret
         floor_strip(c, c->typed_box.y + dy, c->typed_box.y + c->typed_box.h + dy);
     }
+    c->fl_early = (uint8_t)floor_reach(c, p0, n, 0, 1, 0);
     for (int pass = 0; pass < 4; pass++) {
         int grew = 0;
         for (int j = 0; j < n; j++) {
@@ -2032,6 +2079,46 @@ static void table_strip(moy_ui_ctx_t *c, int y0, int y1, int base, int rh, int p
     floor_strip(c, y0, y1);
 }
 
+// What the last frame drew into R from outside it -- a stop's box reaching
+// into R, a mark's reach about a stop beside it -- joins the floor where R's
+// pixels no longer hold it: on a move, the rows it drew and the rows the
+// move carried them to; on a rows frame, the rows of a stop whose marks
+// change. `p0`, `n`: R's own stops among the last frame's; on a placed
+// table's view, rows whole from `base` (`rh` high) where it draws pictures.
+// Answers whether such a stop was drawn before R opened: its part of R
+// the floor takes draws through it, which is then the pass's from its start.
+static int floor_reach(moy_ui_ctx_t *c, int p0, int n, int base, int rh, int pic) {
+    moy_ui_box_t r = c->sh_r;
+    int dy = c->sh_dy, reach = mark_room(c), early = 0, at = c->n_prev;
+    for (int i = 0; i < c->n_prev; i++) {
+        if (c->prev[i].id == c->sh_id && (c->prev[i].flags & STOP_PAGE)) {
+            at = i;
+            break;
+        }
+    }
+    for (int i = 0; i < c->n_prev; i++) {
+        const moy_ui_stop_t *v = &c->prev[i];
+        if ((i >= p0 && i < p0 + n) || (v->flags & STOP_PAGE) || v->id == c->sh_id) {
+            continue;
+        }
+        int now = c->focus != 0 && v->id == c->focus && !c->elsewhere ? MOY_UI_ST_FOCUS : 0;
+        int m = now || (v->st & MARKS) ? reach : 0;
+        int x0 = v->b.x - m, x1 = v->b.x + v->b.w + m;
+        int y0 = v->b.y - m, y1 = v->b.y + v->b.h + m;
+        if (x1 <= r.x || x0 >= r.x + r.w || y1 <= r.y || y0 >= r.y + r.h) {
+            continue;
+        }
+        early |= i < at;            // whatever of it the floor takes, it draws
+        if (dy || (v->st & MARKS) != now) {
+            table_strip(c, y0, y1, base, rh, pic);
+        }
+        if (dy) {
+            table_strip(c, y0 + dy, y1 + dy, base, rh, pic);
+        }
+    }
+    return early;
+}
+
 // A placed table's view R opens on a shift frame: its floor -- the band
 // the move uncovered, the fades a row tall at either end (the last frame's
 // moved and this one's) and the outer page's foot fade (`of`, its bottom),
@@ -2062,15 +2149,19 @@ static void table_floor(moy_ui_ctx_t *c, int base, int rh, int was, int was_mark
             table_strip(c, base + now * rh - reach, base + (now + 1) * rh + reach, base, rh, pic);
         }
     }
+    c->fl_early = (uint8_t)floor_reach(c, 0, 0, base, rh, pic);
 }
 
 static void floor_open(moy_ui_ctx_t *c, const moy_ui_keep_t *k, moy_ui_box_t ct, int scroll,
                        const moy_ui_over_t *o, moy_ui_box_t outer) {
     moy_ui_box_t r = c->sh_r;
     int top = r.y, foot = r.y + r.h, dy = c->sh_dy;
+    int early = c->fl_early;
     c->fl_stage = 1;
-    c->fl_n = 0;
-    c->fl_pend = 0;
+    if (!early) {
+        c->fl_n = 0;
+        c->fl_pend = 0;
+    }
     c->fl_p0 = k->s0;
     c->fl_pn = k->sn;
     if (o == NULL || !o->has_gen || !(k->kd & MOY_UI_KD_GEN) || o->gen != k->gen
@@ -2079,6 +2170,9 @@ static void floor_open(moy_ui_ctx_t *c, const moy_ui_keep_t *k, moy_ui_box_t ct,
         c->fl_struct = 1;
         floor_rows(c, top, foot, 1);
         return;
+    }
+    if (early) {
+        return;                     // begin's floor, which the stops before R drew through
     }
     floor_build(c, c->fl_p0, c->fl_pn, outer.y + outer.h);
 }
@@ -3183,9 +3277,12 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
         if (armed(c) && c->fl_stage == 0 && id == c->sh_id) {
             // the view is R: its floor, from what the last frame drew
             table_r = 1;
+            int early = c->fl_early;
             c->fl_stage = 1;
-            c->fl_n = 0;
-            c->fl_pend = 0;
+            if (!early) {
+                c->fl_n = 0;
+                c->fl_pend = 0;
+            }
             c->fl_p0 = c->fl_pn = 0;
             c->fl_s0 = (uint8_t)c->n_cur;
             moy_ui_box_t r = c->sh_r;
@@ -3196,8 +3293,10 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                 c->fl_struct = 1;
                 floor_rows(c, r.y, r.y + r.h, 1);
             } else {
-                table_floor(c, view.y - offset, rh, q->row, (q->st & MOY_UI_ST_FOCUS) != 0, cur,
-                            (st & MOY_UI_ST_FOCUS) != 0, g.pic, c->page.y + c->page.h);
+                if (!early) {           // else begin's floor, the stops before R drawn through it
+                    table_floor(c, view.y - offset, rh, q->row, (q->st & MOY_UI_ST_FOCUS) != 0,
+                                cur, (st & MOY_UI_ST_FOCUS) != 0, g.pic, c->page.y + c->page.h);
+                }
                 if (s_audit_on) {
                     const moy_ui_stop_t *pv = page_of_keep(c->prev, c->n_prev, kp);
                     const moy_ui_stop_t *vs = page_of_keep(c->cur, c->n_cur, kp);

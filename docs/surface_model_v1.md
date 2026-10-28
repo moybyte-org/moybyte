@@ -1101,7 +1101,11 @@ the rows whose marks moved -- and every draw goes once through each piece
 of the frame's region it reaches (outside R, and the floor's rects), so a
 floor pixel takes every draw over it in a whole frame's order; the floor only
 widens during the pass (a stop unlike the last frame's takes R from its top
-down; a picture whose gen moved, its box). A key typed into a field joins
+down; a picture whose gen moved, its box). What a stop outside R draws
+into R -- a box reaching in, a mark's reach -- is floor where R moved or
+its marks changed, and a stop drawn before R opens makes the floor the
+pass's from its start, so its part of R draws through it (Get Carts' Check
+on the desk reaches four rows into its shelf). A key typed into a field joins
 the floor as the field's row, and a field whose text changed with no key
 typed (the app's own) takes its row during the pass: its stop keeps its
 text's hash. A dialog over a held page (`wash` false) whose app gives it a
@@ -1136,7 +1140,7 @@ through, on the handheld and the desk, and Settings' Name field), each
 presented frame, with up to three buffers taking
 turns, byte-equal to whole repaints, the share of shift frames held above a floor,
 and the engine's record audit failing any shift frame whose stops moved
-outside its floor.
+outside its floor or reached into R outside it.
 
 ## 15. Amendment: the Surface's home is the kernel (2026-10-07)
 

@@ -43,7 +43,8 @@ def audit():
     _C.api_audit(1)
     yield
     failed = _C.api_audit(0)
-    assert failed == 0, "%d shift frames drew stops unlike the last frame's outside the floor" % failed
+    assert failed == 0, ("%d shift frames drew stops unlike the last frame's outside the floor, "
+                         "or a stop's reach into R outside it" % failed)
 
 
 class _SameFree:
@@ -339,8 +340,9 @@ def _files_list(p):
 
 # The Waveshare P4's desk: what each app's pages show on it, every frame's
 # change byte for byte against whole repaints. Licences' list is the desk's
-# scroll region beside the text (the handheld's is a page of its own).
-P4_APPS = ("licences", "files", "storybook", "appearance")
+# scroll region beside the text (the handheld's is a page of its own); Get
+# Carts' Check, drawn before its shelf opens, reaches four rows into it.
+P4_APPS = ("licences", "files", "storybook", "appearance", "getcarts")
 
 
 @pytest.mark.parametrize("bufs", (1, 2, 3))

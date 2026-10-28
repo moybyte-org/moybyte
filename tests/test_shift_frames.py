@@ -38,7 +38,8 @@ def audit():
     _C.api_audit(1)
     yield
     failed = _C.api_audit(0)
-    assert failed == 0, "%d shift frames drew stops unlike the last frame's outside the floor" % failed
+    assert failed == 0, ("%d shift frames drew stops unlike the last frame's outside the floor, "
+                         "or a stop's reach into R outside it" % failed)
 
 
 class App:
