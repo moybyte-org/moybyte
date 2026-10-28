@@ -343,6 +343,7 @@ class _Faces:
         self.of = {}
         self.tick = 0
         self.kept = False
+        self.held = None
 
     def nbytes(self):
         return self.s * self.s * self.cap * 2
@@ -357,14 +358,12 @@ class _Faces:
         self.item = self.title = self.cover = self.fill = None
         self.of = {}
 
-    def slot(self, i, it, cover):
-        """The slot holding item `it`'s face drawn from `cover` under its
-        title, at index `i`; `kept` says whether it is drawn (False: the
-        caller draws it into the slot answered, the least recently
-        stamped)."""
+    def find(self, i, it, cover):
+        """The slot holding item `it`'s face (index `i`) drawn from `cover`
+        under its title, else None; `held` the slot holding another face of
+        it, or None."""
         self.tick += 1
         items = self.item
-        title = it.get("title")
         j = self.of.get(i)
         if j is None or items[j] is not it:
             j = None
@@ -372,11 +371,24 @@ class _Faces:
                 if items[q] is it:
                     j = q
                     break
-        if j is not None and self.title[j] == title and self.cover[j] is cover:
+        self.held = j
+        if j is not None and self.title[j] == it.get("title") and self.cover[j] is cover:
             self.used[j] = self.tick
             self.of[i] = j
-            self.kept = True
             return j
+        return None
+
+    def slot(self, i, it, cover):
+        """The slot holding item `it`'s face drawn from `cover` under its
+        title, at index `i`; `kept` says whether it is drawn (False: the
+        caller draws it into the slot answered, the least recently
+        stamped)."""
+        got = self.find(i, it, cover)
+        self.kept = got is not None
+        if got is not None:
+            return got
+        items = self.item
+        j = self.held
         if j is None:
             used = self.used
             j = 0
@@ -389,11 +401,10 @@ class _Faces:
                     if self.of[k] == j:
                         del self.of[k]
         items[j] = it
-        self.title[j] = title
+        self.title[j] = it.get("title")
         self.cover[j] = cover
         self.used[j] = self.tick
         self.of[i] = j
-        self.kept = False
         return j
 
 
@@ -1083,13 +1094,16 @@ class Launcher:
         clipped)."""
         x, y, n, _n = t
         cover = self._cover_of(it, faces.div)
-        j = faces.slot(i, it, cover)
+        j = faces.find(i, it, cover)
+        if j is None:
+            # no face of it yet: drawn as a paint without faces draws it,
+            # and an idle frame draws its face (`warm_faces`)
+            self._face(cv, it, t, r, cover)
+            return
         m = faces.m
         s = faces.s
         lay = faces.lay
         new = it.get("type") in PSEUDO_TILE_TYPES
-        if not faces.kept:
-            self._draw_face(faces, j, it, r, cover, new, self.frame_no)
         if (faces.key[1] is None or not plain) and (r or new):
             if m == 0 and r and not new and 2 * r < n:
                 fill = faces.fill[j]
@@ -1148,48 +1162,59 @@ class Launcher:
         faces.fill[j] = None if cover is not None or new else \
             _ui_draw.initial_parts(lay, it.get("title") or "", n, n)
 
-    def warm_faces(self, most=2):
-        """On a frame nothing waits on: draw the faces of up to `most` cards
-        of the row (or column) past either end of what the band shows, whose
-        covers are decoded or known absent, so a step or a scroll that
-        brings them in copies them. True where one was drawn."""
+    def warm_faces(self, ms=4):
+        """On a frame nothing waits on: draw the faces of the cards the band
+        shows, then of the row (or column) past either end of it, whose
+        covers are decoded or known absent, for about `ms` -- a paint copies
+        what has a face and draws the rest, so a step copies the row it
+        brings in. True where one was drawn."""
         f = self._faces
         ready = self.cover_ready
         if f is None or f.lay is None or self.face_key is None or ready is None:
             return False
-        c = self._cells()
-        if c.side != f.side or (0 if c.r else self.layout.fs - 1) != f.m:
+        order = self._warm_order(f)
+        if not order:
             return False
-        vis = self._shown()[0]
-        if not vis:
-            return False
-        per = c.rows if self.horizontal else c.cols
-        lo, hi = vis[0][0], vis[-1][0]
         items = self.items
+        r = self._face_r()
+        t0 = _ticks_ms()
         done = 0
-        for i in range(hi + 1, hi + 1 + per):
-            if done >= most:
+        for i in order:
+            if i < 0 or i >= len(items):
+                continue
+            it = items[i]
+            new = it.get("type") in PSEUDO_TILE_TYPES
+            cover = None if new else ready(it, f.div)
+            if cover is False:
+                continue                 # its cover lands first: the draw path takes it
+            j = f.slot(i, it, cover)
+            if f.kept:
+                continue
+            self._draw_face(f, j, it, r, cover, new, self.frame_no + 1)
+            done += 1
+            if _ticks_diff(_ticks_ms(), t0) >= ms:
                 break
-            done += self._warm_face(f, i, items, ready, c)
-        for i in range(lo - 1, lo - 1 - per, -1):
-            if done >= most:
-                break
-            done += self._warm_face(f, i, items, ready, c)
         return done > 0
 
-    def _warm_face(self, f, i, items, ready, c):
-        if i < 0 or i >= len(items):
-            return 0
-        it = items[i]
-        new = it.get("type") in PSEUDO_TILE_TYPES
-        cover = None if new else ready(it, f.div)
-        if cover is False:
-            return 0                     # its cover lands first: the draw path takes it
-        j = f.slot(i, it, cover)
-        if f.kept:
-            return 0
-        self._draw_face(f, j, it, c.r, cover, new, self.frame_no + 1)
-        return 1
+    def _warm_order(self, f):
+        """The cells whose faces an idle frame draws, in the order it draws
+        them: the band's, then the row past each end; None where the faces
+        are another layout's."""
+        c = self._cells()
+        if c.side != f.side or (0 if c.r else self.layout.fs - 1) != f.m:
+            return None
+        vis = self._shown()[0]
+        if not vis:
+            return None
+        per = c.rows if self.horizontal else c.cols
+        lo, hi = vis[0][0], vis[-1][0]
+        sel = self.sel if self._focused(True) else -1
+        return ([i for i, _t in vis if i != sel] + list(range(hi + 1, hi + 1 + per))
+                + list(range(lo - 1, lo - 1 - per, -1)))
+
+    def _face_r(self):
+        """The corners a face is drawn with."""
+        return self._cells().r
 
     def landed_cells(self, since):
         """The cells the band shows whose card a paint now draws otherwise
@@ -2316,9 +2341,24 @@ class Carousel(Launcher):
     def _face_ring(self):
         return None
 
-    def warm_faces(self, most=2):
-        """The shelf's faces are drawn as its cards come into the band."""
-        return False
+    def _warm_order(self, f):
+        """The desk shelf's cards but the selection's at rest, then the one
+        past each end; None off the desk."""
+        g = self._geom()
+        if g[9] is None or f.side != g[2]:
+            return None
+        _left, vis = self._shelf()
+        if not vis:
+            return None
+        c = self.nearest()
+        moving = self.moving
+        idx = sorted(i for i, _t in vis if not (i == c and not moving))
+        lo = min(i for i, _t in vis)
+        hi = max(i for i, _t in vis)
+        return idx + [hi + 1, lo - 1]
+
+    def _face_r(self):
+        return self._corner_r(self._geom()[2])
 
     def landed_cells(self, since):
         """A landing repaints the band: its cards' sizes move with it."""

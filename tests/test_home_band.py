@@ -122,8 +122,11 @@ def _home(tmp_path, monkeypatch, tier, arrangement, theme, bufs, ref, n=40, curs
     for _ in range(40):
         ws._dirty = True
         frame()
-    if not ref:                            # the band's frames: the drag partial's
-        for name in ("_try_drag_partial", "_try_still_frame"):     # and the desk's still
+    if not ref:                            # the faces an idle second draws
+        for _ in range(4):
+            ws.launcher.warm_faces(10 ** 6)
+        # the band's frames: the drag partial's and the desk's still
+        for name in ("_try_drag_partial", "_try_still_frame"):
             def counted(cv, dt, real=getattr(ws.launcher_layer, name)):
                 r = real(cv, dt)
                 if r:
@@ -323,10 +326,18 @@ def test_kept_faces_follow_what_they_show(tmp_path, monkeypatch, arrangement, th
     cover landing, a theme change and the focus leaving the cards for the
     tab row: every picture byte-equal to whole repaints that draw every
     card, and the faces kept."""
+    hits = [0]
+    real = launcher_layer._Faces.find
+
+    def find(self, i, it, cover):
+        j = real(self, i, it, cover)
+        hits[0] += j is not None
+        return j
+    monkeypatch.setattr(launcher_layer._Faces, "find", find)
     ws, stats = _parity(tmp_path, monkeypatch, "handheld", arrangement, theme, bufs,
                         session=_edits)
     assert stats["band"] * 4 > stats["frames"], stats      # (a rescan paints whole)
-    assert ws.launcher.faces_bytes() > 0
+    assert ws.launcher.faces_bytes() > 0 and hits[0] > 100, hits
 
 
 @pytest.mark.parametrize("theme", ["moy", "blocks", "picture"])

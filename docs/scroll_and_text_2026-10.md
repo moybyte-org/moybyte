@@ -673,9 +673,11 @@ two changes and one honest limit:
   copy is `moy_gfx.face` (`mg_face`, `moy_shape.h`), which draws those
   pixels as the cover or the title tile and the edge ring draw them and
   copies the rest, one call a card. The desk shelf's cards take the same
-  faces; the handheld carousel's change size with the offset and draw. Idle
-  frames draw the faces of the row past either end of the band
-  (`Launcher.warm_faces`), so a step copies the row it brings in. The
+  faces; the handheld carousel's change size with the offset and draw. A
+  paint draws no face: idle frames draw them, the band's cards' and then
+  the row past either end of the band (`Launcher.warm_faces`), and a paint
+  copies the cards that have one and draws the rest, so a home's first
+  paint costs what it did and a step copies the row it brings in. The
   backdrop goes back under the whole band in one copy and the pictures
   paint over it: its cut round the cards cost more in calls than the bytes
   it saved (a block that big is the P4s' 2D-DMA's, `FBCPY_MIN_PX`).
