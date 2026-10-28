@@ -1117,7 +1117,8 @@ the rows whose marks moved -- and every draw goes once through each piece
 of the frame's region it reaches (outside R, and the floor's rects), so a
 floor pixel takes every draw over it in a whole frame's order; the floor only
 widens during the pass (a stop unlike the last frame's takes R from its top
-down; a picture whose gen moved, its box). What a stop outside R draws
+down, but for a placed stop that moved where the floor holds both its
+boxes; a picture whose gen moved, its box). What a stop outside R draws
 into R -- a box reaching in, a mark's reach -- is floor where R moved or
 its marks changed, and a stop drawn before R opens makes the floor the
 pass's from its start, so its part of R draws through it (Get Carts' Check

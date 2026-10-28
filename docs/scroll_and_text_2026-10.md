@@ -597,9 +597,12 @@ whole.
   (`moy_ui_api_shift_rows`); a page with rows of its own takes no plan the
   engine makes without them (`own_rows`). The Blocks page takes each run of
   rows its floor reaches into the floor (`floor_take`) and draws them
-  clipped to it. Its cursor plate is a stop, and a moved stop floors the
-  page from its top down, so a step floors from the cursor to the foot and
-  the engine's share rule draws a step near the top whole. Music's page
+  clipped to it. Its cursor plate and insert button are one placed stop
+  (`Row`), whose bands take the gap pixel either side where the plate
+  reaches past its box: a stop `ui.at` placed both frames that moved where
+  the floor holds both its boxes floors nothing more, so a step is the
+  cursor's two rows; a prompt over the page makes the next frame whole
+  (`BlocksPage.forget`). Music's page
   keeps what each shown row held, so an edit of one step is that row's
   frame too; its rows draw their verbs first and their own pixels (the
   cursor bar, the meters, which overlap no verb) after, and the rows and
