@@ -3,6 +3,11 @@ a key typed into a note, a caret step, a selection grown and the frames a
 change owes after it draw the rows of the note that changed and the page's
 floor under them, never the page whole.
 
+A frame whose view moved by whole rows -- a drag, a fling, the wheel, the
+trackball, a held key, the caret leaving the view -- shifts the rows the
+move keeps (`EditorHandle.rows_move`) and draws the rows it brings and the
+rows that changed.
+
 Each case runs one session on two consoles: one as it ships and one whose
 Player never begins a rows frame, so every frame draws whole; every
 presented picture of the first is held to the second's bytes, on one, two
@@ -251,3 +256,157 @@ def test_an_app_that_draws_its_note_alone_draws_rows_by_its_counters(tmp_path):
     p.keys("down", 2)
     p.settle()
     assert sum(drew) > len(drew) // 2, drew
+
+
+# -- shift frames: the view moved ------------------------------------------------
+
+
+def _at(p, desk, fx, fy):
+    """The glass point a fraction (fx, fy) across the note's sheet."""
+    sx, sy, sw, sh = p.a.player.ns["sheet"]
+    ox = oy = 0
+    if desk:
+        ox, oy, _w, _h = p.a.wm._wins["desktop"].content_rect()
+    return ox + sx + int(sw * fx), oy + sy + int(sh * fy)
+
+
+def _drag(p, rows, steps, desk):
+    """A finger on the note dragged `rows` rows' worth up (negative: down)
+    over `steps` frames, then lifted: the view follows it."""
+    for ws in (p.a, p.b):
+        ws.pointer.hovers = False       # a finger, which pans; a mouse selects
+    lh = p.a.player.ns["ed"]._geom[3]
+    sh = p.a.player.ns["sheet"][3]
+    d = rows * lh
+    d = max(-sh * 7 // 10, min(sh * 7 // 10, d))     # the finger stays on the note
+    x, y0 = _at(p, desk, 0.5, 0.85 if rows > 0 else 0.15)
+    p.both("touch", x, y0)
+    p.frame()
+    for i in range(1, steps + 1):
+        p.both("touch_drag", x, y0 - d * i // steps)
+        p.frame()
+    p.both("touch_up")
+    p.frame()
+    p.settle(3)
+
+
+def _wheel(p, notches):
+    """A mouse over the note, its wheel turned a notch a frame."""
+    x, y = _at(p, True, 0.6, 0.5)
+    p.both("hover", x, y)
+    p.frame()
+    for _ in range(abs(notches)):
+        p.both("wheel", 0, 1 if notches > 0 else -1)
+        p.frame()
+    p.settle(2)
+
+
+def _ball(p, dy, frames):
+    """The trackball rolled (the host's arrows held): the caret moves."""
+    p.both("pan", 0, dy)
+    for _ in range(frames):
+        p.frame()
+    p.both("pan", 0, 0)
+    p.frame()
+    p.settle(2)
+
+
+def _held(p, name, frames):
+    p.both("hold", name, True)
+    for _ in range(frames):
+        p.frame()
+    p.both("hold", name, False)
+    p.frame()
+    p.settle(2)
+
+
+def _scrolled(p, desk=False):
+    _drag(p, 6, 6, desk)            # a slow drag: a row a frame
+    _drag(p, -4, 4, desk)           # ...and back
+    _drag(p, 10, 2, desk)           # a fling: rows a frame
+    _drag(p, -9, 3, desk)
+    p.keys("down", 14)              # the caret leaves the view's foot: the view follows it
+    if not desk:
+        # a held key's repeats, and the trackball: the desk's ball moves its
+        # cursor, and its held key's repeats part the two consoles' gates
+        _held(p, "down", 12)
+        _ball(p, 1, 8)
+        _ball(p, -1, 10)
+    p.keys("up", 18)                # the caret leaves the view's top
+    if desk:
+        _wheel(p, 3)
+        _wheel(p, -2)
+    p.typed([0x01])                 # everything selected, then scrolled under it
+    _drag(p, 5, 5, desk)
+    _drag(p, -3, 3, desk)
+    if desk:
+        _wheel(p, 2)
+    p.keys("right", 1)
+    p.settle()
+
+
+def _moves(p):
+    """Every rect the handle's move shifts, kept as the session runs."""
+    ed = p.a.player.ns["ed"]
+    got = []
+    plan = ed.rows_move
+
+    def kept():
+        mv = plan()
+        if mv is not None:
+            got.append(tuple(mv))
+        return mv
+    ed.rows_move = kept
+    return got
+
+
+def _check(p, moves):
+    assert p.a.player.cart_error is None, p.a.player.cart_error
+    shifts = p.kinds.count("shift")
+    assert shifts > len(p.kinds) // 4, "Notes shifted %d of %d painted frames: %r" % (
+        shifts, len(p.kinds), p.kinds)
+    assert p.kinds.count(None) < len(p.kinds) // 8, p.kinds
+    ed = p.a.player.ns["ed"]
+    x, y, w, h = ed._rect
+    r = ed._args[5]
+    for mx, my, mw, mh, dy in moves:
+        # the rows it moves lie inside the paper's straight sides, where
+        # they were and where they land
+        assert (mx, mw) == (x, w) and dy and mh > abs(dy)
+        assert my >= y + r and my + mh <= y + h - r, (moves, ed._rect, r)
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_scrolling_the_note_shifts_byte_for_byte(tmp_path, bufs):
+    """The handheld: a drag, a fling, the caret leaving the view either
+    way, a held key, the trackball and a selection scrolled, on paper with
+    round corners."""
+    p = Pair(tmp_path, bufs)
+    moves = _moves(p)
+    _scrolled(p)
+    _check(p, moves)
+    assert moves
+
+
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_the_desk_shifts_and_composites_byte_for_byte(tmp_path, bufs):
+    """The desk: a finger's drag and fling, a mouse's wheel, the caret
+    leaving the view and a selection scrolled; the window composites what
+    each frame changed, the shifted rows with it."""
+    p = Pair(tmp_path, bufs, desk=True)
+    moves = _moves(p)
+    p.whole = 0
+    _scrolled(p, True)
+    _check(p, moves)
+    assert p.whole < len(p.kinds) // 4, "the window composited %d of %d frames whole" % (
+        p.whole, len(p.kinds))
+
+
+def test_a_drag_on_the_note_pans_it(tmp_path):
+    """A press on the note and a drag from it pan the view by the rows the
+    finger moved."""
+    p = Pair(tmp_path, 1)
+    ed = p.a.player.ns["ed"]
+    _drag(p, 4, 4, False)
+    assert p.a.player.cart_error is None, p.a.player.cart_error
+    assert ed.ed.top == 4

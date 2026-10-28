@@ -657,6 +657,7 @@ class Player:
         self._fbox = _array("i", [0] * 4)
         self._armed = False
         self._broke = False
+        self._mv = None                # the rect the handle's move shifted this frame
         self._cls = None
         self._bg = None
         self._bg_on = False
@@ -1642,10 +1643,13 @@ class Player:
         only the run draws, which the window composites; on the glass, the
         last frame's moved over, or the one RETAINED_FRAMES back with what
         each frame since changed), and the engine licenses the frame from
-        the page's gen and the input it applied. Its pass then draws the
-        floor alone, and the handle draws its rows into it."""
+        the page's gen and the input it applied. Where the handle's view
+        moved by whole rows, the rows it keeps are shifted first
+        (`rows_move`). Its pass then draws the floor alone, and the handle
+        draws its rows into it."""
         self._armed = False
         self._broke = False
+        self._mv = None
         eds = self._editors
         ring = self._ring
         if (ring is None or len(eds) != 1 or self._bg_on
@@ -1666,8 +1670,8 @@ class Player:
             if ring.held(cv, f) == k - 1:
                 for b in range(k - 1):
                     ch = ring.change(b)
-                    if ch is None or ring.key(b) != key:
-                        n = -1
+                    if ch is None or ring.key(b) != key or ch[4]:
+                        n = -1          # (a frame that shifted lags this buffer by its note)
                         break
                     if ch[2] > ch[0] and ch[3] > ch[1]:
                         j = 4 * n
@@ -1688,16 +1692,42 @@ class Player:
         m = eds[0].rows_plan(hr, n)
         if m < 0:
             return
+        mv = eds[0].rows_move()
         p = self._plan
         if not _ui_draw._C.api_shift_rows(ctx, hr, n + m, p):
             return
-        if copy:
-            if not cv.shift_last(p[0] + getattr(cv, "_ox", 0), p[1] + getattr(cv, "_oy", 0),
-                                 p[2], p[3], 0, 0):
-                return
+        ox = getattr(cv, "_ox", 0)
+        oy = getattr(cv, "_oy", 0)
+        if mv is not None and not cv.shift_last(mv[0] + ox, mv[1] + oy, mv[2], mv[3], 0, mv[4]):
+            return
+        if copy and not self._copy_page(cv, p, mv, ox, oy):
+            return
+        if copy or mv is not None:
             cv.shift_fence()
         _ui_draw._C.api_shift_arm(ctx)
         self._armed = True
+        self._mv = mv
+
+    def _copy_page(self, cv, p, mv, ox, oy):
+        """The last frame's page R (`p`: x, y, w, h) into the buffer this
+        frame draws, around the rect the move shifted (`mv`, None: all of
+        it): whether it was."""
+        x0 = p[0]
+        y0 = p[1]
+        x1 = x0 + p[2]
+        y1 = y0 + p[3]
+        if mv is None:
+            return cv.shift_last(x0 + ox, y0 + oy, p[2], p[3], 0, 0)
+        mx0 = mv[0] if mv[0] > x0 else x0
+        my0 = mv[1] if mv[1] > y0 else y0
+        mx1 = mv[0] + mv[2] if mv[0] + mv[2] < x1 else x1
+        my1 = mv[1] + mv[3] if mv[1] + mv[3] < y1 else y1
+        if mx1 <= mx0 or my1 <= my0:
+            return cv.shift_last(x0 + ox, y0 + oy, p[2], p[3], 0, 0)
+        return ((my0 <= y0 or cv.shift_last(x0 + ox, y0 + oy, x1 - x0, my0 - y0, 0, 0))
+                and (my1 >= y1 or cv.shift_last(x0 + ox, my1 + oy, x1 - x0, y1 - my1, 0, 0))
+                and (mx0 <= x0 or cv.shift_last(x0 + ox, my0 + oy, mx0 - x0, my1 - my0, 0, 0))
+                and (mx1 >= x1 or cv.shift_last(mx1 + ox, my0 + oy, x1 - mx1, my1 - my0, 0, 0)))
 
     def _rows_close(self, ws):
         """The app's pass is done: what it changed of the canvas
@@ -1706,7 +1736,7 @@ class Player:
         ring = self._ring
         if ring is None:
             ring = self._ring = _ui_draw.PaintRing()
-            self._ring_rects = [[0, 0, 0, 0] for _ in range(ring.n)]
+            self._ring_rects = [[0, 0, 0, 0, 0] for _ in range(ring.n)]
         k = _ui_draw._C.api_shift_drawn(ctx)
         clean = (k & 4) != 0 and not self._broke and not ws.show_fps
         ch = self.change
@@ -1714,7 +1744,8 @@ class Player:
         self.change_f = _ui_draw.painted()
         if self._armed and (k & 3) == _ROWS and clean:
             ch[4] = 1
-            _ui_draw._CHANGE[0] = _ui_draw._ROWS
+            mv = self._mv
+            _ui_draw._CHANGE[0] = _ui_draw._ROWS if mv is None else _ui_draw._SHIFT
             fb = self._fbox
             if _ui_draw._C.api_floor_box(ctx, fb):
                 ch[0] = fb[0]
@@ -1723,6 +1754,22 @@ class Player:
                 ch[3] = fb[1] + fb[3]
             else:
                 ch[0] = ch[1] = ch[2] = ch[3] = 0
+            if mv is not None:
+                # the rows the move shifted changed too
+                if ch[2] <= ch[0] or ch[3] <= ch[1]:
+                    ch[0] = mv[0]
+                    ch[1] = mv[1]
+                    ch[2] = mv[0] + mv[2]
+                    ch[3] = mv[1] + mv[3]
+                else:
+                    if mv[0] < ch[0]:
+                        ch[0] = mv[0]
+                    if mv[1] < ch[1]:
+                        ch[1] = mv[1]
+                    if mv[0] + mv[2] > ch[2]:
+                        ch[2] = mv[0] + mv[2]
+                    if mv[1] + mv[3] > ch[3]:
+                        ch[3] = mv[1] + mv[3]
         self._armed = False
         alone = self.holds(cv) or _ui_draw._PAINT[1]
         i = ring._i + 1
@@ -1735,8 +1782,10 @@ class Player:
             rect[1] = ch[1]
             rect[2] = ch[2]
             rect[3] = ch[3]
+            rect[4] = 1 if self._mv is not None else 0
         ring.note(_ui_draw.painted(), _ui_draw._GEN, 0, None, cv, ws.theme_colors,
                   clean and alone, rect)
+        self._mv = None
 
     def holds(self, cv):
         """Whether `cv`, the run's canvas, is one buffer only the run
@@ -1755,6 +1804,13 @@ class Player:
         n = _ui_draw._C.api_floor_into(self._ui[0], out)
         return n if n > 0 else 0
 
+    def floor_break(self):
+        """This frame's pass draws whole from here: the handle draws its
+        note whole over the floor."""
+        if self._armed:
+            _ui_draw._C.api_shift_break(self._ui[0])
+            self._armed = False
+
     def floor_take(self, cv, x, y, w, h):
         """Rect x, y, w, h joins the floor over the page's ground, which
         the handle draws its rows on: whether it did."""
@@ -1766,8 +1822,7 @@ class Player:
         """The cart's `cls`: a clear under a floor makes the frame whole
         from there."""
         if self._armed:
-            _ui_draw._C.api_shift_break(self._ui[0])
-            self._armed = False
+            self.floor_break()
             self._broke = True
         self._cls(c)
 

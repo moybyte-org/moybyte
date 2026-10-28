@@ -338,8 +338,10 @@ typedef struct {
     // sh_quiet: begin found nothing that draws the frame whole (no press,
     // activation, step, hover, overlay or owed frame), so a host may name the
     // rows its own drawing changed (hr, hr_n of them: moy_ui_api_shift_rows);
-    // hover_off: no pointer held, and no stop under it this frame or last.
-    uint8_t sh_quiet, hr_n, hover_off;
+    // hover_off: no pointer held but one pressed over no stop
+    // (`press_bare`, from its press to the next), and no stop under it this
+    // frame or last.
+    uint8_t sh_quiet, hr_n, hover_off, press_bare;
     moy_ui_box_t hr[MOY_UI_API_HOST];
     uint32_t fl_pend;
     moy_ui_box_t fl[MOY_UI_API_FLOOR];
@@ -722,7 +724,8 @@ int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]);
 // host draws part of the page itself (a cart's editor handle, which is not a
 // stop) and names the rects of it its drawing will change this frame, `n` of
 // them as x, y, w, h each, MOY_UI_API_HOST at most. Called after begin, where
-// begin planned no frame of its own and found it quiet: R is the page the
+// begin found the frame quiet and planned no move (a rows frame it planned
+// gives way to this one, whose floor is built over the host's page): R is the page the
 // last pass drew under its gen, holding every rect, with no page scrolling;
 // a page with stops ui.at placed qualifies, since nothing moves. The floor
 // is what begin's input changes (the marks, a typed field) and the rects,

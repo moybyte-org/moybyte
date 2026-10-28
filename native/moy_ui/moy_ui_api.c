@@ -992,6 +992,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
         }
         int h = stop_at(v, n, x, y);
         c->press = h >= 0 ? v[h].id : 0;
+        c->press_bare = (uint8_t)(h < 0);
         int pg = page_at(v, n, x, y);
         moy_ui_keep_t *pk = pg >= 0 ? keep_of(c, v[pg].id) : NULL;
         if (pk != NULL && (pk->sc.flags & MOY_UI_SCROLL_FLING)) {
@@ -1110,9 +1111,14 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     // under it, then or now: a stop's hover mark is all a hover draws, so a
     // touch's linger running out over the page's ground draws nothing.
     int was_live = c->last_ptr & MOY_UI_P_LIVE;
-    // a hover over no stop, then or now, draws nothing (a host's rows frame)
-    c->hover_off = (uint8_t)(!held && !was_held && (!live || stop_at(v, n, x, y) < 0)
+    // a hover over no stop, then or now, draws nothing (a host's rows
+    // frame), nor does a press held, or let go, that went down on none
+    c->hover_off = (uint8_t)((c->press_bare || (!held && !was_held))
+                             && (!live || stop_at(v, n, x, y) < 0)
                              && (!was_live || stop_at(v, n, c->last_x, c->last_y) < 0));
+    if (!held && !was_held) {
+        c->press_bare = 0;
+    }
     if ((live && (x != c->last_x || y != c->last_y)) || live != was_live) {
         if (held || was_held || (live && stop_at(v, n, x, y) >= 0)
             || (was_live && stop_at(v, n, c->last_x, c->last_y) >= 0)) {
@@ -4759,9 +4765,11 @@ int moy_ui_api_shift_drawn(const moy_ui_ctx_t *c, int *clean) {
 
 int moy_ui_api_shift_rows(moy_ui_ctx_t *c, const int32_t *r, int n, int32_t out[8]) {
     c->hr_n = 0;
-    if (c->sh_plan != MOY_UI_SHIFT_NONE || !c->sh_quiet || n < 0 || n > MOY_UI_API_HOST) {
+    // a rows frame begin planned of a quiet frame gives way to the host's
+    if (c->sh_plan == MOY_UI_SHIFT_MOVE || !c->sh_quiet || n < 0 || n > MOY_UI_API_HOST) {
         return MOY_UI_SHIFT_NONE;
     }
+    c->sh_plan = MOY_UI_SHIFT_NONE;
     const moy_ui_stop_t *v = c->prev;
     int np = c->n_prev;
     moy_ui_keep_t *k = NULL;

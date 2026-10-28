@@ -563,14 +563,25 @@ whole.
   when the tools, the foot's word or the vault change). At begin the Player
   asks the handle the rows its next draw changes (`EditorHandle.rows_plan`:
   each visual row's laid line, caret cell and selection against the last
-  draw's, the bands of rows that differ; an embed, a moved view or a new
-  look is the whole document), adds what the buffer it draws into lags
-  (its `PaintRing`: on a glass of two or three buffers the floors the
-  frames since changed, else the last frame's page moved over with
-  `shift_last`), and the engine plans the frame
-  (`moy_ui_api_shift_rows`): R is the page under its gen, which may hold
-  stops `ui.at` placed since nothing moves, and the floor is those rects
-  and what begin's input changes, under a hover over no stop. The cart's
+  draw's, the bands of rows that differ; an embed or a new look is the
+  whole document). A view moved by whole lines -- a drag, a fling, the
+  wheel, the trackball, the caret leaving it -- is a **shift frame**: the
+  handle finds the k visual rows the move brings each row by (from the
+  lines its first row moved), compares row i with the last draw's row
+  i + k, and names the rect whose rows it keeps (`EditorHandle.rows_move`:
+  the rows that lie, before and after, inside the paper's straight sides,
+  clear of its round corners), which the Player moves by k rows
+  (`shift_last`) before the pass; the bands are then the rows the move
+  brings, the rows it does not keep, and the rows whose line or marks
+  changed. The Player adds what the buffer it draws into lags (its
+  `PaintRing`: on a glass of two or three buffers the floors the frames
+  since changed, else -- and after a frame that shifted -- the last
+  frame's page moved over with `shift_last`), and the engine plans the
+  frame (`moy_ui_api_shift_rows`): R is the page under its gen, which may
+  hold stops `ui.at` placed since nothing moves, and the floor is those
+  rects and what begin's input changes, under a hover over no stop or a
+  press held that went down on none; a rows frame begin planned of its own
+  (the desk's vault table) gives way to it. The cart's
   pass runs under the floor, the page's ground filling it alone; the handle
   takes each band into the floor over the ground (`moy_ui_api_floor_take`),
   papers it and draws its rows, with the row above where a link's underline
@@ -579,11 +590,14 @@ whole.
   counters (`MOY_ST_N_FILL`, `MOY_ST_N_TEXT`) and its clears show nothing
   else wrote it since its last draw -- otherwise whole. A `cls` under a
   floor breaks the frame (`moy_ui_api_shift_break`: the pass draws whole
-  from there) and a declared `background` draws every frame whole. The
+  from there), as does a handle that finds it must draw whole after all
+  (it takes its whole rect into the floor first), and a declared
+  `background` draws every frame whole. The
   cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other cart
   (render the document into that rect, this frame): a cart that `cls()`es
   and calls it gets the whole document. What a frame changed of the canvas
-  is the floor's bounding rect (`Player.change`); the Player's window on
+  is the floor's bounding rect and the rect the move shifted
+  (`Player.change`); the Player's window on
   the desk copies it and the shown ring's lag onto the glass
   (`WindowedWM._player_rows`, `blit_strip_rect`), not the canvas. It is
   the last phase (§15 P8), priced honestly, and §15 says what it costs if

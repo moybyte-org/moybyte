@@ -327,6 +327,15 @@ class EditorHandle:
         self.drew = [0, 0, 0, 0]
         self.rows_only = False
         self._seen = [None, 0, 0, 0]
+        # A view moved by whole visual rows: the first line the last draw
+        # showed (`_top`) and this walk's (`_wtop`), the rows the next draw's
+        # rows lie below the last draw's (`_k`, the plan's, 0 none) and the
+        # rect of the canvas that move shifts, x, y, w, h and its dy (`_mv`).
+        self._top = -1
+        self._wtop = -1
+        self._k = 0
+        self._mv = [0, 0, 0, 0, 0]
+        self._ab = [0, 0]
 
     # -- what the skin asks ---------------------------------------------------
 
@@ -759,9 +768,12 @@ class EditorHandle:
         canvas the next draw changes -- the bands of rows that differ from
         the last draw's, across its rect -- into `out` from slot `at`, x, y,
         w, h each. Their count, or -1 where that draw is the document whole
-        (nothing drawn yet, the view moved, its look or size changed, an
-        embed shows). The idle save lands here, before the page reads the
-        badge it leaves."""
+        (nothing drawn yet, its rect, look or size changed, an embed
+        shows). Where the view moved by whole visual rows, the rows the move
+        keeps are not among them: `rows_move` names the rect the host shifts
+        them in before the pass. The idle save lands here, before the page
+        reads the badge it leaves."""
+        self._k = 0
         a = self._args
         if a is None or self._nr < 0:
             return -1
@@ -773,8 +785,9 @@ class EditorHandle:
         rows = g[3]
         lh = g[5]
         self._keep_caret(cols, rows)
-        nb = self._diff(self._theme(), x, y, w, h, r, ty, rows, lh, False)
+        nb = self._diff(self._theme(), x, y, w, h, r, ty, rows, lh, False, None)
         if nb < 0 or at + nb > len(out) // 4:
+            self._k = 0
             return -1
         b = self._band
         for i in range(nb):
@@ -785,20 +798,35 @@ class EditorHandle:
             out[k + 3] = b[2 * i + 1] - b[2 * i]
         return nb
 
+    def rows_move(self):
+        """The move the plan `rows_plan` just made takes: x, y, w, h, dy, the
+        rect of the canvas whose last draw's rows shift by dy to where this
+        one shows them (inside the paper's round corners); None where its
+        rows stay where they were. The host shifts it before the pass, and
+        the frame's draw then draws the rows the plan named."""
+        return self._mv if self._k else None
+
     def _rows(self, cv, th, x, y, w, h, r, ty, rows, lh):
         """The bands this draw paints into `_band`, their count; -1 for the
         whole document. Each band is a run of rows that differ from the last
         draw's, across the rect; where the run's frame draws a floor, every
         row its floor reaches joins them and each band is taken into the
-        floor over the page's ground."""
-        nb = self._diff(th, x, y, w, h, r, ty, rows, lh, True)
+        floor over the page's ground. A frame whose host shifted the rows
+        the plan moved (`rows_move`) compares them where they now lie."""
+        fr = self._frame
+        on = fr is not None and fr.floor_on()
+        k = self._k if on else 0
+        self._k = 0
+        nb = self._diff(th, x, y, w, h, r, ty, rows, lh, True, k)
         self._sl, self._nl = self._nl, self._sl
         self._ss, self._ns = self._ns, self._ss
         self._nr = self._walked
-        fr = self._frame
+        self._top = self._wtop
         if nb < 0 or fr is None:
+            if on and not fr.floor_take(cv, x, y, w, h):
+                fr.floor_break()        # the note draws whole, on the page's ground
             return -1
-        if fr.floor_on():
+        if on:
             f = self._fr
             n = fr.floor_rects(f)
             for i in range(0, 4 * n, 4):
@@ -812,6 +840,7 @@ class EditorHandle:
             b = self._band
             for i in range(0, 2 * nb, 2):
                 if not fr.floor_take(cv, x, b[i], w, b[i + 1] - b[i]):
+                    fr.floor_break()
                     return -1
             return nb
         # Nothing wrote the canvas since the last draw, which it still
@@ -857,11 +886,14 @@ class EditorHandle:
         b[2 * nb + 1] = e
         return nb + 1
 
-    def _diff(self, th, x, y, w, h, r, ty, rows, lh, draw):
+    def _diff(self, th, x, y, w, h, r, ty, rows, lh, draw, move):
         """Walk the view as this draw lays it out into `_nl`/`_ns` and
         compare it with the last draw's: the bands of rows that differ, into
         `_band`, their count; -1 where it is the whole document. A `draw`
-        keeps what its rows are a function of for the next."""
+        keeps what its rows are a function of for the next. Row i is
+        compared with the last draw's row i + `move`; a `move` of None finds
+        the one the view's move makes (`_moved_by`) and keeps it with its
+        rect."""
         reg, bold, line = self._faces_in
         g = self._geom
         k = self._key
@@ -877,6 +909,10 @@ class EditorHandle:
         self._walked = n
         if not same or n < 0 or self._nr < 0 or self.autoscrolling() is not None:
             return -1
+        if move is None:
+            move = self._k = self._moved_by(n, x, w, y, h, r, ty, rows, lh)
+        if move:
+            return self._diff_moved(move, n, y, h, r, ty, rows, lh)
         sl = self._sl
         ss = self._ss
         nl = self._nl
@@ -904,6 +940,110 @@ class EditorHandle:
                 run = -1
         return nb
 
+    def _span(self, k, y, h, r, ty, rows, lh):
+        """The rows a move by k keeps, a..b into `_ab`: each lies, where
+        this draw shows it and where the last showed it, inside the paper's
+        straight sides (clear of corners of radius r). a == b where none
+        does."""
+        lo = y + r
+        i0 = 0 if ty >= lo else (lo - ty + lh - 1) // lh
+        i1 = (y + h - r - ty) // lh
+        if i1 > rows:
+            i1 = rows
+        a = i0 if k > 0 else i0 - k
+        b = i1 - k if k > 0 else i1
+        ab = self._ab
+        ab[0] = a
+        ab[1] = b if b > a else a
+
+    def _moved_by(self, n, x, w, y, h, r, ty, rows, lh):
+        """The visual rows this walk's view lies below the last draw's
+        (negative above), where its first line moved by whole lines the last
+        draw's walk or this one shows: 0 where it did not, or by a view or
+        more. Its rect into `_mv`."""
+        top = self.ed.top
+        t0 = self._top
+        if t0 < 0 or top == t0:
+            return 0
+        if top > t0:
+            d = top - t0
+            s = self._ss
+            m = self._nr
+        else:
+            d = t0 - top
+            s = self._ns
+            m = n
+        c = 0
+        k = 0
+        for i in range(1, m):
+            if s[4 * i] == 0:
+                c += 1
+                if c == d:
+                    k = i if top > t0 else -i
+                    break
+        if not k:
+            return 0
+        self._span(k, y, h, r, ty, rows, lh)
+        a = self._ab[0]
+        b = self._ab[1]
+        if b <= a:
+            return 0
+        t = a if k > 0 else a + k
+        e = b + k if k > 0 else b
+        mv = self._mv
+        mv[0] = x
+        mv[1] = ty + t * lh
+        mv[2] = w
+        mv[3] = (e - t) * lh
+        mv[4] = -k * lh
+        return k
+
+    def _diff_moved(self, k, n, y, h, r, ty, rows, lh):
+        """`_diff` for a view moved by k visual rows: row i against the last
+        draw's row i + k (a blank row matches a blank one), and the rows the
+        move does not keep (`_span`) drawn. Where an underline reaches the
+        next row, the first row draws (nothing is above it now), and so does
+        the row under a row whose own text or marks changed."""
+        self._span(k, y, h, r, ty, rows, lh)
+        a = self._ab[0]
+        b = self._ab[1]
+        sl = self._sl
+        ss = self._ss
+        nl = self._nl
+        ns = self._ns
+        nr = self._nr
+        spill = self._spill
+        nb = 0
+        run = -1
+        was = False
+        for i in range(rows + 1):
+            differs = chg = False
+            if i < rows:
+                j = i + k
+                if j < 0 or j >= rows:
+                    chg = True
+                elif i < n:
+                    if j >= nr or sl[j] is not nl[i]:
+                        chg = True
+                    else:
+                        p = 4 * i
+                        q = 4 * j
+                        chg = (ss[q] != ns[p] or ss[q + 1] != ns[p + 1]
+                               or ss[q + 2] != ns[p + 2] or ss[q + 3] != ns[p + 3])
+                else:
+                    chg = j < nr
+                differs = chg or i < a or i >= b or (spill and i == 0)
+            if differs and run < 0:
+                run = i
+            elif not differs and run >= 0:
+                e = i + 1 if spill and was else i
+                nb = self._band_add(nb, ty + run * lh, ty + e * lh, y, h, ty, rows, lh)
+                if nb < 0:
+                    return -1
+                run = -1
+            was = chg
+        return nb
+
     def _walk(self, rows):
         """Lay out the view's visual rows into `_nl` (each row's laid line)
         and `_ns` (its segment, the caret's cell in it or -1, the
@@ -916,6 +1056,7 @@ class EditorHandle:
         wrap = self._m.wrap
         k = 0
         brow = ed.top
+        self._wtop = brow
         n = len(ed.lines)
         while k < rows and brow < n:
             laid = self._row(ed.lines[brow], cols)
