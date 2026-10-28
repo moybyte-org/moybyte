@@ -20,6 +20,8 @@ focus, and the verbs take the other taps. The insert menu, the block
 actions and the pickers are a popover's menu over its items, whose keys are
 the engine's while it is open."""
 
+from array import array
+
 try:
     import ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -49,34 +51,190 @@ class BlocksPage:
     def __init__(self, bu, host):
         self.bu = bu
         self.host = host
+        # The outline's rows are the app's own pixels: a frame draws the
+        # rows a key step changed alone (`rows`), never a plan the engine
+        # makes without them. The page's gen says what else it shows.
+        host.own_rows = True
+        self._o = {"gen": 0}
+        self._shows = None
+        self._drawn = None              # (gen, cursor, top, slot) of the last frame drawn
+        self._bands = array("i", [0] * 16)  # this frame's row bands (first, last) when its rows alone
+        self._nb = 0
+        self._to_foot = False
+        self._rects = array("i", [0] * 24)
+        self._floor = array("i", [0] * 64)
+        self._mark = bytearray(64)
 
     # -- drawing ------------------------------------------------------------------
+
+    def _gen(self, be, rect, desk):
+        """The page's gen: it moves with everything the page shows but the
+        outline's cursor, its scroll and its slot."""
+        bu = self.bu
+        lay = bu.block_layout
+        shows = (id(be), be._hist.gen if be is not None else 0,
+                 be.target if be is not None else None, len(be.rows) if be is not None else 0,
+                 be.moving() if be is not None else False, bu.blk_graduated, bu.blk_status,
+                 bu.blk_menu is not None, tuple(bu._roster_tags()), rect, desk, id(lay))
+        if shows != self._shows:
+            self._shows = shows
+            self._o["gen"] += 1
+        return self._o["gen"]
+
+    def _plan(self, be, gen):
+        """Ask the host for this frame's rows where the last frame drawn
+        differs from it only by the cursor, the scroll or the slot (or not
+        at all): the bands of rows that changed (`_bands`), the outline
+        moved by the rows it scrolled."""
+        self._nb = 0
+        d = self._drawn
+        bu = self.bu
+        if d is None or d[0] != gen or be is None:
+            return
+        cur, top, slot = be.cur, bu.blk_top, bu.blk_slot
+        lay = bu.block_layout
+        n = lay.rows
+        dt = top - d[2]
+        if dt >= n or -dt >= n:
+            return
+        mark = self._mark
+        if n > len(mark):
+            return
+        for vi in range(n):
+            mark[vi] = 0
+        self._to_foot = d[1] != cur or dt != 0
+        if self._to_foot:
+            # the cursor's stop moved: the engine's floor takes the page
+            # from its top down (every stop after a moved one draws whole)
+            a = min(cur - top, d[1] - top)
+            for vi in range(a if a > 0 else 0, n):
+                mark[vi] = 1
+        elif d[3] != slot:
+            if 0 <= cur - top < n:
+                mark[cur - top] = 1
+        if dt > 0:
+            for vi in range(n - dt, n):
+                mark[vi] = 1
+        elif dt < 0:
+            for vi in range(-dt):
+                mark[vi] = 1
+        nb = self._band(n)
+        if nb < 0:
+            return
+        x, _y, w, _h = self._rect
+        self._nb = nb if nb else -1
+        self.host.rows(self._rects, nb, (x, lay.y0 - 1, w, n * lay.row_h, -dt * lay.row_h)
+                       if dt else None)
+
+    def _band(self, n):
+        """The runs of marked rows (`_mark`) as rects across the page
+        (`_rects`, `_bands`): their count, -1 past what a frame names."""
+        mark = self._mark
+        b = self._bands
+        nb = 0
+        vi = 0
+        while vi < n:
+            if mark[vi]:
+                a = vi
+                while vi + 1 < n and mark[vi + 1]:
+                    vi += 1
+                if nb == 6:
+                    return -1
+                b[2 * nb] = a
+                b[2 * nb + 1] = vi
+                nb += 1
+            vi += 1
+        lay = self.bu.block_layout
+        x, _y, w, _h = self._rect
+        rh = lay.row_h
+        r = self._rects
+        for i in range(nb):
+            r[4 * i] = x
+            r[4 * i + 1] = lay.y0 + b[2 * i] * rh - 1
+            r[4 * i + 2] = w
+            r[4 * i + 3] = (b[2 * i + 1] - b[2 * i] + 1) * rh
+        if nb and self._to_foot and b[2 * nb - 1] == n - 1:
+            # ...and from there the page's foot
+            j = 4 * (nb - 1)
+            r[j + 3] = self._rect[1] + self._rect[3] - r[j + 1]
+        return nb
+
+    def _floor_rows(self, cv, n):
+        """Every row the frame's floor reaches joins the marked rows, and
+        each run of them joins the floor over the page's ground: their
+        count, -1 where the frame cannot draw them so."""
+        host = self.host
+        f = self._floor
+        k = host.floor_rects(f)
+        lay = self.bu.block_layout
+        rh = lay.row_h
+        y0 = lay.y0 - 1
+        mark = self._mark
+        for i in range(0, 4 * k, 4):
+            a = (f[i + 1] - y0) // rh
+            e = (f[i + 1] + f[i + 3] - y0 + rh - 1) // rh
+            if a < 0:
+                a = 0
+            if e > n:
+                e = n
+            for vi in range(a, e):
+                mark[vi] = 1
+        nb = self._band(n)
+        if nb < 0:
+            return -1
+        r = self._rects
+        for i in range(nb):
+            j = 4 * i
+            if not host.floor_take(cv, r[j], r[j + 1], r[j + 2], r[j + 3]):
+                return -1
+        return nb
 
     def draw(self, cv, th, rect, desk):
         bu = self.bu
         host = self.host
+        be = bu.blocks_ed
+        self._rect = rect
+        gen = self._gen(be, rect, desk)
+        self._plan(be, gen)
         host.begin(cv, th, rect, desk, False, elsewhere=bu.blk_menu is None)
         ui.at(*rect)
-        ui.page("")
-        be = bu.blocks_ed
+        ui.page("", self._o)
         x, y, w, h = rect
         if be is None:
             ui.at(*rect)
             ui.empty("blocks", "No blocks", ("This cart has no program to show",))
             ui.end()
+            self._drawn = None
             return
         self._head(be, x, y, w)
         lay = bu.block_layout
         rows = be.rows
-        for vi in range(lay.rows):
-            ridx = bu.blk_top + vi
-            if ridx >= len(rows):
-                break
-            self._row(cv, th, lay, rows[ridx], vi, ridx == be.cur)
+        part = self._nb != 0 and host.shifting
+        nb = self._floor_rows(cv, lay.rows) if part else 0
+        broke = nb < 0
+        if broke:
+            host.break_rows()
+        if part and not broke:
+            r = self._rects
+            b = self._bands
+            for i in range(nb):
+                cv.clip(r[4 * i], r[4 * i + 1], r[4 * i + 2], r[4 * i + 3])
+                for vi in range(b[2 * i], b[2 * i + 1] + 1):
+                    ridx = bu.blk_top + vi
+                    if ridx < len(rows):
+                        self._row(cv, th, lay, rows[ridx], vi, ridx == be.cur)
+                cv.clip()
+        else:
+            for vi in range(lay.rows):
+                ridx = bu.blk_top + vi
+                if ridx >= len(rows):
+                    break
+                self._row(cv, th, lay, rows[ridx], vi, ridx == be.cur)
         self._foot(be, x, lay.bar_y, w)
         if bu.blk_menu is not None:
             self._menu(bu.blk_menu, w)
         ui.end()
+        self._drawn = None if broke else (gen, be.cur, bu.blk_top, bu.blk_slot)
 
     def _menu(self, m, w):
         """The insert menu, the block actions and the pickers: a popover

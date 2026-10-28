@@ -1665,6 +1665,7 @@ _ELSEWHERE = 4                          # ... and MOY_UI_ELSEWHERE
 _KEY_EDGE = 16                          # ... and MOY_UI_KEY_EDGE
 _APP_SHIFT = 8                          # moy_ui_api.h's MOY_UI_APP_SHIFT
 UI_SIZE = _C.api_size()
+HOST_ROWS = 6                           # moy_ui_api.h's MOY_UI_API_HOST: the rects of `AppHost.rows`
 
 
 _WHOLE = [None]                         # ui_frame's last whole-canvas rect
@@ -1954,6 +1955,12 @@ class AppHost:
         self._dead = 0                  # the directions whose steps moved nothing last frame
         self._began = -1                # the painted frame it began last
         self._console = None            # ...and the console that painted it
+        # the rows the app asks the frame begun next to draw alone (`rows`):
+        # their count, the rects, and a region it moves first by dy
+        self._want = -1
+        self.own_rows = False           # the app's rows alone: never a plan of the engine's own
+        self._wr = array("i", [0] * (4 * HOST_ROWS))
+        self._wm = array("i", [0] * 5)
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
@@ -2085,6 +2092,29 @@ class AppHost:
         self.owed = not settled
         return settled
 
+    def rows(self, rects, n, move=None):
+        """Ask that the frame begun next draw only the `n` rects of
+        `rects` (x, y, w, h each, HOST_ROWS at most), the page's rows its
+        app changed, after moving `move` (x, y, w, h, dy: a region of the
+        page whose pixels the app scrolled by whole rows) out of the last
+        frame. The frame is such a rows frame where the engine licenses it
+        (`shifting` then says so): the page's gen held and nothing the
+        engine applies moved; the app then joins those rects to the floor
+        (`floor_take`) and draws its own pixels only inside them. A frame begun without a request draws as the engine
+        plans it, or whole where the app draws rows the engine does not
+        see (`own_rows`)."""
+        w = self._wr
+        for i in range(4 * n):
+            w[i] = rects[i]
+        m = self._wm
+        if move is None:
+            m[4] = 0
+            m[2] = 0
+        else:
+            for i in range(5):
+                m[i] = move[i]
+        self._want = n
+
     def _shift(self, cv, th):
         """The frame begun as a shift frame where it may be one
         (docs/scroll_and_text_2026-10.md §3.3): the engine licenses it from
@@ -2112,8 +2142,16 @@ class AppHost:
         # it saves puts the page under the dialog back too.
         # A pass that changed what it drew before the change (`again`) left
         # the last frame's page unlike the app's: this frame draws whole.
-        if ok and not again and _C.api_shift_plan(self.ctx, p) and (
+        want = self._want
+        self._want = -1
+        planned = ok and not again and _C.api_shift_plan(self.ctx, p)
+        if want >= 0 and ok and not again and not planned:
+            self._host_rows(cv, want, p)    # the app's rows
+        elif planned and (not self.own_rows or want >= 0 and not p[4] and not self._wm[4]) and (
                 _pays(cv, p) if not p[7] else self.held is not None and self.held(p)):
+            # the engine's plan; an app with rows of its own takes a rows
+            # plan where it asked for one, its rows joining the floor
+            # (`floor_take`)
             if cv.shift_last(p[0] + getattr(cv, "_ox", 0), p[1] + getattr(cv, "_oy", 0),
                              p[2], p[3], 0, p[4]):
                 cv.shift_fence()        # the floor draws over rows the move wrote
@@ -2121,6 +2159,44 @@ class AppHost:
                 self.shifting = True
                 _CHANGE[0] = _SHIFT if p[4] else _ROWS
         ring.note(f, key, 0, None, cv, th, _PAINT[1] or w != 0)
+
+    def floor_rects(self, out):
+        """This rows frame's floor as the pass has it, into `out` (x, y, w,
+        h each): its count, 0 where the frame draws whole. The app's rows
+        each rect reaches draw again."""
+        if not self.shifting:
+            return 0
+        n = _C.api_floor_into(self.ctx, out)
+        return n if n > 0 else 0
+
+    def floor_take(self, cv, x, y, w, h):
+        """Rect x, y, w, h joins the rows frame's floor over the page's
+        ground, which the app draws its rows on: whether it did."""
+        return self.shifting and _C.api_floor_take(self.ctx, cv, UI_TARGET[2], x, y, w, h)
+
+    def break_rows(self):
+        """This rows frame draws whole from here: the app's rows could not
+        join its floor."""
+        if self.shifting:
+            _C.api_shift_break(self.ctx)
+
+    def _host_rows(self, cv, n, p):
+        """The frame as the rows the app asked for (`rows`): the page moved
+        out of the last frame, the app's region by its rows, the floor
+        those rects."""
+        if not _C.api_shift_rows(self.ctx, self._wr, n, p) or not _pays(cv, p):
+            return
+        ox = getattr(cv, "_ox", 0)
+        oy = getattr(cv, "_oy", 0)
+        m = self._wm
+        if not cv.shift_last(p[0] + ox, p[1] + oy, p[2], p[3], 0, 0):
+            return
+        if m[4] and m[2] > 0 and not cv.shift_last(m[0] + ox, m[1] + oy, m[2], m[3], 0, m[4]):
+            return
+        cv.shift_fence()
+        _C.api_shift_arm(self.ctx)
+        self.shifting = True
+        _CHANGE[0] = _SHIFT if m[4] else _ROWS
 
     def dead(self, rw):
         """Whether a held key's (or the ball's) steps `rw` (the input

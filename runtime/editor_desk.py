@@ -79,7 +79,7 @@ _OWN_FRAMES = ("blocks", "cards", "map", "music")
 
 # The Editor tabs drawn as one verbs page whose gen says what it shows: a
 # frame of the page may move its pixels or draw its changed rows alone.
-_PAGES = ("cards",)
+_PAGES = ("cards", "blocks")
 _FILLS_BODY = ("paint", "map", "scene", "code", "cards", "theme_config", "theme_sprites")
 
 # Which workspace shows an Editor tab, for a tab opened from elsewhere (a
@@ -556,11 +556,12 @@ class EditorDesk(Layer):
             # the page's own shift and rows frames, on a frame of its pane's
             # own where the WM says the buffer `shift_last` reads holds it as
             # the last draw left it; a whole frame draws it whole
-            layer.vouch = 2 if own and self._vouch >= 2 else 1
+            page = self.ws.block_ui if tab == "blocks" else layer
+            page.vouch = 2 if own and self._vouch >= 2 else 1
             try:
                 self._in_pane(tab, r, layer.draw, dt)
             finally:
-                layer.vouch = 0
+                page.vouch = 0
             return
         if tab not in _CODE_TABS:
             self._in_pane(tab, r, layer.draw, dt)
