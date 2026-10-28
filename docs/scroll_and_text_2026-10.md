@@ -372,9 +372,13 @@ gens; nothing is inferred from the pass:
    rect moved by Δ; the scrollbar's rect; a typed field's row; and every
    stop whose gen moved since the entry (a cover landing is that card's
    rect, not a whole paint).
-3. **The ground leaves R out**; at R's open the engine submits `shift_last`
-   for R by Δ and sets the **floor**: the band of |Δ| rows plus the widened
-   set, a rect list in C. The app's pass runs: every verb runs its layout,
+3. **The ground leaves R out**; the host moves R by Δ (`shift_last`) once
+   begin licenses the frame, and the engine sets the **floor**: the band of
+   |Δ| rows plus the widened set, a rect list in C, at R's open -- or from
+   the pass's start where a stop drawn before R reaches into it, so that
+   stop's part of R draws through the floor in a whole frame's order (what
+   a stop outside R drew into R is floor where R moved or its marks
+   changed: surface model §14.7). The app's pass runs: every verb runs its layout,
    focus and hit-testing and the engine RECORDS each stop's draw; a stop
    wholly outside the floor answers 0-size; **the floor only widens**: at
    the first stop whose id or order differs from frame n−1's, the floor

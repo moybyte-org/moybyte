@@ -148,6 +148,7 @@ class Pair:
         self.da = host_app.ConsoleDriver(self.a)
         self.db = host_app.ConsoleDriver(self.b)
         self.bufs = bufs
+        self._state = {}
         root = self.a.sys_canvas
         root.RETAINED_FRAMES = bufs
         self.held = [bytes(root._buf)]
@@ -173,7 +174,7 @@ class Pair:
                 ws._dirty = True
             ws.pointer.visible = False
             k = ws._frames_drawn
-            drv.frame(_DT)
+            self._drive(ws, drv)
             ws.painted = ws._frames_drawn != k
         a, b = self.a, self.b
         assert a.painted == b.painted, "the two consoles' gates parted"
@@ -192,6 +193,29 @@ class Pair:
             root = a.sys_canvas
             root._comp.last = shot
             root._buf[:] = self.held[-self.bufs] if len(self.held) > self.bufs else self.held[0]
+
+    def _drive(self, ws, drv):
+        """One loop pass of `ws` with the toolkit's per-console state its
+        own, as on a board with one console: the painted frame and the host
+        that took the keys. The second console's held steps are never dead,
+        so where the first's dead-step rule takes a step out its frame must
+        show the same."""
+        st = self._state.setdefault(id(ws), [None, [-1, False, None] + [-1] * (
+            len(ui_draw._PAINT) - 3)])
+        ui_draw._KEYS_HOST[0] = st[0]
+        ui_draw._PAINT[:] = st[1]
+        twin = ws is self.b
+        if twin:
+            sd, dead = ui_draw.steps_dead, ui_draw.AppHost.dead
+            ui_draw.steps_dead = lambda rw, console=None: False
+            ui_draw.AppHost.dead = lambda host, rw: False
+        try:
+            drv.frame(_DT)
+        finally:
+            if twin:
+                ui_draw.steps_dead, ui_draw.AppHost.dead = sd, dead
+            st[0] = ui_draw._KEYS_HOST[0]
+            st[1] = list(ui_draw._PAINT)
 
     def both(self, verb, *args):
         getattr(self.da, verb)(*args)
