@@ -239,10 +239,14 @@ class MusicPage:
     def _steps(self, cv, th, me, song, x, y, n, cur, rows, top):
         """The rows' verbs, then their own pixels (the cursor's bar, the
         meters), which overlap none of them: on a frame of the page's rows
-        only where its floor reaches."""
+        only where its floor reaches, the rest kept as the last frame drew
+        them (`ui.keep`)."""
         self.rows = []
         s = None if song else me.cur_sfx()
         t = me.cur_track() if song else None
+        host = self.host
+        f = self._floor
+        k = host.floor_rects(f) if self._asked and host.shifting else -1
         for vi in range(rows):
             i = top + vi
             if i >= n:
@@ -251,6 +255,9 @@ class MusicPage:
             r = (x + 4, ry, 176, ROW)
             self.rows.append((i, r))
             ui.at(*r)
+            if k >= 0 and not _meets(f, k, x, ry, 184, ROW):
+                ui.keep("Row %d" % vi, ROW)
+                continue
             if ui.tool("", "", {"id": "Row %d" % vi, "current": i == cur}):
                 me.select_cursor(i)
             ui.at(x + 10, ry, 20, ROW)
@@ -259,9 +266,6 @@ class MusicPage:
                 self._slot(me, t.pattern[i], x, ry)
             else:
                 self._step(s.steps[i], x, ry)
-        host = self.host
-        f = self._floor
-        k = host.floor_rects(f) if self._asked and host.shifting else -1
         for vi in range(rows):
             i = top + vi
             if i >= n:
@@ -300,6 +304,10 @@ class MusicPage:
         ui.label(word, {"face": "mono"})
 
     def _pad(self, me, song, x, y):
+        f = self._floor
+        host = self.host
+        k = host.floor_rects(f) if self._asked and host.shifting else -1
+        skip = k >= 0 and not _meets(f, k, x - 4, y - 4, 3 * PAD_DX, len(PAD) * PAD_DY + 8)
         for r, pair in enumerate(PAD):
             for c, (icon, word, verb_sfx, verb_song) in enumerate(pair):
                 verb = verb_song if song else verb_sfx
@@ -308,6 +316,9 @@ class MusicPage:
                 if verb is None:
                     continue
                 ui.at(x + c * PAD_DX, y + r * PAD_DY, PAD_W, PAD_H)
+                if skip:
+                    ui.keep("Pad %s" % verb, PAD_H)
+                    continue
                 ui.icon(icon)
                 if ui.button(word, "danger" if verb == "del" else "normal",
                              {"id": "Pad %s" % verb}):
