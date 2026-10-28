@@ -277,3 +277,26 @@ def test_every_surface_sets_up_plays_and_tears_down_on_the_host(host, capsys):
     assert ws.look.file_text() == theme0 and ws.system.get("name", "") == name0
     assert not [c for c in ws.carts.all if c["title"].startswith(ib.SCRATCH)]
     assert not ws.carts_store.list_files("drawings", ws.carts_root)
+
+
+def test_the_pickers_rows_drag_inside_the_pickers_body(host):
+    """The Sprite pickers' finger lands where their body shows the sheet,
+    so a drag scrolls it and the pickers stay up through the row."""
+    ws = host.ws
+    bench = ib.Bench(host, "host", None)
+    bench.setup()
+    surf = _surface("Sprite pickers")
+    try:
+        for code, wait in surf.setup:
+            bench.ex(code, wait)
+        rect = ib._rect(bench, surf)
+        shown = ws.paint_layer.sheet_shown
+        assert shown is not None
+        assert (shown[0] <= rect[0] and shown[1] <= rect[1] and rect[0] + rect[2] <= shown[2]
+                and rect[1] + rect[3] <= shown[3])
+        got = bench.play(ib.build_plan("drag", surf, rect, False), None)
+        assert ib.frames_of(got["raw"])
+        assert ws.paint_layer._pop == "pickers"
+    finally:
+        host.pyexec(surf.teardown)
+        bench.cleanup()

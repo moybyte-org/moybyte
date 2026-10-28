@@ -557,6 +557,30 @@ def _ib_focus(tab):
         ws.layout = _lay
     ws.mark_dirty()
 
+def _ib_picker():
+    # the sheet where the open pickers' body shows it, in the content's
+    # pixels: offset by the desk pane's body the Sprite tab draws in
+    _pl = ws.paint_layer
+    if not _pl._pop or _pl._host is None:
+        return None
+    _s = getattr(_pl, 'sheet_shown', 0)
+    if _s == 0:
+        # an image before the pickers kept it: the part inside the card's
+        # inset (the value row's, moy_ui_modal_band)
+        _c = _pl._host.box('Sprites')
+        _p = _pl._host.box('Sheet')
+        if _c is None or _p is None:
+            return None
+        _m = (18 if _pl.layout.desk else 10) * max(1, getattr(ws.sys_canvas, 'font_scale', 1))
+        _s = (max(_c[0], _p[0]), max(_c[1] + _m, _p[1]), min(_c[0] + _c[2], _p[0] + _p[2]),
+              min(_c[1] + _c[3] - _m, _p[1] + _p[3]))
+    if _s is None or _s[2] <= _s[0] or _s[3] <= _s[1]:
+        return None
+    _d = getattr(ws, 'editor_desk', None)
+    _o = _d._own_pane() if _d is not None and _d.active() else None
+    _ox, _oy = (_o[4][0], _o[4][1]) if _o is not None else (0, 0)
+    return (_s[0] + _ox, _s[1] + _oy, _s[2] - _s[0], _s[3] - _s[1])
+
 def _ib_full():
     f = getattr(ws.wm, 'full_key', None)
     if f is not None:
@@ -1613,7 +1637,7 @@ def surfaces():
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
     s.append(Surface("Sprite pickers", _ed(SCRATCH, "paint", "art") + [
         ("ws.paint_layer._open_pickers()\nws.mark_dirty()", 1.5)],
-        rect=PICKER, teardown="ws.paint_layer._pop = False\nws.mark_dirty()"))
+        rect="picker", teardown="ws.paint_layer._pop = False\nws.mark_dirty()"))
     s.append(Surface("Map", _ed(SCRATCH, "map", "art"), rect=RIGHT_PANE,
                      inputs=("key_steps", "key_held", "key_20", "drag", "ball_slow")))
     s.append(Surface("Notes", _NOTES, "(lambda h: h.ed.top * 100000 + h.ed.row * 1000 + "
@@ -1647,6 +1671,11 @@ def _rect(bench, surf):
         if b:
             return (x + b[0] + b[2] // 16, y + b[1] + b[3] // 16, b[2] * 7 // 8, b[3] * 7 // 8)
         r = CODE_RECT                   # a handheld's Editor: the code fills the content
+    if r == "picker":
+        b = bench.val("ws._g['_ib_picker']()")
+        if b:
+            return (x + b[0], y + b[1], b[2], b[3])
+        r = PICKER
     if r is None:
         return (x, y, w, h)
     return (x + int(w * r[0]), y + int(h * r[1]), int(w * r[2]), int(h * r[3]))
