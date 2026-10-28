@@ -530,6 +530,12 @@ def apps(loop, info):
             moy_loop.swipe(W // 2, y0, W // 2, y1, 25)     # every picture met once
             for _ in range(30):
                 loop.step()
+        # ...and made: My Art makes a picture a quiet frame, and a loaded
+        # machine's longer frames carry a swipe past more of them
+        for _ in range(600):
+            if not getattr(a, "idle_owed", False):
+                break
+            loop.step()
         drag = []
         for rep in range(3):
             y0, y1 = (H * 3 // 4, H // 4) if rep % 2 == 0 else (H // 4, H * 3 // 4)
