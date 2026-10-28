@@ -109,8 +109,9 @@ def wrap_lines(paras, w):
     return out
 
 
-# The list's override table: the parts this image holds never change while it
-# runs, so its gen never moves (docs/scroll_and_text_2026-10.md §3.3).
+# The list's override table, the handheld's page and the desk's scroll region
+# alike: the parts this image holds never change while it runs, so its gen
+# never moves (docs/scroll_and_text_2026-10.md §3.3).
 _LIST_PAGE = {"gen": 0}
 
 
@@ -281,7 +282,7 @@ class LicencesPage:
         _ui.at(x + 12, y + 14, lw, 44)
         _ui.label(_lic.LEAD, _LEAD_DESK)
         _ui.at(x, y + 58, lw + 24, h - 58)
-        _ui.scroll("Licences list")
+        _ui.scroll("Licences list", _LIST_PAGE)
         self._list()
         _ui.scroll()
         e = self._ids.get(_ui.focus())
