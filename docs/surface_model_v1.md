@@ -849,9 +849,12 @@ paints, so a text view moves out of the last buffer only the bands its rows
 frames since drew); and `takes_lag(lag)`, whether this frame's draw
 repaints `lag`, what a direct render's target lags -- where it answers
 False the frame is not rendered straight into the root (the desk Editor's
-prompts draw their rows only into a buffer that lags nothing, and its Code
-pane repaints a lag inside that pane alone: a lag beyond it would draw the
-desk whole and leave the next buffer as far behind). A content counts the
+prompts draw their rows only into a buffer that lags nothing, and its Code,
+Blocks, Settings, Map and Sound panes repaint a lag inside the focused pane
+alone: a lag beyond it would draw the desk whole and leave the next buffer
+as far behind). The WM asks `HELD` and `takes_lag` before it installs the
+window's layout; a content whose answer depends on its layout answers in
+the one it drew in last (`EditorDesk._drew_in`). A content counts the
 WM's word only when its previous draw was one the WM spoke of too. A
 content without the names draws whole, as every content did before, and its
 stamps stay whole. Paint is the first to speak it.

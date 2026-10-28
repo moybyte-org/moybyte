@@ -234,15 +234,20 @@ default.
 
 | surface | scrolls through | drag/fling | key, repeat, ball steps |
 |---|---|---|---|
-| verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Files, Get Carts, Storybook, My Art, Calc, Appearance, Music's steps; the Blocks outline and Config's cards once ported onto nests, §15 P5) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
+| verbs-engine pages, `ui.scroll`, `ui.table` rows (Settings and its pages, Config's cards, Files, Get Carts, Storybook, My Art, Calc, Appearance) | the nest's `moy_ui_scroll_t` | the engine's drag-tap; the fling | focus moves a stop; the reveal is `glide_to` (§7) |
 | the home's carousel, grid and icons; the PROJECTS window | `ScrollRegion` (`Launcher._scroll_region`) | as today | the selection moves; `glide_to` the card |
 | the Code tab, theme Config text, Notes, the fields, the text console | `TextView` (§5) over a `ScrollRegion` in visual rows | the view's region | a caret move reveals through `glide_to`; a page key is `step` |
 | the Map's camera, the sprite pickers | `ScrollRegion` on two axes | as today | `step` |
 
-The Blocks outline and Config's cards scroll in Python by whole rows today
-(`block_editor_ui._outline_drag` and `blk_top`; `cards_layer`'s `mtop`),
-each drawn by a Python loop whose every box moves: they take the model only
-once they are `ui.scroll` nests, which §15's P5 does. Carts are out: a
+The Blocks outline and Music's steps scroll in Python by whole rows
+(`blk_top` and `block_editor_ui._outline_drag`; `MusicPage._window`, which
+keeps the cursor in the middle), their rows the page's own pixels among its
+verbs. A key step or a scroll there is a rows frame the page asks its
+`AppHost` for (`AppHost.rows`, §5): the rows it changed, the rows moved out
+of the last frame by the rows they scrolled. Config's cards are a verbs
+page (`editor_settings.SettingsPage`) whose gen makes a key step the
+engine's rows frame; `cards_layer`'s own loop and `mtop` draw a broken
+manifest and the file list. Carts are out: a
 cart's `btn`/`btnp` and its own scrolling are the cart's (L9); Notes is a
 system cart on the verbs engine whose text is the shell's `EditorHandle`,
 and §5 says what it gets.
@@ -529,7 +534,8 @@ the row, so that row draws with it. Rows outside the floor are not laid out
 -- the T-Deck's `qstr_find_strn` share (strings interned per frame for
 every visible line) goes with them. On the desk the Editor draws the Code
 pane alone on such a frame (its header and the other panes as they were)
-and names the pane as what it changed, unless a header's words run past it
+and names the pane as what it changed -- the Blocks, Settings, Map and
+Sound panes likewise (§8) -- unless a header's words run past it
 into the pane (a font scale over the chrome's), where every frame draws
 whole.
 
@@ -582,6 +588,20 @@ whole.
   (`WindowedWM._player_rows`, `blit_strip_rect`), not the canvas. It is
   the last phase (§15 P8), priced honestly, and §15 says what it costs if
   the cart floor does not hold.
+- *The Blocks outline and Music's steps* are rows a shell page draws itself
+  among its verbs, and the page asks for the same frame from its
+  `AppHost` (`AppHost.rows`): where the last frame it drew differs from
+  this one only by the cursor and a whole-row scroll, the rects of the rows
+  that changed and the region the scroll moves, which the host moves out
+  of the last frame (`shift_last`) before the engine plans the floor
+  (`moy_ui_api_shift_rows`); a page with rows of its own takes no plan the
+  engine makes without them (`own_rows`). The Blocks page takes each run of
+  rows its floor reaches into the floor (`floor_take`) and draws them
+  clipped to it. Its cursor plate is a stop, and a moved stop floors the
+  page from its top down, so a step floors from the cursor to the foot and
+  the engine's share rule draws a step near the top whole. Music's steps
+  draw each row's verbs first and its own pixels (the cursor bar, the
+  meters, which overlap no verb) after, where the floor reaches.
 - *The text console* (`runtime/text_console.py`) draws through the view for
   its scrollback rows and its prompt line; a script that prints appends
   rows, a translation of the scrollback by the rows appended plus those
@@ -693,7 +713,17 @@ where the shown ring vouches for the buffer it paints and the content
 repaints what that buffer lags (`takes_lag`), and the Code pane's text then
 moves out of the last buffer only the rows the frames since drew; a press
 inside the focused Code pane reaches that pane alone, so a drag or a fling
-there draws the pane's rows like a key.
+there draws the pane's rows like a key. The focused pane showing Blocks,
+Settings, the Map or the Sound pane keeps its own frames the same way (P5,
+2026-10-28): a frame whose input reached that pane alone and changed
+nothing another pane draws (an undo step, the blocks' object, the sounds,
+the Map's tools, the bar's key) draws the pane alone and names it as what
+it changed. The Sound pane is drawn on the desk's own verbs, so its frame
+runs the desk's pass clipped to the pane, and a frame whose input the
+desk's verbs take draws whole. The desk answers `HELD` and `takes_lag` in
+the layout it drew in last: the WM asks them before it installs the
+window's, and on a window short of the glass the root's layout arranges
+the panes otherwise.
 
 ## 9. The home's arrangements, PROJECTS, the sprite pickers, My Art
 
@@ -798,6 +828,7 @@ Per canvas, then per source:
 | the PPA ground fill before R opens | the P4s | the S3s, the host, the web |
 | a shift frame of a nest | a nest whose app passes every gen it draws inside R | a nest with a `ui.part` and no gen, a placed `ui.at` stop, a Lua or wasm app |
 | a host's rows frame (an editor handle's) | a Python app on the verbs with one handle, its page under a gen | a Lua or wasm app, two handles, a declared `background`, an embed in view |
+| a page's own rows frame (`AppHost.rows`) | the Blocks outline and Music's steps, a frame whose only change is the cursor or a whole-row scroll | an edit, a press, a floor past three fifths of the page |
 | held-key repeat | every level source: the T-Deck matrix, BLE, the host's and browser's keyboards, a gamepad | the T-Deck keyboard's ASCII fallback |
 | the trackball's steps and `BALL_COAST` | the T-Deck (and the host's arrow pan) | every board without a ball |
 | direct render of key frames | the windowed WM over a root with `set_viewport` (the P4s, the host desk) | the web runner's canvas (keeps the stamp); the fullscreen WM (no window) |
@@ -1011,7 +1042,7 @@ provisional pass cost; P0's null-floor run re-prices every one before P1a.
 | **P2 repeat and the ball** | `begin_frame(now)`, the repeat counts, the typing-level slot, the page's `e.repeat` dropped, the ball as counts, `BALL_COAST`; then the owner's hand trial | T-Deck, host | P1c, P1d | T-Deck `ball_fast` rows 13-27 of 30 → 30 of 30 within one glide; held keys move on every surface (none today); P4 held-key rows (Code, Notes, Music ~11 Hz with no delay) repeat at the rate |
 | **P3 fields and dialogs** (Editor sequence begins) | the field's row; the held page's put-back skipped on rows frames; Blocks' prompts, Cart info, Settings' name, Notes' name field | P4, T-Deck | P6 | P4 Blocks prompts 123 → ~14-20, Cart info fields 86 → ~14-20; T-Deck fields 19-25 → ~12-15 |
 | **P4 the Code tab and theme Config** | `TextView` in visual rows, the whole-draw triggers, overlays as rows, the pixel drag | P4, T-Deck | P6 | P4 Code key steps 86 → ~14-18, typing 86-92 → ~14-18, held 84 → ~14-18, drag 57-82 → ~17-22, fling 87-105 → ~17-22, find 104 → ~50-60 (a find past the view is a whole view under direct render); theme Config keys and typing 91-94 → ~14-18, fling 121 → ~17-22; T-Deck Code type 40 → ~25-40 (its p90 is two outliers P0's tool must name before P4 prices them), drag 24 → ~14-17, find 68 → ~25-45, theme Config 12-15 → ~9-11 |
-| **P5 the Editor's panes** | the Blocks outline and Config's cards ported onto `ui.scroll` nests; Music's steps and the Map's camera on the nest state | P4, T-Deck | P6 | P4 Blocks outline 66-96 → ~20-30, Config 66-68 → ~20-30, Music steps 86 → ~20-30, Map 68-81 → ~22-30; T-Deck Blocks, Config, Music 22-28 → ~15-20 |
+| **P5 the Editor's panes** | the desk's Blocks, Settings, Map and Sound panes draw their own frames; Config's cards a verbs page under a gen; the Blocks outline's and the handheld Music steps' rows as their pages' own rows frames (`AppHost.rows`) | P4, T-Deck | P6 | P4 Blocks outline 66-96 → ~20-30, Config 66-68 → ~20-30, Music steps 86 → ~20-30, Map 68-81 → ~22-30; T-Deck Blocks, Config, Music 22-28 → ~15-20 |
 | **P6 the home and PROJECTS** | steps on `_try_drag_partial`, two cells, the `bg` translation, `blit_batch` covers, the still ring as `PaintRing`, the settle frame as the pane's rows | P4, T-Deck | everything but P1d's WM edits (coordinate the `_shown` slot shape) | P4 grid and icons 97-123 → ~25-35 on `bg`, ~30-55 on `bd` and picture themes (over); carousel key rows 54-57 → ~35-45 (over: the settle frame's pane); T-Deck grid and icons 80-102 → ~25-30 on `bg`, ~30-50 on `bd`/picture (over), carousel settle 48-51 → ~35-45 (over) |
 | **P7a the picker kernel** | `blit_indices_scale` in `moy_gfx`, host and on-glass byte tests | host; one board | P1a onward | none directly (a kernel) |
 | **P7b the pickers** (Editor sequence) | the picker on the kernel, the two-axis region | T-Deck, P4 | -- | T-Deck sprite pickers 40 → ~18-22; P4 93-96 → ~22-30 |
@@ -1136,7 +1167,7 @@ apps read `ui.focus()` before the pane and report rows, with a ratchet
 (§7). 4, direct render would not engage: `api_moving` replaces
 `ws._animating` for the freeze, a content-only frame repaints no desk or
 chrome, with an engagement count (§8, §13). 5, the Blocks outline and
-Config's cards are not nests: ported in P5, their rows priced there and
+Config's cards are not nests: their rows frames are P5's, priced there and
 nowhere earlier (§2.4, §15). 6, `ui.band()` skipping collided with the
 structural check: `ui.keep(id, h)` (§3.3). 7, the T-Deck's Python stays
 for apps not reading `ui.band()` and the copy is ~4.3-5 ms: re-priced
