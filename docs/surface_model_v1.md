@@ -825,7 +825,11 @@ frame paints holds the page but for the changes of all but the oldest, and:
 - **a direct render tells the content what lags** before it draws, and the
   content repaints that and its own change. A buffer the ring cannot vouch
   for is seeded by stamping the window buffer into it, when that buffer's
-  own lag is known;
+  own lag is known. A content that speaks the protocol renders straight
+  into the root on every frame that changes its page (a key's, a press's,
+  not only a gesture's) where the chrome is quiet, its window on top and
+  the ring vouches for that buffer; a full-screen row over it is painted
+  again only where the lag or the draw reached the row;
 - **the window buffer direct render left behind keeps the content's
   changes as its lag**, which the first frame after the release repaints
   instead of the whole page;
@@ -838,10 +842,19 @@ frame paints holds the page but for the changes of all but the oldest, and:
 `retained(known, x0, y0, x1, y1)`, before each draw the WM makes of it in
 its window — whether the target holds its page as of its last draw, and the
 part that lags; `changed()`, after it — the part of the page the draw
-changed, or None. A content counts the WM's word only when its previous draw
-was one the WM spoke of too. A content without the names draws whole, as
-every content did before, and its stamps stay whole. Paint is the first to
-speak it.
+changed, or None. Two more are optional: `vouched(v)`, before the draw, the
+WM's word for the buffer `shift_last` reads (2: it holds the page as the
+last draw left it; 3: and the ring vouches for the buffer this frame
+paints, so a text view moves out of the last buffer only the bands its rows
+frames since drew); and `takes_lag(lag)`, whether this frame's draw
+repaints `lag`, what a direct render's target lags -- where it answers
+False the frame is not rendered straight into the root (the desk Editor's
+prompts draw their rows only into a buffer that lags nothing, and its Code
+pane repaints a lag inside that pane alone: a lag beyond it would draw the
+desk whole and leave the next buffer as far behind). A content counts the
+WM's word only when its previous draw was one the WM spoke of too. A
+content without the names draws whole, as every content did before, and its
+stamps stay whole. Paint is the first to speak it.
 
 **This is not a second invalidation mechanism.** Nothing here decides
 whether a surface draws: the gate, the gens and §14.1's freeze still do. It

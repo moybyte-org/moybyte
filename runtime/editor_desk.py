@@ -171,7 +171,8 @@ class EditorDesk(Layer):
         # every frame: the WM's word for the buffer, the lag it named, what
         # the desk was a function of at the last code frame, and whether the
         # buffer `shift_last` reads holds the page as the last draw left it
-        # (`vouched`: 2, else 1, 0 untold).
+        # (`vouched`: 2, 3 where the ring says the buffer this frame paints
+        # holds it too, else 1, 0 untold).
         self._ret = array("i", [0] * 5)
         self._code_key = None
         self._vouch = 0
@@ -592,6 +593,21 @@ class EditorDesk(Layer):
 
     def vouched(self, v):
         self._vouch = v
+
+    def takes_lag(self, lag):
+        """Whether this frame's draw repaints `lag` [x0, y0, x1, y1), what
+        its target lags (a direct render's): the Code pane's rows repaint a
+        lag inside that pane; a prompt's rows need the desk as the last
+        draw left it, and a lag outside the pane would draw the desk whole
+        and leave the next buffer as far behind."""
+        if lag[2] <= lag[0] or lag[3] <= lag[1]:
+            return True
+        code = self._code_pane() if self._prompt() is None else None
+        if code is None:
+            return False
+        b = code[3]
+        return (lag[0] >= b[0] and lag[1] >= b[1] and lag[2] <= b[0] + b[2]
+                and lag[3] <= b[1] + b[3])
 
     # -- the Code tab's rows (docs/scroll_and_text_2026-10.md §5) -----------------
     #

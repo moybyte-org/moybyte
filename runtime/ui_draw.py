@@ -1686,6 +1686,7 @@ _WIN = [0]
 _CHANGE = [None]
 _SHIFT = "shift"
 _ROWS = "rows"
+_TV_HIST = 4                    # the frames a TextView remembers (RETAINED_FRAMES - 1 at most)
 
 
 def paint_frame(n, alone, console=None):
@@ -2443,7 +2444,7 @@ class DialogRows:
 TT_N = 9                        # the tones (MOY_UI_TT_*): text, keyword, string, number,
                                 # comment, builtin, value, danger, dim
 (TV_KEY, TV_OVER_Y0, TV_OVER_Y1, TV_LINES, TV_NUM0, TV_DY, TV_FLOOR, TV_WHOLE, TV_DRAWN,
- TV_LEN) = range(TV_TONE0 + TT_N, TV_TONE0 + TT_N + 10)
+ TV_FLOOR_Y0, TV_FLOOR_Y1, TV_LEN) = range(TV_TONE0 + TT_N, TV_TONE0 + TT_N + 12)
 TVF_FADE, TVF_GROUND, TVF_CLIP = 1, 2, 4
 SYN_NONE, SYN_PYTHON, SYN_LUA, SYN_JSON, SYN_SGR = range(5)
 SYNTAX = {"python": SYN_PYTHON, "lua": SYN_LUA, "json": SYN_JSON, "sgr": SYN_SGR}
@@ -2485,6 +2486,10 @@ class TextView:
         self.kind = None
         self.over = array("i", [0, 0])  # what overlays covered of R this frame (y0, y1)
         self._w = 0                     # the window's word the frame was planned under
+        # the last frames' plans, a slot a frame (n % _TV_HIST): the frame,
+        # its kind (0 whole, 1 rows, 2 shift) and the band its floor spans
+        self._hist = array("i", [-1] * (4 * _TV_HIST))
+        self._band = array("i", [0, 0])  # `_lag`'s answer: the band R lags
 
     def reset(self):
         """The next frame draws whole."""
@@ -2521,19 +2526,63 @@ class TextView:
         self._w = w
         ring = self.ring
         if w:
-            ok = w == 2 and ring.vouch_key(0)
+            ok = w >= 2 and ring.vouch_key(0)
         else:
             ok = _PAINT[1] and ring.vouch(cv, f, 0)
         self.kind = "whole"
         may = _C.text_plan(self.state, v, lines, err, find)
         if ok and may and _text_pays(cv, v):
             dy = v[TV_DY]
-            if cv.shift_last(v[TV_X] + getattr(cv, "_ox", 0), v[TV_Y] + getattr(cv, "_oy", 0),
-                             v[TV_W], v[TV_H], 0, dy):
-                cv.shift_fence()
+            ox = getattr(cv, "_ox", 0)
+            oy = getattr(cv, "_oy", 0)
+            lag = self._lag(f, getattr(cv, "RETAINED_FRAMES", 1)) if w == 3 and not dy else -1
+            if lag < 0:
+                moved = cv.shift_last(v[TV_X] + ox, v[TV_Y] + oy, v[TV_W], v[TV_H], 0, dy)
+            elif lag:
+                b = self._band
+                moved = cv.shift_last(v[TV_X] + ox, b[0] + oy, v[TV_W], b[1] - b[0], 0, 0)
+            else:
+                moved = True
+            if moved:
+                if lag:
+                    cv.shift_fence()
                 self.kind = _SHIFT if dy else _ROWS
                 _CHANGE[0] = self.kind
+        self._note(f, v)
         return self.kind != "whole"
+
+    def _lag(self, f, n):
+        """Where the window's word says the buffer this frame paints holds
+        R as frame f - n left it (`win` 3): whether R's pixels there lag
+        the last frame's only in the bands the rows frames since drew --
+        1, their span in `_band`, 0 none -- else -1."""
+        h = self._hist
+        y0 = 1 << 30
+        y1 = -y0
+        for b in range(1, n):
+            i = ((f - b) % _TV_HIST) * 4
+            if h[i] != f - b:
+                continue                # the view drew nothing that frame
+            if h[i + 1] != 1:
+                return -1
+            if h[i + 3] > h[i + 2]:
+                y0 = h[i + 2] if h[i + 2] < y0 else y0
+                y1 = h[i + 3] if h[i + 3] > y1 else y1
+        if n > _TV_HIST:
+            return -1
+        if y1 <= y0:
+            return 0
+        self._band[0] = y0
+        self._band[1] = y1
+        return 1
+
+    def _note(self, f, v):
+        h = self._hist
+        i = (f % _TV_HIST) * 4
+        h[i] = f
+        h[i + 1] = 0 if self.kind == "whole" else 2 if self.kind == _SHIFT else 1
+        h[i + 2] = v[TV_FLOOR_Y0]
+        h[i + 3] = v[TV_FLOOR_Y1]
 
     def draw(self, cv, look, lines, err=None, find=None, ground=True):
         """Draw the rows the plan left (every row on a whole frame), each

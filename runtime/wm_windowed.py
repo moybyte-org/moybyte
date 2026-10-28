@@ -1335,11 +1335,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 return
             self._paint_row(win, cv, t)
 
-    def _row_clear(self, win):
-        """Whether what the focused content's last draw changed (`changed`)
-        is known and reaches none of `win`'s full-screen row."""
-        c = self._content_for(win.kind)
-        r = c.changed() if c is not None else None
+    def _row_clear(self, win, r=None):
+        """Whether what the focused content's last draw changed (`changed`),
+        or the rect `r` in its coordinates, is known and reaches none of
+        `win`'s full-screen row."""
+        if r is None:
+            c = self._content_for(win.kind)
+            r = c.changed() if c is not None else None
         if r is None:
             return False
         if r[2] <= r[0] or r[3] <= r[1]:
@@ -3476,10 +3478,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         pages = 0
         if not held and self._speaks(win):
             pages = 2 if self._vouches(win) else 1
-        vouched = getattr(content, "vouched", None) if held else None
-        if vouched is not None:
-            vouched(2 if self._vouches(win) else 1)
         known = 0
+        chain = False
         u = self._u
         if held:
             # What the buffer this frame paints holds of the page: the shown
@@ -3489,6 +3489,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             f = ws._frames_drawn
             if self._shown_ok(win) and self._shown_chain(win, f, u):
                 known = 1
+                chain = True
             elif not win._buf_stale or win._lag[4]:
                 root.blit_strip(win.buf, cx, cy)
                 u[0] = u[1] = u[2] = u[3] = 0
@@ -3499,6 +3500,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     u[2] = lag[2]
                     u[3] = lag[3]
                 known = 1
+        vouched = getattr(content, "vouched", None) if held else None
+        if vouched is not None:
+            # 3: the ring's word too, that this buffer holds the page as the
+            # frames RETAINED_FRAMES back left it, but for their changes
+            vouched((3 if chain else 2) if self._vouches(win) else 1)
         self._install(win.ctx, win)
         ws._sys_canvas = root                 # ...but paint on the framebuffer
         ws._surface_write(cx, cy)
@@ -3519,7 +3525,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             _ui_draw.window_frame(0)
             root.clear_viewport()
             self._install(self._root_ctx)
-        self._row_over(win, root, held)
+        # the row is the root's already where the root held the page as its
+        # last draw left it, but for a lag clear of the row
+        self._row_over(win, root, held, bool(known) and self._row_clear(win, u))
         stale = win._buf_stale
         win._buf_stale = True                 # buf skipped: it now lags the truth
         if not held:
@@ -3816,6 +3824,21 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             return False
         return self._refill(win)
 
+    def _held_direct(self, win, content):
+        """Whether `win`'s content, one that speaks the shown protocol
+        (`HELD`), renders straight into the root this frame: its page
+        changed, the shown ring vouches for the buffer this frame paints,
+        and the content repaints what that buffer lags (its `takes_lag`,
+        where it has one, says whether it will this frame)."""
+        if self._content_static(win, False) or not self._shown_ok(win):
+            return False
+        c = self._sc
+        c[0] = c[1] = c[2] = c[3] = 0
+        if not self._shown_chain(win, self.ws._frames_drawn, c):
+            return False
+        t = getattr(content, "takes_lag", None)
+        return t is None or bool(t(c))
+
     def _still_shown(self, win):
         """Whether this frame need not draw `win`'s page at all: nothing
         changed it (§14.1's legs, but for its buffer's: the glass is the
@@ -3949,12 +3972,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # copy is ~900KB of bus traffic per frame on the P4, against a
             # measured 91MB/s ceiling -- while it is scrolled or flung, and on
             # every frame of a content that says what its frames change
-            # (`_speaks`: a key's, a glide's, a coast's, a press's). Its window
+            # (`_speaks`: a key's, a glide's, a coast's, a press's) or that
+            # keeps its own frames (`HELD`) and changed its page. Its window
             # buffer is left behind the glass, and every reader of it brings it
             # up first (`_fresh`; the idle frames' `refill_step`).
             speaks = self._speaks(win)
+            content = self._content_for(win.kind)
+            held = getattr(content, "HELD", False)
             if (self._chrome_quiet
-                    and (speaks or self._content_gesture or self._content_flinging())
+                    and (speaks or self._content_gesture or self._content_flinging()
+                         or held and self._held_direct(win, content))
                     and self._order and self._wins.get(self._order[-1]) is win):
                 if speaks and self._still_shown(win):
                     # Nothing changed the page and this buffer holds it.
@@ -3966,7 +3993,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     return
                 if self._direct_render(win, dt):
                     self._win_touched = True
-                    held = getattr(self._content_for(win.kind), "HELD", False)
                     if speaks or held:
                         ok = self._shown_ok(win)
                         own = self._own
@@ -3980,8 +4006,6 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # (see _content_static), skip the re-render and let the retained-
             # buffer stamp below present it -- the map tab's draw is ~70ms on P4
             # glass, the stamp ~14ms, and the stamp runs either way.
-            content = self._content_for(win.kind)
-            held = getattr(content, "HELD", False)
             own = self._own
             if (win._buf_stale and getattr(self._root_canvas, "RETAINED_FRAMES", 1) > 1
                     and self._content_static(win, False)):

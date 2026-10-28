@@ -88,6 +88,7 @@ enum {
     MOY_UI_TV_FLOOR,        // the pixel rows the floor draws (R's height: whole)
     MOY_UI_TV_WHOLE,        // the frame draws every row
     MOY_UI_TV_DRAWN,        // the rows the last draw drew
+    MOY_UI_TV_FLOOR_Y0, MOY_UI_TV_FLOOR_Y1,  // the band the floor's rows span (R's on a whole frame)
     MOY_UI_TV_LEN
 };
 

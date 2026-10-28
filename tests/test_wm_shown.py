@@ -163,8 +163,8 @@ def test_a_desk_stroke_is_stroke_frames_from_press_to_release(tmp_path, monkeypa
     """On a desk window, framed or full screen under the WM's row, every
     frame of a stroke -- its press, its release and every frame between -- is
     a stroke frame on every buffer count, and each presented frame is the one
-    full repaints present. The pointer's frames are direct renders; the keys'
-    stamp only what the stroke changed."""
+    full repaints present. Its frames, the pointer's and the keys', are
+    direct renders."""
     whole, _, pix0, _ = _run(tmp_path / "a", monkeypatch, bufs, keys, True, full)
     monkeypatch.undo()
     part, got, pix1, win = _run(tmp_path / "b", monkeypatch, bufs, keys, False, full)
@@ -176,15 +176,10 @@ def test_a_desk_stroke_is_stroke_frames_from_press_to_release(tmp_path, monkeypa
     frames = got["frames"]
     assert frames and all(frames), "whole frames in the stroke: %s" % frames
     area = win.buf.w * win.buf.h
-    if keys:
-        assert got["direct"] == 0
-        # each frame stamps what the last few steps changed, never the window
-        assert got["stamped"] < area * len(frames) // 20, (got["stamped"], area)
-    else:
-        assert got["direct"] >= len(frames) - 2, got
-        # the release's stamp brings the window's buffer back: what the stroke
-        # changed, never the window once a frame
-        assert got["stamped"] < area, (got["stamped"], area)
+    assert got["direct"] >= len(frames) - 2, got
+    # a stamp brings the window's buffer back: what the stroke changed,
+    # never the window once a frame
+    assert got["stamped"] < area, (got["stamped"], area)
 
 
 @pytest.mark.parametrize("bufs", [2, 3])

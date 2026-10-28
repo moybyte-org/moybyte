@@ -518,17 +518,20 @@ full-screen tier, and in a desk pane the Editor's word from the WM
 (`EditorDesk.vouched`: the window's buffer holds its last draw) -- and the
 record which rows moved; R's pixels then always come from that buffer
 (`shift_last` by the scroll, by 0 on a rows frame: translations never
-compose), and `draw` draws the floor's rows, each whole and alone: its
-ground, the current mark, the gutter number, an error's underline, the
-selection, the find matches, the text in its colour runs (tokenized in C
-for those rows only), the fade, the caret. An error's underline reaches the
-row after where the glyph box fills the row, so that row draws with it.
-Rows outside the floor are not laid out -- the T-Deck's `qstr_find_strn`
-share (strings interned per frame for every visible line) goes with them.
-On the desk the Editor draws the Code pane alone on such a frame (its
-header and the other panes as they were) and names the pane as what it
-changed, unless a header's words run past it into the pane (a font scale
-over the chrome's), where every frame draws whole.
+compose; where the WM's word is that the buffer the frame paints holds R as
+the frames `RETAINED_FRAMES` back left it -- a direct render's, 3 -- a rows
+frame moves only the bands the rows frames since drew), and `draw` draws
+the floor's rows, each whole and alone: its ground, the current mark, the
+gutter number, an error's underline, the selection, the find matches, the
+text in its colour runs (tokenized in C for those rows only), the fade, the
+caret. An error's underline reaches the row after where the glyph box fills
+the row, so that row draws with it. Rows outside the floor are not laid out
+-- the T-Deck's `qstr_find_strn` share (strings interned per frame for
+every visible line) goes with them. On the desk the Editor draws the Code
+pane alone on such a frame (its header and the other panes as they were)
+and names the pane as what it changed, unless a header's words run past it
+into the pane (a font scale over the chrome's), where every frame draws
+whole.
 
 **Each editor, what it keeps and what it drops.**
 
@@ -683,7 +686,14 @@ and `_content_flinging` knows only the launcher and PROJECTS. Three changes:
 The stamp disappears from the key and typing rows; a full-screen window's
 12.2-12.7 ms stamp goes the same way. The host desk takes direct render of
 key frames too, so the host is the test bed; its cursor is hidden in those
-tests (a visible cursor makes `_shown_ok` false, as it should).
+tests (a visible cursor makes `_shown_ok` false, as it should). Built for
+the contents that keep their own frames (`HELD`: the desk Editor, Paint) in
+P4b on 2026-10-28: a frame that changes the page renders into the glass
+where the shown ring vouches for the buffer it paints and the content
+repaints what that buffer lags (`takes_lag`), and the Code pane's text then
+moves out of the last buffer only the rows the frames since drew; a press
+inside the focused Code pane reaches that pane alone, so a drag or a fling
+there draws the pane's rows like a key.
 
 ## 9. The home's arrangements, PROJECTS, the sprite pickers, My Art
 

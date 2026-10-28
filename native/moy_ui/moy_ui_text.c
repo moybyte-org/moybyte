@@ -706,6 +706,8 @@ int moy_ui_text_plan(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, in
     t->n_floor = 0;
     v[MOY_UI_TV_DY] = 0;
     v[MOY_UI_TV_FLOOR] = v[MOY_UI_TV_H];
+    v[MOY_UI_TV_FLOOR_Y0] = v[MOY_UI_TV_Y];
+    v[MOY_UI_TV_FLOOR_Y1] = v[MOY_UI_TV_Y] + v[MOY_UI_TV_H];
     v[MOY_UI_TV_WHOLE] = 1;
     t->whole = 1;
     if (lh <= 0 || n > MOY_UI_TEXT_ROWS || t->key != key || t->rows <= 0) {
@@ -722,7 +724,7 @@ int moy_ui_text_plan(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, in
     // the band the move uncovers, in R's rows
     int band0 = dy > 0 ? ry : ry + h + dy, band1 = dy > 0 ? ry + dy : ry + h;
     int over0 = v[MOY_UI_TV_OVER_Y0] + dy, over1 = v[MOY_UI_TV_OVER_Y1] + dy;
-    int px = 0;
+    int px = 0, fy0 = ry + h, fy1 = ry;
     for (int i = 0; i < n; i++) {
         int y = ry + i * lh - v[MOY_UI_TV_OFF];
         int y1 = y + lh;
@@ -744,7 +746,11 @@ int moy_ui_text_plan(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, in
             floor_set(t, i);
             t->n_floor++;
             int a = y > ry ? y : ry, b = y1 < ry + h ? y1 : ry + h;
-            px += b > a ? b - a : 0;
+            if (b > a) {
+                px += b - a;
+                fy0 = a < fy0 ? a : fy0;
+                fy1 = b > fy1 ? b : fy1;
+            }
         }
     }
     // an error's underline under its row's glyph box reaches into the row
@@ -756,10 +762,17 @@ int moy_ui_text_plan(moy_ui_text_t *t, int32_t *v, const moy_ui_trow_t *rows, in
             floor_set(t, i + 1);
             t->n_floor++;
             px += lh;
+            int a = ry + (i + 1) * lh - v[MOY_UI_TV_OFF], b = a + lh;
+            a = a > ry ? a : ry;
+            b = b < ry + h ? b : ry + h;
+            fy0 = a < fy0 ? a : fy0;
+            fy1 = b > fy1 ? b : fy1;
         }
     }
     v[MOY_UI_TV_DY] = dy;
     v[MOY_UI_TV_FLOOR] = px;
+    v[MOY_UI_TV_FLOOR_Y0] = fy1 > fy0 ? fy0 : ry;
+    v[MOY_UI_TV_FLOOR_Y1] = fy1 > fy0 ? fy1 : ry;
     v[MOY_UI_TV_WHOLE] = 0;
     t->whole = 0;
     return 1;

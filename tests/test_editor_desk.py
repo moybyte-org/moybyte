@@ -893,6 +893,91 @@ def test_a_drag_in_the_code_pane_draws_the_pane_alone(desk):
     assert got == [list(pane)] * len(got)
 
 
+def test_a_key_in_the_code_pane_draws_straight_to_the_glass(desk):
+    """A key frame of the Code pane draws into the glass, not the window's
+    buffer and a stamp, and the glass then holds what a whole draw of the
+    Editor makes: its full-screen row painted once, not over itself."""
+    ws, drv = desk
+    d, pane = _code_ready(ws, drv)
+    win = ws.wm._wins["menu"]
+    _tap(drv, ord("a"))                         # the first edit marks the bar's file
+    for code in (ord("b"), 0x0A, ord("c"), ord("d")):
+        drv.key_down(code)
+        drv.frame(DT)
+        assert d.changed() == list(pane)
+        assert win._buf_stale                   # the buffer lags: no stamp ran
+        drv.key_up(code)
+        drv.frame(DT)
+    shown = bytes(ws.glass_canvas._buf)
+    d._code_key = None                          # the next frame draws whole
+    ws._dirty = True
+    drv.frame(DT)
+    assert d.changed() == [0, 0, ws.sys_canvas.w, ws.sys_canvas.h]
+    assert bytes(ws.glass_canvas._buf) == shown
+
+
+def _desk_at(path):
+    ws = host_app.build_workstation(str(path / "carts"), sys_size=(1024, 600),
+                                    panel_diagonal_in=7.0, font_scale=1, windowed=True)
+    ws.open_desk()
+    ws.open_in_editor(next(c for c in ws.carts.all if c.get("title") == "Sky Run"))
+    ws.bar_layer._clock_text = lambda: "10:30"
+    drv = host_app.ConsoleDriver(ws)
+    for _ in range(3):
+        drv.frame(DT)
+    return ws, drv
+
+
+def test_typing_on_a_root_of_two_buffers_draws_the_pane_alone_after_a_whole_frame(tmp_path):
+    """On a root that presents two buffers in turn the buffer a frame
+    paints lags the frame before: after a whole frame the Code pane's key
+    frames come back to the pane alone within a frame or two (a lag beyond
+    the pane goes to the window's buffer, not into the next whole draw),
+    its text moves out of the last buffer only the rows the frames since
+    drew, and every presented frame is the one a single buffer presents."""
+    a, da = _desk_at(tmp_path / "a")
+    b, db = _desk_at(tmp_path / "b")
+    d, pane = _code_ready(a, da)
+    _code_ready(b, db)
+    for ws, drv in ((a, da), (b, db)):
+        _tap(drv, ord("a"))
+    root = a.wm._root_canvas
+    root.RETAINED_FRAMES = 2
+    held = [bytes(root._buf)]
+    moved = []
+    real = root.shift_last
+
+    def shift_last(x, y, w, h, dx, dy):
+        moved.append(h)
+        return real(x, y, w, h, dx, dy)
+    root.shift_last = shift_last
+
+    def frame():
+        n = a._frames_drawn
+        da.frame(DT)
+        db.frame(DT)
+        if a._frames_drawn != n:
+            shot = bytes(root._buf)
+            assert shot == bytes(b.wm._root_canvas._buf), "frame %d" % a._frames_drawn
+            held.append(shot)
+            root._comp.last = shot
+            root._buf[:] = held[-2]
+    for ws in (a, b):
+        ws.editor_desk._code_key = None         # a whole frame
+        ws._dirty = True
+    frame()
+    got = []
+    for code in b"keys typed\nand more":
+        for drv in (da, db):
+            drv.key_down(code)
+        frame()
+        got.append(d.changed())
+        for drv in (da, db):
+            drv.key_up(code)
+    assert got[2:] == [list(pane)] * (len(got) - 2), got
+    assert moved and max(moved[-4:]) <= 2 * a.code_layout.lh, moved
+
+
 def test_at_800_the_sound_panes_menu_picks_a_sound(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(800, 480),
                                     panel_diagonal_in=7.0, font_scale=1, windowed=True)
