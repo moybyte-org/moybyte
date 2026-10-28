@@ -130,6 +130,13 @@ PYEOF
 
   # The moybyte variant (canonical copy lives in variant/, re-staged every build).
   mkdir -p "${PORT_DIR}/variants/moybyte"
+  # make does not rebuild an object whose FLAGS changed, and the variant's .mk
+  # sets per-file optimisation: a changed one starts the build tree afresh, or
+  # the bundle would depend on which objects a machine happened to have.
+  if ! cmp -s "${SCRIPT_DIR}/variant/mpconfigvariant.mk" \
+              "${PORT_DIR}/variants/moybyte/mpconfigvariant.mk"; then
+    rm -rf "${PORT_DIR}/build-moybyte"
+  fi
   cp "${SCRIPT_DIR}/variant/"* "${PORT_DIR}/variants/moybyte/"
 
   # moy_lua usermod (#67, third architecture): stage the vendored VM + bridge
@@ -453,9 +460,9 @@ cp "${SCRIPT_DIR}/moy_store.mjs" "${DIST_DIR}/"
 # The two worker modules ship WITHOUT THEIR COMMENTS. They ride every board
 # image, and the prose in them is most of their bytes (worker.js gzips to
 # under half without it): the source is where it is read. emsdk's own terser
-# re-prints them with comments=false and nothing else -- no compression, no
-# renaming, still one statement a line -- so the code that runs is the code in
-# the tree, and a stack trace still names its function.
+# re-prints them with comments=false and no indentation, and nothing else -- no
+# compression, no renaming, still one statement a line -- so the code that runs
+# is the code in the tree, and a stack trace still names its function and line.
 # tests/test_web_worker_protocol.py holds dist/ to that.
 JS_NODE="$(ls -d "${EMSDK_DIR}"/node/*/bin 2>/dev/null | head -1)/node"
 [ -x "${JS_NODE}" ] || JS_NODE="$(command -v node || true)"
@@ -466,7 +473,7 @@ if [ -z "${JS_NODE}" ] || [ ! -f "${TERSER}" ]; then
 fi
 for f in worker.js moy_store.mjs; do
   "${JS_NODE}" "${TERSER}" "${DIST_DIR}/${f}" --module \
-    --format comments=false,beautify=true -o "${DIST_DIR}/${f}.tmp"
+    --format comments=false,beautify=true,indent_level=0 -o "${DIST_DIR}/${f}.tmp"
   mv "${DIST_DIR}/${f}.tmp" "${DIST_DIR}/${f}"
 done
 # The page ships without its comments for the same reason (they were half its
@@ -481,7 +488,7 @@ if html.count("<script>") != 1 or html.count("</script>") != 1:
     sys.exit("build.sh: index.html must carry exactly one <script> to strip")
 a, b = html.index("<script>") + len("<script>"), html.index("</script>")
 head = re.sub(r"/\*.*?\*/", "", re.sub(r"<!--.*?-->\n?", "", html[:a], flags=re.S), flags=re.S)
-js = subprocess.run([node, terser, "--format", "comments=false,beautify=true"],
+js = subprocess.run([node, terser, "--format", "comments=false,beautify=true,indent_level=0"],
                     input=html[a:b], capture_output=True, text=True, check=True).stdout
 with open(page, "w", encoding="utf-8") as f:
     f.write(head + "\n" + js + html[b:])
@@ -489,7 +496,13 @@ EOF
 if [ "${STAGE_ONLY}" = "1" ]; then
   cp "${STAGE_DIR}/modules.json" "${DIST_DIR}/"
 else
-  cp "${PORT_DIR}/build-moybyte/micropython.mjs" "${DIST_DIR}/"
+  # The VM's loader ships without comments too: the port appends its api.js,
+  # objpyproxy.js and proxy_js.js to emcc's glue as they are in the tree,
+  # licence headers and prose included (MicroPython's licence is the console's
+  # About screen's, runtime/licences.py). The same re-print, unindented like
+  # the glue it follows; nothing is compressed or renamed.
+  "${JS_NODE}" "${TERSER}" "${PORT_DIR}/build-moybyte/micropython.mjs" --module \
+    --format comments=false -o "${DIST_DIR}/micropython.mjs"
   cp "${PORT_DIR}/build-moybyte/micropython.wasm" "${DIST_DIR}/"
   rm -f "${DIST_DIR}/modules.json"
 fi

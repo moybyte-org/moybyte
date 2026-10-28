@@ -27,11 +27,15 @@ nor those docs will warn you about:
   serves without reflashing it, so "which console is this board serving?" is
   answered by its firmware version alone. Changing a web build means
   `firmware/web_runner/build.sh`, then rebuild and reflash. An oversized image is
-  a BUILD FAILURE on every board. For that reason the page and the two worker
-  modules ship without their comments (build.sh re-prints their scripts with
-  emsdk's terser, nothing else changed): read `page_core.html`,
-  `page_tail.js`, `worker.js` and `moy_store.mjs` in the tree, not in
-  `dist/`.
+  a BUILD FAILURE on every board. For that reason the page, the two worker
+  modules and the VM's loader ship without their comments (build.sh re-prints
+  their scripts with emsdk's terser, nothing renamed or compressed): read
+  `page_core.html`, `page_tail.js`, `worker.js` and `moy_store.mjs` in the
+  tree, not in `dist/`. The wasm's C is -Os, -O3 on the VM's loop and its
+  collector as upstream sets them, and -Oz on the files no frame runs (the
+  store, the theme parser, the two compilers; `variant/mpconfigvariant.mk`):
+  -Oz over the rest is smaller still and could not be shown free of frame
+  cost (2026-10-28).
 - **The browser draws what its boards draw: each arrangement on its board's
   metric class, in the theme's fonts and icon set** (owner, 2026-10-20: the
   browser and the boards never diverge). The handheld 320x240 declares no
