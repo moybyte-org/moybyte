@@ -151,8 +151,9 @@ void moy_chrome_notice(const char *title, const char *sub, bool ok, uint32_t unt
 void moy_chrome_toast_arm(const char *head, const char *name, const char *icon, bool secret,
                           uint32_t until_ms);
 // What is up at `now`, drawn over the run's RGB565 canvas `px` (`w` x `h`,
-// its palette `pal`) at the top centre in the live look (moy_ui_unlock): the
-// notice, then the unlock banner. False: nothing was.
+// its palette `pal`) at the top centre in the kernel's look
+// (MOY_UI_LOOK_KERNEL: the theme chrome_inks last handed over), by
+// moy_ui_unlock: the notice, then the unlock banner. False: nothing was.
 bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, uint32_t now);
 
 #endif // MOY_CHROME_H

@@ -348,6 +348,8 @@ void moy_loop_init(const moy_loop_ops_t *ops, int fps_cap) {
     }
     if (L.heavy != NULL) {
         meters_clear(&L.heavy->m);
+        memset(&L.heavy->w, 0, sizeof(L.heavy->w));
+        L.heavy->pending = 0;
         L.heavy->m.skip = false;
         rebudget(&L.heavy->m, L.slot);
         moy_perf_init(&L.heavy->perf, L.last, PERF_PERIOD_MS);

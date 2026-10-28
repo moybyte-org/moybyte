@@ -10,8 +10,11 @@
 // kind at a time, and again when its row is set. There are MOY_UI_LOOKS of
 // them, allocated once in PSRAM where a board has it: four for the Python
 // face's ring of theme dicts (the live theme, and the throwaway or preview
-// dicts a surface passes beside it), and one for a compiled run, so no
-// flatten is shared between the VM's task and a run's session thread.
+// dicts a surface passes beside it), one for a compiled run, so no flatten
+// is shared between the VM's task and a run's session thread, and one for the
+// chrome the kernel draws over a run it drives (moy_chrome), which the shell
+// keeps on the theme it hands that chrome its inks from: a ring slot is
+// whichever theme was bound there last.
 //
 // The fallbacks are the Python toolkit's, never errors: an unknown kind
 // resolves as `row`, a state the kind does not name as its REST, a token the
@@ -31,8 +34,9 @@ enum { MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3, MOY_UI
 typedef struct { int16_t x, y, w, h; } moy_ui_box_t;
 
 #define MOY_UI_ABSENT INT32_MIN     // a token the theme does not hold
-#define MOY_UI_LOOKS 5
+#define MOY_UI_LOOKS 6
 #define MOY_UI_LOOK_RUN 4           // the compiled run's look
+#define MOY_UI_LOOK_KERNEL 5        // the kernel's chrome's (ui_draw.kernel_look)
 
 // A kind's id by name: an unknown name is row's. kind_known: -1 instead.
 int moy_ui_kind(const char *name, size_t n);

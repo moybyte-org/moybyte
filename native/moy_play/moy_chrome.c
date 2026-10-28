@@ -421,7 +421,7 @@ bool moy_chrome_overlay_draw(uint16_t *px, int w, int h, const uint16_t *pal, ui
     memcpy(row.pal, pal, MOY_CANVAS_BLOCK * sizeof(uint16_t));
     memcpy(&row.pal[MOY_CANVAS_BLOCK], moy_canvas_block_words(),
            MOY_CANVAS_BLOCK * sizeof(uint16_t));
-    moy_ui_sink_t s = {MOY_UI_SINK_ROW, 1, 0, &row};
+    moy_ui_sink_t s = {MOY_UI_SINK_ROW, 1, MOY_UI_LOOK_KERNEL, &row};
     int was = moy_ui_cart_text(0);
     if (K.up) {
         static const char ok[] = "check", warn[] = "warn";

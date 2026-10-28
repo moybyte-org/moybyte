@@ -616,6 +616,16 @@ def test_no_hitch_or_loop_while_the_diag_is_off(loop):
     assert L.diag_take() == (None, None)
 
 
+def test_a_fresh_loop_has_no_diag_waiting(loop):
+    """A LOOP line a loop left untaken is not the next loop's."""
+    L.capture(True)
+    loop.cost_us = 10000
+    logs = " ".join(frame(1000 + 60 * i)[1] for i in range(60))
+    assert "say[LOOP" in logs
+    L.trace_init(20, True, 1000)
+    assert L.diag_take() == (None, None)
+
+
 def test_loop_is_the_periods_average_frame_by_stage(loop):
     L.capture(True)
     loop.cost_us = 10000

@@ -548,6 +548,20 @@ def _bind_theme(th):
     _TH, _LOOK, _FLAT = th, slot, ent[2]
 
 
+_LOOK_KERNEL = 5                      # moy_ui.h's MOY_UI_LOOK_KERNEL
+_KERNEL = [None, -1]                  # the theme dict the kernel's look holds, its look gen
+
+
+def kernel_look(th):
+    """Put `th` in the kernel's own look, the one the chrome it draws over a
+    run (moy_chrome_overlay_draw) resolves in: packed again only when the
+    theme or the look's generation moved."""
+    k = _KERNEL
+    if k[0] is not th or k[1] != _GEN:
+        _C.look(_LOOK_KERNEL, _pack(th))
+        k[0], k[1] = th, _GEN
+
+
 def _colors_slow(kind, state):
     t = _C.colors(_LOOK, _kind_id(kind), _STATE_ID.get(state, _REST_ID))
     ent = _FLAT.get(kind)

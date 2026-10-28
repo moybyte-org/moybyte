@@ -11,6 +11,11 @@ _CHROME_ROLES = ("bar", "bar_edge", "chrome_ink", "chrome_ink_dim", "surface",
                  "border", "ink", "ink_dim", "play", "panel", "edge")
 _mp_chrome = []
 
+try:
+    import ui_draw as _ui_draw
+except ImportError:                         # CPython: the runtime package's
+    from runtime import ui_draw as _ui_draw
+
 
 def _moy_play():
     if not _mp_chrome:
@@ -24,13 +29,15 @@ def _moy_play():
 
 def chrome_inks(th, names):
     """Hand the kernel's chrome the inks this theme draws with: the named
-    palette it uses and the theme's roles. Before every chrome draw, so a
-    theme edited in place is never drawn stale."""
+    palette it uses and the theme's roles, and the theme's look its banners
+    over a run resolve in. Before every chrome draw, so a theme edited in
+    place is never drawn stale."""
     inks = [names[n] for n in _CHROME_NAMED]
     for r in _CHROME_ROLES:
         inks.append(th.get(r))
     mp = _moy_play()
     mp.chrome_inks(inks, bool(th.get("bar_light", False)))
+    _ui_draw.kernel_look(th)
     return mp
 
 
