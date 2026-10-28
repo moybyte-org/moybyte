@@ -1046,8 +1046,8 @@ S3_BOARDS = ("tdeck", "guition_s3")
 
 VERBS = ("Settings", "Achievements", "Licences", "Files", "Get Carts", "Storybook",
          "My Art", "Calc", "Appearance")
-FIELDS_SURF = ("Blocks number prompt", "Blocks name prompt", "Cart info", "Settings Name",
-               "Notes new-note name")
+FIELDS_SURF = ("Blocks number prompt", "Blocks name prompt", "Cart info", "New script",
+               "Settings Name", "Notes new-note name")
 EDITOR_TEXT = ("Code", "Theme Config text")
 PANES = ("Blocks outline", "Config cards", "Music steps", "Map")
 HOME = ("home carousel", "home grid", "home icons", "PROJECTS")
@@ -1495,6 +1495,11 @@ def surfaces():
         ("ws.cards_layer._open_meta()\nws.mark_dirty()", 2.0)],
         inputs=("type", "type_fast", "key_steps"), text={"type": ("Hello world", 10),
                                                          "type_fast": ("Hello again", 20)},
+        teardown="ws.cards_layer.prompt and ws.cards_layer._close_prompt()"))
+    s.append(Surface("New script", _ed(SCRATCH + " Blocks", "cards", "settings") + [
+        ("ws.cards_layer._open_newf()\nws.mark_dirty()", 2.0)],
+        inputs=("type", "type_fast"), text={"type": ("helpers", 10),
+                                            "type_fast": ("more_helpers", 20)},
         teardown="ws.cards_layer.prompt and ws.cards_layer._close_prompt()"))
     s.append(Surface("Music steps", _ed(SCRATCH, "music", "sound"), axis="h",
                      keys=("right", "left"), rect=LEFT_PANE,
