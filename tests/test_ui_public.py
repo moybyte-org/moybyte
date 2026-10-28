@@ -444,6 +444,33 @@ def test_a_settled_page_draws_the_same_pixels():
     assert not r.settled, "an activation owes the frame after it"
 
 
+def test_a_hover_owes_a_frame_only_over_a_stop():
+    """A touch lingers live after its release and then goes; over the page's
+    ground that draws nothing, so the frame it goes in is settled and an app
+    drawn on change owes no frame for it: wall time then never decides
+    whether a settled page draws whole (the shell goldens' draw budgets)."""
+    r = _Run(_page())
+    ground, on_a = (300, 230), (20, 20)
+    r.frame()
+    r.frame()
+    r.frame(ptr=ground + (1,))
+    assert r.settled, "a hover arriving over the ground marks no stop"
+    r.frame(ptr=(290, 225, 1))
+    assert r.settled, "a hover moving across the ground marks no stop"
+    r.frame()
+    assert r.settled, "a hover leaving the ground unmarks no stop"
+    r.frame(ptr=on_a + (1,))
+    assert not r.settled, "a hover arriving on A marks it"
+    r.frame(ptr=on_a + (1,))
+    assert r.settled
+    r.frame(ptr=ground + (1,))
+    assert not r.settled, "a hover leaving A for the ground unmarks it"
+    r.frame(ptr=on_a + (1,))
+    r.frame(ptr=on_a + (1,))
+    r.frame()
+    assert not r.settled, "a hover going from over A unmarks it"
+
+
 # -- the shell is strict (§7) ------------------------------------------------------------
 
 # The shell's app modules and system carts not yet moved onto the verbs: each

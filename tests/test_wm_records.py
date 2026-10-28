@@ -551,9 +551,9 @@ def _gen(ws, app):
 @pytest.mark.parametrize("bufs", (1, 2, 3))
 @pytest.mark.parametrize("change", sorted(CHANGES))
 def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
-    """What a page shows changed under a coast and between key steps: its
-    gen moves, so the frames after it draw the page again, not the last
-    frame's pixels moved."""
+    """What a page shows changed under a drag, the release and the coast
+    after it drawing the page, and between key steps: its gen moves, so
+    those frames draw the page again, not the last frame's pixels moved."""
     app, fn = CHANGES[change]
     p = Pair(tmp_path, app, bufs, board=P4)
     kind = p.a.wm._focus
@@ -562,8 +562,7 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
     p.keys("down", 2)
     p.settle()
     _, _, _, ch = p.win(kind).content_rect()
-    p.drag(kind, -ch, steps=3)
-    p.frame()
+    p.drag(kind, -ch, steps=3, release=False)
     was = _gen(p.a, app)
     for ws in (p.a, p.b):
         a = _inst(ws, _CLS[app])
@@ -573,6 +572,7 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
             fn(ws)
         finally:
             a._damage = d
+    p.both("touch_up")
     p.frame()
     p.frame()
     assert _gen(p.a, app) != was, "%s left the page's gen as it was" % change

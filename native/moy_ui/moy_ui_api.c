@@ -1098,11 +1098,15 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     } else {
         c->mid_page = 0;
     }
-    if (live && (x != c->last_x || y != c->last_y)) {
-        settled = 0;                // a hover moved
-    }
-    if ((p & MOY_UI_P_LIVE) != (c->last_ptr & MOY_UI_P_LIVE)) {
-        settled = 0;
+    // A hover that moved, came or went owes a frame only where a stop lies
+    // under it, then or now: a stop's hover mark is all a hover draws, so a
+    // touch's linger running out over the page's ground draws nothing.
+    int was_live = c->last_ptr & MOY_UI_P_LIVE;
+    if ((live && (x != c->last_x || y != c->last_y)) || live != was_live) {
+        if (held || was_held || (live && stop_at(v, n, x, y) >= 0)
+            || (was_live && stop_at(v, n, c->last_x, c->last_y) >= 0)) {
+            settled = 0;
+        }
     }
     c->last_x = (int16_t)x;
     c->last_y = (int16_t)y;
