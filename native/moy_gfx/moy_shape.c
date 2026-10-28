@@ -610,6 +610,14 @@ int moy_shape_rrect(const moy_text_target_t *t, int x, int y, int w, int h,
                 }
                 jl1 = imax(jl0, imin(al, L));
                 jr0 = imin(jr1, imax(w - ar, w - R));
+            } else if (!s.fill && s.has_in && i >= s.line && i < h - s.line) {
+                // a ring alone: the pixels its inner shape covers whole are
+                // neither the ring's nor a fill's, and are left as they are
+                int z2, a2;
+                cov_side(&s.in, 0, i - s.line, &z2, &a2);
+                jl1 = imax(jl0, imin(jl1, s.line + a2));
+                cov_side(&s.in, 1, i - s.line, &z2, &a2);
+                jr0 = imin(jr1, imax(jr0, w - s.line - a2));
             }
         }
         for (int j = jl0; j < jl1; j++) {
@@ -1097,9 +1105,20 @@ int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
         const uint16_t *srow = src + (size_t)(sy + (int)(((uint32_t)i * fy + (fy >> 1)) >> 16))
                                          * (size_t)sw + sx;
         uint16_t *row = g.px + (size_t)Y * (size_t)g.stride;
-        int L = 0, R = 0;
+        int L = 0, R = 0, zl = 0, zr = 0;
         if (i < rr || i >= h - rr) {
             L = R = rr;
+            if (c.t[0] != NULL) {
+                // columns [0, z) of the corner's box it leaves alone and
+                // from a on those it covers whole: a straight sample
+                int z, a2;
+                cov_side(&c, 0, i, &z, &a2);
+                zl = z;
+                L = a2;
+                cov_side(&c, 1, i, &z, &a2);
+                zr = z;
+                R = a2;
+            }
         }
         int a = imax(X0, bx + L), b = imin(X1, bx + w - R);
         uint32_t u = u0;
@@ -1118,6 +1137,9 @@ int mg_cover(uint16_t *dst, size_t cap, int dw, int x, int y, int w, int h,
                 n += b - X;
                 u += fx * (uint32_t)(b - X - 1);
                 X = b - 1;
+                continue;
+            }
+            if (X - bx < zl || X - bx >= w - zr) {
                 continue;
             }
             int co = corners_cov(&c, i, X - bx);
