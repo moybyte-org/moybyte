@@ -223,6 +223,42 @@ class P4SystemCanvas(SystemCanvas):
                     pass
         SystemCanvas.blit_strip(self, layer, dst_x, dst_y)
 
+    # The least block blit_strip_rect hands the 2D-DMA (`moy_ppa.fbcpy`):
+    # below it the cache work on the destination's whole rows and the submit
+    # cost more than the CPU's copy. None: every block is the CPU's.
+    FBCPY_MIN_PX = 65536
+
+    def blit_strip_rect(self, layer, dst_x, dst_y, rx, ry, rw, rh):
+        """SystemCanvas.blit_strip_rect, a block of FBCPY_MIN_PX or more moved
+        by the 2D-DMA (`moy_ppa.fbcpy`, blocking): a backdrop's band put back
+        under the home's cards. Any other block, an engine-less build or a
+        block the engine refuses is the CPU's copy."""
+        ppa = self._ppa
+        mn = self.FBCPY_MIN_PX
+        if (ppa is not None and mn is not None and rw * rh >= mn and self._ox == 0
+                and self._oy == 0 and getattr(layer, "_stride", layer.w) == layer.w):
+            x0 = rx if rx > dst_x else dst_x
+            y0 = ry if ry > dst_y else dst_y
+            x1 = min(rx + rw, dst_x + layer.w, self.w)
+            y1 = min(ry + rh, dst_y + layer.h, self.h)
+            if x0 < 0:
+                x0 = 0
+            if y0 < 0:
+                y0 = 0
+            fb = getattr(ppa, "fbcpy", None)
+            if fb is not None and x1 > x0 and y1 > y0 and (x1 - x0) * (y1 - y0) >= mn:
+                self.flush_batch()
+                ba = getattr(layer, "_batch_arr", None)
+                if ba is not None and ba[0] > 4:
+                    layer.flush_batch()
+                try:
+                    if fb(self._buf, self._stride, self._bh, x0, y0, layer._buf, layer.w,
+                          layer.h, x0 - dst_x, y0 - dst_y, x1 - x0, y1 - y0):
+                        return
+                except Exception:  # noqa: BLE001 -- a short buffer: the CPU's copy
+                    pass
+        SystemCanvas.blit_strip_rect(self, layer, dst_x, dst_y, rx, ry, rw, rh)
+
     # new_layer is DeviceCanvas.new_layer's one body (the SystemCanvas
     # _make_layer hook constructs this class); its COMPACT-FIRST pre-collect
     # matters MORE here -- a collect on the P4 desk is ~55ms and the bar's
