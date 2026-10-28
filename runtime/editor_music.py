@@ -66,6 +66,14 @@ def _width(text):
     return w
 
 
+def _meets(f, k, x, y, w, h):
+    """Whether rect x, y, w, h meets one of the `k` rects in `f`."""
+    for i in range(0, 4 * k, 4):
+        if f[i] < x + w and x < f[i] + f[i + 2] and f[i + 1] < y + h and y < f[i + 1] + f[i + 3]:
+            return True
+    return False
+
+
 class MusicPage:
     """The Music tab over `mu`, the workstation's `MusicEditorUI`; `host`
     is the frame's `AppHost`."""
@@ -75,30 +83,101 @@ class MusicPage:
         self.host = host
         self.pop = None                  # "speed" while its popover is open
         self.rows = []                   # the visible rows' (index, rect)
+        # The steps' cursor bar and meters are the page's own pixels: a
+        # frame draws the rows a step changed alone (`AppHost.rows`), never
+        # a plan the engine makes without them. The page's gen says what
+        # else it shows.
+        host.own_rows = True
+        self._o = {"gen": 0}
+        self._shows = None
+        self._drawn = None               # (gen, cursor, top) of the last frame drawn
+        self._asked = False              # this frame asked for its rows
+        self._rects = array("i", [0] * 24)
+        self._floor = array("i", [0] * 64)
 
     # -- drawing -----------------------------------------------------------------
 
+    def _window(self, me, song, y, foot):
+        """(count, cursor, rows shown, first shown) of the steps (a song's
+        slots) between y and foot: the cursor kept in the middle."""
+        n = me.slot_count() if song else me.step_count()
+        cur = me.slot if song else me.step
+        rows = max(1, (foot - y - 2) // ROW)
+        top = 0
+        if n > rows:
+            top = max(0, min(n - rows, cur - rows // 2))
+        return n, cur, rows, top
+
+    def _gen(self, me, song, n, rect, desk):
+        """The page's gen: it moves with everything the page shows but the
+        steps' cursor and their scroll."""
+        obj = me.cur_track() if song else me.cur_sfx()
+        shows = (id(me), me._hist.gen, song, me.sfx_idx, me.track_idx, n,
+                 sound_name(me.bank, me.sfx_idx), len(me.bank.sfx),
+                 obj.speed if obj is not None else 0, bool(obj.loop) if obj is not None else False,
+                 self.pop, self.mu.music_preview is not None, rect, desk)
+        if shows != self._shows:
+            self._shows = shows
+            self._o["gen"] += 1
+        return self._o["gen"]
+
+    def _plan(self, gen, x, y, cur, rows, top):
+        """Ask the host for this frame's rows where the last frame drawn
+        differs from it only by the cursor and the scroll: the cursor's
+        rows, then and now, and the rows a scroll shows, the steps moved
+        out of the last frame by the rows they scrolled."""
+        self._asked = False
+        d = self._drawn
+        if d is None or d[0] != gen:
+            return
+        dt = top - d[2]
+        if dt >= rows or -dt >= rows:
+            return
+        r = self._rects
+        n = 0
+        for vi in (cur - top, d[1] - top):
+            if 0 <= vi < rows and (n == 0 or r[1] != y + vi * ROW):
+                r[4 * n] = x
+                r[4 * n + 1] = y + vi * ROW
+                r[4 * n + 2] = 184
+                r[4 * n + 3] = ROW
+                n += 1
+        if dt:
+            a = rows - dt if dt > 0 else 0
+            r[4 * n] = x
+            r[4 * n + 1] = y + a * ROW
+            r[4 * n + 2] = 184
+            r[4 * n + 3] = (dt if dt > 0 else -dt) * ROW
+            n += 1
+        self._asked = True
+        self.host.rows(r, n, (x, y, 184, rows * ROW, -dt * ROW) if dt else None)
+
     def draw(self, cv, th, rect, desk):
         host = self.host
+        me = self.mu.musicedit
+        x, y, w, h = rect
+        foot = y + h - FOOT
+        if me is not None:
+            song = me.view == me.SONG_VIEW
+            n, cur, rows, top = self._window(me, song, y + 24, foot)
+            self._plan(self._gen(me, song, n, rect, desk), x, y + 24, cur, rows, top)
         host.begin(cv, th, rect, desk, False, elsewhere=self.pop is None)
         ui.at(*rect)
-        ui.page("")
-        me = self.mu.musicedit
+        ui.page("", self._o)
         if me is None:
             ui.at(*rect)
             ui.empty("music", "No sounds", ("This cart has no sound bank",))
             ui.end()
+            self._drawn = None
             return
-        x, y, w, h = rect
-        song = me.view == me.SONG_VIEW
         self._head(me, song, x, y, w)
-        foot = y + h - FOOT
-        self._steps(cv, th, me, song, x, y + 24, foot)
+        self._steps(cv, th, me, song, x, y + 24, n, cur, rows, top)
         self._pad(me, song, x + w - 132, y + 24)
         self._foot(me, song, x, foot, w)
         if self.pop == "speed":
             self._speed(me, song)
         ui.end()
+        self._drawn = (self._o["gen"], cur, top)
 
     def _head(self, me, song, x, y, w):
         ui.at(x + 4, y + 2, 98, 20)
@@ -132,13 +211,10 @@ class MusicPage:
         ui.at(x + w - 4 - tw, y + 4, tw, 20)
         ui.label(word, {"tone": "dim", "align": "center"})
 
-    def _steps(self, cv, th, me, song, x, y, foot):
-        n = me.slot_count() if song else me.step_count()
-        cur = me.slot if song else me.step
-        rows = max(1, (foot - y - 2) // ROW)
-        top = 0
-        if n > rows:
-            top = max(0, min(n - rows, cur - rows // 2))
+    def _steps(self, cv, th, me, song, x, y, n, cur, rows, top):
+        """The rows' verbs, then their own pixels (the cursor's bar, the
+        meters), which overlap none of them: on a frame of the page's rows
+        only where its floor reaches."""
         self.rows = []
         s = None if song else me.cur_sfx()
         t = me.cur_track() if song else None
@@ -152,16 +228,32 @@ class MusicPage:
             ui.at(*r)
             if ui.tool("", "", {"id": "Row %d" % vi, "current": i == cur}):
                 me.select_cursor(i)
-            if i == cur:
-                cv.rect(x + 4, ry, 2, ROW, th["value"])
             ui.at(x + 10, ry, 20, ROW)
             ui.label("%02d" % (i + 1), {"face": "mono", "tone": None if i == cur else "dim"})
             if song:
                 self._slot(me, t.pattern[i], x, ry)
             else:
-                self._step(cv, th, s.steps[i], x, ry)
+                self._step(s.steps[i], x, ry)
+        host = self.host
+        f = self._floor
+        k = host.floor_rects(f) if self._asked and host.shifting else -1
+        for vi in range(rows):
+            i = top + vi
+            if i >= n:
+                break
+            ry = y + vi * ROW
+            if k >= 0 and not _meets(f, k, x, ry, 184, ROW):
+                continue
+            if i == cur:
+                cv.rect(x + 4, ry, 2, ROW, th["value"])
+            if not song:
+                lit = max(0, min(7, s.steps[i][2]))
+                if lit < 7:
+                    cv.fill_rects(_METER, -1, x + 112, ry + 5, th["surface_alt"])
+                if lit:
+                    cv.fill_rects(_METER, lit, x + 112, ry + 5, th["value"])
 
-    def _step(self, cv, th, step, x, ry):
+    def _step(self, step, x, ry):
         pitch, wave, vol = step[0], step[1], step[2]
         ui.at(x + 34, ry, 30, ROW)
         ui.label(note_name(pitch) if pitch >= 0 else "..", {"face": "mono"})
@@ -169,11 +261,6 @@ class MusicPage:
         ui.label(WAVES[wave & 7], {"face": "mono", "tone": "dim"})
         ui.at(x + 98, ry, 12, ROW)
         ui.label(str(vol), {"face": "mono"})
-        lit = max(0, min(7, vol))
-        if lit < 7:
-            cv.fill_rects(_METER, -1, x + 112, ry + 5, th["surface_alt"])
-        if lit:
-            cv.fill_rects(_METER, lit, x + 112, ry + 5, th["value"])
 
     def _slot(self, me, row, x, ry):
         if isinstance(row, list):

@@ -437,7 +437,8 @@ def test_a_change_the_page_shows_moves_its_gen(tmp_path, change, bufs):
 # A cart's picker of pictures (Hop Quest's, Moy Night's) is a part with no
 # gen: its page draws whole, and its frames are held to a whole draw's alone.
 EDITOR_TABS = ("editor cards Coin Quest", "editor cards Bench", "editor cards Hop Quest",
-               "editor cards Moy Night", "editor blocks Coin Quest", "editor blocks Bench")
+               "editor cards Moy Night", "editor blocks Coin Quest", "editor blocks Bench",
+               "editor music Sky Run", "editor music Coin Quest")
 _PICTURES = ("editor cards Hop Quest", "editor cards Moy Night")
 
 
@@ -448,8 +449,8 @@ def test_an_editor_tabs_key_steps_draw_rows_byte_for_byte(tmp_path, app, bufs):
     del p.kinds[:]
     p.keys("down", 6)
     p.keys("up", 3)
-    if "blocks" in app:
-        p.keys("down", 14)              # the outline scrolls by whole rows
+    if "blocks" in app or "music" in app:
+        p.keys("down", 14)              # the rows scroll by whole rows
         p.keys("up", 14)
     p.settle()
     if app not in _PICTURES:
