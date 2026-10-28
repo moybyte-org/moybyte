@@ -89,6 +89,9 @@ class PerfHud:
             _ui_draw.perf(cv, th, a, _WORDS, b)
         finally:
             _ui_draw.cart_text(was)
+        pl = ws.player
+        if pl is not None:
+            pl.overdrew(cv, b[0], b[1], b[2], b[3])
 
     def _fps_tap_rect(self):
         """The bottom-right corner the FPS readout lives in, used as the tap target

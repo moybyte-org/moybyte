@@ -537,6 +537,28 @@ FREE_DT_MAX = 0.1
 _EMBED_KIND = "drawings"
 
 
+
+_SIG_FPS = 2                            # the WM's overlay sig bit of the FPS chip
+
+
+def _grow(r, x0, y0, x1, y1):
+    """Rect r (x0, y0, x1, y1) grown to hold x0, y0, x1, y1; that rect where
+    r holds nothing."""
+    if r[2] <= r[0] or r[3] <= r[1]:
+        r[0] = x0
+        r[1] = y0
+        r[2] = x1
+        r[3] = y1
+        return
+    if x0 < r[0]:
+        r[0] = x0
+    if y0 < r[1]:
+        r[1] = y0
+    if x1 > r[2]:
+        r[2] = x1
+    if y1 > r[3]:
+        r[3] = y1
+
 class Player:
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
     `ws` back-ref (the shared draw toolkit + services seam every surface uses) and is
@@ -658,6 +680,7 @@ class Player:
         self._armed = False
         self._broke = False
         self._mv = None                # the rect the handle's move shifted this frame
+        self._over = _array("i", [0] * 4)   # what drew over the page after its pass (the FPS chip)
         self._cls = None
         self._bg = None
         self._bg_on = False
@@ -1650,10 +1673,20 @@ class Player:
         self._armed = False
         self._broke = False
         self._mv = None
-        eds = self._editors
+        o = self._over
+        ow = o[2]
+        o[2] = 0
         ring = self._ring
-        if (ring is None or len(eds) != 1 or self._bg_on
-                or getattr(cv, "_buf", None) is None or not ring.size):
+        if (ring is None or self._bg_on or getattr(cv, "_buf", None) is None
+                or not ring.size):
+            return
+        ed = None
+        for e in self._editors:         # the one handle open: a closed one draws nothing
+            if e.live:
+                if ed is not None:
+                    return
+                ed = e
+        if ed is None:
             return
         th = ws.theme_colors
         key = _ui_draw._GEN
@@ -1665,7 +1698,7 @@ class Player:
         k = 1 if self.holds(cv) else getattr(cv, "RETAINED_FRAMES", 0)
         if k > 1:
             f = _ui_draw.painted()
-            if not _ui_draw._PAINT[1]:
+            if not self._alone(ws):
                 return
             if ring.held(cv, f) == k - 1:
                 for b in range(k - 1):
@@ -1689,10 +1722,23 @@ class Player:
                     return
                 n = 0
                 copy = True
-        m = eds[0].rows_plan(hr, n)
+        if ow > 0:
+            # what drew over the page last frame is the page's again
+            if n >= _HR:
+                return
+            j = 4 * n
+            hr[j] = o[0]
+            hr[j + 1] = o[1]
+            hr[j + 2] = ow
+            hr[j + 3] = o[3]
+            n += 1
+        m = ed.rows_plan(hr, n)
         if m < 0:
             return
-        mv = eds[0].rows_move()
+        mv = ed.rows_move()
+        if (mv is not None and ow > 0 and o[0] < mv[0] + mv[2] and mv[0] < o[0] + ow
+                and o[1] < mv[1] + mv[3] and mv[1] < o[1] + o[3]):
+            return                      # the move would carry it
         p = self._plan
         if not _ui_draw._C.api_shift_rows(ctx, hr, n + m, p):
             return
@@ -1711,23 +1757,21 @@ class Player:
     def _copy_page(self, cv, p, mv, ox, oy):
         """The last frame's page R (`p`: x, y, w, h) into the buffer this
         frame draws, around the rect the move shifted (`mv`, None: all of
-        it): whether it was."""
-        x0 = p[0]
-        y0 = p[1]
-        x1 = x0 + p[2]
-        y1 = y0 + p[3]
+        it, which lies inside R): whether it was."""
+        x = p[0] + ox
+        y = p[1] + oy
         if mv is None:
-            return cv.shift_last(x0 + ox, y0 + oy, p[2], p[3], 0, 0)
-        mx0 = mv[0] if mv[0] > x0 else x0
-        my0 = mv[1] if mv[1] > y0 else y0
-        mx1 = mv[0] + mv[2] if mv[0] + mv[2] < x1 else x1
-        my1 = mv[1] + mv[3] if mv[1] + mv[3] < y1 else y1
-        if mx1 <= mx0 or my1 <= my0:
-            return cv.shift_last(x0 + ox, y0 + oy, p[2], p[3], 0, 0)
-        return ((my0 <= y0 or cv.shift_last(x0 + ox, y0 + oy, x1 - x0, my0 - y0, 0, 0))
-                and (my1 >= y1 or cv.shift_last(x0 + ox, my1 + oy, x1 - x0, y1 - my1, 0, 0))
-                and (mx0 <= x0 or cv.shift_last(x0 + ox, my0 + oy, mx0 - x0, my1 - my0, 0, 0))
-                and (mx1 >= x1 or cv.shift_last(mx1 + ox, my0 + oy, x1 - mx1, my1 - my0, 0, 0)))
+            return cv.shift_last(x, y, p[2], p[3], 0, 0)
+        a = mv[1] - p[1]                # R's rows above the move and under it
+        b = p[1] + p[3] - mv[1] - mv[3]
+        c = mv[0] - p[0]                # ...and its columns beside it
+        d = p[0] + p[2] - mv[0] - mv[2]
+        my = mv[1] + oy
+        return (a >= 0 and b >= 0 and c >= 0 and d >= 0
+                and (a == 0 or cv.shift_last(x, y, p[2], a, 0, 0))
+                and (b == 0 or cv.shift_last(x, my + mv[3], p[2], b, 0, 0))
+                and (c == 0 or cv.shift_last(x, my, c, mv[3], 0, 0))
+                and (d == 0 or cv.shift_last(x + c + mv[2], my, d, mv[3], 0, 0)))
 
     def _rows_close(self, ws):
         """The app's pass is done: what it changed of the canvas
@@ -1738,7 +1782,7 @@ class Player:
             ring = self._ring = _ui_draw.PaintRing()
             self._ring_rects = [[0, 0, 0, 0, 0] for _ in range(ring.n)]
         k = _ui_draw._C.api_shift_drawn(ctx)
-        clean = (k & 4) != 0 and not self._broke and not ws.show_fps
+        clean = (k & 4) != 0 and not self._broke
         ch = self.change
         ch[4] = 0
         self.change_f = _ui_draw.painted()
@@ -1756,22 +1800,9 @@ class Player:
                 ch[0] = ch[1] = ch[2] = ch[3] = 0
             if mv is not None:
                 # the rows the move shifted changed too
-                if ch[2] <= ch[0] or ch[3] <= ch[1]:
-                    ch[0] = mv[0]
-                    ch[1] = mv[1]
-                    ch[2] = mv[0] + mv[2]
-                    ch[3] = mv[1] + mv[3]
-                else:
-                    if mv[0] < ch[0]:
-                        ch[0] = mv[0]
-                    if mv[1] < ch[1]:
-                        ch[1] = mv[1]
-                    if mv[0] + mv[2] > ch[2]:
-                        ch[2] = mv[0] + mv[2]
-                    if mv[1] + mv[3] > ch[3]:
-                        ch[3] = mv[1] + mv[3]
+                _grow(ch, mv[0], mv[1], mv[0] + mv[2], mv[1] + mv[3])
         self._armed = False
-        alone = self.holds(cv) or _ui_draw._PAINT[1]
+        alone = self.holds(cv) or self._alone(ws)
         i = ring._i + 1
         if i >= ring.n:
             i = 0
@@ -1786,6 +1817,45 @@ class Player:
         ring.note(_ui_draw.painted(), _ui_draw._GEN, 0, None, cv, ws.theme_colors,
                   clean and alone, rect)
         self._mv = None
+
+    def _alone(self, ws):
+        """Whether the run's page is all the glass shows this frame, but for
+        the FPS chip, which it draws its page under again (`overdrew`)."""
+        return _ui_draw._PAINT[1] or (ws.show_fps and ws.wm.CONTENT_RING
+                                      and ws.wm.content_alone(_SIG_FPS))
+
+    def overdrew(self, cv, x, y, w, h):
+        """Rect x, y, w, h of `cv` was drawn over the run's page after its
+        pass (the FPS chip): this frame changed it, and the next draws the
+        page there again."""
+        ui = self._ui
+        if ui is None or cv is not ui[2]:
+            return
+        cr = self.ns.get("content_rect") if self.ns is not None else None
+        if cr is not None:
+            # only the run's view reaches the glass, and only it the page holds
+            r = cr()
+            x1 = x + w if x + w < r[0] + r[2] else r[0] + r[2]
+            y1 = y + h if y + h < r[1] + r[3] else r[1] + r[3]
+            x = x if x > r[0] else r[0]
+            y = y if y > r[1] else r[1]
+            w = x1 - x
+            h = y1 - y
+        if w <= 0 or h <= 0:
+            return
+        o = self._over
+        o[0] = x
+        o[1] = y
+        o[2] = w
+        o[3] = h
+        ch = self.change
+        if not ch[4] or self.change_f != _ui_draw.painted():
+            return
+        _grow(ch, x, y, x + w, y + h)
+        ring = self._ring
+        r = ring.change(0) if ring is not None else None
+        if r is not None:
+            _grow(r, x, y, x + w, y + h)
 
     def holds(self, cv):
         """Whether `cv`, the run's canvas, is one buffer only the run

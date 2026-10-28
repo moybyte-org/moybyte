@@ -410,3 +410,50 @@ def test_a_drag_on_the_note_pans_it(tmp_path):
     _drag(p, 4, 4, False)
     assert p.a.player.cart_error is None, p.a.player.cart_error
     assert ed.ed.top == 4
+
+
+def _chip(p):
+    """The FPS chip on, both consoles: its readout a function of the frame,
+    so its width changes as the session runs."""
+    for ws in (p.a, p.b):
+        ws.show_fps = True
+        hud = ws.perf_ui
+        draw = hud.draw
+
+        def counted(ws=ws, draw=draw):
+            n = ws._frames_drawn
+            ws._fps = (n * 7) % 120
+            ws._upd_ms = ws._draw_ms = ws._flush_ms = 1.0
+            draw()
+        hud.draw = counted
+
+
+@pytest.mark.parametrize("desk", (False, True))
+@pytest.mark.parametrize("bufs", (1, 2, 3))
+def test_the_fps_chip_keeps_the_rows(tmp_path, bufs, desk):
+    """The FPS chip draws over the page after its pass: what it covered is
+    the next frame's floor, and the frame's change holds it."""
+    p = Pair(tmp_path, bufs, desk=desk)
+    _chip(p)
+    del p.kinds[:]
+    _session(p)
+    _scrolled(p, desk)
+    assert p.a.player.cart_error is None
+    moved = p.kinds.count("rows") + p.kinds.count("shift")
+    assert moved > len(p.kinds) * 2 // 3, p.kinds
+
+
+@pytest.mark.parametrize("bufs", (1, 2))
+def test_a_second_note_keeps_the_rows(tmp_path, bufs):
+    """A note opened after another leaves the first closed, which draws
+    nothing: the rows are the open one's."""
+    p = Pair(tmp_path, bufs)
+    for ws in (p.a, p.b):
+        moy_carts.save_file("docs", "beta", _BODY, ws.carts_root)
+        ws.player.ns["_open"]("beta")
+    p.settle(3)
+    del p.kinds[:]
+    _session(p)
+    assert [e.live for e in p.a.player._editors] == [False, True]
+    moved = p.kinds.count("rows") + p.kinds.count("shift")
+    assert moved > len(p.kinds) * 2 // 3, p.kinds

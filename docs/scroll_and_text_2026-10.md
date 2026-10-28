@@ -580,7 +580,7 @@ whole.
   frame (`moy_ui_api_shift_rows`): R is the page under its gen, which may
   hold stops `ui.at` placed since nothing moves, and the floor is those
   rects and what begin's input changes, under a hover over no stop or a
-  press held that went down on none; a rows frame begin planned of its own
+  press that went down on none, held or let go; a rows frame begin planned of its own
   (the desk's vault table) gives way to it. The cart's
   pass runs under the floor, the page's ground filling it alone; the handle
   takes each band into the floor over the ground (`moy_ui_api_floor_take`),
@@ -592,7 +592,11 @@ whole.
   floor breaks the frame (`moy_ui_api_shift_break`: the pass draws whole
   from there), as does a handle that finds it must draw whole after all
   (it takes its whole rect into the floor first), and a declared
-  `background` draws every frame whole. The
+  `background` draws every frame whole. The handle the run draws is the one
+  it has open: a note closed for another draws nothing (`EditorHandle.live`).
+  The FPS chip, drawn over the page after its pass, is what the frame
+  changed there too, and the next frame's floor (`Player.overdrew`); the
+  run's page is then alone on the glass but for it. The
   cart verb `ed.draw(x, y, w, h)` keeps its meaning for every other cart
   (render the document into that rect, this frame): a cart that `cls()`es
   and calls it gets the whole document. What a frame changed of the canvas

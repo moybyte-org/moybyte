@@ -335,7 +335,12 @@ class EditorHandle:
         self._wtop = -1
         self._k = 0
         self._mv = [0, 0, 0, 0, 0]
-        self._ab = [0, 0]
+        self.live = True             # not closed since its last draw: it draws the run's rows
+        # The plan this frame made: its bands' count (-1 none), the gen, the
+        # move and the look's gen it saw, and the theme it read (`_pth`): a draw that finds
+        # them all still so takes its walk and bands as they are.
+        self._pl = [-1, 0, 0, 0]
+        self._pth = None
 
     # -- what the skin asks ---------------------------------------------------
 
@@ -601,6 +606,7 @@ class EditorHandle:
     def close(self):
         """Flush (hard) and release. Idempotent; the shell calls it for any
         handle still open when the cart's world drops."""
+        self.live = False
         if self._focus:
             self.focus(False)
         if self.dirty():
@@ -640,6 +646,7 @@ class EditorHandle:
         pressing save is the thing this console does not do."""
         cv = self._canvas
         th = self._theme()
+        self.live = True
         g = self._lay(x, y, w, h, scale)
         # one name at a time: a wider unpack builds a tuple every draw
         tx = g[0]
@@ -785,9 +792,17 @@ class EditorHandle:
         rows = g[3]
         lh = g[5]
         self._keep_caret(cols, rows)
-        nb = self._diff(self._theme(), x, y, w, h, r, ty, rows, lh, False, None)
+        th = self._theme()
+        nb = self._diff(th, x, y, w, h, r, ty, rows, lh, False, None)
+        p = self._pl
+        p[0] = nb
+        p[1] = self._gen
+        p[2] = self._k
+        p[3] = _ui_draw._GEN
+        self._pth = th
         if nb < 0 or at + nb > len(out) // 4:
             self._k = 0
+            p[0] = -1
             return -1
         b = self._band
         for i in range(nb):
@@ -817,7 +832,16 @@ class EditorHandle:
         on = fr is not None and fr.floor_on()
         k = self._k if on else 0
         self._k = 0
-        nb = self._diff(th, x, y, w, h, r, ty, rows, lh, True, k)
+        p = self._pl
+        a = self._args
+        if (p[0] >= 0 and p[1] == self._gen and p[2] == k and self._pth is th
+                and p[3] == _ui_draw._GEN
+                and a[0] == x and a[1] == y and a[2] == w and a[3] == h and a[5] == r
+                and a[4] == self._geom[4]):
+            nb = p[0]                   # the plan's walk and bands hold: nothing moved since
+        else:
+            nb = self._diff(th, x, y, w, h, r, ty, rows, lh, True, k)
+        p[0] = -1
         self._sl, self._nl = self._nl, self._sl
         self._ss, self._ns = self._ns, self._ss
         self._nr = self._walked
@@ -941,10 +965,9 @@ class EditorHandle:
         return nb
 
     def _span(self, k, y, h, r, ty, rows, lh):
-        """The rows a move by k keeps, a..b into `_ab`: each lies, where
-        this draw shows it and where the last showed it, inside the paper's
-        straight sides (clear of corners of radius r). a == b where none
-        does."""
+        """The rows a move by k keeps, a..b: each lies, where this draw
+        shows it and where the last showed it, inside the paper's straight
+        sides (clear of corners of radius r). a == b where none does."""
         lo = y + r
         i0 = 0 if ty >= lo else (lo - ty + lh - 1) // lh
         i1 = (y + h - r - ty) // lh
@@ -952,9 +975,7 @@ class EditorHandle:
             i1 = rows
         a = i0 if k > 0 else i0 - k
         b = i1 - k if k > 0 else i1
-        ab = self._ab
-        ab[0] = a
-        ab[1] = b if b > a else a
+        return a, (b if b > a else a)
 
     def _moved_by(self, n, x, w, y, h, r, ty, rows, lh):
         """The visual rows this walk's view lies below the last draw's
@@ -983,9 +1004,7 @@ class EditorHandle:
                     break
         if not k:
             return 0
-        self._span(k, y, h, r, ty, rows, lh)
-        a = self._ab[0]
-        b = self._ab[1]
+        a, b = self._span(k, y, h, r, ty, rows, lh)
         if b <= a:
             return 0
         t = a if k > 0 else a + k
@@ -1004,9 +1023,7 @@ class EditorHandle:
         move does not keep (`_span`) drawn. Where an underline reaches the
         next row, the first row draws (nothing is above it now), and so does
         the row under a row whose own text or marks changed."""
-        self._span(k, y, h, r, ty, rows, lh)
-        a = self._ab[0]
-        b = self._ab[1]
+        a, b = self._span(k, y, h, r, ty, rows, lh)
         sl = self._sl
         ss = self._ss
         nl = self._nl
@@ -1227,6 +1244,7 @@ class EditorHandle:
         if self._mouse.armed and self._mouse.autoscroll(ed, x, y, dt, self._geom[3]):
             moved = True
         if moved:
+            self._gen += 1
             self._caret_at = ed.row             # the view is the reader's now
             self._caret_col = ed.col
         return moved

@@ -505,10 +505,12 @@ static void shift_plan(moy_ui_ctx_t *c, int owed, int over, int flags) {
         return;
     }
 
-    // a host's rows frame: nothing but a hover over no stop
+    // a host's rows frame: nothing but a hover over no stop, or a press on
+    // none
     c->sh_quiet = (uint8_t)(same && !owed && !over && c->pop_prev.w == 0 && !c->pop_gone
                             && !c->act && !c->step_x && !c->step_y && c->hover_off
-                            && !(p & (MOY_UI_P_EDGE | MOY_UI_P_MIDDLE)));
+                            && !(p & MOY_UI_P_MIDDLE)
+                            && (!(p & MOY_UI_P_EDGE) || c->press_bare));
     // a press, an activation, a stepped value, a hover, an overlay: whole
     if (!same || owed || over || c->modal || c->pop_prev.w > 0 || c->pop_gone || c->act
         || c->step_x || (p & MOY_UI_P_EDGE) || (live && !held)

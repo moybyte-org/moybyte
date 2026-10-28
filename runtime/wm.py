@@ -266,11 +266,12 @@ class FullscreenStackWM:
         if nd is not None and self.content_alone():
             nd(x, y, w, h)
 
-    def content_alone(self):
+    def content_alone(self, besides=0):
         """Whether the fullscreen content layer is all this frame draws: no
         overlay, splash, perf HUD, visible cursor or owed LOADING pill over
-        it."""
-        if self._cache_sig != 0:
+        it -- but the overlays of the sig bits `besides`, which the caller
+        accounts for itself."""
+        if self._cache_sig & ~besides:
             return False
         ws = self.ws
         return not (getattr(ws.pointer, "visible", False)
