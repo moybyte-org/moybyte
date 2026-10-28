@@ -1656,23 +1656,37 @@ ui_owes = _C.api_owes      # (ctx) whether the frame it drew last owes the next
 ui_moving = _C.api_moving  # (ctx) whether a page of it flings or glides
 _DT_MS = [0]                            # the loop's tick, the frames' clock (frame_dt)
 _MOVING = [False]                       # a frame begun since moving_take left a page moving
+_AGAIN = [False]                        # a pass since again_take owes the next frame
 # The painted frame the console draws (paint_frame): its number, and whether
 # its content is alone on the glass -- the content's ring vouches for its
 # buffers there (a full-screen tier's content, no overlay, cursor or pill
 # over it); then what the shift frames drawn in it made of it (change_take).
-_PAINT = [-1, False]
+_PAINT = [-1, False, None]
+# A window's content drawn by the windowed WM: 0 none, 1 a window frame, 2 one
+# whose target the WM's shown ring vouches holds the page as the frame before
+# left it (`window_frame`): the one voucher of a window's pages.
+_WIN = [0]
 _CHANGE = [None]
 _SHIFT = "shift"
 _ROWS = "rows"
 
 
-def paint_frame(n, alone):
-    """The console paints frame `n` (its count of painted frames), its
+def paint_frame(n, alone, console=None):
+    """`console` paints frame `n` (its count of painted frames), its
     content alone on the glass where `alone`: an app's `AppHost` may then
     make it a shift frame out of the frame before (`PaintRing`)."""
     _PAINT[0] = n
     _PAINT[1] = bool(alone)
+    _PAINT[2] = console
     _CHANGE[0] = None
+
+
+def window_frame(v):
+    """The windowed WM draws a window's content now (`v` 1), its target
+    holding the page as the last frame left it with nothing over it (`v`
+    2: the shift frame's licence on the WM's side, docs/surface_model_v1.md
+    §14.7), or has done (0)."""
+    _WIN[0] = v
 
 
 def change_take():
@@ -1698,6 +1712,15 @@ def moving_take():
     clears it."""
     got = _MOVING[0]
     _MOVING[0] = False
+    return got
+
+
+def again_take():
+    """Whether a pass drawn since the last call changed what it had drawn
+    before the change and owes the next frame (`AppHost.again`): the console
+    paints it, input or none. Reading clears it."""
+    got = _AGAIN[0]
+    _AGAIN[0] = False
     return got
 
 
@@ -1775,6 +1798,31 @@ def bar_tap(ctx, i):
 
 _HOST_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 _UP = 1 << 2                            # "up"'s bit in a frame's buttons
+_DIRS = 15                              # the four directions' bits
+# The host whose frame began last with the keys (`steps_dead`).
+_KEYS_HOST = [None]
+
+
+def _rep_dirs(rw):
+    """The directions a `rep_word` steps, as a frame's direction bits."""
+    m = 0
+    if rw & 0xFF:
+        m |= 1
+    if rw & 0xFF00:
+        m |= 2
+    if rw & 0xFF0000:
+        m |= 4
+    if (rw >> 24) & 0xFF:               # no constant past a small int's range
+        m |= 8
+    return m
+
+
+def steps_dead(rw, console=None):
+    """Whether a held key's (or the ball's) steps `rw`, with no press
+    beside them, would move nothing on the page whose frame `console` drew
+    last took the keys in: the console then marks no frame for them."""
+    h = _KEYS_HOST[0]
+    return h is not None and h._console is console and h.dead(rw)
 _EDGE = [False]                         # an up press went past a page's top
 
 
@@ -1846,6 +1894,10 @@ class AppHost:
         self.mid = False                # the middle button is held
         self.ring = PaintRing(1)        # what the frame before left of the page in its buffer
         self._plan = array("i", [0] * 5)
+        self.shifting = False           # the frame begun last draws its pages' floor alone
+        self._dead = 0                  # the directions whose steps moved nothing last frame
+        self._began = -1                # the painted frame it began last
+        self._console = None            # ...and the console that painted it
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
@@ -1881,10 +1933,13 @@ class AppHost:
         a[7] = getattr(i, "wheel_x", 0)
         a[8] = getattr(i, "wheel_y", 0)
         rw = getattr(i, "rep_word", 0)
-        a[_IN_REP] = rw - 0x100000000 if rw >> 31 else rw    # a small-int test: no bigint
         kn = getattr(i, "key_repeats", 0)
-        a[_IN_KEYREP] = (i.repeat_key & 0xFFFF) | kn << 16 if kn else 0
         mid = bool(getattr(i, "pointer_buttons", 0) & _PB_MIDDLE)
+        if (rw and not b and not typed and not kn and not mid and mid == self.mid
+                and not a[7] and not a[8] and self.dead(rw)):
+            rw = 0                      # a held key's steps where they move nothing
+        a[_IN_REP] = rw - 0x100000000 if rw >> 31 else rw    # a small-int test: no bigint
+        a[_IN_KEYREP] = (i.repeat_key & 0xFFFF) | kn << 16 if kn else 0
         moved = mid or mid != self.mid or a[7] or a[8] or rw or kn
         self.mid = mid
         return (bool(b) or typed or self.owed or self.tap != 0 or bool(moved)
@@ -1947,11 +2002,23 @@ class AppHost:
                 a[3] = self.py
             a[4] |= 1 | (_P_MIDDLE if self.mid else 0)
         self.ring.close(_C.api_shift_drawn(self.ctx) & 4)
+        away = elsewhere or _ON_BAR[0]
         settled = ui_frame(self.ctx, cv, th, rect, a, desk, window, self.app,
-                           elsewhere=elsewhere or _ON_BAR[0], edge=True)
+                           elsewhere=away, edge=True)
         self._shift(cv, th)
         if a[1] & _UP and _C.api_edge(self.ctx):
             _EDGE[0] = True
+        # The directions this frame's steps took, where they moved nothing
+        # and the page owes nothing: a held key's further steps that way are
+        # no frame (`dead`), until a frame begins otherwise.
+        d = (a[1] & _DIRS) | _rep_dirs(a[_IN_REP])
+        self._dead = (d if d and not (a[1] & ~_DIRS) and not a[5] and not t and not a[7]
+                      and not a[8] and settled and not _C.api_moved(self.ctx)
+                      and not _C.api_moving(self.ctx) else 0)
+        self._began = _PAINT[0]
+        self._console = _PAINT[2]
+        if not away:
+            _KEYS_HOST[0] = self
         self.tap = (3 if self.hold else 2) if t == 1 else 3 if t == 3 else 0
         a[0] = a[1] = a[5] = a[7] = a[8] = 0
         self.owed = not settled
@@ -1969,13 +2036,38 @@ class AppHost:
         ring = self.ring
         key = _GEN + _GEN + (1 if _MARKS_ON[0] else 0)
         p = self._plan
-        if _PAINT[1] and _C.api_shift_plan(self.ctx, p) and ring.vouch(cv, f, key, th):
+        self.shifting = False
+        w = _WIN[0]
+        if w:
+            ok = w == 2 and ring.vouch_key(key, th)     # the WM's shown ring vouches
+        else:
+            ok = _PAINT[1] and ring.vouch(cv, f, key, th)
+        if ok and _C.api_shift_plan(self.ctx, p):
             if cv.shift_last(p[0] + getattr(cv, "_ox", 0), p[1] + getattr(cv, "_oy", 0),
                              p[2], p[3], 0, p[4]):
                 cv.shift_fence()        # the floor draws over rows the move wrote
                 _C.api_shift_arm(self.ctx)
+                self.shifting = True
                 _CHANGE[0] = _SHIFT if p[4] else _ROWS
-        ring.note(f, key, 0, None, cv, th, _PAINT[1])
+        ring.note(f, key, 0, None, cv, th, _PAINT[1] or w != 0)
+
+    def dead(self, rw):
+        """Whether a held key's (or the ball's) steps `rw` (the input
+        table's `rep_word`) would move nothing: each is a direction the last
+        painted frame's steps took to no effect, and the page owes nothing
+        and does not move."""
+        d = self._dead
+        return (d != 0 and (_rep_dirs(rw) & ~d) == 0 and self._began == _PAINT[0]
+                and not self.owed and self.tap == 0 and not _C.api_owes(self.ctx)
+                and not _C.api_moving(self.ctx))
+
+    def again(self):
+        """The pass changed what it had drawn before the change (a page it
+        opened, a place it picked): the next frame is owed, as one the
+        engine owes (`keys` answers it, and the console paints it with no
+        input: `again_take`), never the page marked whole."""
+        self.owed = True
+        _AGAIN[0] = True
 
     def still(self):
         """Whether the page this context drew last is what it draws next:
@@ -2494,6 +2586,18 @@ class PaintRing:
 
     def stamp(self, back=0):
         return self._stamp[self._slot(back)]
+
+    def vouch_key(self, key=None, obj=None):
+        """True when the newest frame painted the region whole under `key`
+        (and `obj`), whatever buffer it drew into and whenever: where
+        another ring vouches that the buffer `shift_last` reads holds that
+        frame's region (the windowed WM's shown ring), else None."""
+        if not self.size:
+            return None
+        i = self._i
+        if not self._whole[i] or self._obj[i] is not obj or self._key[i] != key:
+            return None
+        return True
 
     def vouch(self, cv, frame_no, key=None, obj=None):
         """True when frame `frame_no` - 1 painted the region whole under

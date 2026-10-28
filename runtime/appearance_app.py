@@ -573,13 +573,10 @@ class AppearanceAppLayer:
         self._ui.begin(cv, th, whole, lay.desk, lay.windowed)
         ui.page("")                   # the ground under the bar's band too
         view = self.view
-        tab = self.tab
-        naming = self.naming
-        armed = self.armed
-        why = self.why
         if self._focus is not None:
             ui.focus(self._focus)
             self._focus = None
+        self._focused = ui.focus()        # this frame's: a key's step moved it at begin
         ch = self._ch
         b = self._build(th)
         # Under touch the handheld draws no hints, so no band holds them
@@ -598,9 +595,6 @@ class AppearanceAppLayer:
         self._foot(cv, th, ch, b)
         self._name_dialog()
         self._focused = ui.focus()
-        if (self.view != view or self.tab != tab or self.naming != naming
-                or self.armed != armed or self.why != why):
-            self._damage.all()        # an answer changed what the page shows
 
     def _foot(self, cv, th, ch, b):
         """The hints for the focused stop; on the desk under a rule, after

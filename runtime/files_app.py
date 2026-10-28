@@ -701,7 +701,6 @@ class FilesAppLayer(ListShellApp):
         th = self._theme.colors()
         self._ui.begin(cv, th, (0, 0, cv.w, cv.h), lay.desk, lay.windowed)
         ui.page("")                   # the ground under the bar's band too
-        was = (self.place, self.level, self.dialog, self.cur, len(self.rows))
         if self._focus is not None:
             ui.focus(self._focus)
             self._focus = None
@@ -719,8 +718,6 @@ class FilesAppLayer(ListShellApp):
             self._files(cv, th)
         self._dialog()
         self._focused = ui.focus()
-        if (self.place, self.level, self.dialog, self.cur, len(self.rows)) != was:
-            self._damage.all()        # an answer changed what the page shows
 
     def _places(self):
         """The places: a column on the desk, a page of their own else."""

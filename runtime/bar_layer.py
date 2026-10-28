@@ -319,8 +319,11 @@ class BarLayer:
 
     def _strip_moved(self, cv, x, y, w, h):
         """New pixels landed in (x, y, w, h) of the bar on `cv`: when that is
-        the published root, the strips there ride its next presented frame."""
-        if cv is self._strip_cv:
+        the published root, the strips there ride its next presented frame.
+        A bar drawn through a viewport of the root is a window's, drawn
+        straight into the glass (the windowed WM's direct render): its
+        pixels are the window's, which the WM describes."""
+        if cv is self._strip_cv and not getattr(cv, "_ox", 0) and not getattr(cv, "_oy", 0):
             sm = getattr(cv, "strip_moved", None)
             if sm is not None:
                 sm(x, y, w, h)

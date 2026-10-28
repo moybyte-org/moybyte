@@ -125,6 +125,9 @@ def test_pointer_down_and_release_edge_rerender(tmp_path):
             break
         drv.frame(0.0)
     assert not ws.settings_layer._host.owed
+    drv.frame(0.0)                         # a frame with nothing to paint: the window's
+    assert not win._buf_stale              # buffer, which its frames left behind the
+                                           # glass, is refilled from it
     after_settle = calls[0]
     drv.pan(1, 0)
     drv.frame(0.0)                         # position-only: freeze resumes

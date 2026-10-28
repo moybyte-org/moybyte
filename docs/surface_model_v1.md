@@ -726,10 +726,14 @@ content draw is skipped and the retained `win.buf` stamp presents it instead.
   panel's async scan/pair, the update screen's progress — are excluded by name
   until §3's registration replaces the list. Sources outside app windows draw
   on other layers and need no exclusion.
-- **`win.buf` is not stale.** A rebuilt buffer, or a gesture's `_direct_render`
-  painting past the buffer straight into the framebuffer, leaves it behind the
-  truth: the next paint renders live to refill it before the freeze resumes
-  (only its lag, where the content speaks §14.3's protocol).
+- **`win.buf` is not stale.** A rebuilt buffer, or `_direct_render` painting
+  past the buffer straight into the framebuffer, leaves it behind the truth.
+  Where the shown ring (§14.3) says the last frame's buffer held the window's
+  page where it lies now, it is refilled from that buffer
+  (`copy_last_into`, §14.7: `WindowedWM._refill`), on a frame with nothing
+  to paint and before any other reader stamps it (a focus loss, a move, a
+  resize, this freeze); else the next paint renders live to refill it (only
+  its lag, where the content speaks §14.3's protocol).
 
 Pinned by `tests/test_wm_content_freeze.py` — a frozen-vs-live pixel-equality
 check plus a case per leg of the gate.
@@ -846,10 +850,24 @@ one rect, from what the content says it painted on the frame it painted it —
 the trust `note_damage` already places in the WM (§5.2). On the rotated
 compositor the window's damage is that change rect, not the window.
 
+**An app on the verbs draws every frame it draws straight into the glass**
+(`WindowedWM._speaks`: its pages' frames say what they change, docs/scroll_and_text_2026-10.md §8)
+when its window is focused and on top with nothing over it: its press,
+drag, coast, key and glide frames, each with no desk restore and no
+chrome, since a page moving on its own (`ws.ui_moving`) changes its
+window's content alone (`_frame_is_quiet`). Its entry in the ring is its
+page's rect, changed or not (`_still_shown`: a frame whose page did not
+change and whose buffer holds it draws nothing), and the ring is the
+voucher its pages shift by (§14.7). Each entry also says where the page
+lay and whether the frame changed anything on the glass outside it (no
+other window, clock, tile or chip drew), which is what a buffer's debt is
+made of (§14.6).
+
 Pinned by `tests/test_wm_shown.py`: pointer and held-key strokes on one, two
 and three buffers presented in turn, every presented frame byte-equal to
 full repaints, every frame from the press through the release a stroke
-frame, and the stamps' bytes bounded.
+frame, and the stamps' bytes bounded; and by `tests/test_wm_records.py`
+for the apps on the verbs (below and §14.7).
 
 ### 14.4 The desk home's still backdrop (2026-10-26)
 
@@ -976,8 +994,12 @@ buffers presented in turn.
 drawing**, the lag it copies being the ring's own:
 
 - **the windowed WM's debt frame of a still desk** with no popover and no
-  playtest (`_RepeatLayer`): the whole glass. Its shown ring entry is the
-  last frame's, the page unchanged;
+  playtest (`_RepeatLayer`): the rows the frames since its buffer was
+  painted changed, where each changed nothing outside the focused window's
+  page (`_debt_rows`, from the shown ring's entries, §14.3), else the whole
+  glass. It copies whatever the focused window's buffer holds, so a buffer
+  direct render left behind never holds a debt up (`debt_owed`). Its shown
+  ring entry is the last frame's, the page unchanged;
 - **a playtest's debt frame** -- the quiet one after a whole frame, and
   the frame the system menu's scrim comes over the game on, which washes
   the copy once: the whole glass
@@ -1038,7 +1060,8 @@ place on one buffer (`device/device_canvas.py`, the compositors in
 
 **One voucher per region.** Who says frame n-1 painted R whole: under the
 windowed WM the shown ring (`_shown`) for a window's content, never the
-content; on the full-screen tier the content's own `PaintRing`
+content (`WindowedWM._vouches`, handed to the page's host for the draw:
+`ui_draw.window_frame`); on the full-screen tier the content's own `PaintRing`
 (`ui_draw.PaintRing`, the slots `ScrollRegion`'s #113 ring also keeps),
 because the stack draws everything around R every frame. The WM says which
 (`CONTENT_RING`), and the console tells each painted frame whether the
@@ -1066,9 +1089,12 @@ painting, what its buffer lacks, and `shift_last` replaces the drawing of
 what it moved, as `copy_last` does a whole frame. The one ring body is a
 grep. Pinned by `tests/test_shift_frames.py` (the engine: drags, flings,
 glides, every move size, the clamps, a gen moving mid-fling, a cover landing,
-overlays, a theme change, a gap, a deferred copy landing at the fence) and
+overlays, a theme change, a gap, a deferred copy landing at the fence),
 `tests/test_shift_apps.py` (Settings and its pages, My Art, Get Carts on the
-full-screen console), each presented frame, with up to three buffers taking
+full-screen console) and `tests/test_wm_records.py`
+(every app on the verbs in a desk window, windows overlapping, a focus
+change and a move mid-coast, a popover and the system menu's scrim over a
+glide), each presented frame, with up to three buffers taking
 turns, byte-equal to whole repaints, the share of shift frames held above a floor,
 and the engine's record audit failing any shift frame whose stops moved
 outside its floor.

@@ -155,7 +155,6 @@ class MyArtAppLayer:
         self._pic_wh = None           # a card's picture's size, as the grid drew it
         self._gens_due = True         # the cards' gens to be read again (`_grid`)
         self._clip = array("i", [0, 0, 0, 0])   # a picture's clip (`ui.card_clip`)
-        self._band = array("i", [0, 0, 0, 0])   # the rows the frame draws (`ui.band`)
         self._grid_o = {"gen": 0}     # the grid's region's override table: its gen
         self._caption = None          # (count, wallpaper, left, right, right's width)
         self._foot_k = None           # the desk foot as `_foot_of` made it
@@ -425,7 +424,7 @@ class MyArtAppLayer:
         ui.end()
         if (self.menu != was_menu or (self.renaming is None) != was_renaming
                 or (self.game is None) != was_game or len(self.drawings) != was_n):
-            self._damage.again()
+            self._ui.again()          # an answer changed what the page drew before it
 
     def _empty(self):
         lay = self.layout
@@ -498,8 +497,7 @@ class MyArtAppLayer:
         owed = self._owed
         # a shift frame draws the cards its floor reaches alone: the pictures
         # owed by the others stay owed
-        b = ui.band(self._band)
-        whole = b is None or b[3] >= g[3]
+        whole = not self._ui.shifting
         if whole:
             del owed[:]
         wh = self._pic_wh
@@ -516,7 +514,10 @@ class MyArtAppLayer:
             name = c[0]
             r = ui.card(c[1], "", c[3] if menu and name == self.cur else c[2])
             if r[2]:
-                if wh is None or wh[0] != r[2] or wh[1] != r[3]:
+                # the pictures' size is an unfocused card's: the focused one's
+                # rect grows with its mark, and a size taken from whichever
+                # cards a frame reached would move every card's gen
+                if not r[4] & ui.FOCUS and (wh is None or wh[0] != r[2] or wh[1] != r[3]):
                     wh = self._pic_wh = (r[2], r[3])
                     self._gens_due = True
                 if covers.owed(name, r[2], r[3]) and (whole or not _owes(owed, name)):

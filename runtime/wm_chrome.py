@@ -752,6 +752,7 @@ class WindowChrome:
                     for k, r, lb in self._chip_rects())
         if sig != self._chip_sig:
             # New chip pixels on the OS bar: the compositor's strip carries them.
+            self._outside_f = self.ws._frames_drawn
             got = self._chips_cell()
             if got is not None:
                 bx, by, bw, bh = got[0][1]

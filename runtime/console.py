@@ -3743,8 +3743,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # from ~30fps to ~10 (measured; the "every keypress slows the game" bug).
         # A step is a press here: a held key's repeats and the trackball's
         # steps (`steps`) move what a press moves.
-        pressed = (i.any_pressed() or bool(getattr(i, "rep_word", 0))
-                   or bool(getattr(i, "key_repeats", 0)))
+        # A held key's steps that the page taking the keys found moved
+        # nothing last frame (the end of a list) mark nothing: no frame.
+        rw = getattr(i, "rep_word", 0)
+        pressed = (i.any_pressed() or bool(getattr(i, "key_repeats", 0))
+                   or (rw != 0 and not _ui_draw.steps_dead(rw, self)))
         # The arrows of a keyboard with arrows (the host's, the browser's, a
         # BLE one) or a d-pad step a caret where one has the keys -- the Code
         # tab, a cart's focused editor handle -- as the T-Deck's ball does
@@ -4573,9 +4576,11 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return None
         return (p.x, p.y, bool(p.visible), bool(p.down), bool(p.click))
 
-    def _animating(self, dt):
+    def _animating(self, dt, pages=True):
         """True when SOMETHING on screen changes every frame on its own, so the UI
-        must keep redrawing even without input:
+        must keep redrawing even without input (`pages` False: but a verbs
+        page moving on its own, which changes nothing outside its content --
+        the windowed WM's word for a frame whose only change is a window's):
           - a running cart (games animate -> unchanged full-redraw behaviour),
           - a live wallpaper on the home/settings backdrop (its _update advances it),
           - the achievement toast / Konami confetti / Easter-egg popup while active.
@@ -4622,7 +4627,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
             return True
         # A verbs page the last painted frame drew coasts on a fling or eases
         # on a glide (`api_moving`): its next frame is due with nothing dirty.
-        if self.ui_moving:
+        if pages and self.ui_moving:
             return True
         # (The Appearance app's monitor shows a COMPUTED still on every tier,
         # so it needs no live-wallpaper redraw exception -- the gate closes
@@ -4810,14 +4815,24 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # device saves the SPI flush + power. A running cart / live wallpaper / active
         # overlay always reports animating, so it redraws every frame as before.
         if not self._needs_redraw(dt):
-            # Nothing to paint. Spend the frame warming the next cover instead
-            # (#155) -- after two quiet frames, so the gap between two gestures
-            # is not spent on a 108ms flash read. This is the ONLY work the idle
-            # branch does. The warmers dirty nothing (the home's visible cards
+            # Nothing to paint. Spend the frame bringing a window's buffer up
+            # to the glass (the WM's `refill_step`, a copy), and warming the
+            # next cover (#155) -- that after two quiet frames, so the gap
+            # between two gestures is not spent on a 108ms flash read. That is
+            # the idle branch's work. The warmers dirty nothing (the home's visible cards
             # are built by the draw path, the prefetch is for the ones
             # off-screen); an app's idle step asks for the frame that shows
             # what it made, through its own damage.
             self._quiet_frames += 1
+            try:
+                # The focused window's buffer, which direct render left
+                # behind the glass, refilled from the last frame's buffer:
+                # one copy, on a frame no input waits on.
+                self.wm.refill_step()
+            except Exception as exc:  # noqa: BLE001 -- an idle tick never ends a session
+                if not self._idle_warned:
+                    self._idle_warned = True
+                    print("Moybyte idle work failed:", _err_text(exc))
             if self._quiet_frames > 2:
                 # NOTHING HERE MAY RAISE. This branch runs on a frame with no
                 # user waiting on it, which is exactly why it is the wrong place
@@ -4981,7 +4996,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         # The content's own ring vouches for its buffers where it is alone on
         # a full-screen tier (docs/scroll_and_text_2026-10.md §3.4).
         _ui_draw.paint_frame(self._frames_drawn,
-                             self.wm.CONTENT_RING and self.wm.content_alone())
+                             self.wm.CONTENT_RING and self.wm.content_alone(), self)
         for layer in _stack:
             if _modal is not None and layer.id in _modal:
                 _ui_draw.marks(True)
@@ -5060,6 +5075,8 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         self._dirty = False
         self._damage_drop()          # an app's `all` from this draw is spent
         self.ui_moving = _ui_draw.moving_take()
+        if _ui_draw.again_take():
+            self._dirty = True        # a pass owes the frame after it (`AppHost.again`)
         self.frame_change = _ui_draw.change_take()
         if covers.take_deferred():
             # A shelf cover build was pushed past this frame's budget -- stay

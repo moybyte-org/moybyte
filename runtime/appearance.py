@@ -1418,10 +1418,18 @@ class Appearance:
         layout reflowed to 1x with text still rendering at 2x, which is the
         owner's "changing it while running messes it up, if I change and reboot
         it looks great" (2026-07-26). The fullscreen tier has no _root_canvas and
-        falls through to the ambient canvas, which IS the root there."""
+        falls through to the ambient canvas, which IS the root there.
+
+        None while a window's content draws straight into the root (the
+        windowed WM's direct render): the rest of that pass draws at the
+        window's scale, as it would into the window's buffer, and the WM
+        sets the root's when the content's draw is done."""
         ws = self.ws
         wm = getattr(ws, "wm", None)
         root = getattr(wm, "_root_canvas", None) if wm is not None else None
+        if root is not None and getattr(wm, "_direct_root", False):
+            wm._scale_owed = True
+            return None
         return root if root is not None else ws._sys_canvas
 
     def cycle_font_scale(self, d):

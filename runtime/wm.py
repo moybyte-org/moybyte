@@ -189,6 +189,11 @@ class FullscreenStackWM:
         frame now would pay it; never here."""
         return False
 
+    def refill_step(self):
+        """A frame with nothing to paint brings a window's buffer up to the
+        glass (the windowed WM); nothing here, no windows."""
+        return False
+
     def popover_takes_keys(self):
         """True when the open popover paints its own key presses (the
         windowed WM in desktop mode); never here."""

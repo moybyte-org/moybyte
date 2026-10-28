@@ -663,7 +663,7 @@ class StorybookAppLayer(ListShellApp):
         self._focused = ui.focus()
         if (self.page != page or self.asking != asking or self.menu != menu
                 or self.show is not None):
-            self._damage.again()
+            self._ui.again()          # an answer changed what the page drew before it
 
     # -- stories ----------------------------------------------------------------------
 

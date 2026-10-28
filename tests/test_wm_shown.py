@@ -217,6 +217,7 @@ def test_a_content_that_says_nothing_is_stamped_whole(tmp_path, monkeypatch):
     copies its buffer instead, §14.6)."""
     ws, app, drv, root, win, frame, shot, view = _desk(tmp_path, monkeypatch, 2, False)
     monkeypatch.setattr(type(app), "HELD", False)
+    monkeypatch.setattr(type(app), "UI", False)     # nor an app whose pages say it
     got = _spy(monkeypatch, ws, app, root, win)
     n = ws._frames_drawn
     r = ws.wm._repeats_n

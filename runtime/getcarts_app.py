@@ -1231,14 +1231,19 @@ class GetCartsAppLayer(ListShellApp):
             whole = self._whole = (0, 0, cv.w, cv.h)
         self._ui.begin(cv, th, whole, lay.desk, lay.windowed)
         ui.page("")                       # the ground under the bar's band too
-        was_phase = self.phase
-        was_cur = self.cur is None
         was_asking = self.asking
         if self.phase in BUSY or self.phase == "pick":
             self._focus = _NOWHERE            # held there: no key reaches Cancel
         if self._focus is not None:
             ui.focus(self._focus)
             self._focus = None
+        # The pane shows the card focus is on, this frame's (a key's step
+        # moved it at begin): it follows before the page is drawn.
+        self._focused = ui.focus()
+        if lay.desk and self.phase in ("list", "cart", "done"):
+            self._pane_follows()
+        was_phase = self.phase
+        was_cur = self.cur is None
         ph = self.phase
         shelf = ph == "list" or (lay.desk and self._in_pane())
         if shelf:
@@ -1260,13 +1265,14 @@ class GetCartsAppLayer(ListShellApp):
         self._dialog()
         if self.toast is not None:
             self._toast()
-        self._focused = ui.focus()
-        if lay.desk and ph in ("list", "cart", "done"):
-            self._pane_follows()
+        f = ui.focus()
+        if f != self._focused:
+            self._focused = f             # a tap moved it: the pane follows next frame
+            if lay.desk and ph in ("list", "cart", "done") and self._pane_follows():
+                self._ui.again()
         if (self.phase != was_phase or (self.cur is None) != was_cur
                 or self.asking != was_asking):
-            self._damage.again()          # an answer changed what the page shows: a
-                                          # draw's `all` is spent with it, an `again` is not
+            self._ui.again()              # an answer changed what the page drew before it
 
     # -- the shelf ---------------------------------------------------------------
 
@@ -1395,17 +1401,18 @@ class GetCartsAppLayer(ListShellApp):
         ui.scroll()
 
     def _pane_follows(self):
-        """On the desk the pane shows the card focus is on."""
+        """On the desk the pane shows the card focus is on: whether it moved
+        to another."""
         f = self._focused
         if f is None or not f.startswith("Cart "):
-            return
+            return False
         for row in self.rows:
             if self._card(row)[4]["id"] == f and row is not self.cur:
                 self.cur = row
                 if self.phase == "list" or self.phase == "done":
                     self.phase = "cart"
-                self._damage.all()
-                return
+                return True
+        return False
 
     # -- a cart's page -----------------------------------------------------------
 

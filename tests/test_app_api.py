@@ -436,6 +436,12 @@ def _settle(ws):
     silently reads as agreement. (It did, on exactly that app.)"""
     buf = ws.sys_canvas._buf
     buf[:] = _SENTINEL * len(buf)
+    wm = ws.wm
+    if getattr(wm, "has_desk", False):
+        # The wipe is behind the WM's back: what it retains in this buffer
+        # (the desk, the windows' stamps and chrome) is gone with it.
+        wm._desk_streak = 0
+        wm._win_sig = None
     prev = None
     for _ in range(_MAX_FRAMES):
         _quiesce_frame(ws)

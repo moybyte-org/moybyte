@@ -149,6 +149,9 @@ class _BackdropLayer(Layer):
             self._draw_desktop(dt)
             wm._capture_backdrop()
             wm._draw_unders()
+            # This buffer holds the cache it just took, and the clock: one of the N.
+            wm._desk_streak = 1 if wm._backdrop_valid else 0
+            wm._clock_drawn()
             return
         if wm._backdrop_valid:
             # CONTENT gesture: the window is STATIONARY, so the desk outside it
@@ -191,6 +194,7 @@ class _BackdropLayer(Layer):
             bar = self.ws.bar_layer
             wm._desk_clock()
             if bar.tile_on() != wm._desk_tile:
+                wm._outside_f = self.ws._frames_drawn
                 bar.redraw_tile("desk")        # the cache holds the button's other state
             return
         wm._desk_streak = 0
@@ -199,6 +203,8 @@ class _BackdropLayer(Layer):
         self._draw_desktop(dt)                # cache lost: render + re-snapshot
         wm._capture_backdrop()
         wm._draw_unders()
+        wm._desk_streak = 1 if wm._backdrop_valid else 0
+        wm._clock_drawn()
 
     def _desk_sig(self):
         """Everything the desk's wallpaper + icon column depends on, the

@@ -328,8 +328,22 @@ class _RepeatLayer(Layer):
     def draw(self, dt):
         wm = self.wm
         root = wm._root_canvas
-        if root.copy_last(0, 0, root.w, root.h):
+        # A debt frame copies the rows the frames since its buffer was
+        # painted changed (`_debt_rows`); a lead copy, under a playtest's
+        # frame, the whole glass.
+        r = None if self.lead else wm._debt_rows()
+        if r is None or r[2]:
+            ok = root.copy_last(0, 0, root.w, root.h)
+            px = root.w * root.h
+        elif r[1] > r[0]:
+            ok = root.copy_last(0, r[0], root.w, r[1] - r[0])
+            px = root.w * (r[1] - r[0])
+        else:
+            ok = True
+            px = 0
+        if ok:
             wm._repeats_n += 1
+            wm._debt_px += px
             wm._repeat_note()
             return
         # A lead copy (a quiet frame paying a buffer's debt, the quiet
@@ -566,6 +580,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._ctx_switching = False   # reentrancy guard for internal _relayout runs
         self._in_draw = False         # the windows draw: a relayout waits for its end
         self._relayout_owed = False
+        self._direct_root = False     # a window's content draws into the root now
+        self._scale_owed = False      # ...and changed the font scale the root takes after
         # Quiet-frame fast path (#58): the stand-in stacks + the ping-pong
         # full-paint debt. After ANY full repaint the NEXT drawn frame must also
         # bring its buffer to it -- a double-buffered panel alternates physical
@@ -719,7 +735,15 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         # and nothing over it (None when it could not say), and the part of
         # the page that frame changed (known 0: unknown). A buffer N frames
         # back then holds the page but for what the N-1 frames since changed.
-        self._shown = [[-1, None, 0, 0, 0, 0, 0] for _i in range(_SHOWN + 1)]
+        # Then where the page lay, [cx, cy, cw, ch, look_gen), and whether
+        # the frame changed nothing on the glass outside it (`_alone_f`):
+        # the debt a buffer owes is then the rows those frames changed.
+        self._shown = [[-1, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                       for _i in range(_SHOWN + 1)]
+        self._outside_f = -1          # the frame that drew outside the focused window
+        self._rows = [0, 0, 0]        # the debt's rows [y0, y1, whole]
+        self._refills = 0             # window buffers refilled from the glass
+        self._debt_px = 0             # pixels the debt frames copied
         self._own = [0, 0, 0, 0, 0]   # this frame's change, [x0, y0, x1, y1, known]
         self._u = [0, 0, 0, 0]        # a target's lag behind the page
         self._sc = [0, 0, 0, 0]       # scratch for the next frame's chain
@@ -1988,6 +2012,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 self._wash_focus_back()
             else:
                 self._prewarm(win)
+        else:
+            self._fresh(win)              # the stamp reads its page
         cx, cy, cw, ch = win.content_rect()
         self._root_canvas.blit_strip(win.buf, cx, cy)
         self._win_grip(win, True)         # the one piece of chrome inside the content
@@ -2663,12 +2689,19 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if not (self._full_debt > 0 and self._pop_n() > 1
                 and self._settled(self._still()) and self._calm()):
             return False
-        # ...and its frame would draw no window's content: the focused one's
-        # buffer holds its page under the look in force (§14.1's freeze).
+        # ...and its frame would draw no window's content: it copies the
+        # rows the last frame changed (`_RepeatLayer`), whatever the focused
+        # window's buffer holds, or the focused one's buffer holds its page
+        # under the look in force (§14.1's freeze).
         win = self._wins.get(self._focus) if self._focus is not None else None
-        return (win is None or win.minimized or win.kind == "desktop"
-                or (win.buf is not None and not win._buf_stale
-                    and win._look_gen == self.ws.look.look_gen))
+        if win is None or win.minimized or win.kind == "desktop":
+            return True
+        if win._look_gen != self.ws.look.look_gen and not win._buf_stale:
+            return False
+        if win.buf is not None and not win._buf_stale:
+            return True
+        return (getattr(self._root_canvas, "copy_last", None) is not None
+                and ("desktop" not in self._wins or self._game_held()))
 
     # -- the drag backdrop cache (#58 drag perf) -------------------------------
 
@@ -3197,10 +3230,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
     def _frame_is_quiet(self, dt):
         """True when nothing GLOBAL invalidated the retained ping-pong pixels
         this frame: the desk backdrop did not repaint under the windows, no
-        window is being dragged or resized, nothing is animating, and no cursor
-        stamp needs erasing. Shared by the window-skip and the chrome freeze."""
+        window is being dragged or resized, nothing is animating but a verbs
+        page moving on its own (`ws.ui_moving`, which changes its window's
+        content alone), and no cursor stamp needs erasing. Shared by the
+        window-skip and the chrome freeze."""
         if (self._desk_painted or self._drag is not None
-                or self._resize is not None or self.ws._animating(dt)
+                or self._resize is not None or self.ws._animating(dt, False)
                 or self._scrim_up()):
             return False
         p = self.ws.pointer
@@ -3259,6 +3294,8 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             else:
                 self._draw_app_window(win, focused, dt)
             self._cast_onto(i)
+            if self._win_touched and not focused:
+                self._outside_f = self.ws._frames_drawn
             if self._win_touched:
                 pt = self._part
                 if pt[4] and not self._chrome_drew and pt[2] > pt[0] and pt[3] > pt[1]:
@@ -3271,6 +3308,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         self._hand_damage(touched)
         if cover < 0:                              # the bar is covered with the desk
             self._draw_taskbar_chips(quiet=self._chrome_quiet or self._chips_untouched(dt))
+        self._alone_note()
         if self._resize is not None:               # rubber-band resize preview
             g = self._resize
             kind, cw, chh, rx, ry = g[0], g[5], g[6], g[10], g[11]
@@ -3336,7 +3374,16 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             h[2] = 1
         h[1] = f
         if h[2] <= self._retained_n():
+            self._outside_f = f
             bar.redraw_clock("desk")
+
+    def _clock_drawn(self):
+        """The desk drawn whole this frame, its bar's clock with it: the
+        first of the RETAINED_FRAMES frames that hold its text."""
+        h = self._clock_held
+        h[0] = self.ws.bar_layer._clock_text()
+        h[1] = self.ws._frames_drawn
+        h[2] = 1
 
     def _chips_untouched(self, dt):
         """Whether this frame left the chips' bar as the last one did: a
@@ -3345,7 +3392,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         r = self._restored
         if not r or self._restored_f != self.ws._frames_drawn:
             return False
-        if getattr(self.ws.pointer, "visible", False) or self.ws._animating(dt):
+        if getattr(self.ws.pointer, "visible", False) or self.ws._animating(dt, False):
             return False
         got = self._chips_cell()
         if got is None:
@@ -3398,6 +3445,12 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ws = self.ws
         content = self._content_for(win.kind)
         held = getattr(content, "HELD", False)
+        # An app on the verbs: whether the buffer this frame paints holds
+        # its page as the last frame left it, so its pages may move that
+        # frame's pixels (the shift frame's voucher, `_vouches`).
+        pages = 0
+        if not held and self._speaks(win):
+            pages = 2 if self._vouches(win) else 1
         known = 0
         u = self._u
         if held:
@@ -3422,17 +3475,28 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         ws._sys_canvas = root                 # ...but paint on the framebuffer
         ws._surface_write(cx, cy)
         sv(cx, cy, cw, ch)
+        _ui_draw.window_frame(pages)
+        self._direct_root = True
         try:
             if held:
                 content.retained(known, u[0], u[1], u[2], u[3])
             content.draw(dt)
         finally:
+            self._direct_root = False
+            if self._scale_owed:
+                # The content changed the font scale: the root takes it now
+                # its page is drawn (`Appearance._font_scale_canvas`).
+                self._scale_owed = False
+                root.set_font_scale(ws.look.effective_font_scale())
+            _ui_draw.window_frame(0)
             root.clear_viewport()
             self._install(self._root_ctx)
         self._row_over(win, root, held)
         stale = win._buf_stale
         win._buf_stale = True                 # buf skipped: it now lags the truth
         if not held:
+            if pages:
+                self._own_page(win)
             return True
         self._own_of(win, content, held)
         own = self._own
@@ -3496,6 +3560,32 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 _grow(c, e[3], e[4], e[5], e[6])
         return True
 
+    def _vouches(self, win):
+        """Whether the buffer the last frame drew into holds `win`'s page,
+        where it lies now, with nothing over it, as this frame will hold it
+        (the shown ring's word for frame n-1, and this frame's): a page of
+        its content may then move that frame's pixels (`shift_last`) rather
+        than draw them (docs/scroll_and_text_2026-10.md §3.1, one voucher
+        per region)."""
+        if not self._shown_ok(win):
+            return False
+        f = self.ws._frames_drawn
+        e = self._shown[(f - 1) % (_SHOWN + 1)]
+        if e[0] != f - 1 or e[1] is not win or e[11] != self.ws.look.look_gen:
+            return False
+        cx, cy, cw, ch = win.content_rect()
+        return e[7] == cx and e[8] == cy and e[9] == cw and e[10] == ch
+
+    def _own_page(self, win):
+        """This frame's change of `win`'s page into `_own`: the page's rect,
+        for a content that says no narrower (an app on the verbs)."""
+        own = self._own
+        cx, cy, cw, ch = win.content_rect()
+        own[0] = own[1] = 0
+        own[2] = cw
+        own[3] = ch
+        own[4] = 1
+
     def _own_of(self, win, content, held):
         """This frame's change of `win`'s page into `_own`: what the content
         says its draw changed, unknown where it says nothing, or where the
@@ -3529,6 +3619,13 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         e[4] = own[1]
         e[5] = own[2]
         e[6] = own[3]
+        cx, cy, cw, ch = win.content_rect()
+        e[7] = cx
+        e[8] = cy
+        e[9] = cw
+        e[10] = ch
+        e[11] = self.ws.look.look_gen
+        e[12] = 0                     # the windows' pass closes it (`_alone_note`)
         n = getattr(self._root_canvas, "RETAINED_FRAMES", 0)
         if ok and held and 1 <= n <= _SHOWN:
             sc = self._sc
@@ -3553,13 +3650,21 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         if self._chip_streak < n:
             self._chip_streak += 1
         f = self.ws._frames_drawn
+        h = self._clock_held              # ...and the desk clock's text
+        if h[1] == f - 1:
+            h[1] = f
+            h[2] += 1
         ring = self._shown
         p = ring[(f - 1) % (_SHOWN + 1)]
         e = ring[f % (_SHOWN + 1)]
         e[0] = f
-        e[1] = p[1] if p[0] == f - 1 else None
+        same = p[0] == f - 1
+        e[1] = p[1] if same else None
         e[2] = 1
         e[3] = e[4] = e[5] = e[6] = 0
+        for i in range(7, 12):
+            e[i] = p[i]
+        e[12] = 1                     # the glass is the last frame's: nothing changed
 
     def _shown_part(self, win, x0, y0, x1, y1):
         """Name [x0, y0, x1, y1) of `win`'s content as the root rect it
@@ -3572,7 +3677,133 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         pt[3] = cy + min(ch, y1)
         pt[4] = 1
 
-    def _content_static(self, win):
+    def _alone_note(self):
+        """Close this frame's shown ring entry: whether nothing outside the
+        focused window's content rect changed on the glass (no other window,
+        clock, tile or chip drew), so what the frame changed is the page's
+        part alone (`_debt_rows`)."""
+        f = self.ws._frames_drawn
+        e = self._shown[f % (_SHOWN + 1)]
+        if e[0] == f:
+            e[12] = 1 if e[1] is not None and self._outside_f != f else 0
+
+    def _debt_rows(self):
+        """The rows the buffer this frame paints lacks of the last frame's
+        picture, into `_rows` [y0, y1, whole]: the union of what the frames
+        since that buffer was painted changed, where each changed nothing
+        outside the focused window's page (its ring entry says what, else
+        the page's rect); the whole glass where one cannot say."""
+        r = self._rows
+        r[0] = r[1] = 0
+        r[2] = 1
+        n = self._pop_n()
+        f = self.ws._frames_drawn
+        if n > _SHOWN:
+            return r
+        ring = self._shown
+        y0 = y1 = 0
+        for k in range(f - n + 1, f):
+            e = ring[k % (_SHOWN + 1)]
+            if e[0] != k or not e[12]:
+                return r
+            if e[2]:
+                if e[5] <= e[3] or e[6] <= e[4]:
+                    continue                  # it changed nothing
+                a = e[8] + max(0, e[4])
+                b = e[8] + min(e[10], e[6])
+            else:
+                a = e[8]
+                b = e[8] + e[10]
+            if b <= a:
+                continue
+            if y1 <= y0:
+                y0, y1 = a, b
+            else:
+                y0 = a if a < y0 else y0
+                y1 = b if b > y1 else y1
+        r[0] = y0
+        r[1] = y1
+        r[2] = 0
+        return r
+
+    def _speaks(self, win):
+        """Whether `win`'s content is an app on the public UI API's verbs,
+        whose pages say what each frame changes (`UI`, `SPEAKS`), and not
+        one that speaks the shown protocol itself (`HELD`, which keeps its
+        own frames): it renders straight into the glass on every frame it
+        draws (`_direct_render`), the shown ring vouching where its pages
+        may move the last frame's pixels, and its window buffer is refilled
+        from the glass where a reader needs it (`_fresh`)."""
+        c = self._content_for(win.kind)
+        return (c is not None and not getattr(c, "HELD", False)
+                and (getattr(c, "UI", False) or getattr(c, "SPEAKS", False)))
+
+    def _refill(self, win):
+        """Bring `win.buf` up to the page the last painted frame showed, out
+        of that frame's buffer (the canvas's `copy_last_into`): only where
+        the shown ring says that frame left the window's content rect, where
+        it lies now and under the look in force, holding its page with
+        nothing over it. Whether it did."""
+        root = self._root_canvas
+        cli = getattr(root, "copy_last_into", None)
+        buf = win.buf
+        if cli is None or buf is None:
+            return False
+        last = self.ws._frames_drawn - 1
+        e = self._shown[last % (_SHOWN + 1)]
+        gen = self.ws.look.look_gen
+        if e[0] != last or e[1] is not win or e[11] != gen:
+            return False
+        cx, cy, cw, ch = win.content_rect()
+        if (e[7] != cx or e[8] != cy or e[9] != cw or e[10] != ch
+                or cw != buf.w or ch != buf.h):
+            return False
+        if not cli(buf, cx, cy, cw, ch):
+            return False
+        win._buf_stale = False
+        win._lag[4] = 0
+        win._look_gen = gen
+        self._refills += 1
+        return True
+
+    def _fresh(self, win):
+        """`win.buf` holds its page before a reader stamps it: refilled from
+        the last frame's buffer where the root keeps one apart from the one
+        this frame draws (a single buffer is being drawn over), else drawn
+        (`_prewarm`)."""
+        if win.buf is None or not win._buf_stale:
+            return
+        if getattr(self._root_canvas, "RETAINED_FRAMES", 1) > 1 and self._refill(win):
+            return
+        self._prewarm(win)
+
+    def refill_step(self):
+        """A frame with nothing to paint: the focused window's buffer,
+        which direct render left behind the glass, refilled from the last
+        frame's buffer (the stamp run backwards, off the paint path). Whether
+        it ran."""
+        win = self._wins.get(self._focus) if self._focus is not None else None
+        if (win is None or win.minimized or win.kind == "desktop" or win.buf is None
+                or not win._buf_stale or self.mode != "desktop"):
+            return False
+        return self._refill(win)
+
+    def _still_shown(self, win):
+        """Whether this frame need not draw `win`'s page at all: nothing
+        changed it (§14.1's legs, but for its buffer's: the glass is the
+        target) and the buffer this frame paints holds it, with nothing
+        over it and nothing lagging (the shown ring)."""
+        if not self._content_static(win, False) or not self._shown_ok(win):
+            return False
+        f = self.ws._frames_drawn
+        e = self._shown[(f - 1) % (_SHOWN + 1)]
+        if e[0] != f - 1 or e[11] != self.ws.look.look_gen:
+            return False
+        c = self._sc
+        c[0] = c[1] = c[2] = c[3] = 0
+        return self._shown_chain(win, f, c) and (c[2] <= c[0] or c[3] <= c[1])
+
+    def _content_static(self, win, buf=True):
         """True when this PAINTED frame provably did not change WIN's content,
         so the focused window's draw may be skipped and the stamp reuse the
         retained win.buf (the surface-granularity damage model,
@@ -3609,19 +3840,24 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
           (`ws.ui_moving`, the engine's `api_moving`) is one of them, read
           as the declaration it is.
 
-        win._buf_stale guards the buffer itself: a fresh/rebuilt buffer or a
-        gesture's _direct_render (which paints past the buffer straight into
-        the framebuffer) leaves buf behind the truth, so the next paint
-        renders live to refill it before the freeze may resume, and
+        win._buf_stale guards the buffer itself: a fresh/rebuilt buffer or
+        _direct_render (which paints past the buffer straight into the
+        framebuffer) leaves buf behind the truth, so it is refilled from the
+        glass first where the shown ring allows (`_refill`), else the next
+        paint renders live to refill it before the freeze may resume, and
         win._look_gen against `look_gen` re-renders a buffer drawn under an
-        older look."""
+        older look. `buf` False asks about the page alone: whether nothing
+        changed it, whatever its buffer holds."""
         ws = self.ws
-        gen = ws.look.look_gen
-        if win._look_gen != gen:
-            win._look_gen = gen
-            return False
+        if buf:
+            gen = ws.look.look_gen
+            if win._look_gen != gen:
+                win._look_gen = gen
+                return False
+            if win.buf is None or win._buf_stale:
+                return False
         d = ws._dirty
-        if (d and d is not MODE_MARK) or win.buf is None or win._buf_stale:
+        if d and d is not MODE_MARK:
             return False
         if win._marked != self._marks_for(win):
             return False                  # it holds a focus mark it no longer shows, or lacks one
@@ -3660,6 +3896,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 and self._live_resize_ok():
             # Live-body resize: the frame follows the edge, content crops.
             self._win_touched = True
+            self._fresh(win)
             g = self._resize
             self._draw_resizing_window(win, focused, g[10], g[11], g[5], g[6])
             return
@@ -3669,37 +3906,47 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                       and self._wins.get(self._resize[0]) is win))
         if moving:
             self._win_touched = True
+            self._fresh(win)              # the move stamps its page
         elif not focused and (win._look_gen != self.ws.look.look_gen or win._marked):
             # A background window's retained buffer under an older look, or
             # drawn while it had the focus mark.
             win._look_gen = self.ws.look.look_gen
             self._win_touched = True
             self._prewarm(win)
+        elif not focused:
+            self._fresh(win)
         if focused and not moving:
-            # DIRECT RENDER (#155): while this window's content is being scrolled
-            # or flung, draw it STRAIGHT into the framebuffer through a viewport
-            # and skip the 1:1 stamp entirely -- that copy is ~900KB of bus
-            # traffic per frame on the P4, against a measured 91MB/s ceiling.
-            #
-            # Gated to the gesture on purpose. Outside one, the render still goes
-            # into win.buf, because other paths stamp FROM that buffer without
-            # re-rendering (the drag freeze, a settled background window). Only
-            # during a gesture is nobody reading it -- the window repaints every
-            # frame anyway -- so letting it go stale for the duration is free,
-            # and the first ordinary frame after the release refills it.
+            # DIRECT RENDER (#155): draw the content STRAIGHT into the
+            # framebuffer through a viewport and skip the 1:1 stamp -- that
+            # copy is ~900KB of bus traffic per frame on the P4, against a
+            # measured 91MB/s ceiling -- while it is scrolled or flung, and on
+            # every frame of a content that says what its frames change
+            # (`_speaks`: a key's, a glide's, a coast's, a press's). Its window
+            # buffer is left behind the glass, and every reader of it brings it
+            # up first (`_fresh`; the idle frames' `refill_step`).
+            speaks = self._speaks(win)
             if (self._chrome_quiet
-                    and (self._content_gesture or self._content_flinging())
-                    and self._order and self._wins.get(self._order[-1]) is win
-                    and self._direct_render(win, dt)):
-                self._win_touched = True
-                if getattr(self._content_for(win.kind), "HELD", False):
-                    ok = self._shown_ok(win)
+                    and (speaks or self._content_gesture or self._content_flinging())
+                    and self._order and self._wins.get(self._order[-1]) is win):
+                if speaks and self._still_shown(win):
+                    # Nothing changed the page and this buffer holds it.
                     own = self._own
-                    if ok and own[4]:
-                        self._shown_part(win, own[0], own[1], own[2], own[3])
-                    self._shown_note(win, self.ws._frames_drawn, ok, True)
-                self._win_chrome(win, focused, quiet=self._chrome_quiet)
-                return
+                    own[0] = own[1] = own[2] = own[3] = 0
+                    own[4] = 1
+                    self._shown_note(win, self.ws._frames_drawn, True, False)
+                    self._win_chrome(win, focused, quiet=self._chrome_quiet)
+                    return
+                if self._direct_render(win, dt):
+                    self._win_touched = True
+                    held = getattr(self._content_for(win.kind), "HELD", False)
+                    if speaks or held:
+                        ok = self._shown_ok(win)
+                        own = self._own
+                        if ok and own[4]:
+                            self._shown_part(win, own[0], own[1], own[2], own[3])
+                        self._shown_note(win, self.ws._frames_drawn, ok, held)
+                    self._win_chrome(win, focused, quiet=self._chrome_quiet)
+                    return
             # CONTENT FREEZE (docs/surface_model_v1.md §14.1, first slice): on a
             # painted frame that provably did not change this window's content
             # (see _content_static), skip the re-render and let the retained-
@@ -3708,12 +3955,17 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             content = self._content_for(win.kind)
             held = getattr(content, "HELD", False)
             own = self._own
+            if (win._buf_stale and getattr(self._root_canvas, "RETAINED_FRAMES", 1) > 1
+                    and self._content_static(win, False)):
+                self._refill(win)         # the freeze's buffer, from the glass
             if not self._content_static(win):
                 # Live: render the focused app into its buffer at the window's
                 # layout, telling a content that speaks the shown protocol
                 # (§14.3) what of its page the buffer holds.
                 self._win_touched = True
                 self._install(win.ctx, win)
+                if speaks and not held:
+                    _ui_draw.window_frame(1)
                 try:
                     if held:
                         lag = win._lag
@@ -3723,11 +3975,14 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                             content.retained(lag[4], lag[0], lag[1], lag[2], lag[3])
                     content.draw(dt)
                 finally:
+                    _ui_draw.window_frame(0)
                     self._install(self._root_ctx)
                 self._row_over(win, win.buf, held)
                 win._buf_stale = False
                 if held:
                     self._own_of(win, content, held)
+                elif speaks:
+                    self._own_page(win)
             else:
                 own[0] = own[1] = own[2] = own[3] = 0
                 own[4] = 1                    # frozen: the page did not change
@@ -3736,7 +3991,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             # changed since that buffer last held it -- nothing at all on a
             # frame that changed nothing.
             f = self.ws._frames_drawn
-            ok = held and self._shown_ok(win)
+            ok = (held or speaks) and self._shown_ok(win)
             if ok and own[4]:
                 sc = self._sc
                 sc[0] = own[0]
@@ -3760,7 +4015,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                     self._shown_note(win, f, ok, held)
                     self._win_chrome(win, focused, quiet=self._chrome_quiet)
                     return
-            if held:
+            if held or speaks:
                 self._shown_note(win, f, ok, held)
         # Stamp-defer (#58 drag; extended to CONTENT gestures 2026-07-26): on a
         # device with an async 1:1 blitter (P4SystemCanvas.blit_strip_async ->
@@ -3791,7 +4046,11 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if asb is not None:
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
                 cx, cy, _cw, _ch = win.content_rect()
+                _perf = getattr(self.ws, "perf_capture", False)
+                _t0 = _ticks_ms() if _perf else 0
                 if asb(win.buf, cx, cy):
+                    if _perf:                 # the stamp's CPU share: its submit
+                        self.ws._pf_wm_stamp = _ticks_ms() - _t0
                     return
                 # non-fit / refusal: fall through to the sync stamp (the chrome
                 # is already down; the second draw below is harmless overdraw).

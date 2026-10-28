@@ -12,6 +12,8 @@ that shifted or drew rows alone is held above a floor (L8's silent-disable
 direction), and the engine's record audit fails a shift frame whose stops
 moved outside its floor (L8's correctness direction)."""
 
+import os
+
 import pytest
 
 from cart_store_fixtures import MemNet, Repo
@@ -67,6 +69,18 @@ class _SameFree:
         return (1 << 30, 4096)
 
 
+def _settle_mtimes(root):
+    """The drawings' files dated one second apart in their names' order:
+    My Art lists them newest first, and two stores written in the same
+    second would otherwise order them as the clock fell."""
+    import os
+    for dirpath, _dirs, files in os.walk(str(root)):
+        for f in files:
+            if f.lower().startswith("drawing"):
+                n = int("".join(ch for ch in f if ch.isdigit()) or 0)
+                os.utime(os.path.join(dirpath, f), (1700000000 + n, 1700000000 + n))
+
+
 def _console(tmp_path, app, ships):
     import json
     from runtime import cart_index as ci
@@ -87,6 +101,7 @@ def _console(tmp_path, app, ships):
             moy_carts.save_file("drawings", "Drawing %02d" % i,
                                 moy_carts.encode_moyimg(32, 24, bytes([8 + i % 8]) * 768),
                                 ws.carts_root)
+        _settle_mtimes(os.path.dirname(str(ws.carts_root).rstrip("/")))
         assert ws.open_app(ws._apps_by_id["myart"])
     elif app == "getcarts":
         repo, net = _shelf_net()
@@ -211,3 +226,4 @@ def test_drags_flings_and_key_steps_shift_byte_for_byte(tmp_path, app, bufs):
     p.settle()
     assert p.share() > 0.5, "%s shifted or drew rows on %.2f of its painted frames: %r" % (
         app, p.share(), p.kinds)
+

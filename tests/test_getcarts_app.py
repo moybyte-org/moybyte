@@ -265,7 +265,8 @@ def test_the_layouts_rects_are_where_the_buttons_draw(tmp_path):
 
 def test_a_press_in_the_draw_owes_the_next_frame_a_repaint(tmp_path):
     """Get is pressed inside the cart page's draw, which spends that draw's
-    `all`: the page it opens is owed to the frame after, as an `again`."""
+    `all`: the page it opens is owed to the frame after, through the app's
+    host (`AppHost.again`), which the console paints with no input."""
     repo, net = _shelf()
     ws, app = _ws(tmp_path, net, [repo.url("index.json")])
     _open(ws, app)
@@ -274,4 +275,4 @@ def test_a_press_in_the_draw_owes_the_next_frame_a_repaint(tmp_path):
     app.handle_input(_In("a"))
     ws._dirty = True
     ws.frame(_DT)
-    assert app.phase != "cart" and ws._damage_take()
+    assert app.phase != "cart" and app._ui.owed and ws._dirty

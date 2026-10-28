@@ -308,6 +308,9 @@ class SettingsLayer:
     domain = "system"
     zone_gen = 0
     back_title = "Settings"
+    # Its pages are the public UI API's, whose frames say what they change:
+    # in a window it draws straight into the glass (`WindowedWM._speaks`).
+    SPEAKS = True
 
     _SETTINGS_ROWS = (
         # WIFI (#38, spec shell_ux_v1.md §10: wifi setup lives in Settings): a
