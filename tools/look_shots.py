@@ -3252,24 +3252,33 @@ def _code_pairs(ws, img):
 def _caret_pairs(ws, probe, img):
     """A ground column stands between the code caret and the next stem
     (design review R3-24), across the caret's middle third: the caret is no
-    bold stroke (a glyph's foot, an underscore, may meet it)."""
+    bold stroke (a glyph's foot, an underscore, may meet it). The caret is
+    the text view's (native/moy_ui/moy_ui_text.c): one scale wide, in the
+    column before its cell, a scale in from its glyph box's top and foot."""
     t = getattr(ws.code_layer, "_t", None)
-    if ws.screen != "menu" or t is None or "caret" not in t:
+    ed = ws.editor
+    if ws.screen != "menu" or t is None or "caret" not in t or ed is None:
         return []
     px = img.load()
-    lay, ox, _oy = _editor_origin(ws, "code_layout", ws.code_layout)
+    lay, ox, oy = _editor_origin(ws, "code_layout", ws.code_layout)
     if lay is None:
         return []
-    for x, y, w, h, c in probe.last["rects"]:
-        # the caret: in the code's columns (a current-line mark in its colour
-        # stands in the inset)
-        if c == t["caret"] and h > 2 * w and ox + lay.x0 <= x and x + w < img.width:
-            col = x + w
-            ys = range(y + h // 3, y + h - h // 3)    # a stem's, not an underscore's
-            ground = px[col, y + h // 2]
-            gap = 1 if all(px[col, yy] == ground for yy in ys) and                 all(px[col, yy] != px[x, yy] for yy in ys) else 0
-            return [_measure("caret to next stem gap", gap, 1, gap >= 1)]
-    return []
+    cl = ws.code_layer
+    vcol, vrow = ed.col - ed.left, ed.row - ed.top
+    if not (0 <= vcol <= ed.COLS and 0 <= vrow < ed.ROWS):
+        return []
+    fs = lay.fs
+    x = ox + cl._text_x0(lay, ed) + vcol * lay.cell - fs
+    y = oy + cl._y0(lay) + vrow * lay.lh + fs
+    w, h = fs, lay.text_h - 2 * fs
+    if x + w >= img.width:
+        return []
+    col = x + w
+    ys = range(y + h // 3, y + h - h // 3)    # a stem's, not an underscore's
+    ground = px[col, y + h // 2]
+    gap = 1 if all(px[col, yy] == ground for yy in ys) and \
+        all(px[col, yy] != px[x, yy] for yy in ys) else 0
+    return [_measure("caret to next stem gap", gap, 1, gap >= 1)]
 
 
 def _sprite_pairs(ws, img):

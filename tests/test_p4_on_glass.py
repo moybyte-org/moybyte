@@ -106,7 +106,12 @@ TF_CARD_SRAM = 844
 # PSRAM block's pointer), 270 bytes of .bss by the objects' sizes,
 # 2026-10-26; the scratch and the band themselves are PSRAM.
 KERNEL_SRAM = 1288 + 48 + 40 + 56 + 304 + 1455 + 4 + 5 + 38 + 4 + 8 + 4 + 756 - 312 + 16 + 270
-WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM, 188416)
+# And less TEXT_SRAM, the text view's statics (native/moy_ui/moy_ui_text.c,
+# moy_ui_api.c, moy_ui_wasm.c, modmoy_ui.c: the code tones, the compiled
+# face's line cursor and the pointers to the block the views share, which
+# is PSRAM): 44 bytes of .bss and .data by the objects' sizes, 2026-10-28.
+TEXT_SRAM = 44
+WASM_IDLE_BASELINE = (276743 - TF_CARD_SRAM - KERNEL_SRAM - TEXT_SRAM, 188416)
 WASM_BOARD_DIR = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 
 

@@ -138,6 +138,23 @@ class _Span(c.Structure):
     _fields_ = [("p", c.c_void_p), ("n", c.c_uint16)]
 
 
+# The TextView's view words this face writes (moy_ui_text.h's MOY_UI_TV_*;
+# runtime/ui_draw.py's TV_* names them all, tests/test_text_view.py pins both).
+_TV_TOP, _TV_LINES = 13, 45
+
+
+_LINE_FN = c.CFUNCTYPE(c.c_void_p, c.c_void_p, c.c_int32, c.POINTER(c.c_size_t))
+
+
+class _Lines(c.Structure):
+    _fields_ = [("src", c.c_void_p), ("n", c.c_int32), ("get", _LINE_FN)]
+
+
+class _TRow(c.Structure):
+    _fields_ = [("p", c.c_void_p), ("n", c.c_uint32), ("a", c.c_uint32), ("b", c.c_uint32),
+                ("ca", c.c_int32), ("line", c.c_int32)]
+
+
 class _Depth(c.Structure):
     _fields_ = ([(n, c.c_uint8) for n in ("win_r", "card_r", "key_r", "corners",
                                           "stepped", "shadow", "edges", "frames")]
@@ -324,6 +341,19 @@ _DRAW_SIGS = (
     ("moy_ui_api_card_clip", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_floor", [c.c_void_p, c.c_void_p, _I], _I),
     ("moy_ui_api_floor_box", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_pop_box", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_text_view", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.c_void_p,
+                              c.c_void_p, c.c_void_p], None),
+    ("moy_ui_text_tones", [c.c_void_p], None),
+    ("moy_ui_text_words", [_I, c.c_char_p, c.c_size_t, _I], _I),
+    ("moy_ui_text_words_reset", [], None),
+    ("moy_ui_text_size", [], c.c_size_t),
+    ("moy_ui_text_runs", [c.c_char_p, c.c_size_t, _I, c.c_void_p, _I], _I),
+    ("moy_ui_text_rows", [c.c_void_p], _I),
+    ("moy_ui_text_reset", [c.c_void_p], None),
+    ("moy_ui_text_plan", [c.c_void_p, c.c_void_p, c.c_void_p, _I, _Span, _Span], _I),
+    ("moy_ui_text_draw", [c.c_void_p, c.POINTER(_Sink), c.c_void_p, c.c_void_p, _I, _Span,
+                          _Span, _I], _I),
     ("moy_ui_api_keep", [c.c_void_p, c.POINTER(_Sink), _Span, _I], _I),
     ("moy_ui_api_audit", [_I], c.c_uint32),
     ("moy_ui_api_fades", [_I], c.c_uint32),
@@ -1312,6 +1342,10 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_floor_box(p, (c.c_int32 * 4).from_buffer(out)))
 
+    def api_pop_box(ctx, out):
+        p, _k = _ctx(ctx)
+        return bool(lib.moy_ui_api_pop_box(p, (c.c_int32 * 4).from_buffer(out)))
+
     def api_card_clip(ctx, r):
         p, _k = _ctx(ctx)
         v = (c.c_int32 * 4).from_buffer(r)
@@ -1408,12 +1442,103 @@ def binding():
         d = lib.moy_ui_api_dup(p)
         return None if d is None else d.decode("utf-8", "replace")
 
+
+    # -- TextView (native/moy_ui/moy_ui_text.h) ------------------------------------
+    def text_size():
+        return int(lib.moy_ui_text_size())
+
+    def text_words(syn, words, tone):
+        b = bytes(words)
+        _check(lib.moy_ui_text_words(int(syn), b, len(b), int(tone)))
+
+    def api_text_view(ctx, cv, look, id, lines, opt, o):
+        p, _k = _ctx(ctx)
+        s = sink(cv, look)
+        sp, keep = span(id)
+        bufs = {}
+
+        def get(_src, i, n):
+            if not 0 <= i < len(lines):
+                n[0] = 0
+                return None
+            b = bufs.get(i)
+            if b is None:
+                raw = _b(lines[i])
+                b = bufs[i] = (c.create_string_buffer(raw, len(raw)), len(raw))
+            n[0] = b[1]
+            return c.addressof(b[0])
+        fn = _LINE_FN(get)
+        L = _Lines(None, len(lines), fn)
+        w = (c.c_int32 * 7)(*[int(v) for v in opt])
+        ob, okeep = _over(o)
+        out = (c.c_int32 * 2)()
+        lib.moy_ui_api_text_view(p, c.byref(s), sp, c.byref(L), c.addressof(w), ob,
+                                 c.addressof(out))
+        return (out[0], out[1])
+
+    def text_tones(tones):
+        t = (c.c_int16 * 6)(*[-1 if v is None else int(v) for v in list(tones)[:6]])
+        lib.moy_ui_text_tones(c.addressof(t))
+
+    def text_runs(line, syn):
+        b = _b(line)
+        k = int(lib.moy_ui_text_runs(b, len(b), int(syn), None, 0))
+        w = (c.c_int32 * max(1, 4 * k))()
+        lib.moy_ui_text_runs(b, len(b), int(syn), c.addressof(w), 4 * k)
+        return list(w[:4 * k])
+
+    def _tv_rows(view, lines):
+        v = (c.c_int32 * len(view)).from_buffer(view)
+        v[_TV_LINES] = len(lines)
+        n = min(256, int(lib.moy_ui_text_rows(c.addressof(v))))
+        rows = (_TRow * max(1, n))()
+        keep = []
+        top = v[_TV_TOP]
+        for i in range(n):
+            k = top + i
+            r = rows[i]
+            r.line = k
+            if 0 <= k < len(lines):
+                b = _b(lines[k])
+                buf = c.create_string_buffer(b, len(b))
+                keep.append(buf)
+                r.p = c.addressof(buf)
+                r.n = r.b = len(b)
+            else:
+                r.p = None
+        return v, rows, n, keep
+
+    def text_plan(state, view, lines, err, find):
+        v, rows, n, _keep = _tv_rows(view, lines)
+        e, ek = span(err)
+        f, fk = span(find)
+        st = (c.c_uint8 * len(state)).from_buffer(state)
+        return bool(lib.moy_ui_text_plan(c.addressof(st), c.addressof(v), c.addressof(rows), n,
+                                         e, f))
+
+    def text_draw(state, cv, look, view, lines, err, find, whole):
+        s = sink(cv, look)
+        v, rows, n, _keep = _tv_rows(view, lines)
+        e, ek = span(err)
+        f, fk = span(find)
+        st = (c.c_uint8 * len(state)).from_buffer(state)
+        return int(lib.moy_ui_text_draw(c.addressof(st), c.byref(s), c.addressof(v),
+                                        c.addressof(rows), n, e, f, 1 if whole else 0))
+
+    def text_reset(state):
+        st = (c.c_uint8 * len(state)).from_buffer(state)
+        lib.moy_ui_text_reset(c.addressof(st))
+
+    for f in (api_text_view, text_tones, text_size, text_words, text_runs, text_plan, text_draw, text_reset):
+        setattr(m, f.__name__, f)
+
     for f in (api_size, api_begin, api_page, api_label, api_button, api_toggle, api_slider,
               api_list, api_group, api_value, api_choice, api_hints, api_hints_w, api_icon,
               api_progress,
               api_box, api_table, api_scroll, api_field, api_dialog, api_wash, api_wash_box,
               api_owes, api_moved, api_moving, api_offset, api_fades,
               api_shift_plan, api_shift_arm, api_shift_drawn, api_band, api_floor, api_floor_box,
+              api_pop_box,
               api_card_clip, api_keep, api_audit,
               api_end,
               api_table_rows, api_table_pics,

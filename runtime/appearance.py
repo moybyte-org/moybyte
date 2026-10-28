@@ -1956,6 +1956,7 @@ class Appearance:
         if put is not None:
             put(live.block)
         _ui_draw._C.theme_block(live.block, live.used)
+        _ui_draw.text_tones(live.content)
         _ui_draw.use_buttons(live)
         self.live = live
         self.ws.theme_colors = live.tokens

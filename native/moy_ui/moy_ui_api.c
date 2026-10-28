@@ -752,6 +752,7 @@ int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, i
     c->typed_box.w = 0;
     c->hint_band.h = 0;
     c->tip_at.w = 0;
+    c->tip_shown = 0;
     c->bar_seen = 0;
     int settled = !c->owe;
     int owed_last = c->owe;
@@ -3130,6 +3131,265 @@ void moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
               (o->nav == 0 ? STOP_NAV_OFF : 0) | (placed ? STOP_AT : 0), o);
 }
 
+
+// -- ui.text_view ------------------------------------------------------------------------
+
+static int16_t s_tones[6] = {-1, -1, -1, -1, -1, -1};
+
+void moy_ui_text_tones(const int16_t tones[6]) {
+    memcpy(s_tones, tones, sizeof(s_tones));
+}
+
+#define TEXT_SALT 0x27d4eb2fu
+#define TEXT_PAD 4                  // the text's inset from the view's left, at the scale
+#define TEXT_WRAP_ROWS MOY_UI_TEXT_BREAKS
+static moy_ui_trow_t *s_trows;
+static uint32_t *s_starts;
+
+// Line i's rows at `cols` columns: its breaks into s_starts (the first
+// TEXT_WRAP_ROWS of them), the count answered.
+static int text_line_rows(const moy_ui_lines_t *L, int32_t i, int wrap, int cols, int sgr,
+                          const uint8_t **p, size_t *n) {
+    *p = L->get(L->src, i, n);
+    if (*p == NULL) {
+        *n = 0;
+        *p = (const uint8_t *)"";
+    }
+    if (!wrap) {
+        s_starts[0] = 0;
+        return 1;
+    }
+    return moy_ui_text_wrap(*p, *n, cols, sgr, s_starts, TEXT_WRAP_ROWS);
+}
+
+static int tone_of(int look, int tt) {
+    static const uint8_t token[MOY_UI_TT_N] = {
+        MOY_UI_T_INK, MOY_UI_T_VALUE, MOY_UI_T_INK, MOY_UI_T_INK, MOY_UI_T_INK_DIM,
+        MOY_UI_T_INK_ACCENT, MOY_UI_T_VALUE, MOY_UI_T_DANGER, MOY_UI_T_INK_DIM,
+    };
+    if (tt < 6 && s_tones[tt] >= 0) {
+        return s_tones[tt];
+    }
+    return moy_ui_token(look, token[tt]);
+}
+
+void moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
+                          const moy_ui_lines_t *L, const int32_t *opt, const moy_ui_over_t *o,
+                          int32_t out[2]) {
+    o = over(o);
+    out[0] = out[1] = 0;
+    s_trows = moy_ui_text_scratch();
+    s_starts = moy_ui_text_breaks();
+    if (c->n_nest >= MOY_UI_API_NEST || id.n == 0 || s_trows == NULL) {
+        return;
+    }
+    group_close(c, s);
+    int fs = c->fs;
+    moy_font_info_t fi;
+    uint32_t font = moy_ui_font(MOY_UI_FONT_MONO, &fi);
+    int cell = (fi.w > 0 ? fi.w : 8) * fs, th, lh;
+    if (font != 0 && fi.first == 0) {
+        th = fi.h * fs;
+        lh = th;
+    } else {
+        th = 8 * fs;
+        lh = ((fi.line > 0 ? fi.line : 8) + 2) * fs;
+    }
+    // its box: ui.at's, or `rows` rows of the page (the rest of it)
+    moy_ui_box_t b;
+    int used = 0, placed = c->has_at;
+    if (c->has_at) {
+        b = c->at;
+        c->has_at = 0;
+    } else {
+        int top = c->page.y + c->y - c->scroll, bottom = c->page.y + c->page.h;
+        int h = opt[MOY_UI_TXO_ROWS] > 0 ? opt[MOY_UI_TXO_ROWS] * lh : bottom - top;
+        b = (moy_ui_box_t){c->page.x, (int16_t)top, c->page.w, (int16_t)(h > 0 ? h : 0)};
+        used = b.h;
+    }
+    int wrap = opt[MOY_UI_TXO_WRAP] != 0, syn = opt[MOY_UI_TXO_SYNTAX];
+    int sgr = syn == MOY_UI_SYN_SGR;
+    int gc = 0;
+    if (opt[MOY_UI_TXO_GUTTER]) {
+        for (int32_t n = L->n > 0 ? L->n : 1; n > 0; n /= 10) {
+            gc++;
+        }
+        gc++;
+    }
+    int pad = TEXT_PAD * fs;
+    int cols = (b.w - 2 * pad - gc * cell) / (cell > 0 ? cell : 1);
+    cols = cols < 1 ? 1 : cols;
+    // its rows: a line each, or each line's wrapped rows
+    int32_t total = 0;
+    if (!wrap) {
+        total = L->n;
+    } else {
+        for (int32_t i = 0; i < L->n; i++) {
+            const uint8_t *p;
+            size_t n;
+            total += text_line_rows(L, i, 1, cols, sgr, &p, &n);
+        }
+    }
+    int32_t content = total * lh;
+    content = content > 32767 ? 32767 : content;
+    uint32_t rid = hash(id.p, id.n, TEXT_SALT);
+    moy_ui_keep_t *k0 = keep_of(c, rid);
+    int32_t was_b = k0 != NULL ? k0->b : 0;
+    int was_foot = k0 != NULL && was_b > 0 && k0->a >= was_b - b.h;
+    // its rows are its own gens (the view's record): the region carries a
+    // gen whatever the app gives, so its frames may move and draw rows
+    moy_ui_over_t og = *o;
+    if (!og.has_gen) {
+        og.has_gen = 1;
+        og.gen = 0;
+    }
+    nest_open(c, 1, rid, b, used, (o->nav == 0 ? STOP_NAV_OFF : 0) | (placed ? STOP_AT : 0), &og);
+    moy_ui_keep_t *k = page_keep(c);
+    int32_t scroll = c->scroll;
+    if (k != NULL) {
+        int32_t most = content - b.h;
+        most = most < 0 ? 0 : most;
+        if (opt[MOY_UI_TXO_FOLLOW] && was_foot && content > was_b && scroll < most
+            && !(k->sc.flags & MOY_UI_SCROLL_DRAG)) {
+            moy_ui_scroll_glide_to(&k->sc, scroll, most, 0, content, b.h);
+        }
+    }
+    // the rows R shows
+    int32_t v[MOY_UI_TV_LEN];
+    memset(v, 0, sizeof(v));
+    v[MOY_UI_TV_X] = b.x;
+    v[MOY_UI_TV_Y] = b.y;
+    v[MOY_UI_TV_W] = b.w;
+    v[MOY_UI_TV_H] = b.h;
+    v[MOY_UI_TV_LH] = lh;
+    v[MOY_UI_TV_CELL] = cell;
+    v[MOY_UI_TV_TEXT_H] = th;
+    v[MOY_UI_TV_FS] = fs;
+    v[MOY_UI_TV_FONT] = (int32_t)font;
+    v[MOY_UI_TV_TX] = b.x + pad;
+    v[MOY_UI_TV_MARK] = -1;
+    v[MOY_UI_TV_GUTTER] = gc;
+    v[MOY_UI_TV_COLS] = cols;
+    v[MOY_UI_TV_TOP] = scroll / lh;
+    v[MOY_UI_TV_OFF] = scroll % lh;
+    v[MOY_UI_TV_CARET_ROW] = opt[MOY_UI_TXO_CARET_LINE];
+    v[MOY_UI_TV_CARET_COL] = opt[MOY_UI_TXO_CARET_COL];
+    v[MOY_UI_TV_SEL_R0] = -1;
+    v[MOY_UI_TV_ERR_ROW] = -1;
+    v[MOY_UI_TV_SYNTAX] = syn;
+    v[MOY_UI_TV_FLAGS] = MOY_UI_TVF_GROUND | MOY_UI_TVF_CLIP | (wrap ? 0 : MOY_UI_TVF_FADE);
+    int look = s->look;
+    v[MOY_UI_TV_BG] = moy_ui_token(look, MOY_UI_T_SURFACE);
+    v[MOY_UI_TV_CARET] = moy_ui_token(look, MOY_UI_T_INK_ACCENT);
+    v[MOY_UI_TV_SEL] = moy_ui_token(look, MOY_UI_T_HILITE);
+    v[MOY_UI_TV_GUT] = moy_ui_token(look, MOY_UI_T_INK_DIM);
+    v[MOY_UI_TV_GUT_CUR] = moy_ui_token(look, MOY_UI_T_INK);
+    v[MOY_UI_TV_VALUE] = moy_ui_token(look, MOY_UI_T_VALUE);
+    v[MOY_UI_TV_ERR] = moy_ui_token(look, MOY_UI_T_DANGER);
+    for (int i = 0; i < MOY_UI_TT_N; i++) {
+        v[MOY_UI_TV_TONE0 + i] = tone_of(look, i);
+    }
+    v[MOY_UI_TV_KEY] = (int32_t)(c->cls | (c->win << 1));
+    int nrows = moy_ui_text_rows(&v[0]);
+    nrows = nrows < MOY_UI_TEXT_ROWS ? nrows : MOY_UI_TEXT_ROWS;
+    int32_t top = v[MOY_UI_TV_TOP];
+    if (!wrap) {
+        for (int i = 0; i < nrows; i++) {
+            moy_ui_trow_t *r = &s_trows[i];
+            int32_t ln = top + i;
+            r->line = ln;
+            r->ca = 0;
+            r->a = 0;
+            size_t n = 0;
+            r->p = ln < L->n ? L->get(L->src, ln, &n) : NULL;
+            r->n = r->b = (uint32_t)n;
+        }
+        out[0] = top;
+    } else {
+        int32_t row = 0;
+        int got = 0;
+        out[0] = -1;
+        for (int32_t i = 0; i < L->n && got < nrows; i++) {
+            const uint8_t *p;
+            size_t n;
+            int m = text_line_rows(L, i, 1, cols, sgr, &p, &n);
+            if (row + m <= top) {
+                row += m;
+                continue;
+            }
+            for (int j = 0; j < m && got < nrows; j++, row++) {
+                if (row < top) {
+                    continue;
+                }
+                moy_ui_trow_t *r = &s_trows[got++];
+                uint32_t a = j < TEXT_WRAP_ROWS ? s_starts[j] : (uint32_t)n;
+                uint32_t e = j + 1 < m && j + 1 < TEXT_WRAP_ROWS ? s_starts[j + 1] : (uint32_t)n;
+                r->p = p;
+                r->n = (uint32_t)n;
+                r->a = a;
+                r->b = e;
+                r->ca = moy_ui_text_cols(p, a, sgr);
+                r->line = i;
+                if (out[0] < 0) {
+                    out[0] = i;
+                }
+            }
+        }
+        for (; got < nrows; got++) {
+            s_trows[got].p = NULL;
+            s_trows[got].line = -1;
+        }
+        out[0] = out[0] < 0 ? 0 : out[0];
+    }
+    out[1] = nrows;
+    // the record: this view's, or none where another view of the context
+    // holds it this frame
+    moy_ui_text_t *t = &c->text;
+    int recorded = c->text_id == 0 || c->text_id == rid;
+    if (recorded) {
+        c->text_id = rid;
+    }
+    moy_ui_span_t none = {(const uint8_t *)"", 0};
+    if (recorded && armed(c) && c->fl_stage == 1) {
+        // a floor frame: the rows whose gen moved join the floor
+        // the foot's fade, where the rows' height moved under it this frame
+        if (content != was_b && (content > scroll + b.h || was_b > scroll + b.h)) {
+            int fh = FADE_H * fs;
+            floor_add(c, (rc_t){b.x, b.y + b.h - fh, b.x + b.w, b.y + b.h}, 1);
+        }
+        if (!moy_ui_text_plan(t, v, s_trows, nrows, none, none)) {
+            floor_add(c, rc_of(b), 1);
+        } else {
+            for (int i = 0; i < nrows; i++) {
+                if ((t->floor[i >> 3] >> (i & 7)) & 1) {
+                    int y = b.y + i * lh - v[MOY_UI_TV_OFF];
+                    floor_add(c, (rc_t){b.x, y, b.x + b.w, y + lh}, 1);
+                }
+            }
+        }
+    }
+    if (!recorded && armed(c) && c->fl_stage == 1) {
+        floor_add(c, rc_of(b), 1);      // no record to say which rows moved: all of them
+    }
+    int64_t was = moy_text_print_font_use(font);
+    clip_t kk;
+    EACH_PIECE(c, kk, s, b) {
+        moy_ui_text_paint(NULL, s, v, s_trows, nrows, none, none, 1);
+    }
+    if (was >= 0) {
+        moy_text_print_font_use((uint32_t)was);
+    }
+    if (recorded) {
+        moy_ui_text_note(t, v, s_trows, nrows, none, none);
+    }
+    // its rows' height, the scroll's range
+    c->y = (int16_t)content;
+    if (k != NULL) {
+        k->b = content;
+    }
+    nest_close(c, s, 1);
+}
+
 void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
                       const uint8_t *cols, size_t cols_n, const uint8_t *cells, size_t cells_n,
                       int32_t cur, const moy_ui_over_t *o, int32_t out[2]) {
@@ -4270,6 +4530,7 @@ void moy_ui_api_end(moy_ui_ctx_t *c, const moy_ui_sink_t *s) {
         c->fl_top = 1;
         moy_ui_tip_draw(s, c->tip_at, t, c->surface, c->fs, ground_of(c));
         c->tip_at.w = 0;
+        c->tip_shown = 1;
     }
 }
 
@@ -4474,6 +4735,16 @@ int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap) {
         out[4 * i + 3] = c->fl[i].h;
     }
     return c->fl_n;
+}
+
+int moy_ui_api_pop_box(const moy_ui_ctx_t *c, int32_t out[4]) {
+    moy_ui_box_t b = c->tip_shown ? c->surface
+                     : c->pop_id ? c->pop_card : (moy_ui_box_t){0, 0, 0, 0};
+    out[0] = b.x;
+    out[1] = b.y;
+    out[2] = b.w;
+    out[3] = b.h;
+    return b.w > 0 && b.h > 0;
 }
 
 int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]) {

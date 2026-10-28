@@ -45,6 +45,7 @@ verbs -- the rect-taking widgets, the marks, `ScrollRegion` -- is
 """
 
 import moy_ui as _C
+from array import array
 
 try:
     from struct import pack as _pack
@@ -504,6 +505,39 @@ def scroll(id=None, o=None):
     that move focus and by a drag, until `scroll()` ends it."""
     t = _T
     _C.api_scroll(t[0], t[1], t[2], "" if id is None else id, _over(o))
+
+
+_TXO = array("i", [0] * 7)              # text_view's options (moy_ui_api.h's MOY_UI_TXO_*)
+_SYNTAXES = ("plain", "python", "lua", "json", "sgr")
+
+
+def text_view(id, lines, o=None):
+    """A text area of `lines` (a list of str), its own scroll region: a drag
+    scrolls it and its release coasts, the wheel steps it. In `at`'s rect,
+    else stacked `o`'s `rows` rows tall (the rest of the page where none).
+    `o`: `wrap` (long lines break at the view's width, else they are cut),
+    `syntax` ("sgr", the default: a terminal's `ESC [ n m` colours, which take
+    no column; "plain", "python", "lua", "json"), `follow` (a view at its foot
+    when lines are added glides to the new foot: a log, a terminal),
+    `gutter` (line numbers), `caret` (a line and column: an input line's).
+    In the mono face; only the rows that changed draw. Answers the first
+    line shown and the rows shown."""
+    t = _T
+    opt = _TXO
+    o = o or {}
+    opt[0] = int(o.get("rows", 0) or 0)
+    opt[1] = 1 if o.get("wrap") else 0
+    syn = o.get("syntax", "sgr")
+    opt[2] = _SYNTAXES.index(syn) if syn in _SYNTAXES else 4
+    opt[3] = 1 if o.get("follow") else 0
+    opt[4] = 1 if o.get("gutter") else 0
+    caret = o.get("caret")
+    if caret:
+        opt[5] = int(caret[0])
+        opt[6] = int(caret[1])
+    else:
+        opt[5] = opt[6] = -1
+    return _C.api_text_view(t[0], t[1], t[2], id, lines, opt, _over(o))
 
 
 def field(label, text, max=32, o=None):

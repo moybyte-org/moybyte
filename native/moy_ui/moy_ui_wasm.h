@@ -32,7 +32,7 @@
 
 #include "moy_ui_api.h"
 
-#define MOY_UI_WASM_ROWS 31
+#define MOY_UI_WASM_ROWS 32
 
 // The run's draw target, from the module that drives the run (modmoycore.c on
 // an image, runtime/moyhost_wasm.c on the host): a libmoy moy_canvas, or NULL
@@ -84,6 +84,8 @@ int moy_ui_run_table(void *target, moy_ui_span_t label, const uint8_t *cols, siz
                      const uint8_t *cells, size_t cells_n, int32_t cur, const moy_ui_over_t *o,
                      int32_t out[2]);
 int moy_ui_run_scroll(void *target, moy_ui_span_t id, const moy_ui_over_t *o);
+int moy_ui_run_text_view(void *target, moy_ui_span_t id, const moy_ui_lines_t *lines,
+                         const int32_t *opt, const moy_ui_over_t *o, int32_t out[2]);
 int moy_ui_run_field(void *target, moy_ui_span_t label, uint8_t *buf, size_t cap, size_t len,
                      const moy_ui_over_t *o, int32_t *out);
 int moy_ui_run_dialog(void *target, moy_ui_span_t title, const uint8_t *buttons, size_t n,
@@ -147,6 +149,12 @@ int32_t moy_ui_wasm_progress(void *e, const uint8_t *label, uint32_t n, int32_t 
 int32_t moy_ui_wasm_table(void *e, const uint8_t *label, uint32_t n, const uint8_t *cols,
                           uint32_t cn, const uint8_t *cells, uint32_t en, int32_t cur,
                           const uint8_t *o, uint32_t on, uint8_t *out, uint32_t cap);
+// ui_text_view: its lines NUL-separated, its options the MOY_UI_TXO_* words
+// (little-endian i32s); writes the first line shown and the rows shown at
+// `out`.
+int32_t moy_ui_wasm_text_view(void *e, const uint8_t *id, uint32_t n, const uint8_t *lines,
+                              uint32_t ln, const uint8_t *opt, uint32_t optn, const uint8_t *o,
+                              uint32_t on, uint8_t *out, uint32_t cap);
 // ui_scroll with an id of length 0 ends the region.
 int32_t moy_ui_wasm_scroll(void *e, const uint8_t *id, uint32_t n, const uint8_t *o, uint32_t on);
 // ui_field edits the `len` bytes at buf (its room `cap`): the new length,

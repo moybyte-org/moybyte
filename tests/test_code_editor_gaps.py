@@ -823,7 +823,7 @@ def _band(cv, x0, x1, y, h):
 
 
 def test_a_line_longer_than_the_view_fades_over_its_last_12_pixels(tmp_path):
-    from runtime.code_layer import _FADE
+    _FADE = 12                                   # the fade's width at the scale (moy_ui_text.c)
     ws, _drv, lay, ed = _look_ws(tmp_path, "moy")
     cv = ws.sys_canvas
     tx0 = ws.code_layer._text_x0(lay, ed)        # past the line-number gutter

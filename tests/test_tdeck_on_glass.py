@@ -118,7 +118,12 @@ KERNEL_SRAM = 968 + 56 + 40 + 56 - 9824 + 1180 + 4 + 5 + 38 + 4 + 8 + 4 + 392 - 
 # map holds at the same sizes. The look's corner and shadow caches and the UI
 # API's run context are PSRAM.
 LOOK_SRAM = 1272
-WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM - LOOK_SRAM, 81920)
+# And less TEXT_SRAM, the text view's statics (native/moy_ui/moy_ui_text.c,
+# moy_ui_api.c, moy_ui_wasm.c, modmoy_ui.c: the code tones, the compiled
+# face's line cursor and the pointers to the block the views share, which
+# is PSRAM): 44 bytes of .bss and .data by the objects' sizes, 2026-10-28.
+TEXT_SRAM = 44
+WASM_IDLE_BASELINE = (122343 - EXFAT_SRAM - KERNEL_SRAM - LOOK_SRAM - TEXT_SRAM, 81920)
 WASM_BOARD_DIR = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 

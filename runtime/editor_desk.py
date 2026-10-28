@@ -71,6 +71,7 @@ _ON_VERBS = ("music",)
 # before anything else (Sprite, Map and Scene their `body_fill`, Code its
 # `cls`, Settings its `ui.page`): their card is drawn down to the header
 # only, its body never seen (tests/test_editor_desk.py holds it).
+_CODE_TABS = ("code", "theme_config")
 _FILLS_BODY = ("paint", "map", "scene", "code", "cards", "theme_config", "theme_sprites")
 
 # Which workspace shows an Editor tab, for a tab opened from elsewhere (a
@@ -165,6 +166,14 @@ class EditorDesk(Layer):
         self._changed = None
         self._acts = 0                  # input the desk took itself (a press, a chord)
         self._box = array("i", [0] * 4)
+        # ...and while its focused pane is the Code tab (or theme Config), on
+        # every frame: the WM's word for the buffer, the lag it named, what
+        # the desk was a function of at the last code frame, and whether the
+        # buffer `shift_last` reads holds the page as the last draw left it
+        # (`vouched`: 2, else 1, 0 untold).
+        self._ret = array("i", [0] * 5)
+        self._code_key = None
+        self._vouch = 0
 
     # -- where it applies -------------------------------------------------------
 
@@ -526,8 +535,18 @@ class EditorDesk(Layer):
 
     def _tab_pane(self, tab, r, dt):
         layer = self.ws.layer_of(tab)
-        if layer is not None:
+        if layer is None:
+            return
+        if tab not in _CODE_TABS:
             self._in_pane(tab, r, layer.draw, dt)
+            return
+        # the code's text view moves the rows the buffer holds where the WM
+        # says it holds them (`vouched`)
+        layer.vouch = 0 if self._spills() else self._vouch
+        try:
+            self._in_pane(tab, r, layer.draw, dt)
+        finally:
+            layer.vouch = 0
 
     # -- drawing ------------------------------------------------------------------
 
@@ -559,10 +578,78 @@ class EditorDesk(Layer):
 
     @property
     def HELD(self):
-        return self._prompt() is not None
+        return self._prompt() is not None or self._code_pane() is not None
 
     def retained(self, known, x0, y0, x1, y1):
         self._known = bool(known) and (x1 <= x0 or y1 <= y0)
+        r = self._ret
+        r[0] = 1 if known else 0
+        r[1] = x0
+        r[2] = y0
+        r[3] = x1
+        r[4] = y1
+
+    def vouched(self, v):
+        self._vouch = v
+
+    # -- the Code tab's rows (docs/scroll_and_text_2026-10.md §5) -----------------
+    #
+    # While the focused pane shows the Code tab (or theme Config) the desk
+    # speaks the shown protocol on every frame: a frame whose input reached
+    # only that pane, into a buffer that holds the desk as the frames before
+    # left it but for what that pane changed, draws the pane alone -- its
+    # text view moving the rows it shows and drawing those that changed --
+    # and names the pane as what it changed.
+
+    def _code_pane(self):
+        """(tab, its layer, pane, body) of the focused pane where it shows
+        the Code tab or theme Config, else None."""
+        pane, r, _path = self.focused()
+        alone = self.alone()
+        if alone is not None:
+            if pane != alone:
+                return None
+            r = self._area()
+        tab = P.CONTENTS[self.tab_of(pane)][2]
+        if tab not in _CODE_TABS:
+            return None
+        layer = self.ws.layer_of(tab)
+        if layer is None:
+            return None
+        return tab, layer, pane, self._body(r, self._unit(), pane)
+
+    def _spills(self):
+        """Whether a pane header's words run past the header into the body
+        under it (a font scale over the chrome's): the Code pane's rows
+        there are the header's too, so its frames draw whole."""
+        u = self._unit()
+        return ui.text_size("M")[1] * self.ws.look.effective_font_scale() > (P.HEADER - 4) * u
+
+    def _code_rows(self, code, dt):
+        """The frame as the Code pane's alone, where it may be one: True
+        where the pane drew and nothing else changed."""
+        ws = self.ws
+        tab, layer, pane, body = code
+        cv = ws.sys_canvas
+        look = ws.look
+        app = ws.editor_app
+        key = (tab, self._acts, self.key, self._focus.get(self.key, 0), self.grown, pane,
+               body, self.placed()[0], cv.w, cv.h, look.look_gen,
+               look.effective_font_scale(), look.effective_chrome_scale(),
+               ws.bar_layer.shown_key("menu"), ws.code_file_name(),
+               bool(getattr(layer, "_find_open", False)), self._loupe, self._flash,
+               self.part_state.get("code more"), self.part_state.get("head more"))
+        same = key == self._code_key
+        self._code_key = key
+        r = self._ret
+        if not same or not r[0] or app.playing() or ws._animating(dt) or self._spills():
+            return False
+        x0, y0, x1, y1 = body[0], body[1], body[0] + body[2], body[1] + body[3]
+        if r[3] > r[1] and r[4] > r[2] and (r[1] < x0 or r[2] < y0 or r[3] > x1 or r[4] > y1):
+            return False                # the buffer lags outside the pane
+        self._tab_pane(tab, body, dt)
+        self._changed = [x0, y0, x1, y1]
+        return True
 
     def changed(self):
         return self._changed
@@ -616,9 +703,16 @@ class EditorDesk(Layer):
         self._changed = None
         try:
             if not (self.HELD and self._prompt_rows(dt)):
-                self._draw(dt)
+                code = self._code_pane() if self._prompt() is None else None
+                if code is None or not self._code_rows(code, dt):
+                    self._draw(dt)
+                    if code is not None:
+                        cv = ws.sys_canvas
+                        self._changed = [0, 0, cv.w, cv.h]
         finally:
             self._known = False
+            self._ret[0] = 0
+            self._vouch = 0
 
     def _draw(self, dt):
         ws = self.ws
@@ -642,9 +736,11 @@ class EditorDesk(Layer):
             c = self.tab_of(pane)
             body = self._body(r, u, pane)
             tab = P.CONTENTS[c][2]
-            self._card(cv, th, r, n == fi, u,
-                       body[1] if tab in _FILLS_BODY and c not in _ON_VERBS
-                       and ws.layer_of(tab) is not None else 0)
+            filled = (body[1] if tab in _FILLS_BODY and c not in _ON_VERBS
+                      and ws.layer_of(tab) is not None else 0)
+            self._card(cv, th, r, n == fi, u, filled)
+            if tab in _CODE_TABS and not filled and ws.layer_of(tab) is not None:
+                ws.layer_of(tab).redraw()       # the card's body lies over its rows
             if tab is not None and c not in _ON_VERBS:
                 self._tab_pane(tab, body, dt)
             elif c == "game":
@@ -661,6 +757,10 @@ class EditorDesk(Layer):
             self._loupe = None
         if self._loupe is not None:
             self._draw_loupe(cv, th, u)
+        code = self._code_pane()
+        if code is not None:
+            code[1].covered_by(self._host, self._loupe is not None or (
+                self._flash is not None and self._drag is not None))
         ws.bar_layer._draw_status_strip("menu")
         self._dock()
 

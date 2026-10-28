@@ -175,58 +175,30 @@ def test_clean_cart_has_no_crash_line(tmp_path):
 
 
 def _colour_at(runs, i):
-    """The colour a line's highlight runs (start, end, colour, text flat) give
-    column i."""
-    for k in range(0, len(runs), 4):
-        if runs[k] <= i < runs[k + 1]:
-            return runs[k + 2]
+    """The class of character `i` in the TextView's runs of a line."""
+    for a, b, cl in runs:
+        if a <= i < b:
+            return cl
     return None
 
 
-def test_the_runs_are_the_highlight_in_stretches(tmp_path):
-    from runtime.code_layer import _highlight
-    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
+def _runs(line, lang):
+    """The TextView's colour runs of `line` (native/moy_ui/moy_ui_text.c),
+    as (first column, column after, class)."""
+    from runtime import ui_draw
+    from runtime.code_layer import _HL_CLASSES
+    w = ui_draw._C.text_runs(line, ui_draw.SYNTAX[lang])
+    b = line.encode()
+    return [(w[k + 2], w[k + 2] + len(b[w[k]:w[k + 1]].decode()), _HL_CLASSES[w[k + 3]])
+            for k in range(0, len(w), 4)]
+
+
+def test_the_runs_are_the_highlight_in_stretches():
     line = 'x = "hi" + 12  # note'
     cols = _highlight(line)
-    runs = cl._runs(line)
+    runs = _runs(line, "python")
     assert [_colour_at(runs, i) for i in range(len(line))] == cols
-    assert all(runs[k + 2] != runs[k + 6] for k in range(0, len(runs) - 4, 4))
-    assert [runs[k + 3] for k in range(0, len(runs), 4)] == \
-        [line[runs[k]:runs[k + 1]] for k in range(0, len(runs), 4)]
-
-
-def test_highlight_cache_reuses_result(tmp_path):
-    ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
-    a = ws.code_layer._runs("cls(7)")
-    b = ws.code_layer._runs("cls(7)")
-    assert a is b                          # same line -> cached object
-
-
-def test_crossing_the_memo_bound_keeps_the_lines_still_on_screen(tmp_path):
-    """Dragging through a long file walks past the bound. Emptying the memo
-    there re-highlights the visible window inside one frame -- a hitch on the
-    very gesture the memo is for -- so the older generation is retired instead
-    and the lines just scrolled past are still one lookup away."""
-    from runtime.code_layer import _HL_MEMO
-    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
-    onscreen = ["cls(%d)" % i for i in range(20)]
-    kept = [cl._runs(ln) for ln in onscreen]
-    for i in range(_HL_MEMO * 2):          # scroll far enough to rotate twice
-        cl._runs("x%d = %d" % (i, i))
-    assert len(cl._hl_cache) <= _HL_MEMO
-    assert len(cl._hl_old) <= _HL_MEMO
-    # The window is re-highlighted, not returned stale, once BOTH generations
-    # have rolled past it -- correctness never depends on the memo.
-    assert [cl._runs(ln) for ln in onscreen] == kept
-
-
-def test_a_rotation_does_not_lose_the_line_it_just_cached(tmp_path):
-    from runtime.code_layer import _HL_MEMO
-    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
-    for i in range(_HL_MEMO - 1):
-        cl._runs("a%d = 1" % i)
-    first = cl._runs("cls(1)")               # the entry that trips the rotation
-    assert cl._runs("cls(1)") is first
+    assert all(runs[k][2] != runs[k + 1][2] for k in range(len(runs) - 1))
 
 
 def test_lua_project_switches_palette_and_highlighting(tmp_path):
@@ -243,11 +215,13 @@ def test_lua_project_switches_palette_and_highlighting(tmp_path):
     ws.screen = "menu"
     assert ws.code_layer._symbols() == _CODE_SYMBOLS
     line = "n = #petals  -- count"
-    py_cols = ws.code_layer._runs(line)
+    assert ws.code_layer._lang() == "python"
+    py_cols = _runs(line, "python")
     ws.project.cart["runtime"] = "lua"     # what a picker-opened lua cart carries
     assert ws.code_layer._symbols() == _LUA_SYMBOLS
-    lua_cols = ws.code_layer._runs(line)
-    assert lua_cols != py_cols             # memo keyed by language, not just text
+    assert ws.code_layer._lang() == "lua"
+    lua_cols = _runs(line, "lua")
+    assert lua_cols != py_cols
     assert _colour_at(lua_cols, line.index("--")) == _HL_COMMENT
     assert _colour_at(lua_cols, line.index("#")) != _HL_COMMENT
     ws.frame(1 / 30)                       # the palette draw must not raise
@@ -271,21 +245,3 @@ def test_the_syntax_colours_are_the_themes_code_roles(tmp_path):
     ws.frame(1 / 30)
 
 
-def test_the_memo_runs_are_the_per_character_scan_grouped():
-    """`_highlight_runs` (the Code tab's memo, a token at a time) answers what
-    `_highlight`'s per-character colours grouped into runs answer, for every
-    line of every seed cart's code in its own language and the other, and the
-    edges: escapes, an unclosed string, numbers, either comment marker, a name
-    with digits and a character past ASCII."""
-    from pathlib import Path
-    from runtime.code_layer import _highlight_runs, _runs_of
-    root = Path(__file__).resolve().parent.parent / "system_carts"
-    lines = ['s = "a\\"b" + \'c\'', 'x = "open', "n = 0x1F + 1.5e3 - .5",
-             "a--b # c", "-- lua comment", "#len", "x1y2 = _z_9", "é = 'ü' # ö",
-             "", " ", "print(\"\\\\\") -- end", "x = '\\", "a-b-c--d"]
-    for p in sorted(root.glob("*.moy/main.*")):
-        lines += p.read_text(encoding="utf-8").splitlines()
-    assert len(lines) > 1000
-    for lua in (False, True):
-        for line in lines:
-            assert _highlight_runs(line, lua) == _runs_of(line, _highlight(line, lua)), line

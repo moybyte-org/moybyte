@@ -23,6 +23,7 @@
  *   ui.table(label, columns, rows, cur, o) -> the new cur (from 1; 0 is none), opened
  *   ui.scroll(id, o), ui.scroll()  (a scroll region; ui.scroll() ends it)
  *   ui.field(label, text, max, o)  -> the new text, done (Enter pressed in it)
+ *   ui.text_view(id, lines, o)     -> the first line shown, the rows shown
  *   ui.dialog(title, buttons, kind, o) -> the button activated (from 1; 0 none);
  *                                    ui.dialog() ends its body
  *   ui.popover(id, w, o)           -> true, false the frame it is dismissed;
@@ -432,6 +433,70 @@ static int moycore_ui_scroll(lua_State *L)
     return 0;
 }
 
+/* ui.text_view(id, lines, o) -> the first line shown (from 1), the rows
+ * shown. `lines` a table of strings from 1; `o`'s rows, wrap, syntax ("sgr"
+ * by default, "plain", "python", "lua", "json"), follow, gutter and caret
+ * ({line, col}, each from 1). */
+typedef struct {
+    lua_State *L;
+    int t;
+} moycore_ui_lines_t;
+
+static const uint8_t *moycore_ui_line(void *src, int32_t i, size_t *n)
+{
+    moycore_ui_lines_t *ls = (moycore_ui_lines_t *)src;
+    lua_rawgeti(ls->L, ls->t, (lua_Integer)i + 1);
+    const char *p = lua_type(ls->L, -1) == LUA_TSTRING ? lua_tolstring(ls->L, -1, n) : NULL;
+    if (p == NULL) {
+        *n = 0;
+    }
+    lua_pop(ls->L, 1);          /* the table holds the string */
+    return (const uint8_t *)p;
+}
+
+static int moycore_ui_text_view(lua_State *L)
+{
+    static const char *const syn[] = {"plain", "python", "lua", "json", "sgr"};
+    luaL_checktype(L, 2, LUA_TTABLE);
+    moycore_ui_lines_t ls = {L, 2};
+    moy_ui_lines_t lines = {&ls, (int32_t)lua_rawlen(L, 2), moycore_ui_line};
+    int32_t opt[MOY_UI_TXO_LEN] = {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1};
+    if (lua_type(L, 3) == LUA_TTABLE) {
+        lua_getfield(L, 3, "rows");
+        opt[MOY_UI_TXO_ROWS] = lua_isinteger(L, -1) ? (int32_t)lua_tointeger(L, -1) : 0;
+        lua_pop(L, 1);
+        opt[MOY_UI_TXO_WRAP] = moycore_ui_flag(L, 3, "wrap") == 1;
+        opt[MOY_UI_TXO_FOLLOW] = moycore_ui_flag(L, 3, "follow") == 1;
+        opt[MOY_UI_TXO_GUTTER] = moycore_ui_flag(L, 3, "gutter") == 1;
+        lua_getfield(L, 3, "syntax");
+        if (lua_type(L, -1) == LUA_TSTRING) {
+            const char *name = lua_tostring(L, -1);
+            for (int i = 0; i < 5; i++) {
+                if (strcmp(name, syn[i]) == 0) {
+                    opt[MOY_UI_TXO_SYNTAX] = i;
+                }
+            }
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 3, "caret");
+        if (lua_type(L, -1) == LUA_TTABLE) {
+            lua_rawgeti(L, -1, 1);
+            lua_rawgeti(L, -2, 2);
+            opt[MOY_UI_TXO_CARET_LINE] = (int32_t)luaL_optinteger(L, -2, 0) - 1;
+            opt[MOY_UI_TXO_CARET_COL] = (int32_t)luaL_optinteger(L, -1, 1) - 1;
+            lua_pop(L, 2);
+        }
+        lua_pop(L, 1);
+    }
+    moy_ui_over_t o;
+    int32_t out[2] = {0, 0};
+    moy_ui_run_text_view(moycore_ui_canvas(), moycore_ui_span(L, 1), &lines, opt,
+                         moycore_ui_over(L, 3, &o), out);
+    lua_pushinteger(L, out[0] + 1);
+    lua_pushinteger(L, out[1]);
+    return 2;
+}
+
 static int moycore_ui_field(lua_State *L)
 {
     size_t n = 0;
@@ -600,7 +665,7 @@ static void moycore_ui_open(lua_State *L)
         {"tabs", moycore_ui_tabs}, {"grid", moycore_ui_grid}, {"card", moycore_ui_card},
         {"popover", moycore_ui_popover}, {"menu", moycore_ui_menu},
         {"tool", moycore_ui_tool}, {"bar", moycore_ui_bar},
-        {"rule", moycore_ui_rule},
+        {"rule", moycore_ui_rule}, {"text_view", moycore_ui_text_view},
         {NULL, NULL},
     };
     luaL_newlib(L, verbs);

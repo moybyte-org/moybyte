@@ -24,6 +24,7 @@
 #include <stdint.h>
 
 #include "moy_ui.h"
+#include "moy_ui_text.h"
 
 #define MOY_UI_API_STOPS 40         // the stops one frame records
 #define MOY_UI_API_KEEP 16          // the ids whose state is kept
@@ -231,6 +232,7 @@ typedef struct {
     // press outside the card drawn last, or Esc).
     moy_ui_box_t pop_card, pop_prev, pop_at;
     uint8_t pop_gone;
+    uint8_t tip_shown;              // ui.end drew a tooltip this frame
     uint8_t pop_mid;                // it opened with nothing to hang from: centred
     uint32_t pop_id;                // the popover drawn this frame (0: none)
     // Its body's cut while its rows lay out (content coordinates, 0: not
@@ -338,6 +340,10 @@ typedef struct {
     moy_ui_box_t was_surface;
     uint16_t was_flags;
     uint8_t was_fs, was_hint;
+    // ui.text_view's record: the one text view of the context that keeps one
+    // (the first drawn each frame), by its id
+    uint32_t text_id;
+    moy_ui_text_t text;
 } moy_ui_ctx_t;
 
 // A context's size, for a face that owns it as bytes; and a fresh one.
@@ -364,6 +370,36 @@ moy_ui_ctx_t *moy_ui_api_ctx(void *p, size_t n);
 #define MOY_UI_APP_SHIFT 8
 int moy_ui_api_begin(moy_ui_ctx_t *c, const int32_t *in, moy_ui_box_t surface, int flags,
                      int fs);
+
+// ui.text_view(id, lines, o): a text area in rows (moy_ui_text.h), a scroll
+// region of its own -- a drag scrolls it and its release coasts, the wheel
+// steps it -- in ui.at's rect or stacked `rows` rows tall (0: the rest of
+// the page). Its rows are the lines `L` gives: whole lines cut at its
+// width, or wrapped there (`wrap`); in the mono face, coloured by `syntax`
+// (MOY_UI_SYN_*: SGR escapes by default, a terminal's), numbered where
+// `gutter`, a caret at `caret_line`, `caret_col` (-1: none). Where
+// `follow`, a view at its foot when the text grows glides to the new foot
+// (a log, a terminal). A frame draws only the rows that changed and moves
+// the rest, as a scroll region's floor (§3.3 of
+// docs/scroll_and_text_2026-10.md). out: the first line shown and the rows
+// shown. Its content scrolls at most 32767 pixels: past that, the rows at
+// the end are cut.
+typedef struct {
+    void *src;
+    int32_t n;
+    const uint8_t *(*get)(void *src, int32_t i, size_t *len);
+} moy_ui_lines_t;
+enum {
+    MOY_UI_TXO_ROWS = 0, MOY_UI_TXO_WRAP, MOY_UI_TXO_SYNTAX, MOY_UI_TXO_FOLLOW,
+    MOY_UI_TXO_GUTTER, MOY_UI_TXO_CARET_LINE, MOY_UI_TXO_CARET_COL, MOY_UI_TXO_LEN
+};
+void moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
+                          const moy_ui_lines_t *L, const int32_t *opt, const moy_ui_over_t *o,
+                          int32_t out[2]);
+// The colour indices the syntax classes take under the live theme
+// (MOY_UI_TT_KEYWORD .. MOY_UI_TT_BUILTIN, the theme's code_* content roles;
+// TT_TEXT the code's ink), -1 where a role falls back to a token.
+void moy_ui_text_tones(const int16_t tones[6]);
 
 // The verbs (§1). `o` may be NULL. Text is a span.
 void moy_ui_api_page(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t title,
@@ -608,6 +644,11 @@ void moy_ui_api_at(moy_ui_ctx_t *c, int x, int y, int w, int h);
 int moy_ui_api_box(const moy_ui_ctx_t *c, moy_ui_span_t id, int32_t out[4]);
 // A duplicate id drawn this frame, its text, once per id (NULL none).
 const char *moy_ui_api_dup(moy_ui_ctx_t *c);
+
+// What the pass drew over the app's own rows (a text view's overlay) into
+// out (x, y, w, h; w 0: none): the popover's card, or the whole surface
+// where ui.end drew a tooltip.
+int moy_ui_api_pop_box(const moy_ui_ctx_t *c, int32_t out[4]);
 
 // -- shift frames (docs/scroll_and_text_2026-10.md §3.3) ---------------------------
 //

@@ -20,6 +20,7 @@
 #   AppHost                           a shipped app's host side of the verbs (ctx.ui)
 #   HeldPage                          the page under a dialog, washed, held while it is up; release_held
 #   DialogRows                        a dialog's frame begun ahead of its page: its rows frame
+#   TextView                          a text area's rows in C: its record, shift and floor
 """The toolkit's engine layer: the rect-taking widgets under the public UI API.
 
 `runtime/ui.py` is the public UI API (docs/ui_api_2026-10.md), the verbs every
@@ -2429,6 +2430,130 @@ class DialogRows:
         self.begun = -1
         return got
 
+
+
+# -- TextView: a text area in visual rows (native/moy_ui/moy_ui_text.h) ---------------
+#
+# The view's words, in moy_ui_text.h's MOY_UI_TV_* order (tests/test_text_view.py
+# holds the two together).
+(TV_X, TV_Y, TV_W, TV_H, TV_LH, TV_CELL, TV_TEXT_H, TV_FS, TV_FONT, TV_TX, TV_MARK,
+ TV_GUTTER, TV_COLS, TV_TOP, TV_OFF, TV_LEFT, TV_CARET_ROW, TV_CARET_COL, TV_SEL_R0,
+ TV_SEL_C0, TV_SEL_R1, TV_SEL_C1, TV_ERR_ROW, TV_FIND_CI, TV_SYNTAX, TV_FLAGS, TV_BG,
+ TV_CARET, TV_SEL, TV_GUT, TV_GUT_CUR, TV_VALUE, TV_ERR, TV_TONE0) = range(34)
+TT_N = 9                        # the tones (MOY_UI_TT_*): text, keyword, string, number,
+                                # comment, builtin, value, danger, dim
+(TV_KEY, TV_OVER_Y0, TV_OVER_Y1, TV_LINES, TV_NUM0, TV_DY, TV_FLOOR, TV_WHOLE, TV_DRAWN,
+ TV_LEN) = range(TV_TONE0 + TT_N, TV_TONE0 + TT_N + 10)
+TVF_FADE, TVF_GROUND, TVF_CLIP = 1, 2, 4
+SYN_NONE, SYN_PYTHON, SYN_LUA, SYN_JSON, SYN_SGR = range(5)
+SYNTAX = {"python": SYN_PYTHON, "lua": SYN_LUA, "json": SYN_JSON, "sgr": SYN_SGR}
+
+
+def text_words(syntax, words, tone):
+    """Install the words `syntax` ("python" or "lua") colours in `tone`
+    (an MOY_UI_TT_* index); a word installed again takes its new tone."""
+    _C.text_words(SYNTAX[syntax], "\0".join(words).encode(), tone)
+
+
+_CODE_ROLES = ("code_text", "code_keyword", "code_string", "code_number", "code_comment",
+               "code_builtin")
+
+
+def text_tones(content):
+    """The live theme's code roles (`content`, a role -> colour index dict:
+    `Appearance.content_colors`) as the colours a text view's syntax and SGR
+    tones take (`ui.text_view`, moy_ui_api.h's moy_ui_text_tones)."""
+    _C.text_tones([content.get(r) for r in _CODE_ROLES])
+
+
+class TextView:
+    """One text area's rows in C (docs/scroll_and_text_2026-10.md §5): R, a
+    rect of rows, drawn through `moy_ui.text_draw` from a list of lines, a
+    line a row. The caller fills `v` (the TV_* words) and draws; the view
+    plans the frame against what it drew last (`moy_ui.text_plan`) and,
+    where the buffer the canvas's `shift_last` reads held R whole as this
+    view drew it the frame before (its `PaintRing`, or under a window the
+    WM's word: `window_frame`), moves those pixels by the scroll and draws
+    the floor alone -- the rows whose text or marks moved, the band the
+    scroll uncovered, and what an overlay covered last frame (`over`).
+    `kind` says what the last draw was: "whole", "rows" or "shift"."""
+
+    def __init__(self):
+        self.state = bytearray(_C.text_size())
+        self.v = array("i", [0] * TV_LEN)
+        self.ring = PaintRing(1)
+        self.kind = None
+        self.over = array("i", [0, 0])  # what overlays covered of R this frame (y0, y1)
+        self._w = 0                     # the window's word the frame was planned under
+
+    def reset(self):
+        """The next frame draws whole."""
+        _C.text_reset(self.state)
+        self.ring.clear()
+
+    def cover(self, y0, y1):
+        """Rows y0..y1 of R are drawn over this frame (an overlay): the next
+        frame draws them again."""
+        o = self.over
+        if o[1] <= o[0]:
+            o[0] = y0
+            o[1] = y1
+            return
+        if y0 < o[0]:
+            o[0] = y0
+        if y1 > o[1]:
+            o[1] = y1
+
+    def plan(self, cv, lines, err=None, find=None, win=None):
+        """Before anything draws in R this frame: whether it is a floor
+        frame (R's pixels moved out of the last frame's buffer, its floor
+        left to draw), else a whole one. The caller fills R's ground on a
+        whole frame (`ground` False) or leaves R alone. `win`, where given,
+        is the window's word in place of the WM's (`window_frame`): a
+        content that keeps its own frames hands it down (the desk Editor)."""
+        v = self.v
+        o = self.over
+        v[TV_OVER_Y0] = o[0]
+        v[TV_OVER_Y1] = o[1]
+        o[0] = o[1] = 0
+        f = _PAINT[0]
+        w = _WIN[0] if not win else win
+        self._w = w
+        ring = self.ring
+        if w:
+            ok = w == 2 and ring.vouch_key(0)
+        else:
+            ok = _PAINT[1] and ring.vouch(cv, f, 0)
+        self.kind = "whole"
+        may = _C.text_plan(self.state, v, lines, err, find)
+        if ok and may and _text_pays(cv, v):
+            dy = v[TV_DY]
+            if cv.shift_last(v[TV_X] + getattr(cv, "_ox", 0), v[TV_Y] + getattr(cv, "_oy", 0),
+                             v[TV_W], v[TV_H], 0, dy):
+                cv.shift_fence()
+                self.kind = _SHIFT if dy else _ROWS
+                _CHANGE[0] = self.kind
+        return self.kind != "whole"
+
+    def draw(self, cv, look, lines, err=None, find=None, ground=True):
+        """Draw the rows the plan left (every row on a whole frame), each
+        on its ground where `ground`, and note the frame. The rows drawn."""
+        v = self.v
+        if ground:
+            v[TV_FLAGS] |= TVF_GROUND
+        else:
+            v[TV_FLAGS] &= ~TVF_GROUND
+        n = _C.text_draw(self.state, cv, look, v, lines, err, find, self.kind == "whole")
+        self.ring.note(_PAINT[0], 0, 0, None, cv, None, _PAINT[1] or self._w != 0)
+        return n
+
+
+def _text_pays(cv, v):
+    """Whether moving R out of the last frame costs `cv` less than drawing
+    the rows the floor leaves (`SHIFT_COST`, as `_pays`)."""
+    c = getattr(cv, "SHIFT_COST", None)
+    h = v[TV_H]
+    return c is None or v[TV_FLOOR] * 1000 + c * h < 1000 * h
 
 def _outside(r, hole):
     """Rect `r` less rect `hole`: up to four rects, the bands above, below,

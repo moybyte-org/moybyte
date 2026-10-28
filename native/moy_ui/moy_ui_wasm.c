@@ -306,6 +306,13 @@ int moy_ui_run_scroll(void *target, moy_ui_span_t id, const moy_ui_over_t *o) {
     return close_run(&r, MOY_UI_OK);
 }
 
+int moy_ui_run_text_view(void *target, moy_ui_span_t id, const moy_ui_lines_t *lines,
+                         const int32_t *opt, const moy_ui_over_t *o, int32_t out[2]) {
+    OPEN(target);
+    moy_ui_api_text_view(c, &r.s, id, lines, opt, o, out);
+    return close_run(&r, MOY_UI_OK);
+}
+
 int moy_ui_run_field(void *target, moy_ui_span_t label, uint8_t *buf, size_t cap, size_t len,
                      const moy_ui_over_t *o, int32_t *out) {
     OPEN(target);
@@ -548,6 +555,67 @@ int32_t moy_ui_wasm_card(void *e, const uint8_t *title, uint32_t n, const uint8_
     return rc;
 }
 
+// ui_text_view's lines: NUL-separated text at `p`, found by walking on from
+// the line found last (a view asks for its lines in order).
+typedef struct {
+    const uint8_t *p;
+    uint32_t n, at;             // the text's bytes; where line `line` starts
+    int32_t line;
+} wasm_lines_t;
+static wasm_lines_t s_wl;
+
+static const uint8_t *wasm_line(void *src, int32_t i, size_t *n) {
+    wasm_lines_t *w = (wasm_lines_t *)src;
+    if (i < w->line) {
+        w->line = 0;
+        w->at = 0;
+    }
+    while (w->line < i && w->at < w->n) {
+        while (w->at < w->n && w->p[w->at] != 0) {
+            w->at++;
+        }
+        w->at++;
+        w->line++;
+    }
+    if (w->line != i || w->at > w->n) {
+        *n = 0;
+        return NULL;
+    }
+    uint32_t e = w->at;
+    while (e < w->n && w->p[e] != 0) {
+        e++;
+    }
+    *n = e - w->at;
+    return w->p + w->at;
+}
+
+int32_t moy_ui_wasm_text_view(void *e, const uint8_t *id, uint32_t n, const uint8_t *lines,
+                              uint32_t ln, const uint8_t *opt, uint32_t optn, const uint8_t *ob,
+                              uint32_t on, uint8_t *out, uint32_t cap) {
+    (void)e;
+    OVER(ob, on);
+    int32_t words[MOY_UI_TXO_LEN] = {0, 0, MOY_UI_SYN_SGR, 0, 0, -1, -1};
+    for (uint32_t k = 0; k < MOY_UI_TXO_LEN && 4 * k + 4 <= optn; k++) {
+        const uint8_t *b = opt + 4 * k;
+        words[k] = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16)
+                             | ((uint32_t)b[3] << 24));
+    }
+    int32_t count = 0;
+    for (uint32_t k = 0; k < ln; k++) {
+        count += lines[k] == 0;
+    }
+    count += ln > 0 && lines[ln - 1] != 0;     // a last line with no NUL after it
+    s_wl.p = lines;
+    s_wl.n = ln;
+    s_wl.at = 0;
+    s_wl.line = 0;
+    moy_ui_lines_t L = {&s_wl, count, wasm_line};
+    int32_t v[2] = {0, 0};
+    int rc = moy_ui_run_text_view(wasm_target(), span(id, n), &L, words, &o, v);
+    put_words(out, cap, v, 2);
+    return rc;
+}
+
 int32_t moy_ui_wasm_hints(void *e, const uint8_t *items, uint32_t n, const uint8_t *ob,
                           uint32_t on) {
     (void)e;
@@ -686,6 +754,7 @@ static const struct { const char *name; void *fn; } NATIVES[MOY_UI_WASM_ROWS] = 
     { "ui_tool", FN(moy_ui_wasm_tool) },
     { "ui_bar", FN(moy_ui_wasm_bar) },
     { "ui_rule", FN(moy_ui_wasm_rule) },
+    { "ui_text_view", FN(moy_ui_wasm_text_view) },
 };
 
 void *moy_ui_wasm_native(const char *name) {

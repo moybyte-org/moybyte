@@ -3474,6 +3474,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         pages = 0
         if not held and self._speaks(win):
             pages = 2 if self._vouches(win) else 1
+        vouched = getattr(content, "vouched", None) if held else None
+        if vouched is not None:
+            vouched(2 if self._vouches(win) else 1)
         known = 0
         u = self._u
         if held:
@@ -3990,6 +3993,9 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 if speaks and not held:
                     _ui_draw.window_frame(1)
                 kept = held and not win._buf_stale
+                vouched = getattr(content, "vouched", None) if held else None
+                if vouched is not None:
+                    vouched(2 if kept else 1)
                 try:
                     if held:
                         lag = win._lag

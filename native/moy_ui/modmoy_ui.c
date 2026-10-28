@@ -14,6 +14,7 @@
 #include "moy_canvas.h"
 #include "moy_theme.h"
 #include "moy_str.h"
+#include "moy_ui_text.h"
 #include "moy_ui_wasm.h"
 
 #define NAMES_CAP (MOY_THEME_PARTS > MOY_THEME_ROLES ? MOY_THEME_PARTS : MOY_THEME_ROLES)
@@ -2778,6 +2779,58 @@ static mp_obj_t ui_api_scroll(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_scroll_obj, 5, 5, ui_api_scroll);
 
+// ui.text_view's lines: a list's (or a tuple's) str items, by index.
+static const uint8_t *tv_line(void *src, int32_t i, size_t *n) {
+    size_t len;
+    mp_obj_t *it;
+    mp_obj_get_array((mp_obj_t)src, &len, &it);
+    if (i < 0 || (size_t)i >= len) {
+        *n = 0;
+        return NULL;
+    }
+    return (const uint8_t *)mp_obj_str_get_data(it[i], n);
+}
+
+// api_text_view(ctx, cv, look, id, lines, opt, o) -> (first line shown, rows
+// shown); `opt` the MOY_UI_TXO_* words (an array('i'))
+static mp_obj_t ui_api_text_view(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_ctx_t *c = ctx_of(a[0]);
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    mp_buffer_info_t ob;
+    mp_get_buffer_raise(a[5], &ob, MP_BUFFER_READ);
+    if (ob.len < MOY_UI_TXO_LEN * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: text_view's options"));
+    }
+    size_t nl;
+    mp_obj_t *it;
+    mp_obj_get_array(a[4], &nl, &it);
+    moy_ui_lines_t L = {(void *)a[4], (int32_t)nl, tv_line};
+    moy_ui_over_t o;
+    int32_t out[2];
+    moy_ui_api_text_view(c, &s, span_of(a[3]), &L, (const int32_t *)ob.buf, over_of(a[6], &o),
+                         out);
+    mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(out[0]), MP_OBJ_NEW_SMALL_INT(out[1])};
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_text_view_obj, 7, 7, ui_api_text_view);
+
+// text_tones(tones): the colour indices the syntax classes take under the
+// live theme (text, keyword, string, number, comment, builtin; -1 a token's)
+static mp_obj_t ui_text_tones(mp_obj_t tones) {
+    size_t n;
+    mp_obj_t *it;
+    mp_obj_get_array(tones, &n, &it);
+    int16_t t[6];
+    for (size_t i = 0; i < 6; i++) {
+        t[i] = i < n && it[i] != mp_const_none ? (int16_t)mp_obj_get_int(it[i]) : -1;
+    }
+    moy_ui_text_tones(t);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_text_tones_obj, ui_text_tones);
+
 // api_field(ctx, cv, look, label, buf, n, o) -> the new length, plus 0x10000
 // the frame Enter is pressed in it; `buf` a bytearray, its room the field's
 static mp_obj_t ui_api_field(size_t n_args, const mp_obj_t *a) {
@@ -3165,6 +3218,150 @@ static mp_obj_t ui_api_floor_box(mp_obj_t ctx, mp_obj_t out) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_floor_box_obj, ui_api_floor_box);
 
+
+// -- TextView (moy_ui_text.h) -------------------------------------------------------
+
+#define TV_ROWS MOY_UI_TEXT_ROWS
+
+static moy_ui_text_t *tv_of(mp_obj_t o) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_WRITE);
+    if (b.len < sizeof(moy_ui_text_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: not a text view"));
+    }
+    return (moy_ui_text_t *)b.buf;
+}
+
+static int32_t *tv_view(mp_obj_t o) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(o, &b, MP_BUFFER_WRITE);
+    if (b.len < MOY_UI_TV_LEN * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("moy_ui: a view is MOY_UI_TV_LEN words"));
+    }
+    return (int32_t *)b.buf;
+}
+
+static moy_ui_span_t tv_span(mp_obj_t o) {
+    moy_ui_span_t sp = {(const uint8_t *)"", 0};
+    if (o == mp_const_none) {
+        return sp;
+    }
+    size_t n;
+    sp.p = (const uint8_t *)mp_obj_str_get_data(o, &n);
+    sp.n = (uint16_t)(n > 0xFFFF ? 0xFFFF : n);
+    return sp;
+}
+
+// The rows a view shows of `lines` (a list of str, a line a row), into
+// s_tv_rows: how many.
+static moy_ui_trow_t *s_tv_rows;
+
+static int tv_rows(int32_t *v, mp_obj_t lines) {
+    s_tv_rows = moy_ui_text_scratch();
+    if (s_tv_rows == NULL) {
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_ui: text view rows"));
+    }
+    size_t nl;
+    mp_obj_t *it;
+    mp_obj_get_array(lines, &nl, &it);
+    v[MOY_UI_TV_LINES] = (int32_t)nl;
+    int n = moy_ui_text_rows(v);
+    n = n < TV_ROWS ? n : TV_ROWS;
+    int32_t top = v[MOY_UI_TV_TOP];
+    for (int i = 0; i < n; i++) {
+        moy_ui_trow_t *r = &s_tv_rows[i];
+        int32_t k = top + i;
+        r->line = k;
+        r->ca = 0;
+        r->a = 0;
+        if (k < 0 || (size_t)k >= nl) {
+            r->p = NULL;
+            r->n = r->b = 0;
+            continue;
+        }
+        size_t len;
+        r->p = (const uint8_t *)mp_obj_str_get_data(it[k], &len);
+        r->n = r->b = (uint32_t)len;
+    }
+    return n;
+}
+
+// api_pop_box(ctx, out) -> whether the pass drew a popover; `out`, four
+// writable int32 words, its card
+static mp_obj_t ui_api_pop_box(mp_obj_t ctx, mp_obj_t out) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(out, &b, MP_BUFFER_WRITE);
+    if (b.len < 4 * sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("four words"));
+    }
+    return mp_obj_new_bool(moy_ui_api_pop_box(ctx_of(ctx), (int32_t *)b.buf));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_pop_box_obj, ui_api_pop_box);
+
+// text_size() -> the bytes a text view's record takes
+static mp_obj_t ui_text_size(void) {
+    return MP_OBJ_NEW_SMALL_INT(sizeof(moy_ui_text_t));
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ui_text_size_obj, ui_text_size);
+
+// text_words(syntax, words, tone): words (NUL-separated) a syntax colours
+static mp_obj_t ui_text_words(mp_obj_t syn, mp_obj_t words, mp_obj_t tone) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(words, &b, MP_BUFFER_READ);
+    check(moy_ui_text_words(mp_obj_get_int(syn), (const uint8_t *)b.buf, b.len,
+                            mp_obj_get_int(tone)));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(ui_text_words_obj, ui_text_words);
+
+// text_runs(line, syntax) -> the line's colour runs, a flat list of (byte
+// start, byte end, column, tone) per run
+static mp_obj_t ui_text_runs(mp_obj_t line, mp_obj_t syn) {
+    size_t n;
+    const uint8_t *p = (const uint8_t *)mp_obj_str_get_data(line, &n);
+    int k = moy_ui_text_runs(p, n, mp_obj_get_int(syn), NULL, 0);
+    int32_t *w = m_new(int32_t, 4 * k + 1);
+    moy_ui_text_runs(p, n, mp_obj_get_int(syn), w, 4 * k);
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (int i = 0; i < 4 * k; i++) {
+        mp_obj_list_append(out, MP_OBJ_NEW_SMALL_INT(w[i]));
+    }
+    m_del(int32_t, w, 4 * k + 1);
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(ui_text_runs_obj, ui_text_runs);
+
+// text_plan(state, view, lines, err, find) -> whether the frame may move R
+// and draw its floor alone (the view's DY, FLOOR and WHOLE written)
+static mp_obj_t ui_text_plan(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    int32_t *v = tv_view(a[1]);
+    int n = tv_rows(v, a[2]);
+    return mp_obj_new_bool(moy_ui_text_plan(tv_of(a[0]), v, s_tv_rows, n, tv_span(a[3]),
+                                            tv_span(a[4])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_plan_obj, 5, 5, ui_text_plan);
+
+// text_draw(state, cv, look, view, lines, err, find, whole) -> the rows drawn
+static mp_obj_t ui_text_draw(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_ui_sink_t s;
+    sink_of(&s, a[1], a[2]);
+    int32_t *v = tv_view(a[3]);
+    int n = tv_rows(v, a[4]);
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_text_draw(tv_of(a[0]), &s, v, s_tv_rows, n,
+                                                 tv_span(a[5]), tv_span(a[6]),
+                                                 mp_obj_is_true(a[7])));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_text_draw_obj, 8, 8, ui_text_draw);
+
+// text_reset(state): the next frame draws whole
+static mp_obj_t ui_text_reset(mp_obj_t st) {
+    moy_ui_text_reset(tv_of(st));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ui_text_reset_obj, ui_text_reset);
+
 // api_keep(ctx, cv, look, id, h) -> the state bits of a stop carried forward
 // undrawn
 static mp_obj_t ui_api_keep(size_t n_args, const mp_obj_t *a) {
@@ -3362,6 +3559,15 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_shift_drawn), MP_ROM_PTR(&ui_api_shift_drawn_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_band), MP_ROM_PTR(&ui_api_band_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_floor_box), MP_ROM_PTR(&ui_api_floor_box_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_pop_box), MP_ROM_PTR(&ui_api_pop_box_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_text_view), MP_ROM_PTR(&ui_api_text_view_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_tones), MP_ROM_PTR(&ui_text_tones_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_size), MP_ROM_PTR(&ui_text_size_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_words), MP_ROM_PTR(&ui_text_words_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_runs), MP_ROM_PTR(&ui_text_runs_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_plan), MP_ROM_PTR(&ui_text_plan_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_draw), MP_ROM_PTR(&ui_text_draw_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text_reset), MP_ROM_PTR(&ui_text_reset_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_card_clip), MP_ROM_PTR(&ui_api_card_clip_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_keep), MP_ROM_PTR(&ui_api_keep_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_audit), MP_ROM_PTR(&ui_api_audit_obj) },

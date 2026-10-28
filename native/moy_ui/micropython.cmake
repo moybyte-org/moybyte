@@ -14,6 +14,7 @@ target_sources(usermod_moy_ui INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_interact.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_sink.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_api.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_ui_text.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_wasm.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_ui_tables.c
     ${CMAKE_CURRENT_LIST_DIR}/moy_theme.c

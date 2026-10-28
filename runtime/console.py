@@ -1093,7 +1093,7 @@ class Workstation(PerfMeters, SettingsToggles, SaveVerbs, Notices, SpineVerbs):
         """Store/settings/wallpaper/cache/status fields (the mutable shell state)."""
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
         # (The code editor's keyboard-edge tracker (_ekey_prev) + drag-scroll origin
-        # (_drag) + highlight memo (_hl_cache) live on self.code_layer now.)
+        # (_drag) + its text view (_tv) live on self.code_layer now.)
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
         # (The launcher's cursor-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop

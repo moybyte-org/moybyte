@@ -146,6 +146,7 @@
     {"role": "ui", "verb": "menu", "server": "c", "grant": "never", "wasm": "(*~*~*~*~)i"},
     {"role": "ui", "verb": "tool", "server": "c", "grant": "never", "wasm": "(*~*~*~)i"},
     {"role": "ui", "verb": "bar", "server": "c", "grant": "never", "wasm": "(*~*~i)i"},
-    {"role": "ui", "verb": "rule", "server": "c", "grant": "never", "wasm": "()i"}
+    {"role": "ui", "verb": "rule", "server": "c", "grant": "never", "wasm": "()i"},
+    {"role": "ui", "verb": "text_view", "server": "c", "grant": "never", "wasm": "(*~*~*~*~*~)i"}
   ]
 }

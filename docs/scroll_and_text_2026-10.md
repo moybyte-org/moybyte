@@ -477,7 +477,12 @@ with the first visible row, the rows' pitch, the caret, the selection, and a
 as `ConfigLayer`), the editor handle (`EditorHandle`, which the Player makes
 for Notes), the verbs' fields and the text console draw their rows through
 it. The buffer stays where it is (`CodeEditor`, the handle's document, the
-console's ring); `TextView` is given what changed, in visual rows:
+console's ring), and what changed is the view's to find: it keeps each
+visible row's gen -- a hash of what the row draws: its text, its line's
+number where a gutter shows it, and its marks (the current row, the
+caret's column, the selection's span, the find matches, an error) -- and a
+frame draws the rows whose gen moved (`native/moy_ui/moy_ui_text.h`, built
+in P4 on 2026-10-28). By cause, those rows are:
 
 - **an edit** marks the rows of the edited paragraph or line as laid out
   before and after; when its row count changed (a split, a join, a wrap
@@ -486,9 +491,11 @@ console's ring); `TextView` is given what changed, in visual rows:
 - **a caret move** marks the caret's old and new rows (the caret is solid,
   §14.1's invariant, so the two rows are the whole change);
 - **a scroll** by k rows is a translation of the text rect by k pitches plus
-  the k exposed rows; a drag scrolls by pixels through the view's
-  `ScrollRegion`, a key page by rows through `step`, a caret leaving the
-  view reveals it through `glide_to`, every frame of which is a translation.
+  the k exposed rows. `ui.text_view` is a scroll region of the verbs
+  engine: a drag scrolls it by pixels, its release coasts, and a view that
+  `follow`s its foot glides there when lines come, every frame of which is
+  a translation. The Code tab still pans by whole lines
+  (`CodeLayer._code_drag`), each a translation.
 
 **What draws the whole view**, named so none is inferred: a horizontal
 scroll (the Code tab's `ed.left` moves every row); a gutter width change
@@ -496,26 +503,38 @@ scroll (the Code tab's `ed.left` moves every row); a gutter width change
 find whose match lies outside the view (a scroll of more than a view is a
 page change, and its p90 is priced as one in §15); and a buffer replaced.
 **Overlays over the text rect** -- the Code tab's completion popup, its
-crash popup, the jump and files overlays, the autoscroll mark -- are rows:
-the overlay's old and new rects join the frame's rows, under the ground
-they cover.
+crash popup, the jump and files overlays, the tool row, the autoscroll
+mark -- are rows: the rows an overlay covered last frame (its card and the
+shadow round it), moved by this frame's translation, join the floor, and
+the overlay draws over the frame's rows. On the desk a popover, a tooltip,
+a loupe or a divider's flash over the panes draws the next frame whole.
 
-`TextView.draw(cv, ...)` takes the lag from the WM's `retained` (windowed) or
-its own ring (full screen), draws the lagging rows, shifts the translation
-with `shift_last` and draws the frame's rows: the row's ground, its text
-(the Code tab's highlighter runs for those rows only), the gutter number,
-the caret, the selection's spans. Rows outside the set are not laid out --
-the T-Deck's `qstr_find_strn` share (strings interned per frame for every
-visible line) goes with them.
+`TextView.plan(cv, ...)` asks the voucher whether the buffer `shift_last`
+reads holds R as the view drew it last -- the view's own `PaintRing` on the
+full-screen tier, and in a desk pane the Editor's word from the WM
+(`EditorDesk.vouched`: the window's buffer holds its last draw) -- and the
+record which rows moved; R's pixels then always come from that buffer
+(`shift_last` by the scroll, by 0 on a rows frame: translations never
+compose), and `draw` draws the floor's rows, each whole and alone: its
+ground, the current mark, the gutter number, an error's underline, the
+selection, the find matches, the text in its colour runs (tokenized in C
+for those rows only), the fade, the caret. An error's underline reaches the
+row after where the glyph box fills the row, so that row draws with it.
+Rows outside the floor are not laid out -- the T-Deck's `qstr_find_strn`
+share (strings interned per frame for every visible line) goes with them.
+On the desk the Editor draws the Code pane alone on such a frame (its
+header and the other panes as they were) and names the pane as what it
+changed, unless a header's words run past it into the pane (a font scale
+over the chrome's), where every frame draws whole.
 
 **Each editor, what it keeps and what it drops.**
 
-- *The Code tab* keeps `draw_lines` as the row renderer and loses its
-  whole-pane loop; the status band and the bar strip are outside the text
+- *The Code tab* draws its rows, and the desk's read-only code
+  (`draw_lines`), through the view, and loses its whole-pane loop; the status band and the bar strip are outside the text
   rect and draw as today (the strip through the WM's bar word,
-  `strip_moved`). Its drag pans by whole lines on any upward movement today
-  (`CodeLayer._code_drag` floors the delta); the view's `ScrollRegion` in
-  pixels replaces it, and a drag scrolls as a finger does.
+  `strip_moved`). Its drag pans by whole lines (`CodeLayer._code_drag`),
+  each a shift frame; panning by pixels through a `ScrollRegion`, as
+  `ui.text_view` scrolls, is not built for it.
 - *The theme Config text* is the Code tab's class and takes all of it;
   `ThemeDoc.follow` runs before the draw as today.
 - *The fields* (`ui.field`: Settings' name, Cart info's, Blocks' prompts,

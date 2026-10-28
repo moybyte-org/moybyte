@@ -64,6 +64,8 @@
     (param i32 i32 i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_bar" (func $ui_bar (param i32 i32 i32 i32 i32) (result i32)))
   (import "moybyte.app" "ui_rule" (func $ui_rule (result i32)))
+  (import "moybyte.app" "ui_text_view" (func $ui_text_view
+    (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
 
   (memory (export "memory") 1 1)
 
