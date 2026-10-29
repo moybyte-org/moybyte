@@ -2255,17 +2255,29 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
                 s[2] = 0
                 s[3] = False
 
-    def _pop_capture(self, s):
-        """Snapshot the pixels under slot `s`'s rect from the root canvas."""
+    def _grown(self, s, i, w, h):
+        """Layer `s[i]` of the root's, at least `w` by `h`: a new one at the
+        larger of both sizes where it is smaller, the old one released."""
+        lay = s[i]
+        if lay is not None and lay.w >= w and lay.h >= h:
+            return lay
+        ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
+        s[i] = None
+        self._release_layer(lay)
+        lay = s[i] = self._root_canvas.new_layer(max(w, ow), max(h, oh))
+        return lay
+
+    def _snap(self, s):
+        """Snapshot the pixels under slot `s`'s rect from the root canvas
+        (a popover's, or the riding scrim's)."""
         x, y, w, h = s[1]
-        lay = s[0]
-        if lay is None or lay.w < w or lay.h < h:
-            root = self._root_canvas
-            ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
-            self._release_layer(lay)
-            lay = s[0] = root.new_layer(max(w, ow), max(h, oh))
-        lay.blit_strip(self._root_canvas, -x, -y)
+        self._grown(s, 0, w, h).blit_strip(self._root_canvas, -x, -y)
         s[3] = True
+
+    def _pop_capture(self, s):
+        """Snapshot slot `s` (`_snap`), and note whether it lies over the
+        playtest's window."""
+        self._snap(s)
         # Whether the playtest's window repaints under it, read once here:
         # nothing moves a window while a popover is open (a tap outside
         # closes it), and a play frame allocates nothing.
@@ -2389,7 +2401,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             self._draw_player_window(game, False, self._focus == "desktop", 0,
                                      full=False, defer=False)
         if not w[3]:
-            self._pop_wash_capture(w)
+            self._snap(w)
             self._wash_focus()
         win = self._wash_win[0]
         if win is not None:
@@ -2471,7 +2483,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             if r is not None:
                 _grow(self._pause_span, r[0], r[1], r[0] + r[2], r[1] + r[3])
             return
-        self._pop_wash_capture(w)
+        self._snap(w)
         w[2] = 0
         self._pause_owed = 0
 
@@ -2485,12 +2497,7 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
             ww[0] = None                  # it shows under the menu as it is
             return
         buf = win.buf
-        lay = ww[1]
-        if lay is None or lay.w < buf.w or lay.h < buf.h:
-            ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
-            self._release_layer(lay)
-            lay = ww[1] = self._root_canvas.new_layer(max(buf.w, ow), max(buf.h, oh))
-        lay.blit_strip(buf, 0, 0)
+        self._grown(ww, 1, buf.w, buf.h).blit_strip(buf, 0, 0)
         ww[0] = win
         ww[2] = win._buf_stale
         ww[3][:] = win._lag
@@ -2526,31 +2533,10 @@ class WindowedWM(WindowChrome, FullscreenStackWM):
         allocates nothing once minted; release_cache gives it back."""
         if not self._pop_rides() or self._pop_live():
             return
-        lay = self._pop_wash[0]
-        cw, ch = self.ws.layout.cw, self.ws.layout.ch
-        if lay is not None and lay.w >= cw and lay.h >= ch:
-            return
         try:
-            self._pop_wash_mint(cw, ch)
+            self._grown(self._pop_wash, 0, self.ws.layout.cw, self.ws.layout.ch)
         except Exception:  # noqa: BLE001 -- no room: the open mints it, or repaints
             pass
-
-    def _pop_wash_mint(self, ww, h):
-        w = self._pop_wash
-        lay = w[0]
-        ow, oh = (lay.w, lay.h) if lay is not None else (0, 0)
-        self._release_layer(lay)
-        w[0] = None
-        lay = w[0] = self._root_canvas.new_layer(max(ww, ow), max(h, oh))
-        return lay
-
-    def _pop_wash_capture(self, w):
-        x, y, ww, h = w[1]
-        lay = w[0]
-        if lay is None or lay.w < ww or lay.h < h:
-            lay = self._pop_wash_mint(ww, h)
-        lay.blit_strip(self._root_canvas, -x, -y)
-        w[3] = True
 
     # -- the quiet-frame draw stack (#58 P4 perf) -------------------------------
 
