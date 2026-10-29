@@ -5339,6 +5339,113 @@ int moy_ui_api_pop_box(const moy_ui_ctx_t *c, int32_t out[4]) {
     return b.w > 0 && b.h > 0;
 }
 
+// Rows [y0, y1) join the `cap` bands at a (pairs y0, y1 in order, an empty
+// pair unused): merged with the bands they meet or touch, and where all are
+// taken, with the nearest.
+static void band_add(int32_t *a, int cap, int32_t y0, int32_t y1) {
+    int end = 2 * cap, i = 0;
+    while (i < end && a[i + 1] > a[i] && a[i + 1] < y0) {
+        i += 2;
+    }
+    if (i < end && a[i + 1] > a[i] && a[i] <= y1) {
+        // it meets the band at i: grow that one, then fold the next ones in
+        if (y0 < a[i]) {
+            a[i] = y0;
+        }
+        if (y1 > a[i + 1]) {
+            a[i + 1] = y1;
+        }
+        int j = i + 2;
+        while (j < end && a[j + 1] > a[j] && a[j] <= a[i + 1]) {
+            if (a[j + 1] > a[i + 1]) {
+                a[i + 1] = a[j + 1];
+            }
+            j += 2;
+        }
+        int k = i + 2;
+        for (; j < end; j += 2, k += 2) {
+            a[k] = a[j];
+            a[k + 1] = a[j + 1];
+        }
+        for (; k < end; k += 2) {
+            a[k] = a[k + 1] = 0;
+        }
+        return;
+    }
+    if (a[end - 1] > a[end - 2]) {
+        // every band taken: the rows join the band before or after them
+        if (i >= end || (i > 0 && y0 - a[i - 1] <= a[i] - y1)) {
+            i -= 2;
+        }
+        if (y0 < a[i]) {
+            a[i] = y0;
+        }
+        if (y1 > a[i + 1]) {
+            a[i + 1] = y1;
+        }
+        return;
+    }
+    // a free pair: the bands from i on move down one, and i takes the rows
+    for (int k = end - 2; k > i; k -= 2) {
+        a[k] = a[k - 2];
+        a[k + 1] = a[k - 1];
+    }
+    a[i] = y0;
+    a[i + 1] = y1;
+}
+
+void moy_ui_api_lag_note(const moy_ui_ctx_t *c, int32_t *hist, int slots, int bands,
+                         int f, int kind) {
+    if (slots <= 0 || bands <= 0 || f < 0) {
+        return;
+    }
+    int32_t *h = hist + (f % slots) * (2 + 2 * bands);
+    h[0] = f;
+    h[1] = kind;
+    for (int k = 0; k < 2 * bands; k++) {
+        h[2 + k] = 0;
+    }
+    if (kind == 0 || !c->fl_on || c->fl_stage == 0) {
+        return;
+    }
+    for (int i = 0; i < c->fl_n; i++) {
+        if (c->fl[i].h > 0) {
+            band_add(h + 2, bands, c->fl[i].y, c->fl[i].y + c->fl[i].h);
+        }
+    }
+}
+
+int moy_ui_api_lag(const int32_t *hist, int slots, int bands, int f, int n,
+                   int32_t *out, int cap) {
+    if (n > slots || cap <= 0) {
+        return -1;
+    }
+    for (int k = 0; k < 2 * cap; k++) {
+        out[k] = 0;
+    }
+    int stride = 2 + 2 * bands;
+    for (int b = 1; b < n; b++) {
+        int g = f - b;
+        const int32_t *h = hist + (((g % slots) + slots) % slots) * stride;
+        if (h[0] != g) {
+            continue;                   // the page drew nothing that frame
+        }
+        if (h[1] != 1) {
+            return -1;
+        }
+        for (int k = 0; k < bands; k++) {
+            if (h[3 + 2 * k] > h[2 + 2 * k]) {
+                band_add(out, cap, h[2 + 2 * k], h[3 + 2 * k]);
+            }
+        }
+    }
+    int m = 0;
+    while (m < cap && out[2 * m + 1] > out[2 * m]) {
+        m++;
+    }
+    return m;
+}
+
 int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]) {
     if (!c->fl_on || c->fl_stage == 0 || c->fl_n == 0) {
         return 0;

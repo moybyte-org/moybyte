@@ -341,6 +341,8 @@ _DRAW_SIGS = (
     ("moy_ui_api_card_clip", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_floor", [c.c_void_p, c.c_void_p, _I], _I),
     ("moy_ui_api_floor_box", [c.c_void_p, c.c_void_p], _I),
+    ("moy_ui_api_lag_note", [c.c_void_p, c.c_void_p, _I, _I, _I, _I], None),
+    ("moy_ui_api_lag", [c.c_void_p, _I, _I, _I, _I, c.c_void_p, _I], _I),
     ("moy_ui_api_pop_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_text_view", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.c_void_p,
                               c.c_void_p, c.c_void_p, c.c_void_p], c.c_int32),
@@ -1382,6 +1384,18 @@ def binding():
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_floor_box(p, (c.c_int32 * 4).from_buffer(out)))
 
+    def api_lag_note(ctx, hist, bands, f, kind):
+        p, _k = _ctx(ctx)
+        slots = len(hist) // (2 + 2 * bands)
+        lib.moy_ui_api_lag_note(p, (c.c_int32 * len(hist)).from_buffer(hist), slots,
+                                int(bands), int(f), int(kind))
+
+    def api_lag(hist, bands, f, n, out):
+        slots = len(hist) // (2 + 2 * bands)
+        return int(lib.moy_ui_api_lag((c.c_int32 * len(hist)).from_buffer(hist), slots,
+                                      int(bands), int(f), int(n),
+                                      (c.c_int32 * len(out)).from_buffer(out), len(out) // 2))
+
     def api_pop_box(ctx, out):
         p, _k = _ctx(ctx)
         return bool(lib.moy_ui_api_pop_box(p, (c.c_int32 * 4).from_buffer(out)))
@@ -1574,6 +1588,7 @@ def binding():
               api_owes, api_moved, api_moving, api_offset, api_fades,
               api_shift_plan, api_shift_arm, api_shift_rows, api_floor_take, api_shift_break,
               api_shift_drawn, api_band, api_floor, api_floor_into, api_floor_box,
+              api_lag_note, api_lag,
               api_pop_box,
               api_card_clip, api_keep, api_audit,
               api_end,

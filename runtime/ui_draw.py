@@ -1898,55 +1898,6 @@ _DIRS = 15                              # the four directions' bits
 _KEYS_HOST = [None]
 
 
-def _band_add(a, at, cap, y0, y1):
-    """Rows [y0, y1) join the bands a[at:at + 2 * cap] (pairs y0, y1, kept in
-    order, an empty pair unused): merged with the bands they meet or touch,
-    and where all `cap` are taken, with the nearest."""
-    i = at
-    end = at + 2 * cap
-    while i < end and a[i + 1] > a[i] and a[i + 1] < y0:
-        i += 2
-    if i < end and a[i + 1] > a[i] and a[i] <= y1:
-        # it meets the band at i: grow that one, then fold the next ones in
-        if y0 < a[i]:
-            a[i] = y0
-        if y1 > a[i + 1]:
-            a[i + 1] = y1
-        j = i + 2
-        while j < end and a[j + 1] > a[j] and a[j] <= a[i + 1]:
-            if a[j + 1] > a[i + 1]:
-                a[i + 1] = a[j + 1]
-            j += 2
-        k = i + 2
-        while j < end:
-            a[k] = a[j]
-            a[k + 1] = a[j + 1]
-            k += 2
-            j += 2
-        while k < end:
-            a[k] = a[k + 1] = 0
-            k += 2
-        return
-    if a[end - 1] > a[end - 2]:
-        # every band taken: the new rows join the band before or after them
-        if i >= end or (i > at and y0 - a[i - 1] <= a[i] - y1):
-            i -= 2
-            a[i + 1] = y1 if y1 > a[i + 1] else a[i + 1]
-            a[i] = y0 if y0 < a[i] else a[i]
-        else:
-            a[i] = y0 if y0 < a[i] else a[i]
-            a[i + 1] = y1 if y1 > a[i + 1] else a[i + 1]
-        return
-    # a free pair: shift the bands from i on down one, and take i
-    k = end - 2
-    while k > i:
-        a[k] = a[k - 2]
-        a[k + 1] = a[k - 1]
-        k -= 2
-    a[i] = y0
-    a[i + 1] = y1
-
-
 def _rep_dirs(rw):
     """The directions a `rep_word` steps, as a frame's direction bits."""
     m = 0
@@ -2024,8 +1975,6 @@ _PB_MIDDLE = 2                          # moy_input's PB_MIDDLE
 
 _LAG_HIST = 4                   # the frames a host remembers (RETAINED_FRAMES - 1 at most)
 _LAG_BANDS = 3                  # the bands a frame's floor is kept as (`_note`)
-_LAG_SLOT = 2 + 2 * _LAG_BANDS
-_FLOOR_MAX = 16                 # the floor rects `_note` reads; past them, one band
 
 
 class AppHost:
@@ -2080,10 +2029,9 @@ class AppHost:
         # its kind (0 whole, 1 rows, 2 shift) and the bands its floor spans,
         # a pair (y0, y1) each, _LAG_BANDS at most (an empty pair unused);
         # `_lag`'s answer, the bands the buffer a frame paints lags
-        self._hist = array("i", [-1] * (_LAG_SLOT * _LAG_HIST))
+        self._hist = array("i", [-1] * ((2 + 2 * _LAG_BANDS) * _LAG_HIST))
         self._band = array("i", [0] * (2 * _LAG_BANDS * _LAG_HIST))
         self._dy = 0
-        self._fl = array("i", [0] * (4 * _FLOOR_MAX))
 
     def reset(self):
         """A fresh context: focus, kept state and input forgotten."""
@@ -2337,55 +2285,17 @@ class AppHost:
 
     def _note(self, drawn):
         """The frame begun last, as its pass left it (`drawn`, the engine's
-        word: none where it drew whole): its kind and the band its floor
+        word: none where it drew whole): its kind and the bands its floor
         spans (`_lag`)."""
-        f = self._began
-        if f < 0:
-            return
-        h = self._hist
-        i = (f % _LAG_HIST) * _LAG_SLOT
-        h[i] = f
-        if not (self.shifting and drawn):
-            h[i + 1] = 0
-            return
-        h[i + 1] = 2 if self._dy else 1
-        for k in range(i + 2, i + _LAG_SLOT):
-            h[k] = 0
-        b = self._fl
-        n = _C.api_floor_into(self.ctx, b)
-        if n > _FLOOR_MAX:
-            if _C.api_floor_box(self.ctx, b):
-                h[i + 2] = b[1]
-                h[i + 3] = b[1] + b[3]
-            return
-        for r in range(n):
-            if b[4 * r + 3] > 0:
-                _band_add(h, i + 2, _LAG_BANDS, b[4 * r + 1], b[4 * r + 1] + b[4 * r + 3])
+        if self._began >= 0:
+            _C.api_lag_note(self.ctx, self._hist, _LAG_BANDS, self._began,
+                            (2 if self._dy else 1) if self.shifting and drawn else 0)
 
     def _lag(self, f, n):
         """Whether the buffer frame f paints lags the frame before's page
         only in the bands the rows frames since f - n drew: how many bands,
         each a pair (y0, y1) in `_band` (0, none), else -1."""
-        if n > _LAG_HIST:
-            return -1
-        h = self._hist
-        out = self._band
-        cap = len(out) // 2
-        for k in range(len(out)):
-            out[k] = 0
-        for b in range(1, n):
-            i = ((f - b) % _LAG_HIST) * _LAG_SLOT
-            if h[i] != f - b:
-                continue                # the page drew nothing that frame
-            if h[i + 1] != 1:
-                return -1
-            for k in range(i + 2, i + _LAG_SLOT, 2):
-                if h[k + 1] > h[k]:
-                    _band_add(out, 0, cap, h[k], h[k + 1])
-        m = 0
-        while m < cap and out[2 * m + 1] > out[2 * m]:
-            m += 1
-        return m
+        return _C.api_lag(self._hist, _LAG_BANDS, f, n, self._band)
 
     def floor_rects(self, out):
         """This rows frame's floor as the pass has it, into `out` (x, y, w,

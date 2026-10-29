@@ -813,6 +813,18 @@ int moy_ui_api_floor(const moy_ui_ctx_t *c, int32_t *out, int cap);
 // The floor's bounding rect as the pass drew it, x, y, w, h on screen into
 // out: 1, or 0 where the pass drew whole (or drew no floor at all).
 int moy_ui_api_floor_box(const moy_ui_ctx_t *c, int32_t out[4]);
+// A host's lag history (docs/scroll_and_text_2026-10.md §3.4): `slots`
+// slots of 2 + 2 * `bands` words, a frame's in slot f % slots -- the frame,
+// its kind (0 whole, 1 rows, 2 shift) and its floor's rows as `bands` pairs
+// y0, y1 in order (an empty pair, 0 0, unused; past `bands`, the nearest
+// merge). lag_note writes frame f's slot from the pass begun last.
+void moy_ui_api_lag_note(const moy_ui_ctx_t *c, int32_t *hist, int slots, int bands,
+                         int f, int kind);
+// Whether the buffer frame f paints lags the frame before's page only in the
+// rows the rows frames since f - n drew: their bands into out (`cap` pairs at
+// most, merged as lag_note merges), their count (0, none), else -1.
+int moy_ui_api_lag(const int32_t *hist, int slots, int bands, int f, int n,
+                   int32_t *out, int cap);
 // A rows frame its host asks for (docs/scroll_and_text_2026-10.md §5): the
 // host draws part of the page itself (a cart's editor handle, which is not a
 // stop) and names the rects of it its drawing will change this frame, `n` of

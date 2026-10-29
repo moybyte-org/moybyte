@@ -693,3 +693,63 @@ def test_the_band_is_the_floor_in_the_pages_coordinates(th, monkeypatch):
     assert band[1] + band[3] >= at + H - 60 - 1, "it reaches the view's foot, which the move uncovered"
     assert sum(f[3] for f in floors[-2]) < (H - 60) // 2, "the floor is the most of the view: %r" % (
         floors[-2],)
+
+
+def _bands_ref(intervals):
+    out = []
+    for y0, y1 in sorted(intervals):
+        if out and y0 <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], y1)
+        else:
+            out.append([y0, y1])
+    return out
+
+
+def test_a_lag_is_the_rows_frames_bands_merged():
+    """`api_lag` merges the bands of the rows frames since f - n: every row
+    one drew lies in a band it answers, the bands in order and apart, and
+    where no merge ran out of pairs, exactly the rows drawn. A frame that
+    shifted or drew whole is no lag (-1); a frame not drawn is none."""
+    import random
+    rnd = random.Random(7)
+    slots, bands = 8, 2
+    stride = 2 + 2 * bands
+    for _ in range(3000):
+        cap = rnd.randint(1, 4)
+        hist = array("i", [-1] * (stride * slots))
+        f = rnd.randint(slots, 100)
+        n = rnd.randint(1, slots)
+        drawn, exact = [], True
+        for b in range(1, n):
+            i = ((f - b) % slots) * stride
+            if rnd.random() < 0.2:
+                continue                 # no frame then
+            hist[i] = f - b
+            hist[i + 1] = 1
+            mine = []
+            for k in range(bands):
+                if rnd.random() < 0.7:
+                    y0 = rnd.randint(0, 200)
+                    mine.append((y0, y0 + rnd.randint(1, 30)))
+            m = _bands_ref(mine)
+            if len(m) > bands:
+                m = [[m[0][0], m[-1][1]]]
+            for k, (y0, y1) in enumerate(m):
+                hist[i + 2 + 2 * k] = y0
+                hist[i + 3 + 2 * k] = y1
+                drawn.append((y0, y1))
+                exact = exact and len(_bands_ref(drawn)) <= cap
+        out = array("i", [0] * (2 * cap))
+        got = ui_draw._C.api_lag(hist, bands, f, n, out)
+        pairs = [(out[2 * k], out[2 * k + 1]) for k in range(got)]
+        assert all(out[2 * k] == out[2 * k + 1] == 0 for k in range(got, cap))
+        assert all(pairs[k][1] < pairs[k + 1][0] for k in range(len(pairs) - 1)), pairs
+        for y0, y1 in drawn:
+            assert any(a <= y0 and y1 <= b for a, b in pairs), (drawn, pairs)
+        if exact:
+            assert [list(p) for p in pairs] == _bands_ref(drawn), (drawn, pairs)
+    hist = array("i", [-1] * (stride * slots))
+    hist[(9 % slots) * stride: (9 % slots) * stride + 4] = array("i", [9, 2, 0, 10])
+    assert ui_draw._C.api_lag(hist, bands, 10, 2, array("i", [0] * 4)) == -1
+    assert ui_draw._C.api_lag(hist, bands, 12, 2, array("i", [0] * 4)) == 0
+    assert ui_draw._C.api_lag(hist, bands, 10, slots + 1, array("i", [0] * 4)) == -1

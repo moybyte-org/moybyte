@@ -3360,6 +3360,36 @@ static mp_obj_t ui_api_floor_box(mp_obj_t ctx, mp_obj_t out) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(ui_api_floor_box_obj, ui_api_floor_box);
 
+// api_lag_note(ctx, hist, bands, f, kind): frame f's slot of the lag history
+// `hist`, writable int32 words in slots of 2 + 2 * bands, from the pass begun
+// last (moy_ui_api_lag_note)
+static mp_obj_t ui_api_lag_note(size_t n_args, const mp_obj_t *args) {
+    mp_buffer_info_t b;
+    mp_get_buffer_raise(args[1], &b, MP_BUFFER_WRITE);
+    int bands = mp_obj_get_int(args[2]);
+    int slots = (int)(b.len / (sizeof(int32_t) * (size_t)(2 + 2 * bands)));
+    moy_ui_api_lag_note(ctx_of(args[0]), (int32_t *)b.buf, slots, bands,
+                        mp_obj_get_int(args[3]), mp_obj_get_int(args[4]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_lag_note_obj, 5, 5, ui_api_lag_note);
+
+// api_lag(hist, bands, f, n, out) -> the bands the buffer frame f paints lags
+// by into `out` (writable int32 pairs), their count, -1 where it lags
+// otherwise (moy_ui_api_lag)
+static mp_obj_t ui_api_lag(size_t n_args, const mp_obj_t *args) {
+    mp_buffer_info_t h, o;
+    mp_get_buffer_raise(args[0], &h, MP_BUFFER_READ);
+    mp_get_buffer_raise(args[4], &o, MP_BUFFER_WRITE);
+    int bands = mp_obj_get_int(args[1]);
+    int slots = (int)(h.len / (sizeof(int32_t) * (size_t)(2 + 2 * bands)));
+    return MP_OBJ_NEW_SMALL_INT(moy_ui_api_lag((const int32_t *)h.buf, slots, bands,
+                                               mp_obj_get_int(args[2]), mp_obj_get_int(args[3]),
+                                               (int32_t *)o.buf,
+                                               (int)(o.len / (2 * sizeof(int32_t)))));
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_lag_obj, 5, 5, ui_api_lag);
+
 
 // -- text views (moy_ui_text.h) ----------------------------------------------------
 
@@ -3616,6 +3646,8 @@ static const mp_rom_map_elem_t moy_ui_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_api_shift_drawn), MP_ROM_PTR(&ui_api_shift_drawn_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_band), MP_ROM_PTR(&ui_api_band_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_floor_box), MP_ROM_PTR(&ui_api_floor_box_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_lag_note), MP_ROM_PTR(&ui_api_lag_note_obj) },
+    { MP_ROM_QSTR(MP_QSTR_api_lag), MP_ROM_PTR(&ui_api_lag_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_pop_box), MP_ROM_PTR(&ui_api_pop_box_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_view), MP_ROM_PTR(&ui_api_text_view_obj) },
     { MP_ROM_QSTR(MP_QSTR_api_text_at), MP_ROM_PTR(&ui_api_text_at_obj) },
