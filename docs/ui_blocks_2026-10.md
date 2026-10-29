@@ -1,0 +1,226 @@
+# UI building blocks (2026-10-29)
+
+What the public UI API (`docs/ui_api_2026-10.md`) needs so that every Moybyte
+surface, and a new app, is a COMPOSITION of engine blocks rather than a new
+element per screen. It also says how each block is proven fast enough before
+any surface moves onto it. The plan that moves the surfaces, and its state,
+is #243.
+
+## The goal (owner, 2026-10-29)
+
+- Every surface looks themed and scrolls the same way: one scroller, with
+  fling, glide and fast frames, everywhere text or a list moves.
+- An app is built from composable blocks. A screen that needs something new
+  composes it, or the gap is fixed in a block. No verb is named after the
+  screen that first needed it.
+- The blocks are C (`native/moy_ui/`), and a Python, Lua and compiled app call
+  the same ones (`docs/ui_api_2026-10.md` §1's three faces).
+- **Perf decides, not elegance (owner, 2026-10-29).** The bespoke paths exist
+  because a generic one was once too slow on a board. A surface moves onto a
+  block only when the move holds that surface's p90 on BOTH the T-Deck and the
+  P4 (`tools/input_bench.py`, against the run before). A surface whose move
+  fails stays bespoke. Its numbers go in #66.
+- Notes draws in the monospace face. A `.md` note's later form is a synced
+  pair: the monospace source beside a proportional preview (owner,
+  2026-10-29).
+
+## 1. What the engine's pass costs
+
+Measured on the T-Deck at the 2026-10-28 release candidate: the Settings
+page is drawn through the verbs, and on most of its drag frames the engine
+only moves pixels. Even so, those frames spend nearly all their time in the
+app's pass, not in raster or flush. The numbers are in #66. The bespoke home
+grid skips the pass and is several times cheaper.
+
+So the cost the blocks must beat is the IMMEDIATE-MODE PASS: the app calling
+every verb, and the engine laying out and checking every stop, every frame.
+Two designs answer it, and the next measurement chooses between them (§5,
+step 0):
+
+- **(i) Call only what shows.** The pass calls the verbs of visible rows only.
+  Rows outside the viewport cost nothing. This is what `ui.list` and
+  `ui.table` already do internally, as one stop each.
+- **(ii) Skip the pass.** A frame whose only change is the scroll offset
+  re-runs no app code. The engine moves pixels and draws the entering band
+  from records it kept. This is what `ui.keep` does for one stop.
+
+Which helps depends on how the pass's time splits between MicroPython calling
+verbs and C laying out and checking stops. A `moy_prof` capture during a long
+Settings drag (`tools/prof_sample.py`, `--frame 0` and `--frame 1`) splits it.
+No block in §3 is built until that capture is read.
+
+## 2. What already composes
+
+The verbs in `docs/ui_api_2026-10.md` §1 stay; their calls do not change.
+Most shipped apps are drawn by them already. Three of them already virtualize
+and are the model for anything new:
+
+- `ui.list` and `ui.table` are one stop each (`STOP_ROWS`,
+  `native/moy_ui/moy_ui_api.h`). Focus moves by row index, reveal is built
+  in, and the engine plans their rows by pitch (`table_floor`, `rows_note`
+  in `moy_ui_api.c`).
+- `ui.grid` lays cards in columns. A card scrolled out of view answers a
+  zero size, and the app skips drawing it.
+
+## 3. The gaps
+
+**G1. A full nest fails silently.** `MOY_UI_API_NEST` is 2. When it is full:
+- `ui.scroll` returns, and its rows stack unscrolled into the parent;
+- `ui.text_view` returns;
+- `ui.dialog` answers -1;
+- `ui.popover` answers 0, which an app reads as "dismissed".
+
+Deeper nests are cheap: a nest record is a few bytes per context.
+
+**G2. Lists of rich rows.** `list` and `table` rows hold text cells only.
+Blocks outline, Music steps, the cards drawer and the home grid need rows
+holding controls and pictures. So each plans its own rows.
+
+**G3. Scrolling is y-only, one region a frame.** The engine records one
+shift region per frame, vertical (`sh_id`, `sh_r`, `sh_dy`). Map, Scene and
+Paint pan with their own drag code. Two views cannot share a scroll, which
+the Notes split needs.
+
+**G4. Shell surfaces own private frame paths.** The frame calls (`shift_*`,
+`floor*`) are not in any public face. They reach the shell through
+`modmoy_ui.c`'s private table. But Notes, the Code tab, the Player's rows,
+the Blocks and desk panes, the Launcher's bands and the pickers each drive
+them with a path of their own (#243 lists
+them). `AppHost._shift` (`runtime/ui_draw.py`) is the one path that
+stays. The others go as their surfaces move.
+
+**G5. Budgets.**
+- `MOY_UI_API_STOPS` (40): stops a frame.
+- `MOY_UI_API_KEEP` (16): kept ids.
+- `MOY_UI_API_FLOOR` (24) and `MOY_UI_API_HOST` (6).
+- One text-view record per context.
+
+A list of rich rows on the P4 desk shows more controls than 40 stops hold.
+The stop record is the cost, and it is counted in bytes before a budget is
+raised.
+
+**G6. The Python-only verbs.** `empty`, `toast`, `month`, `cursor`, `tile`,
+`table_rows`, `table_pictures`, `card_clip`, `band` and `keep` have no Lua
+or wasm row. They fall into three kinds:
+- **Shared look.** `empty` and `toast` have many callers, so they are real
+  parts. They gain their Lua and wasm rows as they are. A toast is a non-stop
+  overlay, not a popover.
+- **Frame-path tools.** `band` (the shift floor; it has no callers),
+  `card_clip` and `keep` (`docs/scroll_and_text_2026-10.md` designs them).
+  `band` is deleted. The other two go only when their callers move.
+- **One-caller parts.**
+  - `month` is called by `popover.py`, and `tile` by `achievements_ui.py`.
+    Each moves into its caller as a composition.
+  - `cursor` has several canvas callers and becomes §4.4's part option.
+
+`grid_spread`, `group_card`, `card_mark` and `menu_danger` are not verbs.
+They carry options (`grid`'s `cols`, `group`'s `card`, `card`'s badge,
+`menu`'s per-item kinds), and the Lua and wasm faces need those options too.
+
+## 4. The blocks
+
+Every block enters all three faces (`runtime/ui.py`,
+`native/moycore/moycore_ui.h`, `native/moy_ui/moy_ui_wasm.h` with
+`native/moy_app/roles.json`'s `ui` rows, Moybyte's vendor extension). Every
+block is held by `tests/test_ui_public.py`'s three-faces fixture and by an
+allocation pin in `tests/test_frame_alloc.py`.
+
+### 4.0 Nest overflow is an error
+
+Every nest open past the limit raises in Python and Lua, and answers a
+distinct code in wasm. `MOY_UI_API_NEST` rises to the depth the blocks
+below need. This comes first because it is a correctness fix.
+
+### 4.1 `ui.rows`: a list of rich rows
+
+First, extending `ui.table` with a part column and `ui.grid` with virtual
+cards is tried. `rows` is added only if those cannot carry the G2 surfaces,
+and the reason is recorded here.
+
+If it is added, its shape follows the engine's `STOP_ROWS`. One list stop
+holds the scroll, the focus by row index and the reveal. Child stops exist
+only for the rows that show, under an id scope of the row index, so repeated
+labels across rows stay distinct. It allocates nothing a frame, in every
+face:
+
+```python
+r = ui.rows_begin("steps", len(steps), ROW_H, o)   # a kept array("i")
+while ui.row(r):                                   # r[0] index, r[1:5] rect
+    ui.at(r[1], r[2], r[3], r[4])
+    if ui.button(steps[r[0]].name): pick(r[0])
+```
+
+`o.gens` is an optional kept int array, one entry per row. An absent `gens`
+means "no licence": every row that shows draws. It never means "unchanged".
+Whether an unchanged row is re-called (§1's design i) or carried (design ii)
+is §1's measurement's answer. Under (ii), a carried row keeps its stops
+through the engine, as `ui.keep` does, and a row whose marks change (focus,
+press, hover, a field's caret) is always re-called.
+
+`o.axis = "x"` with `o.snap`, plus each row's fractional distance from the
+viewport centre in `r[5]`, makes the home carousel a composition: an app
+scales each card's `part` by that distance. The carousel moves only if §5's
+spike holds its numbers. Otherwise it stays bespoke over `scroll` and `part`.
+
+### 4.2 `ui.split`: panes
+
+`ui.split(id, dir, sizes, o)` answers one rect per pane, with focus moving
+between panes as between groups. With `o.drag` it adds a divider the engine
+keeps by id. A split with neither focus nor a divider stays the rect algebra
+(`hsplit`/`vsplit`).
+
+### 4.3 Linked and two-axis scroll
+
+- **Link.** `o.link = leader_id` makes a nest a follower. The leader's
+  `moy_ui_scroll_t` is the one body: a fling on either pane drives the
+  leader, and the follower's offset is read through a map. The map is DATA:
+  a kept int array of source line to target y, in every face. There are no
+  callbacks.
+- **Axes.** `o.axis = "xy"` with `o.content = {w, h}`, for a `part` the cart
+  pans.
+- **Limit.** Fast frames shift one region a frame, in y (G3). A linked pair
+  or an xy pan draws whole on its moving frames until the shift record
+  holds more. That cost is measured before a surface depends on it.
+
+### 4.4 `ui.part`, with input
+
+- A part answers the pointer's position inside it and its pressed state.
+  This replaces the four pixel-to-cell copies (#243).
+- `o.gen` lets an unchanged part be left as drawn.
+- `o.cursor = {x, y, w, h}` draws `ui.cursor`'s mark with no extra stop.
+
+### 4.5 `ui.text_view`
+
+Plan step 1 makes it keyed by id, editable (selection, error line, find,
+horizontal offset, current-line mark, reveal, lines gen), and hit-testable
+(`ui.text_at`). Under §4.3 a text view can lead or follow, which is the
+Notes split.
+
+## 5. Order, each step gated
+
+0. **Measure.**
+   - A `moy_prof` split of the Settings pass on the T-Deck (§1).
+   - Music steps redrawn as "visible rows only, through today's verbs, no
+     gens", benched on both boards against the run before. If that holds,
+     gens are not needed for lists.
+1. §4.0: nest overflow becomes an error.
+2. Plan step 1 (`text_view`) is its own gate: Code and the console must hold
+   their p90.
+3. §4.1 (table, grid or `rows`), proven on Blocks outline and Music steps.
+   Then the cards drawer, then the home grid.
+4. §4.2 with the Editor desk's panes.
+5. §4.3 and §4.4 with the canvas editors and the Notes preview.
+6. The home carousel spike (§4.1). It moves or stays.
+
+A composition replacing a verb draws the verb's goldens byte for byte and
+keeps its input semantics. A verb that leaves takes its callers with it in
+the same commit, with no alias: there are no user apps to keep working.
+
+## 6. Guards
+
+- A composition calls only public verbs. `tests/test_ui_public.py` pins it
+  by grepping the composition's file for any engine call outside the faces'
+  verb table.
+- Every block has an allocation pin for its moving frame.
+- Every surface moved has its `input_bench` rows on both boards in #66, from
+  before and after.
