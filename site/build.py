@@ -765,8 +765,11 @@ function sizeStage() {
 window.addEventListener("message", function (e) {
   var f = stage.querySelector("iframe");
   if (!f || e.source !== f.contentWindow || !e.data) return;
-  // The player's first live frame: the still has done its job.
-  if (e.data.moyLive) stage.classList.add("live");
+  // The player's first live frame: the still and the loader have done their job.
+  if (e.data.moyLive) {
+    stage.classList.add("live");
+    stage.classList.remove("loading");
+  }
   if (typeof e.data.moyChrome !== "number") return;
   chrome = e.data.moyChrome;
   sizeStage();
@@ -776,6 +779,7 @@ function show(tab) {
   tabs.forEach(function (t) { t.classList.toggle("on", t === tab); });
   stage.dataset.ar = tab.dataset.ar;
   stage.classList.remove("idle");
+  stage.classList.add("loading");
   tabBar.hidden = false;
   // The still is the desktop's; the handheld has none to hold the place.
   if (tab !== tabs[0]) stage.classList.add("live");
@@ -861,6 +865,8 @@ def page(pal, has_player, cards, channel=None, stills=False):
         '      <button class="still" id="still" type="button" '
         'aria-label="Start the console">%s<span class="go"><i></i>'
         'Start the console</span></button>\n'
+        '      <div class="boot" role="status"><span class="px">Starting the console'
+        '</span><i></i></div>\n'
         '      <button class="shrink" id="shrink" type="button">Close &#10005;</button>\n'
         '    </div>' % (still_html if stills else '')) if has_player else ""
     status = "\n".join(
@@ -976,6 +982,20 @@ h1 em{font-style:normal;color:var(--accent)}
   border-left:13px solid var(--night-accent)}
 .still:hover .go{background:var(--night-accent);color:var(--night-bg)}
 .still:hover .go i{border-left-color:var(--night-bg)}
+/* From the click to the player's first frame (the wasm is fetched and the OS
+   boots meanwhile) a loader sits over the still, or over black for a tier with
+   no still. */
+.boot{position:absolute;left:50%%;top:50%%;transform:translate(-50%%,-50%%);z-index:1;
+  display:none;flex-direction:column;align-items:center;gap:12px;padding:16px 22px;
+  color:var(--night-ink);background:color-mix(in srgb,var(--night-bg) 88%%,transparent);
+  border:1px solid var(--night-line);font-size:13px;white-space:nowrap;pointer-events:none}
+.stage.loading .boot{display:flex}
+.boot i{position:relative;display:block;width:180px;height:8px;overflow:hidden;
+  border:1px solid var(--night-line)}
+.boot i::after{content:"";position:absolute;top:0;bottom:0;left:0;width:30%%;
+  background:var(--night-accent);animation:boot 1.1s steps(14) infinite}
+@keyframes boot{from{transform:translateX(-100%%)}to{transform:translateX(340%%)}}
+@media (prefers-reduced-motion:reduce){.boot i::after{animation:none;width:100%%;opacity:.6}}
 /* --- the mascot ------------------------------------------------------------ */
 .moy{image-rendering:pixelated;vertical-align:-4px}
 nav .moy{width:22px;height:22px;margin-right:9px}
