@@ -114,14 +114,14 @@ BOARD = "tdeck"
 #       (and the version) via a generated `_ota_build` module from MOYBYTE_OTA_CHANNEL, so
 #       the committed default stays "stable" and the channel is a build choice -- clean
 #       across merges, not a per-branch source edit.
-FIRMWARE_VERSION = 13            # v13: The 2026-10 shell: the Moy look, the native kernel, kinetic scrolling and text on every board. Every board's partitions changed, so a v0.14.1 board needs one cable flash; the old updater refuses the larger image and stays as it was.
+FIRMWARE_VERSION = 14            # v14: Fix release. Notes' rows frames allocate nothing again, so typing in Notes no longer feeds the collector.
 #   FIRMWARE_NAME -- what a HUMAN calls this release ("0.6"), and the only version anyone
 #       outside the code ever reads: the update screen, the manifest label, the git tag.
 #       Deliberately separate from FIRMWARE_VERSION above, which exists solely so the
 #       device can order two builds with `>` -- it is signed as an int, and betas stamp a
 #       build epoch into it, so it can never carry a dotted name. `make release NAME=0.7`
 #       sets this; MAJOR.MINOR, with a third component only when a release is purely a fix.
-FIRMWARE_NAME = "0.15"
+FIRMWARE_NAME = "0.15.1"
 FIRMWARE_CHANNEL = "stable"
 FIRMWARE_LABEL = None
 try:
