@@ -323,7 +323,7 @@ _DRAW_SIGS = (
                          c.c_void_p], None),
     ("moy_ui_api_table", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, c.c_char_p, _Z,
                           c.c_int32, c.c_void_p, c.c_void_p], None),
-    ("moy_ui_api_scroll", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], None),
+    ("moy_ui_api_scroll", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p], c.c_int32),
     ("moy_ui_api_field", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, _Z, _Z, c.c_void_p],
      c.c_int32),
     ("moy_ui_api_dialog", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_char_p, _Z, _I, c.c_void_p],
@@ -346,7 +346,7 @@ _DRAW_SIGS = (
     ("moy_ui_api_floor_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_pop_box", [c.c_void_p, c.c_void_p], _I),
     ("moy_ui_api_text_view", [c.c_void_p, c.POINTER(_Sink), _Span, c.c_void_p, c.c_void_p,
-                              c.c_void_p, c.c_void_p], None),
+                              c.c_void_p, c.c_void_p], c.c_int32),
     ("moy_ui_text_tones", [c.c_void_p], None),
     ("moy_ui_text_words", [_I, c.c_char_p, c.c_size_t, _I], _I),
     ("moy_ui_text_words_reset", [], None),
@@ -422,6 +422,17 @@ def _check(rc):
         raise MemoryError("moy_ui: no memory for the looks")
     if rc != OK:
         raise ValueError("moy_ui: bad argument")
+
+
+DEEP = -(1 << 31)                       # moy_ui_api.h's MOY_UI_API_DEEP
+
+
+def _nested(v):
+    """A verb that opens a nest: its answer, or RuntimeError where
+    MOY_UI_API_NEST were open already (modmoy_ui.c's `nested`)."""
+    if v == DEEP:
+        raise RuntimeError("moy_ui: nested too deep")
+    return v
 
 
 def binding():
@@ -1146,7 +1157,7 @@ def binding():
             keep = c.create_string_buffer(b"", 1)
             t = _Span(c.addressof(keep), 0)
         ov, ok = _over(o)
-        lib.moy_ui_api_scroll(p, c.byref(s), t, ov)
+        _nested(lib.moy_ui_api_scroll(p, c.byref(s), t, ov))
 
     def api_field(ctx, cv, look, label, buf, n, o):
         p, _k = _ctx(ctx)
@@ -1165,7 +1176,7 @@ def binding():
             t = _Span(c.addressof(keep), 0)
         ov, ok = _over(o)
         b = bytes(buttons)
-        return int(lib.moy_ui_api_dialog(p, c.byref(s), t, b, len(b), int(kind_), ov))
+        return _nested(int(lib.moy_ui_api_dialog(p, c.byref(s), t, b, len(b), int(kind_), ov)))
 
     def api_wash(ctx, cv, look):
         p, _k = _ctx(ctx)
@@ -1185,7 +1196,7 @@ def binding():
             keep = c.create_string_buffer(b"", 1)
             t = _Span(c.addressof(keep), 0)
         ov, ok = _over(o)
-        return int(lib.moy_ui_api_popover(p, c.byref(s), t, int(w), ov))
+        return _nested(int(lib.moy_ui_api_popover(p, c.byref(s), t, int(w), ov)))
 
     def api_menu(ctx, cv, look, label, items, icons, o):
         p, _k = _ctx(ctx)
@@ -1501,8 +1512,8 @@ def binding():
         w = (c.c_int32 * 7)(*[int(v) for v in opt])
         ob, okeep = _over(o)
         out = (c.c_int32 * 2)()
-        lib.moy_ui_api_text_view(p, c.byref(s), sp, c.byref(L), c.addressof(w), ob,
-                                 c.addressof(out))
+        _nested(lib.moy_ui_api_text_view(p, c.byref(s), sp, c.byref(L), c.addressof(w), ob,
+                                         c.addressof(out)))
         return (out[0], out[1])
 
     def text_tones(tones):

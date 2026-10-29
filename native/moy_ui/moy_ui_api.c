@@ -3148,15 +3148,15 @@ static int nest_close(moy_ui_ctx_t *c, const moy_ui_sink_t *s, int kind) {
     return took;
 }
 
-void moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
-                       const moy_ui_over_t *o) {
+int32_t moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
+                          const moy_ui_over_t *o) {
     o = over(o);
     if (id.n == 0) {
         nest_close(c, s, 1);
-        return;
+        return 0;
     }
     if (c->n_nest >= MOY_UI_API_NEST) {
-        return;
+        return MOY_UI_API_DEEP;
     }
     group_close(c, s);
     moy_ui_box_t b;
@@ -3174,6 +3174,7 @@ void moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
     }
     nest_open(c, 1, hash(id.p, id.n, SCROLL_SALT), b, used,
               (o->nav == 0 ? STOP_NAV_OFF : 0) | (placed ? STOP_AT : 0), o);
+    return 0;
 }
 
 
@@ -3218,15 +3219,18 @@ static int tone_of(int look, int tt) {
     return moy_ui_token(look, token[tt]);
 }
 
-void moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
-                          const moy_ui_lines_t *L, const int32_t *opt, const moy_ui_over_t *o,
-                          int32_t out[2]) {
+int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
+                             const moy_ui_lines_t *L, const int32_t *opt,
+                             const moy_ui_over_t *o, int32_t out[2]) {
     o = over(o);
     out[0] = out[1] = 0;
     s_trows = moy_ui_text_scratch();
     s_starts = moy_ui_text_breaks();
-    if (c->n_nest >= MOY_UI_API_NEST || id.n == 0 || s_trows == NULL) {
-        return;
+    if (c->n_nest >= MOY_UI_API_NEST) {
+        return MOY_UI_API_DEEP;
+    }
+    if (id.n == 0 || s_trows == NULL) {
+        return 0;
     }
     group_close(c, s);
     int fs = c->fs;
@@ -3433,6 +3437,7 @@ void moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         k->b = content;
     }
     nest_close(c, s, 1);
+    return 0;
 }
 
 void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t label,
@@ -3815,7 +3820,7 @@ int32_t moy_ui_api_dialog(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t
         return -1;
     }
     if (c->n_nest >= MOY_UI_API_NEST) {
-        return -1;
+        return MOY_UI_API_DEEP;
     }
     group_close(c, s);
     // a dialog's rows frame (dialog_plan) draws it through its floor;
@@ -4026,7 +4031,7 @@ int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id
         return 0;
     }
     if (c->n_nest >= MOY_UI_API_NEST) {
-        return 0;
+        return MOY_UI_API_DEEP;
     }
     group_close(c, s);
     c->fl_susp++;                       // an overlay: drawn whole, over the page

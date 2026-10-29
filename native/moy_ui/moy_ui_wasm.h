@@ -53,7 +53,9 @@ enum {
 };
 
 // The verbs over `target`, a libmoy moy_canvas (NULL: -MOY_UI_STALE). 0 or a
-// moy_ui.h code negated; an answer is written at `out`.
+// moy_ui.h code negated (-MOY_UI_DEEP: a scroll, text view, dialog or
+// popover opened with MOY_UI_API_NEST open already); an answer is written at
+// `out`.
 int moy_ui_run_page(void *target, moy_ui_span_t title, const moy_ui_over_t *o, int32_t out[4]);
 int moy_ui_run_label(void *target, moy_ui_span_t text, const moy_ui_over_t *o);
 int moy_ui_run_button(void *target, moy_ui_span_t label, int kind, const moy_ui_over_t *o,
@@ -156,6 +158,10 @@ int32_t moy_ui_wasm_text_view(void *e, const uint8_t *id, uint32_t n, const uint
                               uint32_t ln, const uint8_t *opt, uint32_t optn, const uint8_t *o,
                               uint32_t on, uint8_t *out, uint32_t cap);
 // ui_scroll with an id of length 0 ends the region.
+//
+// ui_scroll, ui_text_view, ui_dialog and ui_popover each open a nest: one
+// opened with MOY_UI_API_NEST open already opens none, draws nothing and
+// answers -MOY_UI_DEEP (-5).
 int32_t moy_ui_wasm_scroll(void *e, const uint8_t *id, uint32_t n, const uint8_t *o, uint32_t on);
 // ui_field edits the `len` bytes at buf (its room `cap`): the new length,
 // plus 0x10000 the frame Enter is pressed in it.

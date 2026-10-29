@@ -300,17 +300,20 @@ int moy_ui_run_table(void *target, moy_ui_span_t label, const uint8_t *cols, siz
     return close_run(&r, MOY_UI_OK);
 }
 
+// A verb that opens a nest: MOY_UI_DEEP where it answered MOY_UI_API_DEEP.
+static int nest_rc(int32_t v) {
+    return v == MOY_UI_API_DEEP ? MOY_UI_DEEP : MOY_UI_OK;
+}
+
 int moy_ui_run_scroll(void *target, moy_ui_span_t id, const moy_ui_over_t *o) {
     OPEN(target);
-    moy_ui_api_scroll(c, &r.s, id, o);
-    return close_run(&r, MOY_UI_OK);
+    return close_run(&r, nest_rc(moy_ui_api_scroll(c, &r.s, id, o)));
 }
 
 int moy_ui_run_text_view(void *target, moy_ui_span_t id, const moy_ui_lines_t *lines,
                          const int32_t *opt, const moy_ui_over_t *o, int32_t out[2]) {
     OPEN(target);
-    moy_ui_api_text_view(c, &r.s, id, lines, opt, o, out);
-    return close_run(&r, MOY_UI_OK);
+    return close_run(&r, nest_rc(moy_ui_api_text_view(c, &r.s, id, lines, opt, o, out)));
 }
 
 int moy_ui_run_field(void *target, moy_ui_span_t label, uint8_t *buf, size_t cap, size_t len,
@@ -323,14 +326,22 @@ int moy_ui_run_field(void *target, moy_ui_span_t label, uint8_t *buf, size_t cap
 int moy_ui_run_dialog(void *target, moy_ui_span_t title, const uint8_t *buttons, size_t n,
                       int kind, const moy_ui_over_t *o, int32_t *out) {
     OPEN(target);
-    *out = moy_ui_api_dialog(c, &r.s, title, buttons, n, kind, o);
+    int32_t v = moy_ui_api_dialog(c, &r.s, title, buttons, n, kind, o);
+    if (v == MOY_UI_API_DEEP) {
+        return close_run(&r, MOY_UI_DEEP);
+    }
+    *out = v;
     return close_run(&r, MOY_UI_OK);
 }
 
 int moy_ui_run_popover(void *target, moy_ui_span_t id, int w, const moy_ui_over_t *o,
                        int32_t *out) {
     OPEN(target);
-    *out = moy_ui_api_popover(c, &r.s, id, w, o);
+    int v = moy_ui_api_popover(c, &r.s, id, w, o);
+    if (v == MOY_UI_API_DEEP) {
+        return close_run(&r, MOY_UI_DEEP);
+    }
+    *out = v;
     return close_run(&r, MOY_UI_OK);
 }
 

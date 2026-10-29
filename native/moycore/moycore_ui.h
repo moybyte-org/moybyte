@@ -426,10 +426,19 @@ static int moycore_ui_table(lua_State *L)
     return 2;
 }
 
+/* A verb that opens a nest raises where MOY_UI_API_NEST were open already. */
+static void moycore_ui_nested(lua_State *L, int rc)
+{
+    if (rc == -MOY_UI_DEEP) {
+        luaL_error(L, "ui: nested too deep");
+    }
+}
+
 static int moycore_ui_scroll(lua_State *L)
 {
     moy_ui_over_t o;
-    moy_ui_run_scroll(moycore_ui_canvas(), moycore_ui_span(L, 1), moycore_ui_over(L, 2, &o));
+    moycore_ui_nested(L, moy_ui_run_scroll(moycore_ui_canvas(), moycore_ui_span(L, 1),
+                                           moycore_ui_over(L, 2, &o)));
     return 0;
 }
 
@@ -490,8 +499,8 @@ static int moycore_ui_text_view(lua_State *L)
     }
     moy_ui_over_t o;
     int32_t out[2] = {0, 0};
-    moy_ui_run_text_view(moycore_ui_canvas(), moycore_ui_span(L, 1), &lines, opt,
-                         moycore_ui_over(L, 3, &o), out);
+    moycore_ui_nested(L, moy_ui_run_text_view(moycore_ui_canvas(), moycore_ui_span(L, 1), &lines,
+                                              opt, moycore_ui_over(L, 3, &o), out));
     lua_pushinteger(L, out[0] + 1);
     lua_pushinteger(L, out[1]);
     return 2;
@@ -540,8 +549,8 @@ static int moycore_ui_dialog(lua_State *L)
     moycore_ui_over(L, 4, &o);
     size_t len = 0;
     const char *items = lua_isnoneornil(L, 2) ? "" : moycore_ui_items(L, 2, &len);
-    moy_ui_run_dialog(moycore_ui_canvas(), moycore_ui_span(L, 1), (const uint8_t *)items, len,
-                      kind, &o, &v);
+    moycore_ui_nested(L, moy_ui_run_dialog(moycore_ui_canvas(), moycore_ui_span(L, 1),
+                                           (const uint8_t *)items, len, kind, &o, &v));
     lua_pushinteger(L, (lua_Integer)v + 1);
     return 1;
 }
@@ -558,8 +567,8 @@ static int moycore_ui_popover(lua_State *L)
         return 0;
     }
     int w = lua_isnoneornil(L, 2) ? 0 : moycore_ui_int(L, 2);
-    moy_ui_run_popover(moycore_ui_canvas(), moycore_ui_span(L, 1), w, moycore_ui_over(L, 3, &o),
-                       &v);
+    moycore_ui_nested(L, moy_ui_run_popover(moycore_ui_canvas(), moycore_ui_span(L, 1), w,
+                                            moycore_ui_over(L, 3, &o), &v));
     lua_pushboolean(L, v != 0);
     return 1;
 }

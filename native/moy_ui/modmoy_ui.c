@@ -2767,6 +2767,15 @@ static mp_obj_t ui_api_table(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_table_obj, 8, 8, ui_api_table);
 
+// A verb that opens a nest: its answer, or RuntimeError where MOY_UI_API_NEST
+// were open already.
+static mp_int_t nested(int32_t v) {
+    if (v == MOY_UI_API_DEEP) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moy_ui: nested too deep"));
+    }
+    return v;
+}
+
 // api_scroll(ctx, cv, look, id, o): an id of length 0 ends the region
 static mp_obj_t ui_api_scroll(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
@@ -2774,7 +2783,7 @@ static mp_obj_t ui_api_scroll(size_t n_args, const mp_obj_t *a) {
     moy_ui_sink_t s;
     sink_of(&s, a[1], a[2]);
     moy_ui_over_t o;
-    moy_ui_api_scroll(c, &s, span_of(a[3]), over_of(a[4], &o));
+    nested(moy_ui_api_scroll(c, &s, span_of(a[3]), over_of(a[4], &o)));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_scroll_obj, 5, 5, ui_api_scroll);
@@ -2809,8 +2818,8 @@ static mp_obj_t ui_api_text_view(size_t n_args, const mp_obj_t *a) {
     moy_ui_lines_t L = {(void *)a[4], (int32_t)nl, tv_line};
     moy_ui_over_t o;
     int32_t out[2];
-    moy_ui_api_text_view(c, &s, span_of(a[3]), &L, (const int32_t *)ob.buf, over_of(a[6], &o),
-                         out);
+    nested(moy_ui_api_text_view(c, &s, span_of(a[3]), &L, (const int32_t *)ob.buf,
+                                over_of(a[6], &o), out));
     mp_obj_t t[2] = {MP_OBJ_NEW_SMALL_INT(out[0]), MP_OBJ_NEW_SMALL_INT(out[1])};
     return mp_obj_new_tuple(2, t);
 }
@@ -2857,8 +2866,8 @@ static mp_obj_t ui_api_dialog(size_t n_args, const mp_obj_t *a) {
     mp_buffer_info_t b;
     uint8_t ob[OPTS_BUF];
     opts_of(a[4], ob, &b);
-    return mp_obj_new_int(moy_ui_api_dialog(c, &s, span_of(a[3]), (const uint8_t *)b.buf, b.len,
-                                            num(a[5]), over_of(a[6], &o)));
+    return mp_obj_new_int(nested(moy_ui_api_dialog(c, &s, span_of(a[3]), (const uint8_t *)b.buf,
+                                                   b.len, num(a[5]), over_of(a[6], &o))));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_dialog_obj, 7, 7, ui_api_dialog);
 
@@ -2885,8 +2894,8 @@ static mp_obj_t ui_api_popover(size_t n_args, const mp_obj_t *a) {
     moy_ui_sink_t s;
     sink_of(&s, a[1], a[2]);
     moy_ui_over_t o;
-    return mp_obj_new_int(moy_ui_api_popover(c, &s, span_of(a[3]), num(a[4]),
-                                             over_of(a[5], &o)));
+    return mp_obj_new_int(nested(moy_ui_api_popover(c, &s, span_of(a[3]), num(a[4]),
+                                                    over_of(a[5], &o))));
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(ui_api_popover_obj, 6, 6, ui_api_popover);
 

@@ -29,7 +29,11 @@
 #include "moy_text.h"
 #include "moy_ui_tables.h"
 
-enum { MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3, MOY_UI_FULL = 4 };
+// MOY_UI_DEEP: a nest opened past moy_ui_api.h's MOY_UI_API_NEST.
+enum {
+    MOY_UI_OK = 0, MOY_UI_BAD = 1, MOY_UI_STALE = 2, MOY_UI_NOMEM = 3, MOY_UI_FULL = 4,
+    MOY_UI_DEEP = 5
+};
 
 typedef struct { int16_t x, y, w, h; } moy_ui_box_t;
 

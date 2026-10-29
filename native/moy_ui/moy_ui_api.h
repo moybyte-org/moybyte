@@ -137,6 +137,11 @@ typedef struct {
     int16_t used;                   // a dialog or popover: the body height it was laid out for
 } moy_ui_nest_t;
 #define MOY_UI_API_NEST 2
+// What a verb that opens a nest (ui.scroll, ui.text_view, ui.dialog,
+// ui.popover) answers when MOY_UI_API_NEST are open already: it opens none
+// and draws nothing, and each face reports it (Python and Lua raise, a
+// compiled app's import answers -MOY_UI_DEEP).
+#define MOY_UI_API_DEEP INT32_MIN
 
 typedef struct {
     uint32_t id;
@@ -402,9 +407,10 @@ enum {
     MOY_UI_TXO_ROWS = 0, MOY_UI_TXO_WRAP, MOY_UI_TXO_SYNTAX, MOY_UI_TXO_FOLLOW,
     MOY_UI_TXO_GUTTER, MOY_UI_TXO_CARET_LINE, MOY_UI_TXO_CARET_COL, MOY_UI_TXO_LEN
 };
-void moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
-                          const moy_ui_lines_t *L, const int32_t *opt, const moy_ui_over_t *o,
-                          int32_t out[2]);
+// Answers 0, or MOY_UI_API_DEEP.
+int32_t moy_ui_api_text_view(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
+                             const moy_ui_lines_t *L, const int32_t *opt,
+                             const moy_ui_over_t *o, int32_t out[2]);
 // The colour indices the syntax classes take under the live theme
 // (MOY_UI_TT_KEYWORD .. MOY_UI_TT_BUILTIN, the theme's code_* content roles;
 // TT_TEXT the code's ink), -1 where a role falls back to a token.
@@ -469,9 +475,9 @@ void moy_ui_api_table(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t lab
                       int32_t cur, const moy_ui_over_t *o, int32_t out[2]);
 // A scroll region (§1): `id` begins one in ui.at's rect (else the page's
 // room below its rows), whose stacked rows scroll in it; an id of length 0
-// ends it.
-void moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
-                       const moy_ui_over_t *o);
+// ends it. Answers 0, or MOY_UI_API_DEEP.
+int32_t moy_ui_api_scroll(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id,
+                          const moy_ui_over_t *o);
 // A text field (§1) editing the `len` bytes at `buf` (`cap` its room) while
 // focused: answers the new length, plus MOY_UI_FIELD_DONE the frame Enter
 // is pressed in it.
@@ -481,7 +487,8 @@ int32_t moy_ui_api_field(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t 
 // A dialog (§1): `title` begins a modal card centred on the surface, its
 // `buttons` (NUL-separated, the last of `kind`, the others normal) at its
 // foot, its body the rows stacked until a title of length 0 ends it. Answers
-// the button activated this frame (from 0), -1 none; the end answers -1.
+// the button activated this frame (from 0), -1 none, or MOY_UI_API_DEEP; the
+// end answers -1.
 // Its wash is the surface, less the page's hint band at its foot; with the
 // override `wash` false it draws none, where the page under it was washed
 // already (`moy_ui_api_wash`, the page an app holds under its dialog).
@@ -497,7 +504,7 @@ moy_ui_box_t moy_ui_api_wash_box(const moy_ui_ctx_t *c);
 // below, `w` wide (0: the rect's width), its body the rows stacked until an
 // id of length 0 ends it. While it is drawn nothing outside it takes input,
 // as under a dialog. Answers 1, or 0 the frame a press outside the card or
-// Esc dismissed it; the end answers 0.
+// Esc dismissed it, or MOY_UI_API_DEEP; the end answers 0.
 #define MOY_UI_KEY_ESC 27
 int moy_ui_api_popover(moy_ui_ctx_t *c, const moy_ui_sink_t *s, moy_ui_span_t id, int w,
                        const moy_ui_over_t *o);
