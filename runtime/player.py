@@ -1718,7 +1718,7 @@ class Player:
             if n < 0:
                 # the buffer this frame paints lags: the last frame's page
                 # moved over it whole, where that frame painted it
-                if ring.frame(0) != f - 1 or getattr(cv, "shift_last", None) is None:
+                if ring.frame(0) != f - 1 or not hasattr(cv, "shift_last"):
                     return
                 n = 0
                 copy = True

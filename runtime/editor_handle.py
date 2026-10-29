@@ -340,6 +340,7 @@ class EditorHandle:
         # move and the look's gen it saw, and the theme it read (`_pth`): a draw that finds
         # them all still so takes its walk and bands as they are.
         self._pl = [-1, 0, 0, 0]
+        self._ab = [0, 0]             # `_span`'s rows, a..b
         self._pth = None
 
     # -- what the skin asks ---------------------------------------------------
@@ -967,7 +968,8 @@ class EditorHandle:
     def _span(self, k, y, h, r, ty, rows, lh):
         """The rows a move by k keeps, a..b: each lies, where this draw
         shows it and where the last showed it, inside the paper's straight
-        sides (clear of corners of radius r). a == b where none does."""
+        sides (clear of corners of radius r), into `_ab`; a == b where none
+        does."""
         lo = y + r
         i0 = 0 if ty >= lo else (lo - ty + lh - 1) // lh
         i1 = (y + h - r - ty) // lh
@@ -975,7 +977,9 @@ class EditorHandle:
             i1 = rows
         a = i0 if k > 0 else i0 - k
         b = i1 - k if k > 0 else i1
-        return a, (b if b > a else a)
+        ab = self._ab
+        ab[0] = a
+        ab[1] = b if b > a else a
 
     def _moved_by(self, n, x, w, y, h, r, ty, rows, lh):
         """The visual rows this walk's view lies below the last draw's
@@ -1004,7 +1008,9 @@ class EditorHandle:
                     break
         if not k:
             return 0
-        a, b = self._span(k, y, h, r, ty, rows, lh)
+        self._span(k, y, h, r, ty, rows, lh)
+        a = self._ab[0]
+        b = self._ab[1]
         if b <= a:
             return 0
         t = a if k > 0 else a + k
@@ -1023,7 +1029,9 @@ class EditorHandle:
         move does not keep (`_span`) drawn. Where an underline reaches the
         next row, the first row draws (nothing is above it now), and so does
         the row under a row whose own text or marks changed."""
-        a, b = self._span(k, y, h, r, ty, rows, lh)
+        self._span(k, y, h, r, ty, rows, lh)
+        a = self._ab[0]
+        b = self._ab[1]
         sl = self._sl
         ss = self._ss
         nl = self._nl
